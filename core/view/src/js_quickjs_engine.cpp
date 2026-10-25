@@ -39,6 +39,24 @@ namespace pulp::view {
 // (appendChild → _reparentNative → native bridge → back to JS) exhausts
 // QuickJS's default 256KB JS stack. We increase it to 1MB.
 //
+// AddressSanitizer pads every C frame with redzones, so the same JS call depth
+// uses several times the C stack this limit measures. A nested native event
+// (a key that clicks a popup trigger whose handler queries the DOM) overflows
+// 1MB under ASan only, so an ASan build gets 4MB. The main thread's 8MB stack
+// covers it; the limit is a QuickJS check, not the thread's real size.
+#if defined(__SANITIZE_ADDRESS__)
+#define PULP_QUICKJS_UNDER_ASAN 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define PULP_QUICKJS_UNDER_ASAN 1
+#endif
+#endif
+#if defined(PULP_QUICKJS_UNDER_ASAN)
+constexpr size_t kQuickJsStackBytes = 4 * 1024 * 1024;
+#else
+constexpr size_t kQuickJsStackBytes = 1024 * 1024;
+#endif
+
 static void set_quickjs_stack_size(
     choc::javascript::quickjs::QuickJSContext& context, size_t size) {
     if (context.runtime)
@@ -668,7 +686,7 @@ std::vector<std::uint8_t> build_embedded_script_bytecode(const std::string& sour
     qjs::QuickJSContext backend;
     if (!backend.context)
         return {};
-    set_quickjs_stack_size(backend, 1024 * 1024);
+    set_quickjs_stack_size(backend, kQuickJsStackBytes);
     const auto bytecode = write_global_script_bytecode(backend.context, source);
     if (bytecode.empty())
         return {};
@@ -753,7 +771,7 @@ std::size_t precompile_scripts(const std::vector<std::string>& sources,
         }
         if (!backend) {
             backend.emplace();
-            set_quickjs_stack_size(*backend, 1024 * 1024);
+            set_quickjs_stack_size(*backend, kQuickJsStackBytes);
         }
         auto* ctx = backend->context;
         if (!ctx) break;
@@ -786,7 +804,7 @@ public:
         auto backend = std::make_unique<qjs::QuickJSContext>();
         backend_ = backend.get();
         context_ = choc::javascript::Context(std::move(backend));
-        set_quickjs_stack_size(*backend_, 1024 * 1024);  // 1MB (up from 256KB)
+        set_quickjs_stack_size(*backend_, kQuickJsStackBytes);
         set_quickjs_memory_limit(*backend_, kDefaultJsMemoryLimitBytes);
         // Surface unhandled promise failures through the host's console path.
         install_quickjs_rejection_tracker(*backend_);

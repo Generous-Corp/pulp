@@ -146,6 +146,23 @@ export async function browserProcessIdentity(pid) {
     "/bin/ps", ["-ww", "-p", String(pid), "-o", "lstart=", "-o", "command="]);
 }
 
+// Whether a process other than the group's leader is still in the group. A
+// listing that cannot be read, or that may have been cut short at
+// commandOutput's cap, answers yes, so the caller keeps waiting as if it could
+// not tell.
+async function processGroupHasMembersBesidesLeader(processGroupId) {
+  const listing = await commandOutput("/bin/ps", ["-A", "-o", "pid=", "-o", "pgid="]);
+  if (!listing || listing.length >= 120 * 1024) return true;
+  let leader = false;
+  for (const line of listing.split("\n")) {
+    const [pid, pgid] = line.trim().split(/\s+/).map(Number);
+    if (pgid !== processGroupId) continue;
+    if (pid !== processGroupId) return true;
+    leader = true;
+  }
+  return !leader;
+}
+
 function identityHash(identity) {
   return createHash("sha256").update(identity).digest("hex");
 }
@@ -187,8 +204,14 @@ async function terminateOwnedBrowserPid(
   } catch {
     return !processGroupExists(pid);
   }
+  // The grace period is for Chromium and its helpers. The anchor that leads
+  // the group ignores SIGTERM by design, so the group never empties on its
+  // own; once the anchor is all that is left, nothing is waiting for grace.
   const deadline = Date.now() + 1500;
-  while (Date.now() < deadline && processGroupExists(pid)) await delay(25);
+  while (Date.now() < deadline && processGroupExists(pid) &&
+      await processGroupHasMembersBesidesLeader(pid)) {
+    await delay(25);
+  }
   if (!processGroupExists(pid)) return true;
   if (!await processIdentityMatches(pid, expectedIdentityHash, profileDir)) {
     return false;
