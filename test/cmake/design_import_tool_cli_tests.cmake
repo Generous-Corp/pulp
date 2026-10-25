@@ -327,6 +327,7 @@ target_link_libraries(pulp-test-import-design-tool
 target_compile_definitions(pulp-test-import-design-tool PRIVATE
     PULP_IMPORT_DESIGN_TOOL_PATH="$<TARGET_FILE:pulp-import-design>"
     PULP_FIG_FIXTURE="${CMAKE_SOURCE_DIR}/test/fixtures/imports/fig/synthetic.fig"
+    PULP_V0_AUDIO_PANEL_FIXTURE="${CMAKE_SOURCE_DIR}/test/fixtures/v0-dev/audio-control-panel.tsx"
     PULP_FIG_DECODE_SCRIPT="${CMAKE_SOURCE_DIR}/tools/import-design/fig_decode.mjs"
     PULP_FIGMA_REST_EXPORT="${CMAKE_SOURCE_DIR}/tools/import-design/figma_rest_export.py")
 if(PULP_HAS_SKIA)
@@ -340,7 +341,8 @@ add_dependencies(pulp-test-import-design-tool pulp-import-design)
 # the browser resource lock, so a selector treats it as environment-bound.
 pulp_test_data(pulp-test-import-design-tool NO_DEFINE
     SOURCES test_import_design_tool.cpp
-    PATHS tools/import-design test/fixtures/imports/fig/synthetic.fig)
+    PATHS tools/import-design test/fixtures/imports/fig/synthetic.fig
+        test/fixtures/v0-dev/audio-control-panel.tsx)
 if(WIN32)
     catch_discover_tests(pulp-test-import-design-tool
         TEST_SPEC "~[network]~[browser]"

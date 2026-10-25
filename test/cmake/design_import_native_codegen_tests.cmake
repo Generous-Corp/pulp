@@ -119,8 +119,9 @@ catch_discover_tests(pulp-test-design-import-native-materializer
     PROPERTIES LABELS "parser-import")
 # The generated-source compiles read headers only from these include roots (the
 # test refuses a compile whose dependency file reaches anywhere else in the
-# checkout); the fader case reads one image, the fidelity-scene binding case
-# reads the scene, and the include-root control copies one music header.
+# checkout); the fader case reads one image, the binding cases read the
+# fidelity scene and the v0 audio panel, and the include-root control copies
+# one music header.
 pulp_test_data(pulp-test-design-import-native-materializer NO_DEFINE
     SOURCES test_design_import_native_materializer.cpp
     PATHS
@@ -129,7 +130,8 @@ pulp_test_data(pulp-test-design-import-native-materializer NO_DEFINE
         core/signal/include core/host/include
         core/music/include/pulp/music/pitch.hpp
         test/fixtures/import-fidelity/assets/fader_ref.png
-        test/fixtures/import-fidelity/scene.pulp.json)
+        test/fixtures/import-fidelity/scene.pulp.json
+        test/fixtures/v0-dev/audio-control-panel.tsx)
 
 # Inert style declarations (`opacity: 1`, `clip-path: none`, ...) must not
 # change the native drawlist, the Skia raster, or the sibling painted next.

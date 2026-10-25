@@ -41,14 +41,16 @@ bool refuse_unrenderable_states(const pulp::view::IRNode& root, std::ostream& er
 // A repeated stable anchor is a hard error for the same reason: every emitter
 // addresses a node by its anchor, so the repeat silently loses its binding (the
 // generated C++ binder requires exactly one match and binds neither node), its
-// tweaks and its lock-to-source edits.
+// tweaks and its lock-to-source edits. Anchors derived from content were made
+// unique before this runs (resolve_anchor_collisions), so what is left here is
+// an identity the source itself gave twice.
 bool refuse_duplicate_anchors(const pulp::view::IRNode& root, std::ostream& err) {
     const auto duplicates = pulp::view::find_duplicate_anchors(root);
     if (duplicates.empty())
         return false;
     err << "Error: " << duplicates.size() << " node"
         << (duplicates.size() == 1 ? " repeats" : "s repeat")
-        << " an earlier node's stable anchor, so bindings, tweaks and "
+        << " an earlier node's explicit source identity, so bindings, tweaks and "
            "lock-to-source could not tell them apart:\n";
     for (const auto& d : duplicates)
         err << "       - '" << d.node_name << "' at " << d.path << " has anchor '" << d.anchor

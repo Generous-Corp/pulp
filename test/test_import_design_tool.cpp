@@ -18,9 +18,11 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <optional>
 #include <regex>
 #include <sstream>
+#include <set>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -3552,8 +3554,9 @@ TEST_CASE("a repeated stable anchor fails the import and names both nodes",
             INFO("stderr: " << r.stderr_output);
             REQUIRE_FALSE(r.timed_out);
             CHECK(r.exit_code == 2);
-            CHECK(r.stderr_output.find("1 node repeats an earlier node's stable anchor") !=
-                  std::string::npos);
+            CHECK(
+                r.stderr_output.find("1 node repeats an earlier node's explicit source identity") !=
+                std::string::npos);
             CHECK(r.stderr_output.find("'Drive' at $/children[1] has anchor "
                                        "'figma-plugin:1:2', already used by 'Cutoff' at "
                                        "$/children[0]") != std::string::npos);
@@ -3574,6 +3577,49 @@ TEST_CASE("a repeated stable anchor fails the import and names both nodes",
         CHECK(r.stderr_output.find("stable anchor") == std::string::npos);
         CHECK(fs::exists(out));
     }
+}
+
+TEST_CASE("repeated content-derived anchors are disambiguated rather than refused",
+          "[cli][import-design][tool][identity]") {
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
+    // The v0 audio panel holds two cards, each a caption and an unlabelled
+    // range input. A content hash does not include the parent, so the two
+    // inputs (and their two value readouts) hashed to one anchor each. That is
+    // not a source defect, so the import succeeds with every anchor unique.
+    const std::string fixture = PULP_V0_AUDIO_PANEL_FIXTURE;
+    TempDir tmp("pulp-derived-anchor-collision");
+    const auto ir_out = tmp.path / "panel.ir.json";
+    auto r = run_import_design({"--from", "v0", "--file", fixture, "--mode", "baked", "--emit",
+                                "ir-json", "--output", ir_out.string()},
+                               60000);
+    INFO("stderr: " << r.stderr_output);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    CHECK(r.stderr_output.find("duplicate stable anchor") == std::string::npos);
+    CHECK(r.stderr_output.find("explicit source identity") == std::string::npos);
+
+    std::ifstream in(ir_out);
+    const std::string json((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    std::vector<std::string> anchors;
+    const std::string key = "\"stable_anchor_id\":";
+    for (auto at = json.find(key); at != std::string::npos; at = json.find(key, at + 1)) {
+        const auto open = json.find('"', at + key.size());
+        const auto close = json.find('"', open + 1);
+        anchors.push_back(json.substr(open + 1, close - open - 1));
+    }
+    REQUIRE(anchors.size() > 10);
+    CHECK(std::set<std::string>(anchors.begin(), anchors.end()).size() == anchors.size());
+
+    const auto cpp_out = tmp.path / "panel.cpp";
+    auto cpp = run_import_design({"--from", "v0", "--file", fixture, "--mode", "baked", "--emit",
+                                  "cpp", "--output", cpp_out.string()},
+                                 60000);
+    INFO("cpp stderr: " << cpp.stderr_output);
+    REQUIRE_FALSE(cpp.timed_out);
+    CHECK(cpp.exit_code == 0);
+    CHECK(fs::exists(cpp_out));
 }
 
 TEST_CASE("repeated --frame on a source that resolves one frame is rejected",

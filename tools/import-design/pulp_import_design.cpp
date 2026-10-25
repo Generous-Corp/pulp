@@ -1,3 +1,4 @@
+#include <pulp/view/anchor_strategy.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/design_export.hpp>
 #include <pulp/view/design_tokens_w3c.hpp>
@@ -3177,8 +3178,10 @@ int main(int argc, char* argv[]) {
     // --import-report / --fail-on-unresolved channel carry it.
     apply_swap_target_verification(ir.root);
 
-    // Captured states nobody can render and repeated anchors refuse the import
-    // before anything is written (import_document_refusals.hpp).
+    // Derived anchors that still collide are disambiguated; captured states
+    // nobody can render and repeated explicit anchors refuse the import before
+    // anything is written (import_document_refusals.hpp).
+    pulp::view::resolve_anchor_collisions(ir.root);
     if (pulp::import_design::refuse_unimportable_document(ir.root, std::cerr))
         return 2;
     const auto import_report = collect_import_report(ir.root);
