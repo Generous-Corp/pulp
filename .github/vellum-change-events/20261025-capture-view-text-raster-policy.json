@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "event_id": "20261025-capture-view-text-raster-policy",
+  "kind": "change",
+  "created_at": "2026-10-25T03:10:00Z",
+  "slices": [
+    "capture-primitives"
+  ],
+  "rationale": "design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger); capture-primitives: capture_view, the smart capture, takes the text raster policy render_to_png and render_to_png_gpu already take and hands it to whichever Skia backend it chooses, defaulting to legacy so existing callers capture byte-identically. pulp-screenshot passes a script's requested policy on --backend auto as it already did on an explicit backend. No backend selection, content floor, or overlay rule changes. Vellum inherits the policy-carrying smart capture with the capture primitives.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "build/test/pulp-test-browser-capture-import \"the smart capture renders with the text raster policy it is given\""
+  ],
+  "disposition": "pulp-only",
+  "vellum_inherits": true
+}

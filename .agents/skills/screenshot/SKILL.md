@@ -42,15 +42,15 @@ would return empty bytes.
 flagged `requires_gpu_host()`; use `skia`/`coregraphics` for the explicit cases
 below. The image-compositing rule still applies to the raster backends.
 
-## A script's text raster policy reaches only an explicit backend
+## A script's text raster policy reaches every Skia backend
 
 A generated ui.js that holds antialiased text calls
-`setTextRasterPolicy('chromium')`, and `pulp-screenshot --script` passes that
-policy (`WidgetBridge::text_raster_policy()`) to `render_to_png`. It does that
-only on an explicit backend such as `--backend skia`. `capture_view`, the
-`--backend auto` path, takes no policy, so an antialiased import captured that
-way paints about a fifth too heavy. Use `--backend skia` when comparing imported
-text against Chromium.
+`setTextRasterPolicy('chromium')`. `pulp-screenshot --script` passes that policy
+(`WidgetBridge::text_raster_policy()`) to `render_to_png` on an explicit backend
+and to `capture_view` on `--backend auto`, which hands it to whichever Skia
+backend it picks (`skia` or `gpu`). Without it an antialiased import paints about
+a fifth too heavy. The CoreGraphics backend ignores the policy, so don't compare
+imported text against Chromium with `--backend coregraphics`.
 
 ## The image rule (raster backends): use **Skia** for anything with images
 

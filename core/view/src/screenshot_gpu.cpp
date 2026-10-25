@@ -162,7 +162,7 @@ std::vector<uint8_t> render_to_png_gpu(View& root, uint32_t width, uint32_t heig
 }
 
 CaptureResult capture_view(View& root, uint32_t width, uint32_t height, float scale,
-                           ScreenshotBackend backend) {
+                           ScreenshotBackend backend, canvas::TextRasterPolicy text_raster) {
     CaptureResult r;
 
     // Walk the tree once: find any native overlay AND whether GPU is required.
@@ -209,8 +209,8 @@ CaptureResult capture_view(View& root, uint32_t width, uint32_t height, float sc
     // Keep that implementation detail from mutating a live inspector tree.
     const auto original_bounds = root.bounds();
     r.png = (chosen == ScreenshotBackend::gpu)
-                ? render_to_png_gpu(root, width, height, scale)
-                : render_to_png(root, width, height, scale, chosen);
+                ? render_to_png_gpu(root, width, height, scale, text_raster)
+                : render_to_png(root, width, height, scale, chosen, text_raster);
     root.set_bounds(original_bounds);
     root.layout_children();
     if (r.png.empty()) {

@@ -63,7 +63,8 @@ bool render_to_file(View& root, uint32_t width, uint32_t height, const std::stri
 //   3. Otherwise → CPU raster (`skia` / platform default).
 // The captured PNG is gated by the content floor (analyze_screenshot_content):
 // a blank / clear-only frame sets ok=false with a reason. `png` may still be
-// populated when !ok so callers can save it for debugging.
+// populated when !ok so callers can save it for debugging. `text_raster` reaches
+// whichever Skia backend is chosen, as in render_to_png.
 struct CaptureRequirements {
     View* native_overlay = nullptr;  ///< First OS-composited overlay owner, if any.
     bool requires_gpu = false;       ///< True when any node needs a GPU host.
@@ -81,13 +82,10 @@ struct CaptureResult {
     std::string reason;  ///< Empty when ok; otherwise why the capture isn't trustworthy.
 };
 
-CaptureResult capture_view(
-    View& root,
-    uint32_t width,
-    uint32_t height,
-    float scale = 2.0f,
-    ScreenshotBackend backend = ScreenshotBackend::auto_select  // smart by default
-);
+CaptureResult
+capture_view(View& root, uint32_t width, uint32_t height, float scale = 2.0f,
+             ScreenshotBackend backend = ScreenshotBackend::auto_select, // smart by default
+             canvas::TextRasterPolicy text_raster = canvas::TextRasterPolicy::legacy);
 
 // Render a view tree through the offscreen GPU surface (Dawn + Skia via
 // pulp::render::HeadlessSurface). Returns empty bytes if this build has no GPU

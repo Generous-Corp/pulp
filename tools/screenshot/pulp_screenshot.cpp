@@ -848,8 +848,8 @@ int main(int argc, char* argv[]) {
     std::vector<uint8_t> png;
     std::string used_label = options.backend_name;
     if (smart) {
-        CaptureResult cap =
-            capture_view(*capture_root, options.width, options.height, options.scale, backend);
+        CaptureResult cap = capture_view(*capture_root, options.width, options.height,
+                                         options.scale, backend, bridge.text_raster_policy());
         if (!cap.ok) {
             std::cerr << "Error: capture is not trustworthy — " << cap.reason << "\n";
             return 3;  // native overlay / blank / no backend

@@ -1,0 +1,12 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261025-capture-view-text-raster-policy",
+  "slices": [
+    "capture-primitives"
+  ],
+  "vellum_obligation": "The smart capture accepts a text raster policy and renders with it on whichever Skia backend it selects, exactly as the explicit raster and GPU captures do; the default policy leaves existing captures unchanged.",
+  "evidence": [
+    ".github/vellum-change-events/20261025-capture-view-text-raster-policy.json",
+    "pulp-test-browser-capture-import \"the smart capture renders with the text raster policy it is given\""
+  ]
+}

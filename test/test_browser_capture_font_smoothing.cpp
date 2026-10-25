@@ -10,6 +10,7 @@
 #include <pulp/canvas/skia_canvas.hpp>
 #include <pulp/view/design_codegen.hpp>
 #include <pulp/view/design_import.hpp>
+#include <pulp/view/screenshot.hpp>
 #include <pulp/view/widgets.hpp>
 
 #include "include/core/SkCanvas.h"
@@ -19,6 +20,7 @@
 
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -278,4 +280,27 @@ TEST_CASE("generated ui.js carries captured font smoothing and the surface polic
     const auto plain = pulp::view::generate_pulp_js(ir);
     CHECK(count(plain, "setFontSmoothing(") == 0);
     CHECK(count(plain, "setTextRasterPolicy(") == 0);
+}
+
+TEST_CASE("the smart capture renders with the text raster policy it is given",
+          "[browser-capture][font-smoothing]") {
+    using pulp::view::ScreenshotBackend;
+    pulp::view::View root;
+    root.set_bounds({0, 0, 200, 40});
+    auto label = std::make_unique<pulp::view::Label>("Antialiased capture");
+    label->set_bounds({8, 8, 184, 24});
+    label->set_font_smoothing(FontSmoothing::antialiased);
+    root.add_child(std::move(label));
+
+    const auto smart = pulp::view::capture_view(root, 200, 40, 2.0f, ScreenshotBackend::auto_select,
+                                                TextRasterPolicy::chromium);
+    REQUIRE(smart.ok);
+    if (smart.used != ScreenshotBackend::skia)
+        SKIP("this build's smart capture does not choose the Skia raster backend");
+    // The smart path paints exactly what the explicit backend does with the
+    // same policy, and the policy changes the pixels.
+    CHECK(smart.png ==
+          pulp::view::render_to_png(root, 200, 40, 2.0f, smart.used, TextRasterPolicy::chromium));
+    CHECK(smart.png !=
+          pulp::view::render_to_png(root, 200, 40, 2.0f, smart.used, TextRasterPolicy::legacy));
 }
