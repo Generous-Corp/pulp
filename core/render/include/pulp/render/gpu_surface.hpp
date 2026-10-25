@@ -46,6 +46,24 @@ class SwapchainResizeState {
                                  requested_height_ != configured_height_);
     }
 
+    /// Record a presented frame. `configured` says whether it had to configure
+    /// first; a frame that did restarts the settle count.
+    void note_frame(bool configured) {
+        if (configured)
+            stable_frames_ = 0;
+        else if (stable_frames_ < kSettleFrames)
+            ++stable_frames_;
+    }
+
+    /// Settled: the last kSettleFrames frames presented without configuring,
+    /// and no resize is pending. A live resize is over once this holds, so it
+    /// is the point to trust the final size and to release resize-time slack.
+    bool settled() const {
+        return presentable() && !needs_configure() && stable_frames_ >= kSettleFrames;
+    }
+
+    static constexpr uint32_t kSettleFrames = 2;
+
     /// The requested size, which is what GpuSurface::width()/height() report.
     uint32_t width() const {
         return requested_width_;
@@ -60,6 +78,7 @@ class SwapchainResizeState {
     uint32_t configured_width_ = 0;
     uint32_t configured_height_ = 0;
     bool configured_ = false;
+    uint32_t stable_frames_ = 0;
 };
 
 /// Abstract GPU surface — a presentable rendering target backed by a native window/view.
@@ -223,11 +242,14 @@ public:
     virtual StartupTimings startup_timings() const { return {}; }
 
     /// Swapchain configurations issued since initialize(), the first one
-    /// included, and their total wall-clock milliseconds. Offscreen surfaces
-    /// and implementations without a swapchain report zero.
+    /// included, their total wall-clock milliseconds, and whether the size
+    /// has settled. Offscreen surfaces never configure; implementations
+    /// without a swapchain report zero and never settle.
     struct SwapchainStats {
         uint64_t configure_count = 0;
         double configure_ms = 0.0;
+        /// SwapchainResizeState::settled(): the size has held for two frames.
+        bool settled = false;
     };
 
     /// Kept at the vtable tail for the same reason as startup_timings().

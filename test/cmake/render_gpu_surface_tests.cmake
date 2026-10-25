@@ -62,7 +62,7 @@
             test_gpu_surface_swapchain_macos.mm)
         target_link_libraries(pulp-test-gpu-surface-swapchain-macos PRIVATE
             pulp::render Catch2::Catch2WithMain
-            "-framework Metal" "-framework QuartzCore")
+            "-framework AppKit" "-framework Metal" "-framework QuartzCore")
         target_include_directories(pulp-test-gpu-surface-swapchain-macos PRIVATE
             ${SKIA_INCLUDE_DIRS})
         if(EXISTS "${SKIA_INCLUDE_DIRS}/dawn")

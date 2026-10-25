@@ -400,23 +400,28 @@ public:
                 current_texture_ = nullptr;
                 return false;
             }
-            if (swapchain_.needs_configure())
-                configure_swapchain();
-
+            // One size check guards every acquire: it configures for a pending
+            // resize, and once more when the texture comes back
+            // SuccessSuboptimal. That status means the swapchain still yields
+            // a usable texture but no longer optimally matches the surface: the
+            // window was resized before the host reported it (e.g. a DAW
+            // dragged the editor container ahead of WM_SIZE) or the DPI/format
+            // changed under us. Re-acquire EXACTLY ONCE. If it is still merely
+            // suboptimal we render with this texture for the frame rather than
+            // dropping it — we must never loop, or a surface that stays
+            // suboptimal (a format Dawn can only approximate) would spin
+            // begin_frame() forever.
+            bool configured = false;
             wgpu::SurfaceTexture surface_texture;
-            surface_.GetCurrentTexture(&surface_texture);
-
-            // SuccessSuboptimal means the swapchain still yields a usable texture
-            // but no longer optimally matches the surface — the window was
-            // resized before the host reported it (e.g. a DAW dragged the editor
-            // container ahead of WM_SIZE) or the DPI/format changed under us.
-            // Reconfigure to the requested size and re-acquire the texture
-            // EXACTLY ONCE. If it is still merely suboptimal we render with this texture
-            // for the frame rather than dropping it — we must never loop, or a
-            // surface that stays suboptimal (a format Dawn can only approximate)
-            // would spin begin_frame() forever.
-            if (surface_texture.status ==
-                wgpu::SurfaceGetCurrentTextureStatus::SuccessSuboptimal) {
+            for (int attempt = 0;; ++attempt) {
+                if (swapchain_.needs_configure()) {
+                    configure_swapchain();
+                    configured = true;
+                }
+                surface_.GetCurrentTexture(&surface_texture);
+                if (attempt > 0 || surface_texture.status !=
+                                       wgpu::SurfaceGetCurrentTextureStatus::SuccessSuboptimal)
+                    break;
                 // Release the stale texture's ref before re-acquiring. Dawn's
                 // C++ GetCurrentTexture reinterpret-casts to the C struct and
                 // overwrites the .texture handle in place (bypassing C++
@@ -424,8 +429,6 @@ public:
                 // would otherwise leak the first texture's reference each frame.
                 surface_texture.texture = nullptr;
                 swapchain_.invalidate();
-                configure_swapchain();
-                surface_.GetCurrentTexture(&surface_texture);
             }
 
             if (surface_texture.status != wgpu::SurfaceGetCurrentTextureStatus::SuccessOptimal &&
@@ -435,9 +438,17 @@ public:
             }
 
             current_texture_ = std::move(surface_texture.texture);
-            return current_texture_ != nullptr;
+            if (!current_texture_)
+                return false;
+            swapchain_.note_frame(configured);
+            return true;
         }
 
+        // Offscreen has no swapchain to configure; the size is applied as is.
+        const bool resized = swapchain_.needs_configure();
+        if (resized)
+            swapchain_.mark_configured();
+        swapchain_.note_frame(resized);
         return true;  // offscreen always ready
     }
 
@@ -463,7 +474,9 @@ public:
         return swapchain_.height();
     }
     SwapchainStats swapchain_stats() const override {
-        return swapchain_stats_;
+        SwapchainStats stats = swapchain_stats_;
+        stats.settled = swapchain_.settled();
+        return stats;
     }
 
     // Dawn handle accessors — SkiaSurface casts these back to Dawn C++ types

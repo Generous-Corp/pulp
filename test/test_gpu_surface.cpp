@@ -310,10 +310,12 @@ struct FrameLoop {
     bool frame() {
         if (!state.presentable())
             return false;
-        if (state.needs_configure()) {
+        const bool configured = state.needs_configure();
+        if (configured) {
             ++configures;
             state.mark_configured();
         }
+        state.note_frame(configured);
         return true;
     }
 };
@@ -423,4 +425,53 @@ TEST_CASE("Offscreen GpuSurface resize reports the size and configures no swapch
     REQUIRE(surface->begin_frame());
     surface->end_frame();
     REQUIRE(surface->swapchain_stats().configure_count == 0);
+}
+
+TEST_CASE("Swapchain settles after two frames at an unchanged size", "[render][gpu][swapchain]") {
+    FrameLoop loop;
+    loop.state.request(400, 300);
+    REQUIRE_FALSE(loop.state.settled());
+    REQUIRE(loop.frame()); // configures
+    REQUIRE_FALSE(loop.state.settled());
+    REQUIRE(loop.frame());
+    REQUIRE_FALSE(loop.state.settled());
+    REQUIRE(loop.frame());
+    REQUIRE(loop.state.settled());
+    REQUIRE(loop.configures == 1);
+}
+
+TEST_CASE("Swapchain is not settled while a resize is pending or a drag continues",
+          "[render][gpu][swapchain]") {
+    FrameLoop loop;
+    loop.state.request(400, 300);
+    for (int i = 0; i < 3; ++i)
+        loop.frame();
+    REQUIRE(loop.state.settled());
+
+    loop.state.request(410, 300);
+    REQUIRE_FALSE(loop.state.settled()); // pending, before any frame
+
+    // A drag: every frame configures, so it never settles.
+    for (uint32_t i = 0; i < 8; ++i) {
+        loop.state.request(420 + i, 300);
+        REQUIRE(loop.frame());
+        REQUIRE_FALSE(loop.state.settled());
+    }
+    // Released: two frames at the final size settle it, at exactly that size.
+    REQUIRE(loop.frame());
+    REQUIRE(loop.frame());
+    REQUIRE(loop.state.settled());
+    REQUIRE(loop.state.width() == 427);
+    REQUIRE(loop.state.height() == 300);
+}
+
+TEST_CASE("Swapchain at a zero size never settles", "[render][gpu][swapchain]") {
+    FrameLoop loop;
+    loop.state.request(400, 300);
+    for (int i = 0; i < 3; ++i)
+        loop.frame();
+    loop.state.request(0, 0);
+    for (int i = 0; i < 3; ++i)
+        REQUIRE_FALSE(loop.frame());
+    REQUIRE_FALSE(loop.state.settled());
 }

@@ -7,10 +7,12 @@
 
 #if TARGET_OS_OSX
 
+#import <AppKit/AppKit.h>
 #import <QuartzCore/QuartzCore.h>
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/render/gpu_surface.hpp>
+#include <pulp/render/skia_surface.hpp>
 
 #include "webgpu/webgpu_cpp.h"
 
@@ -164,6 +166,138 @@ TEST_CASE("Presentable GpuSurface created at a zero size configures on its first
         REQUIRE(s.configures() == 1);
         CHECK(w == 320);
         CHECK(h == 240);
+    }
+}
+
+namespace {
+
+// A layer the window server composites, so presented drawables come back. A
+// bare layer runs out after three presents and then waits out nextDrawable's
+// one-second timeout on every acquire.
+struct WindowedFrames {
+    NSWindow* window = nil;
+    CAMetalLayer* layer = nil;
+    std::unique_ptr<GpuSurface> gpu;
+    std::unique_ptr<SkiaSurface> skia;
+
+    bool open(uint32_t width, uint32_t height) {
+        [NSApplication sharedApplication];
+        window = [[NSWindow alloc] initWithContentRect:NSMakeRect(-4000, -4000, width, height)
+                                             styleMask:NSWindowStyleMaskBorderless
+                                               backing:NSBackingStoreBuffered
+                                                 defer:NO];
+        NSView* view = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, width, height)];
+        layer = [CAMetalLayer layer];
+        view.wantsLayer = YES;
+        view.layer = layer;
+        window.contentView = view;
+        [window orderFrontRegardless];
+        [CATransaction flush];
+        gpu = GpuSurface::create_dawn();
+        if (!gpu)
+            return false;
+        GpuSurface::Config config{};
+        config.width = width;
+        config.height = height;
+        config.vsync = false;
+        config.native_surface_handle = (__bridge void*)layer;
+        if (!gpu->initialize(config) || !gpu->has_surface())
+            return false;
+        skia = SkiaSurface::create(*gpu, {.width = width, .height = height});
+        if (!skia || !skia->is_available())
+            return false;
+        return skia->set_persistent_scene(true);
+    }
+
+    ~WindowedFrames() {
+        [window orderOut:nil];
+    }
+
+    void resize(uint32_t width, uint32_t height) {
+        gpu->resize(width, height);
+        skia->resize(width, height, 1.0f);
+    }
+
+    // One full frame; reports the size of the texture it presented.
+    bool frame(uint32_t* width, uint32_t* height) {
+        if (!gpu->begin_frame())
+            return false;
+        auto* texture = static_cast<wgpu::Texture*>(gpu->current_texture_handle());
+        *width = texture && *texture ? texture->GetWidth() : 0;
+        *height = texture && *texture ? texture->GetHeight() : 0;
+        auto* canvas = skia->begin_frame();
+        if (!canvas) {
+            gpu->end_frame();
+            return false;
+        }
+        canvas->fill_rect(0, 0, static_cast<float>(*width), static_cast<float>(*height));
+        skia->end_frame();
+        gpu->end_frame();
+        [CATransaction flush];
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.005, false);
+        return true;
+    }
+};
+
+constexpr const char* kNoWindowedSurface =
+    "GpuSurface + SkiaSurface would not come up on a composited CAMetalLayer";
+
+} // namespace
+
+TEST_CASE("Sixty resizes inside four frames configure and allocate once per frame",
+          "[render][gpu][swapchain][macos]") {
+    @autoreleasepool {
+        WindowedFrames f;
+        if (!f.open(400, 300))
+            SKIP(kNoWindowedSurface);
+        uint32_t w = 0, h = 0;
+        REQUIRE(f.frame(&w, &h));
+        const uint64_t configures = f.gpu->swapchain_stats().configure_count;
+        const uint64_t allocations = f.skia->render_target_allocations();
+
+        int frames = 0;
+        for (uint32_t frame = 0; frame < 4; ++frame) {
+            for (uint32_t i = 1; i <= 15; ++i)
+                f.resize(400 + frame * 15 + i, 300 + i);
+            // Resizes alone touch neither the swapchain nor the Graphite targets.
+            REQUIRE(f.gpu->swapchain_stats().configure_count == configures + frame);
+            REQUIRE(f.skia->render_target_allocations() == allocations + frame);
+            REQUIRE(f.frame(&w, &h));
+            ++frames;
+        }
+        const uint64_t configured = f.gpu->swapchain_stats().configure_count - configures;
+        CHECK(configured == static_cast<uint64_t>(frames));
+        CHECK(f.skia->render_target_allocations() - allocations == configured);
+        CHECK(w == 460);
+        CHECK(h == 315);
+    }
+}
+
+TEST_CASE("Presentable GpuSurface settles at exactly the final size after a drag",
+          "[render][gpu][swapchain][macos]") {
+    @autoreleasepool {
+        WindowedFrames f;
+        if (!f.open(400, 300))
+            SKIP(kNoWindowedSurface);
+        uint32_t w = 0, h = 0;
+        REQUIRE(f.frame(&w, &h));
+        REQUIRE(f.frame(&w, &h));
+        REQUIRE(f.frame(&w, &h));
+        REQUIRE(f.gpu->swapchain_stats().settled);
+
+        for (uint32_t i = 1; i <= 6; ++i) {
+            f.resize(400 + 7 * i, 300 + 3 * i);
+            REQUIRE(f.frame(&w, &h));
+            REQUIRE_FALSE(f.gpu->swapchain_stats().settled);
+        }
+        REQUIRE(f.frame(&w, &h));
+        REQUIRE_FALSE(f.gpu->swapchain_stats().settled);
+        REQUIRE(f.frame(&w, &h));
+        REQUIRE(f.gpu->swapchain_stats().settled);
+        CHECK(w == 442);
+        CHECK(h == 318);
+        CHECK(f.layer.drawableSize.width == 442);
+        CHECK(f.layer.drawableSize.height == 318);
     }
 }
 
