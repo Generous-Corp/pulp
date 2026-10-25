@@ -403,10 +403,17 @@ Glyph contrast and gamma are properties of the surface, not the font.
 a trailing `canvas::TextRasterPolicy`, and it defaults to `legacy` (Skia's
 defaults, which is Chromium's `-webkit-font-smoothing: auto`).
 
-A capture of an imported panel whose text is `antialiased` must pass
-`select_text_raster_policy()` over its text nodes. Otherwise its glyphs come out
-about 30% heavier than the Chromium capture they are scored against. The pixel
-diff then reads that as a text defect, when it is a capture-settings mismatch.
+An imported panel whose text is `antialiased` paints about 21% more ink on a
+`legacy` capture than in the Chromium capture it is scored against, and the pixel
+diff reads that as a text defect when it is a capture-settings mismatch.
+`select_text_raster_policy()` over the panel's text nodes picks `chromium` for
+it, but the policy is only half the fix: Chromium's `antialiased` weight needs
+the `chromium` surface AND hinting none on the text. Until per-node hinting lands,
+the painter keeps its slight hinting, and a `chromium` capture comes out about 2%
+HEAVIER than `legacy` (`test_text_raster_policy.cpp`, "a chromium surface changes
+how text rasterizes"), not lighter. Do not pass the policy expecting the 21% gap
+to close yet, and do not read a 2% text-ink shift between the two policies as a
+regression.
 
 The CoreGraphics backend and a registered provider ignore the policy. A
 fidelity capture has to use `skia` or `gpu`.

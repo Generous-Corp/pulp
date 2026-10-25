@@ -218,7 +218,8 @@ public:
     /// under the old policy is discarded: retained layers are dropped, and the
     /// offscreen and persistent-scene targets are recreated, so like a resize
     /// the next frame must be a full repaint. Setting the current policy is a
-    /// no-op that keeps every cache.
+    /// no-op that keeps every cache. Call it between frames: it releases the
+    /// canvas `begin_frame()` handed out, so it must not run while one is open.
     virtual void set_text_raster_policy(canvas::TextRasterPolicy /*policy*/) {}
 
     /// The policy surfaces are currently created with.
