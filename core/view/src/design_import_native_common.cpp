@@ -1722,16 +1722,12 @@ void apply_label_style(Label& label, const IRStyle& style) {
     }
     if (style.white_space && lower_copy(*style.white_space) != "nowrap")
         label.set_multi_line(true);
-    // Vertically center a single-line label whose design slot is taller than its
-    // font (e.g. an 8px "SEARCH" in a 17px box, tab digits in a 20px button).
-    // Figma centers text in a fixed-height frame but the IR drops
-    // textAlignVertical, so derive it from slot-vs-font. The web-compat codegen
-    // emits the SAME rule as `verticalAlign:middle` (design_codegen.cpp), so
-    // both render paths converge on Label::set_vertical_align(center) and the
-    // screenshot-parity invariant holds. The Label default is top.
-    if (style.height && style.font_size &&
-        *style.height > *style.font_size * 1.15f)
+    // The rule every lane shares (design_ir_helpers.hpp); the Label default is top.
+    const auto valign = imported_vertical_align(style);
+    if (valign == ImportedVerticalAlign::center)
         label.set_vertical_align(canvas::TextVerticalAlign::center);
+    else if (valign == ImportedVerticalAlign::bottom)
+        label.set_vertical_align(canvas::TextVerticalAlign::bottom);
 }
 
 canvas::AttributedString build_attributed_text(const IRNode& node) {

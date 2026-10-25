@@ -1152,9 +1152,13 @@ materializer. Baked C++ alone still flattens — honest partial.
 **`textAlignVertical` is design authority; the tall-slot heuristic is only a
 fallback.** All three producers emit `style.vertical_align`
 (top/middle/bottom; kiwi omits the `.fig` TOP default so it only appears when
-set). Codegen honors it verbatim in both JS arms — including an explicit
-`top`, which SUPPRESSES the old slot-taller-than-font centering guess (that
-heuristic now fires only when the source never says). Expect imports to MOVE
+set). Codegen honors it verbatim in both JS arms, and the native materializer
+and baked C++ lane share the same rule (`imported_vertical_align()` in
+`design_ir_helpers.hpp`), including an explicit `top`, which SUPPRESSES the
+old slot-taller-than-font centering guess (that heuristic now fires only when
+the source never says). A browser capture records `middle` for a control's
+`#control-value` text; before the native lane read it, a button input's label
+painted top-aligned, 1.41 CSS px below Chromium's. Expect imports to MOVE
 text vs pre-emission renders where designs author TOP in a reserved slot —
 that movement is fidelity, not a regression (layout dumps stay byte-identical;
 vertical align is paint, not geometry). Auto-resize / truncation / max-lines /
