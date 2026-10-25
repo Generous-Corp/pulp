@@ -19,11 +19,23 @@ The lab instead compares:
 | Structure | evaluated DOM snapshot | DesignIR tree |
 | Geometry | DOM snapshot bounds | post-Yoga `--dump-layout` bounds |
 | Typography | computed styles | DesignIR text styles |
-| Visual | `browser.png` | candidate DesignIR rendered through Pulp/Skia |
+| Visual | the candidate lane's `browser.png` (see below) | candidate DesignIR rendered through Pulp/Skia |
 
 The raw browser screenshot is retained as the external render reference. Both
 the native import and its validation render are run in a dedicated candidate
 directory.
+
+Each lane runs its own Chromium capture, and the native IR is lowered from the
+candidate lane's. On a panel that animates, such as a canvas drawn every
+frame, the browser lane's screenshot shows a different moment, so scoring
+against it would charge capture timing to the native render. The visual lens
+therefore scores against the candidate lane's own screenshot
+(`candidate/browser.png`) when the two lanes' DOM snapshots have the same
+semantic digest. If they differ, the candidate lane did not evaluate the page
+the other lenses read, and the browser lane's screenshot stays the reference.
+`comparison.visual.reference` records which one was used, why, and
+`capture_moment_residual`: how many pixels the two Chromium captures alone
+disagree on, and where.
 
 ## Run one comparison
 
@@ -61,6 +73,7 @@ browser/
   tokens.json
 candidate/
   design.ir.json
+  browser.png
   render.png
   layout.json
 comparison/
