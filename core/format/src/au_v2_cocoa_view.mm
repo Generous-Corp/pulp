@@ -112,8 +112,10 @@ struct PulpAUEditorOwnership {
 // will-dealloc hook, so ~PluginViewHost sees a whole view; -dealloc keeps it
 // as the fallback when the view has no hook.
 - (void)releaseEditor;
+#if defined(PULP_AU_V2_TEST_HOOKS)
 // The editor's view host while the editor is open; nullptr once released.
 - (pulp::view::PluginViewHost*)editorHost;
+#endif
 @end
 
 // Implemented by the Pulp plug-in views (plugin_view_host_mac_view.h); the
@@ -171,9 +173,11 @@ struct PulpAUEditorOwnership {
         }
     }
 }
+#if defined(PULP_AU_V2_TEST_HOOKS)
 - (pulp::view::PluginViewHost*)editorHost {
     return _ownership ? _ownership->host.get() : nullptr;
 }
+#endif
 @end
 
 static const char kOwnershipKey = 0;
@@ -268,14 +272,17 @@ bool pulp_resize_logic_auv2_editor(NSView* editor_view,
 
 @implementation PULP_AU_COCOA_VIEW_CLASS
 
+#if defined(PULP_AU_V2_TEST_HOOKS)
 // Test-only: the PluginViewHost behind an editor view this factory returned, or
-// nullptr. A test reads the host's GPU cache bytes through it; the plug-in never
-// calls it. A class method on the per-plug-in factory class, so two plug-ins in
-// one process cannot collide on it.
+// nullptr, so a test can read the host's GPU cache bytes. Only the test target
+// defines PULP_AU_V2_TEST_HOOKS; Objective-C dispatches by name at runtime, so
+// a method compiled into a shipped plug-in would be reachable from any code in
+// the host process.
 + (void*)pulpEditorHostForTesting:(NSView*)view {
     auto* owner = static_cast<PulpAUEditorOwner*>(objc_getAssociatedObject(view, &kOwnershipKey));
     return owner ? [owner editorHost] : nullptr;
 }
+#endif
 
 - (unsigned)interfaceVersion {
     return 0;
