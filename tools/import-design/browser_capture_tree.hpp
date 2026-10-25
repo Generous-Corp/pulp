@@ -233,6 +233,13 @@ PaintedTreeCounts lower_painted_tree(
 /// an overlapping one (`overlapping_reorders > 0`). A panel whose canvas paints
 /// in tree order keeps its sections, and a panel that genuinely interleaves
 /// is flattened and says why in `flattened_overlapping_reorders`.
+/// Every node's capture anchor (`stable_anchor_id`), by snapshot node index,
+/// through the same `anchor_path` the lowering uses; empty for a node with no
+/// signature (the document, a doctype, a comment). The importer differential
+/// lab derives the browser lane's anchors with a Python port, and
+/// test/fixtures/capture-anchor-vectors.json pins the two to one spelling.
+std::vector<std::string> capture_anchor_paths(const CapturedStyleIndex& index);
+
 PaintedTreeCounts lower_painted_tree_preferring_hierarchy(
     const CapturedStyleIndex& index, double dx, double dy, double device_scale,
     pulp::view::IRNode& root, const std::unordered_map<int, std::string>& captured_element_assets,

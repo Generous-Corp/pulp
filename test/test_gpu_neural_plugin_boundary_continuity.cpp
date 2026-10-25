@@ -115,7 +115,10 @@ class GpuNeuralEffect final : public format::Processor {
                                               .model = build.model,
                                               .channels = kChannels,
                                               .lead_blocks = kLeadBlocks,
-                                              .capacity = kLeadBlocks + 3});
+                                              .capacity = kLeadBlocks + 3,
+                                              // Faults are simulated in a short
+                                              // run: keep the ring-sized window.
+                                              .watchdog_blocks = kLeadBlocks + 2});
             engine_ready_ = node_->prepare() && transport_.prepare(node_.get(), {});
         }
         for (std::uint32_t ch = 0; ch < kChannels; ++ch) {

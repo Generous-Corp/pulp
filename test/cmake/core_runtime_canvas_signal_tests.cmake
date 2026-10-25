@@ -661,6 +661,17 @@ pulp_add_test_suite(pulp-test-convolver-non-uniform GROUP pulp-test-group-core-s
 pulp_add_test_suite(pulp-test-gpu-audio-transport
     SOURCES test_gpu_audio_transport.cpp harness/rt_allocation_probe.cpp
             ${CMAKE_SOURCE_DIR}/core/gpu_audio/src/gpu_audio_transport.cpp
+            ${CMAKE_SOURCE_DIR}/core/gpu_audio/src/detail/realtime_gpu_audio_path.cpp
+    LIBRARIES pulp::audio pulp::runtime Threads::Threads
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/include
+                 ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+
+# Capability and program validators, plus the transport's refusal of a
+# shape those validators would reject. GPU-agnostic, like the transport suite.
+pulp_add_test_suite(pulp-test-gpu-audio-capability-validation
+    SOURCES test_gpu_audio_capability_validation.cpp
+            ${CMAKE_SOURCE_DIR}/core/gpu_audio/src/gpu_audio_transport.cpp
+            ${CMAKE_SOURCE_DIR}/core/gpu_audio/src/detail/realtime_gpu_audio_path.cpp
     LIBRARIES pulp::audio pulp::runtime Threads::Threads
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/include
                  ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
@@ -879,15 +890,6 @@ if(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
     target_compile_definitions(pulp-test-gpu-shared-io-wavenet-spec
         PRIVATE PULP_GPU_AUDIO_WAVENET_RUNTIME=1)
 endif()
-
-# Dawn-free private reducer for exact lead-delivery and typed miss handling.
-# prepare() owns the only allocation; callback delivery is bounded and atomic.
-pulp_add_test_suite(pulp-test-gpu-audio-execution-controller
-    SOURCES test_gpu_audio_execution_controller.cpp harness/rt_allocation_probe.cpp
-    LIBRARIES pulp::gpu-audio pulp::audio
-    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
-target_compile_definitions(pulp-test-gpu-audio-execution-controller
-    PRIVATE PULP_GPU_AUDIO_CONTROLLER_TEST_HOOKS=1)
 
 # Private fixed-slot lifecycle used by the shared-memory GPU-audio dispatcher.
 # Dawn-free and deterministic: compile the exact production source directly so
@@ -1325,4 +1327,13 @@ pulp_add_test_suite(pulp-test-gpu-audio-header-standalone
             test_gpu_audio_header_standalone_capability.cpp
             test_gpu_audio_header_standalone_node.cpp
             test_gpu_audio_header_standalone_program.cpp
+            test_gpu_audio_header_standalone_provider_pool.cpp
     GROUP pulp-test-group-core-gpu-audio-private)
+
+# Host-memory shared-I/O provider: lifecycle, terminal contract, and the
+# convolution/WaveNet programs nulled against independent references. It needs
+# no GPU, so it runs in GPU-off configurations too.
+pulp_add_test_suite(pulp-test-gpu-cpu-shared-io-provider GROUP pulp-test-group-core-gpu-audio-private
+    SOURCES test_gpu_cpu_shared_io_provider.cpp
+    LIBRARIES pulp::gpu-audio
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)

@@ -1,9 +1,15 @@
+#include <pulp/gpu_audio/gpu_audio_provider_pool.hpp>
 #include <pulp/gpu_audio/gpu_wavenet.hpp>
+#include <pulp/gpu_audio/gpu_wavenet_realtime_node.hpp>
 #include "detail/nam_tcn_artifact.hpp"
+#include "detail/realtime_gpu_audio_path.hpp"
+#include "detail/wavenet_realtime_channel.hpp"
+#include "detail/shared_io_trace.hpp"
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdlib>
@@ -286,3 +292,168 @@ TEST_CASE("named WaveNet fixture remains causal across transport slot reuse",
 }
 
 #endif
+
+TEST_CASE("provider pool keeps a WaveNet provider warm across release and prepare",
+          "[gpu_audio][wavenet][session][pool]") {
+    Fixture fixture;
+    GpuAudioProviderPool pool;
+    const auto config = [&] {
+        GpuWaveNetRealtimeNode::Config c;
+        c.session = {.descriptor = fixture.descriptor(), .weights = fixture.weights, .slots = 2};
+        c.channels = 1;
+        c.lead_blocks = 1;
+        c.capacity = 4;
+        c.provider_pool = &pool;
+        return c;
+    }();
+    const auto now = [] { return std::chrono::steady_clock::now(); };
+    GpuWaveNetRealtimeNode node(config);
+    auto started = now();
+    if (!node.prepare())
+        SKIP("authenticated provider unavailable; provider pool timing skipped");
+    std::vector<double> cold{std::chrono::duration<double, std::micro>(now() - started).count()};
+    std::vector<double> warm, park;
+    for (int round = 0; round < 5; ++round) {
+        started = now();
+        REQUIRE(node.release()); // parks the provider in the pool
+        park.push_back(std::chrono::duration<double, std::micro>(now() - started).count());
+        CHECK(pool.stats().warm_entries == 1);
+        started = now();
+        REQUIRE(node.prepare()); // borrows it back
+        warm.push_back(std::chrono::duration<double, std::micro>(now() - started).count());
+        // A fresh node with no pool pays full creation every time.
+        auto cold_config = config;
+        cold_config.provider_pool = nullptr;
+        GpuWaveNetRealtimeNode cold_node(cold_config);
+        started = now();
+        REQUIRE(cold_node.prepare());
+        cold.push_back(std::chrono::duration<double, std::micro>(now() - started).count());
+        REQUIRE(cold_node.release());
+    }
+    const auto stats = pool.stats();
+    CHECK(stats.hits == 5);
+    CHECK(stats.returned == 5);
+
+    // A warm provider carries the previous stream's history; the node refills
+    // it before delivering, so delivered blocks match the model. Run a stream,
+    // park the provider with that history, borrow it back and run again.
+    const auto deliver = [&](float offset) {
+        auto path = detail::realtime_gpu_node_path(&node);
+        REQUIRE(path.active());
+        std::array<float, 2> input{}, output{};
+        const float* ip = input.data();
+        float* op = output.data();
+        pulp::audio::BufferView<const float> in(&ip, 1, 2);
+        pulp::audio::BufferView<float> out(&op, 1, 2);
+        std::uint64_t sequence = path.next_sequence(path.context);
+        const auto first = sequence;
+        int delivered = 0;
+        for (int block = 0; block < 400 && delivered < 8; ++block, ++sequence) {
+            const float base = offset + static_cast<float>(sequence - first);
+            input = {base, base + 0.25f};
+            const auto status = path.process(path.context, in, out, 2, sequence, true, 0);
+            path.delivered(path.context, sequence,
+                           static_cast<std::uint8_t>(
+                               status == detail::kRealtimeGpuReady
+                                   ? detail::SharedIoDeliveryDisposition::GpuDelivered
+                               : status == detail::kRealtimeGpuPriming
+                                   ? detail::SharedIoDeliveryDisposition::Priming
+                                   : detail::SharedIoDeliveryDisposition::SilenceDelivered),
+                           0, 0);
+            if (status == detail::kRealtimeGpuReady) {
+                ++delivered;
+                const float due = base - 1.0f;
+                CHECK(output[0] == Catch::Approx(std::tanh(0.5f * (due - 0.75f))).margin(2.0e-5));
+                CHECK(output[1] == Catch::Approx(std::tanh(0.5f * due)).margin(2.0e-5));
+            }
+            for (int pump = 0; pump < 4; ++pump) {
+                (void)path.service(path.context, 0);
+                std::this_thread::sleep_for(std::chrono::microseconds(200));
+            }
+        }
+        CHECK(delivered == 8);
+        CHECK(validate_gpu_audio_status(node.status_snapshot()).accepted());
+    };
+    deliver(0.0f);
+    REQUIRE(node.release());
+    REQUIRE(node.prepare());
+    // A different signal level, so stale history would show in the output.
+    deliver(-3.0f);
+    REQUIRE(node.release());
+
+    std::sort(cold.begin(), cold.end());
+    std::sort(warm.begin(), warm.end());
+    std::sort(park.begin(), park.end());
+    const auto cold_median = cold[cold.size() / 2];
+    const auto warm_median = warm[warm.size() / 2];
+    const auto park_median = park[park.size() / 2];
+    std::cout << "{\"schema\":\"pulp.gpu-audio.provider-pool.v1\",\"cold_prepare_us_median\":"
+              << cold_median << ",\"warm_prepare_us_median\":" << warm_median
+              << ",\"park_release_us_median\":" << park_median
+              << ",\"cold_samples\":" << cold.size() << ",\"warm_samples\":" << warm.size()
+              << "}\n";
+    CHECK(warm_median < cold_median);
+
+    // Expiry destroys warm providers.
+    GpuAudioProviderPool short_lived({.keep_warm_ns = 0});
+    auto short_config = config;
+    short_config.provider_pool = &short_lived;
+    GpuWaveNetRealtimeNode short_node(short_config);
+    REQUIRE(short_node.prepare());
+    REQUIRE(short_node.release());
+    CHECK(short_lived.stats().warm_entries == 1);
+    short_lived.evict_expired();
+    CHECK(short_lived.stats().warm_entries == 0);
+    CHECK(short_lived.stats().evictions == 1);
+}
+
+namespace {
+// A channel whose provider never drains, as a quarantined re-acquire leaves.
+class StuckChannel final : public detail::WaveNetRealtimeChannel {
+  public:
+    explicit StuckChannel(const bool& drained) : drained_(drained) {}
+    bool submit(std::span<const float>, const detail::SharedIoSubmissionTicket&) noexcept override {
+        return false;
+    }
+    void service(std::uint64_t) noexcept override {}
+    void service_until(std::uint64_t, std::uint64_t) noexcept override {}
+    std::optional<detail::WaveNetChannelCompletion> receive(std::span<float>) noexcept override {
+        return std::nullopt;
+    }
+    bool release() noexcept override {
+        return drained_;
+    }
+
+  private:
+    const bool& drained_;
+};
+GpuWaveNetRealtimeNode::Config pooled_node_config(const Fixture& fixture,
+                                                  GpuAudioProviderPool& pool) {
+    GpuWaveNetRealtimeNode::Config config;
+    config.session = {.descriptor = fixture.descriptor(), .weights = fixture.weights, .slots = 2};
+    config.channels = 1;
+    config.lead_blocks = 1;
+    config.capacity = 4;
+    config.provider_pool = &pool;
+    return config;
+}
+} // namespace
+
+TEST_CASE("WaveNet release keeps a parked session out of a channel that stays owned",
+          "[gpu_audio][wavenet][session][pool]") {
+    Fixture fixture;
+    GpuAudioProviderPool pool;
+    bool drained = false; // declared before the node, which releases it on destruction
+    GpuWaveNetRealtimeNode node(pooled_node_config(fixture, pool));
+    if (!node.prepare())
+        SKIP("authenticated provider unavailable; provider pool release skipped");
+    detail::WaveNetRealtimeTestAccess::quarantine_for_testing(
+        node, std::make_unique<StuckChannel>(drained));
+    // The live session parks; the quarantined channel keeps the node owned.
+    CHECK_FALSE(node.release());
+    CHECK(pool.stats().warm_entries == 1);
+    // Releasing again must not touch the parked session.
+    CHECK_FALSE(node.release());
+    drained = true;
+    CHECK(node.release());
+}

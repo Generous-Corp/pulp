@@ -434,7 +434,11 @@ upgrade installs, and their tests compare against
 `tools/import-design/browser_capture/runtime_manifest.txt`. A module added to
 the manifest alone passes a source build and fails both upgrade tests; the
 release `common_cli_members` in `tools/scripts/release_product_matrix.json`
-needs it too. Update all four together.
+needs it too. Update all four together. A module missing from the manifest
+does not show up as a missing file. The built `pulp-import-design` runs its
+staged `browser_capture-v1/` copy, the capability probe hits
+`ERR_MODULE_NOT_FOUND`, and discovery reports that the system Chrome "does not
+provide the required headless/CDP capture capabilities".
 
 ## Adding a CLI Command — Full Checklist
 
@@ -926,6 +930,17 @@ Same as above, focus on steps 2, 4, 5, 6, 7. Key risks:
 - Output path flags should accept both nested paths and bare filenames; guard
   empty `std::filesystem::path::parent_path()` before creating directories and
   add shellout coverage for the bare-filename case.
+
+### `pulp content` archives are size-budgeted before extraction
+
+`validate` / `install` / `update` admit a `.pulpcontent` archive from its central
+directory before inflating anything: 4 GiB total, 1 GiB per entry and 65536
+entries by default; `--max-pack-bytes <n>` lowers the byte caps and is a clamp,
+never a raise (`clamp_content_install_bytes`). The budget (`pulp::state::ContentSizeBudget`
+in `core/state/include/pulp/state/content_install_limits.hpp`) is shared with
+the runtime installer, so a cap change belongs in that header, not in
+`content_commands.cpp`. The CLI parses options per subcommand, so a new content
+flag is added to each parser (and to `print_usage`), not in one place.
 
 ### `pulp build --seed-build` is best-effort by contract
 
@@ -2181,6 +2196,20 @@ the example: it left `pulp-view-core` for `pulp-design-import`, and only
 force-loading `pulp-view-core` would no longer pull the importer's objects.
 Guard each entry with `if(TARGET …)` (the importer target exists only with
 `PULP_ENABLE_DESIGN_IMPORT=ON`).
+
+## Configure defaults carry `-DPULP_DEV_BUILD=ON`
+
+`configure_default_args` (`tools/cli/configure_defaults.hpp`, mirrored in
+`experimental/pulp-rs/src/cmd/orchestrate.rs`) adds `-DPULP_DEV_BUILD=ON` on
+a fresh configure or when the cache never recorded the option, and keeps a
+recorded value; `create_standalone_configure_command` passes it outright.
+That is what records the on-disk `ui.js` hot-reload path in a developer
+build. `pulp ship sign|package|release` on a dev build dir configure and build
+`build-ship/` with the option off and ship from there
+(`ship_dev_build_guard.hpp`; `--allow-dev-build` ships `build/` as it is).
+Keep the two `configure_default_args` and their tests
+(`test/test_cli_configure_defaults.cpp`, the Rust unit + parity tests) in
+step when changing either.
 
 ## CLI Git/CMake shell helpers
 

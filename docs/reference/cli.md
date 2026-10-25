@@ -145,6 +145,8 @@ For a standalone project the resolved SDK must itself carry Perfetto; an ordinar
 
 A traced build must not ship: it links Perfetto and carries a retained sentinel that `pulp ship` rejects. `--trace` therefore refuses `--install` unless you also pass `--allow-tracing`, and cannot be combined with `--format wam|wclap`.
 
+Every developer-loop configure (`pulp build`, `pulp dev`, `pulp loop`, `pulp run`, and the project `pulp create` configures) passes `-DPULP_DEV_BUILD=ON` on a fresh build dir, or one whose cache never recorded the option, and keeps a recorded value. A dev build records the on-disk `UI_SCRIPT` path so the standalone host can hot-reload `ui.js`; the embedded editor is compiled in either way. `pulp ship sign|package|release` on such a project configure `build-ship/` from the dev cache (every configured entry except the dev-only switches, loaded through `cmake -C`; `PULP_DEV_BUILD=OFF`), build it, refuse if it lacks a plug-in artifact `build/` has, and ship from there; `check`, `notarize` and `share` read `build-ship/` once it exists. Pass `--allow-dev-build` to ship the dev build dir as it is.
+
 `--check-identity` runs the same comparison as `pulp identity check` before the configure step, so a PR that changes an AU 4CC / VST3 FUID / CLAP id / AAX product code without re-recording the lock fails the build with a per-field diff. See `docs/reference/identity-lock.md`.
 
 The `--watch` flag enters a file-watching loop after the initial build. It polls source files every 500ms and rebuilds on changes. Combine with `--test` to run tests after each successful rebuild and `--validate` to run quick dlopen checks.
@@ -1128,6 +1130,7 @@ pulp ship sign --identity "Developer ID Application: ..."
 pulp ship sign --identity "..." --entitlements path/to/entitlements.plist
 pulp ship sign --identity "..." --path MyApp.app   # sign one explicit artifact
 pulp ship package --version 1.0.0
+pulp ship package --version 1.0.0 --allow-dev-build  # ship build/ as it is instead of building build-ship/
 pulp ship check
 pulp ship swap-pack --bundle ui/ --plugin-id com.you.synth   # sign a hot-reload UX bundle (caps inferred; key from keychain)
 pulp ship doctor                                   # make signing non-interactive (no keychain/1Password prompt)
@@ -3128,10 +3131,10 @@ Subcommands:
 
 | Subcommand | What it does |
 |------------|--------------|
-| `validate <path>` | Validate a `.pulpcontent` archive or `content-pack` directory without executing package code |
+| `validate <path>` | Validate a `.pulpcontent` archive or `content-pack` directory without executing package code. An archive is refused before extraction when its declared decompressed size exceeds the pack cap (4 GiB total, 1 GiB per entry, 65536 entries by default); `--max-pack-bytes <n>` lowers both byte caps and never raises them |
 | `preview <path> --plugin-runtime <manifest>` | Preview compatibility and reload/restart policy without installing anything |
-| `install <path> --plugin <id> --yes` | Copy a validated content pack into the plugin-specific user content root and update the content index with `plugin_id` and `manifest_sha256` |
-| `update <path> --plugin <id> --yes` | Replace or add a validated local content pack, write the target plugin id and new manifest digest, and roll back a replaced version on failure |
+| `install <path> --plugin <id> --yes` | Copy a validated content pack into the plugin-specific user content root and update the content index with `plugin_id` and `manifest_sha256`; accepts `--max-pack-bytes <n>` |
+| `update <path> --plugin <id> --yes` | Replace or add a validated local content pack, write the target plugin id and new manifest digest, and roll back a replaced version on failure; accepts `--max-pack-bytes <n>` |
 | `list [--plugin <id>]` | List installed content packs |
 | `rescan` | Rebuild `Content/index.json` from installed local manifests without copying, deleting, fetching, or executing package code; index entries include `plugin_id` and `manifest_sha256` |
 | `reveal <package-id> --plugin <id>` | Print the installed content path |

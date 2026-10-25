@@ -885,6 +885,16 @@ void RecordingCanvas::clear_fill_gradient() {
     commands_.push_back({DrawCommand::Type::clear_fill_gradient});
 }
 
+// Recorded as its own command, and only when a caller sets it, so a stream
+// without an interpolation space reads exactly as it always has.
+void RecordingCanvas::set_gradient_interpolation(GradientInterpolation method) {
+    Canvas::set_gradient_interpolation(method);
+    DrawCommand cmd{DrawCommand::Type::set_gradient_interpolation};
+    cmd.f[0] = static_cast<float>(method.space);
+    cmd.f[1] = static_cast<float>(method.hue);
+    commands_.push_back(std::move(cmd));
+}
+
 // ── Retained paths ───────────────────────────────────────────────────────────
 // The path is captured as an SVG `d` string so a test can assert on the exact
 // geometry in one comparison, instead of walking a dozen move_to/cubic_to

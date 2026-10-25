@@ -23,7 +23,9 @@
     {"id":"responsive-panel","source":"12-responsive-panel.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","expected_blockers":["responsive-style"]},
     {"id":"fresh-plugin-panel","source":"17-fresh-plugin-panel.html","shape":"self-contained-html","from":"claude","split":"fresh-plugin","viewport":{"width":480,"height":320},"browser_interactions":"17-fresh-plugin-panel.interactions.json","expected_blockers":[]},
     {"id":"gradient-border","source":"19-gradient-border.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","viewport":{"width":400,"height":180},"expected_blockers":[]},
+    {"id":"local-flatten","source":"22-local-flatten.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","viewport":{"width":640,"height":360},"expected_blockers":[]},
     {"id":"flex-gap-knob","source":"20-flex-gap-knob.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","viewport":{"width":960,"height":680},"expected_blockers":[]},
+    {"id":"backdrop-opacity","source":"22-backdrop-opacity.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","viewport":{"width":512,"height":160},"expected_blockers":[]},
     {
       "id": "spectr-standalone",
       "source": "holdout/spectr-standalone.html",
@@ -75,7 +77,7 @@
       "expected_gaps": [
         {
           "id": "flattened-tree-loses-ancestry",
-          "lab_signal": "structural.incorrect_parentage_count 72; structure 0.0397",
+          "lab_signal": "structural.incorrect_parentage_count 69; structure 0.0795",
           "effect": "ancestor opacity (6 wrappers, 0.35 to 0.55) is lost, so dimmed text paints 2.3x to 3.6x too bright"
         },
         {
@@ -126,7 +128,7 @@
       ],
       "notes": [
         "Not deterministic by construction: browser.png and the native render differ inside volatile_regions on every run, so the lab's three-run determinism is fail on the screenshot, render and capture-canonical digests. The DOM snapshot, native layout, platform fonts and render receipt digests are stable.",
-        "The geometry gate fails registered_coverage (75 of 76) only because the head <title> is counted as a missing reference node. Read geometry from registered_geometry: mean 0.999999, max abs delta 0.0012 CSS px.",
+        "The geometry gate passes: registered_geometry mean 0.999999, max abs delta 0.0005 CSS px. The head <title> is still counted as a missing structural node (structure_missing 1).",
         "Report gap ids follow the 2026-10-23 Spectr importer evaluation."
       ]
     },
@@ -141,7 +143,9 @@
         "width": 1280,
         "height": 1127
       },
-      "expected_blockers": [],
+      "expected_blockers": [
+        "animation"
+      ],
       "holdout": {
         "frozen": "2026-10-23",
         "tuning": "forbidden",
@@ -151,14 +155,23 @@
       "volatile_regions": [],
       "expected_gaps": [
         {
-          "id": "fractional-frame-height-refused",
-          "issue": "https://github.com/Generous-Corp/pulp/issues/10833",
-          "lab_signal": "lab error: native authored panel bounds differ from authenticated frame (1006.703125 vs 1006.7)",
-          "effect": "the lab refuses the fixture before scoring; the native panel height is rounded to 0.1 CSS px"
+          "id": "inline-gap-override-moves-label",
+          "lab_signal": "geometry gate registered_max_abs_delta 3.0 CSS px on 4 .knob-label boxes (RATE, GATE, OCTAVES, VELOCITY)",
+          "effect": "knobs with an inline gap:var(--space-3) override lay their label out 3 px above Chromium's; the knob box keeps Chromium's height"
+        },
+        {
+          "id": "binding-frames-not-in-dom",
+          "lab_signal": "structural extra_count 5 (capture:rate, swing, gate, octaves, velocity)",
+          "effect": "macro-binding frames have no DOM counterpart; structure 0.98998"
+        },
+        {
+          "id": "outside-frame-paint-not-drawn",
+          "lab_signal": "visual.outside_frame_residual browser 1520 differing device px, native 0; full_frame_classification unexplained",
+          "effect": "Chromium paints pixels outside the panel frame that the native render leaves as page background"
         }
       ],
       "notes": [
-        "Every run is refused before scoring, so no lens score or determinism verdict exists yet.",
+        "Every digest is stable over three runs.",
         "Glyphs outside the embedded faces fall back to Helvetica Neue and Menlo on macOS."
       ]
     },
@@ -185,9 +198,9 @@
       "volatile_regions": [],
       "expected_gaps": [
         {
-          "id": "transformed-scope-boxes",
-          "lab_signal": "geometry gate registered_max_abs_delta 90.7 CSS px on .pulp-scope children",
-          "effect": "rotated or scaled scope traces carry their untransformed 3 px box where Chromium reports the transformed bounds"
+          "id": "inline-gap-override-moves-label",
+          "lab_signal": "geometry gate registered_max_abs_delta 2.0 CSS px on 1 .knob-label box (RES)",
+          "effect": "the knob with an inline gap:var(--space-2-5) override lays its label out 2 px above Chromium's; the knob box keeps Chromium's height"
         },
         {
           "id": "binding-frames-not-in-dom",
@@ -195,13 +208,13 @@
           "effect": "macro-binding frames have no DOM counterpart; structure 0.981"
         },
         {
-          "id": "page-background-unresolved",
-          "lab_signal": "full_frame_classification page-background-unresolved",
-          "effect": "html and body are transparent, so the UA canvas colour behind the pack's 120 px body padding is unrecorded"
+          "id": "outside-frame-paint-not-drawn",
+          "lab_signal": "visual.outside_frame_residual browser 2846 differing device px, native 0; full_frame_classification unexplained",
+          "effect": "Chromium paints pixels outside the panel frame that the native render leaves as page background"
         }
       ],
       "notes": [
-        "Pixel, layout and render digests are stable over three runs. native_snapshot_semantic_sha256 changed in one of three runs because Chromium assigned backendNodeId values in a different order; the semantic digest does not strip them.",
+        "Every digest is stable over three runs.",
         "Glyphs outside the embedded faces fall back to Helvetica Neue and Lucida Grande on macOS."
       ]
     }

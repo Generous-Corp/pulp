@@ -28,7 +28,9 @@
   {
    "paths": [
     ".github/workflows/build.yml",
-    ".github/workflows/build-macos.yml"
+    ".github/workflows/build-macos.yml",
+    ".github/workflows/macos-ci-label-reset.yml",
+    "tools/ci/macos_pr_lane.py"
    ],
    "docs": [
     "docs/guides/local-ci.md"
