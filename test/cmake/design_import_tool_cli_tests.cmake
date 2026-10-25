@@ -497,6 +497,23 @@ if(Python3_Interpreter_FOUND AND PULP_HAS_SKIA AND PROJECT_IS_TOP_LEVEL)
         SKIP_RETURN_CODE 77)
 endif()
 
+# A family split into unicode-range subsets renders where Chromium put it,
+# through the native tree and through generated ui.js: each subset is
+# registered under its own alias, last-defined first. pulp-screenshot is an
+# Apple-only tool configured after this directory, hence APPLE rather than a
+# target check.
+if(Python3_Interpreter_FOUND AND PULP_HAS_SKIA AND PROJECT_IS_TOP_LEVEL AND APPLE)
+    add_test(NAME import-design-ir-observe-font-subset-label
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_design_ir_observe_font_subset_label.py
+                --observer $<TARGET_FILE:pulp-design-ir-observe>
+                --screenshot $<TARGET_FILE:pulp-screenshot>)
+    set_tests_properties(import-design-ir-observe-font-subset-label PROPERTIES
+        LABELS "parser-import;import"
+        TIMEOUT 120
+        SKIP_RETURN_CODE 77)
+endif()
+
 # pulp-import-design carries a local asset named outside the source design's
 # directory into the saved document's assets/, so the document still renders
 # under the loader's document-root containment after the source is gone.
