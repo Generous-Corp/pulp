@@ -290,6 +290,34 @@ def snapshot_semantic_sha256(snapshot_bytes: bytes) -> str:
     return hashlib.sha256(canonical).hexdigest()
 
 
+def platform_fonts_semantic_sha256(path: Path) -> str | None:
+    """Hash the platform-fonts report with its backend node ids fixed.
+
+    Each text run names its owner by snapshot-local node and layout indices,
+    which are content, and by `backend_node_id`, which is the same per-run
+    token `snapshot_semantic_sha256` fixes: Chromium can number identical
+    nodes differently from one run to the next. A raw file hash moved with
+    that order alone. Every requested and resolved face, glyph count and line
+    metric still enters the digest.
+    """
+    if not path.is_file():
+        return None
+    report = json.loads(path.read_text(encoding="utf-8"))
+
+    def scrub(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {key: ("<backend-node>" if key == "backend_node_id" else scrub(item))
+                    for key, item in value.items()}
+        if isinstance(value, list):
+            return [scrub(item) for item in value]
+        return value
+
+    canonical = json.dumps(
+        scrub(report), sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
 def write_json(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, indent=2, sort_keys=False) + "\n", encoding="utf-8")
@@ -1353,9 +1381,8 @@ def integrity_record(
         "native_layout_sha256": sha256_file(lanes.native_layout),
         "native_render_receipt_sha256": sha256_file(lanes.native_receipt),
         "stage_provenance": stage_provenance(lanes),
-        "platform_fonts_sha256": (
-            sha256_file(lanes.evidence / "platform-fonts.json")
-            if (lanes.evidence / "platform-fonts.json").is_file() else None),
+        "platform_fonts_sha256": platform_fonts_semantic_sha256(
+            lanes.evidence / "platform-fonts.json"),
         "interaction_plan_sha256": (
             capture.get("provenance", {}).get("interactions", {}).get("plan_sha256")
             or "none"),
