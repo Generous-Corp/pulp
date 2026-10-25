@@ -235,6 +235,38 @@ TEST_CASE("GPU plug-in host: a native resize with no display link notifies at on
     }
 }
 
+// The drawable size belongs to the swapchain: a size event leaves the layer
+// holding its last frame, and the next frame both configures the swapchain
+// and resizes the drawable. Resizing the drawable on the size event emptied
+// the layer, so a drag composited the background between frames.
+TEST_CASE("GPU plug-in host: a resize keeps the last frame until the next one draws",
+          "[plugin-view-host][resize][macos][gpu]") {
+    @autoreleasepool {
+        Editor e;
+        if (!e.open(true))
+            SKIP(kNoGpu);
+        REQUIRE(e.settle());
+        CAMetalLayer* layer = (CAMetalLayer*)e.view.layer;
+        REQUIRE([layer isKindOfClass:[CAMetalLayer class]]);
+        CHECK([layer.contentsGravity isEqualToString:kCAGravityTopLeft]);
+        const double s = e.scale();
+        CHECK(layer.drawableSize.width == 400 * s);
+        CHECK(layer.contents != nil);
+
+        [e.view setFrameSize:NSMakeSize(500, 360)];
+        [CATransaction flush];
+        CHECK(layer.drawableSize.width == 400 * s);
+        CHECK(layer.drawableSize.height == 300 * s);
+        CHECK(layer.contents != nil);
+
+        REQUIRE(e.frame());
+        CHECK(layer.drawableSize.width == 500 * s);
+        CHECK(layer.drawableSize.height == 360 * s);
+        CHECK(layer.contents != nil);
+        CHECK(e.at_physical_size(500, 360));
+    }
+}
+
 #endif // PULP_HAS_SKIA
 
 #endif // TARGET_OS_OSX

@@ -2330,6 +2330,11 @@ private:
     CGColorRef seed = pulp::view::mac_host::cg_color_from_rgb(_backgroundRGB);
     layer.backgroundColor = seed;
     CGColorRelease(seed);
+    // Between a resize and the frame that draws it, the layer keeps showing
+    // the last frame at its own pixel size, anchored like the view's content,
+    // rather than stretched into the new bounds. Only an area the view grew
+    // into shows the background, for at most that one frame.
+    layer.contentsGravity = kCAGravityTopLeft;
 
     _metalLayer = layer;
     return layer;
@@ -2362,7 +2367,9 @@ private:
     CGFloat scale = self.window ? self.window.backingScaleFactor
                                 : [NSScreen mainScreen].backingScaleFactor;
     self.metalLayer.contentsScale = scale;
-    self.metalLayer.drawableSize = CGSizeMake(newSize.width * scale, newSize.height * scale);
+    // The drawable size is the swapchain's, set when the next frame configures
+    // it. Setting it here emptied the layer on every size event of a drag, so
+    // the host composited the background until that frame.
     // AU v2 resizes this NSView directly (no host size callback). Notify the
     // host; it resizes surfaces and forwards to ViewBridge::resize. The host
     // guards against re-entrancy when *it* drove the frame change.
@@ -2397,8 +2404,8 @@ private:
     CGFloat scale = self.window ? self.window.backingScaleFactor
                                 : [NSScreen mainScreen].backingScaleFactor;
     self.metalLayer.contentsScale = scale;
-    self.metalLayer.drawableSize = CGSizeMake(self.bounds.size.width * scale,
-                                              self.bounds.size.height * scale);
+    // The host re-sizes the swapchain at the new scale; the next frame sets
+    // the drawable size.
     if (self.onBackingChange) self.onBackingChange();
 }
 
@@ -2556,8 +2563,8 @@ public:
     // the run-loop turn is not enough out of process: AUHostingService commits
     // the container's intermediate sizes before the turn ends, and about one
     // open in twenty-five showed the backing colour. Nor is skipping a view
-    // that has no window yet: the new drawable size empties the layer, which a
-    // host that resizes its container before showing it then composites.
+    // that has no window yet: a host that resizes its container before
+    // showing it composites whatever the layer holds at that moment.
     void present_resize_before_first_link_frame() {
         if (!only_first_frame_presented_ || delivering_resize_)
             return;
@@ -3225,8 +3232,9 @@ private:
     }
 
     void handle_backing_change() {
-        // The view already updated its layer's contentsScale/drawableSize;
-        // re-sync the surfaces at the new scale and re-arm a paint.
+        // The view already updated its layer's contentsScale; re-sync the
+        // surfaces at the new scale, which the next frame configures (and so
+        // sets the drawable size), and re-arm a paint.
         set_size(size_.width, size_.height);
     }
 
