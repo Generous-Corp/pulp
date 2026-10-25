@@ -95,6 +95,7 @@ target_sources(pulp-view-core PRIVATE
     src/widgets/svg_rect.cpp
     src/widgets/svg_line.cpp
     src/frame_clock.cpp
+    src/lite_editor_host.cpp
     src/host_frame_pump.cpp
     src/gpu_acquire_diagnostics.cpp
     src/hover_cursor.cpp

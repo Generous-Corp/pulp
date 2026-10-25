@@ -13,11 +13,11 @@
 namespace pulp::format {
 namespace {
 
-EditorUiInstance build_scripted_editor_ui(const EditorAssets& assets, state::StateStore& store,
-                                          bool enable_hot_reload, std::string* error,
+EditorUiInstance build_scripted_editor_ui(const EditorAssets& assets, EditorUiSource source,
+                                          state::StateStore& store, bool enable_hot_reload,
+                                          std::string* error,
                                           view::ValueChannelAccess value_channel_access,
                                           std::string_view storage_identity) {
-    auto source = select_editor_ui_source(assets, enable_hot_reload);
     if (source.available()) {
         auto root = std::make_unique<view::View>();
         root->set_theme(view::Theme::dark());

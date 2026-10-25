@@ -1104,13 +1104,14 @@ install(FILES
 # It probes `src/pulp/view/platform/mac` in an installed SDK, so ship the cluster
 # there — otherwise an installed-SDK consumer silently falls back to pulp-view-core's
 # shared fixed-name copies and the cross-plug-in class collision returns. The
-# private headers (pulp_mac_objc_names.h + the window_host_mac split headers) ship
+# private headers (pulp_mac_objc_names.h, mac_gpu_host_config.h + the window_host_mac split headers) ship
 # alongside because the .mm include them by relative path.
 if(APPLE)
     install(FILES
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/app_menu_mac.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/app_menu_mac.mm"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/pulp_mac_objc_names.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/mac_gpu_host_config.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/window_host_mac.mm"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/window_host_mac_lifecycle.mm"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/window_host_mac_metal_view.mm"

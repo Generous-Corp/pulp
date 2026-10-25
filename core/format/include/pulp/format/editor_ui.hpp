@@ -163,12 +163,14 @@ inline EditorUiSource select_editor_ui_source(const EditorAssets& assets, bool e
     return source;
 }
 
-/// Builds the scripted editor that `assets` declares (it names or embeds a
-/// script). Returns an instance whose root is null when the script failed to
-/// load; the failure is already logged and copied into `error`.
+/// Builds the scripted editor from `source`, the document
+/// select_editor_ui_source() chose for `assets` (the caller has already
+/// checked it is available). Returns an instance whose root is null when the
+/// script failed to load; the failure is already logged and copied into
+/// `error`.
 using ScriptedEditorBuilder = EditorUiInstance (*)(const EditorAssets& assets,
-                                                   state::StateStore& store, bool enable_hot_reload,
-                                                   std::string* error,
+                                                   EditorUiSource source, state::StateStore& store,
+                                                   bool enable_hot_reload, std::string* error,
                                                    view::ValueChannelAccess value_channel_access,
                                                    std::string_view storage_identity);
 
@@ -195,9 +197,11 @@ inline EditorUiInstance build_editor_ui_for_assets(const EditorAssets& assets,
                                                    std::string* error,
                                                    view::ValueChannelAccess value_channel_access,
                                                    std::string_view storage_identity = {}) {
-    if (select_editor_ui_source(assets, enable_hot_reload).available()) {
+    // Selected once here: choosing it stats the on-disk script, and the
+    // builder evaluates exactly the document this check found.
+    if (auto source = select_editor_ui_source(assets, enable_hot_reload); source.available()) {
         if (auto builder = scripted_editor_builder_slot().load(std::memory_order_acquire)) {
-            auto instance = builder(assets, store, enable_hot_reload, error,
+            auto instance = builder(assets, std::move(source), store, enable_hot_reload, error,
                                     std::move(value_channel_access), storage_identity);
             if (instance.root)
                 return instance;

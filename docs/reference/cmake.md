@@ -19,6 +19,9 @@ pulp_add_plugin(<target>
     ACCEPTS_MIDI
     NATIVE_UI
     NO_EDITOR
+    LITE_EDITOR
+    GPU_UI
+    FULL_EDITOR
     PLUGIN_CODE     <4-char>
     MANUFACTURER_CODE <4-char>
     AAX_PRODUCT_CODE <4-char>
@@ -52,6 +55,9 @@ An argument `pulp_add_plugin()` does not recognise (a misspelled keyword, a keyw
 | `ACCEPTS_MIDI` | No | Off | Mirrors `PluginDescriptor::accepts_midi` for package metadata. AU v2/AUv3 effects that accept MIDI need this so Pulp emits a MIDI-routable component type (`aumf`) instead of an audio-only effect (`aufx`). MIDI output is controlled by `PluginDescriptor::produces_midi`; there is no `pulp_add_plugin(PRODUCES_MIDI)` flag. |
 | `NATIVE_UI` | No | Off | Link the native scripted Skia/Dawn view composition (`Pulp::view-native` and, for Standalone, `Pulp::standalone-native`) without WebView/WebKit. `ScriptedUiSession`, `WidgetBridge`, and `@pulp/react` remain available. Omit this for editors that instantiate `WebViewPanel`; the existing WebView-capable targets remain the default. |
 | `NO_EDITOR` | No | Off | Editor-less (audio-only) plug-in. VST3, CLAP, AU v2 and LV2 modules link `Pulp::format-core` (CLAP also `Pulp::format-clap-core`, the adapter without its GUI extension) instead of the format + view umbrella, so the image carries no view, canvas, render, Skia, Dawn or wgpu code and stages no GPU runtime. The plug-in exposes no editor (Pulp's generated AutoUI editor is not built in); hosts show their generic parameter UI. The processor must not override `create_view()`. Cannot be combined with `NATIVE_UI` or `UI_SCRIPT`. Standalone, AUv3 and AAX outputs keep the default view-linked path. |
+| `GPU_UI` | No | Off | The plug-in's C++ editor needs the GPU host (a view whose `requires_gpu_host()` is true): link the full editor stack. Without it, macOS plug-ins get the lite editor stack (see `LITE_EDITOR`). |
+| `FULL_EDITOR` | No | Off | Link the full editor stack for any other reason (the escape hatch from the lite default). |
+| `LITE_EDITOR` | No | Default on macOS | States the default explicitly. Unless the plug-in declares `UI_SCRIPT`, `GPU_UI` or `FULL_EDITOR`, its macOS VST3, CLAP, AU v2 and Standalone binaries leave out the GPU plug-in and window hosts and link lite replacements for the few library functions that reach Skia unconditionally (text measurement, font resolution, the emoji fallback, native GPU textures), so the VST3, CLAP and AU v2 modules carry no Skia, Dawn or Tint (the Standalone app still links Dawn through the standalone host). The editor opens on the CoreGraphics host, which an AutoUi or CPU-painted C++ editor already uses, and measures text through CoreText, which it already paints with. An editor that asks for the GPU host anyway logs one warning naming `GPU_UI` and opens on the CoreGraphics host. Combining `LITE_EDITOR` with `UI_SCRIPT`, `GPU_UI` or `FULL_EDITOR` is a configure error. Other platforms build the full stack. See [Binary Footprint](#binary-footprint). |
 | `PLUGIN_CODE` | AU/AUv3 only | -- | 4-character AU plugin code |
 | `MANUFACTURER_CODE` | AU/AUv3/AAX only | -- | 4-character manufacturer code used by AU, AUv3, and AAX |
 | `AAX_PRODUCT_CODE` | AAX only | -- | 4-character stable AAX product identifier |
@@ -376,6 +382,29 @@ surprise falls back to the unchanged archive with a warning, and the footprint
 tests then fail on the size. Turn the option off only if your plug-in calls ICU
 services Pulp does not use itself.
 
+On macOS a plug-in gets the lite editor stack unless it declares `UI_SCRIPT`,
+`GPU_UI` or `FULL_EDITOR`; this suits every editor that paints on the
+CoreGraphics host (Pulp's generated AutoUi editor, or C++ views that never ask
+for the GPU host). Its binaries compile their Objective-C cluster without the
+GPU hosts and link `pulp-canvas-lite-objects` and `pulp-view-lite-objects`
+(`tools/cmake/PulpLiteEditorObjects.cmake`): copies of `text_shaper.cpp`,
+`font_resolver.cpp`, `canvas_widget.cpp` and `asset_manager.cpp` built with
+`PULP_LITE_EDITOR=1`, which measure through CoreText and skip the Skia-only
+paths. Objects on the link line take precedence over the library's archive
+members, so the Skia versions are never loaded, and the binary links with
+`-dead_strip` so nothing they would have reached survives. The editor opens on
+the CoreGraphics host in both builds and draws the same glyphs, and captured
+line breaks are reused in both, because the lite build resolves a face's
+identity through CoreText. Text measured without a capture can differ by up to
+1 logical pixel for a few system families at non-400 weights: the lite build
+measures with CoreText, the face it paints, while the full build measures with
+Skia, which can resolve a different face ("Helvetica Neue" 600 at 12 px: ascent
+13.92 and width 116.7 in Skia, 13.69 and 120.0 for the painted face), and for
+a face a design asks for that Pulp does not bundle, where Skia and CoreText fall
+back to different faces (a bold JetBrains Mono: Menlo-Bold in Skia, the bundled
+Regular in CoreText). AutoUi, Inter and design-imported panels whose faces are
+bundled render the same in both builds.
+
 A plug-in without a custom editor that does not need Pulp's generated parameter
 editor should use `NO_EDITOR`: it links none of the view, canvas, Skia, Dawn or
 JavaScript code. Measured on the `pulp-gain` examples (arm64, Release, Skia
@@ -385,12 +414,15 @@ m153), binary bytes per format:
 |-------|------|------|----|
 | `PulpGain`, full ICU data | 44.5 MB | 44.3 MB | 44.3 MB |
 | `PulpGain`, ICU subset | 38.4 MB | 38.2 MB | 38.3 MB |
+| `PulpGain` (lite editor stack, the default) | 2.58 MB | 2.46 MB | 2.54 MB |
+| `PulpEffect` (`FULL_EDITOR`) | 28.7 MB | | |
 | `PulpGainHeadless` (`NO_EDITOR`) | 0.83 MB | 0.61 MB | 0.67 MB |
 
 `tools/scripts/plugin_footprint_check.py` measures a built binary against the
 budgets in `tools/scripts/plugin_footprint_budget.json` (mapped code and data,
 which strip settings do not move; ICU data; and, for an editor-less binary, the
-symbols it must not contain). The `plugin-footprint-PulpGain`,
+symbols it must not contain). The `plugin-footprint-PulpEffect` (`FULL_EDITOR`,
+profile `editor`), `plugin-footprint-PulpGain` (lite stack, profile `lite-editor`),
 `plugin-footprint-PulpGainHeadless` and `icu-data-subset-linked` tests run it,
 and `pulp-test-icu-data-breaks` pins the word, line, sentence and grapheme
 boundaries the full data produces, so a subset that drops a rule file or

@@ -192,8 +192,23 @@ function(_pulp_apply_view_mac_objc_suffix target)
     # display-link class is iOS-only — inside TARGET_OS_IPHONE — so there is no
     # macOS copy to namespace. The .mm's quote-include of the render names header
     # resolves from its own source dir, so no extra include dir is needed.)
+    # A lite editor (pulp_add_plugin sets _PULP_EDITOR_STACK in the calling
+    # scope; lite unless the plug-in declares UI_SCRIPT, GPU_UI or FULL_EDITOR)
+    # compiles the cluster without the GPU hosts and links the lite replacement
+    # objects; see PulpLiteEditorObjects.cmake.
+    set(_pulp_lite_editor FALSE)
+    if(_PULP_EDITOR_STACK STREQUAL "lite")
+        if(TARGET pulp-canvas-lite-objects AND TARGET pulp-view-lite-objects)
+            set(_pulp_lite_editor TRUE)
+        elseif(PLUGIN_LITE_EDITOR)
+            message(STATUS
+                "pulp: ${target}: LITE_EDITOR is not available in this build "
+                "(it needs macOS with Skia); linking the full editor stack")
+        endif()
+    endif()
+
     set(_pulp_render_objc_srcs "")
-    if(PULP_HAS_SKIA AND (TARGET pulp::render OR TARGET Pulp::render))
+    if(NOT _pulp_lite_editor AND PULP_HAS_SKIA AND (TARGET pulp::render OR TARGET Pulp::render))
         if(_PULP_RENDER_SRC_DIR AND EXISTS "${_PULP_RENDER_SRC_DIR}/metal_surface_mac.mm")
             set(_pulp_render_objc_srcs "${_PULP_RENDER_SRC_DIR}/metal_surface_mac.mm")
         else()
@@ -243,6 +258,21 @@ function(_pulp_apply_view_mac_objc_suffix target)
     # across them and the last-added target's value would win for all.)
     target_compile_definitions(${target}
         PRIVATE PULP_VIEW_OBJC_SUFFIX=_${_pulp_view_objc_suffix})
+    if(_pulp_lite_editor)
+        target_compile_definitions(${target} PRIVATE PULP_VIEW_LITE_HOST=1)
+        target_sources(${target} PRIVATE
+            $<TARGET_OBJECTS:pulp-canvas-lite-objects>
+            $<TARGET_OBJECTS:pulp-view-lite-objects>)
+        # The archive members the lite objects replace are never loaded, but a
+        # member that IS loaded keeps every function in it unless the linker
+        # strips what nothing reaches. Dead-strip is what takes the binary from
+        # about 6.9 MB to 2.6 MB (PulpGain VST3). Plug-in modules already
+        # dead-strip in optimized builds (_pulp_plugin_module_link_hygiene);
+        # a lite binary strips in every configuration, and so does the
+        # Standalone app, because "no Skia in a lite binary" depends on it
+        # rather than on the size opt-out.
+        target_link_options(${target} PRIVATE "LINKER:-dead_strip")
+    endif()
     if(PULP_HAS_SKIA AND TARGET pulp::render)
         target_link_libraries(${target} PRIVATE pulp::render)
     elseif(PULP_HAS_SKIA AND TARGET Pulp::render)
