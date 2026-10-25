@@ -28,6 +28,7 @@
 #include <pulp/view/drag_drop.hpp>
 
 #include "xdnd_parse.hpp"
+#include "x11_resize_echo.hpp"
 
 #ifdef PULP_HAS_SKIA
 #include <pulp/render/gpu_surface.hpp>
@@ -114,7 +115,13 @@ public:
         XFlush(display_);
         scale_ = detect_dpi_scale(display_, screen_);
 #ifdef PULP_HAS_SKIA
-        init_gpu(static_cast<float>(size_.width), static_cast<float>(size_.height));
+        // This opt-in seam keeps the editor on the CPU raster path, so a test
+        // that holds an X server grab can drive set_size() without the GPU
+        // surfaces making X round trips under it. It is inert unless a test
+        // sets the variable.
+        const char* cpu_only = std::getenv("PULP_TEST_X11_HOST_CPU_ONLY");
+        if (!(cpu_only && std::strcmp(cpu_only, "1") == 0))
+            init_gpu(static_cast<float>(size_.width), static_cast<float>(size_.height));
         // Fresh editor session: the recreate budget starts clean. Deliberately
         // NOT inside init_gpu(), which the mid-session recreate path also
         // calls — resetting there would let a surface that rebuilds cleanly but
@@ -197,6 +204,7 @@ public:
     void set_size(uint32_t width, uint32_t height) override {
         size_ = {width, height};
         if (display_ && child_) {
+            resize_echo_.note_self_resize(NextRequest(display_));
             XResizeWindow(display_, child_, width, height);
             XFlush(display_);
         }
@@ -209,12 +217,13 @@ public:
         if (skia_surface_) skia_surface_->resize(width, height, scale_);
 #endif
         // repaint() drains X events before it paints, so this call can
-        // re-enter. Our own XResizeWindow's ConfigureNotify may already be
-        // queued; it matches size_ and does nothing. A host resize queued
-        // ahead of it is applied by that drain instead, and its resize
-        // callback may call set_size() again from inside this one. The nested
-        // call finishes (window, surfaces, paint) before this one paints, and
-        // both paint size_, so the last size set wins.
+        // re-enter. Anything the server sent before this XResizeWindow,
+        // including the echo of an earlier set_size() and a host resize this
+        // one supersedes, is stale and dropped (see X11ResizeEcho). A host
+        // resize after it is applied by the drain, and its resize callback may
+        // call set_size() again from inside this one. The nested call finishes
+        // (window, surfaces, paint) before this one paints, and both paint
+        // size_, so the last size set wins.
         repaint();
     }
 
@@ -321,7 +330,8 @@ public:
                     handle_selection_notify(ev.xselection);
                     break;
                 case ConfigureNotify:
-                    if (ev.xconfigure.window == child_) {
+                    if (ev.xconfigure.window == child_ &&
+                        !resize_echo_.is_stale(ev.xconfigure.serial)) {
                         configured_w = static_cast<uint32_t>(ev.xconfigure.width);
                         configured_h = static_cast<uint32_t>(ev.xconfigure.height);
                     }
@@ -385,6 +395,7 @@ private:
     std::atomic<bool> attached_{false};
     std::function<void()> idle_callback_;
     std::function<void(uint32_t, uint32_t)> resize_cb_;
+    X11ResizeEcho resize_echo_;
     float design_viewport_w_ = 0.0f;
     float design_viewport_h_ = 0.0f;
     float fixed_aspect_ratio_ = 0.0f;

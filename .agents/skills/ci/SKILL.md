@@ -789,6 +789,22 @@ Files that predated the check are in `tools/scripts/unregistered_tests_baseline.
 which only shrinks: registering or deleting one fails the check until its row is
 removed. Register a new test file in the same PR that adds it.
 
+### An X11 case that skips on the Linux leg did not run
+
+The Linux build job has no display, so an X11 test that opens one with
+`XOpenDisplay(nullptr)` either skips or, written as `WARN(); return;`, passes
+having asserted nothing. The Linux job installs `xvfb`, and where `xvfb-run` is
+found at configure time `pulp-test-plugin-view-host-factory` runs every case
+through `xvfb-run -a` (the target's `CROSSCOMPILING_EMULATOR`, which Pulp's
+Catch discovery passes to each generated test), under `RESOURCE_LOCK pulp_xvfb`
+(`-a` races when several start at once) and a 120 s timeout. Those cases also
+get `PULP_TEST_REQUIRE_X11_DISPLAY=1`, so a missing display there fails instead
+of skipping. A new X11 suite needs the same wiring, or its skip is the only
+evidence it has. A case that holds a server grab must do nothing that waits on
+the server: the Linux plug-in host builds GPU surfaces regardless of
+`Options::use_gpu`, and they make X round trips on resize and paint, so such a
+case sets `PULP_TEST_X11_HOST_CPU_ONLY=1` and stays unattached.
+
 ## Runner timing metrics
 
 When asked whether Pulp's local runners are fast, stuck, regressing, or worth
