@@ -60,6 +60,20 @@ inline double section_magnitude(const BiquadCoefficients& c, double omega) {
     return section_magnitude<float>(c, omega);
 }
 
+/// Group delay of one biquad section at `omega` (radians per sample), in
+/// samples: -d(arg H)/d(omega) for H = B/A, evaluated in closed form as
+/// tau(B) - tau(A) with tau(P) = Re(sum k p_k z^-k / sum p_k z^-k), so no
+/// numeric differentiation is involved.
+template <typename SampleType>
+inline double section_group_delay(const BiquadCoefficientsT<SampleType>& c, double omega) {
+    const std::complex<double> z1(std::cos(omega), -std::sin(omega));
+    const std::complex<double> z2 = z1 * z1;
+    const auto delay = [&](double p0, double p1, double p2) {
+        return std::real((p1 * z1 + 2.0 * p2 * z2) / (p0 + p1 * z1 + p2 * z2));
+    };
+    return delay(c.b0, c.b1, c.b2) - delay(1.0, c.a1, c.a2);
+}
+
 /// Linear magnitude |H| of a cascade at angular frequency ω. Sections are in
 /// series, so magnitudes multiply (equivalently, their dB values sum).
 template <typename SampleType, std::size_t Extent>

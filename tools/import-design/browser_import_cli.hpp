@@ -51,6 +51,13 @@ struct BrowserImportCliRequest {
     /// explicit --validate request to additionally publish convenience render
     /// and diff files beside the primary output.
     bool validate = false;
+    /// `--emit materialized-runtime`, whose input is the executable document.
+    bool materialized_runtime_emit = false;
+    /// Where browser discovery remembers compatible probe answers
+    /// (browser_probe_cache.hpp). Empty probes every time; the CLI passes
+    /// default_browser_probe_cache_directory(), library callers and tests do
+    /// not, so a test never writes into the user's Pulp home.
+    std::filesystem::path browser_probe_cache_directory;
 };
 
 /// Reject browser-specific CLI options before a non-browser command path can
@@ -59,6 +66,17 @@ std::optional<int> validate_browser_import_cli_options(
     bool fit_authored_frame, bool render_size_explicit, bool has_browser_interactions, bool offline,
     bool export_tokens, bool detect_only, bool native_panel_lowering,
     bool materialized_canvas_composition, bool require_canvas_ink = false);
+
+/// Whether the capture reads the executable materialized document out of the
+/// page. `--emit materialized-runtime` consumes it, and
+/// `--materialized-canvas-composition` publishes it as
+/// materialized-document.json for the runtime transform and state-atlas
+/// entries. Every other import leaves it uncaptured rather than serializing,
+/// hashing and publishing megabytes nobody reads, unless the capture finds
+/// @font-face rules served from Blob URLs in it: their font bindings are the
+/// only record of those faces, so it reads the document for them anyway.
+bool browser_import_captures_materialized_document(bool materialized_runtime_emit,
+                                                   bool materialized_canvas_composition);
 
 /// Reject an explicit source that cannot enter browser-backed HTML import.
 std::optional<int> validate_fit_authored_frame_source_cli(

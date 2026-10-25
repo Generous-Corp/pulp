@@ -564,6 +564,16 @@ void emit_label_style(std::ostringstream& out,
     }
     if (style.white_space && *style.white_space != "nowrap")
         emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_multi_line(true);");
+    // The native lane's rule, so a baked label sits at the same height.
+    const auto valign = imported_vertical_align(style);
+    if (valign == ImportedVerticalAlign::center)
+        emit_line(out, depth, opts.indent_spaces,
+                  std::string(var) +
+                      "->set_vertical_align(pulp::canvas::TextVerticalAlign::center);");
+    else if (valign == ImportedVerticalAlign::bottom)
+        emit_line(out, depth, opts.indent_spaces,
+                  std::string(var) +
+                      "->set_vertical_align(pulp::canvas::TextVerticalAlign::bottom);");
 }
 
 void emit_svg_paint(std::ostringstream& out,

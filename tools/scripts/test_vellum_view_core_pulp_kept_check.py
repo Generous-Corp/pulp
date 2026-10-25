@@ -107,6 +107,48 @@ class Tests(unittest.TestCase):
             errors = self.check(clean_manifest(), root=root)
             self.assertTrue(any("includes pulp/state/store.hpp" in e for e in errors), errors)
 
+    def _seam_tree(self, root: Path) -> None:
+        for seam in RULES["seam_headers"]:
+            target = root / seam["path"]
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes((ROOT / seam["path"]).read_bytes())
+
+    def test_seam_header_import_spelling_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._seam_tree(root)
+            host = root / "core/view/include/pulp/view/host_surfaces.hpp"
+            host.write_text("#import <pulp/state/store.hpp>\n" + host.read_text(encoding="utf-8"),
+                            encoding="utf-8")
+            errors = self.check(clean_manifest(), root=root)
+            self.assertTrue(any("includes pulp/state/store.hpp" in e for e in errors), errors)
+
+    def test_seam_header_reaching_state_through_a_relay_fails(self) -> None:
+        # The seam header itself names no forbidden prefix; a header it
+        # includes does.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._seam_tree(root)
+            relay = root / "core/view/include/pulp/view/relay.hpp"
+            relay.write_text("#pragma once\n#include <pulp/state/store.hpp>\n", encoding="utf-8")
+            host = root / "core/view/include/pulp/view/host_surfaces.hpp"
+            host.write_text("#include <pulp/view/relay.hpp>\n" + host.read_text(encoding="utf-8"),
+                            encoding="utf-8")
+            errors = self.check(clean_manifest(), root=root)
+            self.assertTrue(any("includes pulp/state/store.hpp (via core/view/include/pulp/view/relay.hpp)"
+                                in e for e in errors), errors)
+
+    def test_seam_header_relay_without_forbidden_include_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._seam_tree(root)
+            relay = root / "core/view/include/pulp/view/relay.hpp"
+            relay.write_text("#pragma once\n#include <string>\n", encoding="utf-8")
+            host = root / "core/view/include/pulp/view/host_surfaces.hpp"
+            host.write_text("#include <pulp/view/relay.hpp>\n" + host.read_text(encoding="utf-8"),
+                            encoding="utf-8")
+            self.assertEqual(self.check(clean_manifest(), root=root), [])
+
     def test_deferred_file_that_left_the_closure_is_stale(self) -> None:
         units = with_deferral()
         errors = self.check(clean_manifest(), units)

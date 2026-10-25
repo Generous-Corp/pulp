@@ -25,6 +25,11 @@ namespace pulp::cli {
 // optimization and no NDEBUG.
 inline constexpr std::string_view kDefaultBuildType = "Release";
 
+// CMake option that compiles development-only paths (the on-disk ui.js
+// hot-reload override) into a build. The CLI's configure turns it on; a shipped
+// artifact must come from a build with it off.
+inline constexpr std::string_view kDevBuildCacheName = "PULP_DEV_BUILD";
+
 struct ConfigureDefaults {
     // Text of the build dir's CMakeCache.txt; nullopt for a fresh build dir.
     std::optional<std::string> existing_cache;
@@ -72,6 +77,11 @@ inline std::optional<std::string> cmake_cache_value(std::string_view cache,
 //   and an existing non-empty build type is left alone.
 // - Examples (source checkout only): `--examples` turns them on; a fresh dev
 //   configure turns them off; an existing cache keeps its setting.
+// - Dev build: the CLI is the developer loop, so a fresh configure (or a cache
+//   that never recorded the option) sets `-DPULP_DEV_BUILD=ON`, which compiles
+//   the on-disk ui.js hot-reload path in. A cache that records a value keeps
+//   it: `cmake -B build -DPULP_DEV_BUILD=OFF` is how a build is made shippable,
+//   and `pulp ship` refuses a dev build (ship_dev_build_guard.hpp).
 inline std::vector<std::string> configure_default_args(const ConfigureDefaults& in) {
     std::vector<std::string> args;
     const bool fresh = !in.existing_cache.has_value();
@@ -100,7 +110,50 @@ inline std::vector<std::string> configure_default_args(const ConfigureDefaults& 
             args.emplace_back("-DPULP_BUILD_EXAMPLES=OFF");
         }
     }
+    const bool dev_build_recorded =
+        in.existing_cache && cmake_cache_value(*in.existing_cache, kDevBuildCacheName).has_value();
+    if (!dev_build_recorded) {
+        args.emplace_back(std::string("-D") + std::string(kDevBuildCacheName) + "=ON");
+    }
     return args;
+}
+
+// CMake option (and environment override) that links plug-in modules against
+// the development-only shared Pulp runtime (tools/cmake/PulpDevSharedUi.cmake).
+inline constexpr std::string_view kDevSharedUiOption = "PULP_DEV_SHARED_UI";
+
+// Whether a CMake cache or environment value reads as true.
+inline bool cmake_value_on(std::string_view value) {
+    std::string upper(value);
+    for (auto& c : upper)
+        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    return upper == "ON" || upper == "1" || upper == "TRUE" || upper == "YES" || upper == "Y";
+}
+
+// Whether a command links plug-in modules against the development-only shared
+// runtime. `command_default` is the command's own choice (`pulp dev` and `pulp
+// loop` on macOS want it on; `pulp build` makes shippable artifacts and wants
+// it off unless `--dev-shared` is passed). A non-empty PULP_DEV_SHARED_UI
+// environment value overrides that choice.
+inline bool dev_shared_ui_wanted(bool command_default, const std::optional<std::string>& env) {
+    if (env && env->find_first_not_of(" \t") != std::string::npos)
+        return cmake_value_on(*env);
+    return command_default;
+}
+
+// The PULP_DEV_SHARED_UI value a configure must set to get `wanted`, or
+// nullopt when the existing cache already holds it. A fresh build dir, or a
+// cache without the entry, counts as off.
+inline std::optional<bool> dev_shared_ui_change(const std::optional<std::string>& existing_cache,
+                                                bool wanted) {
+    bool cached = false;
+    if (existing_cache) {
+        if (const auto value = cmake_cache_value(*existing_cache, kDevSharedUiOption))
+            cached = cmake_value_on(*value);
+    }
+    if (wanted == cached)
+        return std::nullopt;
+    return wanted;
 }
 
 // Text of `build_dir`'s CMakeCache.txt, or nullopt when it has none.
@@ -110,6 +163,17 @@ inline std::optional<std::string> read_cmake_cache(const std::filesystem::path& 
     std::ostringstream text;
     text << in.rdbuf();
     return text.str();
+}
+
+// dev_shared_ui_change for a real build dir: reads its cache and the
+// PULP_DEV_SHARED_UI environment value.
+inline std::optional<bool> dev_shared_ui_change_for(const std::filesystem::path& build_dir,
+                                                    bool command_default) {
+    std::optional<std::string> env;
+    if (const char* value = std::getenv(std::string(kDevSharedUiOption).c_str()))
+        env = std::string(value);
+    return dev_shared_ui_change(read_cmake_cache(build_dir),
+                                dev_shared_ui_wanted(command_default, env));
 }
 
 // True when `build_dir`'s cache records PULP_BUILD_EXAMPLES=OFF.

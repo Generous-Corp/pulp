@@ -2,6 +2,10 @@
 
 #include <pulp/render/gpu_surface.hpp>
 #include <pulp/canvas/canvas.hpp>
+#include <pulp/canvas/text_raster_policy.hpp>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <functional>
 #include <vector>
@@ -45,6 +49,48 @@ constexpr bool frame_reached_output(FrameOutcome outcome) {
            outcome == FrameOutcome::offscreen;
 }
 
+/// GPU bytes held by a surface's Skia resource caches.
+///
+/// `budgeted` counts every resource charged against the cache budget, whether
+/// or not something still uses it. `purgeable` is the subset nothing uses any
+/// more: textures an image cache released, scratch targets from earlier frames.
+/// Those stay resident until a trim or budget pressure frees them, so
+/// `purgeable` is what a trim can return to the device.
+struct GpuCacheBytes {
+    std::size_t budgeted = 0;
+    std::size_t purgeable = 0;
+};
+
+/// When a surface's idle trim runs. `end_frame()` asks `due()` once per
+/// frame, so the steady-state cost is one timestamp compare; a trim runs at
+/// most once per `kInterval` and frees only resources unused for `kUnusedAge`.
+class GpuIdleTrimSchedule {
+  public:
+    using Clock = std::chrono::steady_clock;
+    static constexpr std::chrono::milliseconds kInterval{1000};
+    static constexpr std::chrono::milliseconds kUnusedAge{2000};
+
+    explicit GpuIdleTrimSchedule(Clock::time_point start) : last_(start) {}
+
+    /// True when a trim is due at `now`; records `now` as the last trim.
+    bool due(Clock::time_point now) {
+        if (now - last_ < kInterval)
+            return false;
+        last_ = now;
+        ++trims_;
+        return true;
+    }
+
+    /// Trims `due()` has scheduled since construction.
+    std::uint64_t trims() const {
+        return trims_;
+    }
+
+  private:
+    Clock::time_point last_;
+    std::uint64_t trims_ = 0;
+};
+
 /// Skia Graphite rendering surface.
 ///
 /// Connects a GpuSurface (WebGPU device) to Skia's GPU 2D rendering.
@@ -64,6 +110,10 @@ public:
         uint32_t width = 800;
         uint32_t height = 600;
         float scale_factor = 1.0f;  // HiDPI
+        /// Glyph preblend for every surface this one creates (frame target,
+        /// offscreen, persistent scene, retained layers). See
+        /// `pulp/canvas/text_raster_policy.hpp`.
+        canvas::TextRasterPolicy text_raster_policy = canvas::TextRasterPolicy::legacy;
     };
 
     /// Create a Skia Graphite surface.
@@ -81,6 +131,7 @@ public:
         uint32_t width = 0;
         uint32_t height = 0;
         float scale_factor = 1.0f;  // devicePixelRatio
+        canvas::TextRasterPolicy text_raster_policy = canvas::TextRasterPolicy::legacy;
     };
 
     /// Create a Skia surface backed by Ganesh on a WebGL2 context.
@@ -163,6 +214,22 @@ public:
     /// Whether persistent-scene mode is currently active.
     virtual bool persistent_scene() const { return false; }
 
+    /// Change the glyph preblend of every surface this one creates.
+    ///
+    /// An imported panel calls this with `select_text_raster_policy()` over its
+    /// text nodes' captured `-webkit-font-smoothing`. Text already rasterized
+    /// under the old policy is discarded: retained layers are dropped, and the
+    /// offscreen and persistent-scene targets are recreated, so like a resize
+    /// the next frame must be a full repaint. Setting the current policy is a
+    /// no-op that keeps every cache. Call it between frames: it releases the
+    /// canvas `begin_frame()` handed out, so it must not run while one is open.
+    virtual void set_text_raster_policy(canvas::TextRasterPolicy /*policy*/) {}
+
+    /// The policy surfaces are currently created with.
+    virtual canvas::TextRasterPolicy text_raster_policy() const {
+        return canvas::TextRasterPolicy::legacy;
+    }
+
     /// Read the current rendered frame into an RGBA buffer. If a frame is
     /// currently open, this finalizes and submits pending canvas work before
     /// readback; callers should treat readback as a capture/end-of-frame
@@ -210,6 +277,57 @@ public:
         return false;
     }
 
+    /// How much a GPU trim frees.
+    class TrimLevel {
+      public:
+        /// Free purgeable resources nothing has used for `idle`. Resources
+        /// the next frame is likely to reuse survive.
+        static TrimLevel unused_for(std::chrono::milliseconds idle) {
+            return TrimLevel(idle, false);
+        }
+        /// Free every purgeable resource, for a hidden or idle editor.
+        static TrimLevel everything() {
+            return TrimLevel({}, true);
+        }
+
+        bool frees_everything() const {
+            return everything_;
+        }
+        std::chrono::milliseconds idle() const {
+            return idle_;
+        }
+
+      private:
+        TrimLevel(std::chrono::milliseconds idle, bool everything)
+            : idle_(idle), everything_(everything) {}
+        std::chrono::milliseconds idle_;
+        bool everything_;
+    };
+
+    /// Return purgeable GPU memory to the device. Call it between frames,
+    /// on the render thread: it uses the surface's GPU context, which is not
+    /// thread-safe. The same holds for `gpu_cache_bytes()`.
+    /// Resources still referenced (cached images, retained layers, the
+    /// scene) and work the GPU has not finished are not freed; a host that
+    /// wants everything back calls `wait_for_submitted_work()` first.
+    ///
+    /// `end_frame()` already runs `unused_for(GpuIdleTrimSchedule::kUnusedAge)`
+    /// on the `GpuIdleTrimSchedule` throttle, so a host calls this directly
+    /// only for `everything()`, when its editor is hidden or stops drawing.
+    /// Default: no-op, for surfaces with no GPU cache.
+    virtual void trim_gpu_resources(TrimLevel /*level*/) {}
+
+    /// Bytes held by this surface's GPU resource caches. Zero when the
+    /// surface has no GPU context. Render thread only.
+    virtual GpuCacheBytes gpu_cache_bytes() const {
+        return {};
+    }
+
+    /// Idle trims `end_frame()` has run since the surface was created.
+    virtual std::uint64_t idle_trim_count() const {
+        return 0;
+    }
+
     /// Graphite render targets this surface has allocated (the offscreen and
     /// persistent-scene targets; the presentable texture is wrapped, not
     /// allocated). Diagnostic and test use; 0 where it is not tracked.
@@ -233,6 +351,15 @@ public:
     /// fallback that a timed-out readback takes, which a healthy device never
     /// reaches. Process-wide and not synchronized; pass true to restore.
     static void set_async_readback_for_testing(bool enabled);
+
+    /// Test seam for the idle-trim clock. When installed, surfaces read
+    /// `hook()` instead of `steady_clock::now()` for the `GpuIdleTrimSchedule`
+    /// they own, so a test can step frames through time. It does not reach
+    /// Skia's own resource timestamps, which `unused_for` compares against.
+    /// Process-wide and not synchronized: install before creating the
+    /// surface, pass nullptr to remove.
+    using TrimClockHook = GpuIdleTrimSchedule::Clock::time_point (*)();
+    static void set_trim_clock_for_testing(TrimClockHook hook);
 #endif
 };
 

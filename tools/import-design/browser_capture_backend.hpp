@@ -4,6 +4,7 @@
 #include "browser_capture_limits.hpp"
 #include "node_runtime.hpp"
 
+#include <chrono>
 #include <filesystem>
 #include <functional>
 #include <optional>
@@ -83,6 +84,10 @@ struct BrowserProbeResult {
     // passed the command-line version probe.
     std::string protocol_version;
     std::string build_hash;
+
+    // The probe-cache key this answer was read from or stored under; empty
+    // when no cache took part.
+    std::string probe_cache_key;
 };
 
 struct BrowserInstallation {
@@ -93,6 +98,7 @@ struct BrowserInstallation {
     int major_version = 0;
     std::string protocol_version;
     std::string build_hash;
+    std::string probe_cache_key;
 };
 
 struct Diagnostic {
@@ -128,6 +134,10 @@ struct BrowserDiscoveryOptions {
     // The capability probe's deadline. Production callers apply
     // probe_timeout_from_environment() so a slow host can raise it.
     int probe_timeout_ms = 15000;
+    // Where compatible probe answers are remembered (browser_probe_cache.hpp).
+    // nullopt or empty probes every candidate on every discovery, which keeps
+    // tests and hermetic callers independent of earlier runs.
+    std::optional<fs::path> probe_cache_directory;
 };
 
 // PULP_DESIGN_BROWSER_PROBE_TIMEOUT_MS as a positive integer, else
@@ -202,6 +212,8 @@ struct CaptureRequest {
     // Derive one viewport from the authored root, reload the same target once,
     // and require the root to be a contained fixed point at that viewport.
     bool fit_authored_frame = false;
+    // Read the page's executable materialized document into the capture.
+    bool capture_materialized_document = true;
 };
 
 struct CaptureArtifacts {
@@ -229,6 +241,9 @@ CaptureResult capture_document(
 struct DiscoverAndCaptureResult {
     BrowserDiscoveryResult discovery;
     CaptureResult capture;
+    /// When discovery finished and the capture subprocess began, so a caller
+    /// timing the pair can attribute each side separately.
+    std::chrono::steady_clock::time_point discovered_at{};
 
     [[nodiscard]] bool ok() const noexcept {
         return discovery.ok() && capture.ok();

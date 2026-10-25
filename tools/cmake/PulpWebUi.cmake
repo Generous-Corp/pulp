@@ -164,6 +164,8 @@ set(_PULP_WEBUI_CANVAS_SOURCES
     ${_PULP_WEBUI_ROOT}/core/canvas/src/text_shaper.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/text_run_planner.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/text_font_context.cpp
+    ${_PULP_WEBUI_ROOT}/core/canvas/src/font_weight_match.cpp
+    ${_PULP_WEBUI_ROOT}/core/canvas/src/css_weight_font_manager.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/bidi.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/emoji_segmenter.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/font_options.cpp
@@ -189,6 +191,8 @@ set(_PULP_WEBUI_CANVAS_SOURCES
     ${_PULP_WEBUI_ROOT}/core/canvas/src/skia_canvas_path.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/skia_canvas_fonts.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/skia_canvas_text.cpp
+    # Laid-out paragraph cache; skia_canvas_text.cpp builds through it.
+    ${_PULP_WEBUI_ROOT}/core/canvas/src/skia_paragraph_cache.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/skia_canvas_filter.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/skia_canvas_mask.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/skia_canvas_gradients.cpp
@@ -322,6 +326,11 @@ file(GLOB _PULP_WEBUI_PLATFORM_SOURCES
 # in any non-wasm compile.
 list(APPEND _PULP_WEBUI_PLATFORM_SOURCES
     "${_PULP_WEBUI_ROOT}/core/platform/platform/web/clipboard_web.cpp")
+
+# The CSS weight font manager subclasses SkFontMgr, whose type info the
+# prebuilt Skia does not export.
+set_source_files_properties("${_PULP_WEBUI_ROOT}/core/canvas/src/css_weight_font_manager.cpp"
+    PROPERTIES COMPILE_OPTIONS "-fno-rtti")
 
 set(_PULP_WEBUI_ALL_SOURCES
     ${_PULP_WEBUI_RUNTIME_SOURCES}

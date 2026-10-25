@@ -198,10 +198,29 @@ multiply-add twice and sits about 6 dB above arm64 (the speaker cabinet:
 RMS near -106 dBFS on x86-64 against -112.7 on arm64, worst sample -98 to -94
 across seeds). Bound the RMS with margin over the x86-64 figure, hold the
 worst sample to a loose ceiling such as one 16-bit step (-90.3 dBFS), record
-the measured ranges next to the bound, and prove the bound with a negative
-control that truncates the float state (12 mantissa bits trips both by tens
-of dB). An arm64 host cannot see the x86-64 figure; build the comparison with
+the measured ranges next to the bound, and prove the bound with executed
+negative controls that must exceed it: a double twin prepared at
+`fs * 1.0001` (a filter change far smaller than any coefficient bug) and the
+float output rounded to 12 bits (lost precision with the filter unchanged).
+An arm64 host cannot see the x86-64 figure; build the comparison with
 `-arch x86_64 -ffp-contract=off` and run it under Rosetta.
+
+Tighten per build only where contraction is real. The build pins GCC to
+`-ffp-contract=off` on every architecture and MSVC does not contract, so
+only Clang on arm64 fuses the multiply-adds; gate a tight bound on
+`__aarch64__ && __clang__ && !_MSC_VER`, not on `__aarch64__` alone, or the
+GCC Linux arm64 nightly fails it.
+
+## Bit identity against a reference: GCC may fold the reference at compile time
+
+A reference computed from literal arguments may be constant-folded by GCC,
+which evaluates `tanf`, `expf` and friends correctly rounded at compile time,
+while the code under test calls libm at run time; glibc's result can sit one
+ULP away. The two paths then disagree on Linux GCC only, though the DSP is
+identical. When asserting bit identity, route the reference's inputs through
+`volatile` or other runtime values so both sides take the same libm path, or
+compare two runtime paths rather than a runtime path against a literal
+design.
 
 ## Measuring a reverb — two traps that make a working engine look broken
 

@@ -14,6 +14,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
@@ -416,7 +417,11 @@ struct WaveNetKernel {
 struct ChannelPlan {
     bool fail_completions = false;
     bool reject_submissions = false;
-    bool starve = false; // completions withheld
+    bool starve = false; // completions withheld (a hung provider)
+    bool late = false;   // completions arrive, each too late for its consumer
+    bool lost = false;   // the device is gone: lost() is true, work fails
+    // One slow block: this sequence completes only once cleared.
+    std::uint64_t hold = std::numeric_limits<std::uint64_t>::max();
     bool release_ok = true;
     bool sequence_gap_seen = false;
     // Scales the provider's output so a test can tell GPU blocks from
@@ -432,8 +437,10 @@ class FirChannel final : public detail::WaveNetRealtimeChannel {
         for (auto& slot : slots_)
             slot.data.assign(block, 0.0f);
     }
-    bool submit(std::span<const float> input, std::uint64_t sequence) noexcept override {
-        if (plan_.reject_submissions)
+    bool submit(std::span<const float> input,
+                const detail::SharedIoSubmissionTicket& ticket) noexcept override {
+        const auto sequence = ticket.sequence;
+        if (plan_.reject_submissions || plan_.lost)
             return false;
         auto slot = std::find_if(slots_.begin(), slots_.end(), [](auto& s) { return !s.active; });
         if (slot == slots_.end())
@@ -445,6 +452,7 @@ class FirChannel final : public detail::WaveNetRealtimeChannel {
         for (std::size_t i = 0; i < input.size(); ++i)
             slot->data[i] = fir_.step(input[i]);
         slot->sequence = sequence;
+        slot->ticket = ticket;
         slot->order = next_order_++;
         slot->active = true;
         ++plan_.submissions;
@@ -452,22 +460,32 @@ class FirChannel final : public detail::WaveNetRealtimeChannel {
     }
     void service(std::uint64_t) noexcept override {}
     void service_until(std::uint64_t, std::uint64_t) noexcept override {}
-    std::optional<GpuWaveNetBlockResult> receive(std::span<float> output) noexcept override {
+    std::optional<detail::WaveNetChannelCompletion>
+    receive(std::span<float> output) noexcept override {
         if (plan_.starve)
             return {};
         Slot* oldest = nullptr;
         for (auto& slot : slots_)
-            if (slot.active && (oldest == nullptr || slot.order < oldest->order))
+            if (slot.active && slot.sequence != plan_.hold &&
+                (oldest == nullptr || slot.order < oldest->order))
                 oldest = &slot;
         if (oldest == nullptr)
             return {};
         oldest->active = false;
-        if (plan_.fail_completions)
-            return GpuWaveNetBlockResult{oldest->sequence, GpuWaveNetBlockStatus::ProviderFailed,
-                                         false};
+        if (plan_.fail_completions || plan_.lost)
+            return detail::WaveNetChannelCompletion{
+                GpuWaveNetBlockResult{oldest->sequence, GpuWaveNetBlockStatus::ProviderFailed,
+                                      false},
+                oldest->ticket};
         for (std::size_t i = 0; i < output.size(); ++i)
             output[i] = plan_.gain * oldest->data[i];
-        return GpuWaveNetBlockResult{oldest->sequence, GpuWaveNetBlockStatus::GpuDelivered, false};
+        return detail::WaveNetChannelCompletion{
+            GpuWaveNetBlockResult{oldest->sequence, GpuWaveNetBlockStatus::GpuDelivered,
+                                  plan_.late},
+            oldest->ticket};
+    }
+    bool lost() const noexcept override {
+        return plan_.lost;
     }
     bool release() noexcept override {
         ++plan_.releases;
@@ -482,6 +500,7 @@ class FirChannel final : public detail::WaveNetRealtimeChannel {
     struct Slot {
         std::vector<float> data;
         std::uint64_t sequence = 0, order = 0;
+        detail::SharedIoSubmissionTicket ticket{};
         bool active = false;
     };
     ChannelPlan& plan_;

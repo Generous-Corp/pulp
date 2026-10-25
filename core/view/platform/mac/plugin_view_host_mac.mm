@@ -1,6 +1,7 @@
 #include <pulp/view/plugin_view_host.hpp>
 
 #include <TargetConditionals.h>
+#include "mac_gpu_host_config.h"
 #if TARGET_OS_OSX
 
 // Per-binary-unique ObjC class names (renames PulpPluginView / PulpGpuPluginView
@@ -2041,7 +2042,7 @@ private:
 
 // ── MacGpuPluginViewHost (Dawn/Skia Graphite) ────────────────────────────────
 
-#ifdef PULP_HAS_SKIA
+#if PULP_VIEW_MAC_GPU_HOST
 
 // Interface in plugin_view_host_mac_view.h, beside PulpPluginView.
 @implementation PulpGpuPluginView {
@@ -3294,7 +3295,7 @@ private:
 
 } // namespace pulp::view (close GPU class block)
 
-#endif // PULP_HAS_SKIA
+#endif // PULP_VIEW_MAC_GPU_HOST
 
 namespace pulp::view { // reopen for factory functions
 
@@ -3307,7 +3308,7 @@ std::unique_ptr<PluginViewHost> PluginViewHost::create(View& root, Size size) {
 }
 
 std::unique_ptr<PluginViewHost> PluginViewHost::create(View& root, const Options& options) {
-#ifdef PULP_HAS_SKIA
+#if PULP_VIEW_MAC_GPU_HOST
     if (options.use_gpu) {
         auto host = std::make_unique<MacGpuPluginViewHost>(root, options.size,
                                                            options.background_rgb);
@@ -3320,6 +3321,11 @@ std::unique_ptr<PluginViewHost> PluginViewHost::create(View& root, const Options
         // The adapter's runtime scream-guard logs the mismatch loudly.
         host.reset();
     }
+#else
+    // A lite editor binary has no GPU host to give; say so once and open the
+    // CoreGraphics host, so the editor still appears.
+    if (options.use_gpu)
+        detail::note_lite_host_gpu_request();
 #endif
     auto host = std::make_unique<MacPluginViewHost>(root, options.size,
                                                     options.background_rgb);

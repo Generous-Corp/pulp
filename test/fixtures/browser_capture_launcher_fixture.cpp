@@ -101,6 +101,19 @@ int main(int argc, char** argv) {
             << "capture-source-unresolved: source produced no visible design\n";
         return 1;
     }
+    if (capture_script.filename().string().find("identity-drift") != std::string::npos) {
+        std::cerr << "browser-identity-drift: selected browser identity changed "
+                     "during capture\n";
+        return 1;
+    }
+    if (capture_script.filename().string().find("launch-fails") != std::string::npos) {
+        write_file(output / "capture-error.json",
+                   "{\"schema\":\"pulp-browser-capture-error-v1\","
+                   "\"code\":\"browser-capture-failed\","
+                   "\"phase\":\"browser-launch\",\"message\":\"CDP pipe closed\"}\n");
+        std::cerr << "browser-capture-failed: CDP pipe closed\n";
+        return 1;
+    }
     if (capture_script.filename().string().find("raw-stderr")
             != std::string::npos) {
         std::cout

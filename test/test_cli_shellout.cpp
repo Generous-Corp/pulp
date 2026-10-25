@@ -1603,7 +1603,7 @@ TEST_CASE("pulp help output lists the top-level subcommands", "[cli][shellout][h
             (sdk / "share/pulp/authority-navigation.json").generic_string());
     REQUIRE(selected_receipt.get("registry_sha256") != nullptr);
     REQUIRE(selected_receipt.get("registry_sha256")->as_string() ==
-            "816f6dac45b399fb611ec0651850c90728a2a383fd54e1b1204f72b52e7e7a69");
+            "cc61cfea71b01cd8f4a3f73317dc201d9a4eefa0103dd50cf9a6229f09a91e25");
 
     ProcessResult selected_from_source_build;
     {

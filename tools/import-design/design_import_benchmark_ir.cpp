@@ -22,8 +22,10 @@ using namespace pulp::view;
 
 std::unique_ptr<View> materialize_checked(const DesignIR& ir, float width, float height,
                                           std::string_view lane,
-                                          std::vector<std::string>* warning_codes) {
+                                          std::vector<std::string>* warning_codes,
+                                          const std::filesystem::path& asset_base_directory) {
     NativeMaterializeOptions options;
+    options.asset_base_directory = asset_base_directory;
     std::vector<ImportDiagnostic> diagnostics;
     options.diagnostics_out = &diagnostics;
     auto root = build_native_view_tree(ir, ir.asset_manifest, options);
@@ -92,6 +94,14 @@ std::string slot_text(std::size_t slot, int frame) {
     return "slot " + std::to_string(slot) + " frame " + std::to_string(frame);
 }
 
+std::vector<std::string> slot_texts(std::size_t count, int frame) {
+    std::vector<std::string> texts;
+    texts.reserve(count);
+    for (std::size_t i = 0; i < count; ++i)
+        texts.push_back(slot_text(i, frame));
+    return texts;
+}
+
 IrBoundFixture::IrBoundFixture(const std::filesystem::path& path, bool rebuild_each_step)
     : loaded_(load_ir(path)), rebuild_each_step_(rebuild_each_step) {
     materialize(loaded_.ir);
@@ -144,7 +154,8 @@ void IrBoundFixture::verify(int frame) {
 // lane keeps writing through the Labels resolved at construction;
 // `resolved_` always describes the current tree.
 void IrBoundFixture::materialize(const DesignIR& ir) {
-    root_ = materialize_checked(ir, loaded_.width, loaded_.height, "IR-bound", &warning_codes_);
+    root_ = materialize_checked(ir, loaded_.width, loaded_.height, "IR-bound", &warning_codes_,
+                                loaded_.base_dir);
     resolve_slots();
     // Only the retained lane writes through the Labels of its first tree; the
     // rebuild lane replaces that tree, so it keeps no such pointers.

@@ -284,7 +284,7 @@
     },
     {
       "file": "test/test_plugin_view_host_factory.cpp",
-      "sites": 2,
+      "sites": 1,
       "reason": "WARN() on an unmet precondition. Same defect as SUCCEED, but several of these carry a formatted diagnostic that SKIP()'s single message argument does not reproduce."
     },
     {

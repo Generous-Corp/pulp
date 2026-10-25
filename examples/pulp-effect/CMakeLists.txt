@@ -13,6 +13,9 @@ endif()
 pulp_add_plugin(PulpEffect
     FORMATS         VST3 AU CLAP
     PLUGIN_NAME     "PulpEffect"
+    # Kept on the full editor stack on purpose: it is the control for the
+    # lite-stack checks and holds the full stack's footprint budget.
+    FULL_EDITOR
     BUNDLE_ID       "com.pulp.effect"
     MANUFACTURER    "Pulp"
     VERSION         "1.0.0"
@@ -97,4 +100,36 @@ if(PULP_HAS_VST3)
             TIMEOUT 30
             ENVIRONMENT "PULP_DISABLE_PLUGIN_EDITOR=1;PULP_HEADLESS=1;PULP_TEST_MODE=1")
     endif()
+endif()
+
+# Control for the lite checks: a FULL_EDITOR plug-in still carries the full editor stack.
+if(PULP_BUILD_TESTS AND APPLE AND CMAKE_NM AND TARGET pulp-canvas-lite-objects)
+    if(TARGET PulpEffect_VST3)
+        add_test(NAME editor-stack-PulpEffect_VST3
+            COMMAND ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
+                -DMODULE=$<TARGET_FILE:PulpEffect_VST3> -DEXPECT=full
+                -P ${CMAKE_SOURCE_DIR}/test/cmake/check_plugin_module_editor_stack.cmake)
+        set_tests_properties(editor-stack-PulpEffect_VST3 PROPERTIES LABELS "plugin-footprint" TIMEOUT 60)
+    endif()
+endif()
+
+# PulpEffect carries the full editor stack (view, canvas, Skia/Dawn and the
+# script runtime). This holds the size that stack costs per format (mapped
+# segments, excluding the symbol table) and the trimmed ICU data
+# (tools/scripts/plugin_footprint_budget.json, profile "editor").
+if(APPLE AND Python3_EXECUTABLE AND PULP_HAS_SKIA AND PULP_ICU_DATA_SUBSET)
+    set(_pulp_effect_footprint_binaries "")
+    foreach(_fmt VST3 CLAP AU)
+        if(TARGET PulpEffect_${_fmt})
+            list(APPEND _pulp_effect_footprint_binaries "$<TARGET_FILE:PulpEffect_${_fmt}>")
+        endif()
+    endforeach()
+    add_test(NAME plugin-footprint-PulpEffect
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/plugin_footprint_check.py"
+            --profile editor ${_pulp_effect_footprint_binaries})
+    set_tests_properties(plugin-footprint-PulpEffect PROPERTIES
+        LABELS "packaging;footprint"
+        TIMEOUT 60
+        SKIP_RETURN_CODE 77)
 endif()
