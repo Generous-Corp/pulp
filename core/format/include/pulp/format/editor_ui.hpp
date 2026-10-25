@@ -167,8 +167,8 @@ inline EditorUiSource select_editor_ui_source(const EditorAssets& assets, bool e
 /// script). Returns an instance whose root is null when the script failed to
 /// load; the failure is already logged and copied into `error`.
 using ScriptedEditorBuilder = EditorUiInstance (*)(const EditorAssets& assets,
-                                                   state::StateStore& store,
-                                                   bool enable_hot_reload, std::string* error,
+                                                   state::StateStore& store, bool enable_hot_reload,
+                                                   std::string* error,
                                                    view::ValueChannelAccess value_channel_access,
                                                    std::string_view storage_identity);
 

@@ -52,7 +52,8 @@ EditorUiInstance build_scripted_editor_ui(const EditorAssets& assets, state::Sta
         options.enable_theme_reload =
             enable_hot_reload || has_configured_theme || !options.theme_source.empty();
         options.value_channel_access = std::move(value_channel_access);
-        auto scripted_ui = std::make_unique<view::ScriptedUiSession>(*root, store, std::move(options));
+        auto scripted_ui =
+            std::make_unique<view::ScriptedUiSession>(*root, store, std::move(options));
         // A deferred load (view::ScopedDeferredDocumentLoad) reports failure
         // here, after open() has handed the host this root, so the AutoUi
         // fallback goes INTO the root instead of replacing it.
