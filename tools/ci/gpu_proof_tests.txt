@@ -1,4 +1,5 @@
 pulp-gpu-audio-provider-identity
+pulp-gpu-dawn-provider-conformance-receipt-verify
 pulp-gpu-dawn-shared-io-provider-completion-wait-bound
 pulp-gpu-dawn-shared-io-provider-identity
 pulp-gpu-dawn-shared-io-provider-lifecycle
@@ -15,6 +16,7 @@ pulp-gpu-dawn-vellum-d15-source
 pulp-gpu-dawn-wavenet-history-probe
 pulp-gpu-dawn-wavenet-qualification
 pulp-gpu-dawn-wavenet-qualification-identity
+pulp-gpu-dawn-wavenet-staged-timestamps-probe
 pulp-gpu-same-device-storage-probe
 pulp-gpu-shared-io-convolution-session-prepare-scope-negative-control
 pulp-gpu-shared-io-convolution-session-probe
@@ -23,3 +25,4 @@ pulp-gpu-shared-io-private-convolution-prepare-scope-negative-control
 pulp-gpu-shared-io-private-convolution-probe
 pulp-gpu-shared-io-private-convolution-submit-scope-negative-control
 pulp-gpu-shared-spectral-probe
+pulp-test-gpu-dawn-shared-io-provider-conformance
