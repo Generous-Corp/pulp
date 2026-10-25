@@ -107,6 +107,19 @@ records three agreeing source, importer, observer, font, capture, PNG, layout,
 and native render receipt digests. Short campaigns remain unverified, and the
 raw visual threshold is not relaxed by calibration or renderer disagreement.
 
+### HTML staging scans references from their literal starts
+
+`stage_html_project` follows a project's dependencies with the three patterns in
+`html_project_stager.cpp` (`html_reference_pattern()` and its two siblings).
+Each `ReferencePattern` lists the literals its alternatives begin with, and
+`for_each_reference_match` runs the regex only at offsets where one begins.
+`std::sregex_iterator` over the same text yields the same matches, but it runs
+libc++'s backtracking engine at every byte: on the 1.8 MB Spectr export that
+was about 2 s per import. A new alternative must add its leading literal to
+`starts`, or the scan never tries it; the differential case in
+`test_html_project_stager.cpp` compares both scans over generated text and
+fails when a literal is missing.
+
 ### Captured line metrics travel as one `LineMetrics`
 
 The capture's measured ascent/descent ride the line-box basis as
