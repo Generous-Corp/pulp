@@ -407,6 +407,28 @@ rebuild. Keep the two sides in step:
   `EXCLUDED_*` filter constants from the projection side: the bounded run's
   base comparison and the authoritative suite both read them.
 
+### The dev-shared link mode is chosen per command, in both CLIs
+
+`PULP_DEV_SHARED_UI` (see `docs/guides/build.md`) is a property of the build
+dir, but each command decides it: `pulp dev` / `pulp loop` want it on for an
+SDK project on macOS (`--no-dev-shared` opts out; the source checkout stays
+static because its tests inspect example and fixture modules as they ship), `pulp build` wants it off unless `--dev-shared`,
+and a non-empty `PULP_DEV_SHARED_UI` environment value overrides every command.
+A cache that disagrees is reconfigured with one `-DPULP_DEV_SHARED_UI=` flag;
+the option only changes link lines, so switching relinks and never recompiles.
+
+- The rule is `dev_shared_ui_wanted` + `dev_shared_ui_change` in
+  `tools/cli/configure_defaults.hpp` and the same-named functions in
+  `experimental/pulp-rs/src/cmd/orchestrate.rs`. Change both together.
+- `BuildPlan::ensure_configured` (dev/loop) reconfigures an existing dir in place
+  and passes `--dev-shared` to the `cmd_build` bootstrap; without that flag the
+  bootstrap would configure static links and the loop would reconfigure again.
+- `--dev-shared` must be consumed by both build parsers and forwarded by
+  `build_delegate_argv`, or it reaches `cmake --build` as an unknown flag.
+- Tests: the `[dev-shared]` cases in `test/test_cli_configure_defaults.cpp`
+  (pure rule plus `pulp-cpp build` shell-outs against a fake `cmake`) and the
+  `dev_shared` cases in `orchestrate::tests`.
+
 ### A tartci capacity denial retries for the agent floor; its QoS is mandatory
 
 `TartciAgentBuildLease::acquire` (`tools/cli/tartci_lease.cpp`) answers a

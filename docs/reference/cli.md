@@ -111,6 +111,7 @@ pulp build --allow-unsupported-sdk # Bypass the CLI-vs-project SDK guard (unsupp
 pulp build --check-identity    # Verify .pulp/identity.lock before configure (Track 3.12)
 pulp build --check-identity --allow-identity-change  # Treat identity drift as a warning
 pulp build --examples          # Source checkout: also configure/build the example projects
+pulp build --dev-shared        # macOS: link plug-ins against the dev-only shared runtime (never shippable)
 pulp build --seed-build        # New worktree: clone + retarget a sibling's warm build dir first (APFS)
 pulp build --seed-build=../pulp-main  # Same, naming the donor worktree
 pulp build --js-engine=v8      # Force the JS engine backend and reconfigure
@@ -123,6 +124,8 @@ pulp build -f wclap -j8        # Short form, with a cmake passthrough flag
 ```
 
 Extra arguments are passed through to `cmake --build`.
+
+`pulp build` makes shippable artifacts, so it links plug-in modules statically. When the build dir was left in dev-shared mode (`PULP_DEV_SHARED_UI=ON`, which `pulp dev` and `pulp loop` use for SDK projects on macOS), it reconfigures it back to static links and says so; that costs a relink, not a recompile. `--dev-shared` keeps or turns on dev-shared mode instead, and a non-empty `PULP_DEV_SHARED_UI` environment value (`1`/`ON` or `0`/`OFF`) overrides both. See [Fast plug-in relinks](../guides/build.md#fast-plug-in-relinks-pulp_dev_shared_ui).
 
 In a Pulp source checkout `pulp build` is **focused by default**: it builds only the targets the working diff affects, selected by [`pulp affected`](#affected). The banner names the selection (`FOCUSED: building 3/1708 targets affected by your diff - run 'pulp build --all' before opening a PR`) and a full build is one flag away. `--all`, an explicit `--target`, or `PULP_BUILD_FOCUS=0` restore the full build; `--install` and `--validate` always build everything because every bundle must exist. The selector falls back to `all` (and says why) when the diff is empty, touches the build system, cannot be mapped, or exceeds ~40% of all targets. Standalone SDK projects are never focused. The first focused build in an existing build directory configures once to record the CMake file-API codemodel. The pre-push hook and Shipyard keep building `all`, so a focused green run is a development signal, not a landing gate.
 
@@ -2346,7 +2349,10 @@ Flags:
 | `--design SCRIPT` | Build `pulp-design-tool` and launch it with SCRIPT; delegated watch mode relaunches on rebuild, Rust fallback launches once |
 | `--target T` | Pass `--target T` to `cmake --build` |
 | `--allow-unsupported-sdk` | Delegated C++ path: bypass the CLI-vs-project SDK compatibility guard and continue anyway (unsupported) |
+| `--no-dev-shared` | Link plug-in modules statically instead of against the development-only shared Pulp runtime |
 | `-- args...` | Arguments passed to the launched app |
+
+In an SDK project on macOS, `pulp dev` links plug-in modules against one development-only shared Pulp runtime (`-DPULP_DEV_SHARED_UI=ON`), so a one-file edit relinks a module of about a megabyte instead of the full static image, and it reconfigures an existing build dir to match. `--no-dev-shared` or `PULP_DEV_SHARED_UI=0` keeps static links. The Pulp source checkout keeps static links unless `PULP_DEV_SHARED_UI=1` asks, because its own tests inspect example and fixture modules as they ship. The ship commands refuse dev-shared artifacts; `pulp build` switches the dir back. See [Fast plug-in relinks](../guides/build.md#fast-plug-in-relinks-pulp_dev_shared_ui).
 
 `pulp dev` runs the same active-project compatibility preflight as `pulp build`. If the project pins an SDK or `cli_min_version` newer than the installed CLI, the command stops before SDK resolution/build and points at `pulp upgrade`.
 
@@ -2381,6 +2387,7 @@ Flags:
 | `--validate` | Run quick plugin dlopen validation after build |
 | `--run TARGET` | Launch TARGET from build dir, relaunch on rebuild |
 | `--target T` | Pass `--target T` to `cmake --build` |
+| `--no-dev-shared` | Link plug-in modules statically instead of against the development-only shared Pulp runtime `pulp loop` uses on macOS, as with `pulp dev` |
 | `--allow-unsupported-sdk` | Bypass the CLI-vs-project SDK compatibility guard |
 | `-- args...` | Arguments passed to the launched app |
 

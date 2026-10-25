@@ -45,6 +45,9 @@ commands:
       - name: --examples
         kind: flag
         description: "Source checkout only: configure with `-DPULP_BUILD_EXAMPLES=ON`. A fresh `pulp build` configure leaves the example projects off for a faster dev build; an existing build dir keeps its setting, and `--examples` reconfigures one that has them off."
+      - name: --dev-shared
+        kind: flag
+        description: "macOS only: configure with `-DPULP_DEV_SHARED_UI=ON`, linking plug-in modules against one development-only shared Pulp runtime in the build tree for fast relinks. Without it `pulp build` switches a dev-shared build dir back to static links (a relink, no recompile), because only static artifacts can be signed, packaged, notarized, shared, or released. A non-empty `PULP_DEV_SHARED_UI` environment value overrides the choice. See `guides/build.md`."
       - name: --seed-build
         kind: option
         description: "Source checkout, macOS/APFS only: before the first configure of a worktree with no build dir, clone a sibling worktree's warm Ninja build dir (copy-on-write) and retarget it via `tools/scripts/seed_build_dir.py`, so the first build compiles and links only what differs. Bare `--seed-build` picks the eligible sibling closest to HEAD; `--seed-build=<worktree>` names the donor; `PULP_SEED_BUILD=1` opts in without the flag. Unsupported cases fall back to a plain configure."
@@ -2628,6 +2631,9 @@ commands:
       - name: --allow-unsupported-sdk
         kind: flag
         description: Bypass the CLI-vs-project SDK compatibility guard in the delegated C++ dev loop and continue anyway (unsupported)
+      - name: --no-dev-shared
+        kind: flag
+        description: "Link plug-in modules statically. In an SDK project on macOS `pulp dev` otherwise configures `-DPULP_DEV_SHARED_UI=ON` (one development-only shared Pulp runtime, so a one-file edit relinks small modules) and reconfigures an existing build dir to match; the Pulp source checkout keeps static links. A non-empty `PULP_DEV_SHARED_UI` environment value overrides both."
       - name: passthrough
         kind: passthrough
         description: Arguments after `--` are forwarded to the launched binary
@@ -2652,6 +2658,9 @@ commands:
       - name: --no-watch
         kind: flag
         description: Persist focus state and exit without entering the watch loop (CI/test friendly)
+      - name: --no-dev-shared
+        kind: flag
+        description: "Link plug-in modules statically instead of the development-only shared Pulp runtime `pulp loop` uses for SDK projects on macOS (`-DPULP_DEV_SHARED_UI`), the same as `pulp dev --no-dev-shared`."
       - name: --watch-issues
         kind: option
         description: "Deferred: poll `gh pr list` for state flips on PRs referencing the named issues. Today prints a deferred hint."
