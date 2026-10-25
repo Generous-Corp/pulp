@@ -26,9 +26,14 @@ Why a Python helper instead of `xxd -i`?
       elsewhere in the tree, e.g. tools/cli, bindings/python, tools/deps).
     * The encoder is small, deterministic, and easy to test.
 
-With `--compress zlib` the asset is stored as an RFC 1950 zlib stream (level 9,
-so the output is deterministic) and the symbols change, so a consumer that
-expects raw bytes fails to compile rather than reading compressed data:
+With `--compress zlib` the asset is stored as an RFC 1950 zlib stream at level 9
+and the symbols change, so a consumer that expects raw bytes fails to compile
+rather than reading compressed data. The stream comes from the running
+Python's zlib, so it is deterministic per zlib build, not across them: zlib
+1.2.x and zlib-ng (which some CPython builds link) can emit different, equally
+valid streams for the same input, and the inflated bytes are identical either
+way. Encoding with the vendored miniz instead would need a host-built tool,
+which a cross-compiled build (Android, wasm) does not have at this step.
 
     extern const unsigned char ${VAR}_zlib[] = { ... };   // compressed bytes
     extern const std::size_t   ${VAR}_zlib_size = M;

@@ -662,8 +662,11 @@ namespace myresources {
 
 ### Compressed embeds
 
-`COMPRESS` stores each asset as a zlib (RFC 1950) stream, at level 9 so the
-build stays deterministic. Text assets shrink the most: a materialized
+`COMPRESS` stores each asset as a zlib (RFC 1950) stream at level 9. The
+stream is produced by the build host's Python zlib, so it is deterministic per
+zlib build: two hosts whose Python links different zlib builds (zlib 1.2.x and
+zlib-ng, for example) can embed different, equally valid streams, and they
+inflate to the same bytes. Text assets shrink the most: a materialized
 design's runtime bundle to about a tenth, its document JSON to about two
 fifths. Already-compressed formats (PNG, JPEG, WOFF2) gain nothing, so embed
 those in a separate call without `COMPRESS`. The symbols change, so code
@@ -684,7 +687,9 @@ auto bytes = pulp::runtime::zlib_decompress(myresources::runtime_js_zlib,
 ```
 
 The trade is a smaller binary against an inflate on each use and a transient
-heap copy. Inflating costs about 1 ms per megabyte of text on an Apple
+heap copy. `zlib_decompress` allocates its output, so never call it on the
+audio thread: inflate on the message thread or a background thread and hand
+the result over. Inflating costs about 1 ms per megabyte of text on an Apple
 silicon core. `COMPRESS` is not the default: the raw array is a public
 symbol that consumers read directly, so a default change would break their
 builds.
