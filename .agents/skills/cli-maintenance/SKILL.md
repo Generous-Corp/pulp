@@ -792,6 +792,15 @@ A source-only row reports
 without that SDK registry reports the registry unavailable. Do not search a
 different checkout or SDK, or another installed SDK version.
 
+The registry is installed into every SDK (`share/pulp/authority-navigation.json`),
+so a row may describe a private authority but must not name the private
+repository or a file inside it. The `dsp-survey-admission` row says "the DSP
+survey admission protocol in the maintainers' private planning repository";
+the Python and C++ validators pin that exact text, `test_cli_shellout.cpp` pins
+the registry's SHA-256, and `cmake-share-files-no-host-identifiers` /
+`cmake-pulp-install-layout` fail on a private repo, host name, home path or user
+name anywhere under share/pulp (allowlist entries carry their reason).
+
 This is intentionally CLI-only in the parity baseline. It describes the
 separate offline MCP authority and the exact-instance live-control route; it
 does not wrap either as a new generic MCP or control operation. The live row
@@ -2184,6 +2193,28 @@ a stripped build uses `PULP_BUILD_TESTS=OFF`.
 - [ ] Search all skills: `grep -r "pulp <name>" .agents/skills/`
 - [ ] Search CLAUDE.md
 - [ ] Run sync check
+
+## `pulp create` templates: a placeholder or file has four owners
+
+A `{{VAR}}` placeholder or a new template file must be known in four places,
+and missing any one fails somewhere different:
+
+- `tools/cli/cmd_create.cpp` (the substitution map and the file-rename map) and
+  `experimental/pulp-rs/src/cmd/create.rs` (the same two maps for the Rust
+  front end). Missing one scaffolds a project with a literal `{{VAR}}` in it.
+- `test/cmake/create_template_tests.cmake`, which expands the plugin templates
+  at configure time and compiles them as `pulp-test-create-template-*`. An
+  unknown placeholder fails the Pulp configure itself, with the name. A new
+  source file must also be compiled there, or the template's test fails to
+  link (the processor body moved into `processor.cpp.template` hit both).
+- `tools/scripts/verify_create_templates.py` (`KNOWN_TEMPLATE_VARS` and the
+  required-files list), which runs without a build.
+
+The effect and instrument templates keep `process()` in their own source,
+listed under `SOURCES`, and the generated test links `<target>_Core` rather
+than compiling that source again. An edit to the processor body then
+recompiles one object and relinks each format; when the body lived in the
+header, every format's entry TU and the test recompiled it.
 
 ## The macOS CLI force-load list names implementation archives, not modules
 

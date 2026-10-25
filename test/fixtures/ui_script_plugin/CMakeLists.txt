@@ -112,7 +112,17 @@ if(PULP_HAS_CLAP)
             "-DEXPECT_GPU=${PULP_HAS_SKIA}"
             "-DCONFIG=$<CONFIG>"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/sdk_consumer.cmake")
+    # The required macOS gate runs it: one install plus one small CLAP consumer
+    # costs about as much as cmake-view-audio-sdk-consumer beside it. Elsewhere
+    # it rides the slow lane with the other installed-SDK builds until a
+    # consumer build there is measured.
+    set(_ui_script_sdk_consumer_labels "cmake;sdk;format;view;scripted-ui")
+    if(NOT APPLE)
+        list(APPEND _ui_script_sdk_consumer_labels slow)
+    endif()
     set_tests_properties(ui-script-plugin-editor-installed-sdk PROPERTIES
-        LABELS "cmake;sdk;format;view;scripted-ui;slow" TIMEOUT 900
+        LABELS "${_ui_script_sdk_consumer_labels}"
+        COST 30
+        TIMEOUT 300
         ENVIRONMENT_MODIFICATION "${_ui_script_editor_env}")
 endif()

@@ -180,6 +180,21 @@ route the build through `tools/ci/governed-build.sh` without an explicit
 `--parallel` cap. The governor owns the worker share and build-directory lock;
 the emulator and fixture execution steps remain separate.
 
+`governed-build.sh` treats an explicit `-j`/`--parallel` on the build command
+(also after `--`) as a request: the lower of it and `PULP_BUILD_JOBS` caps the
+lease, and the flag is rewritten to the final share before the command runs.
+A literal count can therefore lower a build's share but never raise it past
+the lease, and a bare flag cannot go unbounded. Before that rule the flag
+silently overrode the governor (a `-j4` build reserved and logged the full
+profile share). Covered by the `explicit`/`flag` cases in
+`tools/ci/test_governed_build.py`.
+
+A `CMAKE_BUILD_PARALLEL_LEVEL` the caller exports is the same kind of request:
+the lowest of it, any flag, and `PULP_BUILD_JOBS` wins. The wrapper exports its
+own share under that name, which used to replace the caller's value, so
+`CMAKE_BUILD_PARALLEL_LEVEL=4` ran at the full lease. Covered by the
+`caller_parallel_level` cases.
+
 The TSan workflow keeps its SignalGraph selection exact and bounded: include
 the compile-first lifecycle cases, mutation-lock and prepare-swap publication
 cases, and the routed and parallel re-prepare/process race hammers. Do not
@@ -832,6 +847,34 @@ primitive since Shipyard v0.143.0; the pin supplies the command but does not tur
 on apply mode. The protected-main worker must stay repository-serialized,
 perform a dry run first, and prove one live exact-head canary before scheduled
 activation.
+
+## The control-shipping scanner reads raw bytes: two CMake quirks it depends on
+
+`tools/cmake/check_control_shipping_artifact.cmake` reads each linked image
+with `file(READ)` and searches the bytes with `string(FIND)`. Two CMake
+behaviours make that correct only as written:
+
+- **NUL truncation.** Several CMake paths stop a value at its first NUL byte,
+  measured on CMake 4.3 and 3.24.3: `${var}` in a `-P` script with no
+  `cmake_minimum_required` on 3.x (old CMP0053 rules), `set(... PARENT_SCOPE)`
+  on every version (a 44 MB image returned from a function arrived as 5 bytes
+  while the function's own length check passed), and `string(REPLACE)` /
+  `string(REGEX)` on every version. `string(LENGTH)` and `string(FIND)` see
+  the whole value. Truncation fails OPEN for the forbidden-marker checks. So
+  the scanner pins `cmake_minimum_required(VERSION 3.24)`, reads with a macro
+  (the bytes land in the caller's scope), touches the bytes only with LENGTH
+  and FIND, fails closed when the read is shorter than half the file, and has
+  `_pulp_binary_contains` re-check the searched length against the recorded
+  `<var>_length`. Never remove any of these; a test host on 4.x cannot catch
+  the 3.x case by itself.
+- **CRLF folding.** `file(READ)` turns each CRLF pair into LF, so the value is
+  shorter than the file by the number of folded pairs, at most half of it.
+  Markers contain no CR or LF, so the fold cannot hide or create one.
+
+The matrix test carries a NUL-before-marker and a CRLF-before-marker leak, and
+`_pulp_binary_contains` refuses markers that are under 14 bytes, contain
+whitespace or contain `;` (`-DPULP_CONTROL_MARKER_SELFTEST=<marker>` exercises
+the refusal).
 
 ## Every test file must run somewhere
 

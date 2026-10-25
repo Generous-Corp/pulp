@@ -70,7 +70,7 @@ What the full create path does:
 6. Configures (with `-G Ninja` when `ninja` is on `PATH` and the build dir is new, as `pulp build` does), builds the generated test target plus the default platform outputs, and runs tests
 7. Leaves the project ready for `pulp build`, which you use for rebuilds, explicit targets, or optional deliverables after changing configuration
 
-The generated test target uses Catch2 3. When CMake can find an installed Catch2 3 (for example from `brew install catch2`, or a prefix on `CMAKE_PREFIX_PATH`), the project uses it and skips downloading and compiling Catch2; otherwise configure downloads the pinned Catch2 release archive and checks its SHA-256.
+The generated test target uses Catch2 3. When CMake can find an installed Catch2 at least as new as the pinned 3.16.1, within major version 3 (for example from `brew install catch2`, or a prefix on `CMAKE_PREFIX_PATH`), the project uses it and skips downloading and compiling Catch2; otherwise configure downloads the pinned Catch2 release archive and checks its SHA-256.
 
 Notes:
 - `pulp create` is meant to prove that a fresh machine and fresh project can scaffold, configure, build the default native outputs, and pass the generated tests.
@@ -878,15 +878,15 @@ stays encouraged-not-mandated. The real work lives in the script; the command ju
 makes it discoverable and forwards flags.
 
 ```bash
-pulp ci-host setup --class m5                       # minimum: register the m5 host-class label
-pulp ci-host setup --class m5 --copy-from 'macstudio:/Volumes/Workshop/VMs/vms/pulp-build-runner:latest'
-pulp ci-host setup --class m5 --validate            # also run a one-shot VM build to prove it
+pulp ci-host setup --class studio                   # minimum: register the studio host-class label
+pulp ci-host setup --class studio --copy-from 'buildhost:/path/to/vms/pulp-build-runner:latest'
+pulp ci-host setup --class studio --validate        # also run a one-shot VM build to prove it
 pulp ci-host setup --help                           # full flag list (delegated to the script)
 ```
 
 Common flags (forwarded verbatim to `setup-ci-host.sh`):
 
-- `--class <name>` — **required** host class for the runner label (`m5`, `studio`, `macbook`, …)
+- `--class <name>` — **required** host class for the runner label (`studio`, `macbook`, `mini`, …)
 - `--copy-from <ssh:path | path>` — rsync a golden in from another host/drive (sparse-safe)
 - `--validate` — after setup, run one ephemeral VM build on the host-only label
 - `--no-agent` — do everything except install/load the launchd agent

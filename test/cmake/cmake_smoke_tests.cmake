@@ -1300,6 +1300,56 @@ add_test(NAME cmake-control-shipping-matrix
 set_tests_properties(cmake-control-shipping-matrix PROPERTIES
     LABELS "cmake;control;ship;matrix" TIMEOUT 180)
 
+# Every file under share/pulp is installed into each consumer's SDK, so none may
+# name a build host, a local path, a user or a private repository. This scans
+# the source copies of the Pulp-authored files installed there; vendored and
+# build-generated files (three.js, runtime pins, the capability handoff) are
+# covered by the same scan of the installed tree in cmake-pulp-install-layout.
+# The contracts the install rules name, not every file in docs/contracts.
+file(STRINGS "${CMAKE_SOURCE_DIR}/tools/cmake/PulpInstallRules.cmake" _pulp_installed_contract_lines
+    REGEX "docs/contracts/[A-Za-z0-9_.-]+[.]json")
+set(_pulp_share_contract_sources "")
+foreach(_line IN LISTS _pulp_installed_contract_lines)
+    string(REGEX MATCH "docs/contracts/[A-Za-z0-9_.-]+[.]json" _contract "${_line}")
+    list(APPEND _pulp_share_contract_sources "${CMAKE_SOURCE_DIR}/${_contract}")
+endforeach()
+list(REMOVE_DUPLICATES _pulp_share_contract_sources)
+file(GLOB _pulp_share_example_sources "${CMAKE_SOURCE_DIR}/examples/sample-region-allpass/*")
+set(_pulp_share_sources
+    ${_pulp_share_contract_sources}
+    ${_pulp_share_example_sources}
+    "${CMAKE_SOURCE_DIR}/docs/guides/gpu-validation-checklist.md"
+    "${CMAKE_SOURCE_DIR}/docs/reference/cli.md"
+    "${CMAKE_SOURCE_DIR}/docs/status/agent-capabilities.json"
+    "${CMAKE_SOURCE_DIR}/docs/status/agent-capabilities.schema.json"
+    "${CMAKE_SOURCE_DIR}/docs/status/agent-capability-handoff.schema.json"
+    "${CMAKE_SOURCE_DIR}/docs/status/authority-navigation.json"
+    "${CMAKE_SOURCE_DIR}/docs/status/authority-navigation.schema.json"
+    "${CMAKE_SOURCE_DIR}/docs/status/dsp-capabilities.json"
+    "${CMAKE_SOURCE_DIR}/docs/status/dsp-capabilities.schema.json"
+    "${CMAKE_SOURCE_DIR}/docs/status/forge-catalog.json"
+    "${CMAKE_SOURCE_DIR}/docs/status/forge-catalog.schema.json"
+    "${CMAKE_SOURCE_DIR}/docs/status/gpu-recipes.schema.json"
+    "${CMAKE_SOURCE_DIR}/docs/status/gpu-recipes.yaml"
+    "${CMAKE_SOURCE_DIR}/examples/capability-control/README.md"
+    "${CMAKE_SOURCE_DIR}/examples/capability-control/control-examples.json"
+    "${CMAKE_SOURCE_DIR}/examples/capability-control/generated/cli-walkthrough.sh"
+    "${CMAKE_SOURCE_DIR}/examples/capability-control/generated/mcp-tools.jsonl"
+    "${CMAKE_SOURCE_DIR}/ship/templates/entitlements.plist"
+    "${CMAKE_SOURCE_DIR}/tools/cmake/threejs-runtime-manifest.json"
+    "${CMAKE_SOURCE_DIR}/tools/scripts/ensure_signing_ready.sh"
+    "${CMAKE_SOURCE_DIR}/tools/scripts/gpu_health_contract.py"
+    "${CMAKE_SOURCE_DIR}/tools/scripts/json_schema_lite.py"
+    "${CMAKE_SOURCE_DIR}/tools/scripts/verify_gpu_health_run_attestation.py")
+list(JOIN _pulp_share_sources "\n" _pulp_share_source_lines)
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/pulp-share-sources.txt" "${_pulp_share_source_lines}\n")
+add_test(NAME cmake-share-files-no-host-identifiers
+    COMMAND ${CMAKE_COMMAND}
+        "-DSCAN_LIST=${CMAKE_CURRENT_BINARY_DIR}/pulp-share-sources.txt"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_no_host_identifiers.cmake)
+set_tests_properties(cmake-share-files-no-host-identifiers PROPERTIES
+    LABELS "cmake;ship" TIMEOUT 60)
+
 add_test(NAME cmake-control-shipping-fresh-stamp
     COMMAND ${CMAKE_COMMAND}
         -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
