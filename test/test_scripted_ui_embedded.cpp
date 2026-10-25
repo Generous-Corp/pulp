@@ -267,6 +267,49 @@ TEST_CASE("an embedded session resolves the files embedded beside its script",
     REQUIRE(label_text(session, "sidecar") == R"({"from":"embedded"})");
 }
 
+namespace {
+
+// PNG signature plus an IHDR chunk header naming a 4x8 image: enough for the
+// bridge to read dimensions; nothing here decodes the pixels.
+const unsigned char kStripPngBytes[] = {
+    0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0x0D, 'I', 'H', 'D',
+    'R',  0,   0,   0,   4,    0,    0,    0,    8, 8, 6, 0,    0,   0,
+};
+
+} // namespace
+
+TEST_CASE("an embedded sprite strip keeps its bytes instead of naming a file",
+          "[view][scripted-ui][embedded][assets]") {
+    View root;
+    root.set_bounds({0, 0, 320, 240});
+    StateStore store;
+    ScriptedUiSession session(
+        root, store,
+        {.enable_hot_reload = false,
+         .enable_theme_reload = false,
+         .script_source = R"JS(
+            createKnob('knob', 0, 0, 48, 48);
+            setKnobSpriteStrip('knob', 'strip.png', 2, 'vertical');
+         )JS",
+         .script_name = "ui.js",
+         .embedded_assets = {{"strip.png", kStripPngBytes, sizeof(kStripPngBytes)}},
+         .storage_identity = "com.acme.synth/ui.js"});
+    std::string error;
+    REQUIRE(session.load(&error));
+    REQUIRE(error.empty());
+
+    auto* knob = dynamic_cast<Knob*>(session.bridge()->widget("knob"));
+    REQUIRE(knob != nullptr);
+    const auto& strip = knob->sprite_strip();
+    REQUIRE(strip != nullptr);
+    // A file-backed strip would carry the bare embedded name, which the
+    // renderer would open relative to the working directory.
+    REQUIRE(strip->source() == SpriteStrip::Source::raw_pixels);
+    REQUIRE(strip->path().empty());
+    REQUIRE(strip->data_size() == sizeof(kStripPngBytes));
+    REQUIRE(strip->frame_count() == 2);
+}
+
 TEST_CASE("the embedded asset table rejects names that cannot be script-relative",
           "[view][scripted-ui][embedded][assets]") {
     View root;
