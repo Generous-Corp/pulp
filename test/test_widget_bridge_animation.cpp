@@ -942,6 +942,61 @@ TEST_CASE("WidgetBridge fans window and document listeners out inside the event 
     CHECK(engine.evaluate("batches").getWithDefault<int>(-1) == 2);
 }
 
+TEST_CASE("WidgetBridge runs the after-dispatch hook once the outermost batch returns",
+          "[view][bridge][event-batch]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(kCountingBatchHook);
+    bridge.load_script(R"(
+        var after = [];
+        globalThis.__pulpAfterDiscreteDispatch__ = function (id, eventName) {
+            after.push(id + ':' + eventName + ':' + batch_depth + '/' + __pulpDispatchDepth__);
+        };
+        on('w1', 'click', function () {
+            if (after.length === 0) __dispatch__('w1', 'click', {});
+        });
+    )");
+
+    dispatch_event(engine, "w1", "click", "{}");
+
+    // Once for the outer dispatch, after its batch closed; the dispatch made
+    // from inside the handler did not run it.
+    CHECK(engine.evaluate("after.join(',')").toString() == "w1:click:0/0");
+    CHECK(engine.evaluate("batches").getWithDefault<int>(-1) == 1);
+}
+
+TEST_CASE("WidgetBridge after-dispatch value write does not dispatch the change again",
+          "[view][bridge][event-batch]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createKnob('k');
+        setValue('k', 0.5);
+        var changes = 0;
+        on('k', 'change', function () { changes += 1; });
+        globalThis.__pulpAfterDiscreteDispatch__ = function (id) { setValue(id, 0.5); };
+    )");
+    auto* knob = dynamic_cast<Knob*>(bridge.widget("k"));
+    REQUIRE(knob != nullptr);
+
+    // A user edit: the knob moves and reports it, and the hook puts the
+    // committed value back.
+    knob->set_value(0.8f);
+    REQUIRE(knob->on_change);
+    knob->on_change(0.8f);
+
+    CHECK(knob->value() == Catch::Approx(0.5f));
+    CHECK(engine.evaluate("changes").getWithDefault<int>(-1) == 1);
+}
+
 TEST_CASE("WidgetBridge native widget events run unbatched without a hook",
           "[view][bridge][event-batch]") {
     ScriptEngine engine;
