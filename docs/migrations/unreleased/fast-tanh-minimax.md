@@ -44,8 +44,7 @@ All four functions are odd.
 ## Migration steps
 
 - Code that compared `FastMath::tanh(x)` to exactly ±1 for large |x| should
-  compare against `FastMath::tanh(FastMath::kTanhClamp)`, or test
-  `std::abs(y) > 1 - 1e-6f`.
+  compare against `FastMath::tanh(FastMath::kTanhClamp)`.
 - Code that relied on `FastMath::tanh` matching the Lambert Padé below
   |x| = 4 should evaluate that fraction itself.
 - No change is needed for `tanh_minimax()`, `tanh_accurate()` or the default

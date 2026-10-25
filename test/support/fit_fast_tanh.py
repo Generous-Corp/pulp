@@ -33,7 +33,7 @@ lives in test/test_fast_math.cpp.
 
 Requires numpy and scipy. Offline tooling: nothing in the build runs it.
 
-Usage: fit_fast_tanh.py [--clamps 5.10:5.30:0.01] [--grid 20000]
+Usage: test/support/fit_fast_tanh.py [--clamps 5.10:5.30:0.01] [--grid 20000]
 """
 
 from __future__ import annotations
