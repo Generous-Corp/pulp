@@ -66,6 +66,36 @@ TEST_CASE("FastMath tanh stays within its minimax bound at sample points", "[sig
                      WithinAbs(std::tanh(static_cast<double>(value)), 5.7e-5));
 }
 
+TEST_CASE("FastMath tanh holds its bound over every float from 2^-12 to its clamp",
+          "[signal][fast_math]") {
+    // Exhaustive over the fitted range (about 1.1e8 floats; tanh() is odd
+    // exactly, so the negative half is the same). The two tails are bounded
+    // analytically below rather than enumerated.
+    constexpr double kBound = 5.7e-5;
+    const std::uint32_t first = std::bit_cast<std::uint32_t>(0x1p-12f);
+    const std::uint32_t last = std::bit_cast<std::uint32_t>(FastMath::kTanhClamp);
+    double worst = 0.0;
+    for (std::uint32_t bits = first; bits <= last; ++bits) {
+        const float x = std::bit_cast<float>(bits);
+        worst = std::max(worst, std::abs(static_cast<double>(FastMath::tanh(x)) -
+                                         std::tanh(static_cast<double>(x))));
+    }
+    INFO("worst error on [2^-12, kTanhClamp]: " << worst);
+    REQUIRE(worst < kBound);
+    // Below 2^-12: tanh(x) = x(1 - x^2/3 + ...) and tanh() = x * a0 * (1 + O(x^2)),
+    // so the error is |x| times |1 - a0| (2.4e-4) plus O(x^2) terms: under
+    // 2^-12 * 2.5e-4 = 6.1e-8. Spot checks down to the subnormals:
+    for (float x : {0x1p-12f, 0x1p-13f, 1e-6f, 1e-20f, 1e-38f, 1e-44f})
+        REQUIRE(std::abs(static_cast<double>(FastMath::tanh(x)) -
+                         std::tanh(static_cast<double>(x))) < 6.2e-8);
+    // Beyond the clamp: tanh() is the constant edge = tanh(kTanhClamp) while
+    // std::tanh rises from tanh(kTanhClamp) toward 1, so the error there is
+    // at most max(|edge - tanh(kTanhClamp)|, 1 - edge).
+    const double edge = FastMath::tanh(FastMath::kTanhClamp);
+    REQUIRE(std::abs(edge - std::tanh(static_cast<double>(FastMath::kTanhClamp))) < kBound);
+    REQUIRE(1.0 - edge < kBound);
+}
+
 TEST_CASE("FastMath tanh clamps its argument where its rational reaches one",
           "[signal][fast_math]") {
     // Beyond the clamp the result is the rational at the clamp point, the same
