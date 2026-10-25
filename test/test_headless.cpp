@@ -444,7 +444,9 @@ TEST_CASE("build_editor_ui_for_assets keys an embedded editor's stores by the pl
     // The builder a UI_SCRIPT target's generated source installs.
     pulp::format::install_scripted_editor_builder();
     struct ResetBuilder {
-        ~ResetBuilder() { pulp::format::scripted_editor_builder_slot().store(nullptr); }
+        ~ResetBuilder() {
+            pulp::format::scripted_editor_builder_slot().store(nullptr);
+        }
     } reset_builder;
     pulp::format::HeadlessHost host(create_test_gain);
     std::string error;
