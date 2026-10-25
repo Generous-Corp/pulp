@@ -12,17 +12,17 @@ change lands, in merge order, so a note filed as `vX.Y.Z.md` by its author
 goes stale whenever another release lands first, and two PRs guessing the same
 version collide. Write `unreleased/<topic>.md` instead, with only `breaking`
 and `summary` in its frontmatter (see [`unreleased/README.md`](unreleased/README.md)).
-The bump commit that assigns the next SDK/CLI version folds every unreleased
+The SDK release PR that assigns the next SDK/CLI version folds every unreleased
 note into `v<version>.md` and writes `version` and `applies_if` for it
 (`tools/scripts/fold_migration_notes.py`, called by
-`tools/scripts/version_at_land.py`). If `v<version>.md` already exists, the
+`tools/scripts/release_derived_refresh.py`). If `v<version>.md` already exists, the
 unreleased notes are appended to it. Unreleased notes are validated when
 `pulp-cli` builds but are not embedded until they are folded.
 
 A pull request that adds `vX.Y.Z.md` itself is refused by
 `tools/scripts/migration_note_guard.py` (pre-push, `gates.sh`, and CI's
-`Enforce version & skill sync`); only the version-at-land bump commit may add
-one. Correcting a released note is still allowed.
+`Enforce version & skill sync`); only the release PR's derived-file refresh
+commit (`Release-Derived-Refresh:`) may add one. Correcting a released note is still allowed.
 
 ## File layout
 

@@ -381,11 +381,13 @@ alone would make one runner image's version the contract while `docs-material.ym
 and `docs-deploy.yml` drifted from it. If image drift ever does flip this check,
 pin all three together rather than just this one.
 
-**The release bot's bump skips the advisory lanes.** `control-shipping-native.yml`,
+**Release PRs skip the advisory lanes.** `control-shipping-native.yml`,
 `examples-validation.yml`, `intel-portability.yml` and `coverage.yml` AND
-`github.head_ref != 'release/version-bump'` into every job's condition. The
-bump's tree is main's plus version files, which those lanes already ran on, none
-of their contexts is required, and it keeps bump pull requests off hosted
+`github.head_ref != 'release/version-bump' &&
+!startsWith(github.head_ref, 'release-please--branches--')` into every job's
+condition, covering release-please's release PRs and the retired bump PR. Their
+tree is main's plus version files, which those lanes already ran on, none of
+their contexts is required, and it keeps release pull requests off hosted
 Windows, macOS and Linux runners. `tools/scripts/test_bump_fastpath.py` checks
 the guard on every job and that no skipped context is in
 `.github/rulesets/main-protection.json`.

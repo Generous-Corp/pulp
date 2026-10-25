@@ -38,13 +38,14 @@ concurrency:
 permissions:
   contents: read
 
-# Every job is skipped on the release bot's `release/version-bump` PR: its tree is
+# Every job is skipped on the release bot's `release/version-bump` PR and on
+# release-please's release PRs (`release-please--branches--*`): its tree is
 # main's plus version files, which this advisory workflow already ran on, and
 # none of its contexts is required (tools/scripts/test_bump_skips_advisory.py).
 jobs:
   changes:
     name: Detect example changes
-    if: github.head_ref != 'release/version-bump' && (github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO)
+    if: github.head_ref != 'release/version-bump' && !startsWith(github.head_ref, 'release-please--branches--') && (github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO)
     # Advisory bookkeeping must never wait behind the required macOS gate.
     runs-on: ubuntu-latest
     outputs:
@@ -107,7 +108,7 @@ jobs:
 
   resolve-advisory-macos:
     name: Resolve isolated advisory macOS runner
-    if: github.head_ref != 'release/version-bump' && (github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO)
+    if: github.head_ref != 'release/version-bump' && !startsWith(github.head_ref, 'release-please--branches--') && (github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO)
     runs-on: ubuntu-latest
     outputs:
       selector_json: ${{ steps.resolve.outputs.selector_json }}
@@ -126,7 +127,7 @@ jobs:
   validate:
     name: Validate examples (macOS)
     needs: [changes, resolve-advisory-macos]
-    if: github.head_ref != 'release/version-bump' && (needs.changes.outputs.examples == 'true')
+    if: github.head_ref != 'release/version-bump' && !startsWith(github.head_ref, 'release-please--branches--') && (needs.changes.outputs.examples == 'true')
     # The resolver rejects pulp-build* and pulp-preamble* labels. A dedicated
     # advisory selector may use the fleet only when it cannot steal a required
     # merge-gate runner; otherwise this uses GitHub-hosted macOS.
@@ -205,7 +206,7 @@ jobs:
   build-linux:
     name: Build examples (Linux x64)
     needs: changes
-    if: github.head_ref != 'release/version-bump' && (needs.changes.outputs.examples == 'true')
+    if: github.head_ref != 'release/version-bump' && !startsWith(github.head_ref, 'release-please--branches--') && (needs.changes.outputs.examples == 'true')
     # Public pull_request workflow code stays hosted. Private Mac Pro routing
     # is allowed only for operator-dispatched runs until a runner group can
     # enforce trusted-workflow access outside PR-controlled YAML.
@@ -246,7 +247,7 @@ jobs:
     # example-validation-<ref> group open so the superseding run can never
     # start. Under `always()` a cancelled run also reports a spurious FAIL,
     # because every upstream result reads `cancelled`.
-    if: ${{ github.head_ref != 'release/version-bump' && !cancelled() }}
+    if: ${{ github.head_ref != 'release/version-bump' && !startsWith(github.head_ref, 'release-please--branches--') && !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - name: Report validation outcome

@@ -1,0 +1,101 @@
+name: Release PR enqueue
+
+# Lands release-please's release PRs without taking a merge-queue slot from a
+# real PR (tools/scripts/release_pr_enqueue.py; docs/guides/versioning.md
+# § Release PR). A green release PR is enqueued only when the queue for main
+# holds no PR other than release PRs, bound to the head it read green
+# (`expectedHeadOid`). Two paths skip the idle test, never the green one:
+#
+#   - the max-wait backstop: a release PR open longer than
+#     PULP_RELEASE_MAX_WAIT_HOURS (default 4) is enqueued into a busy queue,
+#     so a queue that is never idle cannot starve releases;
+#   - workflow_dispatch with `force`, the manual on-demand path.
+#
+# Immediately before enqueueing it re-runs the release-PR proof
+# (generated_version_bump_check.py, loaded from origin/main) on the exact head
+# it will pass as expectedHeadOid, and trusts no commit status for that
+# decision. So it runs only as main's own code: on a push to main, on the
+# schedule, or on a dispatch from main. It reads the release branches as data
+# and executes nothing from them.
+#
+# Enqueues with RELEASE_BOT_TOKEN, the identity version-at-land armed its bump
+# PRs with: a GITHUB_TOKEN-driven merge group would not trigger the required
+# checks.
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Enqueue a green release PR even when other PRs are queued"
+        type: boolean
+        required: false
+        default: false
+
+concurrency:
+  # Every run re-reads the queue, so a pending run superseded by a newer one
+  # loses nothing.
+  group: release-pr-enqueue
+  cancel-in-progress: false
+
+permissions:
+  contents: read  # the proof reads commits; the enqueue goes through RELEASE_BOT_TOKEN
+
+jobs:
+  enqueue:
+    if: >-
+      vars.PULP_RELEASE_PLEASE != 'off'
+      && github.ref == 'refs/heads/main'
+      && (github.event_name == 'push'
+        || github.event_name == 'workflow_dispatch'
+        || (github.event_name == 'schedule'
+          && github.repository == vars.PULP_PRIMARY_REPO))
+    # The release secrets live in the release-bot environment (deployments
+    # from main only), not at repository level.
+    environment: release-bot
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require the release-bot environment's secrets
+        env:
+          RELEASE_BOT_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN }}
+        run: |
+          missing=""
+          for name in RELEASE_BOT_TOKEN; do
+            [ -n "${!name}" ] || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::release-bot environment secrets missing:$missing. Create the" \
+                 "release-bot environment (deployment branches: main only) and move the" \
+                 "release secrets into it before enabling this workflow."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0  # the proof reproduces the SDK refresh from history
+          # GITHUB_TOKEN (read) to fetch the release branches as data.
+          persist-credentials: true
+
+      - name: Enqueue a green release PR when the queue is idle
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN }}
+          GH_READ_TOKEN: ${{ github.token }}
+          MAX_WAIT_HOURS: ${{ vars.PULP_RELEASE_MAX_WAIT_HOURS || '4' }}
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.force || false }}
+        run: |
+          set -euo pipefail
+          force=()
+          if [ "$FORCE" = "true" ]; then
+            force=(--force)
+          fi
+          git fetch --quiet --no-tags origin main
+          git show origin/main:tools/scripts/generated_version_bump_check.py \
+              > "$RUNNER_TEMP/release-pr-proof.py"
+          python3 tools/scripts/release_pr_enqueue.py \
+              --repo-name "$GITHUB_REPOSITORY" --repo . \
+              --proof-script "$RUNNER_TEMP/release-pr-proof.py" \
+              --max-wait-hours "$MAX_WAIT_HOURS" "${force[@]}"

@@ -420,8 +420,12 @@ def _failure_tail(error: BaseException, limit: int = 5) -> str:
     return f" ({error})"
 
 
-def _refresh_derived(repo: Path) -> list[str]:
+def _refresh_derived(repo: Path, skip: tuple[str, ...] = ()) -> list[str]:
     """Regenerate files that embed a version, returning those that changed.
+
+    `skip` names regenerators to leave out by their first path. The
+    release-please refresh (release_derived_refresh.py) skips the plugin
+    disposition, which its release PR updates through `extra-files`.
 
     Best-effort by design: a regenerator that fails must not abort a bump that
     is otherwise correct, because the bot is the single writer for versions and
@@ -432,6 +436,8 @@ def _refresh_derived(repo: Path) -> list[str]:
     of being indistinguishable from one nothing ever tried to refresh."""
     refreshed: list[str] = []
     for paths, command in _DERIVED_REGENERATORS:
+        if paths[0] in skip:
+            continue
         # A repo that does not carry this derived file is not a failure to
         # report: the fixture repos these functions are tested against declare
         # only the surfaces they care about, and a regenerator whose subject is

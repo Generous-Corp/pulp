@@ -18,12 +18,13 @@ concurrency:
   group: control-shipping-native-${{ github.event_name == 'schedule' && 'nightly' || format('arm-{0}', github.ref) }}
   cancel-in-progress: true
 
-# Every job is skipped on the release bot's `release/version-bump` PR: its tree is
+# Every job is skipped on the release bot's `release/version-bump` PR and on
+# release-please's release PRs (`release-please--branches--*`): its tree is
 # main's plus version files, which this advisory workflow already ran on, and
 # none of its contexts is required (tools/scripts/test_bump_skips_advisory.py).
 jobs:
   native:
-    if: github.head_ref != 'release/version-bump' && (github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO)
+    if: github.head_ref != 'release/version-bump' && !startsWith(github.head_ref, 'release-please--branches--') && (github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO)
     strategy:
       fail-fast: false
       matrix:
@@ -344,7 +345,7 @@ jobs:
             smoke/build/**/*.control-shipping-report.json
 
   evidence:
-    if: github.head_ref != 'release/version-bump'
+    if: github.head_ref != 'release/version-bump' && !startsWith(github.head_ref, 'release-please--branches--')
     needs: native
     runs-on: ubuntu-latest
     name: consolidated evidence

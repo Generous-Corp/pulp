@@ -92,7 +92,7 @@ def render_report(
         elif intent_declared and not any_bumped:
             tag = f"✓ intent declared (Version-Bump: {v.surface.name}={v.trailer_override})"
         elif assigned_post_merge:
-            tag = "✓ assigned post-merge (version-at-land infers this level)"
+            tag = "✓ assigned post-merge (release-please, from the commit type)"
         elif any_bumped:
             unbumped = [vf.path for vf, b in per_file if not b]
             tag = f"✗ partial bump — not moved: {', '.join(unbumped)}"

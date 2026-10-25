@@ -34,13 +34,14 @@ concurrency:
   group: intel-portability-${{ github.event_name == 'schedule' && 'nightly' || format('arm-{0}', github.ref) }}
   cancel-in-progress: true
 
-# Every job is skipped on the release bot's `release/version-bump` PR: its tree is
+# Every job is skipped on the release bot's `release/version-bump` PR and on
+# release-please's release PRs (`release-please--branches--*`): its tree is
 # main's plus version files, which this advisory workflow already ran on, and
 # none of its contexts is required (tools/scripts/test_bump_skips_advisory.py).
 jobs:
   x86_64-build-test:
     name: x86_64 build + test (Rosetta, advisory)
-    if: github.head_ref != 'release/version-bump' && (github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO)
+    if: github.head_ref != 'release/version-bump' && !startsWith(github.head_ref, 'release-please--branches--') && (github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO)
     # Fork PRs run on the same free GitHub-hosted runner; only skip scheduled
     # noise on forks. Scheduled refreshes run only in the primary repository.
     runs-on: macos-15

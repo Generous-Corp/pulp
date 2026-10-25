@@ -223,9 +223,10 @@ path. `revision` is the most recent commit touching that path; `object_id` is
 `git rev-parse <revision>:<path>`. Change a pinned file and its row still names
 the previous blob.
 
-**Do not re-pin it in your PR.** `version_at_land._refresh_derived` regenerates
-the ledger and its receipt inside the `chore: bump versions` commit the release
-bot writes to `main`, which is the one place a re-pin costs nobody a rebase.
+**Do not re-pin it in your PR.** `release_derived_refresh.py` (through
+`version_at_land._refresh_derived`) regenerates the ledger and its receipt on
+the SDK release PR the release bot keeps open, which is the one place a re-pin
+costs nobody a rebase.
 Doing it in a PR instead re-creates the cost the move removed: ~148 non-merge
 commits in 25 days changed **only** those two generated files, and they collide
 on github.com, where the local `pulp-gpu-ledger` merge driver cannot run.

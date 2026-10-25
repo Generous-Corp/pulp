@@ -341,10 +341,14 @@ instead goes stale whenever another release lands first, and two PRs guessing
 the same one collide on `vX.Y.Z.md`. So a PR never picks `X` (`tools/scripts/migration_note_guard.py` refuses a
 hand-added `vX.Y.Z.md`): it writes
 `docs/migrations/unreleased/<topic>.md` with only `breaking` and `summary`, and
-the version-at-land bump that assigns the SDK version folds it into
+the SDK release PR that assigns the SDK version folds it into
 `v<assigned>.md` with the canonical `applies_if`
-(`tools/scripts/fold_migration_notes.py`). A note sitting in `unreleased/` is
-not shown by `pulp upgrade --notes` until that fold; confirm after release that
+(`tools/scripts/release_derived_refresh.py` calls
+`tools/scripts/fold_migration_notes.py` on the release-please branch, in a
+commit carrying the `Release-Derived-Refresh:` marker the guard accepts). The
+fold lands with the release PR, not with your merge, so a note sitting in
+`unreleased/` is not shown by `pulp upgrade --notes` until the release PR
+merges; confirm after release that
 `v<assigned>.md` exists and that `git merge-base --is-ancestor <merge> vX.Y.Z`
 is true against that tag and false against the previous one.
 

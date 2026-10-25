@@ -1,22 +1,24 @@
 #!/usr/bin/env python3
-"""Tests for pending_intent_liveness.py — the time-based backstop that catches
-a positive version intent the version-at-land bot never applied.
+"""Tests for pending_intent_liveness.py — the release liveness alarm.
 
-Load-bearing behavior: a positive ``Version-Bump: <surface>=<level>`` intent
-after the newest ``Version-Bump-Applied`` marker must ALARM once it is older
-than the grace window, and must stay quiet when (a) it is younger than the
-window, (b) it has since been applied (a newer marker exists), (c) there is no
-intent at all (a no-intent fix/feat is the stranded-fix DETECTOR's job, not
-this alarm's — they must not double-fire), or (d) the only intent lives on a
-re-sync merge commit (``--no-merges`` scoping).
+Load-bearing behavior: the alarm fires when a release PR has been open past
+the threshold, when a merged release PR is still pending its tag past the
+grace window, or when release-please.yml has not succeeded within the
+threshold (or ever), or when a merge after a surface's newest tag touches its
+trigger paths without an explicitly non-releasing title and no release PR
+exists for it past the threshold; and it stays quiet for a young release PR,
+a fresh hand-off, a recent successful run, PRs that are not release PRs, a
+`ci:`-style title, an untouched surface, and a surface with an open release
+PR.
 """
 from __future__ import annotations
 
-import shutil
+import json
 import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -24,119 +26,116 @@ sys.path.insert(0, str(HERE))
 
 import pending_intent_liveness as pil  # noqa: E402
 
-
-def _git(repo: Path, *args: str) -> None:
-    subprocess.run(["git", "-C", str(repo), *args], check=True,
-                   capture_output=True, text=True)
+NOW = datetime(2026, 10, 24, 18, 0, tzinfo=timezone.utc)
 
 
-def _rev(repo: Path, ref: str = "HEAD") -> str:
-    return subprocess.run(["git", "-C", str(repo), "rev-parse", ref],
-                          capture_output=True, text=True, check=True).stdout.strip()
+def ago(minutes: int) -> str:
+    return (NOW - timedelta(minutes=minutes)).isoformat().replace("+00:00", "Z")
 
 
-def _ct(repo: Path, ref: str = "HEAD") -> int:
-    return int(subprocess.run(
-        ["git", "-C", str(repo), "show", "-s", "--format=%ct", ref],
-        capture_output=True, text=True, check=True).stdout)
+def open_pr(minutes: int, branch: str = "release-please--branches--main") -> dict:
+    return {"number": 3, "title": "chore(main): release 1.11.0",
+            "head": {"ref": branch}, "created_at": ago(minutes)}
 
 
-class LivenessAlarmTests(unittest.TestCase):
+def merged_pr(minutes: int) -> dict:
+    return {"number": 4, "title": "chore(main): release plugin 0.492.0",
+            "merged_at": ago(minutes)}
+
+
+class Assess(unittest.TestCase):
+    def kinds(self, result: dict, key: str = "overdue") -> list[str]:
+        return [row["kind"] for row in result[key]]
+
+    def test_healthy_state_is_quiet(self) -> None:
+        result = pil.assess([open_pr(30)], [merged_pr(10)], ago(5), NOW)
+        self.assertEqual(result["overdue"], [])
+        self.assertEqual(self.kinds(result, "pending"), ["release-pr-overdue", "handoff-stuck"])
+
+    def test_an_old_release_pr_alarms(self) -> None:
+        result = pil.assess([open_pr(361)], [], ago(5), NOW)
+        self.assertEqual(self.kinds(result), ["release-pr-overdue"])
+
+    def test_a_merged_release_pr_left_pending_alarms(self) -> None:
+        result = pil.assess([], [merged_pr(61)], ago(5), NOW)
+        self.assertEqual(self.kinds(result), ["handoff-stuck"])
+
+    def test_a_silent_release_please_alarms(self) -> None:
+        self.assertEqual(self.kinds(pil.assess([], [], ago(400), NOW)), ["release-please-silent"])
+        self.assertEqual(self.kinds(pil.assess([], [], None, NOW)), ["release-please-silent"])
+
+    def test_non_release_prs_are_ignored(self) -> None:
+        result = pil.assess([open_pr(9999, branch="fix/x")], [], ago(5), NOW)
+        self.assertEqual(result, {"overdue": [], "pending": []})
+
+    def test_thresholds_are_parameters(self) -> None:
+        result = pil.assess([open_pr(100)], [merged_pr(20)], ago(5), NOW,
+                            threshold_minutes=90, grace_minutes=15)
+        self.assertEqual(self.kinds(result), ["release-pr-overdue", "handoff-stuck"])
+
+
+class UnreleasedChanges(unittest.TestCase):
     def setUp(self) -> None:
-        self.repo = Path(tempfile.mkdtemp(prefix="pulp-liveness-"))
-        self._n = 0
-        cfg = HERE / "versioning.json"
-        (self.repo / "tools/scripts").mkdir(parents=True)
-        shutil.copy(cfg, self.repo / "tools/scripts/versioning.json")
-        self.cfg = self.repo / "tools/scripts/versioning.json"
-        _git(self.repo, "init", "-q", "-b", "main")
-        _git(self.repo, "config", "user.email", "t@t")
-        _git(self.repo, "config", "user.name", "t")
-        _git(self.repo, "config", "commit.gpgsign", "false")
-        (self.repo / "CMakeLists.txt").write_text("project(Pulp VERSION 0.1.0)\n")
-        _git(self.repo, "add", "-A")
-        _git(self.repo, "commit", "-q", "-m", "seed")
+        self._tmp = tempfile.TemporaryDirectory()
+        self.repo = Path(self._tmp.name)
+        self.git("init", "-q", "-b", "main")
+        self.git("config", "user.email", "t@example.com")
+        self.git("config", "user.name", "t")
+        versioning = {"surfaces": {
+            "sdk": {"trigger_paths": ["core/**"],
+                    "release_please": {"config": "rp/sdk.json", "manifest": "rp/sdk.m.json"}},
+            "plugin": {"trigger_paths": [".claude-plugin/**"],
+                       "release_please": {"config": "rp/plugin.json", "manifest": "rp/p.m.json"}},
+        }}
+        self.write("versioning.json", json.dumps(versioning))
+        self.write("rp/sdk.json", json.dumps({"include-component-in-tag": False,
+                                              "packages": {".": {}}}))
+        self.write("rp/plugin.json", json.dumps({"packages": {".": {"component": "plugin"}}}))
+        self.write("core/a.cpp", "0\n")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "base")
+        self.git("tag", "v1.0.0")
+        self.git("tag", "plugin-v0.1.0")
 
     def tearDown(self) -> None:
-        shutil.rmtree(self.repo, ignore_errors=True)
+        self._tmp.cleanup()
 
-    def _commit(self, msg: str, f: str = "core/runtime/src/x.cpp") -> str:
-        self._n += 1
-        p = self.repo / f
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(f"// {msg} {self._n}\nint x{self._n}(){{return {self._n};}}\n")
-        _git(self.repo, "add", "-A")
-        _git(self.repo, "commit", "-q", "-m", msg)
-        return _rev(self.repo)
+    def git(self, *args: str) -> str:
+        return subprocess.run(["git", "-C", str(self.repo), *args], check=True,
+                              capture_output=True, text=True, encoding="utf-8").stdout
 
-    def _marker(self, ver: str) -> str:
-        self._n += 1
-        (self.repo / f"marker{self._n}.txt").write_text(ver)
-        _git(self.repo, "add", "-A")
-        _git(self.repo, "commit", "-q", "-m",
-             f"chore: bump versions\n\nVersion-Bump-Applied: sdk={ver}\n")
-        return _rev(self.repo)
+    def write(self, rel: str, text: str) -> None:
+        path = self.repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
 
-    def _assess(self, now_off_min: int, grace: int = 45) -> dict:
-        started = self._intent_epoch
-        return pil.assess(self.repo, self.cfg, "HEAD", grace_minutes=grace,
-                          now_epoch=started + now_off_min * 60)
+    def merge(self, title: str, path: str = "core/a.cpp") -> None:
+        self.git("checkout", "-q", "-b", "topic")
+        self.write(path, title + "\n")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "work")
+        self.git("checkout", "-q", "main")
+        self.git("merge", "-q", "--no-ff", "-m", f"Merge pull request #1 from topic\n\n{title}",
+                 "topic")
+        self.git("branch", "-q", "-D", "topic")
 
-    def test_aged_intent_alarms(self) -> None:
-        self._marker("0.1.0")
-        self._commit("feat(core): new API\n\nVersion-Bump: sdk=minor\n")
-        self._intent_epoch = _ct(self.repo)
-        r = self._assess(now_off_min=60)
-        self.assertTrue(r["overdue"], "aged pending intent must alarm")
-        self.assertEqual(r["overdue"][0]["surface"], "sdk")
+    def rows(self, open_surfaces=frozenset(), minutes_later: int = 400) -> list[dict]:
+        now = datetime.now(timezone.utc) + timedelta(minutes=minutes_later)
+        return pil.unreleased_changes(self.repo, self.repo / "versioning.json",
+                                      set(open_surfaces), now, 360)
 
-    def test_fresh_intent_is_quiet(self) -> None:
-        self._marker("0.1.0")
-        self._commit("feat(core): new API\n\nVersion-Bump: sdk=minor\n")
-        self._intent_epoch = _ct(self.repo)
-        r = self._assess(now_off_min=5)
-        self.assertFalse(r["overdue"], "within-grace intent must not alarm")
-        self.assertTrue(r["pending"], "within-grace intent should be reported pending")
+    def test_an_invisible_fix_with_no_release_pr_alarms(self) -> None:
+        self.merge("Paint the knob on the snapped grid")
+        rows = self.rows()
+        self.assertEqual([r["kind"] for r in rows], ["unreleased-change"])
+        self.assertIn("sdk since v1.0.0", rows[0]["title"])
 
-    def test_applied_intent_is_quiet(self) -> None:
-        self._marker("0.1.0")
-        self._commit("feat(core): new API\n\nVersion-Bump: sdk=minor\n")
-        self._intent_epoch = _ct(self.repo)
-        self._marker("0.2.0")  # bot applied it — newer marker moves the base past it
-        r = self._assess(now_off_min=60)
-        self.assertFalse(r["overdue"], "an applied intent must not alarm")
-
-    def test_no_intent_fixfeat_is_quiet(self) -> None:
-        # A user-facing fix/feat with NO intent is the stranded-fix detector's
-        # job; this alarm must stay quiet so the two don't double-fire.
-        self._marker("0.1.0")
-        d = self._commit("feat(core): change with no intent trailer")
-        self._intent_epoch = _ct(self.repo, d)
-        r = self._assess(now_off_min=60)
-        self.assertFalse(r["overdue"], "no-intent fix/feat is not this alarm's concern")
-
-    def test_merge_only_intent_is_quiet(self) -> None:
-        # Intent that only exists on a re-sync MERGE commit is not an authored
-        # release intent (--no-merges scoping), so it must not alarm.
-        self._marker("0.1.0")
-        base = _rev(self.repo)
-        _git(self.repo, "checkout", "-q", "-b", "side")
-        self._commit("chore(core): side work")
-        _git(self.repo, "checkout", "-q", "main")
-        _git(self.repo, "merge", "--no-ff", "-q", "side", "-m",
-             "Merge side into main\n\nVersion-Bump: sdk=minor\n")
-        self._intent_epoch = _ct(self.repo)
-        r = self._assess(now_off_min=60)
-        self.assertFalse(r["overdue"], "merge-commit-only intent must not alarm")
-
-    def test_no_marker_yet_is_quiet(self) -> None:
-        # Before the first apply there is no established "processed up to here"
-        # line; the alarm stays quiet (the flip canary bootstraps the marker).
-        self._commit("feat(core): new API\n\nVersion-Bump: sdk=minor\n")
-        self._intent_epoch = _ct(self.repo)
-        r = self._assess(now_off_min=600)
-        self.assertIsNone(r["base"])
-        self.assertFalse(r["overdue"])
+    def test_quiet_cases(self) -> None:
+        self.merge("ci: tidy the workflow")
+        self.merge("fix(plugin): only plugin", path=".claude-plugin/x.json")
+        self.assertEqual([r["title"].split(" ")[0] for r in self.rows()], ["plugin"])
+        self.assertEqual(self.rows(open_surfaces={"plugin"}), [])
+        self.assertEqual(self.rows(minutes_later=0), [])
 
 
 if __name__ == "__main__":

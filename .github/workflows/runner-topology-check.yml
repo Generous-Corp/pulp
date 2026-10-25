@@ -58,6 +58,9 @@ jobs:
     if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     runs-on: ubuntu-latest
     name: Reconcile routing lanes against live runners
+    # The release secrets live in the release-bot environment (deployments
+    # from main only).
+    environment: release-bot
 
     env:
       DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
@@ -69,6 +72,17 @@ jobs:
       PULP_GH_CLI: gh
 
     steps:
+      - name: Require the release-bot environment's secrets
+        env:
+          RELEASE_BOT_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN }}
+        run: |
+          if [ -z "$RELEASE_BOT_TOKEN" ]; then
+            echo "::error::release-bot environment secrets missing: RELEASE_BOT_TOKEN. Create the" \
+                 "release-bot environment (deployment branches: main only) and add the" \
+                 "release secrets to it before removing the repository-level copies."
+            exit 1
+          fi
+
       - uses: actions/checkout@v7
 
       # The snapshot freshness check parses TOML (tomllib, Python 3.11+); pin

@@ -4,8 +4,9 @@
 - `build.yml`'s classify step reports `bump-fast-path: taken|refused: <why>`
   for the release bot's bump only (run here in Bash with a fake verifier).
 - `bump_fastpath_report.py` counts those notices.
-- The four advisory workflows skip every job on `release/version-bump`, still
-  run for any other pull request, and none of their contexts is required.
+- The four advisory workflows skip every job on `release/version-bump` and on
+  release-please's release branches, still run for any other pull request, and
+  none of their contexts is required.
 """
 
 from __future__ import annotations
@@ -32,7 +33,8 @@ ADVISORY = {
     ".github/workflows/examples-validation.yml": "Example validation",
     ".github/workflows/intel-portability.yml": "Intel portability (advisory)",
 }
-GUARD = "github.head_ref != 'release/version-bump'"
+GUARD = ("github.head_ref != 'release/version-bump'"
+         " && !startsWith(github.head_ref, 'release-please--branches--')")
 
 SPEC = importlib.util.spec_from_file_location("bump_fastpath_report", REPORT)
 assert SPEC is not None and SPEC.loader is not None
@@ -246,13 +248,18 @@ class AdvisorySkips(unittest.TestCase):
                         self.assertNotIn("||", rest, "an unparenthesized || would bind past the guard")
                     self.assertEqual(rest.count("("), rest.count(")"))
 
-    def test_the_guard_is_false_only_on_the_bump_branch(self) -> None:
+    def test_the_guard_is_false_only_on_the_release_branches(self) -> None:
         def guard(head_ref: str) -> bool:
-            return head_ref != "release/version-bump"
-        self.assertFalse(guard("release/version-bump"))
-        for head_ref in ("", "feature/x", "release/version-bump-2", "release/other"):
+            return (head_ref != "release/version-bump"
+                    and not head_ref.startswith("release-please--branches--"))
+        for head_ref in ("release/version-bump", "release-please--branches--main",
+                         "release-please--branches--main--components--plugin"):
+            self.assertFalse(guard(head_ref), head_ref)
+        for head_ref in ("", "feature/x", "release/version-bump-2", "release/other",
+                         "fix/release-please--branches--main"):
             self.assertTrue(guard(head_ref), head_ref)
-        self.assertEqual(GUARD, "github.head_ref != 'release/version-bump'")
+        self.assertEqual(GUARD, "github.head_ref != 'release/version-bump'"
+                                " && !startsWith(github.head_ref, 'release-please--branches--')")
 
     def test_non_bump_pull_requests_still_trigger_each_workflow(self) -> None:
         for workflow in ADVISORY:

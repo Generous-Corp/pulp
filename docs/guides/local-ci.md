@@ -2973,6 +2973,32 @@ validation. Version/skill enforcement and both Vellum gates still run, and
 pushes to main, releases, scheduled work, and manual dispatches retain their
 normal validation.
 
+release-please's release PRs (`release-please--branches--main` and
+`…--components--plugin`) reach the same verifier through a second recognizer,
+because release-please's commit cannot be re-run in CI. The PR must be
+release-please's own (open, release-please's title, the `autorelease:
+pending` label, one or two commits, both SSH-signed by the release bot with
+its name, email and account as author and committer, the release commit's
+subject equal to the title and the refresh commit's marker bound to the PR),
+and its base must be on protected main (the compare API). The title's version
+must be exactly one semantic-version step from the base (canonical ASCII
+x.y.z); a major step only when a commit release-please counted since the
+surface's previous release tag (not wholly under its `exclude-paths`) has a
+`<type>!:` header or a `BREAKING CHANGE:` footer. The editable PR body is not
+evidence. release-please's commit may modify only the files its protected-base
+configuration declares (`extra-files` and the manifest), and only there:
+JSON must parse without duplicate keys, equal the base with the declared
+JSONPath locations set to the new version, and differ in bytes only on those
+lines, each by the quoted old version becoming the new one; the CMake file may
+change only on its `x-release-please-version` line, by the old version as one
+whole token. An SDK PR's tree must also equal a rerun of the protected base's
+`release_derived_refresh.py`. A merge group may be built on a
+main that moved past the PR's base: `classify` steps past the refresh commit,
+loads the verifier from the PR's base once the compare API shows main is ahead
+of it (a queue entry ahead cannot supply it), and the verifier requires the
+group tree to be that main plus exactly the PR's edits, on paths main has not
+touched since the PR's base.
+
 On a `pull_request` event the run checks out GitHub's synthesized
 `refs/pull/N/merge` commit, and a freshly opened bump PR's payload usually has
 a null or stale `merge_commit_sha` and no `after`, so by default the verifier

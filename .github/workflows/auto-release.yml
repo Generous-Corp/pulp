@@ -34,7 +34,9 @@ concurrency:
 
 permissions:
   contents: write   # tag push
-  issues: write     # open the "stranded fix/feat" tracker (issue #1009)
+  issues: write     # open the "stranded fix/feat" tracker (issue #1009);
+                    # swap a tagged release PR's release-please labels
+  pull-requests: read  # read the merged release PRs the label hand-off swaps
   checks: read      # the Windows CLI pre-tag check reads the compile-verdict check
   # NO `actions: write`. This workflow must not be able to cancel a workflow
   # run. It held that scope to cancel "superseded" release builds, which is how
@@ -45,8 +47,27 @@ jobs:
   tag:
     runs-on: ubuntu-latest
     name: Tag moved versions
+    # The release secrets live in the release-bot environment (deployments
+    # from main only).
+    environment: release-bot
 
     steps:
+      - name: Require the release-bot environment's secrets
+        env:
+          RELEASE_BOT_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN }}
+          RELEASE_BOT_SSH_SIGNING_KEY: ${{ secrets.RELEASE_BOT_SSH_SIGNING_KEY }}
+        run: |
+          missing=""
+          for name in RELEASE_BOT_TOKEN RELEASE_BOT_SSH_SIGNING_KEY; do
+            [ -n "${!name}" ] || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::release-bot environment secrets missing:$missing. Create the" \
+                 "release-bot environment (deployment branches: main only) and add the" \
+                 "release secrets to it before removing the repository-level copies."
+            exit 1
+          fi
+
       - name: Checkout with range context
         uses: actions/checkout@v7
         with:
@@ -499,6 +520,19 @@ jobs:
           fi
         id: tag
 
+      # release-please only maintains the release PRs (`skip-github-release`),
+      # so this workflow owns the step its release job would have run: once a
+      # merged release PR's tag exists, swap its pending labels for
+      # `autorelease: tagged`. Until then release-please declines to open the
+      # next release PR. A withheld SDK tag keeps the labels; the swap follows
+      # the push that finally cuts it. release-please.yml repeats this before
+      # every run, so a failure here delays the next release PR, never loses it.
+      - name: Hand tagged release PRs back to release-please
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 tools/scripts/release_please_handoff.py --repo-name "$GITHUB_REPOSITORY"
+
       # ── No supersede reaper. This is load-bearing. ─────────────────────
       #
       # The "supersede reaper" that used to live here has been REMOVED.
@@ -523,9 +557,10 @@ jobs:
       # release to completion over destroying it. Nothing in the release path may
       # cancel or delete work that is still in flight.
 
-      # CHANGELOG.md is not written here: the version-bump commit renders it
-      # (version_at_land.py's derived regenerators), so a failed binary build
-      # never blocks the changelog and a failed render never blocks a release.
+      # CHANGELOG.md is not written here: release-please.yml renders it onto
+      # the SDK release PR (release_derived_refresh.py), so a failed binary
+      # build never blocks the changelog and a failed render never blocks a
+      # release.
 
       # ── Stranded fix/feat detector (issue #1009) ─────────────────────
       #
@@ -580,6 +615,10 @@ jobs:
           # detector (nothing was applying the intent). The pending-intent
           # liveness alarm covers "intent present but the bot never applied it".
           PULP_ACCEPT_INTENT_TRAILERS: '1'
+          # Unset or anything but `off`: release-please assigns versions, so a
+          # fix/feat waits in its surface's release PR rather than being
+          # stranded. `off` restores the version-at-land behaviour below.
+          PULP_RELEASE_PLEASE: ${{ vars.PULP_RELEASE_PLEASE }}
         run: |
           set -euo pipefail
 
@@ -643,6 +682,42 @@ jobs:
           echo "Live release signal: ${release_signal}"
           echo "Uncovered surfaces: ${uncovered_surfaces}"
           echo "Recovery levels: ${uncovered_levels}"
+
+          if [ "${PULP_RELEASE_PLEASE:-}" != "off" ]; then
+              # Under release-please a fix/feat is covered once its surface's
+              # standing release PR exists; that PR carries it to a tag. When
+              # none exists yet (release-please runs on this same push, or the
+              # change is one it cannot see), say so here and leave the
+              # tracker to the release liveness alarm, which opens one only if
+              # the change is still unreleased with no release PR after its
+              # threshold (pending-intent-liveness.yml, `unreleased-change`).
+              missing=""
+              for surface in ${uncovered_surfaces//,/ }; do
+                  if [ "$surface" = sdk ]; then
+                      branch="release-please--branches--main"
+                  else
+                      branch="release-please--branches--main--components--plugin"
+                  fi
+                  open_pr=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --base main \
+                      --head "$branch" --label "autorelease: pending" --label "release: $surface" \
+                      --json number --jq '.[0].number // empty' 2>/dev/null || true)
+                  if [ -n "$open_pr" ]; then
+                      echo "[$surface] covered by release PR #${open_pr}."
+                  else
+                      missing="${missing:+$missing,}$surface"
+                  fi
+              done
+              if [ -z "$missing" ]; then
+                  exit 0
+              fi
+              echo "::warning::Release signal on ${missing} (${release_signal//\"/\\\"}) has no open release PR yet." \
+                   "release-please opens one within minutes if it can see the change (a typed" \
+                   "title or commit on a counted path). If it cannot, edit the merged PR's body to add" \
+                   "BEGIN_COMMIT_OVERRIDE / <type>(<scope>): <summary> / END_COMMIT_OVERRIDE;" \
+                   "release-please re-reads it on its next run. The release liveness alarm opens a" \
+                   "tracker if it is still unreleased after its threshold."
+              exit 0
+          fi
 
           pr_ref="${pr_number:+#${pr_number} }"
           subject_safe="${subject//\"/\\\"}"

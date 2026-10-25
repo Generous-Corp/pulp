@@ -1,5 +1,7 @@
 name: Version-at-Land (single-writer, push)
 
+# RETIRED: see the `on:` block. The header below describes the route it ran.
+
 # Single-writer version assignment on main (T1.1 — see
 # planning/2026-07-07-parallel-merge-land-coordination.md and
 # docs/guides/version-at-land-cutover.md).
@@ -18,48 +20,25 @@ name: Version-at-Land (single-writer, push)
 # tools/scripts/test_version_at_land.py (concurrency + idempotency).
 
 on:
-  push:
-    branches: [main]
-    # Deliberately NO `paths:` filter — run on EVERY push to main. A filter here
-    # is a silent-loss hole: a fix/feat that touches only a surface path the
-    # filter omits (e.g. `experimental/pulp-rs/**`, a live sdk trigger path in
-    # versioning.json) would declare a `Version-Bump:` intent, merge, never
-    # trigger this workflow, and — because the auto-release stranded detector
-    # treats a pending intent as covered — never alarm. The drain is bounded by
-    # the `Version-Bump-Applied` marker, so a push with no intent in range is a
-    # cheap no-op (see test_version_at_land.py::test_non_trigger_change_is_noop);
-    # correctness beats saving a few trivial ubuntu runs. The pending-intent
-    # liveness alarm is the time-based backstop if this ever fails to run.
-  # Supersession-immune safety net. GitHub holds only ONE queued run per
-  # concurrency group; on a high-churn main every new push throws the bot's
-  # queued run to the back and drops the previous one, so under hosted-runner
-  # backlog the push-triggered drain can starve FOREVER — the exact death spiral
-  # coverage.yml documents and fixed the same way (see its header). A scheduled
-  # run lands in its OWN concurrency group (below), immune to push supersession,
-  # so pending intent is always drained within the cadence.
-  schedule:
-    - cron: '*/15 * * * *'
-  # Dead-end bump PRs are healed when they die, not on the next main push.
-  # A drain that finds a stale bump PR still able to land waits for it (exit 0);
-  # if that PR is then ejected from the merge queue, or one of its required
-  # checks fails, nothing else would re-run the drain until main moves. These
-  # two events re-run it at that moment. Both are scoped in the job `if` to the
-  # bot's own bump branch in this repository on the PR route, and the job always
-  # checks out main, never PR code. `pull_request` branch filters match the
-  # BASE branch, so the head-branch scope lives in the `if`.
-  pull_request:
-    types: [dequeued]
-  workflow_run:
-    # The workflows that report the required checks on a bump PR.
-    workflows:
-      - Build and Test
-      - Drift fast
-      - Vellum freeze
-      - Vellum trusted gate
-      - Versioning & Skill-Sync
-      - WebCLAP Cloudflare
-    types: [completed]
-    branches: [release/version-bump]
+  # RETIRED (2026-10-24): release-please's standing release PRs assign versions
+  # now (release-please.yml, docs/guides/versioning.md § Release PR). Every
+  # automatic trigger is removed so this workflow opens no bump PR; the job and
+  # its concurrency logic stay intact for rollback. Do not dispatch it while
+  # release-please is live: both would assign the same versions.
+  #
+  # Rollback (docs/guides/version-at-land-cutover.md § Rollback): set
+  # PULP_RELEASE_PLEASE=off, then restore the triggers below and this file's
+  # entry in .github/schedule-backstop.json.
+  #
+  #   push: { branches: [main] }        # no paths: filter, see git history
+  #   schedule: [{ cron: '*/15 * * * *' }]
+  #   pull_request: { types: [dequeued] }
+  #   workflow_run:
+  #     workflows: [Build and Test, Drift fast, Vellum freeze,
+  #                 Vellum trusted gate, Versioning & Skill-Sync,
+  #                 WebCLAP Cloudflare]
+  #     types: [completed]
+  #     branches: [release/version-bump]
   workflow_dispatch: {}
 
 concurrency:
@@ -127,7 +106,26 @@ jobs:
           && github.event.workflow_run.conclusion != 'skipped'
           && github.event.workflow_run.conclusion != 'neutral'))
     runs-on: ubuntu-latest
+    # The release secrets live in the release-bot environment (deployments
+    # from main only).
+    environment: release-bot
     steps:
+      - name: Require the release-bot environment's secrets
+        env:
+          RELEASE_BOT_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN }}
+          RELEASE_BOT_SSH_SIGNING_KEY: ${{ secrets.RELEASE_BOT_SSH_SIGNING_KEY }}
+        run: |
+          missing=""
+          for name in RELEASE_BOT_TOKEN RELEASE_BOT_SSH_SIGNING_KEY; do
+            [ -n "${!name}" ] || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::release-bot environment secrets missing:$missing. Create the" \
+                 "release-bot environment (deployment branches: main only) and add the" \
+                 "release secrets to it before removing the repository-level copies."
+            exit 1
+          fi
+
       - uses: actions/checkout@v7
         with:
           ref: main

@@ -202,9 +202,11 @@ measure it — so skipping it here means contributed C++ reaches `main` with its
 coverage never measured by anyone. Skip it only for a genuinely docs-only
 contribution, and say so.
 
-Version bumps are yours, not theirs — `version-at-land` assigns them post-merge,
-and the contributor was told not to touch version files. If `shipyard pr` asks
-for a bump, that is the normal flow, not something wrong with their patch.
+Version bumps are yours, not theirs — release-please assigns them in its
+release PR after merge, and the contributor was told not to touch version
+files. What you do own is the PR title: release-please reads the
+conventional-commit type (`feat:` minor, `fix:`/`perf:` patch, `!` major), so a
+change that should ship needs a typed title or commit when you adopt it.
 
 ## 7. Close the loop
 

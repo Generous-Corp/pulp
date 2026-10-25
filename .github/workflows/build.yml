@@ -1150,7 +1150,8 @@ jobs:
               fi
             fi
 
-            # The fixed release/version-bump branch changes version-bearing
+            # The fixed release/version-bump branch, and release-please's
+            # release branches, change version-bearing
             # CMake/JSON files, so a path-only classifier must conservatively
             # request the native matrix. Before allocating it, let the
             # PROTECTED BASE's verifier prove this is the release bot's exact,
@@ -1195,13 +1196,26 @@ jobs:
                   git cat-file -e "$candidate^{commit}" 2>/dev/null \
                     || git fetch --no-tags --depth=1 origin "$candidate" \
                     || true
+                  # An SDK release-please PR may carry the bot's derived-file
+                  # refresh on top of release-please's commit; its protected
+                  # base is then one commit further back.
+                  candidate_root="$candidate"
+                  candidate_subject=$(git log -1 --format=%s "$candidate" 2>/dev/null || true)
+                  if [ "$candidate_subject" = "chore: refresh release-derived files" ]; then
+                    candidate_root=$(git cat-file -p "$candidate" 2>/dev/null \
+                      | sed -n 's/^parent \([0-9a-f]\{40\}\)$/\1/p' | head -n 1)
+                    git cat-file -e "$candidate_root^{commit}" 2>/dev/null \
+                      || git fetch --no-tags --depth=1 origin "$candidate_root" \
+                      || true
+                    candidate_subject=$(git log -1 --format=%s "$candidate_root" 2>/dev/null || true)
+                  fi
                   candidate_parents=()
                   candidate_parent_count=0
                   while IFS= read -r parent; do
                     candidate_parents+=("$parent")
                     candidate_parent_count=$((candidate_parent_count + 1))
                   done < <(
-                    git cat-file -p "$candidate" 2>/dev/null \
+                    git cat-file -p "$candidate_root" 2>/dev/null \
                       | sed -n 's/^parent \([0-9a-f]\{40\}\)$/\1/p'
                   )
                   if [ "$candidate_parent_count" -eq 1 ]; then
@@ -1210,6 +1224,16 @@ jobs:
                       || git fetch --no-tags --depth=1 origin "$candidate_base" \
                       || true
                     if [ "$candidate_base" = "$base" ]; then
+                      trusted_verifier_base="$candidate_base"
+                    elif [[ "$candidate_subject" =~ ^chore\(main\):\ release\  ]] \
+                        && [[ "$candidate_base" =~ ^[0-9a-f]{40}$ ]] \
+                        && [ "$(GH_TOKEN="${{ github.token }}" gh api \
+                            "repos/${GITHUB_REPOSITORY}/compare/${candidate_base}...main" \
+                            --jq .status 2>/dev/null || true)" = ahead ]; then
+                      # A release-please PR behind main: run the verifier from
+                      # its own base, proven to be protected main history (a
+                      # queue entry ahead cannot supply it). The verifier then
+                      # requires the group to be main plus the PR's edits.
                       trusted_verifier_base="$candidate_base"
                     else
                       cumulative_parents=()
@@ -1265,11 +1289,13 @@ jobs:
               # verifier above is what decides.
               bump_candidate=
               if [ "$EVENT_NAME" = pull_request ] \
-                  && [ "${GITHUB_HEAD_REF:-}" = release/version-bump ]; then
+                  && { [ "${GITHUB_HEAD_REF:-}" = release/version-bump ] \
+                    || [[ "${GITHUB_HEAD_REF:-}" == release-please--branches--main* ]]; }; then
                 bump_candidate="$EVENT_HEAD_SHA"
               elif [ "$EVENT_NAME" = merge_group ] && [ -n "${candidate:-}" ] \
-                  && [ "$(git log -1 --format=%s "$candidate" 2>/dev/null || true)" \
-                    = "chore: bump versions" ]; then
+                  && { [ "$(git log -1 --format=%s "$candidate" 2>/dev/null || true)" \
+                    = "chore: bump versions" ] \
+                    || [[ "${candidate_subject:-}" =~ ^chore\(main\):\ release\  ]]; }; then
                 bump_candidate="$candidate"
               fi
               if [ -n "$bump_candidate" ]; then

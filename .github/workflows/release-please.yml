@@ -1,0 +1,272 @@
+name: Release PR (release-please)
+
+# Maintains one standing release PR per version surface with release-please
+# (googleapis/release-please-action), replacing version-at-land's per-merge
+# bump PRs. See docs/guides/versioning.md § Release PR.
+#
+#   sdk     .github/release-please/sdk.config.json     → tag vX.Y.Z
+#   plugin  .github/release-please/plugin.config.json  → tag plugin-vX.Y.Z
+#
+# Each configuration is a single root package whose `exclude-paths` is derived
+# from versioning.json's trigger_paths (tools/scripts/release_please_config.py),
+# so the two surfaces version independently, as before. release-please only
+# opens and updates the PRs (`skip-github-release`): auto-release.yml still tags
+# when a version moves on main, after its pre-tag checks, and
+# release_please_handoff.py swaps the merged PR's labels once the tag exists.
+# Landing the PRs is release-pr-enqueue.yml's job, which waits for an idle
+# merge queue.
+#
+# The PRs are opened with RELEASE_BOT_TOKEN, the identity version-at-land's
+# bump PRs used: a GITHUB_TOKEN-created PR triggers no workflows, so its
+# required checks would never run.
+#
+# Rollback: set the repository variable PULP_RELEASE_PLEASE=off and restore
+# version-at-land.yml's triggers (docs/guides/version-at-land-cutover.md).
+
+on:
+  push:
+    branches: [main]
+  # auto-release.yml swaps a merged release PR's labels after tagging; until
+  # then release-please declines to open the next PR. Re-run when it finishes
+  # rather than waiting for the next push or schedule.
+  workflow_run:
+    workflows: [Auto-Release on Version Bump]
+    types: [completed]
+    branches: [main]
+  # Pushes and auto-release completions drive it; the schedule only catches a
+  # dropped event, so it stays slow (each run walks every commit since the last
+  # release through the GitHub API).
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch: {}
+
+concurrency:
+  # One writer for the release branches: release-please force-pushes them and
+  # the derived-file refresh below pushes on top.
+  group: release-please
+  cancel-in-progress: false
+
+permissions:
+  contents: read  # every branch and PR write goes through RELEASE_BOT_TOKEN
+  statuses: write # an informational release/finalized status on each finalized head
+
+jobs:
+  release-pr:
+    if: >-
+      vars.PULP_RELEASE_PLEASE != 'off'
+      && (github.event_name != 'schedule'
+        || github.repository == vars.PULP_PRIMARY_REPO)
+      && (github.event_name != 'workflow_run'
+        || github.event.workflow_run.head_repository.full_name == github.repository)
+    # The release secrets live in the release-bot environment (deployments
+    # from main only), not at repository level.
+    environment: release-bot
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require the release-bot environment's secrets
+        env:
+          RELEASE_BOT_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN }}
+          RELEASE_BOT_SSH_SIGNING_KEY: ${{ secrets.RELEASE_BOT_SSH_SIGNING_KEY }}
+        run: |
+          missing=""
+          for name in RELEASE_BOT_TOKEN RELEASE_BOT_SSH_SIGNING_KEY; do
+            [ -n "${!name}" ] || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::release-bot environment secrets missing:$missing. Create the" \
+                 "release-bot environment (deployment branches: main only) and move the" \
+                 "release secrets into it before enabling this workflow."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0   # the ledger regenerator and the changelog read history
+          fetch-tags: true # `shipyard changelog regenerate` renders the tag graph
+          persist-credentials: true
+          token: ${{ secrets.RELEASE_BOT_TOKEN }}
+
+      - name: Check the configs and manifests against versioning.json
+        # A manifest behind main's version files would make release-please walk
+        # back to an older release and propose a version below main's. Refuse.
+        run: python3 tools/scripts/release_please_config.py --check
+
+      - name: Hand tagged release PRs back to release-please
+        # auto-release.yml does this after it tags; repeating it here (it is
+        # idempotent) means a missed hand-off cannot pause release-please.
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN }}
+        run: python3 tools/scripts/release_please_handoff.py --repo-name "$GITHUB_REPOSITORY"
+
+      - name: Find release PRs to leave alone
+        # A release PR is frozen while it is in the merge queue (a rewrite
+        # ejects it, and with it the builds of every batch behind it), once it
+        # reaches the backstop age, and while it is green and only waiting for
+        # an idle queue (every rewrite restarts its checks; at Pulp's merge rate
+        # an always-current PR might never be green). Changes merged meanwhile
+        # go in the next release PR.
+        id: queued
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN }}
+          MAX_WAIT_HOURS: ${{ vars.PULP_RELEASE_MAX_WAIT_HOURS || '4' }}
+        run: |
+          python3 tools/scripts/release_pr_enqueue.py --repo-name "$GITHUB_REPOSITORY" \
+              --max-wait-hours "$MAX_WAIT_HOURS" --report-frozen
+
+      - name: Update the SDK release PR
+        id: sdk
+        if: steps.queued.outputs.sdk != 'true'
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          token: ${{ secrets.RELEASE_BOT_TOKEN }}
+          config-file: .github/release-please/sdk.config.json
+          manifest-file: .github/release-please/sdk.manifest.json
+          skip-github-release: true
+
+      - name: Update the plugin release PR
+        id: plugin
+        if: steps.queued.outputs.plugin != 'true'
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          token: ${{ secrets.RELEASE_BOT_TOKEN }}
+          config-file: .github/release-please/plugin.config.json
+          manifest-file: .github/release-please/plugin.manifest.json
+          skip-github-release: true
+
+      - name: Configure release bot SSH signing
+        env:
+          RELEASE_BOT_SSH_SIGNING_KEY: ${{ secrets.RELEASE_BOT_SSH_SIGNING_KEY }}
+        run: bash tools/scripts/configure_release_bot_ssh_signing.sh
+
+      - name: Install pinned Shipyard
+        # CHANGELOG.md is rendered by `shipyard changelog regenerate`.
+        if: steps.queued.outputs.sdk != 'true'
+        env:
+          # Authenticates the installer's release lookup; anonymous calls from
+          # shared runner IPs hit the 60/hour API limit (HTTP 403).
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          ./tools/install-shipyard.sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Finalize the release PRs
+        # For each surface whose release PR is not queued:
+        #   1. release-please commits through the API, unsigned and as the
+        #      token's account. Re-commit that exact tree and message as the
+        #      release bot, SSH-signed with the key version-at-land used, so the
+        #      bump fast path (generated_version_bump_check.py) can require the
+        #      bot's signature on every release commit.
+        #   2. SDK only: CHANGELOG.md, the GPU/Vellum ledger + receipt and the
+        #      migration-note fold rode in the version-at-land bump commit and
+        #      release-please cannot produce them. Regenerate them on top and
+        #      commit them, signed, with the Release-Derived-Refresh marker.
+        #   3. Push with a lease on the head that was read, run main's
+        #      release-PR proof on the final head, and post the result as the
+        #      informational release/finalized status, so a refusal is visible
+        #      on the PR. Nothing trusts that status: release-pr-enqueue.yml
+        #      re-runs the proof itself immediately before it enqueues.
+        # release-please rewrites its branch only when its release notes change,
+        # and this runs after it every time, so every new head is finalized
+        # again; an already-final head is a no-op.
+        env:
+          RELEASE_BOT_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN }}
+          STATUS_TOKEN: ${{ github.token }}
+          SDK_FROZEN: ${{ steps.queued.outputs.sdk }}
+          PLUGIN_FROZEN: ${{ steps.queued.outputs.plugin }}
+        run: |
+          set -euo pipefail
+          bot_email=$(git config --local user.email)
+          for surface in sdk plugin; do
+            frozen_var="$(tr '[:lower:]' '[:upper:]' <<<"$surface")_FROZEN"
+            if [ "${!frozen_var}" = "true" ]; then
+              echo "[$surface] release PR is frozen; leaving it alone."
+              continue
+            fi
+            if [ "$surface" = sdk ]; then
+              expected_branch="release-please--branches--main"
+            else
+              expected_branch="release-please--branches--main--components--plugin"
+            fi
+            pr=$(GH_TOKEN="$RELEASE_BOT_TOKEN" gh pr list --repo "$GITHUB_REPOSITORY" \
+                --state open --base main \
+                --label "autorelease: pending" --label "release: $surface" \
+                --json number,headRefName,headRefOid,isCrossRepository \
+                --jq '[.[] | select(.isCrossRepository | not)
+                       | select(.headRefName == "'"$expected_branch"'")][0] // empty')
+            if [ -z "$pr" ]; then
+              echo "[$surface] no open release PR."
+              continue
+            fi
+            number=$(jq -r .number <<<"$pr")
+            branch=$(jq -r .headRefName <<<"$pr")
+            head=$(jq -r .headRefOid <<<"$pr")
+            git fetch --no-tags origin "+refs/heads/${branch}:refs/remotes/origin/${branch}"
+            git checkout -q --detach "$head"
+            release="$head"
+            if [ "$(git log -1 --format=%s "$head")" = "chore: refresh release-derived files" ]; then
+              release=$(git rev-parse "$head^")
+            fi
+            if [ "$(git log -1 --format=%ce "$release")" != "$bot_email" ]; then
+              signed=$(git commit-tree -S "$release^{tree}" -p "$release^" \
+                  -m "$(git log -1 --format=%B "$release")")
+              echo "[$surface] re-committed ${release:0:12} as the release bot: ${signed:0:12}"
+              release="$signed"
+              git checkout -q --detach "$release"
+            fi
+            if [ "$surface" = sdk ]; then
+              python3 tools/scripts/release_derived_refresh.py --repo .
+              if ! git diff --quiet || [ -n "$(git ls-files --others --exclude-standard -- docs CHANGELOG.md)" ]; then
+                git add -A -- CHANGELOG.md docs/status docs/validation docs/migrations
+                git commit -q -m "chore: refresh release-derived files" \
+                    -m "Release-Derived-Refresh: #${number} ${release}"
+              fi
+            fi
+            final=$(git rev-parse HEAD)
+            if [ "$final" != "$head" ]; then
+              git push --force-with-lease="refs/heads/${branch}:${head}" \
+                  origin "HEAD:refs/heads/${branch}"
+              echo "[$surface] #${number} finalized: ${head:0:12} -> ${final:0:12}"
+            else
+              echo "[$surface] #${number} already final at ${final:0:12}"
+            fi
+            # Prove the finalized head with main's copy of the bump fast-path
+            # verifier (generated_version_bump_check.py) before vouching for
+            # it; the enqueuer requires this status from GitHub Actions on the
+            # exact head.
+            root=$(git rev-parse "$release^")
+            commits=1
+            [ "$final" = "$release" ] || commits=2
+            title=$(git log -1 --format=%s "$release")
+            body=$(GH_TOKEN="$RELEASE_BOT_TOKEN" gh pr view "$number" --repo "$GITHUB_REPOSITORY" \
+                --json body --jq .body)
+            jq -n --arg repo "$GITHUB_REPOSITORY" --argjson number "$number" \
+                --arg title "$title" --arg body "$body" \
+                --argjson commits "$commits" --arg branch "$branch" \
+                --arg head "$final" --arg base "$root" --arg surface "$surface" \
+                '{repository: {full_name: $repo}, pull_request: {
+                    number: $number, state: "open", title: $title, body: $body,
+                    commits: $commits,
+                    labels: [{name: "autorelease: pending"}, {name: ("release: " + $surface)}],
+                    head: {ref: $branch, sha: $head, repo: {full_name: $repo}},
+                    base: {ref: "main", sha: $base}}}' > "$RUNNER_TEMP/release-pr-event.json"
+            git show origin/main:tools/scripts/generated_version_bump_check.py \
+                > "$RUNNER_TEMP/release-pr-proof.py"
+            if GH_TOKEN="$STATUS_TOKEN" python3 "$RUNNER_TEMP/release-pr-proof.py" --repo . \
+                  --event-name pull_request --event-path "$RUNNER_TEMP/release-pr-event.json" \
+                  --base "$root" --head "$final" 2> "$RUNNER_TEMP/release-pr-proof.err"; then
+              state=success
+              description="finalized and proven"
+            else
+              cat "$RUNNER_TEMP/release-pr-proof.err" >&2
+              state=failure
+              description=$(tail -n 1 "$RUNNER_TEMP/release-pr-proof.err" | cut -c1-140)
+              echo "::warning::[$surface] #${number} release-PR proof refused: ${description}"
+            fi
+            GH_TOKEN="$STATUS_TOKEN" gh api -X POST "repos/${GITHUB_REPOSITORY}/statuses/${final}" \
+                -f state="$state" -f context=release/finalized \
+                -f description="$description" \
+                -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+                >/dev/null
+            git checkout -q --detach origin/main
+          done

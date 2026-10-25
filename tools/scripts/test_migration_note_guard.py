@@ -70,6 +70,12 @@ class GuardTests(unittest.TestCase):
         self.commit("chore: bump versions\n\nVersion-Bump-Applied: " + "a" * 40)
         self.assertEqual(self.check(), 0)
 
+    def test_the_release_derived_refresh_may_add_the_folded_note(self) -> None:
+        self.write("docs/migrations/v1.0.0.md", NOTE)
+        self.commit("chore: refresh release-derived files\n\n"
+                    "Release-Derived-Refresh: #1 " + "c" * 40)
+        self.assertEqual(self.check(), 0)
+
     def test_editing_a_released_note_passes(self) -> None:
         self.write("docs/migrations/v0.9.0.md", NOTE + "correction\n")
         self.commit("docs: correct the 0.9.0 note")

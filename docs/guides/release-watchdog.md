@@ -579,6 +579,16 @@ prediction, not a pre-created tag.
 > The "intent present but the bot never applied it" case is covered by the
 > separate pending-intent liveness alarm (`pending-intent-liveness.yml`). See
 > `docs/guides/version-at-land-cutover.md`.
+>
+> **Release PRs (2026-10-24):** versions now move only when a release-please
+> release PR lands ([versioning.md § Release PR](versioning.md#release-pr-release-please)).
+> After tagging, `auto-release.yml` runs `release_please_handoff.py`, which
+> swaps a merged release PR's `autorelease: pending` labels for
+> `autorelease: tagged` once its tag exists; release-please opens no further
+> release PR until it does. The step is `continue-on-error`, because
+> `release-please.yml` repeats it before every run. The liveness alarm now
+> watches the release PR (open past 6 h, merged but untagged after 1 h) rather
+> than an unapplied intent.
 
 If the PR-time gate is bypassed somehow (force-push race, admin merge,
 unknown-unknown), `auto-release.yml` has a final backstop step

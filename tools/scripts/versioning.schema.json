@@ -64,7 +64,17 @@
             "type": "array",
             "items": { "type": "string" }
           },
-          "changelog": { "type": "string" }
+          "changelog": { "type": "string" },
+          "release_please": {
+            "type": "object",
+            "description": "The release-please configuration and manifest that assign this surface's version. Each holds one root package; tools/scripts/release_please_config.py derives its exclude-paths from trigger_paths.",
+            "additionalProperties": false,
+            "required": ["config", "manifest"],
+            "properties": {
+              "config": { "type": "string" },
+              "manifest": { "type": "string" }
+            }
+          }
         }
       }
     },
@@ -83,7 +93,7 @@
     },
     "post_merge_assignment": {
       "type": "boolean",
-      "description": "Model B — when true, PRs touch no version files; version-at-land infers the level from the heuristic and assigns it on merge (--mode=apply is a no-op; the PR gate stops requiring a file bump for a touched surface but still hard-fails a fix/feat scoring none on every surface)."
+      "description": "When true, PRs touch no version files; release-please assigns the version in its release PR (--mode=apply is a no-op; the PR gate stops requiring a file bump for a touched surface but still hard-fails a fix/feat scoring none on every surface)."
     },
     "trailers": {
       "type": "object",

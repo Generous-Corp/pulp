@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """Refuse a hand-written `docs/migrations/vX.Y.Z.md` in a pull request.
 
-A pull request cannot know the version its change ships in: version-at-land
-assigns it after the change lands, in merge order. A note filed under a guessed
-version goes stale whenever another release lands first, and two pull requests
-guessing the same version collide on the file. Notes go in
-`docs/migrations/unreleased/<topic>.md`; the version-at-land bump folds them
-into `vX.Y.Z.md` (`tools/scripts/fold_migration_notes.py`).
+A pull request cannot know the version its change ships in: release-please
+assigns it in the release PR after the change lands. A note filed under a
+guessed version goes stale whenever another release lands first, and two pull
+requests guessing the same version collide on the file. Notes go in
+`docs/migrations/unreleased/<topic>.md`; the SDK release PR's derived-file
+refresh folds them into `vX.Y.Z.md` (`tools/scripts/release_derived_refresh.py`,
+which calls `tools/scripts/fold_migration_notes.py`).
 
-So a `vX.Y.Z.md` this range ADDS must come from a bump commit (one carrying the
-`Version-Bump-Applied:` marker). Editing a released note is still allowed: a
-correction to a published note is not a version guess.
+So a `vX.Y.Z.md` this range ADDS must come from that refresh commit (one
+carrying the `Release-Derived-Refresh:` marker) or from a version-at-land bump
+commit (`Version-Bump-Applied:`, the retired route). Editing a released note is
+still allowed: a correction to a published note is not a version guess.
 
     python3 tools/scripts/migration_note_guard.py --base origin/main
 
@@ -27,7 +29,7 @@ import sys
 from pathlib import Path
 
 RELEASED_NOTE = re.compile(r"^docs/migrations/v\d+\.\d+\.\d+\.md$")
-APPLIED_MARKER = "Version-Bump-Applied:"
+APPLIED_MARKERS = ("Release-Derived-Refresh:", "Version-Bump-Applied:")
 
 
 def _git(root: Path, *args: str) -> str:
@@ -47,7 +49,7 @@ def hand_written_notes(root: Path, base: str, head: str = "HEAD") -> list[tuple[
         commits = [entry.strip("\n").split("\x00", 1) for entry in log.split("\x01")
                    if entry.strip()]
         for sha, message in commits:
-            if APPLIED_MARKER not in message:
+            if not any(marker in message for marker in APPLIED_MARKERS):
                 found.append((path, sha))
                 break
     return found
@@ -70,10 +72,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     for path, sha in found:
         print(f"migration-note-guard: {path} is added by {sha[:12]}, which is not a "
-              f"version-at-land bump. The release version is assigned after the change "
+              f"release-derived refresh. The release version is assigned after the change "
               f"lands, so move the note to docs/migrations/unreleased/<topic>.md, drop "
-              f"`version` and `applies_if` from its frontmatter, and let the bump fold "
-              f"it (docs/migrations/unreleased/README.md).", file=sys.stderr)
+              f"`version` and `applies_if` from its frontmatter, and let the release PR "
+              f"fold it (docs/migrations/unreleased/README.md).", file=sys.stderr)
     return 1
 
 

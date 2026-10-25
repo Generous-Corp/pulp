@@ -233,10 +233,10 @@ guards = [".shipyard/config.toml", ".github/workflows/**"]
 [[decision]]
 id = 10
 layer = "pulp"
-tags = ["bump-at-merge", "version-bump", "in-branch", "version-at-land", "pending-intent-liveness", "1008"]
-title = "Every merge to main declares its version intent pre-merge (Version-Bump trailer, gated at PR time); version-at-land applies it after land; an intent the bot has not applied within the drain cadence alarms (pending-intent liveness)."
-why = "A fix once merged bumpless (issue 1008) → no tag → no release, silently. Bump-at-merge was proposed 2026-07-14 and retracted the same day because it lost the pre-merge guarantee. Version-at-land keeps that guarantee by gating the declared intent at PR time; the bot's bump PR (e.g. #10251) only applies it. The row previously read 'the bump lives IN THE BRANCH' after version-at-land had graduated, which sent the 2026-10-14 release-stall plan to a ruling it did not need; rewritten per that ruling."
-do_not = "Reintroduce in-branch bump commits as a requirement; ship a land-time writer without the pending-intent liveness alarm; squash (row 16)."
+tags = ["bump-at-merge", "version-bump", "in-branch", "version-at-land", "release-please", "release-pr", "pending-intent-liveness", "1008"]
+title = "No merge to main writes a version file; release-please's standing release PR per surface assigns the number from the conventional-commit type (PR-time gate still fails a fix/feat touching no surface); the release PR enters the merge queue only when it is idle or after the max-wait backstop; a release PR open past the alarm threshold, a merged one left untagged, or a silent release-please alarms (pending-intent liveness)."
+why = "A fix once merged bumpless (issue 1008) → no tag → no release, silently. Bump-at-merge was proposed 2026-07-14 and retracted the same day because it lost the pre-merge guarantee. version-at-land then assigned versions after land, but its bump PR took one of three merge-queue slots after almost every merge (16 of 41 merges in 24 h on 2026-10-24). On 2026-10-24 release-please replaced it: one release PR per surface carries every pending change, enqueued only into an idle queue (release-pr-enqueue.yml) so real PRs go first, with a max-wait backstop so releases cannot starve. The liveness alarm is kept and re-keyed to the release PR, because the failure it exists for, a change on main that never reaches a tag while nothing fails, is still possible at every step."
+do_not = "Reintroduce in-branch bump commits as a requirement; run version-at-land and release-please at once (both assign the same versions); enqueue the release PR into a busy queue outside the max-wait backstop; ship a release writer without the pending-intent liveness alarm; squash (row 16)."
 guards = [".github/workflows/**", ".shipyard/config.toml"]
 
 [[decision]]

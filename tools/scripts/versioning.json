@@ -2,7 +2,7 @@
   "$schema": "./versioning.schema.json",
   "schema_version": 1,
 
-  "_comment_post_merge": "Model B — PRs touch NO version files; version-at-land infers the level from the heuristic and assigns it on merge (--mode=apply is a no-op; the gate stops requiring a file bump for a touched surface but still hard-fails a fix/feat the heuristic scores none everywhere). One source of truth read by the pre-push hook, gates.sh, and version-skill-check.yml. See docs/guides/version-at-land-cutover.md.",
+  "_comment_post_merge": "PRs touch NO version files; release-please assigns the number in its standing release PR, one per surface (release_please below), from conventional-commit types (--mode=apply is a no-op; the gate stops requiring a file bump for a touched surface but still hard-fails a fix/feat the heuristic scores none everywhere). Each surface's release-please exclude-paths is derived from its trigger_paths by tools/scripts/release_please_config.py. One source of truth read by the pre-push hook, gates.sh, and version-skill-check.yml. See docs/guides/versioning.md § Release PR.",
   "post_merge_assignment": true,
   "_comment": "Repo-agnostic config for version_bump_check.py and skill_sync_check.py. Pivoted from YAML to JSON to avoid the PyYAML install friction on PEP-668 Python. Schema and field names unchanged; see planning/versioning-and-skill-sync-plan.md for the design.",
 
@@ -102,7 +102,11 @@
         "inspect/src/**",
         "packages/pulp-react/src/**"
       ],
-      "changelog": "CHANGELOG.md"
+      "changelog": "CHANGELOG.md",
+      "release_please": {
+        "config": ".github/release-please/sdk.config.json",
+        "manifest": ".github/release-please/sdk.manifest.json"
+      }
     },
 
     "plugin": {
@@ -125,7 +129,11 @@
       "internal_only_paths": [
         "hooks/scripts/**"
       ],
-      "changelog": "CHANGELOG.md"
+      "changelog": "CHANGELOG.md",
+      "release_please": {
+        "config": ".github/release-please/plugin.config.json",
+        "manifest": ".github/release-please/plugin.manifest.json"
+      }
     }
   },
 

@@ -1,0 +1,78 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/v17.6.0/schemas/config.json",
+  "release-type": "simple",
+  "include-component-in-tag": true,
+  "include-v-in-tag": true,
+  "tag-separator": "-",
+  "skip-github-release": true,
+  "skip-changelog": true,
+  "label": "autorelease: pending,release: plugin",
+  "release-label": "autorelease: tagged",
+  "last-release-sha": "22d5e6983074be2126100395e184600d3de3f1f6",
+  "packages": {
+    ".": {
+      "component": "plugin",
+      "extra-files": [
+        {
+          "type": "json",
+          "path": ".claude-plugin/plugin.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": ".claude-plugin/marketplace.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": ".claude-plugin/marketplace.json",
+          "jsonpath": "$.plugins[0].version"
+        },
+        {
+          "type": "json",
+          "path": "docs/status/pulp-tooling-disposition.json",
+          "jsonpath": "$.entries.plugin_registrations[?(@.name=='claude-marketplace:pulp')].version"
+        },
+        {
+          "type": "json",
+          "path": "docs/status/pulp-tooling-disposition.json",
+          "jsonpath": "$.entries.plugin_registrations[?(@.name=='claude-marketplace:pulp')].catalog_version"
+        },
+        {
+          "type": "json",
+          "path": "docs/status/pulp-tooling-disposition.json",
+          "jsonpath": "$.entries.plugin_registrations[?(@.name=='claude-plugin:pulp')].version"
+        }
+      ],
+      "exclude-paths": [
+        ".claude/projects",
+        ".codex",
+        ".githooks",
+        ".github",
+        ".shipyard",
+        ".shipyard.local",
+        "android",
+        "apple",
+        "assets",
+        "bindings",
+        "ci",
+        "compat",
+        "core",
+        "design",
+        "docs",
+        "examples",
+        "experimental",
+        "external",
+        "fixtures",
+        "forge-seam",
+        "inspect",
+        "packages",
+        "scripts",
+        "ship",
+        "templates",
+        "test",
+        "tools"
+      ]
+    }
+  }
+}

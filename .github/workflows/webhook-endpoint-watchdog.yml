@@ -55,6 +55,9 @@ jobs:
     if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     runs-on: ubuntu-latest
     name: Sweep webhook delivery health
+    # The release secrets live in the release-bot environment (deployments
+    # from main only).
+    environment: release-bot
 
     env:
       # Reading webhooks/deliveries is an ADMIN-scoped API. The default
@@ -67,6 +70,17 @@ jobs:
       DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
 
     steps:
+      - name: Require the release-bot environment's secrets
+        env:
+          RELEASE_BOT_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN }}
+        run: |
+          if [ -z "$RELEASE_BOT_TOKEN" ]; then
+            echo "::error::release-bot environment secrets missing: RELEASE_BOT_TOKEN. Create the" \
+                 "release-bot environment (deployment branches: main only) and add the" \
+                 "release secrets to it before removing the repository-level copies."
+            exit 1
+          fi
+
       - name: Sweep hooks
         id: scan
         shell: bash

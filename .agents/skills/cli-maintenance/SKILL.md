@@ -3203,9 +3203,10 @@ Key layout:
   skips it. Only write a note when a reasonable pro developer needs
   to change code / config / habits — not every PR. A PR never writes
   this file itself: it writes `docs/migrations/unreleased/<topic>.md`
-  (`breaking` + `summary` only), and the version-at-land bump that
+  (`breaking` + `summary` only), and the SDK release PR that
   assigns the SDK version folds it into `v<assigned>.md`
-  (`tools/scripts/fold_migration_notes.py`). A guessed `vX.Y.Z.md`
+  (`tools/scripts/release_derived_refresh.py` →
+  `tools/scripts/fold_migration_notes.py`). A guessed `vX.Y.Z.md`
   goes stale whenever another release lands first.
 - **`docs/migrations/unreleased/*.md`** — validated by the codegen
   (refused if it sets `version` or `applies_if`) but not embedded,

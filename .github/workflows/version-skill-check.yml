@@ -359,6 +359,15 @@ jobs:
           python3 tools/scripts/text_encoding_lint.py --base "${{ steps.base.outputs.ref }}"
           python3 tools/scripts/test_migration_note_guard.py
           python3 tools/scripts/migration_note_guard.py --base "${{ steps.base.outputs.ref }}"
+          # release-please's configs must stay a projection of versioning.json,
+          # and each manifest must name the version its files carry; a release
+          # PR moves both together, every other PR touches neither.
+          python3 tools/scripts/test_release_please_config.py
+          python3 tools/scripts/release_please_config.py --check
+          python3 tools/scripts/test_release_please_handoff.py
+          python3 tools/scripts/test_release_pr_enqueue.py
+          python3 tools/scripts/test_generated_release_pr_check.py
+          python3 tools/scripts/test_pending_intent_liveness.py
           python3 tools/scripts/test_python_floor_syntax_check.py
           python3 tools/scripts/python_floor_syntax_check.py
           python3 tools/scripts/single_backend_guard.py --selftest

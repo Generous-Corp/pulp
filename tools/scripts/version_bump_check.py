@@ -1228,8 +1228,8 @@ def main(argv: list[str]) -> int:
         print(text)
 
     if cfg.post_merge_assignment:
-        # Model B: a file bump is no longer required for a touched surface (the
-        # version-at-land bot assigns it on merge). The `--require-bump-for-fix-feat`
+        # Model B: a file bump is no longer required for a touched surface
+        # (release-please assigns it in the release PR). The `--require-bump-for-fix-feat`
         # check is REPLACED by the Z2 guard: a fix/feat the heuristic scores
         # `none` on EVERY surface would merge into a silent bot no-op and never
         # ship. Runs regardless of the invocation flags (all three gates read the
@@ -1248,19 +1248,18 @@ def main(argv: list[str]) -> int:
             print("── fix/feat-touches-a-surface check (post-merge assignment) ──")
             if ff_signal and not any_positive and not has_skip:
                 print(
-                    "✗ this fix/feat touches NO versioned surface, so the "
-                    "version-at-land bot would assign nothing and the change "
-                    "would never ship. Resolve one of:\n"
+                    "✗ this fix/feat touches NO versioned surface, so no "
+                    "release PR would carry it and the change would never "
+                    "ship. Resolve one of:\n"
                     "  • re-title to `chore:` / `docs:` / `refactor:` / `build:` "
                     "if it is genuinely not user-facing, OR\n"
-                    "  • declare intent on a commit: "
-                    '`Version-Bump: <surface>=<patch|minor|major>`, OR\n'
                     '  • opt out: `Version-Bump: skip reason="..."`.'
                 )
                 return 1
             print(
-                "✓ the touched surface(s) will be assigned post-merge by "
-                "version-at-land (or this is not a release-worthy change)."
+                "✓ release-please assigns the touched surface(s) in the "
+                "release PR from the conventional-commit type (or this is not "
+                "a release-worthy change)."
             )
         return code
 

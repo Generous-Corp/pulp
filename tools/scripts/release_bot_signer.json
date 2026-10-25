@@ -1,0 +1,4 @@
+{
+  "_comment": "The release bot's SSH signing key (public half of RELEASE_BOT_SSH_SIGNING_KEY, as configured by configure_release_bot_ssh_signing.sh). generated_version_bump_check.py reads it from the protected base and accepts a release-please release PR's commits for the bump fast path only when their SSH signature was made with this key. Read off the bot's signed commits on main; rotate it in the same PR that rotates the secret.",
+  "ssh_signing_key_fingerprint": "SHA256:3FTeMLmPYGnvymrczt/KaZPmxGA345nT8qOAhMSslxQ"
+}

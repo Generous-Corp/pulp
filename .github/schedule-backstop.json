@@ -9,12 +9,13 @@
     {"file": "pending-intent-liveness.yml", "cadence_minutes": 30},
     {"file": "read-audit-cadence-check.yml", "cadence_minutes": 30},
     {"file": "release-cadence-check.yml", "cadence_minutes": 30},
+    {"file": "release-please.yml", "cadence_minutes": 30},
+    {"file": "release-pr-enqueue.yml", "cadence_minutes": 10},
     {"file": "release-reconcile.yml", "cadence_minutes": 30},
     {"file": "required-gate-liveness.yml", "cadence_minutes": 30},
     {"file": "runner-health-check.yml", "cadence_minutes": 30},
     {"file": "runner-topology-check.yml", "cadence_minutes": 60},
     {"file": "stale-run-reaper.yml", "cadence_minutes": 30},
-    {"file": "version-at-land.yml", "cadence_minutes": 15},
     {"file": "webhook-endpoint-watchdog.yml", "cadence_minutes": 30}
   ],
   "excluded": []

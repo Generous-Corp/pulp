@@ -1,0 +1,98 @@
+name: Semantic PR title
+
+# release-please sets the release level from conventional-commit types
+# (docs/guides/versioning.md § Release PR). The merge queue merges with
+# MERGE, so release-please sees a PR's title only as the body of its merge
+# commit, beside the branch's own commits. A PR whose title and commits are
+# both plain language therefore releases nothing. This check makes the title
+# carry the type, so every merge is visible to release-please.
+#
+# It also closes the one gap the title cannot: release-please finds a title in
+# the merge body by splitting on `<type>(<scope>): `, which a breaking `!:`
+# title does not match. A `!` title must therefore have a commit on the branch
+# that marks the break itself (`!:` or a `BREAKING CHANGE:` footer).
+#
+# Advisory until decided otherwise: unless the repository variable
+# PULP_SEMANTIC_TITLE_ENFORCE is `true`, a failing step only leaves a warning
+# and the check stays green. To gate merges, set the variable and add
+# "Semantic PR title" to main's required checks; the merge_group job reports
+# success so a queued PR is not held by it.
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+    branches: [main]
+  merge_group:
+
+concurrency:
+  # A required check: never cancel a run in flight (docs/guides/versioning.md
+  # § CI workflow), or the context can stick at `cancelled`.
+  group: semantic-pr-title-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  pull-requests: read  # read the title and the branch's commits
+
+jobs:
+  title:
+    name: Semantic PR title
+    runs-on: ubuntu-latest
+    steps:
+      - name: Conventional-commit PR title
+        id: title
+        if: github.event_name == 'pull_request'
+        continue-on-error: ${{ vars.PULP_SEMANTIC_TITLE_ENFORCE != 'true' }}
+        uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            perf
+            refactor
+            docs
+            test
+            build
+            ci
+            chore
+            style
+            revert
+
+      - name: A breaking title is marked on a commit too
+        id: breaking
+        if: github.event_name == 'pull_request'
+        continue-on-error: ${{ vars.PULP_SEMANTIC_TITLE_ENFORCE != 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TITLE: ${{ github.event.pull_request.title }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$TITLE" =~ ^[a-z]+(\([^\)]*\))?!: ]]; then
+            echo "Not a breaking title."
+            exit 0
+          fi
+          messages=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${PR}/commits" \
+              --jq '.[].commit.message')
+          if grep -Eq '^[a-z]+(\([^)]*\))?!: |^BREAKING[ -]CHANGE: ' <<<"$messages"; then
+            echo "A branch commit marks the breaking change."
+            exit 0
+          fi
+          echo "::error::The title marks a breaking change with '!', but release-please does not" \
+               "read '!' from a PR title (it reads merge commits). Mark one commit on the branch" \
+               "too: a '<type>(<scope>)!: ...' subject or a 'BREAKING CHANGE: ...' footer."
+          exit 1
+
+      - name: Warn about an advisory failure
+        if: >-
+          github.event_name == 'pull_request'
+          && (steps.title.outcome == 'failure' || steps.breaking.outcome == 'failure')
+        run: |
+          echo "::warning title=Semantic PR title::release-please cannot read this PR's" \
+               "release level from its title; see the failed step above and" \
+               "docs/guides/versioning.md § Release PR."
+
+      - name: Merge group
+        if: github.event_name == 'merge_group'
+        run: echo "The title was checked on the pull request."

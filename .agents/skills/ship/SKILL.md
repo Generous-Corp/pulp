@@ -1436,8 +1436,8 @@ synthesize a contract they predate.
 ### Shipyard pin: one source of truth
 
 `tools/shipyard.toml` is the only Shipyard pin. Local installs, `shipyard pr`,
-and every workflow that needs the CLI (including `version-at-land.yml`, which
-renders `CHANGELOG.md` in the bump commit) install through
+and every workflow that needs the CLI (including `release-please.yml`, which
+renders `CHANGELOG.md` onto the SDK release PR) install through
 `tools/install-shipyard.sh`, which reads it. Do not add an inline
 `SHIPYARD_VERSION` to a workflow; it drifts from the pin unnoticed. Use
 `shipyard update --check --json` to report local drift and

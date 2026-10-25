@@ -71,7 +71,7 @@ the self-tests for the compiler-asymmetry lints:
 | `win32_include_lint.py` | raw `<windows.h>` in an installed header — leaks the `min`/`max` macros, `C2589` on MSVC |
 | `safe_path_guard_lint.py` | an untrusted-path guard in `core/` or `tools/cli/` that trusts `is_absolute()`, which on Windows accepts `/x`, `\x` and `C:x`, instead of calling `pulp::runtime::is_safe_relative_path` |
 | `text_encoding_lint.py` | Python text I/O (`read_text`, `write_text`, `open`, `subprocess` with `text=True`) without `encoding=`, which decodes with cp1252 on Windows; the existing backlog is held by a per-file baseline (`text_encoding_baseline.json`) that can only go down |
-| `migration_note_guard.py` | a pull request adding `docs/migrations/vX.Y.Z.md` by hand. The release version is assigned after the change lands, so the note belongs in `docs/migrations/unreleased/<topic>.md`, which the version-at-land bump folds; only a bump commit (one with the `Version-Bump-Applied:` marker) may add a released note. Editing a released note is allowed |
+| `migration_note_guard.py` | a pull request adding `docs/migrations/vX.Y.Z.md` by hand. The release version is assigned after the change lands, so the note belongs in `docs/migrations/unreleased/<topic>.md`, which the SDK release PR's derived-file refresh folds; only that refresh commit (`Release-Derived-Refresh:` marker) or a retired version-at-land bump commit (`Version-Bump-Applied:`) may add a released note. Editing a released note is allowed |
 | `script_inputs_precheck.py` | a new `add_test(NAME <name> COMMAND ...)` that runs a Python, shell or Node script but has no entry in `test/ctest_script_inputs.json`. Build-free counterpart of CI's `script-test-inputs-drift`: it reads only the CMake text the range adds. A computed name or the old `add_test(<name> <cmd>)` form is reported as not checked, never passed; `# script-inputs: not-gated <reason>` on or above the call skips a deliberately ungated test. Stale entries (a script that gained an import) still need the configured check |
 | `python_floor_syntax_check.py` | a tracked `*.py` file that Python 3.12 parses but 3.11, the gates' floor, rejects: an f-string field that reuses the enclosing quote or holds a backslash (including a line continuation, or in a nested f-string's text), comment or (single-quoted) line break. CI runs 3.12, so only a 3.11 run (CMake's default on a stock Homebrew Mac) would see it |
 
@@ -288,10 +288,11 @@ without the flag and fail closed on an unverifiable pin, using the developer's
 own access. Granting this workflow a read-only token for pulp-planning and
 dropping `--ci-warn-only` makes CI enforce the ancestry too.
 
-### The bump skips the advisory coverage run
+### Release PRs skip the advisory coverage run
 
-`coverage.yml` ANDs `github.head_ref != 'release/version-bump'` into every job's
-condition, so the release bot's bump pull request no longer starts a coverage
+`coverage.yml` ANDs `github.head_ref != 'release/version-bump' &&
+!startsWith(github.head_ref, 'release-please--branches--')` into every job's
+condition, so neither a release PR nor the retired bump PR starts a coverage
 run (about 2.5 h of hosted runners for a tree that is main's plus version
 files). No coverage context is required; every other pull request, schedule
 and dispatch runs as before. `tools/scripts/test_bump_fastpath.py` checks the
@@ -339,14 +340,14 @@ reversible-DIAL principle: drop the labels from the exclude to re-gate.
 
 ### fix/feat-needs-bump (issue #1009)
 
-> **Intent-trailer model is LIVE (2026-07-17):** on `pull_request` events the
-> workflow now runs `version_bump_check.py --accept-intent-trailers` (a SWAP of
-> the flag below, not an add — the two fail closed together). A release-worthy
-> PR DECLARES `Version-Bump: <surface>=<level>` and touches no version files;
-> the post-merge `version-at-land` bot assigns the number. A touched surface
-> with no bump/intent/skip still hard-fails, so coverage is unchanged. See
-> `docs/guides/version-at-land-cutover.md`. The historical file-bump behavior
-> below still describes what a file-bump satisfies.
+> **Superseded twice.** On `pull_request` events the workflow runs
+> `version_bump_check.py --accept-intent-trailers` (2026-07-17, a SWAP of the
+> flag below, not an add — the two fail closed together), and under
+> `post_merge_assignment` no PR writes a version file. Since 2026-10-24
+> release-please assigns the number from the conventional-commit type in its
+> release PR ([Release PR](#release-pr-release-please)); the gate's remaining
+> hard failure is a fix/feat touching no versioned surface. The historical
+> file-bump behavior below still describes what a file-bump satisfies.
 
 On `pull_request` events, the workflow additionally runs
 `version_bump_check.py --require-bump-for-fix-feat`. This asserts that
@@ -392,11 +393,10 @@ Note: **Shipyard configuration changes** (the `tools/shipyard.toml` file itself,
 Typing `shipyard pr` (or saying "push a PR" / "ship this" / "we're done" to an agent configured with this policy in `CLAUDE.md`) runs the full pipeline:
 
 1. `skill_sync_check.py --mode=report` — hard-fails here if a mapped path is touched without a SKILL.md update. The only reason to bounce back to you is to add a gotcha or a bypass trailer.
-2. `version_bump_check.py --mode=apply` — applies the required bump(s) to `CMakeLists.txt` / `plugin.json` / `marketplace.json`, staging them. Appends a CHANGELOG stub.
-3. `git commit` — single "chore: bump ..." commit.
-4. Branch push + PR creation + Shipyard state recording.
-5. Cross-platform validation + merge on green.
-6. On merge, `.github/workflows/auto-release.yml` diffs the version files against the previous push, creates the matching tag(s), and the existing tag-triggered release workflows publish binaries.
+2. `version_bump_check.py --mode=apply` — under post-merge assignment a verified no-op: the PR carries no version file.
+3. Branch push + PR creation + Shipyard state recording.
+4. Cross-platform validation + merge on green.
+5. On merge, release-please adds the change to its release PR; when that lands, `.github/workflows/auto-release.yml` diffs the version files against the previous push, creates the matching tag(s), and the existing tag-triggered release workflows publish binaries (see [Release PR](#release-pr-release-please)).
 
 The PR title and body come from the branch's non-merge commits (`origin/main..HEAD`), never only the tip commit, so the body is never empty. `.shipyard/config.toml` sets `[pr.body] attribution`, which Shipyard appends once to every body it composes; a PR opened this way needs no hand edit to add the attribution line.
 
@@ -436,13 +436,14 @@ gh workflow run sign-and-release.yml --ref v<x.y.z>
 
 ## Release pipeline — how CHANGELOG.md and the Release page are produced
 
-Two artifacts are produced for every release: the **GitHub Release page** (shown to users at `github.com/.../releases/tag/vX.Y.Z`) and the repo's **CHANGELOG.md** (shown to developers on main). The Release page is composed by Pulp's release workflow; `CHANGELOG.md` is rendered inside the version-bump commit.
+Two artifacts are produced for every release: the **GitHub Release page** (shown to users at `github.com/.../releases/tag/vX.Y.Z`) and the repo's **CHANGELOG.md** (shown to developers on main). The Release page is composed by Pulp's release workflow; `CHANGELOG.md` is rendered onto the SDK release PR.
 
 **Division of labor:**
 
-- **Shipyard** — pre-merge. `shipyard pr` creates/tracks PRs and validates them. It does not touch tags, CHANGELOG.md, or the Release page.
-- **Pulp's `.github/workflows/version-at-land.yml`** — post-merge. Writes the version bump and, in the same commit, the derived files that embed or summarize releases. `tools/scripts/version_at_land.py` lists them in `_DERIVED_REGENERATORS`; one is `shipyard changelog regenerate`, which rewrites `CHANGELOG.md` from every tag cut so far. The workflow installs the pinned Shipyard (`tools/install-shipyard.sh`) for that step, passing `GITHUB_TOKEN` so the installer's release lookup is authenticated. Under GitHub Actions the installer refuses to run without `GITHUB_TOKEN` or `SHIPYARD_GITHUB_TOKEN`, because anonymous lookups from shared runner IPs hit the API rate limit (HTTP 403); `tools/scripts/install_shipyard_token_check.py` (run by `workflow-lint.yml`) flags any workflow step that installs Shipyard without one. Local runs stay anonymous.
-- **Pulp's `.github/workflows/auto-release.yml`** — post-merge. On push to main, diffs version files and, if an SDK version moved, creates the `vX.Y.Z` tag.
+- **Shipyard** — pre-merge. `shipyard pr` creates/tracks PRs and validates them. It does not touch tags or the Release page; its `shipyard changelog regenerate` renders `CHANGELOG.md` when the release workflow asks.
+- **`.github/workflows/release-please.yml`** — post-merge. Keeps the standing release PRs current (see [Release PR](#release-pr-release-please) below) and, on the SDK release PR, pushes one commit with the derived files: `CHANGELOG.md` via `shipyard changelog regenerate`, the GPU/Vellum ledger re-pin, and the migration-note fold (`tools/scripts/release_derived_refresh.py`). The workflow installs the pinned Shipyard (`tools/install-shipyard.sh`) for that step, passing `GITHUB_TOKEN` so the installer's release lookup is authenticated. Under GitHub Actions the installer refuses to run without `GITHUB_TOKEN` or `SHIPYARD_GITHUB_TOKEN`, because anonymous lookups from shared runner IPs hit the API rate limit (HTTP 403); `tools/scripts/install_shipyard_token_check.py` (run by `workflow-lint.yml`) flags any workflow step that installs Shipyard without one. Local runs stay anonymous.
+- **`.github/workflows/release-pr-enqueue.yml`** — puts a green release PR in the merge queue when the queue is otherwise empty.
+- **Pulp's `.github/workflows/auto-release.yml`** — post-merge. On push to main, diffs version files and, if a version moved, creates the `vX.Y.Z` / `plugin-vX.Y.Z` tag, then hands the merged release PR back to release-please.
 - **Pulp's `.github/workflows/release-cli.yml`** — post-tag. On `vX.Y.Z` push, builds binaries and creates the GitHub Release with a body composed from `tools/scripts/compose_release_notes.py` Highlights, GitHub's generated "What's Changed" / "Full Changelog" block, and the install instructions.
 
 **End-to-end sequence:**
@@ -450,20 +451,264 @@ Two artifacts are produced for every release: the **GitHub Release page** (shown
 ```
 PR merges through the queue
        ↓
-version-at-land.yml  (bump PR: versions + CHANGELOG.md rendered from existing tags)
-       ↓  (bump PR merges through the queue)
-auto-release.yml  (diffs version files, pushes vX.Y.Z tag)
+release-please.yml  (release PR updated: versions; SDK PR also gets CHANGELOG.md
+       ↓             rendered from existing tags, the ledger re-pin, folded notes)
+release-pr-enqueue.yml  (queue idle + PR green, or the 4 h backstop → enqueue)
+       ↓  (release PR merges through the queue)
+auto-release.yml  (diffs version files, pushes vX.Y.Z tag, swaps the PR's labels)
        ↓
 release-cli.yml  (build binaries, compose_release_notes.py, GitHub Release body)
 ```
 
-**The changelog trails by one release.** The bump for vX.Y.Z is written before its tag exists, so vX.Y.Z's section reaches `CHANGELOG.md` with the next bump. A separate post-tag PR would close that gap but pay the required gate a second time per release for one docs file; the GitHub Release page is current the moment the tag lands.
+**The changelog trails by one release.** The SDK release PR for vX.Y.Z is rendered before its tag exists, so vX.Y.Z's section reaches `CHANGELOG.md` with the next release PR. Shipyard stays the file's only writer: both release-please configurations set `skip-changelog`, so release-please's own changelog never touches it. That keeps one writer, the per-release `<a id="vXYZ">` anchors the Release page footer links to (`compose_release_notes.changelog_anchor`), and the one-line-per-PR format, which release-please's changelog would replace with one line per conventional commit. The GitHub Release page is current the moment the tag lands.
 
-**CHANGELOG.md source of truth:** `shipyard changelog regenerate` (shipyard v0.11+), configured via `[release.changelog]` in `.shipyard/config.toml`. With no args it rewrites `CHANGELOG.md` from the full tag graph and is idempotent. If a bump run logs `derived regenerator failed, leaving CHANGELOG.md stale`, the next bump retries it; to catch up by hand, run it locally and open a docs PR.
+**CHANGELOG.md source of truth:** `shipyard changelog regenerate` (shipyard v0.11+), configured via `[release.changelog]` in `.shipyard/config.toml`. With no args it rewrites `CHANGELOG.md` from the full tag graph and is idempotent. If a refresh run logs `derived regenerator failed, leaving CHANGELOG.md stale`, the next run retries it; to catch up by hand, run it locally and open a docs PR.
 
 **GitHub Release body source of truth:** `release-cli.yml` calls `compose_release_notes.py` to render grouped Highlights from the tag range, then calls GitHub's generated-notes API for the native "What's Changed" and "Full Changelog" block. `Release-Note: <one-line summary>` trailers override the raw PR title in Highlights; missing trailers fall back to the title and never block a release.
 
 **Editing by hand:** manually editing `CHANGELOG.md` between releases is fine; the generator picks up edits on the next render as long as they land in the right release's bullet block.
+
+---
+
+## Release PR (release-please)
+
+Versions are assigned by [release-please](https://github.com/googleapis/release-please)
+(`googleapis/release-please-action`, pinned by SHA in `release-please.yml`),
+which replaced version-at-land's per-merge bump PRs on 2026-10-24. Those took
+one of the merge queue's three build slots after nearly every merge (16 of 41
+merges in 24 h). Now one standing release PR per surface collects every
+pending change, and it enters the queue only when no real PR is waiting.
+
+### Two surfaces, two configurations
+
+| Surface | Config / manifest (`.github/release-please/`) | Writes | Tag | Branch |
+|---|---|---|---|---|
+| `sdk` | `sdk.config.json` / `sdk.manifest.json` | `CMakeLists.txt` `project(Pulp VERSION …)`, through the generic updater's `# x-release-please-version` marker | `vX.Y.Z` | `release-please--branches--main` |
+| `plugin` | `plugin.config.json` / `plugin.manifest.json` | `.claude-plugin/plugin.json` `version`, `.claude-plugin/marketplace.json` `version` and `plugins[0].version` (not `metadata.version`), and the three plugin versions `docs/status/pulp-tooling-disposition.json` embeds, through `extra-files` `json`/`jsonpath` | `plugin-vX.Y.Z` | `release-please--branches--main--components--plugin` |
+
+release-please assigns commits to a package by directory: a package at the
+root "." gets every commit, minus commits whose files all sit under its
+`exclude-paths`. It has no include-glob, and in one configuration only one
+package can be the root. The plugin's triggers span `.claude-plugin/`,
+`.claude/commands/`, `.agents/skills/` and `hooks/`, so a single configuration
+would have stopped skill, command and hook changes from releasing the plugin.
+Each surface is therefore its own configuration with a single root package,
+and `tools/scripts/release_please_config.py` derives its `exclude-paths` from
+`versioning.json`'s `trigger_paths`: every directory holding no tracked file
+that matches them, at the shallowest level where that is true.
+`versioning.json` names each surface's config and manifest under
+`release_please`. `release_please_config.py --check` (run by
+`version-skill-check.yml` and before every release-please run) fails when an
+excluded directory now holds a trigger file (that surface would stop releasing
+changes there) or a manifest disagrees with the version files. A new directory
+with no trigger files, which the derivation would add, only over-releases until
+someone runs `--write`, so it is reported and passes. Run `--write` after a
+`trigger_paths` edit.
+
+The two configurations carry distinct label sets (`autorelease: pending` plus
+`release: sdk` or `release: plugin`), so each manages only its own PR.
+
+### What changed from the version-at-land heuristic
+
+- **The level comes from the conventional-commit type, not the path.**
+  `feat:` → minor, `fix:` / `perf:` → patch, `!` or a `BREAKING CHANGE:`
+  footer → major (from 0.x as well, so a breaking plugin change goes to 1.0.0,
+  as the heuristic's major did). release-please reads the merge commit, whose
+  body is the PR title, and every commit on the branch. A public-header edit no
+  longer implies minor, and a PR with a plain-language title and untyped
+  commits releases nothing, where the heuristic gave it patch or minor from its
+  paths. A breaking change must be marked on a branch commit (`feat(x)!:` or
+  a `BREAKING CHANGE:` footer): release-please finds a typed PR title inside the
+  merge commit's body by splitting on `<type>(<scope>): `, which a `!:` title
+  does not match, so `!` in the PR title alone is not read.
+- **PR titles must carry a type.** The queue merges with MERGE, so
+  release-please sees a title only inside the merge commit's body.
+  `semantic-pr-title.yml` (context "Semantic PR title") flags a title that is
+  not `<type>(<scope>): ...`, and a `!:` title unless a branch commit marks
+  the break too. It is advisory (a warning, the check stays green) until the
+  repository variable `PULP_SEMANTIC_TITLE_ENFORCE=true` is set and the
+  context is made required on main. A GitHub "Revert ..."
+  title needs re-titling to `revert: ...`. Measured over the 196 non-bump
+  merges of the 7 days before cutover: 173 titles were typed and 23 were
+  not; the heuristic released 144 of the merges and release-please would have
+  released 108. Of the 52 differences, 20 were invisible to release-please
+  (15 plain titles, 4 non-standard types such as `gpu:`, and 1 lost
+  `perf(format)!:` breaking title), which the title check now catches; the
+  other 32 were typed `ci:`, `test:`, `build:`, `chore:` or `refactor:` and do
+  not release under conventional-commit semantics by design.
+- **Trigger paths hold at directory granularity.** The remainder errs toward
+  releasing: a typed commit touching only top-level files (`CMakeLists.txt`,
+  `README.md`), or a non-trigger file in a directory that also holds trigger
+  files (most of `tools/scripts/`, `tools/cmake/`), releases the surface where
+  the heuristic would not have. A commit touching both surfaces releases both.
+- **Releases batch.** One release covers everything merged since the last one,
+  as version-at-land's per-drain coalescing already did, but over a longer
+  window: until the queue is idle or the backstop fires.
+- **Overrides.** `Version-Bump: <surface>=<level>` is still read by the PR gate
+  but does not change what release-please assigns; type the title or a commit
+  instead. An exact version is a `Release-As: x.y.z` footer on a commit, and
+  applies to every surface that commit touches. `Version-Bump: skip` keeps
+  satisfying the `fix/feat-touches-a-surface` gate; to keep a typed commit out
+  of a release, re-type it, or replace what release-please reads for a merged
+  PR with a `BEGIN_COMMIT_OVERRIDE` … `END_COMMIT_OVERRIDE` block in the PR
+  body (edit the merged PR's body, and the next run re-reads it).
+- **The release PR keeps the bump fast path.** `generated_version_bump_check.py`
+  recognizes a release-please release PR as well as version-at-land's bump
+  commit, so `build.yml`'s classify step skips the native (VM) matrix for it.
+  The proof differs, because release-please's commit cannot be re-run here:
+  that commit may change only the locations its protected-base configuration
+  declares (`extra-files` JSONPaths, the manifest, the CMake marker line), in
+  bytes, by the old version becoming a new one exactly one semantic-version
+  step up and equal to the PR title's (a major step only when a commit counted
+  since the previous release tag carries `!:` or a `BREAKING CHANGE:` footer);
+  the SDK PR's
+  derived-file commit must be byte-reproducible by the protected base's
+  `release_derived_refresh.py`; the PR must be release-please's own (branch,
+  title, `autorelease: pending` label, one or two commits, the release bot's
+  account, a base on protected main). In a merge group the PR may be behind main: the group tree must then
+  be main plus exactly the PR's edits, on paths main has not touched since the
+  PR's base. Anything else keeps the full path.
+- **Main's plugin version moves with the release, not the merge.** The Claude
+  marketplace reads main HEAD, so a plugin change reaches marketplace users when
+  the plugin release PR lands.
+
+### Tagging stays with auto-release.yml
+
+Both configurations set `skip-github-release`, and the workflow passes the
+same input, so release-please never tags or creates a Release.
+`auto-release.yml` tags when a version moves on main, with its trailer guard
+and Windows pre-tag check, exactly as it did for a bump PR. release-please
+still tracks a merged release PR by its labels and will not open the next one
+while a merged PR carries `autorelease: pending`; its own release step would
+swap that for `autorelease: tagged`. With that step skipped,
+`tools/scripts/release_please_handoff.py` does it: for each merged pending
+release PR whose tag now exists, read from the manifest at the merge commit, it
+swaps the labels. `auto-release.yml` runs it after tagging, and
+`release-please.yml` runs it before every update. A withheld SDK tag keeps the
+labels until the push that cuts it. Never land a release PR with `Release:
+skip`: the version would move with no tag, and release-please would stay
+paused until someone tags it by hand.
+
+### Landing: real PRs first
+
+`release-pr-enqueue.yml` (`tools/scripts/release_pr_enqueue.py`) runs on every
+push to main, every 10 minutes, and on `workflow_dispatch` from main. It enqueues a release PR, with
+`enqueuePullRequest` bound to the head it read (`expectedHeadOid`), only when:
+
+1. every required check on that head has passed (`isRequired`), the PR is
+   not a draft and does not conflict, and main's release-PR proof, re-run by
+   the enqueuer on that exact head immediately before the enqueue, passes
+   (see Derived files), so a half-built or unproven release PR is never
+   enqueued;
+2. no other release PR is in the queue: the two go in one at a time, oldest
+   first, so they never hold two slots a real PR could need; and
+3. the merge queue for main holds no other entry, **or** the release PR has
+   been open longer than `PULP_RELEASE_MAX_WAIT_HOURS` (repository variable,
+   default 4), **or** the run is a manual dispatch with `force`.
+
+`release-please.yml` leaves a release PR alone (no release-please update, no
+finalization) while it is **frozen**: in the merge queue (a push would eject
+it and discard the builds of every batch behind it), at the backstop age, or
+green and only waiting for an idle queue. Every rewrite restarts the PR's
+checks, and at Pulp's merge rate an always-current release PR might never be
+green; changes merged while it is frozen go in the next release PR.
+
+release-please opens the release PR at the first releasable merge after a
+release, so its age is how long that change has waited; the backstop means a
+queue that is never idle cannot starve releases. Marking the release PR as a
+draft holds it. Every job that uses `RELEASE_BOT_TOKEN` or
+`RELEASE_BOT_SSH_SIGNING_KEY` on main (both release-please workflows,
+`auto-release.yml`'s tag job, `version-at-land.yml`, and the runner and webhook
+watchdogs) runs in the `release-bot` environment (deployments from main only).
+Each fails with a message naming a missing secret. Moving the secrets, in
+order:
+
+1. Before the change that references the environment merges, create
+   `release-bot` with a deployment-branch policy of main only and copy both
+   secrets into it. GitHub auto-creates an environment that a job references
+   but that does not exist yet, with no protection rules, so merging first
+   would leave it unprotected.
+2. Merge.
+3. Confirm one environment-scoped run of each of those workflows succeeds.
+4. Only then delete the repository-level copies. Both workflows use `RELEASE_BOT_TOKEN`, the identity the bump
+PR route used: a `GITHUB_TOKEN`-created PR or merge group triggers no
+workflows, so its required checks would never run.
+
+### Derived files
+
+The bump commit also carried derived files that release-please cannot
+produce. The plugin disposition's embedded versions are `extra-files` of the
+plugin configuration. `CHANGELOG.md` (see Release pipeline above), the
+GPU/Vellum ledger and receipt re-pin, and the fold of
+`docs/migrations/unreleased/*.md` into `docs/migrations/v<sdk>.md` are
+regenerated on the SDK release branch by `release_derived_refresh.py`, which
+reuses version-at-land's regenerators against the version release-please wrote.
+`release-please.yml` commits them, SSH-signed by the release bot with the
+key version-at-land used (`RELEASE_BOT_SSH_SIGNING_KEY`,
+`configure_release_bot_ssh_signing.sh`) and a `Release-Derived-Refresh:`
+marker, which `migration_note_guard.py` accepts in place of
+`Version-Bump-Applied:`. release-please rewrites its branch only when the
+release notes change, and the refresh runs after it on every run, so it is
+re-applied to every new head: a no-op when nothing changed, one marker commit
+otherwise.
+
+Before that, on both surfaces, the same step re-commits release-please's own
+commit (made through the API as the token's account, unsigned) as the release
+bot, SSH-signed, with the same tree and message. Every commit on a release PR
+is then the bot's signed commit, which the bump fast path requires. The step
+pushes with a lease on the head it read, runs main's
+`generated_version_bump_check.py` on the final head, and posts the result as
+the informational `release/finalized` commit status, so a refusal is visible
+on the PR. Nothing trusts that status: any workflow's token can post one.
+Instead `release-pr-enqueue.yml`, which runs only as main's own code (a push
+to main, the schedule, or a dispatch from main), re-runs the same proof,
+loaded from `origin/main`, on the exact head it is about to enqueue, and
+enqueues only if it passes. `expectedHeadOid` then refuses the enqueue if the
+head moves after the proof. Release PRs are recognized by exact branch name
+and surface label throughout. The release bot's SSH signing key is pinned by
+fingerprint in `tools/scripts/release_bot_signer.json` (the public half of
+`RELEASE_BOT_SSH_SIGNING_KEY`); rotate it in the same change that rotates the
+secret, or release PRs lose the fast path.
+
+### Gates on the release PR
+
+The release PR is an ordinary PR to the gates. It moves every version file of
+its surface together, so `version_bump_check.py` reports it as bumped; it
+touches no trigger path, so neither gate demands a SKILL.md or migration note;
+and `release_please_config.py --check` holds its manifest to its files. Every
+other PR still touches no version file.
+
+### Release liveness (decisions-contract row 10)
+
+`pending-intent-liveness.yml` (`tools/scripts/pending_intent_liveness.py`)
+opens a `release-stuck` tracker when a release PR has been open past
+`PULP_RELEASE_LIVENESS_THRESHOLD_MIN` (default 360, two hours past the
+backstop), when a merged release PR is still pending its tag after an hour,
+when `release-please.yml` has not succeeded on main within the threshold, or
+when a merge after a surface's newest tag touches its trigger paths, has a
+title that is not an explicitly non-releasing type, and is older than the
+threshold with no release PR for that surface (`unreleased-change`: a change
+release-please could not see). `auto-release.yml`'s stranded-fix detector
+treats an open release PR as covering a fix/feat and otherwise only warns,
+leaving the tracker to this alarm. The fix for an invisible change is a
+`BEGIN_COMMIT_OVERRIDE` block in the merged PR's body, which release-please
+re-reads on its next run.
+
+### First run and rollback
+
+The manifests start at the versions main carries when the change lands, each
+of which already has its tag (`v1.11.0` and `plugin-v0.491.8` at the time of
+writing), and each config pins `last-release-sha` to that tag's commit, so
+release-please's first release PRs hold only what merged after those tags even
+if its release lookup misses. The pin only bootstraps: once a later release
+exists release-please stops at that release first. `release_please_config.py --check` runs in the required gate, so if
+a bump lands first the merge group fails until the manifests are moved to
+match. Close any open `release/version-bump` PR at cutover.
+
+To roll back, set the repository variable `PULP_RELEASE_PLEASE=off` (both
+release-please workflows and the release-please liveness alarm stop), close
+the open release PRs, and restore `version-at-land.yml`'s triggers, its
+`.github/schedule-backstop.json` entry and its pending-intent alarm; see [version-at-land-cutover.md § Rollback](version-at-land-cutover.md#rollback).
 
 ---
 

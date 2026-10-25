@@ -46,9 +46,11 @@ changes how something *sounds* gets scrutinized, and shouldn't hold them up.
 Do **not** edit `CMakeLists.txt` `VERSION`, `.claude-plugin/plugin.json`,
 `marketplace.json`, or `CHANGELOG.md`.
 
-Pulp assigns versions **after merge** (`version-at-land`) from the diff. A
-contributor-side bump only creates a conflict that makes the PR obsolete — it
-does not help. Same for changelog entries: they are regenerated.
+Pulp assigns versions **after merge**: release-please's release PR sets the
+level from the conventional-commit type of the PR title and commits
+(`feat:` minor, `fix:`/`perf:` patch, `!` major). A contributor-side bump only
+creates a conflict that makes the PR obsolete — it does not help. Same for
+changelog entries: they are regenerated.
 
 ## 3. Build and test locally
 

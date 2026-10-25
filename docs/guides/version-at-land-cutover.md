@@ -1,5 +1,15 @@
 # Version-at-Land Cutover — flipping the single-writer bump bot to `--push`
 
+> **STATUS: RETIRED — 2026-10-24.** release-please's standing release PRs assign
+> versions now ([versioning.md § Release PR](versioning.md#release-pr-release-please)).
+> On the PR route every merge produced a `chore: bump versions` PR that took
+> one of the merge queue's three build slots (16 of 41 merges in 24 h), so
+> `version-at-land.yml` lost all automatic triggers and keeps only
+> `workflow_dispatch`, for rollback. Never dispatch it while release-please is
+> live: both would assign the same versions. Everything below describes the
+> retired route; [Rollback to version-at-land](#rollback-to-version-at-land)
+> says how to bring it back.
+
 > **STATUS: FLIPPED LIVE — 2026-07-17.** `version-at-land.yml` runs `--push`;
 > `version-skill-check.yml` accepts intent trailers; `auto-release.yml`'s
 > stranded detector exports `PULP_ACCEPT_INTENT_TRAILERS=1`.
@@ -349,6 +359,36 @@ The bump can land two ways, selected by the `PULP_BUMP_ROUTE` repo variable
 
 The full rollout, merge-queue validation evidence, and canary checklist live in
 `planning/2026-07-20-merge-queue-reenable-plan.md`.
+
+## Rollback to version-at-land
+
+From release-please back to this bot:
+
+1. Set the repository variable `PULP_RELEASE_PLEASE=off`. `release-please.yml`,
+   `release-pr-enqueue.yml` and the release-please liveness alarm
+   (`pending-intent-liveness.yml`, including its `release-please-silent`
+   check) then skip every run, and `auto-release.yml`'s stranded-fix detector
+   opens its version-at-land trackers again.
+2. Let an open release PR land first if it is green (it carries pending
+   changes and its tag), or close it. Run
+   `python3 tools/scripts/release_please_handoff.py --repo-name Generous-Corp/pulp`
+   once so no merged release PR is left pending.
+3. Restore `version-at-land.yml`'s triggers (the commented block in its `on:`)
+   and its `{"file": "version-at-land.yml", "cadence_minutes": 15}` entry in
+   `.github/schedule-backstop.json`. `PULP_BUMP_ROUTE=pr` is still set.
+   In the same PR, restore the version-at-land pending-intent alarm from the
+   commit before the release-please cutover:
+   `git checkout <cutover>^ -- tools/scripts/pending_intent_liveness.py
+   tools/scripts/test_pending_intent_liveness.py
+   .github/workflows/pending-intent-liveness.yml`, then drop the
+   `vars.PULP_RELEASE_PLEASE != 'off'` condition the restored workflow does not
+   have. A land-time writer must not run without its liveness alarm
+   (decisions-contract row 10).
+4. The bot drains from the newest `Version-Bump-Applied` marker, which
+   predates every release-please release, so its first drain covers changes
+   release-please already released as well as the unreleased ones. Expect one
+   extra release; `_strictly_increasing` keeps it from moving a version
+   backwards.
 
 ## Rollback
 

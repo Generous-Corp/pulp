@@ -1346,23 +1346,22 @@ Pulp versions three surfaces independently: SDK/CLI (`CMakeLists.txt`), Claude p
 3. Branch push, PR creation, Shipyard state recording, and cross-platform validation — one command, merges on green.
 4. `.github/workflows/auto-release.yml` — on merge to main, tags the new version(s) and the existing tag-triggered release workflows build + publish binaries.
 
-**PRs carry no version files — the bot assigns the number on merge.**
-`tools/scripts/versioning.json` sets `"post_merge_assignment": true`, so
-`version_bump_check.py --mode=apply` is a verified no-op and a shipped PR
-touches no version file at all. `version-at-land.yml` re-derives the level from
-the same path heuristic and assigns it after the merge lands. Do **not** hand-write
-a version number, and do **not** add a `chore: bump versions` marker commit — that
-marker belongs to the retired per-PR model, and the gate no longer looks for one.
-One consequence worth stating: the bot assigns one version per surface per drain,
-so a queue batch of three SDK fixes yields one SDK release covering all three.
+**PRs carry no version files — release-please assigns the number.**
+`"post_merge_assignment": true` in `tools/scripts/versioning.json` makes
+`version_bump_check.py --mode=apply` a no-op. `release-please.yml` keeps one
+release PR per surface and takes the level from the **conventional-commit
+type**: `feat:` minor, `fix:`/`perf:` patch, `!`/`BREAKING CHANGE:` major; a
+plain-language title with untyped commits releases nothing. The release PR
+lands only into an idle merge queue (or after a 4 h backstop). Never hand-write
+a version or add a `chore: bump versions` commit (versioning.md § Release PR).
 
 **The one live guard is `fix/feat-touches-a-surface`.** A PR whose title or
 commit subjects read `fix:` / `feat:` but whose diff scores `none` on every
-versioned surface hard-fails, because the bot would assign nothing and the change
-would never ship. Resolve it by re-titling to `chore:` / `docs:` / `refactor:` /
-`build:`, by declaring intent with `Version-Bump: <surface>=<level>`, or with
-`Version-Bump: skip reason="..."`. A `Version-Bump:` trailer is an optional
-override for a heuristic-underweighted case, not a routine step. Run
+versioned surface hard-fails, because no release PR would carry it. Resolve it
+by re-titling to `chore:` / `docs:` / `refactor:` / `build:`, or with
+`Version-Bump: skip reason="..."`. `Version-Bump: <surface>=<level>` no longer
+sets a level (release-please reads the commit type); to force an exact version
+use a `Release-As: x.y.z` footer on a commit. Run
 `tools/scripts/gates.sh origin/main` before pushing to see the same verdict CI will.
 
 Direct `gh pr create` is an emergency/manual bypass only. If it is used because the user explicitly asked for it or Shipyard is broken, call out that the PR may not be visible in Shipyard-managed state until it is reconciled or re-shipped through Shipyard.

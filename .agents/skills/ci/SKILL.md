@@ -5003,9 +5003,77 @@ bisectable.
   inside setup before repository code runs. Use `packages: platform-tools` and
   install the exact NDK, emulator, platform, and system image later with the
   workflow's explicit `sdkmanager` step.
+- **Versions come from release-please's standing release PRs now
+  (2026-10-24); `version-at-land.yml` is RETIRED** (automatic triggers removed,
+  dispatch-only for rollback; never dispatch it while release-please is live).
+  `release-please.yml` runs `googleapis/release-please-action` (SHA-pinned)
+  twice, once per surface (`.github/release-please/{sdk,plugin}.config.json`),
+  because a release-please package is one directory and only one package per
+  config can be the root: each surface is a single root package whose
+  `exclude-paths` `release_please_config.py` derives from `versioning.json`
+  `trigger_paths`. Run `release_please_config.py --write` after editing
+  `trigger_paths`; `--check` fails the required gate when an excluded
+  directory gains a trigger file, or a manifest disagrees with the version
+  files (a stale manifest makes release-please propose a version below
+  main's). A new directory without trigger files only warns. Traps:
+  - `skip-github-release` means release-please never tags, so it also never
+    swaps a merged release PR's `autorelease: pending` label, and it REFUSES to
+    open the next release PR while one is pending. `release_please_handoff.py`
+    does the swap once the tag exists; `auto-release.yml` runs it after
+    tagging and `release-please.yml` before every update. Never land a release
+    PR with `Release: skip`: the version moves untagged and release-please
+    stays paused.
+  - The level is the conventional-commit type (`feat` minor, `fix`/`perf`
+    patch, `!`/`BREAKING CHANGE` major), read from the merge commit's body (the
+    PR title) and every branch commit. A plain-language title with untyped
+    commits releases nothing. `Version-Bump: <surface>=<level>` no longer sets
+    a level; `Release-As: x.y.z` does.
+  - `release-pr-enqueue.yml` enqueues a green release PR (required checks via
+    `isRequired`, `enqueuePullRequest` bound to `expectedHeadOid`) only into a
+    queue with no non-release entry, or after `PULP_RELEASE_MAX_WAIT_HOURS`
+    (default 4) measured from the PR's creation, or on dispatch with `force`.
+    Only one release PR is queued at a time, recognized by exact branch name
+    plus the matching `release: <surface>` label, never a prefix. Right
+    before enqueueing, it re-runs main's `generated_version_bump_check.py`
+    (from `origin/main`) on the exact head it will pass as `expectedHeadOid`
+    and enqueues only on a pass; it trusts no commit status (any workflow's
+    token can post one), so it runs only from main (push, schedule,
+    dispatch). `release-please.yml`'s `release/finalized` status is
+    informational. The bot key is pinned in
+    `tools/scripts/release_bot_signer.json`; rotate it with the secret. Draft the release PR to hold a release. `release-please.yml` leaves a
+    frozen release PR alone (`--report-frozen`): queued (a rewrite ejects it),
+    at backstop age, or green and waiting for an idle queue (each rewrite
+    restarts its checks).
+  - `CHANGELOG.md`, the GPU ledger re-pin and the migration-note fold are
+    pushed onto the SDK release branch by `release-please.yml`
+    (`release_derived_refresh.py`, commit marker `Release-Derived-Refresh:`).
+    Both configs set `skip-changelog`: Shipyard stays the changelog's only
+    writer. The plugin disposition's versions are plugin `extra-files`.
+  - The release PR keeps the bump fast path: `generated_version_bump_check.py`
+    `_verify_release_pr` proves release-please's commit moved only version
+    strings (leaf-by-leaf for JSON, line-by-line for CMake), reproduces the SDK
+    refresh commit with the protected base's regenerators, and in a merge
+    group requires the tree to be main plus the PR's edits on paths main left
+    alone. `build.yml`'s merge-group shape steps past the refresh commit and
+    accepts a behind release PR's base only when the compare API says main is
+    ahead of it (a queue entry ahead cannot supply the verifier).
+  - `semantic-pr-title.yml` requires a conventional title (release-please sees
+    a title only inside the MERGE commit's body) and refuses a `!:` title
+    unless a branch commit marks the break, because release-please's split of
+    the merge body does not match `!:`. Advisory (warning only) until
+    `PULP_SEMANTIC_TITLE_ENFORCE=true` and the context is made required.
+  - `pending-intent-liveness.yml` now alarms on a release PR open past 6 h, a
+    merged release PR untagged after 1 h, no successful `release-please.yml`
+    run in 6 h, or an `unreleased-change` (a merge touching a surface, not
+    typed as non-releasing, unreleased 6 h with no release PR: one
+    release-please could not see). `auto-release.yml`'s stranded detector
+    treats an open release PR as covering and otherwise only warns.
+    `PULP_RELEASE_PLEASE=off` disables it; rollback restores the
+    version-at-land alarm from git (decisions-contract row 10).
+  The rest of this entry describes the retired route, kept for rollback.
 - **`version-at-land.yml` + `version_at_land.py` are the single-writer,
-  post-merge half of the version-bump intent-trailer model, and the workflow
-  runs LIVE (`--push`).** They exist to kill the version-bump merge treadmill
+  post-merge half of the version-bump intent-trailer model (RETIRED
+  2026-10-24, see above).** They exist to kill the version-bump merge treadmill
   (PRs editing `CMakeLists` VERSION / `plugin.json` / `marketplace.json`
   re-conflict every time main advances, and N parallel PRs endlessly re-bump the
   same shared counter). A PR declares `Version-Bump: <surface>=<level>` (or the
@@ -10979,12 +11047,13 @@ Key facts:
   `tools/scripts/bump_fastpath_report.py` (weekly in `bump-fastpath-weekly.yml`)
   counts them. Read that count before changing the verifier, so a fix targets
   the refusal that actually happens.
-- **Advisory workflows skip the bump.** `coverage.yml`,
+- **Advisory workflows skip the bump and the release PRs.** `coverage.yml`,
   `control-shipping-native.yml`, `examples-validation.yml` and
-  `intel-portability.yml` AND `github.head_ref != 'release/version-bump'` into
-  every job's `if:`, so bump PRs no longer start hosted Windows, macOS, Linux and
-  coverage runs. A new job in one of them needs the same guard;
-  `test_bump_fastpath.py` fails without it.
+  `intel-portability.yml` AND `github.head_ref != 'release/version-bump' &&
+  !startsWith(github.head_ref, 'release-please--branches--')` into every job's
+  `if:`, so neither bump PRs nor release-please's release PRs start hosted
+  Windows, macOS, Linux and coverage runs. A new job in one of them needs the
+  same guard; `test_bump_fastpath.py` fails without it.
 - **PR-event bump runs never fast-path unless `PULP_BUMP_FASTPATH_PR_MERGE_REF=1`.**
   `GITHUB_SHA` on a `pull_request` run is the synthesized `refs/pull/N/merge`
   commit, and a freshly opened bump PR's payload has a null/stale
