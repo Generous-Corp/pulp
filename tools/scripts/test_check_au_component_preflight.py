@@ -411,6 +411,56 @@ class AuComponentPreflightTests(unittest.TestCase):
             self.assertTrue(logs.ok)
             self.assertEqual(logs.code, "REGISTRAR_LOGS_CLEAR")
 
+    def _auval_list_with_installed(self, installed_roots: list[pathlib.Path], bundle: pathlib.Path) -> tuple[int, str]:
+        with mock.patch.object(preflight.shutil, "which", return_value="/usr/bin/auval"), \
+             mock.patch.object(preflight, "_component_dirs", return_value=tuple(installed_roots)), \
+             mock.patch.object(preflight.subprocess, "run") as run:
+            run.return_value = preflight.subprocess.CompletedProcess(
+                args=["auval"], returncode=0, stdout="aumf PHBn Pulp  -  Pulp: PulpHostBench\n"
+            )
+            return self._run([
+                str(bundle), "--expect-type", "aumf", "--expect-subtype", "PHBn",
+                "--expect-manufacturer", "Pulp", "--check-auval-list",
+            ])
+
+    def test_auval_list_passes_when_the_bundle_is_the_only_installed_copy(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            user, system = pathlib.Path(d) / "user", pathlib.Path(d) / "system"
+            user.mkdir()
+            system.mkdir()
+            bundle = _make_bundle(user)
+            rc, out = self._auval_list_with_installed([user, system], bundle)
+            self.assertEqual(rc, 0, out)
+            self.assertIn("PASS: auval list", out)
+
+    def test_auval_list_fails_when_another_install_declares_the_same_component(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            user, system = pathlib.Path(d) / "user", pathlib.Path(d) / "system"
+            user.mkdir()
+            system.mkdir()
+            bundle = _make_bundle(user)
+            shadow = _make_bundle(system)
+            rc, out = self._auval_list_with_installed([user, system], bundle)
+            self.assertEqual(rc, 1, out)
+            self.assertIn("FAIL: auval list: aumf PHBn Pulp is listed, but also declared by", out)
+            self.assertIn(str(shadow), out)
+
+    def test_a_failed_log_query_does_not_clear_the_registrar(self) -> None:
+        def fake_which(name: str) -> str | None:
+            return "/usr/bin/" + name
+        def fake_run(command, **kwargs):
+            if command[0] == "/usr/bin/launchctl":
+                return preflight.subprocess.CompletedProcess(command, 0, "Aqua\n")
+            if command[0] == "/usr/bin/log":
+                return preflight.subprocess.CompletedProcess(command, 1, "log: Must be admin to run 'show'\n")
+            raise AssertionError(command)
+        with mock.patch.object(preflight.shutil, "which", side_effect=fake_which), \
+             mock.patch.object(preflight.subprocess, "run", side_effect=fake_run):
+            checks = preflight._check_registrar()
+        logs = next(check for check in checks if check.label == "registrar logs")
+        self.assertFalse(logs.ok)
+        self.assertEqual(logs.code, "REGISTRAR_LOG_QUERY_FAILED")
+
     def test_host_probe_timeout_is_bounded(self) -> None:
         with mock.patch.object(preflight.subprocess, "run",
                                side_effect=preflight.subprocess.TimeoutExpired(["log"], 10.0)):

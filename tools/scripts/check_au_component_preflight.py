@@ -310,6 +310,15 @@ def _check_auval_list(args: argparse.Namespace) -> CheckResult:
                            "Run the host diagnosis and inspect AudioComponentRegistrar logs.")
     for line in proc.stdout.splitlines():
         if line.strip().split()[:3] == [args.expect_type, args.expect_subtype, args.expect_manufacturer]:
+            others = _same_component_elsewhere(
+                args.bundle, (args.expect_type, args.expect_subtype, args.expect_manufacturer))
+            if others:
+                return CheckResult(
+                    "auval list", False,
+                    f"{needle} is listed, but also declared by " + ", ".join(str(p) for p in others),
+                    "COMPONENT_SHADOWED",
+                    "Remove the other copy (~/Library and /Library both register components), then rescan.",
+                )
             return CheckResult("auval list", True, line.strip(), "COMPONENT_VISIBLE")
     components, non_apple = _auval_inventory(proc.stdout)
     summary = _summarize_auval_list(proc.stdout)
@@ -324,6 +333,31 @@ def _check_auval_list(args: argparse.Namespace) -> CheckResult:
         "COMPONENT_NOT_REGISTERED",
         "Run again with --diagnose-host; verify installation path, metadata, architecture, signing, and registrar state.",
     )
+
+
+def _component_dirs() -> tuple[Path, ...]:
+    return (Path.home() / "Library/Audio/Plug-Ins/Components", Path("/Library/Audio/Plug-Ins/Components"))
+
+
+def _same_component_elsewhere(bundle: Path, identity: tuple[str, str, str]) -> list[Path]:
+    """Installed components other than `bundle` that declare the same
+    type/subtype/manufacturer. The registrar lists one of them, so a visible
+    listing does not prove it is the bundle under test."""
+    target = bundle.resolve()
+    found = []
+    for root in _component_dirs():
+        if not root.is_dir():
+            continue
+        for candidate in sorted(root.glob("*.component")):
+            if candidate.resolve() == target:
+                continue
+            data, _ = _read_plist(candidate / "Contents" / "Info.plist")
+            for component in (data or {}).get("AudioComponents") or []:
+                if isinstance(component, dict) and (
+                        component.get("type"), component.get("subtype"), component.get("manufacturer")) == identity:
+                    found.append(candidate)
+                    break
+    return found
 
 
 def _summarize_auval_list(output: str) -> str:
@@ -490,6 +524,12 @@ def _check_registrar() -> list[CheckResult]:
             results.append(CheckResult("registrar logs", False, "Rosetta runtime is not available",
                                        "REGISTRAR_ROSETTA_FAILURE",
                                        "Install Rosetta and restart the registrar before rescanning."))
+        elif logs.returncode != 0:
+            # A query that failed read nothing, so it cannot clear the registrar.
+            results.append(CheckResult("registrar logs", False,
+                                       text or f"log show exited {logs.returncode}",
+                                       "REGISTRAR_LOG_QUERY_FAILED",
+                                       "Rerun from an admin account or grant log access, then rerun this preflight."))
         else:
             results.append(CheckResult("registrar logs", True, "no recent Rosetta failure observed", "REGISTRAR_LOGS_CLEAR"))
     return results
