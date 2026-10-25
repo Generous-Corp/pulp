@@ -24,6 +24,8 @@ WORKFLOW = WORKFLOWS / "macos-tier-record.yml"
 BUILD = WORKFLOWS / "build.yml"
 REPO = "Generous-Corp/pulp"
 HEAD = "a" * 40
+MERGE, BASE = "d" * 40, "c" * 40
+TESTED = f"Tested refs/pull/7/merge at {MERGE} onto {BASE}"
 APP = "shipyard-local[bot]"
 CREATED = "2026-10-25T12:00:00Z"
 BEFORE, AFTER = "2026-10-25T11:00:00Z", "2026-10-25T13:00:00Z"
@@ -79,9 +81,15 @@ def job(name="macos", head=HEAD, **steps: str) -> dict:
             "steps": [{"name": step, "conclusion": conclusion} for step, conclusion in steps.items()]}
 
 
-def native(build: str, full_suite: str = "skipped") -> dict:
-    return job(**{"Build": build, "Test fast deterministic tier (pull request head)": "success",
+def native(build: str, full_suite: str = "skipped", tested: str | None = TESTED,
+           tested_conclusion: str = "success") -> dict:
+    """A native macos job; a `pr_number` dispatch's has build.yml's Tested step."""
+    steps = {}
+    if tested:
+        steps[tested] = tested_conclusion
+    steps.update({"Build": build, "Test fast deterministic tier (pull request head)": "success",
                   "Test (non-Windows)": full_suite})
+    return job(**steps)
 
 
 def verdict(word: str = "APPROVE", head: str = HEAD, author: str = APP, at: str = BEFORE,
@@ -130,9 +138,11 @@ class Harness(unittest.TestCase):
 
 class TierDecisionTest(Harness):
     def _decide(self, jobs, comments=(), run_prs="7", pulls=None, head_repo=REPO,
-                event="workflow_dispatch", actor=APP):
+                event="workflow_dispatch", actor=APP, parents=f"{BASE} {HEAD}\n"):
         fixture = {
             "/attempts/2/jobs": jobs if isinstance(jobs, str) else pages(list(jobs), "jobs"),
+            # The tested merge commit's parents, as `--jq` prints them.
+            f"/commits/{MERGE} ": parents,
             "/commits/": json.dumps(pulls if pulls is not None else []),
             "/issues/7/comments": comments if isinstance(comments, str) else pages(list(comments), None),
         }
@@ -190,8 +200,28 @@ class TierDecisionTest(Harness):
         self.assertEqual(self._tier(full, [verdict(at="2026-10-25T10:00:00Z"),
                                            verdict("HOLD", head="b" * 40, at=BEFORE)]), "full")
 
+    def test_the_full_lane_must_be_a_pr_number_dispatch_of_this_pull_request(self) -> None:
+        full = native("success", full_suite="success")
+        self.assertEqual(self._tier([full], [verdict()]), "full", "control")
+        for case, macos, parents in (
+                ("no Tested step: a plain dispatch", native("success", full_suite="success", tested=None), None),
+                ("Tested step did not succeed", native("success", full_suite="success",
+                                                       tested_conclusion="skipped"), None),
+                ("tested another pull request",
+                 native("success", full_suite="success",
+                        tested=f"Tested refs/pull/8/merge at {MERGE} onto {BASE}"), None),
+                ("malformed Tested name",
+                 native("success", full_suite="success", tested=f"Tested refs/pull/7/merge at {MERGE}"), None),
+                ("tested commit merges another head", full, f"{BASE} {'b' * 40}\n"),
+                ("tested commit with the head first", full, f"{HEAD} {BASE}\n"),
+                ("tested commit's parents unreadable", full, "!FAIL")):
+            with self.subTest(case=case):
+                kwargs = {} if parents is None else {"parents": parents}
+                self.assertEqual(self._tier([macos], [verdict()], **kwargs), "deferred")
+
     def test_the_skip_safe_bootstrap(self) -> None:
-        self.assertEqual(self._tier([job(**{BOOTSTRAP: "success"})], [verdict()]), "not-required")
+        self.assertEqual(self._tier([job(**{TESTED: "success", BOOTSTRAP: "success"})], [verdict()]),
+                         "not-required")
         self.assertEqual(self._tier([job(**{BOOTSTRAP: "success"})], [verdict()],
                                     event="pull_request"), "deferred")
         self.assertEqual(self._tier([job(**{BOOTSTRAP: "failure"})], [verdict()]), "deferred")
@@ -212,6 +242,7 @@ class TierDecisionTest(Harness):
             ("schema", "shipyard-test-tier/v1"), ("check", "macos"), ("tier", "fast"),
             ("run_id", 4242), ("run_attempt", 2), ("trigger", "workflow_dispatch"),
             ("actor", APP), ("selector", "pr-fast+pr-guard+affected"),
+            ("tested_ref", "refs/pull/7/merge"), ("tested_sha", MERGE), ("merged_base", BASE),
             ("full_lane_workflow", "build.yml"), ("full_suite_runs_in", "merge_group")])
         listing = next(" ".join(c) for c in calls if "/jobs" in " ".join(c))
         self.assertIn("actions/runs/4242/attempts/2/jobs", listing)
@@ -228,8 +259,10 @@ class TierDecisionTest(Harness):
         self.assertEqual((summary["tier"], summary["trigger"], summary["actor"], summary["selector"]),
                          ("deferred", "pull_request", "an-author", "pr-fast+pr-guard"))
         self.assertNotIn("label", summary)
+        self.assertEqual((summary["tested_ref"], summary["tested_sha"], summary["merged_base"]),
+                         (None, None, None), "a pull_request run tested no bound merge commit")
         for jobs, selector in (([native("success", full_suite="success")], "full"),
-                               ([job(**{BOOTSTRAP: "success"})], "none")):
+                               ([job(**{TESTED: "success", BOOTSTRAP: "success"})], "none")):
             with self.subTest(selector=selector):
                 _, _, outputs = self._decide(jobs, [verdict()])
                 self.assertEqual(json.loads(outputs["summary"])["selector"], selector)

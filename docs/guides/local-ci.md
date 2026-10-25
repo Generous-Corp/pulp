@@ -3782,7 +3782,9 @@ any step, including the code under test, can print one. It reads a *tier
 record* instead (Shipyard `docs/ghapp-guards.md`, "A tiered required check must
 prove its full lane"). That record is a check run named
 `shipyard-test-tier/macos` on the head, whose summary is
-`{"schema":"shipyard-test-tier/v1","check":"macos","tier":...,"run_id":...,"run_attempt":...,"trigger":...,"actor":...,"selector":...,"full_lane_workflow":"build.yml","full_suite_runs_in":"merge_group"}`.
+`{"schema":"shipyard-test-tier/v1","check":"macos","tier":...,"run_id":...,"run_attempt":...,"trigger":...,"actor":...,"selector":...,"tested_ref":...,"tested_sha":...,"merged_base":...,"full_lane_workflow":"build.yml","full_suite_runs_in":"merge_group"}`.
+`tested_ref`, `tested_sha` and `merged_base` bind it to the merge commit the
+full lane tested (null when the run tested none).
 `trigger` and `actor` name the event and account that started the run; the
 guard reports them but does not trust them. `full_lane_workflow` is what its
 fix line says to dispatch. The record carries no label.
@@ -3816,9 +3818,14 @@ could rewrite those. It refuses a head with no counted record bound to its
      the full lane that way, since label events no longer start Build and
      Test runs. The App's latest verdict on the head, at or before the run's
      `created_at`, must be a trusted `verdict: APPROVE head:<sha>` with a
-     `reviewer:` line. Otherwise the tier is `deferred`: a `pull_request` run,
-     a dispatch or rerun by anyone else, a missing or non-APPROVE verdict, or
-     a head without exactly one same-repository pull request.
+     `reviewer:` line. The run must also be a `pr_number` dispatch of that
+     pull request, which tests its merge commit (see "The full-lane dispatch
+     tests the merge ref"). Its `macos` job carries one succeeded step named
+     `Tested refs/pull/<n>/merge at <sha> onto <base>`, and that commit has
+     exactly the parents `[<base>, <head>]` on GitHub. Otherwise the tier is
+     `deferred`: a `pull_request` run, a dispatch or rerun by anyone else, a
+     plain dispatch, a missing or non-APPROVE verdict, or a head without
+     exactly one same-repository pull request.
   2. **Steps.** The conclusions the runner recorded for that attempt's
      `macos` job:
 

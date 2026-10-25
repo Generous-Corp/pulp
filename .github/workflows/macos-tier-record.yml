@@ -161,8 +161,13 @@ jobs:
           # which a rerun by anyone else changes), and the App's latest
           # verdict on this head at or before the run was created must be a
           # trusted APPROVE (`reviewer:` line, last line
-          # `verdict: APPROVE head:<sha>`).
+          # `verdict: APPROVE head:<sha>`). It must also be a `pr_number`
+          # dispatch of that pull request, which tests its merge commit: the
+          # macos job's succeeded step `Tested refs/pull/<n>/merge at <sha>
+          # onto <base>` (build.yml), whose commit GitHub shows has exactly the
+          # parents [<base>, this head].
           approval="absent"
+          tested_ref="" tested_sha="" merged_base=""
           if [ "$TRIGGER_EVENT" != workflow_dispatch ]; then
             approval="not a dispatch ($TRIGGER_EVENT)"
           elif [ "$TRIGGERING_ACTOR" != "$app" ]; then
@@ -176,8 +181,17 @@ jobs:
                   '[.[] | select(.state == "open" and .head.sha == $sha and .head.repo.full_name == $repo) | .number] | join(" ")')
             fi
             read -r -a pr_list <<< "$prs"
+            tested=$(jq -r '[.steps[]? | select(.conclusion == "success" and (.name | test("^Tested refs/pull/[0-9]+/merge at [0-9a-f]{40} onto [0-9a-f]{40}$")))
+                             | .name] | if length == 1 then .[0] else "" end' <<< "$job")
+            read -r _ tested_ref _ tested_sha _ merged_base <<< "$tested"
             if [ "${#pr_list[@]}" -ne 1 ]; then
               approval="unplaced (${#pr_list[@]} pull requests at this head)"
+            elif [ -z "$tested" ]; then
+              approval="not a pr_number dispatch: the macos job has no single succeeded Tested step"
+            elif [ "$tested_ref" != "refs/pull/${pr_list[0]}/merge" ]; then
+              approval="tested $tested_ref, not refs/pull/${pr_list[0]}/merge"
+            elif [ "$(gh api "repos/$repo/commits/$tested_sha" --jq '[.parents[].sha] | join(" ")')" != "$merged_base $HEAD_SHA" ]; then
+              approval="tested commit $tested_sha does not have the parents [$merged_base, $HEAD_SHA]"
             else
               verdict=$(gh api --paginate "repos/$repo/issues/${pr_list[0]}/comments?per_page=100" \
                 | jq -s -r --arg app "$app" --arg at "$RUN_CREATED_AT" --arg sha "$HEAD_SHA" \
@@ -200,10 +214,16 @@ jobs:
           # --- the more conservative of the two ------------------------------
           if [ "$approval" != present ]; then tier=deferred; else tier="$steps_tier"; fi
           # The fields and their order follow Shipyard's docs/ghapp-guards.md.
+          # `tested_ref`, `tested_sha` and `merged_base` bind the record to the
+          # merge commit the full lane tested; null when the run tested none.
           summary=$(jq -cn --arg tier "$tier" --argjson run "$RUN_ID" --argjson attempt "$RUN_ATTEMPT" \
             --arg trigger "$TRIGGER_EVENT" --arg actor "$TRIGGERING_ACTOR" --arg selector "$selector" \
-            '{schema:"shipyard-test-tier/v1",check:"macos",tier:$tier,run_id:$run,
+            --arg tested_ref "$tested_ref" --arg tested_sha "$tested_sha" --arg merged_base "$merged_base" \
+            'def opt: if . == "" then null else . end;
+             {schema:"shipyard-test-tier/v1",check:"macos",tier:$tier,run_id:$run,
               run_attempt:$attempt,trigger:$trigger,actor:$actor,selector:$selector,
+              tested_ref:($tested_ref | opt),tested_sha:($tested_sha | opt),
+              merged_base:($merged_base | opt),
               full_lane_workflow:"build.yml",full_suite_runs_in:"merge_group"}')
           echo "tier $tier for $HEAD_SHA: steps say $steps_tier (Build=$build, Test (non-Windows)=$full_suite, bootstrap=$bootstrap); approved fleet-App dispatch: $approval"
           {
