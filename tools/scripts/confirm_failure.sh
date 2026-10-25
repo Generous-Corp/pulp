@@ -434,9 +434,9 @@ fi
 # With --subject the driver is left in place, so it must not carry the edited
 # code itself: --target rebuilds the subject only, and a driver that also links
 # the edited object would run the stale copy and could pass with the fix
-# broken (a false NOT CONFIRMED). Compare the strong symbols the edited
-# object defines with the ones the driver defines; any overlap means the driver
-# links it. A header edit has no object of its own, so it cannot be checked
+# broken (a false NOT CONFIRMED). Compare the strong global symbols the edited
+# object defines with the strong symbols the driver defines; any overlap means
+# the driver links it. A header edit has no object of its own, so it cannot be checked
 # this way and is left to the caller.
 driver_links_edited_object() {
     [ -n "$SUBJECT" ] && [ "$NO_BUILD" -eq 0 ] && [ "$IS_HEADER" -eq 0 ] || return 1
@@ -445,23 +445,28 @@ driver_links_edited_object() {
     python3 - "$BUILD_DIR" "${OBJ_BASE}.o" "$TEST_BINARY" "$STASH" <<'PY'
 import os, subprocess, sys
 build, obj_name, driver, stash = sys.argv[1:5]
-def defined(path):
+# Strong text/data definitions only: weak (W/w, V/v) and inline template
+# instantiations appear in every user and prove nothing.
+def defined(path, kinds):
     out = subprocess.run(["nm", path], capture_output=True, text=True).stdout
     syms = set()
     for line in out.splitlines():
         parts = line.split()
-        # Strong text/data definitions only: weak (W/w, V/v) and inline
-        # template instantiations appear in every user and prove nothing.
-        if len(parts) >= 3 and parts[-2] in ("T", "t", "D", "d", "S", "s", "B", "b"):
+        if len(parts) >= 3 and parts[-2] in kinds:
             syms.add(parts[-1])
     return syms
+# The object contributes its global definitions only. Its locals (statics as
+# _ZL<name>, anonymous namespaces as _GLOBAL__N_1) recur in unrelated objects
+# and would match a driver that never linked it. The driver side keeps locals
+# too: a hidden-visibility global is local once linked into an executable.
 edited = set()
 for root, dirs, files in os.walk(build):
     if stash and os.path.abspath(root).startswith(os.path.abspath(stash)):
         continue
     if obj_name in files:
-        edited |= defined(os.path.join(root, obj_name))
-sys.exit(0 if edited and edited & defined(driver) else 1)
+        edited |= defined(os.path.join(root, obj_name), ("T", "D", "S", "B"))
+linked = defined(driver, ("T", "t", "D", "d", "S", "s", "B", "b"))
+sys.exit(0 if edited and edited & linked else 1)
 PY
 }
 if driver_links_edited_object; then
