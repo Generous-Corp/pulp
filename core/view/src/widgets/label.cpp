@@ -127,13 +127,42 @@ void Label::set_text(std::string text) {
     // vertical, attributed, and captured-wrap Labels unless the box is a
     // pinned capture. Their text can change measured geometry, so they
     // must still invalidate layout.
-    const auto& style = flex();
-    const bool has_explicit_width =
-        style.preferred_width > 0.0f ||
-        (style.dim_width.unit != DimensionUnit::auto_ && style.dim_width.value > 0.0f);
-    const bool has_explicit_height =
-        style.preferred_height > 0.0f ||
-        (style.dim_height.unit != DimensionUnit::auto_ && style.dim_height.value > 0.0f);
+    // "Fixed" means a size yoga_layout() hands Yoga as a definite number: a
+    // px dimension through preferred_*, or a viewport dimension, which it
+    // resolves itself. `auto` overrides preferred_*, and a px dim_* without a
+    // preferred size is never handed to Yoga. A percent is definite only when
+    // every ancestor up to the root fixes that axis the same way; under an
+    // auto-sized parent Yoga sizes the box from its text.
+    const auto fixed_size = [](const View* view, bool horizontal_axis) {
+        for (const View* self = view; view != nullptr; view = view->parent()) {
+            // An ancestor that is the root takes its size from the host,
+            // which is definite.
+            if (view != self && view->parent() == nullptr)
+                return true;
+            const auto& f = view->flex();
+            const auto& dim = horizontal_axis ? f.dim_width : f.dim_height;
+            const float preferred = horizontal_axis ? f.preferred_width : f.preferred_height;
+            switch (dim.unit) {
+            case DimensionUnit::px:
+                return preferred > 0.0f;
+            case DimensionUnit::vw:
+            case DimensionUnit::vh:
+            case DimensionUnit::vmin:
+            case DimensionUnit::vmax:
+                return dim.value > 0.0f;
+            case DimensionUnit::auto_:
+                return false;
+            case DimensionUnit::percent:
+                if (dim.value <= 0.0f || view->parent() == nullptr)
+                    return false;
+                continue;
+            }
+            return false;
+        }
+        return false;
+    };
+    const bool has_explicit_width = fixed_size(this, true);
+    const bool has_explicit_height = fixed_size(this, false);
     const bool horizontal = text_direction_ != canvas::TextDirection::top_to_bottom &&
                             text_direction_ != canvas::TextDirection::bottom_to_top;
     const bool single_line_simple =
@@ -171,6 +200,7 @@ void Label::set_text(std::string text) {
     // when the copy is wider than the box; measured before the copy
     // changes so the repaint below covers the old text's ink too.
     const float ink_before = has_explicit_width && single_line_simple ? intrinsic_width() : 0.0f;
+    const bool old_text_was_empty = text_.empty();
     text_ = std::move(text);
     // A captured browser line box describes ONE string. Once the copy
     // diverges from it the Label paints natively, and it must keep doing
@@ -217,25 +247,20 @@ void Label::set_text(std::string text) {
     const bool text_has_layout_slot = has_own_text_box();
     const bool box_is_pinned =
         has_explicit_width && has_explicit_height && !baseline_aligned && !text_has_layout_slot;
-    // A captured box pinned in points on both axes is fixed whatever the
-    // copy wraps to. Yoga never measures a box whose width and height are
-    // definite, it shrinks a flex item toward its explicit min size rather
-    // than a content minimum, and an auto-sized parent reads this box, not
-    // its text. A childless Label with captured lines never gets a text
-    // slot, and scroll extents read child bounds rather than ink, so no line
-    // count or retired capture can move anything. A percent or viewport
-    // dimension stays on the conservative path: it resolves against a
-    // parent whose own size may be content-derived. Most captured
-    // design-import boxes are this kind, and they wrap on a cache miss.
-    const auto pinned_in_points = [](float preferred, const Dimension& dim) {
-        return dim.unit == DimensionUnit::px && (dim.value > 0.0f || preferred > 0.0f);
-    };
-    const bool captured_box_is_pinned =
-        pinned_in_points(style.preferred_width, style.dim_width) &&
-        pinned_in_points(style.preferred_height, style.dim_height) && !baseline_aligned &&
-        !text_has_layout_slot && !cached_line_boxes_.empty() && child_count() == 0;
+    // A box fixed on both axes holds still whatever the copy wraps to. Yoga
+    // never measures a box whose width and height are definite, it shrinks a
+    // flex item toward its explicit min size rather than a content minimum,
+    // and an auto-sized parent reads this box, not its text; paint re-breaks
+    // the lines at the box width itself. A childless Label with captured lines
+    // never gets a text slot, and scroll extents read child bounds rather than
+    // ink, so no line count or retired capture can move anything. Without
+    // captured lines an empty copy has no slot and its first text may need
+    // one, so a change to or from empty still lays out.
+    const bool captured = !cached_line_boxes_.empty();
+    const bool box_holds_still = box_is_pinned && child_count() == 0 &&
+                                 (captured || (!text_.empty() && !old_text_was_empty));
     const bool text_geometry_is_fixed =
-        captured_box_is_pinned ||
+        box_holds_still ||
         (!captured_basis_dropped && has_explicit_width && single_line_simple &&
          !text_has_layout_slot &&
          (box_is_pinned || (probe_height && intrinsic_height() == height_before)));
