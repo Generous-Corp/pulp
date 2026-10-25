@@ -811,7 +811,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/fast_math.hpp",
-        "fingerprint": "sha256:d15ee5596c20887770bc8f6025d0db955b0ba25048afa6f943e669dcd85120f5",
+        "fingerprint": "sha256:9eeb53dae479b4b32ba4f684420f645331c1821f15dfba5cbfb95bbe50aa448b",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1582,6 +1582,18 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "preserving the no-op measurement contract; this is shared runtime "
             "infrastructure rather than an independently advertised generator "
             "capability."
+        ),
+    },
+    {
+        "include": "pulp/audio/restored_path.hpp",
+        "fingerprint": "sha256:5070b5aa15535869b72106ae976074d4e35b1dda6a8df9d303acfaabf4b9a7ec",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Confinement gate for file paths that arrive through restored host or preset "
+            "state: resolves symlinks and admits a path only inside the directory the "
+            "plugin may read from. Shared safety infrastructure for state restore, not an "
+            "advertised generator capability."
         ),
     },
     {

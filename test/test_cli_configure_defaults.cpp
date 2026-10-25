@@ -30,9 +30,29 @@ TEST_CASE("fresh source configure pins Ninja, Release, and examples off",
     ConfigureDefaults in;
     in.ninja_available = true;
     in.source_checkout = true;
-    REQUIRE(configure_default_args(in)
-            == std::vector<std::string>{"-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release",
-                                        "-DPULP_BUILD_EXAMPLES=OFF"});
+    REQUIRE(configure_default_args(in) ==
+            std::vector<std::string>{"-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release",
+                                     "-DPULP_BUILD_EXAMPLES=OFF", "-DPULP_DEV_BUILD=ON"});
+}
+
+TEST_CASE("the developer loop compiles the dev build in; a recorded value is kept",
+          "[cli][configure-defaults][dev-build]") {
+    // Fresh dir, standalone project: the dev build is on regardless of checkout kind.
+    ConfigureDefaults fresh;
+    REQUIRE(has(configure_default_args(fresh), "-DPULP_DEV_BUILD=ON"));
+
+    // A cache from before the option existed is healed on its next configure.
+    ConfigureDefaults unrecorded;
+    unrecorded.existing_cache = "CMAKE_BUILD_TYPE:STRING=Release\n";
+    REQUIRE(configure_default_args(unrecorded) == std::vector<std::string>{"-DPULP_DEV_BUILD=ON"});
+
+    // A deliberate OFF (the shippable configure) is never flipped back.
+    ConfigureDefaults off;
+    off.existing_cache = "CMAKE_BUILD_TYPE:STRING=Release\nPULP_DEV_BUILD:BOOL=OFF\n";
+    REQUIRE(configure_default_args(off).empty());
+    ConfigureDefaults on;
+    on.existing_cache = "CMAKE_BUILD_TYPE:STRING=Release\nPULP_DEV_BUILD:BOOL=ON\n";
+    REQUIRE(configure_default_args(on).empty());
 }
 
 TEST_CASE("fresh configure without ninja leaves the generator to CMake",
@@ -59,7 +79,8 @@ TEST_CASE("an existing cache keeps its generator, build type, and examples",
     ConfigureDefaults in;
     in.existing_cache = "CMAKE_GENERATOR:INTERNAL=Unix Makefiles\n"
                         "CMAKE_BUILD_TYPE:STRING=Debug\n"
-                        "PULP_BUILD_EXAMPLES:BOOL=ON\n";
+                        "PULP_BUILD_EXAMPLES:BOOL=ON\n"
+                        "PULP_DEV_BUILD:BOOL=ON\n";
     in.ninja_available = true;
     in.source_checkout = true;
     REQUIRE(configure_default_args(in).empty());
@@ -68,7 +89,8 @@ TEST_CASE("an existing cache keeps its generator, build type, and examples",
 TEST_CASE("an existing cache with an empty build type is filled with Release",
           "[cli][configure-defaults]") {
     ConfigureDefaults in;
-    in.existing_cache = "CMAKE_GENERATOR:INTERNAL=Unix Makefiles\r\nCMAKE_BUILD_TYPE:STRING=\r\n";
+    in.existing_cache = "CMAKE_GENERATOR:INTERNAL=Unix Makefiles\r\nCMAKE_BUILD_TYPE:STRING=\r\n"
+                        "PULP_DEV_BUILD:BOOL=ON\r\n";
     in.ninja_available = true;
     in.source_checkout = true;
     REQUIRE(configure_default_args(in) == std::vector<std::string>{"-DCMAKE_BUILD_TYPE=Release"});
@@ -77,7 +99,8 @@ TEST_CASE("an existing cache with an empty build type is filled with Release",
 TEST_CASE("the examples flag opts in; standalone projects never get the option",
           "[cli][configure-defaults]") {
     ConfigureDefaults in;
-    in.existing_cache = "PULP_BUILD_EXAMPLES:BOOL=OFF\nCMAKE_BUILD_TYPE:STRING=Release\n";
+    in.existing_cache = "PULP_BUILD_EXAMPLES:BOOL=OFF\nCMAKE_BUILD_TYPE:STRING=Release\n"
+                        "PULP_DEV_BUILD:BOOL=ON\n";
     in.examples = true;
     in.source_checkout = true;
     REQUIRE(configure_default_args(in) == std::vector<std::string>{"-DPULP_BUILD_EXAMPLES=ON"});
@@ -186,7 +209,8 @@ TEST_CASE("build-dir helpers read the cache the configure decision depends on",
     REQUIRE(has(pulp::cli::configure_default_args_for(build, true, false, true), "-G"));
 
     write_text(build / "CMakeCache.txt",
-               "CMAKE_BUILD_TYPE:STRING=Debug\nPULP_BUILD_EXAMPLES:BOOL=OFF\n");
+               "CMAKE_BUILD_TYPE:STRING=Debug\nPULP_BUILD_EXAMPLES:BOOL=OFF\n"
+               "PULP_DEV_BUILD:BOOL=ON\n");
     REQUIRE(pulp::cli::build_dir_has_examples_off(build));
     // An existing Debug dir is left alone unless examples are requested.
     REQUIRE(pulp::cli::configure_default_args_for(build, true, false, true).empty());
@@ -309,6 +333,7 @@ TEST_CASE("pulp-cpp build configures a fresh checkout with Ninja, Release, examp
     REQUIRE(line.find("-G Ninja") != std::string::npos);
     REQUIRE(line.find("-DCMAKE_BUILD_TYPE=Release") != std::string::npos);
     REQUIRE(line.find("-DPULP_BUILD_EXAMPLES=OFF") != std::string::npos);
+    REQUIRE(line.find("-DPULP_DEV_BUILD=ON") != std::string::npos);
 }
 
 TEST_CASE("pulp-cpp build --examples reconfigures a cache that has examples off",

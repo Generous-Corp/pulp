@@ -56,14 +56,15 @@ class SelectionTests(unittest.TestCase):
     def plan(self, paths: list[str], projected: step.inventory.Selection,
              *, scripts: list[str] = (), inputs: list[str] = (), own: list[str] = (),
              rebuilt: list[str] = (), registered: list[str] = (),
-             cases: list[str] = ()) -> dict:
+             cases: list[str] = (), referenced: list[str] = ()) -> dict:
         with mock.patch.object(step, "project", return_value=projected) as project, \
                 mock.patch.object(step, "edited_case_tests", return_value=list(cases)), \
                 mock.patch.object(step, "script_reference_tests", return_value=list(scripts)), \
                 mock.patch.object(step, "script_input_tests", return_value=list(inputs)), \
                 mock.patch.object(step, "own_tests", return_value=list(own)), \
                 mock.patch.object(step, "rebuilt_binary_tests", return_value=list(rebuilt)), \
-                mock.patch.object(step, "registration_tests", return_value=list(registered)):
+                mock.patch.object(step, "registration_tests", return_value=list(registered)), \
+                mock.patch.object(step, "command_reference_tests", return_value=list(referenced)):
             plan = step.select(Path("/b"), paths, NAMES)
         plan["_projected"] = project.called
         return plan
@@ -347,8 +348,16 @@ class PulpRsEmbeddedInputTests(unittest.TestCase):
     LITERAL = re.compile(r"\binclude_(?:str|bytes)!\s*\(\s*\"([^\"]+)\"\s*[,)]")
     # build.rs paths resolve against CARGO_MANIFEST_DIR, the crate root.
     BUILD_SCRIPT = f"{CRATE}/build.rs"
-    RERUN = re.compile(r"cargo:rerun-if-changed=([^\"]*)\"")
-    JOIN = re.compile(r"\.join\(\s*\"([^\"]+)\"\s*\)")
+    RERUN = re.compile(r"cargo:rerun-if-changed=([^\"]*)\"\s*(?:,\s*(\w+))?")
+    BINDING = re.compile(r"\blet\s+(\w+)\s*=\s*\w+\s*\.join\(\s*\"([^\"]+)\"\s*\)\s*;")
+    # Repo-root reads in the crate's tests: `repo_root()` chains, a
+    # CARGO_MANIFEST_DIR join of "../.." then a literal or a `const` path, and
+    # a single "../../<path>" join literal.
+    ROOT_CHAIN = re.compile(r"repo_root\(\)((?:\s*\.join\(\s*\"[^\"]+\"\s*\))+)")
+    UPWARD_JOIN = re.compile(r"\.join\(\s*\"\.\./\.\./([^\"]+)\"\s*\)")
+    UPWARD_THEN = re.compile(r"\.join\(\s*\"\.\./\.\.\"\s*\)\s*\.join\(\s*([\w:]+|\"[^\"]+\")\s*\)")
+    CONST = re.compile(r"\bconst\s+(\w+)\s*:\s*&str\s*=\s*\"([^\"]+)\"")
+    JOIN_ARG = re.compile(r"\.join\(\s*\"([^\"]+)\"\s*\)")
 
     def crate_sources(self) -> dict[str, str]:
         root = REPO / self.CRATE
@@ -371,15 +380,41 @@ class PulpRsEmbeddedInputTests(unittest.TestCase):
         return found
 
     def build_script_inputs(self, text: str) -> list[str]:
-        """The crate-root-relative paths build.rs watches."""
-        reruns = self.RERUN.findall(text)
-        literal = [r for r in reruns if "{" not in r]
-        joined = self.JOIN.findall(text)
-        # An interpolated rerun-if-changed path must come from a .join("...")
-        # literal; anything else is computed and cannot be checked statically.
-        self.assertLessEqual(len(reruns) - len(literal), len(joined),
-                             "build.rs watches a path that is not a .join() literal")
-        return [os.path.join(self.CRATE, p) for p in literal + joined]
+        """The crate-root-relative paths build.rs watches.
+
+        A watched path is either literal or interpolated from a variable bound
+        by `let <var> = <dir>.join("<literal>");`. Any other interpolation is a
+        computed path this read cannot resolve, and fails."""
+        bound = dict(self.BINDING.findall(text))
+        paths = []
+        for watched, var in self.RERUN.findall(text):
+            if "{" not in watched:
+                paths.append(watched)
+                continue
+            name = var or watched.strip("{}")
+            self.assertIn(name, bound, f"build.rs watches {watched!r} from {name!r}, "
+                                       "which is not bound to a .join(\"<literal>\")")
+            paths.append(bound[name])
+        return [os.path.join(self.CRATE, p) for p in paths]
+
+    def repo_root_reads(self, sources: dict[str, str]) -> set[str]:
+        """Repo-relative paths the crate's code joins under the repo root."""
+        consts = {name: value for text in sources.values() for name, value in self.CONST.findall(text)}
+        found: set[str] = set()
+        for text in sources.values():
+            for chain in self.ROOT_CHAIN.findall(text):
+                found.add("/".join(self.JOIN_ARG.findall(chain)))
+            found.update(self.UPWARD_JOIN.findall(text))
+            for arg in self.UPWARD_THEN.findall(text):
+                literal = arg.strip('"') if arg.startswith('"') else consts.get(arg.split("::")[-1])
+                self.assertIsNotNone(literal, f"a repo-root join of {arg!r} cannot be resolved")
+                found.add(literal)
+        return {os.path.normpath(p).replace(os.sep, "/") for p in found}
+
+    @staticmethod
+    def listed(path: str) -> bool:
+        return any(path == entry or (entry.endswith("/") and (path + "/").startswith(entry))
+                   for entry in step.PULP_RS_EXTERNAL_INPUTS + step.PULP_RS_TEST_TIME_INPUTS)
 
     def test_the_build_script_matrix_is_found(self) -> None:
         self.assertIn("tools/scripts/release_product_matrix.json",
@@ -417,9 +452,111 @@ class PulpRsEmbeddedInputTests(unittest.TestCase):
     def test_the_test_time_inputs_exist_and_select_the_family(self) -> None:
         for path in step.PULP_RS_TEST_TIME_INPUTS:
             with self.subTest(path=path):
-                self.assertTrue((REPO / path).is_file(), path)
+                exists = (REPO / path).is_dir() if path.endswith("/") else (REPO / path).is_file()
+                self.assertTrue(exists, path)
+                probe = path + "x.bin" if path.endswith("/") else path
                 self.assertIn("pulp-rs-cargo",
-                              step.family_tests([path], ["pulp-rust-cli-cargo-tests"]))
+                              step.family_tests([probe], ["pulp-rust-cli-cargo-tests"]))
+
+    def test_every_repo_root_read_is_a_listed_input(self) -> None:
+        reads = self.repo_root_reads(self.crate_sources())
+        # Positive control: the reads this check exists for are found at all.
+        for expected in ("tools/ci/record_build_metric.sh",
+                         "tools/packages/chrome-for-testing-verification.md",
+                         "tools/packages/packages.lock.schema.json"):
+            self.assertIn(expected, reads)
+        self.assertEqual(sorted(r for r in reads if not self.listed(r)), [])
+
+    def test_every_test_time_input_is_still_read(self) -> None:
+        # A stale entry selects the crate's tests for an edit nothing reads.
+        reads = self.repo_root_reads(self.crate_sources())
+        for entry in step.PULP_RS_TEST_TIME_INPUTS:
+            with self.subTest(entry=entry):
+                self.assertTrue(any(r == entry or (r + "/").startswith(entry) for r in reads),
+                                f"{entry} is listed but no crate source reads it")
+
+    def test_planted_new_repo_root_read_is_detected(self) -> None:
+        sources = self.crate_sources()
+        sources[f"{self.CRATE}/tests/planted.rs"] = (
+            'fn f() { let _ = repo_root().join("tools").join("planted.json"); }\n'
+            'const P: &str = "tools/ci/planted.sh";\n'
+            'fn g() { let _ = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").join(P); }\n')
+        reads = self.repo_root_reads(sources)
+        self.assertIn("tools/planted.json", reads)
+        self.assertIn("tools/ci/planted.sh", reads)
+        self.assertFalse(self.listed("tools/planted.json"))
+
+    def test_build_script_watch_without_a_literal_join_fails(self) -> None:
+        sources = self.crate_sources()
+        sources[self.BUILD_SCRIPT] += (
+            'fn planted(m: &std::path::Path) {\n'
+            '    let p = m.join(std::env::var("X").unwrap());\n'
+            '    println!("cargo:rerun-if-changed={}", p.display());\n}\n')
+        with self.assertRaises(AssertionError):
+            self.external_inputs(sources)
+
+
+class CommandReferenceTests(unittest.TestCase):
+    """Direct edges from a test's command to a file the diff edits."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        (self.root / "test/cmake").mkdir(parents=True)
+        (self.root / "tools/cmake").mkdir(parents=True)
+        self.smoke = self.root / "test/cmake/test_simd.cmake"
+        self.smoke.write_text('include("${CMAKE_CURRENT_LIST_DIR}/../../tools/cmake/PulpSimdSupport.cmake")\n',
+                              encoding="utf-8")
+        cmake = "/usr/bin/cmake"
+        self.entries = step.inventory.projection_ctest_entries([
+            {"name": "simd-smoke", "command": [cmake, "-P", str(self.smoke)]},
+            {"name": "guard-define", "command": [
+                cmake, f"-DGUARD={self.root}/tools/cmake/CheckGuard.cmake",
+                "-P", str(self.root / "test/cmake/run.cmake")]},
+            {"name": "unrelated", "command": [cmake, "-P", str(self.root / "test/cmake/other.cmake")]},
+        ])
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def select(self, paths: list[str]) -> list[str]:
+        with mock.patch.object(step.inventory, "load_projection_ctest_entries",
+                               return_value=self.entries):
+            return step.command_reference_tests(Path("/b"), paths, self.root)
+
+    def test_a_module_a_cmake_script_includes_selects_the_script_test(self) -> None:
+        self.assertEqual(self.select(["tools/cmake/PulpSimdSupport.cmake"]), ["simd-smoke"])
+
+    def test_a_file_passed_as_a_define_selects_its_test(self) -> None:
+        self.assertEqual(self.select(["tools/cmake/CheckGuard.cmake"]), ["guard-define"])
+
+    def test_control_an_unrelated_module_selects_nothing(self) -> None:
+        self.assertEqual(self.select(["tools/cmake/PulpOther.cmake"]), [])
+        self.assertEqual(self.select(["core/runtime/src/log.cpp"]), [])
+
+    def test_selected_references_run_first_as_merge_only_checks(self) -> None:
+        plan = SelectionTests.plan(SelectionTests(), ["tools/cmake/PulpSimdSupport.cmake"],
+                                   selection("all", []), referenced=["unit-b"])
+        self.assertIn("unit-b", plan["merge_only"])
+        self.assertIn("unit-b", plan["tests"][:len(plan["merge_only"])])
+
+
+class FamilyMessageTests(unittest.TestCase):
+    def test_an_unconfigured_component_is_named_not_a_rename(self) -> None:
+        message = step.empty_family_message("pulp-rs-cargo")
+        self.assertIn("pulp-rs is not configured on this lane", message)
+        self.assertNotIn("renamed", message)
+
+    def test_other_required_families_still_point_at_a_rename(self) -> None:
+        self.assertIn("renamed", step.empty_family_message("runtime-sync-hammers"))
+
+    def test_the_no_editor_fixture_reaches_its_runtime_pattern_selftest(self) -> None:
+        tests = step.family_tests(["test/fixtures/no_editor_link_floor/no_editor_runtime_deps.cmake"],
+                                  ["no-editor-link-floor-runtime-pattern",
+                                   "no-editor-plugin-link-floor-artifacts", "other"])
+        self.assertEqual(sorted(tests["no-editor-link-floor"]),
+                         ["no-editor-link-floor-runtime-pattern",
+                          "no-editor-plugin-link-floor-artifacts"])
 
 
 class RequiredFamilyTests(unittest.TestCase):

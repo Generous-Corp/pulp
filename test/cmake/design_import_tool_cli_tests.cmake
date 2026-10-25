@@ -483,6 +483,20 @@ if(Python3_Interpreter_FOUND AND PULP_HAS_SKIA AND PROJECT_IS_TOP_LEVEL)
         TIMEOUT 120)
 endif()
 
+# A 600-weight captured label on half- and quarter-pixel tops renders where
+# Chromium put it: CSS weight matching picks the captured face, so the captured
+# line layout holds and the ink and its centroid match the capture.
+if(Python3_Interpreter_FOUND AND PULP_HAS_SKIA AND PROJECT_IS_TOP_LEVEL)
+    add_test(NAME import-design-ir-observe-half-pixel-label
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_design_ir_observe_half_pixel_label.py
+                --observer $<TARGET_FILE:pulp-design-ir-observe>)
+    set_tests_properties(import-design-ir-observe-half-pixel-label PROPERTIES
+        LABELS "parser-import;import"
+        TIMEOUT 120
+        SKIP_RETURN_CODE 77)
+endif()
+
 # pulp-import-design carries a local asset named outside the source design's
 # directory into the saved document's assets/, so the document still renders
 # under the loader's document-root containment after the source is gone.

@@ -86,6 +86,7 @@ paths = [
   "tools/scripts/test_build_migration_index.py",
   "tools/scripts/test_build_migration_index_extra.py",
   "tools/scripts/test_build_skia_android_pin.py",
+  "tools/scripts/test_build_skia_source_pin.py",
   "tools/scripts/test_build_workflow.py",
   "tools/scripts/test_changed_surface_policy.py",
   "tools/scripts/test_changed_surface_script_families.py",
@@ -628,6 +629,40 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "dsp-provenance-audit",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-b76022563ab8"
+paths = ["tools/scripts/format_header_view_boundary.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "format-header-view-boundary",
   "gate-common-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -7288,6 +7323,7 @@ paths = [
   "tools/scripts/design_unit_boundary_check.py",
   "tools/scripts/docs_sync_check.py",
   "tools/scripts/dsp_provenance_audit.py",
+  "tools/scripts/format_header_view_boundary.py",
   "tools/scripts/frontend_ir_codegen_artifact_gate.py",
   "tools/scripts/frontend_ir_codegen_artifacts.py",
   "tools/scripts/frontend_ir_common.py",
@@ -7377,6 +7413,7 @@ paths = [
   "tools/scripts/test_build_migration_index_extra.py",
   "tools/scripts/test_build_parallelism_guard.py",
   "tools/scripts/test_build_skia_android_pin.py",
+  "tools/scripts/test_build_skia_source_pin.py",
   "tools/scripts/test_build_speed_proxies.py",
   "tools/scripts/test_build_speed_scorecard.py",
   "tools/scripts/test_build_time_report.py",
@@ -7860,6 +7897,7 @@ paths = [
   "tools/scripts/design_unit_boundary_check.py",
   "tools/scripts/docs_sync_check.py",
   "tools/scripts/dsp_provenance_audit.py",
+  "tools/scripts/format_header_view_boundary.py",
   "tools/scripts/frontend_ir_codegen_artifact_gate.py",
   "tools/scripts/frontend_ir_codegen_artifacts.py",
   "tools/scripts/frontend_ir_common.py",
@@ -7949,6 +7987,7 @@ paths = [
   "tools/scripts/test_build_migration_index_extra.py",
   "tools/scripts/test_build_parallelism_guard.py",
   "tools/scripts/test_build_skia_android_pin.py",
+  "tools/scripts/test_build_skia_source_pin.py",
   "tools/scripts/test_build_speed_proxies.py",
   "tools/scripts/test_build_speed_scorecard.py",
   "tools/scripts/test_build_time_report.py",

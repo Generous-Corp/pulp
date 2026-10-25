@@ -87,10 +87,12 @@ foreach(_fmt IN LISTS _ui_script_formats)
         ENVIRONMENT_MODIFICATION "${_probe_env}")
 endforeach()
 
-# The Standalone opens an audio device, so it is not launched here; its image
-# must still carry the registered script path, which an editor build without
-# the per-target registration does not.
-if(TARGET PulpUiScriptFixture_Standalone)
+# The Standalone opens an audio device, so it is not launched here; in a dev
+# build (PULP_DEV_BUILD) its image must still carry the registered script path,
+# which an editor build without the per-target registration does not. A
+# tests-on configure with the option off records no path, and
+# ui-script-plugin-editor-installed-sdk proves that absence on a release build.
+if(TARGET PulpUiScriptFixture_Standalone AND PULP_DEV_BUILD)
     add_test(NAME ui-script-plugin-standalone-registers-script
         COMMAND ${CMAKE_COMMAND}
             "-DIMAGE=$<TARGET_FILE:PulpUiScriptFixture_Standalone>"

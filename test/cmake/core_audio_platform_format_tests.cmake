@@ -188,7 +188,10 @@ add_test(
     NAME pulp-state-link-closure
     COMMAND ${CMAKE_COMMAND} -P ${CMAKE_BINARY_DIR}/core/state/pulp_state_link_closure.cmake
 )
-set_tests_properties(pulp-state-link-closure PROPERTIES LABELS "state;link-closure")
+# The script is generated from pulp-state's link interface, so the test reads
+# that target, not an artifact of it.
+set_tests_properties(pulp-state-link-closure PROPERTIES LABELS "state;link-closure"
+    PULP_SELECT_WITH_TARGETS "pulp-state")
 
 # Symbol-level closure for the same archive: no object in pulp-state may call
 # into pulp-content or the audio/DSP/MIDI archives, whatever its link edges say.
@@ -810,6 +813,9 @@ add_test(NAME format-header-view-boundary
     COMMAND ${CMAKE_COMMAND} -E env python3
         ${CMAKE_SOURCE_DIR}/tools/scripts/format_header_view_boundary.py
         --repo ${CMAKE_SOURCE_DIR})
+# It walks the two halves' headers, so an edit that selects either half selects it.
+set_tests_properties(format-header-view-boundary PROPERTIES
+    PULP_SELECT_WITH_TARGETS "pulp-format-core;pulp-format-view")
 
 # Core-only link proof: a Processor authored, constructed, exercised and
 # destroyed against pulp::format-core with no view layer in the link at all.

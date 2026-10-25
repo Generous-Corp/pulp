@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "event_id": "20261025-capture-html-font-face-urls",
+  "kind": "change",
+  "created_at": "2026-10-25T02:57:47Z",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "rationale": "design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger); canvas-kernel: register_font_file now sends a file that starts with the WOFF2 magic through the existing register_font_woff2 path, which decompresses and validates it, instead of handing the compressed bytes to the platform font manager, and woff2_file_routes() counts those routes so the path is observable. Imported designs name captured @font-face files by path and pages often serve WOFF2; CoreText decodes WOFF2 itself, but a FreeType build without Brotli does not, so every platform now reads the file the same way. Every other file still goes to register_font unchanged. No authority boundary moves; the decoder is the one already compiled into pulp-canvas. Vellum inherits the WOFF2 file route with the canvas kernel.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "ctest --test-dir build -R pulp-test-browser-capture-fonts",
+    "node --test tools/import-design/browser_capture/font_faces.integration.test.mjs",
+    "node --test tools/import-design/browser_capture/font_faces.test.mjs",
+    "pulp-test-font-woff2 \"a WOFF2 font file registers through the file path\""
+  ],
+  "disposition": "pulp-only",
+  "vellum_inherits": true
+}

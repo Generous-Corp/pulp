@@ -5,6 +5,8 @@
 #include <cctype>
 #include <optional>
 #include <sstream>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #include <pulp/runtime/log.hpp>
@@ -705,6 +707,131 @@ float parse_angle(const std::string& t) {
     return val * 3.14159265f / 180.0f;  // deg
 }
 
+// CSS Color 4 `<color-interpolation-method>`: `in <space> [<hue-method> hue]`.
+// CSS lets it sit before or after a gradient's direction, shape or `from`
+// clause, and Chrome's computed style uses both orders (`to right in oklab`,
+// `circle in hsl`, `from 90deg in oklch`), so it is found as a token anywhere in
+// the prefix and cut out, leaving the rest for the existing prefix parsers.
+enum class InterpolationClause { absent, parsed, invalid };
+
+InterpolationClause take_interpolation_method(std::string& seg,
+                                              canvas::GradientInterpolation& out) {
+    // Whitespace tokens at paren depth 0; a stop such as `color-mix(in srgb,
+    // ...)` never reaches here, but a depth-aware split costs nothing.
+    std::vector<std::string> tokens;
+    std::string cur;
+    int depth = 0;
+    for (char c : seg) {
+        if (c == '(')
+            ++depth;
+        else if (c == ')')
+            --depth;
+        if (depth <= 0 && std::isspace(static_cast<unsigned char>(c))) {
+            if (!cur.empty())
+                tokens.push_back(std::move(cur));
+            cur.clear();
+        } else {
+            cur.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+        }
+    }
+    if (!cur.empty())
+        tokens.push_back(std::move(cur));
+
+    const auto in = std::find(tokens.begin(), tokens.end(), "in");
+    if (in == tokens.end())
+        return InterpolationClause::absent;
+    if (in + 1 == tokens.end())
+        return InterpolationClause::invalid;
+
+    using Space = canvas::GradientColorSpace;
+    static constexpr std::pair<std::string_view, Space> kSpaces[] = {
+        {"srgb", Space::srgb},
+        {"srgb-linear", Space::srgb_linear},
+        // Linear transforms of linear-light sRGB: blending in them is
+        // blending in srgb-linear (see GradientColorSpace).
+        {"xyz", Space::srgb_linear},
+        {"xyz-d50", Space::srgb_linear},
+        {"xyz-d65", Space::srgb_linear},
+        {"display-p3-linear", Space::srgb_linear},
+        {"display-p3", Space::display_p3},
+        {"a98-rgb", Space::a98_rgb},
+        {"prophoto-rgb", Space::prophoto_rgb},
+        {"rec2020", Space::rec2020},
+        {"lab", Space::lab},
+        {"oklab", Space::oklab},
+        {"hsl", Space::hsl},
+        {"hwb", Space::hwb},
+        {"lch", Space::lch},
+        {"oklch", Space::oklch},
+    };
+    const auto space = std::find_if(std::begin(kSpaces), std::end(kSpaces),
+                                    [&](const auto& e) { return e.first == in[1]; });
+    if (space == std::end(kSpaces))
+        return InterpolationClause::invalid;
+
+    canvas::GradientInterpolation method;
+    method.space = space->second;
+    auto clause_end = in + 2;
+    if (clause_end != tokens.end() && clause_end + 1 != tokens.end() && clause_end[1] == "hue") {
+        using Hue = canvas::GradientHueMethod;
+        static constexpr std::pair<std::string_view, Hue> kHues[] = {
+            {"shorter", Hue::shorter},
+            {"longer", Hue::longer},
+            {"increasing", Hue::increasing},
+            {"decreasing", Hue::decreasing},
+        };
+        const auto hue = std::find_if(std::begin(kHues), std::end(kHues),
+                                      [&](const auto& e) { return e.first == *clause_end; });
+        // A hue method needs a hue to act on: Chrome drops `in oklab longer
+        // hue`, and so does this.
+        if (hue == std::end(kHues) || !canvas::is_polar(method.space))
+            return InterpolationClause::invalid;
+        method.hue = hue->second;
+        clause_end += 2;
+    }
+    out = method;
+    tokens.erase(in, clause_end);
+    seg.clear();
+    for (const auto& t : tokens) {
+        if (!seg.empty())
+            seg.push_back(' ');
+        seg += t;
+    }
+    return InterpolationClause::parsed;
+}
+
+// The space a gradient blends in when it names none. CSS Color 4 makes that
+// sRGB only while every stop is a legacy sRGB colour; one `oklab()`, `lch()`
+// or `color()` stop moves the default to Oklab. Chrome's computed style leans
+// on this: it drops `in oklab` from a gradient whose stops are non-legacy,
+// because Oklab is already the default there, so reading the clause alone
+// would paint those in sRGB.
+canvas::GradientInterpolation default_interpolation(std::string_view stops) {
+    std::string lower(stops);
+    for (auto& c : lower)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    canvas::GradientInterpolation method;
+    if (lower.find("lab(") != std::string::npos || lower.find("lch(") != std::string::npos ||
+        lower.find("color(") != std::string::npos)
+        method.space = canvas::GradientColorSpace::oklab;
+    return method;
+}
+
+// Resolve a prefix's interpolation clause, logging the reason a clause is
+// refused. Returns nullopt when the gradient must be refused.
+std::optional<InterpolationClause>
+resolve_interpolation_clause(std::string& seg, const std::string& gradient,
+                             canvas::GradientInterpolation& out) {
+    const auto clause = take_interpolation_method(seg, out);
+    if (clause != InterpolationClause::invalid)
+        return clause;
+    pulp::runtime::log_warn(
+        "css_gradient: refusing gradient with an unsupported colour-interpolation "
+        "method (an unknown space, or a hue method on a non-polar space): {}",
+        gradient);
+    return std::nullopt;
+}
+
 }  // namespace
 
 namespace {
@@ -753,6 +880,12 @@ bool parse_one_gradient(const std::string& gradient,
                               : inner.substr(0, prefix_end);
         while (!seg.empty() && seg.back() == ' ') seg.pop_back();
         while (!seg.empty() && seg.front() == ' ') seg.erase(0, 1);
+        canvas::GradientInterpolation interpolation;
+        const auto clause = resolve_interpolation_clause(seg, gradient, interpolation);
+        if (!clause)
+            return false;
+        if (*clause == InterpolationClause::parsed)
+            color_start = prefix_end + 1;
 
         // CSS angles run clockwise from "to top". An angle used to fall through
         // to the stop list, where the colour parser read `150deg` as a colour it
@@ -899,6 +1032,9 @@ bool parse_one_gradient(const std::string& gradient,
                 out.linear_angle = *radians;
             }
             out.colors = std::move(colors); out.positions = std::move(positions);
+            out.interpolation = *clause == InterpolationClause::parsed
+                                    ? interpolation
+                                    : default_interpolation(inner.substr(color_start));
             return true;
         }
         return false;
@@ -935,14 +1071,21 @@ bool parse_one_gradient(const std::string& gradient,
         float rx_frac = 0.0f, ry_frac = 0.0f, rx_px = 0.0f, ry_px = 0.0f;
         size_t color_start = 0;
         size_t fc = top_level_comma(inner);
+        canvas::GradientInterpolation interpolation;
+        auto clause = InterpolationClause::absent;
         if (fc != std::string::npos) {
             std::string seg = inner.substr(0, fc);
+            const auto taken = resolve_interpolation_clause(seg, gradient, interpolation);
+            if (!taken)
+                return false;
+            clause = *taken;
             const bool has_explicit_size =
                 !seg.empty() && parse_radial_extent(seg, rx_frac, ry_frac,
                                                     rx_px, ry_px, circle);
-            if (has_explicit_size || seg.find("at ") != std::string::npos ||
-                seg.rfind("circle", 0) == 0 || seg.rfind("ellipse", 0) == 0 ||
-                seg.rfind("closest", 0) == 0 || seg.rfind("farthest", 0) == 0) {
+            if (clause == InterpolationClause::parsed || has_explicit_size ||
+                seg.find("at ") != std::string::npos || seg.rfind("circle", 0) == 0 ||
+                seg.rfind("ellipse", 0) == 0 || seg.rfind("closest", 0) == 0 ||
+                seg.rfind("farthest", 0) == 0) {
                 parse_at_center(seg, cx, cy);
                 if (seg.rfind("circle", 0) == 0 ||
                     seg.find(" circle") != std::string::npos) circle = true;
@@ -990,6 +1133,9 @@ bool parse_one_gradient(const std::string& gradient,
             // painter has that radius instead of treating `1px` as 100%.
             out.positions_in_px = stops_all_in(units, StopUnit::pixels);
             out.colors = std::move(colors); out.positions = std::move(positions);
+            out.interpolation = clause == InterpolationClause::parsed
+                                    ? interpolation
+                                    : default_interpolation(inner.substr(color_start));
             return true;
         }
         return false;
@@ -1010,10 +1156,16 @@ bool parse_one_gradient(const std::string& gradient,
         float cx = 0.5f, cy = 0.5f, from_rad = 0.0f;
         size_t color_start = 0;
         size_t fc = top_level_comma(inner);
+        canvas::GradientInterpolation interpolation;
+        auto clause = InterpolationClause::absent;
         if (fc != std::string::npos) {
             std::string seg = inner.substr(0, fc);
-            if (seg.rfind("from ", 0) == 0 || seg.find(" at ", 0) != std::string::npos ||
-                seg.rfind("at ", 0) == 0) {
+            const auto taken = resolve_interpolation_clause(seg, gradient, interpolation);
+            if (!taken)
+                return false;
+            clause = *taken;
+            if (clause == InterpolationClause::parsed || seg.rfind("from ", 0) == 0 ||
+                seg.find(" at ", 0) != std::string::npos || seg.rfind("at ", 0) == 0) {
                 auto fromPos = seg.find("from ");
                 if (fromPos != std::string::npos) {
                     std::istringstream is(seg.substr(fromPos + 5));
@@ -1049,6 +1201,9 @@ bool parse_one_gradient(const std::string& gradient,
         out.angle = from_rad - 1.57079633f;
         out.sweep_turns = sweep_turns;
         out.colors = std::move(colors); out.positions = std::move(positions);
+        out.interpolation = clause == InterpolationClause::parsed
+                                ? interpolation
+                                : default_interpolation(inner.substr(color_start));
         return true;
     }
 

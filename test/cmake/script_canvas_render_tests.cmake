@@ -76,6 +76,11 @@ catch_discover_tests(pulp-test-scripted-ui PROPERTIES LABELS slow)
 pulp_add_test_suite(pulp-test-scripted-ui-runtime-eval GROUP pulp-test-group-script-view
     LIBRARIES pulp::view)
 
+# Embedded-source sessions never touch the file watcher, so they stay in the
+# normal-speed lane rather than the `slow` file-watch suite above.
+pulp_add_test_suite(pulp-test-scripted-ui-embedded GROUP pulp-test-group-script-view
+    LIBRARIES pulp::view)
+
 # JS engine abstraction tests (shared across all backends)
 pulp_add_test_suite(pulp-test-js-engine GROUP pulp-test-group-script-view
     LIBRARIES pulp::view)
@@ -284,11 +289,29 @@ if(PULP_HAS_SKIA)
         LIBRARIES pulp::view)
 endif()
 
+# backdrop-filter under opacity against Chrome's own render of the same tree.
+# The expected pixels are read off Chromium by
+# tools/import-validation/chrome_backdrop_opacity_oracle.py.
+if(PULP_HAS_SKIA)
+    pulp_add_test_suite(pulp-test-css-backdrop-opacity GROUP pulp-test-group-script-view
+        SOURCES test_css_backdrop_opacity.cpp harness/rt_allocation_probe.cpp
+        LIBRARIES pulp::view)
+endif()
+
 # CSS gradients are dithered as Chromium dithers them. Measures rows that are
 # not one colour, which an undithered vertical gradient never has; the
 # Graphite counterpart is pulp-test-css-gradient-dither-gpu.
 if(PULP_HAS_SKIA)
     pulp_add_test_suite(pulp-test-css-gradient-dither GROUP pulp-test-group-script-view
+        LIBRARIES pulp::view pulp::canvas)
+endif()
+
+# CSS `<color-interpolation-method>` (`in oklab`, hue methods): parsing, the
+# view-to-canvas handoff, and Skia raster / CoreGraphics midpoints held to
+# Chrome's, read by chrome_gradient_oracle.py --colors. The Graphite
+# counterpart is pulp-test-css-gradient-interpolation-gpu.
+if(PULP_HAS_SKIA)
+    pulp_add_test_suite(pulp-test-css-gradient-interpolation GROUP pulp-test-group-script-view
         LIBRARIES pulp::view pulp::canvas)
 endif()
 

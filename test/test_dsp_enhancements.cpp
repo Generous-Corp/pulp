@@ -40,8 +40,9 @@ TEST_CASE("FastMath dB conversion covers silent and unity cases",
 
 TEST_CASE("FastMath tanh covers clamps and odd symmetry",
           "[dsp][fast_math]") {
-    REQUIRE_THAT(FastMath::tanh(-5.0f), WithinAbs(-1.0f, 1e-6f));
-    REQUIRE_THAT(FastMath::tanh(5.0f), WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(FastMath::tanh(-5.0f), WithinAbs(std::tanh(-5.0), 5.7e-5));
+    REQUIRE_THAT(FastMath::tanh(5.0f), WithinAbs(std::tanh(5.0), 5.7e-5));
+    REQUIRE_THAT(FastMath::tanh(9.0f), WithinAbs(1.0f, 1e-6f));
     REQUIRE_THAT(FastMath::tanh(0.0f), WithinAbs(0.0f, 1e-6f));
 
     const auto positive = FastMath::tanh(0.75f);
