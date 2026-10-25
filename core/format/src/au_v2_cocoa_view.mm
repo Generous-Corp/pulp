@@ -112,6 +112,8 @@ struct PulpAUEditorOwnership {
 // will-dealloc hook, so ~PluginViewHost sees a whole view; -dealloc keeps it
 // as the fallback when the view has no hook.
 - (void)releaseEditor;
+// The editor's view host while the editor is open; nullptr once released.
+- (pulp::view::PluginViewHost*)editorHost;
 @end
 
 // Implemented by the Pulp plug-in views (plugin_view_host_mac_view.h); the
@@ -168,6 +170,9 @@ struct PulpAUEditorOwnership {
             dispatch_sync(dispatch_get_main_queue(), ^{ delete owned; });
         }
     }
+}
+- (pulp::view::PluginViewHost*)editorHost {
+    return _ownership ? _ownership->host.get() : nullptr;
 }
 @end
 
@@ -262,6 +267,15 @@ bool pulp_resize_logic_auv2_editor(NSView* editor_view,
 @end
 
 @implementation PULP_AU_COCOA_VIEW_CLASS
+
+// Test-only: the PluginViewHost behind an editor view this factory returned, or
+// nullptr. A test reads the host's GPU cache bytes through it; the plug-in never
+// calls it. A class method on the per-plug-in factory class, so two plug-ins in
+// one process cannot collide on it.
++ (void*)pulpEditorHostForTesting:(NSView*)view {
+    auto* owner = static_cast<PulpAUEditorOwner*>(objc_getAssociatedObject(view, &kOwnershipKey));
+    return owner ? [owner editorHost] : nullptr;
+}
 
 - (unsigned)interfaceVersion {
     return 0;
