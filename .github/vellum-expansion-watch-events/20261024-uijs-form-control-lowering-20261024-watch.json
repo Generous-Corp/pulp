@@ -6,7 +6,6 @@
   "acceptance_id": "full-design-import-render-v1-pulp-watch",
   "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
   "capability_families": [
-    "design-ir-contract",
     "render-assets-and-backends"
   ],
   "rationale": "The ui.js emitter now lowers a captured theme-painted range, checkbox or radio (native_theme verdict native) onto RangeSlider / Checkbox in the chromium_refresh skin with the HTML state the native and baked C++ lanes already apply from the shared ua_form_control_state() parse, and records each node's captured snapped paint rect, through new or widened WidgetBridge setters (setUaSkin, setCheckboxKind, setCapturedPaintRect; setAccentColor and setRadioGroup reach Checkbox). This brings one emitter into line with the others; Chromium stays the only oracle and Skia/Dawn the renderer, so no design-import, Chromium, rendering, or packaging authority moves.",
