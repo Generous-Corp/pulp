@@ -5,6 +5,7 @@
 #include "clap_note_name.hpp"
 
 #include <pulp/runtime/trace.hpp>
+#include <pulp/format/detail/host_sample_position.hpp>
 #include <pulp/format/clap_adapter.hpp>
 #include <pulp/format/editor_prewarm.hpp>
 #include <pulp/format/adapter_boundary.hpp>
@@ -173,9 +174,10 @@ boundary::HostTransport decode_clap_transport(const clap_event_transport_t* tr,
     if (flags & CLAP_TRANSPORT_HAS_SECONDS_TIMELINE) {
         const double seconds =
             static_cast<double>(tr->song_pos_seconds) / CLAP_SECTIME_FACTOR;
-        transport.validity.set(TransportField::SamplePosition);
-        transport.position_samples = static_cast<int64_t>(
-            std::llround(seconds * sample_rate));
+        if (const auto position = detail::host_sample_position(seconds * sample_rate)) {
+            transport.validity.set(TransportField::SamplePosition);
+            transport.position_samples = *position;
+        }
     }
     if (flags & CLAP_TRANSPORT_HAS_TIME_SIGNATURE) {
         transport.validity.set(TransportField::TimeSignature);
