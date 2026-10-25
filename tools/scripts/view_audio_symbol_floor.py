@@ -15,9 +15,13 @@ needs pulp-view-audio. The reading and the verdict are
 archive_symbol_closure_check.py's, run with --forbidden-defines any and
 --weak-rtti-contamination. A checked library's own weak definition of an
 inline function view-audio also emits resolves its reference and is not
-flagged, but its own weak copy of a view-audio class's typeinfo, vtable or
-typeinfo name (_ZTI/_ZTV/_ZTS) is: it means the library was compiled against
-that class's definition. A library may carry a
+flagged, but its own weak copy of the RTTI (typeinfo, typeinfo name, vtable,
+VTT, construction vtable) of a class view-audio owns is: it means the library
+was compiled against that class's definition. View-audio owns a class when it
+strongly defines a non-RTTI member of it; std:: and closure types are never
+flagged (see rtti_ownership.py). Weakness is read from `nm -m` on Mach-O,
+where Apple's -P letters never say W/V, and from the letters on ELF. A library
+may carry a
 named debt (--debt LIB=REASON) while a known edge is being removed; a debt that
 no longer matches anything is itself a failure, so a fixed edge cannot leave a
 stale exemption behind.

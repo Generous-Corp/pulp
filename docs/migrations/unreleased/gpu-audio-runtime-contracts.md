@@ -1,0 +1,213 @@
+---
+breaking = false
+summary = "GPU audio: appended status/capability/node contracts, staged convolver pipelining and CPU routing, neural shadow policy and model factory; several GPU audio types grow (rebuild)"
+---
+
+## Batch A: #10670
+
+### What changed
+
+The experimental GPU audio contract headers gained append-only additions. No
+existing field, enumerator value or virtual slot moved. A new status field
+reports its default until the node in question supplies it.
+
+- `GpuAudioStatus` is schema version 3 (`kSchemaVersion == 3`). After the v2
+  fields it adds `epoch`, `delivery_epoch_active`, `terminal_counts[8]`
+  (indexed by `GpuAudioTerminalDisposition`; its length is
+  `GpuAudioStatus::kTerminalDispositionCount`, which equals the new trailing
+  `GpuAudioTerminalDisposition::kCount` sentinel), `completion_mode`
+  (`GpuAudioCompletionMode`), `timestamps_available`, `last_delivery_ns`,
+  `gpu_kernel_available`, and CPU-shadow reporting: `shadow_mode`
+  (`GpuAudioShadowMode::{None, Inline, Worker}`), `shadow_inline_cost_pct`,
+  `shadow_delivered_blocks`, `shadow_late_blocks`,
+  `shadow_double_miss_blocks` and `shadow_model_differs`. `last_delivery_ns`
+  is reserved: no node fills it in this release.
+- `GpuAudioRecoveryReason` appends `ProviderUnresponsive = 7`, the
+  informational `ProviderReacquired = 8`, and `SustainedDeadlineMisses = 9`
+  (the GPU is alive but repeatedly late; reported as Degraded).
+  `ProviderReacquired` is reserved: no node produces it in this release.
+- `GpuAudioNodeDescriptor` appends `worker_pipeline_blocks` (default 0): the
+  blocks a node's worker emits behind its submit. The transport primes
+  `latency_blocks - worker_pipeline_blocks`; total latency stays
+  `latency_blocks`.
+- `GpuAudioProvider` appends `Cpu = 3`.
+- `GpuAudioCapabilityReport` appends `gpu_kernel_available` and
+  `recovery_policy` (`GpuAudioRecoveryPolicy::{Manual, AutoReacquire}`,
+  default `Manual`). `AutoReacquire` is reserved: every node reports `Manual`,
+  and no node re-acquires a lost provider in this release.
+- `validate_gpu_audio_status(status)` (declared with `GpuAudioCapabilityReport`
+  and reachable through `gpu_audio_status.hpp`) checks a quiescent v3 snapshot
+  and returns a typed `GpuAudioStatusError`. It rejects, among others: a
+  Degraded or Unavailable status that selects the GPU engine; ProviderLost or
+  ProviderUnresponsive without Unavailable; SustainedDeadlineMisses without
+  Degraded; a CPU provider with a GPU kernel or epoch; shadow counts without a
+  shadow; terminal counts beyond the delivery counters; and a recovery reason
+  without its sequence (or a sequence without a reason).
+- `GpuAudioNode` appends two virtuals after every existing one:
+  `status_snapshot()` (default: an uninitialized status) and
+  `release_bounded(budget_ns)` (default: `true`). No node overrides
+  `release_bounded()` yet, so it does not bound teardown in this release.
+- `GpuAudioTransport` holds a private health/configuration copy, and its
+  constructor and destructor are now defined out of line. `status_snapshot()`
+  and `capability_report()` read only that copy and never the node, and the
+  transport status now reports the hosted node's health.
+- `GpuConvolutionReverbLaneReport` appends `status` (a `GpuAudioStatus`), so
+  `sizeof(GpuConvolutionReverbReport)` grows. `GpuConvolver`,
+  `GpuMultiConvolver` and `GpuConvolutionReverb` gain `status_snapshot()`,
+  `recovery_reason()` and `fenced()`; `GpuConvolver` gains a trailing pointer
+  member (see the Batch B rebuild note below).
+
+### What to do
+
+- **Rebuild against the new headers.** `sizeof(GpuAudioStatus)`,
+  `sizeof(GpuAudioCapabilityReport)`, `sizeof(GpuAudioNodeDescriptor)`,
+  `sizeof(GpuAudioTransport)`, `sizeof(GpuConvolutionReverbReport)` and the
+  `GpuAudioNode` vtable grow. This
+  is a minor-version append for a source-rebuilt SDK; do not mix objects built
+  against the old and new headers.
+- **Positional initialization keeps working.** Aggregate-initializing the v2
+  prefix of `GpuAudioStatus`, or the existing fields of
+  `GpuAudioNodeDescriptor`, positionally still compiles and leaves the new
+  fields at their defaults.
+- **`GpuAudioTerminalDisposition::kCount` is a sentinel, not a disposition.**
+  Do not record or switch on it; size per-disposition tables with it.
+- **Exhaustive switches need the new cases.** A `switch` over
+  `GpuAudioRecoveryReason` or `GpuAudioProvider` without a `default` warns
+  until it handles `ProviderUnresponsive`, `ProviderReacquired`,
+  `SustainedDeadlineMisses` and `Cpu`.
+- **A node subclass that already declares `status_snapshot() const noexcept`
+  returning `GpuAudioStatus` now overrides the base hook.** Mark it `override`.
+  A subclass member with the same name but a different signature hides the
+  base hook and may warn under `-Woverloaded-virtual`.
+
+### GpuWaveNetRealtimeNode reports loss, hangs and lateness
+
+- `GpuWaveNetRealtimeNode::Config` appends `watchdog_blocks` (default 0, which
+  selects `capacity - 1`). `GpuWaveNetSession` appends `device_lost()` and
+  `outstanding_blocks()`. Positional initialization of the existing `Config`
+  fields keeps working.
+- **Status semantics change.** A lost device latches `ProviderLost` instead of
+  `ProviderFailure`, and a provider that completes nothing for
+  `watchdog_blocks` callback blocks latches `ProviderUnresponsive`. Both report
+  `provider_state = Unavailable`. A fenced or degraded node reports the engine
+  actually producing audio in `selected_engine`: `Cpu` when its CPU shadow
+  covers misses, `Unknown` when misses are silent, never `Gpu`. The schema v3
+  fields are now filled. Hosts that treated `Degraded` with `selected_engine ==
+  Gpu`, or `ProviderFailure`, as the loss signal should read `provider_state`
+  and `recovery_reason` instead.
+- **Late is now a stream-position fact.** A result is rejected as late only
+  once the callback that would consume it has finished, never by wall-clock
+  time.
+
+### Neural realtime node and CPU-only hosting
+
+- New public `GpuNeuralRealtimeNode` (`gpu_neural_realtime_node.hpp`) hosts a
+  neural model behind one node type with a built-in CPU shadow. It is
+  additive; existing node types are unchanged.
+- **Status semantics change for CPU-only nodes.** A hosted node whose provider
+  is `GpuAudioProvider::Cpu` reports `path = Cpu`, `provider = Cpu`,
+  `selected_engine = Cpu` and `Ready`, and the transport no longer counts its
+  CPU-delivered blocks as `missed_blocks`. GPU-backed nodes still count
+  genuine misses.
+- A WaveNet model whose GPU provider could not be prepared runs on the CPU
+  path and reports `Degraded` with `recovery_reason = ProviderFailure` rather
+  than `Ready`.
+
+
+## Batch B: #10665
+
+### Transport health passthrough and loss precedence
+
+- The transport status now passes through the hosted node's
+  `gpu_kernel_available`, `completion_mode`, `timestamps_available` and
+  `last_delivery_ns` (passed through; no node fills it yet), and the
+  `shadow_*` fields. A device loss observed after the `ProviderFailure`,
+  `ProviderUnresponsive` or `SustainedDeadlineMisses` it caused is reported as
+  `ProviderLost`; an independent earlier cause keeps first place.
+
+### Neural node: loss detection, model factory, CPU-only callbacks
+
+- New public `gpu_neural_model.hpp` declares `make_gpu_neural_model()`, the
+  host-thread factory for the node's model. It takes a provenance manifest,
+  the family's shape and one caller-owned `GpuNeuralCpuKernel` per channel,
+  and, for WaveNet only, an optional GPU session configuration. It never
+  throws; a refusal is reported as a `GpuNeuralModelError`.
+- The node adds `callback_contract_violations()`. Its `watchdog_blocks` set
+  to zero selects `capacity - 1`.
+- On the GPU path (WaveNet only) the node latches `ProviderLost` for a device
+  loss and `ProviderUnresponsive` from a completion watchdog
+  (`Config::watchdog_blocks`); both report `Unavailable`. A CPU-only node
+  counts an invalid or out-of-sequence callback in
+  `callback_contract_violations()` instead of latching a recovery reason, so it
+  stays `Ready`.
+- **The WaveNet GPU path is reachable, and prepares, for the first time.**
+  Before this release the neural node's WaveNet GPU path could not be reached
+  through the public API: `GpuNeuralModel` was only forward-declared, and its
+  internal builder had a prepare bug that would have left the node on its CPU
+  model. This release adds the public `make_gpu_neural_model()` factory with
+  the fix, plus hardware evidence. Where Dawn is available, a WaveNet node
+  built with a GPU session reports `Ready` on the GPU engine.
+
+### Neural shadow placement
+
+- **Neural shadow placement.** `GpuNeuralRealtimeNode::Config::shadow_policy`
+  (`ShadowPolicy::{Auto, Inline, Worker, None}`) chooses where the built-in
+  CPU model runs on a realtime GPU miss. `Auto` is the default: it times one
+  block at `prepare()` and picks `Inline` when per-channel cost × channels ≤
+  `kAutoInlineMaxCostPct` (15%) of the block period, otherwise `Worker` (a
+  dedicated thread; the callback only copies). `None` makes a realtime miss
+  silent. Offline renders always run the CPU model inline, and the first
+  realtime callback after one restores the placement chosen at `prepare()`.
+  Families without a GPU backend always run `Inline`.
+- **New Config fields**, all appended after `miss_policy`, so positional
+  initialization of the existing prefix still compiles: `shadow_policy`,
+  `shadow_model` (an optional cheaper model; never a default, reported as
+  `shadow_model_differs`), `shadow_queue_blocks`, `shadow_audio_workgroup`,
+  `watchdog_blocks`. `sizeof(GpuNeuralRealtimeNode::Config)` grows.
+- **Status.** The node fills `GpuAudioStatus`'s `shadow_*` fields, and the
+  hosting transport passes them through. `shadow_double_miss_blocks` is the
+  authoritative count of silent blocks; the transport's `CpuFallbackDelivered`
+  label only means the fallback path ran. `ShadowStatus` / `shadow_status()`
+  add the requested policy, per-channel and total cost, queue drops, resyncs
+  and workgroup membership. While `ShadowPolicy::None` is in effect, the
+  node's own `status_snapshot()` and `capability_report()` report
+  `fallback_policy = Silence` and `fallback_available = false` (`CpuFallback`
+  during an offline render, which runs the shadow inline); the
+  transport's status still reports the descriptor's `CpuFallback` for that
+  node.
+- **Preparation.** `PrepareError` appends `ShadowRequired` and
+  `ShadowModelMismatch`.
+
+### Staged convolver, spectral nodes and transport pipelining
+
+- **`GpuConvolver` staged path (`Auto` / `StagedOnly`).** Every block's input
+  now goes either to the GPU result (when it is on time and finite) or to the
+  worker's CPU convolution, never both, so a late, failed, non-finite or
+  device-lost block is the exact continuation instead of silence. A GPU hit
+  costs no CPU convolution. A run of late results trips a breaker
+  (`GpuConvolverStagedBreaker`, set with `configure_staged_breaker()` before
+  `prepare()`; defaults 8 / 32 / 4) and latches `SustainedDeadlineMisses`
+  (`Degraded`, CPU engine). `ProviderPolicy` appends `StagedBlocking`, which
+  keeps the old blocking readback for one release. `prepare()` rejects a zero
+  sample rate.
+- **Worker pipelining is a transport opt-in.** While a `GpuAudioTransport`
+  hosts it, the staged convolver declares
+  `GpuAudioNodeDescriptor::worker_pipeline_blocks = latency_blocks - 1` and
+  the transport primes that many fewer blocks, so total latency and PDC are
+  unchanged. Called directly, `process_block()` still returns block N for
+  block N. The transport now rejects a descriptor whose
+  `worker_pipeline_blocks >= latency_blocks`.
+- **`GpuMultiConvolver`** refuses a lost device (`Silence` stays the
+  declared policy), adds `device_lost()`, and reports the block at which it
+  found the loss as `recovery_sequence`.
+- **`GpuStft`, `GpuSpectralStack`, `GpuSpectralFreeze`, `GpuSpectralMorph`**
+  record `device_generation()` at `prepare()` and refuse (return false and
+  write a silent frame) once the borrowed device is lost or re-initialized.
+  `device_usable()` (`available()` on the stack) reports it. With no device at
+  all, outputs are left untouched as before.
+- **Rebuild: trailing members.** `GpuConvolver` appends one pointer (its
+  staged state); `GpuMultiConvolver` appends two `std::atomic<std::uint64_t>`
+  (blocks seen, loss block); `GpuStft` and `GpuSpectralStack` each append a
+  `std::uint64_t` device generation (so `GpuSpectralFreeze` and
+  `GpuSpectralMorph`, which hold a `GpuStft`, grow too). No existing member
+  moved, but `sizeof` changes for all six types.
