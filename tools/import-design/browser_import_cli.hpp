@@ -67,7 +67,9 @@ std::optional<int> validate_browser_import_cli_options(
 /// `--materialized-canvas-composition` publishes it as
 /// materialized-document.json for the runtime transform and state-atlas
 /// entries. Every other import leaves it uncaptured rather than serializing,
-/// hashing and publishing megabytes nobody reads.
+/// hashing and publishing megabytes nobody reads, unless the capture finds
+/// @font-face rules served from Blob URLs in it: their font bindings are the
+/// only record of those faces, so it reads the document for them anyway.
 bool browser_import_captures_materialized_document(bool materialized_runtime_emit,
                                                    bool materialized_canvas_composition);
 
