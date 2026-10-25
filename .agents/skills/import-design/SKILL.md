@@ -100,6 +100,11 @@ with headless left at 1 under an emulated 2, a frosted box came back with
 unblurred streaks of what was behind it (16,786 px on fixture
 `22-backdrop-opacity`), and the lab charged that to the native render. Do not
 drop the launch flag or emulate a scale the browser was not launched at.
+At a real device scale Chromium reports DOMSnapshot layout bounds, text-box
+bounds and content size in device pixels, so the capture divides those back
+to CSS pixels (`snapshotToCssPixels`); without that the native lowering drew
+every panel at twice its size. The snapshot's offset, client and scroll
+rects and `DOM.getBoxModel` were already CSS pixels.
 
 ### Browser capture provenance is an import boundary
 
