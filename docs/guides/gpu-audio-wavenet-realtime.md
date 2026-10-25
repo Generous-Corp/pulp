@@ -43,7 +43,9 @@ the full CPU shadow and does not establish CPU-offload savings.
    same pump. There are at most two service passes per channel, sharing the
    original unchanged deadline; the second pass adds no wait budget and admits
    no further work. The default zero budget retains one service pass per pump.
-   The worker does not busy-wait and permits one all-channel block in flight;
+   The worker does not busy-wait and keeps at most `max_inflight` all-channel
+   blocks in flight (by default two when the session has two slots and the ring
+   holds two blocks past the lead, else one); completions retire in order, and
    only successful output from every channel publishes the original stamp.
    This is a bounded correctness architecture, not a throughput claim.
 5. Stop and join both callers before `release()` or reprepare. A failed physical
@@ -69,6 +71,22 @@ Offline processing fences provider work and continues the same aligned callback
 fallback. GPU delivery stays disabled after returning to realtime until explicit
 preparation. Do not reset CPU history merely because GPU output was fenced.
 
+With `GpuAudioTransport::Config::recovery_policy = AutoReacquire`, a provider fault
+other than an offline fence is recovered on the live stream: the worker releases
+the old sessions within `reacquire_release_budget_ns` (quarantining any that
+cannot drain), creates new ones, and asks the bridge for a new epoch that the
+callback adopts at its next block. Records the callback queued in the old epoch
+are discarded, and no completion from the old provider can publish. Because a
+fresh provider has no history, the first `ceil(receptive_field / block_size)`
+blocks of the new epoch are submitted only to refill it and are retired as
+`Cancelled`; the callback delivers its CPU fallback for them. Delivery after
+that matches an uninterrupted provider. `release_bounded(budget_ns)` bounds a
+host teardown the same way.
+
+`Config::provider_pool` keeps released sessions warm in a host-owned
+`GpuAudioProviderPool`. A borrowed session carries another stream's history, so
+the node refills it the same way before its first delivered block.
+
 ## Late results, device loss and hung providers
 
 A result is late only when the callback that would consume it has already
@@ -87,16 +105,45 @@ produces, so once it is observed it replaces an earlier `ProviderFailure` or
 independent earlier cause, such as `InputSaturated`, stays the reported reason.
 
 A watchdog on the worker latches `ProviderUnresponsive` when the provider
-completes nothing for `watchdog_blocks` callback blocks (default
-`capacity - 1`) while work is in flight. Silence is counted from the later of
-the last completion and the oldest in-flight admission, in callback blocks
-rather than worker pumps, because the worker wakes on a poll interval. The
-default window ends before the input ring saturates as long as the worker keeps
-up with the callback, so a hung provider is reported as unresponsive rather
-than as `InputSaturated`. A provider that keeps completing, however late, is
-slow, not unresponsive: its results retire as late, and if it falls behind for
-good the input ring saturates. If the worker itself stops, the callback latches
-`InputSaturated` when the ring fills.
+completes nothing for `watchdog_blocks` callback blocks while work is in
+flight. Silence is counted from the later of the last completion and the oldest
+in-flight admission, in callback blocks rather than worker pumps, because the
+worker wakes on a poll interval. A provider that keeps completing, however
+late, is slow, not unresponsive: its results retire as late, and if it falls
+behind for good the input ring saturates. If the worker itself stops, the
+callback latches `InputSaturated` when the ring fills.
+
+The default window (`watchdog_blocks = 0`) is 200 ms, converted to callback
+blocks at `prepare()` so the callback stays integer-only:
+
+| Block size | 44.1 kHz | 48 kHz | 96 kHz |
+|---|---|---|---|
+| 64 frames | 138 blocks | 150 blocks | 300 blocks |
+| 128 frames | 69 blocks | 75 blocks | 150 blocks |
+| 256 frames | 35 blocks | 38 blocks | 75 blocks |
+
+If `capacity - 1` is larger it is used instead, and the input ring grows to
+hold the window, the lead and one more block, so a hang trips the watchdog
+before the ring saturates. A false trip costs the GPU path until the provider
+is replaced, while a late detection of a true hang costs only telemetry,
+because the miss policy carries every block; so the default is generous. On
+real Dawn the longest completion silence measured for an accepted block was
+86 ms (M1 Max, host load around 20, 64-frame blocks) and 65 ms on an M3 Ultra;
+the default is more than twice that. A true hang is reported 200 ms after its
+block was admitted. A non-zero `watchdog_blocks` is used as given, with the
+configured capacity.
+
+Whatever the window, a ring that saturates while the oldest in-flight block has
+seen no completion since its admission is the hang's symptom, not the cause:
+the node reports `ProviderUnresponsive` at that block, not `InputSaturated`. A
+worker that stops while its provider keeps completing still reports
+`InputSaturated`.
+
+A refused submission latches `ProviderFailure` at the refused block in the
+worker pump that sees it, or `ProviderLost` if the device is gone. A refused
+block never goes in flight, so the watchdog cannot time it.
+`ProviderUnresponsive` therefore always means a block was accepted and nothing
+completed within the window; it never stands for a refusal.
 
 `status_snapshot()` reports `provider_state = Unavailable` after an observed
 device loss, whatever cause latched first, and for `ProviderUnresponsive`:
@@ -104,7 +151,7 @@ delivery cannot resume until the node is released and prepared with a new
 provider. Every other recovery reason reports `Degraded`. `selected_engine`
 names the engine actually producing audio: `Gpu` only while the provider is
 `Ready`; otherwise `Cpu` when a prepared CPU shadow covers misses, or `Unknown`
-when misses are silent. The schema v3 fields report the preparation `epoch`,
+when misses are silent. The schema v4 fields report the preparation `epoch`,
 whether its delivery epoch is still active, `terminal_counts` by
 `GpuAudioTerminalDisposition`, the configured `completion_mode`,
 `gpu_kernel_available = true`, and `timestamps_available = false`, since this
@@ -114,11 +161,29 @@ and a provider failure under the declared miss policy, `CpuFallback` only after
 its consumer delivered the fallback. A quiescent snapshot therefore passes
 `validate_gpu_audio_status()`.
 
+A latch fences GPU delivery at once, and the fence fails closed: a block the
+provider accepted before the latch is not delivered after it, even when its
+result completes cleanly. From the first callback after the latch the node
+delivers its miss policy for every block until a new preparation, or an
+`AutoReacquire` re-acquire, resumes GPU delivery in a new epoch. For example, with a lead of two
+blocks, a refusal on block 11 ends GPU delivery with block 9 while block 10 is
+still in flight, and block 10 is never delivered. The cost is bounded by the
+blocks in flight (`max_inflight`), and a provider that has just failed never
+contributes a few last GPU blocks to a stream that has already moved to its
+fallback. A refused submission does not move the provider's device-resident
+stream position, and the node's sequence keeps advancing one block per callback
+through the fault. The physical Dawn qualification
+(`pulp-gpu-dawn-wavenet-qualification --strict`) checks loss and refusal at the
+first submission, a refusal mid-stream with the GPU blocks before it matched
+against the CPU reference, a refused block retried on the same stream, and that
+each refusal latches at the block the provider refused.
+
 Completions collected in either completion pass count as provider progress,
 and completions are collected before the watchdog is evaluated, so a starved
 worker whose provider keeps completing is not reported as unresponsive.
 
-Recovery is manual: nothing re-acquires a lost or unresponsive provider. See
+Under the default `GpuAudioRecoveryPolicy::Manual`, nothing re-acquires a lost
+or unresponsive provider; `AutoReacquire` (above) does it on the live stream. See
 [GPU audio reliability on macOS](gpu-audio-macos-reliability.md) for how this
 node's health compares with the other GPU-audio nodes.
 
@@ -137,6 +202,29 @@ reliability. An authenticated installed SDK build, actual GPU delivery controls,
 matched DSP output, CPU cost and graphics/load contention remain separate gates.
 The worker scheduling/completion policy still affects latency. There is no
 hard-realtime GPU scheduling guarantee and no NAM speedup claim.
+
+### Measured throughput (not a guarantee)
+
+One block in flight keeps up only while a block's round trip (GPU work plus
+host submission, polling and completion wake) fits in its period. The share of
+callback blocks the GPU delivered, measured with
+`pulp-gpu-dawn-wavenet-watchdog-campaign` on Dawn `ada567700e13`, a NAM
+"standard"-sized WaveNet (two arrays of ten dilated layers, 16 and 8 channels),
+48 kHz, lead 2, 120 s per cell at each host's ambient load, before and after
+the event-driven transport wake:
+
+| Host | Block | 1 in flight | 2 in flight |
+|---|---|---|---|
+| M1 Max | 64 frames | 0.00 / 0.00 | 0.87 / 0.98 |
+| M1 Max | 128 frames | 0.62 / 1.00 | 0.93 / 1.00 |
+| M3 Ultra | 64 frames | 0.99 / 1.00 | 0.99 / 1.00 |
+| M3 Ultra | 128 frames | 0.92 / 1.00 | 1.00 / 1.00 |
+
+GPU work per block was 0.79 ms on the M1 Max and 0.43 ms on the M3 Ultra
+(staged timestamps); at 64 frames (1.33 ms) the M1 Max round trip exceeds the
+period with one block in flight, so the stream falls behind until the ring
+saturates. That is why the default is two in flight. Other hosts, models, block
+sizes and loads will differ; measure on the target.
 
 ### Optional bounded completion servicing
 

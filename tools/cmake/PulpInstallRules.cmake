@@ -885,6 +885,7 @@ install(FILES
     # build-time finalize script relative to its own directory.
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpBuildInfo.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpFinalizeBuildInfo.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpDevSharedUi.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPluginFormats.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpWindowsTargetArch.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpGpuProvider.cmake"
@@ -973,6 +974,8 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/pulp_js_bytecode_main.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/check_portable_binary.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/check_bundle_relocatable.py"
+    # PulpDevSharedUi.cmake runs this as the linker launcher next to itself.
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/pulp_dev_shared_link.sh"
     # PulpSkiaIcuData.cmake resolves the ICU data trimmer next to itself.
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/icu_data_subset.py"
     # G3 universal-build arch/signature gate. pulp_validate_bundle_architectures

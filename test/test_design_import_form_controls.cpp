@@ -111,16 +111,19 @@ TEST_CASE("HTML range defaults apply when the capture recorded no bounds or valu
     CHECK_FALSE(slider->has_accent_color());
 
     // `step="any"` means no stepping; an invalid step falls back to 1.
+    // Each tree is kept in a named variable: the slider is a child of it, so a
+    // temporary tree would free the slider at the end of the statement.
     node.attributes["ua_step"] = "any";
     node.attributes["ua_value"] = "33.3";
-    slider =
-        dynamic_cast<RangeSlider*>(build_native_view_tree(panel_with({node}), {}, {})->child_at(0));
+    auto any_step = build_native_view_tree(panel_with({node}), {}, {});
+    slider = dynamic_cast<RangeSlider*>(any_step->child_at(0));
     REQUIRE(slider != nullptr);
     CHECK(slider->step() == Catch::Approx(0.0f));
     CHECK(slider->value() == Catch::Approx(33.3f));
     node.attributes["ua_step"] = "-2";
-    slider =
-        dynamic_cast<RangeSlider*>(build_native_view_tree(panel_with({node}), {}, {})->child_at(0));
+    auto invalid_step = build_native_view_tree(panel_with({node}), {}, {});
+    slider = dynamic_cast<RangeSlider*>(invalid_step->child_at(0));
+    REQUIRE(slider != nullptr);
     CHECK(slider->step() == Catch::Approx(1.0f));
 }
 

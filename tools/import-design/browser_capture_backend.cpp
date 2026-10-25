@@ -527,7 +527,7 @@ std::optional<fs::path> prepare_capture_output_directory(
         return std::nullopt;
     }
 
-    constexpr std::array<std::string_view, 12> kGeneratedArtifacts{
+    constexpr std::array<std::string_view, 13> kGeneratedArtifacts{
         "capture.json",
         "browser.png",
         "browser-static.png",
@@ -537,6 +537,7 @@ std::optional<fs::path> prepare_capture_output_directory(
         "tokens.json",
         "dom-snapshot.json",
         "platform-fonts.json",
+        "font-faces.json",
         "materialized-document.json",
         "interaction-report.json",
         "capture-error.json",

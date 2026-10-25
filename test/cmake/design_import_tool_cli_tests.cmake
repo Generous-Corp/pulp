@@ -165,6 +165,7 @@ add_executable(pulp-test-browser-capture-import
     test_browser_capture_group_opacity.cpp
     test_browser_capture_gradient_border.cpp
     test_browser_capture_ir.cpp
+    test_browser_capture_paint_scale.cpp
     test_browser_knob_sprites.cpp
     test_browser_capture_text_metrics.cpp
     test_browser_capture_tree.cpp
@@ -193,6 +194,7 @@ pulp_test_data(pulp-test-browser-capture-import NO_DEFINE
     SOURCES test_browser_capture_backdrop_filter.cpp
         test_browser_capture_group_opacity.cpp
         test_browser_capture_gradient_border.cpp test_browser_capture_ir.cpp
+        test_browser_capture_paint_scale.cpp
         test_browser_capture_text_metrics.cpp test_browser_capture_tree.cpp
         test_browser_capture_svg_render.cpp
     PATHS "test/fixtures/browser-capture-*"
@@ -482,6 +484,20 @@ if(Python3_Interpreter_FOUND AND PULP_HAS_SKIA AND PROJECT_IS_TOP_LEVEL)
     set_tests_properties(import-design-ir-observe-asset-escape PROPERTIES
         LABELS "parser-import;import"
         TIMEOUT 120)
+endif()
+
+# A 600-weight captured label on half- and quarter-pixel tops renders where
+# Chromium put it: CSS weight matching picks the captured face, so the captured
+# line layout holds and the ink and its centroid match the capture.
+if(Python3_Interpreter_FOUND AND PULP_HAS_SKIA AND PROJECT_IS_TOP_LEVEL)
+    add_test(NAME import-design-ir-observe-half-pixel-label
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_design_ir_observe_half_pixel_label.py
+                --observer $<TARGET_FILE:pulp-design-ir-observe>)
+    set_tests_properties(import-design-ir-observe-half-pixel-label PROPERTIES
+        LABELS "parser-import;import"
+        TIMEOUT 120
+        SKIP_RETURN_CODE 77)
 endif()
 
 # pulp-import-design carries a local asset named outside the source design's

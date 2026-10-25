@@ -233,7 +233,7 @@ format_limitations:
 scripted_ui:
   ui_script_target_wiring:
     status: usable
-    notes: UI_SCRIPT is registered by each VST3, AU, CLAP, AAX, Standalone, and ControlHost target at load time (pulp::format::register_editor_assets) and opened by every adapter's ViewBridge.
+    notes: UI_SCRIPT bytes (plus the theme.json and asset files beside it) are embedded into each VST3, AU, CLAP, AAX, Standalone, and ControlHost target and registered at load time (pulp::format::register_editor_assets) for every adapter's ViewBridge; the on-disk path is recorded only by a dev build (PULP_DEV_BUILD) and read only by a hot-reloading editor while the file exists.
   scripted_editor_loading:
     macos: usable
     windows: partial

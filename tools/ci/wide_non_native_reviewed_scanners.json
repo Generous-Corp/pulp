@@ -41,6 +41,8 @@
     "tools/scripts/web_timeline_source_closure_check.py": "walks core/*/src",
     "tools/import/test_project_import_ir_schema.py": "globs only its own fixtures under tools/import/fixtures",
     "tools/scripts/test_wide_non_native.py": "this file; wide_non_native.HARD_NATIVE keeps any change to it native",
-    "tools/scripts/render_upward_edge_check.py": "walks core/render sources and reads CMakeLists.txt, core/**/CMakeLists.txt and tools/cmake/*.cmake for target_sources() calls; it never reads tools/scripts, tools/testing or tools/import-validation content"
+    "tools/scripts/render_upward_edge_check.py": "walks core/render sources and reads CMakeLists.txt, core/**/CMakeLists.txt and tools/cmake/*.cmake for target_sources() calls; it never reads tools/scripts, tools/testing or tools/import-validation content",
+    "tools/scripts/include_boundary.py": "walks the core/ roots each boundary names; its only tools/scripts content is vellum_policy.json, read through the vellum_policy import, which the reference search follows by stem",
+    "tools/scripts/design_unit_boundary_check.py": "walks the include roots of the configured design targets under core/; its only tools/scripts content is vellum_policy.json, read through the vellum_policy import, which the reference search follows by stem"
   }
 }

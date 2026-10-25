@@ -90,6 +90,7 @@ int cmd_build(const std::vector<std::string>& args) {
     bool trace_mode = false;
     bool allow_tracing_install = false;
     bool examples = false;
+    bool dev_shared = false;
     std::string test_filter;
     std::vector<std::string> passthrough_args;
     for (auto& arg : args) {
@@ -127,6 +128,10 @@ int cmd_build(const std::vector<std::string>& args) {
         }
         if (arg == "--examples") {
             examples = true;
+            continue;
+        }
+        if (arg == "--dev-shared") {
+            dev_shared = true;
             continue;
         }
         if (arg.rfind("--test-filter=", 0) == 0) {
@@ -212,6 +217,12 @@ int cmd_build(const std::vector<std::string>& args) {
                            !fs::exists(build_dir / "CMakeCache.txt") ||
                            (examples && !standalone_mode && build_dir_has_examples_off(build_dir));
     bool needs_dependency_bootstrap = !standalone_mode && needs_configure;
+    // `pulp build` makes shippable artifacts, so it links statically unless
+    // --dev-shared or PULP_DEV_SHARED_UI asks otherwise; a dir `pulp dev` left
+    // in dev-shared mode switches back here (a relink, no recompile).
+    const auto dev_shared_change = pulp::cli::dev_shared_ui_change_for(build_dir, dev_shared);
+    if (dev_shared_change)
+        needs_configure = true;
 
     // Heal source trees configured before dependency provisioning was
     // completed. Those caches are syntactically valid but silently omit whole
@@ -299,6 +310,15 @@ int cmd_build(const std::vector<std::string>& args) {
         // JS engine selection
         if (!js_engine.empty()) {
             configure_cmd += " -DPULP_JS_ENGINE=" + js_engine;
+        }
+
+        if (dev_shared_change) {
+            configure_cmd +=
+                *dev_shared_change ? " -DPULP_DEV_SHARED_UI=ON" : " -DPULP_DEV_SHARED_UI=OFF";
+            if (!*dev_shared_change)
+                std::cout << "Switching " << build_dir.string()
+                          << " back to static plug-in links (PULP_DEV_SHARED_UI=OFF); "
+                             "`pulp dev` and `pulp loop` turn it on\n";
         }
 
         // macOS target arch (host|universal|arm64|x86_64). `pulp build` defaults

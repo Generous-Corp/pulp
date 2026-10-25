@@ -502,6 +502,18 @@ TEST_CASE("fdn reverb catalog does not allocate on the audio thread",
             injector.inject(immediate(catalog::kTankRate, 7.0f));
             render_once();
             render_once();
+            // The classic tier, a switch into it (which flushes it), its own
+            // parameter changes, and a switch back to the network.
+            injector.inject(immediate(catalog::kTier, 1.0f));
+            render_once();
+            render_once();
+            injector.inject(immediate(catalog::kDecay, 3.0f));
+            render_once();
+            injector.inject(immediate(catalog::kSize, 0.4f));
+            render_once();
+            injector.inject(immediate(catalog::kTier, 0.0f));
+            render_once();
+            render_once();
             const auto count = probe.allocation_count();
             const auto bytes = probe.allocated_bytes();
             INFO("mode " << fdn::mode_config(mode).name);

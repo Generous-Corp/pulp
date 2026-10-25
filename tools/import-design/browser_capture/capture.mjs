@@ -34,6 +34,7 @@ import {
   disableMotion,
   freezeAndMeasureDocumentExtent,
   freezeMotion,
+  horizonPresentationEncoding,
   installDynamicWorkTracker,
   MAX_LOGICAL_CAPTURE_DIMENSION,
   measureClippedControls,
@@ -58,6 +59,7 @@ import {
   installCaptureHealthMonitor,
   verifyCaptureHealth,
 } from "./health.mjs";
+import { capturePageFontFaces, recordResponseStatuses } from "./font_faces.mjs";
 import {
   createMainFrameNavigationGuard,
   executeInteractionPlan,
@@ -609,7 +611,8 @@ async function verifyCanvasRasterSignatures(
   }
 }
 
-async function captureCanvasAssets(cdp, snapshot, screenshotOptions) {
+async function captureCanvasAssets(
+  cdp, snapshot, screenshotOptions, presentationEncoding) {
   const canvases = capturedCanvasNodes(snapshot);
 
   const assets = [];
@@ -718,7 +721,7 @@ async function captureCanvasAssets(cdp, snapshot, screenshotOptions) {
       });
       const bytes = await captureStableScreenshot(cdp, {
         ...screenshotOptions,
-      }, 6, 16, 2);
+      }, 6, 16, 2, presentationEncoding);
       if (!bytes) throw new Error(
         `canvas backend node ${backendNodeId} did not present a stable isolated frame`);
       const dimensions = pngDimensions(bytes);
@@ -1502,6 +1505,7 @@ async function runCapture(options) {
     await configurePage(cdp, initialWidth, initialHeight, dpr);
     await installDynamicWorkTracker(cdp);
     const healthMonitor = installCaptureHealthMonitor(cdp);
+    const responseStatuses = recordResponseStatuses(cdp);
     const networkGuard = installNetworkGuard(
       cdp, server.origin, allowedExternalOrigins, server.privatePrefix);
     await networkGuard.enable();
@@ -1824,6 +1828,10 @@ async function runCapture(options) {
     // the motion the stylesheet and scheduler stubs above cannot stop. The
     // page-settle passes above already settled what existed at load.
     const motion = await freezeMotion(cdp);
+    const presentationEncoding = horizonPresentationEncoding(motion);
+    motion.horizon_presentation_format = presentationEncoding?.format ?? null;
+    const stableScreenshot = (options) => captureStableScreenshot(cdp, options,
+      undefined, undefined, undefined, presentationEncoding);
     // The executable document is read only for the imports that publish it
     // (--emit materialized-runtime and --materialized-canvas-composition; see
     // browser_import_captures_materialized_document), and for a document that
@@ -1840,6 +1848,13 @@ async function runCapture(options) {
         ? null
         : await progress.time(
           "materialized-document", () => captureMaterializedDocument(cdp));
+    // The url() faces a plain page loads from files beside it, read while
+    // virtual time still runs, since each read is a fetch.
+    const pageFontFaces = await capturePageFontFaces(cdp, {
+      privatePrefix: server.privatePrefix,
+      allowNetwork,
+      statuses: responseStatuses,
+    });
     // Pause page virtual time before collecting any sidecar. Canvas/WebGL
     // requestAnimationFrame callbacks and timers must not advance while DOM,
     // semantics, tokens, health, and the authoritative pixels are read.
@@ -2056,7 +2071,7 @@ async function runCapture(options) {
     // complete bounded horizon, then require a byte-identical trailing run;
     // an early A,A plateau must not hide a later B,B presentation.
     let screenshotBytes = await progress.time("stable-screenshot", () =>
-      captureStableScreenshot(cdp, screenshotOptions));
+      stableScreenshot(screenshotOptions));
     // A compositor can miss the required identical tail at the very end of a
     // bounded horizon even though its next horizon is completely still. Give
     // that observable proof one fresh bounded attempt; keeping the common path
@@ -2064,7 +2079,7 @@ async function runCapture(options) {
     // were already stable.
     if (!screenshotBytes)
       screenshotBytes = await progress.time("stable-screenshot", () =>
-        captureStableScreenshot(cdp, screenshotOptions));
+        stableScreenshot(screenshotOptions));
     if (!screenshotBytes) {
       const error = new Error(
         "the visual frame did not stabilize while capture evidence was collected");
@@ -2104,7 +2119,8 @@ async function runCapture(options) {
     // pre-presentation backing stores; otherwise the chrome plate and canvas
     // layers are individually valid but can never reconstruct browser.png.
     canvasAssets = await progress.time("canvas-assets", () =>
-      captureCanvasAssets(cdp, snapshot, screenshotOptions));
+      captureCanvasAssets(
+        cdp, snapshot, screenshotOptions, presentationEncoding));
     if (materializedDocument) {
       materializedDocument.canvas_bindings = canvasAssets.map(
         (asset, index) => ({
@@ -2147,7 +2163,7 @@ async function runCapture(options) {
     let staticScreenshotBytes = screenshotBytes;
     if (hiddenIndicatorCount > 0) {
       staticScreenshotBytes = await progress.time("stable-screenshot", () =>
-        captureStableScreenshot(cdp, screenshotOptions));
+        stableScreenshot(screenshotOptions));
       await cdp.call("Runtime.evaluate", {
         expression: `(() => {
           for (const entry of (window.__pulpCaptureIndicatorStyles || [])) {
@@ -2192,7 +2208,7 @@ async function runCapture(options) {
     const chromeBytes = await progress.time("chrome-frame", () =>
       captureStableFrameWithHiddenPaint(
         cdp, screenshotOptions, screenshotBytes,
-        hiddenCanvases.result?.value));
+        hiddenCanvases.result?.value, presentationEncoding));
     await cdp.call("Runtime.evaluate", {
       expression: `(() => {
         for (const item of globalThis.__pulpCanvasVisibilityRestore || []) {
@@ -2271,6 +2287,9 @@ async function runCapture(options) {
       writeJson(path.join(outputDir, "tokens.json"), tokenReport),
       writeJson(
         path.join(outputDir, "platform-fonts.json"), platformFontReport),
+      ...(pageFontFaces.faces.length > 0 || pageFontFaces.dropped.length > 0
+        ? [writeJson(path.join(outputDir, "font-faces.json"), pageFontFaces)]
+        : []),
       ...(materializedDocument
         ? [progress.time("write:materialized-document", () => writeJson(
             path.join(outputDir, "materialized-document.json"),

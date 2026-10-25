@@ -52,6 +52,9 @@ std::string GpuConvolver::backend() const {
 #endif
 
 struct GpuConvolver::StagedReadbackState {
+    // The transport's worker-pipelining opt-in; detached by ~GpuConvolver.
+    std::shared_ptr<detail::WorkerPipelineLink> pipeline_link;
+
     // Settings made before prepare(); survive re-preparation.
     GpuConvolverStagedBreaker breaker{};
 
@@ -137,6 +140,8 @@ struct GpuConvolver::SharedIoState {
     std::vector<float> normalized_ir_spectrum;
     // Latest serialized health sample, readable from host/UI threads.
     detail::RealtimeGpuHealthMirror health;
+    // Callback-written per delivered block, read by status_snapshot().
+    detail::RecentGpuDelivery recent;
 #endif
 };
 
@@ -146,6 +151,16 @@ bool expected_dawn_revision_available() noexcept {
     constexpr std::string_view value = PULP_GPU_AUDIO_EXPECTED_DAWN_SHA;
     return PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER && !value.empty() &&
            value != "unknown";
+}
+
+// Bounded completion wait for each shared-path service step: a quarter block,
+// at most 1 ms. The worker can then pick up a completion already in flight
+// within the same pump instead of on its next wake.
+std::uint64_t completion_service_wait_ns(std::uint32_t block, std::uint32_t sample_rate) noexcept {
+    if (block == 0 || sample_rate == 0)
+        return 0;
+    const auto quarter_block_ns = std::uint64_t(block) * 250'000'000ull / sample_rate;
+    return std::min<std::uint64_t>(quarter_block_ns, 1'000'000ull);
 }
 } // namespace
 #endif
@@ -211,9 +226,14 @@ GpuConvolver::GpuConvolver(uint32_t channels, uint32_t block_size, uint32_t samp
                            std::vector<float> impulse_response, uint32_t latency_blocks)
     : channels_(channels), block_(block_size), sample_rate_(sample_rate),
       latency_blocks_(latency_blocks), ir_(std::move(impulse_response)),
-      staged_readback_(std::make_unique<StagedReadbackState>()) {}
+      staged_readback_(std::make_unique<StagedReadbackState>()) {
+    staged_readback_->pipeline_link = std::make_shared<detail::WorkerPipelineLink>(
+        this, &GpuConvolver::set_staged_pipeline_hosting);
+}
 
 GpuConvolver::~GpuConvolver() {
+    // A transport released after this node reaches only the detached link.
+    staged_readback_->pipeline_link->detach();
     // Destroying the device completes any readback the worker abandoned, and
     // that completion reads the staged state; release the device first.
     gpu_.reset();
@@ -442,6 +462,8 @@ bool GpuConvolver::prepare() {
         auto fresh = std::make_unique<StagedReadbackState>();
         fresh->breaker = staged_readback_->breaker;
         fresh->transport_hosted = staged_readback_->transport_hosted;
+        // The node's one link: a hosting transport keeps it across re-prepare.
+        fresh->pipeline_link = std::move(staged_readback_->pipeline_link);
         staged_readback_ = std::move(fresh);
     }
     if (channels_ == 0 || block_ == 0 || sample_rate_ == 0 || ir_.empty() || latency_blocks_ == 0 ||
@@ -582,7 +604,9 @@ bool GpuConvolver::prepare() {
                               .calibration_source_revision =
                                   state->trial_config
                                       ? state->trial_config->calibration_source_revision
-                                      : std::string{}},
+                                      : std::string{},
+                              .completion_service_wait_ns =
+                                  completion_service_wait_ns(block_, sample_rate_)},
                          .normalized_ir_spectrum = state->normalized_ir_spectrum});
                     // A failed preparation may still own physically live
                     // storage. Retain that session even when it cannot run.
@@ -675,7 +699,7 @@ std::uint8_t GpuConvolver::process_realtime_shared_io(void* self,
     // Invalid external views consume a zero-input timeline position, but may
     // never admit fresh GPU work. The transport owns their silent disposition.
     if (!input_valid)
-        state.session->request_recovery(detail::SharedIoRecoveryReason::InvalidCallback);
+        state.session->request_recovery(detail::SharedIoRecoveryReason::InvalidCallback, sequence);
     for (uint32_t ch = 0; ch < convolver->channels_; ++ch) {
         const float* src = input.channel_ptr(ch);
         auto* dst = state.callback_input.data() + static_cast<std::size_t>(ch) * convolver->block_;
@@ -757,6 +781,7 @@ void GpuConvolver::complete_realtime_shared_io(void* self, std::uint64_t sequenc
     if (!convolver || !convolver->shared_io_ || !convolver->shared_io_->session)
         return;
     auto& state = *convolver->shared_io_;
+    state.recent.record(static_cast<detail::SharedIoDeliveryDisposition>(disposition));
     if (state.callback.valid() && state.callback.stamp.sequence == sequence)
         (void)state.session->complete_callback_delivery(
             state.callback, static_cast<detail::SharedIoDeliveryDisposition>(disposition),
@@ -789,31 +814,38 @@ detail::SharedIoProviderIdentity GpuConvolver::provider_identity_for_diagnostics
     return {};
 }
 
+bool GpuConvolver::bind_realtime_path(detail::RealtimeGpuNodeBinding& binding) noexcept {
+    binding.pipeline = staged_readback_->pipeline_link;
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
-namespace {
-GpuAudioRecoveryReason public_recovery_reason(detail::SharedIoRecoveryReason reason) noexcept {
-    switch (reason) {
-    case detail::SharedIoRecoveryReason::None:
-        return GpuAudioRecoveryReason::None;
-    case detail::SharedIoRecoveryReason::SequenceGap:
-        return GpuAudioRecoveryReason::SequenceGap;
-    case detail::SharedIoRecoveryReason::InputSaturated:
-        return GpuAudioRecoveryReason::InputSaturated;
-    case detail::SharedIoRecoveryReason::ProviderFailure:
-        return GpuAudioRecoveryReason::ProviderFailure;
-    case detail::SharedIoRecoveryReason::ProviderLost:
-        return GpuAudioRecoveryReason::ProviderLost;
-    case detail::SharedIoRecoveryReason::OfflineFence:
-        return GpuAudioRecoveryReason::OfflineFence;
-    case detail::SharedIoRecoveryReason::InvalidCallback:
-        return GpuAudioRecoveryReason::InvalidCallback;
-    case detail::SharedIoRecoveryReason::ProviderUnresponsive:
-        return GpuAudioRecoveryReason::ProviderUnresponsive;
-    }
-    return GpuAudioRecoveryReason::None;
-}
-} // namespace
+    binding.identity_context = this;
+    binding.identity = [](const void* self) noexcept {
+        return static_cast<const GpuConvolver*>(self)->provider_identity_for_diagnostics();
+    };
+    if (has_realtime_shared_io())
+        binding.path = {.context = this,
+                        .process = &GpuConvolver::process_realtime_shared_io,
+                        .service = &GpuConvolver::service_realtime_shared_io,
+                        .fence = &GpuConvolver::fence_realtime_shared_io,
+                        .delivered = &GpuConvolver::complete_realtime_shared_io,
+                        .next_sequence = &GpuConvolver::next_realtime_shared_io_sequence,
+                        .health = &GpuConvolver::realtime_shared_io_health,
+                        .set_completion_notifier = &GpuConvolver::set_realtime_shared_io_notifier};
 #endif
+    return true;
+}
+
+bool GpuConvolver::set_realtime_shared_io_notifier(
+    void* self, detail::SharedIoCompletionNotifier notifier) noexcept {
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    auto* convolver = static_cast<GpuConvolver*>(self);
+    return convolver != nullptr && convolver->shared_io_ && convolver->shared_io_->session &&
+           convolver->shared_io_->session->set_completion_notifier(notifier);
+#else
+    (void)self;
+    (void)notifier;
+    return false;
+#endif
+}
 
 bool GpuConvolver::realtime_shared_io_health(const void* self,
                                              detail::RealtimeGpuHealth& out) noexcept {
@@ -823,19 +855,15 @@ bool GpuConvolver::realtime_shared_io_health(const void* self,
         return false;
     const auto& session = *convolver->shared_io_->session;
     detail::RealtimeGpuHealth health;
-    health.recovery_reason = public_recovery_reason(session.recovery_reason());
+    health.recovery_reason = detail::public_recovery_reason(session.recovery_reason());
+    // Every cause latches at the block it names: the refused or failed block,
+    // the oldest one in flight for a loss or fence, the callback's own block.
     health.recovery_sequence = session.recovery_sequence();
-    // A cause the worker latched without a stream position (provider loss,
-    // failure or an offline fence) is attributed to the first sequence of the
-    // epoch it fenced; the exact position is unknown.
-    if (health.recovery_reason != GpuAudioRecoveryReason::None &&
-        health.recovery_sequence == std::numeric_limits<std::uint64_t>::max())
-        health.recovery_sequence = session.epoch_first_sequence();
     health.epoch = session.epoch();
     health.delivery_epoch_active = session.delivery_epoch() != 0;
     health.device_lost = session.provider_device_lost();
     health.fenced = !session.prepared() || session.fenced() || !health.delivery_epoch_active;
-    health.gpu_kernel_available = true;
+    health.gpu_kernel_available = session.kernel_prepared();
     // Same mapping as the WaveNet node: a failed GPU block is covered by this
     // node's declared CPU fallback.
     using Gpu = detail::SharedIoGpuTerminalDisposition;
@@ -887,9 +915,13 @@ GpuAudioStatus GpuConvolver::status_snapshot() const noexcept {
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
     if (has_realtime_shared_io()) {
         const auto telemetry = shared_io_->session->trace_telemetry();
-        status.provider = GpuAudioProvider::Dawn;
-        status.gpu_kernel_available = true;
-        status.selected_engine = GpuAudioEngine::Gpu;
+        // The shared provider names itself; an unauthenticated one is not a
+        // GPU claim.
+        const auto identity = provider_identity_for_diagnostics();
+        status.provider = identity.authenticated ? identity.provider : GpuAudioProvider::Unknown;
+        status.selected_engine = status.provider != GpuAudioProvider::Unknown
+                                     ? GpuAudioEngine::Gpu
+                                     : GpuAudioEngine::Unknown;
         status.prepared_lead_blocks = latency_blocks_;
         status.produced_blocks = telemetry.delivered_blocks;
         status.missed_blocks = telemetry.deadline_misses;
@@ -903,6 +935,7 @@ GpuAudioStatus GpuConvolver::status_snapshot() const noexcept {
             status.recovery_sequence = health.recovery_sequence;
             status.epoch = health.epoch;
             status.delivery_epoch_active = health.delivery_epoch_active;
+            status.gpu_kernel_available = health.gpu_kernel_available;
             // The node's delivery counters above come from trace telemetry,
             // which only records while tracing; without them the terminal
             // counts could run ahead of the deliveries they describe. The
@@ -916,9 +949,13 @@ GpuAudioStatus GpuConvolver::status_snapshot() const noexcept {
             // authenticated but its delivery state is unverified.
             status.provider_state = GpuAudioProviderState::Degraded;
         }
-        // Fenced or lost: the continuously primed CPU fallback is delivering.
-        status.selected_engine = detail::delivering_engine(
-            status.provider_state, status.selected_engine, status.fallback_policy);
+        // Fenced, lost, or a GPU the fallback carries: the continuously primed
+        // CPU fallback is delivering.
+        status.provider_state =
+            detail::lower_for_lagging(status.provider_state, shared_io_->recent.lagging());
+        status.selected_engine =
+            detail::delivering_engine(status.provider_state, status.selected_engine,
+                                      status.fallback_policy, status.fallback_available);
         return status;
     }
 #endif
@@ -1417,10 +1454,9 @@ void GpuConvolver::configure_staged_pipeline() {
     staged.pending_id = 0;
 }
 
-namespace detail {
-bool set_worker_pipeline_hosting(GpuAudioNode* node, bool hosted) noexcept {
-    auto* convolver = dynamic_cast<GpuConvolver*>(node);
-    if (convolver == nullptr || !convolver->staged_readback_)
+bool GpuConvolver::set_staged_pipeline_hosting(void* self, bool hosted) noexcept {
+    auto* convolver = static_cast<GpuConvolver*>(self);
+    if (!convolver->staged_readback_)
         return false;
     auto& staged = *convolver->staged_readback_;
     if (staged.transport_hosted == hosted)
@@ -1437,7 +1473,6 @@ bool set_worker_pipeline_hosting(GpuAudioNode* node, bool hosted) noexcept {
     }
     return true;
 }
-} // namespace detail
 
 std::uint64_t GpuConvolver::staged_gpu_blocks() const noexcept {
     return staged_readback_->gpu_blocks;
