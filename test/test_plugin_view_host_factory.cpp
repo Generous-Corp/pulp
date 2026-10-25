@@ -322,6 +322,19 @@ TEST_CASE("X11 plugin host follows a resize the host applied to its window",
     host->attach_to_parent(reinterpret_cast<void*>(static_cast<uintptr_t>(DefaultRootWindow(daw))));
     Window child = static_cast<Window>(reinterpret_cast<uintptr_t>(host->native_handle()));
     REQUIRE(child != 0);
+    // The X server orders requests within one connection, not across two. The
+    // attach's own XResizeWindow and XMapWindow went out on the editor's
+    // connection; until the server has processed them, a resize from the DAW
+    // connection can land first and be undone by the attach. The window turning
+    // viewable proves the attach's requests, the resize before the map
+    // included, are done.
+    for (int i = 0; i < 200; ++i) {
+        XWindowAttributes attrs{};
+        if (XGetWindowAttributes(daw, child, &attrs) && attrs.map_state == IsViewable)
+            break;
+        host->pump_x_events();
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
     host->pump_x_events(); // drain the attach's own events
 
     std::vector<std::pair<uint32_t, uint32_t>> notified;
