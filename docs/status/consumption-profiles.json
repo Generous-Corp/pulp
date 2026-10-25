@@ -162,6 +162,7 @@
       "pulp/canvas/font_options.hpp",
       "pulp/canvas/font_resolver.hpp",
       "pulp/canvas/font_scope.hpp",
+      "pulp/canvas/gradient_interpolation.hpp",
       "pulp/canvas/image_codecs.hpp",
       "pulp/canvas/image_convolution.hpp",
       "pulp/canvas/image_file_cache.hpp",
