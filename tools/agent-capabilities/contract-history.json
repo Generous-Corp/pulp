@@ -1809476,11 +1809476,6 @@
             "disposition": "legacy_unreviewed"
           },
           {
-            "include": "pulp/audio/restored_path.hpp",
-            "fingerprint": "sha256:5070b5aa15535869b72106ae976074d4e35b1dda6a8df9d303acfaabf4b9a7ec",
-            "disposition": "infrastructure"
-          },
-          {
             "include": "pulp/audio/rolling_audio_capture_buffer.hpp",
             "fingerprint": "sha256:09b23362101d10ef49e6a5cb27db60dd8e4dae4283972eb2680bd0154718f5b2",
             "disposition": "legacy_unreviewed"
@@ -1811387,7 +1811382,7 @@
           },
           {
             "include": "pulp/signal/scoped_flush_denormals.hpp",
-            "fingerprint": "sha256:c394e664d37399ccc736a32dda40b6bae5b2883c8fc5a76f45f8b6d6361c1482",
+            "fingerprint": "sha256:c9d2a472c1f096bc19969299925b933c21976d66a0e6492fa306ca309bc942ad",
             "disposition": "infrastructure"
           },
           {
@@ -1811803,7 +1811798,7 @@
         ],
         "tombstones": []
       },
-      "entry_digest": "sha256:1a7f17563ea23807b7c0ec4d86886c1ba08abc53b9291f1f51622d7ec043925c"
+      "entry_digest": "sha256:1816681c7df18044f8eed0af0c146e8fda394783331f9e6da82693bb34cca8f5"
     }
   ]
 }
