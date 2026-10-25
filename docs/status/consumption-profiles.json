@@ -384,6 +384,7 @@
       "pulp/gpu_audio/gpu_audio_capability.hpp",
       "pulp/gpu_audio/gpu_audio_node.hpp",
       "pulp/gpu_audio/gpu_audio_program.hpp",
+      "pulp/gpu_audio/gpu_audio_provider_pool.hpp",
       "pulp/gpu_audio/gpu_audio_status.hpp",
       "pulp/gpu_audio/gpu_audio_transport.hpp",
       "pulp/gpu_audio/gpu_convolution_reverb.hpp",
