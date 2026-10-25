@@ -7,11 +7,13 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cctype>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <regex>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -80,60 +82,60 @@ const std::vector<const ReferencePattern*>& staging_patterns() {
 
 TEST_CASE("HTML reference scan yields exactly the regex iterator's matches",
           "[import-design][browser-capture][staging]") {
-    // Fragments of every alternative in mixed case, the punctuation and
-    // whitespace between them, word bytes that move a \b, and non-ASCII bytes.
-    static const char* const fragments[] = {"src",
-                                            "SRC",
-                                            "Src",
-                                            "href",
-                                            "HREF",
-                                            "poster",
-                                            "url(",
-                                            "URL(",
-                                            "Url(",
-                                            "@import",
-                                            "@IMPORT",
-                                            "import",
-                                            "Import",
-                                            "IMPORT",
-                                            "fetch",
-                                            "Fetch",
-                                            "new",
-                                            "NEW",
-                                            "URL",
-                                            "from",
-                                            "FROM",
-                                            "srcset",
-                                            "SrcSet",
-                                            "<script",
-                                            "<SCRIPT",
-                                            "<link",
-                                            "<LINK",
-                                            " ",
-                                            "  ",
-                                            "=",
-                                            "\"",
-                                            "'",
-                                            "(",
-                                            ")",
-                                            ",",
-                                            ">",
-                                            "a.js",
-                                            "x/y.css",
-                                            "img@2x.png 2x",
-                                            "import.meta.url",
-                                            "\n",
-                                            "\t",
-                                            "b",
-                                            "_",
-                                            "-",
-                                            "/",
-                                            "\xc3\xa9",
-                                            "\xff",
-                                            "imp",
-                                            "fro",
-                                            "sr"};
-    constexpr std::size_t fragment_count = sizeof(fragments) / sizeof(fragments[0]);
+    // One reference per alternative of the three patterns, in lower, upper
+    // and mixed case, so a literal missing from a pattern's starts drops a
+    // match the iterator finds.
+    const std::vector<std::string> references{"src='a.js'",
+                                              "href=\"b.css\"",
+                                              "poster='p.png'",
+                                              "url(c.png)",
+                                              "url('d.png')",
+                                              "@import 'e.css'",
+                                              "@import url('f.css')",
+                                              "import('./g.js')",
+                                              "fetch('h.json')",
+                                              "new URL('i.wasm', import.meta.url)",
+                                              "import './j.js'",
+                                              "from './k.js'",
+                                              "<script type=module src='l.js'>",
+                                              "<link rel=stylesheet href='m.css'>",
+                                              "srcset='n.png 1x, o.png 2x'"};
+    std::size_t matched_references = 0;
+    for (const auto& reference : references) {
+        for (int variant = 0; variant < 3; ++variant) {
+            std::string cased = reference;
+            for (std::size_t i = 0; i < cased.size(); ++i) {
+                const auto c = static_cast<unsigned char>(cased[i]);
+                if (variant == 1 || (variant == 2 && i % 2 == 0))
+                    cased[i] = static_cast<char>(std::toupper(c));
+            }
+            const std::string text = "<p>x</p> " + cased + " tail";
+            bool matched = false;
+            for (const auto* pattern : staging_patterns()) {
+                const auto expected = iterator_matches(text, *pattern);
+                INFO("text: " << text);
+                CHECK(scanned_matches(text, *pattern) == expected);
+                matched = matched || !expected.empty();
+            }
+            if (matched)
+                ++matched_references;
+        }
+    }
+    CHECK(matched_references == 3 * references.size());
+
+    // Then random text: fragments of every alternative in mixed case, the
+    // punctuation and whitespace between them, word bytes that move a \b,
+    // and non-ASCII bytes.
+    constexpr std::string_view joined =
+        "src|SRC|Src|href|HREF|poster|url(|URL(|Url(|@import|@IMPORT|import|Import|IMPORT|"
+        "fetch|Fetch|new|NEW|URL|from|FROM|srcset|SrcSet|<script|<SCRIPT|<link|<LINK| |  |=|"
+        "\"|'|(|)|,|>|a.js|x/y.css|img@2x.png 2x|import.meta.url|\n|\t|b|_|-|/|\xc3\xa9|\xff|"
+        "imp|fro|sr";
+    std::vector<std::string_view> fragments;
+    for (std::size_t from = 0, bar = 0; bar != std::string_view::npos; from = bar + 1) {
+        bar = joined.find('|', from);
+        fragments.push_back(joined.substr(from, bar == std::string_view::npos ? bar : bar - from));
+    }
     std::uint64_t state = 0x9e3779b97f4a7c15ull;
     const auto next = [&state] {
         state ^= state << 13;
@@ -146,7 +148,7 @@ TEST_CASE("HTML reference scan yields exactly the regex iterator's matches",
         std::string text;
         const auto pieces = 1 + next() % 48;
         for (std::uint64_t i = 0; i < pieces; ++i)
-            text += fragments[next() % fragment_count];
+            text += fragments[next() % fragments.size()];
         for (const auto* reference : staging_patterns()) {
             const auto expected = iterator_matches(text, *reference);
             INFO("text: " << text);
