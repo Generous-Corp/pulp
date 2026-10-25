@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261025-linux-editor-configure-notify-watch",
+  "created_at": "2026-10-25T01:22:25Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Pulp-owned Linux plug-in host fix. pump_x_events() in plugin_view_host_linux.cpp now acts on the ConfigureNotify a DAW's XResizeWindow produces: the editor takes the window's new size, resizes its surfaces through the existing set_size() sizing, notifies the resize callback once per drain and repaints. Before, a host-driven resize left the editor at its old size, and the swapchain kept being scaled onto the window. The editor's own set_size() echo is a no-op. Only Pulp-owned host and test code changes; the render sources are untouched. No design-import, Chromium, rendering or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R 'X11 plugin host follows a resize the host applied to its window'",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none",
+  "vellum_inherits": false
+}

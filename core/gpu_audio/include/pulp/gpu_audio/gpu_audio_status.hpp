@@ -21,7 +21,8 @@ enum class GpuAudioEngine : std::uint8_t {
 
 /// Lifecycle state suitable for UI, trace, and host diagnostics. This is a
 /// provider state, not a real-time guarantee. Ready means an authenticated
-/// execution provider is active. Degraded means the transport is prepared but
+/// execution provider is active, or a CPU-only neural node runs its CPU model
+/// as requested (provider Cpu). Degraded means the transport is prepared but
 /// its provider or execution engine cannot be established. Scheduling and
 /// deadline behavior are reported by the counters and timings below.
 enum class GpuAudioProviderState : std::uint8_t {
@@ -31,9 +32,11 @@ enum class GpuAudioProviderState : std::uint8_t {
     Unavailable = 3,
 };
 
-/// First latched reason that a stamped shared-I/O node entered recovery.
-/// `None` means that no recovery has been requested. This is diagnostic state;
-/// it does not itself promise that the next callback will use the GPU.
+/// First latched reason that a node entered recovery. Stamped shared-I/O nodes
+/// latch it; so do the staged GpuConvolver (ProviderFailure, ProviderLost,
+/// SustainedDeadlineMisses) and GpuMultiConvolver (ProviderLost). `None` means
+/// that no recovery has been requested. This is diagnostic state; it does not
+/// itself promise that the next callback will use the GPU.
 enum class GpuAudioRecoveryReason : std::uint8_t {
     None = 0,
     SequenceGap = 1,
@@ -75,7 +78,7 @@ enum class GpuAudioShadowMode : std::uint8_t {
 /// preserve the distinction between GPU production and CPU fallback.  In
 /// particular, `missed_blocks` is not a synonym for `fallback_blocks`.
 struct GpuAudioStatus {
-    static constexpr std::uint32_t kSchemaVersion = 3;
+    static constexpr std::uint32_t kSchemaVersion = 4;
     /// Number of `GpuAudioTerminalDisposition` values counted by
     /// `terminal_counts`.
     static constexpr std::uint32_t kTerminalDispositionCount = 8;
@@ -102,6 +105,12 @@ struct GpuAudioStatus {
     double avg_block_us = 0.0;
     // Appended after the v1 fields so positional aggregate initialization of
     // the installed status prefix remains source-compatible.
+    /// The first cause latched in the current delivery epoch. A successful
+    /// automatic re-acquire opens a new epoch, so the cause that fenced the old
+    /// one is replaced by the informational `ProviderReacquired`, with
+    /// `recovery_sequence` set to the first block the new provider can
+    /// deliver. The replaced cause remains in the trace (a Recovery record for
+    /// the epoch change) and in the reacquire_* counters below.
     GpuAudioRecoveryReason recovery_reason = GpuAudioRecoveryReason::None;
     std::uint64_t recovery_sequence = UINT64_MAX;
     // Schema v3, appended after the v2 fields for the same reason.
@@ -128,6 +137,14 @@ struct GpuAudioStatus {
     /// The shadow runs a different model from the GPU path, so its output is
     /// a substitute rather than a bit-identical fallback.
     bool shadow_model_differs = false;
+    // Schema v4: automatic re-acquire (GpuAudioRecoveryPolicy::AutoReacquire).
+    /// Provider replacements the transport attempted after a fence.
+    std::uint64_t reacquire_attempts = 0;
+    /// Attempts that opened a new delivery epoch on a new provider.
+    std::uint64_t reacquire_successes = 0;
+    /// Nanoseconds from the transport first observing the fence to the first
+    /// GPU-delivered block of the epoch that replaced it; zero until measured.
+    std::uint64_t last_reacquire_to_gpu_ns = 0;
 };
 
 } // namespace pulp::gpu_audio

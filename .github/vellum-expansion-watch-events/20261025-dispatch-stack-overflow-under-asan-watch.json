@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261025-dispatch-stack-overflow-under-asan-watch",
+  "created_at": "2026-10-25T01:19:15Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Bridge dispatch reports handler errors it catches (count, message, console.error fallback) and runs nested dispatches without re-entering the batch runner; QuickJS gets a 4MB stack limit only in AddressSanitizer builds. No design-import, render or authority behaviour changes.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-widget-bridge-animation",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

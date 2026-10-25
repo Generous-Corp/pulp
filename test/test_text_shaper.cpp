@@ -3,6 +3,17 @@
 #include <pulp/canvas/text_run_planner.hpp>
 #include <pulp/canvas/text_layout.hpp>
 #include <pulp/canvas/text_shaper.hpp>
+#ifdef PULP_HAS_SKIA
+#include <pulp/canvas/text_font_context.hpp>
+#include "include/core/SkString.h"
+#include "modules/skparagraph/include/FontCollection.h"
+#include "modules/skparagraph/include/Paragraph.h"
+#include "modules/skparagraph/include/ParagraphBuilder.h"
+#include "modules/skparagraph/include/ParagraphStyle.h"
+#include "modules/skparagraph/include/TextStyle.h"
+#include "../core/canvas/src/skia_unicode.hpp"
+#endif
+#include <algorithm>
 
 using namespace pulp::canvas;
 using Catch::Matchers::WithinAbs;
@@ -117,13 +128,84 @@ TEST_CASE("TextShaper layout respects newlines", "[canvas][text_shaper]") {
     REQUIRE(layout.line_count == 3);
 }
 
-TEST_CASE("TextShaper multiline metrics use one line rather than cumulative paragraph height",
+#ifdef PULP_HAS_SKIA
+TEST_CASE("SkParagraph reports LineMetrics fHeight per line, not cumulatively",
+          "[canvas][text_shaper][metrics][skia]") {
+    // Pins the shipped library's semantics that paragraph_text_extents
+    // relies on. Metrics.h documents fHeight as the paragraph height through
+    // the current line; TextLine::getMetrics assigns the line's own advance.
+    auto collection = TextFontContext::shared()->font_collection();
+    REQUIRE(collection);
+    skia::textlayout::TextStyle text_style;
+    text_style.setFontFamilies({SkString("Inter")});
+    text_style.setFontSize(16.0f);
+    skia::textlayout::ParagraphStyle paragraph_style;
+    paragraph_style.setTextStyle(text_style);
+    auto builder =
+        skia::textlayout::ParagraphBuilder::make(paragraph_style, collection, shared_sk_unicode());
+    REQUIRE(builder);
+    const std::string text = "Alpha\nBeta\nGamma";
+    builder->addText(text.c_str(), text.size());
+    auto paragraph = builder->Build();
+    REQUIRE(paragraph);
+    paragraph->layout(SK_ScalarInfinity);
+    std::vector<skia::textlayout::LineMetrics> lines;
+    paragraph->getLineMetrics(lines);
+    REQUIRE(lines.size() == 3);
+    REQUIRE(lines[0].fHeight > 0.0);
+    CHECK(lines[1].fHeight == lines[0].fHeight);
+    CHECK(lines[2].fHeight == lines[0].fHeight);
+    CHECK_THAT(paragraph->getHeight(),
+               WithinAbs(lines[0].fHeight + lines[1].fHeight + lines[2].fHeight, 1e-3));
+}
+#endif
+
+TEST_CASE("Paragraph extents take a taller later line's own height",
           "[canvas][text_shaper][metrics]") {
+    // A first line 12+4 with 3 of leading, then a taller fallback-face line
+    // 16+5 with 4 of leading. Read as a running total, the second line would
+    // contribute only 25 - 19 = 6 and lose its leading.
+    const auto taller = paragraph_text_extents({{12.0f, 4.0f, 19.0f}, {16.0f, 5.0f, 25.0f}}, 16.0f);
+    REQUIRE(taller.real);
+    CHECK_THAT(taller.ascent, WithinAbs(16.0f, 1e-5f));
+    CHECK_THAT(taller.descent, WithinAbs(5.0f, 1e-5f));
+    CHECK_THAT(taller.leading, WithinAbs(4.0f, 1e-5f));
+    CHECK_THAT(taller.line_height(), WithinAbs(25.0f, 1e-5f));
+
+    // Same height, taller ascent: a running total would see a zero-height
+    // second line and drop its ascent.
+    const auto same_height =
+        paragraph_text_extents({{12.0f, 4.0f, 19.0f}, {14.0f, 2.0f, 19.0f}}, 16.0f);
+    CHECK_THAT(same_height.ascent, WithinAbs(14.0f, 1e-5f));
+    CHECK_THAT(same_height.descent, WithinAbs(4.0f, 1e-5f));
+
+    // Equal lines describe one line, whatever their count.
+    const auto repeated = paragraph_text_extents(
+        {{12.0f, 4.0f, 19.0f}, {12.0f, 4.0f, 19.0f}, {12.0f, 4.0f, 19.0f}}, 16.0f);
+    CHECK_THAT(repeated.line_height(), WithinAbs(19.0f, 1e-5f));
+
+    CHECK_FALSE(paragraph_text_extents({}, 16.0f).real);
+    const auto implausible =
+        paragraph_text_extents({{12.0f, 4.0f, 19.0f}, {12.0f, 4.0f, 1000.0f}}, 16.0f);
+    CHECK_THAT(implausible.line_height(), WithinAbs(19.0f, 1e-5f));
+}
+
+TEST_CASE("TextShaper multiline metrics enclose each line shaped alone",
+          "[canvas][text_shaper][metrics][fallback]") {
+    // Thai then CJK: on macOS both fallback faces give a 22px line at 16px,
+    // and the CJK line descends further. A second line no taller than the
+    // first is the one a running-total reading drops entirely.
     TextShaper shaper;
-    const auto single = shaper.prepare("Alpha", "Inter", 16.0f);
-    const auto three = shaper.prepare("Alpha\nBeta\nGamma", "Inter", 16.0f);
-    REQUIRE(single.line_height() > 0.0f);
-    CHECK(three.line_height() < single.line_height() * 1.5f);
+    const auto first = shaper.prepare("ฎุ ญู", "Inter", 16.0f);
+    const auto second = shaper.prepare("漢字", "Inter", 16.0f);
+    const auto both = shaper.prepare("ฎุ ญู\n漢字", "Inter", 16.0f);
+    REQUIRE(first.line_height() > 0.0f);
+    INFO("first a/d/l " << first.ascent() << "/" << first.descent() << "/" << first.leading());
+    INFO("second a/d/l " << second.ascent() << "/" << second.descent() << "/" << second.leading());
+    INFO("both a/d/l " << both.ascent() << "/" << both.descent() << "/" << both.leading());
+    CHECK_THAT(both.ascent(), WithinAbs(std::max(first.ascent(), second.ascent()), 1e-3f));
+    CHECK_THAT(both.descent(), WithinAbs(std::max(first.descent(), second.descent()), 1e-3f));
+    CHECK_THAT(both.leading(), WithinAbs(std::max(first.leading(), second.leading()), 1e-3f));
 }
 
 TEST_CASE("TextShaper does not wrap at an attributed style boundary inside a word",

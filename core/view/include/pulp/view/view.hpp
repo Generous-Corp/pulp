@@ -2569,6 +2569,7 @@ public:
         /// mixes them — resolve through one expression.
         float radial_rx = 0.0f, radial_ry = 0.0f;
         float radial_rx_px = 0.0f, radial_ry_px = 0.0f;
+        canvas::GradientInterpolation interpolation; ///< CSS `in <space> [<hue> hue]`
     };
 
     /// A radial gradient's centre and radii in pixels, resolved against a box.

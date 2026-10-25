@@ -250,6 +250,47 @@ built with PULP_TRACING=ON," the fix is to rebuild with tracing off (the
 default `pulp build`), not to reach for `--allow-tracing`. The scanner lives in
 `tools/cli/ship_tracing_guard.hpp` (unit-tested in `test/test_ship_tracing_guard.cpp`).
 
+## PULP_DEV_BUILD: ship builds `build-ship/`
+
+A build dir whose `CMakeCache.txt` records `PULP_DEV_BUILD=ON` also records
+the on-disk `UI_SCRIPT` path, theme path and asset roots so a hot-reloading
+editor reads the developer's source tree. The `pulp` CLI turns the option on
+for every developer-loop configure, so a plain `pulp build` dir is a dev
+build. `pulp ship` neither ships nor refuses it: `sign`, `package` and
+`release` configure `<root>/build-ship` from the dev cache and build it
+through the governed build lease, then ship from there; `check`, `notarize`
+and `share` read `build-ship/` once it exists (and say so), and
+`notarize`/`share` point at `pulp ship package` when it does not.
+`--allow-dev-build` ships `build/` as it is and prints a warning; `sign
+--path <artifact>` builds nothing (an artifact inside `build/` is still
+refused). The helpers live in `tools/cli/ship_dev_build_guard.hpp`
+(unit-tested in `test/test_ship_dev_build_guard.cpp`; the CLI path in
+`test/test_cli_ship_shellout.cpp` `[dev-build]`).
+
+Gotchas:
+
+- **The whole dev configuration carries over, not an allowlist.**
+  `ship_build_initial_cache()` writes every non-INTERNAL/STATIC cache entry
+  (formats such as `PULP_ENABLE_AAX`/`PULP_AAX_SDK_DIR`, `PULP_ENABLE_ARA`,
+  compiler, sysroot, SDK paths) into `build-ship/pulp-ship-initial-cache.cmake`,
+  which the configure loads with `cmake -C`; only `PULP_BUILD_TESTS`,
+  `PULP_DEV_BUILD`, `PULP_DEV_BRIDGE_EXEC` and `PULP_ENABLE_AUDIO_PROBES` are
+  dropped (the first two set OFF) and `PULP_PROFILE` is forced to `release`.
+  The generator is INTERNAL and goes on the command line (`-G`). An earlier
+  version carried ten named entries and silently dropped an AAX-enabled
+  plug-in's AAX bundle.
+- **The configure re-runs when it must.** A ship cache without
+  `CMAKE_GENERATOR` (a failed configure), a dev cache newer than the ship
+  cache, or an initial-cache script that differs from the one last written all
+  reconfigure; otherwise only the incremental build runs.
+- **The artifact set is compared after the build.** If `build-ship/` lacks a
+  plug-in artifact `build/` has (`VST3/`, `CLAP/`, `AU/`, `AAX/`, `LV2/`,
+  `Standalone/` bundles), the ship is refused and the message names it;
+  extras in `build-ship/` are fine, because the dev build may have been built
+  for a subset of targets.
+`tools/scripts/build_combined_installer.sh` takes finished artifacts, not a
+build dir, and does not configure, so it carries no such step.
+
 ## Development-SDK ship guard
 
 `package`, `notarize`, `release`, and `share` **refuse** a project configured
@@ -276,6 +317,56 @@ given SDK is releasable.
 Unit-tested in both directions in `test/test_sdk_distribution_guard.cpp`, plus
 the CMake-level provenance contract in
 `test/cmake/test_sdk_provenance_contract.cmake`.
+
+### Dev-shared builds (`PULP_DEV_SHARED_UI`) never ship, and shipping still works
+
+`pulp dev` / `pulp loop` in SDK projects on macOS (and `pulp build
+--dev-shared`) link plug-in modules against
+`libpulp-dev-shared-ui.<version>.dylib` in the build tree
+(`tools/cmake/PulpDevSharedUi.cmake`). That module loads only on the machine and
+in the directory that built it. The rule: static builds ship exactly as before;
+a dev-shared build may be signed for local loading, never distributed.
+
+- `cmd_ship()` treats a dev-shared dir (`build_dir_is_dev_shared()` in
+  `tools/cli/ship_dev_build_guard.hpp`) like a `PULP_DEV_BUILD` dir: `package`,
+  `release` and non-local `sign` build `build-ship/` through `ensure_ship_build()`
+  and ship from it; `notarize`, `share` and `check` read it once it exists.
+  `PULP_DEV_SHARED_UI` is in `kShipBuildDroppedEntries` and set OFF explicitly in
+  the initial cache. Unlike a dev build, `--allow-dev-build` cannot keep a
+  dev-shared dir.
+- `refuse_dev_shared_build()` is the backstop when the redirect did not apply
+  (`sign --path` with a Developer ID and no `build-ship/`): it prints the
+  outermost command as one copy-pasteable line,
+  `PULP_DEV_SHARED_UI=0 pulp build --all && pulp ship <args>`.
+- `is_local_signing_identity()` (ad hoc `-`, `Apple Development`,
+  `Mac Developer`, from `--identity`) lets `sign` take a dev-shared build as it
+  is: no `build-ship/`, no artifact refusal. Ad hoc signing also skips the signing-keychain preflight,
+  because it needs no keychain.
+- `pulp::cli::dev_shared_artifact_offender()` scans every selected artifact for a
+  file named `libpulp-dev-shared-ui.*` or containing those bytes (the runtime's
+  install name, which is in every linked module's load commands). It runs at the
+  same call sites as the Vellum D15 scan, through
+  `enforce_no_development_runtimes()` in `tools/cli/cmd_ship.cpp`, and fails
+  closed on an uninspectable tree.
+- `tools/scripts/build_combined_installer.sh` greps its inputs for the same bytes
+  before any signing tool runs; a grep read error also refuses.
+
+There is no override flag. Tests: the `[dev-shared]` cases in
+`test/test_sdk_distribution_guard.cpp` and `test/test_cli_ship_shellout.cpp`:
+- `package` (also with `--allow-dev-build`), `release` and Developer ID `sign`
+  building a static `build-ship/` (real CMake, `LANGUAGES NONE` project);
+  `notarize` and `share` without `build-ship/` shipping nothing;
+- a static build that signs ad hoc, verifies with `codesign --verify --strict`,
+  and packages;
+- a dev-shared build that signs ad hoc in place, while a Developer ID
+  `sign --path` of it prints the exact fix;
+- `sign --path`, `sign` scan, `package`, `notarize` and `share` against artifact
+  bytes;
+
+plus
+`test_dev_shared_build_is_rejected_before_signing` in
+`tools/scripts/test_build_combined_installer.py`. A new distribution path must
+call `enforce_no_development_runtimes()` on exactly the inputs it selected.
 
 ## Workflows
 

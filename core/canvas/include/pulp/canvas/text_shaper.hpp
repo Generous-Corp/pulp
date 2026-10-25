@@ -238,6 +238,34 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
+/// One shaped paragraph line's own vertical metrics, as SkParagraph's
+/// `LineMetrics` reports them. `height` is that line's height (its advance),
+/// not a running total over the lines above it.
+struct ParagraphLineExtent {
+    float ascent = 0.0f;
+    float descent = 0.0f;
+    float height = 0.0f;
+};
+
+/// Worst-case vertical extents over every line of a shaped paragraph.
+struct ParagraphTextExtents {
+    float ascent = 0.0f;
+    float descent = 0.0f;
+    float leading = 0.0f; ///< max over lines of height - ascent - descent
+    bool real = false;    ///< at least one line had usable metrics
+
+    float line_height() const {
+        return ascent + descent + leading;
+    }
+};
+
+/// Takes the max ascent, descent and leading over `lines`, so a later line
+/// whose fallback face is taller than the first still widens the box. A line
+/// with non-finite, negative, zero-height or implausible (over ten font sizes)
+/// metrics is ignored.
+ParagraphTextExtents paragraph_text_extents(const std::vector<ParagraphLineExtent>& lines,
+                                            float font_size);
+
 /// Global text shaper singleton (uses the best available backend)
 TextShaper& global_text_shaper();
 

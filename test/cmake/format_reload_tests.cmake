@@ -563,6 +563,10 @@ pulp_add_test_suite(pulp-test-host-transport-validity GROUP pulp-test-group-fmt-
 # dependency). Covers the 59.94 vs 60 fps mapping edge case.
 pulp_add_test_suite(pulp-test-vst3-frame-rate GROUP pulp-test-group-fmt-format
     LIBRARIES pulp::format)
+# AU host timeline position (double) → nearest integer sample (pure helper,
+# no AU SDK dependency).
+pulp_add_test_suite(pulp-test-host-sample-position GROUP pulp-test-group-fmt-format
+    LIBRARIES pulp::format)
 # `pulp ship auv3-xcodeproj` developer-path validation helper.
 # Header-only; no extra libraries needed.
 add_executable(pulp-test-xcode-developer-path

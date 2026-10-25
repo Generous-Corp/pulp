@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 79,
+  "manifest_revision": 81,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -9855,6 +9855,7 @@
               "set_mode(Mode mode)",
               "set_parameter(Param p, double value)",
               "parameter(Param p)",
+              "combs_silent()",
               "snap_parameters()",
               "latency_samples()",
               "comb_length(int comb)",
@@ -9959,7 +9960,13 @@
               "attack_coefficient()",
               "release_coefficient()",
               "gain_reduction_db()",
-              "gain_reduction()"
+              "gain_reduction()",
+              "detector_level_db(SampleType detector)",
+              "gain_computer_db(SampleType input_db, const Params& params)",
+              "ballistic_coefficient(SampleType time_ms, SampleType sample_rate)",
+              "branching_step(SampleType envelope, SampleType target, SampleType attack, SampleType release)",
+              "decoupled_hold(SampleType hold, SampleType target, SampleType release)",
+              "db_to_gain(SampleType db)"
             ],
             "enums": []
           },
@@ -11456,11 +11463,13 @@
               "sin_cycles(float phase_cycles)",
               "sin_cycles(float phase_cycles, FastTrigProfile profile)",
               "tanh(float x)",
+              "tanh_clamp(float x)",
               "tanh_accurate(float x)",
               "tanh_accurate_rational(float x, float u)",
               "tanh_minimax(float x)",
               "tanh_minimax(const float* input, float* output, std::size_t count)",
               "tanh_minimax_rational(T x)",
+              "tanh_minimax_recursive(float x)",
               "sin(float x)",
               "cos(float x)",
               "exp2(float x)",
@@ -11768,6 +11777,8 @@
               "tank_rate()",
               "resampling()",
               "interpolation_skew_samples()",
+              "input_read_position()",
+              "output_read_position()",
               "tank_input(int rail)",
               "tank_output(int rail)",
               "host_to_tank(const SampleType* left, const SampleType* right, int n)",
@@ -12781,13 +12792,16 @@
             "enums": []
           },
           {
-            "class": "HalfBandIirStage",
-            "qualified_name": "pulp::signal::detail::HalfBandIirStage",
-            "template": "typename SampleType",
+            "class": "HalfBandIirStageT",
+            "qualified_name": "pulp::signal::HalfBandIirStageT",
+            "template": "typename SampleType = float",
             "methods": [
               "reset()",
               "configure(const HalfBandIirDesign& design)",
               "coefficient_count()",
+              "sections_a()",
+              "sections_b()",
+              "configured()",
               "upsample(const SampleType* input, SampleType* output, std::size_t n)",
               "downsample(const SampleType* input, SampleType* output, std::size_t n)"
             ],
@@ -12802,6 +12816,7 @@
               "process(SampleType x, SampleType& out_lo, SampleType& out_hi)",
               "sections_a()",
               "sections_b()",
+              "configured()",
               "process_block(std::span<const SampleType> input, std::span<SampleType> output)"
             ],
             "enums": []
@@ -12815,6 +12830,7 @@
               "process(SampleType in_lo, SampleType in_hi)",
               "sections_a()",
               "sections_b()",
+              "configured()",
               "process_block(std::span<const SampleType> input, std::span<SampleType> output)"
             ],
             "enums": []
@@ -14477,6 +14493,7 @@
               "latency_samples()",
               "group_delay_samples(double frequency)",
               "polyphase_stage_design(Quality quality, int stage)",
+              "polyphase_stopband_db(Quality quality)",
               "process_block(const SampleType* input, SampleType* output, std::size_t num_samples, Callback&& callback)"
             ],
             "enums": [

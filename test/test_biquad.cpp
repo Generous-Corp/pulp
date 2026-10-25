@@ -975,3 +975,40 @@ TEST_CASE("Biquad tiny-a2 handoff reproduces the reported ring-down",
     CHECK_THAT(block[1], WithinAbs(0.669043f, 1.0e-5f));
     CHECK_THAT(block[2], WithinAbs(0.334521f, 1.0e-5f));
 }
+
+TEST_CASE("Biquad::process_stereo with one filter for both channels runs them in turn",
+          "[signal][biquad][determinism]") {
+    // The lane path loads both channels' state, runs them, and stores each
+    // back: with one filter as both channels, the second store would discard
+    // the first channel's state. One filter passed twice must instead behave
+    // as two block calls, left buffer then right.
+    Biquad shared;
+    shared.set_coefficients(Biquad::Type::lowpass, 1200.0f, 0.9f, 48000.0f);
+    Biquad reference = shared;
+    std::vector<float> l(512), r(512);
+    for (std::size_t i = 0; i < l.size(); ++i) {
+        l[i] = 0.7f * std::sin(0.017f * static_cast<float>(i));
+        r[i] = 0.6f * std::cos(0.023f * static_cast<float>(i));
+    }
+    auto l_ref = l;
+    auto r_ref = r;
+    Biquad::process_stereo(shared, shared, l.data(), r.data(), l.size());
+    reference.process(l_ref.data(), static_cast<int>(l_ref.size()));
+    reference.process(r_ref.data(), static_cast<int>(r_ref.size()));
+    CHECK(std::memcmp(l.data(), l_ref.data(), l.size() * sizeof(float)) == 0);
+    CHECK(std::memcmp(r.data(), r_ref.data(), r.size() * sizeof(float)) == 0);
+
+    // The same for a chain of sections.
+    std::array<Biquad, 3> chain{};
+    for (std::size_t k = 0; k < chain.size(); ++k)
+        chain[k].set_coefficients(Biquad::Type::peaking, 400.0f * static_cast<float>(k + 1), 1.1f,
+                                  48000.0f, 3.0f);
+    auto chain_ref = chain;
+    auto cl = l_ref, cr = r_ref, cl_ref = l_ref, cr_ref = r_ref;
+    Biquad::process_chain_stereo(chain.data(), chain.data(), chain.size(), cl.data(), cr.data(),
+                                 cl.size());
+    Biquad::process_chain(chain_ref.data(), chain_ref.size(), cl_ref.data(), cl_ref.size());
+    Biquad::process_chain(chain_ref.data(), chain_ref.size(), cr_ref.data(), cr_ref.size());
+    CHECK(std::memcmp(cl.data(), cl_ref.data(), cl.size() * sizeof(float)) == 0);
+    CHECK(std::memcmp(cr.data(), cr_ref.data(), cr.size() * sizeof(float)) == 0);
+}

@@ -92,6 +92,14 @@ std::string slot_text(std::size_t slot, int frame) {
     return "slot " + std::to_string(slot) + " frame " + std::to_string(frame);
 }
 
+std::vector<std::string> slot_texts(std::size_t count, int frame) {
+    std::vector<std::string> texts;
+    texts.reserve(count);
+    for (std::size_t i = 0; i < count; ++i)
+        texts.push_back(slot_text(i, frame));
+    return texts;
+}
+
 IrBoundFixture::IrBoundFixture(const std::filesystem::path& path, bool rebuild_each_step)
     : loaded_(load_ir(path)), rebuild_each_step_(rebuild_each_step) {
     materialize(loaded_.ir);
