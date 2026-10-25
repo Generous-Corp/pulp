@@ -313,6 +313,34 @@ def read_git_path(
     return replace(result, status="available", stderr="", content=shown.stdout)
 
 
+def commit_blobs(root: "str | Path", rev: str, paths: Iterable[str]) -> dict[str, str]:
+    """Each path's text in commit ``rev``, read in one ``git cat-file --batch``.
+
+    A path the commit does not hold, or holds as a non-blob, is left out. A
+    pre-push gate reads the pushed commit through this rather than the working
+    tree, so an uncommitted edit cannot change its verdict. Raises
+    subprocess.CalledProcessError when git itself fails.
+    """
+    names = [Path(p).as_posix() for p in paths]
+    if not names:
+        return {}
+    request = "".join(f"{rev}:{name}\n" for name in names).encode("utf-8")
+    out = subprocess.run(["git", "cat-file", "--batch"], cwd=str(root), input=request,
+                         capture_output=True, check=True).stdout
+    texts: dict[str, str] = {}
+    at = 0
+    for name in names:
+        header_end = out.index(b"\n", at)
+        header = out[at:header_end].split()
+        at = header_end + 1
+        if len(header) < 3 or header[1] != b"blob":
+            continue  # "<spec> missing", or a tree / submodule entry
+        size = int(header[2])
+        texts[name] = out[at:at + size].decode("utf-8", errors="replace")
+        at += size + 1
+    return texts
+
+
 def repo_root() -> Path:
     out = subprocess.run(
         ["git", "rev-parse", "--show-toplevel"],
