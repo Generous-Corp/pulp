@@ -32,6 +32,8 @@ pulp_add_plugin(PulpChainerNativeUi
     SOURCES         chainer_native_ui_processor.cpp
                     "${PULP_PHASE_F_PREVIEW_GENERATED_CPP}"
     PLUGIN_NAME     "PulpChainerNativeUi"
+    # The native UI renders on the GPU host (requires_gpu_host()): link the full editor stack.
+    GPU_UI
     BUNDLE_ID       "com.pulp.chainer-native-ui"
     MANUFACTURER    "Pulp"
     VERSION         "0.1.0"

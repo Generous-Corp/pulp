@@ -38,7 +38,7 @@ Choosing an alias policy:
 | Policy | Wet-path delay | Top-octave cost | When |
 |---|---|---|---|
 | `adaa` (default) | 0.5 sample | two-tap mean: −3.0 dB at a quarter of the rate | Low latency, moderate drive |
-| `adaa2` | 1 sample (reported, dry path matched) | three-tap mean: −9.5 dB at a quarter of the rate, null at a third | Content below about a quarter of the rate, where it measured 7–21 dB lower worst-case aliasing than `adaa` at +6 and +18 dB drive; above that its roll-off costs more than it saves |
+| `adaa2` | 1 sample (reported, dry path matched) | three-tap mean: −9.5 dB at a quarter of the rate, null at a third | Content below about a sixth of the rate, where its worst-case aliasing measures at least 12 dB below `adaa`'s and under -50 dBc (tanh at +18 dB drive); higher up its roll-off costs more than it saves |
 | `oversample_2x` | 64 samples (linear phase) | flat | Phase coherence with another linear-phase oversampled stage |
 | `off` | 0 | flat | Measurement and the CPU floor |
 

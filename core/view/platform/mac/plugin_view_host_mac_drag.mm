@@ -22,6 +22,7 @@
 // PulpGpuPluginView when a shipped binary defines PULP_VIEW_OBJC_SUFFIX). Must
 // precede the first reference to those classes.
 #include "pulp_mac_objc_names.h"
+#include "mac_gpu_host_config.h"
 
 #include "drag_drop_mac_internal.h"
 #include "plugin_view_host_mac_view.h"
@@ -96,7 +97,7 @@ static BOOL hosted_perform_drop(NSView* v, View* root, Point (^xf)(Point),
 // PulpGpuPluginView class) is compiled in; see the PULP_HAS_SKIA note at the
 // top of this file. The shared pulp::view::hosted_* helpers stay outside the
 // guard so the CPU category keeps using them in a no-Skia build.
-#ifdef PULP_HAS_SKIA
+#if PULP_VIEW_MAC_GPU_HOST
 @interface PulpGpuPluginView (PulpDragDrop) <NSDraggingDestination>
 @end
 @implementation PulpGpuPluginView (PulpDragDrop)
@@ -118,6 +119,6 @@ static BOOL hosted_perform_drop(NSView* v, View* root, Point (^xf)(Point),
     return pulp::view::hosted_perform_drop(self, self.rootView, self.pointTransform, s);
 }
 @end
-#endif // PULP_HAS_SKIA
+#endif // PULP_VIEW_MAC_GPU_HOST
 
 #endif // __APPLE__

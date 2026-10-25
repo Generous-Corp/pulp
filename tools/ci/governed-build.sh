@@ -35,9 +35,13 @@
 # into a build directory another live build already holds
 # (build_dir_lock.py --no-wait, which names the holder).
 #
-# The build command MUST NOT carry its own --parallel/-j (a bare flag is
+# The build command should not carry its own --parallel/-j (a bare flag is
 # rejected by build_parallelism_guard.py anyway); CMAKE_BUILD_PARALLEL_LEVEL
-# from this wrapper governs it.
+# from this wrapper governs it. If one is present, its count is a request:
+# the lower of it and PULP_BUILD_JOBS caps the lease, and the flag is
+# rewritten to the final share, so it can never exceed the lease. A
+# CMAKE_BUILD_PARALLEL_LEVEL the caller exported is a request in the same way;
+# the wrapper then exports the final share under that name.
 set -euo pipefail
 
 if [ "$#" -eq 0 ]; then
@@ -346,6 +350,48 @@ probe_jobs() {
   echo "jobs=$best grant=$grant"
 }
 
+# An explicit -j/--parallel on the build command is also a request, and the
+# lower of it and PULP_BUILD_JOBS wins. Without this the command's own flag
+# silently overrode the governed share in both directions: `cmake --build -j16`
+# under a 6-core lease ran 16 jobs, and `-j4` reserved a profile-sized lease it
+# never used while the log reported the profile size. The flag is rewritten to
+# the final share just before the build runs (see rewrite_parallel_args).
+explicit_jobs=""
+explicit_parallel_flag=0
+scan_parallel_args() {
+  local prev="" arg value
+  for arg in "$@"; do
+    value=""
+    case "$prev" in
+      -j|--parallel) if positive_int "$arg"; then value="$arg"; fi ;;
+    esac
+    case "$arg" in
+      -j|--parallel) explicit_parallel_flag=1 ;;
+      -j[0-9]*) explicit_parallel_flag=1; value="${arg#-j}" ;;
+      --parallel=*) explicit_parallel_flag=1; value="${arg#--parallel=}" ;;
+    esac
+    if positive_int "$value"; then
+      if [ -z "$explicit_jobs" ] || [ "$value" -lt "$explicit_jobs" ]; then explicit_jobs="$value"; fi
+    fi
+    prev="$arg"
+  done
+}
+scan_parallel_args "$@"
+
+# A caller-set CMAKE_BUILD_PARALLEL_LEVEL is the same kind of request. This
+# wrapper exports its own share under that name before running the build, which
+# used to replace the caller's value, so `CMAKE_BUILD_PARALLEL_LEVEL=4` ran at
+# the full lease. Read it here, before that export; a non-numeric value is
+# ignored like any other invalid request.
+caller_parallel_level="${CMAKE_BUILD_PARALLEL_LEVEL:-}"
+if positive_int "$caller_parallel_level"; then
+  if [ -z "$explicit_jobs" ] || [ "$caller_parallel_level" -lt "$explicit_jobs" ]; then
+    explicit_jobs="$caller_parallel_level"
+  fi
+else
+  caller_parallel_level=""
+fi
+
 TARTCI_BIN=""
 if [ "${1:-}" = "--probe-jobs" ]; then
   probe_jobs
@@ -353,7 +399,12 @@ if [ "${1:-}" = "--probe-jobs" ]; then
 fi
 
 if [ "$DRY_RUN" = "1" ]; then
-  dry_run_plan="$(probe_jobs)"
+  if positive_int "$explicit_jobs" && { ! positive_int "${PULP_BUILD_JOBS:-}" \
+      || [ "$explicit_jobs" -lt "$PULP_BUILD_JOBS" ]; }; then
+    dry_run_plan="$(PULP_BUILD_JOBS="$explicit_jobs" probe_jobs)"
+  else
+    dry_run_plan="$(probe_jobs)"
+  fi
   printf 'governed-build dry-run receipt: %s command=' "$dry_run_plan"
   printf ' %q' "$@"
   printf '\n'
@@ -635,6 +686,12 @@ fi
 # resolved PULP_BUILD_JOBS below.
 requested_jobs="${PULP_BUILD_JOBS:-}"
 
+if positive_int "$explicit_jobs"; then
+  if ! positive_int "$requested_jobs" || [ "$explicit_jobs" -lt "$requested_jobs" ]; then
+    requested_jobs="$explicit_jobs"
+  fi
+fi
+
 if [ "${PULP_TARTCI_LEASES:-}" != "0" ]; then
   TARTCI_BIN="$(find_tartci)"
 fi
@@ -768,6 +825,34 @@ if [ -n "$requested_jobs" ] && [ "$requested_jobs" -ge 1 ] 2>/dev/null \
 fi
 
 export CMAKE_BUILD_PARALLEL_LEVEL="$jobs"
+
+# Rewrite the command's own -j/--parallel value to the governed share, so the
+# flag can neither exceed the lease nor go unbounded (a bare `--parallel` or
+# `-j` with no count). Arguments are otherwise passed through unchanged.
+rewritten_args=()
+rewrite_parallel_args() {
+  local i=0 n=$# arg next
+  local -a in=("$@")
+  rewritten_args=()
+  while [ "$i" -lt "$n" ]; do
+    arg="${in[$i]}"
+    next="${in[$((i + 1))]:-}"
+    case "$arg" in
+      -j|--parallel)
+        rewritten_args+=("$arg" "$jobs")
+        if positive_int "$next"; then i=$((i + 1)); fi ;;
+      -j[0-9]*) rewritten_args+=("-j$jobs") ;;
+      --parallel=*) rewritten_args+=("--parallel=$jobs") ;;
+      *) rewritten_args+=("$arg") ;;
+    esac
+    i=$((i + 1))
+  done
+}
+if [ "$explicit_parallel_flag" = "1" ]; then
+  rewrite_parallel_args "$@"
+  set -- "${rewritten_args[@]}"
+  log "build command's own parallelism flag set to the governed share -j$jobs"
+fi
 export CTEST_PARALLEL_LEVEL="$jobs"
 # Cargo does not consume CMake's parallel-level variables. Export the same
 # governed share explicitly so Rust custom targets cannot fan out across every

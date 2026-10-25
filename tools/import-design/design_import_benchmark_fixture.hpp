@@ -50,6 +50,11 @@ class BenchmarkFixture {
     virtual std::uint64_t slot_text_mismatch_count() const {
         return 0;
     }
+    // The text `step(frame)` gives new content. A steady-state frame may
+    // shape these runs and nothing else.
+    virtual std::vector<std::string> text_written_by_step(int /*frame*/) const {
+        return {};
+    }
     // Untimed check that the update `step(frame)` made is what the tree now
     // holds. run_phase calls it outside every clock, so verification cost
     // never lands in update or frame time.
@@ -60,9 +65,13 @@ class BenchmarkFixture {
 // benchmark never measures a tree the importer reported as wrong. Warnings
 // (a design that states no widget palette, say) do not change the tree's
 // structure; their codes are returned so the receipt shows every one.
-std::unique_ptr<view::View> materialize_checked(const view::DesignIR& ir, float width, float height,
-                                                std::string_view lane,
-                                                std::vector<std::string>* warning_codes);
+// `asset_base_directory` resolves the manifest's relative asset paths; an
+// importer writes them relative to the DesignIR's own directory, so without it
+// every image resolves against the process's working directory instead.
+std::unique_ptr<view::View>
+materialize_checked(const view::DesignIR& ir, float width, float height, std::string_view lane,
+                    std::vector<std::string>* warning_codes,
+                    const std::filesystem::path& asset_base_directory = {});
 
 // A file read whole, with the digest that binds a receipt to its bytes.
 struct HashedFile {
@@ -87,6 +96,8 @@ struct LoadedIr {
 LoadedIr load_ir(const std::filesystem::path& path);
 
 std::string slot_text(std::size_t slot, int frame);
+// slot_text for every slot in [0, count).
+std::vector<std::string> slot_texts(std::size_t count, int frame);
 
 // The retained-plan experiment over real importer output. Each anchored text
 // node is a typed slot. The retained lane resolves every slot to its Label
@@ -109,6 +120,9 @@ class IrBoundFixture final : public BenchmarkFixture {
     }
     std::uint64_t slot_text_mismatch_count() const override {
         return text_mismatches_;
+    }
+    std::vector<std::string> text_written_by_step(int frame) const override {
+        return slot_texts(loaded_.slot_anchors.size(), frame);
     }
     view::View& tree() {
         return *root_;
@@ -168,6 +182,9 @@ class IrLiveFixture final : public BenchmarkFixture {
     }
     std::uint64_t slot_text_mismatch_count() const override {
         return text_mismatches_;
+    }
+    std::vector<std::string> text_written_by_step(int frame) const override {
+        return slot_texts(loaded_.slot_anchors.size(), frame);
     }
     const LoadedIr& loaded() const {
         return loaded_;

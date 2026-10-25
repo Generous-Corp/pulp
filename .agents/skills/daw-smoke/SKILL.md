@@ -29,6 +29,14 @@ the cache/status handshake or interactive desktop is unavailable. The packet's
 README specifies separate `pulp audio render`/null and dev-only Perfetto
 companion gates; screenshots alone do not prove audio or performance.
 
+The Windows harness must launch REAPER with a complete copied resource profile,
+not an empty portable directory. Copy the operator's profile into the private
+run directory, retain the license only there, and remove stale
+`reaper-vstplugins*`/`reaper-clap*` caches before scanning. A partial profile can
+stall before Lua dispatch, while stale caches can resolve an older backup bundle;
+the harness treats either condition as inconclusive and keeps the user's live
+REAPER session untouched.
+
 - **`reload`** — the original flow. Seed watched DSP variant A, insert+float the
   FX, copy variant B over the watched path, scrape `swapped DSP` / `reload
   rejected`.

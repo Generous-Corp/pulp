@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261024-css-font-weight-matching-watch",
+  "created_at": "2026-10-24T16:42:03Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-ir-contract",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Changed paths under design-ir-contract, design-source-ingest and render-assets-and-backends are two committed half/quarter-pixel design-ir-observe fixtures and their check, plus canvas font-face weight matching (CSS Fonts 4 order). No design-import, Chromium, rendering or packaging authority moves; capture and IR formats are unchanged.",
+  "tests": [
+    "ctest --test-dir build -R import-design-ir-observe-half-pixel-label",
+    "ctest --test-dir build -R pulp-test-font-weight-match",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

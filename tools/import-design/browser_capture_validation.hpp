@@ -1,11 +1,14 @@
 #pragma once
 
+#include "browser_lane_timing.hpp"
+
 #include <pulp/view/design_ir.hpp>
 #include <pulp/view/screenshot.hpp>
 
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 namespace pulp::import_design {
 
@@ -50,6 +53,10 @@ struct BrowserCaptureValidationResult {
     /// while an unregistered capture still produced a perfectly good panel and
     /// only its oracle is unusable.
     std::string registration_reason;
+    /// Wall-clock parts of the validation in the order they ran: building the
+    /// native view tree, rendering and encoding it, writing the diff image, and
+    /// scoring. A part that did not run is absent.
+    std::vector<BrowserLaneStage> stages;
 };
 
 /// Where the authored panel sits inside the reference image, in reference

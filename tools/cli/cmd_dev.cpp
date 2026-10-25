@@ -27,6 +27,7 @@ int cmd_dev(const std::vector<std::string>& args) {
     bool examples = false;
     bool hot_dsp = false;
     bool build_all = false;
+    bool no_dev_shared = false;
     bool after_separator = false;
 
     for (size_t i = 0; i < args.size(); ++i) {
@@ -55,6 +56,10 @@ int cmd_dev(const std::vector<std::string>& args) {
                    "                         those affected by the working diff)\n";
             std::cout
                 << "  --examples             Configure the source checkout with example projects\n";
+            std::cout
+                << "  --no-dev-shared        Link plug-ins statically instead of against the\n"
+                   "                         development-only shared Pulp runtime (macOS SDK "
+                   "projects)\n";
             std::cout
                 << "  --allow-unsupported-sdk  Bypass the CLI-vs-project SDK guard (unsupported)\n";
             std::cout << "  -- args...             Arguments passed to the launched app\n\n";
@@ -91,6 +96,8 @@ int cmd_dev(const std::vector<std::string>& args) {
             allow_unsupported_sdk = true;
         } else if (args[i] == "--examples") {
             examples = true;
+        } else if (args[i] == "--no-dev-shared") {
+            no_dev_shared = true;
         } else if (args[i] == "--hot-dsp") {
             hot_dsp = true;
         } else if (args[i] == "--all") {
@@ -151,8 +158,8 @@ int cmd_dev(const std::vector<std::string>& args) {
         return 2;
     }
 
-    BuildPlan plan(
-        {project_root, build_dir, standalone_mode, examples, build_all, build_args, "pulp dev"});
+    BuildPlan plan({project_root, build_dir, standalone_mode, examples, build_all, build_args,
+                    "pulp dev", dev_shared_ui_default(no_dev_shared, standalone_mode)});
     if (!plan.ok()) {
         std::cerr << "pulp dev: " << plan.error() << "\n";
         return plan.exit_code();

@@ -153,7 +153,7 @@ public:
             ? sidechain_hpf_.process(sidechain)
             : sidechain;
 
-        const SampleType gain_db = compute_gain(level_db(detector));
+        const SampleType gain_db = gain_computer_db(detector_level_db(detector), params_);
 
         // Snap the recursive gain-reduction state: when the signal sits above
         // threshold it settles toward 0 dB and otherwise stalls in denormals
@@ -162,8 +162,8 @@ public:
             hold_db_ = snap_to_zero(decoupled_hold(hold_db_, gain_db, release_coeff_));
             envelope_db_ = snap_to_zero(envelope_db_ + attack_coeff_ * (hold_db_ - envelope_db_));
         } else {
-            const SampleType coeff = (gain_db < envelope_db_) ? attack_coeff_ : release_coeff_;
-            envelope_db_ = snap_to_zero(envelope_db_ + coeff * (gain_db - envelope_db_));
+            envelope_db_ =
+                snap_to_zero(branching_step(envelope_db_, gain_db, attack_coeff_, release_coeff_));
         }
 
         const SampleType gain_linear = db_to_gain(envelope_db_ + params_.makeup_db);
@@ -224,6 +224,80 @@ public:
         lookahead_buffer_.reset();
     }
 
+    // ── The pipeline as pure functions ──────────────────────────────────
+    // Each stage process() runs, exposed so a widget or a test can draw or
+    // verify the gain computer and the ballistics without running audio.
+    // process() calls exactly these.
+
+    /// Detector level in dB for one sample: 20 log10(|x|), floored at
+    /// -200 dB. Float uses FastMath's branch-free conversion.
+    static SampleType detector_level_db(SampleType detector) {
+        const SampleType magnitude = std::max(std::abs(detector), SampleType{1e-10f});
+        if constexpr (std::is_same_v<SampleType, float>)
+            return FastMath::gain_to_db_accurate(magnitude);
+        else
+            return SampleType{20.0f} * std::log10(magnitude);
+    }
+
+    /// The static curve: gain change in dB (<= 0) for a detector level in dB
+    /// under `params` (threshold, ratio and knee; attack, release and makeup
+    /// do not enter). Written as selects over precomputed candidates so the
+    /// block path's static-curve pass vectorizes.
+    static SampleType gain_computer_db(SampleType input_db, const Params& params) {
+        const SampleType knee = params.knee_db;
+        const SampleType threshold = params.threshold_db;
+        const SampleType slope = SampleType{1.0f} / params.ratio - SampleType{1.0f};
+        const SampleType above = (input_db - threshold) * slope;
+
+        if (knee <= SampleType{0.0f}) {
+            // Hard knee
+            return input_db <= threshold ? SampleType{0.0f} : above;
+        }
+
+        // Soft knee
+        const SampleType half_knee = knee / SampleType{2.0f};
+        const SampleType x = input_db - threshold + half_knee;
+        const SampleType in_knee = slope * x * x / (SampleType{2.0f} * knee);
+        const SampleType upper = input_db > threshold + half_knee ? above : in_knee;
+        return input_db < threshold - half_knee ? SampleType{0.0f} : upper;
+    }
+
+    /// One-pole smoothing coefficient for a time constant in ms:
+    /// 1 - exp(-1 / (tau fs)), or 1 (instant) for a non-positive time.
+    static SampleType ballistic_coefficient(SampleType time_ms, SampleType sample_rate) {
+        if (time_ms <= SampleType{0.0f})
+            return SampleType{1.0f};
+        return SampleType{1.0f} -
+               std::exp(SampleType{-1.0f} / (time_ms * SampleType{0.001f} * sample_rate));
+    }
+
+    /// One step of the branching ballistics: the envelope (gain change in dB)
+    /// moves toward `target` with the attack coefficient when more reduction
+    /// is asked for and the release coefficient otherwise.
+    static SampleType branching_step(SampleType envelope, SampleType target, SampleType attack,
+                                     SampleType release) {
+        const SampleType coeff = (target < envelope) ? attack : release;
+        return envelope + coeff * (target - envelope);
+    }
+
+    /// The decoupled ballistics' peak hold on gain changes (<= 0 dB): it jumps
+    /// to any deeper reduction at once and otherwise decays toward the target
+    /// with the release coefficient (Giannoulis et al.'s
+    /// y1 = max(x, aR y1 + (1 - aR) x) with the sign flipped). The envelope
+    /// then follows the hold: envelope + attack * (hold - envelope).
+    static SampleType decoupled_hold(SampleType hold, SampleType target, SampleType release) {
+        const SampleType released = hold + release * (target - hold);
+        return target < released ? target : released;
+    }
+
+    /// Linear gain for a gain change in dB (FastMath for float).
+    static SampleType db_to_gain(SampleType db) {
+        if constexpr (std::is_same_v<SampleType, float>)
+            return FastMath::db_to_gain_accurate(db);
+        else
+            return std::pow(SampleType{10.0f}, db / SampleType{20.0f});
+    }
+
 private:
     Params params_;
     SampleType sample_rate_ = SampleType{44100.0f};
@@ -232,8 +306,8 @@ private:
     SampleType hold_db_ = SampleType{0.0f};
     CompressorBallistics ballistics_ = CompressorBallistics::branching;
 
-    SampleType attack_coeff_ = ballistic_coeff(params_.attack_ms, sample_rate_);
-    SampleType release_coeff_ = ballistic_coeff(params_.release_ms, sample_rate_);
+    SampleType attack_coeff_ = ballistic_coefficient(params_.attack_ms, sample_rate_);
+    SampleType release_coeff_ = ballistic_coefficient(params_.release_ms, sample_rate_);
 
     SampleType sidechain_hpf_hz_ = SampleType{0.0f};
     bool sidechain_hpf_active_ = false;
@@ -263,67 +337,9 @@ private:
         }
     }
 
-    // Static curve: gain change in dB (<= 0) for a detector level in dB.
-    // Written as selects over precomputed candidates rather than early
-    // returns so the block path's static-curve pass vectorizes; each region's
-    // expression is unchanged.
-    SampleType compute_gain(SampleType input_db) const {
-        const SampleType knee = params_.knee_db;
-        const SampleType threshold = params_.threshold_db;
-        const SampleType slope = SampleType{1.0f} / params_.ratio - SampleType{1.0f};
-        const SampleType above = (input_db - threshold) * slope;
-
-        if (knee <= SampleType{0.0f}) {
-            // Hard knee
-            return input_db <= threshold ? SampleType{0.0f} : above;
-        }
-
-        // Soft knee
-        const SampleType half_knee = knee / SampleType{2.0f};
-        const SampleType x = input_db - threshold + half_knee;
-        const SampleType in_knee = slope * x * x / (SampleType{2.0f} * knee);
-        const SampleType upper = input_db > threshold + half_knee ? above : in_knee;
-        return input_db < threshold - half_knee ? SampleType{0.0f} : upper;
-    }
-
-    // Detector magnitude in dB, floored at -200 dB. Float uses FastMath's
-    // branch-free conversion so the block path's detector pass vectorizes;
-    // double has no fast path and keeps libm.
-    static SampleType level_db(SampleType detector) {
-        const SampleType magnitude = std::max(std::abs(detector), SampleType{1e-10f});
-        if constexpr (std::is_same_v<SampleType, float>)
-            return FastMath::gain_to_db_accurate(magnitude);
-        else
-            return SampleType{20.0f} * std::log10(magnitude);
-    }
-
-    // Linear gain for a gain change in dB (FastMath for float, as above).
-    static SampleType db_to_gain(SampleType db) {
-        if constexpr (std::is_same_v<SampleType, float>)
-            return FastMath::db_to_gain_accurate(db);
-        else
-            return std::pow(SampleType{10.0f}, db / SampleType{20.0f});
-    }
-
-    // The decoupled detector's peak hold on gain changes (<= 0 dB): it jumps
-    // to any deeper reduction at once and otherwise decays toward the target
-    // with the release coefficient (Giannoulis et al.'s
-    // y1 = max(x, aR y1 + (1 - aR) x) with the sign flipped).
-    static SampleType decoupled_hold(SampleType hold, SampleType target, SampleType release) {
-        const SampleType released = hold + release * (target - hold);
-        return target < released ? target : released;
-    }
-
-    static SampleType ballistic_coeff(SampleType time_ms, SampleType sample_rate) {
-        if (time_ms <= SampleType{0.0f})
-            return SampleType{1.0f};
-        return SampleType{1.0f} -
-               std::exp(SampleType{-1.0f} / (time_ms * SampleType{0.001f} * sample_rate));
-    }
-
     void update_ballistics() {
-        attack_coeff_ = ballistic_coeff(params_.attack_ms, sample_rate_);
-        release_coeff_ = ballistic_coeff(params_.release_ms, sample_rate_);
+        attack_coeff_ = ballistic_coefficient(params_.attack_ms, sample_rate_);
+        release_coeff_ = ballistic_coefficient(params_.release_ms, sample_rate_);
     }
 
     // The block path behind process(buffer) and process_with_sidechain(buffer,
@@ -358,10 +374,10 @@ private:
                 for (int i = 0; i < n; ++i)
                     level[i] = sidechain_hpf_.process(sc[i]);
                 for (int i = 0; i < n; ++i)
-                    level[i] = compute_gain(level_db(level[i]));
+                    level[i] = gain_computer_db(detector_level_db(level[i]), params_);
             } else {
                 for (int i = 0; i < n; ++i)
-                    level[i] = compute_gain(level_db(sc[i]));
+                    level[i] = gain_computer_db(detector_level_db(sc[i]), params_);
             }
 
             // The envelope is snapped once per chunk: it only alters a level
@@ -383,8 +399,7 @@ private:
                 hold_db_ = snap_to_zero(hold);
             } else {
                 for (int i = 0; i < n; ++i) {
-                    const SampleType coeff = (level[i] < envelope) ? attack : release;
-                    envelope = envelope + coeff * (level[i] - envelope);
+                    envelope = branching_step(envelope, level[i], attack, release);
                     level[i] = envelope;
                 }
             }

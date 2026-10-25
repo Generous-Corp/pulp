@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 154,
+  "inventory_version": 159,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -42,21 +42,21 @@
     }
   ],
   "counts": {
-    "public_headers": 511,
-    "reviewed_headers": 257,
-    "legacy_unreviewed_headers": 254,
+    "public_headers": 513,
+    "reviewed_headers": 260,
+    "legacy_unreviewed_headers": 253,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 121,
       "capability_support": 46,
-      "infrastructure": 88,
-      "legacy_unreviewed": 254,
+      "infrastructure": 91,
+      "legacy_unreviewed": 253,
       "unsupported_capability": 2
     },
     "by_domain": {
       "audio": {
-        "public_headers": 113,
-        "reviewed_headers": 15,
+        "public_headers": 114,
+        "reviewed_headers": 16,
         "legacy_unreviewed_headers": 98,
         "unsupported_headers": 0
       },
@@ -85,9 +85,9 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 278,
-        "reviewed_headers": 151,
-        "legacy_unreviewed_headers": 127,
+        "public_headers": 279,
+        "reviewed_headers": 153,
+        "legacy_unreviewed_headers": 126,
         "unsupported_headers": 2
       },
       "timebase": {
@@ -533,6 +533,15 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "audio",
+      "source": "core/audio/include/pulp/audio/restored_path.hpp",
+      "fingerprint": "sha256:5070b5aa15535869b72106ae976074d4e35b1dda6a8df9d303acfaabf4b9a7ec",
+      "include": "pulp/audio/restored_path.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Confinement gate for file paths that arrive through restored host or preset state: resolves symlinks and admits a path only inside the directory the plugin may read from. Shared safety infrastructure for state restore, not an advertised generator capability."
     },
     {
       "domain": "audio",
@@ -2321,7 +2330,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/biquad.hpp",
-      "fingerprint": "sha256:57ae1a537b1ef14942fee81b63a99e5f5f6bed816e1d4fa11f1d7e76a7a1c73d",
+      "fingerprint": "sha256:7491f1683f2b88a0f5af8d160760e49ab429240fd07831f05961fcd0dd0db6a5",
       "include": "pulp/signal/biquad.hpp",
       "disposition": "capability_support",
       "capability_keys": [
@@ -2509,7 +2518,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/classic_reverb.hpp",
-      "fingerprint": "sha256:260a528f11d3641e227e4cd301f91103d51a7aaeb40bdbf9994a5c4b58878fac",
+      "fingerprint": "sha256:ef4d852f267095f4e18a7ed2114640adaeaf8fbbd57087cc3a1aaa1d3a4c796f",
       "include": "pulp/signal/classic_reverb.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -2540,7 +2549,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/compressor.hpp",
-      "fingerprint": "sha256:164c6d838338eecd2e144ca78eb1b3f35edda19e5eda84352dadde24ce2dd5bb",
+      "fingerprint": "sha256:f75d915e4d7f6ac4fc70bcef81454146163aa5f647c80b185c563846e84fd8b3",
       "include": "pulp/signal/compressor.hpp",
       "disposition": "capability_support",
       "capability_keys": [
@@ -2645,7 +2654,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/denormal.hpp",
-      "fingerprint": "sha256:a8a9433f0bd463d455260b3b1470571ce1f139722b4cb8acfe42f0e142ed56f4",
+      "fingerprint": "sha256:c139f6695a9b995b89dc3b9d00430bc0776391286bec850213c8e278bf67e099",
       "include": "pulp/signal/denormal.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -2701,7 +2710,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/detail/simd_lanes.hpp",
-      "fingerprint": "sha256:a03dec563cc1eb560335d4968e1d238dd80134ed1a501d713275b438404d09cb",
+      "fingerprint": "sha256:7f66643caad7bb5dea9e17c238067924f382681b2554f7c8a9deb517f9614e29",
       "include": "pulp/signal/detail/simd_lanes.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -3022,7 +3031,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/fast_math.hpp",
-      "fingerprint": "sha256:d15ee5596c20887770bc8f6025d0db955b0ba25048afa6f943e669dcd85120f5",
+      "fingerprint": "sha256:06673a7b8a8b1609fa65ffb1143e637dd8e0b48adcedfdfa2e26df11369217b0",
       "include": "pulp/signal/fast_math.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -3058,7 +3067,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/fdn/frac_delay.hpp",
-      "fingerprint": "sha256:282c25e49387c19a1a278dac2fa72c1af65a24a19ef427b7a514092741a06836",
+      "fingerprint": "sha256:6ae028912b0f69c9698a23788caedee47f5dfd59edf292f7e1be01d80556f151",
       "include": "pulp/signal/fdn/frac_delay.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -3094,7 +3103,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/fdn/multirate.hpp",
-      "fingerprint": "sha256:41420dc60ad30c20c5417c35adbc2cffff712cf5e5256b375a1a34de8dddafe6",
+      "fingerprint": "sha256:dfad7d64648cbd7e5ced29e8629fa6590b6911f8def641c58b5f5803bf006a2f",
       "include": "pulp/signal/fdn/multirate.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -3170,7 +3179,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/fft.hpp",
-      "fingerprint": "sha256:2794461c6ba9fb79a274f86182439f40b0b003454c5c323f853b730ee7ad6083",
+      "fingerprint": "sha256:8e540807d1e39013586eec91a321b077bba48da22a903ce775314807327f6965",
       "include": "pulp/signal/fft.hpp",
       "disposition": "capability_support",
       "capability_keys": [
@@ -3313,7 +3322,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/frequency_response.hpp",
-      "fingerprint": "sha256:0b571e77442e31ca61913ccbef792f1f775b691e730006bde351ca18f57581f8",
+      "fingerprint": "sha256:565a9cd6416db2a6cb57af4b49585a9715605ba516cbd76e6896a21b1bb08bea",
       "include": "pulp/signal/frequency_response.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -3387,7 +3396,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/halfband_iir.hpp",
-      "fingerprint": "sha256:53cdf36221de5bc046af7a9627809126410cea863daeab56d66eb7757e31aa0d",
+      "fingerprint": "sha256:c47732fc56150293213d048f7ac113f3f3ac0341a83167eb40bae9c4f89ccdfc",
       "include": "pulp/signal/halfband_iir.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -3919,8 +3928,17 @@
     },
     {
       "domain": "signal",
+      "source": "core/signal/include/pulp/signal/overlap_add_convolver.hpp",
+      "fingerprint": "sha256:a673761c3cbeb7eecaaea03f8f49a663cff7fe63f8e422b8538b6c66bafd3307",
+      "include": "pulp/signal/overlap_add_convolver.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "The single-partition overlap-add ConvolverT, moved out of fft.hpp (which still includes it) with an unchanged interface. A one-block-latency convolution utility that runs its spectra in split form internally; it carries no capability claim of its own, PartitionedConvolver being the advertised engine."
+    },
+    {
+      "domain": "signal",
       "source": "core/signal/include/pulp/signal/oversampling.hpp",
-      "fingerprint": "sha256:9a716ddcb90581edd9a8f7214a02a604933bd6e355d46d88749c031908bd6568",
+      "fingerprint": "sha256:08bc7cb21e50cddb3cea2f9aa2405cbbf4e02ca6a2d790e03668e2e23f448760",
       "include": "pulp/signal/oversampling.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -3929,7 +3947,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/oversampling_fir.hpp",
-      "fingerprint": "sha256:1d4c96fd0658021605e48294feba1fc8765266c8b1bd7bed6bf2fcc2fabe79c5",
+      "fingerprint": "sha256:2579a2a2e987d5fc1a960d91fd42ea3d645097fb5d5fd96ac85ba94373cfcef0",
       "include": "pulp/signal/oversampling_fir.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -4214,7 +4232,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/saturator.hpp",
-      "fingerprint": "sha256:3923d4e04568dcbbf4962951de2e05022ea0147bf9dd8a6bb536868b9a5c20dc",
+      "fingerprint": "sha256:5f3e39f13efe4c52be18675c58fb85a23a8dff283eb5abefadd0e5304df0073b",
       "include": "pulp/signal/saturator.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -4263,7 +4281,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/signal.hpp",
-      "fingerprint": "sha256:6d6c680ae9ce6f82cc796d8fcaab3d61d25f9c9eaea26318e698c0b85df0440d",
+      "fingerprint": "sha256:26407cd80b39ea50a5d842c23c91a7d0136f5efdad6be9a52a8f381c427df22b",
       "include": "pulp/signal/signal.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -4328,7 +4346,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/sos_cascade.hpp",
-      "fingerprint": "sha256:5518e99675c45d7f60acb4f60c9d117eef430beaaba40d75af68ea6084fc3ce1",
+      "fingerprint": "sha256:d0521809894f9de1c0ab61ab94d5f14d5d6ad90bd64a5f4bb39706f16a817af3",
       "include": "pulp/signal/sos_cascade.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -4872,11 +4890,11 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/waveshaper.hpp",
-      "fingerprint": "sha256:4673695872790612c9282cf395c6b197af14f500acc0cf86d18366b0ccb48a47",
+      "fingerprint": "sha256:414fae751de0700326a73c259418799514ef35bf134e15d2cf1f29a766719b53",
       "include": "pulp/signal/waveshaper.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Static waveshaping curves (soft, hard, tanh, fold, sine fold) with a drive, as per-sample and buffer paths that agree bit for bit. A bounded DSP primitive; it makes no installed agent capability claim of its own."
     },
     {
       "domain": "signal",

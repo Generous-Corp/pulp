@@ -130,9 +130,10 @@ bool is_asset_reference_key(std::string_view key);
 
 // How a DesignIR node tree is read back.
 struct IRParseOptions {
-    // The node geometry was measured from a rendered page (the browser
-    // capture), so it is already what the source paints. Rules that move
-    // nodes to make up for how a design tool draws do not run.
+    // The node tree was measured from a rendered page (the browser capture),
+    // so its geometry and paint are already what the source draws and its
+    // controls are the ones the capture bound. Rules that make up for how a
+    // design tool draws or names layers do not run.
     bool measured_geometry = false;
 };
 
