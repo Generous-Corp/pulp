@@ -1370,6 +1370,7 @@
   "pulp-test-design-import-native-materializer": {
    "data": "declared",
    "detected_sources": [
+    "test/test_design_import_font_assets.cpp",
     "test/test_design_import_native_materializer.cpp"
    ],
    "inputs": [
@@ -1384,6 +1385,7 @@
     "core/signal/include",
     "core/state/include",
     "core/view/include",
+    "external/fonts/Jost-Regular.ttf",
     "test/fixtures/import-fidelity/assets/fader_ref.png",
     "test/fixtures/import-fidelity/scene.pulp.json",
     "test/fixtures/v0-dev/audio-control-panel.tsx"
@@ -1391,6 +1393,7 @@
    "kind": "compiled",
    "runtime_targets": [],
    "sources": [
+    "test/test_design_import_font_assets.cpp",
     "test/test_design_import_native_materializer.cpp"
    ],
    "spawning_sources": [

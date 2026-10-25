@@ -137,6 +137,10 @@ pulp_test_data(pulp-test-design-import-native-materializer NO_DEFINE
         test/fixtures/import-fidelity/assets/fader_ref.png
         test/fixtures/import-fidelity/scene.pulp.json
         test/fixtures/v0-dev/audio-control-panel.tsx)
+# The page-font registration case reads one bundled face.
+pulp_test_data(pulp-test-design-import-native-materializer NO_DEFINE
+    SOURCES test_design_import_font_assets.cpp
+    PATHS external/fonts/Jost-Regular.ttf)
 
 # Emitter conformance gate: every fixture IR is built through the native
 # materializer, the ui.js bridge program, the baked C++ exporter and the SwiftUI
