@@ -15,6 +15,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 namespace pulp::format {
@@ -44,14 +45,15 @@ struct EditorUiInstance {
     bool uses_script_ui = false;
 };
 
-/// The scripted-UI entry file `assets` declares, if any.
+/// The on-disk scripted-UI entry file `assets` declares, if any. Only a dev
+/// build (`PULP_DEV_BUILD`) records one; see select_editor_ui_source().
 inline std::optional<std::filesystem::path> configured_ui_script_path(const EditorAssets& assets) {
     if (assets.script_path == nullptr || assets.script_path[0] == '\0')
         return std::nullopt;
     return std::filesystem::path{assets.script_path};
 }
 
-/// The theme / design-token file `assets` declares, if any.
+/// The on-disk theme / design-token file `assets` declares, if any.
 inline std::optional<std::filesystem::path> configured_ui_theme_path(const EditorAssets& assets) {
     if (assets.theme_path == nullptr || assets.theme_path[0] == '\0')
         return std::nullopt;
@@ -74,12 +76,12 @@ inline std::vector<std::filesystem::path> configured_ui_asset_roots(const Editor
     return roots;
 }
 
-/// This binary's scripted-UI entry file (see register_editor_assets()).
+/// This binary's on-disk scripted-UI entry file (see register_editor_assets()).
 inline std::optional<std::filesystem::path> configured_ui_script_path() {
     return configured_ui_script_path(registered_editor_assets());
 }
 
-/// This binary's theme / design-token file.
+/// This binary's on-disk theme / design-token file.
 inline std::optional<std::filesystem::path> configured_ui_theme_path() {
     return configured_ui_theme_path(registered_editor_assets());
 }
@@ -89,13 +91,86 @@ inline std::vector<std::filesystem::path> configured_ui_asset_roots() {
     return configured_ui_asset_roots(registered_editor_assets());
 }
 
-/// Builds the scripted editor that `assets` declares (its script path is
-/// set). Returns an instance whose root is null when the script failed to
+/// The files embedded beside `assets`' script, as the bridge consumes them.
+inline std::vector<view::WidgetBridge::EmbeddedAsset>
+embedded_ui_assets(const EditorAssets& assets) {
+    std::vector<view::WidgetBridge::EmbeddedAsset> files;
+    if (assets.files == nullptr)
+        return files;
+    files.reserve(assets.file_count);
+    for (std::size_t i = 0; i < assets.file_count; ++i) {
+        const auto& file = assets.files[i];
+        if (file.name == nullptr || file.name[0] == '\0' || file.data == nullptr || file.size == 0)
+            continue;
+        files.push_back({file.name, file.data, file.size});
+    }
+    return files;
+}
+
+/// Where the default scripted editor's document comes from.
+struct EditorUiSource {
+    /// Set when the editor reads this file (and its sibling theme.json) from
+    /// disk; empty when it evaluates `script_source`.
+    std::filesystem::path script_path;
+    std::string script_source;
+    std::string theme_source;
+    std::string script_name;
+    /// Files embedded beside an embedded script; empty for an on-disk document.
+    std::vector<view::WidgetBridge::EmbeddedAsset> embedded_assets;
+    bool available() const noexcept {
+        return !script_path.empty() || !script_source.empty();
+    }
+    bool embedded() const noexcept {
+        return script_path.empty() && !script_source.empty();
+    }
+    /// What log lines call the document.
+    std::string label() const {
+        return script_path.empty() ? script_name : script_path.string();
+    }
+};
+
+/// Pick the document for a default scripted editor from the record the plug-in
+/// registered. The embedded script wins whenever the image carries one; the
+/// on-disk path a dev build also records is honored only for a hot-reloading
+/// editor (the standalone host, or a DAW launched with `PULP_DEV_HOT_RELOAD=1`),
+/// and only while that file exists, so the edit-and-see loop keeps reading the
+/// file the build points at while a shipped image never depends on the
+/// developer's source tree. Without an embedded script the path is used as
+/// before.
+inline EditorUiSource select_editor_ui_source(const EditorAssets& assets, bool enable_hot_reload) {
+    EditorUiSource source;
+    const auto dev_script_path = configured_ui_script_path(assets);
+    const bool dev_file_present = [&] {
+        if (!dev_script_path)
+            return false;
+        std::error_code ec;
+        return std::filesystem::is_regular_file(*dev_script_path, ec) && !ec;
+    }();
+    if (embeds_editor_script(assets) && !(enable_hot_reload && dev_file_present)) {
+        source.script_source.assign(reinterpret_cast<const char*>(assets.script),
+                                    assets.script_size);
+        if (assets.theme != nullptr && assets.theme_size > 0)
+            source.theme_source.assign(reinterpret_cast<const char*>(assets.theme),
+                                       assets.theme_size);
+        source.script_name = assets.script_name != nullptr && assets.script_name[0] != '\0'
+                                 ? assets.script_name
+                                 : "ui.js";
+        source.embedded_assets = embedded_ui_assets(assets);
+        return source;
+    }
+    if (dev_script_path)
+        source.script_path = *dev_script_path;
+    return source;
+}
+
+/// Builds the scripted editor that `assets` declares (it names or embeds a
+/// script). Returns an instance whose root is null when the script failed to
 /// load; the failure is already logged and copied into `error`.
 using ScriptedEditorBuilder = EditorUiInstance (*)(const EditorAssets& assets,
                                                    state::StateStore& store, bool enable_hot_reload,
                                                    std::string* error,
-                                                   view::ValueChannelAccess value_channel_access);
+                                                   view::ValueChannelAccess value_channel_access,
+                                                   std::string_view storage_identity);
 
 /// The scripted editor builder this binary links, or null.
 /// install_scripted_editor_builder() fills it. Editor glue that every plug-in
@@ -108,19 +183,22 @@ inline std::atomic<ScriptedEditorBuilder>& scripted_editor_builder_slot() noexce
     return builder;
 }
 
-/// Build the editor `assets` declares: a scripted UI when it names a script
-/// and the binary links the scripted editor builder, AutoUi otherwise (or when
-/// the script fails to load). `value_channel_access` leases the hosting
-/// processor's current named value channels while scripted UI code resolves
-/// and snapshots them.
+/// Build the editor `assets` declares: a scripted UI when it names or embeds a
+/// script and the binary links the scripted editor builder, AutoUi otherwise
+/// (or when the script fails to load). `value_channel_access` leases the
+/// hosting processor's current named value channels while scripted UI code
+/// resolves and snapshots them. `storage_identity` names the plug-in (its
+/// bundle id) so an embedded editor, which has no script directory to be keyed
+/// by, keeps stable persisted stores.
 inline EditorUiInstance build_editor_ui_for_assets(const EditorAssets& assets,
                                                    state::StateStore& store, bool enable_hot_reload,
                                                    std::string* error,
-                                                   view::ValueChannelAccess value_channel_access) {
-    if (auto script_path = configured_ui_script_path(assets)) {
+                                                   view::ValueChannelAccess value_channel_access,
+                                                   std::string_view storage_identity = {}) {
+    if (select_editor_ui_source(assets, enable_hot_reload).available()) {
         if (auto builder = scripted_editor_builder_slot().load(std::memory_order_acquire)) {
-            auto instance =
-                builder(assets, store, enable_hot_reload, error, std::move(value_channel_access));
+            auto instance = builder(assets, store, enable_hot_reload, error,
+                                    std::move(value_channel_access), storage_identity);
             if (instance.root)
                 return instance;
         } else {
@@ -128,8 +206,8 @@ inline EditorUiInstance build_editor_ui_for_assets(const EditorAssets& assets,
                 "this binary declares a scripted editor but does not link the script runtime; "
                 "declare UI_SCRIPT on the plug-in target or call "
                 "pulp::format::install_scripted_editor_builder()";
-            runtime::log_error("Scripted editor UI '{}' not built: {}. Falling back to AutoUi.",
-                               script_path->string(), missing);
+            runtime::log_error("Scripted editor UI not built: {}. Falling back to AutoUi.",
+                               missing);
             if (error && error->empty())
                 *error = missing;
         }

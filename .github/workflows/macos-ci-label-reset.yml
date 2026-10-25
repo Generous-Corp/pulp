@@ -12,14 +12,12 @@ name: macOS CI label reset
 #   it on a push anyway.) Re-arming needs a fresh verdict, the label, and a
 #   full-lane success.
 # - It removes `macos-ci`. build.yml already ignores the label on
-#   `synchronize`; removing it keeps the label truthful and lets the arm sweep's
-#   next application fire a fresh `labeled` event, which re-adding a label that
-#   is still there would not.
+#   `synchronize`; removing it keeps the label truthful for the new head.
 #
 # pull_request_target runs this definition from protected main and checks out
 # nothing, so a fork's pull request is reset too and no pull request code runs
 # with the write token. Changes made with GITHUB_TOKEN start no workflow, and
-# build.yml does not listen for `unlabeled` anyway. With the variable unset
+# build.yml does not listen for label events at all. With the variable unset
 # nothing here runs, which is today's behaviour.
 
 on:

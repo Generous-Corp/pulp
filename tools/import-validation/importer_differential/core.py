@@ -51,6 +51,7 @@ from .snapshot import (
     LEGACY_COMPUTED_STYLES,
     DomSnapshot,
     browser_nodes,
+    capture_anchors,
     decode_string,
     document_canvas_background,
     principal_layout_rows,
@@ -399,8 +400,7 @@ def native_nodes(ir: dict[str, Any], layout: dict[str, Any]) -> list[NativeNode]
 
 def node_match_score(browser: BrowserNode, native: NativeNode) -> float:
     score = 0.0
-    if (browser.backend_node_id is not None
-            and browser.backend_node_id == native.backend_node_id):
+    if browser.anchor and browser.anchor == native.anchor:
         score += 100.0
     browser_id = browser.attributes.get("id", "")
     if browser_id and browser_id in {native.anchor, native.name}:
@@ -424,10 +424,14 @@ def node_match_score(browser: BrowserNode, native: NativeNode) -> float:
 
 
 def has_identity_signal(browser: BrowserNode, native: NativeNode) -> bool:
-    if browser.backend_node_id is not None and native.backend_node_id is not None:
-        # Both captures have an authoritative DOM identity. Never let a
-        # same-text/same-tag heuristic hide a mismatched capture node.
-        return browser.backend_node_id == native.backend_node_id
+    # The browser and candidate lanes are two Chromium sessions, and each
+    # numbers backend nodes in its own order, so a backendNodeId names a node
+    # only within its own lane. The DOM-path anchor is derived from the page's
+    # structure and reads the same in both. When both sides carry one it is
+    # the identity, and a disagreement is never rescued by a same-text or
+    # same-tag heuristic.
+    if browser.anchor and native.anchor.startswith("capture:"):
+        return browser.anchor == native.anchor
     browser_id = browser.attributes.get("id", "")
     if browser_id and browser_id in {native.anchor, native.name}:
         return True

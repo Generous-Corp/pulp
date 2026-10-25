@@ -16,6 +16,7 @@
 
 #include <array>
 #include <cmath>
+#include <complex>
 #include <vector>
 
 using namespace pulp::signal;
@@ -249,5 +250,33 @@ TEST_CASE("a notch's null is floored rather than negative infinity",
     for (float db : curve) {
         REQUIRE(std::isfinite(db));
         REQUIRE(db >= min_response_db);
+    }
+}
+
+TEST_CASE("section group delay is exact for delays and matches the phase slope",
+          "[signal][frequency-response][group-delay]") {
+    // Pure delays have a known group delay at every frequency.
+    for (const double omega : {0.01, 0.7, 2.1, 3.0}) {
+        REQUIRE_THAT(section_group_delay(BiquadCoefficientsT<double>{1, 0, 0, 0, 0}, omega),
+                     Catch::Matchers::WithinAbs(0.0, 1e-12));
+        REQUIRE_THAT(section_group_delay(BiquadCoefficientsT<double>{0, 1, 0, 0, 0}, omega),
+                     Catch::Matchers::WithinAbs(1.0, 1e-12));
+        REQUIRE_THAT(section_group_delay(BiquadCoefficientsT<double>{0, 0, 1, 0, 0}, omega),
+                     Catch::Matchers::WithinAbs(2.0, 1e-12));
+    }
+    // A real lowpass: the closed form must equal -d(arg H)/d(omega) taken by a
+    // central difference on the response itself.
+    BiquadT<double> lowpass;
+    lowpass.set_coefficients(BiquadT<double>::Type::lowpass, 3000.0, 0.9, 48000.0);
+    const auto c = lowpass.coefficients();
+    const auto phase = [&](double w) {
+        const std::complex<double> z1 = std::polar(1.0, -w), z2 = z1 * z1;
+        return std::arg((c.b0 + c.b1 * z1 + c.b2 * z2) / (1.0 + c.a1 * z1 + c.a2 * z2));
+    };
+    for (const double omega : {0.05, 0.3, 0.8, 1.5}) {
+        constexpr double h = 1e-6;
+        const double numeric = -(phase(omega + h) - phase(omega - h)) / (2.0 * h);
+        INFO("omega=" << omega);
+        REQUIRE_THAT(section_group_delay(c, omega), Catch::Matchers::WithinAbs(numeric, 1e-6));
     }
 }

@@ -437,24 +437,29 @@ function(_pulp_attach_control_shipping target artifact_target artifact_format)
                 "${_legacy_sidecar_dir}/${_shipping_manifest_stem}.control-shipping.json"
                 "${_legacy_sidecar_dir}/${_shipping_manifest_stem}.control-shipping-report.json")
     endif()
-    add_custom_command(TARGET ${artifact_target} POST_BUILD
-        ${_legacy_sidecar_removal}
-        COMMAND "${CMAKE_COMMAND}" -E make_directory "${_sidecar_dir}"
-        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-            "${_control_manifest}"
-            "${_sidecar_dir}/${target}.inspector-capabilities.json"
-        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-            "${_shipping_manifest}"
-            "${_sidecar_dir}/${_shipping_manifest_stem}.control-shipping.json"
-        COMMAND "${CMAKE_COMMAND}"
-            -DARTIFACT=$<TARGET_FILE:${artifact_target}>
-            -DMANIFEST=${_control_manifest}
-            -DSHIPPING_MANIFEST=${_shipping_manifest}
-            -DCXX_COMPILER=${CMAKE_CXX_COMPILER}
-            -DREPORT=${_sidecar_dir}/${_shipping_manifest_stem}.control-shipping-report.json
-            -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/check_control_shipping_artifact.cmake"
-        COMMAND "${CMAKE_COMMAND}" -E touch "${_scan_stamp}"
-        VERBATIM)
+    # A dev-shared module (PULP_DEV_SHARED_UI) cannot ship, so a direct build
+    # of it skips this step and only the persisted-stamp edge below scans it.
+    get_target_property(_dev_shared ${artifact_target} PULP_DEV_SHARED_UI)
+    if(NOT _dev_shared)
+        add_custom_command(TARGET ${artifact_target} POST_BUILD
+            ${_legacy_sidecar_removal}
+            COMMAND "${CMAKE_COMMAND}" -E make_directory "${_sidecar_dir}"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${_control_manifest}"
+                "${_sidecar_dir}/${target}.inspector-capabilities.json"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${_shipping_manifest}"
+                "${_sidecar_dir}/${_shipping_manifest_stem}.control-shipping.json"
+            COMMAND "${CMAKE_COMMAND}"
+                -DARTIFACT=$<TARGET_FILE:${artifact_target}>
+                -DMANIFEST=${_control_manifest}
+                -DSHIPPING_MANIFEST=${_shipping_manifest}
+                -DCXX_COMPILER=${CMAKE_CXX_COMPILER}
+                -DREPORT=${_sidecar_dir}/${_shipping_manifest_stem}.control-shipping-report.json
+                -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/check_control_shipping_artifact.cmake"
+            COMMAND "${CMAKE_COMMAND}" -E touch "${_scan_stamp}"
+            VERBATIM)
+    endif()
 
     # POST_BUILD protects direct builds of the artifact. The persisted stamp
     # additionally makes scanner/manifests first-class dependencies, so an

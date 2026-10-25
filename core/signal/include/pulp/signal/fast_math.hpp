@@ -218,10 +218,12 @@ struct FastMath {
 #endif
     }
 
-    /// tanh within 3.0e-7 absolute of std::tanh for every float input when
-    /// the compiler fuses multiply-adds, and within 3.6e-7 when it does not
-    /// (-ffp-contract=off, MSVC, x86-64 without FMA); both measured over every
-    /// float. Cheap enough for a saturator inside a per-sample feedback loop.
+    /// tanh within 3.0e-7 absolute of std::tanh when the compiler fuses
+    /// multiply-adds, and within 3.6e-7 when it does not (-ffp-contract=off,
+    /// MSVC, x86-64 without FMA), over the inputs the tests scan: every 64th
+    /// non-negative finite float bit pattern, with odd symmetry covering the
+    /// negatives. Cheap enough for a saturator inside a per-sample feedback
+    /// loop.
     ///
     /// x * P(x^2) / Q(x^2) with both polynomials of degree 4 and P(0) = Q(0)
     /// = 1, fitted for minimax absolute error on [0, 9]; x^2 is clamped to 81
@@ -236,7 +238,7 @@ struct FastMath {
     ///   - monotone to within its error bound (float rounding can step down by
     ///     a few ulps near saturation);
     ///   - no branches or calls, so loops over it vectorize.
-    /// About 2.4x the throughput of std::tanh inside a ladder recursion.
+    /// Faster than std::tanh inside a ladder recursion.
     static float tanh_accurate(float x) {
         // Clamping x^2 rather than x keeps the sign path short; past |x| = 9
         // the ratio exceeds 1 and the output clamp saturates it.
@@ -307,12 +309,11 @@ struct FastMath {
     /// scalar loop the compiler may vectorise elsewhere). A clamped lane
     /// evaluates the rational at ±7, about 4e-7 short of ±1, so beyond
     /// the clamp this differs from the scalar form by that much and inside it
-    /// not at all; both stay within the 3.8e-6 bound. On Apple Silicon it
-    /// costs ~1.2x the unclamped [7/6] Padé per element, which is the price of
-    /// the two clamp instructions on a nine-instruction rational: that form
-    /// has no clamp and grows without bound past |x| ~ 5. With
+    /// not at all; both stay within the 3.8e-6 bound. The two clamp
+    /// instructions cost a little over the unclamped [7/6] Padé, which has
+    /// no clamp and grows without bound past |x| ~ 5. With
     /// auto-vectorisation disabled it holds its speed while the scalar forms
-    /// slow by about 3x. The result for a NaN input is unspecified.
+    /// slow down. The result for a NaN input is unspecified.
     static void tanh_minimax(const float* input, float* output, std::size_t count) noexcept {
         std::size_t i = 0;
 #if defined(__clang__) || defined(__GNUC__)
@@ -605,7 +606,7 @@ public:
 ///
 /// - `exact`: std::tanh. The reference the others are measured against.
 /// - `accurate`: `FastMath::tanh_accurate`, within 3.0e-7 (3.6e-7 without
-///   fused multiply-add) of std::tanh for every input. Against the
+///   fused multiply-add) of std::tanh over the inputs its tests scan. Against the
 ///   exact-saturator ladder, over cutoffs of 300 Hz to 6 kHz, resonance 0 to
 ///   1 and sine input of 110 Hz to 7 kHz at 48 kHz, the pointwise output
 ///   difference is at most -124 dBFS for input up to 0 dBFS, -107 dBFS at

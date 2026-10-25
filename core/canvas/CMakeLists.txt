@@ -14,6 +14,8 @@ target_sources(pulp-canvas PRIVATE
     # Skia-free on purpose: it is a value, so it must exist in every build
     # config, including the ones with no GPU backend at all.
     src/drawlist_format.cpp
+    # Reference CSS gradient colour interpolation; Skia-free, like Path.
+    src/gradient_interpolation.cpp
     src/path.cpp
     src/path_measure.cpp
     src/recording_canvas.cpp
@@ -207,7 +209,17 @@ if(PULP_HAS_SKIA)
         # SkParagraph paths and owns the per-context FontCollection used
         # for Label/measurement.
         src/text_font_context.cpp
+        # CSS font-weight matching for the paragraph collection's default
+        # font manager (see font_weight_match.hpp).
+        src/font_weight_match.cpp
+        src/css_weight_font_manager.cpp
     )
+    if(NOT MSVC)
+        # It subclasses SkFontMgr, whose type info the prebuilt Skia does not
+        # export.
+        set_source_files_properties(src/css_weight_font_manager.cpp PROPERTIES
+            COMPILE_OPTIONS "-fno-rtti")
+    endif()
     if(APPLE)
         target_sources(pulp-canvas PRIVATE src/system_ui_font_manager.cpp)
         # It subclasses SkFontMgr, whose type info the prebuilt Skia does not
@@ -398,6 +410,7 @@ set(PULP_CANVAS_UNIT_HEADERS
     include/pulp/canvas/font_options.hpp
     include/pulp/canvas/font_resolver.hpp
     include/pulp/canvas/font_scope.hpp
+    include/pulp/canvas/gradient_interpolation.hpp
     include/pulp/canvas/image_codecs.hpp
     include/pulp/canvas/image_convolution.hpp
     include/pulp/canvas/image_file_cache.hpp

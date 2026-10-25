@@ -67,6 +67,12 @@ SCHEMA = "pulp-ctest-script-inputs/v1"
 DEFAULT_LIST = Path("test") / "ctest_script_inputs.json"
 INTERPRETERS = ("python", "python3", "node", "bash", "sh", "zsh")
 UNDECLARABLE_EXES = ("cmake", "ninja", "make", "ctest", "xcodebuild", "cargo")
+# GPU-audio hardware-evidence registrations (PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF).
+# The arm64 macOS gate compiles them, but every CI selection excludes this label
+# (tools/ci/ctest_gate_args.py) and only the owner runs them on a physical GPU.
+# Their inputs select nothing, so they are not tracked, and a proof configure is
+# otherwise gate-shaped.
+GPU_PROOF_LABEL = "gpu-proof"
 # An entry script that lives in the build tree (a configure-generated runner)
 # is recorded under this token, never under the build directory's name, so
 # a list written from `build-gate`, `build`, or a directory outside the
@@ -196,8 +202,10 @@ def outside_gate_profile_build(build_dir: Path | None,
                                root: Path | None = None) -> list[str]:
     """Why this build's compiled entries cannot stand for the gate's: each
     switch whose value differs from the gate's configure (examples off, a
-    Release build, no sanitizer, the exact-provider proof off). Empty for a gate-shaped build, and for one
-    with no CMakeCache.txt to read (no build tree, no compiled entries)."""
+    Release build, no sanitizer). Empty for a gate-shaped build, and for one
+    with no CMakeCache.txt to read (no build tree, no compiled entries). The
+    exact-provider proof is not judged: the arm64 gate configures it ON, and
+    the registrations it adds are `gpu-proof` tests, which are not tracked."""
     cache = _cache_values(build_dir) if build_dir else None
     if cache is None:
         return []
@@ -210,12 +218,6 @@ def outside_gate_profile_build(build_dir: Path | None,
     build_type = cache.get("CMAKE_BUILD_TYPE", "")
     if build_type and build_type != "Release":
         reasons.append(f"CMAKE_BUILD_TYPE={build_type} (the gate builds Release)")
-    # The GPU-audio exact-provider proof registers its probes only when ON;
-    # the gate configures it OFF, so a list written ON names tests the gate
-    # never has.
-    proof = cache.get("PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF", "OFF")
-    if not off(proof):
-        reasons.append(f"PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF={proof} (the gate configures OFF)")
     # Without a format SDK the configure registers none of that format's
     # tests or plugin targets, so the list it writes silently drops their
     # inputs. A cache from before a flag existed omits it and is not judged.
@@ -550,8 +552,24 @@ def _is_inline_flag(arg: str) -> bool:
     return arg == "-c" or (arg.startswith("-c") and not arg.startswith("--"))
 
 
+def unwrap_cmake_env(command: list[str]) -> list[str]:
+    """The command `cmake -E env [NAME=VALUE | --unset=NAME]... CMD...` runs.
+
+    The wrapper only sets the environment, so the test's inputs are those of
+    the program it wraps; any other cmake command is returned unchanged."""
+    if (len(command) > 3 and os.path.basename(command[0]).startswith("cmake")
+            and command[1:3] == ["-E", "env"]):
+        rest = command[3:]
+        while rest and ("=" in rest[0].split("/", 1)[0] or rest[0].startswith("--unset")
+                        or rest[0] == "--"):
+            rest = rest[1:]
+        return rest or command
+    return command
+
+
 def classify(command: list[str], root: Path) -> tuple[str, Path | None, list[str]]:
     """(kind, entry script, extra args). kind in python|node|shell|undeclarable."""
+    command = unwrap_cmake_env(command)
     if not command:
         return "undeclarable", None, []
     exe = os.path.basename(command[0])
@@ -595,6 +613,25 @@ def classify(command: list[str], root: Path) -> tuple[str, Path | None, list[str
     return "undeclarable", None, []
 
 
+def discovered_tests(argv: list[str], wd: Path) -> list[Path]:
+    """The files `unittest discover` would load: -s/--start-directory (default
+    the working directory) matched against -p/--pattern (default test*.py)."""
+    start, pattern = wd, "test*.py"
+    it = iter(argv)
+    for arg in it:
+        if arg in ("-s", "--start-directory"):
+            start = Path(next(it, "."))
+        elif arg in ("-p", "--pattern"):
+            pattern = next(it, pattern)
+        elif arg.startswith("--start-directory="):
+            start = Path(arg.split("=", 1)[1])
+        elif arg.startswith("--pattern="):
+            pattern = arg.split("=", 1)[1]
+    if not start.is_absolute():
+        start = wd / start
+    return sorted(start.rglob(pattern)) if start.is_dir() else []
+
+
 # A test run through the temp-leak guard (`python tmp_leak_guard.py [opts] --
 # CMD...`) is declared as the command it wraps; the guard is one more input.
 TMP_LEAK_GUARD = "tmp_leak_guard.py"
@@ -623,18 +660,32 @@ def inputs_for(test: dict, root: Path, build_dir: Path | None = None, *,
     for e in (env if isinstance(env, list) else [env]):
         if e.startswith("PYTHONPATH="):
             search += [Path(p) if os.path.isabs(p) else wd / p for p in e.split("=", 1)[1].split(os.pathsep) if p]
+    extra: list[Path] = []
     if kind == "python-module":
         mods = list(args)
-        if mods and mods[0] == "unittest":
+        if mods[:2] == ["unittest", "discover"]:
+            # `python -m unittest discover -s DIR -p PATTERN`: the matching
+            # test files are the entries.
+            found = discovered_tests(mods[2:], wd)
+            if not found:
+                return None
+            entry, extra = found[0], found[1:]
+            args = []
+            kind = "python"
+            mods = []
+        elif mods and mods[0] == "unittest":
             # `python -m unittest <module>...`: the test modules are the entries.
             mods = [m for m in mods[1:] if not m.startswith("-")]
-        entries = [next((c for c in w.python_module_candidates(m.split("::")[0], [wd] + search) if c.is_file()), None)
-                   for m in mods[:1]]
-        entry = entries[0] if entries else None
-        if entry is None:
-            return None
-        args = []
-        kind = "python"
+        if mods:
+            entries = [next((c for c in w.python_module_candidates(m.split("::")[0], [wd] + search)
+                             if c.is_file()), None) for m in mods[:1]]
+            entry = entries[0] if entries else None
+            if entry is None:
+                return None
+            args = []
+            kind = "python"
+    if kind == "python-module" or entry is None:
+        return None
     if not entry.is_absolute():
         entry = wd / entry
     generated = _rel(entry, build_dir) if build_dir else None
@@ -642,6 +693,8 @@ def inputs_for(test: dict, root: Path, build_dir: Path | None = None, *,
         return None
     if kind == "python":
         w.walk_python(entry, search, seen)
+        for other in extra:
+            w.walk_python(other, search, seen)
     elif kind == "node":
         w.walk_node(entry, seen)
     else:
@@ -892,6 +945,9 @@ def test_executables(build_dir: Path | None) -> dict[str, dict] | None:
         # A ctest command names the artifact; a Catch2 discovery include is
         # named after the target.
         if not (rec.get("under_test", True) or run is None or program in run or target in run):
+            continue
+        # Hardware-evidence executables run only on the owner's GPU; see GPU_PROOF_LABEL.
+        if rec.get("gpu_proof"):
             continue
         if program in out:
             raise ValueError(f"{out[program]['target']} and {target} both build {program}; "
@@ -1145,7 +1201,7 @@ def build_list(inventory: dict, root: Path, build_dir: Path | None = None) -> di
         name = t.get("name", "")
         if not name or name.endswith("_NOT_BUILT") or name in excluded:
             continue
-        cmd = t.get("command") or []
+        cmd = unwrap_cmake_env(t.get("command") or [])
         if cmd and _rel(Path(cmd[0]), root) is None and not os.path.basename(cmd[0]).startswith(INTERPRETERS):
             continue  # a compiled test binary or a tool outside the repo: the graph owns it
         rec = inputs_for(t, root, build_dir, walker=walker, tracked=tracked)
@@ -1247,6 +1303,20 @@ def entries_write_would_delete(current: dict, checked_in: dict) -> list[str]:
     if "executables" in current:
         gone |= set((checked_in.get("executables") or {})) - set(current["executables"])
     return sorted(gone)
+
+
+def test_labels(test: dict) -> list[str]:
+    labels: list[str] = []
+    for prop in test.get("properties") or []:
+        if prop.get("name") == "LABELS":
+            value = prop.get("value")
+            labels.extend(value if isinstance(value, list) else [value])
+    return labels
+
+
+def without_gpu_proof(tests: list[dict]) -> list[dict]:
+    """The registrations the gate can run: drop every `gpu-proof` test."""
+    return [test for test in tests if GPU_PROOF_LABEL not in test_labels(test)]
 
 
 def load_inventory(build_dir: str | None, inventory_json: str | None) -> dict | None:
@@ -1420,6 +1490,7 @@ def main(argv: list[str]) -> int:
     inventory = load_inventory(a.build_dir, a.inventory_json)
     if inventory is None:
         return 2
+    inventory = {**inventory, "tests": without_gpu_proof(inventory.get("tests") or [])}
     build_dir = Path(a.build_dir).resolve() if a.build_dir else None
     if a.data_summary:
         summary = data_summary(root, build_dir)
@@ -1455,8 +1526,7 @@ def main(argv: list[str]) -> int:
         print("script-test-inputs: refusing to write: file=test/ctest_script_inputs.json; "
               "cause_class=INCOMPLETE_CONFIGURE; evidence=the compiled entries depend on the configuration and "
               "this build is not the gate's: " + "; ".join(off_profile) + ".\nRegenerate from a gate-profile "
-              "configure (-DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF, no PULP_SANITIZER, "
-              "PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF OFF).",
+              "configure (-DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF, no PULP_SANITIZER).",
               file=sys.stderr)
         return 2
     if a.write:

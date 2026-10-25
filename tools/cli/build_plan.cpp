@@ -29,8 +29,17 @@ int BuildPlan::ensure_configured(bool allow_unsupported_sdk) {
         (!config_.standalone && !source_checkout_dependencies_enabled(
                                     config_.project_root, config_.build_dir / "CMakeCache.txt")) ||
         (config_.examples && !config_.standalone && build_dir_has_examples_off(config_.build_dir));
-    if (!missing)
-        return 0;
+    const auto dev_shared_change =
+        pulp::cli::dev_shared_ui_change_for(config_.build_dir, config_.dev_shared);
+    if (!missing) {
+        if (!dev_shared_change)
+            return 0;
+        const std::string flag = *dev_shared_change ? "ON" : "OFF";
+        return run_with_spinner("cmake -S " + shell_quote(config_.project_root) + " -B " +
+                                    shell_quote(config_.build_dir) +
+                                    " -DPULP_DEV_SHARED_UI=" + flag,
+                                "Configuring (PULP_DEV_SHARED_UI=" + flag + ")");
+    }
 
     std::cout << "Project not configured. "
               << (config_.command_kind == "pulp loop" ? "Configuring + building first...\n"
@@ -43,6 +52,10 @@ int BuildPlan::ensure_configured(bool allow_unsupported_sdk) {
     if (config_.build_all || build_args_name_target(config_.build_args)) {
         bootstrap_args.push_back("--all");
     }
+    // cmd_build links statically unless told otherwise; the environment
+    // override still applies on top of the flag.
+    if (config_.dev_shared)
+        bootstrap_args.push_back("--dev-shared");
     return cmd_build(bootstrap_args);
 }
 

@@ -30,9 +30,29 @@ TEST_CASE("fresh source configure pins Ninja, Release, and examples off",
     ConfigureDefaults in;
     in.ninja_available = true;
     in.source_checkout = true;
-    REQUIRE(configure_default_args(in)
-            == std::vector<std::string>{"-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release",
-                                        "-DPULP_BUILD_EXAMPLES=OFF"});
+    REQUIRE(configure_default_args(in) ==
+            std::vector<std::string>{"-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release",
+                                     "-DPULP_BUILD_EXAMPLES=OFF", "-DPULP_DEV_BUILD=ON"});
+}
+
+TEST_CASE("the developer loop compiles the dev build in; a recorded value is kept",
+          "[cli][configure-defaults][dev-build]") {
+    // Fresh dir, standalone project: the dev build is on regardless of checkout kind.
+    ConfigureDefaults fresh;
+    REQUIRE(has(configure_default_args(fresh), "-DPULP_DEV_BUILD=ON"));
+
+    // A cache from before the option existed is healed on its next configure.
+    ConfigureDefaults unrecorded;
+    unrecorded.existing_cache = "CMAKE_BUILD_TYPE:STRING=Release\n";
+    REQUIRE(configure_default_args(unrecorded) == std::vector<std::string>{"-DPULP_DEV_BUILD=ON"});
+
+    // A deliberate OFF (the shippable configure) is never flipped back.
+    ConfigureDefaults off;
+    off.existing_cache = "CMAKE_BUILD_TYPE:STRING=Release\nPULP_DEV_BUILD:BOOL=OFF\n";
+    REQUIRE(configure_default_args(off).empty());
+    ConfigureDefaults on;
+    on.existing_cache = "CMAKE_BUILD_TYPE:STRING=Release\nPULP_DEV_BUILD:BOOL=ON\n";
+    REQUIRE(configure_default_args(on).empty());
 }
 
 TEST_CASE("fresh configure without ninja leaves the generator to CMake",
@@ -59,7 +79,8 @@ TEST_CASE("an existing cache keeps its generator, build type, and examples",
     ConfigureDefaults in;
     in.existing_cache = "CMAKE_GENERATOR:INTERNAL=Unix Makefiles\n"
                         "CMAKE_BUILD_TYPE:STRING=Debug\n"
-                        "PULP_BUILD_EXAMPLES:BOOL=ON\n";
+                        "PULP_BUILD_EXAMPLES:BOOL=ON\n"
+                        "PULP_DEV_BUILD:BOOL=ON\n";
     in.ninja_available = true;
     in.source_checkout = true;
     REQUIRE(configure_default_args(in).empty());
@@ -68,7 +89,8 @@ TEST_CASE("an existing cache keeps its generator, build type, and examples",
 TEST_CASE("an existing cache with an empty build type is filled with Release",
           "[cli][configure-defaults]") {
     ConfigureDefaults in;
-    in.existing_cache = "CMAKE_GENERATOR:INTERNAL=Unix Makefiles\r\nCMAKE_BUILD_TYPE:STRING=\r\n";
+    in.existing_cache = "CMAKE_GENERATOR:INTERNAL=Unix Makefiles\r\nCMAKE_BUILD_TYPE:STRING=\r\n"
+                        "PULP_DEV_BUILD:BOOL=ON\r\n";
     in.ninja_available = true;
     in.source_checkout = true;
     REQUIRE(configure_default_args(in) == std::vector<std::string>{"-DCMAKE_BUILD_TYPE=Release"});
@@ -77,7 +99,8 @@ TEST_CASE("an existing cache with an empty build type is filled with Release",
 TEST_CASE("the examples flag opts in; standalone projects never get the option",
           "[cli][configure-defaults]") {
     ConfigureDefaults in;
-    in.existing_cache = "PULP_BUILD_EXAMPLES:BOOL=OFF\nCMAKE_BUILD_TYPE:STRING=Release\n";
+    in.existing_cache = "PULP_BUILD_EXAMPLES:BOOL=OFF\nCMAKE_BUILD_TYPE:STRING=Release\n"
+                        "PULP_DEV_BUILD:BOOL=ON\n";
     in.examples = true;
     in.source_checkout = true;
     REQUIRE(configure_default_args(in) == std::vector<std::string>{"-DPULP_BUILD_EXAMPLES=ON"});
@@ -186,7 +209,8 @@ TEST_CASE("build-dir helpers read the cache the configure decision depends on",
     REQUIRE(has(pulp::cli::configure_default_args_for(build, true, false, true), "-G"));
 
     write_text(build / "CMakeCache.txt",
-               "CMAKE_BUILD_TYPE:STRING=Debug\nPULP_BUILD_EXAMPLES:BOOL=OFF\n");
+               "CMAKE_BUILD_TYPE:STRING=Debug\nPULP_BUILD_EXAMPLES:BOOL=OFF\n"
+               "PULP_DEV_BUILD:BOOL=ON\n");
     REQUIRE(pulp::cli::build_dir_has_examples_off(build));
     // An existing Debug dir is left alone unless examples are requested.
     REQUIRE(pulp::cli::configure_default_args_for(build, true, false, true).empty());
@@ -225,6 +249,38 @@ TEST_CASE("migrating a slow build dir moves its cache and CMakeFiles aside",
     REQUIRE_FALSE(pulp::cli::migrate_stale_build_dir(build, in, quiet));
     REQUIRE(quiet.str().empty());
     REQUIRE(fs::exists(build / "CMakeCache.txt"));
+}
+
+TEST_CASE("dev-shared wanted: the command default unless the environment overrides it",
+          "[cli][configure-defaults][dev-shared]") {
+    using pulp::cli::dev_shared_ui_wanted;
+    REQUIRE(dev_shared_ui_wanted(true, std::nullopt));
+    REQUIRE_FALSE(dev_shared_ui_wanted(false, std::nullopt));
+    REQUIRE_FALSE(dev_shared_ui_wanted(true, std::string("0")));
+    REQUIRE_FALSE(dev_shared_ui_wanted(true, std::string("OFF")));
+    REQUIRE(dev_shared_ui_wanted(false, std::string("on")));
+    // An empty value is unset, not off.
+    REQUIRE(dev_shared_ui_wanted(true, std::string(" ")));
+}
+
+TEST_CASE("dev-shared change: only a cache that disagrees is reconfigured",
+          "[cli][configure-defaults][dev-shared]") {
+    using pulp::cli::dev_shared_ui_change;
+    const std::optional<std::string> fresh;
+    const std::optional<std::string> on = std::string("PULP_DEV_SHARED_UI:BOOL=ON\n");
+    const std::optional<std::string> off = std::string("PULP_DEV_SHARED_UI:BOOL=OFF\n");
+    const std::optional<std::string> absent = std::string("CMAKE_BUILD_TYPE:STRING=Release\n");
+    // `pulp build` (wants off) leaves fresh, off, and option-less caches alone
+    // and switches a dev-shared cache back.
+    REQUIRE_FALSE(dev_shared_ui_change(fresh, false).has_value());
+    REQUIRE_FALSE(dev_shared_ui_change(off, false).has_value());
+    REQUIRE_FALSE(dev_shared_ui_change(absent, false).has_value());
+    REQUIRE(dev_shared_ui_change(on, false) == std::optional<bool>(false));
+    // `pulp dev` (wants on) turns it on everywhere it is not already on.
+    REQUIRE(dev_shared_ui_change(fresh, true) == std::optional<bool>(true));
+    REQUIRE(dev_shared_ui_change(off, true) == std::optional<bool>(true));
+    REQUIRE(dev_shared_ui_change(absent, true) == std::optional<bool>(true));
+    REQUIRE_FALSE(dev_shared_ui_change(on, true).has_value());
 }
 
 #if !defined(_WIN32)
@@ -309,6 +365,7 @@ TEST_CASE("pulp-cpp build configures a fresh checkout with Ninja, Release, examp
     REQUIRE(line.find("-G Ninja") != std::string::npos);
     REQUIRE(line.find("-DCMAKE_BUILD_TYPE=Release") != std::string::npos);
     REQUIRE(line.find("-DPULP_BUILD_EXAMPLES=OFF") != std::string::npos);
+    REQUIRE(line.find("-DPULP_DEV_BUILD=ON") != std::string::npos);
 }
 
 TEST_CASE("pulp-cpp build --examples reconfigures a cache that has examples off",
@@ -367,5 +424,61 @@ TEST_CASE("pulp-cpp build migrates a Makefiles Debug examples-on build dir",
     REQUIRE(fs::is_regular_file(checkout.root / "build" / pulp::cli::kPreMigrationDir /
                                 "CMakeCache.txt"));
     REQUIRE(checkout.last_stdout.find("Reconfiguring ") != std::string::npos);
+}
+namespace {
+const std::string kCompleteCheckoutCache =
+    "CMAKE_GENERATOR:INTERNAL=Ninja\nCMAKE_BUILD_TYPE:STRING=Release\n"
+    "PULP_BUILD_EXAMPLES:BOOL=OFF\nPULP_REQUIRE_CHECKOUT_DEPENDENCIES:BOOL=ON\n"
+    "PULP_HAS_VST3:INTERNAL=ON\nPULP_CHECKOUT_REQUIRES_AUSDK:INTERNAL=OFF\n"
+    "PULP_CHECKOUT_DEPENDENCY_CONTRACT:INTERNAL=fixture-contract\n";
+
+void make_complete_checkout(FakeCheckout& checkout, const std::string& extra_cache) {
+    write_text(checkout.root / "tools/deps/shared-source-contract.txt", "fixture-contract\n");
+    fs::create_directories(checkout.root / "external/vst3sdk/pluginterfaces");
+    write_text(checkout.root / "build" / "CMakeCache.txt", kCompleteCheckoutCache + extra_cache);
+}
+} // namespace
+
+TEST_CASE("pulp-cpp build switches a dev-shared build dir back to static links",
+          "[cli][configure-defaults][shellout][dev-shared]") {
+    if (!fs::exists(cpp_cli()))
+        SKIP("pulp-cpp not built");
+    FakeCheckout checkout(/*with_ninja=*/true);
+    ScopedEnv d("PULP_DEV_SHARED_UI", nullptr);
+    // Control: a complete static cache goes straight to the build.
+    make_complete_checkout(checkout, "PULP_DEV_SHARED_UI:BOOL=OFF\n");
+    REQUIRE(checkout.configure_line({}).rfind("--build ", 0) == 0);
+    fs::remove(checkout.log);
+
+    make_complete_checkout(checkout, "PULP_DEV_SHARED_UI:BOOL=ON\n");
+    const auto line = checkout.configure_line({});
+    INFO(line);
+    REQUIRE(line.rfind("-B ", 0) == 0); // a configure, not a build
+    REQUIRE(line.find("-DPULP_DEV_SHARED_UI=OFF") != std::string::npos);
+    REQUIRE(checkout.last_stdout.find("back to static plug-in links") != std::string::npos);
+}
+
+TEST_CASE("pulp-cpp build --dev-shared turns the shared runtime on",
+          "[cli][configure-defaults][shellout][dev-shared]") {
+    if (!fs::exists(cpp_cli()))
+        SKIP("pulp-cpp not built");
+    FakeCheckout checkout(/*with_ninja=*/true);
+    ScopedEnv d("PULP_DEV_SHARED_UI", nullptr);
+    make_complete_checkout(checkout, "");
+    const auto line = checkout.configure_line({"--dev-shared"});
+    INFO(line);
+    REQUIRE(line.rfind("-B ", 0) == 0);
+    REQUIRE(line.find("-DPULP_DEV_SHARED_UI=ON") != std::string::npos);
+    REQUIRE(line.find("--dev-shared") == std::string::npos);
+}
+
+TEST_CASE("PULP_DEV_SHARED_UI=1 keeps a dev-shared build dir for pulp-cpp build",
+          "[cli][configure-defaults][shellout][dev-shared]") {
+    if (!fs::exists(cpp_cli()))
+        SKIP("pulp-cpp not built");
+    FakeCheckout checkout(/*with_ninja=*/true);
+    ScopedEnv d("PULP_DEV_SHARED_UI", "1");
+    make_complete_checkout(checkout, "PULP_DEV_SHARED_UI:BOOL=ON\n");
+    REQUIRE(checkout.configure_line({}).rfind("--build ", 0) == 0);
 }
 #endif

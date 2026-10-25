@@ -1073,6 +1073,10 @@ tools:
   skill: import-design
   docs: guides/importing-designs.md
 exclude:
+- path: tools/audio/fdn_reference/generate.sh
+  reason: Test-fixture generator. It records the FDN reverb's reference envelopes from a released
+    engine for test_fdn_reverb_block_engine.cpp; it is rerun only when that table is deliberately
+    re-recorded, not a tool an agent reaches for.
 - path: tools/import-design/jsx-runtime/materialized_source_emitter.mjs
   reason: Internal source-emitter implementation launched by pulp-import-design's --emit materialized-runtime; agents should invoke pulp import-design so browser capture, IDs, and packaging contracts stay together.
 - path: tools/import-design/browser_capture/browser_process.mjs
