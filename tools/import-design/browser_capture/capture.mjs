@@ -33,6 +33,7 @@ import {
   captureStableScreenshot,
   disableMotion,
   freezeAndMeasureDocumentExtent,
+  freezeMotion,
   installDynamicWorkTracker,
   MAX_LOGICAL_CAPTURE_DIMENSION,
   measureClippedControls,
@@ -1499,6 +1500,14 @@ async function runCapture(options) {
       pendingNetwork.delete(requestId);
     });
 
+    // Each page-settle round first settles the Web Animations and videos the
+    // page has by then, so a moving one, including one started mid-settle by
+    // a font load or a late timer, cannot keep the layout from settling.
+    const settleFrozen = (settleOptions) => waitForStable(cdp, {
+      ...settleOptions,
+      beforeSample: () => freezeMotion(cdp, { declareSources: false }),
+    });
+
     progress.enterPhase("navigation");
     const loaded = cdp.waitFor("Page.loadEventFired");
     const navigation = await cdp.call("Page.navigate", {
@@ -1511,7 +1520,7 @@ async function runCapture(options) {
 
     progress.enterPhase("page-settle");
     await disableMotion(cdp);
-    const firstSettle = await waitForStable(cdp, {
+    const firstSettle = await settleFrozen({
       networkIdle: () => pendingNetwork.size === 0,
       // Runnable design frameworks can briefly plateau before their
       // dynamically-loaded render helpers commit. Observe a full readiness
@@ -1520,7 +1529,7 @@ async function runCapture(options) {
     });
     let readiness = await awaitExplicitReadiness(cdp);
     let rendererHooks = await finalizeKnownRenderers(cdp);
-    const rendererSettle = await waitForStable(cdp, {
+    const rendererSettle = await settleFrozen({
       networkIdle: () => pendingNetwork.size === 0,
     });
     let resolvedViewportWidth = initialWidth;
@@ -1556,13 +1565,13 @@ async function runCapture(options) {
       await reloaded;
       progress.enterPhase("page-settle");
       await disableMotion(cdp);
-      const reloadSettle = await waitForStable(cdp, {
+      const reloadSettle = await settleFrozen({
         networkIdle: () => pendingNetwork.size === 0,
         minimumElapsedMs: 1000,
       });
       readiness = await awaitExplicitReadiness(cdp);
       rendererHooks = await finalizeKnownRenderers(cdp);
-      const reloadRendererSettle = await waitForStable(cdp, {
+      const reloadRendererSettle = await settleFrozen({
         networkIdle: () => pendingNetwork.size === 0,
       });
       fitSettle = {
@@ -1597,7 +1606,7 @@ async function runCapture(options) {
       interactionNavigationGuard =
         await createMainFrameNavigationGuard(cdp);
       const settleAfterInteraction = async () => {
-        const settled = await waitForStable(cdp, {
+        const settled = await settleFrozen({
           networkIdle: () => pendingNetwork.size === 0,
           minimumElapsedMs: 100,
         });
@@ -1655,7 +1664,7 @@ async function runCapture(options) {
         screenWidth: resolvedViewportWidth,
         screenHeight: resolvedViewportHeight,
       });
-      widthSettle = await waitForStable(cdp, {
+      widthSettle = await settleFrozen({
         networkIdle: () => pendingNetwork.size === 0,
       });
       finalExtent = await measureDocumentExtent(cdp);
@@ -1683,7 +1692,7 @@ async function runCapture(options) {
         screenWidth: resolvedViewportWidth,
         screenHeight: resolvedViewportHeight,
       });
-      heightSettle = await waitForStable(cdp, {
+      heightSettle = await settleFrozen({
         networkIdle: () => pendingNetwork.size === 0,
       });
       finalExtent = await measureDocumentExtent(cdp);
@@ -1710,7 +1719,7 @@ async function runCapture(options) {
             ` document.head.appendChild(s); return true; })()`,
           returnByValue: true,
         });
-        heightSettle = await waitForStable(cdp, {
+        heightSettle = await settleFrozen({
           networkIdle: () => pendingNetwork.size === 0,
         });
         finalExtent = await measureDocumentExtent(cdp);
@@ -1764,7 +1773,7 @@ async function runCapture(options) {
         await setCaptureViewport(cdp, settledWidth, settledHeight, dpr);
         resolvedViewportWidth = settledWidth;
         resolvedViewportHeight = settledHeight;
-        await waitForStable(cdp, {
+        await settleFrozen({
           networkIdle: () => pendingNetwork.size === 0,
         });
         finalExtent = await measureDocumentExtent(cdp);
@@ -1794,6 +1803,11 @@ async function runCapture(options) {
 
     progress.enterPhase("same-frame-capture");
     await interactionNavigationGuard?.assertUnchanged();
+    // After load, fonts, readiness and every settle, and before anything of
+    // the frame is read: Web Animations, videos and the clock they run on are
+    // the motion the stylesheet and scheduler stubs above cannot stop. The
+    // page-settle passes above already settled what existed at load.
+    const motion = await freezeMotion(cdp);
     const materializedDocument = await captureMaterializedDocument(cdp);
     // Pause page virtual time before collecting any sidecar. Canvas/WebGL
     // requestAnimationFrame callbacks and timers must not advance while DOM,
@@ -2283,6 +2297,7 @@ async function runCapture(options) {
         timezone: "UTC",
         color_scheme: "light",
         reduced_motion: false,
+        motion,
         settle: {
           rounds:
             firstSettle.rounds + rendererSettle.rounds +

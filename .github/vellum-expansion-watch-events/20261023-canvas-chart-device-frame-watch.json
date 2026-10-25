@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261023-canvas-chart-device-frame-watch",
+  "created_at": "2026-10-23T01:10:52Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Generic chart-shader work. The Skia chart composer reports the chart's tangent in device orientation, so a chart drawn through a rotation is lit on screen; untransformed draws are unchanged. Pulp-owned view code draws chart shaders and named presets on Fader tracks (a stadium along the track, turned a quarter for a vertical fader), with the stock thumb over a chart-only track and a body shader owning the value otherwise; widgets that draw no chart refuse one; the widget gallery gains five fader tracks. Pulp continues to own these targets under the 2026-10-04 design-import refactor inheritance decision; Vellum inherits the canvas change when the targets adopt the Vellum package. No design-import, Chromium, rendering or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R 'SDF chart reports tan in device orientation'",
+    "ctest --test-dir build -R 'fader chart presets are lit on screen on vertical and horizontal tracks'",
+    "ctest --test-dir build -R 'fader chart presets show the fader.s value'",
+    "ctest --test-dir build -R 'faders without a chart render as before'",
+    "ctest --test-dir build -R 'widget gallery shows chart shader presets on fader tracks'",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none",
+  "vellum_inherits": true
+}

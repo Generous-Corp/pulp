@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstring>
 #include <pluginterfaces/base/keycodes.h>
+#include <pulp/runtime/trace.hpp>
 #include <pulp/format/editor_idle_pump.hpp>
 #include <pulp/format/gpu_host_select.hpp>
 #include <pulp/format/vst3_adapter.hpp>
@@ -57,6 +58,7 @@ tresult PLUGIN_API PulpPlugView::isPlatformTypeSupported(FIDString type) {
 }
 
 tresult PLUGIN_API PulpPlugView::attached(void* parent, FIDString type) {
+    PULP_TRACE_SCOPE_NAMED("lifecycle", "vst3_editor_attached");
     std::string editor_error;
     if (!bridge_.open(&editor_error)) {
         runtime::log_error("VST3 editor: failed to build editor UI ({})", editor_error);

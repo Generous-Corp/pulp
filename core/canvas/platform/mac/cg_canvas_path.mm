@@ -145,7 +145,7 @@ void CoreGraphicsCanvas::stroke_path(const Path& path, const StrokeStyle& style)
     CGPathRelease(p);
 
     if (has_stroke_gradient_) {
-        stroke_with_active_paint();
+        stroke_with_active_paint(/*apply_sticky_dash=*/false);
     } else {
         apply_stroke_color();
         CGContextStrokePath(ctx_);

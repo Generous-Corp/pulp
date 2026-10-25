@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Fail if a Catch2 assertion macro is invoked inside a worker-thread lambda.
 
-Catch2 (pinned at 3.7.1 in this repo) assertion macros are NOT thread-safe:
+Pulp builds Catch2 without CATCH_CONFIG_THREAD_SAFE_ASSERTIONS, so its
+assertion macros are NOT thread-safe:
 REQUIRE / CHECK / FAIL and friends mutate the run's assertion counters and the
 active-section state with no synchronization. Invoking them from a thread other
 than the one that entered the TEST_CASE is undefined behavior — it happens to
@@ -10,8 +11,9 @@ UB stayed invisible until the required macOS CI gate moved onto sandboxed Tart
 VMs, whose thread interleaving reliably tripped it (a HotSwapSlot hammer test
 "failed" in 0.00s though the code under test was race-free by design).
 
-Catch2 only gained opt-in thread-safe assertions in 3.9.0. Until this repo pins
-that (and enables it), the required pattern for a concurrency test is:
+Catch2 offers thread-safe assertions only as a build-time opt-in
+(CATCH_CONFIG_THREAD_SAFE_ASSERTIONS). Until this repo enables it, the required
+pattern for a concurrency test is:
 
     std::atomic<bool> bad{false};
     std::thread worker([&]{

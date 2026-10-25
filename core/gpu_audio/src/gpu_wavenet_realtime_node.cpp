@@ -847,8 +847,14 @@ std::uint32_t GpuWaveNetRealtimeNode::service(void* self, std::uint64_t) noexcep
         (void)s.bridge->release_input(*input);
     }
     s.bridge->end_worker_admission();
-    if (deadline != 0 && all_submitted)
-        produced += s.service_and_collect(now_ns(), deadline);
+    if (deadline != 0 && all_submitted) {
+        // A completion seen only in this tail pass is progress too: the next
+        // pump's watchdog check must count silence from it.
+        progressed = false;
+        produced += s.service_and_collect(now_ns(), deadline, &progressed);
+        if (progressed)
+            s.watch_provider(true);
+    }
     return produced;
 }
 
