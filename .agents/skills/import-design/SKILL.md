@@ -154,7 +154,10 @@ geometry is unknown.
 Separate weight from placement with
 `tools/import-validation/text_raster_decomposition.py crops` (ink ratio,
 centroid, integer shift, transfer curve per text node) before you touch
-baselines. On macOS the skia screenshot backend lives in
+baselines. It measures ink on either side of the box's background, so dark
+text on a light panel reads as reliably as light on dark. Numbers it reported
+for dark-on-light labels before it did were the glyphs' light fringe, not the
+glyphs. On macOS the skia screenshot backend lives in
 `core/view/platform/mac/screenshot_mac.mm`. `core/view/src/screenshot_skia.cpp`
 is the non-Apple path, so a surface change made only there never reaches a
 macOS render.
