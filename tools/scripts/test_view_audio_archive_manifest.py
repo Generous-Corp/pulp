@@ -436,7 +436,10 @@ class VerifyReleaseTests(ManifestFixture):
 
 
 class NmSymbolsTests(unittest.TestCase):
-    LISTING = (
+    # nm writes one spelling per listing: `nm -A -P` prefixes every line,
+    # plain `nm -P` prefixes none. The reader picks the spelling once per
+    # listing, so each spelling is its own fixture.
+    PREFIXED = (
         "lib.a[a.o]:\n"
         "lib.a[a.o]: strong T 0 0\n"
         "lib.a[a.o]: weak W 0 0\n"
@@ -444,17 +447,25 @@ class NmSymbolsTests(unittest.TestCase):
         "lib.a[a.o]: needed U 0 0\n"
         "lib.a[a.o]: weakref w 0 0\n"
         "lib.a[a.o]: indirect I 0 0\n"
+    )
+    PLAIN = (
         "plain D 0 0\n"
+        "weak W 0 0\n"
+        "needed U 0 0\n"
     )
 
     def test_the_floor_rule_is_defined_any(self):
         sys.path.insert(0, str(MODULE_PATH.parent))
         import nm_symbols
-        self.assertEqual(nm_symbols.defined_strong(self.LISTING), {"strong", "plain"})
-        self.assertEqual(nm_symbols.defined_any(self.LISTING),
-                         {"strong", "plain", "weak", "weakobj", "indirect"})
-        self.assertEqual(nm_symbols.undefined(self.LISTING), {"needed", "weakref"})
-        self.assertEqual([m for m, _, _ in nm_symbols.entries(self.LISTING)][:2], ["a.o", "a.o"])
+        self.assertEqual(nm_symbols.defined_strong(self.PREFIXED), {"strong"})
+        self.assertEqual(nm_symbols.defined_any(self.PREFIXED),
+                         {"strong", "weak", "weakobj", "indirect"})
+        self.assertEqual(nm_symbols.undefined(self.PREFIXED), {"needed", "weakref"})
+        self.assertEqual([m for m, _, _ in nm_symbols.entries(self.PREFIXED)][:2], ["a.o", "a.o"])
+        self.assertEqual(nm_symbols.defined_strong(self.PLAIN), {"plain"})
+        self.assertEqual(nm_symbols.defined_any(self.PLAIN), {"plain", "weak"})
+        self.assertEqual(nm_symbols.undefined(self.PLAIN), {"needed"})
+        self.assertEqual([m for m, _, _ in nm_symbols.entries(self.PLAIN)], [None, None, None])
 
 
 SOURCE = "a" * 40

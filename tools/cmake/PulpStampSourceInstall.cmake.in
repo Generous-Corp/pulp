@@ -5,7 +5,35 @@ set(_dirty "@PULP_SOURCE_INSTALL_DIRTY@")
 # Whether pulp-view-script carries the shell exec/execAsync JS bridge
 # (PULP_DEV_BRIDGE_EXEC); a consumer reads it as `bridge_exec`.
 set(_bridge_exec "@PULP_SOURCE_INSTALL_BRIDGE_EXEC@")
-set(_platform "@PULP_SOURCE_INSTALL_PLATFORM@")
+set(_os "@PULP_SOURCE_INSTALL_OS@")
+set(_arch_list "@PULP_SOURCE_INSTALL_ARCH@")
+# One spelling per architecture, whichever toolchain named it: x64 for
+# x86_64/amd64 (an Android x86_64 ABI included) and arm64 for aarch64. Any
+# other name is lowercased with characters outside [a-z0-9-] turned into
+# "-". Two distinct architectures (a universal macOS build) stamp
+# "universal".
+set(_archs "")
+foreach(_arch IN LISTS _arch_list)
+    string(TOLOWER "${_arch}" _arch)
+    if(_arch MATCHES "^(x86_64|amd64|x64)$")
+        set(_arch "x64")
+    elseif(_arch MATCHES "^(aarch64|arm64)$")
+        set(_arch "arm64")
+    endif()
+    string(REGEX REPLACE "[^a-z0-9-]" "-" _arch "${_arch}")
+    if(NOT _arch STREQUAL "")
+        list(APPEND _archs "${_arch}")
+    endif()
+endforeach()
+list(REMOVE_DUPLICATES _archs)
+list(LENGTH _archs _arch_count)
+if(_arch_count EQUAL 1)
+    set(_platform "${_os}-${_archs}")
+elseif(_arch_count GREATER 1)
+    set(_platform "${_os}-universal")
+else()
+    set(_platform "${_os}-unknown")
+endif()
 string(LENGTH "${_sha}" _sha_length)
 if(NOT _sha_length EQUAL 40 OR NOT _sha MATCHES "^[0-9a-f]+$" OR
    NOT _dirty MATCHES "^(true|false)$" OR NOT _bridge_exec MATCHES "^(true|false)$" OR

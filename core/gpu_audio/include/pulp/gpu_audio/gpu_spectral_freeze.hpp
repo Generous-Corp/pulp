@@ -18,15 +18,21 @@ namespace pulp::gpu_audio {
 /// readback) — for the worker / offline use. The GPU-resident foundation for
 /// the hardcore multi-layer "hyper-freeze" modes.
 class GpuSpectralFreeze {
-public:
+  public:
     /// `shared_device` (optional) reuses an existing GpuCompute so this freeze
     /// and a sibling spectral primitive don't each spin up a device; must be
-    /// initialized and outlive the freeze. null = create + own a device.
+    /// initialized and outlive the freeze. null = create + own a device. The
+    /// device generation is recorded here; capture() and render() refuse once
+    /// the device is lost or re-initialized (see GpuStft::prepare).
     bool prepare(uint32_t fft_size, uint32_t hop,
                  signal::WindowFunction::Type window = signal::WindowFunction::Type::hann,
                  render::GpuCompute* shared_device = nullptr);
 
     bool gpu_available() const { return stft_.gpu_available(); }
+    /// False once the prepared device is lost or its generation changed.
+    bool device_usable() const {
+        return stft_.device_usable();
+    }
     uint32_t fft_size() const { return stft_.fft_size(); }
     uint32_t hop() const { return hop_; }
     bool is_captured() const { return captured_; }

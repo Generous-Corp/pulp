@@ -53,6 +53,9 @@ struct ParameterGestureApplyResult {
 };
 
 class StateStore;
+namespace test_support {
+struct StateWriterProbe;
+}
 
 /// Opaque exact identity captured when asynchronous work is ordered against a
 /// parameter. The identity includes the value bits and a monotonic per-slot
@@ -159,7 +162,11 @@ class ParamReader {
 /// @note Value access (get_value, set_value, etc.) is lock-free and safe to
 ///       call from the audio thread.
 class StateStore {
-public:
+    // Tests drive a writer through its phases one at a time to reproduce
+    // reader/writer interleavings deterministically.
+    friend struct test_support::StateWriterProbe;
+
+  public:
     StateStore();
     ~StateStore();
 
@@ -174,8 +181,12 @@ public:
     void add_group(const ParamGroup& group);
 
     /// Read a parameter's base value (lock-free).
-    /// @note Safe to call from the audio thread.
-    float get_value(ParamID id) const;
+    /// @note Safe to call from the audio thread. Defined inline: processors
+    /// call this for every parameter they read on every block.
+    [[gnu::always_inline]] float get_value(ParamID id) const {
+        const std::size_t i = index_of(id);
+        return i == kNoIndex ? 0.0f : values_[i].get();
+    }
 
     /// Resolve a read handle for a parameter's base value. Call off the
     /// audio thread (e.g. in prepare()); the returned handle's get() is
@@ -214,6 +225,23 @@ public:
     ///       picks up the latest on its next pump). Use
     ///       @c rt_listener_queue_telemetry() to inspect this pressure.
     void set_value_rt(ParamID id, float value);
+
+    /// One parameter write in a @c set_values_rt() batch.
+    struct ParamWrite {
+        ParamID id = 0;
+        float value = 0.0f;
+    };
+
+    /// @c set_value_rt() for several parameters as one store write: one
+    /// writer claim for the batch and one listener-snapshot lease for its
+    /// notifications. Writes apply in batch order, each with its own state
+    /// generation, exactly as consecutive @c set_value_rt() calls would: a
+    /// repeated ID ends at its last value, and a write an Audio listener
+    /// makes during the batch is overwritten by a later batch write to the
+    /// same parameter. Every applied write notifies its parameter's listeners
+    /// once, and Audio listeners run inside the batch. Real-time safe; format
+    /// adapters use it to write a block's automation.
+    void set_values_rt(std::span<const ParamWrite> writes);
 
     /// Real-time-safe normalized-value write. Denormalizes through the
     /// parameter's @c ParamRange and then dispatches through
@@ -293,6 +321,12 @@ public:
         return state_generation_.load(std::memory_order_acquire);
     }
 
+    /// True when no writer is in flight and none has advanced the generation
+    /// past @p generation. A writer advances the generation BEFORE it stores
+    /// its value, so a snapshot of values is trustworthy only when this holds
+    /// both before the values are read and after (see
+    /// format::boundary::refresh_param_snapshot); checking only afterwards
+    /// accepts a snapshot that read a value a writer was about to replace.
     bool state_snapshot_is_current(std::uint64_t generation) const noexcept {
         return active_state_writers_.load(std::memory_order_acquire) == 0 &&
                state_generation() == generation;
@@ -657,6 +691,27 @@ public:
     std::vector<ParamGroup> groups_;
     std::unordered_map<ParamID, std::size_t> id_to_index_;
     std::vector<ParamValue> values_;
+    // Direct ParamID -> index table for the audio-thread readers and writers.
+    // Parameter IDs are almost always small integers, so a vector beats a hash
+    // lookup. Every ID below kDenseIndexLimit is in the table; only IDs at or
+    // above it (a four-char code, an adapter's synthesized Bypass) are looked
+    // up in the map, so one such ID does not slow every other lookup.
+    static constexpr ParamID kDenseIndexLimit = 1u << 14;
+    static constexpr std::uint32_t kNoDenseIndex = 0xFFFF'FFFFu;
+    std::vector<std::uint32_t> dense_index_;
+    bool has_sparse_ids_ = false;
+    static constexpr std::size_t kNoIndex = static_cast<std::size_t>(-1);
+    // The dense-table hit is the whole inline path; the hash-map fallback is
+    // out of line so get_value() stays small enough to inline into a
+    // processor's per-block parameter reads.
+    [[gnu::always_inline]] std::size_t index_of(ParamID id) const noexcept {
+        if (id < dense_index_.size()) {
+            const std::uint32_t i = dense_index_[id];
+            return i == kNoDenseIndex ? kNoIndex : i;
+        }
+        return id >= kDenseIndexLimit && has_sparse_ids_ ? index_of_sparse(id) : kNoIndex;
+    }
+    [[gnu::noinline]] std::size_t index_of_sparse(ParamID id) const noexcept;
     using ParameterDisplayNames =
         std::unordered_map<ParamID, std::string>;
     mutable std::mutex parameter_display_mutex_;

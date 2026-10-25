@@ -87,7 +87,8 @@ class FakeGitHub:
             return {"items": [dict(i) for i in self.issues]}
         if args[:2] == ["-X", "POST"] and args[2].endswith("/issues"):
             fields = json.loads(stdin or "{}")
-            self.issues.append({"number": 900 + len(self.issues), "state": "open", **fields})
+            self.issues.append({"number": 900 + len(self.issues), "state": "open",
+                                "user": {"login": ann.BOT_LOGIN}, **fields})
             return {}
         if args[:2] == ["-X", "PATCH"]:
             number = int(args[2].rsplit("/", 1)[1])
@@ -153,7 +154,7 @@ class TrackingIssueTests(unittest.TestCase):
     def test_open_duplicates_carrying_the_marker_are_closed(self) -> None:
         def tracked(number: int, state: str = "open") -> dict:
             return {"number": number, "state": state, "title": f"{ann.TITLE}: old",
-                    "body": f"old\n{ann.ISSUE_MARKER}\n"}
+                    "body": f"old\n{ann.ISSUE_MARKER}\n", "user": {"login": ann.BOT_LOGIN}}
         gh = FakeGitHub([tracked(10), tracked(12), tracked(11, "closed")])
         action = ann.reconcile_issue(measurement_at_share_of_budget(0.81), "o/r", gh)
         # The newest open one is kept and updated; the other open one is closed.
@@ -173,6 +174,25 @@ class TrackingIssueTests(unittest.TestCase):
         repinned = {"count": 128, "limit": LIMIT, "headroom": LIMIT - 128, "budget": BUDGET}
         self.assertEqual(ann.reconcile_issue(repinned, "o/r", gh), "none")
         self.assertEqual(gh.mutations(), [])
+
+    def test_a_person_s_issue_carrying_the_marker_is_never_touched(self) -> None:
+        def marked(number: int, login: str) -> dict:
+            return {"number": number, "state": "open", "title": f"{ann.TITLE}: quoted",
+                    "body": f"pasted from the tracker\n{ann.ISSUE_MARKER}\n",
+                    "user": {"login": login}}
+        human = marked(5, "someone")
+        gh = FakeGitHub([human])
+        # Firing opens the bot's own issue instead of adopting the person's.
+        self.assertEqual(ann.reconcile_issue(measurement_at_share_of_budget(0.81), "o/r", gh), "opened")
+        touched = {a[2] for a in gh.mutations() if a[:2] == ["-X", "PATCH"] or "/comments" in a[2]}
+        self.assertNotIn("/repos/o/r/issues/5", touched)
+        # Recovery closes the bot's issue and leaves the person's open.
+        repinned = {"count": 128, "limit": LIMIT, "headroom": LIMIT - 128, "budget": BUDGET}
+        self.assertEqual(ann.reconcile_issue(repinned, "o/r", gh), f"closed #{gh.issues[1]['number']}")
+        self.assertEqual(gh.issues[0]["state"], "open")
+        # Control: the same issue authored by the bot is adopted and closed.
+        bot = FakeGitHub([marked(5, ann.BOT_LOGIN)])
+        self.assertEqual(ann.reconcile_issue(repinned, "o/r", bot), "closed #5")
 
     def test_an_unreadable_measurement_never_opens_or_closes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -1,0 +1,51 @@
+<!doctype html>
+<style>
+  /* A knob is a flex column: a dial, then a label, separated by the column's
+     gap. The class rule sets an 8px gap and the dial casts a 0 8px 16px drop
+     shadow, so a label always sits inside the shadow's reach. Chromium puts
+     each label at dial bottom + gap whatever the shadow does, so every label
+     here must land exactly where the browser put it. */
+  :root { --space-2: 8px; --space-2-5: 10px; --space-3: 12px; }
+  body { margin: 0; background: #1a1c20; color: #c8c2b4; }
+  #panel { width: 960px; height: 680px; padding: 24px; box-sizing: border-box; }
+  .row { display: flex; align-items: center; gap: 32px; height: 200px; }
+  .row.top { align-items: flex-start; }
+  .pulp-knob { display: inline-flex; flex-direction: column; align-items: center; gap: var(--space-2); }
+  .pulp-knob.wide { gap: var(--space-3); }
+  .dial {
+    width: 64px; height: 64px; border-radius: 50%; border: 1px solid #555a62;
+    background: #2c3036; box-shadow: 0 8px 16px rgba(0, 0, 0, .5);
+  }
+  .dial.border-box { box-sizing: border-box; }
+  .knob-label { font: 11px/16px monospace; letter-spacing: 1px; text-transform: uppercase; white-space: nowrap; }
+</style>
+<div id="panel">
+  <!-- Centred in a row, as a panel lays out knobs of different sizes. The
+       gap is the class's 8px or an inline var() override. -->
+  <div class="row">
+    <div class="pulp-knob" id="c-base"><div class="dial"></div><div class="knob-label">Base</div></div>
+    <div class="pulp-knob" id="c-var10" style="gap:var(--space-2-5)"><div class="dial"></div><div class="knob-label">Var10</div></div>
+    <div class="pulp-knob" id="c-var12" style="gap:var(--space-3)"><div class="dial"></div><div class="knob-label">Var12</div></div>
+    <!-- A drop shadow whose y offset is the gap: nothing between dial and label to close. -->
+    <div class="pulp-knob" id="c-var12-tall" style="gap:var(--space-3)"><div class="dial" style="width:160px;height:160px;box-shadow:inset 0 2px 0 #3a3e44, 0 12px 24px rgba(0, 0, 0, .5)"></div><div class="knob-label" style="font-size:12px;letter-spacing:0.3em">Tall12</div></div>
+    <div class="pulp-knob" id="c-px10" style="gap:10px"><div class="dial"></div><div class="knob-label">Px10</div></div>
+  </div>
+  <!-- The same overrides at the top of their row, so centring cannot move
+       them, across dial sizes, box-sizing and shadow reach. -->
+  <div class="row top">
+    <div class="pulp-knob" id="t-var10" style="gap:var(--space-2-5)"><div class="dial"></div><div class="knob-label">Var10</div></div>
+    <div class="pulp-knob" id="t-px12" style="gap:12px"><div class="dial"></div><div class="knob-label">Px12</div></div>
+    <div class="pulp-knob" id="t-px12-bb" style="gap:12px"><div class="dial border-box"></div><div class="knob-label">Bb12</div></div>
+    <div class="pulp-knob" id="t-px12-mid" style="gap:12px"><div class="dial" style="width:100px;height:100px"></div><div class="knob-label">Mid12</div></div>
+    <!-- A shadow that reaches 7px, short of the 12px gap. -->
+    <div class="pulp-knob" id="t-px12-short" style="gap:12px"><div class="dial" style="box-shadow:0 3px 8px rgba(0, 0, 0, .5)"></div><div class="knob-label">Short12</div></div>
+    <!-- An inset shadow only: no drop shadow at all. -->
+    <div class="pulp-knob" id="t-px12-inset" style="gap:12px"><div class="dial" style="box-shadow:inset 0 -8px 16px rgba(0, 0, 0, .5)"></div><div class="knob-label">Inset12</div></div>
+  </div>
+  <!-- Overrides that do not come from an inline style. -->
+  <div class="row top">
+    <div class="pulp-knob wide" id="k-class12"><div class="dial"></div><div class="knob-label">Class12</div></div>
+    <div class="pulp-knob" id="k-rowgap12" style="row-gap:12px"><div class="dial"></div><div class="knob-label">Row12</div></div>
+    <div class="pulp-knob" id="k-gap14" style="gap:14px"><div class="dial" style="box-shadow:0 9px 18px rgba(0, 0, 0, .5)"></div><div class="knob-label">Gap14</div></div>
+  </div>
+</div>

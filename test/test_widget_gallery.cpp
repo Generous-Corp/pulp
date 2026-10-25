@@ -51,6 +51,29 @@ TEST_CASE("widget gallery shows every chart shader preset on a knob", "[view][ga
     REQUIRE(charted == 7);
 }
 
+TEST_CASE("widget gallery shows chart shader presets on fader tracks", "[view][gallery][shader]") {
+    // Five faders in the preset row, three vertical and two horizontal, carry
+    // charts that compile for the fader's track shape.
+    auto root = build_widget_gallery(ink_signal(true));
+    int vertical = 0, horizontal = 0;
+    for (size_t i = 0; i < root->child_count(); ++i) {
+        auto* fader = dynamic_cast<Fader*>(root->child_at(i));
+        if (!fader || fader->chart_shader().empty())
+            continue;
+        (fader->orientation() == Fader::Orientation::vertical ? vertical : horizontal)++;
+        const auto shape = widget_chart_shape(*fader);
+        REQUIRE(shape == pulp::canvas::Canvas::SDFShape::stadium);
+#ifdef PULP_HAS_SKIA
+        const auto error =
+            pulp::canvas::Canvas::compile_sdf_chart_sksl(*shape, fader->chart_shader());
+        INFO(error);
+        REQUIRE(error.empty());
+#endif
+    }
+    REQUIRE(vertical == 3);
+    REQUIRE(horizontal == 2);
+}
+
 TEST_CASE("widget gallery renders to PNG in light and dark",
           "[view][gallery][render]") {
     // Apple renders via the native CoreGraphics path (no registered provider
