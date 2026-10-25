@@ -258,6 +258,10 @@ public:
         return param_events_;
     }
 
+    ParamEventsOptOutMonitor& param_events_monitor() {
+        return param_events_monitor_;
+    }
+
     /// Returns the StateStore ParamID the adapter routes VST3's
     /// `kIsBypass` parameter to. `process()` short-circuits to
     /// pass-through when this parameter's value is >= 0.5. Returns 0
@@ -365,6 +369,18 @@ private:
     // Parameter output: snapshot values before process to detect plugin-side changes
     std::vector<float> param_snapshot_;
     state::ParameterEventQueue param_events_;
+    // Processor::wants_sample_accurate_parameters(), asked in initialize().
+    bool sample_accurate_params_ = false;
+    // Records an opted-out processor reading param_events(); see processor.hpp.
+    ParamEventsOptOutMonitor param_events_monitor_;
+    // A block's automated values, written to the store in one batch after the
+    // input queues are read; one slot per parameter, reserved in
+    // setupProcessing().
+    std::vector<state::StateStore::ParamWrite> param_writes_;
+    void queue_param_write(state::ParamID id, float value);
+    // Lent to param_events_.sort(); sized in setupProcessing().
+    std::vector<state::ParameterEvent> param_sort_scratch_;
+    std::vector<std::uint32_t> param_offset_counts_;
     // Sample-accurate parameter OUTPUT: the processor pushes offset-tagged events
     // via push_output_param_event(); we drain them into per-parameter VST3 output
     // queues after process(). All three vectors are sized off the audio thread
@@ -377,6 +393,40 @@ private:
     state::ParameterEventQueue output_param_events_;
     std::vector<std::uint8_t> output_param_has_event_;
     std::vector<Steinberg::Vst::IParamValueQueue*> output_param_queue_cache_;
+    // StateStore generation param_snapshot_ was taken at. Every store write
+    // advances the generation, so while it is unchanged the snapshot still
+    // equals the live values and the per-block refresh is skipped; likewise the
+    // post-process diff only runs when the generation moved across process().
+    // The snapshot is untrusted until the first refresh and after a refresh
+    // that overlapped a writer (boundary::refresh_param_snapshot).
+    boundary::ParamSnapshotState snapshot_state_;
+    std::uint64_t pre_process_generation_ = 0;
+
+    // Bus views handed to the Processor, kept as members so a block only
+    // writes the entries it routes instead of value-initialising every slot.
+    std::array<ProcessBusBufferView<float>, BusBufferSet::kMaxBuses> rt_output_buses_{};
+    std::array<ProcessBusBufferView<double>, BusBufferSet::kMaxBuses> rt_output64_buses_{};
+    std::array<ProcessBusBufferView<const double>, 2> rt_input64_buses_{};
+    // Channel count each declared bus expects, captured when the arrangement
+    // is (re)negotiated so process() validates layout without SDK RTTI string
+    // compares per block. Index past the cached count falls back to the bus.
+    static constexpr std::size_t kCachedBusCount = 32;
+    std::array<int, kCachedBusCount> expected_in_channels_{};
+    std::array<int, kCachedBusCount> expected_out_channels_{};
+    std::size_t cached_in_bus_count_ = 0;
+    std::size_t cached_out_bus_count_ = 0;
+    std::atomic<bool> bus_channel_cache_valid_{false};
+    void refresh_bus_channel_cache();
+
+    // Runs the adapter's own per-block path once on silence at activation so
+    // the host's first real block does not pay to fault in cold code and
+    // buffers. It never runs Processor::process() / process_f64() and publishes
+    // nothing to the host; it does hand the Processor the per-block pointers
+    // (parameter events, output events, MPE input) that every block sets and
+    // the first real block sets again. While set, process() also skips the
+    // trigger reset and every store- and host-visible side effect.
+    bool warming_render_path_ = false;
+    void warm_render_path();
 
     // ── Per-note expression (MPE) sidecar ───────────────────────────────────
     //

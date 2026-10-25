@@ -4,6 +4,9 @@
 #include <pulp/signal/fft.hpp>
 #include <pulp/signal/windowing.hpp>
 
+#include "support/fake_gpu_compute.hpp"
+
+#include <algorithm>
 #include <cmath>
 #include <complex>
 #include <vector>
@@ -82,4 +85,57 @@ TEST_CASE("GpuStft analyze/synthesize overlap-add reconstructs (COLA)", "[gpu_au
 TEST_CASE("GpuStft rejects non-power-of-two", "[gpu_audio][stft][gpu]") {
     GpuStft st;
     REQUIRE_FALSE(st.prepare(300));
+}
+
+// A borrowed device that is lost, or re-initialized under the STFT, must not
+// run the STFT's work: the analysis/synthesis would land on state the old
+// prepare never set up. Driven by a scripted device, so it runs on every host.
+TEST_CASE("GpuStft refuses a lost or re-initialized shared device",
+          "[gpu_audio][stft][device-loss]") {
+    constexpr uint32_t FFT = 64;
+    pulp::test::FakeGpuCompute device;
+    GpuStft st;
+    REQUIRE(st.prepare(FFT, WindowFunction::Type::hann, 0.0f, &device));
+
+    std::vector<float> frame(FFT, 0.5f), spec(FFT * 2, -1.0f), out(FFT, -1.0f);
+    // Positive control: a live device runs both directions.
+    REQUIRE(st.device_usable());
+    REQUIRE(st.analyze(frame.data(), spec.data()));
+    REQUIRE(st.synthesize(spec.data(), out.data()));
+    REQUIRE(device.fft_calls() == 2u);
+
+    SECTION("device loss") {
+        device.lose_device();
+    }
+    SECTION("generation change without loss") {
+        device.reinitialize();
+        REQUIRE_FALSE(device.device_lost());
+    }
+    CHECK_FALSE(st.device_usable());
+    std::fill(spec.begin(), spec.end(), -1.0f);
+    std::fill(out.begin(), out.end(), -1.0f);
+    CHECK_FALSE(st.analyze(frame.data(), spec.data()));
+    CHECK_FALSE(st.synthesize(frame.data(), out.data()));
+    CHECK(device.fft_calls() == 2u); // refused before reaching the device
+    CHECK(std::all_of(spec.begin(), spec.end(), [](float v) { return v == 0.0f; }));
+    CHECK(std::all_of(out.begin(), out.end(), [](float v) { return v == 0.0f; }));
+
+    // Re-preparing against the device's current generation resumes.
+    if (!device.device_lost()) {
+        REQUIRE(st.prepare(FFT, WindowFunction::Type::hann, 0.0f, &device));
+        CHECK(st.device_usable());
+        CHECK(st.analyze(frame.data(), spec.data()));
+    }
+}
+
+// Without any device the STFT keeps its old contract: it reports failure and
+// leaves the caller's buffers alone. Only a refused (lost or re-initialized)
+// device writes silence.
+TEST_CASE("GpuStft without a device leaves outputs untouched", "[gpu_audio][stft][device-loss]") {
+    GpuStft st; // never prepared: no device
+    std::vector<float> frame(64, 0.5f), spec(128, -1.0f), out(64, -1.0f);
+    CHECK_FALSE(st.analyze(frame.data(), spec.data()));
+    CHECK_FALSE(st.synthesize(spec.data(), out.data()));
+    CHECK(std::all_of(spec.begin(), spec.end(), [](float v) { return v == -1.0f; }));
+    CHECK(std::all_of(out.begin(), out.end(), [](float v) { return v == -1.0f; }));
 }

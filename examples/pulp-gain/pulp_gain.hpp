@@ -6,6 +6,7 @@
 
 #include <pulp/format/processor.hpp>
 #include <cmath>
+#include <limits>
 
 namespace pulp::examples {
 
@@ -17,7 +18,14 @@ enum GainParams : state::ParamID {
 };
 
 class PulpGainProcessor : public format::Processor {
-public:
+  public:
+    // Reads its parameters once per block, so it opts out of per-point
+    // automation: the VST3, AU v2 and CLAP adapters then write each
+    // automated parameter once per block and dense automation costs nothing.
+    bool wants_sample_accurate_parameters() const override {
+        return false;
+    }
+
     format::PluginDescriptor descriptor() const override {
         return {
             .name = "PulpGain",
@@ -89,11 +97,16 @@ public:
             return;
         }
 
+        // dB -> linear only when a gain parameter actually moved; the two pow()
+        // calls otherwise dominate the cost of this whole block.
         float input_db = state().get_value(kInputGain);
         float output_db = state().get_value(kOutputGain);
-        float input_gain = std::pow(10.0f, input_db / 20.0f);
-        float output_gain = std::pow(10.0f, output_db / 20.0f);
-        float total_gain = input_gain * output_gain;
+        if (input_db != cached_input_db_ || output_db != cached_output_db_) {
+            cached_input_db_ = input_db;
+            cached_output_db_ = output_db;
+            cached_gain_ = std::pow(10.0f, input_db / 20.0f) * std::pow(10.0f, output_db / 20.0f);
+        }
+        float total_gain = cached_gain_;
 
         for (std::size_t ch = 0; ch < output.num_channels() && ch < input.num_channels(); ++ch) {
             auto in = input.channel(ch);
@@ -139,6 +152,12 @@ public:
             }
         }
     }
+
+  private:
+    // NaN never compares equal, so the first block always computes the gain.
+    float cached_input_db_ = std::numeric_limits<float>::quiet_NaN();
+    float cached_output_db_ = std::numeric_limits<float>::quiet_NaN();
+    float cached_gain_ = 1.0f;
 };
 
 inline std::unique_ptr<format::Processor> create_pulp_gain() {

@@ -4,27 +4,30 @@
 //
 // Ordering contract: events are sorted by sample_offset ascending before
 // being handed to consumers. Callers that append events unordered must call
-// sort() before passing the queue on. sort() is a stable insertion sort:
-// equal sample_offsets keep their push order. It is tuned for the common case
-// where hosts deliver automation already in (or near) sample-offset order —
-// O(n) on sorted input, O(n*shift) in general, and O(n^2) only on a fully
-// reversed adversarial flood. n is bounded by kCapacity, so even the worst
-// case is a bounded, allocation-free pass on the audio thread; there is no
-// unbounded blowup. If a future audio-rate source can deliver large reverse-
-// ordered batches, switch to a counting/bucket sort keyed on sample_offset
-// (offsets are bounded by the block size) rather than raising kCapacity.
+// sort() before passing the queue on. sort() is stable: equal sample_offsets
+// keep their push order. Input already in time order is detected in one pass.
+// Anything else -- notably VST3, which delivers one time-ordered queue per
+// parameter, so a block's events arrive as one sorted run per parameter --
+// goes through stable_sort_in_place (stable_sort.hpp), O(n log^2 n) and
+// allocation-free. An insertion sort over those
+// interleaved runs was quadratic: 32 parameters with 16 points each cost
+// about 28 us per block. An adapter that knows its block size passes scratch
+// to the two-argument sort(), a stable counting sort on the offset.
 //
 // Realtime contract: fixed-capacity storage only. push(), clear(), sort(),
 // iteration, and events() do not allocate; overflow is reported through
 // overflowed() / dropped_event_count() and the extra event is dropped.
 
 #include <pulp/state/parameter.hpp>
+#include <pulp/state/stable_sort.hpp>
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <span>
+#include <utility>
 
 namespace pulp::state {
 
@@ -116,15 +119,27 @@ public:
     }
 
     void sort() {
-        for (std::size_t i = 1; i < size_; ++i) {
-            auto current = events_[i];
-            auto j = i;
-            while (j > 0 && events_[j - 1].sample_offset > current.sample_offset) {
-                events_[j] = events_[j - 1];
-                --j;
-            }
-            events_[j] = current;
-        }
+        stable_sort_in_place(events_.begin(), events_.begin() + static_cast<std::ptrdiff_t>(size_),
+                             [](const ParameterEvent& a, const ParameterEvent& b) {
+                                 return a.sample_offset < b.sample_offset;
+                             });
+    }
+
+    /// sort() for a caller that can lend scratch storage, typically sized once
+    /// at prepare time: a stable counting sort on sample_offset, O(n + range),
+    /// when every offset lies in [0, offset_counts.size()) and `scratch` holds
+    /// size() events; otherwise sort(). Allocation-free either way.
+    void sort(std::span<ParameterEvent> scratch, std::span<std::uint32_t> offset_counts) {
+        const auto first = events_.begin();
+        const auto last = events_.begin() + static_cast<std::ptrdiff_t>(size_);
+        if (std::is_sorted(first, last, [](const ParameterEvent& a, const ParameterEvent& b) {
+                return a.sample_offset < b.sample_offset;
+            }))
+            return;
+        if (!stable_counting_sort(
+                first, last, [](const ParameterEvent& e) { return e.sample_offset; }, scratch,
+                offset_counts))
+            sort();
     }
 
     using iterator = std::array<ParameterEvent, kCapacity>::iterator;

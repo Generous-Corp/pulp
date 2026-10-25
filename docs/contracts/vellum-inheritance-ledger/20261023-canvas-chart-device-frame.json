@@ -1,0 +1,13 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261023-canvas-chart-device-frame",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "vellum_obligation": "A shape-chart shader must report PulpChart.tan in device orientation, derived from the canvas's local-to-device linear map, and flip the sign of cross under a mirroring map, so a chart drawn through a rotation is lit in screen space; untransformed draws must report the values they did before.",
+  "evidence": [
+    ".github/vellum-change-events/20261023-canvas-chart-device-frame.json",
+    "ctest --test-dir build -R 'SDF chart reports tan in device orientation'",
+    "ctest --test-dir build -R 'fader chart presets are lit on screen on vertical and horizontal tracks'"
+  ]
+}
