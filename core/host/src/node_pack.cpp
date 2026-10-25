@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <iterator>
 #include <limits>
 #include <mutex>
 #include <string>
@@ -430,10 +431,11 @@ void* dl_open_verified(BinaryImpl& impl, NodePackError& error) {
     std::snprintf(fd_path, sizeof(fd_path), "/dev/fd/%d", impl.fd);
 #else
     std::snprintf(fd_path, sizeof(fd_path), "/proc/self/fd/%d", impl.fd);
-    // glibc keys already-loaded objects by the name string they were opened
-    // with. The descriptor stays open while a pack is loaded, so a live pack
-    // never shares this name; an object dlclose() could not unload still can.
-    // Refuse that stale alias instead of handing back the wrong image.
+#endif
+    // Both loaders also match an already-loaded object by the name string it
+    // was opened with. The descriptor stays open while a pack is loaded, so a
+    // live pack never shares this name; an object dlclose() could not unload
+    // still can. Refuse that stale alias instead of handing back the wrong image.
     if (void* probe = ::dlopen(fd_path, RTLD_NOW | RTLD_NOLOAD)) {
         bool other_name = false;
         if (void* sym = ::dlsym(probe, "pulp_node_v1_entry")) {
@@ -449,7 +451,6 @@ void* dl_open_verified(BinaryImpl& impl, NodePackError& error) {
             return nullptr;
         }
     }
-#endif
     void* handle = ::dlopen(fd_path, RTLD_NOW | RTLD_LOCAL);
     if (handle == nullptr)
         error = NodePackError::LoadFailed;
@@ -458,7 +459,10 @@ void* dl_open_verified(BinaryImpl& impl, NodePackError& error) {
 }
 
 // Open files behind loaded packs, released by unload_node_pack. A pack loaded
-// twice holds two entries, matching the loader's own reference count.
+// twice holds two entries, matching the loader's own reference count. The
+// image keeps the name of the FIRST descriptor it was opened through, so
+// entries are released last-in-first-out: that descriptor closes only with the
+// last reference, and its number cannot be reused while the image is live.
 std::mutex& loaded_binaries_mutex() {
     static std::mutex m;
     return m;
@@ -589,9 +593,9 @@ void unload_node_pack(void* handle) {
     dl_close(handle);
     std::lock_guard<std::mutex> lock(loaded_binaries_mutex());
     auto& entries = loaded_binaries();
-    for (auto it = entries.begin(); it != entries.end(); ++it) {
+    for (auto it = entries.rbegin(); it != entries.rend(); ++it) {
         if (it->first == handle) {
-            entries.erase(it); // releases the open file
+            entries.erase(std::next(it).base()); // releases the open file
             return;
         }
     }

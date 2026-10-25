@@ -319,6 +319,42 @@ TEST_CASE("node pack: the bytes that were hashed are the bytes that load",
     fs::remove_all(scratch);
 }
 
+#if !defined(_WIN32)
+TEST_CASE("node pack: unloading one of two loads keeps the live image's file open",
+          "[host][node-pack][attack-surface]") {
+    // The image keeps the name of the first descriptor it was opened through.
+    // If a single unload closed that descriptor, the next open would reuse its
+    // number and the next load would alias the still-live image by name.
+    const std::string module_path = PULP_NODE_PACK_MODULE_PATH;
+    const std::string dir = fs::path(module_path).parent_path().string();
+    const auto kp = test_keypair();
+    const auto manifest = signed_manifest(kp, module_path);
+    NodePackTrust trust;
+    trust.trusted_public_keys.push_back(kp.public_key);
+    NodePackHostPolicy policy;
+    policy.max_block_size = 1024;
+    policy.max_persistent_bytes = 8192;
+    policy.max_scratch_bytes = 2048;
+
+    auto first = load_node_pack(dir, manifest, trust, policy);
+    REQUIRE(first.ok());
+    auto second = load_node_pack(dir, manifest, trust, policy);
+    REQUIRE(second.ok());
+    REQUIRE(second.handle == first.handle);
+
+    unload_node_pack(second.handle);
+    const pulp_node_descriptor_v1* d = first.entry->descriptor();
+    REQUIRE(std::string_view(d->stable_id, d->stable_id_len) == "pulp.test.pack.gain");
+
+    auto third = load_node_pack(dir, manifest, trust, policy);
+    REQUIRE(third.error == NodePackError::Ok);
+    REQUIRE(third.handle == first.handle);
+
+    unload_node_pack(third.handle);
+    unload_node_pack(first.handle);
+}
+#endif
+
 TEST_CASE("node pack: rejection paths never load untrusted or tampered code",
           "[host][node-pack]") {
     const std::string module_path = PULP_NODE_PACK_MODULE_PATH;
