@@ -13,6 +13,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <optional>
+#include <ostream>
 #include <string>
 
 namespace pulp::view {
@@ -50,6 +51,27 @@ inline SvgStrokeStyleAttributes svg_stroke_style_attributes(const IRNode& node) 
             out.miter_limit = value;
     }
     return out;
+}
+
+/// The JS lane's form of the same style: one `setSvgStrokeStyle` call, emitted
+/// only when the node carries any of the three.
+inline void emit_svg_stroke_style_js(std::ostream& out, const std::string& indent,
+                                     const std::string& id, const IRNode& node) {
+    const auto style = svg_stroke_style_attributes(node);
+    if (!style.cap && !style.join && !style.miter_limit)
+        return;
+    const auto cap = !style.cap                              ? ""
+                     : *style.cap == canvas::LineCap::round  ? "round"
+                     : *style.cap == canvas::LineCap::square ? "square"
+                                                             : "butt";
+    const auto join = !style.join                              ? ""
+                      : *style.join == canvas::LineJoin::round ? "round"
+                      : *style.join == canvas::LineJoin::bevel ? "bevel"
+                                                               : "miter";
+    out << indent << "setSvgStrokeStyle('" << id << "', '" << cap << "', '" << join << "'";
+    if (style.miter_limit)
+        out << ", " << *style.miter_limit;
+    out << ");\n";
 }
 
 } // namespace pulp::view

@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261023-ua-form-control-skins-watch",
+  "created_at": "2026-10-23T09:48:18Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "RangeSlider and Checkbox gain an opt-in chromium_refresh skin that paints Chromium's form-control theme, and their paint code moves from widgets.cpp into widgets/form_controls.cpp (added to the view source list). This is widget paint inside Pulp's own view layer, off by default and selected only by an explicit set_skin call; no design-import lowering, Chromium capture, renderer backend, asset or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R 'Chromium-refresh skins match Chromium'",
+    "ctest --test-dir build -R 'Pulp.s platform form-control look does not pass'",
+    "ctest --test-dir build -R 'RangeSlider chromium_refresh'",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

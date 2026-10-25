@@ -1,0 +1,9 @@
+libpulp-view-audio.a[view_audio.o]: __ZN4pulp4view5Meter9set_levelEff T 70 0
+libpulp-view-audio.a[view_audio.o]: __ZN4pulp4view5MeterD0Ev T 40 0
+libpulp-view-audio.a[view_audio.o]: __ZN4pulp4view5MeterD1Ev T 14 0
+libpulp-view-audio.a[view_audio.o]: __ZN4pulp4view5MeterD2Ev T 0 0
+libpulp-view-audio.a[view_audio.o]: __ZTIN4pulp4view5MeterE S c0 0
+libpulp-view-audio.a[view_audio.o]: __ZTSN4pulp4view5MeterE S d0 0
+libpulp-view-audio.a[view_audio.o]: __ZTVN10__cxxabiv117__class_type_infoE U 0 0
+libpulp-view-audio.a[view_audio.o]: __ZTVN4pulp4view5MeterE S a0 0
+libpulp-view-audio.a[view_audio.o]: __ZdlPv U 0 0

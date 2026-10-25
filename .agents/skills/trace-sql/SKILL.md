@@ -649,7 +649,7 @@ carries the leaked depth as a value rather than a count of incidents.
 
 ## Check the category is populated before trusting a zero
 
-`trace.hpp` declares ten categories and not all of them emit. A
+`trace.hpp` declares eleven categories and not all of them emit. A
 `WHERE category GLOB '<name>'` filter over one that emits from nowhere returns
 no rows — which looks identical to "that subsystem did no work".
 
@@ -657,7 +657,7 @@ Which categories are empty CHANGES as code is instrumented, so measure rather
 than trust a list:
 
 ```sh
-for c in dsp dsp.node render layout canvas text js gpu state io; do
+for c in dsp dsp.node render layout canvas text js gpu state io lifecycle; do
   printf '%-10s %s\n' "$c" \
     "$(git grep -oE "PULP_TRACE_[A-Z_]+\(\s*\"$c\"" origin/main -- core inspect | wc -l)"
 done

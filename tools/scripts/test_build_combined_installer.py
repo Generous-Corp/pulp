@@ -53,6 +53,10 @@ class NotarizationHeartbeatTest(unittest.TestCase):
             path.chmod(0o755)
 
         tool("codesign", "exit 0\n")
+        tool("dsymutil", 'out=""; want=0\n'
+                         'for a in "$@"; do [[ $want == 1 ]] && out="$a"; want=0;'
+                         ' [[ "$a" == "-o" ]] && want=1; done\n'
+                         'mkdir -p "$out"\n')
         tool("file", 'case "${!#}" in\n'
                      '  */Contents/MacOS/*) echo "Mach-O 64-bit executable";;\n'
                      '  *) /usr/bin/file "$@";;\n'
@@ -267,6 +271,8 @@ class CombinedInstallerTest(unittest.TestCase):
         payload_mode: str = "match",
         wraptool: str = "pass",
         allow_unverified_aax_wrap: bool = False,
+        macho_plugins: bool = False,
+        keep_symbols: bool = False,
     ) -> tuple[str, str]:
         with tempfile.TemporaryDirectory() as raw_tmp:
             tmp = Path(raw_tmp)
@@ -279,6 +285,9 @@ class CombinedInstallerTest(unittest.TestCase):
             productbuild_argv_capture = tmp / "productbuild-argv.txt"
             productsign_argv_capture = tmp / "productsign-argv.txt"
             wraptool_argv_capture = tmp / "wraptool-argv.txt"
+            strip_argv_capture = tmp / "strip-argv.txt"
+            symbol_order_capture = tmp / "symbol-order.txt"
+            pkg_components_capture = tmp / "pkgbuild-components.txt"
             output = tmp / "out"
             wraptool_path = tmp / "pace" / "wraptool"
             if wraptool != "absent":
@@ -335,11 +344,13 @@ class CombinedInstallerTest(unittest.TestCase):
                 "pkgbuild",
                 'printf "BEGIN\\n" >> "$CAPTURE_PKG_ARGV"\n'
                 'printf "%s\\n" "$@" >> "$CAPTURE_PKG_ARGV"\n'
-                'last=""\nanalyze=0\ncomponent_plist=""\nwant_component_plist=0\n'
+                'last=""\nanalyze=0\ncomponent_plist=""\nwant_component_plist=0\nwant_component=0\n'
                 'for arg in "$@"; do\n'
                 '  if [[ "$want_component_plist" == 1 ]]; then component_plist="$arg"; want_component_plist=0; fi\n'
+                '  if [[ "$want_component" == 1 ]]; then printf "%s\\n" "$arg" >> "$CAPTURE_PKG_COMPONENTS"; want_component=0; fi\n'
                 '  [[ "$arg" == "--analyze" ]] && analyze=1\n'
                 '  [[ "$arg" == "--component-plist" ]] && want_component_plist=1\n'
+                '  [[ "$arg" == "--component" ]] && want_component=1\n'
                 '  last="$arg"\n'
                 'done\n'
                 'if [[ "$analyze" == 1 ]]; then\n'
@@ -392,7 +403,9 @@ class CombinedInstallerTest(unittest.TestCase):
                 'mkdir -p "$(dirname "$last")"\n: > "$last"\n',
             )
             # A small pkgutil stand-in that materializes the component payload
-            # the real productbuild/pkgutil path produces.  pkgbuild puts a
+            # the real productbuild/pkgutil path produces, from the bundles the
+            # pkgbuild stand-in was handed (the stripped staged copies when the
+            # installer strips).  pkgbuild puts a
             # component bundle directly under Payload; the install location
             # is PackageInfo metadata, not a directory in the payload.
             self._write_tool(
@@ -401,7 +414,12 @@ class CombinedInstallerTest(unittest.TestCase):
                 '[[ "${1:-}" == "--expand-full" ]] || exit 2\n'
                 'archive="$2"; expanded="$3"; [[ ! -e "$expanded" ]] || { echo "destination already exists" >&2; exit 1; }; mkdir -p "$expanded"\n'
                 'idx=0\n'
-                'IFS=: read -r -a roots <<< "${PAYLOAD_BUNDLE_ROOTS:-}"\n'
+                'roots=()\n'
+                'if [[ -s "${CAPTURE_PKG_COMPONENTS:-}" ]]; then\n'
+                '  while IFS= read -r root; do roots+=("$root"); done < "$CAPTURE_PKG_COMPONENTS"\n'
+                'else\n'
+                '  IFS=: read -r -a roots <<< "${PAYLOAD_BUNDLE_ROOTS:-}"\n'
+                'fi\n'
                 'for root in "${roots[@]}"; do\n'
                 '  [[ -n "$root" ]] || continue\n'
                 '  bundle="$(basename "$root")"\n'
@@ -418,6 +436,30 @@ class CombinedInstallerTest(unittest.TestCase):
                 '  fi\n'
                 '  idx=$((idx+1))\n'
                 'done\n',
+            )
+
+            # Records each strip and marks the file it was given, so a case can
+            # tell which copy of a module was stripped.
+            self._write_tool(
+                fake_bin,
+                "strip",
+                'printf "%s\\n" "$*" >> "$CAPTURE_STRIP_ARGV"\n'
+                'last=""\nfor arg in "$@"; do last="$arg"; done\n'
+                'printf "strip %s\\n" "$last" >> "$CAPTURE_SYMBOL_ORDER"\n'
+                'printf "stripped" >> "$last"\n',
+            )
+            # Records the executable each dSYM is made from, in the same log as
+            # the strips, and creates the -o bundle.
+            self._write_tool(
+                fake_bin,
+                "dsymutil",
+                'out=""\nwant=0\n'
+                'for arg in "$@"; do\n'
+                '  if [[ "$want" == 1 ]]; then out="$arg"; want=0; fi\n'
+                '  [[ "$arg" == "-o" ]] && want=1\n'
+                'done\n'
+                'printf "dsymutil %s -> %s\\n" "$1" "$out" >> "$CAPTURE_SYMBOL_ORDER"\n'
+                'mkdir -p "$out/Contents/Resources/DWARF"\n',
             )
 
             args = [
@@ -437,6 +479,8 @@ class CombinedInstallerTest(unittest.TestCase):
             ]
             if allow_unverified_aax_wrap:
                 args.append("--allow-unverified-aax-wrap")
+            if keep_symbols:
+                args.append("--keep-symbols")
             if architectures:
                 args.extend(("--architectures", architectures))
             plugin_bundles: list[Path] = []
@@ -453,7 +497,11 @@ class CombinedInstallerTest(unittest.TestCase):
                     "</dict></plist>\n"
                 )
                 executable = macos / plugin_name
-                executable.write_text("fixture executable\n")
+                if macho_plugins:
+                    # Any real Mach-O will do; the fake strip only marks it.
+                    executable.write_bytes(Path("/usr/bin/true").read_bytes())
+                else:
+                    executable.write_text("fixture executable\n", encoding="utf-8")
                 executable.chmod(0o755)
                 resources = bundle / "Contents" / "Resources"
                 resources.mkdir(parents=True)
@@ -565,6 +613,9 @@ class CombinedInstallerTest(unittest.TestCase):
                 # and "absent" names a path that does not exist.
                 "PULP_AAX_WRAPTOOL": str(wraptool_path),
                 "CAPTURE_WRAPTOOL_ARGV": str(wraptool_argv_capture),
+                "CAPTURE_STRIP_ARGV": str(strip_argv_capture),
+                "CAPTURE_SYMBOL_ORDER": str(symbol_order_capture),
+                "CAPTURE_PKG_COMPONENTS": str(pkg_components_capture),
             }
             Path(env["PULP_SIGN_KEYCHAIN"]).touch()
             Path(env["PULP_SIGN_P12"]).touch()
@@ -649,6 +700,19 @@ class CombinedInstallerTest(unittest.TestCase):
                 str(bundle / "Contents" / "MacOS" / bundle.stem)
                 for bundle in plugin_bundles
             ]
+            self._last_strip_argv = (
+                strip_argv_capture.read_text(encoding="utf-8") if strip_argv_capture.is_file() else ""
+            )
+            self._last_symbol_order = (
+                symbol_order_capture.read_text(encoding="utf-8")
+                if symbol_order_capture.is_file() else ""
+            )
+            self._last_output_dir = output
+            self._last_plugin_mains_unmodified = all(
+                not (bundle / "Contents" / "MacOS" / bundle.stem)
+                .read_bytes().endswith(b"stripped")
+                for bundle in plugin_bundles
+            )
             return capture.read_text(), relocation
 
     def test_development_vellum_runtime_is_rejected_before_signing(self) -> None:
@@ -760,6 +824,54 @@ class CombinedInstallerTest(unittest.TestCase):
                 line.endswith(main_path)
                 for line in self._last_codesign_argv.splitlines()
             ))
+
+    def test_plugins_ship_a_stripped_copy_signed_after_stripping(self) -> None:
+        self._run_installer([("Kick", "au"), ("Kick", "clap")], macho_plugins=True)
+
+        strips = self._last_strip_argv.splitlines()
+        self.assertEqual(len(strips), 2, msg=self._last_strip_argv)
+        for line in strips:
+            self.assertTrue(line.startswith("-x "), msg=line)
+        # The build output is never modified; the staged copy is what is
+        # stripped, signed and packaged.
+        self.assertTrue(self._last_plugin_mains_unmodified)
+        for bundle in ("Kick.component", "Kick.clap"):
+            staged = [l for l in strips if "/plugins/" in l and f"/{bundle}/" in l]
+            self.assertEqual(len(staged), 1, msg=self._last_strip_argv)
+            staged_bundle = staged[0].removeprefix("-x ").split(f"/{bundle}/")[0] + f"/{bundle}"
+            self.assertTrue(any(
+                line.rstrip().endswith(staged_bundle)
+                for line in self._last_codesign_argv.splitlines()
+                if "--verify" not in line
+            ), msg=self._last_codesign_argv)
+            pkg_args = self._last_pkgbuild_argv.splitlines()
+            self.assertIn(staged_bundle, pkg_args, msg=self._last_pkgbuild_argv)
+            self.assertEqual(pkg_args[pkg_args.index(staged_bundle) - 1], "--component")
+
+    def test_a_dsym_of_the_unstripped_module_is_written_before_stripping(self) -> None:
+        self._run_installer([("Kick", "au"), ("Kick", "clap")], macho_plugins=True)
+
+        order = self._last_symbol_order.splitlines()
+        for kind, bundle in (("au", "Kick.component"), ("clap", "Kick.clap")):
+            dsym_at = [i for i, l in enumerate(order)
+                       if l.startswith("dsymutil ") and f"/{bundle}/" in l]
+            strip_at = [i for i, l in enumerate(order)
+                        if l.startswith("strip ") and f"/{bundle}/" in l]
+            self.assertEqual(len(dsym_at), 1, msg=self._last_symbol_order)
+            self.assertEqual(len(strip_at), 1, msg=self._last_symbol_order)
+            # Made from the build output, which still has its symbols, and
+            # before the staged copy is stripped.
+            self.assertLess(dsym_at[0], strip_at[0], msg=self._last_symbol_order)
+            self.assertNotIn("/plugins/", order[dsym_at[0]].split(" -> ")[0])
+            dsym = self._last_output_dir / "symbols" / kind / f"{bundle}.dSYM"
+            self.assertTrue(order[dsym_at[0]].endswith(str(dsym)), msg=order[dsym_at[0]])
+
+    def test_keep_symbols_ships_the_build_output_unstripped(self) -> None:
+        self._run_installer([("Kick", "au")], macho_plugins=True, keep_symbols=True)
+
+        self.assertEqual(self._last_strip_argv, "")
+        self.assertEqual(self._last_symbol_order, "")
+        self.assertNotIn("/plugins/", self._last_pkgbuild_argv)
 
     def test_distinct_names_with_the_same_lossy_slug_do_not_collide(self) -> None:
         xml, _ = self._run_installer([("Foo-Bar", "au"), ("Foo Bar", "au")])
