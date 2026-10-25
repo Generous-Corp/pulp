@@ -872,8 +872,8 @@ pulp_add_test_suite(pulp-test-widget-bridge-capabilities GROUP pulp-test-group-v
 # platform_services_api.cpp beside always-present registrars, so gating only the
 # API-group table would still link the /bin/sh body into every consumer. Compile
 # that one translation unit twice — once per gate value — and inspect the
-# objects: the dev object must carry the registrar symbol and the "execAsync"
-# literal (positive control), the ship object must carry neither.
+# objects' symbol tables: the dev object must carry the registrar symbol
+# (positive control), the ship object must not.
 if(UNIX AND PULP_ENABLE_JS)
     set(_pulp_bridge_exec_fixture_src
         "${CMAKE_SOURCE_DIR}/core/view/src/widget_bridge/platform_services_api.cpp")
