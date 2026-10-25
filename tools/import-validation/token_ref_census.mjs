@@ -14,11 +14,15 @@
 //   inherited-ref the same, declared on an ancestor (inherited properties only)
 //   scoped-ref    a ref whose value at the node differs from the theme root's
 //   fallback      var(--x, fb) with --x undefined, so the fallback rendered
-//   shorthand     the longhand comes from a shorthand that uses var()
+//   shorthand-ref the longhand comes from a shorthand whose component for
+//                 this longhand is exactly one defined var() (border colour,
+//                 one side of padding / gap / border-radius)
+//   shorthand     any other shorthand that uses var()
 //   derived       var() inside calc(), color-mix(), rgb(from ...), ...
-//   coincidental  a literal (or no declaration) equal to some token's value
-//   literal       anything else that was declared or inherited
-//   default       no author declaration at all (user-agent or initial value)
+//   coincidental  a declared literal equal to some token's value
+//   literal       any other declared or inherited literal
+//   default       no author declaration at all (user-agent or initial value);
+//                 how many of those equal a token is reported separately
 //
 // It writes a JSON report and changes nothing: no IR, no importer code.
 //
@@ -50,8 +54,8 @@ export const FAMILIES = {
 // Only these inherit, so only these may take their declaration from an ancestor.
 const INHERITED = new Set(["color", "fill", "stroke"]);
 
-export const CLASSES = ["ref", "inherited-ref", "scoped-ref", "fallback", "shorthand",
-  "derived", "coincidental", "literal", "default"];
+export const CLASSES = ["ref", "inherited-ref", "scoped-ref", "shorthand-ref", "fallback",
+  "shorthand", "derived", "coincidental", "literal", "default"];
 
 const VAR_ONLY = /^var\(\s*(--[A-Za-z0-9_-]+)\s*(?:,([\s\S]*))?\)$/;
 
@@ -69,6 +73,59 @@ export function classifyDeclaration(text, { defined, scoped, inherited = false }
   }
   if (/var\(/.test(value)) return { cls: "derived" };
   return { cls: "literal" };
+}
+
+/// Space-separated components of a shorthand value, keeping parentheses whole.
+function components(text) {
+  const out = [];
+  let depth = 0;
+  let current = "";
+  for (const ch of text.replace(/\s*!important\s*$/i, "").trim()) {
+    if (ch === "(") depth += 1;
+    if (ch === ")") depth -= 1;
+    if (/\s/.test(ch) && depth === 0) {
+      if (current) out.push(current);
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  if (current) out.push(current);
+  return out;
+}
+
+const SIDES = ["top", "right", "bottom", "left"];
+const CORNERS = ["top-left", "top-right", "bottom-right", "bottom-left"];
+const BOX_INDEX = { 1: [0, 0, 0, 0], 2: [0, 1, 0, 1], 3: [0, 1, 2, 1], 4: [0, 1, 2, 3] };
+
+/// The custom property a shorthand gives `property`, when the component that
+/// becomes that longhand is exactly one var(); null when it cannot be said.
+/// `isColour(name)` says whether a custom property's value is a colour.
+export function shorthandComponent(shorthand, text, property, isColour) {
+  const parts = components(text);
+  const only = (part) => VAR_ONLY.exec(part ?? "")?.[1] ?? null;
+  const boxPart = (index) => {
+    if (parts.length < 1 || parts.length > 4 || parts.some((p) => p === "/")) return null;
+    return only(parts[BOX_INDEX[parts.length][index]]);
+  };
+  if (/^border(-(top|right|bottom|left))?$/.test(shorthand) || shorthand === "outline") {
+    if (!property.endsWith("-color")) return null;
+    // width, style and colour in any order: the colour is the one var() whose
+    // value is a colour, and there must be exactly one.
+    const vars = parts.map(only).filter(Boolean).filter(isColour);
+    return vars.length === 1 ? vars[0] : null;
+  }
+  if (shorthand === "border-color" && property.endsWith("-color"))
+    return boxPart(SIDES.indexOf(property.split("-")[1]));
+  if (shorthand === "padding" && property.startsWith("padding-"))
+    return boxPart(SIDES.indexOf(property.slice("padding-".length)));
+  if (shorthand === "border-radius" && property.endsWith("-radius"))
+    return boxPart(CORNERS.indexOf(property.slice("border-".length, -"-radius".length)));
+  if (shorthand === "gap" && (property === "row-gap" || property === "column-gap")) {
+    if (parts.length === 1) return only(parts[0]);
+    if (parts.length === 2) return only(parts[property === "row-gap" ? 0 : 1]);
+  }
+  return null;
 }
 
 /// The winning declaration of `property` in one style block, in source order
@@ -89,7 +146,7 @@ function winningIn(style, property) {
       // The shorthand's own text is what the author wrote; with var() in it
       // the longhands are pending substitution and say nothing.
       text = p.value;
-      fromShorthand = true;
+      fromShorthand = p.name;
     }
     if (text === null) continue;
     const important = Boolean(p.important) || /!important\s*$/i.test(text);
@@ -188,7 +245,8 @@ const PAGE_PROBE = `(() => {
     }
     rows.push({ index, tag: el.tagName.toLowerCase(), uses, defined, scoped });
   });
-  return { rows, tokenCount: Object.keys(tokens).length,
+  const colourTokens = Object.keys(tokens).filter(name => norm(tokens[name]) !== null);
+  return { rows, tokenCount: Object.keys(tokens).length, colourTokens,
            tokenColours: [...tokenColours], tokenLengths: [...tokenLengths] };
 })()`;
 
@@ -230,7 +288,8 @@ export async function censusOne(cdp, file, { width, height }) {
   await delay(2500);
   await cdp.call("Runtime.evaluate", { expression: "document.fonts.ready", awaitPromise: true });
   const probe = await cdp.call("Runtime.evaluate", { expression: PAGE_PROBE, returnByValue: true });
-  const { rows, tokenCount, tokenColours, tokenLengths } = probe.result.value;
+  const { rows, tokenCount, tokenColours, tokenLengths, colourTokens } = probe.result.value;
+  const colourToken = new Set(colourTokens);
   const colours = new Set(tokenColours);
   const lengths = new Set(tokenLengths);
   const { root } = await cdp.call("DOM.getDocument", { depth: -1 });
@@ -240,6 +299,7 @@ export async function censusOne(cdp, file, { width, height }) {
   for (const family of Object.keys(FAMILIES))
     counts[family] = Object.fromEntries(CLASSES.map((c) => [c, 0]));
   const examples = [];
+  const defaultsEqualToToken = Object.fromEntries(Object.keys(FAMILIES).map((f) => [f, 0]));
   const started = Date.now();
   let matchedCalls = 0;
   for (const row of rows) {
@@ -272,7 +332,11 @@ export async function censusOne(cdp, file, { width, height }) {
         if (!found) {
           cls = "default";
         } else if (found.fromShorthand && /var\(/.test(found.text)) {
-          cls = "shorthand";
+          const name = shorthandComponent(found.fromShorthand, found.text, property,
+                                          (n) => colourToken.has(n));
+          cls = !name ? "shorthand"
+              : !context.defined(name) ? "fallback"
+              : context.scoped(name) ? "scoped-ref" : "shorthand-ref";
         } else {
           cls = classifyDeclaration(found.text, { ...context, inherited }).cls;
         }
@@ -280,7 +344,8 @@ export async function censusOne(cdp, file, { width, height }) {
           const v = row.uses[property];
           const equal = family === "colour" ? colours.has(parseColour(v))
                                             : lengths.has(String(parseFloat(v)));
-          if (equal) cls = "coincidental";
+          if (equal && cls === "literal") cls = "coincidental";
+          if (equal && cls === "default") defaultsEqualToToken[family] += 1;
         }
         counts[family][cls] += 1;
         if (examples.length < 400)
@@ -293,6 +358,7 @@ export async function censusOne(cdp, file, { width, height }) {
     elements: rows.length,
     tokens: tokenCount,
     counts,
+    defaults_equal_to_a_token: defaultsEqualToToken,
     cdp: { matched_calls: matchedCalls, match_ms: Date.now() - started },
     examples,
   };
@@ -301,7 +367,10 @@ export async function censusOne(cdp, file, { width, height }) {
 function shares(counts) {
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
   const ref = counts.ref + counts["inherited-ref"];
-  return { total, ref, ref_share: total ? ref / total : 0 };
+  const withShorthands = ref + counts["shorthand-ref"];
+  return { total, ref, ref_share: total ? ref / total : 0,
+           ref_with_shorthands: withShorthands,
+           ref_with_shorthands_share: total ? withShorthands / total : 0 };
 }
 
 async function main(argv) {

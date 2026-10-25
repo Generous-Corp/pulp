@@ -8,7 +8,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import { promisify } from "node:util";
 
-import { classifyDeclaration, winningDeclaration } from "./token_ref_census.mjs";
+import { classifyDeclaration, shorthandComponent, winningDeclaration } from "./token_ref_census.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const yes = () => true;
@@ -48,6 +48,28 @@ test("the cascade's winner is the last block that declares it, unless an earlier
     { rule: { origin: "user-agent", style: block("var(--ua)") } }] }, "color"), null);
 });
 
+test("a shorthand gives a longhand a reference only through that longhand's own component", () => {
+  const colour = (name) => name === "--line";
+  assert.equal(shorthandComponent("border", "1px solid var(--line)", "border-top-color", colour),
+               "--line");
+  assert.equal(shorthandComponent("border", "var(--bw) solid var(--line)", "border-top-color",
+                                  colour), "--line");
+  // Two colour vars, or a colour var only as the width: nothing to say.
+  assert.equal(shorthandComponent("border", "var(--line) var(--line)", "border-top-color",
+                                  () => true), null);
+  assert.equal(shorthandComponent("border", "1px solid var(--line)", "border-top-width", colour),
+               null);
+  assert.equal(shorthandComponent("padding", "0 var(--s2)", "padding-left", colour), "--s2");
+  assert.equal(shorthandComponent("padding", "0 var(--s2)", "padding-top", colour), null);
+  assert.equal(shorthandComponent("padding", "1px 2px var(--s3)", "padding-bottom", colour), "--s3");
+  assert.equal(shorthandComponent("border-radius", "0 0 var(--r) var(--r)",
+                                  "border-bottom-left-radius", colour), "--r");
+  assert.equal(shorthandComponent("border-radius", "var(--r) / 2px",
+                                  "border-top-left-radius", colour), null);
+  assert.equal(shorthandComponent("gap", "var(--g) 4px", "row-gap", colour), "--g");
+  assert.equal(shorthandComponent("padding", "calc(var(--s) * 2)", "padding-left", colour), null);
+});
+
 const browser = process.env.PULP_DESIGN_BROWSER;
 test("the planted panel classifies every case, with no reference from coincidental equality",
      { skip: browser ? false : "set PULP_DESIGN_BROWSER to run against Chromium" }, async () => {
@@ -62,7 +84,7 @@ test("the planted panel classifies every case, with no reference from coincident
     assert.equal(colour.ref, 1);            // #ref
     assert.equal(colour.coincidental, 1);   // #coincidental, equal to --accent, not a ref
     assert.equal(colour.fallback, 1);       // #fallback
-    assert.equal(colour.shorthand, 4);      // #shorthand, four border sides
+    assert.equal(colour["shorthand-ref"], 4); // #shorthand: border colour on four sides
     assert.equal(colour.derived, 1);        // #derived
     assert.equal(colour["scoped-ref"], 1);  // #scoped under #scope
     assert.equal(colour["inherited-ref"], 1); // the span inside #inherit
