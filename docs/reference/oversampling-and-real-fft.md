@@ -96,6 +96,17 @@ transform produces, so a block multiplies its spectrum without interleaving
 it on the way in or out. All of these calls are realtime
 safe after construction; size must be at least 2.
 
-On Apple platforms the float transform pins where its vDSP split buffers sit
-relative to a 64-byte boundary, because vDSP's speed depends on it (up to 1.9x
-for a 512-point real transform, depending on the processor).
+On Apple platforms the float transform keeps its vDSP split buffers 16 bytes
+past a 64-byte boundary, for accuracy. vDSP takes a separate code path when
+both halves of a split array sit on the boundary, and from 512 points up that
+path rounds 0.4-5.3 dB worse on every processor measured (real and complex
+transforms on M1 Max, M5 Max and M5 Ultra; real transforms on M3 Ultra). The
+placement is pinned rather than left to the allocator, so a transform's
+accuracy does not depend on where its buffer lands;
+`FftT::vdsp_split_offset_bytes()` reports it, and a test asserts the 16-byte
+offset at every size and gates the real transform's error at -134 dB. Speed is
+a separate, processor-dependent effect: on M5 Max and M5 Ultra the
+off-boundary path is also the faster one from 512 to 8192 points, while on
+M1 Max and M3 Ultra the boundary path is faster for large transforms (from
+2048 real and 1024 complex points on M1 Max, from 1024 real and 512 complex
+points on M3 Ultra), so there the placement costs speed for accuracy.

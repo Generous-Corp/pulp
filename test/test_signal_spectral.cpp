@@ -916,6 +916,61 @@ TEST_CASE("Convolver overlap-add matches a direct convolution when the IR fits o
     }
 }
 
+TEST_CASE("Convolver64 overlap-add nulls against a long-double direct convolution",
+          "[signal][convolver][null][f64]") {
+    // The double overlap-add path runs the double FFT end to end, so its null
+    // is set by double rounding: measured -297 to -309 dB over these cases.
+    // The gate sits 40 dB above that floor and far below anything a defect
+    // produces. Output is delayed by exactly one block.
+    constexpr double kGateDb = -250.0;
+    struct Case {
+        int block;
+        std::size_t ir_length;
+    };
+    for (const Case c : {Case{1, 37}, Case{64, 50}, Case{64, 300}, Case{256, 1000}}) {
+        std::vector<double> input(4096), ir(c.ir_length);
+        std::uint32_t state = 0x5151u;
+        for (auto& v : input) {
+            state = state * 1664525u + 1013904223u;
+            v = static_cast<double>(state >> 8) / 8388608.0 - 1.0;
+        }
+        for (std::size_t i = 0; i < ir.size(); ++i) {
+            state = state * 1664525u + 1013904223u;
+            ir[i] = (static_cast<double>(state >> 8) / 8388608.0 - 1.0) *
+                    std::exp(-4.0 * static_cast<double>(i) / static_cast<double>(ir.size()));
+        }
+        Convolver64 conv;
+        conv.load_ir(ir.data(), static_cast<int>(ir.size()), c.block);
+        std::vector<double> out(input.size());
+        conv.process(input.data(), out.data(), static_cast<int>(input.size()));
+
+        // Null of the output read `delay` samples late and scaled by `gain`.
+        const auto null_db = [&](std::size_t delay, double gain) {
+            long double err = 0, ref = 0;
+            for (std::size_t n = 0; n + delay < input.size(); ++n) {
+                long double y = 0;
+                for (std::size_t k = 0; k < ir.size() && k <= n; ++k)
+                    y += static_cast<long double>(ir[k]) * static_cast<long double>(input[n - k]);
+                const long double d = static_cast<long double>(gain * out[n + delay]) - y;
+                err += d * d;
+                ref += y * y;
+            }
+            return 10.0 * std::log10(static_cast<double>(err / ref) + 1e-300);
+        };
+        const auto block = static_cast<std::size_t>(c.block);
+        const double null = null_db(block, 1.0);
+        // Negative controls: a one-sample misalignment and a 1% gain error
+        // must both fail the same gate, or the gate is grading nothing.
+        const double shifted = null_db(block + 1, 1.0);
+        const double scaled = null_db(block, 1.01);
+        INFO("block=" << c.block << " ir=" << c.ir_length << " null=" << null
+                      << " dB, shifted=" << shifted << " dB, x1.01=" << scaled << " dB");
+        REQUIRE(null < kGateDb);
+        REQUIRE(shifted > kGateDb);
+        REQUIRE(scaled > kGateDb);
+    }
+}
+
 TEST_CASE("FFT vDSP split halves sit 16 bytes past a 64-byte boundary",
           "[signal][fft][real][placement]") {
     // vDSP's 64-byte-aligned split path rounds 2.6-6.6 dB worse from 512

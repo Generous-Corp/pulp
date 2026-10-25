@@ -39,9 +39,12 @@ std::string normalized_input_type(std::string raw) {
 bool record_ua_control_state(const CapturedStyleIndex& index, int node_index, std::string_view tag,
                              const std::map<std::string, std::string>& computed,
                              decltype(pulp::view::IRNode::attributes)& attributes) {
-    if (tag == "button") {
+    const auto type =
+        tag == "input" ? normalized_input_type(index.attribute(node_index, "type")) : std::string();
+    if (tag == "button" || type == "button" || type == "submit" || type == "reset") {
         // A push button's theme paint reads only the scheme and whether it is
-        // disabled; Chromium ignores `accent-color` for it.
+        // disabled; Chromium ignores `accent-color` for it. A button-type
+        // input is the same theme part, its label the `#control-value` text.
         attributes["ua_control"] = "button";
         if (index.has_attribute(node_index, "disabled"))
             attributes["ua_disabled"] = "1";
@@ -49,9 +52,6 @@ bool record_ua_control_state(const CapturedStyleIndex& index, int node_index, st
             attributes["ua_color_scheme"] = scheme->second;
         return true;
     }
-    if (tag != "input")
-        return false;
-    const auto type = normalized_input_type(index.attribute(node_index, "type"));
     if (type != "range" && type != "checkbox" && type != "radio")
         return false;
     attributes["ua_control"] = type;

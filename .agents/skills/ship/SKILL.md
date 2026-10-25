@@ -338,8 +338,9 @@ a dev-shared build may be signed for local loading, never distributed.
   (`sign --path` with a Developer ID and no `build-ship/`): it prints the
   outermost command as one copy-pasteable line,
   `PULP_DEV_SHARED_UI=0 pulp build --all && pulp ship <args>`.
-- `is_local_signing_identity()` (ad hoc `-`, `Apple Development`,
-  `Mac Developer`, from `--identity`) lets `sign` take a dev-shared build as it
+- `is_local_signing_identity()` (ad hoc `-`, `Apple Development: ...`,
+  `Mac Developer: ...`, matched through the colon so a lookalike name that only
+  starts with those words is not local; from `--identity`) lets `sign` take a dev-shared build as it
   is: no `build-ship/`, no artifact refusal. Ad hoc signing also skips the signing-keychain preflight,
   because it needs no keychain.
 - `pulp::cli::dev_shared_artifact_offender()` scans every selected artifact for a
@@ -350,6 +351,38 @@ a dev-shared build may be signed for local loading, never distributed.
   closed on an uninspectable tree.
 - `tools/scripts/build_combined_installer.sh` greps its inputs for the same bytes
   before any signing tool runs; a grep read error also refuses.
+- `notarize` and `share` also open containers another tool built,
+  `enforce_no_development_runtimes_in_containers()`: a `.zip` through
+  `ditto -x -k`, a flat `.pkg` through `pkgutil --expand-full`, a `.dmg` mounted
+  `hdiutil attach -readonly -nobrowse -noverify` in a private temp dir and
+  always detached by the scratch object's destructor. The D15 and dev-shared
+  scans then run on the contents, without following symlinks out of the
+  container (a disk image's /Applications alias). Containers inside it are
+  recognized by content (zip header, xar header, UDIF `koly` trailer) or
+  extension and opened in turn, up to 3 levels; a deeper one is refused, as is
+  a container that does not open (fail closed), on `--dry-run` as well: a
+  placeholder `.dmg` that is not a disk image fails `hdiutil attach` and
+  stops the share plan. A test that only wants a plan needs a real image.
+- Every container tool runs with stdin from `/dev/null`, and `hdiutil attach`
+  takes `-stdinpass`. Without that, `std::system` hands the tools the
+  terminal, and an encrypted image or one with a licence agreement (SLA)
+  waits for an answer, so `notarize` hangs instead of refusing. Fixture for
+  an encrypted image: `printf pw | hdiutil create -encryption AES-128
+  -stdinpass -srcfolder <dir> <out>.dmg`. A test of the hang has to keep the
+  child's stdin open and silent (`exec "$@" < <(exec sleep 90)` under bash):
+  with stdin at EOF the old code failed fast and looked fixed.
+- Before extracting, the scan reads the expanded size (`zipinfo -t` for a
+  zip; the `installKBytes` of each `PackageInfo` from a shallow
+  `pkgutil --expand` for a pkg) and refuses unless it fits on the temp volume
+  with 256 MiB to spare. A disk image is mounted, not copied, so it is not
+  sized.
+- The tools are forked and exec'd directly (`run_ship_tool`), not through
+  `std::system`, so the scan knows the running child's pid. SIGINT, SIGTERM
+  and SIGHUP during a scan kill that child, detach the registered mountpoints
+  and remove the scan's temp root from the signal handler (fork/execv only,
+  paths in fixed buffers), then re-raise. Killing the child first matters: an
+  orphaned `ditto` keeps writing into the directory the handler removed. Best effort: SIGKILL leaves the
+  mount, which `hdiutil info` lists under `pulp-ship-container-scan`.
 
 There is no override flag. Tests: the `[dev-shared]` cases in
 `test/test_sdk_distribution_guard.cpp` and `test/test_cli_ship_shellout.cpp`:

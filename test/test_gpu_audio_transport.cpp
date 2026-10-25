@@ -1017,6 +1017,58 @@ class PipelineGainNode : public GainNode {
     std::shared_ptr<detail::WorkerPipelineLink> link_;
 };
 
+// A pipelining node that really emits block N - 1 while hosted, as the staged
+// GpuConvolver does: each worker call outputs the previous call's input
+// times `gain`, so the transport must prime one block fewer and still deliver
+// wet(input from latency_blocks ago).
+class DelayedPipelineNode : public GpuAudioNode {
+  public:
+    DelayedPipelineNode(uint32_t block, uint32_t latency, float gain)
+        : block_(block), latency_(latency), gain_(gain), held_(block, 0.0f),
+          link_(std::make_shared<detail::WorkerPipelineLink>(this,
+                                                             &DelayedPipelineNode::set_hosted)) {}
+    ~DelayedPipelineNode() override {
+        link_->detach();
+    }
+    GpuAudioNodeDescriptor descriptor() const override {
+        GpuAudioNodeDescriptor d;
+        d.name = "delayed-pipeline";
+        d.input_channels = d.output_channels = 1;
+        d.block_size = block_;
+        d.sample_rate = 48000;
+        d.latency_blocks = latency_;
+        d.miss_policy = MissPolicy::PassthroughDry;
+        d.worker_pipeline_blocks = hosted_ ? 1u : 0u;
+        return d;
+    }
+    bool prepare() override {
+        return true;
+    }
+    void process_block(const BufferView<const float>& in, BufferView<float>& out,
+                       uint32_t n) override {
+        for (uint32_t i = 0; i < n; ++i) {
+            const float next = in.channel_ptr(0)[i];
+            out.channel_ptr(0)[i] = hosted_ ? held_[i] * gain_ : next * gain_;
+            held_[i] = next;
+        }
+    }
+    bool bind_realtime_path(detail::RealtimeGpuNodeBinding& binding) noexcept override {
+        binding.pipeline = link_;
+        return true;
+    }
+
+  private:
+    static bool set_hosted(void* self, bool hosted) noexcept {
+        static_cast<DelayedPipelineNode*>(self)->hosted_ = hosted;
+        return true;
+    }
+    uint32_t block_, latency_;
+    float gain_;
+    bool hosted_ = false;
+    std::vector<float> held_;
+    std::shared_ptr<detail::WorkerPipelineLink> link_;
+};
+
 // Per-channel storage with stable float / const-float pointer arrays.
 struct Block {
     Block(uint32_t ch, uint32_t n)
@@ -1462,6 +1514,46 @@ TEST_CASE("GpuAudioTransport keeps latency alignment after dropped input blocks"
     CHECK(t.stats().input_dropped_frames == 2 * BS);
     CHECK(t.stats().miss_blocks == 6);
     CHECK(t.stats().resynced_blocks == 4);
+}
+
+TEST_CASE("GpuAudioTransport keeps a pipelining node aligned after dropped input blocks",
+          "[gpu_audio][transport][pipeline]") {
+    // As the drop test above, on a node that emits block N - 1 while hosted.
+    // Every output is either the dry substitute for its own callback or the
+    // wet block from exactly L callbacks ago; once the backlog drains, every
+    // block is wet and aligned.
+    constexpr uint32_t BS = 32, L = 3, RING = 5;
+    DelayedPipelineNode node(BS, L, 2.0f);
+    REQUIRE(node.prepare());
+    GpuAudioTransport t;
+    REQUIRE(t.prepare(&node, {RING}));
+    REQUIRE(node.descriptor().worker_pipeline_blocks == 1);
+
+    Block in(1, BS), out(1, BS);
+    int misaligned = 0, wet_tail = 0;
+    constexpr int kCallbacks = 40, kStallFrom = 10, kResumeAt = 18;
+    for (int k = 0; k < kCallbacks; ++k) {
+        INFO("callback " << k);
+        if (k == kResumeAt)
+            t.pump();
+        const float value = static_cast<float>(k + 1);
+        in.fill(value);
+        auto iv = in.cview();
+        auto ov = out.view();
+        t.process(iv, ov, BS);
+        if (k < kStallFrom || k >= kResumeAt)
+            t.pump();
+        const float got = out.storage[0][0];
+        const float wet = 2.0f * static_cast<float>(k + 1 - static_cast<int>(L));
+        const bool aligned = k < static_cast<int>(L) ? got == 0.0f : got == wet;
+        if (!aligned && got != value)
+            ++misaligned;
+        if (k >= kCallbacks - 10 && aligned)
+            ++wet_tail;
+    }
+    CHECK(misaligned == 0);
+    CHECK(wet_tail == 10);
+    CHECK(t.stats().input_dropped_frames > 0);
 }
 
 TEST_CASE("GpuAudioTransport wake-on-write worker drains the pipeline", "[gpu_audio][transport]") {

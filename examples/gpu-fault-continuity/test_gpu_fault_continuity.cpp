@@ -3,6 +3,7 @@
 // fault arming), driven directly with varying callback sizes.
 
 #include "gpu_fault_continuity.hpp"
+#include "gpu_fault_interposer.hpp"
 #include "gpu_fault_stimulus.hpp"
 
 #include "harness/rt_allocation_probe.hpp"
@@ -10,6 +11,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/midi/buffer.hpp>
+#include <pulp/view/view.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -23,6 +25,8 @@
 #include <thread>
 #include <vector>
 
+#include <sys/stat.h>
+#include <fcntl.h>
 #include <unistd.h>
 
 using pulp::examples::gpu_fault::GpuFaultContinuityProcessor;
@@ -553,4 +557,153 @@ TEST_CASE("run-directory files are not followed through a symlink", "[gpu-fault-
     fs::remove(dir.path / "fault-request.json");
     fs::copy_file(real, dir.path / "fault-request.json");
     CHECK(wait_for(events, "\"event\":\"fault_armed\""));
+}
+
+TEST_CASE("a new target capture drops a fault armed for the previous engine",
+          "[gpu-fault-continuity]") {
+    namespace gf = pulp::examples::gpu_fault;
+    RunDir dir;
+    write_ir(dir.path, make_ir());
+    GpuFaultContinuityProcessor p;
+    p.prepare(prepare_context());
+    REQUIRE(wait_for(dir.path / "events.jsonl", "\"event\":\"prepared\""));
+    if (!on_shared_path(dir.path / "events.jsonl") || !gf::provider_fault_interposer_installed())
+        SKIP("no shared-I/O GPU provider on this host");
+    // No engine, so nothing can apply the fault while it sits armed.
+    p.release();
+    std::string detail;
+    REQUIRE(gf::arm_provider_fault(gf::FaultKind::ForceLossAfter, 0, detail));
+    CHECK(gf::provider_fault_armed()); // positive control
+    gf::begin_provider_fault_target_capture();
+    CHECK_FALSE(gf::provider_fault_armed());
+    gf::end_provider_fault_target_capture(detail);
+    gf::disarm_provider_fault();
+}
+
+TEST_CASE("an unreadable run directory does not stop the service thread",
+          "[gpu-fault-continuity]") {
+    if (::geteuid() == 0)
+        SKIP("root ignores directory permissions");
+    RunDir dir;
+    write_ir(dir.path, make_ir());
+    const auto events = dir.path / "events.jsonl";
+    GpuFaultContinuityProcessor p;
+    p.prepare(prepare_context());
+    REQUIRE(wait_for(events, "\"event\":\"prepared\""));
+    if (!on_shared_path(events))
+        SKIP("no shared-I/O GPU provider on this host");
+    // Looking for the request now fails with EACCES, not "not found"; a
+    // throwing check would end the process from the service thread.
+    REQUIRE(::chmod(dir.path.c_str(), 0) == 0);
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    REQUIRE(::chmod(dir.path.c_str(), 0700) == 0);
+    // Still polling: a request written now is armed.
+    std::ofstream(dir.path / "fault-request.json")
+        << R"({"fault": "positive_control", "at_project_sample": 4000})";
+    CHECK(wait_for(events, "\"event\":\"fault_armed\""));
+}
+
+TEST_CASE("a worker stall is bounded and releasing the engine ends it", "[gpu-fault-continuity]") {
+    RunDir dir;
+    write_ir(dir.path, make_ir());
+    const auto events = dir.path / "events.jsonl";
+    std::ofstream(dir.path / "fault-request.json")
+        << R"({"fault": "worker_stall", "at_project_sample": 4000, "delay_ms": 60000})";
+    GpuFaultContinuityProcessor p;
+    p.prepare(prepare_context());
+    REQUIRE(wait_for(events, "\"event\":\"prepared\""));
+    if (!on_shared_path(events))
+        SKIP("no shared-I/O GPU provider on this host");
+    REQUIRE(wait_for(events, "\"event\":\"fault_armed\""));
+    drive(p, make_input(), /*paced=*/true);
+    REQUIRE(wait_for(events, "\"event\":\"provider_fault_applied\""));
+    // The 60 s request is clamped.
+    CHECK(read_text(events).find("\"delay_ms\":" +
+                                 std::to_string(pulp::examples::gpu_fault::kMaxProviderStallMs)) !=
+          std::string::npos);
+    // The worker is still inside the stall; release must not wait it out.
+    const auto start = std::chrono::steady_clock::now();
+    p.release();
+    const auto took = std::chrono::steady_clock::now() - start;
+    CHECK(took < std::chrono::milliseconds(1500));
+}
+
+TEST_CASE("the editor never reaches a destroyed processor", "[gpu-fault-continuity]") {
+    auto p = std::make_unique<GpuFaultContinuityProcessor>();
+    auto view = p->create_view();
+    REQUIRE(view != nullptr);
+    const auto link = p->editor_link();
+    {
+        std::lock_guard lock(link->mutex);
+        CHECK(link->processor == p.get()); // positive control
+    }
+    // A host may destroy the processor before its editor.
+    p.reset();
+    {
+        std::lock_guard lock(link->mutex);
+        CHECK(link->processor == nullptr);
+    }
+    view.reset(); // must not touch the destroyed processor
+}
+
+TEST_CASE("a host re-prepare between the fault block and the arm refuses the stale fault",
+          "[gpu-fault-continuity]") {
+    namespace gf = pulp::examples::gpu_fault;
+    RunDir dir;
+    write_ir(dir.path, make_ir());
+    const auto events = dir.path / "events.jsonl";
+    std::ofstream(dir.path / "fault-request.json")
+        << R"({"fault": "force_loss_after", "at_project_sample": 4000})";
+    GpuFaultContinuityProcessor p;
+    p.prepare(prepare_context());
+    REQUIRE(wait_for(events, "\"event\":\"prepared\""));
+    if (!on_shared_path(events))
+        SKIP("no shared-I/O GPU provider on this host");
+    REQUIRE(wait_for(events, "\"event\":\"fault_armed\""));
+    // The host re-prepares in the gap between the callback that reached the
+    // fault block and the service thread arming the fault. Audio is idle then
+    // (the drive below has returned), as it is around a real host re-prepare.
+    std::atomic<bool> reprepared{false};
+    p.set_before_arm_hook_for_test([&] {
+        p.release();
+        p.prepare(prepare_context());
+        reprepared.store(true);
+    });
+    auto x = make_input();
+    x.resize(4600); // through the fault block at 4000, then stop
+    drive(p, x);
+    REQUIRE(wait_for(events, "not arming a stale fault"));
+    CHECK(reprepared.load());
+    const auto text = read_text(events);
+    INFO(text);
+    CHECK(text.find("\"prepare_index\":2") != std::string::npos);
+    CHECK(text.find("\"event\":\"fault_fired\"") == std::string::npos);
+    CHECK_FALSE(gf::provider_fault_armed());
+    p.set_before_arm_hook_for_test(nullptr);
+}
+
+TEST_CASE("the instance that owns the run names itself in the host log", "[gpu-fault-continuity]") {
+    // AU v2 hosts log no plug-in name of their own, so the verifier's check
+    // that the host's log mentions the plug-in rests on this line.
+    RunDir dir;
+    write_ir(dir.path, make_ir());
+    const auto log_path = dir.path / "stderr.txt";
+    std::fflush(stderr);
+    const int saved = ::dup(STDERR_FILENO);
+    const int file = ::open(log_path.c_str(), O_CREAT | O_TRUNC | O_WRONLY, 0644);
+    REQUIRE(saved >= 0);
+    REQUIRE(file >= 0);
+    ::dup2(file, STDERR_FILENO);
+    {
+        GpuFaultContinuityProcessor p;
+        p.prepare(prepare_context());
+        std::fflush(stderr);
+    }
+    std::fflush(stderr);
+    ::dup2(saved, STDERR_FILENO);
+    ::close(saved);
+    ::close(file);
+    const auto log = read_text(log_path);
+    INFO(log);
+    CHECK(log.find("'Pulp GPU Fault Continuity' claimed the run directory") != std::string::npos);
 }

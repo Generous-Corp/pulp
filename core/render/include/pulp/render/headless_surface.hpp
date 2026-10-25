@@ -52,6 +52,8 @@ public:
         uint8_t clear_g = 0;
         uint8_t clear_b = 0;
         uint8_t clear_a = 255;
+        /// Glyph preblend handed to SkiaSurface::Config.
+        canvas::TextRasterPolicy text_raster_policy = canvas::TextRasterPolicy::legacy;
     };
 
     struct Rgba {

@@ -537,6 +537,13 @@ specific test when a fixture needs semantics beyond those shared invariants.
   across backends. Both surfaces run the same throttled `unused_for` trim from
   `end_frame()`, and a lost context reports zero rather than stale numbers. Do
   not port a native "budgeted dropped by N" assertion to the browser unchanged.
+- **The WebGL2 surface takes a text raster policy too.** `WebGlConfig::text_raster_policy`
+  sets the glyph contrast and gamma the frame wrap and the offscreen target are
+  created with, and `set_text_raster_policy()` drops the canvas and retained
+  layers, rewraps the frame on the next `begin_frame()` and recreates the
+  offscreen target (deferred while the context is lost). `legacy` is the
+  default and equals a surface created without props, so a browser page that
+  never sets it paints as before.
 - The render loop is `requestAnimationFrame`-driven
   (`core/render/src/render_loop_emscripten.cpp`); DOM pointer/key events are
   translated in `core/view/include/pulp/view/web/web_event_translate.hpp`.
