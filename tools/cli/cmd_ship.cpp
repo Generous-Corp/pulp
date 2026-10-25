@@ -4,7 +4,9 @@
 #include "cli_common.hpp"
 #include "sdk_distribution_guard.hpp"
 #include "notary_env.hpp"
+#include "ship_dev_build_guard.hpp"
 #include "ship_tracing_guard.hpp"
+#include "tartci_lease.hpp"
 #include "inspector_container_report.hpp"
 #include "inspector_shipping_report.hpp"
 #include "json_writer.hpp"
@@ -104,6 +106,8 @@ static int print_ship_help() {
     std::cout << "             --version 1.0.0\n";
     std::cout << "             --pkg | --dmg  (item 7.5: per-artifact macOS packaging)\n";
     std::cout << "             --allow-tracing  (override the guard that refuses a PULP_TRACING=ON build)\n";
+    std::cout << "             --allow-dev-build  (ship a PULP_DEV_BUILD=ON build dir as it is "
+                 "instead of building build-ship/; sign honors it too)\n";
     std::cout << "             --ship-inspector  (acknowledge an exactly declared inspector endpoint)\n";
     std::cout << "             --ship-inspector-runtime-eval  (separate unsafe-eval acknowledgement)\n";
     std::cout << "             --json  (emit inspector capability evidence)\n";
@@ -337,6 +341,90 @@ static int enforce_jit_entitlement(const fs::path& build_dir, const fs::path& en
     return 0;
 }
 
+// A dev build dir (PULP_DEV_BUILD=ON) records the on-disk UI_SCRIPT, theme and
+// asset-root paths for the hot-reload loop, so its artifacts would name, and
+// read from, the developer's source tree. cmd_ship() redirects such a project
+// to build-ship/ before reaching sign/package; this is only reached with the
+// dev dir when --allow-dev-build asked for it, and says so.
+static int enforce_no_dev_build(const fs::path& build_dir, bool allow_dev_build) {
+    if (!pulp::cli::build_dir_is_dev_build(build_dir))
+        return 0;
+    if (allow_dev_build) {
+        std::cerr << "⚠︎  pulp ship: " << build_dir.string()
+                  << " was configured with PULP_DEV_BUILD=ON — shipping it as it is because "
+                     "--allow-dev-build was passed. Its editor can read the on-disk ui.js path.\n";
+        return 0;
+    }
+    std::cerr << "Error: " << build_dir.string()
+              << " is a dev build (PULP_DEV_BUILD=ON); ship from "
+              << pulp::cli::ship_build_dir(build_dir.parent_path()).string()
+              << " or pass --allow-dev-build.\n";
+    return 1;
+}
+
+// Configure (when needed) and build the shippable sibling of a dev build dir:
+// <root>/build-ship, carrying every entry of the dev cache except the dev-only
+// switches through an initial-cache script, with PULP_DEV_BUILD=OFF. The
+// configure re-runs when the dev cache changed or the carried entries differ;
+// the build goes through the same host lease, QoS, watchdog and build-dir lock
+// as `pulp build`. Refuses when build-ship lacks a plug-in artifact the dev
+// build has, so a format that fell out of the configure is never shipped
+// without anyone noticing.
+static int ensure_ship_build(const fs::path& root, const fs::path& dev_build_dir,
+                             const fs::path& ship_dir, bool dev_shared = false) {
+    if (dev_shared)
+        std::cout << "pulp ship: " << dev_build_dir.filename().string()
+                  << "/ links plug-ins against the development-only shared Pulp runtime "
+                     "(PULP_DEV_SHARED_UI=ON).\n"
+                  << "           Building the shippable, statically linked build in "
+                  << ship_dir.string() << " and shipping from there.\n";
+    else
+        std::cout << "pulp ship: " << dev_build_dir.filename().string()
+                  << "/ is a dev build (PULP_DEV_BUILD=ON records the on-disk ui.js hot-reload "
+                     "path).\n"
+                  << "           Building the shippable build in " << ship_dir.string()
+                  << " (PULP_DEV_BUILD=OFF) and shipping from there; "
+                     "--allow-dev-build ships the dev build as it is.\n";
+    const auto dev_cache = pulp::cli::read_cmake_cache(dev_build_dir).value_or("");
+    const auto initial_cache = pulp::cli::ship_build_initial_cache(dev_cache);
+    if (pulp::cli::ship_build_needs_configure(dev_build_dir, ship_dir, initial_cache)) {
+        std::error_code ec;
+        fs::create_directories(ship_dir, ec);
+        const auto initial_cache_path = pulp::cli::ship_initial_cache_path(ship_dir);
+        {
+            std::ofstream out(initial_cache_path, std::ios::binary | std::ios::trunc);
+            if (!out) {
+                std::cerr << "pulp ship: cannot write " << initial_cache_path.string() << "\n";
+                return 1;
+            }
+            out << initial_cache;
+        }
+        std::string configure =
+            "cmake -S " + shell_quote(root.string()) + " -B " + shell_quote(ship_dir.string());
+        for (const auto& arg : pulp::cli::ship_build_configure_args(dev_cache, initial_cache_path))
+            configure += " " + shell_quote(arg);
+        if (int rc = run_with_spinner(configure, "Configuring (shippable)"); rc != 0)
+            return rc;
+    }
+    if (int rc = run_governed_cmake_build(root, ship_dir, {}, "pulp-ship-build",
+                                          GovernedBuildOutput::Spinner, "Building (shippable)",
+                                          "pulp ship: ");
+        rc != 0)
+        return rc;
+    const auto mismatch = pulp::cli::plugin_artifact_set_mismatch(
+        pulp::cli::plugin_artifact_set(dev_build_dir), pulp::cli::plugin_artifact_set(ship_dir));
+    if (!mismatch.empty()) {
+        std::cerr << "Error: refusing to ship from " << ship_dir.string() << ": " << mismatch
+                  << ".\n"
+                  << "  The dev build's configuration did not carry over completely; compare "
+                  << dev_build_dir.string() << "/CMakeCache.txt with "
+                  << pulp::cli::ship_initial_cache_path(ship_dir).string()
+                  << ", or pass --allow-dev-build to ship the dev build as it is.\n";
+        return 1;
+    }
+    return 0;
+}
+
 static int enforce_no_vellum_d15(const std::vector<fs::path>& artifacts) {
     for (const auto& artifact : artifacts) {
         const auto offender = pulp::cli::vellum_d15_artifact_offender(artifact);
@@ -350,6 +438,50 @@ static int enforce_no_vellum_d15(const std::vector<fs::path>& artifacts) {
         return 1;
     }
     return 0;
+}
+
+// The command line that rebuilds the project with static plug-in links and
+// re-runs the outermost `pulp ship` invocation, for a refusal to print.
+static std::string g_dev_shared_fix;
+
+static int enforce_no_dev_shared_ui(const std::vector<fs::path>& artifacts) {
+    for (const auto& artifact : artifacts) {
+        const auto offender = pulp::cli::dev_shared_artifact_offender(artifact);
+        if (offender.empty())
+            continue;
+        std::cerr << "Error: refusing to distribute a development-only dev-shared build "
+                     "(PULP_DEV_SHARED_UI=ON).\n"
+                  << "  Offending artifact: " << offender.string() << "\n"
+                  << "  It loads Pulp from libpulp-dev-shared-ui.<version>.dylib in its build "
+                     "tree, so it fails\n"
+                  << "  on any other machine. Rebuild it with static links and re-run:\n"
+                  << "    " << g_dev_shared_fix << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Development-only runtimes that must never reach a distributed artifact. A
+// dev-shared build may still be signed with a local identity (ad hoc or Apple
+// Development) so a host on this machine loads it; `allow_dev_shared` says so.
+static int enforce_no_development_runtimes(const std::vector<fs::path>& artifacts,
+                                           bool allow_dev_shared = false) {
+    if (int rc = enforce_no_vellum_d15(artifacts); rc != 0)
+        return rc;
+    return allow_dev_shared ? 0 : enforce_no_dev_shared_ui(artifacts);
+}
+
+// Backstop for a dev-shared build dir that reaches a distribution step anyway:
+// cmd_ship() ships such a project from build-ship/, so this fires only when
+// that redirect did not apply. The refusal names the one command that fixes it.
+static int refuse_dev_shared_build(const fs::path& build_dir) {
+    std::string error;
+    if (pulp::cli::dev_shared_build_allows_distribution(build_dir, error))
+        return 0;
+    std::cerr << "Error: " << error << ".\n"
+              << "  Rebuild with static links and re-run:\n"
+              << "    " << g_dev_shared_fix << "\n";
+    return 1;
 }
 
 // Load (or, on first use, create + store) the plugin's Ed25519 signing key from the
@@ -428,11 +560,14 @@ static int ship_sign(const std::vector<std::string>& args,
         std::string sign_path;  // --path: sign one explicit desktop artifact (not .pkg)
         std::string entitlements = default_entitlements(root).string();
         bool allow_tracing = false;  // override the PULP_TRACING ship guard
+        bool allow_dev_build = false; // override the PULP_DEV_BUILD ship guard
         for (size_t i = 1; i < args.size(); ++i) {
             if (args[i] == "--identity") {
                 if (!take_ship_value(args, i, sub, args[i], identity)) return 2;
             } else if (args[i] == "--allow-tracing") {
                 allow_tracing = true;
+            } else if (args[i] == "--allow-dev-build") {
+                allow_dev_build = true;
             } else if (args[i] == "--path") {
                 if (!take_ship_value(args, i, sub, args[i], sign_path)) return 2;
             } else if (args[i] == "--entitlements") {
@@ -459,6 +594,15 @@ static int ship_sign(const std::vector<std::string>& args,
             rc != 0) {
             return rc;
         }
+        // The same for a dev build: its editor reads the source tree. An
+        // explicit --path names an artifact built elsewhere, so the build dir
+        // being a dev build says nothing about what is signed.
+        if (sign_path.empty()) {
+            if (int rc = enforce_no_dev_build(build_dir, allow_dev_build); rc != 0) {
+                return rc;
+            }
+        }
+
         if (target == "android") {
             keystore_path = ship_config(keystore_path, "", "signing.android", "keystore");
             key_alias = ship_config(key_alias, "", "signing.android", "key_alias");
@@ -530,6 +674,18 @@ static int ship_sign(const std::vector<std::string>& args,
             return 1;
         }
 
+        // An ad hoc or Apple Development signature only lets a host on this
+        // machine load the bundle, so a dev-shared build may take one. Any
+        // other identity signs for distribution, which cmd_ship() has already
+        // pointed at the static build-ship/. Ad hoc signing needs no keychain,
+        // so it skips the signing-keychain preflight.
+        const bool local_identity = pulp::cli::is_local_signing_identity(identity);
+        const bool ad_hoc = identity == "-";
+        if (!local_identity) {
+            if (int rc = refuse_dev_shared_build(build_dir); rc != 0)
+                return rc;
+        }
+
         // --path: sign exactly one artifact instead of auto-scanning the
         // build dirs. This is the composable primitive behind the one-off
         // "I built an app/DMG and want to hand it to a friend" flow — point
@@ -549,7 +705,8 @@ static int ship_sign(const std::vector<std::string>& args,
                              "  `pulp ship package` / `create_pkg`, not `sign --path`.\n";
                 return 1;
             }
-            if (int rc = enforce_no_vellum_d15({fs::path(sign_path)}); rc != 0)
+            if (int rc = enforce_no_development_runtimes({fs::path(sign_path)}, local_identity);
+                rc != 0)
                 return rc;
             const bool is_disk_image = (ext == ".dmg");
             if (!is_disk_image) {
@@ -559,7 +716,8 @@ static int ship_sign(const std::vector<std::string>& args,
                     return rc;
             }
 #ifdef __APPLE__
-            if (!run_signing_preflight(root)) return 1;
+            if (!ad_hoc && !run_signing_preflight(root))
+                return 1;
 #endif
             // Hardened runtime + secure timestamp are mandatory for
             // notarization. Entitlements only apply to executables, so we
@@ -590,13 +748,14 @@ static int ship_sign(const std::vector<std::string>& args,
             std::cerr << "No plugin bundles found to sign. Run `pulp build` first.\n";
             return 1;
         }
-        if (int rc = enforce_no_vellum_d15(bundles); rc != 0)
+        if (int rc = enforce_no_development_runtimes(bundles, local_identity); rc != 0)
             return rc;
         if (int rc = enforce_jit_entitlement(build_dir, fs::path(entitlements), bundles); rc != 0)
             return rc;
 
 #ifdef __APPLE__
-        if (!run_signing_preflight(root)) return 1;
+        if (!ad_hoc && !run_signing_preflight(root))
+            return 1;
 #endif
 
         int signed_count = 0;
@@ -700,6 +859,7 @@ static int ship_package_impl(const std::vector<std::string>& args,
         std::string icon_path;     // Linux AppImage: optional .png icon
         bool per_user = false, apk_only = false, aab_only = false;
         bool allow_tracing = false;  // override the PULP_TRACING ship guard
+        bool allow_dev_build = false; // override the PULP_DEV_BUILD ship guard
         bool ship_inspector = false;
         bool ship_inspector_runtime_eval = false;
         // macOS packaging. DEFAULT: one component-selectable installer — a single
@@ -761,6 +921,8 @@ static int ship_package_impl(const std::vector<std::string>& args,
             else if (args[i] == "--keep-symbols")
                 keep_symbols = true;
             else if (args[i] == "--allow-tracing") allow_tracing = true;
+            else if (args[i] == "--allow-dev-build")
+                allow_dev_build = true;
             else if (args[i] == "--ship-inspector") ship_inspector = true;
             else if (args[i] == "--ship-inspector-runtime-eval")
                 ship_inspector_runtime_eval = true;
@@ -773,6 +935,9 @@ static int ship_package_impl(const std::vector<std::string>& args,
         if (int rc = enforce_no_tracing({build_dir, fs::path(binary_path)},
                                         allow_tracing);
             rc != 0) {
+            return rc;
+        }
+        if (int rc = enforce_no_dev_build(build_dir, allow_dev_build); rc != 0) {
             return rc;
         }
 
@@ -802,7 +967,7 @@ static int ship_package_impl(const std::vector<std::string>& args,
         // Inspect exactly the inputs this invocation selected, after product
         // filtering and before creating a DMG/pkg or invoking a packager.
         if (target != "android") {
-            if (int rc = enforce_no_vellum_d15(selected_macos_artifacts); rc != 0)
+            if (int rc = enforce_no_development_runtimes(selected_macos_artifacts); rc != 0)
                 return rc;
         }
         if (target != "android") {
@@ -1472,7 +1637,7 @@ static int ship_notarize(const std::vector<std::string>& args,
         // Directory-backed bundles and loose dylibs are directly inspectable.
         // Opaque pkg/dmg/zip inputs are not extracted here; Pulp-produced
         // containers were already guarded at their selected package inputs.
-        if (int rc = enforce_no_vellum_d15(notarize_artifacts); rc != 0)
+        if (int rc = enforce_no_development_runtimes(notarize_artifacts); rc != 0)
             return rc;
 
         if (staple_only) {
@@ -2387,7 +2552,7 @@ static int ship_share(const std::vector<std::string>& args,
                       << "' — expected .app, .dmg, or .pkg.\n";
             return 2;
         }
-        if (int rc = enforce_no_vellum_d15({fs::path(input)}); rc != 0)
+        if (int rc = enforce_no_development_runtimes({fs::path(input)}); rc != 0)
             return rc;
         auto inspector_report =
             pulp::cli::inspector_shipping::empty_report();
@@ -2697,6 +2862,20 @@ static int ship_swap_pack(const std::vector<std::string>& args,
 int cmd_ship(const std::vector<std::string>& args) {
     // Parse subcommand
     std::string sub = args.empty() ? "help" : args[0];
+    // `release` re-enters cmd_ship for its stages; the fix a refusal prints is
+    // always the command the user typed.
+    if (g_dev_shared_fix.empty()) {
+        g_dev_shared_fix = "PULP_DEV_SHARED_UI=0 pulp build --all && pulp ship";
+        for (const auto& arg : args) {
+            const bool plain =
+                !arg.empty() && std::all_of(arg.begin(), arg.end(), [](unsigned char c) {
+                    return std::isalnum(c) ||
+                           std::string_view("@%+=:,./_-").find(static_cast<char>(c)) !=
+                               std::string_view::npos;
+                });
+            g_dev_shared_fix += " " + (plain ? arg : shell_quote(arg));
+        }
+    }
     if (sub == "help" || sub == "--help" || sub == "-h")
         return print_ship_help();
 
@@ -2740,12 +2919,75 @@ int cmd_ship(const std::vector<std::string>& args) {
         return 1;
     }
 
+    // A dev build dir records the developer's on-disk ui.js path; a shipped
+    // artifact comes from a build without it. Ship from build-ship/ instead of
+    // refusing: the artifact-producing subcommands configure and build it from
+    // the dev cache with PULP_DEV_BUILD=OFF, the others read it once it exists.
+    // --allow-dev-build keeps the dev dir (sign/package then say so).
+    const bool allow_dev_build =
+        std::find(args.begin(), args.end(), "--allow-dev-build") != args.end();
+    const bool reads_native_build =
+        sub != "swap-pack" && sub != "auv3-xcodeproj" && sub != "appcast" && !android_check;
+    // `sign --path <artifact>` signs something the caller already built; it
+    // reads build-ship/ when that exists but never builds it, so signing one
+    // bundle from an in-tree checkout is not a second full build.
+    const bool signs_explicit_path =
+        sub == "sign" && std::find(args.begin(), args.end(), "--path") != args.end();
+    // A dev-shared dir (PULP_DEV_SHARED_UI=ON) loads Pulp from its build tree,
+    // so it takes the same route and --allow-dev-build cannot keep it. Only
+    // `sign` with a local identity (ad hoc or Apple Development, for a host on
+    // this machine) signs it as it is.
+    std::string sign_identity;
+    for (std::size_t i = 1; i + 1 < args.size(); ++i)
+        if (args[i] == "--identity")
+            sign_identity = args[i + 1];
+    const bool dev_shared = pulp::cli::build_dir_is_dev_shared(build_dir) &&
+                            !(sub == "sign" && pulp::cli::is_local_signing_identity(sign_identity));
+    if (reads_native_build &&
+        ((!allow_dev_build && pulp::cli::build_dir_is_dev_build(build_dir)) || dev_shared)) {
+        const auto ship_dir = pulp::cli::ship_build_dir(root);
+        const std::string why = dev_shared
+                                    ? "links plug-ins against the development-only shared runtime "
+                                      "(PULP_DEV_SHARED_UI=ON)"
+                                    : "is a dev build (PULP_DEV_BUILD=ON)";
+        if ((sub == "sign" && !signs_explicit_path) || sub == "package" || sub == "release") {
+            if (int rc = ensure_ship_build(root, build_dir, ship_dir, dev_shared); rc != 0)
+                return rc;
+            build_dir = ship_dir;
+        } else if (signs_explicit_path && !fs::exists(ship_dir / "CMakeCache.txt")) {
+            // The named artifact is signed as given; the dev build dir only
+            // supplies build metadata (entitlements), and nothing is built.
+        } else if (fs::exists(ship_dir / "CMakeCache.txt")) {
+            std::cout << "pulp ship " << sub << ": " << build_dir.filename().string() << "/ " << why
+                      << "; reading " << ship_dir.filename().string() << "/\n";
+            build_dir = ship_dir;
+        } else if (sub == "check") {
+            std::cout << "pulp ship check: " << build_dir.filename().string() << "/ " << why
+                      << "; `pulp ship sign` and "
+                         "`pulp ship package` build and ship "
+                      << ship_dir.filename().string() << "/ instead (not built yet)\n";
+        } else {
+            std::cerr << "pulp ship " << sub << ": " << build_dir.string() << " " << why << " and "
+                      << ship_dir.string() << " has not been built yet.\n"
+                      << "  Run `pulp ship package` (or `pulp ship sign`) first: it configures "
+                         "and builds the shippable build there."
+                      << (dev_shared ? "\n"
+                                     : " Pass --allow-dev-build to read the dev build instead.\n");
+            return 1;
+        }
+    }
+
     if (sub == "package" || sub == "notarize" || sub == "release" || sub == "share") {
         std::string distribution_error;
         if (!pulp::cli::sdk_allows_distribution(build_dir, distribution_error)) {
             std::cerr << "Error: " << distribution_error << ".\n";
             return 1;
         }
+    }
+    // `sign` decides once it knows the identity (see ship_sign).
+    if (sub == "package" || sub == "notarize" || sub == "release" || sub == "share") {
+        if (int rc = refuse_dev_shared_build(build_dir); rc != 0)
+            return rc;
     }
 
     if (sub == "sign")           return ship_sign(args, root, build_dir);

@@ -66,6 +66,8 @@ void BridgeRegistrars::register_widget_assets_api(WidgetBridge& self) {
                                           source.rfind("memory:", 0) == 0;
             if (is_supported_uri) {
                 img->set_image_source(source);
+            } else if (const auto* embedded = self.embedded_asset(source)) {
+                img->set_image_source(self.embedded_asset_data_uri(*embedded));
             } else if (auto resolved = self.resolve_script_relative(source); !resolved.empty()) {
                 img->set_image_path(resolved);
             }
@@ -83,17 +85,21 @@ void BridgeRegistrars::register_widget_assets_api(WidgetBridge& self) {
         auto* k = dynamic_cast<Knob*>(self.widget(id));
         if (!k || path.empty() || frame_count <= 0) return choc::value::Value();
 
-        path = self.resolve_script_relative(path);
-        if (path.empty())
-            return choc::value::Value();
-
-        std::ifstream f(path, std::ios::binary);
-        if (!f.good()) {
-            std::cerr << "[setKnobSpriteStrip] could not open " << path << "\n";
-            return choc::value::Value();
+        std::vector<uint8_t> bytes;
+        const auto* embedded = self.embedded_asset(path);
+        if (embedded) {
+            bytes.assign(embedded->data, embedded->data + embedded->size);
+        } else {
+            path = self.resolve_script_relative(path);
+            if (path.empty())
+                return choc::value::Value();
+            std::ifstream f(path, std::ios::binary);
+            if (!f.good()) {
+                std::cerr << "[setKnobSpriteStrip] could not open " << path << "\n";
+                return choc::value::Value();
+            }
+            bytes.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
         }
-        std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)),
-                                    std::istreambuf_iterator<char>());
         auto img = AssetManager::instance().load_image_from_memory(bytes.data(), bytes.size());
         if (!img.valid()) {
             std::cerr << "[setKnobSpriteStrip] PNG decode failed for " << path << "\n";
@@ -104,10 +110,14 @@ void BridgeRegistrars::register_widget_assets_api(WidgetBridge& self) {
         auto orientation = (orientation_s == "horizontal")
                                ? SpriteStrip::Orientation::horizontal
                                : SpriteStrip::Orientation::vertical;
-        strip->load_from_file(path,
-                              static_cast<int>(img.width),
-                              static_cast<int>(img.height),
-                              frame_count, orientation);
+        // An embedded strip has no file behind it: keep its encoded bytes, so
+        // nothing re-opens the embedded name from the working directory.
+        if (embedded)
+            strip->load(bytes.data(), bytes.size(), static_cast<int>(img.width),
+                        static_cast<int>(img.height), frame_count, orientation);
+        else
+            strip->load_from_file(path, static_cast<int>(img.width), static_cast<int>(img.height),
+                                  frame_count, orientation);
         k->set_sprite_strip(std::move(strip));
         k->request_repaint();
         return choc::value::Value();

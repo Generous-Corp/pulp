@@ -227,6 +227,37 @@ TEST_CASE("pulp create rejects standalone output paths inside the checkout",
             != std::string::npos);
 }
 
+TEST_CASE("pulp create puts the processor body in its own source listed under SOURCES",
+          "[cli][create][shellout][template-split]") {
+    // process() lives in <name>.cpp and pulp_add_plugin(SOURCES) compiles it
+    // once for every format, so a DSP edit recompiles one file instead of
+    // every format entry that includes the header.
+    if (!pulp_binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    for (const std::string type : {"effect", "instrument"}) {
+        TempDir tmp("pulp-create-split-" + type);
+        const auto out_dir = tmp.path / "Split Gain";
+        auto r = run_create({"create", "Split Gain", "--type", type, "--output",
+                             native_path_string(out_dir), "--no-build", "--ci"},
+                            source_root());
+        INFO(type << "\n" << r.stdout_output << r.stderr_output);
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 0);
+        const auto header = read_file(out_dir / "split_gain.hpp");
+        const auto source = read_file(out_dir / "split_gain.cpp");
+        const auto cmake = read_file(out_dir / "CMakeLists.txt");
+        // The header declares process(); the source defines it, once.
+        CHECK(header.find(") override;") != std::string::npos);
+        CHECK(header.find("::process(") == std::string::npos);
+        CHECK(source.find("#include \"split_gain.hpp\"") != std::string::npos);
+        CHECK(source.find("::process(") != std::string::npos);
+        CHECK(source.find("{{") == std::string::npos);
+        CHECK(cmake.find("SOURCES         split_gain.cpp") != std::string::npos);
+        CHECK(cmake.find("SplitGain_Core") != std::string::npos);
+    }
+}
+
 TEST_CASE("pulp create --in-tree rejects output paths outside examples",
           "[cli][create][shellout][issue-643]") {
     if (!pulp_binary_exists()) {

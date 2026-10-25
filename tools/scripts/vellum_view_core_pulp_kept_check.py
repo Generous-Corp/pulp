@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Assert that the extracted view units carry none of Pulp's kept view code.
 
-D3 keeps the component inspector, the editor bridge, the StateStore-backed
+Pulp keeps the component inspector, the editor bridge, the StateStore-backed
 host-parameter adapter and the runtime-inspector bridge in Pulp. They build in
 a Pulp-kept target, and the `view-core` unit in vellum_d3_units.json records
 the rule under `pulp_kept`:
@@ -9,8 +9,9 @@ the rule under `pulp_kept`:
 - `files`: sources and headers that must be absent from the closure manifest.
 - `targets`: Pulp-kept targets that no extracted target may link.
 - `seam_headers`: view-core headers that stand in for a kept implementation,
-  each with include prefixes it must never reach (the abstract HostParamSurface
-  contract must not pull in StateStore).
+  each with include prefixes it must never reach, directly or through any
+  header it includes (the abstract HostParamSurface contract must not pull in
+  StateStore). Every spelling counts: #include, #include_next and #import.
 - `deferred`: kept files still built in view-core, each naming the owner whose
   carve moves it and the ruling that deferred it. A deferred file that has left
   the closure is stale and fails, so a deferral cannot quietly outlive its
@@ -29,8 +30,54 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from include_boundary import INCLUDE_RE
+
 ROOT = Path(__file__).resolve().parents[2]
-INCLUDE = re.compile(r'^\s*#\s*include\s*[<"]([^>"]+)[>"]', re.MULTILINE)
+
+
+def include_roots(source_root: Path) -> list[Path]:
+    """The public include directories a seam header's includes resolve against."""
+    return sorted({*source_root.glob("core/*/include"), *source_root.glob("core/*/*/include")})
+
+
+def reached_includes(source_root: Path, start: Path) -> list[tuple[str, list[str]]]:
+    """(include, chain) for every include `start` reaches, transitively.
+
+    `chain` lists the repository paths of the headers between `start` and the
+    include. Includes resolve as the compiler would: a quoted include next to
+    its file first, then the public include directories. An include that
+    resolves nowhere in the source root (a system or third-party header) is
+    reported but not followed.
+    """
+    roots = include_roots(source_root)
+    found: list[tuple[str, list[str]]] = []
+    seen: set[Path] = set()
+    pending: list[tuple[Path, list[str]]] = [(start, [])]
+    while pending:
+        path, chain = pending.pop()
+        key = path.resolve()
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            match = INCLUDE_RE.match(line)
+            if not match:
+                continue
+            delim, include = match.group(1), match.group(2)
+            found.append((include, chain))
+            bases = ([path.parent] if delim == '"' else []) + roots
+            target = next((base / include for base in bases if (base / include).is_file()), None)
+            if target is not None:
+                try:
+                    rel = target.resolve().relative_to(source_root.resolve()).as_posix()
+                except ValueError:
+                    continue
+                pending.append((target, chain + [rel]))
+    return found
 
 
 def load(path: Path) -> dict[str, Any]:
@@ -45,7 +92,7 @@ def view_core_rules(units: dict[str, Any]) -> dict[str, Any]:
         if unit.get("name") == "view-core":
             rules = unit.get("pulp_kept")
             if not isinstance(rules, dict):
-                raise ValueError("view-core D3 unit has no pulp_kept rules")
+                raise ValueError("view-core unit has no pulp_kept rules")
             return rules
     raise ValueError("vellum_d3_units.json has no view-core unit")
 
@@ -93,14 +140,13 @@ def check(manifest: dict[str, Any], units: dict[str, Any], source_root: Path) ->
             continue
         if path not in closure:
             errors.append(f"seam header {path} is not in the extracted closure")
-        try:
-            text = (source_root / path).read_text(encoding="utf-8")
-        except OSError as error:
-            errors.append(f"cannot read seam header {path}: {error}")
+        if not (source_root / path).is_file():
+            errors.append(f"cannot read seam header {path}")
             continue
-        for include in INCLUDE.findall(text):
+        for include, chain in reached_includes(source_root, source_root / path):
             if any(include.startswith(prefix) for prefix in forbidden):
-                errors.append(f"seam header {path} includes {include}")
+                via = f" (via {' -> '.join(chain)})" if chain else ""
+                errors.append(f"seam header {path} includes {include}{via}")
 
     for entry in rules.get("deferred", []):
         path = entry.get("path", "")

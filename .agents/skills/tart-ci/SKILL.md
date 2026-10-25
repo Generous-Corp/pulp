@@ -57,7 +57,9 @@ The direct Tart guest build must invoke `tools/ci/governed-build.sh` for its
 `cmake --build` step. The guest may have a TartCI profile or may run standalone;
 the governed wrapper selects the bounded lease/profile share or its tier-0
 fallback in either case. Do not reintroduce a caller-owned `--parallel` value
-in `tart-run-job.sh`, because that bypasses the same build policy used by the
+in `tart-run-job.sh`. The wrapper now caps and rewrites such a flag to the
+governed share, so it can no longer exceed the lease, but it still pins the
+job below a resized VM's share and bypasses the same build policy used by the
 local and Shipyard paths.
 
 The reusable runner path is now the sibling `tartci` repo:

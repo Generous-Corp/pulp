@@ -127,7 +127,13 @@ Custom `pulp-install-<target>` targets depend on every format binary they copy.
 That dependency is load-bearing: installation cannot copy a stale format while
 skipping its post-link scan. A persisted scan stamp depends on the artifact,
 both manifests, and the scanner itself, so changing shipping policy invalidates
-an earlier report even when the binary did not relink. The helper and scanner
+an earlier report even when the binary did not relink. An artifact whose bundle
+is filled in after it links names those steps with `AFTER`: the macOS AUv3
+container app passes its embed sentinel, so the scan waits for the framework
+and appex to be copied in, runs after the copies in its own post-build list,
+and rescans when they are re-embedded. Without that, the scan and the embed
+step run side by side and the scan reads the bundle while it is rewritten.
+The helper and scanner
 are both exported in the installed CMake SDK, and an installed-layout test
 builds the complete profile and format policy matrix without reaching back into
 the Pulp source tree.

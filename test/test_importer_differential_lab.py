@@ -153,7 +153,7 @@ class DifferentialLabTests(unittest.TestCase):
         self.assertEqual(len(missing), 1)
         self.assertIn("title", {match[1].anchor for match in matches})
 
-    def test_backend_node_id_matches_element_to_element_before_text_heuristics(self) -> None:
+    def test_capture_anchor_matches_element_to_element_before_text_heuristics(self) -> None:
         strings = ["DIV", "#text", "Gain", "display", "block"]
         snapshot = {
             "strings": strings,
@@ -179,27 +179,29 @@ class DifferentialLabTests(unittest.TestCase):
             "root": {
                 "type": "frame",
                 "name": "div",
-                "stable_anchor_id": "root",
-                "attributes": {"backend_node_id": "35"},
+                "stable_anchor_id": "capture:div[0]",
+                "attributes": {"backend_node_id": "41"},
                 "children": [{
                     "type": "text",
                     "name": "#text",
                     "content": "Gain",
-                    "stable_anchor_id": "text",
-                    "attributes": {"backend_node_id": "36"},
+                    "stable_anchor_id": "capture:div[0]/#text[0]",
+                    "attributes": {"backend_node_id": "42"},
                     "children": [],
                 }],
             },
         }
         layout = {"views": [
-            {"anchor_id": "root", "x": 0, "y": 0, "width": 100, "height": 40},
-            {"anchor_id": "text", "x": 0, "y": 0, "width": 30, "height": 20},
+            {"anchor_id": "capture:div[0]", "x": 0, "y": 0, "width": 100, "height": 40},
+            {"anchor_id": "capture:div[0]/#text[0]", "x": 0, "y": 0, "width": 30, "height": 20},
         ]}
         native = LAB.native_nodes(ir, layout)
         matches, missing, extra = LAB.match_nodes(browser, native)
         self.assertEqual(len(matches), 1)
+        # The candidate lane numbered the div 41 where the browser lane said
+        # 35; the anchor still pairs the div with the div, not with its text.
         self.assertEqual(matches[0][0].backend_node_id, 35)
-        self.assertEqual(matches[0][1].backend_node_id, 35)
+        self.assertEqual(matches[0][1].anchor, "capture:div[0]")
         self.assertEqual(len(missing), 0)
         self.assertEqual(len(extra), 1)
 
@@ -268,15 +270,104 @@ class DifferentialLabTests(unittest.TestCase):
                                    (220.0, 100.0, 50.0, 12.0))
         self.assertGreater(abs(wrong[0] - chromium["inner"][0]), 20.0)
 
-    def test_mismatched_backend_ids_fail_closed_despite_same_text_and_tag(self) -> None:
+    def test_mismatched_anchors_fail_closed_despite_same_text_tag_and_backend_id(self) -> None:
+        # Equal backend ids from two sessions name nothing in common, so they
+        # cannot rescue a node whose anchor says it is a different element.
         browser = LAB.BrowserNode(
-            1, "span", -1, "Gain", {}, (0, 0, 40, 20), {}, 35)
+            1, "span", -1, "Gain", {}, (0, 0, 40, 20), {}, 35, anchor="capture:span[0]")
         native = LAB.NativeNode(
-            "wrong", "frame", "span", "Gain", None, {}, (0, 0, 40, 20), 99)
+            "capture:span[1]", "frame", "span", "Gain", None, {}, (0, 0, 40, 20), 35)
         matches, missing, extra = LAB.match_nodes([browser], [native])
         self.assertEqual(matches, [])
         self.assertEqual(len(missing), 1)
         self.assertEqual(len(extra), 1)
+
+    @staticmethod
+    def _two_gain_spans_snapshot(backend: tuple[int, int, int],
+                                 second_display: str = "block") -> dict:
+        strings = ["DIV", "SPAN", "#text", "Gain", "id", "panel", "display", "block", "none"]
+        return {
+            "strings": strings,
+            "computedStyleNames": ["display"],
+            "documents": [{
+                "nodes": {
+                    "parentIndex": [-1, 0, 1, 0, 3],
+                    "nodeType": [1, 1, 3, 1, 3],
+                    "nodeName": [0, 1, 2, 1, 2],
+                    "nodeValue": [-1, -1, 3, -1, 3],
+                    "backendNodeId": [backend[0], backend[1], 90, backend[2], 91],
+                    "attributes": [[4, 5], [], [], [], []],
+                },
+                "layout": {
+                    "nodeIndex": [0, 1, 3],
+                    "bounds": [[0, 0, 200, 40], [10, 10, 40, 20], [60, 10, 40, 20]],
+                    "styles": [[7], [7], [7 if second_display == "block" else 8]],
+                },
+            }],
+        }
+
+    @staticmethod
+    def _two_gain_spans_ir(backend: tuple[int, int, int], spans: tuple[int, ...]) -> tuple:
+        children = [{"type": "frame", "name": "span", "content": "Gain",
+                     "stable_anchor_id": f"capture:div#panel[0]/span[{ordinal}]",
+                     "attributes": {"backend_node_id": str(backend[1 + ordinal])},
+                     "children": []} for ordinal in spans]
+        ir = {"root": {"type": "frame", "name": "div#panel",
+                       "stable_anchor_id": "capture:div#panel[0]",
+                       "attributes": {"backend_node_id": str(backend[0])},
+                       "children": children}}
+        layout = {"views": [
+            {"anchor_id": "capture:div#panel[0]", "x": 0, "y": 0, "width": 200, "height": 40},
+            {"anchor_id": "capture:div#panel[0]/span[0]", "x": 10, "y": 10, "width": 40, "height": 20},
+            {"anchor_id": "capture:div#panel[0]/span[1]", "x": 60, "y": 10, "width": 40, "height": 20},
+        ]}
+        return ir, layout
+
+    def test_lanes_with_renumbered_backend_ids_match_by_anchor(self) -> None:
+        # The browser and candidate lanes are two Chromium sessions. Spectr's
+        # div#root came back 31 in one and 30 in the other; renumbering every
+        # node must not cost a single match.
+        browser = LAB.browser_nodes(self._two_gain_spans_snapshot((30, 31, 32)))
+        native = LAB.native_nodes(*self._two_gain_spans_ir((47, 48, 49), (0, 1)))
+        matches, missing, extra = LAB.match_nodes(browser, native)
+        self.assertEqual(missing, [])
+        self.assertEqual(extra, [])
+        self.assertEqual(sorted((b.anchor, n.anchor) for b, n, _ in matches), [
+            ("capture:div#panel[0]", "capture:div#panel[0]"),
+            ("capture:div#panel[0]/span[0]", "capture:div#panel[0]/span[0]"),
+            ("capture:div#panel[0]/span[1]", "capture:div#panel[0]/span[1]"),
+        ])
+
+    def test_a_missing_node_fails_closed_against_its_same_text_sibling(self) -> None:
+        # Chromium drew only the first span; the native lost it and drew the
+        # second. The survivor has the same tag and text and, by coincidence,
+        # the backend id the browser lane gave the lost span. It is still a
+        # different element, so the lost span is missing and the survivor
+        # extra, never a pair.
+        browser = LAB.browser_nodes(self._two_gain_spans_snapshot(
+            (30, 31, 32), second_display="none"))
+        self.assertEqual([node.anchor for node in browser if node.tag == "span"],
+                         ["capture:div#panel[0]/span[0]"])
+        native = LAB.native_nodes(*self._two_gain_spans_ir((30, 99, 31), (1,)))
+        matches, missing, extra = LAB.match_nodes(browser, native)
+        self.assertEqual([node.anchor for node in missing], ["capture:div#panel[0]/span[0]"])
+        self.assertEqual([node.anchor for node in extra], ["capture:div#panel[0]/span[1]"])
+        self.assertEqual([(b.anchor, n.anchor) for b, n, _ in matches],
+                         [("capture:div#panel[0]", "capture:div#panel[0]")])
+
+    def test_capture_anchors_match_the_vectors_anchor_path_is_pinned_to(self) -> None:
+        # test_browser_capture_tree.cpp asserts the same file through the
+        # importer's own `anchor_path`, so a spelling change on either side
+        # fails the other instead of reading here as every node missing.
+        fixtures = REPO / "test/fixtures"
+        vectors = json.loads(
+            (fixtures / "capture-anchor-vectors.json").read_text(encoding="utf-8"))
+        self.assertGreaterEqual(len(vectors["cases"]), 8)
+        for case in vectors["cases"]:
+            with self.subTest(case=case["name"]):
+                snapshot = case.get("snapshot") or json.loads(
+                    (fixtures / case["snapshot_path"]).read_text(encoding="utf-8"))
+                self.assertEqual(LAB.capture_anchors(snapshot), case["anchors"])
 
     @staticmethod
     def _panel_with_gain_span():
@@ -320,43 +411,47 @@ class DifferentialLabTests(unittest.TestCase):
     def _canvas_ir(with_canvas: bool) -> dict:
         plane = {
             "type": "image", "name": "canvas#scope/layer",
-            "stable_anchor_id": "panel/canvas/layer[0]",
+            "stable_anchor_id": "capture:div[0]/canvas#scope[0]/layer[0]",
             "attributes": {"asset_ref": "canvas:14", "captured_layer": "viewport"},
             "children": [],
         }
         canvas = {
-            "type": "frame", "name": "canvas#scope", "stable_anchor_id": "panel/canvas",
+            "type": "frame", "name": "canvas#scope", "stable_anchor_id": "capture:div[0]/canvas#scope[0]",
             "attributes": {"backend_node_id": "14", "captured_element": "canvas"},
             "children": [plane],
         }
         return {"root": {
-            "type": "frame", "name": "div", "stable_anchor_id": "panel",
+            "type": "frame", "name": "div", "stable_anchor_id": "capture:div[0]",
             "attributes": {"backend_node_id": "11"},
             "children": [canvas] if with_canvas else [plane],
         }}
 
     def test_a_captured_canvas_plane_is_its_canvas_paint(self) -> None:
         browser = [
-            LAB.BrowserNode(0, "div", -1, "", {}, (0, 0, 100, 40), {}, 11),
-            LAB.BrowserNode(1, "canvas", 0, "", {}, (0, 0, 80, 30), {}, 14),
+            LAB.BrowserNode(0, "div", -1, "", {}, (0, 0, 100, 40), {}, 11,
+                            anchor="capture:div[0]"),
+            LAB.BrowserNode(1, "canvas", 0, "", {"id": "scope"}, (0, 0, 80, 30), {}, 14,
+                            anchor="capture:div[0]/canvas#scope[0]"),
         ]
         native = LAB.native_nodes(self._canvas_ir(True), {"views": []})
         result = LAB.structural_comparison(browser, native)
         self.assertEqual(result["extra"], [])
-        self.assertIn("panel/canvas/layer[0]",
+        self.assertIn("capture:div[0]/canvas#scope[0]/layer[0]",
                       [node.anchor for node in result["ignored_native"]])
         self.assertAlmostEqual(result["score"], 1.0)
 
     def test_control_a_plane_without_its_canvas_is_not_excused(self) -> None:
         browser = [
-            LAB.BrowserNode(0, "div", -1, "", {}, (0, 0, 100, 40), {}, 11),
-            LAB.BrowserNode(1, "canvas", 0, "", {}, (0, 0, 80, 30), {}, 14),
+            LAB.BrowserNode(0, "div", -1, "", {}, (0, 0, 100, 40), {}, 11,
+                            anchor="capture:div[0]"),
+            LAB.BrowserNode(1, "canvas", 0, "", {"id": "scope"}, (0, 0, 80, 30), {}, 14,
+                            anchor="capture:div[0]/canvas#scope[0]"),
         ]
         native = LAB.native_nodes(self._canvas_ir(False), {"views": []})
         result = LAB.structural_comparison(browser, native)
         self.assertEqual([node.tag for node in result["missing"]], ["canvas"])
         self.assertEqual([node.anchor for node in result["extra"]],
-                         ["panel/canvas/layer[0]"])
+                         ["capture:div[0]/canvas#scope[0]/layer[0]"])
         self.assertLess(result["score"], LAB.PROMOTION_THRESHOLDS["structural"])
 
     def test_representation_nodes_are_not_structural_element_extras(self) -> None:
@@ -540,12 +635,12 @@ class DifferentialLabTests(unittest.TestCase):
         self.assertEqual(len(pseudo), 1)
         self.assertEqual(pseudo[0].bounds, (42.0, 44.0, 10.0, 10.0))
         native = [
-            LAB.NativeNode("badge", "frame", "div.badge", "", None, {},
+            LAB.NativeNode("capture:div[0]", "frame", "div.badge", "", None, {},
                            (28, 28, 131, 42), 11),
-            LAB.NativeNode("badge/::before", "frame", "::before", "", "badge", {},
-                           (42, 44, 10, 10), 12),
-            LAB.NativeNode("badge/#text", "text", "#text", "On", "badge", {},
-                           (64, 40, 77, 17), 13),
+            LAB.NativeNode("capture:div[0]/::before[0]", "frame", "::before", "",
+                           "capture:div[0]", {}, (42, 44, 10, 10), 12),
+            LAB.NativeNode("capture:div[0]/#text[0]", "text", "#text", "On",
+                           "capture:div[0]", {}, (64, 40, 77, 17), 13),
         ]
         result = LAB.structural_comparison(browser, native)
         self.assertEqual(result["missing"], [])
@@ -555,10 +650,10 @@ class DifferentialLabTests(unittest.TestCase):
     def test_control_a_native_that_drops_the_pseudo_element_is_missing_it(self) -> None:
         browser = LAB.browser_nodes(self._pseudo_badge_snapshot())
         native = [
-            LAB.NativeNode("badge", "frame", "div.badge", "", None, {},
+            LAB.NativeNode("capture:div[0]", "frame", "div.badge", "", None, {},
                            (28, 28, 131, 42), 11),
-            LAB.NativeNode("badge/#text", "text", "#text", "On", "badge", {},
-                           (64, 40, 77, 17), 13),
+            LAB.NativeNode("capture:div[0]/#text[0]", "text", "#text", "On",
+                           "capture:div[0]", {}, (64, 40, 77, 17), 13),
         ]
         result = LAB.structural_comparison(browser, native)
         self.assertEqual([node.tag for node in result["missing"]], ["::before"])
@@ -613,10 +708,12 @@ class DifferentialLabTests(unittest.TestCase):
     def _icon_geometry(self, shape_box):
         browser = LAB.browser_nodes(self._icon_snapshot())
         native = [
-            LAB.NativeNode("icon", "frame", "div", "", None, {}, (24, 24, 212, 124), 11),
-            LAB.NativeNode("icon/svg", "frame", "svg", "", "icon", {}, (40, 40, 64, 64), 12),
-            LAB.NativeNode("icon/svg/circle", "path", "circle", "", "icon/svg", {},
-                           shape_box, 13),
+            LAB.NativeNode("capture:div[0]", "frame", "div", "", None, {},
+                           (24, 24, 212, 124), 11),
+            LAB.NativeNode("capture:div[0]/svg[0]", "frame", "svg", "", "capture:div[0]", {},
+                           (40, 40, 64, 64), 12),
+            LAB.NativeNode("capture:div[0]/svg[0]/circle[0]", "path", "circle", "",
+                           "capture:div[0]/svg[0]", {}, shape_box, 13),
         ]
         result = LAB.structural_comparison(browser, native)
         return result, LAB.geometry_metrics(result["matches"])
@@ -628,18 +725,18 @@ class DifferentialLabTests(unittest.TestCase):
         self.assertEqual(result["missing"], [])
         self.assertAlmostEqual(result["score"], 1.0)
         shape_row = next(row for row in geometry["rows"]
-                         if row["native_anchor"] == "icon/svg/circle")
+                         if row["native_anchor"] == "capture:div[0]/svg[0]/circle[0]")
         self.assertEqual(shape_row["reference_frame"], "svg-viewport")
         self.assertEqual(shape_row["max_abs_delta"], 0)
         element_rows = [row for row in geometry["rows"]
-                        if row["native_anchor"] != "icon/svg/circle"]
+                        if row["native_anchor"] != "capture:div[0]/svg[0]/circle[0]"]
         self.assertTrue(all(row["reference_frame"] == "element"
                             for row in element_rows))
 
     def test_control_a_shape_outside_its_svg_frame_fails_geometry(self) -> None:
         _result, geometry = self._icon_geometry((43, 40, 64, 64))
         shape_row = next(row for row in geometry["rows"]
-                         if row["native_anchor"] == "icon/svg/circle")
+                         if row["native_anchor"] == "capture:div[0]/svg[0]/circle[0]")
         self.assertEqual(shape_row["max_abs_delta"], 3)
         self.assertGreater(shape_row["max_abs_delta"],
                            LAB.GEOMETRY_MAX_ABS_DELTA_PX)
@@ -1123,9 +1220,10 @@ class DifferentialLabTests(unittest.TestCase):
                 "x": 0.25, "y": 0.25, "width": 1, "height": 1}
             (evidence / "capture.json").write_text(json.dumps(capture), encoding="utf-8")
             browser = LAB.BrowserNode(
-                0, "main", -1, "", {}, (0.25, 0.25, 0.5, 0.5), {}, 10)
+                0, "main", -1, "", {}, (0.25, 0.25, 0.5, 0.5), {}, 10,
+                anchor="capture:main[0]")
             native = LAB.NativeNode(
-                "panel", "frame", "main", "", None, {}, (0, 0, 0.5, 0.5), 10)
+                "capture:main[0]", "frame", "main", "", None, {}, (0, 0, 0.5, 0.5), 10)
             with patch.object(LAB, "run_command", side_effect=fake_run) as offset_run, \
                     patch.object(LAB, "find_browser_evidence", return_value=evidence), \
                     patch.object(LAB, "browser_nodes", return_value=[browser]), \

@@ -72,6 +72,14 @@ class LossProvider final : public SharedIoArenaProvider {
                 std::shared_ptr<pulp::gpu_audio::detail::SharedIoTerminalInbox>) noexcept override {
         return false;
     }
+    // Stands in for the Dawn shared-I/O provider in the convolver tests, so it
+    // reports that identity the way the real provider reports its own.
+    gpu_audio::detail::SharedIoProviderIdentity provider_identity() const noexcept override {
+        gpu_audio::detail::SharedIoProviderIdentity identity;
+        identity.provider = gpu_audio::GpuAudioProvider::Dawn;
+        identity.authenticated = true;
+        return identity;
+    }
     bool device_lost() const noexcept override {
         return lost;
     }

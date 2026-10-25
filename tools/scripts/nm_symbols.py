@@ -129,6 +129,16 @@ def is_darwin(listing: str) -> bool:
     return any(True for _ in darwin_entries(listing))
 
 
+def looks_mach_o(listing: str) -> bool:
+    """Whether a `-P` listing reads as Apple nm on a Mach-O archive: it defines
+    a C++ symbol with Mach-O's extra leading underscore (`__Z...`) and prints
+    no W/V letter, which Apple's nm never uses. Its weak definitions are then
+    invisible to the letters and need `nm -m`."""
+    defined = [(name, kind) for _, name, kind in entries(listing) if kind not in UNDEFINED]
+    return (any(name.startswith("__Z") for name, _ in defined)
+            and not any(kind in WEAK_DEFINED for _, kind in defined))
+
+
 def strength(listing: str, darwin_listing: str | None = None) -> tuple[set[str], set[str]]:
     """(strong, weak-only) definitions of one archive.
 

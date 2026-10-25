@@ -1078,6 +1078,17 @@ save/reopen render proof beside the legacy caller-owned route controls.
   the manifest signature. Registry/package discovery metadata still needs its
   own signed canonical manifest; do not treat screenshots, validation reports,
   licenses, or provenance as covered by the node-pack loader signature.
+  The hash and the load are one file, not one path: `verify_node_pack_binary`
+  opens the binary once and hashes from that open descriptor, and
+  `load_verified_node_pack` maps that same open file (`/dev/fd/N` on Apple,
+  `/proc/self/fd/N` on Linux, an exclusive share mode plus a volume/file-index
+  check on Windows that reports `BinaryChanged`). Never "fix" a loader by
+  hashing `read_file_bytes(path)` and then `dlopen(path)`: a file swapped
+  between the two is the code that runs. The descriptor stays open while the
+  pack is loaded, so a pack directory cannot be deleted out from under a live
+  pack on Windows; `unload_node_pack` releases it. On Linux glibc keys loaded
+  objects by the opened name, so a stale `/proc/self/fd/N` alias from an
+  object `dlclose` could not unload is refused rather than reused.
 - **Routing a `SignalGraph` through the canonical executor
   (`core/host/signal_graph_executor_routing.{hpp,cpp}`).** The eligible subset is
   described above under "Canonical-executor routing" and enforced by

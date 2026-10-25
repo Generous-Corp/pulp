@@ -804,6 +804,82 @@ TEST_CASE("WidgetBridge runs a native widget event inside one UI batch",
     CHECK(engine.evaluate("__pulpDispatchDepth__").getWithDefault<int>(-1) == 0);
 }
 
+TEST_CASE("WidgetBridge reports a handler error even without a dispatch hook",
+          "[view][bridge][event-batch]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // No __dispatchError__ is installed, the case that used to drop the error.
+    bridge.load_script(R"(
+        on('w1', 'click', function () { throw new RangeError('handler boom'); });
+    )");
+    REQUIRE(engine.evaluate("typeof __dispatchError__").toString() == "undefined");
+
+    dispatch_event(engine, "w1", "click", "{}");
+
+    CHECK(engine.evaluate("__pulpDispatchErrorCount__").getWithDefault<int>(-1) == 1);
+    // The report keeps the error's own message, not only its stack frames.
+    CHECK(engine.evaluate("__pulpLastDispatchError__.indexOf('RangeError: handler boom') === 0")
+              .getWithDefault<bool>(false));
+
+    // With a hook installed, the hook receives the same text.
+    bridge.load_script(R"(
+        var hooked = '';
+        globalThis.__dispatchError__ = function (id, ev, text) { hooked = id + '|' + ev + '|' + text; };
+    )");
+    dispatch_event(engine, "w1", "click", "{}");
+    CHECK(engine.evaluate("__pulpDispatchErrorCount__").getWithDefault<int>(-1) == 2);
+    CHECK(engine.evaluate("hooked.indexOf('w1|click|RangeError: handler boom') === 0")
+              .getWithDefault<bool>(false));
+}
+
+TEST_CASE("WidgetBridge runs a nested dispatch without another batch frame",
+          "[view][bridge][event-batch]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(kCountingBatchHook);
+    bridge.load_script(R"(
+        var inner_stack = '';
+        on('w1', 'click', function () { __dispatch__('w2', 'click', {}); });
+        on('w2', 'click', function () { inner_stack = new Error('probe').stack; });
+    )");
+
+    dispatch_event(engine, "w1", "click", "{}");
+
+    // Only the outermost dispatch goes through the batch runner; the nested
+    // one joins the open batch directly, so a nested chain stays shallow.
+    CHECK(engine.evaluate("inner_stack.split('__pulpRunDispatchBatch__').length - 1")
+              .getWithDefault<int>(-1) == 1);
+    CHECK(engine.evaluate("batches").getWithDefault<int>(-1) == 1);
+    CHECK(engine.evaluate("__pulpDispatchDepth__").getWithDefault<int>(-1) == 0);
+
+    // A nested dispatch whose own body throws is contained and reported like
+    // the batched path, and the depth unwinds.
+    bridge.load_script(R"(
+        var errors_before = __pulpDispatchErrorCount__;
+        var saved = __pulpDispatchUnbatched__;
+        on('w3', 'click', function () {
+            __pulpDispatchUnbatched__ = function () { throw new Error('body boom'); };
+            try { __dispatch__('w4', 'click', {}); } finally { __pulpDispatchUnbatched__ = saved; }
+            globalThis.after_nested = true;
+        });
+    )");
+    dispatch_event(engine, "w3", "click", "{}");
+    CHECK(engine.evaluate("after_nested === true").getWithDefault<bool>(false));
+    CHECK(engine.evaluate("__pulpDispatchErrorCount__ - errors_before").getWithDefault<int>(-1) ==
+          1);
+    CHECK(engine.evaluate("__pulpLastDispatchError__.indexOf('Error: body boom') === 0")
+              .getWithDefault<bool>(false));
+    CHECK(engine.evaluate("__pulpDispatchDepth__").getWithDefault<int>(-1) == 0);
+}
+
 TEST_CASE("WidgetBridge keeps the propagation level a batched handler returns",
           "[view][bridge][event-batch]") {
     ScriptEngine engine;
@@ -864,6 +940,61 @@ TEST_CASE("WidgetBridge fans window and document listeners out inside the event 
 
     CHECK(engine.evaluate("fanout.join(',')").toString() == "window:1/1,document:1/1");
     CHECK(engine.evaluate("batches").getWithDefault<int>(-1) == 2);
+}
+
+TEST_CASE("WidgetBridge runs the after-dispatch hook once the outermost batch returns",
+          "[view][bridge][event-batch]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(kCountingBatchHook);
+    bridge.load_script(R"(
+        var after = [];
+        globalThis.__pulpAfterDiscreteDispatch__ = function (id, eventName) {
+            after.push(id + ':' + eventName + ':' + batch_depth + '/' + __pulpDispatchDepth__);
+        };
+        on('w1', 'click', function () {
+            if (after.length === 0) __dispatch__('w1', 'click', {});
+        });
+    )");
+
+    dispatch_event(engine, "w1", "click", "{}");
+
+    // Once for the outer dispatch, after its batch closed; the dispatch made
+    // from inside the handler did not run it.
+    CHECK(engine.evaluate("after.join(',')").toString() == "w1:click:0/0");
+    CHECK(engine.evaluate("batches").getWithDefault<int>(-1) == 1);
+}
+
+TEST_CASE("WidgetBridge after-dispatch value write does not dispatch the change again",
+          "[view][bridge][event-batch]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createKnob('k');
+        setValue('k', 0.5);
+        var changes = 0;
+        on('k', 'change', function () { changes += 1; });
+        globalThis.__pulpAfterDiscreteDispatch__ = function (id) { setValue(id, 0.5); };
+    )");
+    auto* knob = dynamic_cast<Knob*>(bridge.widget("k"));
+    REQUIRE(knob != nullptr);
+
+    // A user edit: the knob moves and reports it, and the hook puts the
+    // committed value back.
+    knob->set_value(0.8f);
+    REQUIRE(knob->on_change);
+    knob->on_change(0.8f);
+
+    CHECK(knob->value() == Catch::Approx(0.5f));
+    CHECK(engine.evaluate("changes").getWithDefault<int>(-1) == 1);
 }
 
 TEST_CASE("WidgetBridge native widget events run unbatched without a hook",

@@ -4,6 +4,13 @@
 #include <string>
 #include <string_view>
 
+namespace pulp::gpu_audio {
+// Defined in gpu_audio_capability.hpp. Declared opaquely so this private
+// header stays free of the public include path (the slot-ledger tests compile
+// production sources without it).
+enum class GpuAudioProvider : std::uint8_t;
+} // namespace pulp::gpu_audio
+
 namespace pulp::gpu_audio::detail {
 
 // Identity observed directly from the native graphics runtime. This is a
@@ -37,6 +44,9 @@ NativeRuntimeIdentity observe_native_metal_device(void* dawn_device, std::string
 // session. A false authenticated value is fail-closed and is never physical
 // acceptance evidence.
 struct SharedIoProviderIdentity {
+    // Which provider implementation reports this identity. Each provider sets
+    // its own kind; nothing downstream infers it from the node type.
+    GpuAudioProvider provider = GpuAudioProvider{}; // GpuAudioProvider::Unknown
     bool authenticated = false;
     std::string provider_revision;
     std::string adapter_name;

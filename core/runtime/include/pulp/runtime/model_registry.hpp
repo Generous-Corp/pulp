@@ -17,7 +17,8 @@ namespace pulp::runtime {
 struct ModelAsset {
     std::string role;          ///< e.g. "weights", "vocab", "encoder" (multi-file bundles)
     std::string checkpoint_ref;///< "hf://user/repo/file" or "https://…"
-    std::string sha256;        ///< Expected hash of this asset (empty = unverified)
+    std::string
+        sha256; ///< Expected hash of this asset (empty = install needs an unverified opt-in)
     std::uint64_t size_bytes = 0;
 };
 
