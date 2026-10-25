@@ -667,12 +667,19 @@ TEST_CASE("WidgetBridge resolves script-relative asset paths against the script 
                 == "file://" + (base / "assets" / "hero.png").lexically_normal().generic_string());
     }
 
-    SECTION("unset base leaves relative paths untouched (historical CWD behavior)") {
+    SECTION("unset base refuses relative paths unless unreviewed paths are allowed") {
         bridge.load_script(R"(
             createImage('img', '');
             setImageSource('img', 'assets/hero.png');
         )");
         auto* image = dynamic_cast<ImageView*>(bridge.widget("img"));
+        REQUIRE(image != nullptr);
+        REQUIRE(image->image_path().empty());
+
+        // Control: the host opt-in restores the working-directory lookup.
+        bridge.set_allow_unreviewed_file_paths(true);
+        bridge.load_script("setImageSource('img', 'assets/hero.png');");
+        image = dynamic_cast<ImageView*>(bridge.widget("img"));
         REQUIRE(image != nullptr);
         REQUIRE(image->image_path() == "file://assets/hero.png");
     }
@@ -726,21 +733,27 @@ TEST_CASE("WidgetBridge resolves script-relative asset paths against the script 
         if (!symlink_error) {
             bridge.set_script_base_dir(scratch_root);
             bridge.set_asset_roots({reviewed_root});
-            REQUIRE(bridge.resolve_script_relative("assets/escape.png")
-                    == "assets/escape.png");
+            REQUIRE(bridge.resolve_script_relative("assets/escape.png").empty());
         }
     }
 
-    SECTION("absolute paths outside every root are refused; in-root misses pass through") {
+    SECTION("paths outside every root, misses and non-file schemes are refused") {
         bridge.set_script_base_dir(base);
         // An absolute path the UI chose resolves to the empty refusal unless
         // the host opted into unreviewed paths, in which case it is unchanged.
         REQUIRE(bridge.resolve_script_relative("/abs/elsewhere.png").empty());
         bridge.set_allow_unreviewed_file_paths(true);
         REQUIRE(bridge.resolve_script_relative("/abs/elsewhere.png") == "/abs/elsewhere.png");
-        bridge.set_allow_unreviewed_file_paths(false);
         REQUIRE(bridge.resolve_script_relative("assets/nope.png") == "assets/nope.png");
         REQUIRE(bridge.resolve_script_relative("memory://sha256=aa") == "memory://sha256=aa");
+        bridge.set_allow_unreviewed_file_paths(false);
+        // A miss is not handed back to be opened relative to the working
+        // directory, and a scheme other than file:// names no reviewed file.
+        REQUIRE(bridge.resolve_script_relative("assets/nope.png").empty());
+        REQUIRE(bridge.resolve_script_relative("memory://sha256=aa").empty());
+        REQUIRE(bridge.resolve_script_relative("x://../assets/hero.png").empty());
+        REQUIRE(bridge.resolve_script_relative("file://assets/hero.png") ==
+                (base / "assets" / "hero.png").lexically_normal().generic_string());
         REQUIRE(bridge.resolve_script_relative("") == "");
     }
 

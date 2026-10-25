@@ -12,6 +12,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/view/asset_manager.hpp>
+#include <pulp/view/canvas_widget.hpp>
 #include <pulp/view/reload_capabilities.hpp>
 #include <pulp/view/script_engine.hpp>
 #include <pulp/view/view.hpp>
@@ -511,6 +512,106 @@ TEST_CASE("a reviewed asset root admits absolute paths beneath it", "[view][brid
     rig.bridge.set_asset_roots({rig.outside});
     REQUIRE(rig.bridge.permits_file_path(rig.outside / "secret.png"));
     REQUIRE_FALSE(rig.bridge.permits_file_path(rig.script_dir / "assets" / "hero.png"));
-    REQUIRE(rig.load_status("file://" + (rig.outside / "secret.png").generic_string()) == 403);
+    // file:// follows the same rule as a bare absolute path and setImageSource.
+    REQUIRE(rig.load_status("file://" + (rig.outside / "secret.png").generic_string()) == 200);
+    REQUIRE(rig.load_status((rig.outside / "secret.png").generic_string()) == 200);
     REQUIRE(rig.load_status("secret.png") == 200);
+    REQUIRE(rig.load_status("file://" +
+                            (rig.script_dir / "assets" / "hero.png").generic_string()) == 403);
+}
+
+namespace {
+
+// Restores the process working directory on scope exit.
+struct WorkingDirectoryGuard {
+    fs::path saved = fs::current_path();
+    ~WorkingDirectoryGuard() {
+        std::error_code ec;
+        fs::current_path(saved, ec);
+    }
+};
+
+} // namespace
+
+TEST_CASE("relative names that miss every root are not opened from the working directory",
+          "[view][bridge][assets][security]") {
+    AssetPathRig rig;
+    rig.bridge.set_script_base_dir(rig.script_dir);
+    // The file exists relative to the working directory, not under any root.
+    WorkingDirectoryGuard cwd;
+    fs::current_path(rig.outside);
+    REQUIRE(fs::exists("face.ttf"));
+
+    REQUIRE_FALSE(
+        rig.engine.evaluate("registerFont('Face', 'face.ttf')").getWithDefault<bool>(true));
+    REQUIRE_FALSE(rig.engine.evaluate("loadFont('face.ttf')").getWithDefault<bool>(true));
+    REQUIRE_FALSE(
+        rig.engine.evaluate("registerFont('Face', 'file://face.ttf')").getWithDefault<bool>(true));
+    REQUIRE(rig.image_path("secret.png").empty());
+    REQUIRE(rig.bridge.resolve_script_relative("secret.png").empty());
+    REQUIRE(rig.bridge.resolve_script_relative("x://secret.png").empty());
+
+    // Control: the host opt-in restores the working-directory lookup.
+    rig.bridge.set_allow_unreviewed_file_paths(true);
+    REQUIRE(rig.engine.evaluate("loadFont('face.ttf')").getWithDefault<bool>(false));
+}
+
+TEST_CASE("canvasDrawImage and setMaskImage hold url() and paths to the reviewed roots",
+          "[view][bridge][assets][security]") {
+    AssetPathRig rig;
+    rig.bridge.set_script_base_dir(rig.script_dir);
+    const auto inside =
+        (rig.script_dir / "assets" / "hero.png").lexically_normal().generic_string();
+    const auto escaped = (rig.outside / "secret.png").generic_string();
+    rig.engine.evaluate("createCanvas('cv', ''); createPanel('p', '');");
+    auto* canvas = dynamic_cast<CanvasWidget*>(rig.bridge.widget("cv"));
+    auto* panel = rig.bridge.widget("p");
+    REQUIRE(canvas != nullptr);
+    REQUIRE(panel != nullptr);
+
+    const auto draw = [&](const std::string& src) {
+        canvas->clear_commands();
+        rig.engine.evaluate("canvasDrawImage('cv', '" + src + "', 0, 0, 8, 8)");
+        REQUIRE(canvas->commands().size() == 1);
+        return canvas->commands().front().text;
+    };
+    REQUIRE(draw("assets/hero.png") == inside);
+    REQUIRE(draw(inside) == inside);
+    REQUIRE(draw(escaped).empty());
+    REQUIRE(draw("file://" + escaped).empty());
+    REQUIRE(draw("../outside/secret.png").empty());
+    REQUIRE(draw("data:image/png;base64,AAAA") == "data:image/png;base64,AAAA");
+
+    const auto mask = [&](const std::string& value) {
+        rig.engine.evaluate("setMaskImage('p', \"" + value + "\")");
+        return panel->mask_image();
+    };
+    REQUIRE(mask("url(assets/hero.png)") == "url(\"" + inside + "\")");
+    REQUIRE(mask("url('file://" + escaped + "')") == "none");
+    REQUIRE(mask("url(" + escaped + "), linear-gradient(black, transparent)") ==
+            "none, linear-gradient(black, transparent)");
+    REQUIRE(mask("url(#mask-id)") == "url(#mask-id)");
+
+    // Control: the host opt-in admits the outside file.
+    rig.bridge.set_allow_unreviewed_file_paths(true);
+    REQUIRE(draw(escaped) == escaped);
+    REQUIRE(mask("url(" + escaped + ")") == "url(\"" + escaped + "\")");
+}
+
+TEST_CASE("bridge path APIs apply the per-file read ceiling", "[view][bridge][assets][security]") {
+    AssetPathRig rig;
+    rig.bridge.set_script_base_dir(rig.script_dir);
+    fs::copy_file(rig.outside / "face.ttf", rig.script_dir / "assets" / "face.ttf");
+    auto& assets = AssetManager::instance();
+    const auto saved = assets.max_file_bytes();
+    assets.set_max_file_bytes(2); // every fixture file is larger
+    const bool loaded =
+        rig.engine.evaluate("loadFont('assets/face.ttf')").getWithDefault<bool>(true);
+    const auto resolved = rig.bridge.resolve_script_relative("assets/hero.png");
+    assets.set_max_file_bytes(saved);
+    REQUIRE_FALSE(loaded);
+    REQUIRE(resolved.empty());
+
+    // Control: under the default ceiling the same font resolves.
+    REQUIRE(rig.engine.evaluate("loadFont('assets/face.ttf')").getWithDefault<bool>(false));
 }

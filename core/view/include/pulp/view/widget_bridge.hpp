@@ -200,12 +200,15 @@ public:
     bool permits_file_path(const std::filesystem::path& path) const;
 
     /// Resolve a file a script named against the script directory or a
-    /// reviewed asset root. Candidates are canonicalized and must remain
-    /// inside their root so symlinks and `..` cannot escape it. An absolute
-    /// path is returned unchanged only when permits_file_path() allows it;
-    /// otherwise, like a relative path that escapes its root, it resolves to
-    /// the empty string and the caller treats that as a refusal. URIs and
-    /// in-root relative misses pass through unchanged.
+    /// reviewed asset root, for a caller that will open the result. A
+    /// `file://` URL is judged as the path it names. A relative path resolves
+    /// to an existing file inside the script directory or a root; candidates
+    /// are canonicalized and must remain inside their root so symlinks and
+    /// `..` cannot escape it. An absolute path is returned unchanged only when
+    /// permits_file_path() allows it. A file above AssetManager's per-file
+    /// ceiling, any other URI scheme, and a relative name found under no root
+    /// all resolve to the empty string, which the caller treats as a refusal;
+    /// with allow_unreviewed_file_paths() the last two are returned unchanged.
     std::string resolve_script_relative(const std::string& path) const;
 
     /// load_script overload that retains a script identifier. `script_id` is

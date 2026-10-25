@@ -3,11 +3,13 @@
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/asset_manager.hpp>
 #include <pulp/runtime/base64.hpp>
+#include <pulp/runtime/log.hpp>
 #include "api_registry.hpp"
 #include "private_storage.hpp"
 
 #include <pulp/runtime/safe_relative_path.hpp>
 
+#include <atomic>
 #include <cctype>
 #include <filesystem>
 #include <fstream>
@@ -107,14 +109,54 @@ bool looks_like_absolute_file_path(const std::string& path) {
            (path[2] == '/' || path[2] == '\\');
 }
 
-// `allow_raw_files` is the bridge's unreviewed-path opt-in. Without it a
-// `file://` URL or an absolute path that matches no embedded asset and no
-// reviewed root is refused with 403 rather than read off the disk: the bridge
-// must never be a file-existence oracle or a feed into the image and font
-// parsers for a path the UI chose.
+// The filesystem path a `file://` URL names. `file:///C:/x` names `C:/x`.
+std::string strip_file_scheme(const std::string& url) {
+    std::string path = url.substr(7);
+#if defined(_WIN32)
+    if (path.size() > 2 && path[0] == '/' && std::isalpha(static_cast<unsigned char>(path[1])) &&
+        path[2] == ':')
+        path.erase(path.begin());
+#endif
+    return path;
+}
+
+// Whether `path` is a file larger than the asset manager's per-file ceiling.
+// Every bridge API that hands a resolved path to a loader checks this, so the
+// ceiling holds for loaders that read the file themselves.
+bool exceeds_read_ceiling(const std::filesystem::path& path) {
+    const auto ceiling = AssetManager::instance().max_file_bytes();
+    if (ceiling == 0)
+        return false;
+    std::error_code ec;
+    const auto size = std::filesystem::file_size(path, ec);
+    return !ec && size > ceiling;
+}
+
+// Report a path the bridge declined to open. Bounded so a script that retries
+// in a loop cannot flood the log.
+void log_refused_file_path(const std::string& path) {
+    static std::atomic<int> reported{0};
+    constexpr int kMaxReports = 32;
+    const int n = reported.fetch_add(1, std::memory_order_relaxed);
+    if (n < kMaxReports) {
+        runtime::log_warn("WidgetBridge: '{}' is not a file under the script directory or a "
+                          "reviewed asset root; not opened",
+                          path);
+    } else if (n == kMaxReports) {
+        runtime::log_warn("WidgetBridge: further refused file paths are not reported");
+    }
+}
+
+// A `file://` URL or an absolute path is judged by
+// WidgetBridge::resolve_script_relative(), the same rule every other
+// path-taking bridge API applies: it loads when it resolves inside the script
+// directory or a reviewed asset root (or the host opted into unreviewed
+// paths), and is refused with 403 otherwise. A relative name that matches no
+// embedded asset and no root falls back to the filesystem only under that
+// opt-in.
 BridgeAssetLoad load_bridge_asset(const std::string& url,
                                   const std::vector<std::filesystem::path>& asset_roots,
-                                  bool allow_raw_files) {
+                                  const WidgetBridge& bridge) {
     BridgeAssetLoad result;
     if (url.empty()) {
         result.status = 400;
@@ -122,7 +164,7 @@ BridgeAssetLoad load_bridge_asset(const std::string& url,
     }
 
     auto& assets = AssetManager::instance();
-    const bool reviewed_roots_only = !allow_raw_files;
+    const bool reviewed_roots_only = !bridge.allow_unreviewed_file_paths();
 
     auto load_from_file = [&](std::string path) {
         if (path.empty()) {
@@ -175,22 +217,26 @@ BridgeAssetLoad load_bridge_asset(const std::string& url,
             result.blob = load_from_file(strip_leading_slashes(ref));
         }
     } else if (url.rfind("file://", 0) == 0) {
-        if (reviewed_roots_only) {
+        const auto path = bridge.resolve_script_relative(url);
+        if (path.empty()) {
             result.status = 403;
             return result;
         }
-        result.blob = load_from_file(url.substr(7));
+        result.blob = load_from_file(path);
     } else {
         result.blob = load_from_embedded(url);
         if (!result.blob.valid()) {
             result.blob = load_from_asset_roots(url);
         }
-        if (!result.blob.valid() && !reviewed_roots_only) {
+        if (!result.blob.valid() && looks_like_absolute_file_path(url)) {
+            const auto path = bridge.resolve_script_relative(url);
+            if (path.empty()) {
+                result.status = 403;
+                return result;
+            }
+            result.blob = load_from_file(path);
+        } else if (!result.blob.valid() && !reviewed_roots_only) {
             result.blob = load_from_file(url);
-        }
-        if (!result.blob.valid() && reviewed_roots_only && looks_like_absolute_file_path(url)) {
-            result.status = 403;
-            return result;
         }
     }
 
@@ -231,36 +277,54 @@ bool WidgetBridge::permits_file_path(const std::filesystem::path& path) const {
 }
 
 std::string WidgetBridge::resolve_script_relative(const std::string& path) const {
-    if (path.empty() || path.find("://") != std::string::npos) return path;
-    const std::filesystem::path relative(path);
-    if (relative.is_absolute() || looks_like_absolute_file_path(path))
-        return permits_file_path(relative) ? path : std::string{};
-    // A relative path that climbs out of its directory is refused outright;
-    // the per-root containment checks below would otherwise be bypassed by a
-    // miss that falls through to the caller's working directory.
-    if (!safe_relative_asset_path(relative))
+    if (path.empty())
+        return path;
+    const auto refuse = [&path] {
+        log_refused_file_path(path);
         return std::string{};
+    };
+    if (path.rfind("file://", 0) == 0)
+        return resolve_script_relative(strip_file_scheme(path));
+    // Callers open the result as a file, so any other scheme would be read as
+    // a path relative to the process working directory.
+    if (path.find("://") != std::string::npos)
+        return allow_unreviewed_file_paths_ ? path : refuse();
 
+    const std::filesystem::path requested(path);
+    if (requested.is_absolute() || looks_like_absolute_file_path(path)) {
+        if (!permits_file_path(requested) || exceeds_read_ceiling(requested))
+            return refuse();
+        return path;
+    }
+    // A relative path that climbs out of its directory is refused outright.
+    if (!safe_relative_asset_path(requested))
+        return refuse();
+
+    // Containment is judged on canonical forms, so a symlink cannot escape.
+    // The script-directory result keeps the caller's spelling; a root result
+    // is canonical.
     if (!script_base_dir_.empty()) {
-        // Containment is judged on canonical forms (so a symlink cannot
-        // escape), but the returned path keeps the caller's spelling.
-        auto candidate = (script_base_dir_ / relative).lexically_normal();
+        const auto candidate = (script_base_dir_ / requested).lexically_normal();
         std::error_code ec;
         if (path_within(best_effort_canonical(candidate),
                         best_effort_canonical(script_base_dir_)) &&
             std::filesystem::exists(candidate, ec) && !ec)
-            return candidate.generic_string();
+            return exceeds_read_ceiling(candidate) ? refuse() : candidate.generic_string();
     }
 
     for (const auto& root : asset_roots_) {
         const auto canonical_root = best_effort_canonical(root);
-        const auto candidate = best_effort_canonical(root / relative);
+        const auto candidate = best_effort_canonical(root / requested);
         if (!path_within(candidate, canonical_root)) continue;
         std::error_code ec;
         if (std::filesystem::exists(candidate, ec) && !ec)
-            return candidate.generic_string();
+            return exceeds_read_ceiling(candidate) ? refuse() : candidate.generic_string();
     }
-    return path;
+
+    // Not found under any root. Only a host that opted into unreviewed paths
+    // gets the name back unchanged, to be opened relative to its working
+    // directory.
+    return allow_unreviewed_file_paths_ ? path : refuse();
 }
 
 void BridgeRegistrars::register_storage_key_value_api(WidgetBridge& self) {
@@ -327,7 +391,7 @@ void BridgeRegistrars::register_asset_loading_api(WidgetBridge& self) {
         auto roots = self.asset_roots_;
         if (!self.script_base_dir_.empty())
             roots.insert(roots.begin(), self.script_base_dir_);
-        auto asset = load_bridge_asset(url, roots, self.allow_unreviewed_file_paths_);
+        auto asset = load_bridge_asset(url, roots, self);
 
         auto result = choc::value::createObject("");
         result.addMember("ok", choc::value::createBool(asset.ok));
@@ -367,7 +431,6 @@ void BridgeRegistrars::register_font_assets_api(WidgetBridge& self) {
         auto family = args.get<std::string>(0, "");
         auto path = args.get<std::string>(1, "");
         if (family.empty() || path.empty()) return choc::value::createBool(false);
-        if (path.rfind("file://", 0) == 0) path = path.substr(7);
         path = self.resolve_script_relative(path);
         if (path.empty() || !std::filesystem::exists(path))
             return choc::value::createBool(false);
