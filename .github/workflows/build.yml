@@ -2351,10 +2351,14 @@ jobs:
       - name: Intel canary — lint + x86_64 GPU-off compile
         if: (runner.os == 'macOS' && vars.PULP_INTEL_CANARY == '1') && matrix.lane != 'contract'
         shell: bash
+        env:
+          # A `pr_number` dispatch lints what a pull request does: its change
+          # against the merged base.
+          INTEL_CANARY_PR_BASE: ${{ github.event.pull_request.base.sha || steps.tested.outputs.merged_base }}
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            base="${{ github.event.pull_request.base.sha }}"
+          if [ -n "$INTEL_CANARY_PR_BASE" ]; then
+            base="$INTEL_CANARY_PR_BASE"
             echo "Intel canary lint (changed vs ${base})"
             python3 tools/scripts/intel_canary_lint.py --mode=changed --base "${base}"
           else
@@ -3777,6 +3781,7 @@ jobs:
       && github.event_name != 'merge_group'
       && (github.event_name != 'workflow_dispatch' || inputs.run_windows)
       && (inputs.allow_hosted_windows == true || vars.PULP_ALLOW_HOSTED_WINDOWS == '1')
+      && inputs.pr_number == ''
     runs-on: windows-latest
     name: Windows MSVC release-path gate
     steps:
@@ -3856,6 +3861,7 @@ jobs:
       && github.event_name != 'merge_group'
       && (github.event_name != 'workflow_dispatch' || inputs.run_windows)
       && (inputs.allow_hosted_windows == true || vars.PULP_ALLOW_HOSTED_WINDOWS == '1')
+      && inputs.pr_number == ''
     runs-on: windows-latest
     name: Windows MIDI Services SDK compile-gate (advisory)
     continue-on-error: true
@@ -3922,6 +3928,7 @@ jobs:
       && github.event_name != 'merge_group'
       && (github.event_name != 'workflow_dispatch' || inputs.run_windows)
       && (inputs.allow_hosted_windows == true || vars.PULP_ALLOW_HOSTED_WINDOWS == '1')
+      && inputs.pr_number == ''
     runs-on: windows-latest
     name: Windows BLE compile-gate (advisory)
     continue-on-error: true
@@ -4234,6 +4241,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           WINDOWS_LEG: ${{ needs.resolve-provider.outputs.windows_leg }}
           HOSTED_WINDOWS_ALLOWED: ${{ needs.resolve-provider.outputs.hosted_windows_allowed }}
+          DISPATCH_PR_NUMBER: ${{ inputs.pr_number }}
         run: |
           set -euo pipefail
           classify_result="${{ needs.classify.result }}"
@@ -4245,7 +4253,10 @@ jobs:
             echo "Skip-safe PR — no C++/Swift build input changed. windows gate ✓ (no native build)"
             exit 0
           fi
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
+          # A `pr_number` dispatch is the pull request's own full lane: it has no
+          # Windows leg either (resolve-provider omits it as for a PR).
+          if [ "${{ github.event_name }}" = "pull_request" ] \
+              || { [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${DISPATCH_PR_NUMBER:-}" ]; }; then
             echo "Windows runs in nightly/explicit validation, not on the PR head — windows alias ✓"
             exit 0
           fi

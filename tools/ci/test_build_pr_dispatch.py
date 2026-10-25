@@ -586,5 +586,67 @@ class TrustAndIsolationTest(unittest.TestCase):
         self.assertIn("github.event_name == 'merge_group'", raised["queue-breaker-notify"])
         self.assertIn("github.event_name == 'push'", raised["a2t-headroom-issue"])
 
+
+class WindowsAliasTest(unittest.TestCase):
+    """The windows alias passes a pr_number dispatch exactly as it does a PR.
+
+    resolve-provider omits the Windows leg for both. The alias used to early-
+    pass only `pull_request`, so a pr_number dispatch (run_windows defaults to
+    true) failed it with "Windows leg not found" (proof run 40225987931).
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.job = workflow()["jobs"]["windows"]
+        cls.step = cls.job["steps"][0]
+
+    def _run(self, event: str, pr_number: str, run_windows: str, windows_leg: str,
+             gh_conclusion: str = "") -> subprocess.CompletedProcess:
+        values = {"needs.classify.result": "success",
+                  "needs.classify.outputs.native_build_required": "true",
+                  "github.event_name": event, "inputs.run_windows": run_windows,
+                  "github.repository": REPO, "github.run_id": "1",
+                  "needs.windows-msvc-release-gate.result": "skipped"}
+        script = self.step["run"]
+        for expr, value in values.items():
+            script = script.replace("${{ " + expr + " }}", value)
+        self.assertNotIn("${{", script, "every expression the alias uses is substituted")
+        with tempfile.TemporaryDirectory() as tmp:
+            bin_dir = Path(tmp) / "bin"
+            bin_dir.mkdir()
+            (bin_dir / "gh").write_text(f"#!/bin/sh\nprintf '%s' '{gh_conclusion}'\n", encoding="utf-8")
+            (bin_dir / "gh").chmod(0o755)
+            proc, _ = bash(script, {"PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+                                    "WINDOWS_LEG": windows_leg, "HOSTED_WINDOWS_ALLOWED": "false",
+                                    "DISPATCH_PR_NUMBER": pr_number, "GH_TOKEN": "x"})
+            return proc
+
+    def test_a_pr_dispatch_passes_like_a_pull_request(self) -> None:
+        omitted = "omitted: pull request or merge group"
+        for event, pr_number in (("pull_request", ""), ("workflow_dispatch", "11053")):
+            with self.subTest(event=event):
+                proc = self._run(event, pr_number, run_windows="true", windows_leg=omitted)
+                self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+                self.assertIn("not on the PR head — windows alias ✓", proc.stdout)
+        self.assertEqual(self.step["env"]["DISPATCH_PR_NUMBER"], "${{ inputs.pr_number }}")
+
+    def test_a_plain_dispatch_still_requires_its_windows_leg(self) -> None:
+        # Control: no early pass; with no Windows job found it fails as before.
+        proc = self._run("workflow_dispatch", "", run_windows="true", windows_leg="included")
+        self.assertEqual(proc.returncode, 1, proc.stdout)
+        self.assertIn("Windows leg not found", proc.stdout)
+
+    def test_no_hosted_windows_gate_runs_on_a_pr_dispatch(self) -> None:
+        for name in ("windows-msvc-release-gate", "windows-midi2-gate", "windows-ble-gate"):
+            with self.subTest(job=name):
+                self.assertIn("&& inputs.pr_number == ''",
+                              " ".join(str(workflow()["jobs"][name]["if"]).split()))
+
+    def test_the_intel_canary_lints_a_pr_dispatchs_change_against_its_merged_base(self) -> None:
+        step = steps("build")["Intel canary — lint + x86_64 GPU-off compile"]
+        self.assertEqual(step["env"]["INTEL_CANARY_PR_BASE"],
+                         "${{ github.event.pull_request.base.sha || steps.tested.outputs.merged_base }}")
+        self.assertNotIn('"${{ github.event_name }}" = "pull_request"', step["run"])
+
 if __name__ == "__main__":
     unittest.main()
