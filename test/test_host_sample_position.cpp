@@ -79,6 +79,10 @@ TEST_CASE("AU event block offset measures from the rounded block start",
     CHECK(au_event_block_offset(9, kImmediate, std::numeric_limits<double>::quiet_NaN(), 512) == 9);
     CHECK(au_event_block_offset(std::int64_t{1} << 40, kImmediate, std::nullopt, 0) ==
           std::numeric_limits<std::int32_t>::max());
+    // A block start near INT64_MIN would overflow the subtraction: the event
+    // time is taken as the offset instead.
+    CHECK(au_event_block_offset(1000, kImmediate, -9223372036854775808.0, 512) == 511);
+    CHECK(au_event_block_offset(5, kImmediate, -9223372036854775808.0, 512) == 5);
 }
 
 TEST_CASE("AU MIDI-out event time is the rounded block start plus the offset",
@@ -87,4 +91,7 @@ TEST_CASE("AU MIDI-out event time is the rounded block start plus the offset",
     CHECK(au_event_sample_time(13824.0001, 0, kImmediate) == 13824);
     CHECK(au_event_sample_time(std::numeric_limits<double>::infinity(), 3, kImmediate) ==
           kImmediate + 3);
+    // A block start within the offset of INT64_MAX would overflow the sum.
+    const double top = std::nextafter(9223372036854775808.0, 0.0);
+    CHECK(au_event_sample_time(top, 4095, kImmediate) == kImmediate + 4095);
 }

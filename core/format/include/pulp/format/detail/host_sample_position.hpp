@@ -39,7 +39,8 @@ inline std::optional<std::int64_t> host_sample_position(double samples) noexcept
 /// [immediate, immediate + 4096) are already block offsets. Otherwise the
 /// offset is the event time minus the block's start, `block_sample_time`
 /// rounded to the nearest sample; when the block time is unavailable or
-/// unrepresentable, the event time itself is taken as the offset.
+/// unrepresentable (or the difference overflows), the event time itself is
+/// taken as the offset.
 inline std::int32_t au_event_block_offset(std::int64_t event_sample_time, std::int64_t immediate,
                                           std::optional<double> block_sample_time,
                                           std::uint32_t frame_count) noexcept {
@@ -48,7 +49,10 @@ inline std::int32_t au_event_block_offset(std::int64_t event_sample_time, std::i
     if (event_sample_time >= immediate && event_sample_time < immediate + kImmediateWindow) {
         offset = event_sample_time - immediate;
     } else if (block_sample_time) {
-        if (const auto start = host_sample_position(*block_sample_time))
+        // Portable overflow check (MSVC builds this header too).
+        const auto start = host_sample_position(*block_sample_time);
+        if (start && !(*start > 0 && event_sample_time < INT64_MIN + *start) &&
+            !(*start < 0 && event_sample_time > INT64_MAX + *start))
             offset = event_sample_time - *start;
     }
     if (offset < 0)
@@ -62,11 +66,13 @@ inline std::int32_t au_event_block_offset(std::int64_t event_sample_time, std::i
 
 /// The AUv3 event time for a MIDI event `sample_offset` frames into a block
 /// that starts at `block_sample_time`, rounded to the nearest sample. When
-/// the block time is unrepresentable the event is sent `immediate +
-/// sample_offset` (AUEventSampleTimeImmediate plus the offset).
+/// the block time is unrepresentable, or the sum overflows, the event is sent
+/// at `immediate + sample_offset` (AUEventSampleTimeImmediate plus the offset).
 inline std::int64_t au_event_sample_time(double block_sample_time, std::int32_t sample_offset,
                                          std::int64_t immediate) noexcept {
-    if (const auto start = host_sample_position(block_sample_time))
+    const auto start = host_sample_position(block_sample_time);
+    if (start && !(sample_offset > 0 && *start > INT64_MAX - sample_offset) &&
+        !(sample_offset < 0 && *start < INT64_MIN - sample_offset))
         return *start + sample_offset;
     return immediate + sample_offset;
 }

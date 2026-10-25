@@ -35,24 +35,38 @@ class HeaderVocabularyGuardTest(unittest.TestCase):
             self.write(root, "c_api.hpp", "WGPUDevice raw = nullptr;\n")
             self.assertEqual(guard.main(["--include-root", str(root)]), 1)
             _, hits = guard.scan(root)
-            self.assertEqual(sorted(h.split(":")[0] for h in hits),
+            # device.hpp both includes the WebGPU header and names wgpu::Device.
+            self.assertEqual(sorted({h.split(":")[0] for h in hits}),
                              ["pulp/gpu_audio/c_api.hpp", "pulp/gpu_audio/device.hpp",
                               "pulp/gpu_audio/native.hpp"])
 
     def test_planted_native_backend_types_fail(self) -> None:
+        plants = {
+            "metal.hpp": "id<MTLDevice> device;\n",
+            "metal_c.hpp": "void f(MTLCommandQueue* queue);\n",
+            "metal_cpp.hpp": "MTL::Device* device = nullptr;\n",
+            "ca_layer.hpp": "CAMetalLayer* layer = nullptr;\n",
+            "bridge.hpp": "void* p = (__bridge void*)obj;\n",
+            "vulkan.hpp": "VkDevice device = nullptr;\n",
+            "d3d.hpp": "ID3D12Device* device = nullptr;\n",
+            "dxgi.hpp": "IDXGISwapChain* chain = nullptr;\n",
+            "d3d_struct.hpp": "D3D12_RESOURCE_DESC desc{};\n",
+            "inc_metal.hpp": "#include <Metal/Metal.h>\n",
+            "imp_quartz.hpp": "#import <QuartzCore/CAMetalLayer.h>\n",
+            "inc_vulkan.hpp": "#include <vulkan/vulkan.h>\n",
+            "inc_webgpu.hpp": "#  include \"webgpu/webgpu.h\"\n",
+            "inc_d3d.hpp": "#include <d3d12.h>\n",
+        }
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
-            self.write(root, "clean.hpp", "struct Clean { int vkey = 0; float mtl_ratio = 0; };\n")
-            self.write(root, "metal.hpp", "id<MTLDevice> device;\n")
-            self.write(root, "metal_c.hpp", "void f(MTLCommandQueue* queue);\n")
-            self.write(root, "vulkan.hpp", "VkDevice device = nullptr;\n")
-            self.write(root, "vulkan_fn.hpp", "auto fn = &vkCreateDevice;\n")
-            self.write(root, "d3d.hpp", "ID3D12Device* device = nullptr;\n")
+            self.write(root, "clean.hpp", "struct Clean { int vkey = 0; int vkMax = 0; "
+                                          "float mtl_ratio = 0; bool MTLike = false; };\n"
+                                          "#include <cstdint>\n")
+            for name, text in plants.items():
+                self.write(root, name, text)
             _, hits = guard.scan(root)
             self.assertEqual(sorted(h.split(":")[0] for h in hits),
-                             ["pulp/gpu_audio/d3d.hpp", "pulp/gpu_audio/metal.hpp",
-                              "pulp/gpu_audio/metal_c.hpp", "pulp/gpu_audio/vulkan.hpp",
-                              "pulp/gpu_audio/vulkan_fn.hpp"])
+                             sorted(f"pulp/gpu_audio/{name}" for name in plants))
 
     def test_prose_mentioning_a_backend_passes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
