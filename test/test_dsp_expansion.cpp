@@ -19,6 +19,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <vector>
 
 using namespace pulp::signal;
@@ -577,6 +578,29 @@ TEST_CASE("WaveShaper buffer path matches the sample path bit for bit", "[signal
             INFO("curve " << static_cast<int>(curve) << " drive " << drive);
             for (int i = 0; i < kSamples; ++i)
                 REQUIRE(std::memcmp(&buffer[i], &expected[i], sizeof(float)) == 0);
+        }
+    }
+}
+
+TEST_CASE("WaveShaper returns NaN for quiet and signaling NaN input", "[signal][waveshaper]") {
+    const WaveShaper::Curve curves[] = {
+        WaveShaper::Curve::soft_clip, WaveShaper::Curve::hard_clip,
+        WaveShaper::Curve::tanh_clip, WaveShaper::Curve::fold,
+        WaveShaper::Curve::sine_fold, static_cast<WaveShaper::Curve>(99)};
+    const float inputs[] = {std::numeric_limits<float>::quiet_NaN(),
+                            std::numeric_limits<float>::signaling_NaN()};
+    for (const auto curve : curves) {
+        for (const float drive : {1.0f, 2.0f}) {
+            WaveShaper shaper;
+            shaper.set_curve(curve);
+            shaper.set_drive(drive);
+            float buffer[2] = {inputs[0], inputs[1]};
+            shaper.process(buffer, 2);
+            INFO("curve " << static_cast<int>(curve) << " drive " << drive);
+            for (int i = 0; i < 2; ++i) {
+                REQUIRE(std::isnan(shaper.process(inputs[i])));
+                REQUIRE(std::isnan(buffer[i]));
+            }
         }
     }
 }

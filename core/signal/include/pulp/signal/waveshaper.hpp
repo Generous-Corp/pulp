@@ -33,8 +33,13 @@ public:
         return x;
     }
 
-    // Same result as process(sample) on each sample, bit for bit (except that
-    // at unity drive a signaling NaN input is not quieted first). The curve
+    // Same result as process(sample) on each sample, bit for bit, with two
+    // exceptions at unity drive, where the buffer path skips the multiply: a
+    // signaling NaN input is not quieted first (the output is still a NaN),
+    // and with denormals-are-zero enabled a subnormal input is not flushed
+    // to zero first, so hard_clip and fold, which do no arithmetic on an
+    // in-range sample, pass it through where the sample path returns 0. The
+    // curve
     // is selected once per buffer and the drive held in a register: read
     // through the object inside the loop they would be reloaded every sample,
     // since the compiler cannot prove that an opaque libm call leaves them
@@ -81,8 +86,9 @@ public:
 
     template <Curve C> static void run(SampleType* buffer, int num_samples, SampleType drive) {
         // Multiplying by exactly 1 changes no value other than quieting a
-        // signaling NaN, so unity drive skips it: the multiply otherwise sits
-        // on the path into each curve evaluation.
+        // signaling NaN (and, under denormals-are-zero, flushing a subnormal),
+        // so unity drive skips it: the multiply otherwise sits on the path
+        // into each curve evaluation.
         if (drive == SampleType{1.0f}) {
             for (int i = 0; i < num_samples; ++i)
                 buffer[i] = shape<C>(buffer[i]);

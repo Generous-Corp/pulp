@@ -1706,7 +1706,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/waveshaper.hpp",
-        "fingerprint": "sha256:05c9b1d85f412a99c7984ff0a87c69619f73f748176ad359a3735419e1fdafdb",
+        "fingerprint": "sha256:414fae751de0700326a73c259418799514ef35bf134e15d2cf1f29a766719b53",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (

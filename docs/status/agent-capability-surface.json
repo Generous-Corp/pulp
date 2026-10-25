@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 155,
+  "inventory_version": 156,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -43,14 +43,14 @@
   ],
   "counts": {
     "public_headers": 512,
-    "reviewed_headers": 258,
-    "legacy_unreviewed_headers": 254,
+    "reviewed_headers": 259,
+    "legacy_unreviewed_headers": 253,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 121,
       "capability_support": 46,
-      "infrastructure": 89,
-      "legacy_unreviewed": 254,
+      "infrastructure": 90,
+      "legacy_unreviewed": 253,
       "unsupported_capability": 2
     },
     "by_domain": {
@@ -86,8 +86,8 @@
       },
       "signal": {
         "public_headers": 278,
-        "reviewed_headers": 151,
-        "legacy_unreviewed_headers": 127,
+        "reviewed_headers": 152,
+        "legacy_unreviewed_headers": 126,
         "unsupported_headers": 2
       },
       "timebase": {
@@ -4881,11 +4881,11 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/waveshaper.hpp",
-      "fingerprint": "sha256:4673695872790612c9282cf395c6b197af14f500acc0cf86d18366b0ccb48a47",
+      "fingerprint": "sha256:414fae751de0700326a73c259418799514ef35bf134e15d2cf1f29a766719b53",
       "include": "pulp/signal/waveshaper.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Static waveshaping curves (soft, hard, tanh, fold, sine fold) with a drive, as per-sample and buffer paths that agree bit for bit. A bounded DSP primitive; it makes no installed agent capability claim of its own."
     },
     {
       "domain": "signal",
