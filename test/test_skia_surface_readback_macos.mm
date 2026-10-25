@@ -51,4 +51,39 @@ TEST_CASE("SkiaSurface reads back a presentable frame at the swapchain's own siz
     }
 }
 
+TEST_CASE("SkiaSurface persistent scene matches a fractional-DPI swapchain's size",
+          "[render][skia][hidpi][macos]") {
+    @autoreleasepool {
+        // The retained scene is blitted 1:1 onto the drawable; derived from
+        // 667 x 1.5 it would be 1000 wide under a 1001 px swapchain.
+        CAMetalLayer* layer = [CAMetalLayer layer];
+        layer.drawableSize = CGSizeMake(1001, 751);
+        auto gpu = GpuSurface::create_dawn();
+        if (!gpu)
+            SKIP("no Dawn backend");
+        GpuSurface::Config config{};
+        config.width = 1001;
+        config.height = 751;
+        config.native_surface_handle = (__bridge void*)layer;
+        if (!gpu->initialize(config) || !gpu->has_surface())
+            SKIP("GpuSurface would not initialize on a CAMetalLayer");
+        auto skia = SkiaSurface::create(*gpu, {.width = 667, .height = 501, .scale_factor = 1.5f});
+        if (!skia || !skia->is_available())
+            SKIP("no Graphite context");
+        REQUIRE(skia->set_persistent_scene(true));
+
+        REQUIRE(gpu->begin_frame());
+        auto* canvas = skia->begin_frame();
+        REQUIRE(canvas != nullptr);
+        canvas->fill_rect(0, 0, 1001.0f / 1.5f, 751.0f / 1.5f);
+        std::vector<uint8_t> pixels;
+        uint32_t w = 0, h = 0;
+        REQUIRE(skia->read_current_rgba(pixels, w, h)); // reads the scene
+        CHECK(w == 1001);
+        CHECK(h == 751);
+        skia->end_frame();
+        gpu->end_frame();
+    }
+}
+
 #endif // TARGET_OS_OSX

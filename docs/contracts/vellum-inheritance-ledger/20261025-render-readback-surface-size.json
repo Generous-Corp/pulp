@@ -4,7 +4,7 @@
   "slices": [
     "render-skia-dawn"
   ],
-  "vellum_obligation": "A Vellum host that mirrors skia_surface.cpp keeps read_current_rgba() sized from the source surface, so a swapchain sized from a physical client rect is read back whole.",
+  "vellum_obligation": "A Vellum host that mirrors skia_surface.cpp keeps read_current_rgba() sized from the source surface and the presentable persistent scene sized from the swapchain, so a swapchain sized from a physical client rect is drawn and read back whole.",
   "evidence": [
     ".github/vellum-change-events/20261025-render-readback-surface-size.json",
     "ctest --test-dir build -R 'SkiaSurface reads back a presentable frame at the swapchain'"
