@@ -103,10 +103,16 @@ def _resolved_repo_target(root: Path, source: Path, target: str) -> str | None:
         return None
 
 
+# Private core/view source trees: implementation sources, the per-OS platform
+# backends, and the audio widgets' sources. The installed headers under
+# core/view/include and core/view/audio/include are the public surface.
+_PRIVATE_CORE_VIEW_TREES = ("core/view/src", "core/view/platform", "core/view/audio/src")
+
+
 def _is_private_core_view_target(target: str) -> bool:
     normalised = _normalise(target)
-    return ("core/view/src/" in normalised or
-            normalised.startswith("core/view/src"))
+    return any(f"{tree}/" in normalised or normalised.startswith(tree)
+               for tree in _PRIVATE_CORE_VIEW_TREES)
 
 
 def _violations(root: Path, manifest: Manifest) -> list[str]:

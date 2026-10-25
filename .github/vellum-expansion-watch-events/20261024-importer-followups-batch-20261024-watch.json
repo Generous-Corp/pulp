@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261024-importer-followups-batch-20261024-watch",
+  "created_at": "2026-10-24T12:10:03Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Two importer follow-ups: a styled SVG gradient stroke now goes through Canvas::stroke_path like a styled solid one, so it no longer sets and resets the canvas's sticky stroke state; and the differential lab gains a test pinning nested native rotations to Chromium 151 bounds. Paint output is unchanged for unstyled strokes and identical for styled ones; no design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "python3 test/test_importer_differential_lab.py",
+    "ctest --test-dir build -R pulp-test-svg-path-widget",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

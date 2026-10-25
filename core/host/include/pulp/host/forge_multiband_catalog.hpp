@@ -6,6 +6,7 @@
 // followed by independent shipped Compressor instances. This two-band node is
 // that composition made directly lowerable, not a parallel DSP implementation.
 
+#include <pulp/host/detail/forge_compressor_ballistics.hpp>
 #include <pulp/host/forge_param_descriptor.hpp>
 #include <pulp/host/custom_node_type.hpp>
 #include <pulp/signal/compressor.hpp>
@@ -28,6 +29,7 @@ inline constexpr state::ParamID kAttackMs = 6;
 inline constexpr state::ParamID kReleaseMs = 7;
 inline constexpr state::ParamID kLowMakeupDb = 8;
 inline constexpr state::ParamID kHighMakeupDb = 9;
+inline constexpr state::ParamID kBallistics = 10;
 
 // Samples per band-split pass of the process callback.
 inline constexpr int kBandChunk = 256;
@@ -93,6 +95,8 @@ inline CustomNodeType make_multiband_compressor_node() {
     t.baked_params.push_back({kReleaseMs, 10.0f, 1000.0f, 150.0f});
     t.baked_params.push_back({kLowMakeupDb, -24.0f, 12.0f, 0.0f});
     t.baked_params.push_back({kHighMakeupDb, -24.0f, 12.0f, 0.0f});
+    // ballistics: 0 branching (default, as before the control existed), 1 decoupled.
+    t.baked_params.push_back({kBallistics, 0.0f, 1.0f, 0.0f});
 
     t.process_instance_baked_param = [](void* p, audio::BufferView<float>& out,
                                         const audio::BufferView<const float>& in, int n,
@@ -110,6 +114,9 @@ inline CustomNodeType make_multiband_compressor_node() {
             params.value_at(kHighThresholdDb, 0), params.value_at(kHighRatio, 0),
             params.value_at(kAttackMs, 0), params.value_at(kReleaseMs, 0),
             params.value_at(kHighMakeupDb, 0)));
+        const auto ballistics = forge_compressor::ballistics_for(params.value_at(kBallistics, 0));
+        s->low.set_ballistics(ballistics);
+        s->high.set_ballistics(ballistics);
 
         // Split a chunk into its two bands, compress each band through the
         // compressor's buffer path, then sum. Stack scratch keeps the node free
@@ -146,9 +153,8 @@ inline ForgeNodeDescriptor descriptor() {
             {"low_threshold_db", kLowThresholdDb, "Low Threshold", "dB",
              "Level above which the low band is compressed.", ForgeParamKind::continuous,
              ForgeParamCurve::linear},
-            {"low_ratio", kLowRatio, "Low Ratio", ":1",
-             "Gain-reduction ratio for the low band.", ForgeParamKind::continuous,
-             ForgeParamCurve::logarithmic},
+            {"low_ratio", kLowRatio, "Low Ratio", ":1", "Gain-reduction ratio for the low band.",
+             ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
             {"high_threshold_db", kHighThresholdDb, "High Threshold", "dB",
              "Level above which the high band is compressed.", ForgeParamKind::continuous,
              ForgeParamCurve::linear},
@@ -167,6 +173,7 @@ inline ForgeNodeDescriptor descriptor() {
             {"high_makeup_db", kHighMakeupDb, "High Makeup", "dB",
              "Output gain applied after high-band compression.", ForgeParamKind::continuous,
              ForgeParamCurve::linear},
+            forge_compressor::ballistics_descriptor(kBallistics),
         },
     };
 }

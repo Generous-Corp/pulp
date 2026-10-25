@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261023-vellum-p4-view-native-carve-watch",
+  "created_at": "2026-10-23T02:35:36Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Vellum P4 view-audio carve for the view-platform unit. pulp-view-native was both the extracted D3 view-platform target and the native-UI umbrella that links pulp-view-audio and pulp-design-import-audio-pack, which put six allowlisted retained-Pulp edges (view-audio, audio, midi, timebase, sample-bank-manifest, design-import-audio-pack) in the extracted closure. A new pulp-view-platform target now carries the extracted half (web_view_backend.cpp and the Windows/Linux WebView backend probes over view-script/view-core plus design-import) and links no audio, MIDI or recognition-pack target; pulp-view-native stays the Pulp-kept umbrella over it with the same public surface. The view-core-carried platform window-host files do not move. vellum_d3_units.json maps view-platform to pulp-view-platform and the six P4-view-audio allowlist entries are deleted. No design-import, Chromium, rendering, or packaging authority moves; Pulp remains the source owner under the 2026-10-04 temporary exception.",
+  "tests": [
+    "python3 tools/scripts/test_vellum_closure.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

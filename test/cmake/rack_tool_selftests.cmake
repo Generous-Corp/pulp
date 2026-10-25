@@ -10,6 +10,12 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME rack-generate-model-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/rack/test_generate_model.py")
     set_tests_properties(rack-generate-model-selftest PROPERTIES LABELS "rack;selftest" TIMEOUT 120)
+    add_test(NAME rack-download-consent-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/rack/test_download_consent.py")
+    set_tests_properties(rack-download-consent-selftest PROPERTIES LABELS "rack;selftest" TIMEOUT 120)
+    add_test(NAME rack-gate-sandbox-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/rack/test_gate_sandbox.py")
+    set_tests_properties(rack-gate-sandbox-selftest PROPERTIES LABELS "rack;selftest" TIMEOUT 120)
     add_test(NAME rack-intent-context-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/rack/test_intent_context.py")
     set_tests_properties(rack-intent-context-selftest PROPERTIES LABELS "rack;selftest" TIMEOUT 120)

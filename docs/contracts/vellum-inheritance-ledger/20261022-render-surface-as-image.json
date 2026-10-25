@@ -1,0 +1,17 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261022-render-surface-as-image",
+  "slices": [
+    "canvas-kernel",
+    "render-skia-dawn"
+  ],
+  "vellum_obligation": "On Graphite, the persistent-scene blit and a retained layer's seal must not copy the surface (SkSurfaces::AsImage or Surface::draw), with a documented ordering guarantee that frame N's blit is recorded before frame N+1's draws; non-textureable surfaces fall back to a copy. A readback of the persistent scene must not take a legacy snapshot of it (copy with AsImageCopy), so the scene never mixes snapshot and AsImage.",
+  "evidence": [
+    ".github/vellum-change-events/20261022-render-surface-as-image.json",
+    "ctest --test-dir build -R 'Graphite AsImage view of a surface sees later draws into it'",
+    "ctest --test-dir build -R 'SkiaCanvas Graphite layer seal shares the layer texture'",
+    "ctest --test-dir build -R 'SkiaSurface persistent-scene blit presents each frame.s own scene'",
+    "ctest --test-dir build -R 'SkiaSurface persistent-scene frames do not copy the scene'",
+    "ctest --test-dir build -R 'SkiaSurface readback fallback keeps the scene blit free of snapshot warnings'"
+  ]
+}

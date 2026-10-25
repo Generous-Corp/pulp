@@ -39,7 +39,7 @@ struct GpuHostDecision {
 /// `[plugin-gpu-host]` debug-parity adapter log (mirrors `[gpu-host]`).
 ///
 /// GPU is wanted when the editor renders through the Skia/Dawn pipeline:
-///   - the framework scripted-UI path (`PULP_UI_SCRIPT_PATH`), detected via
+///   - the framework scripted-UI path (the plug-in's `UI_SCRIPT`), detected via
 ///     `ViewBridge::uses_script_ui()`, or
 ///   - a custom `Processor::create_view()` whose view set
 ///     `View::set_requires_gpu_host(true)` (e.g. ChainerSynth).
@@ -159,7 +159,7 @@ inline void warn_if_unexpected_cpu_fallback(const GpuHostDecision& d,
 /// adapters keep it next to their host and reset it in their close/removed
 /// path. Dropping it is enough: no callback can fire afterwards.
 [[nodiscard]] inline view::PluginViewHost::GpuSurfaceSubscription
-bind_gpu_surface(view::PluginViewHost& host, view::ScriptedUiSession* session,
+bind_gpu_surface(view::PluginViewHost& host, view::ScriptedEditorSession* session,
                  const GpuHostDecision& decision, const char* format_tag) {
     using State = view::PluginViewHost::GpuSurfaceState;
     const bool expected_gpu = decision.use_gpu;

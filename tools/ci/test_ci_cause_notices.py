@@ -265,6 +265,13 @@ class CiCauseNotices(unittest.TestCase):
         for path in ("tools/ci/ci_cause_notices.sh", "tools/shipyard.toml", "tools/toolchain/shipyard.sha256"):
             self.assertIn(path, sparse)
 
+    def test_the_workflow_runs_cause_extraction_on_the_failure_path(self) -> None:
+        workflow = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
+        job = workflow[workflow.index("\n  ci-cause:\n"):]
+        condition = job[job.index("    if: >-"):job.index("    runs-on:")]
+        self.assertIn("failure()", condition)
+        self.assertIn("contains(needs.*.result, 'failure')", condition)
+
     def test_no_failed_job_means_no_record(self) -> None:
         green = [job for job in self.jobs if job["conclusion"] == "success"]
         (self.fixtures / "jobs.json").write_text(json.dumps({"jobs": green}), encoding="utf-8")

@@ -1,0 +1,68 @@
+{
+  "id": "format-parameter-batch-writes",
+  "title": "Batched parameter writes and allocation-free event sorting in the CLAP and VST3 adapters",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "format-parameter-batch-writes-20261022",
+  "owned_paths": [
+    "core/format/include/pulp/format/clap_adapter.hpp",
+    "core/format/include/pulp/format/vst3_adapter.hpp",
+    "core/state/include/pulp/state/parameter_event_queue.hpp",
+    "docs/status/sequencer-exposure/rows/format-parameter-batch-writes.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/format/include/pulp/format/clap_adapter.hpp",
+      "needles": [
+        "std::vector<state::StateStore::ParamWrite> latest_param_writes;"
+      ]
+    },
+    {
+      "path": "core/format/include/pulp/format/vst3_adapter.hpp",
+      "needles": [
+        "std::vector<state::StateStore::ParamWrite> param_writes_;"
+      ]
+    },
+    {
+      "path": "core/state/include/pulp/state/parameter_event_queue.hpp",
+      "needles": [
+        "void sort(std::span<ParameterEvent> scratch, std::span<std::uint32_t> offset_counts) {"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "The adapters collect host parameter changes into StateStore::ParamWrite batches, and ParameterEventQueue gains a scratch-backed sort that keeps offset order without allocating. Host-visible parameter values and ordering are unchanged. This pending source receipt does not establish a released SDK artifact.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/state/include/pulp/state/parameter_event_queue.hpp",
+          "needles": ["void sort(std::span<ParameterEvent> scratch, std::span<std::uint32_t> offset_counts) {"]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "The change is inside the format adapters' process path and adds no offline timeline command."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "The change adds no timeline MCP operation."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No remote control operation is added; parameter changes still arrive from the host."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "No installed agent capability key is added or changed; the touched headers keep their reviewed dispositions."
+    }
+  }
+}

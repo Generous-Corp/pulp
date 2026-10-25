@@ -578,5 +578,155 @@ class TestRegionHelpers(unittest.TestCase):
         self.assertEqual(stderr.getvalue(), "")
 
 
+
+def _toolbar(draw_slider: bool, band_level: int = 0):
+    """A dark toolbar with labels and, optionally, a slider.
+
+    The labels and the slider stand in for a panel's chrome; the slider is
+    small next to the bar, which is the case histogram scoring cannot see.
+    `band_level` lifts a full-width band to that many levels above the bar,
+    the way a dithered gradient straddles the ink threshold.
+    """
+    from PIL import Image, ImageDraw  # type: ignore
+
+    img = Image.new("RGB", (400, 60), (5, 6, 9))
+    draw = ImageDraw.Draw(img)
+    for x in range(10, 330, 40):
+        draw.rectangle((x, 20, x + 24, 30), fill=(200, 205, 210))
+    if band_level:
+        draw.rectangle((0, 50, 399, 53), fill=(5 + band_level, 6 + band_level, 9 + band_level))
+    if draw_slider:
+        draw.rectangle((340, 24, 389, 33), fill=(71, 180, 235))
+    return img
+
+
+FULL = {"x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0}
+
+
+@unittest.skipUnless(HAVE_PIL, "Pillow not installed")
+class TestInkCoverage(unittest.TestCase):
+    def test_missing_slider_fails_the_patch_gate_while_score_passes(self) -> None:
+        region = dict(FULL, threshold=0.75, max_uncovered_fraction=0.0027)
+        result = regions_mod.region_score(_toolbar(True), _toolbar(False), region)
+        self.assertGreaterEqual(result["score"], 0.75)
+        self.assertEqual(result["largest_uncovered_px"], 50 * 10)
+        self.assertAlmostEqual(result["largest_uncovered_fraction"], 500 / (400 * 60), places=6)
+        self.assertEqual(result["max_uncovered_px"], 64)
+        self.assertFalse(result["uncovered_passed"])
+        self.assertEqual(result["failed_checks"], ["uncovered_patch"])
+        self.assertFalse(result["passed"])
+
+    def test_identical_toolbar_passes_every_coverage_gate(self) -> None:
+        region = dict(FULL, coverage_floor=0.98, max_uncovered_fraction=0.0)
+        result = regions_mod.region_score(_toolbar(True), _toolbar(True), region)
+        self.assertEqual(result["ink_coverage"], 1.0)
+        self.assertEqual(result["largest_uncovered_px"], 0)
+        self.assertEqual(result["failed_checks"], [])
+        self.assertTrue(result["passed"])
+
+    def test_missing_slider_lowers_coverage_by_its_share_of_the_ink(self) -> None:
+        cov = regions_mod.ink_coverage(_toolbar(True), _toolbar(False))
+        self.assertEqual(cov["reference_ink_px"], 8 * 25 * 11 + 50 * 10)
+        self.assertAlmostEqual(cov["covered"], 8 * 25 * 11 / (8 * 25 * 11 + 50 * 10))
+        self.assertEqual(cov["reference_modal_rgb"], [5, 6, 9])
+
+    def test_band_just_under_the_threshold_still_counts_as_covered(self) -> None:
+        cov = regions_mod.ink_coverage(_toolbar(True, band_level=9), _toolbar(True, band_level=7))
+        self.assertEqual(cov["covered"], 1.0)
+        self.assertEqual(cov["largest_uncovered_px"], 0)
+
+    def test_band_with_under_half_its_contrast_is_uncovered(self) -> None:
+        cov = regions_mod.ink_coverage(_toolbar(True, band_level=9), _toolbar(True, band_level=4))
+        self.assertEqual(cov["largest_uncovered_px"], 400 * 4)
+
+    def test_blank_candidate_fails_the_coverage_floor(self) -> None:
+        from PIL import Image  # type: ignore
+
+        blank = Image.new("RGB", (400, 60), (0, 0, 0))
+        result = regions_mod.region_score(_toolbar(True), blank, dict(FULL, threshold=0.0, coverage_floor=0.5))
+        self.assertEqual(result["ink_coverage"], 0.0)
+        self.assertIn("coverage", result["failed_checks"])
+        self.assertFalse(result["passed"])
+
+    def test_coverage_is_reported_but_not_gated_without_a_declared_limit(self) -> None:
+        result = regions_mod.region_score(_toolbar(True), _toolbar(False), dict(FULL, threshold=0.75))
+        self.assertIsNone(result["coverage_floor"])
+        self.assertIsNone(result["max_uncovered_fraction"])
+        self.assertIsNone(result["max_uncovered_px"])
+        self.assertLess(result["ink_coverage"], 1.0)
+        self.assertTrue(result["passed"])
+
+    def test_reference_without_ink_is_fully_covered(self) -> None:
+        cov = regions_mod.ink_coverage(FakeImage([(9, 9, 9)] * 4, size=(2, 2)), FakeImage([(200, 0, 0)] * 4, size=(2, 2)))
+        self.assertEqual(cov["covered"], 1.0)
+        self.assertEqual(cov["candidate_ink_px"], 4)
+        self.assertEqual(cov["ink_ratio"], 4.0)
+        empty = regions_mod.ink_coverage(FakeImage([], size=(0, 0)), FakeImage([], size=(0, 0)))
+        self.assertEqual(empty["reference_ink_px"], 0)
+        self.assertEqual(empty["covered"], 1.0)
+
+    def test_patch_limit_holds_the_same_element_size_at_any_frame_size(self) -> None:
+        region = dict(FULL, threshold=0.0, max_uncovered_fraction=0.0027)
+        for scale in (1, 2):
+            ref = _toolbar(True).resize((400 * scale, 60 * scale))
+            cand = _toolbar(False).resize((400 * scale, 60 * scale))
+            with self.subTest(scale=scale):
+                missing = regions_mod.region_score(ref, cand, region)
+                self.assertEqual(missing["max_uncovered_px"], int(0.0027 * 400 * 60 * scale * scale))
+                self.assertGreaterEqual(missing["largest_uncovered_px"], 500 * scale * scale)
+                self.assertEqual(missing["failed_checks"], ["uncovered_patch"])
+                self.assertTrue(regions_mod.region_score(ref, ref, region)["passed"])
+
+    def test_spectr_toolbar_declares_both_coverage_gates(self) -> None:
+        toolbar = regions_mod.SPECTR_REGIONS["bottom_toolbar"]
+        self.assertEqual(toolbar["coverage_floor"], 0.98)
+        self.assertEqual(toolbar["max_uncovered_fraction"], 0.000056)
+        self.assertIn("edge_threshold", toolbar)
+
+    def test_text_output_names_the_failed_check(self) -> None:
+        stdout = io.StringIO()
+        with tempfile.TemporaryDirectory() as tdir:
+            tmp = Path(tdir)
+            ref_path = tmp / "ref.png"
+            cand_path = tmp / "cand.png"
+            _toolbar(True).save(ref_path)
+            _toolbar(False).save(cand_path)
+            region_path = tmp / "regions.json"
+            region_path.write_text(json.dumps({"bar": dict(FULL, max_uncovered_fraction=0.0027)}), encoding="utf-8")
+            with mock.patch.object(sys, "argv", [str(SCRIPT), str(ref_path), str(cand_path), "--size", "400x60",
+                                                 "--regions", str(region_path), "--strict"]), \
+                 contextlib.redirect_stdout(stdout):
+                rc = regions_mod.main()
+        self.assertEqual(rc, 1)
+        self.assertIn("largest uncovered patch=500px (limit 64px)", stdout.getvalue())
+        self.assertIn("failed: uncovered_patch", stdout.getvalue())
+
+
+class TestCoverageSchema(unittest.TestCase):
+    def _load(self, region: dict) -> str:
+        with tempfile.TemporaryDirectory() as tdir:
+            path = Path(tdir) / "regions.json"
+            path.write_text(json.dumps({"r": dict(FULL, **region)}), encoding="utf-8")
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as cm:
+                regions_mod.load_regions(path)
+        self.assertEqual(cm.exception.code, 2)
+        return stderr.getvalue()
+
+    def test_coverage_floor_outside_unit_range_rejected(self) -> None:
+        self.assertIn("invalid coverage_floor", self._load({"coverage_floor": 1.5}))
+
+    def test_max_uncovered_fraction_must_be_a_unit_fraction(self) -> None:
+        for bad in (-0.1, 1.5, True, "0.001"):
+            with self.subTest(bad=bad):
+                self.assertIn("invalid max_uncovered_fraction", self._load({"max_uncovered_fraction": bad}))
+
+    def test_valid_coverage_limits_load(self) -> None:
+        with tempfile.TemporaryDirectory() as tdir:
+            path = Path(tdir) / "regions.json"
+            path.write_text(json.dumps({"r": dict(FULL, coverage_floor=0.9, max_uncovered_fraction=0)}), encoding="utf-8")
+            loaded = regions_mod.load_regions(path)
+        self.assertEqual(loaded["r"]["max_uncovered_fraction"], 0)
+
 if __name__ == "__main__":
     unittest.main()

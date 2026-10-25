@@ -418,7 +418,8 @@ std::unique_ptr<PluginSlot> load_lv2_plugin(const PluginInfo& info) {
     }
 
     PluginInfo filled = info;
-    if (filled.unique_id.empty() && chosen->URI) filled.unique_id = chosen->URI;
+    if (chosen->URI)
+        filled.unique_id = chosen->URI;
     if (filled.name.empty()) filled.name = fs::path(info.path).stem().string();
 
     return std::make_unique<Lv2Slot>(std::move(filled), handle, chosen, std::move(roles));

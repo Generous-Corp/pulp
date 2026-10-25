@@ -7,7 +7,7 @@ WHAT IT DOES
 boundary. Its authoritative run lives in two REQUIRED GitHub checks
 (`Vellum freeze`, `Vellum trusted freeze`), and `vellum-trusted-gate.yml`
 executes the checker from a trusted root rather than from the pull request's
-own copy, while `.github/CODEOWNERS` locks the events directory, the checker
+own copy, while `.github/CODEOWNERS` lists the events directory, the checker
 and the checker's test.
 
 This script runs the same verdict BEFORE the push and, when an event is owed,
