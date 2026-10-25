@@ -240,6 +240,24 @@ class RttiOwnershipTest(unittest.TestCase):
             self.assertEqual(rtti_ownership.member_owner(demangled), owner, demangled)
         self.assertIsNone(rtti_ownership.member_owner("vtable for pulp::view::Meter"))
 
+    def test_member_owner_reads_through_operator_names(self) -> None:
+        # The brackets and spaces in an operator's own name are neither
+        # nesting nor a return type.
+        owner = "pulp::view::Meter"
+        for op in ("operator>(pulp::view::Meter const&) const", "operator>>(int)",
+                   "operator<(pulp::view::Meter const&) const", "operator<<=(int)",
+                   "operator<=>(pulp::view::Meter const&) const", "operator->() const",
+                   "operator bool() const", "operator unsigned long() const",
+                   "operator new(unsigned long)", "operator delete[](void*)",
+                   "operator=(pulp::view::Meter&&)", "operator[](unsigned long)"):
+            with self.subTest(op):
+                self.assertEqual(rtti_ownership.member_owner(f"{owner}::{op}"), owner)
+        self.assertEqual(rtti_ownership.member_owner(
+            "pulp::view::Box<int>::operator<(pulp::view::Box<int> const&) const"),
+            "pulp::view::Box<int>")
+        # A member merely named like an operator keeps its own name.
+        self.assertEqual(rtti_ownership.member_owner(f"{owner}::operator_helper(int)"), owner)
+
     def test_std_and_closures_are_never_flagged(self) -> None:
         for cls in ("std::__1::__function::__func<pulp::view::Meter::bind()::'lambda'(), void ()>",
                     "std::format_error", "pulp::view::Meter::bind()::'lambda'()",

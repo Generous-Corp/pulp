@@ -34,6 +34,15 @@ import subprocess
 RTTI_MANGLED = re.compile(r"^_?_ZT[IVSTC]")
 _RTTI_DEMANGLED = re.compile(
     r"^(?:typeinfo name for|typeinfo for|vtable for|VTT for|construction vtable for) (?P<type>.+)$")
+# An operator's own name: brackets and spaces inside it ("operator>",
+# "operator()", "operator bool", "operator new[]") are not nesting or a return
+# type, so member_owner masks it before measuring depth.
+_OPERATOR_NAME = re.compile(
+    r"\boperator(?:\s*(?:new|delete)(?:\s*\[\])?(?![\w])"
+    r"|\s*\(\)|\s*\[\]|\s*->\*?|\s*<=>|\s*(?:<<|>>)=?"
+    r"|\s*(?:&&|\|\||\+\+|--|[-+*/%^&|~!=<>,]=?)"
+    r"|\s*\"\"\s*\w+"
+    r"|\s+[^()]+?(?=\())")
 _CLOSURE = re.compile(r"'lambda|\{lambda|'block|\{block|'unnamed|\{unnamed|\$_\d|\(anonymous namespace\)")
 
 
@@ -103,6 +112,7 @@ def member_owner(demangled: str) -> str | None:
     """
     if _RTTI_DEMANGLED.match(demangled):
         return None
+    demangled = _OPERATOR_NAME.sub("operator_", demangled)
     paren = _top_level(demangled, "(")
     name = demangled[:paren] if paren >= 0 else demangled
     # Keep the last top-level word: that drops a template instantiation's
