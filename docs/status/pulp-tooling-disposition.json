@@ -705,6 +705,10 @@
             "kind": "flag"
           },
           {
+            "name": "--dev-shared",
+            "kind": "flag"
+          },
+          {
             "name": "--seed-build",
             "kind": "option"
           },
@@ -1685,6 +1689,10 @@
           },
           {
             "name": "--allow-unsupported-sdk",
+            "kind": "flag"
+          },
+          {
+            "name": "--no-dev-shared",
             "kind": "flag"
           },
           {
@@ -2679,6 +2687,10 @@
           },
           {
             "name": "--no-watch",
+            "kind": "flag"
+          },
+          {
+            "name": "--no-dev-shared",
             "kind": "flag"
           },
           {
