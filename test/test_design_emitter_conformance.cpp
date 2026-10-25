@@ -702,6 +702,43 @@ TEST_CASE("ui.js lowers theme-painted controls and snapped paint rects as the na
     CHECK(found.str().empty());
 }
 
+TEST_CASE("ui.js leaves a theme-painted control it has no case for as a plain frame",
+          "[view][import][emitter-conformance][form-controls]") {
+    // A control kind the ui.js lowering does not handle (a button, a colour
+    // picker) must not fall through to another widget: it stays a frame, as
+    // it does in the native lane until that lane lowers it too.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "root";
+    ir.root.style.width = 400.0f;
+    ir.root.style.height = 60.0f;
+    for (const char* control : {"button", "color", "made-up"}) {
+        auto node = theme_control(control, control, 10.0f + 100.0f * ir.root.children.size());
+        node.children.push_back(IRNode{});
+        node.children.back().type = "frame";
+        node.children.back().stable_anchor_id = std::string(control) + "-face";
+        node.children.back().style.width = 20.0f;
+        node.children.back().style.height = 10.0f;
+        ir.root.children.push_back(std::move(node));
+    }
+
+    const auto js = generate_pulp_js(ir, CodeGenOptions{});
+    CHECK(js.find("createCheckbox(") == std::string::npos);
+    CHECK(js.find("createRangeSlider(") == std::string::npos);
+    CHECK(js.find("setUaSkin(") == std::string::npos);
+
+    const StagedAssets assets(ir);
+    const auto native = native_lane(ir, assets.dir());
+    const auto lane = js_lane(ir, assets.dir());
+    for (const char* control : {"button", "color", "made-up"}) {
+        INFO(control);
+        REQUIRE(lane.count(control) == 1);
+        CHECK(lane.at(control).at("kind") == "pulp::view::View");
+        CHECK(lane.at(control).count("state.skin") == 0);
+        CHECK(native.at(control).at("kind") == "pulp::view::View");
+    }
+}
+
 TEST_CASE("the conformance comparison reports planted divergences",
           "[view][import][emitter-conformance]") {
     Projection reference;

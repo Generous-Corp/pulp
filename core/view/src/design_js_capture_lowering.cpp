@@ -40,10 +40,26 @@ bool emit_js_ua_form_control(std::ostream& out, const IRNode& node, const std::s
     const auto state = ua_form_control_state(node);
     if (!state)
         return false;
+    // The widget each control the native lane lowers becomes in ui.js. A control
+    // this lowering has no case for (a theme-painted button, once the capture
+    // records one) stays the plain frame the generic path builds rather than
+    // becoming some other widget, so a new Control needs its case added here.
+    // No default: the compiler names an unhandled Control.
+    const char* factory = nullptr;
+    switch (state->control) {
+    case UaFormControlState::Control::range:
+        factory = "createRangeSlider(";
+        break;
+    case UaFormControlState::Control::checkbox:
+    case UaFormControlState::Control::radio:
+        factory = "createCheckbox(";
+        break;
+    }
+    if (!factory)
+        return false;
     const bool range = state->control == UaFormControlState::Control::range;
     const std::string target = "'" + id + "'";
-    out << indent << (range ? "createRangeSlider(" : "createCheckbox(") << target << ", " << parent
-        << ");\n";
+    out << indent << factory << target << ", " << parent << ");\n";
     out << indent << "setUaSkin(" << target << ", 'chromium_refresh', '"
         << (state->scheme == UaColorScheme::dark ? "dark" : "light") << "');\n";
     if (state->accent)
