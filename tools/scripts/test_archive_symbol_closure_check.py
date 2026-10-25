@@ -200,6 +200,26 @@ class RttiOwnershipTest(unittest.TestCase):
         self.assertEqual(rtti_ownership.rtti_class("construction vtable for foo::Base-in-foo::Bar"), "foo::Bar")
         self.assertEqual(rtti_ownership.rtti_class("typeinfo name for foo::Bar<int>"), "foo::Bar<int>")
 
+    def test_demangle_never_lets_the_tool_strip_an_underscore(self) -> None:
+        # A stand-in for the c++filt on GitHub-hosted macOS: it strips one
+        # leading underscore unless told -n, then demangles only "_Z" names.
+        with tempfile.TemporaryDirectory() as tmp:
+            tool = Path(tmp) / "c++filt"
+            tool.write_text(
+                f"#!{sys.executable}\n"
+                "import sys\n"
+                "strip = '-n' not in sys.argv[1:]\n"
+                "known = {'_ZTIN7content8RegistryE': 'typeinfo for content::Registry'}\n"
+                "for line in sys.stdin.read().splitlines():\n"
+                "    name = line[1:] if strip and line.startswith('_') else line\n"
+                "    print(known.get(name, line))\n",
+                encoding="utf-8")
+            tool.chmod(tool.stat().st_mode | stat.S_IXUSR)
+            names = rtti_ownership.demangle(
+                {"_ZTIN7content8RegistryE", "__ZTIN7content8RegistryE"}, str(tool))
+        # Both the ELF spelling and the Mach-O one (extra underscore) demangle.
+        self.assertEqual(set(names.values()), {"typeinfo for content::Registry"})
+
     def test_member_owner_reads_the_enclosing_class(self) -> None:
         cases = {
             "pulp::view::Meter::set_level(float, float)": "pulp::view::Meter",

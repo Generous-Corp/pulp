@@ -49,8 +49,13 @@ def demangle(names: set[str], cxxfilt: str | None = None) -> dict[str, str]:
     if not tool:
         raise DemangleError("c++filt (or llvm-cxxfilt) is required to read RTTI ownership")
     ordered = sorted(names)
+    # Mach-O names carry one extra leading underscore; it is removed here, so
+    # the tool must never strip another. Older Apple c++filt (the Xcode 16 on
+    # GitHub-hosted macOS) strips one by default on Darwin, which leaves an
+    # Itanium "_Z..." name undemangled and every RTTI owner unread. -n
+    # (--no-strip-underscore) turns that off in llvm-cxxfilt and GNU c++filt.
     itanium = [name[1:] if name.startswith("__Z") else name for name in ordered]
-    proc = subprocess.run([tool], input="\n".join(itanium), capture_output=True, text=True,
+    proc = subprocess.run([tool, "-n"], input="\n".join(itanium), capture_output=True, text=True,
                           encoding="utf-8", errors="replace", check=False)
     out = proc.stdout.splitlines()
     if proc.returncode != 0 or len(out) != len(ordered):
