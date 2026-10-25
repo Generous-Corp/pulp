@@ -99,7 +99,8 @@ std::vector<DependencyReference> referenced_paths(std::string_view content) {
     };
     for_each_reference_match(text, html_reference_pattern(), [&](const std::smatch& match) {
         for (std::size_t group = 1; group < match.size(); ++group) {
-            if (!match[group].matched) continue;
+            if (!match[group].matched)
+                continue;
             append(match[group].str(), false);
             break;
         }
@@ -110,17 +111,19 @@ std::vector<DependencyReference> referenced_paths(std::string_view content) {
             std::istringstream fields(candidate);
             std::string url;
             fields >> url;
-            if (!url.empty()) append(std::move(url), false);
+            if (!url.empty())
+                append(std::move(url), false);
         }
     });
     for_each_reference_match(text, html_scannable_reference_pattern(),
                              [&](const std::smatch& match) {
-        for (std::size_t group = 1; group < match.size(); ++group) {
-            if (!match[group].matched) continue;
-            append(match[group].str(), true);
-            break;
-        }
-    });
+                                 for (std::size_t group = 1; group < match.size(); ++group) {
+                                     if (!match[group].matched)
+                                         continue;
+                                     append(match[group].str(), true);
+                                     break;
+                                 }
+                             });
     return result;
 }
 
@@ -169,8 +172,7 @@ const ReferencePattern& html_scannable_reference_pattern() {
 
 const ReferencePattern& html_srcset_pattern() {
     static const ReferencePattern pattern{
-        std::regex{R"(\bsrcset\s*=\s*["']([^"']+)["'])", std::regex::icase},
-        {"srcset"}};
+        std::regex{R"(\bsrcset\s*=\s*["']([^"']+)["'])", std::regex::icase}, {"srcset"}};
     return pattern;
 }
 

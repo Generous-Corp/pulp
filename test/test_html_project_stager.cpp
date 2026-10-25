@@ -15,12 +15,12 @@
 #include <vector>
 
 namespace fs = std::filesystem;
-using pulp::import_design::stage_html_project;
-using pulp::import_design::commit_browser_capture_directory;
 using pulp::import_design::claude_html_dependency_roots;
+using pulp::import_design::commit_browser_capture_directory;
+using pulp::import_design::for_each_reference_match;
 using pulp::import_design::HtmlProjectStageOptions;
 using pulp::import_design::ReferencePattern;
-using pulp::import_design::for_each_reference_match;
+using pulp::import_design::stage_html_project;
 
 namespace {
 
@@ -55,8 +55,7 @@ MatchRecord record(const std::string& text, const std::smatch& match) {
 std::vector<MatchRecord> iterator_matches(const std::string& text,
                                           const ReferencePattern& reference) {
     std::vector<MatchRecord> out;
-    for (std::sregex_iterator it(text.begin(), text.end(), reference.pattern), end; it != end;
-         ++it)
+    for (std::sregex_iterator it(text.begin(), text.end(), reference.pattern), end; it != end; ++it)
         out.push_back(record(text, *it));
     return out;
 }
@@ -83,12 +82,57 @@ TEST_CASE("HTML reference scan yields exactly the regex iterator's matches",
           "[import-design][browser-capture][staging]") {
     // Fragments of every alternative in mixed case, the punctuation and
     // whitespace between them, word bytes that move a \b, and non-ASCII bytes.
-    static const char* const fragments[] = {
-        "src", "SRC", "Src", "href", "HREF", "poster", "url(", "URL(", "Url(", "@import",
-        "@IMPORT", "import", "Import", "IMPORT", "fetch", "Fetch", "new", "NEW", "URL", "from",
-        "FROM", "srcset", "SrcSet", "<script", "<SCRIPT", "<link", "<LINK", " ", "  ", "=",
-        "\"", "'", "(", ")", ",", ">", "a.js", "x/y.css", "img@2x.png 2x", "import.meta.url",
-        "\n", "\t", "b", "_", "-", "/", "\xc3\xa9", "\xff", "imp", "fro", "sr"};
+    static const char* const fragments[] = {"src",
+                                            "SRC",
+                                            "Src",
+                                            "href",
+                                            "HREF",
+                                            "poster",
+                                            "url(",
+                                            "URL(",
+                                            "Url(",
+                                            "@import",
+                                            "@IMPORT",
+                                            "import",
+                                            "Import",
+                                            "IMPORT",
+                                            "fetch",
+                                            "Fetch",
+                                            "new",
+                                            "NEW",
+                                            "URL",
+                                            "from",
+                                            "FROM",
+                                            "srcset",
+                                            "SrcSet",
+                                            "<script",
+                                            "<SCRIPT",
+                                            "<link",
+                                            "<LINK",
+                                            " ",
+                                            "  ",
+                                            "=",
+                                            "\"",
+                                            "'",
+                                            "(",
+                                            ")",
+                                            ",",
+                                            ">",
+                                            "a.js",
+                                            "x/y.css",
+                                            "img@2x.png 2x",
+                                            "import.meta.url",
+                                            "\n",
+                                            "\t",
+                                            "b",
+                                            "_",
+                                            "-",
+                                            "/",
+                                            "\xc3\xa9",
+                                            "\xff",
+                                            "imp",
+                                            "fro",
+                                            "sr"};
     constexpr std::size_t fragment_count = sizeof(fragments) / sizeof(fragments[0]);
     std::uint64_t state = 0x9e3779b97f4a7c15ull;
     const auto next = [&state] {
@@ -101,12 +145,14 @@ TEST_CASE("HTML reference scan yields exactly the regex iterator's matches",
     for (int sample = 0; sample < 4000; ++sample) {
         std::string text;
         const auto pieces = 1 + next() % 48;
-        for (std::uint64_t i = 0; i < pieces; ++i) text += fragments[next() % fragment_count];
+        for (std::uint64_t i = 0; i < pieces; ++i)
+            text += fragments[next() % fragment_count];
         for (const auto* reference : staging_patterns()) {
             const auto expected = iterator_matches(text, *reference);
             INFO("text: " << text);
             CHECK(scanned_matches(text, *reference) == expected);
-            if (!expected.empty()) ++matched_cases;
+            if (!expected.empty())
+                ++matched_cases;
         }
     }
     // The generator has to reach the matching paths, not only the misses.

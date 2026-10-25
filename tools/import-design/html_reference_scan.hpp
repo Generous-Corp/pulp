@@ -26,13 +26,15 @@ inline char ascii_lower(char c) noexcept {
 }
 
 inline bool starts_at(const std::string& text, std::size_t offset, std::string_view literal) {
-    if (text.size() - offset < literal.size()) return false;
+    if (text.size() - offset < literal.size())
+        return false;
     for (std::size_t i = 0; i < literal.size(); ++i)
-        if (ascii_lower(text[offset + i]) != ascii_lower(literal[i])) return false;
+        if (ascii_lower(text[offset + i]) != ascii_lower(literal[i]))
+            return false;
     return true;
 }
 
-}  // namespace detail
+} // namespace detail
 
 /// Visits, in order, exactly the matches std::sregex_iterator yields for
 /// `reference.pattern` over `text`, calling `visit(const std::smatch&)` for
@@ -45,11 +47,13 @@ std::size_t for_each_reference_match(const std::string& text, const ReferencePat
                                      Visit&& visit) {
     std::array<bool, 256> first{};
     for (const auto literal : reference.starts) {
-        if (literal.empty()) continue;
+        if (literal.empty())
+            continue;
         const auto c = static_cast<unsigned char>(literal.front());
         first[c] = true;
         first[static_cast<unsigned char>(detail::ascii_lower(static_cast<char>(c)))] = true;
-        if (c >= 'a' && c <= 'z') first[c - 'a' + 'A'] = true;
+        if (c >= 'a' && c <= 'z')
+            first[c - 'a' + 'A'] = true;
     }
     std::size_t attempts = 0;
     std::size_t offset = 0;
@@ -74,7 +78,8 @@ std::size_t for_each_reference_match(const std::string& text, const ReferencePat
         // match_prev_avail lets a leading \b see the byte before the offset,
         // as it does when the iterator searches through it.
         auto flags = std::regex_constants::match_continuous;
-        if (offset > 0) flags |= std::regex_constants::match_prev_avail;
+        if (offset > 0)
+            flags |= std::regex_constants::match_prev_avail;
         const auto begin = text.cbegin() + static_cast<std::ptrdiff_t>(offset);
         if (std::regex_search(begin, text.cend(), match, reference.pattern, flags) &&
             match.length(0) > 0) {
@@ -92,4 +97,4 @@ const ReferencePattern& html_reference_pattern();
 const ReferencePattern& html_scannable_reference_pattern();
 const ReferencePattern& html_srcset_pattern();
 
-}  // namespace pulp::import_design
+} // namespace pulp::import_design
