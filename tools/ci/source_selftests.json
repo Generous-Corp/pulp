@@ -308,12 +308,6 @@
       ]
     },
     {
-      "name": "fold-migration-notes-selftest",
-      "argv": [
-        "{repo}/tools/scripts/test_fold_migration_notes.py"
-      ]
-    },
-    {
       "name": "forced-restore-lint-selftest",
       "argv": [
         "{repo}/tools/scripts/test_forced_restore_lint.py"
@@ -368,6 +362,19 @@
       "timeout": 120.0
     },
     {
+      "name": "gpu-audio-p4-evidence-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_gpu_audio_p4_evidence.py"
+      ],
+      "timeout": 120.0
+    },
+    {
+      "name": "gpu-audio-p5-unified-receipt-verifier-selftest",
+      "argv": [
+        "{repo}/tools/validation/test_verify_gpu_audio_p5_receipt.py"
+      ]
+    },
+    {
       "name": "gpu-audio-daw-continuity-receipt-verifier-selftest",
       "argv": [
         "{repo}/tools/validation/test_verify_gpu_audio_daw_continuity_receipt.py"
@@ -381,16 +388,15 @@
       "timeout": 300.0
     },
     {
-      "name": "gpu-audio-p4-evidence-selftest",
+      "name": "gpu-fault-real-host-driver-selftest",
       "argv": [
-        "{repo}/tools/scripts/test_gpu_audio_p4_evidence.py"
-      ],
-      "timeout": 120.0
+        "{repo}/tools/testing/daw-smoke/test_real_host_smoke.py"
+      ]
     },
     {
-      "name": "gpu-audio-p5-unified-receipt-verifier-selftest",
+      "name": "gpu-fault-hooks-release-gate-selftest",
       "argv": [
-        "{repo}/tools/validation/test_verify_gpu_audio_p5_receipt.py"
+        "{repo}/tools/scripts/test_gpu_fault_hooks_release_gate.py"
       ]
     },
     {
@@ -449,18 +455,6 @@
       "name": "gpu-dpr-web-adapter-selftest",
       "argv": [
         "{repo}/tools/scripts/test_gpu_dpr_web_adapter.py"
-      ]
-    },
-    {
-      "name": "gpu-fault-hooks-release-gate-selftest",
-      "argv": [
-        "{repo}/tools/scripts/test_gpu_fault_hooks_release_gate.py"
-      ]
-    },
-    {
-      "name": "gpu-fault-real-host-driver-selftest",
-      "argv": [
-        "{repo}/tools/testing/daw-smoke/test_real_host_smoke.py"
       ]
     },
     {
@@ -616,12 +610,6 @@
       "name": "measure-min-os-selftest",
       "argv": [
         "{repo}/tools/scripts/test_measure_min_os.py"
-      ]
-    },
-    {
-      "name": "migration-note-guard-selftest",
-      "argv": [
-        "{repo}/tools/scripts/test_migration_note_guard.py"
       ]
     },
     {
@@ -952,12 +940,6 @@
       "timeout": 120.0
     },
     {
-      "name": "script-inputs-precheck-selftest",
-      "argv": [
-        "{repo}/tools/scripts/test_script_inputs_precheck.py"
-      ]
-    },
-    {
       "name": "sdk-consumer-update-selftest",
       "argv": [
         "{repo}/tools/scripts/test_sdk_consumer_update.py"
@@ -1164,11 +1146,35 @@
       ]
     },
     {
+      "name": "script-inputs-precheck-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_script_inputs_precheck.py"
+      ]
+    },
+    {
+      "name": "migration-note-guard-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_migration_note_guard.py"
+      ]
+    },
+    {
+      "name": "fold-migration-notes-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_fold_migration_notes.py"
+      ]
+    },
+    {
       "name": "version-at-land-selftest",
       "argv": [
         "{repo}/tools/scripts/test_version_at_land.py"
       ],
       "timeout": 180.0
+    },
+    {
+      "name": "windows-vm-manifest-selftest",
+      "argv": [
+        "{repo}/tools/ci/test_windows_vm_manifest.py"
+      ]
     },
     {
       "name": "visual-python-deps-selftest",
@@ -1188,12 +1194,6 @@
       "name": "web-timeline-source-closure-selftest",
       "argv": [
         "{repo}/tools/scripts/test_web_timeline_source_closure_check.py"
-      ]
-    },
-    {
-      "name": "windows-vm-manifest-selftest",
-      "argv": [
-        "{repo}/tools/ci/test_windows_vm_manifest.py"
       ]
     },
     {
