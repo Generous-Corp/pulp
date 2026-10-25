@@ -949,59 +949,6 @@ class PipelineGainNode : public GainNode {
     std::shared_ptr<detail::WorkerPipelineLink> link_;
 };
 
-// A realtime node with a completion event source that also pipelines through
-// a link it detaches when destroyed, as a hosted shared-I/O GpuConvolver does.
-class PipelineNotifierNode : public RealtimeHookNode {
-  public:
-    PipelineNotifierNode()
-        : RealtimeHookNode(1, 32, MissPolicy::CpuFallback),
-          link_(std::make_shared<detail::WorkerPipelineLink>(this,
-                                                             &PipelineNotifierNode::set_hosted)) {
-        expose_notifier = true;
-    }
-    ~PipelineNotifierNode() override {
-        link_->detach();
-        alive = false;
-    }
-    // Hosted, it emits one block behind its submit, so the transport keeps
-    // the link (it does only for a node that actually pipelines).
-    GpuAudioNodeDescriptor descriptor() const override {
-        auto d = RealtimeHookNode::descriptor();
-        d.worker_pipeline_blocks = hosted ? 1 : 0;
-        return d;
-    }
-    bool hosted = false;
-    bool bind_realtime_path(detail::RealtimeGpuNodeBinding& binding) noexcept override {
-        if (!RealtimeHookNode::bind_realtime_path(binding))
-            return false;
-        binding.pipeline = link_;
-        forward = binding.path.set_completion_notifier;
-        binding.path.set_completion_notifier = &PipelineNotifierNode::set_notifier_checked;
-        alive = true;
-        return true;
-    }
-    // Outlive the node, so a call through a destroyed node is counted rather
-    // than only visible under ASan.
-    static inline bool alive = false;
-    static inline std::uint32_t calls_after_destroy = 0;
-
-  private:
-    static inline detail::RealtimeGpuNotifierFn forward = nullptr;
-    static bool set_notifier_checked(void* self,
-                                     detail::SharedIoCompletionNotifier notifier) noexcept {
-        if (!alive) {
-            ++calls_after_destroy;
-            return false;
-        }
-        return forward(self, notifier);
-    }
-    static bool set_hosted(void* self, bool hosted) noexcept {
-        static_cast<PipelineNotifierNode*>(self)->hosted = hosted;
-        return true;
-    }
-    std::shared_ptr<detail::WorkerPipelineLink> link_;
-};
-
 // Per-channel storage with stable float / const-float pointer arrays.
 struct Block {
     Block(uint32_t ch, uint32_t n)
@@ -2621,31 +2568,6 @@ TEST_CASE("GpuAudioTransport releases a pipelining node it outlived through the 
     CHECK_FALSE(link->attached());
     CHECK_FALSE(link->set_hosting(false));
     transport.release();
-    CHECK_FALSE(transport.capability_report().prepared);
-}
-
-TEST_CASE("GpuAudioTransport release does not clear the notifier through a destroyed node",
-          "[gpu_audio][transport][wake][pipeline]") {
-    GpuAudioTransport transport;
-    GpuAudioTransport::Config config;
-    config.ring_blocks = 8;
-    config.run_worker_thread = true;
-    config.wake_on_write = true;
-    {
-        auto node = std::make_unique<PipelineNotifierNode>();
-        REQUIRE(node->prepare());
-        REQUIRE(transport.prepare(node.get(), config));
-        REQUIRE(node->notifier_installs == 1);
-        // Positive control: releasing while the node lives clears its notifier.
-        transport.release();
-        CHECK(node->notifier_clears == 1);
-        REQUIRE(transport.prepare(node.get(), config));
-        REQUIRE(node->notifier_installs == 2);
-    }
-    // The host destroyed the node first: release() must not call into it.
-    PipelineNotifierNode::calls_after_destroy = 0;
-    transport.release();
-    CHECK(PipelineNotifierNode::calls_after_destroy == 0);
     CHECK_FALSE(transport.capability_report().prepared);
 }
 

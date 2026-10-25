@@ -360,6 +360,9 @@ block. Measure it for the model size and channel count you ship.
   with a bounded wait. The transport's `release()` opts a pipelining
   convolver back out; one destroyed before that call detaches itself from the
   transport first, and a node that does not pipeline is never touched there.
+  That holds only once nothing pumps the node: a transport with its own worker
+  pumps it until `release()` joins the worker, so release that transport
+  before destroying the node.
 - **Exact routing.** A block whose result is on time and finite uses the GPU.
   Any other block goes to the worker's CPU convolution, so the output is the
   exact continuation of the convolution, never silence. A miss costs one CPU
