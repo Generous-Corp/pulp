@@ -35,7 +35,11 @@ concurrency:
 jobs:
   disarm:
     name: Disarm a pull request armed on a deferred macos green
-    if: vars.PULP_MACOS_PR_GATING == 'true' && github.event.workflow_run.event == 'pull_request'
+    # Same-repository runs only; the script checks again.
+    if: >-
+      vars.PULP_MACOS_PR_GATING == 'true'
+      && github.event.workflow_run.event == 'pull_request'
+      && github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -45,9 +49,14 @@ jobs:
           RUN_ID: ${{ github.event.workflow_run.id }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           RUN_PRS: ${{ join(github.event.workflow_run.pull_requests.*.number, ' ') }}
+          HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
         run: |
           set -euo pipefail
           repo="$GITHUB_REPOSITORY"
+          if [ "$HEAD_REPO" != "$repo" ]; then
+            echo "run $RUN_ID is from $HEAD_REPO, not $repo; only same-repository runs are acted on"
+            exit 0
+          fi
           # The run's `macos` job (latest attempt). A skip-safe or failed-closed
           # alias is also named `macos`; only the contract lane says `deferred`.
           check_runs=$(gh api "repos/$repo/actions/runs/$RUN_ID/jobs?filter=latest&per_page=100" \
@@ -69,11 +78,12 @@ jobs:
             exit 0
           fi
           # An App-opened pull request's run has an empty pull_requests list,
-          # so fall back to the open pull requests whose head is this commit.
+          # so fall back to the open same-repository pull requests whose head is
+          # this commit.
           prs="$RUN_PRS"
           if [ -z "$prs" ]; then
             prs=$(gh api "repos/$repo/commits/$HEAD_SHA/pulls" \
-              --jq "[.[] | select(.state == \"open\" and .head.sha == \"$HEAD_SHA\") | .number] | join(\" \")")
+              --jq "[.[] | select(.state == \"open\" and .head.sha == \"$HEAD_SHA\" and .head.repo.full_name == \"$repo\") | .number] | join(\" \")")
           fi
           if [ -z "$prs" ]; then
             echo "deferred run $RUN_ID at $HEAD_SHA belongs to no open pull request; nothing to do"
@@ -82,10 +92,14 @@ jobs:
           for pr in $prs; do
             # shellcheck disable=SC2016  # $owner, $name, $number and $id are GraphQL variables
             state=$(gh api graphql \
-              -f query='query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { id headRefOid autoMergeRequest { enabledAt } mergeQueueEntry { state } } } }' \
+              -f query='query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { id headRefOid headRepository { nameWithOwner } autoMergeRequest { enabledAt } mergeQueueEntry { state } } } }' \
               -f owner="${repo%%/*}" -f name="${repo#*/}" -F number="$pr" \
-              --jq '.data.repository.pullRequest | [.id, .headRefOid, (.autoMergeRequest != null | tostring), (.mergeQueueEntry != null | tostring)] | join(" ")')
-            read -r node_id head armed queued <<< "$state"
+              --jq '.data.repository.pullRequest | [.id, .headRefOid, (.headRepository.nameWithOwner // "none"), (.autoMergeRequest != null | tostring), (.mergeQueueEntry != null | tostring)] | join(" ")')
+            read -r node_id head head_repo armed queued <<< "$state"
+            if [ "$head_repo" != "$repo" ]; then
+              echo "#$pr's head is in $head_repo, not $repo; only same-repository pull requests are acted on"
+              continue
+            fi
             if [ "$head" != "$HEAD_SHA" ]; then
               echo "#$pr has moved past $HEAD_SHA (now $head); its own run decides"
               continue

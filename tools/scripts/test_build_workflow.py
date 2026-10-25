@@ -990,16 +990,40 @@ class MacosDeferredDisarmTest(unittest.TestCase):
                          {"actions": "read", "checks": "read", "pull-requests": "write"})
         self.assertNotIn("actions/checkout", json.dumps(self.workflow))
 
-    def test_it_is_default_off_and_pull_request_only(self) -> None:
+    def test_it_is_default_off_pull_request_only_and_same_repository_only(self) -> None:
         condition = self.job["if"]
-        self.assertTrue(_evaluate_if(condition, {"vars.PULP_MACOS_PR_GATING": "true",
-                                                 "github.event.workflow_run.event": "pull_request"}))
-        for context in ({"vars.PULP_MACOS_PR_GATING": "", "github.event.workflow_run.event": "pull_request"},
-                        {"vars.PULP_MACOS_PR_GATING": "true", "github.event.workflow_run.event": "merge_group"}):
-            with self.subTest(context=context):
-                self.assertFalse(_evaluate_if(condition, context))
+        on = {"vars.PULP_MACOS_PR_GATING": "true", "github.event.workflow_run.event": "pull_request",
+              "github.event.workflow_run.head_repository.full_name": "Generous-Corp/pulp",
+              "github.repository": "Generous-Corp/pulp"}
+        self.assertTrue(_evaluate_if(condition, on))
+        for off in ({"vars.PULP_MACOS_PR_GATING": ""},
+                    {"github.event.workflow_run.event": "merge_group"},
+                    {"github.event.workflow_run.head_repository.full_name": "someone/pulp"}):
+            with self.subTest(off=off):
+                self.assertFalse(_evaluate_if(condition, {**on, **off}))
 
-    def _run(self, fixture: dict[str, str], run_prs: str = "7") -> list[list[str]]:
+    def test_a_run_from_another_repository_touches_nothing(self) -> None:
+        # Even at a commit a queued, armed same-repository pull request shares.
+        fixture = self._fixture("deferred", armed="true", queued="true")
+        for run_prs in ("7", ""):
+            with self.subTest(run_prs=run_prs):
+                calls = self._run(fixture, run_prs=run_prs, head_repo="someone/pulp")
+                self.assertEqual(calls, [], "no API call at all, let alone a mutation")
+        # Control: the same fixture from this repository is dequeued and disarmed.
+        calls = self._run(fixture)
+        self.assertTrue(any("dequeuePullRequest" in " ".join(call) for call in calls))
+        self.assertTrue(self._disarmed(calls))
+
+    def test_only_same_repository_pull_requests_are_acted_on(self) -> None:
+        # The commit fallback keeps only this repository's heads, and the
+        # per-pull-request read checks the head repository again.
+        self.assertIn('.head.repo.full_name == \\"$repo\\"', self.step["run"])
+        calls = self._run(self._fixture("deferred", armed="true", queued="true",
+                                        pr_repo="someone/pulp"), run_prs="")
+        self.assertFalse(any("mutation(" in " ".join(call) for call in calls))
+
+    def _run(self, fixture: dict[str, str], run_prs: str = "7",
+             head_repo: str = "Generous-Corp/pulp") -> list[list[str]]:
         with tempfile.TemporaryDirectory() as tmp:
             bin_dir = Path(tmp) / "bin"
             bin_dir.mkdir()
@@ -1012,20 +1036,21 @@ class MacosDeferredDisarmTest(unittest.TestCase):
             env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
                    "FAKE_GH_FIXTURE": str(Path(tmp) / "fixture.json"), "FAKE_GH_LOG": str(log),
                    "GITHUB_REPOSITORY": "Generous-Corp/pulp", "RUN_ID": "99",
-                   "HEAD_SHA": self.HEAD, "RUN_PRS": run_prs, "GH_TOKEN": "x"}
+                   "HEAD_SHA": self.HEAD, "RUN_PRS": run_prs, "HEAD_REPO": head_repo,
+                   "GH_TOKEN": "x"}
             proc = subprocess.run(["bash", "-c", self.step["run"]], env=env, capture_output=True,
                                   text=True, encoding="utf-8", check=False)
             self.assertEqual(proc.returncode, 0, proc.stderr)
             return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
 
     def _fixture(self, tier: str, armed: str = "true", head: str = HEAD,
-                 queued: str = "false") -> dict[str, str]:
+                 queued: str = "false", pr_repo: str = "Generous-Corp/pulp") -> dict[str, str]:
         return {
             "actions/runs/99/jobs": "123\n",
             "check-runs/123/annotations": '{"schema":"shipyard-test-tier/v1","tier":"%s"}\n' % tier,
             "commits/": "7\n",
             "mutation(": "",
-            "query(": f"PR_NODE {head} {armed} {queued}\n",
+            "query(": f"PR_NODE {head} {pr_repo} {armed} {queued}\n",
         }
 
     @staticmethod
@@ -1193,7 +1218,8 @@ class MacosArmRefusalTest(unittest.TestCase):
             env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
                    "FAKE_GH_FIXTURE": str(Path(tmp) / "fixture.json"), "FAKE_GH_LOG": str(log),
                    "GITHUB_REPOSITORY": "Generous-Corp/pulp", "PR_NUMBER": "7",
-                   "PR_NODE_ID": "PR_NODE", "HEAD_SHA": self.HEAD, "GH_TOKEN": "x"}
+                   "PR_NODE_ID": "PR_NODE", "HEAD_SHA": self.HEAD, "GH_TOKEN": "x",
+                   "GITHUB_SERVER_URL": "https://github.com"}
             proc = subprocess.run(["bash", "-c", self.step["run"]], env=env, capture_output=True,
                                   text=True, encoding="utf-8", check=False)
             self.assertEqual(proc.returncode, 0, proc.stderr)
@@ -1218,6 +1244,22 @@ class MacosArmRefusalTest(unittest.TestCase):
 
     def test_an_arm_on_a_deferred_green_is_refused(self) -> None:
         self.assertTrue(self._refused(self._run("5 completed success\n", tier="deferred")))
+
+    def test_a_success_without_an_allowed_tier_is_refused(self) -> None:
+        # Only an explicit `fast` or `not-required` tier passes.
+        self.assertTrue(self._refused(self._run("5 completed success\n")))
+        self.assertTrue(self._refused(self._run("5 completed success\n", tier="receipt-reused")))
+
+    def test_it_reads_only_this_repositorys_actions_check_runs(self) -> None:
+        run = self.step["run"]
+        self.assertIn('.app.slug == \\"github-actions\\"', run)
+        self.assertIn('startswith(\\"$GITHUB_SERVER_URL/$repo/actions/runs/\\")', run)
+
+    def test_its_comment_says_what_it_checked(self) -> None:
+        # It checks the macos run, not approval, and says only that.
+        run = self.step["run"]
+        self.assertIn("Auto-merge disabled: this head has no completed full macOS run yet", run)
+        self.assertNotIn("APPROVE", run)
 
     def test_an_arm_on_a_full_lane_success_is_left_alone(self) -> None:
         self.assertFalse(self._refused(self._run("5 completed success\n", tier="fast")))

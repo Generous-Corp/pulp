@@ -6,9 +6,12 @@ name: macOS CI arm refusal
 # satisfies the required check without a build, so an arm made before that
 # (arm-on-open, or while the full lane is still running) would let native
 # auto-merge enqueue the head on the wrong green. This refuses such an arm the
-# moment it is made: when auto-merge is enabled and the head's latest `macos`
-# check run is absent, still running, failed, or tier `deferred`, it disables
-# auto-merge and says why on the pull request.
+# moment it is made: when auto-merge is enabled, it reads the head's latest
+# `macos` check run from this repository's own Actions workflows, and leaves the
+# arm alone only on a completed success with an explicit full-lane (`fast`) or
+# skip-safe (`not-required`) tier. Otherwise (absent, still running, failed,
+# `deferred`, or no such tier) it disables auto-merge and says what it found on
+# the pull request. It checks the macos run only; approval is the arm side's.
 #
 # The contract lane's last step (build.yml) and macos-ci-deferred-disarm.yml
 # stay behind this as later layers. pull_request_target runs this definition
@@ -44,23 +47,28 @@ jobs:
         run: |
           set -euo pipefail
           repo="$GITHUB_REPOSITORY"
-          # The newest `macos` check run GitHub Actions posted on this head.
+          # The newest `macos` check run this repository's own Actions workflows
+          # posted on this head.
           latest=$(gh api "repos/$repo/commits/$HEAD_SHA/check-runs?check_name=macos&filter=latest&per_page=100" \
-            --jq '[.check_runs[] | select(.app.slug == "github-actions")] | sort_by(.id) | last | select(. != null) | "\(.id) \(.status) \(.conclusion)"')
+            --jq "[.check_runs[] | select(.app.slug == \"github-actions\" and (.details_url | startswith(\"$GITHUB_SERVER_URL/$repo/actions/runs/\")))] | sort_by(.id) | last | select(. != null) | \"\\(.id) \\(.status) \\(.conclusion)\"")
           reason=""
           if [ -z "$latest" ]; then
-            reason="no macos check has run on this head yet"
+            reason="no macos check has run on it yet"
           else
             read -r check_run status conclusion <<< "$latest"
             if [ "$status" != completed ]; then
-              reason="the macos check on this head is still $status"
+              reason="its macos check is still $status"
             elif [ "$conclusion" != success ]; then
-              reason="the macos check on this head concluded $conclusion"
+              reason="its macos check concluded $conclusion"
             else
               tiers=$(gh api --paginate "repos/$repo/check-runs/$check_run/annotations?per_page=100" \
                 --jq '.[] | select(.title == "shipyard-test-tier") | .message')
+              # Only an explicit full-lane (`fast`) or skip-safe (`not-required`)
+              # tier passes; `deferred`, a missing tier or any other is refused.
               if [[ "$tiers" == *'"tier":"deferred"'* ]]; then
-                reason="the macos check on this head is the contract lane (tier deferred), which builds nothing"
+                reason="its macos check is the contract lane (tier deferred), which builds nothing"
+              elif [[ "$tiers" != *'"tier":"fast"'* && "$tiers" != *'"tier":"not-required"'* ]]; then
+                reason="its macos check carries no full-lane or skip-safe tier"
               fi
             fi
           fi
@@ -73,6 +81,6 @@ jobs:
             -f query='mutation($id: ID!) { disablePullRequestAutoMerge(input: {pullRequestId: $id}) { clientMutationId } }' \
             -f id="$PR_NODE_ID" >/dev/null
           echo "disabled auto-merge on #$PR_NUMBER at $HEAD_SHA: $reason"
-          gh api --method POST "repos/$repo/issues/$PR_NUMBER/comments" -f body="Auto-merge was disabled: $reason.
+          gh api --method POST "repos/$repo/issues/$PR_NUMBER/comments" -f body="Auto-merge disabled: this head has no completed full macOS run yet ($reason).
 
-          A pull request is armed only after a trusted APPROVE for its head, \`macos-ci\` from the fleet App, and a completed full-lane \`macos\` success (docs/guides/local-ci.md, \"macOS on a pull request waits for approval\")." >/dev/null
+          Arm it again once this head's \`macos\` check is a completed full-lane success (docs/guides/local-ci.md, \"macOS on a pull request waits for approval\")." >/dev/null

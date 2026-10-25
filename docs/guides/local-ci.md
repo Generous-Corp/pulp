@@ -3744,8 +3744,11 @@ or its own message), and the fix is to add it to `PULP_PR_FAST_NEEDS_BUILD`.
 - **A pull request armed before its checks ran is refused too, in three
   layers.**
   1. At the arm itself: `macos-ci-arm-refusal.yml` fires on
-     `auto_merge_enabled` and disarms unless the head's latest `macos` is a
-     completed non-deferred success.
+     `auto_merge_enabled` and disarms unless the head's latest `macos` check
+     run from this repository's Actions workflows is a completed success with
+     an explicit `fast` (full lane) or `not-required` (skip-safe) tier. Its
+     comment says what it found about the macos run; it does not judge
+     approval.
   2. At the contract lane's conclusion: its `macos` job's last step, `Refuse a
      head armed before approval (contract lane)`, fails when this exact head is
      armed for auto-merge or already in the merge queue (read over GraphQL
@@ -3755,9 +3758,10 @@ or its own message), and the fix is to add it to `PULP_PR_FAST_NEEDS_BUILD`.
      An arm state it cannot read fails closed. Only the runner's post-steps
      follow it.
   3. After the run: `macos-ci-deferred-disarm.yml` (`workflow_run` on a
-     completed Build and Test run, no checkout) disables auto-merge on a pull
-     request still armed at a head whose `macos` is tier `deferred`, and
-     dequeues it if it is already in the merge queue.
+     completed Build and Test run, no checkout, same-repository runs and pull
+     requests only) disables auto-merge on a pull request still armed at a
+     head whose `macos` is tier `deferred`, and dequeues it if it is already in
+     the merge queue.
 
   All three are gated on the variable.
 - **Removing the label** starts nothing: `build.yml` does not listen for
@@ -3783,8 +3787,9 @@ already run the fast PR-caused checks. Approval is not arming:
    `macos-ci`. The full lane runs.
 2. The sweep arms only once the head's latest `macos` check run is a
    completed full-lane `success`: its `shipyard-test-tier` annotation is not
-   `deferred`. An arm made earlier (absent, running, failed or `deferred`) is
-   refused the moment it is made: `macos-ci-arm-refusal.yml`
+   `deferred`. An arm made earlier (absent, running, failed, `deferred`, or no
+   `fast`/`not-required` tier) is refused the moment it is made:
+   `macos-ci-arm-refusal.yml`
    (`pull_request_target` on `auto_merge_enabled`, no checkout, gated on the
    variable) disables auto-merge and comments with the reason.
 3. If the full lane fails, the pull request needs a fix. The fix is a new head,
