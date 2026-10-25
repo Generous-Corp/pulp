@@ -18,6 +18,15 @@
 #include <limits>
 #include <string>
 
+#if defined(PULP_HAS_SKIA)
+#include <pulp/canvas/skia_canvas.hpp>
+
+#include "include/core/SkCanvas.h"
+#include "include/core/SkImageInfo.h"
+#include "include/core/SkPixmap.h"
+#include "include/core/SkSurface.h"
+#endif
+
 namespace pulp::view {
 
 // ── Label ────────────────────────────────────────────────────────────────────
@@ -1030,6 +1039,93 @@ Label::painted_text_extents(float available_width) const {
         default: break;
     }
     out.ink = Rect{ink_x, 0.0f, widest, height};
+
+    // A captured layout paints Chromium's line boxes, not a native re-shape:
+    // a label that wraps here may be one line on screen. Describe the lines
+    // paint() draws.
+    if (available_width > 0.0f &&
+        cached_line_layout_usable(display_text, rs.font_size, rs.letter_spacing, available_width)) {
+        int captured_lines = static_cast<int>(cached_line_boxes_.size());
+        if (line_clamp_ > 0 && line_clamp_ < captured_lines)
+            captured_lines = line_clamp_;
+        float left = std::numeric_limits<float>::max(), top = left;
+        float right = std::numeric_limits<float>::lowest(), bottom = right;
+        float captured_widest = 0.0f;
+        for (int i = 0; i < captured_lines; ++i) {
+            const auto& box = cached_line_boxes_[static_cast<std::size_t>(i)];
+            captured_widest = std::max(captured_widest, box.width);
+            left = std::min(left, box.left);
+            top = std::min(top, box.top);
+            right = std::max(right, box.left + box.width);
+            bottom = std::max(bottom, box.top + box.height);
+        }
+        if (captured_lines > 0) {
+            out.width = captured_widest;
+            out.height = bottom - top;
+            out.line_count = captured_lines;
+            out.ink = Rect{left, top, right - left, bottom - top};
+        }
+    }
+
+#if defined(PULP_HAS_SKIA)
+    // The ink: what paint() actually covers. Paint centres a block taller than
+    // its box over it, a glyph reaches past its advance and its line box, and
+    // a captured line sits where Chromium put it; every one of those is a
+    // placement rule of paint's own, so the honest answer is to paint once
+    // into a scratch raster and read back which pixels it touched.
+    const float box_w = available_width > 0.0f ? available_width : bounds().width;
+    const float box_h = has_own_text_box() ? own_text_box().height : bounds().height;
+    const float reach = std::max({out.width, out.height, box_w, box_h, rs.font_size * 4.0f});
+    const int margin = static_cast<int>(std::ceil(reach)) + 4;
+    const int surface_w = static_cast<int>(std::ceil(std::max(box_w, 1.0f))) + 2 * margin;
+    const int surface_h = static_cast<int>(std::ceil(std::max(box_h, 1.0f))) + 2 * margin;
+    if (auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(surface_w, surface_h))) {
+        surface->getCanvas()->clear(SK_ColorTRANSPARENT);
+        auto* self = const_cast<Label*>(this);
+        // Painting records selection geometry and counts line-break paths;
+        // this paint is a measurement, so neither may change.
+        const auto selection = selection_layout_;
+        const auto selection_pending = selection_layout_pending_;
+        const auto counts = line_break_counts();
+        {
+            canvas::SkiaCanvas probe(surface->getCanvas());
+            probe.translate(static_cast<float>(margin), static_cast<float>(margin));
+            if (has_own_text_box()) {
+                const Rect box = own_text_box();
+                probe.translate(box.x, box.y);
+                self->paint_text_(probe, {0.0f, 0.0f, box.width, box.height});
+            } else {
+                self->paint_text_(probe, {0.0f, 0.0f, box_w, box_h});
+            }
+        }
+        self->selection_layout_ = selection;
+        self->selection_layout_pending_ = selection_pending;
+        line_break_counts() = counts;
+        SkPixmap pixels;
+        if (surface->peekPixels(&pixels)) {
+            // Every pixel paint touched, anti-aliased edges included: a thin
+            // stroke of small or translucent text is covered by less than half
+            // a pixel and is still ink, and a repaint that skipped it would
+            // leave it stale.
+            int x0 = surface_w, y0 = surface_h, x1 = -1, y1 = -1;
+            for (int y = 0; y < surface_h; ++y) {
+                for (int x = 0; x < surface_w; ++x) {
+                    if (SkColorGetA(pixels.getColor(x, y)) == 0)
+                        continue;
+                    x0 = std::min(x0, x);
+                    x1 = std::max(x1, x);
+                    y0 = std::min(y0, y);
+                    y1 = std::max(y1, y);
+                }
+            }
+            // Nothing inked (a transparent colour, a face with no glyphs):
+            // keep the layout's answer rather than reporting an empty box.
+            if (x1 >= 0)
+                out.ink = Rect{static_cast<float>(x0 - margin), static_cast<float>(y0 - margin),
+                               static_cast<float>(x1 - x0 + 1), static_cast<float>(y1 - y0 + 1)};
+        }
+    }
+#endif
     return out;
 }
 

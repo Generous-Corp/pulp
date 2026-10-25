@@ -18,6 +18,8 @@
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/screenshot_compare.hpp>
 
+#include <array>
+#include <optional>
 #include <string>
 
 #include <cmath>
@@ -317,6 +319,141 @@ TEST_CASE("a fixed-box Label resized after a skipped layout matches a fresh tree
     live->layout_children_if_needed();
     CHECK(label->bounds().width == 110.0f);
     check_matches_fresh(*live, copy, 110.0f, false);
+}
+
+namespace {
+
+// Where a Label's text really lands: render a root holding only that Label
+// through the screenshot raster path and take the box of every pixel that is
+// not the background, in the Label's own coordinates. Independent of
+// painted_text_extents(), which must agree with it.
+std::optional<Rect> rendered_label_ink(View& root, const View& label, uint32_t width,
+                                       uint32_t height) {
+    uint32_t w = 0, h = 0;
+    const auto rgba = render_to_rgba(root, width, height, 1.0f, &w, &h);
+    if (rgba.empty())
+        return std::nullopt;
+    const auto at = [&](uint32_t x, uint32_t y) {
+        const auto* p = &rgba[(static_cast<size_t>(y) * w + x) * 4];
+        return std::array<uint8_t, 4>{p[0], p[1], p[2], p[3]};
+    };
+    const auto background = at(0, 0);
+    // Only the neighbourhood of the Label: a tracing build paints a badge in
+    // the corner of every capture.
+    const auto origin = label.bounds();
+    const auto lo = [](float v) { return static_cast<uint32_t>(std::max(0.0f, v)); };
+    const uint32_t sx0 = lo(origin.x - 60.0f), sy0 = lo(origin.y - 60.0f);
+    const uint32_t sx1 = std::min(w, lo(origin.x + origin.width + 60.0f));
+    const uint32_t sy1 = std::min(h, lo(origin.y + origin.height + 60.0f));
+    int x0 = static_cast<int>(w), y0 = static_cast<int>(h), x1 = -1, y1 = -1;
+    for (uint32_t y = sy0; y < sy1; ++y)
+        for (uint32_t x = sx0; x < sx1; ++x)
+            if (at(x, y) != background) {
+                x0 = std::min(x0, static_cast<int>(x));
+                y0 = std::min(y0, static_cast<int>(y));
+                x1 = std::max(x1, static_cast<int>(x));
+                y1 = std::max(y1, static_cast<int>(y));
+            }
+    if (x1 < 0)
+        return std::nullopt;
+    return Rect{x0 - origin.x, y0 - origin.y, static_cast<float>(x1 - x0 + 1),
+                static_cast<float>(y1 - y0 + 1)};
+}
+
+} // namespace
+
+TEST_CASE("painted_text_extents reports the ink paint really covers",
+          "[view][widget][label][text-metrics]") {
+    struct Case {
+        const char* name;
+        std::string text;
+        float width, height, size, spacing;
+        bool wraps;
+        std::optional<TextVerticalAlign> vertical;
+        std::optional<LabelAlign> align;
+    };
+    const Case cases[] = {
+        // A readout that wraps inside a box shorter than its lines: paint
+        // centres the block, so its first line inks ABOVE the box.
+        {"overflowing centred block", "-60.0 dB", 30.0f, 14.0f, 11.0f, 1.5f, true, {}, {}},
+        {"overflowing top block",
+         "-60.0 dB",
+         30.0f,
+         14.0f,
+         11.0f,
+         1.5f,
+         true,
+         TextVerticalAlign::top,
+         {}},
+        // A single right-aligned line wider than its box inks to its left.
+        {"right-aligned overflow",
+         "OUTPUT LEVEL",
+         40.0f,
+         16.0f,
+         12.0f,
+         0.0f,
+         false,
+         {},
+         LabelAlign::right},
+        // Display type whose glyphs reach past the em box.
+        {"display type", "KELVIN", 114.0f, 41.0f, 30.0f, 2.0f, false, {}, {}},
+    };
+    for (const auto& c : cases) {
+        INFO(c.name);
+        auto root = std::make_unique<View>();
+        auto owned = std::make_unique<Label>(c.text);
+        auto* label = owned.get();
+        label->set_font_family("Inter");
+        label->set_font_size(c.size);
+        label->set_letter_spacing(c.spacing);
+        label->set_text_color(Color::rgba8(255, 255, 255));
+        label->set_multi_line(c.wraps);
+        if (c.vertical)
+            label->set_vertical_align(*c.vertical);
+        if (c.align)
+            label->set_text_align(*c.align);
+        label->set_position(View::Position::absolute);
+        label->set_left(70.0f);
+        label->set_top(70.0f);
+        label->flex().preferred_width = c.width;
+        label->flex().preferred_height = c.height;
+        root->add_child(std::move(owned));
+        const auto rendered = rendered_label_ink(*root, *label, 480, 240);
+        if (!rendered)
+            SKIP("no raster screenshot backend in this build");
+        const auto extents = label->painted_text_extents(label->bounds().width);
+        REQUIRE(extents.measured);
+        INFO("rendered " << rendered->x << "," << rendered->y << " " << rendered->width << "x"
+                         << rendered->height << " reported " << extents.ink.x << ","
+                         << extents.ink.y << " " << extents.ink.width << "x" << extents.ink.height);
+        CHECK(std::abs(extents.ink.x - rendered->x) <= 1.0f);
+        CHECK(std::abs(extents.ink.y - rendered->y) <= 1.0f);
+        CHECK(std::abs(extents.ink.x + extents.ink.width - rendered->x - rendered->width) <= 1.0f);
+        CHECK(std::abs(extents.ink.y + extents.ink.height - rendered->y - rendered->height) <=
+              1.0f);
+    }
+}
+
+TEST_CASE("painted_text_extents describes the captured lines paint draws",
+          "[view][widget][label][label-cache][text-metrics]") {
+    // Chromium drew one line wider than the box; a native re-shape at the
+    // box width would wrap it. Paint uses the captured line, so must this.
+    const auto face = resolved_face_identity("Inter", 400.0f);
+    Label label("Clean input monitoring");
+    label.set_font_family("Inter");
+    label.set_font_size(12.0f);
+    label.set_multi_line(true);
+    label.set_bounds({0, 0, 60, 17});
+    label.set_cached_line_boxes({{0, 0, 128, 17, 0, 22}}, 60.0f, face, true);
+    if (label.cached_line_boxes().empty())
+        SKIP("no resolvable face for the captured basis in this build");
+    const auto extents = label.painted_text_extents(60.0f);
+    REQUIRE(extents.measured);
+    CHECK(extents.line_count == 1);
+    CHECK(extents.width == Catch::Approx(128.0f));
+    // The ink covers the one captured line, past the 60 px box.
+    CHECK(extents.ink.width > 100.0f);
+    CHECK(extents.ink.height < 17.0f + 4.0f);
 }
 
 TEST_CASE("fixed-size Label text with its own layout slot still lays out",

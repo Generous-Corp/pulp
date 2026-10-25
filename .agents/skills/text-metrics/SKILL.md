@@ -403,6 +403,16 @@ line on the captured box` in `test/test_widgets_label.cpp`.
   layout is self-consistent and still paints text off-centre, and the inspector's
   caret and selection band drift off the glyphs they are supposed to sit on.
 
+- **`painted_text_extents().ink` is read from pixels, not derived.** Paint
+  centres a line block taller than its box over it, so a wrapped readout in a
+  short box inks above its top; a captured layout draws Chromium's line boxes
+  rather than a native re-shape; and glyphs overhang their advance. Each of
+  those is a placement rule of `paint_text_()`, so with Skia the extents paint
+  the text once into a scratch raster and read back the touched pixels,
+  restoring the selection geometry and line-break counters paint records.
+  `width`, `height` and `line_count` follow the captured line boxes when the
+  captured layout is usable. Do not re-derive the ink from line heights: that
+  is the drift this replaced, and it reported 0 for every ink above the box.
 - **`TextShaper::prepare()` is not cheap on a warm cache — do not call it from a
   measurement path more than once.** The name suggests a lookup, but every call
   re-validates the UTF-8, re-allocates, and re-segments the string, taking a
