@@ -361,8 +361,8 @@ runner failure or gate verdict, with a class and a confidence.
 
 The required `macos` context is reported by more than one job: the macOS matrix
 leg, which builds and tests, and bootstrap jobs that claim the name without
-running anything — when no native input changed, or when a protected receipt is
-reused. A reused receipt produces a **three-step** green job (`Set up job`, the
+running anything — when no native input changed, when a protected receipt is
+reused, or when an unapproved pull-request head deferred macOS (`macos-ci`). A reused receipt produces a **three-step** green job (`Set up job`, the
 bootstrap step, `Complete job`). In the checks list it is indistinguishable
 from a real pass, and reasoning from one as evidence that the suite passed has
 already cost hours of wrong conclusions.
@@ -384,6 +384,38 @@ affected tier can select nothing), so `--require-executed` refuses it.
 Each bootstrap job also writes a banner into its own job summary saying no
 build and no test step ran. A step count near three on a `macos` job is the
 tell.
+
+## macOS PR CI runs after approval; the arming path labels approved heads
+
+A pull request's macOS matrix leg runs only when the head carries the
+`macos-ci` label. Without it, `build.yml` omits the leg (no macOS VM), and the
+`macos` alias job reports a green check whose `shipyard-test-tier` annotation
+is `deferred` and whose summary says nothing built or ran. Linux still runs on
+every push, and `merge_group` and `push` are unchanged: the merge queue always
+runs macOS (or reuses an exact-tree receipt). Full design, measurements and
+rollback: "macOS on a pull request waits for approval" in
+`docs/guides/local-ci.md`.
+
+- **Only the fleet App (`shipyard-local[bot]`) applies `macos-ci`,** as part of
+  arming, after a trusted `verdict: APPROVE head:<sha>` names the current head.
+  Do not label a head from an agent session to make it green: the deferred
+  `macos` is already green, and labelling only spends a VM.
+- **The arming rule:** label the approved head, then arm only once the head's
+  latest `macos` check run is no longer the deferred one. GitHub then holds the
+  auto-merge until that real run concludes `success`. Arming on the deferred
+  green is not unsafe (the merge group still runs macOS), but a macOS failure
+  is then first found in a batch.
+- **A push removes the label.** `build.yml` ignores `macos-ci` on
+  `synchronize`, and `macos-ci-label-reset.yml` deletes it, so each new head
+  needs approval again. If the label is still present when re-approving,
+  remove and re-apply it: re-adding a present label fires no event.
+- **Other labels do nothing.** Their runs skip every job in a concurrency group
+  of their own and never cancel the head's real run.
+- **To force macOS now:** apply `macos-ci` by hand, or dispatch `build.yml` on
+  the branch. Re-running a deferred run replays its unlabelled event and stays
+  deferred.
+- **A deferred head is `not-executed`** to `gate_suite_executed.py`, like a
+  skip-safe one; read the annotation to tell them apart.
 
 ## Diff-scoped gates on merge_group use the entry's own base
 
@@ -4273,7 +4305,8 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   the receipt's selected/passed counts and source run, or refused, with the
   protected-base verifier's reason) and a job-summary table; every gate test step
   publishes a `shipyard-test-tier` annotation (`fast` on PR heads, `full`,
-  `receipt-reused`, `not-required`). The checked-out script only renders these
+  `receipt-reused`, `not-required`, and `deferred` on a PR head without
+  `macos-ci`). The checked-out script only renders these
   after the base verifier decided — `test_build_workflow.py` pins that the
   workspace copy is only ever called for `note`/`publish-notes`.
 - **"Is the gate slower than usual on this host?"** is `shipyard metrics watch

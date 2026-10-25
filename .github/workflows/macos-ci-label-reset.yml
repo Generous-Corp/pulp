@@ -1,0 +1,51 @@
+name: macOS CI label reset
+
+# `macos-ci` approves one pull-request head for a macOS run in build.yml (see
+# "macOS on a pull request waits for approval" in docs/guides/local-ci.md). A
+# push makes a new head that nobody has approved, so this removes the label
+# again. build.yml already ignores the label on `synchronize`; removing it keeps
+# the label truthful and lets the arm sweep's next application fire a fresh
+# `labeled` event, which re-adding a label that is still there would not.
+#
+# pull_request_target runs this definition from protected main and checks out
+# nothing, so a fork's pull request gets the label removed too and no pull
+# request code runs with the write token. A removal made with GITHUB_TOKEN
+# starts no workflow, and build.yml does not listen for `unlabeled` anyway.
+
+on:
+  pull_request_target:
+    branches: [main, 'develop/**']
+    types: [synchronize]
+
+permissions:
+  pull-requests: write
+
+concurrency:
+  group: macos-ci-label-reset-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  reset:
+    name: Remove macos-ci from the new head
+    if: contains(github.event.pull_request.labels.*.name, 'macos-ci')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Remove the label
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -uo pipefail
+          # 404 means someone removed it first, which is the state we want.
+          if out=$(gh api --method DELETE \
+              "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/labels/macos-ci" 2>&1); then
+            echo "removed macos-ci from #$PR_NUMBER: new head $HEAD_SHA needs approval before macOS runs"
+          elif printf '%s' "$out" | grep -q 'HTTP 404'; then
+            echo "macos-ci was already gone from #$PR_NUMBER"
+          else
+            printf '%s\n' "$out" >&2
+            echo "::warning title=macos-ci label not removed::#$PR_NUMBER still carries macos-ci on unapproved head $HEAD_SHA; the arm sweep must remove and re-apply it to start macOS"
+            exit 1
+          fi

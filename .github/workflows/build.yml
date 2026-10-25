@@ -3,6 +3,12 @@ name: Build and Test
 on:
   pull_request:
     branches: [main, 'develop/**']
+    # The default three plus `labeled`: applying `macos-ci` is what starts a
+    # pull request's macOS leg (see "macOS on a pull request waits for
+    # approval" in docs/guides/local-ci.md). Any other label starts a run that
+    # skips every job and sits in its own concurrency group, so labelling a pull
+    # request never cancels or duplicates its real run.
+    types: [opened, synchronize, reopened, labeled]
   # Publish the Linux/Windows ccache + FetchContent caches that PR runs restore
   # from. Only a non-PR run on the default branch may write to GitHub's cloud
   # cache — a PR-run cache entry is scoped to the PR's own ref and is invisible
@@ -86,8 +92,10 @@ on:
 concurrency:
   # A local proof must neither cancel nor be cancelled by ordinary validation.
   # The run ID gives each proof its own domain while preserving the historical
-  # build-<ref> domain byte-for-byte for every non-proof event.
-  group: build-${{ inputs.local_proof && format('local-proof-{0}', github.run_id) || github.ref }}
+  # build-<ref> domain byte-for-byte for every non-proof event. A run for a
+  # label other than `macos-ci` does nothing, so it gets its own domain too:
+  # sharing build-<ref> would cancel the pull request's real run.
+  group: build-${{ inputs.local_proof && format('local-proof-{0}', github.run_id) || (github.event.action == 'labeled' && github.event.label.name != 'macos-ci') && format('label-noop-{0}', github.run_id) || github.ref }}
   cancel-in-progress: ${{ github.event_name != 'push' && !inputs.local_proof }}
 
 permissions:
@@ -133,7 +141,8 @@ jobs:
     # pull_request and merge_group events an absent value must still run the
     # provider preamble; comparing the raw value to true keeps the opt-in
     # local-proof shortcut while avoiding a truthy string/empty-context skip.
-    if: ${{ github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true') }}
+    # A run for a label other than `macos-ci` skips every job from here down.
+    if: ${{ (github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true')) && (github.event.action != 'labeled' || github.event.label.name == 'macos-ci') }}
     # Runner for the required-gate routing preamble. Defaults to ubuntu-latest
     # (no behaviour change). Set the PULP_PREAMBLE_RUNS_ON_JSON repo var to a
     # self-hosted Linux selector — e.g. ["self-hosted","Linux","ARM64",
@@ -151,6 +160,7 @@ jobs:
       linux_configured_selector_json: ${{ steps.resolve.outputs.linux_configured_selector_json }}
       linux_event_authorized_selector_json: ${{ steps.resolve.outputs.linux_event_authorized_selector_json }}
       macos_runs_on_json: ${{ steps.resolve.outputs.macos_runs_on_json }}
+      macos_deferred: ${{ steps.resolve.outputs.macos_deferred }}
       windows_leg: ${{ steps.resolve.outputs.windows_leg }}
       hosted_windows_allowed: ${{ steps.resolve.outputs.hosted_windows_allowed }}
     steps:
@@ -239,6 +249,11 @@ jobs:
           OVERFLOW_MACOS_RUNS_ON_JSON: ${{ vars.PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON || '["macos-15"]' }}
           # gh CLI auth for the overflow-busy-count probe.
           GH_TOKEN: ${{ github.token }}
+          # `true` when a pull-request event has no approval for macOS: the
+          # head does not carry `macos-ci`, or this is a `synchronize` (a new
+          # head is unapproved until the label is applied again, and the event
+          # payload still lists the label the previous head earned).
+          MACOS_PR_DEFERRED: ${{ github.event_name == 'pull_request' && (github.event.action == 'synchronize' || !contains(github.event.pull_request.labels.*.name, 'macos-ci')) }}
         # Uses the shared resolver at tools/scripts/resolve_runs_on.py so the
         # same precedence (explicit input → repo var → provider fallback) is
         # reused by sanitizers.yml and any future workflow. See that script's
@@ -830,7 +845,23 @@ jobs:
           # with it. Without the leg, a push run finishes on hosted runners.
           # tools/scripts/test_fork_pr_runner_routing.py pins that no job
           # reachable on push routes to a self-hosted runner.
-          if EVENT_NAME != "push":
+          #
+          # A pull request also omits it until the head is approved. Most PR
+          # heads never merge, and their macOS runs were the largest share of
+          # the eight-VM fleet. The `macos` alias job reports the deferral, and
+          # the merge group still runs macOS. Only the literal string `true`
+          # defers, so a missing variable keeps the leg.
+          macos_deferred = (
+              EVENT_NAME == "pull_request"
+              and os.environ.get("MACOS_PR_DEFERRED", "").strip() == "true"
+          )
+          if macos_deferred:
+              print(
+                  "resolve-provider: macOS leg deferred — the pull request head "
+                  "does not carry the `macos-ci` label",
+                  file=sys.stderr,
+              )
+          if EVENT_NAME != "push" and not macos_deferred:
               include.append({
                   "key": "macos",
                   "name": "macOS (ARM64)",
@@ -941,6 +972,9 @@ jobs:
               handle.write(f"provider={REQUESTED}\n")
               handle.write(f"matrix_json={json.dumps(matrix)}\n")
               handle.write(f"macos_runs_on_json={macos_runs_on}\n")
+              handle.write(
+                  f"macos_deferred={'true' if macos_deferred else 'false'}\n"
+              )
               handle.write(f"windows_leg={windows_leg}\n")
               handle.write(
                   "hosted_windows_allowed="
@@ -968,7 +1002,7 @@ jobs:
   # treats any uncertainty as "native build required". See that script's
   # module docstring + tools/scripts/test_classify_changes.py.
   classify:
-    if: ${{ github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true') }}
+    if: ${{ (github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true')) && (github.event.action != 'labeled' || github.event.label.name == 'macos-ci') }}
     # Same PULP_PREAMBLE_RUNS_ON_JSON toggle as resolve-provider: keep the
     # required-gate preamble off the saturated GitHub-hosted pool when opted in.
     runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
@@ -3562,17 +3596,27 @@ jobs:
   # owns `macos`; this inactive bootstrap is renamed so it cannot satisfy or
   # collide with that context. Routing/classification uncertainty remains
   # fail-closed.
+  # It also owns `macos` on a pull-request head whose macOS leg was deferred
+  # for want of the `macos-ci` label. That job concludes `success`, because an
+  # Actions job cannot conclude `neutral` and a `skipped` one satisfies a
+  # required check just the same. What tells it apart is its
+  # `shipyard-test-tier` annotation, `deferred`, which the arming side reads:
+  # it arms only once the head's `macos` check is no longer the deferred one.
+  # A run for any other label skips this job under the unused name, so it can
+  # never replace the head's real `macos` result.
   macos:
-    name: ${{ (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') && (needs.resolve-provider.result != 'success' || needs.classify.result != 'success' || needs.classify.outputs.native_build_required != 'true') && 'macos' || 'macos-pr-unused' }}
+    name: ${{ (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') && (github.event.action != 'labeled' || github.event.label.name == 'macos-ci') && (needs.resolve-provider.result != 'success' || needs.classify.result != 'success' || needs.classify.outputs.native_build_required != 'true' || needs.resolve-provider.outputs.macos_deferred == 'true') && 'macos' || 'macos-pr-unused' }}
     needs: [resolve-provider, classify]
     runs-on: ${{ fromJSON(vars.PULP_ALIAS_RUNS_ON_JSON || '"ubuntu-latest"') }}
     if: >-
       (github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true'))
       && !cancelled()
       && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch')
+      && (github.event.action != 'labeled' || github.event.label.name == 'macos-ci')
       && (needs.resolve-provider.result != 'success'
           || needs.classify.result != 'success'
-          || needs.classify.outputs.native_build_required != 'true')
+          || needs.classify.outputs.native_build_required != 'true'
+          || needs.resolve-provider.outputs.macos_deferred == 'true')
     steps:
       - name: macOS PR/dispatch bootstrap (required when native leg is absent)
         run: |
@@ -3584,6 +3628,25 @@ jobs:
           if [ "${{ needs.classify.result }}" != "success" ]; then
             echo "classify did not succeed — failing macos gate closed"
             exit 1
+          fi
+          if [ "${{ needs.classify.outputs.native_build_required }}" = "true" ] \
+              && [ "${{ needs.resolve-provider.outputs.macos_deferred }}" = "true" ]; then
+            echo "Unapproved PR head — macos deferred (no macOS VM used; the merge queue runs macOS)"
+            REASON="this head does not carry the macos-ci label, so its macOS build and tests were deferred"
+            {
+              echo "### ⏸️ macos deferred until this head is approved"
+              echo
+              echo "This check is green because **$REASON**, not because anything"
+              echo "built or ran on macOS. A pull request's macOS leg runs once the"
+              echo "fleet's arm sweep applies \`macos-ci\` to an approved head, and the"
+              echo "merge queue runs the full macOS suite before anything lands."
+              echo
+              echo "To run macOS now: apply the \`macos-ci\` label, or dispatch"
+              echo "\`build.yml\` on this branch."
+            } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+            echo "::notice title=macos deferred::$REASON"
+            echo '::notice title=shipyard-test-tier::{"schema":"shipyard-test-tier/v1","tier":"deferred","label":"macos-ci","full_suite_runs_in":"merge_group"}'
+            exit 0
           fi
           echo "Skip-safe PR/dispatch — macos gate ✓ (native matrix intentionally omitted)"
           REASON="this change touched no native build input, so the matrix was skipped"
@@ -3633,7 +3696,7 @@ jobs:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           MERGE_GROUP_HEAD_REF: ${{ github.event.merge_group.head_ref }}
           MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
-          NO_SUITE_REASON: 'no suite: macos alias job (provider=${{ needs.resolve-provider.result }} classify=${{ needs.classify.result }} native_build_required=${{ needs.classify.outputs.native_build_required }})'
+          NO_SUITE_REASON: 'no suite: macos alias job (provider=${{ needs.resolve-provider.result }} classify=${{ needs.classify.result }} native_build_required=${{ needs.classify.outputs.native_build_required }} macos_deferred=${{ needs.resolve-provider.outputs.macos_deferred }})'
         run: |
           set -uo pipefail
           rc=0
@@ -3757,6 +3820,9 @@ jobs:
         run: echo "::warning title=reuse-record NOT written::checkout, record or upload did not succeed; this job's replay history is lost"
 
   linux:
+    # A run for a label other than `macos-ci` skips this job under another
+    # name, so the skipped check cannot replace the head's real `linux` result.
+    name: ${{ (github.event.action != 'labeled' || github.event.label.name == 'macos-ci') && 'linux' || 'linux-label-noop' }}
     needs: [build, classify]
     # Rides the same PULP_PREAMBLE_RUNS_ON_JSON toggle as the required `macos`
     # alias, and for a sharper reason than symmetry: an alias job pinned to the
@@ -3770,7 +3836,7 @@ jobs:
     runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
     # Push runs are cache-warming only — no gate to report, and the macOS
     # leg they would poll for is deliberately absent from the matrix.
-    if: ${{ (github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true')) && !cancelled() && github.event_name != 'push' && github.event_name != 'merge_group' }}
+    if: ${{ (github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true')) && !cancelled() && github.event_name != 'push' && github.event_name != 'merge_group' && (github.event.action != 'labeled' || github.event.label.name == 'macos-ci') }}
     steps:
       - name: Linux leg outcome (advisory)
         env:
@@ -3804,6 +3870,9 @@ jobs:
           exit 1
 
   windows:
+    # A run for a label other than `macos-ci` skips this job under another
+    # name, so the skipped check cannot replace the head's real `windows` result.
+    name: ${{ (github.event.action != 'labeled' || github.event.label.name == 'macos-ci') && 'windows' || 'windows-label-noop' }}
     needs: [build, windows-msvc-release-gate, classify, resolve-provider]
     # Rides the same PULP_PREAMBLE_RUNS_ON_JSON toggle as the required `macos`
     # alias, and for a sharper reason than symmetry: an alias job pinned to the
@@ -3817,7 +3886,7 @@ jobs:
     runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
     # Push runs are cache-warming only — no gate to report, and the macOS
     # leg they would poll for is deliberately absent from the matrix.
-    if: ${{ (github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true')) && !cancelled() && github.event_name != 'push' && github.event_name != 'merge_group' }}
+    if: ${{ (github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true')) && !cancelled() && github.event_name != 'push' && github.event_name != 'merge_group' && (github.event.action != 'labeled' || github.event.label.name == 'macos-ci') }}
     steps:
       - name: Windows leg outcome (advisory)
         env:

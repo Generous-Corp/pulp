@@ -74,6 +74,12 @@ require(
 )
 require("Skip-safe PR/dispatch" in pr_alias, "native skip must remain green")
 require(
+    "needs.resolve-provider.outputs.macos_deferred == 'true'" in pr_alias
+    and '"tier":"deferred"' in pr_alias
+    and pr_alias.index("classify did not succeed") < pr_alias.index('"tier":"deferred"'),
+    "an unapproved PR head must report a labelled deferral, after the fail-closed checks",
+)
+require(
     "macos-pr-unused" in pr_alias,
     "native PRs must not emit a duplicate required context from the bootstrap",
 )

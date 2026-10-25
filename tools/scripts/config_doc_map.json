@@ -28,7 +28,8 @@
   {
    "paths": [
     ".github/workflows/build.yml",
-    ".github/workflows/build-macos.yml"
+    ".github/workflows/build-macos.yml",
+    ".github/workflows/macos-ci-label-reset.yml"
    ],
    "docs": [
     "docs/guides/local-ci.md"

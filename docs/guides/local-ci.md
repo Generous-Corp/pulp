@@ -3188,7 +3188,8 @@ them append-only.
 The required `macos` context is reported by more than one job. It can come from
 the macOS matrix leg, which builds and tests, or from a bootstrap job that
 claims the name without running anything, because the change touched no native
-build input or because an earlier run's protected receipt was reused. Both look
+build input, because an earlier run's protected receipt was reused, or because
+the pull-request head is not yet approved for macOS (`macos-ci`). Both look
 identical in the checks list.
 
 A reused receipt produces a three-step job (`Set up job`, the bootstrap step,
@@ -3488,8 +3489,10 @@ echoes the step's script, which contains every refusal message verbatim.
 The test step of each gate job likewise emits a `shipyard-test-tier`
 annotation: `fast` on a pull-request head (only the `pr-fast` label tier runs
 there; the full suite runs in the merge queue), `full` where the full suite
-ran, and `receipt-reused` / `not-required` from the no-suite bootstraps, so a
-fast-tier green is never read as full validation.
+ran, `receipt-reused` / `not-required` from the no-suite bootstraps, and
+`deferred` from a pull-request head whose macOS leg waits for `macos-ci` (see
+"macOS on a pull request waits for approval"), so a fast-tier or deferred green
+is never read as full validation.
 
 ### Required checks trust the pull request's own workflow YAML
 
@@ -3628,6 +3631,104 @@ writes `ctest-pr-fast.junit.xml` rather than `ctest.junit.xml`: the tier is
 not the merge's test evidence and must never satisfy a protected-validation
 receipt.
 
+## macOS on a pull request waits for approval
+
+A pull request's macOS leg runs only once the head is approved. The fleet's arm
+sweep labels approved heads with `macos-ci`, and that label is what starts the
+leg. Until then `build.yml` leaves the macOS matrix child out of the run, takes
+no macOS VM, and the `macos` alias job reports the deferral. Linux and every
+other check still run on every push. `merge_group` and `push` are unchanged:
+the merge queue runs the full macOS suite (or reuses an exact-tree receipt, as
+before) whatever the label says.
+
+Why: the fleet has a hard ceiling of eight macOS VMs (two per Mac, four Macs),
+and it was saturated, with PR-head macOS jobs waiting p50 8 min and p90 46 min.
+Over 12 hours on 2026-10-24/25 the `macos` job's time split 57% pull request
+(61 runs, 26% of them failed), 33% merge group and 7% dispatch. Those 61 runs
+covered 88 distinct heads, of which about 12 to 15 pull requests merged. Most
+PR macOS time went on heads that never landed.
+
+### The `macos-ci` contract
+
+- **Name.** Exactly `macos-ci`.
+- **Who applies it.** The fleet App (`shipyard-local[bot]`) applies it as part
+  of arming, after a trusted verdict comment whose last line is
+  `verdict: APPROVE head:<sha>` names the current head. No other automation
+  applies it. A human with triage access may apply it by hand to force a run;
+  the run costs a VM and approves nothing.
+- **What starts a run.** The `labeled` event for `macos-ci`, or an `opened` or
+  `reopened` event on a pull request that already carries it. The run is a
+  full Build and Test run of the head, in the pull request's usual concurrency
+  group, so it supersedes an in-progress run for the same head.
+- **A new head needs approval again.** On `synchronize`, `build.yml` treats the
+  label as absent, because the event payload still lists the label the
+  previous head earned. `macos-ci-label-reset.yml` (`pull_request_target`,
+  checks out nothing) then removes it, so the arm sweep's next application
+  fires a fresh `labeled` event. Re-adding a label that is still present fires
+  nothing, so if the reset failed (it warns), the sweep must remove the label
+  and apply it again.
+- **Removing the label** starts nothing: `build.yml` does not listen for
+  `unlabeled`, and a macOS run already in flight finishes.
+- **Any other label** starts a run that skips every job, in a concurrency group
+  of its own (`build-label-noop-<run id>`), so it never cancels the real run.
+  Its skipped alias jobs carry unused names (`macos-pr-unused`,
+  `linux-label-noop`, `windows-label-noop`) so a skipped check cannot replace
+  the head's real `macos`, `linux` or `windows` result.
+- **Escape hatches.** Apply `macos-ci`, or dispatch `build.yml` on the branch
+  (`workflow_dispatch` always includes the macOS leg). Re-running a deferred
+  run does not help: a re-run replays the original event, which had no label.
+
+### Why the deferred `macos` check is green
+
+`macos` is a required context, so a deferred head must still report it, and
+there are only four ways to do that:
+
+| Deferred `macos` result | Effect |
+|---|---|
+| `success` | Satisfies the required check. Chosen. |
+| `skipped` or `neutral` | Satisfies it exactly as `success` does. Actions cannot conclude a job `neutral`, and a skipped job carries no summary. |
+| `failure` | Every unapproved pull request is red. Agents chase a failure that is not one, and a review flow that waits for green before approving never labels anything. |
+| No check at all (pending) | GitHub blocks the queue until macOS runs, the strongest gate, but every unapproved head shows `Expected` forever and anything that waits for checks to settle hangs. |
+
+So GitHub cannot tell a deferred green from a real one, and the distinction
+sits with the arming side. The deferred job's log carries
+`::notice title=shipyard-test-tier::{"schema":"shipyard-test-tier/v1","tier":"deferred",...}`
+and its job summary says that nothing built or ran.
+`tools/scripts/gate_suite_executed.py` reads it as `not-executed`. The
+arming rule is: **label the approved head, then arm only once the head's latest
+`macos` check run is not the deferred one** (its `shipyard-test-tier`
+annotation is not `deferred`). From then on GitHub's own required-check rule
+holds the auto-merge until the real run concludes `success`. A head that is
+already armed when the labelled run reaches `Decide pull-request test suite`
+(and still merges onto the tip of `main`) also runs the full suite there and
+issues an exact-tree receipt, as before (see "Only a ready-to-land PR head
+issues a receipt" in the CI skill).
+
+If the arming side does not follow that rule, nothing unsafe lands: the merge
+group still runs macOS. The cost is merge-group exposure, since a macOS failure
+is first found in a batch and ejects the PRs batched with it.
+
+### Interactions
+
+- **Skip-safe pull requests** (no native build input, including the
+  release-bot and release-please version-bump fast path in `classify`) never
+  had a macOS leg, and still report the skip-safe green. Deferral applies only
+  when `classify` says a native build is required.
+- **A version-bump or release PR that the fast path cannot prove** is deferred
+  like any other head. If the release path arms it through a guard that
+  enforces the rule above, that path must apply `macos-ci` too. Otherwise its
+  merge group runs macOS, as it does today.
+- **A2T evidence pull requests** issue their structural attestation from the
+  PR macOS leg, so it is issued once the head is labelled. The labelled head is
+  the one that lands.
+
+### Rollback
+
+Make `MACOS_PR_DEFERRED` in `resolve-provider` evaluate `false` (or delete the
+expression; a missing value keeps the leg). Every pull-request run then
+includes macOS again. The `labeled` trigger and the label reset are harmless
+without it.
+
 ## Windows is gated by the merge queue, not by the PR head
 
 Windows is advisory and runs entirely on GitHub-hosted runners, and a single
@@ -3651,8 +3752,9 @@ So Windows runs where it supplies independent value without blocking every merge
 - **`push: main`** — publishes the Windows ccache.
 - **`workflow_dispatch`** — explicit reruns when you want Windows early.
 
-A PR head keeps macOS on the self-hosted Macs and Linux on GitHub-hosted Linux
-for fast signal. The Linux leg therefore does consume hosted capacity; the
+A PR head keeps macOS on the self-hosted Macs (once approved, see "macOS on a
+pull request waits for approval") and Linux on GitHub-hosted Linux for fast
+signal. The Linux leg therefore does consume hosted capacity; the
 security boundary above deliberately prevents automatic PRs from reaching the
 private Mac Pro VMs. The advisory `windows` alias job
 short-circuits to green on `pull_request` — without that it would fail closed

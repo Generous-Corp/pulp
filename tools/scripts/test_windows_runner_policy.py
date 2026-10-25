@@ -430,6 +430,19 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
         self.assertIn("macos", keys)
         self.assertIn("linux", keys)
 
+    def test_unapproved_pull_request_defers_only_macos(self) -> None:
+        """A PR head without `macos-ci` takes no macOS VM; Linux still runs."""
+        keys = self._matrix_keys("pull_request", MACOS_PR_DEFERRED="true")
+        self.assertNotIn("macos", keys)
+        self.assertIn("linux", keys, "control: the resolver ran and built a matrix")
+        self.assertIn("macos", self._matrix_keys("pull_request", MACOS_PR_DEFERRED="false"))
+
+    def test_deferral_never_reaches_merge_group_or_dispatch(self) -> None:
+        """The merge queue and the escape hatch always run macOS."""
+        for event in ("merge_group", "workflow_dispatch"):
+            with self.subTest(event=event):
+                self.assertIn("macos", self._matrix_keys(event, MACOS_PR_DEFERRED="true"))
+
     def test_merge_group_matrix_keeps_macos_and_local_eligible_linux(self) -> None:
         """Advisory hosted legs must not sit in the path every merge takes.
 
