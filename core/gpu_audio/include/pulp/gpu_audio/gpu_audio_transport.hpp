@@ -49,13 +49,17 @@ class GpuAudioTransport {
         // and lock-free. When false, the caller drives pump() (deterministic
         // tests / custom worker integration).
         bool run_worker_thread = false;
-        // The RT process() posts a semaphore after each input write, and a
-        // provider with an event source posts it when a completion is ready.
-        // The worker waits on it, with the poll interval as a fallback timeout
-        // only, instead of sleeping a full quantum. Signaling a semaphore is
-        // RT-safe (no alloc, no block). Default ON; false keeps the
-        // pure-polling worker. Only meaningful when run_worker_thread is true.
-        bool wake_on_write = true;
+        // Opt-in: the RT process() posts a semaphore after each input write,
+        // and a provider that installs a completion notifier posts it when a
+        // completion may be ready. The worker waits on it, with the poll
+        // interval as a fallback timeout only, instead of sleeping a full
+        // quantum. Posting never allocates or blocks, but while the worker is
+        // parked it is a kernel call (a Mach semaphore signal on macOS, a futex
+        // wake elsewhere) on the audio thread every block, so it is off by
+        // default and the default RT path makes no syscall. No shipped provider
+        // installs a completion notifier yet, so today the worker still finds
+        // completions by polling. Only meaningful when run_worker_thread is true.
+        bool wake_on_write = false;
         // Optional macOS Audio Workgroup for the owned submission worker. The
         // handle is borrowed by the transport and must remain valid until
         // release(). This is an experiment switch: Dawn encode/submit still
@@ -296,13 +300,12 @@ class GpuAudioTransport {
     std::atomic<std::uint64_t> worker_workgroup_join_failures_{0};
     std::atomic<bool> worker_interactive_qos_{false};
 
-    // Wake-on-write (Config::wake_on_write, default on). The RT process()
-    // posts `wake_` after each input write, and an installed completion
-    // notifier posts it from the provider's callback thread; the worker waits
-    // on it (bounded by poll_interval_) instead of always sleeping the full
-    // quantum. release() on a counting semaphore is non-blocking and
-    // allocation-free, so posting it stays RT-safe. When off, worker_loop()
-    // sleeps the poll interval.
+    // Wake-on-write (Config::wake_on_write, opt-in). The RT process() posts
+    // `wake_` after each input write, and an installed completion notifier
+    // posts it from the provider's callback thread; the worker waits on it
+    // (bounded by poll_interval_) instead of always sleeping the full quantum.
+    // A post never allocates or blocks, but signals the kernel while the
+    // worker is parked. When off, worker_loop() sleeps the poll interval.
     bool wake_on_write_ = false;
     std::unique_ptr<detail::WorkerWake> wake_; // allocated at construction
     // Provider completion events, routed to `wake_` while the owned worker

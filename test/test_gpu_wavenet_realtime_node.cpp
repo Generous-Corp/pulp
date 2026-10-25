@@ -3339,6 +3339,7 @@ TEST_CASE("WaveNet transport routes completion events from every channel or none
         GpuAudioTransport::Config config;
         config.ring_blocks = 8;
         config.run_worker_thread = true;
+        config.wake_on_write = true;
         REQUIRE(transport.prepare(&h.node, config));
         for (const auto& control : h.controls) {
             // All or nothing: a partial install is rolled back.

@@ -2841,9 +2841,9 @@ TEST_CASE("GpuAudioTransport installs the completion notifier only for a waking 
     }
 }
 
-TEST_CASE("GpuAudioTransport defaults to wake-on-write without a poll floor",
+TEST_CASE("GpuAudioTransport keeps wake-on-write opt-in so the default callback makes no syscall",
           "[gpu_audio][transport][wake]") {
-    CHECK(GpuAudioTransport::Config{}.wake_on_write);
+    CHECK_FALSE(GpuAudioTransport::Config{}.wake_on_write);
 }
 
 TEST_CASE("GpuAudioTransport completion wakes never count as progress",
@@ -2857,6 +2857,7 @@ TEST_CASE("GpuAudioTransport completion wakes never count as progress",
     GpuAudioTransport::Config config;
     config.ring_blocks = 8;
     config.run_worker_thread = true;
+    config.wake_on_write = true;
     REQUIRE(t.prepare(&node, config));
     REQUIRE(node.notifier_installs == 1);
     const std::uint32_t services_before = node.service_calls.load();
@@ -2882,6 +2883,7 @@ TEST_CASE("GpuAudioTransport coalesces completion wakes instead of spinning",
     GpuAudioTransport::Config config;
     config.ring_blocks = 8;
     config.run_worker_thread = true;
+    config.wake_on_write = true;
     REQUIRE(t.prepare(&node, config));
     // Let the worker settle into its wait.
     REQUIRE(pulp::test::wait_for_condition([&] { return node.service_calls > 0; }));
@@ -2915,6 +2917,7 @@ TEST_CASE("GpuAudioTransport survives completion events racing release",
         GpuAudioTransport::Config config;
         config.ring_blocks = 8;
         config.run_worker_thread = true;
+        config.wake_on_write = true;
         REQUIRE(t.prepare(&node, config));
         std::atomic<bool> stop{false};
         std::atomic<std::uint64_t> notifies{0};
