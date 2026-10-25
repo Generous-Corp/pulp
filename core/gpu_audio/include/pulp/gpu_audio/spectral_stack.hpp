@@ -102,6 +102,11 @@ private:
 /// with a GPU device; capture's forward FFT is done on the CPU (cheap, once per
 /// freeze). Not real-time-safe (blocks on the readback) — drive it off the audio
 /// thread. May share a device with a sibling primitive (e.g. GpuStft).
+///
+/// The layer spectra live on the device prepared here, so the stack records the
+/// device's generation at prepare(). Once the device reports loss or a new
+/// generation, available() goes false and capture()/render() refuse (render
+/// writes a silent frame) until the stack is prepared again.
 class GpuSpectralStack : public SpectralStack {
 public:
     /// `shared_device` (optional) reuses an existing GpuCompute so the stack and
@@ -111,7 +116,7 @@ public:
 
     uint32_t fft_size() const override { return n_; }
     uint32_t num_layers() const override { return num_layers_; }
-    bool available() const override { return gpu_ != nullptr; }
+    bool available() const override;
     bool capture(uint32_t layer, const float* frame_in) override;
     void clear(uint32_t layer) override;
     bool layer_active(uint32_t layer) const override;
@@ -133,6 +138,7 @@ private:
     std::vector<std::uint8_t> active_;                  // per layer
     std::vector<float> weights_;                        // num_layers (null => 1)
     uint32_t seed_ = 0x9E3779B9u;                       // jitter seed, advanced
+    std::uint64_t device_generation_ = 0;               // at prepare
 };
 
 /// Per-hop control values handed to the framer (read on whatever thread drives

@@ -1,0 +1,15 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261023-render-gpu-trim",
+  "slices": [
+    "render-skia-dawn"
+  ],
+  "vellum_obligation": "A GPU surface must expose a trim entry with an idle-time level and an everything level, run the idle trim from its frame end on a throttle, and report budgeted and purgeable bytes so a test can prove that textures the image caches released are returned to the device.",
+  "evidence": [
+    ".github/vellum-change-events/20261023-render-gpu-trim.json",
+    "ctest --test-dir build -R 'GpuIdleTrimSchedule is due once per interval'",
+    "ctest --test-dir build -R 'SkiaSurface idle trim frees textures unused for two seconds and keeps the drawn one'",
+    "ctest --test-dir build -R 'SkiaSurface idle trim runs once per second of frames'",
+    "ctest --test-dir build -R 'SkiaSurface trim everything returns released image textures to the device'"
+  ]
+}

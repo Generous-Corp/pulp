@@ -21,9 +21,11 @@
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
 #include <chrono>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 #endif
 
@@ -74,6 +76,26 @@ TEST_CASE("PluginViewHost::create returns a native host with headless capture",
 
 #if defined(PULP_TEST_HAS_X11)
 
+namespace {
+
+// A display, or a skip, or a failure. With no display these cases cannot run
+// and a bare return would record a pass, so they SKIP. Where the build wires
+// them through xvfb-run (test/cmake/script_canvas_render_tests.cmake), it
+// also sets PULP_TEST_REQUIRE_X11_DISPLAY, and a missing display there means
+// the wiring broke: that fails instead of skipping.
+Display* open_test_display(const char* what) {
+    Display* display = XOpenDisplay(nullptr);
+    if (!display) {
+        const char* required = std::getenv("PULP_TEST_REQUIRE_X11_DISPLAY");
+        if (required && *required == '1')
+            FAIL("no X display although this build runs X11 tests under xvfb-run");
+        SKIP(std::string("no X display (run under xvfb-run): ") + what + " skipped");
+    }
+    return display;
+}
+
+} // namespace
+
 // ── XDND synthetic-source handshake (Linux X11 target, #3645) ────────────────
 //
 // The X11 plugin host advertises an XDND target on its child window and runs the
@@ -122,11 +144,7 @@ void send_client_message(Display* dpy, Window target, Window source, Atom type,
 
 TEST_CASE("X11 plugin host runs the XDND target handshake into dispatch_drop",
           "[view][plugin-view-host][xdnd][linux]") {
-    Display* src = XOpenDisplay(nullptr);
-    if (!src) {
-        WARN("no X display (run under xvfb-run) — XDND handshake skipped");
-        return;
-    }
+    Display* src = open_test_display("XDND handshake");
 
     // Build the host with a recording drop zone covering the whole surface.
     // The host re-runs a Yoga layout pass on every paint (attach_to_parent ->
@@ -286,6 +304,154 @@ TEST_CASE("X11 plugin host runs the XDND target handshake into dispatch_drop",
 
     XDestroyWindow(src, source);
     XCloseDisplay(src);
+}
+
+// A DAW resizes the embedded editor with XResizeWindow on its own X
+// connection and never calls set_size(). The ConfigureNotify on the editor's
+// child window is the only signal, and pump_x_events() must act on it: until
+// it does the surfaces stay at the old size and the swapchain scales that
+// size onto the window every frame.
+TEST_CASE("X11 plugin host follows a resize the host applied to its window",
+          "[view][plugin-view-host][resize][linux]") {
+    Display* daw = open_test_display("ConfigureNotify check");
+    pulp::view::View root;
+    pulp::view::register_platform_plugin_view_host();
+    pulp::view::PluginViewHost::Options opts;
+    opts.size = {200, 150};
+    opts.use_gpu = false;
+    auto host = pulp::view::PluginViewHost::create(root, opts);
+    REQUIRE(host != nullptr);
+    host->attach_to_parent(reinterpret_cast<void*>(static_cast<uintptr_t>(DefaultRootWindow(daw))));
+    Window child = static_cast<Window>(reinterpret_cast<uintptr_t>(host->native_handle()));
+    REQUIRE(child != 0);
+    // The X server orders requests within one connection, not across two. The
+    // attach's own XResizeWindow and XMapWindow went out on the editor's
+    // connection; until the server has processed them, a resize from the DAW
+    // connection can land first and be undone by the attach. The window turning
+    // viewable proves the attach's requests, the resize before the map
+    // included, are done.
+    for (int i = 0; i < 200; ++i) {
+        XWindowAttributes attrs{};
+        if (XGetWindowAttributes(daw, child, &attrs) && attrs.map_state == IsViewable)
+            break;
+        host->pump_x_events();
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    host->pump_x_events(); // drain the attach's own events
+
+    std::vector<std::pair<uint32_t, uint32_t>> notified;
+    host->set_resize_callback([&](uint32_t w, uint32_t h) { notified.emplace_back(w, h); });
+
+    // A drag: several sizes land before the editor's next pump.
+    for (unsigned i = 1; i <= 5; ++i)
+        XResizeWindow(daw, child, 300 + i, 220);
+    XSync(daw, False);
+    for (int i = 0; i < 100 && host->get_size().width != 305; ++i) {
+        host->pump_x_events();
+        if (host->get_size().width != 305)
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    CHECK(host->get_size().width == 305);
+    CHECK(host->get_size().height == 220);
+    REQUIRE_FALSE(notified.empty());
+    CHECK(notified.back() == std::make_pair(305u, 220u));
+    const auto calls = notified.size();
+
+    // The frame is the window's new size.
+    const auto png = host->capture_back_buffer_png();
+    REQUIRE(png.size() >= 24);
+    auto be32 = [&](size_t at) {
+        return (uint32_t(png[at]) << 24) | (uint32_t(png[at + 1]) << 16) |
+               (uint32_t(png[at + 2]) << 8) | uint32_t(png[at + 3]);
+    };
+    const float scale = host->scale_factor();
+    CHECK(be32(16) == static_cast<uint32_t>(305 * scale));
+    CHECK(be32(20) == static_cast<uint32_t>(220 * scale));
+
+    // The editor's own set_size() echoes back as a ConfigureNotify at the size
+    // it set; that is not a host resize and notifies nothing.
+    host->set_size(320, 240);
+    XSync(daw, False);
+    for (int i = 0; i < 20; ++i) {
+        host->pump_x_events();
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    CHECK(notified.size() == calls);
+    CHECK(host->get_size().width == 320);
+
+    host.reset();
+    XCloseDisplay(daw);
+}
+
+// set_size() only flushes its XResizeWindow, so the ConfigureNotify of an
+// earlier size can still be queued when the next set_size() drains events.
+// That stale echo must not put the editor back to the earlier size. The DAW's
+// connection makes it deterministic: a ConfigureNotify it sends and syncs
+// reaches the editor with a serial older than the editor's next request, and
+// holding a server grab while that set_size() drains keeps the real echo of
+// the new size from arriving in the same drain and masking the revert.
+// Nothing the editor does under the grab may wait on the server, or the case
+// deadlocks: it runs CPU-only (PULP_TEST_X11_HOST_CPU_ONLY, because the GPU
+// surfaces make X round trips on resize and paint) and stays unattached (an
+// attached raster editor would write its frame).
+TEST_CASE("X11 plugin host ignores a stale echo of an earlier resize",
+          "[view][plugin-view-host][resize][linux]") {
+    Display* daw = open_test_display("stale ConfigureNotify check");
+    setenv("PULP_TEST_X11_HOST_CPU_ONLY", "1", 1);
+    pulp::view::View root;
+    pulp::view::register_platform_plugin_view_host();
+    pulp::view::PluginViewHost::Options opts;
+    opts.size = {200, 150};
+    opts.use_gpu = false;
+    auto host = pulp::view::PluginViewHost::create(root, opts);
+    REQUIRE(host != nullptr);
+    Window child = static_cast<Window>(reinterpret_cast<uintptr_t>(host->native_handle()));
+    REQUIRE(child != 0);
+    host->set_size(300, 220);
+    XSync(daw, False);
+    for (int i = 0; i < 20; ++i) {
+        host->pump_x_events();
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    REQUIRE(host->get_size().width == 300);
+
+    std::vector<std::pair<uint32_t, uint32_t>> notified;
+    host->set_resize_callback([&](uint32_t w, uint32_t h) { notified.emplace_back(w, h); });
+
+    // The echo of the 300 x 220 resize, queued before the next set_size().
+    XEvent echo{};
+    echo.xconfigure.type = ConfigureNotify;
+    echo.xconfigure.display = daw;
+    echo.xconfigure.event = child;
+    echo.xconfigure.window = child;
+    echo.xconfigure.width = 300;
+    echo.xconfigure.height = 220;
+    REQUIRE(XSendEvent(daw, child, False, StructureNotifyMask, &echo) != 0);
+    XSync(daw, False);
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+
+    XGrabServer(daw);
+    XSync(daw, False);
+    host->set_size(400, 260); // drains the stale echo; its own echo waits
+    XUngrabServer(daw);
+    XSync(daw, False);
+    for (int i = 0; i < 20; ++i) {
+        host->pump_x_events();
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    CHECK(host->get_size().width == 400);
+    CHECK(host->get_size().height == 260);
+    CHECK(notified.empty());
+    Window root_return = 0;
+    int x = 0, y = 0;
+    unsigned int w = 0, h = 0, border = 0, depth = 0;
+    REQUIRE(XGetGeometry(daw, child, &root_return, &x, &y, &w, &h, &border, &depth) != 0);
+    CHECK(w == 400u);
+    CHECK(h == 260u);
+
+    host.reset();
+    unsetenv("PULP_TEST_X11_HOST_CPU_ONLY");
+    XCloseDisplay(daw);
 }
 
 #endif  // PULP_TEST_HAS_X11

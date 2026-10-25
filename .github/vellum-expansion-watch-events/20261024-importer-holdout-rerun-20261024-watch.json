@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261024-importer-holdout-rerun-20261024-watch",
+  "created_at": "2026-10-24T20:09:27Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend"
+  ],
+  "rationale": "Test data only: the three holdout panels' receipts are regenerated from three analyze-corpus runs, the manifest's expected gaps and notes are rewritten to match what the lab now reports, and the holdout README says how to score the panels at their declared viewports. No importer, lab, capture or renderer code changes. Chromium stays the only oracle and Skia/Dawn the renderer; no design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

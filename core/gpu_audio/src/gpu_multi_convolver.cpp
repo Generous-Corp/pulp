@@ -19,6 +19,10 @@ std::string GpuMultiConvolver::backend() const {
 
 GpuMultiConvolver::~GpuMultiConvolver() = default;
 
+bool GpuMultiConvolver::device_lost() const noexcept {
+    return gpu_ != nullptr && gpu_->device_lost();
+}
+
 GpuMultiConvolver::GpuMultiConvolver(uint32_t block_size, uint32_t sample_rate,
                                      std::vector<std::vector<float>> irs)
     : block_(block_size), sample_rate_(sample_rate), irs_(std::move(irs)),
@@ -40,7 +44,25 @@ GpuAudioNodeDescriptor GpuMultiConvolver::descriptor() const {
 }
 
 bool GpuMultiConvolver::prepare() {
+    // Release the old device and validate before creating a new one, so an
+    // invalid configuration never spins up a device.
     prepared_ = false;
+    gpu_.reset();
+    if (block_ == 0 || num_ir_ == 0)
+        return false;
+    if (std::all_of(irs_.begin(), irs_.end(), [](const auto& ir) { return ir.empty(); }))
+        return false;
+    auto gpu = render::GpuCompute::create();
+    if (!gpu || !gpu->initialize_standalone())
+        return false;
+    return prepare_on(std::move(gpu));
+}
+
+bool GpuMultiConvolver::prepare_on(std::unique_ptr<render::GpuCompute> gpu) {
+    prepared_ = false;
+    gpu_.reset();
+    blocks_seen_.store(0, std::memory_order_relaxed);
+    loss_block_.store(UINT64_MAX, std::memory_order_relaxed);
     if (block_ == 0 || num_ir_ == 0) return false;
 
     std::size_t max_ir = 0;
@@ -92,11 +114,9 @@ bool GpuMultiConvolver::prepare() {
         pan_r_[k] = std::sin(theta) * pan_norm_;
     }
 
-    gpu_ = render::GpuCompute::create();
-    if (!gpu_ || !gpu_->initialize_standalone()) {
-        gpu_.reset();
+    gpu_ = std::move(gpu);
+    if (!gpu_)
         return false;
-    }
 
     // Build the num_ir IR spectra: zero-pad each IR to fft_size, forward-FFT on
     // the GPU, pack contiguously. Done once at prepare (non-RT).
@@ -128,6 +148,16 @@ bool GpuMultiConvolver::prepare() {
 bool GpuMultiConvolver::convolve_stereo(const float* mono_in, float* out_l,
                                         float* out_r, uint32_t n) {
     if (!prepared_ || !gpu_ || n != block_) return false;
+    const std::uint64_t block = blocks_seen_.fetch_add(1, std::memory_order_relaxed);
+    // A lost device cannot produce this block, and its readback would only
+    // fail after a wait. Refuse up front; the caller applies the miss policy.
+    // The first block found lost is the recovery sequence status reports.
+    if (gpu_->device_lost()) {
+        std::uint64_t none = UINT64_MAX;
+        (void)loss_block_.compare_exchange_strong(none, block, std::memory_order_release,
+                                                  std::memory_order_relaxed);
+        return false;
+    }
 
     // Zero-padded complex input (one shared block for all rooms).
     std::fill(in_pad_.begin(), in_pad_.end(), 0.0f);
@@ -206,10 +236,13 @@ GpuAudioStatus GpuMultiConvolver::status_snapshot() const noexcept {
     status.recovery_reason = gpu_ != nullptr && gpu_->device_lost()
                                  ? GpuAudioRecoveryReason::ProviderLost
                                  : GpuAudioRecoveryReason::None;
-    // No stamped stream here, so a loss has no exact position; it is
-    // attributed to the start of the stream.
-    if (status.recovery_reason != GpuAudioRecoveryReason::None)
-        status.recovery_sequence = 0;
+    // The block at which the worker first found the device lost, or the next
+    // block it will run for a loss it has not reached yet.
+    if (status.recovery_reason != GpuAudioRecoveryReason::None) {
+        const auto loss = loss_block_.load(std::memory_order_acquire);
+        status.recovery_sequence =
+            loss != UINT64_MAX ? loss : blocks_seen_.load(std::memory_order_relaxed);
+    }
     status.provider_state = status.recovery_reason == GpuAudioRecoveryReason::ProviderLost
                                 ? GpuAudioProviderState::Unavailable
                                 : GpuAudioProviderState::Degraded;
@@ -233,5 +266,16 @@ void GpuMultiConvolver::process_cpu_fallback(const audio::BufferView<const float
     // silence on a miss rather than a misleading partial result.
     output.clear();
 }
+
+namespace detail {
+bool prepare_gpu_multi_convolver_with(GpuMultiConvolver& node,
+                                      std::unique_ptr<render::GpuCompute> gpu) noexcept {
+    try {
+        return node.prepare_on(std::move(gpu));
+    } catch (...) {
+        return false;
+    }
+}
+} // namespace detail
 
 } // namespace pulp::gpu_audio

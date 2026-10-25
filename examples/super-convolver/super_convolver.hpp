@@ -95,7 +95,14 @@
 #if !defined(PULP_WASM)
 #include <pulp/audio/format_registry.hpp>
 #include <pulp/audio/audio_file.hpp>
+#include <pulp/audio/restored_path.hpp>
 #include <pulp/platform/file_dialog.hpp>
+#include <cstdlib>
+#include <filesystem>
+#if !defined(_WIN32)
+#include <pwd.h>
+#include <unistd.h>
+#endif
 #include "source_display.hpp"
 #include <pulp/gpu_audio/gpu_convolver.hpp>
 #include <pulp/gpu_audio/gpu_multi_convolver.hpp>
@@ -1115,6 +1122,26 @@ public:
         return active_ir_path_;
     }
 
+#if !defined(PULP_WASM)
+    /// The directory a RESTORED IR path must lie inside. A session or preset is
+    /// authored by whoever saved it, so the path it carries is untrusted input:
+    /// deserialize_plugin_state() resolves it (symlinks followed) and drops it,
+    /// logging why, unless it sits under this root. The user's own picks through
+    /// load_ir_path() are not confined. Defaults to the user's home directory,
+    /// which keeps a hostile session off system files and other users' files;
+    /// it does not keep it off the user's own. A sandboxed host whose HOME is
+    /// the app container should set the directory it can actually read from.
+    /// UI/main thread only (takes a mutex).
+    void set_ir_restore_root(std::filesystem::path root) {
+        std::lock_guard<std::mutex> lock(ir_path_mutex_);
+        ir_restore_root_ = std::move(root);
+    }
+    std::filesystem::path ir_restore_root() const {
+        std::lock_guard<std::mutex> lock(ir_path_mutex_);
+        return ir_restore_root_;
+    }
+#endif
+
     /// How many times a PCM/file source has actually been decoded + resampled.
     /// A Size change re-windows the cached decode instead of redoing it, so this
     /// stays put across Size moves; exposed for tests / tooling.
@@ -1205,9 +1232,13 @@ public:
 
     /// Restore the IR source. Reads the v2 tagged blob; a v1 blob (magic "SCv1")
     /// and a pre-versioning raw-path blob both still restore their path, so an
-    /// existing native project loads unchanged. A truncated / unknown payload
-    /// falls back to the default synthetic IR rather than failing the load — the
-    /// same fail-safe as a missing file. Always returns true.
+    /// existing native project loads unchanged. A path of any vintage is only
+    /// honoured when it resolves inside ir_restore_root(): the blob was written
+    /// by whoever saved the session, so an absolute path in it must not be able
+    /// to point the plugin at an arbitrary file. A truncated / unknown payload,
+    /// like a refused path, falls back to the default synthetic IR rather than
+    /// failing the load — the same fail-safe as a missing file. Always returns
+    /// true.
     bool deserialize_plugin_state(std::span<const uint8_t> data) override {
         const auto* bytes = reinterpret_cast<const char*>(data.data());
         const bool v2 = data.size() >= kStateHeaderSize &&
@@ -1223,7 +1254,7 @@ public:
                 path.assign(bytes + kStateHeaderSize, data.size() - kStateHeaderSize);
             else if (!data.empty())
                 path.assign(bytes, data.size());
-            set_ir_path(std::move(path));
+            restore_ir_path(std::move(path));
             return true;
         }
 
@@ -1251,7 +1282,7 @@ public:
             return true;
         }
         case IrStateKind::Path:
-            set_ir_path(std::string(reinterpret_cast<const char*>(p.data()), p.size()));
+            restore_ir_path(std::string(reinterpret_cast<const char*>(p.data()), p.size()));
             return true;
         case IrStateKind::Synthetic:
             break;
@@ -2329,6 +2360,59 @@ private:
     bool gpu_base_dirty_ = false;
 #endif
 
+    /// Adopt a path that arrived through restored state. An empty path clears
+    /// the source. Otherwise the path is admitted only when it resolves inside
+    /// ir_restore_root(); a refused path is logged and the synthetic IR takes
+    /// its place, so a hostile session cannot make the plugin read a file of
+    /// its author's choosing. The active path becomes the resolved canonical
+    /// path, never the blob's spelling: a relative spelling is resolved against
+    /// the root here, and the loader must open that same file rather than
+    /// re-resolve it against whatever the host's working directory happens to be.
+    void restore_ir_path(std::string path) {
+        if (path.empty()) {
+            set_ir_path(std::string());
+            return;
+        }
+#if !defined(PULP_WASM)
+        std::filesystem::path root;
+        {
+            std::lock_guard<std::mutex> lock(ir_path_mutex_);
+            root = ir_restore_root_;
+        }
+        const auto confined = audio::confine_restored_path(path, root);
+        if (!confined) {
+            runtime::log_warn(
+                "SuperConvolver: ignoring restored IR path '{}' outside the restore root '{}'; "
+                "using the built-in synthetic IR instead.",
+                path, root.string());
+            set_built_in_ir(0);
+            return;
+        }
+        set_ir_path(confined->string());
+#else
+        set_ir_path(std::move(path));
+#endif
+    }
+
+#if !defined(PULP_WASM)
+    /// The user's home directory. A host may scrub HOME from a plugin's
+    /// environment (an out-of-process AU hosting service does), and an empty
+    /// root would refuse every restored IR, so the account database is asked
+    /// when the variable is missing.
+    static std::filesystem::path default_ir_restore_root() {
+        if (const char* home = std::getenv("HOME"); home && *home)
+            return home;
+#if defined(_WIN32)
+        if (const char* profile = std::getenv("USERPROFILE"); profile && *profile)
+            return profile;
+#else
+        if (const passwd* pw = getpwuid(getuid()); pw && pw->pw_dir && *pw->pw_dir)
+            return pw->pw_dir;
+#endif
+        return {};
+    }
+#endif
+
     // IR source: decoded PCM, a filesystem path, or a built-in id — mutually
     // exclusive, all guarded by ir_path_mutex_ and all set from the UI/main thread
     // and read on the rebuild thread. ir_path_gen_ is the lock-free trigger the
@@ -2339,6 +2423,9 @@ private:
     // rebuild against a freshly produced base IR.
     mutable std::mutex ir_path_mutex_;
     std::string active_ir_path_;
+#if !defined(PULP_WASM)
+    std::filesystem::path ir_restore_root_ = default_ir_restore_root();
+#endif
     IrPcm pcm_;
     std::uint8_t built_in_id_ = 0;
     std::atomic<std::uint32_t> ir_path_gen_{0};

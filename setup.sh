@@ -1454,7 +1454,7 @@ if [ -n "$WGPU_RUNTIME_NAME" ]; then
 fi
 
 ensure_shared_git_source_with_retry "SDL3" "https://github.com/libsdl-org/SDL.git" \
-    "release-3.2.12" "$(fetchcontent_cache_dir_name "sdl3" "release-3.2.12")"
+    "release-3.4.18" "$(fetchcontent_cache_dir_name "sdl3" "release-3.4.18")"
 
 ensure_shared_git_source_with_retry "CLAP" "https://github.com/free-audio/clap.git" \
     "1.2.10" "$(fetchcontent_cache_dir_name "clap" "1.2.10")"
@@ -1466,7 +1466,7 @@ ensure_shared_git_source_with_retry "Yoga" "https://github.com/facebook/yoga.git
     "v3.2.1" "$(fetchcontent_cache_dir_name "yoga" "v3.2.1")"
 
 ensure_shared_git_source_with_retry "Catch2" "https://github.com/catchorg/Catch2.git" \
-    "v3.7.1" "$(fetchcontent_cache_dir_name "catch2" "v3.7.1")"
+    "v3.16.1" "$(fetchcontent_cache_dir_name "catch2" "v3.16.1")"
 
 # three.js is by far the largest FetchContent source (~2.2 GB of history). Left
 # unseeded it clones per BUILD DIRECTORY, not per machine, so every worktree

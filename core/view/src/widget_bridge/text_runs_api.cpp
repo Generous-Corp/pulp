@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -72,9 +73,14 @@ void BridgeRegistrars::register_widget_text_runs_api(WidgetBridge& self) {
                 span.font_weight = static_cast<int>(r["fontWeight"].getWithDefault<int64_t>(span.font_weight));
                 span.inherit_font_weight = false;
             }
+            // A non-finite number (parseFloat of a CSS keyword gives NaN)
+            // keeps the inherited value, as setFontSize / setLetterSpacing do.
             if (r.hasObjectMember("fontSize")) {
-                span.font_size = static_cast<float>(r["fontSize"].getWithDefault<double>(span.font_size));
-                span.inherit_font_size = false;
+                const double size = r["fontSize"].getWithDefault<double>(span.font_size);
+                if (std::isfinite(size) && size > 0.0) {
+                    span.font_size = static_cast<float>(size);
+                    span.inherit_font_size = false;
+                }
             }
             if (r.hasObjectMember("fontFamily")) {
                 span.font_family = std::string(r["fontFamily"].toString());
@@ -97,8 +103,12 @@ void BridgeRegistrars::register_widget_text_runs_api(WidgetBridge& self) {
                 span.inherit_font_slant = false;
             }
             if (r.hasObjectMember("letterSpacing")) {
-                span.letter_spacing = static_cast<float>(r["letterSpacing"].getWithDefault<double>(span.letter_spacing));
-                span.inherit_letter_spacing = false;
+                const double spacing =
+                    r["letterSpacing"].getWithDefault<double>(span.letter_spacing);
+                if (std::isfinite(spacing)) {
+                    span.letter_spacing = static_cast<float>(spacing);
+                    span.inherit_letter_spacing = false;
+                }
             }
             if (r.hasObjectMember("textDecoration")) {
                 span.decoration_override = true;

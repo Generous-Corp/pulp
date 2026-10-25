@@ -403,6 +403,40 @@ class CommandPathReferences(unittest.TestCase):
         self.assertIn("script-define", sel.tests)
 
 
+class DeclaredTargets(unittest.TestCase):
+    """A test that reads what CMake records about a target declares it."""
+
+    def setUp(self) -> None:
+        self.fx = Fixture()
+        self.addCleanup(self.fx.close)
+        self.inventory = self.fx.inventory + at.projection_ctest_entries([
+            {"name": "view-link-closure", "command": [
+                "/usr/bin/cmake", "-P", str(self.fx.build / "core/view/closure.cmake")],
+             "properties": [{"name": "PULP_SELECT_WITH_TARGETS",
+                             "value": ["pulp-view-core", "pulp-runtime"]}]},
+            {"name": "undeclared-closure", "command": [
+                "/usr/bin/cmake", "-P", str(self.fx.build / "core/view/closure.cmake")]},
+        ])
+
+    def select(self, changed: list[str]) -> at.Selection:
+        return at.project_affected(self.fx.model, changed, [], None, self.inventory, 1.0)
+
+    def test_an_edit_to_a_declared_target_selects_the_test(self) -> None:
+        for changed in (["core/view/src/knob.cpp"], ["core/runtime/src/log.cpp"]):
+            with self.subTest(changed=changed):
+                self.assertIn("view-link-closure", self.select(changed).tests)
+
+    def test_control_without_the_declaration_nothing_selects_it(self) -> None:
+        self.assertNotIn("undeclared-closure", self.select(["core/view/src/knob.cpp"]).tests)
+
+    def test_control_an_undeclared_target_does_not_select_it(self) -> None:
+        self.assertNotIn("view-link-closure", self.select(["tools/cli/cmd_build.cpp"]).tests)
+
+    def test_a_semicolon_string_value_is_a_list(self) -> None:
+        entry = at.CTestEntry("t", [], {"PULP_SELECT_WITH_TARGETS": "a;b"})
+        self.assertEqual(at.declared_targets(entry), {"a", "b"})
+
+
 class DependencyDatabase(unittest.TestCase):
     def test_ninja_deps_resolve_relative_to_build_dir(self) -> None:
         text = (

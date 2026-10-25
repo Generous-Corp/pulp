@@ -16,6 +16,9 @@ functions:
       - ACCEPTS_MIDI
       - NATIVE_UI
       - NO_EDITOR
+      - LITE_EDITOR
+      - GPU_UI
+      - FULL_EDITOR
       - PLUGIN_CODE
       - MANUFACTURER_CODE
       - AAX_PRODUCT_CODE
@@ -189,6 +192,7 @@ functions:
       - SOURCES
     optional:
       - NAMESPACE
+      - COMPRESS
     docs: reference/cmake.md#pulp_add_binary_data
 
   - name: pulp_add_js_bytecode

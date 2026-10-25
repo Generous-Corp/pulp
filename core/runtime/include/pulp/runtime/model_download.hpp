@@ -31,10 +31,14 @@ struct HttpHeader {
 struct DownloadRequest {
     std::string url;                       ///< http(s)://… (resolve hf:// first).
     std::filesystem::path dest;            ///< Final destination path.
-    std::string expected_sha256;           ///< Optional hex digest; verified when non-empty.
+    std::string expected_sha256;           ///< Hex digest the finished file must match.
     std::vector<HttpHeader> headers;       ///< Extra request headers (e.g. Authorization).
     bool resume = true;                    ///< Resume from a prior partial <dest>.part via Range.
     int timeout_seconds = 0;               ///< 0 ⇒ a sensible library default.
+    /// An empty `expected_sha256` means nothing can vouch for the bytes, so the
+    /// download is refused (`DownloadResult::unverified`) unless the caller opts
+    /// in here. Opting in still records the digest the transfer produced.
+    bool allow_unverified = false;
 };
 
 /// Connect-phase timeout (seconds) the downloader applies for a given request
@@ -62,14 +66,35 @@ struct DownloadResult {
     std::string sha256;                    ///< Hex digest of the finished file.
     bool resumed = false;                  ///< A prior partial was continued.
     bool cancelled = false;                ///< Stopped via callback / token (partial kept for resume).
+    /// The request carried no expected digest. With `ok == false` nothing was
+    /// fetched or written; with `ok == true` the caller opted in and `sha256` is
+    /// the only record of what arrived.
+    bool unverified = false;
 };
+
+/// A redirect `Location` resolved against the request it answered.
+struct ResolvedRedirect {
+    std::string scheme_host_port; ///< e.g. "https://cdn.example.com:8443"
+    std::string path;             ///< Absolute path on that origin.
+    bool ok = false;              ///< False when unresolvable or refused; see `error`.
+    std::string error;
+};
+
+/// Resolve an absolute, host-absolute, or path-relative redirect `location`
+/// against the current origin + path. Refuses a hop from https to http so a
+/// transfer that started encrypted cannot be downgraded mid-flight (an http
+/// origin may upgrade to https).
+ResolvedRedirect resolve_redirect(const std::string& current_scheme_host_port,
+                                  const std::string& current_path, const std::string& location);
 
 /// Progress callback. Return false to cancel the in-flight download.
 using DownloadProgressFn = std::function<bool(const DownloadProgress&)>;
 
-/// Blocking streaming download. Writes to `<dest>.part`, verifies sha256 (when an
-/// expected digest is given), then atomically renames to `dest`. On cancel/error the
-/// `.part` file is left in place so a later call with `resume = true` continues it.
+/// Blocking streaming download. Writes to `<dest>.part`, verifies sha256 against
+/// `expected_sha256`, then atomically renames to `dest`. A request with no expected
+/// digest is refused before any network or disk activity unless it sets
+/// `allow_unverified`. On cancel/error the `.part` file is left in place so a later
+/// call with `resume = true` continues it.
 DownloadResult download_file(const DownloadRequest& request,
                              const DownloadProgressFn& on_progress = {},
                              const CancellationToken* cancel = nullptr);

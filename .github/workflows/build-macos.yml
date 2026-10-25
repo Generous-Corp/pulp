@@ -667,10 +667,41 @@ jobs:
         run: |
           # PULP_LOTTIE=ON exercises the opt-in skottie render path. The
           # try-link auto-disables if the verified bundle cannot link it.
+          # Exact provider proof mirrors build.yml's arm64 gate: compile the
+          # GPU-audio hardware-evidence targets; the Test step excludes them.
+          proof_args=()
+          if [ "${RUNNER_ARCH}" = "ARM64" ]; then
+            proof_args=(-DPULP_GPU_AUDIO_EXACT_PROVIDER_PROOF=ON)
+          fi
           "$PULP_UNTRUSTED_RUNNER" cmake \
             -S "$PULP_UNTRUSTED_SOURCE" -B "$PULP_BUILD_DIR" \
             -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF \
-            -DPULP_LOTTIE=ON -DPULP_USE_CCACHE=OFF
+            -DPULP_LOTTIE=ON -DPULP_USE_CCACHE=OFF \
+            ${proof_args[@]+"${proof_args[@]}"}
+
+      - name: Verify GPU-audio proof targets are configured and never run
+        # Mirrors build.yml: the reviewed gpu-proof set, and none of it in the
+        # Test step's selection below.
+        if: runner.arch == 'ARM64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          allowlist="$PULP_UNTRUSTED_SOURCE/tools/ci/gpu_proof_tests.txt"
+          names() { sed -n 's/^ *Test *#[0-9]*: //p' | LC_ALL=C sort; }
+          labelled="$("$PULP_UNTRUSTED_RUNNER" ctest --test-dir "$PULP_BUILD_DIR" \
+            -N -L '^gpu-proof$' | names)"
+          if ! diff -u "$allowlist" <(printf '%s\n' "$labelled"); then
+            echo "::error title=gpu-audio-proof::the configured gpu-proof tests differ from tools/ci/gpu_proof_tests.txt"
+            exit 1
+          fi
+          leaked="$(LC_ALL=C comm -12 "$allowlist" <("$PULP_UNTRUSTED_RUNNER" ctest \
+            --test-dir "$PULP_BUILD_DIR" -N \
+            -LE "validation|slow|performance|bench|quality-lab|gpu-proof" | names))"
+          if [ -n "$leaked" ]; then
+            printf '%s\n' "$leaked"
+            echo "::error title=gpu-audio-proof::the Test step's selection would run gpu-proof tests"
+            exit 1
+          fi
 
       - name: Build
         run: |
@@ -688,7 +719,7 @@ jobs:
         run: |
           "$PULP_UNTRUSTED_RUNNER" ctest --test-dir "$PULP_BUILD_DIR" \
             --output-on-failure --repeat until-pass:2 -C Release \
-            -LE "validation|slow|performance|bench|quality-lab" -j8 --timeout 120 \
+            -LE "validation|slow|performance|bench|quality-lab|gpu-proof" -j8 --timeout 120 \
             --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items"
 
       - name: Remove untrusted writable state

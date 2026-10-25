@@ -164,6 +164,43 @@ public:
     }
     const std::vector<std::filesystem::path>& asset_roots() const noexcept { return asset_roots_; }
 
+    /// One file compiled into the plug-in beside its editor script. `name` is
+    /// the script-relative path with forward slashes (`assets/knob.png`); the
+    /// bytes live for the process (a static array in the plug-in image).
+    struct EmbeddedAsset {
+        std::string name;
+        const unsigned char* data = nullptr;
+        std::size_t size = 0;
+    };
+
+    /// Install the files embedded beside the script. For an editor whose
+    /// script was compiled into the image, these stand in for the script's
+    /// directory: `__loadAssetSync__`, `setImageSource`, sprite strips and
+    /// fonts resolve a relative path here first, before the asset roots.
+    void set_embedded_assets(std::vector<EmbeddedAsset> assets);
+    const std::vector<EmbeddedAsset>& embedded_assets() const noexcept {
+        return embedded_assets_;
+    }
+
+    /// The embedded file a script-relative `path` names, or nullptr. Leading
+    /// `./` and `/` are ignored; `..` segments, absolute paths and URIs never
+    /// match. Matching is exact on the normalized name.
+    const EmbeddedAsset* embedded_asset(std::string_view path) const noexcept;
+    /// `data:<mime>;base64,...` for an embedded file, which is how an image
+    /// widget draws bytes that have no file behind them.
+    std::string embedded_asset_data_uri(const EmbeddedAsset& asset) const;
+
+    /// Identity of this bridge's persisted stores (widget storage, style
+    /// presets). A path-backed script is keyed by its directory; an embedded
+    /// script has no directory, so its host names it here (the plug-in's
+    /// bundle id and script name) and the stores keep working across hosts.
+    void set_storage_identity(std::string identity) {
+        storage_identity_ = std::move(identity);
+    }
+    /// The identity the persisted stores hash: `set_storage_identity()`'s value
+    /// when set, else the script base directory, else empty (no store).
+    std::string storage_identity() const;
+
     /// Preferred directory for resolving RELATIVE filesystem paths handed to
     /// path-taking bridge APIs. Imported code emits `assets/<file>` beside its
     /// generated script; a host may instead keep the script in a scratch file
@@ -457,13 +494,15 @@ private:
     std::unique_ptr<NativeGpuBridgeState> native_gpu_bridge_state_;
     std::vector<std::filesystem::path> asset_roots_;
     std::filesystem::path script_base_dir_;
+    std::vector<EmbeddedAsset> embedded_assets_;
+    std::string storage_identity_;
 
     /// Per-bridge persisted-store directories (widget storage, style presets),
-    /// resolved once per script base dir by the storage registrars so a UI
+    /// resolved once per storage identity by the storage registrars so a UI
     /// that mirrors every control change into storage never re-walks the
-    /// directory tree. Reset whenever the base dir it was resolved for moves.
+    /// directory tree. Reset whenever the identity it was resolved for changes.
     struct PrivateStoreDirs {
-        std::filesystem::path base_dir;
+        std::string identity;
         std::optional<std::filesystem::path> widget_storage;
         std::optional<std::filesystem::path> style_presets;
     };

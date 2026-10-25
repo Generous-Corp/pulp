@@ -52,8 +52,8 @@ class SharedIoConvolutionPipeline {
                             std::uint64_t callback_start_ns = 0) noexcept {
         return bridge_.begin_callback(samples, sequence, callback_start_ns);
     }
-    void request_recovery(SharedIoRecoveryReason reason) noexcept {
-        bridge_.request_recovery(reason);
+    void request_recovery(SharedIoRecoveryReason reason, std::uint64_t sequence) noexcept {
+        bridge_.request_recovery(reason, sequence);
     }
     SharedIoRecoveryReason recovery_reason() const noexcept {
         return bridge_.recovery_reason();
@@ -116,6 +116,11 @@ class SharedIoConvolutionPipeline {
     }
     std::uint64_t valid_from_sequence() const noexcept {
         return executor_.valid_from_sequence();
+    }
+    // Serialized non-RT dispatcher only: the block whose terminal fenced the
+    // executor, or else the oldest admitted block without a reduced terminal.
+    std::uint64_t first_undelivered() const noexcept {
+        return executor_.first_undelivered();
     }
     std::uint32_t lead_blocks() const noexcept {
         return bridge_.lead_blocks();

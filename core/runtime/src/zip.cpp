@@ -392,4 +392,32 @@ std::optional<std::vector<uint8_t>> zlib_decompress(
     return inflate_stream(data, size, MZ_DEFAULT_WINDOW_BITS, max_output);
 }
 
+std::optional<std::string> zlib_decompress_exact(const uint8_t* data, size_t size,
+                                                 size_t expected_size) {
+    if (data == nullptr || size == 0)
+        return std::nullopt;
+    if (expected_size > kDefaultMaxDecompressOutput)
+        return std::nullopt;
+
+    std::string out(expected_size, '\0');
+    mz_stream stream{};
+    stream.next_in = data;
+    stream.avail_in = static_cast<unsigned int>(size);
+    stream.next_out = reinterpret_cast<unsigned char*>(out.data());
+    stream.avail_out = static_cast<unsigned int>(out.size());
+
+    if (mz_inflateInit2(&stream, MZ_DEFAULT_WINDOW_BITS) != MZ_OK)
+        return std::nullopt;
+    // One call with the whole input and an output buffer of exactly the
+    // expected size: a longer stream stops with MZ_BUF_ERROR, a shorter one
+    // ends early, and both are rejected below.
+    const int status = mz_inflate(&stream, MZ_FINISH);
+    const bool exact =
+        status == MZ_STREAM_END && stream.total_out == expected_size && stream.total_in == size;
+    mz_inflateEnd(&stream);
+    if (!exact)
+        return std::nullopt;
+    return out;
+}
+
 }  // namespace pulp::runtime

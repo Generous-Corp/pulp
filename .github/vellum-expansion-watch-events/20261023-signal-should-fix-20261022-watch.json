@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261023-signal-should-fix-20261022-watch",
+  "created_at": "2026-10-23T19:42:19Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Signal-family DSP fixes and the polyphase oversampler transition band change audio processing headers (filters, FDN and classic reverb, oversampler, saturator, compressor, fast math), their tests, and the agent-capability fingerprints that record them. No design-import, Chromium, rendering, or packaging code or authority moves; the family match comes from the shared capability record.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-biquad",
+    "ctest --test-dir build -R pulp-test-classic-reverb",
+    "ctest --test-dir build -R pulp-test-compressor-sidechain",
+    "ctest --test-dir build -R pulp-test-fast-math",
+    "ctest --test-dir build -R pulp-test-fast-math-no-contract",
+    "ctest --test-dir build -R pulp-test-fdn-reverb",
+    "ctest --test-dir build -R pulp-test-fdn-reverb-block-engine",
+    "ctest --test-dir build -R pulp-test-forge-fdn-reverb-catalog",
+    "ctest --test-dir build -R pulp-test-forge-spectral-dynamics-catalogs",
+    "ctest --test-dir build -R pulp-test-frequency-response",
+    "ctest --test-dir build -R pulp-test-halfband-iir",
+    "ctest --test-dir build -R pulp-test-oversampling-polyphase",
+    "ctest --test-dir build -R pulp-test-oversampling-quality",
+    "ctest --test-dir build -R pulp-test-signal-saturator",
+    "ctest --test-dir build -R pulp-test-signal-speaker-cabinet-rt-geometry",
+    "ctest --test-dir build -R pulp-test-simd-lanes-portable",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

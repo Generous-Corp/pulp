@@ -81,20 +81,18 @@ python3 tools/import-validation/importer_differential_lab.py analyze-corpus \
   --timeout-seconds 180 --output /tmp/importer-differential/corpus
 ```
 
-The lab needs Pillow in the interpreter that runs it; without it every
-fixture fails with "Pillow is required to verify capture PNG dimensions".
-Spectr's import takes about 35 s, so the default 60 s timeout is too tight on
-a loaded host.
+The lab needs Pillow in the interpreter that runs it. It checks once before
+running and names `tools/ci/install_visual_python_deps.sh` when Pillow is
+missing. Spectr's import takes about 35 s, so the default 60 s timeout is too
+tight on a loaded host.
 
-Expect two of the three to be unscoreable as-is. Spectr's screenshot and
-native render digests change on every run inside its `volatile_regions`, so
-its determinism verdict is `fail` while its DOM snapshot and native layout
-digests hold. The lab refuses lattice before scoring because the native panel
-height is rounded to 0.1 CSS px (1006.7 against Chromium's 1006.703125).
-Both are recorded as expected gaps in the manifest. The lattice fix is
-tracked in https://github.com/Generous-Corp/pulp/issues/10833; remove that
-expected gap once lattice scores in three consecutive runs.
+All three score. Spectr's screenshot and native render digests change on
+every run inside its `volatile_regions`, so its determinism verdict is `fail`
+while its DOM snapshot and native layout digests hold. Lattice and kelvin are
+deterministic: every digest holds over three runs. None of the three is
+threshold-eligible; the gaps each one shows are recorded in the manifest.
 
-`benchmark` takes no viewport, so it can only be run on Spectr, whose
-viewport is the 1280x800 default. Three `analyze-corpus` runs give the
-same three-run comparison for the other two.
+Pass `--manifest`, as above, so each panel is scored at the viewport its entry
+declares. `--input` with `--include-holdout` also scores them, but at the
+default 1280x800 viewport. `benchmark` and `compare` take
+`--viewport WIDTHxHEIGHT` for a single panel.

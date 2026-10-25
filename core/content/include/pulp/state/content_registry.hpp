@@ -4,6 +4,7 @@
 /// Discovery for installed data-only Pulp content packs.
 
 #include <pulp/state/content_capability_manifest.hpp>
+#include <pulp/state/content_install_limits.hpp>
 #include <pulp/state/preset_manager.hpp>
 
 #include <filesystem>
@@ -88,17 +89,20 @@ ContentPresetSource content_registry_preset_source();
 /// Validate a local content-pack directory or .pulpcontent archive against a
 /// trusted plugin runtime manifest without copying any files. This is the
 /// runtime-side backend for in-app "Install Content Pack..." and drag/drop
-/// review flows.
+/// review flows. An archive whose declared decompressed sizes exceed `limits`
+/// is refused from its central directory, before any entry is inflated.
 ContentInstallPreview preview_content_pack_install(
     const std::filesystem::path& input, const ContentCapabilityManifest& plugin,
-    const std::filesystem::path& data_root = ContentRegistry::platform_data_root());
+    const std::filesystem::path& data_root = ContentRegistry::platform_data_root(),
+    const ContentInstallLimits& limits = {});
 
 /// Install a previously previewable data-only content pack. `approved` must be
-/// true so UI code cannot accidentally turn preview/drop into mutation.
+/// true so UI code cannot accidentally turn preview/drop into mutation. The same
+/// `limits` gate extraction as they gate the preview.
 ContentInstallResult
 install_content_pack(const std::filesystem::path& input, const ContentCapabilityManifest& plugin,
                      const std::filesystem::path& data_root = ContentRegistry::platform_data_root(),
-                     bool approved = false);
+                     bool approved = false, const ContentInstallLimits& limits = {});
 
 const char* to_string(ContentReloadPolicy policy);
 

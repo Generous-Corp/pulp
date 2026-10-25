@@ -3,7 +3,13 @@
 #include <pulp/format/editor_ui.hpp>
 #include <pulp/format/headless.hpp>
 #include <pulp/format/registry.hpp>
+#include <pulp/view/widgets.hpp>
+#include "support/unique_temp_dir.hpp"
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
+#include <optional>
+#include <string>
 #include <cmath>
 #include <cstdint>
 #include <utility>
@@ -283,11 +289,181 @@ TEST_CASE("format registry stores and replaces the processor factory",
     REQUIRE(pulp::format::registered_factory() == previous);
 }
 
+namespace {
+
+const unsigned char kEmbeddedScript[] =
+    "createLabel('embedded-editor', 'ok', '');\n"
+    "var sidecar = __loadAssetSync__('assets/data.json');\n"
+    "createLabel('embedded-asset', sidecar.ok ? sidecar.text : String(sidecar.status), '');\n";
+const unsigned char kEmbeddedTheme[] = R"({"colors":{"bg.primary":"#00ff00"}})";
+const unsigned char kEmbeddedSidecar[] = R"({"from":"embedded"})";
+const pulp::format::EmbeddedEditorFile kEmbeddedFiles[] = {
+    {"assets/data.json", kEmbeddedSidecar, sizeof(kEmbeddedSidecar) - 1},
+};
+
+pulp::format::EditorAssets make_embedded(const char* name = "ui.js") {
+    pulp::format::EditorAssets assets{};
+    assets.script_name = name;
+    assets.script = kEmbeddedScript;
+    assets.script_size = sizeof(kEmbeddedScript) - 1;
+    assets.theme = kEmbeddedTheme;
+    assets.theme_size = sizeof(kEmbeddedTheme) - 1;
+    assets.files = kEmbeddedFiles;
+    assets.file_count = 1;
+    return assets;
+}
+
+// Registers `assets` and installs the scripted editor builder the way a
+// UI_SCRIPT target's generated source does. Leaves the process without a
+// registered editor or builder on exit, so the AutoUi fallback case below
+// measures the same binary unregistered.
+struct ScopedEditorAssets {
+    explicit ScopedEditorAssets(const pulp::format::EditorAssets& assets) {
+        pulp::format::register_editor_assets(assets);
+        pulp::format::install_scripted_editor_builder();
+    }
+    ~ScopedEditorAssets() {
+        pulp::format::scripted_editor_builder_slot().store(nullptr);
+        pulp::format::reset_editor_assets_for_testing();
+    }
+};
+
+std::filesystem::path write_temp_script(const char* stem) {
+    const auto dir = pulp::test::make_unique_temp_dir(stem);
+    const auto path = dir / "main.js";
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out << "createLabel('on-disk-editor', 'ok', '');";
+    return path;
+}
+
+} // namespace
+
+TEST_CASE("select_editor_ui_source prefers the embedded script over the dev path",
+          "[format][editor_ui][embedded]") {
+    const auto on_disk = write_temp_script("pulp-editor-ui-source");
+    const std::string on_disk_str = on_disk.string();
+    const std::filesystem::path missing = on_disk.parent_path() / "missing.js";
+    const std::string missing_str = missing.string();
+
+    SECTION("embedded only") {
+        const auto source = pulp::format::select_editor_ui_source(make_embedded(), false);
+        REQUIRE(source.available());
+        REQUIRE(source.embedded());
+        REQUIRE(source.script_path.empty());
+        REQUIRE(source.script_source == reinterpret_cast<const char*>(kEmbeddedScript));
+        REQUIRE(source.theme_source == reinterpret_cast<const char*>(kEmbeddedTheme));
+        REQUIRE(source.script_name == "ui.js");
+        REQUIRE(source.label() == "ui.js");
+        REQUIRE(source.embedded_assets.size() == 1);
+        REQUIRE(source.embedded_assets[0].name == "assets/data.json");
+        REQUIRE(source.embedded_assets[0].size == sizeof(kEmbeddedSidecar) - 1);
+    }
+    SECTION("embedded wins over an existing dev path when not hot reloading") {
+        auto assets = make_embedded();
+        assets.script_path = on_disk_str.c_str();
+        const auto source = pulp::format::select_editor_ui_source(assets, false);
+        REQUIRE(source.embedded());
+    }
+    SECTION("a hot-reloading editor reads the dev path while it exists") {
+        auto assets = make_embedded();
+        assets.script_path = on_disk_str.c_str();
+        const auto source = pulp::format::select_editor_ui_source(assets, true);
+        REQUIRE_FALSE(source.embedded());
+        REQUIRE(source.script_path == on_disk);
+        REQUIRE(source.script_source.empty());
+        REQUIRE(source.embedded_assets.empty());
+        REQUIRE(source.label() == on_disk.string());
+    }
+    SECTION("a missing dev path never beats the embedded script") {
+        auto assets = make_embedded();
+        assets.script_path = missing_str.c_str();
+        const auto source = pulp::format::select_editor_ui_source(assets, true);
+        REQUIRE(source.embedded());
+    }
+    SECTION("without an embedded script the path is used as before, even when missing") {
+        pulp::format::EditorAssets assets{};
+        assets.script_path = missing_str.c_str();
+        const auto source = pulp::format::select_editor_ui_source(assets, false);
+        REQUIRE(source.available());
+        REQUIRE(source.script_path == missing);
+    }
+    SECTION("nothing configured") {
+        const auto source =
+            pulp::format::select_editor_ui_source(pulp::format::EditorAssets{}, true);
+        REQUIRE_FALSE(source.available());
+    }
+    std::filesystem::remove_all(on_disk.parent_path());
+}
+
+TEST_CASE("an embedded script counts as a declared editor", "[format][editor_ui][embedded]") {
+    REQUIRE_FALSE(pulp::format::declares_editor_assets(pulp::format::EditorAssets{}));
+    REQUIRE_FALSE(pulp::format::embeds_editor_script(pulp::format::EditorAssets{}));
+    REQUIRE(pulp::format::embeds_editor_script(make_embedded()));
+    REQUIRE(pulp::format::declares_editor_assets(make_embedded()));
+    // A zero-length script is no editor at all.
+    auto empty = make_embedded();
+    empty.script_size = 0;
+    REQUIRE_FALSE(pulp::format::embeds_editor_script(empty));
+}
+
+TEST_CASE("build_editor_ui evaluates a registered embedded script without reading a file",
+          "[format][editor_ui][embedded]") {
+    ScopedEditorAssets scoped(make_embedded());
+
+    pulp::format::HeadlessHost host(create_test_gain);
+    std::string error;
+    auto ui = pulp::format::build_editor_ui(host.state(), false, &error);
+
+    REQUIRE(ui.root != nullptr);
+    REQUIRE(ui.uses_script_ui);
+    REQUIRE(ui.scripted_ui != nullptr);
+    REQUIRE(ui.scripted_ui->uses_embedded_source());
+    REQUIRE(ui.scripted_ui->script_label() == "ui.js");
+    REQUIRE_FALSE(ui.scripted_ui->hot_reload_watching());
+    REQUIRE(ui.scripted_ui->bridge() != nullptr);
+    REQUIRE(ui.scripted_ui->bridge()->widget("embedded-editor") != nullptr);
+    // The file embedded beside the script answers its relative fetch.
+    auto* asset =
+        dynamic_cast<pulp::view::Label*>(ui.scripted_ui->bridge()->widget("embedded-asset"));
+    REQUIRE(asset != nullptr);
+    REQUIRE(asset->text() == R"({"from":"embedded"})");
+    // Without a plug-in id the stores are keyed by the embedded script alone.
+    REQUIRE(ui.scripted_ui->bridge()->storage_identity() == "embedded/ui.js");
+    // The embedded theme override reached the root.
+    const auto bg = ui.root->theme().color("bg.primary");
+    REQUIRE(bg.has_value());
+    REQUIRE(bg->g8() == 0xFF);
+    REQUIRE(bg->r8() == 0x00);
+    REQUIRE(error.empty());
+    // The session borrows the root; tear it down first.
+    ui.scripted_ui.reset();
+}
+
+TEST_CASE("build_editor_ui_for_assets keys an embedded editor's stores by the plug-in",
+          "[format][editor_ui][embedded]") {
+    // The builder a UI_SCRIPT target's generated source installs.
+    pulp::format::install_scripted_editor_builder();
+    struct ResetBuilder {
+        ~ResetBuilder() {
+            pulp::format::scripted_editor_builder_slot().store(nullptr);
+        }
+    } reset_builder;
+    pulp::format::HeadlessHost host(create_test_gain);
+    std::string error;
+    auto ui = pulp::format::build_editor_ui_for_assets(make_embedded(), host.state(), false, &error,
+                                                       {}, "com.acme.synth");
+    REQUIRE(ui.scripted_ui != nullptr);
+    REQUIRE(ui.scripted_ui->bridge() != nullptr);
+    REQUIRE(ui.scripted_ui->bridge()->storage_identity() == "com.acme.synth/ui.js");
+    ui.scripted_ui.reset();
+}
+
 TEST_CASE("build_editor_ui falls back to AutoUi when no script path is configured",
           "[format][editor_ui]") {
     if (pulp::format::configured_ui_script_path().has_value()) {
         SKIP("AutoUi fallback requires a build without PULP_UI_SCRIPT_PATH");
     }
+    REQUIRE_FALSE(pulp::format::embeds_editor_script(pulp::format::registered_editor_assets()));
 
     pulp::format::HeadlessHost host(create_test_gain);
     std::string error = "preexisting";
