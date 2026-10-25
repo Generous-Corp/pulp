@@ -7,18 +7,6 @@
       "fixtures": [
         "kelvin"
       ],
-      "anchor": "capture:drive:36",
-      "expected": "param:drive",
-      "actual": "<absent>",
-      "issue": "https://github.com/Generous-Corp/pulp/issues/11008",
-      "reason": "SwiftUI resolves a bound control by its display label, and this keyed, routed fader has none, so it emits the unbound placeholder."
-    },
-    {
-      "lane": "swiftui",
-      "field": "binding",
-      "fixtures": [
-        "kelvin"
-      ],
       "anchor": "capture:out:38",
       "expected": "meter:out",
       "actual": "<absent>",

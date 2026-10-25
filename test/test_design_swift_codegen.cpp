@@ -1196,6 +1196,35 @@ TEST_CASE("SwiftUI binds only the controls the native and C++ lanes bind",
     CHECK_FALSE(contains(out.view, "⚠︎ unbound"));
 }
 
+TEST_CASE("SwiftUI binds a keyed control with no display label by its key",
+          "[view][import][swiftui][binding-rule]") {
+    // A captured fader often carries no label and no name, only its key and
+    // route: kelvin's drive. Every other lane binds it; SwiftUI resolves by
+    // the key as a last resort rather than leaving it unbound.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root = frame_node("root", "Panel", 200.0f, 200.0f, LayoutDirection::column);
+    auto fader = frame_node("", "", 24.0f, 120.0f, LayoutDirection::column);
+    fader.audio_widget = AudioWidgetType::fader;
+    fader.attributes["pulpParamKey"] = "drive";
+    fader.attributes["pulpRouteId"] = "capture:drive:36";
+    fader.stable_anchor_id = "capture:drive:36";
+    ir.root.children.push_back(std::move(fader));
+
+    const auto result = generate_pulp_swift(ir, ir.asset_manifest);
+    INFO(result.view_source);
+    INFO(result.binding_manifest);
+    CHECK(contains(result.view_source, "switch resolver.resolveParameter(named: \"drive\")"));
+    CHECK(contains(result.view_source, "PulpSlider(parameter: p)"));
+    CHECK(contains(result.binding_manifest, "\"resolve_name\": \"drive\""));
+    // A label still wins over the key when there is one.
+    auto labelled = ir;
+    labelled.root.children[0].audio_label = "Drive";
+    CHECK(contains(generate_pulp_swift(labelled, labelled.asset_manifest).view_source,
+                   "resolveParameter(named: \"Drive\")"));
+    require_generated_swift_compiles(ir, "unlabelled-keyed-fader");
+}
+
 TEST_CASE("SwiftUI reports a refused binding with the native binder's diagnostic",
           "[view][import][swiftui][binding-rule]") {
     const auto ir = build_binding_rule_fixture();
