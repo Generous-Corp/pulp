@@ -73,6 +73,21 @@
             ${PULP_GPU_TEST_DISCOVERY_ARGS})
     endif()
 
+    # Live resize through the GPU plug-in host: a set_size flood, one final
+    # set_size, and a native resize with no host call (Logic's AU v2 path).
+    # Each frame configures once and notifies the processor once, with the
+    # latest size. It reads the host's GpuSurface, so it lives with the GPU
+    # tests (this file is included only with PULP_ENABLE_GPU) and links
+    # pulp::render, not in the pulp::view-only AppKit group.
+    if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA)
+        add_executable(pulp-test-plugin-view-resize-macos
+            test_plugin_view_host_resize_macos.mm)
+        target_link_libraries(pulp-test-plugin-view-resize-macos PRIVATE
+            pulp::view pulp::render Catch2::Catch2WithMain "-framework AppKit")
+        catch_discover_tests(pulp-test-plugin-view-resize-macos
+            ${PULP_GPU_TEST_DISCOVERY_ARGS})
+    endif()
+
     # Skia surface test — also covers SkPicture (.skp) serialization on the
     # Graphite backend. The .skp round-trip cases include
     # Skia headers directly (SkPicture, SkPictureRecorder, SkSerialProcs,
