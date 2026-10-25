@@ -2,6 +2,7 @@
 
 #include <pulp/gpu_audio/spectral_jitter.hpp>
 
+#include <algorithm>
 #include <cmath>
 
 namespace pulp::gpu_audio {
@@ -24,7 +25,8 @@ bool GpuSpectralFreeze::prepare(uint32_t fft_size, uint32_t hop,
 }
 
 bool GpuSpectralFreeze::capture(const float* frame_in) {
-    if (!stft_.gpu_available() || frame_in == nullptr) return false;
+    if (!stft_.device_usable() || frame_in == nullptr)
+        return false;
     if (!stft_.analyze(frame_in, scratch_.data())) return false;
     const uint32_t n = fft_size();
     for (uint32_t k = 0; k < n; ++k) {
@@ -40,6 +42,12 @@ bool GpuSpectralFreeze::capture(const float* frame_in) {
 bool GpuSpectralFreeze::render(float* frame_out, float phase_jitter) {
     if (!captured_ || frame_out == nullptr) return false;
     const uint32_t n = fft_size();
+    // Refuse before advancing the phases, so a refused hop leaves the frozen
+    // state where it was.
+    if (!stft_.device_usable()) {
+        std::fill_n(frame_out, n, 0.0f);
+        return false;
+    }
     const float hop_ratio = static_cast<float>(hop_) / static_cast<float>(n);
 
     // Nominal per-hop phase advance keeps a steady tone phase-coherent across

@@ -45,11 +45,30 @@ struct RealtimeGpuHealth {
     bool device_lost = false;
     // Indexed by GpuAudioTerminalDisposition.
     std::array<std::uint64_t, GpuAudioStatus::kTerminalDispositionCount> terminal_counts{};
+    // The node's CPU shadow, with the meaning of GpuAudioStatus's shadow_*
+    // fields. Nodes without a shadow leave them at their defaults.
+    GpuAudioShadowMode shadow_mode = GpuAudioShadowMode::None;
+    float shadow_inline_cost_pct = 0.0f;
+    std::uint64_t shadow_delivered_blocks = 0;
+    std::uint64_t shadow_late_blocks = 0;
+    std::uint64_t shadow_double_miss_blocks = 0;
+    bool shadow_model_differs = false;
+    // Provider facts with the meaning of the GpuAudioStatus fields of the same
+    // names. Nodes that do not report them leave the defaults.
+    bool gpu_kernel_available = false;
+    GpuAudioCompletionMode completion_mode = GpuAudioCompletionMode::Unknown;
+    bool timestamps_available = false;
+    std::uint64_t last_delivery_ns = 0;
 };
 // Returns false when no coherent read could be taken.
 using RealtimeGpuHealthFn = bool (*)(const void*, RealtimeGpuHealth&) noexcept;
 // Non-RT: release and re-prepare the provider, opening a new epoch.
 using RealtimeGpuReprepareFn = bool (*)(void*) noexcept;
+// Brackets each offline run. `true` comes on the offline render thread before
+// the run's first block, with the callback idle; `false` comes on the audio
+// thread at the first realtime callback after the run, before that callback
+// touches the node, so it must not allocate, lock or wait.
+using RealtimeGpuOfflineRenderFn = void (*)(void*, bool offline) noexcept;
 
 struct RealtimeGpuNodePath {
     void* context = nullptr;
@@ -61,9 +80,11 @@ struct RealtimeGpuNodePath {
     // across transport release, reconstruction and reprepare.
     RealtimeGpuSequenceFn next_sequence = nullptr;
     // Optional; not part of active(). `health` is populated for the WaveNet
-    // realtime node and the shared GpuConvolver path; `reprepare` is unused.
+    // realtime node and the shared GpuConvolver path; `reprepare` is unused;
+    // `offline_render` is populated for the neural realtime node.
     RealtimeGpuHealthFn health = nullptr;
     RealtimeGpuReprepareFn reprepare = nullptr;
+    RealtimeGpuOfflineRenderFn offline_render = nullptr;
 
     bool active() const noexcept {
         return context != nullptr && process != nullptr && service != nullptr && fence != nullptr &&

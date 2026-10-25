@@ -163,3 +163,19 @@ The trace is intended to explain where a deadline was lost: CPU admission,
 encoding/submission, completion observation, device loss, or delivery fallback.
 It cannot establish a hard scheduling guarantee, and it cannot infer GPU
 execution duration from a CPU completion interval.
+
+## Trace dispositions and the health status
+
+The trace and `GpuAudioStatus` answer different questions. The trace records
+what happened to each block. The status reports the node's lifecycle: its
+`provider_state`, its first latched `recovery_reason`, and cumulative counters.
+The status is not emitted as trace records: no `gpu.audio.*` event carries
+`provider_state` or `recovery_reason`. `gpu.audio.recovery` records only a
+quiescent transition to a new generation; it carries no cause. Read the status from
+`GpuAudioTransport::status_snapshot()` and correlate by time and generation.
+
+`GpuAudioStatus::terminal_counts` counts admitted blocks by the public
+`GpuAudioTerminalDisposition`, which is a separate enum from the trace's
+`gpu_terminal` labels. Compare the two only for the same quiescent generation.
+See [GPU audio reliability on macOS](gpu-audio-macos-reliability.md#reading-health)
+for the status semantics.

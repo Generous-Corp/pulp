@@ -39,7 +39,8 @@ RealtimeGpuNodePath realtime_gpu_node_path(GpuAudioNode* node) noexcept {
                 .fence = &GpuNeuralRealtimeNode::fence,
                 .delivered = &GpuNeuralRealtimeNode::delivered,
                 .next_sequence = &GpuNeuralRealtimeNode::next_sequence,
-                .health = &GpuNeuralRealtimeNode::health};
+                .health = &GpuNeuralRealtimeNode::health,
+                .offline_render = &GpuNeuralRealtimeNode::offline_render};
     }
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
     auto* convolver = dynamic_cast<GpuConvolver*>(node);

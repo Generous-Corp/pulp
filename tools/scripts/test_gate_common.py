@@ -103,6 +103,20 @@ class StripCCommentsTests(unittest.TestCase):
         self.assertEqual(gc.strip_c_comments("// was /* here\nkeep(); /* x */\n"), "\nkeep(); \n")
 
 
+    def test_keep_strings_does_not_open_a_comment_inside_a_literal(self) -> None:
+        src = 'glob("**/*.json"); url("http://x"); c = \'/\'; read(SRC); /* gone */ // gone\n'
+        kept = 'glob("**/*.json"); url("http://x"); c = \'/\'; read(SRC);  \n'
+        self.assertEqual(gc.strip_c_comments(src, keep_strings=True), kept)
+        # Control: the default pass opens a block at the glob and loses read(SRC).
+        self.assertNotIn("read(SRC)", gc.strip_c_comments(src))
+
+    def test_keep_strings_reads_a_raw_string_whole(self) -> None:
+        src = 'auto j = R"js({"a": "/* not a comment */"})js"; use(DIR); // note\n'
+        self.assertEqual(gc.strip_c_comments(src, keep_strings=True),
+                         'auto j = R"js({"a": "/* not a comment */"})js"; use(DIR); \n')
+        self.assertEqual(gc.strip_c_comments('"esc \\" // still in"; x(); // c\n', keep_strings=True),
+                         '"esc \\" // still in"; x(); \n')
+
 class StripMetaTests(unittest.TestCase):
     def test_strips_underscore_and_schema_keys(self) -> None:
         self.assertEqual(

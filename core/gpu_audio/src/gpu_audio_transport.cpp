@@ -4,6 +4,7 @@
 #include "detail/realtime_gpu_audio_path.hpp"
 #include "detail/realtime_gpu_health_mirror.hpp"
 #include "detail/shared_io_trace.hpp"
+#include "detail/worker_pipeline_hosting.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -112,6 +113,20 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
     if (node == nullptr)
         return false;
 
+    // Opt the node into worker pipelining before reading its descriptor; a
+    // node that pipelines declares worker_pipeline_blocks only while hosted.
+    // Undone here, while the node is known alive, if preparation fails or the
+    // node does not pipeline; release() undoes it only for a pipelining node.
+    detail::set_worker_pipeline_hosting(node, true);
+    struct HostingGuard {
+        GpuAudioNode* node;
+        bool keep = false;
+        ~HostingGuard() {
+            if (!keep)
+                detail::set_worker_pipeline_hosting(node, false);
+        }
+    } hosting{node};
+
     // The descriptor is the single source of truth for channels/block/latency.
     const GpuAudioNodeDescriptor desc = node->descriptor(); // host thread — may allocate
     if (desc.input_channels == 0 || desc.output_channels == 0 ||
@@ -128,6 +143,9 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
     }
     // Need the primed latency plus one in-flight block and one free slot.
     if (config.ring_blocks < desc.latency_blocks + 2)
+        return false;
+    // A pipelined node emits wet(N - D); the primed ring makes up the rest.
+    if (desc.worker_pipeline_blocks >= desc.latency_blocks)
         return false;
 
     node_ = node;
@@ -149,6 +167,7 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
         realtime_gpu_fence_ = realtime_path.fence;
         realtime_gpu_delivered_ = realtime_path.delivered;
         realtime_gpu_health_ = realtime_path.health;
+        realtime_gpu_offline_render_ = realtime_path.offline_render;
         callback_sequence_ = realtime_path.next_sequence(realtime_path.context);
     }
     sample_staged_health_ = !realtime_path.active();
@@ -230,6 +249,12 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
         worker_running_.store(true, std::memory_order_release);
         worker_ = std::thread([this] { worker_loop(); });
     }
+    // Keep the opt-in only for a node that actually pipelines; release() must
+    // touch the node for that case alone (the guard undoes it otherwise).
+    if (desc.worker_pipeline_blocks > 0) {
+        hosting.keep = true;
+        pipeline_hosted_ = true;
+    }
     return true;
 }
 
@@ -283,7 +308,10 @@ void GpuAudioTransport::reset_staged_transport_state() noexcept {
         return;
 
     audio::BufferView<float> silence(out_fptrs_.data(), channels_, block_size_);
-    for (uint32_t b = 0; b < latency_blocks_; ++b) {
+    // A node whose worker emits D blocks behind its submit supplies D of the
+    // latency itself, so prime only the remainder.
+    const uint32_t primed = latency_blocks_ - node_->descriptor().worker_pipeline_blocks;
+    for (uint32_t b = 0; b < primed; ++b) {
         (void)output_ring_.write(silence, block_size_);
     }
 }
@@ -301,6 +329,12 @@ void GpuAudioTransport::release() noexcept {
     out_fptrs_.clear();
     rejected_input_ptrs_.clear();
     rejected_output_ptrs_.clear();
+    // The worker has stopped: return a pipelining node to block-in,
+    // block-out use. Only such a node is touched here; it must outlive this
+    // call (documented on GpuConvolver). Any other node may already be gone.
+    if (pipeline_hosted_ && node_ != nullptr)
+        detail::set_worker_pipeline_hosting(node_, false);
+    pipeline_hosted_ = false;
     node_ = nullptr;
     realtime_gpu_context_ = nullptr;
     realtime_gpu_process_ = nullptr;
@@ -308,12 +342,14 @@ void GpuAudioTransport::release() noexcept {
     realtime_gpu_fence_ = nullptr;
     realtime_gpu_delivered_ = nullptr;
     realtime_gpu_health_ = nullptr;
+    realtime_gpu_offline_render_ = nullptr;
     sample_staged_health_ = false;
     diagnostics_->health.reset();
     trial_observer_context_ = nullptr;
     trial_observer_ = nullptr;
     callback_sequence_ = 0;
     realtime_gpu_fenced_for_offline_ = false;
+    realtime_gpu_offline_ = false;
     audio_workgroup_ = nullptr;
     join_audio_workgroup_ = false;
     worker_workgroup_joined_.store(false, std::memory_order_release);
@@ -344,6 +380,10 @@ void GpuAudioTransport::process_realtime_position(const audio::BufferView<const 
                                                   std::uint64_t sequence, bool input_valid,
                                                   std::uint64_t callback_start_ns) noexcept {
     if (realtime_gpu_process_ != nullptr) {
+        if (realtime_gpu_offline_) {
+            realtime_gpu_offline_ = false;
+            realtime_gpu_offline_render_(realtime_gpu_context_, false);
+        }
         process_shared(input, output, n, sequence, input_valid, callback_start_ns, true);
         return;
     }
@@ -537,6 +577,10 @@ void GpuAudioTransport::process_offline_position(const audio::BufferView<const f
     std::lock_guard<std::mutex> lock(pump_mutex_);
 
     if (realtime_gpu_fence_ != nullptr) {
+        if (!realtime_gpu_offline_ && realtime_gpu_offline_render_ != nullptr) {
+            realtime_gpu_offline_ = true;
+            realtime_gpu_offline_render_(realtime_gpu_context_, true);
+        }
         if (!realtime_gpu_fenced_for_offline_) {
             realtime_gpu_fenced_for_offline_ = realtime_gpu_fence_(realtime_gpu_context_);
             refresh_node_health();
@@ -822,6 +866,16 @@ GpuAudioStatus GpuAudioTransport::status_snapshot() const noexcept {
         status.delivery_epoch_active = health.delivery_epoch_active;
         for (std::size_t i = 0; i < GpuAudioStatus::kTerminalDispositionCount; ++i)
             status.terminal_counts[i] = health.terminal_counts[i];
+        status.shadow_mode = health.shadow_mode;
+        status.shadow_inline_cost_pct = health.shadow_inline_cost_pct;
+        status.shadow_delivered_blocks = health.shadow_delivered_blocks;
+        status.shadow_late_blocks = health.shadow_late_blocks;
+        status.shadow_double_miss_blocks = health.shadow_double_miss_blocks;
+        status.shadow_model_differs = health.shadow_model_differs;
+        status.gpu_kernel_available = health.gpu_kernel_available;
+        status.completion_mode = health.completion_mode;
+        status.timestamps_available = health.timestamps_available;
+        status.last_delivery_ns = health.last_delivery_ns;
     } else if (configuration.realtime_health) {
         // No coherent health copy: never report an unverified provider as
         // Ready, and claim no recovery cause that was not observed. A staged

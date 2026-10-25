@@ -826,6 +826,17 @@ knowing before you touch that file:
   only by the CDP frame ID, so compare `*_snapshot_semantic_sha256` across
   runs, not the raw binding.
 
+  **Normalize gotcha:** `normalize_design_ir` (design_ir_normalize.cpp) runs
+  on every node `parse_ir_node` reads, and its rules are design-tool
+  heuristics that move geometry. A browser capture's design.ir.json goes
+  through the same parse when the observer loads it, so a rule that is right
+  for Figma can move a node Chromium already placed. The shadow sibling snap
+  lifted a knob label under a dial's `0 8px 16px` shadow by the gap minus the
+  shadow's y offset (2 px at a 10px gap, 4 px at 12px). `parse_design_ir_json`
+  now passes `IRParseOptions::measured_geometry` when the IR's source adapter
+  is `browser-capture`, and a geometry rule that only makes up for how a
+  design tool draws must check it. Fixture `20-flex-gap-knob` covers the snap.
+
   **Gate gotcha:** a stable Chromium/native PNG hash is only determinism
   evidence. The differential matcher must join captured elements by
   `backendNodeId` when both sides provide one and fail closed on a mismatch;

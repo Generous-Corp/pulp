@@ -2,6 +2,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/view/widgets.hpp>
+#include <pulp/view/buttons.hpp>
 #include <pulp/view/data_display.hpp>
 #include <pulp/view/register_audio_widgets.hpp>
 #include <pulp/view/visualizers.hpp>
@@ -1879,6 +1880,466 @@ TEST_CASE("Chromium-refresh form-control scene renders and can be dumped for com
             write(std::string("hover-") + id, render_ua_scene(scene, id));
         auto platform = build_ua_control_scene(UaSkin::platform);
         write("platform-rest", render_ua_scene(platform, nullptr));
+    }
+}
+
+namespace {
+
+// The push-button scene a Chromium oracle is captured from: the same 600x200
+// panel as the form-control scene, with 80x24 CSS px <button>s in each state,
+// light and dark `color-scheme`, on the dark half and on the white half.
+struct ButtonSceneEntry {
+    const char* id;
+    float x, y;
+    bool dark;
+    bool disabled;
+};
+constexpr ButtonSceneEntry kButtonScene[] = {
+    {"b_default", 20, 20, false, false},  {"b_hover", 20, 60, false, false},
+    {"b_active", 20, 100, false, false},  {"b_focus", 20, 140, false, false},
+    {"d_default", 110, 20, true, false},  {"d_hover", 110, 60, true, false},
+    {"d_active", 110, 100, true, false},  {"d_focus", 110, 140, true, false},
+    {"b_disabled", 200, 20, false, true}, {"d_disabled", 200, 60, true, true},
+    {"b_accent", 200, 100, false, false}, {"b_accent_hover", 200, 140, false, false},
+    {"l_default", 320, 20, false, false}, {"l_focus", 320, 60, false, false},
+    {"l_dark", 320, 100, true, false},    {"l_dark_focus", 320, 140, true, false},
+    {"l_disabled", 420, 20, false, true}, {"l_active", 420, 60, false, false},
+    {"l_hover", 420, 100, false, false},
+};
+
+// One oracle frame: the controls under the pointer, held pressed, or focused
+// by keyboard. `rest` has none.
+struct ButtonFrame {
+    const char* name;
+    const char* hovered;
+    const char* pressed;
+    const char* focused;
+};
+constexpr ButtonFrame kButtonFrames[] = {
+    {"rest", nullptr, nullptr, nullptr},
+    {"hover-b_hover", "b_hover", nullptr, nullptr},
+    {"hover-d_hover", "d_hover", nullptr, nullptr},
+    {"hover-b_accent_hover", "b_accent_hover", nullptr, nullptr},
+    {"hover-l_hover", "l_hover", nullptr, nullptr},
+    {"active-b_active", "b_active", "b_active", nullptr},
+    {"active-d_active", "d_active", "d_active", nullptr},
+    {"active-l_active", "l_active", "l_active", nullptr},
+    {"focus-b_focus", nullptr, nullptr, "b_focus"},
+    {"focus-d_focus", nullptr, nullptr, "d_focus"},
+    {"focus-l_focus", nullptr, nullptr, "l_focus"},
+    {"focus-l_dark_focus", nullptr, nullptr, "l_dark_focus"},
+};
+
+struct ButtonScene {
+    std::unique_ptr<View> root;
+    std::vector<std::pair<std::string, View*>> buttons;
+};
+
+// `skinned` builds ButtonSurfaces; otherwise Pulp's own TextButton stands in
+// for each <button>, as an unskinned import would.
+ButtonScene build_button_scene(bool skinned) {
+    ButtonScene scene;
+    scene.root = std::make_unique<View>();
+    scene.root->set_bounds({0, 0, 600, 200});
+    scene.root->set_background_color(Color::rgba8(6, 8, 12));
+    auto light = std::make_unique<View>();
+    place_absolute(*light, 300, 0, 300, 200);
+    light->set_background_color(Color::rgba8(255, 255, 255));
+    scene.root->add_child(std::move(light));
+    for (const auto& e : kButtonScene) {
+        std::unique_ptr<View> b;
+        if (skinned) {
+            auto s = std::make_unique<ButtonSurface>();
+            s->set_color_scheme(e.dark ? UaColorScheme::dark : UaColorScheme::light);
+            b = std::move(s);
+        } else {
+            b = std::make_unique<TextButton>();
+        }
+        place_absolute(*b, e.x, e.y, 80, 24);
+        b->set_enabled(!e.disabled);
+        scene.buttons.emplace_back(e.id, b.get());
+        scene.root->add_child(std::move(b));
+    }
+    return scene;
+}
+
+std::vector<uint8_t> render_button_frame(ButtonScene& scene, const ButtonFrame& frame) {
+    auto is = [](const char* want, const std::string& id) { return want && id == want; };
+    for (const auto& [id, view] : scene.buttons) {
+        view->set_hovered(is(frame.hovered, id));
+        if (auto* s = dynamic_cast<ButtonSurface*>(view)) {
+            s->set_pressed(is(frame.pressed, id));
+            s->set_focus_visible(is(frame.focused, id));
+        }
+    }
+    uint32_t w = 0, h = 0;
+    auto px = render_to_rgba(*scene.root, 600, 200, 2.0f, &w, &h);
+    REQUIRE(w == 1200);
+    REQUIRE(h == 400);
+    return px;
+}
+
+// Device pixels of the scene, read from Chrome for Testing 151.0.7922.47 headless
+// at device scale 2 with software compositing and an sRGB colour profile (the
+// design-import capture's flags), rendering the same <button>s. Each sample
+// names the frame it was read from (kButtonFrames). Eight per button cover the
+// fill, the border, the rounded corner, the panel outside and, for a focused
+// button, both rings.
+struct ButtonOracleSample {
+    const char* id;
+    int frame;
+    int x, y;
+    std::array<int, 3> rgb;
+};
+constexpr ButtonOracleSample kButtonOracleSamples[] = {
+    {"b_default", 0, 120, 64, {239, 239, 239}},
+    {"b_default", 0, 40, 64, {118, 118, 118}},
+    {"b_default", 0, 120, 40, {118, 118, 118}},
+    {"b_default", 0, 41, 41, {58, 59, 61}},
+    {"b_default", 0, 42, 42, {129, 129, 129}},
+    {"b_default", 0, 199, 87, {6, 8, 12}},
+    {"b_default", 0, 39, 64, {6, 8, 12}},
+    {"b_default", 0, 43, 64, {239, 239, 239}},
+    {"b_hover", 1, 120, 144, {229, 229, 229}},
+    {"b_hover", 1, 40, 144, {79, 79, 79}},
+    {"b_hover", 1, 120, 120, {79, 79, 79}},
+    {"b_hover", 1, 41, 121, {40, 41, 43}},
+    {"b_hover", 1, 42, 122, {93, 93, 93}},
+    {"b_hover", 1, 199, 167, {6, 8, 12}},
+    {"b_hover", 1, 39, 144, {6, 8, 12}},
+    {"b_hover", 1, 43, 144, {229, 229, 229}},
+    {"b_active", 5, 120, 224, {245, 245, 245}},
+    {"b_active", 5, 40, 224, {141, 141, 141}},
+    {"b_active", 5, 120, 200, {141, 141, 141}},
+    {"b_active", 5, 41, 201, {69, 70, 72}},
+    {"b_active", 5, 42, 202, {150, 150, 150}},
+    {"b_active", 5, 199, 247, {6, 8, 12}},
+    {"b_active", 5, 39, 224, {6, 8, 12}},
+    {"b_active", 5, 43, 224, {245, 245, 245}},
+    {"b_focus", 8, 120, 304, {239, 239, 239}},
+    {"b_focus", 8, 40, 304, {0, 95, 204}},
+    {"b_focus", 8, 120, 280, {0, 95, 204}},
+    {"b_focus", 8, 41, 281, {231, 240, 250}},
+    {"b_focus", 8, 42, 282, {0, 95, 204}},
+    {"b_focus", 8, 199, 327, {255, 255, 255}},
+    {"b_focus", 8, 38, 304, {255, 255, 255}},
+    {"b_focus", 8, 43, 304, {0, 95, 204}},
+    {"d_default", 0, 300, 64, {107, 107, 107}},
+    {"d_default", 0, 220, 64, {107, 107, 107}},
+    {"d_default", 0, 300, 40, {107, 107, 107}},
+    {"d_default", 0, 221, 41, {53, 54, 56}},
+    {"d_default", 0, 222, 42, {106, 106, 106}},
+    {"d_default", 0, 379, 87, {6, 8, 12}},
+    {"d_default", 0, 219, 64, {6, 8, 12}},
+    {"d_default", 0, 223, 64, {107, 107, 107}},
+    {"d_hover", 2, 300, 144, {123, 123, 123}},
+    {"d_hover", 2, 220, 144, {123, 123, 123}},
+    {"d_hover", 2, 300, 120, {123, 123, 123}},
+    {"d_hover", 2, 221, 121, {60, 61, 63}},
+    {"d_hover", 2, 222, 122, {123, 123, 123}},
+    {"d_hover", 2, 379, 167, {6, 8, 12}},
+    {"d_hover", 2, 219, 144, {6, 8, 12}},
+    {"d_hover", 2, 223, 144, {123, 123, 123}},
+    {"d_active", 6, 300, 224, {97, 97, 97}},
+    {"d_active", 6, 220, 224, {97, 97, 97}},
+    {"d_active", 6, 300, 200, {97, 97, 97}},
+    {"d_active", 6, 221, 201, {48, 49, 51}},
+    {"d_active", 6, 222, 202, {96, 96, 96}},
+    {"d_active", 6, 379, 247, {6, 8, 12}},
+    {"d_active", 6, 219, 224, {6, 8, 12}},
+    {"d_active", 6, 223, 224, {97, 97, 97}},
+    {"d_focus", 9, 300, 304, {107, 107, 107}},
+    {"d_focus", 9, 220, 304, {153, 200, 255}},
+    {"d_focus", 9, 300, 280, {153, 200, 255}},
+    {"d_focus", 9, 221, 281, {28, 33, 38}},
+    {"d_focus", 9, 222, 282, {153, 200, 255}},
+    {"d_focus", 9, 379, 327, {16, 16, 16}},
+    {"d_focus", 9, 218, 304, {16, 16, 16}},
+    {"d_focus", 9, 223, 304, {153, 200, 255}},
+    {"b_disabled", 0, 480, 64, {98, 99, 102}},
+    {"b_disabled", 0, 400, 64, {40, 41, 44}},
+    {"b_disabled", 0, 480, 40, {40, 41, 44}},
+    {"b_disabled", 0, 401, 41, {21, 22, 26}},
+    {"b_disabled", 0, 402, 42, {103, 104, 106}},
+    {"b_disabled", 0, 559, 87, {6, 8, 12}},
+    {"b_disabled", 0, 399, 64, {6, 8, 12}},
+    {"b_disabled", 0, 403, 64, {98, 99, 102}},
+    {"d_disabled", 0, 480, 144, {54, 54, 54}},
+    {"d_disabled", 0, 400, 144, {54, 54, 54}},
+    {"d_disabled", 0, 480, 120, {54, 54, 54}},
+    {"d_disabled", 0, 401, 121, {28, 29, 31}},
+    {"d_disabled", 0, 402, 122, {53, 53, 53}},
+    {"d_disabled", 0, 559, 167, {6, 8, 12}},
+    {"d_disabled", 0, 399, 144, {6, 8, 12}},
+    {"d_disabled", 0, 403, 144, {54, 54, 54}},
+    {"b_accent", 0, 480, 224, {239, 239, 239}},
+    {"b_accent", 0, 400, 224, {118, 118, 118}},
+    {"b_accent", 0, 480, 200, {118, 118, 118}},
+    {"b_accent", 0, 401, 201, {58, 59, 61}},
+    {"b_accent", 0, 402, 202, {129, 129, 129}},
+    {"b_accent", 0, 559, 247, {6, 8, 12}},
+    {"b_accent", 0, 399, 224, {6, 8, 12}},
+    {"b_accent", 0, 403, 224, {239, 239, 239}},
+    {"b_accent_hover", 3, 480, 304, {229, 229, 229}},
+    {"b_accent_hover", 3, 400, 304, {79, 79, 79}},
+    {"b_accent_hover", 3, 480, 280, {79, 79, 79}},
+    {"b_accent_hover", 3, 401, 281, {40, 41, 43}},
+    {"b_accent_hover", 3, 402, 282, {93, 93, 93}},
+    {"b_accent_hover", 3, 559, 327, {6, 8, 12}},
+    {"b_accent_hover", 3, 399, 304, {6, 8, 12}},
+    {"b_accent_hover", 3, 403, 304, {229, 229, 229}},
+    {"l_default", 0, 720, 64, {239, 239, 239}},
+    {"l_default", 0, 640, 64, {118, 118, 118}},
+    {"l_default", 0, 720, 40, {118, 118, 118}},
+    {"l_default", 0, 641, 41, {191, 191, 191}},
+    {"l_default", 0, 642, 42, {129, 129, 129}},
+    {"l_default", 0, 799, 87, {255, 255, 255}},
+    {"l_default", 0, 639, 64, {255, 255, 255}},
+    {"l_default", 0, 643, 64, {239, 239, 239}},
+    {"l_focus", 10, 720, 144, {239, 239, 239}},
+    {"l_focus", 10, 640, 144, {0, 95, 204}},
+    {"l_focus", 10, 720, 120, {0, 95, 204}},
+    {"l_focus", 10, 641, 121, {231, 240, 250}},
+    {"l_focus", 10, 642, 122, {0, 95, 204}},
+    {"l_focus", 10, 799, 167, {255, 255, 255}},
+    {"l_focus", 10, 638, 144, {255, 255, 255}},
+    {"l_focus", 10, 643, 144, {0, 95, 204}},
+    {"l_dark", 0, 720, 224, {107, 107, 107}},
+    {"l_dark", 0, 640, 224, {107, 107, 107}},
+    {"l_dark", 0, 720, 200, {107, 107, 107}},
+    {"l_dark", 0, 641, 201, {186, 186, 186}},
+    {"l_dark", 0, 642, 202, {106, 106, 106}},
+    {"l_dark", 0, 799, 247, {255, 255, 255}},
+    {"l_dark", 0, 639, 224, {255, 255, 255}},
+    {"l_dark", 0, 643, 224, {107, 107, 107}},
+    {"l_dark_focus", 11, 720, 304, {107, 107, 107}},
+    {"l_dark_focus", 11, 640, 304, {153, 200, 255}},
+    {"l_dark_focus", 11, 720, 280, {153, 200, 255}},
+    {"l_dark_focus", 11, 641, 281, {28, 33, 38}},
+    {"l_dark_focus", 11, 642, 282, {153, 200, 255}},
+    {"l_dark_focus", 11, 799, 327, {16, 16, 16}},
+    {"l_dark_focus", 11, 638, 304, {16, 16, 16}},
+    {"l_dark_focus", 11, 643, 304, {153, 200, 255}},
+    {"l_disabled", 0, 920, 64, {238, 238, 238}},
+    {"l_disabled", 0, 840, 64, {214, 214, 214}},
+    {"l_disabled", 0, 920, 40, {214, 214, 214}},
+    {"l_disabled", 0, 841, 41, {235, 235, 235}},
+    {"l_disabled", 0, 842, 42, {205, 205, 205}},
+    {"l_disabled", 0, 999, 87, {255, 255, 255}},
+    {"l_disabled", 0, 839, 64, {255, 255, 255}},
+    {"l_disabled", 0, 843, 64, {238, 238, 238}},
+    {"l_active", 7, 920, 144, {245, 245, 245}},
+    {"l_active", 7, 840, 144, {141, 141, 141}},
+    {"l_active", 7, 920, 120, {141, 141, 141}},
+    {"l_active", 7, 841, 121, {202, 202, 202}},
+    {"l_active", 7, 842, 122, {150, 150, 150}},
+    {"l_active", 7, 999, 167, {255, 255, 255}},
+    {"l_active", 7, 839, 144, {255, 255, 255}},
+    {"l_active", 7, 843, 144, {245, 245, 245}},
+    {"l_hover", 4, 920, 224, {229, 229, 229}},
+    {"l_hover", 4, 840, 224, {79, 79, 79}},
+    {"l_hover", 4, 920, 200, {79, 79, 79}},
+    {"l_hover", 4, 841, 201, {173, 173, 173}},
+    {"l_hover", 4, 842, 202, {93, 93, 93}},
+    {"l_hover", 4, 999, 247, {255, 255, 255}},
+    {"l_hover", 4, 839, 224, {255, 255, 255}},
+    {"l_hover", 4, 843, 224, {229, 229, 229}},
+};
+
+// Samples `scene` misses by more than 2 levels on a channel.
+std::vector<std::string> button_oracle_mismatches(ButtonScene& scene) {
+    std::vector<std::string> misses;
+    int rendered = -1;
+    std::vector<uint8_t> px;
+    for (const auto& sample : kButtonOracleSamples) {
+        if (sample.frame != rendered) {
+            rendered = sample.frame;
+            px = render_button_frame(scene, kButtonFrames[sample.frame]);
+        }
+        const size_t i = (static_cast<size_t>(sample.y) * 1200 + static_cast<size_t>(sample.x)) * 4;
+        for (int c = 0; c < 3; ++c) {
+            if (std::abs(static_cast<int>(px[i + c]) - sample.rgb[c]) > 2) {
+                misses.push_back(std::string(sample.id) + " @" + std::to_string(sample.x) + "," +
+                                 std::to_string(sample.y));
+                break;
+            }
+        }
+    }
+    return misses;
+}
+
+} // namespace
+
+TEST_CASE("ButtonSurface scene renders and can be dumped for comparison",
+          "[view][widget][button-skin]") {
+    if (!raw_rgba_render_available()) {
+        SKIP("this build has no raw-RGBA raster backend");
+    }
+    auto scene = build_button_scene(true);
+    const auto rest = render_button_frame(scene, kButtonFrames[0]);
+    REQUIRE(rest.size() == size_t{1200} * 400 * 4);
+
+    // Opt-in artifact: one raw 1200x400 RGBA frame per oracle frame.
+    if (const char* dir = std::getenv("PULP_BUTTON_SKIN_SCENE_DUMP")) {
+        for (const auto& frame : kButtonFrames) {
+            const auto px = render_button_frame(scene, frame);
+            const std::string path = std::string(dir) + "/" + frame.name + ".rgba";
+            std::FILE* f = std::fopen(path.c_str(), "wb");
+            REQUIRE(f != nullptr);
+            std::fwrite(px.data(), 1, px.size(), f);
+            std::fclose(f);
+        }
+    }
+}
+
+TEST_CASE("ButtonSurface matches Chromium's own paint of each push-button state",
+          "[view][widget][button-skin]") {
+    if (!raw_rgba_render_available()) {
+        SKIP("this build has no raw-RGBA raster backend");
+    }
+    auto scene = build_button_scene(true);
+    const auto misses = button_oracle_mismatches(scene);
+    INFO("first mismatch: " << (misses.empty() ? std::string("none") : misses.front()));
+    CHECK(misses.size() == 0);
+}
+
+TEST_CASE("TextButton does not pass for Chromium's push button", "[view][widget][button-skin]") {
+    if (!raw_rgba_render_available()) {
+        SKIP("this build has no raw-RGBA raster backend");
+    }
+    // Negative control: Pulp's default button keeps its own look, so the same
+    // scene built from TextButtons must miss most samples, or the samples
+    // cannot tell the skins apart.
+    auto scene = build_button_scene(false);
+    for (const auto& [id, view] : scene.buttons)
+        CHECK(dynamic_cast<ButtonSurface*>(view) == nullptr);
+    const auto misses = button_oracle_mismatches(scene);
+    CHECK(misses.size() * 2 > std::size(kButtonOracleSamples));
+}
+
+TEST_CASE("ButtonSurface chromium_refresh_parts follows Chromium's device-pixel geometry",
+          "[view][widget][button-skin]") {
+    using S = UaControlState;
+    const auto light = UaColorScheme::light;
+    const auto dark = UaColorScheme::dark;
+    const Rect box{0, 0, 80, 24};
+    auto same = [](Color a, Color b) {
+        return a.r8() == b.r8() && a.g8() == b.g8() && a.b8() == b.b8() && a.a8() == b.a8();
+    };
+    auto same_rect = [](Rect a, Rect b) {
+        return a.x == Catch::Approx(b.x) && a.y == Catch::Approx(b.y) &&
+               a.width == Catch::Approx(b.width) && a.height == Catch::Approx(b.height);
+    };
+
+    SECTION("scale 2: a 1px border and 2px radius, the surface inset half the border") {
+        const auto p = ButtonSurface::chromium_refresh_parts(box, S::normal, light, false, 2.0f);
+        CHECK_FALSE(p.solid);
+        CHECK(p.border_width == Catch::Approx(1.0f));
+        CHECK(p.radius == Catch::Approx(2.0f));
+        CHECK(same_rect(p.surface, {0.5f, 0.5f, 79.0f, 23.0f}));
+        CHECK(same(p.fill, Color::rgba8(239, 239, 239)));
+        CHECK(same(p.border, Color::rgba8(118, 118, 118)));
+        CHECK_FALSE(p.lighten.has_value());
+        CHECK_FALSE(p.focus_ring);
+    }
+
+    SECTION("per-state palettes; the dark border is the fill colour") {
+        auto fill = [&](S s, UaColorScheme c) {
+            return ButtonSurface::chromium_refresh_parts(box, s, c, false, 2.0f).fill;
+        };
+        CHECK(same(fill(S::hovered, light), Color::rgba8(229, 229, 229)));
+        CHECK(same(fill(S::pressed, light), Color::rgba8(245, 245, 245)));
+        CHECK(same(fill(S::disabled, light), Color::rgba8(239, 239, 239, 0x4D)));
+        CHECK(same(fill(S::normal, dark), Color::rgba8(107, 107, 107)));
+        CHECK(same(fill(S::hovered, dark), Color::rgba8(123, 123, 123)));
+        CHECK(same(fill(S::pressed, dark), Color::rgba8(97, 97, 97)));
+        CHECK(same(fill(S::disabled, dark), Color::rgba8(54, 54, 54)));
+        for (auto s : {S::normal, S::hovered, S::pressed, S::disabled}) {
+            const auto p = ButtonSurface::chromium_refresh_parts(box, s, dark, false, 2.0f);
+            CHECK(same(p.border, p.fill));
+        }
+        const auto off =
+            ButtonSurface::chromium_refresh_parts(box, S::disabled, light, false, 2.0f);
+        REQUIRE(off.lighten.has_value());
+        CHECK(same(*off.lighten, Color::rgba8(169, 169, 169, 0x33)));
+        CHECK(same(off.border, Color::rgba8(118, 118, 118, 0x4D)));
+    }
+
+    SECTION("focus ring at scale 2: the inner ring one border width inside the box") {
+        const auto p = ButtonSurface::chromium_refresh_parts(box, S::normal, light, true, 2.0f);
+        REQUIRE(p.focus_ring);
+        CHECK(p.ring_width == Catch::Approx(2.0f));
+        CHECK(same_rect(p.outer_ring, box));
+        CHECK(same_rect(p.inner_ring, {1.0f, 1.0f, 78.0f, 22.0f}));
+        CHECK(same(p.outer_ring_color, Color::rgba8(255, 255, 255)));
+        CHECK(same(p.inner_ring_color, Color::rgba8(0, 95, 204)));
+        const auto d = ButtonSurface::chromium_refresh_parts(box, S::normal, dark, true, 2.0f);
+        CHECK(same(d.outer_ring_color, Color::rgba8(16, 16, 16)));
+        CHECK(same(d.inner_ring_color, Color::rgba8(153, 200, 255)));
+    }
+
+    SECTION("scale 1.5 rounds the border, radius and ring to whole device pixels") {
+        const auto p = ButtonSurface::chromium_refresh_parts(box, S::normal, light, true, 1.5f);
+        CHECK(p.border_width == Catch::Approx(1.0f / 1.5f));
+        CHECK(p.radius == Catch::Approx(2.0f));
+        // A 4 device px stroke: rings 8/3 device px wide, the outer one two
+        // device px out from the inner one, which sits one device px inside.
+        CHECK(p.ring_width == Catch::Approx(8.0f / 3.0f / 1.5f));
+        CHECK(p.inner_ring.x == Catch::Approx(1.0f / 1.5f));
+        CHECK(p.outer_ring.x == Catch::Approx(-1.0f / 1.5f));
+
+        // Below scale 1 the ring keeps its 3 device px stroke.
+        const auto small = ButtonSurface::chromium_refresh_parts(box, S::normal, light, true, 0.5f);
+        CHECK(small.ring_width == Catch::Approx(4.0f));
+        CHECK(small.inner_ring.x == Catch::Approx(2.0f));
+        CHECK(small.outer_ring.x == Catch::Approx(0.0f));
+    }
+
+    SECTION("a disabled button shows no focus ring") {
+        CHECK_FALSE(
+            ButtonSurface::chromium_refresh_parts(box, S::disabled, light, true, 2.0f).focus_ring);
+    }
+
+    SECTION("a box under 5 device px is a solid fill") {
+        const Rect tiny{0, 0, 2, 24};
+        const auto p = ButtonSurface::chromium_refresh_parts(tiny, S::normal, light, true, 2.0f);
+        CHECK(p.solid);
+        CHECK_FALSE(p.focus_ring);
+        CHECK_FALSE(
+            ButtonSurface::chromium_refresh_parts({0, 0, 3, 24}, S::normal, light, false, 2.0f)
+                .solid);
+    }
+
+    SECTION("control_state: disabled, then pressed, then hovered") {
+        ButtonSurface b;
+        b.set_bounds(box);
+        CHECK(b.control_state() == S::normal);
+        b.set_hovered(true);
+        CHECK(b.control_state() == S::hovered);
+        b.set_pressed(true);
+        CHECK(b.control_state() == S::pressed);
+        b.set_enabled(false);
+        CHECK(b.control_state() == S::disabled);
+        CHECK(b.access_role() == View::AccessRole::button);
+    }
+
+    SECTION("an instance paints in its captured, snapped box, not its fractional one") {
+        View parent;
+        parent.set_bounds({0, 0, 200, 100});
+        auto owned = std::make_unique<ButtonSurface>();
+        auto* b = owned.get();
+        b->set_bounds({10.25f, 20.25f, 80.0f, 24.0f});
+        parent.add_child(std::move(owned));
+        CHECK(same_rect(b->chromium_refresh_parts(2.0f).bounds, {0, 0, 80, 24}));
+
+        b->set_captured_box_paint_rect(10.0f, 20.0f, 90.5f, 44.5f, 2.0f);
+        const auto p = b->chromium_refresh_parts(2.0f);
+        CHECK(same_rect(p.bounds, {-0.25f, -0.25f, 80.5f, 24.5f}));
+        CHECK(same_rect(p.surface, {0.25f, 0.25f, 79.5f, 23.5f}));
+
+        // A captured rect far from the laid-out box is stale and ignored.
+        b->set_captured_box_paint_rect(40.0f, 20.0f, 120.0f, 44.0f, 2.0f);
+        CHECK(same_rect(b->chromium_refresh_parts(2.0f).bounds, {0, 0, 80, 24}));
     }
 }
 
