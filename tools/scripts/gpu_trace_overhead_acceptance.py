@@ -127,7 +127,7 @@ A2T_SCOPE_MANIFEST_PATH = "tools/scripts/gpu_trace_overhead_scope.json"
 A2T_SCOPE_BASE = "d694994433aec73396caffd8bb10bdc77e15379f"
 # Rolling diagnostic-history pin.  Re-pin on protected main when the 75%
 # headroom guard fires, retaining roughly 25% of the bounded window.
-A2T_SCOPE_HISTORY_BASE = "78e52792a3500bd628070e201026bc4f069f8bdb"
+A2T_SCOPE_HISTORY_BASE = "8687c0dc55d31cce6b7c9c6177eeeecc359fc74b"
 A2T_INTEGRATED_PATCH_EQUIVALENT = "bc1cfaa0aacc881da4c3753ca9d3862f55b571c9"
 
 # How many scope-touching revisions the rolling-base-to-source window may carry.

@@ -482,6 +482,9 @@ def _run(
         raise JourneyError("invalid bounded subprocess request")
     child_env = dict(os.environ if env is None else env)
     child_env["NO_COLOR"] = "1"
+    # A stale update cache makes the CLI fork a detached release check that
+    # outlives the command and trips the descendant-process bound.
+    child_env.setdefault("PULP_UPDATE_CHECK_DISABLED", "1")
     creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
     try:
         process = subprocess.Popen(

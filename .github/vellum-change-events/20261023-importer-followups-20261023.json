@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "event_id": "20261023-importer-followups-20261023",
+  "kind": "change",
+  "created_at": "2026-10-23T10:06:05Z",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "rationale": "canvas-kernel: TextFontContext installs a dynamic font manager on Apple so SkParagraph resolves the system UI font at its exact requested weight instead of a nearest-face fallback. Additive, Apple-only, gated on the platform font database being usable; no public API, ABI, or authority boundary moves. Pulp-only because it serves Pulp's Chromium-parity text path for imported designs.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "ctest --test-dir build -R pulp-test-browser-capture-gradient-border",
+    "ctest --test-dir build -R pulp-test-browser-capture-ir",
+    "ctest --test-dir build -R pulp-test-canvas-fonts",
+    "ctest --test-dir build -R pulp-test-design-import-native-materializer",
+    "ctest --test-dir build -R pulp-test-design-import-parity",
+    "node --test tools/import-design/browser_capture/capture_paint.integration.test.mjs",
+    "node --test tools/import-design/browser_capture/document_canvas.test.mjs",
+    "python3 test/test_importer_differential_lab.py",
+    "python3 tools/import-validation/test_diff_against_reference.py"
+  ],
+  "disposition": "pulp-only"
+}

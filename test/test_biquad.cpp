@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <utility>
 #include <vector>
 
 using namespace pulp::signal;
@@ -823,4 +824,154 @@ TEST_CASE("Biquad::process_stereo keeps each channel's own form when one history
     right_alone.process(r_alone.data(), static_cast<int>(r_alone.size()));
     CHECK(std::memcmp(l.data(), l_alone.data(), l.size() * sizeof(float)) == 0);
     CHECK(std::memcmp(r.data(), r_alone.data(), r.size() * sizeof(float)) == 0);
+}
+
+namespace {
+
+// A double-precision per-sample DF2T run of float coefficients: the
+// reference the block path's handoff is held to.
+struct ReferenceDf2t {
+    double b0 = 1.0, b1 = 0.0, b2 = 0.0, a1 = 0.0, a2 = 0.0;
+    double s1 = 0.0, s2 = 0.0;
+
+    void set(const BiquadCoefficients& c) {
+        b0 = c.b0;
+        b1 = c.b1;
+        b2 = c.b2;
+        a1 = c.a1;
+        a2 = c.a2;
+    }
+    double process(double x) {
+        const double y = b0 * x + s1;
+        s1 = b1 * x - a1 * y + s2;
+        s2 = b2 * x - a2 * y;
+        return y;
+    }
+};
+
+} // namespace
+
+TEST_CASE("Biquad block path continues the sample path when a2 is tiny but nonzero",
+          "[signal][biquad][determinism]") {
+    // Handing per-sample state to the DF1 block path solves for an
+    // equivalent input/output history. A tiny nonzero a2 must not turn that
+    // history into huge values whose contributions cancel in the block
+    // output, either after a run of per-sample calls or after a retune with
+    // live state. The block output is held to a double-precision per-sample
+    // run of the same coefficients.
+    const BiquadCoefficients before{0.2f, 0.4f, 0.2f, -0.6f, 0.25f};
+    for (double a2 = 1.0e-6; a2 >= 1.0e-30; a2 *= 1.0e-2) {
+        INFO("a2 " << a2);
+        const BiquadCoefficients tiny{0.5f, 0.3f, 0.5f, -0.5f, static_cast<float>(a2)};
+        for (const bool retune : {false, true}) {
+            INFO((retune ? "retune" : "handoff"));
+            Biquad filter;
+            ReferenceDf2t reference;
+            filter.set_coefficients(retune ? before : tiny);
+            reference.set(retune ? before : tiny);
+            for (int i = 0; i < 8; ++i) {
+                const float x = (i % 2 == 0) ? 1.0f : -1.0f;
+                (void)filter.process(x);
+                (void)reference.process(x);
+            }
+            if (retune) {
+                filter.set_coefficients(tiny);
+                reference.set(tiny);
+            }
+            std::array<float, 64> block{};
+            for (std::size_t i = 0; i < block.size(); ++i)
+                block[i] = 0.5f * std::sin(0.3f * static_cast<float>(i));
+            std::array<double, 64> expected{};
+            for (std::size_t i = 0; i < block.size(); ++i)
+                expected[i] = reference.process(block[i]);
+            filter.process(block.data(), static_cast<int>(block.size()));
+            double worst = 0.0;
+            for (std::size_t i = 0; i < block.size(); ++i)
+                worst = std::max(worst, std::abs(static_cast<double>(block[i]) - expected[i]));
+            CHECK(worst < 1.0e-5);
+        }
+    }
+}
+
+TEST_CASE("Biquad retune to b2 = 0 with a tiny a2 keeps the block output exact",
+          "[signal][biquad][determinism]") {
+    // Retuning to b2 = 0 with a tiny nonzero a2 leaves the old state's s2,
+    // and every history that reproduces it has |y1| = |s2| / |a2|. No
+    // history is small, so the block path must hand over to the sample
+    // order rather than cancel huge terms.
+    const BiquadCoefficients before{0.2f, 0.4f, 0.2f, -0.6f, 0.25f};
+    for (double a2 = 1.0e-6; a2 >= 1.0e-30; a2 *= 1.0e-2) {
+        INFO("a2 " << a2);
+        const BiquadCoefficients tiny{0.5f, 0.3f, 0.0f, -0.5f, static_cast<float>(a2)};
+        Biquad filter;
+        ReferenceDf2t reference;
+        filter.set_coefficients(before);
+        reference.set(before);
+        for (int i = 0; i < 8; ++i) {
+            const float x = (i % 2 == 0) ? 1.0f : -1.0f;
+            (void)filter.process(x);
+            (void)reference.process(x);
+        }
+        filter.set_coefficients(tiny);
+        reference.set(tiny);
+        std::array<float, 64> block{};
+        for (std::size_t i = 0; i < block.size(); ++i)
+            block[i] = 0.5f * std::sin(0.3f * static_cast<float>(i));
+        std::array<double, 64> expected{};
+        for (std::size_t i = 0; i < block.size(); ++i)
+            expected[i] = reference.process(block[i]);
+        filter.process(block.data(), static_cast<int>(block.size()));
+        double worst = 0.0;
+        for (std::size_t i = 0; i < block.size(); ++i)
+            worst = std::max(worst, std::abs(static_cast<double>(block[i]) - expected[i]));
+        CHECK(worst < 1.0e-5);
+    }
+}
+
+TEST_CASE("Biquad well-conditioned retunes still take the block path",
+          "[signal][biquad][determinism]") {
+    // The history guard only refuses histories far above the state. An
+    // ordinary retune with live state keeps the DF1 block form, whose
+    // rounding differs from the per-sample order: the two outputs are close
+    // but not bit-identical. Bit identity here would mean the guard sent an
+    // ordinary filter down the sample order.
+    for (const auto& [from, to] : {std::pair{BiquadCoefficients{0.2f, 0.4f, 0.2f, -0.6f, 0.25f},
+                                             BiquadCoefficients{0.3f, -0.2f, 0.4f, -0.9f, 0.4f}},
+                                   std::pair{BiquadCoefficients{0.1f, 0.2f, 0.1f, -1.2f, 0.5f},
+                                             BiquadCoefficients{0.5f, 0.3f, 0.5f, -0.5f, 0.1f}}}) {
+        Biquad block_filter;
+        block_filter.set_coefficients(from);
+        for (int i = 0; i < 16; ++i)
+            (void)block_filter.process(0.7f * std::sin(0.21f * static_cast<float>(i)));
+        block_filter.set_coefficients(to);
+        Biquad sample_filter = block_filter;
+        std::vector<float> block(512), sample(512);
+        for (std::size_t i = 0; i < block.size(); ++i)
+            block[i] = sample[i] = 0.5f * std::sin(0.037f * static_cast<float>(i));
+        block_filter.process(block.data(), static_cast<int>(block.size()));
+        for (auto& v : sample)
+            v = sample_filter.process(v);
+        float worst = 0.0f;
+        for (std::size_t i = 0; i < block.size(); ++i)
+            worst = std::max(worst, std::abs(block[i] - sample[i]));
+        CHECK(worst < 1.0e-5f);
+        CHECK(std::memcmp(block.data(), sample.data(), block.size() * sizeof(float)) != 0);
+    }
+}
+
+TEST_CASE("Biquad tiny-a2 handoff reproduces the reported ring-down",
+          "[signal][biquad][determinism]") {
+    // {0.5, 0.3, 0.5, -0.5, 1e-20} after eight per-sample inputs, then a
+    // four-sample block of silence. Dividing the state by a2 to build the
+    // block history returned 0, 0.5, 0.25 here; the filter rings down as
+    // 0.338086, 0.669043, 0.334521.
+    Biquad filter;
+    filter.set_coefficients(BiquadCoefficients{0.5f, 0.3f, 0.5f, -0.5f, 1.0e-20f});
+    for (const float x : {0.5f, 0.0f, 0.5f, 0.5f, 0.5f, 1.0f, -1.0f, 1.0f})
+        (void)filter.process(x);
+    std::array<float, 4> block{};
+    filter.process(block.data(), static_cast<int>(block.size()));
+    CHECK_THAT(block[0], WithinAbs(0.338086f, 1.0e-5f));
+    CHECK_THAT(block[1], WithinAbs(0.669043f, 1.0e-5f));
+    CHECK_THAT(block[2], WithinAbs(0.334521f, 1.0e-5f));
 }

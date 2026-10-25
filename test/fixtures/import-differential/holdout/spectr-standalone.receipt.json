@@ -1,0 +1,275 @@
+{
+  "schema": "pulp-importer-differential-holdout-receipt-v1",
+  "fixture": "spectr-standalone.html",
+  "source_sha256": "7ae6f1d807f2f356b8473d9e672a95535adbe7affea58af360f9ac5c211daf9e",
+  "source_bytes": 1860417,
+  "campaign": {
+    "command": "analyze-corpus",
+    "runs": 3,
+    "cache_state": "unknown",
+    "pulp_commit": "f3119b3de37a518e186cf1203a6461ab8ba470e2",
+    "host_class": "macOS arm64",
+    "viewport": {
+      "width": 1280,
+      "height": 800
+    }
+  },
+  "determinism": {
+    "status": "fail",
+    "completed_runs": 3,
+    "varying_digests": [
+      "browser_capture_canonical_sha256",
+      "browser_screenshot_sha256",
+      "native_capture_canonical_sha256",
+      "native_render_sha256"
+    ],
+    "stable_digests": {
+      "source_sha256": "7ae6f1d807f2f356b8473d9e672a95535adbe7affea58af360f9ac5c211daf9e",
+      "importer_sha256": "aa3989cd0ded97b8777e463909c9450852f06b174c576bc36541dc65823b38d5",
+      "observer_sha256": "2ef940183a9764496240dad1455733def4f9aa02ab58c59d4ec6b7c0b4da92df",
+      "browser_build_hash": "@d0c02bfad08ec92a6ffcf989e53cd995e6381a4c",
+      "browser_snapshot_semantic_sha256": "1e515b1cdb610201754a92417d7736510fac8c8460c48ceff0ddbad8dfb7c9fa",
+      "native_snapshot_semantic_sha256": "1e515b1cdb610201754a92417d7736510fac8c8460c48ceff0ddbad8dfb7c9fa",
+      "native_layout_sha256": "a8a86de67f5c1bb36fb840d216b6b4aa9c2561208b43e7a01f25130514cf5065",
+      "native_render_receipt_sha256": "5392b7ce6b61f79dc2e51f0234175f1adf7bfe8a5f9a40651ab26ed4d8b6c2bc",
+      "platform_fonts_sha256": "86a43a37ca34732035a80ebad85708de0ef0cf1822df9057970329de00efb822"
+    }
+  },
+  "runs": [
+    {
+      "run": 1,
+      "status": "completed",
+      "digests": {
+        "source_sha256": "7ae6f1d807f2f356b8473d9e672a95535adbe7affea58af360f9ac5c211daf9e",
+        "importer_sha256": "aa3989cd0ded97b8777e463909c9450852f06b174c576bc36541dc65823b38d5",
+        "observer_sha256": "2ef940183a9764496240dad1455733def4f9aa02ab58c59d4ec6b7c0b4da92df",
+        "browser_build_hash": "@d0c02bfad08ec92a6ffcf989e53cd995e6381a4c",
+        "browser_capture_canonical_sha256": "f217b00e75253ee6cbe4be73b853b721596212f6cabd227990ed0bafedc70211",
+        "native_capture_canonical_sha256": "de12fc5b2bc75c0c7a9a647d8478b6c6967218c412514f3d68669f6b2deaa129",
+        "browser_snapshot_semantic_sha256": "1e515b1cdb610201754a92417d7736510fac8c8460c48ceff0ddbad8dfb7c9fa",
+        "native_snapshot_semantic_sha256": "1e515b1cdb610201754a92417d7736510fac8c8460c48ceff0ddbad8dfb7c9fa",
+        "browser_screenshot_sha256": "2adb1a85e688c349dd5129d5190d39f3932d7609d7d389fbdede169b3dc0a160",
+        "native_render_sha256": "5a1f75f5be72440dbd057d559b2f2cb1eca60ef31914040738a4ae2c4d8a5278",
+        "native_layout_sha256": "a8a86de67f5c1bb36fb840d216b6b4aa9c2561208b43e7a01f25130514cf5065",
+        "native_render_receipt_sha256": "5392b7ce6b61f79dc2e51f0234175f1adf7bfe8a5f9a40651ab26ed4d8b6c2bc",
+        "platform_fonts_sha256": "86a43a37ca34732035a80ebad85708de0ef0cf1822df9057970329de00efb822"
+      },
+      "device_scale_factor": 2,
+      "scores": {
+        "structure": 0.039735,
+        "structure_incorrect_parentage": 72,
+        "structure_missing": 1,
+        "structure_extra": 0,
+        "geometry": 0.999999,
+        "geometry_gate_ok": false,
+        "geometry_gate_failed": [
+          "registered_coverage"
+        ],
+        "registered_geometry_mean": 0.999999,
+        "registered_geometry_max_abs_delta": 0.001221,
+        "typography": 1.0,
+        "visual": 0.988411,
+        "visual_registered": 0.988411,
+        "visual_full_frame": 0.988411
+      },
+      "classification": "browser-required",
+      "threshold_eligible": false,
+      "unsupported_dynamic_features": [
+        "async_initialization",
+        "canvas",
+        "conditional_rendering",
+        "javascript_evaluation",
+        "webgl"
+      ],
+      "support_boundaries": [
+        {
+          "boundary": "ua-default-form-chrome",
+          "control_count": 1,
+          "foreground_error_share": 0.055364
+        }
+      ],
+      "reasons": [
+        "unsupported dynamic features: async_initialization, canvas, conditional_rendering, javascript_evaluation, javascript_evaluation, webgl",
+        "support boundary ua-default-form-chrome: 1 control(s), 5.5% of scored foreground error",
+        "structural score below 0.990",
+        "geometry gate failed: registered_coverage",
+        "visual score below 0.995",
+        "full-frame visual 0.988 below 0.995 and classified unexplained"
+      ]
+    },
+    {
+      "run": 2,
+      "status": "completed",
+      "digests": {
+        "source_sha256": "7ae6f1d807f2f356b8473d9e672a95535adbe7affea58af360f9ac5c211daf9e",
+        "importer_sha256": "aa3989cd0ded97b8777e463909c9450852f06b174c576bc36541dc65823b38d5",
+        "observer_sha256": "2ef940183a9764496240dad1455733def4f9aa02ab58c59d4ec6b7c0b4da92df",
+        "browser_build_hash": "@d0c02bfad08ec92a6ffcf989e53cd995e6381a4c",
+        "browser_capture_canonical_sha256": "768bc0db6a99a015a8526918cf1a1b883075015b0d0fbffce8527ab4a0057ea3",
+        "native_capture_canonical_sha256": "00b36f3a9efc214620faf3cbe8657f6b1151c5cf304bf359b5fd380a20246d4f",
+        "browser_snapshot_semantic_sha256": "1e515b1cdb610201754a92417d7736510fac8c8460c48ceff0ddbad8dfb7c9fa",
+        "native_snapshot_semantic_sha256": "1e515b1cdb610201754a92417d7736510fac8c8460c48ceff0ddbad8dfb7c9fa",
+        "browser_screenshot_sha256": "3096bf651a25848eef3fbe138c18f7975024fa77a50ee7d5bbcf6a49d9fbd368",
+        "native_render_sha256": "42c6301cdade8c045f4f7e0263833cb02f71622a248bc98d4b80df7bd16fa4cc",
+        "native_layout_sha256": "a8a86de67f5c1bb36fb840d216b6b4aa9c2561208b43e7a01f25130514cf5065",
+        "native_render_receipt_sha256": "5392b7ce6b61f79dc2e51f0234175f1adf7bfe8a5f9a40651ab26ed4d8b6c2bc",
+        "platform_fonts_sha256": "86a43a37ca34732035a80ebad85708de0ef0cf1822df9057970329de00efb822"
+      },
+      "device_scale_factor": 2,
+      "scores": {
+        "structure": 0.039735,
+        "structure_incorrect_parentage": 72,
+        "structure_missing": 1,
+        "structure_extra": 0,
+        "geometry": 0.999999,
+        "geometry_gate_ok": false,
+        "geometry_gate_failed": [
+          "registered_coverage"
+        ],
+        "registered_geometry_mean": 0.999999,
+        "registered_geometry_max_abs_delta": 0.001221,
+        "typography": 1.0,
+        "visual": 0.984574,
+        "visual_registered": 0.984574,
+        "visual_full_frame": 0.984574
+      },
+      "classification": "browser-required",
+      "threshold_eligible": false,
+      "unsupported_dynamic_features": [
+        "async_initialization",
+        "canvas",
+        "conditional_rendering",
+        "javascript_evaluation",
+        "webgl"
+      ],
+      "support_boundaries": [
+        {
+          "boundary": "ua-default-form-chrome",
+          "control_count": 1,
+          "foreground_error_share": 0.042004
+        }
+      ],
+      "reasons": [
+        "unsupported dynamic features: async_initialization, canvas, conditional_rendering, javascript_evaluation, javascript_evaluation, webgl",
+        "support boundary ua-default-form-chrome: 1 control(s), 4.2% of scored foreground error",
+        "structural score below 0.990",
+        "geometry gate failed: registered_coverage",
+        "visual score below 0.995",
+        "full-frame visual 0.985 below 0.995 and classified unexplained"
+      ]
+    },
+    {
+      "run": 3,
+      "status": "completed",
+      "digests": {
+        "source_sha256": "7ae6f1d807f2f356b8473d9e672a95535adbe7affea58af360f9ac5c211daf9e",
+        "importer_sha256": "aa3989cd0ded97b8777e463909c9450852f06b174c576bc36541dc65823b38d5",
+        "observer_sha256": "2ef940183a9764496240dad1455733def4f9aa02ab58c59d4ec6b7c0b4da92df",
+        "browser_build_hash": "@d0c02bfad08ec92a6ffcf989e53cd995e6381a4c",
+        "browser_capture_canonical_sha256": "70a0edba90a7be62979e2f3a287e61f7e260f9f8ec1da0b78164a58f7296decd",
+        "native_capture_canonical_sha256": "e9cd017d67fc80550ec7f6c552cb4d99f5b1ab73f006dde8f6c53b3cf03a287e",
+        "browser_snapshot_semantic_sha256": "1e515b1cdb610201754a92417d7736510fac8c8460c48ceff0ddbad8dfb7c9fa",
+        "native_snapshot_semantic_sha256": "1e515b1cdb610201754a92417d7736510fac8c8460c48ceff0ddbad8dfb7c9fa",
+        "browser_screenshot_sha256": "0142f63e42c02edf5bf0139c348ca5f696a8cd45a364c7494abe4679b709a939",
+        "native_render_sha256": "5b6f0ba581ec36ce6092689d01a4f7402da8864641dbc0b924302e4a4d6d5df8",
+        "native_layout_sha256": "a8a86de67f5c1bb36fb840d216b6b4aa9c2561208b43e7a01f25130514cf5065",
+        "native_render_receipt_sha256": "5392b7ce6b61f79dc2e51f0234175f1adf7bfe8a5f9a40651ab26ed4d8b6c2bc",
+        "platform_fonts_sha256": "86a43a37ca34732035a80ebad85708de0ef0cf1822df9057970329de00efb822"
+      },
+      "device_scale_factor": 2,
+      "scores": {
+        "structure": 0.039735,
+        "structure_incorrect_parentage": 72,
+        "structure_missing": 1,
+        "structure_extra": 0,
+        "geometry": 0.999999,
+        "geometry_gate_ok": false,
+        "geometry_gate_failed": [
+          "registered_coverage"
+        ],
+        "registered_geometry_mean": 0.999999,
+        "registered_geometry_max_abs_delta": 0.001221,
+        "typography": 1.0,
+        "visual": 0.978753,
+        "visual_registered": 0.978753,
+        "visual_full_frame": 0.978753
+      },
+      "classification": "browser-required",
+      "threshold_eligible": false,
+      "unsupported_dynamic_features": [
+        "async_initialization",
+        "canvas",
+        "conditional_rendering",
+        "javascript_evaluation",
+        "webgl"
+      ],
+      "support_boundaries": [
+        {
+          "boundary": "ua-default-form-chrome",
+          "control_count": 1,
+          "foreground_error_share": 0.029614
+        }
+      ],
+      "reasons": [
+        "unsupported dynamic features: async_initialization, canvas, conditional_rendering, javascript_evaluation, javascript_evaluation, webgl",
+        "support boundary ua-default-form-chrome: 1 control(s), 3.0% of scored foreground error",
+        "structural score below 0.990",
+        "geometry gate failed: registered_coverage",
+        "visual score below 0.995",
+        "full-frame visual 0.979 below 0.995 and classified unexplained"
+      ]
+    }
+  ],
+  "volatile_measurement": {
+    "method": "pixels with max-channel difference > 8 between pairs of the three browser.png captures, at DPR 2",
+    "campaigns": [
+      {
+        "pulp_commit": "0d763e5de5e7ff9f36d48af5ce7b5001e3616bce",
+        "command": "benchmark --runs 3",
+        "pairwise_differing_px": [
+          128018,
+          197813,
+          156104
+        ],
+        "css_bands": [
+          {
+            "x": 56,
+            "y": 178,
+            "right": 1224,
+            "bottom": 417.5
+          },
+          {
+            "x": 56,
+            "y": 749,
+            "right": 1224,
+            "bottom": 761
+          }
+        ]
+      },
+      {
+        "pulp_commit": "f3119b3de37a518e186cf1203a6461ab8ba470e2",
+        "command": "analyze-corpus x3",
+        "pairwise_differing_px": [
+          10521,
+          34054,
+          35931
+        ],
+        "css_bands": [
+          {
+            "x": 65,
+            "y": 217,
+            "right": 1224,
+            "bottom": 417.5
+          },
+          {
+            "x": 69,
+            "y": 752,
+            "right": 1224,
+            "bottom": 761
+          }
+        ]
+      }
+    ],
+    "outside_bands_differing_px": 0
+  }
+}

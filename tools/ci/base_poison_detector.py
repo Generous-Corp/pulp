@@ -47,6 +47,17 @@ The only evidence that authorises pausing a queue is a failure observed on main
 ITSELF, by a job that genuinely ran the suite. `safe_to_pause_queue` is true for
 exactly that case and for nothing else.
 
+main's merge-group run is not the only such job. A push to main runs the
+advisory Linux leg of `Build and Test` on main's exact commit, and when that
+leg executed ctest it observed main itself. A test can pass in the merge group
+that landed a commit and fail on main afterwards (a test that reads history or
+time), and then the merge group is green while every batch built on main fails
+the test. So a test that the push run's executed Linux leg failed on main's
+tip, and that a streak of batches shares, is `poisoned` too (proof
+`main-push-linux-failure+batch-streak`). The streak is what keeps a Linux-only
+failure out: the batches run macOS, so a test only Linux fails is never in
+their shared set.
+
 Read-only. Emits a signal; acts on nothing.
 """
 
@@ -92,6 +103,7 @@ PROOF_NONE = "none"
 PROOF_STREAK_ONLY = "batch-streak-only"
 PROOF_MAIN_ONLY = "main-observed-failure-without-streak"
 PROOF_MAIN_AND_STREAK = "main-observed-failure+batch-streak"
+PROOF_MAIN_PUSH_AND_STREAK = "main-push-linux-failure+batch-streak"
 
 # How many consecutive genuinely-executed batch failures make a streak. Two is
 # the smallest number that can distinguish a streak from a single failure at
@@ -322,6 +334,10 @@ class Verdict:
     # Every required context on main's tip, and the ones that failed there.
     main_contexts: tuple[ContextResult, ...] = ()
     main_failing_contexts: tuple[str, ...] = ()
+    # The executed Linux leg of the push run on main's tip, when read.
+    main_push_run_id: str = ""
+    main_push_execution: str = ""
+    main_push_failing_tests: tuple[str, ...] = ()
     streak: Streak = field(default_factory=Streak)
     min_streak: int = DEFAULT_MIN_STREAK
     reason: str = ""
@@ -337,13 +353,47 @@ def detect(
     batches: list[SuiteObservation],
     min_streak: int = DEFAULT_MIN_STREAK,
     tip_sha: str = "",
+    main_push: SuiteObservation | None = None,
 ) -> Verdict:
     """Classify the base from a main observation and the batch history.
 
     Fails closed in every direction: absence of evidence is `unproven`, never
     `healthy`; a streak alone is `suspected`, never `poisoned`; and `poisoned`
-    requires main and the streak to agree on a NAMED test.
+    requires main and the streak to agree on a NAMED test. `main_push` is the
+    executed Linux leg of the push run on main's tip: it can make a verdict
+    `poisoned` on the same terms, and is never read as health.
     """
+    verdict = _detect_merge_group(main, batches, min_streak, tip_sha)
+    if main_push is None:
+        return verdict
+    verdict.main_push_run_id = main_push.run_id
+    verdict.main_push_execution = main_push.execution
+    verdict.main_push_failing_tests = tuple(sorted(set(main_push.failing_tests)))
+    if verdict.status == STATUS_POISONED or not main_push.failed:
+        return verdict
+    streak = verdict.streak
+    named = tuple(sorted(set(main_push.failing_tests) & set(streak.shared_tests)))
+    if named and streak.length >= min_streak:
+        verdict.status = STATUS_POISONED
+        verdict.proof = PROOF_MAIN_PUSH_AND_STREAK
+        verdict.tests = named
+        verdict.reason = (
+            f"the push run {main_push.run_id} on main's tip "
+            f"{(verdict.main_head_sha or main_push.head_sha)[:12]} executed ctest on "
+            f"Linux and failed {', '.join(named)}, and the same test(s) failed in "
+            f"{streak.length} consecutive executed batches. Every batch re-formed "
+            "over this base inherits it."
+        )
+    return verdict
+
+
+def _detect_merge_group(
+    main: SuiteObservation | None,
+    batches: list[SuiteObservation],
+    min_streak: int,
+    tip_sha: str,
+) -> Verdict:
+    """The verdict from main's merge-group observation and the streak alone."""
     if min_streak < 2:
         raise ValueError(
             f"min_streak must be at least 2; {min_streak} would call a single "
@@ -479,6 +529,9 @@ def signal(
         "batch_streak_contexts": list(verdict.streak.shared_contexts),
         "batch_streak_heads": list(verdict.streak.heads),
         "main_failing_contexts": list(verdict.main_failing_contexts),
+        "main_push_run_id": verdict.main_push_run_id or None,
+        "main_push_execution": verdict.main_push_execution or None,
+        "main_push_failing_tests": list(verdict.main_push_failing_tests),
         "main_contexts": [c.as_json() for c in verdict.main_contexts],
         "min_streak": verdict.min_streak,
         "candidate_fix_pr": candidate_fix_pr,
@@ -540,6 +593,9 @@ def render(payload: dict) -> tuple[list[str], str]:
         f"| failing context(s) on main | "
         f"{', '.join(payload.get('main_failing_contexts') or []) or '—'} |",
         f"| required contexts on main | {contexts_row} |",
+        f"| main push run (Linux) | {payload.get('main_push_run_id') or 'none'}"
+        f"{' (' + payload['main_push_execution'] + ')' if payload.get('main_push_execution') else ''}"
+        f": {', '.join(payload.get('main_push_failing_tests') or []) or '—'} |",
         f"| batch streak | {payload['batch_streak']} (min {payload['min_streak']})"
         f"{streak_ctx} |",
         f"| candidate fix PR | {('#%d' % fix) if fix else '—'} |",
@@ -1174,6 +1230,44 @@ def observe_main(
     )
 
 
+# The Linux matrix leg of `Build and Test`, the one leg a push to main runs.
+LINUX_JOB_RE = re.compile(r"^Linux \(", re.IGNORECASE)
+SOURCE_PUSH_LINUX = "push-linux"
+
+
+def observe_main_push(repo: str, tip_sha: str) -> SuiteObservation | None:
+    """The executed Linux leg of the completed push run on main's tip, or None.
+
+    Its failing tests come from the leg's `ctest-logs-linux` artifact. A leg
+    whose test step did not run is returned as non-evidence, never as health.
+    """
+    if not tip_sha:
+        return None
+    run = newest_run(_runs(repo, "push", 5, branch="main", head_sha=tip_sha))
+    if run is None:
+        return None
+    run_id = str(run.get("id"))
+    legs = [j for j in _jobs(repo, run_id) if LINUX_JOB_RE.match((j.get("name") or "").strip())]
+    if not legs:
+        return None
+    leg = legs[0]
+    execution = classify_steps(leg.get("steps") or [])
+    conclusion = (leg.get("conclusion") or "").strip().lower()
+    failing: tuple[str, ...] = ()
+    if execution == EXECUTED and conclusion == "failure":
+        failing = artifact_failing_tests(repo, run_id, key="linux")
+    return SuiteObservation(
+        run_id=run_id,
+        lane="main-push",
+        conclusion=conclusion,
+        execution=execution,
+        failing_tests=failing,
+        head_sha=tip_sha,
+        created_at=(run.get("created_at") or ""),
+        source=SOURCE_PUSH_LINUX,
+    )
+
+
 def observe_batches(
     repo: str,
     limit: int = 12,
@@ -1341,6 +1435,7 @@ def main(argv: list[str] | None = None) -> int:
         observe_batches(args.repo, args.batch_limit, required, workflows, runs=history),
         min_streak=args.min_streak,
         tip_sha=tip_sha,
+        main_push=observe_main_push(args.repo, tip_sha),
     )
     fix = candidate_fix_pr(args.repo, verdict.tests) if args.name_fix_pr else None
     culprits, source = (

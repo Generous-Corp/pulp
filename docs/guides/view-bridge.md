@@ -84,8 +84,9 @@ public:
 ### Default AutoUi editor
 
 Do nothing. `Processor::create_view()` returns `nullptr`, and ViewBridge
-builds the AutoUi (or scripted UI, if one is configured via
-`PULP_UI_SCRIPT_PATH`). Every plugin gets a working editor for free.
+builds the AutoUi (or the scripted UI the plug-in declares with
+`pulp_add_plugin(UI_SCRIPT ...)` or `pulp_use_kit_ui()`, which each format
+target registers at load time; see `pulp/format/editor_assets.hpp`). Every plugin gets a working editor for free.
 
 ### Custom view tree
 

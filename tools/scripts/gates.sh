@@ -902,7 +902,8 @@ if [ -f "$CONFLICT_MARKER_GUARD" ]; then
 fi
 
 # ── 13. thread-safe-assertions guard ───────────────────────────────────────
-# Catch2 3.7.1 assertion macros aren't thread-safe; a REQUIRE/CHECK inside a
+# Catch2 assertion macros aren't thread-safe (Pulp leaves
+# CATCH_CONFIG_THREAD_SAFE_ASSERTIONS off); a REQUIRE/CHECK inside a
 # std::thread/async lambda in test/ is UB that bare metal tolerates but VM
 # scheduler timing trips (it reddened the required macOS gate on the Tart-VM
 # graduation). Also a ctest case, but running it here catches it pre-push.
@@ -1125,6 +1126,23 @@ EOF
         fi
     done
 fi
+
+# ── 21. migration notes, text encoding, script inputs (diff-scoped) ────────
+# Each fails a required CI check and costs about a second here. A hand-written
+# docs/migrations/vX.Y.Z.md guesses a version that version-at-land assigns later;
+# the text-encoding lint refuses text I/O without encoding= beyond the committed
+# baseline; a new script-driven add_test() with no test/ctest_script_inputs.json
+# entry fails script-test-inputs-drift, which needs a configured build and so ran
+# only in CI. Each went red there on a push the local gates had called clean.
+for local_gate in migration_note_guard.py text_encoding_lint.py script_inputs_precheck.py; do
+    local_path="$ROOT/tools/scripts/$local_gate"
+    [ -f "$local_path" ] || continue
+    echo "" >&2
+    echo "▸ ${local_gate%.py}" >&2
+    if ! "$PYTHON" "$local_path" --root "$ROOT" --base "$BASE" >&2; then
+        fail=1
+    fi
+done
 
 # ── Summary ────────────────────────────────────────────────────────────────
 diff_cover_hint() {

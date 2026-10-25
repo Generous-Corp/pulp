@@ -1,0 +1,121 @@
+{
+ "_comment": "Merge-group batches (newest first) and main's two observations on 2026-10-23 between 01:51Z and 03:10Z. main's tip 5489bbad landed through merge group 39886312407, whose macos reused a receipt (green, ran no suite), so the merge group is not evidence; the push run on 5489bbad failed gpu-trace-overhead-acceptance-selftest on Linux, and every batch built on it failed the same test on macOS. Batch failures come from the queue attributor's history read; the push leg's from its ctest-logs-linux artifact.",
+ "tip_sha": "5489bbad99415fce7bed3c8c6b5dd7d4e9b8e61d",
+ "main_merge_group": {
+  "run_id": "39886312407",
+  "conclusion": "success",
+  "execution": "not-executed"
+ },
+ "main_push": {
+  "run_id": "39886937105",
+  "conclusion": "failure",
+  "failing_tests": [
+   "gpu-trace-overhead-acceptance-selftest",
+   "cmake-gpu-audio-sdk-consumer",
+   "cmake-pulp-install-layout",
+   "import-fidelity-diff"
+  ]
+ },
+ "batches": [
+  {
+   "run_id": "39893452280",
+   "created_at": "2026-10-23T03:09:03Z",
+   "conclusion": "failure",
+   "failing_tests": [
+    "gpu-trace-overhead-acceptance-selftest"
+   ]
+  },
+  {
+   "run_id": "39893451378",
+   "created_at": "2026-10-23T03:09:02Z",
+   "conclusion": "failure",
+   "failing_tests": [
+    "gpu-trace-overhead-acceptance-selftest"
+   ]
+  },
+  {
+   "run_id": "39893450186",
+   "created_at": "2026-10-23T03:09:01Z",
+   "conclusion": "failure",
+   "failing_tests": [
+    "gpu-trace-overhead-acceptance-selftest"
+   ]
+  },
+  {
+   "run_id": "39893104061",
+   "created_at": "2026-10-23T03:05:15Z",
+   "conclusion": "failure",
+   "failing_tests": [
+    "gpu-trace-overhead-acceptance-selftest"
+   ]
+  },
+  {
+   "run_id": "39892632551",
+   "created_at": "2026-10-23T03:00:16Z",
+   "conclusion": "cancelled",
+   "failing_tests": []
+  },
+  {
+   "run_id": "39890688029",
+   "created_at": "2026-10-23T02:38:41Z",
+   "conclusion": "failure",
+   "failing_tests": [
+    "gpu-trace-overhead-acceptance-selftest"
+   ]
+  },
+  {
+   "run_id": "39890687500",
+   "created_at": "2026-10-23T02:38:40Z",
+   "conclusion": "cancelled",
+   "failing_tests": []
+  },
+  {
+   "run_id": "39888661903",
+   "created_at": "2026-10-23T02:16:22Z",
+   "conclusion": "failure",
+   "failing_tests": [
+    "gpu-trace-overhead-acceptance-selftest"
+   ]
+  },
+  {
+   "run_id": "39888621668",
+   "created_at": "2026-10-23T02:15:55Z",
+   "conclusion": "failure",
+   "failing_tests": [
+    "gpu-trace-overhead-acceptance-selftest"
+   ]
+  },
+  {
+   "run_id": "39888621334",
+   "created_at": "2026-10-23T02:15:55Z",
+   "conclusion": "failure",
+   "failing_tests": [
+    "gpu-trace-overhead-acceptance-selftest"
+   ]
+  },
+  {
+   "run_id": "39886937757",
+   "created_at": "2026-10-23T01:57:52Z",
+   "conclusion": "failure",
+   "failing_tests": [
+    "gpu-trace-overhead-acceptance-selftest"
+   ]
+  },
+  {
+   "run_id": "39886314758",
+   "created_at": "2026-10-23T01:51:06Z",
+   "conclusion": "failure",
+   "failing_tests": [
+    "gpu-trace-overhead-acceptance-selftest"
+   ]
+  },
+  {
+   "run_id": "39886313542",
+   "created_at": "2026-10-23T01:51:05Z",
+   "conclusion": "failure",
+   "failing_tests": [
+    "gpu-trace-overhead-acceptance-selftest"
+   ]
+  }
+ ]
+}

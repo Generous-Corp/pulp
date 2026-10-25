@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "event_id": "20261023-importer-i8-svg-stroke-paint-20261023",
+  "kind": "change",
+  "created_at": "2026-10-23T19:23:08Z",
+  "slices": [
+    "retained-ui-kernel"
+  ],
+  "rationale": "retained-ui-kernel: SvgPathWidget gains optional set_stroke_cap / set_stroke_join / set_stroke_miter_limit. Unset, it strokes exactly as before; set, the style is passed to Canvas::stroke_path so it stays local to the draw and never leaks into later views. Additive public setters with no change to existing behaviour or to any API or authority boundary; Pulp-only because it serves Pulp's design-import SVG lowering.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "ctest --test-dir build -R pulp-test-design-import-native-common",
+    "ctest --test-dir build -R pulp-test-svg-path-widget",
+    "node --test tools/import-design/browser_capture/semantics.test.mjs"
+  ],
+  "disposition": "pulp-only"
+}

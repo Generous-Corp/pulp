@@ -1,0 +1,172 @@
+{
+ "font": {
+  "family": "JetBrains Mono",
+  "weight_range": "400"
+ },
+ "background": "#0e1013",
+ "line_height": 20,
+ "labels": [
+  {
+   "id": "spectr-title",
+   "text": "SPECTR",
+   "size": 11,
+   "weight": 400,
+   "letter_spacing": 1.5,
+   "color": "rgb(255, 255, 255)",
+   "x": 12,
+   "top": 8
+  },
+  {
+   "id": "subtitle",
+   "text": "ZOOMABLE FILTER BANK",
+   "size": 11,
+   "weight": 400,
+   "letter_spacing": 0.5,
+   "color": "rgba(255, 255, 255, 0.75)",
+   "x": 12,
+   "top": 32
+  },
+  {
+   "id": "live",
+   "text": "LIVE",
+   "size": 10,
+   "weight": 400,
+   "letter_spacing": 1,
+   "color": "rgb(255, 255, 255)",
+   "x": 12,
+   "top": 56
+  },
+  {
+   "id": "precision",
+   "text": "PRECISION",
+   "size": 10,
+   "weight": 400,
+   "letter_spacing": 1,
+   "color": "rgba(255, 255, 255, 0.55)",
+   "x": 12,
+   "top": 80
+  },
+  {
+   "id": "hybrid",
+   "text": "HYBRID",
+   "size": 10,
+   "weight": 400,
+   "letter_spacing": 1,
+   "color": "rgba(255, 255, 255, 0.55)",
+   "x": 12,
+   "top": 104
+  },
+  {
+   "id": "bands",
+   "text": "64 bands",
+   "size": 10,
+   "weight": 400,
+   "letter_spacing": 0.5,
+   "color": "rgba(255, 255, 255, 0.7)",
+   "x": 12,
+   "top": 128
+  },
+  {
+   "id": "zoom",
+   "text": "1.00 x zoom",
+   "size": 10,
+   "weight": 400,
+   "letter_spacing": 0.5,
+   "color": "rgba(255, 255, 255, 0.45)",
+   "x": 12,
+   "top": 152
+  },
+  {
+   "id": "clear",
+   "text": "CLEAR",
+   "size": 10,
+   "weight": 400,
+   "letter_spacing": 1,
+   "color": "rgba(255, 255, 255, 0.85)",
+   "x": 12,
+   "top": 176
+  },
+  {
+   "id": "sculpt",
+   "text": "SCULPT",
+   "size": 10,
+   "weight": 400,
+   "letter_spacing": 1,
+   "color": "rgba(255, 255, 255, 0.85)",
+   "x": 12,
+   "top": 200
+  },
+  {
+   "id": "peak",
+   "text": "PEAK",
+   "size": 10,
+   "weight": 400,
+   "letter_spacing": 1,
+   "color": "rgba(255, 255, 255, 0.85)",
+   "x": 12,
+   "top": 224
+  },
+  {
+   "id": "presets",
+   "text": "PRESETS",
+   "size": 10,
+   "weight": 400,
+   "letter_spacing": 1,
+   "color": "rgba(255, 255, 255, 0.85)",
+   "x": 12,
+   "top": 248
+  },
+  {
+   "id": "snapshot",
+   "text": "SNAPSHOT",
+   "size": 10,
+   "weight": 400,
+   "letter_spacing": 0,
+   "color": "rgba(255, 255, 255, 0.7)",
+   "x": 12,
+   "top": 272
+  },
+  {
+   "id": "morph-a",
+   "text": "A",
+   "size": 9,
+   "weight": 400,
+   "letter_spacing": 0,
+   "color": "rgba(255, 255, 255, 0.5)",
+   "x": 12,
+   "top": 296
+  },
+  {
+   "id": "help",
+   "text": "?",
+   "size": 11,
+   "weight": 400,
+   "letter_spacing": 0,
+   "color": "rgba(255, 255, 255, 0.6)",
+   "x": 12,
+   "top": 320
+  },
+  {
+   "id": "rtl-clear",
+   "text": "CLEAR",
+   "size": 10,
+   "weight": 400,
+   "letter_spacing": 1,
+   "color": "rgba(255, 255, 255, 0.85)",
+   "x": 12,
+   "top": 344,
+   "direction": "rtl"
+  },
+  {
+   "id": "rtl-zoomable",
+   "text": "ZOOMABLE FILTER BANK",
+   "size": 11,
+   "weight": 400,
+   "letter_spacing": 0.5,
+   "color": "rgba(255, 255, 255, 0.75)",
+   "x": 12,
+   "top": 368,
+   "direction": "rtl"
+  }
+ ]
+}

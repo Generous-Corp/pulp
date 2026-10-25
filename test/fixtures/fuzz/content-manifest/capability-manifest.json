@@ -1,0 +1,12 @@
+{
+  "schema": "pulp.plugin-runtime.v1",
+  "pluginId": "dev.pulp.fuzz.content-target",
+  "content": {
+    "capabilities": ["content.presets.v1", "content.themes.v1", "content.sample-banks.v1"],
+    "kinds": ["presets", "themes", "sample-banks"],
+    "reload": {
+      "hotReloadKinds": ["presets", "themes"],
+      "manualRescanKinds": ["sample-banks"]
+    }
+  }
+}

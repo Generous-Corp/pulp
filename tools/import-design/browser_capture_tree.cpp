@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "browser_capture_tree.hpp"
 
+#include "browser_capture_controls.hpp"
 #include "svg_shape_lowering.hpp"
 
 #include <algorithm>
@@ -22,6 +23,8 @@
 namespace pulp::import_design {
 namespace {
 
+using detail::control_value_text;
+using detail::px_value;
 using pulp::view::IRNode;
 
 constexpr int kElementNode = 1;
@@ -655,16 +658,24 @@ bool contains(const ClipRect& outer, const ClipRect& inner) {
            outer.bottom >= inner.bottom - kGrid;
 }
 
-/// A parsed CSS length in px, or 0 for anything else. Chrome serializes
-/// computed border widths as `<n>px`, so this is the whole grammar that
-/// reaches here.
-double px_value(const std::string& value) {
-    if (value.empty()) return 0.0;
-    try {
-        return std::stod(value);
-    } catch (const std::exception&) {
-        return 0.0;
+/// Why a node's captured box cannot be snapped to Chromium's CSS-pixel grid as
+/// a local paint rect: `"transform"` when the node itself is transformed,
+/// `"transformed-ancestor"` when an ancestor is, and empty when neither is.
+/// DOMSnapshot boxes are post-transform for the whole transformed subtree, so
+/// a snapped absolute rect cannot be turned back into a local one. Both the
+/// box paint rect and an overflow clip taken from a clipper's box are snapped
+/// only when this is empty, so a clipper and the clip it imposes always land
+/// on the same pixels.
+std::string transformed_ancestry(const CapturedStyleIndex& index, int node_index) {
+    for (int cursor = node_index, steps = 0; cursor >= 0 && steps < index.node_count();
+         cursor = index.parent_of(cursor), ++steps) {
+        const auto styles = index.styles_for_node(cursor);
+        const auto transform = styles.find("transform");
+        if (transform == styles.end() || transform->second.empty() || transform->second == "none")
+            continue;
+        return cursor == node_index ? "transform" : "transformed-ancestor";
     }
+    return {};
 }
 
 /// Where a browser would actually clip a node, resolved from the snapshot.
@@ -686,6 +697,10 @@ public:
         ClipRect rect;              ///< intersection of every rect clipper
         bool clipped = false;       ///< at least one rect clipper applies
         bool inexpressible = false; ///< a shape clipper this model cannot carry
+        /// Every rect clipper's own box paint is snapped to the CSS-pixel
+        /// grid (`transformed_ancestry` is empty for each), so the clip may be
+        /// snapped the same way.
+        bool clippers_snap = true;
     };
 
     explicit CssClipChain(const CapturedStyleIndex& index) : index_(index) {
@@ -727,10 +742,18 @@ public:
             if (facts_of(ancestor).clips) {
                 out.rect = intersect(out.rect, clip_box_of(ancestor));
                 out.clipped = true;
+                if (!transformed_ancestry(index_, ancestor).empty())
+                    out.clippers_snap = false;
             }
             current = ancestor;
         }
         return out;
+    }
+
+    /// The rounded padding box `node_index` confines its overflow to, whether
+    /// or not the node actually clips.
+    ClipRect overflow_box(int node_index) {
+        return clip_box_of(node_index);
     }
 
 private:
@@ -859,14 +882,12 @@ std::string_view to_string(PaintClass paint_class) {
     return "native";
 }
 
-PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
-                                     double dx,
-                                     double dy,
-                                     double device_scale,
-                                     IRNode& root,
-                                     const std::unordered_map<int, std::string>&
-                                         captured_element_assets,
-                                     bool flatten_to_paint_order) {
+PaintedTreeCounts
+lower_painted_tree(const CapturedStyleIndex& index, double dx, double dy, double device_scale,
+                   IRNode& root,
+                   const std::unordered_map<int, std::string>& captured_element_assets,
+                   bool flatten_to_paint_order,
+                   const std::unordered_map<std::string, CapturedLayerExtent>& captured_layers) {
     PaintedTreeCounts counts;
     const auto painted = index.painted_nodes();
     counts.painted = static_cast<int>(painted.size());
@@ -1297,19 +1318,7 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
         // own, so exclude the entire transformed ancestry from local paint
         // rect adjustment. It is not safe to turn an absolute captured rect
         // back into a local untransformed background/border extent.
-        std::string rect_ineligible;
-        for (int cursor = node.node_index, steps = 0;
-             cursor >= 0 && steps < index.node_count();
-             cursor = index.parent_of(cursor), ++steps) {
-            const auto ancestor_styles = index.styles_for_node(cursor);
-            const auto transform = ancestor_styles.find("transform");
-            if (transform == ancestor_styles.end() || transform->second.empty() ||
-                transform->second == "none")
-                continue;
-            rect_ineligible = cursor == node.node_index ? "transform"
-                                                         : "transformed-ancestor";
-            break;
-        }
+        auto rect_ineligible = transformed_ancestry(index, node.node_index);
         if (!rect_ineligible.empty())
             lowered.attributes["browser_box_paint_rect_ineligible"] =
                 std::move(rect_ineligible);
@@ -1433,11 +1442,20 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
         } else if (capture_only &&
                    captured_element_assets.count(node.backend_node_id) != 0) {
             paint_class = PaintClass::image_asset;
-            lowered.type = "image";
-            lowered.attributes["asset_ref"] =
-                captured_element_assets.at(node.backend_node_id);
+            const auto& asset = captured_element_assets.at(node.backend_node_id);
             lowered.attributes["captured_element"] = node.tag_name;
-            lowered.style.object_fit = "fill";
+            const auto layer = captured_layers.find(asset);
+            if (layer == captured_layers.end()) {
+                // An element-sized raster: the picture IS the element.
+                lowered.type = "image";
+                lowered.attributes["asset_ref"] = asset;
+                lowered.style.object_fit = "fill";
+            } else {
+                // A viewport-plane raster, hung inside the element's box.
+                lowered.type = "frame";
+                lowered.children.push_back(detail::captured_viewport_plane(
+                    lowered.name, asset, layer->second, box, computed));
+            }
         } else if (capture_only) {
             // WHY it cannot be drawn, because the two reasons have different
             // fixes: an uncaptured `<canvas>` needs a native painter (or a
@@ -1486,6 +1504,7 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
                     basis.width = static_cast<float>(box.width);
                     basis.resolved_face =
                         index.resolved_face_for_layout(node.layout_index);
+                    basis.line_metrics = index.line_metrics_for_layout(node.layout_index);
                     // Boxes without the face they were broken against are
                     // boxes the renderer will refuse, so this run reflows and
                     // any mid-line resume it needed is lost. Counted here
@@ -1563,6 +1582,14 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
         // consumer re-deriving one of those against an anchor built here would
         // compute `frame[0]/frame[0]` and match nothing.
         lowered.anchor_strategy = "capture-path";
+        // A captured element's raster plane is addressed under the element
+        // it paints, so an edit to the canvas finds its pixels with it.
+        for (auto& child : lowered.children) {
+            if (!child.attributes.count("captured_layer"))
+                continue;
+            child.stable_anchor_id = *lowered.stable_anchor_id + "/layer[0]";
+            child.anchor_strategy = "capture-path";
+        }
 
         switch (paint_class) {
             case PaintClass::native: ++counts.native; break;
@@ -1593,7 +1620,72 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
         // a stored clip inside the node's own canvas, which the ancestor's
         // `rotate()` has already turned out of page space.
         slot.rotated = rotation.has_value() || frame_rotation != nullptr;
+        const int control_slot = static_cast<int>(slots.size());
+        const auto control_anchor = slot.node.stable_anchor_id;
         slots.push_back(std::move(slot));
+
+        if (node.node_type == kElementNode && !is_text) {
+            const auto appearance = computed.find("appearance");
+            const auto tag = node.tag_name;
+            if (appearance != computed.end() && appearance->second != "none" &&
+                (tag == "input" || tag == "button" || tag == "select" || tag == "textarea" ||
+                 tag == "meter" || tag == "progress")) {
+                // Computed appearance stays `auto` on a control whose author
+                // box styling made Chromium paint it from CSS, so it is the
+                // capture's verdict that says whether the theme painted.
+                const auto theme = index.control_theme(node.node_index);
+                auto& attributes = slots.back().node.attributes;
+                attributes["native_appearance"] = appearance->second;
+                attributes["native_theme"] = theme.empty() ? "unresolved" : theme;
+                if (theme == "native") {
+                    ++counts.native_appearance_controls;
+                    if (tag == "input" && detail::record_ua_control_state(index, node.node_index,
+                                                                          computed, attributes))
+                        detail::drop_theme_replaced_box_paint(slots.back().node.style);
+                }
+            }
+        }
+
+        // The string a control draws from its own state, as a text run owned
+        // by the control. A rotated control is left alone: the content box is
+        // derived from page-space lengths that the rotated frame no longer
+        // shares.
+        if (node.node_type == kElementNode && !is_text && paint_class == PaintClass::native &&
+            !slots.back().rotated) {
+            if (auto value = control_value_text(index, node.node_index, box, computed)) {
+                IRNode text_node;
+                text_node.type = "text";
+                text_node.name = "#control-value";
+                text_node.text_content = value->text;
+                apply_computed_styles(computed, value->content_box, text_node.style,
+                                      ComputedStyleScope::text_only,
+                                      type_scale.ok() ? type_scale.scale : 1.0);
+                // One line, never wrapped: a single-line field scrolls its
+                // value rather than breaking it.
+                text_node.style.white_space = "nowrap";
+                text_node.style.vertical_align = "middle";
+                text_node.style.position = "absolute";
+                text_node.attributes["paint_class"] = std::string(to_string(PaintClass::native));
+                text_node.attributes["paint_order"] = std::to_string(node.paint_order);
+                text_node.attributes["source_tag"] = "#control-value";
+                text_node.attributes["control_value_of"] = node.tag_name;
+                if (control_anchor)
+                    text_node.stable_anchor_id = *control_anchor + "/#control-value[0]";
+                text_node.anchor_strategy = "capture-path";
+                ++counts.native;
+                ++counts.lowered;
+                ++counts.text;
+                ++counts.control_value_text;
+                LoweredNode value_slot;
+                value_slot.node = std::move(text_node);
+                value_slot.node_index = node.node_index;
+                value_slot.owner_slot = control_slot;
+                value_slot.paint_order = node.paint_order;
+                value_slot.box = value->content_box;
+                value_slot.page_box = value->content_box;
+                slots.push_back(std::move(value_slot));
+            }
+        }
 
         // One vector node per shape, immediately after the `<svg>` that owns
         // them, in document order — which for a shape tree IS paint order, and
@@ -1638,6 +1730,22 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
             if (shape.stroke) {
                 vector_node.attributes["svg_stroke_width"] =
                     format_number(shape.stroke_width);
+                // Cap and join are stated even at their SVG initial values,
+                // for the same reason as the paints: the renderer's defaults
+                // are a 2D canvas's, and its miter limit (10) is not SVG's (4).
+                vector_node.attributes["svg_stroke_linecap"] = shape.stroke_linecap;
+                vector_node.attributes["svg_stroke_linejoin"] = shape.stroke_linejoin;
+                if (shape.stroke_linejoin == "miter") {
+                    vector_node.attributes["svg_stroke_miterlimit"] =
+                        format_number(shape.stroke_miterlimit);
+                }
+                if (shape.stroke_dashoffset != 0.0) {
+                    vector_node.attributes["svg_stroke_dashoffset"] =
+                        format_number(shape.stroke_dashoffset);
+                }
+            }
+            if (shape.path_length) {
+                vector_node.attributes["svg_path_length"] = format_number(*shape.path_length);
             }
             vector_node.style.position = "absolute";
             vector_node.attributes["paint_class"] =
@@ -1645,6 +1753,11 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
             vector_node.attributes["paint_order"] =
                 std::to_string(node.paint_order);
             vector_node.attributes["source_tag"] = shape.tag;
+            // The same Chromium identity every other lowered node carries, so
+            // a shape binds to the DOM element it draws rather than only to a
+            // path that renumbers when a sibling shape is added.
+            if (const int backend = index.backend_node_id_of(shape.node_index); backend > 0)
+                vector_node.attributes["backend_node_id"] = std::to_string(backend);
             vector_node.stable_anchor_id = anchor_path(index, identity, shape.node_index);
             vector_node.anchor_strategy = "capture-path";
 
@@ -1727,6 +1840,27 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
     for (size_t i = 0; i < slots.size(); ++i) {
         css_clip[i] = css_chain.resolve(slots[i].node_index);
         if (!css_clip[i].clipped) continue;
+        // The clipper's own background and border are painted on the snapped
+        // CSS-edge rectangle (see `record_paint_rect`), and Chromium clips its
+        // overflow on that same rectangle. Snapping the clip edges the same
+        // way keeps a clipped child's rounded corners and last row on the
+        // pixels where the clipper itself is drawn; an unsnapped clip at a
+        // half-pixel offset lands one device row away from its own track.
+        // Snapped here, before the clip is judged or stored, so the fidelity
+        // audit in `place()` compares the same rectangle the node carries.
+        // A clipper whose box paint is not snapped (a transformed clipper or
+        // one inside a transformed ancestor) leaves its clip unsnapped too.
+        if (device_scale > 0.0 && std::isfinite(device_scale) && !slots[i].rotated &&
+            css_clip[i].clippers_snap) {
+            const auto snap = [](double edge, double shift) {
+                return std::floor(edge + shift + 0.5) - shift;
+            };
+            auto& clip = css_clip[i].rect;
+            clip.left = snap(clip.left, dx);
+            clip.top = snap(clip.top, dy);
+            clip.right = snap(clip.right, dx);
+            clip.bottom = snap(clip.bottom, dy);
+        }
         // The PAGE footprint, which for a recovered rotation is not the box the
         // node carries. A clip is a page-space rectangle; comparing it against
         // a rectangle written in the node's own turned frame compares two
@@ -1776,14 +1910,13 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
     // is an empty rectangle in front of it, not a fidelity loss.
     for (auto& slot : slots) {
         const auto& s = slot.node.style;
-        slot.paints_ink =
-            (s.background_color && *s.background_color != "transparent" &&
-             *s.background_color != "rgba(0, 0, 0, 0)") ||
-            (s.background_image && *s.background_image != "none") ||
-            !s.box_shadow.empty() ||
-            (s.border_width && *s.border_width > 0.0f) ||
-            !slot.node.text_content.empty() || slot.node.type == "image" ||
-            slot.node.type == "vector" || slot.node.type == "text";
+        slot.paints_ink = (s.background_color && *s.background_color != "transparent" &&
+                           *s.background_color != "rgba(0, 0, 0, 0)") ||
+                          (s.background_image && *s.background_image != "none") ||
+                          !s.box_shadow.empty() || (s.border_width && *s.border_width > 0.0f) ||
+                          !slot.node.text_content.empty() || slot.node.type == "image" ||
+                          slot.node.attributes.count("captured_element") != 0 ||
+                          slot.node.type == "vector" || slot.node.type == "text";
     }
 
     // Children in slot order, which IS Chrome's paint order among siblings.
@@ -1876,19 +2009,156 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
     // clipping information and makes sibling order exactly Chromium's order.
     // The hierarchical form remains the default for callers that need source
     // ancestry rather than a pixel-faithful baked panel.
+    //
+    // The one structure the flat list keeps is a group that COMPOSITES as one
+    // layer: `opacity < 1`, `mix-blend-mode`, `filter`, `backdrop-filter` or a
+    // mask applies to the element's whole rendering, descendants included, so
+    // hung off the root its descendants would paint at full strength beside an
+    // empty translucent box. Pushing the alpha down into each descendant is no
+    // substitute wherever they overlap: a button's label over its own fill
+    // blends twice and comes out lighter than the browser's. Each of those
+    // properties starts a stacking context, so the group's descendants are one
+    // contiguous run of Chromium's paint list, and nesting them under the group
+    // reorders nothing. A group that cannot be nested exactly stays flat and
+    // says why in `isolating_group_refused`.
     if (flatten_to_paint_order) {
-        int flat_z = 0;
-        for (auto& entry : slots) {
+        const auto set_and_not = [](const std::optional<std::string>& value,
+                                    std::string_view none) {
+            return value && !value->empty() && *value != none;
+        };
+        const auto composites_as_group = [&](const IRNode& node) {
+            const auto& s = node.style;
+            return (s.opacity && *s.opacity < 1.0f) || set_and_not(s.mix_blend_mode, "normal") ||
+                   set_and_not(s.filter, "none") || set_and_not(s.backdrop_filter, "none") ||
+                   set_and_not(s.mask_image, "none");
+        };
+
+        // Every emitted descendant of each group root, ascending. Slots are
+        // pushed in index order, so each list is already sorted.
+        std::vector<std::vector<int>> members(slots.size());
+        std::vector<bool> isolating(slots.size(), false);
+        for (size_t i = 0; i < slots.size(); ++i)
+            isolating[i] = composites_as_group(slots[i].node);
+        for (size_t i = 0; i < slots.size(); ++i) {
+            int ancestor = slots[i].dom_parent_slot;
+            // Bounded by the slot count: a malformed `parentIndex` cycle must
+            // not spin here any more than it may in the parentage pass.
+            for (size_t step = 0; ancestor >= 0 && step < slots.size(); ++step) {
+                if (isolating[static_cast<size_t>(ancestor)])
+                    members[static_cast<size_t>(ancestor)].push_back(static_cast<int>(i));
+                ancestor = slots[static_cast<size_t>(ancestor)].dom_parent_slot;
+            }
+        }
+
+        // Why a group root cannot carry its descendants as one layer, or empty
+        // when it can. Each reason is a case where the nested tree would draw
+        // something the browser did not.
+        const auto refusal = [&](size_t group) -> std::string {
+            const auto& owner = slots[group];
+            const auto& list = members[group];
+            // A nested child is drawn inside its parent's transform, and its
+            // box is already the post-transform page box.
+            if (owner.rotated || set_and_not(owner.node.style.transform, "none"))
+                return "transform";
+            // Slots are in paint order. Contiguity means nothing outside the
+            // group paints between the root and its last descendant, which a
+            // stacking context guarantees and a captured raster can break.
+            if (list.front() < static_cast<int>(group) ||
+                list.back() - static_cast<int>(group) != static_cast<int>(list.size()))
+                return "interleaved-paint-order";
+            // The renderer's group layer is bounded by the root's box, so a
+            // descendant reaching past it would lose that ink.
+            const ClipRect layer = rect_of(owner.page_box);
+            const bool root_clips = owner.node.style.overflow &&
+                                    !owner.node.style.overflow->empty() &&
+                                    *owner.node.style.overflow != "visible";
+            const ClipRect overflow = css_chain.overflow_box(owner.node_index);
+            for (const int member : list) {
+                const auto& entry = slots[static_cast<size_t>(member)];
+                const auto& css = css_clip[static_cast<size_t>(member)];
+                const bool spills =
+                    !entry.node.style.box_shadow.empty() || entry.node.style.filter.has_value();
+                ClipRect ink = rect_of(entry.page_box);
+                if (css.clipped)
+                    ink = spills ? css.rect : intersect(ink, css.rect);
+                else if (spills)
+                    return "descendant-ink-outside-group";
+                if (!contains(layer, ink))
+                    return "descendant-ink-outside-group";
+                // Nested, the root's `overflow` clips the descendant too. That
+                // is harmless only where it would cut nothing.
+                if (root_clips && (!contains(overflow, ink) ||
+                                   (!css.clipped && intrudes_on_rounded_corner(overflow, ink))))
+                    return "descendant-escapes-group-clip";
+            }
+            return {};
+        };
+
+        std::vector<bool> nests(slots.size(), false);
+        for (size_t i = 0; i < slots.size(); ++i) {
+            if (!isolating[i] || members[i].empty())
+                continue;
+            auto reason = refusal(i);
+            if (reason.empty()) {
+                nests[i] = true;
+                ++counts.isolating_groups_nested;
+            } else {
+                ++counts.isolating_groups_refused;
+                slots[i].node.attributes["isolating_group_refused"] = std::move(reason);
+            }
+        }
+
+        // Each slot hangs off its nearest nesting group, or the root.
+        std::vector<std::vector<int>> group_children(slots.size());
+        std::vector<int> top_level;
+        for (size_t i = 0; i < slots.size(); ++i) {
+            int group = slots[i].dom_parent_slot;
+            for (size_t step = 0; group >= 0 && step < slots.size(); ++step) {
+                if (nests[static_cast<size_t>(group)])
+                    break;
+                group = slots[static_cast<size_t>(group)].dom_parent_slot;
+            }
+            if (group >= 0 && nests[static_cast<size_t>(group)])
+                group_children[static_cast<size_t>(group)].push_back(static_cast<int>(i));
+            else
+                top_level.push_back(static_cast<int>(i));
+        }
+
+        // Same offset arithmetic as the nested emission below: a root child
+        // is its page box plus the crop shift, and a group's child is placed
+        // against the group's padding box.
+        const auto emit = [&](auto&& self, int slot, double frame_left, double frame_top, int depth,
+                              int z, IRNode& parent) -> void {
+            auto& entry = slots[static_cast<size_t>(slot)];
             record_paint_rect(entry.node, entry.box);
-            entry.node.style.left = static_cast<float>(entry.box.left + dx);
-            entry.node.style.top = static_cast<float>(entry.box.top + dy);
+            entry.node.style.left = static_cast<float>(entry.box.left - frame_left);
+            entry.node.style.top = static_cast<float>(entry.box.top - frame_top);
             entry.node.style.width = static_cast<float>(entry.box.width);
             entry.node.style.height = static_cast<float>(entry.box.height);
-            entry.node.style.z_index = flat_z++;
-            root.children.push_back(std::move(entry.node));
-        }
-        counts.max_depth = slots.empty() ? 0 : 1;
-        counts.root_children = static_cast<int>(slots.size());
+            entry.node.style.z_index = z;
+            counts.max_depth = std::max(counts.max_depth, depth);
+            const auto border = [](const std::optional<float>& side,
+                                   const std::optional<float>& uniform) {
+                if (side)
+                    return static_cast<double>(std::max(0.0f, *side));
+                if (uniform)
+                    return static_cast<double>(std::max(0.0f, *uniform));
+                return 0.0;
+            };
+            const double child_left = entry.box.left + border(entry.node.style.border_left_width,
+                                                              entry.node.style.border_width);
+            const double child_top = entry.box.top + border(entry.node.style.border_top_width,
+                                                            entry.node.style.border_width);
+            parent.children.push_back(std::move(entry.node));
+            IRNode& placed = parent.children.back();
+            int child_z = 0;
+            for (const int child : group_children[static_cast<size_t>(slot)])
+                self(self, child, child_left, child_top, depth + 1, child_z++, placed);
+        };
+        int flat_z = 0;
+        for (const int slot : top_level)
+            emit(emit, slot, -dx, -dy, 1, flat_z++, root);
+        counts.root_children = static_cast<int>(top_level.size());
         return counts;
     }
 
@@ -2036,6 +2306,26 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
                                                        label(second));
         }
     }
+    return counts;
+}
+
+PaintedTreeCounts lower_painted_tree_preferring_hierarchy(
+    const CapturedStyleIndex& index, double dx, double dy, double device_scale, IRNode& root,
+    const std::unordered_map<int, std::string>& captured_element_assets,
+    const std::unordered_map<std::string, CapturedLayerExtent>& captured_layers) {
+    // Lower into a copy so the flat fallback starts from the caller's root
+    // exactly as it was handed in, not from a half-built nested tree.
+    IRNode nested = root;
+    auto counts = lower_painted_tree(index, dx, dy, device_scale, nested, captured_element_assets,
+                                     /*flatten_to_paint_order=*/false, captured_layers);
+    if (counts.overlapping_reorders == 0) {
+        root = std::move(nested);
+        return counts;
+    }
+    const int inversions = counts.overlapping_reorders;
+    counts = lower_painted_tree(index, dx, dy, device_scale, root, captured_element_assets,
+                                /*flatten_to_paint_order=*/true, captured_layers);
+    counts.flattened_overlapping_reorders = inversions;
     return counts;
 }
 

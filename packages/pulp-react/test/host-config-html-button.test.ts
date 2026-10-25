@@ -90,6 +90,27 @@ describe('HTML button materialization', () => {
             ]);
     });
 
+    it('centres a button again when an authored alignment disappears', () => {
+        // The centring is the host config's creation default, so it is what a
+        // removed author override falls back to, not the bare row's stretch.
+        const container = { rootId: 'root', nextId: 0 } as never;
+        const oldProps = { id: 'action', children: 'GO', style: { alignItems: 'flex-start' } };
+        const newProps = { id: 'action', children: 'GO', style: {} };
+        const instance = PulpHostConfig.createInstance(
+            'button' as never, oldProps as never, container, {} as never, null as never,
+        );
+        PulpHostConfig.appendChildToContainer!(container, instance);
+        bridge.reset();
+        PulpHostConfig.commitUpdate!(instance, null as never, 'button' as never,
+            oldProps as never, newProps as never, null as never);
+        expect(bridge.calls.filter(c => c.fn === 'resetStyleProperty' || c.fn === 'setFlex')
+            .map(c => [c.fn, ...c.args]))
+            .toEqual([
+                ['resetStyleProperty', 'action', 'align_items'],
+                ['setFlex', 'action', 'align_items', 'center'],
+            ]);
+    });
+
     it('leaves explicit native Pulp Button on the stock widget path', () => {
         lower('Button', 'PRECISION');
         expect(bridge.calls.find(c => c.fn === 'createButton')?.args)

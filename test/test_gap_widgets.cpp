@@ -2,6 +2,7 @@
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/canvas/drawlist_format.hpp>
 #include <pulp/canvas/recording_canvas.hpp>
+#include <pulp/view/continuous_frames.hpp>
 #include <pulp/view/gap_widgets.hpp>
 #include <pulp/view/theme.hpp>
 
@@ -114,6 +115,70 @@ TEST_CASE("InlineBanner paints a tone-colored left bar", "[view][gap][banner]") 
     t.colors["accent.success"] = color_from_hex(0x3FCF77);
     b.set_theme(t);
     REQUIRE(has(fills(b), color_from_hex(0x3FCF77)));
+}
+
+namespace {
+// The caret blinks from the frame clock, so an editing field must keep
+// continuous frames on and release them on every way an edit ends.
+template <typename Field> void check_edit_keeps_frames_until_it_ends(float width, float height) {
+    Field f;
+    f.set_bounds({0, 0, width, height});
+    f.set_range(-99, 99);
+    f.set_value(0);
+    const pulp::view::Point center{width / 2.0f, height / 2.0f};
+    REQUIRE_FALSE(needs_continuous_frames(&f));
+
+    KeyEvent enter;
+    enter.key = KeyCode::enter;
+    enter.is_down = true;
+    KeyEvent esc;
+    esc.key = KeyCode::escape;
+    esc.is_down = true;
+
+    f.on_mouse_down(center);
+    REQUIRE(f.is_editing());
+    CHECK(needs_continuous_frames(&f));
+    f.on_key_event(enter); // commit
+    REQUIRE_FALSE(f.is_editing());
+    CHECK_FALSE(needs_continuous_frames(&f));
+
+    f.on_mouse_down(center);
+    CHECK(needs_continuous_frames(&f));
+    f.on_key_event(esc); // cancel
+    REQUIRE_FALSE(f.is_editing());
+    CHECK_FALSE(needs_continuous_frames(&f));
+
+    f.on_mouse_down(center);
+    CHECK(needs_continuous_frames(&f));
+    f.on_focus_changed(false); // focus loss commits
+    REQUIRE_FALSE(f.is_editing());
+    CHECK_FALSE(needs_continuous_frames(&f));
+
+    f.on_mouse_down(center);
+    CHECK(needs_continuous_frames(&f));
+    f.on_mouse_drag({center.x, center.y - 40.0f}); // a scrub abandons the edit
+    REQUIRE_FALSE(f.is_editing());
+    CHECK_FALSE(needs_continuous_frames(&f));
+}
+} // namespace
+
+TEST_CASE("Stepper keeps frames coming only while its caret is live",
+          "[view][gap][stepper][caret]") {
+    check_edit_keeps_frames_until_it_ends<Stepper>(140.0f, 36.0f);
+}
+
+TEST_CASE("NumberBox keeps frames coming only while its caret is live",
+          "[view][gap][numberbox][caret]") {
+    check_edit_keeps_frames_until_it_ends<NumberBox>(120.0f, 32.0f);
+}
+
+TEST_CASE("Spinner needs frames only while indeterminate", "[view][gap][spinner]") {
+    Spinner sp;
+    CHECK(needs_continuous_frames(&sp));
+    sp.set_progress(0.5f);
+    CHECK_FALSE(needs_continuous_frames(&sp));
+    sp.set_progress(-1.0f);
+    CHECK(needs_continuous_frames(&sp));
 }
 
 TEST_CASE("Stepper minus/plus zones nudge the value by step", "[view][gap][stepper]") {

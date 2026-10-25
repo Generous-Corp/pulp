@@ -926,3 +926,40 @@ TEST_CASE("fdn reverb recovers fully after a tank-rate change in either directio
         REQUIRE(std::abs(after - cold) / cold < 0.05);
     }
 }
+
+TEST_CASE("FdnReverbT<double> runs the float engine behind a double interface",
+          "[signal][fdn][compat]") {
+    // Both tiers compute in single precision; the double instantiation must
+    // still compile and produce exactly the float engine's output, converted.
+    constexpr double kSr = 48000.0;
+    constexpr int kN = 4096;
+    for (const auto tier : {pulp::signal::fdn::Tier::network, pulp::signal::fdn::Tier::classic}) {
+        pulp::signal::FdnReverbT<float> f;
+        pulp::signal::FdnReverbT<double> d;
+        f.prepare(kSr, 512);
+        d.prepare(kSr, 512);
+        f.set_tier(tier);
+        d.set_tier(tier);
+        std::vector<float> fl(kN), fr(kN), fol(kN), for_(kN);
+        std::vector<double> dl(kN), dr(kN), dol(kN), dor(kN);
+        for (int i = 0; i < kN; ++i) {
+            fl[static_cast<std::size_t>(i)] = i < 32 ? 0.8f : 0.0f;
+            fr[static_cast<std::size_t>(i)] = 0.3f * std::sin(0.01f * static_cast<float>(i));
+            dl[static_cast<std::size_t>(i)] = fl[static_cast<std::size_t>(i)];
+            dr[static_cast<std::size_t>(i)] = fr[static_cast<std::size_t>(i)];
+        }
+        for (int offset = 0; offset < kN; offset += 384) {
+            const int m = std::min(384, kN - offset);
+            f.process_block(fl.data() + offset, fr.data() + offset, fol.data() + offset,
+                            for_.data() + offset, m);
+            d.process_block(dl.data() + offset, dr.data() + offset, dol.data() + offset,
+                            dor.data() + offset, m);
+        }
+        std::size_t mismatches = 0;
+        for (std::size_t i = 0; i < static_cast<std::size_t>(kN); ++i)
+            mismatches +=
+                static_cast<double>(fol[i]) != dol[i] || static_cast<double>(for_[i]) != dor[i];
+        CHECK(mismatches == 0);
+        CHECK(std::any_of(dol.begin(), dol.end(), [](double v) { return v != 0.0; }));
+    }
+}

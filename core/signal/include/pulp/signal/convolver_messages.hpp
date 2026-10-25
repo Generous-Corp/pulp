@@ -96,6 +96,17 @@ using ConvolverIrState64 = ConvolverIrStateT<double>;
 
 namespace detail {
 
+/// The block size a convolver prepared for `block_size` accepts: the request
+/// rounded up to the next power of two (the radix-2 FFT needs it), with 0
+/// treated as 1. Every fixed-block convolver uses this one rule so their
+/// accepted block sizes cannot drift apart.
+constexpr std::size_t convolver_block_size(std::size_t block_size) noexcept {
+    std::size_t pot = 1;
+    while (pot < block_size && pot <= (static_cast<std::size_t>(-1) >> 1))
+        pot <<= 1;
+    return pot;
+}
+
 /// Build a `ConvolverIrState` from a raw IR. This is the expensive path
 /// (allocations + N forward FFTs) and must run off the audio thread.
 template <typename SampleType = float>
@@ -106,13 +117,7 @@ build_convolver_ir_state(const SampleType* ir,
     if (ir == nullptr || ir_length == 0)
         return nullptr;
 
-    // Round up to next power-of-two for radix-2 FFT, matching
-    // PartitionedConvolver::load_ir.
-    if (block_size == 0 || (block_size & (block_size - 1)) != 0) {
-        std::size_t pot = 1;
-        while (pot < block_size) pot <<= 1;
-        block_size = pot;
-    }
+    block_size = convolver_block_size(block_size);
 
     auto state = std::make_unique<ConvolverIrStateT<SampleType>>();
     state->block_size = static_cast<int>(block_size);

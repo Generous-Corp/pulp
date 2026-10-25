@@ -1,0 +1,70 @@
+{
+  "schema": "pulp-browser-platform-fonts-v1",
+  "version": 1,
+  "summary": {
+    "text_runs": 2,
+    "interrogated": 2,
+    "resolved": 2,
+    "truncated": false
+  },
+  "faces_by_glyph_count": [
+    {
+      "family_name": "Helvetica",
+      "post_script_name": "Helvetica-Bold",
+      "is_custom_font": false,
+      "glyph_count": 4
+    }
+  ],
+  "runs": [
+    {
+      "layout_index": 11,
+      "node_index": 20,
+      "owner_node_index": 19,
+      "backend_node_id": 22,
+      "requested": {
+        "font_family": "sans-serif",
+        "font_size": "30px",
+        "font_weight": "700",
+        "font_style": "normal",
+        "letter_spacing": "normal"
+      },
+      "resolved": [
+        {
+          "family_name": "Helvetica",
+          "post_script_name": "Helvetica-Bold",
+          "is_custom_font": false,
+          "glyph_count": 2
+        }
+      ],
+      "line_metrics": {
+        "ascent": 28,
+        "descent": 7
+      }
+    },
+    {
+      "layout_index": 17,
+      "node_index": 27,
+      "owner_node_index": 26,
+      "backend_node_id": 29,
+      "requested": {
+        "font_family": "sans-serif",
+        "font_size": "30px",
+        "font_weight": "700",
+        "font_style": "normal",
+        "letter_spacing": "normal"
+      },
+      "resolved": [
+        {
+          "family_name": "Helvetica",
+          "post_script_name": "Helvetica-Bold",
+          "is_custom_font": false,
+          "glyph_count": 2
+        }
+      ],
+      "line_metrics": {
+        "ascent": 28,
+        "descent": 7
+      }
+    }
+  ]
+}

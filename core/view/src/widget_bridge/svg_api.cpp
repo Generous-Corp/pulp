@@ -28,7 +28,7 @@ void BridgeRegistrars::register_svg_api(WidgetBridge& self) {
         auto w = std::make_unique<SvgPathWidget>();
         w->set_id(id);
         self.widgets_[id] = w.get();
-        self.resolve_parent(pid)->add_child(std::move(w));
+        self.attach_created(id, pid, std::move(w));
         return choc::value::createString(id);
     });
 
@@ -172,6 +172,34 @@ void BridgeRegistrars::register_svg_api(WidgetBridge& self) {
         return choc::value::Value();
     });
 
+    // SVG stroke-linecap / stroke-linejoin / stroke-miterlimit on an SvgPath.
+    // An empty or unknown keyword and a missing or invalid limit leave that part
+    // unset, as the browser ignores them; the widget keeps the style local to its
+    // own stroke.
+    register_bridge_function(
+        api, "setSvgStrokeStyle", [&self](choc::javascript::ArgumentList args) {
+            auto* w = dynamic_cast<SvgPathWidget*>(self.widget(args.get<std::string>(0, "")));
+            if (!w)
+                return choc::value::Value();
+            const auto cap = args.get<std::string>(1, "");
+            if (cap == "butt")
+                w->set_stroke_cap(canvas::LineCap::butt);
+            else if (cap == "round")
+                w->set_stroke_cap(canvas::LineCap::round);
+            else if (cap == "square")
+                w->set_stroke_cap(canvas::LineCap::square);
+            const auto join = args.get<std::string>(2, "");
+            if (join == "miter" || join == "miter-clip" || join == "arcs")
+                w->set_stroke_join(canvas::LineJoin::miter);
+            else if (join == "round")
+                w->set_stroke_join(canvas::LineJoin::round);
+            else if (join == "bevel")
+                w->set_stroke_join(canvas::LineJoin::bevel);
+            if (args.size() > 3)
+                w->set_stroke_miter_limit(static_cast<float>(args.get<double>(3, 0.0)));
+            return choc::value::Value();
+        });
+
     // SvgRectWidget bridge. Mirrors createSvgPath / setSvgPath. Geometry is
     // local to the widget origin (not
     // bounds()-translated). x/y default to 0, w/h default to 0 so an
@@ -182,7 +210,7 @@ void BridgeRegistrars::register_svg_api(WidgetBridge& self) {
         auto w = std::make_unique<SvgRectWidget>();
         w->set_id(id);
         self.widgets_[id] = w.get();
-        self.resolve_parent(pid)->add_child(std::move(w));
+        self.attach_created(id, pid, std::move(w));
         return choc::value::createString(id);
     });
 
@@ -207,7 +235,7 @@ void BridgeRegistrars::register_svg_api(WidgetBridge& self) {
         auto w = std::make_unique<SvgLineWidget>();
         w->set_id(id);
         self.widgets_[id] = w.get();
-        self.resolve_parent(pid)->add_child(std::move(w));
+        self.attach_created(id, pid, std::move(w));
         return choc::value::createString(id);
     });
 

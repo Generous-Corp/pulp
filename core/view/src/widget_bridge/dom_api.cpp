@@ -10,6 +10,7 @@
 #include <pulp/view/widgets/svg_line.hpp>
 #include <pulp/view/widgets/svg_rect.hpp>
 #include "api_registry.hpp"
+#include "layout_baselines.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -283,6 +284,12 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                     // again. Yoga is the layout engine here, so the flex style
                     // IS the sizing contract; leaving it behind drops the
                     // container out of the layout it was authored into.
+                    // resetStyleProperty answers every slot but padding from
+                    // the wrapper, so it needs the content's STARTING layout
+                    // too, not the authored style it is about to copy.
+                    capture_layout_baseline(*content);
+                    auto wrapper_baseline = *find_layout_baseline(*content);
+                    wrapper_baseline.grid = wrapper->grid();
                     wrapper->flex() = removed->flex();
                     // The authored style now describes TWO boxes, so it has to
                     // be split rather than duplicated. The wrapper is the OUTER
@@ -297,11 +304,15 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                     // authored `padding-top` is applied twice — once by the
                     // wrapper, once by the content it now contains — and the
                     // content starts at double the authored inset.
-                    outer.padding = 0.0f;
-                    outer.padding_top = outer.padding_right =
-                        outer.padding_bottom = outer.padding_left = -1.0f;
-                    outer.dim_padding_top = outer.dim_padding_right =
-                        outer.dim_padding_bottom = outer.dim_padding_left = Dimension{};
+                    const auto clear_padding = [](FlexStyle& f) {
+                        f.padding = 0.0f;
+                        f.padding_top = f.padding_right = f.padding_bottom = f.padding_left = -1.0f;
+                        f.dim_padding_top = f.dim_padding_right = f.dim_padding_bottom =
+                            f.dim_padding_left = Dimension{};
+                    };
+                    clear_padding(outer);
+                    clear_padding(wrapper_baseline.flex);
+                    set_layout_baseline(*wrapper, std::move(wrapper_baseline));
 
                     // Margins belong to the outer box only, for the same reason
                     // in the other direction.
@@ -605,7 +616,7 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
             child->set_default_hover_feedback(true);
         }
         self.widgets_[childId] = child.get();
-        self.resolve_parent(parentId)->add_child(std::move(child));
+        self.attach_created(childId, parentId, std::move(child));
         return choc::value::Value();
     });
 
