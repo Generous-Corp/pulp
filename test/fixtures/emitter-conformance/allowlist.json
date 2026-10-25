@@ -57,8 +57,8 @@
       "anchor": "capture:out:38",
       "expected": "meter:out",
       "actual": "param:",
-      "issue": "https://github.com/Generous-Corp/pulp/issues/10984",
-      "reason": "SwiftUI declares kelvin's key-only output meter as a param entry with no key, while the native, baked C++ and ui.js lanes bind it by its meter key."
+      "issue": "https://github.com/Generous-Corp/pulp/issues/11008",
+      "reason": "SwiftUI does not bind kelvin's key-only output meter by its key: it declares a param entry with no key, while the native, baked C++ and ui.js lanes bind it as meter:out."
     },
     {
       "lane": "js",
