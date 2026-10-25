@@ -353,16 +353,28 @@ def borrowed_watch_coverage(root: pathlib.Path, base: str, head: str) -> list[st
         return []
     adders = {line for line in log.splitlines()
               if len(line) == 40 and all(c in "0123456789abcdef" for c in line)}
+    # The branch's own copies never count: its real upstream, and on every
+    # remote (GitHub need not be "origin") the same-named branch, main, HEAD
+    # and merge-queue refs.
     branch = _git(root, "rev-parse", "--abbrev-ref", "HEAD") or ""
-    ignored = {"origin/main", "origin/HEAD", "origin", f"origin/{branch}"}
+    upstream = _git(root, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+    remotes = (_git(root, "remote") or "").split()
+    ignored = {upstream} if upstream else set()
+    queue_prefixes = []
+    for remote in remotes:
+        ignored |= {remote, f"{remote}/main", f"{remote}/HEAD", f"{remote}/{branch}"}
+        queue_prefixes.append(f"{remote}/gh-readonly-queue/")
     others: set[str] = set()
     for commit in adders:
+        # --no-contains drops refs that already hold this head: a branch
+        # stacked on THIS one carries its commits, but this branch is the
+        # parent there, not the borrower.
         refs = _git(root, "branch", "-r", "--contains", commit,
-                    "--format=%(refname:short)")
+                    "--no-contains", head_sha, "--format=%(refname:short)")
         if refs is None:
             return []
         carriers = {r for r in refs.split()
-                    if r not in ignored and not r.startswith("origin/gh-readonly-queue/")}
+                    if r not in ignored and not r.startswith(tuple(queue_prefixes))}
         if not carriers:
             return []  # this commit is the branch's own: it has its own event
         others |= carriers

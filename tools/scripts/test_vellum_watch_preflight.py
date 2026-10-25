@@ -203,6 +203,55 @@ class VellumWatchPreflightTest(_PreflightRepo, unittest.TestCase):
         self.assertEqual(code, 0, output)
         self.assertNotIn("stacked", output)
 
+    def test_the_parent_of_a_stack_does_not_warn(self) -> None:
+        # Control: run on parent, with a child branch stacked on it on the
+        # remote. The child holds parent's event commit, but it holds parent's
+        # head too, so parent is not borrowing anything.
+        self._stacked_on_parent()
+        child = _git(self.repo, "rev-parse", "HEAD")
+        _git(self.repo, "update-ref", "refs/remotes/origin/topic", child)
+        _git(self.repo, "checkout", "-q", "parent")
+        code, output = self._run()
+        self.assertEqual(code, 0, output)
+        self.assertNotIn("stacked", output)
+        self.assertNotIn("origin/topic", output)
+
+    def test_a_non_origin_remote_is_ignored_like_origin(self) -> None:
+        # Control: GitHub is "dr" here, as on some hosts. The branch's own
+        # pushed copy and its upstream live under dr/ and must not count.
+        _git(self.repo, "remote", "add", "dr", "https://example.invalid/repo.git")
+        _git(self.repo, "checkout", "-q", "-b", "topic")
+        self._write(WATCHED_PATH, "# a one-line edit under a watched tree\n")
+        self._write(f"{EVENT_DIR_REL}/20260920-fixture.json",
+                    self._event("20260920-fixture", WATCHED_FAMILIES))
+        own = self._commit("feat: touch a watched tree, with its event")
+        # The pushed copy is one commit behind, so it holds the event commit
+        # but not this head: only the ignore list keeps it from counting.
+        self._write(WATCHED_PATH, "# a one-line edit under a watched tree\n# and more\n")
+        self._commit("feat: a follow-up on topic, not yet pushed")
+        _git(self.repo, "update-ref", "refs/remotes/dr/topic", own)
+        _git(self.repo, "update-ref", "refs/remotes/dr/main",
+             _git(self.repo, "rev-parse", "main"))
+        _git(self.repo, "config", "branch.topic.remote", "dr")
+        _git(self.repo, "config", "branch.topic.merge", "refs/heads/topic")
+        code, output = self._run()
+        self.assertEqual(code, 0, output)
+        self.assertNotIn("stacked", output)
+        # And a real parent under dr/ is still named.
+        _git(self.repo, "checkout", "-q", "main")
+        _git(self.repo, "checkout", "-q", "-b", "parent")
+        self._write(WATCHED_PATH, "# the parent PR's watched change\n")
+        self._write(f"{EVENT_DIR_REL}/20260920-parent.json",
+                    self._event("20260920-parent", WATCHED_FAMILIES))
+        parent = self._commit("feat: the parent PR, with its event")
+        _git(self.repo, "update-ref", "refs/remotes/dr/parent", parent)
+        _git(self.repo, "checkout", "-q", "-b", "child")
+        self._write(WATCHED_PATH, "# the parent PR's watched change\n# and child's\n")
+        self._commit("feat: child, stacked on parent")
+        code, output = self._run()
+        self.assertEqual(code, 0, output)
+        self.assertIn("dr/parent", output)
+
     def test_an_unstacked_covered_branch_does_not_warn(self) -> None:
         # Control: the same covered change on a branch no remote ref contains.
         _git(self.repo, "checkout", "-q", "-b", "topic")
