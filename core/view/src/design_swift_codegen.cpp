@@ -26,6 +26,7 @@
 #include "design_import_native_common.hpp"
 #include "design_ir_helpers.hpp"
 #include "design_binding_metadata.hpp"
+#include "design_cpp_binding_codegen.hpp"
 
 #include <algorithm>
 #include <array>
@@ -1585,9 +1586,20 @@ void emit_node(std::ostringstream& out, const SwiftEmitCtx& ctx,
         return;
     }
 
-    // Bound audio controls (knob/slider/toggle).
+    // Bound audio controls (knob/slider/toggle). A control binds only when its
+    // metadata would install a binding in the native and baked C++ lanes too
+    // (`binding_route_installable`); one resolved by its display label alone
+    // would bind controls the other lanes leave unbound, and a renamed label
+    // would silently rebind it. A refused binding reports the native binder's
+    // own diagnostic.
     if (is_bound_widget(kind)) {
-        const std::string key = binding_resolve_name(node);
+        const auto md = NativeBindingMetadata::parse(node);
+        const bool installable = binding_route_installable(node, kind, md);
+        const std::string key = installable ? binding_resolve_name(node) : std::string{};
+        if (!installable) {
+            if (const auto refusal = binding_refusal(node, kind, md))
+                push_fidelity(ctx, node, refusal->code, refusal->message, /*informational=*/false);
+        }
         if (key.empty()) {
             if (ctx.opts.include_comments)
                 emit_line(out, depth, s, "// unbound " + std::string(native_widget_kind_name(kind))
@@ -1841,8 +1853,9 @@ std::string emit_view(const DesignIR& ir, const ResolvedNativeNode& resolved,
 // (B1's exact-`PulpParameter.name` strategy — Pulp's state model has no stable
 // string key, so bound controls resolve by display name). An entry is emitted
 // for any node the C++ manifest would include (carries `pulp*` binding
-// metadata) OR any resolvable bound widget — the union gives the host both the
-// full contract and the name-resolution pre-flight. The field set is asserted
+// metadata); only a control whose metadata would install a binding in the
+// native and C++ lanes (`binding_route_installable`) is marked bound and gets
+// the name-resolution block. The field set is asserted
 // to match the C++ manifest by a cross-check test (test_design_swift_codegen).
 
 // The same manifest-eligibility predicate the C++ path uses (the `pulp*`
@@ -1882,7 +1895,10 @@ struct SwiftBindingEntry {
 
 void collect_swift_bindings(const IRNode& node, const ResolvedNativeNode& resolved,
                             std::string_view ir_path, std::vector<SwiftBindingEntry>& out) {
-    const bool bound = is_bound_widget(resolved.kind) && !binding_resolve_name(node).empty();
+    const bool bound =
+        is_bound_widget(resolved.kind) &&
+        binding_route_installable(node, resolved.kind, NativeBindingMetadata::parse(node)) &&
+        !binding_resolve_name(node).empty();
     if (bound || swift_node_has_binding_metadata(node))
         out.push_back({std::string(ir_path), &node, resolved.kind, bound});
     const std::size_t count = std::min(node.children.size(), resolved.children.size());
