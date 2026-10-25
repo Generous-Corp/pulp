@@ -3094,6 +3094,7 @@
   "pulp-test-six-band-eq",
   "pulp-test-skewed-range",
   "pulp-test-skia-surface",
+  "pulp-test-skia-surface-readback-macos",
   "pulp-test-smf-interchange",
   "pulp-test-sos-cascade",
   "pulp-test-spectral-cross-synthesis",
