@@ -1,0 +1,16 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261023-canvas-chart-device-frame-watch",
+  "slices": [
+    "render-assets-and-backends"
+  ],
+  "vellum_obligation": "Carry the device-orientation chart tangent (cross flipped under a mirroring map) into Vellum's canvas backend when the corresponding Pulp targets adopt Vellum. The fader chart path, presets and gallery tracks are Pulp-owned view code and are not owed.",
+  "evidence": [
+    ".github/vellum-expansion-watch-events/20261023-canvas-chart-device-frame-watch.json",
+    "ctest --test-dir build -R 'SDF chart reports tan in device orientation'",
+    "ctest --test-dir build -R 'fader chart presets are lit on screen on vertical and horizontal tracks'",
+    "ctest --test-dir build -R 'fader chart presets show the fader.s value'",
+    "ctest --test-dir build -R 'faders without a chart render as before'",
+    "ctest --test-dir build -R 'widget gallery shows chart shader presets on fader tracks'"
+  ]
+}

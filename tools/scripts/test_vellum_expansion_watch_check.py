@@ -163,15 +163,19 @@ class Tests(unittest.TestCase):
             2,
         )
 
-    def test_authority_surfaces_require_owner_review(self) -> None:
+    def test_authority_surfaces_listed_in_codeowners(self) -> None:
+        # Listed without an owner so GitHub requests no review; activation
+        # restores the owner (docs/contracts/vellum-activation-readiness.md).
         codeowners = (ROOT / ".github/CODEOWNERS").read_text().splitlines()
+        patterns = {line.split()[0] for line in codeowners if line.strip()
+                    and not line.startswith("#")}
         expected = {
-            "/.github/vellum-expansion-watch/ @danielraffel",
-            "/.github/vellum-expansion-watch-events/ @danielraffel",
-            "/tools/scripts/vellum_expansion_watch_check.py @danielraffel",
-            "/tools/scripts/test_vellum_expansion_watch_check.py @danielraffel",
+            "/.github/vellum-expansion-watch/",
+            "/.github/vellum-expansion-watch-events/",
+            "/tools/scripts/vellum_expansion_watch_check.py",
+            "/tools/scripts/test_vellum_expansion_watch_check.py",
         }
-        self.assertTrue(expected <= set(codeowners))
+        self.assertTrue(expected <= patterns)
 
     def test_absent_acceptance_is_clean_inactive_state(self) -> None:
         temporary, repo = self.git_repo()

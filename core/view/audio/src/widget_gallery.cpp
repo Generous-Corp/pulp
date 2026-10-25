@@ -109,7 +109,7 @@ std::unique_ptr<View> build_widget_gallery(const Theme& theme) {
     }
     y += 56.0f;
 
-    // ── Shader presets: each knob's arc is a named chart-shader preset ──
+    // ── Shader presets: knob arcs and fader tracks drawn by named chart presets ──
     header("Shader presets");
     {
         ChartShaderPresetOptions options;
@@ -143,8 +143,44 @@ std::unique_ptr<View> build_widget_gallery(const Theme& theme) {
             add(std::move(k), kx, y, 84.0f, 84.0f);
             kx += 104.0f;
         }
+        y += 104.0f;
+
+        // Fader tracks: the same presets on vertical and horizontal stadiums,
+        // lit from above on screen whichever way the track runs.
+        struct TrackLook {
+            const char* preset;
+            ChartProfile profile;
+            bool vertical;
+            float value;
+        };
+        const TrackLook tracks[] = {
+            {"inset-channel", ChartProfile::round, true, 0.3f},
+            {"tube", ChartProfile::round, true, 0.55f},
+            {"light-pipe", ChartProfile::round, true, 0.8f},
+            {"inset-channel", ChartProfile::round, false, 0.35f},
+            {"tube", ChartProfile::chamfer, false, 0.7f},
+        };
+        float fx = M;
+        float hy = y;
+        for (const auto& track : tracks) {
+            options.pressed = false;
+            options.profile = track.profile;
+            auto preset = make_chart_shader_preset(track.preset, options);
+            auto f = std::make_unique<Fader>();
+            f->set_orientation(track.vertical ? Fader::Orientation::vertical
+                                              : Fader::Orientation::horizontal);
+            f->set_value(track.value);
+            f->set_chart_shader(std::move(preset.sksl), preset.reach);
+            if (track.vertical) {
+                add(std::move(f), fx, y, 28.0f, 96.0f);
+                fx += 56.0f;
+            } else {
+                add(std::move(f), fx, hy + 20.0f, 240.0f, 28.0f);
+                hy += 44.0f;
+            }
+        }
     }
-    y += 104.0f;
+    y += 112.0f;
 
     // ── Status & feedback ──
     header("Status & feedback");

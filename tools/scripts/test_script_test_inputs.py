@@ -1326,6 +1326,23 @@ class ScanScopeTests(unittest.TestCase):
             self.assertEqual(sti.source_signals(root, "test/build.cpp", []), [])  # the build tree
             self.assertEqual(sti.source_signals(root, "test/log.cpp", []), [])
 
+    def test_a_mention_inside_a_comment_is_not_a_read(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(root, "test/line.cpp", "// loads test/fixtures/a/clip.wav via PULP_SOURCE_DIR\nint x = 0;\n")
+            write(root, "test/block.cpp", "/* test/fixtures/a and FIXTURE_DIR */\nint y = 0;\n")
+            self.assertEqual(sti.source_signals(root, "test/line.cpp", []), [])
+            self.assertEqual(sti.source_signals(root, "test/block.cpp", ["FIXTURE_DIR"]), [])
+            # Control: the same mentions in code are still reads, including
+            # after a literal whose `/*` must not open a comment.
+            write(root, "test/code.cpp",
+                  'auto g = "**/*.json";\n'
+                  'auto p = fs::path(PULP_SOURCE_DIR) / "test/fixtures/a"; // reads it\n'
+                  "auto q = FIXTURE_DIR;\n"
+                  'auto h = "**/*.cpp";\n')
+            self.assertEqual(sti.source_signals(root, "test/code.cpp", ["FIXTURE_DIR"]),
+                             ["PULP_SOURCE_DIR", "test/fixtures", "FIXTURE_DIR"])
+
     def scope_build(self, tmp: Path) -> tuple[Path, Path]:
         root, build = tmp / "repo", tmp / "build"
         write(root, "test/t.cpp", "auto p = fs::path(PULP_SOURCE_DIR);\n")
