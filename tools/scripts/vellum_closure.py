@@ -19,19 +19,22 @@ import sys
 from pathlib import Path
 from typing import Iterable
 
+import vellum_policy
 from include_boundary import include_edges
 
-FORBIDDEN_TARGET = re.compile(r"(?:^|[-_:])(audio|signal|host|midi|music|format|content|gpu_audio)(?:$|[-_:])", re.I)
-FORBIDDEN_INCLUDE = re.compile(r"^pulp/(?:audio|signal|host|midi|music|format|content)(?:/|$)", re.I)
-FORBIDDEN_ROOTS = tuple(f"core/{name}/" for name in ("audio", "signal", "host", "midi", "music", "format", "content"))
+# Every forbidden-subsystem form below derives from tools/scripts/vellum_policy.json.
+_FORBIDDEN = vellum_policy.alternation()
+FORBIDDEN_TARGET = re.compile(rf"(?:^|[-_:])({_FORBIDDEN})(?:$|[-_:])", re.I)
+FORBIDDEN_INCLUDE = re.compile(rf"^pulp/(?:{_FORBIDDEN})(?:/|$)", re.I)
+FORBIDDEN_ROOTS = vellum_policy.roots()
 TEXT_EXTS = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".m", ".mm", ".cmake"}
 RESOURCE_EXTS = {".sksl", ".glsl", ".frag", ".vert", ".ttf", ".otf", ".woff", ".woff2"}
 FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-# The Pulp-built Skia support library; the D3 unit that carries it is where
-# Skia enters the unit graph.
+# The Pulp-built Skia support library; the extraction unit that carries it is
+# where Skia enters the unit graph.
 SKIA_SUPPORT_TARGET = "pulp-skia-chromium-raw-ptr-compat"
 # A CMake reference to a Pulp target the extraction must not carry.
-FORBIDDEN_CMAKE_TARGET = re.compile(r"\bpulp(?:-|::)(?:audio|signal|host|midi|music|format|content|gpu[-_]audio)\b", re.I)
+FORBIDDEN_CMAKE_TARGET = re.compile(rf"\bpulp(?:-|::)(?:{_FORBIDDEN})\b", re.I)
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 EXTERNAL_RE = re.compile(r"^@external/(?P<slug>[^/]+)/(?P<pin>[^/]+)(?:/|$)")
 BUILD_DEPS_RE = re.compile(r"^@build/_deps/(?:pulp-mutable-)?(?P<name>[^/]+?)-(?:src|build)(?:/|$)")

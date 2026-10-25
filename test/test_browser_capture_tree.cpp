@@ -508,6 +508,40 @@ TEST_CASE("an interactive node drawn out of Chrome's order counts even without i
     REQUIRE(nested.counts.overlapping_reorder_pairs.size() == 1);
 }
 
+TEST_CASE("capture anchors match the vectors the lab's port is pinned to",
+          "[browser-capture][native-lowering][anchors]") {
+    // test_importer_differential_lab.py asserts the same file through the
+    // lab's Python `capture_anchors`. The lab pairs its two Chromium lanes by
+    // these strings, so a spelling change here that the port does not share
+    // reads there as every node missing.
+    const auto root = fs::path(PULP_BROWSER_CAPTURE_FIXTURE_ROOT);
+    const auto read = [](const fs::path& path) {
+        std::ifstream in(path, std::ios::binary);
+        REQUIRE(in.good());
+        return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    };
+    const auto vectors = choc::json::parse(read(root / "capture-anchor-vectors.json"));
+    const auto cases = vectors["cases"];
+    REQUIRE(cases.size() >= 8);
+    for (uint32_t c = 0; c < cases.size(); ++c) {
+        const auto entry = cases[static_cast<int>(c)];
+        const std::string name(entry["name"].toString());
+        INFO("case " << name);
+        const std::string bytes = entry.hasObjectMember("snapshot")
+                                      ? choc::json::toString(entry["snapshot"])
+                                      : read(root / std::string(entry["snapshot_path"].toString()));
+        const auto index = CapturedStyleIndex::load_bytes(bytes);
+        REQUIRE(index.has_value());
+        const auto anchors = capture_anchor_paths(*index);
+        const auto expected = entry["anchors"];
+        REQUIRE(anchors.size() == expected.size());
+        for (uint32_t node = 0; node < expected.size(); ++node) {
+            INFO("node " << node);
+            CHECK(anchors[node] == std::string(expected[static_cast<int>(node)].toString()));
+        }
+    }
+}
+
 TEST_CASE("native lowering draws the panel's real nodes, not a bitmap",
           "[browser-capture][native-lowering]") {
     const auto native = lower_fixture(true);

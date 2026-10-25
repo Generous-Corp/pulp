@@ -167,6 +167,9 @@ commands:
         args:
           - name: --identity
             required: false
+          - name: --allow-dev-build
+            required: false
+            description: Ship a build dir configured with PULP_DEV_BUILD=ON (the on-disk ui.js hot-reload path recorded) as it is, instead of building and shipping build-ship/
           - name: --path
             required: false
             description: Sign one explicit desktop artifact (macOS .app/.dmg/bundle, Windows .exe/bundle; .pkg is signed at package time) instead of scanning build dirs
@@ -211,6 +214,9 @@ commands:
         args:
           - name: --version
             required: false
+          - name: --allow-dev-build
+            required: false
+            description: Ship a build dir configured with PULP_DEV_BUILD=ON (the on-disk ui.js hot-reload path recorded) as it is, instead of building and shipping build-ship/
           - name: --target
             required: false
           - name: --keystore

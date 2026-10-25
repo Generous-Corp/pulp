@@ -160,6 +160,22 @@ function(_pulp_v8_windows_generate_libcxx_config out_dir_var)
     set(${out_dir_var} "${_cfg_dir}" PARENT_SCOPE)
 endfunction()
 
+# The V8-specific defines the Windows consumer needs beyond what v8::v8 already
+# carries. A sealed provider puts V8_COMPRESS_POINTERS on v8::v8 from its
+# manifest consumer_defines (PulpV8ConsumerDefines.cmake), so it is added here
+# only for a legacy V8_INCLUDE_DIR/V8_LIB_DIR override, which has no manifest.
+function(pulp_v8_windows_abi_defines out_var)
+    set(_carried "")
+    if(TARGET v8::v8)
+        get_target_property(_carried v8::v8 INTERFACE_COMPILE_DEFINITIONS)
+    endif()
+    set(_defines "")
+    if(NOT "V8_COMPRESS_POINTERS" IN_LIST _carried)
+        list(APPEND _defines V8_COMPRESS_POINTERS)
+    endif()
+    set(${out_var} "${_defines}" PARENT_SCOPE)
+endfunction()
+
 # Apply the Windows V8-consumer ABI flags to the target that compiles
 # src/js_v8_engine.cpp (pulp-view-script). NO-OP off Windows.
 function(pulp_v8_windows_apply_abi target)
@@ -208,8 +224,14 @@ function(pulp_v8_windows_apply_abi target)
         "$<$<COMPILE_LANGUAGE:CXX>:/clang:${PULP_V8_WIN_LIBCXX_INCLUDE}>"
         "$<$<COMPILE_LANGUAGE:CXX>:/GR->")
 
+    pulp_v8_windows_abi_defines(_v8_abi_defines)
+    if(_v8_abi_defines)
+        set(_v8_abi_defines_source "an explicit define")
+    else()
+        set(_v8_abi_defines_source "the provider consumer_defines")
+    endif()
     target_compile_definitions(${target} PRIVATE
-        V8_COMPRESS_POINTERS
+        ${_v8_abi_defines}
         _LIBCPP_DISABLE_AVAILABILITY
         # Suppress libc++'s `#pragma comment(lib,"c++")` autolink — we link the
         # __Cr libc++.lib explicitly below; the default autolink would pull a
@@ -231,7 +253,8 @@ function(pulp_v8_windows_apply_abi target)
 
     message(STATUS
         "Pulp Windows V8: applied clang-cl + Chromium libc++ (__Cr) consumer "
-        "ABI to '${target}' (V8_COMPRESS_POINTERS; libc++ headers "
+        "ABI to '${target}' (V8_COMPRESS_POINTERS via "
+        "${_v8_abi_defines_source}; libc++ headers "
         "${PULP_V8_WIN_LIBCXX_INCLUDE}; config ${_cfg_dir}; runtime "
         "${PULP_V8_WIN_LIBCXX_LIB}).")
 endfunction()

@@ -364,7 +364,11 @@ fork — the same pin/fetch/Find pattern as Skia:
 3. **Resolve:** `tools/cmake/FindV8.cmake` finds `external/v8-build/<key>`
    (or a baked `$V8_DIR`, or legacy overrides) and exposes the `v8::v8`
    imported target. The configure log prints
-   `-- Pulp V8 provider: <path> (platform key: ...)`.
+   `-- Pulp V8 provider: <path> (platform key: ...)`. The provider's
+   `manifest.json` `consumer_defines` ride on `v8::v8` as
+   `INTERFACE_COMPILE_DEFINITIONS` (printed as `-- Pulp V8 consumer defines:`);
+   V8's inline headers read them, so a missing or malformed manifest fails
+   configure rather than compiling against the header defaults.
 
 **Selecting V8 — that's all you need:**
 
@@ -436,7 +440,9 @@ required platform acceptance step:
    is MSVC cl.
 2. **`-DV8_COMPRESS_POINTERS`** — mandatory; without it the inline
    `v8-internal.h` tagged-field offsets mismatch the DLL and silently
-   corrupt the heap.
+   corrupt the heap. A sealed provider supplies it through its manifest
+   `consumer_defines` on `v8::v8`; `PulpV8Windows.cmake` adds it explicitly
+   only for the manifest-less legacy override.
 3. **Chromium-style libc++ headers** with `_LIBCPP_ABI_NAMESPACE=__Cr`
    (routed via clang-cl's `/clang:-nostdinc++ /clang:-isystem` — bare
    `-nostdinc++` is silently dropped by clang-cl, which is the trap that

@@ -1,0 +1,43 @@
+<!doctype html>
+<style>
+  /* Boxes whose border, radius or shadow sits under a scale. Chrome scales
+     those lengths with the box; the snapshot reports the box post-transform
+     and the lengths pre-transform. */
+  body { margin: 0; background: #111; }
+  #panel { position: relative; width: 600px; height: 300px; background: #222; }
+  .abs { position: absolute; }
+  /* A hairline scaled on one axis: a 4px box with a 1px border at 5% width. */
+  #hair { left: 20px; top: 20px; width: 4px; height: 72px; border: 1px solid #e04040;
+          transform: scaleX(0.05); transform-origin: 0 0; }
+  /* A fit-to-viewport wrapper at half size around a rounded, shadowed card. */
+  #shrink { left: 60px; top: 20px; width: 200px; height: 100px;
+            transform: scale(0.5); transform-origin: 0 0; }
+  #card { left: 0; top: 0; width: 160px; height: 80px; border: 4px solid #4a6fa5;
+          border-radius: 16px; box-shadow: 0 8px 16px rgba(0, 0, 0, .5); background: #2c3036; }
+  /* Two axes with a rounded corner: the borders scale per side, the radius
+     cannot. */
+  #squash { left: 180px; top: 20px; width: 80px; height: 40px; border: 2px solid #40a060;
+            border-radius: 8px; background: #2c3036;
+            transform: scale(0.5, 1.5); transform-origin: 0 0; }
+  /* Two axes with a hard shadow, which one offset per axis carries. */
+  #hard { left: 260px; top: 20px; width: 80px; height: 40px; background: #2c3036;
+          box-shadow: 4px 4px 0 #a0a040; transform: scale(2, 1); transform-origin: 0 0; }
+  /* Two axes with a soft shadow, which it does not. */
+  #soft { left: 260px; top: 120px; width: 80px; height: 40px; background: #2c3036;
+          box-shadow: 0 6px 12px rgba(0, 0, 0, .6); transform: scale(2, 1); transform-origin: 0 0; }
+  /* A skew leaves no side with one width. */
+  #skewed { left: 440px; top: 20px; width: 80px; height: 40px; border: 2px solid #a040a0;
+            transform: skewX(20deg); transform-origin: 0 0; }
+  /* The control: the same card with no transform anywhere above it. */
+  #plain { left: 20px; top: 180px; width: 160px; height: 80px; border: 4px solid #4a6fa5;
+           border-radius: 16px; box-shadow: 0 8px 16px rgba(0, 0, 0, .5); background: #2c3036; }
+</style>
+<div id="panel">
+  <div class="abs" id="hair"></div>
+  <div class="abs" id="shrink"><div class="abs" id="card"></div></div>
+  <div class="abs" id="squash"></div>
+  <div class="abs" id="hard"></div>
+  <div class="abs" id="soft"></div>
+  <div class="abs" id="skewed"></div>
+  <div class="abs" id="plain"></div>
+</div>

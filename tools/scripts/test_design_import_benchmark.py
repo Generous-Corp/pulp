@@ -653,6 +653,29 @@ class CompareTests(unittest.TestCase):
         self.assertEqual(len(result["thermal_observations"]), 20)
         self.assertEqual(result["verdict"], "win")
 
+    def test_run_compare_adds_side_args_to_one_side_only(self) -> None:
+        calls: list[list[str]] = []
+
+        def fake_run(cmd: list[str], **kwargs: object) -> object:
+            calls.append(cmd)
+            out = pathlib.Path(next(a for a in cmd if a.startswith("--output=")).split("=", 1)[1])
+            body = receipt("baked-native", 1.0)
+            body["idle"] = {"counters": {"counter_schema": "pulp-design-import-benchmark-counters-v1",
+                                         **{name: 0 for name in dib.COUNTER_FIELDS}}}
+            body["interactive"]["counters"].update(
+                {name: body["interactive"]["counters"].get(name, 0) for name in dib.COUNTER_FIELDS})
+            out.write_text(json.dumps(body), encoding="utf-8")
+            return object()
+
+        with tempfile.TemporaryDirectory() as td:
+            result = dib.run_compare(pathlib.Path("/tmp/fake-bench"), "baked-native", "baked-native",
+                                     2, ["--frames=60"], pathlib.Path(td),
+                                     observe=lambda: {"thermal_state": "nominal"}, runner=fake_run,
+                                     side_args={"baseline": ["--paragraph-cache=off"]})
+        self.assertEqual(["--paragraph-cache=off" in c for c in calls], [True, False, True, False])
+        self.assertTrue(all("--frames=60" in c for c in calls))
+        self.assertEqual(result["side_args"], {"baseline": ["--paragraph-cache=off"]})
+
     def test_thermal_helper_output_is_validated(self) -> None:
         class Done:
             def __init__(self, code: int, out: str) -> None:

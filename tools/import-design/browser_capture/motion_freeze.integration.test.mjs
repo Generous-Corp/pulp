@@ -134,6 +134,12 @@ for (const durationMs of [4000, 8000]) {
         assert.ok(frozen, "the frozen animation is accepted");
         assert.ok(frozen.equals(resting),
           "the accepted bytes are the animation's resting frame");
+        // Every frame in the caller's encoding: the horizon a page with an
+        // animated image takes ships the same bytes.
+        const full = await captureStableScreenshot(
+          cdp, OPTIONS, undefined, undefined, undefined, null);
+        assert.ok(full && full.equals(frozen),
+          "both horizons accept the same bytes");
       });
     });
 }
@@ -352,9 +358,48 @@ test("a full capture holds an infinite animation still and declares animated ima
         url: "pulp-capture:///once.gif",
         byte_length: gif([0, 1]).length,
       }]);
+      // The declared GIF keeps every horizon frame in the caller's encoding.
+      assert.equal(motion.horizon_presentation_format, null);
       for (const { envelope } of captures.slice(1)) {
         assert.deepEqual(envelope.provenance.motion, motion);
       }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+test("an infinite animation ships the same bytes over three cheap horizons",
+  { timeout: captureCaseTimeout(3), skip: process.platform === "win32" },
+  async (context) => {
+    const browser = await installedBrowser();
+    if (!browser) return context.skip("no compatible system browser is installed");
+    const root = await mkdtemp(path.join(os.tmpdir(), "pulp-browser-motion-"));
+    const input = path.join(root, "panel.html");
+    const script = fileURLToPath(new URL("./capture.mjs", import.meta.url));
+    try {
+      await writeFile(input, `<!doctype html><style>
+        html,body{margin:0;width:120px;height:80px;background:#246}
+        #pulse{position:absolute;left:10px;top:10px;width:40px;height:40px}
+      </style><div id="pulse"></div>
+      <script>document.getElementById("pulse").animate(
+        [{backgroundColor:"#ff0000"},{backgroundColor:"#00ff00"}],
+        {duration:500,iterations:Infinity});</script>`);
+      const pngs = [];
+      for (let run = 0; run < 3; run += 1) {
+        const output = path.join(root, `capture-${run}`);
+        await runCapture(script, browser, input, root, output, 120, 80);
+        const envelope = JSON.parse(
+          await readFile(path.join(output, "capture.json"), "utf8"));
+        assert.equal(envelope.provenance.motion.animations.paused, 1);
+        assert.deepEqual(envelope.provenance.motion.volatile_sources, []);
+        assert.equal(envelope.provenance.motion.horizon_presentation_format, "jpeg");
+        pngs.push(await readFile(path.join(output, "browser.png")));
+      }
+      for (const png of pngs.slice(1)) {
+        assert.ok(png.equals(pngs[0]), "every run ships the same bytes");
+      }
+      assert.deepEqual(rgbaPixel(pngs[0], 60, 60), [255, 0, 0, 255],
+        "the pulse is held on its first keyframe");
     } finally {
       await rm(root, { recursive: true, force: true });
     }

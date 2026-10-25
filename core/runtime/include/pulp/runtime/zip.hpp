@@ -71,7 +71,8 @@ std::optional<std::vector<uint8_t>> zlib_compress(const uint8_t* data, size_t si
                                                   int level = 6);
 
 /// Decompress exactly one RFC 1950 zlib stream. Unlike gzip_decompress(), this
-/// rejects RFC 1952 gzip wrapping and trailing bytes.
+/// rejects RFC 1952 gzip wrapping and trailing bytes. It allocates its output,
+/// so it must never run on the audio thread.
 std::optional<std::vector<uint8_t>> zlib_decompress(
     const uint8_t* data, size_t size,
     size_t max_output = kDefaultMaxDecompressOutput);
