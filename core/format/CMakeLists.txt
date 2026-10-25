@@ -89,6 +89,11 @@ target_sources(pulp-format-core PRIVATE
 
 target_sources(pulp-format-view PRIVATE
     src/view_bridge.cpp
+    # Constructs the UI_SCRIPT editor's ScriptedUiSession. Its own archive
+    # member, loaded only by a binary that calls
+    # install_scripted_editor_builder(), so AutoUi plug-ins do not link the
+    # script runtime.
+    src/scripted_editor_builder.cpp
     # The two Processor::SettingsSection members that need view::View complete
     # (adopting a view, take_view); create_view() does not, and stays in
     # format.cpp.

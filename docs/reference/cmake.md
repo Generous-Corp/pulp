@@ -321,14 +321,19 @@ plug-in links reaches a scripted editor only through
 `view::ScriptedEditorSession`'s virtual calls and a prewarm runner slot, so a
 plug-in whose editor runs no script (the generated AutoUI editor, or native
 views) links none of the JS engine, the widget bridge or the session code;
-about 5 MB of a stripped module. Linking follows code references, not a flag:
-`UI_SCRIPT`, or any code in the plug-in that constructs a
-`view::ScriptedUiSession`, links the runtime, and the session's static
-initializer installs the prewarm runner. A plug-in that loads a script at run
-time without declaring `UI_SCRIPT` opts back in simply by constructing its
-session in its own code; nothing else is needed. The one case this does not
-cover is reaching the runtime only by name at run time (`dlsym()`), which
-cannot work because nothing links it. Coverage:
+about 5 MB of a stripped module, plus the Skia text and canvas code the
+widget bridge draws through. Linking follows code references, not a flag. A
+target that declares `UI_SCRIPT` (or gets one from `pulp_use_kit_ui()`) calls
+`pulp::format::install_scripted_editor_builder()` from its generated
+editor-assets source, which links the code that builds the scripted editor and
+with it the runtime. Any code in the plug-in that constructs a
+`view::ScriptedUiSession` links the runtime too, and the session's static
+initializer installs the prewarm runner; a plug-in that loads a script at run
+time without declaring `UI_SCRIPT` opts back in that way. A multi-plug-in
+bundle whose scripts come only from `PluginRegistration::ui_script` entries
+calls `install_scripted_editor_builder()` itself; without it the editor logs
+that the builder is missing and opens AutoUi. Reaching the runtime only by name
+at run time (`dlsym()`) cannot work, because nothing links it. Coverage:
 `plugin-module-no-script-runtime-PulpGain-<FORMAT>`.
 
 **Local symbols stripped at packaging.** `pulp ship package` and

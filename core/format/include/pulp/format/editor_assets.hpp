@@ -87,6 +87,14 @@ EditorAssets registered_editor_assets() noexcept;
 /// binary-wide record.
 EditorAssets editor_assets_for(const char* plugin_id) noexcept;
 
+/// Link and install the scripted editor builder (see
+/// `scripted_editor_builder_slot()` in editor_ui.hpp). The generated source of
+/// a target that declares a UI script calls this at static init; a binary
+/// whose script comes only from a keyed bundle registration calls it itself.
+/// Defined in pulp-format-view, so only a binary that calls it links the
+/// script runtime. Static-init safe.
+void install_scripted_editor_builder() noexcept;
+
 /// Test-only: clear the binary-wide record. NOT for production use.
 void reset_editor_assets_for_testing() noexcept;
 
