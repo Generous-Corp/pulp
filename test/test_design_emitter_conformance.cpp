@@ -82,6 +82,7 @@ namespace fs = std::filesystem;
 PULP_CONFORMANCE_FIXTURE(form_controls_08)
 PULP_CONFORMANCE_FIXTURE(spectr)
 PULP_CONFORMANCE_FIXTURE(kelvin)
+PULP_CONFORMANCE_FIXTURE(keyed_list_18)
 PULP_CONFORMANCE_FIXTURE(fidelity_scene)
 #undef PULP_CONFORMANCE_FIXTURE
 
@@ -125,6 +126,10 @@ std::string skin_name(UaSkin skin) {
     return skin == UaSkin::chromium_refresh ? "chromium_refresh" : "platform";
 }
 
+std::string scheme_name(UaColorScheme scheme) {
+    return scheme == UaColorScheme::dark ? "dark" : "light";
+}
+
 std::string colour(pulp::canvas::Color c) {
     const auto byte = [](float v) {
         return static_cast<int>(std::lround(std::clamp(v, 0.0f, 1.0f) * 255.0f));
@@ -149,6 +154,7 @@ void project_state(const View& view, std::map<std::string, std::string>& fields)
         fields["state.step"] = number(range->step());
         fields["state.value"] = number(range->value());
         fields["state.skin"] = skin_name(range->skin());
+        fields["state.scheme"] = scheme_name(range->color_scheme());
         fields["state.enabled"] = range->enabled() ? "true" : "false";
         if (range->has_accent_color())
             fields["state.accent"] = colour(range->accent_color());
@@ -156,11 +162,16 @@ void project_state(const View& view, std::map<std::string, std::string>& fields)
         fields["state.control"] = box->kind() == Checkbox::Kind::radio ? "radio" : "checkbox";
         fields["state.checked"] = box->is_checked() ? "true" : "false";
         fields["state.skin"] = skin_name(box->skin());
+        fields["state.scheme"] = scheme_name(box->color_scheme());
         fields["state.enabled"] = box->enabled() ? "true" : "false";
         if (box->kind() == Checkbox::Kind::radio)
             fields["state.radio_group"] = std::to_string(box->radio_group());
         if (const auto accent = box->accent_color())
             fields["state.accent"] = colour(*accent);
+    } else if (const auto* surface = dynamic_cast<const ButtonSurface*>(&view)) {
+        fields["state.control"] = "button";
+        fields["state.scheme"] = scheme_name(surface->color_scheme());
+        fields["state.enabled"] = surface->enabled() ? "true" : "false";
     }
 }
 
@@ -286,6 +297,8 @@ std::vector<Fixture> fixtures() {
          c::spectr::conformance_bind},
         {"kelvin", dir / "kelvin.ir.json", false, c::kelvin::conformance_build,
          c::kelvin::conformance_bind},
+        {"keyed-list-18", dir / "keyed-list-18.ir.json", false, c::keyed_list_18::conformance_build,
+         c::keyed_list_18::conformance_bind},
         {"fidelity-scene", root / "test/fixtures/import-fidelity/scene.pulp.json", true,
          c::fidelity_scene::conformance_build, c::fidelity_scene::conformance_bind},
     };
@@ -684,7 +697,21 @@ TEST_CASE("ui.js lowers theme-painted controls and snapped paint rects as the na
     auto plain = theme_control("plain", "range", 340.0f);
     plain.attributes["native_theme"] = "author";
     plain.attributes["browser_box_paint_right_px"] = "10";
-    for (auto* node : {&range, &checkbox, &radio, &plain})
+    // A theme-painted <button> keeps its label as a child.
+    auto button = theme_control("button", "button", 450.0f);
+    button.attributes["ua_disabled"] = "1";
+    button.attributes["ua_color_scheme"] = "dark";
+    IRNode label;
+    label.type = "text";
+    label.text_content = "Apply";
+    label.stable_anchor_id = "button-label";
+    label.style.position = "absolute";
+    label.style.left = 4.0f;
+    label.style.top = 2.0f;
+    label.style.width = 40.0f;
+    label.style.height = 12.0f;
+    button.children.push_back(label);
+    for (auto* node : {&range, &checkbox, &radio, &plain, &button})
         ir.root.children.push_back(*node);
 
     const StagedAssets assets(ir);
@@ -692,6 +719,9 @@ TEST_CASE("ui.js lowers theme-painted controls and snapped paint rects as the na
     const auto js = js_lane(ir, assets.dir());
     REQUIRE(native.at("range").at("kind") == "pulp::view::RangeSlider");
     REQUIRE(native.at("radio").at("state.control") == "radio");
+    REQUIRE(native.at("button").at("kind") == "pulp::view::ButtonSurface");
+    REQUIRE(native.at("button").at("state.scheme") == "dark");
+    REQUIRE(native.at("button-label").at("parent") == "button");
     REQUIRE(native.at("range").count("paint.captured") == 1);
     REQUIRE(native.at("plain").count("paint.captured") == 0);
 
@@ -704,15 +734,15 @@ TEST_CASE("ui.js lowers theme-painted controls and snapped paint rects as the na
 
 TEST_CASE("ui.js leaves a theme-painted control it has no case for as a plain frame",
           "[view][import][emitter-conformance][form-controls]") {
-    // A control kind the ui.js lowering does not handle (a button, a colour
-    // picker) must not fall through to another widget: it stays a frame, as
-    // it does in the native lane until that lane lowers it too.
+    // A control kind the ui.js lowering does not handle (a colour picker, a
+    // kind nobody records yet) must not fall through to another widget: it
+    // stays a frame, as it does in the native lane until that lane lowers it.
     DesignIR ir;
     ir.root.type = "frame";
     ir.root.stable_anchor_id = "root";
     ir.root.style.width = 400.0f;
     ir.root.style.height = 60.0f;
-    for (const char* control : {"button", "color", "made-up"}) {
+    for (const char* control : {"color", "made-up"}) {
         auto node = theme_control(control, control, 10.0f + 100.0f * ir.root.children.size());
         node.children.push_back(IRNode{});
         node.children.back().type = "frame";
@@ -730,7 +760,7 @@ TEST_CASE("ui.js leaves a theme-painted control it has no case for as a plain fr
     const StagedAssets assets(ir);
     const auto native = native_lane(ir, assets.dir());
     const auto lane = js_lane(ir, assets.dir());
-    for (const char* control : {"button", "color", "made-up"}) {
+    for (const char* control : {"color", "made-up"}) {
         INFO(control);
         REQUIRE(lane.count(control) == 1);
         CHECK(lane.at(control).at("kind") == "pulp::view::View");

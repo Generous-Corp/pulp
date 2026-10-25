@@ -20,6 +20,13 @@ namespace pulp::view {
 bool emit_js_ua_form_control(std::ostream& out, const IRNode& node, const std::string& indent,
                              const std::string& id, const std::string& parent);
 
+/// For a theme-painted <button>, writes createButtonSurface() under @p parent,
+/// laid out as a row or a column, and the scheme and disabled state the
+/// surface is painted in, then returns true; the caller emits its children.
+/// Writes nothing and returns false for any other node.
+bool emit_js_ua_button_surface(std::ostream& out, const IRNode& node, const std::string& indent,
+                               const std::string& id, const std::string& parent, bool row);
+
 /// Writes setCapturedPaintRect() for a node that carries a valid captured
 /// paint rect (`browser_box_paint_*`), with the values the native materializer
 /// gives View::set_captured_box_paint_rect(); writes nothing otherwise.

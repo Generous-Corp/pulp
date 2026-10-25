@@ -186,7 +186,8 @@ void BridgeRegistrars::register_widget_value_controls_api(WidgetBridge& self) {
     });
 
     // setUaSkin(id, "chromium_refresh" | "platform", "light" | "dark")
-    // Which skin paints a RangeSlider or Checkbox, and the CSS color-scheme a
+    // Which skin paints a RangeSlider or Checkbox (a ButtonSurface takes only
+    // the scheme), and the CSS color-scheme a
     // chromium_refresh palette resolves against. An imported theme-painted
     // control wears the skin Chromium painted it in; anything else keeps the
     // platform skin it was created with.
@@ -203,6 +204,10 @@ void BridgeRegistrars::register_widget_value_controls_api(WidgetBridge& self) {
         } else if (auto* box = dynamic_cast<Checkbox*>(self.widget(id))) {
             box->set_skin(skin);
             box->set_color_scheme(scheme);
+        } else if (auto* surface = dynamic_cast<ButtonSurface*>(self.widget(id))) {
+            // A ButtonSurface is the Chromium push-button skin itself; only
+            // its colour scheme varies.
+            surface->set_color_scheme(scheme);
         }
         return choc::value::Value();
     });

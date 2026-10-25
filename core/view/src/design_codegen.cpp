@@ -2573,8 +2573,9 @@ static void emit_js_container(const NativeEmit& e, int& var_counter,
     if (opts.include_comments && !node.name.empty() && depth > 0)
         ss << ind << "// " << node.name << "\n";
 
-    ss << ind << (is_grid ? "createGrid" : (is_row ? "createRow" : "createCol"))
-       << "('" << id << "', " << pid << ");\n";
+    if (!emit_js_ua_button_surface(ss, node, ind, id, pid, is_row))
+        ss << ind << (is_grid ? "createGrid" : (is_row ? "createRow" : "createCol")) << "('" << id
+           << "', " << pid << ");\n";
     emit_js_absolute_position(e, id);
     emit_js_visual_overrides(e, id);
     if (is_grid) {
@@ -2990,7 +2991,9 @@ static void generate_native_node_impl(std::ostringstream& ss, const IRNode& node
     const bool is_image = (kind == NativeWidgetKind::image_view) ||
                           node.attributes.count("asset_path") > 0;
     const bool is_text = (kind == NativeWidgetKind::label);
-    const bool is_container = !is_image && (!node.children.empty() || node.type == "frame");
+    // A theme-painted button is a container even when it has no content yet.
+    const bool is_container = !is_image && (!node.children.empty() || node.type == "frame" ||
+                                            kind == NativeWidgetKind::button_surface);
 
     if (is_image) {
         emit_js_image_node(e);

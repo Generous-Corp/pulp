@@ -40,11 +40,11 @@ bool emit_js_ua_form_control(std::ostream& out, const IRNode& node, const std::s
     const auto state = ua_form_control_state(node);
     if (!state)
         return false;
-    // The widget each control the native lane lowers becomes in ui.js. A control
-    // this lowering has no case for (a theme-painted button, once the capture
-    // records one) stays the plain frame the generic path builds rather than
-    // becoming some other widget, so a new Control needs its case added here.
-    // No default: the compiler names an unhandled Control.
+    // The widget each leaf control the native lane lowers becomes in ui.js. A
+    // control this lowering has no case for stays the plain frame the generic
+    // path builds rather than becoming some other widget, so a new Control
+    // needs its case added here. No default: the compiler names an unhandled
+    // Control.
     const char* factory = nullptr;
     switch (state->control) {
     case UaFormControlState::Control::range:
@@ -53,6 +53,10 @@ bool emit_js_ua_form_control(std::ostream& out, const IRNode& node, const std::s
     case UaFormControlState::Control::checkbox:
     case UaFormControlState::Control::radio:
         factory = "createCheckbox(";
+        break;
+    case UaFormControlState::Control::button:
+        // A button keeps its content as children, so the container path
+        // lowers it (emit_js_ua_button_surface), not this leaf path.
         break;
     }
     if (!factory)
@@ -80,6 +84,23 @@ bool emit_js_ua_form_control(std::ostream& out, const IRNode& node, const std::s
         }
         out << indent << "setValue(" << target << ", " << (state->checked ? 1 : 0) << ");\n";
     }
+    if (state->disabled)
+        out << indent << "setEnabled(" << target << ", false);\n";
+    return true;
+}
+
+bool emit_js_ua_button_surface(std::ostream& out, const IRNode& node, const std::string& indent,
+                               const std::string& id, const std::string& parent, bool row) {
+    const auto state = ua_form_control_state(node);
+    if (!state || state->control != UaFormControlState::Control::button)
+        return false;
+    // As make_ua_button_surface(): the colour scheme and the disabled state are
+    // all the surface takes; the label and icons follow as children.
+    const std::string target = "'" + id + "'";
+    out << indent << "createButtonSurface(" << target << ", " << parent << ", '"
+        << (row ? "row" : "column") << "');\n";
+    out << indent << "setUaSkin(" << target << ", 'chromium_refresh', '"
+        << (state->scheme == UaColorScheme::dark ? "dark" : "light") << "');\n";
     if (state->disabled)
         out << indent << "setEnabled(" << target << ", false);\n";
     return true;
