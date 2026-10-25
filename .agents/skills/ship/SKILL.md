@@ -360,7 +360,9 @@ a dev-shared build may be signed for local loading, never distributed.
   container (a disk image's /Applications alias). Containers inside it are
   recognized by content (zip header, xar header, UDIF `koly` trailer) or
   extension and opened in turn, up to 3 levels; a deeper one is refused, as is
-  a container that does not open (fail closed).
+  a container that does not open (fail closed), on `--dry-run` as well: a
+  placeholder `.dmg` that is not a disk image fails `hdiutil attach` and
+  stops the share plan. A test that only wants a plan needs a real image.
 - Every container tool runs with stdin from `/dev/null`, and `hdiutil attach`
   takes `-stdinpass`. Without that, `std::system` hands the tools the
   terminal, and an encrypted image or one with a licence agreement (SLA)

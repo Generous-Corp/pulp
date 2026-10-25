@@ -100,7 +100,8 @@ It is a development-only link mode, by design:
   - An artifact that is, or names, the shared runtime (a bundle copied out of a
     dev-shared tree, a hand-made `.pkg` input) is refused with the same command.
     `notarize` and `share` open a `.zip`, flat `.pkg` or `.dmg` built by another
-    tool and scan what is inside; one that does not open is refused. That
+    tool and scan what is inside; one that does not open is refused, with
+    `--dry-run` too, so a placeholder file named `.dmg` stops a share plan. That
     includes an encrypted disk image or one with a licence agreement (SLA):
     the scan never answers a prompt, so it refuses them rather than waiting.
     A container whose declared size would not fit on the temp volume is
