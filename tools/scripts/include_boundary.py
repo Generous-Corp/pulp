@@ -30,6 +30,8 @@ import pathlib
 import re
 import sys
 
+import vellum_policy
+
 SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".inl",
             ".ipp", ".m", ".mm"}
 INCLUDE_RE = re.compile(r'^\s*#\s*(?:include_next|include|import)\s*([<"])([^>"]+)[>"]')
@@ -59,15 +61,13 @@ BOUNDARIES: dict[str, Boundary] = {
     ),
     "view-core": Boundary(
         name="view-core",
-        summary=("core/view outside core/view/audio may not include audio, signal, host, "
-                 "midi, format, timebase, graph, playback, content or sample-bank headers, "
-                 "nor the audio widgets' headers"),
+        summary=("core/view outside core/view/audio may not include a retained subsystem's "
+                 "headers (tools/scripts/vellum_policy.json), nor the audio widgets' headers"),
         roots=("core/view",),
         include_dirs=("core/view/include",),
-        forbidden_areas=frozenset({"audio", "signal", "host", "midi", "format", "timebase",
-                                   "graph", "playback", "content", "sample_bank_manifest"}),
+        forbidden_areas=vellum_policy.include_areas(),
         excluded=("core/view/audio",),
-        forbidden_include_dirs=("core/content/include",),
+        forbidden_include_dirs=vellum_policy.include_dirs(),
     ),
 }
 

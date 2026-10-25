@@ -4,38 +4,13 @@
 #include <TargetConditionals.h>
 #endif
 
-#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
-
-namespace pulp::runtime {
-
-DownloadResult download_file(const DownloadRequest& req, const DownloadProgressFn&,
-                             const CancellationToken*) {
-    DownloadResult r;
-    r.path = req.dest;
-    r.error = "model downloads are not supported on iOS";
-    return r;
-}
-
-}  // namespace pulp::runtime
-
-#else
-
-#include <pulp/runtime/async_stream.hpp>
-
-#include <mbedtls/sha256.h>
-
-// HTTPS via cpp-httplib's mbedTLS backend. The CMake target defines
-// CPPHTTPLIB_MBEDTLS_SUPPORT when mbedTLS is available.
-#include <httplib.h>
-
-#include <array>
-#include <cstdint>
-#include <fstream>
+#include <cctype>
 #include <regex>
 #include <string>
+#include <string_view>
 
-namespace fs = std::filesystem;
-
+// URL parsing + redirect resolution are pure string work and compile on every
+// platform, including the iOS build that has no downloader behind them.
 namespace pulp::runtime {
 
 namespace {
@@ -61,14 +36,46 @@ ParsedUrl parse_url(const std::string& url) {
     return out;
 }
 
-// Resolve a redirect Location (absolute, host-absolute, or relative) against the
-// current scheme/host/port + path. Returns ok=false if it can't be resolved.
-ParsedUrl resolve_redirect(const std::string& cur_scheme_host_port, const std::string& cur_path,
-                           const std::string& location) {
-    ParsedUrl out;
-    if (location.empty()) return out;
-    if (location.starts_with("http://") || location.starts_with("https://"))
-        return parse_url(location);
+bool is_https_origin(const std::string& scheme_host_port) {
+    static constexpr std::string_view kPrefix = "https://";
+    if (scheme_host_port.size() < kPrefix.size())
+        return false;
+    for (size_t i = 0; i < kPrefix.size(); ++i) {
+        if (std::tolower(static_cast<unsigned char>(scheme_host_port[i])) != kPrefix[i])
+            return false;
+    }
+    return true;
+}
+
+} // namespace
+
+ResolvedRedirect resolve_redirect(const std::string& cur_scheme_host_port,
+                                  const std::string& cur_path, const std::string& location) {
+    ResolvedRedirect out;
+    if (location.empty()) {
+        out.error = "empty redirect location";
+        return out;
+    }
+    const auto target = parse_url(location);
+    if (target.ok) {
+        // A transfer that started on https must stay on https: a Location that
+        // drops to http would hand the rest of the body to anyone on the path.
+        if (is_https_origin(cur_scheme_host_port) && !is_https_origin(target.scheme_host_port)) {
+            out.error = "refusing redirect from " + cur_scheme_host_port + " to " +
+                        target.scheme_host_port + ": https must not downgrade to http";
+            return out;
+        }
+        out.scheme_host_port = target.scheme_host_port;
+        out.path = target.path;
+        out.ok = true;
+        return out;
+    }
+    const bool looks_absolute =
+        location.rfind("http://", 0) == 0 || location.rfind("https://", 0) == 0;
+    if (looks_absolute) {
+        out.error = "unparseable redirect location: " + location;
+        return out;
+    }
     if (location.front() == '/') {  // host-absolute
         out.scheme_host_port = cur_scheme_host_port;
         out.path = location;
@@ -82,6 +89,42 @@ ParsedUrl resolve_redirect(const std::string& cur_scheme_host_port, const std::s
     out.ok = true;
     return out;
 }
+
+} // namespace pulp::runtime
+
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+
+namespace pulp::runtime {
+
+DownloadResult download_file(const DownloadRequest& req, const DownloadProgressFn&,
+                             const CancellationToken*) {
+    DownloadResult r;
+    r.path = req.dest;
+    r.error = "model downloads are not supported on iOS";
+    return r;
+}
+
+} // namespace pulp::runtime
+
+#else
+
+#include <pulp/runtime/async_stream.hpp>
+
+#include <mbedtls/sha256.h>
+
+// HTTPS via cpp-httplib's mbedTLS backend. The CMake target defines
+// CPPHTTPLIB_MBEDTLS_SUPPORT when mbedTLS is available.
+#include <httplib.h>
+
+#include <array>
+#include <cstdint>
+#include <fstream>
+
+namespace fs = std::filesystem;
+
+namespace pulp::runtime {
+
+namespace {
 
 std::string to_hex(const unsigned char* data, size_t n) {
     static const char* digits = "0123456789abcdef";
@@ -147,7 +190,7 @@ const char* system_ca_path() {
     return nullptr;
 }
 
-}  // namespace
+} // namespace
 
 DownloadResult download_file(const DownloadRequest& req, const DownloadProgressFn& on_progress,
                              const CancellationToken* cancel) {
@@ -158,6 +201,17 @@ DownloadResult download_file(const DownloadRequest& req, const DownloadProgressF
     if (!parsed.ok) {
         r.error = "invalid url: " + req.url;
         return r;
+    }
+    // Nothing can vouch for bytes that no digest describes, so a digest-less
+    // request is refused here, before any network or disk activity, unless the
+    // caller explicitly accepts an unverified file.
+    if (req.expected_sha256.empty()) {
+        r.unverified = true;
+        if (!req.allow_unverified) {
+            r.error = "refusing unverified download of " + req.url +
+                      ": no expected sha256 (set allow_unverified to accept it)";
+            return r;
+        }
     }
 
     std::error_code ec;
@@ -316,7 +370,7 @@ DownloadResult download_file(const DownloadRequest& req, const DownloadProgressF
         if (!next.ok) {
             mbedtls_sha256_free(&sha);
             out.close();
-            r.error = "invalid redirect location: " + redirect_location;
+            r.error = "invalid redirect location: " + redirect_location + " (" + next.error + ")";
             return r;
         }
         if (next.scheme_host_port != cur_shp) {
@@ -391,6 +445,6 @@ DownloadResult download_file(const DownloadRequest& req, const DownloadProgressF
     return r;
 }
 
-}  // namespace pulp::runtime
+} // namespace pulp::runtime
 
 #endif

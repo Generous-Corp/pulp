@@ -949,3 +949,52 @@ TEST_CASE("ADAA2 lowers the alias floor below ADAA1 for content under a sixth of
     REQUIRE(worst_alias_dbc(clean, kF0) < -110.0);
     REQUIRE_THAT(worst_alias_dbc(planted, kF0), WithinAbs(-60.0, 0.5));
 }
+
+TEST_CASE("ADAA2 aligns its dry path without prepare()", "[saturator][latency][adaa2]") {
+    // A zero-initialised instance is a valid one; its dry path must be
+    // delayed by the latency it reports, or a dry mix combs.
+    SaturatorT<double> sat;
+    sat.set_alias_policy(SaturatorAliasPolicy::adaa2);
+    sat.set_mix(0.0);
+    REQUIRE(sat.latency_samples() == 1);
+    std::array<double, 4> dry{};
+    for (std::size_t n = 0; n < dry.size(); ++n)
+        dry[n] = sat.process(n == 0 ? 0.25 : 0.0);
+    CHECK(dry[0] == 0.0);
+    CHECK(dry[1] == 0.25);
+    CHECK(dry[2] == 0.0);
+}
+
+TEST_CASE("Switching alias policy seeds the ADAA paths from the true input history",
+          "[saturator][aliasing][adaa2]") {
+    // A path that ran earlier still holds the inputs it saw then. Switching to
+    // it must reseed from the latest inputs, so the first sample after the
+    // switch equals a run that used that policy all along.
+    for (const auto target : {SaturatorAliasPolicy::adaa, SaturatorAliasPolicy::adaa2}) {
+        INFO("target " << static_cast<int>(target));
+        SaturatorT<double> always;
+        SaturatorT<double> switched;
+        for (auto* s : {&always, &switched}) {
+            s->prepare(kSr);
+            s->set_drive_db(12.0);
+            s->set_mix(1.0);
+        }
+        always.set_alias_policy(target);
+        // `switched` runs the target first, then off long enough for its
+        // stored history to be stale, then switches back.
+        switched.set_alias_policy(target);
+        double worst = 0.0;
+        for (int n = 0; n < 2000; ++n) {
+            const double x = 0.8 * std::sin(0.0517 * static_cast<double>(n));
+            if (n == 100)
+                switched.set_alias_policy(SaturatorAliasPolicy::off);
+            if (n == 900)
+                switched.set_alias_policy(target);
+            const double a = always.process(x);
+            const double b = switched.process(x);
+            if (n >= 900)
+                worst = std::max(worst, std::abs(a - b));
+        }
+        CHECK(worst < 1e-12);
+    }
+}

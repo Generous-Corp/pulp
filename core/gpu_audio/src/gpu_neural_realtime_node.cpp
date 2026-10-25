@@ -7,6 +7,7 @@
 #include "detail/realtime_gpu_health_mirror.hpp"
 #include "detail/shared_io_execution_contract.hpp"
 #include "detail/shared_io_stamped_bridge.hpp"
+#include "detail/shared_io_watchdog.hpp"
 
 #include <pulp/gpu_audio/gpu_neural_realtime_node.hpp>
 
@@ -30,27 +31,6 @@ std::uint64_t now_ns() noexcept {
                                           .count());
 }
 
-GpuAudioRecoveryReason public_reason(detail::SharedIoRecoveryReason reason) noexcept {
-    switch (reason) {
-    case detail::SharedIoRecoveryReason::None:
-        return GpuAudioRecoveryReason::None;
-    case detail::SharedIoRecoveryReason::SequenceGap:
-        return GpuAudioRecoveryReason::SequenceGap;
-    case detail::SharedIoRecoveryReason::InputSaturated:
-        return GpuAudioRecoveryReason::InputSaturated;
-    case detail::SharedIoRecoveryReason::ProviderFailure:
-        return GpuAudioRecoveryReason::ProviderFailure;
-    case detail::SharedIoRecoveryReason::ProviderLost:
-        return GpuAudioRecoveryReason::ProviderLost;
-    case detail::SharedIoRecoveryReason::OfflineFence:
-        return GpuAudioRecoveryReason::OfflineFence;
-    case detail::SharedIoRecoveryReason::InvalidCallback:
-        return GpuAudioRecoveryReason::InvalidCallback;
-    case detail::SharedIoRecoveryReason::ProviderUnresponsive:
-        return GpuAudioRecoveryReason::ProviderUnresponsive;
-    }
-    return GpuAudioRecoveryReason::None;
-}
 } // namespace
 
 struct GpuNeuralRealtimeNode::Impl {
@@ -60,12 +40,15 @@ struct GpuNeuralRealtimeNode::Impl {
         Terminal disposition = Terminal::Cancelled;
         bool occupied = false;
         bool done = false;
+        // The worker's completion count when this block was admitted.
+        std::uint64_t completions_at_admit = 0;
 
         void reset() noexcept {
             stamp = {};
             disposition = Terminal::Cancelled;
             occupied = false;
             done = false;
+            completions_at_admit = 0;
         }
     };
 
@@ -87,6 +70,8 @@ struct GpuNeuralRealtimeNode::Impl {
     // fenced shared path; `backend_quiesced` records that the kernel is gone.
     bool backend_active = false;
     bool production_backend = false; // cached at prepare; read by host threads
+    // Reported by the active backend's provider; cached at prepare.
+    detail::SharedIoProviderIdentity provider_identity;
     std::atomic<bool> backend_quiesced{false};
     // Prewarm leases outlive any failed prewarm until the backend releases.
     std::vector<float> prewarm_input, prewarm_output;
@@ -109,6 +94,17 @@ struct GpuNeuralRealtimeNode::Impl {
     std::atomic<bool> device_lost{false};
     std::atomic<std::uint64_t> callback_next{0};
     std::uint64_t watchdog_limit = 0, completion_mark = 0; // worker only
+    // Worker only: completions collected since prepare(), and whether a
+    // latched InputSaturated has been classified.
+    std::uint64_t completions = 0;
+    bool saturation_classified = false;
+    // Ingress ring capacity in effect (see size_provider_watchdog()).
+    std::uint32_t ring_capacity = 0;
+    // Written by the worker once: the input ring saturated while the oldest
+    // in-flight block had seen no completion since its admission, so the node
+    // reports ProviderUnresponsive at that block.
+    std::atomic<bool> saturated_unresponsive{false};
+    std::atomic<std::uint64_t> unresponsive_sequence{std::numeric_limits<std::uint64_t>::max()};
     std::atomic<std::uint64_t> cpu_recovery_sequence{std::numeric_limits<std::uint64_t>::max()};
 
     bool prepared = false;
@@ -135,6 +131,8 @@ struct GpuNeuralRealtimeNode::Impl {
     std::vector<float> shadow_take; // Worker result copied out by the callback
     bool shadow_hit = false;
     std::atomic<std::uint64_t> shadow_delivered{0}, shadow_double_miss{0};
+    // Callback-written per delivered GPU-path block, read by status_snapshot().
+    detail::RecentGpuDelivery recent;
     // Declared last so its thread is joined before the processors it steps die.
     detail::NeuralShadowWorker worker;
 
@@ -142,6 +140,11 @@ struct GpuNeuralRealtimeNode::Impl {
         : config(std::move(source)), model(config.model), shadow_model(config.shadow_model) {
         if (shadow_model == model)
             shadow_model.reset();
+        if (config.max_inflight == 0)
+            config.max_inflight = model != nullptr && model->backend && backend_admits(2) &&
+                                          config.capacity >= config.lead_blocks + 2
+                                      ? 2
+                                      : 1;
     }
 
     // The shadow_* projection shared by status_snapshot() and the health hook
@@ -419,7 +422,10 @@ struct GpuNeuralRealtimeNode::Impl {
     bool initialize_bridge() {
         const auto& c = config;
         bridge = std::make_unique<Bridge>();
-        if (!bridge->prepare({.capacity = c.capacity,
+        const auto sizing = detail::size_provider_watchdog(
+            c.capacity, c.lead_blocks, c.watchdog_blocks, block_size(), model->sample_rate);
+        ring_capacity = sizing.ring_blocks;
+        if (!bridge->prepare({.capacity = ring_capacity,
                               .channels = c.channels,
                               .block_size = block_size(),
                               .lead_blocks = c.lead_blocks},
@@ -436,8 +442,13 @@ struct GpuNeuralRealtimeNode::Impl {
         pending_head = pending_count = 0;
         next_input = sequence;
         callback_next.store(sequence, std::memory_order_relaxed);
-        watchdog_limit = c.watchdog_blocks != 0 ? c.watchdog_blocks : c.capacity - 1;
+        watchdog_limit = sizing.window_blocks;
         completion_mark = sequence;
+        completions = 0;
+        saturation_classified = false;
+        saturated_unresponsive.store(false, std::memory_order_relaxed);
+        unresponsive_sequence.store(std::numeric_limits<std::uint64_t>::max(),
+                                    std::memory_order_relaxed);
         device_lost.store(false, std::memory_order_relaxed);
         telemetry.reset();
         bridge->set_trace(nullptr, &telemetry);
@@ -464,11 +475,14 @@ struct GpuNeuralRealtimeNode::Impl {
     }
     // Device loss is the root cause of the failures and silence it produces,
     // so once observed it replaces those latched symptoms. Independent causes
-    // (a sequence gap, an invalid callback) stay first.
+    // (a sequence gap, an invalid callback) stay first. A ring saturated
+    // behind a hung provider is reported as the hang.
     detail::SharedIoRecoveryReason recovery() const noexcept {
         using Recovery = detail::SharedIoRecoveryReason;
-        const auto latched =
-            bridge ? bridge->recovery_reason() : cpu_recovery.load(std::memory_order_acquire);
+        const auto latched = bridge ? detail::saturated_projection(
+                                          bridge->recovery_reason(),
+                                          saturated_unresponsive.load(std::memory_order_acquire))
+                                    : cpu_recovery.load(std::memory_order_acquire);
         if (device_lost.load(std::memory_order_acquire) &&
             (latched == Recovery::ProviderFailure || latched == Recovery::ProviderUnresponsive))
             return Recovery::ProviderLost;
@@ -488,6 +502,7 @@ struct GpuNeuralRealtimeNode::Impl {
                                  : detail::SharedIoRecoveryReason::ProviderFailure;
         detail::StreamingTerminal terminal;
         while (backend.receive(terminal)) {
+            ++completions;
             auto* pending = find_pending(terminal.stamp);
             if (pending == nullptr) {
                 fail(failure, terminal.stamp.sequence);
@@ -533,6 +548,7 @@ struct GpuNeuralRealtimeNode::Impl {
     // admission, so an idle stretch never counts against it, and a provider
     // that keeps completing, however late, is slow rather than unresponsive.
     void watch_provider(bool progressed) noexcept {
+        classify_saturation();
         const auto position = callback_next.load(std::memory_order_acquire);
         if (progressed) {
             completion_mark = position;
@@ -546,6 +562,35 @@ struct GpuNeuralRealtimeNode::Impl {
         const auto silent = position > since ? position - since : 0;
         if (silent >= watchdog_limit)
             fail(detail::SharedIoRecoveryReason::ProviderUnresponsive, first_undelivered());
+    }
+    // The input ring fills when the worker stops admitting. If it filled during
+    // the silence of an in-flight block that has seen no completion since its
+    // admission, the provider, not the worker, stopped the stream: report the
+    // hang. Runs after this pump's completions are collected.
+    void classify_saturation() noexcept {
+        if (saturation_classified ||
+            bridge->recovery_reason() != detail::SharedIoRecoveryReason::InputSaturated)
+            return;
+        saturation_classified = true;
+        if (pending_count == 0 || completions != pending_ring[pending_head].completions_at_admit)
+            return;
+        // The ring must have filled during this block's silence. A provider
+        // that completes every block, only slower than the callback, fills it
+        // from a backlog while each block's own silence stays short: that is
+        // saturation, not a hang.
+        const auto position = callback_next.load(std::memory_order_acquire);
+        const auto since = std::max(completion_mark, first_undelivered() + 1);
+        const auto silent = position > since ? position - since : 0;
+        if (silent + config.lead_blocks + 1 < ring_capacity)
+            return;
+        unresponsive_sequence.store(first_undelivered(), std::memory_order_release);
+        saturated_unresponsive.store(true, std::memory_order_release);
+    }
+    std::uint64_t latched_sequence() const noexcept {
+        if (bridge->recovery_reason() == detail::SharedIoRecoveryReason::InputSaturated &&
+            saturated_unresponsive.load(std::memory_order_acquire))
+            return unresponsive_sequence.load(std::memory_order_acquire);
+        return bridge->recovery_sequence();
     }
 };
 
@@ -646,6 +691,7 @@ bool GpuNeuralRealtimeNode::prepare() {
                 s.prewarm_backend(backend)) {
                 s.backend_active = true;
                 s.production_backend = s.model->production_backend();
+                s.provider_identity = backend.provider_identity();
                 s.backend_quiesced.store(false, std::memory_order_release);
             } else if (!backend.release()) {
                 return fail(PrepareError::ReleaseFailed);
@@ -684,6 +730,7 @@ bool GpuNeuralRealtimeNode::prepare() {
         s.first_sequence = s.sequence;
         s.shadow_hit = false;
         s.shadow_delivered.store(0, std::memory_order_relaxed);
+        s.recent.reset();
         s.shadow_double_miss.store(0, std::memory_order_relaxed);
         if (s.worker_fed()) {
             s.shadow_take.assign(static_cast<std::size_t>(channels) * n, 0.0f);
@@ -736,6 +783,7 @@ bool GpuNeuralRealtimeNode::release() noexcept {
             return false;
         s.backend_active = false;
         s.production_backend = false;
+        s.provider_identity = {};
     }
     while (!s.processors.empty()) {
         if (!s.processors.back()->release())
@@ -856,19 +904,48 @@ GpuNeuralRealtimeNode::PrepareError GpuNeuralRealtimeNode::last_prepare_error() 
 }
 
 GpuAudioProvider GpuNeuralRealtimeNode::transport_provider() const noexcept {
-    if (authenticated_provider())
-        return GpuAudioProvider::Dawn;
-    return impl_->prepared && !impl_->backend_active ? GpuAudioProvider::Cpu
-                                                     : GpuAudioProvider::Unknown;
+    return provider_identity_for_transport().provider;
+}
+
+detail::SharedIoProviderIdentity
+GpuNeuralRealtimeNode::provider_identity_for_transport() const noexcept {
+    // An authenticated backend reports its own provider; a prepared node with
+    // no active backend runs on the CPU, which needs no authentication.
+    if (authenticated_provider() && impl_->provider_identity.authenticated)
+        return impl_->provider_identity;
+    if (impl_->prepared && !impl_->backend_active) {
+        detail::SharedIoProviderIdentity cpu;
+        cpu.provider = GpuAudioProvider::Cpu;
+        return cpu;
+    }
+    return {};
+}
+
+bool GpuNeuralRealtimeNode::bind_realtime_path(detail::RealtimeGpuNodeBinding& binding) noexcept {
+    binding.requires_realtime_path = true;
+    binding.identity_context = this;
+    binding.identity = [](const void* self) noexcept {
+        return static_cast<const GpuNeuralRealtimeNode*>(self)->provider_identity_for_transport();
+    };
+    if (ready())
+        binding.path = {.context = this,
+                        .process = &GpuNeuralRealtimeNode::process,
+                        .service = &GpuNeuralRealtimeNode::service,
+                        .fence = &GpuNeuralRealtimeNode::fence,
+                        .delivered = &GpuNeuralRealtimeNode::delivered,
+                        .next_sequence = &GpuNeuralRealtimeNode::next_sequence,
+                        .health = &GpuNeuralRealtimeNode::health,
+                        .offline_render = &GpuNeuralRealtimeNode::offline_render};
+    return true;
 }
 
 GpuAudioRecoveryReason GpuNeuralRealtimeNode::recovery_reason() const noexcept {
-    return public_reason(impl_->recovery());
+    return detail::public_recovery_reason(impl_->recovery());
 }
 
 std::uint64_t GpuNeuralRealtimeNode::recovery_sequence() const noexcept {
     if (impl_->bridge)
-        return impl_->bridge->recovery_sequence();
+        return impl_->latched_sequence();
     return impl_->cpu_recovery_sequence.load(std::memory_order_acquire);
 }
 
@@ -959,6 +1036,11 @@ GpuAudioStatus GpuNeuralRealtimeNode::status_snapshot() const noexcept {
     status.provider_state = detail::provider_state_for_health(health);
     if (status.provider_state == GpuAudioProviderState::Ready && !authenticated_provider())
         status.provider_state = GpuAudioProviderState::Degraded;
+    // A GPU the shadow carries is not Ready, and the engine is the shadow's.
+    status.provider_state = detail::lower_for_lagging(status.provider_state, s.recent.lagging());
+    status.selected_engine =
+        detail::delivering_engine(status.provider_state, status.selected_engine,
+                                  status.fallback_policy, status.fallback_available);
     return status;
 }
 
@@ -1073,6 +1155,7 @@ std::uint32_t GpuNeuralRealtimeNode::service(void* self, std::uint64_t) noexcept
         auto& pending = s.pending_ring[(s.pending_head + s.pending_count) % s.pending_ring.size()];
         pending.reset();
         pending.occupied = true;
+        pending.completions_at_admit = s.completions;
         pending.stamp = {.epoch = stamp.epoch, .sequence = stamp.sequence};
         // The backend contract retains both spans until the terminal, so the
         // block owns copies rather than the bridge's ingress lease.
@@ -1099,6 +1182,7 @@ std::uint32_t GpuNeuralRealtimeNode::service(void* self, std::uint64_t) noexcept
         }
         ++s.next_input;
         ++s.pending_count;
+        s.telemetry.observe_in_flight(s.pending_count);
     }
     s.bridge->end_worker_admission();
     // A completion seen only in this tail pass is progress too: the next
@@ -1149,8 +1233,16 @@ bool GpuNeuralRealtimeNode::health(const void* self, detail::RealtimeGpuHealth& 
     out.delivery_epoch_active = out.epoch != 0;
     out.device_lost = node.impl_->device_lost.load(std::memory_order_acquire);
     out.gpu_kernel_available = node.gpu_kernel_available();
-    if (node.impl_->prepared)
+    if (node.impl_->prepared) {
         node.impl_->fill_shadow(out);
+        // Under ShadowPolicy::None a realtime miss is silent although the
+        // descriptor declares CpuFallback; report what is in effect.
+        const bool silent_miss =
+            node.impl_->shadow_mode.load(std::memory_order_relaxed) == ShadowPolicy::None;
+        out.reports_fallback = true;
+        out.fallback_policy = silent_miss ? MissPolicy::Silence : MissPolicy::CpuFallback;
+        out.fallback_available = !silent_miss && node.cpu_fallback_prepared();
+    }
     return true;
 }
 
@@ -1163,6 +1255,7 @@ void GpuNeuralRealtimeNode::delivered(void* self, std::uint64_t sequence, std::u
             s.cpu_blocks.fetch_add(1, std::memory_order_relaxed);
         return;
     }
+    s.recent.record(actual);
     if (s.callback.stamp.sequence == sequence)
         (void)s.bridge->complete_callback_delivery(s.callback, actual, end, visible);
 }
@@ -1200,6 +1293,19 @@ std::size_t detail::NeuralRealtimeTestAccess::pump_shadow(GpuNeuralRealtimeNode&
 std::uint64_t
 detail::NeuralRealtimeTestAccess::shadow_processed(const GpuNeuralRealtimeNode& node) noexcept {
     return node.impl_->worker.counters().processed;
+}
+
+std::uint64_t
+detail::NeuralRealtimeTestAccess::in_flight_high_water(const GpuNeuralRealtimeNode& node) noexcept {
+    return node.impl_->telemetry.snapshot().in_flight_high_water;
+}
+
+bool detail::NeuralRealtimeTestAccess::gpu_lagging(const GpuNeuralRealtimeNode& node) noexcept {
+    return node.impl_->recent.lagging();
+}
+
+void detail::NeuralRealtimeTestAccess::assume_authenticated(GpuNeuralRealtimeNode& node) noexcept {
+    node.impl_->production_backend = true;
 }
 
 void detail::NeuralRealtimeTestAccess::skip_shadow_publish(GpuNeuralRealtimeNode& node,

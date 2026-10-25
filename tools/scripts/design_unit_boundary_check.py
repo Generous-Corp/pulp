@@ -26,9 +26,10 @@ The gate asserts:
   * view-core links design-ir, never design-import or the audio pack, compiles
     none of their sources, and no view-core source or generic public header
     includes a design-import or audio-pack header;
-  * design-import's direct links name no audio, DSP, host, MIDI, format or
-    content target and not the audio pack, and none of its sources or headers
-    includes an audio/signal/host/midi/format/content header or the audio pack.
+  * design-import's direct links name no retained subsystem
+    (tools/scripts/vellum_policy.json) and not the audio pack, and none of its
+    sources, headers or the private headers they reach includes a retained
+    subsystem's header or the audio pack.
 
 The transitive closure of design-import still reaches signal and audio through
 view-core's own PUBLIC links; that edge belongs to view-core and is checked by
@@ -46,27 +47,19 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import vellum_policy
+from include_boundary import INCLUDE_RE
+
 DESIGN_IR = "pulp-design-ir"
 DESIGN_IMPORT = "pulp-design-import"
 AUDIO_PACK = "pulp-design-import-audio-pack"
 VIEW_CORE = "pulp-view-core"
 
-# Product modules no extracted design unit may name, by target stem
-# (`pulp-<stem>` / `pulp::<stem>`).
-FORBIDDEN_LINK_STEMS = {
-    "audio",
-    "signal",
-    "host",
-    "midi",
-    "format",
-    "format-core",
-    "format-view",
-    "content",
-    "sample-bank-manifest",
-    "gpu-audio",
-}
-FORBIDDEN_INCLUDE = re.compile(r"^pulp/(audio|signal|host|midi|format|content)/")
-INCLUDE = re.compile(r'^\s*#\s*include\s*([<"])([^>"]+)[>"]')
+# Retained subsystems no extracted design unit may name, by target stem
+# (`pulp-<stem>` / `pulp::<stem>`), including their sub-targets
+# (`format-core`, `format-view`).
+FORBIDDEN_LINK_STEMS = vellum_policy.target_stems()
+FORBIDDEN_INCLUDE = re.compile(rf"^pulp/(?:{'|'.join(vellum_policy.names())})/")
 PUBLIC_HEADER_ROOT = "include"
 
 
@@ -124,10 +117,15 @@ def resolve(target: Target, rel: str) -> Path:
     return path if path.is_absolute() else Path(target.source_dir) / path
 
 
+def forbidden_stem(stem: str) -> bool:
+    return any(stem == s or stem.startswith(f"{s}-") for s in FORBIDDEN_LINK_STEMS)
+
+
 def includes(path: Path) -> list[tuple[str, str]]:
+    """(delimiter, target) for every #include, #include_next and #import."""
     found = []
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        match = INCLUDE.match(line)
+        match = INCLUDE_RE.match(line)
         if match:
             found.append((match.group(1), match.group(2)))
     return found
@@ -247,15 +245,15 @@ def check(targets: dict[str, Target]) -> list[str]:
     # design-import: no product edges, no pack.
     if imp is not None:
         imp_link_stems = link_stems(imp.links + imp.interface_links)
-        for stem in sorted(s for s in imp_link_stems if s in FORBIDDEN_LINK_STEMS):
-            errors.append(f"{DESIGN_IMPORT}: links pulp-{stem}; the importer must not reach audio/DSP/host/MIDI/format/content")
+        for stem in sorted(s for s in imp_link_stems if forbidden_stem(s)):
+            errors.append(f"{DESIGN_IMPORT}: links pulp-{stem}; the importer must not reach a retained subsystem")
         if "design-import-audio-pack" in imp_link_stems:
             errors.append(f"{DESIGN_IMPORT}: links the audio-control pack; the pack sits above the importer")
         for stem in ("design-ir", "view-core"):
             if stem not in imp_link_stems:
                 errors.append(f"{DESIGN_IMPORT}: does not link pulp-{stem}")
         files = [resolve(imp, s) for s in imp.sources] + [resolve(imp, h) for h in imp.headers]
-        for path in files:
+        for path in with_private_headers(files):
             if not path.is_file():
                 continue
             for _, inc in includes(path):

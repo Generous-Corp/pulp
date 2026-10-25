@@ -11,6 +11,7 @@
 #include "pulp/canvas/font_scope.hpp"
 #include "pulp/canvas/bundled_fonts.hpp"
 #include "pulp/canvas/font_flight_recorder.hpp"
+#include "font_weight_match.hpp"
 #include "system_ui_typeface.hpp"
 
 #include <algorithm>
@@ -411,8 +412,10 @@ ResolvedFont resolve_one_family(const std::string& entry, const FontOptions& opt
             system_ui = tf != nullptr;
         }
 #endif
+        // CSS weight matching inside the family, the same matcher SkParagraph's
+        // collection uses, so the face reported here is the face painted.
         if (!tf)
-            tf = mgr->matchFamilyStyle(platform_family.c_str(), sk_style);
+            tf = css_match_family_style(*mgr, platform_family.c_str(), sk_style);
         if (tf) {
             SkString actual;
             tf->getFamilyName(&actual);

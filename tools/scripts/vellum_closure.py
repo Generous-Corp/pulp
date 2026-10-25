@@ -19,19 +19,22 @@ import sys
 from pathlib import Path
 from typing import Iterable
 
+import vellum_policy
 from include_boundary import include_edges
 
-FORBIDDEN_TARGET = re.compile(r"(?:^|[-_:])(audio|signal|host|midi|music|format|content|gpu_audio)(?:$|[-_:])", re.I)
-FORBIDDEN_INCLUDE = re.compile(r"^pulp/(?:audio|signal|host|midi|music|format|content)(?:/|$)", re.I)
-FORBIDDEN_ROOTS = tuple(f"core/{name}/" for name in ("audio", "signal", "host", "midi", "music", "format", "content"))
+# Every forbidden-subsystem form below derives from tools/scripts/vellum_policy.json.
+_FORBIDDEN = vellum_policy.alternation()
+FORBIDDEN_TARGET = re.compile(rf"(?:^|[-_:])({_FORBIDDEN})(?:$|[-_:])", re.I)
+FORBIDDEN_INCLUDE = re.compile(rf"^pulp/(?:{_FORBIDDEN})(?:/|$)", re.I)
+FORBIDDEN_ROOTS = vellum_policy.roots()
 TEXT_EXTS = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".m", ".mm", ".cmake"}
 RESOURCE_EXTS = {".sksl", ".glsl", ".frag", ".vert", ".ttf", ".otf", ".woff", ".woff2"}
 FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-# The Pulp-built Skia support library; the D3 unit that carries it is where
-# Skia enters the unit graph.
+# The Pulp-built Skia support library; the extraction unit that carries it is
+# where Skia enters the unit graph.
 SKIA_SUPPORT_TARGET = "pulp-skia-chromium-raw-ptr-compat"
 # A CMake reference to a Pulp target the extraction must not carry.
-FORBIDDEN_CMAKE_TARGET = re.compile(r"\bpulp(?:-|::)(?:audio|signal|host|midi|music|format|content|gpu[-_]audio)\b", re.I)
+FORBIDDEN_CMAKE_TARGET = re.compile(rf"\bpulp(?:-|::)(?:{_FORBIDDEN})\b", re.I)
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 EXTERNAL_RE = re.compile(r"^@external/(?P<slug>[^/]+)/(?P<pin>[^/]+)(?:/|$)")
 BUILD_DEPS_RE = re.compile(r"^@build/_deps/(?:pulp-mutable-)?(?P<name>[^/]+?)-(?:src|build)(?:/|$)")
@@ -908,6 +911,10 @@ BUILD_TIMESTAMP_PLACEHOLDER = "<build-timestamp>"
 
 PRELUDE_SOURCE = "@build/core/view/web_compat_preludes_gen.cpp"
 PRELUDE_HEADER = "@build/core/view/web_compat_preludes_gen.hpp"
+# The generated header around its per-prelude declarations; must match the
+# _pulp_prelude_decls strings in core/view/cmake/PulpViewJsPreludes.cmake.
+PRELUDE_HEADER_HEAD = "#pragma once\n// Auto-generated from the JS prelude file list — do not edit\n\n#include <cstddef>\n#include <string>\n\nnamespace pulp::view::preludes {\n\n// One JS prelude, stored as a zlib (RFC 1950) stream of its source text.\nstruct EmbeddedPrelude {\n    const char* file_name;\n    const unsigned char* deflated;\n    std::size_t deflated_size;\n    std::size_t source_size;\n    const char* sha256;\n};\n\n// Inflates the source text of a prelude on each call. Throws\n// std::runtime_error unless the stream inflates to exactly source_size bytes.\nstd::string source(const EmbeddedPrelude& prelude);\n\n"
+PRELUDE_HEADER_TAIL = '\n// Every prelude, in the order the file list declares them.\nextern const EmbeddedPrelude* const kAll[];\nextern const std::size_t kAllCount;\n\n}  // namespace pulp::view::preludes\n'
 
 
 def prelude_inputs(source: Path) -> list[Path] | None:
@@ -1103,13 +1110,13 @@ def prelude_inputs(source: Path) -> list[Path] | None:
         ["PULP_JS_EMBEDDED_HEADER", "${CMAKE_CURRENT_BINARY_DIR}/web_compat_preludes_gen.hpp"],
         ["PULP_JS_EMBEDDED_SOURCE", "${CMAKE_CURRENT_BINARY_DIR}/web_compat_preludes_gen.cpp"],
         ["Python3", "REQUIRED", "COMPONENTS", "Interpreter"],
-        ["_pulp_prelude_decls", '"#pragma once\\n// Auto-generated from the JS prelude file list — do not edit\\n\\nnamespace pulp::view::preludes {\\n\\n"'],
+        ["_pulp_prelude_decls", '"#pragma once\\n// Auto-generated from the JS prelude file list — do not edit\\n\\n#include <cstddef>\\n#include <string>\\n\\nnamespace pulp::view::preludes {\\n\\n// One JS prelude, stored as a zlib (RFC 1950) stream of its source text.\\nstruct EmbeddedPrelude {\\n    const char* file_name;\\n    const unsigned char* deflated;\\n    std::size_t deflated_size;\\n    std::size_t source_size;\\n    const char* sha256;\\n};\\n\\n// Inflates the source text of a prelude on each call. Throws\\n// std::runtime_error unless the stream inflates to exactly source_size bytes.\\nstd::string source(const EmbeddedPrelude& prelude);\\n\\n"'],
         ["_prelude", "${PULP_JS_PRELUDES}"],
         ["_prelude_stem", '"${_prelude}"', "NAME_WE"],
         ["REPLACE", '"-"', '"_"', "_prelude_var", '"${_prelude_stem}"'],
-        ["APPEND", "_pulp_prelude_decls", '"extern const char* const ${_prelude_var};\\n"'],
+        ["APPEND", "_pulp_prelude_decls", '"extern const EmbeddedPrelude ${_prelude_var};\\n"'],
         [],
-        ["APPEND", "_pulp_prelude_decls", '"\\n}  // namespace pulp::view::preludes\\n"'],
+        ["APPEND", "_pulp_prelude_decls", '"\\n// Every prelude, in the order the file list declares them.\\nextern const EmbeddedPrelude* const kAll[];\\nextern const std::size_t kAllCount;\\n\\n}  // namespace pulp::view::preludes\\n"'],
         ["_pulp_existing_decls", '""'],
         ["EXISTS", '"${PULP_JS_EMBEDDED_HEADER}"'],
         ["READ", '"${PULP_JS_EMBEDDED_HEADER}"', "_pulp_existing_decls"],
@@ -1176,10 +1183,9 @@ def generated_digest(rel: str, path: Path, source: Path) -> dict | None:
             return None
         if rel == PRELUDE_HEADER:
             names = [input_path.stem.replace("-", "_") for input_path in inputs]
-            text = "#pragma once\n// Auto-generated from the JS prelude file list — do not edit\n\n"
-            text += "namespace pulp::view::preludes {\n\n"
-            text += "".join(f"extern const char* const {name};\n" for name in names)
-            text += "\n}  // namespace pulp::view::preludes\n"
+            text = PRELUDE_HEADER_HEAD
+            text += "".join(f"extern const EmbeddedPrelude {name};\n" for name in names)
+            text += PRELUDE_HEADER_TAIL
             return {"sha256": _text_sha256(text)}
         import tempfile
         with tempfile.TemporaryDirectory(prefix="pulp-preludes-") as td:
