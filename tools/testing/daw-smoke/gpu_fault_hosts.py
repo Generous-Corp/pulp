@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import re
 import statistics
 import sys
@@ -52,6 +53,12 @@ HOST_FORMATS = {"reaper": ("clap", "vst3", "au"), "logic": ("au",), "garageband"
 REALTIME_RENDER_HOSTS = ("reaper", "logic", "bitwig")
 HOSTING_MODES = ("in_process", "auhostingservice", "auhostingservice_arrow",
                  "bitwig_plugin_host")
+# Hosts driven from an authored template, whose AX snapshot must record the
+# track's input, arm and monitoring state; and the label each host shows for a
+# track no input device reaches ("none" for a GarageBand instrument track).
+TEMPLATE_HOSTS = ("logic", "garageband", "bitwig")
+NO_INPUT_LABELS = {"reaper": ("none",), "logic": ("No Input",),
+                   "garageband": ("No Input", "none"), "bitwig": ("No input",)}
 CONTROL_KINDS = ("fault", "positive_control", "planted_negative", "offline_fault")
 POSITIVE_CONTROL = "positive_control"
 # Planted negatives and what each must verify as. The first three corrupt the
@@ -61,6 +68,7 @@ POSITIVE_CONTROL = "positive_control"
 PLANTED_NEGATIVES = {**{name: "fail" for name in gfc.PLANTED},
                      **{name: "inconclusive" for name in gfc.PATH_NEGATIVES}}
 NOT_SHARED_PATH = "not on the shared-I/O GPU path"
+HOST_NOT_QUIET = "host_not_quiet:"
 # M2: the GPU must have carried the stream just before the fault.
 GPU_SHARE_PASS = 0.9
 # A positive control must show the GPU path carried the stream, or every fault
@@ -105,7 +113,8 @@ KNOWN_DEFECTS = (
     {"id": "#10736",
      "what": "provider WaveNet with staged storage and timestamps hangs after the first block",
      "match": {"node": "wavenet", "storage": "staged", "timestamps": True},
-     "fixed_by": None},
+     # The merge commit that carries the fix on main.
+     "fixed_by": "590bee7a5232a07484c170a9a0690208ec241c1b"},
 )
 # A realtime render cannot finish faster than the audio it renders; allow a
 # little clock slack, never an offline-speed render.
@@ -269,6 +278,23 @@ def loss_status_problem(snapshots: dict[str, dict]) -> str:
             f"recovery_reason={reason!r} (Batch A requires 'unavailable' and 'provider-lost')")
 
 
+def track_state_problem(track: Any, host_id: str) -> str:
+    """Why the track the plug-in sat on could have let host input in, or ""
+    when it could not: not record-armed, input monitoring off, and its input
+    the host's own no-input label. Logic refuses to arm a No Input track, so a
+    live row plays an unarmed track and relies on the internal stimulus (M6)."""
+    if not isinstance(track, dict):
+        return "no track state was recorded from the host's AX snapshot"
+    if track.get("record_armed") is not False:
+        return f"the track was record-armed (record_armed={track.get('record_armed')!r})"
+    if track.get("input_monitoring") is not False:
+        return f"input monitoring was on (input_monitoring={track.get('input_monitoring')!r})"
+    if track.get("input") not in NO_INPUT_LABELS[host_id]:
+        return (f"the track input was {track.get('input')!r}, not one of "
+                f"{', '.join(NO_INPUT_LABELS[host_id])}")
+    return ""
+
+
 def _usable(run_dir: Path, name: str, listed: Sequence[str] | None) -> bool:
     return (run_dir / name).is_file() and (listed is None or name in listed)
 
@@ -301,12 +327,15 @@ def known_defect(events: Sequence[dict], code: dict | None,
 
 def git_is_ancestor(fix: str, commit: str) -> bool | None:
     """Whether `fix` is in `commit`'s history in this checkout; None when git
-    cannot say (unknown objects, no repository)."""
+    cannot say (unknown objects, no repository). Only local objects count: in
+    a partial clone git would otherwise fetch a missing commit from the
+    remote, which takes seconds and makes a verdict depend on the network."""
     import subprocess
     try:
         done = subprocess.run(["git", "-C", str(_LIB_PATH.parent), "merge-base",
                                "--is-ancestor", fix, commit],
-                              capture_output=True, timeout=30, check=False)
+                              capture_output=True, timeout=30, check=False,
+                              env=dict(os.environ, GIT_NO_LAZY_FETCH="1"))
     except (OSError, subprocess.SubprocessError):
         return None
     return {0: True, 1: False}.get(done.returncode)
@@ -319,6 +348,94 @@ def _took_effect(base: dict, fault: str, applied: dict | None) -> bool:
         bool((base["fault"].get("render_loss") or {}).get("performed"))
         if fault in gfc.RENDER_FAULTS else
         True if fault in gfc.CONTROL_FAULTS else applied is not None)
+
+
+def exemption_problem(run_dir: Path, planted: str, base: dict, events: Sequence[dict],
+                      offset: dict, proving_reason: str, *, render_frames: int,
+                      capture: Any, listed: Sequence[str] | None) -> str:
+    """Why a planted FAIL negative on a busy host does not carry the defect's
+    own signature, or "" when it does (Fable, Q1). Load can add a late
+    transient after the fault; it cannot place a deviation exactly where the
+    plug-in's planted construction starts it, for exactly as long as that
+    construction lasts.
+
+    The plug-in arms the defect for the callback after the fault block (the
+    fault's `issued` sample), and each quantum's output leaves the staging
+    one quantum later (gpu_fault_continuity.cpp, run_quantum). A misaligned
+    fallback swaps from the first armed quantum on: issued + quantum. A
+    dropout zeroes the first quantum the fallback served, which is where the
+    provider fault was applied: applied + quantum. Both last to the end of
+    the reference signal. A withheld quantum of input reaches the output
+    after the PDC, at issued + PDC, and lasts one quantum plus the impulse
+    response."""
+    if not proving_reason.startswith("plugin null failed"):
+        return "the proving reason is not the plug-in null"
+    if offset.get("status") != "matched":
+        return f"the host render offset is {offset.get('status')}, not matched at both ends"
+    issued = base["fault"].get("issued_project_sample")
+    # The prepare that owns the audio (a host may re-prepare with another
+    # quantum, as Logic does), not the first one in the log.
+    identity = base.get("plugin_identity") or {}
+    quantum, pdc, taps = identity.get("quantum"), base.get("pdc_samples"), identity.get("ir_taps")
+    if not all(isinstance(v, int) and v > 0 for v in (issued, quantum, pdc, taps)):
+        return "issued sample, quantum, PDC or IR length unknown"
+    # The fallback takes over where the provider fault was applied, on the
+    # capture's clock (G3). The interposer arms at the provider's next
+    # matching call, so that is the issued block or the quantum after it
+    # (live stale run: issued 96256, applied 96768).
+    delivery = base.get("delivery") or {}
+    applied_ns = (base["fault"].get("provider_fault_applied") or {}).get("host_time_ns")
+    applied = (gfc.applied_project_sample(capture, {"host_time_ns": applied_ns})
+               if capture is not None and isinstance(applied_ns, int) else None)
+    if applied is None or not issued <= applied <= issued + quantum:
+        return f"the fault was applied at {applied}, not the issued block {issued} or the next"
+    if not delivery.get("met") or delivery.get("first_fallback_project_sample") != applied:
+        return f"the fallback did not take over where the fault was applied ({applied})"
+    plugin = base["nulls"]["plugin"]
+    first, last = plugin["first_deviating_sample"], plugin["last_deviating_sample"]
+    onset = {"no_fallback": applied + quantum, "fallback_misaligned": issued + quantum,
+             "fallback_stale": issued + pdc}[planted]
+    # Within half a quantum: a deviation one quantum off is the neighbouring
+    # defect's onset (a misalignment rather than a dropout), not this one's.
+    if abs(first - onset) > quantum // 2:
+        return f"the deviation starts at {first}, not the defect's onset {onset}"
+    if planted == "fallback_stale":
+        if not quantum <= last - first <= 2 * quantum + taps:
+            return (f"the deviation lasts {last - first} samples, not one quantum plus the "
+                    f"impulse response ({quantum}..{2 * quantum + taps})")
+        return ""
+    # A dropout or misalignment lasts as long as the reference has signal:
+    # the played stimulus (or the internal one over the render), through the
+    # PDC and the impulse response, cut at the end of the capture.
+    armed = next((e for e in events if e.get("event") == "fault_armed"), {})
+    if armed.get("input") == "internal":
+        stimulus_frames = render_frames
+    elif _usable(run_dir, "stimulus.wav", listed):
+        stimulus_frames = len(gfc.read_wav(run_dir / "stimulus.wav")[1][0])
+    else:
+        return "stimulus.wav unavailable"
+    played = [r["position"] + r["frames"] for r in (capture.records if capture else [])
+              if r["position"] >= 0]
+    end = min(stimulus_frames + pdc + taps, max(played, default=0))
+    if last < end - quantum:
+        return f"the deviation ends at {last}, before the signal ends at {end}"
+    return ""
+
+
+def host_offset(nulls: dict, pdc: Any) -> dict[str, Any]:
+    """How far the host's realtime render sits from the plug-in's capture.
+    The capture is the plug-in's output, delayed by the PDC it declared; the
+    host compensates that PDC, so a deviation shows up exactly `pdc` samples
+    earlier in its render. Measured at both ends of the deviating span, so a
+    render that drifted between them does not match."""
+    plugin, realtime = nulls.get("plugin") or {}, nulls.get("host_realtime") or {}
+    ends = [(plugin.get(k), realtime.get(k))
+            for k in ("first_deviating_sample", "last_deviating_sample")]
+    if not isinstance(pdc, int) or pdc < 0 or any(p is None or r is None for p, r in ends):
+        return {"status": "unmeasurable", "observed": None, "declared": pdc}
+    observed = sorted({p - r for p, r in ends})
+    return {"status": "matched" if observed == [pdc] else "mismatch",
+            "observed": observed[0] if len(observed) == 1 else observed, "declared": pdc}
 
 
 def evaluate_v2(run_dir: Path, *, control_kind: str, fault: str, fault_sample: int,
@@ -430,6 +547,11 @@ def evaluate_v2(run_dir: Path, *, control_kind: str, fault: str, fault_sample: i
             preconditions.append("provider_fault_applied has no host_time_ns that maps to a "
                                  "capture record (G3)")
 
+    offset = host_offset(base["nulls"], base["pdc_samples"])
+    if offset["status"] == "mismatch":
+        preconditions.append(f"the host render is offset {offset['observed']} samples from the "
+                             f"plug-in capture, not the declared PDC {offset['declared']}")
+
     # The stricter of WP-h1's verdict and this one.
     base_verdict, base_reasons = base["verdict"], list(base["verdict_reasons"])
     capture_only = (host.get("id") not in REALTIME_RENDER_HOSTS and
@@ -463,8 +585,18 @@ def evaluate_v2(run_dir: Path, *, control_kind: str, fault: str, fault_sample: i
 
     took_effect = _took_effect(base, fault, applied)
     negative_proved = None
+    quiet_host_exempt = False
     if control_kind == "planted_negative":
         bound = binding["outcome"] == "bound" and not mismatches and not preconditions
+        # Fable's Q1 ruling: a busy host does not void a planted negative, but
+        # only where load cannot have produced the evidence. host_not_quiet is
+        # set aside for the proof (it stays in verdict_reasons); a FAIL shape
+        # must then also show the defect's own onset and span, the host render
+        # at the declared PDC at both ends, and the fallback taking over at the
+        # issued block. --require-quiet-host still refuses such a receipt.
+        exempting = host_quiet is False
+        proof_reasons = [r for r in base_reasons
+                         if not (exempting and r.startswith(HOST_NOT_QUIET))]
         if PLANTED_NEGATIVES.get(planted) == "fail":
             # Fired and applied, bound, and the FAIL is the corrupted audio
             # alone: a null failing from the fault sample on, nothing else.
@@ -472,19 +604,24 @@ def evaluate_v2(run_dir: Path, *, control_kind: str, fault: str, fault_sample: i
             # holding the fault sample (WP-h1, G1), so it cannot begin earlier.
             plugin = base["nulls"]["plugin"]
             negative_proved = bool(
-                bound and took_effect and verdict == "fail" and len(base_reasons) == 1 and
-                base_reasons[0].startswith(("plugin null failed",
-                                            "host realtime render null failed")) and
+                bound and took_effect and verdict == "fail" and len(proof_reasons) == 1 and
+                proof_reasons[0].startswith(("plugin null failed",
+                                             "host realtime render null failed")) and
                 plugin is not None and not plugin["passed"] and
                 plugin["first_deviating_sample"] is not None and
                 plugin["first_deviating_sample"] >= fault_sample)
+            if negative_proved and exempting:
+                negative_proved = not exemption_problem(
+                    run_dir, planted, base, events, offset, proof_reasons[0],
+                    render_frames=render_frames, capture=capture, listed=listed)
         else:
             # gpu_off: fired, bound, and only the GPU-off consequences kept the
             # run from passing.
             negative_proved = bool(
                 bound and base["fault"]["fired"] and verdict == "inconclusive" and
-                any(NOT_SHARED_PATH in r for r in base_reasons) and
-                all(any(k in r for k in _PATH_NEGATIVE_REASONS) for r in base_reasons))
+                any(NOT_SHARED_PATH in r for r in proof_reasons) and
+                all(any(k in r for k in _PATH_NEGATIVE_REASONS) for r in proof_reasons))
+        quiet_host_exempt = bool(negative_proved and exempting)
     return {
         "fault": base["fault"],
         "pdc_samples": base["pdc_samples"],
@@ -499,12 +636,14 @@ def evaluate_v2(run_dir: Path, *, control_kind: str, fault: str, fault_sample: i
         "offline_path": {k: base.get(k) for k in ("offline_records_in_bounce",
                                                   "offline_path_checked")},
         "nulls": base["nulls"],
+        "host_offset": offset,
         "health": base["health"],
         "host_alive": host_alive,
         "verdict": verdict,
         "verdict_reasons": reasons,
         "planted_negative": planted,
         "negative_proved": negative_proved,
+        "quiet_host_exempt": quiet_host_exempt,
     }
 
 
