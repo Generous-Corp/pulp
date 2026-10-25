@@ -212,8 +212,8 @@ quarter block between pumps, never more than 2 ms. `Config::wake_on_write` is
 an opt-in. With it on, each callback posts a semaphore after it writes its
 input, and the worker waits on that semaphore with the poll interval only as a
 fallback. A provider that installs a completion notifier would wake the worker
-too, and then the fallback is one block, but no shipped provider installs one
-yet. The post never allocates or blocks. While the worker is parked, though,
+too, and then the fallback is one block (still at most 2 ms), but no shipped
+provider installs one yet. The post never allocates or blocks. While the worker is parked, though,
 it is a kernel call on the audio thread every block (a Mach semaphore signal
 on macOS), which is why it is off by default. A wake that completes nothing is
 never counted as progress, so `produced_blocks` and WaveNet's

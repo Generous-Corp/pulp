@@ -14,8 +14,9 @@ namespace pulp::gpu_audio::detail {
 // Counting wake for the transport worker. post() never allocates or blocks
 // and may be called from any thread, including the audio callback and a GPU
 // backend's callback thread; while a waiter is parked it is a kernel call (a
-// Mach semaphore signal on Apple, a futex wake elsewhere). wait_for() blocks in the kernel until a post or the
-// timeout. On Apple it is a dispatch semaphore: libc++'s timed
+// Mach semaphore signal on Apple, the platform's semaphore wake elsewhere).
+// wait_for() blocks in the kernel until a post or the timeout. On Apple it is
+// a dispatch semaphore: libc++'s timed
 // counting_semaphore wait polls with a sleeping backoff there, which adds
 // hundreds of microseconds to a wake that has already been posted.
 class WorkerWake {

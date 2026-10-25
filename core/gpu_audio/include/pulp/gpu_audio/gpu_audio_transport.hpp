@@ -54,9 +54,10 @@ class GpuAudioTransport {
         // completion may be ready. The worker waits on it, with the poll
         // interval as a fallback timeout only, instead of sleeping a full
         // quantum. Posting never allocates or blocks, but while the worker is
-        // parked it is a kernel call (a Mach semaphore signal on macOS, a futex
-        // wake elsewhere) on the audio thread every block, so it is off by
-        // default and the default RT path makes no syscall. No shipped provider
+        // parked it is a kernel call (a Mach semaphore signal on macOS, the
+        // platform's semaphore wake elsewhere) on the audio thread every
+        // block, so it is off by default and the default RT path makes no
+        // syscall. No shipped provider
         // installs a completion notifier yet, so today the worker still finds
         // completions by polling. Only meaningful when run_worker_thread is true.
         bool wake_on_write = false;
