@@ -256,8 +256,20 @@ ParagraphUse make_paragraph(const std::string& text, const std::string& family, 
     key.ltr = ltr;
     key.features = features;
     key.font_generation = generation;
-    // SkParagraph's default: synthesize any bold or oblique the face lacks.
+    // SkParagraph's default synthesizes any bold or oblique the face lacks,
+    // judged on the face file's own weight. Chromium judges a page font on its
+    // @font-face's declared weight range, so a face declared `400 700` is
+    // never emboldened at 700 even when only a Regular file backs it. The one
+    // switch covers oblique too, so italic text keeps the default.
     key.fake_missing_font_styles = true;
+    if (slant == 0) {
+        for (const auto& entry : split_css_font_family_list(family)) {
+            if (const auto synthesize = declared_face_synthesizes_bold(entry, weight)) {
+                key.fake_missing_font_styles = *synthesize;
+                break;
+            }
+        }
+    }
     return find_or_build_paragraph(std::move(key), [&family, &primary](const ParagraphKey& k) {
         return build_paragraph(k, family, primary);
     });
