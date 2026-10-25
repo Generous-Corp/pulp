@@ -2719,6 +2719,36 @@ TEST_CASE("WaveNet re-acquire is refused unless a live provider fault fenced the
     }
 }
 
+TEST_CASE("WaveNet reports a GPU kernel only while its channels are prepared",
+          "[gpu_audio][wavenet][realtime][status]") {
+    SECTION("an offline fence releases every channel") {
+        Harness h;
+        h.callback(1);
+        h.service();
+        REQUIRE(checked_status(h.node).gpu_kernel_available);
+        REQUIRE(h.path.fence(h.path.context));
+        const auto status = checked_status(h.node);
+        CHECK(status.recovery_reason == GpuAudioRecoveryReason::OfflineFence);
+        CHECK_FALSE(status.gpu_kernel_available);
+    }
+    SECTION("a failed re-acquire leaves no channel, and a later one restores it") {
+        Harness h;
+        ChannelFactory factory{.control = &h.controls[1], .fail = true};
+        factory.install(h.node);
+        h.callback(1);
+        h.service();
+        h.controls[0].lost = true;
+        h.service();
+        // The lost provider is still owned until a re-acquire replaces it.
+        REQUIRE(checked_status(h.node).gpu_kernel_available);
+        REQUIRE_FALSE(h.path.reprepare(h.path.context, 1'000'000));
+        CHECK_FALSE(checked_status(h.node).gpu_kernel_available);
+        factory.fail = false;
+        REQUIRE(h.path.reprepare(h.path.context, 1'000'000));
+        CHECK(checked_status(h.node).gpu_kernel_available);
+    }
+}
+
 TEST_CASE("Stamped bridge live epoch handoff keeps the stream and refuses stale work",
           "[gpu_audio][wavenet][reacquire]") {
     using Bridge = detail::SharedIoStampedBridge;

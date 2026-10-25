@@ -867,7 +867,7 @@ bool GpuConvolver::realtime_shared_io_health(const void* self,
     health.delivery_epoch_active = session.delivery_epoch() != 0;
     health.device_lost = session.provider_device_lost();
     health.fenced = !session.prepared() || session.fenced() || !health.delivery_epoch_active;
-    health.gpu_kernel_available = true;
+    health.gpu_kernel_available = session.kernel_prepared();
     // Same mapping as the WaveNet node: a failed GPU block is covered by this
     // node's declared CPU fallback.
     using Gpu = detail::SharedIoGpuTerminalDisposition;
@@ -923,7 +923,6 @@ GpuAudioStatus GpuConvolver::status_snapshot() const noexcept {
         // GPU claim.
         const auto identity = provider_identity_for_diagnostics();
         status.provider = identity.authenticated ? identity.provider : GpuAudioProvider::Unknown;
-        status.gpu_kernel_available = true;
         status.selected_engine = status.provider != GpuAudioProvider::Unknown
                                      ? GpuAudioEngine::Gpu
                                      : GpuAudioEngine::Unknown;
@@ -940,6 +939,7 @@ GpuAudioStatus GpuConvolver::status_snapshot() const noexcept {
             status.recovery_sequence = health.recovery_sequence;
             status.epoch = health.epoch;
             status.delivery_epoch_active = health.delivery_epoch_active;
+            status.gpu_kernel_available = health.gpu_kernel_available;
             // The node's delivery counters above come from trace telemetry,
             // which only records while tracing; without them the terminal
             // counts could run ahead of the deliveries they describe. The

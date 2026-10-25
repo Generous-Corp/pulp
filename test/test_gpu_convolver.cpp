@@ -1202,6 +1202,34 @@ TEST_CASE("GpuConvolver shared-path status reports provider loss through the tra
     transport.release();
 }
 
+TEST_CASE("GpuConvolver shared path reports no GPU kernel after the offline fence",
+          "[gpu_audio][convolver][status][health]") {
+    LossProvider* provider = nullptr;
+    auto convolver = convolver_with_loss_provider(provider);
+    if (!convolver)
+        SKIP("shared-I/O provider state is not compiled into this build");
+    GpuAudioTransport transport;
+    REQUIRE(transport.prepare(convolver.get(), {8}));
+    REQUIRE(validated(transport.status_snapshot()).gpu_kernel_available);
+    REQUIRE(transport.capability_report().gpu_kernel_available);
+    REQUIRE(validated(convolver->status_snapshot()).gpu_kernel_available);
+
+    // The offline fence ends GPU delivery for this preparation.
+    std::vector<float> in(kHealthBlock, 0.5f), out(kHealthBlock, 0.0f);
+    const float* in_ptrs[] = {in.data()};
+    float* out_ptrs[] = {out.data()};
+    BufferView<const float> input(in_ptrs, 1, kHealthBlock);
+    BufferView<float> output(out_ptrs, 1, kHealthBlock);
+    transport.process_offline(input, output, kHealthBlock);
+
+    const auto status = validated(transport.status_snapshot());
+    CHECK(status.recovery_reason == GpuAudioRecoveryReason::OfflineFence);
+    CHECK_FALSE(status.gpu_kernel_available);
+    CHECK_FALSE(transport.capability_report().gpu_kernel_available);
+    CHECK_FALSE(validated(convolver->status_snapshot()).gpu_kernel_available);
+    transport.release();
+}
+
 TEST_CASE("GpuConvolver shared-path status counts a refused GPU block as CPU fallback",
           "[gpu_audio][convolver][status][health]") {
     LossProvider* provider = nullptr;

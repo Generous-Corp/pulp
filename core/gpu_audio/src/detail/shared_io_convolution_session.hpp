@@ -170,6 +170,11 @@ class SharedIoConvolutionSession {
     bool fenced() const noexcept {
         return failed_ || pipeline_.fenced();
     }
+    // The prepared program can still run for this preparation. The offline
+    // fence ends it; only release and a fresh prepare bring one back.
+    bool kernel_prepared() const noexcept {
+        return prepared_ && !offline_fenced_;
+    }
     std::uint64_t epoch() const noexcept {
         return pipeline_.epoch();
     }
