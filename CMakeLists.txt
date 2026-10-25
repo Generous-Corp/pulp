@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 1.11.0
+    VERSION 1.12.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -407,6 +407,14 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpTracing.cmake)
 # static-library dependency even though the eventual cached value was ON.
 option(PULP_ENABLE_JS
     "Build the JS scripting + web-compat layer (pulp::view-script)" ON)
+# Development-only paths: a dev checkout (tests on) compiles in the on-disk
+# UI_SCRIPT path so a hot-reloading editor reads the file being edited; a
+# tests-off or SDK build carries only the embedded script bytes. An installed-SDK
+# consumer gets the same option from PulpUiAssets.cmake (default OFF; the CLI's
+# configure turns it on, and `pulp ship` refuses a build with it on). The
+# release profile module owns this option once it lands.
+option(PULP_DEV_BUILD
+    "Compile development-only paths (on-disk ui.js override) in" ${PULP_BUILD_TESTS})
 add_subdirectory(core/platform)
 add_subdirectory(core/simd)
 add_subdirectory(core/runtime)
@@ -742,11 +750,11 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
     set_tests_properties(pulp.vellum-closure-policy-selftest PROPERTIES
         LABELS "pr")
     include(FetchContent)
-    pulp_register_fetchcontent_source(Catch2 DIR catch2 REF v3.7.1)
+    pulp_register_fetchcontent_source(Catch2 DIR catch2 REF v3.16.1)
     FetchContent_Declare(
         Catch2
         GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-        GIT_TAG v3.7.1
+        GIT_TAG v3.16.1
     )
     FetchContent_MakeAvailable(Catch2)
     list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)

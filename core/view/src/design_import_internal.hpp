@@ -178,6 +178,11 @@ const char* interactive_kind_id(InteractiveElementKind k);
 void parse_ir_text_line_layout(IRNode& node, const choc::value::ValueView& obj);
 void write_ir_text_line_layout(std::ostringstream& out, bool& first, const IRNode& node);
 
+// The document's shipped fonts (`fontFamilyAssets`); defined in
+// design_ir_json_fonts.cpp.
+void parse_ir_font_family_assets(DesignIR& ir, const choc::value::ValueView& root);
+void write_ir_font_family_assets(std::ostringstream& out, bool& first, const DesignIR& ir);
+
 // Parse the DesignIR token table; defined in design_ir_json.cpp.
 IRTokens parse_ir_tokens(const choc::value::ValueView& obj);
 void parse_ir_token_source_identity(const choc::value::ValueView& obj,

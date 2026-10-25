@@ -1,6 +1,7 @@
 #include "browser_html_import.hpp"
 
 #include "browser_capture_backend.hpp"
+#include "browser_capture_fonts.hpp"
 #include "browser_capture_ir.hpp"
 #include "browser_capture_provenance.hpp"
 #include "browser_capture_workspace.hpp"
@@ -237,6 +238,13 @@ BrowserHtmlImportResult import_browser_html(
     if (!sprite_error.empty()) {
         return BrowserHtmlFailure{
             3, std::move(sprite_error), shape, std::move(workspaces)};
+    }
+    // The page's own @font-face faces, so native text is shaped with the
+    // fonts Chromium drew the capture with rather than same-named host faces.
+    std::string page_font_error;
+    if (!attach_page_font_faces(*lowered.design_ir, capture_directory / "font-faces.json",
+                                capture_directory / "fonts", lowered.warnings, page_font_error)) {
+        return BrowserHtmlFailure{3, std::move(page_font_error), shape, std::move(workspaces)};
     }
     return BrowserHtmlCaptured{shape,
                                std::move(*lowered.design_ir),

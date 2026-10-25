@@ -63,9 +63,12 @@ class FracDelayT {
     int max_delay() const { return max_delay_; }
 
     void push(SampleType x) {
-        ring()[write_] = x;
-        if (write_ < kMirror)
-            ring()[size_ + write_] = x;
+        SampleType* r = ring();
+        r[write_] = x;
+        // The mirror repeats the ring's first kMirror samples; a ring shorter
+        // than the mirror appears in it more than once.
+        for (std::size_t j = size_ + write_; j < size_ + kMirror; j += size_)
+            r[j] = x;
         write_ = (write_ + 1) & mask_;
     }
 
@@ -217,14 +220,15 @@ class FracDelayT {
     // Advance the write position past `n` samples the caller stored directly
     // as one contiguous run from data() + write_index() (which may extend
     // into the mirror past the ring's end, n <= kMaxBlockSamples). Moves any
-    // part written past the end to the ring's start, then refreshes the
-    // mirror if the ring's first samples changed.
+    // part written past the end to its ring index, newest last so it wins
+    // when the run is longer than the ring, then refreshes the mirror if the
+    // ring's first samples changed.
     void advance(int n) {
         const std::size_t end = write_ + static_cast<std::size_t>(n);
         SampleType* r = ring();
         if (end > size_)
             for (std::size_t j = size_; j < end; ++j)
-                r[j - size_] = r[j];
+                r[j & mask_] = r[j];
         if (write_ < kMirror || end > size_)
             refresh_mirror();
         write_ = end & mask_;

@@ -110,6 +110,15 @@ set_tests_properties(cmake-au-v2-type-selection PROPERTIES
     LABELS "cmake;au;au-v2;midi"
     TIMEOUT 30)
 
+# SDL3 Linux X11 extension defaults: which SDL_X11_* options are defaulted OFF
+# because their development header is absent.
+add_test(NAME cmake-sdl3-linux-x11-defaults
+    COMMAND ${CMAKE_COMMAND} -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_sdl3_linux_x11_defaults.cmake)
+set_tests_properties(cmake-sdl3-linux-x11-defaults PROPERTIES
+    LABELS "cmake;sdl3;linux"
+    TIMEOUT 30)
+
 # Standalone document-type / exported-UTType declaration contract. Argument
 # validation runs under `cmake -P` everywhere; on macOS the same test also
 # configures a throwaway bundle project and reads the Info.plist CMake
@@ -124,6 +133,20 @@ add_test(NAME cmake-plugin-bundle-icon
     COMMAND ${CMAKE_COMMAND}
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_plugin_bundle_icon.cmake)
 
+# UI_SCRIPT embedding contract: configures, builds and runs a throwaway project
+# through the helper every format target uses, and scans the binary for the
+# script bytes (present) and the script's absolute source path (absent without
+# PULP_DEV_BUILD, present under PULP_DEV_BUILD=ON as the control).
+add_test(NAME cmake-ui-script-embed
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_UI_SCRIPT_EMBED_TEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/ui-script-embed
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_ui_script_embed.cmake)
+set_tests_properties(cmake-ui-script-embed PROPERTIES
+    LABELS "cmake;view;scripted-ui;embed"
+    # Two throwaway configures plus two three-file builds; the budget covers
+    # compiler detection on a cold runner.
+    TIMEOUT 300)
+
 # PULP_DEAD_STRIP_PLUGINS and the per-module PULP_DEAD_STRIP property each
 # remove -dead_strip from an Apple plug-in module's link; the default keeps it.
 add_test(NAME cmake-plugin-dead-strip-switch
@@ -133,6 +156,17 @@ add_test(NAME cmake-plugin-dead-strip-switch
 set_tests_properties(cmake-plugin-dead-strip-switch PROPERTIES
     LABELS "cmake;plugin;packaging"
     # Three throwaway configures, each paying C compiler detection.
+    TIMEOUT 180)
+# PULP_DEV_SHARED_UI: a module links its adapter statically and the Pulp
+# libraries through the shared runtime dylib, loads, and runs; the option-off
+# control links statically. Also covers the link helper's refusals.
+add_test(NAME cmake-dev-shared-ui
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_DEV_SHARED_TEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/dev-shared-ui
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_dev_shared_ui.cmake)
+set_tests_properties(cmake-dev-shared-ui PROPERTIES
+    LABELS "cmake;plugin;packaging"
+    # Three throwaway configure + build passes of five C files each.
     TIMEOUT 180)
 set_tests_properties(cmake-standalone-document-types PROPERTIES
     LABELS "cmake;app;standalone;plist"
@@ -149,6 +183,18 @@ add_test(NAME cmake-js-engine-selection
 set_tests_properties(cmake-js-engine-selection PROPERTIES
     LABELS "cmake;view;js-engine"
     TIMEOUT 30)
+
+# A sealed V8 provider's manifest consumer_defines reach v8::v8, and a manifest
+# that cannot supply them fails configure. Each case configures a throwaway
+# LANGUAGES NONE project against the real FindV8.cmake and a fixture provider,
+# so no V8 download or compiler is needed.
+add_test(NAME cmake-v8-consumer-defines
+    COMMAND ${CMAKE_COMMAND}
+        "-DPULP_TEST_GENERATOR=${CMAKE_GENERATOR}"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_v8_consumer_defines.cmake)
+set_tests_properties(cmake-v8-consumer-defines PROPERTIES
+    LABELS "cmake;view;js-engine"
+    TIMEOUT 120)
 
 # ARM64EC selects the scalar SIMD backend. The detection runs under `cmake -P`
 # against the real module, so every host checks the ARM64EC, ARM64 and x64
@@ -1264,6 +1310,56 @@ add_test(NAME cmake-control-shipping-matrix
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_control_shipping_matrix.cmake)
 set_tests_properties(cmake-control-shipping-matrix PROPERTIES
     LABELS "cmake;control;ship;matrix" TIMEOUT 180)
+
+# Every file under share/pulp is installed into each consumer's SDK, so none may
+# name a build host, a local path, a user or a private repository. This scans
+# the source copies of the Pulp-authored files installed there; vendored and
+# build-generated files (three.js, runtime pins, the capability handoff) are
+# covered by the same scan of the installed tree in cmake-pulp-install-layout.
+# The contracts the install rules name, not every file in docs/contracts.
+file(STRINGS "${CMAKE_SOURCE_DIR}/tools/cmake/PulpInstallRules.cmake" _pulp_installed_contract_lines
+    REGEX "docs/contracts/[A-Za-z0-9_.-]+[.]json")
+set(_pulp_share_contract_sources "")
+foreach(_line IN LISTS _pulp_installed_contract_lines)
+    string(REGEX MATCH "docs/contracts/[A-Za-z0-9_.-]+[.]json" _contract "${_line}")
+    list(APPEND _pulp_share_contract_sources "${CMAKE_SOURCE_DIR}/${_contract}")
+endforeach()
+list(REMOVE_DUPLICATES _pulp_share_contract_sources)
+file(GLOB _pulp_share_example_sources "${CMAKE_SOURCE_DIR}/examples/sample-region-allpass/*")
+set(_pulp_share_sources
+    ${_pulp_share_contract_sources}
+    ${_pulp_share_example_sources}
+    "${CMAKE_SOURCE_DIR}/docs/guides/gpu-validation-checklist.md"
+    "${CMAKE_SOURCE_DIR}/docs/reference/cli.md"
+    "${CMAKE_SOURCE_DIR}/docs/status/agent-capabilities.json"
+    "${CMAKE_SOURCE_DIR}/docs/status/agent-capabilities.schema.json"
+    "${CMAKE_SOURCE_DIR}/docs/status/agent-capability-handoff.schema.json"
+    "${CMAKE_SOURCE_DIR}/docs/status/authority-navigation.json"
+    "${CMAKE_SOURCE_DIR}/docs/status/authority-navigation.schema.json"
+    "${CMAKE_SOURCE_DIR}/docs/status/dsp-capabilities.json"
+    "${CMAKE_SOURCE_DIR}/docs/status/dsp-capabilities.schema.json"
+    "${CMAKE_SOURCE_DIR}/docs/status/forge-catalog.json"
+    "${CMAKE_SOURCE_DIR}/docs/status/forge-catalog.schema.json"
+    "${CMAKE_SOURCE_DIR}/docs/status/gpu-recipes.schema.json"
+    "${CMAKE_SOURCE_DIR}/docs/status/gpu-recipes.yaml"
+    "${CMAKE_SOURCE_DIR}/examples/capability-control/README.md"
+    "${CMAKE_SOURCE_DIR}/examples/capability-control/control-examples.json"
+    "${CMAKE_SOURCE_DIR}/examples/capability-control/generated/cli-walkthrough.sh"
+    "${CMAKE_SOURCE_DIR}/examples/capability-control/generated/mcp-tools.jsonl"
+    "${CMAKE_SOURCE_DIR}/ship/templates/entitlements.plist"
+    "${CMAKE_SOURCE_DIR}/tools/cmake/threejs-runtime-manifest.json"
+    "${CMAKE_SOURCE_DIR}/tools/scripts/ensure_signing_ready.sh"
+    "${CMAKE_SOURCE_DIR}/tools/scripts/gpu_health_contract.py"
+    "${CMAKE_SOURCE_DIR}/tools/scripts/json_schema_lite.py"
+    "${CMAKE_SOURCE_DIR}/tools/scripts/verify_gpu_health_run_attestation.py")
+list(JOIN _pulp_share_sources "\n" _pulp_share_source_lines)
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/pulp-share-sources.txt" "${_pulp_share_source_lines}\n")
+add_test(NAME cmake-share-files-no-host-identifiers
+    COMMAND ${CMAKE_COMMAND}
+        "-DSCAN_LIST=${CMAKE_CURRENT_BINARY_DIR}/pulp-share-sources.txt"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_no_host_identifiers.cmake)
+set_tests_properties(cmake-share-files-no-host-identifiers PROPERTIES
+    LABELS "cmake;ship" TIMEOUT 60)
 
 add_test(NAME cmake-control-shipping-fresh-stamp
     COMMAND ${CMAKE_COMMAND}

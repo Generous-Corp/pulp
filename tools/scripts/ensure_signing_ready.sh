@@ -222,7 +222,7 @@ if [ -n "$KC" ] && [ -n "${PULP_SIGN_KEYCHAIN_PW:-}" ]; then
   # session. The superseded one also leaves the search list: a bare
   # `codesign --sign` that walks into it while it is locked in the GUI session
   # makes securityd show a password dialog for a password only keychain.env
-  # holds (m5studio and m3, 2026-10-02). Its file is kept.
+  # holds. Its file is kept.
   if [ "$SIBLING_KC" != "$KC" ] && [ -f "$SIBLING_KC" ]; then
     RETIRED_KC="$KC"
     KC="$SIBLING_KC"

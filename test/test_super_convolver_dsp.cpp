@@ -978,29 +978,34 @@ TEST_CASE("SuperConvolver SCv2 state round-trips every IR source kind",
         CHECK(max_abs_diff(ir1, ir2) == 0.0);
     }
 
+    // Restoring processors are rooted at the path's directory: these sections
+    // are about the blob format, not about where a path is allowed to point.
     SECTION("kind 3 — filesystem path (native)") {
-        const std::string path = "/tmp/pulp_superconvolver_state_ir.wav";
+        const std::string path = "/some/where/pulp_superconvolver_state_ir.wav";
         SuperConvolverProcessor p1;
         p1.set_ir_path(path);
         const auto blob = p1.serialize_plugin_state();
         CHECK(kind_of(blob) == Kind::Path);
 
         SuperConvolverProcessor p2;
+        p2.set_ir_restore_root("/some/where");
         CHECK(p2.deserialize_plugin_state(std::span<const std::uint8_t>(blob)));
         CHECK(p2.ir_path() == path);
     }
 
     SECTION("SCv1 and pre-versioning raw-path blobs still restore their path") {
-        const std::string path = "/tmp/pulp_superconvolver_legacy_ir.wav";
+        const std::string path = "/some/where/pulp_superconvolver_legacy_ir.wav";
 
         std::vector<std::uint8_t> v1 = {'S', 'C', 'v', '1', 1};
         v1.insert(v1.end(), path.begin(), path.end());
         SuperConvolverProcessor p1;
+        p1.set_ir_restore_root("/some/where");
         CHECK(p1.deserialize_plugin_state(std::span<const std::uint8_t>(v1)));
         CHECK(p1.ir_path() == path);
 
         const std::vector<std::uint8_t> raw(path.begin(), path.end());
         SuperConvolverProcessor p2;
+        p2.set_ir_restore_root("/some/where");
         CHECK(p2.deserialize_plugin_state(std::span<const std::uint8_t>(raw)));
         CHECK(p2.ir_path() == path);
 

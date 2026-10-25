@@ -67,6 +67,7 @@ KNOWN_TEMPLATE_VARS = frozenset({
     "NAMESPACE",
     "FACTORY_NAME",
     "HEADER_NAME",
+    "SOURCE_NAME",
     "TARGET_NAME",
     "MANUFACTURER",
     "MANUFACTURER_CODE",
@@ -88,6 +89,7 @@ REQUIRED_FILES_BY_TYPE = {
     "effect": {
         "CMakeLists.txt.template",
         "processor.hpp.template",
+        "processor.cpp.template",
         "test.cpp.template",
         "au_v2_entry.cpp.template",
         "clap_entry.cpp.template",
@@ -96,6 +98,7 @@ REQUIRED_FILES_BY_TYPE = {
     "instrument": {
         "CMakeLists.txt.template",
         "processor.hpp.template",
+        "processor.cpp.template",
         "test.cpp.template",
         "au_v2_entry.cpp.template",
         "clap_entry.cpp.template",
@@ -273,6 +276,17 @@ def check_catch2_fetch(type_name: str, dir_path: Path) -> list[str]:
             if not re.search(r"\bFIND_PACKAGE_ARGS\b", body):
                 failures.append(f"[{type_name}] {rel}: Catch2 declare lacks FIND_PACKAGE_ARGS, "
                                 "so an installed Catch2 is never used")
+            else:
+                # The installed package must be at least the pinned release: a
+                # bare major ("3") would accept an older 3.x than the archive.
+                pinned = re.search(r"/tags/v(\d+\.\d+\.\d+)\.tar\.gz", body)
+                wanted = pinned.group(1) if pinned else None
+                found = re.search(r"\bFIND_PACKAGE_ARGS\s+(\S+)", body)
+                if not wanted or not found or found.group(1) != wanted:
+                    failures.append(
+                        f"[{type_name}] {rel}: FIND_PACKAGE_ARGS must name the pinned "
+                        f"version {wanted or '<archive tag>'}, not "
+                        f"{found.group(1) if found else 'nothing'}")
             if ("${catch2_SOURCE_DIR}" in text
                     and not re.search(r"\bif\(\s*catch2_SOURCE_DIR\s*\)", text)):
                 failures.append(f"[{type_name}] {rel}: appends ${{catch2_SOURCE_DIR}}/extras "

@@ -25,8 +25,10 @@
 #include "include/core/SkSurface.h"
 #include "include/effects/SkDashPathEffect.h"
 #include "include/effects/SkImageFilters.h"
+#if PULP_CANVAS_GANESH
 #include "include/gpu/ganesh/GrDirectContext.h"
 #include "include/gpu/ganesh/SkSurfaceGanesh.h"
+#endif
 #include "include/gpu/graphite/Recorder.h"
 #include "include/gpu/graphite/Surface.h"
 
@@ -434,11 +436,14 @@ Canvas::LayerHandle SkiaCanvas::begin_layer(Rect2D bounds, bool cacheable) {
     // Match the surface to whatever backend owns this canvas, so a GPU layer
     // stays on the GPU instead of round-tripping through system memory.
     sk_sp<SkSurface> surface;
-    if (recorder_ != nullptr) {
+    if (recorder_ != nullptr)
         surface = SkSurfaces::RenderTarget(recorder_, info);
-    } else if (gr_context_ != nullptr) {
+#if PULP_CANVAS_GANESH
+    // Only a Ganesh build (the WebGL browser host) sets gr_context_. Compiling
+    // this call out elsewhere lets dead-strip drop Skia's Ganesh backend.
+    if (recorder_ == nullptr && gr_context_ != nullptr)
         surface = SkSurfaces::RenderTarget(gr_context_, skgpu::Budgeted::kYes, info);
-    }
+#endif
     if (!surface) surface = SkSurfaces::Raster(info);
     if (!surface) return LayerHandle{};  // out of memory — caller draws direct
 
