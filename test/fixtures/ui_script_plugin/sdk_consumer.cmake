@@ -5,7 +5,10 @@
 # installed CMake helpers and headers.
 #
 #   cmake -DPULP_BUILD_DIR=<build> -DFIXTURE_DIR=<this dir> -DPROBE=<exe>
-#         -DEXPECT_GPU=<bool> -DCONFIG=<Release|Debug> -P sdk_consumer.cmake
+#         -DEXPECT_GPU=<bool> -DCONFIG=<Release|Debug>
+#         [-DPULP_PARENT_SANITIZER=<kind>] [-DPULP_PARENT_CXX_FLAGS=<flags>]
+#         [-DPULP_PARENT_INSTRUMENTATION_CXX_FLAGS=<flags>]
+#         [-DPULP_PARENT_INSTRUMENTATION_LINKER_FLAGS=<flags>] -P sdk_consumer.cmake
 
 cmake_minimum_required(VERSION 3.24)
 
@@ -62,6 +65,26 @@ set(_configure_args -S "${_source}" -B "${_build}"
 string(TOLOWER "${CONFIG}" _config_lower)
 if(_config_lower STREQUAL "debug")
     list(APPEND _configure_args -DPULP_ALLOW_DEBUG_SDK=ON)
+endif()
+# A sanitizer or coverage producer installs static libraries that reference
+# its runtime: compile the consumer with the same instrumentation and link the
+# plug-in module (and any executable) against that runtime.
+set(_consumer_cxx_flags "${PULP_PARENT_CXX_FLAGS}")
+if(PULP_PARENT_INSTRUMENTATION_CXX_FLAGS)
+    string(APPEND _consumer_cxx_flags " ${PULP_PARENT_INSTRUMENTATION_CXX_FLAGS}")
+endif()
+string(STRIP "${_consumer_cxx_flags}" _consumer_cxx_flags)
+if(PULP_PARENT_SANITIZER)
+    list(APPEND _configure_args "-DPULP_SANITIZER=${PULP_PARENT_SANITIZER}")
+endif()
+if(_consumer_cxx_flags)
+    list(APPEND _configure_args "-DCMAKE_CXX_FLAGS=${_consumer_cxx_flags}")
+endif()
+if(PULP_PARENT_INSTRUMENTATION_LINKER_FLAGS)
+    foreach(_kind EXE SHARED MODULE)
+        list(APPEND _configure_args
+            "-DCMAKE_${_kind}_LINKER_FLAGS=${PULP_PARENT_INSTRUMENTATION_LINKER_FLAGS}")
+    endforeach()
 endif()
 execute_process(COMMAND "${CMAKE_COMMAND}" ${_configure_args}
     RESULT_VARIABLE _configure_rc OUTPUT_VARIABLE _configure_out ERROR_VARIABLE _configure_err)

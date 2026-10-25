@@ -915,7 +915,9 @@ knowing before you touch that file:
   `image_decodes`, `gpu_uploads` and `image_cache_builds`, and leaves
   `paragraph_builds` ungated there because measuring text shapes it. Raw DOM-snapshot hashes differ per capture
   only by the CDP frame ID, so compare `*_snapshot_semantic_sha256` across
-  runs, not the raw binding.
+  runs, not the raw binding. `platform_fonts_sha256` likewise fixes each text
+  run's `backend_node_id`, which Chromium numbers per run; a raw hash of
+  platform-fonts.json failed determinism on node order alone.
 
   **Normalize gotcha:** `normalize_design_ir` (design_ir_normalize.cpp) runs
   on every node `parse_ir_node` reads, and its rules are design-tool

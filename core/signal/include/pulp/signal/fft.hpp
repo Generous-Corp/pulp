@@ -418,15 +418,32 @@ public:
     // One buffer holds both split halves so their placement is fixed rather
     // than left to the allocator. vDSP takes a separate code path when both
     // halves of a split complex array sit on 64-byte boundaries, and that
-    // path is the less accurate one: from 512 points up it rounds 2.6-6.6 dB
-    // worse (max error over bins against a double-precision DFT, about -130
-    // to -133 dB against -135 to -137 dB off the boundary), for real and
-    // complex transforms alike. Off the boundary, the real transform is also
-    // up to 1.9x faster from 512 to 2048 points; the boundary path is faster
-    // for large transforms on some processors, but never at the accuracy
-    // this one keeps. Both halves therefore always sit 16 bytes past a
-    // 64-byte boundary. Separate allocations made the same transform's speed
-    // and error depend on where the buffers happened to land.
+    // path is the less accurate one: from 512 points up it rounds 0.4-5.3 dB
+    // worse (worst bin error relative to the largest bin, against a
+    // long-double DFT; about -131.6 to -137.6 dB on the boundary against
+    // -135.8 to -141.4 dB off it) on every processor measured: real and
+    // complex transforms on M1 Max, M5 Max and M5 Ultra, real transforms on
+    // M3 Ultra. Both halves therefore always sit 16 bytes past a 64-byte
+    // boundary.
+    //
+    // The cost of that choice depends on the processor. Forward transforms in
+    // this buffer layout, at low priority on shared machines:
+    //   - M5 Max and M5 Ultra (paired, interleaved; loaded): off the boundary
+    //     is the faster path from 512 to 8192 points, by 1.08-2.16x for real
+    //     transforms and 1.15-2.5x for complex ones (3.5-4.4x for complex at
+    //     256); the two are within 0.1% at 256 real points, and at 16384 the
+    //     boundary path takes 0.93-1.14x the time.
+    //   - M1 Max (paired, interleaved; background QoS): the boundary path is
+    //     faster from 2048 real and 1024 complex points, by 1.17-1.75x and
+    //     1.19-2.1x.
+    //   - M3 Ultra (best of five, one session, load not recorded): the
+    //     boundary path is faster from 1024 real and 512 complex points, by
+    //     1.06-1.42x and 1.18-1.59x.
+    // On M1 Max and M3 Ultra, then, large transforms give up that much speed
+    // for the accuracy above.
+    //
+    // Separate allocations made the same transform's speed and error depend
+    // on where the buffers happened to land.
     mutable std::vector<float> split_;
     std::size_t split_base_ = 0;
     static constexpr std::size_t kVdspSplitOffsetFloats = 4; // 16 bytes
