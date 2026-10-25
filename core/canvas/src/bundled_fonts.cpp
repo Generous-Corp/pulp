@@ -465,6 +465,14 @@ bool register_font(const std::uint8_t* data, std::size_t size,
     return true;
 }
 
+namespace {
+std::atomic<std::uint64_t> g_woff2_file_routes{0};
+} // namespace
+
+std::uint64_t woff2_file_routes() noexcept {
+    return g_woff2_file_routes.load(std::memory_order_relaxed);
+}
+
 bool register_font_file(const std::string& path,
                         const std::string& family_override) {
     if (path.empty()) return false;
@@ -475,6 +483,15 @@ bool register_font_file(const std::string& path,
     file.seekg(0, std::ios::beg);
     std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
     if (!file.read(reinterpret_cast<char*>(bytes.data()), size)) return false;
+    // A captured page's @font-face file is often WOFF2, which not every
+    // platform font manager decodes (CoreText does; FreeType needs Brotli);
+    // it goes through the WOFF2 path, which decompresses and validates it
+    // first, so every platform reads it the same way.
+    if (bytes.size() >= 4 && bytes[0] == 'w' && bytes[1] == 'O' && bytes[2] == 'F' &&
+        bytes[3] == '2') {
+        g_woff2_file_routes.fetch_add(1, std::memory_order_relaxed);
+        return register_font_woff2(bytes.data(), bytes.size(), family_override);
+    }
     return register_font(bytes.data(), bytes.size(), family_override);
 }
 

@@ -5,8 +5,9 @@
 // document. A plain page names files beside it instead (`src: url(fonts/x.ttf)`),
 // and Chromium draws the capture with those bytes, so the native import needs
 // the same bytes and descriptors or its text is reshaped with whatever
-// same-named face the host has. Only faces Chromium actually loaded are
-// recorded: a face no text used was never fetched and shapes nothing.
+// same-named face the host has. Only faces Chromium actually loaded and
+// decoded are recorded: a face no text used was never fetched and shapes
+// nothing, and a file its font sanitizer rejected never drew a glyph.
 import { createHash } from "node:crypto";
 
 // Bounds on authored input: faces read, and font bytes carried in total.
@@ -15,21 +16,25 @@ export const MAX_PAGE_FONT_BYTES = 32 * 1024 * 1024;
 
 export const PAGE_FONT_FACES_SCHEMA = "pulp-browser-capture-font-faces-v1";
 
-const FORMAT_MIME = Object.freeze({
-  woff2: "font/woff2",
-  woff: "font/woff",
-  truetype: "font/ttf",
-  ttf: "font/ttf",
-  opentype: "font/otf",
-  otf: "font/otf",
-});
+// The container a font file's first four bytes declare, and the MIME type the
+// import records for it, or null for bytes that are not a font. WOFF 1.0 is
+// recognized so it can be refused by name: not every platform font manager
+// Pulp renders through decodes it.
+const SIGNATURES = [
+  [[0x00, 0x01, 0x00, 0x00], "truetype", "font/ttf"],
+  [[0x74, 0x72, 0x75, 0x65], "truetype", "font/ttf"], // 'true'
+  [[0x4f, 0x54, 0x54, 0x4f], "opentype", "font/otf"], // 'OTTO'
+  [[0x77, 0x4f, 0x46, 0x32], "woff2", "font/woff2"], // 'wOF2'
+  [[0x77, 0x4f, 0x46, 0x46], "woff", "font/woff"], // 'wOFF'
+];
 
-// The MIME type of a face's bytes from its format() hint, else its extension.
-export function fontMimeType(format, url) {
-  const hinted = FORMAT_MIME[String(format || "").toLowerCase()];
-  if (hinted) return hinted;
-  const extension = /\.([a-z0-9]+)(?:[?#]|$)/i.exec(url || "")?.[1]?.toLowerCase();
-  return FORMAT_MIME[extension] ?? "font/ttf";
+export function fontSignature(bytes) {
+  for (const [magic, container, mimeType] of SIGNATURES) {
+    if (bytes.length >= 4 && magic.every((byte, index) => bytes[index] === byte)) {
+      return { container, mimeType };
+    }
+  }
+  return null;
 }
 
 // Every @font-face rule the document's readable style sheets declare, with
@@ -53,6 +58,18 @@ const LIST_EXPRESSION = `(() => {
   }
   const loadedFamilies = new Set([...document.fonts]
     .filter((face) => face.status === "loaded").map((face) => unquote(face.family)));
+  // The FontFace Chromium built for a rule, matched on the descriptors both
+  // serialize the same way. Its status is Chromium's own verdict on the
+  // file: "loaded" once its sanitizer accepted the bytes, "error" when not.
+  const faceStatus = (family, style) => {
+    const weight = style.getPropertyValue("font-weight").trim() || "normal";
+    const fontStyle = style.getPropertyValue("font-style").trim() || "normal";
+    const range = style.getPropertyValue("unicode-range").trim() || "U+0-10FFFF";
+    const face = [...document.fonts].find((candidate) =>
+      unquote(candidate.family) === family && candidate.weight === weight &&
+      candidate.style === fontStyle && candidate.unicodeRange === range);
+    return face ? face.status : null;
+  };
   return rules.map(({ rule, base }) => {
     const style = rule.style;
     const family = unquote(style.getPropertyValue("font-family"));
@@ -71,6 +88,7 @@ const LIST_EXPRESSION = `(() => {
       unicode_range: style.getPropertyValue("unicode-range").trim(),
       sources,
       family_loaded: loadedFamilies.has(family),
+      face_status: faceStatus(family, style),
     };
   });
 })()`;
@@ -105,6 +123,8 @@ function fetchExpression(url) {
 function readable(url, { allowNetwork, privatePrefix }) {
   if (url.startsWith("data:")) return true;
   if (privatePrefix && url.startsWith(privatePrefix)) return true;
+  // Only https: a plain-http font is refused even with the network allowed,
+  // as the capture's network guard refuses plain-http origins.
   return allowNetwork && url.startsWith("https://");
 }
 
@@ -148,6 +168,7 @@ export async function capturePageFontFaces(cdp, options = {}) {
     throw error;
   }
   const faces = [];
+  const dropped = [];
   const assets = new Map();
   const bytesByUrl = new Map();
   let total = 0;
@@ -167,6 +188,12 @@ export async function capturePageFontFaces(cdp, options = {}) {
       continue;
     }
     if (!readable(source.url, { allowNetwork, privatePrefix })) continue;
+    const drop = (reason) => dropped.push({ family: rule.family, weight: rule.weight,
+      style: rule.style, source: publicSource(source.url, privatePrefix), reason });
+    if (rule.face_status === "error") {
+      drop("Chromium fetched it and could not decode it, so its text drew in a fallback face");
+      continue;
+    }
     let bytes = bytesByUrl.get(source.url);
     if (!bytes) {
       const read = await cdp.call("Runtime.evaluate", {
@@ -184,8 +211,17 @@ export async function capturePageFontFaces(cdp, options = {}) {
       }
       bytesByUrl.set(source.url, bytes);
     }
+    const signature = fontSignature(bytes);
+    if (!signature) {
+      drop("its bytes start with no TrueType, OpenType, WOFF or WOFF2 signature");
+      continue;
+    }
+    if (signature.container === "woff") {
+      drop("it is WOFF 1.0, which not every native font manager decodes; serve it as WOFF2 or TTF");
+      continue;
+    }
     const sha256 = createHash("sha256").update(bytes).digest("hex");
-    const mimeType = fontMimeType(source.format, source.url);
+    const mimeType = signature.mimeType;
     if (!assets.has(sha256)) {
       assets.set(sha256, { sha256, mime_type: mimeType, byte_length: bytes.length,
         data_base64: bytes.toString("base64") });
@@ -200,5 +236,5 @@ export async function capturePageFontFaces(cdp, options = {}) {
       sha256,
     });
   }
-  return { schema: PAGE_FONT_FACES_SCHEMA, faces, assets: [...assets.values()] };
+  return { schema: PAGE_FONT_FACES_SCHEMA, faces, dropped, assets: [...assets.values()] };
 }

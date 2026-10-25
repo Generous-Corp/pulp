@@ -3,6 +3,7 @@
 #include "support/unique_temp_dir.hpp"
 #include "tools/import-design/browser_capture_fonts.hpp"
 
+#include <pulp/runtime/base64.hpp>
 #include <pulp/runtime/crypto.hpp>
 #include <pulp/view/design_ir_io.hpp>
 #include <pulp/view/design_sources.hpp>
@@ -11,6 +12,7 @@
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <vector>
 
 using namespace pulp::view;
 using pulp::import_design::attach_captured_font_faces;
@@ -163,9 +165,20 @@ namespace {
 constexpr const char* kWrongSha =
     "2cbb1c0ae72e1b35e1a1ec3c1c6f99d3a3f3a0b8e3e9e7d0b5ec2e3e5ed0d0f1";
 
-// The font-faces.json a capture writes for a plain page whose two url() faces
-// loaded "regular bytes" and "bold bytes".
-std::string page_font_faces(const std::string& regular_sha, const std::string& bold_sha) {
+// The bytes of a plain page's two url() faces, each opening with its
+// container's signature, as the capture carries them.
+const std::string kRegularBytes = std::string("true") + "regular bytes";
+const std::string kBoldBytes = std::string("wOF2") + "bold bytes";
+
+// The font-faces.json a capture writes for that page, with the bytes'
+// recorded digests and, optionally, faces it dropped.
+std::string page_font_faces(const std::string& regular_sha, const std::string& bold_sha,
+                            const std::string& regular_bytes = kRegularBytes,
+                            const std::string& dropped = "[]") {
+    const auto b64 = [](const std::string& bytes) {
+        return pulp::runtime::base64_encode(reinterpret_cast<const uint8_t*>(bytes.data()),
+                                            bytes.size());
+    };
     return R"JSON({"schema":"pulp-browser-capture-font-faces-v1",
   "faces":[
     {"family":"Pulp Page Face","weight":"400","style":"normal","unicode_range":"",
@@ -174,14 +187,20 @@ std::string page_font_faces(const std::string& regular_sha, const std::string& b
     {"family":"Pulp Page Face","weight":"300 800","style":"italic","unicode_range":"U+0-FF",
      "format":"woff2","source":"pulp-capture:///fonts/Jost-Bold.woff2","sha256":")JSON" +
            bold_sha + R"JSON("}],
+  "dropped":)JSON" +
+           dropped + R"JSON(,
   "assets":[
     {"sha256":")JSON" +
-           regular_sha +
-           R"JSON(","mime_type":"font/ttf","byte_length":13,"data_base64":"cmVndWxhciBieXRlcw=="},
+           regular_sha + R"JSON(","mime_type":"font/ttf","data_base64":")JSON" +
+           b64(regular_bytes) + R"JSON("},
     {"sha256":")JSON" +
-           bold_sha +
-           R"JSON(","mime_type":"font/woff2","byte_length":10,"data_base64":"Ym9sZCBieXRlcw=="}]
+           bold_sha + R"JSON(","mime_type":"font/woff2","data_base64":")JSON" + b64(kBoldBytes) +
+           R"JSON("}]
 })JSON";
+}
+
+std::string sha(const std::string& bytes) {
+    return pulp::runtime::sha256_hex(std::string_view(bytes));
 }
 
 } // namespace
@@ -189,15 +208,20 @@ std::string page_font_faces(const std::string& regular_sha, const std::string& b
 TEST_CASE("a plain page's url() @font-face files become IR font assets",
           "[import-design][browser-capture][font-assets]") {
     using pulp::import_design::attach_page_font_faces;
-    const auto regular = pulp::runtime::sha256_hex(std::string_view("regular bytes"));
-    const auto bold = pulp::runtime::sha256_hex(std::string_view("bold bytes"));
+    const auto regular = sha(kRegularBytes);
+    const auto bold = sha(kBoldBytes);
     ScratchDir scratch;
     const auto record = scratch.path / "font-faces.json";
-    std::ofstream(record, std::ios::binary) << page_font_faces(regular, bold);
+    std::ofstream(record, std::ios::binary)
+        << page_font_faces(regular, bold, kRegularBytes,
+                           R"([{"family":"Old Face","weight":"400","style":"normal",
+            "source":"pulp-capture:///fonts/old.woff","reason":"it is WOFF 1.0"}])");
 
     DesignIR ir;
+    std::vector<std::string> warnings;
     std::string error;
-    const bool attached = attach_page_font_faces(ir, record, scratch.path / "fonts", error);
+    const bool attached =
+        attach_page_font_faces(ir, record, scratch.path / "fonts", warnings, error);
     INFO(error);
     REQUIRE(attached);
     REQUIRE(ir.font_family_assets.size() == 2);
@@ -207,7 +231,7 @@ TEST_CASE("a plain page's url() @font-face files become IR font assets",
     CHECK(first.weight_max == 0);
     CHECK(first.font_style == "normal");
     CHECK(first.asset_id == "pulp-page-font-" + regular);
-    CHECK(read_file(first.resolved_path) == "regular bytes");
+    CHECK(read_file(first.resolved_path) == kRegularBytes);
     CHECK(fs::path(first.resolved_path).extension() == ".ttf");
     const auto& second = ir.font_family_assets[1];
     CHECK(second.weight == 300);
@@ -218,25 +242,47 @@ TEST_CASE("a plain page's url() @font-face files become IR font assets",
     REQUIRE(ir.asset_manifest.assets.size() == 2);
     CHECK(ir.asset_manifest.assets[1].mime == "font/woff2");
     CHECK(ir.asset_manifest.assets[1].content_hash == bold);
+    // A face the capture dropped is named in the import's warnings.
+    REQUIRE(warnings.size() == 1);
+    CHECK(warnings[0].find("\"Old Face\" (pulp-capture:///fonts/old.woff)") != std::string::npos);
+    CHECK(warnings[0].find("WOFF 1.0") != std::string::npos);
+}
+
+TEST_CASE("page font bytes that are not a native font fail the import",
+          "[import-design][browser-capture][font-assets]") {
+    using pulp::import_design::attach_page_font_faces;
+    for (const std::string& bytes : {std::string("<!doctype html>"), std::string("wOFFold woff")}) {
+        ScratchDir scratch;
+        const auto record = scratch.path / "font-faces.json";
+        std::ofstream(record, std::ios::binary)
+            << page_font_faces(sha(bytes), sha(kBoldBytes), bytes);
+        DesignIR ir;
+        std::vector<std::string> warnings;
+        std::string error;
+        CHECK_FALSE(attach_page_font_faces(ir, record, scratch.path / "fonts", warnings, error));
+        CHECK(error.find("is not a TrueType, OpenType or WOFF2 file") != std::string::npos);
+        CHECK(ir.font_family_assets.empty());
+    }
 }
 
 TEST_CASE("a page font record whose bytes do not match fails the import",
           "[import-design][browser-capture][font-assets]") {
     using pulp::import_design::attach_page_font_faces;
-    const auto bold = pulp::runtime::sha256_hex(std::string_view("bold bytes"));
+    const auto bold = sha(kBoldBytes);
     ScratchDir scratch;
     const auto record = scratch.path / "font-faces.json";
     std::ofstream(record, std::ios::binary) << page_font_faces(kWrongSha, bold);
 
     DesignIR ir;
+    std::vector<std::string> warnings;
     std::string error;
-    CHECK_FALSE(attach_page_font_faces(ir, record, scratch.path / "fonts", error));
+    CHECK_FALSE(attach_page_font_faces(ir, record, scratch.path / "fonts", warnings, error));
     CHECK(error.find("do not match their SHA-256") != std::string::npos);
     CHECK(ir.font_family_assets.empty());
 
     // No record means the page loaded no url() face.
     DesignIR untouched;
     CHECK(attach_page_font_faces(untouched, scratch.path / "absent.json", scratch.path / "fonts",
-                                 error));
+                                 warnings, error));
     CHECK(untouched.font_family_assets.empty());
 }

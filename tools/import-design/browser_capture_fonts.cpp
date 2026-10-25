@@ -85,6 +85,17 @@ const char* font_extension(const std::string& mime) {
     return ".ttf";
 }
 
+// The containers native text can register: TrueType (0x00010000 or 'true'),
+// OpenType CFF ('OTTO') and WOFF2 ('wOF2'). Anything else would reach the
+// platform font manager unsanitized.
+bool is_native_font(const std::vector<uint8_t>& data) {
+    if (data.size() < 4)
+        return false;
+    const std::string_view tag(reinterpret_cast<const char*>(data.data()), 4);
+    return tag == std::string_view("\0\1\0\0", 4) || tag == "true" || tag == "OTTO" ||
+           tag == "wOF2";
+}
+
 // One captured @font-face rule and the bytes it names.
 struct CapturedFace {
     std::string family;
@@ -182,7 +193,8 @@ bool attach_captured_font_faces(DesignIR& ir, const ClaudeBundle& materialized,
 }
 
 bool attach_page_font_faces(DesignIR& ir, const fs::path& font_faces_json,
-                            const fs::path& font_directory, std::string& error) {
+                            const fs::path& font_directory, std::vector<std::string>& warnings,
+                            std::string& error) {
     std::error_code ec;
     if (!fs::exists(font_faces_json, ec))
         return true;
@@ -217,7 +229,19 @@ bool attach_page_font_faces(DesignIR& ir, const fs::path& font_faces_json,
         Bytes bytes{asset["mime_type"].toString(), std::move(*decoded)};
         if (pulp::runtime::sha256_hex(bytes.data.data(), bytes.data.size()) != sha)
             return invalid("font bytes do not match their SHA-256 " + sha);
+        if (!is_native_font(bytes.data))
+            return invalid("font " + sha + " is not a TrueType, OpenType or WOFF2 file");
         assets.emplace(sha, std::move(bytes));
+    }
+
+    if (root["dropped"].isArray()) {
+        const auto dropped = root["dropped"];
+        for (uint32_t i = 0; i < dropped.size(); ++i) {
+            const auto face = dropped[i];
+            warnings.push_back("captured @font-face \"" + face["family"].toString() + "\" (" +
+                               face["source"].toString() +
+                               ") was not carried: " + face["reason"].toString());
+        }
     }
 
     FaceBinder binder(ir, font_directory);

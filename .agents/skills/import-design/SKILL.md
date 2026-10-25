@@ -135,8 +135,16 @@ instance (`JetBrainsMono-Regular_wght2580000`) is rejected.
 A plain HTML page whose `@font-face` names files with `url(...)` is carried
 too. `font_faces.mjs` reads every rule in the page's readable style sheets,
 resolves each source against its own sheet, and keeps a face only when
-Chromium fetched it. The capture's own network responses say which source
-answered. It writes the bytes and descriptors to `font-faces.json`, and
+Chromium fetched and decoded it. The capture's own network responses say
+which source answered, and the rule's `FontFace` status says whether
+Chromium's font sanitizer accepted it. A kept face's bytes must also start
+with a TrueType (`0x00010000`/`true`), `OTTO` or `wOF2` signature. Anything
+else, WOFF 1.0 included (not every platform font manager decodes it), is
+dropped and named in
+`font-faces.json` `dropped` and in the import's warnings, never handed to the
+platform font manager. `register_font_file` sends WOFF2 files through
+`register_font_woff2`, so they decode the same way on every platform (CoreText
+decodes WOFF2 itself, but a FreeType build without Brotli does not). It writes the bytes and descriptors to `font-faces.json`, and
 `attach_page_font_faces` binds them through the same writer under
 `pulp-page-font-<sha256>`. Staged files and `data:` fonts are read. A remote
 `https` font is read only with `--allow-browser-network`, and Blob fonts stay

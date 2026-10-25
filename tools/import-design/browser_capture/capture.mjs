@@ -2243,7 +2243,7 @@ async function runCapture(options) {
       writeJson(path.join(outputDir, "tokens.json"), tokenReport),
       writeJson(
         path.join(outputDir, "platform-fonts.json"), platformFontReport),
-      ...(pageFontFaces.faces.length > 0
+      ...(pageFontFaces.faces.length > 0 || pageFontFaces.dropped.length > 0
         ? [writeJson(path.join(outputDir, "font-faces.json"), pageFontFaces)]
         : []),
       ...(materializedDocument
