@@ -331,6 +331,44 @@ def evaluate(root: pathlib.Path, base: str, head: str, *,
                    errors=errors, event=event)
 
 
+def borrowed_watch_coverage(root: pathlib.Path, base: str, head: str) -> list[str]:
+    """Remote branches whose commits added every watch event this range adds.
+
+    A branch stacked on another unmerged PR inherits that PR's commits, and
+    with them its watch event. The range then reads as covered while the
+    branch's own change has no event. When the parent PR lands first, the
+    merge queue measures only this branch's change, finds no event, and
+    ejects the whole batch. Empty when the range adds an event of its own
+    (one no other remote branch carries) or adds none, and on any git error.
+    """
+    checker = _load_checker(root)
+    resolved = _resolve_range(root, base, head)
+    if checker is None or resolved is None:
+        return []
+    base_sha, head_sha = resolved
+    prefix = checker.EVENT_ROOT.as_posix()
+    log = _git(root, "log", "--diff-filter=A", "--format=%H", "--name-only",
+               f"{base_sha}..{head_sha}", "--", prefix)
+    if not log:
+        return []
+    adders = {line for line in log.splitlines()
+              if len(line) == 40 and all(c in "0123456789abcdef" for c in line)}
+    branch = _git(root, "rev-parse", "--abbrev-ref", "HEAD") or ""
+    ignored = {"origin/main", "origin/HEAD", "origin", f"origin/{branch}"}
+    others: set[str] = set()
+    for commit in adders:
+        refs = _git(root, "branch", "-r", "--contains", commit,
+                    "--format=%(refname:short)")
+        if refs is None:
+            return []
+        carriers = {r for r in refs.split()
+                    if r not in ignored and not r.startswith("origin/gh-readonly-queue/")}
+        if not carriers:
+            return []  # this commit is the branch's own: it has its own event
+        others |= carriers
+    return sorted(others)
+
+
 def run(root: pathlib.Path, base: str, head: str, stream, *,
         enforce: bool = False) -> int:
     verdict = evaluate(root, base, head)
@@ -339,6 +377,24 @@ def run(root: pathlib.Path, base: str, head: str, stream, *,
             "  vellum-watch: this range affects "
             f"{', '.join(sorted(verdict.affected))} and its watch events cover it.",
         ], stream)
+        borrowed = borrowed_watch_coverage(root, base, head)
+        if borrowed:
+            _emit([
+                "  ⚠︎ vellum-watch (ADVISORY — this does not block your push): every",
+                "     watch event covering this range was added by a commit another",
+                f"     branch also carries: {', '.join(borrowed)}.",
+                "     This branch is stacked on unmerged work, and its own change has no",
+                "     event. It cannot carry one yet: two events claiming the same",
+                "     families in one range are refused as duplicates. Once that PR",
+                "     merges, merge main into this branch and write this branch's event:",
+                "",
+                "       python3 tools/scripts/vellum_watch_preflight.py --write-event \\",
+                '         --rationale "<what changed, why no authority moves>"',
+                "",
+                "     Until then, do not enqueue this branch: if the parent lands in the",
+                "     same batch or first, the merge queue measures only this branch's",
+                "     change, finds no event, and ejects the whole batch.",
+            ], stream)
     if verdict.code != EVENT_OWED:
         return verdict.code
 

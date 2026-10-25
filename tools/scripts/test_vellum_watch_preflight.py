@@ -167,6 +167,53 @@ class VellumWatchPreflightTest(_PreflightRepo, unittest.TestCase):
         self.assertIn("vellum_expansion_watch_check.py", output)
         self.assertIn("merge-base", output)
 
+    def _stacked_on_parent(self) -> None:
+        """topic is stacked on parent, an unmerged branch on the remote whose
+        commit adds the watch event; topic makes its own watched change."""
+        _git(self.repo, "checkout", "-q", "-b", "parent")
+        self._write(WATCHED_PATH, "# the parent PR's watched change\n")
+        self._write(f"{EVENT_DIR_REL}/20260920-parent.json",
+                    self._event("20260920-parent", WATCHED_FAMILIES))
+        parent = self._commit("feat: the parent PR, with its event")
+        _git(self.repo, "update-ref", "refs/remotes/origin/parent", parent)
+        _git(self.repo, "checkout", "-q", "-b", "topic")
+        self._write(WATCHED_PATH, "# the parent PR's watched change\n# and topic's\n")
+        self._commit("feat: topic, stacked on parent")
+
+    def test_coverage_borrowed_from_a_stacked_parent_branch_warns(self) -> None:
+        self._stacked_on_parent()
+        code, output = self._run()
+        # Covered, so nothing is owed and nothing blocks; the warning names the
+        # parent branch and says to add the event once the parent has merged.
+        self.assertEqual(code, 0, output)
+        self.assertIn("origin/parent", output)
+        self.assertIn("stacked on unmerged work", output)
+        self.assertIn("do not enqueue", output)
+
+    def test_an_event_only_this_branch_carries_does_not_warn(self) -> None:
+        # Control: the event commit is on topic's own upstream and on no other
+        # remote branch, so the coverage is topic's own.
+        _git(self.repo, "checkout", "-q", "-b", "topic")
+        self._write(WATCHED_PATH, "# a one-line edit under a watched tree\n")
+        self._write(f"{EVENT_DIR_REL}/20260920-fixture.json",
+                    self._event("20260920-fixture", WATCHED_FAMILIES))
+        own = self._commit("feat: touch a watched tree, with its event")
+        _git(self.repo, "update-ref", "refs/remotes/origin/topic", own)
+        code, output = self._run()
+        self.assertEqual(code, 0, output)
+        self.assertNotIn("stacked", output)
+
+    def test_an_unstacked_covered_branch_does_not_warn(self) -> None:
+        # Control: the same covered change on a branch no remote ref contains.
+        _git(self.repo, "checkout", "-q", "-b", "topic")
+        self._write(WATCHED_PATH, "# a one-line edit under a watched tree\n")
+        self._write(f"{EVENT_DIR_REL}/20260920-fixture.json",
+                    self._event("20260920-fixture", WATCHED_FAMILIES))
+        self._commit("feat: touch a watched tree, with its event")
+        code, output = self._run()
+        self.assertEqual(code, 0, output)
+        self.assertNotIn("stacked", output)
+
     def test_a_committed_event_covering_the_families_clears_the_hint(self) -> None:
         _git(self.repo, "checkout", "-q", "-b", "topic")
         self._write(WATCHED_PATH, "# a one-line edit under a watched tree\n")
