@@ -4,9 +4,10 @@
 The node, transport, status, capability and program contracts under
 core/gpu_audio/include are backend-neutral: a consumer must be able to compile
 against them without any graphics backend. This guard fails when an installed
-header names a WebGPU type (`wgpu...`, `WGPU...`) or the Dawn namespace
-(`dawn::`). Prose that mentions a backend by name is allowed; identifiers are
-not.
+header names a WebGPU type (`wgpu...`, `WGPU...`), the Dawn namespace
+(`dawn::`), a Metal type (`MTL...`, `id<MTL...>`), a Vulkan type or function
+(`Vk...`, `vk...`) or a Direct3D interface (`ID3D...`). Prose that mentions a
+backend by name is allowed; identifiers are not.
 
 Exit status: 0 clean, 1 a header names a backend type, 2 nothing was scanned.
 """
@@ -20,7 +21,12 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 DEFAULT_INCLUDE = ROOT / "core" / "gpu_audio" / "include"
-FORBIDDEN = re.compile(r"\b[wW][gG][pP][uU]\w*|\bdawn::")
+FORBIDDEN = re.compile(
+    r"\b[wW][gG][pP][uU]\w*|\bdawn::"  # WebGPU / Dawn
+    r"|\bMTL[A-Z]\w*"  # Metal
+    r"|\b[Vv]k[A-Z]\w*"  # Vulkan
+    r"|\bID3D\w*"  # Direct3D
+)
 
 
 def strip_comments(text: str) -> str:

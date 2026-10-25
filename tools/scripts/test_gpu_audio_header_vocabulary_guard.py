@@ -39,11 +39,27 @@ class HeaderVocabularyGuardTest(unittest.TestCase):
                              ["pulp/gpu_audio/c_api.hpp", "pulp/gpu_audio/device.hpp",
                               "pulp/gpu_audio/native.hpp"])
 
+    def test_planted_native_backend_types_fail(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            self.write(root, "clean.hpp", "struct Clean { int vkey = 0; float mtl_ratio = 0; };\n")
+            self.write(root, "metal.hpp", "id<MTLDevice> device;\n")
+            self.write(root, "metal_c.hpp", "void f(MTLCommandQueue* queue);\n")
+            self.write(root, "vulkan.hpp", "VkDevice device = nullptr;\n")
+            self.write(root, "vulkan_fn.hpp", "auto fn = &vkCreateDevice;\n")
+            self.write(root, "d3d.hpp", "ID3D12Device* device = nullptr;\n")
+            _, hits = guard.scan(root)
+            self.assertEqual(sorted(h.split(":")[0] for h in hits),
+                             ["pulp/gpu_audio/d3d.hpp", "pulp/gpu_audio/metal.hpp",
+                              "pulp/gpu_audio/metal_c.hpp", "pulp/gpu_audio/vulkan.hpp",
+                              "pulp/gpu_audio/vulkan_fn.hpp"])
+
     def test_prose_mentioning_a_backend_passes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             self.write(root, "doc.hpp", "// Uses wgpu and dawn::native internally.\n"
-                                        "/* WGPUDevice is never exposed. */\nstruct Node {};\n")
+                                        "/* WGPUDevice and MTLDevice are never exposed. */\n"
+                                        "struct Node {};\n")
             self.assertEqual(guard.main(["--include-root", str(root)]), 0)
 
     def test_empty_root_is_an_error_not_a_pass(self) -> None:
