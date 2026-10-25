@@ -442,7 +442,11 @@ class Label : public View, public SelectableText {
         float width = 0.0f;       ///< widest painted line
         float height = 0.0f;      ///< total painted height (line clamp applied)
         int line_count = 0;
-        Rect ink{};               ///< local ink box, text-align applied to x
+        /// Local box of the pixels paint() covers. With Skia it is read back
+        /// from one scratch paint, so overflow above a short box, glyph
+        /// overhang and a captured line's position are all in it; without
+        /// Skia it is the line block, with text-align applied to x.
+        Rect ink{};
     };
     PaintedTextExtents painted_text_extents(float available_width) const;
 

@@ -185,8 +185,11 @@ TEST_CASE("the positive control turns a clean tree into findings",
     REQUIRE(measured.clean());
     REQUIRE(measured.coverage.text_runs_measured == 2);
 
+    // The ink is the glyphs' own, which sits inside each label's advance, so
+    // the gap between the two runs is wider than the 4 px between their
+    // boxes; 12 px a side closes it.
     AppearanceOptions control_options;
-    control_options.control_inflate_ink_px = 8.0f;
+    control_options.control_inflate_ink_px = 12.0f;
     const auto control = detect_appearance_defects(root, control_options);
     INFO(control.to_string());
     REQUIRE(count_kind(control, AppearanceDefectKind::text_overlap) == 1);
