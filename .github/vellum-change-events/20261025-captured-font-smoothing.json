@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "event_id": "20261025-captured-font-smoothing",
+  "kind": "change",
+  "created_at": "2026-10-25T00:14:36Z",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "rationale": "design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger); canvas-kernel: Canvas gains set_font_smoothing(FontSmoothing), canvas state scoped by save()/restore() like the clip and matrix. SkiaCanvas shapes and measures antialiased text with run hinting off (TextStyle::setFontHinting, and the glyph-fallback SkFont), and keeps unhinted runs out of SkParagraph's paragraph cache, whose key ignores hinting, with an inert OpenType feature tag; RecordingCanvas records it as a draw command. With the chromium text raster policy this reproduces Chromium's -webkit-font-smoothing: antialiased glyphs; text that never sets it is byte-identical. No surface, render or authority boundary moves. Vellum inherits per-draw font smoothing with the canvas kernel.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "build/test/pulp-test-browser-capture-import \"[font-smoothing]\"",
+    "ctest --test-dir build -R import-design-ir-observe-font-smoothing-label"
+  ],
+  "disposition": "pulp-only",
+  "vellum_inherits": true
+}

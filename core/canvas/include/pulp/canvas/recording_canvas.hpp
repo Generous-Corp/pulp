@@ -15,15 +15,32 @@ namespace pulp::canvas {
 
 struct DrawCommand {
     enum class Type {
-        save, restore,
-        translate, scale, rotate, clip_rect,
-        set_transform, clip, set_blend_mode,
+        save,
+        restore,
+        translate,
+        scale,
+        rotate,
+        clip_rect,
+        set_transform,
+        clip,
+        set_blend_mode,
         concat_transform,
-        set_fill_color, set_stroke_color, set_line_width,
-        set_line_cap, set_line_join,
-        fill_rect, stroke_rect, fill_rounded_rect, stroke_rounded_rect,
-        fill_circle, stroke_circle, stroke_arc, stroke_line,
-        set_font, set_text_align, fill_text,
+        set_fill_color,
+        set_stroke_color,
+        set_line_width,
+        set_line_cap,
+        set_line_join,
+        fill_rect,
+        stroke_rect,
+        fill_rounded_rect,
+        stroke_rounded_rect,
+        fill_circle,
+        stroke_circle,
+        stroke_arc,
+        stroke_line,
+        set_font,
+        set_text_align,
+        fill_text,
         // Canvas2D `strokeText(text, x, y, maxWidth)` records
         // a distinct cmd so tests can assert that the bridge routed the
         // call through the dedicated stroke_text path (rather than the
@@ -37,11 +54,11 @@ struct DrawCommand {
         // continue to pass.
         set_font_full,
         // ── Canvas2D API coverage ────────────────────────────────────
-        set_line_dash,      ///< intervals stored in `floats`, phase in f[0]
-        draw_image,         ///< source path/url in `text`, dst rect in f[0..3]
-        write_pixels,       ///< RGBA bytes in `text` (binary), w/h in f[0..1], dst in f[2..3]
+        set_line_dash, ///< intervals stored in `floats`, phase in f[0]
+        draw_image,    ///< source path/url in `text`, dst rect in f[0..3]
+        write_pixels,  ///< RGBA bytes in `text` (binary), w/h in f[0..1], dst in f[2..3]
         // ── setBoxShadow / draw_box_shadow ──────────────────────────
-        draw_box_shadow,    ///< x/y/w/h in f[0..3], blur in f[4], spread/offsets via floats payload
+        draw_box_shadow, ///< x/y/w/h in f[0..3], blur in f[4], spread/offsets via floats payload
         // ── Canvas2D shadow* state setters ──────────────────────────
         // Sticky state changes; the recording target captures one cmd
         // per setter so tests can assert on the bridge's flush order.
@@ -54,6 +71,7 @@ struct DrawCommand {
         // the canvas2d bridge harness can assert flush order.
         set_miter_limit,     ///< limit in f[0]
         set_image_smoothing, ///< enabled in f[0] (0/1), quality in f[1] (0=low,1=med,2=high)
+        set_font_smoothing,  ///< f[0]: 0 = auto, 1 = antialiased
         // Canvas2D ctx.direction / ctx.filter sticky setters.
         // Direction enum (0=ltr, 1=rtl, 2=inherit) packed into f[0];
         // filter raw CSS <filter-function-list> string (e.g.
@@ -103,21 +121,21 @@ struct DrawCommand {
         // The path's geometry is captured as an SVG `d` string in `text`
         // (so a test can assert on the exact geometry without walking a
         // command stream), and the fill rule / stroke style in `f`.
-        fill_path_object,     ///< path `d` in `text`; fill rule in f[0] (0=nonzero, 1=evenodd)
-        stroke_path_object,   ///< path `d` in `text`; width f[0], cap f[1], join f[2], miter f[3], dash phase f[4]; dash intervals in `floats`
-        clip_path_object,     ///< path `d` in `text`; fill rule in f[0]
-        draw_path_shadow,     ///< path `d` in `text`; dx/dy/blur/spread in f[0..3]; shadow color in `color`
+        fill_path_object,   ///< path `d` in `text`; fill rule in f[0] (0=nonzero, 1=evenodd)
+        stroke_path_object, ///< path `d` in `text`; width f[0], cap f[1], join f[2], miter f[3], dash phase f[4]; dash intervals in `floats`
+        clip_path_object,   ///< path `d` in `text`; fill rule in f[0]
+        draw_path_shadow, ///< path `d` in `text`; dx/dy/blur/spread in f[0..3]; shadow color in `color`
         // ── Retained compositing LAYERS (handle-based) ──────────────
         // begin/end bracket the recording of a layer; draw_layer composites
         // a sealed one. The handle id is captured in f[0] so a test can
         // assert that the SAME layer was reused across frames rather than
         // silently re-recorded.
-        begin_layer,          ///< bounds x/y/w/h in f[0..3]; cacheable in f[4]; id in f[5]
-        end_layer,            ///< sealed handle id in f[0]
-        draw_layer,           ///< id f[0], alpha f[1], blend mode f[2]
-        draw_layer_fitted,    ///< id f[0]; dest x/y/w/h in f[1..4]
-        draw_layer_rotated,   ///< id f[0]; angle (radians) in f[1]
-        invalidate_layer,     ///< id f[0]
+        begin_layer,        ///< bounds x/y/w/h in f[0..3]; cacheable in f[4]; id in f[5]
+        end_layer,          ///< sealed handle id in f[0]
+        draw_layer,         ///< id f[0], alpha f[1], blend mode f[2]
+        draw_layer_fitted,  ///< id f[0]; dest x/y/w/h in f[1..4]
+        draw_layer_rotated, ///< id f[0]; angle (radians) in f[1]
+        invalidate_layer,   ///< id f[0]
         // ── save_backdrop_filter for frosted-glass overlays ─────────
         save_backdrop_filter, ///< x/y/w/h in f[0..3], blur_radius in f[4]
         // ── CSS clip-path: path("...") ──────────────────────────────
@@ -126,30 +144,30 @@ struct DrawCommand {
         // before painting children. Skia parses via SkParsePath /
         // SkPath::FromSVGString; backends without a path parser
         // degrade to a no-op (no clip applied).
-        clip_path_svg,         ///< SVG path data in `text`
+        clip_path_svg, ///< SVG path data in `text`
         // ── real clearRect that replaces pixels ─────────────────────
-        clear_rect,          ///< clear rect, x/y/w/h in f[0..3]
+        clear_rect, ///< clear rect, x/y/w/h in f[0..3]
         // ── Canvas2D path API recording ─────────────────────────────
         // Captured so widgets that emit path commands (SvgPathWidget,
         // CanvasWidget JS path-replays) can be asserted at the
         // command-stream level without a Skia raster surface.
-        begin_path,           ///< no payload
-        move_to,              ///< (x, y) in f[0..1]
-        line_to,              ///< (x, y) in f[0..1]
-        quad_to,              ///< (cpx, cpy, x, y) in f[0..3]
-        cubic_to,             ///< (cp1x, cp1y, cp2x, cp2y, x, y) in f[0..5]
-        close_path,           ///< no payload
-        fill_current_path,    ///< no payload — uses last set_fill_color
-        stroke_current_path,  ///< no payload — uses last set_stroke_color + set_line_width
+        begin_path,          ///< no payload
+        move_to,             ///< (x, y) in f[0..1]
+        line_to,             ///< (x, y) in f[0..1]
+        quad_to,             ///< (cpx, cpy, x, y) in f[0..3]
+        cubic_to,            ///< (cp1x, cp1y, cp2x, cp2y, x, y) in f[0..5]
+        close_path,          ///< no payload
+        fill_current_path,   ///< no payload — uses last set_fill_color
+        stroke_current_path, ///< no payload — uses last set_stroke_color + set_line_width
         // ── native arc subpaths ─
         // Captured so widgets that emit native arc commands can be
         // asserted at the command-stream level without a Skia raster
         // surface. Maps 1:1 to the new Canvas::arc / arc_to / ellipse /
         // round_rect virtual methods.
-        arc,                  ///< (cx, cy, r, start, end, anticlockwise as 0/1) in f[0..5]
-        arc_to,               ///< (x1, y1, x2, y2, radius) in f[0..4]
-        ellipse,              ///< (cx, cy, rx, ry, rotation, start) in f[0..5]; (end, anticlockwise as 0/1) extras tracked in `floats[0..1]`
-        round_rect,           ///< (x, y, w, h, tl_x, tl_y) in f[0..5]; tr/br/bl x/y in `floats[0..5]`
+        arc,     ///< (cx, cy, r, start, end, anticlockwise as 0/1) in f[0..5]
+        arc_to,  ///< (x1, y1, x2, y2, radius) in f[0..4]
+        ellipse, ///< (cx, cy, rx, ry, rotation, start) in f[0..5]; (end, anticlockwise as 0/1) extras tracked in `floats[0..1]`
+        round_rect, ///< (x, y, w, h, tl_x, tl_y) in f[0..5]; tr/br/bl x/y in `floats[0..5]`
         // ── Compositing layer saves (save_layer family) ─────────────
         // Before these existed, RecordingCanvas inherited the base
         // save_layer* methods, which all collapse to a bare save(). A
@@ -159,17 +177,17 @@ struct DrawCommand {
         // undetected by command-stream tests. Each of these records the
         // layer intent, and its RecordingCanvas override still increments
         // the save stack by exactly one so save_count() balance holds.
-        save_layer,           ///< bounds x/y/w/h in f[0..3]; opacity f[4]; blur f[5]
-        save_layer_blend,     ///< bounds f[0..3]; opacity f[4]; blur f[5]; blend mode (int) in floats[0]
-        save_layer_filters,   ///< bounds f[0..3]; effective opacity f[4]; summed blur f[5]; filter count in floats[0]
-        save_layer_mask,      ///< bounds f[0..3]; opacity f[4]; mask-image CSS value in `text` (mask-size not captured)
-        save_layer_bloom,     ///< bounds f[0..3]; intensity f[4]; threshold f[5]; blur radius in floats[0]
+        save_layer,       ///< bounds x/y/w/h in f[0..3]; opacity f[4]; blur f[5]
+        save_layer_blend, ///< bounds f[0..3]; opacity f[4]; blur f[5]; blend mode (int) in floats[0]
+        save_layer_filters, ///< bounds f[0..3]; effective opacity f[4]; summed blur f[5]; filter count in floats[0]
+        save_layer_mask, ///< bounds f[0..3]; opacity f[4]; mask-image CSS value in `text` (mask-size not captured)
+        save_layer_bloom, ///< bounds f[0..3]; intensity f[4]; threshold f[5]; blur radius in floats[0]
         // Custom SkSL draw recorded as intent. The base draw_with_sksl
         // fills a CPU placeholder rect and returns false; RecordingCanvas
         // instead captures the shader source + rect and returns false
         // (a recorder cannot compile/execute SkSL). Callers that test the
         // base CPU fallback must invoke `rc.Canvas::draw_with_sksl(...)`.
-        draw_sksl             ///< rect x/y/w/h in f[0..3]; value f[4]; time f[5]; SkSL source in `text`
+        draw_sksl ///< rect x/y/w/h in f[0..3]; value f[4]; time f[5]; SkSL source in `text`
     };
 
     Type type;
@@ -374,6 +392,7 @@ public:
     void set_miter_limit(float limit) override;
     void set_image_smoothing(bool enabled,
                              ImageSmoothingQuality quality) override;
+    void set_font_smoothing(FontSmoothing smoothing) override;
 
     // Canvas2D ctx.direction / ctx.filter capture.
     void set_direction(TextDirection direction) override;

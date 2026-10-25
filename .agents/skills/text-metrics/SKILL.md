@@ -154,6 +154,20 @@ names and advances, before trusting either. A subclass of `SkFontMgr` (or of
 SkParagraph's `TypefaceFontProvider`) must live in a TU built with `-fno-rtti`:
 the prebuilt Skia exports no type info for them and the link fails.
 
+## Font smoothing is per draw, and the preblend is per surface
+
+`-webkit-font-smoothing: antialiased` is two settings, owned by two layers.
+Glyph hinting is per draw: `Canvas::set_font_smoothing(antialiased)` makes
+SkiaCanvas shape and measure with hinting off on both text paths, SkParagraph
+and glyph fallback. The canvas keeps the last value, so a caller that sets it
+resets it; Label does this around its own paint. The contrast and gamma
+preblend is a property of the surface (`TextRasterPolicy`,
+`pulp/canvas/text_raster_policy.hpp`). Only both together reproduce
+Chromium's antialiased glyphs. Hinting off on a `legacy` surface still paints
+heavy, and a `chromium` surface with hinting on is not exact either. When an
+imported label's ink is off by about a fifth, check its `font_smoothing`
+attribute and the surface's policy before you look at weight or face.
+
 ## A Label with element children does not paint at its own origin
 
 A `Label` that carries both text and element children is a flex container whose

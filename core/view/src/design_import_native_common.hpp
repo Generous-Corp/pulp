@@ -163,6 +163,10 @@ PromotedChildHitPolicy promoted_widget_child_hit_policy(const IRNode& child,
 // a copy so callers never mutate the imported IR they were handed.
 DesignIR prepare_native_design_ir(const DesignIR& ir);
 
+// The `-webkit-font-smoothing` a capture recorded on a text node (the
+// `font_smoothing` attribute); defined in design_import_text_raster.cpp.
+canvas::FontSmoothing captured_font_smoothing(const IRNode& node);
+
 ResolvedNativeNode resolve_design_ir_native(const DesignIR& ir,
                                             const IRAssetManifest& manifest);
 

@@ -2223,6 +2223,7 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             auto label = std::make_unique<Label>(text);
             apply_label_style(*label, node.style);
             apply_text_runs(*label, node);
+            label->set_font_smoothing(captured_font_smoothing(node));
             // Adopt the browser's own line breaking when the capture carried
             // it. Label validates the basis before using it, so a stale cache
             // costs a reflow rather than a wrong layout.

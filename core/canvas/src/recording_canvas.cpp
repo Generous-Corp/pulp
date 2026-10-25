@@ -607,6 +607,12 @@ void RecordingCanvas::set_image_smoothing(bool enabled,
     commands_.push_back(cmd);
 }
 
+void RecordingCanvas::set_font_smoothing(FontSmoothing smoothing) {
+    DrawCommand cmd{DrawCommand::Type::set_font_smoothing};
+    cmd.f[0] = smoothing == FontSmoothing::antialiased ? 1.0f : 0.0f;
+    commands_.push_back(cmd);
+}
+
 // Capture Canvas2D ctx.direction. Enum packed into f[0] (0=ltr, 1=rtl,
 // 2=inherit). RecordingCanvas doesn't shape text — it models the bridge intent
 // so tests can assert the JS shim flushed the direction setter at the right

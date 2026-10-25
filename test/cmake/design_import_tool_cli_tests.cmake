@@ -161,6 +161,7 @@ endif()
 # can be tested without launching Chromium.
 add_executable(pulp-test-browser-capture-import
     test_browser_capture_backdrop_filter.cpp
+    test_browser_capture_font_smoothing.cpp
     test_browser_capture_group_opacity.cpp
     test_browser_capture_gradient_border.cpp
     test_browser_capture_ir.cpp
@@ -189,6 +190,7 @@ add_executable(pulp-test-browser-capture-import
     ${CMAKE_SOURCE_DIR}/tools/import-design/import_png_codec.cpp)
 pulp_test_data(pulp-test-browser-capture-import NO_DEFINE
     SOURCES test_browser_capture_backdrop_filter.cpp
+        test_browser_capture_font_smoothing.cpp
         test_browser_capture_group_opacity.cpp
         test_browser_capture_gradient_border.cpp test_browser_capture_ir.cpp
         test_browser_capture_text_metrics.cpp test_browser_capture_tree.cpp
@@ -479,6 +481,19 @@ if(Python3_Interpreter_FOUND AND PULP_HAS_SKIA AND PROJECT_IS_TOP_LEVEL)
     set_tests_properties(import-design-ir-observe-asset-escape PROPERTIES
         LABELS "parser-import;import"
         TIMEOUT 120)
+endif()
+
+# Labels authored `-webkit-font-smoothing: antialiased` render as Chromium drew
+# them: unhinted, on a surface with the matching text preblend.
+if(Python3_Interpreter_FOUND AND PULP_HAS_SKIA AND PROJECT_IS_TOP_LEVEL)
+    add_test(NAME import-design-ir-observe-font-smoothing-label
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_design_ir_observe_font_smoothing_label.py
+                --observer $<TARGET_FILE:pulp-design-ir-observe>)
+    set_tests_properties(import-design-ir-observe-font-smoothing-label PROPERTIES
+        LABELS "parser-import;import"
+        TIMEOUT 120
+        SKIP_RETURN_CODE 77)
 endif()
 
 # pulp-import-design carries a local asset named outside the source design's

@@ -143,6 +143,14 @@ baselines. On macOS the skia screenshot backend lives in
 is the non-Apple path, so a surface change made only there never reaches a
 macOS render.
 
+The import now carries the property. The capture records
+`-webkit-font-smoothing`, the lowering stamps `font_smoothing=antialiased` on
+those text nodes, and the materialized Label paints them unhinted
+(`Canvas::set_font_smoothing`). The surface preblend is the host's job:
+`design_ir_text_raster_policy(ir)` returns `chromium` when any captured text is
+antialiased, and the observer creates its surfaces with it. A host or emitter
+that renders imported text on a `legacy` surface still paints it heavy.
+
 ### DesignIR JSON floats are shortest round-trip, not six digits
 
 `write_float_member` (`design_ir_json_primitives.hpp`) writes each float with

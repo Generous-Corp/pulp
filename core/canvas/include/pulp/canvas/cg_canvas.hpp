@@ -61,6 +61,9 @@ public:
     // immediately (no per-draw re-push needed since they hang off the
     // current GState).
     void set_miter_limit(float limit) override;
+    /// `antialiased` turns CoreText font smoothing off, the switch Chromium
+    /// flips on macOS. It is graphics state, so save()/restore() scope it.
+    void set_font_smoothing(FontSmoothing smoothing) override;
     void set_image_smoothing(bool enabled,
                              ImageSmoothingQuality quality) override;
 
