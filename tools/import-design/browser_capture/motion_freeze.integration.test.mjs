@@ -19,7 +19,13 @@ import {
   rgbaPixel,
   runCapture,
 } from "./capture_integration_support.mjs";
-import { captureStableScreenshot, freezeMotion } from "./settle.mjs";
+import {
+  captureStableScreenshot,
+  freezeDynamicTime,
+  freezeMotion,
+  MOTION_COMMIT_TIMEOUT_MS,
+  resumeDynamicTime,
+} from "./settle.mjs";
 
 function cdpSession(pipe) {
   let nextId = 1000;
@@ -56,7 +62,7 @@ const STYLE = "<style>html,body{margin:0;background:#1b2330}" +
 const pageUrl = (body) =>
   "data:text/html," + encodeURIComponent(`<!doctype html>${STYLE}${body}`);
 
-async function withPage(context, body) {
+async function withPage(context, body, launchArgs = []) {
   const browser = await installedBrowser();
   if (!browser) {
     context.skip("no compatible system browser is installed");
@@ -65,7 +71,8 @@ async function withPage(context, body) {
   const profile = await createEmptyProfile();
   let launched;
   try {
-    launched = await launchBrowser(browser, profile, CAPTURE_DEADLINE_MS);
+    launched = await launchBrowser(
+      browser, profile, CAPTURE_DEADLINE_MS, undefined, launchArgs);
     const call = cdpSession(launched.pipe);
     const target = await pageTarget(call, CAPTURE_DEADLINE_MS);
     const { sessionId } = await call(
@@ -295,6 +302,78 @@ test("a video still showing its poster is paused and left on it",
     });
   });
 
+// The freeze changes an animation in the page, and the capture pauses virtual
+// time right after its last pass. A browser running at the capture's real
+// device scale composites the animation, and before the fix the compositor
+// went on presenting the animation's last position: the page read time zero
+// while the accepted frame showed it about 100 ms in, a few times in ten.
+test("a frozen composited animation is presented at its frozen time",
+  { timeout: captureCaseTimeout(8), skip: process.platform === "win32" },
+  async (context) => {
+    await withPage(context, async ({ cdp, open }) => {
+      await open(pageUrl("<div id=m></div>"));
+      const start = await captureStableScreenshot(cdp, OPTIONS);
+      assert.ok(start, "the still page is accepted");
+      for (let trial = 0; trial < 20; trial += 1) {
+        await open(pageUrl("<div id=m></div>"));
+        await cdp.call("Runtime.evaluate", {
+          expression: "document.getElementById('m').animate(" +
+            "[{transform:'translateX(0)'},{transform:'translateX(400px)'}]," +
+            "{duration:700,iterations:Infinity}); true",
+        });
+        // Long enough for the compositor to have started it.
+        await cdp.call("Runtime.evaluate", {
+          expression: `new Promise(r => setTimeout(() => r(true), ${150 + trial * 17}))`,
+          awaitPromise: true,
+        });
+        await freezeMotion(cdp, { declareSources: false });
+        // As the capture does next: pause virtual time for its reads, resume.
+        await freezeDynamicTime(cdp);
+        await resumeDynamicTime(cdp);
+        // A stale compositor frame never changes, so a short horizon reads it
+        // as readily as the full one does.
+        const frozen = await captureStableScreenshot(cdp, OPTIONS, 4, 16, 2);
+        assert.ok(frozen && frozen.equals(start), `trial ${trial} shows the start frame`);
+      }
+    }, ["--force-device-scale-factor=2"]);
+  });
+
+test("a freeze whose frames never come returns within its real-time bound",
+  { timeout: captureCaseTimeout(1), skip: process.platform === "win32" },
+  async (context) => {
+    await withPage(context, async ({ cdp, open }) => {
+      const pulsing = pageUrl("<div id=m></div><script>document.getElementById('m').animate(" +
+        "[{transform:'translateX(0)'},{transform:'translateX(400px)'}]," +
+        "{duration:700,iterations:Infinity})</script>");
+
+      // Virtual time paused, as the capture pauses it for its reads: the
+      // pass still returns within the bound, however the wait ends.
+      await open(pulsing);
+      await cdp.call("Emulation.setVirtualTimePolicy", { policy: "pause" });
+      let started = Date.now();
+      let receipt = await freezeMotion(cdp, { declareSources: false });
+      let elapsed = Date.now() - started;
+      await cdp.call("Emulation.setVirtualTimePolicy", { policy: "advance" });
+      assert.equal(receipt.animations.paused, 1);
+      assert.equal(receipt.frame_commit_waits.unavailable, 0);
+      assert.equal(receipt.frame_commit_waits.presented +
+        receipt.frame_commit_waits.timed_out, 1);
+      assert.ok(elapsed < MOTION_COMMIT_TIMEOUT_MS + 2000, `${elapsed} ms`);
+
+      // A frame source that never answers: the wait times out in real time
+      // and says so, and the capture goes on.
+      await open(pulsing);
+      await cdp.call("Runtime.evaluate",
+        { expression: "window.requestAnimationFrame = () => 0; true" });
+      started = Date.now();
+      receipt = await freezeMotion(cdp, { declareSources: false });
+      elapsed = Date.now() - started;
+      assert.equal(receipt.frame_commit_waits.timed_out >= 1, true);
+      assert.ok(elapsed >= MOTION_COMMIT_TIMEOUT_MS && elapsed < MOTION_COMMIT_TIMEOUT_MS + 2000,
+        `${elapsed} ms`);
+    });
+  });
+
 // One-pixel GIF frames: a graphic control block with a 100 ms delay, an image
 // descriptor and the three-code LZW stream (clear, colour index, end). With no
 // looping extension the image plays once and rests on its last frame.
@@ -361,7 +440,10 @@ test("a full capture holds an infinite animation still and declares animated ima
       // The declared GIF keeps every horizon frame in the caller's encoding.
       assert.equal(motion.horizon_presentation_format, null);
       for (const { envelope } of captures.slice(1)) {
-        assert.deepEqual(envelope.provenance.motion, motion);
+        // How long each wait for a commit took depends on the host.
+        const { frame_commit_waits: _, ...rest } = envelope.provenance.motion;
+        const { frame_commit_waits: __, ...expected } = motion;
+        assert.deepEqual(rest, expected);
       }
     } finally {
       await rm(root, { recursive: true, force: true });

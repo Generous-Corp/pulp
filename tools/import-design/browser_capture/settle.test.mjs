@@ -14,6 +14,7 @@ import {
   freezeDynamicTime,
   freezeMotion,
   horizonPresentationEncoding,
+  MOTION_COMMIT_TIMEOUT_MS,
   installDynamicWorkTracker,
   resumeDynamicTime,
   validateCaptureDimensions,
@@ -369,10 +370,12 @@ test("the motion freeze runs once in the page and returns its receipt",
     const returned = await freezeMotion({
       async call(method, params) {
         calls.push({ method, params });
-        return { result: { value: receipt } };
+        return { result: { value: { receipt, changed: false } } };
       },
     });
-    assert.equal(returned, receipt);
+    // Nothing changed, so nothing waits for a commit.
+    assert.deepEqual(returned, { ...receipt,
+      frame_commit_waits: { presented: 0, timed_out: 0, unavailable: 0 } });
     assert.equal(calls.length, 1);
     assert.equal(calls[0].method, "Runtime.evaluate");
     assert.equal(calls[0].params.awaitPromise, true);
@@ -385,6 +388,40 @@ test("the motion freeze runs once in the page and returns its receipt",
       "currentTime = 0", "querySelectorAll(\"video\")", "volatile_sources"]) {
       assert.ok(expression.includes(step), step);
     }
+  });
+
+test("a freeze that changed motion waits for a commit, bounded in real time",
+  async () => {
+    // Every pass changes something; the commit wait is the call that asks
+    // the page for animation frames.
+    const page = (frames) => {
+      const calls = [];
+      return { calls, async call(method, params) {
+        calls.push(params.expression);
+        if (!params.expression.startsWith("new Promise")) {
+          return { result: { value: { receipt: {}, changed: true } } };
+        }
+        return frames();
+      } };
+    };
+    const presented = page(async () => ({ result: { value: true } }));
+    assert.deepEqual((await freezeMotion(presented)).frame_commit_waits,
+      { presented: 1, timed_out: 0, unavailable: 0 });
+    assert.ok(presented.calls[1].includes("requestAnimationFrame"));
+
+    // Frames that never come (a paused virtual clock): the pass still returns,
+    // within the real-time bound, and says it timed out.
+    const started = Date.now();
+    const stalled = page(() => new Promise(() => {}));
+    assert.deepEqual((await freezeMotion(stalled)).frame_commit_waits,
+      { presented: 0, timed_out: 1, unavailable: 0 });
+    const elapsed = Date.now() - started;
+    assert.ok(elapsed >= MOTION_COMMIT_TIMEOUT_MS && elapsed < MOTION_COMMIT_TIMEOUT_MS + 1000,
+      `${elapsed} ms`);
+
+    // Each page connection keeps its own tally across passes.
+    await freezeMotion(stalled);
+    assert.equal((await freezeMotion(stalled)).frame_commit_waits.timed_out, 3);
   });
 
 test("a motion freeze the page rejects fails the capture by name", async () => {

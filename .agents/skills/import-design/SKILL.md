@@ -4724,7 +4724,15 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   and listed in `provenance.motion.volatile_sources` (classified from its own
   bytes by `animatedImageKind`, in the last pass only), next to the per-kind
   counts. A page that
-  throws inside the freeze fails with `capture-motion-freeze-failed`.
+  throws inside the freeze fails with `capture-motion-freeze-failed`. A pass
+  that changed anything then waits for two animation frames, so a commit
+  carries the new state to the compositor before the capture pauses virtual
+  time. Without that wait, a browser at its real device scale went on
+  presenting a composited animation's old position, and the horizon accepted
+  that stale frame. The wait is bounded at `MOTION_COMMIT_TIMEOUT_MS` of real
+  time on the Node side, because a page timer runs on the same virtual clock
+  as the frames. Outcomes are counted in `provenance.motion.frame_commit_waits`
+  (`presented`, `timed_out`, `unavailable`).
 - **Browser discovery has a version FLOOR and no ceiling.**
   `kMinimumChromiumMajor = 109` (`browser_capture_backend.hpp`) is the only
   version comparison in the probe — nothing rejects a browser for being too

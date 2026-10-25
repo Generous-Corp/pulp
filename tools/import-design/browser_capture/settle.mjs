@@ -308,6 +308,10 @@ export function animatedImageKind(bytes) {
 const MAX_MOTION_IMAGE_SOURCES = 256;
 const MAX_MOTION_IMAGE_BYTES = 32 * 1024 * 1024;
 
+// The longest a freeze pass waits, in real time, for the frames that commit
+// what it changed.
+export const MOTION_COMMIT_TIMEOUT_MS = 500;
+
 const MOTION_FREEZE_SOURCE = `async (declareSources) => {
   const animatedImageKind = ${animatedImageKind.toString()};
   // Every pass over one document shares this state, so an animation or video
@@ -326,6 +330,7 @@ const MOTION_FREEZE_SOURCE = `async (declareSources) => {
     },
   };
   const receipt = state.receipt;
+  let changed = false;
 
   // Web Animations run on the document timeline, which the CSS freeze and the
   // scheduler stubs cannot reach. Settle each one to a single frame: a finite
@@ -339,6 +344,7 @@ const MOTION_FREEZE_SOURCE = `async (declareSources) => {
     const first = !state.settled.has(animation);
     if (!first && animation.playState !== "running") continue;
     state.settled.add(animation);
+    changed = true;
     const count = (kind) => { if (first) receipt.animations[kind] += 1; };
     if ((typeof CSSAnimation === "function" && animation instanceof CSSAnimation) ||
         (typeof CSSTransition === "function" && animation instanceof CSSTransition)) {
@@ -371,6 +377,7 @@ const MOTION_FREEZE_SOURCE = `async (declareSources) => {
     const first = !state.settled.has(video);
     if (!first && video.paused) continue;
     state.settled.add(video);
+    changed = true;
     video.autoplay = false;
     video.pause();
     if (first) receipt.videos.paused += 1;
@@ -396,7 +403,7 @@ const MOTION_FREEZE_SOURCE = `async (declareSources) => {
   // An animated GIF, APNG or WebP advances on the image decoder's own clock,
   // which nothing in the page can pause. It is left to animate and declared,
   // so a consumer knows these pixels are one frame of several.
-  if (!declareSources) return receipt;
+  if (!declareSources) return { receipt, changed };
   receipt.volatile_sources = [];
   receipt.images_examined = 0;
   receipt.images_unreadable = 0;
@@ -450,7 +457,7 @@ const MOTION_FREEZE_SOURCE = `async (declareSources) => {
       byte_length: bytes.length,
     });
   }
-  return receipt;
+  return { receipt, changed };
 }`;
 
 // Stops the motion that keeps a still page from presenting one frame and
@@ -461,13 +468,57 @@ const MOTION_FREEZE_SOURCE = `async (declareSources) => {
 // last pass, `declareSources`, reads the page's images to declare animated
 // ones. Each pass settles only what an earlier one did not, or what the page
 // has restarted since.
+// Two animation frames: the first carries the commit of what the pass just
+// changed, the second starts after it. Scheduling may be refused once the
+// capture has frozen page work; that answers at once.
+const COMMIT_FRAMES_EXPRESSION = `new Promise((resolve) => {
+  try {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve(true)));
+  } catch {
+    resolve(false);
+  }
+})`;
+
+// How each capture's freeze passes ended their wait for the compositor, kept
+// per page connection so the last pass can report every one in its receipt.
+const commitWaits = new WeakMap();
+
+// A composited animation keeps running in the compositor until a commit
+// carries its new state there. The page already reads the settled time, but a
+// frame read before that commit (the capture pauses virtual time right after
+// its last pass) still shows where the animation was, and the horizon accepts
+// that stale frame because it never changes. So a pass that changed anything
+// waits for two animation frames before returning. The bound is real time,
+// kept here rather than in the page, where a timer runs on the same virtual
+// clock as the frames: with that clock paused neither would ever fire. A wait
+// that times out is recorded and the capture goes on.
+async function waitForMotionCommit(cdp) {
+  let timer;
+  const timedOut = new Promise((resolve) => {
+    timer = setTimeout(() => resolve("timed_out"), MOTION_COMMIT_TIMEOUT_MS);
+  });
+  const presented = cdp.call("Runtime.evaluate", {
+    expression: COMMIT_FRAMES_EXPRESSION,
+    awaitPromise: true,
+    returnByValue: true,
+  }).then((evaluated) =>
+    evaluated.result?.value === true ? "presented" : "unavailable",
+  () => "unavailable");
+  try {
+    return await Promise.race([presented, timedOut]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function freezeMotion(cdp, { declareSources = true } = {}) {
   const evaluated = await cdp.call("Runtime.evaluate", {
     expression: `(${MOTION_FREEZE_SOURCE})(${declareSources === true})`,
     awaitPromise: true,
     returnByValue: true,
   });
-  if (evaluated.exceptionDetails || !evaluated.result?.value) {
+  const value = evaluated.result?.value;
+  if (evaluated.exceptionDetails || !value?.receipt) {
     const error = new Error(
       "the page's motion could not be frozen: " +
       (evaluated.exceptionDetails?.exception?.description ??
@@ -475,7 +526,11 @@ export async function freezeMotion(cdp, { declareSources = true } = {}) {
     error.code = "capture-motion-freeze-failed";
     throw error;
   }
-  return evaluated.result.value;
+  const waits = commitWaits.get(cdp) ??
+    { presented: 0, timed_out: 0, unavailable: 0 };
+  commitWaits.set(cdp, waits);
+  if (value.changed) waits[await waitForMotionCommit(cdp)] += 1;
+  return { ...value.receipt, frame_commit_waits: { ...waits } };
 }
 
 export async function freezeDynamicTime(cdp) {
