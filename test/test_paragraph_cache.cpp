@@ -179,6 +179,13 @@ TEST_CASE("Paragraph cache keys the paragraph style switches the build reads",
         REQUIRE(lookup(other));
         CHECK(builds == 2);
     }
+    SECTION("glyph hinting") {
+        ParagraphKey other = base;
+        other.glyph_hinting = !base.glyph_hinting;
+        REQUIRE(lookup(base));
+        REQUIRE(lookup(other));
+        CHECK(builds == 2);
+    }
 }
 
 TEST_CASE("Paragraph cache paints the uncached pixels and builds once",
