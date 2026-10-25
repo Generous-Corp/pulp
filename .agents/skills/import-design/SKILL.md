@@ -4718,8 +4718,13 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   materialized document and the screenshot horizon. Each pass
   settles only what an earlier one did not, or what the page restarted, and
   counts each animation and video once: a finite Web Animation is `finish()`ed (its
-  resting frame), an infinite or unresolved one is paused at `currentTime 0`,
-  and a video is paused and rewound to its first frame unless it still shows
+  resting frame), an infinite or unresolved one is paused at `currentTime 0`
+  and then committed and cancelled (`commitStyles()` writes the time-zero
+  values inline, `cancel()` drops the animation). A browser at its real device
+  scale kept presenting a merely paused composited animation mid-cycle while
+  the page read time zero, and nothing is left to hold once it is cancelled.
+  The page's own reference becomes idle, and restarting it is settled again.
+  A video is paused and rewound to its first frame unless it still shows
   its poster. CSS animations and transitions stay on the stylesheet path, and
   scroll- or view-driven animations are left to the fixed scroll position. An
   animated GIF, APNG or WebP runs on the decoder's clock, so it is left alone

@@ -361,6 +361,16 @@ const MOTION_FREEZE_SOURCE = `async (declareSources) => {
     }
     animation.pause();
     animation.currentTime = 0;
+    // A paused animation can keep painting where the compositor last had it:
+    // with the browser at its real device scale, the page and the DOM read
+    // time zero while the presented frame showed the box mid-cycle. Writing
+    // the time-zero values inline and dropping the animation leaves nothing
+    // for the compositor to hold. commitStyles throws for a target that is
+    // not rendered; that animation stays paused at zero.
+    try {
+      animation.commitStyles();
+      animation.cancel();
+    } catch {}
     count("paused");
   }
 

@@ -202,8 +202,9 @@ test("an infinite Web Animation is held on its first frame",
   { timeout: captureCaseTimeout(2), skip: process.platform === "win32" },
   async (context) => {
     await withPage(context, async ({ cdp, open }) => {
+      // The page keeps its own reference, as a page that restarts it would.
       const pulsing = pageUrl(
-        "<div id=m></div><script>document.getElementById('m').animate(" +
+        "<div id=m></div><script>window.pulse = document.getElementById('m').animate(" +
         "[{transform:'translateX(0)'},{transform:'translateX(400px)'}]," +
         "{duration:700,iterations:Infinity})</script>");
       await open(pulsing);
@@ -231,15 +232,15 @@ test("an infinite Web Animation is held on its first frame",
 
       // A page that restarts it is settled again by the next pass, which
       // still counts the animation once.
-      await cdp.call("Runtime.evaluate",
-        { expression: "document.getAnimations()[0].play()" });
+      await cdp.call("Runtime.evaluate", { expression: "window.pulse.play()" });
       const again = await freezeMotion(cdp);
       assert.equal(again.animations.paused, 1);
       const { result } = await cdp.call("Runtime.evaluate", {
-        expression: "document.getAnimations()[0].playState",
+        expression: "({ running: document.getAnimations().length," +
+          " state: window.pulse.playState })",
         returnByValue: true,
       });
-      assert.equal(result.value, "paused");
+      assert.deepEqual(result.value, { running: 0, state: "idle" });
     });
   });
 
@@ -292,6 +293,35 @@ test("a video still showing its poster is paused and left on it",
       await open(pageUrl(`<video id=v width=160 height=120 poster="${poster}"></video>`));
       const receipt = await freezeMotion(cdp);
       assert.deepEqual(receipt.videos, { paused: 1, rewound: 0, poster: 1 });
+    });
+  });
+
+test("an infinite animation is frozen to its own first keyframe, not the element's style",
+  { timeout: captureCaseTimeout(2), skip: process.platform === "win32" },
+  async (context) => {
+    await withPage(context, async ({ cdp, open }) => {
+      // The first keyframe is not where the element sits without animation,
+      // so a freeze that only dropped the animation would show the wrong frame.
+      await open(pageUrl("<div id=m style='transform:translateX(50px)'></div>"));
+      const firstKeyframe = await captureStableScreenshot(cdp, OPTIONS);
+      await open(pageUrl("<div id=m></div><script>document.getElementById('m').animate(" +
+        "[{transform:'translateX(50px)'},{transform:'translateX(400px)'}]," +
+        "{duration:700,iterations:Infinity})</script>"));
+      await cdp.call("Runtime.evaluate", {
+        expression: "new Promise(r => setTimeout(() => r(true), 300))", awaitPromise: true });
+      const receipt = await freezeMotion(cdp, { declareSources: false });
+      assert.equal(receipt.animations.paused, 1);
+      const { result } = await cdp.call("Runtime.evaluate", {
+        expression: "({ running: document.getAnimations().length," +
+          " inline: document.getElementById('m').style.transform })",
+        returnByValue: true,
+      });
+      // Nothing is left for the compositor to hold: the first keyframe's
+      // values are the element's own style now.
+      assert.deepEqual(result.value, { running: 0, inline: "translateX(50px)" });
+      const frozen = await captureStableScreenshot(cdp, OPTIONS);
+      assert.ok(frozen && firstKeyframe && frozen.equals(firstKeyframe),
+        "the frozen frame is the first keyframe");
     });
   });
 
