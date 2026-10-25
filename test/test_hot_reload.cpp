@@ -66,6 +66,42 @@ static bool wait_for_history_containing(HotReloader& reloader,
     return has_expected();
 }
 
+#if defined(__APPLE__) && !TARGET_OS_IPHONE
+// choc's macOS watcher delivers events on a dispatch queue, and stopping the
+// stream does not wait for a callback already on it. That callback then reads
+// the Watcher being destroyed (the ASan use-after-free under HotReloader), so
+// the destructor must not return while one is running.
+TEST_CASE("a file watcher's destructor waits for a callback already running",
+          "[view][hotreload][slow]") {
+    const auto dir = make_temp_dir("pulp-watcher-drain");
+    std::atomic<bool> entered{false};
+    std::atomic<bool> finished{false};
+    auto watcher = std::make_unique<choc::file::Watcher>(
+        dir,
+        [&](const choc::file::Watcher::Event&) {
+            if (entered.exchange(true))
+                return;
+            // Hold the first callback open across the destructor.
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            finished.store(true);
+        },
+        50);
+    for (int i = 0; i < 100 && !entered.load(); ++i) {
+        write_js_file(dir / "probe.js", "// change " + std::to_string(i) + "\n");
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    REQUIRE(entered.load());
+
+    watcher.reset();
+    const bool drained = finished.load();
+    // Without the drain the callback is still sleeping; let it finish before
+    // the flags it writes go out of scope.
+    std::this_thread::sleep_for(std::chrono::milliseconds(400));
+    CHECK(drained);
+    std::filesystem::remove_all(dir);
+}
+#endif
+
 TEST_CASE("HotReloader detects file changes", "[view][hotreload][slow]") {
     auto tmp_dir = make_temp_dir("pulp_hotreload_test");
     auto js_file = tmp_dir / "ui.js";
