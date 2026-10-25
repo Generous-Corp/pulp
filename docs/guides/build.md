@@ -84,12 +84,16 @@ It is a development-only link mode, by design:
   or after the build directory moves. Normal and release builds (option off)
   sign, package, notarize and release exactly as before. Run against a
   dev-shared build:
-  - `pulp ship package`, `notarize`, `release` and `share`, and `pulp ship sign`
-    with a distribution identity (Developer ID), first switch the build dir back
-    to static links (`pulp build --all`, a relink, no recompile) and then ship
-    the static bundles. If the switch cannot happen, or under `--dry-run`, they
-    stop and print the one command that does it, for example
-    `PULP_DEV_SHARED_UI=0 pulp build --all && pulp ship package --version 1.2.3`.
+  - `pulp ship package`, `release`, and `pulp ship sign` with a distribution
+    identity (Developer ID) configure and build a statically linked sibling,
+    `build-ship/`, from the dev build's cache with `PULP_DEV_SHARED_UI` (and
+    `PULP_DEV_BUILD`) off, and ship from there; the dev build is left as it is.
+    `notarize`, `share` and `check` read `build-ship/` once it exists.
+    `--allow-dev-build` does not keep a dev-shared dir.
+  - When a distribution step still meets dev-shared bits (a `sign --path` of a
+    dev-shared bundle with a Developer ID, say), it stops and prints the one
+    command that fixes it, for example
+    `PULP_DEV_SHARED_UI=0 pulp build --all && pulp ship sign --identity "Developer ID Application: ..." --path ...`.
   - `pulp ship sign --identity -` (ad hoc) or an Apple Development identity
     signs the dev-shared bundles as they are, so a host on this machine can load
     them. That signature is for local loading only.

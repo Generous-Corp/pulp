@@ -26,12 +26,12 @@
 #
 # A build made this way is NOT distributable. The module loads its Pulp code
 # from an absolute path inside this build tree, so on any other machine, or
-# after the build directory moves, it fails to load. `pulp ship package`,
-# `notarize`, `release` and `share`, and `sign` with a distribution identity,
-# switch such a build back to static links before shipping (or print the one
-# command that does); an ad hoc or Apple Development signature for local
-# loading is allowed. tools/scripts/build_combined_installer.sh refuses any
-# input that references the dylib.
+# after the build directory moves, it fails to load. `pulp ship` ships such a
+# project from a statically linked build-ship/ configured from this cache with
+# the option off (or prints the one command that fixes it); an ad hoc or Apple
+# Development signature for local loading is allowed.
+# tools/scripts/build_combined_installer.sh refuses any input that references
+# the dylib.
 #
 # Behaviour that differs from a static build, all of it development-only:
 # - Every member of the force-loaded libraries is present, so their static

@@ -327,17 +327,20 @@ the CMake-level provenance contract in
 in the directory that built it. The rule: static builds ship exactly as before;
 a dev-shared build may be signed for local loading, never distributed.
 
-- `ensure_static_build_for_shipping()` in `tools/cli/cmd_ship.cpp` runs for
-  `package`, `notarize`, `release`, `share`, and for `sign` with a non-local
-  identity. When `dev_shared_build_allows_distribution()` says the cache has the
-  option on, it runs `cmd_build({"--all"})` (which reconfigures OFF: a relink)
-  and continues with the static bundles. When that fails, the option is still on
-  (a `PULP_DEV_SHARED_UI=1` environment override), or the command is
-  `--dry-run`, it refuses and prints the outermost command as one copy-pasteable
-  line: `PULP_DEV_SHARED_UI=0 pulp build --all && pulp ship <args>`.
+- `cmd_ship()` treats a dev-shared dir (`build_dir_is_dev_shared()` in
+  `tools/cli/ship_dev_build_guard.hpp`) like a `PULP_DEV_BUILD` dir: `package`,
+  `release` and non-local `sign` build `build-ship/` through `ensure_ship_build()`
+  and ship from it; `notarize`, `share` and `check` read it once it exists.
+  `PULP_DEV_SHARED_UI` is in `kShipBuildDroppedEntries` and set OFF explicitly in
+  the initial cache. Unlike a dev build, `--allow-dev-build` cannot keep a
+  dev-shared dir.
+- `refuse_dev_shared_build()` is the backstop when the redirect did not apply
+  (`sign --path` with a Developer ID and no `build-ship/`): it prints the
+  outermost command as one copy-pasteable line,
+  `PULP_DEV_SHARED_UI=0 pulp build --all && pulp ship <args>`.
 - `is_local_signing_identity()` (ad hoc `-`, `Apple Development`,
-  `Mac Developer`) lets `sign` take a dev-shared build as it is: no switch, no
-  artifact refusal. Ad hoc signing also skips the signing-keychain preflight,
+  `Mac Developer`, from `--identity`) lets `sign` take a dev-shared build as it
+  is: no `build-ship/`, no artifact refusal. Ad hoc signing also skips the signing-keychain preflight,
   because it needs no keychain.
 - `pulp::cli::dev_shared_artifact_offender()` scans every selected artifact for a
   file named `libpulp-dev-shared-ui.*` or containing those bytes (the runtime's
@@ -350,12 +353,13 @@ a dev-shared build may be signed for local loading, never distributed.
 
 There is no override flag. Tests: the `[dev-shared]` cases in
 `test/test_sdk_distribution_guard.cpp` and `test/test_cli_ship_shellout.cpp`:
-- the switch for each subcommand against a fake `cmake`, the exact fix line when
-  it fails, and no rebuild under `--dry-run`;
+- `package` (also with `--allow-dev-build`), `release` and Developer ID `sign`
+  building a static `build-ship/` (real CMake, `LANGUAGES NONE` project);
+  `notarize` and `share` without `build-ship/` shipping nothing;
 - a static build that signs ad hoc, verifies with `codesign --verify --strict`,
   and packages;
-- a dev-shared build that signs ad hoc but is refused by `package`, `share`,
-  `notarize` and `release`;
+- a dev-shared build that signs ad hoc in place, while a Developer ID
+  `sign --path` of it prints the exact fix;
 - `sign --path`, `sign` scan, `package`, `notarize` and `share` against artifact
   bytes;
 

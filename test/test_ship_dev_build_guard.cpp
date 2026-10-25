@@ -192,3 +192,23 @@ TEST_CASE("the shippable build is refused when it lacks a plug-in artifact the d
     REQUIRE(pulp::cli::plugin_artifact_set_mismatch({}, ship_set).empty());
     fs::remove_all(root);
 }
+
+TEST_CASE("a dev-shared cache is recognized and never reaches the shippable build",
+          "[ship][dev-build][dev-shared]") {
+    auto dir = unique_dir("dev-shared");
+    CHECK_FALSE(pulp::cli::build_dir_is_dev_shared(dir));
+    write_cache(dir, "PULP_DEV_SHARED_UI:BOOL=OFF\n");
+    CHECK_FALSE(pulp::cli::build_dir_is_dev_shared(dir));
+    write_cache(dir, "PULP_DEV_SHARED_UI:BOOL=ON\nPULP_ENABLE_ARA:BOOL=ON\n");
+    CHECK(pulp::cli::build_dir_is_dev_shared(dir));
+    // A dev-shared dir is not a PULP_DEV_BUILD dir: --allow-dev-build is
+    // about the latter only.
+    CHECK_FALSE(pulp::cli::build_dir_is_dev_build(dir));
+
+    const auto script = pulp::cli::ship_build_initial_cache(
+        "PULP_DEV_SHARED_UI:BOOL=ON\nPULP_ENABLE_ARA:BOOL=ON\n");
+    auto has = [&](const std::string& line) { return script.find(line) != std::string::npos; };
+    CHECK(has("set(PULP_DEV_SHARED_UI OFF CACHE BOOL"));
+    CHECK_FALSE(has("PULP_DEV_SHARED_UI [==["));
+    CHECK(has("set(PULP_ENABLE_ARA [==[ON]==] CACHE BOOL"));
+}
