@@ -337,8 +337,15 @@ def run_command(argv: list[str], timeout_seconds: int) -> CommandResult:
         )
     except subprocess.TimeoutExpired as exc:
         elapsed = int((time.monotonic() - start) * 1000)
+        # The partial output on a timeout is bytes even under text=True, and
+        # every reader of a CommandResult expects str.
+        def partial(value: bytes | str | None) -> str:
+            if isinstance(value, bytes):
+                return value.decode("utf-8", errors="replace")
+            return value or ""
         return CommandResult(
-            argv, elapsed, 124, exc.stdout or "", exc.stderr or "command timed out")
+            argv, elapsed, 124, partial(exc.stdout),
+            partial(exc.stderr) or "command timed out")
     elapsed = int((time.monotonic() - start) * 1000)
     return CommandResult(
         argv, elapsed, result.returncode, result.stdout, result.stderr)

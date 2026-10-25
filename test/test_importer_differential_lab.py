@@ -33,6 +33,19 @@ class StageProvenanceTests(unittest.TestCase):
         self.assertEqual(record["import_timing_line"], result.stdout.strip())
         self.assertEqual(len(record["stdout_sha256"]), 64)
 
+    def test_a_timed_out_command_records_its_partial_output_as_text(self) -> None:
+        from importer_differential.core import command_record, run_command
+
+        script = ("import sys, time; print('started', flush=True); "
+                  "print('still going', file=sys.stderr, flush=True); time.sleep(30)")
+        result = run_command([sys.executable, "-c", script], timeout_seconds=1)
+        self.assertEqual(result.returncode, 124)
+        self.assertIsInstance(result.stdout, str)
+        self.assertIsInstance(result.stderr, str)
+        self.assertIn("started", result.stdout)
+        self.assertIn("still going", result.stderr)
+        self.assertEqual(len(command_record(result)["stderr_sha256"]), 64)
+
 from unittest.mock import patch
 
 try:
