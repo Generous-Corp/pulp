@@ -955,7 +955,8 @@ class PipelineNotifierNode : public RealtimeHookNode {
   public:
     PipelineNotifierNode()
         : RealtimeHookNode(1, 32, MissPolicy::CpuFallback),
-          link_(std::make_shared<detail::WorkerPipelineLink>(this, &PipelineNotifierNode::set_hosted)) {
+          link_(std::make_shared<detail::WorkerPipelineLink>(this,
+                                                             &PipelineNotifierNode::set_hosted)) {
         expose_notifier = true;
     }
     ~PipelineNotifierNode() override {
