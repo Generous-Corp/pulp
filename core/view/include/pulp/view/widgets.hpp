@@ -61,127 +61,9 @@ class Label : public View, public SelectableText {
         set_derived_access_label(text_);
     }
 
-    void set_text(std::string text) {
-        if (text == text_) return;
-        // A horizontal, single-line Label whose laid-out box does not move
-        // when its copy changes cannot move its siblings either, so it does
-        // not need a layout pass. Live readouts update this kind of Label on
-        // every pointer sample; re-running Yoga over the whole imported tree
-        // per sample is pure work and can consume the entire input budget.
-        //
-        // Keep the conservative path for intrinsic-width, multiline,
-        // vertical, attributed, and captured-wrap Labels. Their text can
-        // change measured geometry, so they must still invalidate layout.
-        const auto& style = flex();
-        const bool has_explicit_width =
-            style.preferred_width > 0.0f ||
-            (style.dim_width.unit != DimensionUnit::auto_ &&
-             style.dim_width.value > 0.0f);
-        const bool has_explicit_height =
-            style.preferred_height > 0.0f ||
-            (style.dim_height.unit != DimensionUnit::auto_ &&
-             style.dim_height.value > 0.0f);
-        const bool horizontal =
-            text_direction_ != canvas::TextDirection::top_to_bottom &&
-            text_direction_ != canvas::TextDirection::bottom_to_top;
-        const bool single_line_simple =
-            horizontal && !soft_wraps() && !captured_wrap_fallback_ && !has_attributed_;
-        // Baseline alignment reads this Label's ASCENT, not its height, to
-        // place its siblings: under YGAlignBaseline a row's cross-axis
-        // positions derive from the max baseline of the participating items.
-        // Ascent and line height are independent maxes over the faces the
-        // text resolves (TextShaper::prepare takes max of the base font box
-        // and the shaped box per metric), so new copy can hold the height
-        // constant while moving the ascent -- and then a skipped
-        // invalidate_layout() would leave every sibling stale. An unchanged
-        // height is only a sufficient proof of "nothing can move" when this
-        // Label is not a baseline participant, so decline the fast path when
-        // it is. `align_self` overrides the parent's `align_items`, and
-        // `auto_` means inherit, so both have to be consulted.
-        const View* flex_parent = parent();
-        const bool baseline_aligned =
-            flex().align_self == FlexAlign::baseline ||
-            (flex().align_self == FlexAlign::auto_ && flex_parent != nullptr &&
-             flex_parent->flex().align_items == FlexAlign::baseline);
-        // An explicit width pins the horizontal axis outright. The vertical
-        // axis is pinned either by an explicit height, or -- for a single-line
-        // Label -- by measuring it: a single-line height is one line box, so
-        // it only moves when the new copy resolves a different font (fallback
-        // to a taller family) or a different inherited metric. Probing costs
-        // one shaper prepare() on a short string, which paint() is about to
-        // do anyway and which the measure memo caches; invalidate_layout()
-        // costs a Yoga pass over the whole tree. Probe only when it can pay
-        // off -- an intrinsic-width Label must reflow regardless.
-        const bool probe_height = has_explicit_width && single_line_simple &&
-                                  !has_explicit_height && !baseline_aligned;
-        const float height_before = probe_height ? intrinsic_height() : 0.0f;
-        // The ink a fixed-box, single-line Label paints can run past its box
-        // when the copy is wider than the box; measured before the copy
-        // changes so the repaint below covers the old text's ink too.
-        const float ink_before =
-            has_explicit_width && single_line_simple ? intrinsic_width() : 0.0f;
-        text_ = std::move(text);
-        // A captured browser line box describes ONE string. Once the copy
-        // diverges from it the Label paints natively, and it must keep doing
-        // so even when a later value equals the captured string again: a live
-        // readout that flipped between the captured basis and native placement
-        // would visibly jump every time its value passed through the design's
-        // original copy.
-        // The boxes themselves stay: the responsive reflow still reads their
-        // line count and wrap intent, and the line-break accounting still
-        // reports a reflow rather than an uncached shape. Only the basis is
-        // retired, so no later value can resurrect it.
-        bool captured_basis_dropped = false;
-        if (!cached_line_boxes_.empty() && !cached_line_basis_retired_ &&
-            apply_text_transform(text_) != cached_line_basis_text_) {
-            cached_line_basis_retired_ = true;
-            shaped_cache_valid_ = false;
-            captured_basis_dropped = true;
-        }
-        // The text IS the accessible name for a label — the two-arg ctor set it
-        // and set_text() did not, so every Label built by the JS bridge
-        // (<span>, <p>, <label>) or by set_text() carried an empty name. It is
-        // the DERIVED name: an author-set aria-label wins over content, and
-        // react-reconciler rewrites textContent on every re-render.
-        set_derived_access_label(text_);
-        // A plain set_text() supersedes any per-range styled runs from a
-        // prior set_attributed_string(): the old spans index into the OLD
-        // string and are stale. Drop them so paint() takes the single-style
-        // path for the new text.
-        has_attributed_ = false;
-        // The Yoga measure callback (yoga_measure ->
-        // Label::intrinsic_width / measured_height) re-runs TextShaper::prepare
-        // keyed on the CURRENT text_, so a text change re-shapes correctly —
-        // but only if a re-layout is actually triggered. Mark this Label's
-        // layout dirty here so the new copy re-measures + reflows; without it
-        // the laid-out width stays stale at the old text's advance. The
-        // PreText-style shaper cache is keyed by (text, family, size), so the
-        // new text simply hits a different cache entry — no algorithm change,
-        // just cache-correct re-measurement.
-        const bool text_geometry_is_fixed = !captured_basis_dropped && has_explicit_width &&
-                                            single_line_simple &&
-                                            ((has_explicit_height && !baseline_aligned) ||
-                                             (probe_height && intrinsic_height() == height_before));
-        if (!text_geometry_is_fixed) invalidate_layout();
-        // selectable_text() already exposes the new source bytes, so geometry
-        // from the previous paint can no longer describe it honestly. Keep
-        // the capability unmeasured until the repaint records the new run.
-        selection_layout_ = {};
-        selection_layout_pending_ = {};
-        if (!text_geometry_is_fixed) {
-            request_repaint();
-            return;
-        }
-        // Nothing moved: repaint this Label's box, widened by however far
-        // the old or new copy overhangs it (either side: the alignment is
-        // the paint's business), plus room for anti-aliasing. A live readout
-        // or a modulated value label then repaints itself, not the editor.
-        const float box_w = local_bounds().width;
-        const float overhang = std::max(0.0f, std::max(ink_before, intrinsic_width()) - box_w);
-        const float halo = 4.0f;
-        request_repaint(Rect{-overhang - halo, -halo, box_w + 2.0f * (overhang + halo),
-                             local_bounds().height + 2.0f * halo});
-    }
+    // Changes the copy. Requests paint only when no layout output can depend
+    // on it; otherwise invalidates layout as well.
+    void set_text(std::string text);
     const std::string& text() const { return text_; }
 
     // Per-range styled text (design-import mixed text). Every line shape and
@@ -1608,6 +1490,8 @@ public:
 private:
   static constexpr float kModulatedMarkerHalo = 6.0f;
   void paint_modulated_marker(canvas::Canvas& canvas);
+  // The stock thumb (slab or circle) at track position `pos`, 0..1.
+  void paint_stock_thumb(canvas::Canvas& canvas, float pos, canvas::Color color);
   bool has_modulated_ = false;
   float modulated_ = 0.0f;
   float value_ = 0.0f;
@@ -1800,6 +1684,18 @@ private:
     float skin_track_width_ = 0.0f;
     bool has_skin_track_width_ = false;
 };
+
+/// The SDF shape a widget's chart shader is drawn on: `flat_arc` for a Knob's
+/// value arc, `stadium` for a Fader's track (a vertical Fader turns it a
+/// quarter counter-clockwise, so `t` runs from the bottom up). Empty for a
+/// widget that draws no chart.
+std::optional<canvas::Canvas::SDFShape> widget_chart_shape(const View& view);
+
+/// Height of the stadium a Fader's chart is drawn in, given the fader's
+/// extent across its track: half of it, kept between 8 and 24 units.
+inline float fader_chart_track_thickness(float cross_extent) {
+    return std::clamp(cross_extent * 0.5f, 8.0f, 24.0f);
+}
 
 // ── UA form-control skins ───────────────────────────────────────────────────
 // An imported `appearance: auto` form control carries no CSS paint: the
@@ -2362,6 +2258,106 @@ private:
     std::optional<canvas::Color> accent_color_;
 
     void paint_chromium_refresh_(canvas::Canvas& canvas);
+};
+
+// ── ButtonSurface ───────────────────────────────────────────────────────────
+// The themed surface of an imported `appearance: auto` HTML <button>: Chromium's
+// push-button background, border and per-state colours, plus its focus-visible
+// ring. It paints nothing else; the button's content (labels, icons) is its
+// children, laid out like any container's. Only an explicitly constructed
+// ButtonSurface wears this skin; TextButton and generated UI are unaffected.
+//
+// The focus ring reaches one CSS px (two device px at scale 2) outside the
+// view's bounds, as Chromium's does; it is painted in paint() before the
+// children, which never reach the 2px band at the edge it covers.
+
+class ButtonSurface : public View {
+  public:
+    using ColorScheme = UaColorScheme;
+    using ControlState = UaControlState;
+
+    ButtonSurface() {
+        set_access_role(AccessRole::button);
+    }
+
+    /// The page colour scheme the palette resolves from (CSS `color-scheme`).
+    /// CSS `accent-color` does not apply: Chromium paints buttons without it.
+    void set_color_scheme(ColorScheme scheme) {
+        if (color_scheme_ == scheme)
+            return;
+        color_scheme_ = scheme;
+        request_repaint();
+    }
+    ColorScheme color_scheme() const {
+        return color_scheme_;
+    }
+
+    /// CSS `:active`: the pressed palette while true.
+    void set_pressed(bool pressed) {
+        if (pressed_ == pressed)
+            return;
+        pressed_ = pressed;
+        request_repaint();
+    }
+    bool is_pressed() const {
+        return pressed_;
+    }
+
+    /// CSS `:focus-visible`: paints Chromium's two-colour focus ring.
+    void set_focus_visible(bool visible) {
+        if (focus_visible_ == visible)
+            return;
+        focus_visible_ = visible;
+        request_repaint();
+    }
+    bool is_focus_visible() const {
+        return focus_visible_;
+    }
+
+    /// Disabled when not enabled, then pressed, then hovered under the pointer,
+    /// otherwise normal.
+    ControlState control_state() const;
+
+    /// Everything the skin paints, in local coordinates, in paint order: the
+    /// `lighten` layer (disabled only) and `fill` on `surface`, the `border`
+    /// stroke on `surface`, then, when focus-visible, the outer ring and the
+    /// inner ring over it.
+    struct ChromiumRefreshParts {
+        /// A box under 5 device px a side is one solid `fill` rect on `bounds`.
+        bool solid = false;
+        Rect bounds;
+        Rect surface;     ///< `bounds` inset half the border width
+        float radius = 0; ///< corner radius of `surface` and both rings
+        float border_width = 1.0f;
+        std::optional<canvas::Color> lighten;
+        canvas::Color fill{};
+        canvas::Color border{};
+        bool focus_ring = false;
+        Rect outer_ring; ///< stroke centreline of the outer ring
+        Rect inner_ring; ///< stroke centreline of the inner ring
+        float ring_width = 0;
+        canvas::Color outer_ring_color{};
+        canvas::Color inner_ring_color{};
+    };
+
+    /// Pure layout + palette of Chromium's push button for `bounds`. Chromium
+    /// sizes the border, radius and ring in whole device pixels, so
+    /// `device_scale` is device pixels per local unit (`Canvas::backing_scale()`
+    /// when painting). The ring colours are the macOS ones, where the inner
+    /// ring keeps the outline colour in a dark scheme.
+    static ChromiumRefreshParts chromium_refresh_parts(Rect bounds, ControlState state,
+                                                       ColorScheme scheme, bool focus_visible,
+                                                       float device_scale = 1.0f);
+    /// The parts for this view, in self_paint_bounds(): the captured,
+    /// CSS-edge-snapped box when the importer recorded one, else local_bounds().
+    ChromiumRefreshParts chromium_refresh_parts(float device_scale = 1.0f) const;
+
+    void paint(canvas::Canvas& canvas) override;
+
+  private:
+    ColorScheme color_scheme_ = ColorScheme::light;
+    bool pressed_ = false;
+    bool focus_visible_ = false;
 };
 
 // ── ToggleButton ────────────────────────────────────────────────────────────

@@ -4,12 +4,22 @@
 #include "detail/realtime_gpu_audio_path.hpp"
 #include "detail/realtime_gpu_health_mirror.hpp"
 #include "detail/shared_io_trace.hpp"
+#include "detail/worker_pipeline_hosting.hpp"
+#include "detail/worker_wake.hpp"
 
 #include <algorithm>
 #include <chrono>
 
+#if defined(__APPLE__)
+#include <pthread.h>
+#include <pthread/qos.h>
+#endif
+
 namespace pulp::gpu_audio {
 namespace {
+// Each failed re-acquire attempt waits this many times longer than the last.
+constexpr std::uint64_t kReacquireBackoffGrowth = 5;
+
 std::uint64_t monotonic_now_ns() noexcept {
     return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
                                           std::chrono::steady_clock::now().time_since_epoch())
@@ -49,21 +59,40 @@ struct GpuAudioTransportConfiguration {
     std::uint32_t sample_rate = 0;
     std::uint32_t block_size = 0;
     std::uint32_t latency_blocks = 0;
+    GpuAudioRecoveryPolicy recovery_policy = GpuAudioRecoveryPolicy::Manual;
 };
 
 struct GpuAudioTransportDiagnostics {
     SeqlockCell<GpuAudioTransportConfiguration> configuration;
     RealtimeGpuHealthMirror health;
+    // Callback-written per delivered block, read by status_snapshot().
+    RecentGpuDelivery recent;
     // Host-written at prepare/release, callback-read: the prepared node's
     // primary path is its CPU model, so a CPU-delivered block is not a miss.
     bool cpu_primary = false;
+    // Host-only, prepare/release: the worker-pipelining link a hosted node
+    // bound at prepare(). release() undoes exactly that opt-in through the
+    // link, which the node detaches if it is destroyed first. Null when the
+    // node does not pipeline.
+    std::shared_ptr<WorkerPipelineLink> pipeline;
 };
 
 } // namespace detail
 
 GpuAudioTransport::GpuAudioTransport()
-    : diagnostics_(std::make_unique<detail::GpuAudioTransportDiagnostics>()) {
+    : wake_(std::make_unique<detail::WorkerWake>()),
+      diagnostics_(std::make_unique<detail::GpuAudioTransportDiagnostics>()) {
     (void)diagnostics_->configuration.publish({});
+}
+
+namespace {
+// Wake posts one worker iteration consumes at most before it pumps again.
+constexpr int kMaxCoalescedWakes = 1024;
+} // namespace
+
+void GpuAudioTransport::notify_worker(void* self) noexcept {
+    // Provider callback thread: a counting-semaphore post only.
+    static_cast<GpuAudioTransport*>(self)->wake_->post();
 }
 
 GpuAudioTransport::~GpuAudioTransport() {
@@ -85,6 +114,61 @@ void GpuAudioTransport::refresh_node_health() noexcept {
         (void)diagnostics_->health.publish(detail::health_from_status(status));
 }
 
+void GpuAudioTransport::steward_reacquire() noexcept {
+    if (recovery_policy_ != GpuAudioRecoveryPolicy::AutoReacquire ||
+        realtime_gpu_reprepare_ == nullptr || realtime_gpu_health_ == nullptr ||
+        realtime_gpu_fenced_for_offline_)
+        return;
+    detail::RealtimeGpuHealth health;
+    if (!realtime_gpu_health_(realtime_gpu_context_, health))
+        return;
+    const auto reason = health.recovery_reason;
+    const bool outage = !health.delivery_epoch_active && reason != GpuAudioRecoveryReason::None &&
+                        reason != GpuAudioRecoveryReason::OfflineFence &&
+                        reason != GpuAudioRecoveryReason::ProviderReacquired;
+    const auto now = monotonic_now_ns();
+    // Only GPU audio from a re-acquired epoch ends an outage: the callback
+    // clears the pending resume on its first GPU block. Until then attempts
+    // keep counting toward the cap and backing off. A delivery that happened
+    // between pumps still ends it, even if a new fault has latched since.
+    const bool resumed =
+        resume_armed_ && resume_pending_from_ns_.load(std::memory_order_acquire) == 0;
+    if (resumed || (!outage && health.delivery_epoch_active &&
+                    resume_pending_from_ns_.load(std::memory_order_acquire) == 0)) {
+        resume_armed_ = false;
+        reacquire_round_ = 0;
+        next_reacquire_ns_ = 0;
+        outage_started_ns_ = 0;
+    }
+    if (!outage)
+        return;
+    if (outage_started_ns_ == 0)
+        outage_started_ns_ = now;
+    if (reacquire_round_ >= reacquire_max_attempts_ || now < next_reacquire_ns_)
+        return;
+    reacquire_attempts_.fetch_add(1, std::memory_order_relaxed);
+    // Every attempt counts and backs off, successful or not: a new epoch that
+    // fails before delivering must not be replaced on every pump.
+    std::uint64_t wait = reacquire_backoff_ns_;
+    for (std::uint32_t i = 0; i < reacquire_round_ && wait <= UINT64_MAX / kReacquireBackoffGrowth;
+         ++i)
+        wait *= kReacquireBackoffGrowth;
+    ++reacquire_round_;
+    next_reacquire_ns_ = wait > UINT64_MAX - now ? UINT64_MAX : now + wait;
+    if (realtime_gpu_reprepare_(realtime_gpu_context_, reacquire_budget_ns_)) {
+        reacquire_successes_.fetch_add(1, std::memory_order_relaxed);
+        // Keep the earliest outage start: an epoch that failed before
+        // delivering does not restart the time to GPU.
+        auto expected = std::uint64_t{0};
+        (void)resume_pending_from_ns_.compare_exchange_strong(expected, outage_started_ns_,
+                                                              std::memory_order_acq_rel);
+        resume_armed_ = true;
+        // The window described the provider just replaced.
+        diagnostics_->recent.reset();
+        refresh_node_health();
+    }
+}
+
 void GpuAudioTransport::publish_prepared_configuration() noexcept {
     detail::GpuAudioTransportConfiguration configuration;
     if (prepared_ && node_ != nullptr) {
@@ -100,6 +184,9 @@ void GpuAudioTransport::publish_prepared_configuration() noexcept {
         configuration.sample_rate = sample_rate_;
         configuration.block_size = block_size_;
         configuration.latency_blocks = latency_blocks_;
+        // Only a node that can re-acquire honours AutoReacquire.
+        configuration.recovery_policy =
+            realtime_gpu_reprepare_ != nullptr ? recovery_policy_ : GpuAudioRecoveryPolicy::Manual;
     }
     diagnostics_->cpu_primary = configuration.provider == GpuAudioProvider::Cpu;
     // Host-only writer, while neither the worker nor a pump caller runs.
@@ -107,10 +194,35 @@ void GpuAudioTransport::publish_prepared_configuration() noexcept {
     }
 }
 
+void GpuAudioTransport::release_pipeline_hosting() noexcept {
+    auto& d = *diagnostics_;
+    if (d.pipeline != nullptr)
+        (void)d.pipeline->set_hosting(false);
+    d.pipeline.reset();
+}
+
 bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
     release();
     if (node == nullptr)
         return false;
+
+    // Opt the node into worker pipelining before reading its descriptor; a
+    // node that pipelines declares worker_pipeline_blocks only while hosted.
+    // Undone here, while the node is known alive, if preparation fails or the
+    // node does not pipeline; release() undoes it only for a pipelining node.
+    {
+        const auto binding = detail::realtime_gpu_node_binding(node);
+        if (binding.pipeline != nullptr && binding.pipeline->set_hosting(true))
+            diagnostics_->pipeline = binding.pipeline;
+    }
+    struct HostingGuard {
+        GpuAudioTransport& transport;
+        bool keep = false;
+        ~HostingGuard() {
+            if (!keep)
+                transport.release_pipeline_hosting();
+        }
+    } hosting{*this};
 
     // The descriptor is the single source of truth for channels/block/latency.
     const GpuAudioNodeDescriptor desc = node->descriptor(); // host thread — may allocate
@@ -118,7 +230,9 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
         desc.input_channels != desc.output_channels) {
         return false; // 3a: symmetric channel count only
     }
-    if (desc.block_size == 0 || desc.latency_blocks == 0)
+    // A zero rate would prepare a shape that the status validator then
+    // rejects as PreparedShapeMissing, so refuse it here instead.
+    if (desc.block_size == 0 || desc.sample_rate == 0 || desc.latency_blocks == 0)
         return false;
     // CpuFallback requires both a declaration and a host-thread witness that
     // prepare() built the allocation-free, latency-aligned fallback state.
@@ -128,6 +242,9 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
     }
     // Need the primed latency plus one in-flight block and one free slot.
     if (config.ring_blocks < desc.latency_blocks + 2)
+        return false;
+    // A pipelined node emits wet(N - D); the primed ring makes up the rest.
+    if (desc.worker_pipeline_blocks >= desc.latency_blocks)
         return false;
 
     node_ = node;
@@ -149,6 +266,9 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
         realtime_gpu_fence_ = realtime_path.fence;
         realtime_gpu_delivered_ = realtime_path.delivered;
         realtime_gpu_health_ = realtime_path.health;
+        realtime_gpu_offline_render_ = realtime_path.offline_render;
+        realtime_gpu_reprepare_ = realtime_path.reprepare;
+        realtime_gpu_set_notifier_ = realtime_path.set_completion_notifier;
         callback_sequence_ = realtime_path.next_sequence(realtime_path.context);
     }
     sample_staged_health_ = !realtime_path.active();
@@ -196,6 +316,7 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
     blocks_owed_ = 0;
     last_block_ns_.store(0, std::memory_order_relaxed);
     avg_block_ns_.store(0, std::memory_order_relaxed);
+    diagnostics_->recent.reset();
     delivery_gpu_.store(0, std::memory_order_relaxed);
     delivery_worker_.store(0, std::memory_order_relaxed);
     delivery_fallback_.store(0, std::memory_order_relaxed);
@@ -210,25 +331,52 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
     join_audio_workgroup_ = config.join_audio_workgroup && config.run_worker_thread;
     worker_workgroup_joined_.store(false, std::memory_order_relaxed);
     worker_workgroup_join_failures_.store(0, std::memory_order_relaxed);
+    recovery_policy_ = config.recovery_policy;
+    reacquire_budget_ns_ = config.reacquire_release_budget_ns;
+    reacquire_max_attempts_ = config.reacquire_max_attempts;
+    reacquire_backoff_ns_ = config.reacquire_backoff_ns;
+    reacquire_round_ = 0;
+    outage_started_ns_ = next_reacquire_ns_ = 0;
+    resume_armed_ = false;
+    reacquire_attempts_.store(0, std::memory_order_relaxed);
+    reacquire_successes_.store(0, std::memory_order_relaxed);
+    last_reacquire_to_gpu_ns_.store(0, std::memory_order_relaxed);
+    resume_pending_from_ns_.store(0, std::memory_order_relaxed);
+    worker_interactive_qos_.store(false, std::memory_order_relaxed);
     prepared_ = true;
     // Quiescent host reads: neither the callback nor the worker has started.
     refresh_node_health();
     publish_prepared_configuration();
 
     if (config.run_worker_thread) {
-        // Poll a few times per block so the worker reliably keeps the output
-        // ring filled within the latency budget; clamp to a sane range.
+        // The poll interval is a fallback only. Without wake-on-write it is
+        // the worker's sole clock, so it runs a few times per block. With
+        // wake-on-write every callback posts the semaphore, so the interval
+        // only bounds a missed or coalesced post and a completion that has no
+        // event source: a quarter block, capped, with no lower floor.
         const double block_us = (desc.sample_rate > 0)
                                     ? (1.0e6 * static_cast<double>(block_size_) / desc.sample_rate)
                                     : 800.0;
-        long iv = static_cast<long>(block_us / 4.0);
-        if (iv < 50)
-            iv = 50;
+        // A provider with a completion event source wakes the worker itself,
+        // so the fallback then only covers a missed callback post: one block.
+        completion_notifier_installed_ =
+            wake_on_write_ && realtime_gpu_set_notifier_ != nullptr &&
+            realtime_gpu_set_notifier_(realtime_gpu_context_,
+                                       {&GpuAudioTransport::notify_worker, this});
+        long iv = static_cast<long>(completion_notifier_installed_ ? block_us : block_us / 4.0);
+        if (iv < 1)
+            iv = 1;
         if (iv > 2000)
             iv = 2000;
         poll_interval_ = std::chrono::microseconds(iv);
         worker_running_.store(true, std::memory_order_release);
         worker_ = std::thread([this] { worker_loop(); });
+    }
+    // Keep the opt-in only for a node that actually pipelines; release() must
+    // touch the node for that case alone (the guard undoes it otherwise).
+    if (desc.worker_pipeline_blocks > 0) {
+        hosting.keep = true;
+        pipeline_hosted_ = true;
     }
     return true;
 }
@@ -246,10 +394,25 @@ void GpuAudioTransport::worker_loop() noexcept {
             worker_workgroup_join_failures_.fetch_add(1, std::memory_order_relaxed);
         }
     }
+    // Outside a host workgroup, run the worker at the interactive QoS class so
+    // a saturated host does not park it behind default-priority work.
+    if (!joined_workgroup)
+        worker_interactive_qos_.store(
+            pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0) == 0,
+            std::memory_order_release);
 #else
     (void)joined_workgroup;
 #endif
     while (worker_running_.load(std::memory_order_acquire)) {
+        // Consume the posts this pump will cover. A post that lands during the
+        // pump stays pending and wakes the next wait at once, so coalesced
+        // posts never make the worker spin and a late one is never lost. The
+        // drain is bounded: a provider posting faster than the drain cannot
+        // keep the worker from seeing a stop request.
+        if (wake_on_write_) {
+            for (int drained = 0; drained < kMaxCoalescedWakes && wake_->try_consume(); ++drained) {
+            }
+        }
         // Yield while an offline (synchronous) render owns the node — process_offline
         // pumps inline. The mutex serializes node access for the brief window where
         // the flag flips after this check.
@@ -261,7 +424,7 @@ void GpuAudioTransport::worker_loop() noexcept {
         // missed/coalesced post (or offline mode, which posts nothing) still
         // makes progress. Falls back to a plain sleep when wake-on-write is off.
         if (wake_on_write_) {
-            (void)wake_sem_.try_acquire_for(poll_interval_);
+            (void)wake_->wait_for(poll_interval_);
         } else {
             std::this_thread::sleep_for(poll_interval_);
         }
@@ -270,6 +433,7 @@ void GpuAudioTransport::worker_loop() noexcept {
     pump(); // final drain of any input left at stop
     if (joined_workgroup)
         worker_workgroup_joined_.store(false, std::memory_order_release);
+    worker_interactive_qos_.store(false, std::memory_order_release);
 }
 
 void GpuAudioTransport::reset_staged_transport_state() noexcept {
@@ -283,7 +447,10 @@ void GpuAudioTransport::reset_staged_transport_state() noexcept {
         return;
 
     audio::BufferView<float> silence(out_fptrs_.data(), channels_, block_size_);
-    for (uint32_t b = 0; b < latency_blocks_; ++b) {
+    // A node whose worker emits D blocks behind its submit supplies D of the
+    // latency itself, so prime only the remainder.
+    const uint32_t primed = latency_blocks_ - node_->descriptor().worker_pipeline_blocks;
+    for (uint32_t b = 0; b < primed; ++b) {
         (void)output_ring_.write(silence, block_size_);
     }
 }
@@ -293,6 +460,12 @@ void GpuAudioTransport::release() noexcept {
     worker_running_.store(false, std::memory_order_release);
     if (worker_.joinable())
         worker_.join();
+    // No service step runs now. After the clearing call returns the provider
+    // never invokes notify_worker() for this transport again.
+    if (completion_notifier_installed_ && realtime_gpu_set_notifier_ != nullptr)
+        (void)realtime_gpu_set_notifier_(realtime_gpu_context_, {});
+    completion_notifier_installed_ = false;
+    realtime_gpu_set_notifier_ = nullptr;
 
     input_ring_.release();
     output_ring_.release();
@@ -301,6 +474,12 @@ void GpuAudioTransport::release() noexcept {
     out_fptrs_.clear();
     rejected_input_ptrs_.clear();
     rejected_output_ptrs_.clear();
+    // The worker has stopped: return a pipelining node to block-in,
+    // block-out use. Only such a node is touched here; any other node may
+    // already be gone.
+    if (pipeline_hosted_)
+        release_pipeline_hosting();
+    pipeline_hosted_ = false;
     node_ = nullptr;
     realtime_gpu_context_ = nullptr;
     realtime_gpu_process_ = nullptr;
@@ -308,12 +487,16 @@ void GpuAudioTransport::release() noexcept {
     realtime_gpu_fence_ = nullptr;
     realtime_gpu_delivered_ = nullptr;
     realtime_gpu_health_ = nullptr;
+    realtime_gpu_offline_render_ = nullptr;
+    realtime_gpu_reprepare_ = nullptr;
+    recovery_policy_ = GpuAudioRecoveryPolicy::Manual;
     sample_staged_health_ = false;
     diagnostics_->health.reset();
     trial_observer_context_ = nullptr;
     trial_observer_ = nullptr;
     callback_sequence_ = 0;
     realtime_gpu_fenced_for_offline_ = false;
+    realtime_gpu_offline_ = false;
     audio_workgroup_ = nullptr;
     join_audio_workgroup_ = false;
     worker_workgroup_joined_.store(false, std::memory_order_release);
@@ -344,6 +527,10 @@ void GpuAudioTransport::process_realtime_position(const audio::BufferView<const 
                                                   std::uint64_t sequence, bool input_valid,
                                                   std::uint64_t callback_start_ns) noexcept {
     if (realtime_gpu_process_ != nullptr) {
+        if (realtime_gpu_offline_) {
+            realtime_gpu_offline_ = false;
+            realtime_gpu_offline_render_(realtime_gpu_context_, false);
+        }
         process_shared(input, output, n, sequence, input_valid, callback_start_ns, true);
         return;
     }
@@ -371,7 +558,7 @@ void GpuAudioTransport::process_realtime_position(const audio::BufferView<const 
         // of at the next poll tick. RT-safe: a counting-semaphore post neither
         // allocates nor blocks. No-op when wake-on-write is off.
         if (wake_on_write_)
-            wake_sem_.release();
+            wake_->post();
     } else {
         input_dropped_blocks_.fetch_add(1, std::memory_order_relaxed);
     }
@@ -490,12 +677,20 @@ void GpuAudioTransport::process_shared(const audio::BufferView<const float>& inp
         delivered = SharedIoDeliveryDisposition::InvalidRejected;
     }
     const auto result_visible_ns = monotonic_now_ns();
+    // The first GPU block after a re-acquire ends the outage it measures.
+    if (delivered == SharedIoDeliveryDisposition::GpuDelivered) {
+        auto from = resume_pending_from_ns_.load(std::memory_order_relaxed);
+        if (from != 0 &&
+            resume_pending_from_ns_.compare_exchange_strong(from, 0, std::memory_order_acq_rel))
+            last_reacquire_to_gpu_ns_.store(result_visible_ns > from ? result_visible_ns - from : 0,
+                                            std::memory_order_relaxed);
+    }
     realtime_gpu_delivered_(realtime_gpu_context_, sequence, static_cast<std::uint8_t>(delivered),
                             callback_end_ns, result_visible_ns);
     if (count_delivery)
         record_delivery(static_cast<std::uint8_t>(delivered), false);
     if (wake_on_write_)
-        wake_sem_.release();
+        wake_->post();
 }
 
 void GpuAudioTransport::process_offline(const audio::BufferView<const float>& input,
@@ -537,6 +732,10 @@ void GpuAudioTransport::process_offline_position(const audio::BufferView<const f
     std::lock_guard<std::mutex> lock(pump_mutex_);
 
     if (realtime_gpu_fence_ != nullptr) {
+        if (!realtime_gpu_offline_ && realtime_gpu_offline_render_ != nullptr) {
+            realtime_gpu_offline_ = true;
+            realtime_gpu_offline_render_(realtime_gpu_context_, true);
+        }
         if (!realtime_gpu_fenced_for_offline_) {
             realtime_gpu_fenced_for_offline_ = realtime_gpu_fence_(realtime_gpu_context_);
             refresh_node_health();
@@ -603,6 +802,7 @@ void GpuAudioTransport::pump(uint32_t max_blocks) noexcept {
         // The service step is where a node observes provider loss or failure;
         // publish what it saw before the next host/UI read.
         refresh_node_health();
+        steward_reacquire();
         if (produced != detail::kRealtimeGpuServiceInactive) {
             const auto block_ns =
                 static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -669,6 +869,7 @@ void GpuAudioTransport::pump(uint32_t max_blocks) noexcept {
 void GpuAudioTransport::record_delivery(std::uint8_t disposition, bool worker_output) noexcept {
     static_assert(std::atomic<std::uint64_t>::is_always_lock_free);
     using D = detail::SharedIoDeliveryDisposition;
+    diagnostics_->recent.record(static_cast<D>(disposition));
     switch (static_cast<D>(disposition)) {
     case D::GpuDelivered:
         (worker_output ? delivery_worker_ : delivery_gpu_).fetch_add(1, std::memory_order_relaxed);
@@ -715,6 +916,7 @@ GpuAudioTransport::Stats GpuAudioTransport::stats() const noexcept {
     s.worker_workgroup_joined = worker_workgroup_joined_.load(std::memory_order_acquire);
     s.worker_workgroup_join_failures =
         worker_workgroup_join_failures_.load(std::memory_order_relaxed);
+    s.worker_interactive_qos = worker_interactive_qos_.load(std::memory_order_acquire);
     return s;
 }
 
@@ -741,6 +943,7 @@ capability_from(const detail::GpuAudioTransportConfiguration& configuration) noe
     report.prepared = true;
     report.fallback_available = configuration.miss_policy == MissPolicy::CpuFallback;
     report.diagnostics_available = true;
+    report.recovery_policy = configuration.recovery_policy;
     return report;
 }
 
@@ -822,14 +1025,36 @@ GpuAudioStatus GpuAudioTransport::status_snapshot() const noexcept {
         status.delivery_epoch_active = health.delivery_epoch_active;
         for (std::size_t i = 0; i < GpuAudioStatus::kTerminalDispositionCount; ++i)
             status.terminal_counts[i] = health.terminal_counts[i];
+        status.shadow_mode = health.shadow_mode;
+        status.shadow_inline_cost_pct = health.shadow_inline_cost_pct;
+        status.shadow_delivered_blocks = health.shadow_delivered_blocks;
+        status.shadow_late_blocks = health.shadow_late_blocks;
+        status.shadow_double_miss_blocks = health.shadow_double_miss_blocks;
+        status.shadow_model_differs = health.shadow_model_differs;
+        status.gpu_kernel_available = health.gpu_kernel_available;
+        status.completion_mode = health.completion_mode;
+        status.timestamps_available = health.timestamps_available;
+        status.last_delivery_ns = health.last_delivery_ns;
+        if (health.reports_fallback) {
+            status.fallback_policy = health.fallback_policy;
+            status.fallback_available = health.fallback_available;
+        }
     } else if (configuration.realtime_health) {
         // No coherent health copy: never report an unverified provider as
         // Ready, and claim no recovery cause that was not observed. A staged
         // node that reports no health keeps the staged state above.
         lower_to(GpuAudioProviderState::Degraded);
     }
-    status.selected_engine = detail::delivering_engine(
-        status.provider_state, status.selected_engine, status.fallback_policy);
+    // A GPU path whose recent blocks the miss substitute carried is not Ready,
+    // and its engine is the substitute's.
+    if (capability.path != GpuAudioExecutionPath::Cpu && diagnostics_->recent.lagging())
+        lower_to(GpuAudioProviderState::Degraded);
+    status.selected_engine =
+        detail::delivering_engine(status.provider_state, status.selected_engine,
+                                  status.fallback_policy, status.fallback_available);
+    status.reacquire_attempts = reacquire_attempts_.load(std::memory_order_relaxed);
+    status.reacquire_successes = reacquire_successes_.load(std::memory_order_relaxed);
+    status.last_reacquire_to_gpu_ns = last_reacquire_to_gpu_ns_.load(std::memory_order_relaxed);
     return status;
 }
 
@@ -837,7 +1062,20 @@ GpuAudioCapabilityReport GpuAudioTransport::capability_report() const noexcept {
     detail::GpuAudioTransportConfiguration configuration;
     if (!diagnostics_->configuration.read(configuration))
         return {};
-    return capability_from(configuration);
+    auto report = capability_from(configuration);
+    // The node's facts come from the same health sample status_snapshot()
+    // reads: whether a GPU kernel is prepared, and the miss substitute in
+    // effect. Without a sample neither is claimed.
+    detail::RealtimeGpuHealth health;
+    if (report.prepared && (configuration.realtime_health || configuration.staged_health) &&
+        diagnostics_->health.read(health)) {
+        report.gpu_kernel_available = health.gpu_kernel_available;
+        if (health.reports_fallback) {
+            report.fallback_policy = health.fallback_policy;
+            report.fallback_available = health.fallback_available;
+        }
+    }
+    return report;
 }
 
 } // namespace pulp::gpu_audio

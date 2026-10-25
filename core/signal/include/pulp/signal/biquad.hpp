@@ -226,21 +226,22 @@ public:
     // output to the next is a single multiply-add:
     //     y = -a1 y[n-1] + ((b0 x + b1 x[n-1]) + (b2 x[n-2] - a2 y[n-2]))
     // (y[n-2] reaches y two samples later, so it is off the critical path).
-    // That is about twice as fast as the sample path's DF2T order and, with a
-    // double accumulator, more accurate: over the RBJ type x frequency x Q x
-    // gain grid at 44.1/48/96 kHz with program and white-noise input (2112
-    // cases) its RMS error against an exact (float64) DF2T is never above the
-    // sample path's and on average 45 dB below it (47 dB without fused
-    // multiply-add). Block and sample outputs are therefore not bit-identical:
-    // they differ by the sample path's own float round-off, at most -47.9 dBFS
-    // over that grid with fused multiply-add and -44.7 dBFS without. (Which
-    // compilers fuse is Pulp's contraction policy:
+    // That is faster than the sample path's DF2T order, and with a double
+    // accumulator no less accurate in practice: across the RBJ types at 20 Hz to
+    // 8 kHz and Q 0.707 and 10, its RMS error against an exact (float64)
+    // filter stays within 3 dB of the sample path's (test_biquad.cpp). Block
+    // and sample outputs are therefore not bit-identical: they differ by the
+    // sample path's own float round-off. (Which compilers fuse multiply-adds
+    // is Pulp's contraction policy:
     // tools/cmake/PulpFloatingPointContraction.cmake.)
     //
     // Double SampleType keeps a DF2T block path: the feedback-last order
     //     y = b0 x + s1;  s1 = (-a1) y + (b1 x + s2);  s2 = b2 x - a2 y
     // for designs whose poles are at most kFeedbackLastMaxPoleRadius from the
-    // origin, and the sample path's own order (bit-identical to it) above.
+    // origin, and the sample path's own order above. That order is
+    // bit-identical to the sample path while the state stays above the
+    // 1e-15 snap threshold; below it the block path snaps once per chunk
+    // (snap_chunks()) where the sample path snaps every sample.
     //
     // State continuity: the sample path's DF2T state and the block path's DF1
     // history describe the same filter. A block call that follows sample
@@ -267,11 +268,18 @@ public:
     // two recursions in the lanes of one vector so a stereo pair costs about
     // as much as one channel. Each channel's output is bit-identical to
     // calling that filter's block process(); the filters may have different
-    // coefficients. Both buffers must hold num_samples samples.
+    // coefficients. Both buffers must hold num_samples samples. Passing one
+    // filter as both channels runs the left buffer and then the right through
+    // it, as two block process() calls would.
     static void process_stereo(BiquadT& left, BiquadT& right, SampleType* left_buffer,
                                SampleType* right_buffer, std::size_t num_samples) {
         if (num_samples == 0)
             return;
+        if (&left == &right) {
+            dispatch_fixed<1>(&left, nullptr, left_buffer, nullptr, num_samples);
+            dispatch_fixed<1>(&left, nullptr, right_buffer, nullptr, num_samples);
+            return;
+        }
         // Below about 64 samples two separate calls already overlap in the
         // out-of-order window and the lane path measured no faster. Filters
         // whose passes take different forms cannot share lanes.
@@ -299,14 +307,12 @@ public:
     ///     sections of the pass;
     ///   - longer passes, and every double pass, run the feedback-last DF2T
     ///     order when every section's largest pole radius is at most
-    ///     kFeedbackLastMaxPoleRadius (its RMS error then stays within +2.8 dB
-    ///     of the sample path's; per section it differs from the sample path
-    ///     by at most -71 dBFS over the RBJ grid), and the sample path's
-    ///     order, bit-identical to chaining the sections' per-sample
-    ///     process(), otherwise.
-    /// Measured on Apple M3 (ns per sample, contraction on): sample order
-    /// 3.8 / 6.2 / 4.2 / 4.7 for 1 / 3 / 6 / 8 sections, feedback-last
-    /// 2.0 / 2.3 / 2.7 / 3.2, DF1 double 1.9 / 2.2 / 3.7 / 6.0.
+    ///     kFeedbackLastMaxPoleRadius (its error then stays close to the
+    ///     sample path's), and the sample path's order otherwise, which is
+    ///     bit-identical to chaining the sections' per-sample process() while
+    ///     the state stays above the 1e-15 snap threshold.
+    /// The DF1 and feedback-last forms are faster than the sample order; the
+    /// DSP throughput benchmark tracks the figures.
     static void process_chain(BiquadT* sections, std::size_t count, SampleType* buffer,
                               std::size_t num_samples) noexcept {
         for (std::size_t first = 0; first < count; first += kChainSectionsPerPass) {
@@ -319,10 +325,16 @@ public:
     /// of `count` sections, with the channels in the lanes of one vector.
     /// Each channel's output is bit-identical to process_chain() on it alone.
     /// Compilers without vector lanes (simd::kHasVectorLanes) run the two
-    /// chains in turn.
+    /// chains in turn. Passing one chain as both channels runs the left
+    /// buffer and then the right through it, as two process_chain() calls.
     static void process_chain_stereo(BiquadT* left, BiquadT* right, std::size_t count,
                                      SampleType* left_buffer, SampleType* right_buffer,
                                      std::size_t num_samples) noexcept {
+        if (left == right) {
+            process_chain(left, count, left_buffer, num_samples);
+            process_chain(left, count, right_buffer, num_samples);
+            return;
+        }
         for (std::size_t first = 0; first < count; first += kChainSectionsPerPass) {
             const std::size_t n = std::min(count - first, kChainSectionsPerPass);
             // The two channels' passes must take the same form to share
@@ -338,9 +350,8 @@ public:
     }
 
     /// Sections process_chain() runs together in one sample-major pass. A
-    /// wider pass keeps more independent recursions in flight; splitting ten
-    /// sections into passes of 8 and 2 measured 1.5x slower than one pass, and
-    /// sixteen into 8 and 8 1.9x slower.
+    /// wider pass keeps more independent recursions in flight; splitting a
+    /// cascade into narrower passes measured slower than one wide pass.
     static constexpr std::size_t kChainSectionsPerPass = 16;
 
     /// Longest float pass that runs the DF1 double-state form; its extra
@@ -352,11 +363,10 @@ public:
 
     // Longer passes (and double SampleType) use the feedback-last DF2T order
     // only when every section's largest pole radius is at most this. Near the
-    // unit circle that order's RMS error against an exact DF2T grew past the
-    // sample path's by more than 3 dB (up to +4 dB for radii 0.995-0.9985 and
-    // +9 dB above 0.9995: low shelves, allpasses and notches near 20-100 Hz
-    // and high-Q bells); at or below this radius it stayed within +2.8 dB
-    // over 5,200 design and stimulus cases.
+    // unit circle that order's RMS error against an exact DF2T grows past the
+    // sample path's (low shelves, allpasses and notches near 20-100 Hz and
+    // high-Q bells), so those designs keep the sample path's order, which the
+    // tests hold bit-identical above the snap threshold.
     static constexpr double kFeedbackLastMaxPoleRadius = 0.995;
 
     // Reset state (call on discontinuities)

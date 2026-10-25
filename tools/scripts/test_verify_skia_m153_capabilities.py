@@ -69,14 +69,23 @@ class SkiaM153CapabilityProbeTests(unittest.TestCase):
 
     def test_source_fallback_fails_before_copy_on_commit_drift(self) -> None:
         script = (probe.REPO_ROOT / "tools/build-skia.sh").read_text(encoding="utf-8")
-        self.assertIn('SKIA_EXPECTED_COMMIT="${SKIA_EXPECTED_COMMIT:-$(python3', script)
-        preflight = script.index('resolved_skia_commit="$(git ls-remote')
-        build_boundary = script.index('python3 build-skia.py')
+        self.assertIn(
+            'SKIA_EXPECTED_COMMIT="${SKIA_EXPECTED_COMMIT:-$(read_manifest_pin skia_commit)}"',
+            script,
+        )
+        # A mutable milestone branch head is never compared against the pin;
+        # the builder is told the exact revision and its output is verified.
+        self.assertNotIn("git ls-remote", script)
+        revision_support = script.index('grep -Fq \'"-revision"\'')
+        build_boundary = script.index('python3 build-skia.py "$build_platform"')
         verification = script.index('actual_skia_commit="$(git -C')
-        copy_boundary = script.index('echo "Copying build output to $SKIA_BUILD_OUTPUT..."')
-        self.assertLess(preflight, build_boundary)
+        dawn_verification = script.index('actual_dawn_commit" != "$DAWN_EXPECTED_COMMIT')
+        copy_boundary = script.index('echo "Publishing verified build output to $PUBLISH_DIR..."')
+        self.assertLess(revision_support, build_boundary)
+        self.assertLess(build_boundary, verification)
         self.assertLess(verification, copy_boundary)
-        self.assertIn('resolved_skia_commit" != "$SKIA_EXPECTED_COMMIT', script)
+        self.assertLess(dawn_verification, copy_boundary)
+        self.assertIn('-revision "$SKIA_EXPECTED_COMMIT" --shallow', script)
         self.assertIn('actual_skia_commit" != "$SKIA_EXPECTED_COMMIT', script)
 
     def test_unverified_generation_is_rejected_before_compile(self) -> None:

@@ -351,7 +351,11 @@ fork — the same pin/fetch/Find pattern as Skia:
 3. **Resolve:** `tools/cmake/FindV8.cmake` finds `external/v8-build/<key>`
    (or a baked `$V8_DIR`, or legacy overrides) and exposes the `v8::v8`
    imported target. The configure log prints
-   `-- Pulp V8 provider: <path> (platform key: ...)`.
+   `-- Pulp V8 provider: <path> (platform key: ...)`. The provider's
+   `manifest.json` `consumer_defines` ride on `v8::v8` as
+   `INTERFACE_COMPILE_DEFINITIONS` (printed as `-- Pulp V8 consumer defines:`);
+   V8's inline headers read them, so a missing or malformed manifest fails
+   configure rather than compiling against the header defaults.
 
 **Selecting V8 — that's all you need:**
 
@@ -423,7 +427,9 @@ required platform acceptance step:
    is MSVC cl.
 2. **`-DV8_COMPRESS_POINTERS`** — mandatory; without it the inline
    `v8-internal.h` tagged-field offsets mismatch the DLL and silently
-   corrupt the heap.
+   corrupt the heap. A sealed provider supplies it through its manifest
+   `consumer_defines` on `v8::v8`; `PulpV8Windows.cmake` adds it explicitly
+   only for the manifest-less legacy override.
 3. **Chromium-style libc++ headers** with `_LIBCPP_ABI_NAMESPACE=__Cr`
    (routed via clang-cl's `/clang:-nostdinc++ /clang:-isystem` — bare
    `-nostdinc++` is silently dropped by clang-cl, which is the trap that
@@ -539,6 +545,14 @@ block and renders `--demo cube --capture` to a non-empty PNG.
 
 ## Gotchas
 
+- **QuickJS's stack limit is 4 MiB under AddressSanitizer, 1 MiB otherwise** (`kQuickJsStackBytes` in
+  `js_quickjs_engine.cpp`). ASan's redzones inflate every C frame, so a nested native event (a key that
+  clicks a popup trigger whose handler queries the DOM) threw `InternalError: stack overflow` under ASan
+  only. A handler error the bridge dispatch catches goes through `__pulpReportDispatchError__`, which
+  counts it (`__pulpDispatchErrorCount__`, `__pulpLastDispatchError__`), keeps the message (QuickJS's
+  `e.stack` holds only frames), and prints it with `console.error` when no `__dispatchError__` hook is
+  installed. When a scripted-UI test sees a global that a handler should have created missing, read
+  `__pulpLastDispatchError__` first.
 - **Every QuickJS realm starts with a 512 MiB heap ceiling** (`kDefaultJsMemoryLimitBytes`, applied via `JS_SetMemoryLimit` right after the stack-size call in `js_quickjs_engine.cpp`). A script that allocates past it gets a JS `InternalError: out of memory`, not a dead host. Raise or disable (0) per session with `ScriptedUiOptions::js_memory_limit_bytes` or `JsEngine::set_memory_limit()`. JSC and V8 return `false` from `set_memory_limit()`; they have no cap today.
 
 **Selector parses are memoized.** `_parseSelector` (web-compat-document-

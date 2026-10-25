@@ -260,9 +260,12 @@ retain those fields in the PR/landing evidence.
     tracked `VERSION.md` digest is not proof that those bytes came from that
     archive: without the exact fetcher-written asset stamp, re-download and
     verify before publication. Source fallbacks must likewise pin the builder
-    revision and fail before copying output unless the built Skia checkout HEAD
-    equals the manifest's immutable `skia_commit`; a milestone branch name alone
-    is never sufficient provenance.
+    revision, build the manifest's immutable `skia_commit` itself (skia-builder
+    `-revision`, or `fetch --depth 1 <sha>` + `checkout --detach`), and fail
+    before copying output unless the built Skia HEAD equals `skia_commit` and
+    the synced Dawn HEAD equals `built_dawn`. Never compare against or build a
+    milestone branch head: Chromium release branches keep moving after the pin,
+    so a branch-head check breaks every pinned release.
 15. Treat any provider release marked `release_immutable: false` as mutable until
     its publishing workflow is terminal. Record the exact publisher run and
     release `updated_at`, collect every asset ID/digest plus metadata and pair
@@ -296,6 +299,18 @@ retain those fields in the PR/landing evidence.
   capture crashes after a V8 bump, split the providers first (old V8 against new
   Skia/Dawn on the same host), then read V8's `src/api/api.cc` history for the
   API choc uses before suspecting Pulp.
+- A V8 bump can change the provider's `consumer_defines` (the `manifest.json`
+  list of macros the library was built with: embedder field counts, cppgc
+  caging and pointer compression, target arch). `FindV8.cmake` applies that
+  list verbatim to `v8::v8` through `PulpV8ConsumerDefines.cmake`, and fails
+  configure when a sealed provider's manifest is missing, unsealed, or holds
+  anything but `NAME`/`NAME=VALUE` tokens. A consumer compiled without the
+  defines still links and then disagrees with the library about object layout,
+  so never work around that configure failure by dropping the list. The legacy
+  `V8_INCLUDE_DIR`/`V8_LIB_DIR` override has no manifest and gets no defines;
+  on Windows `PulpV8Windows.cmake` adds `V8_COMPRESS_POINTERS` itself only in
+  that case. `cmake-v8-consumer-defines` covers both paths with fixture
+  providers.
 
 - On Windows ARM64, a Ninja build using the ARM-hosted x64 MSVC compiler has
   an empty `CMAKE_GENERATOR_PLATFORM` and an ARM64 host processor. Choose the

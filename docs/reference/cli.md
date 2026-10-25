@@ -70,7 +70,7 @@ What the full create path does:
 6. Configures (with `-G Ninja` when `ninja` is on `PATH` and the build dir is new, as `pulp build` does), builds the generated test target plus the default platform outputs, and runs tests
 7. Leaves the project ready for `pulp build`, which you use for rebuilds, explicit targets, or optional deliverables after changing configuration
 
-The generated test target uses Catch2 3. When CMake can find an installed Catch2 3 (for example from `brew install catch2`, or a prefix on `CMAKE_PREFIX_PATH`), the project uses it and skips downloading and compiling Catch2; otherwise configure downloads the pinned Catch2 release archive and checks its SHA-256.
+The generated test target uses Catch2 3. When CMake can find an installed Catch2 at least as new as the pinned 3.16.1, within major version 3 (for example from `brew install catch2`, or a prefix on `CMAKE_PREFIX_PATH`), the project uses it and skips downloading and compiling Catch2; otherwise configure downloads the pinned Catch2 release archive and checks its SHA-256.
 
 Notes:
 - `pulp create` is meant to prove that a fresh machine and fresh project can scaffold, configure, build the default native outputs, and pass the generated tests.
@@ -144,6 +144,8 @@ Web formats build to `.wasm`/`.js` and are not installed to native plug-in folde
 For a standalone project the resolved SDK must itself carry Perfetto; an ordinary release SDK cannot be traced no matter what the project configures. Install one with `pulp sdk install --local --profile trace` (see [`pulp sdk install`](#pulp-sdk)). `pulp status` reports whether tracing is available in this project.
 
 A traced build must not ship: it links Perfetto and carries a retained sentinel that `pulp ship` rejects. `--trace` therefore refuses `--install` unless you also pass `--allow-tracing`, and cannot be combined with `--format wam|wclap`.
+
+Every developer-loop configure (`pulp build`, `pulp dev`, `pulp loop`, `pulp run`, and the project `pulp create` configures) passes `-DPULP_DEV_BUILD=ON` on a fresh build dir, or one whose cache never recorded the option, and keeps a recorded value. A dev build records the on-disk `UI_SCRIPT` path so the standalone host can hot-reload `ui.js`; the embedded editor is compiled in either way. `pulp ship sign|package|release` on such a project configure `build-ship/` from the dev cache (every configured entry except the dev-only switches, loaded through `cmake -C`; `PULP_DEV_BUILD=OFF`), build it, refuse if it lacks a plug-in artifact `build/` has, and ship from there; `check`, `notarize` and `share` read `build-ship/` once it exists. Pass `--allow-dev-build` to ship the dev build dir as it is.
 
 `--check-identity` runs the same comparison as `pulp identity check` before the configure step, so a PR that changes an AU 4CC / VST3 FUID / CLAP id / AAX product code without re-recording the lock fails the build with a per-field diff. See `docs/reference/identity-lock.md`.
 
@@ -876,15 +878,15 @@ stays encouraged-not-mandated. The real work lives in the script; the command ju
 makes it discoverable and forwards flags.
 
 ```bash
-pulp ci-host setup --class m5                       # minimum: register the m5 host-class label
-pulp ci-host setup --class m5 --copy-from 'macstudio:/Volumes/Workshop/VMs/vms/pulp-build-runner:latest'
-pulp ci-host setup --class m5 --validate            # also run a one-shot VM build to prove it
+pulp ci-host setup --class studio                   # minimum: register the studio host-class label
+pulp ci-host setup --class studio --copy-from 'buildhost:/path/to/vms/pulp-build-runner:latest'
+pulp ci-host setup --class studio --validate        # also run a one-shot VM build to prove it
 pulp ci-host setup --help                           # full flag list (delegated to the script)
 ```
 
 Common flags (forwarded verbatim to `setup-ci-host.sh`):
 
-- `--class <name>` — **required** host class for the runner label (`m5`, `studio`, `macbook`, …)
+- `--class <name>` — **required** host class for the runner label (`studio`, `macbook`, `mini`, …)
 - `--copy-from <ssh:path | path>` — rsync a golden in from another host/drive (sparse-safe)
 - `--validate` — after setup, run one ephemeral VM build on the host-only label
 - `--no-agent` — do everything except install/load the launchd agent
@@ -1128,6 +1130,7 @@ pulp ship sign --identity "Developer ID Application: ..."
 pulp ship sign --identity "..." --entitlements path/to/entitlements.plist
 pulp ship sign --identity "..." --path MyApp.app   # sign one explicit artifact
 pulp ship package --version 1.0.0
+pulp ship package --version 1.0.0 --allow-dev-build  # ship build/ as it is instead of building build-ship/
 pulp ship check
 pulp ship swap-pack --bundle ui/ --plugin-id com.you.synth   # sign a hot-reload UX bundle (caps inferred; key from keychain)
 pulp ship doctor                                   # make signing non-interactive (no keychain/1Password prompt)
@@ -3128,10 +3131,10 @@ Subcommands:
 
 | Subcommand | What it does |
 |------------|--------------|
-| `validate <path>` | Validate a `.pulpcontent` archive or `content-pack` directory without executing package code |
+| `validate <path>` | Validate a `.pulpcontent` archive or `content-pack` directory without executing package code. An archive is refused before extraction when its declared decompressed size exceeds the pack cap (4 GiB total, 1 GiB per entry, 65536 entries by default); `--max-pack-bytes <n>` lowers both byte caps and never raises them |
 | `preview <path> --plugin-runtime <manifest>` | Preview compatibility and reload/restart policy without installing anything |
-| `install <path> --plugin <id> --yes` | Copy a validated content pack into the plugin-specific user content root and update the content index with `plugin_id` and `manifest_sha256` |
-| `update <path> --plugin <id> --yes` | Replace or add a validated local content pack, write the target plugin id and new manifest digest, and roll back a replaced version on failure |
+| `install <path> --plugin <id> --yes` | Copy a validated content pack into the plugin-specific user content root and update the content index with `plugin_id` and `manifest_sha256`; accepts `--max-pack-bytes <n>` |
+| `update <path> --plugin <id> --yes` | Replace or add a validated local content pack, write the target plugin id and new manifest digest, and roll back a replaced version on failure; accepts `--max-pack-bytes <n>` |
 | `list [--plugin <id>]` | List installed content packs |
 | `rescan` | Rebuild `Content/index.json` from installed local manifests without copying, deleting, fetching, or executing package code; index entries include `plugin_id` and `manifest_sha256` |
 | `reveal <package-id> --plugin <id>` | Print the installed content path |

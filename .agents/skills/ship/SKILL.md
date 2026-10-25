@@ -250,6 +250,47 @@ built with PULP_TRACING=ON," the fix is to rebuild with tracing off (the
 default `pulp build`), not to reach for `--allow-tracing`. The scanner lives in
 `tools/cli/ship_tracing_guard.hpp` (unit-tested in `test/test_ship_tracing_guard.cpp`).
 
+## PULP_DEV_BUILD: ship builds `build-ship/`
+
+A build dir whose `CMakeCache.txt` records `PULP_DEV_BUILD=ON` also records
+the on-disk `UI_SCRIPT` path, theme path and asset roots so a hot-reloading
+editor reads the developer's source tree. The `pulp` CLI turns the option on
+for every developer-loop configure, so a plain `pulp build` dir is a dev
+build. `pulp ship` neither ships nor refuses it: `sign`, `package` and
+`release` configure `<root>/build-ship` from the dev cache and build it
+through the governed build lease, then ship from there; `check`, `notarize`
+and `share` read `build-ship/` once it exists (and say so), and
+`notarize`/`share` point at `pulp ship package` when it does not.
+`--allow-dev-build` ships `build/` as it is and prints a warning; `sign
+--path <artifact>` builds nothing (an artifact inside `build/` is still
+refused). The helpers live in `tools/cli/ship_dev_build_guard.hpp`
+(unit-tested in `test/test_ship_dev_build_guard.cpp`; the CLI path in
+`test/test_cli_ship_shellout.cpp` `[dev-build]`).
+
+Gotchas:
+
+- **The whole dev configuration carries over, not an allowlist.**
+  `ship_build_initial_cache()` writes every non-INTERNAL/STATIC cache entry
+  (formats such as `PULP_ENABLE_AAX`/`PULP_AAX_SDK_DIR`, `PULP_ENABLE_ARA`,
+  compiler, sysroot, SDK paths) into `build-ship/pulp-ship-initial-cache.cmake`,
+  which the configure loads with `cmake -C`; only `PULP_BUILD_TESTS`,
+  `PULP_DEV_BUILD`, `PULP_DEV_BRIDGE_EXEC` and `PULP_ENABLE_AUDIO_PROBES` are
+  dropped (the first two set OFF) and `PULP_PROFILE` is forced to `release`.
+  The generator is INTERNAL and goes on the command line (`-G`). An earlier
+  version carried ten named entries and silently dropped an AAX-enabled
+  plug-in's AAX bundle.
+- **The configure re-runs when it must.** A ship cache without
+  `CMAKE_GENERATOR` (a failed configure), a dev cache newer than the ship
+  cache, or an initial-cache script that differs from the one last written all
+  reconfigure; otherwise only the incremental build runs.
+- **The artifact set is compared after the build.** If `build-ship/` lacks a
+  plug-in artifact `build/` has (`VST3/`, `CLAP/`, `AU/`, `AAX/`, `LV2/`,
+  `Standalone/` bundles), the ship is refused and the message names it;
+  extras in `build-ship/` are fine, because the dev build may have been built
+  for a subset of targets.
+`tools/scripts/build_combined_installer.sh` takes finished artifacts, not a
+build dir, and does not configure, so it carries no such step.
+
 ## Development-SDK ship guard
 
 `package`, `notarize`, `release`, and `share` **refuse** a project configured
