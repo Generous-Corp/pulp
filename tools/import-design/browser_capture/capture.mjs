@@ -1446,7 +1446,9 @@ async function runCapture(options) {
     // at 1, and with the two disagreeing a frosted box came back with
     // unblurred streaks of what was behind it. Launching at the capture scale
     // makes the emulated and real scales agree, and the frame then matches a
-    // plain Chrome screenshot at that scale.
+    // plain Chrome screenshot at that scale. The flag reads the same `dpr` the
+    // emulation does, so it follows the capture scale if DPR 2 stops being the
+    // only one accepted above.
     const deviceScaleArgs = [`--force-device-scale-factor=${dpr}`];
     launched = await launchBrowser(
       browserPath, profileDir, timeoutMs,
