@@ -45,6 +45,10 @@
 #define PULP_FONT_RESOLVER_SKIA 0
 #endif
 
+#if !PULP_FONT_RESOLVER_SKIA && defined(__APPLE__)
+#include "coretext_text.hpp"
+#endif
+
 namespace pulp::canvas {
 
 namespace {
@@ -862,6 +866,12 @@ std::string resolved_face_identity(const std::string& css_font_family,
         return resolved.actual_family;
     }
     return std::string(name.c_str(), name.size());
+#elif defined(__APPLE__)
+    // The lite stack measures and paints through CoreText, so the face that
+    // decides line breaks is the one CoreText resolves.
+    const int css_slant = slant == FontSlant::Oblique ? 2 : slant == FontSlant::Italic ? 1 : 0;
+    return detail::coretext_face_postscript_name(css_font_family, static_cast<int>(weight),
+                                                 css_slant);
 #else
     (void)css_font_family;
     (void)weight;

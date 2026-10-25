@@ -174,6 +174,17 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA)
         LIBRARIES pulp::view "-framework AppKit"
         COMPILE_DEFINITIONS PULP_VIEW_LITE_HOST=1 PULP_VIEW_OBJC_SUFFIX=_LiteHostTest)
     unset(_pulp_mac_view_dir)
+    # The same face-identity table against the full and the lite text stack.
+    if(TARGET pulp-canvas-lite-objects)
+        pulp_add_test_suite(pulp-test-face-identity-full
+            SOURCES test_face_identity_stacks.cpp
+            LIBRARIES pulp::canvas
+            COMPILE_DEFINITIONS PULP_FACE_IDENTITY_LITE=0)
+        pulp_add_test_suite(pulp-test-face-identity-lite
+            SOURCES test_face_identity_stacks.cpp $<TARGET_OBJECTS:pulp-canvas-lite-objects>
+            LIBRARIES pulp::canvas
+            COMPILE_DEFINITIONS PULP_FACE_IDENTITY_LITE=1)
+    endif()
 endif()
 # Windows UIA backend — compile-gated on _WIN32 in the
 # source. The sentinel test case keeps the binary present + named
