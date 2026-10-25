@@ -550,8 +550,24 @@ def _is_inline_flag(arg: str) -> bool:
     return arg == "-c" or (arg.startswith("-c") and not arg.startswith("--"))
 
 
+def unwrap_cmake_env(command: list[str]) -> list[str]:
+    """The command `cmake -E env [NAME=VALUE | --unset=NAME]... CMD...` runs.
+
+    The wrapper only sets the environment, so the test's inputs are those of
+    the program it wraps; any other cmake command is returned unchanged."""
+    if (len(command) > 3 and os.path.basename(command[0]).startswith("cmake")
+            and command[1:3] == ["-E", "env"]):
+        rest = command[3:]
+        while rest and ("=" in rest[0].split("/", 1)[0] or rest[0].startswith("--unset")
+                        or rest[0] == "--"):
+            rest = rest[1:]
+        return rest or command
+    return command
+
+
 def classify(command: list[str], root: Path) -> tuple[str, Path | None, list[str]]:
     """(kind, entry script, extra args). kind in python|node|shell|undeclarable."""
+    command = unwrap_cmake_env(command)
     if not command:
         return "undeclarable", None, []
     exe = os.path.basename(command[0])
@@ -595,6 +611,25 @@ def classify(command: list[str], root: Path) -> tuple[str, Path | None, list[str
     return "undeclarable", None, []
 
 
+def discovered_tests(argv: list[str], wd: Path) -> list[Path]:
+    """The files `unittest discover` would load: -s/--start-directory (default
+    the working directory) matched against -p/--pattern (default test*.py)."""
+    start, pattern = wd, "test*.py"
+    it = iter(argv)
+    for arg in it:
+        if arg in ("-s", "--start-directory"):
+            start = Path(next(it, "."))
+        elif arg in ("-p", "--pattern"):
+            pattern = next(it, pattern)
+        elif arg.startswith("--start-directory="):
+            start = Path(arg.split("=", 1)[1])
+        elif arg.startswith("--pattern="):
+            pattern = arg.split("=", 1)[1]
+    if not start.is_absolute():
+        start = wd / start
+    return sorted(start.rglob(pattern)) if start.is_dir() else []
+
+
 # A test run through the temp-leak guard (`python tmp_leak_guard.py [opts] --
 # CMD...`) is declared as the command it wraps; the guard is one more input.
 TMP_LEAK_GUARD = "tmp_leak_guard.py"
@@ -623,18 +658,32 @@ def inputs_for(test: dict, root: Path, build_dir: Path | None = None, *,
     for e in (env if isinstance(env, list) else [env]):
         if e.startswith("PYTHONPATH="):
             search += [Path(p) if os.path.isabs(p) else wd / p for p in e.split("=", 1)[1].split(os.pathsep) if p]
+    extra: list[Path] = []
     if kind == "python-module":
         mods = list(args)
-        if mods and mods[0] == "unittest":
+        if mods[:2] == ["unittest", "discover"]:
+            # `python -m unittest discover -s DIR -p PATTERN`: the matching
+            # test files are the entries.
+            found = discovered_tests(mods[2:], wd)
+            if not found:
+                return None
+            entry, extra = found[0], found[1:]
+            args = []
+            kind = "python"
+            mods = []
+        elif mods and mods[0] == "unittest":
             # `python -m unittest <module>...`: the test modules are the entries.
             mods = [m for m in mods[1:] if not m.startswith("-")]
-        entries = [next((c for c in w.python_module_candidates(m.split("::")[0], [wd] + search) if c.is_file()), None)
-                   for m in mods[:1]]
-        entry = entries[0] if entries else None
-        if entry is None:
-            return None
-        args = []
-        kind = "python"
+        if mods:
+            entries = [next((c for c in w.python_module_candidates(m.split("::")[0], [wd] + search)
+                             if c.is_file()), None) for m in mods[:1]]
+            entry = entries[0] if entries else None
+            if entry is None:
+                return None
+            args = []
+            kind = "python"
+    if kind == "python-module" or entry is None:
+        return None
     if not entry.is_absolute():
         entry = wd / entry
     generated = _rel(entry, build_dir) if build_dir else None
@@ -642,6 +691,8 @@ def inputs_for(test: dict, root: Path, build_dir: Path | None = None, *,
         return None
     if kind == "python":
         w.walk_python(entry, search, seen)
+        for other in extra:
+            w.walk_python(other, search, seen)
     elif kind == "node":
         w.walk_node(entry, seen)
     else:
@@ -1145,7 +1196,7 @@ def build_list(inventory: dict, root: Path, build_dir: Path | None = None) -> di
         name = t.get("name", "")
         if not name or name.endswith("_NOT_BUILT") or name in excluded:
             continue
-        cmd = t.get("command") or []
+        cmd = unwrap_cmake_env(t.get("command") or [])
         if cmd and _rel(Path(cmd[0]), root) is None and not os.path.basename(cmd[0]).startswith(INTERPRETERS):
             continue  # a compiled test binary or a tool outside the repo: the graph owns it
         rec = inputs_for(t, root, build_dir, walker=walker, tracked=tracked)

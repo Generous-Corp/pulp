@@ -5101,6 +5101,13 @@
    ],
    "kind": "shell"
   },
+  "format-header-view-boundary": {
+   "entry": "tools/scripts/format_header_view_boundary.py",
+   "inputs": [
+    "tools/scripts/format_header_view_boundary.py"
+   ],
+   "kind": "python"
+  },
   "foundation-include-lint": {
    "entry": "tools/scripts/foundation_include_lint.py",
    "inputs": [
@@ -6467,6 +6474,14 @@
    ],
    "kind": "python"
   },
+  "gpu-same-device-storage-receipt-controls": {
+   "entry": "test/test_verify_gpu_same_device_storage.py",
+   "inputs": [
+    "test/test_verify_gpu_same_device_storage.py",
+    "test/verify_gpu_same_device_storage.py"
+   ],
+   "kind": "python"
+  },
   "gpu-test-resource-locks": {
    "entry": "tools/scripts/test_gpu_test_resource_locks.py",
    "inputs": [
@@ -7484,11 +7499,14 @@
     "experimental/pulp-rs/src/main.rs",
     "experimental/pulp-rs/tests/fixtures/docs/mini_docs_tree/docs/reference/cli.md",
     "test/CMakeLists.txt",
+    "test/cmake",
     "test/cmake/cmake_smoke_tests.cmake",
     "test/cmake/pr_fast_tests.cmake",
     "test/cmake/test_ios_auv3_control_shipping.cmake",
     "test/fixtures",
+    "test/fixtures/no_editor_link_floor/no_editor_runtime_deps.cmake",
     "test/fixtures/no_editor_link_floor/scan_no_editor_link_floor.cmake",
+    "test/fixtures/perfetto-gpu",
     "test/fixtures/sample-region-compat/expected/abi.txt",
     "test/sample_region_compat/compat_runner.cpp",
     "test/support",
@@ -7514,8 +7532,10 @@
     "tools/ci/spawn_none_build_path_reviews.json",
     "tools/ci/test_pr_head_affected_tests.py",
     "tools/ci/wide_non_native_checks.json",
+    "tools/cmake",
     "tools/cmake/PulpGpuAudioProviderIdentity.cmake",
     "tools/cmake/PulpPlugin.cmake",
+    "tools/cmake/PulpSimdSupport.cmake",
     "tools/cmake/PulpTestData.cmake",
     "tools/deps/manifest.json",
     "tools/import-design/browser_capture/runtime_manifest.txt",
@@ -7557,6 +7577,7 @@
     "docs/status/consumption-profiles.schema.json",
     "test/cmake/pr_fast_tests.cmake",
     "test/fixtures",
+    "test/fixtures/perfetto-gpu",
     "test/support",
     "tools/ci",
     "tools/ci/build_dir_lock.py",
@@ -11830,6 +11851,7 @@
     "external/tweetnacl/tweetnacl.c",
     "test/cmake/pr_fast_tests.cmake",
     "test/fixtures",
+    "test/fixtures/perfetto-gpu",
     "test/fixtures/sample-region-compat",
     "test/sample_region_compat/CMakeLists.txt",
     "test/sample_region_compat/README.md",
