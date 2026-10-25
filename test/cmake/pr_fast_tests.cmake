@@ -227,3 +227,35 @@ if(_pulp_pr_fast_missing)
         "pr-fast tier: not registered in this configuration: "
         "${_pulp_pr_fast_missing}")
 endif()
+
+# An unapproved pull-request head's macOS leg configures but does not build
+# (the contract lane, "macOS on a pull request waits for approval" in
+# docs/guides/local-ci.md). It runs the pr-fast tier with `-LE needs-build`, so
+# a member that runs a compiled target carries this label and waits for the
+# approved head's full lane. Every other member reads only the checkout and
+# the configured tree.
+set(PULP_PR_FAST_NEEDS_BUILD
+    project-package-mutation-control
+)
+foreach(_pulp_pr_fast_test IN LISTS PULP_PR_FAST_NEEDS_BUILD)
+    if(TEST "${_pulp_pr_fast_test}")
+        set_property(TEST "${_pulp_pr_fast_test}" APPEND PROPERTY LABELS needs-build)
+    endif()
+endforeach()
+
+# Guards too slow for pr-fast (a minute, not seconds) that fail every pull
+# request at once, so in a merge group they eject whole batches. The macOS leg
+# runs them on every pull-request head, approved or not, with `-L '^pr-guard$'`.
+# The A2T acceptance selftest holds the scope-history headroom guard: the count
+# climbs with unrelated commits, and a merge ref carries one more than main.
+# The verifier selftest drives the same acceptance tooling over its planted
+# corpora. Both are Python over the checkout and about a minute each.
+set(PULP_PR_GUARD_TESTS
+    gpu-trace-overhead-acceptance-selftest
+    gpu-trace-overhead-verifier-selftest
+)
+foreach(_pulp_pr_guard_test IN LISTS PULP_PR_GUARD_TESTS)
+    if(TEST "${_pulp_pr_guard_test}")
+        set_property(TEST "${_pulp_pr_guard_test}" APPEND PROPERTY LABELS pr-guard)
+    endif()
+endforeach()

@@ -21,7 +21,9 @@
 #include "tools/import-design/browser_capture_ir.hpp"
 #include "tools/import-design/browser_capture_tree.hpp"
 
+#include <pulp/view/design_import.hpp>
 #include <pulp/view/design_ir_io.hpp>
+#include <pulp/view/screenshot.hpp>
 #include <pulp/view/design_update.hpp>
 
 #include <choc/text/choc_JSON.h>
@@ -348,6 +350,163 @@ LoweredSnapshot lower_snapshot(const SnapshotSpec& spec,
 }
 
 }  // namespace
+
+namespace {
+
+/// Spectr's shape in six nodes. `body` holds a full-panel `::before` backdrop
+/// (paint 3, opaque) and a wrapper (paint 2) whose two cards paint after the
+/// backdrop (4 and 5). `wrapper_tag` and `wrapper_style` vary the wrapper: a
+/// bare `div` paints nothing and may move; an `<a>`, a pointer cursor or a
+/// clip pins it to its own paint order.
+///
+/// Strings: 0 #document 1 HTML 2 BODY 3 ::before 4 DIV 5 A
+///   6 background-color 7 display 8 block 9 rgba(0, 0, 0, 0)
+///  10 rgb(5, 7, 10) 11 rgb(200, 60, 60) 12 overflow 13 visible 14 hidden
+///  15 cursor 16 auto 17 pointer 18 rgb(60, 200, 60)
+/// Style rows are [background-color, display, overflow, cursor].
+constexpr std::string_view kBackdropStrings =
+    R"J("#document","HTML","BODY","::before","DIV","A","background-color","display",)J"
+    R"J("block","rgba(0, 0, 0, 0)","rgb(5, 7, 10)","rgb(200, 60, 60)","overflow",)J"
+    R"J("visible","hidden","cursor","auto","pointer","rgb(60, 200, 60)")J";
+
+SnapshotSpec backdrop_spec(int wrapper_tag, std::string_view wrapper_style) {
+    return {
+        .node_names = "[0,1,2,3," + std::to_string(wrapper_tag) + ",4,4]",
+        .node_types = "[9,1,1,1,1,1,1]",
+        .parents = "[-1,0,1,2,2,4,4]",
+        .attributes = "[[],[],[],[],[],[],[]]",
+        .layout_nodes = "[1,2,3,4,5,6]",
+        .styles = "[[9,8,13,16],[10,8,13,16],[10,8,13,16]," + std::string(wrapper_style) +
+                  ",[11,8,13,16],[18,8,13,16]]",
+        .bounds = "[[0,0,300,200],[0,0,300,200],[0,0,300,200],[0,0,300,200],"
+                  "[20,20,100,80],[140,40,120,100]]",
+        .paint_orders = "[1,2,3,2,4,5]",
+        .computed_names = R"(["background-color","display","overflow","cursor"])",
+        .strings = std::string(kBackdropStrings),
+    };
+}
+
+constexpr std::string_view kInklessWrapper = "[9,8,13,16]";
+
+/// Lower `spec` into a 300x200 panel, nested or in Chrome's flat paint order.
+LoweredSnapshot lower_panel(const SnapshotSpec& spec, const std::string& name, bool flat) {
+    LoweredSnapshot out;
+    out.root.style.width = 300.0f;
+    out.root.style.height = 200.0f;
+    out.counts = lower_into(spec, name, out.root, {}, flat);
+    return out;
+}
+
+/// The panel drawn through the importer's own materialize-then-raster path.
+std::vector<uint8_t> render_panel(const IRNode& root) {
+    pulp::view::DesignIR ir;
+    ir.root = root;
+    auto view = pulp::view::build_native_view_tree(ir, ir.asset_manifest);
+    REQUIRE(view != nullptr);
+    view->set_bounds({0.0f, 0.0f, 300.0f, 200.0f});
+    return pulp::view::render_to_png(*view, 300, 200, 2.0f, pulp::view::ScreenshotBackend::skia);
+}
+
+const IRNode* child_named(const IRNode& parent, std::string_view name) {
+    for (const auto& child : parent.children)
+        if (child.name == name)
+            return &child;
+    return nullptr;
+}
+
+} // namespace
+
+TEST_CASE("an inkless wrapper is drawn where its first ink lands, not at its own paint order",
+          "[browser-capture][native-lowering][paint-order]") {
+    // Spectr flattened its whole panel over this: ordering body's children by
+    // their own paint numbers drew the opaque backdrop over every card.
+    const auto nested = lower_panel(backdrop_spec(4, kInklessWrapper), "backdrop-nested", false);
+    CHECK(nested.counts.overlapping_reorders == 0);
+    const auto* html = child_named(nested.root, "html");
+    REQUIRE(html != nullptr);
+    const auto* body = child_named(*html, "body");
+    REQUIRE(body != nullptr);
+    REQUIRE(body->children.size() == 2);
+    CHECK(body->children[0].name == "::before");
+    CHECK(body->children[1].name == "div");
+    CHECK(body->children[1].children.size() == 2);
+
+    // The proof is the pixels: the nested tree draws exactly what Chrome's
+    // flat paint order draws.
+    if (!pulp::view::raw_rgba_render_available())
+        SKIP("no Skia backend in this build");
+    const auto flat = lower_panel(backdrop_spec(4, kInklessWrapper), "backdrop-flat", true);
+    CHECK(flat.counts.root_children > nested.counts.root_children);
+    CHECK(render_panel(nested.root) == render_panel(flat.root));
+}
+
+TEST_CASE("a wrapper that takes input or clips keeps its own paint order",
+          "[browser-capture][native-lowering][paint-order]") {
+    // Each of these may not move, so the backdrop again lands over the cards,
+    // and the audit has to say so: both are inked and they overlap.
+    const struct {
+        const char* name;
+        int tag;
+        const char* style;
+    } cases[] = {
+        {"anchor", 5, "[9,8,13,16]"},  // <a>: Chrome routes clicks to it
+        {"pointer", 4, "[9,8,13,17]"}, // cursor: pointer
+        {"clip", 4, "[9,8,14,16]"},    // overflow: hidden
+    };
+    for (const auto& c : cases) {
+        INFO("wrapper " << c.name);
+        const auto nested =
+            lower_panel(backdrop_spec(c.tag, c.style), std::string("pinned-") + c.name, false);
+        CHECK(nested.counts.overlapping_reorders == 2);
+    }
+}
+
+TEST_CASE("the reorder audit counts exactly the inversions a render can show",
+          "[browser-capture][native-lowering][paint-order]") {
+    if (!pulp::view::raw_rgba_render_available())
+        SKIP("no Skia backend in this build");
+    // The pinned anchor wrapper: the nested tree draws the backdrop over both
+    // cards, and the audit's two pairs are a real difference in the pixels.
+    const auto pinned = lower_panel(backdrop_spec(5, kInklessWrapper), "audit-pinned", false);
+    const auto pinned_flat =
+        lower_panel(backdrop_spec(5, kInklessWrapper), "audit-pinned-flat", true);
+    CHECK(pinned.counts.overlapping_reorders == 2);
+    CHECK(render_panel(pinned.root) != render_panel(pinned_flat.root));
+
+    // The backdrop painting nothing: the same out-of-order tree, but what is
+    // drawn on top has no ink to cover the cards with, so nothing differs and
+    // nothing may be counted.
+    auto spec = backdrop_spec(5, kInklessWrapper);
+    spec.styles = "[[9,8,13,16],[10,8,13,16],[9,8,13,16],[9,8,13,16],[11,8,13,16],[18,8,13,16]]";
+    const auto bare = lower_panel(spec, "audit-bare", false);
+    const auto bare_flat = lower_panel(spec, "audit-bare-flat", true);
+    CHECK(bare.counts.overlapping_reorders == 0);
+    CHECK(render_panel(bare.root) == render_panel(bare_flat.root));
+}
+
+TEST_CASE("an interactive node drawn out of Chrome's order counts even without ink",
+          "[browser-capture][native-lowering][paint-order]") {
+    // A clipping wrapper (pinned) holds a transparent <a> overlay that Chrome
+    // paints AFTER a later inked sibling card covering it. Nothing visible is
+    // wrong, but the card now sits over the link and would take its clicks.
+    //
+    // Nodes: 0 doc, 1 html, 2 body, 3 clipping div, 4 <a> overlay, 5 card.
+    const SnapshotSpec spec{
+        .node_names = "[0,1,2,4,5,4]",
+        .node_types = "[9,1,1,1,1,1]",
+        .parents = "[-1,0,1,2,3,2]",
+        .attributes = "[[],[],[],[],[],[]]",
+        .layout_nodes = "[1,2,3,4,5]",
+        .styles = "[[9,8,13,16],[9,8,13,16],[9,8,14,16],[9,8,13,16],[11,8,13,16]]",
+        .bounds = "[[0,0,300,200],[0,0,300,200],[0,0,300,200],[40,40,120,80],[20,20,200,140]]",
+        .paint_orders = "[1,2,2,4,3]",
+        .computed_names = R"(["background-color","display","overflow","cursor"])",
+        .strings = std::string(kBackdropStrings),
+    };
+    const auto nested = lower_panel(spec, "interactive-overlay", false);
+    CHECK(nested.counts.overlapping_reorders == 1);
+    REQUIRE(nested.counts.overlapping_reorder_pairs.size() == 1);
+}
 
 TEST_CASE("native lowering draws the panel's real nodes, not a bitmap",
           "[browser-capture][native-lowering]") {
@@ -3758,18 +3917,18 @@ TEST_CASE("the reorder audit counts a real inversion and only a visible one",
     //        5 DIV sibling of outer. Chrome paints outer(2), sibling(3),
     //        inner(4); nesting composes outer, inner, sibling — so the
     //        inner/sibling pair is emitted against Chrome's order.
-    // The inner node carries a background COLOUR, because the audit counts an
-    // inversion only where the node that ends up on top actually puts ink on
-    // the canvas. A bare positioning div reordered over a painted sibling is an
-    // empty rectangle in front of a filled one — nothing a painter can show —
-    // so a fixture of style-less divs would drive this to zero and assert
-    // nothing. Index 31 is "rgb(9, 11, 16)".
+    // All three carry a background COLOUR. The audit counts an inversion only
+    // where both nodes put ink down: the sibling drawn last now covers the
+    // inner node, which shows only if both paint. And `outer` must paint too,
+    // or it would be drawn where its first ink lands (after the sibling) and
+    // the inversion would not exist at all. A fixture of style-less divs would
+    // drive this to zero and assert nothing. Index 31 is "rgb(9, 11, 16)".
     const std::string names = "[0,1,2,3,3,3]";
     const std::string types = "[9,1,1,1,1,1]";
     const std::string parents = "[-1,0,1,2,3,2]";
     const std::string attributes = "[[],[],[],[],[],[]]";
     const std::string styles =
-        "[[11,11,14],[11,11,14],[11,11,14],[11,11,14],[31,11,14],[11,11,14]]";
+        "[[11,11,14],[11,11,14],[11,11,14],[31,11,14],[31,11,14],[31,11,14]]";
     const std::string inkless_styles =
         "[[11,11,14],[11,11,14],[11,11,14],[11,11,14],[11,11,14],[11,11,14]]";
     const std::string paint_names =
@@ -3798,10 +3957,10 @@ TEST_CASE("the reorder audit counts a real inversion and only a visible one",
     // renders.
     CHECK(overlapping.counts.overlapping_reorder_pairs.size() == 1);
 
-    // The SAME inversion, over the same overlapping boxes, with the node that
-    // lands on top painting nothing. The painter has no ink to show out of
-    // order, so this must not count — which is what stops the number being a
-    // tally of how hierarchical a document happens to be.
+    // The SAME document, over the same overlapping boxes, with nothing painting.
+    // The painter has no ink to show out of order, so this must not count —
+    // which is what stops the number being a tally of how hierarchical a
+    // document happens to be.
     const auto inkless = lower_snapshot(
         {
             .node_names = names,

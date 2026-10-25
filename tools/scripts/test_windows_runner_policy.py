@@ -369,6 +369,17 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
         **extra: str,
     ) -> list[str]:
         """Run the real resolver for one event and return its matrix leg keys."""
+        return [leg["key"] for leg in self._matrix(event_name, run_windows=run_windows, **extra)]
+
+    def _macos_lanes(self, event_name: str, **extra: str) -> list[str]:
+        return [leg.get("lane", "") for leg in self._matrix(event_name, **extra)
+                if leg["key"] == "macos"]
+
+    def _matrix(
+        self, event_name: str, *, run_windows: bool = True,
+        **extra: str,
+    ) -> list[dict]:
+        """Run the real resolver for one event and return its matrix legs."""
         env = {
             k: v
             for k, v in os.environ.items()
@@ -418,7 +429,7 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
             for line in output.read_text(encoding="utf-8").splitlines():
                 if line.startswith("matrix_json="):
                     matrix = json.loads(line.split("=", 1)[1])
-                    return [leg["key"] for leg in matrix["include"]]
+                    return matrix["include"]
         raise AssertionError("resolver emitted no matrix_json")
 
     def test_pull_request_matrix_drops_windows_but_keeps_macos_and_linux(self) -> None:
@@ -429,6 +440,40 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
         # dropping either would still cost PR-head signal.
         self.assertIn("macos", keys)
         self.assertIn("linux", keys)
+
+    GATED = {"PULP_MACOS_PR_GATING": "true"}
+
+    def test_unapproved_pull_request_runs_only_the_macos_contract_lane(self) -> None:
+        """A new head with gating on keeps a macOS leg, but configure-only."""
+        push = {**self.GATED, "PR_EVENT_ACTION": "synchronize"}
+        self.assertEqual(self._macos_lanes("pull_request", **push), ["contract"])
+        self.assertIn("linux", self._matrix_keys("pull_request", **push))
+
+    def test_gating_defaults_off(self) -> None:
+        """Unset or not exactly `true`: every pull request takes the full lane."""
+        for gating in ("", "false", "1"):
+            with self.subTest(gating=gating):
+                self.assertEqual(self._macos_lanes(
+                    "pull_request", PULP_MACOS_PR_GATING=gating,
+                    PR_EVENT_ACTION="synchronize"), ["full"])
+        self.assertEqual(self._macos_lanes("pull_request"), ["full"])
+
+    def test_the_apps_label_event_runs_the_full_lane_and_only_macos(self) -> None:
+        approval = {**self.GATED, "PR_EVENT_ACTION": "labeled", "PR_LABEL_NAME": "macos-ci",
+                    "PR_SENDER": "shipyard-local[bot]", "PR_LABELS_JSON": '["macos-ci"]'}
+        self.assertEqual(self._matrix_keys("pull_request", **approval), ["macos"])
+        self.assertEqual(self._macos_lanes("pull_request", **approval), ["full"])
+        # Anyone else's label leaves the head on the contract lane.
+        self.assertEqual(self._macos_lanes(
+            "pull_request", **{**approval, "PR_SENDER": "a-maintainer"}), ["contract"])
+
+    def test_deferral_never_reaches_merge_group_or_dispatch(self) -> None:
+        """The merge queue and the escape hatch always run the full macOS lane."""
+        for event in ("merge_group", "workflow_dispatch"):
+            with self.subTest(event=event):
+                self.assertEqual(self._macos_lanes(
+                    event, **self.GATED, PR_EVENT_ACTION="synchronize"), ["full"])
+                self.assertIn("linux", self._matrix_keys(event, **self.GATED))
 
     def test_merge_group_matrix_keeps_macos_and_local_eligible_linux(self) -> None:
         """Advisory hosted legs must not sit in the path every merge takes.
