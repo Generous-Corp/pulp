@@ -744,6 +744,9 @@ struct GpuWaveNetRealtimeNode::Impl {
             record.reason = record.gpu_reason = cause;
             (void)trace->publish_worker(record);
         }
+        // The previous re-acquire's first deliverable block belongs to the
+        // epoch being replaced; the new one is known only once it is adopted.
+        reacquired_sequence.store(UINT64_MAX, std::memory_order_release);
         ++epoch;
         published_epoch.store(epoch, std::memory_order_release);
         reacquire_successes.fetch_add(1, std::memory_order_relaxed);
