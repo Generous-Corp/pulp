@@ -927,6 +927,12 @@ knowing before you touch that file:
   now passes `IRParseOptions::measured_geometry` when the IR's source adapter
   is `browser-capture`, and a geometry rule that only makes up for how a
   design tool draws must check it. Fixture `20-flex-gap-knob` covers the snap.
+  Separator promotion, rounded-corner inheritance and name-based audio-widget
+  detection skip a capture too: a scaled hairline is really 0.3px wide, a
+  child's radius is its own, and a `div.dial` the capture did not bind is not
+  a knob (it became a live Knob with hit regions). Connector spanning needs a
+  row-direction node, which the capture never writes. Fixture
+  `21-design-tool-heuristics` covers them.
 
   **Paint-order gotcha:** Chrome's paint order numbers a node by when its OWN
   box paints, and an inkless wrapper still holds a number. Ordering siblings by

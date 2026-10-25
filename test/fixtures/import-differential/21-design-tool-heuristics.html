@@ -1,0 +1,52 @@
+<!doctype html>
+<style>
+  /* Each row is laid out the way a design tool's file would be after a
+     normalize rule, so a rule that ran on this capture would show up as a
+     geometry or paint difference against Chromium. */
+  body { margin: 0; background: #1a1c20; }
+  #panel { position: relative; width: 800px; height: 520px; }
+  .cell { position: absolute; width: 160px; height: 120px; }
+
+  /* Thin strokes. A hairline scaled to under half a pixel wide keeps its
+     computed 1px border; the others are ordinary hairlines. */
+  .hair { position: absolute; top: 24px; background: transparent; }
+  #h-scaled { left: 40px; width: 4px; height: 72px; border: 1px solid #e04040; transform: scaleX(0.05); transform-origin: 0 0; }
+  #h-zero { left: 120px; width: 0; height: 72px; border: 0.5px solid #e04040; }
+  #h-top { left: 200px; width: 120px; height: 0; border-top: 1px solid #e04040; }
+  #h-rule { left: 360px; width: 120px; height: 1px; background: #e04040; }
+
+  /* A rounded parent with a child that fills it. Chromium rounds the child
+     only when the parent clips. */
+  .round { top: 140px; border-radius: 24px; background: #3a3e44; }
+  .fill { position: absolute; inset: 0; background: #e0a040; }
+  #r-visible { left: 40px; }
+  #r-hidden { left: 240px; overflow: hidden; }
+  #r-own { left: 440px; }
+  #r-own .fill { border-radius: 6px; }
+
+  /* A flex row whose first child is a short hairline, followed by three
+     boxes: the connector-rail shape. Chromium leaves the line in its flex
+     slot at the left. */
+  #rail { position: absolute; left: 40px; top: 320px; width: 600px; height: 160px; display: flex; align-items: center; gap: 16px; }
+  #rail .line { width: 100px; height: 2px; background: #8a90a0; flex: none; }
+  #rail .box { width: 96px; height: 48px; background: #4a6fa5; border-radius: 6px; flex: none; }
+  #rail .add { width: 24px; height: 24px; background: #4a6fa5; flex: none; }
+</style>
+<div id="panel">
+  <div class="hair" id="h-scaled"></div>
+  <div class="hair" id="h-zero"></div>
+  <div class="hair" id="h-top"></div>
+  <div class="hair" id="h-rule"></div>
+
+  <div class="cell round" id="r-visible"><div class="fill"></div></div>
+  <div class="cell round" id="r-hidden"><div class="fill"></div></div>
+  <div class="cell round" id="r-own"><div class="fill"></div></div>
+
+  <div id="rail">
+    <div class="line"></div>
+    <div class="box"></div>
+    <div class="box"></div>
+    <div class="box"></div>
+    <div class="add"></div>
+  </div>
+</div>

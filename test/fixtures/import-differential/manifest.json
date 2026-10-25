@@ -25,6 +25,7 @@
     {"id":"gradient-border","source":"19-gradient-border.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","viewport":{"width":400,"height":180},"expected_blockers":[]},
     {"id":"local-flatten","source":"22-local-flatten.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","viewport":{"width":640,"height":360},"expected_blockers":[]},
     {"id":"flex-gap-knob","source":"20-flex-gap-knob.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","viewport":{"width":960,"height":680},"expected_blockers":[]},
+    {"id":"design-tool-heuristics","source":"21-design-tool-heuristics.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","viewport":{"width":800,"height":520},"expected_blockers":[],"expected_gaps":[{"id":"scaled-bordered-box-clamped","lab_signal":"geometry gate registered_max_abs_delta 1.69 CSS px on #h-scaled (Chromium 0.3125 px wide, native 2 px)","effect":"the capture drops transform and places the box by its scaled paint box, so native lays out a 0.3125 px box with two 1 px borders and clamps it to the 2 px the borders need"}]},
     {"id":"backdrop-opacity","source":"22-backdrop-opacity.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","viewport":{"width":512,"height":160},"expected_blockers":[]},
     {
       "id": "spectr-standalone",
