@@ -362,7 +362,9 @@ runner failure or gate verdict, with a class and a confidence.
 The required `macos` context is reported by more than one job: the macOS matrix
 leg, which builds and tests, and bootstrap jobs that claim the name without
 running anything — when no native input changed, or when a protected receipt is
-reused. A reused receipt produces a **three-step** green job (`Set up job`, the
+reused. With `PULP_MACOS_PR_GATING` on, an unapproved pull-request head's own
+macOS leg is green after only its configure-only contract lane (`deferred`
+tier). A reused receipt produces a **three-step** green job (`Set up job`, the
 bootstrap step, `Complete job`). In the checks list it is indistinguishable
 from a real pass, and reasoning from one as evidence that the suite passed has
 already cost hours of wrong conclusions.
@@ -384,6 +386,56 @@ affected tier can select nothing), so `--require-executed` refuses it.
 Each bootstrap job also writes a banner into its own job summary saying no
 build and no test step ran. A step count near three on a `macos` job is the
 tell.
+
+## macOS PR CI runs after approval; the arming path labels approved heads
+
+**Behind `PULP_MACOS_PR_GATING`, default off.** Until the repository variable is
+exactly `true`, every pull request runs the full macOS lane, label events do
+nothing, and none of the rest of this section applies. Do not set it until
+Shipyard #929 (queue-arm-guard refuses a head whose required `macos` check is
+tier `deferred`) is merged AND verified live, by arming a deferred head and
+seeing the refusal. Design, measurements,
+decision-row coverage and rollback: "macOS on a pull request waits for
+approval" in `docs/guides/local-ci.md`.
+
+With gating on, a pull request's macOS leg (the job named `macos`) runs in one
+of two lanes. `tools/ci/macos_pr_lane.py` picks it:
+
+- **Contract lane**, on every head the fleet App has not approved: configure,
+  the `pr-fast` tier minus `needs-build` members, and the `pr-guard` tier (the
+  A2T acceptance and verifier selftests). There is no build. It takes about
+  3.5 min, against a 23.4 min median for the full job. Its green carries a
+  `shipyard-test-tier` annotation of `deferred`.
+- **Full lane**, on a head the App labelled `macos-ci`: everything the PR head
+  ran before, plus `pr-guard`. The label event's run is macOS-only.
+
+`merge_group`, `push` and dispatch are unchanged; the merge queue always runs
+macOS.
+
+- **Only `shipyard-local[bot]`'s `macos-ci` counts.** On a `labeled` event the
+  lane checks the sender; otherwise it checks who last applied the label. A
+  label from an agent session or a person runs nothing: the run is a no-op. To
+  force the full lane, dispatch `build.yml` on the branch.
+- **Approve first, then the full lane, then arm.** A reviewer may APPROVE
+  before the full macOS run. The sweep labels the approved head, and arms only
+  once the head's latest `macos` check run is no longer `deferred`. GitHub then
+  holds the auto-merge until that run succeeds. If the full lane fails, the PR
+  needs a fix, and the fix is a new head, which needs a new verdict.
+- **A push disarms and unlabels.** `macos-ci-label-reset.yml` disables
+  auto-merge on `synchronize` (otherwise the new head's contract-lane green
+  would merge it) and removes `macos-ci`. A queued PR leaves the queue on push
+  anyway, and the fenced carrier's update-branch counts as a push. Re-arming
+  needs a fresh verdict, the label, and a full-lane success. If the label is
+  still present when re-approving, remove and re-apply it, because re-adding a
+  present label fires no event.
+- **A red contract lane is a real failure** of a pr-fast or pr-guard check.
+  Fix it on the PR; it is exactly what would otherwise eject a batch. If the
+  failing check needs a built target, add it to `PULP_PR_FAST_NEEDS_BUILD` in
+  `test/cmake/pr_fast_tests.cmake`.
+- **The App's label must come from the App's token.** A `labeled` event made
+  with a workflow's `GITHUB_TOKEN` starts no workflow run.
+- **`gate_suite_executed.py` reads both lanes as `tier-only`.** Use the
+  `deferred` annotation, or the skipped `Build` step, to tell them apart.
 
 ## Diff-scoped gates on merge_group use the entry's own base
 
@@ -4273,7 +4325,8 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   the receipt's selected/passed counts and source run, or refused, with the
   protected-base verifier's reason) and a job-summary table; every gate test step
   publishes a `shipyard-test-tier` annotation (`fast` on PR heads, `full`,
-  `receipt-reused`, `not-required`). The checked-out script only renders these
+  `receipt-reused`, `not-required`, and `deferred` from a PR head's
+  contract lane, without `macos-ci`). The checked-out script only renders these
   after the base verifier decided — `test_build_workflow.py` pins that the
   workspace copy is only ever called for `note`/`publish-notes`.
 - **"Is the gate slower than usual on this host?"** is `shipyard metrics watch

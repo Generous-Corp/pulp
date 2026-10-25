@@ -486,8 +486,12 @@ def _fold_migration_notes(repo: Path, plan: list[Assignment]) -> list[str]:
     if sdk is None:
         return []
     try:
-        from fold_migration_notes import fold
-        return fold(repo, sdk.assigned)
+        from fold_migration_notes import fold, shipped_version
+        # The release tags decide which release a note's change already
+        # shipped in; a clone that lacks the newest tag folds that note into
+        # this bump's version, the behaviour before tags were consulted.
+        _git(repo, "fetch", "--quiet", "--tags", "origin", check=False)
+        return fold(repo, sdk.assigned, lambda rel: shipped_version(repo, rel))
     except (Exception, SystemExit) as error:  # noqa: BLE001 - a bump must still finish
         print(
             f"version-at-land: could not fold docs/migrations/unreleased/ into "

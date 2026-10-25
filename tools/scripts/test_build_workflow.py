@@ -372,7 +372,15 @@ def _build_steps() -> dict[str, dict[str, object]]:
 
 
 def _evaluate_if(expression: object, context: dict[str, object]) -> bool:
-    """Evaluate a GitHub Actions step condition over a small literal context.
+    """Evaluate a GitHub Actions step condition over a small literal context."""
+    return bool(_evaluate(expression, context))
+
+
+def _evaluate(expression: object, context: dict[str, object]) -> object:
+    """Evaluate a GitHub Actions expression over a small literal context.
+
+    Returns the expression's value, so `a && 'x' || 'y'` yields the string a
+    job `name:` would get.
 
     Supports exactly what these step conditions use: `&&`, `||`, `!`, `==`,
     `!=`, parentheses, single-quoted strings, dotted context names, and the
@@ -399,7 +407,7 @@ def _evaluate_if(expression: object, context: dict[str, object]) -> bool:
             python.append(repr(token == "true"))
         else:
             python.append(repr(context.get(token, "")))
-    return bool(eval("".join(python), {"__builtins__": {}}))  # noqa: S307
+    return eval("".join(python), {"__builtins__": {}})  # noqa: S307
 
 
 class ReadyPullRequestReceiptTest(unittest.TestCase):
@@ -766,6 +774,176 @@ class ArtifactUploadResilienceTest(unittest.TestCase):
                      "Publish A2T structural verification"):
             with self.subTest(step=name):
                 self.assertNotIn("continue-on-error", self.steps[name])
+
+
+class MacosApprovalGateTest(unittest.TestCase):
+    """An unapproved PR head's macOS leg runs only its contract lane.
+
+    Most pull-request heads never merge, and their full macOS runs were the
+    largest share of the eight-VM fleet. Without `macos-ci` the leg configures,
+    runs the pr-fast and pr-guard tiers (the PR-caused failures that otherwise
+    eject merge-group batches) and stops; the build and the tests it feeds wait
+    for the label the arm sweep applies to an approved head. Any other label
+    starts a run that does nothing.
+    """
+
+    APP = "shipyard-local[bot]"
+    NOOP = {"github.event_name": "pull_request", "github.event.action": "labeled",
+            "github.event.label.name": "queue-unblock", "github.event.sender.login": APP,
+            "vars.PULP_MACOS_PR_GATING": "true"}
+    APPROVAL = {**NOOP, "github.event.label.name": "macos-ci"}
+    CONTRACT = {"github.event_name": "pull_request", "runner.os": "macOS",
+                "matrix.key": "macos", "matrix.lane": "contract",
+                "runner.environment": "self-hosted",
+                "needs.classify.outputs.agent_capability_installed_sdk_required": "true",
+                "success()": True, "failure()": False}
+    # Steps that need the build, or are the expensive tests it feeds.
+    BUILD_FED = (
+        "Build",
+        "Decide pull-request test suite",
+        "Test what this pull request reaches (pull request head)",
+        "Test (non-Windows)",
+        "Observe GPU adapter contract (self-hosted macOS)",
+        "Test installed SDK capability contract (affected changes)",
+        "Install and publish exact GPU-audio SDK (macOS ARM64)",
+        "Upload exact GPU-audio SDK (macOS ARM64)",
+        "Record per-test results for reuse replay (macOS)",
+    )
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.workflow = _workflow()
+        cls.jobs = cls.workflow["jobs"]
+        cls.triggers = cls.workflow.get("on", cls.workflow.get(True, {}))
+        cls.steps = _build_steps()
+
+    def test_labeled_joins_the_default_pull_request_types(self) -> None:
+        self.assertEqual(self.triggers["pull_request"]["types"],
+                         ["opened", "synchronize", "reopened", "labeled"])
+        # merge_group and push keep every event; nothing about them is labelled.
+        self.assertIsNone(self.triggers["merge_group"])
+        self.assertEqual(self.triggers["push"], {"branches": ["main"]})
+
+    def test_only_the_apps_approval_shares_the_pull_requests_concurrency_group(self) -> None:
+        group = self.workflow["concurrency"]["group"]
+        noop = "build-label-noop-42"
+        for context, expected in (
+                (self.APPROVAL, "build-refs/pull/1/merge"),
+                (self.NOOP, noop),
+                ({**self.APPROVAL, "github.event.sender.login": "a-maintainer"}, noop),
+                ({**self.APPROVAL, "vars.PULP_MACOS_PR_GATING": ""}, noop),
+                ({"github.event_name": "pull_request", "github.event.action": "synchronize"},
+                 "build-refs/pull/1/merge")):
+            with self.subTest(context=context):
+                value = (group.replace("format('label-noop-{0}', github.run_id)", "'label-noop-42'")
+                         .replace("format('local-proof-{0}', github.run_id)", "'local-proof-42'"))
+                value = "build-" + str(_evaluate(value.split("build-", 1)[1],
+                                                 {**context, "github.ref": "refs/pull/1/merge"}))
+                self.assertEqual(value, expected)
+
+    def test_another_label_skips_every_job_that_survives_a_skipped_need(self) -> None:
+        # The roots skip outright. The aliases evaluate after a skipped need
+        # (`!cancelled()`), so each needs the clause itself or it fails closed
+        # on the head. Everything else needs a root and is skipped with it.
+        skipped = {**self.NOOP, "needs.resolve-provider.result": "skipped",
+                   "needs.classify.result": "skipped"}
+        approval = {**skipped, "github.event.label.name": "macos-ci"}
+        for name in ("resolve-provider", "classify", "macos", "linux", "windows"):
+            with self.subTest(job=name):
+                self.assertFalse(_evaluate_if(self.jobs[name]["if"], skipped))
+                for untrusted in ({"github.event.sender.login": "a-maintainer"},
+                                  {"vars.PULP_MACOS_PR_GATING": ""}):
+                    self.assertFalse(_evaluate_if(self.jobs[name]["if"],
+                                                  {**approval, **untrusted}))
+        # The App's approval runs the preamble and the macOS alias; Linux and
+        # Windows stay no-ops, because a label event's run is macOS-only.
+        for name in ("resolve-provider", "classify", "macos"):
+            with self.subTest(job=name):
+                self.assertTrue(_evaluate_if(self.jobs[name]["if"], approval))
+        for name in ("linux", "windows"):
+            with self.subTest(job=name):
+                self.assertFalse(_evaluate_if(self.jobs[name]["if"], approval))
+        for name, job in self.jobs.items():
+            if name in ("local-proof", "resolve-provider", "classify"):
+                continue
+            with self.subTest(job=name):
+                self.assertTrue(job.get("needs"), f"{name} must hang off a root")
+
+    def test_a_skipped_alias_never_carries_a_reporting_name(self) -> None:
+        skipped = {**self.NOOP, "needs.resolve-provider.result": "skipped",
+                   "needs.classify.result": "skipped"}
+        for name, unused in (("macos", "macos-pr-unused"),
+                             ("linux", "linux-label-noop"),
+                             ("windows", "windows-label-noop")):
+            with self.subTest(job=name):
+                self.assertEqual(_evaluate(self.jobs[name]["name"], skipped), unused)
+        self.assertEqual(_evaluate(self.jobs["linux"]["name"], {"github.event_name": "push"}),
+                         "linux")
+
+    def test_the_resolver_hands_the_lane_rule_its_inputs(self) -> None:
+        env = self.jobs["resolve-provider"]["steps"][1]["env"]
+        self.assertEqual(env["PULP_MACOS_PR_GATING"], "${{ vars.PULP_MACOS_PR_GATING || '' }}")
+        self.assertEqual(env["PR_SENDER"], "${{ github.event.sender.login }}")
+        self.assertEqual(env["PR_EVENT_ACTION"], "${{ github.event.action }}")
+        self.assertIn('"macos_pr_lane.py"', self.jobs["resolve-provider"]["steps"][1]["run"])
+
+    def test_the_contract_lane_skips_the_build_and_what_it_feeds(self) -> None:
+        for name in self.BUILD_FED:
+            with self.subTest(step=name):
+                condition = self.steps[name].get("if")
+                self.assertFalse(_evaluate_if(condition, self.CONTRACT))
+        # Control: the full lane still builds on the same event.
+        self.assertTrue(_evaluate_if(self.steps["Build"]["if"],
+                                     {**self.CONTRACT, "matrix.lane": "full"}))
+
+    def test_the_contract_lane_still_configures_and_runs_both_cheap_tiers(self) -> None:
+        for name in ("Configure", "Test fast deterministic tier (pull request head)",
+                     "Test merge-queue ejection guards (pull request head)"):
+            with self.subTest(step=name):
+                self.assertTrue(_evaluate_if(self.steps[name].get("if", True), self.CONTRACT))
+        # The guard tier is macOS-only, so Linux keeps its current shape.
+        self.assertFalse(_evaluate_if(
+            self.steps["Test merge-queue ejection guards (pull request head)"]["if"],
+            {**self.CONTRACT, "runner.os": "Linux", "matrix.key": "linux"}))
+
+    def test_the_contract_lanes_green_is_marked_deferred(self) -> None:
+        body = self.steps["Test fast deterministic tier (pull request head)"]["run"]
+        self.assertIn('label_exclude="${label_exclude}|^needs-build$"', body)
+        self.assertIn('"tier":"deferred"', body)
+        self.assertIn('"tier":"fast"', body, "control: the full lane keeps its own tier")
+        self.assertEqual(
+            self.steps["Test fast deterministic tier (pull request head)"]["env"]["PULP_MACOS_LANE"],
+            "${{ matrix.lane }}")
+
+    def test_the_bootstrap_alias_never_claims_a_deferral(self) -> None:
+        # The native leg owns `macos` on every native PR head; a second
+        # `macos` from the bootstrap would collide with it.
+        self.assertNotIn("deferred", json.dumps(self.jobs["macos"]))
+
+    def test_the_label_reset_runs_from_main_and_checks_out_nothing(self) -> None:
+        reset = yaml.safe_load((Path(__file__).parents[2]
+                                / ".github/workflows/macos-ci-label-reset.yml").read_text(encoding="utf-8"))
+        triggers = reset.get("on", reset.get(True, {}))
+        self.assertEqual(list(triggers), ["pull_request_target"])
+        self.assertEqual(triggers["pull_request_target"]["types"], ["synchronize"])
+        self.assertEqual(reset["permissions"], {"pull-requests": "write"})
+        text = json.dumps(reset)
+        self.assertNotIn("actions/checkout", text)
+        self.assertIn("labels/macos-ci", text)
+        # Default off, like the lane itself.
+        self.assertEqual(reset["jobs"]["reset"]["if"], "vars.PULP_MACOS_PR_GATING == 'true'")
+
+    def test_a_push_disarms_an_armed_pull_request(self) -> None:
+        # Otherwise the new head's contract-lane green would auto-merge it.
+        reset = yaml.safe_load((Path(__file__).parents[2]
+                                / ".github/workflows/macos-ci-label-reset.yml").read_text(encoding="utf-8"))
+        steps = {step["name"]: step for step in reset["jobs"]["reset"]["steps"]}
+        disarm = steps["Disable auto-merge"]
+        self.assertEqual(disarm["if"], "github.event.pull_request.auto_merge != null")
+        self.assertIn("disablePullRequestAutoMerge", disarm["run"])
+        self.assertEqual(disarm["env"]["PR_NODE_ID"], "${{ github.event.pull_request.node_id }}")
+        self.assertIn("!cancelled()", steps["Remove the label"]["if"])
+
 
 if __name__ == "__main__":
     unittest.main()
