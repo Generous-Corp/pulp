@@ -1551,3 +1551,58 @@ TEST_CASE("generate_pulp_js web compat emits extended style and layout propertie
 // branch. Nothing errors — the boxes are the right size in the right place, they
 // just aren't faded / shadowed / filled. Each case below renders a node kind
 // through generate_pulp_js and asserts the property survives the lowering.
+
+TEST_CASE("ui.js binds a meter by its key, with or without a routed source",
+          "[design-import][codegen][meter-binding]") {
+    // The bridge's bindMeter(widgetId, source) binds a level display by its
+    // key alone, to a parameter or a `value:<name>` channel. A key-only meter
+    // is therefore live in ui.js; the native and baked binders still require a
+    // routed source and channel, and ui.js must not drop to their rule.
+    const auto meter = [](std::string name, std::string key) {
+        IRNode node;
+        node.type = "meter";
+        node.name = std::move(name);
+        node.audio_widget = AudioWidgetType::meter;
+        node.attributes["binding"] = std::move(key);
+        node.style.width = 12.0f;
+        node.style.height = 80.0f;
+        return node;
+    };
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.style.width = 300.0f;
+    ir.root.style.height = 200.0f;
+    auto routed = meter("RoutedMeter", "out");
+    routed.attributes["pulpRouteId"] = "meter:out";
+    routed.attributes["pulpMeterSource"] = "master";
+    routed.attributes["pulpMeterChannel"] = "out";
+    ir.root.children.push_back(routed);
+    // kelvin's output meter: a value key and a route, no source or channel.
+    auto keyed = meter("KeyedMeter", "level");
+    keyed.attributes["pulpRouteId"] = "capture:out:38";
+    keyed.attributes["pulpMeterValueKey"] = "level";
+    ir.root.children.push_back(keyed);
+    auto channel = meter("ChannelMeter", "value:gr_db");
+    ir.root.children.push_back(channel);
+
+    for (const auto mode : {CodeGenMode::bridge_native_js, CodeGenMode::web_compat}) {
+        INFO("mode " << static_cast<int>(mode));
+        std::vector<FidelityIssue> report;
+        CodeGenOptions opts;
+        opts.mode = mode;
+        opts.fidelity_report = &report;
+        const auto js = generate_pulp_js(ir, opts);
+        std::size_t binds = 0;
+        for (auto at = js.find("bindMeter("); at != std::string::npos;
+             at = js.find("bindMeter(", at + 1))
+            ++binds;
+        CHECK(binds == 3);
+        CHECK(js.find(", 'out');") != std::string::npos);
+        CHECK(js.find(", 'level');") != std::string::npos);
+        CHECK(js.find(", 'value:gr_db');") != std::string::npos);
+        // A meter is a display: nothing writes back to its parameter.
+        CHECK(js.find("setParam('level'") == std::string::npos);
+        for (const auto& issue : report)
+            CHECK(issue.kind.rfind("native-binding-", 0) != 0);
+    }
+}
