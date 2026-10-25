@@ -4891,6 +4891,15 @@ uses, or the golden warms a cache the real jobs never touch.
 
 ## GitHub workflow gotchas
 
+- **A pre-push gate that reads the working tree can pass a commit it never
+  saw.** The push sends HEAD's commit; a file fixed on disk but not committed
+  let a bad commit through the encoding lint, which now reads the pushed
+  commit (`text_encoding_lint.py --head`). Docs-noise, format_changed,
+  conflict-marker, compat-aggregate, source-contract, single-backend and
+  negative-capability gates still read the working tree; the hook warns
+  when tracked files differ from the pushed commit. A new content gate
+  should read the pushed commit's blobs (`git cat-file --batch`), not disk.
+
 - **A workflow that runs a test binary by name breaks when that suite joins
   a test group.** `pulp_add_test_suite(... GROUP <group>)` compiles the
   member into the group executable, so `./build/test/<member>` no longer
