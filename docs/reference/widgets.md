@@ -53,6 +53,23 @@ colour switches the control to the dark palette (`ua_scheme_for_accent`).
 | `ImageButton` | Image button | normal/hover/pressed images, click | `buttons.hpp` |
 | `HyperlinkButton` | Opens a URL | text, URL, hover, click | `buttons.hpp` |
 | `ResizableCorner` | Drag-to-resize handle | resize callback (dx,dy) | `buttons.hpp` |
+| `ButtonSurface` | Chromium's themed `<button>` surface, content as children | light/dark `color-scheme`, hover, pressed, focus-visible ring, disabled | `widgets.hpp` |
+
+### Browser push-button skin
+
+A design-imported `appearance: auto` `<button>` is a `ButtonSurface` whose
+children are its content (labels, icons). The surface paints only what
+Chromium's theme draws for the button: the background, the 1px border with a
+2px radius, the hover, pressed and disabled colours, and the two-colour
+focus-visible ring, which reaches one CSS px outside the box. Set
+`set_color_scheme` (CSS `color-scheme`), `set_pressed` (`:active`),
+`set_focus_visible` (`:focus-visible`) and `set_enabled(false)` for
+`disabled`; hover comes from the view's hover state. CSS `accent-color` does
+not apply, as in Chromium. The surface paints in `self_paint_bounds()`, the
+captured CSS-edge-snapped box when the importer recorded one, while its
+children keep the laid-out box. `ButtonSurface::chromium_refresh_parts` returns
+the geometry and colours without painting. `TextButton` and generated UI keep
+Pulp's own look.
 
 ## Text input
 

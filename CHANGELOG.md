@@ -9,6 +9,45 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1100"></a>
+## [1.10.0] - 2026-10-24
+
+- release/version bump ([#10938](https://github.com/Generous-Corp/pulp/pull/10938))
+
+<a id="v190"></a>
+## [1.9.0] - 2026-10-24
+
+- release/version bump ([#10930](https://github.com/Generous-Corp/pulp/pull/10930))
+- perf/plugin footprint 20261021 ([#10703](https://github.com/Generous-Corp/pulp/pull/10703))
+
+<a id="v180"></a>
+## [1.8.0] - 2026-10-24
+
+- release/version bump ([#10925](https://github.com/Generous-Corp/pulp/pull/10925))
+- fix/importer svg snap 20261024 ([#10913](https://github.com/Generous-Corp/pulp/pull/10913))
+- fix/gpu journey disable update check ([#10915](https://github.com/Generous-Corp/pulp/pull/10915))
+- feature/importer f2a lowering 20261024 ([#10921](https://github.com/Generous-Corp/pulp/pull/10921))
+- ci/ci cause notice 20261024 next ([#10917](https://github.com/Generous-Corp/pulp/pull/10917))
+
+<a id="v170"></a>
+## [1.7.0] - 2026-10-24
+
+- release/version bump ([#10923](https://github.com/Generous-Corp/pulp/pull/10923))
+
+<a id="v161"></a>
+## [1.6.1] - 2026-10-24
+
+- release/version bump ([#10916](https://github.com/Generous-Corp/pulp/pull/10916))
+- fix/reload watcher baseline ([#10902](https://github.com/Generous-Corp/pulp/pull/10902))
+- fix/weak rtti portable ownership 20261024 ([#10904](https://github.com/Generous-Corp/pulp/pull/10904))
+- feature/importer js svg stroke style 20261024 ([#10909](https://github.com/Generous-Corp/pulp/pull/10909))
+
+<a id="v160"></a>
+## [1.6.0] - 2026-10-24
+
+- release/version bump ([#10912](https://github.com/Generous-Corp/pulp/pull/10912))
+- feature/importer range slider skin 20261023 ([#10829](https://github.com/Generous-Corp/pulp/pull/10829))
+
 <a id="v151"></a>
 ## [1.5.1] - 2026-10-24
 
@@ -11494,6 +11533,12 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.10.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.10.0
+[1.9.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.9.0
+[1.8.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.8.0
+[1.7.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.7.0
+[1.6.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.6.1
+[1.6.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.6.0
 [1.5.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.5.1
 [1.5.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.5.0
 [1.4.2]: https://github.com/Generous-Corp/pulp/releases/tag/v1.4.2

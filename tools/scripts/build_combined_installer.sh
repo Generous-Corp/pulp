@@ -47,6 +47,8 @@
 #                                                 contents to DEST, e.g. sample
 #                                                 models/IRs into Application Support)
 #     [--no-notarize]
+#     [--keep-symbols]                    (ship au/vst3/clap modules without
+#                                          stripping local symbols)
 #
 # Example (see examples/super-convolver/package.sh for a real invocation).
 set -euo pipefail
@@ -63,6 +65,7 @@ CLI="${PULP_CPP:-$ROOT/build/tools/cli/pulp-cpp}"
 NOTARIZE_HEARTBEAT_SECS="${PULP_NOTARIZE_HEARTBEAT_SECS:-30}"
 
 NAME=""; VERSION=""; APP_ID=""; INST_ID=""; OUT=""; NOTARIZE=1
+KEEP_SYMBOLS=0
 ALLOW_UNVERIFIED_AAX_WRAP=0
 HOST_ARCHITECTURES=""
 # Parallel arrays of components.
@@ -86,6 +89,7 @@ while [[ $# -gt 0 ]]; do
     --out) OUT="$2"; shift 2;;
     --architectures) HOST_ARCHITECTURES="$2"; shift 2;;
     --no-notarize) NOTARIZE=0; shift;;
+    --keep-symbols) KEEP_SYMBOLS=1; shift;;
     --allow-unverified-aax-wrap) ALLOW_UNVERIFIED_AAX_WRAP=1; shift;;
     --plugin) P_KIND+=("$2"); P_PATH+=("$3"); shift 3;;
     --product-title) PT_NAME+=("$2"); PT_TITLE+=("$3"); shift 3;;
@@ -606,11 +610,42 @@ for ((i=0; i<${#PS_KIND[@]}; i++)); do
   done
 done
 
+# Ship a copy of an au/vst3/clap bundle whose main executable has its local
+# symbols stripped, so the build output keeps them for debugging and nm-based
+# checks. A dSYM of the unstripped executable is written to $OUT/symbols/<kind>
+# first; it keeps every stripped symbol under the UUID the shipped copy carries,
+# so crash reports from the installed plug-in still symbolicate. Stripping
+# precedes signing: deep_sign then seals the copy. An aax is already
+# PACE-wrapped and is never modified.
+stage_stripped_plugin() {  # $1=kind  $2=bundle; prints the path to package
+  local b="$2" exe dest
+  exe="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' \
+    "$b/Contents/Info.plist" 2>/dev/null || true)"
+  [[ -n "$exe" ]] || { exe="$(basename "$b")"; exe="${exe%.*}"; }
+  if [[ "$KEEP_SYMBOLS" == 1 || ! -f "$b/Contents/MacOS/$exe" ]] ||
+     ! file -b "$b/Contents/MacOS/$exe" 2>/dev/null | grep -q "Mach-O"; then
+    printf '%s\n' "$b"; return 0
+  fi
+  dest="$STAGE/plugins/$1/$(basename "$b")"
+  mkdir -p "$(dirname "$dest")"
+  ditto "$b" "$dest" || { echo "error: could not stage $b" >&2; return 2; }
+  local dsym="$OUT/symbols/$1/$(basename "$b").dSYM"
+  rm -rf "$dsym"; mkdir -p "$(dirname "$dsym")"
+  dsymutil "$b/Contents/MacOS/$exe" -o "$dsym" >/dev/null 2>&1 && [[ -d "$dsym" ]] ||
+    { echo "error: dsymutil failed on $b; refusing to ship it stripped without a dSYM" >&2; return 2; }
+  strip -x "$dest/Contents/MacOS/$exe" 2>/dev/null ||
+    { echo "error: strip -x failed on $dest" >&2; return 2; }
+  echo "  stripped local symbols: $(basename "$b") (shipped copy)" >&2
+  printf '%s\n' "$dest"
+}
+
 echo "== plugins =="
 for ((i=0; i<${#P_KIND[@]}; i++)); do
   k="${P_KIND[$i]}"; p="${P_PATH[$i]}"; [[ -d "$p" ]] || { echo "missing: $p" >&2; exit 2; }
   case "$k" in
-    au|vst3|clap) deep_sign "$p";;
+    au|vst3|clap)
+      p="$(stage_stripped_plugin "$k" "$p")" || exit 2
+      deep_sign "$p";;
     aax) verify_presigned_aax "$p";;
     *) echo "bad plugin kind: $k" >&2; exit 2;;
   esac

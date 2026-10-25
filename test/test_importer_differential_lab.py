@@ -232,9 +232,15 @@ class DifferentialLabTests(unittest.TestCase):
                 self.assertEqual(untouched.bounds, (478.518, 319.831, 110.963, 2.993))
 
     def test_nested_native_rotations_compose_like_chromium(self) -> None:
-        # Chromium 151 (DPR 2) bounds for a 160x40 box at (120, 90) under
-        # rotate(30deg), holding a 50x12 box at (100, 10) under rotate(-75deg),
-        # both about their own centres (the CSS default origin):
+        # DOMSnapshot layout bounds from Chrome for Testing 151.0.7922.47
+        # (headless, DPR 2, the browser-capture flags) for this page, captured
+        # with `importer_differential_lab.py compare --viewport 400x300`:
+        #   #panel{position:relative;width:400px;height:300px}
+        #   .outer{position:absolute;left:120px;top:90px;width:160px;height:40px;
+        #          transform:rotate(30deg)}
+        #   .inner{position:absolute;left:100px;top:10px;width:50px;height:12px;
+        #          transform:rotate(-75deg)}   (inside .outer)
+        # Both rotate about their own centres (the CSS default origin):
         #   outer (120.703125, 52.671875) 158.59375 x 114.65625
         #   inner (219.046875, 107.109375) 43.859375 x 43.859375
         # The native layout reports the untransformed boxes; the lab must
