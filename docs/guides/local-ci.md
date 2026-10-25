@@ -3736,8 +3736,8 @@ variable `PULP_MACOS_PR_GATING`. Do not set this variable until Shipyard #929
 (queue-arm-guard refuses a head whose required `macos` check is tier
 `deferred`) is merged AND verified live, by arming a deferred head and seeing
 the refusal. Unless it is exactly `true`, every pull request
-takes the full lane, label events start runs that do nothing, and
-`macos-ci-label-reset.yml` does nothing: today's behaviour. Switch it on only
+takes the full lane and `macos-ci-label-reset.yml` does nothing: today's
+behaviour. Switch it on only
 after the arm side refuses a `deferred` green durably (a Shipyard
 queue-arm-guard change, tracked separately). The tartci interim sweep already
 refuses it. Turning it off again is the rollback.
@@ -3809,21 +3809,19 @@ or its own message), and the fix is to add it to `PULP_PR_FAST_NEEDS_BUILD`.
   event the lane checks the event's sender. On `opened` or `reopened` it reads
   who applied the label last from the issue's events. Anyone else's label, or
   an events listing that cannot be read, counts as no label.
-- **What starts a full-lane run.** The App's `labeled` event, or an `opened` or
-  `reopened` event on a pull request whose label the App applied. The label
-  event's run is macOS-only: Linux and Windows are no-ops, because the push
-  that made the head already ran them. It shares the pull request's
-  concurrency group, so it supersedes a run still in flight for that head,
-  including that run's Linux leg.
-- **The App's label does start a workflow.** A `labeled` event made with a
-  workflow's own `GITHUB_TOKEN` creates no workflow run, while an App
-  installation token's events run workflows normally (GitHub Docs, "Triggering
-  a workflow from a workflow":
-  <https://docs.github.com/en/actions/writing-workflows/choosing-when-your-workflow-runs/triggering-a-workflow#triggering-a-workflow-from-a-workflow>).
-  The label must therefore come from the App's token, never from a workflow's
-  `GITHUB_TOKEN`. Prove it live once gating is switched on: the App's label
-  on a test pull request starts a `Build and Test` run whose resolver log reads
-  `macOS lane = full`.
+- **What starts a full-lane run.** A `workflow_dispatch` of `build.yml` on the
+  pull request's branch made by the fleet App, or an `opened` or `reopened`
+  event on a pull request whose label the App applied. A label event starts
+  nothing.
+- **`build.yml` does not listen for `labeled`.** A label event's run would be a
+  check suite newer than the head's real run with no `macos` check run in it,
+  and the merge queue reads the required `macos` context from the newest
+  suite: it refuses to enqueue ("Required status check "macos" is expected")
+  even though the earlier run's `macos` passed, and re-running a job in the
+  good run does not clear it. Shipyard adds several labels to every new pull
+  request, so every head was shadowed this way (#11034, #11040). The
+  `github.event.action == 'labeled'` conditions still in `build.yml` are
+  unreachable.
 - **A new head needs approval again.** On `synchronize` the lane is the
   contract lane whatever the labels say, because the event payload still lists
   the label the previous head earned. `macos-ci-label-reset.yml`
@@ -3831,21 +3829,13 @@ or its own message), and the fix is to add it to `PULP_PR_FAST_NEEDS_BUILD`.
   - It **disables auto-merge.** Otherwise an armed pull request would
     auto-merge on the new head's contract-lane green. A pull request already in
     the merge queue leaves the queue on a push anyway.
-  - It **removes `macos-ci`**, so the sweep's next application fires a fresh
-    `labeled` event. Re-adding a label that is still present fires nothing, so
-    if the removal failed (it warns), the sweep must remove the label and apply
-    it again.
+  - It **removes `macos-ci`**, so the label never vouches for a head it was
+    not applied to.
 
   Re-arming needs a fresh verdict for the new head, the label, and a
   full-lane success.
 - **Removing the label** starts nothing: `build.yml` does not listen for
   `unlabeled`, and a run already in flight finishes.
-- **Any other label event** (another label, `macos-ci` from anyone but the App,
-  or any label while gating is off) starts a run that skips every job, in a
-  concurrency group of its own (`build-label-noop-<run id>`), so it never
-  cancels the real run. Its skipped alias jobs carry unused names
-  (`macos-pr-unused`, `linux-label-noop`, `windows-label-noop`) so a skipped
-  check cannot replace the head's real `macos`, `linux` or `windows` result.
 - **Escape hatch.** Dispatch `build.yml` on the branch: `workflow_dispatch`
   always runs the full lane. A hand-applied label no longer forces anything.
   Re-running a contract-lane run does not help either, because a re-run
@@ -3857,8 +3847,8 @@ A reviewer may give `verdict: APPROVE head:<sha>` before the head has had a
 full macOS run; the verdict is about the change, and the contract lane has
 already run the fast PR-caused checks. Approval is not arming:
 
-1. The arm sweep sees the trusted APPROVE for the current head and applies
-   `macos-ci`. The full lane runs.
+1. The arm sweep sees the trusted APPROVE for the current head, applies
+   `macos-ci` and dispatches `build.yml` on the branch. The full lane runs.
 2. The sweep arms only once the head's latest `macos` check run is from the
    full lane: its `shipyard-test-tier` annotation is not `deferred`. From then
    on GitHub's required-check rule holds the auto-merge until that run
@@ -3936,7 +3926,7 @@ is merge-group exposure to failures only a build reveals.
 ### Rollback
 
 Unset `PULP_MACOS_PR_GATING`, or set it to anything but `true`. Every pull
-request then takes the full lane, label events do nothing, and the reset
+request then takes the full lane and the reset
 workflow does nothing. `pr-guard` keeps running on the full lane.
 
 ## Windows is gated by the merge queue, not by the PR head

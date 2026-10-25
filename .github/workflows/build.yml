@@ -3,13 +3,17 @@ name: Build and Test
 on:
   pull_request:
     branches: [main, 'develop/**']
-    # The default three plus `labeled`. With PULP_MACOS_PR_GATING on, the
-    # fleet App applying `macos-ci` is what moves a pull request's macOS leg
-    # from its configure-only contract lane to the full lane (see "macOS on a
-    # pull request waits for approval" in docs/guides/local-ci.md); that run is
-    # macOS-only. Any other label event starts a run that skips every job and
-    # sits in its own concurrency group, so it never cancels the real run.
-    types: [opened, synchronize, reopened, labeled]
+    # The default three only, never `labeled`. A label event starts a run whose
+    # check suite is newer than the head's real run but has no `macos` check
+    # run, and the merge queue reads the required `macos` context from that
+    # newest suite: it refuses to enqueue with "Required status check "macos"
+    # is expected" even though the earlier run's `macos` passed. Shipyard adds
+    # several labels to every new pull request, so `labeled` shadowed every
+    # head. With PULP_MACOS_PR_GATING on, the fleet App must move a head to the
+    # full lane by dispatching this workflow (workflow_dispatch), not by a
+    # label event. The `github.event.action == 'labeled'` branches below are
+    # now unreachable.
+    types: [opened, synchronize, reopened]
   # Publish the Linux/Windows ccache + FetchContent caches that PR runs restore
   # from. Only a non-PR run on the default branch may write to GitHub's cloud
   # cache — a PR-run cache entry is scoped to the PR's own ref and is invisible
