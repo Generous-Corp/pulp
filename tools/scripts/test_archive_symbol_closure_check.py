@@ -10,12 +10,14 @@ instrument cannot see into is inconclusive rather than passing.
 from __future__ import annotations
 
 import json
+import os
 import stat
 import sys
 import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -134,6 +136,24 @@ class ArchiveSymbolClosureCheckTest(unittest.TestCase):
                                     "--cxxfilt", str(Path(self._tmp.name) / "no-such-cxxfilt")]), 2)
 
 
+    def test_no_demangler_on_path_is_inconclusive(self) -> None:
+        # Without --cxxfilt the demangler comes from PATH; with neither
+        # c++filt nor llvm-cxxfilt there, the RTTI check cannot read
+        # ownership and must say so rather than pass.
+        content = self.nm.archive("libcontent.a", CONTENT + "    _ZN7content8Registry4openEv T 0 0\n")
+        core = self.nm.archive("libcore.a", "libcore.a[x.o]:\n_ZTIN7content8RegistryE V 0 0\n")
+        nm = self.nm.write()
+        empty = Path(self._tmp.name) / "empty-path"
+        empty.mkdir()
+        with mock.patch.dict(os.environ, {"PATH": str(empty)}):
+            with self.assertRaises(rtti_ownership.DemangleError):
+                rtti_ownership.demangle({"_ZTIN7content8RegistryE"})
+            self.assertEqual(gate.main(["--nm", nm, "--forbidden", str(content), "--no-control",
+                                        "--check", f"core={core}", "--weak-rtti-contamination"]), 2)
+        # Control: the same call with the demangler on PATH runs and finds the copy.
+        self.assertEqual(gate.main(["--nm", nm, "--forbidden", str(content), "--no-control",
+                                    "--check", f"core={core}", "--weak-rtti-contamination"]), 1)
+
     def test_check_mode_uses_the_chosen_rule(self) -> None:
         content = self.nm.archive("libcontent.a", CONTENT)
         core = self.nm.archive("libcore.a", "libcore.a[x.o]:\n_inline_shared U\n")
@@ -185,6 +205,11 @@ class RttiOwnershipTest(unittest.TestCase):
             "pulp::view::Meter::set_level(float, float)": "pulp::view::Meter",
             "non-virtual thunk to pulp::view::Meter::~Meter()": "pulp::view::Meter",
             "guard variable for pulp::view::Meter::instance()::s": "pulp::view::Meter",
+            "virtual thunk to pulp::view::Meter::~Meter()": "pulp::view::Meter",
+            "covariant return thunk to pulp::view::Meter::clone() const": "pulp::view::Meter",
+            "reference temporary #0 for pulp::view::Meter::kDefault": "pulp::view::Meter",
+            "TLS init function for pulp::view::Meter::tls_state": "pulp::view::Meter",
+            "thread-local wrapper routine for pulp::view::Meter::tls_state": "pulp::view::Meter",
             "void pulp::view::Grid<int>::fill<float>(float)": "pulp::view::Grid<int>",
             "pulp::view::Meter::operator()(int) const": "pulp::view::Meter",
             "pulp::view::Meter::kMaxLevel": "pulp::view::Meter",
