@@ -4,6 +4,7 @@
 #include "browser_capture_limits.hpp"
 #include "node_runtime.hpp"
 
+#include <chrono>
 #include <filesystem>
 #include <functional>
 #include <optional>
@@ -202,6 +203,8 @@ struct CaptureRequest {
     // Derive one viewport from the authored root, reload the same target once,
     // and require the root to be a contained fixed point at that viewport.
     bool fit_authored_frame = false;
+    // Read the page's executable materialized document into the capture.
+    bool capture_materialized_document = true;
 };
 
 struct CaptureArtifacts {
@@ -229,6 +232,9 @@ CaptureResult capture_document(
 struct DiscoverAndCaptureResult {
     BrowserDiscoveryResult discovery;
     CaptureResult capture;
+    /// When discovery finished and the capture subprocess began, so a caller
+    /// timing the pair can attribute each side separately.
+    std::chrono::steady_clock::time_point discovered_at{};
 
     [[nodiscard]] bool ok() const noexcept {
         return discovery.ok() && capture.ok();

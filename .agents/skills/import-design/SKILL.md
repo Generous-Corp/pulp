@@ -97,9 +97,15 @@ The native importer validates `capture.json` before lowering the browser tree
 or emitting a materialized runtime. Treat the capture envelope as a binding to
 one exact input and capture environment: it must carry the staged `editor.html`
 SHA-256, Chromium CDP identity, initial/resolved/document viewport dimensions,
-matching device scale factor and reference viewport, plus a contained
-materialized-document sidecar whose SHA-256, schema/version, HTML field, and
-asset count agree with the envelope. A stale, hand-edited, mismatched, or
+matching device scale factor and reference viewport, plus, when the capture
+recorded one, a contained materialized-document sidecar whose SHA-256,
+schema/version, HTML field, and asset count agree with the envelope. Only
+`--emit materialized-runtime` and `--materialized-canvas-composition` capture
+that sidecar (`browser_import_captures_materialized_document`). Every other
+import passes `--omit-materialized-document`, and the envelope then carries no
+materialized fields. The one exception is a document with Blob-URL
+`@font-face` rules: `capture.mjs` reads it anyway, because its
+`font_bindings` are the only record of those faces. A stale, hand-edited, mismatched, or
 path-escaping envelope fails closed with the
 `browser-capture-provenance-invalid` diagnostic. Keep the envelope and sidecar
 from the same capture directory; do not copy one from an older browser run or
@@ -112,6 +118,29 @@ PNG digest and physical dimensions, viewport DPR, and interaction plan, then
 records three agreeing source, importer, observer, font, capture, PNG, layout,
 and native render receipt digests. Short campaigns remain unverified, and the
 raw visual threshold is not relaxed by calibration or renderer disagreement.
+
+### Where a browser import spends its time
+
+Every browser-lane import prints `Browser lane timing:` and writes
+`import-timings.json` beside `capture.json`. Its stages are contiguous laps, so
+they sum to the lane's wall time; the capture script's own phases
+(`provenance.timings`, keyed by the progress tracker's phase names) nest under
+`browser-capture`, and `process-overhead` names the subprocess time outside
+them. `capture_steps` totals each CDP method and named unit; steps overlap and
+nest, so read them as attribution, not as a sum. On Spectr the dominant cost is
+the byte-stable screenshot horizon inside `same-frame-capture` (76
+`Page.captureScreenshot` calls, about 60% of the import, split between the
+accepted frame and the canvas-free chrome plate), followed by
+`browser-discovery`, which launches a separate Chromium for the CDP capability
+probe on every import. The chrome plate ships in the IR asset manifest, so
+skipping it is not output-neutral even for lanes that never draw it.
+
+Two identical imports never produce byte-identical DesignIR: `imported_at`,
+`settle_rounds` (how many settle polls a loaded host needed) and the
+content-addressed names of any asset that contains a live canvas all move.
+Strip exactly those before calling a change output-neutral, and keep a
+canvas-free asset's content hash (the chrome plate) as the pixel-level
+control: it is stable across runs, so a change that moves it changed pixels.
 
 ### HTML staging scans references from their literal starts
 
