@@ -391,6 +391,47 @@ TEST_CASE("Windows plugin host reconciles a WM_SIZE host resize",
     }
 }
 
+// A resize callback can resize the editor again: here the callback's own
+// WM_SIZE arrives while it runs, on an unattached editor that delivers at
+// once. The second size is delivered after the first callback returns, never
+// from inside it.
+TEST_CASE("Windows plugin host does not re-enter its resize callback",
+          "[view][plugin-view-host][resize][windows]") {
+    View root;
+    root.set_theme(Theme::dark());
+    register_platform_plugin_view_host();
+    PluginViewHost::Options opts;
+    opts.size = {64, 64};
+    opts.use_gpu = true; // may degrade to raster-only on a GPU-less runner
+    auto host = PluginViewHost::create(root, opts);
+    REQUIRE(host != nullptr);
+    auto hwnd = static_cast<HWND>(host->native_handle());
+    REQUIRE(hwnd != nullptr);
+    const float scale = host->scale_factor();
+    const auto send_logical = [&](uint32_t w, uint32_t h) {
+        const auto pw = static_cast<uint32_t>(w * scale + 0.5f);
+        const auto ph = static_cast<uint32_t>(h * scale + 0.5f);
+        SendMessageW(hwnd, WM_SIZE, SIZE_RESTORED, static_cast<LPARAM>(MAKELPARAM(pw, ph)));
+    };
+
+    std::vector<std::pair<uint32_t, uint32_t>> notified;
+    int depth = 0, max_depth = 0;
+    host->set_resize_callback([&](uint32_t w, uint32_t h) {
+        ++depth;
+        max_depth = depth > max_depth ? depth : max_depth;
+        notified.emplace_back(w, h);
+        if (notified.size() == 1)
+            send_logical(180, 120);
+        --depth;
+    });
+    send_logical(200, 150);
+    CHECK(max_depth == 1);
+    REQUIRE(notified.size() == 2);
+    CHECK(notified[0] == std::make_pair(200u, 150u));
+    CHECK(notified[1] == std::make_pair(180u, 120u));
+    CHECK(host->get_size().width == 180);
+}
+
 // A DAW drag resizes the attached editor once per mouse move. The processor
 // hears about it once per frame, from the frame timer, with the last size.
 TEST_CASE("Windows attached editor notifies a WM_SIZE flood once per frame",
