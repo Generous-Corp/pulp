@@ -4490,6 +4490,16 @@ opacity layer is the backdrop root, as in Chrome. Chrome's numbers come from
 `tools/import-validation/chrome_backdrop_opacity_oracle.py` over fixture
 `22-backdrop-opacity`, and `pulp-test-css-backdrop-opacity` holds Skia to them.
 
+**Backdrop edges are mirrored:** at a frosted box's edge, Chrome blurs the
+backdrop as if the box's own content were mirrored past its edges. It neither
+repeats the edge column outward nor reads the page beside the box. The Skia
+backdrop paths feed the blur `SkImageFilters::Crop(bounds, kMirror)` and
+crop only the output; passing the rect as the blur's own crop rect clamps the
+input instead, and a bright line just inside the edge smears up to 30 levels
+too bright. The fixture's sixth box starts on a 4px amber band, and the
+oracle prints Chrome's profile across that edge (row 210) for the
+`backdrop-filter mirrors the box at its edges` test.
+
 ### Step 1: Identify source and input
 
 Ask the user or detect from context:
