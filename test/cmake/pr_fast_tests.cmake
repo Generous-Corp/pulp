@@ -248,8 +248,11 @@ endforeach()
 # runs them on every pull-request head, approved or not, with `-L '^pr-guard$'`.
 # The A2T acceptance selftest holds the scope-history headroom guard: the count
 # climbs with unrelated commits, and a merge ref carries one more than main.
+# The verifier selftest drives the same acceptance tooling over its planted
+# corpora. Both are Python over the checkout and about a minute each.
 set(PULP_PR_GUARD_TESTS
     gpu-trace-overhead-acceptance-selftest
+    gpu-trace-overhead-verifier-selftest
 )
 foreach(_pulp_pr_guard_test IN LISTS PULP_PR_GUARD_TESTS)
     if(TEST "${_pulp_pr_guard_test}")

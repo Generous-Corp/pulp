@@ -3188,9 +3188,9 @@ them append-only.
 The required `macos` context is reported by more than one job. It can come from
 the macOS matrix leg, which builds and tests, or from a bootstrap job that
 claims the name without running anything, because the change touched no native
-build input or because an earlier run's protected receipt was reused. On a
-pull-request head without `macos-ci`, the macOS leg itself runs only its
-configure-only contract lane. Both look
+build input or because an earlier run's protected receipt was reused. With
+`PULP_MACOS_PR_GATING` on, an unapproved pull-request head's macOS leg itself
+runs only its configure-only contract lane. Both look
 identical in the checks list.
 
 A reused receipt produces a three-step job (`Set up job`, the bootstrap step,
@@ -3634,20 +3634,29 @@ receipt.
 
 ## macOS on a pull request waits for approval
 
-A pull request's macOS leg runs in one of two lanes:
+**Off by default.** Everything in this section is behind the repository
+variable `PULP_MACOS_PR_GATING`. Unless it is exactly `true`, every pull request
+takes the full lane, label events start runs that do nothing, and
+`macos-ci-label-reset.yml` does nothing: today's behaviour. Switch it on only
+after the arm side refuses a `deferred` green durably (a Shipyard
+queue-arm-guard change, tracked separately). The tartci interim sweep already
+refuses it. Turning it off again is the rollback.
 
-- **Contract lane** (every head, approved or not). The leg configures exactly
-  as the gate does and runs the `pr-fast` tier (minus the members labelled
-  `needs-build`) plus the `pr-guard` tier, then stops. No build, no iOS
-  compile, no affected-tests tier, no full suite.
-- **Full lane** (a head that carries `macos-ci`). Build, `pr-fast`, `pr-guard`,
-  the affected-tests tier and everything else the PR head ran before.
+With gating on, a pull request's macOS leg runs in one of two lanes:
 
-The fleet's arm sweep applies `macos-ci` to an approved head. Linux runs on
-every push either way. `merge_group` and `push` are unchanged: the merge queue
-runs the full macOS suite (or reuses an exact-tree receipt, as before) whatever
-the label says. The lane is a matrix field (`matrix.lane`) that
-`resolve-provider` sets from `MACOS_PR_DEFERRED`.
+- **Contract lane** (every head the fleet App has not approved). The leg
+  configures exactly as the gate does and runs the `pr-fast` tier (minus the
+  members labelled `needs-build`) plus the `pr-guard` tier, then stops. No
+  build, no iOS compile, no affected-tests tier, no full suite.
+- **Full lane** (a head the fleet App labelled `macos-ci`). Build, `pr-fast`,
+  `pr-guard`, the affected-tests tier and everything else the PR head ran
+  before.
+
+Linux runs on every push either way. `merge_group`, `push` and
+`workflow_dispatch` are unchanged: the merge queue runs the full macOS suite
+(or reuses an exact-tree receipt, as before) whatever the label says. The lane
+is a matrix field (`matrix.lane`); `resolve-provider` gets it from
+`tools/ci/macos_pr_lane.py`, which holds the whole rule and its tests.
 
 Why: the fleet has a hard ceiling of eight macOS VMs (two per Mac, four Macs),
 and it was saturated, with PR-head macOS jobs waiting p50 8 min and p90 46 min.
@@ -3671,9 +3680,10 @@ written at configure time. A Catch2 suite that is not built registers as a
 `<target>_NOT_BUILT-<hash>` placeholder (`tools/cmake/PulpCatch.cmake`), and the
 inventory readers skip those. The one member that runs a compiled target,
 `project-package-mutation-control`, carries `needs-build` and waits for the
-full lane. The A2T guard lives in `gpu-trace-overhead-acceptance-selftest`
-(about 68 s on the gate), too slow for `pr-fast`, so it gets the `pr-guard`
-label (`test/cmake/pr_fast_tests.cmake`).
+full lane. The A2T guard lives in `gpu-trace-overhead-acceptance-selftest`, and
+`gpu-trace-overhead-verifier-selftest` drives the same tooling; each takes
+about a minute, too slow for `pr-fast`, so both carry the `pr-guard` label
+(`test/cmake/pr_fast_tests.cmake`) and run in parallel.
 
 Step times from the 12 most recent green PR `macos` jobs (2026-10-24), job time
 only, without VM clone and boot:
@@ -3682,7 +3692,7 @@ only, without VM clone and boot:
 |---|---|---|
 | Whole job today (full lane) | 23.4 min | 14.6 to 34.4 |
 | Steps the contract lane keeps (setup, configure, `pr-fast`, A2T issuer, uploads) | 2.4 min | 2.0 to 3.1 |
-| `pr-guard` (new, both lanes) | about 1.1 min | measured 68 s on the gate |
+| `pr-guard` (new, both lanes; two tests of about 68 s each, run in parallel) | about 1.2 min | |
 | **Contract lane, expected** | **about 3.5 min** | |
 | Deferred until approval (Build 5.9, affected tier 10.3, reuse record 2.1, SDK contract 2.6 when it applies, and others) | 20.9 min | 12.1 to 31.4 |
 
@@ -3693,32 +3703,53 @@ or its own message), and the fix is to add it to `PULP_PR_FAST_NEEDS_BUILD`.
 ### The `macos-ci` contract
 
 - **Name.** Exactly `macos-ci`.
-- **Who applies it.** The fleet App (`shipyard-local[bot]`) applies it as part
-  of arming, after a trusted verdict comment whose last line is
-  `verdict: APPROVE head:<sha>` names the current head. No other automation
-  applies it. A human with triage access may apply it by hand to force the full
-  lane; that costs a VM and approves nothing.
-- **What starts a full-lane run.** The `labeled` event for `macos-ci`, or an
-  `opened` or `reopened` event on a pull request that already carries it. The
-  run is a whole Build and Test run of the head, in the pull request's usual
-  concurrency group, so it supersedes an in-progress run for the same head.
-- **A new head needs approval again.** On `synchronize`, `build.yml` treats the
-  label as absent (the contract lane runs), because the event payload still
-  lists the label the previous head earned. `macos-ci-label-reset.yml`
-  (`pull_request_target`, checks out nothing) then removes it, so the arm
-  sweep's next application fires a fresh `labeled` event. Re-adding a label
-  that is still present fires nothing, so if the reset failed (it warns), the
-  sweep must remove the label and apply it again.
+- **Only the fleet App's label counts.** The App (`shipyard-local[bot]`)
+  applies it as part of arming, after a trusted verdict comment whose last line
+  is `verdict: APPROVE head:<sha>` names the current head. On a `labeled`
+  event the lane checks the event's sender. On `opened` or `reopened` it reads
+  who applied the label last from the issue's events. Anyone else's label, or
+  an events listing that cannot be read, counts as no label.
+- **What starts a full-lane run.** The App's `labeled` event, or an `opened` or
+  `reopened` event on a pull request whose label the App applied. The label
+  event's run is macOS-only: Linux and Windows are no-ops, because the push
+  that made the head already ran them. It shares the pull request's
+  concurrency group, so it supersedes a run still in flight for that head,
+  including that run's Linux leg.
+- **The App's label does start a workflow.** A `labeled` event made with a
+  workflow's own `GITHUB_TOKEN` creates no workflow run, while an App
+  installation token's events run workflows normally (GitHub Docs, "Triggering
+  a workflow from a workflow":
+  <https://docs.github.com/en/actions/writing-workflows/choosing-when-your-workflow-runs/triggering-a-workflow#triggering-a-workflow-from-a-workflow>).
+  The label must therefore come from the App's token, never from a workflow's
+  `GITHUB_TOKEN`. Prove it live once gating is switched on: the App's label
+  on a test pull request starts a `Build and Test` run whose resolver log reads
+  `macOS lane = full`.
+- **A new head needs approval again.** On `synchronize` the lane is the
+  contract lane whatever the labels say, because the event payload still lists
+  the label the previous head earned. `macos-ci-label-reset.yml`
+  (`pull_request_target`, checks out nothing) then does two things:
+  - It **disables auto-merge.** Otherwise an armed pull request would
+    auto-merge on the new head's contract-lane green. A pull request already in
+    the merge queue leaves the queue on a push anyway.
+  - It **removes `macos-ci`**, so the sweep's next application fires a fresh
+    `labeled` event. Re-adding a label that is still present fires nothing, so
+    if the removal failed (it warns), the sweep must remove the label and apply
+    it again.
+
+  Re-arming needs a fresh verdict for the new head, the label, and a
+  full-lane success.
 - **Removing the label** starts nothing: `build.yml` does not listen for
   `unlabeled`, and a run already in flight finishes.
-- **Any other label** starts a run that skips every job, in a concurrency group
-  of its own (`build-label-noop-<run id>`), so it never cancels the real run.
-  Its skipped alias jobs carry unused names (`macos-pr-unused`,
-  `linux-label-noop`, `windows-label-noop`) so a skipped check cannot replace
-  the head's real `macos`, `linux` or `windows` result.
-- **Escape hatches.** Apply `macos-ci`, or dispatch `build.yml` on the branch
-  (`workflow_dispatch` always runs the full lane). Re-running a contract-lane
-  run does not help: a re-run replays the original event, which had no label.
+- **Any other label event** (another label, `macos-ci` from anyone but the App,
+  or any label while gating is off) starts a run that skips every job, in a
+  concurrency group of its own (`build-label-noop-<run id>`), so it never
+  cancels the real run. Its skipped alias jobs carry unused names
+  (`macos-pr-unused`, `linux-label-noop`, `windows-label-noop`) so a skipped
+  check cannot replace the head's real `macos`, `linux` or `windows` result.
+- **Escape hatch.** Dispatch `build.yml` on the branch: `workflow_dispatch`
+  always runs the full lane. A hand-applied label no longer forces anything.
+  Re-running a contract-lane run does not help either, because a re-run
+  replays the original event.
 
 ### Approve first, then the full lane, then arm
 
@@ -3733,7 +3764,8 @@ already run the fast PR-caused checks. Approval is not arming:
    on GitHub's required-check rule holds the auto-merge until that run
    concludes `success`.
 3. If the full lane fails, the pull request needs a fix. The fix is a new head,
-   which drops the label and needs a new verdict, and the cycle repeats.
+   which disarms the pull request, drops the label and needs a new verdict, and
+   the cycle repeats.
 
 A head that is already armed when the full lane reaches `Decide pull-request
 test suite` (and still merges onto the tip of `main`) also runs the full suite
@@ -3750,15 +3782,16 @@ job cannot conclude `neutral`), and a forced `failure` would turn every
 unapproved head red for a defect it does not have. A contract-lane failure is a
 real failure and stays red.
 
-So GitHub cannot tell a contract-lane green from a full one. The arming side
-tells them apart. The `pr-fast` step's log carries
+So GitHub cannot tell a contract-lane green from a full one, and the arming side
+has to. The `pr-fast` step's log carries
 `::notice title=shipyard-test-tier::{"schema":"shipyard-test-tier/v1","tier":"deferred",...}`
 on the contract lane (and `"tier":"fast"` on the full lane), and the job summary
 says that nothing was built. `tools/scripts/gate_suite_executed.py` reads
 both lanes as `tier-only`, so use the annotation, or the skipped `Build` step,
-to tell them apart. If the arming side arms on a contract-lane green anyway,
-nothing unsafe lands, because the merge group still runs macOS. The cost is
-merge-group exposure to failures only a build reveals.
+to tell them apart. That is why gating stays off until the arm side refuses
+`deferred` durably. If a head were armed on a contract-lane green anyway,
+nothing unsafe would land, because the merge group still runs macOS; the cost
+is merge-group exposure to failures only a build reveals.
 
 ### Decisions this has to keep
 
@@ -3771,16 +3804,18 @@ merge-group exposure to failures only a build reveals.
   found in a batch. The contract lane keeps the fast PR-caused checks on every
   head, and the arming rule keeps a full PR-head macOS success before any head
   enters the queue, so batch exposure stays where it is today. It worsens only
-  if the arm sweep arms on a `deferred` green.
+  if a head is armed on a `deferred` green, which the default-off switch and
+  the disarm-on-push exist to prevent.
 - **Decision 5, auto-merge rides on required checks.** `macos` stays required,
   and the contract lane reports it, so auto-merge keeps working. Because a
-  `deferred` green also satisfies it, the arming rule above is what keeps
-  auto-merge from admitting a head with no full macOS run.
-- **Decision 2, the fenced carrier's merge-update of a BEHIND armed PR.** That
-  update is a `synchronize`, so it drops `macos-ci` and the next run is the
-  contract lane. If the carrier's own-lines invariant carries the approval over
-  to the updated head, the arm sweep must apply `macos-ci` again before the
-  head can be re-armed.
+  `deferred` green also satisfies it, the arming rule and the disarm-on-push
+  are what keep auto-merge from admitting a head with no full macOS run.
+- **Decision 2, the fenced carrier's merge-update of a BEHIND armed PR.** With
+  gating on, that update is a `synchronize`: it disarms the pull request, drops
+  `macos-ci`, and the next run is the contract lane. Update-branch already
+  disarms auto-merge (see "The arm is not armed until you read it back" in the
+  CI skill). Re-arming takes the full path: a verdict for the new head, the
+  label, a full-lane success.
 - **Decision 23, the iOS compile gate.** The contract lane builds nothing, so
   it neither runs the iOS gate nor records a digest. Those come from full-lane
   and merge-group runs, as the receipts already require.
@@ -3793,17 +3828,16 @@ merge-group exposure to failures only a build reveals.
   The lanes apply only when `classify` says a native build is required.
 - **A version-bump or release PR that the fast path cannot prove** gets the
   contract lane like any other head. If the release path arms through a guard
-  that enforces the rule above, that path must apply `macos-ci` too. Otherwise
-  its merge group runs macOS, as it does today.
+  that enforces the rule above, that path must have the App apply `macos-ci`
+  too. Otherwise its merge group runs macOS, as it does today.
 - **A2T evidence pull requests** still issue their structural attestation on
   every head. The issuer is a Python step the contract lane keeps.
 
 ### Rollback
 
-Make `MACOS_PR_DEFERRED` in `resolve-provider` evaluate `false` (or delete the
-expression; a missing value keeps the full lane). Every pull-request run then
-takes the full lane again. The `labeled` trigger, the label reset and the
-`pr-guard` tier are harmless without it.
+Unset `PULP_MACOS_PR_GATING`, or set it to anything but `true`. Every pull
+request then takes the full lane, label events do nothing, and the reset
+workflow does nothing. `pr-guard` keeps running on the full lane.
 
 ## Windows is gated by the merge queue, not by the PR head
 
@@ -3828,9 +3862,9 @@ So Windows runs where it supplies independent value without blocking every merge
 - **`push: main`** — publishes the Windows ccache.
 - **`workflow_dispatch`** — explicit reruns when you want Windows early.
 
-A PR head keeps macOS on the self-hosted Macs (the configure-only contract lane
-until approved, see "macOS on a pull request waits for approval") and Linux on
-GitHub-hosted Linux for fast signal. The Linux leg therefore does consume hosted capacity; the
+A PR head keeps macOS on the self-hosted Macs (with `PULP_MACOS_PR_GATING` on,
+the configure-only contract lane until approved; see "macOS on a pull request
+waits for approval") and Linux on GitHub-hosted Linux for fast signal. The Linux leg therefore does consume hosted capacity; the
 security boundary above deliberately prevents automatic PRs from reaching the
 private Mac Pro VMs. The advisory `windows` alias job
 short-circuits to green on `pull_request` — without that it would fail closed

@@ -441,21 +441,39 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
         self.assertIn("macos", keys)
         self.assertIn("linux", keys)
 
+    GATED = {"PULP_MACOS_PR_GATING": "true"}
+
     def test_unapproved_pull_request_runs_only_the_macos_contract_lane(self) -> None:
-        """A PR head without `macos-ci` keeps a macOS leg, but configure-only."""
-        lanes = self._macos_lanes("pull_request", MACOS_PR_DEFERRED="true")
-        self.assertEqual(lanes, ["contract"])
-        self.assertIn("linux", self._matrix_keys("pull_request", MACOS_PR_DEFERRED="true"))
-        self.assertEqual(self._macos_lanes("pull_request", MACOS_PR_DEFERRED="false"), ["full"])
-        # A missing variable keeps the full lane.
+        """A new head with gating on keeps a macOS leg, but configure-only."""
+        push = {**self.GATED, "PR_EVENT_ACTION": "synchronize"}
+        self.assertEqual(self._macos_lanes("pull_request", **push), ["contract"])
+        self.assertIn("linux", self._matrix_keys("pull_request", **push))
+
+    def test_gating_defaults_off(self) -> None:
+        """Unset or not exactly `true`: every pull request takes the full lane."""
+        for gating in ("", "false", "1"):
+            with self.subTest(gating=gating):
+                self.assertEqual(self._macos_lanes(
+                    "pull_request", PULP_MACOS_PR_GATING=gating,
+                    PR_EVENT_ACTION="synchronize"), ["full"])
         self.assertEqual(self._macos_lanes("pull_request"), ["full"])
+
+    def test_the_apps_label_event_runs_the_full_lane_and_only_macos(self) -> None:
+        approval = {**self.GATED, "PR_EVENT_ACTION": "labeled", "PR_LABEL_NAME": "macos-ci",
+                    "PR_SENDER": "shipyard-local[bot]", "PR_LABELS_JSON": '["macos-ci"]'}
+        self.assertEqual(self._matrix_keys("pull_request", **approval), ["macos"])
+        self.assertEqual(self._macos_lanes("pull_request", **approval), ["full"])
+        # Anyone else's label leaves the head on the contract lane.
+        self.assertEqual(self._macos_lanes(
+            "pull_request", **{**approval, "PR_SENDER": "a-maintainer"}), ["contract"])
 
     def test_deferral_never_reaches_merge_group_or_dispatch(self) -> None:
         """The merge queue and the escape hatch always run the full macOS lane."""
         for event in ("merge_group", "workflow_dispatch"):
             with self.subTest(event=event):
-                self.assertEqual(
-                    self._macos_lanes(event, MACOS_PR_DEFERRED="true"), ["full"])
+                self.assertEqual(self._macos_lanes(
+                    event, **self.GATED, PR_EVENT_ACTION="synchronize"), ["full"])
+                self.assertIn("linux", self._matrix_keys(event, **self.GATED))
 
     def test_merge_group_matrix_keeps_macos_and_local_eligible_linux(self) -> None:
         """Advisory hosted legs must not sit in the path every merge takes.
