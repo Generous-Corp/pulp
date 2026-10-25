@@ -671,13 +671,18 @@ pulp_add_test_suite(pulp-test-convolver-non-uniform GROUP pulp-test-group-core-s
 # GPU audio runtime: real-time transport (fixed-latency proxy + non-RT worker
 # pump + lock-free rings + miss policy). GPU-agnostic scheduling logic, so it
 # runs on no-GPU CI too.
+# On UNIX the callback probe traps locks as well as allocations.
 pulp_add_test_suite(pulp-test-gpu-audio-transport
-    SOURCES test_gpu_audio_transport.cpp harness/rt_allocation_probe.cpp
+    SOURCES test_gpu_audio_transport.cpp
+            $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
+            $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
             ${CMAKE_SOURCE_DIR}/core/gpu_audio/src/gpu_audio_transport.cpp
             ${CMAKE_SOURCE_DIR}/core/gpu_audio/src/detail/realtime_gpu_audio_path.cpp
     LIBRARIES pulp::audio pulp::runtime Threads::Threads
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/include
-                 ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+                 ${CMAKE_SOURCE_DIR}/core/gpu_audio/src
+    COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
+pulp_test_spawns(pulp-test-gpu-audio-transport NONE REASON "forks itself without exec and loads nothing the tree builds")
 
 # Capability and program validators, plus the transport's refusal of a
 # shape those validators would reject. GPU-agnostic, like the transport suite.

@@ -2044,6 +2044,13 @@ TEST_CASE("Staged GpuConvolver validates sample rate and breaker settings",
     CHECK_FALSE(zero_rate.prepare());
 
     GpuConvolver node(1, 64, 48000, staged_test_ir());
+    // Defaults: trip after 8 late blocks, probe every 32, recover after 4.
+    CHECK(GpuConvolverStagedBreaker{}.trip_after_misses == 8u);
+    CHECK(GpuConvolverStagedBreaker{}.probe_interval_blocks == 32u);
+    CHECK(GpuConvolverStagedBreaker{}.recover_after_hits == 4u);
+    CHECK(node.staged_breaker().trip_after_misses == 8u);
+    CHECK(node.staged_breaker().probe_interval_blocks == 32u);
+    CHECK(node.staged_breaker().recover_after_hits == 4u);
     CHECK_FALSE(node.configure_staged_breaker({.trip_after_misses = 0}));
     CHECK_FALSE(node.configure_staged_breaker({.probe_interval_blocks = 0}));
     CHECK_FALSE(node.configure_staged_breaker({.recover_after_hits = 0}));
