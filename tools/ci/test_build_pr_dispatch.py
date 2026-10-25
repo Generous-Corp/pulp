@@ -27,17 +27,24 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 BUILD = ROOT / ".github/workflows/build.yml"
 REPO = "Generous-Corp/pulp"
-MERGE_REF = "${{ github.event_name == 'workflow_dispatch' && inputs.pr_number != '' && format('refs/pull/{0}/merge', inputs.pr_number) || '' }}"
+CLASSIFY_REF = "${{ steps.pr_dispatch.outputs.tested_sha || '' }}"
+BUILD_REF = "${{ needs.classify.outputs.tested_sha || '' }}"
 PR_DISPATCH = "github.event_name == 'workflow_dispatch' && inputs.pr_number != ''"
 LOCAL_LINUX = ["self-hosted", "Linux", "X64", "pulp-build-linux-x64", "pulp-host-macpro"]
 
+# Answers `gh api <path>` from FAKE_GH_ANSWERS ({path-substring: body}); a
+# body of "!FAIL" exits non-zero.
 FAKE_GH = """#!/usr/bin/env python3
-import os, sys
-answer = os.environ["FAKE_GH_ANSWER"]
-if answer == "!FAIL":
-    sys.stderr.write("HTTP 404: Not Found\\n")
-    sys.exit(1)
-sys.stdout.write(answer)
+import json, os, sys
+answers = json.loads(os.environ["FAKE_GH_ANSWERS"])
+text = " ".join(sys.argv[1:])
+for key, body in answers.items():
+    if key in text:
+        if body == "!FAIL":
+            sys.stderr.write("HTTP 404: Not Found\\n")
+            sys.exit(1)
+        sys.stdout.write(body)
+        break
 """
 
 
@@ -91,23 +98,27 @@ class InputAndCheckoutTest(unittest.TestCase):
         self.assertEqual((pr_number["type"], pr_number["default"], pr_number["required"]),
                          ("string", "", False))
 
-    def test_classify_and_build_check_out_the_merge_ref_only_on_a_pr_dispatch(self) -> None:
-        for job in ("classify", "build"):
-            with self.subTest(job=job):
-                checkout = next(step for step in workflow()["jobs"][job]["steps"]
-                                if str(step.get("uses", "")).startswith("actions/checkout"))
-                self.assertEqual(checkout["with"]["ref"], MERGE_REF)
+    def test_both_jobs_check_out_the_one_bound_merge_commit(self) -> None:
+        # Resolved once, in classify's bind step; build checks out classify's
+        # output. Neither checks out the moving refs/pull/<n>/merge.
+        jobs = workflow()["jobs"]
+        checkouts = {job: next(step for step in jobs[job]["steps"]
+                               if str(step.get("uses", "")).startswith("actions/checkout"))
+                     for job in ("classify", "build")}
+        self.assertEqual(checkouts["classify"]["with"]["ref"], CLASSIFY_REF)
+        self.assertEqual(checkouts["build"]["with"]["ref"], BUILD_REF)
+        outputs = jobs["classify"]["outputs"]
+        for name in ("tested_ref", "tested_sha", "merged_base"):
+            self.assertEqual(outputs[name], f"${{{{ steps.pr_dispatch.outputs.{name} }}}}")
+        self.assertIn("classify", jobs["build"]["needs"])
+        self.assertNotIn("refs/pull/{0}/merge", BUILD.read_text(encoding="utf-8"))
 
-    def test_the_ref_expression_is_empty_off_the_pr_dispatch(self) -> None:
-        # Mirrors GitHub's && / || short-circuit: empty means the event's ref.
-        def ref(event: str, pr_number: str) -> str:
-            return (event == "workflow_dispatch" and pr_number != ""
-                    and f"refs/pull/{pr_number}/merge") or ""
-        self.assertEqual(ref("workflow_dispatch", "11040"), "refs/pull/11040/merge")
-        for event, pr_number in (("workflow_dispatch", ""), ("pull_request", ""),
-                                 ("merge_group", ""), ("push", "")):
-            with self.subTest(event=event):
-                self.assertEqual(ref(event, pr_number), "")
+    def test_the_bind_runs_before_classify_checks_anything_out(self) -> None:
+        first = workflow()["jobs"]["classify"]["steps"][0]
+        self.assertEqual((first["name"], first["id"]), ("Bind the pull-request dispatch to its head",
+                                                       "pr_dispatch"))
+        self.assertEqual(first["if"], PR_DISPATCH)
+        self.assertNotIn("Bind the pull-request dispatch to its head", steps("resolve-provider"))
 
     def test_the_tested_ref_is_verified_and_recorded_before_anything_uses_the_tree(self) -> None:
         names = [step.get("name") for step in workflow()["jobs"]["build"]["steps"]]
@@ -133,7 +144,7 @@ class VerifyMergeRefTest(unittest.TestCase):
     def test_a_merge_of_this_head_is_recorded(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             shas = merge_repo(Path(tmp))
-            proc, outputs = bash(self.script, {"GITHUB_SHA": shas["head"],
+            proc, outputs = bash(self.script, {"GITHUB_SHA": shas["head"], "BOUND_SHA": shas["merge"],
                                                "TESTED_REF": "refs/pull/7/merge", "PWD_OVERRIDE": tmp})
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertEqual((outputs["tested_ref"], outputs["tested_sha"], outputs["merged_base"]),
@@ -143,15 +154,33 @@ class VerifyMergeRefTest(unittest.TestCase):
     def test_a_merge_of_another_head_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             shas = merge_repo(Path(tmp))
-            proc, outputs = bash(self.script, {"GITHUB_SHA": "f" * 40,
+            proc, outputs = bash(self.script, {"GITHUB_SHA": "f" * 40, "BOUND_SHA": shas["merge"],
                                                "TESTED_REF": "refs/pull/7/merge", "PWD_OVERRIDE": tmp})
         self.assertEqual(proc.returncode, 1)
         self.assertIn("does not merge this run's head", proc.stdout)
         self.assertNotIn("tested_sha", outputs)
 
+    def test_a_checkout_other_than_the_bound_sha_fails(self) -> None:
+        # Belt and braces: build re-checks classify's binding.
+        with tempfile.TemporaryDirectory() as tmp:
+            shas = merge_repo(Path(tmp))
+            for bound in ("e" * 40, ""):
+                with self.subTest(bound=bound):
+                    proc, outputs = bash(self.script, {"GITHUB_SHA": shas["head"], "BOUND_SHA": bound,
+                                                       "TESTED_REF": "refs/pull/7/merge",
+                                                       "PWD_OVERRIDE": tmp})
+                    self.assertEqual(proc.returncode, 1)
+                    self.assertIn("not the merge commit classify bound", proc.stdout)
+                    self.assertNotIn("tested_sha", outputs)
+
+    def test_it_reads_the_binding_from_classify(self) -> None:
+        env = steps("build")["Verify the tested merge ref"]["env"]
+        self.assertEqual(env["BOUND_SHA"], "${{ needs.classify.outputs.tested_sha }}")
+        self.assertEqual(env["TESTED_REF"], "${{ needs.classify.outputs.tested_ref }}")
+
 
 class ClassifyBaseTest(unittest.TestCase):
-    """classify diffs a PR dispatch's merge ref against its merged base."""
+    """classify diffs a PR dispatch's merge commit against its bound base."""
 
     START = 'if [ "$EVENT_NAME" = workflow_dispatch ] && [ -n "${DISPATCH_PR_NUMBER:-}" ]; then'
 
@@ -164,74 +193,88 @@ class ClassifyBaseTest(unittest.TestCase):
         end = next(i for i in range(start, len(lines)) if lines[i].strip() == "fi")
         cls.snippet = "\n".join(lines[start:end + 1])
 
-    def _base(self, clone: Path, event: str, pr_number: str, base: str = "origin/main") -> str:
-        script = f"set -euo pipefail\nbase={base}\n{self.snippet}\necho \"BASE=$base\""
+    def _base(self, event: str, pr_number: str, merged_base: str) -> str:
+        script = f"set -euo pipefail\nbase=origin/main\n{self.snippet}\necho \"BASE=$base\""
         proc, _ = bash(script, {"EVENT_NAME": event, "DISPATCH_PR_NUMBER": pr_number,
-                                "PWD_OVERRIDE": str(clone)})
+                                "DISPATCH_MERGED_BASE": merged_base})
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         return next(line for line in proc.stdout.splitlines() if line.startswith("BASE="))[5:]
 
-    def test_the_merged_base_from_a_depth_one_merge_ref(self) -> None:
-        self.assertEqual(self.env["DISPATCH_PR_NUMBER"], "${{ inputs.pr_number }}")
-        with tempfile.TemporaryDirectory() as tmp:
-            source, clone = Path(tmp) / "source", Path(tmp) / "clone"
-            source.mkdir()
-            shas = merge_repo(source)
-            subprocess.run(["git", "clone", "-q", "--depth", "1", f"file://{source}", str(clone)],
-                           check=True, capture_output=True)
-            self.assertEqual(self._base(clone, "workflow_dispatch", "7"), shas["base"])
-            # Not a PR dispatch: the resolver's base stands.
-            self.assertEqual(self._base(clone, "workflow_dispatch", ""), "origin/main")
-            self.assertEqual(self._base(clone, "pull_request", "7"), "origin/main")
-
-    def test_a_tree_with_no_parent_leaves_no_sha(self) -> None:
-        # Fails toward the native build: the caller requests it for a non-sha.
-        with tempfile.TemporaryDirectory() as tmp:
-            subprocess.run(["git", "init", "-q", tmp], check=True)
-            subprocess.run(["git", "-C", tmp, "-c", "user.name=t", "-c", "user.email=t@t",
-                            "commit", "-q", "--allow-empty", "-m", "root"], check=True)
-            self.assertEqual(self._base(Path(tmp), "workflow_dispatch", "7"), "")
+    def test_a_pr_dispatch_diffs_against_the_bound_base(self) -> None:
+        self.assertEqual(self.env["DISPATCH_MERGED_BASE"], "${{ steps.pr_dispatch.outputs.merged_base }}")
+        self.assertEqual(self._base("workflow_dispatch", "7", "c" * 40), "c" * 40)
+        # Not a PR dispatch: the resolver's base stands.
+        self.assertEqual(self._base("workflow_dispatch", "", ""), "origin/main")
+        self.assertEqual(self._base("pull_request", "7", "c" * 40), "origin/main")
+        # No bound base: no sha, so the caller requires the native build.
+        self.assertEqual(self._base("workflow_dispatch", "7", ""), "")
 
 
 class BindingTest(unittest.TestCase):
-    """The resolve-provider step that binds the dispatch to the pull request."""
+    """classify's bind step: the pull request, its head and its merge commit."""
+
+    HEAD, MERGE, BASE = "a" * 40, "d" * 40, "c" * 40
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.step = steps("resolve-provider")["Bind the pull-request dispatch to its head"]
+        cls.step = steps("classify")["Bind the pull-request dispatch to its head"]
 
-    def _run(self, pr_number: str, answer: str) -> tuple[subprocess.CompletedProcess, dict[str, str]]:
+    def _pull(self, state="open", repo=REPO, ref="topic", head=None, merge=None, mergeable="true"):
+        merge = self.MERGE if merge is None else merge
+        return f"{state} {repo} {ref} {head or self.HEAD} {merge} {mergeable}\n"
+
+    def _run(self, pull: str, parents: str | None = None, pr_number: str = "7"):
+        answers = {"/pulls/": pull,
+                   "/commits/": parents if parents is not None else f"{self.BASE} {self.HEAD}\n"}
         with tempfile.TemporaryDirectory() as tmp:
             bin_dir = Path(tmp) / "bin"
             bin_dir.mkdir()
             (bin_dir / "gh").write_text(FAKE_GH, encoding="utf-8")
             (bin_dir / "gh").chmod(0o755)
-            return bash(self.step["run"], {
-                "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "FAKE_GH_ANSWER": answer,
-                "DISPATCH_PR_NUMBER": pr_number, "GITHUB_REPOSITORY": REPO,
-                "GITHUB_REF_NAME": "topic", "GITHUB_SHA": "a" * 40, "GH_TOKEN": "x"})
+            # The wait for GitHub's mergeability is real time; tests skip it.
+            # Actions substitutes the token expression before bash runs.
+            script = (self.step["run"].replace("sleep $((attempt * 5))", ":")
+                      .replace("${{ github.token }}", "x"))
+            return bash(script, {
+                "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+                "FAKE_GH_ANSWERS": json.dumps(answers), "DISPATCH_PR_NUMBER": pr_number,
+                "GITHUB_REPOSITORY": REPO, "GITHUB_REF_NAME": "topic", "GITHUB_SHA": self.HEAD,
+                "GH_TOKEN": "x"})
 
     def test_it_runs_only_on_a_pr_dispatch(self) -> None:
         self.assertEqual(self.step["if"], PR_DISPATCH)
+        # The token reaches its reads only, never the job's env.
+        self.assertNotIn("GH_TOKEN", self.step.get("env", {}))
 
-    def test_a_dispatch_on_the_pull_requests_head_is_bound(self) -> None:
-        proc, outputs = self._run("7", f"open {REPO} topic {'a' * 40}\n")
+    def test_a_dispatch_on_the_pull_requests_head_binds_its_merge_commit(self) -> None:
+        proc, outputs = self._run(self._pull())
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
-        self.assertEqual(outputs["tested_ref"], "refs/pull/7/merge")
+        self.assertEqual((outputs["tested_ref"], outputs["tested_sha"], outputs["merged_base"]),
+                         ("refs/pull/7/merge", self.MERGE, self.BASE))
 
     def test_anything_else_fails_closed(self) -> None:
-        for case, pr_number, answer in (
-                ("closed", "7", f"closed {REPO} topic {'a' * 40}\n"),
-                ("fork head", "7", f"open someone/pulp topic {'a' * 40}\n"),
-                ("another branch", "7", f"open {REPO} other {'a' * 40}\n"),
-                ("head moved", "7", f"open {REPO} topic {'b' * 40}\n"),
-                ("unreadable", "7", "!FAIL"),
-                ("not digits", "7; rm -rf /", f"open {REPO} topic {'a' * 40}\n"),
-                ("zero", "0", f"open {REPO} topic {'a' * 40}\n")):
+        cases = (
+            ("closed", self._pull(state="closed"), None, "7"),
+            ("fork head", self._pull(repo="someone/pulp"), None, "7"),
+            ("another branch", self._pull(ref="other"), None, "7"),
+            ("head moved", self._pull(head="b" * 40), None, "7"),
+            ("unreadable", "!FAIL", None, "7"),
+            ("not digits", self._pull(), None, "7; rm -rf /"),
+            ("zero", self._pull(), None, "0"),
+            ("conflicting", self._pull(mergeable="false"), None, "7"),
+            ("never computed", self._pull(mergeable="null"), None, "7"),
+            ("no merge commit", self._pull(merge=""), None, "7"),
+            ("merges another head", self._pull(), f"{self.BASE} {'b' * 40}\n", "7"),
+            ("head as first parent", self._pull(), f"{self.HEAD} {self.BASE}\n", "7"),
+            ("three parents", self._pull(), f"{self.BASE} {self.HEAD} {'e' * 40}\n", "7"),
+            ("one parent", self._pull(), f"{self.HEAD}\n", "7"),
+            ("unreadable merge commit", self._pull(), "!FAIL", "7"),
+        )
+        for case, pull, parents, pr_number in cases:
             with self.subTest(case=case):
-                proc, outputs = self._run(pr_number, answer)
+                proc, outputs = self._run(pull, parents, pr_number)
                 self.assertEqual(proc.returncode, 1, proc.stdout)
-                self.assertNotIn("tested_ref", outputs)
+                self.assertNotIn("tested_sha", outputs)
 
 
 class LinuxRoutingTest(unittest.TestCase):

@@ -3854,21 +3854,26 @@ gh workflow run build.yml --ref <pr-head-branch> -f pr_number=<n>
 ```
 
 With `pr_number` set, the run does the following:
-- **Binds first.** In resolve-provider, it requires the pull request to be
-  open, in this repository, with its head branch and commit equal to the
-  dispatch's `github.ref_name` and `github.sha`. Anything else fails closed,
-  and so does `macos`. This stops a dispatch on one branch from posting
-  another pull request's merge result on its head.
-- **Tests the merge ref.** classify and every build leg check out
-  `refs/pull/<n>/merge`, as a pull_request run does. The merge's second parent
-  must be the run's head, or the build fails; a newer push or a stale merge
-  ref both fail here.
+- **Binds first, and resolves the merge commit once.** classify's first step
+  requires the pull request to be open, in this repository, with its head
+  branch and commit equal to the dispatch's `github.ref_name` and
+  `github.sha`. It then takes the pull request's merge commit
+  (`merge_commit_sha`, which `refs/pull/<n>/merge` names) and requires exactly
+  two parents: a base, then this head. Anything else fails closed, and so does
+  `macos`. That covers a conflicting pull request, a merge GitHub has not
+  computed yet, or a moved head. Without the binding, a dispatch on one branch
+  could post another pull request's merge result on its head.
+- **Tests that exact commit everywhere.** classify, and every build leg
+  through classify's output, check out the bound merge sha, never the moving
+  ref. Build re-checks that HEAD is that sha and that its second parent is the
+  run's head.
 - **Records what it tested.** The `tested_ref`, the `tested_sha` (the merge
-  commit) and the `merged_base` (its first parent) are step outputs of `Verify
-  the tested merge ref` and appear in the job summary. The next step is named
-  `Tested <ref> at <sha> onto <base>`, so a reader of the jobs API sees them
-  without reading logs. The merged base is also the capability base and the
-  base classify diffs against, as a pull request's pinned `base.sha` is.
+  commit) and the `merged_base` (its first parent) are classify outputs and
+  step outputs of `Verify the tested merge ref`, and appear in the job summary.
+  The next step is named `Tested <ref> at <sha> onto <base>`, so a reader of
+  the jobs API sees them without reading logs. The merged base is also the
+  capability base and the base classify diffs against, as a pull request's
+  pinned `base.sha` is.
 - **Routes Linux as a pull_request run does**, to GitHub-hosted Linux. The
   operator Linux selectors are ignored on this path.
 

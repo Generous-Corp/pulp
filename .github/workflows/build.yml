@@ -179,7 +179,6 @@ jobs:
       macos_runs_on_json: ${{ steps.resolve.outputs.macos_runs_on_json }}
       windows_leg: ${{ steps.resolve.outputs.windows_leg }}
       hosted_windows_allowed: ${{ steps.resolve.outputs.hosted_windows_allowed }}
-      tested_ref: ${{ steps.pr_dispatch.outputs.tested_ref }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -1052,38 +1051,6 @@ jobs:
           PY
           )
 
-      # A `pr_number` dispatch tests refs/pull/<n>/merge but posts its checks
-      # on this run's head, so bind the two before anything builds: the pull
-      # request must be open, in this repository, and headed exactly by this
-      # dispatch's branch and commit. Otherwise a dispatch on one branch could
-      # put another pull request's merge result on its head. Fails closed;
-      # a failed preamble fails `macos` closed.
-      - name: Bind the pull-request dispatch to its head
-        id: pr_dispatch
-        if: github.event_name == 'workflow_dispatch' && inputs.pr_number != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          DISPATCH_PR_NUMBER: ${{ inputs.pr_number }}
-        run: |
-          set -euo pipefail
-          if ! [[ "$DISPATCH_PR_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
-            echo "::error title=pr_number dispatch::pr_number must be digits, got '$DISPATCH_PR_NUMBER'"
-            exit 1
-          fi
-          if ! pr=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$DISPATCH_PR_NUMBER" \
-              --jq '[.state, .head.repo.full_name // "", .head.ref, .head.sha] | join(" ")'); then
-            echo "::error title=pr_number dispatch::could not read pull request #$DISPATCH_PR_NUMBER"
-            exit 1
-          fi
-          read -r state head_repo head_ref head_sha <<< "$pr"
-          expected="open $GITHUB_REPOSITORY $GITHUB_REF_NAME $GITHUB_SHA"
-          if [ "$state $head_repo $head_ref $head_sha" != "$expected" ]; then
-            echo "::error title=pr_number dispatch::#$DISPATCH_PR_NUMBER is '$state $head_repo $head_ref $head_sha', not '$expected'; dispatch on its head branch at its current head"
-            exit 1
-          fi
-          echo "tested_ref=refs/pull/$DISPATCH_PR_NUMBER/merge" >> "$GITHUB_OUTPUT"
-          echo "#$DISPATCH_PR_NUMBER is headed by $GITHUB_REF_NAME at $GITHUB_SHA; testing refs/pull/$DISPATCH_PR_NUMBER/merge"
-
   # ── Change classifier ────────────────────────────────────────────────────
   # Decides whether this PR needs the native build matrix at all. A PR that
   # touches only docs / markdown / git-hooks / Shipyard config does not need
@@ -1108,7 +1075,73 @@ jobs:
       a2t_evidence_head: ${{ steps.classify.outputs.head }}
       queue_breaker_blocked_prs: ${{ steps.queue_breaker.outputs.blocked_prs }}
       queue_breaker_reason: ${{ steps.queue_breaker.outputs.reason }}
+      # A `pr_number` dispatch's merge commit, resolved once here and checked
+      # out by sha here and in every build leg, so all of them test the same
+      # tree even if refs/pull/<n>/merge moves meanwhile.
+      tested_ref: ${{ steps.pr_dispatch.outputs.tested_ref }}
+      tested_sha: ${{ steps.pr_dispatch.outputs.tested_sha }}
+      merged_base: ${{ steps.pr_dispatch.outputs.merged_base }}
     steps:
+      # A `pr_number` dispatch tests the pull request's merge commit but posts
+      # its checks on this run's head, so bind the two before anything else:
+      # the pull request must be open, in this repository, and headed exactly
+      # by this dispatch's branch and commit. Otherwise a dispatch on one
+      # branch could put another pull request's merge result on its head. Its
+      # merge commit (merge_commit_sha, which refs/pull/<n>/merge names) must
+      # have exactly two parents, a base and this head. Fails closed: a failed
+      # classify fails `macos` closed.
+      - name: Bind the pull-request dispatch to its head
+        id: pr_dispatch
+        if: github.event_name == 'workflow_dispatch' && inputs.pr_number != ''
+        env:
+          DISPATCH_PR_NUMBER: ${{ inputs.pr_number }}
+        run: |
+          set -euo pipefail
+          title="pr_number dispatch"
+          # The token goes to these reads only, never into this job's env: the
+          # job later runs checked-out code.
+          gh_read() { GH_TOKEN="${{ github.token }}" gh api "$@"; }
+          if ! [[ "$DISPATCH_PR_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error title=$title::pr_number must be digits, got '$DISPATCH_PR_NUMBER'"
+            exit 1
+          fi
+          # GitHub computes the merge commit after a push; wait briefly for it.
+          pr=""
+          for attempt in 1 2 3 4 5 6; do
+            if ! pr=$(gh_read "repos/$GITHUB_REPOSITORY/pulls/$DISPATCH_PR_NUMBER" \
+                --jq '[.state, .head.repo.full_name // "", .head.ref, .head.sha, .merge_commit_sha // "", (.mergeable | tostring)] | join(" ")'); then
+              echo "::error title=$title::could not read pull request #$DISPATCH_PR_NUMBER"
+              exit 1
+            fi
+            read -r state head_repo head_ref head_sha merge_sha mergeable <<< "$pr"
+            [ "$mergeable" = null ] || break
+            sleep $((attempt * 5))
+          done
+          expected="open $GITHUB_REPOSITORY $GITHUB_REF_NAME $GITHUB_SHA"
+          if [ "$state $head_repo $head_ref $head_sha" != "$expected" ]; then
+            echo "::error title=$title::#$DISPATCH_PR_NUMBER is '$state $head_repo $head_ref $head_sha', not '$expected'; dispatch on its head branch at its current head"
+            exit 1
+          fi
+          if [ "$mergeable" != true ] || ! [[ "$merge_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error title=$title::#$DISPATCH_PR_NUMBER has no merge commit to test (mergeable=$mergeable); resolve conflicts or dispatch again"
+            exit 1
+          fi
+          if ! parents=$(gh_read "repos/$GITHUB_REPOSITORY/commits/$merge_sha" --jq '[.parents[].sha] | join(" ")'); then
+            echo "::error title=$title::could not read merge commit $merge_sha"
+            exit 1
+          fi
+          read -r -a parent_list <<< "$parents"
+          if [ "${#parent_list[@]}" -ne 2 ] || [ "${parent_list[1]}" != "$GITHUB_SHA" ] \
+              || ! [[ "${parent_list[0]}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error title=$title::merge commit $merge_sha has parents '$parents', not '<base> $GITHUB_SHA'"
+            exit 1
+          fi
+          {
+            echo "tested_ref=refs/pull/$DISPATCH_PR_NUMBER/merge"
+            echo "tested_sha=$merge_sha"
+            echo "merged_base=${parent_list[0]}"
+          } >> "$GITHUB_OUTPUT"
+          echo "#$DISPATCH_PR_NUMBER is headed by $GITHUB_REF_NAME at $GITHUB_SHA; testing merge $merge_sha onto ${parent_list[0]}"
       - uses: actions/checkout@v7
         with:
           # Classification needs two immutable trees, not Pulp's entire
@@ -1116,9 +1149,9 @@ jobs:
           # .git directory before this cheap preamble could report.
           fetch-depth: 1
           lfs: false
-          # A `pr_number` dispatch classifies the merge ref, as a pull_request
-          # run does. Empty is the event's own ref.
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.pr_number != '' && format('refs/pull/{0}/merge', inputs.pr_number) || '' }}
+          # A `pr_number` dispatch classifies its bound merge commit, as a
+          # pull_request run does. Empty is the event's own ref.
+          ref: ${{ steps.pr_dispatch.outputs.tested_sha || '' }}
       # Backstop for a HOLD that did not take its head out of the queue: fail
       # the group, before any VM, when a queued pull request's latest trusted
       # verdict on the head it lands is HOLD. A failed classify makes the
@@ -1210,6 +1243,7 @@ jobs:
           EVENT_HEAD_SHA: ${{ github.sha }}
           EVENT_PATH: ${{ github.event_path }}
           DISPATCH_PR_NUMBER: ${{ inputs.pr_number }}
+          DISPATCH_MERGED_BASE: ${{ steps.pr_dispatch.outputs.merged_base }}
           # Default OFF. `1` lets the protected-base bump verifier accept the
           # synthesized refs/pull/N/merge checkout once it proves the merge's
           # parents are exactly [base.sha, head.sha] and its tree is the head's.
@@ -1237,14 +1271,12 @@ jobs:
             a2t_receipt_verification_required=true
           fi
           base="$("$ci_python" tools/scripts/resolve_classify_base.py)"
-          # A `pr_number` dispatch checked out refs/pull/<n>/merge: diff it
-          # against that merge's own base, its first parent, as a pull request
-          # diffs its pinned base.sha. The commit object names its parents even
-          # at depth 1. Anything but a sha leaves the native build required.
+          # A `pr_number` dispatch checked out its bound merge commit: diff it
+          # against that merge's base (the bind step verified it), as a pull
+          # request diffs its pinned base.sha. Anything but a sha leaves the
+          # native build required.
           if [ "$EVENT_NAME" = workflow_dispatch ] && [ -n "${DISPATCH_PR_NUMBER:-}" ]; then
-            merge_commit=$(git cat-file -p HEAD 2>/dev/null) || merge_commit=""
-            base=$(sed -n 's/^parent \([0-9a-f]\{40\}\)$/\1/p' <<< "$merge_commit")
-            base="${base%%$'\n'*}"
+            base="${DISPATCH_MERGED_BASE:-}"
             echo "classify: pr_number dispatch; diffing refs/pull/$DISPATCH_PR_NUMBER/merge against its merged base ${base:-<none>}"
           fi
           native_build_required=true
@@ -1806,24 +1838,29 @@ jobs:
           # the intent obvious. Net win: 5-10× faster on local mac on the
           # 2nd+ run of any PR (cache + build dir stay warm).
           clean: ${{ contains(matrix.runs_on_json, 'self-hosted') == false }}
-          # A `pr_number` dispatch tests the merge ref, exactly as a
-          # pull_request run does; resolve-provider bound it to this run's head.
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.pr_number != '' && format('refs/pull/{0}/merge', inputs.pr_number) || '' }}
+          # A `pr_number` dispatch tests the merge commit classify bound to
+          # this run's head, the same sha classify tested.
+          ref: ${{ needs.classify.outputs.tested_sha || '' }}
 
-      # The tree a `pr_number` dispatch tested: refs/pull/<n>/merge, whose
-      # second parent must be this run's head (a newer push or a stale merge
-      # ref fails here). Its first parent is the merged base. All three are
+      # The tree a `pr_number` dispatch tested: the merge commit classify
+      # bound, re-checked here. HEAD must be that sha and its second parent
+      # this run's head. Its first parent is the merged base. All three are
       # step outputs and the job summary, and the next step's name carries
-      # the ref and sha so a reader of the jobs API sees them too.
+      # them so a reader of the jobs API sees them too.
       - name: Verify the tested merge ref
         id: tested
         if: github.event_name == 'workflow_dispatch' && inputs.pr_number != ''
         shell: bash
         env:
-          TESTED_REF: refs/pull/${{ inputs.pr_number }}/merge
+          TESTED_REF: ${{ needs.classify.outputs.tested_ref }}
+          BOUND_SHA: ${{ needs.classify.outputs.tested_sha }}
         run: |
           set -euo pipefail
           tested_sha=$(git rev-parse HEAD)
+          if [ -z "$BOUND_SHA" ] || [ "$tested_sha" != "$BOUND_SHA" ]; then
+            echo "::error title=pr_number dispatch::checked out $tested_sha, not the merge commit classify bound (${BOUND_SHA:-none})"
+            exit 1
+          fi
           head_parent=$(git rev-parse --verify --quiet HEAD^2 || true)
           if [ "$head_parent" != "$GITHUB_SHA" ]; then
             echo "::error title=pr_number dispatch::$TESTED_REF at $tested_sha does not merge this run's head $GITHUB_SHA (second parent: ${head_parent:-none}); dispatch again on the current head"
