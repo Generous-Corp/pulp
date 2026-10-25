@@ -1429,6 +1429,20 @@
    "spawns": "none",
    "undeclared_sources": []
   },
+  "pulp-test-embed-compress": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_embed_compress.cpp"
+   ],
+   "inputs": [
+    "core/view/js/css-colors.js"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/test_embed_compress.cpp"
+   ],
+   "undeclared_sources": []
+  },
   "pulp-test-fixture-runner-cli": {
    "data": "declared",
    "detected_sources": [
@@ -2670,6 +2684,7 @@
   "pulp-test-dspx07-projection",
   "pulp-test-edit-history",
   "pulp-test-editor-open-stages",
+  "pulp-test-embed-compress",
   "pulp-test-faithful-port-toolkit",
   "pulp-test-fast-math-no-contract",
   "pulp-test-fdn-reverb",
