@@ -661,6 +661,41 @@ namespace myresources {
 |-----------|----------|---------|-------------|
 | `SOURCES` | Yes | -- | Files to embed |
 | `NAMESPACE` | No | `<target>` | C++ namespace for the generated symbols |
+| `COMPRESS` | No | Off | Store each asset as a zlib stream (see below) |
+
+### Compressed embeds
+
+`COMPRESS` stores each asset as a zlib (RFC 1950) stream at level 9. The
+stream is produced by the build host's Python zlib, so it is deterministic per
+zlib build: two hosts whose Python links different zlib builds (zlib 1.2.x and
+zlib-ng, for example) can embed different, equally valid streams, and they
+inflate to the same bytes. Text assets shrink the most: a materialized
+design's runtime bundle to about a tenth, its document JSON to about two
+fifths. Already-compressed formats (PNG, JPEG, WOFF2) gain nothing, so embed
+those in a separate call without `COMPRESS`. The symbols change, so code
+still reading the raw array fails to compile instead of reading compressed
+bytes:
+
+```cpp
+namespace myresources {
+    extern const unsigned char runtime_js_zlib[];   // compressed bytes
+    extern const std::size_t runtime_js_zlib_size;
+    extern const std::size_t runtime_js_size;       // inflated bytes
+}
+
+// Inflate where the asset is used, and drop the copy once it is consumed.
+auto bytes = pulp::runtime::zlib_decompress(myresources::runtime_js_zlib,
+                                            myresources::runtime_js_zlib_size,
+                                            myresources::runtime_js_size);
+```
+
+The trade is a smaller binary against an inflate on each use and a transient
+heap copy. `zlib_decompress` allocates its output, so never call it on the
+audio thread: inflate on the message thread or a background thread and hand
+the result over. Inflating costs about 1 ms per megabyte of text on an Apple
+silicon core. `COMPRESS` is not the default: the raw array is a public
+symbol that consumers read directly, so a default change would break their
+builds.
 
 ### Implementation notes
 
