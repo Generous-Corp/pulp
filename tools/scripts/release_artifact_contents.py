@@ -43,6 +43,7 @@ GPU_RECIPE_CATALOG_MEMBERS = (
 )
 LEGACY_CLI_BINARY_STEMS = frozenset({"pulp", "pulp-cpp", "pulp-mcp"})
 IMPORT_DESIGN_CLI_FLOOR = "0.764.0"
+ILLUSTRATOR_IMPORT_CLI_FLOOR = "1.12.0"
 PRE_DECLARATIVE_IMPORT_DESIGN_CLI_BINARY_STEMS = LEGACY_CLI_BINARY_STEMS | {
     "pulp-import-design"
 }
@@ -197,6 +198,7 @@ class ProductMatrix:
     control_broker_floor: str
     control_standalone_host_floor: str
     node_runtime_floor: str
+    illustrator_import_floor: str
     materialized_binding_contract_floor: str
     gpu_health_contract_floor: str
     gpu_health_v2_contract_floor: str
@@ -269,6 +271,9 @@ class ProductMatrix:
                 ),
                 node_runtime_floor=str(
                     doc.get("node_runtime_floor", "999999.0.0")
+                ),
+                illustrator_import_floor=str(
+                    doc.get("illustrator_import_floor", "999999.0.0")
                 ),
                 materialized_binding_contract_floor=str(
                     doc.get("materialized_binding_contract_floor", "999999.0.0")
@@ -540,6 +545,8 @@ def effective_cli_contract(
         resources = matrix.common_cli_members
         if not materialized_binding_contract_required(matrix, version):
             resources = resources - {MATERIALIZED_BINDING_CONTRACT_CLI_MEMBER}
+        if version is not None and version_tuple(version) < version_tuple(matrix.illustrator_import_floor):
+            resources = resources - {"import-design/illustrator_to_svg.py"}
         return matrix.cli_binary_stems, resources
     if version is not None:
         return (
@@ -584,6 +591,8 @@ def cli_runtime_source_path(member: str, source_root: Path) -> Path | None:
             source_root / "tools" / "import-design" / "jsx-runtime"
             / member.removeprefix("jsx-runtime/")
         )
+    if member == "import-design/illustrator_to_svg.py":
+        return source_root / "tools" / "import-design" / "illustrator_to_svg.py"
     return None
 
 
@@ -661,6 +670,11 @@ def sdk_import_design_runtime_members(
             for member in resources
             if member.startswith("jsx-runtime/")
         )
+    members.update(
+        "pulp-sdk/bin/" + member
+        for member in resources
+        if member.startswith("import-design/")
+    )
     return frozenset(members)
 
 
@@ -1203,6 +1217,7 @@ def verify_sdk_archive(
             runtime_prefixes = (
                 "pulp-sdk/bin/browser_capture-v1/",
                 "pulp-sdk/bin/jsx-runtime/",
+                "pulp-sdk/bin/import-design/",
             )
             actual_runtime = {
                 name
