@@ -6,7 +6,6 @@
 #include <pulp/runtime/base64.hpp>
 #include <pulp/runtime/crypto.hpp>
 #include <pulp/view/design_ir_io.hpp>
-#include <pulp/view/design_sources.hpp>
 
 #include <filesystem>
 #include <fstream>
@@ -15,41 +14,44 @@
 #include <vector>
 
 using namespace pulp::view;
-using pulp::import_design::attach_captured_font_faces;
+using pulp::import_design::attach_page_font_faces;
 namespace fs = std::filesystem;
 
 namespace {
 
 constexpr const char* kFirst =
-    "pulp-materialized-asset-93a17c7b5a173be2da95f76cb62a26ae30c0e13ce230acd243be63023258bf82";
+    "pulp-materialized-asset-43cab887e2aee6658706301d92c0ba103fb7294f2811c66666545f0117bf4e79";
 constexpr const char* kSecond =
-    "pulp-materialized-asset-42bf82c0cf61a1760a16ee92e88db58757128437f524c86a47c9659614c64e71";
+    "pulp-materialized-asset-62cbf9ecaa14ed3cf258993be6fdcd299fe8c60a78238c9ea1c4a51c297a0a6a";
 
-// A captured page that serves one variable face at two weights and as a
-// weight range, plus a second subset split off by unicode-range.
+// A captured bundle that serves one variable face at two weights and as a
+// weight range, plus a second subset split off by unicode-range, from Blob
+// URLs, as font-faces.json records it.
 const std::string kSidecar = std::string(R"JSON({
-  "schema":"pulp-materialized-browser-document-v1","version":1,
-  "html":"<html><body><div id=\"root\"></div></body></html>",
+  "schema":"pulp-browser-capture-font-faces-v1",
+  "faces":[
+    {"family":"Captured Mono","weight":"400","style":"normal","unicode_range":"U+0000-00FF",
+     "format":"woff2","source":"blob:","asset_id":")JSON") +
+                             kFirst + R"JSON(",
+     "sha256":"43cab887e2aee6658706301d92c0ba103fb7294f2811c66666545f0117bf4e79"},
+    {"family":"Captured Mono","weight":"bold","style":"normal","unicode_range":"U+0000-00FF",
+     "format":"woff2","source":"blob:","asset_id":")JSON" +
+                             kFirst + R"JSON(",
+     "sha256":"43cab887e2aee6658706301d92c0ba103fb7294f2811c66666545f0117bf4e79"},
+    {"family":"Captured Mono","weight":" 100  800 ","style":"italic",
+     "unicode_range":" U+0400-045F ","format":"","source":"blob:","asset_id":")JSON" +
+                             kSecond + R"JSON(",
+     "sha256":"62cbf9ecaa14ed3cf258993be6fdcd299fe8c60a78238c9ea1c4a51c297a0a6a"},
+    {"family":"Captured Sans","weight":"normal","style":"normal","unicode_range":"",
+     "format":"","source":"blob:","asset_id":")JSON" +
+                             kSecond + R"JSON(",
+     "sha256":"62cbf9ecaa14ed3cf258993be6fdcd299fe8c60a78238c9ea1c4a51c297a0a6a"}],
   "assets":[
-    {"id":")JSON") + kFirst + R"JSON(","mime_type":"font/woff2","byte_length":20,
-     "data_base64":"Z2xvYmFsVGhpcy5va1RydWU9MTs=",
-     "sha256":"93a17c7b5a173be2da95f76cb62a26ae30c0e13ce230acd243be63023258bf82"},
-    {"id":")JSON" + kSecond + R"JSON(","mime_type":"font/ttf","byte_length":26,
-     "data_base64":"c2Vjb25kIGNhcHR1cmVkIGZhY2UgYnl0ZXM=",
-     "sha256":"42bf82c0cf61a1760a16ee92e88db58757128437f524c86a47c9659614c64e71"}],
-  "font_bindings":[
-    {"family":"Captured Mono","asset_id":")JSON" +
-                             kFirst + R"JSON(",
-     "weight":"400","style":"normal","unicode_range":"U+0000-00FF"},
-    {"family":"Captured Mono","asset_id":")JSON" +
-                             kFirst + R"JSON(",
-     "weight":"bold","style":"normal","unicode_range":"U+0000-00FF"},
-    {"family":"Captured Mono","asset_id":")JSON" +
-                             kSecond + R"JSON(",
-     "weight":" 100  800 ","style":"italic","unicode_range":" U+0400-045F "},
-    {"family":"Captured Sans","asset_id":")JSON" +
-                             kSecond + R"JSON(",
-     "weight":"normal","style":"normal"}]
+    {"sha256":"43cab887e2aee6658706301d92c0ba103fb7294f2811c66666545f0117bf4e79",
+     "mime_type":"font/woff2","byte_length":27,"data_base64":"d09GMiBjYXB0dXJlZCB2YXJpYWJsZSBmYWNl"},
+    {"sha256":"62cbf9ecaa14ed3cf258993be6fdcd299fe8c60a78238c9ea1c4a51c297a0a6a",
+     "mime_type":"font/ttf","byte_length":25,
+     "data_base64":"dHJ1ZSBzZWNvbmQgY2FwdHVyZWQgZmFjZQ=="}]
 })JSON";
 
 struct ScratchDir {
@@ -69,12 +71,13 @@ std::string read_file(const fs::path& path) {
 
 TEST_CASE("captured @font-face rules become IR font assets in page order",
           "[import-design][browser-capture][font-assets]") {
-    const auto bundle = parse_materialized_browser_document(kSidecar);
-    REQUIRE(bundle.has_value());
     ScratchDir scratch;
+    const auto record = scratch.path / "font-faces.json";
+    std::ofstream(record, std::ios::binary) << kSidecar;
     DesignIR ir;
+    std::vector<std::string> warnings;
     std::string error;
-    REQUIRE(attach_captured_font_faces(ir, *bundle, scratch.path / "fonts", error));
+    REQUIRE(attach_page_font_faces(ir, record, scratch.path / "fonts", warnings, error));
     CHECK(error.empty());
 
     REQUIRE(ir.font_family_assets.size() == 4);
@@ -104,16 +107,16 @@ TEST_CASE("captured @font-face rules become IR font assets in page order",
     CHECK(first->mime == "font/woff2");
     CHECK(first->font_family == std::optional<std::string>("Captured Mono"));
     CHECK(first->content_hash ==
-          "93a17c7b5a173be2da95f76cb62a26ae30c0e13ce230acd243be63023258bf82");
+          "43cab887e2aee6658706301d92c0ba103fb7294f2811c66666545f0117bf4e79");
     REQUIRE(first->local_path.has_value());
     CHECK(fs::path(*first->local_path).filename() ==
-          "93a17c7b5a173be2da95f76cb62a26ae30c0e13ce230acd243be63023258bf82.woff2");
-    CHECK(read_file(*first->local_path) == "globalThis.okTrue=1;");
+          "43cab887e2aee6658706301d92c0ba103fb7294f2811c66666545f0117bf4e79.woff2");
+    CHECK(read_file(*first->local_path) == "wOF2 captured variable face");
     CHECK(regular.resolved_path == *first->local_path);
     const auto* second = ir.asset_manifest.resolve(kSecond);
     REQUIRE(second != nullptr);
     CHECK(fs::path(*second->local_path).extension() == ".ttf");
-    CHECK(read_file(*second->local_path) == "second captured face bytes");
+    CHECK(read_file(*second->local_path) == "true second captured face");
     std::size_t files = 0;
     for (const auto& entry : fs::directory_iterator(scratch.path / "fonts")) {
         (void)entry;
@@ -129,33 +132,34 @@ TEST_CASE("captured @font-face rules become IR font assets in page order",
     REQUIRE(reparsed.asset_manifest.resolve(kSecond) != nullptr);
 }
 
-TEST_CASE("a materialized document without font bindings leaves the IR unchanged",
+TEST_CASE("a capture that loaded no font faces leaves the IR unchanged",
           "[import-design][browser-capture][font-assets]") {
-    const auto bundle = parse_materialized_browser_document(
-        R"JSON({"schema":"pulp-materialized-browser-document-v1","version":1,
-        "html":"<html><body></body></html>","assets":[]})JSON");
-    REQUIRE(bundle.has_value());
     ScratchDir scratch;
+    const auto record = scratch.path / "font-faces.json";
+    std::ofstream(record, std::ios::binary)
+        << R"JSON({"schema":"pulp-browser-capture-font-faces-v1","faces":[],"assets":[]})JSON";
     DesignIR ir;
     ir.root.type = "frame";
     const auto before = serialize_design_ir(ir);
+    std::vector<std::string> warnings;
     std::string error;
-    REQUIRE(attach_captured_font_faces(ir, *bundle, scratch.path / "fonts", error));
+    REQUIRE(attach_page_font_faces(ir, record, scratch.path / "fonts", warnings, error));
     CHECK(serialize_design_ir(ir) == before);
     CHECK_FALSE(fs::exists(scratch.path / "fonts"));
 }
 
 TEST_CASE("captured fonts that cannot be written fail the import",
           "[import-design][browser-capture][font-assets]") {
-    const auto bundle = parse_materialized_browser_document(kSidecar);
-    REQUIRE(bundle.has_value());
     ScratchDir scratch;
+    const auto record = scratch.path / "font-faces.json";
+    std::ofstream(record, std::ios::binary) << kSidecar;
     // A regular file where the font directory has to go.
     const auto blocked = scratch.path / "fonts";
     std::ofstream(blocked) << "not a directory";
     DesignIR ir;
+    std::vector<std::string> warnings;
     std::string error;
-    CHECK_FALSE(attach_captured_font_faces(ir, *bundle, blocked, error));
+    CHECK_FALSE(attach_page_font_faces(ir, record, blocked, warnings, error));
     CHECK_FALSE(error.empty());
 }
 
@@ -207,7 +211,6 @@ std::string sha(const std::string& bytes) {
 
 TEST_CASE("a plain page's url() @font-face files become IR font assets",
           "[import-design][browser-capture][font-assets]") {
-    using pulp::import_design::attach_page_font_faces;
     const auto regular = sha(kRegularBytes);
     const auto bold = sha(kBoldBytes);
     ScratchDir scratch;
@@ -267,7 +270,6 @@ TEST_CASE("page font bytes that are not a native font fail the import",
 
 TEST_CASE("a page font record whose bytes do not match fails the import",
           "[import-design][browser-capture][font-assets]") {
-    using pulp::import_design::attach_page_font_faces;
     const auto bold = sha(kBoldBytes);
     ScratchDir scratch;
     const auto record = scratch.path / "font-faces.json";
@@ -285,4 +287,44 @@ TEST_CASE("a page font record whose bytes do not match fails the import",
     CHECK(attach_page_font_faces(untouched, scratch.path / "absent.json", scratch.path / "fonts",
                                  warnings, error));
     CHECK(untouched.font_family_assets.empty());
+}
+
+TEST_CASE("a face whose asset id does not name its font fails the import",
+          "[import-design][browser-capture][font-assets]") {
+    ScratchDir scratch;
+    const auto record = scratch.path / "font-faces.json";
+    std::string text = kSidecar;
+    const std::string first = kFirst;
+    text.replace(text.find(first), first.size(), "pulp-materialized-asset-other");
+    std::ofstream(record, std::ios::binary) << text;
+    DesignIR ir;
+    std::vector<std::string> warnings;
+    std::string error;
+    CHECK_FALSE(attach_page_font_faces(ir, record, scratch.path / "fonts", warnings, error));
+    CHECK(error.find("does not name its font") != std::string::npos);
+}
+
+TEST_CASE("a bundle's Blob font bytes that are not a native font fail the import",
+          "[import-design][browser-capture][font-assets]") {
+    // A Blob font is page input like any other: its materialized id earns it no trust.
+    const std::string bytes = "<!doctype html>";
+    const auto digest = sha(bytes);
+    ScratchDir scratch;
+    const auto record = scratch.path / "font-faces.json";
+    std::ofstream(record, std::ios::binary)
+        << R"JSON({"schema":"pulp-browser-capture-font-faces-v1","faces":[
+             {"family":"Bundled","weight":"400","style":"normal","unicode_range":"",
+              "source":"blob:","asset_id":"pulp-materialized-asset-)JSON" +
+               digest + R"JSON(","sha256":")JSON" + digest + R"JSON("}],
+           "assets":[{"sha256":")JSON" +
+               digest + R"JSON(","mime_type":"font/woff2","data_base64":")JSON" +
+               pulp::runtime::base64_encode(reinterpret_cast<const uint8_t*>(bytes.data()),
+                                            bytes.size()) +
+               R"JSON("}]})JSON";
+    DesignIR ir;
+    std::vector<std::string> warnings;
+    std::string error;
+    CHECK_FALSE(attach_page_font_faces(ir, record, scratch.path / "fonts", warnings, error));
+    CHECK(error.find("is not a TrueType, OpenType or WOFF2 file") != std::string::npos);
+    CHECK(ir.font_family_assets.empty());
 }

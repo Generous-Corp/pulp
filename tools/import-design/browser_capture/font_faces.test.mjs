@@ -5,6 +5,7 @@ import test from "node:test";
 
 import {
   capturePageFontFaces,
+  MAX_PAGE_FONT_FACES,
   fontSignature,
   PAGE_FONT_FACES_SCHEMA,
 } from "./font_faces.mjs";
@@ -54,7 +55,7 @@ test("a face binds the first source that answered, with its rule's descriptors",
   assert.deepEqual(record.faces, [{
     family: "Pulp Page Face", weight: "300 800", style: "italic", unicode_range: "U+0-FF",
     format: "truetype", source: "pulp-capture:///fonts/Jost-Regular.ttf",
-    sha256: sha(ttf("regular bytes")),
+    sha256: sha(ttf("regular bytes")), asset_id: `pulp-page-font-${sha(ttf("regular bytes"))}`,
   }]);
   assert.deepEqual(record.assets.map((asset) => [asset.sha256, asset.mime_type,
     Buffer.from(asset.data_base64, "base64").toString()]),
@@ -114,19 +115,25 @@ test("a remote font is read only when the import allows the network", async () =
   assert.deepEqual(online.reads, [remote]);
 });
 
-test("inline data fonts are carried, and Blob fonts are left to the materialized document",
+test("inline data and Blob fonts are carried; a Blob font keeps its materialized id and type",
   async () => {
     const data = "data:font/woff2;base64,AAAA";
     const blob = "blob:http://127.0.0.1:4100/1234";
     const page = fontPage([
       rule("Inline", [source(data, data)]),
       rule("Bundled", [source(blob, blob)]),
-    ], { [data]: ttf("inline") });
-    const record = await capturePageFontFaces(page,
-      { privatePrefix: PREFIX, statuses: new Map([[blob, 200]]) });
-    assert.deepEqual(record.faces.map((face) => [face.family, face.source]),
-      [["Inline", "data:"]]);
-    assert.deepEqual(page.reads, [data]);
+      // Repeated verbatim: bound once.
+      rule("Bundled", [source(blob, blob)]),
+    ], { [data]: ttf("inline"), [blob]: woff2("bundled") });
+    const record = await capturePageFontFaces(page, { privatePrefix: PREFIX });
+    assert.deepEqual(record.faces.map((face) => [face.family, face.source, face.asset_id]), [
+      ["Inline", "data:", `pulp-page-font-${sha(ttf("inline"))}`],
+      ["Bundled", "blob:", `pulp-materialized-asset-${sha(woff2("bundled"))}`],
+    ]);
+    assert.deepEqual(page.reads, [data, blob]);
+    // Typed by its signature, never by the type the page gave the Blob.
+    assert.equal(record.assets.find((asset) => asset.sha256 === sha(woff2("bundled"))).mime_type,
+      "font/woff2");
   });
 
 test("a font is recognized by its own first bytes", () => {
@@ -189,4 +196,44 @@ test("no source outside the staged project is read", async () => {
     assert.deepEqual(record.faces, [], `network ${allowNetwork}`);
     assert.deepEqual(page.reads, [], `network ${allowNetwork}`);
   }
+});
+
+test("a Blob font is page input: it is checked like any file, and a revoked one is dropped",
+  async () => {
+    const blob = (id) => `blob:http://127.0.0.1:4100/${id}`;
+    const page = fontPage([
+      rule("Html", [source(blob("a"), blob("a"))]),
+      rule("Woff", [source(blob("b"), blob("b"))]),
+      rule("Revoked", [source(blob("c"), blob("c"))]),
+      rule("Font", [source(blob("d"), blob("d"))]),
+    ], { [blob("a")]: "<!doctype html>", [blob("b")]: "wOFF....", [blob("d")]: ttf("font") });
+    const record = await capturePageFontFaces(page, { privatePrefix: PREFIX });
+    assert.deepEqual(record.faces.map((face) => [face.family, face.asset_id]),
+      [["Font", `pulp-materialized-asset-${sha(ttf("font"))}`]]);
+    assert.deepEqual(record.dropped.map((face) => [face.family, face.source]),
+      [["Html", "blob:"], ["Woff", "blob:"], ["Revoked", "blob:"]]);
+    assert.match(record.dropped[0].reason, /no TrueType, OpenType, WOFF or WOFF2 signature/);
+    assert.match(record.dropped[1].reason, /WOFF 1\.0/);
+    assert.match(record.dropped[2].reason, /revoked its Blob URL/);
+  });
+
+test("the face cap counts distinct faces, after verbatim repeats are folded", async () => {
+  const at = (i) => `${PREFIX}fonts/f${i}.ttf`;
+  const files = {};
+  const statuses = new Map();
+  const rules = [];
+  for (let i = 0; i <= MAX_PAGE_FONT_FACES; i += 1) {
+    files[at(i)] = ttf(`face ${i}`);
+    statuses.set(at(i), 200);
+    rules.push(rule(`Face ${i}`, [source(`fonts/f${i}.ttf`, at(i))]));
+  }
+  // Exactly at the cap, each face repeated verbatim: carried.
+  const atCap = rules.slice(0, MAX_PAGE_FONT_FACES);
+  const record = await capturePageFontFaces(fontPage([...atCap, ...atCap], files),
+    { privatePrefix: PREFIX, statuses });
+  assert.equal(record.faces.length, MAX_PAGE_FONT_FACES);
+  // One distinct face past it: refused by name.
+  await assert.rejects(capturePageFontFaces(fontPage(rules, files),
+    { privatePrefix: PREFIX, statuses }),
+  (error) => error.code === "capture-font-faces-exceeded");
 });

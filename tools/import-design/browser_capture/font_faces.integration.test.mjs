@@ -82,3 +82,42 @@ test("a page that names a font file it does not have fails the capture by name",
       await rm(root, { recursive: true, force: true });
     }
   });
+
+test("a bundle's Blob fonts are carried with their authored descriptors and materialized ids",
+  { timeout: captureCaseTimeout(1), skip: process.platform === "win32" },
+  async (context) => {
+    const browser = await installedBrowser();
+    if (!browser) return context.skip("no compatible system browser is installed");
+    const root = await mkdtemp(path.join(os.tmpdir(), "pulp-browser-blob-fonts-"));
+    try {
+      await cp(path.join(fixture, "fonts/Jost-Regular.ttf"), path.join(root, "face.ttf"));
+      // A loader in the shape of a Claude standalone export: the font is
+      // served from a Blob URL inside a DOMParser document that replaces the
+      // page, with a zero-padded unicode-range CSSOM would re-serialize.
+      await writeFile(path.join(root, "panel.html"), `<!doctype html><body><script>
+        (async () => {
+          const bytes = await (await fetch("face.ttf")).arrayBuffer();
+          const url = URL.createObjectURL(new Blob([bytes], { type: "font/ttf" }));
+          const html = "<html><head><style>@font-face{font-family:'Blob Face';" +
+            "src:url(" + url + ") format('truetype');font-weight:400;" +
+            "unicode-range:U+0000-00FF, U+0131}html,body{margin:0;background:#fff}" +
+            "body{width:320px;height:120px;font:24px 'Blob Face'}</style></head>" +
+            "<body><p>Blob font</p></body></html>";
+          const parsed = new DOMParser().parseFromString(html, "text/html");
+          document.documentElement.replaceWith(parsed.documentElement);
+        })();
+      </script></body>`);
+      const output = path.join(root, "out");
+      await runCapture(script, browser, path.join(root, "panel.html"), root, output, 320, 120);
+      const record = JSON.parse(await readFile(path.join(output, "font-faces.json"), "utf8"));
+      const digest = sha256(await readFile(path.join(root, "face.ttf")));
+      assert.deepEqual(record.faces.map((face) => [face.family, face.weight,
+        face.unicode_range, face.source, face.asset_id]), [
+        ["Blob Face", "400", "U+0000-00FF, U+0131", "blob:",
+          `pulp-materialized-asset-${digest}`],
+      ]);
+      assert.equal(record.assets[0].mime_type, "font/ttf");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
