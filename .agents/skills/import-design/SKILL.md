@@ -856,6 +856,17 @@ knowing before you touch that file:
   is `browser-capture`, and a geometry rule that only makes up for how a
   design tool draws must check it. Fixture `20-flex-gap-knob` covers the snap.
 
+  **Paint-order gotcha:** Chrome's paint order numbers a node by when its OWN
+  box paints, and an inkless wrapper still holds a number. Ordering siblings by
+  that number drew Spectr's full-panel `body::before` over every descendant of
+  the inkless `div#root` and flattened the whole panel. Siblings are ordered by
+  where their ink lands instead (an inkless node that takes no input and does
+  not clip, composite or transform moves to its subtree's first ink). The
+  reorder audit counts a pair only when both nodes paint or either takes input:
+  in a counted pair the SECOND node is drawn on top. Prove a change here by
+  rendering the same snapshot nested and flat (`lower_painted_tree` with
+  `flatten_to_paint_order`) and comparing bytes.
+
   **Gate gotcha:** a stable Chromium/native PNG hash is only determinism
   evidence. The differential matcher must join captured elements by
   `backendNodeId` when both sides provide one and fail closed on a mismatch;
