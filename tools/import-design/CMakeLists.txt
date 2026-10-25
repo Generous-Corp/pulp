@@ -37,6 +37,7 @@ add_executable(pulp-import-design
     browser_import_cli.cpp
     browser_import_session.cpp
     browser_html_import.cpp
+    browser_capture_fonts.cpp
     browser_capture_workspace.cpp
     browser_capture_ir.cpp
     browser_capture_styles.cpp
