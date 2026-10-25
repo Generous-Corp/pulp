@@ -103,9 +103,9 @@ struct GpuAudioCapabilityValidation {
 ///   A transport reports the kernel only from a node's health sample, so a
 ///   staged node with no health hook never reports one. A shared-memory path
 ///   also keeps its path after its kernel is gone: GpuConvolver hosted after
-///   a device loss, offline fence or refused block, and
-///   `GpuNeuralRealtimeNode::capability_report()` while its backend is
-///   quiesced.
+///   an offline fence, GpuWaveNetRealtimeNode hosted after its fence or a
+///   failed re-acquire, and `GpuNeuralRealtimeNode::capability_report()`
+///   while its backend is quiesced.
 /// - A shared-memory path with provider Unknown.
 ///   `GpuNeuralRealtimeNode::capability_report()` reports this while its
 ///   backend runs without an authenticated provider.
@@ -199,6 +199,12 @@ enum class GpuAudioStatusError : std::uint8_t {
     // GPU kernel. Checked after every other rule, the re-acquire rules
     // included, so a status breaking both reports the other error.
     GpuEngineWithoutKernel = 20,
+    // Appended: a cause that fences delivery (SequenceGap, InputSaturated,
+    // ProviderFailure, InvalidCallback, OfflineFence) never reads Ready.
+    FencingCauseReportedReady = 21,
+    // Appended: a stamped node (nonzero epoch) whose delivery epoch is
+    // inactive is fenced, so never Ready.
+    ReadyWithoutDeliveryEpoch = 22,
 };
 
 struct GpuAudioStatusValidation {
@@ -300,6 +306,22 @@ validate_gpu_audio_status(const GpuAudioStatus& status) noexcept {
     if (status.recovery_reason == Reason::SustainedDeadlineMisses &&
         status.provider_state != State::Degraded)
         return {Error::SustainedMissesNotDegraded};
+    // Every other latched cause fences GPU delivery until a reprime or a new
+    // preparation, leaving the CPU fallback carrying the stream: Degraded, or
+    // Unavailable when the device was lost after the cause latched. A
+    // re-acquire is informational and keeps the new provider's own state.
+    if ((status.recovery_reason == Reason::SequenceGap ||
+         status.recovery_reason == Reason::InputSaturated ||
+         status.recovery_reason == Reason::ProviderFailure ||
+         status.recovery_reason == Reason::InvalidCallback ||
+         status.recovery_reason == Reason::OfflineFence) &&
+        status.provider_state == State::Ready)
+        return {Error::FencingCauseReportedReady};
+    // A stamped node (one that names a delivery epoch) delivers only while
+    // that epoch is active; otherwise it is fenced. Unstamped paths report
+    // epoch zero and are not constrained here.
+    if (status.epoch != 0 && !status.delivery_epoch_active && status.provider_state == State::Ready)
+        return {Error::ReadyWithoutDeliveryEpoch};
     if (status.fallback_policy == MissPolicy::CpuFallback && !status.fallback_available)
         return {Error::FallbackUnavailable};
     // A re-acquire is a counted success that left a provider able to deliver.

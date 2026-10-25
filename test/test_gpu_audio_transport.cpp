@@ -223,6 +223,35 @@ TEST_CASE("validate_gpu_audio_status accepts coherent v3 and v4 states", "[gpu_a
     auto failing = ready_gpu_status();
     failing.reacquire_attempts = 3;
     CHECK(validate_gpu_audio_status(failing).accepted());
+
+    // Every cause that fences delivery leaves the provider Degraded, or
+    // Unavailable when the device was lost after it latched, on the CPU
+    // fallback; the fenced stamped node's delivery epoch is inactive.
+    for (const auto reason :
+         {GpuAudioRecoveryReason::SequenceGap, GpuAudioRecoveryReason::InputSaturated,
+          GpuAudioRecoveryReason::ProviderFailure, GpuAudioRecoveryReason::InvalidCallback,
+          GpuAudioRecoveryReason::OfflineFence}) {
+        CAPTURE(reason);
+        auto fenced = ready_gpu_status();
+        fenced.provider_state = GpuAudioProviderState::Degraded;
+        fenced.selected_engine = GpuAudioEngine::Cpu;
+        fenced.recovery_reason = reason;
+        fenced.recovery_sequence = 12;
+        fenced.delivery_epoch_active = false;
+        fenced.gpu_kernel_available = reason != GpuAudioRecoveryReason::OfflineFence;
+        CHECK(validate_gpu_audio_status(fenced).accepted());
+        fenced.provider_state = GpuAudioProviderState::Unavailable;
+        CHECK(validate_gpu_audio_status(fenced).accepted());
+    }
+    // A stamped node between a re-acquire request and its adoption: no cause
+    // latched, the new epoch named, delivery not yet active.
+    auto adopting = ready_gpu_status();
+    adopting.provider_state = GpuAudioProviderState::Degraded;
+    adopting.selected_engine = GpuAudioEngine::Cpu;
+    adopting.epoch = 3;
+    adopting.delivery_epoch_active = false;
+    adopting.reacquire_attempts = adopting.reacquire_successes = 1;
+    CHECK(validate_gpu_audio_status(adopting).accepted());
 }
 
 TEST_CASE("validate_gpu_audio_status rejects each planted v3 violation", "[gpu_audio][status]") {
@@ -370,9 +399,40 @@ TEST_CASE("validate_gpu_audio_status rejects each planted v3 violation", "[gpu_a
     CHECK(status_error(status) == Error::ReacquireSuccessesExceedAttempts);
     status.reacquire_successes = 1;
     CHECK(status_error(status) == Error::GpuEngineWithoutKernel);
+
+    // A cause that fences delivery never leaves the provider Ready, on any
+    // engine.
+    for (const auto reason :
+         {GpuAudioRecoveryReason::SequenceGap, GpuAudioRecoveryReason::InputSaturated,
+          GpuAudioRecoveryReason::ProviderFailure, GpuAudioRecoveryReason::InvalidCallback,
+          GpuAudioRecoveryReason::OfflineFence}) {
+        CAPTURE(reason);
+        status = ready_gpu_status();
+        status.recovery_reason = reason;
+        status.recovery_sequence = 12;
+        CHECK(status_error(status) == Error::FencingCauseReportedReady);
+        status.selected_engine = GpuAudioEngine::Cpu;
+        CHECK(status_error(status) == Error::FencingCauseReportedReady);
+    }
+
+    // A stamped node whose delivery epoch is inactive is fenced, so not Ready.
+    status = ready_gpu_status();
+    status.delivery_epoch_active = false;
+    CHECK(status_error(status) == Error::ReadyWithoutDeliveryEpoch);
+    status.selected_engine = GpuAudioEngine::Cpu;
+    CHECK(status_error(status) == Error::ReadyWithoutDeliveryEpoch);
+    // Without an epoch the node is not stamped: a CPU provider is Ready.
+    status.provider = GpuAudioProvider::Cpu;
+    status.gpu_kernel_available = false;
+    status.epoch = 0;
+    std::fill(std::begin(status.terminal_counts), std::end(status.terminal_counts), 0u);
+    CHECK(status_error(status) == Error::None);
 }
 
 TEST_CASE("GPU audio contract enums append without renumbering", "[gpu_audio][status]") {
+    CHECK(static_cast<int>(GpuAudioStatusError::GpuEngineWithoutKernel) == 20);
+    CHECK(static_cast<int>(GpuAudioStatusError::FencingCauseReportedReady) == 21);
+    CHECK(static_cast<int>(GpuAudioStatusError::ReadyWithoutDeliveryEpoch) == 22);
     CHECK(static_cast<int>(GpuAudioRecoveryReason::InvalidCallback) == 6);
     CHECK(static_cast<int>(GpuAudioRecoveryReason::ProviderUnresponsive) == 7);
     CHECK(static_cast<int>(GpuAudioRecoveryReason::ProviderReacquired) == 8);

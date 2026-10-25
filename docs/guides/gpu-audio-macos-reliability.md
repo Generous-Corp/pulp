@@ -320,6 +320,11 @@ returns a typed `GpuAudioStatusError`. Among other things it rejects:
 - a `Degraded` or `Unavailable` status that selects the GPU engine;
 - `ProviderLost` or `ProviderUnresponsive` without `Unavailable`;
 - `SustainedDeadlineMisses` without `Degraded`;
+- `Ready` with a cause that fences delivery (`SequenceGap`, `InputSaturated`,
+  `ProviderFailure`, `InvalidCallback` or `OfflineFence`);
+- `Ready` on a stamped node (nonzero `epoch`) whose `delivery_epoch_active` is
+  false;
+- the GPU engine without `gpu_kernel_available`;
 - a CPU provider with a GPU kernel or a GPU epoch;
 - shadow counts without a shadow;
 - terminal counts beyond the delivery counters;
