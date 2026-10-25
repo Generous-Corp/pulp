@@ -17,7 +17,6 @@
 namespace pulp::import_design {
 
 namespace fs = std::filesystem;
-using pulp::view::ClaudeBundle;
 using pulp::view::DesignIR;
 using pulp::view::IRAssetRef;
 using pulp::view::IRFontAsset;
@@ -175,23 +174,6 @@ class FaceBinder {
 
 } // namespace
 
-bool attach_captured_font_faces(DesignIR& ir, const ClaudeBundle& materialized,
-                                const fs::path& font_directory, std::string& error) {
-    FaceBinder binder(ir, font_directory);
-    for (const auto& binding : materialized.font_bindings) {
-        if (binding.asset_index >= materialized.assets.size()) {
-            error = "captured font face " + binding.family + " names a missing asset";
-            return false;
-        }
-        const auto& asset = materialized.assets[binding.asset_index];
-        if (!binder.bind({binding.family, binding.weight, binding.style, binding.unicode_range,
-                          asset.uuid, asset.mime, &asset.data},
-                         error))
-            return false;
-    }
-    return true;
-}
-
 bool attach_page_font_faces(DesignIR& ir, const fs::path& font_faces_json,
                             const fs::path& font_directory, std::vector<std::string>& warnings,
                             std::string& error) {
@@ -252,9 +234,18 @@ bool attach_page_font_faces(DesignIR& ir, const fs::path& font_faces_json,
         const auto found = assets.find(face["sha256"].toString());
         if (family.empty() || found == assets.end())
             return invalid("face " + std::to_string(i) + " names no carried font");
+        // A bundle's Blob font keeps the id its materialized runtime names it
+        // by; any other font is a page font. Either way the id names the bytes.
+        std::string asset_id = face["asset_id"].toString();
+        if (asset_id.empty())
+            asset_id = "pulp-page-font-" + found->first;
+        if (asset_id != "pulp-page-font-" + found->first &&
+            asset_id != "pulp-materialized-asset-" + found->first)
+            return invalid("face " + std::to_string(i) + " has asset id " + asset_id +
+                           ", which does not name its font");
         if (!binder.bind({family, face["weight"].toString(), face["style"].toString(),
-                          face["unicode_range"].toString(), "pulp-page-font-" + found->first,
-                          found->second.mime, &found->second.data},
+                          face["unicode_range"].toString(), asset_id, found->second.mime,
+                          &found->second.data},
                          error))
             return false;
     }
