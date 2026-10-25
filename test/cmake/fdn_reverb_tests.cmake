@@ -16,6 +16,7 @@
 # inside a normal suite budget.
 pulp_add_test_suite(pulp-test-fdn-reverb
     SOURCES test_fdn_reverb.cpp test_fdn_reverb_acceptance.cpp
+            test_fdn_reverb_block_engine.cpp test_classic_reverb.cpp
     LIBRARIES pulp::signal pulp::audio-analysis
     TEST_SPEC "~[slow]"
     TIMEOUT 900)

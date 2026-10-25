@@ -87,6 +87,20 @@ struct PaintedTreeCounts {
     /// `native` so "the panel draws more nodes" cannot be read as "the panel
     /// draws more of the design" when the extra nodes are all one icon.
     int svg_shapes = 0;
+    /// Text runs synthesized for form controls that draw a string from their
+    /// own state: an `<input>`'s value or a closed `<select>`'s selected
+    /// option. Chrome paints those inside a user-agent shadow tree the
+    /// snapshot never serializes, so without these the box arrives empty.
+    int control_value_text = 0;
+    /// Form controls the capture recorded as painted by Chromium's native
+    /// theme, so their computed fills and borders do not describe their
+    /// pixels. Every control whose computed `appearance` is not `none` carries
+    /// `native_appearance` and `native_theme` (the verdict, or `unresolved`);
+    /// only `native` ones are counted, because author box styling makes
+    /// Chromium paint an `appearance: auto` control from CSS. The box is
+    /// still drawn from computed style, an approximation this count keeps
+    /// visible.
+    int native_appearance_controls = 0;
     int skipped_empty_box = 0;     ///< zero-area layout objects
     int skipped_blank_text = 0;    ///< collapsed whitespace runs
     int skipped_non_visual = 0;    ///< the document node, doctype, comments
@@ -122,6 +136,22 @@ struct PaintedTreeCounts {
     /// pairing has to be captured here because the audit runs after the nodes
     /// have been moved into the emitted tree and can no longer be written to.
     std::vector<std::string> overlapping_reorder_pairs;
+    /// Set only by `lower_painted_tree_preferring_hierarchy` when it flattened:
+    /// the visible inversions the nested tree would have drawn, which is the
+    /// reason the emission gave up its hierarchy. Zero means nothing was
+    /// flattened.
+    int flattened_overlapping_reorders = 0;
+    /// Of a flattened emission: groups kept nested because they composite as
+    /// one layer (`opacity < 1`, `mix-blend-mode`, `filter`,
+    /// `backdrop-filter`, a mask). Hung off the root instead, their
+    /// descendants would paint at full strength beside an empty translucent
+    /// box.
+    int isolating_groups_nested = 0;
+    /// Of a flattened emission: such groups left flat because nesting them
+    /// would draw something the browser did not. Each carries
+    /// `isolating_group_refused` naming why, and its descendants lose the
+    /// group's compositing.
+    int isolating_groups_refused = 0;
     /// Nodes whose type lengths were multiplied by the scale their box already
     /// carried from an ancestor `transform`. Chrome scales glyphs along with
     /// the box; the snapshot reports the box post-transform and `font-size`
@@ -147,6 +177,15 @@ struct PaintedTreeCounts {
     /// count only the unkeyed siblings, so a key added or removed there moves
     /// a stored edit onto a different node without orphaning it.
     std::vector<std::string> mixed_keyed_siblings;
+};
+
+/// The CSS-px extent of a captured element raster that is a viewport plane:
+/// the element's pixels sit at their page position inside a plane of this
+/// size, with everything else transparent. Chromium's canvas snapshots are
+/// captured this way, composited at their final viewport geometry.
+struct CapturedLayerExtent {
+    double width = 0.0;
+    double height = 0.0;
 };
 
 /// Lower every painted node in the captured document into a TREE under `root`
@@ -176,13 +215,27 @@ struct PaintedTreeCounts {
 /// page origin, so a root child's relative box is its page box plus the shift
 /// and the composition of offsets down any chain returns Chrome's absolute box
 /// exactly — Blink's 1/64px grid values survive the arithmetic unrounded.
-PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
-                                     double dx,
-                                     double dy,
-                                     double device_scale,
-                                     pulp::view::IRNode& root,
-                                     const std::unordered_map<int, std::string>&
-                                         captured_element_assets = {},
-                                     bool flatten_to_paint_order = false);
+PaintedTreeCounts lower_painted_tree(
+    const CapturedStyleIndex& index, double dx, double dy, double device_scale,
+    pulp::view::IRNode& root,
+    const std::unordered_map<int, std::string>& captured_element_assets = {},
+    bool flatten_to_paint_order = false,
+    const std::unordered_map<std::string, CapturedLayerExtent>& captured_layers = {});
+
+/// Lower hierarchically, and fall back to the flat paint-order emission only
+/// when the nested tree would visibly disagree with Chromium.
+///
+/// A captured element raster (a `<canvas>` snapshot) can sit anywhere in
+/// Chromium's paint list, including before an ancestor that paints over it,
+/// and a nested tree draws every parent before its children. Flattening fixes
+/// that order at the cost of the whole editing surface, so it is spent only
+/// when the hierarchical audit finds an inked node drawn on the wrong side of
+/// an overlapping one (`overlapping_reorders > 0`). A panel whose canvas paints
+/// in tree order keeps its sections, and a panel that genuinely interleaves
+/// is flattened and says why in `flattened_overlapping_reorders`.
+PaintedTreeCounts lower_painted_tree_preferring_hierarchy(
+    const CapturedStyleIndex& index, double dx, double dy, double device_scale,
+    pulp::view::IRNode& root, const std::unordered_map<int, std::string>& captured_element_assets,
+    const std::unordered_map<std::string, CapturedLayerExtent>& captured_layers = {});
 
 }  // namespace pulp::import_design

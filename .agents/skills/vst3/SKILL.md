@@ -777,6 +777,20 @@ structural test enforces that every hosted adapter uses the factory. See the
 
 ## Gotchas
 
+### Linux: export only `GetPluginFactory` / `ModuleEntry` / `ModuleExit`
+
+On Linux a plug-in image exports only its entry points: `_pulp_apply_elf_exports`
+(`tools/cmake/PulpInstall.cmake`) compiles the format target with
+`-fvisibility=hidden -fvisibility-inlines-hidden` and links it with a version
+script whose `local: *` localizes everything else, including the archives'
+symbols. Without it, every Pulp plug-in in a Linux host shared its inline
+variables and function-local statics with every other one: they are
+`STB_GNU_UNIQUE`, which glibc binds process-wide **even under `RTLD_LOCAL`**,
+so two different plug-ins' factories each listed both plug-ins. For VST3 the measured failure was under `RTLD_GLOBAL`: the second module's
+factory reported the first module's class. `linux-plugin-isolation-vst3` checks
+that each module's factory lists only its own class under both modes and that
+nothing else is exported.
+
 ### Missing `vst3_entry.cpp` → no `GetPluginFactory` symbol → silent host reject
 
 `PulpPluginFormats.cmake`'s `_pulp_add_vst3()` only links a user-side
@@ -968,6 +982,24 @@ Same contract as CLAP — host events are applied first, then snapshot,
 then process. If the adapter needs additional logic (e.g.
 gesture-coalesced output events), insert it after `process()` and
 before the snapshot diff, not before `set_normalized`.
+
+### Per-block work is gated on the StateStore generation
+
+Every store write advances `StateStore::state_generation()`. `process()`
+refreshes `param_snapshot_` only when the generation moved since the last
+snapshot, and `process_publish_output_params()` returns immediately unless the
+processor pushed explicit output events or the generation moved across
+`process()`. Keep it that way: an O(params) loop that runs on idle blocks is a
+regression in the framework's overhead floor. A new store write path must go
+through a `StateStore` setter (they all advance the generation) or the diff
+will not see it.
+
+The expected channel count of each declared bus is cached by
+`refresh_bus_channel_cache()` (called from `setActive(true)` and
+`setupProcessing()`) and invalidated at the top of `setBusArrangements()`.
+A new code path that rewrites `audioInputs`/`audioOutputs` arrangements must
+invalidate it too; while invalid, layout validation falls back to the SDK
+buses.
 
 ### `getTailSamples` returns `kInfiniteTail` for `tail_samples < 0`
 
@@ -1460,3 +1492,47 @@ The editor edit callback maps the bridge's snapshot (`plain`), never a fresh
 automation write first, and a re-read would report the host's value to the host
 as the user's edit. `[vst3][editor][automation]` in `test_vst3_plugin_state.cpp`
 interleaves exactly that.
+
+## Automation points: one store write per parameter; the queue only on opt-in
+
+Sample-accurate automation is the default: `Processor::wants_sample_accurate_parameters()`
+(default true, asked once when the adapter creates the processor). Opted out
+(the override returns false), the decode loop reads each
+`IParamValueQueue`'s last point only, writes the store once and leaves
+`param_events_` empty and unsorted. Opted in, it does what follows.
+
+Sample-accurate is the default, and block-rate the opt-out, because an opt-in
+default would silently zipper existing plug-ins: a processor that reads the
+queue would get an empty one and step its automation once per block, with
+nothing failing or warning. An opted-out processor that still reads
+`param_events()` is recorded on the audio thread (`Processor::param_events()`
+does one relaxed store) and logged once by `report_param_events_while_opted_out()`
+in `setActive(false)` and `terminate()`.
+
+VST3 delivers one time-ordered `IParamValueQueue` per parameter, so a block's
+`param_events_` arrive as one sorted run per parameter. An insertion sort over
+those interleaved runs was quadratic (about 28 us for 32 parameters x 16
+points), and writing the store per point cost a revisioned atomic write and a
+listener notification each. The decode loop now pushes every point to the
+sample-accurate queue, writes the store once per parameter with its last
+value, and sorts with `ParameterEventQueue::sort(scratch, counts)`, a stable
+counting sort over scratch sized in `setupProcessing()`. When timing
+automation in a private host, run `process()` on a thread other than the one
+that created the plug-in: writes on the creating thread are treated as editor
+edits by `HostParameterEditBridge` and echoed back through `performEdit` and
+`setParamNormalized`, which inflated the old numbers by several times.
+
+## Instantiation is a hot path: no Foundation singletons, no info logs
+
+Hosts and scanners instantiate plug-ins far more often than they open
+editors, and a scanner or validator process may not have created
+`NSProcessInfo` or `NSBundle` yet. Host detection (`detect_host_info()` ->
+`current_auv3_wrapper_identifier()`) used to cost about 300 us per
+instantiation in such a process because it asked `NSProcessInfo` for the
+process name and `NSBundle` for the main bundle; it now uses `getprogname()`
+and CoreFoundation, and `initialize()` dropped from about 320 us to 40 us.
+Each `runtime::log_info` costs tens of microseconds (an `os_log` record plus
+an unbuffered stderr write), so per-instance happy-path lifecycle messages
+(VST3 initialized / ARA factory published / bus arrangement accepted, and the
+AU v2 and CLAP equivalents) are `log_debug`; keep `log_info` for refusals and
+accommodations a user may need to see.

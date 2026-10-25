@@ -30,7 +30,10 @@
 #include <pulp/signal/biquad.hpp>
 #include <pulp/signal/fdn/config.hpp>
 #include <pulp/signal/fdn/filter_state.hpp>
+#include <pulp/signal/detail/simd_lanes.hpp>
 #include <pulp/signal/fdn/modulation.hpp>
+#include <pulp/signal/fdn/sanitize.hpp>
+#include <pulp/signal/denormal.hpp>
 
 #include <algorithm>
 #include <array>
@@ -38,6 +41,8 @@
 #include <cstdint>
 
 namespace pulp::signal::fdn {
+
+namespace lanes = signal::detail::lanes;
 
 // One EQ band as authored. Bands are set through the engine's API rather than
 // through baked params: they are a voicing decision baked into a mode or a
@@ -113,6 +118,11 @@ public:
     // this, so the stability normalization that consumes it is never optimistic.
     double worst_case_boost() const { return worst_case_boost_; }
 
+    // Bands that are not flat — the ones process() actually runs.
+    int active_bands() const {
+        return num_active_;
+    }
+
     SampleType process(int channel, SampleType x) {
         for (int k = 0; k < num_active_; ++k) {
             const auto& c = coeffs_[static_cast<std::size_t>(k)];
@@ -152,6 +162,12 @@ private:
 // It also means flux never lengthens a tail; it takes narrow, wandering bites
 // out of it, and because each of the 16 lines bites in its own register the
 // aggregate decay is unchanged while the colour never sits still.
+//
+// Coefficients and state are stored per field across the sixteen channels so
+// both the per-tick redesign and the per-sample filter run as one pass over all
+// channels: the redesign evaluates the RBJ peaking formula with polynomial
+// sin/cos/exp that are exact to double rounding over the argument ranges the
+// bank can produce, instead of three libm calls per channel per tick.
 template <typename SampleType = float>
 class FluxBank {
 public:
@@ -165,7 +181,8 @@ public:
             target_db_[i] = 0.0;
             current_db_[i] = 0.0;
             countdown_[i] = interval_samples(i);
-            state_[i] = {};
+            s1_[i] = 0.0;
+            s2_[i] = 0.0;
         }
         redesign();
     }
@@ -204,6 +221,8 @@ public:
                 target_db_[i] = -rng_[i].next_unit() * depth_db_;
                 countdown_[i] = interval_samples(i);
             }
+        }
+        for (int i = 0; i < kNumChannels; ++i) {
             current_hz_[i] += (target_hz_[i] - current_hz_[i]) * (1.0 - glide_);
             current_db_[i] += (target_db_[i] - current_db_[i]) * (1.0 - glide_);
         }
@@ -214,10 +233,87 @@ public:
     // ever be louder than flat (see the class note).
     double worst_case_boost() const { return 1.0; }
 
+    // The designed section for one channel, normalized to a0 == 1.
+    BiquadCoefficientsT<double> coefficients(int channel) const {
+        const auto c = static_cast<std::size_t>(channel);
+        return {b0_[c], b1_[c], b2_[c], a1_[c], a2_[c]};
+    }
+
+    // One channel, one sample, with every state word sanitized — the
+    // defensive scalar path.
     SampleType process(int channel, SampleType x) {
-        const auto& c = coeffs_[static_cast<std::size_t>(channel)];
-        return static_cast<SampleType>(
-            state_[static_cast<std::size_t>(channel)].process(c, static_cast<double>(x)));
+        const auto c = static_cast<std::size_t>(channel);
+        const double in = finite_or_zero(static_cast<double>(x));
+        const double out = finite_or_zero(b0_[c] * in + s1_[c]);
+        s1_[c] = finite_or_zero(snap_to_zero(b1_[c] * in - a1_[c] * out + s2_[c]));
+        s2_[c] = finite_or_zero(snap_to_zero(b2_[c] * in - a2_[c] * out));
+        return static_cast<SampleType>(out);
+    }
+
+    // The bank's coefficients and state as two-lane vectors (channels 2i and
+    // 2i + 1 in lane pair i), for a block kernel to hold in local storage
+    // across a block: load_lanes() before, store_lanes() after.
+    struct Lanes {
+        lanes::D2 b0[kNumChannels / 2];
+        lanes::D2 b1[kNumChannels / 2];
+        lanes::D2 b2[kNumChannels / 2];
+        lanes::D2 a1[kNumChannels / 2];
+        lanes::D2 a2[kNumChannels / 2];
+        lanes::D2 s1[kNumChannels / 2];
+        lanes::D2 s2[kNumChannels / 2];
+    };
+
+    void load_lanes(Lanes& l) const {
+        for (std::size_t p = 0; p < static_cast<std::size_t>(kNumChannels / 2); ++p) {
+            l.b0[p] = lanes::load(&b0_[2 * p]);
+            l.b1[p] = lanes::load(&b1_[2 * p]);
+            l.b2[p] = lanes::load(&b2_[2 * p]);
+            l.a1[p] = lanes::load(&a1_[2 * p]);
+            l.a2[p] = lanes::load(&a2_[2 * p]);
+            l.s1[p] = lanes::load(&s1_[2 * p]);
+            l.s2[p] = lanes::load(&s2_[2 * p]);
+        }
+    }
+
+    void store_lanes(const Lanes& l) {
+        for (std::size_t p = 0; p < static_cast<std::size_t>(kNumChannels / 2); ++p) {
+            lanes::store(&s1_[2 * p], l.s1[p]);
+            lanes::store(&s2_[2 * p], l.s2[p]);
+        }
+    }
+
+    // Every channel, one sample, in place, in the tank's lane layout: v[j]
+    // holds channels 4j .. 4j + 3. The tank's block path. Input is finite and
+    // bounded by the tank's construction (the damping stage clamps it), so the
+    // recursion runs bare and heal() snaps and sanitizes the state once per
+    // block (after store_lanes()).
+    static void process_lanes(Lanes& l, lanes::F4 (&v)[kNumChannels / 4]) {
+        using lanes::D2;
+        for (std::size_t j = 0; j < static_cast<std::size_t>(kNumChannels / 4); ++j) {
+            const D2 in[2] = {lanes::widen_low(v[j]), lanes::widen_high(v[j])};
+            D2 out[2];
+            for (std::size_t h = 0; h < 2; ++h) {
+                const std::size_t p = 2 * j + h;
+                const D2 y = l.b0[p] * in[h] + l.s1[p];
+                l.s1[p] = l.b1[p] * in[h] - l.a1[p] * y + l.s2[p];
+                l.s2[p] = l.b2[p] * in[h] - l.a2[p] * y;
+                out[h] = y;
+            }
+            v[j] = lanes::narrow(out[0], out[1]);
+        }
+    }
+
+    // Snap decayed state to zero and zero any channel whose state left the
+    // finite range. Once per block of at most a control period.
+    void heal() {
+        for (std::size_t c = 0; c < static_cast<std::size_t>(kNumChannels); ++c) {
+            if (!std::isfinite(s1_[c]) || !std::isfinite(s2_[c])) {
+                s1_[c] = 0.0;
+                s2_[c] = 0.0;
+            }
+            s1_[c] = snap_to_zero(s1_[c]);
+            s2_[c] = snap_to_zero(s2_[c]);
+        }
     }
 
 private:
@@ -231,20 +327,81 @@ private:
         return std::max(1, static_cast<int>(ms * 0.001 * tank_rate_));
     }
 
+    // sin and cos of w on [0, pi]: shift to y = w - pi/2 in [-pi/2, pi/2] and
+    // evaluate the Taylor series of cos(y) and sin(y) through degree 18 and 17
+    // (truncation below 5e-14 there), so sin(w) = cos(y), cos(w) = -sin(y).
+    static void sin_cos_0_pi(double w, double& s, double& c) {
+        const double y = w - 1.5707963267948966;
+        const double y2 = y * y;
+        double cy = 1.0 / 6402373705728000.0;  // 1/18!
+        cy = cy * y2 - 1.0 / 20922789888000.0; // 1/16!
+        cy = cy * y2 + 1.0 / 87178291200.0;    // 1/14!
+        cy = cy * y2 - 1.0 / 479001600.0;      // 1/12!
+        cy = cy * y2 + 1.0 / 3628800.0;        // 1/10!
+        cy = cy * y2 - 1.0 / 40320.0;          // 1/8!
+        cy = cy * y2 + 1.0 / 720.0;            // 1/6!
+        cy = cy * y2 - 1.0 / 24.0;
+        cy = cy * y2 + 0.5;
+        cy = 1.0 - cy * y2;
+        double sy = 1.0 / 355687428096000.0;  // 1/17!
+        sy = sy * y2 - 1.0 / 1307674368000.0; // 1/15!
+        sy = sy * y2 + 1.0 / 6227020800.0;    // 1/13!
+        sy = sy * y2 - 1.0 / 39916800.0;      // 1/11!
+        sy = sy * y2 + 1.0 / 362880.0;        // 1/9!
+        sy = sy * y2 - 1.0 / 5040.0;          // 1/7!
+        sy = sy * y2 + 1.0 / 120.0;
+        sy = sy * y2 - 1.0 / 6.0;
+        sy = y + y * y2 * sy;
+        s = cy;
+        c = -sy;
+    }
+
+    // 10^(gain_db / 40) for gain_db in [-kFluxMaxDb, 0]: the exponent is at
+    // most 0.18 in magnitude, where the Taylor series of exp through degree 10
+    // is exact to double rounding.
+    static double peaking_amplitude(double gain_db) {
+        const double x = gain_db * (2.302585092994046 / 40.0);
+        double e = 1.0 / 3628800.0;
+        e = e * x + 1.0 / 362880.0;
+        e = e * x + 1.0 / 40320.0;
+        e = e * x + 1.0 / 5040.0;
+        e = e * x + 1.0 / 720.0;
+        e = e * x + 1.0 / 120.0;
+        e = e * x + 1.0 / 24.0;
+        e = e * x + 1.0 / 6.0;
+        e = e * x + 0.5;
+        e = e * x + 1.0;
+        return e * x + 1.0;
+    }
+
+    // The RBJ peaking section (BiquadT::Type::peaking), normalized.
     void redesign() {
-        BiquadT<double> designer;
         const double max_hz = kAaCutoffFraction * tank_rate_;
-        for (int i = 0; i < kNumChannels; ++i) {
-            designer.set_coefficients(BiquadT<double>::Type::peaking,
-                                      std::clamp(current_hz_[i], 20.0, max_hz), kFluxQ,
-                                      tank_rate_, current_db_[i]);
-            coeffs_[static_cast<std::size_t>(i)] = designer.coefficients();
+        const double to_w = 6.283185307179586 / tank_rate_;
+        for (std::size_t i = 0; i < static_cast<std::size_t>(kNumChannels); ++i) {
+            const double w0 = std::clamp(current_hz_[i], 20.0, max_hz) * to_w;
+            double sin_w0 = 0.0;
+            double cos_w0 = 0.0;
+            sin_cos_0_pi(w0, sin_w0, cos_w0);
+            const double alpha = sin_w0 / (2.0 * kFluxQ);
+            const double A = peaking_amplitude(std::clamp(current_db_[i], -kFluxMaxDb, 0.0));
+            const double inv_a0 = 1.0 / (1.0 + alpha / A);
+            b0_[i] = (1.0 + alpha * A) * inv_a0;
+            b1_[i] = -2.0 * cos_w0 * inv_a0;
+            b2_[i] = (1.0 - alpha * A) * inv_a0;
+            a1_[i] = b1_[i];
+            a2_[i] = (1.0 - alpha / A) * inv_a0;
         }
     }
 
     std::array<XorShift32, kNumChannels> rng_{};
-    std::array<BiquadCoefficientsT<double>, kNumChannels> coeffs_{};
-    std::array<SanitizedBiquadState, kNumChannels> state_{};
+    std::array<double, kNumChannels> b0_{};
+    std::array<double, kNumChannels> b1_{};
+    std::array<double, kNumChannels> b2_{};
+    std::array<double, kNumChannels> a1_{};
+    std::array<double, kNumChannels> a2_{};
+    std::array<double, kNumChannels> s1_{};
+    std::array<double, kNumChannels> s2_{};
     std::array<double, kNumChannels> base_hz_{};
     std::array<double, kNumChannels> target_hz_{};
     std::array<double, kNumChannels> current_hz_{};

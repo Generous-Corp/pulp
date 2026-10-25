@@ -682,6 +682,45 @@
                     RESOURCE_LOCK pulp_gpu
                     TIMEOUT 60)
 
+            # The provider conformance kit instantiated for the physical Dawn
+            # provider (the fake instantiation runs on every lane). Its receipt
+            # must derive kind=real from an authenticated identity, skip no
+            # scenario and carry a Dawn imported/staged pair. Catch2 exits 4
+            # when the device is unavailable; that run deletes the receipt
+            # first, so the verify step then skips (77) instead of reading a
+            # stale file.
+            add_executable(pulp-test-gpu-dawn-shared-io-provider-conformance
+                test_gpu_dawn_shared_io_provider_conformance.cpp)
+            target_link_libraries(pulp-test-gpu-dawn-shared-io-provider-conformance PRIVATE
+                pulp::gpu-audio Catch2::Catch2WithMain)
+            target_include_directories(pulp-test-gpu-dawn-shared-io-provider-conformance PRIVATE
+                ../core/gpu_audio/src)
+            target_compile_definitions(pulp-test-gpu-dawn-shared-io-provider-conformance PRIVATE
+                PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_pulp_gpu_audio_expected_dawn_sha}")
+            add_dependencies(pulp-test-gpu-dawn-shared-io-provider-conformance
+                pulp-gpu-dawn-shared-io-provider-probe)
+            set(_pulp_gpu_dawn_conformance_receipt
+                "${CMAKE_CURRENT_BINARY_DIR}/gpu-audio-provider-conformance-dawn.json")
+            add_test(NAME pulp-test-gpu-dawn-shared-io-provider-conformance
+                COMMAND "${CMAKE_COMMAND}" -E env
+                    "PULP_PROVIDER_CONFORMANCE_RECEIPT=${_pulp_gpu_dawn_conformance_receipt}"
+                    $<TARGET_FILE:pulp-test-gpu-dawn-shared-io-provider-conformance>)
+            set_tests_properties(pulp-test-gpu-dawn-shared-io-provider-conformance PROPERTIES
+                FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
+                FIXTURES_SETUP pulp_gpu_dawn_provider_conformance_receipt
+                RESOURCE_LOCK pulp_gpu
+                SKIP_RETURN_CODE 4
+                TIMEOUT 300)
+            add_test(NAME pulp-gpu-dawn-provider-conformance-receipt-verify
+                COMMAND "${Python3_EXECUTABLE}"
+                    "${PROJECT_SOURCE_DIR}/tools/validation/verify_gpu_audio_provider_conformance.py"
+                    "${_pulp_gpu_dawn_conformance_receipt}" --forbid-skips --require-pair
+                    --require-kind real --skip-if-missing)
+            set_tests_properties(pulp-gpu-dawn-provider-conformance-receipt-verify PROPERTIES
+                FIXTURES_REQUIRED pulp_gpu_dawn_provider_conformance_receipt
+                SKIP_RETURN_CODE 77
+                TIMEOUT 30)
+
             # Bounded private one-stream WaveNet qualification. This probe is
             # admitted only after exact provider identity and exercises the
             # resident causal plan, imported audio-slot accounting, CPU oracle,
@@ -812,6 +851,38 @@
                 RESOURCE_LOCK pulp_gpu
                 SKIP_RETURN_CODE 77
                 TIMEOUT 60)
+
+            # Physical proof that the private WaveNet provider keeps completing
+            # blocks with staged storage plus opt-in GPU timestamps (two slots,
+            # six blocks, bounded per-block deadline) and that the audio matches
+            # imported storage byte for byte, for an ungated and a gated net.
+            add_executable(pulp-gpu-dawn-wavenet-staged-timestamps-probe
+                test_gpu_dawn_wavenet_staged_timestamps_probe.cpp)
+            target_link_libraries(pulp-gpu-dawn-wavenet-staged-timestamps-probe PRIVATE
+                pulp::gpu-audio)
+            target_include_directories(pulp-gpu-dawn-wavenet-staged-timestamps-probe PRIVATE
+                ../core/gpu_audio/src)
+            target_include_directories(pulp-gpu-dawn-wavenet-staged-timestamps-probe PRIVATE
+                ${SKIA_INCLUDE_DIRS})
+            if(EXISTS "${SKIA_INCLUDE_DIRS}/dawn")
+                target_include_directories(pulp-gpu-dawn-wavenet-staged-timestamps-probe PRIVATE
+                    "${SKIA_INCLUDE_DIRS}/dawn")
+            endif()
+            target_compile_definitions(pulp-gpu-dawn-wavenet-staged-timestamps-probe PRIVATE
+                PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_pulp_gpu_audio_expected_dawn_sha}")
+            if(PULP_GPU_AUDIO_HAS_VELLUM_D15)
+                target_link_libraries(pulp-gpu-dawn-wavenet-staged-timestamps-probe PRIVATE
+                    Vellum::Gpu Vellum::DawnHeaders)
+            endif()
+            add_dependencies(pulp-gpu-dawn-wavenet-staged-timestamps-probe
+                pulp-gpu-dawn-shared-io-provider-probe)
+            add_test(NAME pulp-gpu-dawn-wavenet-staged-timestamps-probe
+                COMMAND pulp-gpu-dawn-wavenet-staged-timestamps-probe)
+            set_tests_properties(pulp-gpu-dawn-wavenet-staged-timestamps-probe PROPERTIES
+                FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
+                RESOURCE_LOCK pulp_gpu
+                SKIP_RETURN_CODE 77
+                TIMEOUT 120)
 
             if(PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER)
                 # Matched staged/shared lifecycle screening. This is deliberately

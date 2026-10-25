@@ -2,6 +2,7 @@
 
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/view/buttons.hpp>
+#include <pulp/view/chart_shader_presets.hpp>
 #include <pulp/view/gap_widgets.hpp>
 #include <pulp/view/midi_keyboard.hpp>
 #include <pulp/view/text_editor.hpp>
@@ -107,6 +108,79 @@ std::unique_ptr<View> build_widget_gallery(const Theme& theme) {
         add(std::move(pb), M + 390.0f, y + 13.0f, 240.0f, 10.0f);
     }
     y += 56.0f;
+
+    // ── Shader presets: knob arcs and fader tracks drawn by named chart presets ──
+    header("Shader presets");
+    {
+        ChartShaderPresetOptions options;
+        options.color = root->resolve_color("control.track", Color::rgba8(96, 100, 112));
+        options.accent = root->resolve_color("accent.primary", Color::rgba8(100, 170, 255));
+        options.glow_sigma = 4.0f;
+        struct Look {
+            const char* preset;
+            bool pressed;
+            ChartProfile profile;
+        };
+        const Look looks[] = {
+            {"bevel", false, ChartProfile::round},
+            {"bevel", true, ChartProfile::round},
+            {"inset-channel", false, ChartProfile::round},
+            {"tube", false, ChartProfile::chamfer},
+            {"light-pipe", false, ChartProfile::round},
+            {"centre-highlight", false, ChartProfile::round},
+            {"glow", false, ChartProfile::round},
+        };
+        float kx = M;
+        float value = 0.1f;
+        for (const auto& look : looks) {
+            options.pressed = look.pressed;
+            options.profile = look.profile;
+            auto preset = make_chart_shader_preset(look.preset, options);
+            auto k = std::make_unique<Knob>();
+            k->set_value(value);
+            value += 0.13f;
+            k->set_chart_shader(std::move(preset.sksl), preset.reach);
+            add(std::move(k), kx, y, 84.0f, 84.0f);
+            kx += 104.0f;
+        }
+        y += 104.0f;
+
+        // Fader tracks: the same presets on vertical and horizontal stadiums,
+        // lit from above on screen whichever way the track runs.
+        struct TrackLook {
+            const char* preset;
+            ChartProfile profile;
+            bool vertical;
+            float value;
+        };
+        const TrackLook tracks[] = {
+            {"inset-channel", ChartProfile::round, true, 0.3f},
+            {"tube", ChartProfile::round, true, 0.55f},
+            {"light-pipe", ChartProfile::round, true, 0.8f},
+            {"inset-channel", ChartProfile::round, false, 0.35f},
+            {"tube", ChartProfile::chamfer, false, 0.7f},
+        };
+        float fx = M;
+        float hy = y;
+        for (const auto& track : tracks) {
+            options.pressed = false;
+            options.profile = track.profile;
+            auto preset = make_chart_shader_preset(track.preset, options);
+            auto f = std::make_unique<Fader>();
+            f->set_orientation(track.vertical ? Fader::Orientation::vertical
+                                              : Fader::Orientation::horizontal);
+            f->set_value(track.value);
+            f->set_chart_shader(std::move(preset.sksl), preset.reach);
+            if (track.vertical) {
+                add(std::move(f), fx, y, 28.0f, 96.0f);
+                fx += 56.0f;
+            } else {
+                add(std::move(f), fx, hy + 20.0f, 240.0f, 28.0f);
+                hy += 44.0f;
+            }
+        }
+    }
+    y += 112.0f;
 
     // ── Status & feedback ──
     header("Status & feedback");

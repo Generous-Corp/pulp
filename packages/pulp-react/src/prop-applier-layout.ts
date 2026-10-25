@@ -6,6 +6,7 @@
 // expected by the corresponding layout/style contract.
 
 import { call } from './prop-applier-internal.js';
+import { writeVisibility } from './prop-applier-visibility.js';
 
 // Coerce a single CSS-length-like token to the value shape the bridge's
 // per-edge setFlex keys expect. Numbers pass through
@@ -309,9 +310,9 @@ export function applyLayoutProp(
         // emission is just 'flex' / 'none'.
         case 'display': {
             const sval = String(value);
-            if (sval === 'none') { call('setVisible', id, false); return true; }
+            if (sval === 'none') { writeVisibility(id, false); return true; }
             if (sval === 'flex') {
-                call('setVisible', id, true);
+                writeVisibility(id, true);
                 // CSS web-compat: `display: flex` defaults to
                 // `flex-direction: row`. Pulp's Yoga config defaults to
                 // FlexDirection::column (RN convention), so when neither

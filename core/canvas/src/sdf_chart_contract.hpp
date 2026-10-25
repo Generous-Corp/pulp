@@ -19,8 +19,22 @@ namespace pulp::canvas::sdf_chart {
 /// Whether a shape emits a usable stroke chart (t/d/side). A property of the
 /// geometry, not of the renderer — the rule `sksl_declares_uniform()` already
 /// follows for uniforms, so the two backends agree.
+///
+/// The charted shapes are the bands with a closed-form centre line: the flat
+/// arc and ring (a circle), and the flat segment, rounded segment and stadium
+/// (a horizontal line). A quadratic Bezier has no closed-form arc length, so
+/// it has no `t` and is refused with the filled shapes.
 inline bool shape_has_chart(Canvas::SDFShape shape) {
-    return shape == Canvas::SDFShape::flat_arc;
+    switch (shape) {
+    case Canvas::SDFShape::flat_arc:
+    case Canvas::SDFShape::ring:
+    case Canvas::SDFShape::flat_segment:
+    case Canvas::SDFShape::rounded_segment:
+    case Canvas::SDFShape::stadium:
+        return true;
+    default:
+        return false;
+    }
 }
 
 /// The shape's name, so a refusal is something a reader can act on.
@@ -55,7 +69,8 @@ inline bool source_uses_chart(const std::string& sksl) {
 inline std::string refusal_for(Canvas::SDFShape shape) {
     return std::string("Shape '") + shape_name(shape) +
            "' has no stroke chart (t/d/side); chart shaders require a band "
-           "shape whose chart is implemented (flat_arc)";
+           "shape whose chart is implemented (flat_arc, ring, flat_segment, "
+           "rounded_segment, stadium)";
 }
 
 } // namespace pulp::canvas::sdf_chart

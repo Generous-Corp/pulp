@@ -496,6 +496,23 @@ TEST_CASE("serialized NAM artifact has full deterministic CPU-oracle parity",
     for (std::size_t i = 0; i < replay.size(); ++i)
         max_abs_error = std::max(max_abs_error, std::abs(replay[i] - expected[i]));
     CHECK(max_abs_error <= 1.0e-6f);
+
+    // The adapter runs the SIMD block engine (bounded rational tanh), so the
+    // 1e-6 margin above is held against the libm per-sample reference too,
+    // rather than only against the stored vector.
+    NamTcnArtifact reference;
+    REQUIRE(reference.load(fixture_path()));
+    REQUIRE(reference.cpu_kernel() == NamCpuKernel::Reference);
+    std::array<float, 128> reference_out{};
+    reference.process(input.data(), reference_out.data(), 128);
+    float simd_vs_reference = 0.0f, reference_vs_expected = 0.0f;
+    for (std::size_t i = 0; i < replay.size(); ++i) {
+        simd_vs_reference = std::max(simd_vs_reference, std::abs(replay[i] - reference_out[i]));
+        reference_vs_expected =
+            std::max(reference_vs_expected, std::abs(reference_out[i] - expected[i]));
+    }
+    CHECK(simd_vs_reference <= 1.0e-6f);
+    CHECK(reference_vs_expected <= 1.0e-6f);
     REQUIRE(model.quiesce());
     REQUIRE(model.release());
 }

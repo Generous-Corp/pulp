@@ -4,7 +4,7 @@
 # Design import tests (Figma/Stitch/v0/Pencil -> Pulp, W3C tokens)
 pulp_add_test_suite(pulp-test-design-import
     SOURCES test_design_update.cpp
-    SOURCES test_design_import_ir.cpp test_design_ir_normalize.cpp test_design_import_codegen.cpp test_design_import_codegen_layout_text.cpp test_design_import_codegen_paint.cpp test_design_import_codegen_web_controls.cpp test_design_cpp_codegen_golden.cpp test_design_browser_capture.cpp test_design_import_sources.cpp test_design_import_masks.cpp test_design_import_fidelity.cpp test_recognition_resolver.cpp test_design_manifest.cpp test_design_adherence.cpp test_design_fidelity_ledger.cpp test_design_gallery.cpp test_design_ledger.cpp test_design_handoff.cpp test_design_variants.cpp test_design_tweaks.cpp test_design_knobs.cpp
+    SOURCES test_design_import_ir.cpp test_design_ir_normalize.cpp test_design_import_codegen.cpp test_design_import_codegen_layout_text.cpp test_design_import_codegen_paint.cpp test_design_import_codegen_web_controls.cpp test_design_cpp_codegen_golden.cpp test_design_browser_capture.cpp test_design_import_sources.cpp test_design_import_masks.cpp test_design_import_fidelity.cpp test_design_ir_font_assets.cpp test_recognition_resolver.cpp test_design_manifest.cpp test_design_adherence.cpp test_design_fidelity_ledger.cpp test_design_gallery.cpp test_design_ledger.cpp test_design_handoff.cpp test_design_variants.cpp test_design_tweaks.cpp test_design_knobs.cpp
     LIBRARIES pulp::view
     COMPILE_DEFINITIONS PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}"
     TEST_SPEC "~[network]~[bench]"
@@ -107,6 +107,7 @@ endif()
 add_executable(pulp-test-design-import-native-materializer
     test_design_import_native_materializer.cpp
     test_design_import_native_capture.cpp
+    test_design_import_form_controls.cpp
     fixtures/design_import_generated_binding_runtime_fixture.cpp)
 target_link_libraries(pulp-test-design-import-native-materializer
     PRIVATE pulp::view Catch2::Catch2WithMain)
@@ -389,7 +390,12 @@ catch_discover_tests(pulp-test-design-import-benchmark
     PROPERTIES LABELS "parser-import")
 
 add_executable(pulp-test-design-import-benchmark-contracts
-    test_design_import_benchmark_contracts.cpp)
+    test_design_import_benchmark_contracts.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/design_import_benchmark_ir.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/design_import_benchmark_measure.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/design_import_benchmark_targets.cpp
+    harness/rt_allocation_probe.cpp)
+target_include_directories(pulp-test-design-import-benchmark-contracts PRIVATE ${CMAKE_SOURCE_DIR})
 target_link_libraries(pulp-test-design-import-benchmark-contracts
     PRIVATE pulp::view pulp::state Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-design-import-benchmark-contracts

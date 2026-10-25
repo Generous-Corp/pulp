@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "revision": 4,
+  "revision": 5,
   "fixes": [
     {
       "revision": 1,
@@ -55,6 +55,12 @@
       "id": "typography-length-units",
       "summary": "fontSize, letterSpacing and lineHeight strings resolve px, em, rem, % and normal to pixels before the bridge, instead of reaching it as a bare leading number ('0.08em' became 0.08 px, '6px' line height became 6x the font size)",
       "signature": "resolveTypographyLength"
+    },
+    {
+      "revision": 5,
+      "id": "complete-removal-reset",
+      "summary": "a style key that disappears from a commit, or becomes null, hands its native slots back to the widget's starting value (layout through resetStyleProperty), instead of only ten keys resetting and an active-only bold, shadow, scale or padding staying painted after the conditional spread drops it",
+      "signature": "resetRemovedStyleKeys"
     }
   ]
 }

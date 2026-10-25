@@ -11,6 +11,7 @@
 #include <pulp/view/window_host.hpp>
 
 #ifdef PULP_HAS_SKIA
+#include <pulp/canvas/image_file_cache.hpp>
 #include <pulp/canvas/skia_canvas.hpp>
 #include "include/core/SkCanvas.h"
 #include "include/core/SkColorSpace.h"
@@ -278,6 +279,11 @@ std::vector<std::uint8_t> raster_plugin_scene_rgba(View& root,
     const std::uint32_t w = geometry.pixel_width();
     const std::uint32_t h = geometry.pixel_height();
     if (w == 0 || h == 0) return {};
+
+    // Every call is one presented or captured frame drawn through the CPU
+    // raster cache key, so the file images it draws are kept for the frame
+    // even when they exceed the image cache's byte budget.
+    canvas::ImageFileCache::instance().begin_frame(nullptr);
 
     const SkImageInfo info = SkImageInfo::Make(
         static_cast<int>(w), static_cast<int>(h), kRGBA_8888_SkColorType,

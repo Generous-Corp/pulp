@@ -16,6 +16,7 @@
     "mean_timings_ms": {"type": "object"},
     "false_promotions": {"type": "integer", "minimum": 0},
     "ranked_gaps": {"type": "array"},
+    "worst_fixtures": {"type": "array", "maxItems": 5},
     "failures": {"type": "array"}
   }
 }

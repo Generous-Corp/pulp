@@ -58,6 +58,13 @@ class Host:
         self.mise_path = root / "bin/mise"
         self.mise_path.parent.mkdir(parents=True, exist_ok=True)
         self.mise_path.write_bytes(self.mise_bytes)
+        # `rustup <kind> list --installed --toolchain <pin>` output; rustup is
+        # only on the fake PATH when a test adds it.
+        self.rustup = {
+            "component": "cargo-aarch64-unknown-linux-gnu\nclippy-aarch64-unknown-linux-gnu\n"
+                         "rust-std-aarch64-unknown-linux-gnu\nrustc-aarch64-unknown-linux-gnu\nrustfmt-aarch64-unknown-linux-gnu\n",
+            "target": "aarch64-unknown-linux-gnu\nwasm32-unknown-unknown\n",
+        }
 
     @property
     def mise_sha(self) -> str:
@@ -70,6 +77,8 @@ class Host:
 
     def run(self, argv, cwd):
         name = Path(argv[0]).name
+        if name == "rustup":
+            return self.rustup.get(argv[1])
         return self.text.get(name)
 
 
@@ -186,6 +195,111 @@ class CheckEnvTests(unittest.TestCase):
         cmake = [f for f in findings if f.tool == "cmake"]
         self.assertEqual(1, len(cmake))
         self.assertIn("declared exception: platform.linux cmake = system", cmake[0].line())
+
+    def with_rust_parts(self) -> dict:
+        self.host.present.add("rustup")
+        doc = self.matching()
+        doc["rust_components"] = ["rustfmt", "clippy"]
+        doc["rust_targets"] = ["wasm32-unknown-unknown"]
+        return doc
+
+    def test_a_pinned_toolchain_missing_a_component_or_target_is_reported(self) -> None:
+        doc = self.with_rust_parts()
+        self.assertEqual([], self.collect(doc))  # control: everything listed is installed
+        self.host.rustup["component"] = self.host.rustup["component"].replace("clippy-aarch64-unknown-linux-gnu\n", "")
+        findings = self.collect(doc)
+        self.assertEqual(["rust components"], [f.tool for f in findings])
+        self.assertIn("missing clippy", findings[0].line())
+        self.assertIn("rustup toolchain install 1.97.1 --profile minimal --component rustfmt --component clippy "
+                      "--target wasm32-unknown-unknown", findings[0].fix)
+        self.host.rustup["target"] = "aarch64-unknown-linux-gnu\n"
+        self.assertIn("missing clippy, wasm32-unknown-unknown", self.collect(doc)[0].line())
+
+    def test_rust_parts_are_asked_of_the_pinned_toolchain_by_name(self) -> None:
+        doc = self.with_rust_parts()
+        seen = []
+
+        def run(argv, cwd):
+            seen.append(list(argv[1:]))
+            return self.host.run(argv, cwd)
+
+        check_env.collect(doc, self.tmp, self.home, PLAT, self.host.which, run)
+        self.assertIn(["component", "list", "--installed", "--toolchain", "1.97.1"], seen)
+        self.assertIn(["target", "list", "--installed", "--toolchain", "1.97.1"], seen)
+
+    def test_rust_parts_are_not_asked_when_rustc_is_already_wrong_or_absent(self) -> None:
+        doc = self.with_rust_parts()
+        self.host.rustup["component"] = ""
+        self.assertEqual(["rust components"], [f.tool for f in self.collect(doc)])  # control
+        self.host.text["rustc"] = "rustc 1.99.0 (abc 2026-09-01)"
+        self.assertEqual(["rustc"], [f.tool for f in self.collect(doc)])
+        self.host.present.discard("rustc")
+        self.assertEqual([], [f.tool for f in self.collect(doc, plat="linux-x64") if f.tool.startswith("rust")])
+
+    def test_rust_parts_follow_a_toolchain_the_job_selected_by_name(self) -> None:
+        doc = self.with_rust_parts()
+        seen = []
+
+        def run(argv, cwd):
+            seen.append(list(argv[1:]))
+            return self.host.run(argv, cwd)
+
+        from unittest import mock
+
+        with mock.patch.dict(os.environ, {"RUSTUP_TOOLCHAIN": "stable"}):
+            check_env.collect(doc, self.tmp, self.home, PLAT, self.host.which, run)
+        self.assertIn(["component", "list", "--installed", "--toolchain", "stable"], seen)
+        self.assertNotIn(["component", "list", "--installed", "--toolchain", "1.97.1"], seen)
+
+    def test_cache_placement_policy(self) -> None:
+        for good in ("/Volumes/Workshop/caches/rustup", "/Volumes/Atelier/caches/mise/data", "/Users/x/.rustup-real"):
+            self.assertIsNone(check_env.cache_placement_problem(good), good)
+        for bad, needle in (
+            ("/private/var/folders/ab/T/tmp.x1/mise", "temporary"),
+            ("/tmp/rustup", "temporary"),
+            ("/Volumes/Workshop/VMs/cache/mise", "outside /Volumes/<vol>/caches"),
+            ("/Volumes/Atelier/rustup", "outside /Volumes/<vol>/caches"),
+            ("/Volumes/Workshop/cachesX/rustup", "outside /Volumes/<vol>/caches"),
+        ):
+            self.assertIn(needle, check_env.cache_placement_problem(bad) or "", bad)
+
+    def link(self, rel: str, target: str) -> None:
+        path = self.home / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.symlink_to(target)
+
+    @unittest.skipIf(os.name == "nt", "symlinks")
+    def test_cache_symlinks_are_judged_and_real_directories_are_not(self) -> None:
+        (self.home / ".cargo").mkdir()  # a real directory at the default path: never a finding
+        self.link(".rustup", "/usr/bin")  # control: an existing internal-disk target is fine
+        self.assertEqual([], check_env.check_caches(self.home))
+        self.link(".local/share/mise", str(self.tmp / "mise-data"))
+        self.link(".cache/pulp/skia", "/nonexistent-pulp-cache/skia")
+        found = {f.tool: f for f in check_env.check_caches(self.home)}
+        self.assertEqual({"cache mise data", "cache Skia keyed cache"}, set(found))
+        self.assertIn("dangling symlink to /nonexistent-pulp-cache/skia", found["cache Skia keyed cache"].line())
+        self.assertIn("copy to /Volumes/<vol>/caches/<name>", found["cache mise data"].fix)
+        # They count for a rollout check like any host-tool difference.
+        self.assertIn("cache Skia keyed cache", [f.tool for f in self.collect(self.matching())])
+
+    @unittest.skipIf(os.name == "nt", "symlinks")
+    def test_a_volume_cache_that_does_not_answer_is_named_not_waited_on(self) -> None:
+        self.link(".rustup", "/Volumes/Workshop/caches/rustup")
+        self.assertEqual([], check_env.check_caches(self.home, exists=lambda path: True))
+        found = check_env.check_caches(self.home, exists=lambda path: None)
+        self.assertEqual(["volume unresponsive"], [f.note for f in found])
+        self.assertIn("Removable Volumes grant", found[0].fix)
+
+    @unittest.skipIf(os.name == "nt", "a POSIX probe")
+    def test_the_existence_probe_is_bounded(self) -> None:
+        import time
+
+        self.assertTrue(check_env.path_exists_bounded("/"))
+        self.assertFalse(check_env.path_exists_bounded("/nonexistent-pulp-cache"))
+        hang = (sys.executable, "-c", "import time; time.sleep(60)")
+        start = time.monotonic()
+        self.assertIsNone(check_env.path_exists_bounded("/", timeout=0.5, probe=hang))
+        self.assertLess(time.monotonic() - start, 5)
 
     def test_mise_version_mismatch(self) -> None:
         self.host.text["mise"] = "2026.5.16 macos-arm64 (2026-05-16)"

@@ -6,6 +6,34 @@
 /// key derived from their static address and size, so they cannot collide
 /// with a filesystem path.
 ///
+/// Inline encoded bytes (a `data:image/*` source, a retained scene image blob)
+/// live in a separate pool keyed by the caller's SHA-256 of the bytes, never
+/// their address, because a freed buffer's address is reused for different
+/// bytes. That pool is bounded by bytes (the retained encoded copy plus the
+/// decoded or uploaded pixels), not by entry count, so a panel with many
+/// distinct inline images cannot evict file images or pin unbounded memory;
+/// an image larger than the whole budget is built and drawn uncached.
+///
+/// The path pool is bounded by entry count and by bytes (decoded or uploaded
+/// pixels), but it never evicts for bytes an entry drawn in the frame being
+/// painted, nor its most recent entry. A frame whose file images exceed the
+/// budget (an imported panel drawn as several full-frame layers, one
+/// backdrop larger than the whole budget) overshoots the budget instead of
+/// evicting each layer just before it is drawn again, which would decode and
+/// upload every layer on every frame. Entries left over from earlier frames
+/// are evicted down to the budget on the next build. Frames are announced per
+/// backend with `begin_frame()`; a backend that never announces one is evicted
+/// strictly by recency, keeping only its newest entry. The inline pool keeps
+/// its own rule: an image larger than its budget is built and drawn uncached.
+///
+/// Both pools remember a build that returned null for `kFailureRetryDelay`:
+/// lookups of that key inside the window return null without building, so a
+/// missing or corrupt asset is not read and decoded on every paint. A path key
+/// also records the file's size and modification time, and is retried as soon
+/// as either changes, so a file written or fixed inside the window shows on
+/// the next repaint. `clear()` and `clear_backend()` drop the remembered
+/// failures with the entries.
+///
 /// `SkiaCanvas::draw_image_from_file` used to re-read the PNG/JPEG bytes off
 /// disk (`SkData::MakeFromFileName`), re-decode them
 /// (`SkImages::DeferredFromEncodedData`), AND re-upload a fresh GPU texture
@@ -37,12 +65,13 @@
 /// by paying the full cost on every static repaint too.
 ///
 /// Painting is on the UI thread (not the realtime audio thread), so a small
-/// mutex is acceptable; the cache is process-global with an LRU cap. Values are
+/// mutex is acceptable; the cache is process-global with LRU caps. Values are
 /// shared `sk_sp<SkImage>` — immutable once built and safe to share across the
 /// per-frame `SkiaCanvas` instances that reuse the same recorder.
 
 #ifdef PULP_HAS_SKIA
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -62,23 +91,61 @@ public:
     /// miss via @p build (which decodes the file and performs any GPU upload).
     /// The backend token distinguishes GPU-context-bound textures from each
     /// other and from the CPU raster image, so the same path drawn through two
-    /// contexts caches two entries. A null build result is returned but NOT
-    /// stored (a transient read/decode failure does not poison the cache).
+    /// contexts caches two entries. A null build result is returned but not
+    /// stored; lookups of that key return null without building until
+    /// `kFailureRetryDelay` has passed or the file changes, then the next one
+    /// builds again.
     /// When disabled, always rebuilds and stores nothing.
     sk_sp<SkImage> get_or_build(
         const std::string& path,
         const void* backend_key,
         const std::function<sk_sp<SkImage>()>& build);
 
+    /// Default byte budget of the path pool: a few retina-sized backdrops at 4
+    /// bytes per pixel.
+    static constexpr std::size_t kDefaultFileByteBudget = 64u * 1024u * 1024u;
+
+    /// How long a failed build is remembered before its key is built again.
+    static constexpr std::chrono::milliseconds kFailureRetryDelay{1000};
+
+    /// Default byte budget of the inline pool: room for a few retina-sized
+    /// panel backdrops (encoded copy plus 4 bytes per pixel each).
+    static constexpr std::size_t kDefaultInlineByteBudget = 96u * 1024u * 1024u;
+
+    /// Inline-bytes counterpart of `get_or_build`, keyed by @p content_key (a
+    /// digest of the bytes) and @p backend_key in a pool separate from the
+    /// path pool. @p encoded_size is the size of the encoded copy @p build
+    /// retains; the entry costs that plus the built image's pixel bytes. The
+    /// pool evicts least-recently-used entries to stay within its byte budget.
+    /// An image whose cost alone exceeds the budget is returned but not
+    /// stored, so it is rebuilt on every call instead of flushing the pool.
+    sk_sp<SkImage> get_or_build_inline(const std::string& content_key, const void* backend_key,
+                                       std::size_t encoded_size,
+                                       const std::function<sk_sp<SkImage>()>& build);
+
     struct Stats {
         std::uint64_t hits = 0;    ///< Cache hits (decode + upload skipped).
         std::uint64_t builds = 0;  ///< Cache misses (image rebuilt).
         std::size_t size = 0;      ///< Live entries.
+        std::size_t bytes = 0;     ///< Pixel bytes of live entries; above the
+                                   ///< budget only while one frame's images exceed it.
     };
+    /// Counters for the path pool.
     Stats stats() const;
+
+    struct InlineStats {
+        std::uint64_t hits = 0;        ///< Cache hits (decode + upload skipped).
+        std::uint64_t builds = 0;      ///< Builds, cached or not.
+        std::uint64_t over_budget = 0; ///< Builds not retained: larger than the budget.
+        std::size_t size = 0;          ///< Live entries.
+        std::size_t bytes = 0;         ///< Retained cost of live entries.
+    };
+    /// Counters for the inline pool.
+    InlineStats inline_stats() const;
+    /// Reset the counters of both pools.
     void reset_stats();
 
-    /// Drop all cached images. The invalidation hook for on-disk file mutation
+    /// Drop all cached images from both pools, and forget announced frames. The invalidation hook for on-disk file mutation
     /// (see the semantic-change note above) and for GPU-context teardown.
     /// Stop painting before calling this; it waits for every in-flight build.
     void clear();
@@ -89,15 +156,35 @@ public:
     /// A null backend key is ignored because it denotes the shared CPU-raster entry.
     void clear_backend(const void* backend_key);
 
+    /// Announce that a new frame starts drawing through @p backend_key (the
+    /// Graphite recorder or Ganesh context, or null for CPU raster). Entries
+    /// that backend draws until its next frame are not evicted for bytes.
+    /// GPU surfaces call this from their frame start.
+    void begin_frame(const void* backend_key);
+
     /// Toggle caching globally. When false, get_or_build still works but always
     /// rebuilds and stores nothing (used to A/B against the uncached path and to
     /// keep golden / micro-benchmark harnesses deterministic).
     void set_enabled(bool enabled);
     bool enabled() const;
 
+    /// Entry cap of the path pool.
     void set_capacity(std::size_t capacity);
 
-private:
+    /// Byte budget of the path pool; evicts down to it immediately, keeping
+    /// the most recently used entry and the entries drawn this frame.
+    void set_byte_budget(std::size_t bytes);
+    std::size_t byte_budget() const;
+
+    /// Byte budget of the inline pool; evicts down to it immediately.
+    void set_inline_byte_budget(std::size_t bytes);
+    std::size_t inline_byte_budget() const;
+
+    /// Replace the time source of the failure memo; null restores the steady
+    /// clock. Lets a test cross the retry window without sleeping.
+    void set_clock_for_testing(std::function<std::chrono::steady_clock::time_point()> now);
+
+  private:
     ImageFileCache() = default;
     struct Impl;
     // Defined in image_file_cache.cpp; stateful members live there to keep this

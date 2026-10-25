@@ -248,6 +248,8 @@ public:
     bool draw_image_from_file_rect(const std::string& path,
                                    float sx, float sy, float sw, float sh,
                                    float dx, float dy, float dw, float dh) override;
+    bool measure_image_from_data(const uint8_t* data, size_t size, float& out_width,
+                                 float& out_height) override;
     bool measure_image_from_file(const std::string& path,
                                  float& out_width, float& out_height) override;
 
@@ -379,7 +381,9 @@ private:
     // Strokes the current path using either apply_stroke_color or, when
     // has_stroke_gradient_ is set, draws the active stroke gradient
     // clipped to the stroked-path outline (via CGContextReplacePathWithStrokedPath).
-    void stroke_with_active_paint();
+    // `apply_sticky_dash` is false for stroke_path, whose StrokeStyle has already
+    // set the dash for this draw and must not be overridden by the sticky one.
+    void stroke_with_active_paint(bool apply_sticky_dash = true);
     void release_path();
 
     // ── Retained layer state (cg_canvas_path.mm) ─────────────────────────

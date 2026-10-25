@@ -17,6 +17,8 @@
 #include <pulp/canvas/canvas.hpp>
 
 #include <cmath>
+#include <memory>
+#include <limits>
 #include <optional>
 #include <utility>
 
@@ -784,4 +786,133 @@ TEST_CASE("SvgPathWidget clear_stroke_gradient returns to solid-stroke mode",
     REQUIRE_FALSE(gradient_ran);
     REQUIRE(first_stroke.has_value());
     REQUIRE(first_stroke->g > 0.9f);  // green — gradient was cleared
+}
+
+TEST_CASE("SvgPathWidget strokes with its SVG cap, join and miter limit, locally",
+          "[svg_path][stroke-style]") {
+    SvgPathWidget w;
+    w.set_bounds({0, 0, 24, 24});
+    w.set_viewbox(24, 24);
+    w.set_path("M4 12 L12 4 L20 12");
+    w.clear_fill();
+    w.set_stroke_color(pulp::canvas::Color::rgba8(0, 0, 0));
+    w.set_stroke_width(2.0f);
+
+    // Unset, the widget strokes with the canvas's own state, as it always did.
+    REQUIRE_FALSE(w.stroke_cap().has_value());
+    {
+        RecordingCanvas rc;
+        w.paint(rc);
+        bool immediate = false, styled = false;
+        for (const auto& cmd : rc.commands()) {
+            immediate |= cmd.type == DrawCommand::Type::stroke_current_path;
+            styled |= cmd.type == DrawCommand::Type::stroke_path_object;
+        }
+        CHECK(immediate);
+        CHECK_FALSE(styled);
+    }
+
+    // Set, the stroke carries exactly that style in one draw, so nothing is
+    // left on the canvas for the next view; unset parts take SVG's defaults.
+    w.set_stroke_cap(pulp::canvas::LineCap::round);
+    w.set_stroke_join(pulp::canvas::LineJoin::bevel);
+    RecordingCanvas rc;
+    w.paint(rc);
+    const DrawCommand* stroke = nullptr;
+    for (const auto& cmd : rc.commands()) {
+        CHECK(cmd.type != DrawCommand::Type::set_line_cap);
+        if (cmd.type == DrawCommand::Type::stroke_path_object)
+            stroke = &cmd;
+    }
+    REQUIRE(stroke != nullptr);
+    CHECK(stroke->f[0] == 2.0f);
+    CHECK(stroke->f[1] == static_cast<float>(pulp::canvas::LineCap::round));
+    CHECK(stroke->f[2] == static_cast<float>(pulp::canvas::LineJoin::bevel));
+    CHECK(stroke->f[3] == 4.0f); // SVG's miter limit, not the canvas's 10
+
+    w.set_stroke_miter_limit(8.0f);
+    CHECK(w.stroke_miter_limit() == 8.0f);
+    // SVG ignores a limit under 1 or a non-finite one.
+    w.set_stroke_miter_limit(0.5f);
+    w.set_stroke_miter_limit(std::numeric_limits<float>::infinity());
+    CHECK(w.stroke_miter_limit() == 8.0f);
+}
+
+TEST_CASE("SvgPathWidget strokes a styled gradient without touching sticky stroke state",
+          "[svg_path][stroke-style]") {
+    SvgPathWidget w;
+    w.set_bounds({0, 0, 24, 24});
+    w.set_viewbox(24, 24);
+    w.set_path("M4 12 L20 12");
+    w.clear_fill();
+    w.set_stroke_gradient("linear-gradient(to right, #89b4fa, #cba6f7)");
+    w.set_stroke_width(2.0f);
+    w.set_stroke_cap(pulp::canvas::LineCap::round);
+
+    RecordingCanvas rc;
+    w.paint(rc);
+    int gradient = -1, stroke = -1, cleared = -1;
+    for (size_t i = 0; i < rc.commands().size(); ++i) {
+        const auto& cmd = rc.commands()[i];
+        // Neither the style nor a reset of it reaches the canvas's own state,
+        // so a caller's non-default cap or join survives this draw.
+        CHECK(cmd.type != DrawCommand::Type::set_line_cap);
+        CHECK(cmd.type != DrawCommand::Type::set_line_join);
+        CHECK(cmd.type != DrawCommand::Type::set_miter_limit);
+        CHECK(cmd.type != DrawCommand::Type::stroke_current_path);
+        if (cmd.type == DrawCommand::Type::set_stroke_gradient_linear)
+            gradient = static_cast<int>(i);
+        if (cmd.type == DrawCommand::Type::stroke_path_object)
+            stroke = static_cast<int>(i);
+        if (cmd.type == DrawCommand::Type::clear_stroke_gradient)
+            cleared = static_cast<int>(i);
+    }
+    // The gradient is active for the styled draw and cleared after it.
+    REQUIRE(gradient >= 0);
+    REQUIRE(stroke > gradient);
+    REQUIRE(cleared > stroke);
+    CHECK(rc.commands()[static_cast<size_t>(stroke)].f[1] ==
+          static_cast<float>(pulp::canvas::LineCap::round));
+}
+
+TEST_CASE("SvgPathWidget paints in the captured CSS-px-snapped box", "[svg_path][snap]") {
+    // An inline <svg> laid out at top 13.5: Chromium paints its content at the
+    // snapped 14, as it does a box background, and the capture records that.
+    pulp::view::View root;
+    root.set_bounds({0, 0, 100, 100});
+    auto owned = std::make_unique<SvgPathWidget>();
+    auto* svg = owned.get();
+    root.add_child(std::move(owned));
+    svg->set_bounds({20.0f, 13.5f, 24.0f, 24.0f});
+    svg->set_viewbox(24, 24);
+    svg->set_path("M4 12 L20 12");
+    svg->clear_fill();
+    svg->set_stroke_color(pulp::canvas::Color::rgba8(255, 255, 255));
+    svg->set_captured_box_paint_rect(40.0f / 2, 28.0f / 2, 88.0f / 2, 76.0f / 2, 2.0f);
+
+    const auto snapped = svg->self_paint_bounds();
+    CHECK(snapped.x == 0.0f);
+    CHECK(snapped.y == 0.5f);
+    const auto extent = svg->paint_extent();
+    CHECK(extent.y < 12.5f); // the stroke's own padding, offset by the snap
+    CHECK(extent.y + extent.height > 12.5f);
+
+    RecordingCanvas rc;
+    svg->paint(rc);
+    const DrawCommand* first_translate = nullptr;
+    for (const auto& cmd : rc.commands()) {
+        if (cmd.type == DrawCommand::Type::translate) {
+            first_translate = &cmd;
+            break;
+        }
+    }
+    REQUIRE(first_translate != nullptr);
+    CHECK(first_translate->f[0] == 0.0f);
+    CHECK(first_translate->f[1] == 0.5f);
+
+    // Without a captured rect the widget paints in its own bounds.
+    SvgPathWidget plain;
+    plain.set_bounds({0, 0, 24, 24});
+    plain.set_path("M4 12 L20 12");
+    CHECK(plain.self_paint_bounds().y == 0.0f);
 }

@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <cstdint>
+#include <functional>
 #include <iosfwd>
 #include <optional>
 
@@ -34,6 +35,13 @@ std::optional<AudioFileInfo> read_audio_file_info(const std::string& path);
 
 // Read entire audio file into memory
 std::optional<AudioFileData> read_audio_file(const std::string& path);
+
+// Read an audio file through one open: `admit` sees the header the decoder is
+// about to size its output from, and a false return refuses the file before
+// anything is allocated. A separate info read followed by a decode would
+// check one open's header and allocate from another's.
+std::optional<AudioFileData>
+read_audio_file(const std::string& path, const std::function<bool(const AudioFileInfo&)>& admit);
 
 // WAV sample format for writing. Int16 is the compact default (≈ −96 dBFS
 // noise floor); Int24 is a middle ground (≈ −144 dBFS floor, integer, universal

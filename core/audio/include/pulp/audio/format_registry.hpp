@@ -4,6 +4,7 @@
 // Provides unified audio file I/O across all supported formats.
 
 #include <pulp/audio/audio_file.hpp>
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -11,6 +12,31 @@
 #include <memory>
 
 namespace pulp::audio {
+
+/// Resource ceilings a reader enforces on decoded output. Container headers
+/// are untrusted: a reader checks the claimed size against these limits before
+/// allocating, then keeps checking as frames arrive, so a tiny file cannot
+/// request terabytes of output. A zero field means that ceiling is not
+/// enforced. The plain read(path) overloads apply these defaults, which admit
+/// ordinary long recordings (2^30 frames is over three hours of stereo at
+/// 96 kHz within 4 GiB of float output); callers reading longer material pass
+/// larger limits explicitly, and trusted local-file callers whose path was
+/// chosen by the user or host pass unbounded(). Field names match
+/// WavDecodeLimits.
+struct DecodeLimits {
+    std::uint64_t max_frames = 1ull << 30;
+    std::uint32_t max_channels = 64u;
+    std::uint64_t max_output_bytes = 4ull * 1024u * 1024u * 1024u;
+
+    /// No ceilings at all: every field zero.
+    static DecodeLimits unbounded() {
+        DecodeLimits limits;
+        limits.max_frames = 0u;
+        limits.max_channels = 0u;
+        limits.max_output_bytes = 0u;
+        return limits;
+    }
+};
 
 /// Audio format reader interface
 class FormatReader {
@@ -22,6 +48,14 @@ public:
 
     /// Read entire file into memory
     virtual std::optional<AudioFileData> read(const std::string& path) = 0;
+
+    /// Read entire file into memory, refusing output beyond `limits`. Every
+    /// built-in reader overrides this; the default exists for external readers
+    /// that predate limits and falls back to read(path).
+    virtual std::optional<AudioFileData> read(const std::string& path, const DecodeLimits& limits) {
+        (void)limits;
+        return read(path);
+    }
 
     /// Whether this reader supports the given file extension (e.g., ".flac")
     virtual bool supports_extension(std::string_view ext) const = 0;
@@ -66,6 +100,11 @@ public:
     /// Read any supported audio file (dispatches to the right reader)
     std::optional<AudioFileInfo> read_info(const std::string& path) const;
     std::optional<AudioFileData> read(const std::string& path) const;
+
+    /// Read with explicit decode ceilings. Every built-in reader refuses a
+    /// file whose header or decoded output would exceed them; a custom reader
+    /// registered without a limits overload reads unbounded.
+    std::optional<AudioFileData> read(const std::string& path, const DecodeLimits& limits) const;
 
     /// Write audio data (dispatches to the right writer based on extension)
     bool write(const std::string& path, const AudioFileData& data) const;

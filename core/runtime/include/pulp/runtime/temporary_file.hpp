@@ -23,6 +23,10 @@ public:
     /// Prevent auto-deletion (e.g., if you want to keep the file)
     void release() { active_ = false; }
 
+    /// Create `path` as an empty file readable and writable by the owner
+    /// only. Fails without touching the file when `path` already exists.
+    static bool create_exclusive(const std::filesystem::path& path);
+
     // No copy
     TemporaryFile(const TemporaryFile&) = delete;
     TemporaryFile& operator=(const TemporaryFile&) = delete;
