@@ -532,7 +532,6 @@ public:
     void configure_swapchain() {
         if (!surface_ || !device_ || !swapchain_.presentable())
             return;
-        PULP_TRACE_SCOPE_NAMED("gpu", "gpu_swapchain_configure");
         const auto start = std::chrono::steady_clock::now();
         wgpu::SurfaceConfiguration surface_config{};
         surface_config.device = device_;
