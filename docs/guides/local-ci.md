@@ -3874,8 +3874,30 @@ With `pr_number` set, the run does the following:
   the jobs API sees them without reading logs. The merged base is also the
   capability base and the base classify diffs against, as a pull request's
   pinned `base.sha` is.
-- **Routes Linux as a pull_request run does**, to GitHub-hosted Linux. The
-  operator Linux selectors are ignored on this path.
+- **Writes nothing a later run reads.** The run executes a pull request's
+  code. A dispatch writes caches in its ref's scope, so on this path the bind
+  refuses the default branch, any `release/*` branch, and any branch with
+  classic protection or a ruleset, or whose protection cannot be read. Every
+  cache step only restores, and `setup-node` saves no npm cache.
+- **Uploads no consumable artifacts.** The iOS gate digest, the GPU-audio
+  SDK, the reuse replay record and the plugin bundles are skipped. Only the
+  ctest logs and the Rust fallback receipt upload, as diagnostics. The
+  protected receipt and the A2T attestation are `pull_request`-only. Every
+  artifact consumer (`ios_gate_digest`, `reuse_replay_collect`,
+  `binary_identity_shadow`, `base_poison_detector`,
+  `protected_merge_receipt`) reads only `merge_group`, `pull_request` or
+  push-to-main runs, and no `workflow_run` consumer of Build and Test reads
+  artifacts.
+- **Routes every leg as a pull_request run does.** macOS takes the PR-head
+  class (`pulp-build-pr-head`), so it gets the same host caches and warm
+  build dir (`build-<key>`) as the pull request's own runs. Linux goes to
+  GitHub-hosted runners, and there is no Windows leg. None of the operator
+  routing inputs applies: the provider and the Linux, Windows and macOS
+  selectors.
+- **Isolated from the pull request's other runs.** Its concurrency group
+  keys on `github.ref`, which is `refs/heads/<branch>`, so it cannot cancel
+  the pull request's `refs/pull/<n>/merge` run or a merge group. It uses no
+  secret and no environment beyond what a `pull_request` run gets.
 
 Everything else is still a dispatch: the run's checks land on the head, and
 it runs the full suite. A dispatch without `pr_number` behaves as before.

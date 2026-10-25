@@ -223,8 +223,11 @@ class BindingTest(unittest.TestCase):
         merge = self.MERGE if merge is None else merge
         return f"{state} {repo} {ref} {head or self.HEAD} {merge} {mergeable}\n"
 
-    def _run(self, pull: str, parents: str | None = None, pr_number: str = "7"):
-        answers = {"/pulls/": pull,
+    def _run(self, pull: str, parents: str | None = None, pr_number: str = "7",
+             ref_name: str = "topic", default_branch: str = "main",
+             protected: str = "false\n", rules: str = "0\n"):
+        # First match wins, so the rules path goes before the branch path.
+        answers = {"/rules/branches/": rules, "/branches/": protected, "/pulls/": pull,
                    "/commits/": parents if parents is not None else f"{self.BASE} {self.HEAD}\n"}
         with tempfile.TemporaryDirectory() as tmp:
             bin_dir = Path(tmp) / "bin"
@@ -238,8 +241,8 @@ class BindingTest(unittest.TestCase):
             return bash(script, {
                 "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
                 "FAKE_GH_ANSWERS": json.dumps(answers), "DISPATCH_PR_NUMBER": pr_number,
-                "GITHUB_REPOSITORY": REPO, "GITHUB_REF_NAME": "topic", "GITHUB_SHA": self.HEAD,
-                "GH_TOKEN": "x"})
+                "GITHUB_REPOSITORY": REPO, "GITHUB_REF_NAME": ref_name, "GITHUB_SHA": self.HEAD,
+                "DEFAULT_BRANCH": default_branch, "GH_TOKEN": "x"})
 
     def test_it_runs_only_on_a_pr_dispatch(self) -> None:
         self.assertEqual(self.step["if"], PR_DISPATCH)
@@ -251,6 +254,31 @@ class BindingTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertEqual((outputs["tested_ref"], outputs["tested_sha"], outputs["merged_base"]),
                          ("refs/pull/7/merge", self.MERGE, self.BASE))
+
+    def test_a_protected_or_release_ref_is_refused(self) -> None:
+        for case, kwargs in (
+                ("release branch", {"ref_name": "release/1.2"}),
+                ("classic protection", {"protected": "true\n"}),
+                ("a ruleset applies", {"rules": "2\n"}),
+                ("protection unreadable", {"protected": "!FAIL"}),
+                ("rules unreadable", {"rules": "!FAIL"})):
+            with self.subTest(case=case):
+                ref_name = kwargs.get("ref_name", "topic")
+                proc, outputs = self._run(self._pull(ref=ref_name), **kwargs)
+                self.assertEqual(proc.returncode, 1, proc.stdout)
+                self.assertNotIn("tested_sha", outputs)
+
+    def test_a_dispatch_on_the_default_branch_is_refused(self) -> None:
+        # Its caches would land in the default branch's scope. Even a pull
+        # request headed by main itself (into develop/**) is refused.
+        for ref_name, default_branch in (("main", "main"), ("topic", "")):
+            with self.subTest(ref_name=ref_name, default_branch=default_branch):
+                proc, outputs = self._run(self._pull(ref=ref_name), ref_name=ref_name,
+                                          default_branch=default_branch)
+                self.assertEqual(proc.returncode, 1, proc.stdout)
+                self.assertNotIn("tested_sha", outputs)
+        self.assertEqual(self.step["env"]["DEFAULT_BRANCH"],
+                         "${{ github.event.repository.default_branch }}")
 
     def test_anything_else_fails_closed(self) -> None:
         cases = (
@@ -342,6 +370,221 @@ class LinuxRoutingTest(unittest.TestCase):
                          "${{ inputs.pr_number == '' && inputs.linux_runner_selector_json || '' }}")
         self.assertEqual(self.env["DISPATCH_PR_NUMBER"], "${{ inputs.pr_number }}")
 
+
+
+class NoCacheOrArtifactWriteTest(unittest.TestCase):
+    """A pr_number dispatch runs a pull request's code: it writes nothing a
+    later run reads. Its caches only restore, and its consumable artifacts are
+    not uploaded."""
+
+    NO_PR = "inputs.pr_number == ''"
+    # The SDK upload's retry runs only when that upload failed, so it is
+    # skipped with it.
+    SKIPPED_UPLOADS = ("Record iOS gate digest", "Upload exact GPU-audio SDK (macOS ARM64)",
+                       "Upload reuse replay record (macOS)", "Upload plugin bundles (macOS)",
+                       "Upload plugin bundles (Windows)", "Upload plugin bundles (Linux)")
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.jobs = workflow()["jobs"]
+
+    def _condition(self, step: dict) -> str:
+        return " ".join(str(step.get("if", "")).split())
+
+    def test_no_cache_step_can_save_on_the_pr_dispatch_path(self) -> None:
+        seen = 0
+        for job in ("classify", "build"):
+            for step in self.jobs[job]["steps"]:
+                uses = str(step.get("uses", ""))
+                with self.subTest(job=job, step=step.get("name") or uses):
+                    if uses.startswith("actions/cache/restore@"):
+                        seen += 1
+                        continue  # restore-only by construction
+                    if uses.startswith(("actions/cache@", "actions/cache/save@")) \
+                            or "cache-action" in uses or "namespace-macos-cache" in uses:
+                        seen += 1
+                        condition = self._condition(step)
+                        # Either push-to-main only, or explicitly off a pr_number dispatch.
+                        self.assertTrue("github.event_name == 'push'" in condition
+                                        or self.NO_PR in condition, condition)
+                    self.assertNotIn("actions/cache@", uses,
+                                     "actions/cache saves in its post step; use cache/restore")
+        self.assertGreaterEqual(seen, 4, "control: the scan found the cache steps")
+
+    def test_setup_actions_do_not_save_caches_on_the_pr_dispatch_path(self) -> None:
+        for job in ("classify", "build"):
+            for step in self.jobs[job]["steps"]:
+                uses = str(step.get("uses", ""))
+                cache = (step.get("with") or {}).get("cache")
+                if uses.startswith("actions/setup-") and cache:
+                    with self.subTest(step=step["name"]):
+                        self.assertEqual(cache, "${{ inputs.pr_number == '' && 'npm' || '' }}")
+
+    def test_consumable_artifacts_are_not_uploaded_on_the_pr_dispatch_path(self) -> None:
+        build = steps("build")
+        for name in self.SKIPPED_UPLOADS:
+            with self.subTest(step=name):
+                self.assertIn(self.NO_PR, self._condition(build[name]))
+        self.assertEqual(build["Upload exact GPU-audio SDK (macOS ARM64, retry)"]["if"],
+                         "steps.gpu_audio_sdk_upload.outcome == 'failure'")
+        # The protected receipt and the A2T attestation are pull_request-only already.
+        self.assertIn("github.event_name == 'pull_request'",
+                      self._condition(build["Issue exact protected-validation receipt"]))
+
+
+class RoutingParityTest(LinuxRoutingTest):
+    """A pr_number dispatch routes like a pull_request run: macOS on the PR-head
+    class, Linux hosted, no Windows, and no operator routing input applies."""
+
+    def _matrix(self, event: str, **env: str) -> dict:
+        base = {k: v for k, v in os.environ.items()
+                if not k.startswith(("GITHUB_", "PULP_", "EXPLICIT_", "NAMESPACE_"))}
+        base.update({
+            "REQUESTED_PROVIDER": "github-hosted", "GITHUB_EVENT_NAME": event,
+            "GITHUB_REPOSITORY": REPO, "GITHUB_WORKSPACE": str(ROOT),
+            "WORKFLOW_REF": f"{REPO}/.github/workflows/build.yml@refs/heads/topic",
+            "EXPLICIT_LINUX_RUNNER_SELECTOR_JSON": "", "EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON": "",
+            "CONFIGURED_LINUX_RUNNER_SELECTOR_JSON": json.dumps(LOCAL_LINUX),
+            "WORKFLOW_DISPATCH_LINUX_SELECTOR": "", "WORKFLOW_DISPATCH_RUN_WINDOWS": "true",
+            "WORKFLOW_DISPATCH_MACOS_SELECTOR": "",
+            "LOCAL_MACOS_RUNS_ON_JSON": json.dumps(["self-hosted", "macOS", "ARM64", "pulp-build"]),
+            "OVERFLOW_MACOS_RUNS_ON_JSON": "local-only",
+            "NAMESPACE_LINUX_RUNS_ON_JSON": "", "NAMESPACE_WINDOWS_RUNS_ON_JSON": "",
+            "WORKFLOW_DISPATCH_ALLOW_HOSTED_WINDOWS": "", "ALLOW_HOSTED_WINDOWS_VAR": "",
+            "DISPATCH_PR_NUMBER": "",
+        })
+        base.update(env)
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "out"
+            output.write_text("", encoding="utf-8")
+            base["GITHUB_OUTPUT"] = str(output)
+            proc = subprocess.run([sys.executable, "-c", self.resolver], cwd=ROOT, env=base,
+                                  capture_output=True, text=True, encoding="utf-8", check=False)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            for line in output.read_text(encoding="utf-8").splitlines():
+                if line.startswith("matrix_json="):
+                    return {leg["key"]: json.loads(leg["runs_on_json"])
+                            for leg in json.loads(line.split("=", 1)[1])["include"]}
+        raise AssertionError("resolver emitted no matrix_json")
+
+    def test_a_pr_dispatch_matches_a_pull_request_runs_legs(self) -> None:
+        pr_run = self._matrix("pull_request")
+        dispatch = self._matrix("workflow_dispatch", DISPATCH_PR_NUMBER="11053",
+                                # Even with every Windows opt-in a plain dispatch honours:
+                                WORKFLOW_DISPATCH_ALLOW_HOSTED_WINDOWS="true",
+                                ALLOW_HOSTED_WINDOWS_VAR="1")
+        self.assertEqual(sorted(dispatch), sorted(pr_run))
+        self.assertNotIn("windows", dispatch)
+        self.assertIn("pulp-build-pr-head", dispatch["macos"])
+        self.assertNotIn("pulp-build-merge-group", dispatch["macos"])
+        self.assertEqual(dispatch["macos"], pr_run["macos"])
+        self.assertEqual(dispatch["linux"], "ubuntu-latest")
+        # Control: a plain dispatch with the same opt-ins does schedule Windows.
+        # (with the operator Linux selector a plain dispatch's expression supplies).
+        self.assertIn("windows", self._matrix("workflow_dispatch", WORKFLOW_DISPATCH_ALLOW_HOSTED_WINDOWS="true",
+                                              EXPLICIT_LINUX_RUNNER_SELECTOR_JSON=json.dumps(LOCAL_LINUX)))
+
+    def test_no_operator_routing_input_reaches_the_pr_dispatch(self) -> None:
+        env = self.env
+        for key, expected in (
+                ("REQUESTED_PROVIDER", "${{ inputs.pr_number == '' && inputs.runner_provider || vars.PULP_DEFAULT_RUNNER_PROVIDER || 'github-hosted' }}"),
+                ("EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON", "${{ inputs.pr_number == '' && inputs.windows_runner_selector_json || '' }}"),
+                ("WORKFLOW_DISPATCH_MACOS_SELECTOR", "${{ inputs.pr_number == '' && inputs.macos_runner_selector_json || '' }}")):
+            with self.subTest(key=key):
+                self.assertEqual(env[key], expected)
+
+    def test_the_build_dir_is_the_same_on_every_event(self) -> None:
+        # The self-hosted warm dir and host caches follow the PR-head class
+        # and the matrix key, never the event.
+        self.assertEqual(workflow()["jobs"]["build"]["env"]["PULP_BUILD_DIR"], "build-${{ matrix.key }}")
+
+
+class TrustAndIsolationTest(unittest.TestCase):
+    """No trust-bearing output, no cancelled PR or queue run, no extra secret."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.workflow = workflow()
+        cls.text = BUILD.read_text(encoding="utf-8")
+
+    @staticmethod
+    def _condition(step: dict) -> str:
+        return " ".join(str(step.get("if", "")).split())
+
+    def test_only_diagnostic_artifacts_upload_on_the_pr_dispatch_path(self) -> None:
+        reachable = set()
+        for step in self.workflow["jobs"]["build"]["steps"]:
+            if not str(step.get("uses", "")).startswith("actions/upload-artifact"):
+                continue
+            condition = self._condition(step)
+            if any(gate in condition for gate in (
+                    "inputs.pr_number == ''", "github.event_name == 'pull_request'",
+                    "github.event_name == 'push'", "github.event_name == 'merge_group'",
+                    "steps.gpu_audio_sdk_upload.outcome == 'failure'",
+                    # Publishes only what the pull_request-only issue step made.
+                    "steps.protected_receipt.outcome == 'success'",
+                    "a2t_receipt_attestation_required == 'true'")):
+                continue
+            reachable.add(step["name"])
+        self.assertEqual(reachable, {"Upload the Rust fallback receipt", "Upload ctest logs and JUnit report"})
+
+    def test_the_protected_receipt_is_pull_request_only(self) -> None:
+        build = steps("build")
+        self.assertIn("github.event_name == 'pull_request'",
+                      self._condition(build["Issue exact protected-validation receipt"]))
+        self.assertEqual(build["Publish exact protected-validation receipt"]["if"],
+                         "steps.protected_receipt.outcome == 'success'")
+
+    def test_no_workflow_run_consumer_of_build_and_test_reads_artifacts(self) -> None:
+        for path in sorted((ROOT / ".github/workflows").glob("*.y*ml")):
+            data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            triggers = data.get("on", data.get(True)) or {}
+            if isinstance(triggers, dict) and "Build and Test" in ((triggers.get("workflow_run") or {}).get("workflows") or []):
+                with self.subTest(workflow=path.name):
+                    text = path.read_text(encoding="utf-8")
+                    self.assertNotIn("download-artifact", text)
+                    self.assertNotIn("/artifacts", text)
+
+    def test_artifact_consumers_never_read_dispatch_runs(self) -> None:
+        # Each reads only the trusted gate events, so even an artifact a
+        # dispatch did upload (the earlier proof run's reuse record) is never
+        # consumed.
+        sys.path.insert(0, str(ROOT / "tools/ci"))
+        import ios_gate_digest  # noqa: E402
+        self.assertEqual(ios_gate_digest.TRUSTED_EVENTS, ("merge_group", "pull_request"))
+        for rel in ("tools/scripts/reuse_replay_collect.py", "tools/ci/binary_identity_shadow.py",
+                    "tools/ci/base_poison_detector.py", "tools/ci/ios_gate_digest.py",
+                    "tools/scripts/protected_merge_receipt.py"):
+            with self.subTest(consumer=rel):
+                self.assertNotIn("workflow_dispatch", (ROOT / rel).read_text(encoding="utf-8"))
+        collect = (ROOT / "tools/scripts/reuse_replay_collect.py").read_text(encoding="utf-8")
+        self.assertEqual(sorted(set(__import__("re").findall(r'self\.list_runs\("([a-z_]+)"', collect))),
+                         ["merge_group", "pull_request"])
+
+    def test_a_pr_dispatch_has_its_own_concurrency_group(self) -> None:
+        # The group's discriminator is github.ref: refs/heads/<branch> for the
+        # dispatch, refs/pull/<n>/merge for the PR run, the queue ref for a
+        # merge group. pr_number never enters it, so the dispatch cannot
+        # cancel either.
+        group = self.workflow["concurrency"]["group"]
+        self.assertTrue(group.startswith("build-${{") and group.rstrip().endswith("|| github.ref }}"), group)
+        self.assertNotIn("pr_number", group)
+        refs = {"dispatch": "refs/heads/topic", "pull_request": "refs/pull/7/merge",
+                "merge_group": "refs/heads/gh-readonly-queue/main/pr-7-" + "c" * 40}
+        self.assertEqual(len({f"build-{ref}" for ref in refs.values()}), 3)
+
+    def test_no_secret_or_environment_beyond_a_pull_request_run(self) -> None:
+        self.assertNotIn("secrets.", self.text)
+        for name, job in self.workflow["jobs"].items():
+            with self.subTest(job=name):
+                self.assertNotIn("environment", job)
+        # The jobs that raise their own token scope never run on a dispatch's
+        # PR path: merge-group, push-to-main and local-proof only.
+        raised = {name: self._condition(job) for name, job in self.workflow["jobs"].items()
+                  if job.get("permissions")}
+        self.assertEqual(set(raised), {"queue-breaker-notify", "a2t-headroom-issue"})
+        self.assertIn("github.event_name == 'merge_group'", raised["queue-breaker-notify"])
+        self.assertIn("github.event_name == 'push'", raised["a2t-headroom-issue"])
 
 if __name__ == "__main__":
     unittest.main()
