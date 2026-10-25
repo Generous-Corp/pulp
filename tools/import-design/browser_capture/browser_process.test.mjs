@@ -251,6 +251,50 @@ while :; do sleep 1; done
     }
   });
 
+test("normal termination ends the grace once only the custody anchor is left",
+  { skip: process.platform === "win32" }, async () => {
+    // The anchor that leads the group waits out SIGTERM by design. A browser
+    // and helper that exit on it leave only the anchor, and teardown used to
+    // wait out the whole 1.5 s grace for a group that could not empty.
+    const root = await mkdtemp(path.join(os.tmpdir(), "pulp-browser-process-test-"));
+    const profile = path.join(root, "pulp-browser-capture-prompt-grace");
+    const fakeBrowser = path.join(root, "fake-browser.sh");
+    let launched;
+    try {
+      await writeFile(fakeBrowser, `#!/bin/sh
+profile=""
+for arg in "$@"; do
+  case "$arg" in
+    --user-data-dir=*) profile="\${arg#--user-data-dir=}" ;;
+  esac
+done
+test -n "$profile" || exit 64
+/bin/sh -c 'while :; do sleep 1; done' &
+printf '%s\\n' "$!" > "$profile/renderer.pid"
+printf '{"id":1,"result":{}}\\000' >&4
+while :; do sleep 1; done
+`, "utf8");
+      await chmod(fakeBrowser, 0o700);
+      await createEmptyProfile(profile);
+      launched = await launchBrowser(fakeBrowser, profile, 2000);
+      const rendererPid = Number((await readFile(
+        path.join(profile, "renderer.pid"), "utf8")).trim());
+      assert.equal(await processGroupId(rendererPid), launched.child.pid);
+      const started = Date.now();
+      await terminateBrowser(launched.child);
+      const elapsed = Date.now() - started;
+      await waitFor(() => !processExists(launched.child.pid) &&
+        !processExists(rendererPid), 2000, "the browser group to be reaped");
+      assert.ok(elapsed < 1400,
+        `teardown took ${elapsed}ms; the grace outlived every process it was for`);
+    } finally {
+      if (launched?.child?.pid) {
+        try { process.kill(-launched.child.pid, "SIGKILL"); } catch {}
+      }
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
 test("pre-ready browser exit preserves custody of a surviving helper",
   { skip: process.platform === "win32" }, async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "pulp-browser-process-test-"));
