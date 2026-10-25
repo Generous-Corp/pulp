@@ -3,7 +3,10 @@
 
 from pathlib import Path
 import json
+import os
 import re
+import subprocess
+import tempfile
 import unittest
 
 import yaml
@@ -944,6 +947,107 @@ class MacosApprovalGateTest(unittest.TestCase):
         self.assertEqual(disarm["env"]["PR_NODE_ID"], "${{ github.event.pull_request.node_id }}")
         self.assertIn("!cancelled()", steps["Remove the label"]["if"])
 
+
+
+# Answers the disarm step's `gh` calls from a JSON fixture and logs each call,
+# so the step's own bash runs unchanged. Responses are what `--jq` would print.
+FAKE_GH = """#!/usr/bin/env python3
+import json, os, sys
+args = sys.argv[1:]
+fixture = json.load(open(os.environ["FAKE_GH_FIXTURE"], encoding="utf-8"))
+with open(os.environ["FAKE_GH_LOG"], "a", encoding="utf-8") as log:
+    log.write(json.dumps(args) + "\\n")
+text = " ".join(args)
+for key, answer in fixture.items():
+    if key in text:
+        sys.stdout.write(answer)
+        break
+"""
+
+
+class MacosDeferredDisarmTest(unittest.TestCase):
+    """A pull request armed before its checks ran is disarmed on a deferred green.
+
+    The arm-side guard refuses to arm a `deferred` head, but a pull request
+    armed on open has nothing for it to read yet, and native auto-merge would
+    enqueue it on the contract lane's green.
+    """
+
+    PATH = Path(__file__).parents[2] / ".github/workflows/macos-ci-deferred-disarm.yml"
+    HEAD = "a" * 40
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.workflow = yaml.safe_load(cls.PATH.read_text(encoding="utf-8"))
+        cls.job = cls.workflow["jobs"]["disarm"]
+        cls.step = cls.job["steps"][0]
+
+    def test_it_runs_from_main_on_completed_build_runs_and_checks_out_nothing(self) -> None:
+        triggers = self.workflow.get("on", self.workflow.get(True, {}))
+        self.assertEqual(triggers, {"workflow_run": {"workflows": ["Build and Test"],
+                                                     "types": ["completed"]}})
+        self.assertEqual(self.workflow["permissions"],
+                         {"actions": "read", "checks": "read", "pull-requests": "write"})
+        self.assertNotIn("actions/checkout", json.dumps(self.workflow))
+
+    def test_it_is_default_off_and_pull_request_only(self) -> None:
+        condition = self.job["if"]
+        self.assertTrue(_evaluate_if(condition, {"vars.PULP_MACOS_PR_GATING": "true",
+                                                 "github.event.workflow_run.event": "pull_request"}))
+        for context in ({"vars.PULP_MACOS_PR_GATING": "", "github.event.workflow_run.event": "pull_request"},
+                        {"vars.PULP_MACOS_PR_GATING": "true", "github.event.workflow_run.event": "merge_group"}):
+            with self.subTest(context=context):
+                self.assertFalse(_evaluate_if(condition, context))
+
+    def _run(self, fixture: dict[str, str], run_prs: str = "7") -> list[list[str]]:
+        with tempfile.TemporaryDirectory() as tmp:
+            bin_dir = Path(tmp) / "bin"
+            bin_dir.mkdir()
+            gh = bin_dir / "gh"
+            gh.write_text(FAKE_GH, encoding="utf-8")
+            gh.chmod(0o755)
+            (Path(tmp) / "fixture.json").write_text(json.dumps(fixture), encoding="utf-8")
+            log = Path(tmp) / "log"
+            log.write_text("", encoding="utf-8")
+            env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+                   "FAKE_GH_FIXTURE": str(Path(tmp) / "fixture.json"), "FAKE_GH_LOG": str(log),
+                   "GITHUB_REPOSITORY": "Generous-Corp/pulp", "RUN_ID": "99",
+                   "HEAD_SHA": self.HEAD, "RUN_PRS": run_prs, "GH_TOKEN": "x"}
+            proc = subprocess.run(["bash", "-c", self.step["run"]], env=env, capture_output=True,
+                                  text=True, encoding="utf-8", check=False)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+
+    def _fixture(self, tier: str, armed: str = "true", head: str = HEAD) -> dict[str, str]:
+        return {
+            "actions/runs/99/jobs": "123\n",
+            "check-runs/123/annotations": '{"schema":"shipyard-test-tier/v1","tier":"%s"}\n' % tier,
+            "commits/": "7\n",
+            "mutation(": "",
+            "query(": f"PR_NODE {head} {armed} false\n",
+        }
+
+    @staticmethod
+    def _disarmed(calls: list[list[str]]) -> bool:
+        return any("disablePullRequestAutoMerge" in " ".join(call) for call in calls)
+
+    def test_an_armed_pull_request_on_a_deferred_green_is_disarmed(self) -> None:
+        calls = self._run(self._fixture("deferred"))
+        self.assertTrue(self._disarmed(calls))
+        self.assertIn("id=PR_NODE", " ".join(" ".join(call) for call in calls))
+
+    def test_an_app_opened_pull_request_is_found_through_its_commit(self) -> None:
+        calls = self._run(self._fixture("deferred"), run_prs="")
+        self.assertTrue(any("commits/" + self.HEAD + "/pulls" in " ".join(call) for call in calls))
+        self.assertTrue(self._disarmed(calls))
+
+    def test_nothing_is_disarmed_unless_deferred_armed_and_still_at_that_head(self) -> None:
+        for label, fixture in (("full lane", self._fixture("fast")),
+                               ("skip-safe", self._fixture("not-required")),
+                               ("not armed", self._fixture("deferred", armed="false")),
+                               ("moved on", self._fixture("deferred", head="b" * 40))):
+            with self.subTest(case=label):
+                self.assertFalse(self._disarmed(self._run(fixture)))
 
 if __name__ == "__main__":
     unittest.main()
