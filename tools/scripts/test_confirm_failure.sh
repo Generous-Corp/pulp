@@ -361,6 +361,33 @@ else
     FAILURES=$((FAILURES + 1))
 fi
 
+# A driver that links the edited code itself, with --target building only the
+# subject: the driver keeps the unbroken copy and passes, which used to read as
+# NOT CONFIRMED. The loop must refuse instead.
+make_shellout_project "$TMP/driver-links"
+printf 'add_executable(fixture_driver driver.cpp)\ntarget_link_libraries(fixture_driver PRIVATE fixture_lib)\n' \
+    >> "$TMP/driver-links/CMakeLists.txt"
+printf '#include "value.hpp"\nint main() { return answer() == 42 ? 0 : 1; }\n' \
+    > "$TMP/driver-links/driver.cpp"
+( cd "$TMP/driver-links" && git add -A && git commit -qm driver ) >/dev/null 2>&1
+cmake -S "$TMP/driver-links" -B "$TMP/driver-links/build" -DCMAKE_BUILD_TYPE=Release >/dev/null 2>&1
+cmake --build "$TMP/driver-links/build" --target fixture_driver >/dev/null 2>&1
+LINKS=$( ( cd "$TMP/driver-links" && "$UNDER_TEST" \
+    --file value.cpp --break "perl -pi -e 's/return 42;/return 7;/'" \
+    --build-dir build --target fixture_subject \
+    --subject ./build/fixture_subject \
+    --test ./build/fixture_driver --jobs 2 \
+  ) >/dev/null 2>&1; echo $? )
+check "a driver that links the edited source, with a subject-only --target, is INCONCLUSIVE" 2 "$LINKS"
+# Control: the same project with the driver's own target (which also builds
+# the library) gets a real verdict.
+LINKS_OK=$( ( cd "$TMP/driver-links" && "$UNDER_TEST" \
+    --file value.cpp --break "perl -pi -e 's/return 42;/return 7;/'" \
+    --build-dir build --target fixture_driver \
+    --test ./build/fixture_driver --jobs 2 \
+  ) >/dev/null 2>&1; echo $? )
+check "the same driver with its own --target is CONFIRMED" 0 "$LINKS_OK"
+
 # An INCONCLUSIVE exit must not leave the subject built from broken source.
 # Only the --test binary used to be invalidated on restore, so the next run's
 # "baseline" fingerprint was the contaminated artifact, the hash never moved
