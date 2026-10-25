@@ -16,3 +16,11 @@ TEST_CASE("gpu_audio_provider_pool.hpp compiles as the first include", "[gpu_aud
     pool.clear();
     CHECK(pool.stats().evictions == 0);
 }
+
+TEST_CASE("GpuAudioProviderPool keeps a provider warm for 30 s by default",
+          "[gpu_audio][provider_pool]") {
+    const pulp::gpu_audio::GpuAudioProviderPool::Config config;
+    CHECK(config.keep_warm_ns == 30'000'000'000ull);
+    CHECK(config.capacity == 4u);
+    CHECK(config.release_budget_ns == 250'000'000ull);
+}

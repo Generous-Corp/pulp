@@ -151,7 +151,7 @@ delivery cannot resume until the node is released and prepared with a new
 provider. Every other recovery reason reports `Degraded`. `selected_engine`
 names the engine actually producing audio: `Gpu` only while the provider is
 `Ready`; otherwise `Cpu` when a prepared CPU shadow covers misses, or `Unknown`
-when misses are silent. The schema v3 fields report the preparation `epoch`,
+when misses are silent. The schema v4 fields report the preparation `epoch`,
 whether its delivery epoch is still active, `terminal_counts` by
 `GpuAudioTerminalDisposition`, the configured `completion_mode`,
 `gpu_kernel_available = true`, and `timestamps_available = false`, since this

@@ -324,6 +324,9 @@ struct GpuWaveNetRealtimeNode::Impl {
     std::atomic<std::uint64_t> reacquired_sequence{UINT64_MAX};
     // `epoch` for status readers on another thread; the worker may advance it.
     std::atomic<std::uint64_t> published_epoch{0};
+    // Whether a full set of provider channels holds a prepared kernel, for
+    // status readers. An offline fence or a failed re-acquire leaves none.
+    std::atomic<bool> kernel_prepared{false};
     std::atomic<std::uint64_t> reacquire_attempts{0}, reacquire_successes{0};
     // Callback-written per delivered block, read by status_snapshot().
     detail::RecentGpuDelivery recent;
@@ -446,6 +449,7 @@ struct GpuWaveNetRealtimeNode::Impl {
         // part of the provider-neutral lifecycle contract.
         bridge->set_trace(trace.get(), &telemetry);
         prepared = true;
+        kernel_prepared.store(true, std::memory_order_release);
         return true;
     }
     bool any_channel_lost() const noexcept {
@@ -700,6 +704,7 @@ struct GpuWaveNetRealtimeNode::Impl {
             const auto now = now_ns();
             return now >= deadline ? std::uint64_t{1} : deadline - now;
         };
+        kernel_prepared.store(false, std::memory_order_release);
         for (auto& channel : channels) {
             (void)channel->set_completion_notifier({});
             if (!channel->release_bounded(remaining()))
@@ -717,6 +722,7 @@ struct GpuWaveNetRealtimeNode::Impl {
             fresh.push_back(std::move(channel));
         }
         channels = std::move(fresh);
+        kernel_prepared.store(true, std::memory_order_release);
         // The replacement routes its completions where the old provider did. A
         // replacement without an event source leaves the transport on its
         // one-block fallback poll.
@@ -744,6 +750,9 @@ struct GpuWaveNetRealtimeNode::Impl {
             record.reason = record.gpu_reason = cause;
             (void)trace->publish_worker(record);
         }
+        // The previous re-acquire's first deliverable block belongs to the
+        // epoch being replaced; the new one is known only once it is adopted.
+        reacquired_sequence.store(UINT64_MAX, std::memory_order_release);
         ++epoch;
         published_epoch.store(epoch, std::memory_order_release);
         reacquire_successes.fetch_add(1, std::memory_order_relaxed);
@@ -899,6 +908,7 @@ bool GpuWaveNetRealtimeNode::release() noexcept {
 bool GpuWaveNetRealtimeNode::release_bounded(std::uint64_t budget_ns) noexcept {
     auto& s = *impl_;
     s.prepared = false;
+    s.kernel_prepared.store(false, std::memory_order_release);
     s.production_provider = false;
     s.provider_identity = {};
     s.fallback_prepared = false;
@@ -992,7 +1002,10 @@ GpuAudioStatus GpuWaveNetRealtimeNode::status_snapshot() const noexcept {
     status.epoch = impl_->published_epoch.load(std::memory_order_acquire);
     status.reacquire_attempts = impl_->reacquire_attempts.load(std::memory_order_relaxed);
     status.reacquire_successes = impl_->reacquire_successes.load(std::memory_order_relaxed);
-    status.delivery_epoch_active = impl_->bridge->delivery_epoch() != 0;
+    // One read serves both the field and the fence term below: a callback
+    // adopting a re-acquired epoch between two reads would report Ready with
+    // no delivery epoch, which the validator rejects.
+    status.delivery_epoch_active = impl_->bridge && impl_->bridge->delivery_epoch() != 0;
     for (std::size_t i = 0; i < impl_->terminal_counts.size(); ++i)
         status.terminal_counts[i] = impl_->terminal_counts[i].load(std::memory_order_relaxed);
     switch (impl_->config.session.completion_policy) {
@@ -1008,15 +1021,15 @@ GpuAudioStatus GpuWaveNetRealtimeNode::status_snapshot() const noexcept {
     }
     // The WaveNet provider path records no GPU timestamps.
     status.timestamps_available = false;
-    status.gpu_kernel_available = true;
+    status.gpu_kernel_available = impl_->kernel_prepared.load(std::memory_order_acquire);
     // A lost device or an unresponsive provider needs a new provider before
     // the GPU can deliver again, whatever cause latched first; every other
     // recovery reason leaves it recoverable. The engine is the GPU only while
     // it delivers; otherwise the prepared CPU shadow, or none when silent.
     const auto projection = detail::project_node_state(
         impl_->device_lost.load(std::memory_order_acquire), status.recovery_reason,
-        authenticated_provider() && !fenced(), status.fallback_policy, status.fallback_available,
-        impl_->recent.lagging());
+        authenticated_provider() && status.delivery_epoch_active, status.fallback_policy,
+        status.fallback_available, impl_->recent.lagging());
     status.provider_state = projection.provider_state;
     status.selected_engine = projection.selected_engine;
     return status;
@@ -1047,8 +1060,11 @@ bool GpuWaveNetRealtimeNode::bind_realtime_path(detail::RealtimeGpuNodeBinding& 
                         .health =
                             [](const void* self, detail::RealtimeGpuHealth& out) noexcept {
                                 const auto* node = static_cast<const GpuWaveNetRealtimeNode*>(self);
-                                out = detail::health_from_status(node->status_snapshot());
-                                out.fenced = out.fenced || node->fenced();
+                                // Fence from the snapshot's own epoch read, not a
+                                // second one that could see a later adoption.
+                                const auto status = node->status_snapshot();
+                                out = detail::health_from_status(status);
+                                out.fenced = out.fenced || !status.delivery_epoch_active;
                                 return true;
                             },
                         .reprepare = &GpuWaveNetRealtimeNode::reprepare,
@@ -1206,6 +1222,9 @@ bool GpuWaveNetRealtimeNode::fence(void* self) noexcept {
     if (!s.bridge)
         return true;
     s.fail(detail::SharedIoRecoveryReason::OfflineFence, s.first_undelivered());
+    // Every channel is released below; even one that cannot drain no longer
+    // holds a usable kernel.
+    s.kernel_prepared.store(false, std::memory_order_release);
     bool drained = true;
     for (auto& channel : s.channels)
         if (!channel->release())

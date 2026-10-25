@@ -2465,6 +2465,54 @@ TEST_CASE("WaveNet re-acquire replaces a lost provider in a new epoch on the sam
         1);
 }
 
+TEST_CASE("WaveNet re-acquire reports only the newest epoch's first deliverable block",
+          "[gpu_audio][wavenet][realtime][reacquire]") {
+    // The second epoch's replacement channel reads `second` on release, so it
+    // must outlive the node.
+    Control second;
+    Harness h;
+    ChannelFactory factory{.control = &h.controls[1]};
+    factory.install(h.node);
+    const auto run = [&](int blocks) {
+        for (int block = 0; block < blocks; ++block) {
+            h.callback(float(h.sequence + 1));
+            h.service();
+            h.service();
+        }
+    };
+    run(3);
+    h.controls[0].lost = true;
+    h.service();
+    REQUIRE(h.node.recovery_reason() == GpuAudioRecoveryReason::ProviderLost);
+    REQUIRE(h.path.reprepare(h.path.context, 1'000'000'000));
+    const auto first_adopted = h.sequence;
+    run(4);
+    auto status = checked_status(h.node);
+    REQUIRE(status.epoch == 2);
+    REQUIRE(status.recovery_reason == GpuAudioRecoveryReason::ProviderReacquired);
+    REQUIRE(status.recovery_sequence == first_adopted + 1);
+
+    // The replacement is lost too. The second re-acquire opens epoch 3, whose
+    // first deliverable block is not yet known: until the callback adopts it,
+    // no re-acquire may be reported at the previous epoch's sequence.
+    factory.control = &second;
+    h.controls[1].lost = true;
+    h.service();
+    REQUIRE(h.node.recovery_reason() == GpuAudioRecoveryReason::ProviderLost);
+    REQUIRE(h.path.reprepare(h.path.context, 1'000'000'000));
+    status = checked_status(h.node);
+    CHECK(status.epoch == 3);
+    CHECK(status.recovery_reason != GpuAudioRecoveryReason::ProviderReacquired);
+    CHECK(status.recovery_sequence != first_adopted + 1);
+
+    const auto second_adopted = h.sequence;
+    run(4);
+    status = checked_status(h.node);
+    CHECK(status.epoch == 3);
+    CHECK(status.recovery_reason == GpuAudioRecoveryReason::ProviderReacquired);
+    CHECK(status.recovery_sequence == second_adopted + 1);
+}
+
 TEST_CASE("WaveNet re-acquire does not carry a hang classification into the new epoch",
           "[gpu_audio][wavenet][realtime][hang][reacquire]") {
     // Epoch 1: the ring saturates behind a hung provider, reported as the hang.
@@ -2668,6 +2716,36 @@ TEST_CASE("WaveNet re-acquire is refused unless a live provider fault fenced the
         CHECK(h.node.fenced());
         factory.fail = false;
         CHECK(h.path.reprepare(h.path.context, 1'000'000)); // a later attempt succeeds
+    }
+}
+
+TEST_CASE("WaveNet reports a GPU kernel only while its channels are prepared",
+          "[gpu_audio][wavenet][realtime][status]") {
+    SECTION("an offline fence releases every channel") {
+        Harness h;
+        h.callback(1);
+        h.service();
+        REQUIRE(checked_status(h.node).gpu_kernel_available);
+        REQUIRE(h.path.fence(h.path.context));
+        const auto status = checked_status(h.node);
+        CHECK(status.recovery_reason == GpuAudioRecoveryReason::OfflineFence);
+        CHECK_FALSE(status.gpu_kernel_available);
+    }
+    SECTION("a failed re-acquire leaves no channel, and a later one restores it") {
+        Harness h;
+        ChannelFactory factory{.control = &h.controls[1], .fail = true};
+        factory.install(h.node);
+        h.callback(1);
+        h.service();
+        h.controls[0].lost = true;
+        h.service();
+        // The lost provider is still owned until a re-acquire replaces it.
+        REQUIRE(checked_status(h.node).gpu_kernel_available);
+        REQUIRE_FALSE(h.path.reprepare(h.path.context, 1'000'000));
+        CHECK_FALSE(checked_status(h.node).gpu_kernel_available);
+        factory.fail = false;
+        REQUIRE(h.path.reprepare(h.path.context, 1'000'000));
+        CHECK(checked_status(h.node).gpu_kernel_available);
     }
 }
 

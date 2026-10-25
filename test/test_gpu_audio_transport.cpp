@@ -10,6 +10,7 @@
 #include "detail/shared_io_trace.hpp"
 #include "detail/worker_pipeline_hosting.hpp"
 #include "harness/rt_allocation_probe.hpp"
+#include "harness/scoped_rt_process_probe.hpp"
 #include "support/thread_progress.hpp"
 
 #include <algorithm>
@@ -25,6 +26,13 @@
 #if defined(__APPLE__)
 #include <os/object.h>
 #include <os/workgroup.h>
+#endif
+#if PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS
+#include <csignal>
+#include <cstdlib>
+#include <pthread.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #endif
 
 using namespace pulp::gpu_audio;
@@ -223,6 +231,35 @@ TEST_CASE("validate_gpu_audio_status accepts coherent v3 and v4 states", "[gpu_a
     auto failing = ready_gpu_status();
     failing.reacquire_attempts = 3;
     CHECK(validate_gpu_audio_status(failing).accepted());
+
+    // Every cause that fences delivery leaves the provider Degraded, or
+    // Unavailable when the device was lost after it latched, on the CPU
+    // fallback; the fenced stamped node's delivery epoch is inactive.
+    for (const auto reason :
+         {GpuAudioRecoveryReason::SequenceGap, GpuAudioRecoveryReason::InputSaturated,
+          GpuAudioRecoveryReason::ProviderFailure, GpuAudioRecoveryReason::InvalidCallback,
+          GpuAudioRecoveryReason::OfflineFence}) {
+        CAPTURE(reason);
+        auto fenced = ready_gpu_status();
+        fenced.provider_state = GpuAudioProviderState::Degraded;
+        fenced.selected_engine = GpuAudioEngine::Cpu;
+        fenced.recovery_reason = reason;
+        fenced.recovery_sequence = 12;
+        fenced.delivery_epoch_active = false;
+        fenced.gpu_kernel_available = reason != GpuAudioRecoveryReason::OfflineFence;
+        CHECK(validate_gpu_audio_status(fenced).accepted());
+        fenced.provider_state = GpuAudioProviderState::Unavailable;
+        CHECK(validate_gpu_audio_status(fenced).accepted());
+    }
+    // A stamped node between a re-acquire request and its adoption: no cause
+    // latched, the new epoch named, delivery not yet active.
+    auto adopting = ready_gpu_status();
+    adopting.provider_state = GpuAudioProviderState::Degraded;
+    adopting.selected_engine = GpuAudioEngine::Cpu;
+    adopting.epoch = 3;
+    adopting.delivery_epoch_active = false;
+    adopting.reacquire_attempts = adopting.reacquire_successes = 1;
+    CHECK(validate_gpu_audio_status(adopting).accepted());
 }
 
 TEST_CASE("validate_gpu_audio_status rejects each planted v3 violation", "[gpu_audio][status]") {
@@ -370,9 +407,40 @@ TEST_CASE("validate_gpu_audio_status rejects each planted v3 violation", "[gpu_a
     CHECK(status_error(status) == Error::ReacquireSuccessesExceedAttempts);
     status.reacquire_successes = 1;
     CHECK(status_error(status) == Error::GpuEngineWithoutKernel);
+
+    // A cause that fences delivery never leaves the provider Ready, on any
+    // engine.
+    for (const auto reason :
+         {GpuAudioRecoveryReason::SequenceGap, GpuAudioRecoveryReason::InputSaturated,
+          GpuAudioRecoveryReason::ProviderFailure, GpuAudioRecoveryReason::InvalidCallback,
+          GpuAudioRecoveryReason::OfflineFence}) {
+        CAPTURE(reason);
+        status = ready_gpu_status();
+        status.recovery_reason = reason;
+        status.recovery_sequence = 12;
+        CHECK(status_error(status) == Error::FencingCauseReportedReady);
+        status.selected_engine = GpuAudioEngine::Cpu;
+        CHECK(status_error(status) == Error::FencingCauseReportedReady);
+    }
+
+    // A stamped node whose delivery epoch is inactive is fenced, so not Ready.
+    status = ready_gpu_status();
+    status.delivery_epoch_active = false;
+    CHECK(status_error(status) == Error::ReadyWithoutDeliveryEpoch);
+    status.selected_engine = GpuAudioEngine::Cpu;
+    CHECK(status_error(status) == Error::ReadyWithoutDeliveryEpoch);
+    // Without an epoch the node is not stamped: a CPU provider is Ready.
+    status.provider = GpuAudioProvider::Cpu;
+    status.gpu_kernel_available = false;
+    status.epoch = 0;
+    std::fill(std::begin(status.terminal_counts), std::end(status.terminal_counts), 0u);
+    CHECK(status_error(status) == Error::None);
 }
 
 TEST_CASE("GPU audio contract enums append without renumbering", "[gpu_audio][status]") {
+    CHECK(static_cast<int>(GpuAudioStatusError::GpuEngineWithoutKernel) == 20);
+    CHECK(static_cast<int>(GpuAudioStatusError::FencingCauseReportedReady) == 21);
+    CHECK(static_cast<int>(GpuAudioStatusError::ReadyWithoutDeliveryEpoch) == 22);
     CHECK(static_cast<int>(GpuAudioRecoveryReason::InvalidCallback) == 6);
     CHECK(static_cast<int>(GpuAudioRecoveryReason::ProviderUnresponsive) == 7);
     CHECK(static_cast<int>(GpuAudioRecoveryReason::ProviderReacquired) == 8);
@@ -1360,6 +1428,42 @@ TEST_CASE("GpuAudioTransport rejects the sole stale result after deadline misses
     }
 }
 
+TEST_CASE("GpuAudioTransport keeps latency alignment after dropped input blocks",
+          "[gpu_audio][transport]") {
+    // The worker stalls after callback 9. Callbacks 12-15 miss, and inputs 14
+    // and 15 find the input ring full, so their wet blocks never exist. Once
+    // the worker catches up, slots 14 and 15 must still be substituted and
+    // every later callback must return the input from exactly L blocks ago.
+    constexpr uint32_t BS = 32, L = 2, RING = 4;
+    GainNode node(1, BS, 2.0f, MissPolicy::PassthroughDry, L);
+    REQUIRE(node.prepare());
+    GpuAudioTransport t;
+    REQUIRE(t.prepare(&node, {RING}));
+
+    Block in(1, BS), out(1, BS);
+    for (int k = 0; k < 24; ++k) {
+        INFO("callback " << k);
+        if (k == 16)
+            t.pump();
+        const float value = static_cast<float>(k + 1);
+        in.fill(value);
+        auto iv = in.cview();
+        auto ov = out.view();
+        t.process(iv, ov, BS);
+        if (k <= 9 || k >= 16)
+            t.pump();
+        float expected = 2.0f * static_cast<float>(k - 1); // wet input k - L
+        if (k < static_cast<int>(L))
+            expected = 0.0f;
+        else if (k >= 12 && k <= 17)
+            expected = value; // missed, or its input was dropped: dry substitute
+        CHECK(out.storage[0][0] == expected);
+    }
+    CHECK(t.stats().input_dropped_frames == 2 * BS);
+    CHECK(t.stats().miss_blocks == 6);
+    CHECK(t.stats().resynced_blocks == 4);
+}
+
 TEST_CASE("GpuAudioTransport wake-on-write worker drains the pipeline", "[gpu_audio][transport]") {
     // Same whole-block conservation invariant as the polling worker, but with the
     // opt-in wake-on-write path: process() posts a semaphore the worker waits on.
@@ -1967,6 +2071,73 @@ TEST_CASE("GpuAudioTransport status reads a GPU the fallback carries as CPU-deli
     status = validated(h.transport.status_snapshot());
     CHECK(status.provider_state == GpuAudioProviderState::Ready);
     CHECK(status.selected_engine == GpuAudioEngine::Gpu);
+}
+
+TEST_CASE("GpuAudioTransport re-acquire defaults and backoff growth",
+          "[gpu_audio][transport][reacquire]") {
+    const GpuAudioTransport::Config defaults;
+    CHECK(defaults.ring_blocks == 4u);
+    CHECK_FALSE(defaults.run_worker_thread);
+    CHECK_FALSE(defaults.wake_on_write);
+    CHECK(defaults.recovery_policy == GpuAudioRecoveryPolicy::Manual);
+    CHECK(defaults.reacquire_release_budget_ns == 250'000'000ull);
+    CHECK(defaults.reacquire_max_attempts == 3u);
+    CHECK(defaults.reacquire_backoff_ns == 100'000'000ull);
+
+    // Each wait is five times the one before: with a 20 ms first wait, the
+    // third attempt may not start until 100 ms after the second. Only that
+    // lower bound is checked; an attempt is gated on the monotonic clock, so
+    // a loaded host can delay it but never bring it forward.
+    RealtimeHookNode node(1, 32, MissPolicy::CpuFallback);
+    node.claims_provider = true;
+    node.expose_health = true;
+    node.expose_reprepare = true;
+    node.health.gpu_kernel_available = true;
+    REQUIRE(node.prepare());
+    GpuAudioTransport transport;
+    constexpr auto kFirstWait = std::chrono::milliseconds(20);
+    REQUIRE(transport.prepare(
+        &node, {.ring_blocks = 8,
+                .recovery_policy = GpuAudioRecoveryPolicy::AutoReacquire,
+                .reacquire_max_attempts = 3,
+                .reacquire_backoff_ns = static_cast<std::uint64_t>(
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(kFirstWait).count())}));
+    // The replacement is lost before it delivers, so every attempt finds an
+    // outage and the count never resets.
+    const auto lose = [&] {
+        node.health.fenced = true;
+        node.health.delivery_epoch_active = false;
+        node.health.recovery_reason = GpuAudioRecoveryReason::ProviderLost;
+        node.health.recovery_sequence = node.next_sequence;
+    };
+    // Pumps until attempt `n` starts; returns when the pump that ran it began.
+    const auto attempt = [&](std::uint32_t n) {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (std::chrono::steady_clock::now() < deadline) {
+            const auto before = std::chrono::steady_clock::now();
+            transport.pump();
+            if (node.reprepare_calls == n) {
+                lose();
+                return before;
+            }
+            std::this_thread::yield();
+        }
+        FAIL("attempt " << n << " never started");
+        return std::chrono::steady_clock::time_point{};
+    };
+    lose();
+    (void)attempt(1);
+    const auto second = attempt(2);
+    std::uint32_t early_attempts = 0;
+    while (std::chrono::steady_clock::now() <
+           second + 5 * kFirstWait - std::chrono::milliseconds(5)) {
+        transport.pump();
+        early_attempts += node.reprepare_calls - 2;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    CHECK(early_attempts == 0);
+    (void)attempt(3);
+    CHECK(transport.status_snapshot().reacquire_attempts == 3);
 }
 
 TEST_CASE("GpuAudioTransport re-acquire that delivers again clears the stuck-late state",
@@ -2768,6 +2939,120 @@ TEST_CASE("GpuAudioTransport keeps wake-on-write opt-in so the default callback 
           "[gpu_audio][transport][wake]") {
     CHECK_FALSE(GpuAudioTransport::Config{}.wake_on_write);
 }
+
+// The callback under the RT probe: on UNIX it aborts the binary on any
+// allocation or pthread mutex/rwlock lock inside the scope; elsewhere it
+// counts allocations. Every callback position runs: priming, ready output,
+// misses with and without resync debt, dropped input, rejected views, and the
+// realtime-hook path's ready, priming and missed results. The probe cannot
+// see a semaphore post: it interposes allocation and pthread locks only, and
+// wake-on-write's post is dispatch_semaphore_signal (a Mach semaphore_signal
+// trap while the worker is parked) or a futex wake, neither of which takes a
+// pthread lock. The default config leaves wake-on-write off, so no post runs
+// here.
+TEST_CASE("GpuAudioTransport callback takes no lock and allocates nothing on the default config",
+          "[gpu_audio][transport][realtime]") {
+    constexpr uint32_t BS = 32;
+    Block in(1, BS), out(1, BS), short_out(1, BS / 2);
+    in.fill(1.0f);
+    auto iv = in.cview();
+    auto ov = out.view();
+    auto short_ov = short_out.view();
+
+    SECTION("staged path") {
+        GainNode node(1, BS, 2.0f, MissPolicy::CpuFallback);
+        REQUIRE(node.prepare());
+        GpuAudioTransport t;
+        REQUIRE(t.prepare(&node, {}));
+        // The worker keeps pace, stalls long enough for the input ring to
+        // fill, then catches up; each pump runs outside the probe.
+        std::size_t allocations = 0;
+        for (int k = 0; k < 24; ++k) {
+            {
+                pulp::test::ScopedRtProcessProbe probe;
+                t.process(iv, k == 2 ? short_ov : ov, BS); // one rejected view
+                allocations += probe.allocation_count();
+            }
+            if (k < 4 || k >= 12)
+                t.pump();
+        }
+        CHECK(allocations == 0);
+        CHECK(t.stats().input_dropped_frames > 0);
+        CHECK(t.stats().resynced_blocks > 0);
+        CHECK(t.delivery_snapshot().worker_output_blocks > 0);
+        CHECK(t.delivery_snapshot().cpu_fallback_blocks > 0);
+        CHECK(t.delivery_snapshot().invalid_blocks == 1);
+    }
+    SECTION("staged path with its owned polling worker running") {
+        GainNode node(1, BS, 2.0f, MissPolicy::CpuFallback);
+        REQUIRE(node.prepare());
+        GpuAudioTransport t;
+        GpuAudioTransport::Config config;
+        config.run_worker_thread = true;
+        REQUIRE(t.prepare(&node, config));
+        std::size_t allocations = 1;
+        {
+            pulp::test::ScopedRtProcessProbe probe;
+            for (int k = 0; k < 64; ++k) {
+                t.process(iv, ov, BS);
+                const auto until =
+                    std::chrono::steady_clock::now() + std::chrono::microseconds(200);
+                while (std::chrono::steady_clock::now() < until) {
+                }
+            }
+            allocations = probe.allocation_count();
+        }
+        CHECK(allocations == 0);
+        t.release();
+        CHECK(t.stats().produced_blocks > 0);
+    }
+    SECTION("realtime-hook path") {
+        RealtimeHookNode node(1, BS, MissPolicy::CpuFallback);
+        node.stateful_fallback = true;
+        REQUIRE(node.prepare());
+        GpuAudioTransport t;
+        REQUIRE(t.prepare(&node, {}));
+        std::size_t allocations = 1;
+        {
+            pulp::test::ScopedRtProcessProbe probe;
+            for (const auto status : {detail::kRealtimeGpuPriming, detail::kRealtimeGpuReady,
+                                      detail::kRealtimeGpuMissed, detail::kRealtimeGpuInactive}) {
+                node.realtime_status = status;
+                t.process(iv, ov, BS);
+            }
+            t.process(iv, short_ov, BS); // rejected view
+            allocations = probe.allocation_count();
+        }
+        CHECK(allocations == 0);
+        CHECK(node.realtime_calls == 5);
+        CHECK(node.cpu_fallback_calls >= 2);
+    }
+}
+
+#if PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS
+TEST_CASE("GpuAudioTransport callback probe traps a planted blocking lock",
+          "[gpu_audio][transport][realtime][negative]") {
+    // Positive control for the probe above: the same scope in this binary
+    // aborts on a pthread lock.
+    pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+    const auto child = ::fork();
+    REQUIRE(child >= 0);
+    if (child == 0) {
+        // Resolve the interposed symbol before entering the scope, so the
+        // child dies from the planted lock and not from loader work.
+        (void)::pthread_mutex_lock(&mutex);
+        (void)::pthread_mutex_unlock(&mutex);
+        pulp::test::ScopedRtProcessProbe probe;
+        (void)::pthread_mutex_lock(&mutex);
+        _exit(EXIT_FAILURE);
+    }
+    int status = 0;
+    REQUIRE(::waitpid(child, &status, 0) == child);
+    CHECK(WIFSIGNALED(status));
+    CHECK((WTERMSIG(status) == SIGABRT || WTERMSIG(status) == SIGTRAP));
+    REQUIRE(::pthread_mutex_destroy(&mutex) == 0);
+}
+#endif
 
 TEST_CASE("GpuAudioTransport completion wakes never count as progress",
           "[gpu_audio][transport][wake]") {

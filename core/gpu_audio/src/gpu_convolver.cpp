@@ -699,7 +699,7 @@ std::uint8_t GpuConvolver::process_realtime_shared_io(void* self,
     // Invalid external views consume a zero-input timeline position, but may
     // never admit fresh GPU work. The transport owns their silent disposition.
     if (!input_valid)
-        state.session->request_recovery(detail::SharedIoRecoveryReason::InvalidCallback);
+        state.session->request_recovery(detail::SharedIoRecoveryReason::InvalidCallback, sequence);
     for (uint32_t ch = 0; ch < convolver->channels_; ++ch) {
         const float* src = input.channel_ptr(ch);
         auto* dst = state.callback_input.data() + static_cast<std::size_t>(ch) * convolver->block_;
@@ -856,18 +856,14 @@ bool GpuConvolver::realtime_shared_io_health(const void* self,
     const auto& session = *convolver->shared_io_->session;
     detail::RealtimeGpuHealth health;
     health.recovery_reason = detail::public_recovery_reason(session.recovery_reason());
+    // Every cause latches at the block it names: the refused or failed block,
+    // the oldest one in flight for a loss or fence, the callback's own block.
     health.recovery_sequence = session.recovery_sequence();
-    // A cause the worker latched without a stream position (provider loss,
-    // failure or an offline fence) is attributed to the first sequence of the
-    // epoch it fenced; the exact position is unknown.
-    if (health.recovery_reason != GpuAudioRecoveryReason::None &&
-        health.recovery_sequence == std::numeric_limits<std::uint64_t>::max())
-        health.recovery_sequence = session.epoch_first_sequence();
     health.epoch = session.epoch();
     health.delivery_epoch_active = session.delivery_epoch() != 0;
     health.device_lost = session.provider_device_lost();
     health.fenced = !session.prepared() || session.fenced() || !health.delivery_epoch_active;
-    health.gpu_kernel_available = true;
+    health.gpu_kernel_available = session.kernel_prepared();
     // Same mapping as the WaveNet node: a failed GPU block is covered by this
     // node's declared CPU fallback.
     using Gpu = detail::SharedIoGpuTerminalDisposition;
@@ -923,7 +919,6 @@ GpuAudioStatus GpuConvolver::status_snapshot() const noexcept {
         // GPU claim.
         const auto identity = provider_identity_for_diagnostics();
         status.provider = identity.authenticated ? identity.provider : GpuAudioProvider::Unknown;
-        status.gpu_kernel_available = true;
         status.selected_engine = status.provider != GpuAudioProvider::Unknown
                                      ? GpuAudioEngine::Gpu
                                      : GpuAudioEngine::Unknown;
@@ -940,6 +935,7 @@ GpuAudioStatus GpuConvolver::status_snapshot() const noexcept {
             status.recovery_sequence = health.recovery_sequence;
             status.epoch = health.epoch;
             status.delivery_epoch_active = health.delivery_epoch_active;
+            status.gpu_kernel_available = health.gpu_kernel_available;
             // The node's delivery counters above come from trace telemetry,
             // which only records while tracing; without them the terminal
             // counts could run ahead of the deliveries they describe. The

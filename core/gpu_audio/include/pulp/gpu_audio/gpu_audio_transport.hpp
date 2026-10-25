@@ -79,12 +79,15 @@ class GpuAudioTransport {
         /// time has its device destroyed and stays owned (quarantined) until a
         /// later release completes it.
         std::uint64_t reacquire_release_budget_ns = 250'000'000;
-        /// Attempts per outage. After the last failed attempt the transport
-        /// stays on the CPU fallback until the host prepares it again.
+        /// Attempts per outage. If GPU audio has not resumed after the last
+        /// attempt, the transport stays on the CPU fallback until the host
+        /// prepares it again.
         std::uint32_t reacquire_max_attempts = 3;
-        /// Wait after the first failed attempt; each further failure waits
-        /// five times longer (100 ms, 500 ms, 2.5 s by default). The first
-        /// attempt is immediate.
+        /// The first attempt is immediate. Every attempt, successful or not,
+        /// arms a wait before the next: this value after the first, five times
+        /// the previous wait after each later one. With the defaults only the
+        /// 100 ms and 500 ms waits occur; the count resets once GPU audio
+        /// resumes.
         std::uint64_t reacquire_backoff_ns = 100'000'000;
     };
 
@@ -240,6 +243,10 @@ class GpuAudioTransport {
     bool prepared_ = false;
 
     void reset_staged_transport_state() noexcept;
+    // Callback timeline only. Records whether `sequence`'s input block was
+    // dropped and returns whether the block due now (`latency_blocks` earlier)
+    // was.
+    bool record_dropped_slot(std::uint64_t sequence, bool dropped) noexcept;
     void process_shared(const audio::BufferView<const float>&, audio::BufferView<float>&,
                         std::uint32_t, std::uint64_t, bool input_valid,
                         std::uint64_t callback_start_ns, bool count_delivery) noexcept;
@@ -284,6 +291,14 @@ class GpuAudioTransport {
     // (rather than inferring "excess ring depth") keeps the drain immune to a
     // worker that races a fresh block in before the RT read of the same call.
     std::uint64_t blocks_owed_ = 0;
+    // One flag per callback slot over a window of latency_blocks + 1, sized at
+    // prepare(): set when that slot's input block was dropped on a full input
+    // ring. Its wet block will never exist, so the callback `latency_blocks`
+    // later substitutes without reading the ring and without adding resync
+    // debt; reading there would return the next slot's block early and shift
+    // the stream ahead of the declared latency. Written and read only on the
+    // callback timeline.
+    std::vector<std::uint8_t> dropped_slots_;
     // Per-block worker timing, published as integer nanoseconds for lock-free
     // reads by the UI thread (double isn't reliably lock-free).
     std::atomic<std::uint64_t> last_block_ns_{0};

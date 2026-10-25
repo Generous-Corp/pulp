@@ -1202,6 +1202,69 @@ TEST_CASE("GpuConvolver shared-path status reports provider loss through the tra
     transport.release();
 }
 
+TEST_CASE("GpuConvolver shared path latches an invalid callback at its own block",
+          "[gpu_audio][convolver][status][health]") {
+    LossProvider* provider = nullptr;
+    auto convolver = convolver_with_loss_provider(provider);
+    if (!convolver)
+        SKIP("shared-I/O provider state is not compiled into this build");
+    const auto path = pulp::gpu_audio::detail::realtime_gpu_node_path(convolver.get());
+    REQUIRE(path.active());
+    std::vector<float> in(kHealthBlock, 0.5f), out(kHealthBlock, 0.0f);
+    const float* in_ptrs[] = {in.data()};
+    float* out_ptrs[] = {out.data()};
+    BufferView<const float> input(in_ptrs, 1, kHealthBlock);
+    BufferView<float> output(out_ptrs, 1, kHealthBlock);
+    // No service step runs, so nothing but the rejected view can latch.
+    constexpr std::uint64_t kRejected = 3;
+    for (std::uint64_t sequence = 0; sequence <= kRejected; ++sequence) {
+        (void)path.process(path.context, input, output, kHealthBlock, sequence,
+                           sequence != kRejected, 0);
+        path.delivered(
+            path.context, sequence,
+            static_cast<std::uint8_t>(
+                sequence == kRejected
+                    ? pulp::gpu_audio::detail::SharedIoDeliveryDisposition::InvalidRejected
+                    : pulp::gpu_audio::detail::SharedIoDeliveryDisposition::Priming),
+            0, 0);
+    }
+    pulp::gpu_audio::detail::RealtimeGpuHealth health;
+    REQUIRE(path.health(path.context, health));
+    CHECK(health.recovery_reason == GpuAudioRecoveryReason::InvalidCallback);
+    CHECK(health.recovery_sequence == kRejected);
+    const auto status = validated(convolver->status_snapshot());
+    CHECK(status.recovery_reason == GpuAudioRecoveryReason::InvalidCallback);
+    CHECK(status.recovery_sequence == kRejected);
+}
+
+TEST_CASE("GpuConvolver shared path reports no GPU kernel after the offline fence",
+          "[gpu_audio][convolver][status][health]") {
+    LossProvider* provider = nullptr;
+    auto convolver = convolver_with_loss_provider(provider);
+    if (!convolver)
+        SKIP("shared-I/O provider state is not compiled into this build");
+    GpuAudioTransport transport;
+    REQUIRE(transport.prepare(convolver.get(), {8}));
+    REQUIRE(validated(transport.status_snapshot()).gpu_kernel_available);
+    REQUIRE(transport.capability_report().gpu_kernel_available);
+    REQUIRE(validated(convolver->status_snapshot()).gpu_kernel_available);
+
+    // The offline fence ends GPU delivery for this preparation.
+    std::vector<float> in(kHealthBlock, 0.5f), out(kHealthBlock, 0.0f);
+    const float* in_ptrs[] = {in.data()};
+    float* out_ptrs[] = {out.data()};
+    BufferView<const float> input(in_ptrs, 1, kHealthBlock);
+    BufferView<float> output(out_ptrs, 1, kHealthBlock);
+    transport.process_offline(input, output, kHealthBlock);
+
+    const auto status = validated(transport.status_snapshot());
+    CHECK(status.recovery_reason == GpuAudioRecoveryReason::OfflineFence);
+    CHECK_FALSE(status.gpu_kernel_available);
+    CHECK_FALSE(transport.capability_report().gpu_kernel_available);
+    CHECK_FALSE(validated(convolver->status_snapshot()).gpu_kernel_available);
+    transport.release();
+}
+
 TEST_CASE("GpuConvolver shared-path status counts a refused GPU block as CPU fallback",
           "[gpu_audio][convolver][status][health]") {
     LossProvider* provider = nullptr;
@@ -1981,6 +2044,13 @@ TEST_CASE("Staged GpuConvolver validates sample rate and breaker settings",
     CHECK_FALSE(zero_rate.prepare());
 
     GpuConvolver node(1, 64, 48000, staged_test_ir());
+    // Defaults: trip after 8 late blocks, probe every 32, recover after 4.
+    CHECK(GpuConvolverStagedBreaker{}.trip_after_misses == 8u);
+    CHECK(GpuConvolverStagedBreaker{}.probe_interval_blocks == 32u);
+    CHECK(GpuConvolverStagedBreaker{}.recover_after_hits == 4u);
+    CHECK(node.staged_breaker().trip_after_misses == 8u);
+    CHECK(node.staged_breaker().probe_interval_blocks == 32u);
+    CHECK(node.staged_breaker().recover_after_hits == 4u);
     CHECK_FALSE(node.configure_staged_breaker({.trip_after_misses = 0}));
     CHECK_FALSE(node.configure_staged_breaker({.probe_interval_blocks = 0}));
     CHECK_FALSE(node.configure_staged_breaker({.recover_after_hits = 0}));
