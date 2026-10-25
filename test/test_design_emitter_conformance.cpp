@@ -250,7 +250,10 @@ class RecordingBindingContext final : public NativeImportBindingContext {
     }
     void bind_level_display(View& v, LevelDisplay&,
                             const NativeImportMeterBindingDescriptor& d) override {
-        add_binding(out_, &v, "meter:" + key(d.meter_source));
+        // A key-only meter carries its key instead of a source, as ui.js's
+        // bindMeter(id, key) does.
+        add_binding(out_, &v,
+                    "meter:" + key(d.meter_source.empty() ? d.value_key : d.meter_source));
     }
     void bind_series_display(View& v, SeriesDisplay&,
                              const NativeImportWaveformBindingDescriptor& d) override {

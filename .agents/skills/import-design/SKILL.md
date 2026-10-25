@@ -2295,7 +2295,7 @@ this produces controls that render, drag, and move nothing:
 | `pulp-switch` / `pulp-check` | ✅ | on/off; `data-pulp-value` sets the opening state |
 | `pulp-select` (segmented) | ✅ | `data-pulp-choices="A|B|C"`, pipe separated |
 | `pulp-stepper` | ✅ | a count; `data-pulp-min` / `-max` / `-step` are REQUIRED |
-| `pulp-meter` | display | shows a macro; drives nothing, and does not bind on the exported native path at all (needs `pulpMeterSource` + `pulpMeterChannel`, which nothing emits) |
+| `pulp-meter` | display | shows a macro; drives nothing. Binds by its `pulpMeterValueKey` in every lane: ui.js through `bindMeter(id, key)`, native and baked C++ through `bind_level_display` with `value_key` set and an empty source and channel, which the host context binds by that key |
 | `pulp-combo`, `pulp-tab`, `pulp-radio`, `pulp-numbox` | ❌ | recognised by the capture, dropped by the lowering — drawn faithfully, wired to nothing |
 
 Everything outside that table is DECORATION, and decoration is most of a good
