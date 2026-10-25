@@ -1,6 +1,11 @@
 #include "sdk_distribution_guard.hpp"
 
+#include "configure_defaults.hpp"
+#include "ship_tracing_guard.hpp"
+
 #include <fstream>
+#include <sstream>
+#include <string_view>
 
 namespace pulp::cli {
 
@@ -69,6 +74,67 @@ bool sdk_allows_distribution(const std::filesystem::path& build_dir, std::string
         return false;
     }
     return true;
+}
+
+// The install name of the shared runtime is @rpath/libpulp-dev-shared-ui.<version>.dylib
+// (tools/cmake/PulpDevSharedUi.cmake), so these bytes are in the runtime itself
+// and in the load commands of every module linked against it.
+static constexpr std::string_view kDevSharedRuntimePrefix = "libpulp-dev-shared-ui.";
+
+static bool is_dev_shared_offender(const std::filesystem::path& file) {
+    if (file.filename().string().rfind(kDevSharedRuntimePrefix, 0) == 0)
+        return true;
+    return file_contains_bytes(file, kDevSharedRuntimePrefix);
+}
+
+std::filesystem::path dev_shared_artifact_offender(const std::filesystem::path& artifact) {
+    std::error_code ec;
+    if (artifact.empty())
+        return {};
+    const bool artifact_exists = std::filesystem::exists(artifact, ec);
+    if (ec)
+        return artifact;
+    if (!artifact_exists)
+        return {};
+    if (!std::filesystem::is_directory(artifact, ec)) {
+        if (ec)
+            return artifact;
+        return is_dev_shared_offender(artifact) ? artifact : std::filesystem::path{};
+    }
+
+    const auto options = std::filesystem::directory_options::follow_directory_symlink;
+    std::filesystem::recursive_directory_iterator it(artifact, options, ec), end;
+    if (ec)
+        return artifact;
+    while (!ec && it != end) {
+        if (it.depth() > 64)
+            return artifact;
+        if (it->is_regular_file(ec) && !ec && is_dev_shared_offender(it->path()))
+            return it->path();
+        if (ec)
+            return artifact;
+        it.increment(ec);
+    }
+    if (ec)
+        return artifact;
+    return {};
+}
+
+bool dev_shared_build_allows_distribution(const std::filesystem::path& build_dir,
+                                          std::string& error) {
+    std::ifstream cache(build_dir / "CMakeCache.txt");
+    if (!cache)
+        return true;
+    std::ostringstream text;
+    text << cache.rdbuf();
+    const auto value = cmake_cache_value(text.str(), kDevSharedUiOption);
+    if (!value || !cmake_value_on(*value))
+        return true;
+    error = "the configured build links plug-ins against the development-only shared Pulp "
+            "runtime (PULP_DEV_SHARED_UI=ON), which loads only from this build tree. "
+            "Rebuild with `pulp build` (it switches the build back to static links) before "
+            "signing, packaging, notarizing, sharing, or releasing";
+    return false;
 }
 
 } // namespace pulp::cli

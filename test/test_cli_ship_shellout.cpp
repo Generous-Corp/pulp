@@ -2183,6 +2183,182 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 }
 #endif
 
+// ── PULP_DEV_SHARED_UI: development-only shared runtime ───────────────────
+// A dev-shared module loads Pulp from libpulp-dev-shared-ui.<version>.dylib in
+// its build tree, so every distribution path refuses the configured cache and
+// any artifact that is or references the runtime.
+
+namespace {
+
+// Bytes of a module linked against the shared runtime: its load command names
+// the runtime's @rpath install name.
+void write_dev_shared_module(const fs::path& file) {
+    fs::create_directories(file.parent_path());
+    std::ofstream out(file, std::ios::binary);
+    out << "\xcf\xfa\xed\xfe" << "fixture LC_LOAD_DYLIB "
+        << "@rpath/libpulp-dev-shared-ui.1.11.0.dylib" << '\0';
+}
+
+} // namespace
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "every distribution subcommand refuses a PULP_DEV_SHARED_UI build cache",
+                 "[cli][shellout][ship][dev-shared]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    for (const char* sub : {"sign", "package", "notarize", "release", "share"}) {
+        DYNAMIC_SECTION("pulp ship " << sub) {
+            auto root = make_fake_project(std::string("dev-shared-cache-") + sub, true);
+            {
+                std::ofstream cache(root / "build" / "CMakeCache.txt", std::ios::app);
+                cache << "PULP_DEV_SHARED_UI:BOOL=ON\n";
+            }
+            auto r = run_pulp_in(root, {"ship", sub});
+            REQUIRE_FALSE(r.timed_out);
+            REQUIRE(r.exit_code == 1);
+            const auto combined = r.stdout_output + r.stderr_output;
+            REQUIRE(contains(combined, "PULP_DEV_SHARED_UI=ON"));
+            REQUIRE_FALSE(fs::exists(root / "artifacts"));
+            fs::remove_all(root);
+        }
+    }
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship package accepts a cache with PULP_DEV_SHARED_UI off",
+                 "[cli][shellout][ship][dev-shared]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("dev-shared-cache-off", true);
+    {
+        std::ofstream cache(root / "build" / "CMakeCache.txt", std::ios::app);
+        cache << "PULP_DEV_SHARED_UI:BOOL=OFF\n";
+    }
+    auto r = run_pulp_in(root, {"ship", "package"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE_FALSE(contains(r.stdout_output + r.stderr_output, "PULP_DEV_SHARED_UI"));
+    fs::remove_all(root);
+}
+
+#ifdef __APPLE__
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship sign --path rejects a module linked against the dev-shared runtime",
+                 "[cli][shellout][ship][sign][dev-shared]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("sign-path-dev-shared", true);
+    auto bundle = root.parent_path() / (root.filename().string() + "-outside.vst3");
+    write_dev_shared_module(bundle / "Contents" / "MacOS" / "FastGain");
+
+    auto r = run_pulp_in(root, {"ship", "sign", "--identity", "Developer ID Application: Fake",
+                                "--path", bundle.string()});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 1);
+    const auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(contains(combined, "development-only dev-shared build"));
+    REQUIRE(contains(combined, "FastGain"));
+    REQUIRE_FALSE(contains(combined, "Signing " + bundle.filename().string()));
+
+    fs::remove_all(bundle);
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship sign rejects a scanned bundle carrying the dev-shared runtime",
+                 "[cli][shellout][ship][sign][dev-shared]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("sign-scan-dev-shared", true);
+    auto bundle = make_fake_bundle(root, "CLAP", "FastGain.clap");
+    std::ofstream(bundle / "Contents" / "libpulp-dev-shared-ui.1.11.0.dylib") << "copied runtime\n";
+
+    auto r = run_pulp_in(root, {"ship", "sign", "--identity", "Developer ID Application: Fake"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 1);
+    const auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(contains(combined, "development-only dev-shared build"));
+    REQUIRE(contains(combined, "libpulp-dev-shared-ui.1.11.0.dylib"));
+    REQUIRE_FALSE(contains(combined, "Signing FastGain.clap"));
+
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship package rejects a dev-shared module when the cache is off",
+                 "[cli][shellout][ship][package][dev-shared]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("package-dev-shared", true);
+    {
+        std::ofstream cache(root / "build" / "CMakeCache.txt", std::ios::app);
+        cache << "PULP_DEV_SHARED_UI:BOOL=OFF\n"
+              << "PULP_SDK_DISTRIBUTION_ELIGIBLE:INTERNAL=TRUE\n";
+    }
+    auto bundle = make_fake_bundle(root, "VST3", "FastGain.vst3");
+    write_dev_shared_module(bundle / "Contents" / "MacOS" / "FastGain");
+
+    auto r = run_pulp_in(root, {"ship", "package", "--product", "FastGain"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 1);
+    const auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(contains(combined, "development-only dev-shared build"));
+    REQUIRE_FALSE(contains(combined, "Packaging FastGain"));
+    REQUIRE_FALSE(fs::exists(root / "artifacts" / "FastGain-2.3.4.pkg"));
+
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship notarize rejects a dev-shared module before submitting",
+                 "[cli][shellout][ship][notarize][dev-shared]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("notarize-dev-shared", true);
+    auto package = root.parent_path() / (root.filename().string() + "-outside.pkg");
+    write_dev_shared_module(package / "Payload" / "FastGain.vst3" / "Contents" / "MacOS" /
+                            "FastGain");
+
+    auto r = run_pulp_in(root, {"ship", "notarize", "--path", package.string(), "--dry-run",
+                                "--api-key", "/path/AuthKey_FAKE.p8", "--api-key-id", "FAKEKEYID",
+                                "--api-issuer", "fake-issuer"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 1);
+    const auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(contains(combined, "development-only dev-shared build"));
+    REQUIRE_FALSE(contains(combined, "notarytool submit"));
+
+    fs::remove_all(package);
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture, "pulp ship share rejects a dev-shared standalone app",
+                 "[cli][shellout][ship][share][dev-shared]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("share-dev-shared", true);
+    auto app = root.parent_path() / (root.filename().string() + "-outside.app");
+    make_fake_standalone_app(app, "FastGain");
+    write_dev_shared_module(app / "Contents" / "MacOS" / "FastGain");
+
+    auto r = run_pulp_in(root, {"ship", "share", app.string(), "--dry-run"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 1);
+    const auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(contains(combined, "development-only dev-shared build"));
+    REQUIRE_FALSE(contains(combined, "share plan"));
+
+    fs::remove_all(app);
+    fs::remove_all(root);
+}
+#endif
+
 // ── Linux packaging CLI routing ──────────────────────────────────────────
 // Regression guard: `pulp ship package` on Linux must invoke the first-party
 // .deb/.tar.gz packagers (ship/platform/linux/package_linux.cpp), NOT fall

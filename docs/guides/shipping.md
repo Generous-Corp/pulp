@@ -35,6 +35,12 @@ cmake --build build --config Release
 
 Output appears in `build/VST3/`, `build/CLAP/`, `build/AU/`.
 
+Ship from a `pulp build`, not a `pulp dev` or `pulp loop` tree. On macOS those
+link plug-ins against a development-only shared Pulp runtime
+(`PULP_DEV_SHARED_UI=ON`) that loads only from the build directory, and every
+signing, packaging, notarization and sharing path below refuses it. `pulp build`
+switches the build back to static links.
+
 ### Build identity in every bundle
 
 Every bundle `pulp_add_plugin()` / `pulp_add_plugin_bundle()` produces carries

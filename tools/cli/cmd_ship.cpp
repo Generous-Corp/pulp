@@ -326,6 +326,31 @@ static int enforce_no_vellum_d15(const std::vector<fs::path>& artifacts) {
     return 0;
 }
 
+static int enforce_no_dev_shared_ui(const std::vector<fs::path>& artifacts) {
+    for (const auto& artifact : artifacts) {
+        const auto offender = pulp::cli::dev_shared_artifact_offender(artifact);
+        if (offender.empty())
+            continue;
+        std::cerr << "Error: refusing to ship a development-only dev-shared build "
+                     "(PULP_DEV_SHARED_UI=ON).\n"
+                  << "  Offending artifact: " << offender.string() << "\n"
+                  << "  It loads Pulp from libpulp-dev-shared-ui.<version>.dylib in its build "
+                     "tree,\n"
+                  << "  so it fails on any other machine. Rebuild with `pulp build` (static "
+                     "links)\n"
+                  << "  before signing, packaging, sharing, notarizing, or releasing it.\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Development-only runtimes that must never reach a distributed artifact.
+static int enforce_no_development_runtimes(const std::vector<fs::path>& artifacts) {
+    if (int rc = enforce_no_vellum_d15(artifacts); rc != 0)
+        return rc;
+    return enforce_no_dev_shared_ui(artifacts);
+}
+
 // Load (or, on first use, create + store) the plugin's Ed25519 signing key from the
 // macOS keychain. The key material is kept as a single-line base64 blob under a
 // stable, discoverable service name so it is easy to find / rotate / revoke. A freshly
@@ -535,7 +560,7 @@ static int ship_sign(const std::vector<std::string>& args,
                              "  `pulp ship package` / `create_pkg`, not `sign --path`.\n";
                 return 1;
             }
-            if (int rc = enforce_no_vellum_d15({fs::path(sign_path)}); rc != 0)
+            if (int rc = enforce_no_development_runtimes({fs::path(sign_path)}); rc != 0)
                 return rc;
 #ifdef __APPLE__
             if (!run_signing_preflight(root)) return 1;
@@ -570,7 +595,7 @@ static int ship_sign(const std::vector<std::string>& args,
             std::cerr << "No plugin bundles found to sign. Run `pulp build` first.\n";
             return 1;
         }
-        if (int rc = enforce_no_vellum_d15(bundles); rc != 0)
+        if (int rc = enforce_no_development_runtimes(bundles); rc != 0)
             return rc;
 
 #ifdef __APPLE__
@@ -786,7 +811,7 @@ static int ship_package_impl(const std::vector<std::string>& args,
         // Inspect exactly the inputs this invocation selected, after product
         // filtering and before creating a DMG/pkg or invoking a packager.
         if (target != "android") {
-            if (int rc = enforce_no_vellum_d15(selected_macos_artifacts); rc != 0)
+            if (int rc = enforce_no_development_runtimes(selected_macos_artifacts); rc != 0)
                 return rc;
         }
         if (target != "android") {
@@ -1456,7 +1481,7 @@ static int ship_notarize(const std::vector<std::string>& args,
         // Directory-backed bundles and loose dylibs are directly inspectable.
         // Opaque pkg/dmg/zip inputs are not extracted here; Pulp-produced
         // containers were already guarded at their selected package inputs.
-        if (int rc = enforce_no_vellum_d15(notarize_artifacts); rc != 0)
+        if (int rc = enforce_no_development_runtimes(notarize_artifacts); rc != 0)
             return rc;
 
         if (staple_only) {
@@ -2371,7 +2396,7 @@ static int ship_share(const std::vector<std::string>& args,
                       << "' — expected .app, .dmg, or .pkg.\n";
             return 2;
         }
-        if (int rc = enforce_no_vellum_d15({fs::path(input)}); rc != 0)
+        if (int rc = enforce_no_development_runtimes({fs::path(input)}); rc != 0)
             return rc;
         auto inspector_report =
             pulp::cli::inspector_shipping::empty_report();
@@ -2766,6 +2791,14 @@ int cmd_ship(const std::vector<std::string>& args) {
         std::string distribution_error;
         if (!pulp::cli::sdk_allows_distribution(build_dir, distribution_error)) {
             std::cerr << "Error: " << distribution_error << ".\n";
+            return 1;
+        }
+    }
+    if (sub == "sign" || sub == "package" || sub == "notarize" || sub == "release" ||
+        sub == "share") {
+        std::string dev_shared_error;
+        if (!pulp::cli::dev_shared_build_allows_distribution(build_dir, dev_shared_error)) {
+            std::cerr << "Error: " << dev_shared_error << ".\n";
             return 1;
         }
     }

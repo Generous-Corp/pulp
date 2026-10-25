@@ -318,6 +318,34 @@ Unit-tested in both directions in `test/test_sdk_distribution_guard.cpp`, plus
 the CMake-level provenance contract in
 `test/cmake/test_sdk_provenance_contract.cmake`.
 
+### Dev-shared builds (`PULP_DEV_SHARED_UI`) never ship, and the guard is fail-closed
+
+`pulp dev` / `pulp loop` on macOS (and `pulp build --dev-shared`) link plug-in
+modules against `libpulp-dev-shared-ui.<version>.dylib` in the build tree
+(`tools/cmake/PulpDevSharedUi.cmake`). That module loads only on the machine and
+in the directory that built it, so unlike the development-SDK marker above this
+guard also covers `sign`, and it checks the artifact bytes, not only the cache:
+
+- `pulp::cli::dev_shared_build_allows_distribution()` refuses `sign`, `package`,
+  `notarize`, `release` and `share` when `CMakeCache.txt` has the option on.
+- `pulp::cli::dev_shared_artifact_offender()` scans every selected artifact for a
+  file named `libpulp-dev-shared-ui.*` or containing those bytes (the runtime's
+  install name, which is in every linked module's load commands). It runs at the
+  same call sites as the Vellum D15 scan, through
+  `enforce_no_development_runtimes()` in `tools/cli/cmd_ship.cpp`, and fails
+  closed on an uninspectable tree.
+- `tools/scripts/build_combined_installer.sh` greps its inputs for the same bytes
+  before any signing tool runs; a grep read error also refuses.
+
+The fix is always `pulp build` (it switches the build dir back to static links,
+a relink only). There is no override flag. Tests: the `[dev-shared]` cases in
+`test/test_sdk_distribution_guard.cpp` and `test/test_cli_ship_shellout.cpp`
+(each subcommand against the cache; `sign --path`, `sign` scan, `package`,
+`notarize` and `share` against artifact bytes), and
+`test_dev_shared_build_is_rejected_before_signing` in
+`tools/scripts/test_build_combined_installer.py`. A new distribution path must
+call `enforce_no_development_runtimes()` on exactly the inputs it selected.
+
 ## Workflows
 
 ### One-off share (macOS): hand a build to a friend, properly signed
