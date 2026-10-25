@@ -263,6 +263,7 @@
       "pulp/format/detail/delayed_action.hpp",
       "pulp/format/detail/editor_environment.hpp",
       "pulp/format/detail/frame_time_summary.hpp",
+      "pulp/format/detail/host_sample_position.hpp",
       "pulp/format/detail/locale_independent_float.hpp",
       "pulp/format/detail/midi_out_offset.hpp",
       "pulp/format/detail/null_audio_device.hpp",
