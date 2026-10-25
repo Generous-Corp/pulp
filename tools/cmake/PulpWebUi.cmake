@@ -189,6 +189,8 @@ set(_PULP_WEBUI_CANVAS_SOURCES
     ${_PULP_WEBUI_ROOT}/core/canvas/src/skia_canvas_path.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/skia_canvas_fonts.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/skia_canvas_text.cpp
+    # Laid-out paragraph cache; skia_canvas_text.cpp builds through it.
+    ${_PULP_WEBUI_ROOT}/core/canvas/src/skia_paragraph_cache.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/skia_canvas_filter.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/skia_canvas_mask.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/skia_canvas_gradients.cpp

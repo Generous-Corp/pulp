@@ -2611,9 +2611,17 @@ Benchmark receipt (`pulp-design-import-benchmark-v2`) gotchas:
   shaping** — RecordingCanvas records commands and does none of that work.
   Resource claims need `--canvas=skia-raster` (or `skia-graphite` where a Dawn
   adapter exists); `--require-steady-state` exits 4 on a `blind` gate rather
-  than passing it. `paragraph_builds` is reported but never gated: SkiaCanvas
-  shapes every label on every paint until it has a paragraph cache, so a
-  gate on it would fail every text fixture today.
+  than passing it. Paragraph builds are gated by TEXT, not by count: a step
+  legitimately shapes the runs it wrote (the IR fixtures write fresh
+  `slot i frame N` strings every frame), so the gate reads
+  `paragraph_builds.unwritten`, the builds of any text the fixture's
+  `text_written_by_step(frame)` did not list. A count budget ("at most N
+  builds") is blind to a culled slot: the slot shapes nothing, and a static
+  label re-shaping every frame fits inside N. A new fixture that writes text
+  must list it, or the gate fails it.
+  `--paragraph-cache=off` is the uncached text path and the gate's planted
+  negative; compare cached vs uncached with `--baseline-arg` /
+  `--candidate-arg` on the same lane.
 - **`--lane=live --ir` (optionally `--bundle`) is the production JS path over
   importer output.** The runtime's `__pulpRuntimeSettle__` called from
   `engine.evaluate` only records a budget; `WidgetBridge::load_script` drains
@@ -4353,6 +4361,16 @@ resolver lane (`design_import_native_common.cpp`) diagnoses `filter` /
 `backdropFilter` as unsupported (it doesn't call the View setters), and
 cpp/swiftui codegen don't emit them.
 
+**Backdrop under opacity:** Chrome composites a backdrop-filter at the
+element's opacity. It draws the filtered backdrop at that opacity, then the
+element over it at that opacity, so an `opacity: 0` box with
+`backdrop-filter` shows nothing at all, and a hidden frosted toast must not
+blur what is under it. `View::push_effect_layers` skips the backdrop layer
+at opacity 0 and ends the chain in `opacity()` below 1. An ancestor's
+opacity layer is the backdrop root, as in Chrome. Chrome's numbers come from
+`tools/import-validation/chrome_backdrop_opacity_oracle.py` over fixture
+`22-backdrop-opacity`, and `pulp-test-css-backdrop-opacity` holds Skia to them.
+
 ### Step 1: Identify source and input
 
 Ask the user or detect from context:
@@ -4676,6 +4694,17 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   horizons (64 frames); on a loaded gate VM those frames stretch to several
   hundred ms each, and the repeat alone ran the capture past its deadline in the
   same-frame-capture phase. A new hidden-paint plate goes through that helper.
+- **Only a horizon's decisive frames carry the caller's encoding.** The verdict
+  and the shipped bytes depend on the last `STABLE_RUN_FRAMES` (3) of
+  `SCREENSHOT_HORIZON_FRAMES` (32) frames alone, so the 29 before them are
+  taken as quality-1 JPEG with the caller's clip, `captureBeyondViewport` and
+  `fromSurface` untouched; they still wait for a fresh presentation each. Keep
+  the stable run equal to the decisive frame count, or a presentation frame
+  could extend the run that decides. A capture whose motion receipt lists an
+  animated image (`volatile_sources`) takes every frame in the caller's
+  encoding (`horizonPresentationEncoding`), because that image runs on the
+  decoder's wall clock and a faster horizon would move when the decisive
+  frames land; `provenance.motion.horizon_presentation_format` records which.
 - **Integration deadlines come from `capture_integration_support.mjs`.** Every
   capture in the `*.integration.test.mjs` files runs under
   `CAPTURE_DEADLINE_MS` (30 s), and each case's node:test timeout is

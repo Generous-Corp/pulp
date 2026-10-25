@@ -514,6 +514,53 @@ asserting `selectable_index_at_point()` and `char_index_at_point()` return the
 same byte at every x. If you touch either hit-test, that is the test that
 notices.
 
+## SkiaCanvas paragraphs are cached, and the paint is not in the key
+
+`SkiaCanvas` text that goes through SkParagraph (`fill_text`, `stroke_text`,
+`measure_text`, `measure_text_full`, `text_x_for_byte`) looks its laid-out
+paragraph up in the process-wide `ParagraphCache`
+(`pulp/canvas/paragraph_cache.hpp`). It has to be process-wide: hosts build a
+new `SkiaCanvas` every frame, so a per-canvas cache never hits.
+
+- **Anything `build_paragraph` reads must be in `ParagraphKey`.** Adding an
+  input to the paragraph build without adding it to the key paints a stale
+  layout for every run that differed only in that input, and nothing fails
+  unless a test draws two runs that differ in exactly that input. The variant
+  cases in `test_paragraph_cache.cpp` do that per field; add one with the
+  field. Wrap width, text-align and line height are deliberately absent: the
+  paragraph is laid out at infinite width, left-aligned, and the caller aligns
+  the run.
+- **Key on the resolved family stack, not the CSS string.** Generic keywords
+  map to platform families through state that does not bump
+  `font_registration_generation()` (the test-only generic override), so the
+  same CSS string can resolve differently within one process.
+- **The generation is not redundant with the primary typeface.** A
+  registration can change only a fallback entry in the stack (a glyph the
+  primary lacks), leaving the primary face and every other key input equal.
+- **Never update a cached paragraph's foreground paint.**
+  `Paragraph::updateForegroundPaint` rewrites the text styles but not the
+  text-blob records `TextLine` fills on the first paint, which carry the paint
+  they were built with, so a second colour silently paints in the first. The
+  cache builds paragraphs with no foreground paint and draws them through a
+  `ParagraphPainter` that applies the caller's paint to each glyph run.
+- **Every use holds the entry's mutex** (`ParagraphUse`): SkParagraph mutates
+  itself on first paint and in queries such as `getRectsForRange`. Never hold
+  two uses at once; the same key twice on one thread waits on itself.
+- **Key floats must be canonical.** The key compares floats by value and
+  hashes them by bits, so a NaN letter spacing (script can send one through
+  `setTextRuns`) never found its own entry, piled one in per paint, and then
+  crashed eviction; `-0` and `+0` hashed apart. `make_paragraph` replaces
+  non-finite size and spacing and folds `-0` to `+0` before building the key.
+- **Eviction is a segmented LRU on purpose.** A meter readout is a new string
+  every frame; with plain LRU it flushes every label that is not repainted
+  each frame. New entries start on probation and are protected on a second
+  lookup. Admitting only on a second miss instead would shape every stable
+  label twice and fail the benchmark's zero-build steady-state frame.
+- **Unspaced text the primary face cannot cover never reaches SkParagraph.**
+  `fill_text` sends it to the per-run SkShaper fallback, so a cache test that
+  draws a missing glyph must add letter spacing (or a feature) to exercise the
+  cache at all.
+
 ## How to verify a change here
 
 A baseline change that does not move a number is not a fix. Measure before and
