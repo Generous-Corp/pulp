@@ -174,4 +174,8 @@ TEST_CASE("only ad hoc and Apple Development identities sign a dev-shared build"
     REQUIRE_FALSE(pulp::cli::is_local_signing_identity("Developer ID Application: Co (TEAMID)"));
     REQUIRE_FALSE(pulp::cli::is_local_signing_identity("3rd Party Mac Developer Application: Co"));
     REQUIRE_FALSE(pulp::cli::is_local_signing_identity(""));
+    // Lookalikes that only start with the same words are not local identities.
+    REQUIRE_FALSE(pulp::cli::is_local_signing_identity("Apple Developmental Labs (TEAMID)"));
+    REQUIRE_FALSE(pulp::cli::is_local_signing_identity("Apple Development"));
+    REQUIRE_FALSE(pulp::cli::is_local_signing_identity("Mac Developers Inc: Release"));
 }

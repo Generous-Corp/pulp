@@ -10,7 +10,10 @@ bool sdk_allows_distribution(const std::filesystem::path& build_dir, std::string
 // Inspects a loose dylib or a filesystem-backed artifact tree. Opaque flat
 // packages, disk images, and zip archives are guarded when Pulp creates them
 // from selected, inspected inputs; this helper does not extract containers.
-std::filesystem::path vellum_d15_artifact_offender(const std::filesystem::path& artifact);
+// `follow_directory_symlinks` is off for the contents of an opened container,
+// whose symlinks (a disk image's /Applications alias) point outside it.
+std::filesystem::path vellum_d15_artifact_offender(const std::filesystem::path& artifact,
+                                                   bool follow_directory_symlinks = true);
 
 // PULP_DEV_SHARED_UI=ON links plug-in modules against a shared Pulp runtime
 // that only exists in the build tree. False (with `error` set) when the
@@ -21,7 +24,8 @@ bool dev_shared_build_allows_distribution(const std::filesystem::path& build_dir
 // that is the development-only shared runtime or names it in its bytes, as a
 // linked module's load command does. Returns the artifact itself when it
 // cannot be inspected, and an empty path when it is clean or absent.
-std::filesystem::path dev_shared_artifact_offender(const std::filesystem::path& artifact);
+std::filesystem::path dev_shared_artifact_offender(const std::filesystem::path& artifact,
+                                                   bool follow_directory_symlinks = true);
 // Identities that sign only for loading on this machine: ad hoc ("-") and
 // Apple Development certificates. A dev-shared build may be signed with these
 // so a local host loads it; it may never be packaged, notarized or shared.

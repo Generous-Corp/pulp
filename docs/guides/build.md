@@ -99,6 +99,8 @@ It is a development-only link mode, by design:
     them. That signature is for local loading only.
   - An artifact that is, or names, the shared runtime (a bundle copied out of a
     dev-shared tree, a hand-made `.pkg` input) is refused with the same command.
+    `notarize` and `share` open a `.zip`, flat `.pkg` or `.dmg` built by another
+    tool and scan what is inside; one that does not open is refused.
     `tools/scripts/build_combined_installer.sh` refuses such inputs before any
     signing tool runs.
 - **What stays static.** The format adapters (`libpulp-format*`,

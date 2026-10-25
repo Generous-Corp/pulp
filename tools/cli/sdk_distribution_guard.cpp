@@ -9,7 +9,8 @@
 
 namespace pulp::cli {
 
-std::filesystem::path vellum_d15_artifact_offender(const std::filesystem::path& artifact) {
+std::filesystem::path vellum_d15_artifact_offender(const std::filesystem::path& artifact,
+                                                   bool follow_directory_symlinks) {
     constexpr auto runtime_name = "libvellum-gpu.dylib";
     std::error_code ec;
     if (artifact.empty())
@@ -28,7 +29,9 @@ std::filesystem::path vellum_d15_artifact_offender(const std::filesystem::path& 
     if (ec)
         return artifact;
 
-    const auto options = std::filesystem::directory_options::follow_directory_symlink;
+    const auto options = follow_directory_symlinks
+                             ? std::filesystem::directory_options::follow_directory_symlink
+                             : std::filesystem::directory_options::none;
     std::filesystem::recursive_directory_iterator it(artifact, options, ec), end;
     if (ec)
         return artifact;
@@ -87,7 +90,8 @@ static bool is_dev_shared_offender(const std::filesystem::path& file) {
     return file_contains_bytes(file, kDevSharedRuntimePrefix);
 }
 
-std::filesystem::path dev_shared_artifact_offender(const std::filesystem::path& artifact) {
+std::filesystem::path dev_shared_artifact_offender(const std::filesystem::path& artifact,
+                                                   bool follow_directory_symlinks) {
     std::error_code ec;
     if (artifact.empty())
         return {};
@@ -102,7 +106,9 @@ std::filesystem::path dev_shared_artifact_offender(const std::filesystem::path& 
         return is_dev_shared_offender(artifact) ? artifact : std::filesystem::path{};
     }
 
-    const auto options = std::filesystem::directory_options::follow_directory_symlink;
+    const auto options = follow_directory_symlinks
+                             ? std::filesystem::directory_options::follow_directory_symlink
+                             : std::filesystem::directory_options::none;
     std::filesystem::recursive_directory_iterator it(artifact, options, ec), end;
     if (ec)
         return artifact;
@@ -121,8 +127,11 @@ std::filesystem::path dev_shared_artifact_offender(const std::filesystem::path& 
 }
 
 bool is_local_signing_identity(std::string_view identity) {
-    return identity == "-" || identity.rfind("Apple Development", 0) == 0 ||
-           identity.rfind("Mac Developer", 0) == 0;
+    // The certificate common names are "Apple Development: <name> (<team>)"
+    // and "Mac Developer: ...". Matching through the colon keeps an identity
+    // that merely starts with those words from counting as local.
+    return identity == "-" || identity.rfind("Apple Development:", 0) == 0 ||
+           identity.rfind("Mac Developer:", 0) == 0;
 }
 
 bool dev_shared_build_allows_distribution(const std::filesystem::path& build_dir,
