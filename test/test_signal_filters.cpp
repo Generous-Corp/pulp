@@ -242,8 +242,19 @@ float ladder_reference_std_tanh(const std::vector<float>& in, float sr, float fc
                                                   float res) {
     return ladder_reference(in, sr, fc, res, [](float v) { return FastMath::tanh_minimax(v); });
 }
+// The Lambert [7/6] Pade with its output saturated at |x| = 4: a 6.7e-4 step
+// there, the seam a saturator must not have. Kept as the control below.
+float seamed_lambert_tanh(float v) {
+    if (v < -4.0f)
+        return -1.0f;
+    if (v > 4.0f)
+        return 1.0f;
+    const float x2 = v * v;
+    return v * (135135.0f + x2 * (17325.0f + x2 * (378.0f + x2))) /
+           (135135.0f + x2 * (62370.0f + x2 * (3150.0f + x2 * 28.0f)));
+}
 float ladder_reference_lambert_tanh(const std::vector<float>& in, float sr, float fc, float res) {
-    return ladder_reference(in, sr, fc, res, [](float v) { return FastMath::tanh(v); });
+    return ladder_reference(in, sr, fc, res, seamed_lambert_tanh);
 }
 } // namespace
 
@@ -264,9 +275,9 @@ TEST_CASE("FastMath::tanh stays within its pinned error bound of std::tanh",
         if (std::abs(x) <= 2.0f)
             max_err_2 = std::max(max_err_2, e);
     }
-    REQUIRE(max_err_2 < 1e-6f);    // ~-133 dBFS — inaudible
-    REQUIRE(max_err_4 < 2e-5f);    // ~-94 dBFS  — Padé error inside |x|<4
-    REQUIRE(max_err_full < 7e-4f); // ~-63 dBFS  — the +/-4 hard-clamp seam (worst case)
+    REQUIRE(max_err_2 < 1e-6f);      // ~-133 dBFS — inaudible
+    REQUIRE(max_err_4 < 2e-5f);      // ~-94 dBFS  — Padé error inside |x|<4
+    REQUIRE(max_err_full < 9.7e-5f); // ~-80 dBFS  — at the argument clamp (worst case)
 }
 
 // The default float ladder must track the EXACT std::tanh filter to within
@@ -357,8 +368,8 @@ TEST_CASE("LadderFilter explicit saturation profiles ignore the build default",
 TEST_CASE("LadderFilter efficient profile has no clamp seam under hard drive",
           "[signal][ladder][fast_math]") {
     // Amplitude 3 at high resonance pushes stage arguments past |x| = 4 every
-    // cycle, which is where the Lambert-fraction tanh steps to its clamp. The
-    // same prefix run through that fraction is the control: it must show the
+    // cycle, which is where a Lambert fraction saturated at 4 steps to its
+    // clamp. The same prefix run through that form is the control: it must show the
     // seam this stimulus exists to provoke, or a small deviation proves nothing.
     constexpr float kSr = 48000.0f, kFc = 1200.0f, kRes = 0.9f;
     LadderFilter exact;
