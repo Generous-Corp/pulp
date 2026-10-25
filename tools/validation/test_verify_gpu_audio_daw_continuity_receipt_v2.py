@@ -19,6 +19,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -211,10 +212,11 @@ def receipt_for(run: Path, *, kind: str, fault: str, mode: str, host_id: str = "
     return receipt
 
 
-def rewrite_capture(run: Path, *, inputs=None, outputs=None) -> None:
+def rewrite_capture(run: Path, *, inputs=None, outputs=None, counters=None) -> None:
     """Rewrite capture.bin record by record, keeping every record's header
     (position, flags, entry time, delivery counters); `inputs`/`outputs` map
-    (position, value) -> value for the played samples."""
+    (position, value) -> value for the played samples, and `counters` maps
+    (position, (gpu, fallback, silence, priming)) -> counters."""
     cap = gfc.read_capture(run / "capture.bin")
     blocks = []
     for rec in cap.records:
@@ -232,8 +234,8 @@ def rewrite_capture(run: Path, *, inputs=None, outputs=None) -> None:
         blocks.append({"position": pos if pos >= 0 else None, "flags": flags,
                        "inputs": edit(cap.inputs, inputs), "outputs": edit(cap.outputs, outputs),
                        "host_time_ns": rec["host_time_ns"],
-                       "counters": (rec["gpu"], rec["fallback"], rec["silence"],
-                                    rec["priming"])})
+                       "counters": (counters or (lambda p, c: c))(
+                           pos, (rec["gpu"], rec["fallback"], rec["silence"], rec["priming"]))})
     gfc.write_capture(run / "capture.bin", cap.sample_rate, blocks)
 
 
@@ -346,8 +348,10 @@ class V2Receipt(unittest.TestCase):
         fix = hosts.KNOWN_DEFECTS[0]["fixed_by"]
         self.assertEqual(fix, "590bee7a5232a07484c170a9a0690208ec241c1b")  # #10736 on main
         pre = "9c566f733766d82a4ab6f5b7046aa1cf6b6ad101"  # #10736's first parent
+        local = dict(os.environ, GIT_NO_LAZY_FETCH="1")
         have = all(subprocess.run(["git", "-C", str(HERE), "cat-file", "-e", f"{c}^{{commit}}"],
-                                  capture_output=True).returncode == 0 for c in (fix, pre))
+                                  capture_output=True, env=local).returncode == 0
+                   for c in (fix, pre))
         if not have:
             self.skipTest("this checkout lacks the #10736 commits (shallow clone)")
         bad = [{"event": "prepared", "node": "wavenet", "storage": "staged", "timestamps": True}]
@@ -693,14 +697,20 @@ class V2Receipt(unittest.TestCase):
 
     # ── Planted negatives on a host that was not quiet (Fable, Q1) ─────
 
-    QUANTUM, ISSUED = 128, FAULT + 128  # synthesize_run's quantum and issued block
+    # synthesize_run's quantum (= its callback block) and the callback after
+    # the one holding FAULT, where the plug-in issues the fault and arms the
+    # defect (synthesize_run itself stamps FAULT + block, which is no callback).
+    QUANTUM, ISSUED = 128, (FAULT // 128 + 1) * 128
 
-    def plugin_shaped(self, name: str, planted: str, *, shift: int = 0) -> Path:
+    def plugin_shaped(self, name: str, planted: str, *, shift: int = 0,
+                      applied_late: bool = False, onset: int | None = None) -> Path:
         """A planted negative on a busy host, with the deviation where the
         plug-in's construction puts it: issued + one quantum for a dropout or
         misalignment, issued + PDC for a withheld quantum. synthesize_run
         starts every shape at the fault sample, so the output before the onset
-        (and the host render before onset - PDC) is put back to clean audio."""
+        (and the host render before onset - PDC) is put back to clean audio.
+        `applied_late` moves the provider fault, and the fallback taking over,
+        one quantum after the issued block."""
         clean = self.run_dir(f"{name}-clean")
         make_run(clean, quiet=False)
         cap = gfc.read_capture(clean / "capture.bin")
@@ -711,8 +721,27 @@ class V2Receipt(unittest.TestCase):
         receipt = make_run(run, kind="planted_negative", planted=planted, shaped=True,
                            quiet=False)
         pdc = receipt["pdc_samples"]
-        onset = self.ISSUED + (pdc if planted == "fallback_stale" else self.QUANTUM) + shift
-        rewrite_capture(run, outputs=lambda pos, v: clean_out.get(pos, v) if pos < onset else v)
+        applied = self.ISSUED + (self.QUANTUM if applied_late else 0)
+        if onset is None:
+            onset = {"no_fallback": applied + self.QUANTUM,
+                     "fallback_misaligned": self.ISSUED + self.QUANTUM,
+                     "fallback_stale": self.ISSUED + pdc}[planted] + shift
+
+        def late(pos, c):
+            # The issued block is still GPU-served; every later count shifts.
+            gpu, fallback, silence, priming = c
+            return ((gpu + 1, fallback - 1, silence, priming)
+                    if pos >= self.ISSUED and fallback > 0 else c)
+
+        rewrite_capture(run, outputs=lambda pos, v: clean_out.get(pos, v) if pos < onset else v,
+                        counters=late if applied_late else None)
+        own = gfc.read_capture(run / "capture.bin")
+        stamp = next(rec["host_time_ns"] for rec in own.records if rec["position"] == applied)
+        _rewrite_events(run, lambda ev: [
+            dict(e, project_sample=applied, host_time_ns=stamp)
+            if e["event"] == "provider_fault_applied" else
+            dict(e, issued_project_sample=self.ISSUED) if e["event"] == "fault_fired" else e
+            for e in ev])
         _, clean_rt = gfc.read_wav(clean / "realtime.wav")
         _, planted_rt = gfc.read_wav(run / "realtime.wav")
         gfc.write_wav_f32(run / "realtime.wav", [
@@ -777,12 +806,37 @@ class V2Receipt(unittest.TestCase):
             fault=dict(receipt["fault"], provider_fault_applied=applied),
             first_fallback_project_sample=late["position"]))
 
+    def test_m10_a_dropout_starts_where_the_fallback_served(self):
+        # The fault applied one quantum after the issued block: the dropout
+        # zeroes the first fallback-served quantum, so it starts at applied +
+        # quantum. issued + quantum is where a misalignment would start.
+        run = self.plugin_shaped("busy-applied-late", "no_fallback", applied_late=True)
+        receipt = self.receipt_of(run)
+        self.assertEqual(receipt["delivery"]["first_fallback_project_sample"],
+                         self.ISSUED + self.QUANTUM)
+        self.assertEqual(receipt["nulls"]["plugin"]["first_deviating_sample"],
+                         self.ISSUED + 2 * self.QUANTUM)
+        self.assertEqual(self.verify(receipt, run), ("fail", "negative_proved"))
+        run = self.plugin_shaped("busy-applied-late-early", "no_fallback", applied_late=True,
+                                 onset=self.ISSUED + self.QUANTUM)
+        receipt = self.receipt_of(run)
+        self.assertEqual(receipt["nulls"]["plugin"]["first_deviating_sample"],
+                         self.ISSUED + self.QUANTUM)
+        self.assertEqual(self.verify(receipt, run), ("fail", "negative_not_proved"))
+
     def test_m2_an_onset_two_quanta_late_is_not_proved(self):
         run = self.plugin_shaped("busy-late", "no_fallback", shift=2 * self.QUANTUM)
         receipt = self.receipt_of(run)
         self.assertEqual(receipt["host_offset"]["status"], "matched")
         self.assertEqual(self.verify(receipt, run), ("fail", "negative_not_proved"))
         self.assertIs(receipt["quiet_host_exempt"], False)
+
+    def test_m11_the_onset_tolerance_is_half_a_quantum(self):
+        half = self.QUANTUM // 2
+        run = self.plugin_shaped("busy-half", "no_fallback", shift=half)
+        self.assertEqual(self.verify(self.receipt_of(run), run), ("fail", "negative_proved"))
+        run = self.plugin_shaped("busy-half-plus", "no_fallback", shift=half + 1)
+        self.assertEqual(self.verify(self.receipt_of(run), run), ("fail", "negative_not_proved"))
 
     def test_m3_a_span_that_is_not_the_defects_is_not_proved(self):
         # A dropout that stops mid-window, and a withheld quantum whose

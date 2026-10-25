@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import re
 import statistics
 import sys
@@ -326,12 +327,15 @@ def known_defect(events: Sequence[dict], code: dict | None,
 
 def git_is_ancestor(fix: str, commit: str) -> bool | None:
     """Whether `fix` is in `commit`'s history in this checkout; None when git
-    cannot say (unknown objects, no repository)."""
+    cannot say (unknown objects, no repository). Only local objects count: in
+    a partial clone git would otherwise fetch a missing commit from the
+    remote, which takes seconds and makes a verdict depend on the network."""
     import subprocess
     try:
         done = subprocess.run(["git", "-C", str(_LIB_PATH.parent), "merge-base",
                                "--is-ancestor", fix, commit],
-                              capture_output=True, timeout=30, check=False)
+                              capture_output=True, timeout=30, check=False,
+                              env=dict(os.environ, GIT_NO_LAZY_FETCH="1"))
     except (OSError, subprocess.SubprocessError):
         return None
     return {0: True, 1: False}.get(done.returncode)
@@ -356,11 +360,14 @@ def exemption_problem(run_dir: Path, planted: str, base: dict, events: Sequence[
     construction lasts.
 
     The plug-in arms the defect for the callback after the fault block (the
-    fault's `issued` sample). Its output leaves the staging quantum one
-    quantum later, so a dropout or a one-quantum misalignment starts at
-    issued + quantum and lasts to the end of the reference signal; a
-    withheld quantum of input reaches the output after the PDC, at
-    issued + PDC, and lasts one quantum plus the impulse response."""
+    fault's `issued` sample), and each quantum's output leaves the staging
+    one quantum later (gpu_fault_continuity.cpp, run_quantum). A misaligned
+    fallback swaps from the first armed quantum on: issued + quantum. A
+    dropout zeroes the first quantum the fallback served, which is where the
+    provider fault was applied: applied + quantum. Both last to the end of
+    the reference signal. A withheld quantum of input reaches the output
+    after the PDC, at issued + PDC, and lasts one quantum plus the impulse
+    response."""
     if not proving_reason.startswith("plugin null failed"):
         return "the proving reason is not the plug-in null"
     if offset.get("status") != "matched":
@@ -384,8 +391,11 @@ def exemption_problem(run_dir: Path, planted: str, base: dict, events: Sequence[
         return f"the fallback did not take over where the fault was applied ({applied})"
     plugin = base["nulls"]["plugin"]
     first, last = plugin["first_deviating_sample"], plugin["last_deviating_sample"]
-    onset = issued + (pdc if planted == "fallback_stale" else quantum)
-    if abs(first - onset) >= quantum:
+    onset = {"no_fallback": applied + quantum, "fallback_misaligned": issued + quantum,
+             "fallback_stale": issued + pdc}[planted]
+    # Within half a quantum: a deviation one quantum off is the neighbouring
+    # defect's onset (a misalignment rather than a dropout), not this one's.
+    if abs(first - onset) > quantum // 2:
         return f"the deviation starts at {first}, not the defect's onset {onset}"
     if planted == "fallback_stale":
         if not quantum <= last - first <= 2 * quantum + taps:

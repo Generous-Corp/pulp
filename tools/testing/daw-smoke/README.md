@@ -230,9 +230,10 @@ PDC the host compensates. Any other offset makes the row INCONCLUSIVE.
 
 A host that was not quiet makes a row INCONCLUSIVE, except a planted negative
 whose evidence load cannot produce (Fable's Q1 ruling). The deviation must
-start at the planted defect's own onset, within one quantum: the issued
-sample plus one quantum for `no_fallback` and `fallback_misaligned`, plus the
-PDC for `fallback_stale`. It must last as long as the defect does: to the end
+start at the planted defect's own onset, within half a quantum: the sample
+where the fault was applied plus one quantum for `no_fallback`, the issued
+sample plus one quantum for `fallback_misaligned`, and the issued sample plus
+the PDC for `fallback_stale`. It must last as long as the defect does: to the end
 of the reference signal, or one quantum plus the impulse response for a
 withheld quantum. The host render must match at both ends, and the fallback
 must take over where the fault was applied, on the issued block or the next.
