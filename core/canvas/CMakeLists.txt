@@ -184,6 +184,7 @@ if(PULP_HAS_SKIA)
         src/skia_canvas.cpp
         src/skia_canvas_fonts.cpp
         src/skia_canvas_text.cpp
+        src/skia_paragraph_cache.cpp
         src/skia_canvas_filter.cpp
         src/skia_canvas_mask.cpp
         src/skia_canvas_gradients.cpp
@@ -403,6 +404,7 @@ set(PULP_CANVAS_UNIT_HEADERS
     include/pulp/canvas/image_probe.hpp
     include/pulp/canvas/lottie_animation.hpp
     include/pulp/canvas/msdf_atlas.hpp
+    include/pulp/canvas/paragraph_cache.hpp
     include/pulp/canvas/path.hpp
     include/pulp/canvas/path_measure.hpp
     include/pulp/canvas/path_to_sdf.hpp

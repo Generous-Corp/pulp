@@ -284,6 +284,15 @@ if(PULP_HAS_SKIA)
         LIBRARIES pulp::view)
 endif()
 
+# backdrop-filter under opacity against Chrome's own render of the same tree.
+# The expected pixels are read off Chromium by
+# tools/import-validation/chrome_backdrop_opacity_oracle.py.
+if(PULP_HAS_SKIA)
+    pulp_add_test_suite(pulp-test-css-backdrop-opacity GROUP pulp-test-group-script-view
+        SOURCES test_css_backdrop_opacity.cpp harness/rt_allocation_probe.cpp
+        LIBRARIES pulp::view)
+endif()
+
 # CSS gradients are dithered as Chromium dithers them. Measures rows that are
 # not one colour, which an undithered vertical gradient never has; the
 # Graphite counterpart is pulp-test-css-gradient-dither-gpu.

@@ -210,6 +210,20 @@ if(PULP_HAS_SKIA)
         LIBRARIES pulp::canvas)
 endif()
 
+# Laid-out paragraph cache behind SkiaCanvas text: cached renders byte-equal
+# to uncached ones across every key input, a font registration and a width
+# change; build counts; entry and byte bounds. Raster-only.
+if(PULP_HAS_SKIA)
+    pulp_add_test_suite(pulp-test-paragraph-cache GROUP pulp-test-group-canvas-text
+        LIBRARIES pulp::canvas
+        COMPILE_DEFINITIONS
+            PULP_TEST_JOST_FONT_PATH="${CMAKE_SOURCE_DIR}/external/fonts/Jost-Regular.ttf")
+    pulp_test_data(pulp-test-paragraph-cache NO_DEFINE PATHS external/fonts/Jost-Regular.ttf)
+    # The key-switch case reaches the cache's internal key directly.
+    target_include_directories(pulp-test-group-canvas-text PRIVATE
+        ${PULP_ROOT_DIR}/core/canvas/src)
+endif()
+
 if(PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU)
     # Two live-GPU groups, split by compile line: the pulp::canvas + pulp::render
     # suites, and the ones that also drive a pulp::view tree.
@@ -225,6 +239,12 @@ if(PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU)
     # APPLE-gated, so the Windows webgpu DL_PATHS dance from the
     # PULP_GPU_TEST_DISCOVERY_ARGS block below isn't needed here.
     pulp_add_test_suite(pulp-test-font-rendering-goldens-gpu GROUP pulp-test-group-canvas-text-gpu
+        LIBRARIES pulp::canvas pulp::render
+        PROPERTIES RESOURCE_LOCK pulp_gpu)
+
+    # The paragraph cache on Graphite: a cached frame reads back the same
+    # bytes as an uncached one, through a text, paint and width change.
+    pulp_add_test_suite(pulp-test-paragraph-cache-gpu GROUP pulp-test-group-canvas-text-gpu
         LIBRARIES pulp::canvas pulp::render
         PROPERTIES RESOURCE_LOCK pulp_gpu)
 
