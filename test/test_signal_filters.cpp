@@ -258,13 +258,10 @@ float ladder_reference_lambert_tanh(const std::vector<float>& in, float sr, floa
 }
 } // namespace
 
-// Regression guard on the Padé approximation itself. This is what makes the
-// fast path safe to keep as an opt-in: a future edit to FastMath::tanh that
-// widened its error would break this before it could reach anyone's ears.
+// Regression guard on FastMath::tanh's error bound: a future edit that widened
+// it would break this before it could reach anyone's ears.
 TEST_CASE("FastMath::tanh stays within its pinned error bound of std::tanh",
           "[signal][ladder][fast_math]") {
-    // Central region the ladder lives in at normal levels — essentially float
-    // epsilon (~-130 dBFS).
     float max_err_2 = 0.0f, max_err_4 = 0.0f, max_err_full = 0.0f;
     for (int i = 0; i <= 200000; ++i) {
         const float x = -16.0f + 32.0f * static_cast<float>(i) / 200000.0f;
@@ -275,9 +272,10 @@ TEST_CASE("FastMath::tanh stays within its pinned error bound of std::tanh",
         if (std::abs(x) <= 2.0f)
             max_err_2 = std::max(max_err_2, e);
     }
-    REQUIRE(max_err_2 < 1e-6f);      // ~-133 dBFS — inaudible
-    REQUIRE(max_err_4 < 2e-5f);      // ~-94 dBFS  — Padé error inside |x|<4
-    REQUIRE(max_err_full < 9.7e-5f); // ~-80 dBFS  — at the argument clamp (worst case)
+    // An equiripple minimax: the same worst case everywhere, not tiny near 0.
+    REQUIRE(max_err_2 < 5.8e-5f);
+    REQUIRE(max_err_4 < 5.8e-5f);
+    REQUIRE(max_err_full < 5.8e-5f); // ~-85 dBFS
 }
 
 // The default float ladder must track the EXACT std::tanh filter to within

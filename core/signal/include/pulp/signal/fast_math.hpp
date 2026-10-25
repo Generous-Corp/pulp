@@ -63,24 +63,24 @@ enum class FastTrigProfile : std::uint8_t {
 ///
 /// | Function                 | Worst error | Cost  | Clamp                         |
 /// |--------------------------|-------------|-------|-------------------------------|
-/// | `tanh()`                 | 9.6e-5      | 1x    | argument at 4.97, continuous  |
-/// | `tanh_minimax()` block   | 3.8e-6      | 0.93x | at 7: slope-matched           |
-/// | `tanh_minimax()` scalar  | 3.8e-6      | 1.4x  | at 7: slope-matched           |
-/// | `tanh_accurate()`        | 3.0e-7      | 1.55x | at 9, branch-free             |
-/// | `std::tanh`              | exact       | 8.4x  | none                          |
+/// | `tanh()`                 | 5.7e-5      | 1x    | argument at 5.24, continuous  |
+/// | `tanh_minimax()` block   | 3.8e-6      | 1.17x | at 7: slope-matched           |
+/// | `tanh_minimax()` scalar  | 3.8e-6      | 1.8x  | at 7: slope-matched           |
+/// | `tanh_accurate()`        | 3.0e-7      | 1.9x  | at 9, branch-free             |
+/// | `std::tanh`              | exact       | 10x   | none                          |
 ///
-/// The bare [7/6] Padé without `tanh()`'s clamp costs 0.82x but is not a tanh
+/// The bare [7/6] Lambert Padé, which has no clamp, costs 1.01x but is not a tanh
 /// outside a small range: it is 1e-4 off by |x| = 5, exceeds 1 there and
 /// grows without bound (about x/28), so every bounded entry above pays for
 /// its clamp on purpose.
 ///
-/// Prefer `tanh_minimax()` where `tanh()` would be used and the extra 25x of
+/// Prefer `tanh_minimax()` where `tanh()` would be used and the extra 15x of
 /// accuracy is worth its cost, `tanh_minimax_recursive()` for the same fit
 /// inside a per-sample recursion, and `tanh_accurate()` inside a resonant
 /// recursion whose loop gain amplifies saturator error.
 ///
 /// @code
-/// float out = FastMath::tanh(input);       // ~8x faster than std::tanh
+/// float out = FastMath::tanh(input);       // ~10x faster than std::tanh
 /// float freq = FastMath::exp2(pitch);
 /// float phase = FastMath::sin(angle);       // ~5x faster than std::sin
 /// float db = FastMath::log2(amplitude);     // ~3x faster than std::log2
@@ -164,55 +164,57 @@ struct FastMath {
     }
 #endif
 
-    /// Fast tanh approximation using the [7/6] Padé form, within 9.6e-5 of
-    /// std::tanh for every float input, continuous, and bounded by ±1.
+    /// Fast tanh: an odd [5/4] rational, within 5.7e-5 of std::tanh for every
+    /// float input, continuous, and bounded by ±1.
     ///
-    /// The coefficients follow by truncating Lambert's continued fraction
-    /// through denominator 13:
+    /// x·P(x²)/Q(x²), P quadratic and Q quadratic with Q(0) = 1, is the
+    /// minimax fit of tanh in absolute error on [0, 5.24] under one equality
+    /// constraint, f(5.24) = 1, so clamping the argument at ±5.24
+    /// (kTanhClamp) meets the saturation value with no step. Fit by direct
+    /// minimisation of the maximum error over a dense grid, coefficients
+    /// rounded to float. The clamp point balances the two error sources: the
+    /// fit's equiripple error inside [0, 5.24] and the tail 1 - tanh(5.24) =
+    /// 5.6e-5 beyond it are equal. The slope at the origin is 0.99976, not 1:
+    /// the fit spends that freedom on the worst case. Over [-5, 5] this is
+    /// within 5.7e-5 of tanh, where the [7/6] Lambert Padé of the same cost
+    /// is 1.0e-4 off at 5 and unbounded beyond it.
     ///
-    ///     tanh(x) = x / (1 + x^2 / (3 + x^2 / (5 + ... + x^2 / 13)))
+    /// The numerator is scaled by 1 - 2^-21, as in tanh_minimax_rational(),
+    /// so every evaluation order stays strictly inside ±1; beyond the clamp
+    /// the result is about ±0.9999996. Rounding can step the result down by up to
+    /// 4.2e-7 (a few ulps) where the curve is nearly flat; otherwise it is
+    /// monotone.
     ///
-    /// Reducing that fraction and applying Horner's rule gives the numerator
-    /// and denominator evaluated below. Published derivation:
-    /// https://varietyofsound.wordpress.com/2011/02/14/efficient-tanh-computation-using-lamberts-continued-fraction/
-    ///
-    /// The fraction rises monotonically to exactly 1 at |x| = 4.9717869
-    /// (kTanhPadeClamp) and keeps growing past it, so the argument is clamped
-    /// there: the curve meets its saturation value with no step, and the
-    /// worst error is 1 - tanh(4.97) = 9.6e-5, at the clamp. (Saturating the
-    /// output at |x| = 4 instead would leave a 6.7e-4 step.) Clamping the argument costs one min and one max ahead of the
-    /// rational, where saturating the output costs a compare and a select per
-    /// side after it. The numerator is scaled by 1 - 2^-21, as in
-    /// tanh_minimax_rational(), so every evaluation order stays strictly inside
-    /// ±1; beyond the clamp the result is ±0.9999997.
-    ///
-    /// Measured in float over every input, with and without fused
-    /// multiply-add: worst absolute error 9.6e-5, odd, |result| < 1. The clamp
-    /// propagates NaN (IEEE maximum/minimum on Clang, ordered selects
-    /// elsewhere), so a NaN input returns NaN. No branches or calls, so loops
-    /// over it vectorize.
+    /// Measured in float over every input: worst absolute error 5.69e-5 with
+    /// fused multiply-add and 5.69e-5 without, odd, |result| < 1. The clamp
+    /// is one min and one max and propagates NaN (IEEE maximum/minimum on
+    /// Clang, ordered selects elsewhere), so a NaN input returns NaN. No
+    /// branches or calls, so loops over it vectorize: nine operations and a
+    /// division, the same count as the unclamped [7/6] Padé.
     static float tanh(float x) {
-        const float c = tanh_pade_clamp(x);
+        const float c = tanh_clamp(x);
         constexpr float kScale = 1.0f - 0x1p-21f;
-        const float c2 = c * c;
-        const float num = c * (135135.0f * kScale +
-                               c2 * (17325.0f * kScale + c2 * (378.0f * kScale + c2 * kScale)));
-        const float den = 135135.0f + c2 * (62370.0f + c2 * (3150.0f + c2 * 28.0f));
-        return num / den;
+        constexpr float a0 = 0.9997622141279201f * kScale;
+        constexpr float a1 = 0.10092608875679396f * kScale;
+        constexpr float a2 = 0.0006321601824242231f * kScale;
+        constexpr float b1 = 0.4335808440239807f;
+        constexpr float b2 = 0.01240458813388444f;
+        const float t = c * c;
+        return c * (a0 + t * (a1 + t * a2)) / (1.0f + t * (b1 + t * b2));
     }
 
-    /// Where the [7/6] Padé in tanh() reaches 1: tanh() clamps its argument
-    /// to [-kTanhPadeClamp, kTanhPadeClamp].
-    static constexpr float kTanhPadeClamp = 4.97178686f;
+    /// tanh() clamps its argument to [-kTanhClamp, kTanhClamp], where its
+    /// rational reaches 1.
+    static constexpr float kTanhClamp = 5.24f;
 
     /// tanh()'s argument clamp, propagating NaN.
-    static float tanh_pade_clamp(float x) noexcept {
+    static float tanh_clamp(float x) noexcept {
 #if PULP_FAST_MATH_HAS_IEEE_MINMAX
-        return __builtin_elementwise_minimum(__builtin_elementwise_maximum(x, -kTanhPadeClamp),
-                                             kTanhPadeClamp);
+        return __builtin_elementwise_minimum(__builtin_elementwise_maximum(x, -kTanhClamp),
+                                             kTanhClamp);
 #else
-        const float upper = x > kTanhPadeClamp ? kTanhPadeClamp : x;
-        return upper < -kTanhPadeClamp ? -kTanhPadeClamp : upper;
+        const float upper = x > kTanhClamp ? kTanhClamp : x;
+        return upper < -kTanhClamp ? -kTanhClamp : upper;
 #endif
     }
 
@@ -261,11 +263,11 @@ struct FastMath {
         return x * p / q;
     }
 
-    /// Constrained-minimax [7/6] rational tanh: the evaluation cost of
-    /// `tanh()`'s rational above, and about 25x lower worst-case error.
+    /// Constrained-minimax [7/6] rational tanh: two more coefficients per
+    /// polynomial than `tanh()`'s [5/4], and about 15x lower worst-case error.
     ///
-    /// `tanh()` truncates Lambert's continued fraction, so its error is tiny
-    /// near the origin and grows toward its clamp, reaching 9.6e-5 there. This
+    /// Truncating Lambert's continued fraction to the same [7/6] shape gives
+    /// an error that is tiny near the origin and grows toward the clamp. This
     /// form spends the same coefficients on the worst case instead. They are the
     /// minimax fit of `x·P(x²)/Q(x²)` (P and Q cubic) to `tanh` on [0, 7] under
     /// three linear equality constraints: unit slope at the origin, `f(7) = 1`
@@ -621,9 +623,9 @@ public:
 ///   Cheapest per evaluation at normal levels, including inside a
 ///   polyphonic voice loop; under heavy drive `accurate` can be faster,
 ///   because this form's division is on the recursion's critical path for
-///   every argument below 7. The Lambert `FastMath::tanh` is not offered
-///   here: its 9.6e-5 worst error is 25x this one's, and a resonant loop
-///   amplifies saturator error.
+///   every argument below 7. `FastMath::tanh` is not offered here: its
+///   5.7e-5 worst error is 15x this one's, its slope at the origin is not 1,
+///   and a resonant loop amplifies saturator error.
 enum class LadderSaturation { exact, accurate, realtime_efficient };
 
 /// Selecting the default ladder saturator at build time:

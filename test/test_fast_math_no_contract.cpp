@@ -84,7 +84,7 @@ TEST_CASE("Branch-free math holds its bounds without fused multiply-add",
         pade_max = std::max(pade_max, FastMath::tanh(x));
         recursive_max = std::max(recursive_max, FastMath::tanh_minimax_recursive(x));
     }
-    CHECK(pade_err < 9.7e-5);
+    CHECK(pade_err < 5.8e-5);
     CHECK(pade_max < 1.0f);
     CHECK(recursive_err < 3.8e-6);
     CHECK(recursive_max <= 1.0f);
