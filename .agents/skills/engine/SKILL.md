@@ -539,6 +539,14 @@ block and renders `--demo cube --capture` to a non-empty PNG.
 
 ## Gotchas
 
+- **QuickJS's stack limit is 4 MiB under AddressSanitizer, 1 MiB otherwise** (`kQuickJsStackBytes` in
+  `js_quickjs_engine.cpp`). ASan's redzones inflate every C frame, so a nested native event (a key that
+  clicks a popup trigger whose handler queries the DOM) threw `InternalError: stack overflow` under ASan
+  only. A handler error the bridge dispatch catches goes through `__pulpReportDispatchError__`, which
+  counts it (`__pulpDispatchErrorCount__`, `__pulpLastDispatchError__`), keeps the message (QuickJS's
+  `e.stack` holds only frames), and prints it with `console.error` when no `__dispatchError__` hook is
+  installed. When a scripted-UI test sees a global that a handler should have created missing, read
+  `__pulpLastDispatchError__` first.
 - **Every QuickJS realm starts with a 512 MiB heap ceiling** (`kDefaultJsMemoryLimitBytes`, applied via `JS_SetMemoryLimit` right after the stack-size call in `js_quickjs_engine.cpp`). A script that allocates past it gets a JS `InternalError: out of memory`, not a dead host. Raise or disable (0) per session with `ScriptedUiOptions::js_memory_limit_bytes` or `JsEngine::set_memory_limit()`. JSC and V8 return `false` from `set_memory_limit()`; they have no cap today.
 
 **Selector parses are memoized.** `_parseSelector` (web-compat-document-
