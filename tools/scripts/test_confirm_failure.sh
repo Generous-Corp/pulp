@@ -337,6 +337,30 @@ check "a shell-out test without --subject is INCONCLUSIVE" 2 \
 check "a shell-out test with --subject is CONFIRMED" 0 \
     "$(run_shellout_under_test "$TMP/shellout" --subject ./build/fixture_subject)"
 
+# A compiled driver that runs the subject, with --target building the subject
+# alone: the driver must survive the run (it used to be deleted and never
+# rebuilt, so the next baseline failed with "No such file").
+make_shellout_project "$TMP/driver"
+printf 'add_executable(fixture_driver driver.cpp)\n' >> "$TMP/driver/CMakeLists.txt"
+printf '#include <cstdlib>\nint main() { return std::system("./build/fixture_subject") == 0 ? 0 : 1; }\n' \
+    > "$TMP/driver/driver.cpp"
+( cd "$TMP/driver" && git add -A && git commit -qm driver ) >/dev/null 2>&1
+cmake -S "$TMP/driver" -B "$TMP/driver/build" -DCMAKE_BUILD_TYPE=Release >/dev/null 2>&1
+cmake --build "$TMP/driver/build" --target fixture_driver >/dev/null 2>&1
+DRIVER=$( ( cd "$TMP/driver" && "$UNDER_TEST" \
+    --file value.cpp --break "perl -pi -e 's/return 42;/return 7;/'" \
+    --build-dir build --target fixture_subject \
+    --subject ./build/fixture_subject \
+    --test ./build/fixture_driver --jobs 2 \
+  ) >/dev/null 2>&1; echo $? )
+check "a driver test with --subject and a subject-only --target is CONFIRMED" 0 "$DRIVER"
+if [ -x "$TMP/driver/build/fixture_driver" ]; then
+    printf '  ok   the driver binary survives a --subject run\n'
+else
+    printf '  FAIL the driver binary is gone after a --subject run\n'
+    FAILURES=$((FAILURES + 1))
+fi
+
 # An INCONCLUSIVE exit must not leave the subject built from broken source.
 # Only the --test binary used to be invalidated on restore, so the next run's
 # "baseline" fingerprint was the contaminated artifact, the hash never moved
