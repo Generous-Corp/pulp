@@ -92,6 +92,7 @@ def _version(tool: Path) -> str:
             [str(tool), "-v"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
             timeout=10,
         )
@@ -181,6 +182,7 @@ def convert(
                 command,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 check=False,
                 timeout=timeout,
             )

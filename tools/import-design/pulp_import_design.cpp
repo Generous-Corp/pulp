@@ -2125,27 +2125,32 @@ int run_illustrator_to_svg(const CliOptions& cli, const char* executable) {
         return 2;
     }
     if (cli.validate_only || cli.outline_mode || cli.export_tokens_mode) {
-        std::cerr << "Error: --from illustrator cannot be combined with validation-only, outline, or token export modes\n";
+        std::cerr << "Error: --from illustrator cannot be combined with validation-only, outline, "
+                     "or token export modes\n";
         return 2;
     }
 
     fs::path helper;
-    if (const char* configured = std::getenv("PULP_ILLUSTRATOR_TO_SVG"); configured && *configured) {
+    if (const char* configured = std::getenv("PULP_ILLUSTRATOR_TO_SVG");
+        configured && *configured) {
         helper = configured;
     }
 #ifdef PULP_IMPORT_DESIGN_SRC_DIR
-    if (helper.empty()) helper = fs::path(PULP_IMPORT_DESIGN_SRC_DIR) / "illustrator_to_svg.py";
+    if (helper.empty())
+        helper = fs::path(PULP_IMPORT_DESIGN_SRC_DIR) / "illustrator_to_svg.py";
 #endif
     if (helper.empty() || !fs::is_regular_file(helper)) {
         const fs::path executable_path = executable ? fs::path(executable) : fs::path{};
-        const fs::path executable_dir = executable_path.empty()
-            ? fs::path{}
-            : fs::absolute(executable_path).parent_path();
-        const fs::path installed_helper = executable_dir / "import-design" / "illustrator_to_svg.py";
-        if (fs::is_regular_file(installed_helper)) helper = installed_helper;
+        const fs::path executable_dir =
+            executable_path.empty() ? fs::path{} : fs::absolute(executable_path).parent_path();
+        const fs::path installed_helper =
+            executable_dir / "import-design" / "illustrator_to_svg.py";
+        if (fs::is_regular_file(installed_helper))
+            helper = installed_helper;
     }
     if (helper.empty() || !fs::is_regular_file(helper)) {
-        std::cerr << "Error: Illustrator converter is not installed; expected illustrator_to_svg.py beside the import-design tool\n";
+        std::cerr << "Error: Illustrator converter is not installed; expected "
+                     "illustrator_to_svg.py beside the import-design tool\n";
         return 1;
     }
     auto python = pulp::platform::find_on_path("python3");
@@ -2166,7 +2171,8 @@ int run_illustrator_to_svg(const CliOptions& cli, const char* executable) {
     if (!cli.page_name.empty()) {
         try {
             const auto page = std::stoi(cli.page_name);
-            if (page < 1) throw std::invalid_argument("page");
+            if (page < 1)
+                throw std::invalid_argument("page");
             args.emplace_back("--page");
             args.push_back(std::to_string(page));
         } catch (const std::exception&) {
@@ -2177,8 +2183,10 @@ int run_illustrator_to_svg(const CliOptions& cli, const char* executable) {
     pulp::platform::ProcessOptions options;
     options.timeout_ms = 120000;
     const auto result = pulp::platform::ChildProcess::run(python->string(), args, options);
-    if (!result.stdout_output.empty()) std::cout << result.stdout_output;
-    if (!result.stderr_output.empty()) std::cerr << result.stderr_output;
+    if (!result.stdout_output.empty())
+        std::cout << result.stdout_output;
+    if (!result.stderr_output.empty())
+        std::cerr << result.stderr_output;
     if (result.timed_out) {
         std::cerr << "Error: Illustrator conversion timed out\n";
         return 1;
@@ -2189,7 +2197,6 @@ int run_illustrator_to_svg(const CliOptions& cli, const char* executable) {
 int main(int argc, char* argv[]) {
     CliOptions cli;
     if (auto parse_exit = parse_cli_args(argc, argv, cli)) return *parse_exit;
-
 
     bool fidelity_failed = false;    // set when strict_fidelity + at least one finding
     bool similarity_failed = false;  // set when --fail-below + reference similarity under the bar

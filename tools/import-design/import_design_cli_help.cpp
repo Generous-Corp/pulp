@@ -19,7 +19,8 @@ void print_usage() {
     std::cout << "  html     Generic runnable HTML evaluated in isolated Chromium\n";
     std::cout << "  designmd Google DESIGN.md design-system spec (tokens only)\n";
     std::cout << "  jsx      Precompiled React JSX runtime bundle for live pass-through or baked snapshots\n\n";
-    std::cout << "  illustrator, ai, pdf  PDF-compatible Illustrator artwork converted to SVG with provenance\n";
+    std::cout << "  illustrator, ai, pdf  PDF-compatible Illustrator artwork converted to SVG with "
+                 "provenance\n";
     std::cout << "  preconverted-svg  Validated SVG plus control-map sidecar (validation-only)\n";
     std::cout << "Options:\n";
     std::cout << "  --from <source>   Design source override. Runnable HTML is detected automatically.\n";
