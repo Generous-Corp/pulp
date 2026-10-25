@@ -722,6 +722,19 @@ claiming the affected families sorted. Coverage is compared for **equality**,
 not containment: claiming a family the diff does not touch fails the same way
 omitting one does.
 
+## A branch stacked on an unmerged PR borrows that PR's watch event
+
+A PR's Vellum checks diff live `main` against `main` plus the PR head. On a
+branch stacked on another unmerged PR, that diff also holds the parent's
+commits and the parent's watch event, so the range reads as covered even
+when the branch's own change has no event. Once the parent merges, the merge
+queue measures only the branch's change, finds no event, and ejects the whole
+batch. The branch cannot carry its own event while
+it is stacked: two events claiming the same families in one range are refused
+as duplicates. `vellum_watch_preflight.py` prints an advisory when every
+covering event was added by a commit another remote branch carries. Merge main
+after the parent lands, write the branch's own event, and only then enqueue it.
+
 ## Refreshing the ledger no longer pulls this skill into skill-sync
 
 `docs/status/gpu-vellum-handoff.yaml` is mapped to this skill in
