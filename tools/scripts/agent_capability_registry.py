@@ -1692,6 +1692,17 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "polyphonic processors; it makes no installed agent capability claim of its own."
         ),
     },
+    {
+        "include": "pulp/signal/waveshaper.hpp",
+        "fingerprint": "sha256:05c9b1d85f412a99c7984ff0a87c69619f73f748176ad359a3735419e1fdafdb",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Static waveshaping curves (soft, hard, tanh, fold, sine fold) with a drive, as "
+            "per-sample and buffer paths that agree bit for bit. A bounded DSP primitive; it "
+            "makes no installed agent capability claim of its own."
+        ),
+    },
 ]
 SURFACE_TOMBSTONES: list[dict[str, Any]] = []
 CAPABILITY_TOMBSTONES: list[dict[str, Any]] = []
