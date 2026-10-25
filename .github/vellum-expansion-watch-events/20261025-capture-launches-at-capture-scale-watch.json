@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261025-capture-launches-at-capture-scale-watch",
+  "created_at": "2026-10-25T02:34:48Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-output-and-packaging",
+    "design-source-ingest"
+  ],
+  "rationale": "The browser capture now launches Chrome with --force-device-scale-factor at the capture's DPR, which it already emulates through Emulation.setDeviceMetricsOverride, so the emulated and real device scales agree. Chrome composites backdrop-filter at the browser's own scale, and with the two disagreeing a frosted box was captured with unblurred streaks. Only the capture browser's launch scale changes; the capture protocol, its outputs, DesignIR, the renderer and packaging are untouched, so no design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "node --test tools/import-design/browser_capture/capture_paint.integration.test.mjs",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
