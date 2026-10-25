@@ -1777,7 +1777,9 @@ jobs:
         if: runner.os == 'Linux'
         uses: ./.github/actions/install-linux-build-deps
         with:
-          extra-packages: ccache
+          # xvfb: the X11 plug-in host tests run under xvfb-run (see
+          # test/cmake/script_canvas_render_tests.cmake) rather than skipping.
+          extra-packages: ccache xvfb
 
       # ── Namespace cache ─────────────────────────────────────────────────
       # Namespace cache volumes persist across runs on the same workspace,
