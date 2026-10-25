@@ -2421,9 +2421,10 @@ static void emit_js_text_node(const NativeEmit& e) {
     // into the next flex sibling (visible bug: "FILTER & EQHOLLOW
     // PUNCH" — the EQ label overflows its 77-px slot, painting on
     // top of the dropdown's "Hollow Punch" text).
-    // A run a browser capture measured (a control's value text included).
+    // A run whose captured layout is in use (a control's value text, which
+    // has no basis, included). A rejected basis rewraps, so it stays soft.
     const bool captured_run =
-        node.text_layout_basis.has_value() || node.attributes.count("control_value_of") != 0;
+        has_browser_line_layout || node.attributes.count("control_value_of") != 0;
     if (node.style.width) {
         bool uppercase = node.style.text_transform &&
                          *node.style.text_transform == "uppercase";

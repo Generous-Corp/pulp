@@ -1569,8 +1569,9 @@ TEST_CASE("ui.js gives a captured one-line run its captured width, as native doe
     captured.style.font_size = 13.0f;
     captured.style.font_family = "Inter";
     captured.text_line_boxes.push_back({0.0f, 0.0f, 37.0f, 15.0f, 0, 5});
-    captured.text_layout_basis =
-        IRTextLayoutBasis{37.0f, pulp::canvas::resolved_face_identity("Inter", 400.0f)};
+    // The emitter only checks the face is named; matching it is paint's job,
+    // so a literal keeps this running on builds without a text shaper.
+    captured.text_layout_basis = IRTextLayoutBasis{37.0f, "Inter"};
     ir.root.children.push_back(captured);
 
     // Its width already holds the transformed glyphs.
@@ -1578,6 +1579,14 @@ TEST_CASE("ui.js gives a captured one-line run its captured width, as native doe
     captured_caps.name = "CapturedCaps";
     captured_caps.style.text_transform = "uppercase";
     ir.root.children.push_back(captured_caps);
+
+    // A basis the emitter rejects (it measured 37 px against a 40 px box)
+    // rewraps on a cache miss, so a hard captured width would break its last
+    // word wherever Pulp's advances run a hair wider: it keeps the soft box.
+    IRNode rejected = captured;
+    rejected.name = "RejectedBasis";
+    rejected.style.width = 40.0f;
+    ir.root.children.push_back(rejected);
 
     // A control's value text has no layout basis but is captured all the same,
     // and the capture centres it in the control.
@@ -1632,6 +1641,10 @@ TEST_CASE("ui.js gives a captured one-line run its captured width, as native doe
     CHECK(has("setVerticalAlign", "ControlValue", "', 'center');"));
     CHECK_FALSE(has("setMultiLine", "CapturedRun", ""));
     CHECK_FALSE(has("setMultiLine", "ControlValue", ""));
+
+    CHECK_FALSE(has("setFlex", "RejectedBasis", "', 'width'"));
+    CHECK(has("setFlex", "RejectedBasis", "', 'min_width', 40);"));
+    CHECK(has("setMultiLine", "RejectedBasis", ""));
 
     CHECK_FALSE(has("setFlex", "FigmaTitle", "', 'width'"));
     CHECK(has("setFlex", "FigmaTitle", "', 'min_width', 37);"));
