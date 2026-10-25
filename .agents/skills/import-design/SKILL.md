@@ -193,6 +193,18 @@ fractional layout box; that is the 1 device px the Spectr slider was off by.
 `indeterminate` and a `disabled` inherited from a `<fieldset>` are not in the
 DOMSnapshot, so they are not recorded.
 
+### Token references: measure declarations, never values
+
+A captured node stores the colour Chromium resolved, so whether `#C4622A` came
+from `var(--accent)` or from a literal that equals it cannot be read off the
+IR or the computed style. `tools/import-validation/token_ref_census.mjs` asks
+Chromium for the cascade it applied (`CSS.getMatchedStylesForNode`) and
+classifies each colour, spacing and radius use: `ref` / `inherited-ref`
+(exactly one defined `var()`), `scoped-ref`, `fallback`, `shorthand`,
+`derived`, `coincidental` (a literal equal to some token: never a reference)
+and `literal`. Use it before any token-reference work; value equality
+overstates coverage.
+
 ### Packaged SDK runtime contract
 
 The installed `pulp-import-design` SDK runtime includes the browser-capture
