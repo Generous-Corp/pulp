@@ -52,8 +52,6 @@ def _regular_file(path: Path, *, label: str) -> Path:
         info = path.stat()
     except FileNotFoundError as exc:
         raise ConversionError(f"{label} does not exist: {path}") from exc
-    except FileNotFoundError as exc:
-        raise ConversionError(f"pdftocairo is not an executable file: {candidate}") from exc
     except OSError as exc:
         raise ConversionError(f"cannot inspect {label} {path}: {exc}") from exc
     if not stat.S_ISREG(info.st_mode):
