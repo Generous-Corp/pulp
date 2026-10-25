@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "event_id": "20261024-render-swapchain-lazy-configure",
+  "kind": "change",
+  "created_at": "2026-10-24T23:57:46Z",
+  "slices": [
+    "render-skia-dawn"
+  ],
+  "rationale": "design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger); GpuSurface::resize() (gpu_surface_dawn.cpp) now only records the requested size, and begin_frame() configures the swapchain at most once, before it acquires the texture, when the size changed. A zero dimension skips the frame and configures nothing. width()/height() still report the requested size at once. gpu_surface.hpp gains the header-only SwapchainResizeState that decides this and a tail-of-vtable swapchain_stats() configure counter. No present, readback, design-import, Chromium, packaging or authority boundary moves; the Pulp render target has not adopted a Vellum package.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "ctest --test-dir build -R 'Swapchain|swapchain'"
+  ],
+  "disposition": "pulp-only",
+  "vellum_inherits": true
+}
