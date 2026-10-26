@@ -813,6 +813,35 @@ attribution = "🤖 Generated with [Claude Code](https://claude.com/claude-code)
 # who reviewed. Shipyard's server-side `review-verdict` reads only this list
 # (never a host file), and refuses every App approval here if it is missing.
 reviewer_signers = ["pulp-review", "infra-review2"]
+# A PR changing a path that matches one of these never carries an APPROVE to a
+# new head: it needs a verdict naming its exact head. Setting the key REPLACES
+# Shipyard's DEFAULT_CARRY_EXCLUDED_PATHS rather than extending it, so this
+# restates every default except `.shipyard/**`. That default would also stop
+# carry for PRs that only regenerate .shipyard/changed-surface-families.toml.
+# The policy files under .shipyard stay excluded by name. Keep the rest equal
+# to Shipyard's default (scripts/ghapp_queue_arm_guard.py).
+carry_excluded_paths = [
+    ".github/workflows/**",
+    ".agents/contract.toml",
+    ".shipyard/config.toml",
+    ".shipyard/ci-profiles/**",
+    ".shipyard/vm-image*.toml",
+    "tools/ci/**",
+    "scripts/ghapp*",
+    "src/head_approval*",
+    "src/head_approval/**",
+    "src/queue_arm_gate*",
+    "src/auto_arm*",
+    "src/auto_arm/**",
+    "src/ghapp_guards*",
+    "src/app/ship_cmd/auto_arm*",
+    "src/app/merge_steward_cmd/native_arm*",
+    "release-please-config.json",
+    ".release-please-manifest.json",
+    "**/*codesign*",
+    "**/*notariz*",
+    "**/*signing*",
+]
 
 [base_health]
 # `shipyard base-health --act` records "would jump PR #n" once per poisoned
