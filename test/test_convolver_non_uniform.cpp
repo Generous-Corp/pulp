@@ -21,6 +21,10 @@
 #include <pulp/signal/convolver.hpp>
 #include <pulp/signal/convolver_non_uniform.hpp>
 
+#if defined(__APPLE__)
+#include <sys/sysctl.h>
+#endif
+
 using namespace pulp::signal;
 using Catch::Matchers::WithinAbs;
 
@@ -392,16 +396,52 @@ TEST_CASE("NonUniformPartitionedConvolver default tail multiplier follows the me
     REQUIRE(NonUniformPartitionedConvolver64::choose_tail_multiplier(48000, 32) ==
             NonUniformPartitionedConvolver64::kDefaultTailMultiplier);
 
-    // The three-argument load_ir() uses the table; the four-argument one keeps
-    // the caller's K.
+    // The three-argument load_ir() uses default_tail_multiplier(); the
+    // four-argument one keeps the caller's K.
     const auto ir = make_decaying_ir(48000, 0.0002f);
     Conv automatic;
     automatic.load_ir(ir.data(), ir.size(), 32);
-    REQUIRE(automatic.tail_multiplier() == Conv::choose_tail_multiplier(ir.size(), 32));
+    REQUIRE(automatic.tail_multiplier() == Conv::default_tail_multiplier(ir.size(), 32));
     REQUIRE(automatic.head_samples() == automatic.tail_multiplier() * 32);
     Conv pinned;
     pinned.load_ir(ir.data(), ir.size(), 32, 4);
     REQUIRE(pinned.tail_multiplier() == 4);
+}
+
+TEST_CASE("NonUniformPartitionedConvolver applies the table only on measured chip families",
+          "[signal][convolver][non-uniform]") {
+    using Conv = NonUniformPartitionedConvolver;
+    // The measured families, with and without a tier suffix.
+    REQUIRE(Conv::table_measured_on("Apple M1"));
+    REQUIRE(Conv::table_measured_on("Apple M1 Max"));
+    REQUIRE(Conv::table_measured_on("Apple M5 Max"));
+    REQUIRE(Conv::table_measured_on("Apple M5 Pro"));
+    // Unmeasured families, and names that only share a prefix.
+    REQUIRE_FALSE(Conv::table_measured_on("Apple M2"));
+    REQUIRE_FALSE(Conv::table_measured_on("Apple M3 Ultra"));
+    REQUIRE_FALSE(Conv::table_measured_on("Apple M4 Pro"));
+    REQUIRE_FALSE(Conv::table_measured_on("Apple M10"));
+    REQUIRE_FALSE(Conv::table_measured_on("Apple M1X"));
+    REQUIRE_FALSE(Conv::table_measured_on("Intel(R) Core(TM) i9"));
+    REQUIRE_FALSE(Conv::table_measured_on(""));
+
+    // On this host, default_tail_multiplier() is the table exactly when the
+    // build has the table and the host's brand is a measured family.
+    bool host_measured = false;
+#if PULP_NON_UNIFORM_MEASURED_TABLE
+    char brand[128] = {};
+    std::size_t size = sizeof(brand) - 1;
+    if (sysctlbyname("machdep.cpu.brand_string", brand, &size, nullptr, 0) == 0)
+        host_measured = Conv::table_measured_on(brand);
+#endif
+    INFO("host measured: " << host_measured);
+    for (const std::size_t block : {std::size_t{16}, std::size_t{32}, std::size_t{512}}) {
+        const std::size_t expected = host_measured ? Conv::choose_tail_multiplier(96000, block)
+                                                   : Conv::kDefaultTailMultiplier;
+        REQUIRE(Conv::default_tail_multiplier(96000, block) == expected);
+    }
+    REQUIRE(NonUniformPartitionedConvolver64::default_tail_multiplier(96000, 16) ==
+            NonUniformPartitionedConvolver64::kDefaultTailMultiplier);
 }
 
 TEST_CASE(
@@ -409,7 +449,7 @@ TEST_CASE(
     "[signal][convolver][non-uniform]") {
     // The table changes only where the IR splits between the stages, so the
     // output must stay at the uniform engine's own float rounding: measured at
-    // most 3.9e-6 of the output RMS over the whole receipt matrix.
+    // most 4.3e-6 of the output RMS over the whole receipt matrix.
     for (const std::size_t block : {std::size_t{16}, std::size_t{64}, std::size_t{512}}) {
         const auto ir = make_decaying_ir(16384, 0.0004f);
         const std::size_t total = 8 * 1024 + 4 * 16 * block;

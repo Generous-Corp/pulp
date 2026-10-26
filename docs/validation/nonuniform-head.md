@@ -7,6 +7,21 @@ pure table in `NonUniformPartitionedConvolver::choose_tail_multiplier()`.
 This page is the evidence for that table and the command that regenerates
 it.
 
+## Where the table applies
+
+The table applies only to the configuration it was measured on: single
+precision, the Accelerate backend on Apple Silicon macOS, and the chip
+families Apple M1 and Apple M5. `default_tail_multiplier()` reads
+`machdep.cpu.brand_string` once and checks it with `table_measured_on()`.
+
+Everywhere else, K stays 4 (`kDefaultTailMultiplier`) until it is measured:
+- other chip families, such as M2, M3 and M4, which can rank the K arms
+  differently for the same transforms;
+- other platforms and FFT backends;
+- double precision.
+
+To extend the table to a new family, add that chip's CSV and re-fit.
+
 ## Reproduce
 
 ```bash
@@ -77,21 +92,39 @@ Max) faster in geomean, and up to 12.0x and 9.5x in the best cell.
 
 ### Per-callback cost
 
-A larger K fires a larger tail transform less often, so the table trades a
-lower mean for larger occasional callbacks. The ratios below are the table's
-per-callback figure over the same figure at K = 4.
+A larger K makes the tail partitions bigger, which bunches FFT work into the
+blocks where the tail fires, so the mean alone can hide callback spikes. The
+tables below give each callback's p99 and maximum as a share of the 48 kHz
+deadline (B / 48000 s). A tail that fires once every K blocks (K at most 64)
+is at least 1 in 64 callbacks, so the p99 includes the firing blocks.
 
-| Chip | Per-callback p99, median ratio (max) | Per-callback maximum, median ratio (max) |
-|---|---|---|
-| M5 Max | 1.27 (1.58) | 1.01 (1.47) |
-| M1 Max | 0.64 (1.49) | 0.59 (1.05) |
+M5 Max, the worst cases. Each figure is the median over rounds, as table
+vs K = 4; the last column is the worst single round:
 
-On M5 Max the worst cell is 96000 taps at 16 frames. There the table's p99 is
-17.2% of a 96 kHz callback deadline (K = 4: 20.8%), and its maximum is 23.2%
-(K = 4: 39.8%).
+| IR | B | Table K | p99 | Maximum | Worst-round maximum |
+|---|---|---|---|---|---|
+| 48000 | 16 | 64 | 4.4% vs 4.7% | 6.6% vs 9.5% | 17.4% vs 22.9% |
+| 96000 | 16 | 64 | 8.6% vs 10.4% | 11.6% vs 19.9% | 13.6% vs 41.1% |
+| 48000 | 32 | 32 | 2.3% vs 2.2% | 3.2% vs 4.0% | 7.0% vs 17.3% |
+| 96000 | 32 | 64 | 4.7% vs 4.7% | 6.0% vs 8.1% | 9.3% vs 12.3% |
 
-On the loaded, background-QoS M1 Max, the same cell's p99 is 98.6% of that
-deadline with the table and 963% with K = 4.
+At the worst cases, the table's maximum is below K = 4's in every row. Its
+p99 is at or below K = 4's, apart from 2.3% vs 2.2% in one row.
+
+Over all 24 cells on M5 Max:
+- In ordinary cells the table's p99 is higher. In the median cell it is 1.27x
+  K = 4's p99, and at most 1.58x.
+- Every cell where the table's p99 is higher stays at or below 4.7% of the
+  deadline.
+- Every cell where its maximum is higher (at most 1.47x) stays at or below
+  1.7% of the deadline.
+- The largest table maximum in any cell is 11.6% of the deadline, and 17.4%
+  in the worst single round.
+
+M1 Max ran loaded and at background QoS, so its maxima reflect preemption
+rather than computation: K = 4's own median maximum is 300-3200% of the
+deadline at the worst cases. Its p99 at those cells is far lower with the
+table, for example 49.3% vs 481.7% at 96000 taps and 16 frames.
 
 ### Output
 

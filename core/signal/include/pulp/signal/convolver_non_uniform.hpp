@@ -47,11 +47,13 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
 #include <type_traits>
 #include <vector>
 
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
+#include <sys/sysctl.h>
 #endif
 
 // The tail-multiplier table was measured on Apple Silicon Macs with the
@@ -107,6 +109,9 @@ public:
     /// nearest measured length on a log scale. Blocks outside 16-512 frames,
     /// other architectures and operating systems, other SIMD backends, and
     /// double precision keep kDefaultTailMultiplier until they are measured.
+    ///
+    /// This is the table itself. load_ir() applies it only on the chip
+    /// families it was measured on (see table_measured_on()).
     static constexpr std::size_t choose_tail_multiplier(std::size_t ir_length,
                                                         std::size_t block_size) noexcept {
 #if PULP_NON_UNIFORM_MEASURED_TABLE
@@ -146,11 +151,47 @@ public:
 #endif
     }
 
+    /// Whether the table was measured on the chip family a CPU brand string
+    /// (`machdep.cpu.brand_string`) names: "Apple M1" and "Apple M5", with or
+    /// without a tier suffix such as "Max". Other families can rank the K
+    /// arms differently for the same Accelerate transforms, so they keep
+    /// kDefaultTailMultiplier until they are measured.
+    static constexpr bool table_measured_on(std::string_view cpu_brand) noexcept {
+        for (const std::string_view family :
+             {std::string_view{"Apple M1"}, std::string_view{"Apple M5"}}) {
+            if (cpu_brand.substr(0, family.size()) != family)
+                continue;
+            if (cpu_brand.size() == family.size() || cpu_brand[family.size()] == ' ')
+                return true;
+        }
+        return false;
+    }
+
+    /// The tail multiplier the three-argument load_ir() uses:
+    /// choose_tail_multiplier() on a measured chip family, otherwise
+    /// kDefaultTailMultiplier.
+    static std::size_t default_tail_multiplier(std::size_t ir_length, std::size_t block_size) {
+#if PULP_NON_UNIFORM_MEASURED_TABLE
+        static const bool measured = [] {
+            char brand[128] = {};
+            std::size_t size = sizeof(brand) - 1;
+            if (sysctlbyname("machdep.cpu.brand_string", brand, &size, nullptr, 0) != 0)
+                return false;
+            return table_measured_on(std::string_view{brand});
+        }();
+        if (measured)
+            return choose_tail_multiplier(ir_length, block_size);
+#endif
+        (void)ir_length;
+        (void)block_size;
+        return kDefaultTailMultiplier;
+    }
+
     /// Load an impulse response with the tail multiplier
-    /// choose_tail_multiplier() picks for its length and the block size.
+    /// default_tail_multiplier() picks for its length and the block size.
     /// Allocates and FFTs inline — call off the audio thread.
     void load_ir(const SampleType* ir, std::size_t ir_length, std::size_t block_size) {
-        load_ir(ir, ir_length, block_size, choose_tail_multiplier(ir_length, block_size));
+        load_ir(ir, ir_length, block_size, default_tail_multiplier(ir_length, block_size));
     }
 
     /// Load an impulse response into both stages.
@@ -172,7 +213,7 @@ public:
     /// @param tail_multiplier K factor for the tail-stage block size
     ///                        (rounded up to power of 2; K=1 degenerates to
     ///                        uniform partitioning). The three-argument
-    ///                        overload picks it with choose_tail_multiplier().
+    ///                        overload picks it with default_tail_multiplier().
     void load_ir(const SampleType* ir, std::size_t ir_length, std::size_t block_size,
                  std::size_t tail_multiplier) {
         reset_state();
