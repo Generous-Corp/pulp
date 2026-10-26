@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261026-importer-final-review-20261026-watch",
+  "created_at": "2026-10-26T23:11:35Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": ["design-source-ingest", "render-assets-and-backends"],
+  "rationale": "The importer follow-up only scopes the lifetime of declared font-weight ranges in Pulp's JS bridge; Chromium remains the sole oracle and Skia/Dawn remains the renderer. No design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": ["pulp-test-group-canvas [scope]", "pulp-test-design-import [synthetic-bold]", "pulp-test-design-import-native-materializer [synthetic-bold]", "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>", "vellum-expansion-watch"],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

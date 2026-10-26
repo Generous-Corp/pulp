@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "event_id": "20261026-importer-final-review-20261026",
+  "kind": "change",
+  "created_at": "2026-10-26T23:11:35Z",
+  "slices": ["canvas-kernel"],
+  "rationale": "The Pulp canvas registry now scopes declared @font-face weight ranges to live scripted UI realms and clears them when a bridge is destroyed, preventing stale synthetic-bold decisions after reload. This is a Pulp-only lifetime fix; no API or Vellum authority boundary moves and no framework implementation is changed.",
+  "tests": ["Vellum freeze", "Vellum trusted freeze", "pulp-test-group-canvas [scope]", "confirm_failure.sh"],
+  "disposition": "pulp-only"
+}
