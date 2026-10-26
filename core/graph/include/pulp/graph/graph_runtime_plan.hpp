@@ -116,6 +116,9 @@ struct GraphRuntimeNodePlan {
     std::uint32_t inbound_connection_count = 0;
     std::uint32_t first_outbound_connection = 0;
     std::uint32_t outbound_connection_count = 0;
+    std::uint32_t audio_inbound_connection_count = 0;
+    std::uint32_t single_audio_inbound_connection = 0xFFFFFFFFu;
+    std::uint64_t audio_inbound_port_mask = 0;
 };
 
 struct GraphRuntimeConnectionPlan {

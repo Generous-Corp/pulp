@@ -4,6 +4,7 @@
 /// Lock-free latest-value publication between two threads.
 
 #include <atomic>
+#include <cassert>
 #include <array>
 #include <cstdint>
 #include <type_traits>
@@ -32,8 +33,14 @@ namespace pulp::runtime {
 /// draw_meter(levels);
 /// @endcode
 ///
-/// @note Exactly one writer and one reader thread. Multiple concurrent
-///       writers or readers require external synchronization.
+/// @note Exactly one writer and one reader at a time. The writer owns its
+///       back slot index and the reader its front slot index as plain,
+///       unsynchronized state, so successive write() calls must be ordered by
+///       happens-before (one thread, or a mutex / host dispatch handoff when
+///       the writer role moves between threads), and likewise for read().
+///       Two overlapping writers or two overlapping readers corrupt slot
+///       ownership permanently, not just one frame. Debug builds assert when
+///       two calls in the same role overlap.
 template <typename T>
 class TripleBuffer {
 public:
@@ -51,6 +58,7 @@ public:
 
     /// Publish a new value from the writer thread.
     /// Writes into the back buffer, then atomically swaps it to middle.
+    /// Costs one copy and one atomic exchange; never blocks or retries.
     void write(const T& value) noexcept(std::is_nothrow_copy_assignable_v<T>) {
         write_with(
             [&value](T& back) noexcept(std::is_nothrow_copy_assignable_v<T>) { back = value; });
@@ -63,59 +71,65 @@ public:
     /// and must not retain the reference. If it throws, no value is published.
     template <typename Fill>
     void write_with(Fill&& fill) noexcept(noexcept(std::declval<Fill>()(std::declval<T&>()))) {
-        const auto idx = flags_.load(std::memory_order_acquire);
-        const int back = back_index(idx);
-        std::forward<Fill>(fill)(buffers_[back]);
-        std::atomic_thread_fence(std::memory_order_release);
-        // Swap back and middle, keep the current front, and mark as new.
-        uint8_t new_flags;
-        uint8_t old_flags;
-        do {
-            old_flags = flags_.load(std::memory_order_acquire);
-            const int current_back = back_index(old_flags);
-            const int mid = mid_index(old_flags);
-            // Swap: new back = old mid, new mid = old back (which has new data).
-            // Front stays unchanged until the reader consumes the new value.
-            new_flags = make_flags(mid, current_back, front_index(old_flags)) | kDirtyBit;
-        } while (!flags_.compare_exchange_weak(old_flags, new_flags,
-                 std::memory_order_acq_rel, std::memory_order_acquire));
+        [[maybe_unused]] const RoleGuard guard(active_roles_, kWriterRole);
+        std::forward<Fill>(fill)(buffers_[back_]);
+        // One exchange publishes the filled buffer as the middle slot and
+        // hands the previous middle slot back to the writer. Release makes the
+        // fill visible to the reader's acquire; acquire orders the reader's
+        // last use of the returned slot before the writer refills it.
+        const auto previous = middle_.exchange(static_cast<std::uint8_t>(back_ | kDirtyBit),
+                                               std::memory_order_acq_rel);
+        back_ = previous & kIndexMask;
     }
 
     /// Read the latest published value from the reader thread.
     /// If new data is available, atomically swaps middle to front first.
     /// @return Const reference to the front buffer. Valid until the next read().
     const T& read() noexcept {
-        uint8_t flags = flags_.load(std::memory_order_acquire);
-        if (flags & kDirtyBit) {
-            for (;;) {
-                const int front = front_index(flags);
-                const int mid = mid_index(flags);
-                const uint8_t new_flags =
-                    make_flags(back_index(flags), front, mid) & ~kDirtyBit;
-                if (flags_.compare_exchange_weak(flags, new_flags,
-                        std::memory_order_acq_rel, std::memory_order_acquire)) {
-                    flags = new_flags;
-                    break;
-                }
-                if (!(flags & kDirtyBit)) break;
-            }
+        [[maybe_unused]] const RoleGuard guard(active_roles_, kReaderRole);
+        if (middle_.load(std::memory_order_relaxed) & kDirtyBit) {
+            const auto previous = middle_.exchange(front_, std::memory_order_acq_rel);
+            front_ = previous & kIndexMask;
         }
-        return buffers_[front_index(flags)];
+        return buffers_[front_];
     }
 
-private:
-    // Flags layout: bits [1:0] = back, [3:2] = mid, [5:4] = front, [7] = dirty
-    static constexpr uint8_t kDirtyBit = 0x80;
+  private:
+    // middle_ holds the index of the slot between writer and reader, plus a
+    // dirty bit set by the writer and cleared by the reader's swap. back_ is
+    // owned by the writer thread and front_ by the reader thread; neither is
+    // shared, so neither needs to be atomic.
+    static constexpr std::uint8_t kDirtyBit = 0x80;
+    static constexpr std::uint8_t kIndexMask = 0x03;
 
-    static constexpr uint8_t make_flags(int back, int mid, int front) noexcept {
-        return static_cast<uint8_t>((back & 3) | ((mid & 3) << 2) | ((front & 3) << 4));
-    }
-    static constexpr int back_index(uint8_t f) noexcept { return f & 3; }
-    static constexpr int mid_index(uint8_t f) noexcept { return (f >> 2) & 3; }
-    static constexpr int front_index(uint8_t f) noexcept { return (f >> 4) & 3; }
+    // Debug-only overlap check for the one-writer / one-reader contract. The
+    // flag byte is present in every build so the layout does not depend on
+    // NDEBUG; release builds never touch it.
+    static constexpr std::uint8_t kWriterRole = 0x01;
+    static constexpr std::uint8_t kReaderRole = 0x02;
+    struct RoleGuard {
+#ifndef NDEBUG
+        RoleGuard(std::atomic<std::uint8_t>& roles, std::uint8_t role) noexcept
+            : roles_(roles), role_(role) {
+            const auto before = roles_.fetch_or(role_, std::memory_order_acquire);
+            assert((before & role_) == 0 && "TripleBuffer: two overlapping calls in the same role");
+            (void)before;
+        }
+        ~RoleGuard() {
+            roles_.fetch_and(static_cast<std::uint8_t>(~role_), std::memory_order_release);
+        }
+        std::atomic<std::uint8_t>& roles_;
+        std::uint8_t role_;
+#else
+        RoleGuard(std::atomic<std::uint8_t>&, std::uint8_t) noexcept {}
+#endif
+    };
 
     std::array<T, 3> buffers_{};
-    std::atomic<uint8_t> flags_{make_flags(0, 1, 2)};
+    std::atomic<std::uint8_t> middle_{1};
+    std::uint8_t back_ = 0;
+    std::uint8_t front_ = 2;
+    std::atomic<std::uint8_t> active_roles_{0};
 };
 
 } // namespace pulp::runtime

@@ -13,12 +13,14 @@
 #include <optional>
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/format/detail/au_v2_editor_resize.hpp>
+#include <pulp/format/editor_assets.hpp>
 #include <pulp/format/editor_idle_pump.hpp>
 #include <pulp/format/editor_prewarm.hpp>
 #include <pulp/format/editor_ui.hpp>
 #include <pulp/format/gpu_host_select.hpp>
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/format/registry.hpp>
 #include <pulp/format/view_bridge.hpp>
 #include <pulp/state/listener_token.hpp>
 #include <pulp/state/store.hpp>
@@ -1020,6 +1022,117 @@ TEST_CASE("Editor open: a missing script still fails inside open()",
     // falls back to the AutoUi editor instead of a blank deferred root.
     REQUIRE(bridge.open());
     CHECK_FALSE(bridge.uses_script_ui());
+}
+
+namespace {
+
+// Installs the scripted editor builder the way a UI_SCRIPT target's generated
+// source does, and restores the builder slot, the binary-wide editor assets
+// and the keyed registry a case changed.
+struct EditorAssetsScope {
+    format::ScriptedEditorBuilder saved_builder = format::scripted_editor_builder_slot().load();
+    EditorAssetsScope() {
+        format::install_scripted_editor_builder();
+    }
+    ~EditorAssetsScope() {
+        format::scripted_editor_builder_slot().store(saved_builder);
+        format::reset_editor_assets_for_testing();
+        format::reset_registry_for_testing();
+    }
+};
+
+} // namespace
+
+TEST_CASE("ViewBridge builds the scripted editor the plug-in binary registers",
+          "[view_bridge][scripted-ui][editor-assets]") {
+    EditorAssetsScope scope;
+    const std::string script = write_editor_script("pulp-editor-assets-binary",
+                                                   "createLabel('status', 'registered', '');\n")
+                                   .string();
+
+    state::StateStore store;
+    StubProcessor p;
+    p.set_state_store(&store);
+    p.define_parameters(store);
+
+    // Nothing registered: the plug-in's editor is AutoUi.
+    {
+        format::ViewBridge bridge(p, store);
+        REQUIRE(bridge.open());
+        CHECK_FALSE(bridge.uses_script_ui());
+        CHECK(std::string(format::decide_gpu_host(bridge).mode) == "autoui");
+    }
+
+    // The per-target registration source records the UI_SCRIPT path at static
+    // init; every adapter's ViewBridge then builds the scripted editor from it.
+    format::register_editor_assets({script.c_str(), nullptr, nullptr});
+    format::ViewBridge bridge(p, store);
+    REQUIRE(bridge.open());
+    CHECK(bridge.uses_script_ui());
+    REQUIRE(bridge.scripted_ui() != nullptr);
+    const auto decision = format::decide_gpu_host(bridge);
+    CHECK(std::string(decision.mode) == "scripted");
+    CHECK(decision.wants_gpu);
+}
+
+TEST_CASE("A declared script without the scripted editor builder opens AutoUi and says why",
+          "[view_bridge][scripted-ui][editor-assets]") {
+    EditorAssetsScope scope;
+    const std::string script = write_editor_script("pulp-editor-assets-no-builder",
+                                                   "createLabel('status', 'unreachable', '');\n")
+                                   .string();
+    format::register_editor_assets({script.c_str(), nullptr, nullptr});
+
+    state::StateStore store;
+    StubProcessor p;
+    p.set_state_store(&store);
+    p.define_parameters(store);
+
+    // Control: with the builder installed, the same declaration is scripted.
+    {
+        format::ViewBridge bridge(p, store);
+        REQUIRE(bridge.open());
+        CHECK(bridge.uses_script_ui());
+    }
+
+    // A binary that never calls install_scripted_editor_builder() does not
+    // link the script runtime, so it cannot build the session.
+    format::scripted_editor_builder_slot().store(nullptr);
+    format::ViewBridge bridge(p, store);
+    REQUIRE(bridge.open());
+    CHECK_FALSE(bridge.uses_script_ui());
+    CHECK(bridge.scripted_ui() == nullptr);
+    CHECK(std::string(format::decide_gpu_host(bridge).mode) == "autoui");
+    CHECK(bridge.last_error().find("install_scripted_editor_builder") != std::string::npos);
+}
+
+TEST_CASE("A bundle entry's editor assets apply to its own plug-in only",
+          "[view_bridge][scripted-ui][editor-assets]") {
+    EditorAssetsScope scope;
+    const std::string script =
+        write_editor_script("pulp-editor-assets-keyed", "createLabel('status', 'keyed', '');\n")
+            .string();
+    format::register_plugin(format::PluginRegistration{
+        .id = "com.acme.stub",
+        .factory = nullptr,
+        .ui_script = script.c_str(),
+    });
+
+    CHECK(std::string(format::editor_assets_for("com.acme.stub").script_path) == script);
+    CHECK(format::editor_assets_for("com.acme.other").script_path == nullptr);
+
+    state::StateStore store;
+    StubProcessor stub; // bundle id com.acme.stub
+    stub.set_state_store(&store);
+    stub.define_parameters(store);
+    format::ViewBridge keyed(stub, store);
+    REQUIRE(keyed.open());
+    CHECK(keyed.uses_script_ui());
+
+    // A keyed entry that declares nothing falls back to the binary-wide record.
+    format::register_plugin(format::PluginRegistration{.id = "com.acme.bare", .factory = nullptr});
+    format::register_editor_assets({script.c_str(), nullptr, nullptr});
+    CHECK(std::string(format::editor_assets_for("com.acme.bare").script_path) == script);
 }
 
 TEST_CASE("Processor scripted UI accessors default to null", "[view_bridge][scripted-ui]") {
@@ -2843,4 +2956,92 @@ TEST_CASE("an unbound Toggle still dispatches without opening a gesture",
     CHECK(toggle->is_on());
     CHECK(begins == 0);
     CHECK(store.open_gesture_count() == 0);
+}
+
+namespace {
+
+const unsigned char kEmbeddedEditorScript[] =
+    "createLabel('status', 'embedded', '');\n"
+    "var sidecar = __loadAssetSync__('assets/data.json');\n"
+    "createLabel('sidecar', sidecar.ok ? sidecar.text : String(sidecar.status), '');\n";
+const unsigned char kEmbeddedEditorSidecar[] = R"({"from":"embedded"})";
+const format::EmbeddedEditorFile kEmbeddedEditorFiles[] = {
+    {"assets/data.json", kEmbeddedEditorSidecar, sizeof(kEmbeddedEditorSidecar) - 1},
+};
+
+format::EditorAssets embedded_editor_assets() {
+    format::EditorAssets assets{};
+    assets.script_name = "main.js";
+    assets.script = kEmbeddedEditorScript;
+    assets.script_size = sizeof(kEmbeddedEditorScript) - 1;
+    assets.files = kEmbeddedEditorFiles;
+    assets.file_count = 1;
+    return assets;
+}
+
+} // namespace
+
+TEST_CASE("ViewBridge builds the embedded editor the plug-in binary registers",
+          "[view_bridge][scripted-ui][editor-assets][embedded]") {
+    EditorAssetsScope scope;
+    state::StateStore store;
+    StubProcessor p;
+    p.set_state_store(&store);
+    p.define_parameters(store);
+
+    // The registration unit of a release build carries the script bytes and
+    // no path; every adapter's ViewBridge evaluates them.
+    format::register_editor_assets(embedded_editor_assets());
+    format::ViewBridge bridge(p, store);
+    REQUIRE(bridge.open());
+    CHECK(bridge.uses_script_ui());
+    REQUIRE(bridge.scripted_ui() != nullptr);
+    CHECK(bridge.scripted_ui()->uses_embedded_source());
+    CHECK(bridge.scripted_ui()->script_label() == "main.js");
+    CHECK(std::string(format::decide_gpu_host(bridge).mode) == "scripted");
+    REQUIRE(bridge.scripted_ui()->bridge() != nullptr);
+    auto* sidecar = dynamic_cast<view::Label*>(bridge.scripted_ui()->bridge()->widget("sidecar"));
+    REQUIRE(sidecar != nullptr);
+    CHECK(sidecar->text() == R"({"from":"embedded"})");
+    // Persisted stores are keyed by the plug-in, since there is no directory.
+    CHECK(bridge.scripted_ui()->bridge()->storage_identity() == "com.acme.stub/main.js");
+}
+
+TEST_CASE("ViewBridge honors the dev path only for a hot-reloading editor",
+          "[view_bridge][scripted-ui][editor-assets][embedded]") {
+    EditorAssetsScope scope;
+    const std::string script =
+        write_editor_script("pulp-editor-assets-dev-path", "createLabel('status', 'disk', '');\n")
+            .string();
+    auto assets = embedded_editor_assets();
+    assets.script_path = script.c_str();
+    format::register_editor_assets(assets);
+
+    state::StateStore store;
+    StubProcessor p;
+    p.set_state_store(&store);
+    p.define_parameters(store);
+
+    SECTION("a hosted editor evaluates the embedded bytes") {
+        format::ViewBridge bridge(p, store);
+        REQUIRE(bridge.open());
+        REQUIRE(bridge.scripted_ui() != nullptr);
+        CHECK(bridge.scripted_ui()->uses_embedded_source());
+        auto* status = dynamic_cast<view::Label*>(bridge.scripted_ui()->bridge()->widget("status"));
+        REQUIRE(status != nullptr);
+        CHECK(status->text() == "embedded");
+    }
+    SECTION("a hot-reloading editor reads the file the dev build points at") {
+        format::ViewBridge::Options options;
+        options.enable_hot_reload = true;
+        format::ViewBridge bridge(p, store, options);
+        REQUIRE(bridge.open());
+        REQUIRE(bridge.scripted_ui() != nullptr);
+        CHECK_FALSE(bridge.scripted_ui()->uses_embedded_source());
+        CHECK(bridge.scripted_ui()->script_path() == std::filesystem::path(script));
+        auto* status = dynamic_cast<view::Label*>(bridge.scripted_ui()->bridge()->widget("status"));
+        REQUIRE(status != nullptr);
+        CHECK(status->text() == "disk");
+    }
+    std::filesystem::remove_all(std::filesystem::path(script).parent_path());
 }

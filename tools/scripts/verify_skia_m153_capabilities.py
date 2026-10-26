@@ -44,16 +44,28 @@ PROBE_SOURCE = r"""
 #include "include/utils/SkLogHandler.h"
 
 #include <cstdarg>
+#include <functional>
 #include <memory>
+#include <utility>
 
 class ProbeLogHandler final : public SkLogHandler {
 public:
     void onLog(SkLogPriority, const char[], va_list) override {}
 };
 
+// Skia m157 removed the built-in thread-pool factories; a client that wants
+// Graphite threading supplies its own SkExecutor. Running work inline is enough
+// to prove the base class's exported vtable and destructor link and dispatch.
+class ProbeExecutor final : public SkExecutor {
+public:
+    void add(std::function<void(void)> fn) override { fn(); }
+};
+
 int main(int argc, char**) {
-    auto executor = SkExecutor::MakeFIFOThreadPool(1, false);
-    if (!executor) return 2;
+    std::unique_ptr<SkExecutor> executor = std::make_unique<ProbeExecutor>();
+    int ran = 0;
+    executor->add([&ran] { ++ran; }, 0);
+    if (ran != 1) return 2;
 
     skgpu::graphite::ContextOptions options;
     options.fExecutor = executor.get();
@@ -169,6 +181,10 @@ def _compile_and_run(
     command.extend([
         "-std=c++20",
         "-O0",
+        # skia-builder's official builds disable RTTI, so SkExecutor's key
+        # function (~SkExecutor) emits no typeinfo; a client subclass compiled
+        # with RTTI fails to link against "typeinfo for SkExecutor".
+        "-fno-rtti",
         f"-I{include_root}",
         str(source),
         str(library),
@@ -268,7 +284,8 @@ def verify(skia_dir: Path, platform: str) -> dict[str, object]:
 
     print(
         f"verify_skia_m153_capabilities: OK — {release} SkLogHandler exported symbols and "
-        "Graphite ContextOptions::fExecutor compile/link/run against "
+        "client SkExecutor wired into Graphite ContextOptions::fExecutor "
+        "compile/link/run against "
         f"{library}"
     )
     return result

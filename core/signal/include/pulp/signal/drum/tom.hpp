@@ -47,7 +47,12 @@ namespace pulp::signal::drum {
 /// RT contract: `prepare()` allocates nothing; every other method, including
 /// `note_on` and `process`, allocates nothing and takes no locks.
 class TomVoice : public Voice {
-public:
+  public:
+    /// The noise ladder's saturator, chosen per voice. Each value runs the
+    /// LadderSaturation of the same meaning explicitly, so the voice does not
+    /// follow the build-time kDefaultLadderSaturation: reference is
+    /// LadderSaturation::exact (std::tanh) and realtime_efficient is
+    /// LadderSaturation::realtime_efficient (FastMath::tanh_minimax).
     enum class LadderMathProfile : std::uint8_t {
         reference,
         realtime_efficient,
@@ -146,7 +151,7 @@ public:
     void set_noise_color(NoiseColor color) { noise_.set_color(color); }
 
     /// Selects the noise ladder's saturation curve between hits. Reference is
-    /// the default; realtime_efficient uses Pulp's bounded Padé tanh.
+    /// the default; realtime_efficient uses the bounded FastMath::tanh_minimax.
     bool set_ladder_math_profile(LadderMathProfile profile) noexcept {
         if (profile != LadderMathProfile::reference &&
             profile != LadderMathProfile::realtime_efficient)

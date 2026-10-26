@@ -919,8 +919,11 @@
         "tools/cli/migration_index.hpp",
         "tools/cli/migration_runtime.cpp",
         "tools/scripts/build_migration_index.py",
+        "tools/scripts/fold_migration_notes.py",
+        "tools/scripts/migration_note_guard.py",
         "tools/scripts/cli_version_check.sh",
-        "docs/migrations/**",
+        "docs/migrations/README.md",
+        "docs/migrations/unreleased/README.md",
         ".claude/commands/upgrade.md"
       ]
     },
@@ -955,6 +958,9 @@
     "view-bridge": {
       "paths": [
         "core/format/src/view_bridge.cpp",
+        "core/view/platform/mac/mac_gpu_host_config.h",
+        "core/view/src/lite_editor_host.cpp",
+        "tools/cmake/PulpLiteEditorObjects.cmake",
         "core/format/include/pulp/format/view_bridge.hpp",
         "core/format/include/pulp/format/processor.hpp",
         "core/format/src/vst3_plug_view.cpp",

@@ -23,6 +23,7 @@ Pure stdlib — no image IO, no optional dependency, nothing to skip for.
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import pathlib
@@ -393,6 +394,209 @@ class TestCli(unittest.TestCase):
             self.assertGreater(len(report["findings"]), 0)
             self.assertEqual(report["tolerance_px"], 2.0)
 
+
+
+# --- HTML imports: the browser capture is the design side ------------------
+
+REFERENCE_PNG = b"\x89PNG reference bytes"
+
+
+class CaptureFixture:
+    """A minimal HTML import on disk: capture dir, its IR, an observer layout.
+
+    ``dom`` lists (backend_id, parent_dom_index, box-or-None) in DOM order; the
+    IR lowers ``lowered`` (anchor, backend_id-or-None) FLAT under its root, the
+    way a native panel is lowered, so any hierarchy the tool uses must come
+    from the DOM.
+    """
+
+    def __init__(self, td: pathlib.Path, dom, lowered, views,
+                 frame_origin=(0.0, 0.0), ir_png=REFERENCE_PNG):
+        self.capture = td / "panel.pulp-browser-capture"
+        self.capture.mkdir()
+        self.ir = td / "panel.pulp.json"
+        self.layout = td / "observed.json"
+        nodes = {"backendNodeId": [b for b, _, _ in dom],
+                 "parentIndex": [p for _, p, _ in dom]}
+        boxes = [(i, box) for i, (_, _, box) in enumerate(dom) if box is not None]
+        snapshot = json.dumps({"documents": [{
+            "nodes": nodes,
+            "layout": {"nodeIndex": [i for i, _ in boxes], "bounds": [b for _, b in boxes]},
+        }]}).encode()
+        (self.capture / "dom-snapshot.json").write_bytes(snapshot)
+        (self.capture / "browser-static.png").write_bytes(REFERENCE_PNG)
+        (self.capture / "capture.json").write_text(json.dumps({
+            "schema": "pulp-browser-capture-v1",
+            "documents": [{"snapshot_asset": "dom-snapshot.json",
+                           "snapshot_sha256": hashlib.sha256(snapshot).hexdigest()}],
+        }), encoding="utf-8")
+        children = []
+        for anchor, backend in lowered:
+            attrs = {} if backend is None else {"backend_node_id": str(backend)}
+            children.append({"type": "frame", "name": anchor.rsplit("/", 1)[-1],
+                             "stable_anchor_id": anchor, "attributes": attrs})
+        self.ir.write_text(json.dumps({
+            "root": {"type": "frame", "stable_anchor_id": "browser:root",
+                     "attributes": {"browser_authored_frame_x": str(frame_origin[0]),
+                                    "browser_authored_frame_y": str(frame_origin[1])},
+                     "children": children},
+            "assetManifest": {"assets": [{
+                "original_uri": "pulp-capture:///browser-static.png",
+                "content_hash": hashlib.sha256(ir_png).hexdigest()}]},
+        }), encoding="utf-8")
+        self.layout.write_text(json.dumps({
+            "schema_version": "visual-layout-snapshot-v1",
+            "nodes": [{"id": i, "rect": {"x": x, "y": y, "w": w, "h": h}}
+                      for i, x, y, w, h in views]}), encoding="utf-8")
+
+    def compare(self) -> dict:
+        return layout_parity.compare_capture(self.capture, self.ir, self.layout)
+
+
+# A panel: html > body > card > (label, icon). Backend ids are deliberately not
+# in DOM order, so a join by position cannot pass.
+PANEL_DOM = [
+    (40, -1, [0, 0, 400, 300]),      # 0 html
+    (41, 0, [0, 0, 400, 300]),       # 1 body
+    (7, 1, [20, 30, 200, 100]),      # 2 card
+    (93, 2, [30, 40, 80, 20]),       # 3 label
+    (12, 2, [150, 40, 24, 24]),      # 4 icon
+]
+PANEL_LOWERED = [("html", 40), ("html/body", 41), ("card", 7), ("card/label", 93),
+                 ("card/icon", 12), ("canvas/layer", None)]
+
+
+def panel_views(dx_card=0.0, dx_label=0.0, dx_children=0.0, origin=(0.0, 0.0)):
+    ox, oy = origin
+    return [("browser:root", 0, 0, 400, 300), ("html", -ox, -oy, 400, 300),
+            ("html/body", -ox, -oy, 400, 300),
+            ("card", 20 + dx_card - ox, 30 - oy, 200, 100),
+            ("card/label", 30 + dx_card + dx_children + dx_label - ox, 40 - oy, 80, 20),
+            ("card/icon", 150 + dx_card + dx_children - ox, 40 - oy, 24, 24),
+            ("canvas/layer", 0, 0, 10, 10)]
+
+
+class CaptureTestCase(unittest.TestCase):
+    def fixture(self, **kwargs) -> CaptureFixture:
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        kwargs.setdefault("dom", PANEL_DOM)
+        kwargs.setdefault("lowered", PANEL_LOWERED)
+        kwargs.setdefault("views", panel_views())
+        return CaptureFixture(pathlib.Path(td.name), **kwargs)
+
+
+class TestCaptureJoin(CaptureTestCase):
+    def test_matching_capture_passes_and_scaffolding_is_synthetic(self):
+        report = self.fixture().compare()
+        self.assertEqual(report["matched"], 5)
+        self.assertEqual(report["findings"], [])
+        self.assertEqual(report["extra"], [])
+        self.assertEqual(report["synthetic_extra"], ["browser:root", "canvas/layer"])
+        self.assertFalse(layout_parity.report_fails(report))
+        self.assertIn("pairing verified on 1 capture file", layout_parity.render_report(report, 25))
+
+    def test_one_misplaced_leaf_is_exactly_one_finding(self):
+        report = self.fixture(views=panel_views(dx_label=3)).compare()
+        self.assertEqual(len(report["findings"]), 1)
+        finding = report["findings"][0]
+        self.assertEqual(finding["node_id"], "card/label")
+        self.assertEqual((finding["dx"], finding["dy"]), (3.0, 0.0))
+        self.assertEqual(finding["parent_id"], "card")
+
+    def test_a_moved_container_is_reported_once_through_the_dom_hierarchy(self):
+        # The IR is flat, so only the DOM knows label and icon sit inside card.
+        # Taking parents from the IR would report all three nodes.
+        report = self.fixture(views=panel_views(dx_card=9)).compare()
+        self.assertEqual([f["node_id"] for f in report["findings"]], ["card"])
+
+    def test_the_parent_is_the_nearest_lowered_dom_ancestor(self):
+        # A wrapper the import did not lower sits between card and its label.
+        # The label's parent must resolve through it to card, or a moved card
+        # is reported twice.
+        dom = PANEL_DOM[:3] + [(55, 2, [20, 30, 200, 100]), (93, 3, [30, 40, 80, 20]),
+                               (12, 2, [150, 40, 24, 24])]
+        report = self.fixture(dom=dom, views=panel_views(dx_card=9)).compare()
+        self.assertEqual([f["node_id"] for f in report["findings"]], ["card"])
+
+    def test_children_off_inside_a_correct_parent_cluster_under_it(self):
+        report = self.fixture(views=panel_views(dx_children=6)).compare()
+        self.assertEqual(len(report["findings"]), 1)
+        self.assertEqual(report["findings"][0]["kind"], "cluster")
+        self.assertEqual(report["findings"][0]["parent_id"], "card")
+        self.assertTrue(report["findings"][0]["shared_offset"])
+
+    def test_the_authored_frame_origin_is_subtracted(self):
+        # The import frames the panel at its authored surface; a DOM box at that
+        # surface's corner is a view at (0, 0).
+        origin = (100.0, 50.0)
+        report = self.fixture(frame_origin=origin, views=panel_views(origin=origin)).compare()
+        self.assertEqual(report["findings"], [])
+
+    def test_a_rendered_node_chromium_laid_out_no_box_for_is_extra(self):
+        dom = PANEL_DOM + [(77, 2, None)]
+        lowered = PANEL_LOWERED + [("card/hidden", 77)]
+        views = panel_views() + [("card/hidden", 0, 0, 5, 5)]
+        report = self.fixture(dom=dom, lowered=lowered, views=views).compare()
+        self.assertEqual(report["extra"], ["card/hidden"])
+        self.assertEqual(report["source"]["unlaid_out"], ["card/hidden"])
+        self.assertTrue(layout_parity.report_fails(report))
+
+
+class TestCaptureCli(CaptureTestCase):
+    def run_tool(self, *args) -> subprocess.CompletedProcess:
+        return subprocess.run([sys.executable, str(TOOL), *map(str, args)],
+                              capture_output=True, text=True, encoding="utf-8")
+
+    def test_exit_codes_and_the_default_ir_sibling(self):
+        good = self.fixture()
+        ok = self.run_tool("--capture", good.capture, "--observer-layout", good.layout)
+        self.assertEqual(ok.returncode, 0, ok.stdout + ok.stderr)
+        self.assertIn("PASS", ok.stdout)
+        bad = self.fixture(views=panel_views(dx_label=5))
+        failed = self.run_tool("--capture", bad.capture, "--observer-layout", bad.layout)
+        self.assertEqual(failed.returncode, 1)
+        self.assertIn("card/label", failed.stdout)
+
+    def test_an_ir_from_another_capture_session_is_refused(self):
+        # Backend ids are small sequential integers, so a foreign capture of the
+        # same page joins cleanly and yields a believable report; only the
+        # recorded content hashes tell the sessions apart.
+        fx = self.fixture(ir_png=b"another session's reference")
+        result = self.run_tool("--capture", fx.capture, "--observer-layout", fx.layout)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("different capture session", result.stderr)
+
+    def test_an_edited_dom_snapshot_is_refused(self):
+        fx = self.fixture()
+        snapshot = fx.capture / "dom-snapshot.json"
+        snapshot.write_bytes(snapshot.read_bytes() + b" ")
+        result = self.run_tool("--capture", fx.capture, "--observer-layout", fx.layout)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("snapshot_sha256", result.stderr)
+
+    def test_an_ir_with_nothing_to_verify_pairing_against_is_refused(self):
+        fx = self.fixture()
+        (fx.capture / "browser-static.png").unlink()
+        result = self.run_tool("--capture", fx.capture, "--observer-layout", fx.layout)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("cannot prove", result.stderr)
+
+    def test_a_non_numeric_backend_id_is_a_usage_error(self):
+        lowered = PANEL_LOWERED + [("card/odd", "not-a-number")]
+        fx = self.fixture(lowered=lowered)
+        result = self.run_tool("--capture", fx.capture, "--observer-layout", fx.layout)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("non-numeric backend_node_id", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_modes_do_not_mix(self):
+        fx = self.fixture()
+        self.assertEqual(self.run_tool("--capture", fx.capture).returncode, 2)
+        mixed = self.run_tool(fx.layout, "--capture", fx.capture,
+                              "--observer-layout", fx.layout)
+        self.assertEqual(mixed.returncode, 2)
+        self.assertEqual(self.run_tool(fx.layout, "--ir", fx.ir).returncode, 2)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -1106,5 +1106,179 @@ class WorkflowWiringTests(unittest.TestCase):
         self.assertIn("attributor.run_log_zip(", code)
 
 
+
+TONIGHT = json.loads(
+    (pathlib.Path(__file__).resolve().parents[2]
+     / "tools/ci/fixtures/base_poison_2026-10-23.json").read_text(encoding="utf-8")
+)
+GPU_TRACE = "gpu-trace-overhead-acceptance-selftest"
+
+
+def tonight_batches() -> list[bp.SuiteObservation]:
+    return [
+        batch(
+            b["run_id"],
+            conclusion=b["conclusion"],
+            tests=tuple(b["failing_tests"]),
+            execution=bp.EXECUTED if b["conclusion"] != "cancelled" else bp.NOT_EXECUTED,
+        )
+        for b in TONIGHT["batches"]
+    ]
+
+
+def push_obs(
+    conclusion: str = "failure",
+    tests: tuple[str, ...] = tuple(TONIGHT["main_push"]["failing_tests"]),
+    execution: str = bp.EXECUTED,
+) -> bp.SuiteObservation:
+    return bp.SuiteObservation(
+        run_id=TONIGHT["main_push"]["run_id"],
+        lane="main-push",
+        conclusion=conclusion,
+        execution=execution,
+        failing_tests=tests,
+        head_sha=TONIGHT["tip_sha"],
+        source=bp.SOURCE_PUSH_LINUX,
+    )
+
+
+class MainPushTests(unittest.TestCase):
+    """main's tip landed through a merge group whose macos reused a receipt,
+    then failed a test on its own push run; every batch built on it failed the
+    same test on macOS."""
+
+    def tonight(self, main_push: bp.SuiteObservation | None) -> bp.Verdict:
+        landed = TONIGHT["main_merge_group"]
+        tip = bp.SuiteObservation(run_id=landed["run_id"], lane="main",
+                                  conclusion=landed["conclusion"],
+                                  execution=landed["execution"], source=bp.SOURCE_HEAD_SHA)
+        return bp.detect(tip, tonight_batches(), tip_sha=TONIGHT["tip_sha"],
+                         main_push=main_push)
+
+    def test_tonight_is_poisoned_on_the_push_run(self) -> None:
+        verdict = self.tonight(push_obs())
+        self.assertEqual(verdict.status, bp.STATUS_POISONED, verdict.reason)
+        self.assertEqual(verdict.proof, bp.PROOF_MAIN_PUSH_AND_STREAK)
+        self.assertEqual(verdict.tests, (GPU_TRACE,))
+        self.assertTrue(verdict.safe_to_pause_queue)
+        self.assertEqual(verdict.streak.length, 11)
+        self.assertIn("39886937105", verdict.reason)
+
+    def test_without_the_push_run_tonight_is_only_suspected(self) -> None:
+        """Control: what the detector reported that night (04:18Z)."""
+        self.assertEqual(self.tonight(None).status, bp.STATUS_SUSPECTED)
+
+    def test_a_green_executed_merge_group_does_not_hide_the_push_failure(self) -> None:
+        green = main_obs(conclusion="success", source=bp.SOURCE_HEAD_SHA)
+        self.assertEqual(bp.detect(green, tonight_batches()).status, bp.STATUS_HEALTHY)
+        verdict = bp.detect(green, tonight_batches(), main_push=push_obs())
+        self.assertEqual(verdict.status, bp.STATUS_POISONED)
+
+    def test_a_linux_only_failure_is_never_poisoned(self) -> None:
+        linux_only = push_obs(tests=("cmake-pulp-install-layout", "import-fidelity-diff"))
+        self.assertEqual(self.tonight(linux_only).status, bp.STATUS_SUSPECTED)
+
+    def test_a_push_leg_that_ran_no_tests_is_not_evidence(self) -> None:
+        for execution in (bp.BUILT_BUT_UNTESTED, bp.NOT_EXECUTED):
+            verdict = self.tonight(push_obs(execution=execution))
+            self.assertEqual(verdict.status, bp.STATUS_SUSPECTED, execution)
+
+    def test_a_green_push_run_is_never_health(self) -> None:
+        verdict = bp.detect(None, tonight_batches(), main_push=push_obs(conclusion="success",
+                                                                         tests=()))
+        self.assertEqual(verdict.status, bp.STATUS_SUSPECTED)
+
+    def test_the_streak_must_reach_its_minimum(self) -> None:
+        one = [b for b in tonight_batches() if b.conclusion == "failure"][:1]
+        verdict = bp.detect(main_obs(conclusion="success", source=bp.SOURCE_HEAD_SHA), one,
+                            main_push=push_obs())
+        self.assertNotEqual(verdict.status, bp.STATUS_POISONED)
+
+    def test_a_merge_group_proof_is_kept(self) -> None:
+        verdict = bp.detect(main_obs(tests=(GPU_TRACE,)), tonight_batches(),
+                            main_push=push_obs())
+        self.assertEqual(verdict.proof, bp.PROOF_MAIN_AND_STREAK)
+
+    def test_the_signal_carries_the_push_observation(self) -> None:
+        payload = bp.signal(self.tonight(push_obs()))
+        json.dumps(payload)
+        self.assertEqual(payload["main_push_run_id"], "39886937105")
+        self.assertEqual(payload["main_push_execution"], bp.EXECUTED)
+        self.assertIn(GPU_TRACE, payload["main_push_failing_tests"])
+        _, markdown = bp.render(payload)
+        self.assertIn("main push run (Linux) | 39886937105", markdown)
+
+
+class MainPushObservationTests(unittest.TestCase):
+    """observe_main_push reads the Linux leg of the push run on main's tip."""
+
+    def fake(self, steps: list[dict], conclusion: str = "failure", runs: bool = True):
+        reads: list[tuple[str, str | None]] = []
+
+        def gh(path: str, jq: str | None = None) -> str | None:
+            reads.append((path, jq))
+            if "/workflows/build.yml/runs?" in path:
+                self.assertIn("event=push", path)
+                self.assertIn("branch=main", path)
+                self.assertIn(f"head_sha={TIP}", path)
+                return json.dumps({"workflow_runs": [
+                    {"id": 77, "status": "completed", "created_at": "t"}] if runs else []})
+            if path.endswith("/actions/runs/77/jobs?per_page=100"):
+                return json.dumps({"jobs": [
+                    job("macos", "skipped", []),
+                    job("Linux (x64) [github-hosted]", conclusion, steps),
+                ]})
+            if "/actions/runs/77/artifacts" in path:
+                return "123"
+            return None
+
+        def gh_bytes(path: str) -> bytes | None:
+            return _zip({bp.LAST_TESTS_FAILED_MEMBER: f"12:{GPU_TRACE}\n"})
+
+        from unittest import mock
+        with mock.patch.object(bp, "gh", gh), mock.patch.object(bp, "gh_bytes", gh_bytes):
+            return bp.observe_main_push("o/r", TIP), reads
+
+    def test_an_executed_red_leg_names_its_tests_from_the_linux_artifact(self) -> None:
+        seen, reads = self.fake(FAILED_TEST_STEPS)
+        self.assertEqual((seen.execution, seen.conclusion), (bp.EXECUTED, "failure"))
+        self.assertEqual(seen.failing_tests, (GPU_TRACE,))
+        self.assertTrue(seen.is_evidence and seen.failed)
+        artifact_jq = [jq for path, jq in reads if path.endswith("/artifacts?per_page=100")]
+        self.assertIn('"ctest-logs-linux"', artifact_jq[0])
+
+    def test_a_leg_that_ran_no_test_step_is_not_evidence(self) -> None:
+        seen, _ = self.fake([{"name": "Set up job", "conclusion": "success"}])
+        self.assertFalse(seen.is_evidence)
+        self.assertEqual(seen.failing_tests, ())
+
+    def test_no_push_run_yet_is_nothing(self) -> None:
+        self.assertIsNone(self.fake(FAILED_TEST_STEPS, runs=False)[0])
+
+
+    def test_main_reads_the_push_run_on_the_tip_it_judges(self) -> None:
+        import tempfile
+        from unittest import mock
+
+        green_tip = main_obs(conclusion="success", source=bp.SOURCE_HEAD_SHA)
+        seen: list[str] = []
+
+        def push(repo: str, tip: str) -> bp.SuiteObservation:
+            seen.append(tip)
+            return push_obs()
+
+        with tempfile.NamedTemporaryFile("r", suffix=".json") as out, \
+                mock.patch.object(bp, "observe_main", return_value=(green_tip, "tipsha")), \
+                mock.patch.object(bp, "observe_batches", return_value=tonight_batches()), \
+                mock.patch.object(bp, "observe_main_push", push), \
+                mock.patch.dict("os.environ", {"GITHUB_STEP_SUMMARY": ""}), \
+                mock.patch("sys.stdout"):
+            self.assertEqual(bp.main(["--repo", "o/r", "--output", out.name]), 0)
+            payload = json.loads(pathlib.Path(out.name).read_text(encoding="utf-8"))
+        self.assertEqual(seen, ["tipsha"])
+        self.assertEqual(payload["status"], bp.STATUS_POISONED)
+        self.assertEqual(payload["proof"], bp.PROOF_MAIN_PUSH_AND_STREAK)
+
+
 if __name__ == "__main__":
     unittest.main()

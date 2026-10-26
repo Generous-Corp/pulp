@@ -2,6 +2,7 @@
 #include "detail/shared_io_program_session.hpp"
 #include "detail/shared_io_transport_bridge.hpp"
 #include "detail/shared_spectral_result.hpp"
+#include "harness/fake_shared_io_provider.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -10,175 +11,41 @@
 #include <chrono>
 #include <cstring>
 #include <memory>
+#include <thread>
 
 using namespace pulp::gpu_audio::detail;
 
 namespace {
-struct FakeLifecycleState {
-    bool program_released = false;
-    bool provider_destroyed = false;
-    std::uint64_t retired = 0;
-};
-
-class FakeProvider final : public SharedIoArenaProvider {
-    struct Slot {
-        std::byte* input;
-        std::byte* output;
-        std::uint32_t index = 0;
-        std::uint64_t generation = 1;
-        bool retired = false;
-    };
-
+// The plan tests' provider doubles input at submission and retires it at
+// once, unless terminals are deferred to the next successful drain.
+class FakeProvider final : public pulp::test::FakeSharedIoProvider {
   public:
-    ~FakeProvider() override {
-        lifecycle_state->provider_destroyed = true;
-    }
-    bool post_terminal(SlotToken token, std::shared_ptr<SharedIoTerminalInbox> inbox,
-                       CompletionStatus terminal) noexcept {
-        if (defer_terminals) {
-            pending_terminals.push_back({token, std::move(inbox), terminal});
-            return true;
-        }
-        if (inbox->push(token, terminal) != SharedIoTerminalInbox::PushResult::Accepted)
-            return false;
-        ++lifecycle_state->retired;
-        return true;
-    }
-    bool create_slot(std::uint32_t index, std::size_t in, std::size_t out,
-                     SlotResources& resources) noexcept override {
-        auto* slot = new (std::nothrow)
-            Slot{new (std::nothrow) std::byte[in], new (std::nothrow) std::byte[out], index};
-        if (!slot || !slot->input || !slot->output) {
-            if (slot) {
-                delete[] slot->input;
-                delete[] slot->output;
-                delete slot;
-            }
-            return false;
-        }
-        resources.input = slot->input;
-        resources.input_size = in;
-        resources.output = slot->output;
-        resources.output_size = out;
-        resources.opaque = slot;
-        slots_.push_back(slot);
-        resources.input_lifecycle = {
-            .allocated = !invalid_lifecycle, .import_attempted = true, .import_succeeded = true};
-        resources.output_lifecycle = resources.input_lifecycle;
-        resources.storage_kind = storage_kind;
-        if (storage_kind == StorageKind::Staged) {
-            resources.input_lifecycle.import_attempted = false;
-            resources.input_lifecycle.import_succeeded = false;
-            resources.output_lifecycle = resources.input_lifecycle;
-        }
-        return true;
-    }
-    void retire_slot(SlotResources& resources) noexcept override {
-        if (require_program_release && !program_released)
-            retired_before_program_release = true;
-        auto* slot = static_cast<Slot*>(resources.opaque);
-        if (slot) {
-            slot->retired = true;
-            ++slot->generation;
-        }
-        resources.input_lifecycle.dispose_observed = true;
-        resources.output_lifecycle.dispose_observed = true;
-    }
-    void destroy_slot(SlotResources& resources) noexcept override {
-        auto* slot = static_cast<Slot*>(resources.opaque);
-        if (!slot)
-            return;
-        delete[] slot->input;
-        delete[] slot->output;
-        std::erase(slots_, slot);
-        delete slot;
-        resources.input_lifecycle.host_freed = true;
-        resources.output_lifecycle.host_freed = true;
-        resources.opaque = nullptr;
-    }
-    bool acquire_slot_buffers(const SlotResources& resources,
-                              SlotBufferHandle& handle) const noexcept override {
-        auto* slot = static_cast<Slot*>(resources.opaque);
-        if (!slot || slot->retired)
-            return false;
-        handle = {};
-        handle.provider = this;
-        handle.device = this;
-        handle.input_buffer = slot->input;
-        handle.output_buffer = slot->output;
-        handle.slot = slot->index;
-        handle.generation = slot->generation;
-        handle.lifetime = lifetime_;
-        return true;
-    }
-    bool validate_slot_buffers(const SlotBufferHandle& handle) const noexcept override {
-        if (handle.provider != this || handle.device != this || handle.lifetime.expired())
-            return false;
-        for (const auto* slot : slots_) {
-            if (!slot->retired && handle.input_buffer == slot->input &&
-                handle.output_buffer == slot->output && handle.generation == slot->generation)
-                return true;
-        }
-        return false;
+    FakeProvider() {
+        transform = Transform::Affine;
+        scale = 2.0f;
+        transform_at_submit = true;
+        complete_in_submit = true;
+        drain_completes = true;
     }
 
-    bool submit(const SlotResources& resources, SlotToken token,
-                std::shared_ptr<SharedIoTerminalInbox> inbox) noexcept override {
-        if (!accept_submissions)
-            return false;
-        auto* slot = static_cast<Slot*>(resources.opaque);
-        const auto count = resources.input_size / sizeof(float);
-        auto* in = reinterpret_cast<const float*>(slot->input);
-        auto* out = reinterpret_cast<float*>(slot->output);
-        for (std::size_t i = 0; i < count && i < resources.output_size / sizeof(float); ++i)
-            out[i] = in[i] * 2.0f;
-        return post_terminal(token, std::move(inbox), terminal_status);
+    SharedIoProviderIdentity provider_identity() const noexcept override {
+        return authenticated_identity ? authenticated_fake_identity() : identity;
     }
-    void poll() noexcept override {}
+
     bool drain() noexcept override {
-        if (!allow_drain)
-            return false;
-        defer_terminals = false;
-        for (auto& pending : pending_terminals) {
-            if (!post_terminal(pending.token, std::move(pending.inbox), pending.status))
-                return false;
-        }
-        pending_terminals.clear();
-        return true;
+        if (allow_drain)
+            defer_terminals = false;
+        return FakeSharedIoProvider::drain();
     }
-    void cleanup_abandoned_for_test() noexcept {
-        while (!slots_.empty()) {
-            SlotResources resources;
-            resources.opaque = slots_.back();
-            retire_slot(resources);
-            destroy_slot(resources);
-        }
-    }
-    struct PendingTerminal {
-        SlotToken token;
-        std::shared_ptr<SharedIoTerminalInbox> inbox;
-        CompletionStatus status;
-    };
-    std::vector<PendingTerminal> pending_terminals;
-    bool defer_terminals = false, allow_drain = true;
-    bool invalid_lifecycle = false;
-    StorageKind storage_kind = StorageKind::ImportedHostPointer;
-    bool accept_submissions = true;
-    bool require_program_release = false;
-    bool program_released = false;
-    bool program_destroyed = false;
-    bool retired_before_program_release = false;
-    CompletionStatus terminal_status = CompletionStatus::RetiredSuccess;
-    std::shared_ptr<const void> lifetime_ = std::make_shared<int>(0);
-    std::shared_ptr<FakeLifecycleState> lifecycle_state = std::make_shared<FakeLifecycleState>();
-    std::vector<Slot*> slots_;
+
+    bool authenticated_identity = false;
 };
 
 class FakePreparedProgram final : public SharedIoPreparedProgram {
   public:
     explicit FakePreparedProgram(FakeProvider& expected) : expected_(expected) {}
     ~FakePreparedProgram() override {
-        expected_.program_destroyed = true;
+        expected_.lifecycle_state->program_destroyed = true;
     }
 
     bool prepare(SharedIoArenaProvider& provider,
@@ -198,13 +65,13 @@ class FakePreparedProgram final : public SharedIoPreparedProgram {
         auto* output = reinterpret_cast<float*>(resources.output);
         for (std::size_t index = 0; index < values; ++index)
             output[index] = input[index] * 3.0f;
-        return expected_.post_terminal(token, std::move(inbox), expected_.terminal_status);
+        return expected_.submit_program(resources, token, std::move(inbox),
+                                        /*apply_transform=*/false);
     }
 
     bool release() noexcept override {
         if (!allow_release)
             return false;
-        expected_.program_released = true;
         expected_.lifecycle_state->program_released = true;
         prepared = false;
         return true;
@@ -235,6 +102,42 @@ TEST_CASE("shared IO compute plan keeps deadline outside slot token",
     CHECK(completion->token.slot.stream_sequence == 7);
     CHECK(completion->late);
     CHECK(completion->status == SharedIoArena::CompletionStatus::RetiredSuccess);
+    REQUIRE(plan.release());
+}
+
+TEST_CASE("shared IO compute plan delivers a completion only under its admission ticket",
+          "[gpu_audio][shared_io][p2][ticket]") {
+    FakeProvider provider;
+    SharedIoComputePlan plan;
+    REQUIRE(plan.prepare(provider,
+                         {.slots = 2, .input_bytes_per_slot = 16, .output_bytes_per_slot = 16}));
+    auto input = plan.acquire_input(7, 0);
+    REQUIRE(input);
+    const auto token = SharedIoComputePlan::SubmitToken::admit(input->token);
+    CHECK(token.ticket.admits(input->token.preparation_epoch, 7));
+    // A caller ticket that disagrees with the one the plan admitted is refused.
+    auto forged = token;
+    forged.ticket.generation += 1;
+    CHECK_FALSE(plan.submit(forged));
+    REQUIRE(plan.submit(token));
+    REQUIRE(plan.drain(0) == 1);
+    auto completion = plan.pop_completion();
+    REQUIRE(completion);
+    CHECK(completion->token.ticket == token.ticket);
+
+    // Planted negative: the same completion carrying a ticket from another
+    // generation cannot acquire the output.
+    auto stale = *completion;
+    stale.token.ticket.generation += 1;
+    CHECK_FALSE(plan.acquire_output(stale));
+    auto unaccepted = *completion;
+    unaccepted.token.ticket = {};
+    CHECK_FALSE(plan.acquire_output(unaccepted));
+
+    // Positive control: the admitted ticket acquires it.
+    auto lease = plan.acquire_output(*completion);
+    REQUIRE(lease);
+    REQUIRE(plan.release_output({lease->token}));
     REQUIRE(plan.release());
 }
 
@@ -296,9 +199,11 @@ TEST_CASE("shared IO plan prediction admits, refuses, and resets at lifecycle bo
     REQUIRE(plan.drain(0) == 1);
     auto successful = plan.pop_completion();
     REQUIRE(successful);
+    auto successful_output = plan.acquire_output(*successful);
+    REQUIRE(successful_output);
+    REQUIRE(plan.release_output({successful_output->token}));
     CHECK(plan.prediction_estimate().ready);
     CHECK(plan.telemetry().prediction_samples == 1);
-    REQUIRE(plan.discard_completion(*successful));
 
     // A calibrated future deadline is admitted.
     const auto future_deadline =
@@ -315,6 +220,8 @@ TEST_CASE("shared IO plan prediction admits, refuses, and resets at lifecycle bo
     const auto expired_deadline = future_deadline - 2'000'000'000;
     CHECK_FALSE(plan.acquire_input(4, expired_deadline));
     CHECK(plan.telemetry().prediction_refusals == 1);
+    CHECK(plan.telemetry().last_prediction_refusal == SharedIoPredictionRefusal::DeadlineExpired);
+    CHECK(plan.telemetry().last_fallback_reason == SharedIoFallbackReason::PredictionRefused);
     REQUIRE(plan.reprime_when_quiescent());
     CHECK(plan.prediction_estimate().samples == 0);
     CHECK(plan.prediction_estimate().enabled);
@@ -324,6 +231,198 @@ TEST_CASE("shared IO plan prediction admits, refuses, and resets at lifecycle bo
     auto disabled_input = plan.acquire_input(4, 1);
     REQUIRE(disabled_input);
     REQUIRE(plan.cancel({disabled_input->token, 1}));
+    REQUIRE(plan.release());
+}
+
+TEST_CASE("G3 calibration packet binds identity and synchronized timestamps",
+          "[gpu_audio][shared_io][prediction][g3]") {
+    FakeProvider provider;
+    provider.authenticated_identity = true;
+    SharedIoComputePlan plan;
+    const SharedIoCalibrationIdentity identity{.model = 11,
+                                               .block_frames = 64,
+                                               .lead_blocks = 2,
+                                               .slots = 1,
+                                               .batch_width = 1,
+                                               .policy = 7,
+                                               .load = 3};
+    REQUIRE(plan.prepare(provider,
+                         {.slots = 1,
+                          .input_bytes_per_slot = 16,
+                          .output_bytes_per_slot = 16,
+                          .storage_kind = SharedIoArenaProvider::StorageKind::ImportedHostPointer,
+                          .calibration_identity = identity,
+                          .authenticated_calibration = true,
+                          .calibration_source_revision = "test-g3-v1"}));
+    plan.set_prediction_policy({.enabled = true, .minimum_samples = 1});
+    auto input = plan.acquire_input(1, 0);
+    REQUIRE(input);
+    REQUIRE(plan.submit({input->token, 0}));
+    REQUIRE(plan.drain(0) == 1);
+    auto completion = plan.pop_completion();
+    REQUIRE(completion);
+    auto output = plan.acquire_output(*completion);
+    REQUIRE(output);
+    REQUIRE(plan.release_output({output->token}));
+    const auto observations = plan.take_calibration_observations();
+    REQUIRE(observations.size() == 1);
+    CHECK(observations.front().identity == identity);
+    CHECK(observations.front().provider_authenticated);
+    CHECK(observations.front().valid());
+    CHECK(observations.front().visible_ns >= observations.front().terminal_ns);
+    CHECK(plan.telemetry().calibration_rows == 1);
+    REQUIRE(plan.release());
+}
+
+TEST_CASE("G3 calibration packet counts predictor under-estimates",
+          "[gpu_audio][shared_io][prediction][g3]") {
+    const SharedIoCalibrationIdentity identity{.model = 1,
+                                               .block_frames = 64,
+                                               .lead_blocks = 1,
+                                               .slots = 2,
+                                               .batch_width = 1,
+                                               .policy = 2,
+                                               .load = 1};
+    SharedIoExecutionPredictor predictor;
+    predictor.configure({.enabled = true, .minimum_samples = 1});
+    predictor.bind_identity(identity);
+    SharedIoCalibrationObservation observation{.identity = identity,
+                                               .provenance = {.source_revision = "test-g3-v1",
+                                                              .provider_revision = "provider-v1",
+                                                              .adapter_name = "adapter",
+                                                              .adapter_backend = "backend",
+                                                              .adapter_vendor_id = 1,
+                                                              .adapter_device_id = 1,
+                                                              .native_runtime_name = "native",
+                                                              .native_runtime_backend = "backend",
+                                                              .native_runtime_authenticated = true},
+                                               .generation = 1,
+                                               .sequence = 1,
+                                               .worker_ns = 10,
+                                               .submitted_ns = 20,
+                                               .terminal_ns = 120,
+                                               .visible_ns = 130,
+                                               .predicted_ns = 1,
+                                               .provider_authenticated = true,
+                                               .terminal_success = true,
+                                               .output_acquired = true,
+                                               .output_released = true};
+    REQUIRE(observation.valid());
+    predictor.observe(observation);
+    CHECK(predictor.estimate().underestimates == 1);
+    CHECK(predictor.estimate().conservative_ns >= observation.execution_ns());
+    auto cross_cell = observation;
+    cross_cell.identity.load += 1;
+    CHECK_FALSE(predictor.observe(cross_cell));
+    CHECK(predictor.estimate().rejected_observations == 1);
+    observation.visible_ns = observation.terminal_ns - 1;
+    CHECK_FALSE(observation.timestamps_synchronized());
+    CHECK_FALSE(observation.valid());
+    observation.visible_ns = 130;
+    observation.output_released = false;
+    CHECK_FALSE(observation.valid());
+    observation.output_released = true;
+    observation.terminal_success = false;
+    CHECK_FALSE(observation.valid());
+}
+
+TEST_CASE("G3 calibration packet refuses stale and unauthenticated cells and records CPU fallback",
+          "[gpu_audio][shared_io][prediction][g3]") {
+    const SharedIoCalibrationIdentity identity{.model = 1,
+                                               .block_frames = 64,
+                                               .lead_blocks = 1,
+                                               .slots = 1,
+                                               .batch_width = 1,
+                                               .policy = 2,
+                                               .load = 1};
+    FakeProvider unauthenticated;
+    SharedIoComputePlan refused;
+    REQUIRE(refused.prepare(unauthenticated, {.slots = 1,
+                                              .input_bytes_per_slot = 16,
+                                              .output_bytes_per_slot = 16,
+                                              .calibration_identity = identity,
+                                              .authenticated_calibration = true,
+                                              .calibration_source_revision = "test-g3-v1"}));
+    CHECK_FALSE(refused.acquire_input(1, 0));
+    CHECK(refused.telemetry().last_prediction_refusal ==
+          SharedIoPredictionRefusal::MissingCalibration);
+    CHECK(refused.telemetry().last_fallback_reason == SharedIoFallbackReason::CalibrationMissing);
+    CHECK(refused.telemetry().cpu_fallbacks == 1);
+    refused.record_cpu_fallback(SharedIoFallbackReason::DeadlineExceeded);
+    CHECK(refused.telemetry().last_fallback_reason == SharedIoFallbackReason::DeadlineExceeded);
+    REQUIRE(refused.release());
+
+    FakeProvider authenticated;
+    authenticated.authenticated_identity = true;
+    SharedIoComputePlan stale;
+    REQUIRE(stale.prepare(authenticated, {.slots = 1,
+                                          .input_bytes_per_slot = 16,
+                                          .output_bytes_per_slot = 16,
+                                          .calibration_identity = identity,
+                                          .authenticated_calibration = true,
+                                          .calibration_max_age_ns = 1,
+                                          .calibration_source_revision = "test-g3-v1"}));
+    stale.set_prediction_policy({.enabled = true, .minimum_samples = 1});
+    auto warmup = stale.acquire_input(1, 0);
+    REQUIRE(warmup);
+    REQUIRE(stale.submit({warmup->token, 0}));
+    REQUIRE(stale.drain(0) == 1);
+    auto done = stale.pop_completion();
+    REQUIRE(done);
+    auto stale_output = stale.acquire_output(*done);
+    REQUIRE(stale_output);
+    REQUIRE(stale.release_output({stale_output->token}));
+    authenticated.authenticated_identity = false;
+    CHECK_FALSE(stale.acquire_input(2, 0));
+    CHECK(stale.telemetry().last_prediction_refusal ==
+          SharedIoPredictionRefusal::MissingCalibration);
+    authenticated.authenticated_identity = true;
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    CHECK_FALSE(stale.acquire_input(3, 0));
+    CHECK(stale.telemetry().last_prediction_refusal == SharedIoPredictionRefusal::StaleCalibration);
+    CHECK(stale.telemetry().last_fallback_reason == SharedIoFallbackReason::CalibrationStale);
+    REQUIRE(stale.release());
+}
+
+TEST_CASE("G3 receipt overflow poisons a warmed predictor and refuses admission",
+          "[gpu_audio][shared_io][prediction][g3][adversarial]") {
+    FakeProvider provider;
+    provider.authenticated_identity = true;
+    const SharedIoCalibrationIdentity identity{.model = 9,
+                                               .block_frames = 64,
+                                               .lead_blocks = 1,
+                                               .slots = 1,
+                                               .batch_width = 1,
+                                               .policy = 2,
+                                               .load = 1};
+    SharedIoComputePlan plan;
+    REQUIRE(plan.prepare(provider, {.slots = 1,
+                                    .input_bytes_per_slot = 16,
+                                    .output_bytes_per_slot = 16,
+                                    .calibration_identity = identity,
+                                    .authenticated_calibration = true,
+                                    .calibration_source_revision = "test-g3-overflow"}));
+    plan.set_prediction_policy({.enabled = true, .minimum_samples = 1});
+    for (std::uint64_t sequence = 1; sequence <= SharedIoComputePlan::kLifecycleReceiptCapacity;
+         ++sequence) {
+        auto input = plan.acquire_input(sequence, 0);
+        REQUIRE(input);
+        REQUIRE(plan.submit({input->token, 0}));
+        REQUIRE(plan.drain(0) == 1);
+        auto completion = plan.pop_completion();
+        REQUIRE(completion);
+        auto output = plan.acquire_output(*completion);
+        REQUIRE(output);
+        REQUIRE(plan.release_output({output->token}));
+    }
+    REQUIRE(plan.prediction_estimate().samples > 0);
+    CHECK_FALSE(plan.acquire_input(SharedIoComputePlan::kLifecycleReceiptCapacity + 1, 0));
+    CHECK(plan.lifecycle_receipt_overflow());
+    CHECK(plan.telemetry().calibration_invalidated);
+    CHECK(plan.telemetry().last_prediction_refusal ==
+          SharedIoPredictionRefusal::MissingCalibration);
+    CHECK(plan.prediction_estimate().samples == 0);
+    CHECK_FALSE(plan.acquire_input(SharedIoComputePlan::kLifecycleReceiptCapacity + 2, 0));
     REQUIRE(plan.release());
 }
 
@@ -623,12 +722,12 @@ TEST_CASE("shared IO prepared program retains generic lifecycle and releases bef
 
     CHECK_FALSE(plan.release());
     CHECK(plan.prepared());
-    CHECK_FALSE(provider.program_released);
-    CHECK_FALSE(provider.retired_before_program_release);
+    CHECK_FALSE(provider.lifecycle_state->program_released);
+    CHECK_FALSE(provider.lifecycle_state->retired_before_program_release);
     control->allow_release = true;
     REQUIRE(plan.release());
-    CHECK(provider.program_released);
-    CHECK_FALSE(provider.retired_before_program_release);
+    CHECK(provider.lifecycle_state->program_released);
+    CHECK_FALSE(provider.lifecycle_state->retired_before_program_release);
 }
 
 TEST_CASE("shared IO prepared program keeps failed preparation alive until cleanup succeeds",
@@ -643,13 +742,13 @@ TEST_CASE("shared IO prepared program keeps failed preparation alive until clean
                              {.slots = 1, .input_bytes_per_slot = 16, .output_bytes_per_slot = 16},
                              std::move(program)));
     CHECK(plan.prepared());
-    CHECK_FALSE(provider.program_released);
-    CHECK_FALSE(provider.retired_before_program_release);
+    CHECK_FALSE(provider.lifecycle_state->program_released);
+    CHECK_FALSE(provider.lifecycle_state->retired_before_program_release);
 
     control->allow_release = true;
     REQUIRE(plan.release());
-    CHECK(provider.program_released);
-    CHECK_FALSE(provider.retired_before_program_release);
+    CHECK(provider.lifecycle_state->program_released);
+    CHECK_FALSE(provider.lifecycle_state->retired_before_program_release);
 }
 
 TEST_CASE("shared IO destructor quarantines a program when release cannot prove safety",
@@ -668,10 +767,10 @@ TEST_CASE("shared IO destructor quarantines a program when release cannot prove 
         // transaction instead of destroying the program or retiring its slots.
     }
     REQUIRE(control != nullptr);
-    CHECK_FALSE(provider.program_released);
-    CHECK_FALSE(provider.program_destroyed);
-    CHECK_FALSE(provider.retired_before_program_release);
-    REQUIRE(provider.slots_.size() == 1);
+    CHECK_FALSE(provider.lifecycle_state->program_released);
+    CHECK_FALSE(provider.lifecycle_state->program_destroyed);
+    CHECK_FALSE(provider.lifecycle_state->retired_before_program_release);
+    REQUIRE(provider.live_slot_count() == 1);
 
     // Test-only reclamation after observing the quarantine. Production has no
     // recovery claim once an owner is destructed with an unproven barrier.
@@ -679,9 +778,9 @@ TEST_CASE("shared IO destructor quarantines a program when release cannot prove 
     REQUIRE(control->release());
     delete control;
     provider.cleanup_abandoned_for_test();
-    CHECK(provider.program_destroyed);
-    CHECK(provider.slots_.empty());
-    CHECK_FALSE(provider.retired_before_program_release);
+    CHECK(provider.lifecycle_state->program_destroyed);
+    CHECK(provider.live_slot_count() == 0);
+    CHECK_FALSE(provider.lifecycle_state->retired_before_program_release);
 }
 
 TEST_CASE("shared IO bridge never leapfrogs a delayed head", "[gpu_audio][shared_io][p2]") {

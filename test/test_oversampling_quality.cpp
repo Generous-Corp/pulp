@@ -4,10 +4,14 @@
 #include <pulp/audio/analysis/audio_spectrum.hpp>
 #include <pulp/signal/oversampling.hpp>
 
+#include "test_oversampling_support.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <limits>
 #include <span>
 #include <type_traits>
 #include <vector>
@@ -17,10 +21,11 @@ using pulp::signal::Oversampler;
 using pulp::signal::Oversampler64;
 using pulp::test::audio::tone_gain_db;
 using pulp::test::audio::tone_residual_db;
+using pulp::test::oversampling::injected_tone_rejection_db;
+using pulp::test::oversampling::kPi;
+using pulp::test::oversampling::settled_tail;
 
 namespace {
-
-constexpr double kPi = 3.14159265358979323846;
 
 struct Configuration {
     Oversampler::Factor factor;
@@ -58,51 +63,6 @@ template <typename Sample> std::size_t peak_index(const std::vector<Sample>& sam
         samples.begin(), std::max_element(samples.begin(), samples.end(), [](Sample a, Sample b) {
             return std::abs(a) < std::abs(b);
         })));
-}
-
-// The settled tail of a render — the part after the filters have filled and the
-// measurement is of steady state rather than of the transient.
-//
-// The projection analyzers take the segment itself rather than a start offset,
-// and they fit both quadratures, so the tone's phase at the segment start is
-// solved for rather than assumed. Handing them a subspan is therefore exactly
-// equivalent to fitting from an absolute sample index: the sin/cos split
-// rotates, the amplitude and the residual do not move.
-std::span<const double> settled_tail(const std::vector<double>& samples, std::size_t begin) {
-    return std::span<const double>(samples).subspan(begin);
-}
-
-// Rejection of a pure tone injected *inside* the callback, i.e. content the
-// oversampled DSP produced rather than content the caller supplied. `frequency`
-// is in cycles per BASE sample, so 0.5 is base Nyquist and factor/2 is the
-// oversampled Nyquist. Returns how far the surviving output RMS sits below the
-// injected tone's RMS.
-double injected_tone_rejection_db(Oversampler64::Kind kind, Oversampler64::Quality quality,
-                                  Oversampler64::Factor factor, double frequency) {
-    Oversampler64 oversampler;
-    oversampler.set_kind(kind);
-    oversampler.set_quality(quality);
-    oversampler.set_factor(factor);
-
-    const double oversampled_frequency = frequency / static_cast<double>(factor);
-    constexpr std::size_t frames = 8192;
-    const std::size_t settled = static_cast<std::size_t>(2 * oversampler.latency_samples() + 512);
-
-    std::size_t callback_frame = 0;
-    double energy = 0.0;
-    for (std::size_t i = 0; i < frames; ++i) {
-        const double output = oversampler.process(0.0, [&](double) {
-            const double value = std::sin(2.0 * kPi * oversampled_frequency *
-                                          static_cast<double>(callback_frame));
-            ++callback_frame;
-            return value;
-        });
-        if (i >= settled)
-            energy += output * output;
-    }
-    const double mean_square = energy / static_cast<double>(frames - settled);
-    // A unit-amplitude sine has mean square 0.5.
-    return 10.0 * std::log10(0.5 / (mean_square + 1e-300));
 }
 
 } // namespace
@@ -499,4 +459,154 @@ TEST_CASE("Pristine float decimator keeps stopband energy below its numeric floo
     const double rms_db = 10.0 * std::log10(energy / (frames - 1025));
     INFO("pristine float stopband RMS dBFS=" << rms_db);
     REQUIRE(rms_db < -120.0);
+}
+
+// ── behaviour shared by every kind ──────────────────────────────────────────
+
+namespace {
+
+using pulp::test::audio::fit_tone;
+
+// Phase (radians) of a unit sine at `frequency` after the identity round trip.
+double round_trip_phase(Oversampler64& oversampler, double frequency) {
+    oversampler.reset();
+    constexpr std::size_t frames = 8192;
+    std::vector<double> output(frames);
+    for (std::size_t i = 0; i < frames; ++i)
+        output[i] = oversampler.process(std::sin(2.0 * kPi * frequency * static_cast<double>(i)),
+                                        [](double sample) { return sample; });
+    const auto fit = fit_tone(std::span<const double>(output).subspan(4096), frequency);
+    // The fit runs on samples [4096, frames), so its n = 0 is absolute index 4096.
+    return std::atan2(fit.cos_gain, fit.sin_gain) - 2.0 * kPi * frequency * 4096.0;
+}
+
+} // namespace
+
+TEST_CASE("Oversampler group delay function matches the measured round trip",
+          "[signal][oversampling][latency]") {
+    // Group delay is the slope of the measured phase across a narrow frequency
+    // pair. A pure function that disagreed with the audio would be a sealed
+    // stage someone re-derives wrong; this pins them together for both
+    // minimum-phase lanes and the linear-phase one.
+    for (const auto kind : {Oversampler64::Kind::polyphase_iir, Oversampler64::Kind::fir_biquad,
+                            Oversampler64::Kind::linear_phase_fir}) {
+        for (const auto factor : {Oversampler64::Factor::x2, Oversampler64::Factor::x8}) {
+            Oversampler64 oversampler;
+            oversampler.set_kind(kind);
+            oversampler.set_factor(factor);
+            for (const double frequency : {0.02, 0.15, 0.35}) {
+                // The biquad lane rejects images by only ~7-20 dB, so near Nyquist
+                // the decimator folds the tone's own image back onto it and the
+                // round trip stops being LTI; its group delay only describes the
+                // band where images are negligible.
+                if (kind == Oversampler64::Kind::fir_biquad && frequency > 0.2)
+                    continue;
+                constexpr double delta = 0.0005;
+                double dphi = round_trip_phase(oversampler, frequency + delta) -
+                              round_trip_phase(oversampler, frequency - delta);
+                dphi = std::remainder(dphi, 2.0 * kPi);
+                const double measured = -dphi / (2.0 * kPi * 2.0 * delta);
+                const double predicted = oversampler.group_delay_samples(frequency);
+                INFO("kind=" << static_cast<int>(kind) << " factor=" << static_cast<int>(factor)
+                             << " f=" << frequency << " measured=" << measured
+                             << " predicted=" << predicted);
+                REQUIRE_THAT(measured, WithinAbs(predicted, 0.01));
+            }
+        }
+    }
+    // Pin the standard x2 DC delay so a design change that moves it is a
+    // deliberate, reviewed edit: (2 * 3.887 - 1) / 2 base samples, from the
+    // stage-0 design's 3.887-sample delay at the 2x rate.
+    Oversampler64 x2;
+    x2.set_kind(Oversampler64::Kind::polyphase_iir);
+    REQUIRE_THAT(x2.group_delay_samples(1e-6), WithinAbs(3.79, 0.01));
+}
+
+TEST_CASE("Block processing is identical to per-sample processing for every kind",
+          "[signal][oversampling][block]") {
+    std::vector<float> input(3001);
+    for (std::size_t i = 0; i < input.size(); ++i)
+        input[i] = 0.8f * std::sin(static_cast<float>(2.0 * kPi * 0.0371 * i)) +
+                   0.3f * std::sin(static_cast<float>(2.0 * kPi * 0.411 * i));
+    auto shaper = [](float sample) { return std::tanh(2.0f * sample); };
+    for (const auto kind : {Oversampler::Kind::fir_biquad, Oversampler::Kind::polyphase_iir,
+                            Oversampler::Kind::linear_phase_fir}) {
+        for (const auto factor :
+             {Oversampler::Factor::x2, Oversampler::Factor::x4, Oversampler::Factor::x16}) {
+            Oversampler per_sample;
+            per_sample.set_kind(kind);
+            per_sample.set_factor(factor);
+            std::vector<float> expected(input.size());
+            for (std::size_t i = 0; i < input.size(); ++i)
+                expected[i] = per_sample.process(input[i], shaper);
+            for (const std::size_t block : {1u, 5u, 64u, 1000u, 3001u}) {
+                Oversampler blocked;
+                blocked.set_kind(kind);
+                blocked.set_factor(factor);
+                std::vector<float> actual = input; // in place
+                for (std::size_t offset = 0; offset < actual.size(); offset += block) {
+                    const std::size_t count = std::min(block, actual.size() - offset);
+                    blocked.process_block(actual.data() + offset, actual.data() + offset, count,
+                                          shaper);
+                }
+                INFO("kind=" << static_cast<int>(kind) << " factor=" << static_cast<int>(factor)
+                             << " block=" << block);
+                REQUIRE(actual == expected);
+            }
+        }
+    }
+}
+
+TEST_CASE("Block linear-phase stage matches the per-sample stage to rounding",
+          "[signal][oversampling][block]") {
+    // Same prototype, same polyphase split; only the summation order differs
+    // (fixed oldest-first fused multiply-adds against a SIMD dot), so the two
+    // forms must agree to float rounding, never to a filter-design difference.
+    // Every stage OversamplerT configures, standard and pristine, including
+    // pristine's 385-tap x2 stage.
+    struct Stage {
+        double cutoff, attenuation_db;
+        unsigned taps;
+    };
+    for (const Stage stage :
+         {Stage{0.40, 96.0, 129u}, Stage{0.20, 96.0, 49u}, Stage{0.10, 96.0, 33u},
+          Stage{0.05, 96.0, 33u}, Stage{0.45, 140.0, 385u}, Stage{0.225, 140.0, 69u},
+          Stage{0.1125, 140.0, 57u}, Stage{0.05625, 140.0, 49u}}) {
+        INFO("taps " << stage.taps << " cutoff " << stage.cutoff);
+        pulp::signal::detail::LinearPhaseOversamplingStage2x<float> per_sample;
+        pulp::signal::detail::LinearPhaseOversamplingBlockStage2x<float> block;
+        per_sample.configure(stage.cutoff, stage.attenuation_db, stage.taps);
+        block.configure(stage.cutoff, stage.attenuation_db, stage.taps);
+        REQUIRE(block.taps() == per_sample.taps());
+
+        constexpr std::size_t kFrames = 1700; // not a multiple of the 16-lane group
+        std::vector<float> input(kFrames);
+        for (std::size_t i = 0; i < kFrames; ++i)
+            input[i] = 0.6f * std::sin(static_cast<float>(0.37 * static_cast<double>(i))) +
+                       0.3f * std::sin(static_cast<float>(2.9 * static_cast<double>(i)));
+
+        std::vector<float> up_block(2 * kFrames), down_block(kFrames);
+        for (std::size_t offset = 0; offset < kFrames; offset += 100) {
+            const std::size_t count = std::min<std::size_t>(100, kFrames - offset);
+            block.upsample(input.data() + offset, up_block.data() + 2 * offset, count);
+        }
+        for (std::size_t offset = 0; offset < kFrames; offset += 37) {
+            const std::size_t count = std::min<std::size_t>(37, kFrames - offset);
+            block.downsample(up_block.data() + 2 * offset, down_block.data() + offset, count);
+        }
+
+        double worst = 0.0;
+        double worst_up = 0.0;
+        for (std::size_t i = 0; i < kFrames; ++i) {
+            float even = 0.0f, odd = 0.0f;
+            per_sample.upsample(input[i], even, odd);
+            worst_up = std::max({worst_up, std::abs(double(even) - up_block[2 * i]),
+                                 std::abs(double(odd) - up_block[2 * i + 1])});
+            const float down = per_sample.downsample(even, odd);
+            worst = std::max(worst, std::abs(double(down) - down_block[i]));
+        }
+        INFO("worst upsample " << worst_up << " downsample " << worst);
+        CHECK(worst_up < 2e-6);
+        CHECK(worst < 2e-6);
+    }
 }

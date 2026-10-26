@@ -326,7 +326,16 @@ public:
     Float64 GetTailTime() override;
     Float64 GetLatency() override;
 
-protected:
+    /// The opted-out-reader record for this unit's processor.
+    ParamEventsOptOutMonitor& param_events_monitor() {
+        return param_events_monitor_;
+    }
+
+  protected:
+    void queue_scheduled_events(const ParameterEventList& events, UInt32 frames_to_process);
+    void write_scheduled_end_values(ParameterEventList& events, UInt32 frames_to_process);
+    OSStatus ProcessForScheduledParams(ParameterEventList& events, UInt32 frames_to_process,
+                                       void* user_data) override;
     OSStatus ProcessScheduledSlice(void* user_data,
                                    UInt32 start_frame_in_buffer,
                                    UInt32 slice_frames,
@@ -410,6 +419,38 @@ private:
     // events translated from AudioUnitParameterEvent; otherwise it is empty.
     state::ParameterEventQueue param_events_;
     bool scheduled_slice_active_ = false;
+    // Processor::wants_sample_accurate_parameters(), asked at construction.
+    // False: scheduled automation renders the buffer in one call.
+    bool sample_accurate_params_ = false;
+    // Records an opted-out processor reading param_events(); see processor.hpp.
+    ParamEventsOptOutMonitor param_events_monitor_;
+    // Processor::wants_au_scheduled_parameter_slices(): render one call per
+    // scheduled slice instead of one call per buffer.
+    bool slice_scheduled_params_ = false;
+
+    // One scheduled render: the time-sorted event list, how far its
+    // immediates have been applied, and its ramps (by index, reserved in
+    // Initialize()), so each slice touches only what changes at its start
+    // instead of rescanning and rewriting every event.
+    struct ScheduledRamp {
+        std::uint32_t index = 0;
+        bool superseded = false; // a later immediate set the same parameter
+    };
+    const ParameterEventList* scheduled_events_ = nullptr;
+    std::size_t scheduled_cursor_ = 0;
+    std::vector<ScheduledRamp> scheduled_ramps_;
+    bool scheduled_ramps_overflowed_ = false;
+    std::vector<AudioUnitParameterEvent> scheduled_sort_scratch_;
+    // Block-rate path: per store parameter, the latest scheduled event seen
+    // this render (event < 0 when none), and which parameters were touched.
+    struct LatestScheduledEvent {
+        SInt32 offset = 0;
+        std::int32_t event = -1;
+    };
+    std::vector<LatestScheduledEvent> scheduled_latest_;
+    std::vector<std::uint32_t> scheduled_touched_;
+    std::vector<state::StateStore::ParamWrite> scheduled_writes_;
+    std::vector<std::uint32_t> scheduled_offset_counts_;
 
     // Per-block MIDI I/O. Hoisted to members (not constructed per render call)
     // and given reserved, realtime-capacity-limited storage in Initialize() so
@@ -455,6 +496,12 @@ private:
     // `ProcessContext`. Default-constructed so the first process() call
     // after init reports no changes.
     detail::PlayheadSnapshot playhead_prev_{};
+    // Set while Initialize() runs ProcessBufferLists() once on silence to fault
+    // in the validation and buffer-wiring path. The render returns right after
+    // wiring: before the bypass check, the MIDI queue drain, host callbacks and
+    // the Processor, so nothing host- or plug-in-visible moves.
+    bool warming_render_path_ = false;
+    void warm_render_path();
 
     // Host offline-render intent (kAudioUnitProperty_OfflineRender), written by
     // the host before a faster-than-realtime bounce and read each render block.

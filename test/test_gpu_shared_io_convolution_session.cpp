@@ -1,10 +1,12 @@
 #include "detail/shared_io_convolution_session.hpp"
+#include "harness/fake_shared_io_provider.hpp"
 #include "harness/rt_allocation_probe.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -15,175 +17,22 @@ namespace {
 using namespace pulp::gpu_audio::detail;
 using Session = SharedIoConvolutionSession;
 
-struct State {
-    bool program_released = false;
-    bool retired_before_program_release = false;
-    bool program_destroyed = false;
-    std::uint32_t submits = 0;
-    std::uint32_t polls = 0;
-    std::uint32_t drains = 0;
-};
+using FakeProvider = pulp::test::FakeSharedIoProvider;
+using State = FakeProvider::Lifecycle;
 
-class FakeProvider final : public SharedIoArenaProvider {
-    struct Slot {
-        std::uint32_t index = 0;
-        std::vector<std::byte> input;
-        std::vector<std::byte> output;
-        bool retired = false;
-    };
-    struct Pending {
-        SlotToken token;
-        std::shared_ptr<SharedIoTerminalInbox> inbox;
-    };
-
-  public:
-    explicit FakeProvider(std::shared_ptr<State> state) : state_(std::move(state)) {}
-
-    SharedIoProviderIdentity identity;
-    SharedIoProviderCapabilities capabilities;
-
-    SharedIoProviderIdentity provider_identity() const noexcept override {
-        return identity;
-    }
-    SharedIoProviderCapabilities provider_capabilities() const noexcept override {
-        return capabilities;
-    }
-
-    bool create_slot(std::uint32_t index, std::size_t input_bytes, std::size_t output_bytes,
-                     SlotResources& resources) noexcept override {
-        try {
-            auto slot = std::make_unique<Slot>();
-            slot->index = index;
-            slot->input.resize(input_bytes);
-            slot->output.resize(output_bytes);
-            resources.input = slot->input.data();
-            resources.input_size = input_bytes;
-            resources.output = slot->output.data();
-            resources.output_size = output_bytes;
-            resources.opaque = slot.get();
-            resources.input_lifecycle = {
-                .allocated = true, .import_attempted = true, .import_succeeded = true};
-            resources.output_lifecycle = resources.input_lifecycle;
-            slots_.push_back(std::move(slot));
-            return true;
-        } catch (...) {
-            return false;
-        }
-    }
-
-    void retire_slot(SlotResources& resources) noexcept override {
-        if (!state_->program_released)
-            state_->retired_before_program_release = true;
-        if (auto* slot = static_cast<Slot*>(resources.opaque))
-            slot->retired = true;
-        resources.input_lifecycle.dispose_observed = true;
-        resources.output_lifecycle.dispose_observed = true;
-    }
-
-    void destroy_slot(SlotResources& resources) noexcept override {
-        auto* slot = static_cast<Slot*>(resources.opaque);
-        std::erase_if(slots_, [slot](const auto& candidate) { return candidate.get() == slot; });
-        resources.input_lifecycle.host_freed = true;
-        resources.output_lifecycle.host_freed = true;
-        resources.opaque = nullptr;
-    }
-
-    bool acquire_slot_buffers(const SlotResources& resources,
-                              SlotBufferHandle& handle) const noexcept override {
-        const auto* slot = static_cast<const Slot*>(resources.opaque);
-        if (!slot || slot->retired)
-            return false;
-        handle = {.provider = this,
-                  .device = this,
-                  .input_buffer = slot->input.data(),
-                  .output_buffer = slot->output.data(),
-                  .slot = slot->index,
-                  .generation = 1,
-                  .lifetime = lifetime_};
-        return true;
-    }
-
-    bool validate_slot_buffers(const SlotBufferHandle& handle) const noexcept override {
-        return handle.provider == this && handle.device == this && !handle.lifetime.expired() &&
-               std::any_of(slots_.begin(), slots_.end(), [&](const auto& slot) {
-                   return !slot->retired && handle.slot == slot->index &&
-                          handle.input_buffer == slot->input.data() &&
-                          handle.output_buffer == slot->output.data();
-               });
-    }
-
-    bool submit(const SlotResources&, SlotToken,
-                std::shared_ptr<SharedIoTerminalInbox>) noexcept override {
-        return false; // This session requires the transferred prepared program.
-    }
-
-    bool device_lost() const noexcept override {
-        return lost;
-    }
-    bool can_resume_after_drain() const noexcept override {
-        return resume_supported;
-    }
-
-    void poll() noexcept override {
-        ++state_->polls;
-        if (auto_complete)
-            complete_all();
-    }
-
-    bool drain() noexcept override {
-        ++state_->drains;
-        if (!allow_drain)
-            return false;
-        complete_all();
-        return pending_.empty();
-    }
-
-    bool submit_program(const SlotResources& resources, SlotToken token,
-                        std::shared_ptr<SharedIoTerminalInbox> inbox) noexcept {
-        ++state_->submits;
-        if (!accept_submissions)
-            return false;
-        const auto bytes = std::min(resources.input_size, resources.output_size);
-        std::memcpy(resources.output, resources.input, bytes);
-        pending_.push_back({token, std::move(inbox)});
-        return true;
-    }
-
-    void complete_sequence(std::uint64_t sequence) noexcept {
-        const auto found =
-            std::find_if(pending_.begin(), pending_.end(), [sequence](const auto& item) {
-                return item.token.stream_sequence == sequence;
-            });
-        if (found == pending_.end())
-            return;
-        const auto pushed = found->inbox->push(found->token, terminal_status);
-        if (pushed == SharedIoTerminalInbox::PushResult::Accepted)
-            pending_.erase(found);
-    }
-
-    void complete_all() noexcept {
-        for (auto cursor = pending_.begin(); cursor != pending_.end();) {
-            const auto pushed = cursor->inbox->push(cursor->token, terminal_status);
-            if (pushed == SharedIoTerminalInbox::PushResult::Accepted)
-                cursor = pending_.erase(cursor);
-            else
-                ++cursor;
-        }
-    }
-
-    std::shared_ptr<State> state_;
-    bool accept_submissions = true;
-    bool auto_complete = true;
-    bool allow_drain = true;
-    bool lost = false;
-    bool resume_supported = true;
-    CompletionStatus terminal_status = CompletionStatus::RetiredSuccess;
-
-  private:
-    std::shared_ptr<const void> lifetime_ = std::make_shared<int>(0);
-    std::vector<std::unique_ptr<Slot>> slots_;
-    std::vector<Pending> pending_;
-};
+// The session moves input to output at submission through its prepared
+// program; completion is a separate, test-controlled step.
+std::unique_ptr<FakeProvider> make_provider(std::shared_ptr<State> state) {
+    auto provider = std::make_unique<FakeProvider>(std::move(state));
+    provider->transform = FakeProvider::Transform::Affine;
+    provider->transform_at_submit = true;
+    provider->require_program = true;
+    provider->require_program_release = true;
+    provider->complete_on_poll = true;
+    provider->drain_completes = true;
+    provider->resume_supported = true;
+    return provider;
+}
 
 class FakeProgram final : public SharedIoPreparedProgram {
   public:
@@ -232,7 +81,7 @@ struct Fixture {
 
     void prepare(std::uint32_t slots = 2, std::uint32_t channels = 1,
                  bool capture_callback_timing = false, std::uint32_t prediction_samples = 0) {
-        auto owner = std::make_unique<FakeProvider>(state);
+        auto owner = make_provider(state);
         provider = owner.get();
         auto program = std::make_unique<FakeProgram>(*provider, state);
         REQUIRE(session.prepare({std::move(owner), std::move(program)},
@@ -325,7 +174,7 @@ TEST_CASE("shared convolution session packs provider slots and delivers exact pr
 TEST_CASE("shared convolution session forwards the callback block deadline to admission",
           "[gpu_audio][shared_io][session][deadline]") {
     Fixture fixture;
-    auto owner = std::make_unique<FakeProvider>(fixture.state);
+    auto owner = make_provider(fixture.state);
     fixture.provider = owner.get();
     auto program = std::make_unique<FakeProgram>(*fixture.provider, fixture.state);
     REQUIRE(fixture.session.prepare({std::move(owner), std::move(program)},
@@ -412,7 +261,7 @@ TEST_CASE("shared convolution session reports no provider identity for a non-Daw
 TEST_CASE("shared convolution session trace captures admission and terminal identity",
           "[gpu_audio][shared_io][trace]") {
     Fixture fixture;
-    auto owner = std::make_unique<FakeProvider>(fixture.state);
+    auto owner = make_provider(fixture.state);
     fixture.provider = owner.get();
     auto program = std::make_unique<FakeProgram>(*fixture.provider, fixture.state);
     REQUIRE(fixture.session.prepare(
@@ -442,7 +291,7 @@ TEST_CASE("shared convolution session trace captures admission and terminal iden
 TEST_CASE("shared convolution session closes only matched admission identities",
           "[gpu_audio][shared_io][trace][identity]") {
     Fixture fixture;
-    auto owner = std::make_unique<FakeProvider>(fixture.state);
+    auto owner = make_provider(fixture.state);
     fixture.provider = owner.get();
     auto program = std::make_unique<FakeProgram>(*fixture.provider, fixture.state);
     REQUIRE(fixture.session.prepare(
@@ -482,7 +331,7 @@ TEST_CASE("shared convolution session keeps completion chronology and retained i
           "[gpu_audio][shared_io][session][ordering]") {
     Fixture fixture;
     fixture.prepare(1);
-    fixture.provider->auto_complete = false;
+    fixture.provider->complete_on_poll = false;
     std::array<float, 2> output;
     callback(fixture.session, a, output);
     CHECK(fixture.session.service(10).submitted == 1);
@@ -504,7 +353,7 @@ TEST_CASE("shared convolution session does not let an out-of-order terminal leap
           "[gpu_audio][shared_io][session][ordering]") {
     Fixture fixture;
     fixture.prepare(2);
-    fixture.provider->auto_complete = false;
+    fixture.provider->complete_on_poll = false;
     std::array<float, 2> output;
     callback(fixture.session, a, output);
     REQUIRE(fixture.session.service(1).submitted == 1);
@@ -610,7 +459,7 @@ TEST_CASE("shared convolution session retains a failed preparation until its dra
           "[gpu_audio][shared_io][session][lifecycle]") {
     auto state = std::make_shared<State>();
     Session session;
-    auto provider = std::make_unique<FakeProvider>(state);
+    auto provider = make_provider(state);
     auto* provider_control = provider.get();
     auto program = std::make_unique<FakeProgram>(*provider_control, state);
     auto* program_control = program.get();
@@ -629,7 +478,7 @@ TEST_CASE("shared convolution session retains a failed preparation until its dra
     // prepare must be rejected until its physical drain succeeds; otherwise
     // replacing provider_ would leave the plan pointing at a destroyed owner.
     auto replacement_state = std::make_shared<State>();
-    auto replacement_provider = std::make_unique<FakeProvider>(replacement_state);
+    auto replacement_provider = make_provider(replacement_state);
     auto replacement_program =
         std::make_unique<FakeProgram>(*replacement_provider, replacement_state);
     CHECK_FALSE(session.prepare(
@@ -647,7 +496,7 @@ TEST_CASE("shared convolution session retains a failed preparation until its dra
 
     // Once release clears the retained owner, a fresh transaction can prepare
     // and release normally.
-    auto fresh_provider = std::make_unique<FakeProvider>(replacement_state);
+    auto fresh_provider = make_provider(replacement_state);
     auto fresh_program = std::make_unique<FakeProgram>(*fresh_provider, replacement_state);
     REQUIRE(session.prepare(
         {std::move(fresh_provider), std::move(fresh_program)},
@@ -698,7 +547,7 @@ TEST_CASE("shared session gap closes admission and survives a failed physical dr
           "[gpu_audio][shared_io][session][recovery]") {
     Fixture fixture;
     fixture.prepare(1);
-    fixture.provider->auto_complete = false;
+    fixture.provider->complete_on_poll = false;
     std::array<float, 2> output;
     callback(fixture.session, a, output);
     REQUIRE(fixture.session.service(1).submitted == 1);
@@ -766,7 +615,7 @@ TEST_CASE("shared session loss retires exact work but never reprimes the lost pr
           "[gpu_audio][shared_io][session][recovery]") {
     Fixture fixture;
     fixture.prepare();
-    fixture.provider->auto_complete = false;
+    fixture.provider->complete_on_poll = false;
     std::array<float, 2> output;
     callback(fixture.session, a, output);
     REQUIRE(fixture.session.service(1).submitted == 1);
@@ -783,11 +632,58 @@ TEST_CASE("shared session loss retires exact work but never reprimes the lost pr
     REQUIRE(fixture.session.release());
 }
 
+TEST_CASE("shared session latches a worker-observed fault at the block it refused",
+          "[gpu_audio][shared_io][session][recovery]") {
+    // Four healthy blocks first, so the faulted block is not the epoch's first.
+    constexpr std::uint64_t kFaulted = 4;
+    Fixture fixture;
+    fixture.prepare();
+    std::array<float, 2> output;
+    for (std::uint64_t block = 0; block < kFaulted; ++block) {
+        callback(fixture.session, a, output);
+        (void)fixture.session.service(block + 1);
+    }
+    REQUIRE(fixture.session.recovery_reason() == SharedIoRecoveryReason::None);
+    REQUIRE(fixture.session.next_sequence() == kFaulted);
+
+    auto expected = SharedIoRecoveryReason::ProviderFailure;
+    SECTION("a failed terminal") {
+        fixture.provider->terminal_status = SharedIoTerminalStatus::RetiredFailed;
+        callback(fixture.session, a, output);
+        (void)fixture.session.service(kFaulted + 1);
+    }
+    SECTION("a refused submission") {
+        fixture.provider->accept_submissions = false;
+        callback(fixture.session, a, output);
+        (void)fixture.session.service(kFaulted + 1);
+    }
+    SECTION("a provider lost with the block in flight") {
+        fixture.provider->complete_on_poll = false;
+        callback(fixture.session, a, output);
+        REQUIRE(fixture.session.service(kFaulted + 1).submitted == 1);
+        fixture.provider->lost = true;
+        fixture.provider->terminal_status = SharedIoTerminalStatus::RetiredFailed;
+        fixture.provider->complete_all();
+        (void)fixture.session.service(kFaulted + 2);
+        expected = SharedIoRecoveryReason::ProviderLost;
+    }
+    SECTION("an offline fence with the block in flight") {
+        fixture.provider->complete_on_poll = false;
+        callback(fixture.session, a, output);
+        REQUIRE(fixture.session.service(kFaulted + 1).submitted == 1);
+        REQUIRE(fixture.session.fence_for_offline());
+        expected = SharedIoRecoveryReason::OfflineFence;
+    }
+    CHECK(fixture.session.recovery_reason() == expected);
+    CHECK(fixture.session.recovery_sequence() == kFaulted);
+    REQUIRE(fixture.session.release());
+}
+
 TEST_CASE("shared session offline fence retires work and leaves future callbacks CPU-only",
           "[gpu_audio][shared_io][session][recovery]") {
     Fixture fixture;
     fixture.prepare();
-    fixture.provider->auto_complete = false;
+    fixture.provider->complete_on_poll = false;
     std::array<float, 2> output;
     callback(fixture.session, a, output);
     REQUIRE(fixture.session.service(1).submitted == 1);
@@ -801,6 +697,84 @@ TEST_CASE("shared session offline fence retires work and leaves future callbacks
     REQUIRE(fixture.session.release());
 }
 
+TEST_CASE("shared session offline fence refuses reprime until a fresh preparation",
+          "[gpu_audio][shared_io][session][recovery]") {
+    Fixture fixture;
+    fixture.prepare();
+    fixture.provider->complete_on_poll = false;
+    std::array<float, 2> output;
+    callback(fixture.session, a, output);
+    REQUIRE(fixture.session.service(1).submitted == 1);
+    REQUIRE(fixture.session.fence_for_offline());
+    // The provider can resume after its clean drain, but the offline fence is
+    // a session boundary: only release and a fresh prepare reopen GPU work.
+    REQUIRE(fixture.provider->can_resume_after_drain());
+    CHECK_FALSE(fixture.session.fence_and_reprime());
+    CHECK(fixture.session.fenced());
+    CHECK(fixture.session.epoch() == 1);
+    CHECK(fixture.session.recovery_reason() == SharedIoRecoveryReason::OfflineFence);
+    CHECK(callback(fixture.session, b, output).stamp.epoch == 0);
+    CHECK(fixture.session.service(2).submitted == 0);
+    CHECK(fixture.state->submits == 1);
+    REQUIRE(fixture.session.release());
+
+    // Positive control: a fresh preparation (a new session from the factory
+    // in production) admits GPU work again.
+    Fixture fresh;
+    fresh.prepare();
+    CHECK(callback(fresh.session, a, output).stamp.epoch != 0);
+    CHECK(fresh.session.service(1).submitted == 1);
+    REQUIRE(fresh.session.release());
+}
+
+TEST_CASE("released shared session cannot be prepared again",
+          "[gpu_audio][shared_io][session][recovery]") {
+    // The session is single-use: its pipeline prepares once. Recovery after an
+    // offline fence is therefore a new session, which starts unfenced. If this
+    // ever changes, prepare() must clear offline_fenced_ (it does today, but
+    // nothing can reach that path), and this test should become a re-prepare
+    // test that asserts GPU admission reopens.
+    Fixture fixture;
+    fixture.prepare();
+    REQUIRE(fixture.session.fence_for_offline());
+    REQUIRE(fixture.session.release());
+    auto owner = make_provider(fixture.state);
+    auto program = std::make_unique<FakeProgram>(*owner, fixture.state);
+    CHECK_FALSE(fixture.session.prepare(
+        {std::move(owner), std::move(program)},
+        {.pipeline = {.capacity = 8, .channels = 1, .block_size = 2, .fft_size = 2, .ir_length = 1},
+         .slots = 2}));
+    CHECK_FALSE(fixture.session.fence_and_reprime());
+}
+
+TEST_CASE("shared session offline fence refuses reprime behind an earlier recovery reason",
+          "[gpu_audio][shared_io][session][recovery]") {
+    Fixture fixture;
+    fixture.prepare();
+    std::array<float, 2> output;
+    callback(fixture.session, a, output);
+    REQUIRE(fixture.session.service(1).submitted == 1);
+    // Recovery reasons latch first-wins, so the guard cannot key on the reason.
+    fixture.session.request_recovery(SharedIoRecoveryReason::SequenceGap,
+                                     fixture.session.next_sequence());
+    REQUIRE(fixture.session.fence_for_offline());
+    CHECK(fixture.session.recovery_reason() == SharedIoRecoveryReason::SequenceGap);
+    CHECK_FALSE(fixture.session.fence_and_reprime());
+    CHECK(fixture.session.fenced());
+    REQUIRE(fixture.session.release());
+
+    // Positive control: the same recovery without the offline fence reprimes.
+    Fixture control;
+    control.prepare();
+    callback(control.session, a, output);
+    REQUIRE(control.session.service(1).submitted == 1);
+    control.session.request_recovery(SharedIoRecoveryReason::SequenceGap,
+                                     control.session.next_sequence());
+    CHECK(control.session.fence_and_reprime());
+    CHECK_FALSE(control.session.fenced());
+    REQUIRE(control.session.release());
+}
+
 TEST_CASE("shared session requires affirmative provider resume proof before reopening admission",
           "[gpu_audio][shared_io][session][recovery]") {
     Fixture fixture;
@@ -812,5 +786,81 @@ TEST_CASE("shared session requires affirmative provider resume proof before reop
     std::array<float, 2> output;
     CHECK(callback(fixture.session, a, output).stamp.epoch == 0);
     CHECK(fixture.session.service(1).submitted == 0);
+    REQUIRE(fixture.session.release());
+}
+
+namespace {
+
+std::uint64_t steady_ns() {
+    return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                          std::chrono::steady_clock::now().time_since_epoch())
+                                          .count());
+}
+
+struct ServiceDeadlines {
+    std::vector<std::uint64_t> deadlines;
+    std::uint64_t before_ns = 0;
+    std::uint64_t after_ns = 0;
+};
+
+ServiceDeadlines service_deadlines_for(std::uint64_t completion_service_wait_ns) {
+    Fixture fixture;
+    auto owner = make_provider(fixture.state);
+    fixture.provider = owner.get();
+    fixture.provider->service_deadlines.reserve(16);
+    auto program = std::make_unique<FakeProgram>(*fixture.provider, fixture.state);
+    REQUIRE(fixture.session.prepare(
+        {std::move(owner), std::move(program)},
+        {.pipeline = {.capacity = 8, .channels = 1, .block_size = 2, .fft_size = 2, .ir_length = 1},
+         .slots = 2,
+         .completion_service_wait_ns = completion_service_wait_ns}));
+    fixture.provider->service_deadlines.clear();
+    std::array<float, 2> output;
+    callback(fixture.session, a, output);
+    const auto before = steady_ns();
+    (void)fixture.session.service(1'000'000);
+    const auto after = steady_ns();
+    auto deadlines = fixture.provider->service_deadlines;
+    REQUIRE(fixture.session.release());
+    return {deadlines, before, after};
+}
+
+} // namespace
+
+TEST_CASE("shared session waits for in-flight completions only after submitting",
+          "[gpu_audio][shared_io][session][wake]") {
+    // The first drain must not delay submitting new ingress; the drain after
+    // the submit may wait, bounded by the configured budget.
+    // The budget starts after the submit, on the steady clock.
+    const auto bounded = service_deadlines_for(250'000);
+    REQUIRE(bounded.deadlines.size() == 2);
+    CHECK(bounded.deadlines[0] == 0);
+    CHECK(bounded.deadlines[1] >= bounded.before_ns + 250'000);
+    CHECK(bounded.deadlines[1] <= bounded.after_ns + 250'000);
+
+    // Positive control: without a budget both drains stay nonblocking polls.
+    const auto polling = service_deadlines_for(0);
+    REQUIRE(polling.deadlines.size() == 2);
+    CHECK(polling.deadlines[0] == 0);
+    CHECK(polling.deadlines[1] == 0);
+}
+
+TEST_CASE("shared session routes the completion notifier to its provider",
+          "[gpu_audio][shared_io][session][wake]") {
+    Session unprepared;
+    const auto noop = [](void*) noexcept {};
+    int context = 0;
+    CHECK_FALSE(unprepared.set_completion_notifier({noop, &context}));
+
+    Fixture fixture;
+    fixture.prepare();
+    // Positive control: a provider without an event source refuses.
+    CHECK_FALSE(fixture.session.set_completion_notifier({noop, &context}));
+    fixture.provider->notifier_supported = true;
+    REQUIRE(fixture.session.set_completion_notifier({noop, &context}));
+    CHECK(fixture.provider->notifier.notify == +noop);
+    CHECK(fixture.provider->notifier.context == &context);
+    REQUIRE(fixture.session.set_completion_notifier({}));
+    CHECK(fixture.provider->notifier.notify == nullptr);
     REQUIRE(fixture.session.release());
 }

@@ -3,6 +3,8 @@
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/theme_presets.hpp>
 #include <pulp/view/ui_components.hpp>
+#include <pulp/view/widgets.hpp>
+#include <pulp/canvas/canvas.hpp>
 
 using namespace pulp::view;
 
@@ -25,6 +27,51 @@ TEST_CASE("widget gallery builds a populated, sized board", "[view][gallery]") {
     REQUIRE(root->child_count() > 20);            // many primitives present
     REQUIRE(root->bounds().width == GALLERY_WIDTH);
     REQUIRE(root->bounds().height > 600.0f);      // multi-section board
+}
+
+TEST_CASE("widget gallery shows every chart shader preset on a knob", "[view][gallery][shader]") {
+    // The preset row puts the named chart shaders in the visual-regression
+    // corpus: seven knobs (bevel raised and pressed, inset channel, tube,
+    // light pipe, centre highlight, glow), each carrying a chart that compiles
+    // for the knob's arc.
+    auto root = build_widget_gallery(ink_signal(true));
+    int charted = 0;
+    for (size_t i = 0; i < root->child_count(); ++i) {
+        auto* knob = dynamic_cast<Knob*>(root->child_at(i));
+        if (!knob || knob->chart_shader().empty())
+            continue;
+        ++charted;
+#ifdef PULP_HAS_SKIA
+        const auto error = pulp::canvas::Canvas::compile_sdf_chart_sksl(
+            pulp::canvas::Canvas::SDFShape::flat_arc, knob->chart_shader());
+        INFO(error);
+        REQUIRE(error.empty());
+#endif
+    }
+    REQUIRE(charted == 7);
+}
+
+TEST_CASE("widget gallery shows chart shader presets on fader tracks", "[view][gallery][shader]") {
+    // Five faders in the preset row, three vertical and two horizontal, carry
+    // charts that compile for the fader's track shape.
+    auto root = build_widget_gallery(ink_signal(true));
+    int vertical = 0, horizontal = 0;
+    for (size_t i = 0; i < root->child_count(); ++i) {
+        auto* fader = dynamic_cast<Fader*>(root->child_at(i));
+        if (!fader || fader->chart_shader().empty())
+            continue;
+        (fader->orientation() == Fader::Orientation::vertical ? vertical : horizontal)++;
+        const auto shape = widget_chart_shape(*fader);
+        REQUIRE(shape == pulp::canvas::Canvas::SDFShape::stadium);
+#ifdef PULP_HAS_SKIA
+        const auto error =
+            pulp::canvas::Canvas::compile_sdf_chart_sksl(*shape, fader->chart_shader());
+        INFO(error);
+        REQUIRE(error.empty());
+#endif
+    }
+    REQUIRE(vertical == 3);
+    REQUIRE(horizontal == 2);
 }
 
 TEST_CASE("widget gallery renders to PNG in light and dark",

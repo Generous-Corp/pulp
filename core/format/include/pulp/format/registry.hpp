@@ -44,8 +44,11 @@ struct PluginRegistration {
     std::uint32_t au_manufacturer = 0;
 
     // Per-plugin editor assets for multi-plugin bundles, where the binary-wide
-    // PULP_UI_* compile defines cannot distinguish plugins. Null = fall back to
-    // the compile-time defines (the single-plugin path).
+    // record (see editor_assets.hpp) cannot distinguish plugins. All null =
+    // fall back to the binary-wide record (the single-plugin path). A binary
+    // that sets ui_script here without declaring UI_SCRIPT on a target must
+    // call install_scripted_editor_builder() (editor_assets.hpp) once, or the
+    // editor logs the missing builder and opens AutoUi.
     const char* ui_script = nullptr;
     const char* ui_theme = nullptr;
     const char* ui_asset_roots = nullptr;

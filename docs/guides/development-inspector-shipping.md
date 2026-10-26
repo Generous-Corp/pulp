@@ -109,6 +109,14 @@ renaming a helper library cannot hide retained control code. The check reads
 the final linked artifact, so a CMake option or an unlinked declaration is not
 accepted as shipping proof.
 
+Markers are matched inside the artifact's printable string runs rather than in
+a hex dump of the whole image. Every marker is printable ASCII without
+whitespace and at least 14 bytes long, so a marker present anywhere in the raw
+bytes is always inside one such run and the two searches agree; the scanner
+refuses a marker that breaks either property. Reading the runs keeps the scan
+to about a second on a 40 MB plug-in, where hex-encoding the image took
+several seconds on every link.
+
 The generated `dev.pulp.control/shipping-artifact@1` sidecar is per binary and
 names its format, platform, complete architecture list, profile, and canonical
 manifest digest. This makes diagnostic and research artifacts visibly distinct
@@ -119,7 +127,13 @@ Custom `pulp-install-<target>` targets depend on every format binary they copy.
 That dependency is load-bearing: installation cannot copy a stale format while
 skipping its post-link scan. A persisted scan stamp depends on the artifact,
 both manifests, and the scanner itself, so changing shipping policy invalidates
-an earlier report even when the binary did not relink. The helper and scanner
+an earlier report even when the binary did not relink. An artifact whose bundle
+is filled in after it links names those steps with `AFTER`: the macOS AUv3
+container app passes its embed sentinel, so the scan waits for the framework
+and appex to be copied in, runs after the copies in its own post-build list,
+and rescans when they are re-embedded. Without that, the scan and the embed
+step run side by side and the scan reads the bundle while it is rewritten.
+The helper and scanner
 are both exported in the installed CMake SDK, and an installed-layout test
 builds the complete profile and format policy matrix without reaching back into
 the Pulp source tree.

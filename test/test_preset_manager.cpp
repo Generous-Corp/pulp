@@ -106,9 +106,12 @@ static fs::path write_source_content_pack(const fs::path& root,
     return root;
 }
 
-static fs::path write_content_pack_archive(const fs::path& archive,
-                                           const fs::path& source_root,
-                                           bool add_unlisted_payload = false) {
+// `extra_files` are (archive path, body) pairs added and hashed like the
+// source tree's own files, so a test can shape an entry the directory fixture
+// never writes (for instance a large, highly compressible payload).
+static fs::path write_content_pack_archive(
+    const fs::path& archive, const fs::path& source_root, bool add_unlisted_payload = false,
+    const std::vector<std::pair<std::string, std::string>>& extra_files = {}) {
     mz_zip_archive zip{};
     REQUIRE(mz_zip_writer_init_file(&zip, archive.string().c_str(), 0));
     std::error_code ec;
@@ -118,6 +121,11 @@ static fs::path write_content_pack_archive(const fs::path& archive,
         const auto rel = fs::relative(it->path(), source_root, ec).generic_string();
         std::ifstream file(it->path(), std::ios::binary);
         std::string body((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        REQUIRE(mz_zip_writer_add_mem(&zip, rel.c_str(), body.data(), body.size(),
+                                      MZ_DEFAULT_COMPRESSION));
+        hashes.push_back({rel, "sha256-" + pulp::runtime::sha256_hex(body)});
+    }
+    for (const auto& [rel, body] : extra_files) {
         REQUIRE(mz_zip_writer_add_mem(&zip, rel.c_str(), body.data(), body.size(),
                                       MZ_DEFAULT_COMPRESSION));
         hashes.push_back({rel, "sha256-" + pulp::runtime::sha256_hex(body)});
@@ -695,6 +703,54 @@ TEST_CASE("PresetManager user preset scan ignores non-json files and records nes
     REQUIRE(presets[0].folder == "Bank");
     REQUIRE(presets[1].name == "Root");
     REQUIRE(presets[1].folder.empty());
+}
+
+TEST_CASE("PresetManager save and rename reject names that leave the presets directory",
+          "[state][preset][path-escape]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-path-escape");
+    StateStore store;
+    setup_test_store(store);
+    PresetManager pm(store, "TestCo", "TestPlugin");
+
+    const fs::path user_dir = pm.user_presets_dir();
+    const fs::path outside = user_dir.parent_path();
+
+    REQUIRE_FALSE(pm.save("../escape"));
+    REQUIRE_FALSE(fs::exists(outside / "escape.json"));
+    REQUIRE_FALSE(pm.save("nested/escape"));
+    REQUIRE_FALSE(fs::exists(user_dir / "nested" / "escape.json"));
+    REQUIRE_FALSE(pm.save("Mix", ".."));
+    REQUIRE_FALSE(fs::exists(outside / "Mix.json"));
+    REQUIRE_FALSE(pm.save("Mix", "Keys/../bank"));
+    REQUIRE_FALSE(fs::exists(user_dir / "bank" / "Mix.json"));
+    REQUIRE_FALSE(pm.save("Mix", "/abs"));
+    REQUIRE_FALSE(pm.save("Mix", "../bank"));
+    REQUIRE_FALSE(fs::exists(outside / "bank" / "Mix.json"));
+    REQUIRE_FALSE(pm.save(std::string("nul\0name", 8)));
+    REQUIRE_FALSE(pm.save(".."));
+    REQUIRE_FALSE(pm.save("NUL"));
+    REQUIRE_FALSE(pm.save("com1.json"));
+    REQUIRE_FALSE(pm.save("Mix", "con"));
+    REQUIRE_FALSE(pm.save(""));
+    REQUIRE(pm.current_preset_name().empty());
+
+    // Positive control: ordinary names and folders still save, including
+    // a name that merely contains dots.
+    REQUIRE(pm.save("Soft Pad", "Keys/Analog"));
+    REQUIRE(fs::exists(user_dir / "Keys" / "Analog" / "Soft Pad.json"));
+    REQUIRE(pm.save("Normal Name"));
+    REQUIRE(fs::exists(user_dir / "Normal Name.json"));
+    REQUIRE(pm.save("v1..2", "Bank"));
+    REQUIRE(fs::exists(user_dir / "Bank" / "v1..2.json"));
+
+    auto normal = require_user_preset(pm, "Normal Name");
+    REQUIRE_FALSE(pm.rename(normal, "../renamed"));
+    REQUIRE(fs::exists(normal.path));
+    REQUIRE_FALSE(fs::exists(outside / "renamed.json"));
+    REQUIRE_FALSE(pm.rename(normal, "sub/renamed"));
+    REQUIRE(fs::exists(normal.path));
+    REQUIRE(pm.rename(normal, "Renamed"));
+    REQUIRE(fs::exists(user_dir / "Renamed.json"));
 }
 
 TEST_CASE("PresetManager rename and delete update current preset and callbacks", "[state][preset]") {
@@ -1565,6 +1621,108 @@ TEST_CASE("runtime content installer accepts packed pulpcontent archives",
     REQUIRE(fs::exists(data_root / "Content" / "dev.pulp.test.plugin" /
                        "dev.pulp.test.archive-expansion" / "0.1.0" /
                        "presets" / "DropInit.json"));
+}
+
+TEST_CASE("runtime content installer refuses an archive above the decompressed-size caps before "
+          "extracting",
+          "[state][preset][content]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-content-runtime-archive-size");
+    const auto data_root = sandbox.root / "user-data";
+    const auto source = write_source_content_pack(sandbox.root / "incoming",
+                                                  "dev.pulp.test.archive-padded", "0.1.0");
+    // A whitespace-padded theme: 1 MiB declared, a few hundred bytes stored.
+    const std::string padded =
+        std::string(std::size_t{1} << 20, ' ') + R"json({"name":"Padded"})json";
+    const auto archive = write_content_pack_archive(sandbox.root / "padded.pulpcontent", source,
+                                                    false, {{"themes/Padded.json", padded}});
+
+    ContentCapabilityManifest manifest;
+    manifest.plugin_id = "dev.pulp.test.plugin";
+    manifest.capabilities = {"content.presets.v1", "content.themes.v1"};
+    manifest.content_kinds = {"presets", "themes"};
+
+    const auto issue_naming = [](const std::vector<std::string>& issues, std::string_view entry) {
+        return std::any_of(issues.begin(), issues.end(), [&](const std::string& issue) {
+            return issue.rfind("archive-size:", 0) == 0 && issue.find(entry) != std::string::npos;
+        });
+    };
+
+    SECTION("per-entry cap") {
+        ContentInstallLimits limits;
+        limits.max_entry_bytes = std::uint64_t{64} << 10;
+        auto preview = preview_content_pack_install(archive, manifest, data_root, limits);
+        REQUIRE_FALSE(preview.ok);
+        REQUIRE(issue_naming(preview.issues, "themes/Padded.json"));
+
+        auto installed = install_content_pack(archive, manifest, data_root, true, limits);
+        REQUIRE_FALSE(installed.ok);
+        REQUIRE(issue_naming(installed.issues, "themes/Padded.json"));
+        REQUIRE_FALSE(fs::exists(data_root / "Content"));
+    }
+
+    SECTION("total cap across entries that each fit") {
+        ContentInstallLimits limits;
+        limits.max_total_bytes = std::uint64_t{1} << 20; // the padded theme alone nearly fills it
+        auto preview = preview_content_pack_install(archive, manifest, data_root, limits);
+        REQUIRE_FALSE(preview.ok);
+        REQUIRE(std::any_of(preview.issues.begin(), preview.issues.end(), [](const std::string& i) {
+            return i.rfind("archive-size:", 0) == 0 && i.find("total cap") != std::string::npos;
+        }));
+        REQUIRE_FALSE(fs::exists(data_root / "Content"));
+    }
+
+    SECTION("entry-count cap") {
+        // The pack holds the manifest, a preset, two themes and the hash list;
+        // a cap of two refuses it from the central directory, naming the third.
+        ContentInstallLimits limits;
+        limits.max_entries = 2;
+        auto preview = preview_content_pack_install(archive, manifest, data_root, limits);
+        REQUIRE_FALSE(preview.ok);
+        REQUIRE(std::any_of(preview.issues.begin(), preview.issues.end(), [](const std::string& i) {
+            return i.rfind("archive-size:", 0) == 0 &&
+                   i.find("entry-count cap of 2") != std::string::npos;
+        }));
+        REQUIRE_FALSE(fs::exists(data_root / "Content"));
+    }
+
+    SECTION("positive control: the default caps admit the same pack") {
+        auto preview = preview_content_pack_install(archive, manifest, data_root);
+        REQUIRE(preview.ok);
+        auto installed = install_content_pack(archive, manifest, data_root, true);
+        REQUIRE(installed.ok);
+        const auto extracted = data_root / "Content" / "dev.pulp.test.plugin" /
+                               "dev.pulp.test.archive-padded" / "0.1.0" / "themes" / "Padded.json";
+        REQUIRE(fs::exists(extracted));
+        REQUIRE(fs::file_size(extracted) == padded.size());
+    }
+}
+
+TEST_CASE("content install limits clamp to the defaults and count entries",
+          "[state][preset][content]") {
+    const ContentInstallLimits defaults;
+
+    // A user-facing byte cap only tightens: a value above a default leaves it.
+    const auto raised = clamp_content_install_bytes(defaults, std::uint64_t{64} << 30);
+    REQUIRE(raised.max_total_bytes == defaults.max_total_bytes);
+    REQUIRE(raised.max_entry_bytes == defaults.max_entry_bytes);
+    REQUIRE(raised.max_entries == defaults.max_entries);
+    const auto lowered = clamp_content_install_bytes(defaults, 65536);
+    REQUIRE(lowered.max_total_bytes == 65536);
+    REQUIRE(lowered.max_entry_bytes == 65536);
+    REQUIRE(lowered.max_entries == defaults.max_entries);
+
+    // The budget counts admitted entries and refuses the one past the cap even
+    // when it carries no bytes at all.
+    ContentInstallLimits limits;
+    limits.max_entries = 2;
+    ContentSizeBudget budget(limits);
+    REQUIRE(budget.admit("a.json", 10).empty());
+    REQUIRE(budget.admit("b.json", 0).empty());
+    REQUIRE(budget.admitted_entries() == 2);
+    const auto refused = budget.admit("c.json", 0);
+    REQUIRE(refused.find("`c.json`") != std::string::npos);
+    REQUIRE(refused.find("entry-count cap of 2") != std::string::npos);
+    REQUIRE(budget.admitted_entries() == 2); // a refused entry is not counted
 }
 
 TEST_CASE("runtime content installer rejects pulpcontent archives without hash manifests",

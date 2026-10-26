@@ -14,6 +14,8 @@ target_sources(pulp-canvas PRIVATE
     # Skia-free on purpose: it is a value, so it must exist in every build
     # config, including the ones with no GPU backend at all.
     src/drawlist_format.cpp
+    # Reference CSS gradient colour interpolation; Skia-free, like Path.
+    src/gradient_interpolation.cpp
     src/path.cpp
     src/path_measure.cpp
     src/recording_canvas.cpp
@@ -127,6 +129,9 @@ if(APPLE)
         # Retained Path draws + handle-based compositing layers (offscreen
         # CGBitmapContexts sealed to CGImageRefs that outlive the frame).
         platform/mac/cg_canvas_path.mm
+        # CoreText face registry + measurement shared by CG paint and the
+        # non-Skia TextShaper, so a label is measured with the face it paints.
+        platform/mac/coretext_text.mm
     )
     target_link_libraries(pulp-canvas PRIVATE
         "-framework CoreGraphics"
@@ -139,41 +144,15 @@ endif()
 
 target_link_libraries(pulp-canvas PUBLIC pulp::runtime)
 
-# Skia Graphite GPU rendering backend
-if(PULP_HAS_SKIA)
-    target_sources(pulp-canvas PRIVATE
-        src/skia_canvas.cpp
-        src/skia_canvas_fonts.cpp
-        src/skia_canvas_text.cpp
-        src/skia_canvas_filter.cpp
-        src/skia_canvas_mask.cpp
-        src/skia_canvas_gradients.cpp
-        src/skia_canvas_box_shadow.cpp
-        # Retained Path draws + handle-based compositing layers (offscreen
-        # SkSurfaces sealed to SkImages that outlive the frame).
-        src/skia_canvas_path.cpp
-        src/box_shadow_cache.cpp
-        src/svg_dom_cache.cpp
-        src/image_file_cache.cpp
-        src/skia_canvas_opacity.cpp
-        src/skia_canvas_shaders.cpp
-        # Curated named GPU post-effects (crt / grain / vignette / noise /
-        # brushed / bloom) for the scripted-UI canvas — safe named SkSL, no
-        # arbitrary shader source from generated UIs.
-        src/named_shader_effects.cpp
-        src/bundled_fonts.cpp
-        # TextFontContext glues emoji_segmenter into the SkShaper +
-        # SkParagraph paths and owns the per-context FontCollection used
-        # for Label/measurement.
-        src/text_font_context.cpp
-    )
-
+if(PULP_HAS_SKIA OR APPLE)
     # Embed external/fonts/*.ttf into a static lib that pulp-canvas links
     # privately. The Skia prebuilt does not export SkFontMgr_New_Custom_Data
-    # (FreeType is not linked in), so we materialise these into SkTypefaces
-    # via the platform font manager at runtime — see bundled_fonts.cpp.
+    # (FreeType is not linked in), so with Skia these become SkTypefaces via the
+    # platform font manager at runtime (bundled_fonts.cpp). On Apple the same
+    # bytes also feed the CoreText registry the CoreGraphics canvas paints and
+    # measures with (platform/mac/coretext_text.mm), with or without Skia.
     # Keep the SOURCES list aligned with the bundled_blobs() table in
-    # bundled_fonts.cpp; the C++ side names the symbols directly.
+    # src/bundled_font_blobs.cpp; the C++ side names the symbols directly.
     #
     # PulpEmbedData provides pulp_add_binary_data() in isolation from the
     # rest of PulpUtils.cmake (which fails fast unless format/view targets
@@ -197,6 +176,58 @@ if(PULP_HAS_SKIA)
     # to add pulp-bundled-fonts to PULP_SDK_TARGETS for installs.
     set_target_properties(pulp-bundled-fonts PROPERTIES
         EXPORT_NAME bundled-fonts)
+    target_sources(pulp-canvas PRIVATE src/bundled_font_blobs.cpp)
+endif()
+
+
+# Skia Graphite GPU rendering backend
+if(PULP_HAS_SKIA)
+    target_sources(pulp-canvas PRIVATE
+        src/skia_canvas.cpp
+        src/skia_canvas_fonts.cpp
+        src/skia_canvas_text.cpp
+        src/skia_paragraph_cache.cpp
+        src/skia_canvas_filter.cpp
+        src/skia_canvas_mask.cpp
+        src/skia_canvas_gradients.cpp
+        src/skia_canvas_box_shadow.cpp
+        # Retained Path draws + handle-based compositing layers (offscreen
+        # SkSurfaces sealed to SkImages that outlive the frame).
+        src/skia_canvas_path.cpp
+        src/box_shadow_cache.cpp
+        src/svg_dom_cache.cpp
+        src/image_file_cache.cpp
+        src/skia_canvas_opacity.cpp
+        src/skia_canvas_shaders.cpp
+        # Curated named GPU post-effects (crt / grain / vignette / noise /
+        # brushed / bloom) for the scripted-UI canvas — safe named SkSL, no
+        # arbitrary shader source from generated UIs.
+        src/named_shader_effects.cpp
+        src/bundled_fonts.cpp
+        src/font_tables.cpp
+        # TextFontContext glues emoji_segmenter into the SkShaper +
+        # SkParagraph paths and owns the per-context FontCollection used
+        # for Label/measurement.
+        src/text_font_context.cpp
+        # CSS font-weight matching for the paragraph collection's default
+        # font manager (see font_weight_match.hpp).
+        src/font_weight_match.cpp
+        src/css_weight_font_manager.cpp
+    )
+    if(NOT MSVC)
+        # It subclasses SkFontMgr, whose type info the prebuilt Skia does not
+        # export.
+        set_source_files_properties(src/css_weight_font_manager.cpp PROPERTIES
+            COMPILE_OPTIONS "-fno-rtti")
+    endif()
+    if(APPLE)
+        target_sources(pulp-canvas PRIVATE src/system_ui_font_manager.cpp)
+        # It subclasses SkFontMgr, whose type info the prebuilt Skia does not
+        # export.
+        set_source_files_properties(src/system_ui_font_manager.cpp PROPERTIES
+            COMPILE_OPTIONS "-fno-rtti")
+    endif()
+
 
     # Optional bundled Noto Color Emoji typeface — gated by the
     # PULP_BUNDLE_NOTO_COLOR_EMOJI option so macOS / Windows release
@@ -379,17 +410,20 @@ set(PULP_CANVAS_UNIT_HEADERS
     include/pulp/canvas/font_options.hpp
     include/pulp/canvas/font_resolver.hpp
     include/pulp/canvas/font_scope.hpp
+    include/pulp/canvas/gradient_interpolation.hpp
     include/pulp/canvas/image_codecs.hpp
     include/pulp/canvas/image_convolution.hpp
     include/pulp/canvas/image_file_cache.hpp
     include/pulp/canvas/image_probe.hpp
     include/pulp/canvas/lottie_animation.hpp
     include/pulp/canvas/msdf_atlas.hpp
+    include/pulp/canvas/paragraph_cache.hpp
     include/pulp/canvas/path.hpp
     include/pulp/canvas/path_measure.hpp
     include/pulp/canvas/path_to_sdf.hpp
     include/pulp/canvas/psdf_atlas.hpp
     include/pulp/canvas/recording_canvas.hpp
+    include/pulp/canvas/resource_counters.hpp
     include/pulp/canvas/rectangle_list.hpp
     include/pulp/canvas/scene/scene.hpp
     include/pulp/canvas/scene/scene_group.hpp
@@ -406,10 +440,12 @@ set(PULP_CANVAS_UNIT_HEADERS
     include/pulp/canvas/sdf_text.hpp
     include/pulp/canvas/shaped_text.hpp
     include/pulp/canvas/skia_canvas.hpp
+    include/pulp/canvas/skia_text_raster_policy.hpp
     include/pulp/canvas/svg.hpp
     include/pulp/canvas/svg_dom_cache.hpp
     include/pulp/canvas/text_font_context.hpp
     include/pulp/canvas/text_layout.hpp
+    include/pulp/canvas/text_raster_policy.hpp
     include/pulp/canvas/text_run_planner.hpp
     include/pulp/canvas/text_shaper.hpp
     include/pulp/canvas/text_utf8.hpp

@@ -28,6 +28,7 @@
 #include "include/core/SkPoint.h"
 #include "include/core/SkShader.h"
 #include "skia_gradient_compat.hpp"
+#include "skia_resource_counting.hpp"
 
 #endif  // PULP_HAS_SKIA
 
@@ -66,7 +67,8 @@ void SkiaCanvas::set_fill_gradient_linear(float x0, float y0, float x1, float y1
     std::vector<float> sk_pos;
     colors_to_skia4f(colors, positions, count, sk_colors, sk_pos);
     SkPoint pts[2] = {{x0, y0}, {x1, y1}};
-    gradient_shader_ = skia_gradient::make_linear(pts, sk_colors.data(), sk_pos.data(), count);
+    gradient_shader_ = skia_gradient::make_linear(pts, sk_colors.data(), sk_pos.data(), count,
+                                                  SkTileMode::kClamp, gradient_interpolation());
     has_gradient_ = gradient_shader_ != nullptr;
 }
 
@@ -83,9 +85,8 @@ void SkiaCanvas::set_fill_gradient_linear_repeating(float x0, float y0,
     std::vector<float> sk_pos;
     colors_to_skia4f(colors, positions, count, sk_colors, sk_pos);
     SkPoint pts[2] = {{x0, y0}, {x1, y1}};
-    gradient_shader_ = skia_gradient::make_linear(pts, sk_colors.data(),
-                                                  sk_pos.data(), count,
-                                                  SkTileMode::kRepeat);
+    gradient_shader_ = skia_gradient::make_linear(pts, sk_colors.data(), sk_pos.data(), count,
+                                                  SkTileMode::kRepeat, gradient_interpolation());
     has_gradient_ = gradient_shader_ != nullptr;
 }
 
@@ -94,8 +95,8 @@ void SkiaCanvas::set_fill_gradient_radial(float cx, float cy, float radius,
     std::vector<SkColor4f> sk_colors;
     std::vector<float> sk_pos;
     colors_to_skia4f(colors, positions, count, sk_colors, sk_pos);
-    gradient_shader_ = skia_gradient::make_radial({cx, cy}, radius,
-                                                  sk_colors.data(), sk_pos.data(), count);
+    gradient_shader_ = skia_gradient::make_radial({cx, cy}, radius, sk_colors.data(), sk_pos.data(),
+                                                  count, gradient_interpolation());
     has_gradient_ = gradient_shader_ != nullptr;
 }
 
@@ -115,8 +116,8 @@ void SkiaCanvas::set_fill_gradient_radial_elliptical(
     std::vector<SkColor4f> sk_colors;
     std::vector<float> sk_pos;
     colors_to_skia4f(colors, positions, count, sk_colors, sk_pos);
-    auto shader = skia_gradient::make_radial({cx, cy}, rx,
-                                             sk_colors.data(), sk_pos.data(), count);
+    auto shader = skia_gradient::make_radial({cx, cy}, rx, sk_colors.data(), sk_pos.data(), count,
+                                             gradient_interpolation());
     if (shader) {
         SkMatrix m = SkMatrix::Translate(cx, cy);
         m.preScale(1.0f, ry / rx);
@@ -139,8 +140,9 @@ void SkiaCanvas::set_fill_gradient_conic(float cx, float cy, float start_angle,
     std::vector<SkColor4f> sk_colors;
     std::vector<float> sk_pos;
     colors_to_skia4f(colors, positions, count, sk_colors, sk_pos);
-    gradient_shader_ = skia_gradient::make_sweep({cx, cy}, 0.0f, 360.0f,
-                                                 sk_colors.data(), sk_pos.data(), count);
+    gradient_shader_ =
+        skia_gradient::make_sweep({cx, cy}, 0.0f, 360.0f, sk_colors.data(), sk_pos.data(), count,
+                                  SkTileMode::kClamp, gradient_interpolation());
     gradient_shader_ = rotate_sweep(std::move(gradient_shader_), cx, cy, start_angle);
     has_gradient_ = gradient_shader_ != nullptr;
 }
@@ -162,7 +164,7 @@ void SkiaCanvas::set_fill_gradient_conic_repeating(float cx, float cy, float sta
     colors_to_skia4f(colors, positions, count, sk_colors, sk_pos);
     gradient_shader_ = skia_gradient::make_sweep({cx, cy}, 0.0f, sweep_turns * 360.0f,
                                                  sk_colors.data(), sk_pos.data(), count,
-                                                 SkTileMode::kRepeat);
+                                                 SkTileMode::kRepeat, gradient_interpolation());
     gradient_shader_ = rotate_sweep(std::move(gradient_shader_), cx, cy, start_angle);
     has_gradient_ = gradient_shader_ != nullptr;
 }
@@ -178,8 +180,9 @@ void SkiaCanvas::set_fill_gradient_radial_two_circles(
     std::vector<SkColor4f> sk_colors;
     std::vector<float> sk_pos;
     colors_to_skia4f(colors, positions, count, sk_colors, sk_pos);
-    gradient_shader_ = skia_gradient::make_two_point_conical({x0, y0}, r0, {x1, y1}, r1,
-                                                             sk_colors.data(), sk_pos.data(), count);
+    gradient_shader_ =
+        skia_gradient::make_two_point_conical({x0, y0}, r0, {x1, y1}, r1, sk_colors.data(),
+                                              sk_pos.data(), count, gradient_interpolation());
     has_gradient_ = gradient_shader_ != nullptr;
 }
 
@@ -205,7 +208,8 @@ void SkiaCanvas::set_stroke_gradient_linear(float x0, float y0, float x1, float 
     std::vector<float> sk_pos;
     colors_to_skia4f(colors, positions, count, sk_colors, sk_pos);
     SkPoint pts[2] = {{x0, y0}, {x1, y1}};
-    stroke_shader_ = skia_gradient::make_linear(pts, sk_colors.data(), sk_pos.data(), count);
+    stroke_shader_ = skia_gradient::make_linear(pts, sk_colors.data(), sk_pos.data(), count,
+                                                SkTileMode::kClamp, gradient_interpolation());
 }
 
 void SkiaCanvas::set_stroke_gradient_radial(float cx, float cy, float radius,
@@ -213,8 +217,8 @@ void SkiaCanvas::set_stroke_gradient_radial(float cx, float cy, float radius,
     std::vector<SkColor4f> sk_colors;
     std::vector<float> sk_pos;
     colors_to_skia4f(colors, positions, count, sk_colors, sk_pos);
-    stroke_shader_ = skia_gradient::make_radial({cx, cy}, radius,
-                                                sk_colors.data(), sk_pos.data(), count);
+    stroke_shader_ = skia_gradient::make_radial({cx, cy}, radius, sk_colors.data(), sk_pos.data(),
+                                                count, gradient_interpolation());
 }
 
 void SkiaCanvas::set_stroke_gradient_radial_two_circles(
@@ -224,8 +228,9 @@ void SkiaCanvas::set_stroke_gradient_radial_two_circles(
     std::vector<SkColor4f> sk_colors;
     std::vector<float> sk_pos;
     colors_to_skia4f(colors, positions, count, sk_colors, sk_pos);
-    stroke_shader_ = skia_gradient::make_two_point_conical({x0, y0}, r0, {x1, y1}, r1,
-                                                           sk_colors.data(), sk_pos.data(), count);
+    stroke_shader_ =
+        skia_gradient::make_two_point_conical({x0, y0}, r0, {x1, y1}, r1, sk_colors.data(),
+                                              sk_pos.data(), count, gradient_interpolation());
 }
 
 void SkiaCanvas::set_stroke_gradient_conic(float cx, float cy, float start_angle,
@@ -235,8 +240,9 @@ void SkiaCanvas::set_stroke_gradient_conic(float cx, float cy, float start_angle
     colors_to_skia4f(colors, positions, count, sk_colors, sk_pos);
     // Same full-turn window + rotation as the fill side; a stroked sweep loses
     // the identical wedge otherwise.
-    stroke_shader_ = skia_gradient::make_sweep({cx, cy}, 0.0f, 360.0f,
-                                               sk_colors.data(), sk_pos.data(), count);
+    stroke_shader_ =
+        skia_gradient::make_sweep({cx, cy}, 0.0f, 360.0f, sk_colors.data(), sk_pos.data(), count,
+                                  SkTileMode::kClamp, gradient_interpolation());
     stroke_shader_ = rotate_sweep(std::move(stroke_shader_), cx, cy, start_angle);
 }
 
@@ -280,7 +286,7 @@ sk_sp<SkImage> decode_pattern_image(const std::string& src) {
     }
     auto data = SkData::MakeFromFileName(src.c_str());
     if (!data) return nullptr;
-    return SkImages::DeferredFromEncodedData(data);
+    return decode_encoded_image(data);
 }
 
 } // namespace

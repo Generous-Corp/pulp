@@ -30,6 +30,11 @@ target_sources(pulp-gpu-audio
         src/gpu_wavenet.cpp
         src/gpu_spectral_mask.cpp
         src/gpu_wavenet_realtime_node.cpp
+        src/gpu_audio_provider_pool.cpp
+        src/gpu_neural_realtime_node.cpp
+        src/gpu_neural_model.cpp
+        src/detail/wavenet_streaming_backend.cpp
+        src/detail/neural_shadow_worker.cpp
         src/detail/realtime_gpu_audio_path.cpp
         src/detail/shared_io_arena.cpp
         src/detail/dawn_submission_tracker.cpp
@@ -41,6 +46,8 @@ target_sources(pulp-gpu-audio
         src/detail/shared_io_convolution_pipeline.cpp
         src/detail/shared_io_convolution_session.cpp
         src/detail/shared_io_trace.cpp
+        # Host-memory shared-I/O provider; Dawn-free, built on every platform.
+        src/detail/cpu_shared_io_provider.cpp
 )
 
 if(APPLE AND NOT PULP_IOS AND PULP_SKIA_PROVIDES_DAWN)
@@ -189,6 +196,9 @@ if(APPLE AND NOT PULP_IOS AND PULP_SKIA_PROVIDES_DAWN)
         src/detail/dawn_shared_io_wavenet_program.cpp
         src/detail/dawn_wavenet_factory.cpp)
     target_compile_definitions(pulp-gpu-audio PRIVATE PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO=1)
+    # The provider's WaveNet program runs the same layer kernel as GpuCompute;
+    # the WGSL source lives with the render module (wavenet_layer_wgsl.hpp).
+    target_include_directories(pulp-gpu-audio PRIVATE "${CMAKE_SOURCE_DIR}/core/render/src")
     if(PULP_GPU_AUDIO_HAS_VELLUM_D15)
         # Do not link Pulp's static Dawn archive on this edge.  The executable
         # keeps undefined Dawn references which resolve through vellum-gpu,

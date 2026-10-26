@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstddef>
+
 #include <pulp/view/pending_damage.hpp>
 #include <pulp/view/view.hpp>
 #include <memory>
@@ -20,6 +22,16 @@ namespace detail {
 /// shared_ptr in the host and weak_ptr in each subscription, so neither
 /// destruction order is a use-after-free.
 class GpuSurfaceObserverRegistry;
+
+/// A lite editor binary (pulp_add_plugin LITE_EDITOR) is built without the GPU
+/// host. When its editor asks for one anyway (a scripted UI, or a view whose
+/// requires_gpu_host() is true), PluginViewHost::create notes the request here
+/// and opens the CoreGraphics host. The first request in the process logs a
+/// warning naming the fix; every request is counted. Returns true for the
+/// request that logged.
+bool note_lite_host_gpu_request();
+/// Requests noted by note_lite_host_gpu_request() in this process.
+std::size_t lite_host_gpu_request_count() noexcept;
 }  // namespace detail
 
 // Platform-specific handle types
@@ -118,8 +130,8 @@ public:
     // Create a plugin view host for the given view tree.
     //
     // create(), set_factory(), clear_factory(), has_factory(), and
-    // register_platform_plugin_view_host() are declared here but DEFINED in pulp-view-tooling
-    // (pulp::view and pulp::format-view link it), together with the platform hosts. A target
+    // register_platform_plugin_view_host() are declared here but DEFINED in pulp-view-tooling,
+    // together with the platform hosts. A target
     // that links only pulp-view-core can subclass PluginViewHost but cannot create one.
     //
     // Platform support:

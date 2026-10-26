@@ -2,6 +2,7 @@
 
 #include "dawn_shared_io_provider.hpp"
 #include "shared_io_execution_contract.hpp"
+#include "shared_io_execution_predictor.hpp"
 #include "shared_io_provider_identity.hpp"
 #include "shared_io_trace.hpp"
 
@@ -23,6 +24,8 @@ enum class GpuConvolverTrialLoad : std::uint8_t {
     GpuContention,
     Overload,
 };
+
+struct SharedIoTraceDrainObserver;
 
 // Host-observed machine state; this never implies GPU execution or success.
 enum class GpuConvolverThermalState : std::uint8_t { Unavailable, Nominal, Warm, Throttled };
@@ -161,6 +164,10 @@ inline bool valid_gpu_convolver_trial_context(const GpuConvolverTrialContext& co
 // until the paired P4 provider contract is complete. It is consumed exactly
 // once by GpuConvolver::prepare() and is never read by the callback.
 struct GpuConvolverTrialConfig {
+    // Private campaign-only sink. It is called by the serialized diagnostic
+    // drain and must remain alive through release(); ordinary runtime callers
+    // leave it null.
+    const SharedIoTraceDrainObserver* observer = nullptr;
     SharedIoRequest requested_path = SharedIoRequest::Auto;
     // Preparation generation stamped into staged terminal records. Shared-I/O
     // records receive their generation from the prepared arena; keeping this
@@ -186,6 +193,11 @@ struct GpuConvolverTrialConfig {
     // Private diagnostic retention bound. A probe sets this to its complete
     // callback census size; zero leaves the ordinary runtime queue behavior.
     std::uint32_t retention_capacity = 0;
+    SharedIoExecutionPredictor::Config prediction{};
+    SharedIoCalibrationIdentity calibration_identity;
+    bool authenticated_calibration = false;
+    std::uint64_t calibration_max_age_ns = 0;
+    std::string calibration_source_revision;
 };
 
 // Quiescent diagnostic drain for the complete admission census. This remains

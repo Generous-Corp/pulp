@@ -53,10 +53,17 @@ RetainedChargeOracle exact_owned_store_charge(
 #if PULP_FFT_HAS_VDSP
     result.platform_fft_setups =
         2u * fft_size * kVdspFftSetupChargeBytesPerPoint;
-    const auto platform_split_buffers = 4u * store_bytes<float>(fft_size);
+    const auto platform_split_buffers =
+        2u * store_bytes<float>(2u * fft_size + kVdspSplitPaddingFloats);
 #else
     const std::uint64_t platform_split_buffers = 0;
 #endif
+    // The portable real transform keeps a real_bins()-long complex scratch in
+    // each of the engine's two FFTs for the split-spectrum path.
+    const std::uint64_t split_spectrum_scratch =
+        detail::fft_real_split_needs_scratch<float>(fft_size)
+            ? 2u * store_bytes<std::complex<float>>(bins)
+            : 0u;
 
     const std::array base_stores{
         store_bytes<float>(engine->input_ring_elements),
@@ -65,31 +72,31 @@ RetainedChargeOracle exact_owned_store_charge(
         store_bytes<float>(fft_size), // engine window
         store_bytes<float>(fft_size), // engine time scratch
         store_bytes<std::complex<float>>(engine->frame_elements),
-        store_bytes<std::complex<float>>(fft_size), // engine frequency scratch
         store_bytes<std::complex<float>*>(channels),
         store_bytes<std::complex<double>>(fft_size / 2u), // engine twiddles
         platform_split_buffers,
+        split_spectrum_scratch,
         result.platform_fft_setups,
         store_bytes<float>(prepared.stretch_ring_elements),
         store_bytes<float>(prepared.drain_elements),
         store_bytes<float>(prepared.finalize_zero_elements),
         store_bytes<float*>(channels),
         store_bytes<const float*>(channels),
-        3u * store_bytes<double>(bins), // coordinator phases
-        store_bytes<float>(bins), // coordinator reference magnitude
-        store_bytes<int>(bins), // coordinator peaks
-        store_bytes<float>(bins), // transient history
-        store_bytes<float>(channels * capture_bins), // freeze capture magnitudes
-        store_bytes<double>(bins), // freeze newest phase increment
+        3u * store_bytes<double>(bins),                 // coordinator phases
+        store_bytes<float>(bins),                       // coordinator reference magnitude
+        store_bytes<int>(bins),                         // coordinator peaks
+        store_bytes<float>(bins),                       // transient history
+        store_bytes<float>(channels * capture_bins),    // freeze capture magnitudes
+        store_bytes<double>(bins),                      // freeze newest phase increment
         store_bytes<std::complex<float>>(channel_bins), // freeze previous frame
-        store_bytes<float>(channel_bins), // freeze held magnitudes
-        store_bytes<double>(channel_bins), // freeze held phases
-        store_bytes<double>(bins), // freeze instantaneous frequency
-        store_bytes<float>(channel_bins), // freeze staged-restore slot
+        store_bytes<float>(channel_bins),               // freeze held magnitudes
+        store_bytes<double>(channel_bins),              // freeze held phases
+        store_bytes<double>(bins),                      // freeze instantaneous frequency
+        store_bytes<float>(channel_bins),               // freeze staged-restore slot
         store_bytes<double>(channel_bins),
         store_bytes<double>(bins),
-        3u * store_bytes<float>(bins), // envelope scratch vectors
-        store_bytes<std::complex<float>>(fft_size), // envelope cepstrum
+        3u * store_bytes<float>(bins),                    // envelope scratch vectors
+        store_bytes<std::complex<float>>(fft_size),       // envelope cepstrum
         store_bytes<std::complex<double>>(fft_size / 2u), // envelope twiddles
     };
     for (const auto bytes : base_stores) result.total += bytes;

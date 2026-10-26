@@ -469,6 +469,39 @@ def _refresh_derived(repo: Path) -> list[str]:
     return refreshed
 
 
+# The surface whose version `pulp upgrade --notes` compares against: migration
+# notes are keyed to the CLI that ships with the SDK.
+MIGRATION_NOTES_SURFACE = "sdk"
+
+
+def _fold_migration_notes(repo: Path, plan: list[Assignment]) -> list[str]:
+    """Fold docs/migrations/unreleased/ into the note for the SDK version
+    this bump assigns, returning the paths that changed.
+
+    A pull request cannot know which version it ships in, so its migration
+    note waits in unreleased/ until the bump that assigns that version. Best-
+    effort like the regenerators: a failure leaves the notes in unreleased/,
+    where the next SDK bump folds them, rather than stopping the release."""
+    sdk = next((a for a in plan if a.surface == MIGRATION_NOTES_SURFACE), None)
+    if sdk is None:
+        return []
+    try:
+        from fold_migration_notes import fold, shipped_version
+        # The release tags decide which release a note's change already
+        # shipped in; a clone that lacks the newest tag folds that note into
+        # this bump's version, the behaviour before tags were consulted.
+        _git(repo, "fetch", "--quiet", "--tags", "origin", check=False)
+        return fold(repo, sdk.assigned, lambda rel: shipped_version(repo, rel))
+    except (Exception, SystemExit) as error:  # noqa: BLE001 - a bump must still finish
+        print(
+            f"version-at-land: could not fold docs/migrations/unreleased/ into "
+            f"v{sdk.assigned}.md; the notes stay unreleased until the next SDK "
+            f"bump: {error}",
+            file=sys.stderr,
+        )
+        return []
+
+
 def _write_plan(repo: Path, config: Config, plan: list[Assignment]) -> list[str]:
     surfaces_by_name: dict[str, Surface] = {s.name: s for s in config.surfaces}
     edited: list[str] = []
@@ -479,6 +512,7 @@ def _write_plan(repo: Path, config: Config, plan: list[Assignment]) -> list[str]
     # Only when a version actually moved — regenerating on a no-op plan would
     # sweep unrelated drift into a bump commit.
     if edited:
+        edited.extend(_fold_migration_notes(repo, plan))
         edited.extend(_refresh_derived(repo))
     return edited
 

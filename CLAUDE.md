@@ -132,7 +132,7 @@ adding a build command anywhere, derive `--parallel`/`-j` from the governor: a
 literal is a silent ceiling that survives a VM resize, a core count is the melt.
 
 **External SDKs** (not committed, cloned at configure time or manually):
-- VST3 SDK → `external/vst3sdk` (MIT, `git clone --depth 1 --branch v3.8.0_build_66`)
+- VST3 SDK → `external/vst3sdk` (MIT, `git clone --depth 1 --branch v3.8.1_build_84`)
 - AudioUnitSDK → `external/AudioUnitSDK` (Apache 2.0, `git clone --depth 1`)
 - CLAP → fetched automatically via CMake FetchContent
 - Skia → pre-built binaries in `external/skia-build/`
@@ -355,10 +355,10 @@ producing a derivative. Hold the repo's independent line.
 
 Non-obvious things that cost real time when you don't know them:
 
-- **`OversamplerT`'s default `Kind` is `fir_biquad` — only ~7 dB worst-case alias
-  rejection.** Any anti-aliasing measurement that doesn't explicitly pin
-  `Kind::linear_phase_fir` (96 dB standard / 140 dB pristine) or `polyphase_iir`
-  is measuring the filter, not your DSP.
+- **Name the oversampler `Kind` in every anti-aliasing measurement.** Default
+  `polyphase_iir` gives 94.8 dB (frequency-dependent delay); `linear_phase_fir`
+  96/140 dB at constant latency. `fir_biquad` has only ~7 dB worst-case alias
+  rejection, so a measurement that selects it is measuring the filter, not your DSP.
 - **Deep-dynamic-range measurement is a window problem most windows cannot solve.**
   The `Window` enum ships **six** members (rectangular, hann, hamming, blackman,
   flat_top, kaiser), first side lobes −14/−31/−41/−57/−93/−124 dB. **flat_top buys
@@ -965,12 +965,14 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
   - ⚠ **Cannot see:** Presence is not correctness — an element can be present, misplaced and unreadable.
 - Prove each hop of the agent-HTML -> Chromium -> DesignIR pipeline actually ran, before trusting any fidelity number from the same panel. → `tools/import-validation/check_pipeline_stages.py`
   - ⚠ **Cannot see:** Asserts MECHANISM, not quality. A panel can pass every stage and still render badly — that is score-native-panel's job. Conversely a high similarity score says nothing about whether Chromium ran at all, which is exactly the confusion this exists to end.
+- Get Chrome's own composite of backdrop-filter under element and ancestor opacity. → `tools/import-validation/chrome_backdrop_opacity_oracle.py`
+  - ⚠ **Cannot see:** Needs a local Chrome, like the rest of the browser-capture lane. The oracle is Chrome's interpretation, which is the target here but is not the CSS spec.
 - Get Chrome's own answer for a CSS gradient when the native paint disagrees. → `tools/import-validation/chrome_gradient_oracle.py`
   - ⚠ **Cannot see:** Needs a local Chrome, like the rest of the browser-capture lane. The oracle is Chrome's interpretation, which is the target here but is not the CSS spec.
 - Get one similarity score + verdict BEFORE showing the user any native screenshot. → `tools/import-validation/diff_against_reference.py`
   - ⚠ **Cannot see:** POSITION-BLIND. The score is histogram cosine similarity (gross colour distribution), so a design with every element in the wrong place scores identically to a correct one — same pixels, different arrangement. It catches obviously-broken only. Never read a high score as 'laid out right'; that is layout-parity's job.
 - A whole-image score is hiding a broken sub-region (empty canvas, broken chrome). → `tools/import-validation/diff_against_reference_regions.py`
-  - ⚠ **Cannot see:** Only the regions you hand it. Anything outside a declared rect is UNCHECKED, and the built-in defaults are hand-authored percent rects for one specific design (Spectr) — pointing it at another design silently scores the wrong boxes. Each region still scores by the position-blind metric above.
+  - ⚠ **Cannot see:** Only the regions you hand it. Anything outside a declared rect is UNCHECKED, and the built-in defaults are hand-authored percent rects for one specific design (Spectr) — pointing it at another design silently scores the wrong boxes. The score itself is the position-blind metric above. The ink-coverage gates catch reference ink the candidate left empty (a missing control shows as one uncovered patch at its own size), but only in regions that declare coverage_floor or max_uncovered_fraction, and only for presence (wrong colour and extra ink pass).
 - Measure how close an imported+rendered design is to its Figma source, per node. → `tools/import-design/fidelity_diff.py`
   - ⚠ **Cannot see:** Only nodes lowered to RECOGNIZED Pulp widgets. A design imported as the designer's own art (audio_widget "none") is invisible to its widget heuristics — it once read that opt-out sentinel as a kind and reported a near-perfect import as 832 failures. A high skip count means it checked little, not that little was wrong; a run where NOTHING measured reports SKIPPED and exits 3 (never OK), which is what fig-lane scenes produce today.
 - See WHERE a Figma reference and a Pulp render disagree, without eyeballing Preview. → `tools/scripts/figma_import_diff.py`
@@ -991,6 +993,8 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
   - ⚠ **Cannot see:** Needs a design pack for the fixture's stylesheet and fonts; without one the page imports unstyled and every number is meaningless. Says so rather than scoring.
 - Attribute a natively rendered panel's failing pixels to the nodes that own them, against the Chromium capture that is its oracle. → `tools/import-validation/score_native_panel.py`
   - ⚠ **Cannot see:** A blank render scores WELL against a dark design, so the area-weighted number is not a fidelity measure without a companion coverage statistic; per-node scores are not yet usable as a gate.
+- Imported text fails a pixel score and you need to know whether the glyphs are too heavy, sit off by a fraction of a pixel, or have a different coverage curve, per text node. → `tools/import-validation/text_raster_decomposition.py crops`
+  - ⚠ **Cannot see:** Assumes light text on a locally flat darker background, which the box-border background estimate relies on; boxes with a busy border carry background_spread so a reader can discount them. Ink ratio is position-blind and centroid is ink-blind, so read them together. It decomposes; it gates nothing.
 - Triage an import's GROSS colour against Figma's own raster, offline, with no API call. Advisory only — never a gate. → `tools/import-design/thumb_parity.py`
   - ⚠ **Cannot see:** MATERIAL-BLIND by construction. It compares block MEANS, so it cannot see any error that preserves a region's mean — a flattened gradient matches its own mean exactly, 20%-vs-100% white thin strokes average out, a soft shadow on a dark panel vanishes. At ~0.4x it also cannot resolve features under ~3 design px. For geometry use layout-parity; for material survival use the material audit.
 - Prove the emitted ui.js artifact renders like the importer output it claims to ship. → `tools/import-validation/verify_rendered_panel.py`
@@ -1043,6 +1047,8 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 **harness** — coverage + deterministic visual harness
 - The visual-harness Dockerfile's Skia pin may have drifted from the manifest. → `tools/harness/visual/check_skia_pin.py`
 - Check web-compat coverage — and that a `supported` claim is backed by a real test. → `python3 -m tools.harness.verifier`
+- You need proof that committed update N actually reached the screen (a retained or persistent scene that stops refreshing passes every similarity score), or how many captures showed the due update, held one, skipped one, or juddered. → `python3 -m tools.motion.visual.frame_stamp_decode`
+  - ⚠ **Cannot see:** Sees only frames that carry the stamp; it proves which update a capture shows, never that the rest of the frame is drawn right. A capture that crops, scales or color-manages the stamp off its declared layout decodes as -1, so a run that is all -1 says the instrument is blind, not that nothing presented. Without --timestamps-json the captures are assumed one refresh apart, so judder is measured in capture slots, not time; and an unreadable capture is reported as unknown rather than counted held or skipped. It needs Pillow and exits 3 (a ctest skip) without it.
 - Measure installed CLI/MCP GPU trace-analysis latency and prove both surfaces consume one sibling artifact pair. → `tools/scripts/gpu_trace_overhead_acceptance.py`
   - ⚠ **Cannot see:** Measures offline analyzer overhead only. It cannot grade trace-producer capture cost; new producer call sites require separate compile-out, idle-session, and active-capture product trials.
 - Build the visual-harness Docker image — use this, not a raw docker build. → `tools/harness/visual/docker-build.sh`

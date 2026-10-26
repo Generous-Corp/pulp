@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 import contextlib
+import hashlib
 import io
+import os
 import subprocess
 import unittest
 import unittest.mock
 import json
+import re
+import shutil
 import tempfile
 from pathlib import Path
 from argparse import Namespace
@@ -19,7 +23,6 @@ from vellum_closure import (
     policy_include_forbidden,
     policy_target_forbidden,
     receipt_path_violations,
-    symbol_closure,
     unit_header_manifests,
     unit_public_headers,
 )
@@ -38,10 +41,6 @@ class ClosurePolicyTests(unittest.TestCase):
         self.assertTrue(policy_include_forbidden("pulp/content/registry.hpp"))
         self.assertFalse(policy_include_forbidden("pulp/canvas/canvas.hpp"))
         self.assertFalse(policy_include_forbidden("pulp/audiofx/effect.hpp"))
-
-    def test_symbol_policy_negative_control(self):
-        self.assertEqual(symbol_closure(["_ZN5pulp14ContentRegistryE", "_ZN5pulp6CanvasE"]), ["_ZN5pulp14ContentRegistryE"])
-        self.assertEqual(symbol_closure(["_ZN5pulp14ContentRegistryE"], ["_ZN5pulp14ContentRegistryE"]), [])
 
     def test_unknown_build_tree_input_is_rejected(self):
         manifest = {
@@ -62,6 +61,57 @@ class ClosurePolicyTests(unittest.TestCase):
         }), [])
         self.assertTrue(receipt_path_violations({"files": [{"pulp_path": "/Users/agent/build/rogue.hpp"}]}))
 
+    def test_every_forbidden_form_derives_from_the_shared_policy(self):
+        import vellum_closure
+        import vellum_policy
+        names = vellum_policy.names()
+        self.assertTrue({"gpu_audio", "music"} <= set(names))
+        self.assertEqual(vellum_closure.FORBIDDEN_ROOTS, vellum_policy.roots())
+        for name in names:
+            stem = name.replace("_", "-")
+            with self.subTest(name=name):
+                self.assertTrue(vellum_closure.policy_target_forbidden(f"pulp-{stem}"))
+                self.assertTrue(vellum_closure.policy_target_forbidden(f"pulp::{stem}"))
+                self.assertTrue(vellum_closure.policy_include_forbidden(f"pulp/{name}/x.hpp"))
+                self.assertTrue(vellum_closure.FORBIDDEN_CMAKE_TARGET.search(f"target_link_libraries(x PUBLIC pulp::{stem})"))
+        for allowed in ("pulp-canvas", "pulp::view-core", "pulp-state", "SkiaLib", "absl_graphcycles_internal"):
+            self.assertFalse(vellum_closure.policy_target_forbidden(allowed), allowed)
+        self.assertFalse(vellum_closure.policy_include_forbidden("pulp/canvas/canvas.hpp"))
+        table = json.loads((REPO_ROOT / "tools/scripts/vellum_mirror_edge_patterns.json").read_text(encoding="utf-8"))
+        product_include = re.compile(table["content_patterns"]["mirror-product-include"])
+        product_symbol = re.compile(table["content_patterns"]["mirror-product-symbol"])
+        for name in names:
+            with self.subTest(mirror=name):
+                self.assertTrue(product_include.search(f"#include <pulp/{name}/x.hpp>"))
+                self.assertTrue(product_symbol.search(f"pulp::{name}::thing"))
+                self.assertTrue(product_symbol.search(f"pulp-{name.replace('_', '-')}"))
+
+    def test_the_policy_names_exactly_the_retained_subsystems(self):
+        # Pinned so dropping a row from vellum_policy.json, which would unforbid
+        # that subsystem in every boundary check at once, fails here.
+        import vellum_policy
+        self.assertEqual(vellum_policy.POLICY, REPO_ROOT / "tools/scripts/vellum_policy.json")
+        self.assertEqual(vellum_policy.names(), (
+            "audio", "content", "format", "gpu_audio", "graph", "host", "midi",
+            "music", "playback", "sample_bank_manifest", "signal", "timebase",
+        ))
+
+    def test_policy_loader_rejects_malformed_tables(self):
+        import vellum_policy
+        cases = [
+            ({"schema": "other", "forbidden_subsystems": [{"name": "audio"}]}, "schema"),
+            ({"schema": vellum_policy.SCHEMA, "forbidden_subsystems": []}, "non-empty"),
+            ({"schema": vellum_policy.SCHEMA, "forbidden_subsystems": [{"name": "audio"}, {"name": "audio"}]}, "duplicate"),
+            ({"schema": vellum_policy.SCHEMA, "forbidden_subsystems": [{"name": "Gpu-Audio"}]}, "invalid"),
+            ({"schema": vellum_policy.SCHEMA, "forbidden_subsystems": [{"name": "content", "include_dirs": "x"}]}, "include_dirs"),
+        ]
+        for payload, message in cases:
+            with self.subTest(message=message), tempfile.TemporaryDirectory() as td:
+                path = Path(td) / "policy.json"
+                path.write_text(json.dumps(payload), encoding="utf-8")
+                with self.assertRaisesRegex(SystemExit, message):
+                    vellum_policy.load(path)
+
     def test_edge_allowlist_keeps_audio_targets_distinct(self):
         self.assertEqual(edge_key("pulp-design-import", "pulp-audio"), "pulp-design-import->pulp-audio")
         self.assertEqual(edge_key("pulp-design-import", "pulp::view-audio"), "pulp-design-import->pulp-view-audio")
@@ -77,13 +127,12 @@ class ClosurePolicyTests(unittest.TestCase):
             source.write_text("#include <pulp/audio/secret.hpp>\n", encoding="utf-8")
             manifest = root / "manifest.json"
             manifest.write_text(json.dumps({
-                "source_root": str(root),
+                "schema": "pulp.vellum.closure.v1", "source_root": str(root),
                 "files": ["core/platform/src/android/jni_motion.cpp"],
                 "targets": [],
-                "undefined_symbols": [],
             }), encoding="utf-8")
             args = Namespace(
-                manifest=[str(manifest)], allow=[], allow_include_path=[],
+                manifest=[str(manifest)], allow=[],
                 allow_include_edge=[("core/platform/src/android/jni_motion.cpp", "pulp/view/motion.hpp")],
                 allow_include_prefix=[], allow_root_prefix=[], report_only=False,
                 allowlist=None, generate=False, unit_manifest=None, target=None,
@@ -94,7 +143,7 @@ class ClosurePolicyTests(unittest.TestCase):
 
 def gate_args(manifest, allowlist=None):
     return Namespace(
-        manifest=[str(manifest)], allow=[], allow_include_path=[], allow_include_edge=[],
+        manifest=[str(manifest)], allow=[], allow_include_edge=[],
         allow_include_prefix=[], allow_root_prefix=[], report_only=False,
         allowlist=str(allowlist) if allowlist else None, generate=False, unit_manifest=None,
         target=None, source_root=None, build_dir=None,
@@ -116,7 +165,7 @@ class EdgeAllowlistTests(unittest.TestCase):
             root = Path(td)
             manifest = root / "manifest.json"
             manifest.write_text(json.dumps({
-                "source_root": str(root), "files": [], "external_inputs": [], "undefined_symbols": [],
+                "schema": "pulp.vellum.closure.v1", "source_root": str(root), "files": [], "external_inputs": [],
                 "targets": [{"name": "pulp-view-native", "link_targets": ["pulp-audio"]}],
             }), encoding="utf-8")
             allowlist = root / "allowlist.json"
@@ -142,8 +191,8 @@ class ImportDirectiveTests(unittest.TestCase):
             source.write_text(f"{directive} <pulp/audio/buffer.hpp>\n", encoding="utf-8")
             manifest = root / "manifest.json"
             manifest.write_text(json.dumps({
-                "source_root": str(root), "files": ["core/canvas/platform/mac/cg_canvas.mm"],
-                "targets": [], "undefined_symbols": [], "external_inputs": [],
+                "schema": "pulp.vellum.closure.v1", "source_root": str(root), "files": ["core/canvas/platform/mac/cg_canvas.mm"],
+                "targets": [], "external_inputs": [],
             }), encoding="utf-8")
             return run_gate(manifest)
 
@@ -354,7 +403,7 @@ class ClosureHostPathTests(unittest.TestCase):
             root = Path(td)
             manifest = root / "manifest.json"
             manifest.write_text(json.dumps({
-                "source_root": str(root), "files": [], "targets": [], "undefined_symbols": [],
+                "schema": "pulp.vellum.closure.v1", "source_root": str(root), "files": [], "targets": [],
                 "external_inputs": [], "public_include_dirs": ["/Users/agent/Library/Caches/Pulp/fetchcontent-src/yoga-v3.2.1"],
             }), encoding="utf-8")
             rc, out = run_gate(manifest)
@@ -655,7 +704,7 @@ class SystemIdentityTests(unittest.TestCase):
             manifest = root / "manifest.json"
             dirs = [resolver.portable(p) for p in ("/usr/include/freetype2", "/usr/include/libpng16")]
             manifest.write_text(json.dumps({
-                "source_root": str(root), "files": [], "undefined_symbols": [], "external_inputs": [],
+                "schema": "pulp.vellum.closure.v1", "source_root": str(root), "files": [], "external_inputs": [],
                 "public_include_dirs": dirs, "targets": [{"name": "pulp-canvas", "link_targets": [], "include_dirs": dirs}],
             }), encoding="utf-8")
             rc, out = run_gate(manifest)
@@ -791,8 +840,8 @@ class ProducerAttributionTests(unittest.TestCase):
     def gate(self, files, generated):
         with tempfile.TemporaryDirectory() as td:
             manifest = Path(td) / "manifest.json"
-            manifest.write_text(json.dumps({"source_root": str(REPO_ROOT), "files": files, "targets": [],
-                                            "undefined_symbols": [], "external_inputs": [], "generated_inputs": generated}),
+            manifest.write_text(json.dumps({"schema": "pulp.vellum.closure.v1", "source_root": str(REPO_ROOT), "files": files, "targets": [],
+                                            "external_inputs": [], "generated_inputs": generated}),
                                 encoding="utf-8")
             return run_gate(manifest)
 
@@ -867,7 +916,7 @@ class MirroredLinkTests(unittest.TestCase):
                           "pulp-gpu-device", "?pulp-skia-chromium-raw-ptr-compat",
                           "pulp-canvas", "pulp-bundled-fonts", "?pulp-bundled-noto-color-emoji", "pulp-render",
                           "pulp-state", "pulp-view-core", "pulp-design-import",
-                          "pulp-view-script", "pulp-view-native", "pulp-jsx-runtime-materialized-contract",
+                          "pulp-view-script", "pulp-view-platform", "pulp-jsx-runtime-materialized-contract",
                           "pulp-jsx-runtime-materialized-emitter"])
 
     def test_duplicate_target_requires_an_explicit_alias(self):
@@ -961,12 +1010,26 @@ class MirroredLinkTests(unittest.TestCase):
         planted = {"targets": [{"name": "pulp-canvas", "link_targets": ["pulp-timebase"]}]}
         self.assertEqual(unmirrored_link_violations(planted, mirrored, edges, set()), ["unmirrored Pulp target pulp-canvas -> pulp-timebase"])
 
-    def test_approved_view_audio_edges_are_exact_and_scoped(self):
-        entries = {e["id"]: e for e in load_allowlist(REPO_ROOT / "tools/scripts/vellum_closure_allowlist.json")}
-        for name in ("pulp-timebase", "pulp-sample-bank-manifest"):
-            entry = next(e for e in entries.values() if e["match"] == f"pulp-view-native->{name}")
-            self.assertEqual((entry["kind"], entry["owner"], entry["approver"]), ("edge", "carve-p4", "team-lead 2026-10-13"))
-            self.assertTrue(entry["platforms"])
+    def test_view_platform_is_carried_by_the_audio_free_target(self):
+        # pulp-view-native is the Pulp-kept umbrella that adds the audio widgets;
+        # the view-platform unit carries pulp-view-platform, and no allowlist
+        # entry admits an audio edge from either.
+        from vellum_closure import unit_manifest_targets
+        self.assertEqual(unit_manifest_targets(self.UNITS, "view-platform"), ["pulp-view-platform"])
+        entries = load_allowlist(REPO_ROOT / "tools/scripts/vellum_closure_allowlist.json")
+        self.assertEqual([e["id"] for e in entries if e["debt_id"] == "P4-view-audio"], [])
+        self.assertEqual([e["id"] for e in entries if e.get("match", "").startswith(("pulp-view-native->", "pulp-view-platform->"))], [])
+
+    def test_empty_allowlist_loads_and_malformed_entries_fail(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "a.json"
+            path.write_text(json.dumps({"schema": "pulp.vellum.closure.allowlist.v1", "entries": []}), encoding="utf-8")
+            self.assertEqual(load_allowlist(path), [])
+            for payload in ({"schema": "pulp.vellum.closure.allowlist.v1"},
+                            {"schema": "pulp.vellum.closure.allowlist.v1", "entries": {}}):
+                path.write_text(json.dumps(payload), encoding="utf-8")
+                with self.assertRaisesRegex(SystemExit, "entries must be a list"):
+                    load_allowlist(path)
 
     def test_raw_ptr_compat_is_a_linux_and_windows_target_below_every_skia_consumer(self):
         from vellum_closure import unit_layer_violations, unit_manifest_layout, unmirrored_link_violations
@@ -1065,7 +1128,7 @@ class PlatformScopedAllowlistTests(unittest.TestCase):
             root = Path(td)
             manifest = root / "manifest.json"
             manifest.write_text(json.dumps({
-                "source_root": str(root), "files": [], "undefined_symbols": [], "external_inputs": [],
+                "schema": "pulp.vellum.closure.v1", "source_root": str(root), "files": [], "external_inputs": [],
                 "targets": [{"name": "pulp-view-native", "link_targets": [link] if link else []}],
                 "configure": gpu_configure(system=system),
             }), encoding="utf-8")
@@ -1094,7 +1157,7 @@ class GateScopeTests(unittest.TestCase):
     def test_cmake_closure_requires_the_unit_manifest(self):
         with tempfile.TemporaryDirectory() as td:
             manifest = Path(td) / "manifest.json"
-            manifest.write_text(json.dumps({"schema": "pulp.vellum.closure.v1", "source_root": td, "files": [], "external_inputs": [],
+            manifest.write_text(json.dumps({"schema": "pulp.vellum.closure.v1", "source_root": td, "build_dir": td, "files": [], "external_inputs": [],
                                             "targets": [{"name": "pulp-runtime", "link_targets": []}]}), encoding="utf-8")
             rc, out = run_gate(manifest)
             self.assertEqual(rc, 1)
@@ -1120,6 +1183,19 @@ class ClosureMentionTests(unittest.TestCase):
         self.assertTrue(self.scan("target_link_libraries(x PRIVATE pulp-audio)\n"))
         self.assertTrue(self.scan('LINK_FLAGS "-framework CoreAudio"\n'))
         self.assertEqual(self.scan("# the plug-in adapter targets\n"), [])
+
+    def test_design_import_comments_are_negative_controls(self):
+        """The design-import closure must reject ownership-shaped comments too."""
+        self.assertEqual(
+            self.scan("// the format parser is pulp::format::detail::parse_double_c_locale\n",
+                      "core/view/src/design_adherence.cpp"),
+            ["mirror-product-symbol mention core/view/src/design_adherence.cpp:1: pulp::format"],
+        )
+        self.assertEqual(
+            self.scan("// written by register_audio_widgets during editor setup\n",
+                      "core/view/src/design_import_legacy_registry.cpp"),
+            ["mirror-pulp-kept-symbol mention core/view/src/design_import_legacy_registry.cpp:1: register_audio_widgets"],
+        )
 
     def test_files_without_a_code_suffix_are_scanned(self):
         for name in ("tools/run", "docs/notes.md", "tools/x.sh", "tools/x.ps1", "ui/x.ts", "ui/x.tsx",
@@ -1273,6 +1349,8 @@ class ClosureMentionTests(unittest.TestCase):
 
 class GeneratedDigestTests(unittest.TestCase):
     BUILD_INFO = "@build/core/runtime/generated/Release/pulp/runtime/build_info.hpp"
+    PRELUDE_CPP = "@build/core/view/web_compat_preludes_gen.cpp"
+    PRELUDE_HPP = "@build/core/view/web_compat_preludes_gen.hpp"
 
     def build_info(self, td, stamp, dirty="false"):
         path = Path(td) / f"build_info_{stamp}_{dirty}.hpp"
@@ -1303,6 +1381,209 @@ class GeneratedDigestTests(unittest.TestCase):
             built = generated_digest(rel, out, REPO_ROOT)
             self.assertEqual(missing, built)
             self.assertEqual(missing["sha256"], __import__("hashlib").sha256(out.read_bytes()).hexdigest())
+
+    def test_view_prelude_digests_reproduce_without_build_outputs(self):
+        from vellum_closure import generated_digest, mirrorable_generated_source, prelude_inputs
+        import hashlib
+        inputs = prelude_inputs(REPO_ROOT)
+        self.assertIsNotNone(inputs)
+        with tempfile.TemporaryDirectory() as recipe_td:
+            recipe_output = Path(recipe_td) / "web_compat_preludes_gen.cpp"
+            subprocess.run(
+                [__import__("sys").executable, str(REPO_ROOT / "core/view/js/embed_js.py"),
+                 str(recipe_output), *map(str, inputs)], check=True,
+            )
+            expected_cpp = hashlib.sha256(recipe_output.read_bytes()).hexdigest()
+        names = [input_path.stem.replace("-", "_") for input_path in inputs]
+        from vellum_closure import PRELUDE_HEADER_HEAD, PRELUDE_HEADER_TAIL
+        self.assertIn("struct EmbeddedPrelude {", PRELUDE_HEADER_HEAD)
+        expected_hpp_text = (
+            PRELUDE_HEADER_HEAD
+            + "".join(f"extern const EmbeddedPrelude {name};\n" for name in names)
+            + PRELUDE_HEADER_TAIL
+        )
+        expected_hpp = hashlib.sha256(expected_hpp_text.encode("utf-8")).hexdigest()
+        with tempfile.TemporaryDirectory() as td:
+            missing = Path(td) / "never-built.cpp"
+            cpp = generated_digest(self.PRELUDE_CPP, missing, REPO_ROOT)
+            hpp = generated_digest(self.PRELUDE_HPP, Path(td) / "never-built.hpp", REPO_ROOT)
+            stale = Path(td) / "stale.cpp"
+            stale.write_text("stale output", encoding="utf-8")
+            rebuilt = generated_digest(self.PRELUDE_CPP, stale, REPO_ROOT)
+        self.assertEqual(cpp["sha256"], expected_cpp)
+        self.assertEqual(hpp["sha256"], expected_hpp)
+        self.assertEqual(cpp, rebuilt)
+        self.assertTrue(mirrorable_generated_source(self.PRELUDE_CPP))
+        self.assertFalse(mirrorable_generated_source("@build/core/view/other.cpp"))
+
+    def test_view_prelude_digest_fails_closed_when_producer_is_incomplete(self):
+        from vellum_closure import generated_digest
+        with tempfile.TemporaryDirectory() as td:
+            source = Path(td)
+            (source / "core/view/cmake").mkdir(parents=True)
+            (source / "core/view/js").mkdir(parents=True)
+            (source / "core/view/cmake/PulpViewJsPreludes.cmake").write_text(
+                "set(PULP_JS_PRELUDES ${CMAKE_CURRENT_SOURCE_DIR}/js/missing.js\n)\n", encoding="utf-8")
+            (source / "core/view/js/embed_js.py").write_text("", encoding="utf-8")
+            self.assertIsNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source))
+            self.assertIsNone(generated_digest("@build/core/view/unsupported.cpp", source / "out.cpp", source))
+
+    def test_view_prelude_producer_rejects_unbound_or_duplicate_inputs(self):
+        from vellum_closure import generated_digest
+        with tempfile.TemporaryDirectory() as td:
+            source = Path(td)
+            (source / "core/view/cmake").mkdir(parents=True)
+            shutil.copytree(REPO_ROOT / "core/view/js", source / "core/view/js")
+            shutil.copy(REPO_ROOT / "core/view/cmake/PulpViewJsPreludes.cmake", source / "core/view/cmake")
+            shutil.copy(REPO_ROOT / "core/view/js/embed_js.py", source / "core/view/js")
+            producer = source / "core/view/cmake/PulpViewJsPreludes.cmake"
+            original = producer.read_text(encoding="utf-8")
+            expected_cpp = generated_digest(self.PRELUDE_CPP, source / "out.cpp", source)["sha256"]
+            closing = "\n)"
+            valid = original.replace(closing, "\n    # ${CMAKE_CURRENT_SOURCE_DIR}/js/commented.js\n)", 1)
+            producer.write_text(valid, encoding="utf-8")
+            self.assertEqual(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source)["sha256"], expected_cpp)
+            inline_comment = original.replace(
+                "target_sources(pulp-view-script PRIVATE ${PULP_JS_EMBEDDED_SOURCE})",
+                "target_sources(pulp-view-script PRIVATE ${PULP_JS_EMBEDDED_SOURCE}) # trailing comment",
+                1,
+            )
+            producer.write_text(inline_comment, encoding="utf-8")
+            baseline = generated_digest(self.PRELUDE_CPP, source / "out.cpp", source)
+            self.assertIsNotNone(baseline)
+            self.assertEqual(baseline["sha256"], generated_digest(self.PRELUDE_CPP, source / "out.cpp", source)["sha256"])
+            producer.write_text(original.replace(closing, "\n    ${CMAKE_CURRENT_SOURCE_DIR}/js/extra-valid.js\n)", 1), encoding="utf-8")
+            (source / "core/view/js/extra-valid.js").write_text("const extraValid = true;\n", encoding="utf-8")
+            self.assertIsNotNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source))
+            producer.write_text(original, encoding="utf-8")
+            separator_comment = original.replace(
+                ")\nset(PULP_JS_EMBEDDED_HEADER",
+                ") # separator\nset(PULP_JS_EMBEDDED_HEADER", 1,
+            )
+            producer.write_text(separator_comment, encoding="utf-8")
+            self.assertEqual(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source)["sha256"], expected_cpp)
+            producer.write_bytes(original.replace("\n", "\r\n").encode("utf-8"))
+            self.assertEqual(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source)["sha256"], expected_cpp)
+            producer.write_text(original.rstrip("\n"), encoding="utf-8")
+            self.assertEqual(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source)["sha256"], expected_cpp)
+            for extra in ("    js/unbound.js\n", "    ${OTHER}/js/unbound.js\n", "    ${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js\n"):
+                producer.write_text(original.replace(closing, "\n" + extra + ")", 1), encoding="utf-8")
+                self.assertIsNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source), extra)
+            for mutation in (
+                "\nlist(APPEND PULP_JS_PRELUDES ${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js)\n",
+                "\nset(PULP_JS_PRELUDES ${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js)\n",
+                "\nLIST ( REMOVE_AT PULP_JS_PRELUDES 0 )\n",
+                "\nlist ( POP_FRONT PULP_JS_PRELUDES )\n",
+                "\nlist ( TRANSFORM PULP_JS_PRELUDES PREPEND nope )\n",
+                "\nunset ( PULP_JS_PRELUDES )\n",
+                "\nSET ( PULP_JS_PRELUDES ${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js )\n",
+                "\nset ( \"PULP_JS_PRELUDES\" ${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js )\n",
+                "\nset ( [[PULP_JS_PRELUDES]] ${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js )\n",
+                "\nunset ( \"PULP_JS_PRELUDES\" )\n",
+                "\nstring ( APPEND PULP_JS_PRELUDES \";replaced\" )\n",
+            ):
+                producer.write_text(original + mutation, encoding="utf-8")
+                self.assertIsNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source), mutation)
+            producer.write_text(original + "\nSET ( pulp_js_preludes ${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js )\n", encoding="utf-8")
+            self.assertIsNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source))
+            blocked = original.replace("set(PULP_JS_PRELUDES", "#[[\nset(PULP_JS_PRELUDES", 1)
+            blocked = blocked.replace("\n)\n", "\n)\n]]\n", 1)
+            producer.write_text(blocked, encoding="utf-8")
+            self.assertIsNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source))
+            producer.write_text("if(FALSE)\n" + original + "endif()\n", encoding="utf-8")
+            self.assertIsNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source))
+            producer.write_text(original.replace("extern const EmbeddedPrelude ${_prelude_var};", "extern const unsigned char* ${_prelude_var};"), encoding="utf-8")
+            self.assertIsNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source))
+            adversarial_mutations = (
+                ("NAME_WE -> NAME", original.replace("\"${_prelude}\" NAME_WE", "\"${_prelude}\" NAME", 1)),
+                ("duplicate APPEND", original.replace(
+                    'string(APPEND _pulp_prelude_decls "extern const EmbeddedPrelude ${_prelude_var};\\n")',
+                    'string(APPEND _pulp_prelude_decls "extern const EmbeddedPrelude ${_prelude_var};\\n")\n'
+                    'string(APPEND _pulp_prelude_decls "extern const EmbeddedPrelude ${_prelude_var};\\n")', 1)),
+                ("changed header prelude", original.replace("#pragma once\\n", "#pragma changed\\n", 1)),
+                ("extra custom output", original.replace(
+                    "OUTPUT ${PULP_JS_EMBEDDED_SOURCE}",
+                    "OUTPUT ${PULP_JS_EMBEDDED_SOURCE} ${CMAKE_CURRENT_BINARY_DIR}/extra.cpp", 1)),
+                ("duplicate foreach input", original.replace(
+                    "foreach(_prelude ${PULP_JS_PRELUDES})",
+                    "foreach(_prelude ${PULP_JS_PRELUDES} ${PULP_JS_PRELUDES})", 1)),
+                ("entire producer block comment", "#[[\n" + original + "\n]]\n"),
+                ("entire equals-delimited block comment", "#[=[\n" + original + "\n]=]\n"),
+                ("trailing raw text", original + "\nnot_a_cmake_command\n"),
+                ("leading raw text", "EVIL\\n" + original),
+                ("unterminated quoted argument", original + '\nset(foo "unterminated\n'),
+                ("unterminated bracket comment", original + "\n#[=[ unterminated\n"),
+                ("unterminated bracket argument", original + "\nset(foo [=[# not closed\n"),
+                ("NBSP is not CMake whitespace", original.replace("set(PULP_JS_PRELUDES", "set\u00a0(PULP_JS_PRELUDES", 1)),
+                ("vertical tab is not CMake whitespace", original.replace("set(PULP_JS_PRELUDES", "set\v(PULP_JS_PRELUDES", 1)),
+                ("form feed is not CMake whitespace", original.replace("set(PULP_JS_PRELUDES", "set(PULP_JS_PRELUDES\f", 1)),
+                ("consecutive commands without whitespace", original.replace(
+                    ")\nset(PULP_JS_EMBEDDED_HEADER",
+                    ")set(PULP_JS_EMBEDDED_HEADER", 1)),
+                ("consecutive commands separated by spaces", original.replace(
+                    ")\nset(PULP_JS_EMBEDDED_HEADER",
+                    ") set(PULP_JS_EMBEDDED_HEADER", 1)),
+                ("consecutive commands separated by tabs", original.replace(
+                    ")\nset(PULP_JS_EMBEDDED_HEADER",
+                    ")\tset(PULP_JS_EMBEDDED_HEADER", 1)),
+                ("bracket comment command separator", original.replace(
+                    ")\nset(PULP_JS_EMBEDDED_HEADER",
+                    ")#[[x]]set(PULP_JS_EMBEDDED_HEADER", 1)),
+                ("newline before command opening parenthesis", original.replace(
+                    "set(PULP_JS_PRELUDES",
+                    "set\n(PULP_JS_PRELUDES", 1)),
+                ("bracket comment before command opening parenthesis", original.replace(
+                    "set(PULP_JS_PRELUDES",
+                    "set#[[x]](PULP_JS_PRELUDES", 1)),
+            )
+            for description, mutation in adversarial_mutations:
+                producer.write_text(mutation, encoding="utf-8")
+                self.assertIsNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source), description)
+
+    def test_target_manifest_only_exposes_the_supported_prelude_source(self):
+        from vellum_closure import target_manifest
+        with tempfile.TemporaryDirectory() as td:
+            build = Path(td)
+            (build / "core/view").mkdir(parents=True)
+            (build / "vellum-unit-headers.txt").write_text("", encoding="utf-8")
+            (build / "core/view/web_compat_preludes_gen.cpp").write_text("generated", encoding="utf-8")
+            (build / "core/view/web_compat_preludes_gen.hpp").write_text("generated", encoding="utf-8")
+            sources = [
+                {"path": str(build / "core/view/web_compat_preludes_gen.cpp")},
+                {"path": str(build / "core/view/unsupported.cpp")},
+            ]
+            target = {"name": "pulp-view-script", "type": "STATIC_LIBRARY", "sources": sources,
+                      "sourceGroups": [{"sourceIndexes": [0, 1]}], "compileGroups": [], "dependencies": []}
+            with unittest.mock.patch("vellum_closure.codemodel", return_value=({"name": "Release"}, {"id": target})):
+                manifest = target_manifest(REPO_ROOT, build, ["pulp-view-script"])
+        selected = manifest["targets"][0]["sources"]
+        self.assertIn(self.PRELUDE_CPP, selected)
+        self.assertNotIn("@build/core/view/unsupported.cpp", selected)
+        prelude_sources = {
+            path for path in manifest["files"]
+            if path.startswith("core/view/js/") and path.endswith(".js")
+        }
+        self.assertEqual(len(prelude_sources), 26)
+        self.assertEqual(
+            prelude_sources,
+            {
+                str(path.relative_to(REPO_ROOT)).replace("\\", "/")
+                for path in __import__("vellum_closure").prelude_inputs(REPO_ROOT)
+            },
+        )
+
+    def test_target_manifest_refuses_unparseable_prelude_producer(self):
+        from vellum_closure import target_manifest
+        with tempfile.TemporaryDirectory() as td:
+            build = Path(td)
+            (build / "core/view").mkdir(parents=True)
+            target = {"name": "pulp-view-script", "type": "STATIC_LIBRARY",
+                      "sources": [], "sourceGroups": [], "compileGroups": [], "dependencies": []}
+            with unittest.mock.patch("vellum_closure.codemodel", return_value=({"name": "Release"}, {"id": target})), \
+                 unittest.mock.patch("vellum_closure.unit_header_manifests", return_value={}), \
+                 unittest.mock.patch("vellum_closure.prelude_inputs", return_value=None):
+                with self.assertRaisesRegex(SystemExit, "prelude producer could not be parsed"):
+                    target_manifest(REPO_ROOT, build, ["pulp-view-script"])
 
     def test_export_refuses_a_generated_input_without_a_reproducible_digest(self):
         from vellum_closure import exportable_closure
@@ -1351,8 +1632,8 @@ class AllowlistGateTests(unittest.TestCase):
             root = Path(td)
             manifest = root / "manifest.json"
             manifest.write_text(json.dumps({
-                "source_root": str(root), "files": [], "targets": [],
-                "undefined_symbols": [], "external_inputs": [],
+                "schema": "pulp.vellum.closure.v1", "source_root": str(root), "files": [], "targets": [],
+                "external_inputs": [],
             }), encoding="utf-8")
             allowlist = root / "allowlist.json"
             allowlist.write_text(json.dumps({
@@ -1361,7 +1642,7 @@ class AllowlistGateTests(unittest.TestCase):
                              "kind": "root", "match": "core/nothing/"}],
             }), encoding="utf-8")
             args = Namespace(
-                manifest=[str(manifest)], allow=[], allow_include_path=[], allow_include_edge=[],
+                manifest=[str(manifest)], allow=[], allow_include_edge=[],
                 allow_include_prefix=[], allow_root_prefix=[], report_only=False,
                 allowlist=str(allowlist), generate=False, unit_manifest=None, target=None,
                 source_root=None, build_dir=None,
@@ -1429,6 +1710,420 @@ class UnitHeaderManifestTests(unittest.TestCase):
         parsed = unit_header_manifests(build)
         self.assertEqual(parsed["pulp-rt"][1], ["include/pulp/rt/used.hpp", "include/pulp/rt/result.hpp"])
         self.assertEqual(parsed["pulp-gpu"][1], [])
+
+
+class GateFailClosedTests(unittest.TestCase):
+    """Every gate branch that can pass by reading nothing must fail instead."""
+
+    def gate(self, data, allowlist=None, files=None, root=None):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            for rel, text in (files or {}).items():
+                (base / rel).parent.mkdir(parents=True, exist_ok=True)
+                (base / rel).write_text(text, encoding="utf-8")
+            payload = {"schema": "pulp.vellum.closure.v1", "source_root": str(root or base), "files": [], "targets": [],
+                       "missing_targets": [], "external_inputs": [], **data}
+            payload = {k: v for k, v in payload.items() if v is not ...}
+            manifest = base / "manifest.json"
+            manifest.write_text(json.dumps(payload), encoding="utf-8")
+            allowlist_path = None
+            if allowlist is not None:
+                allowlist_path = base / "allowlist.json"
+                allowlist_path.write_text(json.dumps({"schema": "pulp.vellum.closure.allowlist.v1", "entries": allowlist}),
+                                          encoding="utf-8")
+            return run_gate(manifest, allowlist_path)
+
+    def test_valid_empty_closure_passes(self):
+        rc, out = self.gate({})
+        self.assertEqual(rc, 0, out)
+
+    def test_schema_is_required(self):
+        for schema in (..., "garbage", "pulp.vellum.closure.v2"):
+            rc, out = self.gate({"schema": schema})
+            self.assertEqual(rc, 1, out)
+            self.assertIn("closure schema must be pulp.vellum.closure.v1", out)
+
+    def test_missing_source_root_fails(self):
+        for root in (..., "", "/nonexistent/vellum-closure-root"):
+            rc, out = self.gate({"source_root": root, "files": ["core/view/src/a.cpp"]})
+            self.assertEqual(rc, 1, out)
+            self.assertIn("closure source_root is not an existing directory", out)
+
+    def test_unreadable_listed_file_is_a_violation(self):
+        for rel in ("core/view/src/gone.cpp", "core/view/gone.cmake"):
+            rc, out = self.gate({"files": [rel]})
+            self.assertEqual(rc, 1, out)
+            self.assertIn(f"unreadable closure file {rel}", out)
+
+    def test_listed_file_is_scanned(self):
+        files = {"core/view/src/a.cpp": "#include <pulp/view/view.hpp>\n"}
+        rc, out = self.gate({"files": list(files)}, files=files)
+        self.assertEqual(rc, 0, out)
+        files = {"core/view/src/a.cpp": "#include <pulp/audio/engine.hpp>\n"}
+        rc, out = self.gate({"files": list(files)}, files=files)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("forbidden include core/view/src/a.cpp:1: pulp/audio/engine.hpp", out)
+
+    def test_forbidden_root_is_refused_without_a_readable_source_root(self):
+        rc, out = self.gate({"files": ["core/audio/src/engine.cpp"]}, root="/nonexistent/vellum-closure-root")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("forbidden closure root core/audio/src/engine.cpp", out)
+
+    def test_forbidden_root_is_refused_unless_allowlisted(self):
+        files = {"core/audio/src/engine.cpp": "int x;\n"}
+        rc, out = self.gate({"files": list(files)}, files=files)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("forbidden closure root core/audio/src/engine.cpp", out)
+        entry = {"id": "audio-root", "owner": "test", "debt_id": "t", "kind": "root", "match": "core/audio/src/engine.cpp"}
+        rc, out = self.gate({"files": list(files)}, allowlist=[entry], files=files)
+        self.assertEqual(rc, 0, out)
+
+    def test_missing_target_fails(self):
+        rc, out = self.gate({"missing_targets": ["pulp-canvas"]})
+        self.assertEqual(rc, 1, out)
+        self.assertIn("missing target: pulp-canvas", out)
+
+    def test_undefined_symbols_are_not_silently_accepted(self):
+        rc, out = self.gate({"undefined_symbols": []})
+        self.assertEqual(rc, 1, out)
+        self.assertIn("undefined_symbols is not graded by the closure gate", out)
+
+    def test_dot_source_root_is_this_checkout_from_any_cwd(self):
+        rel = "core/canvas/include/pulp/canvas/affine_transform.hpp"
+        cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as td:
+            os.chdir(td)
+            try:
+                rc, out = self.gate({"source_root": ".", "files": [rel]})
+            finally:
+                os.chdir(cwd)
+        self.assertEqual(rc, 0, out)
+
+    def test_allow_include_path_is_not_an_option(self):
+        proc = subprocess.run(["python3", str(Path(__file__).with_name("vellum_closure.py")), "gate", "--manifest", "m.json",
+                               "--allow-include-path", "core/"], capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+        self.assertIn("--allow-include-path", proc.stderr)
+
+
+class ExportIntegrityTests(unittest.TestCase):
+    def repo(self, td):
+        repo = Path(td) / "repo"
+        repo.mkdir()
+        git = lambda *a: subprocess.run(["git", "-C", str(repo), *a], check=True, capture_output=True, text=True, encoding="utf-8").stdout.strip()
+        git("init", "-q")
+        (repo / "a.txt").write_text("a\n", encoding="utf-8")
+        git("add", "a.txt")
+        git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "a")
+        (repo / "untracked.txt").write_text("u\n", encoding="utf-8")
+        return repo, git("rev-parse", "HEAD")
+
+    def test_untracked_closure_file_is_an_export_error(self):
+        from vellum_closure import git_blob_rows
+        with tempfile.TemporaryDirectory() as td:
+            repo, head = self.repo(td)
+            self.assertEqual([r["path"] for r in git_blob_rows(repo, head, ["a.txt"])], ["a.txt"])
+            with self.assertRaisesRegex(SystemExit, "not a tracked file at .*: untracked.txt"):
+                git_blob_rows(repo, head, ["a.txt", "untracked.txt"])
+            self.assertEqual([r["path"] for r in git_blob_rows(repo, head, ["a.txt", "untracked.txt"], strict=False)], ["a.txt"])
+
+    def test_commit_map_must_come_from_the_rewrite(self):
+        from vellum_closure import export_commit_map
+        pulp_sha, mirror_sha = "1" * 40, "2" * 40
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "commit-map"
+            with self.assertRaisesRegex(SystemExit, "wrote no commit map"):
+                export_commit_map(path, pulp_sha, mirror_sha)
+            path.write_text(f"old new\n{pulp_sha} {'3' * 40}\n", encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "does not map"):
+                export_commit_map(path, pulp_sha, mirror_sha)
+            path.write_text(f"old new\n{pulp_sha} {mirror_sha}\n", encoding="utf-8")
+            self.assertEqual(export_commit_map(path, pulp_sha, mirror_sha), path.read_bytes())
+
+    @unittest.skipUnless(shutil.which("git-filter-repo"), "git-filter-repo is not installed")
+    def test_filter_repo_commit_map_maps_the_exported_commit(self):
+        from vellum_closure import export_commit_map
+        with tempfile.TemporaryDirectory() as td:
+            repo, head = self.repo(td)
+            out = Path(td) / "out"
+            subprocess.run(["git", "clone", "-q", "--no-local", str(repo), str(out)], check=True)
+            git = lambda *a: subprocess.run(["git", "-C", str(out), *a], check=True, capture_output=True, text=True, encoding="utf-8").stdout.strip()
+            git("update-ref", "refs/heads/export-source", head)
+            git("checkout", "-q", "--detach", "export-source")
+            subprocess.run(["git-filter-repo", "--force", "--path", "a.txt", "--path-rename", "a.txt:mirror/a.txt",
+                            "--refs", "export-source"], cwd=out, check=True, capture_output=True)
+            mirror_sha = git("rev-parse", "refs/heads/export-source")
+            self.assertNotEqual(mirror_sha, head)
+            export_commit_map(out / ".git" / "filter-repo" / "commit-map", head, mirror_sha)
+
+    def test_an_existing_export_is_never_overwritten(self):
+        from vellum_closure import claim_export_paths
+        with tempfile.TemporaryDirectory() as td:
+            receipt = Path(td) / "receipts" / "20261023-0123456789ab.json"
+            claim_export_paths([receipt])
+            receipt.parent.mkdir()
+            receipt.write_text("{}", encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "an export with this id already exists"):
+                claim_export_paths([Path(td) / "closures" / "20261023-0123456789ab", receipt])
+
+
+HAS_FILTER_REPO = bool(shutil.which("git-filter-repo"))
+PRUNED = "0" * 40
+
+
+class PrunedSourceFixture(unittest.TestCase):
+    """A history where ``pruned`` changes no exported path, so the rewrite prunes it."""
+
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.addCleanup(self.td.cleanup)
+        self.repo = Path(self.td.name) / "repo"
+        self.repo.mkdir()
+        self.git("init", "-q")
+        (self.repo / "tools" / "scripts").mkdir(parents=True)  # spelled in parts: not a script input
+        self.base = self.commit({"a.txt": "a1\n", "b.txt": "b1\n", "tools/scripts/vellum_closure.py": "tool\n"})
+        self.source = self.commit({"a.txt": "a2\n"})
+        self.pruned = self.commit({"b.txt": "b2\n"})
+
+    def git(self, *args, repo=None):
+        return subprocess.run(["git", "-C", str(repo or self.repo), "-c", "user.name=t", "-c", "user.email=t@t", *args],
+                              check=True, capture_output=True, text=True, encoding="utf-8").stdout.strip()
+
+    def commit(self, files, message=None):
+        for name, text in files.items():
+            (self.repo / name).write_text(text, encoding="utf-8")
+        self.git("add", *files)
+        self.git("commit", "-q", "-m", message or ",".join(files))
+        return self.git("rev-parse", "HEAD")
+
+    def mapped(self, commit):
+        """The maps git-filter-repo writes for this history, without running it; (dir, mirror commit).
+
+        Exporting only ``a.txt``, ``base`` and ``source`` each get a rewritten
+        commit and ``pruned`` maps to all-zero. The export ref lands on the
+        rewrite of the newest kept ancestor. Mirror ids are placeholders: the
+        refusal paths read them only as strings, and
+        ``test_synthetic_maps_match_a_real_rewrite`` holds the shape to a real
+        rewrite wherever git-filter-repo is installed.
+        """
+        history = [self.base, self.source, self.pruned]
+        upto = history[:history.index(commit) + 1]
+        kept = {self.base: "1" * 40, self.source: "2" * 40}
+        path = Path(self.td.name) / f"mapped-{commit[:8]}"
+        path.mkdir()
+        (path / "commit-map").write_text(
+            "old new\n" + "".join(f"{c} {kept.get(c, PRUNED)}\n" for c in upto), encoding="utf-8")
+        mirror = kept[[c for c in upto if c in kept][-1]]
+        (path / "ref-map").write_text(f"old new ref\n{commit} {mirror} refs/heads/export-source\n", encoding="utf-8")
+        return path, mirror
+
+    def rewrite(self, commit):
+        """Rewrite ``commit`` exactly as export does; (filter-repo dir, mirror commit)."""
+        out = Path(self.td.name) / f"out-{commit[:8]}"
+        subprocess.run(["git", "clone", "-q", "--no-local", str(self.repo), str(out)], check=True)
+        self.git("update-ref", "refs/heads/export-source", commit, repo=out)
+        self.git("checkout", "-q", "--detach", "export-source", repo=out)
+        subprocess.run(["git-filter-repo", "--force", "--path", "a.txt", "--path-rename", "a.txt:mirror/a.txt",
+                        "--refs", "export-source"], cwd=out, check=True, capture_output=True)
+        return out / ".git" / "filter-repo", self.git("rev-parse", "refs/heads/export-source", repo=out)
+
+    def forged(self, real_dir, commit_rows=None, ref_map=None):
+        """A filter-repo dir with a forged commit map and/or ref map; the real file where not forged."""
+        path = Path(self.td.name) / f"forged-{len(list(Path(self.td.name).glob('forged-*')))}"
+        path.mkdir()
+        (path / "commit-map").write_text("old new\n" + "".join(f"{o} {n}\n" for o, n in commit_rows), encoding="utf-8") \
+            if commit_rows is not None else shutil.copy(real_dir / "commit-map", path / "commit-map")
+        if ref_map is None:
+            shutil.copy(real_dir / "ref-map", path / "ref-map")
+        elif ref_map is not False:
+            (path / "ref-map").write_text(ref_map, encoding="utf-8")
+        return path
+
+
+class PrunedSourceRefusalTests(PrunedSourceFixture):
+    """The source check reads only the maps and the Pulp history, so it runs without git-filter-repo."""
+
+    def test_pruned_commit_is_accepted_with_its_proof(self):
+        from vellum_closure import export_source_mapping
+        fr, mirror_sha = self.mapped(self.pruned)
+        data, ref_map, record = export_source_mapping(fr, self.pruned, mirror_sha, self.repo, ["a.txt"])
+        self.assertEqual(data, (fr / "commit-map").read_bytes())
+        self.assertNotIn(f"{self.pruned} {mirror_sha}", data.decode())  # no row is written in
+        self.assertEqual(ref_map, (fr / "ref-map").read_bytes())
+        self.assertEqual(record["sha"], self.source)
+        proof = record["proof"]
+        self.assertEqual(proof["ref_map_row"], f"{self.pruned} {mirror_sha} refs/heads/export-source")
+        self.assertEqual(proof["commit_map_rows"], [f"{self.pruned} {PRUNED}", f"{self.source} {mirror_sha}"])
+        self.assertTrue(proof["source_is_ancestor"] and proof["exported_paths_equal"])
+        self.assertEqual(proof["exported_path_count"], 1)
+        listing = f"a.txt 100644 {self.git('rev-parse', f'{self.source}:a.txt')}\n".encode()
+        self.assertEqual(proof["exported_blobs_sha256"], hashlib.sha256(listing).hexdigest())
+
+    def test_unpruned_commit_returns_the_map_with_no_record(self):
+        from vellum_closure import export_source_mapping
+        fr, mirror_sha = self.mapped(self.source)
+        data, ref_map, record = export_source_mapping(fr, self.source, mirror_sha, self.repo, ["a.txt"])
+        self.assertEqual(data, (fr / "commit-map").read_bytes())
+        self.assertIsNone(ref_map)
+        self.assertIsNone(record)
+
+    def test_pruned_commit_whose_exported_content_differs_is_refused(self):
+        from vellum_closure import export_source_mapping
+        fr, mirror_sha = self.mapped(self.pruned)
+        forged = self.forged(fr, [(self.base, mirror_sha), (self.pruned, "0" * 40)])
+        with self.assertRaisesRegex(SystemExit, "exported paths differ"):
+            export_source_mapping(forged, self.pruned, mirror_sha, self.repo, ["a.txt"])
+
+    def test_mirror_source_that_is_not_an_ancestor_is_refused(self):
+        from vellum_closure import export_source_mapping
+        fr, mirror_sha = self.mapped(self.pruned)
+        self.git("checkout", "-q", "-b", "side", self.base)
+        side = self.commit({"a.txt": "a2\n"}, message="side")
+        self.assertNotEqual(side, self.source)
+        forged = self.forged(fr, [(side, mirror_sha), (self.pruned, "0" * 40)])
+        with self.assertRaisesRegex(SystemExit, "is not an ancestor"):
+            export_source_mapping(forged, self.pruned, mirror_sha, self.repo, ["a.txt"])
+        forged = self.forged(fr, [(self.pruned, mirror_sha), (self.pruned, "0" * 40)])
+        with self.assertRaisesRegex(SystemExit, "is not an ancestor"):  # R itself is not a strict ancestor
+            export_source_mapping(forged, self.pruned, mirror_sha, self.repo, ["a.txt"])
+
+    def test_pruned_commit_needs_the_ref_map_row(self):
+        from vellum_closure import export_source_mapping
+        fr, mirror_sha = self.mapped(self.pruned)
+        with self.assertRaisesRegex(SystemExit, "wrote no ref map"):
+            export_source_mapping(self.forged(fr, ref_map=False), self.pruned, mirror_sha, self.repo, ["a.txt"])
+        wrong = f"old new ref\n{self.source} {mirror_sha} refs/heads/export-source\n"
+        with self.assertRaisesRegex(SystemExit, "ref map does not move"):
+            export_source_mapping(self.forged(fr, ref_map=wrong), self.pruned, mirror_sha, self.repo, ["a.txt"])
+
+    def test_pruned_commit_with_no_or_two_mirror_sources_is_refused(self):
+        from vellum_closure import export_source_mapping
+        fr, mirror_sha = self.mapped(self.pruned)
+        for sources in ([], [self.source, self.base]):
+            forged = self.forged(fr, [*((row, mirror_sha) for row in sources), (self.pruned, "0" * 40)])
+            with self.assertRaisesRegex(SystemExit, "not exactly one"):
+                export_source_mapping(forged, self.pruned, mirror_sha, self.repo, ["a.txt"])
+
+
+
+    def test_exported_blobs_are_compared_even_when_git_diff_reports_equal(self):
+        import vellum_closure
+        fr, mirror_sha = self.mapped(self.pruned)
+        forged = self.forged(fr, [(self.base, mirror_sha), (self.pruned, PRUNED)])
+        real_run = subprocess.run
+
+        def diff_says_equal(cmd, *args, **kwargs):
+            if "diff" in cmd and "--quiet" in cmd:
+                return subprocess.CompletedProcess(cmd, 0)
+            return real_run(cmd, *args, **kwargs)
+
+        with unittest.mock.patch.object(vellum_closure.subprocess, "run", diff_says_equal), \
+                self.assertRaisesRegex(SystemExit, "exported blobs differ"):
+            vellum_closure.export_source_mapping(forged, self.pruned, mirror_sha, self.repo, ["a.txt"])
+
+
+@unittest.skipUnless(HAS_FILTER_REPO, "git-filter-repo is not installed")
+class PrunedSourceRewriteTests(PrunedSourceFixture):
+    """End-to-end paths that need a real rewrite."""
+
+    def test_synthetic_maps_match_a_real_rewrite(self):
+        for commit in (self.source, self.pruned):
+            fr, mirror_sha = self.rewrite(commit)
+            mapped, mapped_mirror = self.mapped(commit)
+            real_rows = [line.split() for line in (fr / "commit-map").read_text(encoding="utf-8").splitlines()]
+            fake_rows = [line.split() for line in (mapped / "commit-map").read_text(encoding="utf-8").splitlines()]
+            # filter-repo writes rows in no fixed order: compare which commits are kept or pruned
+            self.assertEqual(real_rows[0], fake_rows[0])
+            self.assertEqual(sorted((r[0], r[1] == PRUNED) for r in real_rows[1:]),
+                             sorted((r[0], r[1] == PRUNED) for r in fake_rows[1:]))
+            real_ref = (fr / "ref-map").read_text(encoding="utf-8").replace(mirror_sha, "<mirror>")
+            fake_ref = (mapped / "ref-map").read_text(encoding="utf-8").replace(mapped_mirror, "<mirror>")
+            self.assertIn(f"{commit} <mirror> refs/heads/export-source", real_ref)
+            self.assertIn(f"{commit} <mirror> refs/heads/export-source", fake_ref)
+            self.assertEqual(real_ref.splitlines()[0].split(), fake_ref.splitlines()[0].split())  # filter-repo pads its header
+
+    def test_unpruned_commit_maps_directly_with_no_record(self):
+        from vellum_closure import export_source_mapping
+        fr, mirror_sha = self.rewrite(self.source)
+        data, ref_map, record = export_source_mapping(fr, self.source, mirror_sha, self.repo, ["a.txt"])
+        self.assertEqual(data, (fr / "commit-map").read_bytes())
+        self.assertIsNone(ref_map)
+        self.assertIsNone(record)
+
+    def test_pruned_commit_exports_with_its_ref_map_and_equality_proof(self):
+        from vellum_closure import export_commit_map, export_source_mapping
+        fr, mirror_sha = self.rewrite(self.pruned)
+        self.assertIn(f"{self.pruned} {'0' * 40}", (fr / "commit-map").read_text(encoding="utf-8"))
+        with self.assertRaisesRegex(SystemExit, "does not map"):
+            export_commit_map(fr / "commit-map", self.pruned, mirror_sha)
+        data, ref_map, record = export_source_mapping(fr, self.pruned, mirror_sha, self.repo, ["a.txt"])
+        self.assertEqual(data, (fr / "commit-map").read_bytes())
+        self.assertNotIn(f"{self.pruned} {mirror_sha}", data.decode())
+        self.assertEqual(ref_map, (fr / "ref-map").read_bytes())  # filter-repo's own ref map, shipped as written
+        self.assertEqual(record["sha"], self.source)
+        proof = record["proof"]
+        self.assertEqual(proof["ref_map_row"], f"{self.pruned} {mirror_sha} refs/heads/export-source")
+        self.assertEqual(proof["commit_map_rows"], [f"{self.pruned} {'0' * 40}", f"{self.source} {mirror_sha}"])
+        self.assertTrue(proof["source_is_ancestor"] and proof["exported_paths_equal"])
+        self.assertEqual(proof["exported_path_count"], 1)
+
+    def export_landing(self, commit):
+        """Run cmd_export on ``commit``; (receipt, landing). The closure checks it applies are not under test."""
+        import vellum_closure
+        manifest = Path(self.td.name) / "unit.json"
+        manifest.write_text(json.dumps({"files": ["a.txt"]}), encoding="utf-8")
+        args = Namespace(repo=str(self.repo), manifest=[str(manifest)], unit_name=["unit"], pulp_sha=commit,
+                         output=str(Path(self.td.name) / f"export-{commit[:8]}"), landing=str(Path(self.td.name) / f"landing-{commit[:8]}"),
+                         mirror_root="mirror", mirror_ref="refs/heads/mirror/pulp-framework", dry_run=False,
+                         rename_map=None, cpu_only_unit=[])
+        with unittest.mock.patch.object(vellum_closure, "exportable_closure", lambda m, *_: dict(m)), \
+                unittest.mock.patch.object(vellum_closure, "export_owned_file_violations", lambda *_: []), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(vellum_closure.cmd_export(args), 0)
+        landing = Path(args.landing)
+        return json.loads(next((landing / "provenance/mirror/receipts").glob("*.json")).read_text(encoding="utf-8")), landing
+
+    # Vellum tools/provenance/verify_mirror_export.py RECEIPT_KEYS: an exact set.
+    VELLUM_RECEIPT_KEYS = {"schema", "export_id", "pulp_repository", "pulp_sha", "mirror_ref", "mirror_sha",
+                           "mirror_tree", "rename", "commit_map", "units", "files", "generated_inputs", "tool",
+                           "created_at"}
+
+    def test_unpruned_receipt_keeps_exactly_the_keys_vellum_checks(self):
+        receipt, landing = self.export_landing(self.source)
+        self.assertEqual(set(receipt), self.VELLUM_RECEIPT_KEYS)
+        self.assertFalse((landing / "provenance/mirror/ref-maps").exists())
+
+    def test_pruned_receipt_adds_one_mirror_source_field(self):
+        unpruned, _ = self.export_landing(self.source)
+        receipt, landing = self.export_landing(self.pruned)
+        self.assertEqual(set(receipt) - self.VELLUM_RECEIPT_KEYS, {"mirror_source"})
+        self.assertEqual(receipt["pulp_sha"], self.pruned)  # pulp_sha stays R
+        self.assertEqual(receipt["mirror_sha"], unpruned["mirror_sha"])
+        source = receipt["mirror_source"]
+        self.assertEqual(set(source), {"sha", "ref_map", "proof"})
+        self.assertEqual(source["sha"], self.source)
+        ref_map = landing / source["ref_map"]["path"]
+        self.assertEqual(source["ref_map"]["path"], f"provenance/mirror/ref-maps/{receipt['export_id']}.txt")
+        self.assertEqual(source["ref_map"]["sha256"], hashlib.sha256(ref_map.read_bytes()).hexdigest())
+        self.assertIn(f"{self.pruned} {receipt['mirror_sha']} refs/heads/export-source", ref_map.read_text(encoding="utf-8"))
+        self.assertEqual([row["blob"] for row in receipt["files"]], [self.git("rev-parse", f"{self.source}:a.txt")])
+
+class ClosureCtestWiringTests(unittest.TestCase):
+    def test_manifest_readers_require_the_boundary_fixture(self):
+        # DEPENDS only orders tests; a filtered run would grade a stale manifest.
+        import re
+        text = (REPO_ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+        gpu_branch = text[text.index("add_test(NAME pulp.vellum-closure-boundary"):text.index("    else()\n        # Register the gate")]
+
+        def props(test):
+            match = re.search(r"set_tests_properties\(" + re.escape(test) + r" PROPERTIES(.*?)\)", gpu_branch, re.S)
+            self.assertIsNotNone(match, test)
+            return match.group(1)
+
+        self.assertIn("FIXTURES_SETUP pulp-vellum-closure-manifest", props("pulp.vellum-closure-boundary"))
+        for test in ("pulp.vellum-closure-gate", "pulp.vellum-view-core-pulp-kept"):
+            self.assertIn("FIXTURES_REQUIRED pulp-vellum-closure-manifest", props(test), test)
+            self.assertNotIn("DEPENDS", props(test), test)
 
 
 if __name__ == "__main__":

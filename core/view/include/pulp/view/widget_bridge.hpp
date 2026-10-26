@@ -24,6 +24,7 @@ namespace pulp::view { struct ClaudeBundle; }
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <functional>
 #include <limits>
 #include <string>
@@ -162,6 +163,43 @@ public:
         }
     }
     const std::vector<std::filesystem::path>& asset_roots() const noexcept { return asset_roots_; }
+
+    /// One file compiled into the plug-in beside its editor script. `name` is
+    /// the script-relative path with forward slashes (`assets/knob.png`); the
+    /// bytes live for the process (a static array in the plug-in image).
+    struct EmbeddedAsset {
+        std::string name;
+        const unsigned char* data = nullptr;
+        std::size_t size = 0;
+    };
+
+    /// Install the files embedded beside the script. For an editor whose
+    /// script was compiled into the image, these stand in for the script's
+    /// directory: `__loadAssetSync__`, `setImageSource`, sprite strips and
+    /// fonts resolve a relative path here first, before the asset roots.
+    void set_embedded_assets(std::vector<EmbeddedAsset> assets);
+    const std::vector<EmbeddedAsset>& embedded_assets() const noexcept {
+        return embedded_assets_;
+    }
+
+    /// The embedded file a script-relative `path` names, or nullptr. Leading
+    /// `./` and `/` are ignored; `..` segments, absolute paths and URIs never
+    /// match. Matching is exact on the normalized name.
+    const EmbeddedAsset* embedded_asset(std::string_view path) const noexcept;
+    /// `data:<mime>;base64,...` for an embedded file, which is how an image
+    /// widget draws bytes that have no file behind them.
+    std::string embedded_asset_data_uri(const EmbeddedAsset& asset) const;
+
+    /// Identity of this bridge's persisted stores (widget storage, style
+    /// presets). A path-backed script is keyed by its directory; an embedded
+    /// script has no directory, so its host names it here (the plug-in's
+    /// bundle id and script name) and the stores keep working across hosts.
+    void set_storage_identity(std::string identity) {
+        storage_identity_ = std::move(identity);
+    }
+    /// The identity the persisted stores hash: `set_storage_identity()`'s value
+    /// when set, else the script base directory, else empty (no store).
+    std::string storage_identity() const;
 
     /// Preferred directory for resolving RELATIVE filesystem paths handed to
     /// path-taking bridge APIs. Imported code emits `assets/<file>` beside its
@@ -456,6 +494,19 @@ private:
     std::unique_ptr<NativeGpuBridgeState> native_gpu_bridge_state_;
     std::vector<std::filesystem::path> asset_roots_;
     std::filesystem::path script_base_dir_;
+    std::vector<EmbeddedAsset> embedded_assets_;
+    std::string storage_identity_;
+
+    /// Per-bridge persisted-store directories (widget storage, style presets),
+    /// resolved once per storage identity by the storage registrars so a UI
+    /// that mirrors every control change into storage never re-walks the
+    /// directory tree. Reset whenever the identity it was resolved for changes.
+    struct PrivateStoreDirs {
+        std::string identity;
+        std::optional<std::filesystem::path> widget_storage;
+        std::optional<std::filesystem::path> style_presets;
+    };
+    PrivateStoreDirs private_store_dirs_;
 
     // Per-id cache entry: the resolved View plus the tree structure generation
     // at which that View was last CONFIRMED to live under `root_`. A fresh entry
@@ -847,7 +898,16 @@ private:
 #endif
 
     // Resolve parent: returns view for parentId, or &root_ if empty
-    View* resolve_parent(const std::string& parent_id);
+    // The view a script named as a parent, or the root for an unknown id. With
+    // `child`, a parent that is the child itself or one of its descendants also
+    // resolves to the root: a script registers a widget under its id before
+    // attaching it, so naming that id as the parent must not build a cycle.
+    View* resolve_parent(const std::string& parent_id, const View* child = nullptr);
+    // Attaches a freshly created widget already registered under `id`. A
+    // refused attach drops that registration before the view is destroyed,
+    // so the registry never holds a pointer to a view the tree rejected.
+    bool attach_created(const std::string& id, const std::string& parent_id,
+                        std::unique_ptr<View> view);
 
     // Install on_change/on_toggle callbacks that dispatch to JS
     void wire_callbacks(const std::string& id, View* w);

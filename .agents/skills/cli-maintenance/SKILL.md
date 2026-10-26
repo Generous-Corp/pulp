@@ -364,6 +364,14 @@ their install targets. Pass their existing spinner label and lease-error
 prefix through the helper so user-facing diagnostics remain stable while
 lease, QoS, watchdog, lock, and bounded-parallelism policy stays centralized.
 
+Copyable build recipes a command prints for the user (`pulp import emit`'s
+"Build it" step) may name `tools/ci/governed-build.sh` only by the absolute
+path of a checkout the CLI actually found, and only if that file exists. An
+installed CLI has no checkout and ships no wrapper, so a relative
+`tools/ci/governed-build.sh` there is a path that does not exist; print a
+plain `cmake --build <dir>` instead. `test/test_cli_import_emit.cpp` copies the
+built CLI out of the checkout to pin the installed form.
+
 ### Build-shaped commands consult the focused-build selector
 
 `pulp build`, `pulp dev`, `pulp loop`, `pulp test`, and `pulp-cpp build --watch`
@@ -399,6 +407,28 @@ rebuild. Keep the two sides in step:
   `EXCLUDED_*` filter constants from the projection side: the bounded run's
   base comparison and the authoritative suite both read them.
 
+### The dev-shared link mode is chosen per command, in both CLIs
+
+`PULP_DEV_SHARED_UI` (see `docs/guides/build.md`) is a property of the build
+dir, but each command decides it: `pulp dev` / `pulp loop` want it on for an
+SDK project on macOS (`--no-dev-shared` opts out; the source checkout stays
+static because its tests inspect example and fixture modules as they ship), `pulp build` wants it off unless `--dev-shared`,
+and a non-empty `PULP_DEV_SHARED_UI` environment value overrides every command.
+A cache that disagrees is reconfigured with one `-DPULP_DEV_SHARED_UI=` flag;
+the option only changes link lines, so switching relinks and never recompiles.
+
+- The rule is `dev_shared_ui_wanted` + `dev_shared_ui_change` in
+  `tools/cli/configure_defaults.hpp` and the same-named functions in
+  `experimental/pulp-rs/src/cmd/orchestrate.rs`. Change both together.
+- `BuildPlan::ensure_configured` (dev/loop) reconfigures an existing dir in place
+  and passes `--dev-shared` to the `cmd_build` bootstrap; without that flag the
+  bootstrap would configure static links and the loop would reconfigure again.
+- `--dev-shared` must be consumed by both build parsers and forwarded by
+  `build_delegate_argv`, or it reaches `cmake --build` as an unknown flag.
+- Tests: the `[dev-shared]` cases in `test/test_cli_configure_defaults.cpp`
+  (pure rule plus `pulp-cpp build` shell-outs against a fake `cmake`) and the
+  `dev_shared` cases in `orchestrate::tests`.
+
 ### A tartci capacity denial retries for the agent floor; its QoS is mandatory
 
 `TartciAgentBuildLease::acquire` (`tools/cli/tartci_lease.cpp`) answers a
@@ -416,6 +446,21 @@ the condition of the grant, not a preference. A new build-shaped command must
 do the same, or it will run a floor grant at default QoS and take CPU the host
 never agreed to give. A grant larger than the request, or one without a
 `lease_size_cores`, is released and treated as the original denial.
+
+### The browser-capture runtime file list is duplicated across both CLIs
+
+`tools/cli/upgrade_install.hpp` (`browser_capture_runtime_files`) and the Rust
+`experimental/pulp-rs/src/install_import_design.rs`
+(`BROWSER_CAPTURE_RUNTIME_FILES`) each pin the browser-capture modules an
+upgrade installs, and their tests compare against
+`tools/import-design/browser_capture/runtime_manifest.txt`. A module added to
+the manifest alone passes a source build and fails both upgrade tests; the
+release `common_cli_members` in `tools/scripts/release_product_matrix.json`
+needs it too. Update all four together. A module missing from the manifest
+does not show up as a missing file. The built `pulp-import-design` runs its
+staged `browser_capture-v1/` copy, the capability probe hits
+`ERR_MODULE_NOT_FOUND`, and discovery reports that the system Chrome "does not
+provide the required headless/CDP capture capabilities".
 
 ## Adding a CLI Command — Full Checklist
 
@@ -598,6 +643,30 @@ performs signature/trust and bounded-parse checks only; it never executes Custom
 code or restores state. `--no-mint` is the non-interactive guard that refuses an
 absent signing key instead of silently creating a new identity.
 
+`pulp bake` never loads a plugin: `cmd_bake.cpp` passes
+`GraphLoadOptions::load_plugins = false`, because the lowerability check
+refuses hosted Plugin nodes anyway and loading one first would run whatever
+library the graph file names, for nothing. There is deliberately no
+`--allow-path` flag on bake (it could never produce a successful bake), and
+`pulp host <path>` needs none either, since its positional path *is* the
+operator's explicit choice. `pulp scan --in-process` is the only way CLAP
+entry points run in the scanning process: by default `PluginScanner::scan`
+runs each `.clap` in a `pulp-scan-worker` child, found beside the executable
+(an installed SDK's `bin/`, or `tools/scan-worker/` in a build tree) or via
+`PULP_SCAN_WORKER`, and when no worker exists CLAP is **skipped**, not scanned
+in-process; `cmd_scan` reads `scan_report()` and prints the "pass
+`--in-process`" guidance to stderr. Both behaviours are `pulp-cpp`-side; the
+Rust front end forwards `bake` arguments untouched, while its own `scan` is
+filesystem-only and never reaches the worker.
+
+`tools/cli` is configured only when `PULP_ENABLE_GPU` is ON (root
+`CMakeLists.txt`), so a GPU-off worktree has no `pulp-cli` target at all and
+`cmake --build build --target pulp-cli` fails with "unknown target". To
+compile-check a CLI edit there, run the compiler with `-fsyntax-only` using
+the `FLAGS`/`DEFINES`/`INCLUDES` of a sibling target that links `pulp::host`
+(for example `pulp-scan-worker`'s rule in `build/build.ninja`) plus
+`-Itools/cli`; the real link still happens on the GPU-enabled `macos` gate.
+
 Stateful Custom records persist the graph's authored/staged
 `custom_state_blob`, not a live instance's `save_state()` result. This is a
 load-bearing realtime boundary: bake may run while the graph processes, and the
@@ -745,6 +814,15 @@ A source-only row reports
 without that SDK registry reports the registry unavailable. Do not search a
 different checkout or SDK, or another installed SDK version.
 
+The registry is installed into every SDK (`share/pulp/authority-navigation.json`),
+so a row may describe a private authority but must not name the private
+repository or a file inside it. The `dsp-survey-admission` row says "the DSP
+survey admission protocol in the maintainers' private planning repository";
+the Python and C++ validators pin that exact text, `test_cli_shellout.cpp` pins
+the registry's SHA-256, and `cmake-share-files-no-host-identifiers` /
+`cmake-pulp-install-layout` fail on a private repo, host name, home path or user
+name anywhere under share/pulp (allowlist entries carry their reason).
+
 This is intentionally CLI-only in the parity baseline. It describes the
 separate offline MCP authority and the exact-instance live-control route; it
 does not wrap either as a new generic MCP or control operation. The live row
@@ -884,6 +962,17 @@ Same as above, focus on steps 2, 4, 5, 6, 7. Key risks:
   empty `std::filesystem::path::parent_path()` before creating directories and
   add shellout coverage for the bare-filename case.
 
+### `pulp content` archives are size-budgeted before extraction
+
+`validate` / `install` / `update` admit a `.pulpcontent` archive from its central
+directory before inflating anything: 4 GiB total, 1 GiB per entry and 65536
+entries by default; `--max-pack-bytes <n>` lowers the byte caps and is a clamp,
+never a raise (`clamp_content_install_bytes`). The budget (`pulp::state::ContentSizeBudget`
+in `core/state/include/pulp/state/content_install_limits.hpp`) is shared with
+the runtime installer, so a cap change belongs in that header, not in
+`content_commands.cpp`. The CLI parses options per subcommand, so a new content
+flag is added to each parser (and to `print_usage`), not in one place.
+
 ### `pulp build --seed-build` is best-effort by contract
 
 `--seed-build[=<donor>]` (and `PULP_SEED_BUILD`) hands a fresh source
@@ -942,6 +1031,23 @@ parsing, `check_trace_flags`, the build-dir choice) *and* in `cmd_build.cpp`
 for the delegated branches. The same split bites status output: a `pulp status`
 line added only to the Rust fallback never reaches installed users, because
 installed status delegates to `pulp-cpp status`.
+
+### A standalone `pulp build` configure needs the SDK prefix
+
+The C++ `cmd_build` always passed `-DCMAKE_PREFIX_PATH=<resolved SDK>` for a
+standalone project; the Rust `pulp build` did not, so `pulp create --no-build`
+then `pulp build` (or any fresh build dir) let `find_package(Pulp)` take
+whatever Pulp package was first on CMake's search path. With `~/.pulp/bin` on
+`PATH`, that was the stale `~/.pulp/lib/cmake/Pulp` left by an old install,
+which failed the version check. `experimental/pulp-rs/src/standalone_sdk.rs`
+now finds an installed SDK in the same order as the C++
+`resolve_standalone_sdk(materialize=false)` (`sdk_path`, the `sdk_checkout`
+local build, `~/.pulp/sdk/<version>`, `latest` = newest installed), and when
+none is on disk the build is delegated to `pulp-cpp`, which can download one.
+Keep the two lookups in step. Only a fresh or migrated cache needs the prefix:
+CMake keeps the cached value across reconfigures. The orchestrate unit-test
+fixture `standalone_project` names an `sdk_path` so its configures stay
+in-process; the shell-out cases are in `tests/orchestrate_parity_test.rs`.
 
 ### Configure defaults live in two parsers — change both
 
@@ -1196,11 +1302,23 @@ place (relaunching would kill the plugin + lose audio/UI state). Gotchas:
   installer by unpacking its `Distribution` (`xar -xf … Distribution`) and
   checking for `<options customize="allow">` + one `<line choice>` per format —
   a flat `Bom/Payload/PackageInfo` archive is a bare `pkgbuild` with NO Customize.
+- `pulp ship package` (macOS) exits 1 when any installer fails or nothing was
+  packaged. It used to print `FAILED to create combined installer` / `Created
+  0 .pkg` and exit 0, so `release` went on to notarize nothing and a script saw
+  success. Every `FAILED` branch bumps `failed_count`; a new packaging branch
+  must do the same.
+- `pulp ship` resolves its root with `resolve_active_project_root()`, so it runs
+  in an SDK consumer project (`pulp.toml`, no `core/`) as well as the checkout.
+  Anything it takes from Pulp itself goes through `ship_support_file()`: the
+  checkout path first, then the selected SDK's `share/pulp/ship/` (installed by
+  `PulpInstallRules.cmake`, asserted by `test_pulp_install_layout.cmake`). A
+  new checkout-relative path in `cmd_ship.cpp` (scripts, templates) needs the
+  same treatment, or `ship` breaks for every consumer project again.
 - A subcommand that must work BEFORE a build exists (e.g. `pulp ship doctor`,
   which makes signing non-interactive) has to be dispatched *above*
   `cmd_ship`'s `build/CMakeCache.txt` guard — that early-return fires first and
   would otherwise reject it with "Build directory not found." Put such handlers
-  right after `find_project_root()`.
+  right after the root resolution.
 - `pulp ship doctor` shells out to `tools/scripts/ensure_signing_ready.sh` (the
   canonical logic + its own `test_ensure_signing_ready.sh`); the C++ side is a
   thin pass-through, and macOS `ship sign` invokes it as a **mandatory quiet
@@ -2098,6 +2216,28 @@ a stripped build uses `PULP_BUILD_TESTS=OFF`.
 - [ ] Search CLAUDE.md
 - [ ] Run sync check
 
+## `pulp create` templates: a placeholder or file has four owners
+
+A `{{VAR}}` placeholder or a new template file must be known in four places,
+and missing any one fails somewhere different:
+
+- `tools/cli/cmd_create.cpp` (the substitution map and the file-rename map) and
+  `experimental/pulp-rs/src/cmd/create.rs` (the same two maps for the Rust
+  front end). Missing one scaffolds a project with a literal `{{VAR}}` in it.
+- `test/cmake/create_template_tests.cmake`, which expands the plugin templates
+  at configure time and compiles them as `pulp-test-create-template-*`. An
+  unknown placeholder fails the Pulp configure itself, with the name. A new
+  source file must also be compiled there, or the template's test fails to
+  link (the processor body moved into `processor.cpp.template` hit both).
+- `tools/scripts/verify_create_templates.py` (`KNOWN_TEMPLATE_VARS` and the
+  required-files list), which runs without a build.
+
+The effect and instrument templates keep `process()` in their own source,
+listed under `SOURCES`, and the generated test links `<target>_Core` rather
+than compiling that source again. An edit to the processor body then
+recompiles one object and relinks each format; when the body lived in the
+header, every format's entry TU and the test recompiled it.
+
 ## The macOS CLI force-load list names implementation archives, not modules
 
 `tools/cli/CMakeLists.txt` force-loads a fixed list of static archives into
@@ -2109,6 +2249,20 @@ the example: it left `pulp-view-core` for `pulp-design-import`, and only
 force-loading `pulp-view-core` would no longer pull the importer's objects.
 Guard each entry with `if(TARGET …)` (the importer target exists only with
 `PULP_ENABLE_DESIGN_IMPORT=ON`).
+
+## Configure defaults carry `-DPULP_DEV_BUILD=ON`
+
+`configure_default_args` (`tools/cli/configure_defaults.hpp`, mirrored in
+`experimental/pulp-rs/src/cmd/orchestrate.rs`) adds `-DPULP_DEV_BUILD=ON` on
+a fresh configure or when the cache never recorded the option, and keeps a
+recorded value; `create_standalone_configure_command` passes it outright.
+That is what records the on-disk `ui.js` hot-reload path in a developer
+build. `pulp ship sign|package|release` on a dev build dir configure and build
+`build-ship/` with the option off and ship from there
+(`ship_dev_build_guard.hpp`; `--allow-dev-build` ships `build/` as it is).
+Keep the two `configure_default_args` and their tests
+(`test/test_cli_configure_defaults.cpp`, the Rust unit + parity tests) in
+step when changing either.
 
 ## CLI Git/CMake shell helpers
 
@@ -2556,6 +2710,20 @@ Gotchas:
 - **If you change `upgrade_url.hpp`, update the regression test in the
   same PR.** Both live at HEAD; drift between them is the whole reason
   the header exists.
+
+## Release floors reach C++ through a generated header
+
+`tools/scripts/release_product_matrix.json` is the single home of release
+floors such as `checksum_manifest_floor`. C++ consumers (`cmd_upgrade.cpp`,
+`cli_sdk.cpp`) never spell the number: `tools/cmake/PulpReleaseMatrix.cmake`
+reads it and `release_floors_gen.h.in` is configured into
+`${CMAKE_BINARY_DIR}/tools/cli/release_floors_gen.h`, next to
+`pulp_version_gen.h`. Any target that compiles one of those sources outside
+`pulp-cli` must configure that header too; `cli_tests.cmake` does it for
+`pulp-test-cli-support-objects`, which compiles `cli_sdk.cpp`. The
+`SingleOwnerReleasePublication` tests in
+`test_release_workflow_test_step.py` fail if a CLI source carries its own
+copy of the floor literal.
 
 ## `pulp version --json`
 
@@ -3115,7 +3283,15 @@ Key layout:
   `breaking` (bool), `applies_if` (expression string), `summary`.
   `docs/migrations/README.md` is the schema reference; the codegen
   skips it. Only write a note when a reasonable pro developer needs
-  to change code / config / habits — not every PR.
+  to change code / config / habits — not every PR. A PR never writes
+  this file itself: it writes `docs/migrations/unreleased/<topic>.md`
+  (`breaking` + `summary` only), and the version-at-land bump that
+  assigns the SDK version folds it into `v<assigned>.md`
+  (`tools/scripts/fold_migration_notes.py`). A guessed `vX.Y.Z.md`
+  goes stale whenever another release lands first.
+- **`docs/migrations/unreleased/*.md`** — validated by the codegen
+  (refused if it sets `version` or `applies_if`) but not embedded,
+  because no released CLI can be upgraded to it yet.
 - **`tools/scripts/build_migration_index.py`** — standalone Python
   codegen. Parses the TOML frontmatter, escapes the Markdown body for
   a C++ string literal, sorts entries by parsed semver, and writes
@@ -3271,6 +3447,10 @@ Gotchas:
     - `validate-build.sh` keeps Debug — that's the validator's job (catches debug-only assertion failures).
     - `cli_common.cpp`'s SDK install path already used Release.
   Follow-up scope (not done yet): `pulp build --debug` / `--release` that force a reconfigure of an existing `build/` directory.
+- Standalone `pulp create` passes `-G Ninja` when `configure_ninja_available()`
+  and the build dir has no `CMakeCache.txt`, matching `pulp build`'s fresh
+  configure; before that it silently got Makefiles unless `CMAKE_GENERATOR` was
+  set in the caller's shell.
 - Standalone `pulp create` configure/test shell commands live in
   `tools/cli/create_build_commands.{hpp,cpp}` so path quoting is tested without
   running a full scaffold build. Keep every path-bearing command argument
@@ -3920,3 +4100,16 @@ after a successful delegated Shipyard arm/ship path, and deliberately skips
 `--no-arm`. Keep this hook after arming so advisory workflow dispatches bind to
 the approved head; direct `shipyard pr` remains an interim gap until Shipyard
 provides a native arm hook.
+
+## `pulp ship package` ships stripped copies; its shell-out tests need the test cwd
+
+`pulp ship package` stages a copy of each AU/VST3/CLAP bundle outside the
+build tree, writes a dSYM of the unstripped executable to
+`artifacts/symbols/`, strips local symbols from the copy's main executable and
+re-signs it (`tools/cli/ship_bundle_strip.cpp`); the build output is never
+modified. A new
+package option that edits a bundle must work on that staged copy, before the
+copy is signed, never on the build output. `test_cli_ship_shellout.cpp` finds
+the CLI relative to its working directory (`../tools/cli/pulp-cpp`), so run the
+binary from `build/test` (ctest does). From the repo root every ship case
+SKIPs and the run still exits 0, which looks like a pass.

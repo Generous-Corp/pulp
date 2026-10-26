@@ -92,15 +92,20 @@ jobs:
         # DESIGNED to fail under PULP_TRACING=ON, so exclude exactly that case
         # (Catch2 exact-name exclusion). The session / offline / guard suites
         # are config-agnostic and must fully pass under ON.
+        #
+        # The session and canvas-layers suites compile into group executables;
+        # `-#` selects a member by its source file, with the same spec ctest
+        # uses, and Catch2 fails when a spec matches no case, so a renamed or
+        # moved member fails here instead of passing empty.
         run: |
           set -euo pipefail
           ./build/test/pulp-test-tracing "~tracing is off by default"
-          ./build/test/pulp-test-tracing-session
+          ./build/test/pulp-test-group-core-runtime -# "[#test_tracing_session]~[.]"
           ./build/test/pulp-test-offline-tracing
           ./build/test/pulp-test-ship-tracing-guard
           # The canvas category stays populated. This is the only lane that
           # compiles tracing in, so it is the only place the assertion can run.
-          ./build/test/pulp-test-tracing-canvas-layers
+          ./build/test/pulp-test-group-core-view -# "[#test_tracing_canvas_layers]~[.]"
 
       - name: Summarize
         if: always()
@@ -111,7 +116,9 @@ jobs:
           Configured `-DPULP_TRACING=ON -DPULP_ENABLE_GPU=OFF` (Release) and
           built + ran the tracing test suites: `pulp-test-tracing` (minus the
           off-by-default guard case, which is designed to fail under ON),
-          `pulp-test-tracing-session`, `pulp-test-offline-tracing`, and
+          `pulp-test-tracing-session` and `pulp-test-tracing-canvas-layers`
+          (members of `pulp-test-group-core-runtime` and
+          `pulp-test-group-core-view`), `pulp-test-offline-tracing`, and
           `pulp-test-ship-tracing-guard`.
 
           Advisory, GitHub-hosted Linux — guards the opt-in path no other lane

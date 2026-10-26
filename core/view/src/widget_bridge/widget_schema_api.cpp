@@ -3,12 +3,11 @@
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/widgets.hpp>
 #include "api_registry.hpp"
+#include "private_storage.hpp"
 
 #include <choc/text/choc_JSON.h>
 
 #include <filesystem>
-#include <fstream>
-#include <iterator>
 #include <string>
 
 namespace pulp::view {
@@ -68,11 +67,11 @@ void BridgeRegistrars::register_widget_schema_api(WidgetBridge& self) {
         return choc::value::Value();
     });
 
-    // saveStylePreset(name, object) -> persist style payload as JSON under temp storage
-    register_bridge_function(api, "saveStylePreset", [](choc::javascript::ArgumentList args) {
-        auto name = args.get<std::string>(0, "");
-        if (name.empty() || args.numArgs < 2 || !args[1]) return choc::value::createBool(false);
-
+    // Style presets persist as <safe name>.json under the per-user, per-bridge
+    // store (see private_storage.hpp). The name is whitelisted to
+    // [A-Za-z0-9_-] with spaces folded to "_" so it can never name a path
+    // component outside that directory.
+    const auto preset_path = [&self](const std::string& name) -> std::filesystem::path {
         std::string safe_name;
         safe_name.reserve(name.size());
         for (char c : name) {
@@ -83,46 +82,47 @@ void BridgeRegistrars::register_widget_schema_api(WidgetBridge& self) {
                 safe_name.push_back('_');
             }
         }
-        if (safe_name.empty()) return choc::value::createBool(false);
+        if (safe_name.empty())
+            return {};
+        const auto& dir = detail::cached_private_dir(self.private_store_dirs_,
+                                                     detail::PrivateStoreKind::StylePresets,
+                                                     self.storage_identity());
+        if (dir.empty())
+            return {};
+        return dir / (safe_name + ".json");
+    };
 
-        auto dir = std::filesystem::temp_directory_path() / "pulp-style-presets";
-        std::filesystem::create_directories(dir);
-
-        std::ofstream out(dir / (safe_name + ".json"));
-        if (!out.is_open()) return choc::value::createBool(false);
-        out << choc::json::toString(*args[1], true);
-        return choc::value::createBool(true);
-    });
+    // saveStylePreset(name, object) -> persist style payload as JSON
+    register_bridge_function(
+        api, "saveStylePreset", [preset_path](choc::javascript::ArgumentList args) {
+            auto name = args.get<std::string>(0, "");
+            if (name.empty() || args.numArgs < 2 || !args[1])
+                return choc::value::createBool(false);
+            const auto path = preset_path(name);
+            if (path.empty())
+                return choc::value::createBool(false);
+            return choc::value::createBool(
+                detail::write_private_file(path, choc::json::toString(*args[1], true)));
+        });
 
     // loadStylePreset(name) -> load persisted JSON object or null
-    register_bridge_function(api, "loadStylePreset", [](choc::javascript::ArgumentList args) {
-        auto name = args.get<std::string>(0, "");
-        if (name.empty()) return choc::value::Value();
-
-        std::string safe_name;
-        safe_name.reserve(name.size());
-        for (char c : name) {
-            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-                (c >= '0' && c <= '9') || c == '-' || c == '_') {
-                safe_name.push_back(c);
-            } else if (c == ' ') {
-                safe_name.push_back('_');
-            }
-        }
-        if (safe_name.empty()) return choc::value::Value();
-
-        auto path = std::filesystem::temp_directory_path() / "pulp-style-presets" / (safe_name + ".json");
-        if (!std::filesystem::exists(path)) return choc::value::Value();
-
-        std::ifstream in(path);
-        std::string json((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-        if (json.empty()) return choc::value::Value();
-        try {
-            return choc::json::parse(json);
-        } catch (...) {
-            return choc::value::Value();
-        }
-    });
+    register_bridge_function(api, "loadStylePreset",
+                             [preset_path](choc::javascript::ArgumentList args) {
+                                 auto name = args.get<std::string>(0, "");
+                                 if (name.empty())
+                                     return choc::value::Value();
+                                 const auto path = preset_path(name);
+                                 if (path.empty())
+                                     return choc::value::Value();
+                                 const auto json = detail::read_private_file(path);
+                                 if (!json || json->empty())
+                                     return choc::value::Value();
+                                 try {
+                                     return choc::json::parse(*json);
+                                 } catch (...) {
+                                     return choc::value::Value();
+                                 }
+                             });
 }
 
 } // namespace pulp::view

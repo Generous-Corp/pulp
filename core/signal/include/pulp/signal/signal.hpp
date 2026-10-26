@@ -32,6 +32,7 @@
 #include <pulp/signal/de_esser.hpp>
 #include <pulp/signal/expander.hpp>
 #include <pulp/signal/svf.hpp>
+#include <pulp/signal/svf_bank.hpp>
 #include <pulp/signal/explicit_q_resonator_bank.hpp>
 #include <pulp/signal/waveshaper.hpp>
 #include <pulp/signal/waveset_transformer.hpp>
@@ -42,11 +43,13 @@
 #include <pulp/signal/chorus.hpp>
 #include <pulp/signal/phaser.hpp>
 #include <pulp/signal/reverb.hpp>
+#include <pulp/signal/ladder_bank.hpp>
 #include <pulp/signal/ladder_filter.hpp>
 #include <pulp/signal/analog_vcf.hpp>
 #include <pulp/signal/linkwitz_riley.hpp>
 #include <pulp/signal/windowing.hpp>
 #include <pulp/signal/fft.hpp>
+#include <pulp/signal/overlap_add_convolver.hpp>
 #include <pulp/signal/fir_filter.hpp>
 #include <pulp/signal/fir_design.hpp>
 #include <pulp/signal/reverse_buffer.hpp>
@@ -101,6 +104,7 @@
 #include <pulp/signal/spectrogram.hpp>
 #include <pulp/signal/multi_channel_meter.hpp>
 #include <pulp/signal/convolver.hpp>
+#include <pulp/signal/fixed_ir_convolver.hpp>
 
 // Modulation and utility toolkit — deterministic randomness, LFO, control-signal
 // tools, the trigger/gate event kit, the envelope family, VCA, low-pass gate,

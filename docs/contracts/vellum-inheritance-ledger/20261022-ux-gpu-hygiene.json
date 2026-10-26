@@ -1,0 +1,15 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261022-ux-gpu-hygiene",
+  "slices": [
+    "canvas-kernel",
+    "render-skia-dawn"
+  ],
+  "vellum_obligation": "Vellum's runtime-effect compile path must refuse caller SkSL whose main() declares a local named pos (the coordinate parameter name Graphite substitutes) with a line-numbered diagnostic on every backend, while accepting globals named pos, helper-function locals, and a main whose own parameter is pos, with a Graphite readback test that pins those cases against a control; carry an equivalent fix in the Skia fork on the next render-toolchain update. Every Vellum iOS display link (render loop, window host and plug-in view host) must request the panel's maximum frame rate while frames are drawn and return to the default range after sustained idle, without toggling during a gesture with short gaps, and its iOS host Info.plist must set CADisableMinimumFrameDurationOnPhone.",
+  "evidence": [
+    ".github/vellum-change-events/20261022-ux-gpu-hygiene.json",
+    "pulp-test-group-canvas [runtime-effect]",
+    "pulp-test-render-loop [frame-rate]",
+    "pulp-test-runtime-effect-names-gpu"
+  ]
+}

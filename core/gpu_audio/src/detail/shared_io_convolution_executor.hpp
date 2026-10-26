@@ -51,6 +51,10 @@ class SharedIoConvolutionExecutor {
     std::uint64_t next_sequence() const noexcept {
         return next_;
     }
+    // The block whose terminal fenced collection, or else the next one due.
+    std::uint64_t first_undelivered() const noexcept {
+        return fenced_at_ != kEmpty ? fenced_at_ : next_;
+    }
 
   private:
     struct Entry {
@@ -70,6 +74,7 @@ class SharedIoConvolutionExecutor {
     std::uint64_t epoch_ = 0;
     std::uint64_t next_ = 0;
     std::uint64_t valid_from_ = 0;
+    std::uint64_t fenced_at_ = kEmpty;
     std::atomic<std::uint64_t> watermark_{0};
     std::atomic<bool> watermark_set_{false};
     std::atomic<bool> fenced_{false};

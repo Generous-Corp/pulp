@@ -394,6 +394,52 @@ and `layout(color) float4 accentColor/bgColor/trackColor/fillColor/thumbColor`.
 See [`docs/reference/shaders.md`](../reference/shaders.md) for the full uniform
 contract and the JS-side `compileShader` / `setWidgetShader` API.
 
+### Shape shaders and material presets
+
+To shade a *shape* rather than a rectangle (a knob arc with a bevel, an inset
+fader track, an LED ring), draw an SDF shape through a shader that reads its
+geometry. `Canvas::draw_sdf_shape_with_shader` hands the author a `PulpChart`
+for band shapes: `t` along the centre line, `cross` across it, `d` the band's
+signed distance and `px` one device pixel. `flat_arc`, `ring`,
+`flat_segment`, `rounded_segment` and `stadium` are charted.
+
+Most audio looks need no hand-written SkSL. The named presets in
+`<pulp/view/chart_shader_presets.hpp>` (`bevel`, `inset-channel`, `tube`,
+`light-pipe`, `centre-highlight`, `glow`) produce the chart source with a light
+direction, cross-section profile and colours baked in, lit in linear light:
+
+```cpp
+#include <pulp/view/chart_shader_presets.hpp>
+
+// Built once (for example in the constructor or on a theme change), not per frame.
+pulp::view::ChartShaderPreset make_track_look() {
+    pulp::view::ChartShaderPresetOptions look;
+    look.color = pulp::canvas::Color::rgba8(60, 62, 70);
+    look.light_angle_deg = 90.0f;                          // lit from above
+    return pulp::view::make_chart_shader_preset("inset-channel", look);
+}
+
+void paint(pulp::canvas::Canvas& canvas) override {
+    using pulp::canvas::Canvas;
+    const auto& track = track_;                            // = make_track_look()
+    Canvas::SDFStyle style;
+    style.stroke_width = 10.0f;                            // the track's thickness
+    Canvas::ShaderDrawOptions options;
+    options.reach = track.reach;                           // room for any halo
+    canvas.draw_sdf_shape_with_shader(Canvas::SDFShape::flat_segment, 0, 0,
+                                      bounds().width, bounds().height, style,
+                                      track.sksl, options);
+}
+```
+
+Each distinct preset source is compiled once and cached, so rebuilding the
+same look is cheap but generating a new one every frame is not. From JS, `setWidgetShaderChartPreset('knob-id', 'light-pipe',
+{ accent: '#5ab0ff' })` puts one on a knob's arc or a fader's track. Anything painted outside the
+shape (a glow, an outer feather) needs `reach`, and a glow or outer feather
+shorter than three sigma is refused rather than clipped. The full contract
+(`PulpGeom`, `PulpChart`, `PulpFragment`, feather modes, presets and their
+options) is in [`docs/reference/shaders.md`](../reference/shaders.md#shape-shaders-pulpgeom-pulpchart-and-presets).
+
 ### GPU compute kernels
 
 For non-rendering GPU work — spectral analysis, batch convolution, FFT,

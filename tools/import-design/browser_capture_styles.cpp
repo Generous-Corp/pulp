@@ -6,6 +6,7 @@
 #include <pulp/canvas/text_utf8.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <fstream>
@@ -161,6 +162,97 @@ std::vector<std::string> split_css_list(const std::string& value) {
     return split_top_level(value, ',');
 }
 
+bool has_scale_variant_paint(const pulp::view::IRStyle& style) {
+    const auto positive = [](const std::optional<float>& v) { return v && *v > 0.0f; };
+    return positive(style.border_top_width) || positive(style.border_right_width) ||
+           positive(style.border_bottom_width) || positive(style.border_left_width) ||
+           positive(style.border_top_left_radius) || positive(style.border_top_right_radius) ||
+           positive(style.border_bottom_right_radius) ||
+           positive(style.border_bottom_left_radius) || !style.box_shadow.empty();
+}
+
+PaintScaleResult apply_paint_scale(pulp::view::IRStyle& style, double sx, double sy) {
+    PaintScaleResult result;
+    constexpr double kFlat = 1e-6;
+    if (std::abs(sx - 1.0) <= kFlat && std::abs(sy - 1.0) <= kFlat)
+        return result;
+    const bool uniform = std::abs(sx - sy) <= kFlat;
+    std::vector<std::string> refused;
+    const auto scale = [&](std::optional<float>& field, double factor) {
+        if (!field || *field == 0.0f)
+            return;
+        field = static_cast<float>(*field * factor);
+        result.scaled = true;
+    };
+
+    scale(style.border_top_width, sy);
+    scale(style.border_bottom_width, sy);
+    scale(style.border_left_width, sx);
+    scale(style.border_right_width, sx);
+    // The uniform slots follow the sides, the way `apply_computed_styles`
+    // sets them: a width only when all four agree, and the shorthand only
+    // when there was one to restate.
+    const bool uniform_width = style.border_top_width && style.border_right_width &&
+                               style.border_bottom_width && style.border_left_width &&
+                               *style.border_top_width == *style.border_right_width &&
+                               *style.border_top_width == *style.border_bottom_width &&
+                               *style.border_top_width == *style.border_left_width;
+    if (uniform_width) {
+        style.border_width = style.border_top_width;
+        if (style.border && style.border_style && style.border_color) {
+            std::ostringstream shorthand;
+            shorthand << *style.border_width << "px " << *style.border_style << ' '
+                      << *style.border_color;
+            style.border = shorthand.str();
+        }
+    } else {
+        style.border_width.reset();
+        style.border.reset();
+    }
+
+    std::optional<float>* corners[] = {
+        &style.border_top_left_radius, &style.border_top_right_radius,
+        &style.border_bottom_right_radius, &style.border_bottom_left_radius};
+    bool rounded = false;
+    for (auto* corner : corners)
+        rounded = rounded || (*corner && **corner > 0.0f);
+    if (rounded) {
+        if (uniform) {
+            for (auto* corner : corners)
+                scale(*corner, sx);
+            scale(style.border_radius, sx);
+        } else {
+            // Two axes make every corner elliptical, which one radius per
+            // corner cannot carry.
+            refused.emplace_back("border-radius");
+        }
+    }
+
+    if (!style.box_shadow.empty()) {
+        bool soft = false;
+        for (const auto& layer : style.box_shadow)
+            soft = soft || layer.blur != 0.0f || layer.spread != 0.0f;
+        if (uniform || !soft) {
+            for (auto& layer : style.box_shadow) {
+                layer.offset_x = static_cast<float>(layer.offset_x * sx);
+                layer.offset_y = static_cast<float>(layer.offset_y * sy);
+                layer.blur = static_cast<float>(layer.blur * sx);
+                layer.spread = static_cast<float>(layer.spread * sx);
+                // The authored text would be written back verbatim and undo
+                // the scale.
+                layer.raw.clear();
+            }
+            result.scaled = true;
+        } else {
+            refused.emplace_back("box-shadow");
+        }
+    }
+
+    for (std::size_t i = 0; i < refused.size(); ++i)
+        result.refused += (i ? ", " : "") + refused[i];
+    return result;
+}
+
 std::vector<pulp::view::IRBoxShadow> parse_box_shadow(
     const std::string& value) {
     std::vector<pulp::view::IRBoxShadow> layers;
@@ -219,7 +311,6 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load_bytes(std::string_vie
     if (!snapshot.isObject()) return std::nullopt;
 
     CapturedStyleIndex index;
-    index.document_canvas_paint_ = detail::extract_document_canvas_paint(snapshot);
 
     // Without the request order the style rows cannot be read at all: entry N
     // is meaningless on its own. Refusing here is what keeps an older capture
@@ -291,6 +382,69 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load_bytes(std::string_vie
             pairs.push_back(json_int(entry[static_cast<int>(j)], -1));
     }
 
+    // Form-control state. Both are RareData columns: parallel `index` /
+    // `value` arrays for the inputs that carry a value, and a bare `index`
+    // list for the options that are selected.
+    const auto node_values = member(nodes, "nodeValue");
+    index.node_value_.assign(node_count, -1);
+    if (node_values.isArray()) {
+        for (uint32_t i = 0; i < node_count && i < node_values.size(); ++i)
+            index.node_value_[i] = json_int(node_values[static_cast<int>(i)], -1);
+    }
+    const auto input_values = member(nodes, "inputValue");
+    if (input_values.isObject()) {
+        const auto which = member(input_values, "index");
+        const auto values = member(input_values, "value");
+        if (which.isArray() && values.isArray()) {
+            for (uint32_t i = 0; i < which.size() && i < values.size(); ++i) {
+                const int node = json_int(which[static_cast<int>(i)], -1);
+                const int value = json_int(values[static_cast<int>(i)], -1);
+                if (node >= 0 && value >= 0)
+                    index.input_value_[node] = value;
+            }
+        }
+    }
+    const auto option_selected = member(nodes, "optionSelected");
+    if (option_selected.isObject()) {
+        const auto which = member(option_selected, "index");
+        if (which.isArray()) {
+            for (uint32_t i = 0; i < which.size(); ++i) {
+                const int node = json_int(which[static_cast<int>(i)], -1);
+                if (node >= 0)
+                    index.option_selected_.push_back(node);
+            }
+        }
+    }
+
+    const auto input_checked = member(nodes, "inputChecked");
+    if (input_checked.isObject()) {
+        const auto which = member(input_checked, "index");
+        if (which.isArray()) {
+            for (uint32_t i = 0; i < which.size(); ++i) {
+                const int node = json_int(which[static_cast<int>(i)], -1);
+                if (node >= 0)
+                    index.input_checked_.push_back(node);
+            }
+        }
+    }
+
+    // The capture's theme verdicts, written beside the snapshot's own arrays.
+    const auto theme = member(snapshot, "formControlTheme");
+    if (theme.isObject()) {
+        const auto controls = member(theme, "controls");
+        if (controls.isArray()) {
+            for (uint32_t i = 0; i < controls.size(); ++i) {
+                const auto control = controls[static_cast<int>(i)];
+                if (!control.isObject())
+                    continue;
+                const int node = json_int(member(control, "node_index"), -1);
+                const auto verdict = member(control, "theme");
+                if (node >= 0 && verdict.isString())
+                    index.control_theme_[node] = std::string(verdict.getString());
+            }
+        }
+    }
+
     const auto node_index = member(layout, "nodeIndex");
     const auto styles = member(layout, "styles");
     const auto bounds = member(layout, "bounds");
@@ -315,7 +469,6 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load_bytes(std::string_vie
         if (paint_orders.isArray() && i < paint_orders.size())
             index.layout_paint_order_[i] = json_int(paint_orders[at], -1);
         if (node < 0) continue;
-        index.node_to_layout_[node] = at;
         index.layout_to_node_[i] = node;
     }
 
@@ -344,6 +497,20 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load_bytes(std::string_vie
             box.height = entry[3].getWithDefault<double>(0.0);
             index.layout_bounds_[i] = box;
         }
+    }
+
+    for (size_t at = 0; at < index.layout_to_node_.size(); ++at) {
+        const int node = index.layout_to_node_[at];
+        if (node < 0)
+            continue;
+        const auto has_area = [&](size_t row) {
+            const auto& box = index.layout_bounds_[row];
+            return box.width > 0.0 && box.height > 0.0;
+        };
+        const auto [current, inserted] =
+            index.node_to_layout_.try_emplace(node, static_cast<int>(at));
+        if (!inserted && has_area(at) && !has_area(static_cast<size_t>(current->second)))
+            current->second = static_cast<int>(at);
     }
 
     // Text fragments. `includeDOMRects` is what makes Chrome emit these, and a
@@ -419,6 +586,21 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load_bytes(std::string_vie
                     const int layout_index =
                         json_int(member(run, "layout_index"), -1);
                     if (layout_index < 0) continue;
+                    const auto metrics = member(run, "line_metrics");
+                    if (metrics.isObject()) {
+                        const auto ascent = member(metrics, "ascent");
+                        const auto descent = member(metrics, "descent");
+                        auto numeric = [](const choc::value::ValueView& v) {
+                            return v.isInt32() || v.isInt64() || v.isFloat32() || v.isFloat64();
+                        };
+                        if (numeric(ascent) && numeric(descent)) {
+                            const pulp::view::LineMetrics m{
+                                static_cast<float>(ascent.getWithDefault<double>(0.0)),
+                                static_cast<float>(descent.getWithDefault<double>(0.0))};
+                            if (m.valid())
+                                index.layout_line_metrics_[layout_index] = m;
+                        }
+                    }
                     const auto resolved = member(run, "resolved");
                     if (!resolved.isArray() || resolved.size() == 0) continue;
                     // The face that shaped the MOST glyphs, not the first one
@@ -464,12 +646,23 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load_bytes(std::string_vie
     }
 
     if (index.style_rows_.empty()) return std::nullopt;
+    // The canvas proof classifies each layout row against the node's own row,
+    // so it runs once that table exists.
+    index.document_canvas_paint_ = detail::extract_document_canvas_paint(snapshot, index);
     return index;
 }
 
 std::string CapturedStyleIndex::resolved_face_for_layout(int layout_index) const {
     const auto it = layout_resolved_face_.find(layout_index);
     return it == layout_resolved_face_.end() ? std::string{} : it->second;
+}
+
+std::optional<pulp::view::LineMetrics>
+CapturedStyleIndex::line_metrics_for_layout(int layout_index) const {
+    const auto it = layout_line_metrics_.find(layout_index);
+    if (it == layout_line_metrics_.end())
+        return std::nullopt;
+    return it->second;
 }
 
 std::vector<CapturedTextBox> CapturedStyleIndex::text_boxes_for_layout(
@@ -567,7 +760,7 @@ std::vector<CapturedTextBox> coalesce_text_line_fragments(
     return lines;
 }
 
-std::optional<int> CapturedStyleIndex::layout_for_node(int node_index) const {
+std::optional<int> CapturedStyleIndex::own_layout_row(int node_index) const {
     const auto it = node_to_layout_.find(node_index);
     if (it == node_to_layout_.end()) return std::nullopt;
     return it->second;
@@ -593,7 +786,7 @@ std::optional<CapturedBox> CapturedStyleIndex::bounds_for(
     int backend_node_id) const {
     const auto node = backend_to_node_.find(backend_node_id);
     if (node == backend_to_node_.end()) return std::nullopt;
-    const auto layout = layout_for_node(node->second);
+    const auto layout = own_layout_row(node->second);
     if (!layout) return std::nullopt;
     return layout_bounds_[static_cast<size_t>(*layout)];
 }
@@ -603,6 +796,63 @@ std::string CapturedStyleIndex::string_at(int index) const {
     return strings_[static_cast<size_t>(index)];
 }
 
+std::string CapturedStyleIndex::control_theme(int node_index) const {
+    const auto found = control_theme_.find(node_index);
+    return found == control_theme_.end() ? std::string() : found->second;
+}
+
+bool CapturedStyleIndex::control_checked(int node_index) const {
+    return std::find(input_checked_.begin(), input_checked_.end(), node_index) !=
+           input_checked_.end();
+}
+
+std::string CapturedStyleIndex::control_value(int node_index) const {
+    if (const auto found = input_value_.find(node_index); found != input_value_.end())
+        return string_at(found->second);
+    if (tag_name(node_index) != "select")
+        return {};
+    // The first selected option that belongs to THIS select — directly, or
+    // through an `<optgroup>`. A nested select is not valid HTML, so the walk
+    // up from the option cannot pass through a different one.
+    for (const int option : option_selected_) {
+        bool owned = false;
+        for (int cursor = parent_of(option), steps = 0; cursor >= 0 && steps < node_count();
+             cursor = parent_of(cursor), ++steps) {
+            if (cursor == node_index) {
+                owned = true;
+                break;
+            }
+            if (tag_name(cursor) == "select")
+                break;
+        }
+        if (!owned)
+            continue;
+        // An option's label is its text content with whitespace collapsed, as
+        // the closed select displays it.
+        std::string label;
+        for (int child = 0; child < node_count(); ++child) {
+            if (parent_of(child) != option || node_type_of(child) != 3)
+                continue;
+            if (static_cast<size_t>(child) < node_value_.size())
+                label += string_at(node_value_[static_cast<size_t>(child)]);
+        }
+        std::string collapsed;
+        bool pending_space = false;
+        for (const char c : label) {
+            if (std::isspace(static_cast<unsigned char>(c))) {
+                pending_space = !collapsed.empty();
+                continue;
+            }
+            if (pending_space)
+                collapsed.push_back(' ');
+            pending_space = false;
+            collapsed.push_back(c);
+        }
+        return collapsed;
+    }
+    return {};
+}
+
 int CapturedStyleIndex::parent_of(int node_index) const {
     if (node_index < 0 ||
         node_index >= static_cast<int>(parent_index_.size())) {
@@ -610,6 +860,39 @@ int CapturedStyleIndex::parent_of(int node_index) const {
     }
     return parent_index_[static_cast<size_t>(node_index)];
 }
+
+namespace {
+
+/// The six numbers of a computed `matrix(a, b, c, d, e, f)`, or nothing for
+/// any other spelling. Chrome serializes computed `transform` as a matrix, so
+/// anything else (`matrix3d` above all) is refused rather than guessed at.
+std::optional<std::array<double, 6>> computed_matrix(const std::string& value) {
+    if (value.rfind("matrix(", 0) != 0 || value.back() != ')')
+        return std::nullopt;
+    std::array<double, 6> n{};
+    std::size_t count = 0;
+    const std::string body = value.substr(7, value.size() - 8);
+    std::size_t start = 0;
+    while (start <= body.size()) {
+        const auto comma = body.find(',', start);
+        if (count == n.size())
+            return std::nullopt;
+        try {
+            n[count++] = std::stod(
+                body.substr(start, comma == std::string::npos ? std::string::npos : comma - start));
+        } catch (const std::exception&) {
+            return std::nullopt;
+        }
+        if (comma == std::string::npos)
+            break;
+        start = comma + 1;
+    }
+    if (count != n.size())
+        return std::nullopt;
+    return n;
+}
+
+} // namespace
 
 CapturedStyleIndex::InheritedTypeScale
 CapturedStyleIndex::inherited_type_scale(int node_index) const {
@@ -621,47 +904,80 @@ CapturedStyleIndex::inherited_type_scale(int node_index) const {
     int cursor = parent_of(node_index);
     for (size_t steps = 0; steps < parent_index_.size() && cursor >= 0;
          ++steps, cursor = parent_of(cursor)) {
-        const auto layout = layout_for_node(cursor);
+        const auto layout = own_layout_row(cursor);
         if (!layout) continue;
         const auto styles = styles_for_layout(*layout);
         const auto it = styles.find("transform");
         if (it == styles.end() || it->second.empty() || it->second == "none")
             continue;
 
-        // Chrome serializes computed `transform` as a matrix, so the six
-        // numbers are the whole answer — any other spelling (`matrix3d` above
-        // all) is refused rather than guessed at.
         const auto& value = it->second;
-        if (value.rfind("matrix(", 0) != 0 || value.back() != ')') {
+        const auto matrix = computed_matrix(value);
+        if (!matrix) {
             result.refused = value;
             return result;
         }
-        std::vector<double> n;
-        const std::string body = value.substr(7, value.size() - 8);
-        size_t start = 0;
-        while (start <= body.size()) {
-            const auto comma = body.find(',', start);
-            try {
-                n.push_back(std::stod(body.substr(
-                    start, comma == std::string::npos ? std::string::npos
-                                                      : comma - start)));
-            } catch (const std::exception&) {
-                result.refused = value;
-                return result;
-            }
-            if (comma == std::string::npos) break;
-            start = comma + 1;
-        }
+        const auto& n = *matrix;
         constexpr double kFlat = 1e-6;
         // b and c non-zero is a rotation or a skew; a != d is two axes; a
         // non-positive scale is a flip. A `font-size` is one positive scalar
         // and can express none of the three.
-        if (n.size() != 6 || std::abs(n[1]) > kFlat || std::abs(n[2]) > kFlat ||
-            std::abs(n[0] - n[3]) > kFlat || n[0] <= kFlat) {
+        if (std::abs(n[1]) > kFlat || std::abs(n[2]) > kFlat || std::abs(n[0] - n[3]) > kFlat ||
+            n[0] <= kFlat) {
             result.refused = value;
             return result;
         }
         result.scale *= n[0];
+    }
+    return result;
+}
+
+CapturedStyleIndex::InheritedPaintScale
+CapturedStyleIndex::inherited_paint_scale(int node_index) const {
+    InheritedPaintScale result;
+    constexpr double kFlat = 1e-6;
+    bool rotated = false;
+    bool non_uniform = false;
+    // The node's own transform scales its own border, so the walk starts at
+    // the node, not at its parent. Bounded like `inherited_type_scale`.
+    int cursor = node_index;
+    for (size_t steps = 0; steps < parent_index_.size() && cursor >= 0;
+         ++steps, cursor = parent_of(cursor)) {
+        const auto layout = own_layout_row(cursor);
+        if (!layout)
+            continue;
+        const auto styles = styles_for_layout(*layout);
+        const auto it = styles.find("transform");
+        if (it == styles.end() || it->second.empty() || it->second == "none")
+            continue;
+        const auto& value = it->second;
+        const auto matrix = computed_matrix(value);
+        if (!matrix) {
+            result.refused = value;
+            return result;
+        }
+        const double a = (*matrix)[0], b = (*matrix)[1];
+        const double c = (*matrix)[2], d = (*matrix)[3];
+        // Columns (a, b) and (c, d) are the images of the box's x and y axes.
+        // A negative determinant is a flip and non-orthogonal columns are a
+        // skew; neither leaves a side with one width.
+        if (a * d - b * c <= kFlat || std::abs(a * c + b * d) > kFlat) {
+            result.refused = value;
+            return result;
+        }
+        const double sx = std::hypot(a, b);
+        const double sy = std::hypot(c, d);
+        rotated = rotated || std::abs(b) > kFlat || std::abs(c) > kFlat;
+        non_uniform = non_uniform || std::abs(sx - sy) > kFlat;
+        // A rotation turns the axes a later factor applies to, so the two
+        // only multiply per axis when one of them is absent. The refusal
+        // names the transform at which the chain stopped reducing.
+        if (rotated && non_uniform) {
+            result.refused = value;
+            return result;
+        }
+        result.x *= sx;
+        result.y *= sy;
     }
     return result;
 }
@@ -679,6 +995,18 @@ std::string CapturedStyleIndex::attribute(int node_index,
         if (string_at(pairs[i]) == name) return string_at(pairs[i + 1]);
     }
     return {};
+}
+
+bool CapturedStyleIndex::has_attribute(int node_index, std::string_view name) const {
+    if (node_index < 0 || node_index >= static_cast<int>(node_attributes_.size())) {
+        return false;
+    }
+    const auto& pairs = node_attributes_[static_cast<size_t>(node_index)];
+    for (size_t i = 0; i + 1 < pairs.size(); i += 2) {
+        if (string_at(pairs[i]) == name)
+            return true;
+    }
+    return false;
 }
 
 std::string CapturedStyleIndex::tag_name(int node_index) const {
@@ -785,7 +1113,8 @@ std::map<std::string, std::string> CapturedStyleIndex::styles_for(
             break;
         }
     }
-    if (!chosen) chosen = layout_for_node(node->second);
+    if (!chosen)
+        chosen = own_layout_row(node->second);
     if (!chosen) return computed;
 
     const auto& row = style_rows_[static_cast<size_t>(*chosen)];
@@ -893,6 +1222,10 @@ void apply_computed_styles(const std::map<std::string, std::string>& computed,
         set_string("background-size", style.background_size);
         set_string("background-position", style.background_position);
         set_string("background-repeat", style.background_repeat);
+        // Absent is the initial padding-box, so only another origin is kept.
+        if (const auto origin = lookup("background-origin");
+            !is_absent(origin) && origin != "padding-box")
+            style.background_origin = origin;
     }
 
     const auto opacity = lookup("opacity");

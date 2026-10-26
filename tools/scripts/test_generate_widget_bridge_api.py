@@ -42,6 +42,22 @@ class WidgetBridgeApiGeneratorTest(unittest.TestCase):
         self.assertRegex(dts, r"unbindWidget:\s+\(widgetId: string\) => number;")
         self.assertRegex(dts, r"createMeter:\s+\(id: string, orientation: 'vertical' \| 'horizontal', parentId: string\) => string;")
 
+    def test_dom_lib_names_stay_typed_but_are_not_redeclared_globally(self):
+        root = generator.repo_root()
+        rows = generator.api_rows(root)
+        autocaps = generator.read_autocaps(root)
+        fingerprint = generator.widget_bridge_input_fingerprint(root)
+        dts = generator.emit_types(rows, autocaps, fingerprint)
+        global_block = dts[dts.index("declare global {"):]
+
+        # CONTROL: the bridge does export these names, so their absence from
+        # the global block is the exclusion, not a missing manifest row.
+        self.assertIn("scrollTo", {row.name for row in rows})
+        self.assertRegex(dts, r"\n    scrollTo:\s+")
+        self.assertNotIn("var scrollTo:", global_block)
+        self.assertNotIn("var scrollBy:", global_block)
+        self.assertIn("var setText: PulpBridgeAlwaysGlobals['setText'];", global_block)
+
     def test_fingerprint_normalizes_text_line_endings(self):
         self.assertEqual(generator.normalized_text_bytes(b"a\r\nb\rc\n"), b"a\nb\nc\n")
 

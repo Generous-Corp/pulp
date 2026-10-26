@@ -16,7 +16,7 @@ single source of truth for that model.
 | **iOS compile gate** (inside `macos`'s Build step) | PRs + merge groups that touch an iOS-only surface (`ios_surface` in `classify_changes.py`: `apple/**`, iOS sources or sources branching on an iOS target, non-test CMake, dependency pins, the gate's own wiring); nightly on main; every release tag | yes when it runs on a PR or merge group; the nightly opens a tracking issue; the release publish requires it | iOS AUv3 GPU smoke example | the two-SDK iOS compile (`test/cmake/test_ios_compile_gate.sh`). Shared code is compiled for macOS by the same job, so it no longer runs the per-PR iOS gate |
 | **Nightly full build** | schedule (nightly) | no — **informational** | yes | everything, including all five excluded label groups; results eyeballed, build failures file an issue |
 | **cross-platform-check** | nightly (07:17 UTC) on `main`, plus `workflow_dispatch`; x86-64 Linux, arm64 Linux, x86-64 Windows on GitHub-hosted runners | advisory (failures on `main` file a per-platform tracking issue; dispatches from other branches run in parallel, one concurrency group per ref) | no | core tests, excludes `validation` + `slow` **only** — so the timing group does run here, off the reference platform. **The only lane that runs the Windows ctest suite** |
-| **Windows on a PR** (`windows` check) | every PR | advisory | no | **nothing on Windows.** On `pull_request` the `windows` check is an Ubuntu aggregate job that exits green with "Windows runs in nightly/explicit validation, not on the PR head": no Windows compile, zero tests. The `build.yml` `Windows (x64)` build + ctest leg is skipped on `pull_request` and `merge_group` (it runs on a push to `main` and on `workflow_dispatch`), and the compile-only `Windows MSVC release-path gate`, `Windows MIDI Services SDK compile-gate` and `Windows BLE compile-gate` are skipped on `pull_request`, `merge_group` and push, running only on `workflow_dispatch` (`run_windows`, default on). The one PR-time Windows job is `Windows CLI compile (MSVC)` (`windows-cli-compile.yml`): compile-only, `pulp-cli` and `pulp-mcp` only, and only when `windows_cli_compile_scope.py` says the change can reach them. A green `windows` on a PR is not evidence that Windows compiles or passes tests |
+| **Windows on a PR** (`windows` check) | every PR | advisory | no | **nothing on Windows.** On `pull_request` the `windows` check is an Ubuntu aggregate job that exits green with "Windows runs in nightly/explicit validation, not on the PR head": no Windows compile, zero tests. The `build.yml` `Windows (x64)` build + ctest leg is skipped on `pull_request` and `merge_group` (it runs on a push to `main` and on `workflow_dispatch` only when GitHub-hosted Windows is opted in: `allow_hosted_windows=true`, a self-hosted `windows_runner_selector_json`, or `PULP_ALLOW_HOSTED_WINDOWS=1`), and the compile-only `Windows MSVC release-path gate`, `Windows MIDI Services SDK compile-gate` and `Windows BLE compile-gate` are skipped on `pull_request`, `merge_group` and push, running only on a `workflow_dispatch` that opts in to hosted Windows. The one PR-time Windows job is `Windows CLI compile (MSVC)` (`windows-cli-compile.yml`): compile-only, `pulp-cli` and `pulp-mcp` only, and only when `windows_cli_compile_scope.py` says the change can reach them. A green `windows` on a PR is not evidence that Windows compiles or passes tests |
 
 The required gate is **serialized on self-hosted macOS runners** and takes
 about 40 min (median 39.8 min of wall-clock over 45 sampled `pull_request`
@@ -156,6 +156,26 @@ still runs `source-selftest`, a Linux or Windows push excludes only
 [`.shipyard/config.toml`](../../.shipyard/config.toml) (`[validation.default]`,
 `test =`).
 
+### Installed-SDK consumers on the macOS gate
+
+An installed-SDK consumer test runs `cmake --install` into a scratch prefix,
+then configures and builds an outside project against it. One install plus one
+small consumer target is cheap enough for the required macOS gate, so these
+carry no `slow` label on Apple:
+
+| Test | Quiet Apple Silicon host (Release, n=3) | Required macOS gate |
+|------|------------------|---------------------|
+| `cmake-view-audio-sdk-consumer` | 6.0-6.6 s | 10-13 s |
+| `ui-script-plugin-editor-installed-sdk` | 10.2-11.3 s | not yet sampled; ~20 s expected |
+| `cmake-control-sdk-consumer` | 28.8-29.1 s | 56-63 s |
+
+The install itself is a few seconds (a 600 MB prefix copied from the build
+tree); the consumer compile dominates. Off Apple these keep `slow` until a
+consumer build there is measured. A consumer that builds several independent
+projects (`cmake-clean-consumer-fixture`) or every exported capability
+(`agent-capability-installed-sdk`) stays `slow`, the latter restored per change
+as described below. Measure a new consumer against this table before choosing.
+
 ### Affected slow proofs
 
 `agent-capability-installed-sdk` installs Pulp and builds an independent
@@ -196,6 +216,42 @@ of them (SDK-consumer and smoke manifests) do.
 The explicit restoration is limited to reduced PR, merge-group, and Shipyard
 dispatch corpora; unfiltered main/nightly runs already include the proof and do
 not run it a second time.
+
+## The fuzz lanes
+
+Two lanes, defined in `.github/workflows/timeline-fuzz.yml`, cover the parsers
+that read bytes a host, a downloaded pack or a dropped file hands the SDK:
+
+- **Deterministic replay** (ctest label `fuzz`, plain Catch2, every platform):
+  `pulp-test-timeline-document-fuzz` and `pulp-test-control-protocol-fuzz`
+  replay a seeded mutation corpus through oracles shared with the libFuzzer
+  targets. Runs on every PR that touches its parse surface and on the nightly.
+- **Coverage-guided** (libFuzzer + ASan, `PULP_ENABLE_FUZZING=ON`, Linux,
+  nightly and `workflow_dispatch` only): one target per parser, each with a
+  seed corpus and a bounded `<target>-smoke` ctest (labels `fuzz;libfuzzer`)
+  that the nightly runs before the long `-max_total_time` budget.
+
+| Target | Parser under test | Seeds | Manifest |
+|--------|-------------------|-------|----------|
+| `pulp-fuzz-timeline-document` | Timeline document and command decoders | `test/fixtures/timeline/corpus.index` | `timeline_tests.cmake` |
+| `pulp-fuzz-control-protocol` | Local capability-control protocol decoder | generated by `pulp-generate-control-protocol-fuzz-corpus` | `view_widget_bridge_tests.cmake` |
+| `pulp-fuzz-plugin-state` | Host-facing plugin state: envelope restore, legacy store blob, raw `StateStore::deserialize` | generated by `pulp-generate-plugin-state-fuzz-corpus` (a `FIXTURES_SETUP` ctest) | `format_reload_tests.cmake` |
+| `pulp-fuzz-ui-script` | A ui.js document through `WidgetBridge::load_script` in a QuickJS realm, no effectful capabilities, 500 ms interrupt watchdog, heap cap where the backend enforces one | `test/fixtures/fuzz/ui-script/` | `view_widget_bridge_tests.cmake` |
+| `pulp-fuzz-svg` | `VectorScene::from_svg_string` (nanosvg plus scene lowering) | `test/fixtures/fuzz/svg/` | `core_runtime_canvas_signal_tests.cmake` |
+| `pulp-fuzz-smf` | Standard MIDI File import, strict and lenient policies | `test/fixtures/fuzz/smf/` | `timeline_tests.cmake` |
+| `pulp-fuzz-content-manifest` | Content-pack manifest via the install preview, sample-bank manifest, plugin capability manifest | `test/fixtures/fuzz/content-manifest/` | `content_workflow_tests.cmake` |
+| `pulp-fuzz-format-registry` | Every registered audio container reader under `DecodeLimits` | none (the input is the file) | `core_audio_platform_format_tests.cmake` |
+
+None of the coverage-guided targets runs on the required `macos` gate: Apple's
+clang ships no libFuzzer runtime, so the gate never configures with
+`PULP_ENABLE_FUZZING`, and the libfuzzer job skips `pull_request`.
+`PULP_FUZZ_SANITIZERS` (default `fuzzer,address`) is the `-fsanitize` list the
+targets build with; a host whose ASan runtime cannot start sets it to `fuzzer`. The ctest
+smokes exist so a fuzzing build has a cheap, named proof that every target
+links and loads its seeds. Adding a target: `pulp_add_libfuzzer_target()` in
+the owning manifest, then both lists in the workflow's `libfuzzer` job. The
+`ci` skill carries the crash-plant recipe that proves a new target reaches its
+parser.
 
 ## The source-selftest lane
 
@@ -344,6 +400,15 @@ developer's Homebrew build disagree on some diagnostics, so pinning this lane
 alone would make one runner image's version the contract while `docs-material.yml`
 and `docs-deploy.yml` drifted from it. If image drift ever does flip this check,
 pin all three together rather than just this one.
+
+**The release bot's bump skips the advisory lanes.** `control-shipping-native.yml`,
+`examples-validation.yml`, `intel-portability.yml` and `coverage.yml` AND
+`github.head_ref != 'release/version-bump'` into every job's condition. The
+bump's tree is main's plus version files, which those lanes already ran on, none
+of their contexts is required, and it keeps bump pull requests off hosted
+Windows, macOS and Linux runners. `tools/scripts/test_bump_fastpath.py` checks
+the guard on every job and that no skipped context is in
+`.github/rulesets/main-protection.json`.
 
 **Status: advisory until promoted.** Until `api-contracts` is added to `main`'s
 `required_status_checks`, this lane reports the same defect the old one did and is
@@ -502,6 +567,22 @@ file, but only the first names it in its arguments; the second reaches it
 through a verifier that hardcodes the path. Excluding only the obvious one
 leaves a permanent red.
 
+### Suites that start a realtime worker pool
+
+`GraphRuntimeWorkerPool` workers join the realtime-priority fallback on their
+first batch and spin between batches. Realtime threads starve every
+normal-priority thread on the machine, the ctest scheduler included, so two
+pool-starting suites running side by side can freeze a parallel run for
+seconds and fail timing assertions in unrelated suites. Every suite that drives
+the pool directly or enables SignalGraph's parallel executor therefore
+registers with `PROPERTIES RESOURCE_LOCK pulp_realtime_worker_pool`;
+`tools/scripts/test_realtime_pool_resource_locks.py` (ctest
+`realtime-pool-resource-locks`) fails a new one that does not. The lock only
+serializes those suites with each other, so it costs no wall time on the
+required gate. A test that deliberately oversubscribes far past the core count
+should keep its workers at normal priority (`set_fallback_join_hook_for_test`)
+instead of relying on the lock.
+
 ## Grouped test executables (one binary, many suites)
 
 Every Catch2 executable statically links the whole `pulp::view` stack, so a
@@ -585,8 +666,17 @@ The one visible difference is `--target`: build the group
 
 ### Hosted macOS advisory lanes and arm-time dispatch
 
+The focused TSan lane also selects the exact SignalGraph mailbox and retirement
+reader race cases. When those cases move, update the selector and verify the
+case inventory with `ctest -N`; the lane remains intentionally narrower than the
+full SignalGraph suite.
+
 Coverage, Intel portability, SCENE3D, example validation, and the control-shipping
-native matrix are advisory hosted-macOS lanes. They run from the nightly
+native matrix are advisory hosted lanes. The control-shipping matrix covers
+macOS universal, Linux x64/arm64, and Windows x64/arm64; the Windows ARM leg
+uses the `windows-11-arm` runner and emits `arm64-win` scanner evidence. Its
+installed-SDK probe has GPU disabled, so it does not replace Spectr's separate
+Skia/Dawn, DAW, audio, or Perfetto proof. These lanes run from the nightly
 `schedule` on `main` and from `workflow_dispatch` on an approved PR head; they
 do not start on every `pull_request` push. The `pulp pr` wrapper calls
 `tools/scripts/dispatch_advisory_lanes.sh` after its delegated Shipyard arm/ship
@@ -596,7 +686,11 @@ The sanitizer workflow keeps ASan and UBSan on non-draft PRs that touch
 `core/**`, while TSan is nightly or explicitly dispatched. Coverage is the only
 matrix with a `max-parallel: 2` cap; sanitizer legs are independent named jobs,
 not one matrix, so no aggregate cap is claimed. These lanes remain advisory and
-do not replace the required Vellum checks.
+do not replace the required Vellum checks. The hosted Linux and macOS coverage
+legs each reclaim preinstalled image content before building, and log disk
+samples while the suite runs; see the versioning guide's hosted coverage disk
+section. The Linux leg also fetches full git history before its Python tools
+pass, because several tools tests check ancestry.
 
 The files under `docs/evidence/hosted-macos-advisory/` are labeled pre-change
 baselines. A post-merge follow-up must capture hosted-macOS running plus queued

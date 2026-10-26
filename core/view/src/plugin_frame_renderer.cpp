@@ -11,13 +11,16 @@
 #include <pulp/view/window_host.hpp>
 
 #ifdef PULP_HAS_SKIA
+#include <pulp/canvas/image_file_cache.hpp>
 #include <pulp/canvas/skia_canvas.hpp>
+#include <pulp/canvas/skia_text_raster_policy.hpp>
 #include "include/core/SkCanvas.h"
 #include "include/core/SkColorSpace.h"
 #include "include/core/SkData.h"
 #include "include/core/SkImageInfo.h"
 #include "include/core/SkPixmap.h"
 #include "include/core/SkSurface.h"
+#include "include/core/SkSurfaceProps.h"
 #include "include/encode/SkPngEncoder.h"
 #endif
 
@@ -271,18 +274,23 @@ EditorSurfaces create_editor_surfaces(void* native_handle,
     return out;
 }
 
-std::vector<std::uint8_t> raster_plugin_scene_rgba(View& root,
-                                                   const FrameGeometry& geometry,
-                                                   std::uint32_t* out_w,
-                                                   std::uint32_t* out_h) {
+std::vector<std::uint8_t> raster_plugin_scene_rgba(View& root, const FrameGeometry& geometry,
+                                                   std::uint32_t* out_w, std::uint32_t* out_h,
+                                                   canvas::TextRasterPolicy text_raster) {
     const std::uint32_t w = geometry.pixel_width();
     const std::uint32_t h = geometry.pixel_height();
     if (w == 0 || h == 0) return {};
 
+    // Every call is one presented or captured frame drawn through the CPU
+    // raster cache key, so the file images it draws are kept for the frame
+    // even when they exceed the image cache's byte budget.
+    canvas::ImageFileCache::instance().begin_frame(nullptr);
+
     const SkImageInfo info = SkImageInfo::Make(
         static_cast<int>(w), static_cast<int>(h), kRGBA_8888_SkColorType,
         kPremul_SkAlphaType, SkColorSpace::MakeSRGB());
-    auto surface = SkSurfaces::Raster(info);
+    const SkSurfaceProps props = canvas::surface_props_for(text_raster);
+    auto surface = SkSurfaces::Raster(info, &props);
     if (!surface) return {};
     auto* sk_canvas = surface->getCanvas();
     if (!sk_canvas) return {};

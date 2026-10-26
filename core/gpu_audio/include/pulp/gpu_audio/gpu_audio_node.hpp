@@ -58,7 +58,26 @@ struct GpuAudioNodeDescriptor {
     // about misses is exactly the author who has not made the fallback correct.
     MissPolicy miss_policy = MissPolicy::Silence;
     bool supports_cpu_fallback = false;
+
+    /// Number of blocks the node's worker emits behind its submit (wet(N-D)).
+    /// The transport primes `latency_blocks - worker_pipeline_blocks`, which
+    /// requires `latency_blocks >= worker_pipeline_blocks + 1`; total latency
+    /// stays `latency_blocks`. Appended to keep positional initialization of the
+    /// fields above source-compatible.
+    std::uint32_t worker_pipeline_blocks = 0;
 };
+
+} // namespace pulp::gpu_audio
+
+// After MissPolicy: the status header forward-declares it, and the class below
+// needs GpuAudioStatus complete for status_snapshot().
+#include <pulp/gpu_audio/gpu_audio_status.hpp>
+
+namespace pulp::gpu_audio {
+
+namespace detail {
+struct RealtimeGpuNodeBinding;
+} // namespace detail
 
 /// A unit of audio work the transport schedules onto a non-real-time worker.
 ///
@@ -103,10 +122,13 @@ public:
                                 uint32_t /*n*/) noexcept {}
 
     /// RT-safe fallback. MUST NOT allocate, lock, or block — it runs on the
-    /// audio thread for the CpuFallback miss policy (hence noexcept). Default
-    /// copies input to output (dry) so a node without a real fallback still
-    /// degrades safely. When paired with prime_fallback(), this emits the
-    /// latency-aligned block the continuously-fed fallback has already computed.
+    /// audio thread for the CpuFallback miss policy (hence noexcept). The
+    /// default copies the current dry input to the output. The transport's
+    /// output is delayed by latency_blocks, so that dry block breaks the
+    /// timeline; it is not a safe fallback. A CpuFallback node should override
+    /// this with a primed, latency-aligned fallback, or declare Silence. When
+    /// paired with prime_fallback(), this emits the latency-aligned block the
+    /// continuously-fed fallback has already computed.
     virtual void process_cpu_fallback(const audio::BufferView<const float>& input,
                                       audio::BufferView<float>& output,
                                       uint32_t n) noexcept {
@@ -118,6 +140,30 @@ public:
             float* dst = output.channel_ptr(c);
             for (uint32_t i = 0; i < n; ++i) dst[i] = src[i];
         }
+    }
+
+    // Appended virtuals: new hooks go after every existing one so established
+    // vtable slots keep their positions (tools/scripts/node_abi_gate.py).
+
+    /// Host/UI thread. Allocation-free health snapshot. The default reports an
+    /// uninitialized provider; nodes that track their provider override it.
+    virtual GpuAudioStatus status_snapshot() const noexcept {
+        return {};
+    }
+
+    /// Host thread, audio stopped. Release provider resources within
+    /// `budget_ns`, returning false if teardown had to be abandoned to stay in
+    /// budget. The default holds nothing to release.
+    virtual bool release_bounded(std::uint64_t /*budget_ns*/) noexcept {
+        return true;
+    }
+
+    /// Private transport hook, not for node authors: a node that the GPU audio
+    /// transport drives through a stamped realtime path describes that path
+    /// here. Returns false for a node the transport drives through its staged
+    /// worker path, which is the default.
+    virtual bool bind_realtime_path(detail::RealtimeGpuNodeBinding& /*binding*/) noexcept {
+        return false;
     }
 };
 

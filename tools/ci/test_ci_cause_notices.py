@@ -12,7 +12,25 @@ import textwrap
 import unittest
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parents[2] / "tools/ci/ci_cause_notices.sh"
+ROOT = Path(__file__).resolve().parents[2]
+SCRIPT = ROOT / "tools/ci/ci_cause_notices.sh"
+PIN_FILE = ROOT / "tools/shipyard.toml"
+SUMS_FILE = ROOT / "tools/toolchain/shipyard.sha256"
+
+
+def pinned_version() -> str:
+    for line in PIN_FILE.read_text(encoding="utf-8").splitlines():
+        if line.startswith("version"):
+            return line.split('"')[1]
+    raise AssertionError("no version in tools/shipyard.toml")
+
+
+def pinned_sha256(asset: str) -> str:
+    for line in SUMS_FILE.read_text(encoding="utf-8").splitlines():
+        fields = line.split()
+        if len(fields) == 2 and fields[1] == asset:
+            return fields[0]
+    raise AssertionError(f"no {asset} in tools/toolchain/shipyard.sha256")
 
 FAKE_SHIPYARD = textwrap.dedent(
     """\
@@ -101,6 +119,9 @@ class CiCauseNotices(unittest.TestCase):
             "CALLS": str(self.calls),
             "CI_CAUSE_GH": str(self.tmp / "gh"),
             "CI_CAUSE_ARCH": "x86_64",
+            # The script finds the pin beside itself; a copy run from the
+            # temp dir (the bare-fetch control) needs it named.
+            "CI_CAUSE_TOOLS_DIR": str(ROOT / "tools"),
         }
 
     def fake_curl(self, body: Path) -> Path:
@@ -142,10 +163,9 @@ class CiCauseNotices(unittest.TestCase):
         self.assertIn("ci-cause: job 15 log unavailable: HTTP 410: Gone", result.stdout)
         self.assertIn("--allow-escape-sequences repos/Generous-Corp/pulp/actions/jobs/11/logs", self.calls_text())
         self.assertEqual(result.stdout.count("::notice title=ci-cause::"), 2)
-        self.assertIn("ci-cause: 3 failed job(s), 2 record(s), Shipyard v0.326.0", result.stdout)
-        self.assertIn(
-            "releases/download/v0.326.0/shipyard-linux-x64", self.calls_text(),
-        )
+        version = pinned_version()
+        self.assertIn(f"ci-cause: 3 failed job(s), 2 record(s), Shipyard {version}", result.stdout)
+        self.assertIn(f"releases/download/{version}/shipyard-linux-x64", self.calls_text())
 
     def test_a_gh_without_the_escape_flag_falls_back_to_the_bare_fetch(self) -> None:
         sha = hashlib.sha256(self.binary.read_bytes()).hexdigest()
@@ -179,16 +199,78 @@ class CiCauseNotices(unittest.TestCase):
         write_exec(junk, FAKE_SHIPYARD + "# tampered\n")
         result = self.run_script(CI_CAUSE_CURL=str(self.fake_curl(junk)))
         self.assertEqual(result.returncode, 0)
-        self.assertIn("not the pinned 1c2368fd", result.stdout)
+        self.assertIn(f"not the pinned {pinned_sha256('shipyard-linux-x64')}", result.stdout)
         self.assertNotIn("cause extract", self.calls_text())
         self.assertNotIn("gh api", self.calls_text())
         self.assertFalse((self.tmp / "runner" / "ci-cause" / "shipyard").exists())
 
-    def test_the_pinned_hashes_are_the_release_checksums(self) -> None:
+    def fake_tools(self, pin: str | None, sums: str | None) -> Path:
+        tools = self.tmp / "tools"
+        (tools / "toolchain").mkdir(parents=True, exist_ok=True)
+        if pin is not None:
+            (tools / "shipyard.toml").write_text(pin, encoding="utf-8")
+        if sums is not None:
+            (tools / "toolchain" / "shipyard.sha256").write_text(sums, encoding="utf-8")
+        return tools
+
+    def test_the_version_and_hash_come_from_the_repository_pin(self) -> None:
+        # A pin the script has never seen: the download and the check follow it.
+        sha = hashlib.sha256(self.binary.read_bytes()).hexdigest()
+        tools = self.fake_tools(
+            '[shipyard]\nversion = "v9.8.7"\nrepo = "danielraffel/Shipyard"\n',
+            f"{'0' * 64}  shipyard-linux-arm64\n{sha}  shipyard-linux-x64\n",
+        )
+        result = self.run_script(CI_CAUSE_CURL=str(self.fake_curl(self.binary)), CI_CAUSE_TOOLS_DIR=str(tools))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("releases/download/v9.8.7/shipyard-linux-x64", self.calls_text())
+        self.assertEqual(result.stdout.count("::notice title=ci-cause::"), 2, result.stdout)
+        self.assertIn("Shipyard v9.8.7", result.stdout)
+
+    def test_the_arm64_hash_is_the_arm64_line(self) -> None:
+        sha = hashlib.sha256(self.binary.read_bytes()).hexdigest()
+        tools = self.fake_tools(
+            '[shipyard]\nversion = "v9.8.7"\n',
+            f"{sha}  shipyard-linux-arm64\n{'0' * 64}  shipyard-linux-x64\n",
+        )
+        result = self.run_script(
+            CI_CAUSE_CURL=str(self.fake_curl(self.binary)), CI_CAUSE_TOOLS_DIR=str(tools), CI_CAUSE_ARCH="aarch64"
+        )
+        self.assertEqual(result.stdout.count("::notice title=ci-cause::"), 2, result.stdout)
+        self.assertIn("releases/download/v9.8.7/shipyard-linux-arm64", self.calls_text())
+
+    def test_a_missing_pin_downloads_nothing(self) -> None:
+        tools = self.fake_tools(None, f"{'0' * 64}  shipyard-linux-x64\n")
+        result = self.run_script(CI_CAUSE_CURL=str(self.fake_curl(self.binary)), CI_CAUSE_TOOLS_DIR=str(tools))
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("::warning title=ci-cause::no Shipyard version in", result.stdout)
+        self.assertEqual(self.calls_text(), "")
+
+    def test_an_asset_with_no_checksum_downloads_nothing(self) -> None:
+        tools = self.fake_tools('[shipyard]\nversion = "v9.8.7"\n', f"{'0' * 64}  shipyard-linux-arm64\n")
+        result = self.run_script(CI_CAUSE_CURL=str(self.fake_curl(self.binary)), CI_CAUSE_TOOLS_DIR=str(tools))
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("::warning title=ci-cause::no SHA-256 for shipyard-linux-x64", result.stdout)
+        self.assertEqual(self.calls_text(), "")
+
+    def test_the_script_carries_no_copy_of_the_pin(self) -> None:
         text = SCRIPT.read_text(encoding="utf-8")
-        self.assertIn('SHIPYARD_VERSION="v0.326.0"', text)
-        self.assertIn("1c2368fd8f038f198343cd7884687dcf00cc049828cfe3edaebd682dd885b3da", text)
-        self.assertIn("d559667fd353b772f6156f877a250bbb3db9a08c75aecf6f670ef77f2cbb3a68", text)
+        self.assertNotIn(pinned_version(), text)
+        self.assertNotIn(pinned_sha256("shipyard-linux-x64"), text)
+        self.assertNotIn(pinned_sha256("shipyard-linux-arm64"), text)
+
+    def test_the_workflow_checks_out_the_pin_beside_the_script(self) -> None:
+        workflow = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
+        job = workflow[workflow.index("\n  ci-cause:\n"):]
+        sparse = job[job.index("sparse-checkout: |"):job.index("sparse-checkout-cone-mode")]
+        for path in ("tools/ci/ci_cause_notices.sh", "tools/shipyard.toml", "tools/toolchain/shipyard.sha256"):
+            self.assertIn(path, sparse)
+
+    def test_the_workflow_runs_cause_extraction_on_the_failure_path(self) -> None:
+        workflow = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
+        job = workflow[workflow.index("\n  ci-cause:\n"):]
+        condition = job[job.index("    if: >-"):job.index("    runs-on:")]
+        self.assertIn("failure()", condition)
+        self.assertIn("contains(needs.*.result, 'failure')", condition)
 
     def test_no_failed_job_means_no_record(self) -> None:
         green = [job for job in self.jobs if job["conclusion"] == "success"]

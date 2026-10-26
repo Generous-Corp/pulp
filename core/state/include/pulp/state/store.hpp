@@ -52,6 +52,98 @@ struct ParameterGestureApplyResult {
     std::uint64_t generation = 0;
 };
 
+class StateStore;
+namespace test_support {
+struct StateWriterProbe;
+}
+
+/// Opaque exact identity captured when asynchronous work is ordered against a
+/// parameter. The identity includes the value bits and a monotonic per-slot
+/// revision, so equal values written at different times remain distinct.
+class ParameterFeedbackBaseline {
+  public:
+    ParameterFeedbackBaseline() = default;
+
+    bool valid() const noexcept {
+        return valid_;
+    }
+
+    ParamID id() const noexcept {
+        return id_;
+    }
+    std::uint64_t packed_identity() const noexcept {
+        return packed_identity_;
+    }
+
+  private:
+    friend class StateStore;
+    ParameterFeedbackBaseline(const StateStore* owner, ParamID id, std::uint64_t packed_identity)
+        : owner_(owner), id_(id), packed_identity_(packed_identity), valid_(true) {}
+
+    const StateStore* owner_ = nullptr;
+    ParamID id_ = 0;
+    std::uint64_t packed_identity_ = 0;
+    bool valid_ = false;
+};
+
+enum class ConditionalParameterApplyStatus {
+    Applied,
+    Conflict,
+    InvalidParameter,
+};
+
+struct ConditionalParameterApplyResult {
+    ConditionalParameterApplyStatus status = ConditionalParameterApplyStatus::InvalidParameter;
+    std::uint64_t current_identity = 0;
+};
+
+/// Pre-resolved audio-thread read handle for one parameter's base value.
+///
+/// `StateStore::get_value()` looks the ID up in a hash map on every call.
+/// A processor that reads the same parameters every block can resolve them
+/// once — typically in `prepare()` — and read through the handle instead:
+/// `get()` is an inline relaxed atomic load with no lookup and no call.
+///
+/// The handle stays valid while the store it came from exists, even if more
+/// parameters are registered afterwards (it holds the store and an index,
+/// not a pointer to the value). Registration must still not run
+/// concurrently with `get()` — the same rule as for `get_value()` — and the
+/// handle dangles once its StateStore is destroyed. A default-constructed
+/// handle, or one resolved from an unknown ID, reads 0.0f — the same result
+/// as `get_value()` for an unknown ID.
+///
+/// @code
+/// void prepare(const PrepareContext&) override {
+///     gain_ = state().param_reader(kGain);
+/// }
+/// void process(...) override {
+///     const float gain = gain_.get();
+///     ...
+/// }
+/// @endcode
+class ParamReader {
+  public:
+    ParamReader() = default;
+
+    /// Current base value (lock-free, relaxed ordering), or 0.0f if unbound.
+    /// This is the value get_value() returns; it does not include the
+    /// per-buffer modulation offset that get_modulated() adds.
+    float get() const noexcept;
+
+    /// True if this handle refers to a registered parameter.
+    bool valid() const noexcept {
+        return store_ != nullptr;
+    }
+
+  private:
+    friend class StateStore;
+    ParamReader(const StateStore* store, std::size_t index) noexcept
+        : store_(store), index_(index) {}
+
+    const StateStore* store_ = nullptr;
+    std::size_t index_ = 0;
+};
+
 /// Centralized parameter storage with lock-free value access.
 ///
 /// StateStore is the single source of truth for all plugin parameters.
@@ -70,7 +162,11 @@ struct ParameterGestureApplyResult {
 /// @note Value access (get_value, set_value, etc.) is lock-free and safe to
 ///       call from the audio thread.
 class StateStore {
-public:
+    // Tests drive a writer through its phases one at a time to reproduce
+    // reader/writer interleavings deterministically.
+    friend struct test_support::StateWriterProbe;
+
+  public:
     StateStore();
     ~StateStore();
 
@@ -85,8 +181,18 @@ public:
     void add_group(const ParamGroup& group);
 
     /// Read a parameter's base value (lock-free).
-    /// @note Safe to call from the audio thread.
-    float get_value(ParamID id) const;
+    /// @note Safe to call from the audio thread. Defined inline: processors
+    /// call this for every parameter they read on every block.
+    [[gnu::always_inline]] float get_value(ParamID id) const {
+        const std::size_t i = index_of(id);
+        return i == kNoIndex ? 0.0f : values_[i].get();
+    }
+
+    /// Resolve a read handle for a parameter's base value. Call off the
+    /// audio thread (e.g. in prepare()); the returned handle's get() is
+    /// cheaper than get_value() because the ID lookup is already done.
+    /// An unknown ID yields an unbound handle that reads 0.0f.
+    ParamReader param_reader(ParamID id) const;
 
     /// Read a parameter's modulated value: base + mod_offset (lock-free).
     /// @note Safe to call from the audio thread.
@@ -120,11 +226,41 @@ public:
     ///       @c rt_listener_queue_telemetry() to inspect this pressure.
     void set_value_rt(ParamID id, float value);
 
+    /// One parameter write in a @c set_values_rt() batch.
+    struct ParamWrite {
+        ParamID id = 0;
+        float value = 0.0f;
+    };
+
+    /// @c set_value_rt() for several parameters as one store write: one
+    /// writer claim for the batch and one listener-snapshot lease for its
+    /// notifications. Writes apply in batch order, each with its own state
+    /// generation, exactly as consecutive @c set_value_rt() calls would: a
+    /// repeated ID ends at its last value, and a write an Audio listener
+    /// makes during the batch is overwritten by a later batch write to the
+    /// same parameter. Every applied write notifies its parameter's listeners
+    /// once, and Audio listeners run inside the batch. Real-time safe; format
+    /// adapters use it to write a block's automation.
+    void set_values_rt(std::span<const ParamWrite> writes);
+
     /// Real-time-safe normalized-value write. Denormalizes through the
     /// parameter's @c ParamRange and then dispatches through
     /// @c set_value_rt(). Used by the VST3 adapter where the host
     /// reports parameter changes in normalized [0, 1] form.
     void set_normalized_rt(ParamID id, float normalized);
+
+    /// Capture an exact per-parameter identity at the caller's ordering point.
+    /// This is a single lock-free load and performs no allocation.
+    std::optional<ParameterFeedbackBaseline> capture_feedback_baseline(ParamID id) const noexcept;
+
+    /// Publish asynchronous feedback only if the captured identity is still
+    /// current. The packed identity CAS is the linearization point. A
+    /// conflict leaves the newer value untouched and emits no notification.
+    /// @c current_identity is diagnostic only; callers recapture a fresh
+    /// baseline before retrying and must not treat it as an authority token.
+    /// Revision exhaustion is reported as Conflict and never wraps.
+    ConditionalParameterApplyResult
+    set_value_rt_if_baseline(const ParameterFeedbackBaseline& baseline, float value);
 
     /// Set the absolute modulation offset for a parameter.
     void set_mod_offset(ParamID id, float offset);
@@ -185,6 +321,12 @@ public:
         return state_generation_.load(std::memory_order_acquire);
     }
 
+    /// True when no writer is in flight and none has advanced the generation
+    /// past @p generation. A writer advances the generation BEFORE it stores
+    /// its value, so a snapshot of values is trustworthy only when this holds
+    /// both before the values are read and after (see
+    /// format::boundary::refresh_param_snapshot); checking only afterwards
+    /// accepts a snapshot that read a value a writer was about to replace.
     bool state_snapshot_is_current(std::uint64_t generation) const noexcept {
         return active_state_writers_.load(std::memory_order_acquire) == 0 &&
                state_generation() == generation;
@@ -530,7 +672,14 @@ public:
     /// state.
     void copy_state_migrations_from(const StateStore& source);
 
-private:
+  private:
+    friend class ParamReader;
+
+    /// Base value of the parameter registered at @p index (ParamReader::get).
+    float value_at_index_(std::size_t index) const noexcept {
+        return values_[index].get();
+    }
+
     // Member ORDER is load-bearing for the RT->main listener path. The
     // parameter storage (id_to_index_ + values_) MUST be declared before
     // registry_ so that, on destruction (reverse declaration order),
@@ -542,6 +691,27 @@ private:
     std::vector<ParamGroup> groups_;
     std::unordered_map<ParamID, std::size_t> id_to_index_;
     std::vector<ParamValue> values_;
+    // Direct ParamID -> index table for the audio-thread readers and writers.
+    // Parameter IDs are almost always small integers, so a vector beats a hash
+    // lookup. Every ID below kDenseIndexLimit is in the table; only IDs at or
+    // above it (a four-char code, an adapter's synthesized Bypass) are looked
+    // up in the map, so one such ID does not slow every other lookup.
+    static constexpr ParamID kDenseIndexLimit = 1u << 14;
+    static constexpr std::uint32_t kNoDenseIndex = 0xFFFF'FFFFu;
+    std::vector<std::uint32_t> dense_index_;
+    bool has_sparse_ids_ = false;
+    static constexpr std::size_t kNoIndex = static_cast<std::size_t>(-1);
+    // The dense-table hit is the whole inline path; the hash-map fallback is
+    // out of line so get_value() stays small enough to inline into a
+    // processor's per-block parameter reads.
+    [[gnu::always_inline]] std::size_t index_of(ParamID id) const noexcept {
+        if (id < dense_index_.size()) {
+            const std::uint32_t i = dense_index_[id];
+            return i == kNoDenseIndex ? kNoIndex : i;
+        }
+        return id >= kDenseIndexLimit && has_sparse_ids_ ? index_of_sparse(id) : kNoIndex;
+    }
+    [[gnu::noinline]] std::size_t index_of_sparse(ParamID id) const noexcept;
     using ParameterDisplayNames =
         std::unordered_map<ParamID, std::string>;
     mutable std::mutex parameter_display_mutex_;
@@ -663,6 +833,10 @@ public:
         deferred_gesture_releases_.clear();
     }
 };
+
+inline float ParamReader::get() const noexcept {
+    return store_ != nullptr ? store_->value_at_index_(index_) : 0.0f;
+}
 
 // ─── Template definitions ──────────────────────────────────────────────────
 

@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -75,17 +76,35 @@ def _load_manifest(path: Path, root: Path) -> Manifest:
                     tuple(deps), tuple(targets))
 
 
+def _git_visible_files(path: Path) -> list[Path] | None:
+    """Tracked and untracked-but-not-ignored files under `path`, or None outside git.
+
+    Only what git ignores is skipped (installed node_modules, local build
+    output). A directory merely named build/ or dist/ is still package source
+    when it is tracked, so it cannot hide an include.
+    """
+    try:
+        top = subprocess.run(["git", "-C", str(path), "rev-parse", "--show-toplevel"],
+                             capture_output=True, text=True, encoding="utf-8", check=True).stdout.strip()
+        listed = subprocess.run(
+            ["git", "-C", top, "ls-files", "-z", "--cached", "--others", "--exclude-standard",
+             "--", str(path.resolve())],
+            capture_output=True, text=True, encoding="utf-8", check=True).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return [Path(top) / rel for rel in listed.split("\0") if rel]
+
+
 def _source_files(path: Path) -> Iterable[Path]:
     if path.is_file():
         if path.suffix in _SOURCE_SUFFIXES:
             yield path
         return
-    for candidate in sorted(path.rglob("*")):
+    visible = _git_visible_files(path)
+    candidates = sorted(visible) if visible is not None else sorted(
+        p for p in path.rglob("*") if ".git" not in p.relative_to(path).parts)
+    for candidate in candidates:
         if candidate.is_file() and candidate.suffix in _SOURCE_SUFFIXES:
-            # Generated/vendor trees are not package source and must not become
-            # a way to silence this check by copying a dependency into a package.
-            if any(part in {"node_modules", "dist", "build", ".git"} for part in candidate.parts):
-                continue
             yield candidate
 
 
@@ -103,16 +122,26 @@ def _resolved_repo_target(root: Path, source: Path, target: str) -> str | None:
         return None
 
 
+# Private core/view source trees: implementation sources, the per-OS platform
+# backends, and the audio widgets' sources. The installed headers under
+# core/view/include and core/view/audio/include are the public surface.
+_PRIVATE_CORE_VIEW_TREES = ("core/view/src", "core/view/platform", "core/view/audio/src")
+
+
 def _is_private_core_view_target(target: str) -> bool:
     normalised = _normalise(target)
-    return ("core/view/src/" in normalised or
-            normalised.startswith("core/view/src"))
+    return any(f"{tree}/" in normalised or normalised.startswith(tree)
+               for tree in _PRIVATE_CORE_VIEW_TREES)
 
 
 def _violations(root: Path, manifest: Manifest) -> list[str]:
     problems: list[str] = []
     package_root = root / manifest.root
-    for source in _source_files(package_root):
+    sources = list(_source_files(package_root))
+    if not sources:
+        # A package the lint cannot see into is unchecked, not clean.
+        return [f"{manifest.root}: package {manifest.name!r} has no source files to check"]
+    for source in sources:
         rel = source.relative_to(root).as_posix()
         try:
             text = source.read_text(encoding="utf-8")

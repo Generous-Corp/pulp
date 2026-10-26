@@ -1,4 +1,5 @@
 #include <pulp/format/registry.hpp>
+#include <pulp/format/editor_assets.hpp>
 
 #include <atomic>
 #include <cstring>
@@ -25,6 +26,14 @@ PluginRegistration g_entries[kMaxPlugins];
 std::atomic<std::size_t> g_count{0};
 
 ProcessorFactory g_factory = nullptr;
+
+// The binary's own editor assets, written by the per-target registration
+// source at static init and read when an editor opens.
+EditorAssets g_editor_assets{};
+
+bool non_empty(const char* s) noexcept {
+    return s != nullptr && s[0] != '\0';
+}
 
 } // namespace
 
@@ -79,6 +88,36 @@ void reset_registry_for_testing() {
     }
     g_count.store(0, std::memory_order_release);
     g_factory = nullptr;
+}
+
+bool embeds_editor_script(const EditorAssets& assets) noexcept {
+    return assets.script != nullptr && assets.script_size > 0;
+}
+
+bool declares_editor_assets(const EditorAssets& assets) noexcept {
+    return non_empty(assets.script_path) || non_empty(assets.theme_path) ||
+           non_empty(assets.asset_roots) || embeds_editor_script(assets);
+}
+
+void register_editor_assets(const EditorAssets& assets) noexcept {
+    g_editor_assets = assets;
+}
+
+EditorAssets registered_editor_assets() noexcept {
+    return g_editor_assets;
+}
+
+EditorAssets editor_assets_for(const char* plugin_id) noexcept {
+    if (const auto* reg = find_plugin(plugin_id)) {
+        const EditorAssets keyed{reg->ui_script, reg->ui_theme, reg->ui_asset_roots};
+        if (declares_editor_assets(keyed))
+            return keyed;
+    }
+    return g_editor_assets;
+}
+
+void reset_editor_assets_for_testing() noexcept {
+    g_editor_assets = EditorAssets{};
 }
 
 } // namespace pulp::format

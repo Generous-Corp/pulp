@@ -33,6 +33,24 @@ class GraphRuntimeWorkerPool {
 public:
     using TaskFn = void (*)(void* context, std::uint32_t task_index) noexcept;
 
+    // Private diagnostic seam. The hook is inert unless a focused test or
+    // diagnostic campaign installs it before start(); it is never part of the
+    // graph executor's scheduling contract. Timestamps use the worker's local
+    // monotonic clock and preserve the pool epoch that published the batch.
+    enum class SchedulingReceiptPhase : std::uint8_t {
+        Published,
+        WorkerAdmission,
+        InlineFallback,
+    };
+    struct SchedulingReceipt {
+        SchedulingReceiptPhase phase = SchedulingReceiptPhase::Published;
+        std::uint64_t generation = 0;
+        std::uint32_t worker_index = 0;
+        std::uint32_t task_count = 0;
+        std::uint64_t timestamp_ns = 0;
+    };
+    using SchedulingReceiptHook = void (*)(const SchedulingReceipt&, void*) noexcept;
+
     GraphRuntimeWorkerPool() = default;
     ~GraphRuntimeWorkerPool();
 
@@ -89,6 +107,14 @@ public:
     }
 
 #ifdef PULP_GRAPH_RUNTIME_WORKER_POOL_TEST_HOOKS
+    // Install before start(). The hook receives publication, worker-admission,
+    // and inline-fallback events from the existing pool seam. The callback must
+    // be allocation-free and safe for concurrent worker/audio invocations.
+    void set_scheduling_receipt_hook_for_test(SchedulingReceiptHook hook, void* context) noexcept {
+        assert(!running_.load(std::memory_order_acquire));
+        scheduling_receipt_hook_for_test_ = hook;
+        scheduling_receipt_context_for_test_ = context;
+    }
     // Install before start(). This intercepts only the no-handle fallback join,
     // allowing tests to prove that device-null attempts fallback while AU-null
     // removal does not. Production workgroup joins are never redirected.
@@ -110,6 +136,15 @@ public:
         assert(!running_.load(std::memory_order_acquire));
         worker_park_hook_ = hook;
         worker_park_context_ = context;
+    }
+    // Install before start(). Workers never take the cold-idle path, so run()
+    // always finds every worker hot and dispatches instead of running inline.
+    // A test that asserts worker admission needs this: without it, a caller
+    // descheduled for longer than the hot idle window lets a worker park, and
+    // run() then correctly falls back to inline execution.
+    void keep_workers_hot_for_test() noexcept {
+        assert(!running_.load(std::memory_order_acquire));
+        keep_workers_hot_for_test_ = true;
     }
     // Claim the cold-transition gate from the control thread. While it is held
     // no worker can park (each park CAS fails and the worker keeps spinning),
@@ -173,6 +208,8 @@ private:
                                  bool fallback_when_null) noexcept;
     void worker_loop(std::uint32_t worker_index) noexcept;
     void clear_transient_reheat_if_no_worker_cold() noexcept;
+    void publish_scheduling_receipt(SchedulingReceiptPhase phase, std::uint64_t generation,
+                                    std::uint32_t worker_index, std::uint32_t task_count) noexcept;
     // Run this worker's STATIC contiguous task range for the current batch and
     // add its size to the completion counter. Static partitioning (no shared
     // claim cursor) means a lagging worker can never re-claim tasks after run()
@@ -201,6 +238,11 @@ private:
     void* fallback_join_context_for_test_ = nullptr;
     void (*worker_park_hook_)(void*) noexcept = nullptr;
     void* worker_park_context_ = nullptr;
+    bool keep_workers_hot_for_test_ = false;
+    // Kept in every build so test-hook and production class layouts remain
+    // identical. The pointer is null in every shipping path.
+    SchedulingReceiptHook scheduling_receipt_hook_for_test_ = nullptr;
+    void* scheduling_receipt_context_for_test_ = nullptr;
 
     // Published batch (valid for the current epoch). Written by run() before the
     // epoch bump (release), read by workers after observing the new epoch

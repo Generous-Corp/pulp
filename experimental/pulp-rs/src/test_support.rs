@@ -83,3 +83,16 @@ impl Drop for EnvVarGuard {
         }
     }
 }
+
+/// Lay out an installed SDK of `version` under `pulp_home` the way
+/// `pulp sdk install` does (`sdk/<version>/` with a `version.txt` and the
+/// CMake package config), and return its directory. A test that drives a
+/// standalone build sets `PULP_HOME` to `pulp_home`, so the build's real SDK
+/// lookup finds it rather than depending on what the host has installed.
+pub fn fake_installed_sdk(pulp_home: &std::path::Path, version: &str) -> std::path::PathBuf {
+    let sdk = pulp_home.join("sdk").join(version);
+    std::fs::create_dir_all(sdk.join("lib/cmake/Pulp")).unwrap();
+    std::fs::write(sdk.join("lib/cmake/Pulp/PulpConfig.cmake"), "").unwrap();
+    std::fs::write(sdk.join("version.txt"), format!("{version}\n")).unwrap();
+    sdk
+}

@@ -6,6 +6,8 @@
 // off the callback.  The prepared object only mutates fixed-size causal state.
 
 #include "nam_tcn_adapter.hpp"
+#include "nam_wavenet_block_engine.hpp"
+#include "shared_io_wavenet_spec.hpp"
 #include <pulp/gpu_audio/gpu_wavenet.hpp>
 
 #include <algorithm>
@@ -22,6 +24,18 @@
 #include <choc/text/choc_JSON.h>
 
 namespace pulp::gpu_audio::detail {
+
+/// Which CPU forward NamTcnArtifact::process() runs.
+///   Reference:   the per-sample scalar oracle with std::tanh.
+///   BlockScalar: the layer-major block engine on portable four-float lanes.
+///   BlockSimd:   the same engine on NEON (arm64); equal to BlockScalar elsewhere.
+/// The block kernels use a bounded rational tanh within 3e-7 of std::tanh.
+///
+/// As a per-channel shadow kernel, wrap a loaded artifact in an object with
+/// reset() and process(const float*, float*, uint32_t) (for example holding a
+/// shared_ptr<NamTcnArtifact>) and pass it to bind_neural_cpu_kernel()
+/// (neural_cpu_kernels.hpp). Load and select the kernel before binding.
+enum class NamCpuKernel : std::uint8_t { Reference, BlockScalar, BlockSimd };
 
 class NamTcnArtifact final {
   public:
@@ -150,6 +164,8 @@ class NamTcnArtifact final {
         Model candidate;
         if (!candidate.configure(parsed, weights, scale, error))
             return false;
+        NamWaveNetBlockEngine engine;
+        engine.configure(candidate.engine_arrays(), candidate.head_scale);
         const auto sample_rate =
             root.hasObjectMember("sample_rate") ? number(root["sample_rate"]) : -1.0;
         if (!(sample_rate > 0.0) || !std::isfinite(sample_rate))
@@ -157,35 +173,61 @@ class NamTcnArtifact final {
         // Commit the fully validated candidate only after every field has
         // passed validation. A failed replacement must leave the live
         // artifact, including its metadata and causal state, untouched.
-        arrays_ = std::move(candidate.arrays);
-        head_scale_ = candidate.head_scale;
-        sample_rate_ = sample_rate;
-        receptive_field_ = candidate.receptive_field;
-        state_bytes_ = candidate.state_bytes;
-        weights_size_ = weights.size();
-        gpu_layers_.clear();
-        gpu_dilations_.clear();
-        gpu_weights_ = weights;
-        gpu_layers_.reserve(parsed.size());
-        gpu_dilations_.reserve(parsed.size());
-        for (const auto& layer : parsed) {
-            gpu_dilations_.emplace_back();
-            for (const auto dilation : layer.dilations)
-                gpu_dilations_.back().push_back(static_cast<std::uint32_t>(dilation));
-            gpu_layers_.push_back(
-                {.input_size = static_cast<std::uint32_t>(layer.input_size),
-                 .condition_size = static_cast<std::uint32_t>(layer.condition_size),
-                 .channels = static_cast<std::uint32_t>(layer.channels),
-                 .kernel = static_cast<std::uint32_t>(layer.kernel_size),
-                 .head_size = static_cast<std::uint32_t>(layer.head_size),
-                 .dilation = 0,
-                 .gated = layer.gated,
-                 .head_bias = layer.head_bias,
-                 .tanh_activation = layer.activation == "Tanh",
-                 .dilations = gpu_dilations_.back()});
+        commit(std::move(candidate), std::move(engine), parsed, weights, sample_rate);
+        return true;
+    }
+
+    // Prepares the same CPU model from a provider WaveNet program shape. The
+    // shared-I/O WaveNet program implements only the Tanh A1 activation, so
+    // every array uses it; the flat weight order is the one load() consumes.
+    // Control-thread only. A failure leaves the live model untouched. The
+    // program carries no sample rate, so sample_rate() stays unknown (-1).
+    bool configure_program(const WavenetProgramSpec& spec, std::string* error = nullptr) {
+        auto fail = [&](std::string message) {
+            if (error != nullptr)
+                *error = std::move(message);
+            return false;
+        };
+        if (!validate_wavenet_spec(spec).accepted())
+            return fail("invalid WaveNet program spec");
+        if (spec.stream_instances != 1)
+            return fail("only one stream instance is supported");
+        if (spec.arrays.size() > static_cast<std::size_t>(kMaxArrays) ||
+            spec.weights.size() > kMaxWeights)
+            return fail("program exceeds the CPU model bounds");
+        std::vector<ArrayConfig> parsed;
+        parsed.reserve(spec.arrays.size());
+        for (const auto& layer : spec.arrays) {
+            if (layer.input_size > static_cast<std::uint32_t>(kMaxChannels) ||
+                layer.channels > static_cast<std::uint32_t>(kMaxChannels) ||
+                layer.kernel > static_cast<std::uint32_t>(kMaxKernel) ||
+                layer.head_size > static_cast<std::uint32_t>(kMaxChannels) ||
+                layer.dilations.size() > static_cast<std::size_t>(kMaxLayers))
+                return fail("program layer exceeds the CPU model bounds");
+            ArrayConfig current;
+            current.input_size = static_cast<int>(layer.input_size);
+            current.condition_size = static_cast<int>(layer.condition_size);
+            current.channels = static_cast<int>(layer.channels);
+            current.kernel_size = static_cast<int>(layer.kernel);
+            current.head_size = static_cast<int>(layer.head_size);
+            current.gated = layer.gated != 0;
+            current.head_bias = layer.head_bias != 0;
+            current.activation = "Tanh";
+            current.dilations.reserve(layer.dilations.size());
+            for (const auto dilation : layer.dilations) {
+                if (dilation > static_cast<std::uint32_t>(kMaxDilation))
+                    return fail("program dilation exceeds the CPU model bounds");
+                current.dilations.push_back(static_cast<int>(dilation));
+            }
+            parsed.push_back(std::move(current));
         }
-        loaded_ = true;
-        reset();
+        const std::vector<float> weights(spec.weights.begin(), spec.weights.end());
+        Model candidate;
+        if (!candidate.configure(parsed, weights, spec.head_scale, error))
+            return false;
+        NamWaveNetBlockEngine engine;
+        engine.configure(candidate.engine_arrays(), candidate.head_scale);
+        commit(std::move(candidate), std::move(engine), parsed, weights, -1.0);
         return true;
     }
 
@@ -228,9 +270,31 @@ class NamTcnArtifact final {
     void reset() noexcept {
         for (auto& array : arrays_)
             array.reset();
+        engine_.reset();
+    }
+
+    /// Control thread only. Resets causal state, since the kernels keep
+    /// separate histories. Topologies the block engine does not cover run the
+    /// reference whatever is requested; cpu_kernel() reports what runs.
+    void set_cpu_kernel(NamCpuKernel kernel) noexcept {
+        requested_kernel_ = kernel;
+        reset();
+    }
+    NamCpuKernel cpu_kernel() const noexcept {
+        return engine_.configured() ? requested_kernel_ : NamCpuKernel::Reference;
     }
 
     void process(const float* input, float* output, std::uint32_t frames) noexcept {
+        switch (cpu_kernel()) {
+        case NamCpuKernel::BlockSimd:
+            engine_.process<neural_simd::DefaultIsa>(input, output, frames);
+            return;
+        case NamCpuKernel::BlockScalar:
+            engine_.process<neural_simd::ScalarIsa>(input, output, frames);
+            return;
+        case NamCpuKernel::Reference:
+            break;
+        }
         for (std::uint32_t i = 0; i < frames; ++i)
             output[i] = process_sample(input[i]);
     }
@@ -480,7 +544,73 @@ class NamTcnArtifact final {
                     state_bytes += layer.convolution.history.size() * sizeof(float);
             return true;
         }
+        /// Views of the loaded weights for the block engine to repack.
+        std::vector<NamWaveNetEngineArray> engine_arrays() const {
+            std::vector<NamWaveNetEngineArray> result;
+            for (const auto& array : arrays) {
+                const auto& c = array.config;
+                NamWaveNetEngineArray e;
+                e.input_size = static_cast<std::uint32_t>(c.input_size);
+                e.channels = static_cast<std::uint32_t>(c.channels);
+                e.kernel = static_cast<std::uint32_t>(c.kernel_size);
+                e.head_size = static_cast<std::uint32_t>(c.head_size);
+                e.gated = c.gated;
+                e.activation = c.activation == "ReLU"       ? NamActivation::ReLU
+                               : c.activation == "Hardtanh" ? NamActivation::Hardtanh
+                               : c.activation == "Sigmoid"  ? NamActivation::Sigmoid
+                               : c.activation == "Identity" ? NamActivation::Identity
+                                                            : NamActivation::Tanh;
+                e.rechannel = array.rechannel.weights.data();
+                e.head = array.head_rechannel.weights.data();
+                e.head_bias = c.head_bias ? array.head_rechannel.biases.data() : nullptr;
+                for (const auto& layer : array.layers)
+                    e.layers.push_back(
+                        {.conv = layer.convolution.weights.data(),
+                         .conv_bias = layer.convolution.biases.data(),
+                         .mixin = layer.mixin.weights.data(),
+                         .residual = layer.residual.weights.data(),
+                         .residual_bias = layer.residual.biases.data(),
+                         .dilation = static_cast<std::uint32_t>(layer.convolution.dilation)});
+                result.push_back(std::move(e));
+            }
+            return result;
+        }
     };
+
+    void commit(Model&& candidate, NamWaveNetBlockEngine&& engine,
+                const std::vector<ArrayConfig>& parsed, const std::vector<float>& weights,
+                double sample_rate) {
+        arrays_ = std::move(candidate.arrays);
+        engine_ = std::move(engine);
+        head_scale_ = candidate.head_scale;
+        sample_rate_ = sample_rate;
+        receptive_field_ = candidate.receptive_field;
+        state_bytes_ = candidate.state_bytes;
+        weights_size_ = weights.size();
+        gpu_layers_.clear();
+        gpu_dilations_.clear();
+        gpu_weights_ = weights;
+        gpu_layers_.reserve(parsed.size());
+        gpu_dilations_.reserve(parsed.size());
+        for (const auto& layer : parsed) {
+            gpu_dilations_.emplace_back();
+            for (const auto dilation : layer.dilations)
+                gpu_dilations_.back().push_back(static_cast<std::uint32_t>(dilation));
+            gpu_layers_.push_back(
+                {.input_size = static_cast<std::uint32_t>(layer.input_size),
+                 .condition_size = static_cast<std::uint32_t>(layer.condition_size),
+                 .channels = static_cast<std::uint32_t>(layer.channels),
+                 .kernel = static_cast<std::uint32_t>(layer.kernel_size),
+                 .head_size = static_cast<std::uint32_t>(layer.head_size),
+                 .dilation = 0,
+                 .gated = layer.gated,
+                 .head_bias = layer.head_bias,
+                 .tanh_activation = layer.activation == "Tanh",
+                 .dilations = gpu_dilations_.back()});
+        }
+        loaded_ = true;
+        reset();
+    }
 
     static bool active(const choc::value::ValueView& value, const char* key) {
         return value.hasObjectMember(key) && value[key].isObject() &&
@@ -537,6 +667,8 @@ class NamTcnArtifact final {
     }
 
     std::vector<Array> arrays_;
+    NamWaveNetBlockEngine engine_;
+    NamCpuKernel requested_kernel_ = NamCpuKernel::Reference;
     double sample_rate_ = -1.0;
     float head_scale_ = 1.0f;
     std::uint32_t receptive_field_ = 0;
@@ -566,11 +698,15 @@ class NamTcnArtifactAdapter final : public StreamingModel {
         if (prepared_)
             return false;
         if (!valid_streaming_prepare_context(context) || context.spec != &spec_ ||
-            context.max_frames == 0 || spec_.input_channels != 1 || spec_.output_channels != 1)
+            context.artifact_hash != spec_.weights_hash || context.max_frames == 0 ||
+            spec_.input_channels != 1 || spec_.output_channels != 1)
             return false;
         std::string error;
         if (!artifact_.load(artifact_path_, &error))
             return false;
+        // The shadow runs the block engine; the artifact's default stays the
+        // reference so it remains a GPU oracle for direct callers.
+        artifact_.set_cpu_kernel(NamCpuKernel::BlockSimd);
         if (artifact_.sample_rate() != static_cast<double>(spec_.sample_rate) ||
             artifact_.receptive_field() != spec_.receptive_field_samples ||
             artifact_.state_bytes() != spec_.state_bytes)

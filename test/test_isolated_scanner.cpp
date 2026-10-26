@@ -10,6 +10,8 @@
 //     Timeout, and "unparseable worker output" classifications).
 
 #include <pulp/host/isolated_scanner.hpp>
+#include <pulp/host/scan_blacklist.hpp>
+#include <pulp/host/scanner.hpp>
 #include <pulp/platform/child_process.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -227,15 +229,27 @@ TEST_CASE("IsolatedPluginScanner classifies a hung worker as Timeout",
     REQUIRE_THAT(result.error_message, ContainsSubstring("timed out"));
 }
 
-TEST_CASE("IsolatedPluginScanner classifies unparseable worker output as Crash",
-          "[host][isolated-scanner][item-4.1][crash]") {
+TEST_CASE("IsolatedPluginScanner classifies unparseable worker output as ProtocolError",
+          "[host][isolated-scanner][protocol]") {
     IsolatedPluginScanner scanner{PULP_ISOLATED_SCANNER_CRASH_HELPER};
     auto result = scanner.scan("garbage", /*timeout_ms=*/5000);
 
-    // exit 0 + non-JSON stdout — we don't trust that and report Crash.
-    REQUIRE(result.status == ScanStatus::Crash);
+    // exit 0 + non-JSON stdout: nothing from it is trusted, and the worker,
+    // not the bundle, is at fault.
+    REQUIRE(result.status == ScanStatus::ProtocolError);
     REQUIRE_FALSE(result.descriptor.has_value());
+    REQUIRE(result.descriptors.empty());
     REQUIRE_THAT(result.error_message, ContainsSubstring("not parseable"));
+}
+
+TEST_CASE("IsolatedPluginScanner classifies output past the capture cap as ProtocolError",
+          "[host][isolated-scanner][protocol]") {
+    IsolatedPluginScanner scanner{PULP_ISOLATED_SCANNER_CRASH_HELPER};
+    auto result = scanner.scan("flood", /*timeout_ms=*/5000);
+
+    REQUIRE(result.status == ScanStatus::ProtocolError);
+    REQUIRE(result.descriptors.empty());
+    REQUIRE_THAT(result.error_message, ContainsSubstring("capture limit"));
 }
 
 TEST_CASE("IsolatedPluginScanner returns NotPlugin when worker exits clean with no output",
@@ -261,3 +275,186 @@ TEST_CASE("IsolatedPluginScanner reports WorkerMissing when worker_path is absen
     REQUIRE(result.status == ScanStatus::WorkerMissing);
     REQUIRE_THAT(result.error_message, ContainsSubstring("not found"));
 }
+
+// ── PluginScanner routes CLAP enumeration through the worker ───────────
+
+#ifdef PULP_SCAN_FIXTURE_PROBE_CLAP
+
+namespace {
+
+constexpr const char* kProbeId = "dev.pulp.test.scan-probe";
+
+fs::path copy_fixture(const char* source, const fs::path& directory) {
+    fs::create_directories(directory);
+    const auto destination = directory / fs::path(source).filename();
+    fs::copy_file(source, destination);
+    return destination;
+}
+
+// Only the scratch directory, only CLAP, with the worker this tree built.
+pulp::host::ScanOptions hermetic_clap_scan(const fs::path& directory,
+                                           pulp::host::ScanBlacklist* blacklist) {
+    pulp::host::ScanOptions options;
+    options.scan_vst3 = false;
+    options.scan_au = false;
+    options.scan_lv2 = false;
+    options.only_extra_paths = true;
+    options.extra_paths.push_back(directory.string());
+    options.blacklist = blacklist;
+    options.scan_worker_path = PULP_ISOLATED_SCANNER_REAL_WORKER;
+    return options;
+}
+
+} // namespace
+
+TEST_CASE("PluginScanner isolates CLAP enumeration: an aborting bundle is blacklisted and the scan "
+          "survives",
+          "[host][isolated-scanner][scanner][blacklist]") {
+    ScratchDir scratch("abort-bundle");
+    const auto aborting = copy_fixture(PULP_SCAN_FIXTURE_ABORT_CLAP, scratch.path);
+    copy_fixture(PULP_SCAN_FIXTURE_PROBE_CLAP, scratch.path);
+
+    pulp::host::ScanBlacklist blacklist;
+    const auto found =
+        pulp::host::PluginScanner{}.scan(hermetic_clap_scan(scratch.path, &blacklist));
+
+    REQUIRE(found.size() == 1);
+    REQUIRE(found.front().unique_id == kProbeId);
+    REQUIRE(blacklist.is_blacklisted(aborting.string()));
+    REQUIRE_THAT(blacklist.get(aborting.string())->reason, ContainsSubstring("abnormally"));
+
+    // The next scan skips the recorded bundle and still lists the good one.
+    const auto again =
+        pulp::host::PluginScanner{}.scan(hermetic_clap_scan(scratch.path, &blacklist));
+    REQUIRE(again.size() == 1);
+    REQUIRE(again.front().unique_id == kProbeId);
+}
+
+TEST_CASE("isolated and in-process CLAP scans enumerate the same PluginInfo",
+          "[host][isolated-scanner][scanner]") {
+    ScratchDir scratch("same-info");
+    copy_fixture(PULP_SCAN_FIXTURE_PROBE_CLAP, scratch.path);
+
+    const auto isolated =
+        pulp::host::PluginScanner{}.scan(hermetic_clap_scan(scratch.path, nullptr));
+    auto in_process_options = hermetic_clap_scan(scratch.path, nullptr);
+    in_process_options.in_process_clap = true;
+    const auto in_process = pulp::host::PluginScanner{}.scan(in_process_options);
+
+    REQUIRE(isolated.size() == 1);
+    REQUIRE(in_process.size() == 1);
+    const auto& a = isolated.front();
+    const auto& b = in_process.front();
+    REQUIRE(a.unique_id == kProbeId);
+    REQUIRE(a.name == b.name);
+    REQUIRE(a.manufacturer == b.manufacturer);
+    REQUIRE(a.version == b.version);
+    REQUIRE(a.unique_id == b.unique_id);
+    REQUIRE(a.path == b.path);
+    REQUIRE(a.format == b.format);
+    REQUIRE(a.is_instrument == b.is_instrument);
+    REQUIRE(a.is_effect == b.is_effect);
+    REQUIRE(a.num_inputs == b.num_inputs);
+    REQUIRE(a.num_outputs == b.num_outputs);
+    REQUIRE(a.category == b.category);
+    REQUIRE(a.category == "Fx");
+    REQUIRE(a.features == b.features);
+    REQUIRE(a.features.size() == 2);
+    REQUIRE(a.description == b.description);
+    REQUIRE(a.description == "Scanner fixture with one descriptor");
+    REQUIRE(a.has_editor == b.has_editor);
+    REQUIRE(a.supports_sidechain == b.supports_sidechain);
+    REQUIRE(a.supports_midi_in == b.supports_midi_in);
+    REQUIRE(a.supports_midi_out == b.supports_midi_out);
+}
+
+TEST_CASE("find_scan_worker honours an explicit path, PULP_SCAN_WORKER, then the executable's tree",
+          "[host][isolated-scanner][scanner]") {
+    ScratchDir scratch("find-worker");
+    const auto missing = (scratch.path / "no-such-worker").string();
+    ScopedEnv env("PULP_SCAN_WORKER");
+    env.unset();
+
+    REQUIRE(pulp::host::find_scan_worker(PULP_ISOLATED_SCANNER_REAL_WORKER) ==
+            PULP_ISOLATED_SCANNER_REAL_WORKER);
+    // An explicit path that does not exist is a configuration error, not a
+    // cue to look elsewhere.
+    REQUIRE(pulp::host::find_scan_worker(missing).empty());
+
+    env.set(PULP_ISOLATED_SCANNER_REAL_WORKER);
+    REQUIRE(pulp::host::find_scan_worker() == PULP_ISOLATED_SCANNER_REAL_WORKER);
+    env.set(missing);
+    REQUIRE(pulp::host::find_scan_worker().empty());
+
+    // This test binary sits in the build tree, so the worker is found by
+    // walking up from it with nothing configured.
+    env.unset();
+    const auto discovered = pulp::host::find_scan_worker();
+    REQUIRE_FALSE(discovered.empty());
+    REQUIRE(fs::equivalent(discovered, PULP_ISOLATED_SCANNER_REAL_WORKER));
+}
+
+TEST_CASE("PluginScanner refuses in-process CLAP enumeration when no worker exists",
+          "[host][isolated-scanner][scanner]") {
+    ScratchDir scratch("no-worker");
+    copy_fixture(PULP_SCAN_FIXTURE_PROBE_CLAP, scratch.path);
+    ScopedEnv env("PULP_SCAN_WORKER");
+    env.unset();
+
+    auto options = hermetic_clap_scan(scratch.path, nullptr);
+    options.scan_worker_path = (scratch.path / "no-such-worker").string();
+    const auto report = pulp::host::PluginScanner{}.scan_report(options);
+
+    // Nothing ran in this process, and the report says why and what to do.
+    REQUIRE(report.plugins.empty());
+    REQUIRE(report.clap_skipped_no_worker);
+    REQUIRE_THAT(report.error, ContainsSubstring("no scan worker found"));
+    REQUIRE_THAT(report.error, ContainsSubstring("--in-process"));
+
+    // The explicit ask is what enables it.
+    options.in_process_clap = true;
+    const auto in_process = pulp::host::PluginScanner{}.scan_report(options);
+    REQUIRE_FALSE(in_process.clap_skipped_no_worker);
+    REQUIRE(in_process.plugins.size() == 1);
+    REQUIRE(in_process.plugins.front().unique_id == kProbeId);
+}
+
+TEST_CASE("the worker keeps a plugin's stdout chatter out of the descriptor protocol",
+          "[host][isolated-scanner][protocol]") {
+    // The probe fixture prints a line to stdout from clap_entry.init. The
+    // worker hands the plugin a stdout that is really stderr, so the parent
+    // still reads clean descriptors.
+    IsolatedPluginScanner scanner{PULP_ISOLATED_SCANNER_REAL_WORKER};
+    const auto result = scanner.scan(PULP_SCAN_FIXTURE_PROBE_CLAP, /*timeout_ms=*/10000);
+
+    REQUIRE(result.status == ScanStatus::Ok);
+    REQUIRE(result.descriptors.size() == 1);
+    REQUIRE(result.descriptors.front().unique_id == kProbeId);
+}
+
+#if !defined(_WIN32)
+TEST_CASE("find_scan_worker refuses a group- or world-writable worker",
+          "[host][isolated-scanner][scanner]") {
+    ScratchDir scratch("writable-worker");
+    const auto copy = scratch.path / "pulp-scan-worker";
+    fs::copy_file(PULP_ISOLATED_SCANNER_REAL_WORKER, copy);
+
+    fs::permissions(copy, fs::perms::owner_all | fs::perms::group_read | fs::perms::group_exec |
+                              fs::perms::others_read | fs::perms::others_exec);
+    REQUIRE(pulp::host::find_scan_worker(copy.string()) == copy.string());
+
+    fs::permissions(copy, fs::perms::group_write, fs::perm_options::add);
+    REQUIRE(pulp::host::find_scan_worker(copy.string()).empty());
+
+    fs::permissions(copy, fs::perms::group_write, fs::perm_options::remove);
+    fs::permissions(copy, fs::perms::others_write, fs::perm_options::add);
+    REQUIRE(pulp::host::find_scan_worker(copy.string()).empty());
+
+    // The same copy named through the environment is refused the same way.
+    ScopedEnv env("PULP_SCAN_WORKER");
+    env.set(copy.string());
+    REQUIRE(pulp::host::find_scan_worker().empty());
+}
+#endif
+
+#endif // PULP_SCAN_FIXTURE_PROBE_CLAP

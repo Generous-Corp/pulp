@@ -32,6 +32,16 @@ def configured_hooks(config_path: Path) -> list[dict[str, object]]:
     return configured
 
 
+def configured_event_hooks(config_path: Path, event: str) -> list[dict[str, object]]:
+    document = json.loads(config_path.read_text(encoding="utf-8"))
+    configured: list[dict[str, object]] = []
+    for group in document.get("hooks", {}).get(event, []):
+        for hook in group.get("hooks", []):
+            if isinstance(hook, dict) and isinstance(hook.get("command"), str):
+                configured.append(hook)
+    return configured
+
+
 def run_git(cwd: Path, *arguments: str) -> None:
     subprocess.run(
         ("git", *arguments),
@@ -39,6 +49,7 @@ def run_git(cwd: Path, *arguments: str) -> None:
         text=True,
         capture_output=True,
         check=True,
+        encoding="utf-8",
     )
 
 
@@ -103,6 +114,7 @@ def check_post_tool_input_channels() -> None:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            encoding="utf-8",
         )
         assert process.stdin is not None
         try:
@@ -141,6 +153,7 @@ def check_post_tool_input_channels() -> None:
             capture_output=True,
             timeout=15,
             check=False,
+            encoding="utf-8",
         )
         if result.returncode != 0 or expected not in result.stdout:
             raise RuntimeError(
@@ -148,6 +161,33 @@ def check_post_tool_input_channels() -> None:
                 f"exit={result.returncode}, stdout={result.stdout!r}, "
                 f"stderr={result.stderr!r}"
             )
+
+
+def check_plugin_hooks_without_plugin_root() -> None:
+    """A missing plugin environment must not surface as an opaque exit 127."""
+    hooks_path = ROOT / "hooks/hooks.json"
+    environment = os.environ.copy()
+    environment.pop("CLAUDE_PLUGIN_ROOT", None)
+    with tempfile.TemporaryDirectory(prefix="pulp-plugin-hook-no-root-") as temp:
+        for hook in configured_hooks(hooks_path):
+            result = subprocess.run(
+                str(hook["command"]),
+                cwd=temp,
+                env=environment,
+                shell=True,
+                text=True,
+                input="{}",
+                capture_output=True,
+                timeout=15,
+                check=False,
+                encoding="utf-8",
+            )
+            if result.returncode != 0 or result.stdout or result.stderr:
+                raise RuntimeError(
+                    "Claude plugin hook failed without CLAUDE_PLUGIN_ROOT: "
+                    f"exit={result.returncode}, command={hook['command']!r}, "
+                    f"stdout={result.stdout!r}, stderr={result.stderr!r}"
+                )
 
 
 def check_non_pulp_checkout_noop() -> None:
@@ -170,6 +210,7 @@ def check_non_pulp_checkout_noop() -> None:
                     capture_output=True,
                     timeout=15,
                     check=False,
+                    encoding="utf-8",
                 )
                 if result.returncode != 0:
                     raise RuntimeError(
@@ -179,13 +220,61 @@ def check_non_pulp_checkout_noop() -> None:
                     )
 
 
+def check_build_guard_status_routing() -> None:
+    """Claude must propagate the guard refusal; Codex remains advisory."""
+    claude_commands = [
+        str(hook["command"])
+        for hook in configured_event_hooks(ROOT / ".claude/settings.json", "PreToolUse")
+        if "shell-portability-hint.sh" in str(hook["command"])
+    ]
+    codex_commands = [
+        str(hook["command"])
+        for hook in configured_event_hooks(ROOT / ".codex/hooks.json", "PreToolUse")
+        if "shell-portability-hint.sh" in str(hook["command"])
+    ]
+    if len(claude_commands) != 1 or len(codex_commands) != 1:
+        raise RuntimeError(
+            "expected one shell-portability PreToolUse hook in Claude and Codex"
+        )
+
+    with tempfile.TemporaryDirectory(prefix="pulp-agent-build-guard-") as temp:
+        tartci = Path(temp) / "tartci"
+        tartci.write_text(
+            "#!/bin/sh\nprintf '%s\\n' '{\"reserved_gate_cores\": 1}'\n",
+            encoding="utf-8",
+        )
+        tartci.chmod(0o755)
+        environment = os.environ.copy()
+        environment["PULP_TARTCI_BIN"] = str(tartci)
+        environment["TOOL_INPUT"] = json.dumps({"command": "cmake --build build"})
+        for label, command, expected in (
+            ("Claude", claude_commands[0], 2),
+            ("Codex", codex_commands[0], 0),
+        ):
+            result = subprocess.run(
+                command,
+                cwd=ROOT,
+                env=environment,
+                shell=True,
+                text=True,
+                capture_output=True,
+                timeout=15,
+                check=False,
+                encoding="utf-8",
+            )
+            if result.returncode != expected:
+                raise RuntimeError(
+                    f"{label} shell-portability hook returned {result.returncode}, "
+                    f"expected {expected}; stdout={result.stdout!r}, "
+                    f"stderr={result.stderr!r}"
+                )
+
+
 def main() -> int:
     try:
         check_post_tool_input_channels()
-    except RuntimeError as error:
-        print(f"FAIL: {error}", file=sys.stderr)
-        return 1
-    try:
+        check_plugin_hooks_without_plugin_root()
+        check_build_guard_status_routing()
         check_non_pulp_checkout_noop()
     except RuntimeError as error:
         print(f"FAIL: {error}", file=sys.stderr)
@@ -207,6 +296,21 @@ def main() -> int:
                 )
                 return 1
 
+    # The project Codex SessionStart sync is advisory. A hook runner can have
+    # a deliberately restricted PATH, so a bare `python3` must never turn a
+    # missing interpreter into the UI's opaque exit-127 failure.
+    codex_sync = [
+        str(hook["command"])
+        for hook in configured_hooks(ROOT / ".codex/hooks.json")
+        if "claude_md_sync.py" in str(hook.get("command", ""))
+    ]
+    if len(codex_sync) != 1 or "command -v python3" not in codex_sync[0] or "|| true" not in codex_sync[0]:
+        print(
+            "FAIL: Codex claude_md_sync hook must resolve python3 and remain advisory",
+            file=sys.stderr,
+        )
+        return 1
+
     with tempfile.TemporaryDirectory(prefix="pulp-agent-hook-paths-") as temp:
         superproject, nested_cwd = make_nested_submodule_fixture(Path(temp))
         resolved = subprocess.run(
@@ -215,6 +319,7 @@ def main() -> int:
             text=True,
             capture_output=True,
             check=True,
+            encoding="utf-8",
         ).stdout.strip()
         if Path(resolved).resolve() != superproject.resolve():
             print(
@@ -242,6 +347,7 @@ def main() -> int:
                         capture_output=True,
                         timeout=15,
                         check=False,
+                        encoding="utf-8",
                     )
                     if result.returncode != 0:
                         env_case = "unset" if project_dir is None else "nested"

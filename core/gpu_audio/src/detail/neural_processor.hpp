@@ -89,9 +89,11 @@ class NeuralProcessor final {
             return false;
         if (!model_.prepare(context)) {
             // A failed prepare may have acquired partial model resources. The
-            // model contract makes release idempotent and retryable so the
-            // failed transaction cannot leak into the next admission.
+            // model contract makes quiesce/release retryable so the failed
+            // transaction cannot leak into the next admission. Release must
+            // still be attempted when quiesce reports failure.
             cleanup_required_ = true;
+            (void)model_.quiesce();
             if (model_.release())
                 cleanup_required_ = false;
             return false;

@@ -1,59 +1,41 @@
 #include "realtime_gpu_audio_path.hpp"
-
-#include <pulp/gpu_audio/gpu_convolver.hpp>
-#include <pulp/gpu_audio/gpu_wavenet_realtime_node.hpp>
-
+#include "worker_pipeline_hosting.hpp"
 namespace pulp::gpu_audio::detail {
 
+RealtimeGpuNodeBinding realtime_gpu_node_binding(GpuAudioNode* node) noexcept {
+    RealtimeGpuNodeBinding binding;
+    if (node == nullptr || !node->bind_realtime_path(binding))
+        return {};
+    return binding;
+}
+
 RealtimeGpuNodePath realtime_gpu_node_path(GpuAudioNode* node) noexcept {
-    auto* wavenet = dynamic_cast<GpuWaveNetRealtimeNode*>(node);
-    if (wavenet != nullptr && wavenet->ready()) {
-        return {.context = wavenet,
-                .process = &GpuWaveNetRealtimeNode::process,
-                .service = &GpuWaveNetRealtimeNode::service,
-                .fence = &GpuWaveNetRealtimeNode::fence,
-                .delivered = &GpuWaveNetRealtimeNode::delivered,
-                .next_sequence = &GpuWaveNetRealtimeNode::next_sequence};
-    }
-#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
-    auto* convolver = dynamic_cast<GpuConvolver*>(node);
-    if (convolver != nullptr && convolver->has_realtime_shared_io()) {
-        return {.context = convolver,
-                .process = &GpuConvolver::process_realtime_shared_io,
-                .service = &GpuConvolver::service_realtime_shared_io,
-                .fence = &GpuConvolver::fence_realtime_shared_io,
-                .delivered = &GpuConvolver::complete_realtime_shared_io,
-                .next_sequence = &GpuConvolver::next_realtime_shared_io_sequence};
-    }
-#else
-    (void)node;
-#endif
-    return {};
+    const auto binding = realtime_gpu_node_binding(node);
+    return binding.path.active() ? binding.path : RealtimeGpuNodePath{};
 }
 
 bool requires_realtime_gpu_path(GpuAudioNode* node) noexcept {
-    return dynamic_cast<GpuWaveNetRealtimeNode*>(node) != nullptr;
-}
-
-GpuAudioProvider realtime_gpu_provider(GpuAudioNode* node) noexcept {
-    if (auto* wavenet = dynamic_cast<GpuWaveNetRealtimeNode*>(node))
-        return wavenet->authenticated_provider() ? GpuAudioProvider::Dawn
-                                                 : GpuAudioProvider::Unknown;
-    // The existing friend builds this path only for the concrete, prepared
-    // Dawn convolver. Reuse that decision without exposing node internals.
-    return realtime_gpu_node_path(node).active() ? GpuAudioProvider::Dawn
-                                                 : GpuAudioProvider::Unknown;
+    return realtime_gpu_node_binding(node).requires_realtime_path;
 }
 
 SharedIoProviderIdentity realtime_gpu_provider_identity(GpuAudioNode* node) noexcept {
-#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
-    auto* convolver = dynamic_cast<GpuConvolver*>(node);
-    if (convolver != nullptr)
-        return convolver->provider_identity_for_diagnostics();
-#else
-    (void)node;
-#endif
-    return {};
+    const auto binding = realtime_gpu_node_binding(node);
+    return binding.identity != nullptr ? binding.identity(binding.identity_context)
+                                       : SharedIoProviderIdentity{};
+}
+
+bool set_worker_pipeline_hosting(GpuAudioNode* node, bool hosted) noexcept {
+    const auto binding = realtime_gpu_node_binding(node);
+    return binding.pipeline != nullptr && binding.pipeline->set_hosting(hosted);
+}
+
+GpuAudioProvider realtime_gpu_provider(GpuAudioNode* node) noexcept {
+    // The provider names itself. A GPU provider counts only once it has
+    // authenticated; a CPU provider needs no authentication to be CPU.
+    const auto identity = realtime_gpu_provider_identity(node);
+    if (identity.provider == GpuAudioProvider::Cpu)
+        return GpuAudioProvider::Cpu;
+    return identity.authenticated ? identity.provider : GpuAudioProvider::Unknown;
 }
 
 } // namespace pulp::gpu_audio::detail

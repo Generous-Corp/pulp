@@ -29,6 +29,14 @@ the cache/status handshake or interactive desktop is unavailable. The packet's
 README specifies separate `pulp audio render`/null and dev-only Perfetto
 companion gates; screenshots alone do not prove audio or performance.
 
+The Windows harness must launch REAPER with a complete copied resource profile,
+not an empty portable directory. Copy the operator's profile into the private
+run directory, retain the license only there, and remove stale
+`reaper-vstplugins*`/`reaper-clap*` caches before scanning. A partial profile can
+stall before Lua dispatch, while stale caches can resolve an older backup bundle;
+the harness treats either condition as inconclusive and keeps the user's live
+REAPER session untouched.
+
 - **`reload`** — the original flow. Seed watched DSP variant A, insert+float the
   FX, copy variant B over the watched path, scrape `swapped DSP` / `reload
   rejected`.
@@ -94,6 +102,84 @@ companion gates; screenshots alone do not prove audio or performance.
   `test/test_plugin_key_routing.cpp` (the shared policy) and the
   `[host-forward]` case in `test_plugin_view_host_key_focus.mm` (the real
   `PulpPluginView` seam, counting what reaches the host view).
+- **`gpu-fault`** — GPU-audio continuity at the DAW boundary (WP-h1). Loads the
+  test-only GPU fault-continuity plug-in (`examples/gpu-fault-continuity`, built
+  with `-DPULP_GPU_AUDIO_FAULT_HOOKS=ON`) on its shared-I/O path, floats its
+  editor, and renders the track ONLINE (realtime; set through the project
+  file) while the plug-in fires one `--gpu-fault` at `--fault-at-sample`.
+  - Audio faults are applied to this instance's running provider by a
+    test-only Dawn proc-table interposer (`#error` unless
+    `PULP_GPU_FAULT_TEST_ONLY`). The faults are `force_loss_*`,
+    `delay_completion`, `worker_stall` (formerly `hang`) and
+    `missing_completion`.
+  - `render_force_loss` loses the EDITOR's render device; a REAPER crash there
+    is a FAIL finding.
+  - `positive_control` is the positive control (fires, faults nothing).
+  - PASS needs three nulls across the fault window: the plug-in capture,
+    REAPER's realtime render (`realtime.wav`, primary), and an offline bounce
+    of the reopened project (cross-check only). It also needs the v2 capture's
+    per-block delivery counters to show a GPU share of at least 90% over the
+    96 quanta before the fault, a prompt fallback takeover, a frozen GPU after
+    a loss, and zero silence.
+  - `--planted no_fallback|fallback_misaligned|fallback_stale` must FAIL;
+    `--gpu-off` must be INCONCLUSIVE; `--stimulus internal` keeps any host
+    input out of the capture.
+  - A live run on a host whose preflight is not quiet is INCONCLUSIVE
+    (`host_not_quiet`) and never upgraded. The realtime render needs
+    `realtime_render.json` provenance: a realtime-length span, and bytes
+    different from the bounce.
+  - The plug-in's captured input must be the expected stimulus over the whole
+    run (silence while stopped), or the verifier refuses the receipt. So no
+    host or microphone audio can be in `capture.bin`.
+  - Only `tools/validation/verify_gpu_audio_daw_continuity_receipt.py` accepts
+    the receipt. It re-derives everything from digest-bound artifacts and
+    binds the run by nonce, pid and claim.
+  - A fault delivered by the request file (`in_process_file`) is not control-op
+    evidence.
+  - `--dry-run` needs no REAPER.
+- **Real-host gpu-fault matrix (WP-K)**: the same plug-in in Logic and
+  GarageBand (AU, including out-of-process AUHostingService), Bitwig and
+  REAPER. Driven step by step by `real_host_smoke.py`, not by `reaper_smoke.py`.
+  - Order: `preflight`, `install-au`, `snapshot-prefs`, `stage`, `launch`,
+    `await-claim`, `realtime-begin`/`realtime-end`, `collect`, then `revert`.
+    `preflight` refuses a running DAW, a locked console (`IOConsoleLocked`), an
+    active rendezvous or an unreverted run. `revert` refuses while the host
+    process is alive.
+  - A sandboxed AU gets no env vars from the harness and cannot read
+    `~/Library/Containers`, so `stage` writes the rendezvous at
+    `~/Library/Application Support/Pulp/gpu-fault-continuity/active.json`
+    (nonce, expiry of at most 1 h, `O_EXCL`). The plug-in claims it and emits a
+    `host_process` event; the driver deletes it after checking the nonce.
+  - Projects come only from `real_host_templates.json` (No Input, monitoring
+    OFF, fingerprinted). Never open or save a user project; use throwaway
+    copies in a temp dir.
+  - Never record-arm a template track. Logic refuses to arm a No Input track
+    ("No input source selected!"), so a `live` template is an unarmed track
+    with no audio region, playing the plug-in's internal stimulus. The AX
+    snapshot given to `collect` must carry a `track` object; an armed track,
+    monitoring on or a real input is refused by `collect` and the v2 verifier.
+  - Save a template with the `save-as-plan` steps (Cmd-Shift-S, then
+    Cmd-Shift-G in the sheet, with the host briefly in front). Pressing File >
+    Save As by accessibility does not open Logic's save sheet.
+  - Launching Logic rewrites its preferences, so `snapshot-prefs` exports
+    `com.apple.logic10` (GarageBand: `com.apple.garageband10`) and `launch`
+    refuses without it. `revert` restores the domain, deleting keys the run
+    added because `defaults import` only merges, and stays unreverted unless a
+    fresh export matches the saved one. Logic's launch also rewrites
+    `~/Music/Audio Music Apps/Databases`, which is expected.
+  - In a REAPER run the host render deviates exactly the declared PDC (1536)
+    earlier than the plug-in capture, not the status `latency_samples` (1024,
+    the GPU lead alone). The v2 verifier requires that offset at both ends of
+    the deviation. `wrap-reaper` re-reads a v1 REAPER run as a v2 receipt.
+  - A busy host voids a planted negative only when the deviation lacks the
+    defect's own onset and span (`quiet_host_exempt`). Rerun `gpu_off` on
+    `--gpu-fault positive_control`; on a fault row the pairing is a mismatch.
+  - Only `tools/validation/verify_gpu_audio_daw_continuity_receipt_v2.py`
+    accepts a real-host receipt (built by `gpu_fault_hosts.py`). It needs all
+    six binding conjuncts: an unbound run is INCONCLUSIVE and a wrong DAW is
+    FAIL. GarageBand is capped at `pass_plugin_capture_only`, and rows matching
+    `KNOWN_DEFECTS` are excluded unless the fix is an ancestor of the code
+    under test.
 - All modes share the same REAPER lifecycle (`ReaperSession`): fresh portable
   dir, temp scan path, pre-warm scan, scripted insert+float, guaranteed teardown.
   They differ only in what they SEED, the TRIGGER they fire once the FX is shown,
@@ -126,7 +212,23 @@ ditto "$SRC" "$DST" && codesign --verify --deep --strict "$DST"
 knowing when reading such an error; `--deep --strict` treats everything in
 `MacOS/` as a subcomponent.)
 
-### A custom scan path does not publish on REAPER 7.78 — the editor modes cannot prove anything there
+### "FX not found / flaky launch": the likely cause was the pre-warm, fixed 2026-10-22
+
+Measured on REAPER 7.79/7.82, CLAP and VST3 from the temp scan path: REAPER
+writes a bundle's `[<file>.clap]` cache **section header** before it has
+scanned the bundle. The bundle is usually named after its plug-in, so the old
+pre-warm (a substring match on the whole cache file) saw the name and killed
+REAPER with an empty section. The scripted launch then did not know the
+plug-in and reported `REAPER could not find/insert the FX` / `flaky launch`.
+`cache_publishes()` now waits for a scanned entry line (`id=...|Name (Vendor)`),
+and with it the temp-path scan works for CLAP and VST3: the gpu-fault mode ran
+dozens of scripted launches through it, and `--mode editor-open` on CLAP, which
+was INCONCLUSIVE on the same machine before the fix, now PASSes. The two notes below predate that fix
+and were probably this bug. Re-check them before relying on them, and still
+grep the portable cache for an entry line (not just the name) when a run is
+INCONCLUSIVE.
+
+### (Historical, likely the pre-warm bug above) A custom scan path does not publish on REAPER 7.78
 
 `editor-open` (and any mode needing the FX inserted) currently reports
 INCONCLUSIVE on REAPER 7.78 with:
@@ -234,8 +336,8 @@ way and say plainly that this rung is unproven.
   scanned from a custom path, so `--format au` installs to the real Components folder
   and MUST uninstall on exit. Cleanup ALWAYS runs (finally): kill REAPER, rm temp
   dirs, uninstall AU.
-- **The temp-path scan does not actually work — `--format au` is the only lane that
-  tests anything.** Measured 2026-07-30 on REAPER/macOS arm64: REAPER **ignores** the
+- **(Historical, likely the pre-warm bug: see "FX not found / flaky launch"
+  above.) The temp-path scan does not actually work.** Measured 2026-07-30 on REAPER/macOS arm64: REAPER **ignores** the
   `vstpath`/`clap_path` keys written into the portable `reaper.ini`. It scanned the
   real plugin folders instead (124 CLAP + 104 VST3 entries in the portable caches)
   and never looked at the staged copy, so the bundle under test is absent from the

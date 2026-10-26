@@ -3,6 +3,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <semaphore>
 #include <thread>
@@ -16,6 +17,13 @@
 #include <pulp/gpu_audio/gpu_audio_status.hpp>
 
 namespace pulp::gpu_audio {
+
+namespace detail {
+struct RealtimeGpuHealth;
+struct GpuAudioTransportDiagnostics;
+struct SharedIoCompletionNotifier;
+class WorkerWake;
+} // namespace detail
 
 /// Fixed-latency real-time transport between the audio thread and a non-RT
 /// worker that runs a GpuAudioNode.
@@ -41,13 +49,17 @@ class GpuAudioTransport {
         // and lock-free. When false, the caller drives pump() (deterministic
         // tests / custom worker integration).
         bool run_worker_thread = false;
-        // Opt-in: the RT process() posts a semaphore after each input write and
-        // the worker waits on it (with the poll interval as a fallback timeout)
-        // instead of always sleeping the full quantum. Cuts the worker's
-        // reaction latency — and thus the miss probability at low latency_blocks
-        // — without a busy loop. Signaling a semaphore is RT-safe (no alloc, no
-        // block); default OFF keeps the pure-polling RT path byte-identical.
-        // Only meaningful when run_worker_thread is true.
+        // Opt-in: the RT process() posts a semaphore after each input write,
+        // and a provider that installs a completion notifier posts it when a
+        // completion may be ready. The worker waits on it, with the poll
+        // interval as a fallback timeout only, instead of sleeping a full
+        // quantum. Posting never allocates or blocks, but while the worker is
+        // parked it is a kernel call (a Mach semaphore signal on macOS, the
+        // platform's semaphore wake elsewhere) on the audio thread every
+        // block, so it is off by default and the default RT path makes no
+        // syscall. No shipped provider
+        // installs a completion notifier yet, so today the worker still finds
+        // completions by polling. Only meaningful when run_worker_thread is true.
         bool wake_on_write = false;
         // Optional macOS Audio Workgroup for the owned submission worker. The
         // handle is borrowed by the transport and must remain valid until
@@ -55,6 +67,28 @@ class GpuAudioTransport {
         // runs on the worker and is not claimed to be realtime-safe.
         void* audio_workgroup = nullptr;
         bool join_audio_workgroup = false;
+        /// AutoReacquire lets the worker replace a fenced node's provider while
+        /// the callback stays on its prepared fallback: it releases the old
+        /// provider within `reacquire_release_budget_ns`, prepares a new one,
+        /// and opens a new delivery epoch on the same stream. An offline fence
+        /// is never re-acquired. Only nodes with a realtime GPU path that can
+        /// re-acquire honour it; capability_report().recovery_policy reports
+        /// the policy in effect for the prepared node.
+        GpuAudioRecoveryPolicy recovery_policy = GpuAudioRecoveryPolicy::Manual;
+        /// Budget for releasing the old provider. One that cannot drain in
+        /// time has its device destroyed and stays owned (quarantined) until a
+        /// later release completes it.
+        std::uint64_t reacquire_release_budget_ns = 250'000'000;
+        /// Attempts per outage. If GPU audio has not resumed after the last
+        /// attempt, the transport stays on the CPU fallback until the host
+        /// prepares it again.
+        std::uint32_t reacquire_max_attempts = 3;
+        /// The first attempt is immediate. Every attempt, successful or not,
+        /// arms a wait before the next: this value after the first, five times
+        /// the previous wait after each later one. With the defaults only the
+        /// 100 ms and 500 ms waits occur; the count resets once GPU audio
+        /// resumes.
+        std::uint64_t reacquire_backoff_ns = 100'000'000;
     };
 
     struct Stats {
@@ -77,6 +111,9 @@ class GpuAudioTransport {
         double avg_block_us = 0.0;
         bool worker_workgroup_joined = false;
         std::uint64_t worker_workgroup_join_failures = 0;
+        // Appended: the owned worker runs at QOS_CLASS_USER_INTERACTIVE
+        // (macOS; false when it joined a host workgroup instead, or off Apple).
+        bool worker_interactive_qos = false;
     };
 
     /// Selected output for prepared process() calls, not worker completions or
@@ -95,10 +132,8 @@ class GpuAudioTransport {
         std::uint64_t invalid_blocks = 0;
     };
 
-    GpuAudioTransport() = default;
-    ~GpuAudioTransport() {
-        release();
-    }
+    GpuAudioTransport();
+    ~GpuAudioTransport();
 
     GpuAudioTransport(const GpuAudioTransport&) = delete;
     GpuAudioTransport& operator=(const GpuAudioTransport&) = delete;
@@ -160,6 +195,16 @@ class GpuAudioTransport {
     /// Allocation-free host/UI snapshot with stable, versioned field
     /// semantics.  This is a projection of the transport and capability
     /// snapshots; it does not claim that a GPU result met an audio deadline.
+    ///
+    /// Node health is folded in: a fenced or provider-lost node reports
+    /// `Degraded` or `Unavailable` with its first latched recovery reason,
+    /// sequence, epoch and terminal counts. The serialized worker samples the
+    /// node after every pump (a realtime node after its service step, a staged
+    /// node through its own status_snapshot()), and prepare() and the offline
+    /// fence sample it too. This call reads only the transport's coherent
+    /// copies of that sample and of the prepared configuration, never the
+    /// node, so it stays safe from any host or UI thread even while the node is
+    /// re-prepared or destroyed. It may trail the node by at most one pump.
     GpuAudioStatus status_snapshot() const noexcept;
 
     /// Allocation-free independent atomic loads: approximate while process()
@@ -172,9 +217,14 @@ class GpuAudioTransport {
     /// Host/UI-only snapshot of the prepared integration path. This is
     /// allocation-free and does not touch the callback timeline. Provider
     /// identity is Unknown when a generic staged node cannot establish it.
+    /// Like status_snapshot(), it reads a copy taken at prepare() and never
+    /// the node.
     GpuAudioCapabilityReport capability_report() const noexcept;
 
   private:
+    // Undo the worker-pipelining opt-in prepare() bound, if any. Host thread,
+    // no worker running.
+    void release_pipeline_hosting() noexcept;
     using TrialDeliveryFn = void (*)(void*, std::uint64_t, std::uint8_t, std::uint64_t,
                                      std::uint64_t, std::uint64_t) noexcept;
     friend bool configure_gpu_audio_transport_trial_observer(GpuAudioTransport&, void*,
@@ -193,6 +243,10 @@ class GpuAudioTransport {
     bool prepared_ = false;
 
     void reset_staged_transport_state() noexcept;
+    // Callback timeline only. Records whether `sequence`'s input block was
+    // dropped and returns whether the block due now (`latency_blocks` earlier)
+    // was.
+    bool record_dropped_slot(std::uint64_t sequence, bool dropped) noexcept;
     void process_shared(const audio::BufferView<const float>&, audio::BufferView<float>&,
                         std::uint32_t, std::uint64_t, bool input_valid,
                         std::uint64_t callback_start_ns, bool count_delivery) noexcept;
@@ -237,6 +291,14 @@ class GpuAudioTransport {
     // (rather than inferring "excess ring depth") keeps the drain immune to a
     // worker that races a fresh block in before the RT read of the same call.
     std::uint64_t blocks_owed_ = 0;
+    // One flag per callback slot over a window of latency_blocks + 1, sized at
+    // prepare(): set when that slot's input block was dropped on a full input
+    // ring. Its wet block will never exist, so the callback `latency_blocks`
+    // later substitutes without reading the ring and without adding resync
+    // debt; reading there would return the next slot's block early and shift
+    // the stream ahead of the declared latency. Written and read only on the
+    // callback timeline.
+    std::vector<std::uint8_t> dropped_slots_;
     // Per-block worker timing, published as integer nanoseconds for lock-free
     // reads by the UI thread (double isn't reliably lock-free).
     std::atomic<std::uint64_t> last_block_ns_{0};
@@ -252,16 +314,22 @@ class GpuAudioTransport {
     bool join_audio_workgroup_ = false;
     std::atomic<bool> worker_workgroup_joined_{false};
     std::atomic<std::uint64_t> worker_workgroup_join_failures_{0};
+    std::atomic<bool> worker_interactive_qos_{false};
 
-    // Opt-in wake-on-write (Config::wake_on_write). The RT process() posts
-    // `wake_sem_` after each input write; the worker waits on it (bounded by
-    // poll_interval_) instead of always sleeping the full quantum, cutting its
-    // reaction latency without a busy loop. release() on a counting semaphore is
-    // non-blocking and allocation-free, so posting it stays RT-safe. Default
-    // OFF: worker_loop() falls back to a plain sleep so the polling path is
-    // unchanged.
+    // Wake-on-write (Config::wake_on_write, opt-in). The RT process() posts
+    // `wake_` after each input write, and an installed completion notifier
+    // posts it from the provider's callback thread; the worker waits on it
+    // (bounded by poll_interval_) instead of always sleeping the full quantum.
+    // A post never allocates or blocks, but signals the kernel while the
+    // worker is parked. When off, worker_loop() sleeps the poll interval.
     bool wake_on_write_ = false;
-    std::counting_semaphore<> wake_sem_{0};
+    std::unique_ptr<detail::WorkerWake> wake_; // allocated at construction
+    // Provider completion events, routed to `wake_` while the owned worker
+    // runs. Installed at prepare(), cleared in release() after the join.
+    bool (*realtime_gpu_set_notifier_)(void*,
+                                       detail::SharedIoCompletionNotifier) noexcept = nullptr;
+    bool completion_notifier_installed_ = false;
+    static void notify_worker(void* self) noexcept;
 
     // Private callback-side GPU path captured at prepare() from the concrete
     // node. These are plain function pointers so the RT process path does not
@@ -274,8 +342,42 @@ class GpuAudioTransport {
     bool (*realtime_gpu_fence_)(void*) noexcept = nullptr;
     void (*realtime_gpu_delivered_)(void*, std::uint64_t, std::uint8_t, std::uint64_t,
                                     std::uint64_t) noexcept = nullptr;
+    // Serialized non-RT health read for the same context. The worker
+    // republishes every node health sample, and prepare()/release() publish
+    // the prepared configuration, into `diagnostics_`; status_snapshot() and
+    // capability_report() read only those copies. Allocated at construction.
+    bool (*realtime_gpu_health_)(const void*, detail::RealtimeGpuHealth&) noexcept = nullptr;
+    bool sample_staged_health_ = false;
+    std::unique_ptr<detail::GpuAudioTransportDiagnostics> diagnostics_;
+    void refresh_node_health() noexcept;
+    void publish_prepared_configuration() noexcept;
+
+    // Worker-only re-acquire steward (Config::recovery).
+    void steward_reacquire() noexcept;
+    bool (*realtime_gpu_reprepare_)(void*, std::uint64_t) noexcept = nullptr;
+    GpuAudioRecoveryPolicy recovery_policy_ = GpuAudioRecoveryPolicy::Manual;
+    std::uint64_t reacquire_budget_ns_ = 0;
+    std::uint32_t reacquire_max_attempts_ = 0;
+    std::uint64_t reacquire_backoff_ns_ = 0;
+    std::uint32_t reacquire_round_ = 0;   // failed attempts in this outage
+    std::uint64_t outage_started_ns_ = 0; // worker's first sight of the fence
+    std::uint64_t next_reacquire_ns_ = 0;
+    // A success armed resume_pending_from_ns_; once the callback clears it the
+    // re-acquired epoch has delivered GPU audio, even if a new fault latched
+    // before the worker saw the healthy state.
+    bool resume_armed_ = false;
+    std::atomic<std::uint64_t> reacquire_attempts_{0};
+    std::atomic<std::uint64_t> reacquire_successes_{0};
+    std::atomic<std::uint64_t> last_reacquire_to_gpu_ns_{0};
+    // Outage start of a successful re-acquire whose first GPU block the
+    // callback has not delivered yet; the callback measures and clears it.
+    std::atomic<std::uint64_t> resume_pending_from_ns_{0};
     std::uint64_t callback_sequence_ = 0; // one monotonic RT/offline callback timeline
     bool realtime_gpu_fenced_for_offline_ = false;
+    // Optional node hook bracketing each offline run; `realtime_gpu_offline_`
+    // is set by its first block and cleared by the next realtime callback.
+    void (*realtime_gpu_offline_render_)(void*, bool) noexcept = nullptr;
+    bool realtime_gpu_offline_ = false;
 
     // Synchronous (offline) drive. When `synchronous_` is set, the background
     // worker yields and process_offline() pumps the node inline under
@@ -291,6 +393,12 @@ class GpuAudioTransport {
     // path leaves it null, so this adds no hot-path work for normal users.
     void* trial_observer_context_ = nullptr;
     TrialDeliveryFn trial_observer_ = nullptr;
+
+    // True only while the hosted node pipelines its worker
+    // (worker_pipeline_blocks > 0 after the opt-in at prepare()). release()
+    // opts such a node back out; any other node is never touched there, so a
+    // host may destroy it before release().
+    bool pipeline_hosted_ = false;
 };
 
 } // namespace pulp::gpu_audio

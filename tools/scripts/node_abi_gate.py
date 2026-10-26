@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Node ABI virtual declaration gate.
 
-Processor and PluginSlot are SDK-facing polymorphic surfaces. Within a major
-node ABI version, new virtual methods must be appended at the end of the class
-vtable. Inserting, removing, reordering, or re-signaturing existing virtuals
+Processor, PluginSlot, and GpuAudioNode are SDK-facing polymorphic surfaces.
+Within a major node ABI version, new virtual methods must be appended at the
+end of the class vtable. Inserting, removing, reordering, or re-signaturing existing virtuals
 changes the node contract.
 
 The gate compares the current working tree against the merge-base of the git
@@ -34,6 +34,10 @@ SURFACES = (
     (
         "PluginSlot",
         "core/host/include/pulp/host/plugin_slot.hpp",
+    ),
+    (
+        "GpuAudioNode",
+        "core/gpu_audio/include/pulp/gpu_audio/gpu_audio_node.hpp",
     ),
 )
 
@@ -304,7 +308,7 @@ def main(argv: list[str] | None = None) -> int:
     ]
 
     if not findings:
-        print("node_abi_gate: Processor and PluginSlot virtual order is additive-only")
+        print("node_abi_gate: Processor, PluginSlot, and GpuAudioNode virtual order is additive-only")
         return 0
 
     print("\n\n".join(findings), file=sys.stderr)

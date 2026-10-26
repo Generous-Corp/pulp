@@ -13,9 +13,11 @@
 #undef DEFAULT
 #endif
 
+#include <pulp/runtime/crypto.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/trace.hpp>
 #include <pulp/view/js_engine.hpp>
+#include "script_bytecode_blob.hpp"
 #include <atomic>
 #include <functional>
 #include <charconv>
@@ -37,10 +39,37 @@ namespace pulp::view {
 // (appendChild → _reparentNative → native bridge → back to JS) exhausts
 // QuickJS's default 256KB JS stack. We increase it to 1MB.
 //
+// AddressSanitizer pads every C frame with redzones, so the same JS call depth
+// uses several times the C stack this limit measures. A nested native event
+// (a key that clicks a popup trigger whose handler queries the DOM) overflows
+// 1MB under ASan only, so an ASan build gets 4MB. The main thread's 8MB stack
+// covers it; the limit is a QuickJS check, not the thread's real size.
+#if defined(__SANITIZE_ADDRESS__)
+#define PULP_QUICKJS_UNDER_ASAN 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define PULP_QUICKJS_UNDER_ASAN 1
+#endif
+#endif
+#if defined(PULP_QUICKJS_UNDER_ASAN)
+constexpr size_t kQuickJsStackBytes = 4 * 1024 * 1024;
+#else
+constexpr size_t kQuickJsStackBytes = 1024 * 1024;
+#endif
+
 static void set_quickjs_stack_size(
     choc::javascript::quickjs::QuickJSContext& context, size_t size) {
     if (context.runtime)
         JS_SetMaxStackSize(context.runtime, size);
+}
+
+// QuickJS accounts every allocation against the runtime's malloc limit and
+// throws InternalError("out of memory") past it; its own default is unlimited
+// (SIZE_MAX), which is what 0 maps back to here.
+static void set_quickjs_memory_limit(choc::javascript::quickjs::QuickJSContext& context,
+                                     size_t bytes) {
+    if (context.runtime)
+        JS_SetMemoryLimit(context.runtime, bytes == 0 ? static_cast<size_t>(-1) : bytes);
 }
 
 // Drive QuickJS's pending-job queue ourselves: CHOC's pumpMessageLoop() is
@@ -461,14 +490,19 @@ public:
         }
     }
 
-    void finish(const std::string& source, const std::uint8_t* bytes, std::size_t size) {
+    // `embedded`: the bytes are build-time bytecode rather than a compile.
+    void finish(const std::string& source, const std::uint8_t* bytes, std::size_t size,
+                bool embedded = false) {
         {
             std::lock_guard<std::mutex> lock(mutex_);
             release_locked(source);
             if (bytes != nullptr && find_locked(source) == nullptr) {
                 entries_.push_back({source, std::vector<std::uint8_t>(bytes, bytes + size)});
                 stats_.bytes += source.size() + size;
-                ++stats_.compiles;
+                if (embedded)
+                    ++stats_.embedded;
+                else
+                    ++stats_.compiles;
                 while (!entries_.empty()
                        && (entries_.size() > kMaxCachedScripts
                            || stats_.bytes > kMaxCachedBytes)) {
@@ -556,9 +590,9 @@ public:
     ~ClaimGuard() {
         if (!done_) cache_.abandon(source_);
     }
-    void finish(const std::uint8_t* bytes, std::size_t size) {
+    void finish(const std::uint8_t* bytes, std::size_t size, bool embedded = false) {
         done_ = true;
-        cache_.finish(source_, bytes, size);
+        cache_.finish(source_, bytes, size, embedded);
     }
     ClaimGuard(const ClaimGuard&) = delete;
     ClaimGuard& operator=(const ClaimGuard&) = delete;
@@ -576,7 +610,102 @@ qjs::JSValue compile_global_script(qjs::JSContext* ctx, const std::string& code)
                         JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_COMPILE_ONLY);
 }
 
+// Compiles `code` in `ctx` and serializes the bytecode; empty when it does not
+// compile (the exception is cleared).
+std::vector<std::uint8_t> write_global_script_bytecode(qjs::JSContext* ctx,
+                                                       const std::string& code) {
+    auto function = compile_global_script(ctx, code);
+    if (qjs::JS_IsException(function)) {
+        qjs::JS_FreeValue(ctx, qjs::JS_GetException(ctx));
+        return {};
+    }
+    std::size_t size = 0;
+    auto* bytes = qjs::JS_WriteObject(ctx, &size, function, qjs::JS_WRITE_OBJ_BYTECODE);
+    qjs::JS_FreeValue(ctx, function);
+    if (!bytes)
+        return {};
+    std::vector<std::uint8_t> out(bytes, bytes + size);
+    qjs::js_free(ctx, bytes);
+    return out;
+}
+
+// The engine fingerprint hashes this script's bytecode. It exercises the
+// constructs whose encoding a QuickJS change is most likely to move: opcodes
+// for classes, closures, generators, async, destructuring, spread, optional
+// chaining, template literals, regexps, exceptions and labels, plus
+// predefined atoms from early and late in the atom table.
+constexpr std::string_view kFingerprintProbeScript = R"js(
+"use strict";
+const probe = (function () {
+  class Base { #hidden = 1; static count = 0; get value() { return this.#hidden; }
+               set value(v) { this.#hidden = v; } }
+  class Derived extends Base { constructor(...args) { super(); this.args = args; } }
+  function* counter(n) { for (let i = 0; i < n; ++i) yield i; }
+  async function later(x) { await null; return x ?? 0; }
+  const { a = 1, b: [c, ...rest] = [2, 3, 4], ...others } = { z: 5 };
+  const tagged = (s, ...v) => s.raw.join('|') + v.length;
+  let total = 0;
+  outer: for (const n of counter(5)) { for (const m of [n, n + 1]) {
+    if (m > 4) break outer; total += m; } }
+  try { null.x; } catch (e) { total += e instanceof TypeError ? 1 : 0; } finally { total++; }
+  const re = /(?<word>[a-z]+)\d*/giu;
+  const obj = { [Symbol.iterator]: counter.bind(null, 2), x: { y: { z: 1 } } };
+  return [new Derived(a, c).args.length, rest.length, Object.keys(others).length,
+          obj?.x?.y?.z, tagged`t${total}x`, typeof later, re.flags, [...obj].length,
+          7 ** 2, Number.MAX_SAFE_INTEGER, Math.hypot(3, 4),
+          new Map([[1, 2]]).size, JSON.stringify({ k: undefined }), Reflect.ownKeys({})];
+})();
+probe;
+)js";
+
+std::string compute_engine_fingerprint() {
+    qjs::QuickJSContext backend;
+    std::string fingerprint = "quickjs-";
+#ifdef CONFIG_VERSION
+    fingerprint += CONFIG_VERSION;
+#endif
+    if (!backend.context)
+        return fingerprint + "-unavailable";
+    const auto bytes =
+        write_global_script_bytecode(backend.context, std::string(kFingerprintProbeScript));
+    if (bytes.empty())
+        return fingerprint + "-unavailable";
+    fingerprint += '-';
+    fingerprint += runtime::sha256_hex(bytes.data(), bytes.size()).substr(0, 32);
+    return fingerprint;
+}
+
+const std::string& engine_fingerprint() {
+    static const std::string fingerprint = compute_engine_fingerprint();
+    return fingerprint;
+}
+
 } // namespace
+
+std::vector<std::uint8_t> build_embedded_script_bytecode(const std::string& source) {
+    qjs::QuickJSContext backend;
+    if (!backend.context)
+        return {};
+    set_quickjs_stack_size(backend, kQuickJsStackBytes);
+    const auto bytecode = write_global_script_bytecode(backend.context, source);
+    if (bytecode.empty())
+        return {};
+    return detail::encode_script_bytecode_blob(source, bytecode, engine_fingerprint());
+}
+
+bool register_embedded_script_bytecode(const std::uint8_t* blob, std::size_t size) {
+    return detail::EmbeddedBytecodeRegistry::instance().add(blob, size, engine_fingerprint());
+}
+
+std::string script_bytecode_engine_fingerprint() {
+    return engine_fingerprint();
+}
+
+namespace detail {
+void clear_embedded_script_bytecode_for_tests() {
+    EmbeddedBytecodeRegistry::instance().clear();
+}
+} // namespace detail
 
 ScriptBytecodeCacheStats script_bytecode_cache_stats() {
     return ScriptBytecodeCache::instance().stats();
@@ -630,9 +759,19 @@ std::size_t precompile_scripts(const std::vector<std::string>& sources,
         ClaimGuard guard(cache, code);
         if (auto hook = detail::precompile_claim_hook_for_tests())
             hook(code);  // holding the claim, before compiling
+        std::vector<std::uint8_t> embedded;
+        bool have_embedded = false;
+        {
+            PULP_TRACE_SCOPE_NAMED("js", "script_embedded_lookup");
+            have_embedded = detail::EmbeddedBytecodeRegistry::instance().find(code, embedded);
+        }
+        if (have_embedded) {
+            guard.finish(embedded.data(), embedded.size(), /*embedded=*/true);
+            continue;
+        }
         if (!backend) {
             backend.emplace();
-            set_quickjs_stack_size(*backend, 1024 * 1024);
+            set_quickjs_stack_size(*backend, kQuickJsStackBytes);
         }
         auto* ctx = backend->context;
         if (!ctx) break;
@@ -665,7 +804,8 @@ public:
         auto backend = std::make_unique<qjs::QuickJSContext>();
         backend_ = backend.get();
         context_ = choc::javascript::Context(std::move(backend));
-        set_quickjs_stack_size(*backend_, 1024 * 1024);  // 1MB (up from 256KB)
+        set_quickjs_stack_size(*backend_, kQuickJsStackBytes);
+        set_quickjs_memory_limit(*backend_, kDefaultJsMemoryLimitBytes);
         // Surface unhandled promise failures through the host's console path.
         install_quickjs_rejection_tracker(*backend_);
         setup_console();
@@ -711,18 +851,42 @@ public:
         }
         if (qjs::JS_IsUndefined(function)) {
             std::optional<ClaimGuard> guard;
-            if (claim == ScriptBytecodeCache::Claim::claimed) guard.emplace(cache, code);
-            PULP_TRACE_SCOPE_NAMED("js", "script_compile");
-            function = compile_global_script(ctx, code);
-            if (qjs::JS_IsException(function)) {
-                // Surfaces the syntax error exactly as evaluate() would.
-                return backend_->takeValue(function).toChocValue();
+            if (claim == ScriptBytecodeCache::Claim::claimed) {
+                guard.emplace(cache, code);
+                // A miss: build-time bytecode for exactly this source, if the
+                // product embedded it, replaces the compile.
+                bool have_embedded = false;
+                {
+                    PULP_TRACE_SCOPE_NAMED("js", "script_embedded_lookup");
+                    have_embedded =
+                        detail::EmbeddedBytecodeRegistry::instance().find(code, bytecode);
+                }
+                if (have_embedded) {
+                    PULP_TRACE_SCOPE_NAMED("js", "script_bytecode_read");
+                    function = qjs::JS_ReadObject(ctx, bytecode.data(), bytecode.size(),
+                                                  qjs::JS_READ_OBJ_BYTECODE);
+                    if (qjs::JS_IsException(function)) {
+                        qjs::JS_FreeValue(ctx, qjs::JS_GetException(ctx));
+                        function = JS_UNDEFINED;
+                    } else {
+                        guard->finish(bytecode.data(), bytecode.size(), /*embedded=*/true);
+                    }
+                }
             }
-            std::size_t size = 0;
-            auto* bytes = qjs::JS_WriteObject(ctx, &size, function,
-                                              qjs::JS_WRITE_OBJ_BYTECODE);
-            if (guard) guard->finish(bytes, size);
-            if (bytes) qjs::js_free(ctx, bytes);
+            if (qjs::JS_IsUndefined(function)) {
+                PULP_TRACE_SCOPE_NAMED("js", "script_compile");
+                function = compile_global_script(ctx, code);
+                if (qjs::JS_IsException(function)) {
+                    // Surfaces the syntax error exactly as evaluate() would.
+                    return backend_->takeValue(function).toChocValue();
+                }
+                std::size_t size = 0;
+                auto* bytes = qjs::JS_WriteObject(ctx, &size, function, qjs::JS_WRITE_OBJ_BYTECODE);
+                if (guard)
+                    guard->finish(bytes, size);
+                if (bytes)
+                    qjs::js_free(ctx, bytes);
+            }
         }
         PULP_TRACE_SCOPE_NAMED("js", "script_execute");
         // JS_EvalFunction takes ownership of the compiled function.
@@ -822,6 +986,11 @@ public:
     // whether the engine reports interruption support; we don't gate on it here
     // because supports_interrupt() already advertises the capability.
     bool supports_interrupt() const override { return true; }
+    bool set_memory_limit(std::size_t bytes) override {
+        set_quickjs_memory_limit(*backend_, bytes);
+        return true;
+    }
+
     void request_interrupt() override { context_.cancel(); }
     bool clear_pending_interrupt() override {
         return backend_->shouldCancel.exchange(false, std::memory_order_acq_rel);

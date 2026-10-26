@@ -19,7 +19,8 @@ enum class SharedIoRecoveryReason : std::uint8_t {
     ProviderFailure,
     ProviderLost,
     OfflineFence,
-    InvalidCallback
+    InvalidCallback,
+    ProviderUnresponsive
 };
 
 // Fixed audio records between one callback producer/consumer and one serialized
@@ -138,8 +139,52 @@ class SharedIoStampedBridge {
     // The first ingress record with the new epoch acknowledges the transition.
     void suspend_delivery() noexcept;
     bool activate_epoch(std::uint64_t epoch) noexcept;
+    // Worker only, while delivery is suspended and no admission is reserved:
+    // open `epoch` without stopping the callback. The worker clears the
+    // latched recovery cause and its own publication state now; the callback
+    // adopts the epoch at its next begin_callback and stamps that block with
+    // it, so the stream stays contiguous. Records still queued from the old
+    // epoch are the owner's to discard on admission; the callback drains old
+    // egress records on its own. A recovery request between this call and the
+    // adoption wins: the callback does not reopen delivery over it. Priming is
+    // not repeated, so due blocks without output are ordinary misses.
+    bool request_epoch(std::uint64_t epoch) noexcept;
+    // Worker only: withdraw a request the callback has not adopted yet.
+    // False if the callback has already claimed it.
+    bool cancel_requested_epoch() noexcept {
+        auto pending = pending_epoch_.load(std::memory_order_acquire);
+        if (pending == 0)
+            return true;
+        if (cancel_epoch_hook_ != nullptr)
+            cancel_epoch_hook_(cancel_epoch_hook_context_);
+        if (pending_epoch_.compare_exchange_strong(pending, 0, std::memory_order_acq_rel))
+            return true;
+        // The callback claimed it first. If it refused the adoption, delivery
+        // is still closed and nothing is pending: the caller may proceed.
+        return pending_epoch_.load(std::memory_order_acquire) == 0 && delivery_epoch() == 0;
+    }
+    // Test seam: runs inside cancel_requested_epoch between its load and its
+    // withdrawal, to let a callback claim the request first.
+    void set_cancel_epoch_hook_for_testing(void (*hook)(void*), void* context) noexcept {
+        cancel_epoch_hook_ = hook;
+        cancel_epoch_hook_context_ = context;
+    }
+    bool epoch_requested() const noexcept {
+        return pending_epoch_.load(std::memory_order_acquire) != 0;
+    }
+    // Test seam: runs inside request_epoch between its suspension snapshot and
+    // its clearing of the latched cause, to place a racing recovery there.
+    void set_request_epoch_hook_for_testing(void (*hook)(void*), void* context) noexcept {
+        request_epoch_hook_ = hook;
+        request_epoch_hook_context_ = context;
+    }
     std::uint64_t delivery_epoch() const noexcept {
         return delivery_epoch_.load(std::memory_order_acquire);
+    }
+    // First sequence of the current epoch; written only while the callback is
+    // quiescent, so the serialized worker may read it.
+    std::uint64_t epoch_first_sequence() const noexcept {
+        return epoch_first_sequence_;
     }
     // Callback-owned absolute stream position. The serialized worker uses this
     // at an epoch boundary so its collector starts at the exact record the
@@ -169,6 +214,7 @@ class SharedIoStampedBridge {
     std::optional<Lease> acquire(Queue&) noexcept;
     bool release(Queue&, const Lease&) noexcept;
     bool current_callback(const Callback&) const noexcept;
+    void adopt_requested_epoch() noexcept; // callback only
 
     void trace_delivery(Delivery) noexcept;
     Queue ingress_, egress_;
@@ -184,6 +230,21 @@ class SharedIoStampedBridge {
     std::atomic<std::uint64_t> recovery_sequence_{std::numeric_limits<std::uint64_t>::max()};
     bool trace_output_eligible_ = false; // callback only
     std::atomic<std::uint64_t> delivery_epoch_{0};
+    // Live epoch handoff: the worker publishes the requested epoch with the
+    // suspension count it observed; the callback adopts it only while no
+    // later suspension has happened.
+    std::atomic<std::uint64_t> pending_epoch_{0};
+    std::atomic<std::uint64_t> pending_suspensions_{0};
+    std::atomic<std::uint64_t> suspensions_{0};
+    // The latest recovery request, latched or not. A refused adoption puts it
+    // back if the request cleared the cause it was racing.
+    std::atomic<SharedIoRecoveryReason> last_requested_reason_{SharedIoRecoveryReason::None};
+    std::atomic<std::uint64_t> last_requested_sequence_{std::numeric_limits<std::uint64_t>::max()};
+    void (*request_epoch_hook_)(void*) = nullptr;
+    void* request_epoch_hook_context_ = nullptr;
+    void (*cancel_epoch_hook_)(void*) = nullptr;
+    void* cancel_epoch_hook_context_ = nullptr;
+    void relatch_refused_recovery() noexcept; // callback only
     std::uint64_t last_epoch_ = 0;    // worker only
     std::optional<Stamp> finalized_;  // worker/offline pump only
     std::uint64_t next_sequence_ = 0; // callback only

@@ -21,11 +21,11 @@ disk_gb    = 150
 auto_login = true          # REQUIRED for WindowServer/Metal GPU tests
 
 # BEGIN GENERATED PULP TOOLCHAIN (tools/toolchain/manifest.toml)
-# source_sha256 = ae9f37dac197fd10f1dba20cc1007f5b33d7a20445993484c021ee75833ac51b
+# source_sha256 = d3decd808113b9d8a77140753e8fd405f5fd98c247cac80cfc8c624701f98a03
 [mise]
-version = "2026.10.8"
-path = "~/.local/opt/mise-2026.10.8/bin/mise"
-sha256 = "87c18142dd67f5848b0236738eb9338976329266937ecd79b11121de64dd2d47"
+version = "2026.10.17"
+path = "~/.local/opt/mise-2026.10.17/bin/mise"
+sha256 = "284869e5b5f57211377f026309910bea91ef65b3a71b934295fa8bd712436dfc"
 rust = "1.97.1"
 rust_components = ["rustfmt", "clippy"]
 rust_targets = ["x86_64-apple-darwin"]

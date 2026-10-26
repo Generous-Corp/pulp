@@ -45,20 +45,32 @@ public:
     /// Line height for this text
     float line_height() const { return line_height_; }
 
-    /// SkFontMetrics-derived line box of the resolved typeface. `ascent`
-    /// is the positive distance ABOVE the baseline (Skia's fAscent is
-    /// negative, so we flip it here). `descent` is distance below baseline.
-    /// `leading` is the extra inter-line gap.
-    /// `line_height` equals ascent + descent + leading. `real` is true
-    /// when these came from a resolved typeface, false when the
-    /// fallback heuristic ran (no Skia, family unresolvable, etc.).
-    /// Callers that need to place a baseline (paint code, custom
-    /// canvases) should use `ascent` rather than the previous
-    /// `font_size * 0.85` rule-of-thumb.
+    /// SkFontMetrics-derived line box of the resolved typeface, as positive
+    /// distances above (`ascent`) and below (`descent`) the baseline.
+    /// These are the WORST-CASE glyph extents — the larger of fTop/fAscent
+    /// and fBottom/fDescent — so a box sized from them never clips a glyph.
+    /// `leading` is the extra inter-line gap; `line_height` equals
+    /// ascent + descent + leading. `real` is true when these came from a
+    /// resolved typeface, false when the fallback heuristic ran (no Skia,
+    /// family unresolvable, etc.).
     float ascent()  const { return ascent_; }
     float descent() const { return descent_; }
     float leading() const { return leading_; }
     bool metrics_are_real() const { return metrics_real_; }
+
+    /// The face's TYPOGRAPHIC ascent and descent (Skia's fAscent/fDescent,
+    /// flipped positive) — the metrics CSS builds a line's content area and
+    /// baseline from. Unlike `ascent()`/`descent()` these are not widened to
+    /// the worst-case glyph, so a face whose tallest glyph rises above its
+    /// declared ascent (Arial Bold, Inter) reports a smaller number here.
+    /// Use these to reproduce a browser's baseline; use `ascent()` to size a
+    /// box that must contain every glyph.
+    float typographic_ascent() const {
+        return typographic_ascent_;
+    }
+    float typographic_descent() const {
+        return typographic_descent_;
+    }
 
     /// The CSS numeric weight these segments were measured at.
     ///
@@ -81,6 +93,8 @@ private:
     float ascent_ = 0;
     float descent_ = 0;
     float leading_ = 0;
+    float typographic_ascent_ = 0;
+    float typographic_descent_ = 0;
     bool metrics_real_ = false;
     std::string font_family_;
     float font_size_ = 0;
@@ -223,6 +237,34 @@ private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
+
+/// One shaped paragraph line's own vertical metrics, as SkParagraph's
+/// `LineMetrics` reports them. `height` is that line's height (its advance),
+/// not a running total over the lines above it.
+struct ParagraphLineExtent {
+    float ascent = 0.0f;
+    float descent = 0.0f;
+    float height = 0.0f;
+};
+
+/// Worst-case vertical extents over every line of a shaped paragraph.
+struct ParagraphTextExtents {
+    float ascent = 0.0f;
+    float descent = 0.0f;
+    float leading = 0.0f; ///< max over lines of height - ascent - descent
+    bool real = false;    ///< at least one line had usable metrics
+
+    float line_height() const {
+        return ascent + descent + leading;
+    }
+};
+
+/// Takes the max ascent, descent and leading over `lines`, so a later line
+/// whose fallback face is taller than the first still widens the box. A line
+/// with non-finite, negative, zero-height or implausible (over ten font sizes)
+/// metrics is ignored.
+ParagraphTextExtents paragraph_text_extents(const std::vector<ParagraphLineExtent>& lines,
+                                            float font_size);
 
 /// Global text shaper singleton (uses the best available backend)
 TextShaper& global_text_shaper();

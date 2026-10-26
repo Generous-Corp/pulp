@@ -16,6 +16,7 @@
 #include <pulp/format/process_block.hpp>
 #include <pulp/graph/graph_runtime_plan.hpp>
 #include <pulp/host/signal_graph.hpp>
+#include <pulp/host/signal_graph_executor_contract.hpp>
 #include <pulp/host/signal_graph_executor_routing.hpp>
 #include <pulp/midi/block_ops.hpp>
 
@@ -23,6 +24,7 @@
 
 #include <array>
 #include <atomic>
+#include <bit>
 #include <cstdint>
 #include <limits>
 #include <thread>
@@ -30,10 +32,12 @@
 
 namespace {
 
+using pulp::host::build_signal_graph_executor_routing;
+using pulp::host::ExecutorTopologyValidationCode;
+using pulp::host::signal_graph_executor_eligible;
 using pulp::host::SignalGraph;
 using pulp::host::SignalGraphExecutorRouting;
-using pulp::host::build_signal_graph_executor_routing;
-using pulp::host::signal_graph_executor_eligible;
+using pulp::host::validate_signal_graph_executor_topology;
 
 // Defined with the other wide-graph helpers below; declared here because the
 // publication-race regression test intentionally sits beside the other
@@ -598,6 +602,12 @@ TEST_CASE("Executor routing build fails closed for oversized otherwise-eligible 
     REQUIRE(g.prepare(kSr, kFrames));
 
     CHECK(signal_graph_executor_eligible(g));
+    const auto validation = validate_signal_graph_executor_topology(g.nodes(), g.connections());
+    CHECK_FALSE(validation);
+    CHECK(validation.code == ExecutorTopologyValidationCode::NodeLimitExceeded);
+    CHECK(validation.actual == g.nodes().size());
+    CHECK(validation.actual > validation.limit);
+    CHECK(validation.limit == pulp::graph::GraphRuntimeLimits{}.max_nodes);
     SignalGraphExecutorRouting routing;
     CHECK_FALSE(build_signal_graph_executor_routing(g, routing));
     CHECK_FALSE(routing.valid);
@@ -2694,6 +2704,24 @@ TEST_CASE("Translated routing matches SignalGraph: unresolved custom node pass-t
     const std::vector<std::vector<float>> input{ramp(kFrames, 0.7f)};
     expect_equal(run_legacy(g, kFrames, input, 1),
                  run_routed(exec, routing, kFrames, input, 1));
+
+    // Planted IEEE-754 values exercise the one-edge gather's 0 + source
+    // arithmetic rather than a raw memcpy: signed zero, a payloaded NaN,
+    // infinity, and a subnormal must remain parity-safe across a split block.
+    std::vector<float> specials(static_cast<std::size_t>(kFrames), 0.0f);
+    specials[0] = std::bit_cast<float>(std::uint32_t{0x80000000u});
+    specials[1] = std::bit_cast<float>(std::uint32_t{0x7fc12345u});
+    specials[2] = std::numeric_limits<float>::infinity();
+    specials[3] = std::numeric_limits<float>::denorm_min();
+    const auto first = std::vector<std::vector<float>>{specials};
+    const auto legacy_specials = run_legacy(g, kFrames, first, 1);
+    const auto routed_specials = run_routed(exec, routing, kFrames, first, 1);
+    REQUIRE(legacy_specials.size() == routed_specials.size());
+    for (std::size_t i = 0; i < legacy_specials[0].size(); ++i)
+        REQUIRE(std::bit_cast<std::uint32_t>(legacy_specials[0][i]) ==
+                std::bit_cast<std::uint32_t>(routed_specials[0][i]));
+    const auto second = std::vector<std::vector<float>>{ramp(kFrames, -0.2f)};
+    expect_equal(run_legacy(g, kFrames, second, 1), run_routed(exec, routing, kFrames, second, 1));
 }
 
 // A Custom node's DECLARED intrinsic latency must reach the routed plan's PDC

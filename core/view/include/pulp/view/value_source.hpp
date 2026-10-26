@@ -59,7 +59,7 @@ static_assert(std::is_trivially_copyable_v<MeterFrame>);
 /// must decay to its neutral. Comparing values cannot tell those apart, so a
 /// reader watches this counter instead.
 class PublishCounter {
-public:
+  public:
     /// Writer (audio/host) thread, from publish(). Relaxed: the counter orders
     /// no other memory, it only has to be monotonic and eventually visible.
     void note_publish() noexcept { publish_seq_.fetch_add(1, std::memory_order_relaxed); }

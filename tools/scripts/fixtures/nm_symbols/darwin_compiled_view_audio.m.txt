@@ -1,0 +1,11 @@
+
+view_audio.o:
+0000000000000070 (__TEXT,__text) external __ZN4pulp4view5Meter9set_levelEff
+0000000000000040 (__TEXT,__text) external __ZN4pulp4view5MeterD0Ev
+0000000000000014 (__TEXT,__text) external __ZN4pulp4view5MeterD1Ev
+0000000000000000 (__TEXT,__text) external __ZN4pulp4view5MeterD2Ev
+00000000000000c0 (__DATA,__const) external __ZTIN4pulp4view5MeterE
+00000000000000d0 (__TEXT,__const) external __ZTSN4pulp4view5MeterE
+                 (undefined) external __ZTVN10__cxxabiv117__class_type_infoE
+00000000000000a0 (__DATA,__const) external __ZTVN4pulp4view5MeterE
+                 (undefined) external __ZdlPv

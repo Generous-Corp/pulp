@@ -1,15 +1,19 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/view/auto_ui.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/motion.hpp>
 #include <pulp/view/widgets.hpp>
+#include <pulp/view/window_host.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/canvas/canvas.hpp>
 
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <string>
@@ -144,6 +148,109 @@ TEST_CASE("AutoUi renders knob names and values outside the dial",
                                ScreenshotBackend::skia));
     }
 }
+
+#ifdef __APPLE__
+// Decodes a PNG to RGBA8 with ImageIO (test/png_rgba_decode_apple.cpp, kept
+// out of this file because the CoreGraphics headers declare a global Rect).
+std::vector<uint8_t> decode_png_rgba(const std::vector<uint8_t>& png, size_t& w, size_t& h);
+
+// The CoreGraphics canvas is what paints a plug-in's generated editor, and
+// Skia raster is the fidelity reference (screenshot skill). Both must lay the
+// labels out with the face they paint: before the CoreText registry, the CG
+// canvas painted "Inter" (bundled, not installed) as CoreText's Helvetica
+// substitute, so every label differed from the Skia reference in width and
+// glyph shape.
+TEST_CASE("AutoUi text paints the same face on the CoreGraphics canvas and Skia",
+          "[view][auto_ui][screenshot][text]") {
+    StateStore store;
+    store.add_parameter(make_param(1, "Input Gain", "dB", {-60.0f, 24.0f, 0.0f}));
+    store.add_parameter(make_param(2, "Output Gain", "dB", {-60.0f, 24.0f, 0.0f}));
+    auto root = AutoUi::build(store);
+    REQUIRE(root != nullptr);
+    constexpr uint32_t width = 320;
+    constexpr uint32_t height = 240;
+    root->set_bounds({0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height)});
+
+    auto skia_png = render_to_png(*root, width, height, 2.0f, ScreenshotBackend::skia);
+    if (skia_png.empty())
+        SKIP("Skia raster backend unavailable");
+    auto cg_png = render_to_png(*root, width, height, 2.0f, ScreenshotBackend::coregraphics);
+    REQUIRE_FALSE(cg_png.empty());
+
+    // Optional artifacts for local visual review. CI remains clean.
+    if (const char* dir = std::getenv("PULP_AUTO_UI_FACE_DIFF_OUT")) {
+        for (const auto& [name, bytes] :
+             {std::pair{"skia.png", &skia_png}, std::pair{"coregraphics.png", &cg_png}}) {
+            if (FILE* f = std::fopen((std::string(dir) + "/" + name).c_str(), "wb")) {
+                std::fwrite(bytes->data(), 1, bytes->size(), f);
+                std::fclose(f);
+            }
+        }
+    }
+
+    size_t sw = 0, sh = 0, cw = 0, ch = 0;
+    const auto skia = decode_png_rgba(skia_png, sw, sh);
+    const auto cg = decode_png_rgba(cg_png, cw, ch);
+    REQUIRE_FALSE(skia.empty());
+    REQUIRE(sw == cw);
+    REQUIRE(sh == ch);
+
+    // Compare each label's ink box between the two renders. Layout is shared,
+    // so the boxes differ only by how each canvas resolves and rasterizes the
+    // face: anti-aliasing and baseline rounding move an edge by about one
+    // device pixel, while a substitute face changes a label's ink width by
+    // several (Helvetica for "Parameters" is 9 px narrower at 2x).
+    struct Ink {
+        int left = 0, right = -1, top = 0, bottom = -1;
+    };
+    auto ink_of = [&](const std::vector<uint8_t>& px, int x0, int y0, int x1, int y1) {
+        Ink ink;
+        ink.left = x1;
+        ink.top = y1;
+        for (int y = std::max(0, y0); y < std::min<int>(y1, static_cast<int>(sh)); ++y) {
+            for (int x = std::max(0, x0); x < std::min<int>(x1, static_cast<int>(sw)); ++x) {
+                const size_t i = (static_cast<size_t>(y) * sw + static_cast<size_t>(x)) * 4;
+                const int lum = (px[i] * 2 + px[i + 1] * 5 + px[i + 2]) / 8;
+                if (lum <= 110)
+                    continue;
+                ink.left = std::min(ink.left, x);
+                ink.right = std::max(ink.right, x);
+                ink.top = std::min(ink.top, y);
+                ink.bottom = std::max(ink.bottom, y);
+            }
+        }
+        return ink;
+    };
+    std::vector<std::pair<const Label*, Rect>> labels;
+    std::function<void(const View&, float, float)> walk = [&](const View& v, float ox, float oy) {
+        const float x = ox + v.bounds().x;
+        const float y = oy + v.bounds().y;
+        if (const auto* label = dynamic_cast<const Label*>(&v); label && !label->text().empty())
+            labels.emplace_back(label, Rect{x, y, v.bounds().width, v.bounds().height});
+        for (size_t i = 0; i < v.child_count(); ++i)
+            walk(*v.child_at(i), x, y);
+    };
+    walk(*root, -root->bounds().x, -root->bounds().y);
+    REQUIRE(labels.size() >= 5); // title, two names, two values
+
+    for (const auto& [label, r] : labels) {
+        const int x0 = static_cast<int>(r.x * 2.0f), y0 = static_cast<int>(r.y * 2.0f);
+        const int x1 = static_cast<int>((r.x + r.width) * 2.0f) + 1;
+        const int y1 = static_cast<int>((r.y + r.height) * 2.0f) + 1;
+        const Ink a = ink_of(skia, x0, y0, x1, y1);
+        const Ink b = ink_of(cg, x0, y0, x1, y1);
+        INFO("label \"" << label->text() << "\" skia x " << a.left << ".." << a.right << " y "
+                        << a.top << ".." << a.bottom << ", coregraphics x " << b.left << ".."
+                        << b.right << " y " << b.top << ".." << b.bottom);
+        REQUIRE(a.right >= a.left);
+        REQUIRE(b.right >= b.left);
+        CHECK(std::abs((b.right - b.left) - (a.right - a.left)) <= 2);
+        CHECK(std::abs(b.left - a.left) <= 2);
+        CHECK(std::abs(b.top - a.top) <= 2);
+        CHECK(std::abs(b.bottom - a.bottom) <= 2);
+    }
+}
+#endif
 
 TEST_CASE("AutoUi builds empty parameter grids", "[view][auto_ui]") {
     StateStore store;
@@ -514,6 +621,52 @@ TEST_CASE("AutoUi sync updates the padded value row", "[view][auto_ui]") {
     CHECK(value->text() == "-24.0 dB");
 }
 
+namespace {
+class DamageCapturingHost : public WindowHost {
+  public:
+    void show() override {}
+    void hide() override {}
+    bool is_visible() const override {
+        return true;
+    }
+    void repaint() override {}
+    void set_close_callback(std::function<void()>) override {}
+    void run_event_loop() override {}
+};
+} // namespace
+
+TEST_CASE("AutoUi value rows repaint their own box when a value changes",
+          "[view][auto_ui][partial-repaint]") {
+    // Automation and drags rewrite the value row every step. A content-sized
+    // Label re-runs layout and marks the whole surface; the fixed, centered row
+    // marks only the knob and its readout.
+    StateStore store;
+    store.add_parameter(make_param(7, "Gain", "dB", {-60.0f, 12.0f, 0.0f}));
+    store.add_parameter(make_param(8, "Mix", "%", {0.0f, 100.0f, 50.0f}));
+    auto root = AutoUi::build(store);
+    root->set_bounds({0, 0, 400, 300});
+    root->layout_children();
+    auto* tile = root->child_at(1)->child_at(0)->child_at(0);
+    auto* value = dynamic_cast<Label*>(tile->child_at(2));
+    REQUIRE(value != nullptr);
+    const auto tile_bounds = tile->bounds();
+    // Still centered under the knob.
+    CHECK(value->bounds().width == Catch::Approx(tile_bounds.width));
+
+    DamageCapturingHost host;
+    root->set_window_host(&host);
+    host.clear_pending_dirty();
+    store.set_value(7, -24.5f);
+    AutoUi::sync(*root, store);
+    CHECK(value->text() == "-24.5 dB");
+    REQUIRE_FALSE(host.pending_repaint_is_full());
+    REQUIRE(host.has_pending_dirty_bounds());
+    const auto d = host.pending_dirty_bounds();
+    CHECK(d.width < 200.0f);
+    CHECK(d.height < 200.0f);
+    root->set_window_host(nullptr);
+}
+
 TEST_CASE("AutoUi parameter changes preserve settled control geometry",
           "[view][auto_ui][layout][regression]") {
     // Six controls exercise the first-drag failure: the scroll body learned its
@@ -792,4 +945,26 @@ TEST_CASE("AutoUi knobs follow automation and show host modulation with no plugi
     REQUIRE_THAT(knob->modulated_display_value(), WithinAbs(0.4f, 1e-5f));
     REQUIRE(store.get_value(7) == 80.0f);
     REQUIRE(begins.empty());
+}
+
+TEST_CASE("AutoUi never builds Chromium's push-button surface", "[view][auto_ui][button-skin]") {
+    // Only an explicitly constructed ButtonSurface wears the browser skin; the
+    // generated editor keeps Pulp's own widgets for every parameter kind.
+    StateStore store;
+    store.add_parameter(make_param(1, "Gain", "dB", {-60.0f, 12.0f, 0.0f}));
+    store.add_parameter(make_param(2, "Bypass", "", {0.0f, 1.0f, 0.0f, 1.0f}));
+    store.add_parameter(make_param(3, "Mode", "", {0.0f, 3.0f, 0.0f, 1.0f}));
+    auto root = AutoUi::build(store);
+    REQUIRE(root != nullptr);
+    int views = 0, surfaces = 0;
+    std::function<void(const View&)> walk = [&](const View& v) {
+        ++views;
+        if (dynamic_cast<const ButtonSurface*>(&v) != nullptr)
+            ++surfaces;
+        for (size_t i = 0; i < v.child_count(); ++i)
+            walk(*v.child_at(i));
+    };
+    walk(*root);
+    CHECK(views > 3);
+    CHECK(surfaces == 0);
 }

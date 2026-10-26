@@ -77,13 +77,16 @@ pinned, checksummed fetch path in `tools/deps/manifest.json`.
 
 Two tools are pinned in the manifest but are **not** installed by mise:
 
-- **Rust** (`rust = "1.97.1"` in the manifest, with `rustfmt` and `clippy`).
-  rustup installs Rust and cargo reads `rust-toolchain.toml`. mise could only
-  record a version string for Rust, not a checksum, so Rust is deliberately
-  left out of the lock. Note that `experimental/pulp-rs/rust-toolchain.toml`
-  still selects `channel = "stable"`; the manifest's 1.97.1 records what the CI
-  gate image actually runs, and generating `rust-toolchain.toml` from the
-  manifest is planned (see below).
+- **Rust** (`rust = "1.97.1"` in the manifest, with `rustfmt`, `clippy` and
+  the `x86_64-apple-darwin` std). rustup installs Rust, and cargo reads
+  `experimental/pulp-rs/rust-toolchain.toml`, which `generate.py` writes from
+  the manifest with that exact version, its components and its targets, so
+  every host builds pulp-rs with the same compiler whatever its default
+  toolchain is. mise could only record a version string for Rust, not a
+  checksum, so Rust is deliberately left out of the lock. CI build legs never
+  let cargo fetch a toolchain mid-build (`RUSTUP_AUTO_INSTALL=0`); they run
+  `tools/ci/provide_pinned_rust.sh` before configuring, which installs the pin
+  when the image lacks it.
 - **Xcode** (`xcode = "26.5"`, build `17F42`). Xcode is installed into the
   macOS CI image by the image provisioning scripts, not by mise.
 
@@ -101,9 +104,9 @@ remaining host-toolchain path is a migration boundary, not a second set of
 Pulp pins. `setup.sh`, `pulp build`, and public CI still accept hosts without
 mise until their provisioning is migrated and verified.
 
-### 1. Install mise 2026.10.8
+### 1. Install mise 2026.10.17
 
-The lock is generated with mise **2026.10.8**, and only that version is
+The lock is generated with mise **2026.10.17**, and only that version is
 guaranteed to read it the same way: mise releases differ in how they resolve
 some download URLs, so an older mise can read the same config differently or
 reject rows of the lock.
@@ -118,7 +121,7 @@ Linux package manager). On macOS (on Linux use `linux-x64` or `linux-arm64`, and
 `sha256sum -c` in place of `shasum -a 256 -c`):
 
 ```bash
-mise_version=2026.10.8
+mise_version=2026.10.17
 mise_platform=macos-arm64   # or macos-x64
 base="https://github.com/jdx/mise/releases/download/v${mise_version}"
 curl -fL -O "$base/SHASUMS256.txt" -O "$base/SHASUMS256.txt.minisig" \
@@ -134,22 +137,22 @@ mkdir -p ~/.local/bin && install -m 755 mise/bin/mise ~/.local/bin/mise
 mise --version
 ```
 
-Stop if either check fails. As a cross-check, the 2026.10.8 archives have
+Stop if either check fails. As a cross-check, the 2026.10.17 archives have
 these sha256 digests:
 
 | Archive | sha256 |
 |---------|--------|
-| `mise-v2026.10.8-macos-arm64.tar.gz` | `8228699f316dc17931beb86f7a1aac70e4685535430441492ff4e857c72535ad` |
-| `mise-v2026.10.8-macos-x64.tar.gz` | `28c924c5703c6344489bc73227c59da2194eaf7fd962c5f3d233b9524b7419e9` |
-| `mise-v2026.10.8-linux-arm64.tar.gz` | `88aea77e41c2a3c45a9cbd64df9516ba887017442846213b3de178acbd3c9a46` |
-| `mise-v2026.10.8-linux-x64.tar.gz` | `e908ea27810ae358c9a9a7d897ea10197bdc38d39839243e1b36acc31cbef868` |
-| `mise-v2026.10.8-windows-x64.zip` | `2548132f9e8b8dc29027933e47a98582557b448dfec791dbecad66e9c760582b` |
-| `mise-v2026.10.8-windows-arm64.zip` | `c38a2353088896894df4a2e9c4ea4a9d1b2bee290c0dba9ea5a10e43646d41e1` |
+| `mise-v2026.10.17-macos-arm64.tar.gz` | `d7c50c1683524a764260986ccc9c41c0de5e1fcd491714b5640b657b76781af6` |
+| `mise-v2026.10.17-macos-x64.tar.gz` | `e42418100e2f781f9be00b9feaa60378e77551741faececc2bf360992c5410c8` |
+| `mise-v2026.10.17-linux-arm64.tar.gz` | `cac510e51793ad45e65fe92305bdbe4309c9c60b5907badbc7eba111738ab08f` |
+| `mise-v2026.10.17-linux-x64.tar.gz` | `17565e268c5542d8ce944321e17af81e0b741b65af4aa7e8e010ee77376a4aa3` |
+| `mise-v2026.10.17-windows-x64.zip` | `32bcfda5f72bf7cb189e18ba93c2798bffcb4a678fd004e3127780363f2d8c8c` |
+| `mise-v2026.10.17-windows-arm64.zip` | `d9fb396fa2a1f41b7c68275b6e0e6af4126c2ce138c61b19b819d502cfbf0f43` |
 
 On Windows, compare `(Get-FileHash <archive> -Algorithm SHA256).Hash` with the
 table (PowerShell prints it in upper case).
 
-The convenience installer `curl https://mise.run | MISE_VERSION=v2026.10.8 sh`
+The convenience installer `curl https://mise.run | MISE_VERSION=v2026.10.17 sh`
 checks the archive's sha256, against digests embedded in the script when you
 ask for the script's own current release and against the release's
 `SHASUMS256.txt` otherwise. It does not check the minisign or GPG signature
@@ -168,7 +171,22 @@ MISE_ENV=toolchain mise install --locked
 `--locked` makes mise refuse any tool or platform that the lock does not cover,
 rather than resolving a new download. Pulp's `.mise.toml` also sets
 `locked = true` and `auto_install = false`, so mise never installs a tool
-behind your back.
+behind your back. mise applies a project's `[settings]` only after you trust
+the checkout, so run `mise trust` first; until then those two settings, and
+`disable_update_warning`, are ignored, and mise falls back to its defaults
+(`locked = false`, `auto_install = true`). Trust each checkout's own file,
+never a common parent: a worktree created with the repository's hooks
+installed is trusted by `.githooks/post-checkout` (see
+[Fresh worktrees and mise trust](#fresh-worktrees-and-mise-trust)). Confirm it
+from inside a checkout:
+
+```bash
+mise settings get locked   # must print true
+```
+
+Automation does not rely on trust: the CI candidate lane and the golden-image
+layer also set `MISE_LOCKED=1` and `MISE_AUTO_INSTALL=0`, which apply whether
+or not the checkout is trusted.
 
 ### 3. Use the tools
 
@@ -210,7 +228,7 @@ A tool version changes only through a pull request that:
 2. regenerates the derived files with the pinned mise:
 
    ```bash
-   python3 tools/toolchain/generate.py --lock --mise /path/to/mise-2026.10.8
+   python3 tools/toolchain/generate.py --lock --mise /path/to/mise-2026.10.17
    ```
 
    This rewrites `.mise.toolchain.toml`, the generated block in `.mise.toml`,
@@ -223,7 +241,7 @@ A tool version changes only through a pull request that:
 every version and lock checksum that moved, for the pull request body:
 
 ```bash
-python3 tools/toolchain/update.py cmake --to 4.3.4 --mise /path/to/mise-2026.10.8
+python3 tools/toolchain/update.py cmake --to 4.3.4 --mise /path/to/mise-2026.10.17
 python3 tools/toolchain/update.py rust --to 1.98.0      # no lock rows: rustup installs Rust
 python3 tools/toolchain/update.py shipyard --to v0.270.0
 ```
@@ -263,7 +281,9 @@ toolchain-check: 1 difference(s) from the manifest; continuing (warn mode)
 ```
 
 It checks `python3`, `cmake`, `ninja`, `node`, `rustc` (asked from
-`experimental/pulp-rs`, where cargo builds), `clang-format`, the `mise` binary
+`experimental/pulp-rs`, where cargo builds, and, when rustup is present, that
+the pinned toolchain has every component and target `rust-toolchain.toml`
+names), `clang-format`, the `mise` binary
 (version, and its sha256 against `[mise.binary]` in the manifest), and that each
 npm lockfile directory's `node_modules` is exactly its `package-lock.json`. It
 only reads; it never installs anything.
@@ -327,6 +347,94 @@ It also runs on its own, once, before a build:
 In warn mode none of these fails. Once the manifest is in enforce mode a
 difference stops the configure and `setup.sh` with the same lines.
 
+## Keeping hosts current
+
+`tools/toolchain/manifest.toml` is the one authority for host tools.
+`tools/toolchain/host_sync.py` makes a host match it: it runs the fixes
+`check_env.py` names.
+
+```bash
+python3 tools/toolchain/host_sync.py                    # this checkout
+python3 tools/toolchain/host_sync.py --repo ~/Code/pulp # another one
+cat ~/.config/pulp/toolchain-sync.json                  # what it did and what remains
+```
+
+It fetches `origin/main` and reads the pins from there, never from the working
+tree, so a host converges on what landed whatever branch its checkout has out.
+It trusts the checkout's own `.mise.toml`, runs the pinned mise's
+`mise install --locked` against a copy of the pins, installs the manifest's
+Rust by name with `rustup toolchain install` (with the pinned components and
+targets) when anything is missing, and finally runs `check_env.py --fleet-path`
+inside the pinned environment. The receipt at
+`~/.config/pulp/toolchain-sync.json` records every step (with
+`network_failure` on the ones a download broke), the remaining `findings`, and
+`report_only` notes. It holds a lock, so two runs never overlap.
+
+It only adds. It never uninstalls a tool, runs `mise use`, edits a shell
+profile, or changes the default rustup toolchain. A few things it reports but
+never changes: a mise binary whose digest is not the pin (it is not even run;
+tartci installs the binary), a `rustc` on PATH that is not rustup's proxy,
+anything Homebrew owns, and Xcode.
+
+Exit status: `0` when the host matches, `1` when a difference remains that it
+does not fix, `2` when a download or the fetch failed (the receipt names the
+step; the next run tries again, and nothing is counted as fixed), `3` when the
+pins could not be read, `4` when another run holds the lock.
+
+**When to run it.** Run it by hand, or from an interactive or agent session,
+after a pin bump lands; those sessions already have access to the data
+volumes. Do not install it as a plain LaunchAgent: a launchd job that opens a
+`/Volumes` path without the tartci launcher's Removable Volumes grant hangs
+on that open (one orphan hung for two hours). tartci will schedule it under
+its consented launcher identity. Until then the hourly
+`tools/toolchain/fleet_report.py` run is the drift alarm. Every child
+`host_sync.py` and `check_env.py` start is bounded and abandoned if it does
+not answer, so a lost grant shows up as a named finding, not a hang.
+
+## Cache placement on volume hosts
+
+On a host whose builds live on a data volume (m3 `/Volumes/Workshop`, m5s
+`/Volumes/Atelier`), the agent-only caches (mise data, rustup, cargo, the Skia
+keyed cache) live under `/Volumes/<vol>/caches/<name>`, with a symlink at
+their default path (`~/.local/share/mise`, `~/.rustup`, `~/.cargo`,
+`~/.cache/pulp/skia`). Moving one:
+
+1. **Copy** the default directory to `/Volumes/<vol>/caches/<name>` (`ditto`
+   or `rsync -a`), with nothing using it.
+2. **Verify** the copy: same file count and size, and a spot check of a few
+   files by digest.
+3. **Symlink**: move the default directory aside, then `ln -s
+   /Volumes/<vol>/caches/<name> <default path>`.
+4. **Prove** the tool reads it: `check_env.py --fleet-path` and
+   `host_sync.py` report no `cache` finding, and the tool still runs (for
+   example `rustup toolchain list`, `MISE_ENV=toolchain mise ls`).
+5. **Delete** the old copy only after that proof.
+
+Never point a cache at a temporary or `mktemp` directory, under
+`/Volumes/<vol>/VMs`, or inside any reclaim root: an Aug-29 mise symlink into a
+`mktemp` directory under the volume's VM cache tree dangled once that was
+cleared. `check_env.py` reports a cache symlink that dangles, points into a
+temporary directory, or leaves `/Volumes/<vol>/caches`, so `host_sync.py`
+fails on it. Caches a VM mounts (the ccache `cache_root`, `fetchcontent-src`)
+and `TARTCI_HOME`/logs move only through tartci's profile placement, never a
+symlink: a dangling `--dir` mount takes a lane down.
+
+## Fresh worktrees and mise trust
+
+mise refuses a config it does not trust, so in a fresh worktree any command
+that reaches `python3` through the mise shim (`gates.sh`, the pre-push hook)
+fails. `.githooks/post-checkout` trusts the new worktree's own `.mise.toml`
+when git creates it, and `host_sync.py` trusts the checkout it runs in. Both
+trust the file at the checkout's physical path (a worktree reached through a
+symlink is trusted where it really is), and neither trusts a `.mise.toml` that
+is itself a symlink.
+
+- Check: `mise settings get locked` inside the worktree prints `true`.
+- Repair one worktree: `mise trust <worktree>/.mise.toml`.
+- Never trust a parent directory, `$HOME` or `/`, and never add
+  `trusted_config_paths` roots: trust paths are prefixes, so a root trusts
+  every repository cloned under it, and a `.mise.toml` can run code.
+
 ## Building plugins with the Pulp SDK
 
 If you build plugins with the installed SDK (`pulp create`, `pulp build` in a
@@ -359,8 +467,6 @@ section is here so the direction is visible, not as instructions.
 - **The check before generators of committed files.** The generators that
   write committed files run the environment check first, and refuse outside the
   pinned environment.
-- **Rust from the manifest.** Generate `rust-toolchain.toml` from the manifest
-  so cargo uses the pinned Rust instead of the current `stable`.
 - **CI images built from the lock.** `.shipyard/vm-image.mise.toml` and
   `tools/ci/mise-golden-layer.sh` bake a candidate golden with the pinned
   toolchain installed (`mise install --locked`, Rust by name) and a receipt of

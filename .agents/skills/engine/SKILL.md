@@ -23,6 +23,19 @@ into `web_compat_preludes_gen.hpp` and evaluated in order by
 `WidgetBridge`. The current set covers everything React 18 dev (and most
 similar frameworks) feature-detect on construction:
 
+The preludes ship compressed. `embed_js.py` stores each one as a zlib stream
+(about 600 KB of text becomes about 160 KB in every scripted-UI binary), and
+`preludes::source(preludes::<name>)` inflates it at the `eval_or_throw` call,
+about 1.5 ms for the whole set on an M5. Two consequences:
+
+- The generated `web_compat_preludes_gen.cpp` holds byte arrays, not script
+  text, so grepping it for a JS change finds nothing. Grep the `.js` file, or
+  inflate with `preludes::source()` in a test (`test/test_js_preludes.cpp`
+  already proves every prelude round-trips to its file byte for byte).
+- Each `EmbeddedPrelude` carries the SHA-256 of its text. A cache keyed by
+  that digest can skip the inflate entirely; the bytecode cache today keys on
+  the full source, so every open still inflates.
+
 | Surface | Where | Why |
 |---------|-------|-----|
 | `Element.nodeType` (=1) / `nodeName` (=tagName) | `web-compat-element.js` | React reconciler walks every node and bails before first commit without DOM-compatible node identity. |
@@ -161,6 +174,41 @@ every inline script of a few KB.
   timestamp or nonce baked into the document), not that the cache is off.
 - JSC and V8 inherit the default (`evaluate_script` → `evaluate`).
 
+### Build-time bytecode (`pulp_add_js_bytecode`)
+
+The in-process cache still parses once per process. A product whose editor
+opens right after instantiation (Logic opens the window on insert) waits for
+that parse: 65–80 ms of Spectr's fresh-process open was the editor blocked in
+`script_bytecode_lookup` on the instantiation prewarm compiling its 1.6 MB
+runtime. `pulp_add_js_bytecode(<lib> SOURCES … [WIDGET_BRIDGE_SCRIPT])`
+compiles the scripts at build time with a generator linked against the same
+Pulp libraries, embeds the blobs, and the product hands each to
+`register_embedded_script_bytecode()` before its editor opens (constructor or
+`editor_prewarm()`). A cache miss then takes the embedded bytecode
+(`stats.embedded`) instead of compiling.
+
+- The blob is trusted code because it sits in the signed binary. That is the
+  only reason this does not contradict "never load bytecode from anywhere
+  else" above. Never register bytes read from a writable location.
+- It is used only for the exact source (length + SHA-256) and only by the
+  engine build that emitted it (`script_bytecode_engine_fingerprint()`: the
+  QuickJS version plus a digest of a fixed probe script's bytecode). Anything
+  else compiles from source; a damaged payload fails its bytecode SHA-256 on
+  first use.
+- `WIDGET_BRIDGE_SCRIPT` compiles `WidgetBridge::loaded_script_source(script)`,
+  which is what `load_script()` and the prewarm evaluate. Without it a
+  `load_script()` script never matches, silently: check `stats.embedded`.
+- The fingerprint probe script must compile on Pulp's QuickJS build. BigInt
+  literals do not (CONFIG_BIGNUM is off); a probe that fails to compile
+  degrades the fingerprint to `quickjs-<version>-unavailable`, which the
+  embed test rejects.
+- Trace spans: `script_embedded_lookup` (the SHA-256 match, about 1 ms for
+  1.6 MB with the ARMv8 SHA-2 path) followed by `script_bytecode_read`. A
+  fresh process that still shows `script_precompile` for the runtime is not
+  registering its blobs, or registered them after the prewarm started.
+- Cross-compiling: the generator cannot run, so the library holds placeholder
+  blobs that registration rejects, and the scripts compile at run time.
+
 ## Bridge dispatch measurement
 
 `WidgetBridge::bridge_call_count()` is a per-bridge diagnostic counter for
@@ -239,6 +287,18 @@ Use `recommend` logic above, but **never auto-switch** — always confirm first.
 
 ## Engine Selection Semantics
 
+**Mac plug-in scripted UIs: QuickJS + build-time bytecode beats JSC.** Measured
+on Spectr (1.6 MB materialized runtime, AU v2 editor, M5 Max): JSC opens are
+~100-150 ms slower per open (warm 281-397 ms vs 162-253 ms), with JIT allowed
+or in a hardened-runtime host without `allow-jit` alike (JIT made no
+difference). JSC re-parses the whole runtime in every realm (no in-memory
+bytecode reuse; `JSScript`'s code cache is on disk) and its C-API bridge costs
+more per call (`scripted_ui_live_realm` 290 vs 158 ms). Output was
+pixel-identical. Dropping QuickJS saves ~0.84 MB, which does not pay for it.
+Do not re-run this without a new reason (a JSC in-memory bytecode API, or a
+UI with far heavier steady-state JS than mount).
+
+
 - `auto` (default): QuickJS everywhere unless the build explicitly
   sets a `PULP_DEFAULT_ENGINE_*` compile option. Backward compatible.
   Safe. Do not describe this as "Apple defaults to JSC"; that was an
@@ -293,7 +353,7 @@ prebuilt `libv8`** from the
 fork — the same pin/fetch/Find pattern as Skia:
 
 1. **Pin:** the `V8` entry in `tools/deps/manifest.json`
-   (`determinism.release_assets`, per-platform URL + sha256, tag `v8-m153-15.3.76.5-26cef0256b0e`).
+   (`determinism.release_assets`, per-platform URL + sha256, tag `v8-m157-15.7.112.5-3362da6c495d`).
 2. **Fetch:** `python3 tools/scripts/fetch_v8_for_release.py <platform>`
    downloads + sha256-verifies + unpacks to `external/v8-build/<platform>/`
    (`include/` + `lib/`). Platforms: `darwin-arm64`, `darwin-x64`,
@@ -304,7 +364,11 @@ fork — the same pin/fetch/Find pattern as Skia:
 3. **Resolve:** `tools/cmake/FindV8.cmake` finds `external/v8-build/<key>`
    (or a baked `$V8_DIR`, or legacy overrides) and exposes the `v8::v8`
    imported target. The configure log prints
-   `-- Pulp V8 provider: <path> (platform key: ...)`.
+   `-- Pulp V8 provider: <path> (platform key: ...)`. The provider's
+   `manifest.json` `consumer_defines` ride on `v8::v8` as
+   `INTERFACE_COMPILE_DEFINITIONS` (printed as `-- Pulp V8 consumer defines:`);
+   V8's inline headers read them, so a missing or malformed manifest fails
+   configure rather than compiling against the header defaults.
 
 **Selecting V8 — that's all you need:**
 
@@ -323,10 +387,10 @@ a baked V8 (golden VMs: `V8_DIR=~/pulp-v8-build`).
 - `PULP_JS_ENGINE=auto` **never** pulls in V8 — V8 is strictly opt-in via
   `=v8`. (Previously `auto` + `V8_INCLUDE_DIR` silently enabled it.)
 - `PULP_JS_ENGINE=v8` on **iOS** is a configure-time `FATAL_ERROR`. The pinned
-  m153 asset is a jitless simulator framework, but Pulp has no device/AUv3 V8
+  m157 asset is a jitless simulator framework, but Pulp has no device/AUv3 V8
   runtime acceptance or packaging contract. Use QuickJS (the default) or JSC.
-- `PULP_JS_ENGINE=v8` on **Android** requires API 29+ for the pinned m153
-  provider. Pulp's general Android floor remains API 26; use QuickJS below 29.
+- `PULP_JS_ENGINE=v8` on **Android** requires API 29+ for the pinned m157
+  provider (its embedded manifest records `ndk_api_level: 29`). Pulp's general Android floor remains API 26; use QuickJS below 29.
 
 **Why the sealed build (the ICU caveat):** the v8-builder `libv8` exports
 only the `v8::`/`cppgc::` API and keeps its bundled ICU/zlib/Abseil
@@ -338,19 +402,37 @@ appear, never re-exported `icu_NN::`/`absl::` library symbols. V8 is still
 confined to `js_v8_engine.cpp` and never shares a TU with a Skia/Dawn
 header.
 
+## choc's V8 bridge and V8 API contracts
+
+choc's V8 wrapper (`choc_javascript_V8.h`) predates several V8 API contract
+changes, and Pulp patches it at configure time in
+`tools/cmake/PulpPatchChoc.cmake` rather than forking per V8 release. The
+patch that matters most: V8 15.4 runs the `v8::Array::Iterate` callback in its
+own `HandleScope` and forbids JS execution inside it, so choc's `v8ToChoc`
+property walk (which stored `Local`s from inside the callback) read freed
+handles and crashed with SIGBUS in `KeyAccumulator::CollectOwnElementIndices`
+on the first object whose early members were objects or functions. Pulp walks
+the names by index instead. Every value crossing the bridge goes through
+`v8ToChoc` (evaluate results, call results, native-callback arguments), so a
+bridge regression shows up everywhere, not only in one script. Upstream
+Tracktion/choc still carries the `Iterate` walk.
+
 ## Windows sealed v8-builder V8 (clang-cl + Chromium libc++ `__Cr`)
 
-The v8-builder sealed Windows `v8.dll` (e.g. `v8-m153-15.3.76.5-26cef0256b0e`) is a special
+The v8-builder sealed Windows `v8.dll` (e.g. `v8-m157-15.7.112.5-3362da6c495d`) is a special
 ABI lane, NOT a drop-in for MSVC cl. It is built (v8-builder
 `build-v8.py:win_gn_args()`) with **pointer compression ON**, **Chromium's
 bundled libc++ (`__Cr` ABI namespace)**, sandbox OFF, rtti OFF. So
 `v8.dll.lib` exports its `std::`-bearing API mangled into `__Cr@std`
 (verify: hundreds of `...@__Cr@std@@` symbols). A consumer built with
 **MSVC cl + MSVC STL will not link** — its plain `@std@@` symbols never
-resolve against the `__Cr@std` imports. The m153 archive's ABI shape and
-required files are inspected and pinned. The following consumer contract was
+resolve against the `__Cr@std` imports. The m157 x64 and arm64 archives' ABI
+shape and required files are inspected and pinned: the same file layout as
+m153 (`lib/v8.dll`, `lib/v8.dll.lib`, `lib/libc++.lib`, `manifest.json`),
+~314 `@__Cr@std@@` import records, and `V8_COMPRESS_POINTERS` in the embedded
+`consumer_defines`. The following consumer contract was
 last link/run proven with m152 (`15.2.124.7`) on the Win11-24H2 arm64 QEMU
-golden (x64 V8 under ARM x64 emulation); the m153 consumer link/run remains a
+golden (x64 V8 under ARM x64 emulation); the m157 consumer link/run remains a
 required platform acceptance step:
 
 1. Compile the V8 TU (`js_v8_engine.cpp`) with **clang-cl**, not cl.
@@ -358,7 +440,9 @@ required platform acceptance step:
    is MSVC cl.
 2. **`-DV8_COMPRESS_POINTERS`** — mandatory; without it the inline
    `v8-internal.h` tagged-field offsets mismatch the DLL and silently
-   corrupt the heap.
+   corrupt the heap. A sealed provider supplies it through its manifest
+   `consumer_defines` on `v8::v8`; `PulpV8Windows.cmake` adds it explicitly
+   only for the manifest-less legacy override.
 3. **Chromium-style libc++ headers** with `_LIBCPP_ABI_NAMESPACE=__Cr`
    (routed via clang-cl's `/clang:-nostdinc++ /clang:-isystem` — bare
    `-nostdinc++` is silently dropped by clang-cl, which is the trap that
@@ -387,15 +471,38 @@ On Windows, additionally supply `PULP_V8_WIN_LIBCXX_INCLUDE` and
 then calls `pulp_v8_windows_apply_abi(pulp-view-script)` (no-op off
 Windows). Last runtime proof (m152): choc V8 consumer init +
 `evaluateExpression("40 + 2") == 42`, `V8::GetVersion() == 15.2.124.7`.
-The m153 Windows archive has passed structural ABI inspection but not this
-consumer link/run gate. The mac/linux sealed
+The m157 Windows archives have passed structural ABI inspection but not this
+consumer link/run gate.
+
+The archive also ships a `__Cr` runtime as `lib/libc++.lib` (the embedded
+manifest's `libcxx_lib`), but it is **not** interchangeable with the step 4
+runtime, so `PulpV8Windows.cmake` does not default to it and fails configure
+when `PULP_V8_WIN_LIBCXX_LIB` is unset. The provider lib is a static-CRT build
+(`/MT`, `/DEFAULTLIB:libcmt`), embeds
+`/FAILIFMISMATCH:"_CRT_STDIO_ISO_WIDE_SPECIFIERS=0"`, and carries no vcruntime
+`exception_ptr` glue, while the module's flags assume the llvm-project
+`LIBCXX_CXX_ABI=vcruntime` build (`_CRT_STDIO_ISO_WIDE_SPECIFIERS=1`, dynamic CRT
+via `msvcprt.lib`). The UCRT's `corecrt_stdio_config.h` emits a
+`detect_mismatch` for that define, so pointing at the provider lib produces an
+LNK2038 at link rather than a configure error. Using it would need both
+settings switched, and that is unproven on Windows. The archive ships no
+libc++ headers either, so `PULP_V8_WIN_LIBCXX_INCLUDE` must still point at an
+llvm-project `libcxx/include`.
+
+**ABI boundary trap:** `pulp_v8_windows_apply_abi(pulp-view-script)` puts the
+`__Cr` libc++ headers on every source in `pulp-view-script`, while
+`pulp-view-core` and the tests compile against the MSVC STL. Any non-virtual
+call that passes `std::` types across that boundary names a symbol in one std
+ABI and resolves it in the other, so it will not link. The narrow fix (an
+object library holding only `js_v8_engine.cpp` behind a std-free surface) is
+open work for the local-VM Windows run. The mac/linux sealed
 artifacts use the **system** libc++ (no `__Cr`) and need none of this —
 the `__Cr` contract is Windows-only.
 
 **Cross-platform rollout + ship/sign/package** (Windows MSVC `/MT` ABI,
 macOS nested-dylib re-signing, Android ABI gating, golden-VM bake) are
 tracked in `planning/2026-06-06-v8-sealed-libv8-provider-migration-plan.md`.
-macOS arm64 is the proven m153 runtime lane; other platforms are pinned but
+macOS arm64 is the proven runtime lane (re-proved on m157); other platforms are pinned but
 pending per-platform verification.
 
 ### Sealed v8-builder provider (`FindV8.cmake` → `external/v8-build/`)
@@ -450,6 +557,16 @@ documented in `examples/threejs-native-demo/README.md`.
 block and renders `--demo cube --capture` to a non-empty PNG.
 
 ## Gotchas
+
+- **QuickJS's stack limit is 4 MiB under AddressSanitizer, 1 MiB otherwise** (`kQuickJsStackBytes` in
+  `js_quickjs_engine.cpp`). ASan's redzones inflate every C frame, so a nested native event (a key that
+  clicks a popup trigger whose handler queries the DOM) threw `InternalError: stack overflow` under ASan
+  only. A handler error the bridge dispatch catches goes through `__pulpReportDispatchError__`, which
+  counts it (`__pulpDispatchErrorCount__`, `__pulpLastDispatchError__`), keeps the message (QuickJS's
+  `e.stack` holds only frames), and prints it with `console.error` when no `__dispatchError__` hook is
+  installed. When a scripted-UI test sees a global that a handler should have created missing, read
+  `__pulpLastDispatchError__` first.
+- **Every QuickJS realm starts with a 512 MiB heap ceiling** (`kDefaultJsMemoryLimitBytes`, applied via `JS_SetMemoryLimit` right after the stack-size call in `js_quickjs_engine.cpp`). A script that allocates past it gets a JS `InternalError: out of memory`, not a dead host. Raise or disable (0) per session with `ScriptedUiOptions::js_memory_limit_bytes` or `JsEngine::set_memory_limit()`. JSC and V8 return `false` from `set_memory_limit()`; they have no cap today.
 
 **Selector parses are memoized.** `_parseSelector` (web-compat-document-
 selectors.js) caches its record by selector text (bounded, cleared when
@@ -727,8 +844,8 @@ tools/scripts/confirm_failure.sh \
 ```
 
 The `--object` flag is documented in the script's own header for exactly this
-case. Counting the changed text inside the generated file still works as a
-manual positive control, but it is no longer the only route to a verdict.
+case. The generated file holds compressed bytes, so counting changed text
+inside it is no longer a positive control.
 
 Note also that `core/view/js/web-compat.js` is a monolith that is **not**
 embedded. The embedded lane is the split `web-compat-*.js` set listed above,

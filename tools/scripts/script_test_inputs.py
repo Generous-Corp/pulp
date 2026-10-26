@@ -67,6 +67,12 @@ SCHEMA = "pulp-ctest-script-inputs/v1"
 DEFAULT_LIST = Path("test") / "ctest_script_inputs.json"
 INTERPRETERS = ("python", "python3", "node", "bash", "sh", "zsh")
 UNDECLARABLE_EXES = ("cmake", "ninja", "make", "ctest", "xcodebuild", "cargo")
+# GPU-audio hardware-evidence registrations (PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF).
+# The arm64 macOS gate compiles them, but every CI selection excludes this label
+# (tools/ci/ctest_gate_args.py) and only the owner runs them on a physical GPU.
+# Their inputs select nothing, so they are not tracked, and a proof configure is
+# otherwise gate-shaped.
+GPU_PROOF_LABEL = "gpu-proof"
 # An entry script that lives in the build tree (a configure-generated runner)
 # is recorded under this token, never under the build directory's name, so
 # a list written from `build-gate`, `build`, or a directory outside the
@@ -90,8 +96,22 @@ REPO_PREFIXES = ("tools/", "test/", "hooks/", ".githooks/", ".github/", "docs/",
                  "core/", "examples/", "templates/", "inspect/", "experimental/", "cmake/", "external/")
 LITERAL_RE = re.compile(r"""["'](?P<p>(?:%s)[A-Za-z0-9_./@+-]+)["']""" % "|".join(re.escape(p) for p in REPO_PREFIXES))
 NODE_IMPORT_RE = re.compile(r"""(?:from\s+|import\s*\(?\s*|require\s*\(\s*)["'](?P<s>\.{1,2}/[^"']+)["']""")
+# Node test files `node --test` may list after the first one.
+NODE_SOURCE_SUFFIXES = (".mjs", ".js", ".cjs")
 SHELL_SOURCE_LINE_RE = re.compile(r"""^\s*(?:source|\.)\s+(?P<rest>.+)$""")
 SHELL_TAIL_RE = re.compile(r"""(?P<f>[A-Za-z0-9_./-]+\.(?:sh|bash))["']?\s*$""")
+# A shell script usually names repository files through a directory variable
+# it derived from its own location (`REPO_ROOT="$(cd "$(dirname
+# "${BASH_SOURCE[0]}")/../.." && pwd)"`), never as a bare quoted literal, so
+# `"$REPO_ROOT/setup.sh"` must resolve through the variable. Only variables
+# bound to a directory the script's own location (or git) determines resolve;
+# a temp or fixture directory stays opaque.
+SHELL_ASSIGN_RE = re.compile(r"""^\s*(?:(?:export|local|readonly|declare)\s+(?:-[A-Za-z]+\s+)*)?(?P<var>[A-Za-z_][A-Za-z0-9_]*)=(?P<value>.+?)\s*$""")
+SHELL_SELF_DIR = r"""\$\(\s*dirname\s+["']?(?:\$\{BASH_SOURCE\[0\]\}|\$\{BASH_SOURCE\}|\$BASH_SOURCE|\$0|\$\{0\})["']?\s*\)"""
+SHELL_VAR_REF = r"""\$(?:\{(?P<b>[A-Za-z_][A-Za-z0-9_]*)\}|(?P<v>[A-Za-z_][A-Za-z0-9_]*))"""
+SHELL_DIR_EXPR_RE = re.compile(r"""^(?:(?P<self>%s)|%s|(?P<git>\$\(\s*git\s+(?:-C\s+\S+\s+)?rev-parse\s+--show-toplevel\s*\)))(?P<rel>/[A-Za-z0-9_./-]*)?$""" % (SHELL_SELF_DIR, SHELL_VAR_REF))
+SHELL_CD_PWD_RE = re.compile(r"""^\$\(\s*cd\s+(?P<expr>.+?)\s*&&\s*pwd(?:\s+-P)?\s*\)$""")
+SHELL_VAR_PATH_RE = re.compile(SHELL_VAR_REF + r"""(?P<rel>/[A-Za-z0-9_./@+-]+)""")
 
 
 def _rel(path: Path, root: Path) -> str | None:
@@ -182,8 +202,10 @@ def outside_gate_profile_build(build_dir: Path | None,
                                root: Path | None = None) -> list[str]:
     """Why this build's compiled entries cannot stand for the gate's: each
     switch whose value differs from the gate's configure (examples off, a
-    Release build, no sanitizer, the exact-provider proof off). Empty for a gate-shaped build, and for one
-    with no CMakeCache.txt to read (no build tree, no compiled entries)."""
+    Release build, no sanitizer). Empty for a gate-shaped build, and for one
+    with no CMakeCache.txt to read (no build tree, no compiled entries). The
+    exact-provider proof is not judged: the arm64 gate configures it ON, and
+    the registrations it adds are `gpu-proof` tests, which are not tracked."""
     cache = _cache_values(build_dir) if build_dir else None
     if cache is None:
         return []
@@ -196,12 +218,6 @@ def outside_gate_profile_build(build_dir: Path | None,
     build_type = cache.get("CMAKE_BUILD_TYPE", "")
     if build_type and build_type != "Release":
         reasons.append(f"CMAKE_BUILD_TYPE={build_type} (the gate builds Release)")
-    # The GPU-audio exact-provider proof registers its probes only when ON;
-    # the gate configures it OFF, so a list written ON names tests the gate
-    # never has.
-    proof = cache.get("PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF", "OFF")
-    if not off(proof):
-        reasons.append(f"PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF={proof} (the gate configures OFF)")
     # Without a format SDK the configure registers none of that format's
     # tests or plugin targets, so the list it writes silently drops their
     # inputs. A cache from before a flag existed omits it and is not judged.
@@ -329,6 +345,7 @@ class Walker:
         self._in_repo_memo: dict[Path, bool] = {}
         self._imports_memo: dict[Path, list[tuple] | None] = {}
         self._literals_memo: dict[Path, list[Path]] = {}
+        self._shell_var_memo: dict[Path, list[Path]] = {}
 
     # -- resolution helpers -------------------------------------------------
     def _in_repo(self, p: Path) -> bool:
@@ -448,6 +465,63 @@ class Walker:
                     self.walk_shell(cand, seen)
                     break
         self.literal_paths(entry, seen)
+        if entry not in self._shell_var_memo:
+            self._shell_var_memo[entry] = self._shell_var_paths(entry, text)
+        seen.update(self._shell_var_memo[entry])
+
+    def _shell_dir(self, expr: str, entry: Path, dirs: dict[str, Path]) -> Path | None:
+        """The directory a shell expression names, when the script's own
+        location, git, or an already-resolved variable determines it."""
+        expr = expr.strip()
+        if len(expr) >= 2 and expr[0] == expr[-1] and expr[0] in "\"'":
+            expr = expr[1:-1]
+        m = SHELL_CD_PWD_RE.match(expr)
+        if m:
+            return self._shell_dir(m.group("expr"), entry, dirs)
+        m = SHELL_DIR_EXPR_RE.match(expr)
+        if not m:
+            return None
+        if m.group("self"):
+            base = entry.parent
+        elif m.group("git"):
+            base = self.root
+        else:
+            base = dirs.get(m.group("b") or m.group("v") or "")
+            if base is None:
+                return None
+        rel = (m.group("rel") or "").strip("/")
+        out = Path(os.path.normpath(base / rel)) if rel else base
+        return out if _rel(out, self.root) is not None else None
+
+    def _shell_var_paths(self, entry: Path, text: str) -> list[Path]:
+        # Bindings are read in source order, so a read resolves against the
+        # binding in force on its line.
+        dirs: dict[str, Path] = {}
+        found: list[Path] = []
+        for line in text.splitlines():
+            for m in SHELL_VAR_PATH_RE.finditer(line):
+                base = dirs.get(m.group("b") or m.group("v") or "")
+                if base is None:
+                    continue
+                cand = Path(os.path.normpath(base / m.group("rel").strip("/")))
+                rel = _rel(cand, self.root)
+                if rel is None or rel in (".", ""):
+                    continue
+                if rel.startswith("docs/") and not rel.startswith("docs/status/"):
+                    continue
+                if cand.exists():
+                    found.append(cand)
+            m = SHELL_ASSIGN_RE.match(line)
+            if not m:
+                continue
+            d = self._shell_dir(m.group("value"), entry, dirs)
+            if d is not None and d.is_dir():
+                dirs[m.group("var")] = d
+            else:
+                # Reassigning to something unresolvable (a temp dir) unbinds
+                # the name rather than keeping the old directory.
+                dirs.pop(m.group("var"), None)
+        return found
 
     def literal_paths(self, entry: Path, seen: set[Path]) -> None:
         if entry not in self._literals_memo:
@@ -478,8 +552,24 @@ def _is_inline_flag(arg: str) -> bool:
     return arg == "-c" or (arg.startswith("-c") and not arg.startswith("--"))
 
 
+def unwrap_cmake_env(command: list[str]) -> list[str]:
+    """The command `cmake -E env [NAME=VALUE | --unset=NAME]... CMD...` runs.
+
+    The wrapper only sets the environment, so the test's inputs are those of
+    the program it wraps; any other cmake command is returned unchanged."""
+    if (len(command) > 3 and os.path.basename(command[0]).startswith("cmake")
+            and command[1:3] == ["-E", "env"]):
+        rest = command[3:]
+        while rest and ("=" in rest[0].split("/", 1)[0] or rest[0].startswith("--unset")
+                        or rest[0] == "--"):
+            rest = rest[1:]
+        return rest or command
+    return command
+
+
 def classify(command: list[str], root: Path) -> tuple[str, Path | None, list[str]]:
     """(kind, entry script, extra args). kind in python|node|shell|undeclarable."""
+    command = unwrap_cmake_env(command)
     if not command:
         return "undeclarable", None, []
     exe = os.path.basename(command[0])
@@ -523,6 +613,25 @@ def classify(command: list[str], root: Path) -> tuple[str, Path | None, list[str
     return "undeclarable", None, []
 
 
+def discovered_tests(argv: list[str], wd: Path) -> list[Path]:
+    """The files `unittest discover` would load: -s/--start-directory (default
+    the working directory) matched against -p/--pattern (default test*.py)."""
+    start, pattern = wd, "test*.py"
+    it = iter(argv)
+    for arg in it:
+        if arg in ("-s", "--start-directory"):
+            start = Path(next(it, "."))
+        elif arg in ("-p", "--pattern"):
+            pattern = next(it, pattern)
+        elif arg.startswith("--start-directory="):
+            start = Path(arg.split("=", 1)[1])
+        elif arg.startswith("--pattern="):
+            pattern = arg.split("=", 1)[1]
+    if not start.is_absolute():
+        start = wd / start
+    return sorted(start.rglob(pattern)) if start.is_dir() else []
+
+
 # A test run through the temp-leak guard (`python tmp_leak_guard.py [opts] --
 # CMD...`) is declared as the command it wraps; the guard is one more input.
 TMP_LEAK_GUARD = "tmp_leak_guard.py"
@@ -551,18 +660,32 @@ def inputs_for(test: dict, root: Path, build_dir: Path | None = None, *,
     for e in (env if isinstance(env, list) else [env]):
         if e.startswith("PYTHONPATH="):
             search += [Path(p) if os.path.isabs(p) else wd / p for p in e.split("=", 1)[1].split(os.pathsep) if p]
+    extra: list[Path] = []
     if kind == "python-module":
         mods = list(args)
-        if mods and mods[0] == "unittest":
+        if mods[:2] == ["unittest", "discover"]:
+            # `python -m unittest discover -s DIR -p PATTERN`: the matching
+            # test files are the entries.
+            found = discovered_tests(mods[2:], wd)
+            if not found:
+                return None
+            entry, extra = found[0], found[1:]
+            args = []
+            kind = "python"
+            mods = []
+        elif mods and mods[0] == "unittest":
             # `python -m unittest <module>...`: the test modules are the entries.
             mods = [m for m in mods[1:] if not m.startswith("-")]
-        entries = [next((c for c in w.python_module_candidates(m.split("::")[0], [wd] + search) if c.is_file()), None)
-                   for m in mods[:1]]
-        entry = entries[0] if entries else None
-        if entry is None:
-            return None
-        args = []
-        kind = "python"
+        if mods:
+            entries = [next((c for c in w.python_module_candidates(m.split("::")[0], [wd] + search)
+                             if c.is_file()), None) for m in mods[:1]]
+            entry = entries[0] if entries else None
+            if entry is None:
+                return None
+            args = []
+            kind = "python"
+    if kind == "python-module" or entry is None:
+        return None
     if not entry.is_absolute():
         entry = wd / entry
     generated = _rel(entry, build_dir) if build_dir else None
@@ -570,6 +693,8 @@ def inputs_for(test: dict, root: Path, build_dir: Path | None = None, *,
         return None
     if kind == "python":
         w.walk_python(entry, search, seen)
+        for other in extra:
+            w.walk_python(other, search, seen)
     elif kind == "node":
         w.walk_node(entry, seen)
     else:
@@ -579,6 +704,11 @@ def inputs_for(test: dict, root: Path, build_dir: Path | None = None, *,
     for a in args:
         for cand in (Path(a), wd / a):
             if cand.is_absolute() and w._in_repo(cand):
+                # `node --test a.mjs b.mjs ...` runs every listed file, so each
+                # one's imports are inputs, not only the first file's. Walk
+                # before adding: walk_node skips a file already in `seen`.
+                if kind == "node" and cand.suffix in NODE_SOURCE_SUFFIXES and cand.is_file():
+                    w.walk_node(cand, seen)
                 seen.add(cand)
     if tracked is None:
         tracked = tracked_paths(root)
@@ -615,7 +745,8 @@ SPAWN_FUNCTIONS = ("exec",)
 # tests implement in memory, so only its loader counts.
 LOAD_APIS = (r"PluginSlot::load\s*\(", r"scan_clap_bundle\s*\(", r"scan_vst3_bundle\s*\(",
              r"scan_lv2_bundle\s*\(", r"scan_directory\s*\(", r"scan_audio_units\s*\(", r"dl_open\s*\(",
-             r"load_node_pack\s*\(", r"add_plugin_node\s*\(", r"add_plugin_node_from_drop\s*\(",
+             r"load_node_pack\s*\(", r"load_verified_node_pack\s*\(",
+             r"add_plugin_node\s*\(", r"add_plugin_node_from_drop\s*\(",
              r"GraphSerializer::from_json\s*\(")
 # Public core/host functions that reach a loader but are not in LOAD_APIS,
 # each with the mechanism that covers a test calling it (loader_coverage).
@@ -701,9 +832,11 @@ def _read_json(path: Path) -> dict | None:
 
 def source_signals(root: Path, rel: str, defines: list[str]) -> list[str]:
     """The data-read signals a source's text carries: the fixed ones plus the
-    names of its executable's definitions that point into the checkout."""
+    names of its executable's definitions that point into the checkout. A
+    mention inside a comment is not a read."""
     try:
-        text = (root / rel).read_text(encoding="utf-8", errors="replace")
+        text = strip_c_comments((root / rel).read_text(encoding="utf-8", errors="replace"),
+                                keep_strings=True)
     except OSError:
         return []
     hits = [sig for sig in DATA_SIGNALS if sig in text]
@@ -812,6 +945,9 @@ def test_executables(build_dir: Path | None) -> dict[str, dict] | None:
         # A ctest command names the artifact; a Catch2 discovery include is
         # named after the target.
         if not (rec.get("under_test", True) or run is None or program in run or target in run):
+            continue
+        # Hardware-evidence executables run only on the owner's GPU; see GPU_PROOF_LABEL.
+        if rec.get("gpu_proof"):
             continue
         if program in out:
             raise ValueError(f"{out[program]['target']} and {target} both build {program}; "
@@ -1065,7 +1201,7 @@ def build_list(inventory: dict, root: Path, build_dir: Path | None = None) -> di
         name = t.get("name", "")
         if not name or name.endswith("_NOT_BUILT") or name in excluded:
             continue
-        cmd = t.get("command") or []
+        cmd = unwrap_cmake_env(t.get("command") or [])
         if cmd and _rel(Path(cmd[0]), root) is None and not os.path.basename(cmd[0]).startswith(INTERPRETERS):
             continue  # a compiled test binary or a tool outside the repo: the graph owns it
         rec = inputs_for(t, root, build_dir, walker=walker, tracked=tracked)
@@ -1089,6 +1225,98 @@ def build_list(inventory: dict, root: Path, build_dir: Path | None = None) -> di
         doc["executable_targets"] = {name: rec["target"] for name, rec in sorted(scanned.items())
                                      if rec["target"] != name}
     return doc
+
+
+CMAKE_TOKEN_RE = re.compile(r"[A-Za-z0-9_.+-]+")
+
+
+def cmake_registration_tokens(root: Path) -> set[str]:
+    """Every name-shaped token in the tree's CMake sources, comments removed.
+
+    A test or test executable registered anywhere in the source, including
+    behind a configure option this build has off, keeps its name here; one
+    whose registration was deleted does not."""
+    rels = [r for r in tracked_paths(root) if r.endswith(".cmake") or r.endswith("CMakeLists.txt")]
+    if not rels:
+        rels = [_rel(p, root) or "" for p in root.rglob("*")
+                if p.is_file() and (p.suffix == ".cmake" or p.name == "CMakeLists.txt")]
+    tokens: set[str] = set()
+    for rel in rels:
+        try:
+            text = (root / rel).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            tokens.update(CMAKE_TOKEN_RE.findall(line.split("#", 1)[0]))
+    return tokens
+
+
+def carry_unconfigured_entries(current: dict, checked_in: dict, inventory: dict, root: Path,
+                               build_dir: Path | None) -> list[str]:
+    """Keep checked-in entries for tests this configure does not register.
+
+    A test registered only behind a configure option (an opt-in diagnostic, a
+    platform switch) is absent from a build that has the option off. Writing
+    from that build must not delete its entry: the list holds every gate-shaped
+    configuration's tests, and `--check` already ignores tests absent here. An
+    entry is dropped only when its registration is gone from the CMake source.
+    Returns the carried names; mutates `current`."""
+    tokens = cmake_registration_tokens(root)
+    registered_here = {str(t.get("name", "")) for t in inventory.get("tests", [])}
+    carried: list[str] = []
+    for name, rec in (checked_in.get("tests") or {}).items():
+        if name in current["tests"] or name in registered_here or name not in tokens:
+            continue
+        current["tests"][name] = rec
+        carried.append(name)
+    current["tests"] = dict(sorted(current["tests"].items()))
+    if "executables" in current:
+        scanned_here = set(test_executables(build_dir) or {})
+        old_targets = checked_in.get("executable_targets") or {}
+
+        def unconfigured(exe: str) -> bool:
+            return exe not in scanned_here and (exe in tokens or old_targets.get(exe) in tokens)
+
+        for exe, rec in (checked_in.get("executables") or {}).items():
+            if exe not in current["executables"] and unconfigured(exe):
+                current["executables"][exe] = rec
+                carried.append(exe)
+        current["executables"] = dict(sorted(current["executables"].items()))
+        scanned = set(current.get("executables_scanned") or [])
+        scanned |= {exe for exe in checked_in.get("executables_scanned") or [] if unconfigured(exe)}
+        current["executables_scanned"] = sorted(scanned)
+        targets = dict(current.get("executable_targets") or {})
+        for exe, target in old_targets.items():
+            if exe not in targets and unconfigured(exe):
+                targets[exe] = target
+        current["executable_targets"] = dict(sorted(targets.items()))
+    return sorted(set(carried))
+
+
+def entries_write_would_delete(current: dict, checked_in: dict) -> list[str]:
+    """Checked-in test and executable names absent from what --write would
+    write, after unconfigured entries were carried. Main's list holds every
+    gate-shaped configuration's entries, so a name missing here is either a
+    registration that was removed or one this configure simply cannot see; the
+    two look identical from here, so --write refuses unless told."""
+    gone = set((checked_in.get("tests") or {})) - set(current.get("tests") or {})
+    if "executables" in current:
+        gone |= set((checked_in.get("executables") or {})) - set(current["executables"])
+    return sorted(gone)
+
+
+def test_labels(test: dict) -> list[str]:
+    labels: list[str] = []
+    for prop in test.get("properties") or []:
+        if prop.get("name") == "LABELS":
+            value = prop.get("value")
+            labels.extend(value if isinstance(value, list) else [value])
+    return labels
+
+
+def without_gpu_proof(tests: list[dict]) -> list[dict]:
+    """The registrations the gate can run: drop every `gpu-proof` test."""
+    return [test for test in tests if GPU_PROOF_LABEL not in test_labels(test)]
 
 
 def load_inventory(build_dir: str | None, inventory_json: str | None) -> dict | None:
@@ -1247,6 +1475,9 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--base", default=None, help="diff-scope --check to changes since this ref "
                     "(default: PULP_SCRIPT_INPUTS_BASE, origin/$GITHUB_BASE_REF, or HEAD^1 in a merge group)")
     ap.add_argument("--full", action="store_true", help="--check every entry, ignoring any base")
+    ap.add_argument("--allow-delete", action="store_true",
+                    help="let --write remove checked-in entries this configure does not produce "
+                         "(only when their registration was really removed)")
     mode = ap.add_mutually_exclusive_group(required=True)
     mode.add_argument("--write", action="store_true")
     mode.add_argument("--check", action="store_true")
@@ -1259,6 +1490,7 @@ def main(argv: list[str]) -> int:
     inventory = load_inventory(a.build_dir, a.inventory_json)
     if inventory is None:
         return 2
+    inventory = {**inventory, "tests": without_gpu_proof(inventory.get("tests") or [])}
     build_dir = Path(a.build_dir).resolve() if a.build_dir else None
     if a.data_summary:
         summary = data_summary(root, build_dir)
@@ -1294,15 +1526,35 @@ def main(argv: list[str]) -> int:
         print("script-test-inputs: refusing to write: file=test/ctest_script_inputs.json; "
               "cause_class=INCOMPLETE_CONFIGURE; evidence=the compiled entries depend on the configuration and "
               "this build is not the gate's: " + "; ".join(off_profile) + ".\nRegenerate from a gate-profile "
-              "configure (-DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF, no PULP_SANITIZER, "
-              "PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF OFF).",
+              "configure (-DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF, no PULP_SANITIZER).",
               file=sys.stderr)
         return 2
     if a.write:
+        try:
+            previous = json.loads(list_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            previous = {}
+        carried = carry_unconfigured_entries(current, previous, inventory, root, build_dir)
+        dropped = entries_write_would_delete(current, previous)
+        if dropped and not a.allow_delete:
+            print("script-test-inputs: refusing to write: it would delete "
+                  f"{len(dropped)} checked-in entr{'y' if len(dropped) == 1 else 'ies'} this configure "
+                  "does not produce: " + ", ".join(dropped) + ". A configure that cannot see an "
+                  "entry (an option off, a fixture it does not build) must not remove it; "
+                  f"file={DEFAULT_LIST}; cause_class=UNSEEN_ENTRY_DELETION; "
+                  "fix=regenerate from the gate's configure, or pass --allow-delete if the "
+                  "registration was really removed; safe_to_auto_apply=no; "
+                  "verify=`git diff --stat test/ctest_script_inputs.json` shows no removed entry",
+                  file=sys.stderr)
+            return 2
         list_path.parent.mkdir(parents=True, exist_ok=True)
         list_path.write_text(json.dumps(current, indent=1, sort_keys=True) + "\n", encoding="utf-8")
         print(f"script-test-inputs: wrote {len(current['tests'])} declared tests "
               f"(of {total_scripts} interpreter-driven entries) to {list_path}")
+        if carried:
+            print(f"script-test-inputs: kept {len(carried)} entr{'y' if len(carried) == 1 else 'ies'} this "
+                  "configure does not register but the CMake source still does (a configure option "
+                  "is off here): " + ", ".join(carried))
         excluded = outside_gate_profile(inventory, root)
         if excluded:
             print(f"script-test-inputs: excluded {len(excluded)} test(s) registered from examples/: "

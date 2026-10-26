@@ -164,14 +164,20 @@ set(_PULP_WEBUI_CANVAS_SOURCES
     ${_PULP_WEBUI_ROOT}/core/canvas/src/text_shaper.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/text_run_planner.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/text_font_context.cpp
+    ${_PULP_WEBUI_ROOT}/core/canvas/src/font_weight_match.cpp
+    ${_PULP_WEBUI_ROOT}/core/canvas/src/css_weight_font_manager.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/bidi.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/emoji_segmenter.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/font_options.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/font_scope.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/font_resolver.cpp
+    ${_PULP_WEBUI_ROOT}/core/canvas/src/font_tables.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/font_registry_stubs.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/font_flight_recorder.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/bundled_fonts.cpp
+    # The embedded font table bundled_fonts.cpp reads (Skia-free, shared with
+    # the desktop CoreText registry).
+    ${_PULP_WEBUI_ROOT}/core/canvas/src/bundled_font_blobs.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/noto_color_emoji_stub.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/sdf_atlas.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/msdf_atlas.cpp
@@ -185,6 +191,8 @@ set(_PULP_WEBUI_CANVAS_SOURCES
     ${_PULP_WEBUI_ROOT}/core/canvas/src/skia_canvas_path.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/skia_canvas_fonts.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/skia_canvas_text.cpp
+    # Laid-out paragraph cache; skia_canvas_text.cpp builds through it.
+    ${_PULP_WEBUI_ROOT}/core/canvas/src/skia_paragraph_cache.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/skia_canvas_filter.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/skia_canvas_mask.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/skia_canvas_gradients.cpp
@@ -207,6 +215,8 @@ set(_PULP_WEBUI_VIEW_SOURCES
     # view.cpp does not link without it.
     ${_PULP_WEBUI_ROOT}/core/view/src/view_lifecycle.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/view_paint.cpp
+    ${_PULP_WEBUI_ROOT}/core/view/src/border_style.cpp
+    ${_PULP_WEBUI_ROOT}/core/view/src/text_line_metrics.cpp
     # FU-2 partial-repaint damage model — pure, no platform deps. Kept in the
     # web source set so the view lib links identically across native + wasm.
     ${_PULP_WEBUI_ROOT}/core/view/src/repaint_damage.cpp
@@ -316,6 +326,11 @@ file(GLOB _PULP_WEBUI_PLATFORM_SOURCES
 # in any non-wasm compile.
 list(APPEND _PULP_WEBUI_PLATFORM_SOURCES
     "${_PULP_WEBUI_ROOT}/core/platform/platform/web/clipboard_web.cpp")
+
+# The CSS weight font manager subclasses SkFontMgr, whose type info the
+# prebuilt Skia does not export.
+set_source_files_properties("${_PULP_WEBUI_ROOT}/core/canvas/src/css_weight_font_manager.cpp"
+    PROPERTIES COMPILE_OPTIONS "-fno-rtti")
 
 set(_PULP_WEBUI_ALL_SOURCES
     ${_PULP_WEBUI_RUNTIME_SOURCES}

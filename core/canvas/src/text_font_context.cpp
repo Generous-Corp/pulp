@@ -5,6 +5,9 @@
 #ifdef PULP_HAS_SKIA
 
 #include <pulp/canvas/bundled_fonts.hpp>
+#include "font_weight_match.hpp"
+
+#include "system_ui_typeface.hpp"
 
 #include "include/core/SkData.h"
 #include "include/core/SkFontArguments.h"
@@ -202,6 +205,12 @@ sk_sp<skia::textlayout::FontCollection> TextFontContext::font_collection() const
 
     auto collection = sk_make_sp<skia::textlayout::FontCollection>();
     collection->setAssetFontManager(provider);
+#if defined(__APPLE__)
+    // First in the collection's order: SkParagraph finds the system UI font by
+    // its private name, which the platform manager does not answer reliably.
+    if (platform_font_db_usable())
+        collection->setDynamicFontManager(detail::make_system_ui_font_manager(provider));
+#endif
 
     // Tell SkParagraph what default families to consult for emoji
     // codepoints. The list is searched in order; we put the emoji
@@ -214,10 +223,14 @@ sk_sp<skia::textlayout::FontCollection> TextFontContext::font_collection() const
     }
 
     if (font_mgr_ && platform_font_db_usable()) {
+        // Platform families are matched by CSS weight rules, as FontResolver
+        // matches them, so a paragraph paints the face resolved_face_identity()
+        // reports rather than the platform's nearest weight.
+        sk_sp<SkFontMgr> css_mgr = make_css_weight_font_manager(font_mgr_);
         if (defaults.empty()) {
-            collection->setDefaultFontManager(font_mgr_);
+            collection->setDefaultFontManager(css_mgr);
         } else {
-            collection->setDefaultFontManager(font_mgr_, defaults);
+            collection->setDefaultFontManager(css_mgr, defaults);
         }
     } else {
         // No system font database (browser: SkFontMgr_New_Custom_Empty). The

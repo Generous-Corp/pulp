@@ -99,9 +99,20 @@ headers with another's libraries.
 
 ## Building from source (only when no cached libs anywhere)
 
-`tools/build-skia.sh` builds the currently pinned chrome/m153 Skia+Dawn from source — slow
-(tens of minutes). Prefer the release zip from
-`danielraffel/skia-builder` (chrome/m153, see `external/skia-build/VERSION.md`)
+`tools/build-skia.sh` builds the currently pinned chrome/m157 Skia+Dawn from source — slow
+(tens of minutes). It passes the manifest's exact `skia_commit` to skia-builder
+(`-revision`, so the builder ref must support it) and refuses to copy output
+unless the built Skia and synced Dawn HEADs equal `skia_commit` / `built_dawn`;
+the moving milestone branch only seeds the clone. skia-builder keeps its Skia
+checkout and outputs under `external/skia-builder/build/` (`src/skia`,
+`include`, `share`, `<platform>-gpu`), and that tree persists between runs, so
+the script clears this run's outputs before building and publishes only them:
+the result replaces `external/skia-build/build/` whole, staged in a sibling
+directory and renamed into place, so another revision's slice never survives
+beside the new one and a failed copy keeps the previous generation.
+`PULP_SKIA_DRY_RUN=1` prints the resolved pins and builder command without
+cloning anything. Prefer the release zip from
+`danielraffel/skia-builder` (chrome/m157, see `external/skia-build/VERSION.md`)
 or the immutable fetcher-owned cache generation above.
 
 For m153, prove the provider exposes both new integration surfaces before a
@@ -113,9 +124,20 @@ python3 tools/scripts/verify_skia_m153_capabilities.py \
 ```
 
 The directory must be the fetcher's exact stamped manifest generation. This
-compile/links/runs `SkLogHandler` and
+compile/links/runs `SkLogHandler` and a client `SkExecutor` subclass wired into
 `skgpu::graphite::ContextOptions::fExecutor`; headers or unstamped local
 libraries alone are not a pass.
+
+m157 removed Skia's default executors (`SkExecutor::MakeFIFOThreadPool`,
+`MakeLIFOThreadPool`, the default-executor factory), so threaded Graphite
+pipeline compilation now always means a client-owned subclass. Compile that
+subclass's translation unit **without RTTI** (`-fno-rtti`, MSVC `/GR-`):
+skia-builder's official builds disable RTTI, `~SkExecutor` is the class's
+key function, and so `libskia.a` emits no `typeinfo for SkExecutor`. An
+RTTI-enabled subclass fails at link with that undefined symbol. Pulp leaves
+`fExecutor` null today, so Graphite compiles pipelines inline on the render
+thread; adopting an executor is a measured first-visible-frame decision, not a
+toolchain one.
 `SkLogHandler` is process-global and first-install-wins, while the executor must
 outlive the Graphite context. Generic installation and executor policy are
 Vellum-owned; a Pulp build should consume those contracts rather than install a
@@ -199,6 +221,19 @@ control is not valid measurement. Do not reuse this dev tracing build as a
 shipping artifact.
 
 ## Gotchas (each cost real time)
+
+- **Apple builds link a trimmed copy of `libskunicode_icu.a`.** The archive's
+  embedded ICU data is 10.9 MB; `PulpSkiaIcuData.cmake` (called from FindSkia,
+  `PULP_ICU_DATA_SUBSET=ON` by default) rewrites the `libicu.icudtl_dat.o`
+  member into `build/pulp-skia-icu-subset/<key>/` with only the data the linked
+  ICU code reads (4.9 MB). A Skia bump that changes the data object's layout
+  makes the rewrite refuse and fall back to the full archive with a configure
+  WARNING, and then `icu-data-subset-linked` / `plugin-footprint-PulpGain` fail:
+  read the warning, do not just raise the budget. ICU fails **silently** when an
+  item is missing (a Thai or CJK word break collapses to one segment, no
+  error), which is why `pulp-test-icu-data-breaks` pins the full-data
+  boundaries; a new ICU consumer (collation, time zones, number formatting)
+  needs the policy in `tools/cmake/scripts/icu_data_subset.py` widened first.
 
 - **Windows ARM64 keeps its `arm64/` slice; never flatten it.** FindSkia.cmake
   selects `build/win-gpu/lib/Release/arm64/` for an arm64-win target and refuses

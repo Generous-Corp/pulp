@@ -198,6 +198,23 @@ class EmbeddedPairManifest(unittest.TestCase):
                 fetch_v8.validate_embedded_manifest(
                     zf, manifest, manifest["dependencies"][1], "mac-arm64")
 
+    def test_skia_ahead_of_the_v8_pair_fails_closed(self):
+        # A V8 release stays bound to the Skia/Dawn it was built against: moving
+        # Pulp's active Skia ahead of the pair is refused even when the archive
+        # agrees with the V8 entry's own paired_* fields.
+        manifest, pair = _matched_pair_fixture()
+        skia = manifest["dependencies"][0]
+        skia["version"] = "chrome/m157"
+        skia["determinism"] = {"skia_commit": "7" * 40, "built_dawn": "8" * 40}
+        embedded = {"v8_version": "15.3.76.5", "platform": "mac", "arch": "arm64",
+                    "lib": "lib/libv8.dylib", "shared": True, "sealed": True,
+                    "i18n": True, "pair": pair}
+        with tempfile.TemporaryDirectory() as td, self._archive(
+                pathlib.Path(td), embedded) as zf:
+            with self.assertRaisesRegex(ValueError, "active validated_skia_release"):
+                fetch_v8.validate_embedded_manifest(
+                    zf, manifest, manifest["dependencies"][1], "mac-arm64")
+
     def test_top_level_artifact_identity_drift_fails_closed(self):
         manifest, pair = _matched_pair_fixture()
         embedded = {"v8_version": "15.3.76.5", "platform": "mac",

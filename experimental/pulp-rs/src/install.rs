@@ -44,6 +44,12 @@ mod install_import_design;
 use install_control_broker::{refuse_downgrade, InstallerLock as ControlBrokerInstallerLock};
 pub use install_import_design::import_design_basename;
 
+/// Download URL of any asset on the release tagged `v<version>`.
+#[must_use]
+pub fn release_asset_url(version: &str, asset: &str) -> String {
+    format!("https://github.com/Generous-Corp/pulp/releases/download/v{version}/{asset}")
+}
+
 /// Build the release-asset URL for a target. Mirrors the
 /// `pulp::cli::pulp_upgrade_url_for` C++ helper character-for-character.
 #[must_use]
@@ -54,8 +60,227 @@ pub fn upgrade_url_for(version: &str, platform: &str, arch: &str) -> (String, St
         "tar.gz"
     };
     let asset = format!("pulp-{platform}-{arch}.{ext}");
-    let url = format!("https://github.com/Generous-Corp/pulp/releases/download/v{version}/{asset}");
+    let url = release_asset_url(version, &asset);
     (asset, url)
+}
+
+/// Checksum manifest the release workflow publishes beside every archive.
+pub const MANIFEST_ASSET_NAME: &str = "SHA256SUMS";
+
+/// A fresh directory only this user can enter, created exclusively under
+/// `<pulp home>/tmp`. The checksum check and the extraction that follows it
+/// must share a directory nobody else could have pre-created: a fixed name in
+/// the shared system temp dir lets another local user swap the archive between
+/// the two steps. The caller owns cleanup.
+///
+/// # Errors
+///
+/// [`CliError::Other`] when no private directory could be created.
+pub fn private_temp_dir(prefix: &str) -> Result<PathBuf> {
+    use std::collections::hash_map::RandomState;
+    use std::hash::BuildHasher;
+
+    let root = crate::config::pulp_home().map_or_else(std::env::temp_dir, |home| home.join("tmp"));
+    let mut root_builder = fs::DirBuilder::new();
+    root_builder.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        root_builder.mode(0o700);
+    }
+    root_builder.create(&root).map_err(|e| {
+        CliError::Other(format!(
+            "could not create private temp root {}: {e}",
+            root.display()
+        ))
+    })?;
+    let nonce_source = RandomState::new();
+    for attempt in 0u32..32 {
+        let nonce = nonce_source.hash_one((std::process::id(), attempt, SystemTime::now()));
+        let candidate = root.join(format!("{prefix}-{nonce:016x}"));
+        let mut builder = fs::DirBuilder::new();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            builder.mode(0o700);
+        }
+        match builder.create(&candidate) {
+            Ok(()) => return Ok(candidate),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => {
+                return Err(CliError::Other(format!(
+                    "could not create private temp dir {}: {e}",
+                    candidate.display()
+                )))
+            }
+        }
+    }
+    Err(CliError::Other(format!(
+        "could not create a private temp dir under {}",
+        root.display()
+    )))
+}
+
+/// The release product matrix, embedded so the floor the CLI enforces is the
+/// one the release workflow publishes with. The matrix is the only place a
+/// floor is written down.
+const RELEASE_PRODUCT_MATRIX_JSON: &str =
+    include_str!("../../../tools/scripts/release_product_matrix.json");
+
+/// First release version whose publish step guaranteed `SHA256SUMS`. The
+/// manifest is verified whenever it is present; this floor decides only what
+/// a missing one means: releases at or above it are refused, older ones may
+/// install unverified with a loud warning.
+///
+/// # Errors
+///
+/// [`CliError::Other`] when the embedded matrix lacks the floor.
+pub fn checksum_manifest_floor() -> Result<String> {
+    let matrix: serde_json::Value =
+        serde_json::from_str(RELEASE_PRODUCT_MATRIX_JSON).map_err(|e| {
+            CliError::Other(format!(
+                "embedded release_product_matrix.json is not JSON: {e}"
+            ))
+        })?;
+    matrix
+        .get("checksum_manifest_floor")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(|| {
+            CliError::Other(
+                "embedded release_product_matrix.json has no checksum_manifest_floor".into(),
+            )
+        })
+}
+
+/// The manifest entry whose filename equals `asset` exactly, as lowercase
+/// hex. A malformed line, a duplicate entry, or a missing entry is an error:
+/// the manifest must vouch for exactly one set of bytes under that name.
+///
+/// # Errors
+///
+/// [`CliError::Other`] naming the defect.
+pub fn manifest_digest_for(manifest: &str, asset: &str) -> Result<String> {
+    let mut found: Option<String> = None;
+    for (index, raw) in manifest.lines().enumerate() {
+        let line = raw.trim_end();
+        if line.is_empty() {
+            continue;
+        }
+        let bytes = line.as_bytes();
+        let well_formed = bytes.len() >= 67
+            && bytes[..64].iter().all(u8::is_ascii_hexdigit)
+            && bytes[64] == b' '
+            && (bytes[65] == b' ' || bytes[65] == b'*');
+        if !well_formed {
+            return Err(CliError::Other(format!(
+                "malformed {MANIFEST_ASSET_NAME} line {}",
+                index + 1
+            )));
+        }
+        if &line[66..] != asset {
+            continue;
+        }
+        if found.is_some() {
+            return Err(CliError::Other(format!(
+                "{MANIFEST_ASSET_NAME} lists {asset} more than once"
+            )));
+        }
+        found = Some(line[..64].to_ascii_lowercase());
+    }
+    found.ok_or_else(|| CliError::Other(format!("{MANIFEST_ASSET_NAME} has no entry for {asset}")))
+}
+
+/// True when `version` is at or above `floor`. Pre-release and build
+/// suffixes are dropped before comparing, matching the C++ verifier: an exact
+/// floor pre-release sits at the floor, never below it. Unparsable input
+/// counts as at-or-above so a malformed version never unlocks the legacy path.
+#[must_use]
+pub fn version_at_or_above(version: &str, floor: &str) -> bool {
+    let parse = |s: &str| {
+        semver::Version::parse(s.trim_start_matches(['v', 'V']))
+            .ok()
+            .map(|v| semver::Version::new(v.major, v.minor, v.patch))
+    };
+    match (parse(version), parse(floor)) {
+        (Some(v), Some(f)) => v >= f,
+        _ => true,
+    }
+}
+
+/// Verdict of [`verify_release_archive`] for an archive that may be extracted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ArchiveVerification {
+    /// The archive's digest matches its manifest entry (lowercase hex).
+    Verified(String),
+    /// A pre-floor release with no manifest; the message says what was skipped.
+    UnverifiedLegacy(String),
+}
+
+/// Decide whether `archive` (published as `asset` on release `version`) may be
+/// extracted. `manifest` is the `SHA256SUMS` text fetched for that release,
+/// or `None` when it could not be fetched.
+///
+/// # Errors
+///
+/// [`CliError::Other`] when the archive must not be extracted: no manifest at
+/// or above the floor, no usable entry, or a digest mismatch.
+pub fn verify_release_archive(
+    archive: &Path,
+    asset: &str,
+    version: &str,
+    floor: &str,
+    manifest: Option<&str>,
+) -> Result<ArchiveVerification> {
+    let Some(manifest) = manifest else {
+        if version_at_or_above(version, floor) {
+            return Err(CliError::Other(format!(
+                "could not fetch {MANIFEST_ASSET_NAME} for release v{version} (the release is \
+                 missing it, or the download failed); releases from v{floor} onward must carry \
+                 one, so {asset} was not extracted"
+            )));
+        }
+        return Ok(ArchiveVerification::UnverifiedLegacy(format!(
+            "release v{version} predates the {MANIFEST_ASSET_NAME} manifest (floor v{floor}); \
+             {asset} was NOT verified before extraction"
+        )));
+    };
+    let expected = manifest_digest_for(manifest, asset).map_err(|e| {
+        CliError::Other(format!(
+            "{e} on release v{version}; {asset} was not extracted"
+        ))
+    })?;
+    let observed = crate::cmd::trace_fetch::sha256_hex(archive)?;
+    if observed != expected {
+        return Err(CliError::Other(format!(
+            "SHA-256 mismatch for {asset} on release v{version}: expected {expected}, got \
+             {observed}; the archive was not extracted"
+        )));
+    }
+    Ok(ArchiveVerification::Verified(observed))
+}
+
+/// Fetch the release manifest to `dest`; `None` when it is absent or the
+/// download fails (the caller decides what absence means for this version).
+fn fetch_manifest(url: &str, dest: &Path) -> Option<String> {
+    let dest_str = dest.to_str()?;
+    let status = Command::new("curl")
+        .args([
+            "-fsL",
+            "--connect-timeout",
+            "5",
+            "--max-time",
+            "60",
+            "-o",
+            dest_str,
+            url,
+        ])
+        .status()
+        .ok()?;
+    if !status.success() {
+        return None;
+    }
+    fs::read_to_string(dest).ok()
 }
 
 /// Platform string used in release asset names. Matches the C++ side.
@@ -1410,6 +1635,20 @@ pub fn fetch_and_extract(plan: &InstallPlan, tmp_dir: &Path) -> Result<Extracted
             plan.url,
             dl.code()
         )));
+    }
+    let manifest = fetch_manifest(
+        &release_asset_url(&plan.version, MANIFEST_ASSET_NAME),
+        &tmp_dir.join(MANIFEST_ASSET_NAME),
+    );
+    match verify_release_archive(
+        &asset_path,
+        &plan.asset,
+        &plan.version,
+        &checksum_manifest_floor()?,
+        manifest.as_deref(),
+    )? {
+        ArchiveVerification::Verified(digest) => println!("  Verified SHA-256: {digest}"),
+        ArchiveVerification::UnverifiedLegacy(why) => eprintln!("WARNING: {why}"),
     }
     extract_archive(&asset_path, tmp_dir, plan.is_zip)?;
     locate_binaries_in_archive(tmp_dir)

@@ -323,7 +323,7 @@ void Stepper::on_mouse_down(Point pos) {
     else {
         pressed_zone_ = -1;
         // Center cell: start typing a value (the host focuses us on click).
-        editing_ = true;
+        set_editing_(true);
         char buf[32]; std::snprintf(buf, sizeof(buf), "%g", value_);
         edit_buffer_ = buf;
     }
@@ -336,7 +336,10 @@ void Stepper::on_mouse_drag(Point pos) {
     // just-started edit and scrub instead.
     if (!scrubbing_ && std::abs(press_y_ - pos.y) < kScrubThreshold) return;
     scrubbing_ = true;
-    if (editing_) { editing_ = false; edit_buffer_.clear(); }
+    if (editing_) {
+        set_editing_(false);
+        edit_buffer_.clear();
+    }
     const double raw = drag_start_value_
         + static_cast<double>(press_y_ - pos.y) / kScrubPxPerStep * step_;
     set_value(min_ + std::round((raw - min_) / step_) * step_);
@@ -366,7 +369,10 @@ bool Stepper::on_key_event(const KeyEvent& event) {
     if (!editing_ || !event.is_down) return false;
     if (event.key == KeyCode::enter) { commit_edit_(); return true; }
     if (event.key == KeyCode::escape) {
-        editing_ = false; edit_buffer_.clear(); request_repaint(); return true;
+        set_editing_(false);
+        edit_buffer_.clear();
+        request_repaint();
+        return true;
     }
     if (event.key == KeyCode::backspace) {
         if (!edit_buffer_.empty()) edit_buffer_.pop_back();
@@ -381,7 +387,7 @@ void Stepper::on_focus_changed(bool gained) {
 }
 void Stepper::commit_edit_() {
     if (!editing_) return;
-    editing_ = false;
+    set_editing_(false);
     try {
         if (!edit_buffer_.empty()) {
             set_value(std::stod(edit_buffer_));
@@ -653,7 +659,7 @@ void NumberBox::on_mouse_down(Point pos) {
     else {
         pressed_zone_ = -1;
         // Center cell: start typing a value (the host focuses us on click).
-        editing_ = true;
+        set_editing_(true);
         char buf[32]; std::snprintf(buf, sizeof(buf), "%g", value_);
         edit_buffer_ = buf;
     }
@@ -665,7 +671,10 @@ void NumberBox::on_mouse_drag(Point pos) {
     // a click-to-type. Once it becomes a drag, cancel any edit and scrub.
     if (!scrubbing_ && std::abs(press_y_ - pos.y) < kScrubThreshold) return;
     scrubbing_ = true;
-    if (editing_) { editing_ = false; edit_buffer_.clear(); }
+    if (editing_) {
+        set_editing_(false);
+        edit_buffer_.clear();
+    }
     const double raw = drag_start_value_
         + static_cast<double>(press_y_ - pos.y) / kScrubPxPerStep * step_;
     set_value(std::round(raw / step_) * step_);   // snap to the step grid
@@ -695,7 +704,10 @@ bool NumberBox::on_key_event(const KeyEvent& event) {
     if (!editing_ || !event.is_down) return false;
     if (event.key == KeyCode::enter) { commit_edit_(); return true; }
     if (event.key == KeyCode::escape) {
-        editing_ = false; edit_buffer_.clear(); request_repaint(); return true;
+        set_editing_(false);
+        edit_buffer_.clear();
+        request_repaint();
+        return true;
     }
     if (event.key == KeyCode::backspace) {
         if (!edit_buffer_.empty()) edit_buffer_.pop_back();
@@ -710,7 +722,7 @@ void NumberBox::on_focus_changed(bool gained) {
 }
 void NumberBox::commit_edit_() {
     if (!editing_) return;
-    editing_ = false;
+    set_editing_(false);
     try {
         if (!edit_buffer_.empty()) set_value(std::stod(edit_buffer_));
     } catch (...) {}

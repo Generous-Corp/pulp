@@ -44,7 +44,7 @@ cannot repair them; only a new tag can. The 7-day check catches a subset
 that outlives its purpose, NOT a release that shipped incomplete inside the
 window — that one is already immutable by the time the issue opens.
 
-**Intel-Mac release slice — CROSS-COMPILED on Apple Silicon, required.** The `darwin-x64` build+smoke rows (`os: macos-15-xcompile`) cross-compile the x86_64 CLI+SDK on the healthy arm64 runner via `-DCMAKE_OSX_ARCHITECTURES=x86_64` (C++) + `-DPULP_RUST_CLI_TARGET=x86_64-apple-darwin` (Rust CLI). They prefer the per-leg override, then `PULP_RELEASE_MACOS_RUNS_ON_JSON` (the dedicated `pulp-build-vm-release` Tart pool), then the legacy `PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON`, and finally hosted `macos-15`. The native GitHub-hosted `macos-15-intel` image is deliberately avoided: it CPU-pegs on a full CLI+SDK build (observed: 71-min build cancelled at a 75-min cap, every run) and its timeout **cancellation** (not a clean failure) makes `build-cli`'s aggregate `cancelled` and skips `release` — the earlier native leg never shipped an artifact for this reason. The native Mac Mini remains a separate advisory/nightly portability canary. The pair is REQUIRED (`release-publish.yml` lists it unconditionally). Two leg-specific gotchas: (a) the arm64 runner's bootstrap prefetches arm64 Skia, so the leg `rm -rf external/skia-build/build` before the x86_64 Skia fetch and asserts `lipo -archs libskia.a == x86_64`; (b) `rustup target add x86_64-apple-darwin` is required (the toolchain pins the channel but no targets). **Load-bearing CI gotchas that caused a multi-hour release stall:**
+**Intel-Mac release slice — CROSS-COMPILED on Apple Silicon, required.** The `darwin-x64` build+smoke rows (`os: macos-15-xcompile`) cross-compile the x86_64 CLI+SDK on the healthy arm64 runner via `-DCMAKE_OSX_ARCHITECTURES=x86_64` (C++) + `-DPULP_RUST_CLI_TARGET=x86_64-apple-darwin` (Rust CLI). They prefer the per-leg override, then `PULP_RELEASE_MACOS_RUNS_ON_JSON` (the dedicated `pulp-build-vm-release` Tart pool), then the legacy `PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON`, and finally hosted `macos-15`. The native GitHub-hosted `macos-15-intel` image is deliberately avoided: it CPU-pegs on a full CLI+SDK build (observed: 71-min build cancelled at a 75-min cap, every run) and its timeout **cancellation** (not a clean failure) makes `build-cli`'s aggregate `cancelled` and skips `release` — the earlier native leg never shipped an artifact for this reason. The native Mac Mini remains a separate advisory/nightly portability canary. The pair is REQUIRED (`release-publish.yml` lists it unconditionally). Two leg-specific gotchas: (a) the arm64 runner's bootstrap prefetches arm64 Skia, so the leg `rm -rf external/skia-build/build` before the x86_64 Skia fetch and asserts `lipo -archs libskia.a == x86_64`; (b) the x86_64 std must be in the PINNED toolchain: `experimental/pulp-rs/rust-toolchain.toml` (generated from `tools/toolchain/manifest.toml`) names the exact Rust and its `x86_64-apple-darwin` target, and the "Provide the pinned Rust toolchain" step (`tools/ci/provide_pinned_rust.sh`) installs both. A bare `rustup target add` at the repo root adds the std to the DEFAULT toolchain, which cargo inside the crate never uses, and the cross-build then fails. **Load-bearing CI gotchas that caused a multi-hour release stall:**
 - `continue-on-error` on a matrix leg masks a clean **failure** (leg finishes non-zero) but NOT a **cancellation** (timeout / stuck-queued / run-cancel). A cancelled advisory leg still turns the aggregate `cancelled`. If you ever reintroduce an advisory leg, wrap its long steps in a shell `timeout` so they exit non-zero (clean fail) *before* the job `timeout-minutes` cancels them.
 - The `release` job's `if:` uses `always() && needs.build-cli.result == 'success' && needs.smoke-cli.result == 'success' && needs.universal-arch-gate.result == 'success'` (NOT the implicit `success()` over all needs). `always()` forces evaluation even if a needed job failed, so nothing silently skips publish; the explicit `== 'success'` checks are what enforce the requirement. All three are now required (the universal-arch-gate was re-required once its shell-bug false failure was fixed). A genuine build/smoke/gate failure blocks publish.
 - To recover a stuck release when the tag already exists but no run published: the successful matrix legs' CLI+SDK artifacts persist on the (even cancelled) run — `gh run download <run> -R Generous-Corp/pulp`, then `gh release create <tag> --latest --notes-file <composed>` with `compose_release_notes.py` for the body. On `workflow_dispatch` the pipeline itself publishes directly (draft only on tag-push), so a hand-published backfill matches its semantics.
@@ -100,7 +100,9 @@ Advisory only — never blocks. Full contract + override knobs live in the
 On a workstation, `codesign` and `notarytool` can pop a macOS **keychain "allow
 access"** dialog or a **1Password** prompt — which silently wedges any headless,
 SSH, or CI sign. Two root causes, two durable fixes, both codified in
-`pulp ship doctor` (script: `tools/scripts/ensure_signing_ready.sh`):
+`pulp ship doctor` (script: `tools/scripts/ensure_signing_ready.sh`; in an SDK
+consumer project, the copy the selected SDK installs at
+`share/pulp/ship/ensure_signing_ready.sh`):
 
 1. **Signing key in the *login* keychain** → `codesign`/1Password prompt. Fix:
    sign from a **dedicated keychain** whose key is authorized for `codesign` via
@@ -248,6 +250,47 @@ built with PULP_TRACING=ON," the fix is to rebuild with tracing off (the
 default `pulp build`), not to reach for `--allow-tracing`. The scanner lives in
 `tools/cli/ship_tracing_guard.hpp` (unit-tested in `test/test_ship_tracing_guard.cpp`).
 
+## PULP_DEV_BUILD: ship builds `build-ship/`
+
+A build dir whose `CMakeCache.txt` records `PULP_DEV_BUILD=ON` also records
+the on-disk `UI_SCRIPT` path, theme path and asset roots so a hot-reloading
+editor reads the developer's source tree. The `pulp` CLI turns the option on
+for every developer-loop configure, so a plain `pulp build` dir is a dev
+build. `pulp ship` neither ships nor refuses it: `sign`, `package` and
+`release` configure `<root>/build-ship` from the dev cache and build it
+through the governed build lease, then ship from there; `check`, `notarize`
+and `share` read `build-ship/` once it exists (and say so), and
+`notarize`/`share` point at `pulp ship package` when it does not.
+`--allow-dev-build` ships `build/` as it is and prints a warning; `sign
+--path <artifact>` builds nothing (an artifact inside `build/` is still
+refused). The helpers live in `tools/cli/ship_dev_build_guard.hpp`
+(unit-tested in `test/test_ship_dev_build_guard.cpp`; the CLI path in
+`test/test_cli_ship_shellout.cpp` `[dev-build]`).
+
+Gotchas:
+
+- **The whole dev configuration carries over, not an allowlist.**
+  `ship_build_initial_cache()` writes every non-INTERNAL/STATIC cache entry
+  (formats such as `PULP_ENABLE_AAX`/`PULP_AAX_SDK_DIR`, `PULP_ENABLE_ARA`,
+  compiler, sysroot, SDK paths) into `build-ship/pulp-ship-initial-cache.cmake`,
+  which the configure loads with `cmake -C`; only `PULP_BUILD_TESTS`,
+  `PULP_DEV_BUILD`, `PULP_DEV_BRIDGE_EXEC` and `PULP_ENABLE_AUDIO_PROBES` are
+  dropped (the first two set OFF) and `PULP_PROFILE` is forced to `release`.
+  The generator is INTERNAL and goes on the command line (`-G`). An earlier
+  version carried ten named entries and silently dropped an AAX-enabled
+  plug-in's AAX bundle.
+- **The configure re-runs when it must.** A ship cache without
+  `CMAKE_GENERATOR` (a failed configure), a dev cache newer than the ship
+  cache, or an initial-cache script that differs from the one last written all
+  reconfigure; otherwise only the incremental build runs.
+- **The artifact set is compared after the build.** If `build-ship/` lacks a
+  plug-in artifact `build/` has (`VST3/`, `CLAP/`, `AU/`, `AAX/`, `LV2/`,
+  `Standalone/` bundles), the ship is refused and the message names it;
+  extras in `build-ship/` are fine, because the dev build may have been built
+  for a subset of targets.
+`tools/scripts/build_combined_installer.sh` takes finished artifacts, not a
+build dir, and does not configure, so it carries no such step.
+
 ## Development-SDK ship guard
 
 `package`, `notarize`, `release`, and `share` **refuse** a project configured
@@ -274,6 +317,89 @@ given SDK is releasable.
 Unit-tested in both directions in `test/test_sdk_distribution_guard.cpp`, plus
 the CMake-level provenance contract in
 `test/cmake/test_sdk_provenance_contract.cmake`.
+
+### Dev-shared builds (`PULP_DEV_SHARED_UI`) never ship, and shipping still works
+
+`pulp dev` / `pulp loop` in SDK projects on macOS (and `pulp build
+--dev-shared`) link plug-in modules against
+`libpulp-dev-shared-ui.<version>.dylib` in the build tree
+(`tools/cmake/PulpDevSharedUi.cmake`). That module loads only on the machine and
+in the directory that built it. The rule: static builds ship exactly as before;
+a dev-shared build may be signed for local loading, never distributed.
+
+- `cmd_ship()` treats a dev-shared dir (`build_dir_is_dev_shared()` in
+  `tools/cli/ship_dev_build_guard.hpp`) like a `PULP_DEV_BUILD` dir: `package`,
+  `release` and non-local `sign` build `build-ship/` through `ensure_ship_build()`
+  and ship from it; `notarize`, `share` and `check` read it once it exists.
+  `PULP_DEV_SHARED_UI` is in `kShipBuildDroppedEntries` and set OFF explicitly in
+  the initial cache. Unlike a dev build, `--allow-dev-build` cannot keep a
+  dev-shared dir.
+- `refuse_dev_shared_build()` is the backstop when the redirect did not apply
+  (`sign --path` with a Developer ID and no `build-ship/`): it prints the
+  outermost command as one copy-pasteable line,
+  `PULP_DEV_SHARED_UI=0 pulp build --all && pulp ship <args>`.
+- `is_local_signing_identity()` (ad hoc `-`, `Apple Development: ...`,
+  `Mac Developer: ...`, matched through the colon so a lookalike name that only
+  starts with those words is not local; from `--identity`) lets `sign` take a dev-shared build as it
+  is: no `build-ship/`, no artifact refusal. Ad hoc signing also skips the signing-keychain preflight,
+  because it needs no keychain.
+- `pulp::cli::dev_shared_artifact_offender()` scans every selected artifact for a
+  file named `libpulp-dev-shared-ui.*` or containing those bytes (the runtime's
+  install name, which is in every linked module's load commands). It runs at the
+  same call sites as the Vellum D15 scan, through
+  `enforce_no_development_runtimes()` in `tools/cli/cmd_ship.cpp`, and fails
+  closed on an uninspectable tree.
+- `tools/scripts/build_combined_installer.sh` greps its inputs for the same bytes
+  before any signing tool runs; a grep read error also refuses.
+- `notarize` and `share` also open containers another tool built,
+  `enforce_no_development_runtimes_in_containers()`: a `.zip` through
+  `ditto -x -k`, a flat `.pkg` through `pkgutil --expand-full`, a `.dmg` mounted
+  `hdiutil attach -readonly -nobrowse -noverify` in a private temp dir and
+  always detached by the scratch object's destructor. The D15 and dev-shared
+  scans then run on the contents, without following symlinks out of the
+  container (a disk image's /Applications alias). Containers inside it are
+  recognized by content (zip header, xar header, UDIF `koly` trailer) or
+  extension and opened in turn, up to 3 levels; a deeper one is refused, as is
+  a container that does not open (fail closed), on `--dry-run` as well: a
+  placeholder `.dmg` that is not a disk image fails `hdiutil attach` and
+  stops the share plan. A test that only wants a plan needs a real image.
+- Every container tool runs with stdin from `/dev/null`, and `hdiutil attach`
+  takes `-stdinpass`. Without that, `std::system` hands the tools the
+  terminal, and an encrypted image or one with a licence agreement (SLA)
+  waits for an answer, so `notarize` hangs instead of refusing. Fixture for
+  an encrypted image: `printf pw | hdiutil create -encryption AES-128
+  -stdinpass -srcfolder <dir> <out>.dmg`. A test of the hang has to keep the
+  child's stdin open and silent (`exec "$@" < <(exec sleep 90)` under bash):
+  with stdin at EOF the old code failed fast and looked fixed.
+- Before extracting, the scan reads the expanded size (`zipinfo -t` for a
+  zip; the `installKBytes` of each `PackageInfo` from a shallow
+  `pkgutil --expand` for a pkg) and refuses unless it fits on the temp volume
+  with 256 MiB to spare. A disk image is mounted, not copied, so it is not
+  sized.
+- The tools are forked and exec'd directly (`run_ship_tool`), not through
+  `std::system`, so the scan knows the running child's pid. SIGINT, SIGTERM
+  and SIGHUP during a scan kill that child, detach the registered mountpoints
+  and remove the scan's temp root from the signal handler (fork/execv only,
+  paths in fixed buffers), then re-raise. Killing the child first matters: an
+  orphaned `ditto` keeps writing into the directory the handler removed. Best effort: SIGKILL leaves the
+  mount, which `hdiutil info` lists under `pulp-ship-container-scan`.
+
+There is no override flag. Tests: the `[dev-shared]` cases in
+`test/test_sdk_distribution_guard.cpp` and `test/test_cli_ship_shellout.cpp`:
+- `package` (also with `--allow-dev-build`), `release` and Developer ID `sign`
+  building a static `build-ship/` (real CMake, `LANGUAGES NONE` project);
+  `notarize` and `share` without `build-ship/` shipping nothing;
+- a static build that signs ad hoc, verifies with `codesign --verify --strict`,
+  and packages;
+- a dev-shared build that signs ad hoc in place, while a Developer ID
+  `sign --path` of it prints the exact fix;
+- `sign --path`, `sign` scan, `package`, `notarize` and `share` against artifact
+  bytes;
+
+plus
+`test_dev_shared_build_is_rejected_before_signing` in
+`tools/scripts/test_build_combined_installer.py`. A new distribution path must
+call `enforce_no_development_runtimes()` on exactly the inputs it selected.
 
 ## Workflows
 
@@ -353,9 +479,19 @@ component-selectable `.pkg` — it collects every built bundle (Standalone →
 `create_combined_pkg` call so the user is never forced to install every format.
 `--separate` restores the legacy behavior (one `.pkg` per format); `--dmg`
 produces disk images instead. The routing lives in the `pulp ship package`
-branch of `tools/cli/cmd_ship.cpp`.
+branch of `tools/cli/cmd_ship.cpp`. A failed installer or an empty run exits 1;
+do not read "Created N .pkg" as success, read the exit code.
+
+**`pulp ship` in an SDK consumer project.** `ship` works in a project made by
+`pulp create` (`pulp.toml`, no `core/`), not only in the Pulp checkout. The
+signing preflight and the default `entitlements.plist` come from the selected
+SDK's `share/pulp/ship/`. An SDK older than that directory has neither, so
+`ship doctor` / `ship sign` report the missing path: upgrade the SDK (`pulp sdk
+install`) rather than copying the script into the project.
 
 **Start every array in `build_combined_installer.sh` as `=()`.** The script runs under `set -u`, and bash 4.4 or later reports `${#X[@]}` of a declared-but-unassigned array as unbound, while macOS's `/bin/bash` 3.2 does not. A bare `declare -a X` passes every macOS run and fails on Linux (where the Python coverage pass runs the recipe tests) or under a newer bash on PATH.
+
+**Verify component payloads before signing the product archive.** The combined installer records each signed plugin's `CFBundleExecutable` SHA-256, expands the unsigned `productbuild` archive with `pkgutil --expand-full`, and refuses to run `productsign`, notarization, or stapling if the packaged executable is missing or does not match. This gate prevents a stale or metadata-only build directory from turning into an apparently successful release. The contract tests cover matching, stale, and missing payloads in `test_build_combined_installer.py`.
 
 **macOS 27 `pkgbuild --analyze` omits `BundleIsRelocatable`.** `build_combined_installer.sh` pins every app component non-relocatable, so it must `Add :N:BundleIsRelocatable bool false` when `Set` finds no entry — a bare `Set` aborts with `Entry, ":0:BundleIsRelocatable", Does Not Exist` (covered by `test_build_combined_installer.py`).
 
@@ -519,6 +655,73 @@ Watch out for:
   from the linked headers, so it disagrees with the pin in that case too.
 - **An SDK older than the record** yields `runtime_pins: null`; the rest of the
   file is still produced by the consumer's own CMake helpers.
+
+### Shipped plug-in modules are dead-stripped
+
+Non-Debug Apple VST3, CLAP, AU v2, LV2 and AAX modules link with `-dead_strip`
+(`_pulp_plugin_module_link_hygiene` in `tools/cmake/PulpPluginFormats.cmake`);
+AU v3 is not. Exported entry points, static initializers and what they reach,
+Objective-C class and category metadata, and `__attribute__((used))` code stay
+live. Code reached only by `dlsym()` of an unexported symbol, or an Objective-C
+class found only through `NSClassFromString()`, can vanish with no link error:
+export it, mark it `used`, or reference it. Opt out with
+`-DPULP_DEAD_STRIP_PLUGINS=OFF`, or per module with the `PULP_DEAD_STRIP`
+target property set OFF after `pulp_add_plugin()`. The property is read through
+`$<TARGET_PROPERTY:<module>,PULP_DEAD_STRIP>` with the module named explicitly,
+so the packaging ctest's `$<TARGET_PROPERTY:PulpGain_VST3,LINK_OPTIONS>`
+evaluates it without a head target. Coverage:
+`plugin-module-dead-strip-PulpGain-<FORMAT>` and
+`cmake-plugin-dead-strip-switch`. No test yet opens a dead-stripped module's
+editor in every format.
+
+### Shipped plug-ins have local symbols stripped; the build output does not
+
+`pulp ship package` and `build_combined_installer.sh` package a COPY of each
+AU/VST3/CLAP bundle with `strip -x` applied to its main executable, then sign
+that copy. On a first load the system checks the whole module file, at roughly
+17 ms per MB on Apple Silicon, and local symbols are several MB of a Release
+editor module that nothing at run time reads. The bundle in the build directory
+keeps its symbols, so a debugger and the nm-based packaging ctests still see
+them.
+
+Watch out for:
+
+- **Strip before signing, never after.** Stripping changes the code the
+  signature seals. The installer script strips the staged copy and then
+  `deep_sign`s it. `pulp ship package` runs after `pulp ship sign`, so it
+  re-signs the stripped copy itself: with `--identity` (or
+  `signing.apple.identity` / `PULP_SIGN_IDENTITY`) when the original carries a
+  Developer ID signature, ad hoc otherwise. `pulp ship release` passes its
+  identity through. If a bundle is Developer-ID-signed and no identity
+  resolves, it ships unstripped with a warning rather than with a broken seal.
+- **Re-signing keeps the entitlements.** A new signature replaces the old one,
+  entitlements included, so `stage_stripped_bundle()` extracts the original's
+  entitlements (`codesign -d --entitlements <file> --xml`) and signs the copy
+  with them, for Developer ID and ad hoc alike, unless `--entitlements` names a
+  file. `pulp ship release --entitlements` passes the file to both its sign and
+  package stages.
+- **A dSYM is written before every strip.** `dsymutil` runs on the UNSTRIPPED
+  build-output executable, writing `artifacts/symbols/<FORMAT>/<bundle>.dSYM`
+  (`pulp ship package`) or `<out>/symbols/<kind>/<bundle>.dSYM` (the installer
+  script). It carries the full symbol table under the UUID the stripped copy
+  keeps, so a crash report from an installed plug-in symbolicates against it
+  (`atos -o <bundle>.dSYM/Contents/Resources/DWARF/<exe> -l <load address>
+  <address>`, or let Xcode find it by UUID). Archive the symbols directory with
+  every release you ship; a dSYM regenerated from a later build has a different
+  UUID and does not match. Release builds carry no DWARF, so the dSYM gives
+  function names, not file and line. A failed `dsymutil` refuses the strip
+  rather than shipping a binary nothing can symbolicate.
+- **`--keep-symbols`** (both paths) packages the build output untouched and
+  writes no dSYM. It is the opt-out; stripping happens at packaging, so there
+  is no CMake switch for it.
+- **AAX is never stripped**: it arrives PACE-wrapped and any edit voids the wrap.
+- **Only `-x`** (local symbols). Exported symbols such as the format entry
+  points and anything `dlsym` reaches are untouched.
+- Coverage: `pulp ship package strips local symbols from the shipped copy
+  only` in `test/test_cli_ship_shellout.cpp` (real Mach-O fixture, expands the
+  `.pkg`, runs `nm`, and checks the dSYM keeps the local symbol under the
+  shipped binary's UUID), and the strip and dSYM-order cases in
+  `tools/scripts/test_build_combined_installer.py`.
 
 ### macOS one-command pipeline: `pulp ship release`
 
@@ -1368,7 +1571,7 @@ renders `CHANGELOG.md` in the bump commit) install through
 
 Pulp's notarized macOS release workflow clones the Steinberg VST3 SDK directly
 inside `.github/workflows/sign-and-release.yml`. Keep that workflow pinned to
-the same upstream tag used everywhere else in the repo: `v3.8.0_build_66`.
+the same upstream tag used everywhere else in the repo: `v3.8.1_build_84`.
 The shortened `v3.8.0` ref does not exist on Steinberg's repo and causes the
 tag-triggered macOS release job to fail immediately at `Clone VST3 SDK`, before
 configure, build, or signing begin.

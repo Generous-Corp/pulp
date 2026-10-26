@@ -277,7 +277,6 @@ function(_pulp_add_auv3_macos_host target name bundle_id version)
         INSTALL_RPATH "@executable_path/../Frameworks"
     )
     target_link_libraries(${host_target} PRIVATE "-framework Cocoa")
-    _pulp_attach_control_shipping(${target} ${host_target} AUv3Host)
 
     # Make the host depend on both pieces and copy them into the bundle.
     add_dependencies(${host_target} ${target}_AUv3Framework ${target}_AUv3)
@@ -296,6 +295,25 @@ function(_pulp_add_auv3_macos_host target name bundle_id version)
     set(fw_src "$<TARGET_BUNDLE_DIR:${target}_AUv3Framework>")
     set(appex_src "$<TARGET_BUNDLE_DIR:${target}_AUv3>")
     set(embed_sentinel "${CMAKE_BINARY_DIR}/AUv3/${target}_embed.stamp")
+
+    # Affected-target builds may select only the host target and omit the
+    # directory-level `ALL` embed target.  Keep the explicit sentinel target
+    # for framework-only rebuilds, but also make every host link self-contained:
+    # whenever the host target is built, its AUv3 pieces are copied into the
+    # app before the build command returns.  This prevents a successful host
+    # build from producing an unregistrable app with empty PlugIns/Frameworks.
+    add_custom_command(
+        TARGET ${host_target}
+        POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${host_bundle}/Contents/Frameworks"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${host_bundle}/Contents/PlugIns"
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${host_bundle}/Contents/Frameworks/${name}AUv3Framework.framework"
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${host_bundle}/Contents/PlugIns/${name}.appex"
+        COMMAND cp -RP "${fw_src}" "${host_bundle}/Contents/Frameworks/"
+        COMMAND cp -RP "${appex_src}" "${host_bundle}/Contents/PlugIns/"
+        COMMENT "Embedding ${name}AUv3Framework + ${name}.appex into ${name}.app"
+        VERBATIM
+    )
 
     # The sentinel depends on the upstream framework + appex outputs so
     # the embed step re-fires when either is rebuilt. We also re-run if
@@ -317,6 +335,13 @@ function(_pulp_add_auv3_macos_host target name bundle_id version)
         VERBATIM
     )
     add_custom_target(${host_target}_Embed ALL DEPENDS "${embed_sentinel}")
+
+    # The scan reads every binary in the .app, embedded framework and appex
+    # included. Attached after the embed steps, so its POST_BUILD runs after
+    # the copies above; its persisted-stamp edge waits for the sentinel edge,
+    # which otherwise runs beside it and rewrites the bundle mid-scan.
+    _pulp_attach_control_shipping(${target} ${host_target} AUv3Host
+        AFTER "${embed_sentinel}" ${host_target}_Embed)
 endfunction()
 
 # ── iOS monolithic .appex ─────────────────────────────────────────────────

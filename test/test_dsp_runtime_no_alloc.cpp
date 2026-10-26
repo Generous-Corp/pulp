@@ -279,6 +279,7 @@ TEST_CASE("GraphRuntimeExecutor queue drain hot path does not allocate",
 TEST_CASE("FIR biquad oversampler hot path with function-pointer callback does not allocate",
           "[signal][oversampling][rt-safety][no-alloc]") {
     pulp::signal::Oversampler oversampler;
+    oversampler.set_kind(pulp::signal::Oversampler::Kind::fir_biquad);
     oversampler.set_factor(pulp::signal::Oversampler::Factor::x4);
     oversampler.set_sample_rate(48000.0f);
 

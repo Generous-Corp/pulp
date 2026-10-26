@@ -19,6 +19,7 @@ Run:  python3 tools/ci/test_tart_runner.py
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 import subprocess
@@ -296,6 +297,51 @@ class SupervisorSurvivesTransientFailureTests(unittest.TestCase):
                 "PULP_RUNNER_HOST_TAG": "m5",
             }
             Path(td, "golden.qcow2").write_text("stub", encoding="utf-8")
+            if script == WINDOWS_SCRIPT:
+                # The Windows supervisor validates image provenance before it
+                # enters the retry loop. Give this fixture a complete,
+                # digest-pinned temporary manifest so the test reaches the
+                # transient JIT-mint failure it is intended to exercise.
+                firmware = Path(td, "edk2-code.fd")
+                vars_template = Path(td, "edk2-vars.fd")
+                firmware.write_bytes(b"firmware stub")
+                vars_template.write_bytes(b"vars stub")
+
+                def sha256(path: Path) -> str:
+                    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+                manifest = Path(td, "vm-image.toml")
+                manifest.write_text(
+                    "\n".join(
+                        (
+                            "schema = 1",
+                            'strategy = "ephemeral-overlay"',
+                            'provisioning = "ephemeral"',
+                            'architecture = "arm64"',
+                            "",
+                            "[base_image]",
+                            f'path = "{Path(td, "golden.qcow2")}"',
+                            f'sha256 = "{sha256(Path(td, "golden.qcow2"))}"',
+                            "",
+                            "[firmware]",
+                            f'code_path = "{firmware}"',
+                            f'code_sha256 = "{sha256(firmware)}"',
+                            f'vars_template_path = "{vars_template}"',
+                            f'vars_template_sha256 = "{sha256(vars_template)}"',
+                            "",
+                            "[overlay]",
+                            f'state_dir = "{Path(td, "state")}"',
+                            'cleanup = "on-exit"',
+                            "copy_on_write = true",
+                            "",
+                            "[cache]",
+                            'mode = "guest-local"',
+                            "",
+                        )
+                    ),
+                    encoding="utf-8",
+                )
+                env["TARTCI_WIN_MANIFEST"] = str(manifest)
             proc = subprocess.Popen(
                 ["bash", str(script), "--loop"],
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,

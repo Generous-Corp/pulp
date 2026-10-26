@@ -11,7 +11,13 @@
 #include "pulp/canvas/font_scope.hpp"
 #include "pulp/canvas/bundled_fonts.hpp"
 #include "pulp/canvas/font_flight_recorder.hpp"
+#include "font_weight_match.hpp"
+#include "system_ui_typeface.hpp"
 
+#include <algorithm>
+#include <atomic>
+#include <cctype>
+#include <cmath>
 #include <iterator>
 #include <list>
 #include <mutex>
@@ -24,9 +30,158 @@
 #include "include/core/SkFontStyle.h"
 #include "include/core/SkTypeface.h"
 #include "include/core/SkFontArguments.h"
+#if defined(__APPLE__)
+#include <CoreText/CoreText.h>
+#include "include/ports/SkTypeface_mac.h"
+#endif
+#endif
+
+// PULP_LITE_EDITOR builds this file a second time, into the pulp-editor-lite
+// objects that a plug-in without a GPU editor links ahead of the library.
+// It changes function bodies only; every declaration stays as the headers
+// give it, so the two builds agree on every type.
+#if defined(PULP_HAS_SKIA) && !(defined(PULP_LITE_EDITOR) && PULP_LITE_EDITOR)
+#define PULP_FONT_RESOLVER_SKIA 1
+#else
+#define PULP_FONT_RESOLVER_SKIA 0
+#endif
+
+#if !PULP_FONT_RESOLVER_SKIA && defined(__APPLE__)
+#include "coretext_text.hpp"
 #endif
 
 namespace pulp::canvas {
+
+namespace {
+// Generic-keyword mappings a test stood in; see set_css_generic_family_override.
+std::atomic<bool> g_generic_overrides_present{false};
+std::mutex g_generic_overrides_mutex;
+std::unordered_map<std::string, std::string>& generic_overrides() {
+    static std::unordered_map<std::string, std::string> overrides;
+    return overrides;
+}
+} // namespace
+
+void set_css_generic_family_override(const std::string& keyword, const std::string& family) {
+    std::string lower = keyword;
+    for (auto& c : lower)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    std::lock_guard<std::mutex> lock(g_generic_overrides_mutex);
+    auto& overrides = generic_overrides();
+    if (family.empty())
+        overrides.erase(lower);
+    else
+        overrides[lower] = family;
+    g_generic_overrides_present.store(!overrides.empty(), std::memory_order_release);
+}
+
+std::string platform_family_for_css_generic(const std::string& css_family) {
+    if (g_generic_overrides_present.load(std::memory_order_acquire)) {
+        std::string lower = css_family;
+        for (auto& c : lower)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        std::lock_guard<std::mutex> lock(g_generic_overrides_mutex);
+        const auto& overrides = generic_overrides();
+        if (auto it = overrides.find(lower); it != overrides.end())
+            return it->second;
+    }
+#if defined(__APPLE__)
+    // Chromium's macOS defaults for each generic family, as reported by
+    // CSS.getPlatformFontsForNode. Keywords Chromium does not support on this
+    // platform (ui-monospace, ui-sans-serif, -apple-system, ...) are left
+    // unmapped so the list walk moves on to the next entry, as it does there.
+    struct Entry {
+        const char* keyword;
+        const char* family;
+    };
+    static constexpr Entry kGeneric[] = {
+        {"system-ui", ".AppleSystemUIFont"},
+        {"blinkmacsystemfont", ".AppleSystemUIFont"},
+        {"sans-serif", "Helvetica"},
+        {"serif", "Times"},
+        {"monospace", "Menlo"},
+        {"cursive", "Apple Chancery"},
+        {"fantasy", "Papyrus"},
+        {"math", "STIX Two Math"},
+    };
+    std::string lower = css_family;
+    for (auto& c : lower)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    for (const auto& entry : kGeneric)
+        if (lower == entry.keyword)
+            return entry.family;
+#else
+    (void)css_family;
+#endif
+    return {};
+}
+
+namespace {
+std::string lower_ascii(std::string_view s) {
+    std::string out(s);
+    for (auto& c : out)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return out;
+}
+} // namespace
+
+CssFontFamily parse_css_font_family(std::string_view entry) {
+    constexpr std::string_view kSpace = " \t\n\r\f\v";
+    CssFontFamily out;
+    const size_t lo = entry.find_first_not_of(kSpace);
+    if (lo == std::string_view::npos)
+        return out;
+    const size_t hi = entry.find_last_not_of(kSpace);
+    entry = entry.substr(lo, hi - lo + 1);
+    if (entry.size() >= 2 && (entry.front() == '"' || entry.front() == '\'') &&
+        entry.back() == entry.front()) {
+        out.quoted = true;
+        entry = entry.substr(1, entry.size() - 2);
+    }
+    out.name = std::string(entry);
+    return out;
+}
+
+std::vector<std::string> split_css_font_family_list(std::string_view list) {
+    constexpr std::string_view kSpace = " \t\n\r\f\v";
+    std::vector<std::string> out;
+    size_t pos = 0;
+    while (pos <= list.size()) {
+        const size_t comma = list.find(',', pos);
+        std::string_view entry =
+            list.substr(pos, (comma == std::string_view::npos ? list.size() : comma) - pos);
+        const size_t lo = entry.find_first_not_of(kSpace);
+        if (lo != std::string_view::npos) {
+            const size_t hi = entry.find_last_not_of(kSpace);
+            entry = entry.substr(lo, hi - lo + 1);
+            if (!parse_css_font_family(entry).name.empty())
+                out.emplace_back(entry);
+        }
+        if (comma == std::string_view::npos)
+            break;
+        pos = comma + 1;
+    }
+    return out;
+}
+
+std::string platform_family_for_css_family(std::string_view entry) {
+    CssFontFamily family = parse_css_font_family(entry);
+    if (!family.quoted) {
+        if (auto generic = platform_family_for_css_generic(family.name); !generic.empty())
+            return generic;
+    }
+    return std::move(family.name);
+}
+
+bool platform_face_is_family(std::string_view platform_family, std::string_view actual_family) {
+    if (platform_family.empty() || actual_family.empty())
+        return false;
+    const std::string want = lower_ascii(platform_family);
+    const std::string got = lower_ascii(actual_family);
+    if (want.find(got) != std::string::npos || got.find(want) != std::string::npos)
+        return true;
+    return want.front() == '.' && got.front() == '.';
+}
 
 const char* to_string(FallbackOrigin o) noexcept {
     switch (o) {
@@ -98,7 +253,7 @@ std::size_t FontResolver::cache_size() const noexcept {
     return impl_->cache.size();
 }
 
-#ifdef PULP_HAS_SKIA
+#if PULP_FONT_RESOLVER_SKIA
 
 namespace {
 
@@ -125,14 +280,92 @@ SkFontStyle to_sk_style(const FontOptions& opts) {
     return SkFontStyle(sk_weight, sk_width, sk_slant);
 }
 
+#if defined(__APPLE__)
+// Whether `css_family` is a keyword for the platform's UI font.
+bool names_system_ui_font(const std::string& css_family) {
+    std::string lower = css_family;
+    for (auto& c : lower)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return lower == "system-ui" || lower == "blinkmacsystemfont";
+}
+
+// CoreText's weight trait for a CSS weight: Apple's NSFontWeight values at
+// each hundred, interpolated between them, as Skia's own mapping does.
+CGFloat ct_weight_for_css_weight(int css_weight) {
+    static constexpr CGFloat kAtHundreds[] = {-1.00, -0.80, -0.60, -0.40, 0.00, 0.23,
+                                              0.30,  0.40,  0.56,  0.62,  1.00};
+    const int clamped = std::clamp(css_weight, 0, 1000);
+    const int lo = clamped / 100;
+    if (lo >= 10)
+        return kAtHundreds[10];
+    const CGFloat t = static_cast<CGFloat>(clamped - lo * 100) / 100.0;
+    return kAtHundreds[lo] + (kAtHundreds[lo + 1] - kAtHundreds[lo]) * t;
+}
+
+} // namespace
+
+namespace detail {
+
+// CTFontCreateUIFontForLanguage is the supported way in to the system UI font,
+// and its faces report the same `.SFNS-*` names the browser does.
+sk_sp<SkTypeface> system_ui_typeface(SkFontStyle style) {
+    CTFontRef base = CTFontCreateUIFontForLanguage(kCTFontUIFontSystem, 0.0, nullptr);
+    if (!base)
+        return nullptr;
+    CTFontDescriptorRef base_descriptor = CTFontCopyFontDescriptor(base);
+    CFRelease(base);
+    if (!base_descriptor)
+        return nullptr;
+
+    const CGFloat weight = ct_weight_for_css_weight(style.weight());
+    CFNumberRef weight_number = CFNumberCreate(nullptr, kCFNumberCGFloatType, &weight);
+    const CTFontSymbolicTraits symbolic =
+        style.slant() == SkFontStyle::kUpright_Slant ? 0 : kCTFontItalicTrait;
+    CFNumberRef symbolic_number = CFNumberCreate(nullptr, kCFNumberSInt32Type, &symbolic);
+    const void* trait_keys[] = {kCTFontWeightTrait, kCTFontSymbolicTrait};
+    const void* trait_values[] = {weight_number, symbolic_number};
+    CFDictionaryRef traits =
+        CFDictionaryCreate(nullptr, trait_keys, trait_values, 2, &kCFTypeDictionaryKeyCallBacks,
+                           &kCFTypeDictionaryValueCallBacks);
+    const void* attribute_keys[] = {kCTFontTraitsAttribute};
+    const void* attribute_values[] = {traits};
+    CFDictionaryRef attributes =
+        CFDictionaryCreate(nullptr, attribute_keys, attribute_values, 1,
+                           &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    CTFontDescriptorRef descriptor =
+        CTFontDescriptorCreateCopyWithAttributes(base_descriptor, attributes);
+    CFRelease(attributes);
+    CFRelease(traits);
+    CFRelease(symbolic_number);
+    CFRelease(weight_number);
+    CFRelease(base_descriptor);
+    if (!descriptor)
+        return nullptr;
+
+    CTFontRef font = CTFontCreateWithFontDescriptor(descriptor, 0.0, nullptr);
+    CFRelease(descriptor);
+    if (!font)
+        return nullptr;
+    sk_sp<SkTypeface> typeface = SkMakeTypefaceFromCTFont(font);
+    CFRelease(font);
+    return typeface;
+}
+
+} // namespace detail
+
+namespace {
+#endif
+
 // Keep this TU self-contained by using the public registered-font,
 // bundled-font, and SkFontMgr paths directly.
 
-ResolvedFont resolve_one_family(const std::string& family,
-                                const FontOptions& opts,
-                                SkFontStyle sk_style,
-                                sk_sp<SkFontMgr> mgr,
+ResolvedFont resolve_one_family(const std::string& entry, const FontOptions& opts,
+                                SkFontStyle sk_style, sk_sp<SkFontMgr> mgr,
                                 std::vector<FallbackTraceStep>& trace) {
+    // A family_stack entry may carry its CSS quotes; a quoted entry is a
+    // literal family name and never maps as a generic keyword.
+    const CssFontFamily css = parse_css_font_family(entry);
+    const std::string& family = css.name;
     ResolvedFont r;
     r.scope = opts.scope;
     r.generation = merged_generation_for(opts.scope);
@@ -179,21 +412,37 @@ ResolvedFont resolve_one_family(const std::string& family,
     // nothing. Trusting it here is what made every Label in the browser demo
     // invisible; the miss must fall through to the bundled last-resort below.
     if (mgr && platform_font_db_usable()) {
-        if (auto tf = mgr->matchFamilyStyle(family.c_str(), sk_style)) {
+        // A generic keyword names a platform family rather than being one.
+        const std::string generic =
+            css.quoted ? std::string{} : platform_family_for_css_generic(family);
+        const std::string& platform_family = generic.empty() ? family : generic;
+        sk_sp<SkTypeface> tf;
+        bool system_ui = false;
+#if defined(__APPLE__)
+        // Widths other than normal keep the name lookup, which maps them.
+        if (!css.quoted && names_system_ui_font(family) &&
+            sk_style.width() == SkFontStyle::kNormal_Width) {
+            tf = detail::system_ui_typeface(sk_style);
+            system_ui = tf != nullptr;
+        }
+#endif
+        // CSS weight matching inside the family, the same matcher SkParagraph's
+        // collection uses, so the face reported here is the face painted.
+        if (!tf)
+            tf = css_match_family_style(*mgr, platform_family.c_str(), sk_style);
+        if (tf) {
             SkString actual;
             tf->getFamilyName(&actual);
 
             // Honor v1's "did we get a generic fallback?" check: if the
             // platform returned a default face whose name doesn't relate
             // to the requested family, mark it as failed so the caller
-            // can try the next family in the stack.
-            std::string lo_a(actual.c_str(), actual.size());
-            for (auto& c : lo_a) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-            std::string lo_f = family;
-            for (auto& c : lo_f) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-            bool name_overlap = (lo_a == lo_f
-                                 || lo_a.find(lo_f) != std::string::npos
-                                 || lo_f.find(lo_a) != std::string::npos);
+            // can try the next family in the stack. A generic keyword is
+            // held to the family it maps to: when that family is missing
+            // the face is the matcher's default, not the generic's.
+            const bool name_overlap =
+                system_ui || platform_face_is_family(platform_family,
+                                                     std::string(actual.c_str(), actual.size()));
 
             // In Deterministic mode we refuse any platform face whose
             // name doesn't overlap the requested family — bug-compatible
@@ -206,9 +455,10 @@ ResolvedFont resolve_one_family(const std::string& family,
                 r.typeface = std::move(tf);
                 r.actual_family = std::string(actual.c_str(), actual.size());
                 r.origin = FallbackOrigin::Platform;
-                trace.push_back({family, FallbackOrigin::Platform, true,
-                                 r.actual_family,
-                                 name_overlap ? "" : "platform default (name does not overlap)"});
+                trace.push_back({family, FallbackOrigin::Platform, true, r.actual_family,
+                                 system_ui      ? "system UI font"
+                                 : name_overlap ? ""
+                                                : "platform default (name does not overlap)"});
                 return r;
             }
         } else {
@@ -328,7 +578,12 @@ ResolvedFont FontResolver::resolve_family_list(const FontOptions& options) {
             float want = options.weight;
             if (want < wmin) want = wmin;
             if (want > wmax) want = wmax;
-            if (want != wdef) {
+            // A face the platform already matched at the requested weight
+            // (a named instance such as SF's Bold) needs no clone; cloning it
+            // renames it to a synthetic instance the browser never reports.
+            const bool already_at_weight =
+                std::abs(static_cast<float>(face->fontStyle().weight()) - want) < 0.5f;
+            if (want != wdef && !already_at_weight) {
                 coords.push_back({kWghtTag, want});
             }
         }
@@ -453,7 +708,7 @@ ResolvedFont FontResolver::resolve_character_fallback(const FontOptions& options
     return r;
 }
 
-#else // !PULP_HAS_SKIA
+#else // !PULP_FONT_RESOLVER_SKIA
 
 // Non-Skia builds: every resolver call returns a NotFound result. The
 // callers that pull this in are expected to fall back to their own
@@ -515,12 +770,12 @@ ResolvedFont FontResolver::resolve_character_fallback(const FontOptions& options
     return r;
 }
 
-#endif // PULP_HAS_SKIA
+#endif // PULP_FONT_RESOLVER_SKIA
 
 // Color-font predicates — Skia-conditional method bodies that compile
 // in both Skia and non-Skia builds.
 
-#ifdef PULP_HAS_SKIA
+#if PULP_FONT_RESOLVER_SKIA
 namespace {
 
 // Enumerate which specific color tables a typeface carries so
@@ -563,10 +818,10 @@ ColorTablePresence scan_color_tables(const SkTypeface* typeface) {
 }
 
 } // namespace
-#endif // PULP_HAS_SKIA
+#endif // PULP_FONT_RESOLVER_SKIA
 
 bool ResolvedFont::supports_color_font() const noexcept {
-#ifdef PULP_HAS_SKIA
+#if PULP_FONT_RESOLVER_SKIA
     return scan_color_tables(typeface.get()).any_color;
 #else
     return false;
@@ -574,7 +829,7 @@ bool ResolvedFont::supports_color_font() const noexcept {
 }
 
 bool ResolvedFont::color_font_active() const noexcept {
-#ifdef PULP_HAS_SKIA
+#if PULP_FONT_RESOLVER_SKIA
     if (color_font_mode == ColorFontMode::ForceMonochrome) return false;
     if (!typeface) return false;
     const ColorTablePresence p = scan_color_tables(typeface.get());
@@ -597,29 +852,12 @@ bool ResolvedFont::color_font_active() const noexcept {
 
 std::string resolved_face_identity(const std::string& css_font_family,
                                    float weight, FontSlant slant) {
-#ifdef PULP_HAS_SKIA
+#if PULP_FONT_RESOLVER_SKIA
     FontOptions options;
     options.weight = weight;
     options.slant = slant;
-    // Same comma walk the shaper uses: strip whitespace and one matching pair
-    // of quotes per entry.
-    size_t pos = 0;
-    while (pos < css_font_family.size()) {
-        const size_t comma = css_font_family.find(',', pos);
-        std::string entry = css_font_family.substr(
-            pos, (comma == std::string::npos ? css_font_family.size() : comma) - pos);
-        pos = (comma == std::string::npos) ? css_font_family.size() : comma + 1;
-        const size_t lo = entry.find_first_not_of(" \t");
-        const size_t hi = entry.find_last_not_of(" \t");
-        if (lo == std::string::npos) continue;
-        entry = entry.substr(lo, hi - lo + 1);
-        if (entry.size() >= 2 &&
-            (entry.front() == '"' || entry.front() == '\'') &&
-            entry.front() == entry.back()) {
-            entry = entry.substr(1, entry.size() - 2);
-        }
-        if (!entry.empty()) options.family_stack.push_back(std::move(entry));
-    }
+    // Same comma walk the shaper uses; entries keep their quotes.
+    options.family_stack = split_css_font_family_list(css_font_family);
     const auto resolved = FontResolver::instance().resolve_family_list(options);
     if (!resolved.typeface) return {};
     SkString name;
@@ -631,6 +869,12 @@ std::string resolved_face_identity(const std::string& css_font_family,
         return resolved.actual_family;
     }
     return std::string(name.c_str(), name.size());
+#elif defined(__APPLE__)
+    // The lite stack measures and paints through CoreText, so the face that
+    // decides line breaks is the one CoreText resolves.
+    const int css_slant = slant == FontSlant::Oblique ? 2 : slant == FontSlant::Italic ? 1 : 0;
+    return detail::coretext_face_postscript_name(css_font_family, static_cast<int>(weight),
+                                                 css_slant);
 #else
     (void)css_font_family;
     (void)weight;

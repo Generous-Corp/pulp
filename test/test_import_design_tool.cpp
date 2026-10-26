@@ -445,6 +445,30 @@ TEST_CASE("pulp-import-design reports help and argument diagnostics",
     }
 }
 
+TEST_CASE("pulp-import-design refuses unconverted Illustrator and PDF sources",
+          "[cli][import-design][tool][preconverted-svg][fail-closed]") {
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
+
+    for (const std::string source : {"illustrator", "ai", "pdf"}) {
+        const auto result = run_import_design({"--from", source});
+        REQUIRE_FALSE(result.timed_out);
+        REQUIRE(result.exit_code == 2);
+        CHECK(result.stderr_output.find("Error: source '" + source + "' is unsupported") !=
+              std::string::npos);
+        CHECK(result.stderr_output.find(
+                  "convert to preconverted-svg with a validated control-map sidecar") !=
+              std::string::npos);
+    }
+
+    const auto generation = run_import_design({"--from", "preconverted-svg"});
+    REQUIRE_FALSE(generation.timed_out);
+    REQUIRE(generation.exit_code == 2);
+    CHECK(generation.stderr_output.find("--from preconverted-svg requires --validate-only") !=
+          std::string::npos);
+}
+
 TEST_CASE("pulp-import-design validates phase 0.5 import vocabulary",
           "[cli][import-design][tool][issue-493][network]") {
     if (!binary_exists()) {
@@ -3670,6 +3694,49 @@ TEST_CASE("generic browser HTML supplies the reference for --fail-below",
     CHECK(fs::exists(output));
     CHECK(r.stderr_output.find("--fail-below requires --reference") ==
           std::string::npos);
+#endif
+}
+
+TEST_CASE("a plain ir-json import keeps the fonts a page serves from Blob URLs",
+          "[import][browser][fonts]") {
+    // The materialized document is skipped for an ir-json import, but a page
+    // that serves its @font-face fonts from Blob URLs records them only there.
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
+#ifndef PULP_IMPORT_DESIGN_TEST_HAS_SKIA
+    SKIP("Skia image compositing is unavailable in this build");
+#else
+    TempDir tmp("pulp-import-design-blob-fonts");
+    fs::copy_file(PULP_TEST_JOST_REGULAR_TTF, tmp.path / "face.ttf");
+    const auto input = tmp.path / "page.html";
+    // A loader in the shape of a Claude standalone export: it serves the font
+    // from a Blob URL and installs a DOMParser document that names it.
+    write_text(input, R"HTML(<!DOCTYPE html><html><body><script>
+      (async () => {
+        const bytes = await (await fetch("face.ttf")).arrayBuffer();
+        const url = URL.createObjectURL(new Blob([bytes], { type: "font/ttf" }));
+        const html = "<html><head><style>@font-face{font-family:'Blob Face';" +
+          "src:url(" + url + ") format('truetype');font-weight:400}" +
+          "html,body{margin:0;background:#fff}body{width:320px;height:120px;" +
+          "font:24px 'Blob Face'}</style></head><body><p>Blob font</p></body></html>";
+        const parsed = new DOMParser().parseFromString(html, "text/html");
+        document.documentElement.replaceWith(parsed.documentElement);
+      })();
+    </script></body></html>)HTML");
+    const auto output = tmp.path / "design.json";
+
+    const auto r =
+        run_import_design({"--from", "html", "--file", input.string(), "--emit", "ir-json",
+                           "--render-size", "320x120", "--output", output.string()},
+                          120000);
+    REQUIRE_FALSE(r.timed_out);
+    INFO(r.stdout_output << "\n" << r.stderr_output);
+    REQUIRE(r.exit_code == 0);
+    const auto design = read_text(output);
+    CHECK(design.find("\"fontFamilyAssets\"") != std::string::npos);
+    CHECK(design.find("Blob Face") != std::string::npos);
+    CHECK(design.find("pulp-materialized-asset-") != std::string::npos);
 #endif
 }
 

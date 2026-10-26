@@ -4,6 +4,7 @@
 
 #include <pulp/canvas/image_file_cache.hpp>
 #include <pulp/canvas/skia_canvas.hpp>
+#include <pulp/canvas/skia_text_raster_policy.hpp>
 #include <pulp/render/gpu_render_time.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/trace.hpp>
@@ -26,6 +27,7 @@
 #include "include/gpu/graphite/dawn/DawnUtils.h"
 #include "include/core/SkCanvas.h"
 #include "include/core/SkSurface.h"
+#include "include/core/SkSurfaceProps.h"
 #include "include/core/SkColor.h"
 #include "include/core/SkColorSpace.h"
 #include "include/core/SkImage.h"
@@ -90,12 +92,39 @@ const char* wgpu_texture_format_name(wgpu::TextureFormat format) {
     }
 }
 
+// Installed by set_insert_outcome_hook_for_testing(); null in production.
+SkiaSurface::InsertOutcomeHook g_insert_outcome_hook = nullptr;
+
+// Cleared by set_async_readback_for_testing(false); true in production.
+bool g_async_readback_enabled = true;
+
+// Installed by set_trim_clock_for_testing(); null in production.
+SkiaSurface::TrimClockHook g_trim_clock_hook = nullptr;
+
+GpuIdleTrimSchedule::Clock::time_point trim_clock_now() {
+    return g_trim_clock_hook ? g_trim_clock_hook() : GpuIdleTrimSchedule::Clock::now();
+}
+
 }  // namespace
 
+void SkiaSurface::set_insert_outcome_hook_for_testing(InsertOutcomeHook hook) {
+    g_insert_outcome_hook = hook;
+}
+
+void SkiaSurface::set_async_readback_for_testing(bool enabled) {
+    g_async_readback_enabled = enabled;
+}
+
+void SkiaSurface::set_trim_clock_for_testing(TrimClockHook hook) {
+    g_trim_clock_hook = hook;
+}
+
 class SkiaSurfaceImpl : public SkiaSurface {
-public:
-    SkiaSurfaceImpl(GpuSurface& gpu, uint32_t width, uint32_t height, float scale)
-        : gpu_(gpu), width_(width), height_(height), scale_(scale) {}
+  public:
+    SkiaSurfaceImpl(GpuSurface& gpu, uint32_t width, uint32_t height, float scale,
+                    canvas::TextRasterPolicy text_raster_policy)
+        : gpu_(gpu), width_(width), height_(height), scale_(scale),
+          text_raster_policy_(text_raster_policy) {}
 
     ~SkiaSurfaceImpl() override {
         // Release retained GPU images while their recorder/context are alive.
@@ -188,6 +217,8 @@ public:
         // the next one.
         frame_work_submitted_ = false;
         if (!recorder_ || !context_) return nullptr;
+        // Images this frame draws are kept for it even past the byte budget.
+        canvas::ImageFileCache::instance().begin_frame(recorder_.get());
 
         // Persistent-scene mode (FU-2): draw into the retained scene surface,
         // not the swapchain. The scene keeps last frame's pixels, so the host
@@ -245,12 +276,10 @@ public:
                             "Add it to sk_color_type_for().",
                             wgpu_texture_format_name(surface_format));
                     } else {
+                        const SkSurfaceProps props = surface_props();
                         frame_surface_ = SkSurfaces::WrapBackendTexture(
-                            recorder_.get(),
-                            backend_tex,
-                            surface_color_type,
-                            SkColorSpace::MakeSRGB(),
-                            nullptr);  // props
+                            recorder_.get(), backend_tex, surface_color_type,
+                            SkColorSpace::MakeSRGB(), &props);
                     }
 
                     if (frame_surface_) {
@@ -297,9 +326,9 @@ public:
         if (!context_)
             return false;
         PULP_TRACE_SCOPE_NAMED("render", "first_frame_gpu_wait");
-        context_->submit(skgpu::graphite::SyncToCpu::kYes);
+        const bool submitted = context_->submit(skgpu::graphite::SyncToCpu::kYes);
         context_->checkAsyncWorkCompletion();
-        return true;
+        return submitted;
     }
 
     FrameOutcome end_frame() override {
@@ -363,8 +392,7 @@ public:
             }
 
             frames_in_flight_.on_submitted();
-            const auto status = context_->insertRecording(info);
-            insert_ok = (status == skgpu::graphite::InsertStatus::kSuccess);
+            insert_ok = insert_recording(info);
             if (!insert_ok) {
                 runtime::log_error(
                     "SkiaSurface: Graphite rejected this frame's recording — "
@@ -373,6 +401,9 @@ public:
             context_->submit({});
             frame_work_submitted_ = true;
         }
+
+        if (idle_trim_.due(trim_clock_now()))
+            trim_gpu_resources(TrimLevel::unused_for(GpuIdleTrimSchedule::kUnusedAge));
 
         // A null snap() with no earlier submit means this frame produced no GPU
         // work at all. When read_current_rgba() already flushed the frame, the
@@ -426,6 +457,22 @@ public:
         return persistent_scene_ && scene_surface_ != nullptr;
     }
 
+    void set_text_raster_policy(canvas::TextRasterPolicy policy) override {
+        if (policy == text_raster_policy_)
+            return;
+        text_raster_policy_ = policy;
+        // Retained layers hold text rasterized under the old preblend.
+        canvas_.reset();
+        retained_layers_ = canvas::SkiaCanvas::create_retained_layer_store();
+        create_offscreen_target();
+        if (persistent_scene_)
+            create_scene_target();
+    }
+
+    canvas::TextRasterPolicy text_raster_policy() const override {
+        return text_raster_policy_;
+    }
+
     bool read_current_rgba(std::vector<uint8_t>& pixels,
                            uint32_t& pixel_width,
                            uint32_t& pixel_height) override {
@@ -450,14 +497,25 @@ public:
         // end_frame() instead — MacGpuWindowHost::render_frame() does, between
         // the Skia submit and the Metal present — finds nothing pending here
         // and pays nothing for the guard.
+        //
+        // The flush is judged exactly as end_frame() judges its own insert: a
+        // recording Graphite rejects never reached the texture, so the readback
+        // would return whatever the texture held before this frame. Report the
+        // capture as failed, and leave frame_work_submitted_ unset so the
+        // following end_frame() reports the frame as failed too.
         if (canvas_ && recorder_ && context_) {
             canvas_.reset();
             auto recording = recorder_->snap();
             if (recording) {
                 skgpu::graphite::InsertRecordingInfo info;
                 info.fRecording = recording.get();
-                context_->insertRecording(info);
+                const bool inserted = insert_recording(info);
                 context_->submit({});
+                if (!inserted) {
+                    runtime::log_error("SkiaSurface: Graphite rejected the recording flushed "
+                                       "for readback; the capture does not hold this frame.");
+                    return false;
+                }
                 // end_frame()'s second snap() will legitimately find nothing
                 // left to record; remember that this frame's work DID reach the
                 // GPU so it is not misreported as a failed frame.
@@ -510,7 +568,7 @@ public:
             state->finished.store(true, std::memory_order_release);
         };
 
-        if (context_) {
+        if (context_ && g_async_readback_enabled) {
             // The callback owns this heap context. On a timeout, do not free it:
             // Graphite may still deliver a late callback, and a tiny leaked
             // shared_ptr is safer than reintroducing a callback use-after-free.
@@ -543,7 +601,12 @@ public:
 
         pixels.resize(static_cast<size_t>(pixel_width) * static_cast<size_t>(pixel_height) * 4u);
         SkPixmap pixmap(info, pixels.data(), row_bytes);
-        auto image = source->makeImageSnapshot();
+        // A copy, not makeImageSnapshot: the blit takes AsImage views of the
+        // scene surface, and Graphite warns on every later AsImage of a
+        // surface that has ever handed out a legacy snapshot.
+        auto image = SkSurfaces::AsImageCopy(sk_ref_sp(source));
+        if (!image)
+            image = source->makeImageSnapshot();
         if (image && image->readPixels(pixmap, 0, 0)) {
             return true;
         }
@@ -568,6 +631,35 @@ public:
     }
 
     int gpu_frames_in_flight() const override { return frames_in_flight_.count(); }
+
+    void trim_gpu_resources(TrimLevel level) override {
+        if (!recorder_ || !context_ || canvas_)
+            return;
+        // Retire finished recordings first: until their callbacks run, the
+        // textures they drew are still referenced and cannot be purged.
+        context_->checkAsyncWorkCompletion();
+        // Images uploaded through the recorder (ImageFileCache, the image
+        // provider, layer and scene targets) live in the recorder's cache;
+        // the context holds the resources it creates for submission.
+        if (level.frees_everything()) {
+            recorder_->freeGpuResources();
+            context_->freeGpuResources();
+        } else {
+            recorder_->performDeferredCleanup(level.idle());
+            context_->performDeferredCleanup(level.idle());
+        }
+    }
+
+    GpuCacheBytes gpu_cache_bytes() const override {
+        if (!recorder_ || !context_)
+            return {};
+        return {recorder_->currentBudgetedBytes() + context_->currentBudgetedBytes(),
+                recorder_->currentPurgeableBytes() + context_->currentPurgeableBytes()};
+    }
+
+    std::uint64_t idle_trim_count() const override {
+        return idle_trim_.trims();
+    }
 
 private:
     // Graphite finished-with-stats callback. Fires on the thread pumping GPU
@@ -599,6 +691,7 @@ private:
     bool gpu_elapsed_supported_ = false;  ///< Set once in init() from supportedGpuStats().
     GpuFramesInFlight frames_in_flight_;
     GpuRenderTimeTracker gpu_render_tracker_;  ///< Latest sample; written by on_gpu_stats().
+    GpuIdleTrimSchedule idle_trim_{trim_clock_now()};
 
     std::unique_ptr<skgpu::graphite::Context> context_;
     std::unique_ptr<skgpu::graphite::Recorder> recorder_;
@@ -626,6 +719,12 @@ private:
 
     std::unique_ptr<canvas::SkiaCanvas> canvas_;
 
+    canvas::TextRasterPolicy text_raster_policy_ = canvas::TextRasterPolicy::legacy;
+
+    SkSurfaceProps surface_props() const {
+        return canvas::surface_props_for(text_raster_policy_);
+    }
+
     void create_offscreen_target() {
         if (!recorder_) return;
 
@@ -633,7 +732,9 @@ private:
         int pixel_h = static_cast<int>(height_ * scale_);
 
         SkImageInfo info = SkImageInfo::MakeN32Premul(pixel_w, pixel_h);
-        offscreen_surface_ = SkSurfaces::RenderTarget(recorder_.get(), info);
+        const SkSurfaceProps props = surface_props();
+        offscreen_surface_ =
+            SkSurfaces::RenderTarget(recorder_.get(), info, skgpu::Mipmapped::kNo, &props);
 
         if (offscreen_surface_ && scale_ != 1.0f) {
             offscreen_surface_->getCanvas()->scale(scale_, scale_);
@@ -651,7 +752,9 @@ private:
         int pixel_h = static_cast<int>(height_ * scale_);
 
         SkImageInfo info = SkImageInfo::MakeN32Premul(pixel_w, pixel_h);
-        scene_surface_ = SkSurfaces::RenderTarget(recorder_.get(), info);
+        const SkSurfaceProps props = surface_props();
+        scene_surface_ =
+            SkSurfaces::RenderTarget(recorder_.get(), info, skgpu::Mipmapped::kNo, &props);
         if (!scene_surface_) return;
 
         SkCanvas* c = scene_surface_->getCanvas();
@@ -696,9 +799,9 @@ private:
                 wgpu_texture_format_name(surface_format));
             return false;
         }
+        const SkSurfaceProps props = surface_props();
         frame_surface_ = SkSurfaces::WrapBackendTexture(
-            recorder_.get(), backend_tex, surface_color_type,
-            SkColorSpace::MakeSRGB(), nullptr);
+            recorder_.get(), backend_tex, surface_color_type, SkColorSpace::MakeSRGB(), &props);
         if (!frame_surface_) {
             runtime::log_error(
                 "SkiaSurface: WrapBackendTexture failed for persistent-scene "
@@ -707,7 +810,15 @@ private:
             return false;
         }
 
-        sk_sp<SkImage> snapshot = scene_surface_->makeImageSnapshot();
+        // AsImage shares the scene's texture instead of copying it (Graphite's
+        // makeImageSnapshot always copies). The view aliases a surface the
+        // next frame draws into, which is safe because the view lives only in
+        // this function: the blit is recorded into this frame's recording,
+        // ahead of every later scene draw in queue order. A scene that is not
+        // textureable has no view and is copied instead.
+        sk_sp<SkImage> snapshot = SkSurfaces::AsImage(scene_surface_);
+        if (!snapshot)
+            snapshot = scene_surface_->makeImageSnapshot();
         if (!snapshot) {
             runtime::log_error(
                 "SkiaSurface: retained scene produced no snapshot — nothing "
@@ -728,6 +839,15 @@ private:
         return outcome;
     }
 
+    /// Insert a recording and report whether Graphite accepted it. Every
+    /// insert goes through here so the frame path and the readback flush judge
+    /// the same InsertStatus, and the test seam sees both.
+    bool insert_recording(const skgpu::graphite::InsertRecordingInfo& info) {
+        const bool accepted =
+            context_->insertRecording(info) == skgpu::graphite::InsertStatus::kSuccess;
+        return g_insert_outcome_hook ? g_insert_outcome_hook(accepted) : accepted;
+    }
+
     /// Outcome of the frame in flight. begin_frame() seeds it so a caller that
     /// got a null canvas can still ask what went wrong.
     FrameOutcome last_outcome_ = FrameOutcome::offscreen;
@@ -740,7 +860,8 @@ private:
 };
 
 std::unique_ptr<SkiaSurface> SkiaSurface::create(GpuSurface& gpu, const Config& config) {
-    auto surface = std::make_unique<SkiaSurfaceImpl>(gpu, config.width, config.height, config.scale_factor);
+    auto surface = std::make_unique<SkiaSurfaceImpl>(
+        gpu, config.width, config.height, config.scale_factor, config.text_raster_policy);
     if (!surface->init()) return nullptr;
     return surface;
 }
@@ -753,6 +874,9 @@ namespace pulp::render {
 std::unique_ptr<SkiaSurface> SkiaSurface::create(GpuSurface&, const Config&) {
     return nullptr;
 }
+void SkiaSurface::set_insert_outcome_hook_for_testing(InsertOutcomeHook) {}
+void SkiaSurface::set_async_readback_for_testing(bool) {}
+void SkiaSurface::set_trim_clock_for_testing(TrimClockHook) {}
 }
 
 #endif
