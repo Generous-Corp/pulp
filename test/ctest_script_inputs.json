@@ -7077,7 +7077,9 @@
   "importer-lab-capture-scale": {
    "entry": "test/test_importer_lab_capture_scale.py",
    "inputs": [
-    "test/test_importer_lab_capture_scale.py"
+    "test/fixtures/import-differential/01-basic-card.html",
+    "test/test_importer_lab_capture_scale.py",
+    "tools/import-validation/importer_differential_lab.py"
    ],
    "kind": "python"
   },
