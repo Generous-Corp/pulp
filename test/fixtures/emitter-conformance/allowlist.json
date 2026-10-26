@@ -2,18 +2,6 @@
   "$comment": "Known divergences between the native materializer and the other emitters, read by test/test_design_emitter_conformance.cpp. Each entry names the lane, the projection field (a regex), optionally the fixtures, an anchor regex and the expected (native) and actual (lane) values as regexes, plus the issue that tracks closing it. An entry that matches nothing fails the gate: delete it with the fix.",
   "gaps": [
     {
-      "lane": "js",
-      "field": "binding",
-      "fixtures": [
-        "kelvin"
-      ],
-      "anchor": "capture:out:38",
-      "expected": "<absent>",
-      "actual": "meter:out",
-      "issue": "https://github.com/Generous-Corp/pulp/issues/11010",
-      "reason": "The native and baked C++ binders do not bind a key-only meter (a value key, no meter source or channel) that ui.js binds by its key through bindMeter; the gap is theirs."
-    },
-    {
       "lane": "swiftui",
       "field": "binding",
       "fixtures": [
@@ -24,6 +12,18 @@
       "actual": "param:",
       "issue": "https://github.com/Generous-Corp/pulp/issues/10984",
       "reason": "SwiftUI resolves controls by display name and declares an entry with no param key for controls the other lanes leave unbound."
+    },
+    {
+      "lane": "swiftui",
+      "field": "binding",
+      "fixtures": [
+        "kelvin"
+      ],
+      "anchor": "capture:out:38",
+      "expected": "meter:out",
+      "actual": "param:",
+      "issue": "https://github.com/Generous-Corp/pulp/issues/11008",
+      "reason": "SwiftUI does not bind kelvin's key-only output meter by its key: it declares a param entry with no key, while the native, baked C++ and ui.js lanes bind it as meter:out."
     }
   ]
 }
