@@ -162,13 +162,19 @@ foreach(_spec
         "${_pulp_conformance_dir}/${_stem}.cpp"
         "${_pulp_conformance_dir}/${_stem}_entry.cpp")
 endforeach()
-add_executable(pulp-test-design-emitter-conformance
-    test_design_emitter_conformance.cpp
-    ${_pulp_conformance_sources})
-target_include_directories(pulp-test-design-emitter-conformance PRIVATE
+# The generated sources build as their own object library. They exist only
+# once the build has run the generator, so listing them as the test's sources
+# would make its script-inputs entry depend on whether this build got that far.
+# They read nothing from the checkout: the test builds each one from the asset
+# directory it stages, and declares the fixtures it reads below.
+add_library(pulp-emitter-conformance-baked OBJECT ${_pulp_conformance_sources})
+target_include_directories(pulp-emitter-conformance-baked PUBLIC
     "${_pulp_conformance_dir}")
+target_link_libraries(pulp-emitter-conformance-baked PUBLIC pulp::view)
+add_executable(pulp-test-design-emitter-conformance
+    test_design_emitter_conformance.cpp)
 target_link_libraries(pulp-test-design-emitter-conformance
-    PRIVATE pulp::view pulp::state Catch2::Catch2WithMain)
+    PRIVATE pulp-emitter-conformance-baked pulp::view pulp::state Catch2::Catch2WithMain)
 target_compile_definitions(pulp-test-design-emitter-conformance PRIVATE
     PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
 catch_discover_tests(pulp-test-design-emitter-conformance

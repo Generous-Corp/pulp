@@ -1297,6 +1297,21 @@
    "spawns": "declared",
    "undeclared_sources": []
   },
+  "pulp-test-design-emitter-conformance": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_design_emitter_conformance.cpp"
+   ],
+   "inputs": [
+    "test/fixtures/emitter-conformance",
+    "test/fixtures/import-fidelity/scene.pulp.json"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/test_design_emitter_conformance.cpp"
+   ],
+   "undeclared_sources": []
+  },
   "pulp-test-design-import": {
    "data": "declared",
    "detected_sources": [
@@ -2510,6 +2525,7 @@
   "pulp-control-trusted-host-fixture",
   "pulp-cpp",
   "pulp-denormal-null-refgen",
+  "pulp-emitter-conformance-gen",
   "pulp-fake-screenshot-tool",
   "pulp-fixture-runner",
   "pulp-generate-control-protocol-fuzz-corpus",
@@ -2703,6 +2719,7 @@
   "pulp-test-dawproject-export",
   "pulp-test-denormal-null",
   "pulp-test-design-debug-contracts",
+  "pulp-test-design-emitter-conformance",
   "pulp-test-design-fidelity",
   "pulp-test-design-import",
   "pulp-test-design-import-benchmark",
