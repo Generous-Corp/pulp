@@ -9,6 +9,8 @@ instrument cannot see into is inconclusive rather than passing.
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -176,23 +178,47 @@ class ArchiveSymbolClosureCheckTest(unittest.TestCase):
                                     "--cxxfilt", str(Path(self._tmp.name) / "no-such-cxxfilt")]), 2)
 
 
-    def test_no_demangler_on_path_is_inconclusive(self) -> None:
+    def test_no_demangler_on_path_is_a_skip(self) -> None:
         # Without --cxxfilt the demangler comes from PATH; with neither
         # c++filt nor llvm-cxxfilt there, the RTTI check cannot read
-        # ownership and must say so rather than pass.
+        # ownership. That is a skip (77, the registration's SKIP_RETURN_CODE)
+        # that names the missing tool, not a pass.
         content = self.nm.archive("libcontent.a", CONTENT + "    _ZN7content8Registry4openEv T 0 0\n")
         core = self.nm.archive("libcore.a", "libcore.a[x.o]:\n_ZTIN7content8RegistryE V 0 0\n")
         nm = self.nm.write()
         empty = Path(self._tmp.name) / "empty-path"
         empty.mkdir()
         with mock.patch.dict(os.environ, {"PATH": str(empty)}):
-            with self.assertRaises(rtti_ownership.DemangleError):
+            with self.assertRaises(rtti_ownership.DemanglerMissing):
                 rtti_ownership.demangle({"_ZTIN7content8RegistryE"})
-            self.assertEqual(gate.main(["--nm", nm, "--forbidden", str(content), "--no-control",
-                                        "--check", f"core={core}", "--weak-rtti-contamination"]), 2)
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                rc = gate.main(["--nm", nm, "--forbidden", str(content), "--no-control",
+                                "--check", f"core={core}", "--weak-rtti-contamination"])
+            self.assertEqual(rc, gate.SKIP)
+            self.assertEqual(rc, 77)
+            self.assertIn("SKIPPED", err.getvalue())
+            self.assertIn("c++filt", err.getvalue())
         # Control: the same call with the demangler on PATH runs and finds the copy.
         self.assertEqual(gate.main(["--nm", nm, "--forbidden", str(content), "--no-control",
                                     "--check", f"core={core}", "--weak-rtti-contamination"]), 1)
+
+    def test_a_demangler_on_path_that_reads_nothing_still_fails(self) -> None:
+        # Present but unreadable is not missing: a c++filt on PATH that fails,
+        # or answers without demangling, is a hard INCONCLUSIVE (2), never the
+        # skip a host without one gets.
+        content = self.nm.archive("libcontent.a", CONTENT + "    _ZN7content8Registry4openEv T 0 0\n")
+        core = self.nm.archive("libcore.a", "libcore.a[x.o]:\n_ZTIN7content8RegistryE V 0 0\n")
+        nm = self.nm.write()
+        argv = ["--nm", nm, "--forbidden", str(content), "--no-control",
+                "--check", f"core={core}", "--weak-rtti-contamination"]
+        for name, body in (("passthrough", PASSES_THROUGH),
+                           ("fails", "import sys\nsys.exit(1)\n")):
+            bin_dir = Path(self._tmp.name) / f"path-{name}"
+            bin_dir.mkdir()
+            write_tool(bin_dir / "c++filt", body)
+            with self.subTest(tool=name), mock.patch.dict(os.environ, {"PATH": str(bin_dir)}):
+                self.assertEqual(gate.main(argv), 2)
 
     def test_check_mode_uses_the_chosen_rule(self) -> None:
         content = self.nm.archive("libcontent.a", CONTENT)

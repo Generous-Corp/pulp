@@ -56,13 +56,21 @@ class DemangleError(RuntimeError):
     pass
 
 
+class DemanglerMissing(DemangleError):
+    """No --cxxfilt was given and neither c++filt nor llvm-cxxfilt is on PATH.
+
+    A host without the tool cannot read RTTI ownership at all, which is a skip;
+    a demangler that is there and answers unreadably stays a DemangleError.
+    """
+
+
 def demangle(names: set[str], cxxfilt: str | None = None) -> dict[str, str]:
     """Mangled name -> demangled text, one to one."""
     if not names:
         return {}
     tool = cxxfilt or shutil.which("c++filt") or shutil.which("llvm-cxxfilt")
     if not tool:
-        raise DemangleError("c++filt (or llvm-cxxfilt) is required to read RTTI ownership")
+        raise DemanglerMissing("c++filt (or llvm-cxxfilt) is required to read RTTI ownership")
     ordered = sorted(names)
     # Mach-O names carry one extra leading underscore; it is removed here, so
     # the tool must never strip another. Older Apple c++filt (the Xcode 16 on
