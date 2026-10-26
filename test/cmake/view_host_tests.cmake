@@ -844,6 +844,10 @@ if(NOT WIN32 AND TARGET pulp-view-audio AND TARGET pulp-view-script AND TARGET p
     set_tests_properties(pulp-view-audio-symbol-floor
         pulp-view-audio-symbol-floor-negative-contract
         PROPERTIES LABELS "pr;view;gate" TIMEOUT 60)
+    # --weak-rtti-contamination reads ownership through c++filt or
+    # llvm-cxxfilt. A host with neither on PATH exits 77 and says so; a
+    # demangler that is there but reads nothing still fails.
+    set_tests_properties(pulp-view-audio-symbol-floor PROPERTIES SKIP_RETURN_CODE 77)
     # The negative contract reads the floor's registered command back from
     # ctest, so the flags it checks are the ones that actually run.
     set_tests_properties(pulp-view-audio-symbol-floor-negative-contract
