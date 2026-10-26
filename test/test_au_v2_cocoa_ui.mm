@@ -126,11 +126,14 @@ TEST_CASE("AU v2 editor pins the design viewport per the shared resize contract"
 
 #import <AppKit/AppKit.h>
 #import <objc/runtime.h>
+#import <objc/message.h>
 
+#include <pulp/canvas/canvas.hpp>
 #include <pulp/format/au_v2_common.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/runtime/alive_token.hpp>
 #include <pulp/state/store.hpp>
+#include <pulp/view/plugin_view_host.hpp>
 #include <pulp/view/view.hpp>
 
 #include <cstdlib>
@@ -337,6 +340,117 @@ TEST_CASE("AU v2 editor views close and deallocate when the host drops them",
     g_editor_view = nullptr;
     AudioComponentInstanceDispose(au);
     g_fake_au_ctx_source = nullptr;
+}
+
+namespace {
+
+// A GPU-hosted editor, so the factory returns the GPU host's view.
+class GpuHideProcessor : public pulp::format::Processor {
+  public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {"GpuHide", "Acme", "com.acme.gpuhide", "1.0.0",
+                pulp::format::PluginCategory::Effect};
+    }
+    void define_parameters(pulp::state::StateStore& s) override {
+        s.add_parameter({1, "Gain", "dB", {-60.0f, 12.0f, 0.0f}});
+    }
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {}
+    std::unique_ptr<pulp::view::View> create_view() override {
+        auto root = std::make_unique<pulp::view::View>();
+        root->set_requires_gpu_host(true);
+        // A blurred panel paints through a layer, so each frame leaves a
+        // purgeable scratch target for the hide to return.
+        auto panel = std::make_unique<pulp::view::View>();
+        panel->set_background_color(pulp::canvas::Color::rgba8(90, 140, 220));
+        panel->set_filter_blur(4.0f);
+        panel->flex().preferred_width = 200;
+        panel->flex().preferred_height = 120;
+        root->add_child(std::move(panel));
+        return root;
+    }
+};
+
+} // namespace
+
+TEST_CASE("AU v2 GPU editor view releases its GPU caches when the host hides it",
+          "[auv2][cocoa][editor][gpu-trim]") {
+    EditorEnvironment env;
+    GpuHideProcessor processor;
+    pulp::state::StateStore store;
+    processor.set_state_store(&store);
+    processor.define_parameters(store);
+    pulp::runtime::AliveToken alive;
+
+    FakeEditorAU source;
+    source.ctx.processor = &processor;
+    source.ctx.store = &store;
+    source.ctx.owner_alive = alive.capture();
+    g_fake_au_ctx_source = &source;
+
+    AudioComponentDescription desc{kAudioUnitType_Effect, 'GpHd', 'Acme', 0, 0};
+    AudioComponent comp = AudioComponentRegister(&desc, CFSTR("Acme: GpuHide"), 1, fake_factory);
+    REQUIRE(comp != nullptr);
+    AudioUnit au = nullptr;
+    REQUIRE(AudioComponentInstanceNew(comp, &au) == noErr);
+
+    NSWindow* window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 480, 320)
+                                                   styleMask:NSWindowStyleMaskTitled
+                                                     backing:NSBackingStoreBuffered
+                                                       defer:NO];
+    if (!window || !window.contentView) {
+        AudioComponentInstanceDispose(au);
+        g_fake_au_ctx_source = nullptr;
+        SKIP("No Cocoa window available.");
+    }
+    Class factory_class = NSClassFromString(@"PulpAUCocoaViewFactory_Test");
+    REQUIRE(factory_class != nil);
+
+    bool gpu_editor = false;
+    @autoreleasepool {
+        id<AUCocoaUIBase> factory = [[factory_class alloc] init];
+        NSView* view = [factory uiViewForAudioUnit:au withSize:NSMakeSize(480, 320)];
+        [factory release];
+        REQUIRE(view != nil);
+        [window.contentView addSubview:view];
+        [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
+                                 beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
+        gpu_editor = [view isKindOfClass:NSClassFromString(@"PulpGpuPluginView")];
+        if (gpu_editor) {
+            // An AU v2 editor has no view controller: -viewDidHide on this view
+            // is the only hide signal it gets, so its host must have wired it.
+            CHECK([view valueForKey:@"onHide"] != nil);
+            // Test-only accessor on the factory class: the host behind the view.
+            auto* host = static_cast<pulp::view::PluginViewHost*>(
+                ((void* (*)(id, SEL, NSView*))objc_msgSend)(
+                    factory_class, @selector(pulpEditorHostForTesting:), view));
+            REQUIRE(host != nullptr);
+            REQUIRE(!host->capture_back_buffer_png().empty());
+            const auto before = host->gpu_cache_usage();
+            INFO("before hide: budgeted " << before.budgeted << " purgeable " << before.purgeable);
+            REQUIRE(before.purgeable > 0);
+            view.hidden = YES;
+            const auto hidden = host->gpu_cache_usage();
+            INFO("hidden: budgeted " << hidden.budgeted << " purgeable " << hidden.purgeable);
+            CHECK(hidden.purgeable == 0);
+            CHECK(hidden.budgeted < before.budgeted);
+            view.hidden = NO;
+            [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
+                                     beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+        }
+        [view removeFromSuperview];
+    }
+    @autoreleasepool {
+        [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
+                                 beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.02]];
+    }
+    [window close];
+    AudioComponentInstanceDispose(au);
+    g_fake_au_ctx_source = nullptr;
+    if (!gpu_editor)
+        SKIP("CPU editor (no GPU adapter).");
 }
 
 #else

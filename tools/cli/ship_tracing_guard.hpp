@@ -23,8 +23,24 @@ namespace pulp::cli {
 
 // The exact bytes emitted by core/runtime/src/trace.cpp under PULP_TRACING=ON.
 // Kept in sync by test/test_ship_tracing_guard.cpp, which also greps the source.
-inline constexpr std::string_view kTracingShipSentinel =
-    "PULP_TRACING_COMPILED_IN__DO_NOT_SHIP";
+//
+// Assembled at startup from two halves rather than written as one literal:
+// the release-artifact scan (tools/cmake/release_artifact_forbidden.json, gate
+// tracing-off) forbids these bytes in every PULP_TRACING=OFF artifact, the CLI
+// included, and a contiguous literal here would make the CLI carry the very
+// needle it searches for. The halves are joined through a function-local
+// static so the optimizer has no constant to fold into one run of bytes.
+inline const std::string& tracing_ship_sentinel() {
+    static const std::string sentinel = [] {
+        std::string s;
+        s.reserve(40);
+        s.append("PULP_TRACING_COMPILED_IN");
+        s.append("__DO_NOT_SHIP");
+        return s;
+    }();
+    return sentinel;
+}
+inline const std::string& kTracingShipSentinel = tracing_ship_sentinel();
 
 // Returns true if `file` contains `bytes`. Streams the file in overlapping
 // chunks so a match is found even when it straddles a chunk boundary, and so a

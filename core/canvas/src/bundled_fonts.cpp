@@ -378,7 +378,28 @@ sk_sp<SkTypeface> match_registered_typeface(const std::string& family,
     auto& map = registered_fonts();
     auto it = map.find(family);
     if (it == map.end() || it->second.faces.empty()) return nullptr;
-    return best_style_match(it->second.faces, style);
+    if (auto match = best_style_match(it->second.faces, style))
+        return match;
+    // A page @font-face family never yields to another family over weight:
+    // CSS picks its nearest face and synthesizes the rest. Without this the
+    // resolver measured a 700 run in a system face while the paragraph painted
+    // the page's Regular face emboldened, and the text wrapped where it did not.
+    if (!has_declared_font_face_weights(family))
+        return nullptr;
+    sk_sp<SkTypeface> nearest;
+    int nearest_gap = std::numeric_limits<int>::max();
+    for (const auto& f : it->second.faces) {
+        if (!f)
+            continue;
+        const SkFontStyle have = f->fontStyle();
+        const int gap =
+            std::abs(have.weight() - style.weight()) + (have.slant() == style.slant() ? 0 : 10000);
+        if (gap < nearest_gap) {
+            nearest_gap = gap;
+            nearest = f;
+        }
+    }
+    return nearest;
 }
 
 std::vector<RegisteredTypeface> registered_typefaces_snapshot() {

@@ -253,7 +253,8 @@ not apply — `_bridge` is a C++ struct). The block:
    override the richer overload can inspect AUv3 bus metadata directly.
 7. Forwards any `midi_out` events back to the host via
    `self.MIDIOutputEventBlock` (AU v3.1+). Each event's
-   `sample_offset` is added to `timestamp->mSampleTime`.
+   `sample_offset` is added to `timestamp->mSampleTime` rounded to the nearest
+   sample (`detail::au_event_sample_time`).
 
 The bypass short-circuit (before step 6, when `shouldBypassEffect`) must NOT
 `memcpy` the dry input straight to the output. When the Processor reports a
@@ -982,6 +983,16 @@ links it into the framework. Mirrors `PULP_CLAP_PLUGIN` and
 ### `transportStateBlock`'s sample position is a double — round it, never truncate
 
 `transportStateBlock` returns `currentSamplePosition` as a `double`, and some hosts send a value a hair below the true sample: REAPER reports `13823.9999` for sample `13824`. A `static_cast<int64_t>` truncates it, so `position_samples` steps back one sample and then jumps two on the next block. Convert through `pulp::format::detail::host_sample_position()` (`detail/host_sample_position.hpp`, shared with AUv2). It returns the nearest sample (`std::round`, independent of the rounding mode), or `nullopt` for a non-finite or out-of-range value; leave `TransportField::SamplePosition` unset in that case.
+
+The render timestamp's `mSampleTime` is a double too, and the same rule applies to the two places that use it as the block start: an incoming render event's offset into the block (`detail::au_event_block_offset`) and an outgoing MIDI event's `AUEventSampleTime` (`detail::au_event_sample_time`). Truncating `13823.9999` placed every event one sample late. Both helpers fall back rather than overflow: an unusable block start makes the incoming event's own time its offset, and makes MIDI out go at `AUEventSampleTimeImmediate + offset`.
+
+### A hidden AU v3 editor returns its GPU caches from `viewDidDisappear`
+
+Both view controllers (`au_view_controller_mac.mm`, `au_view_controller_ios.mm`)
+call `PluginViewHost::release_gpu_caches()` there, and only on the main thread: the
+appearance callbacks arrive on main, but `createAudioUnit…` and `-dealloc` can
+arrive on the XPC queue (see the view-bridge skill), and a trim off the render
+thread would race a frame.
 
 ### `AURenderEventMIDIEventList` = UMP — not short MIDI, not raw sysex
 

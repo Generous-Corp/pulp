@@ -185,9 +185,7 @@ void collect_resolved_binding_plan(ResolvedBindingPlan& plan,
     const bool has_xy_params = resolved.kind == NativeWidgetKind::xy_pad &&
         md.x_param_key && !md.x_param_key->empty() &&
         md.y_param_key && !md.y_param_key->empty();
-    const bool has_meter_input = resolved.kind == NativeWidgetKind::meter &&
-        md.meter_source && !md.meter_source->empty() &&
-        md.meter_channel && !md.meter_channel->empty();
+    const bool has_meter_input = resolved.kind == NativeWidgetKind::meter && md.has_meter_input();
     const bool has_waveform_input = resolved.kind == NativeWidgetKind::waveform &&
         has_single_param && md.waveform_shape && !md.waveform_shape->empty();
     const bool has_text_input = resolved.kind == NativeWidgetKind::text_editor &&

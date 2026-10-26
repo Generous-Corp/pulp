@@ -4,6 +4,7 @@
 
 #include <pulp/canvas/image_file_cache.hpp>
 #include <pulp/canvas/skia_canvas.hpp>
+#include <pulp/canvas/skia_text_raster_policy.hpp>
 #include <pulp/render/gpu_render_time.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/trace.hpp>
@@ -26,6 +27,7 @@
 #include "include/gpu/graphite/dawn/DawnUtils.h"
 #include "include/core/SkCanvas.h"
 #include "include/core/SkSurface.h"
+#include "include/core/SkSurfaceProps.h"
 #include "include/core/SkColor.h"
 #include "include/core/SkColorSpace.h"
 #include "include/core/SkImage.h"
@@ -118,15 +120,18 @@ void SkiaSurface::set_trim_clock_for_testing(TrimClockHook hook) {
 }
 
 class SkiaSurfaceImpl : public SkiaSurface {
-public:
-    SkiaSurfaceImpl(GpuSurface& gpu, uint32_t width, uint32_t height, float scale)
-        : gpu_(gpu), width_(width), height_(height), scale_(scale) {}
+  public:
+    SkiaSurfaceImpl(GpuSurface& gpu, uint32_t width, uint32_t height, float scale,
+                    canvas::TextRasterPolicy text_raster_policy)
+        : gpu_(gpu), width_(width), height_(height), scale_(scale), pending_width_(width),
+          pending_height_(height), pending_scale_(scale), text_raster_policy_(text_raster_policy) {}
 
     ~SkiaSurfaceImpl() override {
         // Release retained GPU images while their recorder/context are alive.
         canvas_.reset();
         retained_layers_.reset();
-        if (image_provider_) image_provider_->clear();
+        if (image_provider_)
+            image_provider_->clear();
         // Cached textures are recorder-bound; invalidate them before the
         // recorder/context are destroyed so a recycled pointer cannot alias
         // stale GPU images in a future surface.
@@ -195,7 +200,7 @@ public:
             (static_cast<std::uint32_t>(context_->supportedGpuStats()) &
              static_cast<std::uint32_t>(skgpu::GpuStatsFlags::kElapsedTime)) != 0;
 
-        // Create offscreen fallback target (used when no presentable surface)
+        // Offscreen target, the output when there is no presentable surface.
         create_offscreen_target();
 
         runtime::log_info("SkiaSurface: Graphite initialized on shared Dawn device (presentable: {}, gpu-render-time: {})",
@@ -213,6 +218,7 @@ public:
         // the next one.
         frame_work_submitted_ = false;
         if (!recorder_ || !context_) return nullptr;
+        apply_pending_size();
         // Images this frame draws are kept for it even past the byte budget.
         canvas::ImageFileCache::instance().begin_frame(recorder_.get());
 
@@ -236,6 +242,7 @@ public:
             }
             canvas_ = std::make_unique<canvas::SkiaCanvas>(
                 sk_canvas, recorder_.get(), retained_layers_);
+            idle_trim_.note_frame(trim_clock_now());
             return canvas_.get();
         }
 
@@ -272,12 +279,10 @@ public:
                             "Add it to sk_color_type_for().",
                             wgpu_texture_format_name(surface_format));
                     } else {
+                        const SkSurfaceProps props = surface_props();
                         frame_surface_ = SkSurfaces::WrapBackendTexture(
-                            recorder_.get(),
-                            backend_tex,
-                            surface_color_type,
-                            SkColorSpace::MakeSRGB(),
-                            nullptr);  // props
+                            recorder_.get(), backend_tex, surface_color_type,
+                            SkColorSpace::MakeSRGB(), &props);
                     }
 
                     if (frame_surface_) {
@@ -317,6 +322,7 @@ public:
 
         canvas_ = std::make_unique<canvas::SkiaCanvas>(
             sk_canvas, recorder_.get(), retained_layers_);
+        idle_trim_.note_frame(trim_clock_now());
         return canvas_.get();
     }
 
@@ -400,8 +406,9 @@ public:
             frame_work_submitted_ = true;
         }
 
-        if (idle_trim_.due(trim_clock_now()))
-            trim_gpu_resources(TrimLevel::unused_for(GpuIdleTrimSchedule::kUnusedAge));
+        const auto trim_now = trim_clock_now();
+        if (const auto age = idle_trim_.unused_age(trim_now); age && idle_trim_.due(trim_now))
+            trim_gpu_resources(TrimLevel::unused_for(*age));
 
         // A null snap() with no earlier submit means this frame produced no GPU
         // work at all. When read_current_rgba() already flushed the frame, the
@@ -423,28 +430,28 @@ public:
 
     bool has_presentable_target() const override { return gpu_.has_surface(); }
 
+    // Only records the size. A live resize delivers several events per frame
+    // and reallocating here built targets no frame ever drew into;
+    // begin_frame() applies the last one.
     void resize(uint32_t width, uint32_t height, float scale) override {
-        if (scale != scale_) {
-            // Retained layers are rasterized at record-time device density.
-            // Force callers to rebuild them at the new backing scale.
-            canvas_.reset();
-            retained_layers_ =
-                canvas::SkiaCanvas::create_retained_layer_store();
-        }
-        width_ = width;
-        height_ = height;
-        scale_ = scale;
-        create_offscreen_target();
-        // A fresh scene target at the new size; the host's first post-resize
-        // frame is a full repaint into it (partial repaint can't clip across a
-        // size change).
-        if (persistent_scene_) create_scene_target();
+        pending_width_ = width;
+        pending_height_ = height;
+        pending_scale_ = scale;
+    }
+
+    std::uint64_t render_target_allocations() const override {
+        return render_target_allocations_;
     }
 
     bool set_persistent_scene(bool enable) override {
         persistent_scene_ = enable;
         if (enable) {
-            create_scene_target();
+            // A resize still pending would otherwise build the scene at the
+            // old size here and again in begin_frame().
+            if (pending_width_ != width_ || pending_height_ != height_ || pending_scale_ != scale_)
+                apply_pending_size();
+            else
+                create_scene_target();
         } else {
             scene_surface_.reset();
         }
@@ -453,6 +460,22 @@ public:
 
     bool persistent_scene() const override {
         return persistent_scene_ && scene_surface_ != nullptr;
+    }
+
+    void set_text_raster_policy(canvas::TextRasterPolicy policy) override {
+        if (policy == text_raster_policy_)
+            return;
+        text_raster_policy_ = policy;
+        // Retained layers hold text rasterized under the old preblend.
+        canvas_.reset();
+        retained_layers_ = canvas::SkiaCanvas::create_retained_layer_store();
+        create_offscreen_target();
+        if (persistent_scene_)
+            create_scene_target();
+    }
+
+    canvas::TextRasterPolicy text_raster_policy() const override {
+        return text_raster_policy_;
     }
 
     bool read_current_rgba(std::vector<uint8_t>& pixels,
@@ -505,8 +528,11 @@ public:
             }
         }
 
-        pixel_width = static_cast<uint32_t>(std::max(1, static_cast<int>(width_ * scale_)));
-        pixel_height = static_cast<uint32_t>(std::max(1, static_cast<int>(height_ * scale_)));
+        // The surface's own size, not logical × scale: the presentable texture
+        // is the swapchain's, which a host may size from the platform's
+        // physical client rect (one pixel more than 667 × 1.5 at 1.5x).
+        pixel_width = static_cast<uint32_t>(std::max(1, source->width()));
+        pixel_height = static_cast<uint32_t>(std::max(1, source->height()));
 
         auto info = SkImageInfo::Make(static_cast<int>(pixel_width),
                                       static_cast<int>(pixel_height),
@@ -668,6 +694,10 @@ private:
     GpuSurface& gpu_;
     uint32_t width_ = 0, height_ = 0;
     float scale_ = 1.0f;
+    // The size resize() asked for; the targets follow it in begin_frame().
+    uint32_t pending_width_ = 0, pending_height_ = 0;
+    float pending_scale_ = 1.0f;
+    std::uint64_t render_target_allocations_ = 0;
 
     // GPU render time via Graphite GpuStats.
     bool gpu_elapsed_supported_ = false;  ///< Set once in init() from supportedGpuStats().
@@ -701,14 +731,51 @@ private:
 
     std::unique_ptr<canvas::SkiaCanvas> canvas_;
 
+    canvas::TextRasterPolicy text_raster_policy_ = canvas::TextRasterPolicy::legacy;
+
+    SkSurfaceProps surface_props() const {
+        return canvas::surface_props_for(text_raster_policy_);
+    }
+
+    void apply_pending_size() {
+        if (pending_width_ == width_ && pending_height_ == height_ && pending_scale_ == scale_)
+            return;
+        if (pending_scale_ != scale_) {
+            // Retained layers are rasterized at record-time device density.
+            // Force callers to rebuild them at the new backing scale.
+            canvas_.reset();
+            retained_layers_ = canvas::SkiaCanvas::create_retained_layer_store();
+        }
+        width_ = pending_width_;
+        height_ = pending_height_;
+        scale_ = pending_scale_;
+        create_offscreen_target();
+        // A fresh scene target at the new size; the host's first post-resize
+        // frame is a full repaint into it (partial repaint can't clip across a
+        // size change).
+        if (persistent_scene_)
+            create_scene_target();
+    }
+
+    // The offscreen target is drawn into only when there is no presentable
+    // surface (begin_frame() reports `recreate` rather than fall back to it),
+    // so a presentable surface does not allocate one.
     void create_offscreen_target() {
         if (!recorder_) return;
+        if (gpu_.has_surface()) {
+            offscreen_surface_.reset();
+            return;
+        }
 
         int pixel_w = static_cast<int>(width_ * scale_);
         int pixel_h = static_cast<int>(height_ * scale_);
 
         SkImageInfo info = SkImageInfo::MakeN32Premul(pixel_w, pixel_h);
-        offscreen_surface_ = SkSurfaces::RenderTarget(recorder_.get(), info);
+        const SkSurfaceProps props = surface_props();
+        offscreen_surface_ =
+            SkSurfaces::RenderTarget(recorder_.get(), info, skgpu::Mipmapped::kNo, &props);
+        if (offscreen_surface_)
+            ++render_target_allocations_;
 
         if (offscreen_surface_ && scale_ != 1.0f) {
             offscreen_surface_->getCanvas()->scale(scale_, scale_);
@@ -719,15 +786,28 @@ private:
     // target, the backing-scale CTM is applied once here so the host paints in
     // logical coordinates. Cleared so a (defensive) partial first frame does not
     // reveal undefined texture memory; the host paints a full first frame.
+    //
+    // A presentable scene is blitted 1:1 onto the swapchain texture, so it
+    // takes the swapchain's size. A host may set that from the platform's
+    // physical client rect, a pixel more than logical × scale at a fractional
+    // scale (1001 px at 1.5x against 667 × 1.5), and a scene derived from the
+    // logical size would leave the drawable's last column unpainted.
     void create_scene_target() {
         if (!recorder_) return;
 
         int pixel_w = static_cast<int>(width_ * scale_);
         int pixel_h = static_cast<int>(height_ * scale_);
+        if (gpu_.has_surface() && gpu_.width() > 0 && gpu_.height() > 0) {
+            pixel_w = static_cast<int>(gpu_.width());
+            pixel_h = static_cast<int>(gpu_.height());
+        }
 
         SkImageInfo info = SkImageInfo::MakeN32Premul(pixel_w, pixel_h);
-        scene_surface_ = SkSurfaces::RenderTarget(recorder_.get(), info);
+        const SkSurfaceProps props = surface_props();
+        scene_surface_ =
+            SkSurfaces::RenderTarget(recorder_.get(), info, skgpu::Mipmapped::kNo, &props);
         if (!scene_surface_) return;
+        ++render_target_allocations_;
 
         SkCanvas* c = scene_surface_->getCanvas();
         c->clear(SK_ColorTRANSPARENT);
@@ -771,9 +851,9 @@ private:
                 wgpu_texture_format_name(surface_format));
             return false;
         }
+        const SkSurfaceProps props = surface_props();
         frame_surface_ = SkSurfaces::WrapBackendTexture(
-            recorder_.get(), backend_tex, surface_color_type,
-            SkColorSpace::MakeSRGB(), nullptr);
+            recorder_.get(), backend_tex, surface_color_type, SkColorSpace::MakeSRGB(), &props);
         if (!frame_surface_) {
             runtime::log_error(
                 "SkiaSurface: WrapBackendTexture failed for persistent-scene "
@@ -832,7 +912,8 @@ private:
 };
 
 std::unique_ptr<SkiaSurface> SkiaSurface::create(GpuSurface& gpu, const Config& config) {
-    auto surface = std::make_unique<SkiaSurfaceImpl>(gpu, config.width, config.height, config.scale_factor);
+    auto surface = std::make_unique<SkiaSurfaceImpl>(
+        gpu, config.width, config.height, config.scale_factor, config.text_raster_policy);
     if (!surface->init()) return nullptr;
     return surface;
 }

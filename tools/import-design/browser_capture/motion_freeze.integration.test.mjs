@@ -19,6 +19,8 @@ import {
   rgbaPixel,
   runCapture,
 } from "./capture_integration_support.mjs";
+import { evaluateFormControlTheme } from "./form_control_theme.mjs";
+import { COMPUTED_STYLES } from "./semantics.mjs";
 import { captureStableScreenshot, freezeMotion } from "./settle.mjs";
 
 function cdpSession(pipe) {
@@ -202,8 +204,9 @@ test("an infinite Web Animation is held on its first frame",
   { timeout: captureCaseTimeout(2), skip: process.platform === "win32" },
   async (context) => {
     await withPage(context, async ({ cdp, open }) => {
+      // The page keeps its own reference, as a page that restarts it would.
       const pulsing = pageUrl(
-        "<div id=m></div><script>document.getElementById('m').animate(" +
+        "<div id=m></div><script>window.pulse = document.getElementById('m').animate(" +
         "[{transform:'translateX(0)'},{transform:'translateX(400px)'}]," +
         "{duration:700,iterations:Infinity})</script>");
       await open(pulsing);
@@ -231,15 +234,15 @@ test("an infinite Web Animation is held on its first frame",
 
       // A page that restarts it is settled again by the next pass, which
       // still counts the animation once.
-      await cdp.call("Runtime.evaluate",
-        { expression: "document.getAnimations()[0].play()" });
+      await cdp.call("Runtime.evaluate", { expression: "window.pulse.play()" });
       const again = await freezeMotion(cdp);
       assert.equal(again.animations.paused, 1);
       const { result } = await cdp.call("Runtime.evaluate", {
-        expression: "document.getAnimations()[0].playState",
+        expression: "({ running: document.getAnimations().length," +
+          " state: window.pulse.playState })",
         returnByValue: true,
       });
-      assert.equal(result.value, "paused");
+      assert.deepEqual(result.value, { running: 0, state: "idle" });
     });
   });
 
@@ -292,6 +295,89 @@ test("a video still showing its poster is paused and left on it",
       await open(pageUrl(`<video id=v width=160 height=120 poster="${poster}"></video>`));
       const receipt = await freezeMotion(cdp);
       assert.deepEqual(receipt.videos, { paused: 1, rewound: 0, poster: 1 });
+    });
+  });
+
+test("an infinite animation is frozen to its own first keyframe, not the element's style",
+  { timeout: captureCaseTimeout(2), skip: process.platform === "win32" },
+  async (context) => {
+    await withPage(context, async ({ cdp, open }) => {
+      // The first keyframe is not where the element sits without animation,
+      // so a freeze that only dropped the animation would show the wrong frame.
+      await open(pageUrl("<div id=m style='transform:translateX(50px)'></div>"));
+      const firstKeyframe = await captureStableScreenshot(cdp, OPTIONS);
+      await open(pageUrl("<div id=m></div><script>document.getElementById('m').animate(" +
+        "[{transform:'translateX(50px)'},{transform:'translateX(400px)'}]," +
+        "{duration:700,iterations:Infinity})</script>"));
+      await cdp.call("Runtime.evaluate", {
+        expression: "new Promise(r => setTimeout(() => r(true), 300))", awaitPromise: true });
+      const receipt = await freezeMotion(cdp, { declareSources: false });
+      assert.equal(receipt.animations.paused, 1);
+      const { result } = await cdp.call("Runtime.evaluate", {
+        expression: "({ running: document.getAnimations().length," +
+          " inline: document.getElementById('m').style.transform })",
+        returnByValue: true,
+      });
+      // Nothing is left for the compositor to hold: the first keyframe's
+      // values are the element's own style now.
+      assert.deepEqual(result.value, { running: 0, inline: "translateX(50px)" });
+      const frozen = await captureStableScreenshot(cdp, OPTIONS);
+      assert.ok(frozen && firstKeyframe && frozen.equals(firstKeyframe),
+        "the frozen frame is the first keyframe");
+    });
+  });
+
+test("an inline !important declaration still beats a frozen animation",
+  { timeout: captureCaseTimeout(2), skip: process.platform === "win32" },
+  async (context) => {
+    await withPage(context, async ({ cdp, open }) => {
+      // Both declarations outrank the animation, so the page shows them. The
+      // second box animates a shorthand over an important longhand.
+      const boxes = "<div id=m style='transform:translateX(200px) !important'></div>" +
+        "<div id=n style='position:fixed;left:20px;top:260px;width:60px;height:60px;" +
+        "background-color:#0f0 !important'></div>";
+      await open(pageUrl(boxes));
+      const declared = await captureStableScreenshot(cdp, OPTIONS);
+      await open(pageUrl(boxes + "<script>document.getElementById('m').animate(" +
+        "[{transform:'translateX(50px)'},{transform:'translateX(400px)'}]," +
+        "{duration:700,iterations:Infinity});document.getElementById('n').animate(" +
+        "[{background:'#f00'},{background:'#00f'}],{duration:700,iterations:Infinity})" +
+        "</script>"));
+      const receipt = await freezeMotion(cdp, { declareSources: false });
+      assert.equal(receipt.animations.paused, 2);
+      const { result } = await cdp.call("Runtime.evaluate", {
+        expression: "[['m', 'transform'], ['n', 'background-color']].map(([id, name]) => {" +
+          " const style = document.getElementById(id).style;" +
+          " return [style.getPropertyValue(name), style.getPropertyPriority(name)]; })",
+        returnByValue: true,
+      });
+      assert.deepEqual(result.value,
+        [["translateX(200px)", "important"], ["rgb(0, 255, 0)", "important"]]);
+      const frozen = await captureStableScreenshot(cdp, OPTIONS);
+      assert.ok(frozen && declared && frozen.equals(declared),
+        "the frozen frame shows the important declarations");
+    });
+  });
+
+test("an animated form control keeps the theme verdict the page gave it",
+  { timeout: captureCaseTimeout(1), skip: process.platform === "win32" },
+  async (context) => {
+    await withPage(context, async ({ cdp, open }) => {
+      // The two themed controls animate exactly the families that decide the
+      // verdict; only the third is styled by the page itself.
+      await open(pageUrl("<button>Play</button><textarea></textarea>" +
+        "<button style='background:#f00'>Stop</button><script>" +
+        "document.querySelector('button').animate([{backgroundColor:'#0f0'}," +
+        "{backgroundColor:'#00f'}],{duration:700,iterations:Infinity});" +
+        "document.querySelector('textarea').animate([{borderRadius:'2px'}," +
+        "{borderRadius:'9px'}],{duration:700,iterations:Infinity})</script>"));
+      const receipt = await freezeMotion(cdp, { declareSources: false });
+      assert.equal(receipt.animations.paused, 2);
+      const snapshot = await cdp.call("DOMSnapshot.captureSnapshot",
+        { computedStyles: COMPUTED_STYLES });
+      const report = await evaluateFormControlTheme(cdp, snapshot, COMPUTED_STYLES);
+      assert.deepEqual(report.controls.map((control) => [control.tag, control.theme]),
+        [["button", "native"], ["textarea", "native"], ["button", "author"]]);
     });
   });
 

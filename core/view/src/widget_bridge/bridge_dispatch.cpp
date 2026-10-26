@@ -55,23 +55,40 @@ function __pulpRememberPropagation__(key, level) {
         delete __pulpEventPropagation__[__pulpEventPropagationOrder__.shift()];
     }
 }
-//
-// Fan out events targeting the synthetic '__global__' id into
 // One report for every handler error the dispatch catches. The text keeps the
 // error's own message (QuickJS's e.stack holds only the frames, so reporting
-// the stack alone dropped "stack overflow" and every other message). The count
-// and last text make an error visible even with no __dispatchError__ hook
-// installed; console.error then prints it, as the timer path does.
+// the stack alone dropped "stack overflow" and every other message), and it is
+// built so a thrown value without a toString (Object.create(null)) still
+// reports instead of throwing again. The count and last text make an error
+// visible even with no __dispatchError__ hook installed. console.error then
+// prints it, once per distinct text and again every 100th repeat, so a handler
+// that throws on every pointermove reports without flooding the console.
 var __pulpDispatchErrorCount__ = 0;
 var __pulpLastDispatchError__ = '';
+var __pulpDispatchErrorRepeats__ = 0;
+function __pulpDispatchErrorText__(e) {
+    var head;
+    try { head = String(e); } catch (_) { head = Object.prototype.toString.call(e); }
+    var stack = '';
+    try { stack = e && e.stack ? '\n' + e.stack : ''; } catch (_) {}
+    return head + stack;
+}
 function __pulpReportDispatchError__(id, eventName, e) {
-    var text = String(e) + (e && e.stack ? '\n' + e.stack : '');
+    var text = __pulpDispatchErrorText__(e);
     ++__pulpDispatchErrorCount__;
+    var repeat = text === __pulpLastDispatchError__;
+    __pulpDispatchErrorRepeats__ = repeat ? __pulpDispatchErrorRepeats__ + 1 : 0;
     __pulpLastDispatchError__ = text;
     if (typeof __dispatchError__ === 'function') { __dispatchError__(id, eventName, text); return; }
-    if (typeof console !== 'undefined' && console.error)
+    if (typeof console === 'undefined' || !console.error) return;
+    if (!repeat)
         console.error('dispatch ' + String(eventName) + ' on ' + String(id) + ': ' + text);
+    else if (__pulpDispatchErrorRepeats__ % 100 === 0)
+        console.error('dispatch ' + String(eventName) + ' on ' + String(id) + ': ' + text
+                      + ' (repeated ' + __pulpDispatchErrorRepeats__ + ' more times)');
 }
+//
+// Fan out events targeting the synthetic '__global__' id into
 // window._listeners[eventName] — `window.addEventListener('keydown',
 // fn)` is the standard DOM API, but without this fan-out the native
 // keydown only fed __callbacks__['__global__:keydown'] (a per-id
@@ -255,7 +272,7 @@ function __pulpDispatchUnbatched__(id, eventName) {
                 // separate bridge dispatch so direct @pulp/react listeners and
                 // web-compat share one source. Do not synthesize it again here.
             } catch (e) {
-                stats.lastErr = (String(e) + (e && e.stack ? '\n' + e.stack : '')).slice(0, 200);
+                stats.lastErr = __pulpDispatchErrorText__(e).slice(0, 200);
                 __pulpReportDispatchError__(id, eventName, e);
             }
         } else if (!el) {
@@ -297,10 +314,7 @@ function __pulpRunDispatchBatch__(body, args) {
     }
     if (outermost && typeof __pulpAfterDiscreteDispatch__ === 'function') {
         try { __pulpAfterDiscreteDispatch__(args[0], args[1]); }
-        catch (e) {
-            if (typeof __dispatchError__ === 'function')
-                __dispatchError__(args[0], args[1], String(e && e.stack ? e.stack : e));
-        }
+        catch (e) { __pulpReportDispatchError__(args[0], args[1], e); }
     }
     return result;
 }

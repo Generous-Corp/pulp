@@ -83,14 +83,20 @@ session.
        --check-codesign \
        --check-gatekeeper \
        --check-auval-list \
+       --diagnose-host \
        --run-auval \
        --auval-repeat 2
    ```
    Both `auval` runs must be stable. A transient pass immediately after cache
    reset is not durable evidence, and a discovery failure means the Logic AU
-   bench is not ready to run. If the preflight reports that `auval -a` lists
-   Apple components and no non-Apple components, treat that as a machine-level
-   AU registrar issue rather than evidence about the HostBench bundle itself.
+   bench is not ready to run. Keep `--diagnose-host` enabled while debugging:
+   it reports stable reason codes for metadata, architecture, Rosetta,
+   registrar, and discovery failures and includes remediation text. If the
+   preflight reports that `auval -a` lists Apple components and no non-Apple
+   components, treat that as a registrar-domain issue rather than evidence
+   about the HostBench bundle itself. Background/SSH `auval` and an Aqua GUI
+   host can see different registrar inventories, so record the launchd domain
+   and capture two stable GUI-session passes before calling the AU unavailable.
    If Gatekeeper reports `Adhoc Signed App` or `Notary Ticket Missing`, verify
    the shell can use the Developer ID private key before attempting a new
    notarized install:

@@ -163,6 +163,37 @@ class CommitModeTests(unittest.TestCase):
         call = call[:call.index("\n    gate_rc=")]
         self.assertIn('--head "${_prepush_pushed_head_sha:-HEAD}"', call)
 
+    def test_a_raised_working_tree_baseline_cannot_pass_a_bad_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._repo(directory)
+            self._commit(root, "tools/a.py", FLAGGED)
+            # Raised on disk only: the commit still carries the empty baseline.
+            (root / lint.BASELINE).write_text(
+                json.dumps({"schema": 1, "files": {"tools/a.py": 8}}), encoding="utf-8")
+            self.assertEqual(lint.main(["--root", str(root), "--head", "HEAD"]), 1)
+            # Control: the working-tree read accepts the raised baseline.
+            self.assertEqual(lint.main(["--root", str(root)]), 0)
+
+    def test_a_deleted_working_tree_baseline_reads_the_committed_one(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._repo(directory)
+            (root / lint.BASELINE).write_text(
+                json.dumps({"schema": 1, "files": {"tools/a.py": 8}}), encoding="utf-8")
+            self._commit(root, "tools/a.py", FLAGGED)
+            (root / lint.BASELINE).unlink()
+            # The committed baseline allows the 8 calls; the missing disk copy
+            # is not what the push sends.
+            self.assertEqual(lint.main(["--root", str(root), "--head", "HEAD"]), 0)
+            # Control: the working-tree read sees no baseline and fails.
+            self.assertEqual(lint.main(["--root", str(root)]), 1)
+
+    def test_a_malformed_committed_baseline_is_a_scan_error(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._repo(directory)
+            (root / lint.BASELINE).write_text("{not json", encoding="utf-8")
+            self._commit(root, "tools/a.py", CLEAN)
+            self.assertEqual(lint.main(["--root", str(root), "--head", "HEAD"]), 2)
+
     def test_head_refuses_to_write(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = self._repo(directory)

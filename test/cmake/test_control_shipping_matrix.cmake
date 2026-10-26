@@ -9,6 +9,8 @@ file(COPY
     "${PULP_SOURCE_DIR}/tools/cmake/PulpInspectorShipping.cmake"
     "${PULP_SOURCE_DIR}/tools/cmake/PulpControlShipping.cmake"
     "${PULP_SOURCE_DIR}/tools/cmake/check_control_shipping_artifact.cmake"
+    "${PULP_SOURCE_DIR}/tools/cmake/PulpReleaseArtifactScan.cmake"
+    "${PULP_SOURCE_DIR}/tools/cmake/release_artifact_forbidden.json"
     DESTINATION "${_installed_helper_dir}")
 
 set(_matrix_source "${FIXTURE_DIR}/matrix-source")

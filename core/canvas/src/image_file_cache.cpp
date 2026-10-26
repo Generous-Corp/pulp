@@ -501,6 +501,12 @@ void ImageFileCache::set_capacity(std::size_t capacity) {
     d.capacity = capacity == 0 ? 1 : capacity;
 }
 
+std::size_t ImageFileCache::capacity() const {
+    Pool& d = impl().files;
+    std::lock_guard<std::mutex> lock(d.mutex);
+    return d.capacity;
+}
+
 void ImageFileCache::set_byte_budget(std::size_t bytes) {
     Pool& d = impl().files;
     std::lock_guard<std::mutex> lock(d.mutex);

@@ -15,7 +15,8 @@ bool provider_fault_interposer_installed() noexcept;
 
 // Host thread, around this instance's node prepare: the device whose queue the
 // provider fetches in between (and that device's instance) become the only
-// targets a fault may hit. Returns false when no target was captured.
+// targets a fault may hit. Returns false when no target was captured. Beginning
+// a capture drops any fault still armed for the previous target.
 void begin_provider_fault_target_capture() noexcept;
 bool end_provider_fault_target_capture(std::string& detail);
 bool provider_fault_target_captured() noexcept;
@@ -28,13 +29,19 @@ std::uint64_t provider_fault_applied_device() noexcept;
 // record host_time_ns).
 std::uint64_t provider_fault_applied_time_ns() noexcept;
 
+// The longest stall delay_completion and worker_stall may hold the provider's
+// worker for. Longer requests are clamped to it.
+inline constexpr std::uint32_t kMaxProviderStallMs = 10'000;
+
 // Any non-audio thread. Arms one provider fault; it is applied, once, at the
 // provider's next matching Dawn call on a non-main thread. `delay_ms` is the
-// stall for delay_completion and worker_stall.
+// stall for delay_completion and worker_stall, clamped to kMaxProviderStallMs.
 bool arm_provider_fault(FaultKind kind, std::uint32_t delay_ms, std::string& detail);
+bool provider_fault_armed() noexcept;
 
 // Host thread, before the engine is released. Drops a fault that was armed
-// but never applied, and forgets every queue -> device mapping.
+// but never applied, cuts short a stall in progress so releasing the engine
+// does not wait it out, and forgets every queue -> device mapping.
 void disarm_provider_fault() noexcept;
 
 // How many provider faults were actually applied, and at which call site.

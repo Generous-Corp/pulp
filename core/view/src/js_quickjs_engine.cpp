@@ -28,6 +28,11 @@
 #include <deque>
 #include <mutex>
 #include <string_view>
+#include <algorithm>
+#include <cstdint>
+#if defined(__APPLE__) || defined(__linux__)
+#include <pthread.h>
+#endif
 #include <cmath>
 #include <stdexcept>
 #include <unordered_set>
@@ -42,8 +47,15 @@ namespace pulp::view {
 // AddressSanitizer pads every C frame with redzones, so the same JS call depth
 // uses several times the C stack this limit measures. A nested native event
 // (a key that clicks a popup trigger whose handler queries the DOM) overflows
-// 1MB under ASan only, so an ASan build gets 4MB. The main thread's 8MB stack
-// covers it; the limit is a QuickJS check, not the thread's real size.
+// 1MB under ASan only, so an ASan build asks for 4MB.
+//
+// The limit is a QuickJS check measured down from the stack position of the
+// thread that sets it, not the thread's real size. A secondary thread can have
+// far less than that (512KB by default on macOS), so a limit above what the
+// thread has left would turn a JS "stack overflow" error into a real crash.
+// set_quickjs_stack_size therefore never asks for more than three quarters of
+// the stack left below the caller; on platforms where that cannot be read the
+// requested size is used unchanged.
 #if defined(__SANITIZE_ADDRESS__)
 #define PULP_QUICKJS_UNDER_ASAN 1
 #elif defined(__has_feature)
@@ -57,10 +69,48 @@ constexpr size_t kQuickJsStackBytes = 4 * 1024 * 1024;
 constexpr size_t kQuickJsStackBytes = 1024 * 1024;
 #endif
 
+// Bytes of stack left below this call on the current thread, or 0 when the
+// platform does not report its stack bounds.
+static size_t current_thread_stack_remaining() noexcept {
+    char probe = 0;
+    const auto sp = reinterpret_cast<std::uintptr_t>(&probe);
+    std::uintptr_t low = 0;
+#if defined(__EMSCRIPTEN__)
+    return 0;
+#elif defined(__APPLE__)
+    const auto top = reinterpret_cast<std::uintptr_t>(pthread_get_stackaddr_np(pthread_self()));
+    const std::size_t size = pthread_get_stacksize_np(pthread_self());
+    if (top < size)
+        return 0;
+    low = top - size;
+#elif defined(__linux__)
+    pthread_attr_t attr;
+    if (pthread_getattr_np(pthread_self(), &attr) != 0)
+        return 0;
+    void* addr = nullptr;
+    std::size_t size = 0;
+    const bool ok = pthread_attr_getstack(&attr, &addr, &size) == 0;
+    pthread_attr_destroy(&attr);
+    if (!ok)
+        return 0;
+    low = reinterpret_cast<std::uintptr_t>(addr);
+#else
+    return 0;
+#endif
+    return sp > low ? static_cast<size_t>(sp - low) : 0;
+}
+
+static size_t quickjs_stack_limit_for(size_t requested, size_t remaining) noexcept {
+    if (remaining == 0)
+        return requested;
+    return std::min(requested, remaining / 4 * 3);
+}
+
 static void set_quickjs_stack_size(
     choc::javascript::quickjs::QuickJSContext& context, size_t size) {
     if (context.runtime)
-        JS_SetMaxStackSize(context.runtime, size);
+        JS_SetMaxStackSize(context.runtime,
+                           quickjs_stack_limit_for(size, current_thread_stack_remaining()));
 }
 
 // QuickJS accounts every allocation against the runtime's malloc limit and

@@ -714,6 +714,18 @@ TEST_CASE("ImageFileCache: LRU capacity evicts oldest",
     cache.clear();
 }
 
+TEST_CASE("ImageFileCache: capacity() reads back the entry cap", "[canvas][image-cache]") {
+    auto& cache = ImageFileCache::instance();
+    const auto original = cache.capacity();
+    cache.set_capacity(7);
+    CHECK(cache.capacity() == 7);
+    // A zero cap is stored as one entry, and the getter reports what is stored.
+    cache.set_capacity(0);
+    CHECK(cache.capacity() == 1);
+    cache.set_capacity(original);
+    CHECK(cache.capacity() == original);
+}
+
 TEST_CASE("File pool stays within its byte budget, evicting least recently used",
           "[canvas][image-cache][byte-budget]") {
     CacheDefaults restore;

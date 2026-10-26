@@ -903,6 +903,10 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpControlShipping.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/check_inspector_shipping_artifact.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/check_control_shipping_artifact.cmake"
+    # Read by check_control_shipping_artifact.cmake relative to its own
+    # directory: the one forbidden-marker list and the scanner over it.
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpReleaseArtifactScan.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/release_artifact_forbidden.json"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/install_control_host.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/remove_control_host.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPlugin.cmake"
@@ -1140,6 +1144,13 @@ if(APPLE)
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/accessibility_mac.mm"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/text_accessibility_macos.mm"
         DESTINATION src/pulp/view/platform/mac
+    )
+    # plugin_view_host_mac.mm includes the private core/view/src/pending_resize.hpp
+    # as "../../src/pending_resize.hpp"; from src/pulp/view/platform/mac that
+    # resolves to src/pulp/view/src.
+    install(FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/core/view/src/pending_resize.hpp"
+        DESTINATION src/pulp/view/src
     )
     # Shared macOS render ObjC source (metal_surface_mac.mm), compiled per-binary
     # by _pulp_apply_view_mac_objc_suffix() so its PulpMetalSurfaceView (the

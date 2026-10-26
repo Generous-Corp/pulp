@@ -29,8 +29,8 @@ namespace lanes = signal::detail::lanes;
 // The loop saturator's curve. See signal::lipschitz_tanh for why it is this
 // one — 1-Lipschitz so it can never raise the loop gain, and bounded so a
 // freeze-regime tail settles rather than merely decaying slower than it grows.
-// The character delay derived the same curve for its dub feedback; it lives in
-// fast_math.hpp now so there is one definition to reason about.
+// The character delay uses the same curve for its dub feedback; fast_math.hpp
+// holds the one definition.
 using signal::lipschitz_tanh;
 
 // Transient ducker on the INPUT. Attacks excite the reverb less, sustains

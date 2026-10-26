@@ -4,9 +4,12 @@
 The node, transport, status, capability and program contracts under
 core/gpu_audio/include are backend-neutral: a consumer must be able to compile
 against them without any graphics backend. This guard fails when an installed
-header names a WebGPU type (`wgpu...`, `WGPU...`) or the Dawn namespace
-(`dawn::`). Prose that mentions a backend by name is allowed; identifiers are
-not.
+header names a WebGPU type (`wgpu...`, `WGPU...`), the Dawn namespace
+(`dawn::`), a Metal type (`MTL...`, metal-cpp `MTL::`, `CAMetal...`), a
+Vulkan type (`Vk...`), a Direct3D or DXGI interface (`ID3D...`, `IDXGI...`),
+or includes a backend SDK header (Metal, QuartzCore, Vulkan, WebGPU, Dawn,
+Direct3D, DXGI). Prose that mentions a backend by name is allowed;
+identifiers and includes are not.
 
 Exit status: 0 clean, 1 a header names a backend type, 2 nothing was scanned.
 """
@@ -20,7 +23,15 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 DEFAULT_INCLUDE = ROOT / "core" / "gpu_audio" / "include"
-FORBIDDEN = re.compile(r"\b[wW][gG][pP][uU]\w*|\bdawn::")
+FORBIDDEN = re.compile(
+    r"\b[wW][gG][pP][uU]\w*|\bdawn::"  # WebGPU / Dawn
+    r"|\bMTL[A-Z]\w*|\bMTL::|\bCA::|\bCAMetal\w*|\b__bridge\b"  # Metal, metal-cpp
+    r"|\bVk[A-Z]\w*"  # Vulkan types
+    r"|\bID3D\w*|\bIDXGI\w*|\bIDirect3D\w*|\bD3D1[0-2]_\w*"  # Direct3D / DXGI
+    # A backend SDK header included or imported by an installed header.
+    r"|^\s*#\s*(?:include|import)\s*[<\"](?:Metal/|MetalKit/|QuartzCore/|vulkan/|webgpu/|"
+    r"dawn/|d3d1[0-2]|dxgi)"
+)
 
 
 def strip_comments(text: str) -> str:

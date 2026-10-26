@@ -86,12 +86,15 @@ public:
                           SampleType q,
                           SampleType sample_rate,
                           SampleType gain_db = SampleType{0}) {
-        // Guard the inputs that would produce inf/NaN coefficients and wedge the
-        // filter state forever: sample_rate ≤ 0 (w0 = ∞), q ≤ 0 (alpha = ∞ at q=0,
-        // or a0 = 1+alpha crossing 0 for negative q), and non-finite freq/gain.
-        // Clamp only these — any finite positive q, however tiny, yields large but
-        // finite coefficients, so every legitimate retune stays bit-identical.
-        // Mirrors the input hardening in NoiseGate::set_params.
+        // Guard the inputs that would produce inf/NaN or unstable coefficients
+        // and wedge the filter state forever: sample_rate ≤ 0 (w0 = ∞), q ≤ 0
+        // (alpha = ∞ at q=0, or a0 = 1+alpha crossing 0 for negative q),
+        // non-finite freq/gain, and freq at or above Nyquist (sin w0 ≤ 0 makes
+        // alpha ≤ 0, so a pole lands on or outside the unit circle). The
+        // frequency ceiling is 0.49 x sample_rate, the margin the EQ designers
+        // already clamp to. Any finite positive q, however tiny, yields large
+        // but finite coefficients, so every legitimate retune stays
+        // bit-identical. Mirrors the input hardening in NoiseGate::set_params.
         if (!(std::isfinite(sample_rate) && sample_rate > SampleType{0}))
             sample_rate = SampleType{44100};
         if (!(std::isfinite(q) && q > SampleType{0}))
@@ -99,6 +102,7 @@ public:
         if (!std::isfinite(gain_db)) gain_db = SampleType{0};
         if (!(std::isfinite(freq_hz) && freq_hz > SampleType{0}))
             freq_hz = SampleType{1000};
+        freq_hz = std::min(freq_hz, sample_rate * SampleType{0.49});
 
         SampleType w0 = SampleType{2} * pi * freq_hz / sample_rate;
         SampleType cos_w0 = std::cos(w0);

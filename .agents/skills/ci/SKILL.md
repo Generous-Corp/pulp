@@ -458,8 +458,10 @@ macOS.
   before the full macOS run. The sweep labels the approved head, and arms only
   once the head's latest `macos` check run is a completed full-lane success
   (not `deferred`). An earlier arm is disabled at once by
-  `macos-ci-arm-refusal.yml`, with a comment. If the full lane fails, the PR
-  needs a fix, and the fix is a new head, which needs a new verdict.
+  `macos-ci-arm-refusal.yml`, with a comment. It judges the PR's current head,
+  read live, not the arm event's, and reads every page of that head's check
+  runs; a head or listing it cannot read is a refusal. If the full lane fails,
+  the PR needs a fix, and the fix is a new head, which needs a new verdict.
 - **A push disarms and unlabels.** `macos-ci-label-reset.yml` disables
   auto-merge on `synchronize` (otherwise the new head's contract-lane green
   would merge it) and removes `macos-ci`. A queued PR leaves the queue on push
@@ -3209,6 +3211,28 @@ dependencies", which normally takes 0.3 min). Bound a setup step that can only
 hang on the network with a step `timeout-minutes` well above its measured max,
 so the VM is freed in minutes instead of hours.
 
+## Gate: release-artifact scan (`tools/cmake/PulpReleaseArtifactScan.cmake`)
+
+One list, `tools/cmake/release_artifact_forbidden.json`, names every byte
+pattern a release artifact must not contain, keyed by the build condition
+(`gate`) that forbids it: `js-off`, `tracing-off`, `reload-ship`,
+`bridge-exec-off`, `dev-env-off`, `control-stripped`. `AssertNoJsSymbols`,
+`AssertNoTracingSymbols`, `reload_ship_symbol_check` and
+`check_control_shipping_artifact` are wrappers over it, and the required gate
+runs `release-artifact-forbidden-list-selftest`,
+`release-artifact-scan-negative-control` (a generated fixture carrying every
+marker must be flagged; a clean one must pass) and the per-class scans over
+the SDK libraries, the C++ CLI and the fixture plug-in/standalone. A red
+`release-artifact-scan-*` names the marker id, kind and pattern; the reason it
+is forbidden is the entry's `reason` in the JSON. Add a marker by adding an
+entry; the selftest rejects an unknown gate, a duplicate pattern or an
+unused gate, and the negative control fails if the scanner cannot see it.
+The `ship` skill has the full model. The ctest registrations live in
+`test/cmake/release_artifact_tests.cmake` (included from
+`cmake_smoke_tests.cmake`); the class scans register through
+`cmake_language(DEFER)` because `PULP_SDK_TARGETS` and the CLI target are
+defined after `test/`.
+
 ## Gate: framework-neutrality (`tools/scripts/framework_neutrality_check.py`)
 
 Hard-fails a PR when Pulp's own source names another UI framework — in a
@@ -4893,12 +4917,20 @@ uses, or the golden warms a cache the real jobs never touch.
 
 - **A pre-push gate that reads the working tree can pass a commit it never
   saw.** The push sends HEAD's commit; a file fixed on disk but not committed
-  let a bad commit through the encoding lint, which now reads the pushed
-  commit (`text_encoding_lint.py --head`). Docs-noise, format_changed,
-  conflict-marker, compat-aggregate, source-contract, single-backend and
-  negative-capability gates still read the working tree; the hook warns
-  when tracked files differ from the pushed commit. A new content gate
-  should read the pushed commit's blobs (`git cat-file --batch`), not disk.
+  let a bad commit through the encoding lint. The hook now hands the pushed
+  commit to the encoding lint (`--head`), docs-noise (`--commit`),
+  format_changed (`--check --rev`), the conflict-marker check (`--rev`, the
+  files the push changes) and compat aggregate (`check --rev`), all reading
+  blobs through `gate_common.commit_blobs`. Source contracts, the
+  single-backend guard and the negative-capability check still read the
+  working tree (they walk directory trees); the hook warns when tracked files
+  differ from the pushed commit. A new content gate should read the pushed
+  commit's blobs, not disk.
+- **A gate that did not run is not a pass.** The merge-tree checks exit 4
+  (NOT_CHECKED) when one times out or cannot start; gates.sh exits 4 and the
+  pre-push hook blocks on it (bypass: `PULP_PREPUSH_ALLOW_NOT_CHECKED=1`).
+  Each check's timeout is 20 s scaled by load per core, capped at 300 s;
+  `PULP_MERGE_TREE_CHECK_TIMEOUT` overrides it.
 
 - **A workflow that runs a test binary by name breaks when that suite joins
   a test group.** `pulp_add_test_suite(... GROUP <group>)` compiles the
@@ -6256,6 +6288,15 @@ triggers on a 143/137 signal-kill exit, not just the marker). Real os-windows
 *correctness* bugs are still worth fixing (the ARG_MAX response-file +
 vanished-`-object` existence-filter + mass-drop guard in `run_coverage.sh` were
 real); only the runtime/timeout is accepted as best-effort.
+
+Because `continue-on-error` absorbs a Windows failure, `needs.coverage.result`
+stays `success` and a run can read green with Windows broken (run 40162878355:
+`pwsh: command not found` before the build started). `coverage_publish_barrier`
+therefore runs under `always()`. It fails unless `needs.coverage.result` is
+`success`, and when a dispatch sets `windows_runner_selector_json` it also
+requires the `coverage-cobertura-windows-<sha>` artifact. When you read a
+Windows proof dispatch, check the Windows job and its artifact, not just the
+run conclusion. `test_codecov_upload_contract.py` pins the barrier shape.
 
 ### `release-cli.yml` needs Rust; the VM golden does not have it
 

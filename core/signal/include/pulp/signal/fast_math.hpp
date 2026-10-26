@@ -706,8 +706,7 @@ inline float ladder_tanh(float x) {
 /// a stability question; an unbounded one lets a self-oscillating loop settle
 /// only by growing more slowly than it decays. Two modules derived this same
 /// curve independently for those reasons — the character delay's dub feedback
-/// and the FDN reverb's in-loop drive — which is why it lives here now instead
-/// of once in each.
+/// and the FDN reverb's in-loop drive — so it is defined once, here.
 inline double lipschitz_tanh(double v) noexcept {
     const double x = std::clamp(v, -3.0, 3.0);
     const double x2 = x * x;
