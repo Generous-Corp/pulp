@@ -239,6 +239,7 @@ if(UNIX)
 
     add_test(NAME pulp-reload-ship-symbol-absence
         COMMAND ${CMAKE_COMMAND}
+            -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
             -DDEV_BIN=$<TARGET_FILE:pulp-reload-ship-fixture-dev>
             -DSHIP_BIN=$<TARGET_FILE:pulp-reload-ship-fixture-ship>
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/reload_ship_symbol_check.cmake)
@@ -517,7 +518,8 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_AUSDK)
         pulp::format pulp::view ausdk Catch2::Catch2WithMain
         "-framework AppKit" "-framework AudioToolbox" "-framework QuartzCore")
     target_compile_definitions(pulp-test-au-v2-cocoa-ui PRIVATE
-        PULP_AU_GUI=1 PULP_AU_COCOA_VIEW_CLASS=PulpAUCocoaViewFactory_Test)
+        PULP_AU_GUI=1 PULP_AU_COCOA_VIEW_CLASS=PulpAUCocoaViewFactory_Test
+        PULP_AU_V2_TEST_HOOKS=1)
     set_target_properties(pulp-test-au-v2-cocoa-ui PROPERTIES CXX_STANDARD 23)
     # AudioUnitSDK 1.4 headers use std::expected (C++23). The root sets
     # CMAKE_CXX_STANDARD=20 which wins for ObjC++ over the target CXX_STANDARD,
@@ -525,6 +527,22 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_AUSDK)
     target_compile_options(pulp-test-au-v2-cocoa-ui PRIVATE
         $<$<COMPILE_LANGUAGE:OBJCXX>:-std=gnu++23>)
     catch_discover_tests(pulp-test-au-v2-cocoa-ui)
+
+    # The same module compiled the way pulp_add_plugin() builds a shipped AU v2
+    # target: PULP_AU_GUI and a per-plug-in factory class, no PULP_AU_V2_TEST_HOOKS.
+    # Checks the test-only host accessor stays out of shipped plug-ins.
+    add_executable(pulp-test-au-v2-cocoa-shipping
+        test_au_v2_cocoa_shipping.mm
+        ${CMAKE_SOURCE_DIR}/core/format/src/au_v2_cocoa_view.mm)
+    target_link_libraries(pulp-test-au-v2-cocoa-shipping PRIVATE
+        pulp::format pulp::view ausdk Catch2::Catch2WithMain
+        "-framework AppKit" "-framework AudioToolbox" "-framework QuartzCore")
+    target_compile_definitions(pulp-test-au-v2-cocoa-shipping PRIVATE
+        PULP_AU_GUI=1 PULP_AU_COCOA_VIEW_CLASS=PulpAUCocoaViewFactory_Shipping)
+    set_target_properties(pulp-test-au-v2-cocoa-shipping PROPERTIES CXX_STANDARD 23)
+    target_compile_options(pulp-test-au-v2-cocoa-shipping PRIVATE
+        $<$<COMPILE_LANGUAGE:OBJCXX>:-std=gnu++23>)
+    catch_discover_tests(pulp-test-au-v2-cocoa-shipping)
 endif()
 
 # iOS AVAudioSession bridge

@@ -1301,9 +1301,13 @@
    "data": "declared",
    "detected_sources": [
     "test/test_design_import_ir.cpp",
+    "test/test_design_import_native_fonts.cpp",
     "test/test_recognition_resolver.cpp"
    ],
    "inputs": [
+    "external/fonts/FunnelDisplay-VariableFont_wght.ttf",
+    "external/fonts/Inter-Regular.ttf",
+    "test/fixtures/design-ir-observe/variable-font-label",
     "test/fixtures/import-fidelity/assets/knob_ref.png",
     "test/fixtures/imports/claude/vite-assets.html",
     "test/fixtures/imports/figma-plugin/synthetic-knob.png",
@@ -1312,6 +1316,7 @@
    "kind": "compiled",
    "sources": [
     "test/test_design_import_ir.cpp",
+    "test/test_design_import_native_fonts.cpp",
     "test/test_recognition_resolver.cpp"
    ],
    "undeclared_sources": []
@@ -1364,7 +1369,9 @@
     "core/signal/include",
     "core/state/include",
     "core/view/include",
-    "test/fixtures/import-fidelity/assets/fader_ref.png"
+    "test/fixtures/import-fidelity/assets/fader_ref.png",
+    "test/fixtures/import-fidelity/scene.pulp.json",
+    "test/fixtures/v0-dev/audio-control-panel.tsx"
    ],
    "kind": "compiled",
    "runtime_targets": [],
@@ -1894,6 +1901,7 @@
    ],
    "inputs": [
     "test/fixtures/imports/fig/synthetic.fig",
+    "test/fixtures/v0-dev/audio-control-panel.tsx",
     "tools/import-design"
    ],
    "kind": "compiled",
@@ -2526,6 +2534,8 @@
   "pulp-osc-render-wav",
   "pulp-project-package-mutant-helper",
   "pulp-project-package-publish-helper",
+  "pulp-release-artifact-clean-fixture",
+  "pulp-release-artifact-forbidden-fixture",
   "pulp-reload-ship-fixture-dev",
   "pulp-reload-ship-fixture-ship",
   "pulp-render-provider-floor-wgpu-control",
@@ -2544,6 +2554,7 @@
   "pulp-test-au-bundle-entry",
   "pulp-test-au-param-visibility",
   "pulp-test-au-plugin-state",
+  "pulp-test-au-v2-cocoa-shipping",
   "pulp-test-au-v2-cocoa-ui",
   "pulp-test-au-v2-instrument-rt",
   "pulp-test-au-v2-param-display",
@@ -3094,6 +3105,7 @@
   "pulp-test-six-band-eq",
   "pulp-test-skewed-range",
   "pulp-test-skia-surface",
+  "pulp-test-skia-surface-readback-macos",
   "pulp-test-smf-interchange",
   "pulp-test-sos-cascade",
   "pulp-test-spectral-cross-synthesis",
@@ -6842,6 +6854,13 @@
    ],
    "kind": "python"
   },
+  "import-design-ir-observe-variable-font-label": {
+   "entry": "test/test_design_ir_observe_variable_font_label.py",
+   "inputs": [
+    "test/test_design_ir_observe_variable_font_label.py"
+   ],
+   "kind": "python"
+  },
   "import-fidelity-diff": {
    "entry": "test/test_import_fidelity_diff.py",
    "inputs": [
@@ -7007,6 +7026,8 @@
    "inputs": [
     "test/fixtures",
     "test/fixtures/browser-capture-layout-rows",
+    "test/fixtures/import-differential",
+    "test/fixtures/import-differential/manifest.json",
     "test/test_importer_differential_lab.py",
     "tools/import-design/browser_capture/form_control_theme.mjs",
     "tools/import-design/browser_capture_controls.cpp",
@@ -7761,6 +7782,7 @@
     "tools/scripts",
     "tools/scripts/agent_capability_manifest.py",
     "tools/scripts/changed_surface_script_families.py",
+    "tools/scripts/gates.sh",
     "tools/scripts/gates_script_inputs.py",
     "tools/scripts/merge_tree_script_state.py",
     "tools/scripts/refresh_push_check.py",

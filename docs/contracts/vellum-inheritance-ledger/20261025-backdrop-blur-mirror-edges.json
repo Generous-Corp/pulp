@@ -1,0 +1,13 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261025-backdrop-blur-mirror-edges",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "vellum_obligation": "The canvas kernel's backdrop-filter must blur a mirror-tiled crop of the element's own rect and crop only its output, on both the blur-only and the filter-chain path, so the backdrop at a box edge is the box's content reflected, as Chrome draws it, rather than the edge column clamped outward or the page beside the box.",
+  "evidence": [
+    ".github/vellum-change-events/20261025-backdrop-blur-mirror-edges.json",
+    "pulp-test-css-backdrop-opacity [backdrop-filter]",
+    "tools/import-validation/chrome_backdrop_opacity_oracle.py"
+  ]
+}

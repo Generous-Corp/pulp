@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261025-importer-lab-same-moment-reference-watch",
+  "created_at": "2026-10-25T00:21:45Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-output-and-packaging",
+    "design-source-ingest",
+    "visual-proof-harness"
+  ],
+  "rationale": "The importer differential lab (a development-only Chromium-oracle harness) now scores the native render against the candidate lane's own Chromium screenshot when both lanes' DOM snapshots share a semantic digest, and records the gap between the two captures. It also widens Spectr's declared volatile region in the lab manifest. Only the lab's measurement and its fixture metadata change. The importer, browser capture, DesignIR, renderer and packaging are untouched, so no design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "python3 test/test_importer_differential_lab.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

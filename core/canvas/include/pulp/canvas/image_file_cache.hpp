@@ -168,8 +168,10 @@ public:
     void set_enabled(bool enabled);
     bool enabled() const;
 
-    /// Entry cap of the path pool.
+    /// Entry cap of the path pool. `capacity()` reads it back, so a caller
+    /// that changes it for a while can restore the value it found.
     void set_capacity(std::size_t capacity);
+    std::size_t capacity() const;
 
     /// Byte budget of the path pool; evicts down to it immediately, keeping
     /// the most recently used entry and the entries drawn this frame.

@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "event_id": "20261025-backdrop-blur-mirror-edges",
+  "kind": "change",
+  "created_at": "2026-10-25T01:44:36Z",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "rationale": "design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger); SkiaCanvas::save_backdrop_filter and save_backdrop_filter_chain now feed the backdrop blur a mirror-tiled crop of the element's own rect (SkImageFilters::Crop with SkTileMode::kMirror) and crop only the output, where the blur-only path used to pass the rect as the blur's own crop rect and so clamped the input at the box edge. Chrome samples a backdrop by mirroring the box's content past its edges; measured on fixture 22-backdrop-opacity, the pixels across the edge-mirror box's left edge match Chrome within one level after the change and were up to 30 levels too bright before. No signature, capability or call site changes, interior pixels away from an edge are unchanged, and no design-import, Chromium, rendering-backend, packaging, or source-authority boundary moves.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "ctest --test-dir build -R 'backdrop-filter is composited at the element.s opacity as Chrome does'",
+    "ctest --test-dir build -R 'backdrop-filter mirrors the box at its edges as Chrome does'"
+  ],
+  "disposition": "pulp-only",
+  "vellum_inherits": true
+}

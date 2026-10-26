@@ -424,6 +424,53 @@ TEST_CASE("ProcessorNode routes a pre-bound host bus into a sidechain") {
         REQUIRE(output[frame] == main[frame] + route[frame]);
 }
 
+TEST_CASE("ProcessorNode reuses its bus set without carrying a route into the next block",
+          "[format][graph][executor][routing][processor-node]") {
+    // The node keeps one bus set across blocks. A sidechain that was active in
+    // one block and missing in the next must reach the processor as missing,
+    // and come back when the route does.
+    constexpr int frames = 8;
+    SidechainProbe processor;
+    pulp::state::StateStore store;
+    bind_processor(processor, store);
+    ProcessorNode node(processor);
+    PrepareContext prepare;
+    prepare.sample_rate = kSr;
+    prepare.max_buffer_size = frames;
+    prepare.input_channels = 1;
+    prepare.output_channels = 1;
+    REQUIRE(node.prepare(prepare));
+
+    std::array<float, frames> main{};
+    std::array<float, frames> route{};
+    std::array<float, frames> output{};
+    std::array<const float*, 1> main_channels{main.data()};
+    std::array<const float*, 1> route_channels{route.data()};
+    std::array<float*, 1> output_channels{output.data()};
+    for (int frame = 0; frame < frames; ++frame) {
+        main[frame] = static_cast<float>(frame + 1);
+        route[frame] = static_cast<float>(10 + frame);
+    }
+    RouteProviderFixture provider;
+    node.set_audio_input_provider({&provider, &RouteProviderFixture::read});
+
+    pulp::format::ProcessBlock block;
+    block.sample_rate = kSr;
+    block.frame_count = frames;
+    pulp::format::GraphRuntimeNodeProcessContext context;
+    context.routed = true;
+    context.node_inputs = {main_channels.data(), 1, frames};
+    context.node_outputs = {output_channels.data(), 1, frames};
+    const pulp::audio::BufferView<const float> live(route_channels.data(), 1, frames);
+    for (const bool routed : {true, false, true, false}) {
+        provider.route = routed ? live : pulp::audio::BufferView<const float>{};
+        output.fill(-1.0f);
+        REQUIRE(ProcessorNode::process_binding(block, context, &node));
+        for (int frame = 0; frame < frames; ++frame)
+            REQUIRE(output[frame] == main[frame] + (routed ? route[frame] : 0.0f));
+    }
+}
+
 TEST_CASE("ProcessorNode binding processes audio without the routed view it requires",
           "[format][graph][executor][routing][processor-node]") {
     // The binding implements only the routed contract; on the shared-block path

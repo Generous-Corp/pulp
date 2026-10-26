@@ -684,6 +684,14 @@ the CLAP headers remove the older spelling.
 
 ## Gotchas
 
+- **`gui_hide` returns the editor's GPU caches; `gui_destroy` frees the rest.**
+  A host may hide an editor and keep it for the next `gui_show`. `gui_hide`
+  calls `PluginViewHost::release_gpu_caches()`, which trims the surface with
+  `TrimLevel::everything()` but keeps the surfaces, so `gui_show` repaints
+  without recreating them. `gui_destroy` resets `editor_host`, which frees
+  everything. A hidden editor whose display link keeps drawing refills the
+  caches, so the release only holds while nothing draws.
+
 ### Decoding an event is not the same as advertising that you accept it
 
 The adapter's decode paths are written before, and independently of, the

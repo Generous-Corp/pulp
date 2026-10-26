@@ -32,6 +32,7 @@
 #include <pulp/view/design_import.hpp>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace pulp::view {
 
@@ -49,9 +50,38 @@ enum class AnchorStrategy {
 ///
 /// For nodes that already have a non-empty `stable_anchor_id` (e.g. set
 /// explicitly by an authored override), the existing value is preserved.
+///
+/// A content hash does not include the parent, so two identical subtrees under
+/// different parents (two cards each holding an unlabelled slider) hash alike.
+/// After the walk, every anchor this call derived from content (the
+/// content-hash strategy, and the adapter strategy's fallback for a node with
+/// no source id) that repeats an earlier anchor is disambiguated as
+/// resolve_anchor_collisions() describes. Explicit identities (source ids,
+/// authored overrides) are never rewritten.
 void assign_anchors(IRNode& root,
                     AnchorStrategy strategy,
                     std::string_view adapter_name = "");
+
+/// One derived anchor a collision pass replaced.
+struct AnchorDisambiguation {
+    std::string path;       ///< `$/children[i]/...` of the node that changed
+    std::string previous;   ///< the anchor it shared
+    std::string anchor;     ///< its new anchor
+    std::string first_path; ///< the earlier node that keeps `previous`
+};
+
+/// Makes every derived anchor in `root` unique, in document order over
+/// `children`. The first node holding an anchor keeps it, and so does every
+/// node whose anchor is already unique, so re-import identity is preserved
+/// wherever it already worked. Each later node with a derived anchor gets the
+/// hash of its anchor folded with its parent's anchor, then with each further
+/// ancestor's until the result is held by no other node in the tree.
+///
+/// "Derived" means the node's `anchor_strategy` says the anchor was computed
+/// from content: `content-hash`, or `adapter` on a node with no
+/// `source_node_id`. A repeated explicit identity is left as it is: that is a
+/// source defect for the caller to refuse (find_duplicate_anchors()).
+std::vector<AnchorDisambiguation> resolve_anchor_collisions(IRNode& root);
 
 /// Compute a single anchor without walking. Public for tests and for
 /// adapter code that wants to assign anchors incrementally.

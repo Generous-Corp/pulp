@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261025-render-gpu-trim-frames-watch",
+  "created_at": "2026-10-25T07:00:15Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "A generic render-backend change. The surface's idle GPU trim ages a resource by frames as well as wall time, so a resource is freed only after both 2 s and 30 frames without use; it still frees only resources nothing references, so presented pixels are unchanged. Pulp continues to own these targets under the 2026-10-04 design-import refactor inheritance decision; Vellum inherits the change when the targets adopt the Vellum package. No design-import, Chromium, rendering or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R 'GpuIdleTrimSchedule ages by frames as well as time'",
+    "ctest --test-dir build -R 'SkiaSurface idle trim keeps what a recent frame released across a pause'",
+    "ctest --test-dir build -R 'SkiaSurface idle trim runs once per second of frames'",
+    "ctest --test-dir build -R 'SkiaSurface idle trim frees textures unused for two seconds and keeps the drawn one'",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none",
+  "vellum_inherits": true
+}

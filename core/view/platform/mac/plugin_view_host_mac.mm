@@ -2392,6 +2392,12 @@ private:
     }
 }
 
+- (void)viewDidHide {
+    [super viewDidHide];
+    if (self.onHide)
+        self.onHide();
+}
+
 - (void)viewDidChangeBackingProperties {
     [super viewDidChangeBackingProperties];
     CGFloat scale = self.window ? self.window.backingScaleFactor
@@ -2435,6 +2441,9 @@ public:
             // there too.
             metal_view_.onWindowChange = ^{ this->handle_window_change(); };
             metal_view_.onBackingChange = ^{ this->handle_backing_change(); };
+            metal_view_.onHide = ^{
+              this->release_gpu_caches();
+            };
             metal_view_.onResize = ^(uint32_t w, uint32_t h) {
                 this->on_native_frame_changed(w, h);
             };
@@ -2465,6 +2474,7 @@ public:
             metal_view_.pointTransform = nil;
             metal_view_.onWindowChange = nil;
             metal_view_.onBackingChange = nil;
+            metal_view_.onHide = nil;
             metal_view_.onResize = nil;
         }
         // Publish the teardown while the surfaces are still alive, so a
@@ -2599,6 +2609,18 @@ public:
     // paints the editor.
     render::GpuSurface* gpu_surface() const override {
         return gpu_surface_.get();
+    }
+
+    GpuCacheUsage gpu_cache_usage() const override {
+        if (!skia_surface_)
+            return {};
+        const auto bytes = skia_surface_->gpu_cache_bytes();
+        return {bytes.budgeted, bytes.purgeable};
+    }
+
+    void release_gpu_caches() override {
+        if (skia_surface_)
+            skia_surface_->trim_gpu_resources(render::SkiaSurface::TrimLevel::everything());
     }
 
     void set_idle_callback(std::function<void()> callback) override {

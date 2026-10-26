@@ -48,6 +48,7 @@ FetchContent_MakeAvailable(choc)
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPatchChoc.cmake)
 pulp_patch_choc_v8("${choc_SOURCE_DIR}")
 pulp_patch_choc_json_number_exponent("${choc_SOURCE_DIR}")
+pulp_patch_choc_file_watcher("${choc_SOURCE_DIR}")
 
 # WebGPU (Dawn) — cross-platform GPU abstraction (BSD-3-Clause)
 # Uses eliemichel/WebGPU-distribution for CMake-friendly integration

@@ -1313,7 +1313,11 @@ TEST_CASE("MCP trace analyzer permits CLI-owned hanging descendant cleanup",
     configure_trace_analyze_executable(mcp.string());
     ScopedEnvVar evidence_env("PULP_TEST_GPU_PROBE_EVIDENCE", result_path.string());
     ScopedEnvVar pid_env("PULP_TEST_TRACE_DESCENDANT_PID", pid_path.string());
-    ScopedTraceAnalyzeProcessLimits scaled_limits({500, 256 * 1024});
+    // The budget only has to outlast the CLI: its own 150 ms wait plus shell
+    // and process start-up, which a loaded sanitizer runner stretched past
+    // 500 ms into cli-timeout. What this checks is that the CLI's cleanup of
+    // its own descendant is permitted, not how fast it runs.
+    ScopedTraceAnalyzeProcessLimits scaled_limits({10000, 256 * 1024});
 
     const auto response = handle_request(tool_call(
         "63", "pulp_trace_analyze",
