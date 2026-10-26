@@ -194,6 +194,11 @@ DesignIR prepare_native_ir_with_fonts(const DesignIR& source, const IRAssetManif
                 const auto& bytes = files[i];
                 if (bytes && register_face(*bytes, segment.alias)) {
                     registered = true;
+                    // The rule's declared weight range decides where Chromium
+                    // synthesizes bold, so the alias carries it too.
+                    pulp::canvas::declare_font_face_weight_range(
+                        segment.alias, face->weight,
+                        face->weight_max > 0 ? face->weight_max : face->weight);
                 } else if (options.diagnostics_out != nullptr) {
                     ImportDiagnostic d;
                     d.severity = ImportDiagnosticSeverity::warning;
