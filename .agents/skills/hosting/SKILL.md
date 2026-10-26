@@ -875,6 +875,22 @@ save/reopen render proof beside the legacy caller-owned route controls.
   under `steady_clock`). A test that needs real values on its FIRST read calls
   `set_node_load_monitoring(true)` before processing. `graph_load()` is always
   timed because live-swap admission reads it.
+- Edges pass samples through unchanged. In the executor's `gather_node_inputs`, a
+  port fed by exactly one undelayed edge gets that edge's exact bits, and the
+  only AudioOutput copies into the bus instead of adding onto zero. A graph of
+  Processors therefore equals calling them in sequence bit for bit, -0
+  included. Fan-in and PDC-delayed ports still sum from +0, so they turn -0
+  into +0. The reference walk mirrors the same rule (copy a lone undelayed
+  edge; sole output copies). Change both together or the parity suites
+  diverge on a signed zero (a -1 gain on silence is enough).
+  The edge is read IN PLACE (no copy) only when the buffer assignment marks it
+  `reads_in_place`: it is the only reader of its source port (no fan-out, no
+  feedback capture, no automation tap) and the source region is not
+  persistent. Otherwise the port gets a private copy. Inputs are const views,
+  but hosted plug-in slots (`plugin_slot_vst3/clap.cpp`) and native cores cast
+  that away, so a fan-out sibling must never share the bytes. In-place reads
+  also rely on the assignment freeing a source region only at the END of its
+  last reader's position, so it never becomes that reader's output.
 - Per-node live-DSP telemetry (`audio::LiveDspTelemetryStore`): richer than the
   load measurer — fixed-slot p50/p95/p99 + jitter + over-budget attribution.
   Disabled by default (`set_live_dsp_telemetry_enabled()`; the audio path is one
