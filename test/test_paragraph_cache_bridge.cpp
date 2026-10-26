@@ -96,17 +96,17 @@ TEST_CASE("Paragraph cache holds script text runs with NaN and signed-zero spaci
 
 namespace {
 
-// One Label with `base` applied and a single run over its first word, painted
+// One Label with `base` applied and `runs` set as its text runs, painted
 // through the Skia backend. Runs that resolve to the same style paint the same
 // bytes, so a run can be compared against the style it should inherit.
-std::vector<std::uint8_t> paint_run(const std::string& base, const std::string& run) {
+std::vector<std::uint8_t> paint_runs(const std::string& base, const std::string& runs) {
     ScriptEngine engine;
     View root;
     root.set_bounds({0, 0, 240, 40});
     pulp::state::StateStore store;
     WidgetBridge bridge(engine, root, store);
-    bridge.load_script("createLabel('t', 'Hello world', '');\n" + base +
-                       "setTextRuns('t', [{ start: 0, end: 5" + run + " }]);\n");
+    bridge.load_script("createLabel('t', 'Hello world', '');\n" + base + "setTextRuns('t', [" +
+                       runs + "]);\n");
     auto* label = dynamic_cast<Label*>(bridge.widget("t"));
     if (label == nullptr || !label->has_attributed_string())
         return {};
@@ -120,28 +120,34 @@ TEST_CASE("setTextRuns keeps the inherited spacing for a non-finite letterSpacin
           "[canvas][paragraph-cache][widget-bridge]") {
     CacheDefaults restore;
     const std::string base = "setFontSize('t', 16);\nsetLetterSpacing('t', 3);\n";
-    const auto inherited = paint_run(base, ", letterSpacing: 3");
+    const auto inherited = paint_runs(base, "{ start: 0, end: 5, letterSpacing: 3 }");
     REQUIRE_FALSE(inherited.empty());
     // Control: a different spacing paints differently, so equal bytes below
     // mean the same spacing, not an instrument that cannot see spacing.
-    REQUIRE(paint_run(base, ", letterSpacing: 0") != inherited);
+    REQUIRE(paint_runs(base, "{ start: 0, end: 5, letterSpacing: 0 }") != inherited);
     // NaN keeps the Label's 3. Were it passed on, make_paragraph would fold it
     // to 0 and the run would paint like the control instead.
-    CHECK(paint_run(base, ", letterSpacing: NaN") == inherited);
+    CHECK(paint_runs(base, "{ start: 0, end: 5, letterSpacing: NaN }") == inherited);
 }
 
 TEST_CASE("setTextRuns keeps the inherited size for a non-finite or non-positive fontSize",
           "[canvas][paragraph-cache][widget-bridge]") {
     CacheDefaults restore;
     const std::string base = "setFontSize('t', 16);\n";
-    const auto inherited = paint_run(base, ", fontSize: 16");
+    // The canvas keeps its last usable size when handed one it cannot use, so
+    // the run under test follows a run at 8. Painted first, a bad size would
+    // ride on the Label's 16 and look inherited whether or not it was.
+    const std::string sized = "{ start: 0, end: 6, fontSize: 8 }";
+    const auto inherited = paint_runs(base, sized);
     REQUIRE_FALSE(inherited.empty());
-    REQUIRE(paint_run(base, ", fontSize: 8") != inherited);
+    REQUIRE(paint_runs(base, sized + ", { start: 6, end: 11, fontSize: 12 }") != inherited);
     // parseFloat of a CSS keyword gives NaN; 0 and negatives are not sizes.
-    // Each keeps the Label's size, as setFontSize does.
+    // Each keeps the Label's size, as setFontSize does, rather than the 8 the
+    // canvas was left at.
     for (const char* size : {"NaN", "0", "-3"}) {
         INFO("fontSize " << size);
-        CHECK(paint_run(base, std::string(", fontSize: ") + size) == inherited);
+        CHECK(paint_runs(base, sized + ", { start: 6, end: 11, fontSize: " + size + " }") ==
+              inherited);
     }
 }
 
