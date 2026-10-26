@@ -231,7 +231,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/host/catalog_descriptor.hpp",
-        "fingerprint": "sha256:a0216389b97d7f048675e2ae41d94781db9ef390c178be0edcb2118334f28537",
+        "fingerprint": "sha256:1a5a790b3ae48d3992d429c12f35963293577fd49bfd3f7c9a6dec9548d9e539",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (

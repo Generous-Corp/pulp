@@ -40,13 +40,19 @@ inline std::vector<Finding> validate(const Descriptor& descriptor,
 }
 
 inline std::vector<Finding> validate_export(const std::vector<ExportNode>& nodes) {
-    return audit_forge_catalog_export(nodes);
+    // Forge's fixed 89-node membership is product-specific. The neutral seam
+    // validates only each provider's descriptor/factory join; Forge callers
+    // retain audit_forge_catalog_export for the Forge inventory check.
+    return audit_catalog_export(nodes);
 }
 
 inline std::string describe(const Finding& finding) {
     return describe_forge_audit_finding(finding);
 }
 
+// This is the compatibility projection for the existing Forge JSON schema.
+// Neutral providers should serialize their own catalog schema rather than
+// treating the `pulp.forge-catalog.v1` document as a generic contract.
 inline std::string serialize(const std::vector<ExportNode>& nodes) {
     return serialize_forge_catalog_json(nodes);
 }

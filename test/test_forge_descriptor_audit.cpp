@@ -442,6 +442,8 @@ TEST_CASE("neutral catalog vocabulary catches a factory mismatch",
 
     const auto findings = validate_export(nodes);
     REQUIRE(has_fault(findings, AuditFault::mismatched_type_id));
+    REQUIRE_FALSE(has_fault(findings, AuditFault::missing_catalog_node));
+    REQUIRE_FALSE(has_fault(findings, AuditFault::unexpected_catalog_node));
 }
 
 TEST_CASE("neutral catalog serialization preserves the compatibility export", "[catalog][json]") {
