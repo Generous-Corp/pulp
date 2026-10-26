@@ -491,6 +491,14 @@ failure on a merge group names a commit that is not in the ejected PR, read the
 `diff base:` line in the job log before touching the PR. Any new diff-scoped
 gate added to a merge_group workflow should reuse the same resolver.
 
+## `[train] enabled = true` is read-only
+
+The merge train's switch is on in `.shipyard/config.toml` with no `mode`, so
+only `shipyard train status` and `shipyard train metrics` act on it, and
+both only read. It does not form rollups or arm, enqueue or merge anything.
+Do not add `mode = "rollup"` here: that is PR #11159, and it waits on the
+live test.
+
 ## A HOLD on a queued head fails the merge group
 
 On 2026-10-12/13 six pulp pull requests merged minutes after a `verdict: HOLD`
