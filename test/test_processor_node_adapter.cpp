@@ -424,6 +424,114 @@ TEST_CASE("ProcessorNode routes a pre-bound host bus into a sidechain") {
         REQUIRE(output[frame] == main[frame] + route[frame]);
 }
 
+namespace {
+
+// Records what the processor was handed on its last block.
+class ContextProbe final : public Processor {
+  public:
+    PluginDescriptor descriptor() const override {
+        PluginDescriptor d;
+        d.name = "ContextProbe";
+        d.manufacturer = "Pulp";
+        d.bundle_id = "com.pulp.test.contextprobe";
+        d.version = "1.0.0";
+        d.category = PluginCategory::Effect;
+        d.input_buses = {{"Main In", 1, false}};
+        d.output_buses = {{"Main Out", 1, false}};
+        return d;
+    }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>& in, pulp::midi::MidiBuffer& midi_in,
+                 pulp::midi::MidiBuffer& midi_out, const ProcessContext& context) override {
+        seen = context;
+        input_channels = in.num_channels();
+        midi_in_events = midi_in.size();
+        midi_out.add(pulp::midi::MidiEvent::note_on(0, 60, 100));
+        params_seen = param_events();
+        sidechain_seen = sidechain_input();
+        for (std::size_t i = 0; i < out.num_samples(); ++i)
+            out.channel_ptr(0)[i] = in.channel_ptr(0)[i];
+    }
+    ProcessContext seen{};
+    std::size_t input_channels = 0;
+    std::size_t midi_in_events = 0;
+    const pulp::state::ParameterEventQueue* params_seen = nullptr;
+    const pulp::audio::BufferView<const float>* sidechain_seen = nullptr;
+};
+
+} // namespace
+
+TEST_CASE("ProcessorNode hands a main-bus processor the block context and empty sidecars",
+          "[format][graph][executor][routing][processor-node]") {
+    // A node with one main input and output takes a prepared path. The
+    // processor must see what process_processor_block() would hand it: the
+    // transport when it is complete, the block's rate and length filling any
+    // field it leaves unset, a default context when there is none, empty
+    // MIDI input on every block, an empty parameter queue, and no sidechain.
+    constexpr int frames = 8;
+    ContextProbe processor;
+    pulp::state::StateStore store;
+    bind_processor(processor, store);
+    ProcessorNode node(processor);
+    PrepareContext prepare;
+    prepare.sample_rate = kSr;
+    prepare.max_buffer_size = frames;
+    prepare.input_channels = 1;
+    prepare.output_channels = 1;
+    REQUIRE(node.prepare(prepare));
+
+    std::array<float, frames> input{}, output{};
+    std::array<const float*, 1> in_ch{input.data()};
+    std::array<float*, 1> out_ch{output.data()};
+    pulp::format::GraphRuntimeNodeProcessContext context;
+    context.routed = true;
+    context.node_inputs = {in_ch.data(), 1, frames};
+    context.node_outputs = {out_ch.data(), 1, frames};
+    pulp::format::ProcessBlock block;
+    block.sample_rate = kSr;
+    block.frame_count = frames;
+
+    // Complete transport: handed through as is.
+    ProcessContext full;
+    full.sample_rate = 96000.0;
+    full.num_samples = frames;
+    full.tempo_bpm = 133.0;
+    full.position_samples = 4242;
+    block.transport = &full;
+    REQUIRE(ProcessorNode::process_binding(block, context, &node));
+    CHECK(processor.seen.sample_rate == 96000.0);
+    CHECK(processor.seen.tempo_bpm == 133.0);
+    CHECK(processor.seen.position_samples == 4242);
+    CHECK(processor.input_channels == 1);
+    CHECK(processor.midi_in_events == 0);
+    REQUIRE(processor.params_seen != nullptr);
+    CHECK(processor.params_seen->empty());
+    CHECK(processor.sidechain_seen == nullptr);
+
+    // Partial transport: the block fills the rate and length it leaves unset.
+    ProcessContext partial;
+    partial.tempo_bpm = 90.0;
+    block.transport = &partial;
+    REQUIRE(ProcessorNode::process_binding(block, context, &node));
+    CHECK(processor.seen.sample_rate == kSr);
+    CHECK(processor.seen.num_samples == frames);
+    CHECK(processor.seen.tempo_bpm == 90.0);
+    CHECK(processor.midi_in_events == 0);
+
+    // No transport: a default context with the block's rate and length, with
+    // nothing left over from the partial transport above.
+    block.transport = nullptr;
+    REQUIRE(ProcessorNode::process_binding(block, context, &node));
+    CHECK(processor.seen.sample_rate == kSr);
+    CHECK(processor.seen.num_samples == frames);
+    CHECK(processor.seen.tempo_bpm == ProcessContext{}.tempo_bpm);
+    CHECK(processor.midi_in_events == 0);
+    // The node restored the processor's sidecars after each block.
+    CHECK(processor.param_events() == nullptr);
+}
+
 TEST_CASE("ProcessorNode reuses its bus set without carrying a route into the next block",
           "[format][graph][executor][routing][processor-node]") {
     // The node keeps one bus set across blocks. A sidechain that was active in

@@ -46,6 +46,28 @@ TEST_CASE("AudioProcessLoadMeasurer measures nonzero load", "[audio][load]") {
     REQUIRE(std::isfinite(m.load()));
 }
 
+TEST_CASE("AudioProcessLoadMeasurer reports spans in nanoseconds of wall time", "[audio][load]") {
+    // The measurer reads its own monotonic clock (the counter register on Apple
+    // arm64, mach_absolute_time on other Apple targets). Its span must match
+    // steady_clock's for the same wait, which pins the tick-to-nanosecond
+    // conversion.
+    AudioProcessLoadMeasurer m;
+    for (int attempt = 0; attempt < 5; ++attempt) {
+        const auto outer_start = std::chrono::steady_clock::now();
+        m.begin(512, 44100.0f);
+        busy_wait_for(std::chrono::milliseconds(3));
+        m.end();
+        const auto outer_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                  std::chrono::steady_clock::now() - outer_start)
+                                  .count();
+        const auto measured = m.snapshot().elapsed_ns;
+        INFO("measured " << measured << " ns, steady_clock " << outer_ns << " ns");
+        // At least the wait itself, and no more than the enclosing span.
+        REQUIRE(measured >= 3'000'000 * 95 / 100);
+        REQUIRE(measured <= outer_ns + 50'000);
+    }
+}
+
 TEST_CASE("AudioProcessLoadMeasurer peak tracking", "[audio][load]") {
     AudioProcessLoadMeasurer m;
     m.set_smoothing(1.0f);
