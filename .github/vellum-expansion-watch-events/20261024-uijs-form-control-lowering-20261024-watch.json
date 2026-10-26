@@ -6,9 +6,11 @@
   "acceptance_id": "full-design-import-render-v1-pulp-watch",
   "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
   "capability_families": [
+    "design-ir-contract",
+    "design-source-ingest",
     "render-assets-and-backends"
   ],
-  "rationale": "The ui.js emitter now lowers a captured theme-painted range, checkbox or radio (native_theme verdict native) onto RangeSlider / Checkbox in the chromium_refresh skin with the HTML state the native and baked C++ lanes already apply from the shared ua_form_control_state() parse, and records each node's captured snapped paint rect, through new or widened WidgetBridge setters (setUaSkin, setCheckboxKind, setCapturedPaintRect; setAccentColor and setRadioGroup reach Checkbox). This brings one emitter into line with the others; Chromium stays the only oracle and Skia/Dawn the renderer, so no design-import, Chromium, rendering, or packaging authority moves.",
+  "rationale": "The ui.js emitter now lowers a captured theme-painted range, checkbox or radio (native_theme verdict native) onto RangeSlider / Checkbox in the chromium_refresh skin with the HTML state the native and baked C++ lanes already apply from the shared ua_form_control_state() parse, and records each node's captured snapped paint rect, through new or widened WidgetBridge setters (setUaSkin, setCheckboxKind, setCapturedPaintRect; setAccentColor and setRadioGroup reach Checkbox). This brings one emitter into line with the others; Chromium stays the only oracle and Skia/Dawn the renderer, so no design-import, Chromium, rendering, or packaging authority moves. The same change reaches design-ir-contract and design-source-ingest: the ui.js lowering (design_codegen.cpp, design_js_capture_lowering.*) reads the captured IR node through the UaFormControlState parse, which moves unchanged from design_import_form_controls.hpp into the shared internal header design_ua_form_control_state.hpp so all three lanes use one parse; no IR field, schema or public header changes. The emitter conformance test, its registration and the import-design skill note gain the button and form-control cases that hold the lanes together. These families were covered by the emitter-conformance PR's event while this branch was stacked on it; that PR has merged, so this event now claims them for this branch's own change.",
   "tests": [
     "ctest --test-dir build -R pulp-test-design-emitter-conformance",
     "python3 test/test_importer_differential_lab.py",
