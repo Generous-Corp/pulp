@@ -19,6 +19,8 @@ import {
   rgbaPixel,
   runCapture,
 } from "./capture_integration_support.mjs";
+import { evaluateFormControlTheme } from "./form_control_theme.mjs";
+import { COMPUTED_STYLES } from "./semantics.mjs";
 import { captureStableScreenshot, freezeMotion } from "./settle.mjs";
 
 function cdpSession(pipe) {
@@ -322,6 +324,28 @@ test("an infinite animation is frozen to its own first keyframe, not the element
       const frozen = await captureStableScreenshot(cdp, OPTIONS);
       assert.ok(frozen && firstKeyframe && frozen.equals(firstKeyframe),
         "the frozen frame is the first keyframe");
+    });
+  });
+
+test("an animated form control keeps the theme verdict the page gave it",
+  { timeout: captureCaseTimeout(1), skip: process.platform === "win32" },
+  async (context) => {
+    await withPage(context, async ({ cdp, open }) => {
+      // The two themed controls animate exactly the families that decide the
+      // verdict; only the third is styled by the page itself.
+      await open(pageUrl("<button>Play</button><textarea></textarea>" +
+        "<button style='background:#f00'>Stop</button><script>" +
+        "document.querySelector('button').animate([{backgroundColor:'#0f0'}," +
+        "{backgroundColor:'#00f'}],{duration:700,iterations:Infinity});" +
+        "document.querySelector('textarea').animate([{borderRadius:'2px'}," +
+        "{borderRadius:'9px'}],{duration:700,iterations:Infinity})</script>"));
+      const receipt = await freezeMotion(cdp, { declareSources: false });
+      assert.equal(receipt.animations.paused, 2);
+      const snapshot = await cdp.call("DOMSnapshot.captureSnapshot",
+        { computedStyles: COMPUTED_STYLES });
+      const report = await evaluateFormControlTheme(cdp, snapshot, COMPUTED_STYLES);
+      assert.deepEqual(report.controls.map((control) => [control.tag, control.theme]),
+        [["button", "native"], ["textarea", "native"], ["button", "author"]]);
     });
   });
 

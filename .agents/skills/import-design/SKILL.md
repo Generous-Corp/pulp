@@ -4724,6 +4724,10 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   scale kept presenting a merely paused composited animation mid-cycle while
   the page read time zero, and nothing is left to hold once it is cancelled.
   The page's own reference becomes idle, and restarting it is settled again.
+  A `button`, `input`, `textarea`, `select` or `progress` target is only
+  paused: the form-control theme check counts inline styling as author
+  styling, so committing would flip a theme-painted control to author-styled.
+  Under the real-scale launch it can still show the mid-cycle frame.
   A video is paused and rewound to its first frame unless it still shows
   its poster. CSS animations and transitions stay on the stylesheet path, and
   scroll- or view-driven animations are left to the fixed scroll position. An

@@ -326,6 +326,8 @@ const MOTION_FREEZE_SOURCE = `async (declareSources) => {
     },
   };
   const receipt = state.receipt;
+  // The controls whose theme verdict reads inline author styling.
+  const THEMED_CONTROLS = "button, input, textarea, select, progress";
 
   // Web Animations run on the document timeline, which the CSS freeze and the
   // scheduler stubs cannot reach. Settle each one to a single frame: a finite
@@ -366,11 +368,16 @@ const MOTION_FREEZE_SOURCE = `async (declareSources) => {
     // time zero while the presented frame showed the box mid-cycle. Writing
     // the time-zero values inline and dropping the animation leaves nothing
     // for the compositor to hold. commitStyles throws for a target that is
-    // not rendered; that animation stays paused at zero.
-    try {
-      animation.commitStyles();
-      animation.cancel();
-    } catch {}
+    // not rendered; that animation stays paused at zero. A form control
+    // stays paused too: the committed values would be inline author styling,
+    // which turns a control the native theme paints into an author-styled one.
+    const target = animation.effect?.target;
+    if (!target?.matches?.(THEMED_CONTROLS)) {
+      try {
+        animation.commitStyles();
+        animation.cancel();
+      } catch {}
+    }
     count("paused");
   }
 

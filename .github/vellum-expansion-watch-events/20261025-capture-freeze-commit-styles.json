@@ -10,7 +10,7 @@
     "design-output-and-packaging",
     "design-source-ingest"
   ],
-  "rationale": "The capture's motion freeze settles an infinite or unresolved Web Animation by pausing it at time zero, writing those values inline with commitStyles() and cancelling it, instead of only pausing it, because with the browser at its real device scale Chromium kept presenting the paused composited animation mid-cycle while the page and DOM read time zero. The captured frame is the animation's first keyframe as before; no lowering rule or DesignIR schema changes, and Chromium stays the oracle.",
+  "rationale": "The capture's motion freeze settles an infinite or unresolved Web Animation by pausing it at time zero, writing those values inline with commitStyles() and cancelling it, instead of only pausing it, because with the browser at its real device scale Chromium kept presenting the paused composited animation mid-cycle while the page and DOM read time zero. A button, input, textarea, select or progress target is only paused, since committed values are inline author styling and would flip its form-control theme verdict. The captured frame is the animation's first keyframe as before; no lowering rule or DesignIR schema changes, and Chromium stays the oracle.",
   "tests": [
     "node --test tools/import-design/browser_capture/settle.test.mjs",
     "node --test tools/import-design/browser_capture/motion_freeze.integration.test.mjs",
