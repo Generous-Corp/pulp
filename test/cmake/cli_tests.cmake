@@ -483,6 +483,15 @@ target_include_directories(pulp-test-ship-dev-build-guard PRIVATE ${CMAKE_SOURCE
 target_link_libraries(pulp-test-ship-dev-build-guard PRIVATE Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-ship-dev-build-guard)
 
+# The ship scan's child-process helper: no terminal, empty signal mask and
+# default dispositions for the child, whatever the caller holds.
+if(NOT WIN32)
+    add_executable(pulp-test-ship-child-process test_ship_child_process.cpp)
+    target_include_directories(pulp-test-ship-child-process PRIVATE ${CMAKE_SOURCE_DIR})
+    target_link_libraries(pulp-test-ship-child-process PRIVATE Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-ship-child-process)
+endif()
+
 add_executable(pulp-test-ship-tracing-guard test_ship_tracing_guard.cpp)
 target_include_directories(pulp-test-ship-tracing-guard PRIVATE ${CMAKE_SOURCE_DIR})
 pulp_test_data(pulp-test-ship-tracing-guard PATHS core/runtime/src/trace.cpp)
