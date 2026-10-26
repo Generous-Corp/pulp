@@ -9,6 +9,14 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1140"></a>
+## [1.14.0] - 2026-10-26
+
+- release/version bump ([#11118](https://github.com/Generous-Corp/pulp/pull/11118))
+- fix/rtti ownership demangle ([#11114](https://github.com/Generous-Corp/pulp/pull/11114))
+- codex/windows m157 build 20261022 ([#10861](https://github.com/Generous-Corp/pulp/pull/10861))
+- fix/capture freeze commit styles ([#11092](https://github.com/Generous-Corp/pulp/pull/11092))
+
 <a id="v1130"></a>
 ## [1.13.0] - 2026-10-26
 
@@ -11670,6 +11678,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.14.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.14.0
 [1.13.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.13.0
 [1.12.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.12.0
 [1.11.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.11.0
