@@ -23,6 +23,9 @@
 #include <future>
 #include <string>
 #include <vector>
+#include <optional>
+#include <unordered_map>
+#include <mutex>
 
 // Probe for ICU's BreakIterator headers. The bundled Skia binaries
 // statically link `libskunicode_icu.a`
@@ -492,6 +495,104 @@ std::vector<std::size_t> line_break_opportunities(const std::string& text,
     out.push_back(text.size());
     return out;
 #endif
+}
+
+namespace {
+
+std::mutex& declared_weights_mutex() {
+    static std::mutex m;
+    return m;
+}
+
+std::unordered_map<std::string, std::vector<DeclaredWeightRange>>& declared_weights() {
+    static std::unordered_map<std::string, std::vector<DeclaredWeightRange>> map;
+    return map;
+}
+
+} // namespace
+
+void declare_font_face_weight_range(const std::string& family, int weight_min, int weight_max) {
+    if (family.empty())
+        return;
+    weight_min = std::clamp(weight_min, 1, 1000);
+    weight_max = std::clamp(weight_max, 1, 1000);
+    const DeclaredWeightRange range{std::min(weight_min, weight_max),
+                                    std::max(weight_min, weight_max)};
+    std::lock_guard<std::mutex> guard(declared_weights_mutex());
+    auto& ranges = declared_weights()[family];
+    for (const auto& existing : ranges) {
+        if (existing.min == range.min && existing.max == range.max)
+            return;
+    }
+    ranges.push_back(range);
+}
+
+bool has_declared_font_face_weights(const std::string& family) {
+    std::lock_guard<std::mutex> guard(declared_weights_mutex());
+    return declared_weights().count(family) != 0;
+}
+
+int css_match_declared_weight(const std::vector<DeclaredWeightRange>& ranges, int desired) {
+    if (ranges.empty())
+        return -1;
+    for (std::size_t i = 0; i < ranges.size(); ++i) {
+        if (ranges[i].min <= desired && desired <= ranges[i].max)
+            return static_cast<int>(i);
+    }
+    // The nearest range entirely below or above the desired weight, judged by
+    // the edge that faces it.
+    const auto nearest_below = [&](int limit) {
+        int best = -1;
+        for (std::size_t i = 0; i < ranges.size(); ++i) {
+            if (ranges[i].max < desired && ranges[i].max >= limit &&
+                (best < 0 || ranges[i].max > ranges[static_cast<std::size_t>(best)].max))
+                best = static_cast<int>(i);
+        }
+        return best;
+    };
+    const auto nearest_above = [&](int limit) {
+        int best = -1;
+        for (std::size_t i = 0; i < ranges.size(); ++i) {
+            if (ranges[i].min > desired && ranges[i].min <= limit &&
+                (best < 0 || ranges[i].min < ranges[static_cast<std::size_t>(best)].min))
+                best = static_cast<int>(i);
+        }
+        return best;
+    };
+    constexpr int kAny = 1000;
+    if (desired >= 400 && desired <= 500) {
+        if (const int up = nearest_above(500); up >= 0)
+            return up;
+        if (const int down = nearest_below(0); down >= 0)
+            return down;
+        return nearest_above(kAny);
+    }
+    if (desired < 400) {
+        if (const int down = nearest_below(0); down >= 0)
+            return down;
+        return nearest_above(kAny);
+    }
+    if (const int up = nearest_above(kAny); up >= 0)
+        return up;
+    return nearest_below(0);
+}
+
+std::optional<bool> declared_face_synthesizes_bold(const std::string& family,
+                                                   int requested_weight) {
+    std::vector<DeclaredWeightRange> ranges;
+    {
+        std::lock_guard<std::mutex> guard(declared_weights_mutex());
+        const auto it = declared_weights().find(family);
+        if (it == declared_weights().end())
+            return std::nullopt;
+        ranges = it->second;
+    }
+    const int chosen = css_match_declared_weight(ranges, requested_weight);
+    if (chosen < 0)
+        return std::nullopt;
+    constexpr int kBoldThreshold = 600;
+    return requested_weight >= kBoldThreshold &&
+           ranges[static_cast<std::size_t>(chosen)].max < kBoldThreshold;
 }
 
 } // namespace pulp::canvas

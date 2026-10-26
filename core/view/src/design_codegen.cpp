@@ -3087,11 +3087,10 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
     ss << "if (typeof setSubpixelLayout === 'function') setSubpixelLayout('', true);\n"
        << "if (typeof setCapturedFrameRoot === 'function') setCapturedFrameRoot('', true);\n\n";
 
-    // Register bundled (non-system) fonts BEFORE any setFontFamily, so a
-    // family like "Clash Grotesk" / "Inter" resolves to the shipped face
-    // instead of silently falling back to a same-named system font (or a
-    // generic). resolved_path is the absolute .ttf/.otf path stamped by the
-    // CLI's font asset-resolution pass; skip entries that didn't resolve.
+    // Register bundled fonts, with each @font-face rule's declared weight range,
+    // BEFORE any setFontFamily, so a family resolves to the shipped face rather
+    // than a same-named system font. resolved_path is the absolute file the CLI's
+    // asset-resolution pass stamped; entries that did not resolve are skipped.
     if (!ir.font_family_assets.empty()) {
         bool any = false;
         for (const auto& fa : ir.font_family_assets) {
@@ -3099,7 +3098,8 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
             if (!any && opts.include_comments) ss << "// Bundled fonts\n";
             any = true;
             ss << "registerFont('" << js_single_quote_escape(fa.family) << "', '"
-               << js_single_quote_escape(fa.resolved_path) << "');\n";
+               << js_single_quote_escape(fa.resolved_path) << "', " << fa.weight << ", "
+               << (fa.weight_max > 0 ? fa.weight_max : fa.weight) << ");\n";
         }
         if (any) ss << "\n";
     }
