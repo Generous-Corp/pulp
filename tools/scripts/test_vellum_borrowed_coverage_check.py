@@ -125,6 +125,41 @@ class BorrowedCoverageCheckTest(_PreflightRepo, unittest.TestCase):
         self.assertEqual(code, 0, output)
         self.assertNotIn("FAIL", output)
 
+    def _topic_with_event(self) -> str:
+        _git(self.repo, "checkout", "-q", "-b", "topic")
+        self._write(WATCHED_PATH, "# a one-line edit under a watched tree\n")
+        self._write(f"{EVENT_DIR_REL}/20260920-fixture.json",
+                    self._event("20260920-fixture", WATCHED_FAMILIES))
+        return self._commit("feat: touch a watched tree, with its event")
+
+    def test_a_parent_that_advanced_after_a_child_stacked_on_it_passes(self) -> None:
+        event = self._topic_with_event()
+        # The child holds topic's event commit but not topic's later review
+        # fix, so --no-contains alone does not drop it.
+        _git(self.repo, "checkout", "-q", "-b", "child", event)
+        self._write(UNWATCHED_PATH, "a child PR stacked on topic\n")
+        _git(self.repo, "update-ref", "refs/remotes/origin/child",
+             self._commit("docs: a child PR stacked on topic"))
+        _git(self.repo, "checkout", "-q", "topic")
+        self._write("docs/topic-review-fix.md", "topic's review fix\n")
+        self._commit("docs: topic's review fix")
+        head = self._push_topic()
+        self._advance_main()
+        code, output = self._check(head)
+        self.assertEqual(code, 0, output)
+        self.assertNotIn("origin/child", output)
+
+    def test_a_stale_copy_of_the_pr_under_another_name_does_not_fail_it(self) -> None:
+        event = self._topic_with_event()
+        _git(self.repo, "update-ref", "refs/remotes/origin/takeover/topic", event)
+        self._write("docs/topic-follow-up.md", "a follow-up\n")
+        self._commit("docs: a follow-up")
+        head = self._push_topic()
+        self._advance_main()
+        code, output = self._check(head)
+        self.assertEqual(code, 0, output)
+        self.assertNotIn("takeover", output)
+
 
 class WorkflowWiringTest(unittest.TestCase):
     def setUp(self) -> None:

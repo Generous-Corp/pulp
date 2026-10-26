@@ -742,10 +742,14 @@ green until its batch ejects. CI measures a synthetic merge of live main and
 the PR head that no ref contains, so the check passes the PR head
 (`--source-head`) for the descendant test and the PR's branch name
 (`--own-branch`) for the ignore list. The merge_group job does not run it:
-the queued base already holds every merged parent. Two edges to know: a
-remote branch holding an older copy of this PR's commits under another name
-(a hand-made batch branch, say) counts as a parent, and a fork PR whose
-branch name matches an origin branch ignores that origin branch.
+the queued base already holds every merged parent. A carrier only counts
+when this PR's own commits past it (`merge-base(carrier, head)..head`) touch a
+watched family and add no event, so a parent whose review fix came after a
+child stacked on it, and an older copy of this PR under another name
+(`takeover/`, `backup/`, a hand-made batch branch), pass as long as what
+followed them is unwatched. A watched follow-up past such a copy still fails.
+A fork PR whose branch name matches an origin branch ignores that origin
+branch.
 
 ## Refreshing the ledger no longer pulls this skill into skill-sync
 

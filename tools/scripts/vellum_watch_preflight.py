@@ -385,7 +385,37 @@ def borrowed_watch_coverage(root: pathlib.Path, base: str, head: str, *,
         if not carriers:
             return []  # this commit is the branch's own: it has its own event
         others |= carriers
-    return sorted(others)
+    # A carrier only lends coverage when this branch's own part beyond it,
+    # merge-base(carrier, head)..head, affects a watched family and adds no
+    # event. That drops a child stacked on an older head of this branch (this
+    # branch is the parent, and its later commits are its review fixes) and
+    # a stale copy of this branch under another name (takeover/, backup/),
+    # as long as what followed them is unwatched.
+    try:
+        scopes, _raw = checker.load_acceptance(root)
+    except Exception:
+        return []
+    if scopes is None:
+        return []
+    return sorted(carrier for carrier in others
+                  if _own_part_unevented(root, checker, scopes, carrier,
+                                         descendant_of, prefix + "/"))
+
+
+def _own_part_unevented(root: pathlib.Path, checker, scopes, carrier: str,
+                        head: str, event_prefix: str) -> bool:
+    fork = _git(root, "merge-base", carrier, head)
+    if not fork:
+        return False
+    try:
+        changes = checker._changes(root, fork, head)
+        if any(status == "A" and path.startswith(event_prefix)
+               for status, path in changes):
+            return False
+        changed = {path for _status, path in changes if not path.startswith(event_prefix)}
+        return bool(checker._affected(scopes, changed))
+    except Exception:
+        return False
 
 
 def run(root: pathlib.Path, base: str, head: str, stream, *,

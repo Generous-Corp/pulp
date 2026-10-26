@@ -8,9 +8,12 @@ while the branch's own change has no event. Once the parent merges, the merge
 queue measures only this branch's change, finds no event, and ejects the whole
 batch. This check runs in the pull_request job only, after the watch check has
 passed, and fails exactly when every watch event in the range was added by a
-commit another remote branch carries (`vellum_watch_preflight
-.borrowed_watch_coverage`, the pre-push advisory's rule). An event of the
-branch's own, or no event in the range, passes. The merge_group job never runs
+commit another remote branch carries, and the branch's own commits beyond
+that branch affect a watched family with no event of their own
+(`vellum_watch_preflight.borrowed_watch_coverage`, the pre-push advisory's
+rule). An event of the branch's own, no event in the range, or only unwatched
+commits past the carrier (a parent's review fix, a follow-up to a stale copy)
+passes. The merge_group job never runs
 it: there the queued base already holds every merged parent.
 
     vellum_borrowed_coverage_check.py --base <live main> --head <candidate>
