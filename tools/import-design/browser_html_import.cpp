@@ -10,10 +10,6 @@
 #include "html_intake.hpp"
 #include "html_project_stager.hpp"
 
-#include <pulp/view/design_sources.hpp>
-
-#include <fstream>
-#include <iterator>
 #include <string>
 #include <system_error>
 
@@ -60,6 +56,7 @@ BrowserHtmlImportResult import_browser_html(
         return BrowserHtmlFailure{
             2, "--require-canvas-ink cannot be combined with --offline", "", {}};
     }
+    BrowserLaneClock clock;
     const auto intake = classify_html_intake(request.input_file, content);
     const auto shape = html_export_shape_name(intake.shape);
     if (!intake.use_browser) return BrowserHtmlNotApplicable{};
@@ -120,11 +117,13 @@ BrowserHtmlImportResult import_browser_html(
             std::move(workspaces)};
     }
     workspaces.push_back(staged.workspace);
+    clock.lap("html-staging");
 
     browser_capture::BrowserDiscoveryOptions discovery;
     discovery.explicit_path = request.browser_executable;
     discovery.probe_timeout_ms =
         browser_capture::probe_timeout_from_environment(discovery.probe_timeout_ms);
+    discovery.probe_cache_directory = request.browser_probe_cache_directory;
 
     browser_capture::CaptureRequest capture;
     capture.input_file = staged.entry;
@@ -136,6 +135,7 @@ BrowserHtmlImportResult import_browser_html(
     capture.interaction_plan = request.browser_interactions;
     capture.fit_authored_frame = request.fit_authored_frame;
     capture.allow_network = request.allow_browser_network;
+    capture.capture_materialized_document = request.capture_materialized_document;
 
     std::error_code ec;
     const auto executable =
@@ -169,6 +169,8 @@ BrowserHtmlImportResult import_browser_html(
 
     auto captured =
         browser_capture::discover_and_capture(discovery, capture);
+    clock.lap("browser-discovery", captured.discovered_at);
+    clock.lap("browser-capture");
     if (!captured.discovery.ok()) {
         return BrowserHtmlFailure{
             2,
@@ -205,6 +207,7 @@ BrowserHtmlImportResult import_browser_html(
                                       provenance.code + "]: " + provenance.message,
                                   shape, std::move(workspaces)};
     }
+    clock.lap("capture-provenance");
 
     auto lowered = lower_browser_capture_to_ir(
         captured.capture.artifacts->envelope,
@@ -225,6 +228,7 @@ BrowserHtmlImportResult import_browser_html(
             shape,
             std::move(workspaces)};
     }
+    clock.lap("capture-lowering");
     // Give each knob/fader whose author declared an indicator the capture
     // slices needed to clean the frozen instance and move the authored art with
     // the parameter. Fails the
@@ -243,24 +247,15 @@ BrowserHtmlImportResult import_browser_html(
         return BrowserHtmlFailure{
             3, std::move(sprite_error), shape, std::move(workspaces)};
     }
+    clock.lap("control-sprites");
     // The page's own @font-face faces, so native text is shaped with the
     // fonts Chromium drew the capture with rather than same-named host faces.
-    if (const auto& sidecar = captured.capture.artifacts->materialized_document) {
-        std::ifstream in(*sidecar, std::ios::binary);
-        const std::string json{std::istreambuf_iterator<char>(in),
-                               std::istreambuf_iterator<char>()};
-        const auto materialized = pulp::view::parse_materialized_browser_document(json);
-        if (!materialized) {
-            return BrowserHtmlFailure{
-                3, "captured materialized document could not be decoded: " + sidecar->string(),
-                shape, std::move(workspaces)};
-        }
-        std::string font_error;
-        if (!attach_captured_font_faces(*lowered.design_ir, *materialized,
-                                        capture_directory / "fonts", font_error)) {
-            return BrowserHtmlFailure{3, std::move(font_error), shape, std::move(workspaces)};
-        }
+    std::string page_font_error;
+    if (!attach_page_font_faces(*lowered.design_ir, capture_directory / "font-faces.json",
+                                capture_directory / "fonts", lowered.warnings, page_font_error)) {
+        return BrowserHtmlFailure{3, std::move(page_font_error), shape, std::move(workspaces)};
     }
+    clock.lap("captured-fonts");
     return BrowserHtmlCaptured{shape,
                                std::move(*lowered.design_ir),
                                capture_directory,
@@ -269,7 +264,8 @@ BrowserHtmlImportResult import_browser_html(
                                lowered.semantic_report,
                                captured.capture.artifacts->materialized_document,
                                std::move(workspaces),
-                               std::move(lowered.warnings)};
+                               std::move(lowered.warnings),
+                               clock.take_stages()};
 }
 
 }  // namespace pulp::import_design

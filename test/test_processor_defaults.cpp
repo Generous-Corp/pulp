@@ -1722,3 +1722,43 @@ TEST_CASE("An opted-out processor's param_events() read is recorded without allo
     (void)other.param_events();
     CHECK_FALSE(unarmed.read_while_opted_out());
 }
+
+TEST_CASE("Arming one opted-out monitor keeps another monitor's recorded read",
+          "[format][processor][params][rt-safety]") {
+    // Two adapters whose queues hash to the same slot: the second arm probes
+    // the first's slot on its way to a free one, and must leave the first's
+    // record alone. Only the addresses matter to the table, so stand-ins from
+    // one buffer pick a colliding pair.
+    alignas(64) static std::array<unsigned char, 64 * 1024> addresses{};
+    const auto* first_queue =
+        reinterpret_cast<const pulp::state::ParameterEventQueue*>(addresses.data());
+    const auto home = pulp::format::detail::param_events_opt_out_home(first_queue);
+    const pulp::state::ParameterEventQueue* second_queue = nullptr;
+    for (std::size_t offset = 8; offset < addresses.size(); offset += 8) {
+        const auto* candidate =
+            reinterpret_cast<const pulp::state::ParameterEventQueue*>(addresses.data() + offset);
+        if (pulp::format::detail::param_events_opt_out_home(candidate) == home) {
+            second_queue = candidate;
+            break;
+        }
+    }
+    REQUIRE(second_queue != nullptr);
+
+    PlainProcessor first_processor;
+    first_processor.set_param_events(first_queue);
+    ParamEventsOptOutMonitor first;
+    first.arm(true, first_queue);
+    (void)first_processor.param_events();
+    REQUIRE(first.read_while_opted_out());
+
+    ParamEventsOptOutMonitor second;
+    second.arm(true, second_queue);
+    CHECK(first.read_while_opted_out());
+    CHECK_FALSE(second.read_while_opted_out());
+
+    // Each record still belongs to its own queue.
+    PlainProcessor second_processor;
+    second_processor.set_param_events(second_queue);
+    (void)second_processor.param_events();
+    CHECK(second.read_while_opted_out());
+}

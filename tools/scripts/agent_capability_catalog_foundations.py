@@ -199,7 +199,7 @@ EXPORTS = [
                 qualified_name="pulp::signal::SaturatorT<float>",
                 target="Pulp::signal",
                 header_fingerprint=(
-                    "sha256:3923d4e04568dcbbf4962951de2e05022ea0147bf9dd8a6bb536868b9a5c20dc"
+                    "sha256:5f3e39f13efe4c52be18675c58fb85a23a8dff283eb5abefadd0e5304df0073b"
                 ),
             )
         ],
@@ -253,7 +253,7 @@ EXPORTS = [
                 qualified_name="pulp::signal::SosCascadeT<float>",
                 target="Pulp::signal",
                 header_fingerprint=(
-                    "sha256:5518e99675c45d7f60acb4f60c9d117eef430beaaba40d75af68ea6084fc3ce1"
+                    "sha256:d0521809894f9de1c0ab61ab94d5f14d5d6ad90bd64a5f4bb39706f16a817af3"
                 ),
             )
         ],

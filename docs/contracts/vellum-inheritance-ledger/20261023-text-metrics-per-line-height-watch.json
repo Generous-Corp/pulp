@@ -1,0 +1,13 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261023-text-metrics-per-line-height-watch",
+  "slices": [
+    "render-assets-and-backends"
+  ],
+  "vellum_obligation": "Carry the per-line SkParagraph height rule (max ascent, descent and leading over every line) into Vellum's text measurement when the corresponding Pulp target adopts Vellum.",
+  "evidence": [
+    ".github/vellum-expansion-watch-events/20261023-text-metrics-per-line-height-watch.json",
+    "pulp-test-text-shaper: SkParagraph reports LineMetrics fHeight per line, not cumulatively",
+    "pulp-test-text-shaper: TextShaper multiline metrics enclose each line shaped alone"
+  ]
+}

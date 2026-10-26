@@ -75,7 +75,8 @@ std::size_t SharedIoConvolutionPipeline::drain_terminals() noexcept {
         executor_.release_ready(sequence);
     }
     if (executor_.fenced())
-        bridge_.request_recovery(SharedIoRecoveryReason::ProviderFailure);
+        bridge_.request_recovery(SharedIoRecoveryReason::ProviderFailure,
+                                 executor_.first_undelivered());
     return count;
 }
 

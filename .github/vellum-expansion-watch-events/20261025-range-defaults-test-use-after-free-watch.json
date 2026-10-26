@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261025-range-defaults-test-use-after-free-watch",
+  "created_at": "2026-10-25T05:11:41Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-source-ingest"
+  ],
+  "rationale": "Test-only fix: the range-defaults import test kept a freed RangeSlider by reading it out of a temporary view tree; the trees are now named locals. No import, render or authority behaviour changes.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-design-import-form-controls",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

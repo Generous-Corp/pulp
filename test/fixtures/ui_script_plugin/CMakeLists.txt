@@ -87,10 +87,12 @@ foreach(_fmt IN LISTS _ui_script_formats)
         ENVIRONMENT_MODIFICATION "${_probe_env}")
 endforeach()
 
-# The Standalone opens an audio device, so it is not launched here; its image
-# must still carry the registered script path, which an editor build without
-# the per-target registration does not.
-if(TARGET PulpUiScriptFixture_Standalone)
+# The Standalone opens an audio device, so it is not launched here; in a dev
+# build (PULP_DEV_BUILD) its image must still carry the registered script path,
+# which an editor build without the per-target registration does not. A
+# tests-on configure with the option off records no path, and
+# ui-script-plugin-editor-installed-sdk proves that absence on a release build.
+if(TARGET PulpUiScriptFixture_Standalone AND PULP_DEV_BUILD)
     add_test(NAME ui-script-plugin-standalone-registers-script
         COMMAND ${CMAKE_COMMAND}
             "-DIMAGE=$<TARGET_FILE:PulpUiScriptFixture_Standalone>"
@@ -102,6 +104,14 @@ endif()
 
 # The same plug-in built outside the tree against the installed SDK.
 if(PULP_HAS_CLAP)
+    # An instrumented producer (sanitizer or coverage) installs static
+    # libraries that reference its runtime, so the consumer must compile and
+    # link with the same instrumentation, as the other installed-SDK consumer
+    # fixtures do.
+    string(JOIN " " _ui_script_consumer_instrumentation_compile_flags
+        ${PULP_SANITIZER_COMPILE_FLAGS} ${PULP_COVERAGE_COMPILE_FLAGS})
+    string(JOIN " " _ui_script_consumer_instrumentation_link_flags
+        ${PULP_SANITIZER_LINK_FLAGS} ${PULP_COVERAGE_LINK_FLAGS})
     add_test(NAME ui-script-plugin-editor-installed-sdk
         COMMAND ${CMAKE_COMMAND}
             -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
@@ -109,8 +119,22 @@ if(PULP_HAS_CLAP)
             "-DPROBE=$<TARGET_FILE:pulp-ui-script-editor-probe>"
             "-DEXPECT_GPU=${PULP_HAS_SKIA}"
             "-DCONFIG=$<CONFIG>"
+            "-DPULP_PARENT_SANITIZER=${PULP_SANITIZER}"
+            "-DPULP_PARENT_CXX_FLAGS=${CMAKE_CXX_FLAGS}"
+            "-DPULP_PARENT_INSTRUMENTATION_CXX_FLAGS=${_ui_script_consumer_instrumentation_compile_flags}"
+            "-DPULP_PARENT_INSTRUMENTATION_LINKER_FLAGS=${_ui_script_consumer_instrumentation_link_flags}"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/sdk_consumer.cmake")
+    # The required macOS gate runs it: one install plus one small CLAP consumer
+    # costs about as much as cmake-view-audio-sdk-consumer beside it. Elsewhere
+    # it rides the slow lane with the other installed-SDK builds until a
+    # consumer build there is measured.
+    set(_ui_script_sdk_consumer_labels "cmake;sdk;format;view;scripted-ui")
+    if(NOT APPLE)
+        list(APPEND _ui_script_sdk_consumer_labels slow)
+    endif()
     set_tests_properties(ui-script-plugin-editor-installed-sdk PROPERTIES
-        LABELS "cmake;sdk;format;view;scripted-ui;slow" TIMEOUT 900
+        LABELS "${_ui_script_sdk_consumer_labels}"
+        COST 30
+        TIMEOUT 300
         ENVIRONMENT_MODIFICATION "${_ui_script_editor_env}")
 endif()

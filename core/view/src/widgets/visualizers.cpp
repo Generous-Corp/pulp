@@ -151,9 +151,14 @@ void ImageView::paint(canvas::Canvas& canvas) {
         img_w = cached_data_width_;
         img_h = cached_data_height_;
     }
+    // `fill` stretches the whole image over the box whatever its size, and
+    // object-position has no slack to place it in, so the intrinsic size of
+    // a file image changes nothing. Skip measuring it: each measure is a
+    // second lookup of the same image-cache entry on every paint.
+    const bool fills_box = object_fit().empty() || object_fit() == "fill";
     const bool has_intrinsic =
         (inline_ready && img_w > 0.0f && img_h > 0.0f) ||
-        (!is_inline_image && !fs_path.empty() &&
+        (!is_inline_image && !fills_box && !fs_path.empty() &&
          canvas.measure_image_from_file(fs_path, img_w, img_h) && img_w > 0.0f && img_h > 0.0f);
 
     struct FitRect { float x, y, width, height; };

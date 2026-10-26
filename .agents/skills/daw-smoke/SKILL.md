@@ -29,6 +29,14 @@ the cache/status handshake or interactive desktop is unavailable. The packet's
 README specifies separate `pulp audio render`/null and dev-only Perfetto
 companion gates; screenshots alone do not prove audio or performance.
 
+The Windows harness must launch REAPER with a complete copied resource profile,
+not an empty portable directory. Copy the operator's profile into the private
+run directory, retain the license only there, and remove stale
+`reaper-vstplugins*`/`reaper-clap*` caches before scanning. A partial profile can
+stall before Lua dispatch, while stale caches can resolve an older backup bundle;
+the harness treats either condition as inconclusive and keeps the user's live
+REAPER session untouched.
+
 - **`reload`** — the original flow. Seed watched DSP variant A, insert+float the
   FX, copy variant B over the watched path, scrape `swapped DSP` / `reload
   rejected`.
@@ -145,6 +153,27 @@ companion gates; screenshots alone do not prove audio or performance.
   - Projects come only from `real_host_templates.json` (No Input, monitoring
     OFF, fingerprinted). Never open or save a user project; use throwaway
     copies in a temp dir.
+  - Never record-arm a template track. Logic refuses to arm a No Input track
+    ("No input source selected!"), so a `live` template is an unarmed track
+    with no audio region, playing the plug-in's internal stimulus. The AX
+    snapshot given to `collect` must carry a `track` object; an armed track,
+    monitoring on or a real input is refused by `collect` and the v2 verifier.
+  - Save a template with the `save-as-plan` steps (Cmd-Shift-S, then
+    Cmd-Shift-G in the sheet, with the host briefly in front). Pressing File >
+    Save As by accessibility does not open Logic's save sheet.
+  - Launching Logic rewrites its preferences, so `snapshot-prefs` exports
+    `com.apple.logic10` (GarageBand: `com.apple.garageband10`) and `launch`
+    refuses without it. `revert` restores the domain, deleting keys the run
+    added because `defaults import` only merges, and stays unreverted unless a
+    fresh export matches the saved one. Logic's launch also rewrites
+    `~/Music/Audio Music Apps/Databases`, which is expected.
+  - In a REAPER run the host render deviates exactly the declared PDC (1536)
+    earlier than the plug-in capture, not the status `latency_samples` (1024,
+    the GPU lead alone). The v2 verifier requires that offset at both ends of
+    the deviation. `wrap-reaper` re-reads a v1 REAPER run as a v2 receipt.
+  - A busy host voids a planted negative only when the deviation lacks the
+    defect's own onset and span (`quiet_host_exempt`). Rerun `gpu_off` on
+    `--gpu-fault positive_control`; on a fault row the pairing is a mismatch.
   - Only `tools/validation/verify_gpu_audio_daw_continuity_receipt_v2.py`
     accepts a real-host receipt (built by `gpu_fault_hosts.py`). It needs all
     six binding conjuncts: an unbound run is INCONCLUSIVE and a wrong DAW is

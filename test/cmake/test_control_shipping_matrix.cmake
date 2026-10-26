@@ -349,6 +349,15 @@ expect_leak_blocked(capability-marker
 # inside a longer run of printable bytes must still be found.
 expect_leak_blocked(embedded-marker
     "#if defined(_MSC_VER)\n#define USED\n#else\n#define USED __attribute__((used))\n#endif\nextern \"C\" USED const volatile char leak[] = \"prefix-PULP_INSPECT_SHIPPING_MANIFEST_V1-suffix\";")
+# The scanner reads the raw image. A NUL before the marker must not hide it:
+# without the scanner's CMake policy pin a 3.x CMake truncates the read at
+# the first NUL, and the read-length check must then fail the scan closed.
+expect_leak_blocked(nul-before-marker
+    "#if defined(_MSC_VER)\n#define USED\n#else\n#define USED __attribute__((used))\n#endif\nextern \"C\" USED const volatile char leak[] = \"x\\0PULP_INSPECT_SHIPPING_MANIFEST_V1\";")
+# file(READ) folds CRLF to LF. A marker right after CRLF pairs must still be
+# found, and the folds must not trip the read-length check.
+expect_leak_blocked(crlf-before-marker
+    "#if defined(_MSC_VER)\n#define USED\n#else\n#define USED __attribute__((used))\n#endif\nextern \"C\" USED const volatile char leak[] = \"a\\r\\n\\r\\nPULP_INSPECT_SHIPPING_MANIFEST_V1\";")
 expect_leak_blocked(symbol-leak
     "namespace pulp::inspect { class ControlBroker { public: int run(); }; int ControlBroker::run() { return 7; } }")
 
@@ -393,3 +402,91 @@ if(_dependency_reason LESS 0)
     message(FATAL_ERROR
         "dependency leak failed for the wrong reason: ${_dependency_output}${_dependency_error}")
 endif()
+
+# A Windows plug-in bundle carries its DLLs as PE images inside the bundle
+# (`Contents/x64/` in an AAX bundle). The closure scan must recognise a PE by
+# its "MZ" header and refuse one that carries a forbidden control string. The
+# control copy, identical but for the marker, proves the bundle itself scans
+# clean, so the refusal is about the DLL's content. The fixture is not a
+# `.vst3`: the vst3-bundle-layout test checks every `*.vst3` in the build tree,
+# and this half-built bundle would fail it.
+function(scan_windows_bundle case_name dll_text out_result out_output)
+    set(_bundle "${FIXTURE_DIR}/${case_name}/Leaky.aaxplugin")
+    file(REMOVE_RECURSE "${FIXTURE_DIR}/${case_name}")
+    file(MAKE_DIRECTORY "${_bundle}/Contents/MacOS" "${_bundle}/Contents/x64")
+    set(_bundle_artifact
+        "${_bundle}/Contents/MacOS/ProductionStandalone${_matrix_executable_suffix}")
+    file(COPY_FILE
+        "${_matrix_runtime_dir}/ProductionStandalone${_matrix_executable_suffix}"
+        "${_bundle_artifact}")
+    file(WRITE "${_bundle}/Contents/x64/helper.dll" "${dll_text}")
+    execute_process(COMMAND "${CMAKE_COMMAND}"
+        "-DARTIFACT=${_bundle_artifact}"
+        "-DMANIFEST=${_matrix_build}/pulp-inspector-manifests/ProductionStandalone.json"
+        "-DSHIPPING_MANIFEST=${_matrix_build}/pulp-control-shipping-manifests/ProductionStandalone.Standalone.control-shipping.json"
+        "-DCXX_COMPILER=${_matrix_cxx_compiler}"
+        "-DREPORT=${FIXTURE_DIR}/${case_name}/report.json"
+        -P "${_installed_helper_dir}/check_control_shipping_artifact.cmake"
+        RESULT_VARIABLE _result OUTPUT_VARIABLE _output ERROR_VARIABLE _error)
+    set(${out_result} "${_result}" PARENT_SCOPE)
+    set(${out_output} "${_output}${_error}" PARENT_SCOPE)
+endfunction()
+
+scan_windows_bundle(pe-closure-clean
+    "MZ windows dll fixture without control strings\n" _pe_clean_result _pe_clean_output)
+if(NOT _pe_clean_result EQUAL 0)
+    message(FATAL_ERROR
+        "a Windows bundle with a clean PE dependency was refused: ${_pe_clean_output}")
+endif()
+file(READ "${FIXTURE_DIR}/pe-closure-clean/report.json" _pe_clean_report)
+if(NOT _pe_clean_report MATCHES "\"packaged_dependency_binaries_scanned\": 1")
+    message(FATAL_ERROR
+        "the PE dependency in a Windows bundle was not scanned: ${_pe_clean_report}")
+endif()
+
+scan_windows_bundle(pe-closure-leak
+    "MZ windows dll fixture\nPULP_INSPECT_SHIPPING_MANIFEST_V1\n"
+    _pe_leak_result _pe_leak_output)
+if(_pe_leak_result EQUAL 0)
+    message(FATAL_ERROR "a control string in a bundled Windows DLL was not blocked")
+endif()
+# CMake wraps long FATAL_ERROR text across lines, so compare with the
+# whitespace collapsed.
+string(REGEX REPLACE "[ \t\r\n]+" " " _pe_leak_text "${_pe_leak_output}")
+string(FIND "${_pe_leak_text}"
+    "forbidden control string in packaged dependency helper.dll: PULP_INSPECT_SHIPPING_MANIFEST_V1"
+    _pe_leak_reason)
+if(_pe_leak_reason LESS 0)
+    message(FATAL_ERROR
+        "the bundled Windows DLL leak failed for the wrong reason: ${_pe_leak_output}")
+endif()
+
+# The marker search is only equivalent to a raw byte search for printable
+# markers of at least 14 bytes with no `;` (the runs are joined with `;`), so
+# the scanner must refuse any other marker rather than search for it. The
+# 14-byte case is the control: the hook itself accepts a valid marker.
+function(expect_marker_admission marker expect_accepted)
+    execute_process(COMMAND "${CMAKE_COMMAND}"
+        "-DPULP_CONTROL_MARKER_SELFTEST=${marker}"
+        -P "${_installed_helper_dir}/check_control_shipping_artifact.cmake"
+        RESULT_VARIABLE _result OUTPUT_VARIABLE _output ERROR_VARIABLE _error)
+    if(expect_accepted)
+        if(NOT _result EQUAL 0)
+            message(FATAL_ERROR "valid marker '${marker}' was refused: ${_output}${_error}")
+        endif()
+    else()
+        if(_result EQUAL 0)
+            message(FATAL_ERROR "invalid marker '${marker}' was accepted")
+        endif()
+        string(REGEX REPLACE "[ \t\r\n]+" " " _text "${_output}${_error}")
+        string(FIND "${_text}" "control shipping marker must be" _reason)
+        if(_reason LESS 0)
+            message(FATAL_ERROR
+                "marker '${marker}' was refused for the wrong reason: ${_output}${_error}")
+        endif()
+    endif()
+endfunction()
+
+expect_marker_admission("PULP_ABCDEFGHI" TRUE)       # 14 bytes
+expect_marker_admission("PULP_ABCDEFGH" FALSE)       # 13 bytes
+expect_marker_admission("PULP_ABC;DEFGHIJ_V1" FALSE)

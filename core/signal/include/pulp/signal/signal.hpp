@@ -49,6 +49,7 @@
 #include <pulp/signal/linkwitz_riley.hpp>
 #include <pulp/signal/windowing.hpp>
 #include <pulp/signal/fft.hpp>
+#include <pulp/signal/overlap_add_convolver.hpp>
 #include <pulp/signal/fir_filter.hpp>
 #include <pulp/signal/fir_design.hpp>
 #include <pulp/signal/reverse_buffer.hpp>

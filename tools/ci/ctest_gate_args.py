@@ -50,8 +50,10 @@ import sys
 import urllib.request
 from typing import Any, Callable
 
-# Label set for lanes whose timing tests would be measuring runner load.
-SHARED_HOST_LABEL_EXCLUDE = "validation|slow|performance|bench|quality-lab"
+# Label set for lanes whose timing tests would be measuring runner load, plus
+# `gpu-proof`: GPU-audio hardware-evidence tests that the macOS gate compiles
+# but never runs, because their receipts are owner-run on a physical GPU.
+SHARED_HOST_LABEL_EXCLUDE = "validation|slow|performance|bench|quality-lab|gpu-proof"
 # Source-only Python selftests (tools/ci/source_selftests.json). The required
 # `Enforce version & skill sync` context runs them without a build, so the gate
 # events drop them; `push` keeps them.

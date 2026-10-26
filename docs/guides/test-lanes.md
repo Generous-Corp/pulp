@@ -156,6 +156,26 @@ still runs `source-selftest`, a Linux or Windows push excludes only
 [`.shipyard/config.toml`](../../.shipyard/config.toml) (`[validation.default]`,
 `test =`).
 
+### Installed-SDK consumers on the macOS gate
+
+An installed-SDK consumer test runs `cmake --install` into a scratch prefix,
+then configures and builds an outside project against it. One install plus one
+small consumer target is cheap enough for the required macOS gate, so these
+carry no `slow` label on Apple:
+
+| Test | Quiet Apple Silicon host (Release, n=3) | Required macOS gate |
+|------|------------------|---------------------|
+| `cmake-view-audio-sdk-consumer` | 6.0-6.6 s | 10-13 s |
+| `ui-script-plugin-editor-installed-sdk` | 10.2-11.3 s | not yet sampled; ~20 s expected |
+| `cmake-control-sdk-consumer` | 28.8-29.1 s | 56-63 s |
+
+The install itself is a few seconds (a 600 MB prefix copied from the build
+tree); the consumer compile dominates. Off Apple these keep `slow` until a
+consumer build there is measured. A consumer that builds several independent
+projects (`cmake-clean-consumer-fixture`) or every exported capability
+(`agent-capability-installed-sdk`) stays `slow`, the latter restored per change
+as described below. Measure a new consumer against this table before choosing.
+
 ### Affected slow proofs
 
 `agent-capability-installed-sdk` installs Pulp and builds an independent

@@ -25,6 +25,7 @@ unnoticed.
 
     real_host_smoke.py preflight  --host logic --run DIR
     real_host_smoke.py install-au --run DIR --component PATH.component
+    real_host_smoke.py snapshot-prefs --run DIR      (before launch; required for Logic, GarageBand)
     real_host_smoke.py stage      --run DIR --fault force_loss_before --at 96000 [...]
     real_host_smoke.py launch     --run DIR
     real_host_smoke.py await-claim --run DIR
@@ -42,6 +43,7 @@ import argparse
 import ctypes
 import json
 import os
+import plistlib
 import secrets
 import shutil
 import signal
@@ -89,6 +91,7 @@ HOSTS: dict[str, dict[str, Any]] = {
         # the user's last project next to the throwaway one.
         "open_args": ("--args", "-ApplePersistenceIgnoreState", "YES"),
         "project_suffix": ".logicx",
+        "prefs_domains": ("com.apple.logic10",),
     },
     "garageband": {
         "app": "/Applications/GarageBand.app",
@@ -97,6 +100,7 @@ HOSTS: dict[str, dict[str, Any]] = {
         "formats": ("au",),
         "open_args": ("--args", "-ApplePersistenceIgnoreState", "YES"),
         "project_suffix": ".band",
+        "prefs_domains": ("com.apple.garageband10",),
     },
     "bitwig": {
         "app": "/Applications/Bitwig Studio.app",
@@ -147,12 +151,16 @@ def console_locked() -> bool:
     need pixel clicks on a visible window, which a locked screen blocks."""
     out = subprocess.run(["ioreg", "-n", "Root", "-d1", "-a"], capture_output=True, text=True,
                          encoding="utf-8", check=False).stdout
-    import plistlib
     try:
         doc = plistlib.loads(out.encode("utf-8"))
     except Exception:  # noqa: BLE001 - unknown is treated as locked (fail closed)
         return True
     return bool(doc.get("IOConsoleLocked", True)) if isinstance(doc, dict) else True
+
+
+def defaults(args: list[str]) -> None:
+    """This user's `defaults` (export, import, delete on one domain)."""
+    subprocess.run(["/usr/bin/defaults", *args], capture_output=True, check=True)
 
 
 def responsible_pid(pid: int) -> int:
@@ -262,6 +270,37 @@ def _restore_prefs(target: Path, saved: Path) -> None:
         shutil.rmtree(aside) if aside.is_dir() and not aside.is_symlink() else aside.unlink()
 
 
+def _canonical_plist(path: Path) -> bytes:
+    """A preference export in one canonical byte form (XML, sorted keys), so
+    two exports of the same preferences compare equal byte for byte."""
+    return plistlib.dumps(plistlib.loads(path.read_bytes()), fmt=plistlib.FMT_XML,
+                          sort_keys=True)
+
+
+def _restore_domain(domain: str, saved: Path) -> None:
+    """Put a preference domain back to its export. `defaults import` merges,
+    so keys the run added are deleted one by one; the result is exported
+    again and must equal the saved export byte for byte (canonical form), or
+    the entry stays unreverted and the next preflight refuses."""
+    if not saved.is_file():
+        raise RuntimeError(f"cannot restore {domain}: the saved export {saved} is missing; the "
+                           "current preferences were left untouched")
+    before = plistlib.loads(saved.read_bytes())
+    with tempfile.TemporaryDirectory(prefix="wpk-prefs-") as tmp:
+        now = Path(tmp) / "now.plist"
+        defaults(["export", domain, str(now)])
+        if _canonical_plist(now) == _canonical_plist(saved):
+            return
+        added = sorted(plistlib.loads(now.read_bytes()).keys() - before.keys())
+        defaults(["import", domain, str(saved)])
+        for key in added:
+            defaults(["delete", domain, key])
+        defaults(["export", domain, str(now)])
+        if _canonical_plist(now) != _canonical_plist(saved):
+            raise RuntimeError(f"REFUSING TO MARK {domain} REVERTED: after the restore it still "
+                               f"differs from {saved}. Compare them by hand before the next run.")
+
+
 def _revert_entry(entry: dict) -> None:
     kind = entry["kind"]
     if kind == "rendezvous_active":
@@ -279,6 +318,13 @@ def _revert_entry(entry: dict) -> None:
             refresh_au_registry(path.parent)
     elif kind == "prefs_snapshot":
         _restore_prefs(Path(entry["path"]), Path(entry["saved"]))
+    elif kind == "prefs_domain_snapshot":
+        saved = Path(entry["saved"])
+        if entry.get("sha256") and saved.is_file() and gfc.sha256_file(saved) != entry["sha256"]:
+            raise RuntimeError(f"cannot restore {entry['domain']}: the saved export {saved} no "
+                               "longer matches the snapshot's sha256; the current preferences "
+                               "were left untouched")
+        _restore_domain(entry["domain"], saved)
     elif kind == "throwaway_project":
         shutil.rmtree(entry["path"], ignore_errors=True)
     else:
@@ -407,22 +453,54 @@ def install_au(run: Path, component: Path) -> Path:
     return target
 
 
+PREFS_SNAPSHOT_KINDS = ("prefs_snapshot", "prefs_domain_snapshot")
+
+
 def snapshot_prefs(run: Path, host_id: str) -> Path | None:
-    """Before any host preference changes (Bitwig hosting mode): keep a byte
-    copy to restore, recorded in the revert log."""
-    prefs = HOSTS[host_id].get("prefs_dir")
-    if not prefs:
+    """Before the host can change its preferences: keep a copy to restore,
+    recorded in the revert log. Bitwig's prefs directory is copied byte for
+    byte; Logic's and GarageBand's preference domains are exported with
+    `defaults` (the launch alone rewrites them: recent projects, the plug-in
+    list, new-track settings)."""
+    host = HOSTS[host_id]
+    if not host.get("prefs_dir") and not host.get("prefs_domains"):
         return None
-    source = Path(os.path.expanduser(prefs))
     saved = run / "prefs-before"
     # One snapshot per run: a second one would capture prefs this run already
     # changed and make revert restore those.
-    if saved.exists() or any(e["kind"] == "prefs_snapshot"
+    if saved.exists() or any(e["kind"] in PREFS_SNAPSHOT_KINDS
                              for e in _read_json(run / "revert_log.json", [])):
         raise SystemExit("snapshot-prefs: this run already holds a prefs snapshot")
-    shutil.copytree(source, saved, symlinks=True)
-    record_change(run, "prefs_snapshot", path=str(source), saved=str(saved))
+    if host.get("prefs_dir"):
+        source = Path(os.path.expanduser(host["prefs_dir"]))
+        shutil.copytree(source, saved, symlinks=True)
+        record_change(run, "prefs_snapshot", path=str(source), saved=str(saved))
+        return saved
+    # Export every domain into a staging directory first: a domain that
+    # cannot be exported (a host never launched on this machine has none)
+    # must not leave a half-made snapshot that wedges the next attempt.
+    staging = saved.with_name(f"{saved.name}.partial-{now_us()}")
+    staging.mkdir()
+    try:
+        for domain in host["prefs_domains"]:
+            try:
+                defaults(["export", domain, str(staging / f"{domain}.plist")])
+            except (OSError, subprocess.CalledProcessError) as error:
+                raise SystemExit(f"snapshot-prefs: cannot export {domain} ({error}); launch "
+                                 "the host once so its preferences exist, then retry") from error
+        staging.rename(saved)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    for domain in host["prefs_domains"]:
+        export = saved / f"{domain}.plist"
+        record_change(run, "prefs_domain_snapshot", domain=domain, saved=str(export),
+                      sha256=gfc.sha256_file(export))
     return saved
+
+
+def prefs_snapshot_taken(run: Path) -> bool:
+    return any(e["kind"] in PREFS_SNAPSHOT_KINDS for e in _read_json(run / "revert_log.json", []))
 
 
 TEMPLATE_MANIFEST = "template.manifest.json"
@@ -451,6 +529,39 @@ def check_template(template: Path, host_id: str, kind: str) -> None:
         raise SystemExit(f"stage: {template} is a {doc.get('host')}/{doc.get('kind')} template")
     if doc.get("files") != template_fingerprint(template):
         raise SystemExit(f"stage: {template} changed since its manifest was written")
+
+
+TEMPLATES = HERE / "real_host_templates.json"
+
+
+def save_as_plan(host_id: str, target: Path) -> dict[str, Any]:
+    """The UI steps that save the host's open project as `target`, a new
+    project under the system temp directory. Pressing File > Save As through
+    accessibility did not open Logic's save sheet, so the plan sends the key
+    command with the host briefly in front and types the folder into the
+    sheet's Go to Folder field. Only the host's own window is fronted."""
+    resolved = Path(os.path.realpath(target))
+    roots = {Path(os.path.realpath(p)) for p in (tempfile.gettempdir(), "/tmp")}
+    if not any(r == resolved.parent or r in resolved.parents for r in roots):
+        raise SystemExit(f"save-as-plan: {target} is not under the system temp directory")
+    if resolved.suffix != HOSTS[host_id]["project_suffix"]:
+        raise SystemExit(f"save-as-plan: a {host_id} project ends in "
+                         f"{HOSTS[host_id]['project_suffix']}")
+    if resolved.exists():
+        raise SystemExit(f"save-as-plan: {target} exists; a template is never overwritten")
+    if not resolved.parent.is_dir():
+        raise SystemExit(f"save-as-plan: {resolved.parent} does not exist")
+    front = {"delivery_mode": "foreground", "window": "project"}
+    return {"host": host_id, "bundle_id": HOSTS[host_id]["bundle_id"],
+            "target": str(resolved), "steps": [
+                dict(front, action="hotkey", keys=["cmd", "shift", "s"]),
+                {"action": "await_window", "role": "AXSheet"},
+                dict(front, action="hotkey", keys=["cmd", "shift", "g"]),
+                {"action": "type_text", "text": str(resolved.parent)},
+                {"action": "press_key", "key": "return"},
+                {"action": "type_text", "field": "name", "text": resolved.stem},
+                {"action": "press_key", "key": "return"},
+                {"action": "verify_exists", "path": str(resolved)}]}
 
 
 def stage(run: Path, *, fault: str, at_sample: int, window_post: int, stimulus_frames: int,
@@ -546,6 +657,9 @@ def launch(run: Path, *, rosetta: bool = False, timeout: float = 60.0,
     process this launch started."""
     st = state(run)
     host = HOSTS[st["host"]]
+    if host.get("prefs_domains") and not prefs_snapshot_taken(run):
+        raise SystemExit("launch: run `snapshot-prefs` first; launching the host rewrites its "
+                         "preferences")
     before = {pid for pid, path in processes() if path == host["executable"]}
     if before:
         raise SystemExit("launch: the host is already running")
@@ -640,6 +754,12 @@ def collect(run: Path, *, bounce: Path | None, host_evidence: Path, hosting_mode
     """Bring the plug-in's run directory and the host's renders together,
     write the v2 receipt, and verify it."""
     st = state(run)
+    ax = json.loads(host_evidence.read_text(encoding="utf-8"))
+    # The snapshot taken before playback must show a track no input device
+    # could reach; refuse before writing a receipt the verifier would reject.
+    problem = hosts.track_state_problem(ax.get("track"), st["host"])
+    if problem:
+        raise SystemExit(f"collect: {problem}")
     out = run / "artifacts"
     if out.exists():
         shutil.rmtree(out)
@@ -651,9 +771,8 @@ def collect(run: Path, *, bounce: Path | None, host_evidence: Path, hosting_mode
     if realtime:
         shutil.copyfile(realtime, out / "realtime.wav")
         _write_json(out / hosts.REALTIME_PROVENANCE, st["realtime_provenance"])
-    ax = json.loads(host_evidence.read_text(encoding="utf-8"))
     _write_json(out / "host_evidence.json", {
-        "plugins": ax.get("plugins", []), "host_pid": st["host_pid"],
+        "plugins": ax.get("plugins", []), "track": ax["track"], "host_pid": st["host_pid"],
         "host_executable": HOSTS[st["host"]]["executable"],
         "ax_snapshot_sha256": gfc.sha256_file(host_evidence), "ax": ax})
     host = {"id": st["host"], "version": host_version, "pid": st["host_pid"],
@@ -662,44 +781,123 @@ def collect(run: Path, *, bounce: Path | None, host_evidence: Path, hosting_mode
             "engine_pids": st.get("engine_pids", []),
             "launch_unix_us": st["launch_unix_us"], "binary_arch": st.get("binary_arch"),
             "launch": " ".join(st.get("launch_command", []))}
+    _, stimulus = gfc.read_wav(out / "stimulus.wav")
+    receipt, verdict, outcome = _write_receipt(
+        out, control_kind=st["control_kind"], fault=st["fault"], fault_sample=st["at_sample"],
+        transport="rendezvous_file", nonce=st["nonce"], host=host, hosting_mode=hosting_mode,
+        settings=dict(host_settings or {}, template=st.get("template_kind", "playback")),
+        plugin={"format": st["format"], "name": PLUGIN_NAME,
+                "executable_sha256": gfc.sha256_file(plugin_executable)},
+        code_commit=code_commit, bounce=bounce is not None, realtime=bool(realtime),
+        tolerance=tolerance, window_pre=window_pre, window_post=st["window_post"],
+        render_frames=len(stimulus[0]) + st["window_post"], host_alive=host_alive)
+    save_state(run, verdict=verdict, outcome=outcome)
+    return receipt, verdict, outcome
+
+
+def _write_receipt(out: Path, *, control_kind: str, fault: str, fault_sample: int,
+                   transport: str, nonce: str, host: dict, hosting_mode: str, settings: dict,
+                   plugin: dict, code_commit: str, bounce: bool, realtime: bool,
+                   tolerance: float, window_pre: int, window_post: int, render_frames: int,
+                   host_alive: bool, extra_artifacts: tuple[str, ...] = ()
+                   ) -> tuple[dict, str, str]:
+    """Evaluate the run in `out`, write its v2 receipt there, and verify it."""
     names = ["stimulus.wav", "ir.f32", "events.jsonl", "capture.bin", "preflight.json",
-             "claim", "host_evidence.json"]
-    if bounce is not None:
+             "claim", "host_evidence.json", *extra_artifacts]
+    if bounce:
         names.append("bounce.wav")
     if realtime:
         names += ["realtime.wav", hosts.REALTIME_PROVENANCE]
     artifacts = gfc.artifact_digests(out, names)
     preflight_doc = gfc.summarize_preflight(_read_json(out / "preflight.json", {}))
-    window_post = st["window_post"]
-    _, stimulus = gfc.read_wav(out / "stimulus.wav")
-    render_frames = len(stimulus[0]) + window_post
-    settings = dict(host_settings or {}, template=st.get("template_kind", "playback"))
     evidence = hosts.evaluate_v2(
-        out, control_kind=st["control_kind"], fault=st["fault"], fault_sample=st["at_sample"],
+        out, control_kind=control_kind, fault=fault, fault_sample=fault_sample,
         tolerance=tolerance, window_pre=window_pre, window_post=window_post,
         host_alive=host_alive, bounce_path=(out / "bounce.wav") if bounce else None,
         realtime_path=(out / "realtime.wav") if realtime else None,
-        render_frames=render_frames, nonce=st["nonce"], host=host, hosting_mode=hosting_mode,
+        render_frames=render_frames, nonce=nonce, host=host, hosting_mode=hosting_mode,
         host_quiet=preflight_doc["quiet_host"], code_under_test={"commit": code_commit},
         listed=list(artifacts))
     receipt = hosts.build_receipt_v2(
-        control_kind=st["control_kind"], trigger_transport="rendezvous_file",
-        nonce=st["nonce"], host=host, hosting_mode=hosting_mode, host_settings=settings,
-        plugin={"format": st["format"], "name": PLUGIN_NAME,
-                "executable_sha256": gfc.sha256_file(plugin_executable)},
-        code_under_test={"commit": code_commit}, artifacts=artifacts,
+        control_kind=control_kind, trigger_transport=transport,
+        nonce=nonce, host=host, hosting_mode=hosting_mode, host_settings=settings,
+        plugin=plugin, code_under_test={"commit": code_commit}, artifacts=artifacts,
         bounce_artifact="bounce.wav" if bounce else None,
         host_realtime_artifact="realtime.wav" if realtime else None,
         preflight=preflight_doc, host_quiet=preflight_doc["quiet_host"],
         analysis={"tolerance": tolerance, "window": {"pre": window_pre, "post": window_post},
                   "render_frames": render_frames},
-        column_outcome=hosts.column_outcome(evidence, control_kind=st["control_kind"],
-                                            host_id=st["host"]),
+        column_outcome=hosts.column_outcome(evidence, control_kind=control_kind,
+                                            host_id=host["id"]),
         **{k: evidence[k] for k in V2.RECOMPUTED})
     _write_json(out / "receipt.json", receipt)
     verdict, outcome = V2.verify(receipt, out)
-    save_state(run, verdict=verdict, outcome=outcome)
     return receipt, verdict, outcome
+
+
+def _preflight_sampled_us(doc: dict) -> int | None:
+    """When the preflight sampled the machine, from host_vitals' own
+    `sampled_at` (whole seconds, so this rounds down). REAPER's harness takes
+    the preflight before it launches REAPER, which makes this a lower bound
+    on the launch."""
+    for obs in doc.get("observations", []):
+        if Path((obs.get("argv") or [""])[0]).name != "host_vitals.sh":
+            continue
+        try:
+            return int(json.loads(obs.get("stdout", ""))["sampled_at"]) * 1_000_000
+        except (ValueError, KeyError, TypeError):
+            return None
+    return None
+
+
+def reaper_control_kind(controls: dict, fault_kind: str) -> str:
+    """The v2 control kind of a v1 REAPER run, from what the plug-in armed."""
+    if controls.get("planted_negative") or controls.get("gpu_off"):
+        return "planted_negative"
+    return hosts.POSITIVE_CONTROL if fault_kind == hosts.POSITIVE_CONTROL else "fault"
+
+
+def wrap_reaper(reaper_run: Path, out: Path, *, code_commit: str) -> tuple[dict, str, str]:
+    """A v2 receipt for a REAPER run that reaper_smoke.py already verified as
+    v1, so REAPER rows read in the same terms as every other host (a planted
+    negative is `negative_proved`, not just "fail"). Nothing is re-run: the
+    v1 artifacts are copied and re-evaluated."""
+    v1_receipt = json.loads((reaper_run / "receipt.json").read_text(encoding="utf-8"))
+    V2.v1.verify(v1_receipt, reaper_run)
+    if out.exists():
+        raise SystemExit(f"wrap-reaper: {out} exists")
+    out.mkdir(parents=True)
+    for name in v1_receipt["artifacts"]:
+        shutil.copyfile(reaper_run / name, out / name)
+    launch = _preflight_sampled_us(_read_json(out / "preflight.json", {}))
+    if launch is None:
+        raise SystemExit("wrap-reaper: preflight.json has no host_vitals sample to bound the "
+                         "launch")
+    v1_host, plugin = v1_receipt["host"], v1_receipt["plugin"]
+    log_text = (out / "reaper.out.txt").read_text(encoding="utf-8", errors="replace")
+    _write_json(out / "host_evidence.json", {
+        "plugins": [plugin["name"]] if plugin["name"] in log_text else [],
+        "host_pid": v1_host["reaper_pid"], "host_executable": v1_host["reaper_bin"],
+        "source": "reaper.out.txt"})
+    host = {"id": "reaper", "version": v1_host["reaper_version"], "pid": v1_host["reaper_pid"],
+            "responsible_pid": -1, "executable": v1_host["reaper_bin"], "engine_pids": [],
+            "launch_unix_us": launch, "launch_source": "preflight host_vitals sampled_at",
+            "binary_arch": v1_host.get("machine"), "launch": "reaper_smoke.py"}
+    fault, analysis = v1_receipt["fault"], v1_receipt["analysis"]
+    return _write_receipt(
+        out, control_kind=reaper_control_kind(v1_receipt["controls"], fault["kind"]),
+        fault=fault["kind"],
+        fault_sample=fault["requested_project_sample"],
+        transport=v1_receipt["trigger_transport"], nonce=v1_receipt["nonce"], host=host,
+        hosting_mode="in_process",
+        settings={"template": "reaper_smoke",
+                  "anticipative_fx": v1_receipt.get("anticipative_fx")},
+        plugin={k: plugin[k] for k in ("format", "name", "executable_sha256")},
+        code_commit=code_commit, bounce=v1_receipt.get("bounce_artifact") is not None,
+        realtime=v1_receipt.get("host_realtime_artifact") is not None,
+        tolerance=analysis["tolerance"], window_pre=analysis["window"]["pre"],
+        window_post=analysis["window"]["post"], render_frames=analysis["render_frames"],
+        host_alive=bool(v1_receipt["host_alive"]), extra_artifacts=("reaper.out.txt",))
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────
@@ -755,10 +953,39 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--kind", choices=["playback", "live"], required=True)
     p = sub.add_parser("revert")
     p.add_argument("--run", type=Path, required=True)
+    p = sub.add_parser("save-as-plan")
+    p.add_argument("--host", choices=sorted(HOSTS), required=True)
+    p.add_argument("--target", type=Path, required=True)
+    p = sub.add_parser("wrap-reaper")
+    p.add_argument("--reaper-run", type=Path, required=True,
+                   help="A reaper_smoke.py --mode gpu-fault --out-dir holding a v1 receipt.")
+    p.add_argument("--out", type=Path, required=True)
+    p.add_argument("--code-commit", required=True)
     args = ap.parse_args(argv)
+
+    if args.cmd == "wrap-reaper":
+        try:
+            _, verdict, outcome = wrap_reaper(args.reaper_run, args.out,
+                                              code_commit=args.code_commit)
+        except SystemExit as exc:
+            log(str(exc.code))
+            return EXIT_USAGE
+        except V2.ReceiptError as exc:
+            log(f"INVALID: {exc}")
+            return EXIT_USAGE
+        log(f"verdict={verdict} outcome={outcome}")
+        return EXIT_OK if outcome in V2.FULL_OUTCOMES else EXIT_NOT_PASS
 
     if args.cmd == "template-manifest":
         log(f"wrote {write_template_manifest(args.template, host_id=args.host, kind=args.kind)}")
+        return EXIT_OK
+    if args.cmd == "save-as-plan":
+        try:
+            plan = save_as_plan(args.host, args.target)
+        except SystemExit as exc:
+            log(str(exc.code))
+            return EXIT_USAGE
+        print(json.dumps(plan, indent=1))
         return EXIT_OK
     run = args.run
     try:

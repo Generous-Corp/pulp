@@ -36,6 +36,7 @@
         "tools/cmake/PulpBuildInfo.cmake",
         "tools/cmake/PulpBundleRelocatable.cmake",
         "tools/cmake/PulpControlShipping.cmake",
+        "tools/cmake/PulpDevSharedUi.cmake",
         "tools/cmake/PulpDocumentTypes.cmake",
         "tools/cmake/PulpEmbedData.cmake",
         "tools/cmake/PulpFinalizeBuildInfo.cmake",

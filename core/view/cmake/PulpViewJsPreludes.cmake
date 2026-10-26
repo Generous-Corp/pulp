@@ -97,13 +97,14 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 #
 # The var-name derivation (stem with '-' -> '_') MUST match embed_js.py.
 set(_pulp_prelude_decls
-    "#pragma once\n// Auto-generated from the JS prelude file list — do not edit\n\nnamespace pulp::view::preludes {\n\n")
+    "#pragma once\n// Auto-generated from the JS prelude file list — do not edit\n\n#include <cstddef>\n#include <string>\n\nnamespace pulp::view::preludes {\n\n// One JS prelude, stored as a zlib (RFC 1950) stream of its source text.\nstruct EmbeddedPrelude {\n    const char* file_name;\n    const unsigned char* deflated;\n    std::size_t deflated_size;\n    std::size_t source_size;\n    const char* sha256;\n};\n\n// Inflates the source text of a prelude on each call. Throws\n// std::runtime_error unless the stream inflates to exactly source_size bytes.\nstd::string source(const EmbeddedPrelude& prelude);\n\n")
 foreach(_prelude ${PULP_JS_PRELUDES})
     get_filename_component(_prelude_stem "${_prelude}" NAME_WE)
     string(REPLACE "-" "_" _prelude_var "${_prelude_stem}")
-    string(APPEND _pulp_prelude_decls "extern const char* const ${_prelude_var};\n")
+    string(APPEND _pulp_prelude_decls "extern const EmbeddedPrelude ${_prelude_var};\n")
 endforeach()
-string(APPEND _pulp_prelude_decls "\n}  // namespace pulp::view::preludes\n")
+string(APPEND _pulp_prelude_decls
+    "\n// Every prelude, in the order the file list declares them.\nextern const EmbeddedPrelude* const kAll[];\nextern const std::size_t kAllCount;\n\n}  // namespace pulp::view::preludes\n")
 
 set(_pulp_existing_decls "")
 if(EXISTS "${PULP_JS_EMBEDDED_HEADER}")

@@ -235,7 +235,8 @@ A minimal Pulp plugin project:
 ```
 my-plugin/
   CMakeLists.txt
-  my_processor.hpp       # Your DSP code
+  my_processor.hpp       # Your processor class (parameters, state)
+  my_processor.cpp       # Its process() body, compiled once for every format
   vst3_entry.cpp         # VST3 format entry
   clap_entry.cpp         # CLAP format entry
   au_v2_entry.cpp        # AU format entry (macOS)
@@ -334,8 +335,15 @@ PULP_AAX_PLUGIN(create_my_gain)
 
 ## Step 3: Add CMakeLists.txt
 
+`pulp create` puts the processor's `process()` in its own `.cpp` and lists it
+under `SOURCES`. Pulp compiles that file once and links it into every format,
+so an edit to the DSP recompiles one file instead of every format entry that
+includes the header. A header-only processor (no `SOURCES`) also works; it is
+rebuilt once per format.
+
 ```cmake
 pulp_add_plugin(MyGain
+    SOURCES my_processor.cpp
     FORMATS VST3 AU CLAP AAX Standalone
     PLUGIN_NAME "MyGain"
     BUNDLE_ID "com.mycompany.mygain"
@@ -492,6 +500,8 @@ Try changing the background color or adding a second knob. The scripted standalo
 ```
 
 This is currently the supported live-reload path for scripted UI. Plugin targets can load the same `UI_SCRIPT`, but live JS/theme reload is not yet a cross-host guarantee.
+
+Hot reload works because `pulp build` (and `pulp dev`, `pulp loop`, `pulp run`, and the project `pulp create` scaffolds) configures with `-DPULP_DEV_BUILD=ON`, which records the on-disk `ui/main.js` path in the dev build so the standalone host can watch it. The script's bytes, its `theme.json` and the files beside it are always embedded into every format target as well, and a shipped artifact uses only those: `pulp ship sign` and `pulp ship package` build a sibling `build-ship/` with the option off and ship from there, so the dev build dir keeps its hot-reload loop.
 
 `pulp create` verifies the fresh project path by scaffolding, configuring, building the default native outputs for the platform, and running the generated tests. Use `pulp build` after `pulp create` when you want to rebuild, select explicit targets, or materialize optional deliverables after changing configuration. Browser targets such as WAM/WebCLAP are separate lanes and are not emitted by default by the generated project.
 

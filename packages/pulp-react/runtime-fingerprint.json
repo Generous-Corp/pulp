@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "revision": 5,
+  "revision": 6,
   "fixes": [
     {
       "revision": 1,
@@ -61,6 +61,12 @@
       "id": "complete-removal-reset",
       "summary": "a style key that disappears from a commit, or becomes null, hands its native slots back to the widget's starting value (layout through resetStyleProperty), instead of only ten keys resetting and an active-only bold, shadow, scale or padding staying painted after the conditional spread drops it",
       "signature": "resetRemovedStyleKeys"
+    },
+    {
+      "revision": 6,
+      "id": "controlled-value-restore",
+      "summary": "a Knob, Fader, slider, Toggle or Checkbox with a value or checked prop shows the committed prop after its handler rejects an edit, instead of keeping the value the user dragged it to; the checked prop also reaches the widget at all",
+      "signature": "__pulpAfterDiscreteDispatch__"
     }
   ]
 }

@@ -57,6 +57,11 @@ class SharedIoConvolutionSession {
         bool authenticated_calibration = false;
         std::uint64_t calibration_max_age_ns = 0;
         std::string calibration_source_revision;
+        // Bounded wait, in ns, for completions already in flight after a
+        // service step submits. The provider may block for up to this long
+        // (TimedWaitAny) instead of returning at once; zero keeps service
+        // nonblocking. The budget starts after the submit, on steady_clock.
+        std::uint64_t completion_service_wait_ns = 0;
     };
 
     struct ProviderPair {
@@ -101,8 +106,9 @@ class SharedIoConvolutionSession {
         return prepared_ ? pipeline_.begin_callback(samples, sequence, callback_start_ns)
                          : Callback{};
     }
-    void request_recovery(SharedIoRecoveryReason reason) noexcept {
-        pipeline_.request_recovery(reason);
+    // A latched cause names the block it latched at, as the stamped nodes do.
+    void request_recovery(SharedIoRecoveryReason reason, std::uint64_t sequence) noexcept {
+        pipeline_.request_recovery(reason, sequence);
     }
     SharedIoRecoveryReason recovery_reason() const noexcept {
         return pipeline_.recovery_reason();
@@ -157,8 +163,18 @@ class SharedIoConvolutionSession {
     bool prepared() const noexcept {
         return prepared_;
     }
+    // Host only, while no service call runs. False when the provider has no
+    // completion event source.
+    bool set_completion_notifier(SharedIoCompletionNotifier notifier) noexcept {
+        return prepared_ && plan_.set_completion_notifier(notifier);
+    }
     bool fenced() const noexcept {
         return failed_ || pipeline_.fenced();
+    }
+    // The prepared program can still run for this preparation. The offline
+    // fence ends it; only release and a fresh prepare bring one back.
+    bool kernel_prepared() const noexcept {
+        return prepared_ && !offline_fenced_;
     }
     std::uint64_t epoch() const noexcept {
         return pipeline_.epoch();
@@ -251,8 +267,12 @@ class SharedIoConvolutionSession {
 
     std::optional<std::uint64_t>
     callback_deadline_ns(const SharedIoConvolutionPipeline::Lease&) const noexcept;
+    // ProviderFailure at `sequence`; without one, at the first block the
+    // provider has not delivered.
     void fail_closed() noexcept;
-    bool drain_completions(std::uint64_t now_ns, ServiceResult&) noexcept;
+    void fail_closed(std::uint64_t sequence) noexcept;
+    bool drain_completions(std::uint64_t now_ns, ServiceResult&,
+                           std::uint64_t service_deadline_ns = 0) noexcept;
     bool submit_available(ServiceResult&) noexcept;
     bool discard_all_completions() noexcept;
     bool drain_quiescent() noexcept;

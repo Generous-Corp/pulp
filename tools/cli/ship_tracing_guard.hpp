@@ -42,19 +42,20 @@ inline const std::string& tracing_ship_sentinel() {
 }
 inline const std::string& kTracingShipSentinel = tracing_ship_sentinel();
 
-// Returns true if `file` contains the tracing sentinel. Streams the file in
-// overlapping chunks so the sentinel is found even when it straddles a chunk
-// boundary, and so a multi-MB Mach-O/ELF/PE is scanned without a full slurp.
-// Non-regular / unreadable paths return false (nothing to refuse).
-inline bool file_has_tracing_sentinel(const std::filesystem::path& file) {
+// Returns true if `file` contains `bytes`. Streams the file in overlapping
+// chunks so a match is found even when it straddles a chunk boundary, and so a
+// multi-MB Mach-O/ELF/PE is scanned without a full slurp. Non-regular /
+// unreadable paths and an empty needle return false (nothing to refuse).
+inline bool file_contains_bytes(const std::filesystem::path& file, std::string_view bytes) {
     namespace fs = std::filesystem;
     std::error_code ec;
-    if (!fs::is_regular_file(file, ec) || ec) return false;
+    if (bytes.empty() || !fs::is_regular_file(file, ec) || ec)
+        return false;
 
     std::ifstream in(file, std::ios::binary);
     if (!in) return false;
 
-    const std::size_t needle = kTracingShipSentinel.size();
+    const std::size_t needle = bytes.size();
     constexpr std::size_t kChunk = 1u << 16;  // 64 KiB
     // Carry the last (needle-1) bytes of each chunk into the next so a sentinel
     // split across the boundary is still matched.
@@ -67,12 +68,18 @@ inline bool file_has_tracing_sentinel(const std::filesystem::path& file) {
         const std::streamsize got = in.gcount();
         if (got <= 0) break;
         window.append(block.data(), static_cast<std::size_t>(got));
-        if (window.find(kTracingShipSentinel) != std::string::npos) return true;
+        if (window.find(bytes) != std::string::npos)
+            return true;
         if (window.size() > needle) {
             window.erase(0, window.size() - (needle - 1));
         }
     }
     return false;
+}
+
+// Returns true if `file` contains the tracing sentinel.
+inline bool file_has_tracing_sentinel(const std::filesystem::path& file) {
+    return file_contains_bytes(file, kTracingShipSentinel);
 }
 
 // Scans a shipping artifact for the sentinel. If the path is a directory (a

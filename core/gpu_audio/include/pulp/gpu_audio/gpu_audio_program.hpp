@@ -74,6 +74,15 @@ enum class GpuAudioProgramError : std::uint8_t {
     CapabilityLeadMismatch = 19,
     CapabilityFallbackPolicyMismatch = 20,
     CapabilityFallbackUnavailable = 21,
+    // A descriptor enum outside its declared domain, and a capability report
+    // that agrees with the descriptor but is not self-consistent (see
+    // validate_gpu_audio_capability). Appended like the values above.
+    InvalidEnumValue = 22,
+    CapabilityInvalid = 23,
+    // A staged or shared-memory descriptor naming the CPU provider, which
+    // validate_gpu_audio_capability() rejects as CpuProviderOnGpuPath, so
+    // such a program could never bind. Appended.
+    CpuProviderOnGpuPath = 24,
 };
 
 /// Backend-neutral metadata for a typed program prepared for a fixed audio
@@ -111,6 +120,17 @@ struct GpuAudioProgramValidation {
 /// Validate the backend-neutral prepared-program contract.
 constexpr GpuAudioProgramValidation
 validate_gpu_audio_program(const GpuAudioProgramDescriptor& program) noexcept {
+    const auto kind = program.kind;
+    if ((kind != GpuAudioProgramKind::Unknown && kind != GpuAudioProgramKind::Convolution &&
+         kind != GpuAudioProgramKind::Spectral && kind != GpuAudioProgramKind::Neural &&
+         kind != GpuAudioProgramKind::Custom) ||
+        static_cast<std::uint8_t>(program.path) >
+            static_cast<std::uint8_t>(GpuAudioExecutionPath::Cpu) ||
+        static_cast<std::uint8_t>(program.provider) >
+            static_cast<std::uint8_t>(GpuAudioProvider::Cpu) ||
+        static_cast<int>(program.miss_policy) < 0 ||
+        static_cast<int>(program.miss_policy) > static_cast<int>(MissPolicy::CpuFallback))
+        return {GpuAudioProgramError::InvalidEnumValue};
     if (program.kind == GpuAudioProgramKind::Unknown)
         return {GpuAudioProgramError::MissingKind};
     if (program.channels == 0 || program.block_size == 0 || program.sample_rate == 0)
@@ -132,6 +152,11 @@ validate_gpu_audio_program(const GpuAudioProgramDescriptor& program) noexcept {
         if (program.provider_slots == 0)
             return {GpuAudioProgramError::MissingProviderSlots};
     }
+
+    if ((program.path == GpuAudioExecutionPath::Staged ||
+         program.path == GpuAudioExecutionPath::SharedMemory) &&
+        program.provider == GpuAudioProvider::Cpu)
+        return {GpuAudioProgramError::CpuProviderOnGpuPath};
 
     if (program.path == GpuAudioExecutionPath::SharedMemory) {
         if (program.provider == GpuAudioProvider::Unknown)
@@ -187,6 +212,11 @@ validate_gpu_audio_program(const GpuAudioProgramDescriptor& program,
         return {GpuAudioProgramError::CapabilityProviderMismatch};
     if (program.miss_policy == MissPolicy::CpuFallback && !capability.fallback_available)
         return {GpuAudioProgramError::CapabilityFallbackUnavailable};
+    // The checks above compare the two sides. A report can agree with the
+    // descriptor on every compared field and still contradict itself, for
+    // example an out-of-domain enum in a field the descriptor leaves Unknown.
+    if (!validate_gpu_audio_capability(capability).accepted())
+        return {GpuAudioProgramError::CapabilityInvalid};
     return {};
 }
 

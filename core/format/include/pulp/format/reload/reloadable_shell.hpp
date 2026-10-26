@@ -372,14 +372,18 @@ private:
         // overwritten freely. (The reload path already stages every version; see
         // ReloadController. macOS tolerates the in-place overwrite, so this only
         // bites on Linux.)
+        // Read the watched file's mtime BEFORE copying it. The baseline pairs this
+        // mtime with the hash of the bytes staged below; a build that lands
+        // after this read leaves the baseline at {old mtime, staged hash}, which
+        // the watcher's first poll sees as a change and reloads. Reading the
+        // mtime after the copy could pair a NEW mtime with the OLD bytes, and
+        // poll() would then treat the new build as already seen.
+        std::error_code mtime_ec;
+        const auto loaded_mtime = std::filesystem::last_write_time(logic_path_, mtime_ec);
         const std::string load_path = stage_initial(logic_path_);
         // The version now live is the staged bytes; the watcher's baseline.
-        {
-            std::error_code ec;
-            const auto mtime = std::filesystem::last_write_time(logic_path_, ec);
-            if (const auto hash = ReloadController::content_hash(load_path); hash && !ec)
-                loaded_baseline_ = ReloadController::Baseline{mtime, *hash};
-        }
+        if (const auto hash = ReloadController::content_hash(load_path); hash && !mtime_ec)
+            loaded_baseline_ = ReloadController::Baseline{loaded_mtime, *hash};
 
         // Same fail-closed gate sequence the reload transaction uses (single
         // source of truth — gate_logic_image). On rejection we degrade to

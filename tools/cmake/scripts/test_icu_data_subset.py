@@ -64,6 +64,12 @@ def make_macho_object(payload: bytes) -> bytes:
 
 
 class PolicyTest(unittest.TestCase):
+    def test_thin_and_universal_lipo_reports_are_told_apart(self):
+        self.assertTrue(subset.is_thin(
+            "Non-fat file: /sdk/libskunicode_icu.a is architecture: arm64\n"))
+        self.assertFalse(subset.is_thin(
+            "Architectures in the fat file: /x/libskunicode_icu.a are: x86_64 arm64\n"))
+
     def test_keeps_break_rules_dictionaries_and_alias_table(self):
         for name in ("icudt78l/brkitr/line.brk", "icudt78l/brkitr/cjdict.dict",
                      "icudt78l/cnvalias.icu", "icudt78l/root.res", "icudt78l/nfc.nrm",

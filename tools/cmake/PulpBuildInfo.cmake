@@ -386,10 +386,15 @@ function(_pulp_attach_build_info target format_target format name bundle_id vers
     #    version, build settings), the SDK pins, or a new commit — HEAD's
     #    reflog moves on every commit, checkout, and reset.
     # The finalize script only rewrites the file when its content changes.
-    add_custom_command(TARGET ${format_target} POST_BUILD
-        COMMAND ${_finalize_command}
-        COMMENT "Writing pulp-build-info.json into ${format_target}"
-        VERBATIM)
+    # A dev-shared module (PULP_DEV_SHARED_UI) cannot ship, so it relies on
+    # the `all` step alone and its relink costs only the link.
+    get_target_property(_dev_shared ${format_target} PULP_DEV_SHARED_UI)
+    if(NOT _dev_shared)
+        add_custom_command(TARGET ${format_target} POST_BUILD
+            COMMAND ${_finalize_command}
+            COMMENT "Writing pulp-build-info.json into ${format_target}"
+            VERBATIM)
+    endif()
 
     set(_depends "${_template}" "${_finalize}" "$<TARGET_FILE:${format_target}>")
     if(_pins)

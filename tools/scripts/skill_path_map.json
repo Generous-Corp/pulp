@@ -963,6 +963,9 @@
     "view-bridge": {
       "paths": [
         "core/format/src/view_bridge.cpp",
+        "core/view/platform/mac/mac_gpu_host_config.h",
+        "core/view/src/lite_editor_host.cpp",
+        "tools/cmake/PulpLiteEditorObjects.cmake",
         "core/format/include/pulp/format/view_bridge.hpp",
         "core/format/include/pulp/format/processor.hpp",
         "core/format/src/vst3_plug_view.cpp",

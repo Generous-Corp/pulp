@@ -312,6 +312,7 @@ SIGNATURE_OVERRIDES: dict[str, str] = {
     "releaseOverlay": "(id: string) => void",
     "removeWidget": "(id: string) => void",
     "insertChild": "(parentId: string, childId: string, index: number) => boolean",
+    "isWidgetParamBound": "(widgetId: string) => boolean",
     "saveStylePreset": "(name: string, payload: unknown) => void",
     "seekWidgetLottie": "(id: string, time01: number) => void",
     "setAICli": "(command: string) => void",

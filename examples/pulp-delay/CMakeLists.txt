@@ -75,3 +75,15 @@ if(PULP_HAS_CLAP AND APPLE)
         LABELS "validation;clap"
         TIMEOUT 10)
 endif()
+
+# The C++ editor paints on the CoreGraphics host, so it gets the lite editor
+# stack by default: its modules carry no Skia, Dawn, Tint or GPU host.
+if(PULP_BUILD_TESTS AND APPLE AND CMAKE_NM AND TARGET pulp-canvas-lite-objects)
+    if(TARGET PulpDelay_VST3)
+        add_test(NAME editor-stack-PulpDelay_VST3
+            COMMAND ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
+                -DMODULE=$<TARGET_FILE:PulpDelay_VST3> -DEXPECT=lite
+                -P ${CMAKE_SOURCE_DIR}/test/cmake/check_plugin_module_editor_stack.cmake)
+        set_tests_properties(editor-stack-PulpDelay_VST3 PROPERTIES LABELS "plugin-footprint" TIMEOUT 60)
+    endif()
+endif()
