@@ -1,6 +1,7 @@
 #include <pulp/view/plugin_view_host.hpp>
 
 #include <TargetConditionals.h>
+#include "mac_gpu_host_config.h"
 #if TARGET_OS_OSX
 
 // Per-binary-unique ObjC class names (renames PulpPluginView / PulpGpuPluginView
@@ -2040,7 +2041,7 @@ private:
 
 // ── MacGpuPluginViewHost (Dawn/Skia Graphite) ────────────────────────────────
 
-#ifdef PULP_HAS_SKIA
+#if PULP_VIEW_MAC_GPU_HOST
 
 // Interface in plugin_view_host_mac_view.h, beside PulpPluginView.
 @implementation PulpGpuPluginView {
@@ -2391,6 +2392,12 @@ private:
     }
 }
 
+- (void)viewDidHide {
+    [super viewDidHide];
+    if (self.onHide)
+        self.onHide();
+}
+
 - (void)viewDidChangeBackingProperties {
     [super viewDidChangeBackingProperties];
     CGFloat scale = self.window ? self.window.backingScaleFactor
@@ -2434,6 +2441,9 @@ public:
             // there too.
             metal_view_.onWindowChange = ^{ this->handle_window_change(); };
             metal_view_.onBackingChange = ^{ this->handle_backing_change(); };
+            metal_view_.onHide = ^{
+              this->release_gpu_caches();
+            };
             metal_view_.onResize = ^(uint32_t w, uint32_t h) {
                 this->on_native_frame_changed(w, h);
             };
@@ -2464,6 +2474,7 @@ public:
             metal_view_.pointTransform = nil;
             metal_view_.onWindowChange = nil;
             metal_view_.onBackingChange = nil;
+            metal_view_.onHide = nil;
             metal_view_.onResize = nil;
         }
         // Publish the teardown while the surfaces are still alive, so a
@@ -2598,6 +2609,18 @@ public:
     // paints the editor.
     render::GpuSurface* gpu_surface() const override {
         return gpu_surface_.get();
+    }
+
+    GpuCacheUsage gpu_cache_usage() const override {
+        if (!skia_surface_)
+            return {};
+        const auto bytes = skia_surface_->gpu_cache_bytes();
+        return {bytes.budgeted, bytes.purgeable};
+    }
+
+    void release_gpu_caches() override {
+        if (skia_surface_)
+            skia_surface_->trim_gpu_resources(render::SkiaSurface::TrimLevel::everything());
     }
 
     void set_idle_callback(std::function<void()> callback) override {
@@ -3252,7 +3275,7 @@ private:
 
 } // namespace pulp::view (close GPU class block)
 
-#endif // PULP_HAS_SKIA
+#endif // PULP_VIEW_MAC_GPU_HOST
 
 namespace pulp::view { // reopen for factory functions
 
@@ -3265,7 +3288,7 @@ std::unique_ptr<PluginViewHost> PluginViewHost::create(View& root, Size size) {
 }
 
 std::unique_ptr<PluginViewHost> PluginViewHost::create(View& root, const Options& options) {
-#ifdef PULP_HAS_SKIA
+#if PULP_VIEW_MAC_GPU_HOST
     if (options.use_gpu) {
         auto host = std::make_unique<MacGpuPluginViewHost>(root, options.size,
                                                            options.background_rgb);
@@ -3278,6 +3301,11 @@ std::unique_ptr<PluginViewHost> PluginViewHost::create(View& root, const Options
         // The adapter's runtime scream-guard logs the mismatch loudly.
         host.reset();
     }
+#else
+    // A lite editor binary has no GPU host to give; say so once and open the
+    // CoreGraphics host, so the editor still appears.
+    if (options.use_gpu)
+        detail::note_lite_host_gpu_request();
 #endif
     auto host = std::make_unique<MacPluginViewHost>(root, options.size,
                                                     options.background_rgb);

@@ -63,6 +63,8 @@ if(TARGET pulp::gpu-audio AND TARGET pulp::render)
         FORMATS           VST3 AU CLAP Standalone
         SOURCES           super_convolver_view.cpp
         PLUGIN_NAME       "SuperConvolver"
+        # The editor renders on the GPU host (requires_gpu_host()): link the full editor stack.
+        GPU_UI
         BUNDLE_ID         "com.pulp.superconvolver"
         MANUFACTURER      "Pulp"
         VERSION           "1.1.2"

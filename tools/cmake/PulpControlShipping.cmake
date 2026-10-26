@@ -309,10 +309,30 @@ function(_pulp_attach_control_shipping target artifact_target artifact_format)
     if(NOT artifact_format)
         message(FATAL_ERROR "control shipping format is required for ${artifact_target}")
     endif()
+    # Optional: a manifest stem as the fourth argument, then
+    # AFTER <file>... <target>...: steps that write into the artifact's bundle
+    # (an embedded framework or extension). The persisted-stamp scan waits for
+    # them and rescans when they rerun, so it never reads a bundle while it is
+    # being rewritten. A file is depended on at file level; a target orders the
+    # scan after it.
+    cmake_parse_arguments(PARSE_ARGV 3 _pulp_cs "" "" "AFTER")
     set(_shipping_manifest_stem "${target}.${artifact_format}")
-    if(ARGC GREATER 3 AND NOT "${ARGV3}" STREQUAL "")
-        set(_shipping_manifest_stem "${ARGV3}")
+    if(_pulp_cs_UNPARSED_ARGUMENTS)
+        list(GET _pulp_cs_UNPARSED_ARGUMENTS 0 _pulp_cs_stem)
+        if(NOT "${_pulp_cs_stem}" STREQUAL "")
+            set(_shipping_manifest_stem "${_pulp_cs_stem}")
+        endif()
     endif()
+    set(_after_files "")
+    set(_after_targets "")
+    foreach(_after IN LISTS _pulp_cs_AFTER)
+        if(TARGET "${_after}")
+            list(APPEND _after_targets "${_after}")
+        else()
+            list(APPEND _after_files "${_after}")
+        endif()
+    endforeach()
+    string(REPLACE ";" "|" _after_inputs "${_after_files}")
 
     set(_profile "${PULP_${target}_CONTROL_PROFILE}")
     set(_artifact_capabilities "${PULP_${target}_CONTROL_CAPABILITIES}")
@@ -437,24 +457,29 @@ function(_pulp_attach_control_shipping target artifact_target artifact_format)
                 "${_legacy_sidecar_dir}/${_shipping_manifest_stem}.control-shipping.json"
                 "${_legacy_sidecar_dir}/${_shipping_manifest_stem}.control-shipping-report.json")
     endif()
-    add_custom_command(TARGET ${artifact_target} POST_BUILD
-        ${_legacy_sidecar_removal}
-        COMMAND "${CMAKE_COMMAND}" -E make_directory "${_sidecar_dir}"
-        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-            "${_control_manifest}"
-            "${_sidecar_dir}/${target}.inspector-capabilities.json"
-        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-            "${_shipping_manifest}"
-            "${_sidecar_dir}/${_shipping_manifest_stem}.control-shipping.json"
-        COMMAND "${CMAKE_COMMAND}"
-            -DARTIFACT=$<TARGET_FILE:${artifact_target}>
-            -DMANIFEST=${_control_manifest}
-            -DSHIPPING_MANIFEST=${_shipping_manifest}
-            -DCXX_COMPILER=${CMAKE_CXX_COMPILER}
-            -DREPORT=${_sidecar_dir}/${_shipping_manifest_stem}.control-shipping-report.json
-            -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/check_control_shipping_artifact.cmake"
-        COMMAND "${CMAKE_COMMAND}" -E touch "${_scan_stamp}"
-        VERBATIM)
+    # A dev-shared module (PULP_DEV_SHARED_UI) cannot ship, so a direct build
+    # of it skips this step and only the persisted-stamp edge below scans it.
+    get_target_property(_dev_shared ${artifact_target} PULP_DEV_SHARED_UI)
+    if(NOT _dev_shared)
+        add_custom_command(TARGET ${artifact_target} POST_BUILD
+            ${_legacy_sidecar_removal}
+            COMMAND "${CMAKE_COMMAND}" -E make_directory "${_sidecar_dir}"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${_control_manifest}"
+                "${_sidecar_dir}/${target}.inspector-capabilities.json"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${_shipping_manifest}"
+                "${_sidecar_dir}/${_shipping_manifest_stem}.control-shipping.json"
+            COMMAND "${CMAKE_COMMAND}"
+                -DARTIFACT=$<TARGET_FILE:${artifact_target}>
+                -DMANIFEST=${_control_manifest}
+                -DSHIPPING_MANIFEST=${_shipping_manifest}
+                -DCXX_COMPILER=${CMAKE_CXX_COMPILER}
+                -DREPORT=${_sidecar_dir}/${_shipping_manifest_stem}.control-shipping-report.json
+                -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/check_control_shipping_artifact.cmake"
+            COMMAND "${CMAKE_COMMAND}" -E touch "${_scan_stamp}"
+            VERBATIM)
+    endif()
 
     # POST_BUILD protects direct builds of the artifact. The persisted stamp
     # additionally makes scanner/manifests first-class dependencies, so an
@@ -466,6 +491,9 @@ function(_pulp_attach_control_shipping target artifact_target artifact_format)
     # and touched the stamp. SKIP_IF_FRESH_STAMP lets the scanner return early
     # when the stamp is strictly newer than every input this edge depends on,
     # instead of scanning the same bytes a second time.
+    # The scanner reads the shared forbidden-marker list through its module;
+    # both are policy inputs of the stamp edge, as they are of the scanner's
+    # own SKIP_IF_FRESH_STAMP check.
     set(_scanner "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/check_control_shipping_artifact.cmake")
     set(_scan_target "${artifact_target}_ControlShippingScan_${_format_identifier}")
     # The stamp's name carries the sidecar layout, so a build tree from before
@@ -489,12 +517,19 @@ function(_pulp_attach_control_shipping target artifact_target artifact_format)
             -DCXX_COMPILER=${CMAKE_CXX_COMPILER}
             -DREPORT=${_sidecar_dir}/${_shipping_manifest_stem}.control-shipping-report.json
             -DSKIP_IF_FRESH_STAMP=${_scan_stamp}
+            "-DSCAN_AFTER_INPUTS=${_after_inputs}"
             -P "${_scanner}"
         COMMAND "${CMAKE_COMMAND}" -E touch "${_scan_stamp}"
         DEPENDS ${artifact_target} "${_control_manifest}"
             "${_shipping_manifest}" "${_scanner}"
+            "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/PulpReleaseArtifactScan.cmake"
+            "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/release_artifact_forbidden.json"
+            ${_after_files}
         VERBATIM)
     add_custom_target(${_scan_target} ALL DEPENDS "${_scan_stamp}")
+    if(_after_targets)
+        add_dependencies(${_scan_target} ${_after_targets})
+    endif()
     set(PULP_${artifact_target}_CONTROL_SHIPPING_SCAN_TARGET
         "${_scan_target}" CACHE INTERNAL "" FORCE)
 endfunction()

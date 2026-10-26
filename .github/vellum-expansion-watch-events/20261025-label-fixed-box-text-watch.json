@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261025-label-fixed-box-text-watch",
+  "created_at": "2026-10-25T02:50:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Label::set_text skips the layout pass for a childless, non-baseline Label without a text slot of its own whose width and height are both fixed, now also when it has no captured lines (between two non-empty copies), and counts as fixed only the sizes yoga_layout() applies as numbers: a px size through preferred_*, a viewport size, or a percent fixed by every ancestor up to the root. Yoga never measures such a node and paint breaks its lines at the box width, so boxes and paint commands equal those of a tree laid out from scratch. No design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R 'fixed-box wrapping Label text repaints without a layout pass'",
+    "ctest --test-dir build -R 'intrinsic and multiline Label text still invalidates layout'",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

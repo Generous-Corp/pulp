@@ -161,6 +161,30 @@ TEST_CASE("OscChannel send empty payload is rejected", "[osc_channel][lifecycle]
     a->close();
 }
 
+TEST_CASE("OscChannel binds its receiver to loopback unless options widen it",
+          "[osc_channel][lifecycle][bind]") {
+    SECTION("default") {
+        auto channel = OscChannel::open("127.0.0.1", 29876, 0);
+        REQUIRE(channel);
+        REQUIRE(channel->local_port() != 0);
+        REQUIRE(channel->local_address() == "127.0.0.1");
+        channel->close();
+        REQUIRE(channel->local_address().empty());
+    }
+    SECTION("all interfaces on request") {
+        OscChannelOptions options;
+        options.bind_address = std::string(kBindAllInterfaces);
+        auto channel = OscChannel::open("127.0.0.1", 29876, 0, options);
+        REQUIRE(channel);
+        REQUIRE(channel->local_address() == "0.0.0.0");
+    }
+    SECTION("an unparseable bind address fails open") {
+        OscChannelOptions options;
+        options.bind_address = "localhost";
+        REQUIRE_FALSE(OscChannel::open("127.0.0.1", 29876, 0, options));
+    }
+}
+
 TEST_CASE("OscChannel open rejects invalid remote hosts",
           "[osc_channel][lifecycle]") {
     auto channel = OscChannel::open("999.999.999.999", 29876, 0);

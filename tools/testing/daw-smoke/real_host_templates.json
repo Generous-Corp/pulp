@@ -1,31 +1,37 @@
 {
   "schema": "pulp.gpu-fault.real-host-templates.v1",
-  "_comment": "The throwaway projects real_host_smoke.py copies per run (WP-K). Authored once per host with cmux-cua (accessibility actions only), in a temp directory, never under ~/Music; each template is then fingerprinted with `real_host_smoke.py template-manifest` and `stage` refuses a template whose fingerprint changed. Every requirement below is re-checked by accessibility snapshot before each run; a mismatch stops the run before playback.",
+  "_comment": "The throwaway projects real_host_smoke.py copies per run (WP-K). Authored once per host with cmux-cua (accessibility actions only), in a temp directory, never under ~/Music; each template is then fingerprinted with `real_host_smoke.py template-manifest` and `stage` refuses a template whose fingerprint changed. Every requirement below is re-checked by accessibility snapshot before each run; a mismatch stops the run before playback. The snapshot's track state (input, record_armed, input_monitoring) goes into the AX JSON `collect` binds, and both `collect` and the v2 verifier refuse a track any input device could reach.",
   "common": {
     "sample_rate": 48000,
     "tempo_bpm": 120,
-    "tracks": "exactly one stereo audio track",
+    "tracks": "exactly one stereo track carrying the plug-in (the host's track type below)",
     "insert_1": "Pulp GPU Fault Continuity (the run's format); no other plug-in anywhere in the project",
     "master": "no plug-ins; unity gain; no limiter",
-    "track_region": "playback templates: one region holding the run's stimulus.wav at project sample 0 (the harness replaces the file before each run); live templates: no region"
+    "track_region": "playback templates: one region holding the run's stimulus.wav at project sample 0 (the harness replaces the file before each run); live templates: no audio region (the plug-in renders its internal stimulus while the transport plays)"
   },
   "kinds": {
     "playback": {
-      "track_input": "No Input",
-      "input_monitoring": "off",
+      "track_input": "the host's no-input label",
+      "input_monitoring": false,
       "record_armed": false,
       "plugin_input": "host (the region feeds the plug-in; captured input must equal stimulus.wav)"
     },
     "live": {
-      "track_input": "No Input",
-      "input_monitoring": "off",
-      "record_armed": true,
-      "plugin_input": "internal (the plug-in generates its stimulus; nothing from an input device can reach it)"
+      "track_input": "the host's no-input label",
+      "input_monitoring": false,
+      "record_armed": false,
+      "transport": "plays from project sample 0; nothing is recorded",
+      "plugin_input": "internal (the plug-in generates its stimulus; nothing from an input device can reach it)",
+      "_why": "Logic refuses to record-arm a No Input track ('No input source selected!', live window 2026-10-23). A live row needs the plug-in processing on a playing transport with no input device able to reach it, not a recording: an unarmed no-input track gives that, and the M6 whole-run input check proves it from the capture.",
+      "processing_proof": "the capture's per-block counters show the plug-in was processed while the transport played; a host that skips a track with no region yields INCONCLUSIVE (no GPU share before the fault), never a pass"
     }
   },
   "hosts": {
     "logic": {
       "project": "WPK-<kind>.logicx",
+      "no_input_label": "No Input",
+      "track_type": "Audio track (Create New Track > Audio > Mic or Line, Details: Audio Input 'No Input', Input Monitoring and Record Enable unticked), channel mode Stereo",
+      "live_on_paper": "the unarmed No Input audio track with no region; Logic runs an audio track's inserts while the transport plays. If the capture shows no processed blocks, fall back to an Aux channel strip whose input is an unused bus.",
       "settings": {
         "process_buffer_range": "recorded, not changed (read from Logic's preferences before the run)",
         "low_latency_mode": "off",
@@ -34,16 +40,33 @@
     },
     "garageband": {
       "project": "WPK-<kind>.band",
+      "no_input_label": "none",
+      "track_type": "Software Instrument track with no regions, the AU as its first audio effect: GarageBand audio tracks always take an input device, an instrument track takes none",
+      "live_on_paper": "the instrument track plays silence into the plug-in, which renders its internal stimulus instead; not armed, monitoring off",
       "settings": {
         "export": "Share > Export Song to Disk (offline only: GarageBand cells are capped at plug-in capture only)"
       }
     },
     "bitwig": {
       "project": "WPK-<kind>.bwproject",
+      "no_input_label": "No input",
+      "track_type": "Audio track, input 'No input', not armed, monitoring Off (not Auto)",
+      "live_on_paper": "the unarmed No input track with no clip; Bitwig processes device chains continuously, so no clip is needed",
       "settings": {
         "plugin_hosting_mode": "per column: 'Within Bitwig' or 'Individually'; prefs snapshotted and restored by the driver",
         "export": "File > Export Audio: 32-bit float, 48 kHz, Realtime for the fault pass, Offline for the cross-check"
       }
     }
+  },
+  "save_as": {
+    "_comment": "How a template is saved into the temp directory. `real_host_smoke.py save-as-plan` prints these steps for a host and target, and refuses a target outside the system temp directory. Pressing a host's File > Save As menu item through accessibility did not open the save sheet in Logic (2026-10-23); the key command delivered with the host briefly in front does.",
+    "steps": [
+      "front the host's project window only (cmux-cua delivery_mode foreground, restored afterwards)",
+      "Cmd-Shift-S",
+      "wait for the save sheet",
+      "Cmd-Shift-G in the sheet, type the target directory, Return",
+      "type the project name into the sheet's name field, Return",
+      "verify the project exists at the target before going on"
+    ]
   }
 }

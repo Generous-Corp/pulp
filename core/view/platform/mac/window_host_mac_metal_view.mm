@@ -2,9 +2,10 @@
 // standalone GPU host. It deliberately owns no MacGpuWindowHost state.
 
 #include "window_host_mac_metal_view.h"
+#include "mac_gpu_host_config.h"
 #include "window_host_mac_internal.hpp"
 
-#if TARGET_OS_OSX && defined(PULP_HAS_SKIA)
+#if TARGET_OS_OSX && PULP_VIEW_MAC_GPU_HOST
 
 #include <Foundation/Foundation.h>
 #import <Metal/Metal.h>
@@ -121,4 +122,4 @@
 
 @end
 
-#endif // TARGET_OS_OSX && defined(PULP_HAS_SKIA)
+#endif // TARGET_OS_OSX && PULP_VIEW_MAC_GPU_HOST

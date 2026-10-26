@@ -1122,6 +1122,18 @@ public:
         return gpu_surface_.get();
     }
 
+    GpuCacheUsage gpu_cache_usage() const override {
+        if (!skia_surface_)
+            return {};
+        const auto bytes = skia_surface_->gpu_cache_bytes();
+        return {bytes.budgeted, bytes.purgeable};
+    }
+
+    void release_gpu_caches() override {
+        if (skia_surface_)
+            skia_surface_->trim_gpu_resources(render::SkiaSurface::TrimLevel::everything());
+    }
+
     void set_idle_callback(std::function<void()> callback) override {
         idle_callback_ = std::move(callback);
     }

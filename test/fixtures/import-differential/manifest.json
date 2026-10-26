@@ -23,7 +23,11 @@
     {"id":"responsive-panel","source":"12-responsive-panel.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","expected_blockers":["responsive-style"]},
     {"id":"fresh-plugin-panel","source":"17-fresh-plugin-panel.html","shape":"self-contained-html","from":"claude","split":"fresh-plugin","viewport":{"width":480,"height":320},"browser_interactions":"17-fresh-plugin-panel.interactions.json","expected_blockers":[]},
     {"id":"gradient-border","source":"19-gradient-border.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","viewport":{"width":400,"height":180},"expected_blockers":[]},
+    {"id":"local-flatten","source":"22-local-flatten.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","viewport":{"width":640,"height":360},"expected_blockers":[]},
     {"id":"flex-gap-knob","source":"20-flex-gap-knob.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","viewport":{"width":960,"height":680},"expected_blockers":[]},
+    {"id":"design-tool-heuristics","source":"21-design-tool-heuristics.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","viewport":{"width":800,"height":520},"expected_blockers":[],"expected_gaps":[{"id":"scaled-bordered-box-clamped","lab_signal":"geometry gate registered_max_abs_delta 1.69 CSS px on #h-scaled (Chromium 0.3125 px wide, native 2 px)","effect":"the capture drops transform and places the box by its scaled paint box, so native lays out a 0.3125 px box with two 1 px borders and clamps it to the 2 px the borders need"}]},
+    {"id":"backdrop-opacity","source":"22-backdrop-opacity.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","viewport":{"width":512,"height":260},"expected_blockers":[]},
+    {"id":"input-buttons","source":"23-input-buttons.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","expected_blockers":[]},
     {
       "id": "spectr-standalone",
       "source": "holdout/spectr-standalone.html",
@@ -53,12 +57,12 @@
           "id": "spectrum-canvas",
           "rect": {
             "x": 56,
-            "y": 178,
+            "y": 56,
             "width": 1168,
-            "height": 240
+            "height": 656
           },
           "unit": "css-px",
-          "reason": "animated spectrum drawn into a full-window canvas; frozen capture time differs per run"
+          "reason": "animated spectrum drawn into a full-window canvas; frozen capture time differs per run. The rect is the whole plot the panel draws bands into (getGeom's padding inside the viewport), not only where one run's bands reached"
         },
         {
           "id": "scrubber-canvas",

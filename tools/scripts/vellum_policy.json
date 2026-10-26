@@ -1,0 +1,18 @@
+{
+  "schema": "pulp.vellum.policy.v1",
+  "description": "Retained Pulp subsystems that no extracted view, design or render unit may link, include or carry. Each name is a core/<name> directory, a pulp/<name>/ include area and a pulp-<name> / pulp::<name> target (underscores and hyphens interchangeable). include_dirs names extra include directories whose headers belong to a subsystem but install under another subsystem's prefix. Read through tools/scripts/vellum_policy.py by vellum_closure.py, include_boundary.py, design_unit_boundary_check.py, vellum_mirror_edge_table.py and the view-core link boundary (test/cmake/test_view_core_audio_free.cmake).",
+  "forbidden_subsystems": [
+    {"name": "audio"},
+    {"name": "content", "include_dirs": ["core/content/include"]},
+    {"name": "format"},
+    {"name": "gpu_audio"},
+    {"name": "graph"},
+    {"name": "host"},
+    {"name": "midi"},
+    {"name": "music"},
+    {"name": "playback"},
+    {"name": "sample_bank_manifest"},
+    {"name": "signal"},
+    {"name": "timebase"}
+  ]
+}

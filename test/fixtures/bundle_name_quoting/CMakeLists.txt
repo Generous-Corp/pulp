@@ -20,7 +20,10 @@ if(APPLE AND PULP_HAS_AUSDK)
 endif()
 
 set(_quoting_name "Pulp Test (dev) Plugin")
+# FULL_EDITOR: render-provider-floor-plugin-images reads these images as
+# plug-ins that carry Skia's Dawn; the macOS default (lite) carries none.
 pulp_add_plugin(PulpBundleNameQuoting
+    FULL_EDITOR
     FORMATS           ${_quoting_formats}
     PLUGIN_NAME       "${_quoting_name}"
     BUNDLE_ID         "dev.pulp.test.bundle-name-quoting"

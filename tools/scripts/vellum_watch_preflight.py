@@ -331,6 +331,100 @@ def evaluate(root: pathlib.Path, base: str, head: str, *,
                    errors=errors, event=event)
 
 
+def borrowed_watch_coverage(root: pathlib.Path, base: str, head: str, *,
+                            source_head: str | None = None,
+                            own_branch: str | None = None) -> list[str]:
+    """Remote branches whose commits added every watch event this range adds.
+
+    A branch stacked on another unmerged PR inherits that PR's commits, and
+    with them its watch event. The range then reads as covered while the
+    branch's own change has no event. When the parent PR lands first, the
+    merge queue measures only this branch's change, finds no event, and
+    ejects the whole batch. Empty when the range adds an event of its own
+    (one no other remote branch carries) or adds none, and on any git error.
+
+    CI measures a synthetic merge of live main and the PR head, which no ref
+    contains: ``source_head`` is the PR's own head for the descendant test,
+    and ``own_branch`` is its branch name, ignored on every remote.
+    """
+    checker = _load_checker(root)
+    resolved = _resolve_range(root, base, head)
+    if checker is None or resolved is None:
+        return []
+    base_sha, head_sha = resolved
+    prefix = checker.EVENT_ROOT.as_posix()
+    log = _git(root, "log", "--diff-filter=A", "--format=%H", "--name-only",
+               f"{base_sha}..{head_sha}", "--", prefix)
+    if not log:
+        return []
+    adders = {line for line in log.splitlines()
+              if len(line) == 40 and all(c in "0123456789abcdef" for c in line)}
+    # The branch's own copies never count: its real upstream, and on every
+    # remote (GitHub need not be "origin") the same-named branch, main, HEAD
+    # and merge-queue refs.
+    branch = own_branch or _git(root, "rev-parse", "--abbrev-ref", "HEAD") or ""
+    descendant_of = source_head or head_sha
+    upstream = _git(root, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+    remotes = (_git(root, "remote") or "").split()
+    ignored = {upstream} if upstream else set()
+    queue_prefixes = []
+    for remote in remotes:
+        ignored |= {remote, f"{remote}/main", f"{remote}/HEAD", f"{remote}/{branch}"}
+        queue_prefixes.append(f"{remote}/gh-readonly-queue/")
+    others: set[str] = set()
+    for commit in adders:
+        # --no-contains drops refs that already hold this head: a branch
+        # stacked on THIS one carries its commits, but this branch is the
+        # parent there, not the borrower.
+        refs = _git(root, "branch", "-r", "--contains", commit,
+                    "--no-contains", descendant_of, "--format=%(refname:short)")
+        if refs is None:
+            return []
+        carriers = {r for r in refs.split()
+                    if r not in ignored and not r.startswith(tuple(queue_prefixes))}
+        if not carriers:
+            return []  # this commit is the branch's own: it has its own event
+        others |= carriers
+    # A carrier only lends coverage when this branch's own part beyond it (its
+    # commits that neither the carrier nor the base holds) affects a watched
+    # family and adds no event. That drops a child stacked on an older head of
+    # this branch (this branch is the parent, and its later commits are its
+    # review fixes) and a stale copy of this branch under another name
+    # (takeover/, backup/), as long as what followed them is unwatched.
+    try:
+        scopes, _raw = checker.load_acceptance(root)
+    except Exception:
+        return []
+    if scopes is None:
+        return []
+    return sorted(carrier for carrier in others
+                  if _own_part_unevented(root, checker, scopes, carrier,
+                                         descendant_of, base_sha, prefix + "/"))
+
+
+def _own_part_unevented(root: pathlib.Path, checker, scopes, carrier: str,
+                        head: str, base: str, event_prefix: str) -> bool:
+    """Whether ``head``'s commits that neither ``carrier`` nor ``base`` holds
+    affect a watched family without adding an event. A commit set, not a
+    merge-base diff: a PR that merged main after the carrier forked would
+    otherwise count main's own watched changes as its part. Merge commits
+    are skipped for the same reason."""
+    log = _git(root, "log", "--no-merges", "--format=", "--name-status",
+               head, f"^{carrier}", f"^{base}")
+    if log is None:
+        return False
+    changes = [line.split("\t") for line in log.splitlines() if "\t" in line]
+    # A rename or copy line is "R100\told\tnew": the new path is the last field.
+    if any(fields[0] == "A" and fields[-1].startswith(event_prefix) for fields in changes):
+        return False
+    changed = {path for fields in changes for path in fields[1:]
+               if not path.startswith(event_prefix)}
+    try:
+        return bool(checker._affected(scopes, changed))
+    except Exception:
+        return False
+
+
 def run(root: pathlib.Path, base: str, head: str, stream, *,
         enforce: bool = False) -> int:
     verdict = evaluate(root, base, head)
@@ -339,6 +433,24 @@ def run(root: pathlib.Path, base: str, head: str, stream, *,
             "  vellum-watch: this range affects "
             f"{', '.join(sorted(verdict.affected))} and its watch events cover it.",
         ], stream)
+        borrowed = borrowed_watch_coverage(root, base, head)
+        if borrowed:
+            _emit([
+                "  ⚠︎ vellum-watch (ADVISORY — this does not block your push): every",
+                "     watch event covering this range was added by a commit another",
+                f"     branch also carries: {', '.join(borrowed)}.",
+                "     This branch is stacked on unmerged work, and its own change has no",
+                "     event. It cannot carry one yet: two events claiming the same",
+                "     families in one range are refused as duplicates. Once that PR",
+                "     merges, merge main into this branch and write this branch's event:",
+                "",
+                "       python3 tools/scripts/vellum_watch_preflight.py --write-event \\",
+                '         --rationale "<what changed, why no authority moves>"',
+                "",
+                "     Until then, do not enqueue this branch: if the parent lands in the",
+                "     same batch or first, the merge queue measures only this branch's",
+                "     change, finds no event, and ejects the whole batch.",
+            ], stream)
     if verdict.code != EVENT_OWED:
         return verdict.code
 

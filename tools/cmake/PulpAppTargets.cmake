@@ -32,6 +32,7 @@ function(_pulp_add_standalone target name bundle_id version processor_factory)
             "pulp_add_plugin(${target}): declared inspector shipping component is unavailable; configure/install Pulp with Inspector support")
     endif()
     target_link_libraries(${target}_Standalone PRIVATE ${target}_Core ${_standalone_target})
+    _pulp_dev_shared_ui_attach(${target} ${target}_Standalone _pulp_dev_shared)
     if(PULP_${target}_CONTROL_CAPABILITIES)
         set(_control_factory_source
             "${CMAKE_CURRENT_BINARY_DIR}/${target}_standalone_control_factory.cpp")
@@ -186,8 +187,13 @@ function(_pulp_add_standalone target name bundle_id version processor_factory)
     # Portability guard (runs AFTER the WebGPU dylib is bundled, so a correctly
     # set-up standalone is clean): fail/warn if the binary bakes a build-tree
     # absolute path — the "works on the build box, breaks when shared" footgun.
-    include("${CMAKE_CURRENT_FUNCTION_LIST_DIR}/PulpPortable.cmake")
-    pulp_assert_portable_bundle(${target}_Standalone)
+    # A dev-shared standalone loads its Pulp code from this build tree by
+    # design; the ship commands refuse it, so the portability scan would only
+    # report that absolute rpath.
+    if(NOT _pulp_dev_shared)
+        include("${CMAKE_CURRENT_FUNCTION_LIST_DIR}/PulpPortable.cmake")
+        pulp_assert_portable_bundle(${target}_Standalone)
+    endif()
     _pulp_attach_plugin_runtime_manifest(${target} ${target}_Standalone)
     _pulp_attach_control_shipping(${target} ${target}_Standalone Standalone)
     # Linux+GNU-ld link-order fix: libskia.a → fontconfig. Same helper

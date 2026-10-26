@@ -324,7 +324,12 @@ def load_capture_geometry(
         if raw_backend in (None, ""):
             synthetic.append(anchor)
             continue
-        dom_i = dom_index.get(int(raw_backend))
+        try:
+            backend = int(raw_backend)
+        except (TypeError, ValueError):
+            raise CaptureInputError(
+                f"IR node {anchor} has a non-numeric backend_node_id {raw_backend!r}") from None
+        dom_i = dom_index.get(backend)
         box = box_of.get(dom_i) if dom_i is not None else None
         if box is None:
             unlaid_out.append(anchor)

@@ -23,6 +23,7 @@
 #include <CoreMIDI/MIDIServices.h>
 #include <mach/mach_time.h>
 #include <pulp/format/au_factory_presets.hpp>
+#include <pulp/format/detail/host_sample_position.hpp>
 
 #include <pulp/format/processor.hpp>
 #include <pulp/format/state_restore_gate.hpp>
@@ -225,11 +226,13 @@ inline void apply_host_callbacks_to_process_context(
                                     &current_sample_in_timeline, &is_cycling,
                                     &cycle_start, &cycle_end) == noErr) {
         ctx.is_playing = (is_playing != 0);
-        ctx.position_samples = static_cast<int64_t>(current_sample_in_timeline);
         ctx.is_looping = (is_cycling != 0);
         ctx.transport_validity.set(TransportField::Playing);
         ctx.transport_validity.set(TransportField::Looping);
-        ctx.transport_validity.set(TransportField::SamplePosition);
+        if (const auto position = detail::host_sample_position(current_sample_in_timeline)) {
+            ctx.position_samples = *position;
+            ctx.transport_validity.set(TransportField::SamplePosition);
+        }
         if (ctx.is_looping) {
             ctx.loop_start_beats = cycle_start;
             ctx.loop_end_beats = cycle_end;
