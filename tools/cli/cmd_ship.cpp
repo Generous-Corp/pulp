@@ -4,6 +4,7 @@
 #include "cli_common.hpp"
 #include "sdk_distribution_guard.hpp"
 #include "notary_env.hpp"
+#include "private_temp_dir.hpp"
 #include "ship_dev_build_guard.hpp"
 #include "ship_tracing_guard.hpp"
 #include "tartci_lease.hpp"
@@ -16,6 +17,9 @@
 #include "xcode_developer_path.hpp"
 
 #include <algorithm>
+#include <cerrno>
+#include <csignal>
+#include <cstring>
 #include <cctype>
 #include <chrono>
 #include <ctime>
@@ -26,6 +30,14 @@
 #include <memory>
 #include <sstream>
 #include <string_view>
+
+#if !defined(_WIN32)
+#include <fcntl.h>
+#include <limits.h>
+#include <signal.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
 
 #include <pulp/ship/android.hpp>
 #include <pulp/ship/appcast.hpp>
@@ -362,6 +374,375 @@ static int enforce_no_development_runtimes(const std::vector<fs::path>& artifact
     if (int rc = enforce_no_vellum_d15(artifacts); rc != 0)
         return rc;
     return allow_dev_shared ? 0 : enforce_no_dev_shared_ui(artifacts);
+}
+
+// Containers another tool built (a .zip, a flat .pkg, a .dmg) cannot be
+// scanned as bytes: their payloads are compressed. `notarize` and `share`
+// open each one read-only into a private temp dir and run the same
+// development-runtime scans on what is inside, recursing into the containers
+// it holds down to kShipContainerDepthLimit levels; a deeper one is refused.
+// A container that cannot be opened is refused, because the guards fail
+// closed. Symlinks inside a container are not followed out of it.
+enum class ShipContainer { None, Zip, Pkg, Dmg };
+constexpr int kShipContainerDepthLimit = 3;
+
+// Recognized by content, so a renamed archive is still opened: a zip by its
+// local-file header, a flat pkg by its xar header, a UDIF disk image by the
+// "koly" trailer in its last 512 bytes. The extension catches the rest.
+static ShipContainer ship_container_kind(const fs::path& artifact) {
+    std::error_code ec;
+    if (!fs::is_regular_file(artifact, ec) || ec)
+        return ShipContainer::None;
+    std::ifstream in(artifact, std::ios::binary);
+    char head[4] = {};
+    in.read(head, 4);
+    if (in.gcount() == 4) {
+        if (std::string_view(head, 4) == std::string_view("PK\x03\x04", 4))
+            return ShipContainer::Zip;
+        if (std::string_view(head, 4) == "xar!")
+            return ShipContainer::Pkg;
+    }
+    const auto size = fs::file_size(artifact, ec);
+    if (!ec && size >= 512) {
+        in.clear();
+        in.seekg(static_cast<std::streamoff>(size - 512));
+        char tail[4] = {};
+        in.read(tail, 4);
+        if (in.gcount() == 4 && std::string_view(tail, 4) == "koly")
+            return ShipContainer::Dmg;
+    }
+    auto ext = artifact.extension().string();
+    std::transform(ext.begin(), ext.end(), ext.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (ext == ".zip")
+        return ShipContainer::Zip;
+    if (ext == ".pkg")
+        return ShipContainer::Pkg;
+    if (ext == ".dmg")
+        return ShipContainer::Dmg;
+    return ShipContainer::None;
+}
+
+#if defined(__APPLE__)
+// The container tools run with stdin, stdout and stderr on /dev/null. An
+// image with a licence agreement or a password would otherwise wait on the
+// terminal for an answer nobody gives, and `notarize` would hang instead of
+// refusing; hdiutil also takes its passphrase from stdin (-stdinpass), so an
+// encrypted image fails at once.
+//
+// A SIGINT, SIGTERM or SIGHUP during a scan is cleaned up from the signal
+// handler: the running tool is killed, each mounted image is detached and the
+// scan's temp root removed, with fork/execv/waitpid only (async-signal-safe),
+// and the signal is then re-raised with its default action. Paths live in
+// fixed buffers so the handler never allocates. Best effort: a SIGKILL cannot
+// be handled.
+namespace ship_scan_signals {
+constexpr int kSlots = kShipContainerDepthLimit + 1;
+char root[PATH_MAX] = {};
+char mounts[kSlots][PATH_MAX] = {};
+volatile pid_t tool = 0;
+
+pid_t spawn_quiet(const char* path, char* const argv[]) {
+    const pid_t pid = fork();
+    if (pid == 0) {
+        const int null_fd = open("/dev/null", O_RDWR);
+        if (null_fd >= 0) {
+            dup2(null_fd, 0);
+            dup2(null_fd, 1);
+            dup2(null_fd, 2);
+        }
+        execv(path, argv);
+        _exit(127);
+    }
+    return pid;
+}
+
+int wait_for(pid_t pid) {
+    int status = 0;
+    while (waitpid(pid, &status, 0) < 0) {
+        if (errno != EINTR)
+            return -1;
+    }
+    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+}
+
+void cleanup(int sig) {
+    if (const pid_t running = tool; running > 0) {
+        kill(running, SIGKILL);
+        wait_for(running);
+    }
+    for (auto& mount : mounts) {
+        if (mount[0] == '\0')
+            continue;
+        char hdiutil[] = "hdiutil", detach[] = "detach", force[] = "-force";
+        char* argv[] = {hdiutil, detach, force, mount, nullptr};
+        if (const pid_t pid = spawn_quiet("/usr/bin/hdiutil", argv); pid > 0)
+            wait_for(pid);
+    }
+    if (root[0] != '\0') {
+        char rm[] = "rm", rf[] = "-rf";
+        char* argv[] = {rm, rf, root, nullptr};
+        if (const pid_t pid = spawn_quiet("/bin/rm", argv); pid > 0)
+            wait_for(pid);
+    }
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+
+bool copy_path(char* slot, const fs::path& path) {
+    const auto text = path.string();
+    if (text.size() >= PATH_MAX)
+        return false;
+    std::memcpy(slot, text.c_str(), text.size() + 1);
+    return true;
+}
+
+// Installs the handlers for the outermost scan and restores the previous
+// ones when it ends.
+struct Guard {
+    static constexpr int kSignals[3] = {SIGINT, SIGTERM, SIGHUP};
+    struct sigaction previous[3] = {};
+    explicit Guard(const fs::path& scan_root) {
+        copy_path(root, scan_root);
+        struct sigaction action = {};
+        action.sa_handler = cleanup;
+        sigemptyset(&action.sa_mask);
+        for (int i = 0; i < 3; ++i)
+            sigaction(kSignals[i], &action, &previous[i]);
+    }
+    ~Guard() {
+        for (int i = 0; i < 3; ++i)
+            sigaction(kSignals[i], &previous[i], nullptr);
+        root[0] = '\0';
+    }
+};
+} // namespace ship_scan_signals
+
+// Runs a container tool by absolute path, with no shell and no terminal.
+// Returns its exit status, or -1 when it could not run or was killed.
+static int run_ship_tool(std::vector<std::string> args) {
+    std::vector<char*> argv;
+    for (auto& arg : args)
+        argv.push_back(arg.data());
+    argv.push_back(nullptr);
+    // Blocked across the spawn so the handler always sees the pid it must
+    // kill once the child exists.
+    sigset_t block, previous;
+    sigemptyset(&block);
+    sigaddset(&block, SIGINT);
+    sigaddset(&block, SIGTERM);
+    sigaddset(&block, SIGHUP);
+    sigprocmask(SIG_BLOCK, &block, &previous);
+    const pid_t pid = ship_scan_signals::spawn_quiet(argv[0], argv.data());
+    if (pid > 0)
+        ship_scan_signals::tool = pid;
+    sigprocmask(SIG_SETMASK, &previous, nullptr);
+    if (pid <= 0)
+        return -1;
+    const int rc = ship_scan_signals::wait_for(pid);
+    ship_scan_signals::tool = 0;
+    return rc;
+}
+
+static std::string capture_ship_tool(const std::string& cmd) {
+    std::string out;
+    if (FILE* pipe = popen((cmd + " </dev/null 2>/dev/null").c_str(), "r")) {
+        char buf[4096];
+        while (size_t n = fread(buf, 1, sizeof(buf), pipe))
+            out.append(buf, n);
+        pclose(pipe);
+    }
+    return out;
+}
+
+// A temp dir that is removed, and a disk image mounted in it that is
+// detached first, on every path out of the scan.
+struct ShipContainerScratch {
+    fs::path dir;
+    fs::path mountpoint;
+    int slot = -1;
+    ~ShipContainerScratch() {
+        if (!mountpoint.empty())
+            run_ship_tool({"/usr/bin/hdiutil", "detach", "-force", mountpoint.string()});
+        if (slot >= 0)
+            ship_scan_signals::mounts[slot][0] = '\0';
+        std::error_code ec;
+        if (!dir.empty())
+            fs::remove_all(dir, ec);
+    }
+};
+
+// Bytes a container expands to on the temp volume before it is scanned, or
+// nullopt when that cannot be told. A disk image is mounted, not copied.
+static std::optional<std::uintmax_t> ship_container_expanded_bytes(const fs::path& artifact,
+                                                                   ShipContainer kind,
+                                                                   const fs::path& scratch) {
+    if (kind == ShipContainer::Zip)
+        return pulp::cli::zipinfo_uncompressed_bytes(
+            capture_ship_tool("/usr/bin/zipinfo -t " + shell_quote(artifact.string())));
+    if (kind == ShipContainer::Pkg) {
+        // The compressed expansion is small; its PackageInfo documents
+        // declare what each payload installs.
+        const auto shallow = scratch / "declared";
+        if (run_ship_tool({"/usr/sbin/pkgutil", "--expand", artifact.string(), shallow.string()}) !=
+            0)
+            return std::nullopt;
+        std::uintmax_t total = 0;
+        bool found = false;
+        std::error_code ec;
+        for (fs::recursive_directory_iterator it(shallow, ec), end; !ec && it != end;
+             it.increment(ec)) {
+            if (it->path().filename() != "PackageInfo" || !it->is_regular_file(ec))
+                continue;
+            std::ifstream in(it->path(), std::ios::binary);
+            std::ostringstream text;
+            text << in.rdbuf();
+            // A component without a payload (scripts only) installs nothing.
+            found = true;
+            if (const auto bytes = pulp::cli::pkg_payload_install_bytes(text.str()))
+                total += *bytes;
+        }
+        fs::remove_all(shallow, ec);
+        if (!found)
+            return std::nullopt;
+        // pkgutil --expand-full keeps the shallow layout beside the payloads.
+        return total + static_cast<std::uintmax_t>(fs::file_size(artifact, ec));
+    }
+    return std::uintmax_t{0};
+}
+#endif
+
+// Scans one container. `chain` names it for messages, outermost first
+// ("Outer.dmg > inner.zip"). `scan_root` is the outermost scan's private
+// temp dir; each container opens in a fresh directory under it.
+static int scan_ship_container(const fs::path& artifact, ShipContainer kind,
+                               const std::string& chain, int depth, const fs::path& scan_root) {
+    const auto refuse = [&](const std::string& why) {
+        std::cerr << "Error: cannot check " << chain << " for development-only runtimes (" << why
+                  << ").\n"
+                  << "  The check fails closed, so it is not shipped. Ship the bundles it "
+                     "was made from, or a container that opens.\n";
+        return 1;
+    };
+    if (depth > kShipContainerDepthLimit)
+        return refuse("containers are nested more than " +
+                      std::to_string(kShipContainerDepthLimit) + " deep");
+#if defined(__APPLE__)
+    ShipContainerScratch scratch;
+    scratch.dir = scan_root / ("level" + std::to_string(depth));
+    std::error_code ec;
+    fs::remove_all(scratch.dir, ec);
+    fs::create_directories(scratch.dir, ec);
+    if (ec)
+        return refuse("no private temp dir");
+    const fs::path contents = scratch.dir / "contents";
+
+    const auto expanded = ship_container_expanded_bytes(artifact, kind, scratch.dir);
+    if (!expanded)
+        return refuse(kind == ShipContainer::Zip
+                          ? "zipinfo cannot read its size, so it is not extracted"
+                          : "pkgutil --expand cannot read its PackageInfo, so it is not expanded");
+    if (*expanded > 0) {
+        const auto space = fs::space(scratch.dir, ec);
+        if (ec)
+            return refuse("the temp volume's free space cannot be read");
+        if (auto why = pulp::cli::container_space_refusal(*expanded, space.available); !why.empty())
+            return refuse(why);
+    }
+
+    int rc = 1;
+    if (kind == ShipContainer::Zip) {
+        rc = run_ship_tool({"/usr/bin/ditto", "-x", "-k", artifact.string(), contents.string()});
+    } else if (kind == ShipContainer::Pkg) {
+        rc = run_ship_tool(
+            {"/usr/sbin/pkgutil", "--expand-full", artifact.string(), contents.string()});
+    } else {
+        fs::create_directories(contents, ec);
+        // Registered before the attach, so a signal during it still detaches.
+        scratch.slot = depth - 1;
+        ship_scan_signals::copy_path(ship_scan_signals::mounts[scratch.slot], contents);
+        rc = run_ship_tool({"/usr/bin/hdiutil", "attach", "-readonly", "-nobrowse", "-noverify",
+                            "-noautoopen", "-stdinpass", "-mountpoint", contents.string(),
+                            artifact.string()});
+        if (rc == 0)
+            scratch.mountpoint = contents;
+    }
+    if (rc != 0)
+        return refuse(kind == ShipContainer::Zip   ? "ditto -x -k failed"
+                      : kind == ShipContainer::Pkg ? "pkgutil --expand-full failed"
+                                                   : "hdiutil attach failed; an encrypted image "
+                                                     "or one with a licence agreement (SLA) "
+                                                     "cannot be opened unattended");
+    auto offender = pulp::cli::vellum_d15_artifact_offender(contents, false);
+    const bool d15 = !offender.empty();
+    if (!d15)
+        offender = pulp::cli::dev_shared_artifact_offender(contents, false);
+    if (offender == contents)
+        return refuse("its contents could not be read");
+    if (!offender.empty()) {
+        std::cerr << "Error: refusing to distribute " << chain << ": it contains "
+                  << (d15 ? "a development-only Vellum D15 GPU-audio runtime"
+                          : "a development-only dev-shared build (PULP_DEV_SHARED_UI=ON)")
+                  << ".\n"
+                  << "  Offending file inside it: " << fs::relative(offender, contents).string()
+                  << "\n";
+        if (d15)
+            std::cerr << "  Rebuild what it packages without D15 before shipping it.\n";
+        else
+            std::cerr << "  Rebuild what it packages with static links and re-run:\n"
+                      << "    " << g_dev_shared_fix << "\n";
+        return 1;
+    }
+    // The containers it holds are compressed too; open each of them.
+    for (fs::recursive_directory_iterator
+             it(contents, fs::directory_options::skip_permission_denied, ec),
+         end;
+         !ec && it != end; it.increment(ec)) {
+        if (it->is_symlink(ec))
+            continue;
+        const auto nested = ship_container_kind(it->path());
+        if (nested == ShipContainer::None)
+            continue;
+        const std::string inner = chain + " > " + fs::relative(it->path(), contents).string();
+        if (int nested_rc = scan_ship_container(it->path(), nested, inner, depth + 1, scan_root);
+            nested_rc != 0)
+            return nested_rc;
+    }
+    if (ec)
+        return refuse("its contents could not be listed");
+    return 0;
+#else
+    (void)kind;
+    (void)scan_root;
+    return refuse("container scanning needs macOS tools");
+#endif
+}
+
+static int enforce_no_development_runtimes_in_containers(const std::vector<fs::path>& artifacts) {
+    for (const auto& artifact : artifacts) {
+        const auto kind = ship_container_kind(artifact);
+        if (kind == ShipContainer::None)
+            continue;
+        const auto root = pulp::cli::make_private_temp_dir(
+            fs::temp_directory_path() / "pulp-ship-container-scan", "scan");
+        if (!root) {
+            std::cerr << "Error: cannot check " << artifact.string()
+                      << " for development-only runtimes (no private temp dir).\n";
+            return 1;
+        }
+        int rc = 0;
+        {
+#if defined(__APPLE__)
+            ship_scan_signals::Guard guard(*root);
+#endif
+            rc = scan_ship_container(artifact, kind, artifact.string(), 1, *root);
+        }
+        std::error_code ec;
+        fs::remove_all(*root, ec);
+        if (rc != 0)
+            return rc;
+    }
+    return 0;
 }
 
 // Backstop for a dev-shared build dir that reaches a distribution step anyway:
@@ -1519,10 +1900,11 @@ static int ship_notarize(const std::vector<std::string>& args,
         notarize_artifacts.reserve(bundles.size());
         for (const auto& bundle : bundles)
             notarize_artifacts.emplace_back(bundle);
-        // Directory-backed bundles and loose dylibs are directly inspectable.
-        // Opaque pkg/dmg/zip inputs are not extracted here; Pulp-produced
-        // containers were already guarded at their selected package inputs.
+        // Directory-backed bundles and loose dylibs are scanned directly; a
+        // zip, flat pkg or dmg is opened and its contents scanned.
         if (int rc = enforce_no_development_runtimes(notarize_artifacts); rc != 0)
+            return rc;
+        if (int rc = enforce_no_development_runtimes_in_containers(notarize_artifacts); rc != 0)
             return rc;
 
         if (staple_only) {
@@ -2438,6 +2820,8 @@ static int ship_share(const std::vector<std::string>& args,
             return 2;
         }
         if (int rc = enforce_no_development_runtimes({fs::path(input)}); rc != 0)
+            return rc;
+        if (int rc = enforce_no_development_runtimes_in_containers({fs::path(input)}); rc != 0)
             return rc;
         auto inspector_report =
             pulp::cli::inspector_shipping::empty_report();

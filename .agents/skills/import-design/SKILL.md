@@ -232,7 +232,10 @@ geometry is unknown.
 Separate weight from placement with
 `tools/import-validation/text_raster_decomposition.py crops` (ink ratio,
 centroid, integer shift, transfer curve per text node) before you touch
-baselines. On macOS the skia screenshot backend lives in
+baselines. It measures ink on either side of the box's background, so dark
+text on a light panel reads as reliably as light on dark. Numbers it reported
+for dark-on-light labels before it did were the glyphs' light fringe, not the
+glyphs. On macOS the skia screenshot backend lives in
 `core/view/platform/mac/screenshot_mac.mm`. `core/view/src/screenshot_skia.cpp`
 is the non-Apple path, so a surface change made only there never reaches a
 macOS render.
@@ -274,9 +277,11 @@ DOMSnapshot, so they are not recorded.
 A native-verdict `<button>` records `ua_control=button`, `ua_color_scheme` and
 `ua_disabled`, loses the UA stylesheet's grey background and 2px outset border,
 and becomes a `ButtonSurface` (Chromium's push-button paint) in place of the
-frame, with its text and icons kept as children. An author-styled button keeps
-its captured paint and stays a frame. `<input type=button|submit|reset>` is not
-lowered this way yet.
+frame, with its text and icons kept as children. An `<input
+type=button|submit|reset>` is the same theme part: it lowers the same way, its
+value (or the UA's `Submit` / `Reset` default) the `#control-value` label child.
+An author-styled button or button input keeps its captured paint and stays a
+frame.
 
 ### Packaged SDK runtime contract
 
@@ -925,7 +930,9 @@ knowing before you touch that file:
   `image_decodes`, `gpu_uploads` and `image_cache_builds`, and leaves
   `paragraph_builds` ungated there because measuring text shapes it. Raw DOM-snapshot hashes differ per capture
   only by the CDP frame ID, so compare `*_snapshot_semantic_sha256` across
-  runs, not the raw binding.
+  runs, not the raw binding. `platform_fonts_sha256` likewise fixes each text
+  run's `backend_node_id`, which Chromium numbers per run; a raw hash of
+  platform-fonts.json failed determinism on node order alone.
 
   **Normalize gotcha:** `normalize_design_ir` (design_ir_normalize.cpp) runs
   on every node `parse_ir_node` reads, and its rules are design-tool
@@ -978,6 +985,15 @@ knowing before you touch that file:
   representation nodes and must be reported separately from browser element
   precision/recall. Keep the visual threshold intact: text antialiasing can
   dominate the pixel diff even when structure and geometry are exact.
+
+  **Capture-moment gotcha:** the lab's two lanes are two Chromium captures,
+  and the native IR is lowered from the candidate lane's. On an animated panel
+  the browser lane's screenshot is a different frame: Spectr's two captures
+  disagree on 42,764 spectrum pixels before any native render is involved. The
+  visual lens therefore scores against `candidate/browser.png` when the lanes'
+  DOM snapshots share a semantic digest, and reports the gap between the two
+  captures as `visual.reference.capture_moment_residual`. Do not read a visual
+  score against the browser lane's screenshot as fidelity on an animated panel.
 
   The authored-fixture validator also records the native Skia PNG itself, its
   hash and size, and the browser/native comparator result. This closes the

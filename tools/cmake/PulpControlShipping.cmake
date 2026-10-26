@@ -309,10 +309,30 @@ function(_pulp_attach_control_shipping target artifact_target artifact_format)
     if(NOT artifact_format)
         message(FATAL_ERROR "control shipping format is required for ${artifact_target}")
     endif()
+    # Optional: a manifest stem as the fourth argument, then
+    # AFTER <file>... <target>...: steps that write into the artifact's bundle
+    # (an embedded framework or extension). The persisted-stamp scan waits for
+    # them and rescans when they rerun, so it never reads a bundle while it is
+    # being rewritten. A file is depended on at file level; a target orders the
+    # scan after it.
+    cmake_parse_arguments(PARSE_ARGV 3 _pulp_cs "" "" "AFTER")
     set(_shipping_manifest_stem "${target}.${artifact_format}")
-    if(ARGC GREATER 3 AND NOT "${ARGV3}" STREQUAL "")
-        set(_shipping_manifest_stem "${ARGV3}")
+    if(_pulp_cs_UNPARSED_ARGUMENTS)
+        list(GET _pulp_cs_UNPARSED_ARGUMENTS 0 _pulp_cs_stem)
+        if(NOT "${_pulp_cs_stem}" STREQUAL "")
+            set(_shipping_manifest_stem "${_pulp_cs_stem}")
+        endif()
     endif()
+    set(_after_files "")
+    set(_after_targets "")
+    foreach(_after IN LISTS _pulp_cs_AFTER)
+        if(TARGET "${_after}")
+            list(APPEND _after_targets "${_after}")
+        else()
+            list(APPEND _after_files "${_after}")
+        endif()
+    endforeach()
+    string(REPLACE ";" "|" _after_inputs "${_after_files}")
 
     set(_profile "${PULP_${target}_CONTROL_PROFILE}")
     set(_artifact_capabilities "${PULP_${target}_CONTROL_CAPABILITIES}")
@@ -494,12 +514,16 @@ function(_pulp_attach_control_shipping target artifact_target artifact_format)
             -DCXX_COMPILER=${CMAKE_CXX_COMPILER}
             -DREPORT=${_sidecar_dir}/${_shipping_manifest_stem}.control-shipping-report.json
             -DSKIP_IF_FRESH_STAMP=${_scan_stamp}
+            "-DSCAN_AFTER_INPUTS=${_after_inputs}"
             -P "${_scanner}"
         COMMAND "${CMAKE_COMMAND}" -E touch "${_scan_stamp}"
         DEPENDS ${artifact_target} "${_control_manifest}"
-            "${_shipping_manifest}" "${_scanner}"
+            "${_shipping_manifest}" "${_scanner}" ${_after_files}
         VERBATIM)
     add_custom_target(${_scan_target} ALL DEPENDS "${_scan_stamp}")
+    if(_after_targets)
+        add_dependencies(${_scan_target} ${_after_targets})
+    endif()
     set(PULP_${artifact_target}_CONTROL_SHIPPING_SCAN_TARGET
         "${_scan_target}" CACHE INTERNAL "" FORCE)
 endfunction()

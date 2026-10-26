@@ -836,6 +836,55 @@ TEST_CASE("WidgetBridge reports a handler error even without a dispatch hook",
               .getWithDefault<bool>(false));
 }
 
+TEST_CASE("WidgetBridge reports a thrown value that has no toString",
+          "[view][bridge][event-batch]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        on('w1', 'click', function () { throw Object.create(null); });
+    )");
+    dispatch_event(engine, "w1", "click", "{}");
+
+    // String() on a null-prototype object throws; the report must not.
+    CHECK(engine.evaluate("__pulpDispatchErrorCount__").getWithDefault<int>(-1) == 1);
+    CHECK(engine.evaluate("__pulpLastDispatchError__").toString() == "[object Object]");
+}
+
+TEST_CASE("WidgetBridge prints a repeating handler error once per hundred repeats",
+          "[view][bridge][event-batch]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var printed = [];
+        globalThis.console = globalThis.console || {};
+        console.error = function (text) { printed.push(String(text)); };
+        on('w1', 'pointermove', function () { throw new Error('move boom'); });
+        on('w2', 'pointermove', function () { throw new Error('other boom'); });
+    )");
+    for (int i = 0; i < 250; ++i)
+        dispatch_event(engine, "w1", "pointermove", "{}");
+
+    // Every error is counted; the console sees the first, then every 100th
+    // repeat with how many it stood for.
+    CHECK(engine.evaluate("__pulpDispatchErrorCount__").getWithDefault<int>(-1) == 250);
+    CHECK(engine.evaluate("printed.length").getWithDefault<int>(-1) == 3);
+    CHECK(engine.evaluate("printed[2].indexOf('(repeated 200 more times)') > 0")
+              .getWithDefault<bool>(false));
+
+    // A different error prints at once.
+    dispatch_event(engine, "w2", "pointermove", "{}");
+    CHECK(engine.evaluate("printed.length").getWithDefault<int>(-1) == 4);
+    CHECK(engine.evaluate("printed[3].indexOf('other boom') > 0").getWithDefault<bool>(false));
+}
+
 TEST_CASE("WidgetBridge runs a nested dispatch without another batch frame",
           "[view][bridge][event-batch]") {
     ScriptEngine engine;

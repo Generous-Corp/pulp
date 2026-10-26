@@ -89,13 +89,16 @@ endif()
 # the artifact, both manifests, and this scanner means the artifact's POST_BUILD
 # scan already covered these exact inputs and wrote the report, so a second
 # scan would only repeat it. `IS_NEWER_THAN` is true on equal timestamps, so a
-# tie always rescans.
+# tie always rescans. SCAN_AFTER_INPUTS ("|"-separated) are the stamps of steps
+# that write into the bundle after the link, such as an embedded framework; a
+# rerun of one of them changes what the closure scan reads.
 if(SKIP_IF_FRESH_STAMP AND EXISTS "${SKIP_IF_FRESH_STAMP}"
    AND REPORT AND EXISTS "${REPORT}")
     set(_pulp_scan_stamp_fresh TRUE)
+    string(REPLACE "|" ";" _pulp_scan_after_inputs "${SCAN_AFTER_INPUTS}")
     foreach(_pulp_scan_input IN ITEMS
             "${ARTIFACT}" "${MANIFEST}" "${SHIPPING_MANIFEST}"
-            "${CMAKE_CURRENT_LIST_FILE}")
+            "${CMAKE_CURRENT_LIST_FILE}" ${_pulp_scan_after_inputs})
         if("${_pulp_scan_input}" IS_NEWER_THAN "${SKIP_IF_FRESH_STAMP}")
             set(_pulp_scan_stamp_fresh FALSE)
         endif()
