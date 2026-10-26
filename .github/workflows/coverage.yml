@@ -1362,12 +1362,35 @@ jobs:
     # makes the publish order explicit: if either native surface is absent,
     # the ancillary uploads stay skipped and Codecov keeps the prior broad
     # report/carryforward instead of replacing it with partial data.
+    #
+    # The barrier runs whenever the native matrix was meant to run, not only
+    # when it succeeded: a skipped barrier reads green, so a failed or
+    # cancelled native leg must fail here instead. The only legitimate skip
+    # is `native_build_required != 'true'`, where no leg was required.
+    # Windows is best-effort (`continue-on-error` on its leg), so its failure
+    # never reaches `needs.coverage.result`. A dispatch that names a Windows
+    # runner is asking for Windows proof, so that run also requires the
+    # Windows Cobertura artifact; run 40162878355 read green with its Windows
+    # leg failed before the build started.
     name: Coverage publish barrier (native reports complete)
     needs: [classify, coverage]
-    if: github.head_ref != 'release/version-bump' && ((github.event_name != 'pull_request' || github.event.action == 'auto_merge_enabled') && needs.classify.outputs.native_build_required == 'true' && needs.coverage.result == 'success')
+    if: always() && github.head_ref != 'release/version-bump' && ((github.event_name != 'pull_request' || github.event.action == 'auto_merge_enabled') && needs.classify.outputs.native_build_required == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      WINDOWS_REQUIRED: ${{ (inputs.windows_runner_selector_json || '') != '' }}
     steps:
+      - name: Require every native coverage leg to succeed
+        shell: bash
+        env:
+          COVERAGE_RESULT: ${{ needs.coverage.result }}
+        run: |
+          set -euo pipefail
+          if [ "${COVERAGE_RESULT}" != "success" ]; then
+            echo "::error::Native coverage matrix result is '${COVERAGE_RESULT}', not 'success' — a required Linux or macOS leg failed, was cancelled, or never ran."
+            exit 1
+          fi
+
       - name: Download Linux native coverage artifact
         uses: actions/download-artifact@v8
         with:
@@ -1380,14 +1403,28 @@ jobs:
           name: coverage-cobertura-macos-${{ github.sha }}
           path: native-coverage/macos
 
-      - name: Require Linux and macOS native reports
+      - name: Download Windows native coverage artifact
+        # Only a dispatch that names a Windows runner requires this report.
+        # On every other run Windows stays best-effort.
+        if: env.WINDOWS_REQUIRED == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: coverage-cobertura-windows-${{ github.sha }}
+          path: native-coverage/windows
+
+      - name: Require native coverage reports
         shell: bash
         run: |
           set -euo pipefail
           missing=0
-          for report in \
-            native-coverage/linux/coverage.cobertura.xml \
-            native-coverage/macos/coverage.cobertura.xml; do
+          reports=(
+            native-coverage/linux/coverage.cobertura.xml
+            native-coverage/macos/coverage.cobertura.xml
+          )
+          if [ "${WINDOWS_REQUIRED}" = "true" ]; then
+            reports+=(native-coverage/windows/coverage.cobertura.xml)
+          fi
+          for report in "${reports[@]}"; do
             if [ ! -s "${report}" ]; then
               echo "::error::Missing native coverage artifact: ${report}"
               missing=1
@@ -1396,7 +1433,11 @@ jobs:
           if [ "${missing}" -ne 0 ]; then
             exit 1
           fi
-          echo "Native coverage publish barrier satisfied (Linux + macOS reports)."
+          if [ "${WINDOWS_REQUIRED}" = "true" ]; then
+            echo "Native coverage publish barrier satisfied (Linux + macOS + Windows reports)."
+          else
+            echo "Native coverage publish barrier satisfied (Linux + macOS reports)."
+          fi
 
   android-kotlin-coverage:
     # Keep Android JVM coverage on the always-on Coverage workflow so

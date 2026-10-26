@@ -6287,6 +6287,15 @@ triggers on a 143/137 signal-kill exit, not just the marker). Real os-windows
 vanished-`-object` existence-filter + mass-drop guard in `run_coverage.sh` were
 real); only the runtime/timeout is accepted as best-effort.
 
+Because `continue-on-error` absorbs a Windows failure, `needs.coverage.result`
+stays `success` and a run can read green with Windows broken (run 40162878355:
+`pwsh: command not found` before the build started). `coverage_publish_barrier`
+therefore runs under `always()`. It fails unless `needs.coverage.result` is
+`success`, and when a dispatch sets `windows_runner_selector_json` it also
+requires the `coverage-cobertura-windows-<sha>` artifact. When you read a
+Windows proof dispatch, check the Windows job and its artifact, not just the
+run conclusion. `test_codecov_upload_contract.py` pins the barrier shape.
+
 ### `release-cli.yml` needs Rust; the VM golden does not have it
 
 The macOS build gate and `release-cli.yml`'s darwin leg can share the Tart VM
