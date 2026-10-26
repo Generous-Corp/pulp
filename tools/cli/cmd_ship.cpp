@@ -14,6 +14,7 @@
 #include "mac_runtime_validators.hpp"
 #include "shell_redirect.hpp"
 #include "ship_bundle_strip.hpp"
+#include "ship_child_process.hpp"
 #include "xcode_developer_path.hpp"
 
 #include <algorithm>
@@ -441,12 +442,11 @@ constexpr int kSlots = kShipContainerDepthLimit + 1;
 char root[PATH_MAX] = {};
 char mounts[kSlots][PATH_MAX] = {};
 volatile sig_atomic_t tool = 0;
-constexpr int kSignals[3] = {SIGINT, SIGTERM, SIGHUP};
 
 sigset_t handled_signals() {
     sigset_t set;
     sigemptyset(&set);
-    for (const int sig : kSignals)
+    for (const int sig : pulp::cli::kShipScanSignals)
         sigaddset(&set, sig);
     return set;
 }
@@ -464,34 +464,18 @@ struct BlockSignals {
     }
 };
 
-pid_t spawn_quiet(const char* path, char* const argv[]) {
-    const pid_t pid = fork();
-    if (pid == 0) {
-        const int null_fd = open("/dev/null", O_RDWR);
-        if (null_fd >= 0) {
-            dup2(null_fd, 0);
-            dup2(null_fd, 1);
-            dup2(null_fd, 2);
-        }
-        execv(path, argv);
-        _exit(127);
-    }
-    return pid;
-}
+using pulp::cli::spawn_quiet;
+using pulp::cli::wait_exit_code;
 
-int wait_for(pid_t pid) {
-    int status = 0;
-    while (waitpid(pid, &status, 0) < 0) {
-        if (errno != EINTR)
-            return -1;
-    }
-    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
-}
-
+// Each piece of state is cleared as it is consumed, so a second run of cleanup
+// (a pending signal delivered after a handler returns) finds nothing left to
+// do: it never re-kills a pid that was already reaped and may have been
+// reused, or detaches and removes paths twice.
 void cleanup(int sig) {
     if (const pid_t running = static_cast<pid_t>(tool); running > 0) {
+        tool = 0;
         kill(running, SIGKILL);
-        wait_for(running);
+        wait_exit_code(running);
     }
     for (auto& mount : mounts) {
         if (mount[0] == '\0')
@@ -499,15 +483,21 @@ void cleanup(int sig) {
         char hdiutil[] = "hdiutil", detach[] = "detach", force[] = "-force";
         char* argv[] = {hdiutil, detach, force, mount, nullptr};
         if (const pid_t pid = spawn_quiet("/usr/bin/hdiutil", argv); pid > 0)
-            wait_for(pid);
+            wait_exit_code(pid);
+        mount[0] = '\0';
     }
     if (root[0] != '\0') {
         char rm[] = "rm", rf[] = "-rf";
         char* argv[] = {rm, rf, root, nullptr};
         if (const pid_t pid = spawn_quiet("/bin/rm", argv); pid > 0)
-            wait_for(pid);
+            wait_exit_code(pid);
+        root[0] = '\0';
     }
-    signal(sig, SIG_DFL);
+    // Default actions for all three before re-raising: the raised signal, and
+    // any other one already pending, terminate the process instead of running
+    // this handler again.
+    for (const int handled : pulp::cli::kShipScanSignals)
+        signal(handled, SIG_DFL);
     raise(sig);
 }
 
@@ -531,11 +521,11 @@ struct Guard {
         // so cleanup never runs inside itself.
         action.sa_mask = handled_signals();
         for (int i = 0; i < 3; ++i)
-            sigaction(kSignals[i], &action, &previous[i]);
+            sigaction(pulp::cli::kShipScanSignals[i], &action, &previous[i]);
     }
     ~Guard() {
         for (int i = 0; i < 3; ++i)
-            sigaction(kSignals[i], &previous[i], nullptr);
+            sigaction(pulp::cli::kShipScanSignals[i], &previous[i], nullptr);
         root[0] = '\0';
     }
 };
@@ -559,7 +549,7 @@ static int run_ship_tool(std::vector<std::string> args) {
     }
     if (pid <= 0)
         return -1;
-    const int rc = ship_scan_signals::wait_for(pid);
+    const int rc = ship_scan_signals::wait_exit_code(pid);
     ship_scan_signals::tool = 0;
     return rc;
 }
