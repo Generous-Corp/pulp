@@ -52,7 +52,10 @@ pulp_add_test_suite(pulp-test-fdn-reverb-portable-lanes
             test_multi_channel_meter_block.cpp
     LIBRARIES pulp::signal pulp::audio-analysis pulp::audio
     TEST_SPEC "~[performance]"
-    TEST_PREFIX "portable-lanes::")
+    TEST_PREFIX "portable-lanes::"
+    # The same block-engine and classic-tier cases as pulp-test-fdn-reverb,
+    # so the same budget: the default one ran out under ASan (120 s).
+    TIMEOUT 900)
 target_compile_definitions(pulp-test-fdn-reverb-portable-lanes PRIVATE PULP_SIMD_LANES_PORTABLE)
 # The plain-struct path's partition exactness assumes, as with MSVC's default
 # /fp:precise, that a scalar tail's a * b + c is computed unfused, like the

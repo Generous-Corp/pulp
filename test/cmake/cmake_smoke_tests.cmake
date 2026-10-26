@@ -278,7 +278,9 @@ if(APPLE)
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_auv3_host_scan_order.cmake)
     set_tests_properties(cmake-auv3-host-scan-order PROPERTIES
         LABELS "cmake;auv3;control"
-        TIMEOUT 60)
+        TIMEOUT 60
+        SKIP_RETURN_CODE 77
+        SKIP_REGULAR_EXPRESSION "SKIPPED: cmake-auv3-host-scan-order needs ninja")
 endif()
 # Toggling pulp_add_binary_data(COMPRESS) in an existing Makefile build dir
 # regenerates the embedded source without a clean reconfigure.
@@ -1484,3 +1486,9 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(cmake-forge-catalog-install PROPERTIES
         LABELS "cmake;host;sdk" TIMEOUT 180)
 endif()
+
+# The unified release-artifact scanner: forbidden-marker list self-test,
+# negative control, and per-class scans. Lives beside the control-shipping
+# scanner tests above because it is the same family of `cmake -P` artifact
+# scans and the control scanner reads the same list.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/release_artifact_tests.cmake")

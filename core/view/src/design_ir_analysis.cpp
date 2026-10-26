@@ -18,6 +18,7 @@
 
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -195,6 +196,43 @@ static void find_unrenderable_visit(const IRNode& node,
 std::vector<UnrenderableFrameSet> find_unrenderable_alternate_frames(const IRNode& root) {
     std::vector<UnrenderableFrameSet> out;
     find_unrenderable_visit(root, out);
+    return out;
+}
+
+// ── duplicate anchors ────────────────────────────────────────────────────────
+namespace {
+
+struct FirstAnchorHolder {
+    std::string path;
+    std::string node_name;
+};
+
+std::string display_name(const IRNode& node) {
+    return node.name.empty() ? "<unnamed>" : node.name;
+}
+
+void find_duplicate_anchors_visit(const IRNode& node, const std::string& path,
+                                  std::unordered_map<std::string, FirstAnchorHolder>& first_seen,
+                                  std::vector<DuplicateAnchor>& out) {
+    if (node.stable_anchor_id && !node.stable_anchor_id->empty()) {
+        const auto& anchor = *node.stable_anchor_id;
+        auto [it, inserted] =
+            first_seen.emplace(anchor, FirstAnchorHolder{path, display_name(node)});
+        if (!inserted)
+            out.push_back(
+                {anchor, path, display_name(node), it->second.path, it->second.node_name});
+    }
+    for (std::size_t i = 0; i < node.children.size(); ++i)
+        find_duplicate_anchors_visit(
+            node.children[i], path + "/children[" + std::to_string(i) + "]", first_seen, out);
+}
+
+} // namespace
+
+std::vector<DuplicateAnchor> find_duplicate_anchors(const IRNode& root) {
+    std::unordered_map<std::string, FirstAnchorHolder> first_seen;
+    std::vector<DuplicateAnchor> out;
+    find_duplicate_anchors_visit(root, "$", first_seen, out);
     return out;
 }
 

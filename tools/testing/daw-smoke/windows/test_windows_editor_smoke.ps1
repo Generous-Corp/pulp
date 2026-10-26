@@ -76,6 +76,12 @@ try {
   Reject {Get-PeMachine (Join-Path $root 'bad.exe')} 'invalid PE refused'
   Check ((Join-WindowsArguments @('-cfgfile','C:\Space Folder\reaper.ini','C:\script path\start.lua')) -eq '"-cfgfile" "C:\Space Folder\reaper.ini" "C:\script path\start.lua"') 'paths with spaces preserve argument boundaries'
   Reject {Join-WindowsArguments @("bad`nargument")} 'newline argument refused'
+  $traceBefore=Get-ProcessTracePath
+  Set-ProcessTracePath 'C:\trace\fixture.pftrace'
+  Check ((Get-ProcessTracePath) -eq 'C:\trace\fixture.pftrace') 'process trace destination can be set for scripted run'
+  Set-ProcessTracePath $null
+  Check ([string]::IsNullOrEmpty((Get-ProcessTracePath))) 'warm scan trace destination can be cleared'
+  Set-ProcessTracePath $traceBefore
   $state=Join-Path $root 'state.rpp';'fixture'|Set-Content -LiteralPath $state
   $good=@{phase='AUTOMATION_DONE';fx_shown='1';param_index='0';param_count='1';observations='20';observed_changes='19';max_error='0';state_saved=$state}
   Assert-TerminalStatus $good 0;Check $true 'terminal retains insertion and observed parameter proof'

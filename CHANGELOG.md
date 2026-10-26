@@ -9,6 +9,28 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1120"></a>
+## [1.12.0] - 2026-10-25
+
+- release/version bump ([#11017](https://github.com/Generous-Corp/pulp/pull/11017))
+- feature/attack surface download hygiene 20261022 ([#10862](https://github.com/Generous-Corp/pulp/pull/10862))
+- feature/ux w2 u13 gpu trim 20261023 ([#10908](https://github.com/Generous-Corp/pulp/pull/10908))
+- fix/importer capture local flatten 20261025 ([#10999](https://github.com/Generous-Corp/pulp/pull/10999))
+- feature/import browser teardown grace 20261024 ([#10990](https://github.com/Generous-Corp/pulp/pull/10990))
+- fix/dispatch stack overflow under asan ([#10979](https://github.com/Generous-Corp/pulp/pull/10979))
+- ci/macos approval gated 20261025 ([#11006](https://github.com/Generous-Corp/pulp/pull/11006))
+- ci/migration fold late notes ([#10766](https://github.com/Generous-Corp/pulp/pull/10766))
+- fix/build skia exact commit pin ([#10765](https://github.com/Generous-Corp/pulp/pull/10765))
+- fix/gpu tests paravirtual metal ([#11009](https://github.com/Generous-Corp/pulp/pull/11009))
+- feature/importer holdout rerun 20261024 ([#10929](https://github.com/Generous-Corp/pulp/pull/10929))
+- feature/imp q freeze motion ([#10947](https://github.com/Generous-Corp/pulp/pull/10947))
+- feature/chromium button lowering ([#10944](https://github.com/Generous-Corp/pulp/pull/10944))
+- fix/imported label vertical align ([#10961](https://github.com/Generous-Corp/pulp/pull/10961))
+- feature/captured font faces native ([#10957](https://github.com/Generous-Corp/pulp/pull/10957))
+- deps/sdl3 catch2 combined ([#10922](https://github.com/Generous-Corp/pulp/pull/10922))
+- feature/gpu audio wp d staged hygiene 20261022 ([#10665](https://github.com/Generous-Corp/pulp/pull/10665))
+- fix/importer flex gap label 20261024 ([#10941](https://github.com/Generous-Corp/pulp/pull/10941))
+
 <a id="v1110"></a>
 ## [1.11.0] - 2026-10-24
 
@@ -11545,6 +11567,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.12.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.12.0
 [1.11.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.11.0
 [1.10.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.10.0
 [1.9.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.9.0

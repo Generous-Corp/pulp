@@ -331,7 +331,9 @@ def evaluate(root: pathlib.Path, base: str, head: str, *,
                    errors=errors, event=event)
 
 
-def borrowed_watch_coverage(root: pathlib.Path, base: str, head: str) -> list[str]:
+def borrowed_watch_coverage(root: pathlib.Path, base: str, head: str, *,
+                            source_head: str | None = None,
+                            own_branch: str | None = None) -> list[str]:
     """Remote branches whose commits added every watch event this range adds.
 
     A branch stacked on another unmerged PR inherits that PR's commits, and
@@ -340,6 +342,10 @@ def borrowed_watch_coverage(root: pathlib.Path, base: str, head: str) -> list[st
     merge queue measures only this branch's change, finds no event, and
     ejects the whole batch. Empty when the range adds an event of its own
     (one no other remote branch carries) or adds none, and on any git error.
+
+    CI measures a synthetic merge of live main and the PR head, which no ref
+    contains: ``source_head`` is the PR's own head for the descendant test,
+    and ``own_branch`` is its branch name, ignored on every remote.
     """
     checker = _load_checker(root)
     resolved = _resolve_range(root, base, head)
@@ -356,7 +362,8 @@ def borrowed_watch_coverage(root: pathlib.Path, base: str, head: str) -> list[st
     # The branch's own copies never count: its real upstream, and on every
     # remote (GitHub need not be "origin") the same-named branch, main, HEAD
     # and merge-queue refs.
-    branch = _git(root, "rev-parse", "--abbrev-ref", "HEAD") or ""
+    branch = own_branch or _git(root, "rev-parse", "--abbrev-ref", "HEAD") or ""
+    descendant_of = source_head or head_sha
     upstream = _git(root, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
     remotes = (_git(root, "remote") or "").split()
     ignored = {upstream} if upstream else set()
@@ -370,7 +377,7 @@ def borrowed_watch_coverage(root: pathlib.Path, base: str, head: str) -> list[st
         # stacked on THIS one carries its commits, but this branch is the
         # parent there, not the borrower.
         refs = _git(root, "branch", "-r", "--contains", commit,
-                    "--no-contains", head_sha, "--format=%(refname:short)")
+                    "--no-contains", descendant_of, "--format=%(refname:short)")
         if refs is None:
             return []
         carriers = {r for r in refs.split()
@@ -378,7 +385,44 @@ def borrowed_watch_coverage(root: pathlib.Path, base: str, head: str) -> list[st
         if not carriers:
             return []  # this commit is the branch's own: it has its own event
         others |= carriers
-    return sorted(others)
+    # A carrier only lends coverage when this branch's own part beyond it (its
+    # commits that neither the carrier nor the base holds) affects a watched
+    # family and adds no event. That drops a child stacked on an older head of
+    # this branch (this branch is the parent, and its later commits are its
+    # review fixes) and a stale copy of this branch under another name
+    # (takeover/, backup/), as long as what followed them is unwatched.
+    try:
+        scopes, _raw = checker.load_acceptance(root)
+    except Exception:
+        return []
+    if scopes is None:
+        return []
+    return sorted(carrier for carrier in others
+                  if _own_part_unevented(root, checker, scopes, carrier,
+                                         descendant_of, base_sha, prefix + "/"))
+
+
+def _own_part_unevented(root: pathlib.Path, checker, scopes, carrier: str,
+                        head: str, base: str, event_prefix: str) -> bool:
+    """Whether ``head``'s commits that neither ``carrier`` nor ``base`` holds
+    affect a watched family without adding an event. A commit set, not a
+    merge-base diff: a PR that merged main after the carrier forked would
+    otherwise count main's own watched changes as its part. Merge commits
+    are skipped for the same reason."""
+    log = _git(root, "log", "--no-merges", "--format=", "--name-status",
+               head, f"^{carrier}", f"^{base}")
+    if log is None:
+        return False
+    changes = [line.split("\t") for line in log.splitlines() if "\t" in line]
+    # A rename or copy line is "R100\told\tnew": the new path is the last field.
+    if any(fields[0] == "A" and fields[-1].startswith(event_prefix) for fields in changes):
+        return False
+    changed = {path for fields in changes for path in fields[1:]
+               if not path.startswith(event_prefix)}
+    try:
+        return bool(checker._affected(scopes, changed))
+    except Exception:
+        return False
 
 
 def run(root: pathlib.Path, base: str, head: str, stream, *,

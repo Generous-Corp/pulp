@@ -12,11 +12,16 @@
 
 #include <pulp/view/anchor_strategy.hpp>
 
+#include <pulp/runtime/log.hpp>
+
 #include <algorithm>
 #include <cstdint>
 #include <map>
 #include <sstream>
+#include <functional>
 #include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 namespace pulp::view {
 
@@ -143,6 +148,21 @@ std::string content_hash_signature_key(const IRNode& node) {
     return ss.str();
 }
 
+bool has_adapter_identity(const IRNode& node, std::string_view adapter_name) {
+    return node.source_node_id && !node.source_node_id->empty() && !adapter_name.empty();
+}
+
+// Whether `node`'s anchor is a content hash: always under content_hash, and
+// under adapter for a node the adapter gave no native id. The second case
+// needs the same sibling discriminator as the first, or every id-less sibling
+// with the same tag, role and text hashes to one anchor.
+bool anchors_by_content(const IRNode& node, AnchorStrategy strategy,
+                        std::string_view adapter_name) {
+    if (strategy == AnchorStrategy::content_hash)
+        return true;
+    return strategy == AnchorStrategy::adapter && !has_adapter_identity(node, adapter_name);
+}
+
 // Compute one anchor, optionally replacing the tag used by path/content-hash
 // strategies. The alternate-frame walker uses this to add a reserved namespace
 // without copying the full IRNode (which can include an entire descendant
@@ -156,7 +176,7 @@ std::string compute_anchor_id_with_type(const IRNode& node, std::string_view par
         // Caller must populate source_node_id before invoking the adapter
         // strategy. If they didn't, fall back to content-hash so we always
         // produce an anchor and keep the import pipeline alive.
-        if (node.source_node_id && !node.source_node_id->empty() && !adapter_name.empty()) {
+        if (has_adapter_identity(node, adapter_name)) {
             std::string out;
             out.reserve(adapter_name.size() + 1 + node.source_node_id->size());
             out.append(adapter_name);
@@ -195,7 +215,8 @@ std::string compute_anchor_id_with_type(const IRNode& node, std::string_view par
 
 void walk(IRNode& node, std::string_view parent_anchor, std::size_t parent_child_index,
           std::size_t depth, AnchorStrategy strategy, std::string_view adapter_name, IRNode* parent,
-          std::size_t sig_index, bool alternate_axis = false, bool inside_alternate = false) {
+          std::size_t sig_index, std::unordered_set<const IRNode*>& derived,
+          bool alternate_axis = false, bool inside_alternate = false) {
     // For path strategy: count earlier siblings with the same tag.
     std::size_t sibling_tag_index = 0;
     if (parent != nullptr && strategy == AnchorStrategy::path) {
@@ -231,6 +252,8 @@ void walk(IRNode& node, std::string_view parent_anchor, std::size_t parent_child
         node.stable_anchor_id = compute_anchor_id_with_type(
             node, parent_anchor, alternate_axis ? parent_child_index : sibling_tag_index, depth,
             sig_index, strategy, adapter_name, alternate_tag);
+        if (anchors_by_content(node, strategy, adapter_name))
+            derived.insert(&node);
     }
     if (!node.anchor_strategy || node.anchor_strategy->empty()) {
         node.anchor_strategy = std::string(strategy_name(strategy));
@@ -241,20 +264,22 @@ void walk(IRNode& node, std::string_view parent_anchor, std::size_t parent_child
     std::string child_parent_anchor =
         (strategy == AnchorStrategy::path) ? *node.stable_anchor_id : std::string{};
 
-    // For content-hash, count duplicate-signature siblings so each
-    // duplicate gets a distinct sig_index discriminator.
+    // For every child anchored by content hash, count duplicate-signature
+    // siblings so each duplicate gets a distinct sig_index discriminator. Under
+    // the adapter strategy only the id-less children are counted, so adding or
+    // removing a sibling that has a native id cannot renumber them.
     std::unordered_map<std::string, std::size_t> sig_counts;
     for (std::size_t i = 0; i < node.children.size(); ++i) {
         IRNode& c = node.children[i];
         std::size_t child_sig_index = 0;
-        if (strategy == AnchorStrategy::content_hash) {
+        if (anchors_by_content(c, strategy, adapter_name)) {
             auto key = content_hash_signature_key(c);
             auto& n = sig_counts[key];
             child_sig_index = n;
             ++n;
         }
         walk(c, child_parent_anchor, i, depth + 1, strategy, adapter_name, &node, child_sig_index,
-             false, inside_alternate);
+             derived, false, inside_alternate);
     }
 
     // Alternate frames are ordered by capture/swap index. Their own roots use
@@ -273,8 +298,77 @@ void walk(IRNode& node, std::string_view parent_anchor, std::size_t parent_child
             ++n;
         }
         walk(frame, strategy == AnchorStrategy::path ? *node.stable_anchor_id : std::string_view{},
-             i, depth + 1, strategy, adapter_name, &node, frame_sig_index, true, true);
+             i, depth + 1, strategy, adapter_name, &node, frame_sig_index, derived, true, true);
     }
+}
+
+void collect_anchors(const IRNode& node, std::unordered_set<std::string>& out) {
+    if (node.stable_anchor_id && !node.stable_anchor_id->empty())
+        out.insert(*node.stable_anchor_id);
+    for (const auto& child : node.children)
+        collect_anchors(child, out);
+    for (const auto& frame : node.alternate_frames)
+        collect_anchors(frame, out);
+}
+
+struct CollisionPass {
+    std::function<bool(const IRNode&)> derived;
+    /// Every anchor anywhere in the tree before the pass, plus each one it
+    /// assigns. A replacement must be none of them: taking an anchor a later
+    /// node already holds would break that node's identity, which was fine.
+    std::unordered_set<std::string> taken;
+    std::unordered_map<std::string, std::string> first_holder;
+    std::vector<AnchorDisambiguation> changes;
+
+    void visit(IRNode& node, const std::string& path, std::vector<const IRNode*>& ancestors) {
+        if (node.stable_anchor_id && !node.stable_anchor_id->empty()) {
+            const std::string anchor = *node.stable_anchor_id;
+            const auto [first, inserted] = first_holder.emplace(anchor, path);
+            if (!inserted && derived(node)) {
+                const std::string first_path = first->second;
+                // Fold in the parent's anchor, then each further ancestor's,
+                // until the hash is held by nothing in the tree. Ancestors are
+                // visited first, so the anchors folded in are already unique.
+                std::string folded = anchor;
+                std::string candidate;
+                for (auto it = ancestors.rbegin(); it != ancestors.rend(); ++it) {
+                    const auto& above = (*it)->stable_anchor_id;
+                    if (!above || above->empty())
+                        continue;
+                    folded += '\x1f';
+                    folded += *above;
+                    candidate = fnv1a_base36(folded);
+                    if (taken.count(candidate) == 0)
+                        break;
+                }
+                // Only reachable when every ancestor is anchorless or the
+                // hashes themselves collide; an ordinal still terminates.
+                for (int n = 1; candidate.empty() || taken.count(candidate) != 0; ++n)
+                    candidate = fnv1a_base36(folded + '#' + std::to_string(n));
+                taken.insert(candidate);
+                first_holder.emplace(candidate, path);
+                changes.push_back({path, anchor, candidate, first_path});
+                node.stable_anchor_id = candidate;
+            }
+        }
+        ancestors.push_back(&node);
+        for (std::size_t i = 0; i < node.children.size(); ++i)
+            visit(node.children[i], path + "/children[" + std::to_string(i) + "]", ancestors);
+        ancestors.pop_back();
+    }
+};
+
+std::vector<AnchorDisambiguation> disambiguate(IRNode& root,
+                                               std::function<bool(const IRNode&)> derived) {
+    CollisionPass pass{std::move(derived), {}, {}, {}};
+    collect_anchors(root, pass.taken);
+    std::vector<const IRNode*> ancestors;
+    pass.visit(root, "$", ancestors);
+    for (const auto& change : pass.changes)
+        runtime::log_info("design-import: anchor '{}' at {} repeats the one at {}; "
+                          "disambiguated to '{}'",
+                          change.previous, change.path, change.first_path, change.anchor);
+    return std::move(pass.changes);
 }
 
 }  // namespace
@@ -295,9 +389,22 @@ std::string compute_anchor_id(const IRNode& node,
 void assign_anchors(IRNode& root,
                     AnchorStrategy strategy,
                     std::string_view adapter_name) {
+    std::unordered_set<const IRNode*> derived;
     walk(root, /*parent_anchor=*/{}, /*parent_child_index=*/0, /*depth=*/0, strategy, adapter_name,
-         /*parent=*/nullptr, /*sig_index=*/0,
+         /*parent=*/nullptr, /*sig_index=*/0, derived,
          /*alternate_axis=*/false, /*inside_alternate=*/false);
+    disambiguate(root, [&derived](const IRNode& node) { return derived.count(&node) != 0; });
+}
+
+std::vector<AnchorDisambiguation> resolve_anchor_collisions(IRNode& root) {
+    return disambiguate(root, [](const IRNode& node) {
+        if (!node.anchor_strategy)
+            return false;
+        if (*node.anchor_strategy == "content-hash")
+            return true;
+        return *node.anchor_strategy == "adapter" &&
+               !(node.source_node_id && !node.source_node_id->empty());
+    });
 }
 
 AnchorStrategy default_anchor_strategy(DesignSource source) {

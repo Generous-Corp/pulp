@@ -19,11 +19,23 @@ The lab instead compares:
 | Structure | evaluated DOM snapshot | DesignIR tree |
 | Geometry | DOM snapshot bounds | post-Yoga `--dump-layout` bounds |
 | Typography | computed styles | DesignIR text styles |
-| Visual | `browser.png` | candidate DesignIR rendered through Pulp/Skia |
+| Visual | the candidate lane's `browser.png` (see below) | candidate DesignIR rendered through Pulp/Skia |
 
 The raw browser screenshot is retained as the external render reference. Both
 the native import and its validation render are run in a dedicated candidate
 directory.
+
+Each lane runs its own Chromium capture, and the native IR is lowered from the
+candidate lane's. On a panel that animates, such as a canvas drawn every
+frame, the browser lane's screenshot shows a different moment, so scoring
+against it would charge capture timing to the native render. The visual lens
+therefore scores against the candidate lane's own screenshot
+(`candidate/browser.png`) when the two lanes' DOM snapshots have the same
+semantic digest. If they differ, the candidate lane did not evaluate the page
+the other lenses read, and the browser lane's screenshot stays the reference.
+`comparison.visual.reference` records which one was used, why, and
+`capture_moment_residual`: how many pixels the two Chromium captures alone
+disagree on, and where.
 
 ## Run one comparison
 
@@ -61,6 +73,7 @@ browser/
   tokens.json
 candidate/
   design.ir.json
+  browser.png
   render.png
   layout.json
 comparison/
@@ -320,7 +333,14 @@ own control appearance, so the lab states the boundary instead of scoring it as
 an importer failure. `comparison.form_controls` lists every laid-out control
 with its `appearance`, the capture's `theme` verdict, and one status:
 
-- `ua-default-form-chrome` — the native theme painted it; a support boundary;
+- `ua-default-form-chrome`: the native theme painted it and the native
+  lowering has no skin for it (a select's arrow, a text field, a meter, a
+  progress bar, the picker types); a support boundary;
+- `ua-theme-skinned`: the native theme painted it, and the native lowering
+  paints it with Chromium's own theme (a range, checkbox or radio in the
+  `chromium_refresh` skin, a `<button>` or button-type input as a
+  `ButtonSurface`); not a boundary, so its residual counts against the
+  importer like any other;
 - `ua-shadow-form-part` — CSS paints the box, but parts such as a range thumb,
   colour swatch, date fields, or a styled select's arrow come from user-agent
   internals the snapshot does not serialize; a support boundary;
@@ -424,7 +444,7 @@ provenance, source recognition, and deterministic three-run receipts pass.
 | P0 | Close existing acceptance debt | **DONE** | Attributable M1 ARM64 PR-head receipt recorded for root-canvas and provenance: https://github.com/Generous-Corp/pulp/actions/runs/38996107653/job/117289012852 and protected artifact https://github.com/Generous-Corp/pulp/actions/runs/38996107653/artifacts/12088036268. The later merge-group run reused the receipt and ran zero suites; it is not claimed as fresh execution. |
 | P1 | Reset and reconcile the workstream | **DONE** | Fresh branch `plan/importer-reset-20261018` from `origin/main` `4cbf6f9a845f081fb5fc5fe6f21d758389e64fe0`; old `measure/fixture11-viewport-20261015` is reference-only because its lineage SHA mismatches its head. |
 | P2 | Validate the evidence contract and instruments | **DONE** | 214 Python controls pass; three-run cold benchmark determinism is `pass`; authenticated Skia render receipts, DPR 2 checks, blank-render and planted-defect controls pass; frozen baseline manifest is `test/fixtures/import-differential/reset-manifest-20261018.json`. |
-| P3 | Prove native correctness | **NOT PASSED — P3a/P3b/P3c COMPLETE; P3d OPEN FOR FORM CHROME** | Final cold corpus at `3450a14c8d` (Chrome 151.0.7922.47, DPR 2, one ARM64 host), with three-run determinism passing on all 16 completed fixtures: on the frozen 14-fixture in-scope denominator, 12 meet every gate (structure >=0.99, frame placement plus registered geometry, typography >=0.98, registered visual >=0.995). Two fail the visual gate: held-out `08-form-controls` (registered visual 0.762539) and `18-keyed-list-panel` (0.947144), with the residual located inside UA-theme-painted control boxes; that support boundary was stated after the held-out failure, so it does not redraw this denominator and may be proposed as an exclusion only for the next frozen manifest. Held-out 01, 03, and 06 pass every gate. Gate coverage over the 16 completed fixtures: structure 16/16, geometry 16/16, typography 14/16 (the excluded Canvas2D controls), registered visual 14/16. F2a lowers native-verdict ranges, checkboxes and radios onto the Chromium-refresh widget skins, painted in the captured CSS-edge-snapped box with the theme-replaced UA background and border dropped: `08-form-controls` goes from 0.762539 to 0.953763, with three-run determinism `pass` (remaining foreground error: themed `<button>` 0.976, range 0.024, checkbox 0). The themed `<button>` is now the whole remaining P3d gap on both 08 and 18 (18 unchanged at 0.947144); a Chromium-refresh push-button skin is planned to close it. Lowering a native-verdict `<button>` to `ButtonSurface` (Chromium's push-button paint, with the UA background and border dropped) takes `08-form-controls` to 0.998861 and `18-keyed-list-panel` to 0.998588, with three-run determinism `pass` on both. Both now pass every numeric gate and are classified `browser-required` only by the `ua-default-form-chrome` support boundary. The remaining 08 foreground error is the range (0.961) and the button (0.039). |
+| P3 | Prove native correctness | **NOT PASSED — P3a/P3b/P3c COMPLETE; P3d OPEN FOR FORM CHROME** | Final cold corpus at `3450a14c8d` (Chrome 151.0.7922.47, DPR 2, one ARM64 host), with three-run determinism passing on all 16 completed fixtures: on the frozen 14-fixture in-scope denominator, 12 meet every gate (structure >=0.99, frame placement plus registered geometry, typography >=0.98, registered visual >=0.995). Two fail the visual gate: held-out `08-form-controls` (registered visual 0.762539) and `18-keyed-list-panel` (0.947144), with the residual located inside UA-theme-painted control boxes; that support boundary was stated after the held-out failure, so it does not redraw this denominator and may be proposed as an exclusion only for the next frozen manifest. Held-out 01, 03, and 06 pass every gate. Gate coverage over the 16 completed fixtures: structure 16/16, geometry 16/16, typography 14/16 (the excluded Canvas2D controls), registered visual 14/16. F2a lowers native-verdict ranges, checkboxes and radios onto the Chromium-refresh widget skins, painted in the captured CSS-edge-snapped box with the theme-replaced UA background and border dropped: `08-form-controls` goes from 0.762539 to 0.953763, with three-run determinism `pass` (remaining foreground error: themed `<button>` 0.976, range 0.024, checkbox 0). The themed `<button>` is now the whole remaining P3d gap on both 08 and 18 (18 unchanged at 0.947144); a Chromium-refresh push-button skin is planned to close it. Lowering a native-verdict `<button>` to `ButtonSurface` (Chromium's push-button paint, with the UA background and border dropped) takes `08-form-controls` to 0.998861 and `18-keyed-list-panel` to 0.998588, with three-run determinism `pass` on both. Both now pass every numeric gate. A themed control the lowering reskins is no longer a support boundary (`ua-theme-skinned`), so `08-form-controls` is `native-with-browser-validation` and threshold-eligible, while `18-keyed-list-panel` stays `browser-required` for its JavaScript alone. The remaining 08 foreground error is the range (0.961) and the button (0.039). |
 | P4 | Compare baked-native and retained typed-plan paths | **DONE — NO QUALIFYING WIN** | An isolated retained typed plan (experiment branch `plan/importer-next-20261021-p4`, commit `169d06f977`, not landed) matched a fresh rebuild at all 600 trace steps, at six Skia PNG checkpoints, and detected a planted dropped meter update. Across seven interleaved separate-process Release reps on the synthetic benchmark IR, update-plus-frame median was 0.0892 ms against baked-native 0.0825 ms (1.08x) and p95 0.2003 ms against 0.1620 ms (1.24x), versus the pre-registered <=0.80x; allocations were equal (269 per frame) and peak RSS was within noise (+32 KB). It beat only the full-rebuild control (about 4.5x on median), which does not qualify. Layout and paint, shared by every lane, dominate the frame. The host was contended (load about 45 on 28 cores), so absolute times are noisy, but the ratios are far from the criterion. Separately, `main` landed (PR 10640, merge `e6da6d9816`) IR-bound retained and rebuild benchmark lanes (`--ir`, `--frames`, slot identity and text-mismatch counters, teardown readback). On importer-produced held-out IR its retained lane builds no views, rebinds no slots and records no unmarked mutations, while the rebuild control rebinds every slot every frame, and teardown leaves 0 live views. Those are structural and lifetime results, and that record makes no wall-clock claim. Combined: the retained path is behaviourally sound and keeps identity, and it has no qualifying wall-time or resource win on the one host measured. |
 | P5 | Decide promotion or deferment | **DONE — DEFERRED** | The retained plan does not meet the pre-registered performance criterion, so baked-native remains authoritative and the retained plan stays an isolated experiment branch. The generic benchmark instrumentation (p95, warmup exclusion, per-frame allocation counts, RSS high-water) is retained as infrastructure, alongside `main`'s IR-bound lanes and lifetime counters, which landed independently and stay as landed. |
 | P6 | Code-health follow-ups | **ADVISORY** | Narrow `DocumentCanvasPaint` exposure, unify duplicate snapshot parsing, split the oversized browser-capture test unit, and add the direct benchmark peak assertion. These do not substitute for P0-P5 evidence. |

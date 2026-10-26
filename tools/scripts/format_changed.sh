@@ -43,6 +43,9 @@ PULP_CLANG_FORMAT_MAJOR="${PULP_CLANG_FORMAT_MAJOR:-21}"
 check=0
 base=""
 binary="${PULP_CLANG_FORMAT:-}"
+# --rev: judge that commit's blobs, not the working tree (the pre-push hook
+# passes the pushed commit). Untracked and uncommitted edits are ignored.
+rev=""
 paths=""
 
 usage() {
@@ -56,6 +59,8 @@ while [ $# -gt 0 ]; do
         --base=*) base="${1#--base=}" ;;
         --binary) shift; [ $# -gt 0 ] || { echo "format_changed: --binary needs a path" >&2; exit 2; }; binary="$1" ;;
         --binary=*) binary="${1#--binary=}" ;;
+        --rev) shift; [ $# -gt 0 ] || { echo "format_changed: --rev needs a commit" >&2; exit 2; }; rev="$1" ;;
+        --rev=*) rev="${1#--rev=}" ;;
         -h|--help) usage; exit 0 ;;
         --) shift; paths="$*"; break ;;
         -*) echo "format_changed: unknown flag: $1" >&2; usage >&2; exit 2 ;;
@@ -162,7 +167,14 @@ git rev-parse --verify -q "$base^{commit}" >/dev/null || {
 # Compare against the merge base, not the base tip. `git diff <base>` on a
 # branch that is merely BEHIND main reports main's own commits as "your
 # changes", so the tool then reformats lines the branch never touched.
-base_mb="$(git merge-base "$base" HEAD 2>/dev/null)" || base_mb=""
+if [ -n "$rev" ]; then
+    [ "$check" -eq 1 ] || { echo "format_changed: --rev reads a commit; it only checks (--check)" >&2; exit 2; }
+    git rev-parse --verify -q "$rev^{commit}" >/dev/null || {
+        echo "format_changed: unknown commit: $rev" >&2
+        exit 2
+    }
+fi
+base_mb="$(git merge-base "$base" "${rev:-HEAD}" 2>/dev/null)" || base_mb=""
 [ -n "$base_mb" ] || base_mb="$base"
 echo "format_changed: base $base (merge-base ${base_mb%%
 *})" >&2
@@ -186,8 +198,13 @@ is_source() {
 }
 
 # shellcheck disable=SC2086  # $paths is a deliberate word list
-changed="$( { git diff --name-only --diff-filter=ACMR "$base_mb" -- $paths; git ls-files --others --exclude-standard -- $paths; } | sort -u )"
-untracked="$(git ls-files --others --exclude-standard -- $paths)"
+if [ -n "$rev" ]; then
+    changed="$(git diff --name-only --diff-filter=ACMR "$base_mb" "$rev" -- $paths | sort -u)"
+    untracked=""
+else
+    changed="$( { git diff --name-only --diff-filter=ACMR "$base_mb" -- $paths; git ls-files --others --exclude-standard -- $paths; } | sort -u )"
+    untracked="$(git ls-files --others --exclude-standard -- $paths)"
+fi
 
 is_untracked() {
     printf '%s\n' "$untracked" | grep -Fxq -- "$1"
@@ -216,9 +233,15 @@ anchor_start() {
         }' "$1"
 }
 
-# Lines of `--lines=a:b` for the hunks of $1 that differ from base.
+# Lines of `--lines=a:b` for the hunks of $1 that differ from base; $2 is the
+# file holding the content those hunks number (the blob under --rev).
 hunk_ranges() {
-    git diff -U0 --find-renames "$base_mb" -- "$1" | sed -n 's/^@@ -[0-9][0-9,]* +\([0-9][0-9,]*\) @@.*/\1/p' | while IFS= read -r range; do
+    content="${2:-$1}"
+    if [ -n "$rev" ]; then
+        git diff -U0 --find-renames "$base_mb" "$rev" -- "$1"
+    else
+        git diff -U0 --find-renames "$base_mb" -- "$1"
+    fi | sed -n 's/^@@ -[0-9][0-9,]* +\([0-9][0-9,]*\) @@.*/\1/p' | while IFS= read -r range; do
         start="${range%%,*}"
         if [ "$range" = "$start" ]; then
             count=1
@@ -227,7 +250,7 @@ hunk_ranges() {
         fi
         [ "$count" -gt 0 ] || continue
         end=$((start + count - 1))
-        start="$(anchor_start "$1" "$start")"
+        start="$(anchor_start "$content" "$start")"
         printf -- '--lines=%s:%s\n' "$start" "$end"
     done
 }
@@ -244,11 +267,19 @@ printf 'SCANNED\n' > "$report"
 { printf '%s\n' "$changed" | while IFS= read -r f; do
     [ -n "$f" ] || continue
     is_source "$f" || continue
-    [ -f "$f" ] || continue
+    src="$f"
+    if [ -n "$rev" ]; then
+        # The pushed blob, in a scratch file; clang-format still reads the
+        # repository's .clang-format through --assume-filename.
+        src="$report.blob"
+        git show "$rev:$f" > "$src" 2>/dev/null || { echo "FAILED $f"; echo "TOUCHED $f"; continue; }
+    else
+        [ -f "$f" ] || continue
+    fi
     if is_untracked "$f" || ! git cat-file -e "$base_mb:$f" 2>/dev/null; then
         ranges=""
     else
-        ranges="$(hunk_ranges "$f")"
+        ranges="$(hunk_ranges "$f" "$src")"
         [ -n "$ranges" ] || continue
         # Include sorting ignores --lines: one new #include re-sorts its whole
         # block, rewriting (and, in --check, blaming) lines nobody touched. An
@@ -265,13 +296,17 @@ printf 'SCANNED\n' > "$report"
         # The trailing x survives the command substitution, which would
         # otherwise strip the file's trailing blank lines and report every file
         # that ends in one as dirty, a verdict the rewrite mode never clears.
-        formatted="$("$bin" --style=file $ranges "$f" 2>/dev/null && printf x)" || {
+        if [ -n "$rev" ]; then
+            formatted="$("$bin" --style=file --assume-filename="$f" $ranges < "$src" 2>/dev/null && printf x)"
+        else
+            formatted="$("$bin" --style=file $ranges "$f" 2>/dev/null && printf x)"
+        fi || {
             echo "FAILED $f"
             echo "TOUCHED $f"
             continue
         }
         formatted="${formatted%x}"
-        if ! printf '%s' "$formatted" | diff -u --label "a/$f" --label "b/$f" "$f" - ; then
+        if ! printf '%s' "$formatted" | diff -u --label "a/$f" --label "b/$f" "$src" - ; then
             echo "DIRTY $f"
         fi
         echo "TOUCHED $f"
@@ -299,7 +334,7 @@ touched=$(grep -c '^TOUCHED ' "$report")
 dirty=$(grep -c '^DIRTY ' "$report")
 failed=$(grep -c '^FAILED ' "$report")
 grep -v -E '^(SCANNED|TOUCHED|DIRTY|FAILED)' "$report"
-rm -f "$report"
+rm -f "$report" "$report.blob"
 
 if [ "$touched" -eq 0 ]; then
     echo "format_changed: no changed C++ lines vs $base — nothing to format." >&2

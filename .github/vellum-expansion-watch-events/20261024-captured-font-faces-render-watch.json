@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261024-captured-font-faces-render-watch",
+  "created_at": "2026-10-24T23:11:48Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-ir-contract",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "The native materializer (build_native_view_tree) registers a DesignIR's existing fontFamilyAssets through the public pulp::canvas::register_font / register_font_woff2 under private per-unicode-range-segment aliases named from their content, and rewrites the tree's font-family stacks to list those aliases in place of the shipped family, last-defined segment first. A face whose file is missing or no longer matches the manifest hash is skipped with a font-asset-unavailable diagnostic. Adds a committed design-ir-observe fixture (a Chromium DPR-2 capture of a page serving Funnel Display Variable from a Blob URL) and its checks. Pulp-owned paths only: no Vellum-transferred slice, capture format, IR format, Chromium, packaging or framework authority moves.",
+  "tests": [
+    "build/test/pulp-test-design-import \"[native-fonts]\"",
+    "ctest --test-dir build -R import-design-ir-observe-variable-font-label",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

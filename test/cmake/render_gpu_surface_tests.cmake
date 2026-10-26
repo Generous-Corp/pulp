@@ -55,6 +55,17 @@
     target_link_libraries(pulp-test-gpu-surface PRIVATE pulp::render Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-gpu-surface ${PULP_GPU_TEST_DISCOVERY_ARGS})
 
+    # SkiaSurface readback size on a real CAMetalLayer swapchain.
+    if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA)
+        add_executable(pulp-test-skia-surface-readback-macos
+            test_skia_surface_readback_macos.mm)
+        target_link_libraries(pulp-test-skia-surface-readback-macos PRIVATE
+            pulp::render Catch2::Catch2WithMain
+            "-framework Metal" "-framework QuartzCore")
+        catch_discover_tests(pulp-test-skia-surface-readback-macos
+            ${PULP_GPU_TEST_DISCOVERY_ARGS})
+    endif()
+
     # Swapchain configures counted on a real CAMetalLayer. Reads the acquired
     # wgpu::Texture's size, so it needs the Dawn headers Skia ships.
     if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA)

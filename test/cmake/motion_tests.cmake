@@ -171,10 +171,14 @@ if(Python3_Interpreter_FOUND)
         COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_SOURCE_DIR}/tools/motion/visual/test_capture_smoke.py
     )
+    # A sanitizer build runs the capture several times slower; under the
+    # gate's load ASan took just over 60 s, so the budget scales with the
+    # build instead of the test doing less.
+    pulp_scaled_test_timeout(_pulp_motion_capture_smoke_timeout 60)
     set_tests_properties(pulp-motion-visual-capture-smoke PROPERTIES
         SKIP_RETURN_CODE 3
         LABELS "motion;visual"
-        TIMEOUT 60
+        TIMEOUT ${_pulp_motion_capture_smoke_timeout}
     )
 
     # The one registration in this set that must not skip. Every test above

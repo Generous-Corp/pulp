@@ -4,7 +4,7 @@ SIMD-optimized FFT for real and complex transforms.
 
 | | |
 |---|---|
-| **License** | BSD-3-Clause |
+| **License** | FFTPACK license (UCAR), BSD-style; see [License](#license) |
 | **URL** | https://github.com/marton78/pffft |
 | **Version** | v1.1.0 |
 | **Integration** | CMake (FetchContent) |
@@ -77,10 +77,26 @@ Use Pulp's built-in FFT when:
 - FFT performance is not the bottleneck
 - You want zero additional dependencies
 
+## License
+
+PFFFT is distributed under the FFTPACK license from UCAR, in the project's
+`LICENSE.txt` (copyrights: UCAR 2004, Julien Pommier 2013, Hayati Ayguen 2019,
+Dario Mambro 2020). It is permissive and BSD-style, but it is not the SPDX
+`BSD-3-Clause` text, so the registry records it as `LicenseRef-FFTPACK` and
+`pulp add pffft` reports it for review. Its conditions:
+
+- Source redistributions keep the copyright notices, the conditions and the
+  disclaimer.
+- Binary redistributions reproduce them in their documentation or other
+  materials.
+- The NCAR, UCAR and contributor names are not used to endorse or promote
+  derived products without written permission.
+
 ## Attribution
 
-Add to `DEPENDENCIES.md` and `NOTICE.md`:
+Add to `DEPENDENCIES.md` and `NOTICE.md`, and ship PFFFT's `LICENSE.txt`
+with any binary:
 
 ```
-PFFFT — BSD-3-Clause — https://github.com/marton78/pffft
+PFFFT — FFTPACK license (UCAR), BSD-style — https://github.com/marton78/pffft
 ```

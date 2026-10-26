@@ -154,3 +154,49 @@ function(pulp_patch_choc_json_number_exponent choc_source_dir)
     file(WRITE "${_pulp_choc_json_header}" "${_pulp_choc_json}")
     message(STATUS "Pulp: applied CHOC JSON positive-exponent patch")
 endfunction()
+
+# choc::file::Watcher on macOS stops its FSEventStream in ~Pimpl, but
+# FSEventStreamStop and FSEventStreamInvalidate only prevent new callbacks; one
+# already running on the stream's dispatch queue keeps going and calls
+# watcher.callback on a Watcher that is being freed (an ASan heap-use-after-free
+# in Pimpl::sendEvent under HotReloader). The patch drains the serial queue
+# after invalidating, which waits for that callback, and tags the queue so a
+# Watcher destroyed from inside its own callback skips the drain instead of
+# deadlocking.
+function(pulp_patch_choc_file_watcher choc_source_dir)
+    set(_pulp_choc_watcher_header "${choc_source_dir}/choc/platform/choc_FileWatcher.h")
+    if(NOT EXISTS "${_pulp_choc_watcher_header}")
+        message(FATAL_ERROR
+            "Pulp: CHOC file watcher header not found for lifetime patch: ${_pulp_choc_watcher_header}")
+    endif()
+
+    file(READ "${_pulp_choc_watcher_header}" _pulp_choc_watcher)
+    set(_pulp_choc_watcher_original "${_pulp_choc_watcher}")
+
+    _pulp_choc_apply_patch(_pulp_choc_watcher "file watcher queue tag"
+[==[        FSEventStreamSetDispatchQueue (eventStream, dispatchQueue);
+        FSEventStreamStart (eventStream);]==]
+[==[        // Tags the queue so ~Pimpl can tell when it runs on it.
+        dispatch_queue_set_specific (dispatchQueue, this, this, nullptr);
+        FSEventStreamSetDispatchQueue (eventStream, dispatchQueue);
+        FSEventStreamStart (eventStream);]==])
+
+    _pulp_choc_apply_patch(_pulp_choc_watcher "file watcher drain on destruction"
+[==[            FSEventStreamStop (eventStream);
+            FSEventStreamInvalidate (eventStream);
+            FSEventStreamRelease (eventStream);]==]
+[==[            FSEventStreamStop (eventStream);
+            FSEventStreamInvalidate (eventStream);
+            // Stop and Invalidate schedule no new callbacks but do not wait for
+            // one already running on the queue, which reads the Watcher being
+            // destroyed. Draining the serial queue waits for it, except when
+            // this destructor runs on that queue itself.
+            if (dispatchQueue && dispatch_get_specific (this) != this)
+                dispatch_sync_f (dispatchQueue, nullptr, [] (void*) {});
+            FSEventStreamRelease (eventStream);]==])
+
+    if(NOT _pulp_choc_watcher STREQUAL _pulp_choc_watcher_original)
+        file(WRITE "${_pulp_choc_watcher_header}" "${_pulp_choc_watcher}")
+        message(STATUS "Pulp: applied CHOC file watcher lifetime patch")
+    endif()
+endfunction()

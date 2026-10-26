@@ -3,11 +3,14 @@
 #include <pulp/render/gpu_surface.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/canvas/text_raster_policy.hpp>
+#include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <functional>
+#include <optional>
 #include <vector>
 
 namespace skgpu::graphite {
@@ -63,14 +66,41 @@ struct GpuCacheBytes {
 
 /// When a surface's idle trim runs. `end_frame()` asks `due()` once per
 /// frame, so the steady-state cost is one timestamp compare; a trim runs at
-/// most once per `kInterval` and frees only resources unused for `kUnusedAge`.
+/// most once per `kInterval`.
+///
+/// A trim frees only resources that went unused for both `kUnusedAge` and the
+/// last `kUnusedFrames` frames. Wall time alone would empty an editor that
+/// animates in bursts: a two-second pause between bursts would cost it every
+/// scratch target, and the next burst would rebuild them all.
 class GpuIdleTrimSchedule {
   public:
     using Clock = std::chrono::steady_clock;
     static constexpr std::chrono::milliseconds kInterval{1000};
     static constexpr std::chrono::milliseconds kUnusedAge{2000};
+    static constexpr std::size_t kUnusedFrames = 30;
 
     explicit GpuIdleTrimSchedule(Clock::time_point start) : last_(start) {}
+
+    /// Records the start of a frame; `begin_frame()` calls it when it hands
+    /// out a canvas, before anything in the frame is drawn.
+    void note_frame(Clock::time_point start) {
+        frame_starts_[next_] = start;
+        next_ = (next_ + 1) % kUnusedFrames;
+        if (frames_ < kUnusedFrames)
+            ++frames_;
+    }
+
+    /// How long a resource must have gone unused at `now` to be trimmed: at
+    /// least `kUnusedAge`, and back to the start of the `kUnusedFrames`-th most
+    /// recent frame, so anything drawn in those frames is kept. Empty until
+    /// that many frames have started, when nothing can qualify.
+    std::optional<std::chrono::milliseconds> unused_age(Clock::time_point now) const {
+        if (frames_ < kUnusedFrames)
+            return std::nullopt;
+        // With the ring full, the next slot to overwrite is the oldest start.
+        const auto span = std::chrono::ceil<std::chrono::milliseconds>(now - frame_starts_[next_]);
+        return std::max(kUnusedAge, span);
+    }
 
     /// True when a trim is due at `now`; records `now` as the last trim.
     bool due(Clock::time_point now) {
@@ -89,6 +119,9 @@ class GpuIdleTrimSchedule {
   private:
     Clock::time_point last_;
     std::uint64_t trims_ = 0;
+    std::array<Clock::time_point, kUnusedFrames> frame_starts_{};
+    std::size_t next_ = 0;
+    std::size_t frames_ = 0;
 };
 
 /// Skia Graphite rendering surface.
@@ -311,9 +344,10 @@ public:
     /// scene) and work the GPU has not finished are not freed; a host that
     /// wants everything back calls `wait_for_submitted_work()` first.
     ///
-    /// `end_frame()` already runs `unused_for(GpuIdleTrimSchedule::kUnusedAge)`
-    /// on the `GpuIdleTrimSchedule` throttle, so a host calls this directly
-    /// only for `everything()`, when its editor is hidden or stops drawing.
+    /// `end_frame()` already runs an idle trim on the `GpuIdleTrimSchedule`
+    /// throttle, freeing what went unused for both `kUnusedAge` and
+    /// `kUnusedFrames` frames, so a host calls this directly only for
+    /// `everything()`, when its editor is hidden or stops drawing.
     /// Default: no-op, for surfaces with no GPU cache.
     virtual void trim_gpu_resources(TrimLevel /*level*/) {}
 

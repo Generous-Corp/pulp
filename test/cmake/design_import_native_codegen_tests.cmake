@@ -4,7 +4,7 @@
 # Design import tests (Figma/Stitch/v0/Pencil -> Pulp, W3C tokens)
 pulp_add_test_suite(pulp-test-design-import
     SOURCES test_design_update.cpp
-    SOURCES test_design_import_ir.cpp test_design_ir_normalize.cpp test_design_import_codegen.cpp test_design_import_codegen_layout_text.cpp test_design_import_codegen_paint.cpp test_design_import_codegen_web_controls.cpp test_design_cpp_codegen_golden.cpp test_design_browser_capture.cpp test_design_import_sources.cpp test_design_import_masks.cpp test_design_import_fidelity.cpp test_design_ir_font_assets.cpp test_recognition_resolver.cpp test_design_manifest.cpp test_design_adherence.cpp test_design_fidelity_ledger.cpp test_design_gallery.cpp test_design_ledger.cpp test_design_handoff.cpp test_design_variants.cpp test_design_tweaks.cpp test_design_knobs.cpp
+    SOURCES test_design_import_ir.cpp test_design_ir_normalize.cpp test_design_import_codegen.cpp test_design_import_codegen_layout_text.cpp test_design_import_codegen_paint.cpp test_design_import_codegen_web_controls.cpp test_design_cpp_codegen_golden.cpp test_design_browser_capture.cpp test_design_import_sources.cpp test_design_import_masks.cpp test_design_import_fidelity.cpp test_design_ir_font_assets.cpp test_design_import_native_fonts.cpp test_recognition_resolver.cpp test_design_manifest.cpp test_design_adherence.cpp test_design_fidelity_ledger.cpp test_design_gallery.cpp test_design_ledger.cpp test_design_handoff.cpp test_design_variants.cpp test_design_tweaks.cpp test_design_knobs.cpp
     LIBRARIES pulp::view
     COMPILE_DEFINITIONS PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}"
     TEST_SPEC "~[network]~[bench]"
@@ -16,7 +16,11 @@ catch_discover_tests(pulp-test-design-import
     PROPERTIES LABELS "bench")
 pulp_test_data(pulp-test-design-import NO_DEFINE
     SOURCES test_design_import_ir.cpp test_recognition_resolver.cpp
+        test_design_import_native_fonts.cpp
     PATHS test/fixtures/imports/claude/vite-assets.html
+        external/fonts/FunnelDisplay-VariableFont_wght.ttf
+        external/fonts/Inter-Regular.ttf
+        test/fixtures/design-ir-observe/variable-font-label
         test/fixtures/imports/figma-plugin/synthetic-knob.png
         test/fixtures/import-fidelity/assets/knob_ref.png
         tools/figma-plugin/library-manifest.json)
@@ -119,8 +123,9 @@ catch_discover_tests(pulp-test-design-import-native-materializer
     PROPERTIES LABELS "parser-import")
 # The generated-source compiles read headers only from these include roots (the
 # test refuses a compile whose dependency file reaches anywhere else in the
-# checkout); the fader case reads one image, and the include-root control
-# copies one music header.
+# checkout); the fader case reads one image, the binding cases read the
+# fidelity scene and the v0 audio panel, and the include-root control copies
+# one music header.
 pulp_test_data(pulp-test-design-import-native-materializer NO_DEFINE
     SOURCES test_design_import_native_materializer.cpp
     PATHS
@@ -128,7 +133,9 @@ pulp_test_data(pulp-test-design-import-native-materializer NO_DEFINE
         core/events/include core/state/include core/audio/include core/midi/include
         core/signal/include core/host/include
         core/music/include/pulp/music/pitch.hpp
-        test/fixtures/import-fidelity/assets/fader_ref.png)
+        test/fixtures/import-fidelity/assets/fader_ref.png
+        test/fixtures/import-fidelity/scene.pulp.json
+        test/fixtures/v0-dev/audio-control-panel.tsx)
 
 # Inert style declarations (`opacity: 1`, `clip-path: none`, ...) must not
 # change the native drawlist, the Skia raster, or the sibling painted next.
