@@ -72,7 +72,7 @@ void WidgetBridge::clear(const DeadlineCheck& deadline_check) {
 
 void WidgetBridge::clear_for_realm_replacement(
     const DeadlineCheck& deadline_check) {
-    pulp::canvas::clear_declared_font_face_weight_ranges(storage_identity());
+    pulp::canvas::clear_declared_font_face_weight_ranges(font_weight_scope());
     retire_realm(deadline_check);
 }
 

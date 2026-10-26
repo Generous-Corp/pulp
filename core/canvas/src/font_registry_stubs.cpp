@@ -26,6 +26,7 @@
 #include <optional>
 #include <unordered_map>
 #include <mutex>
+#include <tuple>
 
 // Probe for ICU's BreakIterator headers. The bundled Skia binaries
 // statically link `libskunicode_icu.a`
@@ -608,6 +609,19 @@ std::optional<bool> declared_face_synthesizes_bold(const std::string& family,
         if (ranges.empty())
             return std::nullopt;
     }
+    // Multiple live realms contribute one effective declaration set. Merge
+    // overlaps so unordered scope iteration cannot change the selected face.
+    std::sort(ranges.begin(), ranges.end(), [](const auto& a, const auto& b) {
+        return std::tie(a.min, a.max) < std::tie(b.min, b.max);
+    });
+    std::vector<DeclaredWeightRange> merged;
+    for (const auto& range : ranges) {
+        if (!merged.empty() && range.min <= merged.back().max + 1)
+            merged.back().max = std::max(merged.back().max, range.max);
+        else
+            merged.push_back(range);
+    }
+    ranges = std::move(merged);
     const int chosen = css_match_declared_weight(ranges, requested_weight);
     if (chosen < 0)
         return std::nullopt;

@@ -240,6 +240,10 @@ std::string WidgetBridge::storage_identity() const {
     return script_base_dir_.generic_string();
 }
 
+std::string WidgetBridge::font_weight_scope() const {
+    return "widget-bridge/" + std::to_string(reinterpret_cast<std::uintptr_t>(this));
+}
+
 std::string WidgetBridge::resolve_script_relative(const std::string& path) const {
     if (path.empty() || path.find("://") != std::string::npos) return path;
     const std::filesystem::path relative(path);
@@ -399,7 +403,7 @@ void BridgeRegistrars::register_font_assets_api(WidgetBridge& self) {
         const auto declare = [&] {
             if (declared)
                 pulp::canvas::declare_font_face_weight_range(
-                    family, declared->first, declared->second, self.storage_identity());
+                    family, declared->first, declared->second, self.font_weight_scope());
         };
         if (path.rfind("file://", 0) == 0) path = path.substr(7);
         if (const auto* embedded = self.embedded_asset(path)) {
