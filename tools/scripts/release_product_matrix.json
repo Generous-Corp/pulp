@@ -110,6 +110,7 @@
     "pulp-sample-bank-manifest",
     "pulp-sequence",
     "pulp-signal-fft-backend",
+    "pulp-signal-mufft",
     "pulp-signal-modal-spec",
     "pulp-simd",
     "pulp-smf-interchange",
