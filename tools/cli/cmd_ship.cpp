@@ -440,7 +440,29 @@ namespace ship_scan_signals {
 constexpr int kSlots = kShipContainerDepthLimit + 1;
 char root[PATH_MAX] = {};
 char mounts[kSlots][PATH_MAX] = {};
-volatile pid_t tool = 0;
+volatile sig_atomic_t tool = 0;
+constexpr int kSignals[3] = {SIGINT, SIGTERM, SIGHUP};
+
+sigset_t handled_signals() {
+    sigset_t set;
+    sigemptyset(&set);
+    for (const int sig : kSignals)
+        sigaddset(&set, sig);
+    return set;
+}
+
+// Holds the handled signals off while shared state the handler reads is
+// half-written: a path copied into a slot, a pid recorded for a new child.
+struct BlockSignals {
+    sigset_t previous;
+    BlockSignals() {
+        const sigset_t block = handled_signals();
+        sigprocmask(SIG_BLOCK, &block, &previous);
+    }
+    ~BlockSignals() {
+        sigprocmask(SIG_SETMASK, &previous, nullptr);
+    }
+};
 
 pid_t spawn_quiet(const char* path, char* const argv[]) {
     const pid_t pid = fork();
@@ -467,7 +489,7 @@ int wait_for(pid_t pid) {
 }
 
 void cleanup(int sig) {
-    if (const pid_t running = tool; running > 0) {
+    if (const pid_t running = static_cast<pid_t>(tool); running > 0) {
         kill(running, SIGKILL);
         wait_for(running);
     }
@@ -500,13 +522,14 @@ bool copy_path(char* slot, const fs::path& path) {
 // Installs the handlers for the outermost scan and restores the previous
 // ones when it ends.
 struct Guard {
-    static constexpr int kSignals[3] = {SIGINT, SIGTERM, SIGHUP};
     struct sigaction previous[3] = {};
     explicit Guard(const fs::path& scan_root) {
         copy_path(root, scan_root);
         struct sigaction action = {};
         action.sa_handler = cleanup;
-        sigemptyset(&action.sa_mask);
+        // A second, different signal waits until the first cleanup re-raises,
+        // so cleanup never runs inside itself.
+        action.sa_mask = handled_signals();
         for (int i = 0; i < 3; ++i)
             sigaction(kSignals[i], &action, &previous[i]);
     }
@@ -527,16 +550,13 @@ static int run_ship_tool(std::vector<std::string> args) {
     argv.push_back(nullptr);
     // Blocked across the spawn so the handler always sees the pid it must
     // kill once the child exists.
-    sigset_t block, previous;
-    sigemptyset(&block);
-    sigaddset(&block, SIGINT);
-    sigaddset(&block, SIGTERM);
-    sigaddset(&block, SIGHUP);
-    sigprocmask(SIG_BLOCK, &block, &previous);
-    const pid_t pid = ship_scan_signals::spawn_quiet(argv[0], argv.data());
-    if (pid > 0)
-        ship_scan_signals::tool = pid;
-    sigprocmask(SIG_SETMASK, &previous, nullptr);
+    pid_t pid = -1;
+    {
+        ship_scan_signals::BlockSignals blocked;
+        pid = ship_scan_signals::spawn_quiet(argv[0], argv.data());
+        if (pid > 0)
+            ship_scan_signals::tool = pid;
+    }
     if (pid <= 0)
         return -1;
     const int rc = ship_scan_signals::wait_for(pid);
@@ -660,7 +680,10 @@ static int scan_ship_container(const fs::path& artifact, ShipContainer kind,
         fs::create_directories(contents, ec);
         // Registered before the attach, so a signal during it still detaches.
         scratch.slot = depth - 1;
-        ship_scan_signals::copy_path(ship_scan_signals::mounts[scratch.slot], contents);
+        {
+            ship_scan_signals::BlockSignals blocked;
+            ship_scan_signals::copy_path(ship_scan_signals::mounts[scratch.slot], contents);
+        }
         rc = run_ship_tool({"/usr/bin/hdiutil", "attach", "-readonly", "-nobrowse", "-noverify",
                             "-noautoopen", "-stdinpass", "-mountpoint", contents.string(),
                             artifact.string()});

@@ -421,7 +421,10 @@ a dev-shared build may be signed for local loading, never distributed.
   `std::system`, so the scan knows the running child's pid. SIGINT, SIGTERM
   and SIGHUP during a scan kill that child, detach the registered mountpoints
   and remove the scan's temp root from the signal handler (fork/execv only,
-  paths in fixed buffers), then re-raise. Killing the child first matters: an
+  paths in fixed buffers), then re-raise. The handler's sa_mask holds
+  all three signals, so a second one cannot re-enter cleanup, and the main
+  path blocks them while it writes a mount slot or the child pid
+  (`tool`, a `volatile sig_atomic_t`). Killing the child first matters: an
   orphaned `ditto` keeps writing into the directory the handler removed. Best effort: SIGKILL leaves the
   mount, which `hdiutil info` lists under `pulp-ship-container-scan`.
 
