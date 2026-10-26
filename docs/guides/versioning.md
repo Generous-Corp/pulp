@@ -743,6 +743,19 @@ reviewer_signers`. Its `shipyard changelog regenerate` renders CHANGELOG.md
 byte-identically to v0.269.1 for the same tag graph, and `shipyard config show`
 merges Pulp's configuration identically under both.
 
+The fleet guard reads `[auto_merge] carry_excluded_paths` from the base's
+`.shipyard/config.toml`. These are the paths whose change stops an APPROVE from
+carrying to a new head after a merge-only refresh. Setting the key replaces
+Shipyard's `DEFAULT_CARRY_EXCLUDED_PATHS`; it does not add to it. Pulp's list
+therefore restates the default (workflows, `.agents/contract.toml`, `tools/ci/`,
+the guard and arm code, release-please files, and signing and notarization),
+with one change. In place of the default's `.shipyard/**` it names only the
+policy files: `.shipyard/config.toml`, `.shipyard/ci-profiles/**` and
+`.shipyard/vm-image*.toml`. Generated data such as
+`.shipyard/changed-surface-families.toml` keeps carrying, so a PR that only
+regenerates it can still land on its approval. The guard only reads the key, so
+the Shipyard pin does not need to support it.
+
 The earlier v0.269.1 pin parses `executable_reuse` in a target's
 `changed_surface_selection`. Shipyard reads that table with
 `deny_unknown_fields`, so a host on an older release cannot parse a policy that
