@@ -5403,7 +5403,8 @@ TEST_CASE("SignalGraph node_loads() reports per-node CPU load after processing",
     REQUIRE(graph.connect(input, 0, gain, 0));
     REQUIRE(graph.connect(gain, 0, output, 0));
 
-    // No telemetry before prepare() builds the measurers.
+    // No telemetry before prepare() builds the measurers. This first read also
+    // turns per-node monitoring on, so the blocks below are timed.
     REQUIRE(graph.node_loads().empty());
 
     constexpr int kFrames = 64;
@@ -5463,6 +5464,7 @@ TEST_CASE("SignalGraph node_loads() is reported on the canonical-executor path t
     REQUIRE(graph.connect(input, 0, gain, 0));
     REQUIRE(graph.connect(gain, 0, output, 0));
     graph.set_canonical_executor_routing_enabled(true);  // route, not walk
+    graph.set_node_load_monitoring(true);
 
     constexpr int kFrames = 64;
     REQUIRE(graph.prepare(48000.0, kFrames));
@@ -5507,6 +5509,7 @@ TEST_CASE("SignalGraph node_loads() is reported on the parallel-executor path",
     }
     graph.set_canonical_executor_routing_enabled(true);
     graph.set_parallel_routing_enabled(true);  // route across worker threads
+    graph.set_node_load_monitoring(true);
 
     constexpr int kFrames = 64;
     REQUIRE(graph.prepare(48000.0, kFrames));
@@ -5528,6 +5531,75 @@ TEST_CASE("SignalGraph node_loads() is reported on the parallel-executor path",
     for (const auto& report : loads) {
         REQUIRE(report.load.callback_count == kBlocks);  // exactly one per block
         REQUIRE(report.load.available_ns > 0);
+    }
+}
+
+TEST_CASE("SignalGraph times nodes only once someone reads their load",
+          "[host][graph][telemetry][executor]") {
+    // Per-node timing is two clock reads per node per block, so it starts off.
+    // The first node_loads() turns it on; set_node_load_monitoring(false) stops
+    // it until the next read; live-DSP telemetry times nodes too. Whole-graph
+    // timing, which live-swap admission reads, always runs. Checked on the
+    // reference walk, the serial executor and the parallel executor.
+    enum class Path { Walk, Serial, Parallel };
+    for (const auto path : {Path::Walk, Path::Serial, Path::Parallel}) {
+        INFO("path " << static_cast<int>(path));
+        SignalGraph graph;
+        const auto input = graph.add_input_node(2, "Input");
+        const auto output = graph.add_output_node(2, "Output");
+        for (int i = 0; i < 4; ++i) {
+            const auto gn = graph.add_gain_node("G");
+            REQUIRE(graph.connect(input, 0, gn, 0));
+            REQUIRE(graph.connect(gn, 0, output, 0));
+        }
+        graph.set_canonical_executor_routing_enabled(path != Path::Walk);
+        graph.set_parallel_routing_enabled(path == Path::Parallel);
+
+        constexpr int kFrames = 64;
+        REQUIRE(graph.prepare(48000.0, kFrames));
+        std::vector<float> l(kFrames, 0.5f), r(kFrames, 0.5f);
+        std::vector<float> lo(kFrames, 0.0f), ro(kFrames, 0.0f);
+        std::array<const float*, 2> in_ch{l.data(), r.data()};
+        std::array<float*, 2> out_ch{lo.data(), ro.data()};
+        pulp::audio::BufferView<const float> in_view(in_ch.data(), 2, kFrames);
+        pulp::audio::BufferView<float> out_view(out_ch.data(), 2, kFrames);
+        const auto run = [&](int blocks) {
+            for (int i = 0; i < blocks; ++i)
+                graph.process(out_view, in_view, kFrames);
+        };
+        // Every node's callback count, which must agree across nodes.
+        const auto node_callbacks = [&] {
+            const auto loads = graph.node_loads();
+            REQUIRE(loads.size() == 6);
+            for (const auto& report : loads)
+                REQUIRE(report.load.callback_count == loads.front().load.callback_count);
+            return loads.front().load.callback_count;
+        };
+
+        REQUIRE_FALSE(graph.node_load_monitoring());
+        run(3);
+        REQUIRE(graph.graph_load().callback_count == 3);
+        // The first read sees nothing measured yet, and turns monitoring on.
+        REQUIRE(node_callbacks() == 0);
+        REQUIRE(graph.node_load_monitoring());
+        run(2);
+        REQUIRE(node_callbacks() == 2);
+
+        // Turned off, timing stops; the next read reports the frozen count and
+        // turns it back on.
+        graph.set_node_load_monitoring(false);
+        run(2);
+        REQUIRE(node_callbacks() == 2);
+        run(1);
+        REQUIRE(node_callbacks() == 3);
+
+        // Live-DSP telemetry reads the node measurers, so it times them too.
+        graph.set_node_load_monitoring(false);
+        graph.set_live_dsp_telemetry_enabled(true);
+        run(2);
+        REQUIRE_FALSE(graph.node_load_monitoring());
+        REQUIRE(node_callbacks() == 5);
+        REQUIRE(graph.graph_load().callback_count == 10);
     }
 }
 

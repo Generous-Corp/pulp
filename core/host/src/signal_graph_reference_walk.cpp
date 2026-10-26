@@ -54,11 +54,9 @@ bool push_parameter_event(ParameterEventQueue& queue,
 
 }  // namespace
 
-void SignalGraph::run_reference_walk_(
-    audio::BufferView<float>& output,
-    const audio::BufferView<const float>& input,
-    int num_samples,
-    CompiledGraph* cg) {
+void SignalGraph::run_reference_walk_(audio::BufferView<float>& output,
+                                      const audio::BufferView<const float>& input, int num_samples,
+                                      CompiledGraph* cg, bool time_nodes) {
     // Clear the final destination; AudioOutput nodes accumulate into it.
     for (std::size_t c = 0; c < output.num_channels(); ++c) {
         std::memset(output.channel_ptr(c), 0, sizeof(float) * static_cast<size_t>(num_samples));
@@ -158,7 +156,9 @@ void SignalGraph::run_reference_walk_(
         // per-node CPU load is attributable via node_loads(). Live-DSP telemetry
         // reads these same per-node measurers after the block (see process_impl),
         // so it needs no separate hook here.
-        if (rt.load) rt.load->begin(num_samples, static_cast<float>(cg->sample_rate));
+        auto* const node_load = time_nodes ? rt.load : nullptr;
+        if (node_load)
+            node_load->begin(num_samples, static_cast<float>(cg->sample_rate));
         switch (shape.type) {
             case NodeType::AudioInput: {
                 const int chs = std::min(
@@ -560,7 +560,8 @@ void SignalGraph::run_reference_walk_(
                 break;
             }
         }
-        if (rt.load) rt.load->end();
+        if (node_load)
+            node_load->end();
     }
 
     // Capture each feedback source's current block for the *next* block.
