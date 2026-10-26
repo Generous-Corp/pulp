@@ -894,6 +894,40 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-b8b6b8bf7b8d"
+paths = ["tools/scripts/nonuniform_head_check.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "nonuniform-head-table",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-cb4583c2844a"
 paths = ["tools/scripts/pch_wiring_check.py"]
 tests = [
@@ -7431,6 +7465,7 @@ paths = [
   "tools/scripts/mac_objc_source_list_guard.py",
   "tools/scripts/merge_cobertura.py",
   "tools/scripts/msvc_string_literal_guard.py",
+  "tools/scripts/nonuniform_head_check.py",
   "tools/scripts/pch_wiring_check.py",
   "tools/scripts/pending_intent_liveness.py",
   "tools/scripts/plugin_footprint_check.py",
@@ -8009,6 +8044,7 @@ paths = [
   "tools/scripts/mac_objc_source_list_guard.py",
   "tools/scripts/merge_cobertura.py",
   "tools/scripts/msvc_string_literal_guard.py",
+  "tools/scripts/nonuniform_head_check.py",
   "tools/scripts/pch_wiring_check.py",
   "tools/scripts/pending_intent_liveness.py",
   "tools/scripts/plugin_footprint_check.py",
