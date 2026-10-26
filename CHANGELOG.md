@@ -9,6 +9,23 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1160"></a>
+## [1.16.0] - 2026-10-26
+
+- release/version bump ([#11148](https://github.com/Generous-Corp/pulp/pull/11148))
+
+<a id="v1152"></a>
+## [1.15.2] - 2026-10-26
+
+- fix/uijs meter binding rule ([#11002](https://github.com/Generous-Corp/pulp/pull/11002))
+- release/version bump ([#11145](https://github.com/Generous-Corp/pulp/pull/11145))
+- chore/footprint followups 2 20261025 ([#11089](https://github.com/Generous-Corp/pulp/pull/11089))
+- perf/graph node load opt in ([#11134](https://github.com/Generous-Corp/pulp/pull/11134))
+- fix/release artifact scan symbol count ([#11141](https://github.com/Generous-Corp/pulp/pull/11141))
+- feature/uijs form control lowering 20261024 ([#10992](https://github.com/Generous-Corp/pulp/pull/10992))
+- fix/cache status directories ([#11140](https://github.com/Generous-Corp/pulp/pull/11140))
+- release/version bump ([#11139](https://github.com/Generous-Corp/pulp/pull/11139))
+
 <a id="v1151"></a>
 ## [1.15.1] - 2026-10-26
 
@@ -11703,6 +11720,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.16.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.16.0
+[1.15.2]: https://github.com/Generous-Corp/pulp/releases/tag/v1.15.2
 [1.15.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.15.1
 [1.15.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.15.0
 [1.14.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.14.0
