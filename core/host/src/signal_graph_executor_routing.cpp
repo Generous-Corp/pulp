@@ -592,6 +592,7 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
             if (atomic == nullptr) return false;
             bindings.push_back(fmt::GraphRuntimeNodeBinding{
                 id, gain_binding, atomic, /*required=*/true});
+            bindings.back().reads_inputs_only = true; // out = in * gain
         } else if (src->type == NodeType::Plugin) {
             PluginSlot* slot = plugin_for ? plugin_for(id) : nullptr;
             if (slot == nullptr) {
@@ -752,6 +753,7 @@ bool build_signal_graph_executor_routing(const SignalGraph& graph,
                         out.snapshot.buffer_assignment().connection_delay_samples)) {
         return false;
     }
+    (void)out.pool.bind(out.snapshot);
 
     out.snapshot_keepalive = graph.live_snapshot_handle_locked_();
     out.valid = true;
