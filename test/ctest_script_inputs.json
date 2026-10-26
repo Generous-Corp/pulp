@@ -3486,6 +3486,13 @@
    ],
    "kind": "python"
   },
+  "au-component-preflight-selftest": {
+   "entry": "tools/scripts/test_check_au_component_preflight.py",
+   "inputs": [
+    "tools/scripts/test_check_au_component_preflight.py"
+   ],
+   "kind": "python"
+  },
   "audio-glitch-trace-selftest": {
    "entry": "tools/audio/test_glitch_trace.py",
    "inputs": [

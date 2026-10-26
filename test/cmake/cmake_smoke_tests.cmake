@@ -933,6 +933,18 @@ if(UNIX)
     endif()
 endif()
 if(Python3_Interpreter_FOUND)
+    # The AU component preflight the DAW bench runs before auval: bundle
+    # metadata, signing, auval registration and the registrar diagnosis. A
+    # failed log query or auval timeout must fail closed, not report a clean
+    # registration. Every host tool is stubbed, so it runs on every host.
+    add_test(NAME au-component-preflight-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_check_au_component_preflight.py")
+    set_tests_properties(au-component-preflight-selftest PROPERTIES
+        LABELS "tooling;validation"
+        TIMEOUT 60)
+endif()
+if(Python3_Interpreter_FOUND)
     # The frozen C0 ABI receipt was captured on darwin-arm64. Register its
     # governed nested build on the matching platform; the portable verifier
     # selftests remain part of every Python-enabled test manifest.
