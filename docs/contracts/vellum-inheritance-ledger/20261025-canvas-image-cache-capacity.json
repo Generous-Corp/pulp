@@ -1,0 +1,13 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261025-canvas-image-cache-capacity",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "vellum_obligation": "The image file cache must report its entry cap through a read-only accessor that returns the value set_capacity() stored, so a caller that changes the cap can restore the one it found.",
+  "evidence": [
+    ".github/vellum-change-events/20261025-canvas-image-cache-capacity.json",
+    "ctest --test-dir build -R 'ImageCacheCapacityGuard restores the capacity it found'",
+    "ctest --test-dir build -R 'ImageFileCache: capacity\\(\\) reads back the entry cap'"
+  ]
+}

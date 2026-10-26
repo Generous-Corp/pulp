@@ -255,6 +255,7 @@ class SkiaSurfaceGanesh : public SkiaSurface {
         canvas_ = std::make_unique<canvas::SkiaCanvas>(
             sk_canvas, /*recorder*/ nullptr, retained_layers_);
         canvas_->set_gpu_upload_context(context_.get());
+        idle_trim_.note_frame(GpuIdleTrimSchedule::Clock::now());
         return canvas_.get();
     }
 
@@ -268,8 +269,9 @@ class SkiaSurfaceGanesh : public SkiaSurface {
         // No present call: the browser composites the canvas element itself,
         // so a successful flush IS the frame reaching its output.
         context_->flushAndSubmit();
-        if (idle_trim_.due(GpuIdleTrimSchedule::Clock::now()))
-            trim_gpu_resources(TrimLevel::unused_for(GpuIdleTrimSchedule::kUnusedAge));
+        const auto trim_now = GpuIdleTrimSchedule::Clock::now();
+        if (const auto age = idle_trim_.unused_age(trim_now); age && idle_trim_.due(trim_now))
+            trim_gpu_resources(TrimLevel::unused_for(*age));
         return last_outcome_ = FrameOutcome::presented;
     }
 

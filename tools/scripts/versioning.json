@@ -58,6 +58,7 @@
         "tools/cmake/PulpPluginMetadata.cmake",
         "tools/cmake/PulpPortable.cmake",
         "tools/cmake/PulpReactRuntime.cmake",
+        "tools/cmake/PulpReleaseArtifactScan.cmake",
         "tools/cmake/PulpReload.cmake",
         "tools/cmake/PulpRuntimeStaging.cmake",
         "tools/cmake/PulpSdkGuards.cmake",

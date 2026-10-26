@@ -273,6 +273,15 @@ value (or the UA's `Submit` / `Reset` default) the `#control-value` label child.
 An author-styled button or button input keeps its captured paint and stays a
 frame.
 
+The differential lab knows which themed controls the lowering reskins
+(`THEME_SKINNED_TAGS` / `THEME_SKINNED_INPUT_TYPES` in
+`tools/import-validation/importer_differential/form_controls.py`, kept equal to
+what `record_ua_control_state` records by a test). Those report
+`ua-theme-skinned`, whose residual counts against the importer; every other
+themed control (a select's arrow, text fields, meter, progress, the picker
+types) stays the `ua-default-form-chrome` support boundary. Add a control to
+both when you give it a native skin.
+
 ### Emitter conformance: one IR, four lowerings, one gate
 
 The native materializer, the ui.js emitter (`design_codegen.cpp`), the baked C++
@@ -995,6 +1004,15 @@ knowing before you touch that file:
   representation nodes and must be reported separately from browser element
   precision/recall. Keep the visual threshold intact: text antialiasing can
   dominate the pixel diff even when structure and geometry are exact.
+
+  **Capture-moment gotcha:** the lab's two lanes are two Chromium captures,
+  and the native IR is lowered from the candidate lane's. On an animated panel
+  the browser lane's screenshot is a different frame: Spectr's two captures
+  disagree on 42,764 spectrum pixels before any native render is involved. The
+  visual lens therefore scores against `candidate/browser.png` when the lanes'
+  DOM snapshots share a semantic digest, and reports the gap between the two
+  captures as `visual.reference.capture_moment_residual`. Do not read a visual
+  score against the browser lane's screenshot as fidelity on an animated panel.
 
   The authored-fixture validator also records the native Skia PNG itself, its
   hash and size, and the browser/native comparator result. This closes the
@@ -3639,7 +3657,23 @@ match:
   `[pulp:warn] design-import:` line. "Unknown" means `kind_from_type` does not
   recognize the type and it is not a vector kind. The warning fires even when
   the node's audio role or name still resolves it. Duplicates are found by a
-  document-order walk of `stable_anchor_id`.
+  document-order walk of `stable_anchor_id` (`find_duplicate_anchors`).
+- **Repeated derived anchors are disambiguated; repeated explicit ones refuse.**
+  Every binder, tweak and lock addresses a node by its anchor, and the baked
+  C++ binder binds only on exactly one match, so a repeat silently loses its
+  binding. A content hash does not include the parent, so identical subtrees
+  under different parents (two cards, each an unlabelled slider) hash alike.
+  `assign_anchors` therefore runs a collision pass: the first node in document
+  order keeps the anchor, as does every node whose anchor was already unique,
+  and each later derived anchor (content hash, or the adapter fallback for a
+  node with no source id) is rehashed with its parent's anchor, then further
+  ancestors', until it is held by nothing else in the tree. The CLI runs the
+  same pass (`resolve_anchor_collisions`) for IRs that arrive already anchored,
+  then exits 2 only when two nodes carry the same explicit identity (a source
+  id or an authored anchor), naming each. The materializer keeps warning so an
+  already-built IR still renders. The adapter fallback also needs the
+  per-signature sibling index `content_hash` uses (counted over id-less
+  siblings only), or every id-less sibling of one shape gets one anchor.
 - **A successful decode does not prove an image is intact.** Skia's PNG
   decoder fills the rows of a truncated file with transparent pixels and
   returns `kSuccess`, and the node paints blank. `canvas::probe_image_file`
@@ -4516,6 +4550,16 @@ at opacity 0 and ends the chain in `opacity()` below 1. An ancestor's
 opacity layer is the backdrop root, as in Chrome. Chrome's numbers come from
 `tools/import-validation/chrome_backdrop_opacity_oracle.py` over fixture
 `22-backdrop-opacity`, and `pulp-test-css-backdrop-opacity` holds Skia to them.
+
+**Backdrop edges are mirrored:** at a frosted box's edge, Chrome blurs the
+backdrop as if the box's own content were mirrored past its edges. It neither
+repeats the edge column outward nor reads the page beside the box. The Skia
+backdrop paths feed the blur `SkImageFilters::Crop(bounds, kMirror)` and
+crop only the output; passing the rect as the blur's own crop rect clamps the
+input instead, and a bright line just inside the edge smears up to 30 levels
+too bright. The fixture's sixth box starts on a 4px amber band, and the
+oracle prints Chrome's profile across that edge (row 210) for the
+`backdrop-filter mirrors the box at its edges` test.
 
 ### Step 1: Identify source and input
 

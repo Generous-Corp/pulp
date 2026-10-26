@@ -1,0 +1,15 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261025-render-gpu-trim-frames",
+  "slices": [
+    "render-skia-dawn"
+  ],
+  "vellum_obligation": "A GPU surface's idle trim must free a resource only once it has gone unused for both its idle time and a count of recent frames, counted from frame starts, so a burst of frames after a pause still finds what the previous burst used.",
+  "evidence": [
+    ".github/vellum-change-events/20261025-render-gpu-trim-frames.json",
+    "ctest --test-dir build -R 'GpuIdleTrimSchedule ages by frames as well as time'",
+    "ctest --test-dir build -R 'SkiaSurface idle trim keeps what a recent frame released across a pause'",
+    "ctest --test-dir build -R 'SkiaSurface idle trim runs once per second of frames'",
+    "ctest --test-dir build -R 'SkiaSurface idle trim frees textures unused for two seconds and keeps the drawn one'"
+  ]
+}

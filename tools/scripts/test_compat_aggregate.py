@@ -253,6 +253,38 @@ class CliRoundTripTests(unittest.TestCase):
             self.assertEqual(res.returncode, 1, res.stderr)
             self.assertIn("DRIFT", res.stderr)
 
+    def test_check_rev_reads_the_commit_not_the_working_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            git = ["git", "-C", str(root)]
+            for args in (["init", "-q"], ["config", "user.email", "t@example.invalid"],
+                         ["config", "user.name", "T"], ["config", "commit.gpgsign", "false"]):
+                subprocess.run([*git, *args], check=True)
+            (root / "compat.json").write_text(SAMPLE_AGGREGATE, encoding="utf-8")
+            self.assertEqual(self._run("split", root).returncode, 0)
+            subprocess.run([*git, "add", "-A"], check=True)
+            subprocess.run([*git, "commit", "-q", "-m", "seed"], check=True)
+            css = root / "compat" / "css.json"
+            good = css.read_text(encoding="utf-8")
+            css.write_text(good.replace("display", "DISPLAY"), encoding="utf-8")
+            subprocess.run([*git, "commit", "-q", "-am", "drift a part"], check=True)
+            # Restored on disk, not committed: the push still sends the drift.
+            css.write_text(good, encoding="utf-8")
+            pushed = subprocess.run(
+                [sys.executable, str(SCRIPT), "check", "--repo-root", str(root), "--rev", "HEAD"],
+                capture_output=True, text=True, encoding="utf-8")
+            self.assertEqual(pushed.returncode, 1, pushed.stderr)
+            self.assertIn("DRIFT", pushed.stderr)
+            # Control: the working-tree read is what let it through.
+            self.assertEqual(self._run("check", root).returncode, 0)
+            # And an uncommitted drift does not fail a clean commit.
+            subprocess.run([*git, "commit", "-q", "-am", "restore"], check=True)
+            css.write_text(good.replace("display", "DISPLAY"), encoding="utf-8")
+            clean = subprocess.run(
+                [sys.executable, str(SCRIPT), "check", "--repo-root", str(root), "--rev", "HEAD"],
+                capture_output=True, text=True, encoding="utf-8")
+            self.assertEqual(clean.returncode, 0, clean.stderr)
+
     def test_check_missing_parts_dir(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

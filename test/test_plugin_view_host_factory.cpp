@@ -34,6 +34,7 @@
 // WM_SIZE, MAKELPARAM, GetClientRect).
 #include <pulp/platform/win32_sane.hpp>
 #include <cstdint>
+#include <vector>
 #endif
 
 using namespace pulp::view;
@@ -327,14 +328,20 @@ TEST_CASE("X11 plugin host follows a resize the host applied to its window",
     // connection; until the server has processed them, a resize from the DAW
     // connection can land first and be undone by the attach. The window turning
     // viewable proves the attach's requests, the resize before the map
-    // included, are done.
-    for (int i = 0; i < 200; ++i) {
+    // included, are done. Running out of time is a failure, not a reason to
+    // carry on into the race this wait exists to avoid. The budget is 5 s:
+    // xvfb on a loaded CI runner can be slow, and a passing run stops at the
+    // first poll that sees the window.
+    bool viewable = false;
+    for (int i = 0; i < 1000 && !viewable; ++i) {
         XWindowAttributes attrs{};
-        if (XGetWindowAttributes(daw, child, &attrs) && attrs.map_state == IsViewable)
-            break;
-        host->pump_x_events();
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        viewable = XGetWindowAttributes(daw, child, &attrs) && attrs.map_state == IsViewable;
+        if (!viewable) {
+            host->pump_x_events();
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
     }
+    REQUIRE(viewable);
     host->pump_x_events(); // drain the attach's own events
 
     std::vector<std::pair<uint32_t, uint32_t>> notified;
@@ -553,6 +560,63 @@ TEST_CASE("Windows plugin host reconciles a WM_SIZE host resize",
     } else {
         WARN("no GPU adapter/device (headless CI) — GPU swapchain check skipped");
     }
+}
+
+namespace {
+
+// Width and height from a PNG's IHDR chunk (big-endian, bytes 16..23).
+bool png_size(const std::vector<uint8_t>& png, uint32_t& w, uint32_t& h) {
+    if (png.size() < 24)
+        return false;
+    auto be32 = [&](size_t at) {
+        return (uint32_t(png[at]) << 24) | (uint32_t(png[at + 1]) << 16) |
+               (uint32_t(png[at + 2]) << 8) | uint32_t(png[at + 3]);
+    };
+    w = be32(16);
+    h = be32(20);
+    return true;
+}
+
+} // namespace
+
+// At a fractional scale a client width does not survive the trip through
+// logical units: 1001 px at 1.5x is 667 logical, and 667 x 1.5 is 1000. The
+// frame must be the client rect's own size, or it is stretched over the
+// window by a pixel and every frame is blurred.
+TEST_CASE("Windows plugin host frames a fractional-DPI client at its exact pixel size",
+          "[view][plugin-view-host][resize][hidpi][windows]") {
+    View root;
+    root.set_theme(Theme::dark());
+    register_platform_plugin_view_host();
+    PluginViewHost::Options opts;
+    opts.size = {64, 64};
+    opts.use_gpu = true; // may degrade to raster-only on a GPU-less runner
+    auto host = PluginViewHost::create(root, opts);
+    REQUIRE(host != nullptr);
+    host->set_scale_factor(1.5f);
+    REQUIRE(host->scale_factor() == 1.5f);
+    auto hwnd = static_cast<HWND>(host->native_handle());
+    REQUIRE(hwnd != nullptr);
+
+    int notified = 0;
+    host->set_resize_callback([&](uint32_t, uint32_t) { ++notified; });
+
+    SendMessageW(hwnd, WM_SIZE, SIZE_RESTORED, static_cast<LPARAM>(MAKELPARAM(1001, 751)));
+    CHECK(host->get_size().width == 667);
+    CHECK(host->get_size().height == 501);
+    CHECK(notified == 1);
+    uint32_t w = 0, h = 0;
+    REQUIRE(png_size(host->capture_back_buffer_png(), w, h));
+    CHECK(w == 1001);
+    CHECK(h == 751);
+
+    // 1000 px is also 667 logical. The frame still follows the client rect,
+    // and the processor, whose logical size did not change, hears nothing.
+    SendMessageW(hwnd, WM_SIZE, SIZE_RESTORED, static_cast<LPARAM>(MAKELPARAM(1000, 751)));
+    CHECK(notified == 1);
+    REQUIRE(png_size(host->capture_back_buffer_png(), w, h));
+    CHECK(w == 1000);
+    CHECK(h == 751);
 }
 
 TEST_CASE("Windows attached GPU editor coalesces scripted repaint requests",
