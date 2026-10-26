@@ -3152,6 +3152,16 @@ signing identity) becomes a distinct authorization boundary, first publish its
 public fingerprint on protected main and then pin the embedded SSH signature
 key to that reviewed value.
 
+## The merge train reports, read-only
+
+`.shipyard/config.toml` sets `[train] enabled = true` and leaves `mode`
+unset (`"off"`). `shipyard train status --repo Generous-Corp/pulp` prints
+each open PR's stage. `--record` appends a sample to the host's sample file,
+and `shipyard train metrics` summarises those samples: queue depth, time
+from approval to merge, and merges per hour. Nothing forms, arms, enqueues
+or merges from this setting. `SHIPYARD_TRAIN=off` or a `train.pause` file
+stops even the reads. These are the before-numbers for rollups.
+
 ## A merge_group batch stops at the first failing test
 
 The full suite is roughly 21,764 tests. A batch that has one failing test is

@@ -849,3 +849,10 @@ carry_excluded_paths = [
 # `on` re-enqueues the fix with `jump: true`; it stays off until Shipyard checks
 # a trusted approval on the head it enqueues and survives a failed re-enqueue.
 auto_jump = "dry-run"
+
+[train]
+# Shipyard's merge train, read-only (phase 1): `shipyard train status
+# [--record]` and `shipyard train metrics` report each open PR's stage and
+# the queue's throughput. With `mode` unset ("off") nothing forms, arms,
+# enqueues or merges; rollups need `mode = "rollup"` (PR #11159).
+enabled = true
