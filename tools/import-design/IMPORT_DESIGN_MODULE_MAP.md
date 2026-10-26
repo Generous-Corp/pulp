@@ -89,6 +89,7 @@ data structs over pulling the entire CLI state into every module.
 | `import_design_tokens` | `--export-tokens`, token format validation, token-file writes. | UI scaffold generation. |
 | `import_design_detect_cli` | `--detect-only` / `--report-new-format` CLI wrapper and output. | Detection algorithms already in `import_detect`. |
 | `import_design_cli_help` | Byte-stable usage/help output. | Argument parsing, validation, or dispatch. |
+| `import_document_refusals` | Refusing a parsed document before any emit: captured states nobody can render, and repeated stable anchors. | Diagnostics the import can continue past, or emit logic. |
 | `browser_import_session` | Browser-capture adoption, preparation policy, generated-output staging, and final publication. | Browser capture/validation mechanics or generated-output writes. |
 | `browser_import_cli` | Browser capture CLI diagnostics, settled canvas/reference propagation, portable-asset localization, DesignIR validation, and deferred evidence commit. | Browser discovery/subprocess implementation, parser dispatch, or generated output writes. |
 | `browser_html_import` | Runnable-HTML classification, capture orchestration, and lowering result. | CLI printing, generated output writes, browser subprocess implementation. |

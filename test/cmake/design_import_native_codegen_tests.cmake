@@ -119,8 +119,9 @@ catch_discover_tests(pulp-test-design-import-native-materializer
     PROPERTIES LABELS "parser-import")
 # The generated-source compiles read headers only from these include roots (the
 # test refuses a compile whose dependency file reaches anywhere else in the
-# checkout); the fader case reads one image, and the include-root control
-# copies one music header.
+# checkout); the fader case reads one image, the binding cases read the
+# fidelity scene and the v0 audio panel, and the include-root control copies
+# one music header.
 pulp_test_data(pulp-test-design-import-native-materializer NO_DEFINE
     SOURCES test_design_import_native_materializer.cpp
     PATHS
@@ -128,7 +129,9 @@ pulp_test_data(pulp-test-design-import-native-materializer NO_DEFINE
         core/events/include core/state/include core/audio/include core/midi/include
         core/signal/include core/host/include
         core/music/include/pulp/music/pitch.hpp
-        test/fixtures/import-fidelity/assets/fader_ref.png)
+        test/fixtures/import-fidelity/assets/fader_ref.png
+        test/fixtures/import-fidelity/scene.pulp.json
+        test/fixtures/v0-dev/audio-control-panel.tsx)
 
 # Emitter conformance gate: every fixture IR is built through the native
 # materializer, the ui.js bridge program, the baked C++ exporter and the SwiftUI

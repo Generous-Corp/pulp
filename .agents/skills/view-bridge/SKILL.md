@@ -461,6 +461,15 @@ without the fix is the use-after-free itself.
 
 ## Lifecycle protocol — adapter author side
 
+- **A hidden editor's GPU memory: `PluginViewHost::release_gpu_caches()`.**
+  One owner for every adapter: the mac, iOS, Windows and Linux GPU hosts
+  implement it with `TrimLevel::everything()` and keep their surfaces; CPU
+  hosts and a host with no surface make it a no-op. Callers: CLAP `gui_hide`,
+  AU v3 `viewDidDisappear`, and the mac GPU view's `-viewDidHide` (the only
+  hide signal an AU v2 editor gets). VST3 has no hide callback; `removed()`
+  destroys the host, which frees everything. `gpu_cache_usage()` reports the
+  host's cache bytes for tests.
+
 ```
 bridge.open(&err)                 // builds the view; does NOT fire on_view_opened
   |

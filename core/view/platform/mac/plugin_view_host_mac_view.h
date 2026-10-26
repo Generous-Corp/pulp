@@ -119,6 +119,10 @@
 @property(nonatomic, copy) void (^onWindowChange)(void);
 @property(nonatomic, copy) void (^onBackingChange)(void);
 @property(nonatomic, copy) void (^onResize)(uint32_t, uint32_t);
+// Fired from -viewDidHide, which AppKit also sends when a hidden ancestor
+// hides this view: an AU v2 editor, which has no view controller, learns
+// that the host hid it only this way.
+@property(nonatomic, copy) void (^onHide)(void);
 // Inverse-design-viewport transform applied to every host-space input point
 // before hit_test. Mirrors PulpPluginView + the standalone host. nil =
 // identity. Set by MacGpuPluginViewHost::set_design_viewport.

@@ -1379,7 +1379,9 @@
     "core/signal/include",
     "core/state/include",
     "core/view/include",
-    "test/fixtures/import-fidelity/assets/fader_ref.png"
+    "test/fixtures/import-fidelity/assets/fader_ref.png",
+    "test/fixtures/import-fidelity/scene.pulp.json",
+    "test/fixtures/v0-dev/audio-control-panel.tsx"
    ],
    "kind": "compiled",
    "runtime_targets": [],
@@ -1909,6 +1911,7 @@
    ],
    "inputs": [
     "test/fixtures/imports/fig/synthetic.fig",
+    "test/fixtures/v0-dev/audio-control-panel.tsx",
     "tools/import-design"
    ],
    "kind": "compiled",
@@ -2542,6 +2545,8 @@
   "pulp-osc-render-wav",
   "pulp-project-package-mutant-helper",
   "pulp-project-package-publish-helper",
+  "pulp-release-artifact-clean-fixture",
+  "pulp-release-artifact-forbidden-fixture",
   "pulp-reload-ship-fixture-dev",
   "pulp-reload-ship-fixture-ship",
   "pulp-render-provider-floor-wgpu-control",
@@ -2560,6 +2565,7 @@
   "pulp-test-au-bundle-entry",
   "pulp-test-au-param-visibility",
   "pulp-test-au-plugin-state",
+  "pulp-test-au-v2-cocoa-shipping",
   "pulp-test-au-v2-cocoa-ui",
   "pulp-test-au-v2-instrument-rt",
   "pulp-test-au-v2-param-display",
@@ -3111,6 +3117,7 @@
   "pulp-test-six-band-eq",
   "pulp-test-skewed-range",
   "pulp-test-skia-surface",
+  "pulp-test-skia-surface-readback-macos",
   "pulp-test-smf-interchange",
   "pulp-test-sos-cascade",
   "pulp-test-spectral-cross-synthesis",
@@ -7024,6 +7031,8 @@
    "inputs": [
     "test/fixtures",
     "test/fixtures/browser-capture-layout-rows",
+    "test/fixtures/import-differential",
+    "test/fixtures/import-differential/manifest.json",
     "test/test_importer_differential_lab.py",
     "tools/import-design/browser_capture/form_control_theme.mjs",
     "tools/import-design/browser_capture_controls.cpp",
@@ -7778,6 +7787,7 @@
     "tools/scripts",
     "tools/scripts/agent_capability_manifest.py",
     "tools/scripts/changed_surface_script_families.py",
+    "tools/scripts/gates.sh",
     "tools/scripts/gates_script_inputs.py",
     "tools/scripts/merge_tree_script_state.py",
     "tools/scripts/refresh_push_check.py",
