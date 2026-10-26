@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import stat
 import sys
 import tempfile
@@ -52,6 +53,28 @@ class StubNm:
             encoding="utf-8")
         self.path.chmod(self.path.stat().st_mode | stat.S_IXUSR)
         return str(self.path)
+
+
+def write_tool(path: Path, body: str) -> str:
+    """An executable Python script at `path`; returns its path."""
+    path.write_text(f"#!{sys.executable}\n{body}", encoding="utf-8")
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+    return str(path)
+
+
+# A demangler that strips one leading underscore whatever it is told (-n
+# included), then demangles only "_Z" names: what an older Darwin c++filt does
+# when its default strip is not turned off.
+ALWAYS_STRIPS = (
+    "import sys\n"
+    "known = {'_ZTIN7content8RegistryE': 'typeinfo for content::Registry',\n"
+    "         '_ZN7content8Registry4openEv': 'content::Registry::open()',\n"
+    "         '_ZTIN4pulp4rtti7ControlE': 'typeinfo for pulp::rtti::Control'}\n"
+    "for line in sys.stdin.read().splitlines():\n"
+    "    name = line[1:] if line.startswith('_') else line\n"
+    "    print(known.get(name, line))\n")
+# A demangler that answers one line per name and demangles nothing.
+PASSES_THROUGH = "import sys\nsys.stdout.write(sys.stdin.read() + '\\n')\n"
 
 
 STATE = """
@@ -126,6 +149,23 @@ class ArchiveSymbolClosureCheckTest(unittest.TestCase):
                 "--no-control", "--check", f"core={core}"]
         self.assertEqual(gate.main(argv), 0)
         self.assertEqual(gate.main([*argv, "--weak-rtti-contamination"]), 1)
+
+    def test_a_demangler_that_reads_nothing_is_inconclusive(self) -> None:
+        # Either tool answers one line per name, so the line count matches;
+        # only the control shows that no owner was read. Without it the owned
+        # set is empty and the weak copy below is reported clean (rc 0).
+        content = self.nm.archive("libcontent.a", CONTENT
+                                  + "    _ZN7content8Registry4openEv T 0 0\n")
+        core = self.nm.archive("libcore.a", "libcore.a[x.o]:\n_ZTIN7content8RegistryE V 0 0\n")
+        nm = self.nm.write()
+        argv = ["--nm", nm, "--forbidden", str(content), "--no-control",
+                "--check", f"core={core}", "--weak-rtti-contamination"]
+        for name, body in (("strips", ALWAYS_STRIPS), ("passthrough", PASSES_THROUGH)):
+            tool = write_tool(Path(self._tmp.name) / name, body)
+            with self.subTest(tool=name):
+                self.assertEqual(gate.main([*argv, "--cxxfilt", tool]), 2)
+        # Control: the demangler on PATH reads the owner and finds the copy.
+        self.assertEqual(gate.main(argv), 1)
 
     def test_a_missing_demangler_is_inconclusive(self) -> None:
         content = self.nm.archive("libcontent.a", CONTENT + "    _ZN7content8Registry4openEv T 0 0\n")
@@ -209,7 +249,8 @@ class RttiOwnershipTest(unittest.TestCase):
                 f"#!{sys.executable}\n"
                 "import sys\n"
                 "strip = '-n' not in sys.argv[1:]\n"
-                "known = {'_ZTIN7content8RegistryE': 'typeinfo for content::Registry'}\n"
+                "known = {'_ZTIN7content8RegistryE': 'typeinfo for content::Registry',\n"
+                "         '_ZTIN4pulp4rtti7ControlE': 'typeinfo for pulp::rtti::Control'}\n"
                 "for line in sys.stdin.read().splitlines():\n"
                 "    name = line[1:] if strip and line.startswith('_') else line\n"
                 "    print(known.get(name, line))\n",
@@ -219,6 +260,37 @@ class RttiOwnershipTest(unittest.TestCase):
                 {"_ZTIN7content8RegistryE", "__ZTIN7content8RegistryE"}, str(tool))
         # Both the ELF spelling and the Mach-O one (extra underscore) demangle.
         self.assertEqual(set(names.values()), {"typeinfo for content::Registry"})
+
+    def test_demangle_refuses_output_that_fails_the_control(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            for name, body in (("strips", ALWAYS_STRIPS), ("passthrough", PASSES_THROUGH)):
+                tool = write_tool(Path(tmp) / name, body)
+                with self.subTest(tool=name), self.assertRaisesRegex(
+                        rtti_ownership.DemangleError, "control"):
+                    rtti_ownership.demangle({"_ZTIN7content8RegistryE"}, tool)
+
+    def test_demangle_reads_through_a_stripping_wrapper_or_fails_closed(self) -> None:
+        # The real c++filt behind a wrapper that turns the underscore strip on,
+        # as GitHub-hosted macOS's Xcode 16 c++filt has it by default. The -n
+        # demangle() passes comes later, so it wins and the names read. A
+        # wrapper that forces the strip after it cannot be read past, and
+        # demangle() must say so instead of returning names nobody demangled.
+        real = shutil.which("c++filt") or shutil.which("llvm-cxxfilt")
+        if not real:
+            self.skipTest("no c++filt or llvm-cxxfilt on PATH")
+        names = {"__ZTIN7content8RegistryE", "__ZN7content8Registry4openEv"}
+        with tempfile.TemporaryDirectory() as tmp:
+            before = Path(tmp) / "strip-first"
+            before.write_text(f'#!/bin/sh\nexec "{real}" -_ "$@"\n', encoding="utf-8")
+            before.chmod(0o755)
+            read = rtti_ownership.demangle(names, str(before))
+            self.assertEqual(rtti_ownership.owned_classes({"__ZN7content8Registry4openEv"}, read),
+                             {"content::Registry"})
+            after = Path(tmp) / "strip-last"
+            after.write_text(f'#!/bin/sh\nexec "{real}" "$@" -_\n', encoding="utf-8")
+            after.chmod(0o755)
+            with self.assertRaisesRegex(rtti_ownership.DemangleError, "control"):
+                rtti_ownership.demangle(names, str(after))
 
     def test_member_owner_reads_the_enclosing_class(self) -> None:
         cases = {
