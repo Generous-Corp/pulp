@@ -11,6 +11,7 @@
 #include "detail/gpu_convolver_test_access.hpp"
 #include "detail/realtime_gpu_audio_path.hpp"
 #include "detail/worker_pipeline_hosting.hpp"
+#include "harness/fake_shared_io_provider.hpp"
 #include "harness/rt_allocation_probe.hpp"
 #include "support/shared_io_loss_provider.hpp"
 
@@ -19,10 +20,12 @@
 #endif
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <ctime>
 #include <functional>
 #include <initializer_list>
@@ -1235,6 +1238,134 @@ TEST_CASE("GpuConvolver shared path latches an invalid callback at its own block
     const auto status = validated(convolver->status_snapshot());
     CHECK(status.recovery_reason == GpuAudioRecoveryReason::InvalidCallback);
     CHECK(status.recovery_sequence == kRejected);
+}
+
+namespace {
+
+// Forwards each submission to a fake provider that copies the packed GPU
+// input slot to the output slot and completes on its next poll, keeping the
+// real parts of the latest input slot.
+class RecordingProgram final : public pulp::test::SharedIoPreparedProgram {
+  public:
+    RecordingProgram(pulp::test::FakeSharedIoProvider& provider,
+                     std::array<float, kHealthBlock>& submitted)
+        : provider_(provider), submitted_(submitted) {}
+    bool prepare(
+        pulp::test::SharedIoArenaProvider&,
+        std::span<const pulp::test::SharedIoArenaProvider::SlotBufferHandle>) noexcept override {
+        return true;
+    }
+    bool submit(
+        pulp::test::SharedIoArenaProvider&,
+        const pulp::test::SharedIoArenaProvider::SlotResources& resources,
+        pulp::test::SharedIoArenaProvider::SlotToken token,
+        std::shared_ptr<pulp::gpu_audio::detail::SharedIoTerminalInbox> inbox) noexcept override {
+        if (resources.input_size < kHealthBlock * 2 * sizeof(float))
+            return false;
+        for (std::uint32_t i = 0; i < kHealthBlock; ++i)
+            std::memcpy(&submitted_[i], resources.input + 2u * i * sizeof(float), sizeof(float));
+        return provider_.submit_program(resources, token, std::move(inbox));
+    }
+    bool release() noexcept override {
+        return true;
+    }
+
+  private:
+    pulp::test::FakeSharedIoProvider& provider_;
+    std::array<float, kHealthBlock>& submitted_;
+};
+
+bool install_recording_session(GpuConvolver& convolver,
+                               std::array<float, kHealthBlock>& submitted) {
+    auto owner = std::make_unique<pulp::test::FakeSharedIoProvider>();
+    owner->identity = pulp::test::FakeSharedIoProvider::authenticated_fake_identity();
+    owner->identity.provider = GpuAudioProvider::Dawn;
+    owner->transform = pulp::test::FakeSharedIoProvider::Transform::Affine;
+    owner->transform_at_submit = true;
+    owner->require_program = true;
+    owner->complete_on_poll = true;
+    owner->drain_completes = true;
+    auto program = std::make_unique<RecordingProgram>(*owner, submitted);
+    auto session = std::make_unique<pulp::gpu_audio::detail::SharedIoConvolutionSession>();
+    if (!session->prepare({std::move(owner), std::move(program)},
+                          {.pipeline = {.capacity = 8,
+                                        .channels = 1,
+                                        .block_size = kHealthBlock,
+                                        .fft_size = kHealthBlock,
+                                        .ir_length = 1,
+                                        .lead_blocks = GpuConvolver::kLatencyBlocks},
+                           .slots = 2}))
+        return false;
+    return GpuConvolverTestAccess::install_shared_io_session(convolver, std::move(session));
+}
+
+} // namespace
+
+TEST_CASE("GpuConvolver shared path replaces non-finite input with zero before GPU submission",
+          "[gpu_audio][convolver][shared_io]") {
+    std::array<float, kHealthBlock> submitted{};
+    auto convolver =
+        std::make_unique<GpuConvolver>(1, kHealthBlock, 48000, std::vector<float>{1.0f});
+    REQUIRE(convolver->prepare());
+    if (!install_recording_session(*convolver, submitted))
+        SKIP("shared-I/O provider state is not compiled into this build");
+    const auto path = pulp::gpu_audio::detail::realtime_gpu_node_path(convolver.get());
+    REQUIRE(path.active());
+
+    std::array<float, kHealthBlock> in{}, out{};
+    const float* in_ptrs[] = {in.data()};
+    float* out_ptrs[] = {out.data()};
+    BufferView<const float> input(in_ptrs, 1, kHealthBlock);
+    BufferView<float> output(out_ptrs, 1, kHealthBlock);
+    std::uint64_t sequence = 0;
+    std::size_t allocations = 0;
+    const auto block = [&] {
+        std::uint8_t status = 0;
+        {
+            pulp::test::RtAllocationProbe probe;
+            status = path.process(path.context, input, output, kHealthBlock, sequence, true, 0);
+            allocations += probe.allocation_count();
+        }
+        using D = pulp::gpu_audio::detail::SharedIoDeliveryDisposition;
+        const auto disposition =
+            status == pulp::gpu_audio::detail::kRealtimeGpuReady     ? D::GpuDelivered
+            : status == pulp::gpu_audio::detail::kRealtimeGpuPriming ? D::Priming
+                                                                     : D::SilenceDelivered;
+        path.delivered(path.context, sequence++, static_cast<std::uint8_t>(disposition), 0, 0);
+        (void)path.service(path.context, 0);
+        return status;
+    };
+
+    // Positive control: finite input reaches the GPU input slot unchanged.
+    in = {0.25f, -0.5f};
+    (void)block();
+    CHECK(submitted == std::array<float, kHealthBlock>{0.25f, -0.5f});
+    CHECK(convolver->sanitized_input_samples() == 0);
+
+    in = {std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity()};
+    (void)block();
+    CHECK(submitted == std::array<float, kHealthBlock>{0.0f, 0.0f});
+    CHECK(convolver->sanitized_input_samples() == 2);
+
+    // The GPU output for that block and every later one stays finite.
+    int ready = 0;
+    for (int i = 0; i < 6; ++i) {
+        in = {0.125f, 0.125f};
+        if (block() == pulp::gpu_audio::detail::kRealtimeGpuReady) {
+            ++ready;
+            for (float sample : out)
+                CHECK(std::isfinite(sample));
+        }
+    }
+    CHECK(ready > 0);
+    CHECK(allocations == 0);
+    CHECK(convolver->sanitized_input_samples() == 2);
+    // The policy counts rather than latching a cause: the GPU path stays live.
+    pulp::gpu_audio::detail::RealtimeGpuHealth health;
+    REQUIRE(path.health(path.context, health));
+    CHECK(health.recovery_reason == GpuAudioRecoveryReason::None);
+    CHECK_FALSE(health.fenced);
+    CHECK(convolver->recovery_reason() == GpuAudioRecoveryReason::None);
 }
 
 TEST_CASE("GpuConvolver shared path reports no GPU kernel after the offline fence",

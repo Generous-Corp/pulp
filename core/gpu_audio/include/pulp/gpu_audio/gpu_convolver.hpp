@@ -259,6 +259,12 @@ class GpuConvolver : public GpuAudioNode {
     /// True before preparation, or once GPU delivery was fenced or its
     /// provider lost. A diagnostic snapshot, not a promise about the next block.
     bool fenced() const noexcept;
+    /// Non-finite input samples (NaN, +/-Inf) the shared realtime path replaced
+    /// with zero before they reached the GPU input slot, counted since the
+    /// shared provider was installed. One such sample would otherwise ring
+    /// through the whole IR tail. Always 0 on the staged and CPU paths, whose
+    /// fallback resets itself on non-finite input.
+    std::uint64_t sanitized_input_samples() const noexcept;
 
   protected:
     /// Allocate + load the CPU fallback machinery (both the RT miss fallback and

@@ -352,6 +352,8 @@ it does not show that a ready provider met a realtime deadline.
   It reports `Degraded` with `ProviderFailure`, not `Ready`.
 - **Non-finite input.** NaN and infinite samples are replaced with zero before
   either the GPU or the shadow sees them. `sanitized_input_samples()` counts them.
+  `GpuWaveNetRealtimeNode` applies the same policy before GPU submission and
+  counts in its own `sanitized_input_samples()`; neither latches a cause.
 - **Recovery.** On the GPU path, any latched cause, including a single invalid
   callback, fences GPU delivery until the host prepares the node again.
 - **Model construction.** Build a model on the host thread with
@@ -437,6 +439,10 @@ a transition escape hatch.
 authenticated Dawn provider and reports `Ready` with provider `Dawn` while it
 delivers. After the transport's offline fence, the session stays CPU-only until
 the next preparation; it does not re-prime onto the GPU.
+NaN and infinite input samples are replaced with zero before the GPU input
+slot, so one bad sample neither rings through the IR tail nor fences the
+session on readback. `sanitized_input_samples()` counts them and latches no
+cause; it reads 0 on the staged path.
 
 **`GpuMultiConvolver`.** No CPU fallback: a miss or a lost device is silent,
 and the status says so with `fallback_policy = Silence`. `device_lost()`

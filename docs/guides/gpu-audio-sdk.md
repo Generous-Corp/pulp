@@ -453,7 +453,11 @@ reports `Degraded`, with `ProviderFailure` as the recovery reason.
 Non-finite input samples (NaN, +Inf, -Inf) are replaced with zero before
 either the GPU submission or the CPU shadow sees them, so the two stay
 comparable and no causal state is poisoned. `sanitized_input_samples()`
-counts the replacements.
+counts the replacements. `GpuWaveNetRealtimeNode` and the `GpuConvolver`
+shared realtime path apply the same policy before the GPU input slot, so one
+NaN cannot ring through a receptive field or an IR tail, and each counts the
+replacements in its own `sanitized_input_samples()`. The count latches no
+recovery cause.
 
 Any latched cause, including one invalid callback, fences GPU delivery until
 the host prepares the node again. The shadow carries the stream until then.

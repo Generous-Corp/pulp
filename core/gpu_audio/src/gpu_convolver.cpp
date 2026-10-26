@@ -7,6 +7,7 @@
 
 #include "detail/gpu_convolver_test_access.hpp"
 #include "detail/gpu_convolver_trial_config.hpp"
+#include "detail/neural_input_sanitizer.hpp"
 #include "detail/realtime_gpu_audio_path.hpp"
 #include "detail/realtime_gpu_health_mirror.hpp"
 #include "detail/shared_io_convolution_session.hpp"
@@ -142,6 +143,8 @@ struct GpuConvolver::SharedIoState {
     detail::RealtimeGpuHealthMirror health;
     // Callback-written per delivered block, read by status_snapshot().
     detail::RecentGpuDelivery recent;
+    // Callback-written; see sanitized_input_samples().
+    std::atomic<std::uint64_t> sanitized_samples{0};
 #endif
 };
 
@@ -700,11 +703,16 @@ std::uint8_t GpuConvolver::process_realtime_shared_io(void* self,
     // never admit fresh GPU work. The transport owns their silent disposition.
     if (!input_valid)
         state.session->request_recovery(detail::SharedIoRecoveryReason::InvalidCallback, sequence);
+    // The neural node's policy: non-finite samples enter the GPU as 0, so one
+    // NaN cannot ring through the IR tail or fence the session on readback.
+    std::uint64_t replaced = 0;
     for (uint32_t ch = 0; ch < convolver->channels_; ++ch) {
         const float* src = input.channel_ptr(ch);
         auto* dst = state.callback_input.data() + static_cast<std::size_t>(ch) * convolver->block_;
-        std::copy_n(src, n, dst);
+        replaced += detail::sanitize_nonfinite(src, dst, n);
     }
+    if (replaced != 0)
+        state.sanitized_samples.fetch_add(replaced, std::memory_order_relaxed);
 
     const auto callback = state.session->begin_callback(
         std::span<const float>(state.callback_input.data(), state.callback_input.size()), sequence,
@@ -1024,6 +1032,14 @@ bool detail::GpuConvolverTestAccess::install_shared_io_session(
 
 GpuAudioRecoveryReason GpuConvolver::recovery_reason() const noexcept {
     return status_snapshot().recovery_reason;
+}
+
+std::uint64_t GpuConvolver::sanitized_input_samples() const noexcept {
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    if (shared_io_)
+        return shared_io_->sanitized_samples.load(std::memory_order_relaxed);
+#endif
+    return 0;
 }
 
 bool GpuConvolver::fenced() const noexcept {
