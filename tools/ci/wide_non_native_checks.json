@@ -45,6 +45,10 @@
     {
       "name": "create-templates-verify",
       "argv": ["{repo}/tools/scripts/test_verify_create_templates.py"]
+    },
+    {
+      "name": "shipping-macro-guard",
+      "argv": ["{repo}/tools/scripts/shipping_macro_guard.py", "--root", "{repo}"]
     }
   ]
 }

@@ -12329,6 +12329,27 @@
    ],
    "kind": "shell"
   },
+  "shipping-macro-guard": {
+   "entry": "tools/scripts/shipping_macro_guard.py",
+   "inputs": [
+    "core/format/src/au_v2_cocoa_view.mm",
+    "tools/scripts/shipping_macro_guard.py",
+    "tools/scripts/test_shipping_macro_guard.py"
+   ],
+   "kind": "python"
+  },
+  "shipping-macro-guard-negative-contract": {
+   "entry": "tools/scripts/test_shipping_macro_guard.py",
+   "inputs": [
+    ".github/workflows/build.yml",
+    "core/format/src/au_v2_cocoa_view.mm",
+    "core/format/src/au_v2_common.cpp",
+    "test/cmake/format_reload_tests.cmake",
+    "tools/cmake/PulpPluginFormats.cmake",
+    "tools/scripts/test_shipping_macro_guard.py"
+   ],
+   "kind": "python"
+  },
   "shipyard-merge-gate-evidence-selftest": {
    "entry": "tools/scripts/test_shipyard_merge_gate_evidence.py",
    "inputs": [
