@@ -90,6 +90,29 @@ class HeaderSelfContainedTests(unittest.TestCase):
         )
         self.assertNotIn("tools/scripts", flags)
 
+    def test_load_module_flags_prefers_cpp_over_c_for_a_cpp_header(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            cc = Path(td) / "compile_commands.json"
+            cc.write_text(
+                json.dumps([
+                    {
+                        "file": "core/signal/src/fft_mufft.c",
+                        "directory": td,
+                        "arguments": ["cc", "-std=gnu99", "-c", "fft_mufft.c",
+                                       "-o", "CMakeFiles/pulp-signal.dir/fft_mufft.c.o"],
+                    },
+                    {
+                        "file": "core/signal/src/fft.cpp",
+                        "directory": td,
+                        "arguments": ["c++", "-std=c++20", "-c", "fft.cpp",
+                                       "-o", "CMakeFiles/pulp-signal.dir/fft.cpp.o"],
+                    },
+                ]),
+                encoding="utf-8",
+            )
+            flags = checker.load_module_flags(cc)
+        self.assertEqual(flags["core/signal"][0], ["-std=c++20"])
+
     def test_module_target_score_prefers_canonical_owner(self) -> None:
         self.assertEqual(
             checker.module_target_score(
