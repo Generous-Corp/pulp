@@ -264,7 +264,10 @@ ParagraphUse make_paragraph(const std::string& text, const std::string& family, 
     key.fake_missing_font_styles = true;
     if (slant == 0) {
         for (const auto& entry : split_css_font_family_list(family)) {
-            if (const auto synthesize = declared_face_synthesizes_bold(entry, weight)) {
+            // Ranges are declared under the bare family; a stack entry is
+            // usually quoted ("'Jost', serif", or a native alias).
+            const auto name = parse_css_font_family(entry).name;
+            if (const auto synthesize = declared_face_synthesizes_bold(name, weight)) {
                 key.fake_missing_font_styles = *synthesize;
                 break;
             }

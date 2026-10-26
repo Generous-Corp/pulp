@@ -2336,6 +2336,10 @@ TEST_CASE("a face declared across 400 700 is not emboldened at 700, a 400-only o
     CHECK(ink("SynthBoldPaintRange", 700) == Catch::Approx(regular).epsilon(0.02));
     // Declared 400 only: Chromium synthesizes bold, so the ink grows.
     CHECK(ink("SynthBoldPaintNarrow", 700) > regular * 1.08);
+    // Imported stacks quote the family and carry a fallback; the declared
+    // range still applies to the quoted entry.
+    CHECK(ink("'SynthBoldPaintRange', serif", 700) == Catch::Approx(regular).epsilon(0.02));
+    CHECK(ink("\"SynthBoldPaintNarrow\", serif", 700) > regular * 1.08);
 }
 
 TEST_CASE("a declared @font-face family keeps its own face at a weight its file is far from",

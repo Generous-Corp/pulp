@@ -5302,9 +5302,8 @@ TEST_CASE(
     }
 }
 
-// Captured @font-face faces reach the text renderer with the weight range each
-// rule declared: in the native lane, the generated JS, and the bridge's
-// registerFont entry point that JS calls.
+// Generated JS and the bridge's registerFont carry each captured @font-face
+// rule's declared weight range to the text renderer.
 namespace {
 
 DesignIR ir_with_face(std::string family, std::string path, int weight, int weight_max) {
@@ -5323,27 +5322,6 @@ DesignIR ir_with_face(std::string family, std::string path, int weight, int weig
 }
 
 } // namespace
-
-TEST_CASE("the native lane registers captured @font-face faces with their declared range",
-          "[view][import][native-materializer][fonts][synthetic-bold]") {
-    const std::string jost = std::string(PULP_REPO_ROOT) + "/external/fonts/Jost-Regular.ttf";
-    REQUIRE_FALSE(pulp::canvas::is_font_registered("NativeFaceRange"));
-    auto root = build_native_view_tree(ir_with_face("NativeFaceRange", jost, 400, 700), {}, {});
-    REQUIRE(root != nullptr);
-    CHECK(pulp::canvas::is_font_registered("NativeFaceRange"));
-    // Declared 400..700, so Chromium draws 700 from the Regular file unemboldened.
-    CHECK(pulp::canvas::declared_face_synthesizes_bold("NativeFaceRange", 700) == false);
-
-    // A single declared weight keeps Chromium's synthesis.
-    build_native_view_tree(ir_with_face("NativeFaceSingle", jost, 400, 0), {}, {});
-    CHECK(pulp::canvas::declared_face_synthesizes_bold("NativeFaceSingle", 700) == true);
-
-    // A face whose file did not resolve registers nothing, and declares nothing.
-    build_native_view_tree(ir_with_face("NativeFaceMissing", "/nonexistent/face.ttf", 400, 700), {},
-                           {});
-    CHECK_FALSE(pulp::canvas::is_font_registered("NativeFaceMissing"));
-    CHECK_FALSE(pulp::canvas::declared_face_synthesizes_bold("NativeFaceMissing", 700).has_value());
-}
 
 TEST_CASE("generated JS registers a captured face with its declared weight range",
           "[view][import][codegen][fonts][synthetic-bold]") {

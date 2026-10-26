@@ -454,3 +454,31 @@ TEST_CASE("every captured label of the variable-font fixture resolves its captur
     CHECK(semibold > regular * 1.1);
 #endif
 }
+
+TEST_CASE("a shipped face's declared weight range is carried by its alias",
+          "[design-import][font-assets][native-fonts][synthetic-bold]") {
+    // Chromium synthesizes bold against the rule's declared range, so the
+    // alias the stack names must carry that range, not the bare family.
+    require_shipped_faces_resolve();
+    const auto alias_of = [](const std::string& family, int weight, int weight_max) {
+        auto shipped = face(family, "font-" + family);
+        shipped.weight = weight;
+        shipped.weight_max = weight_max;
+        auto ir = shipped_font_design(family, 700, {shipped}, kStaticFont);
+        auto root = build_native_view_tree(ir, ir.asset_manifest);
+        REQUIRE(root);
+        auto* label = only_label(*root);
+        REQUIRE(label != nullptr);
+        const auto stack = pulp::canvas::split_css_font_family_list(label->effective_font_family());
+        REQUIRE_FALSE(stack.empty());
+        const auto alias = pulp::canvas::parse_css_font_family(stack.front()).name;
+        REQUIRE(alias.find(family + " [") == 0);
+        return alias;
+    };
+    const auto range = alias_of("Pulp Declared Range", 400, 700);
+    CHECK(pulp::canvas::declared_face_synthesizes_bold(range, 700) == false);
+    const auto single = alias_of("Pulp Declared Single", 400, 0);
+    CHECK(pulp::canvas::declared_face_synthesizes_bold(single, 700) == true);
+    // The bare family is not what text names, so it declares nothing.
+    CHECK_FALSE(pulp::canvas::has_declared_font_face_weights("Pulp Declared Range"));
+}
