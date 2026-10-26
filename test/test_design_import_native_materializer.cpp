@@ -5341,6 +5341,8 @@ TEST_CASE("registerFont declares a range only for a registered face and valid we
     root.set_bounds({0, 0, 100, 40});
     pulp::state::StateStore store;
     WidgetBridge bridge(engine, root, store);
+    // An absolute path is read only from an asset root or the script directory.
+    bridge.set_asset_roots({std::filesystem::path(PULP_REPO_ROOT) / "external/fonts"});
     const auto call = [&](const std::string& family, const std::string& path,
                           const std::string& weights) {
         return engine.evaluate("registerFont('" + family + "', '" + path + "'" + weights + ")")
