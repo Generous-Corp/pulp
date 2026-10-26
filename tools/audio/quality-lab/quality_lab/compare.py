@@ -31,7 +31,7 @@ from typing import Any, Callable
 import numpy as np
 
 from . import alignment, audio_io, schema
-from .align import detect_onsets, map_onsets
+from .align import detect_onsets
 from .dsp import (
     dc_offset_metrics,
     harmonic_to_noise_ratio_db,
@@ -41,7 +41,8 @@ from .dsp import (
     ltas_log_spectral_distance_db,
     mean_spectral_flux,
     null_residual_db,
-    onset_attack_deficit,
+    estimate_global_lag,
+    onset_attack_measure,
     pitch_compensated_centroid_shift,
     pitch_ratio_from_semitones,
     relative_centroid_shift,
@@ -101,13 +102,20 @@ _STEREO_WIDTH_THRESHOLD = 0.1
 # material is not percussive/onset-bearing enough and the axis is not_applicable (a caller-declared
 # material contract like roughness/graininess, surfaced honestly rather than guessed).
 _ONSET_MIN_MATCHED = 3
-# A reference onset whose mapped candidate onset is farther than this (normalized time) is a
-# dropped/moved attack, not the same event — scored as a FULL deficit (1.0), never silently skipped.
-# A dropped attack is the maximal transient loss the axis exists to catch.
-_ONSET_MATCH_TOL_NORM = 0.05
+# Onset pairing is shift-invariant. Each reference attack is measured in the candidate at its
+# predicted position: normalized-time scaled (so a declared stretch still maps), plus the constant
+# lag that cross-correlation finds between the two whole signals, then locked per onset by
+# dsp.local_align. Candidate onset DETECTIONS do not place the measurement: on dense material the
+# detector's picks move by tens of milliseconds under a few samples of delay, and pairing by them
+# read a pure 37-sample delay as smeared attacks. They only mark an attack as undetected (no
+# candidate onset within _ONSET_DETECTED_S of the prediction) for the dropped-attack accounting.
+_ONSET_DETECTED_S = 0.012
 # A single onset softened at least this much fires the verdict even when the mean is diluted across
-# many faithful onsets (the sparse-catastrophe gate) — while a lone noisy onset below it does not.
+# many faithful onsets (the sparse-catastrophe gate) — but only when its attack ENERGY was lost as
+# well (amplitude ratio below _WORST_AMP_RATIO). The rise-time estimate alone can jump on a small
+# perturbation of an attack whose energy is intact, and that must not decide the verdict.
 _WORST_HARD_DEFICIT = 0.5
+_WORST_AMP_RATIO = 0.5
 
 # Above this level-matched, reference-relative residual, an algorithm-agnostic sample-domain
 # difference is present (the two renders are not effectively identical). Heuristic floor: -60 dB
@@ -321,9 +329,10 @@ def _stereo_width_summary(verdict: str, env: dict[str, Any]) -> str:
 
 def _transient_integrity_kernel(matched: np.ndarray, reference: np.ndarray, sr: int) -> dict[str, Any]:
     """Per-onset attack-sharpness ratio of candidate vs reference. Detects onsets on both signals,
-    maps them (align.map_onsets), locks each pair with sub-hop cross-correlation (dsp.local_align),
-    and compares the high-band attack rise (dsp.attack_rise — the SAME primitive the
-    transient_sharpness detector uses). Aggregates to the mean cand/ref sharpness ratio; delta =
+    estimates the candidate's constant lag from them, measures each reference attack at its
+    lag-predicted candidate position, locks each pair with sub-hop cross-correlation
+    (dsp.local_align), and compares the high-band attack rise (dsp.attack_rise — the SAME primitive
+    the transient_sharpness detector uses). Aggregates to the mean cand/ref sharpness ratio; delta =
     ratio − 1 (signed: < 0 = attacks softened/smeared). not_applicable on too few matched onsets."""
     ref_onsets = detect_onsets(reference, sr)
     if len(ref_onsets) < _ONSET_MIN_MATCHED:
@@ -332,33 +341,45 @@ def _transient_integrity_kernel(matched: np.ndarray, reference: np.ndarray, sr: 
                            "— transient-integrity needs percussive/onset-bearing material")}
     cand_onsets = detect_onsets(matched, sr)
     ref_dur, cand_dur = reference.size / sr, matched.size / sr
-    mapped = dict(map_onsets(ref_onsets, cand_onsets, ref_dur, cand_dur))   # {ref_t: cand_t}
-    # Score EVERY reference onset. A per-onset deficit is clip(1 − s_cand/s_ref, 0, 1): 0 = faithful
-    # (or sharper), 1 = fully softened. Crucially, a reference attack with NO candidate onset nearby
-    # (unmatched, or the mapped one is a different event > tol away) is DROPPED/moved → a full
-    # deficit, never silently skipped — a dropped drum hit is the maximal transient loss the axis
-    # exists to catch. Only an unmeasurable window (boundary / silent reference attack) is skipped.
+    scale = cand_dur / ref_dur if ref_dur > 0 else 1.0
+    cand_arr = np.asarray(cand_onsets, dtype=np.float64)
+    lag_s = estimate_global_lag(reference, matched, sr).lag_samples / sr
+
+    def detected_near(t: float) -> bool:
+        return cand_arr.size > 0 and float(np.min(np.abs(cand_arr - t))) <= _ONSET_DETECTED_S
+
+    # Score EVERY reference onset at its lag-predicted position. A per-onset deficit is
+    # clip(1 − s_cand/s_ref, 0, 1): 0 = faithful (or sharper), 1 = fully softened. A reference attack
+    # with no candidate onset near the prediction is still MEASURED there, so a dropped drum hit
+    # reads as a full deficit with its energy gone, while a detection the candidate's onset detector
+    # merely missed reads as the faithful attack it is. Only an unmeasurable window (boundary /
+    # silent reference attack) is skipped.
     deficits: list[float] = []
+    catastrophic: list[float] = []
     lost = scored = skipped = 0
     for ref_t in ref_onsets:
-        cand_t = mapped.get(ref_t)
-        if cand_t is None or abs(cand_t / cand_dur - ref_t / ref_dur) > _ONSET_MATCH_TOL_NORM:
-            deficits.append(1.0)
-            lost += 1
-            continue
-        d = onset_attack_deficit(reference, matched, sr, ref_t, cand_t)
-        if d is None:
+        predicted = ref_t * scale + lag_s
+        undetected = not detected_near(predicted)
+        measured = onset_attack_measure(reference, matched, sr, ref_t, predicted)
+        if measured is None:
             skipped += 1
             continue
+        d, amp_ratio = measured
         deficits.append(d)
+        if d >= _WORST_HARD_DEFICIT and amp_ratio < _WORST_AMP_RATIO:
+            catastrophic.append(d)
+            if undetected:
+                lost += 1
+                continue
         scored += 1
     if len(deficits) < _ONSET_MIN_MATCHED:
         return {"applicable": False,
                 "reason": f"too few judgeable onsets ({len(deficits)} < {_ONSET_MIN_MATCHED})"}
     mean_deficit, worst_deficit = float(np.mean(deficits)), float(np.max(deficits))
-    # Two-part severity: a single catastrophic loss fires via `worst` even when diluted across many
-    # faithful onsets; a broad gentle smear fires via `mean`; a lone noisy onset does not false-fire.
-    delta = worst_deficit if worst_deficit >= _WORST_HARD_DEFICIT else mean_deficit
+    # Two-part severity: a single catastrophic loss (softened AND its energy gone) fires via the
+    # worst even when diluted across many faithful onsets; a broad gentle smear fires via `mean`; a
+    # lone onset whose rise-time estimate jumped while its energy survived does not false-fire.
+    delta = max(catastrophic) if catastrophic else mean_deficit
     direction = "softer/smeared attacks" if delta > 1e-4 else "faithful attacks"
     return {"applicable": True, "delta": delta, "unit": "attack_smear_deficit",
             "tolerance_class": "transient_integrity.v1",
