@@ -491,6 +491,17 @@ failure on a merge group names a commit that is not in the ejected PR, read the
 `diff base:` line in the job log before touching the PR. Any new diff-scoped
 gate added to a merge_group workflow should reuse the same resolver.
 
+## A `shipyard-train/rollup-*` PR is approved through its members
+
+A rollup PR, configured in `.shipyard/config.toml` `[train]` and off until
+the live test passes, carries no verdict of its own. The guard lands it
+only when every merge on it is a member's exact approved head and nothing
+else changed (docs/guides/local-ci.md, "Rollups"). Review and approve the
+members; a HOLD on the rollup head stops it. Never push a commit to a rollup
+branch by hand, because the guard then refuses it. Members that change
+workflows, `tools/ci/**`, the queue scripts, the Shipyard pin or signing
+never join one.
+
 ## A HOLD on a queued head fails the merge group
 
 On 2026-10-12/13 six pulp pull requests merged minutes after a `verdict: HOLD`
