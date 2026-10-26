@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261023-attack-surface-phase1-20261022-watch",
+  "created_at": "2026-10-23T05:20:20Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging",
+    "render-assets-and-backends",
+    "visual-proof-harness"
+  ],
+  "rationale": "Attack-surface Phase 1a: the JS shell exec/execAsync bridge is compiled out of pulp-view-script unless PULP_DEV_BRIDGE_EXEC is on, release and SDK profiles pass it OFF, and sdk-provenance.json records bridge_exec. No design-import, Chromium, rendering or packaging authority moves; the render-assets touch is the widget bridge registrar table only.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-cli-local-sdk-profile",
+    "ctest --test-dir build -R pulp-test-widget-bridge-capabilities",
+    "python3 tools/scripts/test_release_artifact_contents.py",
+    "python3 tools/scripts/test_sdk_development_provenance.py",
+    "python3 tools/scripts/test_sdk_provenance.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

@@ -11,7 +11,11 @@ namespace pulp::cli::local_sdk {
 
 namespace fs = std::filesystem;
 
-inline constexpr int kForgeProfileRevision = 2;
+// A profile revision moves whenever the archive contract or the provenance
+// text changes (most recently: the shell exec/execAsync JS bridge is compiled
+// out and recorded as `features.bridge_exec`), so a prefix built under the old
+// contract keeps its own fingerprint instead of being mistaken for the new one.
+inline constexpr int kForgeProfileRevision = 3;
 inline constexpr const char* kForgeProfileName = "forge-dev";
 
 // The tracing profile: the forge-dev feature set plus Perfetto compiled in.
@@ -21,7 +25,7 @@ inline constexpr const char* kForgeProfileName = "forge-dev";
 // shipped — and because the two must not collide at one prefix. A prefix whose
 // name promises tracing while its libraries contain none is the exact failure
 // this profile exists to make impossible.
-inline constexpr int kTraceProfileRevision = 1;
+inline constexpr int kTraceProfileRevision = 2;
 inline constexpr const char* kTraceProfileName = "trace";
 inline constexpr const char* kProvenanceSchema = "pulp.sdk-provenance.v1";
 

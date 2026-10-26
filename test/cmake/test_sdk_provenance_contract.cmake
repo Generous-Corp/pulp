@@ -57,6 +57,88 @@ if(PULP_SDK_DEVELOPMENT OR NOT PULP_SDK_DISTRIBUTION_ELIGIBLE OR
     message(FATAL_ERROR "official release SDK contract was not exported")
 endif()
 
+# A release marker that records the shell exec bridge as absent exports FALSE…
+file(WRITE "${_sdk}/sdk-provenance.json"
+    "{\"schema\":\"pulp.sdk-provenance.v1\",\"kind\":\"release\","
+    "\"profile\":\"official-release\",\"distribution_eligible\":true,"
+    "\"sdk_version\":\"9.8.7\",\"source_git_ref\":\"v9.8.7\","
+    "\"source_git_sha\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\","
+    "\"source_git_dirty\":false,\"platform\":\"darwin-arm64\",\"build_type\":\"Release\","
+    "\"features\":{\"audio_probes\":false,\"inspector\":true,\"bridge_exec\":false}${_integrity}}")
+include("${_module}")
+if(NOT PULP_SDK_DISTRIBUTION_ELIGIBLE OR
+   NOT DEFINED PULP_SDK_BRIDGE_EXEC_ENABLED OR PULP_SDK_BRIDGE_EXEC_ENABLED OR
+   PULP_SDK_BRIDGE_EXEC_ENABLED STREQUAL "")
+    message(FATAL_ERROR "release SDK bridge_exec=false was not exported as FALSE")
+endif()
+
+# …and one that claims the bridge is present is refused outright.
+file(WRITE "${_sdk}/sdk-provenance.json"
+    "{\"schema\":\"pulp.sdk-provenance.v1\",\"kind\":\"release\","
+    "\"profile\":\"official-release\",\"distribution_eligible\":true,"
+    "\"sdk_version\":\"9.8.7\",\"source_git_ref\":\"v9.8.7\","
+    "\"source_git_sha\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\","
+    "\"source_git_dirty\":false,\"platform\":\"darwin-arm64\",\"build_type\":\"Release\","
+    "\"features\":{\"audio_probes\":false,\"inspector\":true,\"bridge_exec\":true}${_integrity}}")
+execute_process(
+    COMMAND "${CMAKE_COMMAND}"
+        "-DPULP_SDK_DIR=${_sdk}"
+        -P "${_module}"
+    RESULT_VARIABLE _bridge_exec_result
+    OUTPUT_VARIABLE _bridge_exec_stdout
+    ERROR_VARIABLE _bridge_exec_stderr)
+if(_bridge_exec_result EQUAL 0)
+    message(FATAL_ERROR "release SDK claiming the shell exec bridge did not fail closed")
+endif()
+if(NOT "${_bridge_exec_stdout}\n${_bridge_exec_stderr}"
+       MATCHES "unsafe release contract.*bridge_exec")
+    message(FATAL_ERROR
+        "shell-exec release failed without the expected diagnostic:\n"
+        "${_bridge_exec_stdout}\n${_bridge_exec_stderr}")
+endif()
+
+# A source-install marker exports its top-level bridge_exec verbatim.
+file(WRITE "${_sdk}/sdk-provenance.json"
+    "{\"schema\":\"pulp.sdk-provenance.v1\",\"kind\":\"source-install\","
+    "\"distribution_eligible\":false,\"source_git_sha\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\","
+    "\"source_git_dirty\":false,\"bridge_exec\":true}")
+include("${_module}")
+if(NOT PULP_SDK_DEVELOPMENT OR NOT PULP_SDK_BRIDGE_EXEC_ENABLED)
+    message(FATAL_ERROR "source-install bridge_exec=true was not exported as TRUE")
+endif()
+
+# A dev-experiment document records bridge_exec at top level, so a development
+# marker exports that key as well as features.bridge_exec.
+unset(PULP_SDK_BRIDGE_EXEC_ENABLED)
+file(WRITE "${_sdk}/sdk-provenance.json"
+    "{\"schema\":\"pulp.sdk-provenance.v1\",\"kind\":\"development\","
+    "\"distribution_eligible\":false,\"source_git_sha\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\","
+    "\"bridge_exec\":true}")
+include("${_module}")
+if(NOT PULP_SDK_DEVELOPMENT OR NOT DEFINED PULP_SDK_BRIDGE_EXEC_ENABLED OR
+   NOT PULP_SDK_BRIDGE_EXEC_ENABLED)
+    message(FATAL_ERROR "development top-level bridge_exec=true was not exported as TRUE")
+endif()
+unset(PULP_SDK_BRIDGE_EXEC_ENABLED)
+file(WRITE "${_sdk}/sdk-provenance.json"
+    "{\"schema\":\"pulp.sdk-provenance.v1\",\"kind\":\"development\","
+    "\"distribution_eligible\":false,\"source_git_sha\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\","
+    "\"features\":{\"bridge_exec\":false}}")
+include("${_module}")
+if(NOT PULP_SDK_DEVELOPMENT OR NOT DEFINED PULP_SDK_BRIDGE_EXEC_ENABLED OR
+   PULP_SDK_BRIDGE_EXEC_ENABLED)
+    message(FATAL_ERROR "development features.bridge_exec=false was not exported as FALSE")
+endif()
+
+# Restore the integrity-bound release marker for the coherence check below.
+file(WRITE "${_sdk}/sdk-provenance.json"
+    "{\"schema\":\"pulp.sdk-provenance.v1\",\"kind\":\"release\","
+    "\"profile\":\"official-release\",\"distribution_eligible\":true,"
+    "\"sdk_version\":\"9.8.7\",\"source_git_ref\":\"v9.8.7\","
+    "\"source_git_sha\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\","
+    "\"source_git_dirty\":false,\"platform\":\"darwin-arm64\",\"build_type\":\"Release\","
+    "\"features\":{\"audio_probes\":false,\"inspector\":true}${_integrity}}")
+
 file(WRITE "${_sdk}/include/pulp/view/widget_bridge.hpp" "stale header fixture\n")
 execute_process(
     COMMAND "${CMAKE_COMMAND}"

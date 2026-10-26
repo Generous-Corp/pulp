@@ -1879,6 +1879,44 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
                 root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
             )
 
+    def test_negative_control_provenance_claiming_bridge_exec_fires(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            make_platform(root, "linux-x64")
+            sdk_path = root / rac.sdk_asset_name("linux-x64")
+            with rac.Archive(sdk_path) as archive:
+                members = set(archive.members)
+            original_payload = member_payload
+
+            def bridge_exec_payload(name: str, platform: str = "linux-x64") -> bytes:
+                if name == "pulp-sdk/sdk-provenance.json":
+                    marker = json.loads(original_payload(name, platform))
+                    marker["features"]["bridge_exec"] = True
+                    return json.dumps(marker).encode()
+                return original_payload(name, platform)
+
+            # Control: the same marker with the key present and false is accepted,
+            # so the rejection below is the value and not the key's presence.
+            def bridge_exec_off_payload(name: str, platform: str = "linux-x64") -> bytes:
+                if name == "pulp-sdk/sdk-provenance.json":
+                    marker = json.loads(original_payload(name, platform))
+                    marker["features"]["bridge_exec"] = False
+                    return json.dumps(marker).encode()
+                return original_payload(name, platform)
+
+            with mock.patch(__name__ + ".member_payload", side_effect=bridge_exec_off_payload):
+                write_archive(sdk_path, members, as_zip=False)
+            rac.verify_platform(
+                root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
+            )
+
+            with mock.patch(__name__ + ".member_payload", side_effect=bridge_exec_payload):
+                write_archive(sdk_path, members, as_zip=False)
+            with self.assertRaisesRegex(rac.ContentError, "unsafe SDK provenance"):
+                rac.verify_platform(
+                    root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
+                )
+
     def test_negative_control_provenance_claiming_tracing_on_fires(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

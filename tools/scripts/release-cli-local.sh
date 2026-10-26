@@ -37,6 +37,7 @@ cmake -S "$REPO_ROOT" -B "$MAC_BUILD_DIR" \
     -DPULP_BUILD_TESTS=OFF \
     -DPULP_ENABLE_SCENE3D=ON \
     -DPULP_ENABLE_AUDIO_PROBES=OFF \
+    -DPULP_DEV_BRIDGE_EXEC=OFF \
     -DPULP_BUILD_WEBVIEW=ON
 bash "$REPO_ROOT/tools/ci/governed-build.sh" cmake --build "$MAC_BUILD_DIR" --target pulp-cli --config Release
 if [ ! -f "$MAC_BUILD_DIR/tools/cli/pulp" ]; then
@@ -60,6 +61,7 @@ cmake -S "$REPO_ROOT" -B "$MAC_SDK_BUILD_DIR" \
     -DPULP_BUILD_TESTS=OFF \
     -DPULP_ENABLE_SCENE3D=OFF \
     -DPULP_ENABLE_AUDIO_PROBES=OFF \
+    -DPULP_DEV_BRIDGE_EXEC=OFF \
     -DPULP_BUILD_WEBVIEW=ON
 bash "$REPO_ROOT/tools/ci/governed-build.sh" cmake --build "$MAC_SDK_BUILD_DIR" --config Release
 cmake --install "$MAC_SDK_BUILD_DIR" --prefix "$SDK_STAGING" --config Release
@@ -94,6 +96,7 @@ if ssh -o ConnectTimeout=5 -o BatchMode=yes ubuntu "echo ok" &>/dev/null; then
         cmake -S . -B build-cli -DCMAKE_BUILD_TYPE=Release \
             -DPULP_BUILD_TESTS=OFF -DPULP_ENABLE_GPU=OFF \
             -DPULP_ENABLE_AUDIO_PROBES=OFF \
+    -DPULP_DEV_BRIDGE_EXEC=OFF \
             -DPULP_BUILD_WEBVIEW=ON"
 
     # Build
