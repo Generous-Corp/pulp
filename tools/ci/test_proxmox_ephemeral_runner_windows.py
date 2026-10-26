@@ -110,7 +110,7 @@ with locked_state() as state:
         rid = int(path.rsplit("/", 1)[1])
         match = [r for r in state["runners"] if r["id"] == rid]
         if method == "DELETE":
-            if match and match[0]["busy"]:
+            if state.get("delete_422") or (match and match[0]["busy"]):
                 sys.stderr.write("HTTP 422: runner is busy\n")
                 rc = 1
             else:
@@ -121,7 +121,10 @@ with locked_state() as state:
             rc = 1
         else:
             r = match[0]
-            out = "%s\t%s\t%s" % (r["id"], r["name"], str(r["busy"]).lower())
+            # `reread_busy`: the runner list still says idle, but GitHub has
+            # just assigned a job, which a direct read of the runner shows.
+            busy = True if state.get("reread_busy") else r["busy"]
+            out = "%s\t%s\t%s" % (r["id"], r["name"], str(busy).lower())
     elif "/actions/runs?" in path:
         out = ""
     else:
@@ -193,6 +196,18 @@ if "WriteAllText" in command:
         state["guest_jit"] = jit
     sys.exit(0)
 if "run.cmd" in command:
+    if behavior == "assigned-while-idle":
+        # Listed idle past the limit while GitHub is assigning it a job; the
+        # job then runs to completion.
+        with locked_state() as state:
+            name = state["jit_requests"][-1]["name"]
+            state["runners"].append({"id": 4242, "name": name, "status": "online", "busy": False})
+        time.sleep(float(os.environ.get("FAKE_JOB_SECONDS", "3")))
+        with locked_state() as state:
+            state["runners"] = [r for r in state["runners"] if r["id"] != 4242]
+            state["jobs_run"] += 1
+            state["events"].append("job-done")
+        sys.exit(0)
     if behavior == "idle-forever":
         # Online and never assigned a job, as a stale JIT session looks.
         with locked_state() as state:
@@ -535,6 +550,26 @@ class WindowsSupervisorTests(unittest.TestCase):
         self.assertNotIn("recycling a JIT runner", result.stdout)
         self.assertEqual(self.state["deleted"], [])
         self.assertEqual(self.state["jobs_run"], 1, result.stdout)
+
+    def assert_assigned_runner_survives_the_idle_limit(self, **flags: bool) -> None:
+        self.state["runner_behavior"] = "assigned-while-idle"
+        self.state.update(flags)
+        result = self.run_supervisor(PULP_WINDOWS_RUNNER_IDLE_RECYCLE_SECONDS="1",
+                                     FAKE_JOB_SECONDS="3")
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, output)
+        self.assertNotIn("recycling a JIT runner", output)
+        self.assertEqual(self.state["deleted"], [], output)
+        self.assertEqual(self.state["jobs_run"], 1, output)
+        self.assertEqual(self.state["events"], ["rollback", "job-done", "rollback"], output)
+        # Control: the idle limit was reached and the fence was tried.
+        self.assertIn("fence:", output)
+
+    def test_a_runner_the_fence_reads_as_busy_keeps_its_job(self) -> None:
+        self.assert_assigned_runner_survives_the_idle_limit(reread_busy=True)
+
+    def test_a_runner_whose_delete_is_refused_keeps_its_job(self) -> None:
+        self.assert_assigned_runner_survives_the_idle_limit(delete_422=True)
 
     def test_idle_recycle_zero_disables_it(self) -> None:
         self.state["runner_behavior"] = "idle-forever"
