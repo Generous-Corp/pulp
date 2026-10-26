@@ -1,9 +1,13 @@
 // A DesignIR's captured @font-face faces reach the text renderer with the
-// weight range each rule declared, in the native lane and the generated JS.
+// weight range each rule declared, in the native lane, the generated JS, and
+// the bridge's registerFont entry point that JS calls.
 #include <pulp/canvas/bundled_fonts.hpp>
+#include <pulp/state/store.hpp>
 #include <pulp/view/design_codegen.hpp>
 #include <pulp/view/design_import.hpp>
+#include <pulp/view/script_engine.hpp>
 #include <pulp/view/view.hpp>
+#include <pulp/view/widget_bridge.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -63,4 +67,41 @@ TEST_CASE("generated JS registers a captured face with its declared weight range
     CHECK(range.find("registerFont('Probe', '/fonts/Jost.ttf', 400, 700);") != std::string::npos);
     const auto single = generate_pulp_js(ir_with_face("Probe", "/fonts/Jost.ttf", 400, 0), opts);
     CHECK(single.find("registerFont('Probe', '/fonts/Jost.ttf', 400, 400);") != std::string::npos);
+}
+
+TEST_CASE("registerFont declares a range only for a registered face and valid weights",
+          "[view][bridge][fonts][synthetic-bold]") {
+    const std::string jost = std::string(PULP_REPO_ROOT) + "/external/fonts/Jost-Regular.ttf";
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 100, 40});
+    pulp::state::StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    const auto call = [&](const std::string& family, const std::string& path,
+                          const std::string& weights) {
+        return engine.evaluate("registerFont('" + family + "', '" + path + "'" + weights + ")")
+            .getWithDefault<bool>(false);
+    };
+
+    // Control: a resolvable face with a valid range declares it.
+    CHECK(call("BridgeFaceValid", jost, ", 400, 700"));
+    CHECK(pulp::canvas::declared_face_synthesizes_bold("BridgeFaceValid", 700) == false);
+
+    // A face that never registered must not leave a range behind.
+    CHECK_FALSE(call("BridgeFaceMissing", "/nonexistent/face.ttf", ", 400, 700"));
+    CHECK_FALSE(pulp::canvas::has_declared_font_face_weights("BridgeFaceMissing"));
+
+    // Non-finite weights declare nothing; the face itself still registers.
+    CHECK(call("BridgeFaceNaN", jost, ", NaN, 700"));
+    CHECK(call("BridgeFaceInf", jost, ", 400, Infinity"));
+    CHECK_FALSE(pulp::canvas::has_declared_font_face_weights("BridgeFaceNaN"));
+    CHECK_FALSE(pulp::canvas::has_declared_font_face_weights("BridgeFaceInf"));
+
+    // Out-of-range weights clamp to CSS's [1, 1000] instead of overflowing the cast.
+    CHECK(call("BridgeFaceHuge", jost, ", 400, 1e300"));
+    CHECK(pulp::canvas::declared_face_synthesizes_bold("BridgeFaceHuge", 1000) == false);
+
+    // A reversed pair is the same range.
+    CHECK(call("BridgeFaceReversed", jost, ", 700, 400"));
+    CHECK(pulp::canvas::declared_face_synthesizes_bold("BridgeFaceReversed", 700) == false);
 }

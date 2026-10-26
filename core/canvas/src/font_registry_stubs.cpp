@@ -514,6 +514,8 @@ std::unordered_map<std::string, std::vector<DeclaredWeightRange>>& declared_weig
 void declare_font_face_weight_range(const std::string& family, int weight_min, int weight_max) {
     if (family.empty())
         return;
+    weight_min = std::clamp(weight_min, 1, 1000);
+    weight_max = std::clamp(weight_max, 1, 1000);
     const DeclaredWeightRange range{std::min(weight_min, weight_max),
                                     std::max(weight_min, weight_max)};
     std::lock_guard<std::mutex> guard(declared_weights_mutex());
