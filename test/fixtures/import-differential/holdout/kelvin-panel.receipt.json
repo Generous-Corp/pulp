@@ -7,7 +7,7 @@
     "command": "analyze-corpus",
     "runs": 3,
     "cache_state": "unknown",
-    "pulp_commit": "f3119b3de37a518e186cf1203a6461ab8ba470e2",
+    "pulp_commit": "42b835074bc05f910f39cb1e7dd4b3fbbd514d08",
     "host_class": "macOS arm64",
     "viewport": {
       "width": 1280,
@@ -15,23 +15,22 @@
     }
   },
   "determinism": {
-    "status": "fail",
+    "status": "pass",
     "completed_runs": 3,
-    "varying_digests": [
-      "native_snapshot_semantic_sha256"
-    ],
+    "varying_digests": [],
     "stable_digests": {
       "source_sha256": "c6b236e4ebfcbb5b0593fee8194f7ccb93cf7b059b1d2699c679bd39c0d08309",
-      "importer_sha256": "aa3989cd0ded97b8777e463909c9450852f06b174c576bc36541dc65823b38d5",
-      "observer_sha256": "2ef940183a9764496240dad1455733def4f9aa02ab58c59d4ec6b7c0b4da92df",
+      "importer_sha256": "bd6132a08d06c8058bedf210685644acd5a54feb99285c1079863b50798d9658",
+      "observer_sha256": "c9e6e193574ba1f8e40f433b6acbaeac2d822d6134b227d1da3eb16eb392b7de",
       "browser_build_hash": "@d0c02bfad08ec92a6ffcf989e53cd995e6381a4c",
       "browser_capture_canonical_sha256": "6ca13ae5a357219748953531e0470dd0891bb8f6dabc335fd2e7d7bac65717fc",
       "native_capture_canonical_sha256": "6ca13ae5a357219748953531e0470dd0891bb8f6dabc335fd2e7d7bac65717fc",
-      "browser_snapshot_semantic_sha256": "63a3bb5dcd11640e97eb3ce4ac718edd7f4f92f8bdd578b7f589cce10c0dcff9",
+      "browser_snapshot_semantic_sha256": "71a40371217263bcb38a082382cec4b1ec4fe46a09bab22ef2301aa60f8785af",
+      "native_snapshot_semantic_sha256": "71a40371217263bcb38a082382cec4b1ec4fe46a09bab22ef2301aa60f8785af",
       "browser_screenshot_sha256": "95a15eb410675a8fe7f9e960f737b196850efcaafce69dc1b75d3e8b2b8c7bbb",
-      "native_render_sha256": "8ec388c1de14d36183100e9475d03244eaee06cc8422631f96c4595aeb61a25b",
-      "native_layout_sha256": "92f9e5197fa5ad09e96b038f3e03fae996219fe3a5853d75a4e230fedcdb3482",
-      "native_render_receipt_sha256": "46b1dabe7095caffe4ea8443caf9a2e7e865b1b76043053be8c746ee9fd32b5f",
+      "native_render_sha256": "d2ea5d212225fd4263d14092bbcd67303ee2d096d41ad0c511133c347ccdcf4e",
+      "native_layout_sha256": "6f59ec636f8fed69eaa343f62f864ff8830817f50d99bbd2c4f8f698815d7caf",
+      "native_render_receipt_sha256": "c889dc5440746f5f4c76fcb16bfe4f7be813c6ff66ff2f255e7c8b18872f63f8",
       "platform_fonts_sha256": "95198329e14c9e32445fb3caa6889802cb7d6917dda11e5f0bbbc70a7f7da8eb"
     }
   },
@@ -41,17 +40,17 @@
       "status": "completed",
       "digests": {
         "source_sha256": "c6b236e4ebfcbb5b0593fee8194f7ccb93cf7b059b1d2699c679bd39c0d08309",
-        "importer_sha256": "aa3989cd0ded97b8777e463909c9450852f06b174c576bc36541dc65823b38d5",
-        "observer_sha256": "2ef940183a9764496240dad1455733def4f9aa02ab58c59d4ec6b7c0b4da92df",
+        "importer_sha256": "bd6132a08d06c8058bedf210685644acd5a54feb99285c1079863b50798d9658",
+        "observer_sha256": "c9e6e193574ba1f8e40f433b6acbaeac2d822d6134b227d1da3eb16eb392b7de",
         "browser_build_hash": "@d0c02bfad08ec92a6ffcf989e53cd995e6381a4c",
         "browser_capture_canonical_sha256": "6ca13ae5a357219748953531e0470dd0891bb8f6dabc335fd2e7d7bac65717fc",
         "native_capture_canonical_sha256": "6ca13ae5a357219748953531e0470dd0891bb8f6dabc335fd2e7d7bac65717fc",
-        "browser_snapshot_semantic_sha256": "63a3bb5dcd11640e97eb3ce4ac718edd7f4f92f8bdd578b7f589cce10c0dcff9",
-        "native_snapshot_semantic_sha256": "eab77b0e7b4c009cb7d4b7650388cedcef4d36f39d61f94f6225798cc90f92f8",
+        "browser_snapshot_semantic_sha256": "71a40371217263bcb38a082382cec4b1ec4fe46a09bab22ef2301aa60f8785af",
+        "native_snapshot_semantic_sha256": "71a40371217263bcb38a082382cec4b1ec4fe46a09bab22ef2301aa60f8785af",
         "browser_screenshot_sha256": "95a15eb410675a8fe7f9e960f737b196850efcaafce69dc1b75d3e8b2b8c7bbb",
-        "native_render_sha256": "8ec388c1de14d36183100e9475d03244eaee06cc8422631f96c4595aeb61a25b",
-        "native_layout_sha256": "92f9e5197fa5ad09e96b038f3e03fae996219fe3a5853d75a4e230fedcdb3482",
-        "native_render_receipt_sha256": "46b1dabe7095caffe4ea8443caf9a2e7e865b1b76043053be8c746ee9fd32b5f",
+        "native_render_sha256": "d2ea5d212225fd4263d14092bbcd67303ee2d096d41ad0c511133c347ccdcf4e",
+        "native_layout_sha256": "6f59ec636f8fed69eaa343f62f864ff8830817f50d99bbd2c4f8f698815d7caf",
+        "native_render_receipt_sha256": "c889dc5440746f5f4c76fcb16bfe4f7be813c6ff66ff2f255e7c8b18872f63f8",
         "platform_fonts_sha256": "95198329e14c9e32445fb3caa6889802cb7d6917dda11e5f0bbbc70a7f7da8eb"
       },
       "device_scale_factor": 2,
@@ -60,17 +59,17 @@
         "structure_incorrect_parentage": 0,
         "structure_missing": 0,
         "structure_extra": 6,
-        "geometry": 0.993208,
+        "geometry": 0.99999,
         "geometry_gate_ok": false,
         "geometry_gate_failed": [
           "registered_max_abs_delta"
         ],
-        "registered_geometry_mean": 0.992801,
-        "registered_geometry_max_abs_delta": 90.6945,
+        "registered_geometry_mean": 0.999987,
+        "registered_geometry_max_abs_delta": 2.000366,
         "typography": 1.0,
-        "visual": 0.972793,
-        "visual_registered": 0.988886,
-        "visual_full_frame": 0.972793
+        "visual": 0.992631,
+        "visual_registered": 0.988986,
+        "visual_full_frame": 0.992631
       },
       "classification": "browser-required",
       "threshold_eligible": false,
@@ -83,7 +82,7 @@
         "structural score below 0.990",
         "geometry gate failed: registered_max_abs_delta",
         "visual score below 0.995",
-        "full-frame visual 0.973 below 0.995 and classified page-background-unresolved"
+        "full-frame visual 0.993 below 0.995 and classified unexplained"
       ]
     },
     {
@@ -91,17 +90,17 @@
       "status": "completed",
       "digests": {
         "source_sha256": "c6b236e4ebfcbb5b0593fee8194f7ccb93cf7b059b1d2699c679bd39c0d08309",
-        "importer_sha256": "aa3989cd0ded97b8777e463909c9450852f06b174c576bc36541dc65823b38d5",
-        "observer_sha256": "2ef940183a9764496240dad1455733def4f9aa02ab58c59d4ec6b7c0b4da92df",
+        "importer_sha256": "bd6132a08d06c8058bedf210685644acd5a54feb99285c1079863b50798d9658",
+        "observer_sha256": "c9e6e193574ba1f8e40f433b6acbaeac2d822d6134b227d1da3eb16eb392b7de",
         "browser_build_hash": "@d0c02bfad08ec92a6ffcf989e53cd995e6381a4c",
         "browser_capture_canonical_sha256": "6ca13ae5a357219748953531e0470dd0891bb8f6dabc335fd2e7d7bac65717fc",
         "native_capture_canonical_sha256": "6ca13ae5a357219748953531e0470dd0891bb8f6dabc335fd2e7d7bac65717fc",
-        "browser_snapshot_semantic_sha256": "63a3bb5dcd11640e97eb3ce4ac718edd7f4f92f8bdd578b7f589cce10c0dcff9",
-        "native_snapshot_semantic_sha256": "63a3bb5dcd11640e97eb3ce4ac718edd7f4f92f8bdd578b7f589cce10c0dcff9",
+        "browser_snapshot_semantic_sha256": "71a40371217263bcb38a082382cec4b1ec4fe46a09bab22ef2301aa60f8785af",
+        "native_snapshot_semantic_sha256": "71a40371217263bcb38a082382cec4b1ec4fe46a09bab22ef2301aa60f8785af",
         "browser_screenshot_sha256": "95a15eb410675a8fe7f9e960f737b196850efcaafce69dc1b75d3e8b2b8c7bbb",
-        "native_render_sha256": "8ec388c1de14d36183100e9475d03244eaee06cc8422631f96c4595aeb61a25b",
-        "native_layout_sha256": "92f9e5197fa5ad09e96b038f3e03fae996219fe3a5853d75a4e230fedcdb3482",
-        "native_render_receipt_sha256": "46b1dabe7095caffe4ea8443caf9a2e7e865b1b76043053be8c746ee9fd32b5f",
+        "native_render_sha256": "d2ea5d212225fd4263d14092bbcd67303ee2d096d41ad0c511133c347ccdcf4e",
+        "native_layout_sha256": "6f59ec636f8fed69eaa343f62f864ff8830817f50d99bbd2c4f8f698815d7caf",
+        "native_render_receipt_sha256": "c889dc5440746f5f4c76fcb16bfe4f7be813c6ff66ff2f255e7c8b18872f63f8",
         "platform_fonts_sha256": "95198329e14c9e32445fb3caa6889802cb7d6917dda11e5f0bbbc70a7f7da8eb"
       },
       "device_scale_factor": 2,
@@ -110,17 +109,17 @@
         "structure_incorrect_parentage": 0,
         "structure_missing": 0,
         "structure_extra": 6,
-        "geometry": 0.993208,
+        "geometry": 0.99999,
         "geometry_gate_ok": false,
         "geometry_gate_failed": [
           "registered_max_abs_delta"
         ],
-        "registered_geometry_mean": 0.992801,
-        "registered_geometry_max_abs_delta": 90.6945,
+        "registered_geometry_mean": 0.999987,
+        "registered_geometry_max_abs_delta": 2.000366,
         "typography": 1.0,
-        "visual": 0.972793,
-        "visual_registered": 0.988886,
-        "visual_full_frame": 0.972793
+        "visual": 0.992631,
+        "visual_registered": 0.988986,
+        "visual_full_frame": 0.992631
       },
       "classification": "browser-required",
       "threshold_eligible": false,
@@ -133,7 +132,7 @@
         "structural score below 0.990",
         "geometry gate failed: registered_max_abs_delta",
         "visual score below 0.995",
-        "full-frame visual 0.973 below 0.995 and classified page-background-unresolved"
+        "full-frame visual 0.993 below 0.995 and classified unexplained"
       ]
     },
     {
@@ -141,17 +140,17 @@
       "status": "completed",
       "digests": {
         "source_sha256": "c6b236e4ebfcbb5b0593fee8194f7ccb93cf7b059b1d2699c679bd39c0d08309",
-        "importer_sha256": "aa3989cd0ded97b8777e463909c9450852f06b174c576bc36541dc65823b38d5",
-        "observer_sha256": "2ef940183a9764496240dad1455733def4f9aa02ab58c59d4ec6b7c0b4da92df",
+        "importer_sha256": "bd6132a08d06c8058bedf210685644acd5a54feb99285c1079863b50798d9658",
+        "observer_sha256": "c9e6e193574ba1f8e40f433b6acbaeac2d822d6134b227d1da3eb16eb392b7de",
         "browser_build_hash": "@d0c02bfad08ec92a6ffcf989e53cd995e6381a4c",
         "browser_capture_canonical_sha256": "6ca13ae5a357219748953531e0470dd0891bb8f6dabc335fd2e7d7bac65717fc",
         "native_capture_canonical_sha256": "6ca13ae5a357219748953531e0470dd0891bb8f6dabc335fd2e7d7bac65717fc",
-        "browser_snapshot_semantic_sha256": "63a3bb5dcd11640e97eb3ce4ac718edd7f4f92f8bdd578b7f589cce10c0dcff9",
-        "native_snapshot_semantic_sha256": "63a3bb5dcd11640e97eb3ce4ac718edd7f4f92f8bdd578b7f589cce10c0dcff9",
+        "browser_snapshot_semantic_sha256": "71a40371217263bcb38a082382cec4b1ec4fe46a09bab22ef2301aa60f8785af",
+        "native_snapshot_semantic_sha256": "71a40371217263bcb38a082382cec4b1ec4fe46a09bab22ef2301aa60f8785af",
         "browser_screenshot_sha256": "95a15eb410675a8fe7f9e960f737b196850efcaafce69dc1b75d3e8b2b8c7bbb",
-        "native_render_sha256": "8ec388c1de14d36183100e9475d03244eaee06cc8422631f96c4595aeb61a25b",
-        "native_layout_sha256": "92f9e5197fa5ad09e96b038f3e03fae996219fe3a5853d75a4e230fedcdb3482",
-        "native_render_receipt_sha256": "46b1dabe7095caffe4ea8443caf9a2e7e865b1b76043053be8c746ee9fd32b5f",
+        "native_render_sha256": "d2ea5d212225fd4263d14092bbcd67303ee2d096d41ad0c511133c347ccdcf4e",
+        "native_layout_sha256": "6f59ec636f8fed69eaa343f62f864ff8830817f50d99bbd2c4f8f698815d7caf",
+        "native_render_receipt_sha256": "c889dc5440746f5f4c76fcb16bfe4f7be813c6ff66ff2f255e7c8b18872f63f8",
         "platform_fonts_sha256": "95198329e14c9e32445fb3caa6889802cb7d6917dda11e5f0bbbc70a7f7da8eb"
       },
       "device_scale_factor": 2,
@@ -160,17 +159,17 @@
         "structure_incorrect_parentage": 0,
         "structure_missing": 0,
         "structure_extra": 6,
-        "geometry": 0.993208,
+        "geometry": 0.99999,
         "geometry_gate_ok": false,
         "geometry_gate_failed": [
           "registered_max_abs_delta"
         ],
-        "registered_geometry_mean": 0.992801,
-        "registered_geometry_max_abs_delta": 90.6945,
+        "registered_geometry_mean": 0.999987,
+        "registered_geometry_max_abs_delta": 2.000366,
         "typography": 1.0,
-        "visual": 0.972793,
-        "visual_registered": 0.988886,
-        "visual_full_frame": 0.972793
+        "visual": 0.992631,
+        "visual_registered": 0.988986,
+        "visual_full_frame": 0.992631
       },
       "classification": "browser-required",
       "threshold_eligible": false,
@@ -183,7 +182,7 @@
         "structural score below 0.990",
         "geometry gate failed: registered_max_abs_delta",
         "visual score below 0.995",
-        "full-frame visual 0.973 below 0.995 and classified page-background-unresolved"
+        "full-frame visual 0.993 below 0.995 and classified unexplained"
       ]
     }
   ]

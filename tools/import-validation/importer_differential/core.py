@@ -51,6 +51,7 @@ from .snapshot import (
     LEGACY_COMPUTED_STYLES,
     DomSnapshot,
     browser_nodes,
+    capture_anchors,
     decode_string,
     document_canvas_background,
     principal_layout_rows,
@@ -290,6 +291,34 @@ def snapshot_semantic_sha256(snapshot_bytes: bytes) -> str:
     return hashlib.sha256(canonical).hexdigest()
 
 
+def platform_fonts_semantic_sha256(path: Path) -> str | None:
+    """Hash the platform-fonts report with its backend node ids fixed.
+
+    Each text run names its owner by snapshot-local node and layout indices,
+    which are content, and by `backend_node_id`, which is the same per-run
+    token `snapshot_semantic_sha256` fixes: Chromium can number identical
+    nodes differently from one run to the next. A raw file hash moved with
+    that order alone. Every requested and resolved face, glyph count and line
+    metric still enters the digest.
+    """
+    if not path.is_file():
+        return None
+    report = json.loads(path.read_text(encoding="utf-8"))
+
+    def scrub(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {key: ("<backend-node>" if key == "backend_node_id" else scrub(item))
+                    for key, item in value.items()}
+        if isinstance(value, list):
+            return [scrub(item) for item in value]
+        return value
+
+    canonical = json.dumps(
+        scrub(report), sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
 def write_json(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, indent=2, sort_keys=False) + "\n", encoding="utf-8")
@@ -309,8 +338,15 @@ def run_command(argv: list[str], timeout_seconds: int) -> CommandResult:
         )
     except subprocess.TimeoutExpired as exc:
         elapsed = int((time.monotonic() - start) * 1000)
+        # The partial output on a timeout is bytes even under text=True, and
+        # every reader of a CommandResult expects str.
+        def partial(value: bytes | str | None) -> str:
+            if isinstance(value, bytes):
+                return value.decode("utf-8", errors="replace")
+            return value or ""
         return CommandResult(
-            argv, elapsed, 124, exc.stdout or "", exc.stderr or "command timed out")
+            argv, elapsed, 124, partial(exc.stdout),
+            partial(exc.stderr) or "command timed out")
     elapsed = int((time.monotonic() - start) * 1000)
     return CommandResult(
         argv, elapsed, result.returncode, result.stdout, result.stderr)
@@ -400,8 +436,7 @@ def native_nodes(ir: dict[str, Any], layout: dict[str, Any]) -> list[NativeNode]
 
 def node_match_score(browser: BrowserNode, native: NativeNode) -> float:
     score = 0.0
-    if (browser.backend_node_id is not None
-            and browser.backend_node_id == native.backend_node_id):
+    if browser.anchor and browser.anchor == native.anchor:
         score += 100.0
     browser_id = browser.attributes.get("id", "")
     if browser_id and browser_id in {native.anchor, native.name}:
@@ -425,10 +460,14 @@ def node_match_score(browser: BrowserNode, native: NativeNode) -> float:
 
 
 def has_identity_signal(browser: BrowserNode, native: NativeNode) -> bool:
-    if browser.backend_node_id is not None and native.backend_node_id is not None:
-        # Both captures have an authoritative DOM identity. Never let a
-        # same-text/same-tag heuristic hide a mismatched capture node.
-        return browser.backend_node_id == native.backend_node_id
+    # The browser and candidate lanes are two Chromium sessions, and each
+    # numbers backend nodes in its own order, so a backendNodeId names a node
+    # only within its own lane. The DOM-path anchor is derived from the page's
+    # structure and reads the same in both. When both sides carry one it is
+    # the identity, and a disagreement is never rescued by a same-text or
+    # same-tag heuristic.
+    if browser.anchor and native.anchor.startswith("capture:"):
+        return browser.anchor == native.anchor
     browser_id = browser.attributes.get("id", "")
     if browser_id and browser_id in {native.anchor, native.name}:
         return True
@@ -1396,9 +1435,8 @@ def integrity_record(
         "native_layout_sha256": sha256_file(lanes.native_layout),
         "native_render_receipt_sha256": sha256_file(lanes.native_receipt),
         "stage_provenance": stage_provenance(lanes),
-        "platform_fonts_sha256": (
-            sha256_file(lanes.evidence / "platform-fonts.json")
-            if (lanes.evidence / "platform-fonts.json").is_file() else None),
+        "platform_fonts_sha256": platform_fonts_semantic_sha256(
+            lanes.evidence / "platform-fonts.json"),
         "interaction_plan_sha256": (
             capture.get("provenance", {}).get("interactions", {}).get("plan_sha256")
             or "none"),

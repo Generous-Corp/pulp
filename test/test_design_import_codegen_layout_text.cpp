@@ -1551,3 +1551,103 @@ TEST_CASE("generate_pulp_js web compat emits extended style and layout propertie
 // branch. Nothing errors — the boxes are the right size in the right place, they
 // just aren't faded / shadowed / filled. Each case below renders a node kind
 // through generate_pulp_js and asserts the property survives the lowering.
+
+TEST_CASE("ui.js gives a captured one-line run its captured width, as native does",
+          "[design-import][codegen][captured-line-layout]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.style.width = 400.0f;
+    ir.root.style.height = 200.0f;
+
+    // Chromium laid this run out 37 px wide on one line.
+    IRNode captured;
+    captured.type = "text";
+    captured.name = "CapturedRun";
+    captured.text_content = "Drive";
+    captured.style.width = 37.0f;
+    captured.style.height = 15.0f;
+    captured.style.font_size = 13.0f;
+    captured.style.font_family = "Inter";
+    captured.text_line_boxes.push_back({0.0f, 0.0f, 37.0f, 15.0f, 0, 5});
+    // The emitter only checks the face is named; matching it is paint's job,
+    // so a literal keeps this running on builds without a text shaper.
+    captured.text_layout_basis = IRTextLayoutBasis{37.0f, "Inter"};
+    ir.root.children.push_back(captured);
+
+    // Its width already holds the transformed glyphs.
+    IRNode captured_caps = captured;
+    captured_caps.name = "CapturedCaps";
+    captured_caps.style.text_transform = "uppercase";
+    ir.root.children.push_back(captured_caps);
+
+    // A basis the emitter rejects (it measured 37 px against a 40 px box)
+    // rewraps on a cache miss, so a hard captured width would break its last
+    // word wherever Pulp's advances run a hair wider: it keeps the soft box.
+    IRNode rejected = captured;
+    rejected.name = "RejectedBasis";
+    rejected.style.width = 40.0f;
+    ir.root.children.push_back(rejected);
+
+    // A control's value text has no layout basis but is captured all the same,
+    // and the capture centres it in the control.
+    IRNode value;
+    value.type = "text";
+    value.name = "ControlValue";
+    value.text_content = "Save preset";
+    value.style.width = 71.140625f;
+    value.style.height = 15.0f;
+    value.style.font_size = 13.3333f;
+    value.style.white_space = "nowrap";
+    value.style.vertical_align = "middle";
+    value.attributes["control_value_of"] = "input";
+    ir.root.children.push_back(value);
+
+    // A Figma one-line title declares its width in the design tool; it stays
+    // unbounded so Pulp's slightly wider metrics cannot wrap or clip it.
+    IRNode title;
+    title.type = "text";
+    title.name = "FigmaTitle";
+    title.text_content = "Filter";
+    title.style.width = 37.0f;
+    title.style.height = 15.0f;
+    title.style.font_size = 13.0f;
+    ir.root.children.push_back(title);
+    IRNode title_caps = title;
+    title_caps.name = "FigmaCaps";
+    title_caps.style.text_transform = "uppercase";
+    ir.root.children.push_back(title_caps);
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::bridge_native_js;
+    const auto js = generate_pulp_js(ir, opts);
+    // The JS id is the node name plus a suffix, so match one call by its prefix
+    // and the rest of that line.
+    const auto has = [&](const std::string& call, const std::string& name,
+                         const std::string& rest) {
+        const std::string head = call + "('" + name;
+        for (auto at = js.find(head); at != std::string::npos; at = js.find(head, at + 1)) {
+            const auto line = js.substr(at, js.find('\n', at) - at);
+            if (line.find(rest) != std::string::npos)
+                return true;
+        }
+        return false;
+    };
+
+    CHECK(has("setFlex", "CapturedRun", "', 'width', 37);"));
+    CHECK(has("setFlex", "CapturedRun", "', 'min_width', 37);"));
+    CHECK(has("setFlex", "CapturedCaps", "', 'width', 37);"));
+    CHECK(has("setFlex", "CapturedCaps", "', 'min_width', 37);"));
+    CHECK(has("setFlex", "ControlValue", "', 'width', 71.1406"));
+    CHECK(has("setVerticalAlign", "ControlValue", "', 'center');"));
+    CHECK_FALSE(has("setMultiLine", "CapturedRun", ""));
+    CHECK_FALSE(has("setMultiLine", "ControlValue", ""));
+
+    CHECK_FALSE(has("setFlex", "RejectedBasis", "', 'width'"));
+    CHECK(has("setFlex", "RejectedBasis", "', 'min_width', 40);"));
+    CHECK(has("setMultiLine", "RejectedBasis", ""));
+
+    CHECK_FALSE(has("setFlex", "FigmaTitle", "', 'width'"));
+    CHECK(has("setFlex", "FigmaTitle", "', 'min_width', 37);"));
+    CHECK_FALSE(has("setFlex", "FigmaCaps", "', 'width'"));
+    CHECK(has("setFlex", "FigmaCaps", "', 'min_width', 44.4"));
+}

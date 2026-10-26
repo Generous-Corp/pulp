@@ -452,6 +452,8 @@ export const NO_RESET_NEEDED: Readonly<Record<string, string>> = {
     selected: 'the applier clears the selection itself when the prop disappears.',
     value: 'control data, not style: as with an uncontrolled DOM input the widget '
         + 'keeps the value the user or the last commit gave it.',
+    checked: 'control data, not style: as with an uncontrolled DOM checkbox the '
+        + 'widget keeps the position the user or the last commit gave it.',
     level: 'meter data, not style: the next sample overwrites it.',
     data: 'spectrum and waveform data, not style: the next frame overwrites it.',
     min: 'range bounds are control data; a control that loses its bounds keeps '

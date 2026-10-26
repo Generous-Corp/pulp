@@ -28,6 +28,15 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME catch-test-name-guard-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_catch_test_name_guard.py")
     set_tests_properties(catch-test-name-guard-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
+    # gpu_audio_header_vocabulary_guard.py: the installed GPU-audio headers
+    # name no backend type (wgpu/WGPU/dawn::). The selftest plants each kind
+    # of hit and proves the scan reads the real headers.
+    add_test(NAME gpu-audio-header-vocabulary-guard COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/gpu_audio_header_vocabulary_guard.py")
+    set_tests_properties(gpu-audio-header-vocabulary-guard PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
+    add_test(NAME gpu-audio-header-vocabulary-guard-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_audio_header_vocabulary_guard.py")
+    set_tests_properties(gpu-audio-header-vocabulary-guard-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
     # macos_merge_group_bootstrap.sh: the merge-group `macos` verdict. A failed
     # or missing dependency fails closed; a cancelled classify (never given a
     # runner) is classified in-job, and the verdict proceeds on that answer.

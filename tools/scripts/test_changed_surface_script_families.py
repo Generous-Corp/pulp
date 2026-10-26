@@ -484,10 +484,15 @@ class DriftCheckTest(FamilyFixture):
     """`--check` blocks only a change a stale family could bound wrongly."""
 
     def check(self, touched: list[str] | None, merge_group: bool = False,
-              build: str = "/b", mode: str = "--check") -> int:
+              build: str = "/b", mode: str = "--check", extra_script: str | None = None,
+              extra_labels: list[str] | None = None) -> int:
         self.add_whole_tree()
         self.write("tools/scripts/test_a.py", "")
         self.script_test("a-selftest", "tools/scripts/test_a.py")
+        if extra_script:
+            self.write(f"tools/scripts/{extra_script}.py", "")
+            self.script_test(extra_script, f"tools/scripts/{extra_script}.py",
+                             labels=extra_labels or [])
         self.generate()
         committed = self.root / families.FAMILIES_FILE
         committed.parent.mkdir(parents=True, exist_ok=True)
@@ -532,9 +537,9 @@ class DriftCheckTest(FamilyFixture):
         self.assertEqual(self.check(["tools/scripts/test_a.py"], build=build), 1)
 
     def test_a_build_outside_the_gate_profile_skips_the_check(self) -> None:
-        """The proof option registers GPU probes the gate never does, so a
-        file written or judged on such a build disagrees with the gate's."""
-        for cache in ({"CMAKE_BUILD_TYPE": "Release", "PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF": "ON"},
+        """A configure the gate does not make registers a different test set,
+        so a file written or judged on it disagrees with the gate's."""
+        for cache in ({"CMAKE_BUILD_TYPE": "Release", "PULP_BUILD_EXAMPLES": "ON"},
                       {"CMAKE_BUILD_TYPE": "Debug"}):
             with self.subTest(cache=cache):
                 build = self.build_with_cache(**cache)
@@ -542,14 +547,13 @@ class DriftCheckTest(FamilyFixture):
                                  families.SKIP_EXIT)
 
     def test_a_build_outside_the_gate_profile_refuses_to_write(self) -> None:
-        build = self.build_with_cache(CMAKE_BUILD_TYPE="Release",
-                                      PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF="ON")
+        build = self.build_with_cache(CMAKE_BUILD_TYPE="Release", PULP_BUILD_EXAMPLES="ON")
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
             rc = self.check(["tools/scripts/test_a.py"], build=build, mode="--write")
         self.assertEqual(rc, 2)
         self.assertIn("refusing to write", err.getvalue())
-        self.assertIn("PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF=ON", err.getvalue())
+        self.assertIn("PULP_BUILD_EXAMPLES=ON", err.getvalue())
         self.assertIn("cause_class=INCOMPLETE_CONFIGURE", err.getvalue())
         self.assertIn("safe_to_auto_apply=no", err.getvalue())
         self.assertEqual((self.root / families.FAMILIES_FILE).read_text(encoding="utf-8"),
@@ -563,14 +567,34 @@ class DriftCheckTest(FamilyFixture):
         self.assertIn('"a-selftest"', written)
 
     def test_the_skip_names_why(self) -> None:
-        build = self.build_with_cache(CMAKE_BUILD_TYPE="Release",
-                                      PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF="ON")
+        build = self.build_with_cache(CMAKE_BUILD_TYPE="Debug")
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             self.assertEqual(self.check(["tools/scripts/test_a.py"], build=build),
                              families.SKIP_EXIT)
         self.assertIn("SKIP", out.getvalue())
-        self.assertIn("PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF=ON", out.getvalue())
+        self.assertIn("CMAKE_BUILD_TYPE=Debug", out.getvalue())
+
+    def test_an_exact_provider_proof_configure_is_judged_like_the_gate(self) -> None:
+        """The arm64 gate configures the proof ON; its drift check must run there."""
+        build = self.build_with_cache(CMAKE_BUILD_TYPE="Release",
+                                      PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF="ON")
+        self.assertEqual(self.check(["tools/scripts/test_a.py"], build=build), 1)
+
+    def written_with_extra(self, labels: list[str]) -> str:
+        build = self.build_with_cache(CMAKE_BUILD_TYPE="Release",
+                                      PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF="ON")
+        self.assertEqual(self.check(["tools/scripts/test_a.py"], build=build, mode="--write",
+                                    extra_script="proof_probe", extra_labels=labels), 0)
+        written = (self.root / families.FAMILIES_FILE).read_text(encoding="utf-8")
+        self.assertIn('"a-selftest"', written)
+        return written
+
+    def test_an_unlabelled_script_test_is_written_into_families(self) -> None:
+        self.assertIn('"proof_probe"', self.written_with_extra([]))
+
+    def test_gpu_proof_registrations_are_not_written_into_families(self) -> None:
+        self.assertNotIn('"proof_probe"', self.written_with_extra(["gpu-proof"]))
 
     def test_missing_codemodel_is_a_reported_skip(self) -> None:
         saved = inventory.codemodel_reply_available

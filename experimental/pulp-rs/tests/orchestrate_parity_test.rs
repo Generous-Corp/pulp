@@ -466,6 +466,7 @@ mod build_configure_argv {
         assert!(joined.contains("-G Ninja"), "{joined}");
         assert!(argv.iter().any(|a| a == "-DCMAKE_BUILD_TYPE=Release"), "{joined}");
         assert!(argv.iter().any(|a| a == "-DPULP_BUILD_EXAMPLES=OFF"), "{joined}");
+        assert!(argv.iter().any(|a| a == "-DPULP_DEV_BUILD=ON"), "{joined}");
     }
 
     /// A standalone project (pulp.toml, no core/) beside the fake tool dir.

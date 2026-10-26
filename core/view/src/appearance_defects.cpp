@@ -412,8 +412,8 @@ struct Walker {
             run.node_id = node_label(view);
             run.kind = run_kind(view);
             run.text = label->text();
-            run.ink = Rect{abs.x + extents.ink.x, abs.y + extents.ink.y,
-                           extents.width, extents.height};
+            run.ink = Rect{abs.x + extents.ink.x, abs.y + extents.ink.y, extents.ink.width,
+                           extents.ink.height};
             run.box = abs;
             run.paint_order = paint_order;
             run.scroll_frame = scroll_frame;

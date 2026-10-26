@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261025-chromium-input-button-lowering-watch",
+  "created_at": "2026-10-25T19:35:49Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-ir-contract",
+    "design-output-and-packaging",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "A theme-painted <input type=button|submit|reset> now records the same push-button state as a <button> (tools/import-design/browser_capture_controls.cpp and .hpp: design-source-ingest, chromium-authoring-frontend via **/*browser*, design-output-and-packaging), drops the UA background and border the theme replaces, and lowers to the existing ButtonSurface with its #control-value text as the label; core/view/src/design_import_form_controls.hpp only updates its comment (design-ir-contract, render-assets-and-backends). Tests and the 23-input-buttons differential fixture with its manifest entry (test/test_browser_capture_tree.cpp, test/fixtures/import-differential/**: chromium-authoring-frontend; test/test_design_import_form_controls.cpp, .agents/skills/import-design/SKILL.md: design-source-ingest) cover it. No Chromium capture flag, DesignIR schema field, renderer backend, asset or packaging authority moves; author-styled inputs and other import lanes are unchanged.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-browser-capture-tree",
+    "ctest --test-dir build -R pulp-test-design-import-form-controls",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

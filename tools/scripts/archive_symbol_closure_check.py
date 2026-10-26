@@ -67,8 +67,18 @@ def darwin_listing(nm: str, archive: Path) -> str | None:
 
 
 def read_strength(nm: str, archive: Path, listing: str) -> tuple[set[str], set[str]]:
-    """(strong, weak-only) definitions, from `nm -m` on Mach-O and W/V on ELF."""
-    return nm_symbols.strength(listing, darwin_listing(nm, archive))
+    """(strong, weak-only) definitions, from `nm -m` on Mach-O and W/V on ELF.
+
+    A Mach-O archive whose `nm -m` read failed (a GNU nm passed as --nm, for
+    one) is refused: its letters print weak definitions as S/T/D, so the weak
+    set would be empty and every weak copy would pass unseen.
+    """
+    darwin = darwin_listing(nm, archive)
+    if (darwin is None or not nm_symbols.is_darwin(darwin)) and nm_symbols.looks_mach_o(listing):
+        raise RuntimeError(
+            f"{nm} -g -m gave no darwin listing for Mach-O archive {archive}, so its weak "
+            "definitions cannot be read; pass Apple's nm or llvm-nm as --nm")
+    return nm_symbols.strength(listing, darwin)
 
 
 def copied_rtti(nm: str, forbidden: list[Path], checks: dict[str, str],

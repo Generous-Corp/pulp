@@ -32,16 +32,27 @@ class GpuSpectralMaskSession {
         bool delivered = false, late = false;
     };
     struct Diagnostics {
-        std::string dawn_revision, adapter_name;
+        /// Deprecated: read `provider_revision`. Kept, with the same value,
+        /// for one release.
+        std::string dawn_revision;
+        std::string adapter_name;
         std::uint32_t vendor_id = 0, device_id = 0;
-        // Header/native/proc revision agreement plus Metal host-pointer import.
+        // Header/native/proc revision agreement plus host-pointer import.
         // This does not imply a separately configured manifest pin was checked.
-        bool authenticated_shared_metal = false, configured_revision_verified = false;
+        /// Deprecated: read `authenticated_shared_provider`. Kept, with the
+        /// same value, for one release.
+        bool authenticated_shared_metal = false;
+        bool configured_revision_verified = false;
         bool physical_release_confirmed = false;
         std::uint64_t cpu_input_bytes = 0, cpu_output_bytes = 0;
         std::uint64_t runtime_write_buffer_calls = 0, runtime_copy_buffer_calls = 0,
                       runtime_map_async_calls = 0, imported_allocations = 0, retired_success = 0,
                       retired_failure = 0;
+        /// Revision the shared provider reports for itself.
+        std::string provider_revision;
+        /// The shared provider authenticated its revision and its host-pointer
+        /// import.
+        bool authenticated_shared_provider = false;
     };
     // Non-RT snapshot. Transfer counters exclude resource initialization.
     Diagnostics diagnostics() const;

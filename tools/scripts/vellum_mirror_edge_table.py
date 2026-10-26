@@ -7,12 +7,15 @@ must name every file, header and free function Pulp keeps, so those parts are
 generated rather than written by hand:
 
 - kept headers: every public header of the Pulp-kept view-audio targets
-  (core/view/audio/include), plus every header a D3 unit lists under
+  (core/view/audio/include), plus every header an extraction unit lists under
   pulp_kept.files in vellum_d3_units.json;
-- kept files: every file a D3 unit lists under pulp_kept.files (the
+- kept files: every file an extraction unit lists under pulp_kept.files (the
   core/view/audio tree is kept by its prefix);
 - kept symbols: the namespace-scope free functions those view-audio headers
   declare or define;
+- product rules: the retained subsystems in tools/scripts/vellum_policy.json,
+  as include areas (`pulp/<name>/`), namespaces (`pulp::<name>`) and target
+  names (`pulp-<name>`), next to the vendor SDK and audio-framework prefixes;
 - approved exceptions: each line a docs/status/view-audio-seam-debts.json
   entry records that a content rule matches. A debt row is the only way a
   kept edge may stay in a mirrored file, and an exception holds for that
@@ -30,6 +33,8 @@ import re
 import sys
 from pathlib import Path
 
+import vellum_policy
+
 ROOT = Path(__file__).resolve().parents[2]
 TABLE = Path("tools/scripts/vellum_mirror_edge_patterns.json")
 UNITS = Path("tools/scripts/vellum_d3_units.json")
@@ -46,6 +51,13 @@ BASE_KEPT_VIEW_NAMES = (
     r"step_grid_view|waveform_\w+|graph_editor_view"
 )
 
+PRODUCT_INCLUDE = "mirror-product-include"
+PRODUCT_SYMBOL = "mirror-product-symbol"
+# Vendor plugin SDKs and Apple audio frameworks a mirrored file must not include.
+VENDOR_INCLUDE_PREFIXES = (
+    r"pluginterfaces/|public\.sdk/|clap/|lv2/|AudioUnitSDK/|oboe/|AudioToolbox/|AudioUnit/|"
+    r"CoreAudio/|CoreAudioKit/|CoreMIDI/|AVFAudio/"
+)
 KEPT_INCLUDE = "mirror-pulp-kept-include"
 KEPT_SYMBOL = "mirror-pulp-kept-symbol"
 KEPT_FILE = "mirror-pulp-kept-file"
@@ -124,7 +136,14 @@ def derived_rules(root: Path) -> dict[str, str]:
     includes = alternation(kept_include_paths(root))
     files = alternation(d3_kept_files(root))
     symbols = alternation(kept_symbols(root))
+    policy = root / "tools/scripts/vellum_policy.json"
+    areas = "|".join(vellum_policy.names(policy))
+    stems = vellum_policy.alternation(policy)
     return {
+        PRODUCT_INCLUDE: (
+            r"#\s*(?:include|import)\s*[<\"](?:pulp/(?:" + areas + r")/|" + VENDOR_INCLUDE_PREFIXES + r")"
+        ),
+        PRODUCT_SYMBOL: r"\bpulp::(?:" + areas + r")\b|\bpulp[-_](?:" + stems + r")\b",
         KEPT_INCLUDE: (
             r"#\s*(?:include|import)\s*[<\"](?:pulp/view/(?:audio/|(?:widgets/)?(?:"
             + BASE_KEPT_VIEW_NAMES
@@ -157,6 +176,8 @@ def approved_exceptions(root: Path, content_patterns: dict[str, str]) -> list[di
 def generate(root: Path) -> dict:
     table = json.loads((root / TABLE).read_text(encoding="utf-8"))
     rules = derived_rules(root)
+    table["content_patterns"][PRODUCT_INCLUDE] = rules[PRODUCT_INCLUDE]
+    table["content_patterns"][PRODUCT_SYMBOL] = rules[PRODUCT_SYMBOL]
     table["content_patterns"][KEPT_INCLUDE] = rules[KEPT_INCLUDE]
     table["content_patterns"][KEPT_SYMBOL] = rules[KEPT_SYMBOL]
     table["path_patterns"][KEPT_FILE] = rules[KEPT_FILE]

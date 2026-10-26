@@ -2067,6 +2067,8 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
         }
         record_if("native_nodes_type_scaled", tree.type_scaled);
         record_if("native_nodes_type_scale_refused", tree.type_scale_refused);
+        record_if("native_nodes_paint_scaled", tree.paint_scaled);
+        record_if("native_nodes_paint_scale_refused", tree.paint_scale_refused);
         record_if("native_nodes_keyed_anchors", tree.keyed_anchors);
         // A duplicated `data-pulp-key` cannot identify either sibling, so both
         // keep positional anchors and a reorder would move edits between them.

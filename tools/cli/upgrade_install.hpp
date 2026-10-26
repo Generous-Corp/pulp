@@ -474,6 +474,8 @@ inline constexpr std::string_view browser_capture_runtime_files[]{
     "capture.mjs",
     // The capture imports this to read the UA canvas colour Chromium paints.
     "document_canvas.mjs",
+    // The capture imports this to carry the url() @font-face files a page loads.
+    "font_faces.mjs",
     // The capture imports this to decide whether a form control kept the
     // platform theme or took the author's styling.
     "form_control_theme.mjs",
