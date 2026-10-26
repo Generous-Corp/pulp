@@ -385,12 +385,12 @@ def borrowed_watch_coverage(root: pathlib.Path, base: str, head: str, *,
         if not carriers:
             return []  # this commit is the branch's own: it has its own event
         others |= carriers
-    # A carrier only lends coverage when this branch's own part beyond it,
-    # merge-base(carrier, head)..head, affects a watched family and adds no
-    # event. That drops a child stacked on an older head of this branch (this
-    # branch is the parent, and its later commits are its review fixes) and
-    # a stale copy of this branch under another name (takeover/, backup/),
-    # as long as what followed them is unwatched.
+    # A carrier only lends coverage when this branch's own part beyond it (its
+    # commits that neither the carrier nor the base holds) affects a watched
+    # family and adds no event. That drops a child stacked on an older head of
+    # this branch (this branch is the parent, and its later commits are its
+    # review fixes) and a stale copy of this branch under another name
+    # (takeover/, backup/), as long as what followed them is unwatched.
     try:
         scopes, _raw = checker.load_acceptance(root)
     except Exception:
@@ -399,20 +399,27 @@ def borrowed_watch_coverage(root: pathlib.Path, base: str, head: str, *,
         return []
     return sorted(carrier for carrier in others
                   if _own_part_unevented(root, checker, scopes, carrier,
-                                         descendant_of, prefix + "/"))
+                                         descendant_of, base_sha, prefix + "/"))
 
 
 def _own_part_unevented(root: pathlib.Path, checker, scopes, carrier: str,
-                        head: str, event_prefix: str) -> bool:
-    fork = _git(root, "merge-base", carrier, head)
-    if not fork:
+                        head: str, base: str, event_prefix: str) -> bool:
+    """Whether ``head``'s commits that neither ``carrier`` nor ``base`` holds
+    affect a watched family without adding an event. A commit set, not a
+    merge-base diff: a PR that merged main after the carrier forked would
+    otherwise count main's own watched changes as its part. Merge commits
+    are skipped for the same reason."""
+    log = _git(root, "log", "--no-merges", "--format=", "--name-status",
+               head, f"^{carrier}", f"^{base}")
+    if log is None:
         return False
+    changes = [line.split("\t") for line in log.splitlines() if "\t" in line]
+    # A rename or copy line is "R100\told\tnew": the new path is the last field.
+    if any(fields[0] == "A" and fields[-1].startswith(event_prefix) for fields in changes):
+        return False
+    changed = {path for fields in changes for path in fields[1:]
+               if not path.startswith(event_prefix)}
     try:
-        changes = checker._changes(root, fork, head)
-        if any(status == "A" and path.startswith(event_prefix)
-               for status, path in changes):
-            return False
-        changed = {path for _status, path in changes if not path.startswith(event_prefix)}
         return bool(checker._affected(scopes, changed))
     except Exception:
         return False

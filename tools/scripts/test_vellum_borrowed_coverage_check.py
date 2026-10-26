@@ -27,10 +27,22 @@ from test_vellum_watch_preflight import (  # noqa: E402
 ROOT = Path(__file__).resolve().parents[2]
 CHECK = ROOT / "tools" / "scripts" / "vellum_borrowed_coverage_check.py"
 WORKFLOW = ROOT / ".github" / "workflows" / "vellum-freeze-check.yml"
-STEP_NAME = "Refuse watch coverage borrowed from a stacked parent"
+# An unwatched path the branch edits; main's own advance edits UNWATCHED_PATH,
+# so the two never conflict in the candidate merge.
+FOLLOW_UP_PATH = "docs/guides/fixture-follow-up.md"
+STEP_NAME = "Warn on watch coverage borrowed from a stacked parent"
 
 
 class BorrowedCoverageCheckTest(_PreflightRepo, unittest.TestCase):
+    def test_the_follow_up_path_is_unwatched(self) -> None:
+        # Control for the two "passes" cases below: they pass because the
+        # follow-up needs no event, which holds only while it is unwatched.
+        checker = self._import_checker()
+        scopes, _ = checker.load_acceptance(ROOT)
+        self.assertIsNotNone(scopes)
+        self.assertEqual(checker._affected(scopes, {FOLLOW_UP_PATH}), set())
+        self.assertTrue(checker._affected(scopes, {WATCHED_PATH}))
+
     def setUp(self) -> None:
         super().setUp()
         # actions/checkout configures origin; the ignore list is per remote.
@@ -57,7 +69,8 @@ class BorrowedCoverageCheckTest(_PreflightRepo, unittest.TestCase):
         _git(self.repo, "update-ref", "refs/remotes/origin/main",
              _git(self.repo, "rev-parse", "main"))
 
-    def _check(self, source_head: str) -> tuple[int, str]:
+    def _check(self, source_head: str, *extra: str,
+               own_branch: str = "topic") -> tuple[int, str]:
         """Run the check on live main merged with ``source_head``, as CI does."""
         live = _git(self.repo, "rev-parse", "main")
         _git(self.repo, "checkout", "-q", "--detach", live)
@@ -67,11 +80,12 @@ class BorrowedCoverageCheckTest(_PreflightRepo, unittest.TestCase):
                          f"{candidate} {live} {source_head}")
         completed = subprocess.run(
             ["python3", str(CHECK), "--root", str(self.repo), "--base", live,
-             "--head", candidate, "--source-head", source_head, "--own-branch", "topic"],
+             "--head", candidate, "--source-head", source_head, "--own-branch", own_branch,
+             *extra],
             cwd=self.repo, check=False, capture_output=True, text=True, encoding="utf-8")
         return completed.returncode, completed.stdout + completed.stderr
 
-    def test_a_pr_stacked_on_an_unmerged_parent_fails_naming_the_parent(self) -> None:
+    def test_a_pr_stacked_on_an_unmerged_parent_warns_naming_the_parent(self) -> None:
         self._parent_with_event()
         _git(self.repo, "checkout", "-q", "-b", "topic")
         self._write(WATCHED_PATH, "# the parent PR's watched change\n# and topic's\n")
@@ -79,11 +93,52 @@ class BorrowedCoverageCheckTest(_PreflightRepo, unittest.TestCase):
         head = self._push_topic()
         self._advance_main()
         code, output = self._check(head)
-        self.assertEqual(code, 1, output)
-        self.assertIn("FAIL", output)
+        # A warning annotation, not a failure, until the rule is promoted.
+        self.assertEqual(code, 0, output)
+        self.assertIn("::warning title=Vellum borrowed watch coverage::", output)
         self.assertIn("the pull request from parent (origin/parent)", output)
         self.assertIn("Re-run this check after the parent merges", output)
         self.assertNotIn("origin/topic", output)
+        # --fail is the promoted form: the same report exits 1.
+        _git(self.repo, "checkout", "-q", "main")
+        code, output = self._check(head, "--fail")
+        self.assertEqual(code, 1, output)
+        self.assertIn("vellum-borrowed-coverage: FAIL:", output)
+
+    def test_a_parent_that_advanced_after_a_child_stacked_passes(self) -> None:
+        # The child holds the parent's event commit but not the parent's
+        # newer head. The parent's own part beyond the child is a fix that
+        # touches nothing watched, so the parent is not borrowing from it.
+        self._parent_with_event()
+        _git(self.repo, "checkout", "-q", "-b", "child")
+        self._write(WATCHED_PATH, "# the parent PR's watched change\n# and child's\n")
+        _git(self.repo, "update-ref", "refs/remotes/origin/child",
+             self._commit("feat: child, stacked on parent"))
+        _git(self.repo, "checkout", "-q", "parent")
+        self._write(FOLLOW_UP_PATH, "a review fix on the parent\n")
+        head = self._commit("docs: a review fix on the parent")
+        _git(self.repo, "update-ref", "refs/remotes/origin/parent", head)
+        self._advance_main()
+        code, output = self._check(head, "--fail", own_branch="parent")
+        self.assertEqual(code, 0, output)
+        self.assertNotIn("origin/child", output)
+
+    def test_a_stale_copy_under_another_name_passes(self) -> None:
+        # takeover/topic is a copy of this PR at its event commit; the PR then
+        # took one more commit that touches nothing watched.
+        _git(self.repo, "checkout", "-q", "-b", "topic")
+        self._write(WATCHED_PATH, "# a one-line edit under a watched tree\n")
+        self._write(f"{EVENT_DIR_REL}/20260920-fixture.json",
+                    self._event("20260920-fixture", WATCHED_FAMILIES))
+        own = self._commit("feat: touch a watched tree, with its event")
+        _git(self.repo, "update-ref", "refs/remotes/origin/takeover/topic", own)
+        self._write(FOLLOW_UP_PATH, "a follow-up outside every watched tree\n")
+        head = self._commit("docs: a follow-up")
+        _git(self.repo, "update-ref", "refs/remotes/origin/topic", head)
+        self._advance_main()
+        code, output = self._check(head, "--fail")
+        self.assertEqual(code, 0, output)
+        self.assertNotIn("takeover", output)
 
     def test_the_same_pr_passes_once_its_parent_has_merged(self) -> None:
         parent = self._parent_with_event()
@@ -125,38 +180,25 @@ class BorrowedCoverageCheckTest(_PreflightRepo, unittest.TestCase):
         self.assertEqual(code, 0, output)
         self.assertNotIn("FAIL", output)
 
-    def _topic_with_event(self) -> str:
+
+    def test_a_merge_of_main_brings_none_of_mains_paths_in(self) -> None:
+        # The stale copy again, but main then gains a watched change and the
+        # PR merges main. Main's commits are reachable from the PR head; they
+        # are the base's, not the PR's own part beyond the copy.
         _git(self.repo, "checkout", "-q", "-b", "topic")
         self._write(WATCHED_PATH, "# a one-line edit under a watched tree\n")
         self._write(f"{EVENT_DIR_REL}/20260920-fixture.json",
                     self._event("20260920-fixture", WATCHED_FAMILIES))
-        return self._commit("feat: touch a watched tree, with its event")
-
-    def test_a_parent_that_advanced_after_a_child_stacked_on_it_passes(self) -> None:
-        event = self._topic_with_event()
-        # The child holds topic's event commit but not topic's later review
-        # fix, so --no-contains alone does not drop it.
-        _git(self.repo, "checkout", "-q", "-b", "child", event)
-        self._write(UNWATCHED_PATH, "a child PR stacked on topic\n")
-        _git(self.repo, "update-ref", "refs/remotes/origin/child",
-             self._commit("docs: a child PR stacked on topic"))
+        own = self._commit("feat: touch a watched tree, with its event")
+        _git(self.repo, "update-ref", "refs/remotes/origin/takeover/topic", own)
+        _git(self.repo, "checkout", "-q", "main")
+        self._write("tools/import-design/main_side_probe.py", "# main's own watched change\n")
+        self._commit("feat: a watched change that landed on main")
         _git(self.repo, "checkout", "-q", "topic")
-        self._write("docs/topic-review-fix.md", "topic's review fix\n")
-        self._commit("docs: topic's review fix")
-        head = self._push_topic()
-        self._advance_main()
-        code, output = self._check(head)
-        self.assertEqual(code, 0, output)
-        self.assertNotIn("origin/child", output)
-
-    def test_a_stale_copy_of_the_pr_under_another_name_does_not_fail_it(self) -> None:
-        event = self._topic_with_event()
-        _git(self.repo, "update-ref", "refs/remotes/origin/takeover/topic", event)
-        self._write("docs/topic-follow-up.md", "a follow-up\n")
-        self._commit("docs: a follow-up")
-        head = self._push_topic()
-        self._advance_main()
-        code, output = self._check(head)
+        _git(self.repo, "merge", "-q", "--no-ff", "--no-edit", "main")
+        head = _git(self.repo, "rev-parse", "HEAD")
+        _git(self.repo, "update-ref", "refs/remotes/origin/topic", head)
+        code, output = self._check(head, "--fail")
         self.assertEqual(code, 0, output)
         self.assertNotIn("takeover", output)
 

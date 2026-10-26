@@ -128,8 +128,10 @@ jobs:
       # A branch stacked on an unmerged PR passes the watch check on its
       # parent's event, then ejects its merge-queue batch once the parent
       # lands and the queue measures this change alone. merge_group needs no
-      # such step: its base already holds every merged parent.
-      - name: Refuse watch coverage borrowed from a stacked parent
+      # such step: its base already holds every merged parent. It annotates
+      # rather than fails until its hit rate on open PRs has been measured;
+      # --fail promotes it.
+      - name: Warn on watch coverage borrowed from a stacked parent
         if: github.event_name == 'pull_request'
         env:
           PR_HEAD_REF: ${{ github.head_ref }}
