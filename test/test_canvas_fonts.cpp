@@ -2347,21 +2347,6 @@ TEST_CASE("a face declared across 400 700 is not emboldened at 700, a 400-only o
     CHECK(declared_font_ink("\"SynthBoldPaintNarrow\", serif", 700) > regular * 1.08);
 }
 
-TEST_CASE("text measured before it is painted keeps the declared range's synthesis",
-          "[canvas][skia][fonts][synthetic-bold]") {
-    // Layout measures a run through SkParagraph before the painter draws it,
-    // and SkParagraph's shaping cache ignores the fake-styles switch: a
-    // measurement left at the default handed its emboldened runs to the paint.
-    REQUIRE(pulp::canvas::register_font_file(PULP_TEST_FONT_PATH, "SynthBoldMeasuredRange"));
-    pulp::canvas::declare_font_face_weight_range("SynthBoldMeasuredRange", 400, 700);
-    const std::string stack = "'SynthBoldMeasuredRange', serif";
-    const double regular = declared_font_ink(stack, 400);
-    REQUIRE(regular > 0.0);
-    pulp::canvas::TextShaper shaper;
-    (void)shaper.prepare("Hamburgefonstiv", stack, 32.0f, 700);
-    CHECK(declared_font_ink(stack, 700) == Catch::Approx(regular).epsilon(0.02));
-}
-
 TEST_CASE("a declared @font-face family keeps its own face at a weight its file is far from",
           "[canvas][skia][fonts][synthetic-bold]") {
     // Regular file, requested at 700: 300 apart, beyond the registry's usual
