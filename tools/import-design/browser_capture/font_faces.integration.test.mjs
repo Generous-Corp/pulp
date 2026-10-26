@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -108,7 +108,12 @@ test("a bundle's Blob fonts are carried with their authored descriptors and mate
         })();
       </script></body>`);
       const output = path.join(root, "out");
-      await runCapture(script, browser, path.join(root, "panel.html"), root, output, 320, 120);
+      // The flag a plain IR import passes: the faces must not depend on the
+      // executable document being read.
+      await runCapture(script, browser, path.join(root, "panel.html"), root, output, 320, 120,
+        "--omit-materialized-document");
+      await assert.rejects(access(path.join(output, "materialized-document.json")),
+        { code: "ENOENT" });
       const record = JSON.parse(await readFile(path.join(output, "font-faces.json"), "utf8"));
       const digest = sha256(await readFile(path.join(root, "face.ttf")));
       assert.deepEqual(record.faces.map((face) => [face.family, face.weight,

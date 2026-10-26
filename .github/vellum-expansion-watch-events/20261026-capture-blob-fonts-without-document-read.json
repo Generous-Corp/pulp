@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261026-capture-blob-fonts-without-document-read",
+  "created_at": "2026-10-26T04:30:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-output-and-packaging",
+    "design-source-ingest"
+  ],
+  "rationale": "The browser capture no longer reads the materialized document for an import that passes --omit-materialized-document just because the document serves @font-face fonts from Blob URLs. Those faces are already read in the page into font-faces.json, which is the only record the native importer attaches fonts from; the document's font_bindings had no remaining consumer. A plain IR import of a Blob-font bundle keeps the same faces and asset ids and no longer writes materialized-document.json. No lowering rule or DesignIR schema changes, and Chromium stays the oracle.",
+  "tests": [
+    "node --test tools/import-design/browser_capture/font_faces.integration.test.mjs",
+    "ctest --test-dir build -R pulp-browser-capture-node-integration",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

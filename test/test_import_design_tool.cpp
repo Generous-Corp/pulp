@@ -3811,8 +3811,8 @@ TEST_CASE("generic browser HTML supplies the reference for --fail-below",
 
 TEST_CASE("a plain ir-json import keeps the fonts a page serves from Blob URLs",
           "[import][browser][fonts]") {
-    // The materialized document is skipped for an ir-json import, but a page
-    // that serves its @font-face fonts from Blob URLs records them only there.
+    // The materialized document is skipped for an ir-json import, so a page's
+    // Blob URL fonts have to reach the IR through the faces read in the page.
     if (!binary_exists()) {
         SKIP("pulp-import-design not built");
     }
