@@ -7746,6 +7746,7 @@
     "tools/scripts",
     "tools/scripts/agent_capability_manifest.py",
     "tools/scripts/changed_surface_script_families.py",
+    "tools/scripts/gates.sh",
     "tools/scripts/gates_script_inputs.py",
     "tools/scripts/merge_tree_script_state.py",
     "tools/scripts/refresh_push_check.py",
