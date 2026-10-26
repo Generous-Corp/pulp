@@ -7417,6 +7417,14 @@
    ],
    "kind": "python"
   },
+  "nonuniform-head-table": {
+   "entry": "tools/scripts/nonuniform_head_check.py",
+   "inputs": [
+    "core/signal/include/pulp/signal/convolver_non_uniform.hpp",
+    "tools/scripts/nonuniform_head_check.py"
+   ],
+   "kind": "python"
+  },
   "object-deps-selftest": {
    "entry": "tools/ci/test_object_deps.py",
    "inputs": [

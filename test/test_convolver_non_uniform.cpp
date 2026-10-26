@@ -364,3 +364,72 @@ TEST_CASE("NonUniformPartitionedConvolver reset clears state",
         REQUIRE_THAT(out[i], WithinAbs(ir[i], 1e-4f));
     }
 }
+
+TEST_CASE("NonUniformPartitionedConvolver default tail multiplier follows the measured table",
+          "[signal][convolver][non-uniform]") {
+    using Conv = NonUniformPartitionedConvolver;
+#if PULP_NON_UNIFORM_MEASURED_TABLE
+    // Corners of the receipt table (docs/validation/nonuniform-head/).
+    REQUIRE(Conv::choose_tail_multiplier(96000, 16) == 64);
+    REQUIRE(Conv::choose_tail_multiplier(48000, 32) == 32);
+    REQUIRE(Conv::choose_tail_multiplier(96000, 32) == 64);
+    REQUIRE(Conv::choose_tail_multiplier(4096, 128) == 4);
+    REQUIRE(Conv::choose_tail_multiplier(48000, 512) == 8);
+    // An IR length takes the nearest measured column on a log scale: the
+    // 4096/16384 boundary is their geometric mean, 8192.
+    REQUIRE(Conv::choose_tail_multiplier(8192, 64) == 8);
+    REQUIRE(Conv::choose_tail_multiplier(8193, 64) == 16);
+    REQUIRE(Conv::choose_tail_multiplier(1000000, 16) == 64);
+    // Non-power-of-two blocks use the row they round up to.
+    REQUIRE(Conv::choose_tail_multiplier(48000, 17) == Conv::choose_tail_multiplier(48000, 32));
+    // Unmeasured block sizes keep the fixed default.
+    REQUIRE(Conv::choose_tail_multiplier(48000, 8) == Conv::kDefaultTailMultiplier);
+    REQUIRE(Conv::choose_tail_multiplier(48000, 1024) == Conv::kDefaultTailMultiplier);
+#else
+    REQUIRE(Conv::choose_tail_multiplier(48000, 32) == Conv::kDefaultTailMultiplier);
+#endif
+    // Double precision is not measured.
+    REQUIRE(NonUniformPartitionedConvolver64::choose_tail_multiplier(48000, 32) ==
+            NonUniformPartitionedConvolver64::kDefaultTailMultiplier);
+
+    // The three-argument load_ir() uses the table; the four-argument one keeps
+    // the caller's K.
+    const auto ir = make_decaying_ir(48000, 0.0002f);
+    Conv automatic;
+    automatic.load_ir(ir.data(), ir.size(), 32);
+    REQUIRE(automatic.tail_multiplier() == Conv::choose_tail_multiplier(ir.size(), 32));
+    REQUIRE(automatic.head_samples() == automatic.tail_multiplier() * 32);
+    Conv pinned;
+    pinned.load_ir(ir.data(), ir.size(), 32, 4);
+    REQUIRE(pinned.tail_multiplier() == 4);
+}
+
+TEST_CASE(
+    "NonUniformPartitionedConvolver default tail multiplier keeps the uniform engine's output",
+    "[signal][convolver][non-uniform]") {
+    // The table changes only where the IR splits between the stages, so the
+    // output must stay at the uniform engine's own float rounding: measured at
+    // most 3.9e-6 of the output RMS over the whole receipt matrix.
+    for (const std::size_t block : {std::size_t{16}, std::size_t{64}, std::size_t{512}}) {
+        const auto ir = make_decaying_ir(16384, 0.0004f);
+        const std::size_t total = 8 * 1024 + 4 * 16 * block;
+        const auto input = make_random_block(total, 11u + static_cast<uint32_t>(block));
+        NonUniformPartitionedConvolver automatic;
+        automatic.load_ir(ir.data(), ir.size(), block);
+        NonUniformPartitionedConvolver uniform;
+        uniform.load_ir(ir.data(), ir.size(), block, 1);
+        const auto a = run_blocks(automatic, input, block, total);
+        const auto u = run_blocks(uniform, input, block, total);
+        double err = 0.0, energy = 0.0;
+        for (std::size_t i = 0; i < total; ++i) {
+            err = std::max(err, static_cast<double>(std::abs(a[i] - u[i])));
+            energy += static_cast<double>(u[i]) * u[i];
+        }
+        const double rms = std::sqrt(energy / static_cast<double>(total));
+        INFO("block " << block << " K " << automatic.tail_multiplier() << " max |diff| " << err
+                      << " rms " << rms);
+        REQUIRE(rms > 0.0);
+        REQUIRE(err < 2e-5 * rms);
+        REQUIRE(automatic.block_size_violations() == 0);
+    }
+}

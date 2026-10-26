@@ -42,11 +42,26 @@
 #include <pulp/signal/convolver_messages.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <type_traits>
 #include <vector>
+
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
+// The tail-multiplier table was measured on Apple Silicon Macs with the
+// Accelerate backend in single precision; it applies only there.
+#if defined(PULP_SIMD_DEFAULT_BACKEND_ACCELERATE) && defined(__aarch64__) &&                       \
+    defined(TARGET_OS_OSX) && TARGET_OS_OSX
+#define PULP_NON_UNIFORM_MEASURED_TABLE 1
+#else
+#define PULP_NON_UNIFORM_MEASURED_TABLE 0
+#endif
 
 namespace pulp::signal {
 
@@ -64,11 +79,79 @@ class NonUniformPartitionedConvolverT {
 public:
     NonUniformPartitionedConvolverT() = default;
 
-    /// Reasonable default tail multiplier (K). The head stage covers
-    /// the first K small-block partitions of the IR so that the tail
-    /// stage's input-buffering latency (K small blocks) exactly
-    /// cancels the IR-tap offset, producing seamless alignment.
+    /// Tail multiplier (K) used where choose_tail_multiplier() has no
+    /// measurement. The head stage covers the first K small-block partitions
+    /// of the IR so that the tail stage's input-buffering latency (K small
+    /// blocks) exactly cancels the IR-tap offset, producing seamless
+    /// alignment.
     static constexpr std::size_t kDefaultTailMultiplier = 4;
+
+    /// The tail multiplier load_ir() uses when none is given: the head length
+    /// (K · B samples) that minimises the mean per-frame cost for this IR
+    /// length and block size.
+    ///
+    /// A longer head moves more of the IR into the per-block stage, whose
+    /// multiply-accumulate grows with it; a shorter one fires the tail's
+    /// large FFT more often. The balance point grows with both the IR and the
+    /// block: about 1024 samples of head for a one-second IR at 16- to
+    /// 32-frame blocks, up to 4096 at 512 frames. A fixed K of 4 sits far
+    /// from it for long IRs (1.5-14x the cost at 48000-96000 taps).
+    ///
+    /// The table is measured in single precision on Apple Silicon Macs with
+    /// the Accelerate backend (M1 Max over three runs, M5 Max over five) for IRs of 4096,
+    /// 16384, 48000 and 96000 taps and blocks of 16 to 512 frames (receipt:
+    /// docs/validation/nonuniform-head/; a test recomputes it from those
+    /// files). Each entry is the K whose worst cost ratio to that chip's
+    /// cheapest K is lowest over the chips, each chip's cost being its median over
+    /// every round of its runs. An IR length uses the row of the
+    /// nearest measured length on a log scale. Blocks outside 16-512 frames,
+    /// other architectures and operating systems, other SIMD backends, and
+    /// double precision keep kDefaultTailMultiplier until they are measured.
+    static constexpr std::size_t choose_tail_multiplier(std::size_t ir_length,
+                                                        std::size_t block_size) noexcept {
+#if PULP_NON_UNIFORM_MEASURED_TABLE
+        if constexpr (!std::is_same_v<SampleType, float>) {
+            (void)ir_length;
+            (void)block_size;
+            return kDefaultTailMultiplier;
+        } else {
+            // Columns: IRs nearest 4096, 16384, 48000 and 96000 taps.
+            constexpr std::array<std::uint64_t, 4> kMeasuredIr{4096, 16384, 48000, 96000};
+            std::size_t column = 0;
+            const auto n = static_cast<std::uint64_t>(ir_length);
+            while (column + 1 < kMeasuredIr.size() &&
+                   n * n > kMeasuredIr[column] * kMeasuredIr[column + 1])
+                ++column;
+            switch (detail::convolver_block_size(block_size)) {
+            case 16:
+                return std::array<std::size_t, 4>{16, 32, 64, 64}[column];
+            case 32:
+                return std::array<std::size_t, 4>{8, 32, 32, 64}[column];
+            case 64:
+                return std::array<std::size_t, 4>{8, 16, 32, 64}[column];
+            case 128:
+                return std::array<std::size_t, 4>{4, 8, 16, 32}[column];
+            case 256:
+                return std::array<std::size_t, 4>{16, 8, 16, 16}[column];
+            case 512:
+                return std::array<std::size_t, 4>{8, 8, 8, 16}[column];
+            default:
+                return kDefaultTailMultiplier;
+            }
+        }
+#else
+        (void)ir_length;
+        (void)block_size;
+        return kDefaultTailMultiplier;
+#endif
+    }
+
+    /// Load an impulse response with the tail multiplier
+    /// choose_tail_multiplier() picks for its length and the block size.
+    /// Allocates and FFTs inline — call off the audio thread.
+    void load_ir(const SampleType* ir, std::size_t ir_length, std::size_t block_size) {
+        load_ir(ir, ir_length, block_size, choose_tail_multiplier(ir_length, block_size));
+    }
 
     /// Load an impulse response into both stages.
     ///
@@ -87,11 +170,11 @@ public:
     /// @param block_size      Audio callback block size (rounded up to
     ///                        the next power of two for the radix-2 FFT).
     /// @param tail_multiplier K factor for the tail-stage block size
-    ///                        (default 4; rounded up to power of 2;
-    ///                        K=1 degenerates to uniform partitioning).
-    void load_ir(const SampleType* ir, std::size_t ir_length,
-                 std::size_t block_size,
-                 std::size_t tail_multiplier = kDefaultTailMultiplier) {
+    ///                        (rounded up to power of 2; K=1 degenerates to
+    ///                        uniform partitioning). The three-argument
+    ///                        overload picks it with choose_tail_multiplier().
+    void load_ir(const SampleType* ir, std::size_t ir_length, std::size_t block_size,
+                 std::size_t tail_multiplier) {
         reset_state();
         if (ir == nullptr || ir_length == 0 || block_size == 0) return;
 

@@ -1026,7 +1026,8 @@ int usage() {
     std::fprintf(stderr,
                  "usage: pulp-dsp-throughput-benchmark [--json PATH] [--filter SUBSTRING]\n"
                  "                                     [--seconds S] [--commit SHA] [--host NAME]\n"
-                 "                                     [--smoke] [--convolver-crossover CSV]\n");
+                 "                                     [--smoke] [--convolver-crossover CSV]\n"
+                 "                                     [--nonuniform-head CSV]\n");
     return 2;
 }
 
@@ -1132,9 +1133,89 @@ int run_convolver_crossover(const std::string& path) {
     return 0;
 }
 
+/// The data behind NonUniformPartitionedConvolver's tail-multiplier table:
+/// every power-of-two K whose head (K x B samples) fits the IR, on identical
+/// input, interleaved over five rounds, for IR lengths x block sizes. Writes
+/// CSV rows `ir,B,K,head,round,mean_ns_frame,p99_ns_call,max_ns_call,
+/// max_abs_vs_K1,ref_rms`: the mean cost per frame over the run, the 99th
+/// percentile and maximum of the per-callback times, and each K's largest
+/// output difference from K = 1 (the uniform engine) beside that output's RMS.
+int run_nonuniform_head(const std::string& path) {
+    std::FILE* csv = std::fopen(path.c_str(), "w");
+    if (csv == nullptr) {
+        std::fprintf(stderr, "error: could not write %s\n", path.c_str());
+        return 1;
+    }
+    std::fprintf(csv,
+                 "ir,B,K,head,round,mean_ns_frame,p99_ns_call,max_ns_call,max_abs_vs_K1,ref_rms\n");
+    constexpr int kRounds = 5;
+    for (const int ir_len : {4096, 16384, 48000, 96000}) {
+        const auto ir = decaying_ir(std::size_t(ir_len), 23, 6.0f);
+        for (const int B : {16, 32, 64, 128, 256, 512}) {
+            std::vector<int> ks;
+            for (int K = 1; K <= 256 && std::size_t(K) * std::size_t(B) <= std::size_t(ir_len);
+                 K *= 2)
+                ks.push_back(K);
+            // At least four firings of the largest tail and one second of audio.
+            const int frames = std::max(int(kSampleRate), 4 * ks.back() * B) / B * B;
+            std::vector<float> in(static_cast<std::size_t>(frames));
+            std::uint32_t seed = 0x9E3779B9u ^ std::uint32_t(ir_len * 31 + B);
+            for (auto& v : in) {
+                seed = seed * 1664525u + 1013904223u;
+                v = float(seed >> 8) / 8388608.0f - 1.0f;
+            }
+            std::vector<float> ref(in.size()), out(in.size());
+            {
+                NonUniformPartitionedConvolver uniform;
+                uniform.load_ir(ir.data(), ir.size(), std::size_t(B), 1);
+                for (int o = 0; o < frames; o += B)
+                    uniform.process(in.data() + o, ref.data() + o, std::size_t(B));
+            }
+            double ref_rms = 0.0;
+            for (const float v : ref)
+                ref_rms += double(v) * double(v);
+            ref_rms = std::sqrt(ref_rms / frames);
+            std::vector<NonUniformPartitionedConvolver> conv(ks.size());
+            for (std::size_t k = 0; k < ks.size(); ++k)
+                conv[k].load_ir(ir.data(), ir.size(), std::size_t(B), std::size_t(ks[k]));
+            std::vector<double> calls(static_cast<std::size_t>(frames / B));
+            for (int r = 0; r < kRounds; ++r) {
+                for (std::size_t kk = 0; kk < ks.size(); ++kk) {
+                    // Alternate the order each round so drift is shared.
+                    const std::size_t k = (r & 1) ? ks.size() - 1 - kk : kk;
+                    conv[k].reset();
+                    for (int o = 0, c = 0; o < frames; o += B, ++c) {
+                        const auto t0 = Clock::now();
+                        conv[k].process(in.data() + o, out.data() + o, std::size_t(B));
+                        calls[std::size_t(c)] =
+                            std::chrono::duration<double, std::nano>(Clock::now() - t0).count();
+                    }
+                    double sum = 0.0;
+                    for (const double v : calls)
+                        sum += v;
+                    std::vector<double> sorted = calls;
+                    std::sort(sorted.begin(), sorted.end());
+                    double err = 0.0;
+                    for (std::size_t i = 0; i < out.size(); ++i)
+                        err = std::max(err, double(std::fabs(out[i] - ref[i])));
+                    std::fprintf(csv, "%d,%d,%d,%d,%d,%.3f,%.0f,%.0f,%.3g,%.4g\n", ir_len, B, ks[k],
+                                 ks[k] * B, r, sum / frames,
+                                 sorted[std::size_t(double(sorted.size() - 1) * 0.99)],
+                                 sorted.back(), err, ref_rms);
+                }
+                std::fflush(csv);
+            }
+        }
+    }
+    std::fclose(csv);
+    std::printf("wrote %s\n", path.c_str());
+    return 0;
+}
+
 int main(int argc, char** argv) {
     bool smoke = false;
     std::string crossover_path;
+    std::string nonuniform_head_path;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         const auto value = [&]() -> std::string {
@@ -1151,6 +1232,8 @@ int main(int argc, char** argv) {
         else if (arg == "--smoke") smoke = true;
         else if (arg == "--convolver-crossover")
             crossover_path = value();
+        else if (arg == "--nonuniform-head")
+            nonuniform_head_path = value();
         else return usage();
     }
     if (g_options.commit.empty())
@@ -1169,6 +1252,8 @@ int main(int argc, char** argv) {
     }
     if (!crossover_path.empty())
         return run_convolver_crossover(crossover_path);
+    if (!nonuniform_head_path.empty())
+        return run_nonuniform_head(nonuniform_head_path);
     const double timer_overhead_ns = measure_timer_overhead_ns();
     std::printf("dsp throughput: %s, %s, timer overhead %.1f ns\n", platform_tag().c_str(),
                 cpu_brand().c_str(), timer_overhead_ns);
