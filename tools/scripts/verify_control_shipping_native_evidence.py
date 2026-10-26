@@ -268,7 +268,15 @@ def aggregate(args: argparse.Namespace) -> dict[str, Any]:
                 raise EvidenceError(f"native shipping leg report has invalid artifact size: {leg}")
         legs[leg] = evidence
 
-    missing = sorted(EXPECTED_LEGS.keys() - legs.keys())
+    # A leg the workflow left out on purpose (the one-VM Windows x64 lane was
+    # busy) is named, not silently missing, and the aggregate says incomplete.
+    deferred = sorted(set(args.deferred_leg or ()))
+    for leg in deferred:
+        if leg not in EXPECTED_LEGS:
+            raise EvidenceError(f"unknown deferred native shipping leg {leg!r}")
+        if leg in legs:
+            raise EvidenceError(f"deferred native shipping leg has evidence: {leg}")
+    missing = sorted(EXPECTED_LEGS.keys() - legs.keys() - set(deferred))
     if missing:
         raise EvidenceError(f"missing native shipping leg evidence: {', '.join(missing)}")
 
@@ -292,7 +300,8 @@ def aggregate(args: argparse.Namespace) -> dict[str, Any]:
 
     result = {
         "schema": AGGREGATE_SCHEMA,
-        "complete": True,
+        "complete": not deferred,
+        "deferred_legs": deferred,
         "aax": aax,
         "legs": [legs[name] for name in sorted(legs)],
         "verdict": "pass",
@@ -320,6 +329,8 @@ def parser() -> argparse.ArgumentParser:
     combined = commands.add_parser("aggregate")
     combined.add_argument("--evidence-root", required=True)
     combined.add_argument("--output", required=True)
+    combined.add_argument("--deferred-leg", action="append",
+                          help="a leg the workflow left out on purpose; repeatable")
     combined.set_defaults(handler=aggregate)
     return root
 

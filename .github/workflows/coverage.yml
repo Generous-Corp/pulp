@@ -177,7 +177,8 @@ jobs:
   # as sanitizers.yml). Each OS resolves to, in priority order:
   #   1. workflow_dispatch input (e.g. linux_runner_selector_json)
   #   2. repo variable override (e.g. PULP_COVERAGE_LINUX_RUNS_ON_JSON)
-  #   3. hard-coded default label (ubuntu-latest / macos-latest / windows-latest)
+  #   3. hard-coded default label (ubuntu-latest / macos-latest); Windows
+  #      defaults to the self-hosted Windows x64 lane instead (see below)
   # No behavior change when the repo variables are unset — matches today's
   # single-job baseline on Linux and adds macOS/Windows on the standard
   # GitHub-hosted labels. Set PULP_COVERAGE_<OS>_RUNS_ON_JSON to route any
@@ -187,10 +188,15 @@ jobs:
   resolve-runners:
     if: github.head_ref != 'release/version-bump' && (github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # The Windows x64 lane backlog probe lists this repository's runs.
+      actions: read
     outputs:
       linux_runs_on: ${{ steps.resolve.outputs.linux_runs_on }}
       macos_runs_on: ${{ steps.resolve.outputs.macos_runs_on }}
       windows_runs_on: ${{ steps.resolve.outputs.windows_runs_on }}
+      windows_route: ${{ steps.resolve.outputs.windows_route }}
       android_kotlin_runs_on: ${{ steps.resolve.outputs.android_kotlin_runs_on }}
     steps:
       - uses: actions/checkout@v7
@@ -205,6 +211,9 @@ jobs:
           LINUX_RUNS_ON_JSON: ${{ vars.PULP_COVERAGE_LINUX_RUNS_ON_JSON }}
           MACOS_RUNS_ON_JSON: ${{ vars.PULP_COVERAGE_MACOS_RUNS_ON_JSON }}
           WINDOWS_RUNS_ON_JSON: ${{ vars.PULP_COVERAGE_WINDOWS_RUNS_ON_JSON }}
+          WINDOWS_X64_RUNS_ON_JSON: ${{ vars.PULP_LOCAL_WINDOWS_X64_RUNS_ON_JSON || '' }}
+          ALLOW_HOSTED_WINDOWS: ${{ vars.PULP_ALLOW_HOSTED_WINDOWS || '' }}
+          GH_TOKEN: ${{ github.token }}
           ANDROID_KOTLIN_RUNS_ON_JSON: ${{ vars.PULP_COVERAGE_ANDROID_KOTLIN_RUNS_ON_JSON }}
           PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           THIS_REPO: ${{ github.repository }}
@@ -248,21 +257,41 @@ jobs:
               ANDROID_KOTLIN_RUNS_ON_JSON \
               macos-latest)
           fi
+          # Windows coverage is best-effort (see the coverage job), and its
+          # instrumented build is the longest job in the workflow. It runs on
+          # the self-hosted Windows x64 lane, which is one VM, so:
+          #   - a pull request, fork or not, leaves it out unless
+          #     PULP_ALLOW_HOSTED_WINDOWS=1, which runs it on GitHub-hosted
+          #     windows-latest as before;
+          #   - the schedule leaves it out while another Windows x64 job is
+          #     already waiting (--max-backlog 1);
+          #   - a dispatch always queues it.
+          # A dispatch input, then PULP_COVERAGE_WINDOWS_RUNS_ON_JSON, override
+          # the lane. tools/scripts/windows_runner_selector.py polices both.
+          # Repository variables resolve for fork pull requests, so a pull
+          # request never reads the override.
+          windows_selector="${EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON:-${WINDOWS_RUNS_ON_JSON:-}}"
           if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
-            # Keep PR Windows coverage on GitHub-hosted runners until the
-            # Namespace Windows queue is reliably assigning jobs again.
-            windows='"windows-latest"'
-          else
-            windows=$(resolve \
-              "Coverage (Windows)" \
-              EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON \
-              WINDOWS_RUNS_ON_JSON \
-              windows-latest)
+            windows_selector=""
+          fi
+          windows_route=$(python3 tools/scripts/windows_runner_selector.py --route \
+            --selector "$windows_selector" \
+            --default-selector "$WINDOWS_X64_RUNS_ON_JSON" \
+            --allow-hosted "$ALLOW_HOSTED_WINDOWS" \
+            --head-repo "$PR_HEAD_REPO" \
+            --max-backlog 1)
+          echo "$windows_route"
+          windows=$(printf '%s\n' "$windows_route" | sed -n 's/^runs_on=//p')
+          windows_leg=$(printf '%s\n' "$windows_route" | sed -n 's/^route=//p')
+          windows_reason=$(printf '%s\n' "$windows_route" | sed -n 's/^route_reason=//p')
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ] && [ "$windows_reason" != hosted-opt-in ]; then
+            windows_leg=skip
           fi
           {
             echo "linux_runs_on=${linux}"
             echo "macos_runs_on=${macos}"
             echo "windows_runs_on=${windows}"
+            echo "windows_route=${windows_leg}"
             echo "android_kotlin_runs_on=${android_kotlin}"
           } >>"${GITHUB_OUTPUT}"
 
@@ -320,6 +349,7 @@ jobs:
           LINUX_RUNS_ON_JSON: ${{ needs.resolve-runners.outputs.linux_runs_on }}
           MACOS_RUNS_ON_JSON: ${{ needs.resolve-runners.outputs.macos_runs_on }}
           WINDOWS_RUNS_ON_JSON: ${{ needs.resolve-runners.outputs.windows_runs_on }}
+          WINDOWS_ROUTE: ${{ needs.resolve-runners.outputs.windows_route }}
         shell: bash
         run: |
           set -euo pipefail
@@ -342,11 +372,17 @@ jobs:
           windows=$(jq -nc \
             --argjson runs_on "${WINDOWS_RUNS_ON_JSON}" \
             '{os:"windows", label:"Windows", flag:"os-windows", runs_on_json:($runs_on|tojson)}')
-          include=$(jq -nc \
-            --argjson l "${linux}" \
-            --argjson m "${macos}" \
-            --argjson w "${windows}" \
-            '[$l, $m, $w]')
+          # The resolver drops Windows when the Windows x64 lane is busy or
+          # the event is a pull request without the hosted opt-in.
+          if [ "${WINDOWS_ROUTE}" = skip ]; then
+            include=$(jq -nc --argjson l "${linux}" --argjson m "${macos}" '[$l, $m]')
+          else
+            include=$(jq -nc \
+              --argjson l "${linux}" \
+              --argjson m "${macos}" \
+              --argjson w "${windows}" \
+              '[$l, $m, $w]')
+          fi
           matrix=$(jq -nc --argjson inc "${include}" '{include:$inc}')
           echo "matrix=${matrix}" >> "${GITHUB_OUTPUT}"
           echo "Coverage matrix for event '${EVENT_NAME}': ${matrix}"

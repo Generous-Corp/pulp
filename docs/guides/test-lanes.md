@@ -15,8 +15,8 @@ single source of truth for that model.
 | **API contracts** (`api-contracts`) | every PR + every merge group | advisory pending promotion (see below) | no | the Doxygen strict pass over the catalogued public headers, ~3 s of work |
 | **iOS compile gate** (inside `macos`'s Build step) | PRs + merge groups that touch an iOS-only surface (`ios_surface` in `classify_changes.py`: `apple/**`, iOS sources or sources branching on an iOS target, non-test CMake, dependency pins, the gate's own wiring); nightly on main; every release tag | yes when it runs on a PR or merge group; the nightly opens a tracking issue; the release publish requires it | iOS AUv3 GPU smoke example | the two-SDK iOS compile (`test/cmake/test_ios_compile_gate.sh`). Shared code is compiled for macOS by the same job, so it no longer runs the per-PR iOS gate |
 | **Nightly full build** | schedule (nightly) | no — **informational** | yes | everything, including all five excluded label groups; results eyeballed, build failures file an issue |
-| **cross-platform-check** | nightly (07:17 UTC) on `main`, plus `workflow_dispatch`; x86-64 Linux, arm64 Linux, x86-64 Windows on GitHub-hosted runners | advisory (failures on `main` file a per-platform tracking issue; dispatches from other branches run in parallel, one concurrency group per ref) | no | core tests, excludes `validation` + `slow` **only** — so the timing group does run here, off the reference platform. **The only lane that runs the Windows ctest suite** |
-| **Windows on a PR** (`windows` check) | every PR | advisory | no | **nothing on Windows.** On `pull_request` the `windows` check is an Ubuntu aggregate job that exits green with "Windows runs in nightly/explicit validation, not on the PR head": no Windows compile, zero tests. The `build.yml` `Windows (x64)` build + ctest leg is skipped on `pull_request` and `merge_group` (it runs on a push to `main` and on `workflow_dispatch` only when GitHub-hosted Windows is opted in: `allow_hosted_windows=true`, a self-hosted `windows_runner_selector_json`, or `PULP_ALLOW_HOSTED_WINDOWS=1`), and the compile-only `Windows MSVC release-path gate`, `Windows MIDI Services SDK compile-gate` and `Windows BLE compile-gate` are skipped on `pull_request`, `merge_group` and push, running only on a `workflow_dispatch` that opts in to hosted Windows. The one PR-time Windows job is `Windows CLI compile (MSVC)` (`windows-cli-compile.yml`): compile-only, `pulp-cli` and `pulp-mcp` only, and only when `windows_cli_compile_scope.py` says the change can reach them. A green `windows` on a PR is not evidence that Windows compiles or passes tests |
+| **cross-platform-check** | nightly (07:17 UTC) on `main`, plus `workflow_dispatch`; x86-64 Linux, arm64 Linux, x86-64 Linux and arm64 Linux on GitHub-hosted runners, x86-64 Windows on the self-hosted Windows x64 lane (GitHub-hosted only with `PULP_ALLOW_HOSTED_WINDOWS=1`) | advisory (failures on `main` file a per-platform tracking issue; dispatches from other branches run in parallel, one concurrency group per ref) | no | core tests, excludes `validation` + `slow` **only** — so the timing group does run here, off the reference platform. **The only lane that runs the Windows ctest suite** |
+| **Windows on a PR** (`windows` check) | every PR | advisory | no | **nothing on Windows.** On `pull_request` the `windows` check is an Ubuntu aggregate job that exits green with "Windows runs in nightly/explicit validation, not on the PR head": no Windows compile, zero tests. The `build.yml` `Windows (x64)` build + ctest leg is skipped on `pull_request` and `merge_group` (it runs on `workflow_dispatch` on the self-hosted Windows x64 lane, and hosted only when opted in: `allow_hosted_windows=true` or `PULP_ALLOW_HOSTED_WINDOWS=1`, which also adds it to a push to `main`), and the compile-only `Windows MSVC release-path gate`, `Windows MIDI Services SDK compile-gate` and `Windows BLE compile-gate` are skipped on `pull_request`, `merge_group` and push, running only on a `workflow_dispatch` that opts in to hosted Windows. The one PR-time Windows job is `Windows CLI compile (MSVC)` (`windows-cli-compile.yml`): compile-only, `pulp-cli` and `pulp-mcp` only, and only when `windows_cli_compile_scope.py` says the change can reach them. A green `windows` on a PR is not evidence that Windows compiles or passes tests |
 
 The required gate is **serialized on self-hosted macOS runners** and takes
 about 40 min (median 39.8 min of wall-clock over 45 sampled `pull_request`
@@ -681,9 +681,16 @@ case inventory with `ctest -N`; the lane remains intentionally narrower than the
 full SignalGraph suite.
 
 Coverage, Intel portability, SCENE3D, example validation, and the control-shipping
-native matrix are advisory hosted lanes. The control-shipping matrix covers
-macOS universal, Linux x64/arm64, and Windows x64/arm64; the Windows ARM leg
-uses the `windows-11-arm` runner and emits `arm64-win` scanner evidence. Its
+native matrix are advisory lanes, hosted except for Windows x64. The
+control-shipping matrix covers macOS universal, Linux x64/arm64, and Windows
+x64/arm64; the Windows ARM leg uses the `windows-11-arm` runner and emits
+`arm64-win` scanner evidence. Its Windows x64 leg, and coverage's Windows leg,
+run on the self-hosted Windows x64 lane, which is one VM: a pull request's
+control-shipping Windows x64 leg is left out (and named as deferred in the
+consolidated evidence) while another Windows x64 job waits, a scheduled
+coverage refresh does the same, and a pull request runs coverage without
+Windows unless `PULP_ALLOW_HOSTED_WINDOWS=1` (`docs/guides/local-ci.md`,
+"What runs on it"). Its
 installed-SDK probe has GPU disabled, so it does not replace Spectr's separate
 Skia/Dawn, DAW, audio, or Perfetto proof. These lanes run from the nightly
 `schedule` on `main` and from `workflow_dispatch` on an approved PR head; they

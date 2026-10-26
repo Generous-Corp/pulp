@@ -655,9 +655,19 @@ Still out of scope today:
 
 ## Cross-platform matrix
 
-The native coverage matrix runs `{ubuntu-latest, macos-latest,
-windows-latest}` on scheduled refreshes and workflow dispatch so the Codecov
+The native coverage matrix runs `{ubuntu-latest, macos-latest}` plus the
+Windows leg on scheduled refreshes and workflow dispatch so the Codecov
 branch record receives the full cross-OS picture.
+
+The Windows leg runs on the self-hosted Windows x64 lane
+(`docs/guides/local-ci.md`, "What runs on it"). That lane is one VM, so a
+scheduled refresh leaves Windows out while another Windows x64 job is queued
+or running, and a pull request leaves it out entirely. A dispatch always
+queues it. `PULP_ALLOW_HOSTED_WINDOWS=1` runs it on GitHub-hosted
+`windows-latest` instead, which is the only way a pull request gets it;
+`PULP_COVERAGE_WINDOWS_RUNS_ON_JSON` or the `windows_runner_selector_json`
+input pins it to a named runner (a pull request ignores both). Windows stays
+best effort either way, so a left-out leg never fails the refresh.
 
 Each OS leg produces its own `coverage.cobertura.xml` and uploads to
 Codecov with an OS-tag flag. The Linux leg also produces the Python

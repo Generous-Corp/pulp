@@ -58,13 +58,38 @@ jobs:
             --label "dependencies"
 
   # Tier 2: Full build validation (monthly or on-demand)
+  # The Windows leg runs on the self-hosted Windows x64 lane by default;
+  # GitHub-hosted windows-latest only with PULP_ALLOW_HOSTED_WINDOWS=1
+  # (tools/scripts/windows_runner_selector.py).
+  windows-runner:
+    name: Resolve Windows runner
+    if: (github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO) && (inputs.tier == '2')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      runs_on: ${{ steps.resolve.outputs.runs_on }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: tools/scripts/windows_runner_selector.py
+          sparse-checkout-cone-mode: false
+      - name: Resolve the Windows x64 runner
+        id: resolve
+        env:
+          DEFAULT_SELECTOR: ${{ vars.PULP_LOCAL_WINDOWS_X64_RUNS_ON_JSON || '' }}
+          ALLOW_HOSTED: ${{ vars.PULP_ALLOW_HOSTED_WINDOWS || '' }}
+        run: >-
+          python3 tools/scripts/windows_runner_selector.py --route --github-output
+          --default-selector "$DEFAULT_SELECTOR" --allow-hosted "$ALLOW_HOSTED"
+
   build-validation:
     name: Build validation (${{ matrix.package }}) — ${{ matrix.os }}
+    needs: windows-runner
     if: (github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO) && (inputs.tier == '2')
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest, windows-latest]
+        os: [macos-latest, ubuntu-latest, windows-x64]
         package:
           - signalsmith-stretch
           - signalsmith-dsp
@@ -76,7 +101,7 @@ jobs:
           - daisysp
           - fontaudio
           - r8brain-free-src
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'windows-x64' && fromJSON(needs.windows-runner.outputs.runs_on) || matrix.os }}
     steps:
       - uses: actions/checkout@v7
 

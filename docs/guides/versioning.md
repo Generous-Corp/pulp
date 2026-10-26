@@ -575,7 +575,9 @@ protected main's required-check set.
 The coverage matrix runs the instrumented build + a coverage-focused ctest suite under an
 internal time budget (below the job's `timeout-minutes`) enforced by a watchdog
 that terminates the suite before the job cap. When that budget is hit the leg
-drops any partial report and records `budget_hit`. Windows remains advisory,
+drops any partial report and records `budget_hit`. Windows remains advisory
+(and runs on the self-hosted Windows x64 lane; a busy lane or a pull request
+leaves it out, see `docs/guides/coverage.md`),
 but Linux and macOS are receipt-authoritative: their Cobertura verifier still
 runs and fails when the report is absent, so a green workflow cannot hide a
 missing native upload. The shared coverage CTest policy excludes the
