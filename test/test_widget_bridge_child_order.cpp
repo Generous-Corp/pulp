@@ -223,8 +223,10 @@ TEST_CASE("DOM reorder of a keyed row keeps its widget, focus, and applied style
     const View* second_before = bridge.widget(second_id);
     const auto lifetime = second_before->import_binding_lifetime_token();
 
-    // Swap the rows the way a keyed reconciler does, then put them back.
-    engine.evaluate("list.insertBefore(second, first)");
+    // Swap the rows the way a keyed reconciler does, then put them back. Each
+    // move runs through load_script: evaluate() would convert the returned
+    // Element, whose parent and child links are cyclic, and never finish.
+    bridge.load_script("list.insertBefore(second, first);");
     CHECK(child_ids(*list) == std::vector<std::string>{second_id, first_id});
     CHECK(bridge.widget(second_id) == second_before);
     CHECK_FALSE(lifetime.expired());
@@ -233,12 +235,12 @@ TEST_CASE("DOM reorder of a keyed row keeps its widget, focus, and applied style
     // The row's styles are already on its widget; a move does not resend them.
     CHECK(engine.evaluate("backgroundWrites").getWithDefault<int>(-1) == 0);
 
-    engine.evaluate("list.insertBefore(first, second)");
+    bridge.load_script("list.insertBefore(first, second);");
     CHECK(child_ids(*list) == std::vector<std::string>{first_id, second_id});
     CHECK(field->has_focus());
 
     // Inserting a row before its own next sibling is no move at all.
-    engine.evaluate("list.insertBefore(first, second)");
+    bridge.load_script("list.insertBefore(first, second);");
     CHECK(child_ids(*list) == std::vector<std::string>{first_id, second_id});
     CHECK(engine.evaluate("backgroundWrites").getWithDefault<int>(-1) == 0);
 }
