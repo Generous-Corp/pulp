@@ -1109,9 +1109,10 @@ std::vector<std::string> swift_binding_codes(const std::vector<FidelityIssue>& i
     return codes;
 }
 
-/// Controls the other lanes treat differently: kelvin's meter carries a route
-/// and a value key but no source or channel, and a checkbox and a knob carry
-/// only a display label. Only `keyed` has everything a binding needs.
+/// Controls the other lanes treat differently: a checkbox and a knob carry only
+/// a display label, and an XY pad is routed with only its X key. `keyed` and
+/// kelvin's meter, which carries a route and a value key but no source or
+/// channel, have everything a binding needs.
 DesignIR build_binding_rule_fixture() {
     DesignIR ir;
     ir.source = DesignSource::figma;
@@ -1144,6 +1145,14 @@ DesignIR build_binding_rule_fixture() {
     meter.stable_anchor_id = "capture:out:38";
     ir.root.children.push_back(std::move(meter));
 
+    auto pad = frame_node("pan", "Pan", 60.0f, 60.0f, LayoutDirection::column);
+    pad.audio_widget = AudioWidgetType::xy_pad;
+    pad.audio_label = "Pan";
+    pad.attributes["pulpParamKeyX"] = "pan";
+    pad.attributes["pulpRouteId"] = "route.pan";
+    pad.stable_anchor_id = "anchor-pan";
+    ir.root.children.push_back(std::move(pad));
+
     auto unrouted = frame_node("mix", "Mix", 60.0f, 60.0f, LayoutDirection::column);
     unrouted.audio_widget = AudioWidgetType::knob;
     unrouted.audio_label = "Mix";
@@ -1163,18 +1172,19 @@ TEST_CASE("SwiftUI binds only the controls the native and C++ lanes bind",
     INFO(out.view);
     INFO(manifest);
 
-    // The keyed knob binds, by the route the other lanes use too.
+    // The keyed knob and the key-only meter bind, by the routes the other lanes
+    // use too.
     CHECK(contains(out.view, "switch resolver.resolveParameter(named: \"Drive\")"));
     CHECK(contains(manifest, "\"resolve_name\": \"Drive\""));
+    CHECK(contains(out.view, "switch resolver.resolveParameter(named: \"Out\")"));
+    CHECK(contains(manifest, "\"resolve_name\": \"Out\""));
 
     // A display label alone binds nothing: renaming "Tone" must not rebind it.
-    for (const char* label : {"Tone", "Oversample", "Out", "Mix"}) {
+    for (const char* label : {"Tone", "Oversample", "Pan", "Mix"}) {
         INFO("control " << label);
         CHECK_FALSE(contains(out.view, std::string("resolveParameter(named: \"") + label + "\")"));
         CHECK_FALSE(contains(manifest, std::string("\"resolve_name\": \"") + label + "\""));
     }
-    // Kelvin's meter keeps its manifest entry (the C++ manifest lists it too),
-    // but as a contract, not a binding: no resolution block.
     CHECK(contains(manifest, "\"anchor_id\": \"capture:out:38\""));
     CHECK(contains(manifest, "\"meter_value_key\": \"out\""));
     // Label-only controls carry no binding metadata, so no entry at all.
@@ -1182,7 +1192,7 @@ TEST_CASE("SwiftUI binds only the controls the native and C++ lanes bind",
     CHECK_FALSE(contains(manifest, "anchor-oversample"));
     // They are still drawn, inert, the way native draws an unbound control.
     CHECK(contains(out.view, "PulpKnob(parameter: .detached(name: \"Tone\""));
-    CHECK(contains(out.view, "PulpMeter(parameter: .detached(name: \"Out\""));
+    CHECK_FALSE(contains(out.view, "PulpMeter(parameter: .detached"));
     CHECK_FALSE(contains(out.view, "⚠︎ unbound"));
 }
 
