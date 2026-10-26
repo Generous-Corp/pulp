@@ -175,3 +175,41 @@ def _dense_material(seed: int = 4242):
     ir[0] = 0.6
     y = np.convolve(x, ir)[:n]
     return y, None, sr
+
+
+def test_an_energetic_smear_of_one_attack_is_a_regression():
+    """One attack faded in over 15 ms keeps its energy (the amplitude ratio stays near 1) but arrives
+    later. That is an audible smear, and one is enough: the energy-median shift corroborates the
+    rise-time deficit, so the worst-onset gate fires even though the mean is diluted."""
+    from quality_lab.align import detect_onsets
+    for seed in (4242, 99):
+        ref, _onsets, sr = _dense_material(seed)
+        onsets = detect_onsets(ref, sr)
+        t0 = onsets[len(onsets) // 2]
+        start, length = int(t0 * sr) - int(0.003 * sr), int(0.015 * sr)
+        cand = ref.copy()
+        cand[start:start + length] *= np.linspace(0.0, 1.0, length)
+        report = compare.compare_arrays(ref, cand, sr, profile="transient-integrity",
+                                        reference_role="golden")
+        assert report["verdict"] == compare.VERDICT_REGRESSION, (seed, report["summary"])
+        assert report["measurements"][0]["payload"]["mean_deficit"] < 0.15
+
+
+def test_periodic_identical_hits_read_no_change_at_any_delay():
+    """Identical hits every 250 ms give a cross-correlation comb with a peak every hit period. The
+    linear (zero-padded) correlation's shrinking overlap is what makes the true lag win; normalizing
+    each lag by its overlap picks a peak one or two periods away. The lag itself is asserted, since a
+    one-period error measures an identical hit and can read no change by luck."""
+    from quality_lab import dsp
+    sr = 48000
+    rng = np.random.default_rng(5)
+    hit = rng.uniform(-1.0, 1.0, int(0.08 * sr)) * np.exp(-np.arange(int(0.08 * sr)) / (0.012 * sr))
+    ref = np.zeros(sr * 6)
+    for start in range(0, ref.size - hit.size, sr // 4):
+        ref[start:start + hit.size] += 0.6 * hit
+    for k in (0, 37, 300):
+        cand = np.concatenate([np.zeros(k), ref[: ref.size - k]])
+        assert dsp.estimate_global_lag(ref, cand, sr).lag_samples == k
+        report = compare.compare_arrays(ref, cand, sr, profile="transient-integrity",
+                                        reference_role="golden")
+        assert report["verdict"] == compare.VERDICT_NO_CHANGE, (k, report["summary"])

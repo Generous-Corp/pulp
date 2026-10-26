@@ -1297,6 +1297,21 @@
    "spawns": "declared",
    "undeclared_sources": []
   },
+  "pulp-test-design-emitter-conformance": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_design_emitter_conformance.cpp"
+   ],
+   "inputs": [
+    "test/fixtures/emitter-conformance",
+    "test/fixtures/import-fidelity/scene.pulp.json"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/test_design_emitter_conformance.cpp"
+   ],
+   "undeclared_sources": []
+  },
   "pulp-test-design-import": {
    "data": "declared",
    "detected_sources": [
@@ -1369,6 +1384,7 @@
     "core/signal/include",
     "core/state/include",
     "core/view/include",
+    "external/fonts/Jost-Regular.ttf",
     "test/fixtures/import-fidelity/assets/fader_ref.png",
     "test/fixtures/import-fidelity/scene.pulp.json",
     "test/fixtures/v0-dev/audio-control-panel.tsx"
@@ -2518,6 +2534,7 @@
   "pulp-control-trusted-host-fixture",
   "pulp-cpp",
   "pulp-denormal-null-refgen",
+  "pulp-emitter-conformance-gen",
   "pulp-fake-screenshot-tool",
   "pulp-fixture-runner",
   "pulp-generate-control-protocol-fuzz-corpus",
@@ -2714,6 +2731,7 @@
   "pulp-test-dawproject-export",
   "pulp-test-denormal-null",
   "pulp-test-design-debug-contracts",
+  "pulp-test-design-emitter-conformance",
   "pulp-test-design-fidelity",
   "pulp-test-design-import",
   "pulp-test-design-import-benchmark",
@@ -3485,6 +3503,14 @@
     "tools/scripts/nm_symbols.py",
     "tools/scripts/rtti_ownership.py",
     "tools/scripts/test_archive_symbol_closure_check.py"
+   ],
+   "kind": "python"
+  },
+  "au-component-preflight-selftest": {
+   "entry": "tools/scripts/test_check_au_component_preflight.py",
+   "inputs": [
+    "tools/scripts/check_au_component_preflight.py",
+    "tools/scripts/test_check_au_component_preflight.py"
    ],
    "kind": "python"
   },
@@ -12302,6 +12328,27 @@
     "tools/scripts/test_setup_source_cache.sh"
    ],
    "kind": "shell"
+  },
+  "shipping-macro-guard": {
+   "entry": "tools/scripts/shipping_macro_guard.py",
+   "inputs": [
+    "core/format/src/au_v2_cocoa_view.mm",
+    "tools/scripts/shipping_macro_guard.py",
+    "tools/scripts/test_shipping_macro_guard.py"
+   ],
+   "kind": "python"
+  },
+  "shipping-macro-guard-negative-contract": {
+   "entry": "tools/scripts/test_shipping_macro_guard.py",
+   "inputs": [
+    ".github/workflows/build.yml",
+    "core/format/src/au_v2_cocoa_view.mm",
+    "core/format/src/au_v2_common.cpp",
+    "test/cmake/format_reload_tests.cmake",
+    "tools/cmake/PulpPluginFormats.cmake",
+    "tools/scripts/test_shipping_macro_guard.py"
+   ],
+   "kind": "python"
   },
   "shipyard-merge-gate-evidence-selftest": {
    "entry": "tools/scripts/test_shipyard_merge_gate_evidence.py",

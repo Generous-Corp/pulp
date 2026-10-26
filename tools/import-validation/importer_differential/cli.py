@@ -70,7 +70,8 @@ def command_compare(args: argparse.Namespace) -> int:
             args.file.resolve(), args.output.resolve(), args.timeout_seconds,
             args.from_source, args.browser.resolve() if args.browser else None,
             fixture_metadata=viewport_metadata(args),
-            cache_state=args.cache_state, timing_budgets_ms=budgets)
+            cache_state=args.cache_state, timing_budgets_ms=budgets,
+            emitter=getattr(args, "emitter", "native"))
     except (LabError, OSError, ValueError, json.JSONDecodeError) as exc:
         error = sanitized_error(
             exc, [args.importer.resolve(), args.observer.resolve(),
@@ -130,7 +131,7 @@ def command_corpus(args: argparse.Namespace) -> int:
                 metadata.get("from", args.from_source) if metadata else args.from_source,
                 args.browser.resolve() if args.browser else None, metadata,
                 metadata.get("cache_state", args.cache_state) if metadata else args.cache_state,
-                budgets))
+                budgets, emitter=getattr(args, "emitter", "native")))
         except (LabError, OSError, ValueError, json.JSONDecodeError) as exc:
             failures.append({
                 "fixture_id": fixture_id,
@@ -318,7 +319,7 @@ def command_benchmark(args: argparse.Namespace) -> int:
                 args.browser.resolve() if args.browser else None,
                 fixture_metadata=viewport_metadata(args),
                 cache_state=args.cache_state,
-                timing_budgets_ms=budgets))
+                timing_budgets_ms=budgets, emitter=getattr(args, "emitter", "native")))
     except (LabError, OSError, ValueError, json.JSONDecodeError) as exc:
         error = sanitized_error(
             exc, [args.importer.resolve(), args.observer.resolve(),
@@ -433,6 +434,10 @@ def build_parser() -> argparse.ArgumentParser:
         subparser.add_argument(
             "--timing-budget", type=Path,
             help="JSON object of caller-supplied importer timing budgets in milliseconds")
+        subparser.add_argument(
+            "--emitter", choices=("native", "js"), default="native",
+            help="render the candidate IR through the native materializer (default) or "
+                 "through the ui.js program it emits")
 
     compare = subparsers.add_parser("compare")
     shared(compare)

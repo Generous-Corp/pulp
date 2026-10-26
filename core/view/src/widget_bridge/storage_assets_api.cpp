@@ -1,5 +1,6 @@
 // widget_bridge/storage_assets_api.cpp - storage and asset-loading registrations for WidgetBridge.
 
+#include <pulp/canvas/bundled_fonts.hpp>
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/asset_manager.hpp>
 #include <pulp/runtime/base64.hpp>
@@ -8,10 +9,13 @@
 
 #include <pulp/runtime/safe_relative_path.hpp>
 
+#include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -369,15 +373,34 @@ void BridgeRegistrars::register_font_assets_api(WidgetBridge& self) {
         return choc::value::createBool(exists);
     });
 
-    // registerFont(family, path) - register a bundled .ttf/.otf with the text
-    // renderer under `family`, so set_font() / Label font_family resolve to the
-    // shipped face instead of a same-named system font (or a generic fallback).
-    // Codegen emits these from the envelope's font_family_assets before any
-    // setFontFamily.
+    // registerFont(family, path, weightMin?, weightMax?) - register a bundled
+    // .ttf/.otf with the text renderer under `family`, so set_font() / Label
+    // font_family resolve to the shipped face instead of a same-named system
+    // font. The optional weights are the @font-face rule's declared range, which
+    // decides where bold is synthesized. Codegen emits these from the envelope's
+    // font_family_assets before any setFontFamily.
     register_bridge_function(api, "registerFont", [&self](choc::javascript::ArgumentList args) {
         auto family = args.get<std::string>(0, "");
         auto path = args.get<std::string>(1, "");
         if (family.empty() || path.empty()) return choc::value::createBool(false);
+        // A range is recorded only once the face is registered, and only from
+        // finite weights clamped to CSS's [1, 1000]; a bad weight declares nothing.
+        std::optional<std::pair<int, int>> declared;
+        if (args.size() >= 3) {
+            const double low = args.get<double>(2, 400.0);
+            const double high = args.size() >= 4 ? args.get<double>(3, low) : low;
+            if (std::isfinite(low) && std::isfinite(high)) {
+                const auto css = [](double w) {
+                    return static_cast<int>(std::clamp(w, 1.0, 1000.0));
+                };
+                declared = std::minmax(css(low), css(high));
+            }
+        }
+        const auto declare = [&] {
+            if (declared)
+                pulp::canvas::declare_font_face_weight_range(family, declared->first,
+                                                             declared->second);
+        };
         if (path.rfind("file://", 0) == 0) path = path.substr(7);
         if (const auto* embedded = self.embedded_asset(path)) {
             // The face is already in memory; hand it to the font registry
@@ -387,6 +410,7 @@ void BridgeRegistrars::register_font_assets_api(WidgetBridge& self) {
             auto& assets = AssetManager::instance();
             assets.register_embedded(key, embedded->data, embedded->size);
             assets.register_font_family(family, key);
+            declare();
             return choc::value::createBool(true);
         }
         path = self.resolve_script_relative(path);
@@ -394,6 +418,7 @@ void BridgeRegistrars::register_font_assets_api(WidgetBridge& self) {
         // register_font_family decodes the file + registers the typeface with
         // the canvas font registry (Skia on GPU builds; no-op stub otherwise).
         AssetManager::instance().register_font_family(family, path);
+        declare();
         return choc::value::createBool(true);
     });
 }

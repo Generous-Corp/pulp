@@ -285,6 +285,14 @@ hard error in every wrapper, not a vacuous pass. The per-class scans
 (`pulp_release_artifact_active_gates`) to every installed SDK library, the
 C++ CLI and the fixture plug-in built through `pulp_add_plugin`.
 
+**The scan's cost is in CMake, not `nm`.** A sanitizer build's archives give
+hundreds of MB of `nm -C` output (983 MB `libpulp-timeline.a` gives 607 MB of
+table, 269k entries), and any CMake operation that walks the whole table
+(`REGEX MATCHALL`, a list of every line) costs seconds per archive. Deciding
+that a table is evidence (at least two defined entries; a stripped binary has
+one) therefore stops at the second match. `string(FIND)` per pattern is cheap;
+`file(STRINGS)` over the archive is the other large cost.
+
 Not on the list, deliberately: `pulp ship`'s own tracing sentinel
 (`PULP_TRACING_COMPILED_IN__DO_NOT_SHIP`, previous section). The CLI contains
 that byte-string as its search needle, so a `string` marker for it would flag

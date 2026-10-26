@@ -9,6 +9,48 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1160"></a>
+## [1.16.0] - 2026-10-26
+
+- release/version bump ([#11148](https://github.com/Generous-Corp/pulp/pull/11148))
+
+<a id="v1152"></a>
+## [1.15.2] - 2026-10-26
+
+- fix/uijs meter binding rule ([#11002](https://github.com/Generous-Corp/pulp/pull/11002))
+- release/version bump ([#11145](https://github.com/Generous-Corp/pulp/pull/11145))
+- chore/footprint followups 2 20261025 ([#11089](https://github.com/Generous-Corp/pulp/pull/11089))
+- perf/graph node load opt in ([#11134](https://github.com/Generous-Corp/pulp/pull/11134))
+- fix/release artifact scan symbol count ([#11141](https://github.com/Generous-Corp/pulp/pull/11141))
+- feature/uijs form control lowering 20261024 ([#10992](https://github.com/Generous-Corp/pulp/pull/10992))
+- fix/cache status directories ([#11140](https://github.com/Generous-Corp/pulp/pull/11140))
+- release/version bump ([#11139](https://github.com/Generous-Corp/pulp/pull/11139))
+
+<a id="v1151"></a>
+## [1.15.1] - 2026-10-26
+
+- release/version bump ([#11138](https://github.com/Generous-Corp/pulp/pull/11138))
+- fix/capability history append on counter move ([#11137](https://github.com/Generous-Corp/pulp/pull/11137))
+- release/version bump ([#11136](https://github.com/Generous-Corp/pulp/pull/11136))
+- feature/emitter conformance gate 20261024 ([#10991](https://github.com/Generous-Corp/pulp/pull/10991))
+- fix/quality lab transient followup 20261025 ([#11133](https://github.com/Generous-Corp/pulp/pull/11133))
+
+<a id="v1150"></a>
+## [1.15.0] - 2026-10-26
+
+- release/version bump ([#11132](https://github.com/Generous-Corp/pulp/pull/11132))
+- fix/release artifact scan sanitizer timeout ([#11130](https://github.com/Generous-Corp/pulp/pull/11130))
+- perf/swapchain lazy configure ([#10976](https://github.com/Generous-Corp/pulp/pull/10976))
+- fix/signal thermo mustfix 20261025 ([#11123](https://github.com/Generous-Corp/pulp/pull/11123))
+- release/version bump ([#11128](https://github.com/Generous-Corp/pulp/pull/11128))
+- release/version bump ([#11127](https://github.com/Generous-Corp/pulp/pull/11127))
+- fix/rtti demangler missing skip ([#11125](https://github.com/Generous-Corp/pulp/pull/11125))
+- ci/windows runner idle recycle ([#11121](https://github.com/Generous-Corp/pulp/pull/11121))
+- fix/coverage barrier requires native legs ([#11111](https://github.com/Generous-Corp/pulp/pull/11111))
+- release/version bump ([#11124](https://github.com/Generous-Corp/pulp/pull/11124))
+- fix/capture drop blob font document read ([#11115](https://github.com/Generous-Corp/pulp/pull/11115))
+- fix/wavenet pool budget deterministic ([#11119](https://github.com/Generous-Corp/pulp/pull/11119))
+
 <a id="v1140"></a>
 ## [1.14.0] - 2026-10-26
 
@@ -11678,6 +11720,10 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.16.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.16.0
+[1.15.2]: https://github.com/Generous-Corp/pulp/releases/tag/v1.15.2
+[1.15.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.15.1
+[1.15.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.15.0
 [1.14.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.14.0
 [1.13.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.13.0
 [1.12.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.12.0

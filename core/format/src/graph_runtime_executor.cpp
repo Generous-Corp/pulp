@@ -531,19 +531,14 @@ void copy_io_bus(graph::GraphRuntimeNodeKind kind,
 // output slots, per-node MIDI/automation buffers, per-connection inbound rings),
 // so distinct nodes may run concurrently — EXCEPT AudioOutput, which accumulates
 // into the shared output bus and must be run serially by the caller.
-GraphRuntimeExecutorErrorCode run_routed_node(
-    std::uint32_t node_index,
-    const graph::GraphRuntimePlan& plan,
-    std::span<const GraphRuntimeNodeBinding> bindings,
-    const graph::GraphRuntimeBufferAssignment& assignment,
-    GraphRuntimeBufferPool& pool,
-    GraphRuntimeMidiScratch* midi,
-    GraphRuntimeAutomationScratch* automation,
-    ProcessBlock& block,
-    const BusBuffer* in_bus,
-    BusBuffer* out_bus,
-    std::span<const GraphRuntimeCommandDecision> command_results,
-    std::uint32_t frames) noexcept {
+GraphRuntimeExecutorErrorCode
+run_routed_node(std::uint32_t node_index, const graph::GraphRuntimePlan& plan,
+                std::span<const GraphRuntimeNodeBinding> bindings,
+                const graph::GraphRuntimeBufferAssignment& assignment, GraphRuntimeBufferPool& pool,
+                GraphRuntimeMidiScratch* midi, GraphRuntimeAutomationScratch* automation,
+                ProcessBlock& block, const BusBuffer* in_bus, BusBuffer* out_bus,
+                std::span<const GraphRuntimeCommandDecision> command_results, std::uint32_t frames,
+                bool time_node) noexcept {
     const auto& node = plan.nodes[node_index];
     const auto& slots = assignment.nodes[node_index];
 
@@ -569,7 +564,8 @@ GraphRuntimeExecutorErrorCode run_routed_node(
     // legacy walk does. RAII closes the span on every return below (I/O copy,
     // missing/failed processor, success). Distinct measurer per node, so parallel
     // levels touch disjoint instances; begin()/end() are relaxed-atomic, RT-safe.
-    audio::AudioProcessLoadMeasurer* const node_load = bindings[node_index].load;
+    audio::AudioProcessLoadMeasurer* const node_load =
+        time_node ? bindings[node_index].load : nullptr;
     if (node_load != nullptr) {
         node_load->begin(static_cast<int>(frames), static_cast<float>(block.sample_rate));
     }
@@ -1197,6 +1193,7 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
 #endif
 
     const auto command_decisions = command_results.first(commands.size());
+    const bool time_nodes = node_load_timing();
     for (const auto node_index : plan.processing_order_indices) {
         if (node_index >= bindings.size()) return fail_invalid_snapshot();
 
@@ -1208,9 +1205,9 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
             continue;
         }
 
-        const auto error = run_routed_node(node_index, plan, bindings, assignment,
-                                           pool, midi, automation, block, in_bus,
-                                           out_bus, command_decisions, frames);
+        const auto error =
+            run_routed_node(node_index, plan, bindings, assignment, pool, midi, automation, block,
+                            in_bus, out_bus, command_decisions, frames, time_nodes);
         if (error != GraphRuntimeExecutorErrorCode::None) {
             result.error = error;
             result.failed_node_index = node_index;
@@ -1243,6 +1240,7 @@ struct ParallelLevelTask {
     BusBuffer* out_bus;
     std::span<const GraphRuntimeCommandDecision> command_results;
     std::uint32_t frames;
+    bool time_nodes;
     const std::uint32_t* level_nodes;          // this level's node indices
     std::atomic<std::uint32_t>* error_code;    // 0 = None, else (code + 1)
     std::atomic<std::uint32_t>* failed_node;
@@ -1251,10 +1249,9 @@ struct ParallelLevelTask {
 void run_level_node(void* ctx, std::uint32_t i) noexcept {
     auto* t = static_cast<ParallelLevelTask*>(ctx);
     const std::uint32_t node_index = t->level_nodes[i];
-    const auto e = run_routed_node(node_index, *t->plan, t->bindings, *t->assignment,
-                                   *t->pool, t->midi, t->automation, *t->block,
-                                   t->in_bus, t->out_bus, t->command_results,
-                                   t->frames);
+    const auto e = run_routed_node(node_index, *t->plan, t->bindings, *t->assignment, *t->pool,
+                                   t->midi, t->automation, *t->block, t->in_bus, t->out_bus,
+                                   t->command_results, t->frames, t->time_nodes);
     if (e != GraphRuntimeExecutorErrorCode::None) {
         std::uint32_t expected = 0;
         if (t->error_code->compare_exchange_strong(
@@ -1320,6 +1317,7 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_parallel(
     }
 
     const auto command_decisions = command_results.first(commands.size());
+    const bool time_nodes = node_load_timing();
     std::atomic<std::uint32_t> error_code{0};
     std::atomic<std::uint32_t> failed_node{0};
 
@@ -1368,18 +1366,30 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_parallel(
         if (serial) {
             for (std::uint32_t k = 0; k < width; ++k) {
                 const std::uint32_t node_index = levels.level_nodes[base + k];
-                const auto e = run_routed_node(node_index, plan, bindings, assignment,
-                                               pool, midi, automation, block, in_bus,
-                                               out_bus, command_decisions, frames);
+                const auto e =
+                    run_routed_node(node_index, plan, bindings, assignment, pool, midi, automation,
+                                    block, in_bus, out_bus, command_decisions, frames, time_nodes);
                 if (e != GraphRuntimeExecutorErrorCode::None) {
                     return report_failure(e, node_index);
                 }
             }
         } else {
             ParallelLevelTask task{
-                &plan, bindings, &assignment, &pool, midi, automation, &block,
-                in_bus, out_bus, command_decisions, frames,
-                levels.level_nodes.data() + base, &error_code, &failed_node,
+                &plan,
+                bindings,
+                &assignment,
+                &pool,
+                midi,
+                automation,
+                &block,
+                in_bus,
+                out_bus,
+                command_decisions,
+                frames,
+                time_nodes,
+                levels.level_nodes.data() + base,
+                &error_code,
+                &failed_node,
             };
             workers.run(width, run_level_node, &task);
             if (const std::uint32_t code = error_code.load(std::memory_order_relaxed);

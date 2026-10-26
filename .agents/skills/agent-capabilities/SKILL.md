@@ -251,13 +251,15 @@ For an existing capability change:
   fingerprint and a durable rationale, and leave the baseline untouched. The
   reviewed branch is consulted ahead of the baseline, so the stale baseline
   entry is simply no longer read; dozens of headers already sit in both.
-- `--write` also appends a full snapshot to
-  `tools/agent-capabilities/contract-history.json` — tens of thousands of lines
-  that dwarf the change that caused them. `--check` does not require it, so for
-  a byte-level fingerprint refresh, revert that file and keep the three-file
-  change; `--check` still reports `fresh`. Reverting it is not free of meaning,
-  so keep the snapshot when the change is a real contract movement whose history
-  someone will read back.
+- `--write` appends a full snapshot to
+  `tools/agent-capabilities/contract-history.json` (tens of thousands of lines)
+  only when the change moves `MANIFEST_REVISION` or `SURFACE_INVENTORY_VERSION`.
+  The snapshot is the previous published state, so a refresh that leaves both
+  counters alone (a catalog binding's `header_fingerprint`) appends nothing,
+  and the next counter move records the state it started from. `--check` never
+  requires a snapshot at the current version. Before this rule, a
+  fingerprint-only `--write` appended a same-version snapshot that then sat in
+  the append-only history for good.
 - Increase the capability minor version for compatible additive contract
   changes.
 - Increase the capability major version when a binding is removed, renamed, or
