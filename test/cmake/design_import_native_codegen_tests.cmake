@@ -4,7 +4,7 @@
 # Design import tests (Figma/Stitch/v0/Pencil -> Pulp, W3C tokens)
 pulp_add_test_suite(pulp-test-design-import
     SOURCES test_design_update.cpp
-    SOURCES test_design_import_ir.cpp test_design_ir_normalize.cpp test_design_import_codegen.cpp test_design_import_codegen_layout_text.cpp test_design_import_codegen_paint.cpp test_design_import_codegen_web_controls.cpp test_design_cpp_codegen_golden.cpp test_design_browser_capture.cpp test_design_import_sources.cpp test_design_import_masks.cpp test_design_import_fidelity.cpp test_design_ir_font_assets.cpp test_recognition_resolver.cpp test_design_manifest.cpp test_design_adherence.cpp test_design_fidelity_ledger.cpp test_design_gallery.cpp test_design_ledger.cpp test_design_handoff.cpp test_design_variants.cpp test_design_tweaks.cpp test_design_knobs.cpp
+    SOURCES test_design_import_ir.cpp test_design_ir_normalize.cpp test_design_import_codegen.cpp test_design_import_codegen_layout_text.cpp test_design_import_codegen_paint.cpp test_design_import_codegen_web_controls.cpp test_design_cpp_codegen_golden.cpp test_design_browser_capture.cpp test_design_import_sources.cpp test_design_import_masks.cpp test_design_import_fidelity.cpp test_design_ir_font_assets.cpp test_design_import_native_fonts.cpp test_recognition_resolver.cpp test_design_manifest.cpp test_design_adherence.cpp test_design_fidelity_ledger.cpp test_design_gallery.cpp test_design_ledger.cpp test_design_handoff.cpp test_design_variants.cpp test_design_tweaks.cpp test_design_knobs.cpp
     LIBRARIES pulp::view
     COMPILE_DEFINITIONS PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}"
     TEST_SPEC "~[network]~[bench]"
@@ -16,7 +16,11 @@ catch_discover_tests(pulp-test-design-import
     PROPERTIES LABELS "bench")
 pulp_test_data(pulp-test-design-import NO_DEFINE
     SOURCES test_design_import_ir.cpp test_recognition_resolver.cpp
+        test_design_import_native_fonts.cpp
     PATHS test/fixtures/imports/claude/vite-assets.html
+        external/fonts/FunnelDisplay-VariableFont_wght.ttf
+        external/fonts/Inter-Regular.ttf
+        test/fixtures/design-ir-observe/variable-font-label
         test/fixtures/imports/figma-plugin/synthetic-knob.png
         test/fixtures/import-fidelity/assets/knob_ref.png
         tools/figma-plugin/library-manifest.json)
@@ -132,6 +136,59 @@ pulp_test_data(pulp-test-design-import-native-materializer NO_DEFINE
         test/fixtures/import-fidelity/assets/fader_ref.png
         test/fixtures/import-fidelity/scene.pulp.json
         test/fixtures/v0-dev/audio-control-panel.tsx)
+
+# Emitter conformance gate: every fixture IR is built through the native
+# materializer, the ui.js bridge program, the baked C++ exporter and the SwiftUI
+# exporter, and the projections are compared (test_design_emitter_conformance.cpp).
+# The baked C++ is generated here at build time from the fixture IRs, never
+# committed, so the C++ lane is always the exporter's current output.
+add_executable(pulp-emitter-conformance-gen support/emitter_conformance_gen.cpp)
+target_link_libraries(pulp-emitter-conformance-gen PRIVATE pulp::view)
+set(_pulp_conformance_dir "${CMAKE_CURRENT_BINARY_DIR}/emitter_conformance")
+set(_pulp_conformance_sources)
+foreach(_spec
+        "form_controls_08|ir|test/fixtures/emitter-conformance/form-controls-08.ir.json"
+        "spectr|ir|test/fixtures/emitter-conformance/spectr.ir.json"
+        "kelvin|ir|test/fixtures/emitter-conformance/kelvin.ir.json"
+        "keyed_list_18|ir|test/fixtures/emitter-conformance/keyed-list-18.ir.json"
+        "fidelity_scene|figma-plugin|test/fixtures/import-fidelity/scene.pulp.json")
+    string(REPLACE "|" ";" _parts "${_spec}")
+    list(GET _parts 0 _stem)
+    list(GET _parts 1 _kind)
+    list(GET _parts 2 _input)
+    set(_outputs
+        "${_pulp_conformance_dir}/${_stem}.hpp"
+        "${_pulp_conformance_dir}/${_stem}.cpp"
+        "${_pulp_conformance_dir}/${_stem}_entry.cpp")
+    add_custom_command(OUTPUT ${_outputs}
+        COMMAND pulp-emitter-conformance-gen ${_kind} "${CMAKE_SOURCE_DIR}/${_input}"
+                "pulp::test::conformance::${_stem}" "${_pulp_conformance_dir}" ${_stem}
+        DEPENDS pulp-emitter-conformance-gen "${CMAKE_SOURCE_DIR}/${_input}"
+        COMMENT "Generating the baked C++ conformance fixture ${_stem}"
+        VERBATIM)
+    list(APPEND _pulp_conformance_sources
+        "${_pulp_conformance_dir}/${_stem}.cpp"
+        "${_pulp_conformance_dir}/${_stem}_entry.cpp")
+endforeach()
+# The generated sources build as their own object library. They exist only
+# once the build has run the generator, so listing them as the test's sources
+# would make its script-inputs entry depend on whether this build got that far.
+# They read nothing from the checkout: the test builds each one from the asset
+# directory it stages, and declares the fixtures it reads below.
+add_library(pulp-emitter-conformance-baked OBJECT ${_pulp_conformance_sources})
+target_include_directories(pulp-emitter-conformance-baked PUBLIC
+    "${_pulp_conformance_dir}")
+target_link_libraries(pulp-emitter-conformance-baked PUBLIC pulp::view)
+add_executable(pulp-test-design-emitter-conformance
+    test_design_emitter_conformance.cpp)
+target_link_libraries(pulp-test-design-emitter-conformance
+    PRIVATE pulp-emitter-conformance-baked pulp::view pulp::state Catch2::Catch2WithMain)
+target_compile_definitions(pulp-test-design-emitter-conformance PRIVATE
+    PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
+catch_discover_tests(pulp-test-design-emitter-conformance
+    PROPERTIES LABELS "parser-import")
+pulp_test_data(pulp-test-design-emitter-conformance NO_DEFINE
+    PATHS test/fixtures/emitter-conformance test/fixtures/import-fidelity/scene.pulp.json)
 
 # Inert style declarations (`opacity: 1`, `clip-path: none`, ...) must not
 # change the native drawlist, the Skia raster, or the sibling painted next.

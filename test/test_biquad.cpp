@@ -1012,3 +1012,40 @@ TEST_CASE("Biquad::process_stereo with one filter for both channels runs them in
     CHECK(std::memcmp(cl.data(), cl_ref.data(), cl.size() * sizeof(float)) == 0);
     CHECK(std::memcmp(cr.data(), cr_ref.data(), cr.size() * sizeof(float)) == 0);
 }
+
+TEST_CASE("Biquad designs at and above Nyquist stay stable and finite", "[signal][biquad]") {
+    using T = Biquad::Type;
+    const T types[] = {T::lowpass, T::highpass, T::bandpass,  T::notch,
+                       T::allpass, T::peaking,  T::low_shelf, T::high_shelf};
+    constexpr float kRate = 32000.0f;
+    for (const T type : types) {
+        for (const float hz : {15900.0f, 16000.0f, 20000.0f, 31000.0f, 1.0e9f}) {
+            INFO("type " << static_cast<int>(type) << " at " << hz << " Hz");
+            Biquad f;
+            f.set_coefficients(type, hz, 0.7071f, kRate, 6.0f);
+            REQUIRE(biquad_is_stable(f.coefficients()));
+            bool finite = true;
+            float peak = 0.0f;
+            for (int n = 0; n < 4096; ++n) {
+                const float y = f.process(n == 0 ? 1.0f : 0.0f);
+                finite &= std::isfinite(y);
+                peak = std::max(peak, std::abs(y));
+            }
+            REQUIRE(finite);
+            REQUIRE(peak < 1.0e3f);
+        }
+    }
+}
+
+TEST_CASE("Biquad design below the Nyquist ceiling is unchanged by the clamp", "[signal][biquad]") {
+    Biquad clamped;
+    Biquad reference;
+    // 0.49 x fs is the ceiling: designs at it and just above it are identical.
+    clamped.set_coefficients(Biquad::Type::lowpass, 0.495f * 48000.0f, 0.7071f, 48000.0f);
+    reference.set_coefficients(Biquad::Type::lowpass, 0.49f * 48000.0f, 0.7071f, 48000.0f);
+    const auto a = clamped.coefficients();
+    const auto b = reference.coefficients();
+    REQUIRE(a.b0 == b.b0);
+    REQUIRE(a.a1 == b.a1);
+    REQUIRE(a.a2 == b.a2);
+}

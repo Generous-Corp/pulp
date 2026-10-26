@@ -21,6 +21,7 @@
 
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/host_frame_pump.hpp>
+#include "../../src/pending_resize.hpp"
 #include <pulp/view/platform/win_plugin_input_router.hpp>
 #include <pulp/view/platform/win_pointer_input.hpp>
 #include <pulp/view/platform/win_surface_lifecycle.hpp>
@@ -348,6 +349,7 @@ public:
         if (gpu_surface_ && skia_surface_) {
             render_frame(nullptr, nullptr, nullptr);
         } else if (dc) {
+            deliver_pending_resize();
             // Same contract as the GPU path: consume the damage for this frame
             // and put it back if the blit never happens, so a failed raster
             // frame does not silently retire a region nobody painted.
@@ -539,9 +541,26 @@ public:
         if (gpu_surface_) gpu_surface_->resize(pixel_w(), pixel_h());
         if (skia_surface_) skia_surface_->resize(logical_w, logical_h, scale_);
 #endif
-        if (logical_changed && resize_cb_)
-            resize_cb_(logical_w, logical_h);
+        // Delivered by the next frame, once per frame with the last size, and
+        // only when the logical size changed (a physical-only change is not
+        // news to the processor). An unattached editor has no frame timer, so
+        // nothing may paint (the raster path only invalidates): tell the
+        // processor now.
+        if (logical_changed) {
+            pending_resize_.record(logical_w, logical_h);
+            if (!attached_.load(std::memory_order_acquire))
+                deliver_pending_resize();
+        }
         repaint();
+    }
+
+    // Runs the host's resize callback for the last size handle_wm_size()
+    // recorded since the previous frame (see PendingResize).
+    void deliver_pending_resize() {
+        pending_resize_.deliver([this](uint32_t w, uint32_t h) {
+            if (resize_cb_)
+                resize_cb_(w, h);
+        });
     }
 
     Size get_size() const override { return size_; }
@@ -659,6 +678,9 @@ public:
         if (!should_dispatch_host_frame(frame_pump_, needs_repaint_, continuous_frames_,
                                         static_cast<bool>(idle_callback_)))
             return;
+        // Before the tick, so the editor lays out the frame at the size the
+        // processor was told about.
+        deliver_pending_resize();
 
         const auto now =
             std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch())
@@ -693,6 +715,7 @@ private:
     bool needs_repaint_ = true;
     bool continuous_frames_ = false;
     std::function<void(uint32_t, uint32_t)> resize_cb_;
+    PendingResize pending_resize_;
     float design_viewport_w_ = 0.0f;
     float design_viewport_h_ = 0.0f;
     float fixed_aspect_ratio_ = 0.0f;
@@ -925,6 +948,7 @@ private:
         // queries; without it the Windows editor showed only gpu_submit /
         // gpu_present and there was no frame span to attribute them to.
         PULP_TRACE_SCOPE_NAMED("render", "frame");
+        deliver_pending_resize();
         if (!gpu_surface_ || !skia_surface_) return false;
 
         PluginFrameRenderer::Request request;

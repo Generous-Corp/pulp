@@ -1299,13 +1299,32 @@
    "spawns": "declared",
    "undeclared_sources": []
   },
+  "pulp-test-design-emitter-conformance": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_design_emitter_conformance.cpp"
+   ],
+   "inputs": [
+    "test/fixtures/emitter-conformance",
+    "test/fixtures/import-fidelity/scene.pulp.json"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/test_design_emitter_conformance.cpp"
+   ],
+   "undeclared_sources": []
+  },
   "pulp-test-design-import": {
    "data": "declared",
    "detected_sources": [
     "test/test_design_import_ir.cpp",
+    "test/test_design_import_native_fonts.cpp",
     "test/test_recognition_resolver.cpp"
    ],
    "inputs": [
+    "external/fonts/FunnelDisplay-VariableFont_wght.ttf",
+    "external/fonts/Inter-Regular.ttf",
+    "test/fixtures/design-ir-observe/variable-font-label",
     "test/fixtures/import-fidelity/assets/knob_ref.png",
     "test/fixtures/imports/claude/vite-assets.html",
     "test/fixtures/imports/figma-plugin/synthetic-knob.png",
@@ -1314,6 +1333,7 @@
    "kind": "compiled",
    "sources": [
     "test/test_design_import_ir.cpp",
+    "test/test_design_import_native_fonts.cpp",
     "test/test_recognition_resolver.cpp"
    ],
    "undeclared_sources": []
@@ -2515,6 +2535,7 @@
   "pulp-control-trusted-host-fixture",
   "pulp-cpp",
   "pulp-denormal-null-refgen",
+  "pulp-emitter-conformance-gen",
   "pulp-fake-screenshot-tool",
   "pulp-fixture-runner",
   "pulp-generate-control-protocol-fuzz-corpus",
@@ -2711,6 +2732,7 @@
   "pulp-test-dawproject-export",
   "pulp-test-denormal-null",
   "pulp-test-design-debug-contracts",
+  "pulp-test-design-emitter-conformance",
   "pulp-test-design-fidelity",
   "pulp-test-design-import",
   "pulp-test-design-import-benchmark",
@@ -2803,6 +2825,7 @@
   "pulp-test-gpu-shared-io-slot-ledger",
   "pulp-test-gpu-shared-io-wavenet-spec",
   "pulp-test-gpu-surface",
+  "pulp-test-gpu-surface-swapchain-macos",
   "pulp-test-gpu-wavenet-descriptor",
   "pulp-test-gpu-wavenet-realtime-node",
   "pulp-test-gpu-wavenet-session",
@@ -3006,6 +3029,7 @@
   "pulp-test-plugin-manager-panel",
   "pulp-test-plugin-state-io",
   "pulp-test-plugin-view-host-design-viewport",
+  "pulp-test-plugin-view-resize-macos",
   "pulp-test-popover-row-template-1147",
   "pulp-test-processor-node-adapter",
   "pulp-test-project-package",
@@ -3051,6 +3075,7 @@
   "pulp-test-sdk-distribution-guard",
   "pulp-test-sdl3-surface",
   "pulp-test-settings-sections",
+  "pulp-test-ship-child-process",
   "pulp-test-ship-dev-build-guard",
   "pulp-test-ship-tracing-guard",
   "pulp-test-signal-additive-bank",
@@ -6858,6 +6883,13 @@
    ],
    "kind": "python"
   },
+  "import-design-ir-observe-variable-font-label": {
+   "entry": "test/test_design_ir_observe_variable_font_label.py",
+   "inputs": [
+    "test/test_design_ir_observe_variable_font_label.py"
+   ],
+   "kind": "python"
+  },
   "import-fidelity-diff": {
    "entry": "test/test_import_fidelity_diff.py",
    "inputs": [
@@ -7833,9 +7865,11 @@
     "tools/import-design/browser_capture/capture_interactions.integration.test.mjs",
     "tools/import-design/browser_capture/capture_paint.integration.test.mjs",
     "tools/import-design/browser_capture/font_faces.integration.test.mjs",
+    "tools/import-design/browser_capture/form_control_theme.mjs",
     "tools/import-design/browser_capture/motion_freeze.integration.test.mjs",
     "tools/import-design/browser_capture/run_integration.mjs",
     "tools/import-design/browser_capture/security.mjs",
+    "tools/import-design/browser_capture/semantics.mjs",
     "tools/import-design/browser_capture/settle.mjs"
    ],
    "kind": "node"

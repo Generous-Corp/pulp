@@ -15,6 +15,14 @@ audio continuity require a product scenario and remain `NOT_EVALUATED` here.
   -ParamIndex 0 -AutomationSec 8 -TimeoutSec 60
 ```
 
+`EvidenceDir` must be writable by the account that launches REAPER. A service
+or SSH launch as `ci` must use a `ci`-owned path (for example
+`$env:TEMP\pulp-reaper-evidence`); it must not write under another desktop
+account such as `C:\Users\pulp-rdp\Desktop`. A GUI capture launched from the
+interactive `pulp-rdp` session has the opposite requirement. This account
+boundary is checked before the host starts so an ACL failure cannot be
+misreported as a plugin or status-publication failure.
+
 Use an initialized, registered profile whose first-run dialogs have already
 been dismissed. The harness copies the non-secret profile into a private
 temporary profile outside the evidence directory, preserves the license only in
@@ -113,6 +121,10 @@ On Windows, start the complete private profile with
 stall before startup-script dispatch; the harness copies the non-secret profile
 and removes stale scan caches before launching. Neither `-portable` nor
 `-script` is supported.
+When `PULP_TRACE_PATH` is set, the harness clears it for the warm REAPER scan
+and restores it for the scripted editor run. The scan can instantiate the
+plugin and close a trace before the measured run begins; keeping that probe out
+of the destination makes the resulting capture belong to the scripted run.
 Compare the same assigned modulation with mouse still versus band drawing, and
 settings mouse-still versus scrolling. Buffer input QPC/UTC timing records and
 capture screenshots/state outside the measured windows. Verify received event

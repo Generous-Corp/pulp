@@ -1,0 +1,29 @@
+{
+  "$comment": "Known divergences between the native materializer and the other emitters, read by test/test_design_emitter_conformance.cpp. Each entry names the lane, the projection field (a regex), optionally the fixtures, an anchor regex and the expected (native) and actual (lane) values as regexes, plus the issue that tracks closing it. An entry that matches nothing fails the gate: delete it with the fix.",
+  "gaps": [
+    {
+      "lane": "js",
+      "field": "binding",
+      "fixtures": [
+        "kelvin"
+      ],
+      "anchor": "capture:out:38",
+      "expected": "<absent>",
+      "actual": "meter:out",
+      "issue": "https://github.com/Generous-Corp/pulp/issues/10983",
+      "reason": "ui.js binds a meter from pulpMeterValueKey alone; the native and baked C++ binders need a meter source and channel."
+    },
+    {
+      "lane": "swiftui",
+      "field": "binding",
+      "fixtures": [
+        "form-controls-08",
+        "kelvin"
+      ],
+      "expected": "<absent>",
+      "actual": "param:",
+      "issue": "https://github.com/Generous-Corp/pulp/issues/10984",
+      "reason": "SwiftUI resolves controls by display name and declares an entry with no param key for controls the other lanes leave unbound."
+    }
+  ]
+}

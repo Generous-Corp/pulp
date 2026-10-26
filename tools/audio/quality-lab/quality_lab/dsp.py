@@ -635,14 +635,35 @@ def resample_by_ratio(y: np.ndarray, ratio: float, *, zeros: int = 32, beta: flo
     return _kaiser_sinc_resample(y, int(round(y.size * ratio)), zeros, beta)
 
 
+class OnsetAttack(NamedTuple):
+    """One onset pair's attack comparison (see :func:`onset_attack_measure`)."""
+
+    deficit: float
+    amp_ratio: float
+    energy_delay_ms: float
+
+
+def energy_median_ms(seg: np.ndarray, sr: int) -> float:
+    """Time (ms from the window start) by which half of the window's smoothed high-band energy has
+    arrived. An aggregate over the whole window, so unlike a threshold crossing it does not jump
+    when a small perturbation moves one envelope sample across a level."""
+    env, hop = smooth_energy_env(seg, sr)
+    total = float(np.sum(env))
+    if env.size == 0 or total <= 0.0:
+        return 0.0
+    return hop * float(np.searchsorted(np.cumsum(env), 0.5 * total)) / sr * 1000.0
+
+
 def onset_attack_measure(
     reference: np.ndarray, candidate: np.ndarray, sr: int, ref_t: float, cand_t: float
-) -> tuple[float, float] | None:
-    """(deficit, amplitude ratio) for ONE onset pair, or None when the window can't be measured
-    (boundary, or a silent reference attack). The deficit is :func:`onset_attack_deficit`'s. The
-    amplitude ratio is the candidate's high-band attack amplitude over the reference's, clipped to
-    [0, 1]: near 1 when the attack's energy survived (whatever its rise time), near 0 when the attack
-    is gone."""
+) -> OnsetAttack | None:
+    """Attack comparison for ONE onset pair, or None when the window can't be measured (boundary,
+    or a silent reference attack). ``deficit`` is :func:`onset_attack_deficit`'s. ``amp_ratio`` is
+    the candidate's high-band attack amplitude over the reference's, clipped to [0, 1]: near 1 when
+    the attack's energy survived (whatever its rise time), near 0 when the attack is gone.
+    ``energy_delay_ms`` is how much later the candidate's window reaches half its high-band energy
+    (:func:`energy_median_ms`): an attack spread out in time moves it later by milliseconds, while a
+    rise-time estimate that jumped on intact energy leaves it at zero."""
     ref_seg, cand_seg, _lag = local_align(reference, candidate, sr, ref_t, cand_t)
     if ref_seg is None:
         return None
@@ -650,8 +671,11 @@ def onset_attack_measure(
     a_cand, s_cand = attack_shape(cand_seg, sr)
     if s_ref <= 1e-9:
         return None
-    return (float(np.clip(1.0 - s_cand / s_ref, 0.0, 1.0)),
-            float(np.clip(a_cand / a_ref, 0.0, 1.0)) if a_ref > 1e-12 else 1.0)
+    return OnsetAttack(
+        float(np.clip(1.0 - s_cand / s_ref, 0.0, 1.0)),
+        float(np.clip(a_cand / a_ref, 0.0, 1.0)) if a_ref > 1e-12 else 1.0,
+        energy_median_ms(cand_seg, sr) - energy_median_ms(ref_seg, sr),
+    )
 
 
 def onset_attack_deficit(

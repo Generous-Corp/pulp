@@ -23,6 +23,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/host/sample_region_authoring.hpp": "Pulp::host",
     "pulp/host/sample_region_proof.hpp": "Pulp::host",
     "pulp/host/sample_region_parameters.hpp": "Pulp::host",
+    "pulp/host/catalog_descriptor.hpp": "Pulp::host",
 
     "pulp/format/processor.hpp": "Pulp::format",
     "pulp/format/processor_node_adapter.hpp": "Pulp::format",
@@ -226,6 +227,19 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "It lets control and importer code validate graph identity/generation "
             "without claiming an installed DSP capability or pulling in the runtime "
             "implementation surface."
+        ),
+    },
+    {
+        "include": "pulp/host/catalog_descriptor.hpp",
+        "fingerprint": "sha256:1a5a790b3ae48d3992d429c12f35963293577fd49bfd3f7c9a6dec9548d9e539",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Product-neutral catalog descriptor aliases and validates the host-facing "
+            "descriptor and export machinery. It is reusable host infrastructure, "
+            "while product-specific Forge headers, symbols, and serialization remain "
+            "the compatibility authority; it is not an independently advertised "
+            "generator-facing capability."
         ),
     },
     {
@@ -498,7 +512,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     ],
     {
         "include": "pulp/signal/fft.hpp",
-        "fingerprint": "sha256:2fa87e10652990ec764698911a14f722bf67f02a0530d62845ba8dc974264fb4",
+        "fingerprint": "sha256:e5cb316d6a41224282447d106d52358f6245a768556f7b44e271ec81e5fbf433",
         "disposition": "capability_support",
         "capability_keys": ["signal.source-filter-analysis", "signal.streaming-analysis-frontends"],
         "rationale": (
@@ -811,7 +825,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/fast_math.hpp",
-        "fingerprint": "sha256:06673a7b8a8b1609fa65ffb1143e637dd8e0b48adcedfdfa2e26df11369217b0",
+        "fingerprint": "sha256:1ec60855acbc4b9fd41b37161c308bc3bf499c231be901222b11bfb1bf75a73e",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -842,7 +856,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/biquad.hpp",
-        "fingerprint": "sha256:7491f1683f2b88a0f5af8d160760e49ab429240fd07831f05961fcd0dd0db6a5",
+        "fingerprint": "sha256:fdbc7b3053b72c4a8dc102e034e405bcaab68ba07083e5ac610c2b9ae35ec07e",
         "disposition": "capability_support",
         "capability_keys": ["signal.sos-cascade"],
         "rationale": (
@@ -1376,7 +1390,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/fdn/config.hpp",
-        "fingerprint": "sha256:a63cebacd0da5920556092f5e802fc863add06d8ff951ec78fe00eb2721770ce",
+        "fingerprint": "sha256:7c86120bda9c7619a3c92f490b4e9cf7f88dfdcc40ecf330d045b3db63eb387a",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1420,7 +1434,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/fdn/loop_eq.hpp",
-        "fingerprint": "sha256:553d65de8f48182b8d4362d8c974824dd4ade3d0cf9b5605283992c8bae0affc",
+        "fingerprint": "sha256:791f7d56e50ffd8143ae7c4bb339536b4febed45c298aca2792a3fcd4c6915e2",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1453,7 +1467,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/fdn/stages.hpp",
-        "fingerprint": "sha256:d397bfcef37a288a29648ad2bd95010c4f995b135693c23cb5da36b3ab7ed9b1",
+        "fingerprint": "sha256:02a305c4607e4e42fd4e51d161bfc46f6c10d13d8fe4bb0fb9d3d6d5cbcf9e75",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1524,7 +1538,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/fixed_ir_convolver.hpp",
-        "fingerprint": "sha256:64382ea1f17038c0f2bcd960eb17a02c8f8cd97ce5680481ef7fe16e0109cb84",
+        "fingerprint": "sha256:80ba7f87cc92c3a7fb71238aea463f3839b977fe11877e80aeb029860edffe80",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
