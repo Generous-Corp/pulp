@@ -1004,6 +1004,11 @@ struct TextShaper::Impl {
                     tstyle.setFontFamilies(families);
                     tstyle.setFontSize(font_size);
                     apply_auto_optical_size(tstyle, typeface.get(), font_size);
+                    tstyle.setFontStyle(SkFontStyle(
+                        font_weight, SkFontStyle::kNormal_Width,
+                        skia_slant_from_int(font_slant)));
+                    pstyle.setFakeMissingFontStyles(
+                        paragraph_fakes_missing_font_styles(font_family, font_weight, font_slant));
                     pstyle.setTextStyle(tstyle);
                     auto collection_use = ctx->lock_font_collection_use();
                     auto pb = skia::textlayout::ParagraphBuilder::make(
