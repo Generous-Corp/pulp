@@ -504,8 +504,9 @@ std::mutex& declared_weights_mutex() {
     return m;
 }
 
-using ScopedDeclaredWeights = std::unordered_map<
-    std::string, std::unordered_map<std::string, std::vector<DeclaredWeightRange>>>;
+using ScopedDeclaredWeights =
+    std::unordered_map<std::string,
+                       std::unordered_map<std::string, std::vector<DeclaredWeightRange>>>;
 
 ScopedDeclaredWeights& declared_weights() {
     static ScopedDeclaredWeights map;
