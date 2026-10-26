@@ -941,7 +941,7 @@ if(Python3_Interpreter_FOUND)
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_check_au_component_preflight.py")
     set_tests_properties(au-component-preflight-selftest PROPERTIES
-        LABELS "tooling;validation"
+        LABELS "tooling"
         TIMEOUT 60)
 endif()
 if(Python3_Interpreter_FOUND)
