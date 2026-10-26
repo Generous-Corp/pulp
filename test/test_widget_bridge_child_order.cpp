@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/state/store.hpp>
+#include <pulp/view/pointer_dispatch.hpp>
 #include <pulp/view/script_engine.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/widget_bridge.hpp>
@@ -198,11 +199,8 @@ TEST_CASE("DOM reorder of a keyed row keeps its widget, focus, and applied style
         var second = document.createElement('div');
         first.style.background = 'rgb(10,20,30)';
         second.style.background = 'rgb(40,50,60)';
-        var field = document.createElement('input');
-        second.appendChild(field);
         list.appendChild(first);
         list.appendChild(second);
-        field.focus();
         var backgroundWrites = 0;
         var realSetBackground = setBackground;
         setBackground = function(id, value) {
@@ -210,18 +208,34 @@ TEST_CASE("DOM reorder of a keyed row keeps its widget, focus, and applied style
             return realSetBackground(id, value);
         };
         var listId = list._id, firstId = first._id, secondId = second._id;
-        var fieldId = field._id;
     )JS");
 
     auto* list = bridge.widget(engine.evaluate("listId").toString());
     const auto first_id = engine.evaluate("firstId").toString();
     const auto second_id = engine.evaluate("secondId").toString();
-    auto* field = bridge.widget(engine.evaluate("fieldId").toString());
     REQUIRE(list != nullptr);
-    REQUIRE(field != nullptr);
-    REQUIRE(field->has_focus());
-    const View* second_before = bridge.widget(second_id);
+    View* second_before = bridge.widget(second_id);
+    REQUIRE(second_before != nullptr);
     const auto lifetime = second_before->import_binding_lifetime_token();
+
+    // A focused editor inside the moved row. Detaching the row blurs it, and
+    // re-attaching hands focus back through a fresh gain callback, so a
+    // reparent shows up as a gain even though focus looks unchanged after.
+    struct FocusProbe : View {
+        int gains = 0;
+        void on_focus_changed(bool gained) override {
+            View::on_focus_changed(gained);
+            if (gained)
+                ++gains;
+        }
+    };
+    auto owned_probe = std::make_unique<FocusProbe>();
+    owned_probe->set_focusable(true);
+    auto* field = owned_probe.get();
+    second_before->add_child(std::move(owned_probe));
+    REQUIRE(transfer_input_focus(root, field));
+    REQUIRE(field->has_focus());
+    field->gains = 0;
 
     // Swap the rows the way a keyed reconciler does, then put them back. Each
     // move runs through load_script: evaluate() would convert the returned
@@ -232,12 +246,14 @@ TEST_CASE("DOM reorder of a keyed row keeps its widget, focus, and applied style
     CHECK_FALSE(lifetime.expired());
     // A detach and re-attach would blur the editor inside the moved row.
     CHECK(field->has_focus());
+    CHECK(field->gains == 0);
     // The row's styles are already on its widget; a move does not resend them.
     CHECK(engine.evaluate("backgroundWrites").getWithDefault<int>(-1) == 0);
 
     bridge.load_script("list.insertBefore(first, second);");
     CHECK(child_ids(*list) == std::vector<std::string>{first_id, second_id});
     CHECK(field->has_focus());
+    CHECK(field->gains == 0);
 
     // Inserting a row before its own next sibling is no move at all.
     bridge.load_script("list.insertBefore(first, second);");
