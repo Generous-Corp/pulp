@@ -1,0 +1,778 @@
+{
+  "version": 1,
+  "source": "claude",
+  "sourceFile": "source.html",
+  "capture_method": "chromium-cdp",
+  "settle_rounds": 13,
+  "fallback_reason": "",
+  "source_adapter": "browser-capture",
+  "source_version": "pulp-browser-capture-v1",
+  "imported_at": "2026-10-24T23:12:54Z",
+  "root": {
+    "type": "frame",
+    "name": "Browser-evaluated HTML",
+    "style": {
+      "backgroundColor": "rgb(13, 17, 23)",
+      "overflow": "hidden",
+      "position": "relative",
+      "width": 420,
+      "height": 120
+    },
+    "layout": {
+      "direction": "column",
+      "gap": 0,
+      "paddingTop": 0,
+      "paddingRight": 0,
+      "paddingBottom": 0,
+      "paddingLeft": 0,
+      "justify": "flex-start",
+      "align": "stretch",
+      "wrap": false,
+      "widthMode": "fixed",
+      "heightMode": "fixed"
+    },
+    "attributes": {
+      "browser_authored_frame_height": "120.000000",
+      "browser_authored_frame_width": "420.000000",
+      "browser_authored_frame_x": "0.000000",
+      "browser_authored_frame_y": "0.000000",
+      "browser_capture_envelope": "pulp-capture:///capture.json",
+      "browser_device_scale_factor": "2.000000",
+      "browser_reference_asset": "reference:browser",
+      "browser_semantic_candidates": "0",
+      "browser_semantic_report": "pulp-capture:///semantic-report.json",
+      "browser_semantic_resolved": "0",
+      "browser_semantic_unresolved": "0",
+      "browser_token_report": "pulp-capture:///tokens.json",
+      "controls_lowered": "0",
+      "controls_with_captured_style": "0",
+      "native_nodes_element_capture_fallback": "0",
+      "native_nodes_image_asset": "0",
+      "native_nodes_lowered": "11",
+      "native_nodes_missing_paint_order": "0",
+      "native_nodes_native": "11",
+      "native_nodes_pooled": "0",
+      "native_nodes_skipped_non_visual": "1",
+      "native_nodes_text": "4",
+      "native_painted_nodes": "12",
+      "native_tree_depth": "5",
+      "native_tree_root_children": "1"
+    },
+    "stable_anchor_id": "browser:root",
+    "anchor_strategy": "adapter",
+    "source_adapter": "browser-capture",
+    "source_version": "pulp-browser-capture-v1",
+    "children": [
+      {
+        "type": "frame",
+        "name": "html",
+        "style": {
+          "backgroundColor": "rgb(13, 17, 23)",
+          "color": "rgb(0, 0, 0)",
+          "borderRadius": 0,
+          "borderWidth": 0,
+          "borderTopWidth": 0,
+          "borderRightWidth": 0,
+          "borderBottomWidth": 0,
+          "borderLeftWidth": 0,
+          "borderTopLeftRadius": 0,
+          "borderTopRightRadius": 0,
+          "borderBottomRightRadius": 0,
+          "borderBottomLeftRadius": 0,
+          "fontFamily": "Times",
+          "fontSize": 16,
+          "fontWeight": 400,
+          "whiteSpace": "normal",
+          "textOverflow": "clip",
+          "position": "absolute",
+          "top": 0,
+          "left": 0,
+          "zIndex": 0,
+          "width": 420,
+          "height": 120
+        },
+        "layout": {
+          "direction": "column",
+          "gap": 0,
+          "paddingTop": 0,
+          "paddingRight": 0,
+          "paddingBottom": 0,
+          "paddingLeft": 0,
+          "justify": "flex-start",
+          "align": "stretch",
+          "wrap": false,
+          "widthMode": "fixed",
+          "heightMode": "fixed"
+        },
+        "attributes": {
+          "backend_node_id": "3",
+          "browser_box_paint_bottom_px": "240.000000",
+          "browser_box_paint_dpr": "2.000000",
+          "browser_box_paint_left_px": "0.000000",
+          "browser_box_paint_right_px": "840.000000",
+          "browser_box_paint_top_px": "0.000000",
+          "paint_class": "native",
+          "paint_order": "1",
+          "source_tag": "html"
+        },
+        "stable_anchor_id": "capture:html[0]",
+        "anchor_strategy": "capture-path",
+        "children": [
+          {
+            "type": "frame",
+            "name": "body",
+            "style": {
+              "backgroundColor": "rgb(13, 17, 23)",
+              "color": "rgb(0, 0, 0)",
+              "borderRadius": 0,
+              "borderWidth": 0,
+              "borderTopWidth": 0,
+              "borderRightWidth": 0,
+              "borderBottomWidth": 0,
+              "borderLeftWidth": 0,
+              "borderTopLeftRadius": 0,
+              "borderTopRightRadius": 0,
+              "borderBottomRightRadius": 0,
+              "borderBottomLeftRadius": 0,
+              "fontFamily": "Times",
+              "fontSize": 16,
+              "fontWeight": 400,
+              "whiteSpace": "normal",
+              "textOverflow": "clip",
+              "position": "absolute",
+              "top": 0,
+              "left": 0,
+              "zIndex": 0,
+              "width": 420,
+              "height": 120
+            },
+            "layout": {
+              "direction": "column",
+              "gap": 0,
+              "paddingTop": 0,
+              "paddingRight": 0,
+              "paddingBottom": 0,
+              "paddingLeft": 0,
+              "justify": "flex-start",
+              "align": "stretch",
+              "wrap": false,
+              "widthMode": "fixed",
+              "heightMode": "fixed"
+            },
+            "attributes": {
+              "backend_node_id": "8",
+              "browser_box_paint_bottom_px": "240.000000",
+              "browser_box_paint_dpr": "2.000000",
+              "browser_box_paint_left_px": "0.000000",
+              "browser_box_paint_right_px": "840.000000",
+              "browser_box_paint_top_px": "0.000000",
+              "paint_class": "native",
+              "paint_order": "1",
+              "source_tag": "body"
+            },
+            "stable_anchor_id": "capture:html[0]/body[0]",
+            "anchor_strategy": "capture-path",
+            "children": [
+              {
+                "type": "frame",
+                "name": "div#panel",
+                "style": {
+                  "backgroundColor": "rgb(13, 17, 23)",
+                  "color": "rgb(0, 0, 0)",
+                  "borderRadius": 0,
+                  "borderWidth": 0,
+                  "borderTopWidth": 0,
+                  "borderRightWidth": 0,
+                  "borderBottomWidth": 0,
+                  "borderLeftWidth": 0,
+                  "borderTopLeftRadius": 0,
+                  "borderTopRightRadius": 0,
+                  "borderBottomRightRadius": 0,
+                  "borderBottomLeftRadius": 0,
+                  "fontFamily": "Times",
+                  "fontSize": 16,
+                  "fontWeight": 400,
+                  "whiteSpace": "normal",
+                  "textOverflow": "clip",
+                  "position": "absolute",
+                  "top": 0,
+                  "left": 0,
+                  "zIndex": 0,
+                  "width": 420,
+                  "height": 120
+                },
+                "layout": {
+                  "direction": "column",
+                  "gap": 0,
+                  "paddingTop": 0,
+                  "paddingRight": 0,
+                  "paddingBottom": 0,
+                  "paddingLeft": 0,
+                  "justify": "flex-start",
+                  "align": "stretch",
+                  "wrap": false,
+                  "widthMode": "fixed",
+                  "heightMode": "fixed"
+                },
+                "attributes": {
+                  "backend_node_id": "10",
+                  "browser_box_paint_bottom_px": "240.000000",
+                  "browser_box_paint_dpr": "2.000000",
+                  "browser_box_paint_left_px": "0.000000",
+                  "browser_box_paint_right_px": "840.000000",
+                  "browser_box_paint_top_px": "0.000000",
+                  "paint_class": "native",
+                  "paint_order": "2",
+                  "source_tag": "div"
+                },
+                "stable_anchor_id": "capture:html[0]/body[0]/div#panel[0]",
+                "anchor_strategy": "capture-path",
+                "children": [
+                  {
+                    "type": "frame",
+                    "name": "div#label-half",
+                    "style": {
+                      "color": "rgb(230, 237, 243)",
+                      "borderRadius": 0,
+                      "borderWidth": 0,
+                      "borderTopWidth": 0,
+                      "borderRightWidth": 0,
+                      "borderBottomWidth": 0,
+                      "borderLeftWidth": 0,
+                      "borderTopLeftRadius": 0,
+                      "borderTopRightRadius": 0,
+                      "borderBottomRightRadius": 0,
+                      "borderBottomLeftRadius": 0,
+                      "fontFamily": "\"Pulp Captured Variable\", sans-serif",
+                      "fontSize": 15,
+                      "fontWeight": 600,
+                      "lineHeight": 20,
+                      "whiteSpace": "normal",
+                      "textOverflow": "clip",
+                      "position": "absolute",
+                      "top": 13.5,
+                      "left": 60,
+                      "zIndex": 0,
+                      "width": 58.140625,
+                      "height": 20
+                    },
+                    "layout": {
+                      "direction": "column",
+                      "gap": 0,
+                      "paddingTop": 0,
+                      "paddingRight": 0,
+                      "paddingBottom": 0,
+                      "paddingLeft": 0,
+                      "justify": "flex-start",
+                      "align": "stretch",
+                      "wrap": false,
+                      "widthMode": "fixed",
+                      "heightMode": "fixed"
+                    },
+                    "attributes": {
+                      "backend_node_id": "12",
+                      "browser_box_paint_bottom_px": "68.000000",
+                      "browser_box_paint_dpr": "2.000000",
+                      "browser_box_paint_left_px": "120.000000",
+                      "browser_box_paint_right_px": "236.000000",
+                      "browser_box_paint_top_px": "28.000000",
+                      "paint_class": "native",
+                      "paint_order": "3",
+                      "source_tag": "div"
+                    },
+                    "stable_anchor_id": "capture:html[0]/body[0]/div#panel[0]/div#label-half[0]",
+                    "anchor_strategy": "capture-path",
+                    "children": [
+                      {
+                        "type": "text",
+                        "name": "#text",
+                        "content": "SPECTR",
+                        "lineBoxes": [
+                          {
+                            "left": 0,
+                            "top": 0,
+                            "width": 58.140625,
+                            "height": 19,
+                            "start": 0,
+                            "length": 6
+                          }
+                        ],
+                        "lineBoxBasis": {
+                          "width": 58.140625,
+                          "resolvedFace": "FunnelDisplay-Light_SemiBold",
+                          "ascent": 15,
+                          "descent": 4
+                        },
+                        "style": {
+                          "color": "rgb(230, 237, 243)",
+                          "fontFamily": "\"Pulp Captured Variable\", sans-serif",
+                          "fontSize": 15,
+                          "fontWeight": 600,
+                          "lineHeight": 20,
+                          "whiteSpace": "normal",
+                          "textOverflow": "clip",
+                          "position": "absolute",
+                          "top": 0,
+                          "left": 0,
+                          "zIndex": 0,
+                          "width": 58.140625,
+                          "height": 19
+                        },
+                        "layout": {
+                          "direction": "column",
+                          "gap": 0,
+                          "paddingTop": 0,
+                          "paddingRight": 0,
+                          "paddingBottom": 0,
+                          "paddingLeft": 0,
+                          "justify": "flex-start",
+                          "align": "stretch",
+                          "wrap": false,
+                          "widthMode": "fixed",
+                          "heightMode": "fixed"
+                        },
+                        "attributes": {
+                          "backend_node_id": "13",
+                          "browser_box_paint_bottom_px": "66.000000",
+                          "browser_box_paint_dpr": "2.000000",
+                          "browser_box_paint_left_px": "120.000000",
+                          "browser_box_paint_right_px": "236.000000",
+                          "browser_box_paint_top_px": "28.000000",
+                          "paint_class": "native",
+                          "paint_order": "3",
+                          "source_tag": "#text"
+                        },
+                        "stable_anchor_id": "capture:html[0]/body[0]/div#panel[0]/div#label-half[0]/#text[0]",
+                        "anchor_strategy": "capture-path",
+                        "children": []
+                      }
+                    ]
+                  },
+                  {
+                    "type": "frame",
+                    "name": "div#light-half",
+                    "style": {
+                      "color": "rgb(230, 237, 243)",
+                      "borderRadius": 0,
+                      "borderWidth": 0,
+                      "borderTopWidth": 0,
+                      "borderRightWidth": 0,
+                      "borderBottomWidth": 0,
+                      "borderLeftWidth": 0,
+                      "borderTopLeftRadius": 0,
+                      "borderTopRightRadius": 0,
+                      "borderBottomRightRadius": 0,
+                      "borderBottomLeftRadius": 0,
+                      "fontFamily": "\"Pulp Captured Variable\", sans-serif",
+                      "fontSize": 15,
+                      "fontWeight": 400,
+                      "lineHeight": 20,
+                      "whiteSpace": "normal",
+                      "textOverflow": "clip",
+                      "position": "absolute",
+                      "top": 13.5,
+                      "left": 220,
+                      "zIndex": 1,
+                      "width": 48.15625,
+                      "height": 20
+                    },
+                    "layout": {
+                      "direction": "column",
+                      "gap": 0,
+                      "paddingTop": 0,
+                      "paddingRight": 0,
+                      "paddingBottom": 0,
+                      "paddingLeft": 0,
+                      "justify": "flex-start",
+                      "align": "stretch",
+                      "wrap": false,
+                      "widthMode": "fixed",
+                      "heightMode": "fixed"
+                    },
+                    "attributes": {
+                      "backend_node_id": "15",
+                      "browser_box_paint_bottom_px": "68.000000",
+                      "browser_box_paint_dpr": "2.000000",
+                      "browser_box_paint_left_px": "440.000000",
+                      "browser_box_paint_right_px": "536.000000",
+                      "browser_box_paint_top_px": "28.000000",
+                      "paint_class": "native",
+                      "paint_order": "4",
+                      "source_tag": "div"
+                    },
+                    "stable_anchor_id": "capture:html[0]/body[0]/div#panel[0]/div#light-half[0]",
+                    "anchor_strategy": "capture-path",
+                    "children": [
+                      {
+                        "type": "text",
+                        "name": "#text",
+                        "content": "Sweep",
+                        "lineBoxes": [
+                          {
+                            "left": 0,
+                            "top": 0,
+                            "width": 48.15625,
+                            "height": 19,
+                            "start": 0,
+                            "length": 5
+                          }
+                        ],
+                        "lineBoxBasis": {
+                          "width": 48.15625,
+                          "resolvedFace": "FunnelDisplay-Light_Regular",
+                          "ascent": 15,
+                          "descent": 4
+                        },
+                        "style": {
+                          "color": "rgb(230, 237, 243)",
+                          "fontFamily": "\"Pulp Captured Variable\", sans-serif",
+                          "fontSize": 15,
+                          "fontWeight": 400,
+                          "lineHeight": 20,
+                          "whiteSpace": "normal",
+                          "textOverflow": "clip",
+                          "position": "absolute",
+                          "top": 0,
+                          "left": 0,
+                          "zIndex": 0,
+                          "width": 48.15625,
+                          "height": 19
+                        },
+                        "layout": {
+                          "direction": "column",
+                          "gap": 0,
+                          "paddingTop": 0,
+                          "paddingRight": 0,
+                          "paddingBottom": 0,
+                          "paddingLeft": 0,
+                          "justify": "flex-start",
+                          "align": "stretch",
+                          "wrap": false,
+                          "widthMode": "fixed",
+                          "heightMode": "fixed"
+                        },
+                        "attributes": {
+                          "backend_node_id": "16",
+                          "browser_box_paint_bottom_px": "66.000000",
+                          "browser_box_paint_dpr": "2.000000",
+                          "browser_box_paint_left_px": "440.000000",
+                          "browser_box_paint_right_px": "536.000000",
+                          "browser_box_paint_top_px": "28.000000",
+                          "paint_class": "native",
+                          "paint_order": "4",
+                          "source_tag": "#text"
+                        },
+                        "stable_anchor_id": "capture:html[0]/body[0]/div#panel[0]/div#light-half[0]/#text[0]",
+                        "anchor_strategy": "capture-path",
+                        "children": []
+                      }
+                    ]
+                  },
+                  {
+                    "type": "frame",
+                    "name": "div#label-whole",
+                    "style": {
+                      "color": "rgb(230, 237, 243)",
+                      "borderRadius": 0,
+                      "borderWidth": 0,
+                      "borderTopWidth": 0,
+                      "borderRightWidth": 0,
+                      "borderBottomWidth": 0,
+                      "borderLeftWidth": 0,
+                      "borderTopLeftRadius": 0,
+                      "borderTopRightRadius": 0,
+                      "borderBottomRightRadius": 0,
+                      "borderBottomLeftRadius": 0,
+                      "fontFamily": "\"Pulp Captured Variable\", sans-serif",
+                      "fontSize": 15,
+                      "fontWeight": 600,
+                      "lineHeight": 20,
+                      "whiteSpace": "normal",
+                      "textOverflow": "clip",
+                      "position": "absolute",
+                      "top": 64,
+                      "left": 60,
+                      "zIndex": 2,
+                      "width": 58.140625,
+                      "height": 20
+                    },
+                    "layout": {
+                      "direction": "column",
+                      "gap": 0,
+                      "paddingTop": 0,
+                      "paddingRight": 0,
+                      "paddingBottom": 0,
+                      "paddingLeft": 0,
+                      "justify": "flex-start",
+                      "align": "stretch",
+                      "wrap": false,
+                      "widthMode": "fixed",
+                      "heightMode": "fixed"
+                    },
+                    "attributes": {
+                      "backend_node_id": "18",
+                      "browser_box_paint_bottom_px": "168.000000",
+                      "browser_box_paint_dpr": "2.000000",
+                      "browser_box_paint_left_px": "120.000000",
+                      "browser_box_paint_right_px": "236.000000",
+                      "browser_box_paint_top_px": "128.000000",
+                      "paint_class": "native",
+                      "paint_order": "5",
+                      "source_tag": "div"
+                    },
+                    "stable_anchor_id": "capture:html[0]/body[0]/div#panel[0]/div#label-whole[0]",
+                    "anchor_strategy": "capture-path",
+                    "children": [
+                      {
+                        "type": "text",
+                        "name": "#text",
+                        "content": "SPECTR",
+                        "lineBoxes": [
+                          {
+                            "left": 0,
+                            "top": 0,
+                            "width": 58.140625,
+                            "height": 19,
+                            "start": 0,
+                            "length": 6
+                          }
+                        ],
+                        "lineBoxBasis": {
+                          "width": 58.140625,
+                          "resolvedFace": "FunnelDisplay-Light_SemiBold",
+                          "ascent": 15,
+                          "descent": 4
+                        },
+                        "style": {
+                          "color": "rgb(230, 237, 243)",
+                          "fontFamily": "\"Pulp Captured Variable\", sans-serif",
+                          "fontSize": 15,
+                          "fontWeight": 600,
+                          "lineHeight": 20,
+                          "whiteSpace": "normal",
+                          "textOverflow": "clip",
+                          "position": "absolute",
+                          "top": 0,
+                          "left": 0,
+                          "zIndex": 0,
+                          "width": 58.140625,
+                          "height": 19
+                        },
+                        "layout": {
+                          "direction": "column",
+                          "gap": 0,
+                          "paddingTop": 0,
+                          "paddingRight": 0,
+                          "paddingBottom": 0,
+                          "paddingLeft": 0,
+                          "justify": "flex-start",
+                          "align": "stretch",
+                          "wrap": false,
+                          "widthMode": "fixed",
+                          "heightMode": "fixed"
+                        },
+                        "attributes": {
+                          "backend_node_id": "19",
+                          "browser_box_paint_bottom_px": "166.000000",
+                          "browser_box_paint_dpr": "2.000000",
+                          "browser_box_paint_left_px": "120.000000",
+                          "browser_box_paint_right_px": "236.000000",
+                          "browser_box_paint_top_px": "128.000000",
+                          "paint_class": "native",
+                          "paint_order": "5",
+                          "source_tag": "#text"
+                        },
+                        "stable_anchor_id": "capture:html[0]/body[0]/div#panel[0]/div#label-whole[0]/#text[0]",
+                        "anchor_strategy": "capture-path",
+                        "children": []
+                      }
+                    ]
+                  },
+                  {
+                    "type": "frame",
+                    "name": "div#light-whole",
+                    "style": {
+                      "color": "rgb(230, 237, 243)",
+                      "borderRadius": 0,
+                      "borderWidth": 0,
+                      "borderTopWidth": 0,
+                      "borderRightWidth": 0,
+                      "borderBottomWidth": 0,
+                      "borderLeftWidth": 0,
+                      "borderTopLeftRadius": 0,
+                      "borderTopRightRadius": 0,
+                      "borderBottomRightRadius": 0,
+                      "borderBottomLeftRadius": 0,
+                      "fontFamily": "\"Pulp Captured Variable\", sans-serif",
+                      "fontSize": 15,
+                      "fontWeight": 400,
+                      "lineHeight": 20,
+                      "whiteSpace": "normal",
+                      "textOverflow": "clip",
+                      "position": "absolute",
+                      "top": 64,
+                      "left": 220,
+                      "zIndex": 3,
+                      "width": 48.15625,
+                      "height": 20
+                    },
+                    "layout": {
+                      "direction": "column",
+                      "gap": 0,
+                      "paddingTop": 0,
+                      "paddingRight": 0,
+                      "paddingBottom": 0,
+                      "paddingLeft": 0,
+                      "justify": "flex-start",
+                      "align": "stretch",
+                      "wrap": false,
+                      "widthMode": "fixed",
+                      "heightMode": "fixed"
+                    },
+                    "attributes": {
+                      "backend_node_id": "21",
+                      "browser_box_paint_bottom_px": "168.000000",
+                      "browser_box_paint_dpr": "2.000000",
+                      "browser_box_paint_left_px": "440.000000",
+                      "browser_box_paint_right_px": "536.000000",
+                      "browser_box_paint_top_px": "128.000000",
+                      "paint_class": "native",
+                      "paint_order": "6",
+                      "source_tag": "div"
+                    },
+                    "stable_anchor_id": "capture:html[0]/body[0]/div#panel[0]/div#light-whole[0]",
+                    "anchor_strategy": "capture-path",
+                    "children": [
+                      {
+                        "type": "text",
+                        "name": "#text",
+                        "content": "Sweep",
+                        "lineBoxes": [
+                          {
+                            "left": 0,
+                            "top": 0,
+                            "width": 48.15625,
+                            "height": 19,
+                            "start": 0,
+                            "length": 5
+                          }
+                        ],
+                        "lineBoxBasis": {
+                          "width": 48.15625,
+                          "resolvedFace": "FunnelDisplay-Light_Regular",
+                          "ascent": 15,
+                          "descent": 4
+                        },
+                        "style": {
+                          "color": "rgb(230, 237, 243)",
+                          "fontFamily": "\"Pulp Captured Variable\", sans-serif",
+                          "fontSize": 15,
+                          "fontWeight": 400,
+                          "lineHeight": 20,
+                          "whiteSpace": "normal",
+                          "textOverflow": "clip",
+                          "position": "absolute",
+                          "top": 0,
+                          "left": 0,
+                          "zIndex": 0,
+                          "width": 48.15625,
+                          "height": 19
+                        },
+                        "layout": {
+                          "direction": "column",
+                          "gap": 0,
+                          "paddingTop": 0,
+                          "paddingRight": 0,
+                          "paddingBottom": 0,
+                          "paddingLeft": 0,
+                          "justify": "flex-start",
+                          "align": "stretch",
+                          "wrap": false,
+                          "widthMode": "fixed",
+                          "heightMode": "fixed"
+                        },
+                        "attributes": {
+                          "backend_node_id": "22",
+                          "browser_box_paint_bottom_px": "166.000000",
+                          "browser_box_paint_dpr": "2.000000",
+                          "browser_box_paint_left_px": "440.000000",
+                          "browser_box_paint_right_px": "536.000000",
+                          "browser_box_paint_top_px": "128.000000",
+                          "paint_class": "native",
+                          "paint_order": "6",
+                          "source_tag": "#text"
+                        },
+                        "stable_anchor_id": "capture:html[0]/body[0]/div#panel[0]/div#light-whole[0]/#text[0]",
+                        "anchor_strategy": "capture-path",
+                        "children": []
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "tokens": {
+    "colors": {},
+    "dimensions": {},
+    "strings": {}
+  },
+  "assetManifest": {
+    "version": 1,
+    "assets": [
+      {
+        "asset_id": "reference:browser-static",
+        "original_uri": "pulp-capture:///browser-static.png",
+        "local_path": "assets/3d6f6886574c98c9a230cb6ad25dd7abcb5ad6288ec8ba688ea8fa75de505e4b.png",
+        "content_hash": "3d6f6886574c98c9a230cb6ad25dd7abcb5ad6288ec8ba688ea8fa75de505e4b",
+        "mime": "image/png",
+        "width": 840,
+        "height": 240,
+        "diagnostics": []
+      },
+      {
+        "asset_id": "reference:browser-chrome",
+        "original_uri": "pulp-capture:///browser-chrome.png",
+        "local_path": "assets/browser-chrome-2.png",
+        "content_hash": "3d6f6886574c98c9a230cb6ad25dd7abcb5ad6288ec8ba688ea8fa75de505e4b",
+        "mime": "image/png",
+        "width": 840,
+        "height": 240,
+        "diagnostics": []
+      },
+      {
+        "asset_id": "evidence:browser-canvas-composite",
+        "original_uri": "pulp-capture:///browser-canvas-composite.png",
+        "local_path": "assets/8e86ae11c4379d36bca6c577c25c8d320730b74c0f890fb86892c4074261ad73.png",
+        "content_hash": "8e86ae11c4379d36bca6c577c25c8d320730b74c0f890fb86892c4074261ad73",
+        "mime": "image/png",
+        "width": 840,
+        "height": 240,
+        "diagnostics": []
+      },
+      {
+        "asset_id": "pulp-materialized-asset-b4151c9c4b7b07eb74320096b4ff4156cca8821f5adfab34af9fd9a2d6c1179d",
+        "original_uri": "pulp-capture:///fonts/b4151c9c4b7b07eb74320096b4ff4156cca8821f5adfab34af9fd9a2d6c1179d.ttf",
+        "local_path": "assets/b4151c9c4b7b07eb74320096b4ff4156cca8821f5adfab34af9fd9a2d6c1179d.ttf",
+        "content_hash": "b4151c9c4b7b07eb74320096b4ff4156cca8821f5adfab34af9fd9a2d6c1179d",
+        "mime": "font/ttf",
+        "font_family": "Pulp Captured Variable",
+        "diagnostics": []
+      }
+    ]
+  },
+  "fontFamilyAssets": [
+    {
+      "family": "Pulp Captured Variable",
+      "weight": 300,
+      "asset_id": "pulp-materialized-asset-b4151c9c4b7b07eb74320096b4ff4156cca8821f5adfab34af9fd9a2d6c1179d",
+      "resolvedPath": "assets/b4151c9c4b7b07eb74320096b4ff4156cca8821f5adfab34af9fd9a2d6c1179d.ttf",
+      "fontStyle": "normal",
+      "weightMax": 800
+    }
+  ]
+}
