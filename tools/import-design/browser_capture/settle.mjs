@@ -328,6 +328,27 @@ const MOTION_FREEZE_SOURCE = `async (declareSources) => {
   const receipt = state.receipt;
   // The controls whose theme verdict reads inline author styling.
   const THEMED_CONTROLS = "button, input, textarea, select, progress";
+  const KEYFRAME_FIELDS = new Set(["offset", "computedOffset", "easing", "composite"]);
+  const cssName = (name) => name.startsWith("--") ? name
+    : name === "cssFloat" ? "float" : name === "cssOffset" ? "offset"
+    : name.replace(/[A-Z]/g, (letter) => "-" + letter.toLowerCase());
+  // Whether the target's inline style holds an !important declaration for a
+  // property the animation drives. Such a declaration beats the animation, and
+  // commitStyles would rewrite it at normal priority, where a stylesheet
+  // !important rule it used to beat would win.
+  // A probe declaration expands each animated shorthand into its longhands.
+  const overridesImportant = (animation, target) => {
+    const probe = document.createElement("div").style;
+    for (const keyframe of animation.effect.getKeyframes()) {
+      for (const name of Object.keys(keyframe)) {
+        if (!KEYFRAME_FIELDS.has(name)) probe.setProperty(cssName(name), "initial");
+      }
+    }
+    for (const longhand of probe) {
+      if (target.style.getPropertyPriority(longhand) === "important") return true;
+    }
+    return false;
+  };
 
   // Web Animations run on the document timeline, which the CSS freeze and the
   // scheduler stubs cannot reach. Settle each one to a single frame: a finite
@@ -371,11 +392,15 @@ const MOTION_FREEZE_SOURCE = `async (declareSources) => {
     // not rendered; that animation stays paused at zero. A form control
     // stays paused too: the committed values would be inline author styling,
     // which turns a control the native theme paints into an author-styled one.
+    // So does a target whose inline !important declaration the commit would
+    // overwrite.
     const target = animation.effect?.target;
     if (!target?.matches?.(THEMED_CONTROLS)) {
       try {
-        animation.commitStyles();
-        animation.cancel();
+        if (!overridesImportant(animation, target)) {
+          animation.commitStyles();
+          animation.cancel();
+        }
       } catch {}
     }
     count("paused");

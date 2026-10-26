@@ -4727,7 +4727,9 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   A `button`, `input`, `textarea`, `select` or `progress` target is only
   paused: the form-control theme check counts inline styling as author
   styling, so committing would flip a theme-painted control to author-styled.
-  Under the real-scale launch it can still show the mid-cycle frame.
+  Under the real-scale launch it can still show the mid-cycle frame. So is a
+  target whose inline style declares an animated property `!important`:
+  committing would rewrite that declaration at normal priority.
   A video is paused and rewound to its first frame unless it still shows
   its poster. CSS animations and transitions stay on the stylesheet path, and
   scroll- or view-driven animations are left to the fixed scroll position. An

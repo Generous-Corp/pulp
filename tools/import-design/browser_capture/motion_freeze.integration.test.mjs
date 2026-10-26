@@ -327,6 +327,38 @@ test("an infinite animation is frozen to its own first keyframe, not the element
     });
   });
 
+test("an inline !important declaration still beats a frozen animation",
+  { timeout: captureCaseTimeout(2), skip: process.platform === "win32" },
+  async (context) => {
+    await withPage(context, async ({ cdp, open }) => {
+      // Both declarations outrank the animation, so the page shows them. The
+      // second box animates a shorthand over an important longhand.
+      const boxes = "<div id=m style='transform:translateX(200px) !important'></div>" +
+        "<div id=n style='position:fixed;left:20px;top:260px;width:60px;height:60px;" +
+        "background-color:#0f0 !important'></div>";
+      await open(pageUrl(boxes));
+      const declared = await captureStableScreenshot(cdp, OPTIONS);
+      await open(pageUrl(boxes + "<script>document.getElementById('m').animate(" +
+        "[{transform:'translateX(50px)'},{transform:'translateX(400px)'}]," +
+        "{duration:700,iterations:Infinity});document.getElementById('n').animate(" +
+        "[{background:'#f00'},{background:'#00f'}],{duration:700,iterations:Infinity})" +
+        "</script>"));
+      const receipt = await freezeMotion(cdp, { declareSources: false });
+      assert.equal(receipt.animations.paused, 2);
+      const { result } = await cdp.call("Runtime.evaluate", {
+        expression: "[['m', 'transform'], ['n', 'background-color']].map(([id, name]) => {" +
+          " const style = document.getElementById(id).style;" +
+          " return [style.getPropertyValue(name), style.getPropertyPriority(name)]; })",
+        returnByValue: true,
+      });
+      assert.deepEqual(result.value,
+        [["translateX(200px)", "important"], ["rgb(0, 255, 0)", "important"]]);
+      const frozen = await captureStableScreenshot(cdp, OPTIONS);
+      assert.ok(frozen && declared && frozen.equals(declared),
+        "the frozen frame shows the important declarations");
+    });
+  });
+
 test("an animated form control keeps the theme verdict the page gave it",
   { timeout: captureCaseTimeout(1), skip: process.platform === "win32" },
   async (context) => {
