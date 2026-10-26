@@ -545,6 +545,21 @@ if(Python3_Interpreter_FOUND AND PULP_HAS_SKIA AND PROJECT_IS_TOP_LEVEL)
         TIMEOUT 120)
 endif()
 
+# The importer lab end to end with a real browser: the capture browser runs at
+# the capture's device scale, and the snapshot it lowers from must still be in
+# CSS pixels, or the native render comes out at twice the reference's size.
+if(Python3_Interpreter_FOUND AND PULP_HAS_SKIA AND PROJECT_IS_TOP_LEVEL)
+    add_test(NAME importer-lab-capture-scale
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_importer_lab_capture_scale.py
+                --importer $<TARGET_FILE:pulp-import-design>
+                --observer $<TARGET_FILE:pulp-design-ir-observe>)
+    set_tests_properties(importer-lab-capture-scale PROPERTIES
+        SKIP_RETURN_CODE 77
+        LABELS "parser-import;import;browser-capture"
+        TIMEOUT 600)
+endif()
+
 # pulp-design-ir-observe interaction replay: --click/--drag/--key steps run
 # against the materialized DesignIR before the render, and the per-step log
 # (hit target, focus, control state) is what a parity harness compares across

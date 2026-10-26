@@ -139,6 +139,29 @@ function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+// With the browser launched at the capture scale, Chromium applies that scale
+// as zoom, and DOMSnapshot reports layout and text-box bounds and the content
+// size in device pixels. Every other geometry source the capture reads (the
+// snapshot's offset, client and scroll rects, DOM.getBoxModel, and anything
+// measured in the page) stays in CSS pixels, and so does everything that
+// consumes the snapshot. Divide the device-pixel fields back to CSS pixels.
+function snapshotToCssPixels(snapshot, deviceScale) {
+  if (!(deviceScale > 0) || deviceScale === 1) return snapshot;
+  const scaleRects = (rects) => {
+    if (!Array.isArray(rects)) return;
+    for (const rect of rects)
+      if (Array.isArray(rect))
+        for (let i = 0; i < rect.length; i += 1) rect[i] /= deviceScale;
+  };
+  for (const document of snapshot?.documents ?? []) {
+    scaleRects(document.layout?.bounds);
+    scaleRects(document.textBoxes?.bounds);
+    if (typeof document.contentWidth === "number") document.contentWidth /= deviceScale;
+    if (typeof document.contentHeight === "number") document.contentHeight /= deviceScale;
+  }
+  return snapshot;
+}
+
 async function measureAuthoredFrame(cdp) {
   const evaluated = await cdp.call("Runtime.evaluate", {
     expression: `(() => {
@@ -1440,11 +1463,22 @@ async function runCapture(options) {
       denyProxy = await serveDenyProxy();
     }
     progress.enterPhase("browser-launch");
+    // The page is laid out and rastered at `dpr` through
+    // Emulation.setDeviceMetricsOverride, but Chrome composites a
+    // backdrop-filter against the browser's own device scale. Headless runs
+    // at 1, and with the two disagreeing a frosted box came back with
+    // unblurred streaks of what was behind it. Launching at the capture scale
+    // makes the emulated and real scales agree, and the frame then matches a
+    // plain Chrome screenshot at that scale. The flag reads the same `dpr` the
+    // emulation does, so it follows the capture scale if DPR 2 stops being the
+    // only one accepted above.
+    const deviceScaleArgs = [`--force-device-scale-factor=${dpr}`];
     launched = await launchBrowser(
       browserPath, profileDir, timeoutMs,
       (child) => browserCustody.adopt(child),
       denyProxy
         ? [
+            ...deviceScaleArgs,
             "--disable-quic",
             "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
             "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1",
@@ -1452,6 +1486,7 @@ async function runCapture(options) {
             `--proxy-bypass-list=<-loopback>;${server.origin}`,
           ]
         : [
+            ...deviceScaleArgs,
             "--disable-quic",
             "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
             `--host-resolver-rules=${
@@ -1754,11 +1789,12 @@ async function runCapture(options) {
       finalExtent.width > resolvedViewportWidth ||
       finalExtent.height > resolvedViewportHeight;
     if (extentExceedsViewport) {
-      const overflowSnapshot = await cdp.call("DOMSnapshot.captureSnapshot", {
-        computedStyles: ["display"],
-        includePaintOrder: true,
-        includeDOMRects: true,
-      });
+      const overflowSnapshot = snapshotToCssPixels(
+        await cdp.call("DOMSnapshot.captureSnapshot", {
+          computedStyles: ["display"],
+          includePaintOrder: true,
+          includeDOMRects: true,
+        }), dpr);
       captureExtentCanvasSignatures =
         await captureCanvasRasterSignatures(cdp, overflowSnapshot);
       validateCaptureDimensions(
@@ -1958,13 +1994,14 @@ async function runCapture(options) {
         scale: 1,
       },
     };
-    const snapshot = await cdp.call("DOMSnapshot.captureSnapshot", {
-      computedStyles: COMPUTED_STYLES,
-      includePaintOrder: true,
-      includeDOMRects: true,
-      includeBlendedBackgroundColors: true,
-      includeTextColorOpacities: true,
-    });
+    const snapshot = snapshotToCssPixels(
+      await cdp.call("DOMSnapshot.captureSnapshot", {
+        computedStyles: COMPUTED_STYLES,
+        includePaintOrder: true,
+        includeDOMRects: true,
+        includeBlendedBackgroundColors: true,
+        includeTextColorOpacities: true,
+      }), dpr);
     // Before anything reads it: every sidecar below and the persisted bytes
     // (and so their hash binding) see masked strings, never the secret.
     maskSecretText(snapshot, COMPUTED_STYLES);

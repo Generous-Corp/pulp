@@ -91,6 +91,29 @@ matches in `ids.map.json` are rejected. Verify deterministic output with
 and keep the browser capture's Chromium validation receipt alongside the
 emitted source tree.
 
+### The capture browser runs at the capture's device scale
+
+`capture.mjs` emulates its DPR with `Emulation.setDeviceMetricsOverride`, and
+also launches Chrome with `--force-device-scale-factor=<dpr>` so the browser's
+own scale agrees. Chrome composites `backdrop-filter` at the browser's scale:
+with headless left at 1 under an emulated 2, a frosted box came back with
+unblurred streaks of what was behind it (16,786 px on fixture
+`22-backdrop-opacity`), and the lab charged that to the native render. Do not
+drop the launch flag or emulate a scale the browser was not launched at.
+At a real device scale Chromium reports DOMSnapshot layout bounds, text-box
+bounds and content size in device pixels, so the capture divides those back
+to CSS pixels (`snapshotToCssPixels`); without that the native lowering drew
+every panel at twice its size. The snapshot's offset, client and scroll
+rects and `DOM.getBoxModel` were already CSS pixels.
+
+**Testing a capture change against a built importer:** `pulp-import-design`
+runs the capture runtime staged beside its own binary
+(`<build>/tools/import-design/browser_capture-v1/capture.mjs`) ahead of
+`PULP_BROWSER_CAPTURE_SCRIPT`, so pointing that variable at an edited
+`capture.mjs` silently runs the staged copy instead. Rebuild to restage it, or
+copy the importer next to a runtime holding the edit, and check that the
+captures actually differ before reading any score.
+
 ### Browser capture provenance is an import boundary
 
 The native importer validates `capture.json` before lowering the browser tree

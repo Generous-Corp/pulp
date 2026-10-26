@@ -7074,6 +7074,15 @@
    ],
    "kind": "python"
   },
+  "importer-lab-capture-scale": {
+   "entry": "test/test_importer_lab_capture_scale.py",
+   "inputs": [
+    "test/fixtures/import-differential/01-basic-card.html",
+    "test/test_importer_lab_capture_scale.py",
+    "tools/import-validation/importer_differential_lab.py"
+   ],
+   "kind": "python"
+  },
   "inject-claude-prefs-hook": {
    "entry": "test/test_inject_claude_prefs_hook.sh",
    "inputs": [
