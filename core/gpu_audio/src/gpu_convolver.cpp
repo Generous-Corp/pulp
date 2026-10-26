@@ -129,6 +129,12 @@ struct GpuConvolver::StagedReadbackState {
     std::vector<float> cpu_out; // [channels][block] CPU convolution output
     std::vector<const float*> zero_ptrs;
     std::vector<float*> cpu_out_ptrs;
+
+    // Non-finite input samples zeroed before GPU submission, written by the
+    // shared-I/O callback or the staged worker; see sanitized_input_samples().
+    // Lives here because this state is replaced on every prepare() and exists
+    // on both paths.
+    std::atomic<std::uint64_t> sanitized_samples{0};
 };
 
 struct GpuConvolver::SharedIoState {
@@ -143,8 +149,6 @@ struct GpuConvolver::SharedIoState {
     detail::RealtimeGpuHealthMirror health;
     // Callback-written per delivered block, read by status_snapshot().
     detail::RecentGpuDelivery recent;
-    // Callback-written; see sanitized_input_samples().
-    std::atomic<std::uint64_t> sanitized_samples{0};
 #endif
 };
 
@@ -712,7 +716,8 @@ std::uint8_t GpuConvolver::process_realtime_shared_io(void* self,
         replaced += detail::sanitize_nonfinite(src, dst, n);
     }
     if (replaced != 0)
-        state.sanitized_samples.fetch_add(replaced, std::memory_order_relaxed);
+        convolver->staged_readback_->sanitized_samples.fetch_add(replaced,
+                                                                 std::memory_order_relaxed);
 
     const auto callback = state.session->begin_callback(
         std::span<const float>(state.callback_input.data(), state.callback_input.size()), sequence,
@@ -1035,11 +1040,7 @@ GpuAudioRecoveryReason GpuConvolver::recovery_reason() const noexcept {
 }
 
 std::uint64_t GpuConvolver::sanitized_input_samples() const noexcept {
-#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
-    if (shared_io_)
-        return shared_io_->sanitized_samples.load(std::memory_order_relaxed);
-#endif
-    return 0;
+    return staged_readback_->sanitized_samples.load(std::memory_order_relaxed);
 }
 
 bool GpuConvolver::fenced() const noexcept {
@@ -1245,10 +1246,17 @@ void GpuConvolver::process_block(const audio::BufferView<const float>& input,
         latch_staged_recovery(GpuAudioRecoveryReason::ProviderLost);
 
     // Keep this block's input: it is convolved on the CPU if its GPU result is
-    // not in when the block is due.
+    // not in when the block is due. Non-finite samples are kept as zero, the
+    // policy of every GPU path, so the GPU and the CPU continuation see the
+    // same block and a NaN can neither fence the device on readback nor ring
+    // through the IR tail.
+    std::uint64_t replaced = 0;
     for (uint32_t ch = 0; ch < channels_; ++ch)
-        std::copy_n(input.channel_ptr(ch), n,
-                    submit_slot.input.data() + static_cast<std::size_t>(ch) * block_);
+        replaced += detail::sanitize_nonfinite(
+            input.channel_ptr(ch), submit_slot.input.data() + static_cast<std::size_t>(ch) * block_,
+            n);
+    if (replaced != 0)
+        staged.sanitized_samples.fetch_add(replaced, std::memory_order_relaxed);
 
     // Decide whether this block goes to the GPU. A lost device never does; a
     // tripped breaker only for its periodic probe.
@@ -1269,7 +1277,7 @@ void GpuConvolver::process_block(const audio::BufferView<const float>& input,
         // Pack every channel's zero-padded complex block back to back.
         std::fill(in_pad_.begin(), in_pad_.end(), 0.0f);
         for (uint32_t ch = 0; ch < channels_; ++ch) {
-            const float* x = input.channel_ptr(ch);
+            const float* x = submit_slot.input.data() + static_cast<std::size_t>(ch) * block_;
             float* slot = in_pad_.data() + static_cast<std::size_t>(ch) * cplx;
             for (uint32_t i = 0; i < n; ++i)
                 slot[2u * i] = x[i];

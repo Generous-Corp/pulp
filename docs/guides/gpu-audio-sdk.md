@@ -288,6 +288,11 @@ resolves, and its worker never waits on the GPU at all.
   tripped on a slow but alive GPU; reported as degraded), `ProviderFailure`
   (failed map or non-finite readback). A single late block is a served miss
   and latches nothing. `prepare()` now also rejects a zero sample rate.
+- Non-finite input samples are zeroed before submission, so a NaN in the input
+  neither fences the device on readback nor rings through the IR tail. The GPU,
+  the worker's CPU convolution and the transport's miss substitute all see the
+  same zeroed block. `sanitized_input_samples()` counts the replacements and
+  latches nothing.
 
 A caller that depends on the old unbounded, in-block wait can select
 `ProviderPolicy::StagedBlocking` before `prepare()` (no worker pipeline); it
@@ -360,6 +365,11 @@ for these sessions. Derive from `GpuWaveNetRealtimeNode` to retain a continuousl
 primed, aligned CPU shadow without a second worker CPU model. Provider failures
 and missing results remain tied to their epoch/sequence; they never shift later
 samples into an earlier hole. See [the lifecycle and limitations](gpu-audio-wavenet-realtime.md).
+The node zeroes NaN and infinite samples before GPU submission, but your
+`prime_fallback()` and `process_cpu_fallback()` overrides receive the host's
+raw input. Apply the same policy there (replace each NaN or +/-Inf sample with
+zero and keep the shadow's state) so the shadow matches the GPU output it
+substitutes for and one bad sample cannot poison its history.
 This is experimental correctness infrastructure, not a CPU-saving claim.
 
 `<pulp/gpu_audio/gpu_neural_realtime_node.hpp>` adds `GpuNeuralRealtimeNode`,
@@ -453,8 +463,8 @@ reports `Degraded`, with `ProviderFailure` as the recovery reason.
 Non-finite input samples (NaN, +Inf, -Inf) are replaced with zero before
 either the GPU submission or the CPU shadow sees them, so the two stay
 comparable and no causal state is poisoned. `sanitized_input_samples()`
-counts the replacements. `GpuWaveNetRealtimeNode` and the `GpuConvolver`
-shared realtime path apply the same policy before the GPU input slot, so one
+counts the replacements. `GpuWaveNetRealtimeNode` and both `GpuConvolver`
+GPU paths (staged and shared) apply the same policy before GPU submission, so one
 NaN cannot ring through a receptive field or an IR tail, and each counts the
 replacements in its own `sanitized_input_samples()`. The count latches no
 recovery cause.

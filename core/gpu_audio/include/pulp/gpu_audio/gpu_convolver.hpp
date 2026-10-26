@@ -181,41 +181,9 @@ class GpuConvolver : public GpuAudioNode {
     /// RT-safe. Feed the continuously-fed CPU fallback one block so its history
     /// stays current, and stage the latency-aligned substitute for a possible
     /// miss this block. Called by the transport on every block (hit or miss).
-    void prime_fallback(const audio::BufferView<const float>& input, uint32_t n) noexcept override {
-        if (!prepared_ || n != block_ || fallback_delay_blocks_ == 0)
-            return;
-        float* slot_base =
-            fb_delay_.data() + static_cast<std::size_t>(fb_delay_idx_) * block_ * channels_;
-        for (uint32_t ch = 0; ch < channels_ && ch < fallback_.size(); ++ch) {
-            float* slot = slot_base + static_cast<std::size_t>(ch) * block_;
-            float* due = fb_out_.data() + static_cast<std::size_t>(ch) * block_;
-            // The slot currently holds conv(input(t-L)) — this block's due
-            // substitute. Stash it, then overwrite with conv(input(t)).
-            std::copy_n(slot, block_, due);
-            if (ch >= input.num_channels()) {
-                std::fill_n(slot, block_, 0.0f);
-                continue;
-            }
-            const float* x = input.channel_ptr(ch);
-            // Guard the fallback against a non-finite input block too: without it
-            // a single NaN would poison the convolver's own history (and the
-            // delay ring) for the whole IR tail, not just one block.
-            bool finite = true;
-            for (uint32_t i = 0; i < n; ++i) {
-                if (!std::isfinite(x[i])) {
-                    finite = false;
-                    break;
-                }
-            }
-            if (!finite) {
-                fallback_[ch].reset();
-                std::fill_n(slot, block_, 0.0f);
-            } else {
-                fallback_[ch].process(x, slot, static_cast<std::size_t>(n));
-            }
-        }
-        fb_delay_idx_ = (fb_delay_idx_ + 1) % fallback_delay_blocks_;
-    }
+    /// Non-finite samples enter as zero, as on the GPU paths, so the substitute
+    /// keeps the IR tail and matches the GPU output it stands in for.
+    void prime_fallback(const audio::BufferView<const float>& input, uint32_t n) noexcept override;
 
     /// RT-safe miss substitute: emit the latency-aligned block that
     /// prime_fallback() already computed for this timeline slot.
@@ -259,11 +227,11 @@ class GpuConvolver : public GpuAudioNode {
     /// True before preparation, or once GPU delivery was fenced or its
     /// provider lost. A diagnostic snapshot, not a promise about the next block.
     bool fenced() const noexcept;
-    /// Non-finite input samples (NaN, +/-Inf) the shared realtime path replaced
-    /// with zero before they reached the GPU input slot, counted since the
-    /// shared provider was installed. One such sample would otherwise ring
-    /// through the whole IR tail. Always 0 on the staged and CPU paths, whose
-    /// fallback resets itself on non-finite input.
+    /// Non-finite input samples (NaN, +/-Inf) replaced with zero before they
+    /// reached the GPU, on the shared realtime path or the staged path, since
+    /// prepare(). One such sample would otherwise ring through the whole IR
+    /// tail or fence the GPU on a non-finite readback. Counted, not latched.
+    /// Always 0 without a GPU device.
     std::uint64_t sanitized_input_samples() const noexcept;
 
   protected:
@@ -292,12 +260,13 @@ class GpuConvolver : public GpuAudioNode {
     /// algorithmic timing.
     ///
     /// This is the SOLE audio path when the device fails to init (the `!gpu_`
-    /// branch of process_block) and in the no-render build, so it carries the same
-    /// non-finite-input guard as prime_fallback(): a single NaN/Inf would otherwise
-    /// poison worker_fallback_'s history for the whole IR tail (the IR length,
-    /// plus one block on the FFT engine). On a poisoned block we reset the
-    /// convolver and emit silence for that channel; it self-heals on the next
-    /// finite block instead of dying for the tail.
+    /// branch of process_block) and in the no-render build, so it carries its own
+    /// non-finite-input guard: a single NaN/Inf would otherwise poison
+    /// worker_fallback_'s history for the whole IR tail (the IR length, plus
+    /// one block on the FFT engine). On a poisoned block we reset the convolver
+    /// and emit silence for that channel; it self-heals on the next finite
+    /// block instead of dying for the tail. The staged GPU path hands it input
+    /// already sanitized, so the guard never fires there.
     void render_worker_fallback(const audio::BufferView<const float>& input,
                                 audio::BufferView<float>& output, uint32_t n) noexcept {
         const uint32_t out_ch = static_cast<uint32_t>(output.num_channels());

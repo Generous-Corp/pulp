@@ -431,6 +431,10 @@ block. Measure it for the model size and channel count you ship.
 - **Status.** A failed map or non-finite readback latches `ProviderFailure`. A
   lost device latches `ProviderLost` (`Unavailable`, CPU engine) and replaces
   any other cause. A single late block latches nothing.
+- **Non-finite input.** NaN and infinite input samples are zeroed before
+  submission, so they cannot cause a non-finite readback. The CPU convolution
+  and the miss substitute get the same zeroed block, keeping the IR tail
+  seamless. `sanitized_input_samples()` counts them.
 
 `ProviderPolicy::StagedBlocking` keeps the older in-block readback wait and is
 a transition escape hatch.
@@ -442,7 +446,7 @@ the next preparation; it does not re-prime onto the GPU.
 NaN and infinite input samples are replaced with zero before the GPU input
 slot, so one bad sample neither rings through the IR tail nor fences the
 session on readback. `sanitized_input_samples()` counts them and latches no
-cause; it reads 0 on the staged path.
+cause.
 
 **`GpuMultiConvolver`.** No CPU fallback: a miss or a lost device is silent,
 and the status says so with `fallback_policy = Silence`. `device_lost()`

@@ -704,6 +704,52 @@ TEST_CASE("GpuConvolver fallback recovers from a NaN input block", "[gpu_audio][
     }
 }
 
+// The RT miss substitute follows the GPU paths' non-finite policy: a bad
+// sample enters as zero and the IR tail of the block around it survives, so a
+// GPU miss inside that tail has no seam.
+TEST_CASE("GpuConvolver miss substitute zeroes a non-finite sample and keeps the IR tail",
+          "[gpu_audio][convolver]") {
+    constexpr uint32_t BS = 16;
+    constexpr std::size_t NBLK = 10;
+    const uint32_t L = GpuConvolver::kLatencyBlocks;
+    std::vector<float> ir(40);
+    for (std::size_t i = 0; i < ir.size(); ++i)
+        ir[i] = static_cast<float>(std::cos(0.3 * i) * std::exp(-0.05 * i));
+    GpuConvolver node(1, BS, 48000, ir);
+    REQUIRE(node.prepare());
+
+    std::vector<float> input(BS * NBLK);
+    for (std::size_t i = 0; i < input.size(); ++i)
+        input[i] = static_cast<float>(std::sin(0.21 * i) + 0.5);
+    std::vector<float> sanitized = input;
+    input[BS + 5] = std::numeric_limits<float>::quiet_NaN();
+    input[BS + 9] = std::numeric_limits<float>::infinity();
+    sanitized[BS + 5] = 0.0f;
+    sanitized[BS + 9] = 0.0f;
+    const auto reference = direct_convolution(sanitized, ir);
+
+    std::vector<float> out(input.size(), -9.0f);
+    std::size_t allocations = 0;
+    for (std::size_t b = 0; b < NBLK; ++b) {
+        const float* ip[1] = {input.data() + b * BS};
+        float* op[1] = {out.data() + b * BS};
+        BufferView<const float> iv(ip, 1, BS);
+        BufferView<float> ov(op, 1, BS);
+        pulp::test::RtAllocationProbe probe;
+        node.prime_fallback(iv, BS);
+        node.process_cpu_fallback(iv, ov, BS);
+        allocations += probe.allocation_count();
+    }
+    CHECK(allocations == 0);
+    // Block t substitutes conv(sanitized)(t - L), including the NaN block and
+    // the blocks of its tail.
+    for (std::size_t i = static_cast<std::size_t>(L) * BS; i < out.size(); ++i) {
+        INFO("sample " << i);
+        REQUIRE(std::isfinite(out[i]));
+        CHECK(std::abs(out[i] - reference[i - L * BS]) < 1.0e-4f);
+    }
+}
+
 // BUG 3 on the worker/no-GPU path: render_worker_fallback() is the SOLE audio
 // path when the device fails to init (and in the no-render build). A single NaN
 // input sample must not smear across the FFT bins and poison worker_fallback_'s
@@ -1807,6 +1853,49 @@ TEST_CASE("Staged GpuConvolver hits come from the GPU without a CPU convolution"
     CHECK(node.staged_breaker_trips() == 0u);
     CHECK(node.staged_latched_reason() == GpuAudioRecoveryReason::None);
     CHECK(validate_gpu_audio_status(node.status_snapshot()).accepted());
+}
+
+TEST_CASE("Staged GpuConvolver zeroes non-finite input before submission and stays live",
+          "[gpu_audio][convolver][staged]") {
+    constexpr std::uint32_t BS = 64;
+    constexpr std::size_t NBLK = 16;
+    constexpr std::size_t kBad = 3;
+    const auto ir = staged_test_ir();
+    InjectableConvolver node(1, BS, 48000, ir);
+    REQUIRE(node.prepare());
+    auto* fake = node.adopt_fake(ir);
+    REQUIRE(node.pipeline() == 1u);
+
+    auto input = staged_test_input(BS * NBLK);
+    auto sanitized = input;
+    input[kBad * BS + 7] = std::numeric_limits<float>::quiet_NaN();
+    input[kBad * BS + 20] = std::numeric_limits<float>::infinity();
+    sanitized[kBad * BS + 7] = 0.0f;
+    sanitized[kBad * BS + 20] = 0.0f;
+
+    SECTION("the GPU carries the block") {
+        const auto out = run_staged_stream(node, input, BS, [](std::size_t) {});
+        for (float sample : out)
+            REQUIRE(std::isfinite(sample));
+        CHECK(first_mismatch(
+                  out, routed_reference(sanitized, ir, BS, std::vector<bool>(NBLK, false), 1)) ==
+              out.size());
+        CHECK(node.staged_cpu_blocks() == 0u);
+    }
+    SECTION("a miss on that block hands the CPU the same sanitized input") {
+        const auto out = run_staged_stream(node, input, BS, [&](std::size_t b) {
+            fake->set_async_mode(b == kBad ? FakeGpuCompute::AsyncMode::Expire
+                                           : FakeGpuCompute::AsyncMode::Resolve);
+        });
+        for (float sample : out)
+            REQUIRE(std::isfinite(sample));
+        const auto cpu = blocks_where(NBLK, [](std::size_t b) { return b == kBad; });
+        CHECK(first_mismatch(out, routed_reference(sanitized, ir, BS, cpu, 1)) == out.size());
+    }
+    CHECK(node.sanitized_input_samples() == 2u);
+    CHECK(node.staged_latched_reason() == GpuAudioRecoveryReason::None);
+    CHECK(node.recovery_reason() == GpuAudioRecoveryReason::None);
+    CHECK_FALSE(node.fenced());
 }
 
 TEST_CASE("Staged GpuConvolver routes missed blocks, and only those, to the CPU",
