@@ -26,6 +26,7 @@
 #include <optional>
 #include <unordered_map>
 #include <mutex>
+#include <tuple>
 
 // Probe for ICU's BreakIterator headers. The bundled Skia binaries
 // statically link `libskunicode_icu.a`
@@ -504,14 +505,23 @@ std::mutex& declared_weights_mutex() {
     return m;
 }
 
-std::unordered_map<std::string, std::vector<DeclaredWeightRange>>& declared_weights() {
-    static std::unordered_map<std::string, std::vector<DeclaredWeightRange>> map;
+using ScopedDeclaredWeights =
+    std::unordered_map<std::string,
+                       std::unordered_map<std::string, std::vector<DeclaredWeightRange>>>;
+
+ScopedDeclaredWeights& declared_weights() {
+    static ScopedDeclaredWeights map;
     return map;
 }
 
 } // namespace
 
 void declare_font_face_weight_range(const std::string& family, int weight_min, int weight_max) {
+    declare_font_face_weight_range(family, weight_min, weight_max, {});
+}
+
+void declare_font_face_weight_range(const std::string& family, int weight_min, int weight_max,
+                                    const std::string& scope) {
     if (family.empty())
         return;
     weight_min = std::clamp(weight_min, 1, 1000);
@@ -519,7 +529,7 @@ void declare_font_face_weight_range(const std::string& family, int weight_min, i
     const DeclaredWeightRange range{std::min(weight_min, weight_max),
                                     std::max(weight_min, weight_max)};
     std::lock_guard<std::mutex> guard(declared_weights_mutex());
-    auto& ranges = declared_weights()[family];
+    auto& ranges = declared_weights()[family][scope];
     for (const auto& existing : ranges) {
         if (existing.min == range.min && existing.max == range.max)
             return;
@@ -529,7 +539,19 @@ void declare_font_face_weight_range(const std::string& family, int weight_min, i
 
 bool has_declared_font_face_weights(const std::string& family) {
     std::lock_guard<std::mutex> guard(declared_weights_mutex());
-    return declared_weights().count(family) != 0;
+    const auto it = declared_weights().find(family);
+    return it != declared_weights().end() && !it->second.empty();
+}
+
+void clear_declared_font_face_weight_ranges(const std::string& scope) {
+    std::lock_guard<std::mutex> guard(declared_weights_mutex());
+    for (auto it = declared_weights().begin(); it != declared_weights().end();) {
+        it->second.erase(scope);
+        if (it->second.empty())
+            it = declared_weights().erase(it);
+        else
+            ++it;
+    }
 }
 
 int css_match_declared_weight(const std::vector<DeclaredWeightRange>& ranges, int desired) {
@@ -585,8 +607,24 @@ std::optional<bool> declared_face_synthesizes_bold(const std::string& family,
         const auto it = declared_weights().find(family);
         if (it == declared_weights().end())
             return std::nullopt;
-        ranges = it->second;
+        for (const auto& [scope, scoped_ranges] : it->second)
+            ranges.insert(ranges.end(), scoped_ranges.begin(), scoped_ranges.end());
     }
+    // Multiple live realms contribute one effective declaration set. Merge
+    // overlaps so a narrower realm cannot make the result depend on unordered
+    // scope-map iteration (an active 400..700 declaration wins over 400).
+    std::sort(ranges.begin(), ranges.end(), [](const auto& a, const auto& b) {
+        return std::tie(a.min, a.max) < std::tie(b.min, b.max);
+    });
+    std::vector<DeclaredWeightRange> merged;
+    for (const auto& range : ranges) {
+        if (!merged.empty() && range.min <= merged.back().max + 1) {
+            merged.back().max = std::max(merged.back().max, range.max);
+        } else {
+            merged.push_back(range);
+        }
+    }
+    ranges = std::move(merged);
     const int chosen = css_match_declared_weight(ranges, requested_weight);
     if (chosen < 0)
         return std::nullopt;

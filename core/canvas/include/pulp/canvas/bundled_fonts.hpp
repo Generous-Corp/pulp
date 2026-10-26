@@ -98,6 +98,9 @@ struct DeclaredWeightRange {
 /// Records that an `@font-face` rule bound `family` at a declared weight range.
 /// Repeating a range already recorded for the family is a no-op.
 void declare_font_face_weight_range(const std::string& family, int weight_min, int weight_max);
+void declare_font_face_weight_range(const std::string& family, int weight_min, int weight_max,
+                                    const std::string& scope);
+void clear_declared_font_face_weight_ranges(const std::string& scope);
 
 /// Whether any `@font-face` weight range has been declared for `family`.
 bool has_declared_font_face_weights(const std::string& family);

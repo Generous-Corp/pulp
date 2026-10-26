@@ -2302,6 +2302,24 @@ TEST_CASE("bold is synthesized only where the matched declared range ends below 
     CHECK(declared_face_synthesizes_bold("SynthBoldPair", 700) == false);
 }
 
+TEST_CASE("declared font ranges are scoped and can be replaced",
+          "[canvas][fonts][synthetic-bold][scope]") {
+    using pulp::canvas::clear_declared_font_face_weight_ranges;
+    using pulp::canvas::declare_font_face_weight_range;
+    using pulp::canvas::declared_face_synthesizes_bold;
+    const std::string family = "ScopedSynthBold";
+    const std::string first = "scope-one";
+    const std::string second = "scope-two";
+    declare_font_face_weight_range(family, 400, 700, first);
+    CHECK(declared_face_synthesizes_bold(family, 700) == false);
+    declare_font_face_weight_range(family, 400, 400, second);
+    CHECK(declared_face_synthesizes_bold(family, 700) == false);
+    clear_declared_font_face_weight_ranges(first);
+    CHECK(declared_face_synthesizes_bold(family, 700) == true);
+    clear_declared_font_face_weight_ranges(second);
+    CHECK_FALSE(declared_face_synthesizes_bold(family, 700).has_value());
+}
+
 #ifdef PULP_HAS_SKIA
 namespace {
 // Ink (sum of 255 - red) of one word painted black on white through SkiaCanvas.

@@ -372,6 +372,12 @@ A declared family also never yields to another family over weight in
 `match_registered_typeface`: the resolver otherwise measured a 700 run in a
 system face while the paragraph painted the page face, and the text wrapped.
 
+Bridge `registerFont` declarations are scoped to the owning `WidgetBridge`
+realm. Reloading replaces that realm's declarations and destroying an editor
+removes them. Queries use the union of ranges held by live realms that declare
+the family; native content-named aliases remain process-scoped because their
+names are immutable per materialized design.
+
 ### Packaged SDK runtime contract
 
 The installed `pulp-import-design` SDK runtime includes the browser-capture

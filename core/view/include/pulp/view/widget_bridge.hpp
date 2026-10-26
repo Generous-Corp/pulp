@@ -200,6 +200,7 @@ public:
     /// The identity the persisted stores hash: `set_storage_identity()`'s value
     /// when set, else the script base directory, else empty (no store).
     std::string storage_identity() const;
+    std::string font_weight_scope() const;
 
     /// Preferred directory for resolving RELATIVE filesystem paths handed to
     /// path-taking bridge APIs. Imported code emits `assets/<file>` beside its
