@@ -3403,15 +3403,21 @@ TEST_CASE("Provider pool releases several lost providers within one shared budge
         control.lost = true;
         control.hang_release = true;
     }
-    const auto started = std::chrono::steady_clock::now();
-    CHECK(Access::acquire(pool, config, "fake:1", 100'000'000) == nullptr);
-    const auto elapsed = std::chrono::steady_clock::now() - started;
-    // Four providers, each willing to wait its whole budget: one deadline
-    // keeps the total near one budget, not four.
-    CHECK(elapsed <= std::chrono::milliseconds(200));
+    constexpr std::uint64_t kBudgetNs = 100'000'000;
+    CHECK(Access::acquire(pool, config, "fake:1", kBudgetNs) == nullptr);
     CHECK(pool.stats().evictions == 4);
-    for (const auto& control : controls)
+    // Four providers, each sleeping its whole budget: one deadline hands out
+    // one budget in total. The first gets what remains of it, and once it has
+    // slept through the deadline each later one gets the 1 ns floor. Separate
+    // budgets would hand out four. Counted from the budgets, not the clock,
+    // so a sanitizer's slowdown cannot move it.
+    std::uint64_t handed_out = 0;
+    for (const auto& control : controls) {
         CHECK(control.last_release_budget >= 1);
+        CHECK(control.last_release_budget <= kBudgetNs);
+        handed_out += control.last_release_budget;
+    }
+    CHECK(handed_out <= kBudgetNs + controls.size() - 1);
 }
 
 TEST_CASE("WaveNet drops a completion from the epoch a re-acquire replaced",
