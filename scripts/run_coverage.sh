@@ -37,6 +37,8 @@ INCLUDE_SLOW_TESTS=false
 
 # shellcheck source=coverage_ctest_policy.sh
 source "${SCRIPT_DIR}/coverage_ctest_policy.sh"
+# shellcheck source=coverage_native_paths.sh
+source "${SCRIPT_DIR}/coverage_native_paths.sh"
 
 # Coverage measures executable source lines. It does not need to repeat the
 # long soak/configuration proofs that the primary build matrix already owns.
@@ -139,18 +141,26 @@ coverage_phase "Configuring coverage build in ${BUILD_DIR}"
 # `clang-cl` is Clang's MSVC-compatible driver: it accepts MSVC flags
 # AND the GCC-style `-fprofile-instr-generate -fcoverage-mapping` that
 # PulpInstrumentation.cmake emits for source-based coverage.
+#
+# Windows builds RelWithDebInfo rather than Debug. Pulp links the static
+# MSVC runtime, so Debug means /MTd and _ITERATOR_DEBUG_LEVEL=2, while the
+# prebuilt Skia is release (/MT, level 0); lld-link's /failifmismatch then
+# rejects every target that links Skia. PulpInstrumentation.cmake adds
+# /Od /Ob0 on clang-cl, so the build stays unoptimized.
 if [ "${OS:-}" = "Windows_NT" ] || [ -n "${MSYSTEM:-}" ]; then
     CLANG_C=clang-cl
     CLANG_CXX=clang-cl
+    COVERAGE_BUILD_TYPE=RelWithDebInfo
 else
     CLANG_C=clang
     CLANG_CXX=clang++
+    COVERAGE_BUILD_TYPE=Debug
 fi
 
 cmake_args=(
     -S "${REPO_ROOT}"
     -B "${BUILD_DIR}"
-    -DCMAKE_BUILD_TYPE=Debug
+    -DCMAKE_BUILD_TYPE="${COVERAGE_BUILD_TYPE}"
     -DPULP_ENABLE_COVERAGE=ON
     -DCMAKE_C_COMPILER="${CLANG_C}"
     -DCMAKE_CXX_COMPILER="${CLANG_CXX}"
@@ -201,6 +211,13 @@ if ! PULP_BUILD_JOBS="${JOBS}" bash "${REPO_ROOT}/tools/ci/governed-build.sh" \
         grep -n -H -E "error:|Error [0-9]+|\*\*\*|undefined reference|FAILED|fatal|CMake Error" \
             "${log}" 2>/dev/null | head -n 100 >&2 || true
     done
+    # lld-link names the two objects that disagree on the lines after a
+    # /failifmismatch (or any other) error; print them too.
+    if grep -q "lld-link: error:" "${BUILD_LOG}" "${BUILD_STDOUT_LOG}" 2>/dev/null; then
+        echo "=== lld-link errors with context ===" >&2
+        grep -h -A3 "lld-link: error:" "${BUILD_LOG}" "${BUILD_STDOUT_LOG}" 2>/dev/null \
+            | head -n 60 >&2 || true
+    fi
     echo "=== last 200 stderr lines ===" >&2
     tail -n 200 "${BUILD_LOG}" >&2 || true
     exit 1
@@ -300,7 +317,9 @@ PROFILE_INPUTS="${REPORT_DIR}/llvm-profdata-inputs.txt"
 # Keep argv bounded and use one llvm-profdata invocation. xargs may split a
 # large profile set into multiple merges, and each later -o invocation
 # overwrites the prior result instead of accumulating it.
-find "${PROFRAW_DIR}" -name '*.profraw' -type f -print > "${PROFILE_INPUTS}"
+# llvm-profdata reads this list itself, so its entries must be native paths.
+find "${PROFRAW_DIR}" -name '*.profraw' -type f -print \
+    | coverage_native_path_list > "${PROFILE_INPUTS}"
 PROFILE_SHARDS=$(wc -l < "${PROFILE_INPUTS}" | tr -d ' ')
 # Distinct module signatures among the pool files: one per instrumented binary
 # that wrote a profile. Checked against the test-binary count once that is
@@ -506,19 +525,14 @@ OBJ_RSP="${REPORT_DIR}/llvm-cov-objects.rsp"
 # missing -object ("failed to load coverage: '…': no such file or directory"),
 # so one disappearing fixture would blackhole the whole os-windows leg. Drop any
 # that are no longer present instead.
-: > "${OBJ_RSP}"
+KEPT_OBJECT_PATHS=()
 KEPT_OBJECTS=0
 VANISHED_OBJECTS=0
 prev=""
 for tok in "${BINARIES[@]}"; do
     if [[ "${prev}" == "-object" ]]; then
         if [[ -f "${tok}" ]]; then
-            # Quote the path: LLVM response files are whitespace-tokenized but
-            # honor double quotes, so a runner workdir containing a space
-            # (e.g. /Volumes/CI Builds/...) stays a single -object argument
-            # instead of splitting into bogus tokens. Harmless for the common
-            # space-free GitHub/self-hosted paths.
-            printf -- '-object\n"%s"\n' "${tok}" >> "${OBJ_RSP}"
+            KEPT_OBJECT_PATHS+=("${tok}")
             KEPT_OBJECTS=$((KEPT_OBJECTS + 1))
         else
             VANISHED_OBJECTS=$((VANISHED_OBJECTS + 1))
@@ -546,6 +560,14 @@ if [[ "${VANISHED_OBJECTS}" -gt 25 \
     echo "run_coverage.sh: ${VANISHED_OBJECTS}/${TOTAL_OBJECTS} -object entries vanished after the pre-flight probe (>5%) — refusing to upload coverage from the survivors; object discovery or the build tree is likely broken." >&2
     exit 1
 fi
+# llvm-cov reads the response file itself, so its paths must be native. Quote
+# each one: LLVM response files are whitespace-tokenized but honor double
+# quotes, so a runner workdir containing a space (e.g. /Volumes/CI Builds/...)
+# stays a single -object argument instead of splitting into bogus tokens.
+printf '%s\n' "${KEPT_OBJECT_PATHS[@]}" | coverage_native_path_list \
+    | while IFS= read -r native; do
+        printf -- '-object\n"%s"\n' "${native}"
+    done > "${OBJ_RSP}"
 echo "=== Wrote ${KEPT_OBJECTS} -object tokens to a response file (avoids Windows ARG_MAX) ==="
 
 coverage_phase "llvm-cov report (top-level summary)"

@@ -1154,6 +1154,13 @@ real but is not what turned the job red. When the C++ build fails,
 lines; under a parallel build, the tail alone is warnings from sibling
 targets that kept compiling.
 
+The Windows coverage leg builds `RelWithDebInfo` (with `/Od /Ob0` from
+`PulpInstrumentation.cmake`), never `Debug`. Pulp links the static MSVC
+runtime, so a Debug build is `/MTd` with `_ITERATOR_DEBUG_LEVEL=2`, and the
+prebuilt release Skia (`/MT`, level 0) then fails every Skia-linking target
+with `lld-link: error: /failifmismatch`. The failure extract prints three lines
+after each `lld-link: error:`; those lines name the two objects that disagree.
+
 A hosted Linux leg that dies with "No space left on device" leaves no job log
 (the runner's own log write fails). Read the `disk-sample:` lines the coverage
 step prints every five minutes, and the before/after `df` of "Reclaim hosted
