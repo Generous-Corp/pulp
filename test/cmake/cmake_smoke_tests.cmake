@@ -263,6 +263,23 @@ add_test(NAME cmake-ios-auv3-control-shipping
 set_tests_properties(cmake-ios-auv3-control-shipping PROPERTIES
     LABELS "cmake;ios;auv3;control"
     TIMEOUT 30)
+# The macOS AUv3 container's control-shipping scan reads the embedded framework
+# and appex, so the Ninja graph must order it after the embed steps.
+if(APPLE)
+    set(_pulp_auv3_scan_order_ninja "")
+    if(CMAKE_GENERATOR MATCHES "Ninja")
+        set(_pulp_auv3_scan_order_ninja "${CMAKE_MAKE_PROGRAM}")
+    endif()
+    add_test(NAME cmake-auv3-host-scan-order
+        COMMAND ${CMAKE_COMMAND}
+            -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+            -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/auv3-host-scan-order
+            "-DNINJA=${_pulp_auv3_scan_order_ninja}"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_auv3_host_scan_order.cmake)
+    set_tests_properties(cmake-auv3-host-scan-order PROPERTIES
+        LABELS "cmake;auv3;control"
+        TIMEOUT 60)
+endif()
 # Toggling pulp_add_binary_data(COMPRESS) in an existing Makefile build dir
 # regenerates the embedded source without a clean reconfigure.
 add_test(NAME cmake-pulp-add-binary-data-compress-toggle
