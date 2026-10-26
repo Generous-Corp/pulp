@@ -22,7 +22,37 @@ namespace pulp::view {
 
 // ── Knob animation ──────────────────────────────────────────────────────────
 
+std::optional<canvas::Canvas::SDFShape> widget_chart_shape(const View& view) {
+    if (dynamic_cast<const Knob*>(&view))
+        return canvas::Canvas::SDFShape::flat_arc;
+    if (dynamic_cast<const Fader*>(&view))
+        return canvas::Canvas::SDFShape::stadium;
+    return std::nullopt;
+}
+
 namespace {
+// Where a widget's chart shader draws, in the widget's local space (before the
+// quarter turn a vertical track gets). Mirrors widget_chart_shape().
+struct ChartPlacement {
+    canvas::Canvas::SDFShape shape;
+    float x, y, w, h;
+    bool vertical;
+};
+std::optional<ChartPlacement> chart_placement(const View& view, float w, float h) {
+    const auto shape = widget_chart_shape(view);
+    if (!shape)
+        return std::nullopt;
+    if (*shape == canvas::Canvas::SDFShape::flat_arc)
+        return ChartPlacement{*shape, 0.0f, 0.0f, w, h, false};
+    const auto* fader = dynamic_cast<const Fader*>(&view);
+    const bool vertical = fader && fader->orientation() == Fader::Orientation::vertical;
+    const float length = vertical ? h : w;
+    const float thickness = fader_chart_track_thickness(vertical ? w : h);
+    return vertical
+               ? ChartPlacement{*shape, 0.0f, -thickness * 0.5f, length, thickness, true}
+               : ChartPlacement{*shape, 0.0f, (h - thickness) * 0.5f, length, thickness, false};
+}
+
 // Draw a shader-capable widget's body via its installed SkSL shader.
 //
 // Returns true when the shader actually painted the body; false means the draw
@@ -55,43 +85,51 @@ bool draw_custom_shader_body(canvas::Canvas& canvas, CustomShaderHost& host, Vie
                                : nullptr;
     options.geometry = host.shader_geometry();
     bool chart_painted = false;
-    if (!host.chart_shader().empty()) {
-        if (dynamic_cast<Knob*>(&view) != nullptr) {
-            canvas::Canvas::SDFStyle style;
-            style.fill_color = u.fill_color;
-            style.stroke_color = u.fill_color;
-            style.stroke_width = 8.0f;
-            style.arc_start = Knob::start_angle;
-            style.arc_sweep = Knob::end_angle - Knob::start_angle;
-            // The feather an author declared with the shader's geometry
-            // applies to the chart draw too.
-            if (const auto& geometry = host.shader_geometry()) {
-                style.feather_sigma = geometry->style.feather_sigma;
-                style.feather_curve = geometry->style.feather_curve;
-                style.feather_mode = geometry->style.feather_mode;
+    const auto placement = chart_placement(view, w, h);
+    if (!host.chart_shader().empty() && placement) {
+        canvas::Canvas::SDFStyle style;
+        style.fill_color = u.fill_color;
+        style.stroke_color = u.fill_color;
+        style.stroke_width = 8.0f;
+        style.arc_start = Knob::start_angle;
+        style.arc_sweep = Knob::end_angle - Knob::start_angle;
+        // The feather an author declared with the shader's geometry
+        // applies to the chart draw too.
+        if (const auto& geometry = host.shader_geometry()) {
+            style.feather_sigma = geometry->style.feather_sigma;
+            style.feather_curve = geometry->style.feather_curve;
+            style.feather_mode = geometry->style.feather_mode;
+        }
+        // A glow whose reach is shorter than its falloff would be cut off
+        // in a hard edge at the draw rect. The chart draw is refused out
+        // loud and the body shader below paints instead, exactly as for a
+        // chart draw that fails.
+        // The chart also gets the reach its own source declared (a glow
+        // preset's halo); the body shader below keeps the widget's reach.
+        auto chart_options = options;
+        chart_options.reach = std::max(options.reach, host.chart_reach());
+        const float min_reach = canvas::Canvas::sdf_feather_min_reach(style);
+        if (chart_options.reach < min_reach) {
+            if (!host.shader_draw_failure_logged()) {
+                runtime::log_error("[custom-shader] chart feather sigma {} needs reach >= {} "
+                                   "but the shader's reach is {}; painting the body "
+                                   "shader instead of the chart",
+                                   style.feather_sigma, min_reach, chart_options.reach);
+                host.mark_shader_draw_failure_logged();
             }
-            // A glow whose reach is shorter than its falloff would be cut off
-            // in a hard edge at the draw rect. The chart draw is refused out
-            // loud and the body shader below paints instead, exactly as for a
-            // chart draw that fails.
-            // The chart also gets the reach its own source declared (a glow
-            // preset's halo); the body shader below keeps the widget's reach.
-            auto chart_options = options;
-            chart_options.reach = std::max(options.reach, host.chart_reach());
-            const float min_reach = canvas::Canvas::sdf_feather_min_reach(style);
-            if (chart_options.reach < min_reach) {
-                if (!host.shader_draw_failure_logged()) {
-                    runtime::log_error("[custom-shader] chart feather sigma {} needs reach >= {} "
-                                       "but the shader's reach is {}; painting the body "
-                                       "shader instead of the chart",
-                                       style.feather_sigma, min_reach, chart_options.reach);
-                    host.mark_shader_draw_failure_logged();
-                }
-            } else {
-                chart_painted =
-                    canvas.draw_sdf_shape_with_shader(canvas::Canvas::SDFShape::flat_arc, 0, 0, w,
-                                                      h, style, host.chart_shader(), chart_options);
+        } else {
+            // A vertical track is drawn as the horizontal shape turned a
+            // quarter counter-clockwise, so t runs from the bottom up; the
+            // chart reports tan in device orientation, so lighting follows.
+            canvas.save();
+            if (placement->vertical) {
+                canvas.translate(w * 0.5f, h);
+                canvas.rotate(-1.57079633f);
             }
+            chart_painted = canvas.draw_sdf_shape_with_shader(
+                placement->shape, placement->x, placement->y, placement->w, placement->h, style,
+                host.chart_shader(), chart_options);
+            canvas.restore();
         }
     }
     const bool body_painted = (!chart_painted || host.has_custom_shader()) &&
@@ -919,6 +957,83 @@ void Fader::paint_modulated_marker(canvas::Canvas& canvas) {
         canvas.stroke_line(base, cross - half, base, cross + half);
 }
 
+void Fader::paint_stock_thumb(canvas::Canvas& canvas, float pos, canvas::Color thumb_color) {
+    auto b = local_bounds();
+    const bool vert = orientation_ == Orientation::vertical;
+    const float track_length = vert ? b.height : b.width;
+    const float track_width = vert ? b.width : b.height;
+    const bool skinned = has_skin();
+    const bool skin_rect_thumb = skinned; // captured faders use a slab thumb
+    canvas.set_fill_color({thumb_color.r, thumb_color.g, thumb_color.b, thumb_color.a});
+    if (!has_captured_indicator_art() &&
+        (thumb_shape_ == ThumbShape::rectangle || skin_rect_thumb)) {
+        const float scale = hover_thumb_scale_.value();
+        // Skinned faders default to a wide rounded slab (matching the
+        // captured Figma thumb) when explicit dimensions weren't given.
+        // When the importer derived a thin track width, it also sized the
+        // widget box to the captured thumb width — so the thumb fills the
+        // box (no 0.62 shrink), and the track is the thin line.
+        const float skin_thumb_frac = has_skin_track_width_ ? 1.0f : 0.62f;
+        const float skin_default_w = vert ? std::min(b.width, track_width) * skin_thumb_frac
+                                          : std::max(10.0f, track_length * 0.10f);
+        // A captured fader thumb is a flat slab — wider than tall (~2:1).
+        // Default the cross-axis extent to ~half the long-axis so the thumb
+        // reads as a slab, not the near-square/circle that
+        // track_length*0.10 produced on tall faders. (Vertical fader: thumb
+        // is wide & short, so its height ≈ half its width.)
+        const float skin_default_h =
+            vert ? std::max(8.0f, skin_default_w * 0.5f) : std::min(b.height, track_width) * 0.62f;
+        const float default_w =
+            skinned ? skin_default_w : (vert ? std::min(b.width, track_width) : 10.0f);
+        const float default_h =
+            skinned ? skin_default_h : (vert ? 9.0f : std::min(b.height, track_width));
+        const float thumb_w =
+            std::max(1.0f, (thumb_width_ > 0.0f ? thumb_width_ : default_w) * scale);
+        const float thumb_h =
+            std::max(1.0f, (thumb_height_ > 0.0f ? thumb_height_ : default_h) * scale);
+        const float axis_half = (vert ? thumb_h : thumb_w) * 0.5f;
+        const float usable = std::max(0.0f, track_length - 2.0f * axis_half);
+        const float axis_center = axis_half + (vert ? (1.0f - pos) : pos) * usable;
+        // Skinned slab defaults to a generously rounded corner when none
+        // was provided (the captured thumb is a pill).
+        const float skin_radius = std::min(thumb_w, thumb_h) * 0.5f;
+        const float radius =
+            thumb_corner_radius_ > 0.0f
+                ? std::min(thumb_corner_radius_, std::min(thumb_w, thumb_h) * 0.5f)
+                : skin_radius; // pill ends by default (matches the Figma fader handle)
+        float thumb_x, thumb_y;
+        if (vert) {
+            thumb_x = (b.width - thumb_w) * 0.5f;
+            thumb_y = axis_center - thumb_h * 0.5f;
+        } else {
+            thumb_x = axis_center - thumb_w * 0.5f;
+            thumb_y = (b.height - thumb_h) * 0.5f;
+        }
+        canvas.fill_rounded_rect(thumb_x, thumb_y, thumb_w, thumb_h, radius);
+        // Optional thumb border (the captured silver thumb has a darker
+        // bevel edge). Drawn as a stroke around the slab.
+        if (has_skin_thumb_border_) {
+            canvas.set_stroke_color(thumb_border_color_);
+            canvas.set_line_width(1.5f);
+            canvas.stroke_rounded_rect(thumb_x, thumb_y, thumb_w, thumb_h, radius);
+        }
+    } else if (!has_captured_indicator_art()) {
+        float thumb_radius = std::min(track_width * 0.35f, 8.0f) * hover_thumb_scale_.value();
+        // Convention: when mapping a 0..1 value to a position with a circular/rect
+        // indicator, inset by the indicator's radius so it stays fully within bounds:
+        //   usable = length - 2 * radius;  pos = radius + value * usable;
+        if (vert) {
+            float usable = track_length - 2.0f * thumb_radius;
+            float thumb_y = thumb_radius + usable - pos * usable;
+            canvas.fill_circle(b.width * 0.5f, thumb_y, thumb_radius);
+        } else {
+            float usable = track_length - 2.0f * thumb_radius;
+            float thumb_x = thumb_radius + pos * usable;
+            canvas.fill_circle(thumb_x, b.height * 0.5f, thumb_radius);
+        }
+    }
+}
+
 void Fader::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
 
@@ -994,6 +1109,7 @@ void Fader::paint(canvas::Canvas& canvas) {
     float shader_time = frame_clock() ? frame_clock()->time() : 0.0f;
 
     bool vert = orientation_ == Orientation::vertical;
+    bool chart_only = false; // set by draw_custom_shader_body below
     float track_length = vert ? b.height : b.width;
     float track_width = vert ? b.width : b.height;
     // One thumb: it sits at the value PLAYING (the modulated value while a
@@ -1004,6 +1120,13 @@ void Fader::paint(canvas::Canvas& canvas) {
                                      : position_for_value();
     const auto modulation_color =
         resolve_color("knob.modulation", canvas::Color::rgba8(190, 150, 255));
+    const auto thumb_color =
+        has_modulated_ ? modulation_color
+        : has_skin_thumb_
+            ? thumb_color_
+            : resolve_color("control.thumb", has_skin_thumb_fallback_
+                                                 ? thumb_fallback_color_
+                                                 : canvas::Color::rgba8(220, 220, 220));
 
     // A static captured travel band already includes the authored track,
     // ticks, border and other non-value-dependent chrome. Its body plus the
@@ -1031,9 +1154,15 @@ void Fader::paint(canvas::Canvas& canvas) {
         }
     } else if (!widget_schema_.empty()) {
         render_schema(canvas, widget_schema_, b.width, b.height, shown, *this);
-    } else if (has_custom_shader() && draw_custom_shader_body(canvas, *this, *this, b.width,
-                                                              b.height, shown, shader_time)) {
+    } else if ((has_custom_shader() || !chart_shader().empty()) &&
+               draw_custom_shader_body(canvas, *this, *this, b.width, b.height, shown, shader_time,
+                                       &chart_only)) {
         // Shader painted the body; a draw-time failure falls through below.
+        // A chart paints the track's material, not its value: a body shader
+        // over it owns the value display, and without one the stock thumb
+        // goes on top.
+        if (chart_only)
+            paint_stock_thumb(canvas, pos, thumb_color);
     } else if (render_style_ == WidgetRenderStyle::minimal) {
         // ── Minimal: thin track only, no fill, no thumb (matches design tools) ──
         auto track_color = resolve_color("control.track", canvas::Color::rgba8(69, 71, 90));
@@ -1056,7 +1185,6 @@ void Fader::paint(canvas::Canvas& canvas) {
         // value-driven (the thumb still moves with value_), unlike a baked
         // full-image sprite. Falls back to theme tokens when unset.
         const bool skinned = has_skin();
-        const bool skin_rect_thumb = skinned;  // captured faders use a slab thumb
 
         // Track
         auto track_color = has_skin_track_
@@ -1117,77 +1245,7 @@ void Fader::paint(canvas::Canvas& canvas) {
         // replaces only this slab; track and fill above remain native and
         // value-driven, so the result is still a working fader rather than a
         // static screenshot.
-        auto thumb_color =
-            has_modulated_ ? modulation_color
-            : has_skin_thumb_
-                ? thumb_color_
-                : resolve_color("control.thumb", has_skin_thumb_fallback_
-                                                     ? thumb_fallback_color_
-                                                     : canvas::Color::rgba8(220, 220, 220));
-        canvas.set_fill_color({thumb_color.r, thumb_color.g, thumb_color.b, thumb_color.a});
-
-        if (!has_captured_indicator_art() &&
-            (thumb_shape_ == ThumbShape::rectangle || skin_rect_thumb)) {
-            const float scale = hover_thumb_scale_.value();
-            // Skinned faders default to a wide rounded slab (matching the
-            // captured Figma thumb) when explicit dimensions weren't given.
-            // When the importer derived a thin track width, it also sized the
-            // widget box to the captured thumb width — so the thumb fills the
-            // box (no 0.62 shrink), and the track is the thin line.
-            const float skin_thumb_frac = has_skin_track_width_ ? 1.0f : 0.62f;
-            const float skin_default_w = vert ? std::min(b.width, track_width) * skin_thumb_frac
-                                              : std::max(10.0f, track_length * 0.10f);
-            // A captured fader thumb is a flat slab — wider than tall (~2:1).
-            // Default the cross-axis extent to ~half the long-axis so the thumb
-            // reads as a slab, not the near-square/circle that
-            // track_length*0.10 produced on tall faders. (Vertical fader: thumb
-            // is wide & short, so its height ≈ half its width.)
-            const float skin_default_h = vert ? std::max(8.0f, skin_default_w * 0.5f)
-                                              : std::min(b.height, track_width) * 0.62f;
-            const float default_w = skinned ? skin_default_w : (vert ? std::min(b.width, track_width) : 10.0f);
-            const float default_h = skinned ? skin_default_h : (vert ? 9.0f : std::min(b.height, track_width));
-            const float thumb_w = std::max(1.0f, (thumb_width_ > 0.0f ? thumb_width_ : default_w) * scale);
-            const float thumb_h = std::max(1.0f, (thumb_height_ > 0.0f ? thumb_height_ : default_h) * scale);
-            const float axis_half = (vert ? thumb_h : thumb_w) * 0.5f;
-            const float usable = std::max(0.0f, track_length - 2.0f * axis_half);
-            const float axis_center = axis_half + (vert ? (1.0f - pos) : pos) * usable;
-            // Skinned slab defaults to a generously rounded corner when none
-            // was provided (the captured thumb is a pill).
-            const float skin_radius = std::min(thumb_w, thumb_h) * 0.5f;
-            const float radius = thumb_corner_radius_ > 0.0f
-                ? std::min(thumb_corner_radius_, std::min(thumb_w, thumb_h) * 0.5f)
-                : skin_radius;  // pill ends by default (matches the Figma fader handle)
-            float thumb_x, thumb_y;
-            if (vert) {
-                thumb_x = (b.width - thumb_w) * 0.5f;
-                thumb_y = axis_center - thumb_h * 0.5f;
-            } else {
-                thumb_x = axis_center - thumb_w * 0.5f;
-                thumb_y = (b.height - thumb_h) * 0.5f;
-            }
-            canvas.fill_rounded_rect(thumb_x, thumb_y, thumb_w, thumb_h, radius);
-            // Optional thumb border (the captured silver thumb has a darker
-            // bevel edge). Drawn as a stroke around the slab.
-            if (has_skin_thumb_border_) {
-                canvas.set_stroke_color(thumb_border_color_);
-                canvas.set_line_width(1.5f);
-                canvas.stroke_rounded_rect(thumb_x, thumb_y, thumb_w, thumb_h, radius);
-            }
-        } else if (!has_captured_indicator_art()) {
-            float thumb_radius = std::min(track_width * 0.35f, 8.0f) * hover_thumb_scale_.value();
-            // Convention: when mapping a 0..1 value to a position with a circular/rect
-            // indicator, inset by the indicator's radius so it stays fully within bounds:
-            //   usable = length - 2 * radius;  pos = radius + value * usable;
-            if (vert) {
-                float usable = track_length - 2.0f * thumb_radius;
-                float thumb_y = thumb_radius + usable - pos * usable;
-                canvas.fill_circle(b.width * 0.5f, thumb_y, thumb_radius);
-            } else {
-                float usable = track_length - 2.0f * thumb_radius;
-                float thumb_x = thumb_radius + pos * usable;
-                canvas.fill_circle(thumb_x, b.height * 0.5f, thumb_radius);
-            }
-        }
+        paint_stock_thumb(canvas, pos, thumb_color);
     }
 
     // Captured indicator art is a final compositing layer, independent of the

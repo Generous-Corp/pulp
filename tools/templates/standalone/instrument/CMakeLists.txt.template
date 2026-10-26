@@ -12,15 +12,15 @@ include(FetchContent)
 if(POLICY CMP0168)
     cmake_policy(SET CMP0168 NEW)
 endif()
-# An installed Catch2 3 (for example `brew install catch2`) is used as-is, which
+# An installed Catch2 3.7.1 or newer 3.x (for example `brew install catch2`) is used as-is, which
 # skips both the download and compiling its ~100 sources. Otherwise the pinned
 # release archive is fetched and checked against its hash, which is quicker
 # than a git clone of the whole history.
 FetchContent_Declare(Catch2
-    URL https://github.com/catchorg/Catch2/archive/refs/tags/v3.7.1.tar.gz
-    URL_HASH SHA256=c991b247a1a0d7bb9c39aa35faf0fe9e19764213f28ffba3109388e62ee0269c
+    URL https://github.com/catchorg/Catch2/archive/refs/tags/v3.16.1.tar.gz
+    URL_HASH SHA256=d16bd1b8b2364918bd472cb216394acb93bde6784890df0d91bccfb3f28d777d
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-    FIND_PACKAGE_ARGS 3 CONFIG
+    FIND_PACKAGE_ARGS 3.16.1 CONFIG
 )
 FetchContent_MakeAvailable(Catch2)
 include(CTest)
@@ -30,11 +30,14 @@ endif()
 include(Catch)
 
 add_executable({{TARGET_NAME}}-test test_{{LOWER_NAME}}.cpp)
-target_link_libraries({{TARGET_NAME}}-test PRIVATE Pulp::format Catch2::Catch2WithMain)
+target_link_libraries({{TARGET_NAME}}-test PRIVATE Pulp::format Catch2::Catch2WithMain {{TARGET_NAME}}_Core)
 target_include_directories({{TARGET_NAME}}-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 catch_discover_tests({{TARGET_NAME}}-test)
 
 pulp_add_plugin({{TARGET_NAME}}
+    # The processor body is compiled once and shared by every format, so an
+    # edit to process() rebuilds one file before the relinks.
+    SOURCES         {{SOURCE_NAME}}
     FORMATS         {{FORMATS}}
     PLUGIN_NAME     "{{PLUGIN_NAME}}"
     BUNDLE_ID       "{{BUNDLE_ID}}"

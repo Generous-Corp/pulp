@@ -14,6 +14,19 @@ struct NeuralRealtimeTestAccess {
     // Latches a recovery reason as a provider fault would.
     static void request_recovery(GpuNeuralRealtimeNode&, SharedIoRecoveryReason) noexcept;
     static RealtimeGpuNodePath path(GpuNeuralRealtimeNode&) noexcept;
+    // Replaces the prepare()-time shadow cost measurement (Auto policy).
+    static void inject_shadow_cost(GpuNeuralRealtimeNode&, float pct) noexcept;
+    // Before prepare(): run the Worker shadow without a thread; pump_shadow()
+    // steps it on the caller.
+    static void manual_shadow(GpuNeuralRealtimeNode&, bool manual) noexcept;
+    static std::size_t pump_shadow(GpuNeuralRealtimeNode&, std::size_t max_blocks = 0) noexcept;
+    static std::uint64_t shadow_processed(const GpuNeuralRealtimeNode&) noexcept;
+    // Most GPU blocks the worker has held at once since prepare().
+    static std::uint64_t in_flight_high_water(const GpuNeuralRealtimeNode&) noexcept;
+    // Whether the recent-delivery window reads the GPU as not carrying the stream.
+    static bool gpu_lagging(const GpuNeuralRealtimeNode&) noexcept;
+    // Planted: project status as for an authenticated production provider.
+    static void assume_authenticated(GpuNeuralRealtimeNode&) noexcept;
 };
 
 } // namespace pulp::gpu_audio::detail

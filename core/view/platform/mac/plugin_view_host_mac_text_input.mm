@@ -1,4 +1,5 @@
 #include "pulp_mac_objc_names.h"
+#include "mac_gpu_host_config.h"
 
 #include "mac_text_input_ranges.h"
 #include "plugin_view_host_mac_view.h"
@@ -363,7 +364,7 @@ NSRect pulp_plugin_first_rect_for_character_range(NSView* host,
 
 @end
 
-#ifdef PULP_HAS_SKIA
+#if PULP_VIEW_MAC_GPU_HOST
 
 @interface PulpGpuPluginView (TextInputClient) <NSTextInputClient>
 @end
@@ -442,6 +443,6 @@ NSRect pulp_plugin_first_rect_for_character_range(NSView* host,
 
 @end
 
-#endif  // PULP_HAS_SKIA
+#endif // PULP_VIEW_MAC_GPU_HOST
 
 #endif  // TARGET_OS_OSX

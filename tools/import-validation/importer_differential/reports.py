@@ -35,6 +35,13 @@ def format_summary(report: dict[str, Any]) -> str:
         lines.append(
             f"- Registered authored-frame visual score: "
             f"{comparison['visual']['registered_visual']['score']:.3f}")
+    reference = comparison["visual"].get("reference")
+    if isinstance(reference, dict):
+        moment = reference["capture_moment_residual"]
+        lines.append(
+            f"- Visual reference: {reference['source']} "
+            f"(DOM snapshots {'match' if reference['dom_snapshots_match'] else 'differ'}; "
+            f"{moment['differing_pixel_count']} pixels differ between the two captures)")
     full_frame = comparison["visual"].get("full_frame_classification")
     if isinstance(full_frame, dict):
         detail = ""

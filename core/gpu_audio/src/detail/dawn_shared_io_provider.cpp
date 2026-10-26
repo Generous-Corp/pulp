@@ -2530,7 +2530,12 @@ bool DawnSharedIoProvider::drain() noexcept {
         return true;
     impl_->accepting = false;
     ++impl_->stats.drain_calls;
-    const auto deadline = std::chrono::steady_clock::now() + kDrainLimit;
+    const auto budget = impl_->options.drain_budget_ns;
+    const auto limit = budget == 0 || budget > static_cast<std::uint64_t>(
+                                                   std::chrono::nanoseconds(kDrainLimit).count())
+                           ? std::chrono::nanoseconds(kDrainLimit)
+                           : std::chrono::nanoseconds(budget);
+    const auto deadline = std::chrono::steady_clock::now() + limit;
     const bool physically_drained = impl_->pump_until_completion(
         [&] {
             for (const auto* slot : impl_->slots) {
@@ -2617,6 +2622,11 @@ bool DawnSharedIoProvider::drain() noexcept {
     return physically_drained;
 }
 
+void DawnSharedIoProvider::set_drain_budget_ns(std::uint64_t budget_ns) noexcept {
+    if (impl_)
+        impl_->options.drain_budget_ns = budget_ns;
+}
+
 bool DawnSharedIoProvider::device_lost() const noexcept {
     return impl_ &&
            (impl_->device_destroyed || impl_->device_lost.load(std::memory_order_acquire) ||
@@ -2671,6 +2681,7 @@ SharedIoProviderIdentity DawnSharedIoProvider::provider_identity() const noexcep
         return identity;
     try {
         const auto& adapter = impl_->adapter_identity;
+        identity.provider = GpuAudioProvider::Dawn;
         identity.provider_revision = dawn_revision();
         identity.adapter_name = adapter.name;
         identity.adapter_backend = adapter.backend;

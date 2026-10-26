@@ -388,6 +388,30 @@ class FakeSharedIoProvider : public pulp::gpu_audio::detail::SharedIoArenaProvid
         return true;
     }
 
+    // Records each service deadline (reserve capacity first; later calls are
+    // dropped rather than allocating), then polls like the base provider.
+    void service_until(std::uint64_t deadline_ns) noexcept override {
+        if (service_deadlines.size() < service_deadlines.capacity())
+            service_deadlines.push_back(deadline_ns);
+        poll();
+    }
+
+    // Completion events. With `notifier_supported` the fake stores what is
+    // installed, and notify_completion() fires it the way a backend callback
+    // thread would; otherwise it has no event source, like most providers.
+    bool set_completion_notifier(
+        pulp::gpu_audio::detail::SharedIoCompletionNotifier installed) noexcept override {
+        if (!notifier_supported)
+            return false;
+        ++(installed.notify != nullptr ? notifier_installs : notifier_clears);
+        notifier = installed;
+        return true;
+    }
+    void notify_completion() const noexcept {
+        if (notifier.notify != nullptr)
+            notifier.notify(notifier.context);
+    }
+
     void poll() noexcept override {
         ++poll_calls;
         ++lifecycle_state->polls;
@@ -539,6 +563,10 @@ class FakeSharedIoProvider : public pulp::gpu_audio::detail::SharedIoArenaProvid
             ++lifecycle_state->retired;
             if (violation == Violation::DuplicateTerminal)
                 (void)inbox->push(token, status);
+            // A provider with an event source wakes its dispatcher once the
+            // work is serviceable; for the fake, once the terminal is pushed.
+            if (notify_on_terminal)
+                notify_completion();
         }
         return result;
     }
@@ -636,6 +664,14 @@ class FakeSharedIoProvider : public pulp::gpu_audio::detail::SharedIoArenaProvid
     bool force_drain_failure = false;
     bool lost = false;
     bool resume_supported = false;
+    bool notifier_supported = false;
+    // Fire the installed notifier when a terminal is published (a provider
+    // that has the event source but never fires it leaves this false).
+    bool notify_on_terminal = true;
+    pulp::gpu_audio::detail::SharedIoCompletionNotifier notifier{};
+    std::uint32_t notifier_installs = 0;
+    std::uint32_t notifier_clears = 0;
+    std::vector<std::uint64_t> service_deadlines;
     SharedIoTerminalStatus terminal_status = SharedIoTerminalStatus::RetiredSuccess;
 
     // Fault injection.

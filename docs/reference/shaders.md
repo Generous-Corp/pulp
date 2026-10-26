@@ -297,7 +297,7 @@ knob arcs, LED rings, fader tracks and bar meters are.
 | `g.halfWidth` | Half the band's width |
 | `g.d` | Signed distance to the band, negative inside, including flat caps |
 | `g.side` | `-1` inside the band, `+1` outside |
-| `g.tan` | Unit tangent of the centre line, the direction `t` grows. Inside a rounded cap it is perpendicular to the radius from the end point, so `(tan.y, -tan.x)` points away from it; below the axis `tan` and `cross` both flip sign at the cap's edge. Their product `cross * (tan.y, -tan.x)` and anything that depends only on `abs(cross)` stay continuous there, but a shader keyed on the sign of `cross` alone, or on `tan` alone, shows a seam |
+| `g.tan` | Unit tangent of the centre line, the direction `t` grows, in device orientation: a rotated canvas reports the rotated direction, so lighting along the normal follows the screen. Inside a rounded cap it is perpendicular to the radius from the end point, so `(tan.y, -tan.x)` points away from it; below the axis `tan` and `cross` both flip sign at the cap's edge. Their product `cross * (tan.y, -tan.x)` and anything that depends only on `abs(cross)` stay continuous there, but a shader keyed on the sign of `cross` alone, or on `tan` alone, shows a seam |
 | `g.px` | One device pixel in the units of `d`, so `2.0 * g.px` is two pixels at any backing scale |
 | `g.valid` | `0` for degenerate geometry (no sweep, no length, no band width); ignore the other fields then |
 
@@ -314,19 +314,31 @@ coverage, for example `clamp(0.5 - g.d / g.px, 0.0, 1.0)`.
 
 Every chart matches the shape `draw_sdf_shape` draws for the same
 `SDFStyle`. The horizontal shapes are horizontal in the canvas's local space;
-draw a vertical track by rotating the canvas. `arc`, `quadratic_bezier` and
+draw a vertical track by rotating the canvas. `tan` (and with it the normal)
+comes back in device orientation, so a shader that lights along the normal
+needs no correction for the rotation; a mirroring transform also flips the sign
+of `cross`, so `cross * (tan.y, -tan.x)` stays the same offset. `arc`, `quadratic_bezier` and
 the filled shapes have no chart and are refused by name, at compile time
 (`Canvas::compile_sdf_chart_sksl`) and at draw time. A Bezier's arc length has
 no closed form, so it has no `t`.
 
-From JS, `setWidgetShaderChart(id, source)` installs a chart shader on a knob,
-whose arc is the `flat_arc` from `Knob::start_angle` to `Knob::end_angle`. A
-chart shader paints the knob's material, the same full arc at every value, so
-something else must show the value. With a chart alone the knob draws its
-rotating value pointer over it. With a chart and a body shader, the body shader
-paints over the chart and owns the value display, so no pointer is drawn; give
-it transparent areas where the chart should show through. If the chart draw is
-refused, the body shader paints alone.
+From JS, `setWidgetShaderChart(id, source)` installs a chart shader on a knob
+or a fader; `widget_chart_shape()` names the shape each draws on, and any other
+widget refuses the chart.
+
+| Widget | Chart shape | `t` |
+|---|---|---|
+| Knob | `flat_arc` from `Knob::start_angle` to `Knob::end_angle` | 0 at the minimum |
+| Fader, horizontal | `stadium` along the track, `fader_chart_track_thickness()` thick, centred across the fader | 0 at the left end |
+| Fader, vertical | the same stadium turned a quarter counter-clockwise | 0 at the bottom |
+
+A chart paints the control's material, the same at every value, so something
+else must show the value. With a chart alone the control draws its stock value
+marker over it: the knob's rotating pointer, the fader's thumb. With a chart
+and a body shader, the body shader paints over the chart and owns the value
+display, so no marker is drawn; give it transparent areas where the chart
+should show through. If the chart draw is refused, the body shader paints
+alone.
 
 ### Feather modes and the `reach` rule
 
@@ -378,7 +390,7 @@ from the right (90 is above, 270 below; default 120, upper left) and
 strings.
 
 ```js
-// Install on a knob. A glow's extra reach belongs to the chart: it pads only the
+// Install on a knob or a fader. A glow's extra reach belongs to the chart: it pads only the
 // chart draw and is replaced when another chart or preset is installed.
 setWidgetShaderChartPreset('drive', 'light-pipe', { accent: '#5ab0ff', profile: 'round' });
 
@@ -404,8 +416,9 @@ the chart normal. A directional light shades it with Lambert diffuse, divided
 by the value for a face toward the viewer so a flat face shows exactly the
 authored colour, plus a Blinn-Phong highlight. All of it happens in linear
 light: colours are decoded from sRGB first and encoded once at the end, since
-lighting sRGB values directly looks plausible and is wrong. The light lives in
-the canvas's local space, so a rotated draw rotates it too.
+lighting sRGB values directly looks plausible and is wrong. The light is in
+screen space: the chart reports its direction in device orientation, so a
+vertical fader track and a horizontal one are lit from the same side.
 
 Options are baked into the source, and each distinct source compiles once and
 is cached; build presets when the look changes, not every frame. The widget

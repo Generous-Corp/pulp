@@ -313,6 +313,34 @@ def read_git_path(
     return replace(result, status="available", stderr="", content=shown.stdout)
 
 
+def commit_blobs(root: "str | Path", rev: str, paths: Iterable[str]) -> dict[str, str]:
+    """Each path's text in commit ``rev``, read in one ``git cat-file --batch``.
+
+    A path the commit does not hold, or holds as a non-blob, is left out. A
+    pre-push gate reads the pushed commit through this rather than the working
+    tree, so an uncommitted edit cannot change its verdict. Raises
+    subprocess.CalledProcessError when git itself fails.
+    """
+    names = [Path(p).as_posix() for p in paths]
+    if not names:
+        return {}
+    request = "".join(f"{rev}:{name}\n" for name in names).encode("utf-8")
+    out = subprocess.run(["git", "cat-file", "--batch"], cwd=str(root), input=request,
+                         capture_output=True, check=True).stdout
+    texts: dict[str, str] = {}
+    at = 0
+    for name in names:
+        header_end = out.index(b"\n", at)
+        header = out[at:header_end].split()
+        at = header_end + 1
+        if len(header) < 3 or header[1] != b"blob":
+            continue  # "<spec> missing", or a tree / submodule entry
+        size = int(header[2])
+        texts[name] = out[at:at + size].decode("utf-8", errors="replace")
+        at += size + 1
+    return texts
+
+
 def repo_root() -> Path:
     out = subprocess.run(
         ["git", "rev-parse", "--show-toplevel"],
@@ -539,14 +567,29 @@ def version_bump_skip_reason(trailers: dict[str, list[str]]) -> str | None:
 # One left-to-right pass, as the compiler reads it: whichever opener comes
 # first wins, so a `/*` inside a `//` comment opens nothing.
 _C_COMMENT = re.compile(r"/\*.*?\*/|//[^\n]*", re.DOTALL)
+# The same pass with string and character literals as alternatives, so a
+# literal is consumed whole and a `/*` or `//` inside it opens nothing. Raw
+# strings (`R"d( ... )d"`) come first because their body may hold quotes.
+_C_COMMENT_OR_LITERAL = re.compile(
+    r'R"(?P<delim>[^()\\\s"]{0,16})\(.*?\)(?P=delim)"'
+    r'|"(?:\\.|[^"\\\n])*"'
+    r"|'(?:\\.|[^'\\\n])*'"
+    r"|/\*.*?\*/|//[^\n]*",
+    re.DOTALL,
+)
 
 
-def strip_c_comments(text: str) -> str:
+def strip_c_comments(text: str, *, keep_strings: bool = False) -> str:
     """Remove C/C++/JS comments: ``/* ... */`` blocks and ``//`` to the end
-    of the line. String literals are not modelled, so ``//`` or ``/*``
-    inside one is removed as a comment too; callers scanning for code
-    accept that over-removal."""
-    return _C_COMMENT.sub("", text)
+    of the line. By default string literals are not modelled, so ``//`` or
+    ``/*`` inside one is removed as a comment too; callers scanning for code
+    accept that over-removal. ``keep_strings=True`` skips over literals
+    instead, for scans where over-removal would hide a real use (a glob like
+    ``"**/*.json"`` otherwise opens a block that swallows the code after it)."""
+    if not keep_strings:
+        return _C_COMMENT.sub("", text)
+    return _C_COMMENT_OR_LITERAL.sub(
+        lambda m: "" if m.group(0).startswith("/") else m.group(0), text)
 
 
 def strip_meta(data):

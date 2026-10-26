@@ -1128,6 +1128,66 @@ TEST_CASE("SDF chart: ring and flat arc chart t around and cross radially",
 #endif
 }
 
+TEST_CASE("SDF chart reports tan in device orientation", "[canvas][sdf][shader][chart]") {
+#ifdef PULP_HAS_SKIA
+    // A horizontal flat segment, 64 x 32, drawn through a canvas transform.
+    // Channels: r = tan.x, g = tan.y (both mapped to 0..1), b = cross sign.
+    constexpr const char* kTan =
+        "half4 shade(PulpChart g) { return half4(half(g.tan.x * 0.5 + 0.5), "
+        "half(g.tan.y * 0.5 + 0.5), g.cross > 0.0 ? 1.0 : 0.0, 1); }";
+    auto render = [&](auto&& transform, int px, int py) {
+        auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(64, 64));
+        REQUIRE(surface != nullptr);
+        surface->getCanvas()->clear(SK_ColorTRANSPARENT);
+        SkiaCanvas canvas(surface->getCanvas());
+        canvas.save();
+        transform(canvas);
+        Canvas::SDFStyle style;
+        style.stroke_width = 16.0f;
+        REQUIRE(canvas.draw_sdf_shape_with_shader(Canvas::SDFShape::flat_segment, 0, 0, 64, 32,
+                                                  style, kTan, {}));
+        canvas.restore();
+        SkPixmap pixels;
+        REQUIRE(surface->peekPixels(&pixels));
+        const SkColor c = pixels.getColor(px, py);
+        return std::array<float, 3>{SkColorGetR(c) / 255.0f * 2.0f - 1.0f,
+                                    SkColorGetG(c) / 255.0f * 2.0f - 1.0f, SkColorGetB(c) / 255.0f};
+    };
+    // Untransformed: tan points right, and a point above the centre line
+    // (local y 12, centre 16) has positive cross.
+    const auto plain = render([](Canvas&) {}, 32, 12);
+    CHECK(plain[0] == Catch::Approx(1.0f).margin(0.02f));
+    CHECK(plain[1] == Catch::Approx(0.0f).margin(0.02f));
+    CHECK(plain[2] == 1.0f);
+    // Rotated a quarter turn counter-clockwise on screen: the segment runs
+    // up the left half of the surface, so tan points up (device y negative).
+    // Local (32, 12) lands at device (12, 64 - 32) = (12, 32).
+    const auto turned = render(
+        [](Canvas& c) {
+            c.translate(0.0f, 64.0f);
+            c.rotate(-1.5707963f);
+        },
+        12, 32);
+    INFO("rotated tan " << turned[0] << "," << turned[1]);
+    CHECK(turned[0] == Catch::Approx(0.0f).margin(0.02f));
+    CHECK(turned[1] == Catch::Approx(-1.0f).margin(0.02f));
+    CHECK(turned[2] == 1.0f);
+    // Mirrored vertically: tan still points right, and the same local point
+    // now sits below the line on screen, so cross turns negative there.
+    const auto mirrored = render(
+        [](Canvas& c) {
+            c.translate(0.0f, 32.0f);
+            c.scale(1.0f, -1.0f);
+        },
+        32, 20);
+    CHECK(mirrored[0] == Catch::Approx(1.0f).margin(0.02f));
+    CHECK(mirrored[1] == Catch::Approx(0.0f).margin(0.02f));
+    CHECK(mirrored[2] == 0.0f);
+#else
+    SUCCEED("chart probes require PULP_HAS_SKIA");
+#endif
+}
+
 TEST_CASE("SDF chart: degenerate bands report valid = 0", "[canvas][sdf][shader][chart]") {
 #ifdef PULP_HAS_SKIA
     constexpr const char* kValid =

@@ -97,7 +97,13 @@ BASE="${1:-${PULP_GATES_BASE:-origin/main}}"
 
 MERGE_TREE_SCRIPT_STATE="$ROOT/tools/scripts/merge_tree_script_state.py"
 if [ -f "$MERGE_TREE_SCRIPT_STATE" ]; then
-    "$PYTHON" "$MERGE_TREE_SCRIPT_STATE" --repo-root "$ROOT" --base "$BASE" --head HEAD || exit $?
+    # Exit 4 means a check did not run (a timeout on a loaded host): that is
+    # not a pass, and it keeps its own code so it never reads as one.
+    "$PYTHON" "$MERGE_TREE_SCRIPT_STATE" --repo-root "$ROOT" --base "$BASE" --head HEAD || {
+        _merge_tree_rc=$?
+        [ "$_merge_tree_rc" -eq 4 ] && echo "gates: ✗ NOT CHECKED — a merge-tree check did not run (see above); exit 4, not a pass." >&2
+        exit "$_merge_tree_rc"
+    }
 fi
 
 # A tartci host that carries the required gate VMs refuses the heavy local
@@ -902,7 +908,8 @@ if [ -f "$CONFLICT_MARKER_GUARD" ]; then
 fi
 
 # ── 13. thread-safe-assertions guard ───────────────────────────────────────
-# Catch2 3.7.1 assertion macros aren't thread-safe; a REQUIRE/CHECK inside a
+# Catch2 assertion macros aren't thread-safe (Pulp leaves
+# CATCH_CONFIG_THREAD_SAFE_ASSERTIONS off); a REQUIRE/CHECK inside a
 # std::thread/async lambda in test/ is UB that bare metal tolerates but VM
 # scheduler timing trips (it reddened the required macOS gate on the Tart-VM
 # graduation). Also a ctest case, but running it here catches it pre-push.

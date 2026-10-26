@@ -70,6 +70,7 @@
 #include <pulp/format/au_factory_presets.hpp>
 #include <pulp/format/audio_workgroup_client.hpp>
 #include <pulp/format/detail/audio_buffer_list_validation.hpp>
+#include <pulp/format/detail/host_sample_position.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/format/host_quirks.hpp>
 #include <pulp/format/parameter_text.hpp>
@@ -235,29 +236,12 @@ struct AUBridge {
 static int32_t block_relative_sample_offset(AUEventSampleTime event_sample_time,
                                             const AudioTimeStamp* timestamp,
                                             AUAudioFrameCount frame_count) {
-    int64_t offset = 0;
-    constexpr auto kImmediate = static_cast<int64_t>(AUEventSampleTimeImmediate);
-    constexpr int64_t kImmediateWindow = 4096;
-
-    if (event_sample_time >= kImmediate &&
-        event_sample_time < kImmediate + kImmediateWindow) {
-        offset = static_cast<int64_t>(event_sample_time) - kImmediate;
-    } else if (timestamp &&
-               (timestamp->mFlags & kAudioTimeStampSampleTimeValid) != 0) {
-        offset = static_cast<int64_t>(event_sample_time) -
-                 static_cast<int64_t>(timestamp->mSampleTime);
-    } else {
-        offset = static_cast<int64_t>(event_sample_time);
-    }
-
-    if (offset < 0) return 0;
-    if (frame_count > 0 && offset >= static_cast<int64_t>(frame_count)) {
-        return static_cast<int32_t>(frame_count - 1);
-    }
-    if (offset > static_cast<int64_t>(std::numeric_limits<int32_t>::max())) {
-        return std::numeric_limits<int32_t>::max();
-    }
-    return static_cast<int32_t>(offset);
+    std::optional<double> block_sample_time;
+    if (timestamp && (timestamp->mFlags & kAudioTimeStampSampleTimeValid) != 0)
+        block_sample_time = timestamp->mSampleTime;
+    return pulp::format::detail::au_event_block_offset(
+        static_cast<int64_t>(event_sample_time), static_cast<int64_t>(AUEventSampleTimeImmediate),
+        block_sample_time, frame_count);
 }
 
 // Set while a host parameter write (implementorValueObserver) or our own
@@ -1553,13 +1537,14 @@ struct ScopedAuV3HostWriting {
                     (transport_flags & AUHostTransportStateRecording) != 0;
                 ctx.is_looping =
                     (transport_flags & AUHostTransportStateCycling) != 0;
-                ctx.position_samples =
-                    static_cast<int64_t>(current_sample_position);
                 ctx.transport_validity.set(pulp::format::TransportField::Playing);
                 ctx.transport_validity.set(pulp::format::TransportField::Recording);
                 ctx.transport_validity.set(pulp::format::TransportField::Looping);
-                ctx.transport_validity.set(
-                    pulp::format::TransportField::SamplePosition);
+                if (const auto position =
+                        pulp::format::detail::host_sample_position(current_sample_position)) {
+                    ctx.position_samples = *position;
+                    ctx.transport_validity.set(pulp::format::TransportField::SamplePosition);
+                }
                 if (ctx.is_looping) {
                     ctx.loop_start_beats = cycle_start_beat_position;
                     ctx.loop_end_beats = cycle_end_beat_position;
@@ -1728,8 +1713,9 @@ struct ScopedAuV3HostWriting {
             if (outBlock) {
                 for (const auto& e : midi_out) {
                     const AUEventSampleTime sampleTime =
-                        static_cast<AUEventSampleTime>(
-                            timestamp->mSampleTime + e.sample_offset);
+                        static_cast<AUEventSampleTime>(pulp::format::detail::au_event_sample_time(
+                            timestamp->mSampleTime, e.sample_offset,
+                            static_cast<int64_t>(AUEventSampleTimeImmediate)));
                     uint8_t bytes[3] = {0, 0, 0};
                     const uint32_t n = e.message.length();
                     if (n >= 1) bytes[0] = e.data()[0];

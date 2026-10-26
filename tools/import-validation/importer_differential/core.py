@@ -51,6 +51,7 @@ from .snapshot import (
     LEGACY_COMPUTED_STYLES,
     DomSnapshot,
     browser_nodes,
+    capture_anchors,
     decode_string,
     document_canvas_background,
     principal_layout_rows,
@@ -63,6 +64,7 @@ from .verdicts import (
     work_counter_gate,
 )
 from .visual import (
+    capture_moment_residual,
     classify_full_frame,
     full_frame_ok,
     outside_frame_ink,
@@ -289,6 +291,34 @@ def snapshot_semantic_sha256(snapshot_bytes: bytes) -> str:
     return hashlib.sha256(canonical).hexdigest()
 
 
+def platform_fonts_semantic_sha256(path: Path) -> str | None:
+    """Hash the platform-fonts report with its backend node ids fixed.
+
+    Each text run names its owner by snapshot-local node and layout indices,
+    which are content, and by `backend_node_id`, which is the same per-run
+    token `snapshot_semantic_sha256` fixes: Chromium can number identical
+    nodes differently from one run to the next. A raw file hash moved with
+    that order alone. Every requested and resolved face, glyph count and line
+    metric still enters the digest.
+    """
+    if not path.is_file():
+        return None
+    report = json.loads(path.read_text(encoding="utf-8"))
+
+    def scrub(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {key: ("<backend-node>" if key == "backend_node_id" else scrub(item))
+                    for key, item in value.items()}
+        if isinstance(value, list):
+            return [scrub(item) for item in value]
+        return value
+
+    canonical = json.dumps(
+        scrub(report), sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
 def write_json(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, indent=2, sort_keys=False) + "\n", encoding="utf-8")
@@ -308,8 +338,15 @@ def run_command(argv: list[str], timeout_seconds: int) -> CommandResult:
         )
     except subprocess.TimeoutExpired as exc:
         elapsed = int((time.monotonic() - start) * 1000)
+        # The partial output on a timeout is bytes even under text=True, and
+        # every reader of a CommandResult expects str.
+        def partial(value: bytes | str | None) -> str:
+            if isinstance(value, bytes):
+                return value.decode("utf-8", errors="replace")
+            return value or ""
         return CommandResult(
-            argv, elapsed, 124, exc.stdout or "", exc.stderr or "command timed out")
+            argv, elapsed, 124, partial(exc.stdout),
+            partial(exc.stderr) or "command timed out")
     elapsed = int((time.monotonic() - start) * 1000)
     return CommandResult(
         argv, elapsed, result.returncode, result.stdout, result.stderr)
@@ -399,8 +436,7 @@ def native_nodes(ir: dict[str, Any], layout: dict[str, Any]) -> list[NativeNode]
 
 def node_match_score(browser: BrowserNode, native: NativeNode) -> float:
     score = 0.0
-    if (browser.backend_node_id is not None
-            and browser.backend_node_id == native.backend_node_id):
+    if browser.anchor and browser.anchor == native.anchor:
         score += 100.0
     browser_id = browser.attributes.get("id", "")
     if browser_id and browser_id in {native.anchor, native.name}:
@@ -424,10 +460,14 @@ def node_match_score(browser: BrowserNode, native: NativeNode) -> float:
 
 
 def has_identity_signal(browser: BrowserNode, native: NativeNode) -> bool:
-    if browser.backend_node_id is not None and native.backend_node_id is not None:
-        # Both captures have an authoritative DOM identity. Never let a
-        # same-text/same-tag heuristic hide a mismatched capture node.
-        return browser.backend_node_id == native.backend_node_id
+    # The browser and candidate lanes are two Chromium sessions, and each
+    # numbers backend nodes in its own order, so a backendNodeId names a node
+    # only within its own lane. The DOM-path anchor is derived from the page's
+    # structure and reads the same in both. When both sides carry one it is
+    # the identity, and a disagreement is never rescued by a same-text or
+    # same-tag heuristic.
+    if browser.anchor and native.anchor.startswith("capture:"):
+        return browser.anchor == native.anchor
     browser_id = browser.attributes.get("id", "")
     if browser_id and browser_id in {native.anchor, native.name}:
         return True
@@ -1135,6 +1175,49 @@ def retain_evidence(lanes: LaneOutputs) -> None:
     (lanes.browser_dir / "capture.json").write_bytes(lanes.capture_bytes)
     (lanes.native_dir / "dom-snapshot.json").write_bytes(lanes.native_snapshot_bytes)
     (lanes.native_dir / "capture.json").write_bytes(lanes.native_capture_bytes)
+    # The candidate lane's own screenshot is the frame the native IR was
+    # lowered from. Re-verify the retained copy, since it is what is scored.
+    shutil.copy2(lanes.native_evidence / "browser.png", lanes.native_dir / "browser.png")
+    verify_capture_image_binding(lanes.native_capture, lanes.native_dir / "browser.png")
+
+
+def visual_reference(lanes: LaneOutputs) -> tuple[Path, dict[str, Any]]:
+    """Pick the Chromium screenshot the native render is scored against.
+
+    Each lane runs its own Chromium capture, and the native IR is lowered from
+    the candidate lane's. On an animated panel the browser lane's screenshot
+    shows a different moment, so scoring against it measures capture timing as
+    well as fidelity. When the two lanes' DOM snapshots agree, the candidate
+    lane's screenshot is the same page at the moment the native IR describes,
+    and it is the reference. When they disagree, the candidate lane did not
+    evaluate the page the other lenses read, so the browser lane's screenshot
+    stays the reference and the report says why.
+    """
+    browser_semantic = snapshot_semantic_sha256(lanes.browser_snapshot_bytes)
+    native_semantic = snapshot_semantic_sha256(lanes.native_snapshot_bytes)
+    snapshots_match = browser_semantic == native_semantic
+    browser_png = lanes.browser_dir / "browser.png"
+    candidate_png = lanes.native_dir / "browser.png"
+    if snapshots_match:
+        path, source = candidate_png, "candidate-lane-capture"
+        reason = ("both lanes' DOM snapshots match, so the candidate lane's "
+                  "screenshot shows the moment the native IR was lowered from")
+    else:
+        path, source = browser_png, "browser-lane-capture"
+        reason = ("the lanes' DOM snapshots differ, so the candidate lane's "
+                  "screenshot is not the page the other lenses read")
+    return path, {
+        "source": source,
+        "path": path.relative_to(lanes.browser_dir.parent).as_posix(),
+        "sha256": sha256_file(path),
+        "dom_snapshots_match": snapshots_match,
+        "reason": reason,
+        # What the two capture moments alone disagree on: the noise a
+        # browser-lane reference would have charged to the native render.
+        "capture_moment_residual": capture_moment_residual(
+            browser_png, candidate_png,
+            lanes.capture["reference"]["device_scale_factor"]),
+    }
 
 
 def stage_provenance(lanes: LaneOutputs) -> dict[str, Any]:
@@ -1271,8 +1354,9 @@ def score_lanes(lanes: LaneOutputs, source: Path) -> Scores:
         placement_origin=lanes.placement_origin)
     scale = capture["reference"]["device_scale_factor"]
     capture_width, capture_height = lanes.capture_size
+    reference_png, reference = visual_reference(lanes)
     visual = visual_metrics(
-        lanes.browser_dir / "browser.png",
+        reference_png,
         lanes.native_render,
         lanes.comparison_dir / "overlays",
         (round(capture_width * scale), round(capture_height * scale)),
@@ -1281,12 +1365,13 @@ def score_lanes(lanes: LaneOutputs, source: Path) -> Scores:
         lanes.placement_origin,
         lanes.page_background.get("status"),
     )
+    visual["reference"] = reference
     visual["registration"]["native_layout"] = native_frame_registration
     if visual.get("registered_visual"):
         visual["registered_visual"]["registration"]["native_layout"] = native_frame_registration
     blockers = unsupported_features(recognition)
     form_control_report = form_control_residual(
-        browser_flat_raw, lanes.browser_dir / "browser.png", lanes.native_render, visual,
+        browser_flat_raw, reference_png, lanes.native_render, visual,
         browser_snapshot)
     classifications = classify_gaps(
         recognition, structural, geometry, typography, visual,
@@ -1345,13 +1430,13 @@ def integrity_record(
         "native_snapshot_semantic_sha256": snapshot_semantic_sha256(
             lanes.native_snapshot_bytes),
         "browser_screenshot_sha256": sha256_file(lanes.browser_dir / "browser.png"),
+        "candidate_screenshot_sha256": sha256_file(lanes.native_dir / "browser.png"),
         "native_render_sha256": sha256_file(lanes.native_render),
         "native_layout_sha256": sha256_file(lanes.native_layout),
         "native_render_receipt_sha256": sha256_file(lanes.native_receipt),
         "stage_provenance": stage_provenance(lanes),
-        "platform_fonts_sha256": (
-            sha256_file(lanes.evidence / "platform-fonts.json")
-            if (lanes.evidence / "platform-fonts.json").is_file() else None),
+        "platform_fonts_sha256": platform_fonts_semantic_sha256(
+            lanes.evidence / "platform-fonts.json"),
         "interaction_plan_sha256": (
             capture.get("provenance", {}).get("interactions", {}).get("plan_sha256")
             or "none"),

@@ -19,19 +19,22 @@ import sys
 from pathlib import Path
 from typing import Iterable
 
+import vellum_policy
 from include_boundary import include_edges
 
-FORBIDDEN_TARGET = re.compile(r"(?:^|[-_:])(audio|signal|host|midi|music|format|content|gpu_audio)(?:$|[-_:])", re.I)
-FORBIDDEN_INCLUDE = re.compile(r"^pulp/(?:audio|signal|host|midi|music|format|content)(?:/|$)", re.I)
-FORBIDDEN_ROOTS = tuple(f"core/{name}/" for name in ("audio", "signal", "host", "midi", "music", "format", "content"))
+# Every forbidden-subsystem form below derives from tools/scripts/vellum_policy.json.
+_FORBIDDEN = vellum_policy.alternation()
+FORBIDDEN_TARGET = re.compile(rf"(?:^|[-_:])({_FORBIDDEN})(?:$|[-_:])", re.I)
+FORBIDDEN_INCLUDE = re.compile(rf"^pulp/(?:{_FORBIDDEN})(?:/|$)", re.I)
+FORBIDDEN_ROOTS = vellum_policy.roots()
 TEXT_EXTS = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".m", ".mm", ".cmake"}
 RESOURCE_EXTS = {".sksl", ".glsl", ".frag", ".vert", ".ttf", ".otf", ".woff", ".woff2"}
 FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-# The Pulp-built Skia support library; the D3 unit that carries it is where
-# Skia enters the unit graph.
+# The Pulp-built Skia support library; the extraction unit that carries it is
+# where Skia enters the unit graph.
 SKIA_SUPPORT_TARGET = "pulp-skia-chromium-raw-ptr-compat"
 # A CMake reference to a Pulp target the extraction must not carry.
-FORBIDDEN_CMAKE_TARGET = re.compile(r"\bpulp(?:-|::)(?:audio|signal|host|midi|music|format|content|gpu[-_]audio)\b", re.I)
+FORBIDDEN_CMAKE_TARGET = re.compile(rf"\bpulp(?:-|::)(?:{_FORBIDDEN})\b", re.I)
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 EXTERNAL_RE = re.compile(r"^@external/(?P<slug>[^/]+)/(?P<pin>[^/]+)(?:/|$)")
 BUILD_DEPS_RE = re.compile(r"^@build/_deps/(?:pulp-mutable-)?(?P<name>[^/]+?)-(?:src|build)(?:/|$)")
@@ -908,6 +911,10 @@ BUILD_TIMESTAMP_PLACEHOLDER = "<build-timestamp>"
 
 PRELUDE_SOURCE = "@build/core/view/web_compat_preludes_gen.cpp"
 PRELUDE_HEADER = "@build/core/view/web_compat_preludes_gen.hpp"
+# The generated header around its per-prelude declarations; must match the
+# _pulp_prelude_decls strings in core/view/cmake/PulpViewJsPreludes.cmake.
+PRELUDE_HEADER_HEAD = "#pragma once\n// Auto-generated from the JS prelude file list — do not edit\n\n#include <cstddef>\n#include <string>\n\nnamespace pulp::view::preludes {\n\n// One JS prelude, stored as a zlib (RFC 1950) stream of its source text.\nstruct EmbeddedPrelude {\n    const char* file_name;\n    const unsigned char* deflated;\n    std::size_t deflated_size;\n    std::size_t source_size;\n    const char* sha256;\n};\n\n// Inflates the source text of a prelude on each call. Throws\n// std::runtime_error unless the stream inflates to exactly source_size bytes.\nstd::string source(const EmbeddedPrelude& prelude);\n\n"
+PRELUDE_HEADER_TAIL = '\n// Every prelude, in the order the file list declares them.\nextern const EmbeddedPrelude* const kAll[];\nextern const std::size_t kAllCount;\n\n}  // namespace pulp::view::preludes\n'
 
 
 def prelude_inputs(source: Path) -> list[Path] | None:
@@ -1103,13 +1110,13 @@ def prelude_inputs(source: Path) -> list[Path] | None:
         ["PULP_JS_EMBEDDED_HEADER", "${CMAKE_CURRENT_BINARY_DIR}/web_compat_preludes_gen.hpp"],
         ["PULP_JS_EMBEDDED_SOURCE", "${CMAKE_CURRENT_BINARY_DIR}/web_compat_preludes_gen.cpp"],
         ["Python3", "REQUIRED", "COMPONENTS", "Interpreter"],
-        ["_pulp_prelude_decls", '"#pragma once\\n// Auto-generated from the JS prelude file list — do not edit\\n\\nnamespace pulp::view::preludes {\\n\\n"'],
+        ["_pulp_prelude_decls", '"#pragma once\\n// Auto-generated from the JS prelude file list — do not edit\\n\\n#include <cstddef>\\n#include <string>\\n\\nnamespace pulp::view::preludes {\\n\\n// One JS prelude, stored as a zlib (RFC 1950) stream of its source text.\\nstruct EmbeddedPrelude {\\n    const char* file_name;\\n    const unsigned char* deflated;\\n    std::size_t deflated_size;\\n    std::size_t source_size;\\n    const char* sha256;\\n};\\n\\n// Inflates the source text of a prelude on each call. Throws\\n// std::runtime_error unless the stream inflates to exactly source_size bytes.\\nstd::string source(const EmbeddedPrelude& prelude);\\n\\n"'],
         ["_prelude", "${PULP_JS_PRELUDES}"],
         ["_prelude_stem", '"${_prelude}"', "NAME_WE"],
         ["REPLACE", '"-"', '"_"', "_prelude_var", '"${_prelude_stem}"'],
-        ["APPEND", "_pulp_prelude_decls", '"extern const char* const ${_prelude_var};\\n"'],
+        ["APPEND", "_pulp_prelude_decls", '"extern const EmbeddedPrelude ${_prelude_var};\\n"'],
         [],
-        ["APPEND", "_pulp_prelude_decls", '"\\n}  // namespace pulp::view::preludes\\n"'],
+        ["APPEND", "_pulp_prelude_decls", '"\\n// Every prelude, in the order the file list declares them.\\nextern const EmbeddedPrelude* const kAll[];\\nextern const std::size_t kAllCount;\\n\\n}  // namespace pulp::view::preludes\\n"'],
         ["_pulp_existing_decls", '""'],
         ["EXISTS", '"${PULP_JS_EMBEDDED_HEADER}"'],
         ["READ", '"${PULP_JS_EMBEDDED_HEADER}"', "_pulp_existing_decls"],
@@ -1176,10 +1183,9 @@ def generated_digest(rel: str, path: Path, source: Path) -> dict | None:
             return None
         if rel == PRELUDE_HEADER:
             names = [input_path.stem.replace("-", "_") for input_path in inputs]
-            text = "#pragma once\n// Auto-generated from the JS prelude file list — do not edit\n\n"
-            text += "namespace pulp::view::preludes {\n\n"
-            text += "".join(f"extern const char* const {name};\n" for name in names)
-            text += "\n}  // namespace pulp::view::preludes\n"
+            text = PRELUDE_HEADER_HEAD
+            text += "".join(f"extern const EmbeddedPrelude {name};\n" for name in names)
+            text += PRELUDE_HEADER_TAIL
             return {"sha256": _text_sha256(text)}
         import tempfile
         with tempfile.TemporaryDirectory(prefix="pulp-preludes-") as td:
@@ -2204,6 +2210,19 @@ def git_blob_rows(repo: Path, commit: str, paths: Iterable[str], strict: bool = 
     return rows
 
 
+PRUNED_SHA = "0" * 40
+
+
+def read_commit_map(data: bytes) -> list[tuple[str, str]]:
+    """(old, new) rows of a git-filter-repo commit map, header excluded."""
+    rows: list[tuple[str, str]] = []
+    for line in data.decode("ascii", errors="replace").splitlines():
+        fields = line.split()
+        if len(fields) == 2 and all(FULL_SHA_RE.fullmatch(field) for field in fields):
+            rows.append((fields[0], fields[1]))
+    return rows
+
+
 def export_commit_map(commit_map_src: Path, pulp_sha: str, mirror_sha: str) -> bytes:
     """The commit map git-filter-repo wrote, which must map the exported commit.
 
@@ -2216,6 +2235,79 @@ def export_commit_map(commit_map_src: Path, pulp_sha: str, mirror_sha: str) -> b
     if f"{pulp_sha} {mirror_sha}".encode() not in data.splitlines():
         raise SystemExit(f"git-filter-repo commit map does not map {pulp_sha} to {mirror_sha}")
     return data
+
+
+EXPORT_SOURCE_REF = "refs/heads/export-source"
+
+
+def read_ref_map(data: bytes) -> list[tuple[str, str, str]]:
+    """(old, new, ref) rows of a git-filter-repo ref map, header excluded."""
+    rows: list[tuple[str, str, str]] = []
+    for line in data.decode("ascii", errors="replace").splitlines():
+        fields = line.split()
+        if len(fields) == 3 and FULL_SHA_RE.fullmatch(fields[0]) and FULL_SHA_RE.fullmatch(fields[1]):
+            rows.append((fields[0], fields[1], fields[2]))
+    return rows
+
+
+def export_source_mapping(filter_repo_dir: Path, pulp_sha: str, mirror_sha: str,
+                          repo: Path, paths: Iterable[str]) -> tuple[bytes, bytes | None, dict | None]:
+    """The commit map git-filter-repo wrote, plus the ref map and proof for a pruned source.
+
+    Normally the commit map carries ``pulp_sha mirror_sha``; the result is then
+    ``(commit map, None, None)`` and the receipt is exactly as before. When the
+    exported commit changes no exported path, git-filter-repo prunes it
+    (``pulp_sha 0000...``) and the export ref lands on the rewrite of its
+    nearest ancestor that does. That ancestor is taken from the commit map's
+    own row for ``mirror_sha``, and is accepted only if it is a strict ancestor
+    of ``pulp_sha`` and every exported path is identical in both. The rewrite's
+    own ref map must record ``pulp_sha mirror_sha refs/heads/export-source``:
+    together the two maps attest the export. A row is never written in:
+    nothing would attest it.
+    """
+    commit_map_src = filter_repo_dir / "commit-map"
+    if not commit_map_src.is_file():
+        raise SystemExit(f"git-filter-repo wrote no commit map: {commit_map_src}")
+    data = commit_map_src.read_bytes()
+    rows = read_commit_map(data)
+    if (pulp_sha, PRUNED_SHA) not in rows:
+        return export_commit_map(commit_map_src, pulp_sha, mirror_sha), None, None
+    ref_map_src = filter_repo_dir / "ref-map"
+    if not ref_map_src.is_file():
+        raise SystemExit(f"git-filter-repo pruned {pulp_sha} and wrote no ref map: {ref_map_src}")
+    ref_map = ref_map_src.read_bytes()
+    ref_row = (pulp_sha, mirror_sha, EXPORT_SOURCE_REF)
+    if ref_row not in read_ref_map(ref_map):
+        raise SystemExit(f"git-filter-repo ref map does not move {EXPORT_SOURCE_REF} from {pulp_sha} to {mirror_sha}")
+    sources = sorted({old for old, new in rows if new == mirror_sha})
+    if len(sources) != 1:
+        raise SystemExit(f"git-filter-repo pruned {pulp_sha}, and its map names {len(sources)} source commit(s) "
+                         f"for mirror commit {mirror_sha}, not exactly one")
+    source = sources[0]
+    paths = sorted(set(paths))
+    if not paths:
+        raise SystemExit(f"git-filter-repo pruned {pulp_sha}; there are no exported paths to compare")
+    quiet = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+    if source == pulp_sha or subprocess.run(
+            ["git", "-C", str(repo), "merge-base", "--is-ancestor", source, pulp_sha], **quiet).returncode != 0:
+        raise SystemExit(f"mirror source commit {source} is not an ancestor of pruned export commit {pulp_sha}")
+    if subprocess.run(["git", "--literal-pathspecs", "-C", str(repo), "diff", "--quiet", source, pulp_sha, "--", *paths], **quiet).returncode != 0:
+        raise SystemExit(f"exported paths differ between mirror source commit {source} and pruned export commit {pulp_sha}")
+    source_rows = git_blob_rows(repo, source, paths)
+    if source_rows != git_blob_rows(repo, pulp_sha, paths):
+        raise SystemExit(f"exported blobs differ between mirror source commit {source} and pruned export commit {pulp_sha}")
+    listing = "".join(f"{row['path']} {row['mode']} {row['blob']}\n" for row in source_rows).encode()
+    return data, ref_map, {
+        "sha": source,
+        "proof": {
+            "commit_map_rows": [f"{pulp_sha} {PRUNED_SHA}", f"{source} {mirror_sha}"],
+            "ref_map_row": " ".join(ref_row),
+            "source_is_ancestor": True,
+            "exported_paths_equal": True,
+            "exported_path_count": len(source_rows),
+            "exported_blobs_sha256": hashlib.sha256(listing).hexdigest(),
+        },
+    }
 
 
 def claim_export_paths(paths: Iterable[Path]) -> None:
@@ -2375,8 +2467,10 @@ def cmd_export(args: argparse.Namespace) -> int:
     closure_dir = landing / "provenance" / "mirror" / "closures" / export_id
     commit_map_path = landing / "provenance" / "mirror" / "commit-maps" / f"{export_id}.txt"
     receipt_path = landing / "provenance" / "mirror" / "receipts" / f"{export_id}.json"
-    claim_export_paths([closure_dir, commit_map_path, receipt_path])
-    commit_map_bytes = export_commit_map(out / ".git" / "filter-repo" / "commit-map", args.pulp_sha, mirror_sha)
+    ref_map_path = landing / "provenance" / "mirror" / "ref-maps" / f"{export_id}.txt"
+    commit_map_bytes, ref_map_bytes, mirror_source = export_source_mapping(
+        out / ".git" / "filter-repo", args.pulp_sha, mirror_sha, repo, paths)
+    claim_export_paths([closure_dir, commit_map_path, receipt_path] + ([ref_map_path] if mirror_source else []))
     closure_dir.mkdir(parents=True)
     units = []
     for index, manifest in enumerate(manifests):
@@ -2390,6 +2484,9 @@ def cmd_export(args: argparse.Namespace) -> int:
     files = sorted(({"mirror_path": f"{mirror_root}/{rename_map.get(path, path)}", "pulp_path": path, "mode": next(row["mode"] for row in rows if row["path"] == path), "blob": by_path[path]} for path in paths if path in by_path), key=lambda row: row["mirror_path"])
     commit_map_path.parent.mkdir(parents=True, exist_ok=True)
     commit_map_path.write_bytes(commit_map_bytes)
+    if mirror_source is not None:
+        ref_map_path.parent.mkdir(parents=True, exist_ok=True)
+        ref_map_path.write_bytes(ref_map_bytes)
     tool_rows = git_blob_rows(repo, args.pulp_sha, ["tools/scripts/vellum_closure.py"])
     receipt_rel = f"provenance/mirror/receipts/{export_id}.json"
     generated_inputs = []
@@ -2430,6 +2527,16 @@ def cmd_export(args: argparse.Namespace) -> int:
         "tool": {"path": "tools/scripts/vellum_closure.py", "pulp_blob": tool_rows[0]["blob"] if tool_rows else ""},
         "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
+    if mirror_source is not None:
+        # pulp_sha stays the commit that was asked for (R); the mirror commit is
+        # the rewrite of mirror_source.sha (A), which the proof shows equal to R
+        # on every exported path. Absent for an unpruned export, so its receipt
+        # keeps exactly the keys it always had.
+        receipt["mirror_source"] = {
+            "sha": mirror_source["sha"],
+            "ref_map": {"path": f"provenance/mirror/ref-maps/{export_id}.txt", "sha256": sha256(ref_map_path)},
+            "proof": mirror_source["proof"],
+        }
     path_violations = receipt_path_violations(receipt)
     if path_violations:
         raise SystemExit("receipt contains host paths: " + "; ".join(path_violations))

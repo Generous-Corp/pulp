@@ -169,5 +169,69 @@ class FoldTests(_RepoCase):
         self.assertIn('"2.0.0"', generated)
 
 
+class ShippedReleaseTests(_RepoCase):
+    """A note whose change already shipped joins that release's note."""
+
+    def git(self, *args: str) -> str:
+        import subprocess
+        return subprocess.run(["git", "-C", str(self.repo), *args], capture_output=True,
+                              text=True, encoding="utf-8", check=True).stdout.strip()
+
+    def init_git(self) -> None:
+        self.git("init", "-q", "-b", "main")
+        for key, value in (("user.email", "t@e"), ("user.name", "t"), ("commit.gpgsign", "false"),
+                           ("tag.gpgsign", "false")):
+            self.git("config", key, value)
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "seed")
+
+    def test_the_resolver_routes_each_note_to_its_release(self) -> None:
+        self.note("early.md", 'summary = "Shipped already"', "EARLY\n")
+        self.note("late.md", 'summary = "Ships now"', "LATE\n")
+        shipped = {"docs/migrations/unreleased/early.md": "0.9.0"}
+        changed = fmn.fold(self.repo, "1.0.0", shipped.get)
+        self.assertEqual(changed[:2], ["docs/migrations/v0.9.0.md", "docs/migrations/v1.0.0.md"])
+        early = bmi.load_entry(self.repo / fmn.MIGRATIONS_DIR / "v0.9.0.md")
+        bmi.check_entry_consistency(early)
+        self.assertIn("EARLY", early.body)
+        self.assertNotIn("LATE", early.body)
+        self.assertIn("LATE", bmi.load_entry(self.repo / fmn.MIGRATIONS_DIR / "v1.0.0.md").body)
+
+    def test_control_a_release_at_or_after_the_bump_is_ignored(self) -> None:
+        self.note("a.md", 'summary = "s"')
+        fmn.fold(self.repo, "1.0.0", lambda rel: "1.0.0")
+        self.assertTrue((self.repo / fmn.MIGRATIONS_DIR / "v1.0.0.md").exists())
+
+    def test_shipped_version_reads_the_release_tags(self) -> None:
+        self.init_git()
+        self.git("tag", "v0.8.0")  # before the note: must not count
+        note = self.note("a.md", 'summary = "s"')
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "add note")
+        rel = note.relative_to(self.repo).as_posix()
+        self.assertIsNone(fmn.shipped_version(self.repo, rel))
+        self.git("tag", "plugin-v0.1.0")  # another surface's tag: ignored
+        self.assertIsNone(fmn.shipped_version(self.repo, rel))
+        self.git("tag", "v0.10.0")
+        self.git("tag", "v0.9.0")
+        self.assertEqual(fmn.shipped_version(self.repo, rel), "0.9.0")
+
+    def test_a_shallow_clone_falls_back_to_the_bump_version(self) -> None:
+        import subprocess
+        self.init_git()
+        note = self.note("a.md", 'summary = "s"')
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "add note")
+        self.git("tag", "v0.9.0")
+        rel = note.relative_to(self.repo).as_posix()
+        self.assertEqual(fmn.shipped_version(self.repo, rel), "0.9.0")
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        shallow = pathlib.Path(scratch.name) / "shallow"
+        subprocess.run(["git", "clone", "-q", "--depth", "1", f"file://{self.repo}", str(shallow)],
+                       check=True, capture_output=True)
+        self.assertIsNone(fmn.shipped_version(shallow, rel))
+
+
 if __name__ == "__main__":
     unittest.main()

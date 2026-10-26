@@ -19,6 +19,13 @@
 #include <string>
 #include <vector>
 
+#if !defined(_WIN32)
+#include <unistd.h>
+#else
+#include <process.h>
+#define getpid _getpid
+#endif
+
 using namespace pulp::host;
 namespace fs = std::filesystem;
 
@@ -236,6 +243,117 @@ TEST_CASE("node pack: a trusted, intact, signed pack loads and runs",
     r.entry->destroy(inst);
     unload_node_pack(r.handle);
 }
+
+TEST_CASE("node pack: the bytes that were hashed are the bytes that load",
+          "[host][node-pack][attack-surface]") {
+    // A pack is verified, then the file at its path is replaced before the
+    // load stage runs. The loader must map the verified file, never the
+    // replacement: verify_node_pack_binary holds the file open and
+    // load_verified_node_pack maps that open file.
+    const std::string module_path = PULP_NODE_PACK_MODULE_PATH;
+    const fs::path scratch =
+        fs::temp_directory_path() /
+        ("pulp-node-pack-swap-" + std::to_string(static_cast<long long>(::getpid())));
+    fs::remove_all(scratch);
+    fs::create_directories(scratch);
+    const fs::path pack = scratch / fs::path(module_path).filename();
+    fs::copy_file(module_path, pack, fs::copy_options::overwrite_existing);
+
+    const auto kp = test_keypair();
+    const auto manifest = signed_manifest(kp, pack.string());
+    NodePackTrust trust;
+    trust.trusted_public_keys.push_back(kp.public_key);
+    NodePackHostPolicy policy;
+    policy.max_block_size = 1024;
+    policy.max_persistent_bytes = 8192;
+    policy.max_scratch_bytes = 2048;
+
+    auto verified = verify_node_pack_binary(scratch.string(), manifest);
+    REQUIRE(verified.error == NodePackError::Ok);
+    REQUIRE(verified.binary.is_open());
+    REQUIRE(verified.binary.sha256_hex() == manifest.sha256_hex);
+
+    // Swap the directory entry: a junk file takes the pack's path while the
+    // verified file stays open.
+    const fs::path junk = scratch / "junk.bin";
+    {
+        std::ofstream j(junk, std::ios::binary);
+        const std::string bytes(4096, '\x5a');
+        j.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    }
+    std::error_code swap_ec;
+    fs::rename(junk, pack, swap_ec);
+
+    auto r = load_verified_node_pack(std::move(verified.binary), manifest, trust, policy);
+#if defined(_WIN32)
+    // The open handle denies the swap; if a platform ever allowed it, the
+    // identity check must refuse the replacement rather than load it.
+    if (swap_ec) {
+        REQUIRE(r.ok());
+    } else {
+        REQUIRE(r.error == NodePackError::BinaryChanged);
+    }
+#else
+    REQUIRE_FALSE(swap_ec);
+    // Control: the path now holds junk, so a fresh path-based load refuses it.
+    REQUIRE(load_node_pack(scratch.string(), manifest, trust, policy).error ==
+            NodePackError::HashMismatch);
+    // The verified bytes are what ran.
+    REQUIRE(r.ok());
+    REQUIRE(r.entry != nullptr);
+    const pulp_node_descriptor_v1* d = r.entry->descriptor();
+    REQUIRE(std::string_view(d->stable_id, d->stable_id_len) == "pulp.test.pack.gain");
+#endif
+    if (r.ok())
+        unload_node_pack(r.handle);
+
+    // A binary verified against one manifest does not satisfy another.
+    auto again = verify_node_pack_binary(fs::path(module_path).parent_path().string(),
+                                         signed_manifest(kp, module_path));
+    REQUIRE(again.error == NodePackError::Ok);
+    NodePackManifest other = manifest;
+    other.sha256_hex = std::string(64, '0');
+    REQUIRE(load_verified_node_pack(std::move(again.binary), other, trust, policy).error !=
+            NodePackError::Ok);
+
+    fs::remove_all(scratch);
+}
+
+#if !defined(_WIN32)
+TEST_CASE("node pack: unloading one of two loads keeps the live image's file open",
+          "[host][node-pack][attack-surface]") {
+    // The image keeps the name of the first descriptor it was opened through.
+    // If a single unload closed that descriptor, the next open would reuse its
+    // number and the next load would alias the still-live image by name.
+    const std::string module_path = PULP_NODE_PACK_MODULE_PATH;
+    const std::string dir = fs::path(module_path).parent_path().string();
+    const auto kp = test_keypair();
+    const auto manifest = signed_manifest(kp, module_path);
+    NodePackTrust trust;
+    trust.trusted_public_keys.push_back(kp.public_key);
+    NodePackHostPolicy policy;
+    policy.max_block_size = 1024;
+    policy.max_persistent_bytes = 8192;
+    policy.max_scratch_bytes = 2048;
+
+    auto first = load_node_pack(dir, manifest, trust, policy);
+    REQUIRE(first.ok());
+    auto second = load_node_pack(dir, manifest, trust, policy);
+    REQUIRE(second.ok());
+    REQUIRE(second.handle == first.handle);
+
+    unload_node_pack(second.handle);
+    const pulp_node_descriptor_v1* d = first.entry->descriptor();
+    REQUIRE(std::string_view(d->stable_id, d->stable_id_len) == "pulp.test.pack.gain");
+
+    auto third = load_node_pack(dir, manifest, trust, policy);
+    REQUIRE(third.error == NodePackError::Ok);
+    REQUIRE(third.handle == first.handle);
+
+    unload_node_pack(third.handle);
+    unload_node_pack(first.handle);
+}
+#endif
 
 TEST_CASE("node pack: rejection paths never load untrusted or tampered code",
           "[host][node-pack]") {

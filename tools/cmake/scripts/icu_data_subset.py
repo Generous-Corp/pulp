@@ -335,11 +335,22 @@ def subset_thin_archive(thin: Path, out: Path, work: Path, dropped=is_dropped) -
     return stats
 
 
+def is_thin(lipo_info: str) -> bool:
+    """True for ``lipo -info`` of a single-architecture archive.
+
+    lipo reports a thin file as "Non-fat file: ... is architecture: arm64" and a
+    universal one as "Architectures in the fat file: ...", so the test is for
+    the thin wording; looking for "fat" alone matches both. An installed SDK
+    ships thin archives, so getting this wrong linked them with the full data.
+    """
+    return lipo_info.strip().lower().startswith("non-fat file")
+
+
 def subset_archive(archive: Path, output: Path, work: Path, dropped=is_dropped) -> dict:
     archs = _archs(archive)
     work.mkdir(parents=True, exist_ok=True)
     report = {"policy_version": POLICY_VERSION, "archive": str(archive), "slices": {}}
-    if len(archs) == 1 and "fat" not in _run("lipo", "-info", str(archive)).lower():
+    if len(archs) == 1 and is_thin(_run("lipo", "-info", str(archive))):
         tmp_out = work / "out.a"
         report["slices"][archs[0]] = subset_thin_archive(archive, tmp_out, work / archs[0], dropped)
         output.parent.mkdir(parents=True, exist_ok=True)

@@ -860,7 +860,11 @@ def synthesize_run(out_dir: Path, *, fault: str, fault_sample: int, frames: int,
                (0.0 if i >= fault_stream else wet[i]) for i in range(len(wet))]
 
     audio_fault = fault in AUDIO_FAULTS
-    takeover = fault_sample + block  # the fallback carries from the next block
+    # The plug-in issues the fault at the start of the callback after the one
+    # holding fault_sample (it stamps the latest callback position), and the
+    # fallback carries from that block.
+    issued = (fault_sample // block + 1) * block
+    takeover = issued
     gpu = fallback = 0
     blocks = []
     for start in range(0, len(stream_in), block):
@@ -930,15 +934,15 @@ def synthesize_run(out_dir: Path, *, fault: str, fault_sample: int, frames: int,
          "input": "host",
          "gpu_off": planted == "gpu_off"},
         {"event": "fault_fired", "fault": fault, "at_project_sample": fault_sample,
-         "issued_project_sample": fault_sample + block, "offline": False},
+         "issued_project_sample": issued, "offline": False},
     ]
     if fault in RENDER_FAULTS:
         events.append({"event": "render_loss", "performed": True, "detail": "dry run"})
     elif audio_fault:
         events.append({"event": "provider_fault_applied", "point": FAULT_POINTS[fault],
-                       "project_sample": fault_sample + block, "device": device,
+                       "project_sample": issued, "device": device,
                        "prepare_index": 1,
-                       "host_time_ns": (lead_in + fault_sample + block) * 20833})
+                       "host_time_ns": (lead_in + issued) * 20833})
     events += [{"event": "health", "phase": p, "status": st} for p, st in health.items()]
     with (out_dir / "events.jsonl").open("w", encoding="utf-8") as stream:
         for event in events:

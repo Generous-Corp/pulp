@@ -1,0 +1,1234 @@
+{
+ "schema": "pulp-capture-anchor-vectors-v1",
+ "about": "Expected capture anchors, by snapshot node index, for DOM shapes and one committed Chrome capture. Asserted through the C++ anchor_path (test_browser_capture_tree.cpp, capture_anchor_paths) and the lab's Python port (test_importer_differential_lab.py, capture_anchors), so a spelling change on either side fails the other.",
+ "cases": [
+  {
+   "name": "same-tag-siblings",
+   "why": "Ordinals count same-signature siblings only, in document order, under each parent; the document node has no segment.",
+   "snapshot": {
+    "strings": [
+     "display",
+     "block",
+     "#document",
+     "HTML",
+     "BODY",
+     "DIV",
+     "SPAN"
+    ],
+    "computedStyleNames": [
+     "display"
+    ],
+    "documents": [
+     {
+      "nodes": {
+       "parentIndex": [
+        -1,
+        0,
+        1,
+        2,
+        2,
+        2,
+        2,
+        4,
+        4
+       ],
+       "nodeType": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+       ],
+       "nodeName": [
+        2,
+        3,
+        4,
+        5,
+        5,
+        6,
+        5,
+        5,
+        5
+       ],
+       "nodeValue": [
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1
+       ],
+       "backendNodeId": [
+        100,
+        101,
+        102,
+        103,
+        104,
+        105,
+        106,
+        107,
+        108
+       ],
+       "attributes": [
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        []
+       ]
+      },
+      "layout": {
+       "nodeIndex": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+       ],
+       "bounds": [
+        [
+         0,
+         0,
+         10,
+         10
+        ],
+        [
+         0,
+         0,
+         10,
+         10
+        ],
+        [
+         0,
+         0,
+         10,
+         10
+        ],
+        [
+         0,
+         0,
+         10,
+         10
+        ],
+        [
+         0,
+         0,
+         10,
+         10
+        ],
+        [
+         0,
+         0,
+         10,
+         10
+        ],
+        [
+         0,
+         0,
+         10,
+         10
+        ],
+        [
+         0,
+         0,
+         10,
+         10
+        ]
+       ],
+       "styles": [
+        [
+         1
+        ],
+        [
+         1
+        ],
+        [
+         1
+        ],
+        [
+         1
+        ],
+        [
+         1
+        ],
+        [
+         1
+        ],
+        [
+         1
+        ],
+        [
+         1
+        ]
+       ]
+      }
+     }
+    ]
+   },
+   "anchors": [
+    "",
+    "capture:html[0]",
+    "capture:html[0]/body[0]",
+    "capture:html[0]/body[0]/div[0]",
+    "capture:html[0]/body[0]/div[1]",
+    "capture:html[0]/body[0]/span[0]",
+    "capture:html[0]/body[0]/div[2]",
+    "capture:html[0]/body[0]/div[1]/div[0]",
+    "capture:html[0]/body[0]/div[1]/div[1]"
+   ]
+  },
+  {
+   "name": "ids-and-escaping",
+   "why": "An id wins over a class, an empty id does not count, and the path's own delimiters in author text are escaped.",
+   "snapshot": {
+    "strings": [
+     "display",
+     "block",
+     "#document",
+     "DIV",
+     "id",
+     "root",
+     "w-1/2",
+     "a[b]",
+     "say \"hi\"",
+     "back\\slash",
+     "SPAN",
+     "",
+     "class",
+     "fallback",
+     "P",
+     "x",
+     "ignored"
+    ],
+    "computedStyleNames": [
+     "display"
+    ],
+    "documents": [
+     {
+      "nodes": {
+       "parentIndex": [
+        -1,
+        0,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+       ],
+       "nodeType": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+       ],
+       "nodeName": [
+        2,
+        3,
+        3,
+        3,
+        3,
+        3,
+        10,
+        14
+       ],
+       "nodeValue": [
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1
+       ],
+       "backendNodeId": [
+        100,
+        101,
+        102,
+        103,
+        104,
+        105,
+        106,
+        107
+       ],
+       "attributes": [
+        [],
+        [
+         4,
+         5
+        ],
+        [
+         4,
+         6
+        ],
+        [
+         4,
+         7
+        ],
+        [
+         4,
+         8
+        ],
+        [
+         4,
+         9
+        ],
+        [
+         4,
+         11,
+         12,
+         13
+        ],
+        [
+         4,
+         15,
+         12,
+         16
+        ]
+       ]
+      },
+      "layout": {
+       "nodeIndex": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+       ],
+       "bounds": [
+        [
+         0,
+         0,
+         10,
+         10
+        ],
+        [
+         0,
+         0,
+         10,
+         10
+        ],
+        [
+         0,
+         0,
+         10,
+         10
+        ],
+        [
+         0,
+         0,
+         10,
+         10
+        ],
+        [
+         0,
+         0,
+         10,
+         10
+        ],
+        [
+         0,
+         0,
+         10,
+         10
+        ],
+        [
+         0,
+         0,
+         10,
+         10
+        ]
+       ],
+       "styles": [
+        [
+         1
+        ],
+        [
+         1
+        ],
+        [
+         1
+        ],
+        [
+         1
+        ],
+        [
+         1
+        ],
+        [
+         1
+        ],
+        [
+         1
+        ]
+       ]
+      }
+     }
+    ]
+   },
+   "anchors": [
+    "",
+    "capture:div#root[0]",
+    "capture:div#root[0]/div#w-1\\/2[0]",
+    "capture:div#root[0]/div#a\\[b\\][0]",
+    "capture:div#root[0]/div#say \\\"hi\\\"[0]",
+    "capture:div#root[0]/div#back\\\\slash[0]",
+    "capture:div#root[0]/span.fallback[0]",
+    "capture:div#root[0]/p#x[0]"
+   ]
+  },
+  {
+   "name": "first-class-whitespace",
+   "why": "The first class is the first token after any CSS whitespace, form feed and vertical tab included.",
+   "snapshot": {
+    "strings": [
+     "display",
+     "block",
+     "#document",
+     "DIV",
+     "class",
+     "  card wide",
+     "\tcard\nwide",
+     "\fcard\fwide",
+     "\u000bcard\u000bwide",
+     "card\rwide",
+     " \t\f\u000b"
+    ],
+    "computedStyleNames": [
+     "display"
+    ],
+    "documents": [
+     {
+      "nodes": {
+       "parentIndex": [
+        -1,
+        0,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+       ],
+       "nodeType": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+       ],
+       "nodeName": [
+        2,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3
+       ],
+       "nodeValue": [
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1
+       ],
+       "backendNodeId": [
+        100,
+        101,
+        102,
+        103,
+        104,
+        105,
+        106,
+        107
+       ],
+       "attributes": [
+        [],
+        [],
+        [
+         4,
+         5
+        ],
+        [
+         4,
+         6
+        ],
+        [
+         4,
+         7
+        ],
+        [
+         4,
+         8
+        ],
+        [
+         4,
+         9
+        ],
+        [
+         4,
+         10
+        ]
+       ]
+      },
+      "layout": {
+       "nodeIndex": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+       ],
+       "bounds": [
+        [
+         0,
+         0,
+         10,
+         10
+        ],
+        [
+         0,
+         0,
+         10,
+         10
+        ],
+        [
+         0,
+         0,
+         10,
+         10
+        ],
+        [
+         0,
+         0,
+         10,
+         10
+        ],
+        [
+         0,
+         0,
+         10,
+         10
+        ],
+        [
+         0,
+         0,
+         10,
+         10
+        ],
+        [
+         0,
+         0,
+         10,
+         10
+        ]
+       ],
+       "styles": [
+        [
+         1
+        ],
+        [
+         1
+        ],
+        [
+         1
+        ],
+        [
+         1
+        ],
+        [
+         1
+        ],
+        [
+         1
+        ],
+        [
+         1
+        ]
+       ]
+      }
+     }
+    ]
+   },
+   "anchors": [
+    "",
+    "capture:div[0]",
+    "capture:div[0]/div.card[0]",
+    "capture:div[0]/div.card[1]",
+    "capture:div[0]/div.card[2]",
+    "capture:div[0]/div.card[3]",
+    "capture:div[0]/div.card[4]",
+    "capture:div[0]/div[0]"
+   ]
+  },
+  {
+   "name": "pulp-keys",
+   "why": "A unique data-pulp-key names the node; a key two siblings share falls back to ordinals, and keyed siblings do not take up an ordinal.",
+   "snapshot": {
+    "strings": [
+     "display",
+     "block",
+     "#document",
+     "OL",
+     "LI",
+     "data-pulp-key",
+     "drive",
+     "tone",
+     "twin",
+     "a/b"
+    ],
+    "computedStyleNames": [
+     "display"
+    ],
+    "documents": [
+     {
+      "nodes": {
+       "parentIndex": [
+        -1,
+        0,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+       ],
+       "nodeType": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+       ],
+       "nodeName": [
+        2,
+        3,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4
+       ],
+       "nodeValue": [
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1
+       ],
+       "backendNodeId": [
+        100,
+        101,
+        102,
+        103,
+        104,
+        105,
+        106,
+        107,
+        108
+       ],
+       "attributes": [
+        [],
+        [],
+        [
+         5,
+         6
+        ],
+        [],
+        [
+         5,
+         7
+        ],
+        [],
+        [
+         5,
+         8
+        ],
+        [
+         5,
+         8
+        ],
+        [
+         5,
+         9
+        ]
+       ]
+      },
+      "layout": {
+       "nodeIndex": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+       ],
+       "bounds": [
+        [
+         0,
+         0,
+         10,
+         10
+        ],
+        [
+         0,
+         0,
+         10,
+         10
+        ],
+        [
+         0,
+         0,
+         10,
+         10
+        ],
+        [
+         0,
+         0,
+         10,
+         10
+        ],
+        [
+         0,
+         0,
+         10,
+         10
+        ],
+        [
+         0,
+         0,
+         10,
+         10
+        ],
+        [
+         0,
+         0,
+         10,
+         10
+        ],
+        [
+         0,
+         0,
+         10,
+         10
+        ]
+       ],
+       "styles": [
+        [
+         1
+        ],
+        [
+         1
+        ],
+        [
+         1
+        ],
+        [
+         1
+        ],
+        [
+         1
+        ],
+        [
+         1
+        ],
+        [
+         1
+        ],
+        [
+         1
+        ]
+       ]
+      }
+     }
+    ]
+   },
+   "anchors": [
+    "",
+    "capture:ol[0]",
+    "capture:ol[0]/li[key=drive]",
+    "capture:ol[0]/li[0]",
+    "capture:ol[0]/li[key=tone]",
+    "capture:ol[0]/li[1]",
+    "capture:ol[0]/li[2]",
+    "capture:ol[0]/li[3]",
+    "capture:ol[0]/li[key=a\\/b]"
+   ]
+  },
+  {
+   "name": "text-comments-pseudo",
+   "why": "Text nodes are #text with their own ordinals, a comment has no anchor and takes no ordinal, and pseudo-elements are named by their node name.",
+   "snapshot": {
+    "strings": [
+     "display",
+     "block",
+     "#document",
+     "DIV",
+     "class",
+     "badge",
+     "::before",
+     "#text",
+     "One",
+     "#comment",
+     "note",
+     "Two",
+     "SPAN",
+     "Three",
+     "::after"
+    ],
+    "computedStyleNames": [
+     "display"
+    ],
+    "documents": [
+     {
+      "nodes": {
+       "parentIndex": [
+        -1,
+        0,
+        1,
+        1,
+        1,
+        1,
+        1,
+        6,
+        1
+       ],
+       "nodeType": [
+        9,
+        1,
+        1,
+        3,
+        8,
+        3,
+        1,
+        3,
+        1
+       ],
+       "nodeName": [
+        2,
+        3,
+        6,
+        7,
+        9,
+        7,
+        12,
+        7,
+        14
+       ],
+       "nodeValue": [
+        -1,
+        -1,
+        -1,
+        8,
+        10,
+        11,
+        -1,
+        13,
+        -1
+       ],
+       "backendNodeId": [
+        100,
+        101,
+        102,
+        103,
+        104,
+        105,
+        106,
+        107,
+        108
+       ],
+       "attributes": [
+        [],
+        [
+         4,
+         5
+        ],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        []
+       ]
+      },
+      "layout": {
+       "nodeIndex": [
+        1,
+        2,
+        6,
+        8
+       ],
+       "bounds": [
+        [
+         0,
+         0,
+         10,
+         10
+        ],
+        [
+         0,
+         0,
+         10,
+         10
+        ],
+        [
+         0,
+         0,
+         10,
+         10
+        ],
+        [
+         0,
+         0,
+         10,
+         10
+        ]
+       ],
+       "styles": [
+        [
+         1
+        ],
+        [
+         1
+        ],
+        [
+         1
+        ],
+        [
+         1
+        ]
+       ]
+      }
+     }
+    ]
+   },
+   "anchors": [
+    "",
+    "capture:div.badge[0]",
+    "capture:div.badge[0]/::before[0]",
+    "capture:div.badge[0]/#text[0]",
+    "",
+    "capture:div.badge[0]/#text[1]",
+    "capture:div.badge[0]/span[0]",
+    "capture:div.badge[0]/span[0]/#text[0]",
+    "capture:div.badge[0]/::after[0]"
+   ]
+  },
+  {
+   "name": "shadow-root",
+   "why": "A shadow root is a document fragment with no segment, so its children sit directly under the host; a shadow span and a light-DOM span therefore both read span[0].",
+   "snapshot": {
+    "strings": [
+     "display",
+     "block",
+     "#document",
+     "DIV",
+     "id",
+     "host",
+     "#document-fragment",
+     "SPAN",
+     "SLOT"
+    ],
+    "computedStyleNames": [
+     "display"
+    ],
+    "documents": [
+     {
+      "nodes": {
+       "parentIndex": [
+        -1,
+        0,
+        1,
+        2,
+        2,
+        1
+       ],
+       "nodeType": [
+        9,
+        1,
+        11,
+        1,
+        1,
+        1
+       ],
+       "nodeName": [
+        2,
+        3,
+        6,
+        7,
+        8,
+        7
+       ],
+       "nodeValue": [
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1
+       ],
+       "backendNodeId": [
+        100,
+        101,
+        102,
+        103,
+        104,
+        105
+       ],
+       "attributes": [
+        [],
+        [
+         4,
+         5
+        ],
+        [],
+        [],
+        [],
+        []
+       ]
+      },
+      "layout": {
+       "nodeIndex": [
+        1,
+        3,
+        4,
+        5
+       ],
+       "bounds": [
+        [
+         0,
+         0,
+         10,
+         10
+        ],
+        [
+         0,
+         0,
+         10,
+         10
+        ],
+        [
+         0,
+         0,
+         10,
+         10
+        ],
+        [
+         0,
+         0,
+         10,
+         10
+        ]
+       ],
+       "styles": [
+        [
+         1
+        ],
+        [
+         1
+        ],
+        [
+         1
+        ],
+        [
+         1
+        ]
+       ]
+      }
+     }
+    ]
+   },
+   "anchors": [
+    "",
+    "capture:div#host[0]",
+    "",
+    "capture:div#host[0]/span[0]",
+    "capture:div#host[0]/slot[0]",
+    "capture:div#host[0]/span[0]"
+   ]
+  },
+  {
+   "name": "iframe",
+   "why": "The iframe element is anchored; its content document is a separate DOMSnapshot document and is not, in either implementation.",
+   "snapshot": {
+    "strings": [
+     "display",
+     "block",
+     "#document",
+     "DIV",
+     "id",
+     "panel",
+     "IFRAME",
+     "class",
+     "scope"
+    ],
+    "computedStyleNames": [
+     "display"
+    ],
+    "documents": [
+     {
+      "nodes": {
+       "parentIndex": [
+        -1,
+        0,
+        1,
+        1
+       ],
+       "nodeType": [
+        9,
+        1,
+        1,
+        1
+       ],
+       "nodeName": [
+        2,
+        3,
+        6,
+        6
+       ],
+       "nodeValue": [
+        -1,
+        -1,
+        -1,
+        -1
+       ],
+       "backendNodeId": [
+        100,
+        101,
+        102,
+        103
+       ],
+       "attributes": [
+        [],
+        [
+         4,
+         5
+        ],
+        [],
+        [
+         7,
+         8
+        ]
+       ]
+      },
+      "layout": {
+       "nodeIndex": [
+        1,
+        2,
+        3
+       ],
+       "bounds": [
+        [
+         0,
+         0,
+         10,
+         10
+        ],
+        [
+         0,
+         0,
+         10,
+         10
+        ],
+        [
+         0,
+         0,
+         10,
+         10
+        ]
+       ],
+       "styles": [
+        [
+         1
+        ],
+        [
+         1
+        ],
+        [
+         1
+        ]
+       ]
+      }
+     }
+    ]
+   },
+   "anchors": [
+    "",
+    "capture:div#panel[0]",
+    "capture:div#panel[0]/iframe[0]",
+    "capture:div#panel[0]/iframe.scope[0]"
+   ]
+  },
+  {
+   "name": "clip-transform-capture",
+   "why": "A real Chrome capture, so the vectors cover what Chromium actually serializes.",
+   "snapshot_path": "browser-capture-clip-transform/dom-snapshot.json",
+   "anchors": [
+    "",
+    "",
+    "capture:html[0]",
+    "capture:html[0]/head[0]",
+    "capture:html[0]/head[0]/style[0]",
+    "capture:html[0]/head[0]/style[0]/#text[0]",
+    "capture:html[0]/head[0]/#text[0]",
+    "capture:html[0]/head[0]/style#__pulp_browser_capture_motion__[0]",
+    "capture:html[0]/head[0]/style#__pulp_browser_capture_motion__[0]/#text[0]",
+    "capture:html[0]/body[0]",
+    "capture:html[0]/body[0]/div#panel[0]",
+    "capture:html[0]/body[0]/div#panel[0]/#text[0]",
+    "capture:html[0]/body[0]/div#panel[0]/div#bar[0]",
+    "capture:html[0]/body[0]/div#panel[0]/div#bar[0]/span#label[0]",
+    "capture:html[0]/body[0]/div#panel[0]/div#bar[0]/span#label[0]/#text[0]",
+    "capture:html[0]/body[0]/div#panel[0]/#text[1]",
+    "capture:html[0]/body[0]/div#panel[0]/div#scaled[0]",
+    "capture:html[0]/body[0]/div#panel[0]/#text[2]",
+    "capture:html[0]/body[0]/#text[0]"
+   ]
+  }
+ ]
+}

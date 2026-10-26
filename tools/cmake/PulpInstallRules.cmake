@@ -790,51 +790,49 @@ if(WIN32)
     else()
         set(_pulp_source_install_arch "x86-win")
     endif()
-    if(_pulp_source_install_arch STREQUAL "arm64-win")
-        set(PULP_SOURCE_INSTALL_PLATFORM "windows-arm64")
-    elseif(_pulp_source_install_arch STREQUAL "x86_64-win")
-        set(PULP_SOURCE_INSTALL_PLATFORM "windows-x64")
-    elseif(_pulp_source_install_arch STREQUAL "arm64ec-win")
-        set(PULP_SOURCE_INSTALL_PLATFORM "windows-arm64ec")
-    elseif(_pulp_source_install_arch STREQUAL "arm64x-win")
-        set(PULP_SOURCE_INSTALL_PLATFORM "windows-arm64x")
-    else()
-        set(PULP_SOURCE_INSTALL_PLATFORM "windows-${_pulp_source_install_arch}")
+    # PulpStampSourceInstall normalizes the architecture, so these stay the
+    # canonical Windows names (windows-arm64, windows-x64, ...).
+    set(PULP_SOURCE_INSTALL_OS "windows")
+    string(REGEX REPLACE "-win$" "" PULP_SOURCE_INSTALL_ARCH "${_pulp_source_install_arch}")
+    if(PULP_SOURCE_INSTALL_ARCH STREQUAL "x86")
+        # The unclassified fallback keeps its historical windows-x86-win name.
+        set(PULP_SOURCE_INSTALL_ARCH "x86-win")
     endif()
     unset(_pulp_source_install_arch)
     unset(_pulp_source_install_platform)
     unset(_pulp_source_install_compiler_arch)
 elseif(ANDROID)
-    if(CMAKE_ANDROID_ARCH_ABI)
-        set(PULP_SOURCE_INSTALL_PLATFORM "android-${CMAKE_ANDROID_ARCH_ABI}")
-    else()
-        set(PULP_SOURCE_INSTALL_PLATFORM "android-unknown")
+    # The ABI name (arm64-v8a, armeabi-v7a, x86, x86_64), never the processor.
+    set(PULP_SOURCE_INSTALL_OS "android")
+    set(PULP_SOURCE_INSTALL_ARCH "${CMAKE_ANDROID_ARCH_ABI}")
+    if(PULP_SOURCE_INSTALL_ARCH STREQUAL "")
+        set(PULP_SOURCE_INSTALL_ARCH "unknown")
     endif()
 elseif(IOS OR PULP_IOS)
+    set(PULP_SOURCE_INSTALL_OS "ios")
     if(CMAKE_OSX_ARCHITECTURES MATCHES "(^|;)x86_64(;|$)")
-        set(PULP_SOURCE_INSTALL_PLATFORM "ios-x64")
+        set(PULP_SOURCE_INSTALL_ARCH "x86_64")
     else()
-        set(PULP_SOURCE_INSTALL_PLATFORM "ios-arm64")
+        set(PULP_SOURCE_INSTALL_ARCH "arm64")
     endif()
 elseif(APPLE)
-    if(CMAKE_OSX_ARCHITECTURES MATCHES "(^|;)x86_64(;|$)")
-        set(PULP_SOURCE_INSTALL_PLATFORM "darwin-x64")
-    else()
-        string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _pulp_macos_arch)
-        if(_pulp_macos_arch STREQUAL "")
-            string(TOLOWER "${CMAKE_HOST_SYSTEM_PROCESSOR}" _pulp_macos_arch)
-        endif()
-        set(PULP_SOURCE_INSTALL_PLATFORM "darwin-${_pulp_macos_arch}")
-        unset(_pulp_macos_arch)
-    endif()
+    # Every listed architecture; two distinct ones stamp darwin-universal.
+    set(PULP_SOURCE_INSTALL_OS "darwin")
+    set(PULP_SOURCE_INSTALL_ARCH "${CMAKE_OSX_ARCHITECTURES}")
 elseif(UNIX)
-    if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$")
-        set(PULP_SOURCE_INSTALL_PLATFORM "linux-x64")
-    else()
-        set(PULP_SOURCE_INSTALL_PLATFORM "linux-arm64")
-    endif()
+    set(PULP_SOURCE_INSTALL_OS "linux")
+    set(PULP_SOURCE_INSTALL_ARCH "")
 else()
-    set(PULP_SOURCE_INSTALL_PLATFORM "unknown-unknown")
+    set(PULP_SOURCE_INSTALL_OS "unknown")
+    set(PULP_SOURCE_INSTALL_ARCH "")
+endif()
+# With no explicit target architecture, the target processor (then the
+# host's) is the architecture: a native Intel Mac or arm64 Linux box.
+if(PULP_SOURCE_INSTALL_ARCH STREQUAL "")
+    set(PULP_SOURCE_INSTALL_ARCH "${CMAKE_SYSTEM_PROCESSOR}")
+endif()
+if(PULP_SOURCE_INSTALL_ARCH STREQUAL "")
+    set(PULP_SOURCE_INSTALL_ARCH "${CMAKE_HOST_SYSTEM_PROCESSOR}")
 endif()
 configure_file("${PULP_ROOT_DIR}/tools/cmake/PulpStampSourceInstall.cmake.in"
     "${CMAKE_CURRENT_BINARY_DIR}/PulpStampSourceInstall.cmake" @ONLY)
@@ -887,6 +885,7 @@ install(FILES
     # build-time finalize script relative to its own directory.
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpBuildInfo.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpFinalizeBuildInfo.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpDevSharedUi.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPluginFormats.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpWindowsTargetArch.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpGpuProvider.cmake"
@@ -902,6 +901,10 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpControlShipping.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/check_inspector_shipping_artifact.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/check_control_shipping_artifact.cmake"
+    # Read by check_control_shipping_artifact.cmake relative to its own
+    # directory: the one forbidden-marker list and the scanner over it.
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpReleaseArtifactScan.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/release_artifact_forbidden.json"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/install_control_host.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/remove_control_host.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPlugin.cmake"
@@ -975,6 +978,8 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/pulp_js_bytecode_main.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/check_portable_binary.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/check_bundle_relocatable.py"
+    # PulpDevSharedUi.cmake runs this as the linker launcher next to itself.
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/pulp_dev_shared_link.sh"
     # PulpSkiaIcuData.cmake resolves the ICU data trimmer next to itself.
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/icu_data_subset.py"
     # G3 universal-build arch/signature gate. pulp_validate_bundle_architectures
@@ -1103,13 +1108,14 @@ install(FILES
 # It probes `src/pulp/view/platform/mac` in an installed SDK, so ship the cluster
 # there — otherwise an installed-SDK consumer silently falls back to pulp-view-core's
 # shared fixed-name copies and the cross-plug-in class collision returns. The
-# private headers (pulp_mac_objc_names.h + the window_host_mac split headers) ship
+# private headers (pulp_mac_objc_names.h, mac_gpu_host_config.h + the window_host_mac split headers) ship
 # alongside because the .mm include them by relative path.
 if(APPLE)
     install(FILES
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/app_menu_mac.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/app_menu_mac.mm"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/pulp_mac_objc_names.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/mac_gpu_host_config.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/window_host_mac.mm"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/window_host_mac_lifecycle.mm"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/window_host_mac_metal_view.mm"

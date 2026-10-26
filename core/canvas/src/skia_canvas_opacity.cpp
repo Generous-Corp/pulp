@@ -452,6 +452,16 @@ void SkiaCanvas::save_layer_with_shader_effect(float x, float y,
                /*force_non_opaque=*/active);
 }
 
+// What a backdrop filter reads: the surface behind the element, limited to the
+// element's own rect and mirrored past its edges. Chrome samples a backdrop
+// this way (tools/import-validation/chrome_backdrop_opacity_oracle.py, the
+// edge-mirror box). Clamping instead repeated the box's edge column outward,
+// so a bright line just inside the edge smeared a band 30 levels too bright,
+// and reading past the rect would mix in the page beside the box.
+static sk_sp<SkImageFilter> mirrored_backdrop(const SkRect& bounds) {
+    return SkImageFilters::Crop(bounds, SkTileMode::kMirror, nullptr);
+}
+
 void SkiaCanvas::save_backdrop_filter(float x, float y, float w, float h,
                                        float blur_radius) {
     // CSS `backdrop-filter: blur(N)`. Push a layer whose initial contents are
@@ -470,9 +480,12 @@ void SkiaCanvas::save_backdrop_filter(float x, float y, float w, float h,
     // writes outside those bounds — a frosted deck at the bottom of a panel
     // smeared the title at the top, and the reach grew with the radius, which
     // is what identified it. `backdrop-filter` must affect what is behind THIS
-    // element and nothing else.
-    auto backdrop = SkImageFilters::Blur(blur_radius, blur_radius,
-                                         SkTileMode::kClamp, nullptr, &bounds);
+    // element and nothing else. The crop is applied to the output only: as the
+    // blur's own crop rect it would also clamp the input at the rect, undoing
+    // the mirrored edges.
+    auto backdrop = SkImageFilters::Crop(bounds, SkImageFilters::Blur(blur_radius, blur_radius,
+                                                                      SkTileMode::kClamp,
+                                                                      mirrored_backdrop(bounds)));
 
     SkCanvas::SaveLayerRec rec(&bounds, /*paint=*/nullptr, backdrop.get(), 0);
     canvas_->saveLayer(rec);
@@ -497,7 +510,10 @@ void SkiaCanvas::save_backdrop_filter_chain(float x, float y, float w, float h,
     // its bounds argument as a hint and grows the layer to the device clip.
     // The filtered result then composites over everything already painted,
     // which reads as the whole panel flooding with one colour.
-    if (backdrop) backdrop = SkImageFilters::Crop(bounds, std::move(backdrop));
+    if (backdrop) {
+        backdrop = SkImageFilters::Compose(std::move(backdrop), mirrored_backdrop(bounds));
+        backdrop = SkImageFilters::Crop(bounds, std::move(backdrop));
+    }
     if (!backdrop) {
         // Nothing in the list this backend can express — a list of no-ops, or
         // one that parsed to nothing. A plain save() keeps the restore()

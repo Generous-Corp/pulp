@@ -313,11 +313,39 @@ bool archive_contains_path(const std::vector<std::string>& archived_payloads,
     });
 }
 
+// Admit every entry's declared decompressed size against `limits` from the
+// central directory alone. Returns false, with the offending entry named in
+// `error`, before anything is inflated; the caller must not extract afterwards.
+bool archive_fits_limits(mz_zip_archive& zip, const ContentInstallLimits& limits,
+                         std::string& error) {
+    ContentSizeBudget budget(limits);
+    const auto count = mz_zip_reader_get_num_files(&zip);
+    for (mz_uint i = 0; i < count; ++i) {
+        mz_zip_archive_file_stat stat{};
+        if (!mz_zip_reader_file_stat(&zip, i, &stat) || stat.m_is_directory)
+            continue;
+        error = budget.admit(stat.m_filename, stat.m_uncomp_size);
+        if (!error.empty())
+            return false;
+    }
+    return true;
+}
+
 bool validate_archive_entries(const fs::path& archive, std::vector<std::string>& issues,
-                              const std::vector<std::string>* required_paths = nullptr) {
+                              const std::vector<std::string>* required_paths = nullptr,
+                              const ContentInstallLimits& limits = {}) {
     mz_zip_archive zip{};
     if (!mz_zip_reader_init_file(&zip, archive.string().c_str(), 0)) {
         issues.push_back("archive-open: failed to open " + archive.string());
+        return false;
+    }
+
+    // The size budget comes first: the hash check below inflates every declared
+    // file onto the heap, so an oversized pack must be refused before it runs.
+    std::string size_error;
+    if (!archive_fits_limits(zip, limits, size_error)) {
+        mz_zip_reader_end(&zip);
+        issues.push_back(size_error);
         return false;
     }
 
@@ -406,11 +434,15 @@ bool validate_archive_entries(const fs::path& archive, std::vector<std::string>&
     return ok;
 }
 
-bool extract_archive_content(const fs::path& archive, const fs::path& dest_root,
-                             std::string& error) {
+bool extract_archive_content(const fs::path& archive, const fs::path& dest_root, std::string& error,
+                             const ContentInstallLimits& limits = {}) {
     mz_zip_archive zip{};
     if (!mz_zip_reader_init_file(&zip, archive.string().c_str(), 0)) {
         error = "Failed to open archive " + archive.string();
+        return false;
+    }
+    if (!archive_fits_limits(zip, limits, error)) {
+        mz_zip_reader_end(&zip);
         return false;
     }
 
@@ -611,7 +643,8 @@ std::vector<std::string> exported_kinds(const ContentPackInfo& pack) {
 std::optional<LocalContentManifest>
 load_local_content_manifest(const fs::path& input, std::vector<std::string>& issues,
                             bool validate_archive_sample_banks = true,
-                            bool validate_directory_sample_banks = true) {
+                            bool validate_directory_sample_banks = true,
+                            const ContentInstallLimits& limits = {}) {
     LocalContentManifest manifest;
     manifest.source = input;
 
@@ -755,12 +788,12 @@ load_local_content_manifest(const fs::path& input, std::vector<std::string>& iss
         }
 
         if (manifest.archive)
-            validate_archive_entries(input, issues, &manifest.exported_paths);
+            validate_archive_entries(input, issues, &manifest.exported_paths, limits);
         if (manifest.archive && validate_archive_sample_banks && issues.empty() &&
             !manifest.sample_bank_paths.empty()) {
             const auto temporary_root = temporary_content_validation_root();
             std::string extract_error;
-            if (!extract_archive_content(input, temporary_root, extract_error)) {
+            if (!extract_archive_content(input, temporary_root, extract_error, limits)) {
                 issues.push_back("sample-bank: " + extract_error);
             } else {
                 validate_sample_banks(temporary_root, manifest.sample_bank_paths, nullptr, issues);
@@ -991,7 +1024,8 @@ const char* to_string(ContentReloadPolicy policy) {
 
 ContentInstallPreview preview_content_pack_install(const fs::path& input,
                                                    const ContentCapabilityManifest& plugin,
-                                                   const fs::path& data_root) {
+                                                   const fs::path& data_root,
+                                                   const ContentInstallLimits& limits) {
     ContentInstallPreview preview;
     preview.source = input;
     preview.plugin = plugin;
@@ -1001,7 +1035,7 @@ ContentInstallPreview preview_content_pack_install(const fs::path& input,
     }
 
     std::vector<std::string> issues;
-    auto local = load_local_content_manifest(input, issues);
+    auto local = load_local_content_manifest(input, issues, true, true, limits);
     if (!local) {
         preview.issues = std::move(issues);
         return preview;
@@ -1038,9 +1072,10 @@ ContentInstallPreview preview_content_pack_install(const fs::path& input,
 
 ContentInstallResult install_content_pack(const fs::path& input,
                                           const ContentCapabilityManifest& plugin,
-                                          const fs::path& data_root, bool approved) {
+                                          const fs::path& data_root, bool approved,
+                                          const ContentInstallLimits& limits) {
     ContentInstallResult result;
-    result.preview = preview_content_pack_install(input, plugin, data_root);
+    result.preview = preview_content_pack_install(input, plugin, data_root, limits);
     result.issues = result.preview.issues;
     if (!result.preview.ok)
         return result;
@@ -1052,7 +1087,7 @@ ContentInstallResult install_content_pack(const fs::path& input,
     std::vector<std::string> issues;
     // The preview above already validated this input's sample banks and is
     // required to be ok, so re-extracting the archive here would prove nothing.
-    auto local = load_local_content_manifest(input, issues, false);
+    auto local = load_local_content_manifest(input, issues, false, true, limits);
     if (!local) {
         result.issues.insert(result.issues.end(), issues.begin(), issues.end());
         return result;
@@ -1071,10 +1106,10 @@ ContentInstallResult install_content_pack(const fs::path& input,
     }
     fs::remove_all(result.preview.install_root, ec);
     std::string error;
-    const bool copied = local->archive
-                            ? extract_archive_content(input, result.preview.install_root, error)
-                            : copy_declared_content(local->root, result.preview.install_root,
-                                                    local->exported_paths, error);
+    const bool copied =
+        local->archive ? extract_archive_content(input, result.preview.install_root, error, limits)
+                       : copy_declared_content(local->root, result.preview.install_root,
+                                               local->exported_paths, error);
     if (!copied) {
         fs::remove_all(result.preview.install_root, ec);
         result.issues.push_back(error);
