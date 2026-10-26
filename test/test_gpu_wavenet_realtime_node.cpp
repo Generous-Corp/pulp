@@ -14,6 +14,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
 #include <climits>
+#include <cmath>
+#include <limits>
 #include <pulp/gpu_audio/gpu_audio_program.hpp>
 #include <pulp/gpu_audio/gpu_audio_provider_pool.hpp>
 #include <pulp/gpu_audio/gpu_audio_transport.hpp>
@@ -75,6 +77,8 @@ struct Control {
     bool hang_release = false;
     std::uint64_t last_wait_deadline = 0;
     std::array<std::uint64_t, 8> wait_deadlines{}, wait_starts{};
+    // The samples of the most recent submission, as the GPU input slot saw them.
+    std::array<float, 2> last_submitted{};
 };
 class Channel final : public detail::WaveNetRealtimeChannel {
   public:
@@ -91,6 +95,8 @@ class Channel final : public detail::WaveNetRealtimeChannel {
         if (pending == pending_.end())
             return false;
         std::copy(input.begin(), input.end(), pending->data.begin());
+        std::copy_n(input.begin(), std::min(input.size(), control_.last_submitted.size()),
+                    control_.last_submitted.begin());
         pending->sequence = ticket.sequence;
         pending->ticket = ticket;
         pending->submit_index = control_.submits;
@@ -356,6 +362,10 @@ struct Harness {
     std::uint8_t callback(float value, std::uint64_t start_ns = 0) {
         a.fill(value);
         b.fill(value + 100);
+        return send(start_ns);
+    }
+    // One callback with whatever `a` and `b` already hold.
+    std::uint8_t send(std::uint64_t start_ns = 0) {
         pulp::audio::BufferView<const float> in(inputs.data(), channels, 2);
         pulp::audio::BufferView<float> out(outputs.data(), channels, 2);
         auto status = path.process(path.context, in, out, 2, sequence, true, start_ns);
@@ -681,6 +691,55 @@ TEST_CASE("WaveNet callback performs no C++ allocations", "[gpu_audio][wavenet][
             CHECK(allocations == 0);
         }
 }
+TEST_CASE("WaveNet replaces non-finite input with zero before GPU submission",
+          "[gpu_audio][wavenet][realtime]") {
+    Harness h(1, 2);
+    detail::WaveNetRealtimeTestAccess::assume_authenticated(h.node);
+    // Positive control: finite input reaches the provider unchanged.
+    REQUIRE(h.callback(0.25f) == detail::kRealtimeGpuPriming);
+    h.service();
+    h.service();
+    REQUIRE(h.controls[0].submits == 1);
+    CHECK(h.controls[0].last_submitted == std::array<float, 2>{0.25f, 0.25f});
+    CHECK(h.node.sanitized_input_samples() == 0);
+
+    h.a = {std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity()};
+    h.b = {0.5f, -std::numeric_limits<float>::infinity()};
+    std::size_t allocations = 0;
+    std::uint8_t status = 0;
+    {
+        pulp::test::RtAllocationProbe probe;
+        status = h.send();
+        allocations = probe.allocation_count();
+    }
+    CHECK(allocations == 0);
+    REQUIRE(status == detail::kRealtimeGpuReady);
+    h.service();
+    h.service();
+    REQUIRE(h.controls[0].submits == 2);
+    REQUIRE(h.controls[1].submits == 2);
+    CHECK(h.controls[0].last_submitted == std::array<float, 2>{0.0f, 0.0f});
+    // Finite samples in the same block pass through untouched.
+    CHECK(h.controls[1].last_submitted == std::array<float, 2>{0.5f, 0.0f});
+    CHECK(h.node.sanitized_input_samples() == 3);
+
+    // The block that carried the non-finite samples, and every later one,
+    // comes back finite; the policy counts rather than latching a cause.
+    for (std::uint32_t block = 0; block < 4; ++block) {
+        REQUIRE(h.callback(float(block + 1)) == detail::kRealtimeGpuReady);
+        for (float sample : h.outa)
+            CHECK(std::isfinite(sample));
+        for (float sample : h.outb)
+            CHECK(std::isfinite(sample));
+        h.service();
+        h.service();
+    }
+    CHECK(h.node.sanitized_input_samples() == 3);
+    CHECK_FALSE(h.node.fenced());
+    CHECK(h.node.recovery_reason() == GpuAudioRecoveryReason::None);
+    CHECK(checked_status(h.node).provider_state == GpuAudioProviderState::Ready);
+}
+
 TEST_CASE("WaveNet invalid config and prewarm overflow are rejected before provider calls",
           "[gpu_audio][wavenet][realtime]") {
     for (auto mode : {0, 1, 2, 3}) {

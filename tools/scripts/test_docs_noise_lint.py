@@ -220,6 +220,36 @@ class DocsNoiseLintTests(unittest.TestCase):
         self.assertIn("See #456", noisy_result.stderr)
         self.assertNotIn("See #123", noisy_result.stderr)
 
+    def _commit_all(self, message: str) -> None:
+        self.assertEqual(self._git("add", "-A").returncode, 0)
+        self.assertEqual(self._git("commit", "-q", "-m", message).returncode, 0)
+
+    def test_commit_mode_cannot_be_hidden_by_a_clean_working_tree(self) -> None:
+        self._init_git_repo()
+        self._write("docs/reference/page.md", "# Page\nCurrent behavior.\n")
+        self._commit_all("seed")
+        self._write("docs/reference/page.md", "# Page\nCurrent behavior.\nSee #456 here.\n")
+        self._commit_all("add a breadcrumb")
+        # Fixed on disk, not committed: the push still sends the breadcrumb.
+        self._write("docs/reference/page.md", "# Page\nCurrent behavior.\nStill current.\n")
+        pushed = self._run("--mode=report", "--base", "HEAD~1", "--head", "HEAD", "--commit")
+        self.assertEqual(pushed.returncode, 1, msg=pushed.stderr)
+        self.assertIn("See #456", pushed.stderr)
+        # Control: the working-tree read is what let it through.
+        disk = self._run("--mode=report", "--base", "HEAD~1", "--head", "HEAD")
+        self.assertEqual(disk.returncode, 0, msg=disk.stderr)
+
+    def test_commit_mode_ignores_uncommitted_noise(self) -> None:
+        self._init_git_repo()
+        self._write("docs/reference/page.md", "# Page\nCurrent behavior.\n")
+        self._commit_all("seed")
+        self._write("docs/reference/page.md", "# Page\nCurrent behavior.\nStill current.\n")
+        self._commit_all("a clean change")
+        self._write("docs/reference/page.md", "# Page\nCurrent behavior.\nSee #789 here.\n")
+        self._write("docs/reference/untracked.md", "Untracked note (#790).\n")
+        pushed = self._run("--mode=report", "--base", "HEAD~1", "--head", "HEAD", "--commit")
+        self.assertEqual(pushed.returncode, 0, msg=pushed.stderr)
+
     def test_git_changed_line_inside_existing_fence_is_skipped(self) -> None:
         self._init_git_repo()
         self._write("docs/reference/code.md", "# Code\n```\nclean();\n```\n")

@@ -621,9 +621,13 @@ TEST_CASE("design-import benchmark excludes warmup frames from cumulative counte
     REQUIRE(commands > 0);
     REQUIRE(layouts_per_frame > 0);
 
+    // A fixed frame count, not a time window: a 5 ms window under a slow
+    // sanitizer build can end inside the warmup and sample nothing. The count
+    // includes the warmup frames.
     constexpr int kWarmup = 3;
-    const auto idle = run_phase(*fixture, 5, std::nullopt, 10000, false, kWarmup);
-    REQUIRE(idle.samples > 0);
+    constexpr int kFrames = 8;
+    const auto idle = run_phase(*fixture, 0, kFrames, 10000, false, kWarmup);
+    REQUIRE(idle.samples == kFrames - kWarmup);
     const auto sampled = static_cast<std::uint64_t>(idle.samples);
     // Every frame repeats the same work, so a counter that included the
     // warmup frames would read kWarmup frames high.
@@ -632,13 +636,13 @@ TEST_CASE("design-import benchmark excludes warmup frames from cumulative counte
     CHECK(idle.layout_passes == sampled * layouts_per_frame);
 
     // Control: without warmup every rendered frame is counted.
-    const auto all = run_phase(*fixture, 5, std::nullopt, 10000, false, 0);
-    REQUIRE(all.samples > 0);
+    const auto all = run_phase(*fixture, 0, kFrames, 10000, false, 0);
+    REQUIRE(all.samples == kFrames);
     CHECK(all.paint_calls == static_cast<std::uint64_t>(all.samples));
     CHECK(all.layout_passes == static_cast<std::uint64_t>(all.samples) * layouts_per_frame);
 
     // A phase that never leaves warmup counts nothing.
-    const auto warmup_only = run_phase(*fixture, 1, std::nullopt, 10000, false, 1000000);
+    const auto warmup_only = run_phase(*fixture, 0, kFrames, 10000, false, kFrames);
     CHECK(warmup_only.samples == 0);
     CHECK(warmup_only.paint_calls == 0);
     CHECK(warmup_only.paint_commands_total == 0);

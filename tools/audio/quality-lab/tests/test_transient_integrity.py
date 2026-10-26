@@ -135,3 +135,43 @@ def test_cli_transient_integrity_smoke(tmp_path, capsys):
     rc = cli.main(["compare", ref_p, cand_p, "--profile", "transient-integrity", "--reference-role", "golden"])
     assert rc == 0
     assert "regression_suspected" in capsys.readouterr().out
+
+
+def test_a_pure_delay_is_no_material_change():
+    """A constant delay moves every attack without touching it. Pairing onsets by order let one
+    onset the candidate's detector missed shift every later pair onto a different event, which read
+    a 37-sample delay as smeared attacks. Pairing is anchored on the estimated lag instead."""
+    for seed in (4242, 99):
+        ref, _onsets, sr = _dense_material(seed)
+        for k in (1, 13, 37, 64, 101, 300):
+            cand = np.concatenate([np.zeros(k), ref[: ref.size - k]])
+            report = compare.compare_arrays(ref, cand, sr, profile="transient-integrity",
+                                            reference_role="golden")
+            assert report["verdict"] == compare.VERDICT_NO_CHANGE, (seed, k, report["summary"])
+
+
+def test_a_low_noise_floor_does_not_fire_the_worst_gate():
+    """Noise about 50 dB below the material leaves every attack's energy intact. The rise-time
+    estimate of one attack can still jump on it, and that alone must not read as a dropped attack."""
+    ref, _onsets, sr = _dense_material()
+    rng = np.random.default_rng(7)
+    cand = ref + rng.uniform(-0.0056, 0.0056, ref.size)
+    report = compare.compare_arrays(ref, cand, sr, profile="transient-integrity",
+                                    reference_role="golden")
+    assert report["verdict"] == compare.VERDICT_NO_CHANGE, report["summary"]
+
+
+def _dense_material(seed: int = 4242):
+    """Six seconds of a detuned saw chord under decaying noise hits every 250 ms, through a
+    2048-tap decaying-noise reverb: dense onsets, many of them weak, as in a convolved mix."""
+    sr = 48000
+    n = sr * 6
+    t = np.arange(n) / sr
+    saw = sum(2.0 * ((f * t) % 1.0) - 1.0 for f in (110.0, 164.81, 220.66))
+    rng = np.random.default_rng(seed)
+    hits = rng.uniform(-1.0, 1.0, n) * np.exp(-((np.arange(n) % (sr // 4)) / (0.012 * sr)))
+    x = 0.18 * saw + 0.5 * hits
+    ir = rng.uniform(-1.0, 1.0, 2048) * np.exp(-6.0 * np.arange(2048) / 2048) * 0.08
+    ir[0] = 0.6
+    y = np.convolve(x, ir)[:n]
+    return y, None, sr

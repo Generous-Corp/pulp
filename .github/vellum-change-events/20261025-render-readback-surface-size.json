@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "event_id": "20261025-render-readback-surface-size",
+  "kind": "change",
+  "created_at": "2026-10-25T01:12:10Z",
+  "slices": [
+    "render-skia-dawn"
+  ],
+  "rationale": "design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger); SkiaSurface (skia_surface.cpp) now sizes from the swapchain where a presentable surface has one: read_current_rgba() reads back at the size of the surface it drew into, and the persistent-scene target takes the swapchain's size instead of logical width x scale. The two are equal unless a host sizes the swapchain from the platform's physical client rect, which at a fractional scale is a pixel larger (1001 px at 1.5x against 667 x 1.5 = 1000); the readback then cropped the frame and the scene left the drawable's last column unpainted. No frame, present, readback-format, design-import, Chromium, packaging or authority boundary moves; the Pulp render target has not adopted a Vellum package.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "ctest --test-dir build -R 'SkiaSurface persistent scene matches a fractional-DPI swapchain'",
+    "ctest --test-dir build -R 'SkiaSurface reads back a presentable frame at the swapchain'"
+  ],
+  "disposition": "pulp-only",
+  "vellum_inherits": true
+}

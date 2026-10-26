@@ -321,6 +321,215 @@ class AuComponentPreflightTests(unittest.TestCase):
             self.assertIn("FAIL: auval list: aumf PHBn Pulp not listed", out)
             self.assertIn("listed 2 Apple component(s) and no non-Apple components", out)
 
+    def test_auval_list_requires_exact_manufacturer_token(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            bundle = _make_bundle(pathlib.Path(d))
+            with mock.patch.object(preflight.shutil, "which", return_value="/usr/bin/auval"), \
+                 mock.patch.object(preflight.subprocess, "run") as run:
+                run.return_value = preflight.subprocess.CompletedProcess(
+                    args=["auval"], returncode=0, stdout="aumf PHBn PulpFake  -  Fake\n"
+                )
+                rc, out = self._run([
+                    str(bundle), "--expect-type", "aumf", "--expect-subtype", "PHBn",
+                    "--expect-manufacturer", "Pulp", "--check-auval-list",
+                ])
+            self.assertEqual(rc, 1)
+            self.assertIn("not listed", out)
+
+    def test_apple_only_inventory_gets_typed_registrar_diagnosis(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            bundle = _make_bundle(pathlib.Path(d))
+            outputs = {
+                "auval": "aufx bpas appl  -  Apple: AUBandpass\n",
+                "uname": "arm64\n",
+                "arch": "Rosetta 2 is not installed\n",
+                "launchctl domain": "Aqua\n",
+                "launchctl print": "service not found\n",
+                "pgrep": "",
+                "log": '[{"process":"AudioComponentRegistrar","processImagePath":"/usr/libexec/AudioComponentRegistrar",'
+                        '"eventMessage":"Rosetta runtime is not available!"}]\n',
+            }
+            def fake_which(name: str) -> str | None:
+                return "/usr/bin/" + name
+            def fake_run(command, **kwargs):
+                tool = command[0]
+                if tool == "/usr/bin/auval":
+                    return preflight.subprocess.CompletedProcess(command, 0, outputs["auval"])
+                if tool == "uname":
+                    return preflight.subprocess.CompletedProcess(command, 0, outputs["uname"])
+                if tool == "arch":
+                    return preflight.subprocess.CompletedProcess(command, 1, outputs["arch"])
+                if tool == "/usr/bin/file":
+                    return preflight.subprocess.CompletedProcess(command, 0, "Mach-O 64-bit executable arm64\n")
+                if tool == "/usr/bin/launchctl" and command[1] == "managername":
+                    return preflight.subprocess.CompletedProcess(command, 0, outputs["launchctl domain"])
+                if tool == "/usr/bin/launchctl":
+                    return preflight.subprocess.CompletedProcess(command, 1, outputs["launchctl print"])
+                if tool == "/usr/bin/pgrep":
+                    return preflight.subprocess.CompletedProcess(command, 1, outputs["pgrep"])
+                if tool == "/usr/bin/log":
+                    return preflight.subprocess.CompletedProcess(command, 0, outputs["log"])
+                raise AssertionError(command)
+            with mock.patch.object(preflight.shutil, "which", side_effect=fake_which), \
+                 mock.patch.object(preflight.subprocess, "run", side_effect=fake_run):
+                rc, out = self._run([
+                    str(bundle), "--expect-type", "aumf", "--expect-subtype", "PHBn",
+                    "--expect-manufacturer", "Pulp", "--check-auval-list", "--format", "json",
+                ])
+            data = json.loads(out)
+            self.assertEqual(rc, 1)
+            checks = {item["label"]: item for item in data["checks"]}
+            self.assertEqual(checks["auval list"]["code"], "SYSTEM_REGISTRAR_APPLE_ONLY")
+            self.assertEqual(checks["Rosetta"]["code"], "HOST_ROSETTA_MISSING")
+            self.assertEqual(checks["registrar logs"]["code"], "REGISTRAR_ROSETTA_FAILURE")
+
+    def test_log_command_cannot_self_trigger_rosetta_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            bundle = _make_bundle(pathlib.Path(d))
+            def fake_which(name: str) -> str | None:
+                return "/usr/bin/" + name
+            def fake_run(command, **kwargs):
+                if command[:2] == ["uname", "-m"]:
+                    return preflight.subprocess.CompletedProcess(command, 0, "arm64\n")
+                if command[0] == "/usr/bin/file":
+                    return preflight.subprocess.CompletedProcess(command, 0, "Mach-O universal binary arm64 x86_64\n")
+                if command[0] in ("arch", "/usr/bin/arch"):
+                    return preflight.subprocess.CompletedProcess(command, 0, "")
+                if command[0] == "/usr/bin/launchctl":
+                    return preflight.subprocess.CompletedProcess(command, 0, "Aqua\n")
+                if command[0] == "/usr/bin/log":
+                    return preflight.subprocess.CompletedProcess(
+                        command, 0,
+                        '{"process":"log","eventMessage":"args=--predicate process == '
+                        'AudioComponentRegistrar eventMessage CONTAINS[c] Rosetta runtime is not available"}\n',
+                    )
+                raise AssertionError(command)
+            with mock.patch.object(preflight.shutil, "which", side_effect=fake_which), \
+                 mock.patch.object(preflight.subprocess, "run", side_effect=fake_run):
+                checks = preflight._diagnose_host(type("Args", (), {"bundle": bundle})())
+            logs = next(check for check in checks if check.label == "registrar logs")
+            self.assertTrue(logs.ok)
+            self.assertEqual(logs.code, "REGISTRAR_LOGS_CLEAR")
+
+    def _auval_list_with_installed(self, installed_roots: list[pathlib.Path], bundle: pathlib.Path) -> tuple[int, str]:
+        with mock.patch.object(preflight.shutil, "which", return_value="/usr/bin/auval"), \
+             mock.patch.object(preflight, "_component_dirs", return_value=tuple(installed_roots)), \
+             mock.patch.object(preflight.subprocess, "run") as run:
+            run.return_value = preflight.subprocess.CompletedProcess(
+                args=["auval"], returncode=0, stdout="aumf PHBn Pulp  -  Pulp: PulpHostBench\n"
+            )
+            return self._run([
+                str(bundle), "--expect-type", "aumf", "--expect-subtype", "PHBn",
+                "--expect-manufacturer", "Pulp", "--check-auval-list",
+            ])
+
+    def test_auval_list_passes_when_the_bundle_is_the_only_installed_copy(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            user, system = pathlib.Path(d) / "user", pathlib.Path(d) / "system"
+            user.mkdir()
+            system.mkdir()
+            bundle = _make_bundle(user)
+            rc, out = self._auval_list_with_installed([user, system], bundle)
+            self.assertEqual(rc, 0, out)
+            self.assertIn("PASS: auval list", out)
+
+    def test_auval_list_fails_when_another_install_declares_the_same_component(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            user, system = pathlib.Path(d) / "user", pathlib.Path(d) / "system"
+            user.mkdir()
+            system.mkdir()
+            bundle = _make_bundle(user)
+            shadow = _make_bundle(system)
+            rc, out = self._auval_list_with_installed([user, system], bundle)
+            self.assertEqual(rc, 1, out)
+            self.assertIn("FAIL: auval list: aumf PHBn Pulp is listed, but also declared by", out)
+            self.assertIn(str(shadow), out)
+
+    def test_a_failed_log_query_does_not_clear_the_registrar(self) -> None:
+        def fake_which(name: str) -> str | None:
+            return "/usr/bin/" + name
+        def fake_run(command, **kwargs):
+            if command[0] == "/usr/bin/launchctl":
+                return preflight.subprocess.CompletedProcess(command, 0, "Aqua\n")
+            if command[0] == "/usr/bin/log":
+                return preflight.subprocess.CompletedProcess(command, 1, "log: Must be admin to run 'show'\n")
+            raise AssertionError(command)
+        with mock.patch.object(preflight.shutil, "which", side_effect=fake_which), \
+             mock.patch.object(preflight.subprocess, "run", side_effect=fake_run):
+            checks = preflight._check_registrar()
+        logs = next(check for check in checks if check.label == "registrar logs")
+        self.assertFalse(logs.ok)
+        self.assertEqual(logs.code, "REGISTRAR_LOG_QUERY_FAILED")
+
+    def test_host_probe_timeout_is_bounded(self) -> None:
+        with mock.patch.object(preflight.subprocess, "run",
+                               side_effect=preflight.subprocess.TimeoutExpired(["log"], 10.0)):
+            result = preflight._run_probe(["log", "show"])
+        self.assertEqual(result.returncode, 124)
+        self.assertIn("timed out after 10s", result.stdout)
+
+    def test_binary_architecture_rejects_non_macho_file(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            bundle = _make_bundle(pathlib.Path(d))
+            def fake_which(name: str) -> str | None:
+                return "/usr/bin/" + name
+            def fake_run(command, **kwargs):
+                if command[:2] == ["uname", "-m"]:
+                    return preflight.subprocess.CompletedProcess(command, 0, "x86_64\n")
+                if command[0] == "/usr/bin/file":
+                    return preflight.subprocess.CompletedProcess(command, 0, "ASCII text\n")
+                if command[0] == "/usr/bin/launchctl":
+                    return preflight.subprocess.CompletedProcess(command, 0, "Background\n")
+                if command[0] == "/usr/bin/log":
+                    return preflight.subprocess.CompletedProcess(command, 0, "")
+                raise AssertionError(command)
+            with mock.patch.object(preflight.shutil, "which", side_effect=fake_which), \
+                 mock.patch.object(preflight.subprocess, "run", side_effect=fake_run):
+                checks = preflight._check_host_architecture(bundle)
+            binary = next(check for check in checks if check.label == "binary architecture")
+            self.assertFalse(binary.ok)
+            self.assertEqual(binary.code, "BINARY_ARCHITECTURE_MISMATCH")
+
+    def test_intel_host_rejects_arm_only_binary(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            bundle = _make_bundle(pathlib.Path(d))
+            def fake_which(name: str) -> str | None:
+                return "/usr/bin/" + name
+            def fake_run(command, **kwargs):
+                if command[:2] == ["uname", "-m"]:
+                    return preflight.subprocess.CompletedProcess(command, 0, "x86_64\n")
+                if command[0] == "/usr/bin/file":
+                    return preflight.subprocess.CompletedProcess(command, 0, "Mach-O 64-bit executable arm64\n")
+                raise AssertionError(command)
+            with mock.patch.object(preflight.shutil, "which", side_effect=fake_which), \
+                 mock.patch.object(preflight.subprocess, "run", side_effect=fake_run):
+                checks = preflight._check_host_architecture(bundle)
+            binary = next(check for check in checks if check.label == "binary architecture")
+            self.assertFalse(binary.ok)
+            self.assertEqual(binary.code, "BINARY_ARCHITECTURE_MISMATCH")
+
+    def test_diagnosis_reports_non_arm64_without_rosetta_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            bundle = _make_bundle(pathlib.Path(d))
+            def fake_which(name: str) -> str | None:
+                return "/usr/bin/" + name
+            def fake_run(command, **kwargs):
+                if command[:2] == ["uname", "-m"]:
+                    return preflight.subprocess.CompletedProcess(command, 0, "x86_64\n")
+                if command[0] == "/usr/bin/file":
+                    return preflight.subprocess.CompletedProcess(command, 0, "Mach-O 64-bit executable x86_64\n")
+                if command[0] == "/usr/bin/launchctl":
+                    return preflight.subprocess.CompletedProcess(command, 0, "Background\n")
+                if command[0] == "/usr/bin/log":
+                    return preflight.subprocess.CompletedProcess(command, 0, "")
+                raise AssertionError(command)
+            with mock.patch.object(preflight.shutil, "which", side_effect=fake_which), \
+                 mock.patch.object(preflight.subprocess, "run", side_effect=fake_run):
+                checks = preflight._diagnose_host(type("Args", (), {"bundle": bundle})())
+            rosetta = next(check for check in checks if check.label == "Rosetta")
+            self.assertTrue(rosetta.ok)
+            self.assertEqual(rosetta.code, "ROSETTA_NOT_REQUIRED")
+
     def test_json_output_is_machine_readable(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             bundle = _make_bundle(pathlib.Path(d))
@@ -339,6 +548,34 @@ class AuComponentPreflightTests(unittest.TestCase):
                 "ok": True,
                 "detail": "aumf",
             }, data["checks"])
+
+    def test_auval_list_timeout_is_typed_and_bounded(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            bundle = _make_bundle(pathlib.Path(d))
+            with mock.patch.object(preflight.shutil, "which", return_value="/usr/bin/auval"), \
+                 mock.patch.object(preflight.subprocess, "run", side_effect=preflight.subprocess.TimeoutExpired(["auval", "-a"], 0.1)):
+                rc, out = self._run([
+                    str(bundle), "--expect-type", "aumf", "--expect-subtype", "PHBn",
+                    "--expect-manufacturer", "Pulp", "--check-auval-list", "--auval-timeout", "0.1",
+                    "--format", "json",
+                ])
+            data = json.loads(out)
+            self.assertEqual(rc, 1)
+            check = next(item for item in data["checks"] if item["label"] == "auval list")
+            self.assertEqual(check["code"], "AUVAL_TIMEOUT")
+            self.assertIn("timed out", check["detail"])
+
+    def test_auval_validation_timeout_is_typed(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            bundle = _make_bundle(pathlib.Path(d))
+            with mock.patch.object(preflight.shutil, "which", return_value="/usr/bin/auval"), \
+                 mock.patch.object(preflight.subprocess, "run", side_effect=preflight.subprocess.TimeoutExpired(["auval", "-v"], 0.1)):
+                rc, out = self._run([
+                    str(bundle), "--expect-type", "aumf", "--expect-subtype", "PHBn",
+                    "--expect-manufacturer", "Pulp", "--run-auval", "--auval-timeout", "0.1",
+                ])
+            self.assertEqual(rc, 1)
+            self.assertIn("FAIL: auval: run 1/2 timed out", out)
 
     def test_auval_repeat_runs_requested_number_of_times(self) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -360,6 +597,35 @@ class AuComponentPreflightTests(unittest.TestCase):
             self.assertEqual(run.call_count, 2)
             self.assertIn("PASS: auval: run 1/2", out)
             self.assertIn("PASS: auval: run 2/2", out)
+
+    def test_auval_requires_exact_success_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            bundle = _make_bundle(pathlib.Path(d))
+            with mock.patch.object(preflight.shutil, "which", return_value="/usr/bin/auval"), \
+                 mock.patch.object(preflight.subprocess, "run") as run:
+                run.return_value = preflight.subprocess.CompletedProcess(
+                    args=["auval"], returncode=0, stdout="NOT PASS\n"
+                )
+                rc, out = self._run([
+                    str(bundle), "--expect-type", "aumf", "--expect-subtype", "PHBn",
+                    "--expect-manufacturer", "Pulp", "--run-auval", "--auval-repeat", "1",
+                ])
+            self.assertEqual(rc, 1)
+            self.assertIn("FAIL: auval: run 1/1 failed", out)
+
+    def test_auval_accepts_real_success_marker_period(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            bundle = _make_bundle(pathlib.Path(d))
+            with mock.patch.object(preflight.shutil, "which", return_value="/usr/bin/auval"), \
+                 mock.patch.object(preflight.subprocess, "run") as run:
+                run.return_value = preflight.subprocess.CompletedProcess(
+                    args=["auval"], returncode=0, stdout="AU VALIDATION SUCCEEDED.\n"
+                )
+                rc, out = self._run([
+                    str(bundle), "--expect-type", "aumf", "--expect-subtype", "PHBn",
+                    "--expect-manufacturer", "Pulp", "--run-auval", "--auval-repeat", "1",
+                ])
+            self.assertEqual(rc, 0, out)
 
     def test_rejects_invalid_auval_repeat(self) -> None:
         with tempfile.TemporaryDirectory() as d:

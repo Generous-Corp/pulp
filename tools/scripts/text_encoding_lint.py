@@ -35,6 +35,9 @@ import subprocess
 import sys
 from typing import Callable, Iterable
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from gate_common import commit_blobs  # noqa: E402
+
 SCOPES = ("tools/", "test/")
 BASELINE = pathlib.Path("tools/scripts/text_encoding_baseline.json")
 SUBPROCESS_TEXT = {"run", "check_output", "check_call", "Popen"}
@@ -168,28 +171,6 @@ def tracked_python_at(root: pathlib.Path, rev: str) -> list[str]:
     )
     return sorted(p for p in result.stdout.decode("utf-8").split("\0")
                   if p.endswith(".py") and p.startswith(SCOPES))
-
-
-def blobs_at(root: pathlib.Path, rev: str, paths: Iterable[str]) -> dict[str, str]:
-    """Each path's content in commit ``rev``, read in one ``git cat-file --batch``."""
-    paths = list(paths)
-    if not paths:
-        return {}
-    request = "".join(f"{rev}:{rel}\n" for rel in paths).encode("utf-8")
-    out = subprocess.run(["git", "cat-file", "--batch"], cwd=root, input=request,
-                         capture_output=True, check=True).stdout
-    texts: dict[str, str] = {}
-    at = 0
-    for rel in paths:
-        header_end = out.index(b"\n", at)
-        header = out[at:header_end].split()
-        at = header_end + 1
-        if len(header) < 3 or header[1] != b"blob":
-            continue  # "<spec> missing": not in that commit
-        size = int(header[2])
-        texts[rel] = out[at:at + size].decode("utf-8", errors="replace")
-        at += size + 1
-    return texts
 
 
 def changed_lines(root: pathlib.Path, base: str, head: str = "HEAD") -> dict[str, set[int]]:
@@ -334,7 +315,7 @@ def main(argv: list[str] | None = None,
     try:
         if args.head:
             files = tracked_python_at(root, args.head)
-            texts = blobs_at(root, args.head, [*files, BASELINE.as_posix()])
+            texts = commit_blobs(root, args.head, [*files, BASELINE.as_posix()])
         else:
             files = list_files(root)
     except (OSError, ValueError, subprocess.CalledProcessError) as exc:
@@ -345,9 +326,16 @@ def main(argv: list[str] | None = None,
         return 2
     baseline_path = root / BASELINE
     if texts is not None:
+        # The committed baseline: a raised or deleted working-tree copy is not
+        # what the push sends, so it must not decide the verdict.
         committed = texts.pop(BASELINE.as_posix(), None)
-        baseline = ({str(k): int(v) for k, v in json.loads(committed).get("files", {}).items()}
-                    if committed else {})
+        try:
+            baseline = ({str(k): int(v) for k, v in json.loads(committed).get("files", {}).items()}
+                        if committed else {})
+        except (ValueError, AttributeError, TypeError) as exc:
+            print(f"text-encoding-lint: {BASELINE} in {args.head} is not a valid baseline: {exc}",
+                  file=sys.stderr)
+            return 2
     else:
         baseline = load_baseline(baseline_path)
     counts, details = counts_for(root, files, texts)

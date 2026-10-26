@@ -523,6 +523,17 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
     [self resizeEditorToViewBounds];
 }
 
+// An AU host that closes the plug-in window keeps this controller and its
+// view host for the next open; return the GPU memory the hidden editor is
+// not drawing with.
+- (void)viewDidDisappear {
+    [super viewDidDisappear];
+    // AppKit sends appearance callbacks on the main thread, where the host
+    // renders. A trim from any other thread would race a frame, so skip it.
+    if (_viewHost && [NSThread isMainThread])
+        _viewHost->release_gpu_caches();
+}
+
 - (void)viewWillTransitionToSize:(NSSize)newSize {
     // AUViewController on macOS may not always route through this selector —
     // viewDidLayout is the authority. This is a belt-and-suspenders for hosts

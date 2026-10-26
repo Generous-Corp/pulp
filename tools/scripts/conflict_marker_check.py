@@ -62,6 +62,9 @@ import sys
 import tempfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from gate_common import commit_blobs  # noqa: E402
+
 # ── Marker signatures ──────────────────────────────────────────────────────
 # A git conflict block is bounded by a start and an end marker and (in diff3
 # mode) a base marker: exactly seven of the character, at column 0, followed by
@@ -109,7 +112,13 @@ def scan_file(path: Path, rel: str) -> list[str]:
         return []
     if _is_binary(data):
         return []
-    text = data.decode("utf-8", "ignore")
+    return scan_text(data.decode("utf-8", "ignore"), rel)
+
+
+def scan_text(text: str, rel: str) -> list[str]:
+    """Return one message per conflict-marker line found in `text`."""
+    if "\0" in text[:8000]:
+        return []
 
     hits: list[tuple[int, str]] = []  # (lineno, kind)
     saw_start_or_end = False
@@ -132,6 +141,27 @@ def scan_file(path: Path, rel: str) -> list[str]:
         "landing this file."
         for lineno, kind in hits
     ]
+
+
+def run_commit(root: Path, base: str, rev: str) -> list[str]:
+    """Scan what a push of `rev` sends: the files `base...rev` changes, read
+    from `rev`'s blobs. Files the range does not touch equal the base, which
+    this guard already holds clean; a file resolved on disk but not committed
+    is judged as committed."""
+    try:
+        names = subprocess.run(
+            ["git", "-C", str(root), "diff", "--name-only", "-z", "--diff-filter=ACMR",
+             f"{base}...{rev}"], check=True, capture_output=True,
+        ).stdout.decode("utf-8", "surrogateescape").split("\0")
+        files = [n for n in names if n and n not in ALLOWLIST]
+        texts = commit_blobs(root, rev, files)
+    except (OSError, subprocess.CalledProcessError):
+        return [f"conflict-marker: not a git working tree — cannot read {rev}."]
+    violations: list[str] = []
+    for rel in files:
+        if rel in texts:
+            violations.extend(scan_text(texts[rel], rel))
+    return violations
 
 
 def run(root: Path) -> list[str]:
@@ -243,6 +273,36 @@ def selftest() -> int:
         False,
     )
 
+    # The pushed commit, not the working tree: markers committed and then
+    # resolved on disk without a commit are still in the push.
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        git = ["git", "-C", str(root)]
+        subprocess.run([*git, "init", "-q"], check=True)
+        subprocess.run([*git, "config", "user.email", "t@example.invalid"], check=True)
+        subprocess.run([*git, "config", "user.name", "T"], check=True)
+        (root / "src.cpp").write_text("int a;\n", encoding="utf-8")
+        subprocess.run([*git, "add", "-A"], check=True)
+        subprocess.run([*git, "commit", "-q", "-m", "seed"], check=True)
+        (root / "src.cpp").write_text(conflict, encoding="utf-8")
+        subprocess.run([*git, "commit", "-q", "-am", "markers"], check=True)
+        (root / "src.cpp").write_text("int a;\nint b;\n", encoding="utf-8")
+        pushed = run_commit(root, "HEAD~1", "HEAD")
+        disk = run(root)
+        ok = bool(pushed) and not disk
+        failures += 0 if ok else 1
+        print(f"[{'ok' if ok else 'FAIL'}] committed markers flagged under --rev though resolved"
+              f" on disk (disk scan, the control, sees {len(disk)}); found={len(pushed)}")
+        # And uncommitted markers do not fail a clean commit.
+        (root / "src.cpp").write_text("int a;\n", encoding="utf-8")
+        subprocess.run([*git, "commit", "-q", "-am", "resolve"], check=True)
+        (root / "src.cpp").write_text(conflict, encoding="utf-8")
+        clean = run_commit(root, "HEAD~1", "HEAD")
+        ok = not clean
+        failures += 0 if ok else 1
+        print(f"[{'ok' if ok else 'FAIL'}] uncommitted markers do not fail a clean commit;"
+              f" found={len(clean)}")
+
     # main() must return 2 (not 1) when handed a non-git directory. The
     # push:main workflow relies on this distinction: exit 1 means "markers
     # committed" (open the tracker), exit 2+ means "internal error" (fail the
@@ -265,13 +325,16 @@ def main(argv) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default=None, help="repo root (default: auto-detect)")
     parser.add_argument("--selftest", action="store_true", help="run fixture self-test")
+    parser.add_argument("--rev", help="scan the files base...REV changes, from REV's blobs "
+                                      "(the pre-push hook passes the pushed commit)")
+    parser.add_argument("--base", default="origin/main", help="base for --rev")
     args = parser.parse_args(argv[1:])
 
     if args.selftest:
         return selftest()
 
     root = Path(args.root) if args.root else Path(__file__).resolve().parents[2]
-    violations = run(root)
+    violations = run_commit(root, args.base, args.rev) if args.rev else run(root)
     if violations:
         for v in violations:
             print(v)

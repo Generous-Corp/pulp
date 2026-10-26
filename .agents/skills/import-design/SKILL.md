@@ -202,6 +202,16 @@ is rejected. A remote `https` font is read only with `--allow-browser-network`,
 and a used face whose staged file is absent fails as `capture-font-missing`,
 naming the authored path. Fixture: `test/fixtures/browser-capture-font-face-url`.
 
+`build_native_view_tree` registers them before materializing
+(`core/view/src/design_import_native_fonts.cpp`). Each unicode-range segment of a
+family goes under a private alias, `<family> [<12 hex>]`, named from its
+content. Every font-family stack naming the family is rewritten to list the
+aliases, last-defined first, in place of the family. So when you debug an
+imported Label's face, expect `effective_font_family()` to show aliases, not
+the CSS family. A face that can't be read or fails its manifest hash is
+skipped with `font-asset-unavailable`, and that family keeps resolving to host
+faces.
+
 ### Imported text looks heavier than Chromium: check font smoothing first
 
 Pulp's default glyph raster on macOS is Chromium's `-webkit-font-smoothing:
@@ -222,7 +232,10 @@ geometry is unknown.
 Separate weight from placement with
 `tools/import-validation/text_raster_decomposition.py crops` (ink ratio,
 centroid, integer shift, transfer curve per text node) before you touch
-baselines. On macOS the skia screenshot backend lives in
+baselines. It measures ink on either side of the box's background, so dark
+text on a light panel reads as reliably as light on dark. Numbers it reported
+for dark-on-light labels before it did were the glyphs' light fringe, not the
+glyphs. On macOS the skia screenshot backend lives in
 `core/view/platform/mac/screenshot_mac.mm`. `core/view/src/screenshot_skia.cpp`
 is the non-Apple path, so a surface change made only there never reaches a
 macOS render.
@@ -269,6 +282,15 @@ type=button|submit|reset>` is the same theme part: it lowers the same way, its
 value (or the UA's `Submit` / `Reset` default) the `#control-value` label child.
 An author-styled button or button input keeps its captured paint and stays a
 frame.
+
+The differential lab knows which themed controls the lowering reskins
+(`THEME_SKINNED_TAGS` / `THEME_SKINNED_INPUT_TYPES` in
+`tools/import-validation/importer_differential/form_controls.py`, kept equal to
+what `record_ua_control_state` records by a test). Those report
+`ua-theme-skinned`, whose residual counts against the importer; every other
+themed control (a select's arrow, text fields, meter, progress, the picker
+types) stays the `ua-default-form-chrome` support boundary. Add a control to
+both when you give it a native skin.
 
 ### Packaged SDK runtime contract
 
@@ -972,6 +994,15 @@ knowing before you touch that file:
   representation nodes and must be reported separately from browser element
   precision/recall. Keep the visual threshold intact: text antialiasing can
   dominate the pixel diff even when structure and geometry are exact.
+
+  **Capture-moment gotcha:** the lab's two lanes are two Chromium captures,
+  and the native IR is lowered from the candidate lane's. On an animated panel
+  the browser lane's screenshot is a different frame: Spectr's two captures
+  disagree on 42,764 spectrum pixels before any native render is involved. The
+  visual lens therefore scores against `candidate/browser.png` when the lanes'
+  DOM snapshots share a semantic digest, and reports the gap between the two
+  captures as `visual.reference.capture_moment_residual`. Do not read a visual
+  score against the browser lane's screenshot as fidelity on an animated panel.
 
   The authored-fixture validator also records the native Skia PNG itself, its
   hash and size, and the browser/native comparator result. This closes the
@@ -3616,7 +3647,23 @@ match:
   `[pulp:warn] design-import:` line. "Unknown" means `kind_from_type` does not
   recognize the type and it is not a vector kind. The warning fires even when
   the node's audio role or name still resolves it. Duplicates are found by a
-  document-order walk of `stable_anchor_id`.
+  document-order walk of `stable_anchor_id` (`find_duplicate_anchors`).
+- **Repeated derived anchors are disambiguated; repeated explicit ones refuse.**
+  Every binder, tweak and lock addresses a node by its anchor, and the baked
+  C++ binder binds only on exactly one match, so a repeat silently loses its
+  binding. A content hash does not include the parent, so identical subtrees
+  under different parents (two cards, each an unlabelled slider) hash alike.
+  `assign_anchors` therefore runs a collision pass: the first node in document
+  order keeps the anchor, as does every node whose anchor was already unique,
+  and each later derived anchor (content hash, or the adapter fallback for a
+  node with no source id) is rehashed with its parent's anchor, then further
+  ancestors', until it is held by nothing else in the tree. The CLI runs the
+  same pass (`resolve_anchor_collisions`) for IRs that arrive already anchored,
+  then exits 2 only when two nodes carry the same explicit identity (a source
+  id or an authored anchor), naming each. The materializer keeps warning so an
+  already-built IR still renders. The adapter fallback also needs the
+  per-signature sibling index `content_hash` uses (counted over id-less
+  siblings only), or every id-less sibling of one shape gets one anchor.
 - **A successful decode does not prove an image is intact.** Skia's PNG
   decoder fills the rows of a truncated file with transparent pixels and
   returns `kSuccess`, and the node paints blank. `canvas::probe_image_file`
@@ -4494,6 +4541,16 @@ opacity layer is the backdrop root, as in Chrome. Chrome's numbers come from
 `tools/import-validation/chrome_backdrop_opacity_oracle.py` over fixture
 `22-backdrop-opacity`, and `pulp-test-css-backdrop-opacity` holds Skia to them.
 
+**Backdrop edges are mirrored:** at a frosted box's edge, Chrome blurs the
+backdrop as if the box's own content were mirrored past its edges. It neither
+repeats the edge column outward nor reads the page beside the box. The Skia
+backdrop paths feed the blur `SkImageFilters::Crop(bounds, kMirror)` and
+crop only the output; passing the rect as the blur's own crop rect clamps the
+input instead, and a bright line just inside the edge smears up to 30 levels
+too bright. The fixture's sixth box starts on a 4px amber band, and the
+oracle prints Chrome's profile across that edge (row 210) for the
+`backdrop-filter mirrors the box at its edges` test.
+
 ### Step 1: Identify source and input
 
 Ask the user or detect from context:
@@ -4718,8 +4775,19 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   materialized document and the screenshot horizon. Each pass
   settles only what an earlier one did not, or what the page restarted, and
   counts each animation and video once: a finite Web Animation is `finish()`ed (its
-  resting frame), an infinite or unresolved one is paused at `currentTime 0`,
-  and a video is paused and rewound to its first frame unless it still shows
+  resting frame), an infinite or unresolved one is paused at `currentTime 0`
+  and then committed and cancelled (`commitStyles()` writes the time-zero
+  values inline, `cancel()` drops the animation). A browser at its real device
+  scale kept presenting a merely paused composited animation mid-cycle while
+  the page read time zero, and nothing is left to hold once it is cancelled.
+  The page's own reference becomes idle, and restarting it is settled again.
+  A `button`, `input`, `textarea`, `select` or `progress` target is only
+  paused: the form-control theme check counts inline styling as author
+  styling, so committing would flip a theme-painted control to author-styled.
+  Under the real-scale launch it can still show the mid-cycle frame. So is a
+  target whose inline style declares an animated property `!important`:
+  committing would rewrite that declaration at normal priority.
+  A video is paused and rewound to its first frame unless it still shows
   its poster. CSS animations and transitions stay on the stylesheet path, and
   scroll- or view-driven animations are left to the fixed scroll position. An
   animated GIF, APNG or WebP runs on the decoder's clock, so it is left alone

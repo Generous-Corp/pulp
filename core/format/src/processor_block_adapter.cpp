@@ -103,8 +103,8 @@ bool process_processor_block(Processor& processor, ProcessBlock& block,
         processor.set_ump_input(ump);
         processor.set_param_events(params);
         runtime::ScopedNoAlloc no_alloc_guard;
-        std::array<ProcessBusBufferView<const float>, BusBufferSet::kMaxBuses> input_views{};
-        std::array<ProcessBusBufferView<float>, BusBufferSet::kMaxBuses> output_views{};
+        auto& input_views = scratch.input_views;
+        auto& output_views = scratch.output_views;
         std::size_t input_count = 0;
         std::size_t output_count = 0;
         for (const auto& bus : block.buses->buses()) {

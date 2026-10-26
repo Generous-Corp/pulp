@@ -262,7 +262,10 @@ pulp_add_test_suite(pulp-test-safe-relative-path GROUP pulp-test-group-core-runt
 pulp_add_test_suite(pulp-test-xml-zip GROUP pulp-test-group-core-runtime
     LIBRARIES pulp::runtime)
 
-# pulp_add_binary_data(COMPRESS) round trip through zlib_decompress.
+# pulp_add_binary_data(COMPRESS) round trip through zlib_decompress. The module
+# is included here because GPU-off configures never load the app/UI modules
+# that otherwise bring it in.
+include(${CMAKE_SOURCE_DIR}/tools/cmake/PulpEmbedData.cmake)
 pulp_add_binary_data(pulp-test-embed-compress-data
     SOURCES ${CMAKE_SOURCE_DIR}/core/view/js/css-colors.js
     NAMESPACE embed_compress_fixture

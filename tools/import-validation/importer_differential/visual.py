@@ -86,6 +86,40 @@ def score_images(ref_image: Any, candidate_image: Any, output_dir: Path,
     }
 
 
+def capture_moment_residual(first_path: Path, second_path: Path,
+                            device_scale_factor: float) -> dict[str, Any]:
+    """How far two Chromium screenshots of the same page disagree.
+
+    Uses the same per-pixel test as `score_images` (a channel-sum or alpha
+    delta above 2). Two captures of a static page agree exactly; what differs
+    is what the page changed between the two capture moments.
+    """
+    from PIL import Image, ImageChops
+
+    with Image.open(first_path) as first, Image.open(second_path) as second:
+        first_rgba = first.convert("RGBA")
+        second_rgba = second.convert("RGBA")
+    if first_rgba.size != second_rgba.size:
+        raise LabError("the two lanes' browser screenshots differ in size")
+    red, green, blue, alpha = ImageChops.difference(first_rgba, second_rgba).split()
+    # The sum saturates at 255, which the "> 2" test never needs to see past.
+    channel_sum = ImageChops.add(ImageChops.add(red, green), blue)
+    differs = ImageChops.lighter(
+        channel_sum.point(lambda value: 255 if value > 2 else 0),
+        alpha.point(lambda value: 255 if value > 2 else 0))
+    count = differs.histogram()[255]
+    box = differs.getbbox()
+    scale = float(device_scale_factor)
+    total = first_rgba.width * first_rgba.height
+    return {
+        "differing_pixel_count": count,
+        "differing_pixel_fraction": round(count / max(1, total), 6),
+        "bounds_css": None if box is None else [
+            round(box[0] / scale, 3), round(box[1] / scale, 3),
+            round((box[2] - box[0]) / scale, 3), round((box[3] - box[1]) / scale, 3)],
+    }
+
+
 def outside_frame_ink(image: Any, own_frame: tuple[int, int, int, int]) -> dict[str, Any]:
     """How much of an image outside its authored frame departs from its background."""
     background = Counter(image.get_flattened_data()).most_common(1)[0][0]
