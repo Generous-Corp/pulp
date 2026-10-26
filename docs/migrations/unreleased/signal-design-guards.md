@@ -1,0 +1,32 @@
+---
+breaking = false
+summary = "Biquad designs clamp the frequency to 0.49 x sample rate, the FDN loop EQ bound covers overshooting shelves, and Fft::forward_real handles 1- and 2-point transforms on Apple"
+---
+
+## What changed
+
+- `BiquadT::set_coefficients(Type, freq, q, sample_rate, gain)` clamps
+  `freq` to at most 0.49 × `sample_rate`. At or above Nyquist the RBJ formulas
+  give a pole on or outside the unit circle (a lowpass at 20 kHz and 32 kHz had
+  `a2 = 3.0`), so the filter's output grew to inf/NaN and stayed there. Designs
+  at or below 0.49 × `sample_rate` are bit-identical. A design between 0.49 and
+  0.5 of the rate is moved to 0.49. The in-tree EQs (parametric EQ, the FDN
+  loop EQ, the EQ curve view) already clamped to 0.49 or lower. Callers that
+  passed the user's frequency through unclamped, such as the speaker cabinet and
+  noise tilt shelves, are now covered by the designer.
+- `fdn::LoopEq::worst_case_boost()` takes the cascade's measured peak when a
+  shelf band has Q above 1/√2. RBJ shelves steeper than that overshoot their
+  own gain near the corner, and a cut shelf rises above unity there. The
+  product-of-gains bound then understated the per-pass gain, and the reverb's
+  stability normalization relied on it. Banks of peaking bands and shelves with
+  Q at or below 1/√2, which includes every default band, keep the previous
+  bound exactly, so their output is unchanged.
+- `Fft::forward_real` on Apple sends sizes below 4 to the portable transform,
+  as every other real transform already did. vDSP's packed real transform needs
+  two complex points, so sizes 1 and 2 used to give wrong output.
+
+## What to do
+
+Nothing, unless you relied on a design above 0.49 × the sample rate. If you
+did, that filter was unstable; clamp the frequency yourself if you need a
+different ceiling.

@@ -273,7 +273,11 @@ public:
         rt::count_fft();
 #if PULP_FFT_HAS_VDSP
         if constexpr (std::is_same_v<SampleType, float>) {
-            forward_real_vdsp(input, output);
+            if (size_ >= kVdspMinRealSize) {
+                forward_real_vdsp(input, output);
+                return;
+            }
+            forward_real_fallback(input, output);
         } else {
             forward_real_fallback(input, output);
         }

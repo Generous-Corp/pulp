@@ -343,9 +343,9 @@ struct MultiBackendFft::Impl {
         // DftiSetValue is variadic — for a single-precision descriptor the
         // expected trailing argument is `float`. We pass the float through
         // the variadic interface; the compiler emits the right ABI dance
-        // (varargs promote float → double, MKL recovers it via va_arg). The
-        // standalone `fn_set_f` typed alias that previously aliased the
-        // same dlsym handle was undefined behavior.
+        // (varargs promote float → double, MKL recovers it via va_arg). Do
+        // not call it through a fixed-signature float alias of the same
+        // dlsym handle: that is undefined behavior.
         b.set(mkl_desc, mkl_dyn::DFTI_BACKWARD_SCALE,
               1.0f / static_cast<float>(size));
         if (b.commit(mkl_desc) != 0)
