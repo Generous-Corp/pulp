@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 160,
+  "inventory_version": 161,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -42,14 +42,14 @@
     }
   ],
   "counts": {
-    "public_headers": 513,
-    "reviewed_headers": 260,
+    "public_headers": 514,
+    "reviewed_headers": 261,
     "legacy_unreviewed_headers": 253,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 121,
       "capability_support": 46,
-      "infrastructure": 91,
+      "infrastructure": 92,
       "legacy_unreviewed": 253,
       "unsupported_capability": 2
     },
@@ -97,8 +97,8 @@
         "unsupported_headers": 0
       },
       "host": {
-        "public_headers": 9,
-        "reviewed_headers": 9,
+        "public_headers": 10,
+        "reviewed_headers": 10,
         "legacy_unreviewed_headers": 0,
         "unsupported_headers": 0
       }
@@ -1145,6 +1145,15 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "host",
+      "source": "core/host/include/pulp/host/catalog_descriptor.hpp",
+      "fingerprint": "sha256:a0216389b97d7f048675e2ae41d94781db9ef390c178be0edcb2118334f28537",
+      "include": "pulp/host/catalog_descriptor.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Product-neutral catalog descriptor aliases and validates the host-facing descriptor and export machinery. It is reusable host infrastructure, while product-specific Forge headers, symbols, and serialization remain the compatibility authority; it is not an independently advertised generator-facing capability."
     },
     {
       "domain": "host",

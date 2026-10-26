@@ -23,6 +23,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/host/sample_region_authoring.hpp": "Pulp::host",
     "pulp/host/sample_region_proof.hpp": "Pulp::host",
     "pulp/host/sample_region_parameters.hpp": "Pulp::host",
+    "pulp/host/catalog_descriptor.hpp": "Pulp::host",
 
     "pulp/format/processor.hpp": "Pulp::format",
     "pulp/format/processor_node_adapter.hpp": "Pulp::format",
@@ -226,6 +227,19 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "It lets control and importer code validate graph identity/generation "
             "without claiming an installed DSP capability or pulling in the runtime "
             "implementation surface."
+        ),
+    },
+    {
+        "include": "pulp/host/catalog_descriptor.hpp",
+        "fingerprint": "sha256:a0216389b97d7f048675e2ae41d94781db9ef390c178be0edcb2118334f28537",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Product-neutral catalog descriptor aliases and validates the host-facing "
+            "descriptor and export machinery. It is reusable host infrastructure, "
+            "while product-specific Forge headers, symbols, and serialization remain "
+            "the compatibility authority; it is not an independently advertised "
+            "generator-facing capability."
         ),
     },
     {
