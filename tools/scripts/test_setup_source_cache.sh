@@ -950,7 +950,14 @@ echo "== the CHOC patch set applies once, is idempotent, and fails closed"
     # matches here matches the header Pulp actually fetches.
     write_choc_fixture() {
         local root="$1"
-        mkdir -p "$root/choc/javascript" "$root/choc/text"
+        mkdir -p "$root/choc/javascript" "$root/choc/text" "$root/choc/platform"
+        cat > "$root/choc/platform/choc_FileWatcher.h" <<'EOF'
+        FSEventStreamSetDispatchQueue (eventStream, dispatchQueue);
+        FSEventStreamStart (eventStream);
+            FSEventStreamStop (eventStream);
+            FSEventStreamInvalidate (eventStream);
+            FSEventStreamRelease (eventStream);
+EOF
         cat > "$root/choc/javascript/choc_javascript_V8.h" <<'EOF'
 #include "choc_javascript.h"
         isolate->SetHostImportModuleDynamicallyCallback (+[] (v8::Local<v8::Context> c,
@@ -998,6 +1005,7 @@ EOF
 include("$REPO_ROOT/tools/cmake/PulpPatchChoc.cmake")
 pulp_patch_choc_v8("$1/choc-src")
 pulp_patch_choc_json_number_exponent("$1/choc-src")
+pulp_patch_choc_file_watcher("$1/choc-src")
 EOF
     }
 
@@ -1006,9 +1014,10 @@ EOF
     write_patch_script "$tmp/good"
     v8h="$tmp/good/choc-src/choc/javascript/choc_javascript_V8.h"
     jsonh="$tmp/good/choc-src/choc/text/choc_JSON.h"
+    watchh="$tmp/good/choc-src/choc/platform/choc_FileWatcher.h"
     cmake -P "$tmp/good/patch.cmake" >/dev/null 2>&1
     check "$?" "0" "the patch set applies to a header carrying every reviewed anchor"
-    once="$(cat "$v8h" "$jsonh" | cksum)"
+    once="$(cat "$v8h" "$jsonh" "$watchh" | cksum)"
     check "$(grep -c 'v8-version.h' "$v8h")" "1" "the V8 version include is applied exactly once"
     check "$(grep -c -- '-> v8::MaybeLocal<v8::Promise>' "$v8h")" "1" \
         "the dynamic-import callback patch is applied exactly once"
@@ -1021,10 +1030,14 @@ EOF
     check "$(grep -c 'i < names->Length()' "$v8h")" "1" \
         "the index-loop property walk is applied exactly once"
     check "$(grep -c "popIf ('+')" "$jsonh")" "1" "the JSON exponent patch is applied exactly once"
+    check "$(grep -c 'dispatch_queue_set_specific' "$watchh")" "1" \
+        "the file watcher queue tag is applied exactly once"
+    check "$(grep -c 'dispatch_sync_f (dispatchQueue' "$watchh")" "1" \
+        "the file watcher drain is applied exactly once"
 
     cmake -P "$tmp/good/patch.cmake" >/dev/null 2>&1
     check "$?" "0" "a second configure over the patched headers succeeds"
-    twice="$(cat "$v8h" "$jsonh" | cksum)"
+    twice="$(cat "$v8h" "$jsonh" "$watchh" | cksum)"
     check "$twice" "$once" "a second configure leaves the patched headers unchanged"
 
     # Each anchor removed on its own must stop the configure and name its patch.
@@ -1035,15 +1048,20 @@ EOF
         'utf8|auto len = s.Utf8Length (isolate);|V8 UTF-8 string conversion' \
         'iterate|using IteratorType = decltype (iterator);|V8 v8ToChoc property walk' \
         'static|loadStaticModule (c, specifier);|V8 static-module instantiate callback' \
-        'json|popIf (.-.);|JSON exponent parser'
+        'json|popIf (.-.);|JSON exponent parser' \
+        'watchtag|FSEventStreamStart (eventStream);|file watcher queue tag' \
+        'watchdrain|FSEventStreamInvalidate (eventStream);|file watcher drain on destruction'
     do
         label="${case%%|*}"; rest="${case#*|}"
         pattern="${rest%%|*}"; patch_name="${rest#*|}"
         mkdir -p "$tmp/$label"
         write_choc_fixture "$tmp/$label/choc-src"
         write_patch_script "$tmp/$label"
-        if [ "$label" = json ]; then target="$tmp/$label/choc-src/choc/text/choc_JSON.h"
-        else target="$tmp/$label/choc-src/choc/javascript/choc_javascript_V8.h"; fi
+        case "$label" in
+            json) target="$tmp/$label/choc-src/choc/text/choc_JSON.h" ;;
+            watch*) target="$tmp/$label/choc-src/choc/platform/choc_FileWatcher.h" ;;
+            *) target="$tmp/$label/choc-src/choc/javascript/choc_javascript_V8.h" ;;
+        esac
         grep -v -- "$pattern" "$target" > "$target.new" && mv "$target.new" "$target"
         out="$(cmake -P "$tmp/$label/patch.cmake" 2>&1)"; rc=$?
         check "$([ "$rc" -ne 0 ] && echo failed || echo passed)" "failed" \

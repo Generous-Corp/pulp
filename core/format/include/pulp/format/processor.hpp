@@ -1296,8 +1296,10 @@ class ParamEventsOptOutMonitor {
             auto& slot = detail::param_events_opt_out_slots[(home + i) &
                                                             (detail::kParamEventsOptOutSlots - 1)];
             const void* expected = nullptr;
-            slot.read.store(false, std::memory_order_relaxed);
+            // Only a slot this monitor claims is reset: a probed slot may
+            // belong to another adapter whose record must survive.
             if (slot.queue.compare_exchange_strong(expected, queue, std::memory_order_acq_rel)) {
+                slot.read.store(false, std::memory_order_relaxed);
                 slot_ = &slot;
                 detail::param_events_opt_out_count.fetch_add(1, std::memory_order_relaxed);
                 return;

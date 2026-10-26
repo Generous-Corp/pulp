@@ -437,6 +437,38 @@ TEST_CASE("Forge compressor nodes default to branching and select decoupled ball
         const auto decoupled = render(1.0f, Ballistics::decoupled);
         CHECK(differs(by_default, branching) == 0);
         CHECK(differs(branching, decoupled) > 0);
+
+        // A patch saved before the control existed must render as it did
+        // then. These samples were rendered by the compressor that predates
+        // the ballistics control (Apple clang, arm64). Rebuilt for arm64 and
+        // x86-64, with and without contraction, the default render lands
+        // within 3.7e-9 of them; the 1e-5 tolerance leaves room for other
+        // libms, and the decoupled form, which a broken default would
+        // select, misses them by far more.
+        struct Stored {
+            std::size_t index;
+            float value;
+        };
+        static constexpr Stored kPreChange[] = {
+            {5, 1.701898500e-02f},     {336, 1.519011986e-02f},   {667, 2.435248531e-02f},
+            {998, 2.278942801e-02f},   {1329, 4.148724675e-02f},  {1660, 2.749615163e-02f},
+            {1991, 5.166805163e-02f},  {4308, -1.252994314e-02f}, {4639, 2.146920562e-02f},
+            {4970, -2.763011307e-02f}, {5301, 2.491727937e-03f},  {5632, -4.175488651e-02f},
+            {5963, -1.436426491e-02f}, {8280, -3.309924901e-02f}, {8611, -2.473986708e-02f},
+            {8942, -8.685382083e-03f},
+        };
+        double default_error = 0.0, decoupled_error = 0.0;
+        for (const auto& [index, value] : kPreChange) {
+            default_error =
+                std::max(default_error, std::abs(static_cast<double>(by_default[index]) -
+                                                 static_cast<double>(value)));
+            decoupled_error =
+                std::max(decoupled_error, std::abs(static_cast<double>(decoupled[index]) -
+                                                   static_cast<double>(value)));
+        }
+        INFO("default vs stored " << default_error << ", decoupled vs stored " << decoupled_error);
+        CHECK(default_error < 1.0e-5);
+        CHECK(decoupled_error > 1.0e-3);
     }
 
     SECTION("sidechain compressor") {

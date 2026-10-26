@@ -84,7 +84,18 @@ public:
             l->flex().preferred_height = 28;
             root->add_child(std::move(l));
         }
+        root->add_child(make_blurred_panel());
         return root;
+    }
+
+    // A blurred panel paints through a layer, so each frame leaves a scratch
+    // target in Skia's cache that a GPU trim can return.
+    static std::unique_ptr<view::View> make_blurred_panel() {
+        auto panel = std::make_unique<view::View>();
+        panel->set_background_color(canvas::Color::rgba8(90, 140, 220));
+        panel->set_filter_blur(4.0f);
+        panel->flex().preferred_height = 64;
+        return panel;
     }
 };
 
@@ -931,6 +942,169 @@ TEST_CASE("a knob drag on the mac CPU plugin host redraws the knob once per fram
         host->detach();
         host.reset();
         root.reset();
+        [window close];
+    }
+}
+
+TEST_CASE("a hidden GPU plugin host returns its GPU caches and repaints when shown (mac)",
+          "[gpu][skia][plugin-gpu-host][mac][gpu-trim]") {
+    smoke::clear_no_editor_env();
+    @autoreleasepool {
+        NSWindow* window =
+            [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, smoke::kW, smoke::kH)
+                                        styleMask:NSWindowStyleMaskTitled
+                                          backing:NSBackingStoreBuffered
+                                            defer:NO];
+        if (!window || !window.contentView)
+            SKIP("No Cocoa window available.");
+
+        smoke::GpuEditorProcessor p;
+        state::StateStore store;
+        p.set_state_store(&store);
+        p.define_parameters(store);
+        format::ViewBridge bridge(p, store);
+        std::string err;
+        REQUIRE(bridge.open(&err));
+
+        view::PluginViewHost::Options opts;
+        opts.size = {smoke::kW, smoke::kH};
+        opts.use_gpu = true;
+        auto host = view::PluginViewHost::create(*bridge.view(), opts);
+        REQUIRE(host != nullptr);
+        if (!host->is_gpu_backed()) {
+            bridge.close();
+            [window close];
+            SKIP("No GPU adapter (CPU fallback).");
+        }
+        host->set_idle_callback(format::make_editor_idle_pump(bridge));
+        REQUIRE(host->try_attach_to_parent((__bridge void*)window.contentView));
+        bridge.notify_attached();
+        smoke::pump_run_loop(6);
+
+        const auto shown = host->capture_back_buffer_png();
+        REQUIRE(smoke::looks_like_png(shown));
+        const auto before = host->gpu_cache_usage();
+        INFO("before hide: budgeted " << before.budgeted << " purgeable " << before.purgeable);
+        // Control: the blurred panel's layer target is purgeable between frames,
+        // so there is something for a hide to return.
+        REQUIRE(before.purgeable > 0);
+
+        // The host hides the editor. AppKit sends -viewDidHide, which is how an
+        // AU v2 editor (no view controller) learns it is hidden.
+        auto* view = (__bridge NSView*)host->native_handle();
+        REQUIRE(view != nil);
+        view.hidden = YES;
+        const auto hidden = host->gpu_cache_usage();
+        INFO("hidden: budgeted " << hidden.budgeted << " purgeable " << hidden.purgeable);
+        CHECK(hidden.purgeable == 0);
+        CHECK(hidden.budgeted < before.budgeted);
+
+        // Shown again, the editor repaints from its kept surfaces: same pixels,
+        // no blank frame.
+        view.hidden = NO;
+        host->repaint();
+        smoke::pump_run_loop(6);
+        const auto reshown = host->capture_back_buffer_png();
+        REQUIRE(smoke::looks_like_png(reshown));
+        CHECK(reshown == shown);
+
+        host->detach();
+        // A detached host still owns its surfaces until it is destroyed; the
+        // release stays safe there and frees what the last frame left.
+        host->release_gpu_caches();
+        CHECK(host->gpu_cache_usage().purgeable == 0);
+        host.reset();
+        bridge.close();
+        [window close];
+    }
+}
+
+TEST_CASE("release_gpu_caches is a no-op on a CPU plugin host (mac)",
+          "[plugin-gpu-host][mac][gpu-trim]") {
+    smoke::clear_no_editor_env();
+    @autoreleasepool {
+        auto root = smoke::make_cpu_content_view();
+        view::PluginViewHost::Options opts;
+        opts.size = {smoke::kW, smoke::kH};
+        opts.use_gpu = false;
+        auto host = view::PluginViewHost::create(*root, opts);
+        REQUIRE(host != nullptr);
+        REQUIRE_FALSE(host->is_gpu_backed());
+        host->release_gpu_caches();
+        const auto usage = host->gpu_cache_usage();
+        CHECK(usage.budgeted == 0);
+        CHECK(usage.purgeable == 0);
+    }
+}
+
+TEST_CASE("CLAP gui_hide returns the editor's GPU caches; gui_show repaints (mac)",
+          "[gpu][skia][plugin-gpu-host][mac][clap][gpu-trim]") {
+    smoke::clear_no_editor_env();
+    @autoreleasepool {
+        REQUIRE(clap_entry.init("test"));
+        auto* factory = static_cast<const clap_plugin_factory_t*>(
+            clap_entry.get_factory(CLAP_PLUGIN_FACTORY_ID));
+        REQUIRE(factory != nullptr);
+        auto* desc = factory->get_plugin_descriptor(factory, 0);
+        const clap_plugin_t* plugin = factory->create_plugin(factory, nullptr, desc->id);
+        REQUIRE(plugin != nullptr);
+        REQUIRE(plugin->init(plugin));
+        auto* gui =
+            static_cast<const clap_plugin_gui_t*>(plugin->get_extension(plugin, CLAP_EXT_GUI));
+        REQUIRE(gui != nullptr);
+        auto finish = [&] {
+            plugin->destroy(plugin);
+            clap_entry.deinit();
+        };
+        if (!gui->is_api_supported(plugin, CLAP_WINDOW_API_COCOA, false) ||
+            !gui->create(plugin, CLAP_WINDOW_API_COCOA, false)) {
+            finish();
+            SKIP("No Cocoa GUI or window server.");
+        }
+        auto* adapter = static_cast<format::clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
+        REQUIRE(adapter->editor_host != nullptr);
+        if (!adapter->editor_host->is_gpu_backed()) {
+            gui->destroy(plugin);
+            finish();
+            SKIP("No GPU adapter (CPU fallback).");
+        }
+
+        NSWindow* window =
+            [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, smoke::kW, smoke::kH)
+                                        styleMask:NSWindowStyleMaskTitled
+                                          backing:NSBackingStoreBuffered
+                                            defer:NO];
+        REQUIRE(window.contentView != nil);
+        clap_window_t cw{};
+        cw.api = CLAP_WINDOW_API_COCOA;
+        cw.cocoa = (__bridge void*)window.contentView;
+        REQUIRE(gui->set_parent(plugin, &cw));
+        REQUIRE(gui->show(plugin));
+        smoke::pump_run_loop(6);
+
+        const auto shown = adapter->editor_host->capture_back_buffer_png();
+        REQUIRE(smoke::looks_like_png(shown));
+        const auto before = adapter->editor_host->gpu_cache_usage();
+        INFO("before gui_hide: budgeted " << before.budgeted << " purgeable " << before.purgeable);
+        REQUIRE(before.purgeable > 0);
+
+        REQUIRE(gui->hide(plugin));
+        const auto hidden = adapter->editor_host->gpu_cache_usage();
+        INFO("after gui_hide: budgeted " << hidden.budgeted << " purgeable " << hidden.purgeable);
+        CHECK(hidden.purgeable == 0);
+        CHECK(hidden.budgeted < before.budgeted);
+
+        REQUIRE(gui->show(plugin));
+        adapter->editor_host->repaint();
+        smoke::pump_run_loop(6);
+        const auto reshown = adapter->editor_host->capture_back_buffer_png();
+        REQUIRE(smoke::looks_like_png(reshown));
+        CHECK(reshown == shown);
+
+        // Closing destroys the host, and with it every GPU resource it held.
+        gui->destroy(plugin);
+        CHECK(adapter->editor_host == nullptr);
+        finish();
         [window close];
     }
 }

@@ -15,9 +15,9 @@
 //              absorptive law g = 10^(-3 D / (T60 fs)), so each comb reaches
 //              -60 dB at the same time whatever its length.
 //   size       scales every comb and allpass length, as in the FDN. Lengths
-//              are set when the parameters are snapped (snap_parameters(),
-//              reset(), set_mode()): integer comb lengths cannot glide, so a
-//              live size change waits for the next snap rather than jumping.
+//              are integers, so a live size change follows the smoothed
+//              control: each control tick that moves it re-derives the
+//              lengths, which step by whole samples as it passes them.
 //   predelay   milliseconds before the combs.
 //   damp_hi    the in-loop one-pole lowpass, on the FDN's cutoff curve, with
 //              its loss scaled per comb by length so the frequency-dependent
@@ -153,6 +153,13 @@ template <typename SampleType = float> class ClassicReverbT {
         return target_[static_cast<std::size_t>(p)];
     }
 
+    // True when every sample held in the comb bank is exactly zero: the
+    // recirculating part of the tail has fully decayed.
+    bool combs_silent() const {
+        return std::all_of(storage_.begin(), storage_.end(),
+                           [](SampleType v) { return v == SampleType{0}; });
+    }
+
     // Skip the smoothing ramps, and re-derive the lengths from size.
     void snap_parameters() {
         smoothed_ = target_;
@@ -252,6 +259,8 @@ template <typename SampleType = float> class ClassicReverbT {
         const auto from_gain = gain_f_;
         const auto from_damp = damp_f_;
         const SampleType from_width = width_;
+        if (smoothed(Param::size) != lengths_size_)
+            derive_lengths();
         derive();
         constexpr auto inv = static_cast<SampleType>(1.0 / fdn::kControlRateSamples);
         for (std::size_t i = 0; i < static_cast<std::size_t>(kCombs); ++i) {
@@ -270,6 +279,7 @@ template <typename SampleType = float> class ClassicReverbT {
 
     // Comb and allpass lengths from size.
     void derive_lengths() {
+        lengths_size_ = smoothed(Param::size);
         const double scale = fdn::kSizeScaleMin + std::clamp(smoothed(Param::size), 0.0, 1.0) *
                                                       (fdn::kSizeScaleMax - fdn::kSizeScaleMin);
         const double spread = classic_reverb::kRailSpreadMs * 0.001 * rate_;
@@ -385,6 +395,8 @@ template <typename SampleType = float> class ClassicReverbT {
         for (std::size_t i = 0; i < static_cast<std::size_t>(kCombs); ++i)
             read[i] = storage_.data() + read_index(i) * kRow + i;
         SampleType* write = storage_.data() + write_ * kRow;
+        const F4 threshold = lanes::splat(snap_threshold<SampleType>());
+        const F4 zero = lanes::splat(SampleType{0});
         F4 lp[4], damp[4], gain[4];
         for (int j = 0; j < 4; ++j) {
             lp[j] = lanes::load(&lp_[4 * static_cast<std::size_t>(j)]);
@@ -408,8 +420,13 @@ template <typename SampleType = float> class ClassicReverbT {
             }
             for (int j = 0; j < 4; ++j) {
                 lp[j] = delayed[j] + (lp[j] - delayed[j]) * damp[j];
-                lanes::store(write + at + 4 * static_cast<std::size_t>(j),
-                             feed[j / 2] + gain[j] * lp[j]);
+                // Snapped as it is stored: a loop gain above one half rounds
+                // the smallest subnormal back to itself, so an unsnapped
+                // comb recirculates subnormals forever without FTZ.
+                const F4 stored = feed[j / 2] + gain[j] * lp[j];
+                lanes::store(
+                    write + at + 4 * static_cast<std::size_t>(j),
+                    lanes::select(lanes::less(lanes::abs(stored), threshold), zero, stored));
             }
             const F4 l = delayed[0] + delayed[1];
             const F4 r = delayed[2] + delayed[3];
@@ -439,8 +456,8 @@ template <typename SampleType = float> class ClassicReverbT {
     }
 
     // On the control grid: snap decayed loop filters and clear any that went
-    // non-finite. The comb input is finite and every gain is below one, so a
-    // snapped filter stops a silent tail from recirculating forever.
+    // non-finite. The comb writes are snapped as they are stored, so a silent
+    // tail reaches exact zero in the rings as well.
     void heal() {
         for (auto& v : lp_)
             v = std::isfinite(v) ? snap_to_zero(v) : SampleType{0};
@@ -458,6 +475,8 @@ template <typename SampleType = float> class ClassicReverbT {
     std::array<std::array<double, fdn::kNumParams>, 2> smoothing_stages_{};
     std::array<double, fdn::kNumParams> smoothed_{};
     std::size_t comb_mask_ = 0;
+    // The size the comb and allpass lengths were last derived from.
+    double lengths_size_ = -1.0;
     std::size_t write_ = 0;
     double rate_ = 48000.0;
     double smoothing_coeff_ = 1.0;

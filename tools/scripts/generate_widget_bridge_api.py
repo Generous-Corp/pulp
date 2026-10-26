@@ -312,6 +312,7 @@ SIGNATURE_OVERRIDES: dict[str, str] = {
     "releaseOverlay": "(id: string) => void",
     "removeWidget": "(id: string) => void",
     "insertChild": "(parentId: string, childId: string, index: number) => boolean",
+    "isWidgetParamBound": "(widgetId: string) => boolean",
     "saveStylePreset": "(name: string, payload: unknown) => void",
     "seekWidgetLottie": "(id: string, time01: number) => void",
     "setAICli": "(command: string) => void",
@@ -613,6 +614,8 @@ def signature_for(row: ManifestRow) -> str:
             return "(id: string, text: string, parentId: string) => string"
         if row.name == "createBadge":
             return "(id: string, text: string, tone: string, parentId: string) => string"
+        if row.name == "createButtonSurface":
+            return "(id: string, parentId: string, direction?: 'row' | 'column') => string"
         return "(id: string, parentId: string) => string"
     if row.name in ID_BOOLEAN_SETTERS:
         return "(id: string, value: boolean) => void"

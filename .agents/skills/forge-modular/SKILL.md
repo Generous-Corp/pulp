@@ -61,12 +61,18 @@ and is never held. `test_download_consent.py` holds the matrix.
 ## The Claude pass runs with no tools and no MCP servers
 
 `patch.ask_model` is the only `claude -p` builder; `generate.ask_model` calls
-it. It passes `--strict-mcp-config` (no `--mcp-config`, so no MCP server loads)
-and `--disallowedTools Write Edit NotebookEdit Bash WebFetch WebSearch`. The
-answer is the JSON on stdout, and the prompt carries network-fetched library
-text and a base patch, so any tool left on is a prompt-injection channel that
-depends only on the user's own permission settings. Keep both when the argv
-changes. The exact argv is pinned in `test_generate_model.py` and
+it. It passes `--strict-mcp-config` (no `--mcp-config`, so no MCP server loads),
+`--tools ""` (every tool off, including ones a later CLI adds) when
+`claude_disables_all_tools()` finds the flag in the CLI's `--help`, and always
+`--disallowedTools` with `CLAUDE_DENIED_TOOLS` (Write, Edit, NotebookEdit, Bash,
+WebFetch, WebSearch, Read, Glob, Grep, Task, Skill, ToolSearch), which is the
+fence on a CLI too old for `--tools`. A probe that fails outright (the CLI
+cannot run, times out, exits non-zero or prints no help) refuses the pass with
+a SystemExit rather than falling back, so every fake claude in a test must
+answer `--help`. The answer is the JSON on stdout, and the prompt carries
+network-fetched library text and a base patch, so any tool left on is a
+prompt-injection channel: Read alone puts ~/.ssh or a secrets file into the
+model's context. Keep all of this when the argv changes. The exact argv is pinned in `test_generate_model.py` and
 `test_patch.py`, and the effort test requires `--effort` to stay last, so new
 flags go before `--model`.
 

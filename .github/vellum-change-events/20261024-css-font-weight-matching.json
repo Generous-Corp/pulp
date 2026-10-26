@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "event_id": "20261024-css-font-weight-matching",
+  "kind": "change",
+  "created_at": "2026-10-24T16:42:02Z",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "rationale": "design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger); canvas-kernel: the font resolver, the SkParagraph collection's default font manager and bundled-family matching now pick a family's weight by the CSS Fonts 4 order (one shared css_match_font_weight helper) instead of the platform's nearest weight, so imported text paints the face the capturing browser drew and resolved_face_identity() agrees with the paragraph face. Fixes Helvetica Neue 600 painting Medium. No API or authority boundary moves. Vellum inherits the weight-matching rule with the canvas kernel.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "ctest --test-dir build -R import-design-ir-observe-half-pixel-label",
+    "ctest --test-dir build -R pulp-test-font-weight-match"
+  ],
+  "disposition": "pulp-only",
+  "vellum_inherits": true
+}

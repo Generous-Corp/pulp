@@ -16,7 +16,8 @@ that a control archive defines (a dependency it is allowed to have). If that
 count is zero, nm read nothing, so an empty forbidden intersection proves
 nothing and the check reports INCONCLUSIVE rather than PASS.
 
-Exit status: 0 pass, 1 forbidden reference, 2 inconclusive or unusable input.
+Exit status: 0 pass, 1 forbidden reference, 2 inconclusive or unusable input,
+77 skipped: --weak-rtti-contamination with no demangler on PATH and no --cxxfilt.
 """
 
 from __future__ import annotations
@@ -29,6 +30,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import nm_symbols  # noqa: E402
 import rtti_ownership  # noqa: E402
+
+SKIP = 77
 
 # What "defined" means for --forbidden, chosen per gate. A dependency gate uses
 # strong definitions only: an inline function emitted in both archives is not a
@@ -67,8 +70,18 @@ def darwin_listing(nm: str, archive: Path) -> str | None:
 
 
 def read_strength(nm: str, archive: Path, listing: str) -> tuple[set[str], set[str]]:
-    """(strong, weak-only) definitions, from `nm -m` on Mach-O and W/V on ELF."""
-    return nm_symbols.strength(listing, darwin_listing(nm, archive))
+    """(strong, weak-only) definitions, from `nm -m` on Mach-O and W/V on ELF.
+
+    A Mach-O archive whose `nm -m` read failed (a GNU nm passed as --nm, for
+    one) is refused: its letters print weak definitions as S/T/D, so the weak
+    set would be empty and every weak copy would pass unseen.
+    """
+    darwin = darwin_listing(nm, archive)
+    if (darwin is None or not nm_symbols.is_darwin(darwin)) and nm_symbols.looks_mach_o(listing):
+        raise RuntimeError(
+            f"{nm} -g -m gave no darwin listing for Mach-O archive {archive}, so its weak "
+            "definitions cannot be read; pass Apple's nm or llvm-nm as --nm")
+    return nm_symbols.strength(listing, darwin)
 
 
 def copied_rtti(nm: str, forbidden: list[Path], checks: dict[str, str],
@@ -139,6 +152,13 @@ def main(argv: list[str] | None = None) -> int:
                 else:
                     print(f"archive-symbol-closure: {name}: clean")
             return 1 if failed else 0
+        except rtti_ownership.DemanglerMissing as exc:
+            # This host has no demangler to read ownership with: a skip, not a
+            # pass, and not a verdict on the archives. A --cxxfilt that is
+            # missing, or a demangler that answers unreadably, still fails.
+            print(f"archive-symbol-closure: SKIPPED: --weak-rtti-contamination needs a demangler: {exc}",
+                  file=sys.stderr)
+            return SKIP
         except (OSError, RuntimeError, rtti_ownership.DemangleError) as exc:
             print(f"archive-symbol-closure: INCONCLUSIVE: {exc}", file=sys.stderr)
             return 2

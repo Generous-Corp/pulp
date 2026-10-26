@@ -1,0 +1,48 @@
+<!doctype html>
+<style>
+  /* Spectr's shape. The backdrop is a positioned pseudo-element on body, so
+     Chrome paints it after #root's own (empty) box and before every
+     positioned descendant of #root. #root paints nothing, so drawing the
+     backdrop first is the order Chrome's pixels show. */
+  html, body { margin: 0; }
+  body { background: #05070a; }
+  body::before { content: ""; position: fixed; inset: 0;
+                 background: linear-gradient(180deg, #10141b, #05070a); }
+  #root { width: 640px; height: 360px; }
+  .abs { position: absolute; }
+  .card { background: #1c222c; border: 1px solid #2c3442; border-radius: 8px;
+          color: #c8d0dc; font: 12px/16px sans-serif; padding: 8px; box-sizing: border-box; }
+  #scope { left: 24px; top: 24px; width: 280px; height: 140px; }
+  #scope canvas { position: absolute; left: 0; top: 0; }
+  #meters { left: 328px; top: 24px; width: 288px; height: 140px; }
+  #meters .bar { position: absolute; bottom: 12px; width: 24px; background: #4a6fa5; }
+  /* A transparent button over a card: it paints nothing and takes clicks, so
+     it must stay above the card it covers. */
+  #hit { left: 24px; top: 188px; width: 280px; height: 148px; background: transparent;
+         border: 0; padding: 0; cursor: pointer; }
+  #under { left: 24px; top: 188px; width: 280px; height: 148px; }
+  /* An isolating group over the backdrop. */
+  #dim { left: 328px; top: 188px; width: 288px; height: 148px; opacity: 0.6; }
+  #dim .chip { position: absolute; left: 12px; top: 12px; width: 96px; height: 24px;
+               background: #a0603a; border-radius: 4px; }
+</style>
+<div id="root">
+  <div class="abs card" id="scope"><canvas width="280" height="140"></canvas></div>
+  <div class="abs card" id="meters">
+    <div class="bar" style="left: 16px; height: 60px"></div>
+    <div class="bar" style="left: 56px; height: 90px"></div>
+    <div class="bar" style="left: 96px; height: 40px"></div>
+  </div>
+  <div class="abs card" id="under">Preset: Warm Tape</div>
+  <button class="abs" id="hit" aria-label="Open presets"></button>
+  <div class="abs card" id="dim"><div class="chip"></div></div>
+</div>
+<script>
+  const c = document.querySelector("#scope canvas").getContext("2d");
+  c.strokeStyle = "#6fd3a0"; c.lineWidth = 2; c.beginPath();
+  for (let x = 0; x <= 280; x += 4) {
+    const y = 70 + 40 * Math.sin(x / 18);
+    if (x === 0) c.moveTo(x, y); else c.lineTo(x, y);
+  }
+  c.stroke();
+</script>

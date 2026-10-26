@@ -112,6 +112,15 @@ with the key it serves and a durable rationale), register its owner in
 `agent_capability_rederive.py` and `--check`. The baseline file itself is not
 edited; the header simply stops being legacy.
 
+A header that serves no capability (a plain DSP primitive such as
+`waveshaper.hpp`, `svf.hpp` or `tpt_filter.hpp`) takes an `infrastructure` row
+with empty `capability_keys` instead, and needs no `REVIEWED_MINIMAL_TARGETS`
+entry. Its fingerprint is the SHA-256 of the header bytes (`shasum -a 256`).
+`agent_capability_rederive.py` derives `SURFACE_INVENTORY_VERSION` as the
+protected base's value plus one and overwrites a hand-set value, so set the
+sequencer-exposure rows that quote it to the derived number after rederiving,
+not before.
+
 ## Classify the change
 
 For a new public header or symbol:
@@ -242,13 +251,15 @@ For an existing capability change:
   fingerprint and a durable rationale, and leave the baseline untouched. The
   reviewed branch is consulted ahead of the baseline, so the stale baseline
   entry is simply no longer read; dozens of headers already sit in both.
-- `--write` also appends a full snapshot to
-  `tools/agent-capabilities/contract-history.json` — tens of thousands of lines
-  that dwarf the change that caused them. `--check` does not require it, so for
-  a byte-level fingerprint refresh, revert that file and keep the three-file
-  change; `--check` still reports `fresh`. Reverting it is not free of meaning,
-  so keep the snapshot when the change is a real contract movement whose history
-  someone will read back.
+- `--write` appends a full snapshot to
+  `tools/agent-capabilities/contract-history.json` (tens of thousands of lines)
+  only when the change moves `MANIFEST_REVISION` or `SURFACE_INVENTORY_VERSION`.
+  The snapshot is the previous published state, so a refresh that leaves both
+  counters alone (a catalog binding's `header_fingerprint`) appends nothing,
+  and the next counter move records the state it started from. `--check` never
+  requires a snapshot at the current version. Before this rule, a
+  fingerprint-only `--write` appended a same-version snapshot that then sat in
+  the append-only history for good.
 - Increase the capability minor version for compatible additive contract
   changes.
 - Increase the capability major version when a binding is removed, renamed, or
@@ -704,6 +715,10 @@ header under `core/host/include` leaves `--check` reporting `fresh`, since the
 surface never saw it. The header ships public and unguarded, and a later byte
 change to it trips nothing. **Add it to the tuple in the same slice that adds the
 header.**
+
+Product-neutral host catalog seams follow this same rule: classify the reusable
+descriptor/factory machinery as host infrastructure and leave product-specific
+Forge compatibility names and serialization in their existing authority.
 
 Two further rules, both learned by getting them wrong:
 

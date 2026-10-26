@@ -1,0 +1,12 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261025-capture-html-font-face-urls",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "vellum_obligation": "A font file registered by path must be decoded by its own container: a file starting with the WOFF2 magic goes through the validated WOFF2 decoder, never straight to the platform font manager, so a captured @font-face WOFF2 file registers the same way on every platform.",
+  "evidence": [
+    ".github/vellum-change-events/20261025-capture-html-font-face-urls.json",
+    "pulp-test-font-woff2 \"a WOFF2 font file registers through the file path\""
+  ]
+}

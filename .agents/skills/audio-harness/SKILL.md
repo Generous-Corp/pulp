@@ -198,10 +198,29 @@ multiply-add twice and sits about 6 dB above arm64 (the speaker cabinet:
 RMS near -106 dBFS on x86-64 against -112.7 on arm64, worst sample -98 to -94
 across seeds). Bound the RMS with margin over the x86-64 figure, hold the
 worst sample to a loose ceiling such as one 16-bit step (-90.3 dBFS), record
-the measured ranges next to the bound, and prove the bound with a negative
-control that truncates the float state (12 mantissa bits trips both by tens
-of dB). An arm64 host cannot see the x86-64 figure; build the comparison with
+the measured ranges next to the bound, and prove the bound with executed
+negative controls that must exceed it: a double twin prepared at
+`fs * 1.0001` (a filter change far smaller than any coefficient bug) and the
+float output rounded to 12 bits (lost precision with the filter unchanged).
+An arm64 host cannot see the x86-64 figure; build the comparison with
 `-arch x86_64 -ffp-contract=off` and run it under Rosetta.
+
+Tighten per build only where contraction is real. The build pins GCC to
+`-ffp-contract=off` on every architecture and MSVC does not contract, so
+only Clang on arm64 fuses the multiply-adds; gate a tight bound on
+`__aarch64__ && __clang__ && !_MSC_VER`, not on `__aarch64__` alone, or the
+GCC Linux arm64 nightly fails it.
+
+## Bit identity against a reference: GCC may fold the reference at compile time
+
+A reference computed from literal arguments may be constant-folded by GCC,
+which evaluates `tanf`, `expf` and friends correctly rounded at compile time,
+while the code under test calls libm at run time; glibc's result can sit one
+ULP away. The two paths then disagree on Linux GCC only, though the DSP is
+identical. When asserting bit identity, route the reference's inputs through
+`volatile` or other runtime values so both sides take the same libm path, or
+compare two runtime paths rather than a runtime path against a literal
+design.
 
 ## Measuring a reverb — two traps that make a working engine look broken
 
@@ -1035,11 +1054,20 @@ harness or `ctest`.
   rather than the mono downmix; mono input on either side is `not_applicable`, its metric is
   level-invariant (no level-match), and a candidate whose correlation goes negative is flagged out
   of phase (mono-incompatible) in the summary. **`transient-integrity`** (the `_Axis.needs_onsets`
-  flag) is "did my DSP soften/smear the attacks?" — it detects+matches onsets (`align.detect_onsets`
-  / `map_onsets`), locks each attack (`dsp.local_align`), and compares the high-band attack rise
+  flag) is "did my DSP soften/smear the attacks?" — it detects the reference's onsets
+  (`align.detect_onsets`), measures each one in the candidate at its predicted position (normalized
+  time plus the cross-correlation lag from `dsp.estimate_global_lag`; candidate onset detections
+  do NOT place it, because on dense material they move by tens of ms under a few samples of delay
+  and once read a pure 37-sample delay as smeared attacks), locks each attack (`dsp.local_align`),
+  and compares the high-band attack rise
   (`dsp.attack_rise`, the SAME primitive the `transient_sharpness` detector uses — extracted to dsp
   so there is no forked DSP). One-directional (a softening is the regression; a sharper candidate
-  reads no change); needs onset-bearing material (< 3 matched onsets → `not_applicable`); self-aligns
+  reads no change); the worst-onset gate fires only when a second measure corroborates the
+  rise-time deficit: the attack's high-band energy dropped (`dsp.onset_attack_measure` amplitude
+  ratio < 0.5) or arrived later (energy median moved >= 1 ms, which catches one attack smeared wide
+  with its energy intact), since the 10-90% rise-time estimate alone can jump on a -50 dBFS noise
+  floor while the energy median stays put; needs onset-bearing material (< 3 matched onsets →
+  `not_applicable`); self-aligns
   per onset so `--align` is a no-op and the global sample-domain advisory is suppressed. That takes
   compare to **6 of the lab's 7 detectors** reachable from the agent-facing surface (up from 2).
   `compare.STEREO_PROFILES` / `ONSET_PROFILES` mark the capability-specific axes, and

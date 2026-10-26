@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261025-batch-d-restack-20261024-watch",
+  "created_at": "2026-10-25T00:48:29Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "visual-proof-harness"
+  ],
+  "rationale": "Extends two test-only headers under test/harness, the shared-I/O GPU-audio provider conformance kit and its fake SharedIoArenaProvider, so they can exercise the event-driven transport worker wake (WP-T): the fake provider gains a completion notifier, and the kit gains notifier scenarios. These exercise only the private core/gpu_audio shared-I/O seam. No visual-proof, design-import, Chromium, rendering, Skia/Dawn or packaging code or authority changes.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-gpu-audio-capability-validation",
+    "ctest --test-dir build -R pulp-test-gpu-audio-execution-controller",
+    "ctest --test-dir build -R pulp-test-gpu-audio-header-standalone-provider-pool",
+    "ctest --test-dir build -R pulp-test-gpu-audio-header-standalone-status",
+    "ctest --test-dir build -R pulp-test-gpu-audio-plugin-boundary-continuity",
+    "ctest --test-dir build -R pulp-test-gpu-audio-transport",
+    "ctest --test-dir build -R pulp-test-gpu-convolver",
+    "ctest --test-dir build -R pulp-test-gpu-cpu-shared-io-provider",
+    "ctest --test-dir build -R pulp-test-gpu-dawn-wavenet-qualification",
+    "ctest --test-dir build -R pulp-test-gpu-neural-model-factory",
+    "ctest --test-dir build -R pulp-test-gpu-neural-plugin-boundary-continuity",
+    "ctest --test-dir build -R pulp-test-gpu-neural-realtime-node",
+    "ctest --test-dir build -R pulp-test-gpu-neural-shadow-policy",
+    "ctest --test-dir build -R pulp-test-gpu-shared-io-compute-plan",
+    "ctest --test-dir build -R pulp-test-gpu-shared-io-convolution-session",
+    "ctest --test-dir build -R pulp-test-gpu-shared-io-provider-conformance",
+    "ctest --test-dir build -R pulp-test-gpu-wavenet-realtime-node",
+    "ctest --test-dir build -R pulp-test-gpu-wavenet-session",
+    "python3 tools/scripts/test_gpu_audio_header_vocabulary_guard.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

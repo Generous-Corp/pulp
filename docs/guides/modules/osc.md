@@ -40,6 +40,22 @@ receiver.stop();
 
 The receiver runs on a background thread. The callback fires on that thread — use a lock-free queue if you need to forward to the audio thread.
 
+The receiver binds to loopback (`127.0.0.1`) by default, so only processes on
+the same machine can reach it. A hardware controller or another computer on
+the LAN needs an explicit all-interfaces bind, which is the only place that
+exposure is opted into:
+
+```cpp
+pulp::osc::ReceiverOptions options;
+options.bind_address = std::string(pulp::osc::kBindAllInterfaces);  // "0.0.0.0"
+options.on_message = handle_message;
+receiver.listen_with_options(9000, options);
+receiver.local_address();  // "0.0.0.0" — the address actually bound
+```
+
+`bind_address` takes an IPv4 literal only; the receiver does not resolve
+hostnames, and `listen` fails on anything else. The receiver is IPv4-only.
+
 For address-pattern routing, bundle callbacks, and malformed packet reporting, use `listen_with_options`:
 
 ```cpp

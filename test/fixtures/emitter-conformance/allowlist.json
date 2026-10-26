@@ -3,41 +3,6 @@
   "gaps": [
     {
       "lane": "js",
-      "field": "kind",
-      "fixtures": [
-        "form-controls-08",
-        "spectr"
-      ],
-      "expected": "pulp::view::(RangeSlider|Checkbox)",
-      "actual": "pulp::view::View",
-      "issue": "https://github.com/Generous-Corp/pulp/issues/10981",
-      "reason": "ui.js does not lower a theme-painted range, checkbox or radio onto its widget; the node stays a plain View."
-    },
-    {
-      "lane": "js",
-      "field": "state\\..*",
-      "fixtures": [
-        "form-controls-08",
-        "spectr"
-      ],
-      "actual": "<absent>",
-      "issue": "https://github.com/Generous-Corp/pulp/issues/10981",
-      "reason": "With no widget, ui.js carries none of the control's HTML state (value, range, checked, skin, accent, disabled)."
-    },
-    {
-      "lane": "js",
-      "field": "paint\\.(captured|bounds)",
-      "fixtures": [
-        "form-controls-08",
-        "spectr",
-        "kelvin"
-      ],
-      "actual": "<absent>",
-      "issue": "https://github.com/Generous-Corp/pulp/issues/10982",
-      "reason": "ui.js never records the captured snapped paint rect, so its boxes paint in the fractional layout box."
-    },
-    {
-      "lane": "js",
       "field": "binding",
       "fixtures": [
         "kelvin"
@@ -59,28 +24,6 @@
       "actual": "param:",
       "issue": "https://github.com/Generous-Corp/pulp/issues/10984",
       "reason": "SwiftUI resolves controls by display name and declares an entry with no param key for controls the other lanes leave unbound."
-    },
-    {
-      "lane": "js",
-      "field": "binding",
-      "fixtures": [
-        "fidelity-scene"
-      ],
-      "anchor": "150oayc",
-      "expected": "<absent>",
-      "issue": "https://github.com/Generous-Corp/pulp/pull/10943",
-      "reason": "The scene's three controls share one anchor on main, so the native binder refuses them while ui.js binds by widget id. #10943 gives them distinct anchors; delete this entry when it lands."
-    },
-    {
-      "lane": "swiftui",
-      "field": "binding",
-      "fixtures": [
-        "fidelity-scene"
-      ],
-      "anchor": "150oayc",
-      "expected": "<absent>",
-      "issue": "https://github.com/Generous-Corp/pulp/pull/10943",
-      "reason": "Same collision: SwiftUI resolves by name and binds what the native binder refuses. Delete with #10943."
     }
   ]
 }

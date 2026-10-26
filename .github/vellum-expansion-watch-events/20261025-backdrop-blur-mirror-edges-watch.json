@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261025-backdrop-blur-mirror-edges-watch",
+  "created_at": "2026-10-25T19:54:21Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-output-and-packaging",
+    "design-source-ingest",
+    "render-assets-and-backends",
+    "visual-proof-harness"
+  ],
+  "rationale": "SkiaCanvas's backdrop-filter paths now blur a mirror-tiled crop of the element's own rect and crop only the output, so a backdrop at a box edge is the box's content reflected as Chrome draws it (core/canvas/src/skia_canvas_opacity.cpp: render-assets-and-backends; the canvas-kernel change event and inheritance entry cover the transferred slice). The backdrop differential fixture gains an edge-mirror box and its manifest viewport grows to 512x260 (test/fixtures/import-differential/22-backdrop-opacity.html and manifest.json: chromium-authoring-frontend). The Chrome oracle prints the profile across that edge (tools/import-validation/chrome_backdrop_opacity_oracle.py: design-output-and-packaging, visual-proof-harness), and the import-design skill notes the mirrored edge (.agents/skills/import-design/SKILL.md: design-source-ingest). No signature, capability or call site changes, and no design-import, Chromium, rendering, packaging, or source-authority boundary moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-css-backdrop-opacity",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

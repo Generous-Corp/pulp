@@ -83,7 +83,13 @@ def updated_history_entries(
     initial_bootstrap: bool,
     migrate_unpublished: bool,
 ) -> list[dict[str, Any]]:
-    """Return append-only entries, replacing the sole unpublished bootstrap."""
+    """Return append-only entries, replacing the sole unpublished bootstrap.
+
+    The previous published state is appended only when this change moves a
+    counter (manifest_revision or the surface inventory_version). A refresh
+    that leaves both alone, such as a catalog binding's header fingerprint,
+    appends nothing: the next counter move records the state it started from.
+    """
     if initial_bootstrap or migrate_unpublished:
         return [history_entry(current_manifest, current_surface)]
     entries = (
@@ -92,8 +98,14 @@ def updated_history_entries(
         else []
     )
     if isinstance(previous_manifest, dict) and isinstance(previous_surface, dict):
+        counters_moved = (
+            previous_manifest.get("manifest_revision")
+            != current_manifest.get("manifest_revision")
+            or previous_surface.get("inventory_version")
+            != current_surface.get("inventory_version")
+        )
         previous_entry = history_entry(previous_manifest, previous_surface)
-        if not entries or entries[-1] != previous_entry:
+        if counters_moved and (not entries or entries[-1] != previous_entry):
             entries.append(previous_entry)
     if not entries:
         entries.append(history_entry(current_manifest, current_surface))

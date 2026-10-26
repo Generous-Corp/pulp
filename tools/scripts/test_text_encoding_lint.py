@@ -119,6 +119,88 @@ class RatchetTests(unittest.TestCase):
         self.assertEqual(lint.baseline_raises({"a.py": 2}, {"a.py": 1}), [])
 
 
+class CommitModeTests(unittest.TestCase):
+    """--head lints a commit's blobs, which is what the pre-push hook pushes."""
+
+    def _repo(self, directory: str) -> pathlib.Path:
+        root = pathlib.Path(directory)
+        for args in (["init", "-q", "-b", "main"], ["config", "user.email", "t@example.invalid"],
+                     ["config", "user.name", "T"], ["config", "commit.gpgsign", "false"]):
+            subprocess.run(["git", *args], cwd=root, check=True)
+        (root / lint.BASELINE).parent.mkdir(parents=True, exist_ok=True)
+        (root / lint.BASELINE).write_text(json.dumps({"schema": 1, "files": {}}),
+                                          encoding="utf-8")
+        return root
+
+    def _commit(self, root: pathlib.Path, rel: str, text: str) -> None:
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(text, encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", rel], cwd=root, check=True)
+
+    def test_a_clean_working_tree_cannot_hide_a_bad_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._repo(directory)
+            self._commit(root, "tools/a.py", FLAGGED)
+            # Fixed in the working tree, never committed: the push still sends
+            # the flagged file.
+            (root / "tools/a.py").write_text(CLEAN, encoding="utf-8")
+            self.assertEqual(lint.main(["--root", str(root), "--head", "HEAD"]), 1)
+            # Control: the working-tree read is what let it through.
+            self.assertEqual(lint.main(["--root", str(root)]), 0)
+
+    def test_a_clean_commit_passes_and_reads_its_own_baseline(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._repo(directory)
+            self._commit(root, "tools/a.py", CLEAN)
+            # A dirty working tree does not fail a clean commit either.
+            (root / "tools/a.py").write_text(FLAGGED, encoding="utf-8")
+            self.assertEqual(lint.main(["--root", str(root), "--head", "HEAD"]), 0)
+
+    def test_the_pre_push_hook_lints_the_pushed_commit(self) -> None:
+        hook = (ROOT / ".githooks" / "pre-push").read_text(encoding="utf-8")
+        call = hook[hook.index('"$TEXT_ENCODING_LINT" --root'):]
+        call = call[:call.index("\n    gate_rc=")]
+        self.assertIn('--head "${_prepush_pushed_head_sha:-HEAD}"', call)
+
+    def test_a_raised_working_tree_baseline_cannot_pass_a_bad_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._repo(directory)
+            self._commit(root, "tools/a.py", FLAGGED)
+            # Raised on disk only: the commit still carries the empty baseline.
+            (root / lint.BASELINE).write_text(
+                json.dumps({"schema": 1, "files": {"tools/a.py": 8}}), encoding="utf-8")
+            self.assertEqual(lint.main(["--root", str(root), "--head", "HEAD"]), 1)
+            # Control: the working-tree read accepts the raised baseline.
+            self.assertEqual(lint.main(["--root", str(root)]), 0)
+
+    def test_a_deleted_working_tree_baseline_reads_the_committed_one(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._repo(directory)
+            (root / lint.BASELINE).write_text(
+                json.dumps({"schema": 1, "files": {"tools/a.py": 8}}), encoding="utf-8")
+            self._commit(root, "tools/a.py", FLAGGED)
+            (root / lint.BASELINE).unlink()
+            # The committed baseline allows the 8 calls; the missing disk copy
+            # is not what the push sends.
+            self.assertEqual(lint.main(["--root", str(root), "--head", "HEAD"]), 0)
+            # Control: the working-tree read sees no baseline and fails.
+            self.assertEqual(lint.main(["--root", str(root)]), 1)
+
+    def test_a_malformed_committed_baseline_is_a_scan_error(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._repo(directory)
+            (root / lint.BASELINE).write_text("{not json", encoding="utf-8")
+            self._commit(root, "tools/a.py", CLEAN)
+            self.assertEqual(lint.main(["--root", str(root), "--head", "HEAD"]), 2)
+
+    def test_head_refuses_to_write(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._repo(directory)
+            self._commit(root, "tools/a.py", CLEAN)
+            self.assertEqual(lint.main(["--root", str(root), "--head", "HEAD", "--write"]), 2)
+
+
 class RepositoryTests(unittest.TestCase):
     def test_the_committed_baseline_matches_the_tree(self) -> None:
         self.assertEqual(lint.main(["--root", str(ROOT)]), 0)

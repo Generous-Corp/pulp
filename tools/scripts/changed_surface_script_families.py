@@ -679,6 +679,8 @@ def main(argv: list[str]) -> int:
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         print(f"changed-surface script families: cannot read CTest inventory: {error}", file=sys.stderr)
         return 2
+    # Hardware-evidence registrations never run in CI; see GPU_PROOF_LABEL.
+    tests = script_test_inputs.without_gpu_proof(tests)
     off_profile = outside_gate_profile(args.build_dir, tests)
     if off_profile:
         # The environment-bound family lists every declared test the configure

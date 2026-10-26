@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "browser_capture_backend.hpp"
+#include "browser_probe_cache.hpp"
 
 #include <pulp/platform/child_process.hpp>
 
@@ -9,6 +10,7 @@
 #include <regex>
 #include <set>
 #include <sstream>
+#include <string_view>
 
 namespace pulp::import_design::browser_capture {
 
@@ -310,6 +312,14 @@ collect_browser_candidates(const BrowserDiscoveryOptions& options) {
         }
     }
     return candidates;
+}
+
+fs::path default_browser_probe_cache_directory() {
+    if (const char* value = std::getenv("PULP_DESIGN_BROWSER_PROBE_CACHE");
+        value && std::string_view(value) == "0")
+        return {};
+    const auto home = pulp_home();
+    return home.empty() ? fs::path{} : home / "cache" / "browser-probe";
 }
 
 }  // namespace pulp::import_design::browser_capture

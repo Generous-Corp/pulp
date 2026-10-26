@@ -129,6 +129,26 @@ class GpuFaultContinuityProcessor : public format::Processor {
     }
     void report_render_loss(bool performed, const std::string& detail);
 
+    // The editor's way back to the processor. A host may destroy the processor
+    // while its editor (or a main-queue task the editor queued) is still
+    // alive, so the editor holds this and reaches the processor only through
+    // it; the processor clears it first thing in its destructor.
+    struct EditorLink {
+        std::mutex mutex;
+        GpuFaultContinuityProcessor* processor = nullptr; // guarded by mutex
+    };
+    std::shared_ptr<EditorLink> editor_link() const {
+        return editor_link_;
+    }
+
+#if defined(PULP_GPU_FAULT_TEST_ONLY)
+    // Tests only: called on the service thread just before it arms a provider
+    // fault, so a test can put a host re-prepare exactly in that gap.
+    void set_before_arm_hook_for_test(std::function<void()> hook) {
+        before_arm_hook_ = std::move(hook);
+    }
+#endif
+
     // Host thread. Which path delivered each transport quantum so far.
     gpu_audio::GpuAudioTransport::DeliverySnapshot delivery() const;
 
@@ -154,6 +174,7 @@ class GpuFaultContinuityProcessor : public format::Processor {
 
     // Engine (host thread; guarded by engine_mutex_ against the service thread).
     mutable std::mutex engine_mutex_;
+    std::uint32_t engine_generation_ = 0; // prepare_index_ of the current engine
     std::unique_ptr<gpu_audio::GpuConvolver> node_;
     std::unique_ptr<gpu_audio::GpuAudioTransport> transport_;
     std::vector<float> ir_;
@@ -194,6 +215,7 @@ class GpuFaultContinuityProcessor : public format::Processor {
     std::atomic<std::int64_t> after_at_{-1};
     std::atomic<bool> fire_pending_{false};
     std::atomic<bool> fire_offline_{false};
+    std::atomic<std::uint32_t> fire_generation_{0}; // prepare_index_ at the fault block
     std::atomic<std::int64_t> latest_position_{-1};
     std::atomic<bool> render_loss_requested_{false};
 
@@ -216,6 +238,10 @@ class GpuFaultContinuityProcessor : public format::Processor {
     std::mutex hook_mutex_;
     std::function<void()> render_loss_hook_;
     std::atomic<int> render_loss_state_{0}; // 0 none, 1 performed, 2 refused
+    std::shared_ptr<EditorLink> editor_link_ = std::make_shared<EditorLink>();
+#if defined(PULP_GPU_FAULT_TEST_ONLY)
+    std::function<void()> before_arm_hook_;
+#endif
 };
 
 std::unique_ptr<format::Processor> create_gpu_fault_continuity();

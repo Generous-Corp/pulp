@@ -99,11 +99,16 @@ class EvaluateTest(unittest.TestCase):
 class BudgetFileTest(unittest.TestCase):
     def test_shipped_budget_profiles_are_well_formed(self):
         profiles = json.loads(check.BUDGET_FILE.read_text(encoding="utf-8"))["profiles"]
-        for name in ("editor", "no-editor", "icu-data"):
+        for name in ("editor", "lite-editor", "no-editor", "icu-data"):
             self.assertIn(name, profiles)
             self.assertEqual(profiles[name].get("arches"), ["arm64"])
         self.assertTrue(profiles["editor"]["require_icu_data"])
         self.assertTrue(profiles["no-editor"]["forbidden_symbol_patterns"])
+        lite = profiles["lite-editor"]
+        self.assertFalse(lite.get("require_icu_data", False))
+        self.assertLess(lite["max_mapped_bytes"], profiles["editor"]["max_mapped_bytes"] // 4)
+        for family in ("icudt", "SkCanvas", "dawn", "tint", "MacGpuPluginViewHost"):
+            self.assertTrue(any(family in p for p in lite["forbidden_symbol_patterns"]), family)
         self.assertLess(profiles["editor"]["max_icu_data_bytes"], 10_000_000)
 
 

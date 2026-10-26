@@ -326,6 +326,29 @@ const MOTION_FREEZE_SOURCE = `async (declareSources) => {
     },
   };
   const receipt = state.receipt;
+  // The controls whose theme verdict reads inline author styling.
+  const THEMED_CONTROLS = "button, input, textarea, select, progress";
+  const KEYFRAME_FIELDS = new Set(["offset", "computedOffset", "easing", "composite"]);
+  const cssName = (name) => name.startsWith("--") ? name
+    : name === "cssFloat" ? "float" : name === "cssOffset" ? "offset"
+    : name.replace(/[A-Z]/g, (letter) => "-" + letter.toLowerCase());
+  // Whether the target's inline style holds an !important declaration for a
+  // property the animation drives. Such a declaration beats the animation, and
+  // commitStyles would rewrite it at normal priority, where a stylesheet
+  // !important rule it used to beat would win.
+  // A probe declaration expands each animated shorthand into its longhands.
+  const overridesImportant = (animation, target) => {
+    const probe = document.createElement("div").style;
+    for (const keyframe of animation.effect.getKeyframes()) {
+      for (const name of Object.keys(keyframe)) {
+        if (!KEYFRAME_FIELDS.has(name)) probe.setProperty(cssName(name), "initial");
+      }
+    }
+    for (const longhand of probe) {
+      if (target.style.getPropertyPriority(longhand) === "important") return true;
+    }
+    return false;
+  };
 
   // Web Animations run on the document timeline, which the CSS freeze and the
   // scheduler stubs cannot reach. Settle each one to a single frame: a finite
@@ -361,6 +384,25 @@ const MOTION_FREEZE_SOURCE = `async (declareSources) => {
     }
     animation.pause();
     animation.currentTime = 0;
+    // A paused animation can keep painting where the compositor last had it:
+    // with the browser at its real device scale, the page and the DOM read
+    // time zero while the presented frame showed the box mid-cycle. Writing
+    // the time-zero values inline and dropping the animation leaves nothing
+    // for the compositor to hold. commitStyles throws for a target that is
+    // not rendered; that animation stays paused at zero. A form control
+    // stays paused too: the committed values would be inline author styling,
+    // which turns a control the native theme paints into an author-styled one.
+    // So does a target whose inline !important declaration the commit would
+    // overwrite.
+    const target = animation.effect?.target;
+    if (!target?.matches?.(THEMED_CONTROLS)) {
+      try {
+        if (!overridesImportant(animation, target)) {
+          animation.commitStyles();
+          animation.cancel();
+        }
+      } catch {}
+    }
     count("paused");
   }
 
@@ -517,14 +559,62 @@ export async function resumeDynamicTime(cdp) {
   });
 }
 
+// A horizon accepts its last frame when the final STABLE_RUN_FRAMES frames are
+// byte-identical. The run counter resets on any change and the loop never
+// exits early, so that verdict, and the bytes returned, are a function of the
+// final STABLE_RUN_FRAMES frames alone. Every earlier frame exists only to push
+// the decisive ones past that many fresh compositor presentations (an early
+// plateau must not hide a later change), and nothing reads its bytes.
+export const SCREENSHOT_HORIZON_FRAMES = 32;
+export const STABLE_RUN_FRAMES = 3;
+
+// The output options of a presentation-only frame. Encoding happens after
+// readback, so these change the cost of a frame and not which pixels are read.
+// Everything that describes geometry (clip, captureBeyondViewport, fromSurface)
+// is left exactly as the caller passed it: a geometry change resizes the
+// capture surface and is visible to the page.
+export const PRESENTATION_FRAME_ENCODING = Object.freeze({
+  format: "jpeg",
+  quality: 1,
+});
+
+export function presentationFrameOptions(
+  screenshotOptions, encoding = PRESENTATION_FRAME_ENCODING) {
+  return { ...screenshotOptions, ...encoding };
+}
+
+// The presentation encoding for a capture whose motion has been frozen, or
+// null to take every frame in the caller's encoding. An animated image is the
+// one motion the freeze leaves running, on the decoder's wall clock, and its
+// verdict depends on when the decisive frames land. Cheaper presentation
+// frames move them earlier, so a page that declares one keeps the horizon's
+// full wall duration and the verdict it had.
+export function horizonPresentationEncoding(motion) {
+  return motion?.volatile_sources?.length > 0 ? null : PRESENTATION_FRAME_ENCODING;
+}
+
+// The decisive frames, exactly `requiredTrailingFrames` of them, are taken with
+// the caller's own options and compared byte for byte, so they are the frames
+// the rule judges and the bytes the capture ships. Because their count equals
+// the required run, a presentation frame before them can never extend the run
+// that decides: the first decisive frame always restarts it, as any change
+// would. Requiring a longer run than the decisive frames would let encoding
+// break that equivalence, so the two are the same parameter. A null
+// `presentationEncoding` takes every frame with the caller's options.
 export async function captureStableScreenshot(
-  cdp, screenshotOptions, maximumAttempts = 32, intervalMs = 16,
-  requiredTrailingFrames = 3) {
+  cdp, screenshotOptions, maximumAttempts = SCREENSHOT_HORIZON_FRAMES,
+  intervalMs = 16, requiredTrailingFrames = STABLE_RUN_FRAMES,
+  presentationEncoding = PRESENTATION_FRAME_ENCODING) {
+  const presentationFrames = presentationEncoding
+    ? Math.max(0, maximumAttempts - requiredTrailingFrames) : 0;
+  const presentationOptions =
+    presentationFrameOptions(screenshotOptions, presentationEncoding ?? {});
   let previous;
   let trailingFrames = 0;
   for (let attempt = 0; attempt < maximumAttempts; attempt += 1) {
-    const screenshot =
-      await cdp.call("Page.captureScreenshot", screenshotOptions);
+    const screenshot = await cdp.call(
+      "Page.captureScreenshot",
+      attempt < presentationFrames ? presentationOptions : screenshotOptions);
     const current = Buffer.from(screenshot.data, "base64");
     trailingFrames =
       previous?.equals(current) ? trailingFrames + 1 : 1;
@@ -543,10 +633,12 @@ export async function captureStableScreenshot(
 // reused; anything else is observed, with one fresh horizon if the first
 // misses its identical tail.
 export async function captureStableFrameWithHiddenPaint(
-  cdp, screenshotOptions, acceptedBytes, hiddenCount) {
+  cdp, screenshotOptions, acceptedBytes, hiddenCount,
+  presentationEncoding = PRESENTATION_FRAME_ENCODING) {
   if (hiddenCount === 0) return acceptedBytes;
-  return await captureStableScreenshot(cdp, screenshotOptions) ??
-    await captureStableScreenshot(cdp, screenshotOptions);
+  const horizon = () => captureStableScreenshot(cdp, screenshotOptions,
+    undefined, undefined, undefined, presentationEncoding);
+  return await horizon() ?? await horizon();
 }
 
 export async function waitForStable(cdp, options = {}) {

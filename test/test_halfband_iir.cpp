@@ -1,6 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/signal/halfband_iir.hpp>
+#include <pulp/signal/scoped_flush_denormals.hpp>
+
+#include "test_oversampling_support.hpp"
 
 #include <array>
 #include <cmath>
@@ -12,10 +15,11 @@ using namespace pulp::signal;
 using Catch::Matchers::WithinAbs;
 
 // ────────────────────────────────────────────────────────────────────────
-// macOS plan item 2.2 — Polyphase IIR half-band filter (2x).
+// Polyphase IIR half-band filter (2x).
 //
-// Two parallel allpass paths (six sections per path = twelve allpass
-// sections total). Upsampler doubles the rate, downsampler halves it.
+// Two parallel allpass paths (three sections per path = six allpass
+// sections total with the default design). Upsampler doubles the rate,
+// downsampler halves it.
 //
 // Acceptance criteria:
 //   * passband flat (< 0.1 dB) up to 0.42 of the half-band's own rate
@@ -446,7 +450,7 @@ TEST_CASE("HalfBandUpsampler2x rejects out-of-band images (white-noise check)",
 }
 
 TEST_CASE("An unconfigured half-band stage emits silence", "[signal][halfband]") {
-    pulp::signal::detail::HalfBandIirStage<float> stage; // count 0: no design
+    pulp::signal::HalfBandIirStage stage; // count 0: no design
     const std::array<float, 4> input = {1.0f, -0.5f, 0.25f, 0.75f};
     std::array<float, 8> up;
     up.fill(123.0f);
@@ -457,4 +461,80 @@ TEST_CASE("An unconfigured half-band stage emits silence", "[signal][halfband]")
     stage.downsample(input.data(), down.data(), 2);
     REQUIRE(down[0] == 0.0f);
     REQUIRE(down[1] == 0.0f);
+}
+
+TEST_CASE("Half-band classes reject coefficient shapes no half-band has", "[signal][halfband]") {
+    // Path A must carry as many sections as path B or one more. Anything else
+    // is not a half-band design; the classes refuse it by going silent rather
+    // than filtering with a guess.
+    constexpr std::array<float, 1> one = {0.4f};
+    constexpr std::array<float, 3> three = {0.1f, 0.5f, 0.9f};
+    HalfBandUpsampler2x b_longer{std::span<const float>(one), std::span<const float>(three)};
+    HalfBandDownsampler2x a_too_long{std::span<const float>(three), std::span<const float>()};
+    REQUIRE_FALSE(b_longer.configured());
+    REQUIRE_FALSE(a_too_long.configured());
+    float lo = 1.0f, hi = 1.0f;
+    b_longer.process(0.7f, lo, hi);
+    REQUIRE(lo == 0.0f);
+    REQUIRE(hi == 0.0f);
+    REQUIRE(a_too_long.process(0.7f, -0.2f) == 0.0f);
+
+    HalfBandUpsampler2x one_more{std::span<const float>(three),
+                                 std::span<const float>(three).first(2)};
+    REQUIRE(one_more.configured());
+    REQUIRE(one_more.sections_a() == 3);
+    REQUIRE(one_more.sections_b() == 2);
+}
+
+TEST_CASE("Half-band upsampler and downsampler decay to exact zero without flush-to-zero",
+          "[signal][halfband][denormal]") {
+    // The public classes run on the block stage, so silence after a loud
+    // signal must reach exact zero instead of settling into a subnormal limit
+    // cycle, through both the per-sample and the block entry points.
+    pulp::test::oversampling::FlushToZeroOff no_ftz;
+    REQUIRE_FALSE(denormals_are_flushed());
+    constexpr std::size_t kLoud = 4096;
+    constexpr std::size_t kSilent = 65536;
+    constexpr std::size_t kBound = 4096; // measured: well under 1024 per path
+
+    for (const bool block : {false, true}) {
+        HalfBandUpsampler2x up;
+        HalfBandDownsampler2x down;
+        std::vector<float> x(kLoud), wide(2 * kLoud), y(kLoud);
+        for (std::size_t i = 0; i < kLoud; ++i)
+            x[i] = std::tanh(3.0f * 0.9f * std::sin(0.1f * static_cast<float>(i)));
+        up.process_block(x, wide);
+        down.process_block(wide, y);
+
+        long last_up = -1, last_down = -1;
+        std::size_t subnormal = 0;
+        for (std::size_t i = 0; i < kSilent; ++i) {
+            float lo = 0.0f, hi = 0.0f, out = 0.0f;
+            if (block) {
+                const float zero = 0.0f;
+                float pair[2];
+                up.process_block(std::span<const float>(&zero, 1), pair);
+                lo = pair[0];
+                hi = pair[1];
+                const float zeros[2] = {0.0f, 0.0f};
+                down.process_block(zeros, std::span<float>(&out, 1));
+            } else {
+                up.process(0.0f, lo, hi);
+                out = down.process(0.0f, 0.0f);
+            }
+            if (lo != 0.0f || hi != 0.0f)
+                last_up = static_cast<long>(i);
+            if (out != 0.0f)
+                last_down = static_cast<long>(i);
+            for (const float v : {lo, hi, out})
+                if (std::fpclassify(v) == FP_SUBNORMAL)
+                    ++subnormal;
+        }
+        INFO("block=" << block << " upsampler zero after " << last_up + 1
+                      << ", downsampler zero after " << last_down + 1 << ", subnormal outputs "
+                      << subnormal);
+        REQUIRE(last_up + 1 <= static_cast<long>(kBound));
+        REQUIRE(last_down + 1 <= static_cast<long>(kBound));
+        REQUIRE(subnormal == 0);
+    }
 }

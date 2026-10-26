@@ -42,10 +42,13 @@ Not covered: nodes used outside the transport, and the explicitly offline
 on its shadow policy (see [shadow policy](#shadow-policy)). That is CPU work on
 the callback, not GPU work.
 
-`GpuAudioNode::release_bounded(budget_ns)` is declared, but no node overrides
-its default, so it does not yet bound teardown.
+`GpuAudioNode::release_bounded(budget_ns)` bounds teardown only on
+`GpuWaveNetRealtimeNode`. A provider that cannot drain within the budget has
+its device destroyed and stays owned (quarantined) until a later release
+completes it, and the call returns `false`. Every other node keeps the default,
+which holds nothing and returns `true`, so its teardown is not bounded.
 
-**Coming:** bounded teardown with a per-call drain budget.
+**Coming:** bounded teardown for `GpuNeuralRealtimeNode` and the convolvers.
 
 ### 2. Device loss and hung providers are detected and fenced
 
@@ -65,20 +68,32 @@ editor's render device. Today:
 - **Hang.** `GpuWaveNetRealtimeNode` and the GPU path of
   `GpuNeuralRealtimeNode` run a completion watchdog. Each latches
   `ProviderUnresponsive` when the provider completes nothing for
-  `Config::watchdog_blocks` callback blocks (default `capacity - 1`) while work
-  is in flight. On `GpuWaveNetRealtimeNode`, a worker that is starved while its
+  `Config::watchdog_blocks` callback blocks while work is in flight. The
+  default is 200 ms of blocks (150 at 64 frames and 48 kHz), or
+  `capacity - 1` if that is larger. On `GpuWaveNetRealtimeNode`, a worker that is starved while its
   provider keeps completing is tested not to be reported as unresponsive.
 - **Slow but alive.** The staged `GpuConvolver` trips a circuit breaker after a
   run of late results and moves to the CPU, reporting `SustainedDeadlineMisses`.
 - **Fence.** On the stamped shared-I/O nodes (both WaveNet nodes and the shared
   `GpuConvolver`), any latched failure fences the current epoch. A stale or
   late GPU result is never delivered.
-- **Recovery is manual.** After a fence or a loss, audio continues on the CPU
-  path where the node has one, and on silence where it does not. GPU delivery
-  stays off until the host releases and prepares the node again. The staged
-  breaker is the one exception: it probes a slow, live GPU and re-enables it.
-  `GpuAudioRecoveryPolicy` has an `AutoReacquire` value, but it is reserved:
-  every node reports `Manual`, and no node re-acquires a lost provider.
+- **Recovery is manual by default.** After a fence or a loss, audio continues
+  on the CPU path where the node has one, and on silence where it does not.
+  Under the default `GpuAudioRecoveryPolicy::Manual`, GPU delivery stays off
+  until the host releases and prepares the node again. The staged breaker is
+  the one exception: it probes a slow, live GPU and re-enables it.
+- **Opt-in re-acquire, `GpuWaveNetRealtimeNode` only.** With
+  `GpuAudioTransport::Config::recovery_policy = AutoReacquire`, the transport's
+  worker releases a fenced `GpuWaveNetRealtimeNode`'s provider, prepares a new
+  one and opens a new delivery epoch on the same stream, while the callback
+  stays on its fallback. An offline fence is never re-acquired. For any other
+  node the transport's `capability_report().recovery_policy` reads `Manual`
+  whatever is configured, and the node stays fenced. See
+  [re-acquire a lost provider](gpu-audio-sdk.md#re-acquire-a-lost-provider-while-audio-keeps-playing).
+- **Warm providers.** A host-owned `GpuAudioProviderPool`
+  (`GpuWaveNetRealtimeNode::Config::provider_pool`) keeps released providers
+  for `keep_warm_ns` (30 s by default), so a later `prepare()` of the same
+  program borrows one instead of creating a device.
 
 Not covered:
 
@@ -90,7 +105,8 @@ Not covered:
 - a hung provider behind the convolvers: only the two WaveNet GPU paths run a
   watchdog.
 
-**Coming:** automatic re-acquire of a lost provider and a warm provider pool.
+**Coming:** automatic re-acquire for `GpuNeuralRealtimeNode` and the
+convolvers.
 
 ### 3. A missed GPU block is substituted without waiting
 
@@ -119,7 +135,7 @@ hosted by the transport, and have no miss policy or status.
 
 Missed deadlines, fallback use, device loss, unresponsive-provider detection,
 provider state and the first latched recovery reason are reported through
-`GpuAudioStatus` (schema v3) for every transport-hosted node. Read them from
+`GpuAudioStatus` (schema v4) for every transport-hosted node. Read them from
 `GpuAudioTransport::status_snapshot()`. See [reading health](#reading-health)
 for which fields the transport fills.
 
@@ -140,8 +156,14 @@ Metal or other backend types. On macOS there is one GPU provider, Dawn.
 `GpuAudioProvider::Cpu` labels a node that runs CPU-only; it is not a
 pluggable CPU implementation of the provider seam.
 
-**Coming:** a provider conformance kit that any provider must pass, and a
-provider registry with a real CPU provider.
+A provider conformance kit (`test/harness/shared_io_provider_conformance.hpp`)
+drives a provider through the production shared-I/O arena and writes a
+`pulp.gpu-audio.provider-conformance.v1` receipt. It runs against the test
+fake and the Dawn provider. A host-memory CPU provider exists behind the seam
+as a private implementation with its own tests; no node uses it, and the
+conformance kit does not run against it.
+
+**Coming:** a provider registry and a public CPU provider.
 
 ## Reading health
 
@@ -157,6 +179,13 @@ epoch, the delivery counters, `terminal_counts`, the `shadow_*` fields,
 `last_delivery_ns` from the node's health sample. A field the node does not
 report stays at its default.
 
+The transport fills the schema v4 re-acquire fields itself:
+`reacquire_attempts` counts provider replacements it attempted after a fence,
+`reacquire_successes` counts attempts that opened a new delivery epoch, and
+`last_reacquire_to_gpu_ns` is the time from first observing the fence to the
+first GPU-delivered block of the replacing epoch (zero until measured). All
+three stay zero under `Manual` and for a node that cannot re-acquire.
+
 ### Provider state and recovery reason
 
 `provider_state` is the lifecycle summary. `recovery_reason` is the **first**
@@ -165,14 +194,14 @@ latched (`UINT64_MAX` when nothing has latched).
 
 | `recovery_reason` | `provider_state` | Produced by |
 | --- | --- | --- |
-| `None` | `Ready` (GPU delivering, or a CPU-only neural family), or `Degraded` (staged path, or no provider) | every node |
+| `None` | `Ready` (GPU delivering, or a CPU-only neural family), or `Degraded` (staged path, no provider, or a lagging GPU; see below) | every node |
 | `SequenceGap`, `InvalidCallback` | `Degraded` | both WaveNet GPU paths and the shared `GpuConvolver` |
 | `InputSaturated`, `OfflineFence` | `Degraded` | both WaveNet nodes and the shared `GpuConvolver` |
 | `ProviderFailure` | `Degraded` | a failed provider completion; a staged `GpuConvolver` map failure or non-finite readback; a WaveNet model whose GPU provider could not be prepared |
 | `ProviderLost` | `Unavailable` | both WaveNet GPU paths, both `GpuConvolver` paths, `GpuMultiConvolver` |
 | `ProviderUnresponsive` | `Unavailable` | the watchdog on the two WaveNet GPU paths |
 | `SustainedDeadlineMisses` | `Degraded` | the staged `GpuConvolver`'s circuit breaker |
-| `ProviderReacquired` | informational | reserved; nothing produces it. **Coming** with automatic re-acquire |
+| `ProviderReacquired` | informational; the new provider's own state applies | `GpuWaveNetRealtimeNode` under `AutoReacquire`, after a successful re-acquire |
 
 Every node reports a device loss observed after a failure, a stall or
 sustained misses (`ProviderFailure`, `ProviderUnresponsive` or
@@ -180,6 +209,24 @@ sustained misses (`ProviderFailure`, `ProviderUnresponsive` or
 transport's. Independent causes (`SequenceGap`, `InputSaturated`,
 `InvalidCallback` or `OfflineFence`) stay first: a node that latched one of
 those and then lost its device keeps that reason and reports `Unavailable`.
+
+A provider that keeps completing, but too late for the callback, latches no
+cause. On the stamped shared-I/O nodes (`GpuWaveNetRealtimeNode`, the GPU path
+of `GpuNeuralRealtimeNode` and the shared `GpuConvolver`), `Ready` on the `Gpu`
+engine also requires the GPU to carry the recent stream. The status reads
+`Degraded`, with `recovery_reason` `None`, when:
+
+- at least 8 of the last 32 callback blocks were counted and the GPU delivered
+  fewer than half of them; or
+- at least one block was counted and the GPU delivered none of them, as during
+  a first preparation's or a re-acquired epoch's warmup.
+
+Priming blocks are not counted. The status returns to `Ready` once the GPU
+carries half the window again, and a re-acquire starts a new window.
+
+`ProviderReacquired` replaces the cause that fenced the old epoch, with
+`recovery_sequence` set to the first block the new provider can deliver. The
+replaced cause stays in the trace and in the `reacquire_*` counters.
 
 On the staged `GpuConvolver` and `GpuMultiConvolver`, `recovery_sequence` is
 the worker block at which the reason latched. A loss the worker has not reached
@@ -200,7 +247,8 @@ violation fences GPU delivery and is reported as the recovery reason.
 
 `selected_engine` names the engine that actually produces the audio:
 
-- `Gpu` only while the provider is `Ready` with a GPU provider;
+- `Gpu` only while the provider is `Ready` with a GPU provider, so not while a
+  lagging GPU holds the status at `Degraded`;
 - `Cpu` when a prepared CPU path covers misses, for a CPU-only family, and for
   a staged `GpuConvolver` whose breaker has tripped or whose device is lost;
 - `Unknown` when misses are silent, or on the staged path while it uses the
@@ -272,6 +320,11 @@ returns a typed `GpuAudioStatusError`. Among other things it rejects:
 - a `Degraded` or `Unavailable` status that selects the GPU engine;
 - `ProviderLost` or `ProviderUnresponsive` without `Unavailable`;
 - `SustainedDeadlineMisses` without `Degraded`;
+- `Ready` with a cause that fences delivery (`SequenceGap`, `InputSaturated`,
+  `ProviderFailure`, `InvalidCallback` or `OfflineFence`);
+- `Ready` on a stamped node (nonzero `epoch`) whose `delivery_epoch_active` is
+  false;
+- the GPU engine without `gpu_kernel_available`;
 - a CPU provider with a GPU kernel or a GPU epoch;
 - shadow counts without a shadow;
 - terminal counts beyond the delivery counters;
@@ -299,6 +352,8 @@ it does not show that a ready provider met a realtime deadline.
   It reports `Degraded` with `ProviderFailure`, not `Ready`.
 - **Non-finite input.** NaN and infinite samples are replaced with zero before
   either the GPU or the shadow sees them. `sanitized_input_samples()` counts them.
+  `GpuWaveNetRealtimeNode` applies the same policy before GPU submission and
+  counts in its own `sanitized_input_samples()`; neither latches a cause.
 - **Recovery.** On the GPU path, any latched cause, including a single invalid
   callback, fences GPU delivery until the host prepares the node again.
 - **Model construction.** Build a model on the host thread with
@@ -357,9 +412,13 @@ block. Measure it for the model size and channel count you ship.
   `worker_pipeline_blocks`, and the transport primes that many fewer blocks, so
   total latency and the reported delay compensation are unchanged. Called
   directly, or with a one-block lead, it decides each block inside the call
-  with a bounded wait. A pipelining convolver must outlive the transport's
-  `release()` (or the transport must be released first), because `release()`
-  opts it back out; a node that does not pipeline is never touched there.
+  with a bounded wait. The transport's `release()` opts a pipelining
+  convolver back out; one destroyed before that call detaches itself from the
+  transport first, and a node that does not pipeline is never touched there.
+  That holds only once neither `pump()` nor `process()` runs on its transport:
+  the audio callback's `process()` calls the node's CPU fallback, and a
+  transport with its own worker pumps it until `release()` joins the worker.
+  Otherwise release that transport before destroying the node.
 - **Exact routing.** A block whose result is on time and finite uses the GPU.
   Any other block goes to the worker's CPU convolution, so the output is the
   exact continuation of the convolution, never silence. A miss costs one CPU
@@ -372,6 +431,10 @@ block. Measure it for the model size and channel count you ship.
 - **Status.** A failed map or non-finite readback latches `ProviderFailure`. A
   lost device latches `ProviderLost` (`Unavailable`, CPU engine) and replaces
   any other cause. A single late block latches nothing.
+- **Non-finite input.** NaN and infinite input samples are zeroed before
+  submission, so they cannot cause a non-finite readback. The CPU convolution
+  and the miss substitute get the same zeroed block, keeping the IR tail
+  seamless. `sanitized_input_samples()` counts them.
 
 `ProviderPolicy::StagedBlocking` keeps the older in-block readback wait and is
 a transition escape hatch.
@@ -380,6 +443,10 @@ a transition escape hatch.
 authenticated Dawn provider and reports `Ready` with provider `Dawn` while it
 delivers. After the transport's offline fence, the session stays CPU-only until
 the next preparation; it does not re-prime onto the GPU.
+NaN and infinite input samples are replaced with zero before the GPU input
+slot, so one bad sample neither rings through the IR tail nor fences the
+session on readback. `sanitized_input_samples()` counts them and latches no
+cause.
 
 **`GpuMultiConvolver`.** No CPU fallback: a miss or a lost device is silent,
 and the status says so with `fallback_policy = Silence`. `device_lost()`
@@ -397,9 +464,10 @@ merged evidence. Each is a host fact to plan around, not a Pulp guarantee.
   CPU fallback. Audio stays correct, but the GPU does no useful work. Turn
   anticipative FX off for the track to test the GPU path. A processing quantum
   smaller than the host block has the same effect.
-- **The GPU does not resume after an audio fault.** After any injected provider
-  fault, delivery stays on the CPU fallback for the rest of the run. This
-  matches the manual recovery policy described in claim 2.
+- **The GPU does not resume after an audio fault (under the default `Manual`
+  policy).** After any injected provider fault, delivery stays on the CPU
+  fallback for the rest of the run. This matches the manual recovery policy
+  described in claim 2.
 - **No real host has shown a named loss reason yet.** In those runs, which used
   a code base from before the v3 status work, `recovery_reason` stayed `None`
   after a loss. The code now latches a reason; a real-host run against it has
@@ -438,12 +506,20 @@ resource replay or teardown suppression.
   loss, hang, lateness and fencing, and every status they produce passes
   `validate_gpu_audio_status`. They prove the sequencing and fallback contracts,
   not hardware deadline reliability.
-- **Real DAW.** Use the [real-DAW smoke harness](daw-smoke.md). **Coming:** a
-  `gpu-fault` mode that injects a provider fault while the plug-in runs in
-  REAPER, and a verifier for its receipts. Run it with anticipative FX off for
-  the GPU path, and record the setting either way.
-- **Provider conformance.** **Coming:** a kit that runs the same contract tests
-  against any provider.
+- **Real DAW.** Use the [real-DAW smoke harness](daw-smoke.md). Its
+  `--mode gpu-fault` injects one GPU fault into the test plug-in in
+  `examples/gpu-fault-continuity/` while REAPER renders the track, and writes a
+  `pulp.gpu-audio.daw-continuity.v1` receipt that
+  `tools/validation/verify_gpu_audio_daw_continuity_receipt.py` checks. The
+  other hosts' runs write a `v2` receipt, checked by
+  `verify_gpu_audio_daw_continuity_receipt_v2.py`. Run it
+  with anticipative FX off for the GPU path, and record the setting either
+  way. No real-DAW receipt from it is merged yet.
+- **Provider conformance.** The kit in
+  `test/harness/shared_io_provider_conformance.hpp` runs the same contract
+  scenarios against the test fake and the Dawn provider, and
+  `tools/validation/verify_gpu_audio_provider_conformance.py` checks its
+  receipt.
 - **Dawn versus native Metal comparator.** **Coming:** a matched comparator for
   the provider decision. Its first campaign was inconclusive on a loaded host.
 

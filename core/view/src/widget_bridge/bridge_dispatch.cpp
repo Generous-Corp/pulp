@@ -55,6 +55,38 @@ function __pulpRememberPropagation__(key, level) {
         delete __pulpEventPropagation__[__pulpEventPropagationOrder__.shift()];
     }
 }
+// One report for every handler error the dispatch catches. The text keeps the
+// error's own message (QuickJS's e.stack holds only the frames, so reporting
+// the stack alone dropped "stack overflow" and every other message), and it is
+// built so a thrown value without a toString (Object.create(null)) still
+// reports instead of throwing again. The count and last text make an error
+// visible even with no __dispatchError__ hook installed. console.error then
+// prints it, once per distinct text and again every 100th repeat, so a handler
+// that throws on every pointermove reports without flooding the console.
+var __pulpDispatchErrorCount__ = 0;
+var __pulpLastDispatchError__ = '';
+var __pulpDispatchErrorRepeats__ = 0;
+function __pulpDispatchErrorText__(e) {
+    var head;
+    try { head = String(e); } catch (_) { head = Object.prototype.toString.call(e); }
+    var stack = '';
+    try { stack = e && e.stack ? '\n' + e.stack : ''; } catch (_) {}
+    return head + stack;
+}
+function __pulpReportDispatchError__(id, eventName, e) {
+    var text = __pulpDispatchErrorText__(e);
+    ++__pulpDispatchErrorCount__;
+    var repeat = text === __pulpLastDispatchError__;
+    __pulpDispatchErrorRepeats__ = repeat ? __pulpDispatchErrorRepeats__ + 1 : 0;
+    __pulpLastDispatchError__ = text;
+    if (typeof __dispatchError__ === 'function') { __dispatchError__(id, eventName, text); return; }
+    if (typeof console === 'undefined' || !console.error) return;
+    if (!repeat)
+        console.error('dispatch ' + String(eventName) + ' on ' + String(id) + ': ' + text);
+    else if (__pulpDispatchErrorRepeats__ % 100 === 0)
+        console.error('dispatch ' + String(eventName) + ' on ' + String(id) + ': ' + text
+                      + ' (repeated ' + __pulpDispatchErrorRepeats__ + ' more times)');
+}
 //
 // Fan out events targeting the synthetic '__global__' id into
 // window._listeners[eventName] — `window.addEventListener('keydown',
@@ -89,7 +121,7 @@ function __pulpDispatchCallbackOnlyUnbatched__(id, eventName) {
         // halting the frame loop.
         try { level = __pulpPropagationLevel__(cb.apply(null, args)); }
         catch (e) {
-            if (typeof __dispatchError__ === 'function') __dispatchError__(id, eventName, String(e && e.stack ? e.stack : e));
+            __pulpReportDispatchError__(id, eventName, e);
         }
     }
     __pulpRememberPropagation__(propagationKey, level);
@@ -110,7 +142,7 @@ function __pulpDispatchUnbatched__(id, eventName) {
             for (var i = 0; i < list.length; i++) {
                 try { list[i](ev); }
                 catch (e) {
-                    if (typeof __dispatchError__ === 'function') __dispatchError__(id, eventName, String(e && e.stack ? e.stack : e));
+                    __pulpReportDispatchError__(id, eventName, e);
                 }
             }
         }
@@ -240,8 +272,8 @@ function __pulpDispatchUnbatched__(id, eventName) {
                 // separate bridge dispatch so direct @pulp/react listeners and
                 // web-compat share one source. Do not synthesize it again here.
             } catch (e) {
-                stats.lastErr = String(e && e.stack ? e.stack.slice(0, 200) : e);
-                if (typeof __dispatchError__ === 'function') __dispatchError__(id, eventName, String(e && e.stack ? e.stack : e));
+                stats.lastErr = __pulpDispatchErrorText__(e).slice(0, 200);
+                __pulpReportDispatchError__(id, eventName, e);
             }
         } else if (!el) {
             stats.missingElement = (stats.missingElement || 0) + 1;
@@ -259,6 +291,10 @@ constexpr const char* kDispatchBatchPrelude = R"(
 // is already open instead of opening its own. __pulpRunHostCallback__ belongs
 // to the runtime API registrar, which a view-core-only consumer may not
 // install; without it the handlers run unbatched.
+//
+// When the outermost dispatch's batch has committed, the UI framework's
+// __pulpAfterDiscreteDispatch__ hook runs, so it sees the props the handlers'
+// state produced. A controlled control uses it to put a rejected edit back.
 var __pulpDispatchDepth__ = 0;
 function __pulpRunDispatchBatch__(body, args) {
     var outermost = __pulpDispatchDepth__ === 0;
@@ -272,17 +308,40 @@ function __pulpRunDispatchBatch__(body, args) {
     } catch (e) {
         // The batch commits as the hook returns, outside the handlers' own
         // try/catch, so an error raised while committing surfaces here.
-        if (typeof __dispatchError__ === 'function')
-            __dispatchError__(args[0], args[1], String(e && e.stack ? e.stack : e));
+        __pulpReportDispatchError__(args[0], args[1], e);
     } finally {
         --__pulpDispatchDepth__;
     }
+    if (outermost && typeof __pulpAfterDiscreteDispatch__ === 'function') {
+        try { __pulpAfterDiscreteDispatch__(args[0], args[1]); }
+        catch (e) {
+            if (typeof __dispatchError__ === 'function')
+                __dispatchError__(args[0], args[1], String(e && e.stack ? e.stack : e));
+        }
+    }
     return result;
 }
+// A dispatch made inside an open batch already joins it, so it runs the body
+// here instead of through __pulpRunDispatchBatch__: each nesting level (a key
+// that clicks, a click that focuses) then costs one frame instead of three,
+// which matters under QuickJS's stack limit. Depth and error containment are
+// the same as the batched path.
 function __dispatchCallbackOnly__(id, eventName) {
+    if (__pulpDispatchDepth__ > 0) {
+        ++__pulpDispatchDepth__;
+        try { return __pulpDispatchCallbackOnlyUnbatched__.apply(null, arguments) || 0; }
+        catch (e) { __pulpReportDispatchError__(id, eventName, e); return 0; }
+        finally { --__pulpDispatchDepth__; }
+    }
     return __pulpRunDispatchBatch__(__pulpDispatchCallbackOnlyUnbatched__, arguments) || 0;
 }
 function __dispatch__(id, eventName) {
+    if (__pulpDispatchDepth__ > 0) {
+        ++__pulpDispatchDepth__;
+        try { return __pulpDispatchUnbatched__.apply(null, arguments); }
+        catch (e) { __pulpReportDispatchError__(id, eventName, e); return undefined; }
+        finally { --__pulpDispatchDepth__; }
+    }
     return __pulpRunDispatchBatch__(__pulpDispatchUnbatched__, arguments);
 }
 )";
