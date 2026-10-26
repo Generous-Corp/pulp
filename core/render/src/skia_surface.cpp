@@ -240,6 +240,7 @@ class SkiaSurfaceImpl : public SkiaSurface {
             }
             canvas_ = std::make_unique<canvas::SkiaCanvas>(
                 sk_canvas, recorder_.get(), retained_layers_);
+            idle_trim_.note_frame(trim_clock_now());
             return canvas_.get();
         }
 
@@ -319,6 +320,7 @@ class SkiaSurfaceImpl : public SkiaSurface {
 
         canvas_ = std::make_unique<canvas::SkiaCanvas>(
             sk_canvas, recorder_.get(), retained_layers_);
+        idle_trim_.note_frame(trim_clock_now());
         return canvas_.get();
     }
 
@@ -402,8 +404,9 @@ class SkiaSurfaceImpl : public SkiaSurface {
             frame_work_submitted_ = true;
         }
 
-        if (idle_trim_.due(trim_clock_now()))
-            trim_gpu_resources(TrimLevel::unused_for(GpuIdleTrimSchedule::kUnusedAge));
+        const auto trim_now = trim_clock_now();
+        if (const auto age = idle_trim_.unused_age(trim_now); age && idle_trim_.due(trim_now))
+            trim_gpu_resources(TrimLevel::unused_for(*age));
 
         // A null snap() with no earlier submit means this frame produced no GPU
         // work at all. When read_current_rgba() already flushed the frame, the
