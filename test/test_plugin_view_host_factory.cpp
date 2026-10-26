@@ -327,14 +327,20 @@ TEST_CASE("X11 plugin host follows a resize the host applied to its window",
     // connection; until the server has processed them, a resize from the DAW
     // connection can land first and be undone by the attach. The window turning
     // viewable proves the attach's requests, the resize before the map
-    // included, are done.
-    for (int i = 0; i < 200; ++i) {
+    // included, are done. Running out of time is a failure, not a reason to
+    // carry on into the race this wait exists to avoid. The budget is 5 s:
+    // xvfb on a loaded CI runner can be slow, and a passing run stops at the
+    // first poll that sees the window.
+    bool viewable = false;
+    for (int i = 0; i < 1000 && !viewable; ++i) {
         XWindowAttributes attrs{};
-        if (XGetWindowAttributes(daw, child, &attrs) && attrs.map_state == IsViewable)
-            break;
-        host->pump_x_events();
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        viewable = XGetWindowAttributes(daw, child, &attrs) && attrs.map_state == IsViewable;
+        if (!viewable) {
+            host->pump_x_events();
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
     }
+    REQUIRE(viewable);
     host->pump_x_events(); // drain the attach's own events
 
     std::vector<std::pair<uint32_t, uint32_t>> notified;
