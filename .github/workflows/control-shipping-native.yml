@@ -22,20 +22,17 @@ concurrency:
 # main's plus version files, which this advisory workflow already ran on, and
 # none of its contexts is required (tools/scripts/test_bump_skips_advisory.py).
 jobs:
-  # Builds the leg list. Windows x64 runs on the self-hosted Windows x64 lane;
-  # PULP_ALLOW_HOSTED_WINDOWS=1 puts it back on GitHub-hosted windows-2022, as
-  # does a pull request from a fork. The lane is one VM, so a pull request's
-  # Windows x64 leg is dropped while another Windows x64 job is already waiting
-  # (tools/scripts/windows_runner_selector.py --max-backlog); the nightly and a
-  # dispatch always queue. windows-arm64 stays GitHub-hosted: no self-hosted
-  # Windows ARM64 lane serves this workflow.
+  # Builds the leg list. On the nightly and a dispatch, Windows x64 runs on the
+  # self-hosted Windows x64 lane (tools/scripts/windows_runner_selector.py);
+  # PULP_ALLOW_HOSTED_WINDOWS=1 puts it back on GitHub-hosted windows-2022.
+  # Automatic pull-request runs never take the lane: a pull request's Windows
+  # x64 leg runs hosted only with that opt-in and is otherwise deferred, which
+  # the consolidated evidence records. windows-arm64 stays GitHub-hosted: no
+  # self-hosted Windows ARM64 lane serves this workflow.
   legs:
     if: github.head_ref != 'release/version-bump' && (github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO)
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    permissions:
-      contents: read
-      actions: read
     outputs:
       matrix: ${{ steps.legs.outputs.matrix }}
       deferred: ${{ steps.legs.outputs.deferred }}
@@ -47,24 +44,23 @@ jobs:
       - name: Resolve the native legs
         id: legs
         env:
-          GH_TOKEN: ${{ github.token }}
           DEFAULT_SELECTOR: ${{ vars.PULP_LOCAL_WINDOWS_X64_RUNS_ON_JSON || '' }}
           ALLOW_HOSTED: ${{ vars.PULP_ALLOW_HOSTED_WINDOWS || '' }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
         shell: bash
         run: |
           set -euo pipefail
-          max_backlog=""
-          if [ "${GITHUB_EVENT_NAME}" = pull_request ]; then
-            max_backlog=1
-          fi
           route=$(python3 tools/scripts/windows_runner_selector.py --route \
             --fallback windows-2022 \
             --default-selector "$DEFAULT_SELECTOR" \
             --allow-hosted "$ALLOW_HOSTED" \
-            --head-repo "$HEAD_REPO" \
-            --max-backlog "$max_backlog")
+            --head-repo "$HEAD_REPO")
           echo "$route"
+          # A pull request keeps the leg only on the hosted opt-in.
+          case "${GITHUB_EVENT_NAME}:${ALLOW_HOSTED}" in
+            pull_request*:1|pull_request*:true|pull_request*:TRUE) ;;
+            pull_request*) route=$(printf '%s\n' "$route" | sed 's/^route=.*/route=skip/') ;;
+          esac
           ROUTE="$route" python3 - <<'PY'
           import json
           import os
@@ -441,7 +437,7 @@ jobs:
           set -euo pipefail
           deferred_args=()
           for leg in $DEFERRED_LEGS; do
-            echo "::notice::${leg} deferred: the self-hosted Windows x64 lane was busy"
+            echo "::notice::${leg} deferred: a pull request runs it only with PULP_ALLOW_HOSTED_WINDOWS=1"
             deferred_args+=(--deferred-leg "$leg")
           done
           python3 tools/scripts/verify_control_shipping_native_evidence.py \

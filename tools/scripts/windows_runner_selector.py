@@ -25,6 +25,8 @@ else DEFAULT_SELF_HOSTED), and GitHub-hosted is used only when
     image, without the push and pull-request jobs PULP_ALLOW_HOSTED_WINDOWS
     also turns on), or
   * the event is a pull request from a fork, whose code never runs on our VMs.
+    This is checked first, so no selector or variable overrides it, and a
+    pull request whose head repository is missing counts as a fork.
 
 The lane is one VM that runs one job at a time, so an automatic event
 (anything but workflow_dispatch) given --max-backlog N skips the job when N or
@@ -160,13 +162,19 @@ def route(
 ) -> tuple[str, str, str]:
     """Return (runs_on JSON, route, reason) for a Windows x64 job."""
     hosted = resolve("", hosted_label)
+    # First, before any selector or variable: repository variables resolve for
+    # fork pull requests, so nothing a pull request can carry may reach the
+    # lane. A head repository that is missing or differs from this one counts
+    # as a fork.
+    if event_name.startswith("pull_request") and (
+        not head_repo.strip() or not repository.strip() or head_repo.strip() != repository.strip()
+    ):
+        return hosted, "hosted", "fork-hosted"
     if selector.strip():
         runs_on = resolve(selector, hosted_label)
         return runs_on, "self-hosted" if _is_self_hosted(runs_on) else "hosted", "explicit-selector"
     if allow_hosted.strip().casefold() in ("1", "true"):
         return hosted, "hosted", "hosted-opt-in"
-    if event_name.startswith("pull_request") and head_repo and head_repo != repository:
-        return hosted, "hosted", "fork-hosted"
     local = resolve(default_selector or json.dumps(DEFAULT_SELF_HOSTED), hosted_label)
     if not _is_self_hosted(local):
         return hosted, "hosted", "hosted-opt-in"

@@ -119,6 +119,35 @@ class RouteTests(unittest.TestCase):
                     self.route(event, head_repo="someone/pulp", repository="Generous-Corp/pulp"),
                     ("windows-latest", "hosted", "fork-hosted"))
 
+    def test_a_pull_request_without_a_head_repository_counts_as_a_fork(self) -> None:
+        for event in ("pull_request", "pull_request_target"):
+            for head, repo in (("", "Generous-Corp/pulp"), ("  ", "Generous-Corp/pulp"),
+                               ("Generous-Corp/pulp", ""), ("", "")):
+                with self.subTest(event=event, head=head, repo=repo):
+                    self.assertEqual(self.route(event, head_repo=head, repository=repo),
+                                     ("windows-latest", "hosted", "fork-hosted"))
+
+    def test_the_fork_check_runs_before_any_selector_or_variable(self) -> None:
+        fork = {"head_repo": "someone/pulp", "repository": "Generous-Corp/pulp"}
+        for event in ("pull_request", "pull_request_target"):
+            with self.subTest(event=event, via="explicit selector"):
+                self.assertEqual(self.route(event, selector=json.dumps(MACPRO_WINDOWS), **fork),
+                                 ("windows-latest", "hosted", "fork-hosted"))
+            with self.subTest(event=event, via="lane variable"):
+                self.assertEqual(
+                    self.route(event, default_selector=json.dumps(MACPRO_WINDOWS), **fork),
+                    ("windows-latest", "hosted", "fork-hosted"))
+            with self.subTest(event=event, via="empty head and explicit selector"):
+                self.assertEqual(
+                    self.route(event, selector=json.dumps(MACPRO_WINDOWS), head_repo="",
+                               repository="Generous-Corp/pulp")[1], "hosted")
+
+    def test_a_same_repository_pull_request_still_takes_the_lane(self) -> None:
+        # Control for the two tests above: the fork check is not "every PR".
+        self.assertEqual(self.route("pull_request", head_repo="Generous-Corp/pulp",
+                                    repository="Generous-Corp/pulp"),
+                         (LANE, "self-hosted", "self-hosted-default"))
+
     def test_an_explicit_selector_wins_and_is_still_policed(self) -> None:
         self.assertEqual(self.route("workflow_dispatch", selector=json.dumps(MACPRO_WINDOWS)),
                          (MACPRO_WINDOWS, "self-hosted", "explicit-selector"))
@@ -132,7 +161,8 @@ class RouteTests(unittest.TestCase):
         busy = lambda: 1  # noqa: E731
         self.assertEqual(self.route("schedule", max_backlog=1, backlog=busy),
                          (LANE, "skip", "capacity-skip"))
-        self.assertEqual(self.route("pull_request", max_backlog=1, backlog=busy)[1], "skip")
+        self.assertEqual(self.route("pull_request", max_backlog=1, backlog=busy,
+                                    head_repo="o/r", repository="o/r")[1], "skip")
         # A dispatch always queues: someone asked for it.
         self.assertEqual(self.route("workflow_dispatch", max_backlog=1, backlog=busy)[1],
                          "self-hosted")

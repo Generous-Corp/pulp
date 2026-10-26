@@ -740,8 +740,12 @@ the golden.
 
 #### What runs on it
 
-Windows x64 jobs default to this lane. GitHub-hosted Windows runs only when it is
-opted into, or for a pull request from a fork, whose code never runs on our VMs.
+Windows x64 jobs default to this lane, and GitHub-hosted Windows runs only when it
+is opted into. No pull request reaches the lane. The selector checks for a fork
+first, before any selector or variable, and a pull request whose head repository
+is missing counts as a fork. The two pull-request-triggered jobs below
+(`control-shipping-native` and coverage) never send a pull request to the lane
+either: without the opt-in they leave Windows x64 out.
 Each routed workflow resolves its runner with `windows_runner_selector.py
 --route`, which emits `runs_on`, `route` (`self-hosted`, `hosted` or `skip`) and
 `route_reason`:
@@ -750,7 +754,7 @@ Each routed workflow resolves its runner with `windows_runner_selector.py
 |---|---|---|---|
 | `cross-platform-check.yml` | Windows build + test | the nightly, a dispatch | opted in |
 | `software-gpu-proof.yml` | Windows WARP proof | the nightly, a dispatch | opted in |
-| `control-shipping-native.yml` | `windows-x64` leg | the nightly, a dispatch, a same-repo pull request while the lane is idle | opted in, or a fork |
+| `control-shipping-native.yml` | `windows-x64` leg | the nightly, a dispatch | opted in (the only way a pull request runs it; otherwise deferred) |
 | `coverage.yml` | Coverage report (Windows, Clang) | a schedule while the lane is idle, a dispatch | opted in (the only way a pull request runs it) |
 | `android.yml` | `windows-x64` row | the nightly, a dispatch | opted in (which also adds it to a push) |
 | `freshness-check.yml` | Build validation, `windows-x64` | a tier-2 dispatch | opted in |
@@ -761,12 +765,12 @@ It leaves out `pulp-host-macpro`, so a second Windows x64 host carrying the same
 capability label would serve the same jobs.
 
 The lane is one VM that runs one job at a time, and nothing on it is a required
-check (`tools/scripts/test_windows_x64_routing.py` pins both). So the jobs an
-automatic event starts often are bounded with `--max-backlog 1`: while another
-Windows x64 job is queued or running, a pull request's `control-shipping-native`
-leg and a scheduled coverage leg are left out instead of queued. A left-out
-`windows-x64` leg is named in `control-shipping-native`'s consolidated evidence
-(`deferred_legs`, `complete: false`). A dispatch always queues. The backlog probe
+check (`tools/scripts/test_windows_x64_routing.py` pins both). So a scheduled
+coverage leg is bounded with `--max-backlog 1`: while another Windows x64 job is
+queued or running, it is left out instead of queued. A pull request's
+`control-shipping-native` `windows-x64` leg, left out unless hosted is opted
+into, is named in the consolidated evidence (`deferred_legs`,
+`complete: false`). A dispatch always queues. The backlog probe
 counts jobs carrying `pulp-build-windows-x64` in other queued and in-progress
 runs; when it cannot read them it counts zero and the job queues.
 

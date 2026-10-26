@@ -5,9 +5,8 @@ The lane is one repository-scoped VM (docs/guides/local-ci.md, "The Windows x64
 slot") that runs one job at a time. Every routed job resolves its runner through
 tools/scripts/windows_runner_selector.py --route, which defaults to the lane and
 uses GitHub-hosted only with PULP_ALLOW_HOSTED_WINDOWS=1 (or a fork pull
-request). The jobs a pull request can start skip the lane while another Windows
-x64 job is waiting, so a burst of pull requests cannot queue hours of work on
-one VM.
+request). No pull request reaches the lane: the jobs a pull request can start
+run Windows x64 hosted on the opt-in and otherwise leave it out.
 
 The step scripts are executed here, not modelled, with a fake `gh` standing in
 for the backlog probe, so the tests stay offline.
@@ -125,16 +124,17 @@ class RoutedJobsTests(unittest.TestCase):
                 runs_on = load(workflow)["jobs"][job_name]["runs-on"]
                 self.assertIn(f"fromJSON({source})", runs_on)
 
-    def test_pull_request_jobs_bound_the_lane_backlog(self) -> None:
-        # The routed jobs a pull request can start. Each passes --max-backlog
-        # so a burst of pull requests cannot stack hours of work on one VM.
+    def test_pull_request_jobs_pass_the_head_repository(self) -> None:
+        # The routed jobs a pull request can start. Both name the head
+        # repository so the selector's fork check can see it.
         for workflow, job_name in (("coverage.yml", "resolve-runners"),
                                    ("control-shipping-native.yml", "legs")):
             with self.subTest(workflow=workflow):
                 spec = load(workflow)["jobs"][job_name]
-                self.assertIn("--max-backlog", selector_steps(spec)[0]["run"])
                 self.assertIn("--head-repo", selector_steps(spec)[0]["run"])
-                self.assertEqual(spec["permissions"].get("actions"), "read")
+        coverage = load("coverage.yml")["jobs"]["resolve-runners"]
+        self.assertIn("--max-backlog 1", selector_steps(coverage)[0]["run"])
+        self.assertEqual(coverage["permissions"].get("actions"), "read")
 
     def test_no_routed_job_is_a_required_context(self) -> None:
         ruleset = json.loads((REPO_ROOT / ".github/rulesets/main-protection.json").read_text(encoding="utf-8"))
@@ -187,8 +187,12 @@ class CoverageRouteTests(unittest.TestCase):
     def test_a_pull_request_leaves_windows_out_unless_hosted_is_opted_into(self) -> None:
         self.assertEqual(self.resolve("pull_request")[1], "skip")
         self.assertEqual(self.resolve("pull_request", PR_HEAD_REPO="fork/pulp")[1], "skip")
-        self.assertEqual(self.resolve("pull_request", ALLOW_HOSTED_WINDOWS="1"),
-                         ("windows-latest", "hosted"))
+        self.assertEqual(self.resolve("pull_request", PR_HEAD_REPO="")[1], "skip")
+        for head in ("Generous-Corp/pulp", "fork/pulp", ""):
+            with self.subTest(head=head):
+                self.assertEqual(
+                    self.resolve("pull_request", ALLOW_HOSTED_WINDOWS="1", PR_HEAD_REPO=head),
+                    ("windows-latest", "hosted"))
 
     def test_a_hosted_lane_variable_switches_coverage_back_to_hosted(self) -> None:
         self.assertEqual(self.resolve("schedule", WINDOWS_X64_RUNS_ON_JSON='"windows-latest"'),
@@ -233,17 +237,30 @@ class ControlShippingRouteTests(unittest.TestCase):
         self.assertEqual(legs["macos-universal"], "macos-15")
         self.assertEqual(legs["linux-x64"], "ubuntu-24.04")
 
-    def test_a_pull_request_defers_windows_x64_while_the_lane_is_busy(self) -> None:
-        self.assertEqual(self.legs("pull_request")[0]["windows-x64"], LANE)
-        legs, deferred = self.legs("pull_request", backlog=1)
-        self.assertNotIn("windows-x64", legs)
+    def test_an_automatic_pull_request_never_takes_the_lane(self) -> None:
+        # Same-repo, fork, or no head repository, idle lane or busy: deferred.
+        for head in ("Generous-Corp/pulp", "fork/pulp", ""):
+            for backlog in (0, 1):
+                with self.subTest(head=head, backlog=backlog):
+                    legs, deferred = self.legs("pull_request", backlog=backlog, HEAD_REPO=head)
+                    self.assertNotIn("windows-x64", legs)
+                    self.assertEqual(deferred, "windows-x64")
+                    self.assertEqual(len(legs), 4, "control: the other legs still run")
+        # Even a lane variable cannot pull a pull request onto the lane.
+        legs, deferred = self.legs("pull_request",
+                                   DEFAULT_SELECTOR=json.dumps([*LANE, "pulp-host-macpro"]))
         self.assertEqual(deferred, "windows-x64")
-        self.assertEqual(len(legs), 4, "control: the other legs still run")
 
-    def test_hosted_is_the_opt_in_or_a_fork(self) -> None:
+    def test_a_pull_request_runs_windows_x64_hosted_only_with_the_opt_in(self) -> None:
+        for head in ("Generous-Corp/pulp", "fork/pulp", ""):
+            with self.subTest(head=head):
+                legs, deferred = self.legs("pull_request", ALLOW_HOSTED="1", HEAD_REPO=head)
+                self.assertEqual(legs["windows-x64"], "windows-2022")
+                self.assertEqual(deferred, "")
+
+    def test_hosted_is_the_opt_in_on_the_nightly(self) -> None:
         self.assertEqual(self.legs("schedule", ALLOW_HOSTED="1")[0]["windows-x64"], "windows-2022")
-        self.assertEqual(self.legs("pull_request", HEAD_REPO="fork/pulp")[0]["windows-x64"],
-                         "windows-2022")
+        self.assertEqual(self.legs("workflow_dispatch")[0]["windows-x64"], LANE)
 
     def test_a_hosted_lane_variable_keeps_the_legs_own_image(self) -> None:
         self.assertEqual(

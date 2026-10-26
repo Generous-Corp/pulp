@@ -4804,9 +4804,12 @@ self-hosted Windows x64 lane (the Mac Pro slot) through
 `tools/scripts/windows_runner_selector.py --route`. Hosted needs an opt-in:
 `allow_hosted_windows`, `PULP_ALLOW_HOSTED_WINDOWS=1`, or
 `PULP_LOCAL_WINDOWS_X64_RUNS_ON_JSON='"windows-latest"'` (that last one takes the
-lane out of service and changes nothing else). Fork pull requests always run hosted.
-The lane is one serial VM, so a pull request's leg and a scheduled coverage leg are
-left out while another Windows x64 job waits; a dispatch always queues. The table
+lane out of service and changes nothing else). No pull request reaches the lane. The
+fork check runs first, and a missing head repository counts as a fork. A pull
+request's control-shipping and coverage Windows legs run hosted only with the
+opt-in, and are otherwise left out. The lane is one serial VM, so a scheduled
+coverage leg is left out while another Windows x64 job waits; a dispatch always
+queues. The table
 is in `docs/guides/local-ci.md` ("What runs on it"). `windows-cli-compile.yml`, the
 three `build.yml` compile gates and `release-cli.yml` stay on `windows-latest` on
 purpose. Pass `windows_runner_selector_json` to pin a run to a specific runner. A run with either input set skips

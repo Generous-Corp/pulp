@@ -685,11 +685,11 @@ native matrix are advisory lanes, hosted except for Windows x64. The
 control-shipping matrix covers macOS universal, Linux x64/arm64, and Windows
 x64/arm64; the Windows ARM leg uses the `windows-11-arm` runner and emits
 `arm64-win` scanner evidence. Its Windows x64 leg, and coverage's Windows leg,
-run on the self-hosted Windows x64 lane, which is one VM: a pull request's
+run on the self-hosted Windows x64 lane on the nightly and a dispatch. No pull
+request reaches that lane: without `PULP_ALLOW_HOSTED_WINDOWS=1` a pull request's
 control-shipping Windows x64 leg is left out (and named as deferred in the
-consolidated evidence) while another Windows x64 job waits, a scheduled
-coverage refresh does the same, and a pull request runs coverage without
-Windows unless `PULP_ALLOW_HOSTED_WINDOWS=1` (`docs/guides/local-ci.md`,
+consolidated evidence), and its coverage run has no Windows leg. A scheduled
+coverage refresh leaves Windows out while another Windows x64 job waits (`docs/guides/local-ci.md`,
 "What runs on it"). Its
 installed-SDK probe has GPU disabled, so it does not replace Spectr's separate
 Skia/Dawn, DAW, audio, or Perfetto proof. These lanes run from the nightly

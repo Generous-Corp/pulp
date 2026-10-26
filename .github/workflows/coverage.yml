@@ -283,8 +283,10 @@ jobs:
           echo "$windows_route"
           windows=$(printf '%s\n' "$windows_route" | sed -n 's/^runs_on=//p')
           windows_leg=$(printf '%s\n' "$windows_route" | sed -n 's/^route=//p')
-          windows_reason=$(printf '%s\n' "$windows_route" | sed -n 's/^route_reason=//p')
-          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ] && [ "$windows_reason" != hosted-opt-in ]; then
+          case "${ALLOW_HOSTED_WINDOWS}" in 1|true|TRUE) allow_hosted=1 ;; *) allow_hosted=0 ;; esac
+          # With the opt-in the route is always hosted: the selector puts a
+          # fork there first, and a pull request never passes a selector.
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ] && [ "$allow_hosted" != 1 ]; then
             windows_leg=skip
           fi
           {
