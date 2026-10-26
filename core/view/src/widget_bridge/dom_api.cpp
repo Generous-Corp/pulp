@@ -127,7 +127,37 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
         auto childId = args.get<std::string>(1, "");
         auto tag = args.get<std::string>(2, "div");
         auto hint = args.get<std::string>(3, "");
+        // Optional id of the native sibling the child must precede. Without it
+        // the child lands last, which is appendChild's position but not
+        // insertBefore's.
+        auto beforeId = args.get<std::string>(4, "");
         auto* existing = self.widget(childId);
+        // Put `view` directly ahead of `beforeId` in `destination`'s child
+        // order. Either one can sit inside a bridge-inserted scroll wrapper, so
+        // each is resolved to the view that occupies the destination's slot.
+        // move_child_to_index only reorders: focus, drag, and popup state in
+        // the moved subtree survive.
+        const auto place_before = [&self, &beforeId](View* destination, View* view) {
+            if (beforeId.empty() || destination == nullptr) return;
+            const auto slot_of = [destination](View* v) {
+                while (v != nullptr && v->parent() != destination) v = v->parent();
+                return v;
+            };
+            View* moving = slot_of(view);
+            View* anchor = slot_of(self.widget(beforeId));
+            if (moving == nullptr || anchor == nullptr || moving == anchor) return;
+            const auto count = destination->child_count();
+            size_t from = count;
+            size_t to = count;
+            for (size_t i = 0; i < count; ++i) {
+                if (destination->child_at(i) == moving) from = i;
+                if (destination->child_at(i) == anchor) to = i;
+            }
+            if (from == count || to == count) return;
+            // The target index is counted after `moving` leaves its old slot.
+            if (from < to) --to;
+            destination->move_child_to_index(moving, to);
+        };
         // Move an already-upgraded retained wrapper as one transaction. The
         // wrapper is the actual native owner; moving only its authored child
         // strands the scroll container and invalidates the alias map. Keep the
@@ -187,6 +217,7 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                             throw std::runtime_error("retained scroll wrapper is detached");
                         interaction.restore(destination);
                     }
+                    place_before(destination, wrapper);
                     return choc::value::Value();
                 }
             }
@@ -222,6 +253,7 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                         throw std::runtime_error("retained scroll wrapper is detached");
                     interaction.restore(destination);
                 }
+                place_before(destination, wrapper);
                 return choc::value::Value();
             }
             if (auto* p = existing->parent()) {
@@ -416,6 +448,18 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                     // only after the new ancestry is live; destroyed or
                     // replaced owners are ignored safely.
                     interaction.restore(destination);
+                    place_before(destination, existing);
+                    return choc::value::Value();
+                }
+                // A move inside the same parent is a reorder, not a reparent.
+                // Detaching and re-attaching would run the lifecycle that
+                // cancels a drag, closes a popup, and blurs a focused editor in
+                // the moved subtree, so only the child order changes.
+                if (p == destination) {
+                    if (beforeId.empty())
+                        p->move_child_to_index(existing, p->child_count());
+                    else
+                        place_before(p, existing);
                     return choc::value::Value();
                 }
                 // Move the existing subtree to the new parent - don't erase widgets.
@@ -480,6 +524,7 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                 // is about to be destroyed.
                 self.widgets_.cache(childId, existing);
                 interaction.restore(destination);
+                place_before(destination, existing);
                 return choc::value::Value();
             }
         }
@@ -616,7 +661,8 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
             child->set_default_hover_feedback(true);
         }
         self.widgets_[childId] = child.get();
-        self.attach_created(childId, parentId, std::move(child));
+        if (self.attach_created(childId, parentId, std::move(child)))
+            place_before(self.resolve_parent(parentId), self.widget(childId));
         return choc::value::Value();
     });
 

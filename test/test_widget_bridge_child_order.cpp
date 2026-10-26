@@ -138,6 +138,111 @@ TEST_CASE("insertChild positions the child through an intervening wrapper",
     CHECK(child_ids(*panel) == std::vector<std::string>{"wrapper", "caption"});
 }
 
+TEST_CASE("DOM insertBefore and replaceChild keep native order in step with the DOM",
+          "[view][bridge][child-order][web-compat]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"JS(
+        var list = document.createElement('div');
+        document.body.appendChild(list);
+        function row(name) {
+            var el = document.createElement('div');
+            el.setAttribute('data-row', name);
+            return el;
+        }
+        var a = row('a'), b = row('b'), c = row('c');
+        list.appendChild(a);
+        list.appendChild(b);
+        list.appendChild(c);
+        // A new row in the middle, an existing row moved to the front, and a
+        // replacement in the middle: the three ways a keyed list changes.
+        var d = row('d');
+        list.insertBefore(d, b);
+        list.insertBefore(c, a);
+        var e = row('e');
+        list.replaceChild(e, d);
+        var names = {};
+        [a, b, c, d, e].forEach(function(el) {
+            names[el._id] = el.getAttribute('data-row');
+        });
+        var listId = list._id;
+        var domOrder = list._children.map(function(el) {
+            return el.getAttribute('data-row');
+        }).join(',');
+    )JS");
+
+    auto* list = bridge.widget(engine.evaluate("listId").toString());
+    REQUIRE(list != nullptr);
+    REQUIRE(engine.evaluate("domOrder").toString() == "c,a,e,b");
+    std::vector<std::string> native_order;
+    for (const auto& id : child_ids(*list))
+        native_order.push_back(engine.evaluate("names['" + id + "']").toString());
+    CHECK(native_order == std::vector<std::string>{"c", "a", "e", "b"});
+}
+
+TEST_CASE("DOM reorder of a keyed row keeps its widget, focus, and applied styles",
+          "[view][bridge][child-order][web-compat]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"JS(
+        var list = document.createElement('div');
+        document.body.appendChild(list);
+        var first = document.createElement('div');
+        var second = document.createElement('div');
+        first.style.background = 'rgb(10,20,30)';
+        second.style.background = 'rgb(40,50,60)';
+        var field = document.createElement('input');
+        second.appendChild(field);
+        list.appendChild(first);
+        list.appendChild(second);
+        field.focus();
+        var backgroundWrites = 0;
+        var realSetBackground = setBackground;
+        setBackground = function(id, value) {
+            backgroundWrites++;
+            return realSetBackground(id, value);
+        };
+        var listId = list._id, firstId = first._id, secondId = second._id;
+        var fieldId = field._id;
+    )JS");
+
+    auto* list = bridge.widget(engine.evaluate("listId").toString());
+    const auto first_id = engine.evaluate("firstId").toString();
+    const auto second_id = engine.evaluate("secondId").toString();
+    auto* field = bridge.widget(engine.evaluate("fieldId").toString());
+    REQUIRE(list != nullptr);
+    REQUIRE(field != nullptr);
+    REQUIRE(field->has_focus());
+    const View* second_before = bridge.widget(second_id);
+    const auto lifetime = second_before->import_binding_lifetime_token();
+
+    // Swap the rows the way a keyed reconciler does, then put them back.
+    engine.evaluate("list.insertBefore(second, first)");
+    CHECK(child_ids(*list) == std::vector<std::string>{second_id, first_id});
+    CHECK(bridge.widget(second_id) == second_before);
+    CHECK_FALSE(lifetime.expired());
+    // A detach and re-attach would blur the editor inside the moved row.
+    CHECK(field->has_focus());
+    // The row's styles are already on its widget; a move does not resend them.
+    CHECK(engine.evaluate("backgroundWrites").getWithDefault<int>(-1) == 0);
+
+    engine.evaluate("list.insertBefore(first, second)");
+    CHECK(child_ids(*list) == std::vector<std::string>{first_id, second_id});
+    CHECK(field->has_focus());
+
+    // Inserting a row before its own next sibling is no move at all.
+    engine.evaluate("list.insertBefore(first, second)");
+    CHECK(child_ids(*list) == std::vector<std::string>{first_id, second_id});
+    CHECK(engine.evaluate("backgroundWrites").getWithDefault<int>(-1) == 0);
+}
+
 TEST_CASE("View reorders a child without running the attach lifecycle",
           "[view][child-order]") {
     View parent;
