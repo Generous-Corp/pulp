@@ -73,7 +73,7 @@ inline constexpr double kFlutterDepth = 0.02;      // fraction of the stage dela
 inline constexpr double kFlutterRateMinHz = 0.13;
 inline constexpr double kFlutterRateMaxHz = 0.71;
 
-// Delay modulation (§ dual-source: sine + mean-reverting walk).
+// Delay modulation (dual-source: sine + mean-reverting walk).
 inline constexpr double kModSineMix = 0.6;
 inline constexpr double kModWalkMix = 0.4;
 inline constexpr double kModRateMinHz = 0.10;
@@ -177,8 +177,8 @@ inline constexpr double kTankInputLpFraction = 0.42;
 // Sanitization (defense in depth). A 16-line recursive structure needs more
 // than one guard at the output: a single corrupted channel is invisible at the
 // sum until it has already poisoned every line through the matrix. The matrix
-// boundary gets the prompt's narrower overflow clamp; the delay-line write
-// retains the wider emergency ceiling.
+// boundary gets the narrower overflow clamp; the delay-line write keeps the
+// wider emergency ceiling.
 inline constexpr double kPostHadamardCeil = 4.0;
 inline constexpr double kSanityCeil = 10.0;
 
