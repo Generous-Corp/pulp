@@ -2526,6 +2526,8 @@
   "pulp-osc-render-wav",
   "pulp-project-package-mutant-helper",
   "pulp-project-package-publish-helper",
+  "pulp-release-artifact-clean-fixture",
+  "pulp-release-artifact-forbidden-fixture",
   "pulp-reload-ship-fixture-dev",
   "pulp-reload-ship-fixture-ship",
   "pulp-render-provider-floor-wgpu-control",
