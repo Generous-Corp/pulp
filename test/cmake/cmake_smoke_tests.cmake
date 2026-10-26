@@ -278,7 +278,9 @@ if(APPLE)
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_auv3_host_scan_order.cmake)
     set_tests_properties(cmake-auv3-host-scan-order PROPERTIES
         LABELS "cmake;auv3;control"
-        TIMEOUT 60)
+        TIMEOUT 60
+        SKIP_RETURN_CODE 77
+        SKIP_REGULAR_EXPRESSION "SKIPPED: cmake-auv3-host-scan-order needs ninja")
 endif()
 # Toggling pulp_add_binary_data(COMPRESS) in an existing Makefile build dir
 # regenerates the embedded source without a clean reconfigure.
