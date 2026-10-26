@@ -1062,9 +1062,11 @@ harness or `ctest`.
   and compares the high-band attack rise
   (`dsp.attack_rise`, the SAME primitive the `transient_sharpness` detector uses — extracted to dsp
   so there is no forked DSP). One-directional (a softening is the regression; a sharper candidate
-  reads no change); the worst-onset gate fires only when that attack's high-band ENERGY also
-  dropped (`dsp.onset_attack_measure` amplitude ratio < 0.5), since the 10-90% rise-time estimate
-  alone can jump on a -50 dBFS noise floor; needs onset-bearing material (< 3 matched onsets →
+  reads no change); the worst-onset gate fires only when a second measure corroborates the
+  rise-time deficit: the attack's high-band energy dropped (`dsp.onset_attack_measure` amplitude
+  ratio < 0.5) or arrived later (energy median moved >= 1 ms, which catches one attack smeared wide
+  with its energy intact), since the 10-90% rise-time estimate alone can jump on a -50 dBFS noise
+  floor while the energy median stays put; needs onset-bearing material (< 3 matched onsets →
   `not_applicable`); self-aligns
   per onset so `--align` is a no-op and the global sample-domain advisory is suppressed. That takes
   compare to **6 of the lab's 7 detectors** reachable from the agent-facing surface (up from 2).
