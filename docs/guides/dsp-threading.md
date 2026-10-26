@@ -518,6 +518,13 @@ erased) while a snapshot is live, so the audio thread's raw measurer pointers
 stay valid across snapshot swaps. This is what lets a host attribute a CPU
 spike to a specific node instead of just the whole callback.
 
+Per-node timing starts when someone reads it, because two clock reads per node
+per block are a large share of a small graph's cost. The first `node_loads()`
+call turns monitoring on, so that first reading is zero or stale and the next
+ones are live. `set_node_load_monitoring()` gives explicit control, and
+enabling live-DSP telemetry times nodes too. Whole-graph timing (`graph_load()`)
+always runs; the live-swap admission gate reads it.
+
 Validation and UI surfaces should classify that snapshot with
 `audio::evaluate_audio_runtime_overload()` instead of inventing local
 thresholds. The shared policy reports nominal, watch, overloaded, and critical

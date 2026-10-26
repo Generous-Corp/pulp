@@ -33,6 +33,7 @@
 #include <pulp/signal/detail/simd_lanes.hpp>
 #include <pulp/signal/fdn/modulation.hpp>
 #include <pulp/signal/fdn/sanitize.hpp>
+#include <pulp/signal/frequency_response.hpp>
 #include <pulp/signal/denormal.hpp>
 
 #include <algorithm>
@@ -90,6 +91,7 @@ public:
         const double max_hz = kAaCutoffFraction * tank_rate;
         worst_case_boost_ = 1.0;
         num_active_ = 0;
+        bool shelf_can_overshoot = false;
         BiquadT<double> designer;
         for (int b = 0; b < kNumEqBands; ++b) {
             const EqBand& band = bands_[static_cast<std::size_t>(b)];
@@ -105,7 +107,15 @@ public:
             ++num_active_;
             if (band.gain_db > 0.0)
                 worst_case_boost_ *= std::pow(10.0, band.gain_db / 20.0);
+            if (type != BiquadT<double>::Type::peaking && std::max(band.q, 0.05) > kMonotonicShelfQ)
+                shelf_can_overshoot = true;
         }
+        // A peaking band's maximum is its gain, so the product above bounds a
+        // bank of peaks and plain shelves. A shelf with Q above 1/sqrt(2)
+        // overshoots its own gain near the corner (and a cut shelf rises above
+        // unity), so then the bound also takes the cascade's measured peak.
+        if (shelf_can_overshoot)
+            worst_case_boost_ = std::max(worst_case_boost_, measured_peak(tank_rate));
         reset();
     }
 
@@ -114,8 +124,9 @@ public:
     }
 
     // Conservative upper bound on the bank's magnitude response: the product of
-    // every active band's linear boost. Bands that overlap can only add up to
-    // this, so the stability normalization that consumes it is never optimistic.
+    // every active band's linear boost, raised to the cascade's measured peak
+    // when a shelf's Q lets it overshoot. The stability normalization that
+    // consumes it is never optimistic.
     double worst_case_boost() const { return worst_case_boost_; }
 
     // Bands that are not flat — the ones process() actually runs.
@@ -136,6 +147,56 @@ private:
     // A band is treated as flat (and skipped entirely) below this, so an
     // untouched EQ costs nothing per sample.
     static constexpr double kFlatBandDb = 0.01;
+    // The steepest RBJ shelf whose response stays monotonic (slope S = 1).
+    static constexpr double kMonotonicShelfQ = 0.7071067811865476;
+
+    // Peak |H| of the active cascade on [0, Nyquist]: a log grid, every band
+    // centre, then a golden-section refinement around the largest sample. The
+    // refinement and a 0.1% margin keep a narrow peak between grid points from
+    // making the bound optimistic. Control rate only; allocates nothing.
+    double measured_peak(double tank_rate) const {
+        const std::span<const BiquadCoefficientsT<double>> sos(
+            coeffs_.data(), static_cast<std::size_t>(num_active_));
+        auto mag = [&](double omega) { return cascade_magnitude(sos, omega); };
+        constexpr int kGrid = 512;
+        constexpr double kLowest = 1.0e-4; // radians/sample, about 0.5 Hz at 32 kHz
+        const double pi = 3.14159265358979323846;
+        double best = std::max(mag(0.0), mag(pi));
+        double best_omega = 0.0;
+        double step = std::pow(pi / kLowest, 1.0 / (kGrid - 1));
+        double omega = kLowest;
+        for (int i = 0; i < kGrid; ++i, omega *= step) {
+            const double m = mag(omega);
+            if (m > best) {
+                best = m;
+                best_omega = omega;
+            }
+        }
+        for (int b = 0; b < kNumEqBands; ++b) {
+            const double centre =
+                angular_frequency(bands_[static_cast<std::size_t>(b)].freq_hz, tank_rate);
+            const double m = mag(centre);
+            if (m > best) {
+                best = m;
+                best_omega = centre;
+            }
+        }
+        if (best_omega > 0.0) {
+            double lo = std::max(best_omega / step, 0.0);
+            double hi = std::min(best_omega * step, pi);
+            constexpr double kRatio = 0.6180339887498949;
+            for (int i = 0; i < 40; ++i) {
+                const double a = hi - kRatio * (hi - lo);
+                const double c = lo + kRatio * (hi - lo);
+                if (mag(a) > mag(c))
+                    hi = c;
+                else
+                    lo = a;
+            }
+            best = std::max(best, mag(0.5 * (lo + hi)));
+        }
+        return best * 1.001;
+    }
 
     static std::size_t state_index(int active_slot, int channel) {
         return static_cast<std::size_t>(active_slot) *

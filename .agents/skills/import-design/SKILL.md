@@ -103,9 +103,9 @@ schema/version, HTML field, and asset count agree with the envelope. Only
 `--emit materialized-runtime` and `--materialized-canvas-composition` capture
 that sidecar (`browser_import_captures_materialized_document`). Every other
 import passes `--omit-materialized-document`, and the envelope then carries no
-materialized fields. The one exception is a document with Blob-URL
-`@font-face` rules: `capture.mjs` reads it anyway, because its
-`font_bindings` are the only record of those faces. A stale, hand-edited, mismatched, or
+materialized fields, with no exception: Blob-URL `@font-face` faces are read
+in the page into `font-faces.json`, so they do not need the sidecar. A stale,
+hand-edited, mismatched, or
 path-escaping envelope fails closed with the
 `browser-capture-provenance-invalid` diagnostic. Keep the envelope and sidecar
 from the same capture directory; do not copy one from an older browser run or
@@ -202,6 +202,16 @@ is rejected. A remote `https` font is read only with `--allow-browser-network`,
 and a used face whose staged file is absent fails as `capture-font-missing`,
 naming the authored path. Fixture: `test/fixtures/browser-capture-font-face-url`.
 
+`build_native_view_tree` registers them before materializing
+(`core/view/src/design_import_native_fonts.cpp`). Each unicode-range segment of a
+family goes under a private alias, `<family> [<12 hex>]`, named from its
+content. Every font-family stack naming the family is rewritten to list the
+aliases, last-defined first, in place of the family. So when you debug an
+imported Label's face, expect `effective_font_family()` to show aliases, not
+the CSS family. A face that can't be read or fails its manifest hash is
+skipped with `font-asset-unavailable`, and that family keeps resolving to host
+faces.
+
 ### Imported text looks heavier than Chromium: check font smoothing first
 
 Pulp's default glyph raster on macOS is Chromium's `-webkit-font-smoothing:
@@ -255,7 +265,11 @@ A captured `<input type=range|checkbox|radio>` whose `native_theme` verdict is
 theme paints from as `ua_*` attributes (`browser_capture_controls.cpp`), and
 `design_import_form_controls.cpp` builds a `RangeSlider` / `Checkbox` in
 `UaSkin::chromium_refresh` from it, in the native lane and the baked C++ lane
-alike (`ua_form_control_state()` is the shared parse). Only those controls get
+alike (`ua_form_control_state()` is the shared parse). The ui.js lane emits the
+same widget and state from that parse (`design_js_capture_lowering.cpp`:
+`createRangeSlider`/`createCheckbox`, `createButtonSurface` with its label as
+children, `setUaSkin`, `setCheckboxKind`, the range, value and checked state), and every lane records the snapped paint rect
+(`setCapturedPaintRect` in ui.js); the emitter conformance gate checks all of it. Only those controls get
 the skin: an `author` or `unresolved` verdict, another import lane's checkbox,
 AutoUi and every hand-built widget keep `UaSkin::platform`. Chromium paints a
 theme part in its CSS-px-snapped box, so the skins paint in
@@ -281,6 +295,51 @@ what `record_ua_control_state` records by a test). Those report
 themed control (a select's arrow, text fields, meter, progress, the picker
 types) stays the `ua-default-form-chrome` support boundary. Add a control to
 both when you give it a native skin.
+
+### Emitter conformance: one IR, four lowerings, one gate
+
+The native materializer, the ui.js emitter (`design_codegen.cpp`), the baked C++
+exporter and the SwiftUI exporter each walk the IR on their own, so a lowering
+added to one does not reach the others. `pulp-test-design-emitter-conformance`
+builds the fixtures in `test/fixtures/emitter-conformance/` (plus the
+figma-plugin fidelity scene) through all four and compares, per anchor, the
+anchored-view tree, widget kind, theme-control state, captured paint rect and
+snapped `self_paint_bounds()`, and bindings, against the native lane. The baked
+C++ is generated at build time by `pulp-emitter-conformance-gen`, never
+committed. A divergence must match an entry in `allowlist.json`, each linked to
+an issue; an entry that matches nothing fails the gate, so delete it with the
+fix. `PULP_CONFORMANCE_REPORT=<path>` writes every divergence as JSON. When you
+lower something new in one emitter, run the gate before you claim the others
+agree.
+
+To see what a ui.js import looks like against Chromium, pass `--emitter js` to
+the differential lab: the observer renders the candidate IR through its ui.js
+program instead of the native materializer.
+
+### Page fonts: match on the declared range
+
+`prepare_native_ir_with_fonts` registers each shipped face under a
+content-named alias, and generated JS registers it with `registerFont`. Both
+also hand each rule's declared `font-weight` range to
+`canvas::declare_font_face_weight_range`: natively on the alias, from that
+family's own rules (two families may bind one file with different ranges), and
+in JS on the family. Chromium matches and synthesizes against the declared
+range, not the file: one Regular file declared `400 700` draws 700
+unemboldened, and declared `400` it draws 700 faux-bold.
+
+`paragraph_fakes_missing_font_styles` decides SkParagraph's fake-styles switch
+(CSS font matching over the declared ranges; bold only when the request is 600+
+and the matched range ends below 600; italic keeps the default, which shares the
+switch). It looks up each stack entry by its parsed name, because imported
+stacks are quoted. Every paragraph Pulp builds must ask it, the painter and the
+`TextShaper` measurement paths alike: SkParagraph's own shaping cache does not
+key on the switch, so a measurement paragraph left at the default caches
+emboldened runs that the painter then reuses, whatever its own switch says. A
+canvas-only test does not reproduce that reuse; render a native tree.
+
+A declared family also never yields to another family over weight in
+`match_registered_typeface`: the resolver otherwise measured a 700 run in a
+system face while the paragraph painted the page face, and the text wrapped.
 
 ### Packaged SDK runtime contract
 
@@ -2404,7 +2463,7 @@ this produces controls that render, drag, and move nothing:
 | `pulp-switch` / `pulp-check` | ✅ | on/off; `data-pulp-value` sets the opening state |
 | `pulp-select` (segmented) | ✅ | `data-pulp-choices="A|B|C"`, pipe separated |
 | `pulp-stepper` | ✅ | a count; `data-pulp-min` / `-max` / `-step` are REQUIRED |
-| `pulp-meter` | display | shows a macro; drives nothing, and does not bind on the exported native path at all (needs `pulpMeterSource` + `pulpMeterChannel`, which nothing emits) |
+| `pulp-meter` | display | shows a macro; drives nothing. Binds by its `pulpMeterValueKey` in every lane: ui.js through `bindMeter(id, key)`, native and baked C++ through `bind_level_display` with `value_key` set and an empty source and channel, which the host context binds by that key |
 | `pulp-combo`, `pulp-tab`, `pulp-radio`, `pulp-numbox` | ❌ | recognised by the capture, dropped by the lowering — drawn faithfully, wired to nothing |
 
 Everything outside that table is DECORATION, and decoration is most of a good
@@ -4765,8 +4824,19 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   materialized document and the screenshot horizon. Each pass
   settles only what an earlier one did not, or what the page restarted, and
   counts each animation and video once: a finite Web Animation is `finish()`ed (its
-  resting frame), an infinite or unresolved one is paused at `currentTime 0`,
-  and a video is paused and rewound to its first frame unless it still shows
+  resting frame), an infinite or unresolved one is paused at `currentTime 0`
+  and then committed and cancelled (`commitStyles()` writes the time-zero
+  values inline, `cancel()` drops the animation). A browser at its real device
+  scale kept presenting a merely paused composited animation mid-cycle while
+  the page read time zero, and nothing is left to hold once it is cancelled.
+  The page's own reference becomes idle, and restarting it is settled again.
+  A `button`, `input`, `textarea`, `select` or `progress` target is only
+  paused: the form-control theme check counts inline styling as author
+  styling, so committing would flip a theme-painted control to author-styled.
+  Under the real-scale launch it can still show the mid-cycle frame. So is a
+  target whose inline style declares an animated property `!important`:
+  committing would rewrite that declaration at normal priority.
+  A video is paused and rewound to its first frame unless it still shows
   its poster. CSS animations and transitions stay on the stylesheet path, and
   scroll- or view-driven animations are left to the fixed scroll position. An
   animated GIF, APNG or WebP runs on the decoder's clock, so it is left alone

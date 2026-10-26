@@ -162,6 +162,36 @@ GraphRuntimeBufferAssignment build_graph_runtime_buffer_assignment(
             }
         }
         assignment.slot_count = cursor;
+
+        // In-place reads (see reads_in_place). Count every audio-carrying
+        // reader of each source port: feedforward, feedback (its end-of-block
+        // capture reads the source) and automation taps.
+        std::vector<std::uint32_t> port_base(node_count + 1, 0);
+        for (std::size_t n = 0; n < node_count; ++n)
+            port_base[n + 1] = port_base[n] + plan.nodes[n].output_ports;
+        std::vector<std::uint32_t> readers(port_base[node_count], 0);
+        for (const auto& conn : plan.connections) {
+            if (is_event(conn) || conn.source_index >= node_count ||
+                conn.source_port >= plan.nodes[conn.source_index].output_ports)
+                continue;
+            ++readers[port_base[conn.source_index] + conn.source_port];
+        }
+        assignment.reads_in_place.assign(plan.connections.size(), 0);
+        for (std::size_t i = 0; i < plan.connections.size(); ++i) {
+            const auto& conn = plan.connections[i];
+            if (is_event(conn) || is_automation_conn(conn))
+                continue;
+            if (conn.feedback) {
+                assignment.reads_in_place[i] = 1;
+                continue;
+            }
+            if (conn.source_index >= node_count ||
+                conn.source_port >= plan.nodes[conn.source_index].output_ports)
+                continue;
+            const bool sole = readers[port_base[conn.source_index] + conn.source_port] == 1;
+            assignment.reads_in_place[i] =
+                sole && !plan.nodes[conn.source_index].persistent_output ? 1 : 0;
+        }
     } catch (...) {
         assignment = {};
         assignment.ok = false;

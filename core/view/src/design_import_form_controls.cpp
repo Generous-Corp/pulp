@@ -56,6 +56,10 @@ std::optional<NativeWidgetKind> ua_form_control_kind(const IRNode& node) {
     return NativeWidgetKind::checkbox;
 }
 
+const char* ua_color_scheme_name(UaColorScheme scheme) {
+    return scheme == UaColorScheme::dark ? "dark" : "light";
+}
+
 std::optional<UaFormControlState> ua_form_control_state(const IRNode& node) {
     if (attr(node, "native_theme").value_or("") != "native")
         return std::nullopt;

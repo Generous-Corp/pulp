@@ -1088,6 +1088,25 @@ class CtestLaneTests(unittest.TestCase):
         self.assertEqual(entries[0]["skip_regex"], ["fast_skipped="])
         self.assertIn("CMAKE_BINARY_DIR", not_checked["fast-needs-build"])
 
+    def test_a_configure_time_timeout_falls_back_to_the_default(self) -> None:
+        # pulp_scaled_test_timeout() leaves TIMEOUT as a variable, which a
+        # source read cannot evaluate; float() on it used to raise.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            self._tree(root)
+            (root / "test" / "cmake" / "scaled_tests.cmake").write_text(
+                "pulp_scaled_test_timeout(_scaled_timeout 60)\n"
+                "add_test(NAME scaled COMMAND ${Python3_EXECUTABLE}\n"
+                '    "${CMAKE_SOURCE_DIR}/tools/contract.py")\n'
+                "set_tests_properties(scaled PROPERTIES TIMEOUT ${_scaled_timeout})\n",
+                encoding="utf-8")
+            entries, not_checked = lane.static_ctest_entries(["scaled", "fast-one"], root)
+        by_name = {e["name"]: e for e in entries}
+        self.assertEqual(sorted(by_name), ["fast-one", "scaled"], not_checked)
+        self.assertNotIn("timeout", by_name["scaled"])
+        # Control: a literal TIMEOUT beside it is still read.
+        self.assertEqual(by_name["fast-one"]["timeout"], 42.0)
+
     def test_python_ctests_exclude_the_other_lanes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp).resolve()

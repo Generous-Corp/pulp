@@ -1148,6 +1148,13 @@ if(APPLE)
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/text_accessibility_macos.mm"
         DESTINATION src/pulp/view/platform/mac
     )
+    # plugin_view_host_mac.mm includes the private core/view/src/pending_resize.hpp
+    # as "../../src/pending_resize.hpp"; from src/pulp/view/platform/mac that
+    # resolves to src/pulp/view/src.
+    install(FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/core/view/src/pending_resize.hpp"
+        DESTINATION src/pulp/view/src
+    )
     # Shared macOS render ObjC source (metal_surface_mac.mm), compiled per-binary
     # by _pulp_apply_view_mac_objc_suffix() so its PulpMetalSurfaceView (the
     # GPU-surface NSView) doesn't collide across plug-ins. The

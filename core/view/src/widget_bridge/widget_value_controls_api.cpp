@@ -176,7 +176,49 @@ void BridgeRegistrars::register_widget_value_controls_api(WidgetBridge& self) {
             } else {
                 range->set_accent_color(parse_bridge_css_color(hex));
             }
+        } else if (auto* box = dynamic_cast<Checkbox*>(self.widget(id))) {
+            if (hex.empty())
+                box->clear_accent_color();
+            else
+                box->set_accent_color(parse_bridge_css_color(hex));
         }
+        return choc::value::Value();
+    });
+
+    // setUaSkin(id, "chromium_refresh" | "platform", "light" | "dark")
+    // Which skin paints a RangeSlider or Checkbox (a ButtonSurface takes only
+    // the scheme), and the CSS color-scheme a
+    // chromium_refresh palette resolves against. An imported theme-painted
+    // control wears the skin Chromium painted it in; anything else keeps the
+    // platform skin it was created with.
+    register_bridge_function(api, "setUaSkin", [&self](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        const auto skin = args.get<std::string>(1, "platform") == "chromium_refresh"
+                              ? UaSkin::chromium_refresh
+                              : UaSkin::platform;
+        const auto scheme = args.get<std::string>(2, "light") == "dark" ? UaColorScheme::dark
+                                                                        : UaColorScheme::light;
+        if (auto* range = dynamic_cast<RangeSlider*>(self.widget(id))) {
+            range->set_skin(skin);
+            range->set_color_scheme(scheme);
+        } else if (auto* box = dynamic_cast<Checkbox*>(self.widget(id))) {
+            box->set_skin(skin);
+            box->set_color_scheme(scheme);
+        } else if (auto* surface = dynamic_cast<ButtonSurface*>(self.widget(id))) {
+            // A ButtonSurface is the Chromium push-button skin itself; only
+            // its colour scheme varies.
+            surface->set_color_scheme(scheme);
+        }
+        return choc::value::Value();
+    });
+
+    // setCheckboxKind(id, "checkbox" | "radio")
+    // A radio selects on click and never clears itself; see Checkbox::Kind.
+    register_bridge_function(api, "setCheckboxKind", [&self](choc::javascript::ArgumentList args) {
+        if (auto* box = dynamic_cast<Checkbox*>(self.widget(args.get<std::string>(0, ""))))
+            box->set_kind(args.get<std::string>(1, "checkbox") == "radio"
+                              ? Checkbox::Kind::radio
+                              : Checkbox::Kind::checkbox);
         return choc::value::Value();
     });
 
@@ -197,12 +239,17 @@ void BridgeRegistrars::register_widget_value_controls_api(WidgetBridge& self) {
     // Two toggles that look mutually exclusive must BE mutually exclusive.
     // Without a shared group both tabs could read as selected at once, and the
     // mode became whichever was clicked last rather than what was shown.
+    // A radio Checkbox shares the same group semantics.
     register_bridge_function(api, "setRadioGroup",
-                             [toggle_of](choc::javascript::ArgumentList args) {
-        auto* t = toggle_of(args.get<std::string>(0, ""));
-        if (t) t->set_radio_group(static_cast<int>(args.get<double>(1, 0)));
-        return choc::value::Value();
-    });
+                             [&self, toggle_of](choc::javascript::ArgumentList args) {
+                                 const auto id = args.get<std::string>(0, "");
+                                 const auto group = static_cast<int>(args.get<double>(1, 0));
+                                 if (auto* t = toggle_of(id))
+                                     t->set_radio_group(group);
+                                 else if (auto* box = dynamic_cast<Checkbox*>(self.widget(id)))
+                                     box->set_radio_group(group);
+                                 return choc::value::Value();
+                             });
 }
 
 } // namespace pulp::view

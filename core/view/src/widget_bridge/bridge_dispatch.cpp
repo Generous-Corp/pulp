@@ -314,10 +314,7 @@ function __pulpRunDispatchBatch__(body, args) {
     }
     if (outermost && typeof __pulpAfterDiscreteDispatch__ === 'function') {
         try { __pulpAfterDiscreteDispatch__(args[0], args[1]); }
-        catch (e) {
-            if (typeof __dispatchError__ === 'function')
-                __dispatchError__(args[0], args[1], String(e && e.stack ? e.stack : e));
-        }
+        catch (e) { __pulpReportDispatchError__(args[0], args[1], e); }
     }
     return result;
 }

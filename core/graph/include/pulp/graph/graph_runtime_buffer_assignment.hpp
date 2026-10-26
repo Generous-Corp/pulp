@@ -76,6 +76,16 @@ struct GraphRuntimeBufferAssignment {
     // requiring each host path to repeat the graph walk. Appended for
     // aggregate-initializer compatibility.
     std::uint32_t total_latency_samples = 0;
+    // Indexed by connection index. 1 when the destination may read this edge's
+    // samples in place, without a private copy: the edge is the only reader of
+    // its source port (no fan-out, no feedback capture of it, no automation tap
+    // on it), and the source's output region is not persistent across blocks.
+    // A consumer that wrote through its input view (a hosted plug-in, a native
+    // core that casts constness away) can then change only bytes nobody else
+    // reads. A feedback edge's previous-block slot is its own, so it is always
+    // 1. Empty (or 0) means copy. Appended for aggregate-initializer
+    // compatibility.
+    std::vector<std::uint8_t> reads_in_place;
 };
 
 // Compute the slot layout for `plan`. Returns ok=false (and slot_count=0) only

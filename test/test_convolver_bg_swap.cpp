@@ -87,6 +87,62 @@ TEST_CASE("ConvolverIrSwapper64 builds double-precision IR state",
     REQUIRE(state->num_partitions == 1);
 }
 
+namespace {
+// Every partition spectrum and every input-history slot holds exactly the
+// DC..Nyquist bins the MAC and the real inverse read, starts on a 64-byte
+// boundary, and sits one 64-byte-rounded stride from the next, so each set is
+// one compact block rather than full-width or separately allocated spectra.
+template <typename SampleType>
+void require_compact_spectra(const ConvolverSpectrumArenaT<SampleType>& spectra, std::size_t count,
+                             int fft_size) {
+    using Arena = ConvolverSpectrumArenaT<SampleType>;
+    const auto bins = static_cast<std::size_t>(fft_size / 2 + 1);
+    REQUIRE(spectra.size() == count);
+    REQUIRE(spectra.bins() == bins);
+    REQUIRE(spectra.stride() == Arena::stride_for(bins));
+    REQUIRE(spectra.stride() * sizeof(typename Arena::value_type) % 64 == 0);
+    REQUIRE(spectra.stride() < bins + 64 / sizeof(typename Arena::value_type));
+    for (std::size_t i = 0; i < count; ++i) {
+        REQUIRE(spectra[i].size() == bins);
+        REQUIRE(reinterpret_cast<std::uintptr_t>(spectra[i].data()) % 64 == 0);
+        if (i > 0)
+            REQUIRE(spectra[i].data() == spectra[i - 1].data() + spectra.stride());
+    }
+    // One block: the spectra plus at most one line of alignment slack.
+    const std::size_t value = sizeof(typename Arena::value_type);
+    REQUIRE(spectra.footprint_bytes() <= (count * spectra.stride()) * value + 64);
+    // From 64-sample blocks up that is close to half of storing every spectrum
+    // at the full FFT width.
+    if (fft_size >= 128)
+        REQUIRE(spectra.footprint_bytes() * 10 <=
+                count * static_cast<std::size_t>(fft_size) * value * 6);
+}
+
+template <typename SampleType>
+void require_half_spectrum_slots(const ConvolverIrStateT<SampleType>& state) {
+    require_compact_spectra(state.ir_spectra, state.num_partitions, state.fft_size);
+    REQUIRE(state.history != nullptr);
+    require_compact_spectra(state.history->spectra, state.num_partitions, state.fft_size);
+}
+} // namespace
+
+TEST_CASE("Convolver IR state stores only the DC..Nyquist bins", "[signal][convolver][bg-swap]") {
+    std::vector<float> ir(1000);
+    for (std::size_t i = 0; i < ir.size(); ++i)
+        ir[i] = std::sin(0.37f * static_cast<float>(i)) / static_cast<float>(i + 1);
+    for (std::size_t block :
+         {std::size_t{1}, std::size_t{16}, std::size_t{64}, std::size_t{128}, std::size_t{512}}) {
+        const auto state = detail::build_convolver_ir_state(ir.data(), ir.size(), block);
+        REQUIRE(state != nullptr);
+        require_half_spectrum_slots(*state);
+    }
+
+    const std::vector<double> ir64(300, 0.125);
+    const auto state64 = detail::build_convolver_ir_state(ir64.data(), ir64.size(), 64);
+    REQUIRE(state64 != nullptr);
+    require_half_spectrum_slots(*state64);
+}
+
 TEST_CASE("ConvolverIrSwapper rejects null/empty input",
           "[signal][convolver][bg-swap]") {
     ConvolverIrSwapper swapper;

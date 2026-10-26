@@ -1,3 +1,4 @@
+#include "detail/neural_input_sanitizer.hpp"
 #include "detail/realtime_gpu_audio_path.hpp"
 #include "detail/realtime_gpu_health_mirror.hpp"
 #include "detail/shared_io_stamped_bridge.hpp"
@@ -328,6 +329,8 @@ struct GpuWaveNetRealtimeNode::Impl {
     // status readers. An offline fence or a failed re-acquire leaves none.
     std::atomic<bool> kernel_prepared{false};
     std::atomic<std::uint64_t> reacquire_attempts{0}, reacquire_successes{0};
+    // Callback-written; see sanitized_input_samples().
+    std::atomic<std::uint64_t> sanitized_samples{0};
     // Callback-written per delivered block, read by status_snapshot().
     detail::RecentGpuDelivery recent;
     // The transport's completion notifier, host or worker only. Every channel
@@ -415,6 +418,7 @@ struct GpuWaveNetRealtimeNode::Impl {
         reacquired_sequence.store(UINT64_MAX, std::memory_order_relaxed);
         reacquire_attempts.store(0, std::memory_order_relaxed);
         reacquire_successes.store(0, std::memory_order_relaxed);
+        sanitized_samples.store(0, std::memory_order_relaxed);
         device_lost.store(false, std::memory_order_relaxed);
         for (auto& count : terminal_counts)
             count.store(0, std::memory_order_relaxed);
@@ -963,6 +967,9 @@ GpuAudioRecoveryReason GpuWaveNetRealtimeNode::recovery_reason() const noexcept 
 std::uint64_t GpuWaveNetRealtimeNode::recovery_sequence() const noexcept {
     return impl_->bridge ? impl_->latched_sequence() : std::numeric_limits<std::uint64_t>::max();
 }
+std::uint64_t GpuWaveNetRealtimeNode::sanitized_input_samples() const noexcept {
+    return impl_->sanitized_samples.load(std::memory_order_relaxed);
+}
 GpuAudioStatus GpuWaveNetRealtimeNode::status_snapshot() const noexcept {
     GpuAudioStatus status;
     if (!impl_->prepared) {
@@ -1106,8 +1113,14 @@ std::uint8_t GpuWaveNetRealtimeNode::process(void* self,
         s.fail(detail::SharedIoRecoveryReason::InvalidCallback, sequence);
         std::fill(s.callback_input.begin(), s.callback_input.end(), 0.f);
     } else {
+        // The neural node's policy: non-finite samples enter the GPU as 0, so
+        // one NaN cannot ring through the dilated stack's receptive field.
+        std::uint64_t replaced = 0;
         for (std::uint32_t ch = 0; ch < s.config.channels; ++ch)
-            std::copy_n(input.channel_ptr(ch), n, s.callback_input.data() + ch * n);
+            replaced += detail::sanitize_nonfinite(input.channel_ptr(ch),
+                                                   s.callback_input.data() + ch * n, n);
+        if (replaced != 0)
+            s.sanitized_samples.fetch_add(replaced, std::memory_order_relaxed);
     }
     s.callback = s.bridge->begin_callback(s.callback_input, sequence, start);
     const auto delivery = s.bridge->consume_output(s.callback, s.callback_output, nullptr, true);

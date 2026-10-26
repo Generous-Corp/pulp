@@ -57,8 +57,8 @@ BuildLine::Kind BuildMonitor::classify(const std::string& line) {
 
     // A traceback is unambiguous. Checked before the generic "error", because a
     // Python traceback's first line says nothing about what broke.
-    if (contains(line, "Traceback (most recent call last)") ||
-        contains(lower, "fatal error") || contains(lower, "no such file") ||
+    if (contains(line, "Traceback (most recent call last)") || contains(lower, "fatal error") ||
+        contains(lower, "no such file") ||
         // The generator's own way of ENDING without an artifact:
         //
         //   patch.py:  raise SystemExit(f"gave up after {n} attempts")
@@ -84,36 +84,32 @@ BuildLine::Kind BuildMonitor::classify(const std::string& line) {
         //
         // tools/rack/test_generator_endings.py keeps this list and the
         // generators' own SystemExit strings in step.
-        contains(lower, "gave up after") ||
-        contains(lower, "model call failed") ||
+        contains(lower, "gave up after") || contains(lower, "model call failed") ||
         contains(lower, "generation stop failed") ||
         // The account, not the machine. A model with no quota left ends the
         // run exactly as a login failure does, and it is what a person hits
         // after a busy day rather than a misconfiguration. Unmatched it read
         // as progress: the generator was already dead while the app still
         // showed "Thinking... 1m 55s elapsed".
-        contains(lower, "is out of quota") ||
-        contains(lower, "usage limit") ||
-        contains(lower, "quota exceeded") ||
-        contains(lower, "model cli is not logged in") ||
+        contains(lower, "is out of quota") || contains(lower, "usage limit") ||
+        contains(lower, "quota exceeded") || contains(lower, "model cli is not logged in") ||
         contains(lower, "could not fetch the library catalog") ||
-        contains(lower, "could not fetch the module index") ||
-        contains(lower, "is not sound") ||
-        contains(lower, "did not contain both a json") ||
-        contains(lower, "duplicate addmodel") ||
+        contains(lower, "could not fetch the module index") || contains(lower, "is not sound") ||
+        contains(lower, "did not contain both a json") || contains(lower, "duplicate addmodel") ||
         // A prerequisite this Mac does not have -- the model CLI, or Apple's
         // Command Line Tools. Both are a real stop, and both are things the
         // person can fix in a minute once they are told.
         contains(lower, "is missing something") ||
+        // The model CLI could not say which tools a pass would keep, so the
+        // generator refuses to run it rather than risk tools staying on.
+        contains(lower, "refusing to run a generation pass") ||
         contains(lower, "is not installed, so nothing can be generated") ||
         // Kept deliberately even though no generator prints it during a BUILD:
         // it is raised at import/setup, before a run starts, and matching it
         // costs nothing. Removing it as "orphaned" made the app read that
         // ending as ordinary progress.
-        contains(lower, "rack sdk not found") ||
-        contains(lower, "the rack sdk is not installed") ||
-        contains(lower, "could not download the rack sdk") ||
-        contains(lower, "unknown setting") ||
+        contains(lower, "rack sdk not found") || contains(lower, "the rack sdk is not installed") ||
+        contains(lower, "could not download the rack sdk") || contains(lower, "unknown setting") ||
         contains(lower, "two manifests claim") ||
         // Argument handling that reaches a watched log, because the app builds
         // the command line: a rejected flag ends the run with nothing to open.
