@@ -620,6 +620,14 @@ if(PULP_BUILD_TESTS)
     set_tests_properties(cli-cache-status PROPERTIES
         PASS_REGULAR_EXPRESSION "Pulp Cache")
 
+    add_test(NAME cli-cache-status-subdir
+        COMMAND "${CMAKE_COMMAND}"
+            "-DCLI=$<TARGET_FILE:pulp-cli>"
+            "-DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/cache-status-subdir"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/check_cache_status_subdir.cmake")
+    set_tests_properties(cli-cache-status-subdir PROPERTIES
+        PASS_REGULAR_EXPRESSION "cache status lists a directory entry")
+
     add_test(NAME cli-cache-help
         COMMAND pulp-cli cache
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
