@@ -145,6 +145,23 @@ which was the behaviour before. The `upgrade` skill maps only the two README fil
 `docs/migrations/`, so neither an author's note nor the bot's fold owes a
 SKILL.md update.
 
+### The SDK bump also assigns agent-capability counters
+
+`MANIFEST_REVISION` and `SURFACE_INVENTORY_VERSION` in
+`tools/scripts/agent_capability_manifest.py` were the same kind of shared
+counter as a release version: every branch that changed capability material
+claimed base + 1, and each merge staled the rest. Branches now leave them at the
+base value; the regenerated snapshot is *pending* (its material differs from the
+last state `contract-history.json` recorded under the same counter). When a bump
+assigns the `sdk` surface, `_assign_capability_counters` runs the repo's own
+`agent_capability_manifest.py --assign-pending`, which advances each pending
+counter by one and regenerates the snapshot, surface ledger and history; the
+changed paths join the bump commit, and the message carries a
+`Skill-Update: skip skill=agent-capabilities` trailer because the files are the
+skill's but the change is mechanical. A failure is reverted and logged, and
+`auto-release.yml`'s agent-capability pre-tag check withholds the SDK tag while
+anything is pending (see `release-watchdog.md`).
+
 ### Why the race can't lose or duplicate a version
 
 `apply_and_push` is safe under concurrent post-merge runs because of three

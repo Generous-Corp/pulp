@@ -5,12 +5,42 @@ description: Maintain Pulp's installed design-time agent capability manifest and
 
 # Agent Capabilities
 
+## The counters are assigned at land
+
+`MANIFEST_REVISION` and `SURFACE_INVENTORY_VERSION` are assigned by the
+version-at-land bump, not by branches. A branch changes the registry, headers
+and fingerprints, runs `--write`, and leaves both constants at the base value.
+The regenerated snapshot is then **pending**: its material differs from the
+last state `tools/agent-capabilities/contract-history.json` recorded, under the
+same counter. `--check` accepts that, and the next SDK bump runs
+`agent_capability_manifest.py --assign-pending`, which advances each pending
+counter by one and regenerates inside the bump commit. A hand-picked counter
+was a single integer every open branch raced for; one merge staled the rest.
+
+- `--status` prints each counter as `assigned` or `pending` (JSON). A pending
+  revision names no published contract; do not cite it as one.
+- `--require-assigned` is the release guard: `auto-release.yml` withholds the
+  SDK tag while a counter is pending.
+- A branch that still hand-bumps a counter to base + 1 keeps working; the
+  rule only stopped requiring it.
+- A pending state is never appended to the history, so two materials never
+  share a counter there.
+- If the bump's assignment keeps failing (its log says `could not assign
+  pending capability counters` or `timed out`), fix the cause and land
+  `--assign-pending` by hand as an ordinary PR from `main`. The withheld SDK
+  version is tagged by the next push only if `main` is still at it; once a
+  later bump moves the version, it is skipped. See
+  `docs/guides/release-watchdog.md`.
+
+The sections below that say "increase the counter" describe the hand-bump
+flow that branches no longer need; leave the constants alone instead.
+
 ## Public-header fingerprint refresh
 
 When a SignalGraph or other covered public header changes bytes while its
 consumer capability remains the same, refresh the reviewed SHA-256 in the
-catalog and surface ledger, increment `SURFACE_INVENTORY_VERSION`, and update
-any sequencer-exposure rows that name the old version. Run
+catalog and surface ledger and update any sequencer-exposure rows that name the
+old version (the bump assigns `SURFACE_INVENTORY_VERSION`). Run
 `python3 tools/scripts/agent_capability_manifest.py --check` and the sequencer
 exposure checker before pushing. This keeps focused-header refactors visible
 to installed-SDK consumers without turning an include-only change into a new
@@ -138,8 +168,8 @@ For a new public header or symbol:
    `tools/scripts/agent_capability_registry.py` instead:
    `capability_support`, `infrastructure`, or `unsupported_capability`. Give a
    durable rationale. Never grow the frozen `legacy_unreviewed` baseline.
-4. Increase `SURFACE_INVENTORY_VERSION` for any ledger change. Increase
-   `MANIFEST_REVISION` whenever the installed manifest changes.
+4. Leave `SURFACE_INVENTORY_VERSION` and `MANIFEST_REVISION` at the base
+   value; the version-at-land bump assigns them (see the top of this skill).
 
 For overloaded C++ free functions, keep the public `qualified_name` as the real
 API name and give each overload a distinct binding role. Use private generator
@@ -232,11 +262,9 @@ For an existing capability change:
   `--build-dir` at a sibling worktree's build rewrites every include root to
   the other tree, so for a stacked branch without its own build add the one
   header line by hand instead.
-- A pending sequencer-exposure row can pin the current inventory integer as an
-  evidence needle (`"SURFACE_INVENTORY_VERSION = 95"`). Bumping the version
-  stales that row and `sequencer_exposure_check.py` fails on it, not on your
-  change. Repoint the needle to the new integer — it is a pending row, so the
-  edit is allowed — and grep every pending row for the outgoing literal first.
+- Do not pin a counter integer as a sequencer-exposure evidence needle
+  (`"SURFACE_INVENTORY_VERSION = 95"`): the bump that assigns the counter stales
+  the row. Name the API or header fingerprint the row is about instead.
 - A summary-only edit to a capability row is not a contract change: raising
   `contract_version` for it is refused ("contract_version changed without a
   contract change"). Leave the version, bump `MANIFEST_REVISION`, and let
