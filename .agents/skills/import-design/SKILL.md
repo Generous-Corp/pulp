@@ -976,6 +976,15 @@ knowing before you touch that file:
   precision/recall. Keep the visual threshold intact: text antialiasing can
   dominate the pixel diff even when structure and geometry are exact.
 
+  **Capture-moment gotcha:** the lab's two lanes are two Chromium captures,
+  and the native IR is lowered from the candidate lane's. On an animated panel
+  the browser lane's screenshot is a different frame: Spectr's two captures
+  disagree on 42,764 spectrum pixels before any native render is involved. The
+  visual lens therefore scores against `candidate/browser.png` when the lanes'
+  DOM snapshots share a semantic digest, and reports the gap between the two
+  captures as `visual.reference.capture_moment_residual`. Do not read a visual
+  score against the browser lane's screenshot as fidelity on an animated panel.
+
   The authored-fixture validator also records the native Skia PNG itself, its
   hash and size, and the browser/native comparator result. This closes the
   earlier measurement mistake of hashing generated JavaScript as if it were a

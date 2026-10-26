@@ -64,6 +64,7 @@ from .verdicts import (
     work_counter_gate,
 )
 from .visual import (
+    capture_moment_residual,
     classify_full_frame,
     full_frame_ok,
     outside_frame_ink,
@@ -1174,6 +1175,49 @@ def retain_evidence(lanes: LaneOutputs) -> None:
     (lanes.browser_dir / "capture.json").write_bytes(lanes.capture_bytes)
     (lanes.native_dir / "dom-snapshot.json").write_bytes(lanes.native_snapshot_bytes)
     (lanes.native_dir / "capture.json").write_bytes(lanes.native_capture_bytes)
+    # The candidate lane's own screenshot is the frame the native IR was
+    # lowered from. Re-verify the retained copy, since it is what is scored.
+    shutil.copy2(lanes.native_evidence / "browser.png", lanes.native_dir / "browser.png")
+    verify_capture_image_binding(lanes.native_capture, lanes.native_dir / "browser.png")
+
+
+def visual_reference(lanes: LaneOutputs) -> tuple[Path, dict[str, Any]]:
+    """Pick the Chromium screenshot the native render is scored against.
+
+    Each lane runs its own Chromium capture, and the native IR is lowered from
+    the candidate lane's. On an animated panel the browser lane's screenshot
+    shows a different moment, so scoring against it measures capture timing as
+    well as fidelity. When the two lanes' DOM snapshots agree, the candidate
+    lane's screenshot is the same page at the moment the native IR describes,
+    and it is the reference. When they disagree, the candidate lane did not
+    evaluate the page the other lenses read, so the browser lane's screenshot
+    stays the reference and the report says why.
+    """
+    browser_semantic = snapshot_semantic_sha256(lanes.browser_snapshot_bytes)
+    native_semantic = snapshot_semantic_sha256(lanes.native_snapshot_bytes)
+    snapshots_match = browser_semantic == native_semantic
+    browser_png = lanes.browser_dir / "browser.png"
+    candidate_png = lanes.native_dir / "browser.png"
+    if snapshots_match:
+        path, source = candidate_png, "candidate-lane-capture"
+        reason = ("both lanes' DOM snapshots match, so the candidate lane's "
+                  "screenshot shows the moment the native IR was lowered from")
+    else:
+        path, source = browser_png, "browser-lane-capture"
+        reason = ("the lanes' DOM snapshots differ, so the candidate lane's "
+                  "screenshot is not the page the other lenses read")
+    return path, {
+        "source": source,
+        "path": path.relative_to(lanes.browser_dir.parent).as_posix(),
+        "sha256": sha256_file(path),
+        "dom_snapshots_match": snapshots_match,
+        "reason": reason,
+        # What the two capture moments alone disagree on: the noise a
+        # browser-lane reference would have charged to the native render.
+        "capture_moment_residual": capture_moment_residual(
+            browser_png, candidate_png,
+            lanes.capture["reference"]["device_scale_factor"]),
+    }
 
 
 def stage_provenance(lanes: LaneOutputs) -> dict[str, Any]:
@@ -1310,8 +1354,9 @@ def score_lanes(lanes: LaneOutputs, source: Path) -> Scores:
         placement_origin=lanes.placement_origin)
     scale = capture["reference"]["device_scale_factor"]
     capture_width, capture_height = lanes.capture_size
+    reference_png, reference = visual_reference(lanes)
     visual = visual_metrics(
-        lanes.browser_dir / "browser.png",
+        reference_png,
         lanes.native_render,
         lanes.comparison_dir / "overlays",
         (round(capture_width * scale), round(capture_height * scale)),
@@ -1320,12 +1365,13 @@ def score_lanes(lanes: LaneOutputs, source: Path) -> Scores:
         lanes.placement_origin,
         lanes.page_background.get("status"),
     )
+    visual["reference"] = reference
     visual["registration"]["native_layout"] = native_frame_registration
     if visual.get("registered_visual"):
         visual["registered_visual"]["registration"]["native_layout"] = native_frame_registration
     blockers = unsupported_features(recognition)
     form_control_report = form_control_residual(
-        browser_flat_raw, lanes.browser_dir / "browser.png", lanes.native_render, visual,
+        browser_flat_raw, reference_png, lanes.native_render, visual,
         browser_snapshot)
     classifications = classify_gaps(
         recognition, structural, geometry, typography, visual,
@@ -1384,6 +1430,7 @@ def integrity_record(
         "native_snapshot_semantic_sha256": snapshot_semantic_sha256(
             lanes.native_snapshot_bytes),
         "browser_screenshot_sha256": sha256_file(lanes.browser_dir / "browser.png"),
+        "candidate_screenshot_sha256": sha256_file(lanes.native_dir / "browser.png"),
         "native_render_sha256": sha256_file(lanes.native_render),
         "native_layout_sha256": sha256_file(lanes.native_layout),
         "native_render_receipt_sha256": sha256_file(lanes.native_receipt),
