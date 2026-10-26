@@ -10036,6 +10036,8 @@
               "process(const SampleType* input, SampleType* output, std::size_t num_samples)",
               "reset()",
               "choose_tail_multiplier(std::size_t ir_length, std::size_t block_size)",
+              "table_measured_on(std::string_view cpu_brand)",
+              "default_tail_multiplier(std::size_t ir_length, std::size_t block_size)",
               "load_ir(const SampleType* ir, std::size_t ir_length, std::size_t block_size)",
               "load_ir(const SampleType* ir, std::size_t ir_length, std::size_t block_size, std::size_t tail_multiplier)",
               "latency()",
