@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261025-importer-swiftui-binding-rule-20261025-watch",
+  "created_at": "2026-10-25T09:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-ir-contract",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "The SwiftUI exporter binds a control, and marks it bound in its binding manifest, only when the baked C++ binder's eligibility rule (now the shared binding_route_installable: a route id, a stable anchor and the keys the widget kind reads, including a key-only meter) accepts it, so the SwiftUI, native, ui.js and C++ lanes bind the same set of controls. A refused binding reports the native binder's diagnostic code and message, and an unbound control is drawn inert on a detached parameter. The C++ plan calls the same rule, unchanged in behaviour. The emitter conformance gate's SwiftUI projection (test/test_design_emitter_conformance.cpp and its allowlist fixture, which select design-ir-contract and design-source-ingest) counts only bound manifest entries. No IR contract, Chromium, rendering or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-design-swift-codegen",
+    "ctest --test-dir build -R pulp-test-design-import",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

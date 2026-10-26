@@ -5,13 +5,13 @@
       "lane": "swiftui",
       "field": "binding",
       "fixtures": [
-        "form-controls-08",
         "kelvin"
       ],
-      "expected": "<absent>",
-      "actual": "param:",
-      "issue": "https://github.com/Generous-Corp/pulp/issues/10984",
-      "reason": "SwiftUI resolves controls by display name and declares an entry with no param key for controls the other lanes leave unbound."
+      "anchor": "capture:drive:36",
+      "expected": "param:drive",
+      "actual": "<absent>",
+      "issue": "https://github.com/Generous-Corp/pulp/issues/11008",
+      "reason": "SwiftUI resolves a bound control by its display label, and this keyed, routed fader has none, so it emits the unbound placeholder."
     },
     {
       "lane": "swiftui",
@@ -21,9 +21,9 @@
       ],
       "anchor": "capture:out:38",
       "expected": "meter:out",
-      "actual": "param:",
+      "actual": "<absent>",
       "issue": "https://github.com/Generous-Corp/pulp/issues/11008",
-      "reason": "SwiftUI does not bind kelvin's key-only output meter by its key: it declares a param entry with no key, while the native, baked C++ and ui.js lanes bind it as meter:out."
+      "reason": "SwiftUI resolves a bound control by its display label, and kelvin's key-only output meter has none, so it stays unbound while the native, baked C++ and ui.js lanes bind it as meter:out."
     }
   ]
 }
