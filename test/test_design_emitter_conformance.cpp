@@ -201,6 +201,18 @@ Projection project_tree(const View& root) {
     return out;
 }
 
+/// The key a meter reads: its value key when the design names one, otherwise
+/// `source.channel`, which is what ui.js binds. Projecting the source alone
+/// would drop the channel and call two lanes that read the same meter apart.
+std::string meter_key(std::string_view value_key, std::string_view source,
+                      std::string_view channel) {
+    if (!value_key.empty())
+        return std::string(value_key);
+    if (channel.empty())
+        return std::string(source);
+    return std::string(source) + "." + std::string(channel);
+}
+
 void add_binding(Projection& out, const View* view, const std::string& binding) {
     const View* owner = anchored(view);
     auto& value = out[owner ? owner->anchor_id() : std::string("<unanchored>")]["binding"];
@@ -250,7 +262,7 @@ class RecordingBindingContext final : public NativeImportBindingContext {
     }
     void bind_level_display(View& v, LevelDisplay&,
                             const NativeImportMeterBindingDescriptor& d) override {
-        add_binding(out_, &v, "meter:" + key(d.meter_source));
+        add_binding(out_, &v, "meter:" + meter_key(d.value_key, d.meter_source, d.channel));
     }
     void bind_series_display(View& v, SeriesDisplay&,
                              const NativeImportWaveformBindingDescriptor& d) override {
@@ -426,9 +438,11 @@ Projection swift_lane(const DesignIR& ir) {
         const auto e = entries[i];
         const std::string anchor(e["anchor_id"].toString());
         const std::string family(e["source_family"].toString());
-        std::string binding = family == "meter"
-                                  ? "meter:" + std::string(e["meter_source"].toString())
-                                  : "param:" + std::string(e["param_key"].toString());
+        std::string binding =
+            family == "meter" ? "meter:" + meter_key(std::string(e["meter_value_key"].toString()),
+                                                     std::string(e["meter_source"].toString()),
+                                                     std::string(e["meter_channel"].toString()))
+                              : "param:" + std::string(e["param_key"].toString());
         auto& value = out[anchor]["binding"];
         value += (value.empty() ? "" : " ") + binding;
     }

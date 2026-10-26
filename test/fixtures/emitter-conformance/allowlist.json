@@ -59,28 +59,6 @@
       "actual": "param:",
       "issue": "https://github.com/Generous-Corp/pulp/issues/10984",
       "reason": "SwiftUI resolves controls by display name and declares an entry with no param key for controls the other lanes leave unbound."
-    },
-    {
-      "lane": "js",
-      "field": "binding",
-      "fixtures": [
-        "fidelity-scene"
-      ],
-      "anchor": "150oayc",
-      "expected": "<absent>",
-      "issue": "https://github.com/Generous-Corp/pulp/pull/10943",
-      "reason": "The scene's three controls share one anchor on main, so the native binder refuses them while ui.js binds by widget id. #10943 gives them distinct anchors; delete this entry when it lands."
-    },
-    {
-      "lane": "swiftui",
-      "field": "binding",
-      "fixtures": [
-        "fidelity-scene"
-      ],
-      "anchor": "150oayc",
-      "expected": "<absent>",
-      "issue": "https://github.com/Generous-Corp/pulp/pull/10943",
-      "reason": "Same collision: SwiftUI resolves by name and binds what the native binder refuses. Delete with #10943."
     }
   ]
 }
