@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import importlib.util
 import io
 import json
 import plistlib
@@ -16,14 +15,9 @@ from unittest import mock
 
 
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
-spec = importlib.util.spec_from_file_location(
-    "check_au_component_preflight",
-    SCRIPT_DIR / "check_au_component_preflight.py",
-)
-assert spec and spec.loader
-preflight = importlib.util.module_from_spec(spec)
-sys.modules["check_au_component_preflight"] = preflight
-spec.loader.exec_module(preflight)
+sys.path.insert(0, str(SCRIPT_DIR))
+
+import check_au_component_preflight as preflight  # noqa: E402
 
 
 def _make_bundle(root: pathlib.Path, *, au_type: str = "aumf") -> pathlib.Path:
