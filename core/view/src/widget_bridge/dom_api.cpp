@@ -138,24 +138,31 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
         // move_child_to_index only reorders: focus, drag, and popup state in
         // the moved subtree survive.
         const auto place_before = [&self, &beforeId](View* destination, View* view) {
-            if (beforeId.empty() || destination == nullptr) return;
+            if (beforeId.empty() || destination == nullptr)
+                return;
             const auto slot_of = [destination](View* v) {
-                while (v != nullptr && v->parent() != destination) v = v->parent();
+                while (v != nullptr && v->parent() != destination)
+                    v = v->parent();
                 return v;
             };
             View* moving = slot_of(view);
             View* anchor = slot_of(self.widget(beforeId));
-            if (moving == nullptr || anchor == nullptr || moving == anchor) return;
+            if (moving == nullptr || anchor == nullptr || moving == anchor)
+                return;
             const auto count = destination->child_count();
             size_t from = count;
             size_t to = count;
             for (size_t i = 0; i < count; ++i) {
-                if (destination->child_at(i) == moving) from = i;
-                if (destination->child_at(i) == anchor) to = i;
+                if (destination->child_at(i) == moving)
+                    from = i;
+                if (destination->child_at(i) == anchor)
+                    to = i;
             }
-            if (from == count || to == count) return;
+            if (from == count || to == count)
+                return;
             // The target index is counted after `moving` leaves its old slot.
-            if (from < to) --to;
+            if (from < to)
+                --to;
             destination->move_child_to_index(moving, to);
         };
         // Move an already-upgraded retained wrapper as one transaction. The
