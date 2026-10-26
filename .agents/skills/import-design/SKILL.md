@@ -3628,7 +3628,23 @@ match:
   `[pulp:warn] design-import:` line. "Unknown" means `kind_from_type` does not
   recognize the type and it is not a vector kind. The warning fires even when
   the node's audio role or name still resolves it. Duplicates are found by a
-  document-order walk of `stable_anchor_id`.
+  document-order walk of `stable_anchor_id` (`find_duplicate_anchors`).
+- **Repeated derived anchors are disambiguated; repeated explicit ones refuse.**
+  Every binder, tweak and lock addresses a node by its anchor, and the baked
+  C++ binder binds only on exactly one match, so a repeat silently loses its
+  binding. A content hash does not include the parent, so identical subtrees
+  under different parents (two cards, each an unlabelled slider) hash alike.
+  `assign_anchors` therefore runs a collision pass: the first node in document
+  order keeps the anchor, as does every node whose anchor was already unique,
+  and each later derived anchor (content hash, or the adapter fallback for a
+  node with no source id) is rehashed with its parent's anchor, then further
+  ancestors', until it is held by nothing else in the tree. The CLI runs the
+  same pass (`resolve_anchor_collisions`) for IRs that arrive already anchored,
+  then exits 2 only when two nodes carry the same explicit identity (a source
+  id or an authored anchor), naming each. The materializer keeps warning so an
+  already-built IR still renders. The adapter fallback also needs the
+  per-signature sibling index `content_hash` uses (counted over id-less
+  siblings only), or every id-less sibling of one shape gets one anchor.
 - **A successful decode does not prove an image is intact.** Skia's PNG
   decoder fills the rows of a truncated file with transparent pixels and
   returns `kSuccess`, and the node paints blank. `canvas::probe_image_file`
