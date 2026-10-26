@@ -866,6 +866,15 @@ save/reopen render proof beside the legacy caller-owned route controls.
   never erase while a snapshot may be live, or the audio thread's raw
   `NodeRuntime::load` pointer dangles. `begin()/end()` are relaxed-atomic and
   RT-safe (proven under the no-alloc trap in test_signal_graph_rt_safety).
+  Timing is opt-in: `process_snapshot_impl` sets
+  `executor_.set_node_load_timing()` and passes the same flag to the reference
+  walk each block, on when monitoring is on or live-DSP telemetry is enabled.
+  Monitoring starts off and the first `node_loads()` turns it on (sticky), so
+  existing pollers keep working with one stale first reading. On a three-node B=64 graph the two clock reads per node were
+  ~44% of the block once the bus marshalling was fixed (`mach_continuous_time`
+  under `steady_clock`). A test that needs real values on its FIRST read calls
+  `set_node_load_monitoring(true)` before processing. `graph_load()` is always
+  timed because live-swap admission reads it.
 - Per-node live-DSP telemetry (`audio::LiveDspTelemetryStore`): richer than the
   load measurer — fixed-slot p50/p95/p99 + jitter + over-budget attribution.
   Disabled by default (`set_live_dsp_telemetry_enabled()`; the audio path is one
