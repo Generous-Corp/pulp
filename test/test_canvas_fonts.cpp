@@ -2303,6 +2303,29 @@ TEST_CASE("bold is synthesized only where the matched declared range ends below 
 }
 
 #ifdef PULP_HAS_SKIA
+namespace {
+// Ink (sum of 255 - red) of one word painted black on white through SkiaCanvas.
+double declared_font_ink(const std::string& family, int weight) {
+    constexpr int kW = 360, kH = 64;
+    SkImageInfo info =
+        SkImageInfo::Make(kW, kH, kN32_SkColorType, kPremul_SkAlphaType, SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    surface->getCanvas()->clear(SK_ColorWHITE);
+    SkiaCanvas canvas(surface->getCanvas());
+    canvas.set_font_full(family, 32.0f, weight, /*slant=*/0, /*letter_spacing=*/0.0f);
+    canvas.set_fill_color(Color::rgba(0.0f, 0.0f, 0.0f, 1.0f));
+    canvas.fill_text("Hamburgefonstiv", 8.0f, 44.0f);
+    SkPixmap pm;
+    REQUIRE(surface->peekPixels(&pm));
+    double total = 0.0;
+    for (int y = 0; y < kH; ++y)
+        for (int x = 0; x < kW; ++x)
+            total += 255.0 - SkColorGetR(pm.getColor(x, y));
+    return total;
+}
+} // namespace
+
 TEST_CASE("a face declared across 400 700 is not emboldened at 700, a 400-only one is",
           "[canvas][skia][fonts][synthetic-bold]") {
     // One Regular file under two families, as a page binds it with two rules.
@@ -2311,35 +2334,32 @@ TEST_CASE("a face declared across 400 700 is not emboldened at 700, a 400-only o
     pulp::canvas::declare_font_face_weight_range("SynthBoldPaintRange", 400, 700);
     pulp::canvas::declare_font_face_weight_range("SynthBoldPaintNarrow", 400, 400);
 
-    const auto ink = [](const std::string& family, int weight) {
-        constexpr int kW = 360, kH = 64;
-        SkImageInfo info = SkImageInfo::Make(kW, kH, kN32_SkColorType, kPremul_SkAlphaType,
-                                             SkColorSpace::MakeSRGB());
-        auto surface = SkSurfaces::Raster(info);
-        REQUIRE(surface != nullptr);
-        surface->getCanvas()->clear(SK_ColorWHITE);
-        SkiaCanvas canvas(surface->getCanvas());
-        canvas.set_font_full(family, 32.0f, weight, /*slant=*/0, /*letter_spacing=*/0.0f);
-        canvas.set_fill_color(Color::rgba(0.0f, 0.0f, 0.0f, 1.0f));
-        canvas.fill_text("Hamburgefonstiv", 8.0f, 44.0f);
-        SkPixmap pm;
-        REQUIRE(surface->peekPixels(&pm));
-        double total = 0.0;
-        for (int y = 0; y < kH; ++y)
-            for (int x = 0; x < kW; ++x)
-                total += 255.0 - SkColorGetR(pm.getColor(x, y));
-        return total;
-    };
-    const double regular = ink("SynthBoldPaintRange", 400);
+    const double regular = declared_font_ink("SynthBoldPaintRange", 400);
     REQUIRE(regular > 0.0);
     // Declared to cover 700: Chromium draws the Regular file as it is.
-    CHECK(ink("SynthBoldPaintRange", 700) == Catch::Approx(regular).epsilon(0.02));
+    CHECK(declared_font_ink("SynthBoldPaintRange", 700) == Catch::Approx(regular).epsilon(0.02));
     // Declared 400 only: Chromium synthesizes bold, so the ink grows.
-    CHECK(ink("SynthBoldPaintNarrow", 700) > regular * 1.08);
+    CHECK(declared_font_ink("SynthBoldPaintNarrow", 700) > regular * 1.08);
     // Imported stacks quote the family and carry a fallback; the declared
     // range still applies to the quoted entry.
-    CHECK(ink("'SynthBoldPaintRange', serif", 700) == Catch::Approx(regular).epsilon(0.02));
-    CHECK(ink("\"SynthBoldPaintNarrow\", serif", 700) > regular * 1.08);
+    CHECK(declared_font_ink("'SynthBoldPaintRange', serif", 700) ==
+          Catch::Approx(regular).epsilon(0.02));
+    CHECK(declared_font_ink("\"SynthBoldPaintNarrow\", serif", 700) > regular * 1.08);
+}
+
+TEST_CASE("text measured before it is painted keeps the declared range's synthesis",
+          "[canvas][skia][fonts][synthetic-bold]") {
+    // Layout measures a run through SkParagraph before the painter draws it,
+    // and SkParagraph's shaping cache ignores the fake-styles switch: a
+    // measurement left at the default handed its emboldened runs to the paint.
+    REQUIRE(pulp::canvas::register_font_file(PULP_TEST_FONT_PATH, "SynthBoldMeasuredRange"));
+    pulp::canvas::declare_font_face_weight_range("SynthBoldMeasuredRange", 400, 700);
+    const std::string stack = "'SynthBoldMeasuredRange', serif";
+    const double regular = declared_font_ink(stack, 400);
+    REQUIRE(regular > 0.0);
+    pulp::canvas::TextShaper shaper;
+    (void)shaper.prepare("Hamburgefonstiv", stack, 32.0f, 700);
+    CHECK(declared_font_ink(stack, 700) == Catch::Approx(regular).epsilon(0.02));
 }
 
 TEST_CASE("a declared @font-face family keeps its own face at a weight its file is far from",

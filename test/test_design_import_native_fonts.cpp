@@ -482,3 +482,30 @@ TEST_CASE("a shipped face's declared weight range is carried by its alias",
     // The bare family is not what text names, so it declares nothing.
     CHECK_FALSE(pulp::canvas::has_declared_font_face_weights("Pulp Declared Range"));
 }
+
+TEST_CASE("two families binding one file each keep their own declared range",
+          "[design-import][font-assets][native-fonts][synthetic-bold]") {
+    // A page may bind one Regular file under two families, declared 400 700
+    // and 400. Each family's alias carries its own rule's range.
+    require_shipped_faces_resolve();
+    auto wide = face("Pulp Shared Wide", "font-shared");
+    wide.weight = 400;
+    wide.weight_max = 700;
+    auto narrow = face("Pulp Shared Narrow", "font-shared");
+    narrow.weight = 400;
+    narrow.weight_max = 0;
+    const auto alias_for = [&](const std::string& family) {
+        auto ir = shipped_font_design(family, 700, {wide, narrow}, kStaticFont);
+        auto root = build_native_view_tree(ir, ir.asset_manifest);
+        REQUIRE(root);
+        auto* label = only_label(*root);
+        REQUIRE(label != nullptr);
+        const auto stack = pulp::canvas::split_css_font_family_list(label->effective_font_family());
+        REQUIRE_FALSE(stack.empty());
+        return pulp::canvas::parse_css_font_family(stack.front()).name;
+    };
+    CHECK(pulp::canvas::declared_face_synthesizes_bold(alias_for("Pulp Shared Wide"), 700) ==
+          false);
+    CHECK(pulp::canvas::declared_face_synthesizes_bold(alias_for("Pulp Shared Narrow"), 700) ==
+          true);
+}

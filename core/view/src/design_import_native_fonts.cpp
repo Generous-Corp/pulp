@@ -194,11 +194,19 @@ DesignIR prepare_native_ir_with_fonts(const DesignIR& source, const IRAssetManif
                 const auto& bytes = files[i];
                 if (bytes && register_face(*bytes, segment.alias)) {
                     registered = true;
-                    // The rule's declared weight range decides where Chromium
-                    // synthesizes bold, so the alias carries it too.
-                    pulp::canvas::declare_font_face_weight_range(
-                        segment.alias, face->weight,
-                        face->weight_max > 0 ? face->weight_max : face->weight);
+                    // Each rule's declared weight range decides where Chromium
+                    // synthesizes bold, so the alias carries the range of
+                    // every rule of this family and segment that names the
+                    // file. Another family may bind the same file with a
+                    // different range.
+                    for (const auto& rule : ir.font_family_assets) {
+                        if (rule.asset_id != id || lowered(rule.family) != key ||
+                            rule.unicode_range != segment.unicode_range)
+                            continue;
+                        pulp::canvas::declare_font_face_weight_range(
+                            segment.alias, rule.weight,
+                            rule.weight_max > 0 ? rule.weight_max : rule.weight);
+                    }
                 } else if (options.diagnostics_out != nullptr) {
                     ImportDiagnostic d;
                     d.severity = ImportDiagnosticSeverity::warning;
