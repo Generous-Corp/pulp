@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 82,
+  "manifest_revision": 83,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -10007,6 +10007,22 @@
           }
         ],
         "convolver_messages.hpp": [
+          {
+            "class": "ConvolverSpectrumArenaT",
+            "qualified_name": "pulp::signal::ConvolverSpectrumArenaT",
+            "template": "typename SampleType = float",
+            "methods": [
+              "stride_for(std::size_t bins)",
+              "assign(std::size_t count, std::size_t bins)",
+              "size()",
+              "empty()",
+              "bins()",
+              "stride()",
+              "footprint_bytes()",
+              "fill_zero()"
+            ],
+            "enums": []
+          },
           {
             "class": "ConvolverIrSwapperT",
             "qualified_name": "pulp::signal::ConvolverIrSwapperT",
