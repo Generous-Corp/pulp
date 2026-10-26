@@ -2027,8 +2027,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "core/render/src/skia_surface.cpp",
           "state": "framework-authoritative-transferred-compatibility",
-          "revision": "85239b1d8015f006a057548fadc6bdc18908e9fb",
-          "object_id": "7beae8d45d81d345ddf11d739a2f057955c64bf8",
+          "revision": "faceed26a56e8ed647308c3abdd12aa263080ef4",
+          "object_id": "6b5312b81c4d3582e1177296d52b268800453e3f",
           "object_type": "blob"
         },
         {
@@ -2508,8 +2508,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "core/render/include/pulp/render/skia_surface.hpp",
           "state": "framework-authoritative-transferred-compatibility",
-          "revision": "eb919c6775b8443d2b88c0aacdc6869813bd0bb4",
-          "object_id": "ad3e609e90c4f9bda5bbf49b85202797e534619d",
+          "revision": "faceed26a56e8ed647308c3abdd12aa263080ef4",
+          "object_id": "e9b3ca1f57cd6920062303be3f560f09d07584b5",
           "object_type": "blob"
         },
         {
