@@ -71,4 +71,9 @@ std::vector<ForgeCatalogExportNode> forge_catalog_export_nodes();
 std::vector<ForgeAuditFinding>
 audit_forge_catalog_export(const std::vector<ForgeCatalogExportNode>& nodes);
 
+/// Audit descriptor/range joins without imposing Forge's catalog membership.
+/// Provider-neutral catalog users may define their own node-key inventory.
+std::vector<ForgeAuditFinding>
+audit_catalog_export(const std::vector<ForgeCatalogExportNode>& nodes);
+
 } // namespace pulp::host

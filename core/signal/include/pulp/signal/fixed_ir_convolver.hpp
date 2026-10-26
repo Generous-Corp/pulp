@@ -110,7 +110,7 @@ template <typename SampleType = float> class FixedIrConvolverT {
     ///
     /// Everywhere else (other architectures and operating systems, other SIMD
     /// backends, double precision) the limit is 0 and the FFT engine runs every
-    /// IR, as it did before the table existed, until that target is measured.
+    /// IR until that target is measured.
     static constexpr std::size_t direct_fir_limit(std::size_t block_size) noexcept {
 #if PULP_FIXED_IR_MEASURED_TABLE
         if constexpr (!std::is_same_v<SampleType, float>) {

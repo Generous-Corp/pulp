@@ -164,6 +164,19 @@ std::vector<std::string> split_css_font_family_list(std::string_view list) {
     return out;
 }
 
+bool paragraph_fakes_missing_font_styles(std::string_view css_font_family, int weight, int slant) {
+    if (slant != 0)
+        return true;
+    for (const auto& entry : split_css_font_family_list(css_font_family)) {
+        // Ranges are declared under the bare family; a stack entry is usually
+        // quoted ("'Jost', serif", or a native alias).
+        if (const auto synthesize =
+                declared_face_synthesizes_bold(parse_css_font_family(entry).name, weight))
+            return *synthesize;
+    }
+    return true;
+}
+
 std::string platform_family_for_css_family(std::string_view entry) {
     CssFontFamily family = parse_css_font_family(entry);
     if (!family.quoted) {

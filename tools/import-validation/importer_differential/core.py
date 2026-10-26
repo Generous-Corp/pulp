@@ -1002,7 +1002,7 @@ class Scores:
 def run_lanes(
     importer: Path, observer: Path, source: Path, output: Path,
     timeout_seconds: int, from_source: str, browser_path: Path | None,
-    fixture_metadata: dict[str, Any] | None,
+    fixture_metadata: dict[str, Any] | None, emitter: str = "native",
 ) -> LaneOutputs:
     """Import the source through both lanes, render the native IR, verify all of it."""
     browser_dir = output / "browser"
@@ -1100,6 +1100,10 @@ def run_lanes(
     ]
     if page_background["status"] == "resolved":
         render_args.extend(["--page-background", page_background["color"]])
+    # The candidate is the native materializer unless the caller asks for the
+    # ui.js program the same IR emits; the native argv stays as it always was.
+    if emitter != "native":
+        render_args.extend(["--emitter", emitter])
     render_run = run_command(render_args, timeout_seconds)
     write_json(native_dir / "render-command.json", command_record(render_run))
     if render_run.returncode != 0:
@@ -1108,6 +1112,10 @@ def run_lanes(
     if not native_receipt.exists():
         raise LabError("native Skia render did not emit a render receipt")
     render_receipt = json.loads(native_receipt.read_text(encoding="utf-8"))
+    if render_receipt.get("emitter", "native") != emitter:
+        raise LabError(
+            f"native render receipt names emitter {render_receipt.get('emitter')!r}, "
+            f"not the requested {emitter!r}")
     if (render_receipt.get("schema") != "pulp-design-ir-render-receipt-v1"
             or render_receipt.get("backend_requested") != "skia"
             or render_receipt.get("backend_used") != "skia"
@@ -1515,13 +1523,14 @@ def compare_one(
     fixture_metadata: dict[str, Any] | None = None,
     cache_state: str = "unknown",
     timing_budgets_ms: dict[str, int] | None = None,
+    emitter: str = "native",
 ) -> dict[str, Any]:
     output.mkdir(parents=True, exist_ok=True)
     source_copy_dir = output / "source"
     source_copy_dir.mkdir(exist_ok=True)
     shutil.copy2(source, source_copy_dir / source.name)
     lanes = run_lanes(importer, observer, source, output, timeout_seconds,
-                      from_source, browser_path, fixture_metadata)
+                      from_source, browser_path, fixture_metadata, emitter)
     retain_evidence(lanes)
     scores = score_lanes(lanes, source)
     timings = timings_record(lanes)
@@ -1546,6 +1555,7 @@ def compare_one(
             "capture_method": lanes.native_doc.get("capture_method"),
             "source_adapter": lanes.native_doc.get("source_adapter"),
             "comparison_lane": "browser-native-panel-lowering",
+            "emitter": emitter,
             "offline_parser": False,
             "provenance": {
                 "source_sha256": lanes.source_sha256,

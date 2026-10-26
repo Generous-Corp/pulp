@@ -279,13 +279,15 @@ For an existing capability change:
   fingerprint and a durable rationale, and leave the baseline untouched. The
   reviewed branch is consulted ahead of the baseline, so the stale baseline
   entry is simply no longer read; dozens of headers already sit in both.
-- `--write` also appends a full snapshot to
-  `tools/agent-capabilities/contract-history.json` — tens of thousands of lines
-  that dwarf the change that caused them. `--check` does not require it, so for
-  a byte-level fingerprint refresh, revert that file and keep the three-file
-  change; `--check` still reports `fresh`. Reverting it is not free of meaning,
-  so keep the snapshot when the change is a real contract movement whose history
-  someone will read back.
+- `--write` appends a full snapshot to
+  `tools/agent-capabilities/contract-history.json` (tens of thousands of lines)
+  only when the change moves `MANIFEST_REVISION` or `SURFACE_INVENTORY_VERSION`.
+  The snapshot is the previous published state, so a refresh that leaves both
+  counters alone (a catalog binding's `header_fingerprint`) appends nothing,
+  and the next counter move records the state it started from. `--check` never
+  requires a snapshot at the current version. Before this rule, a
+  fingerprint-only `--write` appended a same-version snapshot that then sat in
+  the append-only history for good.
 - Increase the capability minor version for compatible additive contract
   changes.
 - Increase the capability major version when a binding is removed, renamed, or
@@ -497,6 +499,19 @@ that conflict by hand.
 python3 tools/scripts/agent_capability_rederive.py --print   # read-only: what would change
 python3 tools/scripts/agent_capability_rederive.py           # rewrite both, then --write
 ```
+
+**Merge the protected base first; the tool refuses otherwise.** Rederive
+compares this tree against the base, so on a branch that is behind the base,
+every change the base made since the branch point reads as this branch's own. It
+bumps a counter for them, and `--write` appends a full history entry (about
+20,000 lines, the size of every entry) that records the base's material rolled
+back: an untouched header's fingerprint reverting to its old value. So it
+refuses, writing nothing, unless the base tip is an ancestor of `HEAD`, or a
+merge in progress has the base as its incoming commit. The refusal names the
+base sha and, as a hint, the fingerprinted headers that differ; the fix is
+`git merge origin/main`, then re-run. A shallow clone cannot prove ancestry and
+refuses too; fetch the full history. A correct run on a merged branch appends at
+most one entry and leaves every existing entry byte-identical.
 
 It resolves the same protected tip `--check` uses, compares this tree's
 generated material against the base's with the counter excluded, and moves each
@@ -741,6 +756,10 @@ header under `core/host/include` leaves `--check` reporting `fresh`, since the
 surface never saw it. The header ships public and unguarded, and a later byte
 change to it trips nothing. **Add it to the tuple in the same slice that adds the
 header.**
+
+Product-neutral host catalog seams follow this same rule: classify the reusable
+descriptor/factory machinery as host infrastructure and leave product-specific
+Forge compatibility names and serialization in their existing authority.
 
 Two further rules, both learned by getting them wrong:
 

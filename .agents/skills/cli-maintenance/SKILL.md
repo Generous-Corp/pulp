@@ -2250,6 +2250,17 @@ force-loading `pulp-view-core` would no longer pull the importer's objects.
 Guard each entry with `if(TARGET …)` (the importer target exists only with
 `PULP_ENABLE_DESIGN_IMPORT=ON`).
 
+## `$PULP_HOME/cache` holds directories, not only files
+
+Other tools write there too: the browser-capture probe keeps a directory at
+`cache/browser-probe`. Code that lists or sizes the cache must treat each
+entry as a file or a directory, and use the `std::error_code` overloads; the
+throwing `fs::file_size` on that directory aborted `pulp cache status` with
+"Is a directory" on any host that had run a browser-capture test first.
+`cli-cache-status-subdir` seeds an isolated `PULP_HOME` with a nested
+directory. The Rust `pulp cache status` lists regular files only, so it omits
+such a directory rather than failing.
+
 ## Configure defaults carry `-DPULP_DEV_BUILD=ON`
 
 `configure_default_args` (`tools/cli/configure_defaults.hpp`, mirrored in

@@ -219,7 +219,10 @@ public:
     /// rather than a fallback.
     virtual bool has_presentable_target() const = 0;
 
-    /// Resize the surface
+    /// Record a new logical size and backing scale. The render targets are
+    /// reallocated, and on a scale change the retained layers dropped, only in
+    /// the next begin_frame(), so several resizes before one frame cost one
+    /// reallocation.
     virtual void resize(uint32_t width, uint32_t height, float scale = 1.0f) = 0;
 
     /// Enable/disable persistent-scene mode (partial-repaint support, FU-2).
@@ -356,6 +359,13 @@ public:
 
     /// Idle trims `end_frame()` has run since the surface was created.
     virtual std::uint64_t idle_trim_count() const {
+        return 0;
+    }
+
+    /// Graphite render targets this surface has allocated (the offscreen and
+    /// persistent-scene targets; the presentable texture is wrapped, not
+    /// allocated). Diagnostic and test use; 0 where it is not tracked.
+    virtual std::uint64_t render_target_allocations() const {
         return 0;
     }
 

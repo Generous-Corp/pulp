@@ -285,6 +285,14 @@ hard error in every wrapper, not a vacuous pass. The per-class scans
 (`pulp_release_artifact_active_gates`) to every installed SDK library, the
 C++ CLI and the fixture plug-in built through `pulp_add_plugin`.
 
+**The scan's cost is in CMake, not `nm`.** A sanitizer build's archives give
+hundreds of MB of `nm -C` output (983 MB `libpulp-timeline.a` gives 607 MB of
+table, 269k entries), and any CMake operation that walks the whole table
+(`REGEX MATCHALL`, a list of every line) costs seconds per archive. Deciding
+that a table is evidence (at least two defined entries; a stripped binary has
+one) therefore stops at the second match. `string(FIND)` per pattern is cheap;
+`file(STRINGS)` over the archive is the other large cost.
+
 Not on the list, deliberately: `pulp ship`'s own tracing sentinel
 (`PULP_TRACING_COMPILED_IN__DO_NOT_SHIP`, previous section). The CLI contains
 that byte-string as its search needle, so a `string` marker for it would flag
@@ -424,7 +432,13 @@ a dev-shared build may be signed for local loading, never distributed.
   paths in fixed buffers), then re-raise. The handler's sa_mask holds
   all three signals, so a second one cannot re-enter cleanup, and the main
   path blocks them while it writes a mount slot or the child pid
-  (`tool`, a `volatile sig_atomic_t`). Killing the child first matters: an
+  (`tool`, a `volatile sig_atomic_t`). Cleanup clears each piece as it
+  consumes it and sets all three signals to SIG_DFL before re-raising, so a
+  pending second signal cannot re-run it and re-kill a reaped, possibly
+  reused pid. Children start through `tools/cli/ship_child_process.hpp`,
+  which empties the inherited mask and restores default dispositions before
+  exec; without that, ditto and hdiutil inherit the blocked set and ignore a
+  Ctrl-C. Killing the child first matters: an
   orphaned `ditto` keeps writing into the directory the handler removed. Best effort: SIGKILL leaves the
   mount, which `hdiutil info` lists under `pulp-ship-container-scan`.
 

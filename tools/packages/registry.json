@@ -200,7 +200,7 @@
       "alternatives": [
         "Aubio (GPL-3.0, more comprehensive)",
         "Signalsmith DSP (MIT, spectral toolkit only)",
-        "PFFFT (BSD-3-Clause, FFT accelerator only)"
+        "PFFFT (FFTPACK license, BSD-style; FFT accelerator only)"
       ],
       "migration_notes": {},
       "verification": {
@@ -680,7 +680,7 @@
       },
       "unique_value": "Highly optimized FFT with auto-tuning SIMD code generation — fastest available for large transforms",
       "alternatives": [
-        "PFFFT (BSD-3 — lighter, SIMD, power-of-two only)",
+        "PFFFT (FFTPACK license, BSD-style — lighter, SIMD, power-of-two only)",
         "KissFFT (BSD-3 — portable)"
       ],
       "migration_notes": {},
@@ -995,7 +995,7 @@
       },
       "unique_value": "Comprehensive SIMD-optimized DSP with expression templates — faster than hand-written loops",
       "alternatives": [
-        "PFFFT (BSD-3) + Signalsmith DSP (MIT) for FFT + filters separately"
+        "PFFFT (FFTPACK license, BSD-style) + Signalsmith DSP (MIT) for FFT + filters separately"
       ],
       "migration_notes": {},
       "verification": {
@@ -1070,7 +1070,7 @@
       },
       "unique_value": "Arbitrary-size FFT (not limited to power-of-two like PFFFT)",
       "alternatives": [
-        "PFFFT (BSD-3, SIMD-optimized but power-of-two only)"
+        "PFFFT (FFTPACK license, BSD-style; SIMD-optimized but power-of-two only)"
       ],
       "migration_notes": {},
       "verification": {
@@ -1945,7 +1945,8 @@
       "name": "PFFFT",
       "version": "v1.1.0",
       "description": "SIMD-optimized FFT (SSE on x64, NEON on arm64)",
-      "license": "BSD-3-Clause",
+      "license": "LicenseRef-FFTPACK",
+      "license_note": "PFFFT is distributed under the FFTPACK license from UCAR (copyrights: UCAR 2004, Julien Pommier 2013, Hayati Ayguen 2019, Dario Mambro 2020). It is permissive and BSD-style, but it is not the SPDX BSD-3-Clause text. Its conditions: keep the copyright notices, conditions and disclaimer in source redistributions; reproduce them in the documentation of binary redistributions; and do not use the NCAR/UCAR names to endorse derived products. Ship the project's LICENSE.txt with any binary.",
       "category": "dsp",
       "url": "https://github.com/marton78/pffft",
       "fetch": {
@@ -2019,7 +2020,7 @@
         "FFTW (GPL — requires commercial license)"
       ],
       "migration_notes": {
-        "from:fftw": "PFFFT is BSD-licensed and lighter; covers real and complex FFT for power-of-two sizes"
+        "from:fftw": "PFFFT has a permissive BSD-style license (FFTPACK) and is lighter; covers real and complex FFT for power-of-two sizes"
       },
       "verification": {
         "last_verified": "2026-04-07",

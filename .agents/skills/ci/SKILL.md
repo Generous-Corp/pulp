@@ -458,8 +458,10 @@ macOS.
   before the full macOS run. The sweep labels the approved head, and arms only
   once the head's latest `macos` check run is a completed full-lane success
   (not `deferred`). An earlier arm is disabled at once by
-  `macos-ci-arm-refusal.yml`, with a comment. If the full lane fails, the PR
-  needs a fix, and the fix is a new head, which needs a new verdict.
+  `macos-ci-arm-refusal.yml`, with a comment. It judges the PR's current head,
+  read live, not the arm event's, and reads every page of that head's check
+  runs; a head or listing it cannot read is a refusal. If the full lane fails,
+  the PR needs a fix, and the fix is a new head, which needs a new verdict.
 - **A push disarms and unlabels.** `macos-ci-label-reset.yml` disables
   auto-merge on `synchronize` (otherwise the new head's contract-lane green
   would merge it) and removes `macos-ci`. A queued PR leaves the queue on push
@@ -6291,6 +6293,15 @@ triggers on a 143/137 signal-kill exit, not just the marker). Real os-windows
 *correctness* bugs are still worth fixing (the ARG_MAX response-file +
 vanished-`-object` existence-filter + mass-drop guard in `run_coverage.sh` were
 real); only the runtime/timeout is accepted as best-effort.
+
+Because `continue-on-error` absorbs a Windows failure, `needs.coverage.result`
+stays `success` and a run can read green with Windows broken (run 40162878355:
+`pwsh: command not found` before the build started). `coverage_publish_barrier`
+therefore runs under `always()`. It fails unless `needs.coverage.result` is
+`success`, and when a dispatch sets `windows_runner_selector_json` it also
+requires the `coverage-cobertura-windows-<sha>` artifact. When you read a
+Windows proof dispatch, check the Windows job and its artifact, not just the
+run conclusion. `test_codecov_upload_contract.py` pins the barrier shape.
 
 ### `release-cli.yml` needs Rust; the VM golden does not have it
 

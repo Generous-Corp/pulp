@@ -2773,7 +2773,9 @@ def check_streamed_model_call() -> tuple:
     os.makedirs(hang_dir)
     hang = os.path.join(hang_dir, "claude")
     with open(hang, "w") as f:
-        f.write("#!/bin/sh\nsleep 30\n")
+        # Answers the tools probe, then hangs on the generation call itself.
+        f.write('#!/bin/sh\n[ "$1" = --help ] && { echo "  --tools <tools...>"; exit 0; }\n'
+                "sleep 30\n")
     os.chmod(hang, os.stat(hang).st_mode | stat.S_IEXEC)
     code, _, why = P.ask_model(hang, "hello", 1.0)
     if code == 0 or "limit" not in why:

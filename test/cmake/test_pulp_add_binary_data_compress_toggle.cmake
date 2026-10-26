@@ -1,5 +1,5 @@
 #[[
-Switching pulp_add_binary_data's COMPRESS on in an existing build regenerates
+Switching pulp_add_binary_data's COMPRESS on, and off again, in an existing build regenerates
 the embedded source with a Makefile generator: CMake reruns a custom command
 whose command line changed. Verified on CMake 3.24.3 (the repository minimum)
 and 4.3.3; this test keeps it from regressing silently.
@@ -66,4 +66,15 @@ if(_hit EQUAL -1)
         "turning COMPRESS on did not regenerate the embedded source:\n${_compressed}")
 endif()
 
-message(STATUS "pulp_add_binary_data: toggling COMPRESS regenerates under Unix Makefiles")
+# And back: switching COMPRESS off again regenerates the raw array.
+_step("configure raw again" ${CMAKE_COMMAND} -S "${_work}/src" -B "${_build}" -DUSE_COMPRESS=OFF)
+_step("build raw again" ${CMAKE_COMMAND} --build "${_build}")
+file(READ "${_generated}" _raw_again)
+string(FIND "${_raw_again}" "extern const unsigned char asset_txt[]" _hit)
+string(FIND "${_raw_again}" "asset_txt_zlib" _zlib_hit)
+if(_hit EQUAL -1 OR NOT _zlib_hit EQUAL -1)
+    message(FATAL_ERROR
+        "turning COMPRESS off did not regenerate the raw source:\n${_raw_again}")
+endif()
+
+message(STATUS "pulp_add_binary_data: toggling COMPRESS on and off regenerates under Unix Makefiles")

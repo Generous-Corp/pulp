@@ -192,6 +192,10 @@ struct NativeImportXYPadBindingDescriptor {
     std::string_view gesture_contract;
 };
 
+/// A level display's binding. Either `meter_source` and `channel` name a
+/// metering source, or both are empty and `value_key` alone names what to show:
+/// a parameter by name, or a `value:<name>` value channel, as the bridge's
+/// `bindMeter(id, key)` resolves it. A context binds the key form by that key.
 struct NativeImportMeterBindingDescriptor {
     std::string_view route_id;
     std::string_view meter_source;
