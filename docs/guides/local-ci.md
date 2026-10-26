@@ -753,6 +753,15 @@ Each invocation:
    credential, writes it into the guest over stdin, and runs one job.
 6. Fences the registration and rolls back again.
 
+A runner that stays online and idle for 45 minutes
+(`PULP_WINDOWS_RUNNER_IDLE_RECYCLE_SECONDS`, default 2700; `0` turns it off) is
+deregistered through the same fence and the invocation exits 0, so systemd
+registers a fresh one. A JIT session that idles for hours can stay `online`
+while GitHub stops assigning it jobs: on 2026-10-25 a matching job queued for
+hours beside an idle registration. The fence deletes the registration before the
+session is stopped, so a runner that took a job in that window refuses the
+delete and keeps it.
+
 The VM belongs to the slot. Anything else that stops it (`qm shutdown 300` from
 another tool or session) kills the running job. The supervisor watches the VM
 while a job runs. When it stops without the supervisor stopping it, the
