@@ -97,7 +97,7 @@ public:
     /// large FFT more often. The balance point grows with both the IR and the
     /// block: about 1024 samples of head for a one-second IR at 16- to
     /// 32-frame blocks, up to 4096 at 512 frames. A fixed K of 4 sits far
-    /// from it for long IRs (1.5-14x the cost at 48000-96000 taps).
+    /// from it for long IRs (up to 9.75x the cost at 48000-96000 taps).
     ///
     /// The table is measured in single precision on Apple Silicon Macs with
     /// the Accelerate backend (M1 Max over three runs, M5 Max over five) for IRs of 4096,
@@ -131,13 +131,13 @@ public:
             case 16:
                 return std::array<std::size_t, 4>{16, 32, 64, 64}[column];
             case 32:
-                return std::array<std::size_t, 4>{8, 32, 32, 64}[column];
-            case 64:
                 return std::array<std::size_t, 4>{8, 16, 32, 64}[column];
+            case 64:
+                return std::array<std::size_t, 4>{8, 16, 16, 32}[column];
             case 128:
-                return std::array<std::size_t, 4>{4, 8, 16, 32}[column];
+                return std::array<std::size_t, 4>{8, 8, 16, 32}[column];
             case 256:
-                return std::array<std::size_t, 4>{16, 8, 16, 16}[column];
+                return std::array<std::size_t, 4>{4, 8, 16, 16}[column];
             case 512:
                 return std::array<std::size_t, 4>{8, 8, 8, 16}[column];
             default:
@@ -167,9 +167,22 @@ public:
         return false;
     }
 
-    /// The tail multiplier the three-argument load_ir() uses:
+    /// The tail multiplier for a host whose CPU brand string is `cpu_brand`:
     /// choose_tail_multiplier() on a measured chip family, otherwise
-    /// kDefaultTailMultiplier.
+    /// kDefaultTailMultiplier. Pure, so the family rule is testable on any
+    /// host; default_tail_multiplier() applies it to the running host.
+    static constexpr std::size_t default_tail_multiplier_for(std::string_view cpu_brand,
+                                                             std::size_t ir_length,
+                                                             std::size_t block_size) noexcept {
+        return table_measured_on(cpu_brand) ? choose_tail_multiplier(ir_length, block_size)
+                                            : kDefaultTailMultiplier;
+    }
+
+    /// The tail multiplier the three-argument load_ir() uses:
+    /// default_tail_multiplier_for() with this host's
+    /// `machdep.cpu.brand_string`, read once off the audio thread and cached.
+    /// Builds without the measured table, and hosts whose brand cannot be
+    /// read, keep kDefaultTailMultiplier.
     static std::size_t default_tail_multiplier(std::size_t ir_length, std::size_t block_size) {
 #if PULP_NON_UNIFORM_MEASURED_TABLE
         static const bool measured = [] {

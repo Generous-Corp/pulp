@@ -54,8 +54,12 @@ indicative.
 
 | File | Chip | Runs | Conditions |
 |---|---|---|---|
-| [m1-max.csv](nonuniform-head/m1-max.csv) | Apple M1 Max (MacBookPro18,4) | 3 | nice 19, background QoS, 1-minute load 9-34 |
-| [m5-max.csv](nonuniform-head/m5-max.csv) | Apple M5 Max (Mac17,7) | 5 | nice 19, 1-minute load 4-8 |
+| [m1-max.csv](nonuniform-head/m1-max.csv) | Apple M1 Max (MacBookPro18,4) | 3 | nice 19, background QoS, 1-minute load 4-5 |
+| [m5-max.csv](nonuniform-head/m5-max.csv) | Apple M5 Max (Mac17,7) | 5 | nice 19, 1-minute load 7-9 |
+
+Both files were measured on the compact-arena partitioned kernel, which the
+head and tail stages are built from. The same benchmark binary ran on both
+hosts.
 
 ### The fitting rule
 
@@ -77,18 +81,18 @@ Regret over the 24 cells (in sample):
 
 | Chip | Table: geomean, worst | Fixed K = 4: geomean, worst |
 |---|---|---|
-| M1 Max | 1.007, 1.08 | 2.37, 11.99 (96000 taps, 32 frames) |
-| M5 Max | 1.007, 1.09 | 2.03, 9.46 (96000 taps, 16 frames) |
+| M1 Max | 1.003, 1.04 | 2.06, 9.75 (96000 taps, 16 frames) |
+| M5 Max | 1.005, 1.05 | 1.98, 8.56 (96000 taps, 16 frames) |
 
 Out of sample, fitting on one chip and scoring the other:
 
 | Held-out chip | Geomean | Worst |
 |---|---|---|
-| M1 Max | 1.039 | 1.39 (96000 taps, 64 frames) |
-| M5 Max | 1.024 | 1.15 (4096 taps, 128 frames) |
+| M1 Max | 1.010 | 1.07 (48000 taps, 64 frames) |
+| M5 Max | 1.022 | 1.19 (48000 taps, 256 frames) |
 
-Against the previous fixed K = 4 the table is 2.35x (M1 Max) and 2.02x (M5
-Max) faster in geomean, and up to 12.0x and 9.5x in the best cell.
+Against the previous fixed K = 4 the table is 2.05x (M1 Max) and 1.97x (M5
+Max) faster in geomean, and up to 9.7x and 8.6x in the best cell.
 
 ### Per-callback cost
 
@@ -103,31 +107,33 @@ vs K = 4; the last column is the worst single round:
 
 | IR | B | Table K | p99 | Maximum | Worst-round maximum |
 |---|---|---|---|---|---|
-| 48000 | 16 | 64 | 4.4% vs 4.7% | 6.6% vs 9.5% | 17.4% vs 22.9% |
-| 96000 | 16 | 64 | 8.6% vs 10.4% | 11.6% vs 19.9% | 13.6% vs 41.1% |
-| 48000 | 32 | 32 | 2.3% vs 2.2% | 3.2% vs 4.0% | 7.0% vs 17.3% |
-| 96000 | 32 | 64 | 4.7% vs 4.7% | 6.0% vs 8.1% | 9.3% vs 12.3% |
+| 48000 | 16 | 64 | 4.1% vs 3.9% | 6.7% vs 7.7% | 9.3% vs 21.7% |
+| 96000 | 16 | 64 | 7.3% vs 8.6% | 11.0% vs 13.6% | 19.6% vs 31.6% |
+| 48000 | 32 | 32 | 2.0% vs 2.0% | 3.0% vs 2.5% | 4.8% vs 6.7% |
+| 96000 | 32 | 64 | 4.4% vs 4.1% | 5.6% vs 5.0% | 8.2% vs 28.1% |
 
-At the worst cases, the table's maximum is below K = 4's in every row. Its
-p99 is at or below K = 4's, apart from 2.3% vs 2.2% in one row.
+At the worst cases, the table's worst single round is below K = 4's in every
+row. Its median p99 and median maximum are within a few tenths of a percent
+of K = 4's, slightly higher in some rows, and the highest of them is 11.0% of
+the deadline.
 
 Over all 24 cells on M5 Max:
-- In ordinary cells the table's p99 is higher. In the median cell it is 1.27x
-  K = 4's p99, and at most 1.58x.
-- Every cell where the table's p99 is higher stays at or below 4.7% of the
+- In ordinary cells the table's p99 is higher. In the median cell it is 1.22x
+  K = 4's p99, and at most 1.66x.
+- Every cell where the table's p99 is higher stays at or below 4.4% of the
   deadline.
-- Every cell where its maximum is higher (at most 1.47x) stays at or below
-  1.7% of the deadline.
-- The largest table maximum in any cell is 11.6% of the deadline, and 17.4%
+- Every cell where its maximum is higher (at most 1.54x) stays at or below
+  5.6% of the deadline.
+- The largest table maximum in any cell is 11.0% of the deadline, and 19.6%
   in the worst single round.
 
-M1 Max ran loaded and at background QoS, so its maxima reflect preemption
-rather than computation: K = 4's own median maximum is 300-3200% of the
-deadline at the worst cases. Its p99 at those cells is far lower with the
-table, for example 49.3% vs 481.7% at 96000 taps and 16 frames.
+M1 Max ran at background QoS, so its maxima reflect preemption rather than
+computation: K = 4's own median maximum is 385-1686% of the deadline at the
+worst cases. Its p99 at those cells is far lower with the table, for example
+36.6% vs 241.5% at 96000 taps and 16 frames.
 
 ### Output
 
 The largest difference from the uniform engine over every cell and K is
-4.3e-6 of the output RMS. That is float rounding, since K only changes where
-the IR splits between the stages.
+4.3e-6 of the output RMS (4.31e-6 on both chips). That is float rounding,
+since K only changes where the IR splits between the stages.

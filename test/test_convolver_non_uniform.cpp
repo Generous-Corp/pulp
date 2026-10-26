@@ -377,7 +377,7 @@ TEST_CASE("NonUniformPartitionedConvolver default tail multiplier follows the me
     REQUIRE(Conv::choose_tail_multiplier(96000, 16) == 64);
     REQUIRE(Conv::choose_tail_multiplier(48000, 32) == 32);
     REQUIRE(Conv::choose_tail_multiplier(96000, 32) == 64);
-    REQUIRE(Conv::choose_tail_multiplier(4096, 128) == 4);
+    REQUIRE(Conv::choose_tail_multiplier(4096, 128) == 8);
     REQUIRE(Conv::choose_tail_multiplier(48000, 512) == 8);
     // An IR length takes the nearest measured column on a log scale: the
     // 4096/16384 boundary is their geometric mean, 8192.
@@ -424,6 +424,24 @@ TEST_CASE("NonUniformPartitionedConvolver applies the table only on measured chi
     REQUIRE_FALSE(Conv::table_measured_on("Apple M1X"));
     REQUIRE_FALSE(Conv::table_measured_on("Intel(R) Core(TM) i9"));
     REQUIRE_FALSE(Conv::table_measured_on(""));
+
+    // An unmeasured family keeps the fixed K = 4 at every cell the table
+    // covers, while a measured one takes the table.
+    for (const std::size_t block : {std::size_t{16}, std::size_t{32}, std::size_t{256}}) {
+        for (const std::size_t ir : {std::size_t{4096}, std::size_t{48000}, std::size_t{96000}}) {
+            REQUIRE(Conv::default_tail_multiplier_for("Apple M3 Ultra", ir, block) ==
+                    Conv::kDefaultTailMultiplier);
+            REQUIRE(Conv::default_tail_multiplier_for("Apple M2 Pro", ir, block) ==
+                    Conv::kDefaultTailMultiplier);
+            REQUIRE(Conv::default_tail_multiplier_for("Apple M5 Max", ir, block) ==
+                    Conv::choose_tail_multiplier(ir, block));
+        }
+    }
+#if PULP_NON_UNIFORM_MEASURED_TABLE
+    // The table differs from K = 4 here, so the unmeasured case is a real
+    // difference rather than a coincidence of the table.
+    REQUIRE(Conv::choose_tail_multiplier(96000, 16) != Conv::kDefaultTailMultiplier);
+#endif
 
     // On this host, default_tail_multiplier() is the table exactly when the
     // build has the table and the host's brand is a measured family.

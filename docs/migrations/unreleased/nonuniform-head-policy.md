@@ -1,6 +1,6 @@
 ---
 breaking = false
-summary = "NonUniformPartitionedConvolver picks its head length from a measured table when no tail multiplier is given (Apple Silicon, float): up to 14x faster for long IRs, output unchanged to float rounding"
+summary = "NonUniformPartitionedConvolver picks its head length from a measured table when no tail multiplier is given (Apple M1 and M5, float): up to about 10x faster for long IRs, output unchanged to float rounding"
 ---
 
 ## What changed
@@ -15,8 +15,8 @@ summary = "NonUniformPartitionedConvolver picks its head length from a measured 
   - Everywhere else it keeps the previous fixed K of 4
     (`kDefaultTailMultiplier`): other chip families, other platforms and FFT
     backends, double precision, and blocks outside that range.
-- For long IRs the fixed K of 4 cost 1.5-14x the best measured head length.
-  Examples: 96000 taps at 32-frame blocks, and 48000 taps at 16 frames.
+- For long IRs the fixed K of 4 cost up to 9.75x the best measured head length.
+  The worst case measured is 96000 taps at 16-frame blocks.
 - The four-argument `load_ir()` with an explicit tail multiplier is unchanged.
 
 ## Effect on output
