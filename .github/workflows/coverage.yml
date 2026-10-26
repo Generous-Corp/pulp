@@ -1374,7 +1374,7 @@ jobs:
     # leg failed before the build started.
     name: Coverage publish barrier (native reports complete)
     needs: [classify, coverage]
-    if: always() && github.head_ref != 'release/version-bump' && ((github.event_name != 'pull_request' || github.event.action == 'auto_merge_enabled') && needs.classify.outputs.native_build_required == 'true')
+    if: github.head_ref != 'release/version-bump' && (always() && (github.event_name != 'pull_request' || github.event.action == 'auto_merge_enabled') && needs.classify.outputs.native_build_required == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:

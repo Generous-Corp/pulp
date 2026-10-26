@@ -113,7 +113,7 @@ class CoverageWorkflowTests(unittest.TestCase):
         end = self.coverage.index("\n  android-kotlin-coverage:\n")
         barrier = self.coverage[start:end]
         self.assertIn("    needs: [classify, coverage]\n", barrier)
-        self.assertIn("    if: always() && ", barrier)
+        self.assertIn("    if: github.head_ref != 'release/version-bump' && (always() && ", barrier)
         self.assertIn("needs.classify.outputs.native_build_required == 'true'", barrier)
         self.assertNotIn("needs.coverage.result == 'success'", barrier)
         self.assertIn("COVERAGE_RESULT: ${{ needs.coverage.result }}", barrier)
