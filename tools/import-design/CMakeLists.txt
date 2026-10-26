@@ -35,6 +35,7 @@ add_executable(pulp-import-design
     pulp_import_design.cpp
     annotated_capture.cpp
     import_design_cli_help.cpp
+    import_document_refusals.cpp
     browser_import_cli.cpp
     browser_import_session.cpp
     browser_html_import.cpp
@@ -221,7 +222,8 @@ target_link_libraries(pulp-design-import-bench PRIVATE
 # serialized DesignIR directly, avoiding codegen/QuickJS as a confounding layer
 # when measuring the candidate importer's native tree.
 add_executable(pulp-design-ir-observe
-    design_ir_observe.cpp)
+    design_ir_observe.cpp
+    observer_script_lane.cpp)
 target_include_directories(pulp-design-ir-observe PRIVATE
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/core/render/src)

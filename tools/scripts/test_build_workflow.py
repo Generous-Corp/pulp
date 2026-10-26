@@ -1208,7 +1208,7 @@ class MacosArmRefusalTest(unittest.TestCase):
 
     def _run(self, latest: str, tier: str = "",
              run_repos: dict[str, str] | None = None, annotations: str | None = None,
-             listing: str | None = None) -> list[list[str]]:
+             listing: str | None = None, live_head: str | None = None) -> list[list[str]]:
         # `latest` is the check runs newest first, `<id> <status> <conclusion>
         # [<run id> | <details url>]` per line; a bare line belongs to run
         # 1<id>. `listing`, `annotations` or a run_repos value of "!FAIL" makes
@@ -1227,6 +1227,8 @@ class MacosArmRefusalTest(unittest.TestCase):
         fixture = {
             "/annotations": annotations,
             "mutation(": "",
+            # The pull request's live head.
+            "query(": live_head if live_head == "!FAIL" else f"{live_head or self.HEAD}\n",
             "/comments": "",
             **{f"actions/runs/{run} ": (answer if answer == "!FAIL" else f"{answer}\n")
                for run, answer in runs.items()},
@@ -1244,7 +1246,7 @@ class MacosArmRefusalTest(unittest.TestCase):
             env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
                    "FAKE_GH_FIXTURE": str(Path(tmp) / "fixture.json"), "FAKE_GH_LOG": str(log),
                    "GITHUB_REPOSITORY": "Generous-Corp/pulp", "PR_NUMBER": "7",
-                   "PR_NODE_ID": "PR_NODE", "HEAD_SHA": self.HEAD, "GH_TOKEN": "x",
+                   "PR_NODE_ID": "PR_NODE", "EVENT_HEAD_SHA": self.HEAD, "GH_TOKEN": "x",
                    "GITHUB_SERVER_URL": "https://github.com"}
             proc = subprocess.run(["bash", "-c", self.step["run"]], env=env, capture_output=True,
                                   text=True, encoding="utf-8", check=False)
@@ -1322,6 +1324,31 @@ class MacosArmRefusalTest(unittest.TestCase):
         calls = self._run("5 completed success\n", annotations="!FAIL")
         self.assertTrue(self._refused(calls))
         self.assertIn("could not verify", self._comment(calls))
+
+    def test_every_page_of_check_runs_is_read_and_the_newest_decides(self) -> None:
+        # Pages arrive in API order, not newest first; the newest (9, still
+        # running) must decide, not the older full-lane success on page one.
+        calls = self._run("5 completed success\n9 in_progress null\n", tier="full")
+        self.assertTrue(self._refused(calls))
+        listing = next(" ".join(c) for c in calls if "/check-runs?" in " ".join(c))
+        self.assertIn("--paginate", listing)
+
+    def test_the_pull_requests_current_head_is_judged_not_the_events(self) -> None:
+        moved = "b" * 40
+        calls = self._run("5 completed success\n", tier="full", live_head=moved)
+        self.assertFalse(self._refused(calls))
+        listings = [" ".join(c) for c in calls if "/check-runs?" in " ".join(c)]
+        self.assertEqual(len(listings), 1)
+        self.assertIn(f"commits/{moved}/", listings[0])
+        self.assertNotIn(self.HEAD, listings[0])
+
+    def test_an_unreadable_current_head_is_refused(self) -> None:
+        for live_head in ("!FAIL", "not-a-sha"):
+            with self.subTest(live_head=live_head):
+                calls = self._run("5 completed success\n", tier="full", live_head=live_head)
+                self.assertTrue(self._refused(calls))
+                self.assertIn("could not verify", self._comment(calls))
+                self.assertFalse(any("/check-runs?" in " ".join(c) for c in calls))
 
     def test_a_success_without_an_allowed_tier_is_refused(self) -> None:
         # Only an explicit `full`, `fast` or `not-required` tier passes.

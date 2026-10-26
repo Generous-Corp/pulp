@@ -34,6 +34,8 @@
 // WM_SIZE, MAKELPARAM, GetClientRect).
 #include <pulp/platform/win32_sane.hpp>
 #include <cstdint>
+#include <utility>
+#include <vector>
 #endif
 
 using namespace pulp::view;
@@ -327,14 +329,20 @@ TEST_CASE("X11 plugin host follows a resize the host applied to its window",
     // connection; until the server has processed them, a resize from the DAW
     // connection can land first and be undone by the attach. The window turning
     // viewable proves the attach's requests, the resize before the map
-    // included, are done.
-    for (int i = 0; i < 200; ++i) {
+    // included, are done. Running out of time is a failure, not a reason to
+    // carry on into the race this wait exists to avoid. The budget is 5 s:
+    // xvfb on a loaded CI runner can be slow, and a passing run stops at the
+    // first poll that sees the window.
+    bool viewable = false;
+    for (int i = 0; i < 1000 && !viewable; ++i) {
         XWindowAttributes attrs{};
-        if (XGetWindowAttributes(daw, child, &attrs) && attrs.map_state == IsViewable)
-            break;
-        host->pump_x_events();
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        viewable = XGetWindowAttributes(daw, child, &attrs) && attrs.map_state == IsViewable;
+        if (!viewable) {
+            host->pump_x_events();
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
     }
+    REQUIRE(viewable);
     host->pump_x_events(); // drain the attach's own events
 
     std::vector<std::pair<uint32_t, uint32_t>> notified;
@@ -553,6 +561,170 @@ TEST_CASE("Windows plugin host reconciles a WM_SIZE host resize",
     } else {
         WARN("no GPU adapter/device (headless CI) — GPU swapchain check skipped");
     }
+}
+
+namespace {
+
+// Width and height from a PNG's IHDR chunk (big-endian, bytes 16..23).
+bool png_size(const std::vector<uint8_t>& png, uint32_t& w, uint32_t& h) {
+    if (png.size() < 24)
+        return false;
+    auto be32 = [&](size_t at) {
+        return (uint32_t(png[at]) << 24) | (uint32_t(png[at + 1]) << 16) |
+               (uint32_t(png[at + 2]) << 8) | uint32_t(png[at + 3]);
+    };
+    w = be32(16);
+    h = be32(20);
+    return true;
+}
+
+} // namespace
+
+// At a fractional scale a client width does not survive the trip through
+// logical units: 1001 px at 1.5x is 667 logical, and 667 x 1.5 is 1000. The
+// frame must be the client rect's own size, or it is stretched over the
+// window by a pixel and every frame is blurred.
+TEST_CASE("Windows plugin host frames a fractional-DPI client at its exact pixel size",
+          "[view][plugin-view-host][resize][hidpi][windows]") {
+    View root;
+    root.set_theme(Theme::dark());
+    register_platform_plugin_view_host();
+    PluginViewHost::Options opts;
+    opts.size = {64, 64};
+    opts.use_gpu = true; // may degrade to raster-only on a GPU-less runner
+    auto host = PluginViewHost::create(root, opts);
+    REQUIRE(host != nullptr);
+    host->set_scale_factor(1.5f);
+    REQUIRE(host->scale_factor() == 1.5f);
+    auto hwnd = static_cast<HWND>(host->native_handle());
+    REQUIRE(hwnd != nullptr);
+
+    int notified = 0;
+    host->set_resize_callback([&](uint32_t, uint32_t) { ++notified; });
+
+    SendMessageW(hwnd, WM_SIZE, SIZE_RESTORED, static_cast<LPARAM>(MAKELPARAM(1001, 751)));
+    CHECK(host->get_size().width == 667);
+    CHECK(host->get_size().height == 501);
+    CHECK(notified == 1);
+    uint32_t w = 0, h = 0;
+    REQUIRE(png_size(host->capture_back_buffer_png(), w, h));
+    CHECK(w == 1001);
+    CHECK(h == 751);
+
+    // 1000 px is also 667 logical. The frame still follows the client rect,
+    // and the processor, whose logical size did not change, hears nothing.
+    SendMessageW(hwnd, WM_SIZE, SIZE_RESTORED, static_cast<LPARAM>(MAKELPARAM(1000, 751)));
+    CHECK(notified == 1);
+    REQUIRE(png_size(host->capture_back_buffer_png(), w, h));
+    CHECK(w == 1000);
+    CHECK(h == 751);
+}
+
+// A resize callback can resize the editor again: here the callback's own
+// WM_SIZE arrives while it runs, on an unattached editor that delivers at
+// once. The second size is delivered after the first callback returns, never
+// from inside it.
+TEST_CASE("Windows plugin host does not re-enter its resize callback",
+          "[view][plugin-view-host][resize][windows]") {
+    View root;
+    root.set_theme(Theme::dark());
+    register_platform_plugin_view_host();
+    PluginViewHost::Options opts;
+    opts.size = {64, 64};
+    opts.use_gpu = true; // may degrade to raster-only on a GPU-less runner
+    auto host = PluginViewHost::create(root, opts);
+    REQUIRE(host != nullptr);
+    auto hwnd = static_cast<HWND>(host->native_handle());
+    REQUIRE(hwnd != nullptr);
+    const float scale = host->scale_factor();
+    const auto send_logical = [&](uint32_t w, uint32_t h) {
+        const auto pw = static_cast<uint32_t>(w * scale + 0.5f);
+        const auto ph = static_cast<uint32_t>(h * scale + 0.5f);
+        SendMessageW(hwnd, WM_SIZE, SIZE_RESTORED, static_cast<LPARAM>(MAKELPARAM(pw, ph)));
+    };
+
+    std::vector<std::pair<uint32_t, uint32_t>> notified;
+    int depth = 0, max_depth = 0;
+    host->set_resize_callback([&](uint32_t w, uint32_t h) {
+        ++depth;
+        max_depth = depth > max_depth ? depth : max_depth;
+        notified.emplace_back(w, h);
+        if (notified.size() == 1)
+            send_logical(180, 120);
+        --depth;
+    });
+    send_logical(200, 150);
+    CHECK(max_depth == 1);
+    REQUIRE(notified.size() == 2);
+    CHECK(notified[0] == std::make_pair(200u, 150u));
+    CHECK(notified[1] == std::make_pair(180u, 120u));
+    CHECK(host->get_size().width == 180);
+}
+
+// A DAW drag resizes the attached editor once per mouse move. The processor
+// hears about it once per frame, from the frame timer, with the last size.
+TEST_CASE("Windows attached editor notifies a WM_SIZE flood once per frame",
+          "[view][plugin-view-host][resize][windows]") {
+    struct ParentWindow {
+        HWND hwnd =
+            CreateWindowExW(0, L"STATIC", L"Pulp resize coalescing", WS_OVERLAPPEDWINDOW, 0, 0, 512,
+                            512, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+        ~ParentWindow() {
+            if (hwnd)
+                DestroyWindow(hwnd);
+        }
+    } parent;
+    REQUIRE(parent.hwnd != nullptr);
+
+    View root;
+    root.set_theme(Theme::dark());
+    register_platform_plugin_view_host();
+    PluginViewHost::Options opts;
+    opts.size = {64, 64};
+    opts.use_gpu = true; // may degrade to raster-only on a GPU-less runner
+    auto host = PluginViewHost::create(root, opts);
+    REQUIRE(host != nullptr);
+    host->attach_to_parent(parent.hwnd);
+    REQUIRE(host->is_attached());
+
+    const auto child = static_cast<HWND>(host->native_handle());
+    REQUIRE(child != nullptr);
+    const auto dispatch_frame_timer = [&] {
+        const auto deadline = GetTickCount64() + 1000;
+        MSG msg{};
+        while (GetTickCount64() < deadline) {
+            if (PeekMessageW(&msg, child, WM_TIMER, WM_TIMER, PM_REMOVE)) {
+                DispatchMessageW(&msg);
+                return true;
+            }
+            Sleep(1);
+        }
+        return false;
+    };
+
+    std::vector<std::pair<uint32_t, uint32_t>> notified;
+    host->set_resize_callback([&](uint32_t w, uint32_t h) { notified.emplace_back(w, h); });
+    const float scale = host->scale_factor();
+    REQUIRE(scale > 0.0f);
+    const auto send_logical = [&](uint32_t w, uint32_t h) {
+        const auto pw = static_cast<uint32_t>(w * scale + 0.5f);
+        const auto ph = static_cast<uint32_t>(h * scale + 0.5f);
+        SendMessageW(child, WM_SIZE, SIZE_RESTORED, static_cast<LPARAM>(MAKELPARAM(pw, ph)));
+    };
+
+    for (uint32_t i = 1; i <= 60; ++i)
+        send_logical(100 + i, 80);
+    CHECK(notified.empty());
+    REQUIRE(dispatch_frame_timer());
+    REQUIRE(notified.size() == 1);
+    CHECK(notified.back() == std::make_pair(160u, 80u));
+    CHECK(host->get_size().width == 160);
+
+    // A frame with no resize notifies nothing.
+    host->repaint();
+    REQUIRE(dispatch_frame_timer());
+    CHECK(notified.size() == 1);
+    host->detach();
 }
 
 TEST_CASE("Windows attached GPU editor coalesces scripted repaint requests",

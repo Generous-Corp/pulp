@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "event_id": "20261025-importer-synthetic-bold-20261025",
+  "kind": "change",
+  "created_at": "2026-10-25T11:02:02Z",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "rationale": "canvas-kernel: the font registry records each @font-face rule's declared font-weight range (declare_font_face_weight_range, css_match_declared_weight, declared_face_synthesizes_bold, has_declared_font_face_weights), make_paragraph synthesizes bold from that declared range as Chromium does, and match_registered_typeface keeps a declared family on its nearest face instead of returning no match past the weight tolerance. Families registered without declarations behave exactly as before; no API is removed and no authority boundary moves; Pulp-only.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "ctest --test-dir build -R pulp-test-canvas-fonts",
+    "ctest --test-dir build -R pulp-test-design-import-fidelity",
+    "ctest --test-dir build -R pulp-test-design-import-font-assets"
+  ],
+  "disposition": "pulp-only"
+}

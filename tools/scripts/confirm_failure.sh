@@ -37,7 +37,9 @@
 # and reports INCONCLUSIVE by construction - which reads as "the test does not
 # cover this" when the truth is "the wrong file was fingerprinted". With
 # --subject the test executable is left in place (it only drives the subject),
-# so --target may name the subject's target alone.
+# so --target may name the subject's target alone, unless the driver links the
+# edited source too: then the run stops INCONCLUSIVE and asks for a --target
+# that rebuilds the driver as well.
 #
 # A Catch2 test spec splits on commas, so a --test naming a test case whose
 # name contains a comma matches nothing and the baseline comes back
@@ -427,6 +429,51 @@ if [ "$BASELINE_BINARY" = "absent" ]; then
     if the test shells out to another compiled binary, name it with
     --subject <path> (e.g. build/tools/cli/pulp-cpp); if it is a script, use
     --no-build"
+fi
+
+# With --subject the driver is left in place, so it must not carry the edited
+# code itself: --target rebuilds the subject only, and a driver that also links
+# the edited object would run the stale copy and could pass with the fix
+# broken (a false NOT CONFIRMED). Compare the strong global symbols the edited
+# object defines with the strong symbols the driver defines; any overlap means
+# the driver links it. A header edit has no object of its own, so it cannot be checked
+# this way and is left to the caller.
+driver_links_edited_object() {
+    [ -n "$SUBJECT" ] && [ "$NO_BUILD" -eq 0 ] && [ "$IS_HEADER" -eq 0 ] || return 1
+    [ -f "$TEST_BINARY" ] || return 1
+    command -v nm >/dev/null 2>&1 || return 1
+    python3 - "$BUILD_DIR" "${OBJ_BASE}.o" "$TEST_BINARY" "$STASH" <<'PY'
+import os, subprocess, sys
+build, obj_name, driver, stash = sys.argv[1:5]
+# Strong text/data definitions only: weak (W/w, V/v) and inline template
+# instantiations appear in every user and prove nothing.
+def defined(path, kinds):
+    out = subprocess.run(["nm", path], capture_output=True, text=True).stdout
+    syms = set()
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) >= 3 and parts[-2] in kinds:
+            syms.add(parts[-1])
+    return syms
+# The object contributes its global definitions only. Its locals (statics as
+# _ZL<name>, anonymous namespaces as _GLOBAL__N_1) recur in unrelated objects
+# and would match a driver that never linked it. The driver side keeps locals
+# too: a hidden-visibility global is local once linked into an executable.
+edited = set()
+for root, dirs, files in os.walk(build):
+    if stash and os.path.abspath(root).startswith(os.path.abspath(stash)):
+        continue
+    if obj_name in files:
+        edited |= defined(os.path.join(root, obj_name), ("T", "D", "S", "B"))
+linked = defined(driver, ("T", "t", "D", "d", "S", "s", "B", "b"))
+sys.exit(0 if edited and edited & linked else 1)
+PY
+}
+if driver_links_edited_object; then
+    die_inconclusive "the test driver '$TEST_BINARY' also links $BASE, and with
+    --subject the driver is not rebuilt, so it would run the unbroken copy.
+    Pass a --target that builds the driver as well as the subject (the driver's
+    own target usually does)"
 fi
 
 # ── 2. Break the fix ─────────────────────────────────────────────────────────

@@ -27,6 +27,9 @@
 #   PULP_WINDOWS_RUNNER_LABELS     default self-hosted,Windows,X64,pulp-build-windows-x64,pulp-host-macpro
 #   PULP_WINDOWS_RUNNER_DIR        runner install dir in the guest, default B:\actions-runner
 #   PULP_WINDOWS_GUEST_USER        SSH user in the guest (an administrator), default ci
+#   PULP_WINDOWS_RUNNER_IDLE_RECYCLE_SECONDS
+#                                  re-register a runner that stays online and idle
+#                                  this long, default 2700 (45 min); 0 disables
 #
 set -uo pipefail
 
@@ -50,6 +53,7 @@ STATE_DIR="${PULP_WINDOWS_STATE_DIR:-/var/lib/pulp/windows-runner}"
 LOCK_DIR="${PULP_WINDOWS_LOCK_DIR:-/var/lock}"
 RUNNER_READY_TIMEOUT_SECONDS="${PULP_WINDOWS_RUNNER_READY_TIMEOUT_SECONDS:-180}"
 RUNNER_HEARTBEAT_INTERVAL_SECONDS="${PULP_WINDOWS_RUNNER_HEARTBEAT_INTERVAL_SECONDS:-15}"
+RUNNER_IDLE_RECYCLE_SECONDS="${PULP_WINDOWS_RUNNER_IDLE_RECYCLE_SECONDS:-2700}"
 GUEST_BOOT_TIMEOUT_SECONDS="${PULP_WINDOWS_GUEST_BOOT_TIMEOUT_SECONDS:-600}"
 BUSY_WAIT_SECONDS="${PULP_WINDOWS_BUSY_WAIT_SECONDS:-4800}"
 BUSY_POLL_SECONDS="${PULP_WINDOWS_BUSY_POLL_SECONDS:-30}"
@@ -282,7 +286,8 @@ cleanup() {
     [ -z "${VM_WATCH_PID:-}" ] || kill "$VM_WATCH_PID" 2>/dev/null || true
     [ -z "${RUNNER_PID:-}" ] || kill "$RUNNER_PID" 2>/dev/null || true
     rm -f -- "${JIT_REQUEST_FILE:-}" "${JIT_CONFIG_FILE:-}" \
-        "${RUNNER_OUTPUT_FILE:-}" "${HEARTBEAT_FAILURE_FILE:-}" "${EXTERNAL_STOP_FILE:-}"
+        "${RUNNER_OUTPUT_FILE:-}" "${HEARTBEAT_FAILURE_FILE:-}" "${EXTERNAL_STOP_FILE:-}" \
+        "${IDLE_RECYCLE_FILE:-}"
     [ "$VM_STARTED" = 1 ] || exit "$rc"
     if [ "$KEEP" = 1 ]; then
         log "--keep set: leaving VM $VMID up at ${GUEST_IP:-unknown address}"
@@ -297,12 +302,12 @@ cleanup() {
 }
 
 monitor_runner_heartbeat() {
-    local misses=0 lookup status busy
+    local misses=0 lookup rid status busy idle_since="$SECONDS"
     while kill -0 "$RUNNER_PID" 2>/dev/null; do
         if lookup="$(runners_tsv 2>/dev/null)"; then
             lookup="$(printf '%s\n' "$lookup" | awk -F '\t' -v name="$RUNNER_NAME" '$2 == name')"
-            status="" busy=""
-            [ -z "$lookup" ] || IFS=$'\t' read -r _ _ status busy <<< "$lookup"
+            rid="" status="" busy=""
+            [ -z "$lookup" ] || IFS=$'\t' read -r rid _ status busy <<< "$lookup"
             if [ "$busy" = true ] || [ "$status" = online ]; then
                 misses=0
             else
@@ -313,6 +318,27 @@ monitor_runner_heartbeat() {
                     kill "$RUNNER_PID" 2>/dev/null || true
                     break
                 fi
+            fi
+            # An idle JIT session that lives for hours can stay online while
+            # GitHub stops assigning it jobs, so a queued job waits on a runner
+            # that never takes it. Re-register after RUNNER_IDLE_RECYCLE_SECONDS
+            # of continuous idleness. The fence deregisters first: once the
+            # DELETE succeeds no job can be assigned, and a runner that turned
+            # busy refuses it and keeps its job.
+            [ "$busy" = false ] || idle_since="$SECONDS"
+            if [ "$RUNNER_IDLE_RECYCLE_SECONDS" -gt 0 ] && [ "$status" = online ] && [ "$busy" = false ] \
+                && [ $((SECONDS - idle_since)) -ge "$RUNNER_IDLE_RECYCLE_SECONDS" ]; then
+                jit_deregister_fence "$rid" "$RUNNER_NAME"
+                case $? in
+                    0)
+                        printf 'runner=%s idle=%ss\n' "$RUNNER_NAME" "$((SECONDS - idle_since))" \
+                            >"$IDLE_RECYCLE_FILE"
+                        kill "$RUNNER_PID" 2>/dev/null || true
+                        break
+                        ;;
+                    3) idle_since="$SECONDS" ;;
+                    *) ;;
+                esac
             fi
         fi
         sleep "$RUNNER_HEARTBEAT_INTERVAL_SECONDS"
@@ -329,6 +355,8 @@ while [ "$#" -gt 0 ]; do
 done
 
 [[ "$VMID" =~ ^[1-9][0-9]*$ ]] || die "PULP_WINDOWS_VMID must be a VM id"
+[[ "$RUNNER_IDLE_RECYCLE_SECONDS" =~ ^[0-9]+$ ]] \
+    || die "PULP_WINDOWS_RUNNER_IDLE_RECYCLE_SECONDS must be a whole number of seconds"
 [[ "$GOLDEN_SNAPSHOT" =~ ^[A-Za-z][A-Za-z0-9_-]*$ ]] \
     || die "PULP_WINDOWS_GOLDEN_SNAPSHOT must name a snapshot"
 case "$REPO" in
@@ -474,6 +502,7 @@ fi
 # Two consecutive absent/offline observations fail closed; a busy or online
 # observation resets the count, so a job GitHub assigned is never torn down.
 HEARTBEAT_FAILURE_FILE="$(mktemp)" || die "could not allocate heartbeat state"
+IDLE_RECYCLE_FILE="$(mktemp)" || die "could not allocate idle-recycle state"
 monitor_runner_heartbeat &
 HEARTBEAT_PID=$!
 EXTERNAL_STOP_FILE="$(mktemp)" || die "could not allocate VM watch state"
@@ -488,6 +517,11 @@ wait "$HEARTBEAT_PID" "$VM_WATCH_PID" 2>/dev/null || true
 HEARTBEAT_PID="" VM_WATCH_PID=""
 external_stop="$(cat "$EXTERNAL_STOP_FILE" 2>/dev/null || true)"
 [ -z "$external_stop" ] || die "VM $VMID stopped externally during the job: ${external_stop}"
+idle_recycle="$(cat "$IDLE_RECYCLE_FILE" 2>/dev/null || true)"
+if [ -n "$idle_recycle" ]; then
+    log "recycling a JIT runner that stayed idle past ${RUNNER_IDLE_RECYCLE_SECONDS}s (${idle_recycle})"
+    exit 0
+fi
 heartbeat_failure="$(cat "$HEARTBEAT_FAILURE_FILE" 2>/dev/null || true)"
 [ -z "$heartbeat_failure" ] || die "JIT runner lost its GitHub heartbeat ($heartbeat_failure)"
 if [ "$runner_exit" -ne 0 ]; then

@@ -565,7 +565,12 @@ block and renders `--demo cube --capture` to a non-empty PNG.
   counts it (`__pulpDispatchErrorCount__`, `__pulpLastDispatchError__`), keeps the message (QuickJS's
   `e.stack` holds only frames), and prints it with `console.error` when no `__dispatchError__` hook is
   installed. When a scripted-UI test sees a global that a handler should have created missing, read
-  `__pulpLastDispatchError__` first.
+  `__pulpLastDispatchError__` first. The limit is clamped to 3/4 of the stack the creating thread
+  still has (Apple and Linux), so a realm made on a 512 KB secondary thread gets a QuickJS
+  `InternalError` instead of a native stack overflow; a limit that reads lower than expected means
+  the realm was created on a small thread. The `console.error` fallback prints a message once,
+  then only every 100th consecutive repeat of it, so a handler failing on every frame does not flood the
+  log; the count still advances on every error.
 - **Every QuickJS realm starts with a 512 MiB heap ceiling** (`kDefaultJsMemoryLimitBytes`, applied via `JS_SetMemoryLimit` right after the stack-size call in `js_quickjs_engine.cpp`). A script that allocates past it gets a JS `InternalError: out of memory`, not a dead host. Raise or disable (0) per session with `ScriptedUiOptions::js_memory_limit_bytes` or `JsEngine::set_memory_limit()`. JSC and V8 return `false` from `set_memory_limit()`; they have no cap today.
 
 **Selector parses are memoized.** `_parseSelector` (web-compat-document-

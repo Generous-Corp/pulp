@@ -242,12 +242,14 @@ if(TARGET pulp::gpu-device)
     # worker (which compiles the same TU through tools/cmake/PulpGpuWasm.cmake,
     # not through this target).
     target_sources(pulp-gpu-audio PRIVATE
-        src/gpu_convolver.cpp src/gpu_multi_convolver.cpp src/gpu_stft.cpp
+        src/gpu_convolver.cpp src/gpu_convolver_fallback.cpp src/gpu_multi_convolver.cpp
+        src/gpu_stft.cpp
         src/gpu_spectral_freeze.cpp src/gpu_spectral_morph.cpp
         src/spectral_stack.cpp src/web/web_gpu_convolver.cpp)
     target_link_libraries(pulp-gpu-audio PUBLIC pulp::gpu-device pulp::signal)
 else()
-    target_sources(pulp-gpu-audio PRIVATE src/gpu_convolver_no_render.cpp)
+    target_sources(pulp-gpu-audio PRIVATE src/gpu_convolver_no_render.cpp
+        src/gpu_convolver_fallback.cpp)
     target_link_libraries(pulp-gpu-audio PUBLIC pulp::signal)
 endif()
 

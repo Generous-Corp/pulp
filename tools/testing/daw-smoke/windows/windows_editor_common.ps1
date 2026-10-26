@@ -30,6 +30,12 @@ function Join-WindowsArguments([string[]]$Arguments) {
     '"' + ($_ -replace '(\\+)$','$1$1') + '"'
   }) -join ' ')
 }
+function Get-ProcessTracePath {
+  return [Environment]::GetEnvironmentVariable('PULP_TRACE_PATH','Process')
+}
+function Set-ProcessTracePath([AllowNull()][string]$Value) {
+  [Environment]::SetEnvironmentVariable('PULP_TRACE_PATH',$Value,'Process')
+}
 function Read-HostStatus([string]$Path, [string]$Token) {
   if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
   $s = @{}

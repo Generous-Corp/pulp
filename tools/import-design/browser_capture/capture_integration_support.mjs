@@ -37,12 +37,13 @@ export function captureCaseTimeout(captures = 1, deadlineMs = CAPTURE_DEADLINE_M
   return captures * (deadlineMs + CAPTURE_OVERHEAD_MS);
 }
 
-export async function runCapture(script, browser, input, root, output, width, height) {
+export async function runCapture(script, browser, input, root, output, width, height,
+  ...flags) {
   await execute(process.execPath, [
     script, "capture", "--browser", browser, "--input", input,
     "--root", root, "--output", output,
     "--initial-width", String(width), "--initial-height", String(height),
-    "--dpr", "2", "--timeout-ms", String(CAPTURE_DEADLINE_MS),
+    "--dpr", "2", "--timeout-ms", String(CAPTURE_DEADLINE_MS), ...flags,
   ], { maxBuffer: 1024 * 1024 });
 }
 

@@ -11,10 +11,24 @@ if(NOT DEFINED PULP_SOURCE_DIR OR NOT DEFINED FIXTURE_DIR)
     message(FATAL_ERROR "PULP_SOURCE_DIR and FIXTURE_DIR are required")
 endif()
 if(NOT NINJA)
-    find_program(NINJA NAMES ninja ninja-build)
+    # A fresh variable: NINJA arrives defined (empty) from -DNINJA=, and
+    # find_program does not search into a variable that is already set.
+    find_program(_pulp_scan_order_ninja NAMES ninja ninja-build)
+    if(_pulp_scan_order_ninja)
+        set(NINJA "${_pulp_scan_order_ninja}")
+    endif()
 endif()
 if(NOT NINJA)
-    message(FATAL_ERROR "the AUv3 host scan-order check reads the Ninja graph; ninja is required")
+    # The check reads the Ninja graph, so it cannot run without ninja. That is
+    # a skip, not a pass: say which tool is missing. A Ninja-configured build
+    # passes its own CMAKE_MAKE_PROGRAM, so this only fires on another
+    # generator with no ninja on PATH.
+    message("SKIPPED: cmake-auv3-host-scan-order needs ninja to read the build graph, "
+            "and no ninja was found (not passed in, not on PATH)")
+    if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.29)
+        cmake_language(EXIT 77)
+    endif()
+    return()
 endif()
 
 file(REMOVE_RECURSE "${FIXTURE_DIR}")

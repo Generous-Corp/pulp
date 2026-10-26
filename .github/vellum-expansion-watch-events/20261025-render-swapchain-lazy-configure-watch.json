@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261025-render-swapchain-lazy-configure-watch",
+  "created_at": "2026-10-25T00:00:50Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Generic resize-timing work in the Dawn GpuSurface and the Graphite SkiaSurface. resize() on both records the requested size and begin_frame() configures the swapchain and sizes the Graphite targets at most once per frame, so a live resize that delivers many size events per frame rebuilds them once; a zero dimension skips the frame. Pulp-owned host code delivers the processor's resize notification once per frame with the latest size, and Pulp-owned tests count configures and target allocations with a header-only SwapchainResizeState, on a real CAMetalLayer and through the macOS GPU plug-in host. Pulp continues to own these targets under the 2026-10-04 design-import refactor inheritance decision; Vellum inherits the render change when the targets adopt the Vellum package (change event 20261024-render-swapchain-lazy-configure). No design-import, Chromium, rendering or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R 'Swapchain|swapchain'",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none",
+  "vellum_inherits": true
+}

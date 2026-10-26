@@ -1,7 +1,7 @@
 // CSS backdrop-filter under opacity, judged against Chrome's own render.
 //
 // The document below is test/fixtures/import-differential/22-backdrop-opacity.html
-// as DesignIR, built into native Views the way the importer does: five
+// as DesignIR, built into native Views the way the importer does: six
 // `backdrop-filter: blur(8px)` boxes over 1px gridlines. Every expected pixel
 // was read off Chromium's render of that file by
 // tools/import-validation/chrome_backdrop_opacity_oracle.py. Chrome is the
@@ -37,8 +37,9 @@ using namespace pulp::view;
 namespace {
 
 constexpr int kW = 512;
-constexpr int kH = 160;
+constexpr int kH = 260;
 constexpr int kRow = 80;
+constexpr int kEdgeRow = 210;
 
 // Chrome and Skia blur with different kernels and round the composite
 // differently, which moves a channel by a few levels. The defect this file
@@ -61,6 +62,21 @@ constexpr Sample kChrome[] = {
     {"opacity-1", 245, {17, 22, 28}, 240, {17, 22, 28}},
     {"group-half", 345, {99, 112, 125}, 340, {11, 15, 20}},
     {"group-0", 435, {128, 144, 160}, 430, {11, 15, 20}},
+};
+
+struct EdgeSample {
+    int x;
+    std::array<int, 3> rgb;
+};
+
+// The edge-mirror box, row 210, from its left edge inward. Chrome mirrors the
+// box's own content past its edge, so the 4px amber band under the edge is
+// reflected once. Clamping the edge column instead puts the first pixel near
+// (90, 77, 38); reading the page beside the box puts it near (40, 39, 32).
+constexpr EdgeSample kChromeEdge[] = {
+    {208, {60, 54, 34}}, {210, {58, 53, 34}}, {212, {55, 50, 34}}, {214, {49, 46, 33}},
+    {216, {43, 41, 32}}, {218, {37, 37, 31}}, {220, {31, 32, 30}}, {222, {26, 29, 29}},
+    {224, {22, 26, 29}}, {226, {20, 24, 28}}, {228, {18, 23, 28}}, {230, {18, 22, 28}},
 };
 
 IRNode absolute(const char* name, float left, float top, float width, float height) {
@@ -108,14 +124,18 @@ std::vector<uint8_t> render_fixture(uint32_t& w, uint32_t& h) {
     ir.root.children.push_back(frost(208.0f, 40.0f, 1.0f));
     ir.root.children.push_back(group(304.0f, 0.5f));
     ir.root.children.push_back(group(400.0f, 0.0f));
+    IRNode band = absolute("band", 208.0f, 170.0f, 4.0f, 80.0f);
+    band.style.background_color = "#F0C040";
+    ir.root.children.push_back(std::move(band));
+    ir.root.children.push_back(frost(208.0f, 170.0f, 1.0f));
     auto root = build_native_view_tree(ir, ir.asset_manifest);
     REQUIRE(root != nullptr);
     return render_to_rgba(*root, kW, kH, 1.0f, &w, &h);
 }
 
 void require_pixel(const std::vector<uint8_t>& rgba, uint32_t w, int x,
-                   const std::array<int, 3>& chrome, const std::string& what) {
-    const uint8_t* p = &rgba[(static_cast<size_t>(kRow) * w + x) * 4];
+                   const std::array<int, 3>& chrome, const std::string& what, int row = kRow) {
+    const uint8_t* p = &rgba[(static_cast<size_t>(row) * w + x) * 4];
     for (int c = 0; c < 3; ++c) {
         INFO(what << " x=" << x << " channel " << c << ": got " << static_cast<int>(p[c])
                   << ", Chrome " << chrome[c]);
@@ -182,6 +202,18 @@ TEST_CASE("backdrop-filter is composited at the element's opacity as Chrome does
         require_pixel(rgba, w, s.line_x, s.line, std::string(s.box) + " gridline");
         require_pixel(rgba, w, s.gap_x, s.gap, std::string(s.box) + " gap");
     }
+}
+
+TEST_CASE("backdrop-filter mirrors the box at its edges as Chrome does",
+          "[view][canvas][backdrop-filter]") {
+    if (!raw_rgba_render_available())
+        SKIP("no raw-RGBA render backend in this build");
+    uint32_t w = 0, h = 0;
+    const auto rgba = render_fixture(w, h);
+    REQUIRE(w == static_cast<uint32_t>(kW));
+    REQUIRE(h == static_cast<uint32_t>(kH));
+    for (const auto& s : kChromeEdge)
+        require_pixel(rgba, w, s.x, s.rgb, "edge-mirror", kEdgeRow);
 }
 
 // The opacity() step makes an opacity 0 backdrop vanish on Skia, but a backend

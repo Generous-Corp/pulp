@@ -5,16 +5,21 @@
      of the box shows, so the gridlines under it stay crisp, and at 0.5 the
      blurred backdrop is mixed half-and-half with the page beneath. A box
      under an ancestor with opacity below 1 sits inside that ancestor's
-     isolated group, so its backdrop is the group's own content, not the page. */
+     isolated group, so its backdrop is the group's own content, not the page.
+     The sixth box, in the second row, starts on a 4px amber band. Chrome
+     blurs a backdrop as if the box's own content were mirrored at its edges,
+     so the band is reflected once at the left edge: it is neither repeated
+     outward (clamp) nor mixed with the page left of the box. */
   body { margin: 0; background: #0b0f14; }
-  #panel { position: relative; width: 512px; height: 160px; overflow: hidden; }
-  .grid { position: absolute; top: 0; width: 1px; height: 160px; background: #8090a0; }
+  #panel { position: relative; width: 512px; height: 260px; overflow: hidden; }
+  .grid { position: absolute; top: 0; width: 1px; height: 260px; background: #8090a0; }
   .frost {
     position: absolute; top: 40px; width: 80px; height: 80px;
     background: rgba(12, 16, 22, 0.5); backdrop-filter: blur(8px);
   }
   .group { position: absolute; top: 40px; width: 80px; height: 80px; }
   .group > .frost { top: 0; left: 0; }
+  .band { position: absolute; width: 4px; height: 80px; background: #f0c040; }
 </style>
 <div id="panel">
   <div class="grid" style="left:5px"></div>
@@ -73,4 +78,6 @@
   <div class="frost" id="opacity-1" style="left:208px"></div>
   <div class="group" id="group-half" style="left:304px; opacity:0.5"><div class="frost"></div></div>
   <div class="group" id="group-0" style="left:400px; opacity:0"><div class="frost"></div></div>
+  <div class="band" style="left:208px; top:170px"></div>
+  <div class="frost" id="edge-mirror" style="left:208px; top:170px"></div>
 </div>
