@@ -150,6 +150,7 @@ foreach(_spec
         "form_controls_08|ir|test/fixtures/emitter-conformance/form-controls-08.ir.json"
         "spectr|ir|test/fixtures/emitter-conformance/spectr.ir.json"
         "kelvin|ir|test/fixtures/emitter-conformance/kelvin.ir.json"
+        "keyed_list_18|ir|test/fixtures/emitter-conformance/keyed-list-18.ir.json"
         "fidelity_scene|figma-plugin|test/fixtures/import-fidelity/scene.pulp.json")
     string(REPLACE "|" ";" _parts "${_spec}")
     list(GET _parts 0 _stem)

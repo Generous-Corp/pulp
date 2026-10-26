@@ -25,6 +25,7 @@
 #include "design_import_internal.hpp"
 #include "design_import_native_common.hpp"
 #include "design_import_svg_stroke.hpp"
+#include "design_js_capture_lowering.hpp"
 #include "design_ir_helpers.hpp"
 
 #include <algorithm>
@@ -2572,8 +2573,9 @@ static void emit_js_container(const NativeEmit& e, int& var_counter,
     if (opts.include_comments && !node.name.empty() && depth > 0)
         ss << ind << "// " << node.name << "\n";
 
-    ss << ind << (is_grid ? "createGrid" : (is_row ? "createRow" : "createCol"))
-       << "('" << id << "', " << pid << ");\n";
+    if (!emit_js_ua_button_surface(ss, node, ind, id, pid, is_row))
+        ss << ind << (is_grid ? "createGrid" : (is_row ? "createRow" : "createCol")) << "('" << id
+           << "', " << pid << ");\n";
     emit_js_absolute_position(e, id);
     emit_js_visual_overrides(e, id);
     if (is_grid) {
@@ -2942,6 +2944,18 @@ static void generate_native_node_impl(std::ostringstream& ss, const IRNode& node
         return;
     }
     if (emit_js_svg_path_node(e)) return;
+    // A theme-painted control is the widget the native lane builds, with its
+    // captured skin and state, placed and sized like any other node.
+    if (emit_js_ua_form_control(ss, node, e.ind, e.id, e.pid)) {
+        emit_js_absolute_position(e, e.id);
+        emit_js_visual_overrides(e, e.id);
+        if (node.style.width)
+            ss << e.ind << "setFlex('" << e.id << "', 'width', " << *node.style.width << ");\n";
+        if (node.style.height)
+            ss << e.ind << "setFlex('" << e.id << "', 'height', " << *node.style.height << ");\n";
+        ss << "\n";
+        return;
+    }
 
     // Materialized browser captures use canvas nodes as stable visible
     // targets for a live React/Canvas2D behavior realm. They may carry a PNG
@@ -2977,7 +2991,9 @@ static void generate_native_node_impl(std::ostringstream& ss, const IRNode& node
     const bool is_image = (kind == NativeWidgetKind::image_view) ||
                           node.attributes.count("asset_path") > 0;
     const bool is_text = (kind == NativeWidgetKind::label);
-    const bool is_container = !is_image && (!node.children.empty() || node.type == "frame");
+    // A theme-painted button is a container even when it has no content yet.
+    const bool is_container = !is_image && (!node.children.empty() || node.type == "frame" ||
+                                            kind == NativeWidgetKind::button_surface);
 
     if (is_image) {
         emit_js_image_node(e);
@@ -3006,9 +3022,11 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
     auto* ids = id_map ? id_map : &local_ids;
     generate_native_node_impl(ss, node, resolved, opts, depth, var_counter, parent_id,
                               parent_direction, ids);
-    if (!node.stable_anchor_id || node.stable_anchor_id->empty()) return;
     auto it = ids->find(&node);
     if (it == ids->end()) return;
+    emit_js_captured_paint_rect(ss, node, indent(depth, opts.indent_spaces), it->second);
+    if (!node.stable_anchor_id || node.stable_anchor_id->empty())
+        return;
     ss << indent(depth, opts.indent_spaces) << "setAnchor('" << it->second << "', '"
        << js_single_quote_escape(*node.stable_anchor_id) << "');\n";
 }
