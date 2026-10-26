@@ -11,10 +11,12 @@ definitions, so it cannot see a shipping path (``pulp_add_plugin``, an install
 rule, a workflow flag) that starts defining the macro. This guard can.
 
 Outside ``test/``, a line that names a guarded macro may only be a preprocessor
-guard on it (``#if defined(M)``, ``#ifdef M``, ``#endif // M``) or a comment.
-Anything else (``#define M``, ``-DM``, ``M=1`` in a CMake definition list) is a
-violation. ``test/`` is exempt: the test targets that define the macro live
-there.
+guard on it (``#if defined(M)``, ``#ifdef M``, ``#endif // M``) or a comment,
+and the whole line has to be that: ``#if defined(M) || 1`` and
+``/* note */ #define M`` are violations too. Anything else (``#define M``,
+``-DM``, ``M=1`` in a CMake definition list) is a violation. The top-level
+``test/`` is exempt, because the test targets that define the macro live there;
+a ``test`` or ``docs`` directory deeper in the tree is scanned like any other.
 
 Exit codes: 0 = clean, 1 = violation found, 2 = scan error (including no guard
 found for a macro at all, which means the scan looked in the wrong place).
@@ -32,8 +34,11 @@ GUARDED_MACROS: dict[str, str] = {
     "PULP_AU_V2_TEST_HOOKS": "core/format/src/au_v2_cocoa_view.mm",
 }
 
-SKIP_DIRS = {".git", "test", "docs", "external", "node_modules", "planning", "_deps",
-             "__pycache__"}
+# Skipped only at the repository root: test/ holds the targets that define the
+# macro, and the others are documentation or vendored trees.
+ROOT_SKIP_DIRS = {"test", "docs", "external", "planning"}
+# Skipped at any depth: generated, vendored or VCS state.
+SKIP_DIRS = {".git", "node_modules", "_deps", "__pycache__"}
 SKIP_SUFFIXES = {".md", ".png", ".jpg", ".jpeg", ".gif", ".wav", ".ttf", ".otf", ".zip", ".a",
                  ".dylib", ".so", ".bin", ".pdf", ".ico", ".icns", ".woff", ".woff2", ".pyc"}
 SELF = {"tools/scripts/shipping_macro_guard.py", "tools/scripts/test_shipping_macro_guard.py"}
@@ -42,14 +47,28 @@ SELF = {"tools/scripts/shipping_macro_guard.py", "tools/scripts/test_shipping_ma
 C_FAMILY = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".inl", ".m", ".mm"}
 
 
+# A trailing comment a guard line may carry: "// ..." or one closed "/* ... */".
+_TRAILING_COMMENT = r"(?://.*|/\*(?:(?!\*/).)*\*/)?"
+
+
+def _comment_only(stripped: str) -> bool:
+    if stripped.startswith("//"):
+        return True
+    if stripped.startswith(("/*", "*")):
+        # Code after the comment closes is still code.
+        _, closed, rest = stripped.partition("*/")
+        return not closed or not rest.strip()
+    return False
+
+
 def _allowed(line: str, macro: str, suffix: str) -> bool:
     stripped = line.strip()
     if suffix in C_FAMILY:
-        guard = re.compile(r"^#\s*(?:if\s+(?:!\s*)?defined\s*\(\s*%s\s*\)|ifn?def\s+%s\b|endif\b)"
-                           % (macro, macro))
-        # A preprocessor guard on the macro, or a comment. "# define M" is
-        # neither: the preprocessor allows spaces after the '#'.
-        return bool(guard.match(stripped)) or stripped.startswith(("//", "/*", "*"))
+        # The whole line is a guard on the macro alone, or a comment. "# define M"
+        # is neither: the preprocessor allows spaces after the '#'.
+        guard = re.compile(r"^#\s*(?:if\s+(?:!\s*)?defined\s*\(\s*%s\s*\)|ifn?def\s+%s|endif)"
+                           r"\s*%s$" % (macro, macro, _TRAILING_COMMENT))
+        return bool(guard.match(stripped)) or _comment_only(stripped)
     # CMake, shell, YAML, Python and the like: only a comment may name it.
     return stripped.startswith("#")
 
@@ -59,8 +78,10 @@ def scan(root: pathlib.Path) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     guards = {macro: 0 for macro in GUARDED_MACROS}
     for dirpath, dirnames, filenames in os.walk(root):
+        at_root = pathlib.Path(dirpath) == root
         dirnames[:] = [d for d in dirnames
-                       if d not in SKIP_DIRS and not d.startswith("build")]
+                       if d not in SKIP_DIRS and not d.startswith("build")
+                       and not (at_root and d in ROOT_SKIP_DIRS)]
         for name in filenames:
             path = pathlib.Path(dirpath) / name
             rel = path.relative_to(root).as_posix()

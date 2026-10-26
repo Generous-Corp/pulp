@@ -72,6 +72,30 @@ class ShippingMacroGuardTests(unittest.TestCase):
                     "// PULP_AU_V2_TEST_HOOKS is defined by the test target only.\n")
         self.assertEqual(self._run(), 0)
 
+    def test_a_guard_line_carrying_more_than_the_macro_fails(self):
+        self._write("core/format/src/au_v2_common.cpp",
+                    "#if defined(PULP_AU_V2_TEST_HOOKS) || 1\n#endif\n")
+        self.assertEqual(self._run(), 1)
+
+    def test_code_after_a_closed_comment_fails(self):
+        self._write("core/format/src/au_v2_common.cpp",
+                    "/* note */ #define PULP_AU_V2_TEST_HOOKS 1\n")
+        self.assertEqual(self._run(), 1)
+
+    def test_guard_lines_with_trailing_comments_pass(self):
+        self._write("core/format/src/au_v2_common.mm",
+                    "#ifdef PULP_AU_V2_TEST_HOOKS // test-only\n"
+                    "#endif /* PULP_AU_V2_TEST_HOOKS */\n")
+        self.assertEqual(self._run(), 0)
+
+    def test_nested_test_and_docs_directories_are_scanned(self):
+        self._write("examples/forge-modular/test/hooks.cmake",
+                    "add_compile_definitions(PULP_AU_V2_TEST_HOOKS=1)\n")
+        self.assertEqual(self._run(), 1)
+        (self.root / "examples/forge-modular/test/hooks.cmake").unlink()
+        self._write("tools/figma-plugin/docs/build.sh", "cc -DPULP_AU_V2_TEST_HOOKS=1 x.c\n")
+        self.assertEqual(self._run(), 1)
+
     def test_a_missing_guard_is_a_scan_error(self):
         self._write(HOOKED, "+ (void*)pulpEditorHostForTesting:(NSView*)view { return nullptr; }\n")
         self.assertEqual(self._run(), 2)
