@@ -292,6 +292,26 @@ themed control (a select's arrow, text fields, meter, progress, the picker
 types) stays the `ua-default-form-chrome` support boundary. Add a control to
 both when you give it a native skin.
 
+### Emitter conformance: one IR, four lowerings, one gate
+
+The native materializer, the ui.js emitter (`design_codegen.cpp`), the baked C++
+exporter and the SwiftUI exporter each walk the IR on their own, so a lowering
+added to one does not reach the others. `pulp-test-design-emitter-conformance`
+builds the fixtures in `test/fixtures/emitter-conformance/` (plus the
+figma-plugin fidelity scene) through all four and compares, per anchor, the
+anchored-view tree, widget kind, theme-control state, captured paint rect and
+snapped `self_paint_bounds()`, and bindings, against the native lane. The baked
+C++ is generated at build time by `pulp-emitter-conformance-gen`, never
+committed. A divergence must match an entry in `allowlist.json`, each linked to
+an issue; an entry that matches nothing fails the gate, so delete it with the
+fix. `PULP_CONFORMANCE_REPORT=<path>` writes every divergence as JSON. When you
+lower something new in one emitter, run the gate before you claim the others
+agree.
+
+To see what a ui.js import looks like against Chromium, pass `--emitter js` to
+the differential lab: the observer renders the candidate IR through its ui.js
+program instead of the native materializer.
+
 ### Packaged SDK runtime contract
 
 The installed `pulp-import-design` SDK runtime includes the browser-capture

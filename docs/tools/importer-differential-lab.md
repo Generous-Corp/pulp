@@ -49,6 +49,14 @@ python3 tools/import-validation/importer_differential_lab.py compare \
   --output /tmp/importer-differential/flex
 ```
 
+`--emitter js` scores the ui.js lane instead of the native materializer: the
+observer renders the same candidate IR through the program `generate_pulp_js()`
+emits for it, run through the WidgetBridge as a plugin loads `ui.js`. The
+report records the lane as `candidate.emitter`, and the run fails if the render
+receipt names a different emitter. Compare the two lanes on one fixture to see
+what a ui.js import loses against the native one; the emitter conformance gate
+(`test/test_design_emitter_conformance.cpp`) names the same gaps structurally.
+
 Cache state is caller supplied and is never inferred from elapsed time. Declare
 it when the harness is run (`--cache-state cold|warm|unknown`). Each receipt
 also uses the shared GPU observability vocabulary: TTFP (time to first present),
