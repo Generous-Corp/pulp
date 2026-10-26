@@ -104,6 +104,36 @@ class CoverageWorkflowTests(unittest.TestCase):
         )
         self.assertGreaterEqual(self.coverage.count("required: true"), 4)
 
+    def test_publish_barrier_fails_instead_of_skipping_on_a_failed_native_leg(self) -> None:
+        # Gating the barrier on `needs.coverage.result == 'success'` skipped it
+        # when a native leg failed, and a skipped barrier reads green. Run
+        # 40162878355 read green with its explicitly dispatched Windows leg
+        # failed before the build started.
+        start = self.coverage.index("\n  coverage_publish_barrier:\n")
+        end = self.coverage.index("\n  android-kotlin-coverage:\n")
+        barrier = self.coverage[start:end]
+        self.assertIn("    needs: [classify, coverage]\n", barrier)
+        self.assertIn("    if: github.head_ref != 'release/version-bump' && (always() && ", barrier)
+        self.assertIn("needs.classify.outputs.native_build_required == 'true'", barrier)
+        self.assertNotIn("needs.coverage.result == 'success'", barrier)
+        self.assertIn("COVERAGE_RESULT: ${{ needs.coverage.result }}", barrier)
+        self.assertIn('if [ "${COVERAGE_RESULT}" != "success" ]; then', barrier)
+        self.assertLess(
+            barrier.index("Require every native coverage leg to succeed"),
+            barrier.index("Download Linux native coverage artifact"),
+        )
+        # Windows is best-effort, so its failure never reaches
+        # needs.coverage.result; a dispatch that names a Windows runner
+        # requires its report through the artifact instead.
+        self.assertIn(
+            "WINDOWS_REQUIRED: ${{ (inputs.windows_runner_selector_json || '') != '' }}",
+            barrier,
+        )
+        self.assertIn("if: env.WINDOWS_REQUIRED == 'true'", barrier)
+        self.assertIn("coverage-cobertura-windows-${{ github.sha }}", barrier)
+        self.assertIn("reports+=(native-coverage/windows/coverage.cobertura.xml)", barrier)
+        self.assertIn("continue-on-error: ${{ matrix.os == 'windows' }}", self.coverage)
+
     def test_required_native_lanes_skip_slow_proofs_and_fail_on_budget_miss(self) -> None:
         self.assertIn("scripts/run_coverage.sh owns the bounded CTest policy", self.coverage)
         self.assertNotIn("PULP_COVERAGE_CTEST_ARGS:", self.coverage)
