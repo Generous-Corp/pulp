@@ -3354,6 +3354,7 @@
    "entry": "tools/scripts/test_agent_capability_manifest.py",
    "inputs": [
     ".github/workflows",
+    ".github/workflows/auto-release.yml",
     "core/audio/include/pulp/audio",
     "core/host/include",
     "core/midi/include/pulp/midi",
@@ -13084,8 +13085,12 @@
    "entry": "tools/scripts/test_version_at_land.py",
    "inputs": [
     ".github/workflows",
+    "docs/status/agent-capabilities.json",
+    "docs/status/agent-capability-surface.json",
     "docs/status/gpu-vellum-handoff.yaml",
     "docs/status/pulp-tooling-disposition.json",
+    "tools/agent-capabilities/contract-history.json",
+    "tools/scripts/agent_capability_manifest.py",
     "tools/scripts/build_migration_index.py",
     "tools/scripts/connected_git_history.py",
     "tools/scripts/fold_migration_notes.py",
