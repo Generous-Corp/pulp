@@ -472,6 +472,19 @@ python3 tools/scripts/agent_capability_rederive.py --print   # read-only: what w
 python3 tools/scripts/agent_capability_rederive.py           # rewrite both, then --write
 ```
 
+**Merge the protected base first; the tool refuses otherwise.** Rederive
+compares this tree against the base, so on a branch that is behind the base,
+every change the base made since the branch point reads as this branch's own. It
+bumps a counter for them, and `--write` appends a full history entry (about
+20,000 lines, the size of every entry) that records the base's material rolled
+back: an untouched header's fingerprint reverting to its old value. So it
+refuses, writing nothing, unless the base tip is an ancestor of `HEAD`, or a
+merge in progress has the base as its incoming commit. The refusal names the
+base sha and, as a hint, the fingerprinted headers that differ; the fix is
+`git merge origin/main`, then re-run. A shallow clone cannot prove ancestry and
+refuses too; fetch the full history. A correct run on a merged branch appends at
+most one entry and leaves every existing entry byte-identical.
+
 It resolves the same protected tip `--check` uses, compares this tree's
 generated material against the base's with the counter excluded, and moves each
 counter only when its own material actually moved. That asymmetry is the part
