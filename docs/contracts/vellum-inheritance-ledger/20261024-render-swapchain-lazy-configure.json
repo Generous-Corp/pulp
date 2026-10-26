@@ -1,0 +1,12 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261024-render-swapchain-lazy-configure",
+  "slices": [
+    "render-skia-dawn"
+  ],
+  "vellum_obligation": "A Vellum host that mirrors gpu_surface_dawn.cpp, gpu_surface.hpp, skia_surface.cpp and skia_surface.hpp keeps GpuSurface::resize() and SkiaSurface::resize() free of GPU work and lets begin_frame() configure the swapchain and size the Graphite targets once per frame; a host that reads the presented size between a resize and the next frame reads it from the acquired texture, not from width()/height().",
+  "evidence": [
+    ".github/vellum-change-events/20261024-render-swapchain-lazy-configure.json",
+    "ctest --test-dir build -R 'Swapchain|swapchain'"
+  ]
+}

@@ -261,6 +261,11 @@ pulp_add_test_suite(pulp-test-dirty-region-consumption GROUP pulp-test-group-vie
 pulp_add_test_suite(pulp-test-pending-damage GROUP pulp-test-group-view-host
     LIBRARIES pulp::view)
 
+# PendingResize: a host's resize notification runs once per frame with the
+# latest size, however many size events the frame absorbed.
+pulp_add_test_suite(pulp-test-pending-resize GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
+
 # X11ResizeEcho: the Linux plug-in host drops a ConfigureNotify older than its
 # own last XResizeWindow, so a stale echo cannot revert the size. Serial
 # arithmetic only, so it runs on every platform.

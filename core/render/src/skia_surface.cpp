@@ -123,14 +123,15 @@ class SkiaSurfaceImpl : public SkiaSurface {
   public:
     SkiaSurfaceImpl(GpuSurface& gpu, uint32_t width, uint32_t height, float scale,
                     canvas::TextRasterPolicy text_raster_policy)
-        : gpu_(gpu), width_(width), height_(height), scale_(scale),
-          text_raster_policy_(text_raster_policy) {}
+        : gpu_(gpu), width_(width), height_(height), scale_(scale), pending_width_(width),
+          pending_height_(height), pending_scale_(scale), text_raster_policy_(text_raster_policy) {}
 
     ~SkiaSurfaceImpl() override {
         // Release retained GPU images while their recorder/context are alive.
         canvas_.reset();
         retained_layers_.reset();
-        if (image_provider_) image_provider_->clear();
+        if (image_provider_)
+            image_provider_->clear();
         // Cached textures are recorder-bound; invalidate them before the
         // recorder/context are destroyed so a recycled pointer cannot alias
         // stale GPU images in a future surface.
@@ -199,7 +200,7 @@ class SkiaSurfaceImpl : public SkiaSurface {
             (static_cast<std::uint32_t>(context_->supportedGpuStats()) &
              static_cast<std::uint32_t>(skgpu::GpuStatsFlags::kElapsedTime)) != 0;
 
-        // Create offscreen fallback target (used when no presentable surface)
+        // Offscreen target, the output when there is no presentable surface.
         create_offscreen_target();
 
         runtime::log_info("SkiaSurface: Graphite initialized on shared Dawn device (presentable: {}, gpu-render-time: {})",
@@ -217,6 +218,7 @@ class SkiaSurfaceImpl : public SkiaSurface {
         // the next one.
         frame_work_submitted_ = false;
         if (!recorder_ || !context_) return nullptr;
+        apply_pending_size();
         // Images this frame draws are kept for it even past the byte budget.
         canvas::ImageFileCache::instance().begin_frame(recorder_.get());
 
@@ -428,28 +430,28 @@ class SkiaSurfaceImpl : public SkiaSurface {
 
     bool has_presentable_target() const override { return gpu_.has_surface(); }
 
+    // Only records the size. A live resize delivers several events per frame
+    // and reallocating here built targets no frame ever drew into;
+    // begin_frame() applies the last one.
     void resize(uint32_t width, uint32_t height, float scale) override {
-        if (scale != scale_) {
-            // Retained layers are rasterized at record-time device density.
-            // Force callers to rebuild them at the new backing scale.
-            canvas_.reset();
-            retained_layers_ =
-                canvas::SkiaCanvas::create_retained_layer_store();
-        }
-        width_ = width;
-        height_ = height;
-        scale_ = scale;
-        create_offscreen_target();
-        // A fresh scene target at the new size; the host's first post-resize
-        // frame is a full repaint into it (partial repaint can't clip across a
-        // size change).
-        if (persistent_scene_) create_scene_target();
+        pending_width_ = width;
+        pending_height_ = height;
+        pending_scale_ = scale;
+    }
+
+    std::uint64_t render_target_allocations() const override {
+        return render_target_allocations_;
     }
 
     bool set_persistent_scene(bool enable) override {
         persistent_scene_ = enable;
         if (enable) {
-            create_scene_target();
+            // A resize still pending would otherwise build the scene at the
+            // old size here and again in begin_frame().
+            if (pending_width_ != width_ || pending_height_ != height_ || pending_scale_ != scale_)
+                apply_pending_size();
+            else
+                create_scene_target();
         } else {
             scene_surface_.reset();
         }
@@ -692,6 +694,10 @@ private:
     GpuSurface& gpu_;
     uint32_t width_ = 0, height_ = 0;
     float scale_ = 1.0f;
+    // The size resize() asked for; the targets follow it in begin_frame().
+    uint32_t pending_width_ = 0, pending_height_ = 0;
+    float pending_scale_ = 1.0f;
+    std::uint64_t render_target_allocations_ = 0;
 
     // GPU render time via Graphite GpuStats.
     bool gpu_elapsed_supported_ = false;  ///< Set once in init() from supportedGpuStats().
@@ -731,8 +737,35 @@ private:
         return canvas::surface_props_for(text_raster_policy_);
     }
 
+    void apply_pending_size() {
+        if (pending_width_ == width_ && pending_height_ == height_ && pending_scale_ == scale_)
+            return;
+        if (pending_scale_ != scale_) {
+            // Retained layers are rasterized at record-time device density.
+            // Force callers to rebuild them at the new backing scale.
+            canvas_.reset();
+            retained_layers_ = canvas::SkiaCanvas::create_retained_layer_store();
+        }
+        width_ = pending_width_;
+        height_ = pending_height_;
+        scale_ = pending_scale_;
+        create_offscreen_target();
+        // A fresh scene target at the new size; the host's first post-resize
+        // frame is a full repaint into it (partial repaint can't clip across a
+        // size change).
+        if (persistent_scene_)
+            create_scene_target();
+    }
+
+    // The offscreen target is drawn into only when there is no presentable
+    // surface (begin_frame() reports `recreate` rather than fall back to it),
+    // so a presentable surface does not allocate one.
     void create_offscreen_target() {
         if (!recorder_) return;
+        if (gpu_.has_surface()) {
+            offscreen_surface_.reset();
+            return;
+        }
 
         int pixel_w = static_cast<int>(width_ * scale_);
         int pixel_h = static_cast<int>(height_ * scale_);
@@ -741,6 +774,8 @@ private:
         const SkSurfaceProps props = surface_props();
         offscreen_surface_ =
             SkSurfaces::RenderTarget(recorder_.get(), info, skgpu::Mipmapped::kNo, &props);
+        if (offscreen_surface_)
+            ++render_target_allocations_;
 
         if (offscreen_surface_ && scale_ != 1.0f) {
             offscreen_surface_->getCanvas()->scale(scale_, scale_);
@@ -772,6 +807,7 @@ private:
         scene_surface_ =
             SkSurfaces::RenderTarget(recorder_.get(), info, skgpu::Mipmapped::kNo, &props);
         if (!scene_surface_) return;
+        ++render_target_allocations_;
 
         SkCanvas* c = scene_surface_->getCanvas();
         c->clear(SK_ColorTRANSPARENT);
