@@ -448,8 +448,11 @@ jobs:
         # PULP_ENABLE_COVERAGE requires Clang — MSVC is rejected by
         # tools/cmake/PulpInstrumentation.cmake because llvm-cov and
         # MSVC's /fsanitize-coverage emit incompatible profile shapes.
+        # Windows PowerShell 5.1, not pwsh: the local pulp-win-ephemeral
+        # image ships no PowerShell 7, so `shell: pwsh` fails before the
+        # build starts. Keep this body 5.1-compatible.
         if: matrix.os == 'windows'
-        shell: pwsh
+        shell: powershell
         run: |
           $llvmBin = "C:\Program Files\LLVM\bin"
           if (-not (Test-Path $llvmBin)) {
