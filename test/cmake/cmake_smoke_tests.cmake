@@ -278,7 +278,9 @@ if(APPLE)
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_auv3_host_scan_order.cmake)
     set_tests_properties(cmake-auv3-host-scan-order PROPERTIES
         LABELS "cmake;auv3;control"
-        TIMEOUT 60)
+        TIMEOUT 60
+        SKIP_RETURN_CODE 77
+        SKIP_REGULAR_EXPRESSION "SKIPPED: cmake-auv3-host-scan-order needs ninja")
 endif()
 # Toggling pulp_add_binary_data(COMPRESS) in an existing Makefile build dir
 # regenerates the embedded source without a clean reconfigure.
@@ -929,6 +931,18 @@ if(UNIX)
             LABELS "tooling;installer"
             TIMEOUT 30)
     endif()
+endif()
+if(Python3_Interpreter_FOUND)
+    # The AU component preflight the DAW bench runs before auval: bundle
+    # metadata, signing, auval registration and the registrar diagnosis. A
+    # failed log query or auval timeout must fail closed, not report a clean
+    # registration. Every host tool is stubbed, so it runs on every host.
+    add_test(NAME au-component-preflight-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_check_au_component_preflight.py")
+    set_tests_properties(au-component-preflight-selftest PROPERTIES
+        LABELS "tooling"
+        TIMEOUT 60)
 endif()
 if(Python3_Interpreter_FOUND)
     # The frozen C0 ABI receipt was captured on darwin-arm64. Register its

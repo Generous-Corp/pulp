@@ -599,7 +599,10 @@ valid report when the other verifier fails.
 emitted exact, non-expired Linux, macOS, Python-tools, Apple Swift, Android
 Kotlin, and Pulp React receipts and Codecov reports those exact-run uploads as
 merged. Windows remains an explicitly inventoried best-effort producer while
-its bounded instrumented suite can exceed the job cap. Upload-axis Codecov
+its bounded instrumented suite can exceed the job cap, except on a dispatch
+that names a Windows runner: there `coverage_publish_barrier` requires the
+Windows Cobertura report too. The barrier runs under `always()` and fails when
+the native matrix did not succeed, because a skipped barrier reads green. Upload-axis Codecov
 flags do not carry forward,
 so a failed current lane cannot masquerade as fresh coverage from an older SHA.
 The native graph retains example-driven tests that exercise first-party core

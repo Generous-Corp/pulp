@@ -1,0 +1,13 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261025-render-swapchain-lazy-configure-watch",
+  "slices": [
+    "render-assets-and-backends"
+  ],
+  "vellum_obligation": "When the render targets adopt the Vellum package, Vellum's GpuSurface keeps swapchain configuration out of resize() and in begin_frame(), and keeps the configure-count tests, so a live resize still rebuilds the swapchain at most once per frame.",
+  "evidence": [
+    ".github/vellum-expansion-watch-events/20261025-render-swapchain-lazy-configure-watch.json",
+    ".github/vellum-change-events/20261024-render-swapchain-lazy-configure.json",
+    "ctest --test-dir build -R 'Swapchain|swapchain'"
+  ]
+}

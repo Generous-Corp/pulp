@@ -190,6 +190,36 @@ def check_plugin_hooks_without_plugin_root() -> None:
                 )
 
 
+def check_non_pulp_checkout_noop() -> None:
+    """A plain Git checkout must not fail when Pulp hook files are absent."""
+    with tempfile.TemporaryDirectory(prefix="pulp-agent-hook-noop-") as temp:
+        checkout = Path(temp) / "checkout"
+        checkout.mkdir()
+        run_git(checkout, "init", "--quiet")
+        environment = os.environ.copy()
+        environment["CLAUDE_PROJECT_DIR"] = str(checkout)
+        for config_path in CONFIGS:
+            for hook in configured_hooks(config_path):
+                result = subprocess.run(
+                    str(hook["command"]),
+                    cwd=checkout,
+                    env=environment,
+                    shell=True,
+                    text=True,
+                    input="",
+                    capture_output=True,
+                    timeout=15,
+                    check=False,
+                    encoding="utf-8",
+                )
+                if result.returncode != 0:
+                    raise RuntimeError(
+                        f"{config_path.relative_to(ROOT)} hook failed in a plain "
+                        f"Git checkout: exit={result.returncode}, "
+                        f"stderr={result.stderr!r}"
+                    )
+
+
 def check_build_guard_status_routing() -> None:
     """Claude must propagate the guard refusal; Codex remains advisory."""
     claude_commands = [
@@ -245,6 +275,7 @@ def main() -> int:
         check_post_tool_input_channels()
         check_plugin_hooks_without_plugin_root()
         check_build_guard_status_routing()
+        check_non_pulp_checkout_noop()
     except RuntimeError as error:
         print(f"FAIL: {error}", file=sys.stderr)
         return 1

@@ -340,7 +340,8 @@ class EveryExternalRowTests(unittest.TestCase):
         forged_label = {**row, "patch": "d" * 64, "path": f"@external/choc/{pin}+patch-dddddddddddddddd/choc/text/choc_JSON.h"}
         self.assertTrue(any("recompute" in v for v in self.check(forged_label)))
         replay = row["patch_recipe"]["replay"]
-        self.assertEqual(replay["functions"], ["pulp_patch_choc_v8", "pulp_patch_choc_json_number_exponent"])
+        self.assertEqual(replay["functions"], ["pulp_patch_choc_v8", "pulp_patch_choc_json_number_exponent",
+                                              "pulp_patch_choc_file_watcher"])
         reordered = {**row, "patch_recipe": {**row["patch_recipe"], "replay": {**replay, "functions": list(reversed(replay["functions"]))}}}
         self.assertTrue(any("in order" in v for v in self.check(reordered)))
         other_blob = {**row, "patch_recipe": {**row["patch_recipe"], "replay": {**replay, "patch_set_blob": "0" * 40}}}

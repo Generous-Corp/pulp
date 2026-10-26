@@ -5,10 +5,12 @@
 
 namespace pulp::gpu_audio::detail {
 
-/// The neural node's non-finite input policy, shared by the GPU submission and
-/// the CPU shadow so both see identical samples: NaN and +/-Inf become 0.0f
-/// and every other sample passes through unchanged. A causal model's state
-/// would otherwise carry one bad sample forever. Allocation-free and RT-safe;
+/// The GPU-audio non-finite input policy: NaN and +/-Inf become 0.0f and every
+/// other sample passes through unchanged. The neural node applies it to the
+/// GPU submission and the CPU shadow alike so both see identical samples; the
+/// WaveNet node and the shared-I/O convolver apply it before the GPU input
+/// slot. A causal model's state, or a convolver's IR tail, would otherwise
+/// carry one bad sample for its whole memory. Allocation-free and RT-safe;
 /// `input` and `output` may alias. Returns the number of samples replaced.
 inline std::uint32_t sanitize_nonfinite(const float* input, float* output,
                                         std::uint32_t frames) noexcept {

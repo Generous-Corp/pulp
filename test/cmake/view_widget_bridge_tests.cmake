@@ -950,9 +950,10 @@ pulp_add_test_suite(pulp-test-widget-bridge-yoga-a4-oos GROUP pulp-test-group-vi
 # wiring (DIVERGE → PASS) + CSS value-coverage entries from compat.json.
 pulp_add_test_suite(pulp-test-widget-bridge-wave2-cheap GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
 
-# The paragraph cache fed from script: setTextRuns letterSpacing NaN and -0
-# reach SkiaCanvas unchecked; a repaint must find its entry and eviction must
-# survive them. Skia-gated (paints through the Skia screenshot backend).
+# The paragraph cache fed from script: setTextRuns keeps the inherited value for
+# a NaN letterSpacing or a non-positive fontSize and passes -0 through; a repaint
+# must find its entry and eviction must survive them. Skia-gated (paints through
+# the Skia screenshot backend).
 if(PULP_HAS_SKIA)
     pulp_add_test_suite(pulp-test-paragraph-cache-bridge GROUP pulp-test-group-view-widgets
         LIBRARIES pulp::view)

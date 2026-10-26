@@ -260,11 +260,23 @@ function(pulp_release_artifact_probe)
         # A stripped binary keeps at most the Mach-O header symbol, so a table
         # with fewer than two defined entries proves nothing; those markers are
         # UNCHECKED and the string backstop every gate carries does the work.
+        # Only "at least two" matters, so find the first entry and look for one
+        # more after it. Collecting every entry (REGEX MATCHALL) built a list of
+        # the whole table, which on a sanitizer build's archives (hundreds of
+        # MB of nm output) was most of this scan's time.
         if(_have_symbols)
-            string(REGEX MATCHALL "(^|\n)[0-9a-fA-F]+ [A-Za-z] [^\n]" _defined_lines "${_symbols}")
-            list(LENGTH _defined_lines _defined_count)
-            if(_defined_count LESS 2)
+            set(_defined_entry "[0-9a-fA-F]+ [A-Za-z] [^\n]")
+            string(REGEX MATCH "(^|\n)${_defined_entry}" _first_defined "${_symbols}")
+            if(_first_defined STREQUAL "")
                 set(_have_symbols FALSE)
+            else()
+                string(FIND "${_symbols}" "${_first_defined}" _at)
+                string(LENGTH "${_first_defined}" _len)
+                math(EXPR _after "${_at} + ${_len}")
+                string(SUBSTRING "${_symbols}" ${_after} -1 _rest)
+                if(NOT _rest MATCHES "\n${_defined_entry}")
+                    set(_have_symbols FALSE)
+                endif()
             endif()
         endif()
         list(LENGTH _sym_ids _n)

@@ -41,6 +41,7 @@ class WidgetBridgeApiGeneratorTest(unittest.TestCase):
         self.assertRegex(dts, r"bindMeter:\s+\(widgetId: string, source: string, transform\?: PulpBridgeBindingTransform\) => boolean;")
         self.assertRegex(dts, r"unbindWidget:\s+\(widgetId: string\) => number;")
         self.assertRegex(dts, r"createMeter:\s+\(id: string, orientation: 'vertical' \| 'horizontal', parentId: string\) => string;")
+        self.assertRegex(dts, r"createButtonSurface:\s+\(id: string, parentId: string, direction\?: 'row' \| 'column'\) => string;")
 
     def test_dom_lib_names_stay_typed_but_are_not_redeclared_globally(self):
         root = generator.repo_root()

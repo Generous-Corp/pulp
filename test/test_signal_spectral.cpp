@@ -1029,3 +1029,29 @@ TEST_CASE("FFT real transform error matches the most accurate vDSP placement",
 #endif
     }
 }
+
+TEST_CASE("FFT forward_real handles one- and two-point transforms", "[signal][fft]") {
+    {
+        Fft fft(2);
+        const float x[2] = {1.0f, -1.0f};
+        std::complex<float> out[2]{};
+        fft.forward_real(x, out);
+        REQUIRE(std::abs(out[0] - std::complex<float>(0.0f, 0.0f)) < 1.0e-6f);
+        REQUIRE(std::abs(out[1] - std::complex<float>(2.0f, 0.0f)) < 1.0e-6f);
+    }
+    {
+        Fft fft(2);
+        const float x[2] = {3.0f, 5.0f};
+        std::complex<float> out[2]{};
+        fft.forward_real(x, out);
+        REQUIRE(std::abs(out[0] - std::complex<float>(8.0f, 0.0f)) < 1.0e-6f);
+        REQUIRE(std::abs(out[1] - std::complex<float>(-2.0f, 0.0f)) < 1.0e-6f);
+    }
+    {
+        Fft fft(1);
+        const float x[1] = {0.75f};
+        std::complex<float> out[1]{};
+        fft.forward_real(x, out);
+        REQUIRE(std::abs(out[0] - std::complex<float>(0.75f, 0.0f)) < 1.0e-6f);
+    }
+}

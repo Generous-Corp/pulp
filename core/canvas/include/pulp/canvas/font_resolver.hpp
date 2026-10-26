@@ -73,6 +73,17 @@ CssFontFamily parse_css_font_family(std::string_view entry);
 /// `FontOptions::family_stack` or to `platform_family_for_css_family`.
 std::vector<std::string> split_css_font_family_list(std::string_view list);
 
+/// Whether SkParagraph may fake the bold or oblique the matched face lacks,
+/// for text in `css_font_family` at `weight` and `slant`. SkParagraph judges
+/// on the face file's own weight; Chromium judges a page font on its
+/// @font-face's declared weight range, so a face declared `400 700` is never
+/// emboldened at 700 even when only a Regular file backs it. The first family
+/// with declared ranges decides; italic keeps the default, which the same
+/// switch covers. Every paragraph built for the same text must ask this:
+/// SkParagraph's shaping cache does not key on the switch, so a measurement
+/// paragraph left at the default hands its emboldened runs to the painter.
+bool paragraph_fakes_missing_font_styles(std::string_view css_font_family, int weight, int slant);
+
 /// The family name to ask a font matcher for, for one list entry (quotes
 /// allowed): the platform family an unquoted generic keyword stands for,
 /// otherwise the entry's name without its quotes.

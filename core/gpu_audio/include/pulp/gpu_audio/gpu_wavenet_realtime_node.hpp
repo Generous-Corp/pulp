@@ -91,6 +91,11 @@ class GpuWaveNetRealtimeNode : public GpuAudioNode {
     GpuAudioRecoveryReason recovery_reason() const noexcept;
     /// Sequence associated with the first latched recovery cause, or UINT64_MAX.
     std::uint64_t recovery_sequence() const noexcept;
+    /// Non-finite input samples (NaN, +/-Inf) replaced with zero before GPU
+    /// submission since prepare(). A dilated causal stack would otherwise
+    /// carry one bad sample through its whole receptive field. Counted, not
+    /// latched: the status stays Ready.
+    std::uint64_t sanitized_input_samples() const noexcept;
     /// Allocation-free provider-neutral lifecycle projection for hosts that
     /// own this stamped node directly.
     GpuAudioStatus status_snapshot() const noexcept override;

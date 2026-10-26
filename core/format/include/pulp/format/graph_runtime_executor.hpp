@@ -720,6 +720,17 @@ public:
         return parallel_min_work_units_.load(std::memory_order_relaxed);
     }
 
+    // Whether routed execution (serial and parallel) times each node into its
+    // binding's load measurer. A node timing costs two clock reads, which is a
+    // large share of a small graph's per-node cost, so an owner that knows no one
+    // reads per-node load turns it off. Read once per block. Default on.
+    void set_node_load_timing(bool enabled) noexcept {
+        node_load_timing_.store(enabled, std::memory_order_relaxed);
+    }
+    bool node_load_timing() const noexcept {
+        return node_load_timing_.load(std::memory_order_relaxed);
+    }
+
 private:
     GraphRuntimeExecutorResult fail_invalid_block() noexcept;
     GraphRuntimeExecutorResult fail_invalid_snapshot() noexcept;
@@ -750,6 +761,7 @@ private:
     std::atomic<std::uint64_t> serial_levels_run_{0};
     // 0 = no cost gate (parallelize every eligible level); see the setter.
     std::atomic<std::uint64_t> parallel_min_work_units_{0};
+    std::atomic<bool> node_load_timing_{true};
 };
 
 } // namespace pulp::format

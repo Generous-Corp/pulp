@@ -46,8 +46,22 @@ _OPERATOR_NAME = re.compile(
 _CLOSURE = re.compile(r"'lambda|\{lambda|'block|\{block|'unnamed|\{unnamed|\$_\d|\(anonymous namespace\)")
 
 
+# A known RTTI name in Mach-O spelling and its demangling. demangle() checks it
+# on every call, so a demangler that reads nothing fails instead of yielding an
+# empty owned set, which would flag nothing.
+_CONTROL = ("__ZTIN4pulp4rtti7ControlE", "typeinfo for pulp::rtti::Control")
+
+
 class DemangleError(RuntimeError):
     pass
+
+
+class DemanglerMissing(DemangleError):
+    """No --cxxfilt was given and neither c++filt nor llvm-cxxfilt is on PATH.
+
+    A host without the tool cannot read RTTI ownership at all, which is a skip;
+    a demangler that is there and answers unreadably stays a DemangleError.
+    """
 
 
 def demangle(names: set[str], cxxfilt: str | None = None) -> dict[str, str]:
@@ -56,20 +70,27 @@ def demangle(names: set[str], cxxfilt: str | None = None) -> dict[str, str]:
         return {}
     tool = cxxfilt or shutil.which("c++filt") or shutil.which("llvm-cxxfilt")
     if not tool:
-        raise DemangleError("c++filt (or llvm-cxxfilt) is required to read RTTI ownership")
+        raise DemanglerMissing("c++filt (or llvm-cxxfilt) is required to read RTTI ownership")
     ordered = sorted(names)
     # Mach-O names carry one extra leading underscore; it is removed here, so
     # the tool must never strip another. Older Apple c++filt (the Xcode 16 on
     # GitHub-hosted macOS) strips one by default on Darwin, which leaves an
     # Itanium "_Z..." name undemangled and every RTTI owner unread. -n
     # (--no-strip-underscore) turns that off in llvm-cxxfilt and GNU c++filt.
-    itanium = [name[1:] if name.startswith("__Z") else name for name in ordered]
+    # The control rides in the same batch and must come back demangled: a tool
+    # that ignores -n, or passes names through untouched, still answers one
+    # line per name, so the line count alone cannot tell it from a real read.
+    control, expected = _CONTROL
+    itanium = [name[1:] if name.startswith("__Z") else name for name in [control, *ordered]]
     proc = subprocess.run([tool, "-n"], input="\n".join(itanium), capture_output=True, text=True,
                           encoding="utf-8", errors="replace", check=False)
     out = proc.stdout.splitlines()
-    if proc.returncode != 0 or len(out) != len(ordered):
+    if proc.returncode != 0 or len(out) != len(ordered) + 1:
         raise DemangleError(f"{tool} did not demangle {len(ordered)} names one-to-one")
-    return dict(zip(ordered, out))
+    if out[0] != expected:
+        raise DemangleError(f"{tool} demangled the control {control!r} to {out[0]!r}, "
+                            f"not {expected!r}; its output cannot be read")
+    return dict(zip(ordered, out[1:]))
 
 
 def _top_level(text: str, stop: str) -> int:
