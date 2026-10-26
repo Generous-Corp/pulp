@@ -4,7 +4,10 @@
 #include "cli_common.hpp"
 #include "sdk_distribution_guard.hpp"
 #include "notary_env.hpp"
+#include "private_temp_dir.hpp"
+#include "ship_dev_build_guard.hpp"
 #include "ship_tracing_guard.hpp"
+#include "tartci_lease.hpp"
 #include "inspector_container_report.hpp"
 #include "inspector_shipping_report.hpp"
 #include "json_writer.hpp"
@@ -14,6 +17,9 @@
 #include "xcode_developer_path.hpp"
 
 #include <algorithm>
+#include <cerrno>
+#include <csignal>
+#include <cstring>
 #include <cctype>
 #include <chrono>
 #include <ctime>
@@ -24,6 +30,14 @@
 #include <memory>
 #include <sstream>
 #include <string_view>
+
+#if !defined(_WIN32)
+#include <fcntl.h>
+#include <limits.h>
+#include <signal.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
 
 #include <pulp/ship/android.hpp>
 #include <pulp/ship/appcast.hpp>
@@ -104,6 +118,8 @@ static int print_ship_help() {
     std::cout << "             --version 1.0.0\n";
     std::cout << "             --pkg | --dmg  (item 7.5: per-artifact macOS packaging)\n";
     std::cout << "             --allow-tracing  (override the guard that refuses a PULP_TRACING=ON build)\n";
+    std::cout << "             --allow-dev-build  (ship a PULP_DEV_BUILD=ON build dir as it is "
+                 "instead of building build-ship/; sign honors it too)\n";
     std::cout << "             --ship-inspector  (acknowledge an exactly declared inspector endpoint)\n";
     std::cout << "             --ship-inspector-runtime-eval  (separate unsafe-eval acknowledgement)\n";
     std::cout << "             --json  (emit inspector capability evidence)\n";
@@ -230,6 +246,90 @@ static int enforce_no_tracing(const std::vector<fs::path>& roots,
     return 0;
 }
 
+// A dev build dir (PULP_DEV_BUILD=ON) records the on-disk UI_SCRIPT, theme and
+// asset-root paths for the hot-reload loop, so its artifacts would name, and
+// read from, the developer's source tree. cmd_ship() redirects such a project
+// to build-ship/ before reaching sign/package; this is only reached with the
+// dev dir when --allow-dev-build asked for it, and says so.
+static int enforce_no_dev_build(const fs::path& build_dir, bool allow_dev_build) {
+    if (!pulp::cli::build_dir_is_dev_build(build_dir))
+        return 0;
+    if (allow_dev_build) {
+        std::cerr << "⚠︎  pulp ship: " << build_dir.string()
+                  << " was configured with PULP_DEV_BUILD=ON — shipping it as it is because "
+                     "--allow-dev-build was passed. Its editor can read the on-disk ui.js path.\n";
+        return 0;
+    }
+    std::cerr << "Error: " << build_dir.string()
+              << " is a dev build (PULP_DEV_BUILD=ON); ship from "
+              << pulp::cli::ship_build_dir(build_dir.parent_path()).string()
+              << " or pass --allow-dev-build.\n";
+    return 1;
+}
+
+// Configure (when needed) and build the shippable sibling of a dev build dir:
+// <root>/build-ship, carrying every entry of the dev cache except the dev-only
+// switches through an initial-cache script, with PULP_DEV_BUILD=OFF. The
+// configure re-runs when the dev cache changed or the carried entries differ;
+// the build goes through the same host lease, QoS, watchdog and build-dir lock
+// as `pulp build`. Refuses when build-ship lacks a plug-in artifact the dev
+// build has, so a format that fell out of the configure is never shipped
+// without anyone noticing.
+static int ensure_ship_build(const fs::path& root, const fs::path& dev_build_dir,
+                             const fs::path& ship_dir, bool dev_shared = false) {
+    if (dev_shared)
+        std::cout << "pulp ship: " << dev_build_dir.filename().string()
+                  << "/ links plug-ins against the development-only shared Pulp runtime "
+                     "(PULP_DEV_SHARED_UI=ON).\n"
+                  << "           Building the shippable, statically linked build in "
+                  << ship_dir.string() << " and shipping from there.\n";
+    else
+        std::cout << "pulp ship: " << dev_build_dir.filename().string()
+                  << "/ is a dev build (PULP_DEV_BUILD=ON records the on-disk ui.js hot-reload "
+                     "path).\n"
+                  << "           Building the shippable build in " << ship_dir.string()
+                  << " (PULP_DEV_BUILD=OFF) and shipping from there; "
+                     "--allow-dev-build ships the dev build as it is.\n";
+    const auto dev_cache = pulp::cli::read_cmake_cache(dev_build_dir).value_or("");
+    const auto initial_cache = pulp::cli::ship_build_initial_cache(dev_cache);
+    if (pulp::cli::ship_build_needs_configure(dev_build_dir, ship_dir, initial_cache)) {
+        std::error_code ec;
+        fs::create_directories(ship_dir, ec);
+        const auto initial_cache_path = pulp::cli::ship_initial_cache_path(ship_dir);
+        {
+            std::ofstream out(initial_cache_path, std::ios::binary | std::ios::trunc);
+            if (!out) {
+                std::cerr << "pulp ship: cannot write " << initial_cache_path.string() << "\n";
+                return 1;
+            }
+            out << initial_cache;
+        }
+        std::string configure =
+            "cmake -S " + shell_quote(root.string()) + " -B " + shell_quote(ship_dir.string());
+        for (const auto& arg : pulp::cli::ship_build_configure_args(dev_cache, initial_cache_path))
+            configure += " " + shell_quote(arg);
+        if (int rc = run_with_spinner(configure, "Configuring (shippable)"); rc != 0)
+            return rc;
+    }
+    if (int rc = run_governed_cmake_build(root, ship_dir, {}, "pulp-ship-build",
+                                          GovernedBuildOutput::Spinner, "Building (shippable)",
+                                          "pulp ship: ");
+        rc != 0)
+        return rc;
+    const auto mismatch = pulp::cli::plugin_artifact_set_mismatch(
+        pulp::cli::plugin_artifact_set(dev_build_dir), pulp::cli::plugin_artifact_set(ship_dir));
+    if (!mismatch.empty()) {
+        std::cerr << "Error: refusing to ship from " << ship_dir.string() << ": " << mismatch
+                  << ".\n"
+                  << "  The dev build's configuration did not carry over completely; compare "
+                  << dev_build_dir.string() << "/CMakeCache.txt with "
+                  << pulp::cli::ship_initial_cache_path(ship_dir).string()
+                  << ", or pass --allow-dev-build to ship the dev build as it is.\n";
+        return 1;
+    }
+    return 0;
+}
+
 static int enforce_no_vellum_d15(const std::vector<fs::path>& artifacts) {
     for (const auto& artifact : artifacts) {
         const auto offender = pulp::cli::vellum_d15_artifact_offender(artifact);
@@ -243,6 +343,442 @@ static int enforce_no_vellum_d15(const std::vector<fs::path>& artifacts) {
         return 1;
     }
     return 0;
+}
+
+// The command line that rebuilds the project with static plug-in links and
+// re-runs the outermost `pulp ship` invocation, for a refusal to print.
+static std::string g_dev_shared_fix;
+
+static int enforce_no_dev_shared_ui(const std::vector<fs::path>& artifacts) {
+    for (const auto& artifact : artifacts) {
+        const auto offender = pulp::cli::dev_shared_artifact_offender(artifact);
+        if (offender.empty())
+            continue;
+        std::cerr << "Error: refusing to distribute a development-only dev-shared build "
+                     "(PULP_DEV_SHARED_UI=ON).\n"
+                  << "  Offending artifact: " << offender.string() << "\n"
+                  << "  It loads Pulp from libpulp-dev-shared-ui.<version>.dylib in its build "
+                     "tree, so it fails\n"
+                  << "  on any other machine. Rebuild it with static links and re-run:\n"
+                  << "    " << g_dev_shared_fix << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Development-only runtimes that must never reach a distributed artifact. A
+// dev-shared build may still be signed with a local identity (ad hoc or Apple
+// Development) so a host on this machine loads it; `allow_dev_shared` says so.
+static int enforce_no_development_runtimes(const std::vector<fs::path>& artifacts,
+                                           bool allow_dev_shared = false) {
+    if (int rc = enforce_no_vellum_d15(artifacts); rc != 0)
+        return rc;
+    return allow_dev_shared ? 0 : enforce_no_dev_shared_ui(artifacts);
+}
+
+// Containers another tool built (a .zip, a flat .pkg, a .dmg) cannot be
+// scanned as bytes: their payloads are compressed. `notarize` and `share`
+// open each one read-only into a private temp dir and run the same
+// development-runtime scans on what is inside, recursing into the containers
+// it holds down to kShipContainerDepthLimit levels; a deeper one is refused.
+// A container that cannot be opened is refused, because the guards fail
+// closed. Symlinks inside a container are not followed out of it.
+enum class ShipContainer { None, Zip, Pkg, Dmg };
+constexpr int kShipContainerDepthLimit = 3;
+
+// Recognized by content, so a renamed archive is still opened: a zip by its
+// local-file header, a flat pkg by its xar header, a UDIF disk image by the
+// "koly" trailer in its last 512 bytes. The extension catches the rest.
+static ShipContainer ship_container_kind(const fs::path& artifact) {
+    std::error_code ec;
+    if (!fs::is_regular_file(artifact, ec) || ec)
+        return ShipContainer::None;
+    std::ifstream in(artifact, std::ios::binary);
+    char head[4] = {};
+    in.read(head, 4);
+    if (in.gcount() == 4) {
+        if (std::string_view(head, 4) == std::string_view("PK\x03\x04", 4))
+            return ShipContainer::Zip;
+        if (std::string_view(head, 4) == "xar!")
+            return ShipContainer::Pkg;
+    }
+    const auto size = fs::file_size(artifact, ec);
+    if (!ec && size >= 512) {
+        in.clear();
+        in.seekg(static_cast<std::streamoff>(size - 512));
+        char tail[4] = {};
+        in.read(tail, 4);
+        if (in.gcount() == 4 && std::string_view(tail, 4) == "koly")
+            return ShipContainer::Dmg;
+    }
+    auto ext = artifact.extension().string();
+    std::transform(ext.begin(), ext.end(), ext.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (ext == ".zip")
+        return ShipContainer::Zip;
+    if (ext == ".pkg")
+        return ShipContainer::Pkg;
+    if (ext == ".dmg")
+        return ShipContainer::Dmg;
+    return ShipContainer::None;
+}
+
+#if defined(__APPLE__)
+// The container tools run with stdin, stdout and stderr on /dev/null. An
+// image with a licence agreement or a password would otherwise wait on the
+// terminal for an answer nobody gives, and `notarize` would hang instead of
+// refusing; hdiutil also takes its passphrase from stdin (-stdinpass), so an
+// encrypted image fails at once.
+//
+// A SIGINT, SIGTERM or SIGHUP during a scan is cleaned up from the signal
+// handler: the running tool is killed, each mounted image is detached and the
+// scan's temp root removed, with fork/execv/waitpid only (async-signal-safe),
+// and the signal is then re-raised with its default action. Paths live in
+// fixed buffers so the handler never allocates. Best effort: a SIGKILL cannot
+// be handled.
+namespace ship_scan_signals {
+constexpr int kSlots = kShipContainerDepthLimit + 1;
+char root[PATH_MAX] = {};
+char mounts[kSlots][PATH_MAX] = {};
+volatile sig_atomic_t tool = 0;
+constexpr int kSignals[3] = {SIGINT, SIGTERM, SIGHUP};
+
+sigset_t handled_signals() {
+    sigset_t set;
+    sigemptyset(&set);
+    for (const int sig : kSignals)
+        sigaddset(&set, sig);
+    return set;
+}
+
+// Holds the handled signals off while shared state the handler reads is
+// half-written: a path copied into a slot, a pid recorded for a new child.
+struct BlockSignals {
+    sigset_t previous;
+    BlockSignals() {
+        const sigset_t block = handled_signals();
+        sigprocmask(SIG_BLOCK, &block, &previous);
+    }
+    ~BlockSignals() {
+        sigprocmask(SIG_SETMASK, &previous, nullptr);
+    }
+};
+
+pid_t spawn_quiet(const char* path, char* const argv[]) {
+    const pid_t pid = fork();
+    if (pid == 0) {
+        const int null_fd = open("/dev/null", O_RDWR);
+        if (null_fd >= 0) {
+            dup2(null_fd, 0);
+            dup2(null_fd, 1);
+            dup2(null_fd, 2);
+        }
+        execv(path, argv);
+        _exit(127);
+    }
+    return pid;
+}
+
+int wait_for(pid_t pid) {
+    int status = 0;
+    while (waitpid(pid, &status, 0) < 0) {
+        if (errno != EINTR)
+            return -1;
+    }
+    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+}
+
+void cleanup(int sig) {
+    if (const pid_t running = static_cast<pid_t>(tool); running > 0) {
+        kill(running, SIGKILL);
+        wait_for(running);
+    }
+    for (auto& mount : mounts) {
+        if (mount[0] == '\0')
+            continue;
+        char hdiutil[] = "hdiutil", detach[] = "detach", force[] = "-force";
+        char* argv[] = {hdiutil, detach, force, mount, nullptr};
+        if (const pid_t pid = spawn_quiet("/usr/bin/hdiutil", argv); pid > 0)
+            wait_for(pid);
+    }
+    if (root[0] != '\0') {
+        char rm[] = "rm", rf[] = "-rf";
+        char* argv[] = {rm, rf, root, nullptr};
+        if (const pid_t pid = spawn_quiet("/bin/rm", argv); pid > 0)
+            wait_for(pid);
+    }
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+
+bool copy_path(char* slot, const fs::path& path) {
+    const auto text = path.string();
+    if (text.size() >= PATH_MAX)
+        return false;
+    std::memcpy(slot, text.c_str(), text.size() + 1);
+    return true;
+}
+
+// Installs the handlers for the outermost scan and restores the previous
+// ones when it ends.
+struct Guard {
+    struct sigaction previous[3] = {};
+    explicit Guard(const fs::path& scan_root) {
+        copy_path(root, scan_root);
+        struct sigaction action = {};
+        action.sa_handler = cleanup;
+        // A second, different signal waits until the first cleanup re-raises,
+        // so cleanup never runs inside itself.
+        action.sa_mask = handled_signals();
+        for (int i = 0; i < 3; ++i)
+            sigaction(kSignals[i], &action, &previous[i]);
+    }
+    ~Guard() {
+        for (int i = 0; i < 3; ++i)
+            sigaction(kSignals[i], &previous[i], nullptr);
+        root[0] = '\0';
+    }
+};
+} // namespace ship_scan_signals
+
+// Runs a container tool by absolute path, with no shell and no terminal.
+// Returns its exit status, or -1 when it could not run or was killed.
+static int run_ship_tool(std::vector<std::string> args) {
+    std::vector<char*> argv;
+    for (auto& arg : args)
+        argv.push_back(arg.data());
+    argv.push_back(nullptr);
+    // Blocked across the spawn so the handler always sees the pid it must
+    // kill once the child exists.
+    pid_t pid = -1;
+    {
+        ship_scan_signals::BlockSignals blocked;
+        pid = ship_scan_signals::spawn_quiet(argv[0], argv.data());
+        if (pid > 0)
+            ship_scan_signals::tool = pid;
+    }
+    if (pid <= 0)
+        return -1;
+    const int rc = ship_scan_signals::wait_for(pid);
+    ship_scan_signals::tool = 0;
+    return rc;
+}
+
+static std::string capture_ship_tool(const std::string& cmd) {
+    std::string out;
+    if (FILE* pipe = popen((cmd + " </dev/null 2>/dev/null").c_str(), "r")) {
+        char buf[4096];
+        while (size_t n = fread(buf, 1, sizeof(buf), pipe))
+            out.append(buf, n);
+        pclose(pipe);
+    }
+    return out;
+}
+
+// A temp dir that is removed, and a disk image mounted in it that is
+// detached first, on every path out of the scan.
+struct ShipContainerScratch {
+    fs::path dir;
+    fs::path mountpoint;
+    int slot = -1;
+    ~ShipContainerScratch() {
+        if (!mountpoint.empty())
+            run_ship_tool({"/usr/bin/hdiutil", "detach", "-force", mountpoint.string()});
+        if (slot >= 0)
+            ship_scan_signals::mounts[slot][0] = '\0';
+        std::error_code ec;
+        if (!dir.empty())
+            fs::remove_all(dir, ec);
+    }
+};
+
+// Bytes a container expands to on the temp volume before it is scanned, or
+// nullopt when that cannot be told. A disk image is mounted, not copied.
+static std::optional<std::uintmax_t> ship_container_expanded_bytes(const fs::path& artifact,
+                                                                   ShipContainer kind,
+                                                                   const fs::path& scratch) {
+    if (kind == ShipContainer::Zip)
+        return pulp::cli::zipinfo_uncompressed_bytes(
+            capture_ship_tool("/usr/bin/zipinfo -t " + shell_quote(artifact.string())));
+    if (kind == ShipContainer::Pkg) {
+        // The compressed expansion is small; its PackageInfo documents
+        // declare what each payload installs.
+        const auto shallow = scratch / "declared";
+        if (run_ship_tool({"/usr/sbin/pkgutil", "--expand", artifact.string(), shallow.string()}) !=
+            0)
+            return std::nullopt;
+        std::uintmax_t total = 0;
+        bool found = false;
+        std::error_code ec;
+        for (fs::recursive_directory_iterator it(shallow, ec), end; !ec && it != end;
+             it.increment(ec)) {
+            if (it->path().filename() != "PackageInfo" || !it->is_regular_file(ec))
+                continue;
+            std::ifstream in(it->path(), std::ios::binary);
+            std::ostringstream text;
+            text << in.rdbuf();
+            // A component without a payload (scripts only) installs nothing.
+            found = true;
+            if (const auto bytes = pulp::cli::pkg_payload_install_bytes(text.str()))
+                total += *bytes;
+        }
+        fs::remove_all(shallow, ec);
+        if (!found)
+            return std::nullopt;
+        // pkgutil --expand-full keeps the shallow layout beside the payloads.
+        return total + static_cast<std::uintmax_t>(fs::file_size(artifact, ec));
+    }
+    return std::uintmax_t{0};
+}
+#endif
+
+// Scans one container. `chain` names it for messages, outermost first
+// ("Outer.dmg > inner.zip"). `scan_root` is the outermost scan's private
+// temp dir; each container opens in a fresh directory under it.
+static int scan_ship_container(const fs::path& artifact, ShipContainer kind,
+                               const std::string& chain, int depth, const fs::path& scan_root) {
+    const auto refuse = [&](const std::string& why) {
+        std::cerr << "Error: cannot check " << chain << " for development-only runtimes (" << why
+                  << ").\n"
+                  << "  The check fails closed, so it is not shipped. Ship the bundles it "
+                     "was made from, or a container that opens.\n";
+        return 1;
+    };
+    if (depth > kShipContainerDepthLimit)
+        return refuse("containers are nested more than " +
+                      std::to_string(kShipContainerDepthLimit) + " deep");
+#if defined(__APPLE__)
+    ShipContainerScratch scratch;
+    scratch.dir = scan_root / ("level" + std::to_string(depth));
+    std::error_code ec;
+    fs::remove_all(scratch.dir, ec);
+    fs::create_directories(scratch.dir, ec);
+    if (ec)
+        return refuse("no private temp dir");
+    const fs::path contents = scratch.dir / "contents";
+
+    const auto expanded = ship_container_expanded_bytes(artifact, kind, scratch.dir);
+    if (!expanded)
+        return refuse(kind == ShipContainer::Zip
+                          ? "zipinfo cannot read its size, so it is not extracted"
+                          : "pkgutil --expand cannot read its PackageInfo, so it is not expanded");
+    if (*expanded > 0) {
+        const auto space = fs::space(scratch.dir, ec);
+        if (ec)
+            return refuse("the temp volume's free space cannot be read");
+        if (auto why = pulp::cli::container_space_refusal(*expanded, space.available); !why.empty())
+            return refuse(why);
+    }
+
+    int rc = 1;
+    if (kind == ShipContainer::Zip) {
+        rc = run_ship_tool({"/usr/bin/ditto", "-x", "-k", artifact.string(), contents.string()});
+    } else if (kind == ShipContainer::Pkg) {
+        rc = run_ship_tool(
+            {"/usr/sbin/pkgutil", "--expand-full", artifact.string(), contents.string()});
+    } else {
+        fs::create_directories(contents, ec);
+        // Registered before the attach, so a signal during it still detaches.
+        scratch.slot = depth - 1;
+        {
+            ship_scan_signals::BlockSignals blocked;
+            ship_scan_signals::copy_path(ship_scan_signals::mounts[scratch.slot], contents);
+        }
+        rc = run_ship_tool({"/usr/bin/hdiutil", "attach", "-readonly", "-nobrowse", "-noverify",
+                            "-noautoopen", "-stdinpass", "-mountpoint", contents.string(),
+                            artifact.string()});
+        if (rc == 0)
+            scratch.mountpoint = contents;
+    }
+    if (rc != 0)
+        return refuse(kind == ShipContainer::Zip   ? "ditto -x -k failed"
+                      : kind == ShipContainer::Pkg ? "pkgutil --expand-full failed"
+                                                   : "hdiutil attach failed; an encrypted image "
+                                                     "or one with a licence agreement (SLA) "
+                                                     "cannot be opened unattended");
+    auto offender = pulp::cli::vellum_d15_artifact_offender(contents, false);
+    const bool d15 = !offender.empty();
+    if (!d15)
+        offender = pulp::cli::dev_shared_artifact_offender(contents, false);
+    if (offender == contents)
+        return refuse("its contents could not be read");
+    if (!offender.empty()) {
+        std::cerr << "Error: refusing to distribute " << chain << ": it contains "
+                  << (d15 ? "a development-only Vellum D15 GPU-audio runtime"
+                          : "a development-only dev-shared build (PULP_DEV_SHARED_UI=ON)")
+                  << ".\n"
+                  << "  Offending file inside it: " << fs::relative(offender, contents).string()
+                  << "\n";
+        if (d15)
+            std::cerr << "  Rebuild what it packages without D15 before shipping it.\n";
+        else
+            std::cerr << "  Rebuild what it packages with static links and re-run:\n"
+                      << "    " << g_dev_shared_fix << "\n";
+        return 1;
+    }
+    // The containers it holds are compressed too; open each of them.
+    for (fs::recursive_directory_iterator
+             it(contents, fs::directory_options::skip_permission_denied, ec),
+         end;
+         !ec && it != end; it.increment(ec)) {
+        if (it->is_symlink(ec))
+            continue;
+        const auto nested = ship_container_kind(it->path());
+        if (nested == ShipContainer::None)
+            continue;
+        const std::string inner = chain + " > " + fs::relative(it->path(), contents).string();
+        if (int nested_rc = scan_ship_container(it->path(), nested, inner, depth + 1, scan_root);
+            nested_rc != 0)
+            return nested_rc;
+    }
+    if (ec)
+        return refuse("its contents could not be listed");
+    return 0;
+#else
+    (void)kind;
+    (void)scan_root;
+    return refuse("container scanning needs macOS tools");
+#endif
+}
+
+static int enforce_no_development_runtimes_in_containers(const std::vector<fs::path>& artifacts) {
+    for (const auto& artifact : artifacts) {
+        const auto kind = ship_container_kind(artifact);
+        if (kind == ShipContainer::None)
+            continue;
+        const auto root = pulp::cli::make_private_temp_dir(
+            fs::temp_directory_path() / "pulp-ship-container-scan", "scan");
+        if (!root) {
+            std::cerr << "Error: cannot check " << artifact.string()
+                      << " for development-only runtimes (no private temp dir).\n";
+            return 1;
+        }
+        int rc = 0;
+        {
+#if defined(__APPLE__)
+            ship_scan_signals::Guard guard(*root);
+#endif
+            rc = scan_ship_container(artifact, kind, artifact.string(), 1, *root);
+        }
+        std::error_code ec;
+        fs::remove_all(*root, ec);
+        if (rc != 0)
+            return rc;
+    }
+    return 0;
+}
+
+// Backstop for a dev-shared build dir that reaches a distribution step anyway:
+// cmd_ship() ships such a project from build-ship/, so this fires only when
+// that redirect did not apply. The refusal names the one command that fixes it.
+static int refuse_dev_shared_build(const fs::path& build_dir) {
+    std::string error;
+    if (pulp::cli::dev_shared_build_allows_distribution(build_dir, error))
+        return 0;
+    std::cerr << "Error: " << error << ".\n"
+              << "  Rebuild with static links and re-run:\n"
+              << "    " << g_dev_shared_fix << "\n";
+    return 1;
 }
 
 // Load (or, on first use, create + store) the plugin's Ed25519 signing key from the
@@ -321,11 +857,14 @@ static int ship_sign(const std::vector<std::string>& args,
         std::string sign_path;  // --path: sign one explicit desktop artifact (not .pkg)
         std::string entitlements = default_entitlements(root).string();
         bool allow_tracing = false;  // override the PULP_TRACING ship guard
+        bool allow_dev_build = false; // override the PULP_DEV_BUILD ship guard
         for (size_t i = 1; i < args.size(); ++i) {
             if (args[i] == "--identity") {
                 if (!take_ship_value(args, i, sub, args[i], identity)) return 2;
             } else if (args[i] == "--allow-tracing") {
                 allow_tracing = true;
+            } else if (args[i] == "--allow-dev-build") {
+                allow_dev_build = true;
             } else if (args[i] == "--path") {
                 if (!take_ship_value(args, i, sub, args[i], sign_path)) return 2;
             } else if (args[i] == "--entitlements") {
@@ -351,6 +890,14 @@ static int ship_sign(const std::vector<std::string>& args,
                                         allow_tracing);
             rc != 0) {
             return rc;
+        }
+        // The same for a dev build: its editor reads the source tree. An
+        // explicit --path names an artifact built elsewhere, so the build dir
+        // being a dev build says nothing about what is signed.
+        if (sign_path.empty()) {
+            if (int rc = enforce_no_dev_build(build_dir, allow_dev_build); rc != 0) {
+                return rc;
+            }
         }
 
         if (target == "android") {
@@ -424,6 +971,18 @@ static int ship_sign(const std::vector<std::string>& args,
             return 1;
         }
 
+        // An ad hoc or Apple Development signature only lets a host on this
+        // machine load the bundle, so a dev-shared build may take one. Any
+        // other identity signs for distribution, which cmd_ship() has already
+        // pointed at the static build-ship/. Ad hoc signing needs no keychain,
+        // so it skips the signing-keychain preflight.
+        const bool local_identity = pulp::cli::is_local_signing_identity(identity);
+        const bool ad_hoc = identity == "-";
+        if (!local_identity) {
+            if (int rc = refuse_dev_shared_build(build_dir); rc != 0)
+                return rc;
+        }
+
         // --path: sign exactly one artifact instead of auto-scanning the
         // build dirs. This is the composable primitive behind the one-off
         // "I built an app/DMG and want to hand it to a friend" flow — point
@@ -443,10 +1002,12 @@ static int ship_sign(const std::vector<std::string>& args,
                              "  `pulp ship package` / `create_pkg`, not `sign --path`.\n";
                 return 1;
             }
-            if (int rc = enforce_no_vellum_d15({fs::path(sign_path)}); rc != 0)
+            if (int rc = enforce_no_development_runtimes({fs::path(sign_path)}, local_identity);
+                rc != 0)
                 return rc;
 #ifdef __APPLE__
-            if (!run_signing_preflight(root)) return 1;
+            if (!ad_hoc && !run_signing_preflight(root))
+                return 1;
 #endif
             // Hardened runtime + secure timestamp are mandatory for
             // notarization. Entitlements only apply to executables, so we
@@ -478,11 +1039,12 @@ static int ship_sign(const std::vector<std::string>& args,
             std::cerr << "No plugin bundles found to sign. Run `pulp build` first.\n";
             return 1;
         }
-        if (int rc = enforce_no_vellum_d15(bundles); rc != 0)
+        if (int rc = enforce_no_development_runtimes(bundles, local_identity); rc != 0)
             return rc;
 
 #ifdef __APPLE__
-        if (!run_signing_preflight(root)) return 1;
+        if (!ad_hoc && !run_signing_preflight(root))
+            return 1;
 #endif
 
         int signed_count = 0;
@@ -586,6 +1148,7 @@ static int ship_package_impl(const std::vector<std::string>& args,
         std::string icon_path;     // Linux AppImage: optional .png icon
         bool per_user = false, apk_only = false, aab_only = false;
         bool allow_tracing = false;  // override the PULP_TRACING ship guard
+        bool allow_dev_build = false; // override the PULP_DEV_BUILD ship guard
         bool ship_inspector = false;
         bool ship_inspector_runtime_eval = false;
         // macOS packaging. DEFAULT: one component-selectable installer — a single
@@ -647,6 +1210,8 @@ static int ship_package_impl(const std::vector<std::string>& args,
             else if (args[i] == "--keep-symbols")
                 keep_symbols = true;
             else if (args[i] == "--allow-tracing") allow_tracing = true;
+            else if (args[i] == "--allow-dev-build")
+                allow_dev_build = true;
             else if (args[i] == "--ship-inspector") ship_inspector = true;
             else if (args[i] == "--ship-inspector-runtime-eval")
                 ship_inspector_runtime_eval = true;
@@ -659,6 +1224,9 @@ static int ship_package_impl(const std::vector<std::string>& args,
         if (int rc = enforce_no_tracing({build_dir, fs::path(binary_path)},
                                         allow_tracing);
             rc != 0) {
+            return rc;
+        }
+        if (int rc = enforce_no_dev_build(build_dir, allow_dev_build); rc != 0) {
             return rc;
         }
 
@@ -688,7 +1256,7 @@ static int ship_package_impl(const std::vector<std::string>& args,
         // Inspect exactly the inputs this invocation selected, after product
         // filtering and before creating a DMG/pkg or invoking a packager.
         if (target != "android") {
-            if (int rc = enforce_no_vellum_d15(selected_macos_artifacts); rc != 0)
+            if (int rc = enforce_no_development_runtimes(selected_macos_artifacts); rc != 0)
                 return rc;
         }
         if (target != "android") {
@@ -1355,10 +1923,11 @@ static int ship_notarize(const std::vector<std::string>& args,
         notarize_artifacts.reserve(bundles.size());
         for (const auto& bundle : bundles)
             notarize_artifacts.emplace_back(bundle);
-        // Directory-backed bundles and loose dylibs are directly inspectable.
-        // Opaque pkg/dmg/zip inputs are not extracted here; Pulp-produced
-        // containers were already guarded at their selected package inputs.
-        if (int rc = enforce_no_vellum_d15(notarize_artifacts); rc != 0)
+        // Directory-backed bundles and loose dylibs are scanned directly; a
+        // zip, flat pkg or dmg is opened and its contents scanned.
+        if (int rc = enforce_no_development_runtimes(notarize_artifacts); rc != 0)
+            return rc;
+        if (int rc = enforce_no_development_runtimes_in_containers(notarize_artifacts); rc != 0)
             return rc;
 
         if (staple_only) {
@@ -2273,7 +2842,9 @@ static int ship_share(const std::vector<std::string>& args,
                       << "' — expected .app, .dmg, or .pkg.\n";
             return 2;
         }
-        if (int rc = enforce_no_vellum_d15({fs::path(input)}); rc != 0)
+        if (int rc = enforce_no_development_runtimes({fs::path(input)}); rc != 0)
+            return rc;
+        if (int rc = enforce_no_development_runtimes_in_containers({fs::path(input)}); rc != 0)
             return rc;
         auto inspector_report =
             pulp::cli::inspector_shipping::empty_report();
@@ -2577,6 +3148,20 @@ static int ship_swap_pack(const std::vector<std::string>& args,
 int cmd_ship(const std::vector<std::string>& args) {
     // Parse subcommand
     std::string sub = args.empty() ? "help" : args[0];
+    // `release` re-enters cmd_ship for its stages; the fix a refusal prints is
+    // always the command the user typed.
+    if (g_dev_shared_fix.empty()) {
+        g_dev_shared_fix = "PULP_DEV_SHARED_UI=0 pulp build --all && pulp ship";
+        for (const auto& arg : args) {
+            const bool plain =
+                !arg.empty() && std::all_of(arg.begin(), arg.end(), [](unsigned char c) {
+                    return std::isalnum(c) ||
+                           std::string_view("@%+=:,./_-").find(static_cast<char>(c)) !=
+                               std::string_view::npos;
+                });
+            g_dev_shared_fix += " " + (plain ? arg : shell_quote(arg));
+        }
+    }
     if (sub == "help" || sub == "--help" || sub == "-h")
         return print_ship_help();
 
@@ -2620,12 +3205,75 @@ int cmd_ship(const std::vector<std::string>& args) {
         return 1;
     }
 
+    // A dev build dir records the developer's on-disk ui.js path; a shipped
+    // artifact comes from a build without it. Ship from build-ship/ instead of
+    // refusing: the artifact-producing subcommands configure and build it from
+    // the dev cache with PULP_DEV_BUILD=OFF, the others read it once it exists.
+    // --allow-dev-build keeps the dev dir (sign/package then say so).
+    const bool allow_dev_build =
+        std::find(args.begin(), args.end(), "--allow-dev-build") != args.end();
+    const bool reads_native_build =
+        sub != "swap-pack" && sub != "auv3-xcodeproj" && sub != "appcast" && !android_check;
+    // `sign --path <artifact>` signs something the caller already built; it
+    // reads build-ship/ when that exists but never builds it, so signing one
+    // bundle from an in-tree checkout is not a second full build.
+    const bool signs_explicit_path =
+        sub == "sign" && std::find(args.begin(), args.end(), "--path") != args.end();
+    // A dev-shared dir (PULP_DEV_SHARED_UI=ON) loads Pulp from its build tree,
+    // so it takes the same route and --allow-dev-build cannot keep it. Only
+    // `sign` with a local identity (ad hoc or Apple Development, for a host on
+    // this machine) signs it as it is.
+    std::string sign_identity;
+    for (std::size_t i = 1; i + 1 < args.size(); ++i)
+        if (args[i] == "--identity")
+            sign_identity = args[i + 1];
+    const bool dev_shared = pulp::cli::build_dir_is_dev_shared(build_dir) &&
+                            !(sub == "sign" && pulp::cli::is_local_signing_identity(sign_identity));
+    if (reads_native_build &&
+        ((!allow_dev_build && pulp::cli::build_dir_is_dev_build(build_dir)) || dev_shared)) {
+        const auto ship_dir = pulp::cli::ship_build_dir(root);
+        const std::string why = dev_shared
+                                    ? "links plug-ins against the development-only shared runtime "
+                                      "(PULP_DEV_SHARED_UI=ON)"
+                                    : "is a dev build (PULP_DEV_BUILD=ON)";
+        if ((sub == "sign" && !signs_explicit_path) || sub == "package" || sub == "release") {
+            if (int rc = ensure_ship_build(root, build_dir, ship_dir, dev_shared); rc != 0)
+                return rc;
+            build_dir = ship_dir;
+        } else if (signs_explicit_path && !fs::exists(ship_dir / "CMakeCache.txt")) {
+            // The named artifact is signed as given; the dev build dir only
+            // supplies build metadata (entitlements), and nothing is built.
+        } else if (fs::exists(ship_dir / "CMakeCache.txt")) {
+            std::cout << "pulp ship " << sub << ": " << build_dir.filename().string() << "/ " << why
+                      << "; reading " << ship_dir.filename().string() << "/\n";
+            build_dir = ship_dir;
+        } else if (sub == "check") {
+            std::cout << "pulp ship check: " << build_dir.filename().string() << "/ " << why
+                      << "; `pulp ship sign` and "
+                         "`pulp ship package` build and ship "
+                      << ship_dir.filename().string() << "/ instead (not built yet)\n";
+        } else {
+            std::cerr << "pulp ship " << sub << ": " << build_dir.string() << " " << why << " and "
+                      << ship_dir.string() << " has not been built yet.\n"
+                      << "  Run `pulp ship package` (or `pulp ship sign`) first: it configures "
+                         "and builds the shippable build there."
+                      << (dev_shared ? "\n"
+                                     : " Pass --allow-dev-build to read the dev build instead.\n");
+            return 1;
+        }
+    }
+
     if (sub == "package" || sub == "notarize" || sub == "release" || sub == "share") {
         std::string distribution_error;
         if (!pulp::cli::sdk_allows_distribution(build_dir, distribution_error)) {
             std::cerr << "Error: " << distribution_error << ".\n";
             return 1;
         }
+    }
+    // `sign` decides once it knows the identity (see ship_sign).
+    if (sub == "package" || sub == "notarize" || sub == "release" || sub == "share") {
+        if (int rc = refuse_dev_shared_build(build_dir); rc != 0)
+            return rc;
     }
 
     if (sub == "sign")           return ship_sign(args, root, build_dir);

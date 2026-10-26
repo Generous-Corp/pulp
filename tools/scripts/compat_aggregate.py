@@ -60,6 +60,10 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Callable
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from gate_common import commit_blobs  # noqa: E402
 
 # Top-level keys, in the exact order they appear in compat.json.
 # Order is load-bearing for byte-stable reassembly.
@@ -253,24 +257,28 @@ def cmd_split(root: Path) -> int:
     return 0
 
 
+def _read_disk(path: Path) -> "str | None":
+    return path.read_text(encoding="utf-8") if path.exists() else None
+
+
 def _aggregate_from_parts(
     parts_dir: Path, *, trailing_newline: bool = False,
+    read: "Callable[[Path], str | None]" = _read_disk,
 ) -> str:
-    """Read compat/ parts and reassemble the aggregate text."""
+    """Read compat/ parts and reassemble the aggregate text. ``read`` returns
+    a part's text, or None when it is missing (a commit's blob under --rev)."""
     blocks: dict[str, str] = {}
     for key in SURFACE_KEYS:
         part = parts_dir / f"{key}.json"
-        if not part.exists():
+        text = read(part)
+        if text is None:
             raise FileNotFoundError(f"missing part: {part}")
-        blocks.update(blocks_from_part(
-            part.read_text(encoding="utf-8"), [key],
-        ))
+        blocks.update(blocks_from_part(text, [key]))
     meta = parts_dir / META_PART
-    if not meta.exists():
+    text = read(meta)
+    if text is None:
         raise FileNotFoundError(f"missing part: {meta}")
-    blocks.update(blocks_from_part(
-        meta.read_text(encoding="utf-8"), META_KEYS,
-    ))
+    blocks.update(blocks_from_part(text, META_KEYS))
     return assemble_aggregate(blocks, trailing_newline=trailing_newline)
 
 
@@ -295,26 +303,39 @@ def cmd_build(root: Path) -> int:
     return 0
 
 
-def cmd_check(root: Path) -> int:
+def cmd_check(root: Path, rev: "str | None" = None) -> int:
     """Assert compat.json == aggregate-regenerated-from-parts.
 
     This is the CI / pre-push sync gate. Exit 0 when in sync, 1 when
-    drifted, 2 on a structural error.
+    drifted, 2 on a structural error. With ``rev`` it checks that commit's
+    files instead of the working tree, which is what a push sends.
     """
     aggregate = root / "compat.json"
     parts_dir = root / "compat"
-    if not aggregate.exists():
-        print("compat_aggregate: compat.json missing", file=sys.stderr)
-        return 2
-    if not parts_dir.is_dir():
+    read = _read_disk
+    if rev:
+        names = ["compat.json", *(f"compat/{k}.json" for k in SURFACE_KEYS),
+                 f"compat/{META_PART}"]
+        try:
+            texts = commit_blobs(root, rev, names)
+        except (OSError, subprocess.CalledProcessError) as exc:
+            print(f"compat_aggregate: cannot read {rev}: {exc}", file=sys.stderr)
+            return 2
+
+        def read(path: Path) -> "str | None":
+            return texts.get(path.relative_to(root).as_posix())
+    elif not parts_dir.is_dir():
         print(f"compat_aggregate: no parts dir at {parts_dir} — run "
               "`split` to create it.", file=sys.stderr)
         return 2
 
-    current = aggregate.read_text(encoding="utf-8")
+    current = read(aggregate)
+    if current is None:
+        print("compat_aggregate: compat.json missing", file=sys.stderr)
+        return 2
     try:
         rebuilt = _aggregate_from_parts(
-            parts_dir, trailing_newline=current.endswith("\n}\n"),
+            parts_dir, trailing_newline=current.endswith("\n}\n"), read=read,
         )
     except (ValueError, FileNotFoundError) as exc:
         print(f"compat_aggregate: cannot rebuild from parts: {exc}",
@@ -357,6 +378,11 @@ def main(argv: list[str]) -> int:
         "--repo-root", default=None,
         help="Override repo root (default: git toplevel / compat.json walk)",
     )
+    parser.add_argument(
+        "--rev", default=None,
+        help="check: read that commit's compat.json and parts instead of the "
+             "working tree (the pre-push hook passes the pushed commit)",
+    )
     args = parser.parse_args(argv)
 
     root = Path(args.repo_root) if args.repo_root else repo_root()
@@ -365,7 +391,7 @@ def main(argv: list[str]) -> int:
         return cmd_split(root)
     if args.command == "build":
         return cmd_build(root)
-    return cmd_check(root)
+    return cmd_check(root, args.rev)
 
 
 if __name__ == "__main__":

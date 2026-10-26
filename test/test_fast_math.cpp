@@ -29,15 +29,6 @@ PULP_TEST_NOINLINE float runtime_sin_cycles(float phase, FastTrigProfile profile
 
 #undef PULP_TEST_NOINLINE
 
-float lambert_tanh_through_13(float x) {
-    constexpr float odd_denominators[] = {11.0f, 9.0f, 7.0f, 5.0f, 3.0f};
-    const float x2 = x * x;
-    float fraction = 13.0f;
-    for (float denominator : odd_denominators)
-        fraction = denominator + x2 / fraction;
-    return x / (1.0f + x2 / fraction);
-}
-
 std::uint32_t positive_float_ulp_distance(float lhs, float rhs) {
     const auto lhs_bits = std::bit_cast<std::uint32_t>(lhs);
     const auto rhs_bits = std::bit_cast<std::uint32_t>(rhs);
@@ -67,18 +58,62 @@ TEST_CASE("FastMath tanh approximation", "[signal][fast_math]") {
     REQUIRE_THAT(FastMath::tanh(5.0f), WithinAbs(1.0, 0.001));
 }
 
-TEST_CASE("FastMath tanh matches the reduced Lambert continued fraction", "[signal][fast_math]") {
-    constexpr float values[] = {-4.0f, -3.0f, -1.0f, -0.25f, 0.0f, 0.25f, 1.0f, 3.0f, 4.0f};
-    for (float value : values) {
-        REQUIRE_THAT(FastMath::tanh(value), WithinAbs(lambert_tanh_through_13(value), 1e-6f));
-    }
+TEST_CASE("FastMath tanh stays within its minimax bound at sample points", "[signal][fast_math]") {
+    constexpr float values[] = {-5.0f, -4.0f, -3.0f, -1.0f, -0.25f, 0.0f,
+                                0.25f, 1.0f,  3.0f,  4.0f,  5.0f};
+    for (float value : values)
+        REQUIRE_THAT(FastMath::tanh(value),
+                     WithinAbs(std::tanh(static_cast<double>(value)), 5.7e-5));
 }
 
-TEST_CASE("FastMath tanh clamps exactly beyond approximation range", "[signal][fast_math]") {
-    REQUIRE(FastMath::tanh(-100.0f) == -1.0f);
-    REQUIRE(FastMath::tanh(-4.0001f) == -1.0f);
-    REQUIRE(FastMath::tanh(4.0001f) == 1.0f);
-    REQUIRE(FastMath::tanh(100.0f) == 1.0f);
+TEST_CASE("FastMath tanh holds its bound over every float from 2^-12 to its clamp",
+          "[signal][fast_math]") {
+    // Exhaustive over the fitted range (about 1.1e8 floats; tanh() is odd
+    // exactly, so the negative half is the same). The two tails are bounded
+    // analytically below rather than enumerated.
+    constexpr double kBound = 5.7e-5;
+    const std::uint32_t first = std::bit_cast<std::uint32_t>(0x1p-12f);
+    const std::uint32_t last = std::bit_cast<std::uint32_t>(FastMath::kTanhClamp);
+    double worst = 0.0;
+    for (std::uint32_t bits = first; bits <= last; ++bits) {
+        const float x = std::bit_cast<float>(bits);
+        worst = std::max(worst, std::abs(static_cast<double>(FastMath::tanh(x)) -
+                                         std::tanh(static_cast<double>(x))));
+    }
+    INFO("worst error on [2^-12, kTanhClamp]: " << worst);
+    REQUIRE(worst < kBound);
+    // Below 2^-12: tanh(x) = x(1 - x^2/3 + ...) and tanh() = x * a0 * (1 + O(x^2)),
+    // so the error is |x| times |1 - a0| (2.4e-4) plus O(x^2) terms: under
+    // 2^-12 * 2.5e-4 = 6.1e-8. Spot checks down to the subnormals:
+    for (float x : {0x1p-12f, 0x1p-13f, 1e-6f, 1e-20f, 1e-38f, 1e-44f})
+        REQUIRE(std::abs(static_cast<double>(FastMath::tanh(x)) -
+                         std::tanh(static_cast<double>(x))) < 6.2e-8);
+    // Beyond the clamp: tanh() is the constant edge = tanh(kTanhClamp) while
+    // std::tanh rises from tanh(kTanhClamp) toward 1, so the error there is
+    // at most max(|edge - tanh(kTanhClamp)|, 1 - edge).
+    const double edge = FastMath::tanh(FastMath::kTanhClamp);
+    REQUIRE(std::abs(edge - std::tanh(static_cast<double>(FastMath::kTanhClamp))) < kBound);
+    REQUIRE(1.0 - edge < kBound);
+}
+
+TEST_CASE("FastMath tanh clamps its argument where its rational reaches one",
+          "[signal][fast_math]") {
+    // Beyond the clamp the result is the rational at the clamp point, the same
+    // for every larger magnitude: strictly inside +/-1 and within 1e-6 of it
+    // (the 2^-21 numerator scale plus rounding, which differs with and
+    // without fused multiply-add).
+    const float edge = FastMath::tanh(FastMath::kTanhClamp);
+    REQUIRE(edge < 1.0f);
+    REQUIRE(edge > 1.0f - 1.0e-6f);
+    for (float x : {5.5f, 7.0f, 100.0f, 1e30f, std::numeric_limits<float>::infinity()}) {
+        REQUIRE(FastMath::tanh(x) == edge);
+        REQUIRE(FastMath::tanh(-x) == -edge);
+    }
+    REQUIRE(std::isnan(FastMath::tanh(std::numeric_limits<float>::quiet_NaN())));
+    // Continuous at the clamp: no step, unlike saturating the output at 4.
+    const float below = FastMath::tanh(std::nextafter(FastMath::kTanhClamp, 0.0f));
+    REQUIRE(edge - below < 1.0e-6f);
+    REQUIRE(FastMath::tanh(4.0001f) - FastMath::tanh(3.9999f) < 1.0e-5f);
 }
 
 namespace {
@@ -106,15 +141,33 @@ std::pair<double, float> tanh_error_scan(F&& approx, std::uint32_t stride, float
 TEST_CASE("FastMath tanh_minimax holds its worst-case bound across the float range",
           "[signal][fast_math]") {
     // A stride co-prime with the mantissa walks every binade densely. The same
-    // scan over tanh() must see that function's 6.7e-4 seam at |x| = 4, which
-    // shows the instrument reaches the region where a clamp hides its error.
+    // scan over tanh() must see that function's 5.7e-5 equiripple worst case,
+    // which shows the instrument resolves errors at that level.
     const auto pade = tanh_error_scan([](float x) { return FastMath::tanh(x); }, 101u, 30.0f);
     const auto minimax =
         tanh_error_scan([](float x) { return FastMath::tanh_minimax(x); }, 101u, 30.0f);
-    REQUIRE(pade.first > 6.0e-4);
+    const auto recursive =
+        tanh_error_scan([](float x) { return FastMath::tanh_minimax_recursive(x); }, 101u, 30.0f);
+    REQUIRE(pade.first > 5.5e-5);
+    REQUIRE(pade.first < 5.8e-5);
+    REQUIRE(pade.second < 1.0f);
     REQUIRE(minimax.first < 3.8e-6);
-    REQUIRE(pade.first / minimax.first > 150.0);
+    REQUIRE(recursive.first < 3.8e-6);
+    REQUIRE(pade.first / minimax.first > 10.0);
     REQUIRE(minimax.second == 1.0f);
+    REQUIRE(recursive.second == 1.0f);
+
+    // Every float around the worst case (|x| near 4.745), where the stride
+    // above lands only every hundredth value.
+    double local = 0.0;
+    for (float x = 4.6f; x < 4.9f; x = std::nextafter(x, 5.0f)) {
+        const float y = FastMath::tanh_minimax(x);
+        local =
+            std::max(local, std::abs(static_cast<double>(y) - std::tanh(static_cast<double>(x))));
+        REQUIRE(FastMath::tanh_minimax(-x) == -y);
+    }
+    INFO("worst error near |x| = 4.745: " << local);
+    REQUIRE(local < 3.8e-6);
 }
 
 TEST_CASE("FastMath tanh_minimax is odd, unit-slope, and seamless at its clamp",
@@ -134,9 +187,45 @@ TEST_CASE("FastMath tanh_minimax is odd, unit-slope, and seamless at its clamp",
     REQUIRE(FastMath::tanh_minimax(-7.5f) == -1.0f);
     REQUIRE(FastMath::tanh_minimax(std::numeric_limits<float>::max()) == 1.0f);
     REQUIRE(std::isnan(FastMath::tanh_minimax(std::numeric_limits<float>::quiet_NaN())));
-    // The Lambert form's seam, for contrast: a 6.7e-4 jump across x = 4.
-    REQUIRE(FastMath::tanh(4.0001f) - FastMath::tanh(3.9999f) > 6.0e-4f);
     REQUIRE(FastMath::tanh_minimax(4.0001f) - FastMath::tanh_minimax(3.9999f) < 1.0e-6f);
+}
+
+TEST_CASE("FastMath tanh_minimax_recursive is the minimax fit in Estrin form",
+          "[signal][fast_math]") {
+    // The same coefficients as tanh_minimax_rational(), evaluated as two
+    // independent halves per cubic. Horner order rounds differently at some of
+    // these inputs, so this pins the evaluation form the ladder relies on.
+    constexpr float kScale = 1.0f - 0x1p-21f;
+    const auto estrin = [](float x) {
+        const float t = x * x;
+        const float t2 = t * t;
+        const float num =
+            x * ((kScale + t * (1.2183626499918065e-01f * kScale)) +
+                 t2 * (2.1714800492144003e-03f * kScale + t * (3.4510574788349538e-06f * kScale)));
+        const float den = (1.0f + t * 4.5515217250939749e-01f) +
+                          t2 * (2.0577605545641264e-02f + t * 1.3105688057792639e-04f);
+        return num / den;
+    };
+    int differs_from_horner = 0;
+    for (int i = 0; i <= 1400; ++i) {
+        const float x = -7.0f + 0.01f * static_cast<float>(i);
+        REQUIRE(FastMath::tanh_minimax_recursive(x) == estrin(x));
+        REQUIRE(std::abs(FastMath::tanh_minimax_recursive(x) - FastMath::tanh_minimax(x)) <
+                1.0e-6f);
+        if (FastMath::tanh_minimax_recursive(x) != FastMath::tanh_minimax(x))
+            ++differs_from_horner;
+    }
+    // The pin above is meaningful only if the two forms round apart somewhere.
+    REQUIRE(differs_from_horner > 0);
+    REQUIRE(FastMath::tanh_minimax_recursive(7.5f) == 1.0f);
+    REQUIRE(FastMath::tanh_minimax_recursive(-7.5f) == -1.0f);
+    REQUIRE(std::isnan(FastMath::tanh_minimax_recursive(std::numeric_limits<float>::quiet_NaN())));
+    for (float x : {1e-30f, 0.5f, 2.5f, 6.99f})
+        REQUIRE(FastMath::tanh_minimax_recursive(-x) == -FastMath::tanh_minimax_recursive(x));
+    // The ladder's realtime_efficient saturator is this function.
+    for (float x : {-3.0f, -0.25f, 0.0f, 0.7f, 6.5f})
+        REQUIRE(ladder_tanh_profiled<LadderSaturation::realtime_efficient>(x) ==
+                FastMath::tanh_minimax_recursive(x));
 }
 
 TEST_CASE("FastMath tanh_minimax block form agrees with the scalar form", "[signal][fast_math]") {
@@ -592,17 +681,22 @@ TEST_CASE("FastMath log2 orders common gain ratios", "[signal][fast_math]") {
 
 namespace {
 
-// FastMath::tanh's contract written with early returns: exactly +/-1 beyond
-// |x| = 4, the [7/6] Pade form inside.
+// FastMath::tanh's contract written with early returns: the argument clamped
+// to +/-kTanhClamp, then the [5/4] rational with its numerator scaled by
+// 1 - 2^-21.
 float tanh_reference(float x) {
-    if (x < -4.0f)
-        return -1.0f;
-    if (x > 4.0f)
-        return 1.0f;
-    const float x2 = x * x;
-    const float num = x * (135135.0f + x2 * (17325.0f + x2 * (378.0f + x2)));
-    const float den = 135135.0f + x2 * (62370.0f + x2 * (3150.0f + x2 * 28.0f));
-    return num / den;
+    if (std::isnan(x))
+        return x;
+    if (x < -FastMath::kTanhClamp)
+        x = -FastMath::kTanhClamp;
+    if (x > FastMath::kTanhClamp)
+        x = FastMath::kTanhClamp;
+    constexpr float kScale = 1.0f - 0x1p-21f;
+    const float t = x * x;
+    return x *
+           (0.9997622141279201f * kScale +
+            t * (0.10092608875679396f * kScale + t * (0.0006321601824242231f * kScale))) /
+           (1.0f + t * (0.4335808440239807f + t * 0.01240458813388444f));
 }
 
 double ulp_of(double value) {
@@ -612,7 +706,7 @@ double ulp_of(double value) {
 
 } // namespace
 
-TEST_CASE("FastMath::tanh is bit-identical to its saturating Pade contract",
+TEST_CASE("FastMath::tanh is bit-identical to its clamped rational contract",
           "[signal][fast-math][tanh]") {
     std::size_t mismatches = 0;
     for (float x = -12.0f; x <= 12.0f; x += 1.0e-4f) {
@@ -621,14 +715,13 @@ TEST_CASE("FastMath::tanh is bit-identical to its saturating Pade contract",
         mismatches += std::bit_cast<std::uint32_t>(a) != std::bit_cast<std::uint32_t>(b);
     }
     CHECK(mismatches == 0);
+    const float edge = tanh_reference(FastMath::kTanhClamp);
     CHECK(FastMath::tanh(4.0f) == tanh_reference(4.0f));
     CHECK(FastMath::tanh(-4.0f) == tanh_reference(-4.0f));
-    CHECK(FastMath::tanh(std::nextafter(4.0f, 5.0f)) == 1.0f);
-    CHECK(FastMath::tanh(std::nextafter(-4.0f, -5.0f)) == -1.0f);
-    CHECK(FastMath::tanh(1.0e30f) == 1.0f);
-    CHECK(FastMath::tanh(-1.0e30f) == -1.0f);
-    CHECK(FastMath::tanh(std::numeric_limits<float>::infinity()) == 1.0f);
-    CHECK(FastMath::tanh(-std::numeric_limits<float>::infinity()) == -1.0f);
+    CHECK(FastMath::tanh(1.0e30f) == edge);
+    CHECK(FastMath::tanh(-1.0e30f) == -edge);
+    CHECK(FastMath::tanh(std::numeric_limits<float>::infinity()) == edge);
+    CHECK(FastMath::tanh(-std::numeric_limits<float>::infinity()) == -edge);
     CHECK(std::isnan(FastMath::tanh(std::numeric_limits<float>::quiet_NaN())));
 }
 

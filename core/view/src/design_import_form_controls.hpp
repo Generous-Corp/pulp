@@ -2,7 +2,8 @@
 #pragma once
 
 // Theme-painted form controls in a browser capture. An imported range,
-// checkbox, radio or <button> whose Chromium native theme painted it (the
+// checkbox, radio or push button (a <button>, or an input of type button,
+// submit or reset) whose Chromium native theme painted it (the
 // capture's `native_theme` verdict) carries no CSS paint to lower, so it
 // becomes the matching widget in its `chromium_refresh` skin, or a
 // ButtonSurface for a button, driven by the HTML state the capture recorded as

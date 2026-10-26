@@ -14,34 +14,6 @@
 
 namespace pulp::gpu_audio::detail {
 
-/// Provider channel over one session. `Session` has GpuWaveNetSession's
-/// submit/service/receive/release/device_lost surface.
-template <class Session> class SessionChannel final : public WaveNetRealtimeChannel {
-  public:
-    explicit SessionChannel(std::unique_ptr<Session> session) : session_(std::move(session)) {}
-    bool submit(std::span<const float> input, std::uint64_t sequence) noexcept override {
-        return session_->submit_block(input, sequence);
-    }
-    void service(std::uint64_t now) noexcept override {
-        session_->service(now);
-    }
-    void service_until(std::uint64_t, std::uint64_t deadline) noexcept override {
-        session_->service_until(deadline);
-    }
-    std::optional<GpuWaveNetBlockResult> receive(std::span<float> output) noexcept override {
-        return session_->receive(output);
-    }
-    bool release() noexcept override {
-        return session_->release();
-    }
-    bool lost() const noexcept override {
-        return session_->device_lost();
-    }
-
-  private:
-    std::unique_ptr<Session> session_;
-};
-
 /// Creates one session and appends it to `channels`. A partially prepared
 /// session is appended too, so release() can retry its physical drain.
 /// Returns whether creation succeeded. Host thread; may throw on allocation.
@@ -53,7 +25,8 @@ bool create_session_channel(const GpuWaveNetSession::Config& config,
     // operator bool also requires the session pointer.
     const bool created = static_cast<bool>(result);
     if (result.session)
-        channels.push_back(std::make_unique<SessionChannel<Session>>(std::move(result.session)));
+        channels.push_back(std::make_unique<GpuWaveNetSessionChannel<Session>>(
+            std::move(result.session), config.slots));
     return created;
 }
 
@@ -69,7 +42,9 @@ class WaveNetStreamingBackend final : public StreamingBackend {
     struct Config {
         GpuWaveNetSession::Config session{};
         std::uint32_t channels = 1;
-        std::uint32_t max_inflight = 1;
+        /// Blocks the backend holds at once; at most the session's slots.
+        /// Zero selects two when the session has at least two slots, else one.
+        std::uint32_t max_inflight = 0;
     };
     /// Builds one provider channel. Returning null fails prepare(); the
     /// production factory wraps GpuWaveNetSession::create().
@@ -102,6 +77,10 @@ class WaveNetStreamingBackend final : public StreamingBackend {
     bool device_lost() const noexcept override {
         return lost_;
     }
+    SharedIoProviderIdentity provider_identity() const noexcept override {
+        return channels_.empty() ? SharedIoProviderIdentity{}
+                                 : channels_.front()->provider_identity();
+    }
 
     /// True when the channels are authenticated GpuWaveNetSession providers
     /// rather than an injected test seam.
@@ -128,6 +107,8 @@ class WaveNetStreamingBackend final : public StreamingBackend {
   private:
     struct Slot {
         StreamingBlockStamp stamp{};
+        // Captured at admission; a completion must carry the same ticket.
+        SharedIoSubmissionTicket ticket{};
         std::span<float> output{};
         std::uint32_t output_channel_stride = 0;
         std::uint32_t output_frame_stride = 1;

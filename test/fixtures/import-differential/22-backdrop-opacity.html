@@ -1,0 +1,83 @@
+<!doctype html>
+<style>
+  /* Five frosted boxes over 1px gridlines. CSS opacity applies to an element's
+     whole rendering, its backdrop-filter result included: at opacity 0 nothing
+     of the box shows, so the gridlines under it stay crisp, and at 0.5 the
+     blurred backdrop is mixed half-and-half with the page beneath. A box
+     under an ancestor with opacity below 1 sits inside that ancestor's
+     isolated group, so its backdrop is the group's own content, not the page.
+     The sixth box, in the second row, starts on a 4px amber band. Chrome
+     blurs a backdrop as if the box's own content were mirrored at its edges,
+     so the band is reflected once at the left edge: it is neither repeated
+     outward (clamp) nor mixed with the page left of the box. */
+  body { margin: 0; background: #0b0f14; }
+  #panel { position: relative; width: 512px; height: 260px; overflow: hidden; }
+  .grid { position: absolute; top: 0; width: 1px; height: 260px; background: #8090a0; }
+  .frost {
+    position: absolute; top: 40px; width: 80px; height: 80px;
+    background: rgba(12, 16, 22, 0.5); backdrop-filter: blur(8px);
+  }
+  .group { position: absolute; top: 40px; width: 80px; height: 80px; }
+  .group > .frost { top: 0; left: 0; }
+  .band { position: absolute; width: 4px; height: 80px; background: #f0c040; }
+</style>
+<div id="panel">
+  <div class="grid" style="left:5px"></div>
+  <div class="grid" style="left:15px"></div>
+  <div class="grid" style="left:25px"></div>
+  <div class="grid" style="left:35px"></div>
+  <div class="grid" style="left:45px"></div>
+  <div class="grid" style="left:55px"></div>
+  <div class="grid" style="left:65px"></div>
+  <div class="grid" style="left:75px"></div>
+  <div class="grid" style="left:85px"></div>
+  <div class="grid" style="left:95px"></div>
+  <div class="grid" style="left:105px"></div>
+  <div class="grid" style="left:115px"></div>
+  <div class="grid" style="left:125px"></div>
+  <div class="grid" style="left:135px"></div>
+  <div class="grid" style="left:145px"></div>
+  <div class="grid" style="left:155px"></div>
+  <div class="grid" style="left:165px"></div>
+  <div class="grid" style="left:175px"></div>
+  <div class="grid" style="left:185px"></div>
+  <div class="grid" style="left:195px"></div>
+  <div class="grid" style="left:205px"></div>
+  <div class="grid" style="left:215px"></div>
+  <div class="grid" style="left:225px"></div>
+  <div class="grid" style="left:235px"></div>
+  <div class="grid" style="left:245px"></div>
+  <div class="grid" style="left:255px"></div>
+  <div class="grid" style="left:265px"></div>
+  <div class="grid" style="left:275px"></div>
+  <div class="grid" style="left:285px"></div>
+  <div class="grid" style="left:295px"></div>
+  <div class="grid" style="left:305px"></div>
+  <div class="grid" style="left:315px"></div>
+  <div class="grid" style="left:325px"></div>
+  <div class="grid" style="left:335px"></div>
+  <div class="grid" style="left:345px"></div>
+  <div class="grid" style="left:355px"></div>
+  <div class="grid" style="left:365px"></div>
+  <div class="grid" style="left:375px"></div>
+  <div class="grid" style="left:385px"></div>
+  <div class="grid" style="left:395px"></div>
+  <div class="grid" style="left:405px"></div>
+  <div class="grid" style="left:415px"></div>
+  <div class="grid" style="left:425px"></div>
+  <div class="grid" style="left:435px"></div>
+  <div class="grid" style="left:445px"></div>
+  <div class="grid" style="left:455px"></div>
+  <div class="grid" style="left:465px"></div>
+  <div class="grid" style="left:475px"></div>
+  <div class="grid" style="left:485px"></div>
+  <div class="grid" style="left:495px"></div>
+  <div class="grid" style="left:505px"></div>
+  <div class="frost" id="opacity-0" style="left:16px; opacity:0"></div>
+  <div class="frost" id="opacity-half" style="left:112px; opacity:0.5"></div>
+  <div class="frost" id="opacity-1" style="left:208px"></div>
+  <div class="group" id="group-half" style="left:304px; opacity:0.5"><div class="frost"></div></div>
+  <div class="group" id="group-0" style="left:400px; opacity:0"><div class="frost"></div></div>
+  <div class="band" style="left:208px; top:170px"></div>
+  <div class="frost" id="edge-mirror" style="left:208px; top:170px"></div>
+</div>

@@ -172,6 +172,22 @@ TEST_CASE("captured WOFF2 bytes decode and register under their CSS family",
     REQUIRE(pulp::canvas::is_font_registered("Pulp Captured Inter"));
 }
 
+TEST_CASE("a WOFF2 font file registers through the file path",
+          "[font][woff2][materialized-import]") {
+    // An imported design names its captured @font-face files by path, and a
+    // page's own fonts are often WOFF2, which not every platform font manager
+    // decodes. The route is what is under test: CoreText decodes WOFF2 itself
+    // and would register it either way.
+    REQUIRE(woff2_decoder_available());
+    const auto routed = pulp::canvas::woff2_file_routes();
+    REQUIRE(pulp::canvas::register_font_file(PULP_TEST_WOFF2_FIXTURE, "Pulp Captured Inter File"));
+    REQUIRE(pulp::canvas::is_font_registered("Pulp Captured Inter File"));
+    CHECK(pulp::canvas::woff2_file_routes() == routed + 1);
+    // A TrueType file takes the platform path.
+    REQUIRE(pulp::canvas::register_font_file(PULP_TEST_JOST_FIXTURE, "Pulp Captured Jost File"));
+    CHECK(pulp::canvas::woff2_file_routes() == routed + 1);
+}
+
 TEST_CASE("materialized fonts resolve exact captured faces across families",
           "[font][materialized-import][skia]") {
     struct Fixture {

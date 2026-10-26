@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "event_id": "20261025-render-gpu-trim-frames",
+  "kind": "change",
+  "created_at": "2026-10-25T07:00:14Z",
+  "slices": [
+    "render-skia-dawn"
+  ],
+  "rationale": "design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger); amends the GPU surface trim from 20261023-render-gpu-trim. GpuIdleTrimSchedule records each frame's start when begin_frame() hands out a canvas, and end_frame()'s idle trim now frees only resources unused for both kUnusedAge (2 s) and the last kUnusedFrames (30) frames, skipping the trim until that many frames have started, so an editor that animates in bursts keeps its working set across a pause. Only resources nothing references are freed, as before, so pixels do not change. No frame, present, readback, design-import, Chromium, packaging or authority boundary moves; the Pulp render target has not adopted a Vellum package.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "ctest --test-dir build -R 'GpuIdleTrimSchedule ages by frames as well as time'",
+    "ctest --test-dir build -R 'SkiaSurface idle trim frees textures unused for two seconds and keeps the drawn one'",
+    "ctest --test-dir build -R 'SkiaSurface idle trim keeps what a recent frame released across a pause'",
+    "ctest --test-dir build -R 'SkiaSurface idle trim runs once per second of frames'"
+  ],
+  "disposition": "pulp-only",
+  "vellum_inherits": true
+}

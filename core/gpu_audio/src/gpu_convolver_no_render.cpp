@@ -19,9 +19,6 @@ struct GpuConvolver::SharedIoState {};
 struct GpuConvolver::StagedReadbackState {
     GpuConvolverStagedBreaker breaker{};
     std::atomic<std::uint8_t> reason{0};
-    // Recorded like the render build; without a staged device the node never
-    // pipelines, so it changes nothing else.
-    bool transport_hosted = false;
 };
 
 GpuConvolver::GpuConvolver(uint32_t channels, uint32_t block_size, uint32_t sample_rate,
@@ -34,16 +31,6 @@ GpuConvolver::GpuConvolver(uint32_t channels, uint32_t block_size, uint32_t samp
     : channels_(channels), block_(block_size), sample_rate_(sample_rate),
       latency_blocks_(latency_blocks), ir_(std::move(impulse_response)),
       staged_readback_(std::make_unique<StagedReadbackState>()) {}
-
-namespace detail {
-bool set_worker_pipeline_hosting(GpuAudioNode* node, bool hosted) noexcept {
-    auto* convolver = dynamic_cast<GpuConvolver*>(node);
-    if (convolver == nullptr || !convolver->staged_readback_)
-        return false;
-    convolver->staged_readback_->transport_hosted = hosted;
-    return true;
-}
-} // namespace detail
 
 std::uint64_t GpuConvolver::staged_cpu_blocks() const noexcept {
     return 0;
@@ -172,11 +159,20 @@ void GpuConvolver::process_block(const audio::BufferView<const float>& input,
 
 // No staged device or shared session exists in this build, so nothing is ever
 // latched and no shared health sample is available.
+bool GpuConvolver::bind_realtime_path(detail::RealtimeGpuNodeBinding&) noexcept {
+    return false; // the staged CPU worker is the only path in this build
+}
+
 GpuAudioRecoveryReason GpuConvolver::staged_recovery_reason() const noexcept {
     return GpuAudioRecoveryReason::None;
 }
 
 bool GpuConvolver::realtime_shared_io_health(const void*, detail::RealtimeGpuHealth&) noexcept {
+    return false;
+}
+
+bool GpuConvolver::set_realtime_shared_io_notifier(void*,
+                                                   detail::SharedIoCompletionNotifier) noexcept {
     return false;
 }
 

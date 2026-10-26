@@ -12,6 +12,16 @@
 #include <pulp/canvas/skia_canvas.hpp>
 #endif
 
+// PULP_LITE_EDITOR builds this file a second time, into the pulp-editor-lite
+// objects that a plug-in without a GPU editor links ahead of the library.
+// It changes function bodies only; every declaration stays as the headers
+// give it, so the two builds agree on every type.
+#if defined(PULP_HAS_SKIA) && !(defined(PULP_LITE_EDITOR) && PULP_LITE_EDITOR)
+#define PULP_CANVAS_WIDGET_SKIA 1
+#else
+#define PULP_CANVAS_WIDGET_SKIA 0
+#endif
+
 namespace pulp::view {
 
 namespace {
@@ -291,7 +301,7 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
     //     against a RecordingCanvas and asserts no full-bounds fill_rect was
     //     emitted.
     // Do NOT add any unconditional fill / clear here.
-#ifdef PULP_HAS_SKIA
+#if PULP_CANVAS_WIDGET_SKIA
     if (native_gpu_texture_provider_) {
         auto frame = native_gpu_texture_provider_();
         if (frame.available) {

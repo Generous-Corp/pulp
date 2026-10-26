@@ -240,6 +240,7 @@ paths = [
   "tools/scripts/test_validate_registry_extra.py",
   "tools/scripts/test_validation_profile_select.py",
   "tools/scripts/test_vellum_authority_workflows.py",
+  "tools/scripts/test_vellum_borrowed_coverage_check.py",
   "tools/scripts/test_vellum_expansion_watch_check.py",
   "tools/scripts/test_vellum_freeze_check.py",
   "tools/scripts/test_verify_cobertura_xml.py",
@@ -262,6 +263,7 @@ paths = [
   "tools/scripts/test_workflow_runner_selector_audit.py",
   "tools/scripts/unserved_job_check.py",
   "tools/scripts/validation_profile_select.py",
+  "tools/scripts/vellum_borrowed_coverage_check.py",
   "tools/scripts/verify_cobertura_xml.py",
   "tools/scripts/verify_control_shipping_native_evidence.py",
   "tools/scripts/verify_downstream_validation_manifest.py",
@@ -652,6 +654,40 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-b76022563ab8"
+paths = ["tools/scripts/format_header_view_boundary.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "format-header-view-boundary",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-73de1f6e005c"
 paths = ["tools/scripts/gate_python_imports_check.py"]
 tests = [
@@ -679,6 +715,40 @@ tests = [
   "sample-region-compat-baseline-selftest",
   "source-selftest-lane-contract",
   "source-selftest-lane-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-b5ca1a17d0e7"
+paths = ["tools/scripts/gpu_audio_header_vocabulary_guard.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gate-common-selftest",
+  "gpu-audio-header-vocabulary-guard",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
@@ -3167,6 +3237,40 @@ tests = [
   "clean-worktree-planning-selftest",
   "gate-common-selftest",
   "gpu-audio-comparator-v2-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-8fcea5f2df63"
+paths = ["tools/scripts/test_gpu_audio_header_vocabulary_guard.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gate-common-selftest",
+  "gpu-audio-header-vocabulary-guard-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -7289,6 +7393,7 @@ paths = [
   "tools/scripts/design_unit_boundary_check.py",
   "tools/scripts/docs_sync_check.py",
   "tools/scripts/dsp_provenance_audit.py",
+  "tools/scripts/format_header_view_boundary.py",
   "tools/scripts/frontend_ir_codegen_artifact_gate.py",
   "tools/scripts/frontend_ir_codegen_artifacts.py",
   "tools/scripts/frontend_ir_common.py",
@@ -7314,6 +7419,7 @@ paths = [
   "tools/scripts/gate_python_imports_check.py",
   "tools/scripts/generate_sample_region_compat_inputs.py",
   "tools/scripts/github_app_jwt.py",
+  "tools/scripts/gpu_audio_header_vocabulary_guard.py",
   "tools/scripts/gpu_audio_p4_lead_campaign.py",
   "tools/scripts/gpu_dpr_test_support.py",
   "tools/scripts/gpu_fault_hooks_release_gate.py",
@@ -7493,6 +7599,7 @@ paths = [
   "tools/scripts/test_git_stdin_pipe_deadlock.py",
   "tools/scripts/test_github_app_jwt.py",
   "tools/scripts/test_gpu_audio_comparator_v2.py",
+  "tools/scripts/test_gpu_audio_header_vocabulary_guard.py",
   "tools/scripts/test_gpu_audio_p2_campaign.py",
   "tools/scripts/test_gpu_audio_p2_host_preflight.py",
   "tools/scripts/test_gpu_audio_p4_evidence.py",
@@ -7666,6 +7773,7 @@ paths = [
   "tools/scripts/test_validate_registry_extra.py",
   "tools/scripts/test_validation_profile_select.py",
   "tools/scripts/test_vellum_authority_workflows.py",
+  "tools/scripts/test_vellum_borrowed_coverage_check.py",
   "tools/scripts/test_vellum_boundary_lint.py",
   "tools/scripts/test_vellum_closure.py",
   "tools/scripts/test_vellum_expansion_watch_check.py",
@@ -7709,6 +7817,7 @@ paths = [
   "tools/scripts/trace_span_category_lint.py",
   "tools/scripts/unserved_job_check.py",
   "tools/scripts/validation_profile_select.py",
+  "tools/scripts/vellum_borrowed_coverage_check.py",
   "tools/scripts/vellum_closure.py",
   "tools/scripts/vellum_mirror_edge_table.py",
   "tools/scripts/vellum_view_core_pulp_kept_check.py",
@@ -7769,6 +7878,8 @@ tests = [
   "forced-restore-lint-selftest",
   "foundation-include-lint",
   "foundation-include-lint-negative-contract",
+  "gpu-audio-header-vocabulary-guard",
+  "gpu-audio-header-vocabulary-guard-selftest",
   "gpu-probe-acceptance-verifier-selftest",
   "gpu-probe-historical-v1-acceptance",
   "gpu-probe-terminal-recorder-selftest",
@@ -7862,6 +7973,7 @@ paths = [
   "tools/scripts/design_unit_boundary_check.py",
   "tools/scripts/docs_sync_check.py",
   "tools/scripts/dsp_provenance_audit.py",
+  "tools/scripts/format_header_view_boundary.py",
   "tools/scripts/frontend_ir_codegen_artifact_gate.py",
   "tools/scripts/frontend_ir_codegen_artifacts.py",
   "tools/scripts/frontend_ir_common.py",
@@ -7887,6 +7999,7 @@ paths = [
   "tools/scripts/gate_python_imports_check.py",
   "tools/scripts/generate_sample_region_compat_inputs.py",
   "tools/scripts/github_app_jwt.py",
+  "tools/scripts/gpu_audio_header_vocabulary_guard.py",
   "tools/scripts/gpu_audio_p4_lead_campaign.py",
   "tools/scripts/gpu_dpr_test_support.py",
   "tools/scripts/gpu_fault_hooks_release_gate.py",
@@ -8066,6 +8179,7 @@ paths = [
   "tools/scripts/test_git_stdin_pipe_deadlock.py",
   "tools/scripts/test_github_app_jwt.py",
   "tools/scripts/test_gpu_audio_comparator_v2.py",
+  "tools/scripts/test_gpu_audio_header_vocabulary_guard.py",
   "tools/scripts/test_gpu_audio_p2_campaign.py",
   "tools/scripts/test_gpu_audio_p2_host_preflight.py",
   "tools/scripts/test_gpu_audio_p4_evidence.py",
@@ -8239,6 +8353,7 @@ paths = [
   "tools/scripts/test_validate_registry_extra.py",
   "tools/scripts/test_validation_profile_select.py",
   "tools/scripts/test_vellum_authority_workflows.py",
+  "tools/scripts/test_vellum_borrowed_coverage_check.py",
   "tools/scripts/test_vellum_boundary_lint.py",
   "tools/scripts/test_vellum_closure.py",
   "tools/scripts/test_vellum_expansion_watch_check.py",
@@ -8282,6 +8397,7 @@ paths = [
   "tools/scripts/trace_span_category_lint.py",
   "tools/scripts/unserved_job_check.py",
   "tools/scripts/validation_profile_select.py",
+  "tools/scripts/vellum_borrowed_coverage_check.py",
   "tools/scripts/vellum_closure.py",
   "tools/scripts/vellum_mirror_edge_table.py",
   "tools/scripts/vellum_view_core_pulp_kept_check.py",

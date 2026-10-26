@@ -591,9 +591,12 @@ GraphRuntimeExecutorErrorCode run_routed_node(
                                 : GraphRuntimeExecutorErrorCode::None;
     }
 
-    // Marshal the node's mono slots into contiguous channel views.
-    std::array<const float*, GraphRuntimeExecutor::kMaxRoutedPortsPerNode> in_ptrs{};
-    std::array<float*, GraphRuntimeExecutor::kMaxRoutedPortsPerNode> out_ptrs{};
+    // Marshal the node's mono slots into contiguous channel views. Only the
+    // node's own ports are written, and the views read no further, so the
+    // arrays are left uninitialized rather than zeroing kMaxRoutedPortsPerNode
+    // entries per node per block.
+    std::array<const float*, GraphRuntimeExecutor::kMaxRoutedPortsPerNode> in_ptrs;
+    std::array<float*, GraphRuntimeExecutor::kMaxRoutedPortsPerNode> out_ptrs;
     for (std::uint32_t p = 0; p < node.input_ports; ++p) {
         in_ptrs[p] = pool.slot_data(slots.input_base + p);
     }

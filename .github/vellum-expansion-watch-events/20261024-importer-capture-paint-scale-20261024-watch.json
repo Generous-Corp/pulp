@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261024-importer-capture-paint-scale-20261024-watch",
+  "created_at": "2026-10-25T02:30:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-output-and-packaging",
+    "design-source-ingest"
+  ],
+  "rationale": "Browser-capture lowering scales a node's border widths, corner radii and shadow lengths by the per-axis scale its post-transform box already carries from its own and its ancestors' computed transforms (left/right borders by sx, top/bottom by sy, shadow offsets per axis, radii and blur only under a uniform scale), and refuses and counts what one factor per axis cannot carry. The IR contract and box meaning are unchanged; only lengths drawn inside the captured box move. A new captured fixture (browser-capture-paint-scale) and its test are added. Chromium stays the only oracle and Skia/Dawn the renderer; no design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-browser-capture-import",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

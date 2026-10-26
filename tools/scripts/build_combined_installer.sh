@@ -140,6 +140,17 @@ for _distribution_input in \
     echo "[installer] ERROR: development-only Vellum D15 GPU-audio runtime found in $_distribution_input; refusing to package, sign, or notarize" >&2
     exit 1
   fi
+  # A PULP_DEV_SHARED_UI build links its modules against
+  # libpulp-dev-shared-ui.<version>.dylib inside the build tree, so it loads
+  # only on the machine that built it. Its install name is in the runtime and
+  # in every linked module's load commands. A read error also refuses.
+  _dev_shared_rc=0
+  _dev_shared="$(LC_ALL=C grep -R -l -a -F -- 'libpulp-dev-shared-ui.' "$_distribution_input" 2>/dev/null)" \
+    || _dev_shared_rc=$?
+  if [[ -n "$_dev_shared" || "$_dev_shared_rc" -gt 1 ]]; then
+    echo "[installer] ERROR: development-only dev-shared build (PULP_DEV_SHARED_UI=ON) found in $_distribution_input (${_dev_shared%%$'\n'*}); rebuild with \`pulp build\` before packaging, signing, or notarizing" >&2
+    exit 1
+  fi
 done
 
 # Control-shipping manifests and scan reports are build evidence, not Mach-O

@@ -114,6 +114,21 @@ class SyntheticMechanisms(unittest.TestCase):
         row = trd.decompose(flat, glyph_field(), BOX)
         self.assertIn("error", row)
 
+    def test_dark_text_on_a_light_background_measures_like_light_on_dark(self):
+        # The same stems, drawn dark on a light panel.
+        light = 240.0
+        ref = light - (glyph_field() - BG)
+        gained = light - (light - ref) * 1.25
+        row = trd.decompose(ref, gained, BOX)
+        self.assertAlmostEqual(row["ink_ratio"], 1.25, places=2)
+        self.assertEqual(row["shift"], [0, 0])
+        moved = np.full_like(ref, light)
+        moved[:, 1:] = ref[:, :-1]
+        row = trd.decompose(ref, moved, BOX)
+        self.assertAlmostEqual(row["ink_ratio"], 1.0, places=3)
+        self.assertAlmostEqual(row["dx"], 1.0, places=2)
+        self.assertEqual(row["shift"], [1, 0])
+
     def test_summary_counts_only_measured_labels(self):
         ref = glyph_field()
         rows = [dict(id="a", **trd.decompose(ref, shifted(ref, 1, 0), BOX)),
