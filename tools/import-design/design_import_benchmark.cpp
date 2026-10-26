@@ -25,6 +25,7 @@
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -80,6 +81,8 @@ struct Config {
     // Planted negative: add a view that decodes an encoded image on every
     // paint, to prove the steady-state gate fails on per-frame decodes.
     bool plant_frame_decode = false;
+    // Off measures the uncached text path: every paint shapes its text.
+    bool paragraph_cache = true;
 };
 
 // Per-frame duration of one pipeline stage.
@@ -125,6 +128,9 @@ struct PhaseResources {
     ResourceSeries image_decodes;
     ResourceSeries gpu_uploads;
     ResourceSeries paragraph_builds;
+    // Paragraph builds of text the frame's update did not write: re-shaping
+    // that a cache should have served.
+    ResourceSeries paragraph_builds_unwritten;
     ResourceSeries scene_records;
     ResourceSeries scene_replays;
     ResourceSeries image_cache_hits;
@@ -935,6 +941,20 @@ PhaseMetrics run_phase(BenchmarkFixture& fixture, int duration_ms, std::optional
     std::vector<double> record_ms;
     std::vector<double> submit_ms;
     std::vector<double> frame_allocations;
+    // The text this frame's update wrote, and the builds of any other text.
+    // Ordered with a transparent comparator so the observer looks text up
+    // without allocating inside the measured frame.
+    std::set<std::string, std::less<>> written;
+    std::uint64_t unwritten_builds = 0;
+    set_paragraph_build_observer([&](std::string_view text) {
+        if (written.find(text) == written.end())
+            ++unwritten_builds;
+    });
+    struct ObserverReset {
+        ~ObserverReset() {
+            set_paragraph_build_observer({});
+        }
+    } observer_reset;
     MemorySeries rss;
     MemorySeries footprint;
 
@@ -952,6 +972,11 @@ PhaseMetrics run_phase(BenchmarkFixture& fixture, int duration_ms, std::optional
         std::size_t allocations = 0;
         std::size_t allocated_bytes = 0;
         Clock::time_point laps[4];
+        written.clear();
+        if (interactive)
+            for (auto& text : fixture.text_written_by_step(frame))
+                written.insert(std::move(text));
+        const auto unwritten_before = unwritten_builds;
         const auto resources_before = sample_resources();
         const auto frame_start = Clock::now();
         const auto frame_cpu_start = std::clock();
@@ -992,6 +1017,7 @@ PhaseMetrics run_phase(BenchmarkFixture& fixture, int duration_ms, std::optional
             r.image_decodes.add(a.image_decodes - b.image_decodes, first);
             r.gpu_uploads.add(a.gpu_uploads - b.gpu_uploads, first);
             r.paragraph_builds.add(a.paragraph_builds - b.paragraph_builds, first);
+            r.paragraph_builds_unwritten.add(unwritten_builds - unwritten_before, first);
             r.scene_records.add(a.scene_records - b.scene_records, first);
             r.scene_replays.add(a.scene_replays - b.scene_replays, first);
             r.image_cache_hits.add(a.image_cache_hits - b.image_cache_hits, first);
@@ -1194,10 +1220,10 @@ std::string stage_json(const StageStats& stats) {
 }
 
 // Steady state does no resource work: after a phase's first frame, no frame
-// may decode an image, upload one to the GPU or rebuild an image-cache entry.
-// Paragraph builds are reported but not gated, because the canvas shapes text
-// on every paint until it has a paragraph cache. A target that never decodes
-// or uploads cannot fail this gate, so its verdict is `blind`, not `pass`.
+// may decode an image, upload one to the GPU or rebuild an image-cache entry,
+// and no frame may shape more text runs than its update wrote. A target that
+// never decodes, uploads or shapes cannot fail this gate, so its verdict is
+// `blind`, not `pass`.
 struct SteadyStateGate {
     std::string status;
     std::vector<std::string> failures;
@@ -1221,6 +1247,8 @@ SteadyStateGate steady_state_gate(const PhaseMetrics& idle, const PhaseMetrics& 
         check("image decodes", phase->resources.image_decodes);
         check("GPU uploads", phase->resources.gpu_uploads);
         check("image-cache builds", phase->resources.image_cache_builds);
+        check("paragraph builds of text the update did not write",
+              phase->resources.paragraph_builds_unwritten);
     }
     gate.status = gate.failures.empty() ? "pass" : "fail";
     return gate;
@@ -1231,6 +1259,14 @@ std::string resource_json(const ResourceSeries& series) {
            ", \"per_frame_max\": " + std::to_string(series.per_frame_max) +
            ", \"frames_after_first_with_work\": " +
            std::to_string(series.frames_after_first_with_work) + "}";
+}
+
+// Paragraph builds also carry the subset the gate judges: builds of text the
+// frame's update did not write.
+std::string paragraph_builds_json(const PhaseResources& r) {
+    auto json = resource_json(r.paragraph_builds);
+    json.pop_back();
+    return json + ", \"unwritten\": " + resource_json(r.paragraph_builds_unwritten) + "}";
 }
 
 void append_phase_json(std::ostringstream& out,
@@ -1290,7 +1326,7 @@ void append_phase_json(std::ostringstream& out,
     out << "      \"resources\": {\n";
     out << "        \"image_decodes\": " << resource_json(r.image_decodes) << ",\n";
     out << "        \"gpu_uploads\": " << resource_json(r.gpu_uploads) << ",\n";
-    out << "        \"paragraph_builds\": " << resource_json(r.paragraph_builds) << ",\n";
+    out << "        \"paragraph_builds\": " << paragraph_builds_json(r) << ",\n";
     out << "        \"scene_cache\": {\"records\": " << resource_json(r.scene_records)
         << ", \"replays\": " << resource_json(r.scene_replays) << "},\n";
     out << "        \"image_cache\": {\"hits\": " << resource_json(r.image_cache_hits)
@@ -1327,6 +1363,7 @@ struct RunContext {
     std::string canvas = "recording";
     SteadyStateGate steady_state{"blind", {}};
     bool planted_frame_decode = false;
+    bool paragraph_cache = true;
     std::uint64_t paint_commands_recorded = 0;
 };
 
@@ -1411,6 +1448,7 @@ std::string make_json(const Config& config, const std::optional<IrProvenance>& i
            "setters, baked-native-rebuild rematerializes the same IR per interactive step, "
            "baked-cpp mutates generated-style native widgets directly; with --ir every lane "
            "writes the IR's anchored text slots instead\",\n";
+    out << "  \"paragraph_cache\": " << (run.paragraph_cache ? "true" : "false") << ",\n";
     out << "  \"steady_state_gate\": {\n";
     out << "    \"status\": \"" << run.steady_state.status << "\",\n";
     out << "    \"planted_frame_decode\": " << (run.planted_frame_decode ? "true" : "false")
@@ -1442,7 +1480,7 @@ void print_usage(std::ostream& out) {
            "[--ir=DESIGN_IR_JSON] [--bundle=MATERIALIZED_BUNDLE_JS] [--frames=N] "
            "[--cycles=N] [--canvas=recording|skia-raster|skia-graphite] "
            "[--require-steady-state] [--plant-leak] [--plant-cycle-leak] [--plant-load=LOAD] "
-           "[--plant-frame-decode]\n"
+           "[--plant-frame-decode] [--paragraph-cache=on|off]\n"
            "  --ir measures an importer-produced DesignIR with anchored text nodes as\n"
            "     keyed slots (live, baked-native and baked-native-rebuild).\n"
            "  --bundle mounts the materialized runtime bundle built from the same\n"
@@ -1455,13 +1493,16 @@ void print_usage(std::ostream& out) {
            "     SkiaCanvas into a CPU raster or headless Graphite surface, where\n"
            "     decodes, uploads and text shaping are measured.\n"
            "  --require-steady-state exits 4 when a frame after a phase's first\n"
-           "     decodes, uploads or rebuilds an image.\n"
+           "     decodes, uploads or rebuilds an image, or shapes text its update\n"
+           "     did not write.\n"
            "  --plant-leak leaks one view past teardown; the run must then fail.\n"
            "  --plant-cycle-leak leaks 4 MiB per cycle; the slope must then rise.\n"
            "  --plant-load reports LOAD as the one-minute load average; a load\n"
            "     above cores/4 must mark the receipt confounded.\n"
            "  --plant-frame-decode adds a view that decodes an image every paint;\n"
-           "     the steady-state gate must then fail.\n";
+           "     the steady-state gate must then fail.\n"
+           "  --paragraph-cache=off shapes every text run on every paint, the\n"
+           "     uncached text path; the steady-state gate must then fail on text.\n";
 }
 
 bool parse_double(std::string_view value, double& out) {
@@ -1554,6 +1595,10 @@ std::optional<Config> parse_args(int argc, char** argv) {
             config.require_steady_state = true;
         } else if (arg == "--plant-frame-decode") {
             config.plant_frame_decode = true;
+        } else if (auto value = value_after("--paragraph-cache=")) {
+            if (*value != "on" && *value != "off")
+                return std::nullopt;
+            config.paragraph_cache = *value == "on";
         } else if (arg == "--plant-leak") {
             config.plant_leak = true;
         } else if (arg == "--plant-cycle-leak") {
@@ -1615,6 +1660,7 @@ int main(int argc, char** argv) {
         return 2;
     }
 
+    set_paragraph_cache_enabled(config->paragraph_cache);
     const auto views_constructed_start = View::constructed_count();
     const auto views_destroyed_start = View::destroyed_count();
     const auto build_start = Clock::now();
@@ -1734,6 +1780,7 @@ int main(int argc, char** argv) {
     run.canvas = target->name();
     run.steady_state = steady_state_gate(idle, interactive, target->observes_resources());
     run.planted_frame_decode = config->plant_frame_decode;
+    run.paragraph_cache = config->paragraph_cache;
     run.paint_commands_recorded = paint_commands_recorded;
     target.reset();
     const auto json = make_json(*config, ir, startup, idle, interactive, teardown, run);

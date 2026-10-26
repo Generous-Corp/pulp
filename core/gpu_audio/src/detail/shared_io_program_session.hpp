@@ -38,6 +38,10 @@ class SharedIoProgramSession {
     bool prepared() const noexcept {
         return prepared_;
     }
+    // Host only, while no service call runs (see the provider hook).
+    bool set_completion_notifier(SharedIoCompletionNotifier notifier) noexcept {
+        return prepared_ && provider_ != nullptr && provider_->set_completion_notifier(notifier);
+    }
     std::uint64_t preparation_epoch() const noexcept {
         return plan_.preparation_epoch();
     }

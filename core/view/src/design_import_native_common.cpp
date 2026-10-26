@@ -2314,6 +2314,8 @@ std::unique_ptr<View> make_widget(const IRNode& node,
         }
         case NativeWidgetKind::range_slider:
             return make_ua_range_slider(node);
+        case NativeWidgetKind::button_surface:
+            return make_ua_button_surface(node);
         case NativeWidgetKind::stepper: {
             auto stepper = std::make_unique<Stepper>();
             stepper->set_range(node.audio_min, node.audio_max);
@@ -2770,6 +2772,7 @@ bool is_interactive_native_kind(NativeWidgetKind kind) {
         case NativeWidgetKind::text_editor:
         case NativeWidgetKind::checkbox:
         case NativeWidgetKind::range_slider:
+        case NativeWidgetKind::button_surface:
         case NativeWidgetKind::toggle_button:
         case NativeWidgetKind::combo_box:
         case NativeWidgetKind::knob:
@@ -2799,6 +2802,7 @@ bool native_kind_owns_imported_child_hits(NativeWidgetKind kind) {
         case NativeWidgetKind::text_editor:
         case NativeWidgetKind::checkbox:
         case NativeWidgetKind::range_slider:
+        case NativeWidgetKind::button_surface:
         case NativeWidgetKind::toggle_button:
         case NativeWidgetKind::combo_box:
         case NativeWidgetKind::knob:
@@ -2879,6 +2883,8 @@ const char* native_widget_kind_name(NativeWidgetKind kind) {
         case NativeWidgetKind::checkbox: return "checkbox";
         case NativeWidgetKind::range_slider:
             return "range_slider";
+        case NativeWidgetKind::button_surface:
+            return "button_surface";
         case NativeWidgetKind::toggle_button: return "toggle_button";
         case NativeWidgetKind::segmented: return "segmented";
         case NativeWidgetKind::stepper: return "stepper";

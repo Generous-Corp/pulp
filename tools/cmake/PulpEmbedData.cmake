@@ -42,8 +42,29 @@ include_guard(GLOBAL)
 #       extern const unsigned char logo_png[];
 #       extern const std::size_t   logo_png_size;
 #   }
+#
+# COMPRESS stores each asset as a zlib (RFC 1950) stream. Text assets (a
+# scripted UI's runtime bundle, a materialized document's JSON) shrink to a
+# tenth to a half; already-compressed formats (PNG, JPEG, WOFF2) gain nothing,
+# so leave those raw. The symbols change, so a consumer still reading raw bytes
+# fails to compile instead of reading compressed data:
+#   extern const unsigned char logo_json_zlib[];      // compressed bytes
+#   extern const std::size_t   logo_json_zlib_size;
+#   extern const std::size_t   logo_json_size;        // inflated bytes
+# Inflate where the asset is used and drop the copy once it is consumed:
+#   auto text = pulp::runtime::zlib_decompress_exact(
+#       myresources::logo_json_zlib, myresources::logo_json_zlib_size,
+#       myresources::logo_json_size);   // std::optional<std::string>
+# zlib_decompress_exact inflates straight into a string of the recorded size and
+# returns nullopt unless the stream yields exactly that many bytes.
+# The trade is binary size against an inflate on use and a transient heap copy:
+# about 1 ms per MB of text on an M-series core. It allocates, so
+# never call it on the audio thread. The stream is deterministic per zlib
+# build of the host's Python (see encode_binary_data.py), not across builds,
+# so leave COMPRESS off for a target whose artifacts are byte-compared across
+# hosts or built as a reproducible release.
 function(pulp_add_binary_data target)
-    cmake_parse_arguments(DATA "" "NAMESPACE" "SOURCES" ${ARGN})
+    cmake_parse_arguments(DATA "COMPRESS" "NAMESPACE" "SOURCES" ${ARGN})
 
     if(NOT DATA_NAMESPACE)
         set(DATA_NAMESPACE "${target}")
@@ -79,6 +100,10 @@ function(pulp_add_binary_data target)
     set(hpp_content "#pragma once\n#include <cstddef>\n\nnamespace ${DATA_NAMESPACE} {\n\n")
 
     set(_generated_cpps "")
+    set(_compress_args "")
+    if(DATA_COMPRESS)
+        set(_compress_args --compress zlib)
+    endif()
 
     foreach(source_file ${DATA_SOURCES})
         get_filename_component(file_name "${source_file}" NAME)
@@ -101,13 +126,19 @@ function(pulp_add_binary_data target)
                     --out       "${_per_source_cpp}"
                     --namespace "${DATA_NAMESPACE}"
                     --var       "${var_name}"
+                    ${_compress_args}
             DEPENDS "${abs_path}" "${_pulp_encoder}"
             COMMENT "Encoding binary asset ${file_name} into ${target}"
             VERBATIM)
 
         list(APPEND _generated_cpps "${_per_source_cpp}")
 
-        string(APPEND hpp_content "extern const unsigned char ${var_name}[];\n")
+        if(DATA_COMPRESS)
+            string(APPEND hpp_content "extern const unsigned char ${var_name}_zlib[];\n")
+            string(APPEND hpp_content "extern const std::size_t ${var_name}_zlib_size;\n")
+        else()
+            string(APPEND hpp_content "extern const unsigned char ${var_name}[];\n")
+        endif()
         string(APPEND hpp_content "extern const std::size_t ${var_name}_size;\n\n")
     endforeach()
 

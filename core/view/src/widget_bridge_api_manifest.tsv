@@ -51,6 +51,7 @@ parseParamValue	state_binding	function	core/view/src/widget_bridge/state_binding
 getParam	state_binding	function	core/view/src/widget_bridge/state_binding_api.cpp
 setParam	state_binding	function	core/view/src/widget_bridge/state_binding_api.cpp
 bindWidgetToParam	state_binding	function	core/view/src/widget_bridge/state_binding_api.cpp
+isWidgetParamBound	state_binding	function	core/view/src/widget_bridge/state_binding_api.cpp
 bindMeter	state_binding	function	core/view/src/widget_bridge/state_binding_api.cpp
 bindScope	state_binding	function	core/view/src/widget_bridge/state_binding_api.cpp
 listValueChannels	state_binding	function	core/view/src/widget_bridge/state_binding_api.cpp

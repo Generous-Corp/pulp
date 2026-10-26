@@ -38,7 +38,7 @@ REGISTRATION_DOMAIN = b"pulp-ctest-registration-v1\0"
 INVENTORY_DOMAIN = b"pulp-ctest-inventory-v1\0"
 DIGEST_DOMAIN = b"pulp-changed-surface-contract-v1\0"
 EXCLUDED_NAME_REGEX = "AudioWorkgroup"
-EXCLUDED_LABEL_REGEX = "validation|slow|performance|bench|quality-lab"
+EXCLUDED_LABEL_REGEX = "validation|slow|performance|bench|quality-lab|gpu-proof"
 NOT_BUILT_PLACEHOLDER = re.compile(
     r"^(?P<target>[A-Za-z0-9_.+:-]+)_NOT_BUILT-(?P<suffix>[0-9a-f]{7,64})$"
 )
@@ -806,6 +806,20 @@ def artifact_index(model: "CodeModel") -> dict[str, set[str]]:
     return index
 
 
+# A test that reads what CMake records about a target (a generated link or
+# flags file, a boundary over its headers) names no artifact of it. Its
+# registration declares the targets instead:
+#   set_tests_properties(<test> PROPERTIES PULP_SELECT_WITH_TARGETS "a;b")
+SELECT_WITH_TARGETS_PROPERTY = "PULP_SELECT_WITH_TARGETS"
+
+
+def declared_targets(entry: "CTestEntry") -> set[str]:
+    values: set[str] = set()
+    for value in _as_list(entry.properties.get(SELECT_WITH_TARGETS_PROPERTY)):
+        values.update(v for v in value.split(";") if v)
+    return values
+
+
 def command_owners(command: Iterable[str], index: dict[str, set[str]]) -> set[str]:
     """Targets whose build output (or its bundle) a test command names."""
     owners: set[str] = set()
@@ -1426,6 +1440,8 @@ def project_affected(model: CodeModel, changed: list[str], deleted: list[str],
             for ref in refs:
                 for owner in index.get(ref, ()):
                     by_test_target.setdefault(owner, set()).add(entry.name)
+            for owner in declared_targets(entry):
+                by_test_target.setdefault(owner, set()).add(entry.name)
             if any(ref in changed_abs for ref in refs):
                 file_selected_tests.add(entry.name)
         tests: set[str] = set(file_selected_tests) | (family_tests & known_names)

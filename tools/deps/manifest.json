@@ -358,7 +358,7 @@
       "name": "ICU",
       "category": "canvas",
       "license": "Unicode-3.0 (+ ICU, BSD, IPADIC/ICOT notices for bundled dictionaries)",
-      "version": "78.2 (bundled in Skia chrome/m153)",
+      "version": "78.2 (bundled in Skia chrome/m157)",
       "source_kind": "prebuilt-toolchain",
       "repository": "https://github.com/unicode-org/icu",
       "upstream": {

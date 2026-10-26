@@ -34,12 +34,15 @@ import subprocess
 RTTI_MANGLED = re.compile(r"^_?_ZT[IVSTC]")
 _RTTI_DEMANGLED = re.compile(
     r"^(?:typeinfo name for|typeinfo for|vtable for|VTT for|construction vtable for) (?P<type>.+)$")
-# Special names whose subject is a member of a class.
-_SPECIAL_PREFIXES = (
-    "non-virtual thunk to ", "virtual thunk to ", "covariant return thunk to ",
-    "guard variable for ", "reference temporary #0 for ", "reference temporary for ",
-    "thread-local wrapper routine for ", "TLS init function for ",
-)
+# An operator's own name: brackets and spaces inside it ("operator>",
+# "operator()", "operator bool", "operator new[]") are not nesting or a return
+# type, so member_owner masks it before measuring depth.
+_OPERATOR_NAME = re.compile(
+    r"\boperator(?:\s*(?:new|delete)(?:\s*\[\])?(?![\w])"
+    r"|\s*\(\)|\s*\[\]|\s*->\*?|\s*<=>|\s*(?:<<|>>)=?"
+    r"|\s*(?:&&|\|\||\+\+|--|[-+*/%^&|~!=<>,]=?)"
+    r"|\s*\"\"\s*\w+"
+    r"|\s+[^()]+?(?=\())")
 _CLOSURE = re.compile(r"'lambda|\{lambda|'block|\{block|'unnamed|\{unnamed|\$_\d|\(anonymous namespace\)")
 
 
@@ -55,8 +58,13 @@ def demangle(names: set[str], cxxfilt: str | None = None) -> dict[str, str]:
     if not tool:
         raise DemangleError("c++filt (or llvm-cxxfilt) is required to read RTTI ownership")
     ordered = sorted(names)
+    # Mach-O names carry one extra leading underscore; it is removed here, so
+    # the tool must never strip another. Older Apple c++filt (the Xcode 16 on
+    # GitHub-hosted macOS) strips one by default on Darwin, which leaves an
+    # Itanium "_Z..." name undemangled and every RTTI owner unread. -n
+    # (--no-strip-underscore) turns that off in llvm-cxxfilt and GNU c++filt.
     itanium = [name[1:] if name.startswith("__Z") else name for name in ordered]
-    proc = subprocess.run([tool], input="\n".join(itanium), capture_output=True, text=True,
+    proc = subprocess.run([tool, "-n"], input="\n".join(itanium), capture_output=True, text=True,
                           encoding="utf-8", errors="replace", check=False)
     out = proc.stdout.splitlines()
     if proc.returncode != 0 or len(out) != len(ordered):
@@ -104,13 +112,13 @@ def member_owner(demangled: str) -> str | None:
     """
     if _RTTI_DEMANGLED.match(demangled):
         return None
-    for prefix in _SPECIAL_PREFIXES:
-        if demangled.startswith(prefix):
-            demangled = demangled[len(prefix):]
-            break
+    demangled = _OPERATOR_NAME.sub("operator_", demangled)
     paren = _top_level(demangled, "(")
     name = demangled[:paren] if paren >= 0 else demangled
-    # A template instantiation can carry its return type first.
+    # Keep the last top-level word: that drops a template instantiation's
+    # return type and the wording of special names ("non-virtual thunk to",
+    # "guard variable for", "TLS init function for", ...), which all end in
+    # the member they are about.
     depth, start = 0, 0
     for index, char in enumerate(name):
         if char in "<(":

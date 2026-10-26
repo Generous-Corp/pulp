@@ -563,6 +563,10 @@ directly—the shared helpers contain exceptions.
 
 ## Gotchas
 
+### The host's timeline sample position is a double — round it, never truncate
+
+`CallHostTransportState` reports `outCurrentSampleInTimeLine` as a `Float64`, and some hosts send a value a hair below the true sample: REAPER reports `13823.9999` for sample `13824`. A `static_cast<int64_t>` truncates it, so `position_samples` steps back one sample and then jumps two on the next block. Convert through `pulp::format::detail::host_sample_position()` (`detail/host_sample_position.hpp`). It returns the nearest sample (`std::round`, independent of the rounding mode), or `nullopt` for a non-finite or out-of-range value; leave `TransportField::SamplePosition` unset in that case.
+
 ### DAW component cache — clear it after a `type` change
 
 Logic, MainStage, GarageBand, Studio One, Live, and every other AU host maintain a **host-side cache** of AU descriptors, keyed on subtype + manufacturer. When you change a plug-in from `aufx` to `aumf` (or vice versa) *without* also changing the subtype, hosts will keep the cached-old-type descriptor and behave as if the fix never shipped — you'll install a fresh `.component` and the host will still treat it as `aufx`. Symptoms: rebuilt plug-in appears in the correct MIDI-effect slot of the host UI only after a restart, or never appears at all.

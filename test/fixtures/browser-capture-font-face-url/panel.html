@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Page font faces</title>
+<style>
+  @font-face {
+    font-family: 'Pulp Page Face';
+    src: url('fonts/Jost-Regular.ttf') format('truetype');
+    font-weight: 400;
+    font-style: normal;
+  }
+  @font-face {
+    font-family: 'Pulp Page Face';
+    src: local("Pulp Page Face Bold Not Installed"), url(fonts/Jost-Bold.ttf) format("truetype");
+    font-weight: 700;
+    font-style: normal;
+  }
+  /* Declared and never used: Chromium never fetches it, so it binds nothing. */
+  @font-face {
+    font-family: 'Pulp Page Unused';
+    src: url('fonts/never-fetched.ttf') format('truetype');
+  }
+  html, body { margin: 0; background: #f4f1ea; color: #1d1b16; }
+  body { width: 480px; height: 200px; padding: 24px; box-sizing: border-box; }
+  p { margin: 0 0 16px; font: 28px/1.2 'Pulp Page Face', sans-serif; }
+  .bold { font-weight: 700; }
+</style>
+</head>
+<body>
+  <p>Regular page face</p>
+  <p class="bold">Bold page face</p>
+</body>
+</html>

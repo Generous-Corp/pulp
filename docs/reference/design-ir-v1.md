@@ -201,7 +201,7 @@ is the file the CLI's asset pass resolved it to.
 | `weightMax` | integer | Upper bound of a CSS `font-weight` range (a variable face). Absent for one weight. |
 | `fontStyle` | string | CSS `font-style` descriptor of a captured `@font-face` rule. |
 | `unicodeRange` | string | CSS `unicode-range` descriptor, verbatim. Absent means every code point. |
-| `asset_id` | string | Manifest entry holding the `.ttf`, `.otf` or `.woff2` bytes. |
+| `asset_id` | string | Manifest entry holding the `.ttf`, `.otf`, `.woff` or `.woff2` bytes: `pulp-materialized-asset-<sha256>` for a bundle's Blob font, `pulp-page-font-<sha256>` for a plain page's `url()` font. |
 | `resolvedPath` | string | Filesystem path stamped by the CLI asset pass. |
 
 Figma plugin exports fill `family`, `style`, `weight` and `asset_id`. A browser

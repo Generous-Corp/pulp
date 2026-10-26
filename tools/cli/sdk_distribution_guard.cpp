@@ -1,10 +1,16 @@
 #include "sdk_distribution_guard.hpp"
 
+#include "configure_defaults.hpp"
+#include "ship_tracing_guard.hpp"
+
 #include <fstream>
+#include <sstream>
+#include <string_view>
 
 namespace pulp::cli {
 
-std::filesystem::path vellum_d15_artifact_offender(const std::filesystem::path& artifact) {
+std::filesystem::path vellum_d15_artifact_offender(const std::filesystem::path& artifact,
+                                                   bool follow_directory_symlinks) {
     constexpr auto runtime_name = "libvellum-gpu.dylib";
     std::error_code ec;
     if (artifact.empty())
@@ -23,7 +29,9 @@ std::filesystem::path vellum_d15_artifact_offender(const std::filesystem::path& 
     if (ec)
         return artifact;
 
-    const auto options = std::filesystem::directory_options::follow_directory_symlink;
+    const auto options = follow_directory_symlinks
+                             ? std::filesystem::directory_options::follow_directory_symlink
+                             : std::filesystem::directory_options::none;
     std::filesystem::recursive_directory_iterator it(artifact, options, ec), end;
     if (ec)
         return artifact;
@@ -69,6 +77,122 @@ bool sdk_allows_distribution(const std::filesystem::path& build_dir, std::string
         return false;
     }
     return true;
+}
+
+// The install name of the shared runtime is @rpath/libpulp-dev-shared-ui.<version>.dylib
+// (tools/cmake/PulpDevSharedUi.cmake), so these bytes are in the runtime itself
+// and in the load commands of every module linked against it.
+static constexpr std::string_view kDevSharedRuntimePrefix = "libpulp-dev-shared-ui.";
+
+static bool is_dev_shared_offender(const std::filesystem::path& file) {
+    if (file.filename().string().rfind(kDevSharedRuntimePrefix, 0) == 0)
+        return true;
+    return file_contains_bytes(file, kDevSharedRuntimePrefix);
+}
+
+std::filesystem::path dev_shared_artifact_offender(const std::filesystem::path& artifact,
+                                                   bool follow_directory_symlinks) {
+    std::error_code ec;
+    if (artifact.empty())
+        return {};
+    const bool artifact_exists = std::filesystem::exists(artifact, ec);
+    if (ec)
+        return artifact;
+    if (!artifact_exists)
+        return {};
+    if (!std::filesystem::is_directory(artifact, ec)) {
+        if (ec)
+            return artifact;
+        return is_dev_shared_offender(artifact) ? artifact : std::filesystem::path{};
+    }
+
+    const auto options = follow_directory_symlinks
+                             ? std::filesystem::directory_options::follow_directory_symlink
+                             : std::filesystem::directory_options::none;
+    std::filesystem::recursive_directory_iterator it(artifact, options, ec), end;
+    if (ec)
+        return artifact;
+    while (!ec && it != end) {
+        if (it.depth() > 64)
+            return artifact;
+        if (it->is_regular_file(ec) && !ec && is_dev_shared_offender(it->path()))
+            return it->path();
+        if (ec)
+            return artifact;
+        it.increment(ec);
+    }
+    if (ec)
+        return artifact;
+    return {};
+}
+
+bool is_local_signing_identity(std::string_view identity) {
+    // The certificate common names are "Apple Development: <name> (<team>)"
+    // and "Mac Developer: ...". Matching through the colon keeps an identity
+    // that merely starts with those words from counting as local.
+    return identity == "-" || identity.rfind("Apple Development:", 0) == 0 ||
+           identity.rfind("Mac Developer:", 0) == 0;
+}
+
+std::optional<std::uintmax_t> zipinfo_uncompressed_bytes(std::string_view zipinfo_totals) {
+    const std::string_view marker = " bytes uncompressed";
+    const auto at = zipinfo_totals.find(marker);
+    if (at == std::string_view::npos)
+        return std::nullopt;
+    std::size_t start = at;
+    while (start > 0 && zipinfo_totals[start - 1] >= '0' && zipinfo_totals[start - 1] <= '9')
+        --start;
+    if (start == at)
+        return std::nullopt;
+    std::uintmax_t value = 0;
+    for (std::size_t i = start; i < at; ++i)
+        value = value * 10 + static_cast<std::uintmax_t>(zipinfo_totals[i] - '0');
+    return value;
+}
+
+std::optional<std::uintmax_t> pkg_payload_install_bytes(std::string_view package_info) {
+    const auto payload = package_info.find("<payload");
+    if (payload == std::string_view::npos)
+        return std::nullopt;
+    const std::string_view attr = "installKBytes=\"";
+    const auto at = package_info.find(attr, payload);
+    const auto tag_end = package_info.find('>', payload);
+    if (at == std::string_view::npos || (tag_end != std::string_view::npos && at > tag_end))
+        return std::nullopt;
+    std::uintmax_t kbytes = 0;
+    std::size_t i = at + attr.size();
+    if (i >= package_info.size() || package_info[i] < '0' || package_info[i] > '9')
+        return std::nullopt;
+    for (; i < package_info.size() && package_info[i] >= '0' && package_info[i] <= '9'; ++i)
+        kbytes = kbytes * 10 + static_cast<std::uintmax_t>(package_info[i] - '0');
+    return kbytes * 1024;
+}
+
+std::string container_space_refusal(std::uintmax_t needed, std::uintmax_t available) {
+    // Room for the scan's own bookkeeping and for whatever else is writing
+    // to the temp volume meanwhile.
+    constexpr std::uintmax_t kMargin = 256ull * 1024 * 1024;
+    if (needed <= available && available - needed >= kMargin)
+        return {};
+    return "it expands to " + std::to_string(needed) + " bytes and the temp volume has " +
+           std::to_string(available) + " bytes free (256 MiB is kept in reserve)";
+}
+
+bool dev_shared_build_allows_distribution(const std::filesystem::path& build_dir,
+                                          std::string& error) {
+    std::ifstream cache(build_dir / "CMakeCache.txt");
+    if (!cache)
+        return true;
+    std::ostringstream text;
+    text << cache.rdbuf();
+    const auto value = cmake_cache_value(text.str(), kDevSharedUiOption);
+    if (!value || !cmake_value_on(*value))
+        return true;
+    error = "the configured build links plug-ins against the development-only shared Pulp "
+            "runtime (PULP_DEV_SHARED_UI=ON), which loads only from this build tree. Only a "
+            "static build can be signed for distribution, packaged, notarized, shared, or "
+            "released";
+    return false;
 }
 
 } // namespace pulp::cli

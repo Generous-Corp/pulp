@@ -969,6 +969,22 @@ void BridgeRegistrars::register_state_binding_api(WidgetBridge& self) {
         return value_channels_to_value(infos);
     });
 
+    // isWidgetParamBound(widgetId) -> whether bindWidgetToParam bound the
+    // widget's value to a parameter. Such a widget is driven from the store
+    // every frame, so a UI framework must not also write a value back to it
+    // after an edit: the binding already re-asserts the store's value.
+    register_bridge_function(
+        api, "isWidgetParamBound", [&self](choc::javascript::ArgumentList args) {
+            const auto id = args.get<std::string>(0, "");
+            const bool bound =
+                std::any_of(self.param_bindings_.begin(), self.param_bindings_.end(),
+                            [&](const WidgetBridge::ParamBinding& b) {
+                                return b.widget_id == id &&
+                                       b.target == WidgetBridge::ParamBinding::Target::value;
+                            });
+            return choc::value::createBool(bound);
+        });
+
     // unbindWidget(widgetId) -> remove any binding(s) for that widget. Returns
     // the number of bindings removed.
     register_bridge_function(api, "unbindWidget", [&self](choc::javascript::ArgumentList args) {
