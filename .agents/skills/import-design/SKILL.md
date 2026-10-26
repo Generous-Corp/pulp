@@ -103,9 +103,9 @@ schema/version, HTML field, and asset count agree with the envelope. Only
 `--emit materialized-runtime` and `--materialized-canvas-composition` capture
 that sidecar (`browser_import_captures_materialized_document`). Every other
 import passes `--omit-materialized-document`, and the envelope then carries no
-materialized fields. The one exception is a document with Blob-URL
-`@font-face` rules: `capture.mjs` reads it anyway, because its
-`font_bindings` are the only record of those faces. A stale, hand-edited, mismatched, or
+materialized fields, with no exception: Blob-URL `@font-face` faces are read
+in the page into `font-faces.json`, so they do not need the sidecar. A stale,
+hand-edited, mismatched, or
 path-escaping envelope fails closed with the
 `browser-capture-provenance-invalid` diagnostic. Keep the envelope and sidecar
 from the same capture directory; do not copy one from an older browser run or
