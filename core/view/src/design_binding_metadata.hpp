@@ -122,6 +122,14 @@ struct NativeBindingMetadata {
     // (case-insensitive); default true otherwise.
     bool show_internal_label_value() const;
 
+    // Whether a level display can bind: a meter source and channel, or a meter
+    // value key alone, which the bridge's bindMeter binds by key (a parameter
+    // by name, or a `value:<name>` channel). Every lane binds on the same test.
+    bool has_meter_input() const {
+        const auto has = [](const std::optional<std::string>& v) { return v && !v->empty(); };
+        return (has(meter_source) && has(meter_channel)) || has(meter_value_key);
+    }
+
     // Read the `pulp*` contract attributes off `node` into a typed model.
     static NativeBindingMetadata parse(const IRNode& node);
 

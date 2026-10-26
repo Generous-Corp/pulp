@@ -311,8 +311,7 @@ bool bind_imported_view(View& view,
                             .gesture_contract = text_or_empty(md.gesture_contract)});
         return true;
     }
-    if (auto* level = dynamic_cast<LevelDisplay*>(&view);
-        level && has_text(md.meter_source) && has_text(md.meter_channel)) {
+    if (auto* level = dynamic_cast<LevelDisplay*>(&view); level && md.has_meter_input()) {
         const NativeImportMeterBindingDescriptor descriptor{
             .route_id = text_or_empty(md.route_id),
             .meter_source = text_or_empty(md.meter_source),
@@ -392,8 +391,7 @@ bool can_bind_imported_view(View& view,
         return true;
     if (dynamic_cast<XYPad*>(&view) && has_text(md.x_param_key) && has_text(md.y_param_key))
         return true;
-    if (dynamic_cast<LevelDisplay*>(&view) && has_text(md.meter_source) &&
-        has_text(md.meter_channel))
+    if (dynamic_cast<LevelDisplay*>(&view) && md.has_meter_input())
         return true;
     if (dynamic_cast<SeriesDisplay*>(&view) && has_text(md.param_key) &&
         has_text(md.waveform_shape))
