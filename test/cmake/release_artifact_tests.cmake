@@ -115,8 +115,11 @@ if(_pulp_pra_gates)
                 "-DGATES=${_gates}"
                 "-DLABEL=release-artifact scan [sdk-library]"
                 -P ${CMAKE_SOURCE_DIR}/tools/cmake/PulpReleaseArtifactScan.cmake)
+        # Scanning every SDK library runs close to 300 s under ASan, so the
+        # budget is scaled for instrumented trees; plain lanes keep 300.
+        pulp_scaled_test_timeout(_pulp_pra_sdk_timeout 300)
         set_tests_properties(release-artifact-scan-sdk-libraries PROPERTIES
-            LABELS "cmake;control;ship" TIMEOUT 300)
+            LABELS "cmake;control;ship" TIMEOUT "${_pulp_pra_sdk_timeout}")
     endfunction()
     cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}"
         CALL _pulp_release_artifact_register_class_scans)
