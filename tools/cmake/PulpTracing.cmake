@@ -11,9 +11,10 @@
 # NEVER ship a binary built with PULP_TRACING=ON. Two guards enforce this:
 #   - test/test_tracing.cpp — Catch2 "off by default" assertion (a default build
 #     is OFF, so it passes in normal CI and fails loudly if ON leaks in).
-#   - tools/cmake/AssertNoTracingSymbols.cmake — best-effort nm scan (mirrors
-#     AssertNoJsSymbols.cmake); the authoritative guarantee is this module adding
-#     no Perfetto link input when OFF.
+#   - tools/cmake/AssertNoTracingSymbols.cmake — best-effort nm scan over the
+#     `tracing-off` gate of tools/cmake/release_artifact_forbidden.json (the one
+#     list every release-artifact scan reads); the authoritative guarantee is
+#     this module adding no Perfetto link input when OFF.
 #
 # D1 (planning/2026-07-08-perfetto-tracing-plan.md §0c) proved Perfetto's
 # TRACE_EVENT is NOT real-time-safe (it locks a mutex on chunk rollover), so this

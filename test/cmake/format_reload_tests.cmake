@@ -239,6 +239,7 @@ if(UNIX)
 
     add_test(NAME pulp-reload-ship-symbol-absence
         COMMAND ${CMAKE_COMMAND}
+            -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
             -DDEV_BIN=$<TARGET_FILE:pulp-reload-ship-fixture-dev>
             -DSHIP_BIN=$<TARGET_FILE:pulp-reload-ship-fixture-ship>
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/reload_ship_symbol_check.cmake)

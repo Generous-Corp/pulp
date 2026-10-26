@@ -1484,3 +1484,9 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(cmake-forge-catalog-install PROPERTIES
         LABELS "cmake;host;sdk" TIMEOUT 180)
 endif()
+
+# The unified release-artifact scanner: forbidden-marker list self-test,
+# negative control, and per-class scans. Lives beside the control-shipping
+# scanner tests above because it is the same family of `cmake -P` artifact
+# scans and the control scanner reads the same list.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/release_artifact_tests.cmake")
