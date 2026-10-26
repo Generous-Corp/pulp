@@ -8,6 +8,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <pulp/canvas/bundled_fonts.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/canvas/font_resolver.hpp>
 #include <pulp/canvas/sdf_atlas.hpp>
@@ -2254,3 +2255,108 @@ TEST_CASE("a generic whose platform family is missing falls through the list",
 }
 
 #endif  // PULP_HAS_SKIA
+
+// ── Declared @font-face weight ranges ────────────────────────────────────────
+//
+// Chromium matches and synthesizes a page font against its @font-face rule's
+// declared font-weight range, not the weight the file reports.
+
+TEST_CASE("CSS font matching picks a declared weight range the way Chromium does",
+          "[canvas][fonts][synthetic-bold]") {
+    using pulp::canvas::css_match_declared_weight;
+    using pulp::canvas::DeclaredWeightRange;
+    const std::vector<DeclaredWeightRange> pair{{300, 300}, {700, 700}};
+    CHECK(css_match_declared_weight(pair, 700) == 1); // contained
+    CHECK(css_match_declared_weight(pair, 600) == 1); // over 500: nearest above first
+    CHECK(css_match_declared_weight(pair, 800) == 1); // then the nearest below
+    CHECK(css_match_declared_weight(pair, 350) == 0); // under 400: nearest below first
+    // 400..500: above up to 500, then below, then above 500.
+    CHECK(css_match_declared_weight(pair, 450) == 0);
+    CHECK(css_match_declared_weight({{500, 500}, {300, 300}}, 450) == 0);
+    CHECK(css_match_declared_weight({{600, 600}}, 450) == 0);
+    CHECK(css_match_declared_weight({{400, 700}}, 650) == 0);
+    CHECK(css_match_declared_weight({}, 400) == -1);
+}
+
+TEST_CASE("bold is synthesized only where the matched declared range ends below 600",
+          "[canvas][fonts][synthetic-bold]") {
+    using pulp::canvas::declare_font_face_weight_range;
+    using pulp::canvas::declared_face_synthesizes_bold;
+    CHECK_FALSE(declared_face_synthesizes_bold("SynthBoldUndeclared", 700).has_value());
+
+    declare_font_face_weight_range("SynthBoldRange", 400, 700);
+    CHECK(declared_face_synthesizes_bold("SynthBoldRange", 700) == false);
+    CHECK(declared_face_synthesizes_bold("SynthBoldRange", 400) == false);
+
+    declare_font_face_weight_range("SynthBoldNarrow", 400, 400);
+    CHECK(declared_face_synthesizes_bold("SynthBoldNarrow", 700) == true);
+    CHECK(declared_face_synthesizes_bold("SynthBoldNarrow", 600) == true);
+    CHECK(declared_face_synthesizes_bold("SynthBoldNarrow", 500) == false);
+
+    // Two faces: 600 matches the 700 face, which is declared bold.
+    declare_font_face_weight_range("SynthBoldPair", 400, 400);
+    declare_font_face_weight_range("SynthBoldPair", 700, 700);
+    CHECK(declared_face_synthesizes_bold("SynthBoldPair", 600) == false);
+    // Repeating a declaration changes nothing.
+    declare_font_face_weight_range("SynthBoldPair", 700, 700);
+    CHECK(declared_face_synthesizes_bold("SynthBoldPair", 700) == false);
+}
+
+#ifdef PULP_HAS_SKIA
+namespace {
+// Ink (sum of 255 - red) of one word painted black on white through SkiaCanvas.
+double declared_font_ink(const std::string& family, int weight) {
+    constexpr int kW = 360, kH = 64;
+    SkImageInfo info =
+        SkImageInfo::Make(kW, kH, kN32_SkColorType, kPremul_SkAlphaType, SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    surface->getCanvas()->clear(SK_ColorWHITE);
+    SkiaCanvas canvas(surface->getCanvas());
+    canvas.set_font_full(family, 32.0f, weight, /*slant=*/0, /*letter_spacing=*/0.0f);
+    canvas.set_fill_color(Color::rgba(0.0f, 0.0f, 0.0f, 1.0f));
+    canvas.fill_text("Hamburgefonstiv", 8.0f, 44.0f);
+    SkPixmap pm;
+    REQUIRE(surface->peekPixels(&pm));
+    double total = 0.0;
+    for (int y = 0; y < kH; ++y)
+        for (int x = 0; x < kW; ++x)
+            total += 255.0 - SkColorGetR(pm.getColor(x, y));
+    return total;
+}
+} // namespace
+
+TEST_CASE("a face declared across 400 700 is not emboldened at 700, a 400-only one is",
+          "[canvas][skia][fonts][synthetic-bold]") {
+    // One Regular file under two families, as a page binds it with two rules.
+    REQUIRE(pulp::canvas::register_font_file(PULP_TEST_FONT_PATH, "SynthBoldPaintRange"));
+    REQUIRE(pulp::canvas::register_font_file(PULP_TEST_FONT_PATH, "SynthBoldPaintNarrow"));
+    pulp::canvas::declare_font_face_weight_range("SynthBoldPaintRange", 400, 700);
+    pulp::canvas::declare_font_face_weight_range("SynthBoldPaintNarrow", 400, 400);
+
+    const double regular = declared_font_ink("SynthBoldPaintRange", 400);
+    REQUIRE(regular > 0.0);
+    // Declared to cover 700: Chromium draws the Regular file as it is.
+    CHECK(declared_font_ink("SynthBoldPaintRange", 700) == Catch::Approx(regular).epsilon(0.02));
+    // Declared 400 only: Chromium synthesizes bold, so the ink grows.
+    CHECK(declared_font_ink("SynthBoldPaintNarrow", 700) > regular * 1.08);
+    // Imported stacks quote the family and carry a fallback; the declared
+    // range still applies to the quoted entry.
+    CHECK(declared_font_ink("'SynthBoldPaintRange', serif", 700) ==
+          Catch::Approx(regular).epsilon(0.02));
+    CHECK(declared_font_ink("\"SynthBoldPaintNarrow\", serif", 700) > regular * 1.08);
+}
+
+TEST_CASE("a declared @font-face family keeps its own face at a weight its file is far from",
+          "[canvas][skia][fonts][synthetic-bold]") {
+    // Regular file, requested at 700: 300 apart, beyond the registry's usual
+    // tolerance. A page family stays on its face (CSS synthesizes the rest);
+    // a family registered without @font-face declarations keeps the tolerance.
+    REQUIRE(pulp::canvas::register_font_file(PULP_TEST_FONT_PATH, "SynthBoldNearestDeclared"));
+    REQUIRE(pulp::canvas::register_font_file(PULP_TEST_FONT_PATH, "SynthBoldNearestPlain"));
+    pulp::canvas::declare_font_face_weight_range("SynthBoldNearestDeclared", 400, 700);
+    const SkFontStyle bold(700, SkFontStyle::kNormal_Width, SkFontStyle::kUpright_Slant);
+    CHECK(pulp::canvas::match_registered_typeface("SynthBoldNearestDeclared", bold) != nullptr);
+    CHECK(pulp::canvas::match_registered_typeface("SynthBoldNearestPlain", bold) == nullptr);
+}
+#endif // PULP_HAS_SKIA

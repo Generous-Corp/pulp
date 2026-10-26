@@ -57,10 +57,16 @@ bool push_parameter_event(ParameterEventQueue& queue,
 void SignalGraph::run_reference_walk_(audio::BufferView<float>& output,
                                       const audio::BufferView<const float>& input, int num_samples,
                                       CompiledGraph* cg, bool time_nodes) {
-    // Clear the final destination; AudioOutput nodes accumulate into it.
+    // Clear the final destination; AudioOutput nodes accumulate into it, or the
+    // only one copies into it so its bits arrive unchanged (-0 included).
     for (std::size_t c = 0; c < output.num_channels(); ++c) {
         std::memset(output.channel_ptr(c), 0, sizeof(float) * static_cast<size_t>(num_samples));
     }
+    int audio_outputs = 0;
+    for (const auto& ordered : cg->ordered_runtime)
+        if (ordered.shape.type == NodeType::AudioOutput)
+            ++audio_outputs;
+    const bool sole_output = audio_outputs == 1;
 
     auto pass_through_or_zero = [num_samples](NodeRuntime& rt) {
         const int in_ch  = static_cast<int>(rt.input_ptrs.size());
@@ -112,7 +118,22 @@ void SignalGraph::run_reference_walk_(audio::BufferView<float>& output,
             }
         }
 
-        // 2. Gather audio inbound with PDC/feedback delay lines.
+        // 2. Gather audio inbound with PDC/feedback delay lines. A port fed by
+        // exactly one undelayed edge takes that edge's samples unchanged (a
+        // copy, so -0 stays -0, as calling the two nodes back to back would);
+        // ports fed by several edges, or through a delay ring, sum from zero.
+        std::array<std::uint8_t, 64> port_edges{};
+        for (const auto& edge : rt.inbound_audio_edges) {
+            const auto& c = cg->connections[edge.connection_index];
+            const auto dport = static_cast<std::size_t>(c.dest_port);
+            if (dport >= port_edges.size())
+                continue;
+            const auto& dl = cg->connection_delays[edge.connection_index];
+            const bool direct =
+                c.feedback ? !dl.feedback_prev.empty()
+                           : (dl.delay_samples <= 0 || !dl.state || dl.state->ring.empty());
+            port_edges[dport] = direct && port_edges[dport] == 0 ? 1 : 2;
+        }
         for (const auto& edge : rt.inbound_audio_edges) {
             const size_t ci = edge.connection_index;
             const auto& c = cg->connections[ci];
@@ -126,6 +147,12 @@ void SignalGraph::run_reference_walk_(audio::BufferView<float>& output,
             float* dst = rt.input_ptrs[dport];
             const float* src = src_rt.output_ptrs[sport];
             auto& dl = cg->connection_delays[ci];
+            if (dport < static_cast<int>(port_edges.size()) &&
+                port_edges[static_cast<std::size_t>(dport)] == 1) {
+                const float* from = c.feedback ? dl.feedback_prev.data() : src;
+                std::memcpy(dst, from, sizeof(float) * static_cast<size_t>(num_samples));
+                continue;
+            }
             if (c.feedback) {
                 if (!dl.feedback_prev.empty()) {
                     for (int i = 0; i < num_samples; ++i) dst[i] += dl.feedback_prev[(size_t)i];
@@ -509,7 +536,12 @@ void SignalGraph::run_reference_walk_(audio::BufferView<float>& output,
                 for (int c = 0; c < chs; ++c) {
                     float* dst = output.channel_ptr(c);
                     const float* src = rt.input_ptrs[c];
-                    for (int i = 0; i < num_samples; ++i) dst[i] += src[i];
+                    if (sole_output) {
+                        std::memcpy(dst, src, sizeof(float) * static_cast<size_t>(num_samples));
+                    } else {
+                        for (int i = 0; i < num_samples; ++i)
+                            dst[i] += src[i];
+                    }
                 }
                 break;
             }

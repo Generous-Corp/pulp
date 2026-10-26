@@ -135,7 +135,8 @@ pulp_test_data(pulp-test-design-import-native-materializer NO_DEFINE
         core/music/include/pulp/music/pitch.hpp
         test/fixtures/import-fidelity/assets/fader_ref.png
         test/fixtures/import-fidelity/scene.pulp.json
-        test/fixtures/v0-dev/audio-control-panel.tsx)
+        test/fixtures/v0-dev/audio-control-panel.tsx
+        external/fonts/Jost-Regular.ttf)
 
 # Emitter conformance gate: every fixture IR is built through the native
 # materializer, the ui.js bridge program, the baked C++ exporter and the SwiftUI

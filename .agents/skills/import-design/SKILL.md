@@ -324,6 +324,31 @@ To see what a ui.js import looks like against Chromium, pass `--emitter js` to
 the differential lab: the observer renders the candidate IR through its ui.js
 program instead of the native materializer.
 
+### Page fonts: match on the declared range
+
+`prepare_native_ir_with_fonts` registers each shipped face under a
+content-named alias, and generated JS registers it with `registerFont`. Both
+also hand each rule's declared `font-weight` range to
+`canvas::declare_font_face_weight_range`: natively on the alias, from that
+family's own rules (two families may bind one file with different ranges), and
+in JS on the family. Chromium matches and synthesizes against the declared
+range, not the file: one Regular file declared `400 700` draws 700
+unemboldened, and declared `400` it draws 700 faux-bold.
+
+`paragraph_fakes_missing_font_styles` decides SkParagraph's fake-styles switch
+(CSS font matching over the declared ranges; bold only when the request is 600+
+and the matched range ends below 600; italic keeps the default, which shares the
+switch). It looks up each stack entry by its parsed name, because imported
+stacks are quoted. Every paragraph Pulp builds must ask it, the painter and the
+`TextShaper` measurement paths alike: SkParagraph's own shaping cache does not
+key on the switch, so a measurement paragraph left at the default caches
+emboldened runs that the painter then reuses, whatever its own switch says. A
+canvas-only test does not reproduce that reuse; render a native tree.
+
+A declared family also never yields to another family over weight in
+`match_registered_typeface`: the resolver otherwise measured a 700 run in a
+system face while the paragraph painted the page face, and the text wrapped.
+
 ### Packaged SDK runtime contract
 
 The installed `pulp-import-design` SDK runtime includes the browser-capture

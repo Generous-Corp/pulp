@@ -1,5 +1,6 @@
 // A DesignIR's shipped fonts are registered when its tree is materialized, and
 // every font-family stack that names them is pointed at the shipped faces.
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include "support/unique_temp_dir.hpp"
@@ -8,6 +9,7 @@
 #include <pulp/runtime/crypto.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/design_ir_io.hpp>
+#include <pulp/view/screenshot.hpp>
 #include <pulp/view/widgets.hpp>
 
 #ifdef PULP_HAS_SKIA
@@ -453,4 +455,90 @@ TEST_CASE("every captured label of the variable-font fixture resolves its captur
     REQUIRE(regular > 0.0);
     CHECK(semibold > regular * 1.1);
 #endif
+}
+
+TEST_CASE("a shipped face's declared weight range is carried by its alias",
+          "[design-import][font-assets][native-fonts][synthetic-bold]") {
+    // Chromium synthesizes bold against the rule's declared range, so the
+    // alias the stack names must carry that range, not the bare family.
+    require_shipped_faces_resolve();
+    const auto alias_of = [](const std::string& family, int weight, int weight_max) {
+        auto shipped = face(family, "font-" + family);
+        shipped.weight = weight;
+        shipped.weight_max = weight_max;
+        auto ir = shipped_font_design(family, 700, {shipped}, kStaticFont);
+        auto root = build_native_view_tree(ir, ir.asset_manifest);
+        REQUIRE(root);
+        auto* label = only_label(*root);
+        REQUIRE(label != nullptr);
+        const auto stack = pulp::canvas::split_css_font_family_list(label->effective_font_family());
+        REQUIRE_FALSE(stack.empty());
+        const auto alias = pulp::canvas::parse_css_font_family(stack.front()).name;
+        REQUIRE(alias.find(family + " [") == 0);
+        return alias;
+    };
+    const auto range = alias_of("Pulp Declared Range", 400, 700);
+    CHECK(pulp::canvas::declared_face_synthesizes_bold(range, 700) == false);
+    const auto single = alias_of("Pulp Declared Single", 400, 0);
+    CHECK(pulp::canvas::declared_face_synthesizes_bold(single, 700) == true);
+    // The bare family is not what text names, so it declares nothing.
+    CHECK_FALSE(pulp::canvas::has_declared_font_face_weights("Pulp Declared Range"));
+}
+
+TEST_CASE("two families binding one file each keep their own declared range",
+          "[design-import][font-assets][native-fonts][synthetic-bold]") {
+    // A page may bind one Regular file under two families, declared 400 700
+    // and 400. Each family's alias carries its own rule's range.
+    require_shipped_faces_resolve();
+    auto wide = face("Pulp Shared Wide", "font-shared");
+    wide.weight = 400;
+    wide.weight_max = 700;
+    auto narrow = face("Pulp Shared Narrow", "font-shared");
+    narrow.weight = 400;
+    narrow.weight_max = 0;
+    const auto alias_for = [&](const std::string& family) {
+        auto ir = shipped_font_design(family, 700, {wide, narrow}, kStaticFont);
+        auto root = build_native_view_tree(ir, ir.asset_manifest);
+        REQUIRE(root);
+        auto* label = only_label(*root);
+        REQUIRE(label != nullptr);
+        const auto stack = pulp::canvas::split_css_font_family_list(label->effective_font_family());
+        REQUIRE_FALSE(stack.empty());
+        return pulp::canvas::parse_css_font_family(stack.front()).name;
+    };
+    CHECK(pulp::canvas::declared_face_synthesizes_bold(alias_for("Pulp Shared Wide"), 700) ==
+          false);
+    CHECK(pulp::canvas::declared_face_synthesizes_bold(alias_for("Pulp Shared Narrow"), 700) ==
+          true);
+}
+
+TEST_CASE("a label whose shipped face is declared 400 700 draws 700 unemboldened",
+          "[design-import][font-assets][native-fonts][synthetic-bold]") {
+    // The whole path: the tree is laid out (TextShaper measures the label
+    // through SkParagraph) and then painted. SkParagraph's shaping cache does
+    // not key on the fake-styles switch, so a measurement that synthesized
+    // bold handed its runs to the painter even when the painter declined.
+    require_shipped_faces_resolve();
+    const auto ink_at = [](const std::string& family, int weight, int weight_max) {
+        auto shipped = face(family, "font-" + family);
+        shipped.weight = 400;
+        shipped.weight_max = weight_max;
+        auto ir = shipped_font_design(family, weight, {shipped}, kStaticFont);
+        auto root = build_native_view_tree(ir, ir.asset_manifest);
+        REQUIRE(root);
+        std::uint32_t w = 0, h = 0;
+        const auto rgba = render_to_rgba(*root, 200, 40, 2.0f, &w, &h);
+        if (rgba.empty())
+            SKIP("this build has no Skia raster capture");
+        // Ink: how far each pixel's red channel is from the background's.
+        double ink = 0;
+        for (std::size_t i = 0; i < rgba.size(); i += 4)
+            ink += std::abs(static_cast<int>(rgba[i]) - static_cast<int>(rgba[0]));
+        return ink;
+    };
+    const double regular = ink_at("Pulp Painted Range", 400, 700);
+    REQUIRE(regular > 0.0);
+    CHECK(ink_at("Pulp Painted Range", 700, 700) == Catch::Approx(regular).epsilon(0.02));
+    // Control: declared 400 only, Chromium synthesizes bold, so ink grows.
+    CHECK(ink_at("Pulp Painted Narrow", 700, 0) > regular * 1.05);
 }

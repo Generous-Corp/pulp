@@ -268,8 +268,7 @@ ParagraphUse make_paragraph(const std::string& text, const std::string& family, 
     key.features = features;
     key.glyph_hinting = glyph_hinting;
     key.font_generation = generation;
-    // SkParagraph's default: synthesize any bold or oblique the face lacks.
-    key.fake_missing_font_styles = true;
+    key.fake_missing_font_styles = paragraph_fakes_missing_font_styles(family, weight, slant);
     return find_or_build_paragraph(std::move(key), [&family, &primary](const ParagraphKey& k) {
         return build_paragraph(k, family, primary);
     });

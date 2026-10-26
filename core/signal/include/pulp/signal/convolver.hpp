@@ -446,8 +446,7 @@ public:
     static void clear_history(ConvolverInputHistoryT<SampleType>* h) {
         if (!h) return;
         constexpr std::complex<SampleType> kZero{SampleType{0.0f}, SampleType{0.0f}};
-        for (auto& spec : h->spectra)
-            std::fill(spec.begin(), spec.end(), kZero);
+        h->spectra.fill_zero();
         std::fill(h->overlap.begin(), h->overlap.end(), kZero);
         h->write_pos = 0;
     }

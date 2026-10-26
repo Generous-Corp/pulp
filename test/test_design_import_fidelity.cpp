@@ -157,7 +157,7 @@ TEST_CASE("codegen emits registerFont before setFontFamily for bundled fonts", "
     ir.font_family_assets.push_back(fa);
 
     const auto js = generate_pulp_js(ir);
-    const auto reg = js.find("registerFont('Clash Grotesk', '/tmp/assets/clash.ttf')");
+    const auto reg = js.find("registerFont('Clash Grotesk', '/tmp/assets/clash.ttf', 500, 500)");
     REQUIRE(reg != std::string::npos);
     // registerFont must precede any setFontFamily so the family resolves to the
     // bundled face, not a system fallback.

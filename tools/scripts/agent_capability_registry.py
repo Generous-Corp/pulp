@@ -1513,7 +1513,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/convolver.hpp",
-        "fingerprint": "sha256:f2324d75e7b1fde411c4907b5f2b5f4f4a2849e4877a7b45cf9bd368d6da7564",
+        "fingerprint": "sha256:dcf17ae7acdf07ad6bfc3082876bf5c2f695a9dda49c933f56a074b3a7b5621d",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1612,13 +1612,14 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/convolver_messages.hpp",
-        "fingerprint": "sha256:13c0cdc65296220448802702ad25141e704d9d0c9d780f6575e222e1e6fa78ce",
+        "fingerprint": "sha256:bf0a804475fb6f8879ad5d734f586c6b76c2d119215af65d370d250bb7364a08",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
             "Audio-thread hand-off plumbing behind PartitionedConvolver: the per-IR state, "
-            "the convolver's shared input history, and the lock-free swapper that shuttles "
-            "them between a worker thread and the audio thread over runtime::Handoff. "
+            "the convolver's shared input history, the spectrum arena both keep their "
+            "half spectra in, and the lock-free swapper that shuttles them between a "
+            "worker thread and the audio thread over runtime::Handoff. "
             "Real-time ownership-transfer infrastructure for that engine rather than an "
             "advertised generator surface; it carries no capability claim of its own."
         ),
