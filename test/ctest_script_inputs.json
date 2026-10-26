@@ -7814,9 +7814,11 @@
     "tools/import-design/browser_capture/capture_interactions.integration.test.mjs",
     "tools/import-design/browser_capture/capture_paint.integration.test.mjs",
     "tools/import-design/browser_capture/font_faces.integration.test.mjs",
+    "tools/import-design/browser_capture/form_control_theme.mjs",
     "tools/import-design/browser_capture/motion_freeze.integration.test.mjs",
     "tools/import-design/browser_capture/run_integration.mjs",
     "tools/import-design/browser_capture/security.mjs",
+    "tools/import-design/browser_capture/semantics.mjs",
     "tools/import-design/browser_capture/settle.mjs"
    ],
    "kind": "node"
