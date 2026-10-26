@@ -523,8 +523,11 @@ class SkiaSurfaceImpl : public SkiaSurface {
             }
         }
 
-        pixel_width = static_cast<uint32_t>(std::max(1, static_cast<int>(width_ * scale_)));
-        pixel_height = static_cast<uint32_t>(std::max(1, static_cast<int>(height_ * scale_)));
+        // The surface's own size, not logical × scale: the presentable texture
+        // is the swapchain's, which a host may size from the platform's
+        // physical client rect (one pixel more than 667 × 1.5 at 1.5x).
+        pixel_width = static_cast<uint32_t>(std::max(1, source->width()));
+        pixel_height = static_cast<uint32_t>(std::max(1, source->height()));
 
         auto info = SkImageInfo::Make(static_cast<int>(pixel_width),
                                       static_cast<int>(pixel_height),
@@ -745,11 +748,21 @@ private:
     // target, the backing-scale CTM is applied once here so the host paints in
     // logical coordinates. Cleared so a (defensive) partial first frame does not
     // reveal undefined texture memory; the host paints a full first frame.
+    //
+    // A presentable scene is blitted 1:1 onto the swapchain texture, so it
+    // takes the swapchain's size. A host may set that from the platform's
+    // physical client rect, a pixel more than logical × scale at a fractional
+    // scale (1001 px at 1.5x against 667 × 1.5), and a scene derived from the
+    // logical size would leave the drawable's last column unpainted.
     void create_scene_target() {
         if (!recorder_) return;
 
         int pixel_w = static_cast<int>(width_ * scale_);
         int pixel_h = static_cast<int>(height_ * scale_);
+        if (gpu_.has_surface() && gpu_.width() > 0 && gpu_.height() > 0) {
+            pixel_w = static_cast<int>(gpu_.width());
+            pixel_h = static_cast<int>(gpu_.height());
+        }
 
         SkImageInfo info = SkImageInfo::MakeN32Premul(pixel_w, pixel_h);
         const SkSurfaceProps props = surface_props();
