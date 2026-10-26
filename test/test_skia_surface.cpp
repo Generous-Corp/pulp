@@ -4,6 +4,7 @@
 #include <pulp/render/skp_capture.hpp>
 
 #ifdef PULP_HAS_SKIA
+#include <pulp/canvas/image_file_cache.hpp>
 #include <pulp/canvas/skia_canvas.hpp>
 #include <pulp/canvas/canvas.hpp>  // FillRule + Canvas path API (pulp #3656)
 #include <pulp/view/svg_path_widget.hpp>  // gradient-stroke raster proof
@@ -909,6 +910,376 @@ TEST_CASE("SkiaCanvas retained stores isolate handles and open layers",
     pulp::canvas::SkiaCanvas after_unwind(
         surface_a->getCanvas(), nullptr, store_a);
     REQUIRE_FALSE(after_unwind.layer_valid(abandoned));
+#else
+    REQUIRE(true);
+#endif
+}
+
+TEST_CASE("GpuIdleTrimSchedule is due once per interval", "[render][gpu-trim]") {
+    using Clock = GpuIdleTrimSchedule::Clock;
+    const Clock::time_point t0{std::chrono::seconds(100)};
+    GpuIdleTrimSchedule schedule(t0);
+    CHECK_FALSE(schedule.due(t0));
+    CHECK_FALSE(schedule.due(t0 + GpuIdleTrimSchedule::kInterval - std::chrono::nanoseconds(1)));
+    CHECK(schedule.due(t0 + GpuIdleTrimSchedule::kInterval));
+    // The interval restarts at the trim, not at construction.
+    CHECK_FALSE(schedule.due(t0 + GpuIdleTrimSchedule::kInterval + std::chrono::milliseconds(999)));
+    CHECK(schedule.due(t0 + 2 * GpuIdleTrimSchedule::kInterval));
+    CHECK(schedule.trims() == 2);
+}
+
+TEST_CASE("GpuIdleTrimSchedule ages by frames as well as time", "[render][gpu-trim]") {
+    using Clock = GpuIdleTrimSchedule::Clock;
+    using std::chrono::milliseconds;
+    constexpr auto kFrames = GpuIdleTrimSchedule::kUnusedFrames;
+    const Clock::time_point t0{std::chrono::seconds(100)};
+
+    SECTION("nothing qualifies until kUnusedFrames frames have started") {
+        GpuIdleTrimSchedule schedule(t0);
+        for (std::size_t i = 0; i + 1 < kFrames; ++i)
+            schedule.note_frame(t0 + milliseconds(16) * static_cast<int>(i));
+        CHECK_FALSE(schedule.unused_age(t0 + std::chrono::seconds(60)).has_value());
+        schedule.note_frame(t0 + milliseconds(16) * static_cast<int>(kFrames));
+        CHECK(schedule.unused_age(t0 + std::chrono::seconds(60)).has_value());
+    }
+
+    SECTION("at frame pace the time bound decides") {
+        GpuIdleTrimSchedule schedule(t0);
+        for (std::size_t i = 0; i < kFrames; ++i)
+            schedule.note_frame(t0 + milliseconds(16) * static_cast<int>(i));
+        const auto now = t0 + milliseconds(16) * static_cast<int>(kFrames);
+        CHECK(schedule.unused_age(now) == GpuIdleTrimSchedule::kUnusedAge);
+    }
+
+    SECTION("slow frames: the frame bound reaches back past kUnusedAge") {
+        GpuIdleTrimSchedule schedule(t0);
+        for (std::size_t i = 0; i < kFrames; ++i)
+            schedule.note_frame(t0 + milliseconds(200) * static_cast<int>(i));
+        const auto now = t0 + milliseconds(200) * static_cast<int>(kFrames);
+        // Back to the oldest of the last kUnusedFrames frame starts: t0.
+        CHECK(schedule.unused_age(now) == milliseconds(200) * static_cast<int>(kFrames));
+    }
+
+    SECTION("an idle gap between bursts does not age the last burst's resources") {
+        GpuIdleTrimSchedule schedule(t0);
+        for (std::size_t i = 0; i < kFrames; ++i)
+            schedule.note_frame(t0 + milliseconds(16) * static_cast<int>(i));
+        // Ten idle seconds, then the first frame of the next burst.
+        const auto resume = t0 + std::chrono::seconds(10);
+        schedule.note_frame(resume);
+        const auto age = schedule.unused_age(resume);
+        REQUIRE(age.has_value());
+        // Something last drawn in the previous burst's final frame is younger
+        // than the age, so the resume frame's trim keeps it.
+        const auto last_burst_frame = t0 + milliseconds(16) * static_cast<int>(kFrames - 1);
+        CHECK(resume - last_burst_frame < *age);
+    }
+}
+
+#ifdef PULP_HAS_SKIA
+namespace {
+constexpr std::size_t kMiB = 1024 * 1024;
+
+// Writes `count` distinct solid-colour PNGs, `side` pixels square, into a
+// fresh directory. Each decodes to a `side * side * 4`-byte texture.
+std::vector<std::string> write_trim_images(const std::string& tag, int count, int side) {
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::temp_directory_path() / ("pulp-gpu-trim-" + tag);
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    std::vector<std::string> paths;
+    for (int i = 0; i < count; ++i) {
+        SkBitmap bitmap;
+        bitmap.allocN32Pixels(side, side);
+        bitmap.eraseColor(SkColorSetARGB(255, static_cast<U8CPU>(10 + 30 * i),
+                                         static_cast<U8CPU>(240 - 30 * i),
+                                         static_cast<U8CPU>(7 * i)));
+        const fs::path path = dir / ("image-" + std::to_string(i) + ".png");
+        SkFILEWStream out(path.string().c_str());
+        if (!out.isValid() || !SkPngEncoder::Encode(&out, bitmap.pixmap(), {}))
+            return {};
+        paths.push_back(path.string());
+    }
+    return paths;
+}
+
+// One frame that draws every image in `paths`, then waits for the GPU so the
+// frame's recording no longer references anything it drew.
+bool draw_trim_frame(SkiaSurface& skia, const std::vector<std::string>& paths) {
+    auto* canvas = skia.begin_frame();
+    if (!canvas)
+        return false;
+    bool drawn = true;
+    for (const auto& path : paths)
+        drawn = canvas->draw_image_from_file(path, 0.0f, 0.0f, 32.0f, 32.0f) && drawn;
+    canvas->set_fill_color(pulp::canvas::Color::rgba8(40, 40, 40));
+    canvas->fill_rect(40.0f, 40.0f, 8.0f, 8.0f);
+    const bool reached = frame_reached_output(skia.end_frame());
+    skia.wait_for_submitted_work();
+    return drawn && reached;
+}
+
+std::atomic<std::int64_t> g_fake_trim_clock_ns{0};
+
+GpuIdleTrimSchedule::Clock::time_point fake_trim_clock() {
+    return GpuIdleTrimSchedule::Clock::time_point(
+        std::chrono::nanoseconds(g_fake_trim_clock_ns.load(std::memory_order_relaxed)));
+}
+
+struct TrimClockGuard {
+    TrimClockGuard() {
+        SkiaSurface::set_trim_clock_for_testing(&fake_trim_clock);
+    }
+    ~TrimClockGuard() {
+        SkiaSurface::set_trim_clock_for_testing(nullptr);
+    }
+};
+
+// The image cache is process-wide, so a failed REQUIRE must not leave a later
+// test running with this one's capacity: restore the one this guard found.
+struct ImageCacheCapacityGuard {
+    explicit ImageCacheCapacityGuard(std::size_t capacity)
+        : previous_(pulp::canvas::ImageFileCache::instance().capacity()) {
+        pulp::canvas::ImageFileCache::instance().set_capacity(capacity);
+    }
+    ~ImageCacheCapacityGuard() {
+        auto& cache = pulp::canvas::ImageFileCache::instance();
+        cache.set_capacity(previous_);
+        cache.clear();
+    }
+
+  private:
+    std::size_t previous_;
+};
+} // namespace
+#endif
+
+TEST_CASE("ImageCacheCapacityGuard restores the capacity it found", "[render][gpu-trim]") {
+#ifdef PULP_HAS_SKIA
+    auto& cache = pulp::canvas::ImageFileCache::instance();
+    const auto original = cache.capacity();
+    // Not the default, so restoring a hard-coded default would show here.
+    cache.set_capacity(7);
+    {
+        ImageCacheCapacityGuard guard(1);
+        CHECK(cache.capacity() == 1);
+    }
+    CHECK(cache.capacity() == 7);
+    cache.set_capacity(original);
+#else
+    REQUIRE(true);
+#endif
+}
+
+TEST_CASE("SkiaSurface trim everything returns released image textures to the device",
+          "[render][skia][gpu-trim]") {
+#ifdef PULP_HAS_SKIA
+    constexpr uint32_t kSize = 256;
+    auto dawn = GpuSurface::create_dawn();
+    if (!dawn)
+        SKIP(kNoGpu);
+    if (!dawn->initialize({.width = kSize, .height = kSize}))
+        SKIP(kNoGpu);
+    auto skia = SkiaSurface::create(*dawn, {.width = kSize, .height = kSize});
+    if (!skia || !skia->is_available())
+        SKIP(kNoSkiaSurface);
+    const auto paths = write_trim_images("everything", 8, 1024);
+    REQUIRE(paths.size() == 8);
+
+    auto& cache = pulp::canvas::ImageFileCache::instance();
+    cache.clear();
+    REQUIRE(draw_trim_frame(*skia, paths));
+    const auto drawn = skia->gpu_cache_bytes();
+    // The cache held the only references to the eight textures.
+    cache.clear();
+    REQUIRE(draw_trim_frame(*skia, {}));
+    const auto released = skia->gpu_cache_bytes();
+    INFO("drawn: budgeted " << drawn.budgeted << " purgeable " << drawn.purgeable
+                            << "; released: budgeted " << released.budgeted << " purgeable "
+                            << released.purgeable);
+    // Control: the released textures are still resident and counted.
+    REQUIRE(released.purgeable >= 24 * kMiB);
+
+    skia->trim_gpu_resources(SkiaSurface::TrimLevel::everything());
+    const auto trimmed = skia->gpu_cache_bytes();
+    INFO("trimmed: budgeted " << trimmed.budgeted << " purgeable " << trimmed.purgeable);
+    CHECK(trimmed.purgeable < 4 * kMiB);
+    CHECK(trimmed.budgeted + 24 * kMiB <= released.budgeted);
+    // The surface still draws after a full trim.
+    CHECK(draw_trim_frame(*skia, {}));
+#else
+    REQUIRE(true);
+#endif
+}
+
+TEST_CASE("SkiaSurface idle trim frees textures unused for two seconds and keeps the drawn one",
+          "[render][skia][gpu-trim]") {
+#ifdef PULP_HAS_SKIA
+    constexpr uint32_t kSize = 256;
+    auto dawn = GpuSurface::create_dawn();
+    if (!dawn)
+        SKIP(kNoGpu);
+    if (!dawn->initialize({.width = kSize, .height = kSize}))
+        SKIP(kNoGpu);
+    auto skia = SkiaSurface::create(*dawn, {.width = kSize, .height = kSize});
+    if (!skia || !skia->is_available())
+        SKIP(kNoSkiaSurface);
+    // A differs in size from the released images, so its texture can never
+    // be a recycled one of theirs.
+    const auto released_paths = write_trim_images("idle-released", 7, 1024);
+    const auto kept_paths = write_trim_images("idle-kept", 1, 512);
+    REQUIRE(released_paths.size() == 7);
+    REQUIRE(kept_paths.size() == 1);
+
+    auto& cache = pulp::canvas::ImageFileCache::instance();
+    cache.clear();
+    REQUIRE(draw_trim_frame(*skia, released_paths));
+    // With room for one entry, caching A evicts the other seven.
+    ImageCacheCapacityGuard capacity(1);
+    REQUIRE(draw_trim_frame(*skia, kept_paths));
+    REQUIRE(draw_trim_frame(*skia, kept_paths));
+    const auto released = skia->gpu_cache_bytes();
+    INFO("released: budgeted " << released.budgeted << " purgeable " << released.purgeable);
+    REQUIRE(released.purgeable >= 24 * kMiB);
+
+    // Control: an idle window longer than the time since release frees none
+    // of it, so the level is honoured rather than treated as everything.
+    skia->trim_gpu_resources(SkiaSurface::TrimLevel::unused_for(std::chrono::minutes(10)));
+    REQUIRE(skia->gpu_cache_bytes().purgeable >= 24 * kMiB);
+
+    const auto builds = cache.stats().builds;
+    const auto trims = skia->idle_trim_count();
+    pulp::test::DawnTransferCallCounter work;
+    const auto warm = work.snapshot();
+
+    // Draw only A at frame pace until end_frame()'s own idle trim has run
+    // past both kUnusedAge and kUnusedFrames frames. Skia stamps resources
+    // with the real clock, so this takes real time: whichever bound is later,
+    // plus at most one kInterval. A loaded host draws slowly enough that the
+    // frame bound can be the later one; the cap keeps a broken trim from
+    // looping forever.
+    using SteadyClock = std::chrono::steady_clock;
+    const auto start = SteadyClock::now();
+    const auto time_bound = start + GpuIdleTrimSchedule::kUnusedAge +
+                            2 * GpuIdleTrimSchedule::kInterval + std::chrono::seconds(1);
+    const auto cap = start + std::chrono::seconds(60);
+    std::optional<SteadyClock::time_point> frame_bound;
+    bool freed = false;
+    int frames = 0;
+    while (SteadyClock::now() < cap) {
+        REQUIRE(draw_trim_frame(*skia, kept_paths));
+        ++frames;
+        if (skia->gpu_cache_bytes().purgeable + 24 * kMiB <= released.purgeable) {
+            freed = true;
+            break;
+        }
+        const auto now = SteadyClock::now();
+        if (!frame_bound && static_cast<std::size_t>(frames) >= GpuIdleTrimSchedule::kUnusedFrames)
+            frame_bound = now + 2 * GpuIdleTrimSchedule::kInterval + std::chrono::seconds(1);
+        if (now >= time_bound && frame_bound && now >= *frame_bound)
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+    }
+    const auto after = skia->gpu_cache_bytes();
+    const auto steady = work.snapshot();
+    INFO("after " << frames << " frames: budgeted " << after.budgeted << " purgeable "
+                  << after.purgeable << ", idle trims " << skia->idle_trim_count() - trims
+                  << ", textures created "
+                  << steady.device_create_texture_calls - warm.device_create_texture_calls);
+    CHECK(freed);
+    CHECK(skia->idle_trim_count() > trims);
+    // A stayed resident: drawing it again neither rebuilt nor re-uploaded it,
+    // and the per-frame scratch targets the idle trim spared were reused.
+    CHECK(cache.stats().builds == builds);
+    CHECK(steady.device_create_texture_calls == warm.device_create_texture_calls);
+#else
+    REQUIRE(true);
+#endif
+}
+
+TEST_CASE("SkiaSurface idle trim runs once per second of frames", "[render][skia][gpu-trim]") {
+#ifdef PULP_HAS_SKIA
+    constexpr uint32_t kSize = 64;
+    auto dawn = GpuSurface::create_dawn();
+    if (!dawn)
+        SKIP(kNoGpu);
+    if (!dawn->initialize({.width = kSize, .height = kSize}))
+        SKIP(kNoGpu);
+    g_fake_trim_clock_ns.store(std::chrono::nanoseconds(std::chrono::hours(1)).count());
+    TrimClockGuard clock;
+    auto skia = SkiaSurface::create(*dawn, {.width = kSize, .height = kSize});
+    if (!skia || !skia->is_available())
+        SKIP(kNoSkiaSurface);
+
+    // 120 frames spread over exactly one second of the injected clock.
+    constexpr std::int64_t kStepNs = 1'000'000'000 / 120 + 1;
+    auto frame = [&] {
+        g_fake_trim_clock_ns.fetch_add(kStepNs, std::memory_order_relaxed);
+        auto* canvas = skia->begin_frame();
+        REQUIRE(canvas != nullptr);
+        canvas->set_fill_color(pulp::canvas::Color::rgba8(200, 0, 0));
+        canvas->fill_rect(0.0f, 0.0f, 8.0f, 8.0f);
+        REQUIRE(frame_reached_output(skia->end_frame()));
+    };
+    for (int i = 0; i < 119; ++i)
+        frame();
+    CHECK(skia->idle_trim_count() == 0);
+    frame();
+    CHECK(skia->idle_trim_count() == 1);
+    for (int i = 0; i < 120; ++i)
+        frame();
+    CHECK(skia->idle_trim_count() == 2);
+#else
+    REQUIRE(true);
+#endif
+}
+
+TEST_CASE("SkiaSurface idle trim keeps what a recent frame released across a pause",
+          "[render][skia][gpu-trim]") {
+#ifdef PULP_HAS_SKIA
+    constexpr uint32_t kSize = 256;
+    auto dawn = GpuSurface::create_dawn();
+    if (!dawn)
+        SKIP(kNoGpu);
+    if (!dawn->initialize({.width = kSize, .height = kSize}))
+        SKIP(kNoGpu);
+    auto skia = SkiaSurface::create(*dawn, {.width = kSize, .height = kSize});
+    if (!skia || !skia->is_available())
+        SKIP(kNoSkiaSurface);
+    const auto released_paths = write_trim_images("burst-released", 7, 1024);
+    const auto kept_paths = write_trim_images("burst-kept", 1, 512);
+    REQUIRE(released_paths.size() == 7);
+    REQUIRE(kept_paths.size() == 1);
+    auto& cache = pulp::canvas::ImageFileCache::instance();
+    cache.clear();
+
+    // A burst long enough to fill the trim's frame history.
+    for (std::size_t i = 0; i < GpuIdleTrimSchedule::kUnusedFrames + 5; ++i)
+        REQUIRE(draw_trim_frame(*skia, kept_paths));
+    // Its last frames draw the large images once; shrinking the cache to one
+    // entry then releases their textures to Skia's cache, purgeable.
+    REQUIRE(draw_trim_frame(*skia, released_paths));
+    ImageCacheCapacityGuard capacity(1);
+    REQUIRE(draw_trim_frame(*skia, kept_paths));
+    const auto released = skia->gpu_cache_bytes();
+    INFO("released: budgeted " << released.budgeted << " purgeable " << released.purgeable);
+    REQUIRE(released.purgeable >= 24 * kMiB);
+
+    // A pause longer than kUnusedAge, plus an interval so the next frame's idle
+    // trim is due. Skia stamps resources with the real clock.
+    std::this_thread::sleep_for(GpuIdleTrimSchedule::kUnusedAge + GpuIdleTrimSchedule::kInterval +
+                                std::chrono::milliseconds(500));
+
+    // The resume frame's trim runs. The released textures went unused for
+    // longer than kUnusedAge but were drawn within the last kUnusedFrames
+    // frames, so they stay; wall time alone would have freed them.
+    const auto trims = skia->idle_trim_count();
+    REQUIRE(draw_trim_frame(*skia, kept_paths));
+    REQUIRE(skia->idle_trim_count() == trims + 1);
+    const auto after = skia->gpu_cache_bytes();
+    INFO("after the resume frame's trim: budgeted " << after.budgeted << " purgeable "
+                                                    << after.purgeable);
+    CHECK(after.purgeable >= 24 * kMiB);
 #else
     REQUIRE(true);
 #endif

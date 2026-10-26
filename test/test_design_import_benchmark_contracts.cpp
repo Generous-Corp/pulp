@@ -11,6 +11,8 @@
 #include <thread>
 #include <vector>
 
+#include "support/unique_temp_dir.hpp"
+
 #define main pulp_design_import_benchmark_main_for_test
 #include "../tools/import-design/design_import_benchmark.cpp"
 
@@ -619,9 +621,13 @@ TEST_CASE("design-import benchmark excludes warmup frames from cumulative counte
     REQUIRE(commands > 0);
     REQUIRE(layouts_per_frame > 0);
 
+    // A fixed frame count, not a time window: a 5 ms window under a slow
+    // sanitizer build can end inside the warmup and sample nothing. The count
+    // includes the warmup frames.
     constexpr int kWarmup = 3;
-    const auto idle = run_phase(*fixture, 5, std::nullopt, 10000, false, kWarmup);
-    REQUIRE(idle.samples > 0);
+    constexpr int kFrames = 8;
+    const auto idle = run_phase(*fixture, 0, kFrames, 10000, false, kWarmup);
+    REQUIRE(idle.samples == kFrames - kWarmup);
     const auto sampled = static_cast<std::uint64_t>(idle.samples);
     // Every frame repeats the same work, so a counter that included the
     // warmup frames would read kWarmup frames high.
@@ -630,13 +636,13 @@ TEST_CASE("design-import benchmark excludes warmup frames from cumulative counte
     CHECK(idle.layout_passes == sampled * layouts_per_frame);
 
     // Control: without warmup every rendered frame is counted.
-    const auto all = run_phase(*fixture, 5, std::nullopt, 10000, false, 0);
-    REQUIRE(all.samples > 0);
+    const auto all = run_phase(*fixture, 0, kFrames, 10000, false, 0);
+    REQUIRE(all.samples == kFrames);
     CHECK(all.paint_calls == static_cast<std::uint64_t>(all.samples));
     CHECK(all.layout_passes == static_cast<std::uint64_t>(all.samples) * layouts_per_frame);
 
     // A phase that never leaves warmup counts nothing.
-    const auto warmup_only = run_phase(*fixture, 1, std::nullopt, 10000, false, 1000000);
+    const auto warmup_only = run_phase(*fixture, 0, kFrames, 10000, false, kFrames);
     CHECK(warmup_only.samples == 0);
     CHECK(warmup_only.paint_calls == 0);
     CHECK(warmup_only.paint_commands_total == 0);
@@ -1170,12 +1176,72 @@ TEST_CASE("design-import benchmark Skia lane counts per-frame resource work",
     CHECK(steady_state_gate(recorded, recorded, false).status == "blind");
     CHECK(steady_state_gate(phase, phase, true).status == "fail");
 
-    // Text shapes a paragraph on every Skia paint.
+    // Text is shaped on the first paint and served from the paragraph cache
+    // after it. Switching the cache off (which also empties it) restores a
+    // shape per run per paint, and the steady-state gate then fails on text.
     auto bench = make_fixture(lane_config("baked-cpp"));
+    set_paragraph_cache_enabled(false);
+    const auto uncached = run_phase(*bench, 0, 3, 60, false, 0, options);
+    set_paragraph_cache_enabled(true);
     const auto text = run_phase(*bench, 0, 3, 60, false, 0, options);
     CHECK(text.resources.paragraph_builds.per_frame_max > 0);
-    CHECK(text.resources.paragraph_builds.frames_after_first_with_work == 2);
+    CHECK(text.resources.paragraph_builds.frames_after_first_with_work == 0);
     CHECK(text.resources.image_decodes.total == 0);
+    CHECK(steady_state_gate(text, text, true).status == "pass");
+    CHECK(uncached.resources.paragraph_builds.per_frame_max ==
+          text.resources.paragraph_builds.per_frame_max);
+    CHECK(uncached.resources.paragraph_builds_unwritten.frames_after_first_with_work == 2);
+    CHECK(steady_state_gate(uncached, uncached, true).status == "fail");
+}
+
+TEST_CASE("design-import benchmark text gate allows only the text a step wrote",
+          "[design-import][benchmark]") {
+    std::string error;
+    auto target = make_frame_target("skia-raster", 200, 80, error);
+    if (!target)
+        SKIP("skia-raster target unavailable: " + error);
+    PhaseOptions options;
+    options.target = target.get();
+    const auto path = write_slot_ir("pulp-bench-text-gate.ir.json");
+    Config config = lane_config("baked-native");
+    config.ir_path = path;
+    auto fixture = make_fixture(config);
+    REQUIRE(fixture != nullptr);
+    REQUIRE(fixture->text_written_by_step(3) ==
+            std::vector<std::string>{"slot 0 frame 3", "slot 1 frame 3"});
+
+    // Each step writes both slots, so each frame shapes exactly those two,
+    // and none of it is text the step did not write.
+    const auto phase = run_phase(*fixture, 0, 4, 60, true, 0, options);
+    CHECK(phase.resources.paragraph_builds.frames_after_first_with_work == 3);
+    CHECK(phase.resources.paragraph_builds_unwritten.total == 0);
+    CHECK(steady_state_gate(phase, phase, true).status == "pass");
+
+    // A static label beside a slot the frame never paints: the step still
+    // writes two runs but only one is shaped, so with the cache off the
+    // static label's re-shape fits inside the written count. Counting builds
+    // by text still catches it.
+    auto caption = std::make_unique<Label>("Static caption");
+    caption->set_bounds({0, 50, 200, 20});
+    fixture->root().add_child(std::move(caption));
+    std::vector<View*> slots;
+    for (std::size_t i = 0; i < fixture->root().child_count(); ++i)
+        if (auto* label = dynamic_cast<Label*>(fixture->root().child_at(i));
+            label && label->text() != "Static caption")
+            slots.push_back(label);
+    REQUIRE(slots.size() == 2);
+    slots[1]->set_visible(false);
+    set_paragraph_cache_enabled(false);
+    const auto culled = run_phase(*fixture, 0, 4, 60, true, 0, options);
+    set_paragraph_cache_enabled(true);
+    CHECK(culled.resources.paragraph_builds.per_frame_max == 2);
+    CHECK(culled.resources.paragraph_builds_unwritten.frames_after_first_with_work == 3);
+    CHECK(steady_state_gate(culled, culled, true).status == "fail");
+
+    // Idle frames write nothing, so any build after the first is unwritten.
+    const auto idle = run_phase(*fixture, 0, 4, 60, false, 0, options);
+    CHECK(idle.resources.paragraph_builds_unwritten.frames_after_first_with_work == 0);
+    std::filesystem::remove(path);
 }
 
 TEST_CASE("design-import benchmark Skia lane counts scene-cache records and replays",
@@ -1193,6 +1259,132 @@ TEST_CASE("design-import benchmark Skia lane counts scene-cache records and repl
     // A replayed subtree does not repaint its Label, so it shapes no text
     // after the recording frame.
     CHECK(phase.resources.paragraph_builds.frames_after_first_with_work == 0);
+}
+
+namespace {
+
+// Restores the working directory however the scope is left.
+struct CurrentPathGuard {
+    std::filesystem::path previous = std::filesystem::current_path();
+    explicit CurrentPathGuard(const std::filesystem::path& next) {
+        std::filesystem::current_path(next);
+    }
+    ~CurrentPathGuard() {
+        std::error_code ec;
+        std::filesystem::current_path(previous, ec);
+    }
+    CurrentPathGuard(const CurrentPathGuard&) = delete;
+    CurrentPathGuard& operator=(const CurrentPathGuard&) = delete;
+};
+
+void write_pixel_png(const std::filesystem::path& path) {
+    static constexpr std::uint8_t kPng[] = {
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48,
+        0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
+        0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78,
+        0x9c, 0x63, 0x78, 0xd0, 0x66, 0xf3, 0x1f, 0x00, 0x06, 0x8e, 0x02, 0xa2, 0x86, 0xc6,
+        0xaa, 0xc4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82};
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream(path, std::ios::binary).write(reinterpret_cast<const char*>(kPng), sizeof(kPng));
+}
+
+// A DesignIR with one text slot and one image whose manifest names
+// `local_path`, written as design.ir.json in `dir`.
+std::filesystem::path write_image_ir(const std::filesystem::path& dir,
+                                     const std::string& local_path) {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "root";
+    ir.root.style.width = 32.0f;
+    ir.root.style.height = 32.0f;
+    IRNode text;
+    text.type = "text";
+    text.stable_anchor_id = "caption";
+    text.text_content = "caption";
+    ir.root.children.push_back(text);
+    IRNode image;
+    image.type = "image";
+    image.stable_anchor_id = "pixel";
+    image.attributes["srcAssetId"] = "image:pixel";
+    image.style.position = "absolute";
+    image.style.left = 0.0f;
+    image.style.top = 0.0f;
+    image.style.width = 16.0f;
+    image.style.height = 16.0f;
+    ir.root.children.push_back(image);
+    IRAssetRef asset;
+    asset.asset_id = "image:pixel";
+    asset.local_path = local_path;
+    ir.asset_manifest.assets.push_back(asset);
+    const auto path = dir / "design.ir.json";
+    std::ofstream(path) << serialize_design_ir(ir);
+    return path;
+}
+
+// Image-cache work over three frames of the IR-bound lane, materialized from
+// `cwd`.
+PhaseMetrics image_phase(const std::filesystem::path& ir_path, const std::filesystem::path& cwd,
+                         FrameTarget& target) {
+    std::unique_ptr<BenchmarkFixture> fixture;
+    {
+        CurrentPathGuard guard(cwd);
+        Config config = lane_config("baked-native");
+        config.ir_path = ir_path;
+        fixture = make_fixture(config);
+    }
+    REQUIRE(fixture != nullptr);
+    PhaseOptions options;
+    options.target = &target;
+    return run_phase(*fixture, 0, 3, 60, false, 0, options);
+}
+
+} // namespace
+
+TEST_CASE("design-import benchmark IR-bound lane draws manifest images away from their directory",
+          "[design-import][benchmark]") {
+    std::string error;
+    auto target = make_frame_target("skia-raster", 32, 32, error);
+    if (!target)
+        SKIP("skia-raster target unavailable: " + error);
+    // An importer writes asset paths relative to the DesignIR's own directory.
+    const auto dir = pulp::test::make_unique_temp_dir("pulp-bench-ir-assets");
+    write_pixel_png(dir / "assets" / "pixel.png");
+    const auto path = write_image_ir(dir, "assets/pixel.png");
+    // Run from a directory that holds no assets/ folder, as the bench does
+    // when it is not started beside the DesignIR.
+    const auto phase = image_phase(path, std::filesystem::temp_directory_path(), *target);
+    // The image is decoded and cached on the first frame and drawn from the
+    // cache after it; an unresolved path would read zero on every count.
+    CHECK(phase.resources.image_cache_builds.total == 1);
+    CHECK(phase.resources.image_cache_hits.total >= 2);
+    CHECK(phase.resources.image_cache_builds.frames_after_first_with_work == 0);
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("design-import benchmark IR-bound lane refuses assets outside the IR's directory",
+          "[design-import][benchmark]") {
+    std::string error;
+    auto target = make_frame_target("skia-raster", 32, 32, error);
+    if (!target)
+        SKIP("skia-raster target unavailable: " + error);
+    // With the DesignIR's directory as the asset base, the materializer's
+    // containment applies: a manifest path that climbs out of it, or names
+    // an absolute file elsewhere, is refused even though the file exists and
+    // a working-directory lookup would have found it.
+    const auto root = pulp::test::make_unique_temp_dir("pulp-bench-ir-escape");
+    write_pixel_png(root / "outside" / "pixel.png");
+    const auto dir = root / "document";
+    std::filesystem::create_directories(dir);
+    for (const std::string local :
+         {std::string{"../outside/pixel.png"}, (root / "outside" / "pixel.png").string()}) {
+        INFO("local_path: " << local);
+        const auto path = write_image_ir(dir, local);
+        const auto phase = image_phase(path, dir, *target);
+        CHECK(phase.resources.image_cache_builds.total == 0);
+        CHECK(phase.resources.image_cache_hits.total == 0);
+        CHECK(phase.resources.image_decodes.total == 0);
+    }
+    std::filesystem::remove_all(root);
 }
 
 TEST_CASE("design-import benchmark Graphite lane counts GPU uploads",

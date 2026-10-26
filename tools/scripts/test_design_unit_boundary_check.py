@@ -150,6 +150,34 @@ class DesignUnitBoundaryCheckTest(unittest.TestCase):
         self.tree.files["src/design_import.cpp"] += "#include <pulp/signal/biquad.hpp>\n"
         self.assert_fails()
 
+    def test_importer_private_header_including_music_fails(self) -> None:
+        # design_import.cpp reaches this header only through a quoted include;
+        # the header is in no SOURCES or PULP_UNIT_HEADERS list.
+        self.tree.files["src/design_import_internal.hpp"] = "#pragma once\n#include <pulp/music/scale.hpp>\n"
+        self.assert_fails()
+
+    def test_importer_import_and_include_next_spellings_fail(self) -> None:
+        for line in ("#import <pulp/gpu_audio/session.hpp>\n", "#include_next <pulp/signal/fft.hpp>\n"):
+            with self.subTest(line=line):
+                self.tree.files["src/design_import.cpp"] = "#include <pulp/view/design_import.hpp>\n" + line
+                self.assert_fails()
+
+    def test_every_policy_subsystem_is_forbidden(self) -> None:
+        import vellum_policy
+        self.assertTrue({"gpu_audio", "music"} <= set(vellum_policy.names()))
+        for name in vellum_policy.names():
+            with self.subTest(name=name):
+                self.assertTrue(gate.FORBIDDEN_INCLUDE.match(f"pulp/{name}/x.hpp"))
+                self.assertTrue(gate.forbidden_stem(name.replace("_", "-")))
+        self.assertFalse(gate.forbidden_stem("design-import-audio-pack"))
+        self.assertFalse(gate.forbidden_stem("view-core"))
+
+    def test_importer_linking_gpu_audio_or_music_fails(self) -> None:
+        for link in ("pulp::gpu-audio", "pulp-music"):
+            with self.subTest(link=link):
+                self.tree.targets["pulp-design-import"]["links"] = "pulp::design-ir;pulp::view-core;" + link
+                self.assert_fails()
+
     def test_importer_including_audio_pack_fails(self) -> None:
         self.tree.files["src/design_import.cpp"] += "#include <pulp/view/recognition_audio_pack.hpp>\n"
         self.assert_fails()

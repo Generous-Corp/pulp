@@ -100,6 +100,45 @@ virtuals: additive callbacks such as `process_f64(...)` belong after the
 existing f32 process surface, and descriptor fields added for new capabilities
 should be appended when positional aggregate initializer compatibility matters.
 
+### Editor stack: lite by default, GPU host by declaration
+
+On macOS a plug-in links the **lite editor stack** unless its
+`pulp_add_plugin(...)` declares otherwise. A lite binary has no GPU plug-in or
+window host, no Skia, Dawn or Tint, and its editor always opens on the
+CoreGraphics host (`PluginViewHost::create` in
+`core/view/platform/mac/plugin_view_host_mac.mm`, compiled with
+`PULP_VIEW_LITE_HOST` through `mac_gpu_host_config.h`). Pick the keyword by what
+the editor draws:
+
+| Declare | When |
+|---|---|
+| nothing (or `LITE_EDITOR`) | AutoUi, or C++ views that paint on the CoreGraphics host and never set `requires_gpu_host()` |
+| `UI_SCRIPT` | a scripted UI; it renders on the GPU host, so it always gets the full stack |
+| `GPU_UI` | C++ views that need the GPU host: `requires_gpu_host()` is true, Skia SVG that must composite, shaders, Dawn textures, 3D |
+| `FULL_EDITOR` | the full stack for any other reason (a deliberate control, a GPU feature that does not set the flag) |
+
+`LITE_EDITOR` with any of the other three is a configure error. Other
+platforms always build the full stack.
+
+A lite plug-in whose editor asks for the GPU host anyway (`decide_gpu_host`
+returns `use_gpu`) does not fail: `PluginViewHost::create` calls
+`detail::note_lite_host_gpu_request()`, which logs **one** warning per process
+naming `GPU_UI` and counts every request, and the editor opens on the
+CoreGraphics host, where GPU-only drawing is blank. That warning in a log means
+the plug-in is missing `GPU_UI`. `pulp-test-lite-editor-host-mac` holds this
+behavior; `editor-stack-*` tests check which stack each example module links.
+
+How the stack is cut, so a change does not reattach Skia by accident: the
+per-binary ObjC cluster leaves out the GPU hosts, and the binary links
+`pulp-canvas-lite-objects` / `pulp-view-lite-objects`, copies of
+`text_shaper.cpp`, `font_resolver.cpp`, `canvas_widget.cpp` and
+`asset_manager.cpp` built with `PULP_LITE_EDITOR=1`
+(`tools/cmake/PulpLiteEditorObjects.cmake`). Objects on the link line win over
+the library's archive members. `PULP_LITE_EDITOR` may change function bodies
+only, never a declaration. A new unconditional Skia call in a library function
+a lite editor reaches puts Skia back in every lite binary; the `editor-stack-*`
+symbol checks are what catch it.
+
 ## Editor open: content-first — the host's first image is the mounted document
 
 **Rule: the first thing a host composites of an editor is the settled document
@@ -421,6 +460,15 @@ Gate: `[lifetime]` in `test/test_view_bridge.cpp`; under ASan its failure
 without the fix is the use-after-free itself.
 
 ## Lifecycle protocol — adapter author side
+
+- **A hidden editor's GPU memory: `PluginViewHost::release_gpu_caches()`.**
+  One owner for every adapter: the mac, iOS, Windows and Linux GPU hosts
+  implement it with `TrimLevel::everything()` and keep their surfaces; CPU
+  hosts and a host with no surface make it a no-op. Callers: CLAP `gui_hide`,
+  AU v3 `viewDidDisappear`, and the mac GPU view's `-viewDidHide` (the only
+  hide signal an AU v2 editor gets). VST3 has no hide callback; `removed()`
+  destroys the host, which frees everything. `gpu_cache_usage()` reports the
+  host's cache bytes for tests.
 
 ```
 bridge.open(&err)                 // builds the view; does NOT fire on_view_opened
@@ -2497,6 +2545,83 @@ is false, because choc's watcher needs macOS `FSEventStream*`), the flag is
 accepted and file-watch reload is inert. `ScriptedUiSession` logs once in that
 case so the degradation is visible rather than mysterious.
 
+## The UI_SCRIPT editor is embedded; the on-disk path is a dev-build override
+
+`pulp_add_plugin(UI_SCRIPT)` no longer ships a plug-in that reads `ui.js` from
+the developer's absolute source path at every editor open. The script's bytes,
+the `theme.json` beside it, and the asset files beside it (images, fonts,
+`.json` sidecars and shaders: the allowlist in `PulpUiAssets.cmake`;
+dot-directories, `node_modules` and nested build trees are skipped, and a
+script whose directory holds a `CMakeLists.txt` is refused so a project root
+never ships its own files) are encoded by `encode_binary_data.py` into one
+`pulp_ui_embed_<hash>` static library per distinct (script, theme, files) set,
+and a generated header returns them as the embedded half of a
+`pulp::format::EditorAssets`. The per-target registration unit
+(`pulp_editor_assets/<target>.cpp`, generated with `$<TARGET_PROPERTY>` so a
+later `pulp_use_kit_ui` selection still lands) includes that header, so one static
+initializer registers the embedded editor and the on-disk paths together, and
+the data archive's members are referenced from a direct source and survive
+the link. `select_editor_ui_source()` in `editor_ui.hpp` is the pure decision;
+`test_headless.cpp` tests its matrix and `test_view_bridge.cpp` opens an
+embedded registration through a real ViewBridge.
+
+Gotchas:
+
+- **Hot reload needs the on-disk path, and only a dev build records it.**
+  `PULP_UI_SCRIPT_PATH`, `PULP_UI_THEME_PATH` and `PULP_UI_ASSET_ROOTS` are set
+  as target properties only when `PULP_DEV_BUILD` is on. In the checkout it is
+  a root option defaulting to `PULP_BUILD_TESTS`; `PulpUiAssets.cmake`
+  declares it OFF for an installed-SDK consumer, and the `pulp` CLI's
+  configure (`pulp build`/`dev`/`loop`/`run`, and `pulp create`'s project
+  configure) passes `-DPULP_DEV_BUILD=ON` on a fresh dir or one that never
+  recorded it. `pulp ship` builds `build-ship/` with it off rather than
+  shipping the dev dir (`ship` skill). At run time
+  `select_editor_ui_source()` honors the path only for a hot-reloading editor
+  (standalone, or `PULP_DEV_HOT_RELOAD=1`) and only while the file exists, so
+  a stale path falls back to the embedded bytes rather than to AutoUi.
+  `cmake-ui-script-embed` proves both halves on a throwaway project: bytes,
+  theme and sibling file embedded and registered with no path, and the path
+  present under `PULP_DEV_BUILD=ON`; `ui-script-plugin-*` prove the real
+  plug-in targets.
+- **An embedded session is path-less.** `script_path()` is empty,
+  `uses_embedded_source()` is true, `theme_path()` is empty (never a
+  `theme.json` relative to the host's cwd), the script base dir is empty, and
+  `enable_hot_reload` creates no `HotReloader` (`hot_reload_watching()` is
+  false; it logs once). Log lines name the script through `script_label()`.
+  `reload()` re-evaluates the bytes; `reload_from({})` returns to them, which
+  is how `ScriptedUiSwapUnit` rolls an embedded editor back.
+- **Embedded files stand in for the script directory.**
+  `ScriptedUiOptions::embedded_assets` reaches every bridge the session
+  builds (`WidgetBridge::set_embedded_assets`). `__loadAssetSync__` answers
+  from it first (`resolvedPath` is `embedded:<name>`), `setImageSource` hands
+  the widget a `data:` URI (`ImageView` draws inline bytes through the keyed
+  decode cache; it has no in-memory file scheme), `setKnobSpriteStrip` reads
+  the bytes, and `registerFont` registers them with the AssetManager under a
+  per-bridge key. Names are screened by `is_safe_relative_path` after
+  normalization: `..`, absolute paths and URIs never match. Not covered: the
+  sprite-knob body/indicator pair (`SpriteStrip::load_from_file`) and any
+  other API that hands a bare filesystem path to the canvas.
+- **Persisted stores need an identity without a directory.** The widget
+  storage and style-preset namespaces hashed the script base dir; an embedded
+  editor has none, so `ScriptedUiOptions::storage_identity` (the default
+  editor passes `<bundle id>/<script name>`, from ViewBridge) is hashed
+  instead (`WidgetBridge::storage_identity()`). A file-backed session still
+  hashes its directory, so nothing moves for existing plug-ins.
+- **The old mechanism depended on a weak-symbol override.** The compiled-in
+  path only reached `ViewBridge` (in `pulp-format-view`, built without the
+  define) when a plug-in TU that includes `editor_ui.hpp` -- `clap_entry.hpp`
+  -- supplied a competing definition of the inline builder. The registry is
+  explicit, so VST3/AU/Standalone no longer rely on link order.
+- **A file added beside the script re-runs CMake** (the glob is
+  `CONFIGURE_DEPENDS`); an edit to an embedded file re-encodes it at build
+  time without a reconfigure. Embedding more than 16 MiB beside one script
+  warns. A kit (`pulp_use_kit_ui`) embeds the files under its `PULP_ASSETS`
+  directories too, named relative to each directory.
+- **The last selection on a target wins.** `pulp_use_kit_ui` runs after
+  `pulp_add_plugin` and overwrites the embed and path properties the generated
+  unit reads at generate time; there is one registration per target, so no
+  static-initializer ordering is involved.
+
 ## Scripted UI joins a unified live-swap transaction (SwapUnit)
 
 `ScriptedUiSwapUnit` (`core/format/include/pulp/format/reload/scripted_ui_swap_unit.hpp`)
@@ -3579,10 +3704,24 @@ same reason. A new direct call to a non-virtual `ScriptedUiSession` method (or
 any other view-script symbol) from glue pulls the whole runtime back into every
 plug-in; `plugin-module-no-script-runtime-PulpGain-*` (packaging label) fails
 when that happens, and `-Wl,-why_load` on the module link names the caller.
+The default editor's own scripted branch is the trap that broke this once:
+when the `UI_SCRIPT` selection became a runtime value, the inline
+`build_editor_ui_for_assets()` could no longer fold its
+`make_unique<ScriptedUiSession>` away, so every AutoUi plug-in linked the
+runtime again (PulpGain 18.7 -> 23.8 MB stripped) while the build stayed
+green. That branch now lives in `core/format/src/scripted_editor_builder.cpp`
+and is reached through `format::scripted_editor_builder_slot()`;
+`install_scripted_editor_builder()` fills the slot, and only the generated
+editor-assets source of a target with a script calls it. A runtime-valued
+choice in glue every plug-in links never removes code; only a reference that
+is absent at link time does.
 A processor that builds its own `ScriptedUiSession` needs no opt-in: its
 constructor call links the runtime, and that also installs the prewarm runner.
 That is also how a plug-in that loads a script at run time without declaring
 `UI_SCRIPT` opts back in; there is deliberately no CMake switch, because the
-link follows the reference. Reaching the runtime only by name (`dlsym`) cannot
+link follows the reference. A bundle whose scripts come only from keyed
+`PluginRegistration::ui_script` entries calls
+`install_scripted_editor_builder()` itself; without it ViewBridge logs the
+missing builder, reports it in `last_error()` and opens AutoUi. Reaching the runtime only by name (`dlsym`) cannot
 work: nothing links it. `docs/reference/cmake.md` "Shipped Module Size" is the
 user-facing version.

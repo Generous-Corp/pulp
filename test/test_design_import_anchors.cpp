@@ -18,6 +18,7 @@
 #include <sstream>
 #include <string>
 #include <unordered_set>
+#include <vector>
 
 using namespace pulp::view;
 
@@ -385,6 +386,221 @@ TEST_CASE("adapter strategy falls back to content-hash for nodes without IDs",
     REQUIRE(root.children[0].stable_anchor_id.has_value());
     // Fallback is content-hash, so the value is NOT prefixed with "figma:".
     REQUIRE(root.children[0].stable_anchor_id->find("figma:") == std::string::npos);
+}
+
+TEST_CASE("adapter fallback discriminates id-less siblings with one signature",
+          "[view][import][anchors]") {
+    // A figma-plugin export without node ids: three widget frames with no text
+    // share {tag, role, text}. The fallback hashes them by content, so each
+    // needs its own sibling index exactly as under content_hash; with one index
+    // for all three they shared one anchor and none of them could be bound.
+    IRNode root = make_node("frame");
+    for (int i = 0; i < 3; ++i)
+        root.children.push_back(make_node("frame"));
+
+    assign_anchors(root, AnchorStrategy::adapter, "figma-plugin");
+
+    std::unordered_set<std::string> seen;
+    for (const auto& c : root.children) {
+        REQUIRE(c.stable_anchor_id.has_value());
+        CHECK(seen.insert(*c.stable_anchor_id).second);
+    }
+    CHECK(seen.size() == 3);
+    // The first keeps the anchor it always had, so existing tweaks on a single
+    // id-less node still resolve.
+    CHECK(root.children[0].stable_anchor_id ==
+          compute_anchor_id(make_node("frame"), {}, 0, 1, 0, AnchorStrategy::content_hash, {}));
+}
+
+TEST_CASE("adapter fallback indexes ignore siblings that carry a source id",
+          "[view][import][anchors]") {
+    IRNode without_id_sibling = make_node("frame");
+    without_id_sibling.children.push_back(make_node("frame"));
+    without_id_sibling.children.push_back(make_node("frame"));
+
+    IRNode with_id_sibling = make_node("frame");
+    with_id_sibling.children.push_back(make_node("frame"));
+    with_id_sibling.children.push_back(make_node("frame", {}, {}, "7:7"));
+    with_id_sibling.children.push_back(make_node("frame"));
+
+    assign_anchors(without_id_sibling, AnchorStrategy::adapter, "figma-plugin");
+    assign_anchors(with_id_sibling, AnchorStrategy::adapter, "figma-plugin");
+
+    CHECK(with_id_sibling.children[1].stable_anchor_id == "figma-plugin:7:7");
+    CHECK(with_id_sibling.children[0].stable_anchor_id ==
+          without_id_sibling.children[0].stable_anchor_id);
+    CHECK(with_id_sibling.children[2].stable_anchor_id ==
+          without_id_sibling.children[1].stable_anchor_id);
+}
+
+namespace {
+
+// A card holding a caption and an unlabelled control: the shape that repeats
+// under different parents in real designs (two knobs, two sliders).
+IRNode card(std::string caption) {
+    IRNode c = make_node("frame");
+    c.children.push_back(make_node("text", std::move(caption)));
+    c.children.push_back(make_node("input"));
+    return c;
+}
+
+std::vector<std::string> all_anchors(const IRNode& node) {
+    std::vector<std::string> out;
+    if (node.stable_anchor_id)
+        out.push_back(*node.stable_anchor_id);
+    for (const auto& c : node.children)
+        for (auto& a : all_anchors(c))
+            out.push_back(std::move(a));
+    return out;
+}
+
+} // namespace
+
+TEST_CASE("identical controls under different parents get distinct anchors",
+          "[view][import][anchors]") {
+    // A content hash does not include the parent, so the two inputs hash alike
+    // even though their cards differ by caption.
+    IRNode root = make_node("frame");
+    root.children.push_back(card("Drive"));
+    root.children.push_back(card("Tone"));
+    const auto undisambiguated =
+        compute_anchor_id(make_node("input"), {}, 0, 2, 0, AnchorStrategy::content_hash, {});
+
+    assign_anchors(root, AnchorStrategy::content_hash);
+
+    const auto anchors = all_anchors(root);
+    CHECK(std::unordered_set<std::string>(anchors.begin(), anchors.end()).size() == anchors.size());
+    CHECK(find_duplicate_anchors(root).empty());
+    // The first in document order keeps the anchor it always had; the cards
+    // and captions were unique already and are untouched.
+    CHECK(root.children[0].children[1].stable_anchor_id == undisambiguated);
+    CHECK(root.children[1].children[1].stable_anchor_id != undisambiguated);
+    IRNode plain = make_node("frame");
+    plain.children.push_back(card("Drive"));
+    plain.children.push_back(card("Tone"));
+    for (auto& c : plain.children)
+        c.children.pop_back();
+    assign_anchors(plain, AnchorStrategy::content_hash);
+    CHECK(root.children[1].stable_anchor_id == plain.children[1].stable_anchor_id);
+    CHECK(root.children[1].children[0].stable_anchor_id ==
+          plain.children[1].children[0].stable_anchor_id);
+}
+
+TEST_CASE("the adapter fallback disambiguates across parents too", "[view][import][anchors]") {
+    IRNode root = make_node("frame", {}, {}, "1:1");
+    root.children.push_back(card("Drive"));
+    root.children[0].source_node_id = "1:2";
+    root.children.push_back(card("Tone"));
+    root.children[1].source_node_id = "1:3";
+
+    assign_anchors(root, AnchorStrategy::adapter, "figma-plugin");
+
+    CHECK(root.children[0].stable_anchor_id == "figma-plugin:1:2");
+    CHECK(root.children[1].stable_anchor_id == "figma-plugin:1:3");
+    CHECK(root.children[0].children[1].stable_anchor_id !=
+          root.children[1].children[1].stable_anchor_id);
+    CHECK(find_duplicate_anchors(root).empty());
+}
+
+TEST_CASE("disambiguation never takes an anchor another node already holds",
+          "[view][import][anchors]") {
+    // Learn which anchor the repeat would be given, then give that anchor to
+    // an unrelated node first: its identity was fine and must stay put.
+    IRNode probe = make_node("frame");
+    probe.children.push_back(card("Drive"));
+    probe.children.push_back(card("Tone"));
+    assign_anchors(probe, AnchorStrategy::content_hash);
+    const auto would_take = *probe.children[1].children[1].stable_anchor_id;
+
+    IRNode root = make_node("frame");
+    root.children.push_back(card("Drive"));
+    root.children.push_back(card("Tone"));
+    IRNode bystander = make_node("text", "elsewhere");
+    bystander.stable_anchor_id = would_take;
+    root.children.push_back(bystander);
+
+    assign_anchors(root, AnchorStrategy::content_hash);
+
+    CHECK(root.children[2].stable_anchor_id == would_take);
+    CHECK(root.children[1].children[1].stable_anchor_id != would_take);
+    CHECK(find_duplicate_anchors(root).empty());
+}
+
+TEST_CASE("explicit identities are never rewritten, so a repeat stays a repeat",
+          "[view][import][anchors]") {
+    IRNode adapter = make_node("frame", {}, {}, "0:1");
+    adapter.children.push_back(make_node("frame", {}, {}, "9:9"));
+    adapter.children.push_back(make_node("frame", {}, {}, "9:9"));
+    assign_anchors(adapter, AnchorStrategy::adapter, "figma");
+    CHECK(adapter.children[0].stable_anchor_id == "figma:9:9");
+    CHECK(adapter.children[1].stable_anchor_id == "figma:9:9");
+    CHECK(find_duplicate_anchors(adapter).size() == 1);
+
+    // An authored override is the author's identity, not a derived one.
+    IRNode authored = make_node("frame");
+    authored.children.push_back(make_node("button", "A"));
+    authored.children.push_back(make_node("button", "B"));
+    authored.children[0].stable_anchor_id = "mine";
+    authored.children[1].stable_anchor_id = "mine";
+    assign_anchors(authored, AnchorStrategy::content_hash);
+    CHECK(find_duplicate_anchors(authored).size() == 1);
+}
+
+TEST_CASE("resolve_anchor_collisions rewrites only anchors recorded as derived",
+          "[view][import][anchors]") {
+    IRNode root = make_node("frame");
+    root.stable_anchor_id = "root";
+    root.anchor_strategy = "path";
+    for (const char* strategy : {"content-hash", "content-hash", "path", "path", "adapter"}) {
+        IRNode n = make_node("frame");
+        n.stable_anchor_id = std::string(strategy) == "path" ? "p" : "h";
+        n.anchor_strategy = strategy;
+        root.children.push_back(std::move(n));
+    }
+    // An adapter anchor with no source id is the fallback, so derived.
+    const auto changes = resolve_anchor_collisions(root);
+
+    REQUIRE(changes.size() == 2);
+    CHECK(changes[0].path == "$/children[1]");
+    CHECK(changes[0].previous == "h");
+    CHECK(changes[0].first_path == "$/children[0]");
+    CHECK(changes[1].path == "$/children[4]");
+    CHECK(root.children[0].stable_anchor_id == "h");
+    CHECK(root.children[3].stable_anchor_id == "p");
+    const auto left = find_duplicate_anchors(root);
+    REQUIRE(left.size() == 1);
+    CHECK(left[0].path == "$/children[3]");
+    // Running it again changes nothing: the result is already unique.
+    CHECK(resolve_anchor_collisions(root).empty());
+}
+
+TEST_CASE("find_duplicate_anchors names each repeat and the node that keeps the anchor",
+          "[view][import][anchors]") {
+    IRNode root = make_node("frame");
+    root.stable_anchor_id = "root";
+    for (const char* name : {"Knob A", "Fader", "Knob B"}) {
+        IRNode n = make_node("frame");
+        n.name = name;
+        n.stable_anchor_id = std::string(name) == "Fader" ? "fader" : "knob";
+        root.children.push_back(std::move(n));
+    }
+    root.children[1].children.push_back(make_node("frame"));
+    root.children[1].children[0].stable_anchor_id = "knob";
+
+    const auto duplicates = find_duplicate_anchors(root);
+    REQUIRE(duplicates.size() == 2);
+    CHECK(duplicates[0].anchor == "knob");
+    CHECK(duplicates[0].path == "$/children[1]/children[0]");
+    CHECK(duplicates[0].node_name == "<unnamed>");
+    CHECK(duplicates[0].first_path == "$/children[0]");
+    CHECK(duplicates[0].first_node_name == "Knob A");
+    CHECK(duplicates[1].path == "$/children[2]");
+    CHECK(duplicates[1].node_name == "Knob B");
+    CHECK(duplicates[1].first_path == "$/children[0]");
+
+    root.children[2].stable_anchor_id = "knob-b";
+    root.children[1].children[0].stable_anchor_id = "knob-inner";
+    CHECK(find_duplicate_anchors(root).empty());
 }
 
 // ── pre-existing anchor preservation ────────────────────────────────────

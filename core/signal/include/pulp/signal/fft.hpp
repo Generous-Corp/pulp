@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <numbers>
 #include <type_traits>
 #include <vector>
 
@@ -27,6 +28,8 @@ inline constexpr std::size_t fft_twiddle_index(int phase_index, int stride) noex
     const auto step = static_cast<std::size_t>(stride);
     return index * step;
 }
+
+struct FftRealSplit;
 
 } // namespace detail
 
@@ -54,6 +57,23 @@ inline bool checked_fft_platform_setup_bytes(std::uint64_t fft_size,
     return true;
 }
 
+namespace detail {
+
+/// Whether a FftT of `fft_size` points keeps a real_bins()-long complex
+/// scratch for the split-spectrum path (FftRealSplit): every size the portable real
+/// transform serves, which is all of them except vDSP's float sizes.
+template <typename SampleType>
+inline constexpr bool fft_real_split_needs_scratch(std::uint64_t fft_size) noexcept {
+#if PULP_FFT_HAS_VDSP
+    if constexpr (std::is_same_v<SampleType, float>)
+        return fft_size < 4u;
+#endif
+    static_cast<void>(fft_size);
+    return true;
+}
+
+} // namespace detail
+
 /// Complete retained-storage contract for one prepared FftT. Keeping this
 /// beside FftT makes callers compose the transform's allocation policy instead
 /// of duplicating its platform-specific backing stores.
@@ -75,6 +95,9 @@ inline bool checked_fft_retained_bytes(std::uint64_t fft_size,
             return false;
     }
 #endif
+    if (detail::fft_real_split_needs_scratch<SampleType>(fft_size) &&
+        !charge.add<std::complex<SampleType>>(fft_size / 2u + 1u))
+        return false;
     bytes = charge.total();
     return true;
 }
@@ -93,8 +116,8 @@ inline bool checked_fft_retained_bytes(std::uint64_t fft_size,
 // RT contract: construction/destruction allocate or release twiddle/vDSP
 // storage and are prepare/control-thread work. forward(), inverse(),
 // forward_real(), forward_real_half(), inverse_real_half(), magnitude(),
-// magnitude_db(), and size() are allocation-free after construction when
-// callers provide valid input/output buffers.
+// magnitude_db(), and size() are allocation-free after construction when callers provide
+// valid input/output buffers.
 template <typename SampleType = float>
 class FftT {
     static_assert(std::is_floating_point_v<SampleType>,
@@ -107,7 +130,8 @@ public:
     FftT& operator=(const FftT&) = delete;
 
     FftT(FftT&& other) noexcept
-        : size_(other.size_), twiddles_(std::move(other.twiddles_))
+        : size_(other.size_), twiddles_(std::move(other.twiddles_)),
+          real_scratch_(std::move(other.real_scratch_))
 #if PULP_FFT_HAS_VDSP
           ,
           log2n_(other.log2n_), vdsp_setup_(other.vdsp_setup_), split_(std::move(other.split_)),
@@ -133,6 +157,7 @@ public:
             size_ = other.size_;
             other.size_ = 0;
             twiddles_ = std::move(other.twiddles_);
+            real_scratch_ = std::move(other.real_scratch_);
         }
         return *this;
     }
@@ -153,9 +178,12 @@ public:
         // Pre-compute twiddle factors (used as fallback on non-Apple)
         twiddles_.resize(size / 2);
         for (int i = 0; i < size / 2; ++i) {
-            double angle = -2.0 * pi * i / size;
+            double angle = -2.0 * std::numbers::pi * i / size;
             twiddles_[i] = {std::cos(angle), std::sin(angle)};
         }
+        if (size > 0 &&
+            detail::fft_real_split_needs_scratch<SampleType>(static_cast<std::uint64_t>(size)))
+            real_scratch_.resize(static_cast<std::size_t>(size / 2 + 1));
 #if PULP_FFT_HAS_VDSP
         if constexpr (std::is_same_v<SampleType, float>) {
             // Keep raw setup acquisition last: every vector allocation and
@@ -180,6 +208,9 @@ public:
     [[nodiscard]] bool ready() const noexcept {
         if (size_ <= 0 || twiddles_.size() != static_cast<std::size_t>(size_ / 2))
             return false;
+        if (detail::fft_real_split_needs_scratch<SampleType>(static_cast<std::uint64_t>(size_)) &&
+            real_scratch_.size() != static_cast<std::size_t>(size_ / 2 + 1))
+            return false;
 #if PULP_FFT_HAS_VDSP
         if constexpr (std::is_same_v<SampleType, float>) {
             return vdsp_setup_ != nullptr &&
@@ -187,6 +218,26 @@ public:
         }
 #endif
         return true;
+    }
+
+    /// Byte offset past a 64-byte boundary of the real and imaginary halves
+    /// the vDSP transforms use, or -1 when this transform does not use vDSP.
+    /// Always 16 for a ready float transform of 32 points or more (see the
+    /// placement note on the split storage); exposed so that contract can be
+    /// tested rather than assumed.
+    [[nodiscard]] int vdsp_split_offset_bytes(bool real_transform) const noexcept {
+#if PULP_FFT_HAS_VDSP
+        if constexpr (std::is_same_v<SampleType, float>) {
+            if (!ready())
+                return -1;
+            const DSPSplitComplex z = real_transform ? real_split() : split();
+            const auto re = static_cast<int>(reinterpret_cast<std::uintptr_t>(z.realp) % 64u);
+            const auto im = static_cast<int>(reinterpret_cast<std::uintptr_t>(z.imagp) % 64u);
+            return re == im ? re : -2;
+        }
+#endif
+        static_cast<void>(real_transform);
+        return -1;
     }
 
     // Forward FFT (time → frequency) — complex in-place
@@ -222,7 +273,11 @@ public:
         rt::count_fft();
 #if PULP_FFT_HAS_VDSP
         if constexpr (std::is_same_v<SampleType, float>) {
-            forward_real_vdsp(input, output);
+            if (size_ >= kVdspMinRealSize) {
+                forward_real_vdsp(input, output);
+                return;
+            }
+            forward_real_fallback(input, output);
         } else {
             forward_real_fallback(input, output);
         }
@@ -230,6 +285,9 @@ public:
         forward_real_fallback(input, output);
 #endif
     }
+
+    /// Smallest size() forward_real_half() / inverse_real_half() accept.
+    static constexpr int kMinRealSize = 2;
 
     /// Independent bins of a real transform of size(): DC through Nyquist.
     int real_bins() const {
@@ -240,21 +298,25 @@ public:
     /// real_bins() bins, X[k] = scale * sum_n x[n] e^(-2 pi i k n / N) for
     /// k = 0..N/2. DC and Nyquist are written with zero imaginary part and
     /// nothing past the Nyquist bin is touched. `output` must not overlap
-    /// `input`. Requires size() >= 2.
+    /// `input`. Requires size() >= kMinRealSize. The two-argument overload
+    /// uses scale 1.
     void forward_real_half(const SampleType* input, std::complex<SampleType>* output,
-                           SampleType scale = SampleType{1}) const {
+                           SampleType scale) const {
         rt::count_fft();
-        assert(size_ >= 2 && "real transforms need at least two points");
+        assert(size_ >= kMinRealSize && "real transforms need at least two points");
 #if PULP_FFT_HAS_VDSP
-        // vDSP's packed real transform needs at least two complex points.
         if constexpr (std::is_same_v<SampleType, float>) {
-            if (size_ >= 4) {
+            if (size_ >= kVdspMinRealSize) {
                 forward_real_half_vdsp(input, output, scale);
                 return;
             }
         }
 #endif
         forward_real_half_fallback(input, output, scale);
+    }
+
+    void forward_real_half(const SampleType* input, std::complex<SampleType>* output) const {
+        forward_real_half(input, output, SampleType{1});
     }
 
     /// Inverse of `forward_real_half()`. Reads real_bins() bins (the imaginary
@@ -264,14 +326,15 @@ public:
     /// default scale 1/N recovers the forward transform's input. `output` may
     /// occupy the same storage as `input` (a complex buffer reinterpreted as
     /// real samples), which lets a caller transform a spectrum in place.
-    /// Requires size() >= 2.
+    /// Requires size() >= kMinRealSize. The two-argument overload uses scale
+    /// 1/N.
     void inverse_real_half(const std::complex<SampleType>* input, SampleType* output,
                            SampleType scale) const {
         rt::count_fft();
-        assert(size_ >= 2 && "real transforms need at least two points");
+        assert(size_ >= kMinRealSize && "real transforms need at least two points");
 #if PULP_FFT_HAS_VDSP
         if constexpr (std::is_same_v<SampleType, float>) {
-            if (size_ >= 4) {
+            if (size_ >= kVdspMinRealSize) {
                 inverse_real_half_vdsp(input, output, scale);
                 return;
             }
@@ -304,46 +367,105 @@ public:
         }
     }
 
-private:
-    static constexpr double pi = 3.14159265358979323846;
+  private:
+    friend struct detail::FftRealSplit;
+
+    /// Real-input forward transform into packed split form. `re` and `im`
+    /// each receive size() / 2 values: re[0] is the DC bin and im[0] the
+    /// Nyquist bin (both purely real), and re[k], im[k] for k = 1..N/2-1 are
+    /// bin k's real and imaginary parts, scaled as by `forward_real_half()`.
+    /// Neither array may overlap `input` or the other. Requires size() >=
+    /// kMinRealSize.
+    void forward_real_split(const SampleType* input, SampleType* re, SampleType* im,
+                            SampleType scale) const {
+        rt::count_fft();
+        assert(size_ >= kMinRealSize && "real transforms need at least two points");
+#if PULP_FFT_HAS_VDSP
+        if constexpr (std::is_same_v<SampleType, float>) {
+            if (size_ >= kVdspMinRealSize) {
+                forward_real_split_vdsp(input, re, im, scale);
+                return;
+            }
+        }
+#endif
+        forward_real_split_fallback(input, re, im, scale);
+    }
+
+    /// Inverse of `forward_real_split()`: reads a packed split spectrum and
+    /// writes size() real samples equal to `scale` times the unnormalised
+    /// inverse DFT of the Hermitian spectrum it defines; scale 1/N recovers
+    /// the forward transform's input. `output` must not overlap `re` or `im`.
+    /// Requires size() >= kMinRealSize.
+    void inverse_real_split(const SampleType* re, const SampleType* im, SampleType* output,
+                            SampleType scale) const {
+        rt::count_fft();
+        assert(size_ >= kMinRealSize && "real transforms need at least two points");
+#if PULP_FFT_HAS_VDSP
+        if constexpr (std::is_same_v<SampleType, float>) {
+            if (size_ >= kVdspMinRealSize) {
+                inverse_real_split_vdsp(re, im, output, scale);
+                return;
+            }
+        }
+#endif
+        inverse_real_split_fallback(re, im, output, scale);
+    }
+
     int size_ = 0;
     std::vector<std::complex<double>> twiddles_;
+    // real_bins() bins for the portable split-spectrum path, which builds
+    // the interleaved half spectrum first; empty where vDSP serves it.
+    mutable std::vector<std::complex<SampleType>> real_scratch_;
 #if PULP_FFT_HAS_VDSP
     int log2n_ = 0;
     FFTSetup vdsp_setup_ = nullptr;
-    // One buffer holds both split halves so their placement can be chosen.
-    // vDSP takes a separate code path when both halves of a split complex
-    // array sit on 64-byte boundaries, and which path is faster depends on the
-    // transform and the chip. Measured with vDSP_fft_zrip / vDSP_fft_zip:
-    //   * real, 512-2048 points: off-boundary is 1.4-1.9x faster on M5
-    //     Ultra and M5 Max; M3 Ultra prefers the boundary from 1024 points
-    //     (up to 1.3x at 2048). Off-boundary is used: it is the newer chips'
-    //     win and the larger one.
-    //   * real, 4096 points and up: on-boundary, 1.3-1.6x faster on all three.
-    //   * complex, 512 points and up: on-boundary, up to 1.6x faster on all
-    //     three; below 512 off-boundary, up to 1.6x faster on M5.
-    // Two separate allocations left the placement to the allocator, so the
-    // same transform's speed changed with where the buffers landed.
+    // One buffer holds both split halves so their placement is fixed rather
+    // than left to the allocator. vDSP takes a separate code path when both
+    // halves of a split complex array sit on 64-byte boundaries, and that
+    // path is the less accurate one: from 512 points up it rounds 0.4-5.3 dB
+    // worse (worst bin error relative to the largest bin, against a
+    // long-double DFT; about -131.6 to -137.6 dB on the boundary against
+    // -135.8 to -141.4 dB off it) on every processor measured: real and
+    // complex transforms on M1 Max, M5 Max and M5 Ultra, real transforms on
+    // M3 Ultra. Both halves therefore always sit 16 bytes past a 64-byte
+    // boundary.
+    //
+    // The cost of that choice depends on the processor. Forward transforms in
+    // this buffer layout, at low priority on shared machines:
+    //   - M5 Max and M5 Ultra (paired, interleaved; loaded): off the boundary
+    //     is the faster path from 512 to 8192 points, by 1.08-2.16x for real
+    //     transforms and 1.15-2.5x for complex ones (3.5-4.4x for complex at
+    //     256); the two are within 0.1% at 256 real points, and at 16384 the
+    //     boundary path takes 0.93-1.14x the time.
+    //   - M1 Max (paired, interleaved; background QoS): the boundary path is
+    //     faster from 2048 real and 1024 complex points, by 1.17-1.75x and
+    //     1.19-2.1x.
+    //   - M3 Ultra (best of five, one session, load not recorded): the
+    //     boundary path is faster from 1024 real and 512 complex points, by
+    //     1.06-1.42x and 1.18-1.59x.
+    // On M1 Max and M3 Ultra, then, large transforms give up that much speed
+    // for the accuracy above.
+    //
+    // Separate allocations made the same transform's speed and error depend
+    // on where the buffers happened to land.
     mutable std::vector<float> split_;
     std::size_t split_base_ = 0;
-    static_assert(kVdspSplitPaddingFloats >= 64 / sizeof(float) - 1 + 4,
-                  "split padding must cover the 64-byte alignment slack plus the 4-float step");
+    static constexpr std::size_t kVdspSplitOffsetFloats = 4; // 16 bytes
+    static_assert(kVdspSplitPaddingFloats >= 64 / sizeof(float) - 1 + kVdspSplitOffsetFloats,
+                  "split padding must cover the 64-byte alignment slack plus the 16-byte step");
 #endif
 
 #if PULP_FFT_HAS_VDSP
-    // N-point halves for complex transforms: on 64-byte boundaries from 512
-    // points up, 16 bytes past one below that.
+    // N-point halves for complex transforms, each 16 bytes past a 64-byte
+    // boundary (N is a power of two, so the second half keeps the offset).
     DSPSplitComplex split() const {
-        const std::size_t offset = size_ >= 512 ? 0 : 4;
-        float* base = split_.data() + split_base_ + offset;
+        float* base = split_.data() + split_base_ + kVdspSplitOffsetFloats;
         return {base, base + size_};
     }
 
-    // N/2-point halves for real transforms: on 64-byte boundaries from 4096
-    // points up, 16 bytes past one below that.
+    // N/2-point halves for real transforms, placed like split()'s.
     DSPSplitComplex real_split() const {
-        const std::size_t offset = size_ >= 4096 ? 0 : 4;
-        float* base = split_.data() + split_base_ + offset;
+        float* base = split_.data() + split_base_ + kVdspSplitOffsetFloats;
         return {base, base + size_ / 2};
     }
 
@@ -432,6 +554,31 @@ private:
             output[size_ - i] = {re, -im};
         }
     }
+
+    // vDSP's packed real transform already has the split layout; only its 2x
+    // gain is folded into the copy out of the placed buffer.
+    void forward_real_split_vdsp(const float* input, float* re, float* im, float scale) const {
+        forward_real_packed_vdsp(input);
+        const DSPSplitComplex z = real_split();
+        const float s = 0.5f * scale;
+        const auto half = static_cast<vDSP_Length>(size_ / 2);
+        vDSP_vsmul(z.realp, 1, &s, re, 1, half);
+        vDSP_vsmul(z.imagp, 1, &s, im, 1, half);
+    }
+
+    void inverse_real_split_vdsp(const float* re, const float* im, float* output,
+                                 float scale) const {
+        const int half = size_ / 2;
+        DSPSplitComplex z = real_split();
+        std::copy_n(re, half, z.realp);
+        std::copy_n(im, half, z.imagp);
+        vDSP_fft_zrip(vdsp_setup_, &z, 1, log2n_, kFFTDirection_Inverse);
+        if (scale == 1.0f)
+            vDSP_ztoc(&z, 1, reinterpret_cast<DSPComplex*>(output), 2,
+                      static_cast<vDSP_Length>(half));
+        else
+            interleave_scaled(z.realp, z.imagp, output, half, scale);
+    }
 #endif
 
     void forward_fallback(std::complex<SampleType>* data) const {
@@ -482,8 +629,13 @@ private:
     // x[2k] + i x[2k+1], transform, then separate the even/odd spectra
     // E, O pairwise and combine X[k] = E[k] + W^k O[k],
     // X[N/2 - k] = conj(E[k] - W^k O[k]).
+    // vDSP's packed real transform needs two complex points; smaller real
+    // transforms take the portable path.
+    static constexpr int kVdspMinRealSize = 4;
+
     void forward_real_half_fallback(const SampleType* input, std::complex<SampleType>* output,
                                     SampleType scale) const {
+        assert(size_ >= kMinRealSize);
         const int half = size_ / 2;
         for (int k = 0; k < half; ++k)
             output[k] = {input[2 * k], input[2 * k + 1]};
@@ -513,6 +665,7 @@ private:
     // slots, so the spectrum may share storage with the output.
     void inverse_real_half_fallback(const std::complex<SampleType>* input, SampleType* output,
                                     SampleType scale) const {
+        assert(size_ >= kMinRealSize);
         const int half = size_ / 2;
         const SampleType nyquist = input[half].real();
         const SampleType dc = input[0].real();
@@ -542,6 +695,29 @@ private:
             z[k] = std::conj(z[k]);
     }
 
+    void forward_real_split_fallback(const SampleType* input, SampleType* re, SampleType* im,
+                                     SampleType scale) const {
+        std::complex<SampleType>* bins = real_scratch_.data();
+        forward_real_half_fallback(input, bins, scale);
+        const int half = size_ / 2;
+        for (int k = 0; k < half; ++k) {
+            re[k] = bins[k].real();
+            im[k] = bins[k].imag();
+        }
+        im[0] = bins[half].real();
+    }
+
+    void inverse_real_split_fallback(const SampleType* re, const SampleType* im, SampleType* output,
+                                     SampleType scale) const {
+        std::complex<SampleType>* bins = real_scratch_.data();
+        const int half = size_ / 2;
+        for (int k = 0; k < half; ++k)
+            bins[k] = {re[k], im[k]};
+        bins[0] = {re[0], SampleType{0}};
+        bins[half] = {im[0], SampleType{0}};
+        inverse_real_half_fallback(bins, output, scale);
+    }
+
     void bit_reverse(std::complex<SampleType>* data) const {
         bit_reverse(data, size_);
     }
@@ -563,131 +739,77 @@ private:
 using Fft = FftT<float>;
 using Fft64 = FftT<double>;
 
-// ── Convolver ────────────────────────────────────────────────────────────────
+namespace detail {
 
-// Simple frequency-domain convolver using overlap-add. Output is delayed by
-// one block: a block is transformed once it has filled, and its result is
-// read out while the next one fills.
-//
-// RT contract: load_ir() allocates FFT and overlap-add buffers and is not
-// audio-thread safe. process(), buffer process(), and reset() are
-// allocation-free after a valid impulse response has been loaded.
-template <typename SampleType = float>
-class ConvolverT {
-public:
-    // Load an impulse response
-    void load_ir(const SampleType* ir, int ir_length, int block_size = 0) {
-        if (ir == nullptr || ir_length <= 0) {
-            fft_.reset();
-            ir_freq_.clear();
-            input_buf_.clear();
-            output_buf_.clear();
-            overlap_.clear();
-            freq_buf_.clear();
-            fft_size_ = 0;
-            block_size_ = 0;
-            pos_ = 0;
-            return;
-        }
-
-        block_size_ = block_size > 0 ? block_size : 256;
-
-        // FFT size: next power of 2 >= block_size + ir_length - 1
-        // The real transform needs at least two points.
-        fft_size_ = 2;
-        while (fft_size_ < block_size_ + ir_length) fft_size_ <<= 1;
-
-        fft_ = std::make_unique<FftT<SampleType>>(fft_size_);
-
-        // Transform IR
-        ir_freq_.resize(fft_size_);
-        for (int i = 0; i < fft_size_; ++i)
-            ir_freq_[i] = i < ir_length
-                ? std::complex<SampleType>(ir[i], SampleType{0.0f})
-                : std::complex<SampleType>(SampleType{0.0f}, SampleType{0.0f});
-        fft_->forward(ir_freq_.data());
-
-        // Buffers
-        input_buf_.assign(fft_size_, SampleType{0.0f});
-        output_buf_.assign(fft_size_, SampleType{0.0f});
-        overlap_.assign(fft_size_, SampleType{0.0f});
-        freq_buf_.assign(fft_size_, {});
-        pos_ = 0;
+/// The packed split-complex form of a real transform, for Pulp's own
+/// frequency-domain stages (the overlap-add ConvolverT). `re` and `im` each
+/// hold size() / 2 values: re[0] is the DC bin and im[0] the Nyquist bin
+/// (both purely real), and re[k], im[k] for k = 1..N/2-1 are bin k, scaled
+/// as by `forward_real_half()`. It is the layout vDSP's real transform
+/// produces, so a stage that stays in it skips the interleave on the way in
+/// and out. Not public API: the partitioned engines keep interleaved bins,
+/// which their complex multiply-accumulate kernels run fastest on.
+struct FftRealSplit {
+    template <typename SampleType>
+    static void forward(const FftT<SampleType>& fft, const SampleType* input, SampleType* re,
+                        SampleType* im, SampleType scale) {
+        fft.forward_real_split(input, re, im, scale);
     }
 
-    // Process a single sample
-    SampleType process(SampleType input) {
-        if (!fft_ || block_size_ <= 0)
-            return input;
-
-        input_buf_[pos_] = input;
-        SampleType output = output_buf_[pos_];
-        ++pos_;
-
-        if (pos_ >= block_size_) {
-            process_block();
-            pos_ = 0;
-        }
-
-        return output;
-    }
-
-    // Process a buffer
-    void process(const SampleType* input, SampleType* output, int num_samples) {
-        for (int i = 0; i < num_samples; ++i)
-            output[i] = process(input[i]);
-    }
-
-    void reset() {
-        std::fill(input_buf_.begin(), input_buf_.end(), SampleType{0.0f});
-        std::fill(output_buf_.begin(), output_buf_.end(), SampleType{0.0f});
-        std::fill(overlap_.begin(), overlap_.end(), SampleType{0.0f});
-        pos_ = 0;
-    }
-
-private:
-    std::unique_ptr<FftT<SampleType>> fft_;
-    int fft_size_ = 0;
-    int block_size_ = 0;
-    int pos_ = 0;
-
-    std::vector<std::complex<SampleType>> ir_freq_;
-    std::vector<SampleType> input_buf_;
-    std::vector<SampleType> output_buf_;
-    std::vector<SampleType> overlap_;
-    std::vector<std::complex<SampleType>> freq_buf_;
-
-    void process_block() {
-        // input_buf_ is already zero past block_size_ (cleared after every
-        // block), so it is the zero-padded real frame as it stands.
-        fft_->forward_real_half(input_buf_.data(), freq_buf_.data());
-
-        // Multiply in frequency domain; both spectra are Hermitian, so only
-        // DC..Nyquist carries information.
-        const int bins = fft_->real_bins();
-        for (int i = 0; i < bins; ++i)
-            freq_buf_[i] *= ir_freq_[i];
-
-        // Real inverse in place, normalised.
-        // std::complex<T> is layout-compatible with T[2] ([complex.numbers]).
-        auto* time = reinterpret_cast<SampleType*>(freq_buf_.data());
-        fft_->inverse_real_half(freq_buf_.data(), time);
-
-        // Overlap-add. The tail of an IR longer than one block reaches several
-        // blocks ahead, so the pending overlap is accumulated and shifted down
-        // by one block rather than replaced by this block's tail alone.
-        for (int i = 0; i < block_size_; ++i)
-            output_buf_[i] = time[i] + overlap_[i];
-        for (int i = block_size_; i < fft_size_; ++i)
-            overlap_[i - block_size_] = time[i] + overlap_[i];
-        std::fill(overlap_.end() - block_size_, overlap_.end(), SampleType{0.0f});
-
-        // Clear input buffer
-        std::fill(input_buf_.begin(), input_buf_.begin() + block_size_, SampleType{0.0f});
+    template <typename SampleType>
+    static void inverse(const FftT<SampleType>& fft, const SampleType* re, const SampleType* im,
+                        SampleType* output, SampleType scale) {
+        fft.inverse_real_split(re, im, output, scale);
     }
 };
 
-using Convolver = ConvolverT<float>;
-using Convolver64 = ConvolverT<double>;
+/// Product of two packed split spectra of `half` = size() / 2 slots each
+/// (see FftRealSplit): bin k of `out` is bin k of `a` times
+/// bin k of `b` for k = 1..half-1, and slot 0's DC and Nyquist reals multiply
+/// separately. The result is the packed spectrum of the circular convolution.
+/// `out` may be `a` or `b`; partial overlap is not allowed. Allocation-free.
+template <typename SampleType>
+inline void multiply_packed_split(const SampleType* a_re, const SampleType* a_im,
+                                  const SampleType* b_re, const SampleType* b_im,
+                                  SampleType* out_re, SampleType* out_im, int half) noexcept {
+    if (half <= 0)
+        return;
+    const SampleType dc = a_re[0] * b_re[0];
+    const SampleType nyquist = a_im[0] * b_im[0];
+    for (int k = 0; k < half; ++k) {
+        const SampleType re = a_re[k] * b_re[k] - a_im[k] * b_im[k];
+        const SampleType im = a_re[k] * b_im[k] + a_im[k] * b_re[k];
+        out_re[k] = re;
+        out_im[k] = im;
+    }
+    out_re[0] = dc;
+    out_im[0] = nyquist;
+}
+
+/// `acc += a * b` over packed split spectra, with the product as in
+/// `multiply_packed_split()`. `acc` must not overlap `a` or `b`.
+/// Allocation-free.
+template <typename SampleType>
+inline void multiply_accumulate_packed_split(const SampleType* a_re, const SampleType* a_im,
+                                             const SampleType* b_re, const SampleType* b_im,
+                                             SampleType* acc_re, SampleType* acc_im,
+                                             int half) noexcept {
+    if (half <= 0)
+        return;
+    const SampleType dc = acc_re[0] + a_re[0] * b_re[0];
+    const SampleType nyquist = acc_im[0] + a_im[0] * b_im[0];
+    for (int k = 0; k < half; ++k) {
+        acc_re[k] += a_re[k] * b_re[k] - a_im[k] * b_im[k];
+        acc_im[k] += a_re[k] * b_im[k] + a_im[k] * b_re[k];
+    }
+    acc_re[0] = dc;
+    acc_im[0] = nyquist;
+}
+
+} // namespace detail
 
 } // namespace pulp::signal
+
+// ConvolverT is declared in its own header; it stays reachable through this
+// one for code that has always included fft.hpp for it.
+#include <pulp/signal/overlap_add_convolver.hpp>

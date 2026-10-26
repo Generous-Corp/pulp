@@ -1,6 +1,7 @@
 #include <pulp/view/plugin_view_host.hpp>
 
 #include <TargetConditionals.h>
+#include "mac_gpu_host_config.h"
 #if TARGET_OS_OSX
 
 // Per-binary-unique ObjC class names (renames PulpPluginView / PulpGpuPluginView
@@ -17,6 +18,7 @@
 #include <pulp/view/continuous_frames.hpp> // needs_continuous_frames (CPU + GPU host repaint gate)
 #include <pulp/view/host_drag_coalescer.hpp> // per-presented-frame drag coalescing
 #include <pulp/view/input_events.hpp>
+#include "../../src/pending_resize.hpp"
 #include <pulp/view/overlay_dismissal.hpp>
 #include <pulp/view/platform/ns_role_mapping.hpp>
 #include <pulp/view/pointer_dispatch.hpp> // dispatch_context_menu (no-Skia builds too)
@@ -2040,7 +2042,7 @@ private:
 
 // ── MacGpuPluginViewHost (Dawn/Skia Graphite) ────────────────────────────────
 
-#ifdef PULP_HAS_SKIA
+#if PULP_VIEW_MAC_GPU_HOST
 
 // Interface in plugin_view_host_mac_view.h, beside PulpPluginView.
 @implementation PulpGpuPluginView {
@@ -2391,6 +2393,12 @@ private:
     }
 }
 
+- (void)viewDidHide {
+    [super viewDidHide];
+    if (self.onHide)
+        self.onHide();
+}
+
 - (void)viewDidChangeBackingProperties {
     [super viewDidChangeBackingProperties];
     CGFloat scale = self.window ? self.window.backingScaleFactor
@@ -2434,6 +2442,9 @@ public:
             // there too.
             metal_view_.onWindowChange = ^{ this->handle_window_change(); };
             metal_view_.onBackingChange = ^{ this->handle_backing_change(); };
+            metal_view_.onHide = ^{
+              this->release_gpu_caches();
+            };
             metal_view_.onResize = ^(uint32_t w, uint32_t h) {
                 this->on_native_frame_changed(w, h);
             };
@@ -2464,6 +2475,7 @@ public:
             metal_view_.pointTransform = nil;
             metal_view_.onWindowChange = nil;
             metal_view_.onBackingChange = nil;
+            metal_view_.onHide = nil;
             metal_view_.onResize = nil;
         }
         // Publish the teardown while the surfaces are still alive, so a
@@ -2558,7 +2570,7 @@ public:
     // that has no window yet: the new drawable size empties the layer, which a
     // host that resizes its container before showing it then composites.
     void present_resize_before_first_link_frame() {
-        if (!only_first_frame_presented_)
+        if (!only_first_frame_presented_ || delivering_resize_)
             return;
         if (size_.width == 0 || size_.height == 0)
             return;
@@ -2598,6 +2610,18 @@ public:
     // paints the editor.
     render::GpuSurface* gpu_surface() const override {
         return gpu_surface_.get();
+    }
+
+    GpuCacheUsage gpu_cache_usage() const override {
+        if (!skia_surface_)
+            return {};
+        const auto bytes = skia_surface_->gpu_cache_bytes();
+        return {bytes.budgeted, bytes.purgeable};
+    }
+
+    void release_gpu_caches() override {
+        if (skia_surface_)
+            skia_surface_->trim_gpu_resources(render::SkiaSurface::TrimLevel::everything());
     }
 
     void set_idle_callback(std::function<void()> callback) override {
@@ -2737,6 +2761,8 @@ private:
     std::function<void()> idle_callback_;
     std::atomic<bool> has_idle_callback_{false};
     std::function<void(uint32_t, uint32_t)> resize_cb_;
+    PendingResize pending_resize_;
+    bool delivering_resize_ = false;
     // Liveness token captured by the display-link main-thread dispatch
     // blocks. Flipped false in the destructor so a queued block after
     // teardown is a no-op (DAW teardown order is not under our control).
@@ -2885,6 +2911,7 @@ private:
                       uint32_t* capture_width = nullptr,
                       uint32_t* capture_height = nullptr) {
         if (!gpu_surface_ || !skia_surface_) return false;
+        deliver_pending_resize();
         commit_layer_geometry_before_present();
         if (!gpu_surface_->begin_frame()) return false;
 
@@ -3129,6 +3156,9 @@ private:
         // generation, a programmatic blur). Cheap + idempotent: syncKeyFocus
         // only touches first responder on a transition.
         if (metal_view_) [metal_view_ syncKeyFocus];
+        // Before the tick, so the editor lays out the frame at the size the
+        // processor was told about.
+        deliver_pending_resize();
 
         const auto tick = pulp::view::begin_host_frame(
             &root_, frame_clock_, frame_pump_, frame_time,
@@ -3180,7 +3210,32 @@ private:
         if (w == size_.width && h == size_.height) return;
         if (w == 0 || h == 0) return;
         set_size(w, h);
-        if (resize_cb_) resize_cb_(w, h);
+        // A drag resizes the view per mouse move; the next frame tells the
+        // processor once, with the last size. With no display link running
+        // there is no next frame, so tell it now.
+        pending_resize_.record(w, h);
+        if (!display_link_.is_open()) {
+            const Size delivered = size_;
+            deliver_pending_resize();
+            // A size the callback set was not presented while it ran.
+            if (size_.width != delivered.width || size_.height != delivered.height)
+                present_resize_before_first_link_frame();
+        }
+    }
+
+    // Runs the host's resize callback for the last size recorded since the
+    // previous frame (see PendingResize). A set_size() from inside the
+    // callback is painted by the frame that is delivering it, not presented
+    // on its own (see present_resize_before_first_link_frame).
+    void deliver_pending_resize() {
+        if (delivering_resize_)
+            return;
+        delivering_resize_ = true;
+        pending_resize_.deliver([this](uint32_t w, uint32_t h) {
+            if (resize_cb_)
+                resize_cb_(w, h);
+        });
+        delivering_resize_ = false;
     }
 
     void handle_window_change() {
@@ -3252,7 +3307,7 @@ private:
 
 } // namespace pulp::view (close GPU class block)
 
-#endif // PULP_HAS_SKIA
+#endif // PULP_VIEW_MAC_GPU_HOST
 
 namespace pulp::view { // reopen for factory functions
 
@@ -3265,7 +3320,7 @@ std::unique_ptr<PluginViewHost> PluginViewHost::create(View& root, Size size) {
 }
 
 std::unique_ptr<PluginViewHost> PluginViewHost::create(View& root, const Options& options) {
-#ifdef PULP_HAS_SKIA
+#if PULP_VIEW_MAC_GPU_HOST
     if (options.use_gpu) {
         auto host = std::make_unique<MacGpuPluginViewHost>(root, options.size,
                                                            options.background_rgb);
@@ -3278,6 +3333,11 @@ std::unique_ptr<PluginViewHost> PluginViewHost::create(View& root, const Options
         // The adapter's runtime scream-guard logs the mismatch loudly.
         host.reset();
     }
+#else
+    // A lite editor binary has no GPU host to give; say so once and open the
+    // CoreGraphics host, so the editor still appears.
+    if (options.use_gpu)
+        detail::note_lite_host_gpu_request();
 #endif
     auto host = std::make_unique<MacPluginViewHost>(root, options.size,
                                                     options.background_rgb);

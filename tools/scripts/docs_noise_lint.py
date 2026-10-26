@@ -43,6 +43,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from gate_common import commit_blobs  # noqa: E402
+
 LineMap = dict[str, Optional[set[int]]]
 
 DEFAULT_SCAN_GLOBS = (
@@ -421,6 +424,17 @@ def _git_changed_line_map(root: Path, base: str, head: str) -> Optional[LineMap]
     return combined
 
 
+def _git_commit_line_map(root: Path, base: str, head: str) -> Optional[LineMap]:
+    """Added lines of the committed range only: what a push of ``head`` sends.
+
+    The default map also folds in staged, unstaged and untracked changes for a
+    local run; the pre-push hook must not, because none of them are pushed.
+    """
+    if not _is_git_repo(root):
+        return None
+    return _git_diff_line_map(root, [f"{base}...{head}"])
+
+
 def _iter_explicit_files(root: Path, paths: Iterable[str]) -> list[Path]:
     out: list[Path] = []
     for raw in paths:
@@ -549,20 +563,28 @@ def _split_hash_line(line: str) -> str:
     return ""
 
 
+def _read_lines(path: Path, rel: str, text: Optional[str]) -> list[str]:
+    if text is not None:
+        return text.splitlines()
+    try:
+        return path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError as exc:
+        raise RuntimeError(f"could not read {rel}: {exc}") from exc
+
+
 def _scan_source_file(
     path: Path,
     root: Path,
     style: str,
     allowed_lines: Optional[set[int]] = None,
+    text: Optional[str] = None,
 ) -> list[Finding]:
-    """Diff-scoped comment/tag scan for a source file."""
+    """Diff-scoped comment/tag scan for a source file; ``text`` overrides the
+    working-tree read (a commit's blob)."""
     rel = _norm_path(path, root)
     findings: list[Finding] = []
     in_block = False
-    try:
-        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError as exc:
-        raise RuntimeError(f"could not read {rel}: {exc}") from exc
+    lines = _read_lines(path, rel, text)
 
     for idx, original in enumerate(lines, start=1):
         if style == "c":
@@ -593,14 +615,12 @@ def scan_file(
     path: Path,
     root: Path,
     allowed_lines: Optional[set[int]] = None,
+    text: Optional[str] = None,
 ) -> list[Finding]:
     rel = _norm_path(path, root)
     findings: list[Finding] = []
     in_fence = False
-    try:
-        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError as exc:
-        raise RuntimeError(f"could not read {rel}: {exc}") from exc
+    lines = _read_lines(path, rel, text)
 
     for idx, original in enumerate(lines, start=1):
         if FENCE_RE.match(original):
@@ -632,9 +652,23 @@ def scan(
     base: str,
     head: str,
     scan_all: bool,
+    commit: bool = False,
 ) -> list[Finding]:
     line_map: Optional[LineMap] = None
-    if paths:
+    texts: Optional[dict[str, str]] = None
+    if commit:
+        # The pushed commit: its committed range and its blobs, never disk.
+        line_map = _git_commit_line_map(root, base, head)
+        if line_map is None:
+            raise RuntimeError(f"--commit needs a git repository: {root}")
+        try:
+            texts = commit_blobs(root, head, sorted(line_map))
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(f"could not read {head}'s blobs: {exc}") from exc
+        files = [root / rel for rel in sorted(line_map)
+                 if rel in texts and not _is_allowlisted_path(rel)
+                 and (_path_in_default_scope(rel) or _path_is_source(rel))]
+    elif paths:
         files = _iter_explicit_files(root, paths)
     elif scan_all:
         files = _iter_default_files(root)
@@ -658,13 +692,14 @@ def scan(
     for path in files:
         rel = _norm_path(path, root)
         allowed_lines = None if line_map is None else line_map.get(rel)
+        text = None if texts is None else texts[rel]
         style = _source_style(rel) if _path_is_source(rel) else None
         if style is not None:
             findings.extend(
-                _scan_source_file(path, root, style, allowed_lines=allowed_lines)
+                _scan_source_file(path, root, style, allowed_lines=allowed_lines, text=text)
             )
         else:
-            findings.extend(scan_file(path, root, allowed_lines=allowed_lines))
+            findings.extend(scan_file(path, root, allowed_lines=allowed_lines, text=text))
     return findings
 
 
@@ -705,6 +740,12 @@ def main(argv: list[str]) -> int:
         help="scan the full default scope instead of changed/untracked files",
     )
     parser.add_argument(
+        "--commit",
+        action="store_true",
+        help="scan only the committed base...head range, reading --head's blobs "
+             "instead of the working tree (what the pre-push hook pushes)",
+    )
+    parser.add_argument(
         "paths",
         nargs="*",
         help="optional explicit files to scan instead of the default scope",
@@ -723,6 +764,7 @@ def main(argv: list[str]) -> int:
             base=args.base,
             head=args.head,
             scan_all=args.all,
+            commit=args.commit,
         )
     except RuntimeError as exc:
         sys.stderr.write(f"[docs-noise-lint] error: {exc}\n")

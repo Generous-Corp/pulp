@@ -885,6 +885,7 @@ install(FILES
     # build-time finalize script relative to its own directory.
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpBuildInfo.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpFinalizeBuildInfo.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpDevSharedUi.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPluginFormats.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpWindowsTargetArch.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpGpuProvider.cmake"
@@ -900,6 +901,10 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpControlShipping.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/check_inspector_shipping_artifact.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/check_control_shipping_artifact.cmake"
+    # Read by check_control_shipping_artifact.cmake relative to its own
+    # directory: the one forbidden-marker list and the scanner over it.
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpReleaseArtifactScan.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/release_artifact_forbidden.json"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/install_control_host.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/remove_control_host.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPlugin.cmake"
@@ -973,6 +978,8 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/pulp_js_bytecode_main.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/check_portable_binary.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/check_bundle_relocatable.py"
+    # PulpDevSharedUi.cmake runs this as the linker launcher next to itself.
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/pulp_dev_shared_link.sh"
     # PulpSkiaIcuData.cmake resolves the ICU data trimmer next to itself.
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/icu_data_subset.py"
     # G3 universal-build arch/signature gate. pulp_validate_bundle_architectures
@@ -1101,13 +1108,14 @@ install(FILES
 # It probes `src/pulp/view/platform/mac` in an installed SDK, so ship the cluster
 # there — otherwise an installed-SDK consumer silently falls back to pulp-view-core's
 # shared fixed-name copies and the cross-plug-in class collision returns. The
-# private headers (pulp_mac_objc_names.h + the window_host_mac split headers) ship
+# private headers (pulp_mac_objc_names.h, mac_gpu_host_config.h + the window_host_mac split headers) ship
 # alongside because the .mm include them by relative path.
 if(APPLE)
     install(FILES
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/app_menu_mac.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/app_menu_mac.mm"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/pulp_mac_objc_names.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/mac_gpu_host_config.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/window_host_mac.mm"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/window_host_mac_lifecycle.mm"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/window_host_mac_metal_view.mm"
@@ -1134,6 +1142,13 @@ if(APPLE)
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/accessibility_mac.mm"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/text_accessibility_macos.mm"
         DESTINATION src/pulp/view/platform/mac
+    )
+    # plugin_view_host_mac.mm includes the private core/view/src/pending_resize.hpp
+    # as "../../src/pending_resize.hpp"; from src/pulp/view/platform/mac that
+    # resolves to src/pulp/view/src.
+    install(FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/core/view/src/pending_resize.hpp"
+        DESTINATION src/pulp/view/src
     )
     # Shared macOS render ObjC source (metal_surface_mac.mm), compiled per-binary
     # by _pulp_apply_view_mac_objc_suffix() so its PulpMetalSurfaceView (the

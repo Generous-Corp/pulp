@@ -4,6 +4,26 @@
 # Test-only, so it is built only when PULP_GPU_AUDIO_FAULT_HOOKS is ON, and only
 # where the shared-I/O path exists (macOS with Skia-provided Dawn).
 
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/gpu_fault_guards.cmake)
+pulp_gpu_fault_refuse_vellum()
+
+if(PULP_BUILD_TESTS)
+    # The refusal itself, and its positive control, in a throwaway project.
+    foreach(_vellum ON OFF)
+        add_test(NAME gpu-fault-continuity-vellum-guard-${_vellum}
+            COMMAND ${CMAKE_COMMAND}
+                -S ${CMAKE_CURRENT_SOURCE_DIR}/cmake/vellum-guard-test
+                -B ${CMAKE_CURRENT_BINARY_DIR}/vellum-guard-${_vellum}
+                -DWITH_VELLUM=${_vellum})
+    endforeach()
+    # Refusing means stopping: the configure must not get past the guard.
+    set_tests_properties(gpu-fault-continuity-vellum-guard-ON PROPERTIES
+        PASS_REGULAR_EXPRESSION "refuses to build when Vellum::Gpu"
+        FAIL_REGULAR_EXPRESSION "gpu-fault vellum guard: configured")
+    set_tests_properties(gpu-fault-continuity-vellum-guard-OFF PROPERTIES
+        PASS_REGULAR_EXPRESSION "gpu-fault vellum guard: configured")
+endif()
+
 if(NOT (PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO AND TARGET pulp::gpu-audio AND TARGET pulp::render))
     message(STATUS "gpu-fault-continuity: shared-I/O GPU audio unavailable; not built")
     return()
@@ -19,6 +39,7 @@ endif()
 
 pulp_add_plugin(PulpGpuFaultContinuity
     FORMATS           CLAP VST3 AU
+    GPU_UI
     SOURCES           gpu_fault_continuity.cpp gpu_fault_interposer.cpp gpu_fault_view.cpp
                       gpu_fault_rendezvous.cpp
     PLUGIN_NAME       "Pulp GPU Fault Continuity"

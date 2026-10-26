@@ -37,9 +37,12 @@ BUILD_YML = REPO_ROOT / ".github" / "workflows" / "build.yml"
 
 # The literal label set the workflow used for gate events before extraction.
 LEGACY_GATE_LABEL_EXCLUDE = "validation|slow|performance|bench|quality-lab"
+# The shared macOS hosts also drop the GPU-audio hardware-evidence tests: the
+# gate compiles them, and only the owner runs them on a physical GPU.
+SHARED_HOST_LABEL_EXCLUDE = LEGACY_GATE_LABEL_EXCLUDE + "|gpu-proof"
 # The gate events additionally drop the source-only selftests, which the
 # required `Enforce version & skill sync` context runs without a build.
-GATE_LABEL_EXCLUDE = LEGACY_GATE_LABEL_EXCLUDE + "|source-selftest"
+GATE_LABEL_EXCLUDE = SHARED_HOST_LABEL_EXCLUDE + "|source-selftest"
 # The literal label set the workflow used for every other event.
 LEGACY_FULL_LABEL_EXCLUDE = "validation"
 
@@ -88,7 +91,7 @@ class PushMacosLabelTests(unittest.TestCase):
         """
         self.assertEqual(
             ctest_gate_args.label_exclude("push", "macOS"),
-            LEGACY_GATE_LABEL_EXCLUDE,
+            SHARED_HOST_LABEL_EXCLUDE,
         )
 
     def test_runner_os_match_is_case_insensitive(self) -> None:
@@ -96,7 +99,7 @@ class PushMacosLabelTests(unittest.TestCase):
             with self.subTest(spelling=spelling):
                 self.assertEqual(
                     ctest_gate_args.label_exclude("push", spelling),
-                    LEGACY_GATE_LABEL_EXCLUDE,
+                    SHARED_HOST_LABEL_EXCLUDE,
                 )
 
 
@@ -148,7 +151,7 @@ class ShellOutputTests(unittest.TestCase):
         payload = json.loads(
             self._run("--event-name", "push", "--runner-os", "macOS", "--format", "json")
         )
-        self.assertEqual(payload["label_exclude"], LEGACY_GATE_LABEL_EXCLUDE)
+        self.assertEqual(payload["label_exclude"], SHARED_HOST_LABEL_EXCLUDE)
         self.assertEqual(payload["stop_on_failure"], "")
 
 

@@ -91,11 +91,34 @@ print(json.dumps({"type": "result", "subtype": "success",
         with mock.patch.dict(os.environ, env, clear=True):
             self.assertEqual(generate.ask_model("make a bell"), "OLD CLAUDE")
 
+    def test_a_claude_whose_help_fails_gets_no_generation_pass(self):
+        # A failed --help says nothing about which tools the pass would keep,
+        # so the pass is refused instead of run on the denylist alone.
+        marker = os.path.join(self.temp.name, "model-was-called")
+        wrapper = self.wrapper("broken-help-claude", r'''
+import sys
+if sys.argv[1:] == ["--help"]:
+    raise SystemExit(3)
+open(%r, "w", encoding="utf-8").write("called")
+print("{}")
+''' % marker)
+        env = {"FORGE_MODEL_PROVIDER": "claude",
+               "FORGE_CLAUDE_BIN": wrapper,
+               "FORGE_CLAUDE_MODEL": "claude-opus-5"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            with self.assertRaises(SystemExit) as refused:
+                generate.ask_model("make a bell")
+        self.assertIn("refusing", str(refused.exception))
+        self.assertFalse(os.path.exists(marker))
+
     def test_selected_claude_reasoning_efforts_are_exact_arguments(self):
         wrapper = self.wrapper("claude-effort-wrapper", r'''
 import json
 import os
 import sys
+if sys.argv[1:] == ["--help"]:
+    print("  --tools <tools...>   Specify the list of available tools")
+    raise SystemExit(0)
 effort = os.environ["FORGE_CLAUDE_REASONING_EFFORT"]
 if sys.argv[-2:] != ["--effort", effort]:
     print("wrong Claude effort: " + repr(sys.argv[1:]), file=sys.stderr)

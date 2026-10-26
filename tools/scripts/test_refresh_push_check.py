@@ -388,9 +388,9 @@ def _merge_tree_with_checkers(fx: Fixture, **scripts: str) -> subprocess.Complet
 
 
 def case_a_timed_out_check_is_not_a_stale_verdict(fx: Fixture) -> None:
-    """A check that times out exits 2 (advisory in pre-push), never STALE."""
+    """A check that times out exits NOT_CHECKED (4): never STALE, never a pass."""
     res = _merge_tree_with_checkers(fx, ledger="import time; time.sleep(5)\n")
-    assert res.returncode == 2, (res.returncode, res.stderr)
+    assert res.returncode == merge_tree_state.NOT_CHECKED == 4, (res.returncode, res.stderr)
     assert "timed out" in res.stderr, res.stderr
     assert "NOT CHECKED" in res.stderr, res.stderr
     assert merge_tree_state.STALE not in res.stderr, res.stderr
@@ -402,6 +402,43 @@ def case_a_real_failure_outranks_a_timeout(fx: Fixture) -> None:
                                     families="raise SystemExit(1)\n")
     assert res.returncode == 1, (res.returncode, res.stderr)
     assert merge_tree_state.STALE in res.stderr, res.stderr
+
+
+def case_an_invalid_check_fails(fx: Fixture) -> None:
+    """A check that reports INVALID and exits 1 fails the run (exit 1)."""
+    res = _merge_tree_with_checkers(
+        fx, families="import sys; print('agent-capabilities: INVALID: stale fingerprint', "
+                     "file=sys.stderr); raise SystemExit(1)\n")
+    assert res.returncode == 1, (res.returncode, res.stderr)
+    assert "INVALID" in res.stderr, res.stderr
+
+
+def case_the_check_timeout_scales_with_load(fx: Fixture) -> None:
+    """20 s at or below one runnable task per core, scaled above it, capped."""
+    from unittest import mock
+    with mock.patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("PULP_MERGE_TREE_CHECK_TIMEOUT", None)
+        with mock.patch.object(os, "cpu_count", return_value=8):
+            with mock.patch.object(os, "getloadavg", return_value=(4.0, 0, 0)):
+                assert merge_tree_state._check_timeout() == 20.0
+            with mock.patch.object(os, "getloadavg", return_value=(20.0, 0, 0)):
+                assert merge_tree_state._check_timeout() == 50.0
+            with mock.patch.object(os, "getloadavg", return_value=(800.0, 0, 0)):
+                assert merge_tree_state._check_timeout() == merge_tree_state.MAX_CHECK_TIMEOUT
+        os.environ["PULP_MERGE_TREE_CHECK_TIMEOUT"] = "7"
+        assert merge_tree_state._check_timeout() == 7.0
+
+
+def case_gates_and_pre_push_fail_on_not_checked(fx: Fixture) -> None:
+    """Both callers treat exit 4 as a failure, not an advisory pass."""
+    gates = (ROOT / "tools/scripts/gates.sh").read_text(encoding="utf-8")
+    call = gates[gates.index('"$MERGE_TREE_SCRIPT_STATE" --repo-root'):]
+    assert 'exit "$_merge_tree_rc"' in call[:600], call[:600]
+    hook = (ROOT / ".githooks/pre-push").read_text(encoding="utf-8")
+    block = hook[hook.index("_merge_tree_rc=$?"):]
+    block = block[:block.index("esac")]
+    four = block[block.index("            4)"):]
+    assert "exit 1" in four and "PULP_PREPUSH_ALLOW_NOT_CHECKED" in four, four
 
 
 def case_merge_tree_conflict_refuses(fx: Fixture) -> None:

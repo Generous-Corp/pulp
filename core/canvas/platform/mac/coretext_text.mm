@@ -288,6 +288,21 @@ CoreTextFaceMetrics coretext_face_metrics(std::string_view family_stack, float s
     return m;
 }
 
+std::string coretext_face_postscript_name(std::string_view family_stack, int weight, int slant) {
+    auto font = static_cast<CTFontRef>(coretext_create_font(family_stack, 12.0f, weight, slant));
+    if (!font)
+        return {};
+    std::string out;
+    if (CFStringRef name = CTFontCopyPostScriptName(font)) {
+        char buf[256];
+        if (CFStringGetCString(name, buf, sizeof(buf), kCFStringEncodingUTF8))
+            out = buf;
+        CFRelease(name);
+    }
+    CFRelease(font);
+    return out;
+}
+
 float coretext_advance(std::string_view text, std::string_view family_stack, float size, int weight,
                        int slant, const std::vector<Canvas::FontFeature>& features) {
     if (text.empty())

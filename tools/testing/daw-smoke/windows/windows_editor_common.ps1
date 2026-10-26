@@ -30,12 +30,30 @@ function Join-WindowsArguments([string[]]$Arguments) {
     '"' + ($_ -replace '(\\+)$','$1$1') + '"'
   }) -join ' ')
 }
+function Get-ProcessTracePath {
+  return [Environment]::GetEnvironmentVariable('PULP_TRACE_PATH','Process')
+}
+function Set-ProcessTracePath([AllowNull()][string]$Value) {
+  [Environment]::SetEnvironmentVariable('PULP_TRACE_PATH',$Value,'Process')
+}
 function Read-HostStatus([string]$Path, [string]$Token) {
   if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
   $s = @{}
-  foreach ($line in Get-Content -LiteralPath $Path) {
-    $parts = $line -split '=', 2
-    if ($parts.Count -eq 2) { $s[$parts[0]] = $parts[1] }
+  try {
+    # The Lua writer replaces the status file atomically, so a reader can pass
+    # Test-Path just before the old file is removed. Treat that narrow window
+    # as "not published yet"; turning it into a harness failure kills REAPER
+    # while the host is still delivering the valid automation receipt.
+    foreach ($line in Get-Content -LiteralPath $Path) {
+      $parts = $line -split '=', 2
+      if ($parts.Count -eq 2) { $s[$parts[0]] = $parts[1] }
+    }
+  } catch [System.Management.Automation.ItemNotFoundException] {
+    return $null
+  } catch [System.UnauthorizedAccessException] {
+    return $null
+  } catch [System.IO.IOException] {
+    return $null
   }
   if ($s.token -ne $Token) { throw 'Stale or foreign host status token' }
   return $s
@@ -59,9 +77,40 @@ function Assert-ModuleBinding([string]$LoadedPath, [string]$LoadedHash, $Manifes
   if ($entries.Count -ne 1 -or $entries[0].sha256 -ine $LoadedHash) { throw 'Loaded module does not match exact staged manifest' }
   if ([IO.Path]::GetExtension($LoadedPath) -notin @('.vst3','.clap')) { throw 'Loaded module is not a plugin PE' }
 }
+function Get-BoundModulePaths([int]$TargetPid, [ValidateRange(1,60)][int]$TimeoutSec = 15) {
+  # Process.Modules can block indefinitely while a GPU plugin is inside its
+  # editor startup path. Query it in a disposable child and fail closed when
+  # the host does not answer within the bounded proof window.
+  $job = Start-Job -ScriptBlock {
+    param([int]$PidToInspect)
+    $target = [Diagnostics.Process]::GetProcessById($PidToInspect)
+    @($target.Modules | ForEach-Object { $_.FileName })
+  } -ArgumentList $TargetPid
+  try {
+    if ($null -eq (Wait-Job -Job $job -Timeout $TimeoutSec)) {
+      Stop-Job -Job $job -ErrorAction SilentlyContinue
+      throw 'MODULE_ENUMERATION_TIMEOUT'
+    }
+    $errors = @($job.ChildJobs | ForEach-Object { $_.JobStateInfo.Reason } | Where-Object { $_ })
+    if ($errors.Count -gt 0) { throw ('MODULE_ENUMERATION_FAILED: ' + $errors[0].Exception.Message) }
+    return @((Receive-Job -Job $job -ErrorAction Stop) | Where-Object { $_ })
+  } finally {
+    Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+  }
+}
 function Assert-OwnedIdentity($Process, [string]$StartedUtc) {
   $Process.Refresh()
   if ($Process.HasExited -or $Process.StartTime.ToUniversalTime().ToString('o') -ne $StartedUtc) { throw 'Owned process identity changed' }
+}
+function Get-InteractiveDesktopContext {
+  $sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
+  $explorer = @(Get-Process -Name explorer -ErrorAction SilentlyContinue |
+    Where-Object { $_.SessionId -eq $sessionId })
+  if ($explorer.Count -eq 0) { throw 'INTERACTIVE_SESSION_ABSENT' }
+  [ordered]@{
+    session_id = $sessionId
+    explorer_pids = @($explorer | ForEach-Object { [int]$_.Id })
+  }
 }
 
 function Copy-PrivateProfile([string]$Source, [string]$Destination, [string]$EvidenceRoot) {
@@ -70,10 +119,23 @@ function Copy-PrivateProfile([string]$Source, [string]$Destination, [string]$Evi
   if ($private.StartsWith($export, [StringComparison]::OrdinalIgnoreCase) -or $private -eq $export.TrimEnd([IO.Path]::DirectorySeparatorChar)) { throw 'Private profile cannot be inside exported evidence' }
   if ([IO.Path]::GetFullPath($Source) -eq $private) { throw 'Private profile cannot replace source profile' }
   New-Item -ItemType Directory -Path $private | Out-Null
-  foreach ($name in @('reaper.ini','reaper-license.rk')) {
-    $path = Join-Path $Source $name
-    if (Test-Path -LiteralPath $path -PathType Leaf) { Copy-Item -LiteralPath $path -Destination (Join-Path $private $name) }
+  # `-cfgfile` selects the alternate REAPER resource directory, not just an
+  # isolated INI. Copy the non-secret profile so startup scripts and scan
+  # caches resolve beside the selected reaper.ini rather than falling back to
+  # the user's profile. Cache files are deliberately removed: a stale entry
+  # can make REAPER load an old Spectr backup before the staged exact module.
+  Get-ChildItem -LiteralPath $Source -Force | Where-Object {
+    $_.Name -ne 'reaper-license.rk'
+  } | ForEach-Object {
+    Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $private $_.Name) -Recurse -Force
   }
+  $license = Join-Path $Source 'reaper-license.rk'
+  if (Test-Path -LiteralPath $license -PathType Leaf) {
+    Copy-Item -LiteralPath $license -Destination (Join-Path $private 'reaper-license.rk')
+  }
+  Get-ChildItem -LiteralPath $private -File | Where-Object {
+    $_.Name -match '^reaper-(vstplugins|clap).*\.ini$'
+  } | Remove-Item -Force
 }
 function Assert-EditorWindow([long]$Hwnd, [bool]$Exists, [bool]$Visible, [bool]$Owned) {
   if ($Hwnd -eq 0 -or -not $Exists) { throw 'Floating editor HWND absent' }

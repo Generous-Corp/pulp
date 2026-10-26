@@ -201,7 +201,7 @@ is the file the CLI's asset pass resolved it to.
 | `weightMax` | integer | Upper bound of a CSS `font-weight` range (a variable face). Absent for one weight. |
 | `fontStyle` | string | CSS `font-style` descriptor of a captured `@font-face` rule. |
 | `unicodeRange` | string | CSS `unicode-range` descriptor, verbatim. Absent means every code point. |
-| `asset_id` | string | Manifest entry holding the `.ttf`, `.otf` or `.woff2` bytes. |
+| `asset_id` | string | Manifest entry holding the `.ttf`, `.otf`, `.woff` or `.woff2` bytes: `pulp-materialized-asset-<sha256>` for a bundle's Blob font, `pulp-page-font-<sha256>` for a plain page's `url()` font. |
 | `resolvedPath` | string | Filesystem path stamped by the CLI asset pass. |
 
 Figma plugin exports fill `family`, `style`, `weight` and `asset_id`. A browser
@@ -237,7 +237,7 @@ warning diagnostic and one `[pulp:warn] design-import:` line:
 |---|---|
 | `document-version-unsupported` | The envelope declares a `version` newer than this build knows (1). The reader still accepts and round-trips it; its fields are read as version 1 defines them. |
 | `node-type-unknown` | A node's `type` is not one the native resolver recognizes. The node still imports by its audio role, its name, or as a plain View. |
-| `identity-duplicate` | A node repeats an earlier node's `stable_anchor_id`. Bindings and re-import tweaks reach only the first. |
+| `identity-duplicate` | A node repeats an earlier node's `stable_anchor_id`. Bindings and re-import tweaks reach only the first. `pulp import-design` first disambiguates anchors derived from content (a repeated content hash or adapter fallback is rehashed with its ancestors' anchors; the first holder and every already-unique anchor are kept), then refuses (exit 2) a repeated explicit identity, naming each repeat and the node that keeps the anchor. The warning remains for an IR that is materialized directly. |
 | `asset-undecodable` | An image asset's file exists but cannot be decoded (corrupt, truncated, or not an image), so the node paints blank. PNG chunk CRCs and `IEND` are checked as well as the decode, because the decoder fills the missing rows of a truncated PNG and still reports success. |
 | `font-undecodable` | A browser capture's page declared a web font the browser could not decode; its text was captured in a fallback face. |
 

@@ -1,0 +1,123 @@
+name: macOS CI deferred disarm
+
+# With PULP_MACOS_PR_GATING on, a pull request's contract-lane `macos` check is
+# green without a build (tier `deferred`; see "macOS on a pull request waits for
+# approval" in docs/guides/local-ci.md). The arm-side guard refuses to arm such
+# a head, but a pull request armed BEFORE its checks ran (arm-on-open) carries
+# no annotation for the guard to read, and GitHub's native auto-merge would
+# enqueue it the moment that green lands. macos-ci-arm-refusal.yml refuses
+# such an arm when it is made, and the contract lane's last step fails a head
+# armed at that point; this is the last layer, for one that slipped past both. When a Build and Test run for a pull
+# request completes, this reads its `macos` job's `shipyard-test-tier`
+# annotation and, if the tier is `deferred` and the pull request is armed at
+# that run's head, disables auto-merge; if the head is already in the merge
+# queue, it dequeues it first. Re-arming then takes the normal path:
+# a verdict for the head, `macos-ci`, and a full-lane success.
+#
+# workflow_run runs this definition from the default branch and checks out
+# nothing, so no pull request code runs with the write token. With the
+# variable unset nothing here runs, which is today's behaviour.
+
+on:
+  workflow_run:
+    workflows: ["Build and Test"]
+    types: [completed]
+
+permissions:
+  actions: read
+  checks: read
+  pull-requests: write
+
+concurrency:
+  group: macos-ci-deferred-disarm-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  disarm:
+    name: Disarm a pull request armed on a deferred macos green
+    # Same-repository runs only; the script checks again.
+    if: >-
+      vars.PULP_MACOS_PR_GATING == 'true'
+      && github.event.workflow_run.event == 'pull_request'
+      && github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Disable auto-merge on a deferred head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_PRS: ${{ join(github.event.workflow_run.pull_requests.*.number, ' ') }}
+          HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          if [ "$HEAD_REPO" != "$repo" ]; then
+            echo "run $RUN_ID is from $HEAD_REPO, not $repo; only same-repository runs are acted on"
+            exit 0
+          fi
+          # The run's `macos` job (latest attempt). A skip-safe or failed-closed
+          # alias is also named `macos`; only the contract lane says `deferred`.
+          check_runs=$(gh api "repos/$repo/actions/runs/$RUN_ID/jobs?filter=latest&per_page=100" \
+            --jq '.jobs[] | select(.name == "macos") | .check_run_url | split("/") | last')
+          if [ -z "$check_runs" ]; then
+            echo "run $RUN_ID has no macos job; nothing to do"
+            exit 0
+          fi
+          deferred=false
+          for check_run in $check_runs; do
+            tiers=$(gh api --paginate "repos/$repo/check-runs/$check_run/annotations?per_page=100" \
+              --jq '.[] | select(.title == "shipyard-test-tier") | .message')
+            if [[ "$tiers" == *'"tier":"deferred"'* ]]; then
+              deferred=true
+            fi
+          done
+          if [ "$deferred" != true ]; then
+            echo "run $RUN_ID's macos check is not tier deferred; nothing to do"
+            exit 0
+          fi
+          # An App-opened pull request's run has an empty pull_requests list,
+          # so fall back to the open same-repository pull requests whose head is
+          # this commit.
+          prs="$RUN_PRS"
+          if [ -z "$prs" ]; then
+            prs=$(gh api "repos/$repo/commits/$HEAD_SHA/pulls" \
+              --jq "[.[] | select(.state == \"open\" and .head.sha == \"$HEAD_SHA\" and .head.repo.full_name == \"$repo\") | .number] | join(\" \")")
+          fi
+          if [ -z "$prs" ]; then
+            echo "deferred run $RUN_ID at $HEAD_SHA belongs to no open pull request; nothing to do"
+            exit 0
+          fi
+          for pr in $prs; do
+            # shellcheck disable=SC2016  # $owner, $name, $number and $id are GraphQL variables
+            state=$(gh api graphql \
+              -f query='query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { id headRefOid headRepository { nameWithOwner } autoMergeRequest { enabledAt } mergeQueueEntry { state } } } }' \
+              -f owner="${repo%%/*}" -f name="${repo#*/}" -F number="$pr" \
+              --jq '.data.repository.pullRequest | [.id, .headRefOid, (.headRepository.nameWithOwner // "none"), (.autoMergeRequest != null | tostring), (.mergeQueueEntry != null | tostring)] | join(" ")')
+            read -r node_id head head_repo armed queued <<< "$state"
+            if [ "$head_repo" != "$repo" ]; then
+              echo "#$pr's head is in $head_repo, not $repo; only same-repository pull requests are acted on"
+              continue
+            fi
+            if [ "$head" != "$HEAD_SHA" ]; then
+              echo "#$pr has moved past $HEAD_SHA (now $head); its own run decides"
+              continue
+            fi
+            if [ "$queued" = true ]; then
+              # shellcheck disable=SC2016  # $id is a GraphQL variable
+              gh api graphql \
+                -f query='mutation($id: ID!) { dequeuePullRequest(input: {id: $id}) { clientMutationId } }' \
+                -f id="$node_id" >/dev/null
+              echo "dequeued #$pr: it entered the merge queue on a deferred macos green at $HEAD_SHA (run $RUN_ID)"
+            fi
+            if [ "$armed" != true ]; then
+              echo "#$pr is not armed at $HEAD_SHA; nothing to do"
+              continue
+            fi
+            # shellcheck disable=SC2016
+            gh api graphql \
+              -f query='mutation($id: ID!) { disablePullRequestAutoMerge(input: {pullRequestId: $id}) { clientMutationId } }' \
+              -f id="$node_id" >/dev/null
+            echo "disabled auto-merge on #$pr: its macos check at $HEAD_SHA is tier deferred (run $RUN_ID); re-arm after a verdict, macos-ci and a full-lane success"
+          done

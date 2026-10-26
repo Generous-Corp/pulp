@@ -1603,7 +1603,7 @@ TEST_CASE("pulp help output lists the top-level subcommands", "[cli][shellout][h
             (sdk / "share/pulp/authority-navigation.json").generic_string());
     REQUIRE(selected_receipt.get("registry_sha256") != nullptr);
     REQUIRE(selected_receipt.get("registry_sha256")->as_string() ==
-            "816f6dac45b399fb611ec0651850c90728a2a383fd54e1b1204f72b52e7e7a69");
+            "cc61cfea71b01cd8f4a3f73317dc201d9a4eefa0103dd50cf9a6229f09a91e25");
 
     ProcessResult selected_from_source_build;
     {
@@ -3382,11 +3382,16 @@ TEST_CASE("pulp ship share requires inspector acknowledgements before dry run",
         std::ofstream placeholder(placeholder_dmg, std::ios::binary);
         placeholder << "not a disk image";
     }
+    // A container the scan cannot open is refused, dry run or not: the
+    // development-runtime check fails closed rather than plan an unchecked share.
     auto placeholder_plan =
         run_pulp_in_directory(project, {"ship", "share", placeholder_dmg.string(), "--dry-run"});
     REQUIRE_FALSE(placeholder_plan.timed_out);
-    REQUIRE(placeholder_plan.exit_code == 0);
-    REQUIRE(placeholder_plan.stdout_output.find("pulp ship share plan") != std::string::npos);
+    REQUIRE(placeholder_plan.exit_code == 1);
+    REQUIRE(placeholder_plan.stderr_output.find("cannot check") != std::string::npos);
+    REQUIRE(placeholder_plan.stderr_output.find("hdiutil attach failed") != std::string::npos);
+    REQUIRE(placeholder_plan.stderr_output.find("fails closed") != std::string::npos);
+    REQUIRE(placeholder_plan.stdout_output.find("pulp ship share plan") == std::string::npos);
 #endif
 }
 

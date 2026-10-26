@@ -1,5 +1,6 @@
 // Per-binary-unique ObjC class names (see header).
 #include "pulp_mac_objc_names.h"
+#include "mac_gpu_host_config.h"
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/window_manager.hpp>
 #include <pulp/view/frame_clock.hpp>
@@ -1728,7 +1729,7 @@ private:
 
 // ── MacGpuWindowHost (Dawn/Skia Graphite) ────────────────────────────────────
 
-#ifdef PULP_HAS_SKIA
+#if PULP_VIEW_MAC_GPU_HOST
 
 class MacGpuWindowHost : public WindowHost {
 public:
@@ -3085,12 +3086,12 @@ private:
     }
 };
 
-#endif // PULP_HAS_SKIA
+#endif // PULP_VIEW_MAC_GPU_HOST
 
 // ── Factory ──────────────────────────────────────────────────────────────────
 
 std::unique_ptr<WindowHost> WindowHost::create(View& root, const WindowOptions& options) {
-#ifdef PULP_HAS_SKIA
+#if PULP_VIEW_MAC_GPU_HOST
     if (options.use_gpu) {
         auto host = std::make_unique<MacGpuWindowHost>(root, options);
         root.set_window_host(host.get());

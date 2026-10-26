@@ -7,6 +7,7 @@ import subprocess
 import unittest
 import unittest.mock
 import json
+import re
 import shutil
 import tempfile
 from pathlib import Path
@@ -59,6 +60,57 @@ class ClosurePolicyTests(unittest.TestCase):
             "generated_inputs": [{"path": "@build/core/runtime/generated/build_info.hpp", "producer_paths": ["core/runtime/CMakeLists.txt"]}],
         }), [])
         self.assertTrue(receipt_path_violations({"files": [{"pulp_path": "/Users/agent/build/rogue.hpp"}]}))
+
+    def test_every_forbidden_form_derives_from_the_shared_policy(self):
+        import vellum_closure
+        import vellum_policy
+        names = vellum_policy.names()
+        self.assertTrue({"gpu_audio", "music"} <= set(names))
+        self.assertEqual(vellum_closure.FORBIDDEN_ROOTS, vellum_policy.roots())
+        for name in names:
+            stem = name.replace("_", "-")
+            with self.subTest(name=name):
+                self.assertTrue(vellum_closure.policy_target_forbidden(f"pulp-{stem}"))
+                self.assertTrue(vellum_closure.policy_target_forbidden(f"pulp::{stem}"))
+                self.assertTrue(vellum_closure.policy_include_forbidden(f"pulp/{name}/x.hpp"))
+                self.assertTrue(vellum_closure.FORBIDDEN_CMAKE_TARGET.search(f"target_link_libraries(x PUBLIC pulp::{stem})"))
+        for allowed in ("pulp-canvas", "pulp::view-core", "pulp-state", "SkiaLib", "absl_graphcycles_internal"):
+            self.assertFalse(vellum_closure.policy_target_forbidden(allowed), allowed)
+        self.assertFalse(vellum_closure.policy_include_forbidden("pulp/canvas/canvas.hpp"))
+        table = json.loads((REPO_ROOT / "tools/scripts/vellum_mirror_edge_patterns.json").read_text(encoding="utf-8"))
+        product_include = re.compile(table["content_patterns"]["mirror-product-include"])
+        product_symbol = re.compile(table["content_patterns"]["mirror-product-symbol"])
+        for name in names:
+            with self.subTest(mirror=name):
+                self.assertTrue(product_include.search(f"#include <pulp/{name}/x.hpp>"))
+                self.assertTrue(product_symbol.search(f"pulp::{name}::thing"))
+                self.assertTrue(product_symbol.search(f"pulp-{name.replace('_', '-')}"))
+
+    def test_the_policy_names_exactly_the_retained_subsystems(self):
+        # Pinned so dropping a row from vellum_policy.json, which would unforbid
+        # that subsystem in every boundary check at once, fails here.
+        import vellum_policy
+        self.assertEqual(vellum_policy.POLICY, REPO_ROOT / "tools/scripts/vellum_policy.json")
+        self.assertEqual(vellum_policy.names(), (
+            "audio", "content", "format", "gpu_audio", "graph", "host", "midi",
+            "music", "playback", "sample_bank_manifest", "signal", "timebase",
+        ))
+
+    def test_policy_loader_rejects_malformed_tables(self):
+        import vellum_policy
+        cases = [
+            ({"schema": "other", "forbidden_subsystems": [{"name": "audio"}]}, "schema"),
+            ({"schema": vellum_policy.SCHEMA, "forbidden_subsystems": []}, "non-empty"),
+            ({"schema": vellum_policy.SCHEMA, "forbidden_subsystems": [{"name": "audio"}, {"name": "audio"}]}, "duplicate"),
+            ({"schema": vellum_policy.SCHEMA, "forbidden_subsystems": [{"name": "Gpu-Audio"}]}, "invalid"),
+            ({"schema": vellum_policy.SCHEMA, "forbidden_subsystems": [{"name": "content", "include_dirs": "x"}]}, "include_dirs"),
+        ]
+        for payload, message in cases:
+            with self.subTest(message=message), tempfile.TemporaryDirectory() as td:
+                path = Path(td) / "policy.json"
+                path.write_text(json.dumps(payload), encoding="utf-8")
+                with self.assertRaisesRegex(SystemExit, message):
+                    vellum_policy.load(path)
 
     def test_edge_allowlist_keeps_audio_targets_distinct(self):
         self.assertEqual(edge_key("pulp-design-import", "pulp-audio"), "pulp-design-import->pulp-audio")
@@ -288,7 +340,8 @@ class EveryExternalRowTests(unittest.TestCase):
         forged_label = {**row, "patch": "d" * 64, "path": f"@external/choc/{pin}+patch-dddddddddddddddd/choc/text/choc_JSON.h"}
         self.assertTrue(any("recompute" in v for v in self.check(forged_label)))
         replay = row["patch_recipe"]["replay"]
-        self.assertEqual(replay["functions"], ["pulp_patch_choc_v8", "pulp_patch_choc_json_number_exponent"])
+        self.assertEqual(replay["functions"], ["pulp_patch_choc_v8", "pulp_patch_choc_json_number_exponent",
+                                              "pulp_patch_choc_file_watcher"])
         reordered = {**row, "patch_recipe": {**row["patch_recipe"], "replay": {**replay, "functions": list(reversed(replay["functions"]))}}}
         self.assertTrue(any("in order" in v for v in self.check(reordered)))
         other_blob = {**row, "patch_recipe": {**row["patch_recipe"], "replay": {**replay, "patch_set_blob": "0" * 40}}}
@@ -1343,11 +1396,12 @@ class GeneratedDigestTests(unittest.TestCase):
             )
             expected_cpp = hashlib.sha256(recipe_output.read_bytes()).hexdigest()
         names = [input_path.stem.replace("-", "_") for input_path in inputs]
+        from vellum_closure import PRELUDE_HEADER_HEAD, PRELUDE_HEADER_TAIL
+        self.assertIn("struct EmbeddedPrelude {", PRELUDE_HEADER_HEAD)
         expected_hpp_text = (
-            "#pragma once\n// Auto-generated from the JS prelude file list — do not edit\n\n"
-            "namespace pulp::view::preludes {\n\n"
-            + "".join(f"extern const char* const {name};\n" for name in names)
-            + "\n}  // namespace pulp::view::preludes\n"
+            PRELUDE_HEADER_HEAD
+            + "".join(f"extern const EmbeddedPrelude {name};\n" for name in names)
+            + PRELUDE_HEADER_TAIL
         )
         expected_hpp = hashlib.sha256(expected_hpp_text.encode("utf-8")).hexdigest()
         with tempfile.TemporaryDirectory() as td:
@@ -1439,14 +1493,14 @@ class GeneratedDigestTests(unittest.TestCase):
             self.assertIsNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source))
             producer.write_text("if(FALSE)\n" + original + "endif()\n", encoding="utf-8")
             self.assertIsNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source))
-            producer.write_text(original.replace("extern const char* const ${_prelude_var};", "extern const unsigned char* ${_prelude_var};"), encoding="utf-8")
+            producer.write_text(original.replace("extern const EmbeddedPrelude ${_prelude_var};", "extern const unsigned char* ${_prelude_var};"), encoding="utf-8")
             self.assertIsNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source))
             adversarial_mutations = (
                 ("NAME_WE -> NAME", original.replace("\"${_prelude}\" NAME_WE", "\"${_prelude}\" NAME", 1)),
                 ("duplicate APPEND", original.replace(
-                    'string(APPEND _pulp_prelude_decls "extern const char* const ${_prelude_var};\\n")',
-                    'string(APPEND _pulp_prelude_decls "extern const char* const ${_prelude_var};\\n")\n'
-                    'string(APPEND _pulp_prelude_decls "extern const char* const ${_prelude_var};\\n")', 1)),
+                    'string(APPEND _pulp_prelude_decls "extern const EmbeddedPrelude ${_prelude_var};\\n")',
+                    'string(APPEND _pulp_prelude_decls "extern const EmbeddedPrelude ${_prelude_var};\\n")\n'
+                    'string(APPEND _pulp_prelude_decls "extern const EmbeddedPrelude ${_prelude_var};\\n")', 1)),
                 ("changed header prelude", original.replace("#pragma once\\n", "#pragma changed\\n", 1)),
                 ("extra custom output", original.replace(
                     "OUTPUT ${PULP_JS_EMBEDDED_SOURCE}",

@@ -89,6 +89,7 @@ SharedIoStampedBridge::begin_callback(std::span<const float> samples, std::uint6
     }
     if (sequence > next_sequence_)
         request_recovery(SharedIoRecoveryReason::SequenceGap, sequence);
+    adopt_requested_epoch();
     next_sequence_ = sequence;
     if (next_sequence_ >= kSequenceLimit)
         return {{}, Admission::SequenceExhausted};
@@ -346,6 +347,8 @@ void SharedIoStampedBridge::request_recovery(SharedIoRecoveryReason reason,
                                              std::uint64_t sequence) noexcept {
     if (reason == SharedIoRecoveryReason::None)
         return;
+    last_requested_sequence_.store(sequence, std::memory_order_relaxed);
+    last_requested_reason_.store(reason, std::memory_order_release);
     suspend_delivery();
     auto expected = SharedIoRecoveryReason::None;
     if (recovery_reason_.compare_exchange_strong(expected, reason, std::memory_order_acq_rel))
@@ -353,8 +356,59 @@ void SharedIoStampedBridge::request_recovery(SharedIoRecoveryReason reason,
 }
 
 void SharedIoStampedBridge::suspend_delivery() noexcept {
+    suspensions_.fetch_add(1, std::memory_order_acq_rel);
     admission_gate_.fetch_and(~1u, std::memory_order_acq_rel);
     delivery_epoch_.store(0, std::memory_order_release);
+}
+
+bool SharedIoStampedBridge::request_epoch(std::uint64_t epoch) noexcept {
+    if (!prepared_ || !epoch || epoch <= last_epoch_ || delivery_epoch() != 0 ||
+        (admission_gate_.load(std::memory_order_acquire) & 2u) ||
+        pending_epoch_.load(std::memory_order_acquire) != 0)
+        return false;
+    last_epoch_ = epoch;
+    finalized_.reset();
+    // Snapshot first: any recovery request from here on bumps the count and
+    // refuses the adoption, even one whose cause the clearing below erases.
+    pending_suspensions_.store(suspensions_.load(std::memory_order_acquire),
+                               std::memory_order_release);
+    if (request_epoch_hook_ != nullptr)
+        request_epoch_hook_(request_epoch_hook_context_);
+    recovery_reason_.store(SharedIoRecoveryReason::None, std::memory_order_release);
+    recovery_sequence_.store(std::numeric_limits<std::uint64_t>::max(), std::memory_order_release);
+    pending_epoch_.store(epoch, std::memory_order_release);
+    return true;
+}
+
+void SharedIoStampedBridge::relatch_refused_recovery() noexcept {
+    auto expected = SharedIoRecoveryReason::None;
+    const auto reason = last_requested_reason_.load(std::memory_order_acquire);
+    if (reason != SharedIoRecoveryReason::None &&
+        recovery_reason_.compare_exchange_strong(expected, reason, std::memory_order_acq_rel))
+        recovery_sequence_.store(last_requested_sequence_.load(std::memory_order_relaxed),
+                                 std::memory_order_release);
+}
+
+void SharedIoStampedBridge::adopt_requested_epoch() noexcept {
+    auto epoch = pending_epoch_.load(std::memory_order_acquire);
+    if (epoch == 0 || !pending_epoch_.compare_exchange_strong(epoch, 0, std::memory_order_acq_rel))
+        return;
+    const auto observed = pending_suspensions_.load(std::memory_order_acquire);
+    if (suspensions_.load(std::memory_order_acquire) != observed) {
+        relatch_refused_recovery();
+        return;
+    }
+    admission_gate_.store(1u, std::memory_order_release);
+    delivery_epoch_.store(epoch, std::memory_order_release);
+    // A recovery request that raced the reopening suspended again or left a
+    // cause latched; close delivery behind it so the request wins, and keep
+    // its cause visible so the owner can recover again.
+    if (suspensions_.load(std::memory_order_acquire) != observed ||
+        recovery_reason_.load(std::memory_order_acquire) != SharedIoRecoveryReason::None) {
+        admission_gate_.fetch_and(~1u, std::memory_order_acq_rel);
+        delivery_epoch_.store(0, std::memory_order_release);
+        relatch_refused_recovery();
+    }
 }
 
 bool SharedIoStampedBridge::activate_epoch(std::uint64_t epoch) noexcept {

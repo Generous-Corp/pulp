@@ -7,7 +7,8 @@ pixel count comes from glyphs that are too heavy, glyphs that sit a fraction of
 a pixel off, or a coverage curve with a different shape. This decomposes one
 text box at a time into numbers that each name one of those mechanisms:
 
-  ink_ratio      sum of background-subtracted luminance, candidate / reference.
+  ink_ratio      sum of the luminance distance from the local background,
+                 candidate / reference.
                  1.00 is equal ink. Position-blind by construction.
   count_ratio    pixels with ink above a fixed level, candidate / reference.
                  Separates "more pixels lit" (dilation) from "same pixels, more
@@ -38,10 +39,11 @@ The labels file is JSON: {"font": {"family", "file"}, "background": "#rrggbb",
 "direction" is optional and defaults to "ltr". Coordinates are CSS
 pixels; renders are device pixels at --scale.
 
-The ink measurement assumes light text on a darker, locally flat background,
-which is what the background estimate (the box border's median) relies on.
-Boxes whose border is not flat are reported with `background_spread` so a
-reader can discount them.
+Ink is the luminance distance from the local background in either direction,
+so light text on a dark panel and dark text on a light one measure alike. The
+background estimate (the box border's median) assumes a locally flat
+background; boxes whose border is not flat are reported with
+`background_spread` so a reader can discount them.
 """
 
 from __future__ import annotations
@@ -74,13 +76,14 @@ def load_luma(path: Path) -> np.ndarray:
 
 
 def ink_map(luma: np.ndarray, box: tuple[int, int, int, int]) -> tuple[np.ndarray, float, float]:
-    """Background-subtracted ink inside `box` (x0, y0, x1, y1), clamped at 0."""
+    """Ink inside `box` (x0, y0, x1, y1): each pixel's luminance distance from
+    the box's background, whichever side of it the text is drawn on."""
     x0, y0, x1, y1 = box
     region = luma[y0:y1, x0:x1]
     border = np.concatenate([region[0, :], region[-1, :], region[:, 0], region[:, -1]])
     bg = float(np.median(border))
     spread = float(np.percentile(border, 90) - np.percentile(border, 10))
-    return np.clip(region - bg, 0.0, None), bg, spread
+    return np.abs(region - bg), bg, spread
 
 
 def centroid(ink: np.ndarray) -> tuple[float, float]:

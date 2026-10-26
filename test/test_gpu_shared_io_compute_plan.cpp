@@ -105,6 +105,42 @@ TEST_CASE("shared IO compute plan keeps deadline outside slot token",
     REQUIRE(plan.release());
 }
 
+TEST_CASE("shared IO compute plan delivers a completion only under its admission ticket",
+          "[gpu_audio][shared_io][p2][ticket]") {
+    FakeProvider provider;
+    SharedIoComputePlan plan;
+    REQUIRE(plan.prepare(provider,
+                         {.slots = 2, .input_bytes_per_slot = 16, .output_bytes_per_slot = 16}));
+    auto input = plan.acquire_input(7, 0);
+    REQUIRE(input);
+    const auto token = SharedIoComputePlan::SubmitToken::admit(input->token);
+    CHECK(token.ticket.admits(input->token.preparation_epoch, 7));
+    // A caller ticket that disagrees with the one the plan admitted is refused.
+    auto forged = token;
+    forged.ticket.generation += 1;
+    CHECK_FALSE(plan.submit(forged));
+    REQUIRE(plan.submit(token));
+    REQUIRE(plan.drain(0) == 1);
+    auto completion = plan.pop_completion();
+    REQUIRE(completion);
+    CHECK(completion->token.ticket == token.ticket);
+
+    // Planted negative: the same completion carrying a ticket from another
+    // generation cannot acquire the output.
+    auto stale = *completion;
+    stale.token.ticket.generation += 1;
+    CHECK_FALSE(plan.acquire_output(stale));
+    auto unaccepted = *completion;
+    unaccepted.token.ticket = {};
+    CHECK_FALSE(plan.acquire_output(unaccepted));
+
+    // Positive control: the admitted ticket acquires it.
+    auto lease = plan.acquire_output(*completion);
+    REQUIRE(lease);
+    REQUIRE(plan.release_output({lease->token}));
+    REQUIRE(plan.release());
+}
+
 TEST_CASE("shared IO execution predictor is opt-in and conservative",
           "[gpu_audio][shared_io][prediction]") {
     SharedIoExecutionPredictor predictor;

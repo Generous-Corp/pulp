@@ -90,7 +90,7 @@ struct SnapChunk {
 ///
 /// A range rather than a callback on purpose: a loop body passed as a lambda
 /// that captures a pass's state arrays by reference kept that state in memory
-/// instead of registers and made an eight-section cascade 1.7x slower; the
+/// instead of registers and made an eight-section cascade measurably slower; the
 /// range-for keeps the body in the caller's own scope.
 ///
 /// @code

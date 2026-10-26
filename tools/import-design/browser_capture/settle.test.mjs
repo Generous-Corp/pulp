@@ -6,9 +6,14 @@ import {
   animatedImageKind,
   captureStableFrameWithHiddenPaint,
   captureStableScreenshot,
+  presentationFrameOptions,
+  PRESENTATION_FRAME_ENCODING,
+  SCREENSHOT_HORIZON_FRAMES,
+  STABLE_RUN_FRAMES,
   freezeAndMeasureDocumentExtent,
   freezeDynamicTime,
   freezeMotion,
+  horizonPresentationEncoding,
   installDynamicWorkTracker,
   resumeDynamicTime,
   validateCaptureDimensions,
@@ -377,7 +382,8 @@ test("the motion freeze runs once in the page and returns its receipt",
     assert.ok(expression.includes(animatedImageKind.toString()));
     assert.doesNotThrow(() => new Function(`return ${expression};`));
     for (const step of ["getAnimations", "finish()", "pause()",
-      "currentTime = 0", "querySelectorAll(\"video\")", "volatile_sources"]) {
+      "currentTime = 0", "commitStyles()", "cancel()", "querySelectorAll(\"video\")",
+      "volatile_sources"]) {
       assert.ok(expression.includes(step), step);
     }
   });
@@ -392,4 +398,130 @@ test("a motion freeze the page rejects fails the capture by name", async () => {
     }),
     (error) => error.code === "capture-motion-freeze-failed" &&
       /TypeError: boom/.test(error.message));
+});
+
+// A page whose presented frame N shows `pixelsAt(N)`, behind an encoder whose
+// output depends on the requested format the way a real one does.
+function encodingPage(pixelsAt) {
+  const requests = [];
+  return {
+    requests,
+    async call(method, options) {
+      assert.equal(method, "Page.captureScreenshot");
+      requests.push(options);
+      const pixels = pixelsAt(requests.length);
+      const encoded = `${options.format}/${options.quality ?? "-"}/${pixels}`;
+      return { data: Buffer.from(encoded).toString("base64") };
+    },
+  };
+}
+
+// The rule as it stood before presentation frames: every frame with the
+// caller's options. Option-for-option equivalence is judged against it.
+async function referenceHorizon(cdp, options, frames, required) {
+  let previous;
+  let run = 0;
+  for (let index = 0; index < frames; index += 1) {
+    const shot = await cdp.call("Page.captureScreenshot", options);
+    const current = Buffer.from(shot.data, "base64");
+    run = previous?.equals(current) ? run + 1 : 1;
+    previous = current;
+  }
+  return run >= required ? previous : undefined;
+}
+
+const canonicalOptions = Object.freeze({
+  format: "png",
+  captureBeyondViewport: true,
+  fromSurface: true,
+  clip: { x: 0, y: 0, width: 1280, height: 800, scale: 1 },
+});
+
+test("the horizon length and stable run are pinned", () => {
+  // Presentation frames are equivalent only while the stable run equals the
+  // number of decisive frames; captureStableScreenshot ties the two together,
+  // and this pins the values every capture horizon has been proven at.
+  assert.equal(SCREENSHOT_HORIZON_FRAMES, 32);
+  assert.equal(STABLE_RUN_FRAMES, 3);
+});
+
+test("only the decisive frames carry the caller's encoding; geometry never changes",
+  async () => {
+    const cdp = encodingPage(() => "still");
+    await captureStableScreenshot(cdp, canonicalOptions, undefined, 0);
+    assert.equal(cdp.requests.length, SCREENSHOT_HORIZON_FRAMES);
+    const presentation = SCREENSHOT_HORIZON_FRAMES - STABLE_RUN_FRAMES;
+    for (const [index, options] of cdp.requests.entries()) {
+      if (index >= presentation) {
+        assert.deepEqual(options, canonicalOptions);
+        continue;
+      }
+      const { format, quality, ...geometry } = options;
+      const { format: _format, ...canonicalGeometry } = canonicalOptions;
+      assert.deepEqual(geometry, canonicalGeometry);
+      assert.equal(format, PRESENTATION_FRAME_ENCODING.format);
+      assert.equal(quality, PRESENTATION_FRAME_ENCODING.quality);
+    }
+    assert.deepEqual(presentationFrameOptions(canonicalOptions).clip,
+      canonicalOptions.clip);
+  });
+
+test("presentation frames decide nothing the original rule did not", async () => {
+  const frames = SCREENSHOT_HORIZON_FRAMES;
+  const cases = {
+    // Still throughout: accepted, the shipped bytes are the canonical frame.
+    still: () => "settled",
+    // Changes at frame 28, still from 29 on: accepted identically.
+    "change at 28": (n) => (n < 28 ? "draining" : "settled"),
+    // Changes at frame 31: rejected by both.
+    "change at 31": (n) => (n < 31 ? "settled" : "moved"),
+    // Never still: rejected by both.
+    "always moving": (n) => `frame-${n}`,
+  };
+  for (const [name, pixelsAt] of Object.entries(cases)) {
+    const optimized = await captureStableScreenshot(
+      encodingPage(pixelsAt), canonicalOptions, frames, 0);
+    const reference = await referenceHorizon(
+      encodingPage(pixelsAt), canonicalOptions, frames, STABLE_RUN_FRAMES);
+    assert.deepEqual(optimized, reference, name);
+  }
+  const accepted = await captureStableScreenshot(
+    encodingPage((n) => (n < 28 ? "draining" : "settled")),
+    canonicalOptions, frames, 0);
+  assert.equal(accepted.toString(), "png/-/settled");
+  assert.equal(await captureStableScreenshot(
+    encodingPage((n) => (n < 31 ? "settled" : "moved")),
+    canonicalOptions, frames, 0), undefined);
+});
+
+test("a shorter horizon keeps its own decisive run", async () => {
+  // The isolated-canvas horizon takes 6 frames and needs a run of 2.
+  const cdp = encodingPage(() => "canvas");
+  const bytes = await captureStableScreenshot(cdp, canonicalOptions, 6, 0, 2);
+  assert.equal(bytes.toString(), "png/-/canvas");
+  assert.deepEqual(cdp.requests.slice(4), [canonicalOptions, canonicalOptions]);
+  assert.equal(cdp.requests.slice(0, 4).every(
+    (options) => options.format === PRESENTATION_FRAME_ENCODING.format), true);
+});
+
+test("a declared animated image keeps every horizon frame in the caller's encoding",
+  async () => {
+    const volatile = { volatile_sources: [{ kind: "animated-image", format: "gif" }] };
+    assert.equal(horizonPresentationEncoding(volatile), null);
+    assert.equal(horizonPresentationEncoding({ volatile_sources: [] }),
+      PRESENTATION_FRAME_ENCODING);
+    const cdp = encodingPage(() => "still");
+    const bytes = await captureStableScreenshot(cdp, canonicalOptions,
+      undefined, 0, undefined, horizonPresentationEncoding(volatile));
+    assert.equal(bytes.toString(), "png/-/still");
+    assert.equal(cdp.requests.length, SCREENSHOT_HORIZON_FRAMES);
+    for (const options of cdp.requests) assert.deepEqual(options, canonicalOptions);
+  });
+
+test("a hidden-paint horizon takes the encoding it is given", async () => {
+  const cdp = encodingPage(() => "hidden");
+  const bytes = await captureStableFrameWithHiddenPaint(
+    cdp, canonicalOptions, Buffer.from("accepted"), 1, null);
+  assert.equal(bytes.toString(), "png/-/hidden");
+  for (const options of cdp.requests) assert.deepEqual(options, canonicalOptions);
 });

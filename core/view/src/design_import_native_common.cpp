@@ -3105,7 +3105,7 @@ std::unique_ptr<View> build_native_view_tree(const DesignIR& ir,
                                              const NativeMaterializeOptions& options) {
     try {
         const auto& effective_manifest = manifest.assets.empty() ? ir.asset_manifest : manifest;
-        const DesignIR prepared = prepare_native_design_ir(ir);
+        const DesignIR prepared = prepare_native_ir_with_fonts(ir, effective_manifest, options);
         auto resolved = resolve_design_ir_native(prepared, effective_manifest);
 
         std::vector<ImportDiagnostic> materialize_diagnostics;

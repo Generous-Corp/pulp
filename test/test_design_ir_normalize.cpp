@@ -203,6 +203,80 @@ TEST_CASE("a browser capture's gap under a drop shadow survives parsing", "[desi
     CHECK(*designed.root.children[1].style.top == 74.0f);
 }
 
+TEST_CASE("separator promotion leaves a measured hairline alone", "[design-ir-normalize]") {
+    // A 4px box with a 1px border, scaled to 5% wide: Chromium paints a
+    // 0.3125px sliver and still reports the 1px border. Figma's rule would
+    // widen it to 1px and fill it with the border colour.
+    IRNode hairline;
+    hairline.style.width = 0.3125f;
+    hairline.style.height = 74.0f;
+    hairline.style.border_width = 1.0f;
+    hairline.style.border_color = "rgb(224, 64, 64)";
+    hairline.style.border = "1px solid rgb(224, 64, 64)";
+
+    IRNode figma = hairline;
+    normalize_design_ir(figma);
+    CHECK(*figma.style.width == 1.0f);
+    CHECK_FALSE(figma.style.border.has_value());
+
+    IRParseOptions measured;
+    measured.measured_geometry = true;
+    normalize_design_ir(hairline, measured);
+    CHECK(*hairline.style.width == 0.3125f);
+    REQUIRE(hairline.style.border.has_value());
+    CHECK(*hairline.style.border == "1px solid rgb(224, 64, 64)");
+    CHECK_FALSE(hairline.style.background_color.has_value());
+    CHECK(hairline.attributes.count("__stroke_demoted") == 0);
+}
+
+TEST_CASE("rounded corners are not inherited by a measured child", "[design-ir-normalize]") {
+    // A child that fills a 24px-rounded parent and reports a 0 radius of its
+    // own. Chromium squares it unless the parent clips.
+    IRNode parent;
+    parent.style.border_radius = 24.0f;
+    parent.style.width = 160.0f;
+    parent.style.height = 120.0f;
+    IRNode fill;
+    fill.style.left = 0.0f;
+    fill.style.top = 0.0f;
+    fill.style.width = 160.0f;
+    fill.style.height = 120.0f;
+    fill.style.border_radius = 0.0f;
+    parent.children = {fill};
+
+    IRNode figma = parent;
+    normalize_design_ir(figma);
+    CHECK(*figma.children[0].style.border_radius == 24.0f);
+
+    IRParseOptions measured;
+    measured.measured_geometry = true;
+    normalize_design_ir(parent, measured);
+    CHECK(*parent.children[0].style.border_radius == 0.0f);
+}
+
+TEST_CASE("a browser capture's unbound dial stays a frame when parsed", "[design-ir-normalize]") {
+    // The capture binds a control only from a declared parameter. A plain
+    // div whose class is "dial" is part of the picture; its name must not
+    // turn it into a knob when the capture is read back.
+    const std::string capture = R"json({"version": 1, "source": "html",
+      "sourceAdapter": "browser-capture",
+      "root": {"type": "frame", "name": "div#panel", "children": [
+        {"type": "frame", "name": "div.dial",
+         "style": {"position": "absolute", "top": 0, "width": 66, "height": 66}}]}})json";
+    std::string design = capture;
+    const std::string adapter = "browser-capture";
+    design.replace(design.find(adapter), adapter.size(), "figma");
+
+    const auto captured = parse_design_ir_json(capture);
+    REQUIRE(captured.root.children.size() == 1);
+    CHECK(captured.root.children[0].audio_widget == AudioWidgetType::none);
+    CHECK(captured.root.audio_widget == AudioWidgetType::none);
+
+    const auto designed = parse_design_ir_json(design);
+    REQUIRE(designed.root.children.size() == 1);
+    CHECK(designed.root.children[0].audio_widget == AudioWidgetType::knob);
+}
+
 TEST_CASE("connector hairline spans the row and centers vertically",
           "[design-ir-normalize]") {
     IRNode row;

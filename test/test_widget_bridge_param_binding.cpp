@@ -270,6 +270,37 @@ TEST_CASE("precedence: binding re-asserts over a stray direct set on source chan
     REQUIRE_THAT(knob->value(), WithinAbs(0.40f, 1e-5f));
 }
 
+TEST_CASE("isWidgetParamBound reports a value binding until it is removed",
+          "[view][bridge][state-binding]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    add_params(store);
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createKnob('gain-knob');
+        createKnob('free-knob');
+        createMeter('out-meter');
+        bindWidgetToParam('gain-knob', 'gain');
+        bindMeter('out-meter', 'gain');
+    )");
+    REQUIRE(bridge.param_binding_count() == 2);
+
+    const auto bound = [&](const char* id) {
+        return engine.evaluate(std::string("isWidgetParamBound('") + id + "')")
+            .getWithDefault<bool>(false);
+    };
+    CHECK(bound("gain-knob"));
+    CHECK_FALSE(bound("free-knob"));
+    // A meter binding drives a display, not a value an edit could change.
+    CHECK_FALSE(bound("out-meter"));
+    CHECK_FALSE(bound("no-such-widget"));
+
+    engine.evaluate("unbindWidget('gain-knob')");
+    CHECK_FALSE(bound("gain-knob"));
+}
+
 TEST_CASE("unbindWidget stops the native push; rebinding replaces the source",
           "[view][bridge][state-binding]") {
     ScriptEngine engine;

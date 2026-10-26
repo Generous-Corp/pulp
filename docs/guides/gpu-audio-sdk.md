@@ -207,6 +207,20 @@ fills the block — `Silence` by default (a bounded, obvious dropout), or
 `latency_blocks * block_size`, and a host that is not told leaves your track
 shifted late against every other track in the session.
 
+An owned worker (`Config::run_worker_thread`) polls by default: it sleeps a
+quarter block between pumps, never more than 2 ms. `Config::wake_on_write` is
+an opt-in. With it on, each callback posts a semaphore after it writes its
+input, and the worker waits on that semaphore with the poll interval only as a
+fallback. A provider that installs a completion notifier would wake the worker
+too, and then the fallback is one block (still at most 2 ms), but no shipped
+provider installs one yet. The post never allocates or blocks. While the worker is parked, though,
+it is a kernel call on the audio thread every block (a Mach semaphore signal
+on macOS), which is why it is off by default. A wake that completes nothing is
+never counted as progress, so `produced_blocks` and WaveNet's
+unresponsive-provider watchdog are the same either way. Outside a host
+workgroup, the worker runs at `QOS_CLASS_USER_INTERACTIVE` on macOS, which
+`Stats::worker_interactive_qos` reports.
+
 The transport also has an opt-in macOS scheduling experiment for an owned
 worker. Set `Config::join_audio_workgroup` and pass a borrowed
 `Config::audio_workgroup` handle when the host has a valid `os_workgroup_t`.
@@ -248,9 +262,13 @@ resolves, and its worker never waits on the GPU at all.
   directly, `process_block` still returns block N for input block N and
   reports `worker_pipeline_blocks = 0`, deciding each block inside the call
   with a wait bounded to one period minus its CPU cost (with the same CPU
-  routing and breaker). Because `release()` opts a pipelining convolver back
-  out, that node must outlive the transport's `release()` (or the transport
-  must be released first); a non-pipelining node is never touched there.
+  routing and breaker). The transport's `release()` opts a pipelining
+  convolver back out; a convolver destroyed before that call detaches itself
+  from the transport first, and a non-pipelining node is never touched there.
+  That holds only once neither `pump()` nor `process()` runs on its transport:
+  the audio callback's `process()` calls the node's CPU fallback, and a
+  transport with its own worker pumps it until `release()` joins the worker.
+  Otherwise release that transport before destroying the node.
 - Every block's input goes to exactly one place: the GPU overlap-add carry when
   its readback is on time, otherwise the worker's zero-latency CPU convolution.
   The output is the carry plus whatever the CPU convolution still owes, so a
@@ -270,6 +288,11 @@ resolves, and its worker never waits on the GPU at all.
   tripped on a slow but alive GPU; reported as degraded), `ProviderFailure`
   (failed map or non-finite readback). A single late block is a served miss
   and latches nothing. `prepare()` now also rejects a zero sample rate.
+- Non-finite input samples are zeroed before submission, so a NaN in the input
+  neither fences the device on readback nor rings through the IR tail. The GPU,
+  the worker's CPU convolution and the transport's miss substitute all see the
+  same zeroed block. `sanitized_input_samples()` counts the replacements and
+  latches nothing.
 
 A caller that depends on the old unbounded, in-block wait can select
 `ProviderPolicy::StagedBlocking` before `prepare()` (no worker pipeline); it
@@ -288,6 +311,14 @@ archive; older SDKs may not contain these facts. Traced/probe builds and the
 Vellum D15 experiment remain outside the official release contract. The legacy
 `release-cli-local.sh` helper does not produce this qualified capability receipt;
 its archive is not a substitute for the official release artifact.
+
+The required arm64 macOS gate also configures `PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF=ON`,
+so CI compiles and links the hardware-evidence binaries (for example
+`pulp-gpu-dawn-wavenet-qualification` and the shared-I/O provider probes)
+against the pinned Dawn on every pull request and merge group. It never runs
+them: their tests carry the `gpu-proof` label, which every CI ctest selection
+excludes. Hardware receipts remain owner-run on a physical GPU (m3), and a
+claim-bearing change still attaches a fresh receipt from that machine.
 
 Earlier experimental builds let `Auto` try shared execution when the convolver
 compile flag was enabled. Experiments relying on that behavior must now request
@@ -334,6 +365,11 @@ for these sessions. Derive from `GpuWaveNetRealtimeNode` to retain a continuousl
 primed, aligned CPU shadow without a second worker CPU model. Provider failures
 and missing results remain tied to their epoch/sequence; they never shift later
 samples into an earlier hole. See [the lifecycle and limitations](gpu-audio-wavenet-realtime.md).
+The node zeroes NaN and infinite samples before GPU submission, but your
+`prime_fallback()` and `process_cpu_fallback()` overrides receive the host's
+raw input. Apply the same policy there (replace each NaN or +/-Inf sample with
+zero and keep the shadow's state) so the shadow matches the GPU output it
+substitutes for and one bad sample cannot poison its history.
 This is experimental correctness infrastructure, not a CPU-saving claim.
 
 `<pulp/gpu_audio/gpu_neural_realtime_node.hpp>` adds `GpuNeuralRealtimeNode`,
@@ -358,9 +394,19 @@ to one node.
 On the GPU path the node detects device loss through the provider's loss
 query, which outranks the failed completions the loss causes. It detects a
 hung provider with a completion watchdog: `Config::watchdog_blocks` callback
-blocks with nothing completed while work is in flight. Both report
+blocks with nothing completed while work is in flight (by default 200 ms of
+blocks, 150 at 64 frames and 48 kHz; see the WaveNet node guide). Both report
 `Unavailable`, with `ProviderLost` or `ProviderUnresponsive` as the reason,
 and the CPU model carries the stream.
+
+A WaveNet node keeps up to two GPU blocks in flight by default:
+`Config::max_inflight = 0` selects two when the model's backend admits two
+(`GpuNeuralModelRequest::gpu_max_inflight`, which by default is two for a
+session with at least two slots) and the ring holds two blocks past the lead,
+else one. One block in flight keeps up only while a block's round trip fits in
+its period; at 64 frames on an M1 Max it does not (see the measured table in
+the WaveNet node guide). The lead, and so the latency, does not change. Set
+`max_inflight = 1` to keep single flight.
 
 Where the shadow runs is `Config::shadow_policy`. The policy governs only
 what happens on a realtime GPU miss:
@@ -417,7 +463,11 @@ reports `Degraded`, with `ProviderFailure` as the recovery reason.
 Non-finite input samples (NaN, +Inf, -Inf) are replaced with zero before
 either the GPU submission or the CPU shadow sees them, so the two stay
 comparable and no causal state is poisoned. `sanitized_input_samples()`
-counts the replacements.
+counts the replacements. `GpuWaveNetRealtimeNode` and both `GpuConvolver`
+GPU paths (staged and shared) apply the same policy before GPU submission, so one
+NaN cannot ring through a receptive field or an IR tail, and each counts the
+replacements in its own `sanitized_input_samples()`. The count latches no
+recovery cause.
 
 Any latched cause, including one invalid callback, fences GPU delivery until
 the host prepares the node again. The shadow carries the stream until then.
@@ -442,7 +492,9 @@ Perfetto work without deriving the result from a loose collection of events.
 For host diagnostics, `capability_report()` returns an allocation-free snapshot
 of the selected path. `path` distinguishes the ordinary staged worker from the
 experimental shared-memory path, while `provider` is `Dawn` only when the exact
-shared Dawn path is active and is otherwise `Unknown`. The snapshot carries
+shared Dawn path is active and is otherwise `Unknown`. A `GpuNeuralRealtimeNode`
+running without a GPU backend (a CPU-only family, or WaveNet whose provider
+could not be prepared) reports `Cpu` for both `path` and `provider`. The snapshot carries
 `prepared_latency_blocks` for the transport's fixed output/PDC delay. It carries
 `prepared_lead_blocks` only when an authenticated concrete provider establishes
 an algorithmic lead; generic staged nodes report zero there. It also carries the
@@ -766,11 +818,32 @@ preparation can bring it back. A loss observed after the `ProviderFailure`,
 the state is not `Ready`, `selected_engine` names the engine that actually delivers. That is
 `Cpu` for a node with a CPU fallback, and `Unknown` for a node that emits
 silence; it is never `Gpu`. `provider` still names the provider that was
-prepared. `epoch`,
+prepared. A provider that keeps completing, but too late for every block, latches
+no recovery cause, yet the substitute carries the stream. So `Ready` on the `Gpu`
+engine also requires the GPU to have delivered at least half of the last 32
+callback blocks (once at least 8 were counted; priming blocks are not counted).
+Below that the status reads `Degraded`, with `recovery_reason` `None`. It also
+reads `Degraded` as soon as at least one block was counted and the GPU delivered
+none of them, as during a first preparation's or a re-acquired epoch's warmup.
+It returns
+to `Ready` once the GPU carries half the window again; a re-acquire starts a
+new window. The own statuses of `GpuWaveNetRealtimeNode`,
+`GpuNeuralRealtimeNode` and the shared `GpuConvolver` path apply the same rule. `epoch`,
 `delivery_epoch_active` and `terminal_counts` come from the node when it
 supplies them. The shared `GpuConvolver` path supplies the epoch and counts one
 terminal disposition per admitted GPU block. A refused or failed block is counted
 as `CpuFallback`, because that is what the callback delivers for it.
+
+For `GpuWaveNetRealtimeNode` the fence fails closed. Blocks admitted before the
+latch are not delivered after it, even when their GPU results complete
+cleanly: from the first callback after the latch, every block takes the CPU
+fallback, or silence for a node without one, until a new preparation or an
+`AutoReacquire` re-acquire resumes GPU delivery in a new epoch. The cost is bounded by the blocks
+in flight, and a provider that has just failed never adds late GPU blocks to a
+stream that has already moved to its fallback. `recovery_sequence` is the block
+at which the cause latched, which can be later than the last block delivered on
+the GPU. See [the WaveNet node guide](gpu-audio-wavenet-realtime.md) for the
+physical evidence.
 
 The read is allocation-free and safe from a UI thread. `status_snapshot()` and
 `capability_report()` read only the transport's own copies: the configuration
@@ -800,8 +873,56 @@ least healthy lane, and `report().lanes[i].status` carries each lane.
 
 Check a quiescent snapshot with `validate_gpu_audio_status()`. The
 [reliability page](gpu-audio-macos-reliability.md#reading-health) lists which
-node produces each recovery reason today, and which values are reserved with no
-producer yet.
+node produces each recovery reason today.
+
+### Re-acquire a lost provider while audio keeps playing
+
+By default a fenced node stays on its CPU fallback until the host prepares it
+again (`GpuAudioRecoveryPolicy::Manual`). Set
+`GpuAudioTransport::Config::recovery_policy = GpuAudioRecoveryPolicy::AutoReacquire` to
+let the transport's worker replace the provider instead:
+
+```cpp
+GpuAudioTransport::Config config;
+config.run_worker_thread = true;
+config.recovery_policy = GpuAudioRecoveryPolicy::AutoReacquire;
+config.reacquire_release_budget_ns = 250'000'000; // per release of the old provider
+config.reacquire_max_attempts = 3;                // then stay on the fallback
+config.reacquire_backoff_ns = 100'000'000;        // waits of 100 ms, then 500 ms
+transport.prepare(&node, config);
+```
+
+When a provider fault fences the node (`ProviderLost`, `ProviderUnresponsive`,
+`ProviderFailure`, and the other non-offline causes), the worker releases the old
+provider within the budget, prepares a new one and opens a new delivery epoch on
+the same stream. The callback never waits: it adopts the epoch at its next block
+and keeps delivering the CPU fallback until the new provider's results are due.
+The new provider first refills its causal history, so its first blocks are not
+delivered. A provider that cannot drain within the budget has its device
+destroyed and is quarantined, not freed; `release()` retries it. An offline
+fence is never re-acquired. Status then reports `recovery_reason ==
+ProviderReacquired` with `recovery_sequence` set to the first block the new
+provider can deliver, and counts `reacquire_attempts`, `reacquire_successes`
+and `last_reacquire_to_gpu_ns` (from the worker first seeing the fence to the
+first GPU-delivered block). Today only `GpuWaveNetRealtimeNode` re-acquires; other
+nodes stay fenced.
+
+The first attempt runs as soon as the worker sees the outage. Every attempt,
+successful or not, arms a wait before the next one: `reacquire_backoff_ns` after
+the first, and five times the previous wait after each later one. The count
+resets only once GPU audio resumes, so an epoch that fails before delivering
+still counts toward `reacquire_max_attempts`. With the defaults, the three attempts run at once, at
+least 100 ms later, and at least 500 ms after that. The 2.5 s wait the third
+attempt arms is never used, because no fourth attempt follows. If GPU audio has
+not resumed by then, the node stays on its fallback until the host prepares it
+again.
+
+To keep providers warm across a node's own `release()` and `prepare()`, give
+the node a host-owned `GpuAudioProviderPool`
+(`GpuWaveNetRealtimeNode::Config::provider_pool`). Released providers are drained
+and kept for `keep_warm_ns` (30 s by default); a later `prepare()` with the same
+model, block size, slots and completion policy borrows one back instead of
+creating a device and pipelines. Call `evict_expired()` from a host timer.
 
 ### Keep host controls separate from callback execution
 
