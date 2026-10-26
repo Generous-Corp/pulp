@@ -7007,6 +7007,8 @@
    "inputs": [
     "test/fixtures",
     "test/fixtures/browser-capture-layout-rows",
+    "test/fixtures/import-differential",
+    "test/fixtures/import-differential/manifest.json",
     "test/test_importer_differential_lab.py",
     "tools/import-design/browser_capture/form_control_theme.mjs",
     "tools/import-design/browser_capture_controls.cpp",
