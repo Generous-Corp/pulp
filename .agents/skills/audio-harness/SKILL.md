@@ -1054,11 +1054,18 @@ harness or `ctest`.
   rather than the mono downmix; mono input on either side is `not_applicable`, its metric is
   level-invariant (no level-match), and a candidate whose correlation goes negative is flagged out
   of phase (mono-incompatible) in the summary. **`transient-integrity`** (the `_Axis.needs_onsets`
-  flag) is "did my DSP soften/smear the attacks?" — it detects+matches onsets (`align.detect_onsets`
-  / `map_onsets`), locks each attack (`dsp.local_align`), and compares the high-band attack rise
+  flag) is "did my DSP soften/smear the attacks?" — it detects the reference's onsets
+  (`align.detect_onsets`), measures each one in the candidate at its predicted position (normalized
+  time plus the cross-correlation lag from `dsp.estimate_global_lag`; candidate onset detections
+  do NOT place it, because on dense material they move by tens of ms under a few samples of delay
+  and once read a pure 37-sample delay as smeared attacks), locks each attack (`dsp.local_align`),
+  and compares the high-band attack rise
   (`dsp.attack_rise`, the SAME primitive the `transient_sharpness` detector uses — extracted to dsp
   so there is no forked DSP). One-directional (a softening is the regression; a sharper candidate
-  reads no change); needs onset-bearing material (< 3 matched onsets → `not_applicable`); self-aligns
+  reads no change); the worst-onset gate fires only when that attack's high-band ENERGY also
+  dropped (`dsp.onset_attack_measure` amplitude ratio < 0.5), since the 10-90% rise-time estimate
+  alone can jump on a -50 dBFS noise floor; needs onset-bearing material (< 3 matched onsets →
+  `not_applicable`); self-aligns
   per onset so `--align` is a no-op and the global sample-domain advisory is suppressed. That takes
   compare to **6 of the lab's 7 detectors** reachable from the agent-facing surface (up from 2).
   `compare.STEREO_PROFILES` / `ONSET_PROFILES` mark the capability-specific axes, and
