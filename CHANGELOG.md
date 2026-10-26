@@ -9,6 +9,17 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1190"></a>
+## [1.19.0] - 2026-10-26
+
+- release/version bump ([#11164](https://github.com/Generous-Corp/pulp/pull/11164))
+- chore/shipyard train status ([#11160](https://github.com/Generous-Corp/pulp/pull/11160))
+- chore/carry excluded paths shipyard ([#11161](https://github.com/Generous-Corp/pulp/pull/11161))
+- feature/text font smoothing ([#11020](https://github.com/Generous-Corp/pulp/pull/11020))
+- fix/importer swiftui binding rule 20261025 ([#11007](https://github.com/Generous-Corp/pulp/pull/11007))
+- feature/attack surface phase1 20261022 ([#10798](https://github.com/Generous-Corp/pulp/pull/10798))
+- release/version bump ([#11162](https://github.com/Generous-Corp/pulp/pull/11162))
+
 <a id="v1181"></a>
 ## [1.18.1] - 2026-10-26
 
@@ -11750,6 +11761,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.19.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.19.0
 [1.18.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.18.1
 [1.18.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.18.0
 [1.17.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.17.0
