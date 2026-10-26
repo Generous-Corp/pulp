@@ -5409,3 +5409,19 @@ TEST_CASE("registerFont declares a range only for a registered face and valid we
     CHECK(call("BridgeFaceReversed", jost, ", 700, 400"));
     CHECK(pulp::canvas::declared_face_synthesizes_bold("BridgeFaceReversed", 700) == false);
 }
+
+TEST_CASE("registerFont weight ranges are removed with their bridge scope",
+          "[view][bridge][fonts][synthetic-bold][reload]") {
+    const std::string jost = std::string(PULP_REPO_ROOT) + "/external/fonts/Jost-Regular.ttf";
+    {
+        ScriptEngine engine;
+        View root;
+        pulp::state::StateStore store;
+        WidgetBridge bridge(engine, root, store);
+        bridge.set_storage_identity("font-scope-reload-test");
+        REQUIRE(engine.evaluate("registerFont('ScopedFace', '" + jost + "', 400, 700)")
+                    .getWithDefault<bool>(false));
+        CHECK(pulp::canvas::declared_face_synthesizes_bold("ScopedFace", 700) == false);
+    }
+    CHECK_FALSE(pulp::canvas::has_declared_font_face_weights("ScopedFace"));
+}

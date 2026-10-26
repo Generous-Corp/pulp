@@ -399,7 +399,8 @@ void BridgeRegistrars::register_font_assets_api(WidgetBridge& self) {
         const auto declare = [&] {
             if (declared)
                 pulp::canvas::declare_font_face_weight_range(family, declared->first,
-                                                             declared->second);
+                                                             declared->second,
+                                                             self.storage_identity());
         };
         if (path.rfind("file://", 0) == 0) path = path.substr(7);
         if (const auto* embedded = self.embedded_asset(path)) {
