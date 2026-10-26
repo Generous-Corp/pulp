@@ -9,6 +9,22 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1150"></a>
+## [1.15.0] - 2026-10-26
+
+- release/version bump ([#11132](https://github.com/Generous-Corp/pulp/pull/11132))
+- fix/release artifact scan sanitizer timeout ([#11130](https://github.com/Generous-Corp/pulp/pull/11130))
+- perf/swapchain lazy configure ([#10976](https://github.com/Generous-Corp/pulp/pull/10976))
+- fix/signal thermo mustfix 20261025 ([#11123](https://github.com/Generous-Corp/pulp/pull/11123))
+- release/version bump ([#11128](https://github.com/Generous-Corp/pulp/pull/11128))
+- release/version bump ([#11127](https://github.com/Generous-Corp/pulp/pull/11127))
+- fix/rtti demangler missing skip ([#11125](https://github.com/Generous-Corp/pulp/pull/11125))
+- ci/windows runner idle recycle ([#11121](https://github.com/Generous-Corp/pulp/pull/11121))
+- fix/coverage barrier requires native legs ([#11111](https://github.com/Generous-Corp/pulp/pull/11111))
+- release/version bump ([#11124](https://github.com/Generous-Corp/pulp/pull/11124))
+- fix/capture drop blob font document read ([#11115](https://github.com/Generous-Corp/pulp/pull/11115))
+- fix/wavenet pool budget deterministic ([#11119](https://github.com/Generous-Corp/pulp/pull/11119))
+
 <a id="v1140"></a>
 ## [1.14.0] - 2026-10-26
 
@@ -11678,6 +11694,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.15.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.15.0
 [1.14.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.14.0
 [1.13.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.13.0
 [1.12.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.12.0
