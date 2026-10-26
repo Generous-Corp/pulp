@@ -156,6 +156,26 @@ still runs `source-selftest`, a Linux or Windows push excludes only
 [`.shipyard/config.toml`](../../.shipyard/config.toml) (`[validation.default]`,
 `test =`).
 
+### Installed-SDK consumers on the macOS gate
+
+An installed-SDK consumer test runs `cmake --install` into a scratch prefix,
+then configures and builds an outside project against it. One install plus one
+small consumer target is cheap enough for the required macOS gate, so these
+carry no `slow` label on Apple:
+
+| Test | Quiet Apple Silicon host (Release, n=3) | Required macOS gate |
+|------|------------------|---------------------|
+| `cmake-view-audio-sdk-consumer` | 6.0-6.6 s | 10-13 s |
+| `ui-script-plugin-editor-installed-sdk` | 10.2-11.3 s | not yet sampled; ~20 s expected |
+| `cmake-control-sdk-consumer` | 28.8-29.1 s | 56-63 s |
+
+The install itself is a few seconds (a 600 MB prefix copied from the build
+tree); the consumer compile dominates. Off Apple these keep `slow` until a
+consumer build there is measured. A consumer that builds several independent
+projects (`cmake-clean-consumer-fixture`) or every exported capability
+(`agent-capability-installed-sdk`) stays `slow`, the latter restored per change
+as described below. Measure a new consumer against this table before choosing.
+
 ### Affected slow proofs
 
 `agent-capability-installed-sdk` installs Pulp and builds an independent
@@ -380,6 +400,15 @@ developer's Homebrew build disagree on some diagnostics, so pinning this lane
 alone would make one runner image's version the contract while `docs-material.yml`
 and `docs-deploy.yml` drifted from it. If image drift ever does flip this check,
 pin all three together rather than just this one.
+
+**`control-shipping-native.yml` proves the installed scanner is complete.** After
+`cmake --install` it asserts that `lib/cmake/Pulp/` holds
+`check_control_shipping_artifact.cmake` together with the two files it reads
+from its own directory, `PulpReleaseArtifactScan.cmake` and
+`release_artifact_forbidden.json` (the one forbidden-marker list every
+release-artifact scan applies). A downstream SDK that staged the scanner
+without its list would fail closed at scan time; this check fails it at
+install time instead.
 
 **The release bot's bump skips the advisory lanes.** `control-shipping-native.yml`,
 `examples-validation.yml`, `intel-portability.yml` and `coverage.yml` AND

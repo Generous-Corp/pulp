@@ -1,0 +1,19 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261023-css-gradient-interpolation",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "vellum_obligation": "When the Pulp canvas target adopts Vellum, gradients must accept a CSS colour-interpolation space and hue method and map them to Skia's interpolation enum; unsupported spaces are refused, not approximated. Concretely: every fill and stroke gradient setter (linear, repeating linear, radial, elliptical radial, two-point conical, sweep/conic, repeating conic) honours the canvas's current GradientInterpolation on both the raster and Graphite backends; sRGB stays Skia's kDestination; oklab/oklch map to the non-gamut-mapped kOKLab/kOKLCH, matching Chrome's clipping; and the setter stays appended so existing vtable slots keep their positions.",
+  "evidence": [
+    ".github/vellum-change-events/20261023-css-gradient-interpolation.json",
+    "A gradient forced to sRGB fails the Oklab midpoint",
+    "CoreGraphics midpoints match Chrome through resampling",
+    "Graphite gradient midpoints match Chrome for each interpolation method",
+    "Skia raster midpoints match Chrome for every interpolation method",
+    "The reference interpolation matches Chrome's midpoints",
+    "The view hands a layer's interpolation to the canvas around its shader",
+    "every command type has a distinct name",
+    "tools/import-validation/chrome_gradient_oracle.py --colors (Chrome 156 column means at t = 0.5)"
+  ]
+}

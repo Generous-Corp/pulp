@@ -3,6 +3,8 @@
 #include <pulp/format/process_block.hpp>
 #include <pulp/format/processor.hpp>
 
+#include <array>
+
 namespace pulp::format {
 
 /// Caller-owned fallback storage for process_processor_block().
@@ -16,6 +18,11 @@ struct ProcessorBlockAdapterScratch {
     midi::MidiBuffer fallback_midi_in;
     midi::MidiBuffer fallback_midi_out;
     state::ParameterEventQueue empty_parameter_events;
+    // Per-bus views handed to Processor::process(). Each call overwrites only
+    // the entries for the block's buses, so a graph node does not construct
+    // BusBufferSet::kMaxBuses views per direction on every block.
+    std::array<ProcessBusBufferView<const float>, BusBufferSet::kMaxBuses> input_views{};
+    std::array<ProcessBusBufferView<float>, BusBufferSet::kMaxBuses> output_views{};
 };
 
 /// Invoke the legacy Processor::process() API from a ProcessBlock.

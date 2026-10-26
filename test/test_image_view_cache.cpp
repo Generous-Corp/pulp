@@ -68,6 +68,7 @@ namespace {
 struct ImageStubCanvas : pulp::canvas::RecordingCanvas {
     float img_w = 0.0f, img_h = 0.0f;
     bool can_measure = true;
+    int measures = 0;
 
     struct Draw {
         bool has_src = false;
@@ -79,6 +80,7 @@ struct ImageStubCanvas : pulp::canvas::RecordingCanvas {
     bool measure_image_from_file(const std::string& path,
                                   float& out_w, float& out_h) override {
         (void)path;
+        ++measures;
         if (!can_measure) { out_w = 0; out_h = 0; return false; }
         out_w = img_w; out_h = img_h;
         return img_w > 0.0f && img_h > 0.0f;
@@ -120,6 +122,40 @@ TEST_CASE("object-fit: fill stretches to bounds (default)",
     REQUIRE(cv.draws[0].has_src == false);
     REQUIRE_THAT(cv.draws[0].dw, WithinAbs(200.0f, 0.001f));
     REQUIRE_THAT(cv.draws[0].dh, WithinAbs(100.0f, 0.001f));
+}
+
+TEST_CASE("object-fit: fill draws a file image without measuring it",
+          "[widgets][image][object-fit]") {
+    using Catch::Matchers::WithinAbs;
+    // Measuring and drawing a file image are two lookups of one image-cache
+    // entry; fill needs neither the intrinsic size nor object-position.
+    for (const std::string fit : {std::string{}, std::string{"fill"}}) {
+        for (const std::string position :
+             {std::string{}, std::string{"10% 90%"}, std::string{"-30px 40px"}}) {
+            INFO("fit '" << fit << "' position '" << position << "'");
+            ImageView v;
+            configure_view(v, 200, 100, fit, position);
+            ImageStubCanvas cv;
+            cv.img_w = 50.0f;
+            cv.img_h = 20.0f;
+            v.paint(cv);
+            CHECK(cv.measures == 0);
+            REQUIRE(cv.draws.size() == 1);
+            CHECK_FALSE(cv.draws[0].has_src);
+            CHECK_THAT(cv.draws[0].dx, WithinAbs(0.0f, 0.001f));
+            CHECK_THAT(cv.draws[0].dy, WithinAbs(0.0f, 0.001f));
+            CHECK_THAT(cv.draws[0].dw, WithinAbs(200.0f, 0.001f));
+            CHECK_THAT(cv.draws[0].dh, WithinAbs(100.0f, 0.001f));
+        }
+    }
+    // Fits that place or crop the image still read its size.
+    ImageView contain;
+    configure_view(contain, 200, 100, "contain");
+    ImageStubCanvas cv;
+    cv.img_w = 50.0f;
+    cv.img_h = 20.0f;
+    contain.paint(cv);
+    CHECK(cv.measures == 1);
 }
 
 TEST_CASE("object-fit: contain letterboxes preserving aspect ratio",

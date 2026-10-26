@@ -115,6 +115,8 @@ jobs:
           cmake --install build-sdk --prefix "$prefix" --config Release
           test -f "$prefix/lib/cmake/Pulp/PulpControlShipping.cmake"
           test -f "$prefix/lib/cmake/Pulp/check_control_shipping_artifact.cmake"
+          test -f "$prefix/lib/cmake/Pulp/PulpReleaseArtifactScan.cmake"
+          test -f "$prefix/lib/cmake/Pulp/release_artifact_forbidden.json"
 
       - name: Materialize optional AAX SDK outside the checkout
         id: aax

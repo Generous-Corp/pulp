@@ -45,6 +45,12 @@ SCRIPT = Path(__file__).with_name("governed-build.sh")
 # on PATH. These tests run it many times, so they must never write rows into a
 # developer's real store; BuildMetricRecordTests opts back in with a stub.
 os.environ["PULP_BUILD_METRICS"] = "0"
+# A caller's PULP_BUILD_JOBS or CMAKE_BUILD_PARALLEL_LEVEL caps the share, and
+# the wrapper exports both to its children, so a suite run under a governed
+# build or `pulp` inherits them. Start every case without either; the cases
+# that exercise a cap set it explicitly.
+for _inherited_cap in ("PULP_BUILD_JOBS", "CMAKE_BUILD_PARALLEL_LEVEL"):
+    os.environ.pop(_inherited_cap, None)
 
 # Deliberately unlike any plausible core count so an assertion can tell a
 # granted lease size apart from a host-derived one.
@@ -491,6 +497,94 @@ class GovernedBuildTests(unittest.TestCase):
                       STUB_MAX_GRANT=str(PROFILE_JOBS), PULP_BUILD_JOBS="3")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self._granted(r), 3, r.stderr)
+
+    # --- an explicit -j/--parallel on the command is a ceiling, not an override
+
+    def _run_cmd(self, args, **stub_env):
+        """Run the wrapper over `sh -c ... <args>`; return (granted, argv seen)."""
+        env = {**os.environ, "PATH": f"{self.bindir}{os.pathsep}{os.environ['PATH']}",
+               "PULP_GOVERNED_BUILD_MIN_JOBS": str(FLOOR), "PULP_BUILD_CLASS": "background"}
+        for k in ("PULP_TARTCI_BIN", "PULP_TARTCI_LEASES", "PULP_BUILD_JOBS",
+                  "STUB_PROFILE_JOBS", "STUB_MAX_GRANT", "STUB_FREE_CORES"):
+            env.pop(k, None)
+        env.update(stub_env)
+        r = subprocess.run(
+            ["bash", str(SCRIPT), "sh", "-c",
+             'echo "JOBS=$CMAKE_BUILD_PARALLEL_LEVEL"; for a in "$@"; do echo "ARG=$a"; done',
+             "sh", *args],
+            capture_output=True, text=True, encoding="utf-8", check=False, env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        argv = [l[4:] for l in r.stdout.splitlines() if l.startswith("ARG=")]
+        return self._granted(r), argv
+
+    def _lease(self, **extra):
+        return dict(STUB_PROFILE_JOBS=str(PROFILE_JOBS), STUB_MAX_GRANT=str(PROFILE_JOBS), **extra)
+
+    def test_lower_explicit_jobs_caps_the_share(self) -> None:
+        granted, argv = self._run_cmd(["--build", "b", "-j", "3"], **self._lease())
+        self.assertEqual(granted, 3)
+        self.assertEqual(argv, ["--build", "b", "-j", "3"])
+
+    def test_higher_explicit_jobs_is_rewritten_down_to_the_lease(self) -> None:
+        for flag in (["--parallel", "64"], ["-j64"], ["--parallel=64"]):
+            granted, argv = self._run_cmd(["--build", "b", *flag], **self._lease())
+            self.assertEqual(granted, PROFILE_JOBS, flag)
+            joined = " ".join(argv)
+            self.assertNotIn("64", joined, flag)
+            self.assertIn(str(PROFILE_JOBS), joined, flag)
+
+    def test_bare_parallel_flag_gets_the_governed_count(self) -> None:
+        granted, argv = self._run_cmd(["--build", "b", "--parallel", "--target", "x"], **self._lease())
+        self.assertEqual(argv, ["--build", "b", "--parallel", str(granted), "--target", "x"])
+
+    def test_native_tool_flag_after_double_dash_is_rewritten(self) -> None:
+        granted, argv = self._run_cmd(["--build", "b", "--", "-j99"], **self._lease())
+        self.assertEqual(argv, ["--build", "b", "--", f"-j{granted}"])
+        self.assertEqual(granted, PROFILE_JOBS)
+
+    def test_env_and_flag_take_the_lower_request(self) -> None:
+        granted, argv = self._run_cmd(["-j", "5"], **self._lease(PULP_BUILD_JOBS="3"))
+        self.assertEqual(granted, 3)
+        self.assertEqual(argv, ["-j", "3"])
+
+    def test_command_without_a_flag_is_untouched(self) -> None:
+        granted, argv = self._run_cmd(["--build", "b", "--target", "j4"], **self._lease())
+        self.assertEqual(granted, PROFILE_JOBS)
+        self.assertEqual(argv, ["--build", "b", "--target", "j4"])
+
+    def test_explicit_jobs_cap_applies_without_tartci(self) -> None:
+        granted, argv = self._run_cmd(["-j2"], PULP_TARTCI_LEASES="0")
+        self.assertEqual(granted, 2)
+        self.assertEqual(argv, ["-j2"])
+
+    # --- a caller's CMAKE_BUILD_PARALLEL_LEVEL is a ceiling too
+
+    def test_caller_parallel_level_caps_the_lease(self) -> None:
+        granted, _ = self._run_cmd(["--build", "b"],
+                                   **self._lease(CMAKE_BUILD_PARALLEL_LEVEL="4"))
+        self.assertEqual(granted, 4)
+
+    def test_caller_parallel_level_never_widens_the_lease(self) -> None:
+        granted, _ = self._run_cmd(["--build", "b"],
+                                   **self._lease(CMAKE_BUILD_PARALLEL_LEVEL="64"))
+        self.assertEqual(granted, PROFILE_JOBS)
+
+    def test_caller_parallel_level_caps_without_tartci(self) -> None:
+        granted, _ = self._run_cmd(["--build", "b"], PULP_TARTCI_LEASES="0",
+                                   CMAKE_BUILD_PARALLEL_LEVEL="3")
+        self.assertEqual(granted, 3)
+
+    def test_lowest_of_env_flag_and_parallel_level_wins(self) -> None:
+        granted, argv = self._run_cmd(
+            ["-j", "6"], **self._lease(PULP_BUILD_JOBS="5", CMAKE_BUILD_PARALLEL_LEVEL="2"))
+        self.assertEqual(granted, 2)
+        self.assertEqual(argv, ["-j", "2"])
+
+    def test_invalid_caller_parallel_level_is_ignored(self) -> None:
+        for value in ("0", "abc", "-3"):
+            granted, _ = self._run_cmd(["--build", "b"],
+                                       **self._lease(CMAKE_BUILD_PARALLEL_LEVEL=value))
+            self.assertEqual(granted, PROFILE_JOBS, value)
 
     def test_ctest_parallelism_uses_the_granted_lease_size(self) -> None:
         r = self._run(STUB_PROFILE_JOBS=str(PROFILE_JOBS),
@@ -1190,7 +1284,7 @@ class TartciLeaseRecoveryIntegrationTests(unittest.TestCase):
             r = subprocess.run(
                 ["bash", str(SCRIPT), "sh", "-c",
                  'echo "JOBS=$CMAKE_BUILD_PARALLEL_LEVEL"'],
-                capture_output=True, text=True, check=False, env=env)
+                capture_output=True, text=True, encoding="utf-8", check=False, env=env)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             self.assertIn("JOBS=3", r.stdout, r.stderr)
             expected_qos = "TASKPOLICY=-c" if "utility QoS" in r.stderr else "TASKPOLICY=-b"
@@ -1251,7 +1345,7 @@ class TartciLeaseRecoveryIntegrationTests(unittest.TestCase):
             r = subprocess.run(
                 ["bash", str(SCRIPT), "sh", "-c",
                  'echo "JOBS=$CMAKE_BUILD_PARALLEL_LEVEL"'],
-                capture_output=True, text=True, check=False, env=env)
+                capture_output=True, text=True, encoding="utf-8", check=False, env=env)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             # Non-gate budget 6, 4 held by the validation: 2 fit.
             self.assertIn("JOBS=2", r.stdout, r.stderr)
@@ -1337,7 +1431,7 @@ class BuildMetricRecordTests(unittest.TestCase):
         return subprocess.run(
             ["bash", str(SCRIPT), "sh", "-c", f"exit {exit_code}", "sh",
              "--target", "pulp-test-widgets"],
-            capture_output=True, text=True, check=False, env=env)
+            capture_output=True, text=True, encoding="utf-8", check=False, env=env)
 
     def _recorded(self) -> list[str]:
         # The record runs detached in the background.

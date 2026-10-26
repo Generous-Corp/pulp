@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "notes": "Budgets for tools/scripts/plugin_footprint_check.py. Sizes are bytes of the arm64 slice; mapped_bytes excludes __LINKEDIT, so strip settings do not move it. Measured on the pulp-gain examples (Release, Skia m153): PulpGain 26.59 MB mapped with 4.85 MB ICU data (32.6 MB mapped and 10.88 MB ICU data with the full package); PulpGainHeadless (NO_EDITOR) 0.56 MB; the canvas-text test binary 4.85 MB ICU data. Each budget fails if the ICU subset or the editor-less link boundary is lost.",
+  "notes": "Budgets for tools/scripts/plugin_footprint_check.py. Sizes are bytes of the arm64 slice; mapped_bytes excludes __LINKEDIT, so strip settings do not move it. Measured on the pulp-gain examples (Release, Skia m153): PulpGain 26.59 MB mapped with 4.85 MB ICU data (32.6 MB mapped and 10.88 MB ICU data with the full package); PulpGain built LITE_EDITOR 2.05 MB with no Skia, Dawn, Tint, ICU or GPU host; PulpGainHeadless (NO_EDITOR) 0.56 MB; the canvas-text test binary 4.85 MB ICU data. Each budget fails if the ICU subset or the editor-less link boundary is lost.",
   "profiles": {
     "editor": {
       "arches": [
@@ -9,6 +9,22 @@
       "max_mapped_bytes": 28000000,
       "max_icu_data_bytes": 5500000,
       "require_icu_data": true
+    },
+    "lite-editor": {
+      "arches": [
+        "arm64"
+      ],
+      "max_mapped_bytes": 3000000,
+      "forbidden_symbol_patterns": [
+        "icudt\\d+_dat",
+        "SkCanvas",
+        "SkFontMgr",
+        "4dawn6native",
+        "4tint",
+        "wgpu",
+        "MacGpuPluginViewHost",
+        "quickjs"
+      ]
     },
     "no-editor": {
       "arches": [

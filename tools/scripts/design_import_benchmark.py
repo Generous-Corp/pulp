@@ -797,15 +797,20 @@ def judge(baseline: list[dict[str, Any]], candidate: list[dict[str, Any]], *,
 def run_compare(bench_exe: Path, baseline: str, candidate: str, reps: int,
                 bench_args: list[str], output_dir: Path, *, stage: str = "frame",
                 mechanism: tuple[str, str] | None = None, observe: Any = observe_thermal,
-                runner: Any = None) -> dict[str, Any]:
+                runner: Any = None, side_args: dict[str, list[str]] | None = None
+                ) -> dict[str, Any]:
+    """`side_args` adds arguments to one side only, so one lane can be compared
+    with itself under a different setting (`--paragraph-cache=off`, say)."""
     runner = runner or subprocess.run
+    side_args = side_args or {}
     receipts: dict[str, list[dict[str, Any]]] = {"baseline": [], "candidate": []}
     thermal: list[dict[str, Any]] = []
     order = abab_order(baseline, candidate, reps)
     for index, (role, lane) in enumerate(order):
         out_path = output_dir / f"{index:02d}-{role}-{lane}.json"
         thermal.append(observe())
-        cmd = [str(bench_exe), f"--lane={lane}", *bench_args, f"--output={out_path}"]
+        cmd = [str(bench_exe), f"--lane={lane}", *bench_args, *side_args.get(role, []),
+               f"--output={out_path}"]
         runner(cmd, check=True, timeout=3600, env=no_launch_env())
         thermal.append(observe())
         with out_path.open(encoding="utf-8") as fh:
@@ -816,7 +821,8 @@ def run_compare(bench_exe: Path, baseline: str, candidate: str, reps: int,
                    mechanism=mechanism, thermal=thermal)
     result.update({"generated_at": now_utc(), "baseline_lane": baseline,
                    "candidate_lane": candidate, "order": [lane for _, lane in order],
-                   "bench_args": bench_args, "thermal_observations": thermal})
+                   "bench_args": bench_args, "side_args": side_args,
+                   "thermal_observations": thermal})
     return result
 
 
@@ -861,6 +867,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--bench-arg", action="append", default=[], dest="bench_args",
                         help="Argument passed to every --compare rep (repeatable), e.g. "
                              "--bench-arg=--frames=600 --bench-arg=--ir=panel.ir.json.")
+    parser.add_argument("--baseline-arg", action="append", default=[], dest="baseline_args",
+                        help="Argument passed to the baseline side's reps only (repeatable).")
+    parser.add_argument("--candidate-arg", action="append", default=[], dest="candidate_args",
+                        help="Argument passed to the candidate side's reps only (repeatable), "
+                             "e.g. to compare a lane with itself: --compare baked-native "
+                             "baked-native --baseline-arg=--paragraph-cache=off.")
     args = parser.parse_args(argv)
 
     build_dir = args.build_dir.resolve()
@@ -881,7 +893,9 @@ def main(argv: list[str] | None = None) -> int:
             bench_args.append("--cycles=3")
         with tempfile.TemporaryDirectory(prefix="pulp-design-import-compare-") as td:
             result = run_compare(bench_exe, args.compare[0], args.compare[1], args.reps,
-                                 bench_args, Path(td), stage=args.stage, mechanism=mechanism)
+                                 bench_args, Path(td), stage=args.stage, mechanism=mechanism,
+                                 side_args={"baseline": list(args.baseline_args),
+                                            "candidate": list(args.candidate_args)})
         text = json.dumps(result, indent=2, sort_keys=True) + "\n"
         if args.output_json:
             write_text(args.output_json, text)

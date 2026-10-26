@@ -877,6 +877,10 @@ inline bool gui_show(const clap_plugin_t* plugin) {
 inline bool gui_hide(const clap_plugin_t* plugin) {
     auto* p = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
     p->editor_visible = false;
+    // A hidden editor keeps its host and surfaces for gui_show, but nothing it
+    // is not drawing should keep holding GPU memory meanwhile.
+    if (p->editor_host)
+        p->editor_host->release_gpu_caches();
     return true;
 }
 

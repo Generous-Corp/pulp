@@ -430,6 +430,7 @@ int cmd_create(const std::vector<std::string>& args) {
     std::string mfr_code = make_mfr_code(manufacturer);
     std::string bundle_id = "com." + to_namespace_name(manufacturer) + "." + ns;
     std::string header_name = replace_all_str(lower_name, "-", "_") + ".hpp";
+    std::string source_name = replace_all_str(lower_name, "-", "_") + ".cpp";
 
     // Output directory
     fs::path out_dir;
@@ -548,7 +549,7 @@ int cmd_create(const std::vector<std::string>& args) {
     std::string lower_name_underscored = replace_all_str(lower_name, "-", "_");
 
     // Template variables
-    std::vector<std::pair<std::string,std::string>> vars = {
+    std::vector<std::pair<std::string, std::string>> vars = {
         {"PLUGIN_NAME", name},
         {"CLASS_NAME", class_name},
         {"LOWER_NAME", lower_name_underscored},
@@ -556,6 +557,7 @@ int cmd_create(const std::vector<std::string>& args) {
         {"NAMESPACE", ns},
         {"FACTORY_NAME", factory},
         {"HEADER_NAME", header_name},
+        {"SOURCE_NAME", source_name},
         {"TARGET_NAME", class_name},
         {"MANUFACTURER", manufacturer},
         {"MANUFACTURER_CODE", mfr_code},
@@ -565,9 +567,9 @@ int cmd_create(const std::vector<std::string>& args) {
         {"AAX_PRODUCT_CODE", aax_product_code},
         {"AAX_NATIVE_CODE", plugin_code},
         {"FORMATS", formats},
-        {"DESCRIPTION", type == "app" ? "A standalone Pulp audio application" :
-                        type == "bare" ? "A minimal Pulp project" :
-                        "A Pulp audio " + type},
+        {"DESCRIPTION", type == "app"    ? "A standalone Pulp audio application"
+                        : type == "bare" ? "A minimal Pulp project"
+                                         : "A Pulp audio " + type},
         {"VST3_UID", make_vst3_uid()},
         {"SDK_VERSION", sdk_version},
     };
@@ -659,6 +661,7 @@ int cmd_create(const std::vector<std::string>& args) {
     std::string test_name = "test_" + replace_all_str(lower_name, "-", "_") + ".cpp";
     std::vector<FileMapping> file_map = {
         {"processor.hpp.template", header_name},
+        {"processor.cpp.template", source_name},
         {"CMakeLists.txt.template", "CMakeLists.txt"},
         {"clap_entry.cpp.template", "clap_entry.cpp"},
         {"vst3_entry.cpp.template", "vst3_entry.cpp"},

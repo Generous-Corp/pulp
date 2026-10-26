@@ -237,6 +237,28 @@ class CapturedStyleIndex {
     };
     InheritedTypeScale inherited_type_scale(int node_index) const;
 
+    /// The per-axis scale a node's own paint carries: the product of its own
+    /// computed `transform` and every ancestor's. The box is placed
+    /// post-transform, while border widths, corner radii and shadow lengths
+    /// are the untransformed computed values, so a bordered box under
+    /// `scale(0.05, 1)` keeps a 1px border inside a 0.3px box. Unlike type,
+    /// paint can carry two axes: a border has a width per side. A rotation
+    /// keeps the factor when every scale in the chain is uniform; a flip, a
+    /// skew, a `matrix3d`, or a rotation anywhere in a chain with a
+    /// non-uniform scale is refused, because the per-axis factors no longer
+    /// line up with the box's sides.
+    struct InheritedPaintScale {
+        double x = 1.0;
+        double y = 1.0;
+        /// Empty when the chain reduced; otherwise the computed `transform`
+        /// that refused it.
+        std::string refused;
+        bool ok() const {
+            return refused.empty();
+        }
+    };
+    InheritedPaintScale inherited_paint_scale(int node_index) const;
+
     /// A node's DOM `nodeType` (1 element, 3 text), or 0 when out of range.
     ///
     /// A doctype carries the same `nodeName` as the root element, so tag name
@@ -339,6 +361,28 @@ void apply_computed_styles(
     pulp::view::IRStyle& style,
     ComputedStyleScope scope = ComputedStyleScope::box_and_text,
     double type_scale = 1.0);
+
+/// What `apply_paint_scale` did with one node's style.
+struct PaintScaleResult {
+    /// A border, radius or shadow length was multiplied.
+    bool scaled = false;
+    /// The properties left unscaled because one factor per axis cannot
+    /// express them (an elliptical corner, a blur under two axes), joined
+    /// with ", ". Empty when nothing was refused.
+    std::string refused;
+};
+
+/// Multiply the lengths `apply_computed_styles` read in the untransformed
+/// space by the scale the node's box already carries: left and right border
+/// widths by `sx`, top and bottom by `sy`, and corner radii and shadow blur
+/// and spread by the factor only when the two axes agree. Shadow offsets take
+/// one axis each. Anything a per-axis factor cannot express is left as it
+/// was and named in the result.
+PaintScaleResult apply_paint_scale(pulp::view::IRStyle& style, double sx, double sy);
+
+/// Whether `style` paints anything whose size does not follow the box:
+/// a border width, a corner radius, or a shadow.
+bool has_scale_variant_paint(const pulp::view::IRStyle& style);
 
 /// Split a CSS list on top-level commas, ignoring commas nested in functions
 /// (`rgba(0, 0, 0, .5)` is one value, not four).

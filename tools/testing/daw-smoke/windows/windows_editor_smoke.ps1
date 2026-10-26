@@ -39,12 +39,14 @@ function Stop-Owned($Entry) {
 function Start-Owned([string[]]$Arguments,[string]$Label) {
   $command=Join-WindowsArguments $Arguments
   $p=Start-Process -FilePath $script:reaper -ArgumentList $command -WorkingDirectory $run -RedirectStandardOutput (Join-Path $run ($Label+'.stdout.txt')) -RedirectStandardError (Join-Path $run ($Label+'.stderr.txt')) -PassThru
-  $entry=@{process=$p;started=$p.StartTime.ToUniversalTime().ToString('o');command=$command}
+  if ($p.SessionId -ne [int]$receipt.session.session_id) { throw 'Owned REAPER process entered a different Windows session' }
+  $entry=@{process=$p;started=$p.StartTime.ToUniversalTime().ToString('o');command=$command;session_id=[int]$p.SessionId}
   $owned.Add($entry); return $entry
 }
 try {
   if(-not(Test-Path -LiteralPath $ReaperExe -PathType Leaf)){throw "REAPER executable missing: $ReaperExe"}
   $script:reaper=(Resolve-Path -LiteralPath $ReaperExe).Path
+  $receipt.session=Get-InteractiveDesktopContext
   $hostPe=Get-PeIdentity $reaper; $keys=Get-ReaperScanKeys $hostPe.execution_abi
   $receipt.host=@{path=$reaper;pe=$hostPe;sha256=(Get-FileHash -LiteralPath $reaper -Algorithm SHA256).Hash}
   if(-not(Test-Path -LiteralPath (Join-Path $SeedProfile 'reaper.ini') -PathType Leaf)){throw 'SeedProfile must contain an initialized reaper.ini'}
@@ -98,10 +100,14 @@ try {
     if($cacheText -match [regex]::Escape([IO.Path]::GetFileName($staged))){$cacheMatch=$true;break}
     Start-Sleep -Milliseconds 250
   }
-  Stop-Owned $warm
   if(-not $cacheMatch){throw 'Scan cache did not acquire staged basename'}
+  Stop-Owned $warm
+  # A complete copied REAPER profile is required here. A minimal profile can
+  # stall before startup-script dispatch; with the private resource directory
+  # and its stale scan caches removed, the documented positional Lua form
+  # executes in the same owned host process that will load the staged module.
   $proc=Start-Owned @('-newinst','-cfgfile',$ini,'-new','-nosplash',$lua) 'scripted'
-  $receipt.process=@{pid=$proc.process.Id;started_utc=$proc.started;arguments=$proc.command}
+  $receipt.process=@{pid=$proc.process.Id;started_utc=$proc.started;arguments=$proc.command;session_id=$proc.session_id}
   $deadline=[DateTime]::UtcNow.AddSeconds($TimeoutSec);$hostStatus=$null
   while([DateTime]::UtcNow -lt $deadline){
     Assert-OwnedIdentity $proc.process $proc.started
@@ -121,7 +127,9 @@ try {
   }
   Assert-TerminalStatus $hostStatus $ParamIndex
   $receipt.host_status=$hostStatus
-  $modules=@($proc.process.Modules | Where-Object {[IO.Path]::GetExtension($_.FileName) -ieq ('.'+$Format)})
+  $modulePaths=@(Get-BoundModulePaths $proc.process.Id)
+  $modules=@($modulePaths | ForEach-Object { [pscustomobject]@{FileName=$_} } |
+    Where-Object {[IO.Path]::GetExtension($_.FileName) -ieq ('.'+$Format)})
   $bound=@()
   foreach($module in $modules){
     $hash=(Get-FileHash -LiteralPath $module.FileName -Algorithm SHA256).Hash
@@ -162,10 +170,10 @@ public static class OwnedWindow {
   $editor=[IntPtr]([long]$hostStatus.editor_hwnd)
   function Guard-EditorOwner([long]$Hwnd) {
     Assert-OwnedIdentity $proc.process $proc.started
+    if ($proc.process.SessionId -ne [int]$receipt.session.session_id) { throw 'Bound REAPER process left the interactive session' }
     if($Hwnd -ne $editor.ToInt64() -or $proc.process.Path -ine $reaper){throw 'Bound editor/host identity changed'}
-    $current=@($proc.process.Modules | Where-Object {$_.FileName -ieq $receipt.loaded_plugin.path})
-    if($current.Count -ne 1){throw 'Bound plugin module disappeared'}
-    Assert-ModuleBinding $current[0].FileName (Get-FileHash -LiteralPath $current[0].FileName -Algorithm SHA256).Hash $manifest
+    if(-not(Test-Path -LiteralPath $receipt.loaded_plugin.path -PathType Leaf)){throw 'Bound plugin module disappeared'}
+    Assert-ModuleBinding $receipt.loaded_plugin.path (Get-FileHash -LiteralPath $receipt.loaded_plugin.path -Algorithm SHA256).Hash $manifest
     Assert-EditorWindow $Hwnd ([OwnedWindow]::IsWindow($editor)) ([OwnedWindow]::IsWindowVisible($editor)) ([OwnedWindow]::IsOwned($editor,[uint32]$proc.process.Id))
   }
   $receipt.editor_activation=[ordered]@{editor_hwnd=$editor.ToInt64()}
@@ -174,6 +182,12 @@ public static class OwnedWindow {
     $foreground=[OwnedWindow]::GetForegroundWindow()
     [uint32]$foregroundPid=0
     [OwnedWindow]::GetWindowThreadProcessId($foreground,[ref]$foregroundPid)|Out-Null
+    if ($foregroundPid -ne 0) {
+      try {
+        $foregroundSession=[Diagnostics.Process]::GetProcessById([int]$foregroundPid).SessionId
+        $receipt.editor_activation.foreground_session_id=$foregroundSession
+      } catch { $receipt.editor_activation.foreground_session_id=$null }
+    }
     $receipt.editor_activation.foreground_hwnd=$foreground.ToInt64()
     $receipt.editor_activation.foreground_pid=$foregroundPid
     [OwnedWindow]::Belongs([IntPtr]$Hwnd,$foreground)

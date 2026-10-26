@@ -23,6 +23,7 @@
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <choc/text/choc_JSON.h>
 
 #include "support/unique_temp_dir.hpp"
 #include <cmath>
@@ -30,6 +31,7 @@
 #include <fstream>
 #include <iterator>
 #include <limits>
+#include <map>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -3222,6 +3224,146 @@ TEST_CASE("tiny Stepper grid matches baked widget and binding descriptor and com
     INFO(diagnostics);
     REQUIRE(compiled);
 #endif
+}
+
+namespace {
+
+// Records the route of every widget the binder reached.
+class RouteRecordingContext final : public NativeImportBindingContext {
+  public:
+    void bind_knob(Knob&, const NativeImportBindingDescriptor& descriptor) override {
+        routes.emplace_back(descriptor.route_id);
+    }
+    void bind_fader(Fader&, const NativeImportBindingDescriptor& descriptor) override {
+        routes.emplace_back(descriptor.route_id);
+    }
+    void bind_level_display(View&, LevelDisplay&,
+                            const NativeImportMeterBindingDescriptor& descriptor) override {
+        routes.emplace_back(descriptor.route_id);
+    }
+    std::vector<std::string> routes;
+};
+
+std::size_t occurrences(const std::string& haystack, const std::string& needle) {
+    std::size_t count = 0;
+    for (auto at = haystack.find(needle); at != std::string::npos;
+         at = haystack.find(needle, at + needle.size()))
+        ++count;
+    return count;
+}
+
+} // namespace
+
+TEST_CASE("the figma-plugin fidelity scene binds every control in both native lanes",
+          "[view][import][native-materializer][binding][identity]") {
+    // The scene's three controls carry no Figma node ids, so their anchors come
+    // from the adapter's content-hash fallback. They used to share one anchor,
+    // and both binders, which require exactly one view per anchor, bound none.
+    std::ifstream in(fs::path(PULP_REPO_ROOT) / "test/fixtures/import-fidelity/scene.pulp.json",
+                     std::ios::binary);
+    REQUIRE(in.good());
+    const std::string json((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    const auto ir = parse_figma_plugin_json(json);
+    REQUIRE(ir.root.children.size() == 3);
+    CHECK(find_duplicate_anchors(ir.root).empty());
+
+    auto root = build_native_view_tree(ir, ir.asset_manifest, {.preview_mode = true});
+    REQUIRE(root != nullptr);
+    RouteRecordingContext binding;
+    std::vector<ImportDiagnostic> diagnostics;
+    bind_native_view_tree(*root, ir, binding, {.diagnostics_out = &diagnostics});
+    for (const auto& d : diagnostics) {
+        INFO(d.code << " at " << d.path << ": " << d.message);
+        CHECK(d.code != "native-binding-duplicate-anchor");
+    }
+    CHECK(binding.routes == std::vector<std::string>{"figma-plugin:filter.cutoff_hz",
+                                                     "figma-plugin:param.master_level",
+                                                     "figma-plugin:meter.out_l"});
+
+    // The baked binder looks each route up with find_imported_view_by_anchor
+    // and binds only on exactly one match, so each anchor must be set once.
+    const auto generated = generate_pulp_cpp(ir, ir.asset_manifest, {});
+    for (const auto& control : ir.root.children) {
+        REQUIRE(control.stable_anchor_id.has_value());
+        INFO("anchor " << *control.stable_anchor_id);
+        CHECK(occurrences(generated.source,
+                          "set_anchor_id(\"" + *control.stable_anchor_id + "\")") == 1);
+        CHECK(occurrences(generated.source, "find_imported_view_by_anchor(root, \"" +
+                                                *control.stable_anchor_id + "\"") == 1);
+    }
+
+#if defined(_WIN32)
+    SKIP("freestanding generated-source compile is unsupported on the Windows CI toolchain");
+#else
+    TempDir tmp("pulp-fidelity-scene-binding-cpp");
+    write_text(tmp.path / "imported_ui.hpp", generated.header);
+    write_text(tmp.path / "imported_ui.cpp", generated.source);
+    std::string compile_diagnostics;
+    const bool compiled = compile_generated_source(
+        tmp.path / "imported_ui.cpp", tmp.path / "imported_ui.o", &compile_diagnostics);
+    INFO(compile_diagnostics);
+    CHECK(compiled);
+#endif
+}
+
+TEST_CASE("the v0 audio panel's Drive and Tone sliders each bind",
+          "[view][import][native-materializer][binding][identity]") {
+    // Each slider sits in its own card with a caption, but an unlabelled range
+    // input hashes the same wherever it is, so both shared one anchor: their
+    // two routes named one anchor, which no host can resolve to one view.
+    std::ifstream in(fs::path(PULP_REPO_ROOT) / "test/fixtures/v0-dev/audio-control-panel.tsx",
+                     std::ios::binary);
+    REQUIRE(in.good());
+    const std::string tsx((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    const auto ir = parse_v0_tsx(tsx);
+    CHECK(find_duplicate_anchors(ir.root).empty());
+
+    std::vector<const IRNode*> sliders;
+    const auto collect = [&](auto& self, const IRNode& node) -> void {
+        if (node.attributes.count("pulpValueKey") &&
+            (node.attributes.at("pulpValueKey") == "drive" ||
+             node.attributes.at("pulpValueKey") == "tone"))
+            sliders.push_back(&node);
+        for (const auto& child : node.children)
+            self(self, child);
+    };
+    collect(collect, ir.root);
+    REQUIRE(sliders.size() == 2);
+    REQUIRE(sliders[0]->stable_anchor_id.has_value());
+    REQUIRE(sliders[1]->stable_anchor_id.has_value());
+    CHECK(*sliders[0]->stable_anchor_id != *sliders[1]->stable_anchor_id);
+
+    auto root = build_native_view_tree(ir, ir.asset_manifest, {.preview_mode = true});
+    REQUIRE(root != nullptr);
+    RouteRecordingContext binding;
+    std::vector<ImportDiagnostic> diagnostics;
+    bind_native_view_tree(*root, ir, binding, {.diagnostics_out = &diagnostics});
+    for (const auto& d : diagnostics) {
+        INFO(d.code << " at " << d.path << ": " << d.message);
+        CHECK(d.code != "native-binding-duplicate-anchor");
+    }
+
+    // The sliders bind by state value key (drive, tone): the baked binding
+    // manifest names each route's anchor, and a host resolves that anchor to
+    // the one view that carries it.
+    const auto generated = generate_pulp_cpp(ir, ir.asset_manifest, {});
+    const auto manifest = choc::json::parse(generated.binding_manifest);
+    std::map<std::string, std::string> anchor_of_key;
+    const auto entries = manifest["entries"];
+    for (uint32_t i = 0; i < entries.size(); ++i)
+        if (entries[i].hasObjectMember("value_key"))
+            anchor_of_key[std::string(entries[i]["value_key"].toString())] =
+                std::string(entries[i]["anchor_id"].toString());
+    REQUIRE(anchor_of_key.count("drive") == 1);
+    REQUIRE(anchor_of_key.count("tone") == 1);
+    CHECK(anchor_of_key["drive"] != anchor_of_key["tone"]);
+    for (const auto* slider : sliders) {
+        INFO("anchor " << *slider->stable_anchor_id);
+        CHECK(occurrences(generated.source,
+                          "set_anchor_id(\"" + *slider->stable_anchor_id + "\")") == 1);
+    }
+    CHECK(anchor_of_key["drive"] == *sliders[0]->stable_anchor_id);
+    CHECK(anchor_of_key["tone"] == *sliders[1]->stable_anchor_id);
 }
 
 TEST_CASE("compiled generated C++ binding helper binds and fails closed at runtime",

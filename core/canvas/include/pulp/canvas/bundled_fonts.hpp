@@ -80,11 +80,17 @@ bool register_font(const std::uint8_t* data, std::size_t size,
                    const std::string& family_override = "");
 
 /// Convenience overload: register a font from a file on disk. Reads the
-/// entire file into memory, then forwards to the bytes-based overload.
-/// Returns `false` if the file cannot be opened, is empty, or Skia
-/// rejects the bytes.
+/// entire file into memory, then forwards to the bytes-based overload, or to
+/// `register_font_woff2` when the file starts with the WOFF2 magic. Returns
+/// `false` if the file cannot be opened, is empty, or the bytes are rejected.
 bool register_font_file(const std::string& path,
                         const std::string& family_override = "");
+
+/// How many `register_font_file` calls this process has routed to
+/// `register_font_woff2` because the file started with the WOFF2 magic. A
+/// platform font manager may decode WOFF2 on its own (CoreText does), so the
+/// registration result alone cannot show which path a file took; this can.
+std::uint64_t woff2_file_routes() noexcept;
 
 /// Returns true iff the requested family name was previously registered
 /// via `register_font` / `register_font_file`. Bundled families (Inter,

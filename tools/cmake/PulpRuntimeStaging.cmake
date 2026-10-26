@@ -282,8 +282,11 @@ function(pulp_stage_runtime_dependencies target)
         # Skia's Dawn is the WebGPU implementation; nothing loads wgpu-native.
         # Staging is copy-only, so remove a copy an earlier configuration of
         # this build dir left beside the target; a bundle must not ship it.
+        # A dev-shared module (PULP_DEV_SHARED_UI) never loads one and cannot
+        # ship, so its relink skips the cleanup.
         pulp_wgpu_runtime_name(_wgpu_name)
-        if(_wgpu_name)
+        get_target_property(_dev_shared ${target} PULP_DEV_SHARED_UI)
+        if(_wgpu_name AND NOT _dev_shared)
             add_custom_command(
                 TARGET ${target} POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -E rm -f "$<TARGET_FILE_DIR:${target}>/${_wgpu_name}"

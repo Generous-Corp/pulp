@@ -94,5 +94,27 @@ class ScreenshotVerdictTest(unittest.TestCase):
         self.assertIn("unreadable screenshot", str(ctx.exception.code))
 
 
+class ColumnMeanTest(unittest.TestCase):
+    """--colors reads a column MEAN, so Chrome's dither cancels: rows that
+    alternate one code value either side of the true colour average to it."""
+
+    def test_dithered_column_averages_to_its_colour(self):
+        from PIL import Image
+        im = Image.new("RGB", (3, 4))
+        for y in range(4):
+            d = 1 if y % 2 else -1
+            im.putpixel((0, y), (100 + d, 50, 0))
+            im.putpixel((1, y), (10, 20 + d, 30 - d))
+            im.putpixel((2, y), (0, 0, 255))
+        self.assertEqual(oracle.column_means(im, cols=(0, 1, 2)),
+                         [(100.0, 50.0, 0.0), (10.0, 20.0, 30.0), (0.0, 0.0, 255.0)])
+
+    def test_midpoint_column_is_half_way(self):
+        # The geometry the colour cases rely on: in a COLOR_W box the middle
+        # sampled column's pixel centre sits at exactly t = 0.5.
+        mid = oracle.COLOR_COLS[len(oracle.COLOR_COLS) // 2]
+        self.assertEqual((mid + 0.5) / oracle.COLOR_W, 0.5)
+
+
 if __name__ == "__main__":
     unittest.main()

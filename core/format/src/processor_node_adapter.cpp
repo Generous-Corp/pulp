@@ -91,11 +91,13 @@ bool ProcessorNode::process_binding(ProcessBlock& block, const GraphRuntimeNodeP
     if (!ctx.routed)
         return false;
 
-    // Stack-local bus set aliases the executor's routed main view and any
+    // The node's bus set aliases the executor's routed main view and any
     // host-provided optional input views. BusBufferSet stores its buses inline
     // and BufferView only holds host-owned channel pointers, so this aliases
-    // without copying samples and stays allocation-free.
-    BusBufferSet local_buses;
+    // without copying samples and stays allocation-free. A node is never run
+    // on two threads at once, so its set is reused rather than rebuilt.
+    BusBufferSet& local_buses = self->buses_;
+    local_buses.clear();
     const auto main_role = self->input_bus_count_ > 0 ? self->input_roles_[0] : BusRole::Main;
     if (!local_buses.add_input("main", ctx.node_inputs, main_role, true))
         return false;
@@ -133,10 +135,11 @@ bool ProcessorNode::process_binding(ProcessBlock& block, const GraphRuntimeNodeP
     events.midi_out = ctx.node_midi_out;
     events.audio_rate_modulations = ctx.node_audio_rate_modulations;
     local_block.events = &events;
-    if (!local_block.validate())
-        return false;
 
     if (self->capabilities_.consumes_audio_rate_modulations) {
+        // process_processor_block() validates the legacy path itself.
+        if (!local_block.validate())
+            return false;
         PULP_TRY {
             runtime::ScopedNoAlloc no_alloc_guard;
             if (self->processor_->process_block(local_block))

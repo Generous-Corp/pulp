@@ -302,7 +302,7 @@ class ProtectedMergeReceiptTest(unittest.TestCase):
         # The emitted gate selection of a head whose change requires a
         # `slow-affected` proof. It excludes fewer tests than the plain
         # selection, so it is full validation and must yield a receipt.
-        anchored = "validation|^slow$|performance|bench|quality-lab|source-selftest"
+        anchored = "validation|^slow$|performance|bench|quality-lab|gpu-proof|source-selftest"
         self.write_selection(label_exclude=anchored)
         issued = receipt.issue(self.issue_args())
         self.assertEqual(issued["validation"]["selection"]["label_exclude"], anchored)
@@ -325,10 +325,10 @@ class ProtectedMergeReceiptTest(unittest.TestCase):
 
     def test_issue_refuses_label_sets_that_exclude_more_than_the_gate(self) -> None:
         for label_exclude in (
-            "validation|slow|performance|bench|quality-lab|source-selftest|pr-fast",
-            "validation|slow|performance|bench|quality-lab|source-selftest|^slow$",
-            "validation|^slow|performance|bench|quality-lab|source-selftest",
-            "validation|slow$|performance|bench|quality-lab|source-selftest",
+            "validation|slow|performance|bench|quality-lab|gpu-proof|source-selftest|pr-fast",
+            "validation|slow|performance|bench|quality-lab|gpu-proof|source-selftest|^slow$",
+            "validation|^slow|performance|bench|quality-lab|gpu-proof|source-selftest",
+            "validation|slow$|performance|bench|quality-lab|gpu-proof|source-selftest",
             "",
         ):
             with self.subTest(label_exclude=label_exclude):

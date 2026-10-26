@@ -32,11 +32,30 @@ def git(root: Path, *args: str, check: bool = False) -> subprocess.CompletedProc
 UNAVAILABLE = None
 
 
+# A check that could not run at all exits with this code, distinct from 1
+# (stale) and from 3 (the merge conflicts), so a caller can never read "did
+# not run" as "passed".
+NOT_CHECKED = 4
+BASE_CHECK_TIMEOUT = 20.0
+MAX_CHECK_TIMEOUT = 300.0
+
+
 def _check_timeout() -> float:
+    """Seconds one check may take. PULP_MERGE_TREE_CHECK_TIMEOUT overrides;
+    otherwise 20 s scaled by the 1-minute load per core (never below 20 s,
+    never above 300 s), so a loaded host does not turn every check into a
+    timeout."""
+    override = os.environ.get("PULP_MERGE_TREE_CHECK_TIMEOUT")
+    if override:
+        try:
+            return float(override)
+        except ValueError:
+            pass
     try:
-        return float(os.environ.get("PULP_MERGE_TREE_CHECK_TIMEOUT", "20"))
-    except ValueError:
-        return 20.0
+        per_core = os.getloadavg()[0] / max(1, os.cpu_count() or 1)
+    except (OSError, AttributeError):
+        per_core = 1.0
+    return min(MAX_CHECK_TIMEOUT, BASE_CHECK_TIMEOUT * max(1.0, per_core))
 
 
 def _run(cmd: list[str], cwd: Path, env: dict[str, str], timeout: float | None = None) -> int | None:
@@ -169,11 +188,12 @@ def main(argv: list[str] | None = None) -> int:
             print(f"merge-tree script-state: {STALE}", file=sys.stderr)
             return 1
         if unavailable:
-            # Exit 2: could not establish. Pre-push reports it as advisory.
+            # Could not establish: not a pass. gates.sh and pre-push fail on it.
             print("merge-tree script-state: NOT CHECKED (could not run: "
-                  f"{', '.join(unavailable)}); this is not a stale-branch verdict",
-                  file=sys.stderr)
-            return 2
+                  f"{', '.join(unavailable)}); this is not a stale-branch verdict, and "
+                  "not a pass. Re-run on a less loaded host or raise "
+                  "PULP_MERGE_TREE_CHECK_TIMEOUT.", file=sys.stderr)
+            return NOT_CHECKED
         return 0
     finally:
         cleanup()
