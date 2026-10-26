@@ -1,0 +1,161 @@
+{
+  "schema": "pulp-browser-capture-v1",
+  "version": 1,
+  "provenance": {
+    "capture_method": "chromium-cdp",
+    "browser": {
+      "product": "Chrome",
+      "version": "155.0.8059.85",
+      "protocol_version": "1.3",
+      "build_hash": "@0e66b94549a8bd85f03fbdf189b752d6e7b63c32",
+      "origin": "system"
+    },
+    "source": {
+      "entry": "panel.html",
+      "sha256": "cc3c699646fc20e3bc40ee6a9c19546b004a1c19fe3feccaea059bfad5fc6ab5"
+    },
+    "viewport": {
+      "initial": {
+        "width": 320,
+        "height": 80
+      },
+      "width_pinned": false,
+      "resolved": {
+        "width": 320,
+        "height": 80
+      },
+      "document": {
+        "width": 320,
+        "height": 80,
+        "primary_surface": {
+          "left": 0,
+          "top": 0,
+          "width": 320,
+          "height": 80
+        }
+      },
+      "device_scale_factor": 2
+    },
+    "locale": "en-US",
+    "timezone": "UTC",
+    "color_scheme": "light",
+    "reduced_motion": false,
+    "settle": {
+      "rounds": 13,
+      "stable_rounds": 11,
+      "elapsed_ms": 1841
+    },
+    "network": {
+      "external_allowed": false,
+      "allowed_origins": [],
+      "external_resources": [],
+      "blocked_requests": []
+    },
+    "health": {
+      "status": "healthy",
+      "layout_count": 10,
+      "visible_elements": 4,
+      "visible_text_characters": 26,
+      "painted_surfaces": 0,
+      "failed_fonts": [],
+      "runtime_exceptions": [],
+      "log_errors": [],
+      "failed_responses": []
+    },
+    "readiness": {
+      "contract": "",
+      "awaited": false
+    },
+    "renderer_hooks": []
+  },
+  "documents": [
+    {
+      "id": "document:0",
+      "url": "pulp-capture:///panel.html",
+      "node_count": 23,
+      "layout_count": 10,
+      "paint_order": true,
+      "snapshot_asset": "dom-snapshot.json",
+      "snapshot_sha256": "86fda2edacb40b28cba8bc100ba21127763b09f08429de06d55891d2dca3cc9e"
+    }
+  ],
+  "assets": [
+    {
+      "id": "reference:browser",
+      "kind": "screenshot",
+      "mime_type": "image/png",
+      "path": "browser.png",
+      "sha256": "abd62e27f54b6f5b887fc9a5e51d96feb9a2269b5362fba39f5d5262f403a236",
+      "width_px": 640,
+      "height_px": 160
+    },
+    {
+      "id": "reference:browser-static",
+      "kind": "screenshot",
+      "mime_type": "image/png",
+      "path": "browser-static.png",
+      "sha256": "abd62e27f54b6f5b887fc9a5e51d96feb9a2269b5362fba39f5d5262f403a236",
+      "width_px": 640,
+      "height_px": 160
+    },
+    {
+      "id": "reference:browser-chrome",
+      "kind": "chrome-screenshot",
+      "mime_type": "image/png",
+      "path": "browser-chrome.png",
+      "sha256": "abd62e27f54b6f5b887fc9a5e51d96feb9a2269b5362fba39f5d5262f403a236",
+      "width_px": 640,
+      "height_px": 160
+    },
+    {
+      "id": "evidence:browser-canvas-composite",
+      "kind": "canvas-composite-evidence",
+      "mime_type": "image/png",
+      "path": "browser-canvas-composite.png",
+      "sha256": "0ef7c6434a9523b268b96666b17bbadba421087164ad3bcaac97ca943ff6ce0b",
+      "width_px": 640,
+      "height_px": 160,
+      "changed_pixels": 0
+    }
+  ],
+  "semantics": {
+    "schema": "pulp-browser-semantics-v1",
+    "report": "semantic-report.json",
+    "candidate_count": 0,
+    "resolved_count": 0,
+    "unresolved_count": 0
+  },
+  "tokens": {
+    "schema": "pulp-browser-tokens-v1",
+    "report": "tokens.json",
+    "color_count": 0,
+    "dimension_count": 0,
+    "string_count": 0
+  },
+  "platform_fonts": {
+    "schema": "pulp-browser-platform-fonts-v1",
+    "report": "platform-fonts.json",
+    "text_run_count": 3,
+    "resolved_run_count": 3,
+    "face_count": 1
+  },
+  "states": [
+    {
+      "name": "default",
+      "reference_asset_id": "reference:browser"
+    }
+  ],
+  "reference": {
+    "asset_id": "reference:browser",
+    "path": "browser.png",
+    "logical_width": 320,
+    "logical_height": 80,
+    "device_scale_factor": 2,
+    "authored_frame": {
+      "x": 0,
+      "y": 0,
+      "width": 320,
+      "height": 80
+    }
+  }
+}
