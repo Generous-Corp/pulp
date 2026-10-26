@@ -38,7 +38,7 @@ for a in "$@"; do
     case "$a" in
         -i) inplace=1 ;;
         --lines=*) ranges="$ranges ${a#--lines=}" ;;
-        --style=*|--sort-includes=*) ;;
+        --style=*|--sort-includes=*|--assume-filename=*) ;;
         *) file="$a" ;;
     esac
 done
@@ -48,7 +48,7 @@ out="$(awk -v R="$ranges" '
         hit = (n == 0)
         for (i = 1; i <= n; i++) if (NR >= lo[i] && NR <= hi[i]) hit = 1
         if (hit && $0 !~ /^F:/) print "F:" $0; else print
-    }' "$file"; printf x)"
+    }' "${file:--}"; printf x)"
 # The x keeps the command substitution from stripping trailing blank lines:
 # a formatter that leaves a file alone must hand it back byte-for-byte.
 out="${out%x}"
@@ -405,6 +405,26 @@ else
     fi
     rm -rf "$repo"
 fi
+
+# ── --rev judges the pushed commit, not the working tree ────────────────────
+repo="$(make_repo)"; fake="$repo/fake"; make_fake "$fake"
+printf 'line1\nline2\nCHANGED\nline4\nline5\n' > "$repo/core/a.cpp"
+git -C "$repo" commit -qam "a misformatted change"
+# Fixed on disk, not committed: the push still sends the misformatted line.
+printf 'line1\nline2\nF:CHANGED\nline4\nline5\n' > "$repo/core/a.cpp"
+run "$repo" "$fake" --check --rev HEAD
+expect_rc "--rev: a misformatted commit fails though the working tree is clean" 1
+expect_out "--rev: the diff names the committed line" "+F:CHANGED"
+run "$repo" "$fake" --check
+expect_rc "control: the working-tree read passes it" 0
+# And an uncommitted mess does not fail a clean commit.
+git -C "$repo" commit -qam "fix it"
+printf 'line1\nline2\nCHANGED\nline4\nline5\nUNCOMMITTED\n' > "$repo/core/a.cpp"
+run "$repo" "$fake" --check --rev HEAD
+expect_rc "--rev: uncommitted edits do not fail a clean commit" 0
+run "$repo" "$fake" --rev HEAD
+expect_rc "--rev without --check is refused (it never rewrites)" 2
+rm -rf "$repo"
 
 # ── path restriction ────────────────────────────────────────────────────────
 repo="$(make_repo)"; fake="$repo/fake"; make_fake "$fake"

@@ -4915,12 +4915,20 @@ uses, or the golden warms a cache the real jobs never touch.
 
 - **A pre-push gate that reads the working tree can pass a commit it never
   saw.** The push sends HEAD's commit; a file fixed on disk but not committed
-  let a bad commit through the encoding lint, which now reads the pushed
-  commit (`text_encoding_lint.py --head`). Docs-noise, format_changed,
-  conflict-marker, compat-aggregate, source-contract, single-backend and
-  negative-capability gates still read the working tree; the hook warns
-  when tracked files differ from the pushed commit. A new content gate
-  should read the pushed commit's blobs (`git cat-file --batch`), not disk.
+  let a bad commit through the encoding lint. The hook now hands the pushed
+  commit to the encoding lint (`--head`), docs-noise (`--commit`),
+  format_changed (`--check --rev`), the conflict-marker check (`--rev`, the
+  files the push changes) and compat aggregate (`check --rev`), all reading
+  blobs through `gate_common.commit_blobs`. Source contracts, the
+  single-backend guard and the negative-capability check still read the
+  working tree (they walk directory trees); the hook warns when tracked files
+  differ from the pushed commit. A new content gate should read the pushed
+  commit's blobs, not disk.
+- **A gate that did not run is not a pass.** The merge-tree checks exit 4
+  (NOT_CHECKED) when one times out or cannot start; gates.sh exits 4 and the
+  pre-push hook blocks on it (bypass: `PULP_PREPUSH_ALLOW_NOT_CHECKED=1`).
+  Each check's timeout is 20 s scaled by load per core, capped at 300 s;
+  `PULP_MERGE_TREE_CHECK_TIMEOUT` overrides it.
 
 - **A workflow that runs a test binary by name breaks when that suite joins
   a test group.** `pulp_add_test_suite(... GROUP <group>)` compiles the
