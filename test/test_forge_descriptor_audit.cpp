@@ -4,6 +4,7 @@
 #include <pulp/host/forge_catalog_json.hpp>
 #include <pulp/host/forge_descriptor_audit.hpp>
 #include <pulp/host/forge_fuzz_catalog.hpp>
+#include <pulp/host/catalog_descriptor.hpp>
 
 #include <algorithm>
 #include <fstream>
@@ -389,6 +390,65 @@ TEST_CASE("every declared export realization is constructed and type checked", "
     const auto findings = audit_forge_catalog_export(nodes);
     INFO(render(findings));
     REQUIRE(has_fault(findings, ForgeAuditFault::mismatched_type_id));
+}
+
+TEST_CASE("neutral catalog vocabulary validates a non-Forge descriptor", "[catalog][descriptor]") {
+    using namespace pulp::host::catalog;
+
+    const Descriptor descriptor{
+        "neutral_gain",
+        "Neutral Gain",
+        "A provider-neutral test node.",
+        {},
+        {Realization{"default", "provider.neutral-gain"}},
+        {ParameterDescriptor{"gain", 7, "Gain", "dB", "Output gain.", ParameterKind::continuous,
+                             ParameterCurve::linear}}};
+    const std::vector<BakedParameter> baked{{7, -24.0f, 24.0f, 0.0f}};
+
+    REQUIRE(validate(descriptor, baked).empty());
+}
+
+TEST_CASE("neutral catalog vocabulary rejects malformed descriptors",
+          "[catalog][descriptor][negative]") {
+    using namespace pulp::host::catalog;
+
+    const Descriptor malformed{
+        "neutral_gain",
+        "",
+        "A provider-neutral test node.",
+        {},
+        {Realization{"default", "provider.neutral-gain"}},
+        {ParameterDescriptor{"gain", 7, "Gain", "dB", "Output gain.", ParameterKind::continuous,
+                             ParameterCurve::linear}}};
+
+    const auto findings = validate(malformed, {{7, -24.0f, 24.0f, 0.0f}});
+    REQUIRE(has_fault(findings, AuditFault::empty_field));
+}
+
+TEST_CASE("neutral catalog vocabulary catches a factory mismatch",
+          "[catalog][descriptor][negative]") {
+    using namespace pulp::host::catalog;
+
+    const Descriptor descriptor{
+        "neutral_gain",
+        "Neutral Gain",
+        "A provider-neutral test node.",
+        {},
+        {Realization{"default", "provider.neutral-gain"}},
+        {ParameterDescriptor{"gain", 7, "Gain", "dB", "Output gain.", ParameterKind::continuous,
+                             ParameterCurve::linear}}};
+    const std::vector<ExportNode> nodes{
+        {descriptor, {ExportRealization{"default", "provider.wrong", {{7, -24.0f, 24.0f, 0.0f}}}}}};
+
+    const auto findings = validate_export(nodes);
+    REQUIRE(has_fault(findings, AuditFault::mismatched_type_id));
+    REQUIRE_FALSE(has_fault(findings, AuditFault::missing_catalog_node));
+    REQUIRE_FALSE(has_fault(findings, AuditFault::unexpected_catalog_node));
+}
+
+TEST_CASE("neutral catalog serialization preserves the compatibility export", "[catalog][json]") {
+    const auto nodes = forge_catalog_export_nodes();
+    REQUIRE(pulp::host::catalog::serialize(nodes) == serialize_forge_catalog_json(nodes));
 }
 
 TEST_CASE("dynamic Forge families export every supported finite realization", "[forge][catalog]") {

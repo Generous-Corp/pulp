@@ -222,6 +222,10 @@ bool GpuConvolver::fenced() const noexcept {
     return status_snapshot().provider_state == GpuAudioProviderState::Uninitialized;
 }
 
+std::uint64_t GpuConvolver::sanitized_input_samples() const noexcept {
+    return 0;
+}
+
 GpuMultiConvolver::GpuMultiConvolver(uint32_t block_size, uint32_t sample_rate,
                                      std::vector<std::vector<float>> irs)
     : block_(block_size), sample_rate_(sample_rate), irs_(std::move(irs)),

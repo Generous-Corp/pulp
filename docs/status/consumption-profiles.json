@@ -423,6 +423,7 @@
       "pulp/host/baked_codec.hpp",
       "pulp/host/baked_graph_processor.hpp",
       "pulp/host/bounded_delay_descriptor.hpp",
+      "pulp/host/catalog_descriptor.hpp",
       "pulp/host/crossfade_plugin_slot.hpp",
       "pulp/host/custom_node_diagnostics.hpp",
       "pulp/host/custom_node_events.hpp",

@@ -714,6 +714,10 @@ surface never saw it. The header ships public and unguarded, and a later byte
 change to it trips nothing. **Add it to the tuple in the same slice that adds the
 header.**
 
+Product-neutral host catalog seams follow this same rule: classify the reusable
+descriptor/factory machinery as host infrastructure and leave product-specific
+Forge compatibility names and serialization in their existing authority.
+
 Two further rules, both learned by getting them wrong:
 
 * **A `REVIEWED_HEADERS` row cannot rescue an undiscovered header.**

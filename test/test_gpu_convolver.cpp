@@ -11,6 +11,7 @@
 #include "detail/gpu_convolver_test_access.hpp"
 #include "detail/realtime_gpu_audio_path.hpp"
 #include "detail/worker_pipeline_hosting.hpp"
+#include "harness/fake_shared_io_provider.hpp"
 #include "harness/rt_allocation_probe.hpp"
 #include "support/shared_io_loss_provider.hpp"
 
@@ -19,10 +20,12 @@
 #endif
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <ctime>
 #include <functional>
 #include <initializer_list>
@@ -701,6 +704,52 @@ TEST_CASE("GpuConvolver fallback recovers from a NaN input block", "[gpu_audio][
     }
 }
 
+// The RT miss substitute follows the GPU paths' non-finite policy: a bad
+// sample enters as zero and the IR tail of the block around it survives, so a
+// GPU miss inside that tail has no seam.
+TEST_CASE("GpuConvolver miss substitute zeroes a non-finite sample and keeps the IR tail",
+          "[gpu_audio][convolver]") {
+    constexpr uint32_t BS = 16;
+    constexpr std::size_t NBLK = 10;
+    const uint32_t L = GpuConvolver::kLatencyBlocks;
+    std::vector<float> ir(40);
+    for (std::size_t i = 0; i < ir.size(); ++i)
+        ir[i] = static_cast<float>(std::cos(0.3 * i) * std::exp(-0.05 * i));
+    GpuConvolver node(1, BS, 48000, ir);
+    REQUIRE(node.prepare());
+
+    std::vector<float> input(BS * NBLK);
+    for (std::size_t i = 0; i < input.size(); ++i)
+        input[i] = static_cast<float>(std::sin(0.21 * i) + 0.5);
+    std::vector<float> sanitized = input;
+    input[BS + 5] = std::numeric_limits<float>::quiet_NaN();
+    input[BS + 9] = std::numeric_limits<float>::infinity();
+    sanitized[BS + 5] = 0.0f;
+    sanitized[BS + 9] = 0.0f;
+    const auto reference = direct_convolution(sanitized, ir);
+
+    std::vector<float> out(input.size(), -9.0f);
+    std::size_t allocations = 0;
+    for (std::size_t b = 0; b < NBLK; ++b) {
+        const float* ip[1] = {input.data() + b * BS};
+        float* op[1] = {out.data() + b * BS};
+        BufferView<const float> iv(ip, 1, BS);
+        BufferView<float> ov(op, 1, BS);
+        pulp::test::RtAllocationProbe probe;
+        node.prime_fallback(iv, BS);
+        node.process_cpu_fallback(iv, ov, BS);
+        allocations += probe.allocation_count();
+    }
+    CHECK(allocations == 0);
+    // Block t substitutes conv(sanitized)(t - L), including the NaN block and
+    // the blocks of its tail.
+    for (std::size_t i = static_cast<std::size_t>(L) * BS; i < out.size(); ++i) {
+        INFO("sample " << i);
+        REQUIRE(std::isfinite(out[i]));
+        CHECK(std::abs(out[i] - reference[i - L * BS]) < 1.0e-4f);
+    }
+}
+
 // BUG 3 on the worker/no-GPU path: render_worker_fallback() is the SOLE audio
 // path when the device fails to init (and in the no-render build). A single NaN
 // input sample must not smear across the FFT bins and poison worker_fallback_'s
@@ -1237,6 +1286,134 @@ TEST_CASE("GpuConvolver shared path latches an invalid callback at its own block
     CHECK(status.recovery_sequence == kRejected);
 }
 
+namespace {
+
+// Forwards each submission to a fake provider that copies the packed GPU
+// input slot to the output slot and completes on its next poll, keeping the
+// real parts of the latest input slot.
+class RecordingProgram final : public pulp::test::SharedIoPreparedProgram {
+  public:
+    RecordingProgram(pulp::test::FakeSharedIoProvider& provider,
+                     std::array<float, kHealthBlock>& submitted)
+        : provider_(provider), submitted_(submitted) {}
+    bool prepare(
+        pulp::test::SharedIoArenaProvider&,
+        std::span<const pulp::test::SharedIoArenaProvider::SlotBufferHandle>) noexcept override {
+        return true;
+    }
+    bool submit(
+        pulp::test::SharedIoArenaProvider&,
+        const pulp::test::SharedIoArenaProvider::SlotResources& resources,
+        pulp::test::SharedIoArenaProvider::SlotToken token,
+        std::shared_ptr<pulp::gpu_audio::detail::SharedIoTerminalInbox> inbox) noexcept override {
+        if (resources.input_size < kHealthBlock * 2 * sizeof(float))
+            return false;
+        for (std::uint32_t i = 0; i < kHealthBlock; ++i)
+            std::memcpy(&submitted_[i], resources.input + 2u * i * sizeof(float), sizeof(float));
+        return provider_.submit_program(resources, token, std::move(inbox));
+    }
+    bool release() noexcept override {
+        return true;
+    }
+
+  private:
+    pulp::test::FakeSharedIoProvider& provider_;
+    std::array<float, kHealthBlock>& submitted_;
+};
+
+bool install_recording_session(GpuConvolver& convolver,
+                               std::array<float, kHealthBlock>& submitted) {
+    auto owner = std::make_unique<pulp::test::FakeSharedIoProvider>();
+    owner->identity = pulp::test::FakeSharedIoProvider::authenticated_fake_identity();
+    owner->identity.provider = GpuAudioProvider::Dawn;
+    owner->transform = pulp::test::FakeSharedIoProvider::Transform::Affine;
+    owner->transform_at_submit = true;
+    owner->require_program = true;
+    owner->complete_on_poll = true;
+    owner->drain_completes = true;
+    auto program = std::make_unique<RecordingProgram>(*owner, submitted);
+    auto session = std::make_unique<pulp::gpu_audio::detail::SharedIoConvolutionSession>();
+    if (!session->prepare({std::move(owner), std::move(program)},
+                          {.pipeline = {.capacity = 8,
+                                        .channels = 1,
+                                        .block_size = kHealthBlock,
+                                        .fft_size = kHealthBlock,
+                                        .ir_length = 1,
+                                        .lead_blocks = GpuConvolver::kLatencyBlocks},
+                           .slots = 2}))
+        return false;
+    return GpuConvolverTestAccess::install_shared_io_session(convolver, std::move(session));
+}
+
+} // namespace
+
+TEST_CASE("GpuConvolver shared path replaces non-finite input with zero before GPU submission",
+          "[gpu_audio][convolver][shared_io]") {
+    std::array<float, kHealthBlock> submitted{};
+    auto convolver =
+        std::make_unique<GpuConvolver>(1, kHealthBlock, 48000, std::vector<float>{1.0f});
+    REQUIRE(convolver->prepare());
+    if (!install_recording_session(*convolver, submitted))
+        SKIP("shared-I/O provider state is not compiled into this build");
+    const auto path = pulp::gpu_audio::detail::realtime_gpu_node_path(convolver.get());
+    REQUIRE(path.active());
+
+    std::array<float, kHealthBlock> in{}, out{};
+    const float* in_ptrs[] = {in.data()};
+    float* out_ptrs[] = {out.data()};
+    BufferView<const float> input(in_ptrs, 1, kHealthBlock);
+    BufferView<float> output(out_ptrs, 1, kHealthBlock);
+    std::uint64_t sequence = 0;
+    std::size_t allocations = 0;
+    const auto block = [&] {
+        std::uint8_t status = 0;
+        {
+            pulp::test::RtAllocationProbe probe;
+            status = path.process(path.context, input, output, kHealthBlock, sequence, true, 0);
+            allocations += probe.allocation_count();
+        }
+        using D = pulp::gpu_audio::detail::SharedIoDeliveryDisposition;
+        const auto disposition =
+            status == pulp::gpu_audio::detail::kRealtimeGpuReady     ? D::GpuDelivered
+            : status == pulp::gpu_audio::detail::kRealtimeGpuPriming ? D::Priming
+                                                                     : D::SilenceDelivered;
+        path.delivered(path.context, sequence++, static_cast<std::uint8_t>(disposition), 0, 0);
+        (void)path.service(path.context, 0);
+        return status;
+    };
+
+    // Positive control: finite input reaches the GPU input slot unchanged.
+    in = {0.25f, -0.5f};
+    (void)block();
+    CHECK(submitted == std::array<float, kHealthBlock>{0.25f, -0.5f});
+    CHECK(convolver->sanitized_input_samples() == 0);
+
+    in = {std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity()};
+    (void)block();
+    CHECK(submitted == std::array<float, kHealthBlock>{0.0f, 0.0f});
+    CHECK(convolver->sanitized_input_samples() == 2);
+
+    // The GPU output for that block and every later one stays finite.
+    int ready = 0;
+    for (int i = 0; i < 6; ++i) {
+        in = {0.125f, 0.125f};
+        if (block() == pulp::gpu_audio::detail::kRealtimeGpuReady) {
+            ++ready;
+            for (float sample : out)
+                CHECK(std::isfinite(sample));
+        }
+    }
+    CHECK(ready > 0);
+    CHECK(allocations == 0);
+    CHECK(convolver->sanitized_input_samples() == 2);
+    // The policy counts rather than latching a cause: the GPU path stays live.
+    pulp::gpu_audio::detail::RealtimeGpuHealth health;
+    REQUIRE(path.health(path.context, health));
+    CHECK(health.recovery_reason == GpuAudioRecoveryReason::None);
+    CHECK_FALSE(health.fenced);
+    CHECK(convolver->recovery_reason() == GpuAudioRecoveryReason::None);
+}
+
 TEST_CASE("GpuConvolver shared path reports no GPU kernel after the offline fence",
           "[gpu_audio][convolver][status][health]") {
     LossProvider* provider = nullptr;
@@ -1676,6 +1853,49 @@ TEST_CASE("Staged GpuConvolver hits come from the GPU without a CPU convolution"
     CHECK(node.staged_breaker_trips() == 0u);
     CHECK(node.staged_latched_reason() == GpuAudioRecoveryReason::None);
     CHECK(validate_gpu_audio_status(node.status_snapshot()).accepted());
+}
+
+TEST_CASE("Staged GpuConvolver zeroes non-finite input before submission and stays live",
+          "[gpu_audio][convolver][staged]") {
+    constexpr std::uint32_t BS = 64;
+    constexpr std::size_t NBLK = 16;
+    constexpr std::size_t kBad = 3;
+    const auto ir = staged_test_ir();
+    InjectableConvolver node(1, BS, 48000, ir);
+    REQUIRE(node.prepare());
+    auto* fake = node.adopt_fake(ir);
+    REQUIRE(node.pipeline() == 1u);
+
+    auto input = staged_test_input(BS * NBLK);
+    auto sanitized = input;
+    input[kBad * BS + 7] = std::numeric_limits<float>::quiet_NaN();
+    input[kBad * BS + 20] = std::numeric_limits<float>::infinity();
+    sanitized[kBad * BS + 7] = 0.0f;
+    sanitized[kBad * BS + 20] = 0.0f;
+
+    SECTION("the GPU carries the block") {
+        const auto out = run_staged_stream(node, input, BS, [](std::size_t) {});
+        for (float sample : out)
+            REQUIRE(std::isfinite(sample));
+        CHECK(first_mismatch(
+                  out, routed_reference(sanitized, ir, BS, std::vector<bool>(NBLK, false), 1)) ==
+              out.size());
+        CHECK(node.staged_cpu_blocks() == 0u);
+    }
+    SECTION("a miss on that block hands the CPU the same sanitized input") {
+        const auto out = run_staged_stream(node, input, BS, [&](std::size_t b) {
+            fake->set_async_mode(b == kBad ? FakeGpuCompute::AsyncMode::Expire
+                                           : FakeGpuCompute::AsyncMode::Resolve);
+        });
+        for (float sample : out)
+            REQUIRE(std::isfinite(sample));
+        const auto cpu = blocks_where(NBLK, [](std::size_t b) { return b == kBad; });
+        CHECK(first_mismatch(out, routed_reference(sanitized, ir, BS, cpu, 1)) == out.size());
+    }
+    CHECK(node.sanitized_input_samples() == 2u);
+    CHECK(node.staged_latched_reason() == GpuAudioRecoveryReason::None);
+    CHECK(node.recovery_reason() == GpuAudioRecoveryReason::None);
+    CHECK_FALSE(node.fenced());
 }
 
 TEST_CASE("Staged GpuConvolver routes missed blocks, and only those, to the CPU",
