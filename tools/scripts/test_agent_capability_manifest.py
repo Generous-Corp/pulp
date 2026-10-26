@@ -600,6 +600,59 @@ def exercise_evolution(canonical: dict) -> int:
     assert entries == [capability_history.history_entry(canonical, evolved_surface)]
     checks += 1
 
+    # Past the bootstrap, the previous published state is appended only when a
+    # counter moves. A fingerprint-only refresh leaves the history alone.
+    base_surface = manifest.build_surface(ROOT)[0]
+    older_surface = copy.deepcopy(base_surface)
+    older_surface["inventory_version"] -= 1
+    published = capability_history.history_document([
+        capability_history.history_entry(canonical, older_surface)
+    ])
+    refreshed_surface = copy.deepcopy(base_surface)
+    refreshed_surface["headers"][0]["fingerprint"] = "sha256:" + "b" * 64
+    unmoved = capability_history.updated_history_entries(
+        published,
+        canonical,
+        base_surface,
+        canonical,
+        refreshed_surface,
+        initial_bootstrap=False,
+        migrate_unpublished=False,
+    )
+    assert unmoved == published["entries"], "a fingerprint-only refresh appended"
+    checks += 1
+
+    bumped_surface = copy.deepcopy(refreshed_surface)
+    bumped_surface["inventory_version"] += 1
+    moved = capability_history.updated_history_entries(
+        published,
+        canonical,
+        base_surface,
+        canonical,
+        bumped_surface,
+        initial_bootstrap=False,
+        migrate_unpublished=False,
+    )
+    assert moved == published["entries"] + [
+        capability_history.history_entry(canonical, base_surface)
+    ], "a counter move did not append the prior state"
+    checks += 1
+
+    bumped_manifest = copy.deepcopy(canonical)
+    bumped_manifest["manifest_revision"] += 1
+    revised = capability_history.updated_history_entries(
+        published,
+        canonical,
+        base_surface,
+        bumped_manifest,
+        base_surface,
+        initial_bootstrap=False,
+        migrate_unpublished=False,
+    )
+    assert revised[-1] == capability_history.history_entry(canonical, base_surface)
+    assert len(revised) == len(published["entries"]) + 1
+    checks += 1
+
     with tempfile.TemporaryDirectory(prefix="pulp-agent-transaction-") as temp:
         root = pathlib.Path(temp)
         journal = root / "transaction.json"
