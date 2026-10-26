@@ -58,9 +58,11 @@
 #include <pthread.h>
 #endif
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <mutex>
 #include <thread>
 
@@ -75,6 +77,11 @@ std::atomic<std::uintptr_t> g_applied_device{0};
 // When the fault was applied, on the steady clock the capture's record
 // host_time_ns uses, so the analysis can find the exact block it hit.
 std::atomic<std::uint64_t> g_applied_ns{0};
+// A stall in progress waits on this, so disarming (the engine is being
+// released) ends it at once instead of after the full delay.
+std::mutex g_stall_mutex;
+std::condition_variable g_stall_cv;
+bool g_stall_cancelled = false;
 std::once_flag g_install_once;
 bool g_installed = false;
 
@@ -202,8 +209,10 @@ void process_events(WGPUInstance instance) {
             reinterpret_cast<std::uintptr_t>(g_target_device.load(std::memory_order_acquire)),
             std::memory_order_release);
         applied("process_events_stall");
-        std::this_thread::sleep_for(
-            std::chrono::milliseconds(g_delay_ms.load(std::memory_order_acquire)));
+        std::unique_lock lock(g_stall_mutex);
+        g_stall_cv.wait_for(lock,
+                            std::chrono::milliseconds(g_delay_ms.load(std::memory_order_acquire)),
+                            [] { return g_stall_cancelled; });
     }
     g_native.instanceProcessEvents(instance);
 }
@@ -241,6 +250,8 @@ void begin_provider_fault_target_capture() noexcept {
         return;
     // The editor may have reinstalled the native table since the last arm.
     dawnProcSetProcs(&g_wrapped);
+    // A fault armed for the previous target must not land on the new one.
+    g_armed.store(0, std::memory_order_release);
     g_target_device.store(nullptr, std::memory_order_release);
     g_target_instance.store(nullptr, std::memory_order_release);
     t_capturing = true;
@@ -314,7 +325,11 @@ bool arm_provider_fault(FaultKind kind, std::uint32_t delay_ms, std::string& det
         detail = "not a provider fault";
         return false;
     }
-    g_delay_ms.store(delay_ms, std::memory_order_release);
+    g_delay_ms.store(std::min(delay_ms, kMaxProviderStallMs), std::memory_order_release);
+    {
+        std::lock_guard lock(g_stall_mutex);
+        g_stall_cancelled = false;
+    }
 #if defined(PULP_GPU_FAULT_HAS_DAWN)
     dawnProcSetProcs(&g_wrapped);
 #endif
@@ -329,8 +344,17 @@ bool arm_provider_fault(FaultKind kind, std::uint32_t delay_ms, std::string& det
     return true;
 }
 
+bool provider_fault_armed() noexcept {
+    return g_armed.load(std::memory_order_acquire) != 0;
+}
+
 void disarm_provider_fault() noexcept {
     g_armed.store(0, std::memory_order_release);
+    {
+        std::lock_guard lock(g_stall_mutex);
+        g_stall_cancelled = true;
+    }
+    g_stall_cv.notify_all();
 #if defined(PULP_GPU_FAULT_HAS_DAWN)
     // The engine is being released: its device and queue are about to be
     // freed, so no mapping to them may survive.

@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261025-win-editor-physical-swapchain-size-watch",
+  "created_at": "2026-10-25T01:12:35Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Generic fractional-DPI sizing work. Pulp-owned Windows plug-in host code sizes the editor swapchain from the physical client rect WM_SIZE reports instead of re-deriving it from logical x scale, which lost a pixel at 125% and 150% and stretched every frame over the window. SkiaSurface::read_current_rgba() reads back at its source surface's size so the capture matches. Pulp-owned tests cover the geometry, a real CAMetalLayer readback, and the Windows host. Pulp continues to own these targets under the 2026-10-04 design-import refactor inheritance decision; Vellum inherits the render change when the targets adopt the Vellum package (change event 20261025-render-readback-surface-size). No design-import, Chromium, rendering or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R 'reported physical size|SkiaSurface reads back a presentable frame'",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none",
+  "vellum_inherits": true
+}

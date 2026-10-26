@@ -286,6 +286,16 @@
     [self resizeEditorToViewBounds];
 }
 
+// The host app keeps this controller and its view host while the editor is
+// off screen; return the GPU memory the hidden editor is not drawing with.
+- (void)viewDidDisappear:(BOOL)animated {
+    [super viewDidDisappear:animated];
+    // UIKit sends appearance callbacks on the main thread, where the host
+    // renders. A trim from any other thread would race a frame, so skip it.
+    if (_viewHost && [NSThread isMainThread])
+        _viewHost->release_gpu_caches();
+}
+
 - (void)viewWillTransitionToSize:(CGSize)size
        withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator {
     [super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];

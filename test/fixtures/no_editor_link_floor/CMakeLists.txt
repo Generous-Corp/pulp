@@ -36,7 +36,10 @@ pulp_add_plugin(PulpNoEditorLinkFloor
 )
 
 # Positive control: the same processor, default link path.
+# FULL_EDITOR: the control must carry the full editor stack the NO_EDITOR
+# plug-in leaves out; the macOS default (lite) would carry no Skia or Dawn.
 pulp_add_plugin(PulpNoEditorLinkFloorControl
+    FULL_EDITOR
     FORMATS           CLAP
     PLUGIN_NAME       "Pulp No Editor Link Floor Control"
     BUNDLE_ID         "dev.pulp.test.no-editor-link-floor-control"

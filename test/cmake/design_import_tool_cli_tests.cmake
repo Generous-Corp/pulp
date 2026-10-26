@@ -165,6 +165,7 @@ add_executable(pulp-test-browser-capture-import
     test_browser_capture_group_opacity.cpp
     test_browser_capture_gradient_border.cpp
     test_browser_capture_ir.cpp
+    test_browser_capture_paint_scale.cpp
     test_browser_knob_sprites.cpp
     test_browser_capture_text_metrics.cpp
     test_browser_capture_tree.cpp
@@ -193,6 +194,7 @@ pulp_test_data(pulp-test-browser-capture-import NO_DEFINE
     SOURCES test_browser_capture_backdrop_filter.cpp
         test_browser_capture_group_opacity.cpp
         test_browser_capture_gradient_border.cpp test_browser_capture_ir.cpp
+        test_browser_capture_paint_scale.cpp
         test_browser_capture_text_metrics.cpp test_browser_capture_tree.cpp
         test_browser_capture_svg_render.cpp
     PATHS "test/fixtures/browser-capture-*"
@@ -329,6 +331,8 @@ target_link_libraries(pulp-test-import-design-tool
 target_compile_definitions(pulp-test-import-design-tool PRIVATE
     PULP_IMPORT_DESIGN_TOOL_PATH="$<TARGET_FILE:pulp-import-design>"
     PULP_FIG_FIXTURE="${CMAKE_SOURCE_DIR}/test/fixtures/imports/fig/synthetic.fig"
+    PULP_V0_AUDIO_PANEL_FIXTURE="${CMAKE_SOURCE_DIR}/test/fixtures/v0-dev/audio-control-panel.tsx"
+    PULP_TEST_JOST_REGULAR_TTF="${CMAKE_SOURCE_DIR}/external/fonts/Jost-Regular.ttf"
     PULP_FIG_DECODE_SCRIPT="${CMAKE_SOURCE_DIR}/tools/import-design/fig_decode.mjs"
     PULP_FIGMA_REST_EXPORT="${CMAKE_SOURCE_DIR}/tools/import-design/figma_rest_export.py")
 if(PULP_HAS_SKIA)
@@ -342,7 +346,8 @@ add_dependencies(pulp-test-import-design-tool pulp-import-design)
 # the browser resource lock, so a selector treats it as environment-bound.
 pulp_test_data(pulp-test-import-design-tool NO_DEFINE
     SOURCES test_import_design_tool.cpp
-    PATHS tools/import-design test/fixtures/imports/fig/synthetic.fig)
+    PATHS tools/import-design test/fixtures/imports/fig/synthetic.fig
+        test/fixtures/v0-dev/audio-control-panel.tsx)
 if(WIN32)
     catch_discover_tests(pulp-test-import-design-tool
         TEST_SPEC "~[network]~[browser]"
@@ -481,6 +486,20 @@ if(Python3_Interpreter_FOUND AND PULP_HAS_SKIA AND PROJECT_IS_TOP_LEVEL)
     set_tests_properties(import-design-ir-observe-asset-escape PROPERTIES
         LABELS "parser-import;import"
         TIMEOUT 120)
+endif()
+
+# A 600-weight captured label on half- and quarter-pixel tops renders where
+# Chromium put it: CSS weight matching picks the captured face, so the captured
+# line layout holds and the ink and its centroid match the capture.
+if(Python3_Interpreter_FOUND AND PULP_HAS_SKIA AND PROJECT_IS_TOP_LEVEL)
+    add_test(NAME import-design-ir-observe-half-pixel-label
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_design_ir_observe_half_pixel_label.py
+                --observer $<TARGET_FILE:pulp-design-ir-observe>)
+    set_tests_properties(import-design-ir-observe-half-pixel-label PROPERTIES
+        LABELS "parser-import;import"
+        TIMEOUT 120
+        SKIP_RETURN_CODE 77)
 endif()
 
 # pulp-import-design carries a local asset named outside the source design's

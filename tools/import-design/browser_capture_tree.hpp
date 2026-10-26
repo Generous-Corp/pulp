@@ -163,6 +163,16 @@ struct PaintedTreeCounts {
     /// is NOT applied and the node records the value that refused it. A
     /// recorded refusal is findable; a plausible wrong number is not.
     int type_scale_refused = 0;
+    /// Nodes whose border widths, corner radii or shadow lengths were
+    /// multiplied by the per-axis scale their box already carries from their
+    /// own or an ancestor's `transform`, so a bordered box under `scale()`
+    /// keeps its border in proportion instead of at its untransformed width.
+    int paint_scaled = 0;
+    /// Nodes with a border, radius or shadow whose scale could not be carried:
+    /// a chain with a flip, skew, `matrix3d` or rotation alongside a
+    /// non-uniform scale, or an elliptical corner or soft shadow under two
+    /// axes. The node records what was refused and leaves it unscaled.
+    int paint_scale_refused = 0;
     /// Nodes whose anchor segment comes from an author `data-pulp-key`, so a
     /// reorder carries the anchor with the node instead of leaving it at the
     /// position.
@@ -233,6 +243,13 @@ PaintedTreeCounts lower_painted_tree(
 /// an overlapping one (`overlapping_reorders > 0`). A panel whose canvas paints
 /// in tree order keeps its sections, and a panel that genuinely interleaves
 /// is flattened and says why in `flattened_overlapping_reorders`.
+/// Every node's capture anchor (`stable_anchor_id`), by snapshot node index,
+/// through the same `anchor_path` the lowering uses; empty for a node with no
+/// signature (the document, a doctype, a comment). The importer differential
+/// lab derives the browser lane's anchors with a Python port, and
+/// test/fixtures/capture-anchor-vectors.json pins the two to one spelling.
+std::vector<std::string> capture_anchor_paths(const CapturedStyleIndex& index);
+
 PaintedTreeCounts lower_painted_tree_preferring_hierarchy(
     const CapturedStyleIndex& index, double dx, double dy, double device_scale,
     pulp::view::IRNode& root, const std::unordered_map<int, std::string>& captured_element_assets,

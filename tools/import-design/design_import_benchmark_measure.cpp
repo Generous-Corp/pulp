@@ -124,7 +124,8 @@ HostSample sample_host(std::optional<double> planted_load) {
     if (planted_load) {
         sample.load_1m = planted_load;
     } else {
-#if defined(__APPLE__) || defined(__linux__)
+        // Bionic declares getloadavg only from API 29, above Android's minSdk.
+#if defined(__APPLE__) || (defined(__linux__) && !defined(__ANDROID__))
         double loads[1] = {0.0};
         if (getloadavg(loads, 1) == 1)
             sample.load_1m = loads[0];

@@ -222,6 +222,8 @@ const char* draw_command_name(DrawCommand::Type type) {
         return "save_layer_bloom";
     case T::draw_sksl:
         return "draw_sksl";
+    case T::set_gradient_interpolation:
+        return "set_gradient_interpolation";
     }
     return "unknown";
 }

@@ -510,6 +510,15 @@ class TestCaptureJoin(CaptureTestCase):
         report = self.fixture(views=panel_views(dx_card=9)).compare()
         self.assertEqual([f["node_id"] for f in report["findings"]], ["card"])
 
+    def test_the_parent_is_the_nearest_lowered_dom_ancestor(self):
+        # A wrapper the import did not lower sits between card and its label.
+        # The label's parent must resolve through it to card, or a moved card
+        # is reported twice.
+        dom = PANEL_DOM[:3] + [(55, 2, [20, 30, 200, 100]), (93, 3, [30, 40, 80, 20]),
+                               (12, 2, [150, 40, 24, 24])]
+        report = self.fixture(dom=dom, views=panel_views(dx_card=9)).compare()
+        self.assertEqual([f["node_id"] for f in report["findings"]], ["card"])
+
     def test_children_off_inside_a_correct_parent_cluster_under_it(self):
         report = self.fixture(views=panel_views(dx_children=6)).compare()
         self.assertEqual(len(report["findings"]), 1)
@@ -572,6 +581,14 @@ class TestCaptureCli(CaptureTestCase):
         result = self.run_tool("--capture", fx.capture, "--observer-layout", fx.layout)
         self.assertEqual(result.returncode, 2)
         self.assertIn("cannot prove", result.stderr)
+
+    def test_a_non_numeric_backend_id_is_a_usage_error(self):
+        lowered = PANEL_LOWERED + [("card/odd", "not-a-number")]
+        fx = self.fixture(lowered=lowered)
+        result = self.run_tool("--capture", fx.capture, "--observer-layout", fx.layout)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("non-numeric backend_node_id", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
 
     def test_modes_do_not_mix(self):
         fx = self.fixture()

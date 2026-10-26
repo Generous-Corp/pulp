@@ -142,6 +142,15 @@ with the key it serves and a durable rationale), register its owner in
 `agent_capability_rederive.py` and `--check`. The baseline file itself is not
 edited; the header simply stops being legacy.
 
+A header that serves no capability (a plain DSP primitive such as
+`waveshaper.hpp`, `svf.hpp` or `tpt_filter.hpp`) takes an `infrastructure` row
+with empty `capability_keys` instead, and needs no `REVIEWED_MINIMAL_TARGETS`
+entry. Its fingerprint is the SHA-256 of the header bytes (`shasum -a 256`).
+`agent_capability_rederive.py` derives `SURFACE_INVENTORY_VERSION` as the
+protected base's value plus one and overwrites a hand-set value, so set the
+sequencer-exposure rows that quote it to the derived number after rederiving,
+not before.
+
 ## Classify the change
 
 For a new public header or symbol:

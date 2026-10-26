@@ -193,9 +193,11 @@ struct SynthesisTrace {
 /// those break text differently. The PostScript name identifies the instance.
 ///
 /// Takes the raw CSS `font-family` value — the comma list is walked here so a
-/// caller does not need its own copy of that parsing. Returns empty when
-/// nothing resolves or the build has no Skia, and an empty answer must be read
-/// as "unknown", never as "matches".
+/// caller does not need its own copy of that parsing. Without Skia (and in
+/// the lite editor stack) on Apple platforms it answers with the face CoreText
+/// resolves, which is the face the CoreGraphics canvas paints. Returns empty
+/// when nothing resolves or the platform has neither, and an empty answer must
+/// be read as "unknown", never as "matches".
 std::string resolved_face_identity(const std::string& css_font_family,
                                    float weight,
                                    FontSlant slant = FontSlant::Normal);

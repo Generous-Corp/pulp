@@ -56,6 +56,19 @@ class ControlShippingNativeWorkflowTest(unittest.TestCase):
         self.assertNotIn("cmake --build build-sdk --config Release --parallel", self.workflow)
         self.assertNotIn("cmake --build smoke/build --config Release --parallel", self.workflow)
 
+    def test_installed_sdk_carries_the_scanner_and_its_marker_list(self) -> None:
+        # check_control_shipping_artifact.cmake reads the shared forbidden-marker
+        # list through its module from its own directory; an SDK staged without
+        # either fails closed at scan time, so the workflow asserts both at install.
+        for installed in (
+            "check_control_shipping_artifact.cmake",
+            "PulpReleaseArtifactScan.cmake",
+            "release_artifact_forbidden.json",
+        ):
+            self.assertIn(f'test -f "$prefix/lib/cmake/Pulp/{installed}"', self.workflow)
+        self.assertIn("PulpReleaseArtifactScan.cmake", self.scanner)
+        self.assertIn("release_artifact_forbidden.json", self.scanner)
+
     def test_gpu_audio_lifecycle_probe_executes_and_retains_receipt(self) -> None:
         self.assertIn("PulpSDKSmokeGpuAudioLifecycleProbe", self.workflow)
         self.assertIn("Execute installed-SDK GPU-audio lifecycle probe", self.workflow)

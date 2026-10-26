@@ -49,7 +49,8 @@ add_subdirectory(pulp-effect)
 # suffixes every class name per binary. Only loading two real bundles proves
 # it, which is why the probe lives with the examples: it dlopens PulpGain and
 # PulpEffect together and requires each class to exist under both suffixes and
-# never under its bare name. The GPU classes exist only with Skia.
+# never under its bare name. PulpGain is a lite editor (no GPU view classes),
+# so the GPU classes are checked on a second pair of full-stack plug-ins.
 if(APPLE AND PULP_HAS_CLAP AND TARGET PulpGain_CLAP AND TARGET PulpEffect_CLAP)
     add_executable(pulp-mac-objc-coload-probe
         ${CMAKE_SOURCE_DIR}/test/mac_objc_coload_probe.cpp)
@@ -60,9 +61,6 @@ if(APPLE AND PULP_HAS_CLAP AND TARGET PulpGain_CLAP AND TARGET PulpEffect_CLAP)
         PulpView PulpWindowDelegate PulpAppDelegate PulpMenuCommandTarget
         PulpPluginView PulpAccessibilityElement PulpWindowAccessibilityElement
         PulpAccessibilityHostLifetime PulpTextAccessibilityElement PulpFileDragSource)
-    if(PULP_HAS_SKIA)
-        list(APPEND _pulp_coload_classes PulpMetalView PulpGpuPluginView PulpMetalSurfaceView)
-    endif()
     add_test(NAME mac-objc-coload-PulpGain-PulpEffect
         COMMAND pulp-mac-objc-coload-probe
             $<TARGET_FILE:PulpGain_CLAP> PulpGain_CLAP
@@ -91,6 +89,19 @@ if(PULP_GPU_AUDIO_FAULT_HOOKS)
     add_subdirectory(gpu-fault-continuity)
 endif()
 add_subdirectory(spectral-lab)
+# The GPU view classes, on two full-stack plug-ins (see the co-load probe above).
+if(APPLE AND PULP_HAS_CLAP AND PULP_HAS_SKIA AND TARGET pulp-mac-objc-coload-probe
+   AND TARGET SpectralLab_CLAP)
+    add_dependencies(pulp-mac-objc-coload-probe SpectralLab_CLAP)
+    add_test(NAME mac-objc-coload-PulpEffect-SpectralLab-gpu
+        COMMAND pulp-mac-objc-coload-probe
+            $<TARGET_FILE:PulpEffect_CLAP> PulpEffect_CLAP
+            $<TARGET_FILE:SpectralLab_CLAP> SpectralLab_CLAP
+            PulpMetalView PulpGpuPluginView PulpMetalSurfaceView)
+    set_tests_properties(mac-objc-coload-PulpEffect-SpectralLab-gpu PROPERTIES
+        LABELS "clap;objc"
+        TIMEOUT 60)
+endif()
 # GPU NAM (Neural Amp Modeler player) lives in its own repo and consumes Pulp as
 # an SDK: https://github.com/danielraffel/pulp-gpu-nam
 # Bendr (pitch / formant / freeze effect) likewise lives in its own repo:

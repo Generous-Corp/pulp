@@ -499,9 +499,10 @@ So any anti-aliasing measurement that runs on `fir_biquad` is measuring a
 default changed may still select it. Name the kind in every measurement. `linear_phase_fir`
 offers a 96 dB design at standard quality and a 140 dB design at pristine, and
 the suite holds them to within about 2 dB of those targets. `polyphase_iir`
-rejects from 0.58 Fs by 94.8 dB at standard and from 0.55 Fs by 146 dB at
-pristine (measured to the design in double; the float pristine build reads
-about -143 dB at its stopband edge). The
+rejects from 0.515 Fs by 114.6 dB at standard and by 153.2 dB at pristine
+(measured to the design in double; the float pristine build reads about
+-152 dB just past its stopband edge, the rounding of its float samples,
+because its stages keep double state). The
 below −100 dB residual test mentioned above pins `linear_phase_fir`, `pristine`,
 and 16× explicitly — that threshold is a statement about that configuration and
 not about the oversampler generally.

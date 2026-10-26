@@ -107,6 +107,22 @@ forms (`/x`, `\x`, `C:x`, `\\server\share`), `.`/`..`/empty components, and any
 Windows is refused on macOS and Linux as well. A pack authored with backslash
 separators or colons in file names therefore fails validation everywhere.
 
+## Archives are size-budgeted from the central directory
+
+A `.pulpcontent` archive declares each entry's decompressed size, so
+`ContentSizeBudget` (`core/state/include/pulp/state/content_install_limits.hpp`)
+admits the whole pack from metadata before anything is inflated: 4 GiB total,
+1 GiB per entry and 65536 entries by default. `--max-pack-bytes <n>` on
+`validate` / `install` / `update` lowers both byte caps through
+`clamp_content_install_bytes`; it can never raise a default, which is what lets
+the docs state the caps as ceilings. The entry-count cap is what bounds the hash
+check's cross-reference of archived against declared files, so it is not a
+knob. The runtime installer takes the same `ContentInstallLimits`. The budget runs *before* the `files.sha256.json` hash
+check, because that check inflates every declared file onto the heap. A refusal
+names the entry (`archive-size: entry ... above the per-entry cap`); miniz
+enforces the declared size during extraction, so a stream that inflates past its
+own header fails there rather than growing past the budget.
+
 ## Design-import UI source snapshots stay out of content-pack extraction
 
 The design-import `pulp ui build/check` surface emits and verifies an owned UI

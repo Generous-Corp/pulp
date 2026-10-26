@@ -40,12 +40,15 @@ EXPECTED_IDS = {
 EXACT_LIVE_QUERY = (
     "pulp control status --instance <caller-supplied-exact-instance-id> --json"
 )
+# The registry ships in every SDK, so these describe the private planning
+# authority without naming its repository or a file inside it.
 DSP_ADMISSION_OWNER = (
-    "danielraffel/pulp-planning:dsp-survey-claims/WORKER-PROMPT.md"
+    "planning: the DSP survey admission protocol in the maintainers' "
+    "private planning repository"
 )
 DSP_ADMISSION_QUERY = (
-    "read dsp-survey-claims/WORKER-PROMPT.md from current "
-    "danielraffel/pulp-planning main"
+    "read the DSP survey admission protocol from the current main of the "
+    "planning submodule's repository"
 )
 
 
@@ -161,7 +164,7 @@ def validate_document(
                 or query.get("installed") is not None
             ):
                 problems.append(
-                    "dsp-survey-admission must remain source-only and route to current pulp-planning main"
+                    "dsp-survey-admission must remain source-only and route to current planning main"
                 )
 
         for field in ("native_owner", "coverage_semantics", "absence_semantics"):

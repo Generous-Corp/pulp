@@ -87,6 +87,10 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
         // gets a per-slot timestamp query and an asynchronous mapped readback.
         // The default remains completely query/map-free.
         bool enable_timestamps = false;
+        // Wait budget for each drain() call; zero keeps the 15 s default. On
+        // expiry drain() abandons to quarantine: the device is destroyed and
+        // every slot stays pinned until a later drain() observes disposal.
+        std::uint64_t drain_budget_ns = 0;
     };
 
     struct CreateResult {
@@ -176,6 +180,7 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
     void poll() noexcept override;
     bool device_lost() const noexcept override;
     bool drain() noexcept override;
+    void set_drain_budget_ns(std::uint64_t budget_ns) noexcept override;
     bool can_resume_after_drain() const noexcept override;
     bool gpu_elapsed_ns(SlotToken token, std::uint64_t& elapsed) const noexcept override;
 
