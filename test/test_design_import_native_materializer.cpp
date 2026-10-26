@@ -5299,3 +5299,43 @@ TEST_CASE(
 #endif
     }
 }
+
+TEST_CASE("a captured antialiased text node materializes as an antialiased label",
+          "[design-import][native][font-smoothing]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.style.width = 240.0f;
+    ir.root.style.height = 60.0f;
+    for (const char* text : {"Antialiased", "Default"}) {
+        IRNode node;
+        node.type = "text";
+        node.text_content = text;
+        node.style.font_size = 15.0f;
+        node.style.width = 120.0f;
+        node.style.height = 20.0f;
+        if (std::string_view(text) == "Antialiased")
+            node.attributes["font_smoothing"] = "antialiased";
+        ir.root.children.push_back(node);
+    }
+    auto root = build_native_view_tree(ir, ir.asset_manifest);
+    REQUIRE(root);
+    const auto find = [&](const std::string& text) -> Label* {
+        const auto walk = [&](auto&& self, View& view) -> Label* {
+            if (auto* label = dynamic_cast<Label*>(&view); label && label->text() == text)
+                return label;
+            for (std::size_t i = 0; i < view.child_count(); ++i)
+                if (auto* child = view.child_at(i))
+                    if (auto* found = self(self, *child))
+                        return found;
+            return nullptr;
+        };
+        return walk(walk, *root);
+    };
+    auto* smooth = find("Antialiased");
+    auto* plain = find("Default");
+    REQUIRE(smooth != nullptr);
+    REQUIRE(plain != nullptr);
+    CHECK(smooth->font_smoothing() == pulp::canvas::FontSmoothing::antialiased);
+    CHECK(plain->font_smoothing() == pulp::canvas::FontSmoothing::auto_smoothing);
+    CHECK(design_ir_text_raster_policy(ir) == pulp::canvas::TextRasterPolicy::chromium);
+}

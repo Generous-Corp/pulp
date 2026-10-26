@@ -1,20 +1,24 @@
 // CSS `-webkit-font-smoothing` from a browser capture to the painted text: the
-// capture records it, the lowering marks `antialiased` text nodes, the
-// materialized Label paints them unhinted, and the document asks for the
-// surface preblend that matches.
+// capture records it, the lowering marks `antialiased` text nodes, SkiaCanvas
+// draws them unhinted, and the document asks for the surface preblend that
+// matches. The materialized Label's side lives with the widget tests
+// (test_typography_inheritance.cpp, test_design_import_native_materializer.cpp)
+// so this file stays off the view headers.
 #include <catch2/catch_test_macros.hpp>
 
 #include "tools/import-design/browser_capture_ir.hpp"
 
-#include <pulp/canvas/recording_canvas.hpp>
-#include <pulp/canvas/skia_canvas.hpp>
 #include <pulp/view/design_import.hpp>
-#include <pulp/view/widgets.hpp>
+
+#ifdef PULP_HAS_SKIA
+#include <pulp/canvas/paragraph_cache.hpp>
+#include <pulp/canvas/skia_canvas.hpp>
 
 #include "include/core/SkCanvas.h"
 #include "include/core/SkImageInfo.h"
 #include "include/core/SkPixmap.h"
 #include "include/core/SkSurface.h"
+#endif
 
 #include <filesystem>
 #include <functional>
@@ -46,18 +50,9 @@ IRNode* find_text(IRNode& node, const std::string& text) {
     return nullptr;
 }
 
-pulp::view::Label* find_label(pulp::view::View& view, const std::string& text) {
-    if (auto* label = dynamic_cast<pulp::view::Label*>(&view); label && label->text() == text)
-        return label;
-    for (std::size_t i = 0; i < view.child_count(); ++i)
-        if (auto* child = view.child_at(i))
-            if (auto* found = find_label(*child, text))
-                return found;
-    return nullptr;
-}
-
-// Ink (sum of 255 - red) of `text` drawn black on white through SkiaCanvas.
-double drawn_ink(const std::string& text, FontSmoothing smoothing) {
+#ifdef PULP_HAS_SKIA
+// `text` drawn black on white through SkiaCanvas: its pixels.
+std::vector<SkColor> drawn(const std::string& text, FontSmoothing smoothing) {
     auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(400, 80));
     surface->getCanvas()->clear(SK_ColorWHITE);
     surface->getCanvas()->scale(2, 2);
@@ -68,28 +63,62 @@ double drawn_ink(const std::string& text, FontSmoothing smoothing) {
     canvas.fill_text(text, 10, 25);
     SkPixmap pixels;
     REQUIRE(surface->peekPixels(&pixels));
-    double ink = 0;
+    std::vector<SkColor> all;
     for (int y = 0; y < pixels.height(); ++y)
         for (int x = 0; x < pixels.width(); ++x)
-            ink += 255 - SkColorGetR(pixels.getColor(x, y));
+            all.push_back(pixels.getColor(x, y));
+    return all;
+}
+
+// Ink (sum of 255 - red) of a render from drawn().
+double ink_of(const std::vector<SkColor>& pixels) {
+    double ink = 0;
+    for (const SkColor c : pixels)
+        ink += 255 - SkColorGetR(c);
     return ink;
 }
+
+double drawn_ink(const std::string& text, FontSmoothing smoothing) {
+    return ink_of(drawn(text, smoothing));
+}
+#endif
 
 } // namespace
 
 TEST_CASE("unhinted text is never served the hinted glyphs of the same run",
           "[browser-capture][font-smoothing]") {
-    // Each order shapes a string nothing else has, so the first draw of it
-    // is the one a shared paragraph cache would hand to the second.
-    const double hinted_first = drawn_ink("Quartz Hymn Vex", FontSmoothing::auto_smoothing);
-    const double unhinted_second = drawn_ink("Quartz Hymn Vex", FontSmoothing::antialiased);
-    const double unhinted_first = drawn_ink("Jumpy Fjord Wax", FontSmoothing::antialiased);
-    const double hinted_second = drawn_ink("Jumpy Fjord Wax", FontSmoothing::auto_smoothing);
-    REQUIRE(hinted_first > 0.0);
-    REQUIRE(unhinted_first > 0.0);
-    // Unhinted glyphs carry visibly less ink (CoreText smoothing is off).
-    CHECK(unhinted_second < hinted_first * 0.95);
-    CHECK(unhinted_first < hinted_second * 0.95);
+#ifndef PULP_HAS_SKIA
+    SKIP("glyph hinting is a Skia canvas setting; this build has no Skia");
+#else
+    // The same run with and without glyph hinting is two paragraph cache
+    // entries: drawing one never hands back the other's glyphs, in either
+    // order, while drawing the same run again is served from the cache.
+    auto& cache = pulp::canvas::ParagraphCache::instance();
+    REQUIRE(cache.enabled());
+    const auto check_order = [&](const std::string& text, FontSmoothing first,
+                                 FontSmoothing second) {
+        cache.clear();
+        cache.reset_stats();
+        const auto a = drawn(text, first);
+        const auto b = drawn(text, second);
+        CHECK(cache.stats().entries == 2);
+        CHECK(a != b);
+        const auto hits = cache.stats().hits;
+        CHECK(drawn(text, first) == a);
+        CHECK(cache.stats().hits > hits);
+    };
+    // Each order shapes a string nothing else has, so the first draw of it is
+    // the one a shared cache entry would hand to the second.
+    check_order("Quartz Hymn Vex", FontSmoothing::auto_smoothing, FontSmoothing::antialiased);
+    check_order("Jumpy Fjord Wax", FontSmoothing::antialiased, FontSmoothing::auto_smoothing);
+#if defined(__APPLE__)
+    // On CoreText faces hinting thickens the glyphs, so unhinted text also
+    // carries visibly less ink. FreeType's hinting does not, so this is not
+    // asserted elsewhere.
+    CHECK(drawn_ink("Brave Glyph Kin", FontSmoothing::antialiased) <
+          drawn_ink("Brave Glyph Kin", FontSmoothing::auto_smoothing) * 0.95);
+#endif
+#endif
 }
 
 TEST_CASE("a captured antialiased text node is marked, and only that one",
@@ -109,19 +138,11 @@ TEST_CASE("a captured antialiased text node is marked, and only that one",
     CHECK(smoothing_of("Subpixel") == "(none)");
 }
 
-TEST_CASE("antialiased text is painted unhinted on a chromium surface",
+TEST_CASE("a document holding antialiased text asks for the chromium surface",
           "[browser-capture][font-smoothing]") {
     auto lowered = lower_smoothing_fixture();
     REQUIRE(lowered.design_ir.has_value());
     auto& ir = *lowered.design_ir;
-    auto root = pulp::view::build_native_view_tree(ir, ir.asset_manifest);
-    REQUIRE(root);
-    auto* smooth = find_label(*root, "Antialiased");
-    auto* plain = find_label(*root, "Default");
-    REQUIRE(smooth != nullptr);
-    REQUIRE(plain != nullptr);
-    CHECK(smooth->font_smoothing() == FontSmoothing::antialiased);
-    CHECK(plain->font_smoothing() == FontSmoothing::auto_smoothing);
     CHECK(pulp::view::design_ir_text_raster_policy(ir) == TextRasterPolicy::chromium);
 
     // A document whose text is all `auto` keeps Skia's default preblend.
@@ -129,32 +150,10 @@ TEST_CASE("antialiased text is painted unhinted on a chromium surface",
     CHECK(pulp::view::design_ir_text_raster_policy(ir) == TextRasterPolicy::legacy);
 }
 
-TEST_CASE("a label's font smoothing is scoped to its own paint",
-          "[browser-capture][font-smoothing]") {
-    using pulp::canvas::DrawCommand;
-    pulp::view::Label label("Antialiased");
-    label.set_bounds({0, 0, 120, 20});
-    label.set_font_smoothing(FontSmoothing::antialiased);
-    pulp::canvas::RecordingCanvas canvas;
-    label.paint(canvas);
-    const auto& commands = canvas.commands();
-    REQUIRE(commands.size() >= 3);
-    // save, the smoothing, the text, restore: the smoothing ends with the scope.
-    CHECK(commands.front().type == DrawCommand::Type::save);
-    CHECK(commands[1].type == DrawCommand::Type::set_font_smoothing);
-    CHECK(commands[1].f[0] == 1.0f);
-    CHECK(commands.back().type == DrawCommand::Type::restore);
-    CHECK(canvas.count(DrawCommand::Type::fill_text) == 1);
-
-    // An auto label touches no smoothing state at all.
-    pulp::view::Label plain("Default");
-    plain.set_bounds({0, 0, 120, 20});
-    pulp::canvas::RecordingCanvas plain_canvas;
-    plain.paint(plain_canvas);
-    CHECK(plain_canvas.count(DrawCommand::Type::set_font_smoothing) == 0);
-}
-
 TEST_CASE("smoothing set inside a save scope ends with it", "[browser-capture][font-smoothing]") {
+#ifndef PULP_HAS_SKIA
+    SKIP("glyph hinting is a Skia canvas setting; this build has no Skia");
+#else
     const auto ink_after_scope = [](const std::string& text) {
         auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(400, 80));
         surface->getCanvas()->clear(SK_ColorWHITE);
@@ -176,46 +175,14 @@ TEST_CASE("smoothing set inside a save scope ends with it", "[browser-capture][f
     };
     CHECK(ink_after_scope("Brisk Lynx Oath") ==
           drawn_ink("Brisk Lynx Oath", FontSmoothing::auto_smoothing));
-}
-
-TEST_CASE("an auto label painted after an antialiased one is still hinted",
-          "[browser-capture][font-smoothing]") {
-    // Two labels on one canvas, the antialiased one first; the auto one must
-    // paint exactly as it does alone.
-    const auto render = [](bool with_antialiased_first) {
-        auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(400, 120));
-        surface->getCanvas()->clear(SK_ColorWHITE);
-        surface->getCanvas()->scale(2, 2);
-        pulp::canvas::SkiaCanvas canvas(surface->getCanvas());
-        if (with_antialiased_first) {
-            pulp::view::Label smooth("Grave Tusk Fly");
-            smooth.set_font_family("\"Helvetica Neue\", sans-serif");
-            smooth.set_font_size(15.0f);
-            smooth.set_bounds({0, 0, 200, 20});
-            smooth.set_font_smoothing(FontSmoothing::antialiased);
-            smooth.paint(canvas);
-        }
-        canvas.save();
-        canvas.translate(0, 30);
-        pulp::view::Label plain("Grave Tusk Fly");
-        plain.set_font_family("\"Helvetica Neue\", sans-serif");
-        plain.set_font_size(15.0f);
-        plain.set_bounds({0, 0, 200, 20});
-        plain.paint(canvas);
-        canvas.restore();
-        SkPixmap pixels;
-        REQUIRE(surface->peekPixels(&pixels));
-        std::vector<SkColor> lower; // the auto label's rows only
-        for (int y = 60; y < pixels.height(); ++y)
-            for (int x = 0; x < pixels.width(); ++x)
-                lower.push_back(pixels.getColor(x, y));
-        return lower;
-    };
-    CHECK(render(true) == render(false));
+#endif
 }
 
 TEST_CASE("auto text measures and draws exactly as with no smoothing set",
           "[browser-capture][font-smoothing]") {
+#ifndef PULP_HAS_SKIA
+    SKIP("glyph hinting is a Skia canvas setting; this build has no Skia");
+#else
     // Advances: setting auto, or scoping antialiased away, changes nothing.
     const auto advance = [](int mode) {
         auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(40, 40));
@@ -254,4 +221,5 @@ TEST_CASE("auto text measures and draws exactly as with no smoothing set",
         return all;
     };
     CHECK(draw(true) == draw(false));
+#endif
 }
