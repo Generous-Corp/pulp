@@ -836,6 +836,29 @@ TEST_CASE("WidgetBridge reports a handler error even without a dispatch hook",
               .getWithDefault<bool>(false));
 }
 
+TEST_CASE("WidgetBridge reports an after-dispatch hook error even without a dispatch hook",
+          "[view][bridge][event-batch]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // The UI framework's post-commit hook throws, and no __dispatchError__ is
+    // installed: the error must still be counted and keep its message.
+    bridge.load_script(R"(
+        on('w1', 'click', function () {});
+        globalThis.__pulpAfterDiscreteDispatch__ = function () { throw new RangeError('hook boom'); };
+    )");
+    REQUIRE(engine.evaluate("typeof __dispatchError__").toString() == "undefined");
+
+    dispatch_event(engine, "w1", "click", "{}");
+
+    CHECK(engine.evaluate("__pulpDispatchErrorCount__").getWithDefault<int>(-1) == 1);
+    CHECK(engine.evaluate("__pulpLastDispatchError__.indexOf('RangeError: hook boom') === 0")
+              .getWithDefault<bool>(false));
+}
+
 TEST_CASE("WidgetBridge reports a thrown value that has no toString",
           "[view][bridge][event-batch]") {
     ScriptEngine engine;

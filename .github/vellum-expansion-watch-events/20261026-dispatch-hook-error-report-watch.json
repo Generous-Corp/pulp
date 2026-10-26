@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none",
+  "event_id": "20261026-dispatch-hook-error-report-watch",
+  "created_at": "2026-10-26T04:10:00Z",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "A view-bridge error-reporting fix. The catch around the UI framework's after-dispatch hook now reports through __pulpReportDispatchError__, like handler errors: it counts the error, keeps its message ahead of the stack, and falls back to console.error when no __dispatchError__ is installed. Dispatch order, batching and rendering are unchanged. No design-import, Chromium, rendering or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R 'WidgetBridge reports an after-dispatch hook error even without a dispatch hook'",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ]
+}
