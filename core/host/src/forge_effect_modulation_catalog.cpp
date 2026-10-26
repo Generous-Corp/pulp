@@ -1,7 +1,12 @@
 #include <pulp/host/forge_effect_modulation_catalog.hpp>
+#include <pulp/signal/tpt_filter.hpp>
 
+#include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <string>
+#include <vector>
 
 namespace pulp::host::modulation {
 
@@ -270,5 +275,228 @@ CustomNodeType make_phaser_node(int stages) {
 }
 
 } // namespace phaser
+
+namespace vibrato {
+
+double allpass_cascade_l1(const std::vector<double>& corners_hz, double sample_rate, int length) {
+    std::vector<signal::TptFilter64> stages(corners_hz.size());
+    for (std::size_t i = 0; i < corners_hz.size(); ++i) {
+        stages[i].prepare(sample_rate);
+        stages[i].set_cutoff(corners_hz[i]);
+    }
+    double l1 = 0.0;
+    for (int i = 0; i < length; ++i) {
+        double x = (i == 0) ? 1.0 : 0.0;
+        for (auto& stage : stages)
+            x = stage.process_allpass(x);
+        l1 += std::abs(x);
+    }
+    return l1;
+}
+
+namespace delay_line {
+std::string delay_vibrato_type_id(float min_rate_hz) {
+    // The floor changes the injectable rate range, so it remains part of the
+    // stable realization identity even though vibrato declares no PDC latency.
+    return "modulation.vibrato.delay." +
+           std::to_string(static_cast<int>(std::lround(min_rate_hz * 10.0f)));
+}
+
+float delay_vibrato_worst_case_gain() {
+    return static_cast<float>(Engine::kInterpolatorPeakGain);
+}
+
+CustomNodeType make_delay_vibrato_node(float min_rate_hz) {
+    const float floor_hz = std::clamp(min_rate_hz, static_cast<float>(Engine::kMinRateHz),
+                                      static_cast<float>(Engine::kMaxRateHz));
+
+    CustomNodeType t;
+    t.type_id = delay_vibrato_type_id(floor_hz);
+    t.version = 1;
+    t.num_input_ports = 1;
+    t.num_output_ports = 1;
+    t.default_name = "Vibrato (Delay)";
+    t.lowerable = true;
+
+    t.create = []() -> void* { return new Instance{}; };
+    t.destroy = [](void* p) { delete static_cast<Instance*>(p); };
+    t.prepare = [](void* p, double sr, int /*max_block*/) {
+        static_cast<Instance*>(p)->engine.prepare(sr);
+    };
+    t.reset = [](void* p) {
+        auto* s = static_cast<Instance*>(p);
+        s->engine.reset();
+        s->applied_delay_ms = -1.0f;
+        s->applied_fade_in_ms = -1.0f;
+    };
+
+    t.baked_params.push_back({kRateHz, floor_hz, static_cast<float>(Engine::kMaxRateHz),
+                              std::max(floor_hz, static_cast<float>(Engine::kDefaultRateHz))});
+    t.baked_params.push_back({kDepthCents, 0.0f, static_cast<float>(Engine::kMaxDepthCents),
+                              static_cast<float>(Engine::kDefaultDepthCents)});
+    t.baked_params.push_back({kDelayMs, 0.0f, static_cast<float>(Engine::kMaxLifecycleMs), 0.0f});
+    t.baked_params.push_back({kFadeInMs, 0.0f, static_cast<float>(Engine::kMaxLifecycleMs), 0.0f});
+
+    t.process_instance_baked_param = [](void* p, audio::BufferView<float>& out,
+                                        const audio::BufferView<const float>& in, int n,
+                                        const BakedParamView& params) {
+        auto* s = static_cast<Instance*>(p);
+        const float* input = in.channel_ptr(0);
+        float* output = out.channel_ptr(0);
+
+        for (int k = 0; k < n; ++k) {
+            const auto offset = static_cast<std::int32_t>(k);
+            s->engine.set_rate_hz(params.value_at(kRateHz, offset));
+            s->engine.set_depth_cents(params.value_at(kDepthCents, offset));
+
+            // The two onset controls are applied ONLY WHEN THEY CHANGE, and
+            // that is load-bearing rather than an optimisation. Both setters
+            // re-arm the lifecycle envelope, which zeroes its depth scale — so
+            // writing them every sample would hold the envelope at zero forever
+            // and the node would pass audio through with no vibrato at all,
+            // while every parameter read back exactly the value that was set.
+            const float delay_ms = params.value_at(kDelayMs, offset);
+            if (delay_ms != s->applied_delay_ms) {
+                s->engine.set_delay_ms(delay_ms);
+                s->applied_delay_ms = delay_ms;
+            }
+            const float fade_ms = params.value_at(kFadeInMs, offset);
+            if (fade_ms != s->applied_fade_in_ms) {
+                s->engine.set_fade_in_ms(fade_ms);
+                s->applied_fade_in_ms = fade_ms;
+            }
+
+            output[static_cast<std::size_t>(k)] =
+                s->engine.process(input[static_cast<std::size_t>(k)]);
+        }
+    };
+    return t;
+}
+} // namespace delay_line
+
+namespace phase {
+std::string phase_vibrato_type_id(int stages) {
+    return "modulation.vibrato.phase." + std::to_string(stages);
+}
+
+float phase_vibrato_worst_case_gain(int stages, double sample_rate) {
+    const double lowest_corner = Engine::kMinCenterHz * std::exp2(-Engine::kSweepOctaves);
+    return static_cast<float>(allpass_cascade_l1(
+        std::vector<double>(static_cast<std::size_t>(stages), lowest_corner), sample_rate));
+}
+
+CustomNodeType make_phase_vibrato_node(int stages) {
+    const int clamped = std::clamp(stages, 1, Engine::kMaxStages);
+
+    CustomNodeType t;
+    t.type_id = phase_vibrato_type_id(clamped);
+    t.version = 1;
+    t.num_input_ports = 1;
+    t.num_output_ports = 1;
+    t.default_name = "Vibrato (Phase, " + std::to_string(clamped) + "-stage)";
+    t.lowerable = true;
+
+    t.create = []() -> void* { return new Instance{}; };
+    t.destroy = [](void* p) { delete static_cast<Instance*>(p); };
+    t.prepare = [clamped](void* p, double sr, int /*max_block*/) {
+        auto* s = static_cast<Instance*>(p);
+        s->engine.prepare(sr);
+        s->engine.set_stage_count(clamped);
+    };
+    t.reset = [](void* p) { static_cast<Instance*>(p)->engine.reset(); };
+
+    t.baked_params.push_back({kRateHz, static_cast<float>(Engine::kMinRateHz),
+                              static_cast<float>(Engine::kMaxRateHz),
+                              static_cast<float>(Engine::kDefaultRateHz)});
+    t.baked_params.push_back(
+        {kDepth, 0.0f, 100.0f, static_cast<float>(Engine::kDefaultDepth * 100.0)});
+    t.baked_params.push_back({kCenterHz, static_cast<float>(Engine::kMinCenterHz),
+                              static_cast<float>(Engine::kMaxCenterHz),
+                              static_cast<float>(Engine::kDefaultCenterHz)});
+    t.baked_params.push_back({kMix, 0.0f, 100.0f, static_cast<float>(Engine::kDefaultMix * 100.0)});
+
+    t.process_instance_baked_param = [](void* p, audio::BufferView<float>& out,
+                                        const audio::BufferView<const float>& in, int n,
+                                        const BakedParamView& params) {
+        auto* s = static_cast<Instance*>(p);
+        const float* input = in.channel_ptr(0);
+        float* output = out.channel_ptr(0);
+        for (int k = 0; k < n; ++k) {
+            const auto offset = static_cast<std::int32_t>(k);
+            s->engine.set_rate_hz(params.value_at(kRateHz, offset));
+            s->engine.set_depth(params.value_at(kDepth, offset) * 0.01);
+            s->engine.set_center_hz(params.value_at(kCenterHz, offset));
+            s->engine.set_mix(params.value_at(kMix, offset) * 0.01);
+            output[static_cast<std::size_t>(k)] =
+                s->engine.process(input[static_cast<std::size_t>(k)]);
+        }
+    };
+    return t;
+}
+} // namespace phase
+
+namespace univibe {
+Mode mode_from_param(float value) {
+    return std::lround(value) >= 1 ? Mode::chorus : Mode::vibrato;
+}
+
+float univibe_worst_case_gain(double sample_rate) {
+    const double scale = Engine::corner_scale(0.0, 1.0);
+    std::vector<double> corners(static_cast<std::size_t>(Engine::kStageCount));
+    for (int i = 0; i < Engine::kStageCount; ++i)
+        corners[static_cast<std::size_t>(i)] =
+            Engine::kStageBaseHz[static_cast<std::size_t>(i)] * scale;
+    return static_cast<float>(allpass_cascade_l1(corners, sample_rate));
+}
+
+CustomNodeType make_univibe_node() {
+    CustomNodeType t;
+    t.type_id = kTypeId;
+    t.version = 1;
+    t.num_input_ports = 2;
+    t.num_output_ports = 2;
+    t.default_name = "Univibe";
+    t.lowerable = true;
+
+    t.create = []() -> void* { return new Instance{}; };
+    t.destroy = [](void* p) { delete static_cast<Instance*>(p); };
+    t.prepare = [](void* p, double sr, int /*max_block*/) {
+        static_cast<Instance*>(p)->engine.prepare(sr);
+    };
+    t.reset = [](void* p) { static_cast<Instance*>(p)->engine.reset(); };
+
+    t.baked_params.push_back({kRateHz, static_cast<float>(Engine::kMinRateHz),
+                              static_cast<float>(Engine::kMaxRateHz),
+                              static_cast<float>(Engine::kDefaultRateHz)});
+    t.baked_params.push_back(
+        {kDepth, 0.0f, 100.0f, static_cast<float>(Engine::kDefaultDepth * 100.0)});
+    t.baked_params.push_back({kMode, kModeVibrato, kModeChorus, kModeVibrato});
+
+    t.process_instance_baked_param = [](void* p, audio::BufferView<float>& out,
+                                        const audio::BufferView<const float>& in, int n,
+                                        const BakedParamView& params) {
+        auto* s = static_cast<Instance*>(p);
+        const float* in_left = in.channel_ptr(0);
+        const float* in_right = in.channel_ptr(1);
+        float* out_left = out.channel_ptr(0);
+        float* out_right = out.channel_ptr(1);
+
+        for (int k = 0; k < n; ++k) {
+            const auto offset = static_cast<std::int32_t>(k);
+            s->engine.set_rate_hz(params.value_at(kRateHz, offset));
+            s->engine.set_depth(params.value_at(kDepth, offset) * 0.01);
+            s->engine.set_mode(mode_from_param(params.value_at(kMode, offset)));
+
+            const float mono = 0.5f * (in_left[static_cast<std::size_t>(k)] +
+                                       in_right[static_cast<std::size_t>(k)]);
+            s->engine.process(mono, out_left[static_cast<std::size_t>(k)],
+                              out_right[static_cast<std::size_t>(k)]);
+        }
+    };
+    return t;
+}
+} // namespace univibe
+
+} // namespace vibrato
 
 } // namespace pulp::host::modulation
