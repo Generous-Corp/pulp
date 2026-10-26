@@ -1147,6 +1147,11 @@ if(UNIX)
     add_test(NAME pulp-coverage-instrumentation-flags
         COMMAND ${CMAKE_COMMAND} -P ${CMAKE_SOURCE_DIR}/tools/cmake/test_pulp_instrumentation_flags.cmake)
     set_tests_properties(pulp-coverage-instrumentation-flags PROPERTIES TIMEOUT 60)
+    # WindowsApp also imports the OS icu.dll; as a link input it collides with
+    # Skia's bundled ICU under lld-link, so it must stay a default library.
+    add_test(NAME pulp-midi-windows-link-libs
+        COMMAND ${CMAKE_COMMAND} -P ${CMAKE_SOURCE_DIR}/tools/cmake/test_midi_windows_link_libs.cmake)
+    set_tests_properties(pulp-midi-windows-link-libs PROPERTIES TIMEOUT 60)
     # Fail at CONFIGURE if the script is not where the registration says.
     # A wrong path here does not fail configure on its own -- it produces
     # `***Failed 0.00 sec  No such file or directory` at run time, which reads

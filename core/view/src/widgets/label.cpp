@@ -1851,19 +1851,28 @@ float captured_frame_y(const View& view) {
 } // namespace
 
 void Label::paint(canvas::Canvas& canvas) {
+    // Font smoothing is canvas state scoped by save()/restore(), so what this
+    // text asks for ends with it and never reaches whatever paints next.
+    const bool smoothed = font_smoothing_ != canvas::FontSmoothing::auto_smoothing;
+    if (smoothed) {
+        canvas.save();
+        canvas.set_font_smoothing(font_smoothing_);
+    }
     // A Label that also has element children draws its own text inside the
     // anonymous inline box the layout pass reserved for it on the flex line.
     // Without that slot the text would start at the same content origin the
     // first child lays out from and the two would overlap.
     if (!has_own_text_box()) {
         paint_text_(canvas, {0.0f, 0.0f, bounds().width, bounds().height});
-        return;
+    } else {
+        const Rect box = own_text_box();
+        canvas.save();
+        canvas.translate(box.x, box.y);
+        paint_text_(canvas, {0.0f, 0.0f, box.width, box.height});
+        canvas.restore();
     }
-    const Rect box = own_text_box();
-    canvas.save();
-    canvas.translate(box.x, box.y);
-    paint_text_(canvas, {0.0f, 0.0f, box.width, box.height});
-    canvas.restore();
+    if (smoothed)
+        canvas.restore();
 }
 
 void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {

@@ -647,7 +647,12 @@ tool deliberately does not guess from a header or class name. Start a new key at
 contract version `1.0`. Increase the minor version for compatible additions and
 the major version for removed/renamed bindings or incompatible semantic changes.
 Any installed-manifest change also increases `manifest_revision`; any ledger
-change increases its `inventory_version`. Removed keys and headers leave
+change increases its `inventory_version`. Both are assigned by the
+version-at-land bump that releases the change, never by the branch that makes
+it: on `main` between that merge and the bump the counter is reported as
+pending (`agent_capability_manifest.py --status`), and an SDK tag is withheld
+until it is assigned, so an installed manifest always carries an assigned
+revision. Removed keys and headers leave
 permanent tombstones, so consumers can distinguish removal from an incomplete
 inventory and stable keys cannot be silently reused.
 

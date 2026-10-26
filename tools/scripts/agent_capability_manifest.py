@@ -14,6 +14,7 @@ import json
 import os
 import pathlib
 import re
+import subprocess
 import sys
 from typing import Any
 
@@ -36,6 +37,7 @@ from agent_capability_history import (
     append_only_history_problems,
     history_document,
     history_problems,
+    pending_counters,
     protected_base_problems,
     updated_history_entries,
 )
@@ -51,8 +53,8 @@ from agent_capability_transaction import recover_transaction, write_transaction
 
 SCHEMA = "pulp.agent-capabilities.v1"
 SCHEMA_MINOR = 1
-MANIFEST_REVISION = 82
-SURFACE_INVENTORY_VERSION = 163
+MANIFEST_REVISION = 83
+SURFACE_INVENTORY_VERSION = 164
 WRITE_TRANSACTION_FILE = pathlib.Path(
     "tools/agent-capabilities/.capability-write-transaction.json"
 )
@@ -769,6 +771,80 @@ def rendered(root: pathlib.Path | None = None) -> str:
     return json.dumps(document(root), indent=2, ensure_ascii=False) + "\n"
 
 
+def _counter_problems(
+    old_history: Any, entries: list[dict[str, Any]], previous: Any,
+    previous_surface: Any, doc: dict[str, Any], surface_document: dict[str, Any],
+) -> list[str]:
+    """Evolution from the on-disk snapshot to the regenerated one.
+
+    A branch leaves the counters alone, so changed material under an unchanged
+    counter is pending, not an error; the bump that assigns a pending snapshot
+    advances its counter by one with the material unchanged."""
+    manifest_pending, surface_pending = pending_counters(
+        history_document(entries), doc, surface_document)
+    was_manifest_pending, was_surface_pending = pending_counters(
+        old_history, previous, previous_surface)
+    return evolution_problems(
+        previous, doc, allow_unpublished_migration=False,
+        unassigned=manifest_pending,
+        assigning=was_manifest_pending and not manifest_pending,
+    ) + surface_evolution_problems(
+        previous_surface, surface_document, surface.SURFACE_SCHEMA,
+        unassigned=surface_pending,
+        assigning=was_surface_pending and not surface_pending,
+    )
+
+
+COUNTER_CONSTANTS = (("MANIFEST_REVISION", "manifest_revision"),
+                     ("SURFACE_INVENTORY_VERSION", "inventory_version"))
+
+
+def counter_status(root: pathlib.Path, doc: dict[str, Any],
+                   surface_document: dict[str, Any], history_path: pathlib.Path,
+                   args: argparse.Namespace) -> int:
+    """--status, --require-assigned and --assign-pending.
+
+    A pending counter means the tree's capability material changed after the
+    counter was last assigned; the next version-at-land SDK bump assigns it.
+    A pending revision names no published contract, so nothing may be tagged
+    from such a tree."""
+    history = _load_optional_json(history_path)
+    pending = pending_counters(history, doc, surface_document)
+    values = (doc["manifest_revision"], surface_document["inventory_version"])
+    report = {
+        name: {"value": value, "state": "pending" if is_pending else "assigned"}
+        for (_, name), value, is_pending in zip(COUNTER_CONSTANTS, values, pending)
+    }
+    if args.status:
+        print(json.dumps(report, indent=2, sort_keys=True))
+        return 0
+    if args.require_assigned:
+        if any(pending):
+            names = [name for (_, name), is_pending in zip(COUNTER_CONSTANTS, pending)
+                     if is_pending]
+            print("agent-capabilities: PENDING: " + ", ".join(
+                f"{name} {report[name]['value']} names changed material that no "
+                "version-at-land bump has assigned yet" for name in names), file=sys.stderr)
+            return 1
+        print("agent-capabilities: every counter is assigned")
+        return 0
+    if not any(pending):
+        print("agent-capabilities: nothing pending to assign")
+        return 0
+    source = pathlib.Path(__file__).resolve()
+    text = source.read_text(encoding="utf-8")
+    for (constant, _), value, is_pending in zip(COUNTER_CONSTANTS, values, pending):
+        if is_pending:
+            line = f"{constant} = {value}\n"
+            if text.count(line) != 1:
+                return _print_problems([f"cannot find `{line.strip()}` to assign"])
+            text = text.replace(line, f"{constant} = {value + 1}\n")
+    source.write_text(text, encoding="utf-8")
+    # The constants are read at import, so the write runs in a fresh process.
+    result = subprocess.run([sys.executable, str(source), "--write"], cwd=root)
+    return result.returncode
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Pulp installed agent capabilities")
     mode = parser.add_mutually_exclusive_group()
@@ -776,6 +852,15 @@ def main() -> int:
     mode.add_argument("--check", action="store_true", help="validate all generated artifacts")
     mode.add_argument("--write", action="store_true", help="regenerate checked artifacts")
     mode.add_argument("--validate", metavar="PATH", help="validate a manifest fixture")
+    mode.add_argument(
+        "--status", action="store_true",
+        help="report each counter as assigned or pending (JSON)")
+    mode.add_argument(
+        "--require-assigned", action="store_true",
+        help="exit 1 when a counter is pending assignment (the release tag guard)")
+    mode.add_argument(
+        "--assign-pending", action="store_true",
+        help="advance each pending counter by one and --write (the version-at-land bump)")
     mode.add_argument(
         "--bootstrap-surface",
         action="store_true",
@@ -849,6 +934,8 @@ def main() -> int:
     if args.json:
         sys.stdout.write(output)
         return 0
+    if args.status or args.require_assigned or args.assign_pending:
+        return counter_status(root, doc, surface_document, history_path, args)
     if args.write:
         previous = _load_optional_json(snapshot)
         previous_surface = _load_optional_json(surface_snapshot)
@@ -862,21 +949,15 @@ def main() -> int:
             protected_tip and _git_json(root, protected_tip, SNAPSHOT) is None
         )
         problems: list[str] = []
-        if not (args.migrate_unpublished_v1 and initial_bootstrap):
-            problems.extend(
-                evolution_problems(
-                    previous,
-                    doc,
-                    allow_unpublished_migration=args.migrate_unpublished_v1,
-                )
-            )
-            problems.extend(
-                surface_evolution_problems(
-                    previous_surface, surface_document, surface.SURFACE_SCHEMA
-                )
-            )
-        if problems:
-            return _print_problems(problems)
+        if args.migrate_unpublished_v1:
+            if not initial_bootstrap:
+                problems.extend(
+                    evolution_problems(previous, doc, allow_unpublished_migration=True))
+                problems.extend(
+                    surface_evolution_problems(
+                        previous_surface, surface_document, surface.SURFACE_SCHEMA))
+            if problems:
+                return _print_problems(problems)
         history = _load_optional_json(history_path)
         entries = updated_history_entries(
             history,
@@ -887,6 +968,11 @@ def main() -> int:
             initial_bootstrap=initial_bootstrap,
             migrate_unpublished=args.migrate_unpublished_v1,
         )
+        if not args.migrate_unpublished_v1:
+            problems.extend(_counter_problems(
+                history, entries, previous, previous_surface, doc, surface_document))
+        if problems:
+            return _print_problems(problems)
         history = history_document(entries)
         problems = history_problems(history, doc, surface_document)
         problems.extend(

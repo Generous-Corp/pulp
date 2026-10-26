@@ -69,6 +69,41 @@ def history_entry(
         "entry_digest": surface.canonical_digest(material),
     }
 
+def _without(document: dict[str, Any], key: str) -> dict[str, Any]:
+    return {k: v for k, v in document.items() if k != key}
+
+
+def pending_counters(
+    history: Any, manifest_document: Any, surface_document: Any
+) -> tuple[bool, bool]:
+    """(manifest pending, surface pending) for a snapshot against its history.
+
+    History holds every state before the current snapshot. A snapshot whose
+    material differs from the last recorded state under the SAME counter is
+    pending: a branch changed it and left the counter for the version-at-land
+    bump to assign. A snapshot whose counter moved past the last state, or
+    whose material equals it, is assigned."""
+    entries = history.get("entries") if isinstance(history, dict) else None
+    if (not isinstance(entries, list) or not entries
+            or not isinstance(manifest_document, dict)
+            or not isinstance(surface_document, dict)):
+        return False, False
+    last = entries[-1]
+    try:
+        current = history_entry(manifest_document, surface_document)
+    except (KeyError, TypeError):
+        return False, False
+    pending = []
+    for side, counter in (("manifest", "manifest_revision"), ("surface", "inventory_version")):
+        old, new = last.get(side), current[side]
+        pending.append(
+            isinstance(old, dict)
+            and new.get(counter) == old.get(counter)
+            and _without(new, counter) != _without(old, counter)
+        )
+    return pending[0], pending[1]
+
+
 def history_document(entries: list[dict[str, Any]]) -> dict[str, Any]:
     return {"schema": HISTORY_SCHEMA, "entries": copy.deepcopy(entries)}
 
@@ -105,7 +140,13 @@ def updated_history_entries(
             != current_surface.get("inventory_version")
         )
         previous_entry = history_entry(previous_manifest, previous_surface)
-        if counters_moved and (not entries or entries[-1] != previous_entry):
+        # A pending previous state was never assigned a counter, so it is not
+        # a contract identity: recording it would put two materials under one
+        # counter. The assigned state that follows records the change. A
+        # refresh that moves neither counter appends nothing.
+        if not entries or (counters_moved and entries[-1] != previous_entry and not any(
+                pending_counters(history_document(entries), previous_manifest,
+                                 previous_surface))):
             entries.append(previous_entry)
     if not entries:
         entries.append(history_entry(current_manifest, current_surface))
@@ -155,16 +196,20 @@ def history_problems(
         previous = entry
     current_entry = history_entry(current_manifest, current_surface)
     if previous is not None:
+        manifest_pending, surface_pending = pending_counters(
+            history, current_manifest, current_surface)
         problems.extend(
             evolution_problems(
                 previous["manifest"],
                 current_entry["manifest"],
                 allow_unpublished_migration=False,
+                unassigned=manifest_pending,
             )
         )
         problems.extend(
             surface_evolution_problems(
-                previous["surface"], current_entry["surface"], surface.SURFACE_SCHEMA
+                previous["surface"], current_entry["surface"], surface.SURFACE_SCHEMA,
+                unassigned=surface_pending,
             )
         )
     return _deduplicate(problems)
@@ -219,16 +264,24 @@ def protected_base_problems(
     old_manifest, old_surface, old_history = parsed
     problems: list[str] = []
     problems.extend(append_only_history_problems(old_history, history))
+    manifest_pending, surface_pending = pending_counters(
+        history, current_manifest, current_surface)
+    base_manifest_pending, base_surface_pending = pending_counters(
+        old_history, old_manifest, old_surface)
     problems.extend(
         evolution_problems(
             old_manifest,
             current_manifest,
             allow_unpublished_migration=False,
+            unassigned=manifest_pending,
+            assigning=base_manifest_pending and not manifest_pending,
         )
     )
     problems.extend(
         surface_evolution_problems(
-            old_surface, current_surface, surface.SURFACE_SCHEMA
+            old_surface, current_surface, surface.SURFACE_SCHEMA,
+            unassigned=surface_pending,
+            assigning=base_surface_pending and not surface_pending,
         )
     )
     return _deduplicate(problems)

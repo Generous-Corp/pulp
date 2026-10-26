@@ -491,6 +491,14 @@ failure on a merge group names a commit that is not in the ejected PR, read the
 `diff base:` line in the job log before touching the PR. Any new diff-scoped
 gate added to a merge_group workflow should reuse the same resolver.
 
+## `[train] enabled = true` is read-only
+
+The merge train's switch is on in `.shipyard/config.toml` with no `mode`, so
+only `shipyard train status` and `shipyard train metrics` act on it, and
+both only read. It does not form rollups or arm, enqueue or merge anything.
+Do not add `mode = "rollup"` here: that is PR #11159, and it waits on the
+live test.
+
 ## A HOLD on a queued head fails the merge group
 
 On 2026-10-12/13 six pulp pull requests merged minutes after a `verdict: HOLD`
@@ -522,6 +530,16 @@ an App `verdict: APPROVE` only with a `reviewer: <name>` line naming one of
 them, and never one `ghapp` stamped with an `unattributed` session. A reviewer
 agent puts `reviewer: <its name>` on the line above the verdict. Adding a
 reviewer means adding it to that list.
+
+**`carry_excluded_paths` replaces Shipyard's default; it does not add to it.**
+The same `[auto_merge]` table lists the paths whose change stops an APPROVE
+from carrying to a new head after a merge-only refresh. Shipyard's guard reads
+the key as the whole list. Pulp's copy therefore restates Shipyard's
+`DEFAULT_CARRY_EXCLUDED_PATHS` except `.shipyard/**`, which it narrows to the
+policy files: `config.toml`, `ci-profiles/**` and `vm-image*.toml`. That keeps
+a regenerated `changed-surface-families.toml` carrying. To add an exclusion,
+append it to that list. When Shipyard's default changes, compare the two lists
+again, or Pulp silently drops the new protection.
 
 ## A failed batch's branch name is not the culprit
 
@@ -1153,6 +1171,13 @@ real but is not what turned the job red. When the C++ build fails,
 (`build.log` for stderr, `build.stdout.log` for stdout) before the last 200
 lines; under a parallel build, the tail alone is warnings from sibling
 targets that kept compiling.
+
+The Windows coverage leg builds `RelWithDebInfo` (with `/Od /Ob0` from
+`PulpInstrumentation.cmake`), never `Debug`. Pulp links the static MSVC
+runtime, so a Debug build is `/MTd` with `_ITERATOR_DEBUG_LEVEL=2`, and the
+prebuilt release Skia (`/MT`, level 0) then fails every Skia-linking target
+with `lld-link: error: /failifmismatch`. The failure extract prints three lines
+after each `lld-link: error:`; those lines name the two objects that disagree.
 
 A hosted Linux leg that dies with "No space left on device" leaves no job log
 (the runner's own log write fails). Read the `disk-sample:` lines the coverage
@@ -4838,6 +4863,11 @@ auto-release deliberately does not hold. Read it as:
   runs no tests. A failure in `Build CLI targets (MSVC)` is a real MSVC error; a
   failure in an earlier step (bootstrap, toolchain) is runner trouble: the verdict
   job is skipped, so the pre-tag check ignores it too.
+- A second blocking pre-tag check withholds the SDK tag while an
+  agent-capability counter is pending
+  (`agent_capability_manifest.py --require-assigned`). The version-at-land bump
+  assigns pending counters; a withheld tag here means that assignment failed,
+  and its run log names why. See `docs/guides/release-watchdog.md`.
 - The MSVC build step invokes `bash tools/ci/governed-build.sh cmake --build
   build-win-cli --target pulp-cli pulp-mcp -- -k 0`. Keep the wrapper even though
   the hosted Windows runner is single-tenant: it supplies the same bounded
@@ -12879,6 +12909,21 @@ first.
 
 ## Hosted macOS advisory cadence
 
+## Release lanes pin the shell exec JS bridge OFF
+
+`PULP_DEV_BRIDGE_EXEC` compiles the developer-only `exec` / `execAsync` JS
+bridge (a `/bin/sh` for scripted UIs) into `pulp-view-script`. It defaults to
+`PULP_BUILD_TESTS`, so tests OFF already implies it, but every release
+configure — `release-cli.yml` (CLI build and both SDK builds) and
+`sign-and-release.yml` — passes `-DPULP_DEV_BRIDGE_EXEC=OFF` explicitly and
+`sdk_provenance.py` refuses to mint a release marker from a cache where it is
+ON or missing. The marker records it as `features.bridge_exec: false`;
+`PulpSdkProvenance.cmake` fails a release SDK whose marker claims `true`. When
+adding a release configure site, carry the flag; when a release leg fails on
+`bridge_exec=OFF`, the leg dropped the flag or configured from a source tree
+that predates the option — neither is a test failure. The same refusal
+stops a `workflow_dispatch` backfill of a tag older than the option: those
+SDKs do carry the bridge, so re-minting their provenance is refused by design.
 The TSan workflow's focused SignalGraph selector must retain exact-name entries
 for mailbox and retirement-reader race cases when those cases are extracted or
 renamed. Validate the selected names with `ctest -N` before changing the regex;

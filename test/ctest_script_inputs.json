@@ -262,6 +262,7 @@
    "data": "declared",
    "detected_sources": [
     "test/test_browser_capture_backdrop_filter.cpp",
+    "test/test_browser_capture_font_smoothing.cpp",
     "test/test_browser_capture_gradient_border.cpp",
     "test/test_browser_capture_group_opacity.cpp",
     "test/test_browser_capture_ir.cpp",
@@ -277,6 +278,7 @@
    "kind": "compiled",
    "sources": [
     "test/test_browser_capture_backdrop_filter.cpp",
+    "test/test_browser_capture_font_smoothing.cpp",
     "test/test_browser_capture_gradient_border.cpp",
     "test/test_browser_capture_group_opacity.cpp",
     "test/test_browser_capture_ir.cpp",
@@ -3354,6 +3356,7 @@
    "entry": "tools/scripts/test_agent_capability_manifest.py",
    "inputs": [
     ".github/workflows",
+    ".github/workflows/auto-release.yml",
     "core/audio/include/pulp/audio",
     "core/host/include",
     "core/midi/include/pulp/midi",
@@ -6844,6 +6847,13 @@
    "entry": "test/test_design_ir_observe_asset_escape.py",
    "inputs": [
     "test/test_design_ir_observe_asset_escape.py"
+   ],
+   "kind": "python"
+  },
+  "import-design-ir-observe-font-smoothing-label": {
+   "entry": "test/test_design_ir_observe_font_smoothing_label.py",
+   "inputs": [
+    "test/test_design_ir_observe_font_smoothing_label.py"
    ],
    "kind": "python"
   },
@@ -13084,8 +13094,12 @@
    "entry": "tools/scripts/test_version_at_land.py",
    "inputs": [
     ".github/workflows",
+    "docs/status/agent-capabilities.json",
+    "docs/status/agent-capability-surface.json",
     "docs/status/gpu-vellum-handoff.yaml",
     "docs/status/pulp-tooling-disposition.json",
+    "tools/agent-capabilities/contract-history.json",
+    "tools/scripts/agent_capability_manifest.py",
     "tools/scripts/build_migration_index.py",
     "tools/scripts/connected_git_history.py",
     "tools/scripts/fold_migration_notes.py",
