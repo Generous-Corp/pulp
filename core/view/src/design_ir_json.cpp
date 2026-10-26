@@ -1510,7 +1510,8 @@ IRNode parse_ir_node(const choc::value::ValueView& obj, const IRParseOptions& op
     normalize_design_ir(node, options);
 
     // Tail post-passes, extracted into named functions.
-    detect_node_audio_widget(node, explicit_audio_widget);
+    if (!options.measured_geometry)
+        detect_node_audio_widget(node, explicit_audio_widget);
     parse_shape_stroke_color(node, obj);
     extract_widget_shape_dims(node);
 

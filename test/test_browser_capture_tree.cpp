@@ -508,6 +508,40 @@ TEST_CASE("an interactive node drawn out of Chrome's order counts even without i
     REQUIRE(nested.counts.overlapping_reorder_pairs.size() == 1);
 }
 
+TEST_CASE("capture anchors match the vectors the lab's port is pinned to",
+          "[browser-capture][native-lowering][anchors]") {
+    // test_importer_differential_lab.py asserts the same file through the
+    // lab's Python `capture_anchors`. The lab pairs its two Chromium lanes by
+    // these strings, so a spelling change here that the port does not share
+    // reads there as every node missing.
+    const auto root = fs::path(PULP_BROWSER_CAPTURE_FIXTURE_ROOT);
+    const auto read = [](const fs::path& path) {
+        std::ifstream in(path, std::ios::binary);
+        REQUIRE(in.good());
+        return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    };
+    const auto vectors = choc::json::parse(read(root / "capture-anchor-vectors.json"));
+    const auto cases = vectors["cases"];
+    REQUIRE(cases.size() >= 8);
+    for (uint32_t c = 0; c < cases.size(); ++c) {
+        const auto entry = cases[static_cast<int>(c)];
+        const std::string name(entry["name"].toString());
+        INFO("case " << name);
+        const std::string bytes = entry.hasObjectMember("snapshot")
+                                      ? choc::json::toString(entry["snapshot"])
+                                      : read(root / std::string(entry["snapshot_path"].toString()));
+        const auto index = CapturedStyleIndex::load_bytes(bytes);
+        REQUIRE(index.has_value());
+        const auto anchors = capture_anchor_paths(*index);
+        const auto expected = entry["anchors"];
+        REQUIRE(anchors.size() == expected.size());
+        for (uint32_t node = 0; node < expected.size(); ++node) {
+            INFO("node " << node);
+            CHECK(anchors[node] == std::string(expected[static_cast<int>(node)].toString()));
+        }
+    }
+}
+
 TEST_CASE("native lowering draws the panel's real nodes, not a bitmap",
           "[browser-capture][native-lowering]") {
     const auto native = lower_fixture(true);
@@ -4612,6 +4646,79 @@ TEST_CASE("theme-painted buttons record their scheme and lose the UA box paint",
     CHECK_FALSE(buttons[2]->attributes.contains("ua_control"));
     CHECK(buttons[2]->style.background_color.value_or("") == "rgb(200, 0, 0)");
     CHECK(buttons[2]->style.border_top_width.value_or(0.0f) == Catch::Approx(2.0f));
+}
+
+TEST_CASE("theme-painted button inputs record push-button state and keep their label",
+          "[browser-capture][native-lowering][form-controls]") {
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 INPUT[type=submit] (themed, no
+    // value), 4 INPUT[type=button value=Go] whose author background dropped
+    // the theme, 5 INPUT[type=reset disabled] (themed, dark scheme).
+    //
+    // Row order: display, appearance, color-scheme, background-color, the
+    // four border widths, border-top-style, the four paddings, font-size,
+    // color.
+    const std::string page = "[12,13,14,18,21,21,21,21,22,21,21,21,21,26,27]";
+    const std::string themed = "[15,13,14,17,20,20,20,20,23,25,24,25,24,26,27]";
+    const std::string styled = "[15,13,14,19,20,20,20,20,23,25,24,25,24,26,27]";
+    const std::string dark = "[15,13,16,17,20,20,20,20,23,25,24,25,24,26,27]";
+    const SnapshotSpec spec{
+        .node_names = "[0,1,2,3,3,3]",
+        .node_types = "[9,1,1,1,1,1]",
+        .parents = "[-1,0,1,2,2,2]",
+        .attributes = "[[],[],[],[4,5],[4,6,7,8],[4,9,10,11]]",
+        .layout_nodes = "[1,2,3,4,5]",
+        .styles = "[" + page + "," + page + "," + themed + "," + styled + "," + dark + "]",
+        .bounds = "[[0,0,300,200],[0,0,300,200],[10,10,80,24],[10,40,80,24],[10,70,80,24]]",
+        .paint_orders = "[0,1,2,3,4]",
+        .computed_names = R"(["display","appearance","color-scheme","background-color",)"
+                          R"("border-top-width","border-right-width","border-bottom-width",)"
+                          R"("border-left-width","border-top-style","padding-top",)"
+                          R"("padding-right","padding-bottom","padding-left","font-size",)"
+                          R"("color"])",
+        .strings = R"J("#document","HTML","BODY","INPUT","type","submit","button","value",)J"
+                   R"J("Go","reset","disabled","","block","auto","normal","inline-block",)J"
+                   R"J("dark","rgb(239, 239, 239)","rgba(0, 0, 0, 0)","rgb(200, 0, 0)",)J"
+                   R"J("2px","0px","none","outset","6px","1px","13.3333px","rgb(0, 0, 0)")J",
+        .extra_nodes = R"(,"inputValue":{"index":[4],"value":[8]})",
+        .extra_top = R"(,"formControlTheme":{"controls":[)"
+                     R"({"node_index":3,"theme":"native"},)"
+                     R"({"node_index":4,"theme":"author"},)"
+                     R"({"node_index":5,"theme":"native"}]})",
+    };
+    const auto lowered = lower_snapshot(spec, "form-control-theme-input-button");
+    std::vector<const IRNode*> inputs;
+    const std::function<void(const IRNode&)> collect = [&](const IRNode& node) {
+        if (attribute(node, "source_tag") == "input")
+            inputs.push_back(&node);
+        for (const auto& child : node.children)
+            collect(child);
+    };
+    collect(lowered.root);
+    REQUIRE(inputs.size() == 3);
+    const auto label = [](const IRNode& node) -> std::string {
+        for (const auto& child : node.children)
+            if (child.name == "#control-value")
+                return child.text_content;
+        return {};
+    };
+
+    // A submit input is the same theme part as a <button>; its label is the
+    // UA default, drawn as the control's own text child.
+    CHECK(attribute(*inputs[0], "ua_control") == "button");
+    CHECK_FALSE(inputs[0]->style.background_color.has_value());
+    CHECK_FALSE(inputs[0]->style.border_top_width.has_value());
+    CHECK(label(*inputs[0]) == "Submit");
+
+    CHECK(attribute(*inputs[2], "ua_control") == "button");
+    CHECK(attribute(*inputs[2], "ua_disabled") == "1");
+    CHECK(attribute(*inputs[2], "ua_color_scheme") == "dark");
+    CHECK(label(*inputs[2]) == "Reset");
+
+    // The author-styled input keeps its own paint and records no theme state.
+    CHECK(attribute(*inputs[1], "native_theme") == "author");
+    CHECK_FALSE(inputs[1]->attributes.contains("ua_control"));
+    CHECK(inputs[1]->style.background_color.value_or("") == "rgb(200, 0, 0)");
+    CHECK(label(*inputs[1]) == "Go");
 }
 
 namespace {

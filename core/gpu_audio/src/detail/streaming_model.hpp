@@ -12,6 +12,7 @@
 #include <pulp/audio/rt_safety_contract.hpp>
 #include <pulp/gpu_audio/gpu_audio_program.hpp>
 
+#include "shared_io_provider_identity.hpp"
 #include "streaming_block_stamp.hpp"
 
 namespace pulp::gpu_audio::detail {
@@ -254,6 +255,10 @@ class StreamingBackend {
     // complete successfully again. Latched until release().
     virtual bool device_lost() const noexcept {
         return false;
+    }
+    // Non-RT: the identity the backend's provider reports for itself.
+    virtual SharedIoProviderIdentity provider_identity() const noexcept {
+        return {};
     }
 
   protected:

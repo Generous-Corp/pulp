@@ -59,6 +59,7 @@ import {
   installCaptureHealthMonitor,
   verifyCaptureHealth,
 } from "./health.mjs";
+import { capturePageFontFaces, recordResponseStatuses } from "./font_faces.mjs";
 import {
   createMainFrameNavigationGuard,
   executeInteractionPlan,
@@ -98,7 +99,8 @@ function parseArguments(argv) {
       throw new Error(`unexpected argument: ${token}`);
     }
     if (token === "--allow-network" || token === "--allow-browser-network" ||
-        token === "--fit-authored-frame") {
+        token === "--fit-authored-frame" ||
+        token === "--omit-materialized-document") {
       flags.add(token === "--allow-browser-network" ? "--allow-network" : token);
       continue;
     }
@@ -971,6 +973,21 @@ function capturedAttribute(openTag, wanted) {
   return undefined;
 }
 
+// Whether the materialized document declares an @font-face rule whose
+// source is a Blob URL: the same rules captureMaterializedDocument reads into
+// font_bindings, found without reading or serializing the document.
+async function materializedDocumentHasBlobFonts(cdp) {
+  const evaluated = await cdp.call("Runtime.evaluate", {
+    expression: `(() => {
+      const html = globalThis.__pulpMaterializedDocument?.html;
+      return typeof html === "string" &&
+        /@font-face\\s*\\{[^}]*url\\(\\s*['"]?blob:/i.test(html);
+    })()`,
+    returnByValue: true,
+  });
+  return evaluated.result?.value === true;
+}
+
 async function captureMaterializedDocument(cdp) {
   const metadata = await cdp.call("Runtime.evaluate", {
     expression: `(async () => {
@@ -1488,6 +1505,7 @@ async function runCapture(options) {
     await configurePage(cdp, initialWidth, initialHeight, dpr);
     await installDynamicWorkTracker(cdp);
     const healthMonitor = installCaptureHealthMonitor(cdp);
+    const responseStatuses = recordResponseStatuses(cdp);
     const networkGuard = installNetworkGuard(
       cdp, server.origin, allowedExternalOrigins, server.privatePrefix);
     await networkGuard.enable();
@@ -1814,7 +1832,29 @@ async function runCapture(options) {
     motion.horizon_presentation_format = presentationEncoding?.format ?? null;
     const stableScreenshot = (options) => captureStableScreenshot(cdp, options,
       undefined, undefined, undefined, presentationEncoding);
-    const materializedDocument = await captureMaterializedDocument(cdp);
+    // The executable document is read only for the imports that publish it
+    // (--emit materialized-runtime and --materialized-canvas-composition; see
+    // browser_import_captures_materialized_document), and for a document that
+    // serves @font-face fonts from Blob URLs, because its font bindings are
+    // the only record of the faces Chromium drew it with. Skipping the read
+    // leaves the page untouched: the install script still runs, and the read
+    // only copies the globals it filled. It does change two things: virtual
+    // time pauses sooner after the settle, because nothing runs between here
+    // and the freeze below, and the read's own blob-asset failures (too many
+    // blobs, a blob it could not capture, more than 64 MiB) cannot fire.
+    const materializedDocument =
+      options.flags.has("--omit-materialized-document") &&
+      !(await materializedDocumentHasBlobFonts(cdp))
+        ? null
+        : await progress.time(
+          "materialized-document", () => captureMaterializedDocument(cdp));
+    // The url() faces a plain page loads from files beside it, read while
+    // virtual time still runs, since each read is a fetch.
+    const pageFontFaces = await capturePageFontFaces(cdp, {
+      privatePrefix: server.privatePrefix,
+      allowNetwork,
+      statuses: responseStatuses,
+    });
     // Pause page virtual time before collecting any sidecar. Canvas/WebGL
     // requestAnimationFrame callbacks and timers must not advance while DOM,
     // semantics, tokens, health, and the authoritative pixels are read.
@@ -1949,12 +1989,12 @@ async function runCapture(options) {
     // Canvas paint is captured after the final presented browser frame below;
     // the DOMSnapshot already provides its stable backend-node identities.
     let canvasAssets = [];
-    const semanticReport = await evaluateSemantics(
-      cdp, snapshot, {
+    const semanticReport = await progress.time("semantics", () =>
+      evaluateSemantics(cdp, snapshot, {
         width: captureWidth,
         height: captureHeight,
         device_scale_factor: dpr,
-      });
+      }));
     if (materializedDocument) {
       // Semantics and painted geometry were resolved from the same frozen
       // DOMSnapshot. Keep a bounded, renderer-neutral binding manifest beside
@@ -1981,16 +2021,17 @@ async function runCapture(options) {
           },
         }));
     }
-    const tokenReport = await evaluateDesignTokens(cdp);
+    const tokenReport = await progress.time(
+      "design-tokens", () => evaluateDesignTokens(cdp));
     // Read before time resumes, like every other DOM-derived sidecar: the
     // faces reported have to be the ones the frozen frame was shaped with.
-    const platformFontReport = await evaluatePlatformFonts(
-      cdp, snapshot, COMPUTED_STYLES);
+    const platformFontReport = await progress.time("platform-fonts", () =>
+      evaluatePlatformFonts(cdp, snapshot, COMPUTED_STYLES));
     // Whether the native theme painted each form control is decided by who
     // styled it, which only matched-rule origins can say. Written INTO the
     // snapshot below, so the verdict is bound by the same hash as the boxes.
-    const formControlTheme = await evaluateFormControlTheme(
-      cdp, snapshot, COMPUTED_STYLES);
+    const formControlTheme = await progress.time("form-control-theme", () =>
+      evaluateFormControlTheme(cdp, snapshot, COMPUTED_STYLES));
     if (materializedDocument) {
       materializedDocument.layout_bindings = buildMaterializedLayoutBindings(
         snapshot, materializedDocument.coordinate_space);
@@ -2010,8 +2051,8 @@ async function runCapture(options) {
       materializedDocument.pseudo_bindings = pseudoEvidence.bindings;
       materializedDocument.pseudo_diagnostics = pseudoEvidence.diagnostics;
     }
-    const captureHealth = await verifyCaptureHealth(
-      cdp, snapshot, healthMonitor, networkGuard.blocked);
+    const captureHealth = await progress.time("capture-health", () =>
+      verifyCaptureHealth(cdp, snapshot, healthMonitor, networkGuard.blocked));
     await networkGuard.awaitProvenance();
     // Every sidecar above is read from the DOM while virtual time is paused.
     // Pixels are different: the compositor cannot present a new frame with
@@ -2029,15 +2070,16 @@ async function runCapture(options) {
     // boundaries even after DOM/timer motion is frozen. Always observe the
     // complete bounded horizon, then require a byte-identical trailing run;
     // an early A,A plateau must not hide a later B,B presentation.
-    let screenshotBytes =
-      await stableScreenshot(screenshotOptions);
+    let screenshotBytes = await progress.time("stable-screenshot", () =>
+      stableScreenshot(screenshotOptions));
     // A compositor can miss the required identical tail at the very end of a
     // bounded horizon even though its next horizon is completely still. Give
     // that observable proof one fresh bounded attempt; keeping the common path
     // at 32 frames avoids spending the whole capture deadline on pages that
     // were already stable.
     if (!screenshotBytes)
-      screenshotBytes = await stableScreenshot(screenshotOptions);
+      screenshotBytes = await progress.time("stable-screenshot", () =>
+        stableScreenshot(screenshotOptions));
     if (!screenshotBytes) {
       const error = new Error(
         "the visual frame did not stabilize while capture evidence was collected");
@@ -2076,8 +2118,9 @@ async function runCapture(options) {
     // assets with the accepted stable browser pixels, not with the earlier
     // pre-presentation backing stores; otherwise the chrome plate and canvas
     // layers are individually valid but can never reconstruct browser.png.
-    canvasAssets = await captureCanvasAssets(
-      cdp, snapshot, screenshotOptions, presentationEncoding);
+    canvasAssets = await progress.time("canvas-assets", () =>
+      captureCanvasAssets(
+        cdp, snapshot, screenshotOptions, presentationEncoding));
     if (materializedDocument) {
       materializedDocument.canvas_bindings = canvasAssets.map(
         (asset, index) => ({
@@ -2119,8 +2162,8 @@ async function runCapture(options) {
     const hiddenIndicatorCount = hiddenIndicators.result?.value ?? 0;
     let staticScreenshotBytes = screenshotBytes;
     if (hiddenIndicatorCount > 0) {
-      staticScreenshotBytes =
-        await stableScreenshot(screenshotOptions);
+      staticScreenshotBytes = await progress.time("stable-screenshot", () =>
+        stableScreenshot(screenshotOptions));
       await cdp.call("Runtime.evaluate", {
         expression: `(() => {
           for (const entry of (window.__pulpCaptureIndicatorStyles || [])) {
@@ -2162,9 +2205,10 @@ async function runCapture(options) {
       })()`,
       returnByValue: true,
     });
-    const chromeBytes = await captureStableFrameWithHiddenPaint(
-      cdp, screenshotOptions, screenshotBytes, hiddenCanvases.result?.value,
-      presentationEncoding);
+    const chromeBytes = await progress.time("chrome-frame", () =>
+      captureStableFrameWithHiddenPaint(
+        cdp, screenshotOptions, screenshotBytes,
+        hiddenCanvases.result?.value, presentationEncoding));
     await cdp.call("Runtime.evaluate", {
       expression: `(() => {
         for (const item of globalThis.__pulpCanvasVisibilityRestore || []) {
@@ -2191,8 +2235,8 @@ async function runCapture(options) {
     // pixels stay transparent and changed pixels carry the accepted opaque
     // result. This is validation evidence only; executable per-canvas assets
     // and command-stream bindings remain the shipping/runtime contract.
-    const canvasComposition = await deriveCanvasCompositionEvidence(
-      cdp, screenshotBytes, chromeBytes);
+    const canvasComposition = await progress.time("canvas-composition", () =>
+      deriveCanvasCompositionEvidence(cdp, screenshotBytes, chromeBytes));
     // The UA canvas colour, read with a transient probe now that every frame
     // has been captured. Written INTO the snapshot below, beside the
     // transparent root and body backgrounds it completes.
@@ -2211,12 +2255,13 @@ async function runCapture(options) {
     const sanitizedSnapshot = sanitizeSnapshot(
       snapshot, server.privatePrefix);
     // Preserve the positional style-name mapping in the exact bytes we bind.
-    const snapshotBytes = Buffer.from(serializeJson({
-      ...sanitizedSnapshot,
-      computedStyleNames: COMPUTED_STYLES,
-      formControlTheme,
-      documentCanvas,
-    }), "utf8");
+    const snapshotBytes = await progress.time("serialize:dom-snapshot", () =>
+      Buffer.from(serializeJson({
+        ...sanitizedSnapshot,
+        computedStyleNames: COMPUTED_STYLES,
+        formControlTheme,
+        documentCanvas,
+      }), "utf8"));
     const interactionReportBytes = interactionReport
       ? serializeJson(interactionReport)
       : "";
@@ -2242,10 +2287,13 @@ async function runCapture(options) {
       writeJson(path.join(outputDir, "tokens.json"), tokenReport),
       writeJson(
         path.join(outputDir, "platform-fonts.json"), platformFontReport),
+      ...(pageFontFaces.faces.length > 0 || pageFontFaces.dropped.length > 0
+        ? [writeJson(path.join(outputDir, "font-faces.json"), pageFontFaces)]
+        : []),
       ...(materializedDocument
-        ? [writeJson(
+        ? [progress.time("write:materialized-document", () => writeJson(
             path.join(outputDir, "materialized-document.json"),
-            materializedDocument)]
+            materializedDocument))]
         : []),
       ...(interactionReport
         ? [writeFile(
@@ -2253,6 +2301,11 @@ async function runCapture(options) {
             interactionReportBytes)]
         : []),
     ]);
+
+    const materializedDocumentSha256 = materializedDocument
+      ? await progress.time("hash:materialized-document", () => sha256(
+          Buffer.from(serializeJson(materializedDocument), "utf8")))
+      : "";
 
     const browserProductArg = canonicalBrowserProduct(
       options.values.get("--browser-product") ?? "");
@@ -2275,8 +2328,7 @@ async function runCapture(options) {
           ...(materializedDocument
             ? {
                 materialized_document: "materialized-document.json",
-                materialized_document_sha256: sha256(Buffer.from(
-                  serializeJson(materializedDocument), "utf8")),
+                materialized_document_sha256: materializedDocumentSha256,
                 materialized_asset_count: materializedDocument.assets.length,
               }
             : {}),
@@ -2334,6 +2386,10 @@ async function runCapture(options) {
           ? { interaction_readiness: interactionReadiness }
           : {}),
         renderer_hooks: rendererHooks,
+        // Wall time per capture phase, keyed by the phase names the progress
+        // tracker reports. Volatile by nature: two identical captures never
+        // agree on it, so nothing derived from the capture may depend on it.
+        timings: progress.timings(),
         ...(interactionReport
           ? {
               interactions: {

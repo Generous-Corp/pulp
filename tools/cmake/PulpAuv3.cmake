@@ -277,7 +277,6 @@ function(_pulp_add_auv3_macos_host target name bundle_id version)
         INSTALL_RPATH "@executable_path/../Frameworks"
     )
     target_link_libraries(${host_target} PRIVATE "-framework Cocoa")
-    _pulp_attach_control_shipping(${target} ${host_target} AUv3Host)
 
     # Make the host depend on both pieces and copy them into the bundle.
     add_dependencies(${host_target} ${target}_AUv3Framework ${target}_AUv3)
@@ -336,6 +335,13 @@ function(_pulp_add_auv3_macos_host target name bundle_id version)
         VERBATIM
     )
     add_custom_target(${host_target}_Embed ALL DEPENDS "${embed_sentinel}")
+
+    # The scan reads every binary in the .app, embedded framework and appex
+    # included. Attached after the embed steps, so its POST_BUILD runs after
+    # the copies above; its persisted-stamp edge waits for the sentinel edge,
+    # which otherwise runs beside it and rewrites the bundle mid-scan.
+    _pulp_attach_control_shipping(${target} ${host_target} AUv3Host
+        AFTER "${embed_sentinel}" ${host_target}_Embed)
 endfunction()
 
 # ── iOS monolithic .appex ─────────────────────────────────────────────────

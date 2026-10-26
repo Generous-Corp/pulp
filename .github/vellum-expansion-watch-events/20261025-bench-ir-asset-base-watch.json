@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261025-bench-ir-asset-base-watch",
+  "created_at": "2026-10-25T02:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging",
+    "design-source-ingest"
+  ],
+  "rationale": "The design-import benchmark's IR-bound lanes materialize an importer DesignIR with its own directory as the asset base, so manifest images resolve wherever the benchmark is started and its decode and image-cache counters see them. This is a measurement-only change: no import, Chromium capture, materialization rule, rendering, packaging or source-authority boundary moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-design-import-benchmark-contracts",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

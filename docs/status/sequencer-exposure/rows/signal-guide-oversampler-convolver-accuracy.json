@@ -22,7 +22,7 @@
       ]
     },
     {
-      "path": "core/signal/include/pulp/signal/fft.hpp",
+      "path": "core/signal/include/pulp/signal/overlap_add_convolver.hpp",
       "needles": [
         "pending overlap is accumulated and shifted down"
       ]

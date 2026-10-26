@@ -6,8 +6,15 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
 
 namespace pulp::gpu_audio {
+
+namespace detail {
+struct GpuWaveNetSessionAccess;
+struct GpuWaveNetSessionTestAccess;
+struct GpuWaveNetSessionPoolAccess;
+} // namespace detail
 
 // Model-neutral shape accepted by the first provider-owned WaveNet adapter.
 // The execution object remains private to the provider; consumers pass only
@@ -79,11 +86,16 @@ enum class GpuWaveNetBlockStatus : std::uint8_t {
     GpuDelivered = 0,
     ProviderFailed,
 };
-/// Completion servicing policy for the serialized, non-realtime dispatcher.
-/// These policies never authorize waiting or Dawn calls from an audio callback.
+/// How the serialized, non-realtime dispatcher services provider completions.
+/// No policy ever waits on, or calls into, the provider from an audio callback.
 enum class GpuWaveNetCompletionPolicy : std::uint8_t {
+    /// Let the provider deliver finished work through its event pump on each
+    /// service step.
     ProcessEvents,
+    /// Check the submitted work's completion handles directly, without
+    /// waiting.
     WaitAny,
+    /// As WaitAny, but wait on the handles up to the configured bound.
     TimedWaitAny,
 };
 
@@ -164,6 +176,13 @@ class GpuWaveNetSession {
     /// caller can retry the provider's physical drain barrier.
     bool release() noexcept;
 
+    /// release() that bounds the provider's physical drain to `budget_ns`. On
+    /// expiry the provider abandons to quarantine: its device is destroyed,
+    /// its shared memory stays owned, and this returns false. The session
+    /// keeps ownership on false; the caller must still call release() later
+    /// to complete the disposal. Host/quiescent or serialized worker.
+    bool release_bounded(std::uint64_t budget_ns) noexcept;
+
     /// True once the provider has observed loss of its device. A lost session
     /// never delivers again; its owner must release it and create a new one.
     /// Serialized non-realtime diagnostic, like `service()`.
@@ -174,6 +193,18 @@ class GpuWaveNetSession {
     std::uint64_t outstanding_blocks() const noexcept;
 
   private:
+    friend struct detail::GpuWaveNetSessionAccess;
+    friend struct detail::GpuWaveNetSessionTestAccess;
+    friend struct detail::GpuWaveNetSessionPoolAccess;
+    // Drains a quiescent session within `budget_ns` (zero: the provider's
+    // default) and opens a fresh slot generation on the same provider and
+    // program, for GpuAudioProviderPool. False leaves it to release().
+    // Resident causal history is not cleared.
+    bool recycle(std::uint64_t budget_ns) noexcept;
+    // Provider kind and revision this session runs on, and the ones a new
+    // session would request, for GpuAudioProviderPool keys. Host only.
+    std::string provider_key() const;
+    static std::string requested_provider_key();
     struct Impl;
     explicit GpuWaveNetSession(std::unique_ptr<Impl> impl) noexcept;
     std::unique_ptr<Impl> impl_;

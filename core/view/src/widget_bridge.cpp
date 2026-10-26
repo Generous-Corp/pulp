@@ -336,68 +336,70 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
     repaint_callback_ = [&root] { root.request_repaint(); };
     register_api();
     eval_or_throw(engine_, "kJSPreamble", dispatch_prelude_js() + kJSPreamblePart2);
-    eval_or_throw(engine_, "css_colors", preludes::css_colors);
-    eval_or_throw(engine_, "css_parser", preludes::css_parser);
-    eval_or_throw(engine_, "web_compat_element", preludes::web_compat_element);
+    const auto eval_prelude = [this](const char* name, const auto& prelude) {
+        eval_or_throw(engine_, name, preludes::source(prelude));
+    };
+    eval_prelude("css_colors", preludes::css_colors);
+    eval_prelude("css_parser", preludes::css_parser);
+    eval_prelude("web_compat_element", preludes::web_compat_element);
     // Events + pointer-capture helpers must eval after web_compat_element so
     // the Element constructor and prototype exist before overrides install.
-    eval_or_throw(engine_, "web_compat_element_events", preludes::web_compat_element_events);
-    eval_or_throw(engine_, "web_compat_canvas", preludes::web_compat_canvas);
+    eval_prelude("web_compat_element_events", preludes::web_compat_element_events);
+    eval_prelude("web_compat_canvas", preludes::web_compat_canvas);
     // Native GPU canvas helpers must eval after the canvas core so
     // CanvasRenderingContext2D and window.pulp.gpu are in scope when
     // __ensurePulpGpuHelpers / getContext("webgpu") run.
-    eval_or_throw(engine_, "web_compat_canvas_gpu", preludes::web_compat_canvas_gpu);
+    eval_prelude("web_compat_canvas_gpu", preludes::web_compat_canvas_gpu);
     // _PulpCanvasMatrix DOMMatrix-compat helper plus Canvas2D API closures
     // must eval after web_compat_canvas so the CanvasRenderingContext2D
     // constructor and prototype are in scope.
-    eval_or_throw(engine_, "web_compat_canvas_matrix", preludes::web_compat_canvas_matrix);
-    eval_or_throw(engine_, "web_compat_canvas_image", preludes::web_compat_canvas_image);
+    eval_prelude("web_compat_canvas_matrix", preludes::web_compat_canvas_matrix);
+    eval_prelude("web_compat_canvas_image", preludes::web_compat_canvas_image);
     // Generated alias-group table read by _applyProperty's write-dedup
     // guard. Plain data, no dependencies, so it evaluates before the
     // declaration that consumes it.
-    eval_or_throw(engine_, "web_compat_style_dedup_table", preludes::web_compat_style_dedup_table);
-    eval_or_throw(engine_, "web_compat_style_decl", preludes::web_compat_style_decl);
+    eval_prelude("web_compat_style_dedup_table", preludes::web_compat_style_dedup_table);
+    eval_prelude("web_compat_style_decl", preludes::web_compat_style_decl);
     // Per-domain `_applyProperty` handler modules. The property switch is split
     // into layout / paint / typography / transform / misc handlers;
     // web-compat-style-decl.js's `_applyProperty` is a thin dispatcher that
     // resolves those function declarations at call time. Evaluate handlers
     // after style_decl and before any consumer can trigger a style apply.
-    eval_or_throw(engine_, "web_compat_style_decl_layout", preludes::web_compat_style_decl_layout);
-    eval_or_throw(engine_, "web_compat_style_decl_paint", preludes::web_compat_style_decl_paint);
-    eval_or_throw(engine_, "web_compat_style_decl_typography", preludes::web_compat_style_decl_typography);
-    eval_or_throw(engine_, "web_compat_style_decl_transform", preludes::web_compat_style_decl_transform);
-    eval_or_throw(engine_, "web_compat_style_decl_misc", preludes::web_compat_style_decl_misc);
+    eval_prelude("web_compat_style_decl_layout", preludes::web_compat_style_decl_layout);
+    eval_prelude("web_compat_style_decl_paint", preludes::web_compat_style_decl_paint);
+    eval_prelude("web_compat_style_decl_typography", preludes::web_compat_style_decl_typography);
+    eval_prelude("web_compat_style_decl_transform", preludes::web_compat_style_decl_transform);
+    eval_prelude("web_compat_style_decl_misc", preludes::web_compat_style_decl_misc);
     // CSSStyleDeclaration helper installation needs the style constructor and
     // _applyProperty prototype before it walks __cssProperties__.
-    eval_or_throw(engine_, "web_compat_style_decl_helpers", preludes::web_compat_style_decl_helpers);
-    eval_or_throw(engine_, "web_compat_animation", preludes::web_compat_animation);
-    eval_or_throw(engine_, "web_compat_document", preludes::web_compat_document);
-    eval_or_throw(engine_, "web_compat_transient_interaction",
-                  preludes::web_compat_transient_interaction);
+    eval_prelude("web_compat_style_decl_helpers", preludes::web_compat_style_decl_helpers);
+    eval_prelude("web_compat_animation", preludes::web_compat_animation);
+    eval_prelude("web_compat_document", preludes::web_compat_document);
+    eval_prelude("web_compat_transient_interaction", preludes::web_compat_transient_interaction);
     // CSS selector engine must eval after document and Element so the
     // selector helpers are resolvable when document.querySelector /
     // .querySelectorAll dispatch into them.
-    eval_or_throw(engine_, "web_compat_document_selectors", preludes::web_compat_document_selectors);
+    eval_prelude("web_compat_document_selectors", preludes::web_compat_document_selectors);
     // WebGPU mock factories must eval after document so GPU* usage constants
     // are in scope when factory bodies resolve them lazily at call time.
-    eval_or_throw(engine_, "web_compat_document_gpu_mock", preludes::web_compat_document_gpu_mock);
-    eval_or_throw(engine_, "web_compat_gpu_buffered", preludes::web_compat_gpu_buffered);
+    eval_prelude("web_compat_document_gpu_mock", preludes::web_compat_document_gpu_mock);
+    eval_prelude("web_compat_gpu_buffered", preludes::web_compat_gpu_buffered);
     // DOM mutation methods (appendChild / removeChild / etc.). Single source
     // of truth lives in core/view/js/web-compat-dom-ops.js.
     // The JS file's idempotency guard (`__pulp_dom_ops__` marker on the
     // prototype methods) makes a re-eval a no-op, which matters because
     // load_script callers used to re-trigger this initialization manually
     // before the consolidation.
-    eval_or_throw(engine_, "web_compat_dom_ops", preludes::web_compat_dom_ops);
+    eval_prelude("web_compat_dom_ops", preludes::web_compat_dom_ops);
     // Observer no-ops and scheduler shims so React 18, and any other framework
     // that feature-detects MutationObserver / MessageChannel / queueMicrotask,
     // finds the constructors it expects on the global.
-    eval_or_throw(engine_, "web_compat_observers", preludes::web_compat_observers);
-    eval_or_throw(engine_, "web_compat_scheduler", preludes::web_compat_scheduler);
+    eval_prelude("web_compat_observers", preludes::web_compat_observers);
+    eval_prelude("web_compat_scheduler", preludes::web_compat_scheduler);
     // DOM construction and walker for the Claude Design `--execute-bundle`
     // import lane. Hides itself behind `globalThis.__pulpImportRuntime__` so
     // non-import scripts do not see new globals.
-    eval_or_throw(engine_, "import_runtime", preludes::import_runtime);
+    eval_prelude("import_runtime", preludes::import_runtime);
     // Install the window event-listener shim LAST so it survives any
     // `var window = {...}` reassignment performed by the preludes above
     // (notably web-compat-document.js). See kWindowListenerShim comment.

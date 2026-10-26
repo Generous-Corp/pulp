@@ -160,6 +160,12 @@ if(PULP_HAS_SKIA)
         LIBRARIES pulp::canvas)
 endif()
 
+# CSS font-weight matching: the spec order as a table, and the face every
+# picking path reports for real platform families (macOS cases skip where the
+# family is not installed).
+pulp_add_test_suite(pulp-test-font-weight-match GROUP pulp-test-group-canvas-text
+    LIBRARIES pulp::canvas)
+
 # Font subsystem typed options and scope generation tests
 pulp_add_test_suite(pulp-test-font-options GROUP pulp-test-group-canvas-text
     LIBRARIES pulp::canvas)
@@ -222,6 +228,16 @@ if(PULP_HAS_SKIA)
     # The key-switch case reaches the cache's internal key directly.
     target_include_directories(pulp-test-group-canvas-text PRIVATE
         ${PULP_ROOT_DIR}/core/canvas/src)
+endif()
+
+# Native builds must not pull Skia's Ganesh backend into pulp-canvas; see the
+# script for why one unguarded call keeps all of it alive.
+if(PULP_HAS_SKIA AND NOT EMSCRIPTEN AND CMAKE_NM AND NOT MSVC)
+    add_test(NAME pulp-canvas-native-no-ganesh
+        COMMAND "${CMAKE_COMMAND}"
+            "-DNM=${CMAKE_NM}"
+            "-DARCHIVE=$<TARGET_FILE:pulp-canvas>"
+            -P "${CMAKE_CURRENT_LIST_DIR}/check_canvas_no_ganesh_refs.cmake")
 endif()
 
 if(PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU)
@@ -319,6 +335,13 @@ if(PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU)
     # and measured the same way as pulp-test-css-gradient-dither's raster
     # cases. Soft-skips without an adapter.
     pulp_add_test_suite(pulp-test-css-gradient-dither-gpu
+        LIBRARIES pulp::view pulp::canvas pulp::render
+        PROPERTIES RESOURCE_LOCK pulp_gpu)
+
+    # CSS gradient interpolation methods on an offscreen Dawn/Graphite surface,
+    # midpoints held to Chrome's as pulp-test-css-gradient-interpolation holds
+    # the raster ones. Soft-skips without an adapter.
+    pulp_add_test_suite(pulp-test-css-gradient-interpolation-gpu
         LIBRARIES pulp::view pulp::canvas pulp::render
         PROPERTIES RESOURCE_LOCK pulp_gpu)
 

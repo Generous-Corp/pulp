@@ -10,6 +10,9 @@ endif()
 pulp_add_plugin(PulpTempoSampler
     FORMATS           ${PULP_TEMPO_FORMATS}
     PLUGIN_NAME       "PulpTempoSampler"
+    # The sampler editor embeds the musical typing keyboard, whose SVG only
+    # composites on the GPU host (requires_gpu_host()): link the full editor stack.
+    GPU_UI
     BUNDLE_ID         "com.pulp.tempo-sampler"
     MANUFACTURER      "Pulp"
     VERSION           "1.7.1"

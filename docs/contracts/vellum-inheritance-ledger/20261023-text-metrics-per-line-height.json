@@ -1,0 +1,13 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261023-text-metrics-per-line-height",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "vellum_obligation": "Multi-line text metrics must treat SkParagraph LineMetrics::fHeight as a per-line height and take the max ascent/descent/leading over all lines, with a control test that pins the library's semantics.",
+  "evidence": [
+    ".github/vellum-change-events/20261023-text-metrics-per-line-height.json",
+    "pulp-test-text-shaper: SkParagraph reports LineMetrics fHeight per line, not cumulatively",
+    "pulp-test-text-shaper: TextShaper multiline metrics enclose each line shaped alone"
+  ]
+}

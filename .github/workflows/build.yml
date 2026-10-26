@@ -3,13 +3,17 @@ name: Build and Test
 on:
   pull_request:
     branches: [main, 'develop/**']
-    # The default three plus `labeled`. With PULP_MACOS_PR_GATING on, the
-    # fleet App applying `macos-ci` is what moves a pull request's macOS leg
-    # from its configure-only contract lane to the full lane (see "macOS on a
-    # pull request waits for approval" in docs/guides/local-ci.md); that run is
-    # macOS-only. Any other label event starts a run that skips every job and
-    # sits in its own concurrency group, so it never cancels the real run.
-    types: [opened, synchronize, reopened, labeled]
+    # The default three only, never `labeled`. A label event starts a run whose
+    # check suite is newer than the head's real run but has no `macos` check
+    # run, and the merge queue reads the required `macos` context from that
+    # newest suite: it refuses to enqueue with "Required status check "macos"
+    # is expected" even though the earlier run's `macos` passed. Shipyard adds
+    # several labels to every new pull request, so `labeled` shadowed every
+    # head. With PULP_MACOS_PR_GATING on, the fleet App must move a head to the
+    # full lane by dispatching this workflow (workflow_dispatch), not by a
+    # label event. The `github.event.action == 'labeled'` branches below are
+    # now unreachable.
+    types: [opened, synchronize, reopened]
   # Publish the Linux/Windows ccache + FetchContent caches that PR runs restore
   # from. Only a non-PR run on the default branch may write to GitHub's cloud
   # cache — a PR-run cache entry is scoped to the PR's own ref and is invisible
@@ -1773,7 +1777,9 @@ jobs:
         if: runner.os == 'Linux'
         uses: ./.github/actions/install-linux-build-deps
         with:
-          extra-packages: ccache
+          # xvfb: the X11 plug-in host tests run under xvfb-run (see
+          # test/cmake/script_canvas_render_tests.cmake) rather than skipping.
+          extra-packages: ccache xvfb
 
       # ── Namespace cache ─────────────────────────────────────────────────
       # Namespace cache volumes persist across runs on the same workspace,
@@ -2338,6 +2344,14 @@ jobs:
           # (tools/cmake/PulpLinkMaps.cmake). The map is a side output, the
           # linked bytes are unchanged, and it does nothing off Apple linkers.
           cmake_args=(-DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF -DPULP_RECORD_LINK_MAPS=ON)
+          # Compile, never run, the GPU-audio hardware-evidence targets: the
+          # arm64 gate has the GPU, tests and the pinned Skia/Dawn, so exact
+          # provider proof configures here, and the `gpu-proof` label keeps the
+          # tests out of every ctest selection (tools/ci/ctest_gate_args.py).
+          # Their receipts stay owner-run on a physical GPU.
+          if [ "${RUNNER_OS}" = "macOS" ] && [ "${RUNNER_ARCH}" = "ARM64" ]; then
+            cmake_args+=(-DPULP_GPU_AUDIO_EXACT_PROVIDER_PROOF=ON)
+          fi
           # Ask CMake for its codemodel: the pull-request step that runs the
           # tests a diff reaches maps changed files to targets through it.
           mkdir -p "$PULP_BUILD_DIR/.cmake/api/v1/query"
@@ -2350,6 +2364,33 @@ jobs:
             mkdir -p "$PULP_BUILD_DIR" && : > "$PULP_BUILD_DIR/.pulp-build-incomplete"
           fi
         shell: bash
+
+      - name: Verify GPU-audio proof targets are configured and never run
+        # The configure registers exactly the reviewed gpu-proof set
+        # (tools/ci/gpu_proof_tests.txt): a dropped proof target cannot pass by
+        # absence, and a new one is a reviewed allowlist diff. ctest adds a
+        # required fixture's setup even under -LE, so the selection this gate
+        # runs is checked too: it must contain no gpu-proof test.
+        if: runner.os == 'macOS' && runner.arch == 'ARM64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          names() { sed -n 's/^ *Test *#[0-9]*: //p' | LC_ALL=C sort; }
+          labelled="$(ctest --test-dir "$PULP_BUILD_DIR" -N -L '^gpu-proof$' | names)"
+          if ! diff -u tools/ci/gpu_proof_tests.txt <(printf '%s\n' "$labelled"); then
+            echo "::error title=gpu-audio-proof::the configured gpu-proof tests differ from tools/ci/gpu_proof_tests.txt"
+            exit 1
+          fi
+          eval "$(python3 tools/ci/ctest_gate_args.py \
+            --event-name "$GITHUB_EVENT_NAME" --runner-os "$RUNNER_OS")"
+          : "${label_exclude:?ctest gate arguments did not resolve}"
+          leaked="$(LC_ALL=C comm -12 tools/ci/gpu_proof_tests.txt \
+            <(ctest --test-dir "$PULP_BUILD_DIR" -N -LE "$label_exclude" | names))"
+          if [ -n "$leaked" ]; then
+            printf '%s\n' "$leaked"
+            echo "::error title=gpu-audio-proof::the gate's ctest selection would run gpu-proof tests"
+            exit 1
+          fi
 
       - name: Install visual-analysis Python dependencies
         shell: bash
@@ -3367,9 +3408,9 @@ jobs:
         run: |
           chcp 65001
           set "PULP_CTEST_LABEL_EXCLUDE=validation"
-          if "%GITHUB_EVENT_NAME%"=="pull_request" set "PULP_CTEST_LABEL_EXCLUDE=validation|slow|windows-pr-quarantine|performance|bench|quality-lab"
-          if "%GITHUB_EVENT_NAME%"=="workflow_dispatch" set "PULP_CTEST_LABEL_EXCLUDE=validation|slow|windows-pr-quarantine|performance|bench|quality-lab"
-          if "%GITHUB_EVENT_NAME%"=="merge_group" set "PULP_CTEST_LABEL_EXCLUDE=validation|slow|windows-pr-quarantine|performance|bench|quality-lab"
+          if "%GITHUB_EVENT_NAME%"=="pull_request" set "PULP_CTEST_LABEL_EXCLUDE=validation|slow|windows-pr-quarantine|performance|bench|quality-lab|gpu-proof"
+          if "%GITHUB_EVENT_NAME%"=="workflow_dispatch" set "PULP_CTEST_LABEL_EXCLUDE=validation|slow|windows-pr-quarantine|performance|bench|quality-lab|gpu-proof"
+          if "%GITHUB_EVENT_NAME%"=="merge_group" set "PULP_CTEST_LABEL_EXCLUDE=validation|slow|windows-pr-quarantine|performance|bench|quality-lab|gpu-proof"
           ctest --test-dir "%PULP_BUILD_DIR%" --output-on-failure --repeat until-pass:2 -C Release -LE "%PULP_CTEST_LABEL_EXCLUDE%" -j8 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items|baked C.* exporter emits ownable C.* source artifacts|pulp-import-design handles literal file paths and rejects unsafe URLs"
 
       - name: Issue exact protected-validation receipt
@@ -3481,6 +3522,55 @@ jobs:
             ${{ env.PULP_BUILD_DIR }}/VST3/**/*.so
             ${{ env.PULP_BUILD_DIR }}/CLAP/**/*.so
           retention-days: 7
+
+      - name: Refuse a head armed before approval (contract lane)
+        # The contract lane's green satisfies the required `macos` check
+        # without a build, so a pull request armed for auto-merge before it
+        # was approved (arm-on-open) would be enqueued on it. Fail instead when
+        # this exact head is armed or already queued. It is the job's LAST
+        # step, after every always() step, so only the runner's post-steps
+        # separate it from the job's conclusion (test_build_workflow.py pins
+        # that). macos-ci-arm-refusal.yml refuses an arm at the source, and
+        # macos-ci-deferred-disarm.yml disarms or dequeues any that slip past.
+        # GraphQL, not REST: REST `auto_merge` reads null for a queued pull
+        # request. A read-only token is enough.
+        if: >-
+          vars.PULP_MACOS_PR_GATING == 'true'
+          && github.event_name == 'pull_request'
+          && matrix.lane == 'contract'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -uo pipefail
+          state=""
+          for attempt in 1 2 3; do
+            # shellcheck disable=SC2016  # $owner, $name and $number are GraphQL variables
+            if state=$(gh api graphql \
+                -f query='query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { headRefOid autoMergeRequest { enabledAt } mergeQueueEntry { state } } } }' \
+                -f owner="${GITHUB_REPOSITORY%%/*}" -f name="${GITHUB_REPOSITORY#*/}" -F number="$PR_NUMBER" \
+                --jq '.data.repository.pullRequest | [.headRefOid, (.autoMergeRequest != null | tostring), (.mergeQueueEntry != null | tostring)] | join(" ")'); then
+              break
+            fi
+            state=""
+            sleep $((attempt * 5))
+          done
+          if [ -z "$state" ]; then
+            echo "::error title=arm state unreadable::could not read whether #$PR_NUMBER is armed; a contract-lane green must not reach the queue unread. Re-run this job."
+            exit 1
+          fi
+          read -r head armed queued <<< "$state"
+          if [ "$head" != "$PR_HEAD_SHA" ]; then
+            echo "#$PR_NUMBER has moved past $PR_HEAD_SHA (now $head); its own run decides"
+            exit 0
+          fi
+          if [ "$armed" = true ] || [ "$queued" = true ]; then
+            echo "::error title=armed before approval::#$PR_NUMBER at $PR_HEAD_SHA is armed before approval and a full macOS run: remove auto-merge, get a trusted APPROVE; the fleet App applies macos-ci for the full lane"
+            exit 1
+          fi
+          echo "#$PR_NUMBER is not armed or queued at $PR_HEAD_SHA"
 
   # ── Windows MSVC release-path PR gate ────────────────────────────────────
   #

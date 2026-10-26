@@ -394,6 +394,7 @@ pub fn scaffold(
     let ns = to_namespace_name(&args.name);
     let lower_underscored = lower_name.replace('-', "_");
     let header_name = format!("{lower_underscored}.hpp");
+    let source_name = format!("{lower_underscored}.cpp");
     let plugin_code = make_plugin_code(&class_name);
     let aax_product_code = make_aax_product_code(&class_name);
     let mfr_code = make_mfr_code(&args.manufacturer);
@@ -415,6 +416,7 @@ pub fn scaffold(
         ("NAMESPACE", &ns),
         ("FACTORY_NAME", &ns),
         ("HEADER_NAME", &header_name),
+        ("SOURCE_NAME", &source_name),
         ("TARGET_NAME", &class_name),
         ("MANUFACTURER", &args.manufacturer),
         ("MANUFACTURER_CODE", &mfr_code),
@@ -466,8 +468,9 @@ pub fn scaffold(
 
     // File map — same source-to-output list as C++.
     let test_name = format!("test_{lower_underscored}.cpp");
-    let file_map: [(&str, &str); 8] = [
+    let file_map: [(&str, &str); 9] = [
         ("processor.hpp.template", "processor.hpp"), // overwritten below
+        ("processor.cpp.template", "processor.cpp"), // overwritten below
         ("CMakeLists.txt.template", "CMakeLists.txt"),
         ("clap_entry.cpp.template", "clap_entry.cpp"),
         ("vst3_entry.cpp.template", "vst3_entry.cpp"),
@@ -478,8 +481,9 @@ pub fn scaffold(
     ];
     // We overwrite the processor header to <header_name>, and the test
     // to test_<lower>.cpp, via this table:
-    let rename: [(&str, &str); 2] = [
+    let rename: [(&str, &str); 3] = [
         ("processor.hpp", header_name.as_str()),
+        ("processor.cpp", source_name.as_str()),
         ("test.cpp", test_name.as_str()),
     ];
 

@@ -211,6 +211,7 @@ IOS_COMPILE_REQUIRED_PATTERNS = (
     "test/cmake/plugin_lab_clap_roundtrip.cmake",
     "test/cmake/check_bundle_build_info.cmake",
     "test/cmake/check_plugin_module_dead_strip.cmake",
+    "test/cmake/check_plugin_module_editor_stack.cmake",
     "test/cmake/check_plugin_module_no_script_runtime.cmake",
     "test/cmake/pulp_state_link_closure.cmake.in",
     "docs/contracts/**",

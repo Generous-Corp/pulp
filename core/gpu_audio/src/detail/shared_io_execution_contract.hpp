@@ -26,6 +26,43 @@ enum class SharedIoRequest : std::uint8_t {
     RequireCpu,
 };
 
+// Admission outcome for one block offered to a provider.
+enum class SharedIoAdmission : std::uint8_t {
+    Accepted,
+    NotPrepared,
+    SequenceGap,
+    CapacityFull,
+    // The terminal sequence value has no successor, so admitting it would
+    // wrap the admission epoch back to zero. The owner must re-prepare.
+    SequenceExhausted,
+};
+
+// The admission ticket a submission carries to its completion. The generation
+// (the delivery or preparation epoch) is captured when the block is admitted
+// and is never re-read when the completion arrives, so a completion can only
+// retire work of the generation that admitted it.
+struct SharedIoSubmissionTicket {
+    SharedIoAdmission admission = SharedIoAdmission::NotPrepared;
+    std::uint64_t generation = 0;
+    std::uint64_t sequence = 0;
+
+    constexpr bool accepted() const noexcept {
+        return admission == SharedIoAdmission::Accepted;
+    }
+    // True when this ticket admitted `sequence` under `generation`.
+    constexpr bool admits(std::uint64_t expected_generation,
+                          std::uint64_t expected_sequence) const noexcept {
+        return accepted() && generation == expected_generation && sequence == expected_sequence;
+    }
+    friend constexpr bool operator==(const SharedIoSubmissionTicket&,
+                                     const SharedIoSubmissionTicket&) = default;
+};
+
+constexpr SharedIoSubmissionTicket admit_submission(std::uint64_t generation,
+                                                    std::uint64_t sequence) noexcept {
+    return {SharedIoAdmission::Accepted, generation, sequence};
+}
+
 enum class SharedIoFallbackReason : std::uint8_t {
     None,
     UnsupportedProvider,

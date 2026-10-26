@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 80,
+  "manifest_revision": 82,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -9855,6 +9855,7 @@
               "set_mode(Mode mode)",
               "set_parameter(Param p, double value)",
               "parameter(Param p)",
+              "combs_silent()",
               "snap_parameters()",
               "latency_samples()",
               "comb_length(int comb)",
@@ -9959,7 +9960,13 @@
               "attack_coefficient()",
               "release_coefficient()",
               "gain_reduction_db()",
-              "gain_reduction()"
+              "gain_reduction()",
+              "detector_level_db(SampleType detector)",
+              "gain_computer_db(SampleType input_db, const Params& params)",
+              "ballistic_coefficient(SampleType time_ms, SampleType sample_rate)",
+              "branching_step(SampleType envelope, SampleType target, SampleType attack, SampleType release)",
+              "decoupled_hold(SampleType hold, SampleType target, SampleType release)",
+              "db_to_gain(SampleType db)"
             ],
             "enums": []
           },
@@ -11770,6 +11777,8 @@
               "tank_rate()",
               "resampling()",
               "interpolation_skew_samples()",
+              "input_read_position()",
+              "output_read_position()",
               "tank_input(int rail)",
               "tank_output(int rail)",
               "host_to_tank(const SampleType* left, const SampleType* right, int n)",
@@ -11988,11 +11997,13 @@
             "methods": [
               "size()",
               "ready()",
+              "vdsp_split_offset_bytes(bool real_transform)",
               "forward(std::complex<SampleType>* data)",
               "inverse(std::complex<SampleType>* data)",
               "forward_real(const SampleType* input, std::complex<SampleType>* output)",
               "real_bins()",
-              "forward_real_half(const SampleType* input, std::complex<SampleType>* output, SampleType scale = SampleType{1})",
+              "forward_real_half(const SampleType* input, std::complex<SampleType>* output, SampleType scale)",
+              "forward_real_half(const SampleType* input, std::complex<SampleType>* output)",
               "inverse_real_half(const std::complex<SampleType>* input, SampleType* output, SampleType scale)",
               "inverse_real_half(const std::complex<SampleType>* input, SampleType* output)",
               "magnitude_db(const std::complex<SampleType>* freq, SampleType* out, int num_bins)",
@@ -12001,14 +12012,12 @@
             "enums": []
           },
           {
-            "class": "ConvolverT",
-            "qualified_name": "pulp::signal::ConvolverT",
-            "template": "typename SampleType = float",
+            "class": "FftRealSplit",
+            "qualified_name": "pulp::signal::detail::FftRealSplit",
+            "template": null,
             "methods": [
-              "process(SampleType input)",
-              "process(const SampleType* input, SampleType* output, int num_samples)",
-              "reset()",
-              "load_ir(const SampleType* ir, int ir_length, int block_size = 0)"
+              "constexpr(std::is_same_v<SampleType, float>)",
+              "checked_capacity_product(fft_size, kVdspFftSetupChargeBytesPerPoint, target_max_bytes, bytes)"
             ],
             "enums": []
           }
@@ -12783,13 +12792,16 @@
             "enums": []
           },
           {
-            "class": "HalfBandIirStage",
-            "qualified_name": "pulp::signal::detail::HalfBandIirStage",
-            "template": "typename SampleType",
+            "class": "HalfBandIirStageT",
+            "qualified_name": "pulp::signal::HalfBandIirStageT",
+            "template": "typename SampleType = float",
             "methods": [
               "reset()",
               "configure(const HalfBandIirDesign& design)",
               "coefficient_count()",
+              "sections_a()",
+              "sections_b()",
+              "configured()",
               "upsample(const SampleType* input, SampleType* output, std::size_t n)",
               "downsample(const SampleType* input, SampleType* output, std::size_t n)"
             ],
@@ -12804,6 +12816,7 @@
               "process(SampleType x, SampleType& out_lo, SampleType& out_hi)",
               "sections_a()",
               "sections_b()",
+              "configured()",
               "process_block(std::span<const SampleType> input, std::span<SampleType> output)"
             ],
             "enums": []
@@ -12817,6 +12830,7 @@
               "process(SampleType in_lo, SampleType in_hi)",
               "sections_a()",
               "sections_b()",
+              "configured()",
               "process_block(std::span<const SampleType> input, std::span<SampleType> output)"
             ],
             "enums": []
@@ -14458,6 +14472,20 @@
             ]
           }
         ],
+        "overlap_add_convolver.hpp": [
+          {
+            "class": "ConvolverT",
+            "qualified_name": "pulp::signal::ConvolverT",
+            "template": "typename SampleType = float",
+            "methods": [
+              "process(SampleType input)",
+              "process(const SampleType* input, SampleType* output, int num_samples)",
+              "reset()",
+              "load_ir(const SampleType* ir, int ir_length, int block_size = 0)"
+            ],
+            "enums": []
+          }
+        ],
         "oversampling.hpp": [
           {
             "class": "OversamplerT",
@@ -14479,6 +14507,7 @@
               "latency_samples()",
               "group_delay_samples(double frequency)",
               "polyphase_stage_design(Quality quality, int stage)",
+              "polyphase_stopband_db(Quality quality)",
               "process_block(const SampleType* input, SampleType* output, std::size_t num_samples, Callback&& callback)"
             ],
             "enums": [

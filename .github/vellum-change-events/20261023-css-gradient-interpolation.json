@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "event_id": "20261023-css-gradient-interpolation",
+  "kind": "change",
+  "created_at": "2026-10-23T02:32:45Z",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "rationale": "design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger); CSS gradients may name the space their stops blend in (`in oklab`, `in oklch longer hue`), which Tailwind v4 emits on every gradient utility, and Pulp blended every gradient in sRGB, so `linear-gradient(to right in oklab, #ff0000, #0000ff)` painted (127.5, 0, 127.5) at its midpoint where Chrome 156 paints (140.25, 83, 162.25). Canvas gains an appended set_gradient_interpolation() virtual (existing vtable slots unchanged) whose state every later gradient setter reads; skia_gradient::css_interpolation maps each CSS Color 4 space and hue method to SkGradient::Interpolation, keeping sRGB on kDestination so gradients that name no space paint identical pixels, and using the plain OKLab/OKLCH spaces because Chrome clips out-of-gamut blends. RecordingCanvas records the call as an appended command only when it is made. Measured midpoints for eleven methods: Skia raster and Graphite equal Chrome's column means exactly; CoreGraphics (Pulp-owned, resampled from a public reference interpolation) is within 2.3 code values. Dithered gradients still install through skia_gradient::set_paint_shader. No design-import, Chromium, packaging, or source-authority boundary moves.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "ctest --test-dir build -R 'A gradient forced to sRGB fails the Oklab midpoint'",
+    "ctest --test-dir build -R 'CoreGraphics midpoints match Chrome through resampling'",
+    "ctest --test-dir build -R 'Graphite gradient midpoints match Chrome for each interpolation method'",
+    "ctest --test-dir build -R 'Skia raster midpoints match Chrome for every interpolation method'",
+    "ctest --test-dir build -R 'The reference interpolation matches Chrome's midpoints'",
+    "ctest --test-dir build -R 'The view hands a layer's interpolation to the canvas around its shader'",
+    "ctest --test-dir build -R 'every command type has a distinct name'"
+  ],
+  "disposition": "pulp-only",
+  "vellum_inherits": true
+}

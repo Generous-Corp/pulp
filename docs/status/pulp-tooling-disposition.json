@@ -705,6 +705,10 @@
             "kind": "flag"
           },
           {
+            "name": "--dev-shared",
+            "kind": "flag"
+          },
+          {
             "name": "--seed-build",
             "kind": "option"
           },
@@ -1685,6 +1689,10 @@
           },
           {
             "name": "--allow-unsupported-sdk",
+            "kind": "flag"
+          },
+          {
+            "name": "--no-dev-shared",
             "kind": "flag"
           },
           {
@@ -2682,6 +2690,10 @@
             "kind": "flag"
           },
           {
+            "name": "--no-dev-shared",
+            "kind": "flag"
+          },
+          {
             "name": "--watch-issues",
             "kind": "option"
           },
@@ -3500,6 +3512,10 @@
                 "required": false
               },
               {
+                "name": "--allow-dev-build",
+                "required": false
+              },
+              {
                 "name": "--path",
                 "required": false
               },
@@ -3581,6 +3597,10 @@
             "arguments": [
               {
                 "name": "--version",
+                "required": false
+              },
+              {
+                "name": "--allow-dev-build",
                 "required": false
               },
               {

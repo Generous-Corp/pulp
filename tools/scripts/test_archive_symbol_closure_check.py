@@ -200,6 +200,26 @@ class RttiOwnershipTest(unittest.TestCase):
         self.assertEqual(rtti_ownership.rtti_class("construction vtable for foo::Base-in-foo::Bar"), "foo::Bar")
         self.assertEqual(rtti_ownership.rtti_class("typeinfo name for foo::Bar<int>"), "foo::Bar<int>")
 
+    def test_demangle_never_lets_the_tool_strip_an_underscore(self) -> None:
+        # A stand-in for the c++filt on GitHub-hosted macOS: it strips one
+        # leading underscore unless told -n, then demangles only "_Z" names.
+        with tempfile.TemporaryDirectory() as tmp:
+            tool = Path(tmp) / "c++filt"
+            tool.write_text(
+                f"#!{sys.executable}\n"
+                "import sys\n"
+                "strip = '-n' not in sys.argv[1:]\n"
+                "known = {'_ZTIN7content8RegistryE': 'typeinfo for content::Registry'}\n"
+                "for line in sys.stdin.read().splitlines():\n"
+                "    name = line[1:] if strip and line.startswith('_') else line\n"
+                "    print(known.get(name, line))\n",
+                encoding="utf-8")
+            tool.chmod(tool.stat().st_mode | stat.S_IXUSR)
+            names = rtti_ownership.demangle(
+                {"_ZTIN7content8RegistryE", "__ZTIN7content8RegistryE"}, str(tool))
+        # Both the ELF spelling and the Mach-O one (extra underscore) demangle.
+        self.assertEqual(set(names.values()), {"typeinfo for content::Registry"})
+
     def test_member_owner_reads_the_enclosing_class(self) -> None:
         cases = {
             "pulp::view::Meter::set_level(float, float)": "pulp::view::Meter",
@@ -219,6 +239,24 @@ class RttiOwnershipTest(unittest.TestCase):
         for demangled, owner in cases.items():
             self.assertEqual(rtti_ownership.member_owner(demangled), owner, demangled)
         self.assertIsNone(rtti_ownership.member_owner("vtable for pulp::view::Meter"))
+
+    def test_member_owner_reads_through_operator_names(self) -> None:
+        # The brackets and spaces in an operator's own name are neither
+        # nesting nor a return type.
+        owner = "pulp::view::Meter"
+        for op in ("operator>(pulp::view::Meter const&) const", "operator>>(int)",
+                   "operator<(pulp::view::Meter const&) const", "operator<<=(int)",
+                   "operator<=>(pulp::view::Meter const&) const", "operator->() const",
+                   "operator bool() const", "operator unsigned long() const",
+                   "operator new(unsigned long)", "operator delete[](void*)",
+                   "operator=(pulp::view::Meter&&)", "operator[](unsigned long)"):
+            with self.subTest(op):
+                self.assertEqual(rtti_ownership.member_owner(f"{owner}::{op}"), owner)
+        self.assertEqual(rtti_ownership.member_owner(
+            "pulp::view::Box<int>::operator<(pulp::view::Box<int> const&) const"),
+            "pulp::view::Box<int>")
+        # A member merely named like an operator keeps its own name.
+        self.assertEqual(rtti_ownership.member_owner(f"{owner}::operator_helper(int)"), owner)
 
     def test_std_and_closures_are_never_flagged(self) -> None:
         for cls in ("std::__1::__function::__func<pulp::view::Meter::bind()::'lambda'(), void ()>",

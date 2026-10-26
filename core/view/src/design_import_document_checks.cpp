@@ -2,12 +2,11 @@
 
 #include <pulp/canvas/image_probe.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/view/design_import.hpp>
 
 #include <algorithm>
 #include <cctype>
-#include <sstream>
 #include <string>
-#include <unordered_map>
 
 namespace pulp::view {
 
@@ -40,29 +39,6 @@ bool names_svg(const IRAssetRef& asset, std::string_view file_uri) {
     return uri.size() >= 4 && (uri.ends_with(".svg") || uri.ends_with(".svgz"));
 }
 
-void walk_anchors(const IRNode& node, const std::string& path,
-                  std::unordered_map<std::string, std::string>& first_seen,
-                  std::vector<ImportDiagnostic>& out) {
-    if (node.stable_anchor_id && !node.stable_anchor_id->empty()) {
-        const auto& anchor = *node.stable_anchor_id;
-        auto [it, inserted] = first_seen.emplace(anchor, path);
-        if (!inserted) {
-            runtime::log_warn("design-import: duplicate stable anchor '{}' at {} (first at {}); "
-                              "bindings and re-import tweaks reach only the first",
-                              anchor, path, it->second);
-            out.push_back(
-                warning("identity-duplicate", path,
-                        "duplicate stable anchor '" + anchor + "' (first at " + it->second + ")",
-                        node, ImportDiagnosticKind::unknown));
-        }
-    }
-    for (std::size_t i = 0; i < node.children.size(); ++i) {
-        std::ostringstream child;
-        child << path << "/children[" << i << "]";
-        walk_anchors(node.children[i], child.str(), first_seen, out);
-    }
-}
-
 } // namespace
 
 void append_document_version_diagnostic(const DesignIR& ir, std::vector<ImportDiagnostic>& out) {
@@ -85,8 +61,20 @@ void append_unknown_node_type_diagnostic(const IRNode& node, std::string_view pa
 }
 
 void append_duplicate_anchor_diagnostics(const IRNode& root, std::vector<ImportDiagnostic>& out) {
-    std::unordered_map<std::string, std::string> first_seen;
-    walk_anchors(root, "$", first_seen, out);
+    for (const auto& duplicate : find_duplicate_anchors(root)) {
+        runtime::log_warn("design-import: duplicate stable anchor '{}' at {} (first at {}); "
+                          "bindings and re-import tweaks reach only the first",
+                          duplicate.anchor, duplicate.path, duplicate.first_path);
+        ImportDiagnostic diagnostic;
+        diagnostic.severity = ImportDiagnosticSeverity::warning;
+        diagnostic.kind = ImportDiagnosticKind::unknown;
+        diagnostic.code = "identity-duplicate";
+        diagnostic.path = duplicate.path;
+        diagnostic.message = "duplicate stable anchor '" + duplicate.anchor + "' (first at " +
+                             duplicate.first_path + ")";
+        diagnostic.anchor_id = duplicate.anchor;
+        out.push_back(std::move(diagnostic));
+    }
 }
 
 bool append_undecodable_image_diagnostic(const IRNode& node, std::string_view path,

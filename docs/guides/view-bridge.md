@@ -88,6 +88,35 @@ builds the AutoUi (or the scripted UI the plug-in declares with
 `pulp_add_plugin(UI_SCRIPT ...)` or `pulp_use_kit_ui()`, which each format
 target registers at load time; see `pulp/format/editor_assets.hpp`). Every plugin gets a working editor for free.
 
+#### Where the default scripted editor's document comes from
+
+`pulp_add_plugin(... UI_SCRIPT ui.js)` compiles the script's bytes, the
+`theme.json` beside it, and the image, font and data files beside it into every
+format target. The same generated registration unit that records the target's
+editor assets carries them, so `pulp::format::register_editor_assets()` hands
+ViewBridge one record: the embedded editor every build has, plus the on-disk
+paths only a dev build (`PULP_DEV_BUILD`) records. The default editor
+(`build_editor_ui_for_assets`) evaluates the embedded bytes through
+`ScriptedUiOptions::script_source`: nothing is read from disk, the session's
+`script_path()` is empty, a `theme.json` relative to the host's working
+directory is never consulted, and the embedded files stand in for the script's
+directory (`__loadAssetSync__`, `setImageSource`, sprite strips and
+`registerFont` resolve a relative path there first, then in the asset roots).
+Persisted stores (`localStorage`, style presets) are keyed by the plug-in's
+bundle id and script name instead of a directory.
+
+`select_editor_ui_source()` in `editor_ui.hpp` is the pure decision and is
+tested as such. The on-disk path is honored only by a hot-reloading editor and
+only while that file exists, so the standalone host and a DAW launched with
+`PULP_DEV_HOT_RELOAD=1` keep reading the file a developer is editing, while a
+release build, which records no path, depends on nothing outside the bundle.
+
+An embedded session asked for `enable_hot_reload` has nothing to watch: it
+keeps the flag, creates no `HotReloader` (`hot_reload_watching()` stays false),
+and logs once. `reload()` re-evaluates the embedded bytes; `reload_from(path)`
+switches to a file and `reload_from({})` returns to the embedded source, which
+is how `ScriptedUiSwapUnit` rolls an embedded editor back.
+
 ### Custom view tree
 
 ```cpp

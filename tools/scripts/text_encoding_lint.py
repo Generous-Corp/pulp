@@ -35,6 +35,9 @@ import subprocess
 import sys
 from typing import Callable, Iterable
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from gate_common import commit_blobs  # noqa: E402
+
 SCOPES = ("tools/", "test/")
 BASELINE = pathlib.Path("tools/scripts/text_encoding_baseline.json")
 SUBPROCESS_TEXT = {"run", "check_output", "check_call", "Popen"}
@@ -160,9 +163,19 @@ def tracked_python(root: pathlib.Path) -> list[str]:
     return sorted({p for p in result.stdout.decode("utf-8").split("\0") if p})
 
 
-def changed_lines(root: pathlib.Path, base: str) -> dict[str, set[int]]:
+def tracked_python_at(root: pathlib.Path, rev: str) -> list[str]:
+    """The in-scope Python sources in commit ``rev``'s tree."""
+    result = subprocess.run(
+        ["git", "ls-tree", "-r", "-z", "--name-only", rev],
+        cwd=root, capture_output=True, check=True,
+    )
+    return sorted(p for p in result.stdout.decode("utf-8").split("\0")
+                  if p.endswith(".py") and p.startswith(SCOPES))
+
+
+def changed_lines(root: pathlib.Path, base: str, head: str = "HEAD") -> dict[str, set[int]]:
     diff = subprocess.run(
-        ["git", "diff", "--unified=0", "--no-color", f"{base}...HEAD", "--", *SCOPES],
+        ["git", "diff", "--unified=0", "--no-color", f"{base}...{head}", "--", *SCOPES],
         cwd=root, capture_output=True, check=True,
     ).stdout.decode("utf-8", errors="replace")
     lines: dict[str, set[int]] = {}
@@ -178,15 +191,25 @@ def changed_lines(root: pathlib.Path, base: str) -> dict[str, set[int]]:
     return lines
 
 
-def counts_for(root: pathlib.Path, files: Iterable[str]) -> tuple[dict[str, int], dict[str, list[tuple[int, str]]]]:
+def counts_for(root: pathlib.Path, files: Iterable[str],
+               texts: dict[str, str] | None = None,
+               ) -> tuple[dict[str, int], dict[str, list[tuple[int, str]]]]:
+    """Counts per file, read from ``texts`` when given (a commit's blobs),
+    otherwise from the working tree."""
     counts: dict[str, int] = {}
     details: dict[str, list[tuple[int, str]]] = {}
     for rel in files:
-        path = root / rel
-        if not path.is_file():
-            continue
+        if texts is not None:
+            if rel not in texts:
+                continue
+            text = texts[rel]
+        else:
+            path = root / rel
+            if not path.is_file():
+                continue
+            text = path.read_text(encoding="utf-8")
         try:
-            found = scan_text(path.read_text(encoding="utf-8"))
+            found = scan_text(text)
         except SyntaxError:
             continue  # a fixture that is not Python 3 source is not text I/O
         if found:
@@ -263,12 +286,20 @@ def main(argv: list[str] | None = None,
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=pathlib.Path, default=pathlib.Path("."))
     parser.add_argument("--base", help="git ref; violations on lines changed since it fail")
+    parser.add_argument("--head", metavar="REV",
+                        help="lint commit REV's blobs and baseline instead of the working "
+                             "tree, so an uncommitted fix cannot hide a bad commit (the "
+                             "pre-push hook passes the pushed commit)")
     parser.add_argument("--write", action="store_true",
                         help="record lowered counts; refuses to raise any")
     parser.add_argument("--fix", nargs="+", metavar="PATH",
                         help='insert encoding="utf-8" into the fixable calls in these files')
     args = parser.parse_args(argv)
     root = args.root.resolve()
+    if args.head and (args.fix or args.write):
+        print("text-encoding-lint: --head reads a commit; --fix and --write edit the "
+              "working tree", file=sys.stderr)
+        return 2
     if args.fix:
         total = 0
         for rel in args.fix:
@@ -280,17 +311,34 @@ def main(argv: list[str] | None = None,
             print(f"text-encoding-lint: {rel}: {count} call(s) fixed")
         print(f"text-encoding-lint: {total} call(s) fixed; run --write to record the lower counts")
         return 0
+    texts: dict[str, str] | None = None
     try:
-        files = list_files(root)
-    except (OSError, subprocess.CalledProcessError) as exc:
+        if args.head:
+            files = tracked_python_at(root, args.head)
+            texts = commit_blobs(root, args.head, [*files, BASELINE.as_posix()])
+        else:
+            files = list_files(root)
+    except (OSError, ValueError, subprocess.CalledProcessError) as exc:
         print(f"text-encoding-lint: cannot list sources: {exc}", file=sys.stderr)
         return 2
     if not files:
         print(f"text-encoding-lint: no Python sources found under {root}", file=sys.stderr)
         return 2
     baseline_path = root / BASELINE
-    baseline = load_baseline(baseline_path)
-    counts, details = counts_for(root, files)
+    if texts is not None:
+        # The committed baseline: a raised or deleted working-tree copy is not
+        # what the push sends, so it must not decide the verdict.
+        committed = texts.pop(BASELINE.as_posix(), None)
+        try:
+            baseline = ({str(k): int(v) for k, v in json.loads(committed).get("files", {}).items()}
+                        if committed else {})
+        except (ValueError, AttributeError, TypeError) as exc:
+            print(f"text-encoding-lint: {BASELINE} in {args.head} is not a valid baseline: {exc}",
+                  file=sys.stderr)
+            return 2
+    else:
+        baseline = load_baseline(baseline_path)
+    counts, details = counts_for(root, files, texts)
 
     if args.write:
         raised = [f"{rel}: {count} > {baseline.get(rel, 0)}" for rel, count in counts.items()
@@ -309,7 +357,7 @@ def main(argv: list[str] | None = None,
     raised: list[str] = []
     if args.base:
         try:
-            changed = changed_lines(root, args.base)
+            changed = changed_lines(root, args.base, args.head or "HEAD")
             base_baseline = base_baseline_for(root, args.base)
         except subprocess.CalledProcessError as exc:
             print(f"text-encoding-lint: cannot diff against {args.base}: {exc}", file=sys.stderr)
