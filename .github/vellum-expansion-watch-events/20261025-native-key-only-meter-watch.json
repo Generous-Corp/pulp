@@ -6,9 +6,10 @@
   "acceptance_id": "full-design-import-render-v1-pulp-watch",
   "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
   "capability_families": [
+    "design-ir-contract",
     "render-assets-and-backends"
   ],
-  "rationale": "The native materializer and the baked C++ binding helper now bind a level display from a meter value key alone, as the ui.js bridge already does, passing the key in the existing descriptor with an empty source and channel. It is a binding rule inside Pulp's own import lowering: no DesignIR schema field, Chromium capture, renderer backend, asset or packaging authority moves.",
+  "rationale": "The native materializer and the baked C++ binding helper now bind a level display from a meter value key alone, as the ui.js bridge already does, passing the key in the existing NativeImportMeterBindingDescriptor::value_key with an empty meter_source and channel. Public header core/view/include/pulp/view/design_import.hpp: a doc comment on NativeImportMeterBindingDescriptor only; its fields (route_id, meter_source, channel, value_key, event_contract) and every declaration are unchanged. Private header core/view/src/design_binding_metadata.hpp (not installed): adds the inline member `bool NativeBindingMetadata::has_meter_input() const`, true for a meter source plus channel or a non-empty meter_value_key; no data member changes. design_cpp_binding_codegen.cpp and design_import_native_common.cpp call it in place of the source-and-channel test. No DesignIR schema field (IRNode, DesignIR, or a pulp* binding attribute) is added, removed, renamed or retyped: pulpMeterValueKey was already parsed into meter_value_key. No Chromium capture, renderer backend, asset or packaging authority moves.",
   "tests": [
     "ctest --test-dir build -R pulp-test-design-import-native-common",
     "ctest --test-dir build -R pulp-test-design-emitter-conformance",
