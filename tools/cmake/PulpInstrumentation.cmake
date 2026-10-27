@@ -83,13 +83,18 @@ set(_pulp_coverage_compile_flags
 # emitting -Wunused-command-line-argument. Any dep that compiles with
 # -Werror (yoga, for one) then upgrades that warning to a hard error.
 #
-# Emit `-O0` only on the GCC / plain-Clang driver — clang-cl's Debug
-# build already implies `/Od`, so we get the same no-opt behavior
-# without the redundant-flag warning. Detect via
+# Emit `-O0` only on the GCC / plain-Clang driver. On clang-cl use the
+# native `/Od /Ob0` instead: Windows coverage builds RelWithDebInfo, not
+# Debug, so its static /MT runtime and _ITERATOR_DEBUG_LEVEL=0 match the
+# prebuilt release Skia (a Debug /MTd build fails lld-link
+# /failifmismatch). Appended after the config's `/O2 /Ob1`, these keep
+# the build unoptimized and uninlined. Detect via
 # CMAKE_CXX_COMPILER_FRONTEND_VARIANT which CMake sets to "MSVC" for
 # clang-cl and "GNU" (or unset) for plain clang/gcc.
 if(NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
     list(APPEND _pulp_coverage_compile_flags -g1 -O0)
+else()
+    list(APPEND _pulp_coverage_compile_flags /Od /Ob0)
 endif()
 
 set(_pulp_coverage_link_flags

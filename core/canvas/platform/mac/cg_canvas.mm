@@ -1424,6 +1424,12 @@ void CoreGraphicsCanvas::set_miter_limit(float limit) {
 //   high   = kCGInterpolationHigh    (Lanczos / cubic)
 // `enabled = false` collapses to kCGInterpolationNone (nearest), which
 // is what HTML5 canvas spec requires (pixel-art preservation).
+void CoreGraphicsCanvas::set_font_smoothing(FontSmoothing smoothing) {
+    if (!ctx_)
+        return;
+    CGContextSetShouldSmoothFonts(ctx_, smoothing != FontSmoothing::antialiased);
+}
+
 void CoreGraphicsCanvas::set_image_smoothing(bool enabled,
                                               ImageSmoothingQuality quality) {
     if (!ctx_) return;

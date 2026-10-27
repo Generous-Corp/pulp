@@ -118,7 +118,12 @@ TEST_CASE("ratchet subdivision remains exact across the full signed tick domain"
     REQUIRE(output[3] == TickPosition{4'611'686'018'427'387'903LL});
 }
 
-#if defined(__SIZEOF_INT128__)
+// The wide oracle divides 128-bit integers, which lowers to the compiler-rt
+// builtin __udivti3. clang-cl defines __SIZEOF_INT128__ but links against the
+// MSVC runtime, which has no such builtin, so MSVC-ABI toolchains skip these
+// cases exactly as MSVC itself does (core/runtime/src/primes.cpp draws the
+// same _MSC_VER line).
+#if defined(__SIZEOF_INT128__) && !defined(_MSC_VER)
 TEST_CASE("ratchet cursor carries a near-maximum subdivision remainder without overflow") {
     constexpr auto minimum = std::numeric_limits<std::int64_t>::min();
     constexpr auto maximum = std::numeric_limits<std::int64_t>::max();

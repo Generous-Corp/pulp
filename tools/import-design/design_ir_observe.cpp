@@ -559,6 +559,7 @@ const char* frame_outcome_name(pulp::render::FrameOutcome outcome) {
 // layout, paint, overlays), so a render here is comparable with one there.
 std::vector<std::uint8_t> render_gpu(pulp::view::View& root, std::uint32_t width,
                                      std::uint32_t height, float scale, GpuFault fault,
+                                     pulp::canvas::TextRasterPolicy text_raster,
                                      RenderReport& report) {
     auto gpu = pulp::render::GpuSurface::create_dawn();
     pulp::render::GpuSurface::Config gpu_config{};
@@ -576,8 +577,10 @@ std::vector<std::uint8_t> render_gpu(pulp::view::View& root, std::uint32_t width
         report.error = "no native GPU adapter (Dawn Null backend)";
         return {};
     }
-    auto skia = pulp::render::SkiaSurface::create(
-        *gpu, {.width = width, .height = height, .scale_factor = scale});
+    auto skia = pulp::render::SkiaSurface::create(*gpu, {.width = width,
+                                                         .height = height,
+                                                         .scale_factor = scale,
+                                                         .text_raster_policy = text_raster});
     if (!skia || !skia->is_available()) {
         report.error = "SkiaSurface unavailable on this device";
         return {};
@@ -875,6 +878,9 @@ int main(int argc, char** argv) {
         native_root = pulp::view::build_native_view_tree(
             ir, ir.asset_manifest, {.asset_base_directory = input_path.parent_path()});
     pulp::view::View* root = script_root ? &script_root->root() : native_root.get();
+    // Captured `antialiased` text is drawn unhinted, which matches Chromium
+    // only on a surface created with the matching preblend.
+    const auto text_raster = pulp::view::design_ir_text_raster_policy(ir);
     if (!root) {
         std::cerr << "Error: could not materialize DesignIR\n";
         return 1;
@@ -941,13 +947,13 @@ int main(int argc, char** argv) {
     std::vector<std::uint8_t> png;
     if (raster) {
         png = pulp::view::render_to_png(*root, pixel_w, pixel_h, scale,
-                                        pulp::view::ScreenshotBackend::skia);
+                                        pulp::view::ScreenshotBackend::skia, text_raster);
         report.used = gpu_fault == GpuFault::raster_fallback_unreported ? "gpu" : "skia";
         if (png.empty())
             report.error = "Skia raster render failed";
     } else {
 #if defined(PULP_HAS_SKIA)
-        png = render_gpu(*root, pixel_w, pixel_h, scale, gpu_fault, report);
+        png = render_gpu(*root, pixel_w, pixel_h, scale, gpu_fault, text_raster, report);
         report.used = "gpu";
 #else
         report.error = "this build has no GPU backend (PULP_HAS_SKIA is off)";

@@ -68,6 +68,9 @@ export const COMPUTED_STYLES = [
   "font-weight",
   "font-style",
   "font-variation-settings",
+  // Decides glyph hinting and the surface's text preblend; see
+  // core/canvas/include/pulp/canvas/text_raster_policy.hpp.
+  "-webkit-font-smoothing",
   "text-align",
   "letter-spacing",
   "word-spacing",

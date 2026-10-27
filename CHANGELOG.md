@@ -9,6 +9,62 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1210"></a>
+## [1.21.0] - 2026-10-27
+
+- release/version bump ([#11186](https://github.com/Generous-Corp/pulp/pull/11186))
+- codex/importer font scope fix 20261026 ([#11179](https://github.com/Generous-Corp/pulp/pull/11179))
+
+<a id="v1200"></a>
+## [1.20.0] - 2026-10-27
+
+- release/version bump ([#11178](https://github.com/Generous-Corp/pulp/pull/11178))
+- codex/refactor next audit 20261026 ([#11172](https://github.com/Generous-Corp/pulp/pull/11172))
+- release/version bump ([#11171](https://github.com/Generous-Corp/pulp/pull/11171))
+- fix/capture launches at capture scale ([#11016](https://github.com/Generous-Corp/pulp/pull/11016))
+- release/version bump ([#11169](https://github.com/Generous-Corp/pulp/pull/11169))
+
+<a id="v1190"></a>
+## [1.19.0] - 2026-10-26
+
+- release/version bump ([#11164](https://github.com/Generous-Corp/pulp/pull/11164))
+- chore/shipyard train status ([#11160](https://github.com/Generous-Corp/pulp/pull/11160))
+- chore/carry excluded paths shipyard ([#11161](https://github.com/Generous-Corp/pulp/pull/11161))
+- feature/text font smoothing ([#11020](https://github.com/Generous-Corp/pulp/pull/11020))
+- fix/importer swiftui binding rule 20261025 ([#11007](https://github.com/Generous-Corp/pulp/pull/11007))
+- feature/attack surface phase1 20261022 ([#10798](https://github.com/Generous-Corp/pulp/pull/10798))
+- release/version bump ([#11162](https://github.com/Generous-Corp/pulp/pull/11162))
+
+<a id="v1181"></a>
+## [1.18.1] - 2026-10-26
+
+- release/version bump ([#11157](https://github.com/Generous-Corp/pulp/pull/11157))
+- ci/capability counters at land ([#10771](https://github.com/Generous-Corp/pulp/pull/10771))
+- fix/windows coverage relwithdebinfo ([#10585](https://github.com/Generous-Corp/pulp/pull/10585))
+
+<a id="v1180"></a>
+## [1.18.0] - 2026-10-26
+
+- release/version bump ([#11155](https://github.com/Generous-Corp/pulp/pull/11155))
+- perf/mac editor drawable in frame path ([#10996](https://github.com/Generous-Corp/pulp/pull/10996))
+
+<a id="v1170"></a>
+## [1.17.0] - 2026-10-26
+
+- release/version bump ([#11153](https://github.com/Generous-Corp/pulp/pull/11153))
+- fix/rederive requires merged base ([#11151](https://github.com/Generous-Corp/pulp/pull/11151))
+- perf/graph zero copy edges ([#11147](https://github.com/Generous-Corp/pulp/pull/11147))
+- perf/partitioned half spectra 20261025 ([#11146](https://github.com/Generous-Corp/pulp/pull/11146))
+- feature/r3 landing followups 20261026 ([#11143](https://github.com/Generous-Corp/pulp/pull/11143))
+- fix/importer synthetic bold 20261025 ([#11049](https://github.com/Generous-Corp/pulp/pull/11049))
+
+<a id="v1161"></a>
+## [1.16.1] - 2026-10-26
+
+- release/version bump ([#11150](https://github.com/Generous-Corp/pulp/pull/11150))
+- fix/register au preflight ctest ([#11122](https://github.com/Generous-Corp/pulp/pull/11122))
+- fix/native key only meter ([#11015](https://github.com/Generous-Corp/pulp/pull/11015))
+
 <a id="v1160"></a>
 ## [1.16.0] - 2026-10-26
 
@@ -11720,6 +11776,13 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.21.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.21.0
+[1.20.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.20.0
+[1.19.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.19.0
+[1.18.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.18.1
+[1.18.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.18.0
+[1.17.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.17.0
+[1.16.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.16.1
 [1.16.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.16.0
 [1.15.2]: https://github.com/Generous-Corp/pulp/releases/tag/v1.15.2
 [1.15.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.15.1

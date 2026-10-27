@@ -761,6 +761,11 @@ if(_pulp_source_install_status STREQUAL "")
 else()
     set(PULP_SOURCE_INSTALL_DIRTY true)
 endif()
+if(PULP_DEV_BRIDGE_EXEC)
+    set(PULP_SOURCE_INSTALL_BRIDGE_EXEC true)
+else()
+    set(PULP_SOURCE_INSTALL_BRIDGE_EXEC false)
+endif()
 # A source-install SDK is intentionally non-distributable, but its target
 # architecture still matters: a native ARM64 archive must never be consumed
 # by an ARM64EC/ARM64X plugin just because both builds run on Windows ARM.
