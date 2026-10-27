@@ -173,7 +173,10 @@ inline bool ship_build_carries_entry(const CmakeCacheEntry& entry) {
 // from `dev_cache`, the dev build dir's CMakeCache.txt text:
 // - every non-INTERNAL, non-STATIC entry the developer configured, verbatim
 //   (formats, SDK paths, compiler, sysroot, feature switches, build type);
-// - PULP_PROFILE forced to `release` when the dev build has that option;
+// - PULP_PROFILE pinned to `release`, whether the dev build recorded the
+//   option (rewritten) or predates it (added): PulpProfiles.cmake would
+//   otherwise default the sibling to `dev`, and its stamp would record a
+//   build_profile that official provenance minting rejects;
 // - every option the release profile enforces (PULP_DEV_BUILD, tests,
 //   examples, audio probes, the exec bridge, ...) and PULP_DEV_SHARED_UI
 //   dropped and set OFF explicitly, which is the point;
@@ -186,12 +189,15 @@ inline std::string ship_build_initial_cache(std::string_view dev_cache) {
         "# Written by `pulp ship`: the dev build's configuration, minus the dev-only switches.\n"
         "# Regenerated from build/CMakeCache.txt whenever it changes; do not edit.\n";
     bool has_build_type = false;
+    bool has_profile = false;
     for (const auto& entry : cmake_cache_entries(dev_cache)) {
         if (!ship_build_carries_entry(entry))
             continue;
         std::string value = entry.value;
-        if (entry.name == "PULP_PROFILE")
+        if (entry.name == "PULP_PROFILE") {
             value = "release";
+            has_profile = true;
+        }
         if (entry.name == "CMAKE_BUILD_TYPE") {
             if (value.empty())
                 value = std::string(kDefaultBuildType);
@@ -204,6 +210,8 @@ inline std::string ship_build_initial_cache(std::string_view dev_cache) {
     if (!has_build_type)
         script += "set(CMAKE_BUILD_TYPE [==[" + std::string(kDefaultBuildType) +
                   "]==] CACHE STRING \"pinned by pulp ship\")\n";
+    if (!has_profile)
+        script += "set(PULP_PROFILE [==[release]==] CACHE STRING \"pinned by pulp ship\")\n";
     for (const auto option : kProfileEnforcedOptions)
         script += "set(" + std::string(option) +
                   " OFF CACHE BOOL \"OFF under the release profile; set by pulp ship\")\n";

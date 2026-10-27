@@ -123,6 +123,28 @@ TEST_CASE("the shippable initial cache carries every configured entry except the
         CHECK(bare.find("set(CMAKE_BUILD_TYPE [==[Release]==] CACHE STRING") != std::string::npos);
         CHECK(bare.find("set(PULP_DEV_BUILD OFF CACHE BOOL") != std::string::npos);
     }
+    SECTION("a cache that predates the profile option still pins PULP_PROFILE=release") {
+        // A pre-profile or stale developer cache has no PULP_PROFILE entry.
+        // Without the pin PulpProfiles.cmake would default the sibling to
+        // `dev`, and its stamp would record a build_profile official
+        // provenance minting rejects.
+        const auto stale = ship_build_initial_cache("CMAKE_GENERATOR:INTERNAL=Ninja\n"
+                                                    "CMAKE_BUILD_TYPE:STRING=Release\n"
+                                                    "PULP_DEV_BUILD:BOOL=ON\n");
+        CHECK(
+            stale.find("set(PULP_PROFILE [==[release]==] CACHE STRING \"pinned by pulp ship\")") !=
+            std::string::npos);
+        // Exactly one PULP_PROFILE line, whether rewritten or added.
+        const auto count = [](const std::string& text, const std::string& needle) {
+            size_t n = 0;
+            for (size_t at = text.find(needle); at != std::string::npos;
+                 at = text.find(needle, at + 1))
+                ++n;
+            return n;
+        };
+        CHECK(count(stale, "set(PULP_PROFILE ") == 1);
+        CHECK(count(ship_build_initial_cache(cache), "set(PULP_PROFILE ") == 1);
+    }
     SECTION("the configure arguments are the generator and the initial cache") {
         REQUIRE(pulp::cli::ship_build_configure_args(cache, "/proj/build-ship/init.cmake") ==
                 std::vector<std::string>{"-G", "Ninja", "-C", "/proj/build-ship/init.cmake"});
