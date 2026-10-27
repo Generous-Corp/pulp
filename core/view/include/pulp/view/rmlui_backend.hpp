@@ -57,8 +57,8 @@ class ActionSink {
     virtual Status invoke(std::string_view action) = 0;
 };
 
-// Pulp-owned seam for the optional RmlUi adapter.  It intentionally contains
-// no RmlUi or Lua headers: those dependencies are admitted by a later slice.
+// Pulp-owned seam for the optional RmlUi adapter. It intentionally contains
+// no RmlUi or Lua headers; those dependencies remain behind this boundary.
 class Backend {
   public:
     Backend(AssetProvider&, RenderInterface&, LuaInterface&, ActionSink* = nullptr);
@@ -84,8 +84,8 @@ class Backend {
     Asset document_;
 };
 
-// Headless test double used to prove the contract without an RmlUi runtime,
-// host window, or external dependency.
+// Headless test double used to prove the Pulp-owned contract without a host
+// window or external runtime.
 class Headless final : public AssetProvider,
                        public RenderInterface,
                        public LuaInterface,
