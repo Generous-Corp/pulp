@@ -56,6 +56,7 @@ struct DrawCommand {
         // the canvas2d bridge harness can assert flush order.
         set_miter_limit,     ///< limit in f[0]
         set_image_smoothing, ///< enabled in f[0] (0/1), quality in f[1] (0=low,1=med,2=high)
+        set_font_smoothing,  ///< f[0]: 0 = auto, 1 = antialiased
         // Canvas2D ctx.direction / ctx.filter sticky setters.
         // Direction enum (0=ltr, 1=rtl, 2=inherit) packed into f[0];
         // filter raw CSS <filter-function-list> string (e.g.
@@ -379,6 +380,7 @@ public:
     void set_miter_limit(float limit) override;
     void set_image_smoothing(bool enabled,
                              ImageSmoothingQuality quality) override;
+    void set_font_smoothing(FontSmoothing smoothing) override;
 
     // Canvas2D ctx.direction / ctx.filter capture.
     void set_direction(TextDirection direction) override;

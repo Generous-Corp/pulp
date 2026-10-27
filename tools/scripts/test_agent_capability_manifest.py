@@ -1480,6 +1480,192 @@ def exercise_base_drift() -> int:
     return checks
 
 
+def exercise_counters_assigned_at_land(canonical: dict) -> int:
+    """Branches leave the counters at the base; the version-at-land bump assigns.
+
+    Each rule is paired with the strict behaviour it relaxes, so a check that
+    stopped discriminating fails here."""
+    import argparse
+
+    checks = 0
+    surface_doc = manifest.build_surface(ROOT)[0]
+    published = copy.deepcopy(canonical)
+    history = capability_history.history_document(
+        [capability_history.history_entry(published, surface_doc)])
+
+    changed = copy.deepcopy(published)
+    changed["capabilities"][0]["summary"] += " (edited)"
+    assigned = copy.deepcopy(changed)
+    assigned["manifest_revision"] += 1
+
+    # Pending: changed material under the counter the history last recorded.
+    assert capability_history.pending_counters(history, changed, surface_doc) == (True, False)
+    assert capability_history.pending_counters(history, published, surface_doc) == (False, False)
+    assert capability_history.pending_counters(history, assigned, surface_doc) == (False, False)
+    checks += 1
+
+    strict = manifest.evolution_problems(published, changed, allow_unpublished_migration=False)
+    expect_problem(strict, "manifest changed without a manifest_revision increase")
+    assert "manifest changed without a manifest_revision increase" not in "\n".join(
+        manifest.evolution_problems(published, changed, allow_unpublished_migration=False,
+                                    unassigned=True))
+    checks += 1
+
+    # Assigning: the counter advances by exactly one over unchanged material.
+    expect_problem(manifest.evolution_problems(changed, assigned, allow_unpublished_migration=False),
+                   "manifest_revision changed without a manifest change")
+    assert not manifest.evolution_problems(changed, assigned, allow_unpublished_migration=False,
+                                           assigning=True)
+    skipped = copy.deepcopy(assigned)
+    skipped["manifest_revision"] += 1
+    expect_problem(manifest.evolution_problems(changed, skipped, allow_unpublished_migration=False,
+                                               assigning=True),
+                   "manifest_revision changed without a manifest change")
+    checks += 1
+
+    surface_changed = copy.deepcopy(surface_doc)
+    surface_changed["headers"][0]["fingerprint"] = "sha256:" + "b" * 64
+    expect_problem(manifest.surface_evolution_problems(surface_doc, surface_changed,
+                                                       surface.SURFACE_SCHEMA),
+                   "public surface changed without an inventory_version increase")
+    assert not manifest.surface_evolution_problems(surface_doc, surface_changed,
+                                                   surface.SURFACE_SCHEMA, unassigned=True)
+    assert capability_history.pending_counters(history, published, surface_changed) == (False, True)
+    checks += 1
+
+    # A pending state is never recorded: it names no contract identity.
+    entries = capability_history.updated_history_entries(
+        history, changed, surface_doc, assigned, surface_doc,
+        initial_bootstrap=False, migrate_unpublished=False)
+    assert entries == history["entries"], "a pending previous state was appended"
+    entries = capability_history.updated_history_entries(
+        capability_history.history_document([]), published, surface_doc, changed, surface_doc,
+        initial_bootstrap=False, migrate_unpublished=False)
+    assert entries == [capability_history.history_entry(published, surface_doc)]
+    checks += 1
+
+    # The history check accepts a pending current snapshot, and still refuses a
+    # changed snapshot whose counter went backwards.
+    assert not [problem for problem in capability_history.history_problems(
+        history, changed, surface_doc) if "without a manifest_revision increase" in problem]
+    regressed = copy.deepcopy(changed)
+    regressed["manifest_revision"] -= 1
+    expect_problem(capability_history.history_problems(history, regressed, surface_doc),
+                   "manifest changed without a manifest_revision increase")
+    checks += 1
+
+    # The release guard and the status report read the same rule.
+    with tempfile.TemporaryDirectory(prefix="pulp-agent-counters-") as temp:
+        path = pathlib.Path(temp) / "history.json"
+        path.write_text(json.dumps(history), encoding="utf-8")
+        flags = argparse.Namespace(status=False, require_assigned=True, assign_pending=False)
+        assert manifest.counter_status(ROOT, changed, surface_doc, path, flags) == 1
+        assert manifest.counter_status(ROOT, assigned, surface_doc, path, flags) == 0
+        assert manifest.counter_status(ROOT, published, surface_doc, path, flags) == 0
+    result = run("--status")
+    assert result.returncode == 0, result.stderr
+    status = json.loads(result.stdout)
+    assert set(status) == {"manifest_revision", "inventory_version"}
+    assert all(item["state"] in {"assigned", "pending"} for item in status.values())
+    checks += 1
+    return checks
+
+
+def _workflow_steps(text: str) -> list[dict[str, str]]:
+    """The steps of a single-job workflow as {"name", "id", "if", "run", <env>}.
+
+    Read as text: the gate Python has no PyYAML. Only the shapes auto-release.yml
+    uses are understood: `- name:` starts a step, `key: value` and folded
+    `key: >-` / literal `key: |` blocks at step level, and one `env:` map."""
+    steps: list[dict[str, str]] = []
+    lines = text.splitlines()
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if line.lstrip().startswith("- name:") and line.startswith("      - "):
+            steps.append({"name": line.split(":", 1)[1].strip()})
+            index += 1
+            continue
+        if steps and line.startswith("        ") and not line.startswith("         "):
+            key, _, value = line.strip().partition(":")
+            value = value.strip()
+            if value in ("|", ">-", ">"):
+                block = []
+                index += 1
+                while index < len(lines) and (lines[index].startswith("          ")
+                                              or not lines[index].strip()):
+                    block.append(lines[index][10:])
+                    index += 1
+                joiner = "\n" if value == "|" else " "
+                steps[-1][key] = joiner.join(block).strip() + ("\n" if value == "|" else "")
+                continue
+            if key == "env":
+                index += 1
+                while index < len(lines) and lines[index].startswith("          "):
+                    env_key, _, env_value = lines[index].strip().partition(":")
+                    if not env_key.startswith("#"):
+                        steps[-1][env_key] = env_value.strip()
+                    index += 1
+                continue
+            steps[-1][key] = value
+        index += 1
+    return steps
+
+
+def exercise_release_guard_wiring() -> int:
+    """auto-release.yml withholds the SDK tag while a counter is pending.
+
+    Runs the workflow step's own script against a stub manifest tool for both
+    outcomes, then evaluates the tag step's SDK_SHOULD_TAG expression with the
+    step's output, so a rewired condition fails here rather than tagging a
+    pending revision."""
+    steps = _workflow_steps(
+        (ROOT / ".github/workflows/auto-release.yml").read_text(encoding="utf-8"))
+    by_id = {step["id"]: step for step in steps if "id" in step}
+    guard = by_id["capability_precheck"]
+    tag = next(step for step in steps if step["name"] == "Create tags for moved surfaces")
+    assert "steps.versions.outputs.sdk_should_tag == '1'" in guard["if"]
+    assert "--require-assigned" in guard["run"]
+    assert steps.index(guard) < steps.index(tag), "the guard must run before tagging"
+    checks = 1
+
+    expression = tag["SDK_SHOULD_TAG"].strip()
+    assert expression.startswith("${{") and expression.endswith("}}")
+    body = expression[3:-2]
+
+    def should_tag(windows: str, capability: str, decided: str) -> str:
+        python = (body.replace("steps.windows_precheck.outputs.block", repr(windows))
+                  .replace("steps.capability_precheck.outputs.block", repr(capability))
+                  .replace("steps.versions.outputs.sdk_should_tag", repr(decided))
+                  .replace("||", " or ").replace("&&", " and "))
+        return eval(python, {"__builtins__": {}}, {})  # noqa: S307 - literals only
+
+    with tempfile.TemporaryDirectory(prefix="pulp-release-guard-") as temp:
+        root = pathlib.Path(temp)
+        tool = root / "tools/scripts/agent_capability_manifest.py"
+        tool.parent.mkdir(parents=True)
+        for exit_code, expected_block in ((1, "1"), (0, "0")):
+            tool.write_text(f"import sys\nsys.exit({exit_code})\n", encoding="utf-8")
+            output = root / "github_output"
+            summary = root / "step_summary"
+            output.write_text("", encoding="utf-8")
+            result = subprocess.run(
+                ["bash", "-c", guard["run"]], cwd=root, text=True, encoding="utf-8",
+                capture_output=True,
+                env={**os.environ, "GITHUB_OUTPUT": str(output),
+                     "GITHUB_STEP_SUMMARY": str(summary), "SDK_AFTER": "9.9.9"})
+            assert result.returncode == 0, result.stderr
+            block = output.read_text(encoding="utf-8").strip().split("=")[-1]
+            assert block == expected_block, (exit_code, block)
+            assert should_tag("", block, "1") == ("0" if block == "1" else "1")
+            checks += 1
+    # The Windows guard still withholds on its own, and a "no tag" decision is
+    # never turned into a tag.
+    assert should_tag("1", "0", "1") == "0"
+    assert should_tag("0", "0", "0") == "0"
+    return checks + 1
+
+
 def main() -> int:
     result = run("--json")
     assert result.returncode == 0, result.stderr
@@ -1497,6 +1683,8 @@ def main() -> int:
 
     checks += exercise_compatibility(canonical)
     checks += exercise_base_drift()
+    checks += exercise_counters_assigned_at_land(canonical)
+    checks += exercise_release_guard_wiring()
     checks += exercise_authority_navigation()
     print(f"agent-capabilities: {checks} negative/evolution/surface/compatibility checks passed")
     return 0

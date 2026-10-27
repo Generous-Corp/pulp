@@ -54,6 +54,9 @@ struct ParagraphKey {
     // SkParagraph rounds the first baseline only with hinting on, so hinting
     // moves glyphs. SkiaCanvas never turns it off today.
     bool hinting = true;
+    // The run's glyph hinting (TextStyle::setFontHinting), which changes the
+    // glyph outlines and advances: off for `antialiased` font smoothing.
+    bool glyph_hinting = true;
     // Whether SkParagraph synthesizes a bold or oblique the resolved face
     // lacks, which changes the glyphs it lays out. Left out of the hash: it is
     // almost always true, and equal keys need only hash equally.

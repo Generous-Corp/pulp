@@ -20,8 +20,18 @@
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/widgets.hpp>
 
+#ifdef PULP_HAS_SKIA
+#include <pulp/canvas/skia_canvas.hpp>
+
+#include "include/core/SkCanvas.h"
+#include "include/core/SkImageInfo.h"
+#include "include/core/SkPixmap.h"
+#include "include/core/SkSurface.h"
+#endif
+
 #include <memory>
 #include <optional>
+#include <vector>
 
 using namespace pulp::view;
 using namespace pulp::canvas;
@@ -455,4 +465,70 @@ TEST_CASE("WidgetBridge: explicit Label setter wins over panel-level cascade",
     auto fill = last_fill_color_before_text(canvas);
     REQUIRE(fill.has_value());
     REQUIRE(fill.value() == Color::rgba8(255, 0, 0));
+}
+
+// A Label authored `-webkit-font-smoothing: antialiased` paints unhinted for
+// its own draw only (test_browser_capture_font_smoothing.cpp covers the canvas).
+TEST_CASE("a label's font smoothing is scoped to its own paint",
+          "[view][typography][font-smoothing]") {
+    Label label("Antialiased");
+    label.set_bounds({0, 0, 120, 20});
+    label.set_font_smoothing(FontSmoothing::antialiased);
+    RecordingCanvas canvas;
+    label.paint(canvas);
+    const auto& commands = canvas.commands();
+    REQUIRE(commands.size() >= 3);
+    // save, the smoothing, the text, restore: the smoothing ends with the scope.
+    CHECK(commands.front().type == DrawCommand::Type::save);
+    CHECK(commands[1].type == DrawCommand::Type::set_font_smoothing);
+    CHECK(commands[1].f[0] == 1.0f);
+    CHECK(commands.back().type == DrawCommand::Type::restore);
+    CHECK(canvas.count(DrawCommand::Type::fill_text) == 1);
+
+    // An auto label touches no smoothing state at all.
+    Label plain("Default");
+    plain.set_bounds({0, 0, 120, 20});
+    RecordingCanvas plain_canvas;
+    plain.paint(plain_canvas);
+    CHECK(plain_canvas.count(DrawCommand::Type::set_font_smoothing) == 0);
+}
+
+TEST_CASE("an auto label painted after an antialiased one is still hinted",
+          "[view][typography][font-smoothing]") {
+#ifndef PULP_HAS_SKIA
+    SKIP("glyph hinting is a Skia canvas setting; this build has no Skia");
+#else
+    // Two labels on one canvas, the antialiased one first; the auto one must
+    // paint exactly as it does alone.
+    const auto render = [](bool with_antialiased_first) {
+        auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(400, 120));
+        surface->getCanvas()->clear(SK_ColorWHITE);
+        surface->getCanvas()->scale(2, 2);
+        SkiaCanvas canvas(surface->getCanvas());
+        if (with_antialiased_first) {
+            Label smooth("Grave Tusk Fly");
+            smooth.set_font_family("\"Helvetica Neue\", sans-serif");
+            smooth.set_font_size(15.0f);
+            smooth.set_bounds({0, 0, 200, 20});
+            smooth.set_font_smoothing(FontSmoothing::antialiased);
+            smooth.paint(canvas);
+        }
+        canvas.save();
+        canvas.translate(0, 30);
+        Label plain("Grave Tusk Fly");
+        plain.set_font_family("\"Helvetica Neue\", sans-serif");
+        plain.set_font_size(15.0f);
+        plain.set_bounds({0, 0, 200, 20});
+        plain.paint(canvas);
+        canvas.restore();
+        SkPixmap pixels;
+        REQUIRE(surface->peekPixels(&pixels));
+        std::vector<SkColor> lower; // the auto label's rows only
+        for (int y = 60; y < pixels.height(); ++y)
+            for (int x = 0; x < pixels.width(); ++x)
+                lower.push_back(pixels.getColor(x, y));
+        return lower;
+    };
+    CHECK(render(true) == render(false));
+#endif
 }

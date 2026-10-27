@@ -250,6 +250,10 @@ built with PULP_TRACING=ON," the fix is to rebuild with tracing off (the
 default `pulp build`), not to reach for `--allow-tracing`. The scanner lives in
 `tools/cli/ship_tracing_guard.hpp` (unit-tested in `test/test_ship_tracing_guard.cpp`).
 
+## Shell exec bridge ship guard
+
+Release and SDK configures pass `-DPULP_DEV_BRIDGE_EXEC=OFF` (`release-cli.yml`, `sign-and-release.yml`, `pulp sdk install`, the local SDK profile), which compiles the JS `exec`/`execAsync` bridge body out of `pulp-view-script`. The installed SDK records the outcome in `sdk-provenance.json` as `features.bridge_exec` (release marker, forge-dev/trace) or top-level `bridge_exec` (source-install stamp); minting a release marker refuses a configure cache with the option ON or missing, and `PulpSdkProvenance.cmake` fails on a release marker claiming `true`. A dev checkout keeps the bridge because the option follows `PULP_BUILD_TESTS`. Prove an artifact with `strings <archive> | grep -c execAsync` (0 for ship) or the `pulp-bridge-exec-ship-symbol-absence` ctest.
+
 ## Release-artifact forbidden-marker list
 
 Every "a shipped binary must not contain X" check reads ONE list:
@@ -458,6 +462,32 @@ plus
 `test_dev_shared_build_is_rejected_before_signing` in
 `tools/scripts/test_build_combined_installer.py`. A new distribution path must
 call `enforce_no_development_runtimes()` on exactly the inputs it selected.
+
+
+## JIT-engine entitlement guard
+
+`pulp ship sign` and `pulp ship share` check the entitlements plist they are
+about to apply, before the signing preflight or any `codesign` runs:
+
+- `com.apple.security.cs.allow-jit` is the one approved JIT entitlement (V8
+  and JSC map JIT pages with MAP_JIT, which it covers). A plist that asks for
+  `allow-unsigned-executable-memory` or `disable-executable-page-protection`
+  without `allow-jit` is refused for every artifact and engine.
+- When `<build>/CMakeCache.txt` has `PULP_JS_ENGINE=v8` or `jsc`, an artifact
+  that runs as its own process (`.app`, `.appex`, or a bare executable passed
+  with `--path`) must grant `allow-jit`. Otherwise it signs cleanly and the
+  engine then fails to map its first JIT page.
+- Plug-in bundles (`.vst3`, `.component`, `.clap`) are exempt. They load into
+  a host process, and the host's entitlements decide JIT, so the default
+  `ship/templates/entitlements.plist` (no JIT) is the right file for them.
+
+The AUv3 build renders per-engine files
+(`build/AUv3/<target>_AUv3.entitlements`) via
+`tools/cmake/PulpAuv3Entitlements.cmake`, which emits `allow-jit` only for
+those engines and never `allow-unsigned-executable-memory`. QuickJS builds
+pass the engine check untouched. The check is keyed on the configured engine,
+not on symbols in the binary, so a bundle copied from another build directory
+is not detected.
 
 ## Workflows
 

@@ -132,6 +132,8 @@ const char* draw_command_name(DrawCommand::Type type) {
         return "set_miter_limit";
     case T::set_image_smoothing:
         return "set_image_smoothing";
+    case T::set_font_smoothing:
+        return "set_font_smoothing";
     case T::set_direction:
         return "set_direction";
     case T::set_filter:

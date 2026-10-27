@@ -259,6 +259,36 @@ final class PulpParameterTests: XCTestCase {
         XCTAssertEqual(pulpClassifyParameterName("Gain", in: ["Gain", "Gain"]), .duplicate(2))
     }
 
+    func testDetachedParameterNeverTouchesTheBridge() {
+        installBridge(parameters: [
+            .init(id: 0, name: "Gain", unit: "dB", minValue: -24, maxValue: 24, defaultValue: 0, step: 0.1),
+        ])
+        let parameter = PulpParameter.detached(name: "Tone", normalizedValue: 0.25)
+
+        XCTAssertTrue(parameter.isDetached)
+        XCTAssertEqual(parameter.name, "Tone")
+        XCTAssertEqual(parameter.normalizedValue, 0.25, accuracy: 1e-6)
+        parameter.beginGesture()
+        parameter.value = 0.75
+        parameter.normalizedValue = 0.75
+        parameter.endGesture()
+        parameter.poll()
+        parameter.reset()
+
+        XCTAssertEqual(parameter.normalizedValue, 0.25, accuracy: 1e-6)
+        XCTAssertTrue(bridge.setCalls.isEmpty)
+        XCTAssertTrue(bridge.normalizedSetCalls.isEmpty)
+        XCTAssertTrue(bridge.gestureBegan.isEmpty)
+        XCTAssertTrue(bridge.gestureEnded.isEmpty)
+        XCTAssertTrue(bridge.resets.isEmpty)
+        XCTAssertEqual(bridge.values[0], 0)
+    }
+
+    func testDetachedValueIsClampedToTheNormalizedRange() {
+        XCTAssertEqual(PulpParameter.detached(name: "", normalizedValue: 3).normalizedValue, 1)
+        XCTAssertEqual(PulpParameter.detached(name: "", normalizedValue: -1).normalizedValue, 0)
+    }
+
     private func installBridge(parameters: [PulpBridgeParameterInfo]) {
         bridge = MockBridge(parameters: parameters)
         PulpBridgeRuntime.installTestBackend(bridge.backend)

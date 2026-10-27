@@ -104,20 +104,20 @@ unlocked = { windows-arm64 = "conda-forge publishes no windows-arm64 clang-forma
 # tools/toolchain/shipyard.sha256, which tools/install-shipyard.sh checks every
 # download against before installing. The digests are the release's own
 # checksums.sha256; `generate.py --shipyard <tag>` rewrites this table from it.
-version = "v0.353.0"
+version = "v0.364.0"
 repo = "danielraffel/Shipyard"
 # sha256 of install.sh at refs/tags/<version>: install-shipyard.sh runs that
 # script, so it is pinned like a binary and refused if it differs.
 installer_sha256 = "64fbb7ec1136e1cbf1e799754abc0132832e20b1c8e63f98bd1ad079883fc029"
 
 [shipyard.assets]
-"shipyard-linux-arm64" = "68cba1afe6186f0d0aa278e0af5a73b29aff84b248ff843653ea28ea4a42c5f2"
-"shipyard-linux-x64" = "78b99f962930072ba18ebd06f0fa92849d2e13259f5dbe5db744c4c99e7e7752"
-"shipyard-macos-arm64.dmg" = "153d4707faf6929e48e423f8a8339be94248b106cc32999b95316be0d3d60d82"
-"shipyard-windows-x64.exe" = "68f791443ceadd80ea5cc0056093bbb83f8d1d7d9692a950b4adb5b11b29e8a8"
-"shipyard-workstream-provider-linux-arm64" = "8e767fcb353c1bc87c2b06e7255a1df319bf35e7b153da6918eeeb67336e8388"
-"shipyard-workstream-provider-linux-x64" = "233f419a52a36a4a2d46898498d11455dbfd31dcfdd77af4e51cf0a4d9efb2dd"
-"shipyard-workstream-provider-windows-x64.exe" = "420f80837ea353a3742c16841055c18c2aa74b3c238915adaba6e1f1f74a93e8"
+"shipyard-linux-arm64" = "163217e5dd27be3e33dc398129e7c8f8d285cc902af4f5930355385f42b6ac71"
+"shipyard-linux-x64" = "a669bbdfe07d29b75727d0390ba69569c0d43e8f611d4c252870eaeb30472767"
+"shipyard-macos-arm64.dmg" = "0f9cfb16ced982d6057f3feaaf3f3f927f02d6fd0457af1e8a0554fa96fb36c0"
+"shipyard-windows-x64.exe" = "658ab432941778c9a825b26d411e8b441fba265567afba9f9359f2297322cab0"
+"shipyard-workstream-provider-linux-arm64" = "4a14f733fea00c6b46fbe10405114ea7a31ff4a4dfdfe11ab390c5a353f5115b"
+"shipyard-workstream-provider-linux-x64" = "a096bd35e8ce7a3ec782b37f88a23bf52308e9b6d3089ac2b9d3e85d166156cf"
+"shipyard-workstream-provider-windows-x64.exe" = "ed75c30de5e37c5c5f29272303816c4772d31888e90d6c9cc9642b9b22ad9009"
 
 [npm]
 # Project dependencies install with `npm ci` from these committed lockfiles,

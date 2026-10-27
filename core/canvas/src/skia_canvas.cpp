@@ -197,10 +197,8 @@ static sk_sp<SkTypeface> get_cached_typeface(const std::string& family) {
     return get_cached_typeface(family, SkFontStyle::kNormal_Weight, 0);
 }
 
-SkFont make_font(const std::string& family, float size,
-                        int weight = SkFontStyle::kNormal_Weight,
-                        int slant = 0,
-                        bool non_opaque_dst = false) {
+SkFont make_font(const std::string& family, float size, int weight = SkFontStyle::kNormal_Weight,
+                 int slant = 0, bool non_opaque_dst = false, bool hinted = true) {
     SkFont font;
     // If size is 0 here, fill_text records commands but produces zero-height
     // glyphs; clamp to a minimal visible default so labels render even when the
@@ -219,7 +217,7 @@ SkFont make_font(const std::string& family, float size,
     font.setEdging(non_opaque_dst
         ? SkFont::Edging::kAntiAlias            // Greyscale AA (browser parity inside opacity layers)
         : SkFont::Edging::kSubpixelAntiAlias);  // LCD-quality AA on opaque destinations
-    font.setHinting(SkFontHinting::kSlight);               // Light hinting preserves glyph shapes
+    font.setHinting(hinted ? SkFontHinting::kSlight : SkFontHinting::kNone); // none: antialiased
     font.setLinearMetrics(true);                           // Linear scaling for consistent metrics
 
     auto typeface = get_cached_typeface(family, weight, slant);
@@ -364,6 +362,7 @@ void SkiaCanvas::restore() {
         non_opaque_layer_stack_.pop_back();
     }
     canvas_->restore();
+    unwind_font_smoothing();
 }
 
 // Expose Skia's save-stack depth so CanvasWidget::paint() can snapshot it at

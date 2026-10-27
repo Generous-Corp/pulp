@@ -3152,6 +3152,20 @@ signing identity) becomes a distinct authorization boundary, first publish its
 public fingerprint on protected main and then pin the embedded SSH signature
 key to that reviewed value.
 
+## The merge train forms member-approved rollups
+
+`.shipyard/config.toml` sets `[train] enabled = true` and, after the live
+scratch-repository test, sets `mode = "rollup"`. `shipyard train status --repo Generous-Corp/pulp` prints
+each open PR's stage. `--record` appends a sample to the host's sample file,
+and `shipyard train metrics` summarises those samples: queue depth, time
+from approval to merge, and merges per hour. A rollup forms only when every
+member has an approval naming its exact head; it lands through the merge queue
+as a merge commit. `SHIPYARD_TRAIN=off` or a `train.pause` file is the kill
+switch. `shipyard rollup reconcile --apply` is a manual operation because Pulp
+has no merge steward. The baseline numbers are recorded in the Shipyard
+merge-train design handoff; the after measurement uses the same scripts and
+rollback rule.
+
 ## A merge_group batch stops at the first failing test
 
 The full suite is roughly 21,764 tests. A batch that has one failing test is

@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 1.16.1
+    VERSION 1.23.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -407,6 +407,15 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpTracing.cmake)
 # static-library dependency even though the eventual cached value was ON.
 option(PULP_ENABLE_JS
     "Build the JS scripting + web-compat layer (pulp::view-script)" ON)
+# The shell exec/execAsync JS bridge hands a scripted UI a /bin/sh. It is a
+# developer-only affordance, so it follows PULP_BUILD_TESTS: release and SDK
+# builds (tests OFF) compile the registrar out of pulp-view-script entirely, and
+# those lanes also pass OFF explicitly. core/view/cmake/PulpViewJsEngines.cmake
+# turns the option into the PULP_BRIDGE_EXEC_ENABLED compile definition;
+# widget_bridge.cpp refuses to build without it, so a missing define fails loudly.
+option(PULP_DEV_BRIDGE_EXEC
+    "Compile the developer-only shell exec/execAsync JS bridge into pulp-view-script"
+    ${PULP_BUILD_TESTS})
 # Development-only paths: a dev checkout (tests on) compiles in the on-disk
 # UI_SCRIPT path so a hot-reloading editor reads the file being edited; a
 # tests-off or SDK build carries only the embedded script bytes. An installed-SDK

@@ -171,6 +171,46 @@ const char* name(Shape s) {
     return s == Shape::warm ? "warm" : s == Shape::harsh ? "harsh" : "other";
 }
 
+// Diagnostics printed only when a check fails, so the reason is in the plain
+// ctest log.
+void describe_window(const char* label, const std::vector<float>& y) {
+    if (y.empty()) {
+        std::printf("     %s: empty\n", label);
+        return;
+    }
+    const float lo = *std::min_element(y.begin(), y.end());
+    const float hi = *std::max_element(y.begin(), y.end());
+    std::size_t on_levels = 0;
+    for (float v : y)
+        if (std::fabs(v - 1.0f) < 1e-5f || std::fabs(v - lo) < 1e-5f)
+            ++on_levels;
+    std::printf("     %s: classified %s, min=%.6f max=%.6f level_share=%.4f samples=%zu "
+                "first=[%.6f %.6f %.6f %.6f] last=%.6f\n",
+                label, name(classify(y)), lo, hi, double(on_levels) / double(y.size()), y.size(),
+                y[0], y.size() > 1 ? y[1] : 0.0f, y.size() > 2 ? y[2] : 0.0f,
+                y.size() > 3 ? y[3] : 0.0f, y.back());
+}
+
+void describe_params(const clap_plugin_t* plugin) {
+    const auto* params =
+        static_cast<const clap_plugin_params_t*>(plugin->get_extension(plugin, CLAP_EXT_PARAMS));
+    if (!params) {
+        std::printf("     params: no CLAP params extension\n");
+        return;
+    }
+    const std::uint32_t count = params->count(plugin);
+    std::printf("     params: %u\n", count);
+    for (std::uint32_t i = 0; i < count; ++i) {
+        clap_param_info_t info{};
+        if (!params->get_info(plugin, i, &info))
+            continue;
+        double value = -1.0;
+        const bool have = params->get_value(plugin, info.id, &value);
+        std::printf("       id=%u name=%s default=%.4f value=%s%.4f\n", info.id, info.name,
+                    info.default_value, have ? "" : "(get_value failed) ", value);
+    }
+}
+
 int reload_cycle(const char* plugin_path, const char* warm, const char* harsh,
                  const std::string& dir) {
     namespace fs = std::filesystem;
@@ -250,10 +290,30 @@ int reload_cycle(const char* plugin_path, const char* warm, const char* harsh,
     };
 
     int failures = 0;
-    const Shape first = classify(render_window());
+    const auto first_window = render_window();
+    const Shape first = classify(first_window);
     std::printf("%s initial logic renders as %s\n", first == Shape::warm ? "ok  " : "FAIL",
                 name(first));
     failures += first == Shape::warm ? 0 : 1;
+    if (first != Shape::warm) {
+        // Say which failure this is: the initial DSP never installed (output is
+        // the input), depth reads 0 (same, with the parameter at 0), a swap in
+        // flight (a later window recovers), or a different shape altogether.
+        describe_window("initial window", first_window);
+        const auto* desc = factory->get_plugin_descriptor(factory, 0);
+        std::printf("     descriptor id=%s name=%s\n", desc && desc->id ? desc->id : "(null)",
+                    desc && desc->name ? desc->name : "(null)");
+        describe_params(plugin);
+        const auto second = render_window();
+        describe_window("second window, no wait", second);
+        std::this_thread::sleep_for(std::chrono::milliseconds(400));
+        const auto third = render_window();
+        describe_window("third window, after 400 ms", third);
+        std::error_code lec;
+        std::printf("     files in %s:\n", dir.c_str());
+        for (const auto& item : fs::directory_iterator(dir, lec))
+            std::printf("       %s\n", item.path().filename().c_str());
+    }
 
     // No wait before the swap: the shell seeds its watcher with the version it
     // loaded, so a build that lands before the watcher's first poll is still a

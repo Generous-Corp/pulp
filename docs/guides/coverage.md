@@ -741,7 +741,10 @@ Each OS uses Clang source-based coverage — MSVC is rejected by
 `tools/cmake/PulpInstrumentation.cmake` because MSVC's
 `/fsanitize-coverage` and llvm-cov emit incompatible profile shapes.
 On Windows runners that means `clang-cl` from the bundled LLVM
-(`C:\Program Files\LLVM\bin`), not `cl.exe`. macOS uses Apple Clang
+(`C:\Program Files\LLVM\bin`), not `cl.exe`. The Windows leg configures
+RelWithDebInfo (Pulp's static MSVC runtime must match the release prebuilt
+Skia) and builds with examples OFF, like the normal Windows build; Linux and
+macOS keep examples ON so example-owned tests still drive core code. macOS uses Apple Clang
 from the active Xcode toolchain (resolved via `xcrun` when the bin
 is not already on PATH).
 

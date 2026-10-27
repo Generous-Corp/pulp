@@ -33,6 +33,7 @@
         "tools/cmake/PulpAAX.cmake",
         "tools/cmake/PulpAppIcon.cmake",
         "tools/cmake/PulpAppTargets.cmake",
+        "tools/cmake/PulpAuv3Entitlements.cmake",
         "tools/cmake/PulpBuildInfo.cmake",
         "tools/cmake/PulpBundleRelocatable.cmake",
         "tools/cmake/PulpControlShipping.cmake",

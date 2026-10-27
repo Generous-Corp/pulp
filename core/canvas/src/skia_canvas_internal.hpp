@@ -102,12 +102,11 @@ sk_sp<SkFontMgr> get_font_manager();
 SkPaint make_stroke_paint(Color c, float width);
 
 // Build an SkFont for the given family / size / weight / slant. The
-// non_opaque_dst flag selects greyscale vs. LCD antialiasing. Defined
+// non_opaque_dst flag selects greyscale vs. LCD antialiasing, and `hinted`
+// light hinting vs. none (`-webkit-font-smoothing: antialiased`). Defined
 // in skia_canvas.cpp.
-SkFont make_font(const std::string& family, float size,
-                 int weight = SkFontStyle::kNormal_Weight,
-                 int slant = 0,
-                 bool non_opaque_dst = false);
+SkFont make_font(const std::string& family, float size, int weight = SkFontStyle::kNormal_Weight,
+                 int slant = 0, bool non_opaque_dst = false, bool hinted = true);
 
 } // namespace pulp::canvas
 
