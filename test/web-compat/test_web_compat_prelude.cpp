@@ -1476,9 +1476,8 @@ TEST_CASE("WebCompat: removeProperty clears every custom-token slot",
     auto lengthSlot = env.engine.evaluate("getMotionToken('remove-length')");
     REQUIRE(std::string(stringSlot.getWithDefault<std::string_view>("")).empty());
     REQUIRE(lengthSlot.getWithDefault<double>(-1.0) == 0.0);
-    auto fallback = env.engine.evaluate(
-        "_resolveVar('var(--remove-string, fallback)') + '|' + "
-        "_resolveVar('var(--remove-length, 7px)')");
+    auto fallback = env.engine.evaluate("_resolveVar('var(--remove-string, fallback)') + '|' + "
+                                        "_resolveVar('var(--remove-length, 7px)')");
     REQUIRE(std::string(fallback.getWithDefault<std::string_view>("")) == "fallback|7px");
 
     // Colors live in a third theme map and cannot be cleared by assigning an

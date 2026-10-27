@@ -66,7 +66,8 @@ void BridgeRegistrars::register_tokens_api(WidgetBridge& self) {
     // later materialization in the same bridge.
     register_bridge_function(api, "removeToken", [&self](choc::javascript::ArgumentList args) {
         auto name = args.get<std::string>(0, "");
-        if (name.empty()) return choc::value::Value();
+        if (name.empty())
+            return choc::value::Value();
         auto theme = self.root_.theme();
         theme.dimensions.erase(name);
         theme.strings.erase(name);
