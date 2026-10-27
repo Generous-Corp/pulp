@@ -47,6 +47,19 @@ TEST_CASE("RmlUi backend parses and lowers a document through the Pulp renderer 
     backend.close();
 }
 
+TEST_CASE("RmlUi backend fails closed instead of double-initializing process-global RmlUi") {
+    Headless first_headless;
+    Headless second_headless;
+    Backend first(first_headless, first_headless, first_headless);
+    Backend second(second_headless, second_headless, second_headless);
+
+    REQUIRE(first.open(32, 32) == Status::ok);
+    REQUIRE(second.open(32, 32) == Status::rejected);
+    first.close();
+    REQUIRE(second.open(32, 32) == Status::ok);
+    second.close();
+}
+
 TEST_CASE("headless RmlUi contract fails closed for missing and rejected assets") {
     Headless headless;
     headless.reject_path("../escape.rml");
