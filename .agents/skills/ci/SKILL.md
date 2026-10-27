@@ -534,12 +534,12 @@ reviewer means adding it to that list.
 **`carry_excluded_paths` replaces Shipyard's default; it does not add to it.**
 The same `[auto_merge]` table lists the paths whose change stops an APPROVE
 from carrying to a new head after a merge-only refresh. Shipyard's guard reads
-the key as the whole list. Pulp's copy therefore restates Shipyard's
-`DEFAULT_CARRY_EXCLUDED_PATHS` except `.shipyard/**`, which it narrows to the
-policy files: `config.toml`, `ci-profiles/**` and `vm-image*.toml`. That keeps
-a regenerated `changed-surface-families.toml` carrying. To add an exclusion,
-append it to that list. When Shipyard's default changes, compare the two lists
-again, or Pulp silently drops the new protection.
+the key as the whole list. Pulp's copy is narrower than Shipyard's
+`DEFAULT_CARRY_EXCLUDED_PATHS`: workflows, `.agents/contract.toml`,
+`scripts/ghapp*`, `.shipyard/config.toml` and the signing and notarization
+globs. `tools/ci/**` and the rest of `.shipyard/` carry across a merge-only
+refresh when the PR's own lines are unchanged. To add an exclusion, append it
+to that list. When Shipyard's default changes, compare the two lists again.
 
 ## A failed batch's branch name is not the culprit
 

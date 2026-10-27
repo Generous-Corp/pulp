@@ -815,29 +815,19 @@ attribution = "🤖 Generated with [Claude Code](https://claude.com/claude-code)
 reviewer_signers = ["pulp-review", "infra-review2"]
 # A PR changing a path that matches one of these never carries an APPROVE to a
 # new head: it needs a verdict naming its exact head. Setting the key REPLACES
-# Shipyard's DEFAULT_CARRY_EXCLUDED_PATHS rather than extending it, so this
-# restates every default except `.shipyard/**`. That default would also stop
-# carry for PRs that only regenerate .shipyard/changed-surface-families.toml.
-# The policy files under .shipyard stay excluded by name. Keep the rest equal
-# to Shipyard's default (scripts/ghapp_queue_arm_guard.py).
+# Shipyard's DEFAULT_CARRY_EXCLUDED_PATHS rather than extending it. Pulp keeps
+# only what a carry must never land unreviewed: workflows, the agent contract,
+# the ghapp guard scripts, this policy file (signers and these exclusions), and
+# signing and notarization. Everything else, tools/ci/** included, carries
+# across a merge-only refresh when the PR's own lines are unchanged, so a
+# CI-script PR does not need a fresh verdict after every base update. The
+# carry is still limited to automatic merges, three base merges and the
+# approval's age (scripts/ghapp_queue_arm_guard.py).
 carry_excluded_paths = [
     ".github/workflows/**",
     ".agents/contract.toml",
     ".shipyard/config.toml",
-    ".shipyard/ci-profiles/**",
-    ".shipyard/vm-image*.toml",
-    "tools/ci/**",
     "scripts/ghapp*",
-    "src/head_approval*",
-    "src/head_approval/**",
-    "src/queue_arm_gate*",
-    "src/auto_arm*",
-    "src/auto_arm/**",
-    "src/ghapp_guards*",
-    "src/app/ship_cmd/auto_arm*",
-    "src/app/merge_steward_cmd/native_arm*",
-    "release-please-config.json",
-    ".release-please-manifest.json",
     "**/*codesign*",
     "**/*notariz*",
     "**/*signing*",

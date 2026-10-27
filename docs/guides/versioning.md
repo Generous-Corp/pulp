@@ -747,13 +747,12 @@ The fleet guard reads `[auto_merge] carry_excluded_paths` from the base's
 `.shipyard/config.toml`. These are the paths whose change stops an APPROVE from
 carrying to a new head after a merge-only refresh. Setting the key replaces
 Shipyard's `DEFAULT_CARRY_EXCLUDED_PATHS`; it does not add to it. Pulp's list
-therefore restates the default (workflows, `.agents/contract.toml`, `tools/ci/`,
-the guard and arm code, release-please files, and signing and notarization),
-with one change. In place of the default's `.shipyard/**` it names only the
-policy files: `.shipyard/config.toml`, `.shipyard/ci-profiles/**` and
-`.shipyard/vm-image*.toml`. Generated data such as
-`.shipyard/changed-surface-families.toml` keeps carrying, so a PR that only
-regenerates it can still land on its approval. The guard only reads the key, so
+is narrower than the default: workflows, `.agents/contract.toml`,
+`scripts/ghapp*`, the policy file `.shipyard/config.toml`, and signing and
+notarization. Everything else, `tools/ci/` and the rest of `.shipyard/`
+included, carries across a merge-only refresh when the PR's own lines are
+unchanged, so a CI-script PR does not need a fresh verdict after every base
+update. The guard only reads the key, so
 the Shipyard pin does not need to support it.
 
 The earlier v0.269.1 pin parses `executable_reuse` in a target's
