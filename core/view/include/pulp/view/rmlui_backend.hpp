@@ -34,6 +34,18 @@ struct AssetManifestEntry {
     std::string sha256;
 };
 
+// RmlUi font metadata kept in the Pulp-owned seam so callers do not need to
+// include RmlUi headers. A zero weight asks RmlUi to discover all weights in a
+// variable face; explicit weights must be in RmlUi's [1, 1000] range.
+enum class FontStyle : std::uint8_t { normal, italic };
+
+struct FontFaceOptions {
+    FontStyle style = FontStyle::normal;
+    std::uint16_t weight = 0;
+    bool fallback = false;
+    int face_index = 0;
+};
+
 struct DrawVertex {
     float x = 0.0f;
     float y = 0.0f;
@@ -123,6 +135,11 @@ class Backend {
     // The path is resolved by AssetProvider before it reaches RmlUi; callers
     // cannot make the font engine read outside the declared asset closure.
     Status load_font_face(std::string_view path, std::string_view family, bool fallback = false);
+    // Registers a face with the style, weight, and collection index used by
+    // the source RmlUi skin. This overload preserves the legacy fallback-only
+    // call above while allowing bold/italic and variable-font faces to retain
+    // their CSS selection semantics.
+    Status load_font_face(std::string_view path, std::string_view family, FontFaceOptions options);
     Status dispatch_lua(std::string_view callback);
     Status invoke_action(std::string_view action);
     Status process_mouse_move(int x, int y, int key_modifier_state = 0);

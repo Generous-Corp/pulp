@@ -485,14 +485,19 @@ Status Backend::load_document(std::string_view path) {
 }
 
 Status Backend::load_font_face(std::string_view path, std::string_view family, bool fallback) {
+    return load_font_face(path, family, FontFaceOptions{FontStyle::normal, 0, fallback, 0});
+}
+
+Status Backend::load_font_face(std::string_view path, std::string_view family,
+                               FontFaceOptions options) {
     if (!open_)
         return Status::not_open;
-    if (path.empty() || family.empty())
+    if (path.empty() || family.empty() || options.face_index < 0 || options.weight > 1000)
         return Status::rejected;
 #if !PULP_RMLUI_FONTS_ENABLED
     (void)path;
     (void)family;
-    (void)fallback;
+    (void)options;
     return Status::rejected;
 #else
     Asset asset;
@@ -502,9 +507,12 @@ Status Backend::load_font_face(std::string_view path, std::string_view family, b
     runtime_->font_storage.emplace_back(std::move(asset.bytes));
     const auto& owned = runtime_->font_storage.back();
     const auto* bytes = reinterpret_cast<const Rml::byte*>(owned.data());
+    const auto style = options.style == FontStyle::italic ? Rml::Style::FontStyle::Italic
+                                                          : Rml::Style::FontStyle::Normal;
+    const auto weight = static_cast<Rml::Style::FontWeight>(options.weight);
     const auto loaded =
         Rml::LoadFontFace(Rml::Span<const Rml::byte>(bytes, owned.size()), Rml::String(family),
-                          Rml::Style::FontStyle::Normal, Rml::Style::FontWeight::Auto, fallback);
+                          style, weight, options.fallback, options.face_index);
     if (!loaded)
         runtime_->font_storage.pop_back();
     return loaded ? Status::ok : Status::rejected;
