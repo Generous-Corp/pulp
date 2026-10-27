@@ -282,7 +282,13 @@ static int run_captured_command(const std::string& cmd, std::string& out) {
 // the machine. Returns 0 when the scan is clean, or when nothing applies and
 // says which (no cache, no gate recorded, no scanner installed, no native
 // binary). Returns 1 with the scanner's report when a forbidden marker is
-// present, unless `skip_scan` overrides, which prints a loud warning.
+// present, unless `skip_scan` overrides, which prints a loud warning. A scan
+// that could not run or reach a verdict (a symlink or unreadable artifact, a
+// runner that failed to start, the scanner's own FATAL for no evidence) also
+// refuses, reported as `scan-error` so automation reading `check --json` can
+// tell "the binary is dirty" from "the scan did not happen". On Windows the
+// scan is skipped and says so: the runner would go through cmd.exe and an
+// MSVC host has no nm.
 static int enforce_release_artifact_scan(const fs::path& build_dir,
                                          const std::vector<fs::path>& artifacts, bool skip_scan,
                                          const std::string& stage, std::string* status = nullptr) {
@@ -296,6 +302,13 @@ static int enforce_release_artifact_scan(const fs::path& build_dir,
         report_status("overridden");
         std::cerr << "⚠︎  " << who
                   << ": release-artifact scan skipped because --skip-artifact-scan was passed.\n";
+        return 0;
+    }
+    if (!pulp::cli::release_scan_supported()) {
+        std::cout
+            << who
+            << ": release-artifact scan skipped: not supported on Windows (the scanner needs "
+               "a POSIX shell and nm); the build's own release-artifact ctests hold the list.\n";
         return 0;
     }
     const auto cache = pulp::cli::read_cmake_cache(build_dir);
@@ -321,11 +334,23 @@ static int enforce_release_artifact_scan(const fs::path& build_dir,
                   << " is neither beside the build's source tree nor in its SDK.\n";
         return 0;
     }
+    const auto scan_error = [&](const std::string& why) {
+        report_status("scan-error");
+        std::cerr << "Error: refusing to " << stage
+                  << ": the release-artifact scan could not reach a verdict.\n"
+                  << why << (why.empty() || why.back() == '\n' ? "" : "\n")
+                  << "  Nothing was found or cleared; fix the input or the scanner, or pass "
+                     "--skip-artifact-scan to override deliberately.\n";
+        return 1;
+    };
     std::vector<fs::path> targets;
     for (const auto& artifact : artifacts) {
         if (artifact.empty())
             continue;
-        auto found = pulp::cli::release_scan_targets(artifact);
+        std::string why;
+        auto found = pulp::cli::release_scan_targets(artifact, &why);
+        if (!why.empty())
+            return scan_error("  " + why);
         targets.insert(targets.end(), found.begin(), found.end());
     }
     if (targets.empty())
@@ -336,6 +361,12 @@ static int enforce_release_artifact_scan(const fs::path& build_dir,
         cmd += (cmd.empty() ? "" : " ") + shell_quote(arg);
     std::string report;
     const int rc = run_captured_command(cmd, report);
+    if (rc == -1)
+        return scan_error("  could not start: " + cmd);
+    // The scanner's own verdict text; anything else non-zero is the scanner
+    // failing (nm on an unreadable input, no evidence source) rather than a hit.
+    if (rc != 0 && report.find("forbidden marker(s) present") == std::string::npos)
+        return scan_error(report);
     if (rc == 0) {
         report_status("clean");
         std::cout << who << ": release-artifact scan clean over " << targets.size()

@@ -1175,10 +1175,15 @@ the shell exec bridge, `PULP_ENABLE_JS=OFF` the JS engine; an official release
 SDK's `profile: official-release` proves the dev-environment, reload-watcher
 and exec-bridge gates for everything linked against it). A hit refuses the step with the
 scanner's report naming the marker; `--skip-artifact-scan` overrides it with a
-loud warning. A build that recorded none of those options, a build dir without
-a cache, or a project whose SDK does not install the scanner is skipped, and
-the command says which. `check --json` reports the verdict as `artifact_scan`
-(`clean`, `forbidden-marker`, `overridden` or `skipped`). The scanner is the
+loud warning. A scan that cannot reach a verdict (a symlink or unreadable
+artifact, a path carrying `;`, a scanner that failed to start or found no
+evidence source) also refuses, as `scan-error`, so a dirty binary and a scan
+that did not happen are never confused. A build that recorded none of those
+options, a build dir without a cache, a project whose SDK does not install the
+scanner, or a Windows host (the scanner needs a POSIX shell and `nm`) is
+skipped, and the command says which. `check --json` reports the verdict as
+`artifact_scan` (`clean`, `forbidden-marker`, `scan-error`, `overridden` or
+`skipped`). The scanner is the
 same one the build's ctests run over the SDK libraries, the CLI and the fixture
 plug-in; this runs it on the bytes that leave the machine.
 

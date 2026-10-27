@@ -326,7 +326,7 @@ commands:
           - name: --pub-date
             required: false
       - name: check
-        summary: Check signing status of built desktop plugins or Android APK/AAB artifacts, and run the release-artifact forbidden-marker scan over the desktop bundles (exit 1 on a hit; `--json` reports it as `artifact_scan`)
+        summary: Check signing status of built desktop plugins or Android APK/AAB artifacts, and run the release-artifact forbidden-marker scan over the desktop bundles (exit 1 on a hit or when the scan cannot reach a verdict; `--json` reports `artifact_scan` as clean, forbidden-marker, scan-error, overridden or skipped; skipped on Windows)
         args:
           - name: --target
             required: false

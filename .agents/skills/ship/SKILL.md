@@ -275,17 +275,31 @@ classes they build; this holds it on the bytes that get signed and notarized.
   scanned against what its SDK proves. `control-stripped` is never derived here.
 - **Skips say why.** No cache, no gate recorded, no scanner (it is looked for
   at `<CMAKE_HOME_DIRECTORY>/tools/cmake/` then `<Pulp_DIR>/`, where the SDK
-  installs it), or nothing native under the artifact (a `.dmg`, a `.pkg`) each
-  print one line and proceed. A skip is not a pass; `check --json` reports
-  `artifact_scan` as `skipped` in that case, `clean` / `forbidden-marker`
-  otherwise, and `overridden` under `--skip-artifact-scan`.
+  installs it), nothing native under the artifact (a `.dmg`, a `.pkg`), or a
+  Windows host (the runner would go through cmd.exe, which cannot open
+  `/dev/null`, and an MSVC host has no `nm`; the build's own release-artifact
+  ctests hold the list there) each print one line and proceed. A skip is not
+  a pass; `check --json` reports `artifact_scan` as `skipped` in that case,
+  `clean` / `forbidden-marker` otherwise, and `overridden` under
+  `--skip-artifact-scan`.
 - **A hit fails closed** with the scanner's own report (marker id, kind,
-  pattern, gates) and exits 1 — including a scanner that could not run (nm
-  failing on an input, no evidence source at all). The fix is a release
-  configure (`pulp ship` builds `build-ship/` for a dev build); `--skip-artifact-scan`
+  pattern, gates) and exits 1. **So does a scan that cannot reach a verdict**,
+  reported as `scan-error` with its own message: a symlink as the artifact
+  (never followed), a directory the walk cannot read, a path carrying `;` (the
+  CMake list separator `BINS` is joined with), a runner that failed to start,
+  or the scanner's own FATAL (nm failing on an input, no evidence source at
+  all). The two are told apart by the scanner's `forbidden marker(s) present`
+  text, so automation reading the JSON never mistakes "the scan did not
+  happen" for "the binary is dirty". The fix for a hit is a release configure
+  (`pulp ship` builds `build-ship/` for a dev build); `--skip-artifact-scan`
   is the deliberate, loud override, on `sign`, `package` and `check`.
   `release` inherits the guard through its `sign` and `package` stages and has
   no override of its own.
+- **Provenance is read by position, not by key name.** The reader takes the
+  top level and the `features` object of `sdk-provenance.json` and nothing
+  deeper, so a `profile` or `tracing` key inside `gpu_audio` or `integrity`
+  cannot shadow the real ones whatever order `sort_keys=True` wrote them in;
+  the unit test feeds the marker as minted and a demoted negative control.
 - **Testing it needs a real image.** The scanner runs `nm` on every target and
   a text file fails it, so the shell-out cases (`[artifact-scan]` in
   `test/test_cli_ship_shellout.cpp`) copy the Mach-O strip fixture into a fake

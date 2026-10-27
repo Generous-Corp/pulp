@@ -119,6 +119,65 @@ TEST_CASE("SDK provenance supplies the gates a consumer's cache never records",
     CHECK(has(gates, kGateTracingOff));
     CHECK(gates.size() == 4);
 
+    // The marker as the producer really writes it: json.dumps(sort_keys=True)
+    // with the gpu_audio and integrity objects. Nested keys spelled like the
+    // top-level ones (a planted gpu_audio.profile, integrity.tracing) must not
+    // shadow them: the reader only looks at the top level and at features.
+    const std::string sorted_real =
+        "{\n"
+        "  \"build_type\": \"Release\",\n"
+        "  \"distribution_eligible\": true,\n"
+        "  \"features\": {\n"
+        "    \"audio_probes\": false,\n"
+        "    \"bridge_exec\": false,\n"
+        "    \"inspector\": true,\n"
+        "    \"tracing\": false\n"
+        "  },\n"
+        "  \"gpu_audio\": {\n"
+        "    \"capability_receipt\": \"sha256:abc\",\n"
+        "    \"profile\": \"dev\",\n"
+        "    \"providers\": [\"metal\", \"vulkan\"]\n"
+        "  },\n"
+        "  \"integrity\": {\n"
+        "    \"algorithm\": \"sha256\",\n"
+        "    \"files\": {\"lib/libpulp.a\": \"0123\", \"features\": \"not-an-object\"},\n"
+        "    \"tracing\": true\n"
+        "  },\n"
+        "  \"kind\": \"release\",\n"
+        "  \"platform\": \"darwin-arm64\",\n"
+        "  \"profile\": \"official-release\",\n"
+        "  \"schema\": \"pulp.sdk-provenance.v1\",\n"
+        "  \"sdk_version\": \"1.2.3\",\n"
+        "  \"source_git_dirty\": false,\n"
+        "  \"source_git_ref\": \"v1.2.3\",\n"
+        "  \"source_git_sha\": \"0123456789abcdef0123456789abcdef01234567\"\n"
+        "}\n";
+    gates = release_scan_gates_from_provenance(sorted_real);
+    CHECK(has(gates, kGateDevEnvOff));
+    CHECK(has(gates, kGateReloadShip));
+    CHECK(has(gates, kGateBridgeExecOff));
+    CHECK(has(gates, kGateTracingOff));
+    CHECK(gates.size() == 4);
+    const auto scalars = pulp::cli::detail::provenance_scalars(sorted_real);
+    CHECK(scalars.at("profile") == "official-release");
+    CHECK(scalars.at("features.bridge_exec") == "false");
+    CHECK(scalars.at("features.tracing") == "false");
+    CHECK(scalars.at("kind") == "release");
+    CHECK(scalars.count("capability_receipt") == 0); // gpu_audio.* is not read
+    CHECK(scalars.count("algorithm") == 0);          // integrity.* is not read
+    CHECK(scalars.count("features.files") == 0);     // integrity.files is not features
+    // The negative control: the same marker with the top-level profile set
+    // to dev keeps nothing but the features gates, however the nested
+    // objects spell theirs.
+    std::string demoted = sorted_real;
+    const auto at = demoted.find("\"profile\": \"official-release\"");
+    REQUIRE(at != std::string::npos);
+    demoted.replace(at, std::string("\"profile\": \"official-release\"").size(),
+                    "\"profile\": \"dev\"");
+    gates = release_scan_gates_from_provenance(demoted);
+    CHECK(gates ==
+          std::vector<std::string>{std::string(kGateBridgeExecOff), std::string(kGateTracingOff)});
+
     // An official marker minted before features.bridge_exec existed still
     // proves the profile gates; one that claims the bridge proves no bridge
     // gate of its own, only the profile's.
@@ -243,7 +302,9 @@ TEST_CASE("a bundle reduces to its native binaries and a loose file to itself",
     CHECK(release_scan_targets(bundle / "Contents" / "Info.plist").empty());
     CHECK(release_scan_targets(root / "absent").empty());
 
-    // A symlink is never followed, so an alias cannot point the scan outside.
+    // A symlink inside the bundle is never followed, so an alias cannot point
+    // the scan outside; a symlink AS the artifact is refused rather than
+    // silently scanned as nothing.
     std::error_code ec;
     fs::create_directory_symlink(root, bundle / "Contents" / "escape", ec);
     if (!ec) {
@@ -251,8 +312,40 @@ TEST_CASE("a bundle reduces to its native binaries and a loose file to itself",
         fs::create_symlink(loose, bundle / "Contents" / "MacOS" / "alias", ec);
         if (!ec)
             CHECK(release_scan_targets(bundle).size() == 3);
+        fs::create_directory_symlink(bundle, root / "Alias.vst3", ec);
+        if (!ec) {
+            std::string why;
+            CHECK(release_scan_targets(root / "Alias.vst3", &why).empty());
+            CHECK(why.find("symlink") != std::string::npos);
+        }
+    }
+    // A path carrying the CMake list separator cannot be handed to BINS.
+    {
+        const auto odd = root / "a;b";
+        fs::create_directories(odd / "Contents" / "MacOS");
+        write(odd / "Contents" / "MacOS" / "Odd", kMachO64);
+        std::string why;
+        CHECK(release_scan_targets(odd, &why).empty());
+        CHECK(why.find("';'") != std::string::npos);
+        why.clear();
+        CHECK(release_scan_targets(odd / "Contents" / "MacOS" / "Odd", &why).empty());
+        CHECK_FALSE(why.empty());
+    }
+    // An absent artifact is no error (a missing optional root), just nothing.
+    {
+        std::string why;
+        CHECK(release_scan_targets(root / "absent", &why).empty());
+        CHECK(why.empty());
     }
     fs::remove_all(root);
+}
+
+TEST_CASE("the scan is supported everywhere but Windows", "[ship][artifact-scan]") {
+#if defined(_WIN32)
+    CHECK_FALSE(release_scan_supported());
+#else
+    CHECK(release_scan_supported());
+#endif
 }
 
 TEST_CASE("the scan argv names every binary, the gates and the forbid mode",

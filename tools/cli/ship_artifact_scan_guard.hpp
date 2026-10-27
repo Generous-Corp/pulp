@@ -28,6 +28,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -39,6 +40,18 @@ namespace pulp::cli {
 inline constexpr std::string_view kReleaseScanScriptName = "PulpReleaseArtifactScan.cmake";
 inline constexpr std::string_view kReleaseScanListName = "release_artifact_forbidden.json";
 inline constexpr std::string_view kSdkProvenanceName = "sdk-provenance.json";
+
+// Whether this host can produce evidence for the scan. The scanner needs a
+// POSIX shell for its runner and nm for symbol markers; on Windows the runner
+// would go through cmd.exe and an MSVC host has no nm, so the scan is skipped
+// there with a line saying so rather than refusing every signing.
+inline constexpr bool release_scan_supported() {
+#if defined(_WIN32)
+    return false;
+#else
+    return true;
+#endif
+}
 
 // The gate ids PulpReleaseArtifactScan.cmake understands, as the ship scan
 // derives them. `control-stripped` is decided per artifact by the
@@ -58,31 +71,91 @@ inline void add_gate(std::vector<std::string>& gates, std::string_view gate) {
     gates.emplace_back(gate);
 }
 
-// The bare scalar after `"key":` in a flat JSON object: quotes stripped,
-// surrounding whitespace removed. nullopt when the key is absent. The SDK
-// provenance file is a flat object the install stamp writes itself, so this
-// is enough and keeps the header free of a JSON dependency.
-inline std::optional<std::string> flat_json_scalar(std::string_view text, std::string_view key) {
-    const std::string needle = "\"" + std::string(key) + "\"";
-    size_t at = text.find(needle);
-    if (at == std::string_view::npos)
-        return std::nullopt;
-    at = text.find(':', at + needle.size());
-    if (at == std::string_view::npos)
-        return std::nullopt;
-    ++at;
-    while (at < text.size() &&
-           (text[at] == ' ' || text[at] == '\t' || text[at] == '\n' || text[at] == '\r'))
-        ++at;
-    size_t end = at;
-    while (end < text.size() && text[end] != ',' && text[end] != '}' && text[end] != '\n')
-        ++end;
-    std::string value(text.substr(at, end - at));
-    while (!value.empty() && (value.back() == ' ' || value.back() == '\t' || value.back() == '\r'))
-        value.pop_back();
-    if (value.size() >= 2 && value.front() == '"' && value.back() == '"')
-        value = value.substr(1, value.size() - 2);
-    return value;
+// The scalar values of a provenance marker, keyed by where they sit: a
+// top-level key as "key", a key of the top-level "features" object as
+// "features.key". Nothing deeper is read, so an object such as gpu_audio or
+// integrity cannot shadow a top-level key whatever order the producer wrote
+// the keys in. Quotes are stripped from string values; objects and arrays
+// are not recorded. The marker is produced by Pulp's own tooling, so this
+// walks braces and strings rather than carrying a JSON parser.
+inline std::map<std::string, std::string> provenance_scalars(std::string_view text) {
+    std::map<std::string, std::string> out;
+    std::vector<std::string> path; // object keys from the root to the current value
+    int depth = 0;                 // 1 inside the root object
+    bool in_string = false;
+    std::string token;       // the string literal being read
+    std::string pending_key; // the key awaiting its value at this depth
+    bool expecting_value = false;
+    bool string_is_value = false;
+    const auto record = [&](const std::string& value) {
+        if (!expecting_value)
+            return;
+        if (depth == 1)
+            out[pending_key] = value;
+        else if (depth == 2 && !path.empty() && path.back() == "features")
+            out["features." + pending_key] = value;
+        expecting_value = false;
+    };
+    for (size_t i = 0; i < text.size(); ++i) {
+        const char c = text[i];
+        if (in_string) {
+            if (c == '\\' && i + 1 < text.size()) {
+                token.push_back(text[++i]);
+                continue;
+            }
+            if (c == '"') {
+                in_string = false;
+                if (string_is_value)
+                    record(token);
+                else
+                    pending_key = token;
+                continue;
+            }
+            token.push_back(c);
+            continue;
+        }
+        switch (c) {
+        case '"':
+            in_string = true;
+            token.clear();
+            string_is_value = expecting_value; // a string after ':' is a value
+            break;
+        case ':':
+            expecting_value = true;
+            break;
+        case '{':
+        case '[':
+            path.push_back(expecting_value ? pending_key : std::string());
+            expecting_value = false;
+            ++depth;
+            break;
+        case '}':
+        case ']':
+            if (!path.empty())
+                path.pop_back();
+            --depth;
+            break;
+        case ',':
+        case ' ':
+        case '\t':
+        case '\n':
+        case '\r':
+            break;
+        default: {
+            if (!expecting_value)
+                break;
+            // A bare scalar: true, false, null or a number.
+            size_t end = i;
+            while (end < text.size() && text[end] != ',' && text[end] != '}' && text[end] != ']' &&
+                   text[end] != ' ' && text[end] != '\n' && text[end] != '\r' && text[end] != '\t')
+                ++end;
+            record(std::string(text.substr(i, end - i)));
+            i = end - 1;
+            break;
+        }
+        }
+    }
+    return out;
 }
 
 } // namespace detail
@@ -131,26 +204,27 @@ inline std::vector<std::string> release_scan_gates_from_cache(std::string_view c
 // A release-profile SDK compiles out the dev environment hooks, the reload
 // watcher and the exec bridge, so `official-release` and `build_profile:
 // release` each prove `dev-env-off`, `reload-ship` and `bridge-exec-off`;
-// `bridge_exec: false` proves `bridge-exec-off` and `tracing: false` proves
-// `tracing-off` wherever they sit. A consumer project's own cache rarely
-// records those options, so without this an SDK-based plug-in would be
-// scanned against nothing. The lookup is by key name, not by nesting: a key
-// of the same name under another object would be misread, and no marker
-// shape carries one.
+// `bridge_exec: false` (top-level or under features) proves `bridge-exec-off`
+// and `features.tracing: false` proves `tracing-off`. A consumer project's own
+// cache rarely records those options, so without this an SDK-based plug-in
+// would be scanned against nothing. Only the top level and the features
+// object are read, so a key of the same name inside gpu_audio or integrity
+// cannot shadow them.
 inline std::vector<std::string> release_scan_gates_from_provenance(std::string_view provenance) {
     std::vector<std::string> gates;
-    const auto is = [&provenance](std::string_view key, std::string_view want) {
-        const auto value = detail::flat_json_scalar(provenance, key);
-        return value && *value == want;
+    const auto scalars = detail::provenance_scalars(provenance);
+    const auto is = [&scalars](const char* key, std::string_view want) {
+        const auto it = scalars.find(key);
+        return it != scalars.end() && it->second == want;
     };
     if (is("profile", "official-release") || is("build_profile", "release")) {
         detail::add_gate(gates, kGateDevEnvOff);
         detail::add_gate(gates, kGateReloadShip);
         detail::add_gate(gates, kGateBridgeExecOff);
     }
-    if (is("bridge_exec", "false"))
+    if (is("features.bridge_exec", "false") || is("bridge_exec", "false"))
         detail::add_gate(gates, kGateBridgeExecOff);
-    if (is("tracing", "false"))
+    if (is("features.tracing", "false"))
         detail::add_gate(gates, kGateTracingOff);
     return gates;
 }
@@ -260,30 +334,50 @@ inline bool is_native_binary(const std::filesystem::path& file) {
 
 // Every native binary the artifact holds: the artifact itself when it is a
 // loose file, or every regular file under a bundle directory that carries a
-// native image header. Symlinks are not followed, so an alias cannot point the
-// scan outside the artifact. Sorted, so the scan and its report are stable.
+// native image header. Sorted, so the scan and its report are stable. Nothing
+// here is allowed to fail quietly into a clean verdict: a top-level symlink
+// (an alias could point the scan at something else), a directory the walk
+// cannot read, and a path carrying `;` (the CMake list separator the BINS
+// argument is joined with) each set `error` and yield no targets, which the
+// caller must refuse rather than pass. Symlinks inside a bundle are not
+// followed.
 inline std::vector<std::filesystem::path>
-release_scan_targets(const std::filesystem::path& artifact) {
+release_scan_targets(const std::filesystem::path& artifact, std::string* error = nullptr) {
     namespace fs = std::filesystem;
     std::vector<fs::path> targets;
-    std::error_code ec;
-    if (fs::is_symlink(artifact, ec))
+    const auto fail = [&](const std::string& why) {
+        if (error)
+            *error = why;
+        targets.clear();
         return targets;
+    };
+    if (artifact.string().find(';') != std::string::npos)
+        return fail(artifact.string() + ": a path containing ';' cannot be passed to the scanner");
+    std::error_code ec;
+    const auto status = fs::symlink_status(artifact, ec);
+    if (status.type() == fs::file_type::not_found)
+        return targets; // an optional root that was never built: nothing to read
+    if (ec)
+        return fail(artifact.string() + ": cannot stat: " + ec.message());
+    if (status.type() == fs::file_type::symlink)
+        return fail(artifact.string() + ": a symlink is not scanned; pass the real path");
     if (fs::is_directory(artifact, ec) && !ec) {
-        for (fs::recursive_directory_iterator
-                 it(artifact, fs::directory_options::skip_permission_denied, ec),
-             end;
-             it != end; it.increment(ec)) {
+        for (fs::recursive_directory_iterator it(artifact, ec), end; it != end; it.increment(ec)) {
             if (ec)
-                break;
+                return fail(artifact.string() + ": cannot walk: " + ec.message());
             if (it->is_symlink(ec)) {
                 if (it->is_directory(ec))
                     it.disable_recursion_pending();
                 continue;
             }
+            if (it->path().string().find(';') != std::string::npos)
+                return fail(it->path().string() +
+                            ": a path containing ';' cannot be passed to the scanner");
             if (it->is_regular_file(ec) && !ec && is_native_binary(it->path()))
                 targets.push_back(it->path());
         }
+        if (ec)
+            return fail(artifact.string() + ": cannot walk: " + ec.message());
     } else if (fs::is_regular_file(artifact, ec) && !ec && is_native_binary(artifact)) {
         targets.push_back(artifact);
     }

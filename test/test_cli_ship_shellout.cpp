@@ -3454,4 +3454,69 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     REQUIRE_FALSE(contains(overridden.stderr_output, "forbidden release marker"));
     fs::remove_all(root);
 }
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "a scan that cannot reach a verdict refuses as scan-error, not as a marker hit",
+                 "[cli][shellout][ship][artifact-scan]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    // A symlink as the --path artifact: the scan refuses to follow it.
+    auto root = make_scannable_project("artifact-scan-error", "OFF");
+    auto bundle = make_module_bundle(root, "CLAP", "Linked", ".clap");
+    write_default_entitlements(root);
+    const auto alias = root / "Alias.clap";
+    std::error_code ec;
+    fs::create_directory_symlink(bundle, alias, ec);
+    REQUIRE_FALSE(ec);
+    auto r = run_pulp_in(root, {"ship", "sign", "--identity", "-", "--path", alias.string()});
+    INFO(r.stdout_output << r.stderr_output);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 1);
+    REQUIRE(contains(r.stderr_output, "could not reach a verdict"));
+    REQUIRE(contains(r.stderr_output, "a symlink is not scanned"));
+    REQUIRE_FALSE(contains(r.stderr_output, "forbidden release marker"));
+    fs::remove_all(root);
+
+    // A bundle path carrying the CMake list separator cannot reach the
+    // scanner; check reports it as scan-error in JSON, distinct from a hit.
+    auto odd = make_scannable_project("artifact;scan", "OFF");
+    make_module_bundle(odd, "VST3", "Odd", ".vst3");
+    auto json = run_pulp_in(odd, {"ship", "check", "--json"});
+    INFO(json.stdout_output << json.stderr_output);
+    REQUIRE(json.exit_code == 1);
+    REQUIRE(contains(json.stdout_output, "\"artifact_scan\":\"scan-error\""));
+    REQUIRE(contains(json.stderr_output, "';'"));
+    auto text = run_pulp_in(odd, {"ship", "check"});
+    REQUIRE(text.exit_code == 1);
+    REQUIRE(contains(text.stderr_output, "could not reach a verdict"));
+    fs::remove_all(odd);
+}
+#endif
+
+#if defined(_WIN32)
+// The scanner needs a POSIX shell and nm, so on Windows the scan is skipped
+// with a line saying so; it must never refuse a signing there.
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship check skips the release-artifact scan on Windows and says so",
+                 "[cli][shellout][ship][artifact-scan]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("artifact-scan-windows", true);
+    {
+        std::ofstream cache(root / "build" / "CMakeCache.txt", std::ios::app);
+        cache << "PULP_TRACING:BOOL=OFF\nPULP_DEV_BUILD:BOOL=OFF\n";
+    }
+    auto r = run_pulp_in(root, {"ship", "check"});
+    INFO(r.stdout_output << r.stderr_output);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(contains(r.stdout_output, "release-artifact scan skipped: not supported on Windows"));
+    REQUIRE_FALSE(contains(r.stderr_output, "forbidden release marker"));
+    auto json = run_pulp_in(root, {"ship", "check", "--json"});
+    REQUIRE(json.exit_code == 0);
+    REQUIRE(contains(json.stdout_output, "\"artifact_scan\":\"skipped\""));
+    fs::remove_all(root);
+}
 #endif
