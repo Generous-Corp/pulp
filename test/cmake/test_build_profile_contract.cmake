@@ -4,6 +4,7 @@
 #   an explicit contradicting -D is refused with the profile diagnostic;
 #   a stale dev cache is refused the same way;
 #   PULP_PROFILE_ALLOW_OVERRIDE turns the refusal into a warning naming the option;
+#   a cached PULP_DEV_BUILD=ON (the pulp CLI's developer-loop configure) is refused;
 #   an unknown profile is refused;
 #   the root CMakeLists.txt wires the module around its governed options.
 cmake_minimum_required(VERSION 3.24)
@@ -36,7 +37,7 @@ endfunction()
 
 set(_enforced
     PULP_BUILD_TESTS PULP_BUILD_EXAMPLES PULP_ENABLE_AUDIO_PROBES PULP_DEV_BRIDGE_EXEC
-    PULP_TRACING PULP_ENABLE_FUZZING PULP_BENCHMARK PULP_RT_WORK_COUNTERS)
+    PULP_DEV_BUILD PULP_TRACING PULP_ENABLE_FUZZING PULP_BENCHMARK PULP_RT_WORK_COUNTERS)
 set(_neutral PULP_ENABLE_DESIGN_IMPORT PULP_ENABLE_INSPECTOR)
 
 # Control: the dev profile leaves every fixture option at its declared ON, so a
@@ -54,6 +55,14 @@ endforeach()
 _cache_value(dev PULP_PROFILE _value)
 if(NOT _value STREQUAL "dev" OR NOT _output MATCHES "Pulp profile: dev \\(")
     message(FATAL_ERROR "dev profile was not recorded:\n${_output}")
+endif()
+# The list above is this test's copy of PULP_PROFILE_ENFORCED_OPTIONS; an option
+# added to the module without being added here would be enforced but unproven.
+file(READ "${FIXTURE_DIR}/dev/enforced-options.txt" _module_enforced)
+if(NOT _module_enforced STREQUAL _enforced)
+    message(FATAL_ERROR
+        "PULP_PROFILE_ENFORCED_OPTIONS is '${_module_enforced}' but this test "
+        "proves '${_enforced}'; update _enforced to match")
 endif()
 
 # (a) release seeds every enforced option OFF; neutral options keep their default.
@@ -186,6 +195,32 @@ foreach(_case "OFF;release" "ON;dev")
     endif()
 endforeach()
 
+# A cached PULP_DEV_BUILD=ON is refused on its own. The pulp CLI's developer
+# loop writes exactly this cache (-DPULP_DEV_BUILD=ON into build/), so a
+# release configure into that directory must not inherit the on-disk UI_SCRIPT
+# hot-reload path. Everything else is cached OFF so only this option can fail.
+set(_dev_build_offs "")
+foreach(_option IN LISTS _enforced)
+    if(NOT _option STREQUAL "PULP_DEV_BUILD")
+        list(APPEND _dev_build_offs "-D${_option}=OFF")
+    endif()
+endforeach()
+_configure(dev-build _result _output -DPULP_DEV_BUILD=ON ${_dev_build_offs})
+if(NOT _result EQUAL 0)
+    message(FATAL_ERROR "dev profile refused PULP_DEV_BUILD=ON:\n${_output}")
+endif()
+_configure(dev-build _result _output -DPULP_PROFILE=release)
+if(_result EQUAL 0)
+    message(FATAL_ERROR "release profile accepted a cached PULP_DEV_BUILD=ON")
+endif()
+if(NOT _output MATCHES "PULP_PROFILE=release requires these options OFF" OR
+   NOT _output MATCHES "PULP_DEV_BUILD=ON")
+    message(FATAL_ERROR "cached PULP_DEV_BUILD=ON failed without the profile diagnostic:\n${_output}")
+endif()
+if(_output MATCHES "PULP_BUILD_TESTS=ON" OR _output MATCHES "PULP_DEV_BRIDGE_EXEC=ON")
+    message(FATAL_ERROR "profile diagnostic named an option that agreed:\n${_output}")
+endif()
+
 # An unknown profile is refused before any option is seeded.
 _configure(unknown _result _output -DPULP_PROFILE=ship)
 if(_result EQUAL 0 OR NOT _output MATCHES "is not a Pulp build profile")
@@ -198,12 +233,12 @@ endif()
 file(READ "${PULP_SRC_DIR}/CMakeLists.txt" _root)
 string(FIND "${_root}" "tools/cmake/PulpProfiles.cmake)" _include_at)
 string(FIND "${_root}" "option(PULP_BUILD_TESTS" _first_option_at)
-string(FIND "${_root}" "option(PULP_DEV_BRIDGE_EXEC" _last_option_at)
+string(FIND "${_root}" "option(PULP_DEV_BUILD" _last_option_at)
 string(FIND "${_root}" "\npulp_profile_validate()\n" _validate_at)
 if(_include_at EQUAL -1 OR _first_option_at EQUAL -1 OR
    _last_option_at EQUAL -1 OR _validate_at EQUAL -1 OR
    NOT _include_at LESS _first_option_at OR NOT _last_option_at LESS _validate_at)
     message(FATAL_ERROR
         "CMakeLists.txt must include PulpProfiles.cmake before option(PULP_BUILD_TESTS) "
-        "and call pulp_profile_validate() after option(PULP_DEV_BRIDGE_EXEC)")
+        "and call pulp_profile_validate() after option(PULP_DEV_BUILD)")
 endif()

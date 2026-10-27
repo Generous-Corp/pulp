@@ -66,11 +66,16 @@ if(NOT PULP_PROFILE MATCHES "^(dev|release)$")
 endif()
 
 # Every option the release profile forces OFF. The order is the report order.
+# PULP_DEV_BUILD is the on-disk UI_SCRIPT hot-reload path: a shipped image must
+# carry only the embedded editor, so the profile owns it like the exec bridge.
+# `pulp ship` reads this list (tools/cli/build_profile_gen.h, generated from
+# it) to decide which cache entries its shippable sibling configure drops.
 set(PULP_PROFILE_ENFORCED_OPTIONS
     PULP_BUILD_TESTS
     PULP_BUILD_EXAMPLES
     PULP_ENABLE_AUDIO_PROBES
     PULP_DEV_BRIDGE_EXEC
+    PULP_DEV_BUILD
     PULP_TRACING
     PULP_ENABLE_FUZZING
     PULP_BENCHMARK

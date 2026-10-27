@@ -12933,8 +12933,9 @@ do not broaden the selector to the entire graph suite.
 
 `tools/cmake/PulpProfiles.cmake` is the one statement of the shipped option
 set. `-DPULP_PROFILE=release` seeds `PULP_BUILD_TESTS`, `PULP_BUILD_EXAMPLES`,
-`PULP_ENABLE_AUDIO_PROBES`, `PULP_DEV_BRIDGE_EXEC`, `PULP_TRACING`,
-`PULP_ENABLE_FUZZING`, `PULP_BENCHMARK` and `PULP_RT_WORK_COUNTERS` OFF, and
+`PULP_ENABLE_AUDIO_PROBES`, `PULP_DEV_BRIDGE_EXEC`, `PULP_DEV_BUILD`,
+`PULP_TRACING`, `PULP_ENABLE_FUZZING`, `PULP_BENCHMARK` and
+`PULP_RT_WORK_COUNTERS` OFF, and
 the configure FATAL_ERRORs if any of them is ON from a `-D` or a stale cache.
 Every release site (`release-cli.yml` CLI + both SDK configures,
 `sign-and-release.yml`, `release-cli-local.sh`,

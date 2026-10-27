@@ -426,8 +426,10 @@ option(PULP_DEV_BRIDGE_EXEC
 # UI_SCRIPT path so a hot-reloading editor reads the file being edited; a
 # tests-off or SDK build carries only the embedded script bytes. An installed-SDK
 # consumer gets the same option from PulpUiAssets.cmake (default OFF; the CLI's
-# configure turns it on, and `pulp ship` refuses a build with it on). The
-# release profile module owns this option once it lands.
+# configure turns it on, and `pulp ship` configures a shippable sibling with it
+# off). The release profile module (tools/cmake/PulpProfiles.cmake) owns this
+# option: PULP_PROFILE=release seeds it OFF and refuses a cache or -D that
+# says ON, so it must stay declared above pulp_profile_validate().
 option(PULP_DEV_BUILD
     "Compile development-only paths (on-disk ui.js override) in" ${PULP_BUILD_TESTS})
 

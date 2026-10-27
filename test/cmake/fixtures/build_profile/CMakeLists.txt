@@ -16,6 +16,10 @@ endforeach()
 
 pulp_profile_validate()
 
+# The contract test keeps its own copy of the enforced list so its assertions
+# are explicit; this file lets it prove that copy is complete.
+file(WRITE "${CMAKE_BINARY_DIR}/enforced-options.txt" "${PULP_PROFILE_ENFORCED_OPTIONS}")
+
 foreach(_option IN LISTS PULP_PROFILE_ENFORCED_OPTIONS PULP_PROFILE_NEUTRAL_OPTIONS)
     message(STATUS "fixture ${_option}=${${_option}}")
 endforeach()

@@ -827,8 +827,9 @@ set_tests_properties(cmake-sdk-provenance-contract PROPERTIES
     LABELS "cmake;sdk;provenance"
     TIMEOUT 30)
 # PULP_PROFILE contract: release seeds the enforced options OFF, refuses a
-# contradicting -D or stale cache, and only PULP_PROFILE_ALLOW_OVERRIDE (with a
-# warning) lets one through. Six fixture configures with LANGUAGES NONE.
+# contradicting -D, stale cache or cached PULP_DEV_BUILD=ON, and only
+# PULP_PROFILE_ALLOW_OVERRIDE (with a warning) lets one through. Eight fixture
+# configures with LANGUAGES NONE.
 add_test(NAME cmake-build-profile-contract
     COMMAND ${CMAKE_COMMAND}
         -DPULP_SRC_DIR=${CMAKE_SOURCE_DIR}
