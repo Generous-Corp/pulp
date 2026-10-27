@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <filesystem>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -24,6 +25,26 @@ class AssetProvider {
   public:
     virtual ~AssetProvider() = default;
     virtual Status load(std::string_view path, Asset& out) = 0;
+};
+
+struct AssetManifestEntry {
+    std::string path;
+    std::string sha256;
+};
+
+// Reads only regular files inside a declared asset root. The manifest is a
+// content closure: an empty or mismatched digest rejects the read.
+class RootedAssetProvider final : public AssetProvider {
+  public:
+    RootedAssetProvider(std::filesystem::path root, std::vector<AssetManifestEntry> manifest,
+                        std::uint64_t max_bytes = 16 * 1024 * 1024);
+
+    Status load(std::string_view path, Asset& out) override;
+
+  private:
+    std::filesystem::path root_;
+    std::vector<AssetManifestEntry> manifest_;
+    std::uint64_t max_bytes_;
 };
 
 struct DrawCommand {

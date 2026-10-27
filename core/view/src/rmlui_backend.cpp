@@ -1,7 +1,11 @@
 #include <RmlUi/Core.h>
 #include <pulp/view/rmlui_backend.hpp>
 
+#include <pulp/runtime/crypto.hpp>
+
 #include <algorithm>
+#include <fstream>
+#include <iterator>
 
 namespace pulp::view::rmlui {
 
@@ -15,6 +19,58 @@ namespace {
 Backend::Backend(AssetProvider& assets, RenderInterface& renderer, LuaInterface& lua,
                  ActionSink* actions)
     : assets_(assets), renderer_(renderer), lua_(lua), actions_(actions) {}
+
+RootedAssetProvider::RootedAssetProvider(std::filesystem::path root,
+                                         std::vector<AssetManifestEntry> manifest,
+                                         std::uint64_t max_bytes)
+    : root_(std::move(root)), manifest_(std::move(manifest)), max_bytes_(max_bytes) {}
+
+Status RootedAssetProvider::load(std::string_view path, Asset& out) {
+    if (path.empty())
+        return Status::rejected;
+
+    const std::filesystem::path relative(path);
+    if (relative.is_absolute())
+        return Status::rejected;
+    for (const auto& component : relative) {
+        if (component == ".." || component == ".")
+            return Status::rejected;
+    }
+
+    const auto manifest =
+        std::find_if(manifest_.begin(), manifest_.end(),
+                     [&](const AssetManifestEntry& entry) { return entry.path == path; });
+    if (manifest == manifest_.end() || manifest->sha256.size() != 64)
+        return Status::rejected;
+
+    std::error_code ec;
+    const auto root = std::filesystem::weakly_canonical(root_, ec);
+    if (ec)
+        return Status::missing_asset;
+    const auto candidate = std::filesystem::weakly_canonical(root / relative, ec);
+    if (ec)
+        return Status::rejected;
+    const auto confined = candidate.lexically_relative(root);
+    const auto first = confined.begin();
+    if (confined.empty() || first == confined.end() || *first == "..")
+        return Status::rejected;
+    if (!std::filesystem::is_regular_file(candidate, ec) || ec)
+        return Status::missing_asset;
+    const auto size = std::filesystem::file_size(candidate, ec);
+    if (ec)
+        return Status::missing_asset;
+    if (size > max_bytes_)
+        return Status::rejected;
+
+    std::ifstream stream(candidate, std::ios::binary);
+    if (!stream)
+        return Status::missing_asset;
+    std::string bytes((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+    if (bytes.size() != size || pulp::runtime::sha256_hex(bytes) != manifest->sha256)
+        return Status::rejected;
+    out = Asset{std::string(path), std::move(bytes)};
+    return Status::ok;
+}
 
 Status Backend::open(std::uint32_t width, std::uint32_t height) {
     if (open_)
