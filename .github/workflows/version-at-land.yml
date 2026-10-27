@@ -46,7 +46,9 @@ on:
   # two events re-run it at that moment. Both are scoped in the job `if` to the
   # bot's own bump branch in this repository on the PR route, and the job always
   # checks out main, never PR code. `pull_request` branch filters match the
-  # BASE branch, so the head-branch scope lives in the `if`.
+  # BASE branch, so the head-branch scope lives in the `if`. A `pull_request`
+  # run cannot use the main-only `release` environment, so it only dispatches a
+  # drain on main (kick-drain below).
   pull_request:
     types: [dequeued]
   workflow_run:
@@ -77,11 +79,13 @@ concurrency:
   # competitor entirely, so that race cannot occur. The direct path's group is
   # left exactly as before, so this changes nothing until the toggle is flipped.
   #
-  # Only events whose job actually runs join the serial group. A group holds a
-  # single pending run, and a new arrival cancels it, so a `pull_request:
+  # Only events whose drain job actually runs join the serial group. A group
+  # holds a single pending run, and a new arrival cancels it, so a `pull_request:
   # dequeued` for any other PR, or a green bump-branch `workflow_run`, used to
   # cancel a pending push drain and then skip its own job. Those events get a
-  # per-run group instead, so they never contend. The serial-group condition
+  # per-run group instead, so they never contend. A dequeued bump PR runs only
+  # kick-drain, whose dispatched drain joins the serial group as
+  # `workflow_dispatch`. The serial-group condition
   # mirrors the job `if` below; test_version_at_land.py evaluates both against
   # every event shape and fails if they diverge.
   group: >-
@@ -90,9 +94,6 @@ concurrency:
           || github.event_name == 'workflow_dispatch'
           || (github.event_name == 'schedule'
             && github.repository == vars.PULP_PRIMARY_REPO)
-          || (github.event_name == 'pull_request'
-            && github.event.pull_request.head.ref == 'release/version-bump'
-            && github.event.pull_request.head.repo.full_name == github.repository)
           || (github.event_name == 'workflow_run'
             && github.event.workflow_run.head_repository.full_name == github.repository
             && github.event.workflow_run.conclusion != 'success'
@@ -116,10 +117,7 @@ jobs:
     if: >-
       (github.event_name != 'schedule'
         || github.repository == vars.PULP_PRIMARY_REPO)
-      && (github.event_name != 'pull_request'
-        || (vars.PULP_BUMP_ROUTE == 'pr'
-          && github.event.pull_request.head.ref == 'release/version-bump'
-          && github.event.pull_request.head.repo.full_name == github.repository))
+      && github.event_name != 'pull_request'
       && (github.event_name != 'workflow_run'
         || (vars.PULP_BUMP_ROUTE == 'pr'
           && github.event.workflow_run.head_repository.full_name == github.repository
@@ -127,6 +125,11 @@ jobs:
           && github.event.workflow_run.conclusion != 'skipped'
           && github.event.workflow_run.conclusion != 'neutral'))
     runs-on: ubuntu-latest
+    # Release secrets live in the `release` environment, which only main can
+    # use: schedule and workflow_run runs are on main too.
+    environment:
+      name: release
+      deployment: false
     steps:
       - uses: actions/checkout@v7
         with:
@@ -197,3 +200,21 @@ jobs:
           python3 tools/scripts/version_at_land.py --push \
               --route "$BUMP_ROUTE" "${heal[@]}" \
               --base "${{ github.event.before }}"
+
+  kick-drain:
+    # A dequeued bump PR re-runs the drain at once. The drain needs the
+    # main-only `release` environment, which a `pull_request` run cannot use,
+    # so this dispatches it on main (a GITHUB_TOKEN dispatch does start a run).
+    if: >-
+      github.event_name == 'pull_request'
+      && vars.PULP_BUMP_ROUTE == 'pr'
+      && github.event.pull_request.head.ref == 'release/version-bump'
+      && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Dispatch the drain on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run version-at-land.yml --repo "$GITHUB_REPOSITORY" --ref main

@@ -133,6 +133,10 @@ jobs:
   check:
     if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     runs-on: ubuntu-latest
+    # Release secrets live in the `release` environment, which only main can use.
+    environment:
+      name: release
+      deployment: false
     name: Check dispatch and queue age
 
     env:

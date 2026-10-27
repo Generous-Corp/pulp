@@ -44,6 +44,10 @@ permissions:
 jobs:
   tag:
     runs-on: ubuntu-latest
+    # Release secrets live in the `release` environment, which only main can use.
+    environment:
+      name: release
+      deployment: false
     name: Tag moved versions
 
     steps:

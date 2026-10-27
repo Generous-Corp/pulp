@@ -369,6 +369,11 @@ Tracking issue title: `Auto-release workflow failed — RELEASES BLOCKED`.
 One issue, edited in place, auto-closed on recovery — mirrors the #475
 close-path pattern used by the orphan-branch and deps-drift sweeps.
 
+`auto-release.yml` reads `RELEASE_BOT_TOKEN` and `RELEASE_BOT_SSH_SIGNING_KEY`
+from the `release` environment, which only `main` can use. If the environment
+is missing those secrets, the tag job falls back to `GITHUB_TOKEN`, and tags it
+pushes do not start `release.yml`.
+
 `auto-release.yml` only tags. `CHANGELOG.md` is not a release artifact these
 layers watch: it is rendered in the version-bump commit, so a failed render
 cannot block a tag, and the next bump retries it (see

@@ -324,7 +324,8 @@ The bump can land two ways, selected by the `PULP_BUMP_ROUTE` repo variable
   `gh pr merge --auto --merge`, so the bump lands **through the merge queue**
   (and as a normal auto-merge PR when no queue is enabled — so the route flip
   and the queue-enable are independent steps). Requirements and invariants:
-  - **PAT required.** PR-route runs only with `RELEASE_BOT_TOKEN`; a
+  - **PAT required.** PR-route runs only with `RELEASE_BOT_TOKEN` (a secret of
+    the `release` environment, which only `main` can use); a
     `GITHUB_TOKEN`-created PR does not trigger workflows, so its checks never run
     and auto-merge stalls. The workflow fails loudly if the PAT is absent.
   - **`--merge`, never `--squash`** (`.agents/contract.toml`): squash folds the
@@ -365,7 +366,12 @@ The bump can land two ways, selected by the `PULP_BUMP_ROUTE` repo variable
     completion of a workflow reporting its required checks (`workflow_run`,
     scoped to `release/version-bump`), so a dead end is healed when it dies
     rather than on the next push to main. Those runs check out main, never PR
-    code.
+    code. The drain reads its secrets from the main-only `release` environment,
+    which a `pull_request` run cannot use, so on `dequeued` only the
+    `kick-drain` job runs: it dispatches the drain on main
+    (`gh workflow run version-at-land.yml --ref main`, GITHUB_TOKEN with
+    `actions: write`). That dispatched run joins the serial group, and the
+    `dequeued` run itself takes a per-run group.
   - **No regression / no double-bump.** `_strictly_increasing` drops any
     assignment that does not exceed the surface's version at the fresh head, so a
     stale drain can never walk a version backward (independent of whether the

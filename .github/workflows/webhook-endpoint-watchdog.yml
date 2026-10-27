@@ -54,6 +54,10 @@ jobs:
     # Only the canonical repo should page anyone.
     if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     runs-on: ubuntu-latest
+    # Release secrets live in the `release` environment, which only main can use.
+    environment:
+      name: release
+      deployment: false
     name: Sweep webhook delivery health
 
     env:
