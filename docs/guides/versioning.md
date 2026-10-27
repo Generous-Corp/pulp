@@ -20,6 +20,9 @@ Pulp versions three surfaces independently:
   consume, not a surface we ship; see [Dependency Update
   Workflow](https://github.com/Generous-Corp/pulp/blob/main/CLAUDE.md#dependency-update-workflow) for pin bumps.
 
+  After a pin bump, regenerate every generated toolchain projection with
+  `python3 tools/toolchain/generate.py`; never hand-edit the derived files.
+
   This pin governs what a *fresh* checkout installs, so an
   already-provisioned machine keeps running whatever it has and any drift
   between the two is invisible from the repo. When reasoning about it,
