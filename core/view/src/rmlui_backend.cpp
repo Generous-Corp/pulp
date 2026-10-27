@@ -158,11 +158,14 @@ struct Backend::Runtime {
     Rml::ElementDocument* document = nullptr;
     bool initialised = false;
     std::string context_name;
+    bool active = false;
 
     static std::atomic_uint64_t next_context_id;
+    static std::atomic_flag process_active;
 };
 
 std::atomic_uint64_t Backend::Runtime::next_context_id{1};
+std::atomic_flag Backend::Runtime::process_active = ATOMIC_FLAG_INIT;
 
 Backend::Backend(AssetProvider& assets, RenderInterface& renderer, LuaInterface& lua,
                  ActionSink* actions)
@@ -227,17 +230,23 @@ Status RootedAssetProvider::load(std::string_view path, Asset& out) {
 Status Backend::open(std::uint32_t width, std::uint32_t height) {
     if (open_)
         return Status::already_open;
+    if (Runtime::process_active.test_and_set(std::memory_order_acquire))
+        return Status::rejected;
     auto runtime = std::make_unique<Runtime>(assets_, renderer_);
+    runtime->active = true;
     Rml::SetFileInterface(&runtime->file);
     Rml::SetFontEngineInterface(&runtime->font);
-    if (!Rml::Initialise())
+    if (!Rml::Initialise()) {
+        Runtime::process_active.clear(std::memory_order_release);
         return Status::rejected;
+    }
     runtime->initialised = true;
     runtime->context =
         Rml::CreateContext(runtime->context_name,
                            {static_cast<int>(width), static_cast<int>(height)}, &runtime->render);
     if (!runtime->context) {
         Rml::Shutdown();
+        Runtime::process_active.clear(std::memory_order_release);
         return Status::rejected;
     }
     width_ = width;
@@ -301,6 +310,8 @@ void Backend::close() {
             Rml::RemoveContext(runtime_->context_name);
         if (runtime_->initialised)
             Rml::Shutdown();
+        if (runtime_->active)
+            Runtime::process_active.clear(std::memory_order_release);
         runtime_.reset();
     }
     document_ = {};
