@@ -4,6 +4,7 @@
 #include <pulp/runtime/crypto.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <fstream>
 #include <iterator>
@@ -146,7 +147,9 @@ class FileAdapter final : public Rml::FileInterface {
 } // namespace
 
 struct Backend::Runtime {
-    Runtime(AssetProvider& assets, RenderInterface& renderer) : file(assets), render(renderer) {}
+    Runtime(AssetProvider& assets, RenderInterface& renderer)
+        : file(assets), render(renderer),
+          context_name("pulp-rmlui-" + std::to_string(next_context_id.fetch_add(1))) {}
 
     FileAdapter file;
     RenderAdapter render;
@@ -154,7 +157,12 @@ struct Backend::Runtime {
     Rml::Context* context = nullptr;
     Rml::ElementDocument* document = nullptr;
     bool initialised = false;
+    std::string context_name;
+
+    static std::atomic_uint64_t next_context_id;
 };
+
+std::atomic_uint64_t Backend::Runtime::next_context_id{1};
 
 Backend::Backend(AssetProvider& assets, RenderInterface& renderer, LuaInterface& lua,
                  ActionSink* actions)
@@ -225,8 +233,9 @@ Status Backend::open(std::uint32_t width, std::uint32_t height) {
     if (!Rml::Initialise())
         return Status::rejected;
     runtime->initialised = true;
-    runtime->context = Rml::CreateContext(
-        "pulp-rmlui", {static_cast<int>(width), static_cast<int>(height)}, &runtime->render);
+    runtime->context =
+        Rml::CreateContext(runtime->context_name,
+                           {static_cast<int>(width), static_cast<int>(height)}, &runtime->render);
     if (!runtime->context) {
         Rml::Shutdown();
         return Status::rejected;
@@ -289,7 +298,7 @@ void Backend::render() {
 void Backend::close() {
     if (runtime_) {
         if (runtime_->context)
-            Rml::RemoveContext(runtime_->context->GetName());
+            Rml::RemoveContext(runtime_->context_name);
         if (runtime_->initialised)
             Rml::Shutdown();
         runtime_.reset();
