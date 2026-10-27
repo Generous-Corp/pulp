@@ -66,6 +66,8 @@ TEST_CASE("rooted RmlUi assets require a confined, hash-checked manifest") {
 
     REQUIRE(assets.load("editor.rml", loaded) == Status::ok);
     REQUIRE(loaded.bytes == "<rml/>\n");
+    RootedAssetProvider capped(root, {{"editor.rml", digest}}, 3);
+    REQUIRE(capped.load("editor.rml", loaded) == Status::rejected);
     REQUIRE(assets.load("../editor.rml", loaded) == Status::rejected);
     REQUIRE(assets.load("missing.rml", loaded) == Status::rejected);
 
