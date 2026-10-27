@@ -1,7 +1,6 @@
-// The per-OS WebView backend answer, installed as the detector's provider by
+// The per-OS WebView backend answer, linked as the detector's provider by
 // every composition that compiles WebView in. CMake links this archive whole,
-// so the registrar below survives dead-stripping even when nothing in the
-// binary references it.
+// so its definition below is always the one the linker chooses.
 //
 //   * macOS / iOS   -> "wkwebview"   (WebKit.framework ships with the OS).
 //   * Windows       -> "webview2"    when WebView2Loader.dll resolves at
@@ -47,16 +46,16 @@ bool os_webview_backend_available() {
 
 namespace {
 
-const WebViewBackendProvider kOsProvider{&os_webview_backend, &os_webview_backend_available};
-
-struct Registrar {
-    Registrar() {
-        set_webview_backend_provider(&kOsProvider);
-    }
-};
-
-const Registrar kRegistrar;
+constexpr WebViewBackendProvider kOsProvider{&os_webview_backend, &os_webview_backend_available};
 
 } // namespace
 
 } // namespace pulp::view::detail
+
+// The strong definition that overrides pulp::view-platform's default (see
+// web_view_backend.cpp). It is a link-time choice, so the detector answers
+// correctly from the first call, including one made by another translation
+// unit's static initializer.
+extern "C" const pulp::view::detail::WebViewBackendProvider* pulp_view_webview_backend_provider() {
+    return &pulp::view::detail::kOsProvider;
+}

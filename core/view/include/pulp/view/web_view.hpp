@@ -142,16 +142,18 @@ bool webview_backend_available();
 namespace detail {
 
 /// The answer behind detect_webview_backend() and webview_backend_available().
-/// The detector has one definition, in pulp::view-platform, and reports
-/// "none" until a composition that compiles WebView in installs a provider;
-/// pulp::view-webview installs one during static initialization.
+/// The detector has one definition, in pulp::view-platform. A composition that
+/// compiles WebView in (pulp::view-webview) supplies the per-OS provider at
+/// link time, so the detector is correct from its first call, including one
+/// made during static initialization; without one it reports "none".
 struct WebViewBackendProvider {
     std::string (*detect)() = nullptr;
     bool (*available)() = nullptr;
 };
 
-/// Install (or, with nullptr, remove) the provider and return the one it
-/// replaced. The pointee must outlive every later call to the detector.
+/// Install an override provider (for tests), or with nullptr remove it so the
+/// linked provider answers again; returns the override it replaced. The
+/// pointee must outlive every later call to the detector.
 const WebViewBackendProvider* set_webview_backend_provider(const WebViewBackendProvider* provider);
 
 } // namespace detail
