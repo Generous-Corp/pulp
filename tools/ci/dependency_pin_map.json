@@ -10,6 +10,7 @@
   "Mbed TLS": {"fetchcontent": ["mbedtls"]},
   "muFFT": {"fetchcontent": ["mufft"], "targets": ["pulp-signal-mufft"]},
   "Oboe": {"fetchcontent": ["oboe"], "platforms": ["android"]},
+  "RmlUi": {"fetchcontent": ["rmlui"], "targets": ["pulp-view-rmlui"], "anchors": ["\\bpulp_register_fetchcontent_source\\(rmlui\\b"]},
   "SDL3": {"fetchcontent": ["sdl3"]},
   "SheenBidi": {"fetchcontent": ["sheenbidi"]},
   "simdjson": {"fetchcontent": ["simdjson"]},
