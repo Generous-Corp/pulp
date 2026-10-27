@@ -30,10 +30,12 @@ struct Lua final : LuaHost {
 struct Elements final : ElementHost {
     HostStatus register_element(ElementRegistration registration) override {
         names.emplace_back(registration.name);
+        registrations.push_back(std::move(registration));
         return result;
     }
     HostStatus result = HostStatus::ok;
     std::vector<std::string> names;
+    std::vector<ElementRegistration> registrations;
 };
 struct Product final : ProductHost {
     HostStatus dispatch(ProductEvent event) override {
@@ -61,6 +63,9 @@ TEST_CASE("RmlUi host bridge requires all providers and stages registration") {
     REQUIRE(lua->initialise_count == 1);
     REQUIRE(bridge.register_element({"knob", [](std::string_view) { return HostStatus::ok; }}) == HostStatus::ok);
     REQUIRE(elements->names == std::vector<std::string>{"knob"});
+    REQUIRE(elements->registrations.front().dispatch("before-close") == HostStatus::ok);
+    bridge.close();
+    REQUIRE(elements->registrations.front().dispatch("after-close") == HostStatus::not_active);
 }
 
 TEST_CASE("RmlUi host bridge owns providers and event identifiers") {
@@ -93,6 +98,9 @@ TEST_CASE("RmlUi host bridge propagates refusals and catches provider exceptions
     REQUIRE(bridge.activate() == HostStatus::rejected);
     REQUIRE_FALSE(bridge.active());
     lua->throw_on_initialise = false;
+    REQUIRE(bridge.bind_lua(lua) == HostStatus::ok);
+    REQUIRE(bridge.bind_elements(elements) == HostStatus::ok);
+    REQUIRE(bridge.bind_product(product) == HostStatus::ok);
     REQUIRE(bridge.activate() == HostStatus::ok);
     REQUIRE(bridge.dispatch_product({static_cast<ProductEventKind>(99), "bad", 0.0}) ==
             HostStatus::rejected);
