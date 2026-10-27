@@ -21,7 +21,7 @@ struct Asset {
 };
 
 class AssetProvider {
-public:
+  public:
     virtual ~AssetProvider() = default;
     virtual Status load(std::string_view path, Asset& out) = 0;
 };
@@ -37,7 +37,7 @@ struct DrawCommand {
 };
 
 class RenderInterface {
-public:
+  public:
     virtual ~RenderInterface() = default;
     virtual void begin_frame(std::uint32_t width, std::uint32_t height) = 0;
     virtual void submit(const DrawCommand& command) = 0;
@@ -45,14 +45,14 @@ public:
 };
 
 class LuaInterface {
-public:
+  public:
     virtual ~LuaInterface() = default;
     virtual Status load(std::string_view source, std::string_view source_name) = 0;
     virtual Status dispatch(std::string_view callback) = 0;
 };
 
 class ActionSink {
-public:
+  public:
     virtual ~ActionSink() = default;
     virtual Status invoke(std::string_view action) = 0;
 };
@@ -60,7 +60,7 @@ public:
 // Pulp-owned seam for the optional RmlUi adapter.  It intentionally contains
 // no RmlUi or Lua headers: those dependencies are admitted by a later slice.
 class Backend {
-public:
+  public:
     Backend(AssetProvider&, RenderInterface&, LuaInterface&, ActionSink* = nullptr);
 
     Status open(std::uint32_t width, std::uint32_t height);
@@ -69,9 +69,11 @@ public:
     Status invoke_action(std::string_view action);
     void render();
     void close();
-    [[nodiscard]] bool is_open() const noexcept { return open_; }
+    [[nodiscard]] bool is_open() const noexcept {
+        return open_;
+    }
 
-private:
+  private:
     AssetProvider& assets_;
     RenderInterface& renderer_;
     LuaInterface& lua_;
@@ -88,7 +90,7 @@ class Headless final : public AssetProvider,
                        public RenderInterface,
                        public LuaInterface,
                        public ActionSink {
-public:
+  public:
     Status load(std::string_view path, Asset& out) override;
     void begin_frame(std::uint32_t width, std::uint32_t height) override;
     void submit(const DrawCommand& command) override;
@@ -99,13 +101,23 @@ public:
 
     void add_asset(std::string path, std::string bytes);
     void reject_path(std::string path);
-    [[nodiscard]] const std::vector<DrawCommand>& commands() const noexcept { return commands_; }
-    [[nodiscard]] const std::vector<std::string>& callbacks() const noexcept { return callbacks_; }
-    [[nodiscard]] const std::vector<std::string>& actions() const noexcept { return actions_; }
-    [[nodiscard]] std::uint32_t frame_width() const noexcept { return frame_width_; }
-    [[nodiscard]] std::uint32_t frame_height() const noexcept { return frame_height_; }
+    [[nodiscard]] const std::vector<DrawCommand>& commands() const noexcept {
+        return commands_;
+    }
+    [[nodiscard]] const std::vector<std::string>& callbacks() const noexcept {
+        return callbacks_;
+    }
+    [[nodiscard]] const std::vector<std::string>& actions() const noexcept {
+        return actions_;
+    }
+    [[nodiscard]] std::uint32_t frame_width() const noexcept {
+        return frame_width_;
+    }
+    [[nodiscard]] std::uint32_t frame_height() const noexcept {
+        return frame_height_;
+    }
 
-private:
+  private:
     std::vector<Asset> assets_;
     std::vector<std::string> rejected_paths_;
     std::vector<DrawCommand> commands_;
