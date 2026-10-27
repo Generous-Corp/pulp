@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <pulp/signal/smoothed_value.hpp>
 #include <pulp/signal/special_functions.hpp>
 #include <type_traits>
 
@@ -16,25 +17,38 @@ class GainT {
                   "GainT requires a floating-point sample type");
 
 public:
-    void set_gain_db(SampleType db) {
-        gain_ = std::pow(SampleType{10}, db / SampleType{20});
+    /// Enable a linear per-sample gain ramp. The default time is one sample,
+    /// preserving the historical immediate-set behavior.
+    void set_ramp_time(SampleType seconds, SampleType sample_rate) {
+        gain_ramp_.set_ramp_time(seconds, sample_rate);
+        ramp_enabled_ = true;
     }
-    void set_gain_linear(SampleType linear) { gain_ = linear; }
+
+    void set_gain_db(SampleType db) {
+        set_gain_linear(std::pow(SampleType{10}, db / SampleType{20}));
+    }
+    void set_gain_linear(SampleType linear) {
+        if (ramp_enabled_)
+            gain_ramp_.set_target(linear);
+        else
+            gain_ramp_.set_immediate(linear);
+    }
     SampleType gain_db() const {
         return SampleType{20} *
-               std::log10(std::max(gain_, SampleType{1e-10f}));
+               std::log10(std::max(gain_ramp_.current(), SampleType{1e-10f}));
     }
-    SampleType gain_linear() const { return gain_; }
+    SampleType gain_linear() const { return gain_ramp_.current(); }
 
-    SampleType process(SampleType input) const { return input * gain_; }
+    SampleType process(SampleType input) const { return input * gain_ramp_.next(); }
 
     void process(SampleType* buffer, int num_samples) const {
         for (int i = 0; i < num_samples; ++i)
-            buffer[i] *= gain_;
+            buffer[i] *= gain_ramp_.next();
     }
 
 private:
-    SampleType gain_ = SampleType{1};
+    mutable SmoothedValue<SampleType> gain_ramp_{SampleType{1}};
+    bool ramp_enabled_ = false;
 };
 
 // Simple dry/wet mixer (single-sample, no latency compensation).
