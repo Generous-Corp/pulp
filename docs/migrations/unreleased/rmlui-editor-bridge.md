@@ -1,3 +1,8 @@
+---
+breaking = false
+summary = "Document the optional RmlUi editor bridge boundary"
+---
+
 # Optional RmlUi editor bridge
 
 ## Status
