@@ -933,11 +933,11 @@ TEST_CASE("Windows attached GPU editor coalesces scripted repaint requests",
     host->detach();
 }
 
-TEST_CASE("Windows attached GPU editor rolls back when its frame timer fails",
-          "[view][plugin-view-host][repaint][windows][timer]") {
+TEST_CASE("Windows attached GPU editor retries a forced frame failure",
+          "[view][plugin-view-host][repaint][windows][frame]") {
     struct ParentWindow {
         HWND hwnd =
-            CreateWindowExW(0, L"STATIC", L"Pulp timer failure regression", WS_OVERLAPPEDWINDOW, 0,
+            CreateWindowExW(0, L"STATIC", L"Pulp frame failure regression", WS_OVERLAPPEDWINDOW, 0,
                             0, 128, 128, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
         ~ParentWindow() {
             if (hwnd)
@@ -953,15 +953,30 @@ TEST_CASE("Windows attached GPU editor rolls back when its frame timer fails",
     PluginViewHost::Options opts;
     opts.size = {64, 64};
     opts.use_gpu = true;
+    _putenv_s("PULP_TEST_FORCE_WIN_FRAME_FAILURE", "1");
     auto host = PluginViewHost::create(root, opts);
     REQUIRE(host != nullptr);
 
-    _putenv_s("PULP_TEST_FORCE_WIN_FRAME_TIMER_FAILURE", "1");
+    auto host_window = static_cast<HWND>(host->native_handle());
     host->attach_to_parent(parent.hwnd);
-    _putenv_s("PULP_TEST_FORCE_WIN_FRAME_TIMER_FAILURE", "");
+    REQUIRE(host->is_attached());
+    REQUIRE(GetParent(host_window) == parent.hwnd);
+    host->repaint();
+    MSG msg{};
+    REQUIRE(PeekMessageW(&msg, host_window, WM_TIMER, WM_TIMER, PM_REMOVE));
+    DispatchMessageW(&msg);
+    CHECK(host->is_attached());
+    CHECK(root.frame_clock()->frame() > 0);
 
-    CHECK_FALSE(host->is_attached());
-    CHECK(GetParent(static_cast<HWND>(host->native_handle())) == nullptr);
+    // The failed frame preserved its dirty state; clearing the production hook
+    // lets the next timer tick render the pending frame successfully.
+    _putenv_s("PULP_TEST_FORCE_WIN_FRAME_FAILURE", "");
+    host->repaint();
+    REQUIRE(PeekMessageW(&msg, host_window, WM_TIMER, WM_TIMER, PM_REMOVE));
+    DispatchMessageW(&msg);
+    auto png = host->capture_back_buffer_png();
+    REQUIRE_FALSE(png.empty());
+    _putenv_s("PULP_TEST_FORCE_WIN_FRAME_FAILURE", "");
     host->detach();
 }
 

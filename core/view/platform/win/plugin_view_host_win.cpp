@@ -272,7 +272,7 @@ class WinPluginViewHost : public PluginViewHost, private win_input::InputRouterH
             // An attached repaint is only live while the timer can consume its
             // dirty bit. Fail closed instead of leaving a visible child that
             // can never present another frame.
-            rollback_failed_attach();
+            detach();
             return false;
         }
         attached_.store(true, std::memory_order_release);
