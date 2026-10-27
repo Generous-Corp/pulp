@@ -77,6 +77,21 @@ template <typename T> constexpr double tolerance() {
     return std::is_same_v<T, float> ? 2.0e-6 : 1.0e-12;
 }
 
+TEST_CASE("FftT rejects non-power-of-two sizes", "[fft][error]") {
+    for (const int n : {0, 3, 100, 127}) {
+        FftT<float> single(n);
+        FftT<double> double_precision(n);
+        REQUIRE_FALSE(single.ready());
+        REQUIRE_FALSE(double_precision.ready());
+        REQUIRE(single.size() == 0);
+        REQUIRE(double_precision.size() == 0);
+    }
+    for (const int n : {1, 2, 4, 64}) {
+        REQUIRE(FftT<float>(n).size() == n);
+        REQUIRE(FftT<double>(n).size() == n);
+    }
+}
+
 template <typename T> void check_complex(int n) {
     INFO("complex N=" << n);
     FftT<T> fft(n);
