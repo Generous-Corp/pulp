@@ -1638,7 +1638,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/convolver_non_uniform.hpp",
-        "fingerprint": "sha256:cff21331a0ae08fd9eaf4e12ad4e5b2a75901c6f72bfe3011bf3085da27ae70e",
+        "fingerprint": "sha256:598a096100daada3acac86a98d29856d23172b620dab4215349664d0dc600035",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
