@@ -59,7 +59,8 @@ jobs:
           # pulls in thousands of unrelated targets and can exhaust the job
           # timeout before the RmlUi contract is exercised.
           tools/ci/governed-build.sh cmake --build build-rmlui \
-            --target pulp-test-rmlui-backend rmlui_debugger pulp-runtime-pins pulp-mcp
+            --target pulp-test-rmlui-backend rmlui_debugger pulp-runtime-pins pulp-mcp \
+            pulp-scan-worker
 
       - name: Run RmlUi backend and installed SDK consumer tests
         run: |
