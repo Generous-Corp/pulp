@@ -442,7 +442,11 @@ required platform acceptance step:
    `v8-internal.h` tagged-field offsets mismatch the DLL and silently
    corrupt the heap. A sealed provider supplies it through its manifest
    `consumer_defines` on `v8::v8`; `PulpV8Windows.cmake` adds it explicitly
-   only for the manifest-less legacy override.
+   only for the manifest-less legacy override. The provider's
+   `V8_DEPRECATION_WARNINGS` and `V8_IMMINENT_DEPRECATION_WARNINGS` therefore
+   land as INTERFACE definitions on `v8::v8`, so external SDK consumers built
+   with `-Werror` see V8 deprecations as errors; Pulp itself promotes only
+   `-Werror=reorder-init-list` and `-Werror=initializer-overrides`.
 3. **Chromium-style libc++ headers** with `_LIBCPP_ABI_NAMESPACE=__Cr`
    (routed via clang-cl's `/clang:-nostdinc++ /clang:-isystem` — bare
    `-nostdinc++` is silently dropped by clang-cl, which is the trap that

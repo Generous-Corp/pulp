@@ -693,6 +693,27 @@
       ]
     },
     {
+      "name": "muFFT",
+      "category": "signal",
+      "license": "MIT",
+      "version": "47bb0865",
+      "source_kind": "fetchcontent",
+      "repository": "https://github.com/Themaister/muFFT.git",
+      "upstream": {
+        "kind": "git-commit",
+        "ref": "47bb08652eab399c2c7d460abe5184857110f130"
+      },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "notes": "Float FFT backend for FftT on every non-Apple target (Apple uses vDSP). Pinned to an exact commit because upstream publishes no release tags. Pulp compiles fft.c, kernel.c, cpu.c and the x86 SSE/SSE3/AVX kernels itself (core/signal/CMakeLists.txt) through a Pulp-owned C shim; muFFT's own CMake, which builds FFTW-linked (GPL) bench and test binaries, never runs, and those binaries are not built or shipped. Apple fetches it only when tests are built.",
+      "source_files": [
+        "core/signal/CMakeLists.txt",
+        "core/signal/include/pulp/signal/fft.hpp",
+        "core/signal/src/fft_mufft.c",
+        "tools/cmake/PulpDependencies.cmake"
+      ]
+    },
+    {
       "name": "nanosvg",
       "category": "canvas",
       "license": "zlib",
