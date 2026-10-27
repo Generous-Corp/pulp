@@ -5544,9 +5544,10 @@ bisectable.
   Release publication (the release watchdog flagged the missing Releases). The
   release ships the CLI + plugins
   (`build/VST3`,`/CLAP`,`/AU`), never the example apps, so the release legs
-  build with `-DPULP_BUILD_EXAMPLES=OFF` (matching `build.yml`). If you add a
-  new release/packaging workflow, configure with examples OFF (or a populated
-  `SKIA_DIR`), or the design-tool Skia gate will block it.
+  get examples OFF from `-DPULP_PROFILE=release` (matching `build.yml`'s
+  Windows release gate). If you add a new release/packaging workflow,
+  configure through the profile (or with a populated `SKIA_DIR`), or the
+  design-tool Skia gate will block it.
 - **One packaging step, three callers.** `release-cli.yml` (Package CLI
   (Unix)), `release-dry-run.yml` and `release-path-pr-gate.yml` all run
   `tools/ci/release_package_cli.sh`, and all three isolate dependencies with
@@ -5568,13 +5569,16 @@ bisectable.
   package at all, because the runtime is not copied into the build dir there.
   darwin-arm64 went green while bundling the shared-cache dylib. A green leg
   is not proof that the isolated copy shipped: read the `bundled:` line.
-- **Release/SDK builds must pass `-DPULP_ENABLE_AUDIO_PROBES=OFF`.** The
-  standalone audio probe is a dev/example inspection surface and defaults ON
-  for local development, but shipped CLI, standalone, and SDK artifacts must
-  not export it. Keep `release-cli.yml`, `release-path-pr-gate.yml`,
-  `release-dry-run.yml`, `sign-and-release.yml`, `release-cli-local.sh`, and
-  checkout-backed SDK configure paths aligned when touching release CMake
-  flags.
+- **Release/SDK builds get `PULP_ENABLE_AUDIO_PROBES=OFF` from the profile.**
+  The standalone audio probe is a dev/example inspection surface and defaults
+  ON for local development, but shipped CLI, standalone, and SDK artifacts
+  must not export it. `-DPULP_PROFILE=release` turns it off at
+  `release-cli.yml`, `release-path-pr-gate.yml`, `release-dry-run.yml`,
+  `sign-and-release.yml`, `install-consumer-smoke.yml`,
+  `control-shipping-native.yml`, `release-cli-local.sh` and
+  `intel-vm-cross-build.sh`; the dev-profile checkout SDK passes it OFF
+  explicitly. `test_release_workflow_test_step.py` fails any of those sites
+  that spells an enforced option by hand instead of passing the profile.
 - **Official release SDKs carry positive provenance.** Starting at the
   `sdk_provenance_floor` in `tools/scripts/release_product_matrix.json`,
   `release-cli.yml` stamps `sdk-provenance.json` only after proving the clean
@@ -12958,7 +12962,13 @@ hatch for a development build only. `sdk_provenance.py` records
 else or missing, so a `workflow_dispatch` backfill of a tag older than the
 profile is refused the same way the bridge-exec rule refuses it. The
 `cmake-build-profile-contract` ctest drives the module through a fixture
-project; run it after touching the enforced list.
+project; run it after touching the enforced list. The lanes that rehearse a
+release (`release-dry-run.yml`, `release-path-pr-gate.yml`,
+`install-consumer-smoke.yml`, `control-shipping-native.yml`) configure through
+the profile too, and `EveryReleaseSiteConfiguresThroughTheProfile` in
+`tools/scripts/test_release_workflow_test_step.py` reads the enforced list out
+of `PulpProfiles.cmake` and fails any release site, rehearsal or script that
+spells one of those options by hand.
 
 Coverage, Intel portability, SCENE3D, example validation, and the control-shipping
 native matrix are scheduled nightly and dispatched on an approved PR head. The
