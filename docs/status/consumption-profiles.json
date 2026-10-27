@@ -1611,7 +1611,7 @@
         "ranked_by_closure": [
           {
             "exported_as": "Pulp::inspect-standalone-runtime",
-            "closure_node_count": 106
+            "closure_node_count": 107
           },
           {
             "exported_as": "Pulp::inspect-graph-runtime",
@@ -1630,24 +1630,24 @@
             "closure_node_count": 92
           },
           {
-            "exported_as": "Pulp::standalone-native",
+            "exported_as": "Pulp::inspect",
             "closure_node_count": 91
           },
           {
-            "exported_as": "Pulp::inspect",
-            "closure_node_count": 90
+            "exported_as": "Pulp::standalone",
+            "closure_node_count": 91
+          },
+          {
+            "exported_as": "Pulp::standalone-native",
+            "closure_node_count": 91
           },
           {
             "exported_as": "Pulp::inspect-offline-runtime",
             "closure_node_count": 90
           },
           {
-            "exported_as": "Pulp::standalone",
-            "closure_node_count": 90
-          },
-          {
             "exported_as": "Pulp::inspect-ui-runtime",
-            "closure_node_count": 88
+            "closure_node_count": 89
           },
           {
             "exported_as": "Pulp::format",
@@ -1659,11 +1659,11 @@
           },
           {
             "exported_as": "Pulp::inspect-runtime-eval",
-            "closure_node_count": 81
+            "closure_node_count": 82
           },
           {
             "exported_as": "Pulp::view",
-            "closure_node_count": 80
+            "closure_node_count": 81
           },
           {
             "exported_as": "Pulp::view-native",
@@ -3996,7 +3996,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 90,
+            "node_count": 91,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -4025,6 +4025,7 @@
               "pulp-view",
               "pulp-view-audio",
               "pulp-view-core",
+              "pulp-view-platform",
               "pulp-view-script",
               "pulp-view-tooling"
             ],
@@ -4806,7 +4807,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 81,
+            "node_count": 82,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -4831,6 +4832,7 @@
               "pulp-view",
               "pulp-view-audio",
               "pulp-view-core",
+              "pulp-view-platform",
               "pulp-view-script",
               "pulp-view-tooling"
             ],
@@ -5091,7 +5093,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 106,
+            "node_count": 107,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -5126,6 +5128,7 @@
               "pulp-view",
               "pulp-view-audio",
               "pulp-view-core",
+              "pulp-view-platform",
               "pulp-view-script",
               "pulp-view-tooling"
             ],
@@ -5381,7 +5384,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 88,
+            "node_count": 89,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -5410,6 +5413,7 @@
               "pulp-view",
               "pulp-view-audio",
               "pulp-view-core",
+              "pulp-view-platform",
               "pulp-view-script",
               "pulp-view-tooling"
             ],
@@ -6848,7 +6852,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "",
           "closure": {
-            "node_count": 90,
+            "node_count": 91,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -6878,6 +6882,7 @@
               "pulp-view",
               "pulp-view-audio",
               "pulp-view-core",
+              "pulp-view-platform",
               "pulp-view-script",
               "pulp-view-tooling"
             ],
@@ -7459,7 +7464,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view",
           "closure": {
-            "node_count": 80,
+            "node_count": 81,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -7484,6 +7489,7 @@
               "pulp-view",
               "pulp-view-audio",
               "pulp-view-core",
+              "pulp-view-platform",
               "pulp-view-script",
               "pulp-view-tooling"
             ],
@@ -7581,6 +7587,7 @@
           "direct_dependencies": [
             "pulp-design-import-audio-pack",
             "pulp-view-audio",
+            "pulp-view-platform",
             "pulp-view-script",
             "pulp-view-tooling"
           ]

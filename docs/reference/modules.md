@@ -1023,7 +1023,7 @@ have measured on your target.
 | Processor | Header | Description |
 |-----------|--------|-------------|
 | ADSR | `adsr.hpp` | Attack-decay-sustain-release envelope generator for amplitude or filter modulation |
-| FFT | `fft.hpp` | Fast Fourier Transform — uses vDSP on Apple, fallback on other platforms |
+| FFT | `fft.hpp` | Fast Fourier Transform — float transforms use vDSP on Apple and muFFT elsewhere; double precision and transforms under 16 points use a built-in radix-2 |
 | Multi-Channel Meter | `multi_channel_meter.hpp` | Sample peak, RMS, stereo correlation, and channel-based BS.1770-5 K-weighted momentary, gated integrated, EBU short-term, and loudness-range readings; not true-peak or a complete EBU Mode meter. Measures a block at a time with vector reductions; `MeterFeatures` leaves out correlation and loudness when nothing reads them |
 | Oscillator | `oscillator.hpp` | Legacy polyBLEP oscillator with sine, saw, square, triangle waveforms (float phase, integrated triangle) |
 | Oscillator suite (`osc/`) | `osc/va.hpp`, `osc/vco.hpp`, `osc/dco.hpp`, `osc/wt.hpp`, `osc/wt_lofi.hpp`, `osc/minblep.hpp` | Newer VA/VCO/DCO/wavetable family plus shared phase, polynomial BLEP/BLAMP, and fixed-capacity causal minBLEP primitives — see the [oscillators guide](../guides/oscillators.md) |
@@ -2516,9 +2516,12 @@ runtime should link `pulp::view-native`; `pulp_add_plugin(... NATIVE_UI)` select
 that composition for every requested format and uses
 `pulp::standalone-native` for Standalone. `pulp::view-native` is a composition
 over `pulp::view-platform`, which holds the native scripted view stack and the
-WebView backend probe with no audio, MIDI or recognition-pack dependency; the
-`pulp::view-native` umbrella adds `pulp::view-audio` and
-`pulp::design-import-audio-pack`. Baked UI code that constructs `View`
+one `detect_webview_backend()` definition with no audio, MIDI or
+recognition-pack dependency; the `pulp::view-native` umbrella adds
+`pulp::view-audio` and `pulp::design-import-audio-pack`. `pulp::view` links
+`pulp::view-platform` too. The detector reports `"none"` until
+`pulp::view-webview` installs the per-OS answer, so a composition without
+WebView reports `"none"` on every OS. Baked UI code that constructs `View`
 trees directly and does not evaluate JS can link `pulp::view-core`.
 
 `pulp::view-core` links no audio, signal or host target. The audio-dependent

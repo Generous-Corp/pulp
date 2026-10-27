@@ -510,7 +510,9 @@ TEST_CASE("ScriptedUiSession blocks reviewed kit asset root escape hatches", "[v
 
     auto* absolute = dynamic_cast<Label*>(session.bridge()->widget("absolute"));
     REQUIRE(absolute != nullptr);
-    REQUIRE(absolute->text() == "404");
+    // Refused by the same rule as the file:// spelling, whether or not the
+    // file exists.
+    REQUIRE(absolute->text() == "403");
 
     auto* symlink = dynamic_cast<Label*>(session.bridge()->widget("symlink"));
     REQUIRE(symlink != nullptr);
