@@ -210,9 +210,11 @@ def canonical_json_sha256(source: Path | bytes) -> str:
     They also omit the settle loop's iteration counters
     (`provenance.settle.rounds` and `stable_rounds`, and an IR's top-level
     `settle_rounds`): how many polls the page took to go quiet depends on host
-    load, not on what was captured. Only those counters are scrubbed (the
-    settle record's only in capture envelopes); every other settle field and
-    every content field still enters the digest.
+    load, not on what was captured. Capture envelopes also omit
+    `provenance.timings`, which records per-run diagnostic clocks. Only those
+    fields are scrubbed (the settle record's counters and timings are only in
+    capture envelopes); every other settle field and every content field still
+    enters the digest.
     """
     volatile_keys = {"elapsed_ms", "imported_at"}
     document = json.loads(source if isinstance(source, bytes) else source.read_bytes())
@@ -226,12 +228,14 @@ def canonical_json_sha256(source: Path | bytes) -> str:
             document_entry = (capture_envelope and len(path) == 2
                               and path[0] == "documents" and isinstance(path[1], int))
             settle_record = capture_envelope and path == ("provenance", "settle")
+            capture_timings = capture_envelope and path == ("provenance", "timings")
             return {
                 key: scrub(item, (*path, key))
                 for key, item in value.items()
                 if key not in volatile_keys
                 and not (document_entry and key == "snapshot_sha256")
                 and not (settle_record and key in SETTLE_COUNTER_KEYS)
+                and not capture_timings
                 and not (path == () and key == "settle_rounds")
             }
         if isinstance(value, list):
