@@ -19,6 +19,27 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpSimdSupport.cmake)
 include(FetchContent)
 set(FETCHCONTENT_UPDATES_DISCONNECTED ${PULP_FETCHCONTENT_UPDATES_DISCONNECTED})
 
+# RmlUi core is an explicit opt-in. Keep all optional plugins, font engines,
+# samples, Lua bindings, and debugger disabled until their independent
+# dependency and sandbox contracts are reviewed.
+if(PULP_ENABLE_RMLUI)
+    set(RMLUI_SAMPLES OFF CACHE BOOL "" FORCE)
+    set(RMLUI_FONT_ENGINE "none" CACHE STRING "" FORCE)
+    set(RMLUI_LUA_BINDINGS OFF CACHE BOOL "" FORCE)
+    set(RMLUI_LOTTIE_PLUGIN OFF CACHE BOOL "" FORCE)
+    set(RMLUI_SVG_PLUGIN OFF CACHE BOOL "" FORCE)
+    set(RMLUI_HARFBUZZ_SAMPLE OFF CACHE BOOL "" FORCE)
+    set(RMLUI_TRACY_PROFILING OFF CACHE BOOL "" FORCE)
+    set(RMLUI_INSTALL_LICENSES_AND_BUILD_INFO OFF CACHE BOOL "" FORCE)
+    pulp_register_fetchcontent_source(rmlui
+        REF 58c751531f4c1a1eb2dc56f409b8e8a323a0c9ad)
+    FetchContent_Declare(
+        rmlui
+        GIT_REPOSITORY https://github.com/mikke89/RmlUi.git
+        GIT_TAG 58c751531f4c1a1eb2dc56f409b8e8a323a0c9ad)
+    FetchContent_MakeAvailable(rmlui)
+endif()
+
 # CHOC: header-only C++ utilities (ISC license)
 # Used for: JS engine abstraction, MIDI utilities, WebView (drag-and-drop)
 #

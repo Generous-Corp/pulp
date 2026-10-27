@@ -23,6 +23,9 @@ target_compile_definitions(pulp-view-core PUBLIC PULP_ENABLE_JS=$<BOOL:${PULP_EN
 # slice contains only Pulp-owned contracts and a headless double; the actual
 # RmlUi/Lua dependencies are admitted by a later, separately audited slice.
 if(PULP_ENABLE_RMLUI)
+    if(NOT TARGET RmlUi::Core)
+        message(FATAL_ERROR "PULP_ENABLE_RMLUI=ON requires the pinned RmlUi core target")
+    endif()
     add_library(pulp-view-rmlui
         src/rmlui_backend.cpp)
     add_library(pulp::view-rmlui ALIAS pulp-view-rmlui)
@@ -30,7 +33,7 @@ if(PULP_ENABLE_RMLUI)
         PUBLIC
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
             $<INSTALL_INTERFACE:include>)
-    target_link_libraries(pulp-view-rmlui PUBLIC pulp::view-core)
+    target_link_libraries(pulp-view-rmlui PUBLIC pulp::view-core PRIVATE RmlUi::Core)
     target_compile_features(pulp-view-rmlui PUBLIC cxx_std_20)
 endif()
 
