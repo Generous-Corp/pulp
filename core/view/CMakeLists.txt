@@ -38,6 +38,28 @@ if(PULP_ENABLE_RMLUI)
     # targets never link this target, so the dependency remains opt-in.
     target_link_libraries(pulp-view-rmlui PUBLIC pulp::view-core RmlUi::Core)
     target_compile_features(pulp-view-rmlui PUBLIC cxx_std_20)
+
+    # Catch a future FetchContent option leak at configure time, before it can
+    # alter the plugin SDK's link model. Respect an explicit shared-library
+    # request; the default Pulp build remains static.
+    get_target_property(_pulp_rmlui_type pulp-view-rmlui TYPE)
+    if(PULP_RMLUI_BUILD_SHARED_LIBS_REQUESTED)
+        set(_pulp_rmlui_expected_type SHARED_LIBRARY)
+    else()
+        set(_pulp_rmlui_expected_type STATIC_LIBRARY)
+    endif()
+    if(NOT _pulp_rmlui_type STREQUAL _pulp_rmlui_expected_type)
+        message(FATAL_ERROR
+            "pulp-view-rmlui link model changed unexpectedly; expected ${_pulp_rmlui_expected_type}, got ${_pulp_rmlui_type}")
+    endif()
+    get_target_property(_pulp_runtime_type pulp-runtime TYPE)
+    if(NOT _pulp_runtime_type STREQUAL _pulp_rmlui_expected_type)
+        message(FATAL_ERROR
+            "PULP_ENABLE_RMLUI changed pulp-runtime link model; expected ${_pulp_rmlui_expected_type}, got ${_pulp_runtime_type}")
+    endif()
+    unset(_pulp_rmlui_type)
+    unset(_pulp_rmlui_expected_type)
+    unset(_pulp_runtime_type)
 endif()
 
 add_library(pulp-view-script)

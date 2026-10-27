@@ -1,0 +1,49 @@
+name: Optional RmlUi bridge
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/rmlui.yml"
+      - "CMakeLists.txt"
+      - "core/view/**"
+      - "tools/cmake/PulpConfig.cmake.in"
+      - "tools/cmake/PulpDependencies.cmake"
+      - "tools/cmake/PulpInstallRules.cmake"
+      - "test/cmake/rmlui_*.cmake"
+      - "test/test_rmlui_*.cpp"
+      - "DEPENDENCIES.md"
+      - "NOTICE.md"
+      - "docs/reference/licensing.md"
+      - "docs/migrations/unreleased/rmlui-editor-bridge.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rmlui:
+    name: RmlUi opt-in configure/build/test
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Configure RmlUi opt-in build
+        run: |
+          cmake -S . -B build-rmlui -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPULP_ENABLE_RMLUI=ON \
+            -DPULP_ENABLE_GPU=OFF \
+            -DPULP_BUILD_EXAMPLES=OFF \
+            -DPULP_ENABLE_INSPECTOR=OFF \
+            -DPULP_ENABLE_AUDIO_PROBES=OFF
+
+      - name: Build RmlUi backend and SDK consumer
+        run: |
+          tools/ci/governed-build.sh cmake --build build-rmlui
+
+      - name: Run RmlUi backend and installed SDK consumer tests
+        run: |
+          ctest --test-dir build-rmlui -C Release --output-on-failure \
+            -R '^(pulp-test-rmlui-backend|cmake-rmlui-sdk-consumer)$'
