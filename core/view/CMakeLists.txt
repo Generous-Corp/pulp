@@ -33,7 +33,10 @@ if(PULP_ENABLE_RMLUI)
         PUBLIC
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
             $<INSTALL_INTERFACE:include>)
-    target_link_libraries(pulp-view-rmlui PUBLIC pulp::view-core PRIVATE RmlUi::Core)
+    # The optional target's public link carries RmlUi's headers and library to
+    # consumers that exercise the admitted core lifecycle.  The ordinary view
+    # targets never link this target, so the dependency remains opt-in.
+    target_link_libraries(pulp-view-rmlui PUBLIC pulp::view-core RmlUi::Core)
     target_compile_features(pulp-view-rmlui PUBLIC cxx_std_20)
 endif()
 

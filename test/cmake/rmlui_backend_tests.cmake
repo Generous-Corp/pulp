@@ -2,7 +2,9 @@
 # materialized when explicitly enabled, so default builds cannot acquire it.
 if(PULP_ENABLE_RMLUI)
     pulp_add_test_suite(pulp-test-rmlui-backend
-        SOURCES test_rmlui_backend.cpp
+        SOURCES
+            test_rmlui_backend.cpp
+            test_rmlui_core_smoke.cpp
         LIBRARIES pulp::view-rmlui)
 else()
     add_test(NAME pulp.rmlui-default-off
