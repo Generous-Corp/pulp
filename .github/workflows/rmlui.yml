@@ -31,6 +31,8 @@ jobs:
 
       - name: Install Linux build dependencies
         uses: ./.github/actions/install-linux-build-deps
+        with:
+          extra-packages: libfreetype6-dev
 
       - name: Configure RmlUi opt-in build
         run: |
@@ -44,6 +46,7 @@ jobs:
           cmake -S . -B build-rmlui -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DPULP_ENABLE_RMLUI=ON \
+            -DPULP_ENABLE_RMLUI_FONTS=ON \
             -DPULP_ENABLE_GPU=OFF \
             -DPULP_BUILD_EXAMPLES=OFF \
             -DPULP_ENABLE_INSPECTOR=ON \

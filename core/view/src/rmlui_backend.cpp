@@ -285,7 +285,9 @@ struct Backend::Runtime {
 
     FileAdapter file;
     RenderAdapter render;
+#if !PULP_RMLUI_FONTS_ENABLED
     Rml::FontEngineInterface font;
+#endif
     Rml::Context* context = nullptr;
     Rml::ElementDocument* document = nullptr;
     bool initialised = false;
@@ -367,7 +369,9 @@ Status Backend::open(std::uint32_t width, std::uint32_t height) {
     auto runtime = std::make_unique<Runtime>(assets_, renderer_);
     runtime->active = true;
     Rml::SetFileInterface(&runtime->file);
+#if !PULP_RMLUI_FONTS_ENABLED
     Rml::SetFontEngineInterface(&runtime->font);
+#endif
     if (!Rml::Initialise()) {
         Runtime::process_active.clear(std::memory_order_release);
         return Status::rejected;
@@ -409,6 +413,30 @@ Status Backend::load_document(std::string_view path) {
     }
     document_ = std::move(asset);
     return Status::ok;
+}
+
+Status Backend::load_font_face(std::string_view path, std::string_view family, bool fallback) {
+    if (!open_)
+        return Status::not_open;
+    if (path.empty() || family.empty())
+        return Status::rejected;
+#if !PULP_RMLUI_FONTS_ENABLED
+    (void)path;
+    (void)family;
+    (void)fallback;
+    return Status::rejected;
+#else
+    Asset asset;
+    const auto status = assets_.load(path, asset);
+    if (status != Status::ok)
+        return status;
+    const auto* bytes = reinterpret_cast<const Rml::byte*>(asset.bytes.data());
+    return Rml::LoadFontFace(Rml::Span<const Rml::byte>(bytes, asset.bytes.size()),
+                             Rml::String(family), Rml::Style::FontStyle::Normal,
+                             Rml::Style::FontWeight::Auto, fallback)
+               ? Status::ok
+               : Status::rejected;
+#endif
 }
 
 Status Backend::dispatch_lua(std::string_view callback) {

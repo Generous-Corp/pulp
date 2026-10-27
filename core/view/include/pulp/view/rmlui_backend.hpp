@@ -119,6 +119,10 @@ class Backend {
 
     Status open(std::uint32_t width, std::uint32_t height);
     Status load_document(std::string_view path);
+    // Loads a manifest-approved font through the admitted RmlUi font engine.
+    // The path is resolved by AssetProvider before it reaches RmlUi; callers
+    // cannot make the font engine read outside the declared asset closure.
+    Status load_font_face(std::string_view path, std::string_view family, bool fallback = false);
     Status dispatch_lua(std::string_view callback);
     Status invoke_action(std::string_view action);
     Status process_mouse_move(int x, int y, int key_modifier_state = 0);

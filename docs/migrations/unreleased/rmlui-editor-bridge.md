@@ -18,7 +18,9 @@ The admitted core slice is pinned to RmlUi commit
 `58c751531f4c1a1eb2dc56f409b8e8a323a0c9ad`, with samples, Lua bindings,
 third-party containers, font engines, SVG/Lottie, HarfBuzz sample, and Tracy
 disabled. The upstream debugger target remains available in the SDK export,
-but the Pulp bridge links only `RmlUi::Core`. The
+but the Pulp bridge links only `RmlUi::Core`. A separate, default-off
+`PULP_ENABLE_RMLUI_FONTS` admission enables RmlUi's FreeType engine from the
+developer/CI system package; it is not exported or bundled. The
 `pulp-test-rmlui-backend` suite now proves core initialization, document
 parsing, update, render, and teardown through the optional backend. Its RmlUi
 render adapter lowers compiled geometry to bounded Pulp draw commands,
@@ -97,7 +99,9 @@ reading the developer checkout.
    core admission, lifecycle smoke, rooted file loading, and a geometry-recording
    adapter are complete. The adapter carries indexed vertices, UVs, packed
    colours, scissor state, and active transforms to the renderer seam;
-   Skia/Dawn lowering, Lua, and font providers remain open.**
+  Skia/Dawn lowering and Lua remain open. The FreeType opt-in now proves
+  manifest-approved font registration and text geometry, but does not prove
+  cross-platform metrics or a production host renderer.**
 3. **Product adapter.** Add a generated/imported Nodal model namespace and
    action bridge. Existing RML/RCSS/Lua files remain external or embedded by
    the importer; no hand-edited skin coordinates are accepted.
