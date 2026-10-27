@@ -263,7 +263,7 @@ option(PULP_ENABLE_ABLETON_LINK "Enable optional desktop Ableton Link support wi
 option(PULP_ENABLE_ARA "Enable optional ARA 2.x support with a developer-supplied Celemony SDK" OFF)
 option(PULP_ENABLE_MTS_ESP "Enable optional ODDSound MTS-ESP microtuning client integration" OFF)
 option(PULP_ENABLE_SCALA_TUNING "Enable optional Scala .scl/.kbm microtuning support via Surge Synth Team tuning-library" OFF)
-option(PULP_ENABLE_RMLUI "Build the optional RmlUi editor backend contract (no RmlUi dependency yet)" OFF)
+option(PULP_ENABLE_RMLUI "Build the optional RmlUi editor backend and pinned core dependency" OFF)
 option(PULP_FETCHCONTENT_UPDATES_DISCONNECTED "Avoid implicit FetchContent updates during configure" ON)
 option(PULP_USE_SHARED_FETCHCONTENT_SOURCES "Prefer machine-local shared source caches for FetchContent dependencies" ON)
 option(PULP_BENCHMARK "Enable zero-copy benchmark perf counters. Tooling-only; OFF by default so production builds see zero overhead." OFF)
