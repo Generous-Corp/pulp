@@ -74,6 +74,27 @@ TEST_CASE("RmlUi backend admits manifest textures and records their source path"
     backend.close();
 }
 
+TEST_CASE("RmlUi backend routes host pointer and wheel events") {
+    Headless headless;
+    headless.add_asset(
+        "editor.rml",
+        "<rml><body><button style='display:block;width:40px;height:40px;'>x</button></body></rml>");
+    Backend backend(headless, headless, headless);
+
+    REQUIRE(backend.open(64, 64) == Status::ok);
+    REQUIRE(backend.load_document("editor.rml") == Status::ok);
+    backend.render();
+    REQUIRE(backend.process_mouse_move(10, 10) == Status::ok);
+    REQUIRE(backend.mouse_interacting());
+    REQUIRE(backend.process_mouse_button_down(0) == Status::ok);
+    REQUIRE(backend.process_mouse_button_up(0) == Status::ok);
+    REQUIRE(backend.process_mouse_wheel(0.0f, 1.0f) == Status::ok);
+    REQUIRE(backend.process_mouse_leave() == Status::ok);
+    REQUIRE_FALSE(backend.mouse_interacting());
+    backend.close();
+    REQUIRE(backend.process_mouse_move(0, 0) == Status::not_open);
+}
+
 TEST_CASE("RmlUi backend fails closed instead of double-initializing process-global RmlUi") {
     Headless first_headless;
     Headless second_headless;
