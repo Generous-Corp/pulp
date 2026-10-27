@@ -118,7 +118,7 @@ endif()
 # export, but when a PULP_ENABLE_RMLUI SDK is installed export both sides of
 # its public link boundary. RmlUi is brought in with FetchContent, so its
 # targets are installed through the optional SDK rules below rather than being
-# added to the canonical PULP_SDK_TARGETS manifest. The manifest is parsed by
+# added to the canonical SDK target manifest. The manifest is parsed by
 # release gates and must contain only Pulp-owned target names.
 
 # The GPU device layer is exported with the renderer that links it, and on its
