@@ -452,11 +452,16 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // has been prepared (removed nodes' lingering measurers are filtered out),
     // each a latest-value snapshot (may mix adjacent callbacks). Safe to poll
     // while the audio thread runs.
+    // Nodes are timed only once read (two clock reads per node per block): the
+    // first call turns monitoring on, returning current (zero or stale) values.
     struct NodeLoadReport {
         NodeId node_id = 0;
         audio::AudioProcessLoadSnapshot load;
     };
     std::vector<NodeLoadReport> node_loads() const;
+    // true times nodes before any read; false stops until the next node_loads().
+    void set_node_load_monitoring(bool enabled) noexcept;
+    bool node_load_monitoring() const noexcept;
 
     // Whole-graph process-load snapshot (load == callback-budget fullness; 1.0 == a
     // full buffer). callback_count == 0 means no measurement yet. Safe to poll while
@@ -1384,6 +1389,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // node_load_). process_impl brackets each block with begin()/end() via an RAII
     // scope; the control thread reads graph_load() for the live-swap admission gate.
     // Heap-stable behind unique_ptr; snapshot() is concurrency-safe.
+    mutable std::atomic<bool> node_load_monitoring_{false}; // node_loads() sets it
     std::unique_ptr<audio::AudioProcessLoadMeasurer> graph_load_ =
         std::make_unique<audio::AudioProcessLoadMeasurer>();
 
@@ -1586,7 +1592,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // process_impl() invokes it when no routed path takes a block.
     void run_reference_walk_(audio::BufferView<float>& output,
                              const audio::BufferView<const float>& input, int num_samples,
-                             CompiledGraph* cg);
+                             CompiledGraph* cg, bool time_nodes);
     // compile_ mode. Normal is the full build (prepare()). SwapNoAnticipation is
     // used by (2.2b) prepare_swap: it HARD-skips the anticipation-lane build so a
     // swap-time recompile can never construct an AnticipationLane over the live

@@ -24,6 +24,7 @@
 // again, so the survivors win exactly as they did before.
 
 import { call } from './prop-applier-internal.js';
+import { writeVisibility } from './prop-applier-visibility.js';
 
 /// Returns false when it decided there was nothing to undo, so the slots it
 /// names are not treated as reset.
@@ -168,7 +169,7 @@ export const STYLE_KEY_RULES: Readonly<Record<string, StyleKeyRule>> = {
         // `none` hid the widget; `flex` turned a column into a row.
         slots: ['visible', 'flex.direction'],
         reset: (id) => {
-            call('setVisible', id, true);
+            writeVisibility(id, true);
             call('resetStyleProperty', id, 'direction');
         },
     },
@@ -306,7 +307,7 @@ export const STYLE_KEY_RULES: Readonly<Record<string, StyleKeyRule>> = {
     outlineStyle: clearOutline,
     outlineWidth: clearOutline,
     opacity: setter(['opacity'], 'setOpacity', 1),
-    visible: setter(['visible'], 'setVisible', true),
+    visible: { slots: ['visible'], reset: (id) => writeVisibility(id, true) },
     boxShadow: clearShadow,
     shadowColor: clearShadow,
     shadowOffset: clearShadow,
@@ -451,6 +452,8 @@ export const NO_RESET_NEEDED: Readonly<Record<string, string>> = {
     selected: 'the applier clears the selection itself when the prop disappears.',
     value: 'control data, not style: as with an uncontrolled DOM input the widget '
         + 'keeps the value the user or the last commit gave it.',
+    checked: 'control data, not style: as with an uncontrolled DOM checkbox the '
+        + 'widget keeps the position the user or the last commit gave it.',
     level: 'meter data, not style: the next sample overwrites it.',
     data: 'spectrum and waveform data, not style: the next frame overwrites it.',
     min: 'range bounds are control data; a control that loses its bounds keeps '

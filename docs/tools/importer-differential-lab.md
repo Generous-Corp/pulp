@@ -19,11 +19,23 @@ The lab instead compares:
 | Structure | evaluated DOM snapshot | DesignIR tree |
 | Geometry | DOM snapshot bounds | post-Yoga `--dump-layout` bounds |
 | Typography | computed styles | DesignIR text styles |
-| Visual | `browser.png` | candidate DesignIR rendered through Pulp/Skia |
+| Visual | the candidate lane's `browser.png` (see below) | candidate DesignIR rendered through Pulp/Skia |
 
 The raw browser screenshot is retained as the external render reference. Both
 the native import and its validation render are run in a dedicated candidate
 directory.
+
+Each lane runs its own Chromium capture, and the native IR is lowered from the
+candidate lane's. On a panel that animates, such as a canvas drawn every
+frame, the browser lane's screenshot shows a different moment, so scoring
+against it would charge capture timing to the native render. The visual lens
+therefore scores against the candidate lane's own screenshot
+(`candidate/browser.png`) when the two lanes' DOM snapshots have the same
+semantic digest. If they differ, the candidate lane did not evaluate the page
+the other lenses read, and the browser lane's screenshot stays the reference.
+`comparison.visual.reference` records which one was used, why, and
+`capture_moment_residual`: how many pixels the two Chromium captures alone
+disagree on, and where.
 
 ## Run one comparison
 
@@ -36,6 +48,14 @@ python3 tools/import-validation/importer_differential_lab.py compare \
   --file test/fixtures/import-differential/02-flex-controls.html \
   --output /tmp/importer-differential/flex
 ```
+
+`--emitter js` scores the ui.js lane instead of the native materializer: the
+observer renders the same candidate IR through the program `generate_pulp_js()`
+emits for it, run through the WidgetBridge as a plugin loads `ui.js`. The
+report records the lane as `candidate.emitter`, and the run fails if the render
+receipt names a different emitter. Compare the two lanes on one fixture to see
+what a ui.js import loses against the native one; the emitter conformance gate
+(`test/test_design_emitter_conformance.cpp`) names the same gaps structurally.
 
 Cache state is caller supplied and is never inferred from elapsed time. Declare
 it when the harness is run (`--cache-state cold|warm|unknown`). Each receipt
@@ -61,6 +81,7 @@ browser/
   tokens.json
 candidate/
   design.ir.json
+  browser.png
   render.png
   layout.json
 comparison/
@@ -85,8 +106,13 @@ frame: geometry by subtracting that origin from Chromium's boxes and from the
 native layout, the authored-frame visual by cropping the frame from both PNGs
 at the same page rect. For a panel with page around it, that node
 carries the canvas colour Chromium paints, resolved from the verified DOM
-snapshot by CSS background propagation (`comparison.page_background`); a
-colour the rule cannot resolve is left unpainted and reported `unresolved`. A
+snapshot by CSS background propagation (`comparison.page_background`). When
+html and body are both transparent the canvas is the user agent's, and it
+resolves (`source: ua-canvas`) to the colour the capture recorded for it: a
+probe given the root's computed color-scheme and a `Canvas` background reads
+back what Chromium resolves, after every frame is captured
+(`documentCanvas` in the DOM snapshot). A colour the rule cannot resolve is
+left unpainted and reported `unresolved`. A
 panel that covers the whole page owns its canvas (`importer-owned`), so a
 dropped document colour shows up as a residual instead of being supplied.
 The render receipt records the placement it applied, and the lab rejects a
@@ -100,11 +126,14 @@ page colour is `unresolved`, so the observer left the page unpainted.
 under a resolved or importer-owned colour. The second and third classes both
 block promotion.
 `comparison.work_counters` judges the observer's own counters from the
-digest-bound render receipt: a tree that outlives its teardown, or a paint
-mutation after the first frame that requested no repaint, makes the fixture
-ineligible. `integrity.*_snapshot_semantic_sha256` hashes each DOM snapshot
-with only its capture-local CDP frame ID removed, which is the digest to
-compare across repeated runs. The receipt paths are relative to
+digest-bound render receipt: a tree that outlives its teardown, a paint
+mutation after the first frame that requested no repaint, or (counter schema
+v2) a read-back that decoded, uploaded or rebuilt an image makes the fixture
+ineligible. v1 receipts carry no resource counters and are judged without
+them; the verdict says `resources: absent`. `integrity.*_snapshot_semantic_sha256` hashes each DOM snapshot
+with only its capture-local CDP identifiers fixed (the frame ID, loader IDs,
+and backend node IDs, which Chromium numbers in a run-dependent order), which
+is the digest to compare across repeated runs. The receipt paths are relative to
 each fixture output, so they can be copied under `/tmp/pulp-p0a-8458/receipts/`
 without exposing machine-local paths.
 
@@ -128,6 +157,45 @@ python3 tools/import-validation/importer_differential_lab.py benchmark \
   --runs 5 \
   --output /tmp/importer-differential/benchmark
 ```
+
+`--input` walks the directory recursively but skips anything under a
+`holdout/` directory, so iterating on the corpus root never scores held-out
+panels; pass `--include-holdout`, or point `--input` at the holdout directory
+itself, to score them. `compare` and `benchmark` take `--viewport
+WIDTHxHEIGHT` for panels taller than the default 1280x800 (manifest fixtures
+declare theirs). Every comparison reads PNGs, so the commands check for Pillow
+once before running and name `tools/ci/install_visual_python_deps.sh` when it is
+missing.
+
+The browser and candidate lanes are two separate Chromium captures, and each
+session numbers backend nodes in its own order. Nodes are therefore paired
+across the lanes by the capture's DOM-path anchor (`stable_anchor_id`, for
+example `capture:html[0]/body[0]/div#root[0]`), which both lanes derive from
+the page's structure. A backend node ID is only meaningful inside the lane that
+produced it. An anchor present on both sides that disagrees is a non-match,
+whatever the text or tag says.
+
+### Fixtures that are not lab-runnable on their own
+
+Not every HTML file under `test/fixtures/` can be captured by itself. These ten
+fail at capture when they are passed to `compare` or `pulp-import-design` as
+they stand (Chrome 156, 2026-10-24), so a corpus run over the whole tree
+reports them as capture failures, not as importer results:
+
+| Fixture | Capture verdict | Why |
+|---|---|---|
+| `agent-panels/kelvin/panel.html` | `capture-source-unresolved` | links `styles.css`, which is not in the directory (404) |
+| `agent-panels/lattice/panel.html` | `capture-source-unresolved` | links `styles.css`, which is not in the directory (404) |
+| `agent-panels/magneto/panel.html` | `capture-source-unresolved` | links `styles.css`, which is not in the directory (404) |
+| `agent-panels/polystrike/panel.html` | `capture-negative-overflow` | content still begins at x = -37 px at a pinned 1280 px width |
+| `browser-capture-text-fallback-first/panel.html` | `capture-source-unresolved` | loads `FunnelDisplay-VariableFont_wght.ttf` and `Inter-Regular.ttf`, which are not committed beside it (404); its test reads the committed capture instead |
+| `browser-capture-text-stale-face/panel.html` | `capture-source-unresolved` | the same two font files (404); the committed capture is the test input |
+| `browser-capture-text-wrap/panel.html` | `capture-source-unresolved` | the same two font files (404); the committed capture is the test input |
+| `import-differential/16-svg-invalid.html` | `capture-source-unresolved` | its `<path d="M10 10 L">` is malformed on purpose; it belongs to the canvas/SVG manifest, not the browser-capture corpus |
+| `imports/claude/vite-assets.html` | `capture-source-unresolved` | renders no meaningful visible design without the Vite bundle it was exported from |
+| `imports/stitch/2025.04/code.html` | `capture-source-unresolved` | needs `https://cdn.tailwindcss.com`, which the capture does not fetch (`tailwind is not defined`) |
+
+The other 37, including the three holdouts, capture.
 
 The benchmark preserves the caller's `--cache-state` declaration on every
 run; it does not infer `cold` or `warm` from run order. The `first_invocation`
@@ -273,7 +341,14 @@ own control appearance, so the lab states the boundary instead of scoring it as
 an importer failure. `comparison.form_controls` lists every laid-out control
 with its `appearance`, the capture's `theme` verdict, and one status:
 
-- `ua-default-form-chrome` — the native theme painted it; a support boundary;
+- `ua-default-form-chrome`: the native theme painted it and the native
+  lowering has no skin for it (a select's arrow, a text field, a meter, a
+  progress bar, the picker types); a support boundary;
+- `ua-theme-skinned`: the native theme painted it, and the native lowering
+  paints it with Chromium's own theme (a range, checkbox or radio in the
+  `chromium_refresh` skin, a `<button>` or button-type input as a
+  `ButtonSurface`); not a boundary, so its residual counts against the
+  importer like any other;
 - `ua-shadow-form-part` — CSS paints the box, but parts such as a range thumb,
   colour swatch, date fields, or a styled select's arrow come from user-agent
   internals the snapshot does not serialize; a support boundary;
@@ -377,7 +452,7 @@ provenance, source recognition, and deterministic three-run receipts pass.
 | P0 | Close existing acceptance debt | **DONE** | Attributable M1 ARM64 PR-head receipt recorded for root-canvas and provenance: https://github.com/Generous-Corp/pulp/actions/runs/38996107653/job/117289012852 and protected artifact https://github.com/Generous-Corp/pulp/actions/runs/38996107653/artifacts/12088036268. The later merge-group run reused the receipt and ran zero suites; it is not claimed as fresh execution. |
 | P1 | Reset and reconcile the workstream | **DONE** | Fresh branch `plan/importer-reset-20261018` from `origin/main` `4cbf6f9a845f081fb5fc5fe6f21d758389e64fe0`; old `measure/fixture11-viewport-20261015` is reference-only because its lineage SHA mismatches its head. |
 | P2 | Validate the evidence contract and instruments | **DONE** | 214 Python controls pass; three-run cold benchmark determinism is `pass`; authenticated Skia render receipts, DPR 2 checks, blank-render and planted-defect controls pass; frozen baseline manifest is `test/fixtures/import-differential/reset-manifest-20261018.json`. |
-| P3 | Prove native correctness | **NOT PASSED — P3a/P3b/P3c COMPLETE; P3d OPEN FOR FORM CHROME** | Final cold corpus at `3450a14c8d` (Chrome 151.0.7922.47, DPR 2, one ARM64 host), with three-run determinism passing on all 16 completed fixtures: on the frozen 14-fixture in-scope denominator, 12 meet every gate (structure >=0.99, frame placement plus registered geometry, typography >=0.98, registered visual >=0.995). Two fail the visual gate: held-out `08-form-controls` (registered visual 0.762539) and `18-keyed-list-panel` (0.947144), with the residual located inside UA-theme-painted control boxes; that support boundary was stated after the held-out failure, so it does not redraw this denominator and may be proposed as an exclusion only for the next frozen manifest. Held-out 01, 03, and 06 pass every gate. Gate coverage over the 16 completed fixtures: structure 16/16, geometry 16/16, typography 14/16 (the excluded Canvas2D controls), registered visual 14/16. |
+| P3 | Prove native correctness | **NOT PASSED — P3a/P3b/P3c COMPLETE; P3d OPEN FOR FORM CHROME** | Final cold corpus at `3450a14c8d` (Chrome 151.0.7922.47, DPR 2, one ARM64 host), with three-run determinism passing on all 16 completed fixtures: on the frozen 14-fixture in-scope denominator, 12 meet every gate (structure >=0.99, frame placement plus registered geometry, typography >=0.98, registered visual >=0.995). Two fail the visual gate: held-out `08-form-controls` (registered visual 0.762539) and `18-keyed-list-panel` (0.947144), with the residual located inside UA-theme-painted control boxes; that support boundary was stated after the held-out failure, so it does not redraw this denominator and may be proposed as an exclusion only for the next frozen manifest. Held-out 01, 03, and 06 pass every gate. Gate coverage over the 16 completed fixtures: structure 16/16, geometry 16/16, typography 14/16 (the excluded Canvas2D controls), registered visual 14/16. F2a lowers native-verdict ranges, checkboxes and radios onto the Chromium-refresh widget skins, painted in the captured CSS-edge-snapped box with the theme-replaced UA background and border dropped: `08-form-controls` goes from 0.762539 to 0.953763, with three-run determinism `pass` (remaining foreground error: themed `<button>` 0.976, range 0.024, checkbox 0). The themed `<button>` is now the whole remaining P3d gap on both 08 and 18 (18 unchanged at 0.947144); a Chromium-refresh push-button skin is planned to close it. Lowering a native-verdict `<button>` to `ButtonSurface` (Chromium's push-button paint, with the UA background and border dropped) takes `08-form-controls` to 0.998861 and `18-keyed-list-panel` to 0.998588, with three-run determinism `pass` on both. Both now pass every numeric gate. A themed control the lowering reskins is no longer a support boundary (`ua-theme-skinned`), so `08-form-controls` is `native-with-browser-validation` and threshold-eligible, while `18-keyed-list-panel` stays `browser-required` for its JavaScript alone. The remaining 08 foreground error is the range (0.961) and the button (0.039). |
 | P4 | Compare baked-native and retained typed-plan paths | **DONE — NO QUALIFYING WIN** | An isolated retained typed plan (experiment branch `plan/importer-next-20261021-p4`, commit `169d06f977`, not landed) matched a fresh rebuild at all 600 trace steps, at six Skia PNG checkpoints, and detected a planted dropped meter update. Across seven interleaved separate-process Release reps on the synthetic benchmark IR, update-plus-frame median was 0.0892 ms against baked-native 0.0825 ms (1.08x) and p95 0.2003 ms against 0.1620 ms (1.24x), versus the pre-registered <=0.80x; allocations were equal (269 per frame) and peak RSS was within noise (+32 KB). It beat only the full-rebuild control (about 4.5x on median), which does not qualify. Layout and paint, shared by every lane, dominate the frame. The host was contended (load about 45 on 28 cores), so absolute times are noisy, but the ratios are far from the criterion. Separately, `main` landed (PR 10640, merge `e6da6d9816`) IR-bound retained and rebuild benchmark lanes (`--ir`, `--frames`, slot identity and text-mismatch counters, teardown readback). On importer-produced held-out IR its retained lane builds no views, rebinds no slots and records no unmarked mutations, while the rebuild control rebinds every slot every frame, and teardown leaves 0 live views. Those are structural and lifetime results, and that record makes no wall-clock claim. Combined: the retained path is behaviourally sound and keeps identity, and it has no qualifying wall-time or resource win on the one host measured. |
 | P5 | Decide promotion or deferment | **DONE — DEFERRED** | The retained plan does not meet the pre-registered performance criterion, so baked-native remains authoritative and the retained plan stays an isolated experiment branch. The generic benchmark instrumentation (p95, warmup exclusion, per-frame allocation counts, RSS high-water) is retained as infrastructure, alongside `main`'s IR-bound lanes and lifetime counters, which landed independently and stay as landed. |
 | P6 | Code-health follow-ups | **ADVISORY** | Narrow `DocumentCanvasPaint` exposure, unify duplicate snapshot parsing, split the oversized browser-capture test unit, and add the direct benchmark peak assertion. These do not substitute for P0-P5 evidence. |
@@ -544,6 +619,15 @@ placement, background, overflow, and shadow defects remain visible. Missing or
 disagreeing frame metadata fails closed rather than silently mixing registered
 and unregistered metrics.
 
+Chromium reports a transformed element's bounding box after its transform and
+every ancestor's, while the native layout snapshot reports untransformed View
+boxes. Native lowering applies a lone `rotate(<n>deg)` as a rotation about the
+View's centre (the importer folds the authored `transform-origin` into the box
+position), so the lab compares the bounding box of each native box under the
+composed rotations of the node and its ancestors. A transform that native
+lowering does not rotate, such as a list or a non-degree unit, keeps its
+layout box on both counts.
+
 P3 passes only when every in-scope fixture has authenticated three-run receipts,
 structure >=0.99; frame placement |recorded origin - observed Chromium
 origin| <= 0.5 CSS px, verified against the native layout; registered geometry
@@ -584,6 +668,84 @@ not comparable with benchmark JSON produced before that instrumentation;
 ratios between lanes of one build are. `bridge_calls` is zero for every native lane and is not
 a discriminating counter; paint commands are RecordingCanvas counts, not GPU
 draw or resource measurements.
+
+### Benchmark instrument v2
+
+`pulp-design-import-bench` receipts are `pulp-design-import-benchmark-v2`.
+What changed, and what each field can and cannot show:
+
+- **Stages.** Each frame is lapped as `update` (the fixture's state change),
+  `layout`, `record` (painting into the frame's canvas) and `submit`, on one
+  clock. `stages.residual_ms_max` is the largest frame time the laps do not
+  cover; `stages.consistent` is false when more than 5% of sampled frames
+  leave over 50 us or 2% of the frame uncovered.
+  Fixtures no longer lay out inside `update`; v1 receipts laid out twice per
+  baked frame and are not comparable per stage.
+- **Memory.** `memory.rss` and `memory.phys_footprint` are
+  `{median,p99,peak}_bytes` plus `source` and `reason`; an unreadable probe is
+  `null` with a reason, never 0. `--cycles N` (N >= 3) adds settled
+  build/run/teardown cycles and a least-squares memory slope across them,
+  excluding the first; `--plant-cycle-leak` must make that slope rise.
+- **Host conditions.** Load average and Apple thermal state are sampled at
+  every phase boundary. `host_conditions.confounded` is true when the
+  one-minute load exceeds cores/4, a reading is unavailable, or thermal state
+  is not nominal, and a confounded receipt cannot support a speed claim.
+  `--plant-load` replaces the measured load to prove the classification.
+- **Canvas.** `--canvas=skia-raster|skia-graphite` paints through SkiaCanvas,
+  so decodes, uploads, paragraph builds and rasterization are inside the
+  frame. Counter schema v2 reports `image_decodes`, `gpu_uploads`,
+  `paragraph_builds`, `scene_cache.{records,replays}` and
+  `image_cache.{hits,builds}` per phase as total, per-frame maximum, and
+  frames after the first that did any. `steady_state_gate` fails when any
+  frame after a phase's first decodes, uploads or rebuilds an image, or
+  shapes text its update did not write (`paragraph_builds.unwritten`, from a
+  build observer matched against the text the fixture's step wrote); the
+  recording canvas reports `blind`.
+  `--require-steady-state` exits 4 unless the gate passes, and
+  `--plant-frame-decode` and `--paragraph-cache=off` must each make it fail.
+  SkiaCanvas keeps laid-out paragraphs in a process-wide cache
+  (`pulp/canvas/paragraph_cache.hpp`), so a static label shapes once;
+  `--paragraph-cache=off` measures the uncached text path.
+- **Live lane on importer output.** `--lane=live --ir=<panel.ir.json>
+  [--bundle=<behavior.js>]` mounts the DesignIR as generated bridge
+  JavaScript, under the materialized runtime bundle when one is given, and
+  writes every anchored text slot through `setText` plus one host frame tick
+  per step.
+- **Comparison.** `tools/scripts/design_import_benchmark.py --compare BASELINE
+  CANDIDATE --reps N --mechanism COUNTER:down|up|zero --stage STAGE
+  --bench-arg=...` runs the two lanes in ABAB order as separate processes,
+  observes thermal state around every rep with
+  `tools/scripts/p2_thermal_state.swift`, and reports `win` only when every
+  criterion of the pre-registered speed bar holds; otherwise `work-moved`,
+  `no-win`, `confounded`, `insufficient-reps` or `instrument-inconsistent`.
+  `--baseline-arg` and `--candidate-arg` add arguments to one side only, so
+  a lane can be judged against itself, for example
+  `--compare baked-native baked-native --baseline-arg=--paragraph-cache=off
+  --mechanism paragraph_builds:down`.
+
+Example: judge a candidate lane against baked-native on the Skia raster lane,
+over an importer-produced DesignIR, under the no-launch environment:
+
+```bash
+PULP_DISABLE_PLUGIN_EDITOR=1 PULP_HEADLESS=1 PULP_TEST_MODE=1 PULP_INSPECTOR_NO_LAUNCH=1 \
+python3 tools/scripts/design_import_benchmark.py --build-dir build \
+  --compare baked-native live --reps 5 --stage frame \
+  --mechanism image_decodes:down \
+  --bench-arg=--frames=600 --bench-arg=--warmup-frames=60 \
+  --bench-arg=--canvas=skia-raster --bench-arg=--ir=/path/panel.ir.json \
+  --output-json /tmp/verdict.json
+```
+
+Every rep also runs `--cycles=3` unless a `--cycles` bench argument is given,
+because the memory slope is part of the criterion. `--mechanism` names the
+per-frame counter the candidate claims to move (a v1 counter such as
+`layout_passes`, or a v2 resource such as `image_decodes` or
+`scene_cache.replays`); without one the best verdict is `work-moved`. Run it
+only on a host below a quarter load per core: elsewhere every rep is
+`confounded` by construction. A single receipt shows where a frame goes:
+`interactive.stages.*.median_ms` splits update, layout, record and submit, and
+`interactive.counters.resources` shows per-frame decodes, uploads and
+paragraph builds.
 
 ### Landed context
 
@@ -680,10 +842,14 @@ Release blockers for any claim of native import correctness: form-control
 chrome (08, 18); the IPC socket timeout tests, which are timing-sensitive under
 load and fail on `main` independently of this work; and the masked-field secret
 fix, whose own tests fail without it (24 pass, 2 fail when the masking is
-neutered). Deferred items: the RTL caret in `text_x_for_byte`, paragraph-path
-lookup of the system UI font by its private name, non-rendered text outside
-form controls keeping its value in the snapshot, and the native-DPR text-layout
-deviation of up to one device pixel per line.
+neutered). Deferred items: the RTL caret in `text_x_for_byte`, non-rendered text
+outside form controls keeping its value in the snapshot, and the native-DPR
+text-layout deviation of up to one device pixel per line. Imported
+right-to-left text never reaches the RTL letter-spacing branch, because
+DesignIR carries no text direction. The paragraph path
+now finds the system UI font through a manager that serves it at the exact
+requested weight (see the `text-metrics` skill), and a transparent html/body
+resolves its page background from the UA canvas colour the capture records.
 
 **Parallel `main` record (2026-10-21 to 2026-10-22).** `main` landed an
 independent version of this work in PR 10640 (merge `e6da6d9816`) and its

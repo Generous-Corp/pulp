@@ -1,8 +1,8 @@
 {
   "schema": "pulp-importer-differential-manifest-v1",
   "version": 1,
-  "license": "MIT",
-  "ownership": "Pulp synthetic fixtures",
+  "license": "MIT; the holdout/ panels embed SIL OFL 1.1 fonts and MIT scripts, see holdout/README.md",
+  "ownership": "Pulp synthetic fixtures; holdout/ holds real panels frozen for evaluation only",
   "defaults": {
     "from": "claude",
     "viewport": {"width": 1280, "height": 800},
@@ -21,6 +21,204 @@
     {"id":"runtime-state","source":"10-runtime-state.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","expected_blockers":["javascript-evaluation"]},
     {"id":"typography","source":"11-typography.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","expected_blockers":[]},
     {"id":"responsive-panel","source":"12-responsive-panel.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","expected_blockers":["responsive-style"]},
-    {"id":"fresh-plugin-panel","source":"17-fresh-plugin-panel.html","shape":"self-contained-html","from":"claude","split":"fresh-plugin","viewport":{"width":480,"height":320},"browser_interactions":"17-fresh-plugin-panel.interactions.json","expected_blockers":[]}
+    {"id":"fresh-plugin-panel","source":"17-fresh-plugin-panel.html","shape":"self-contained-html","from":"claude","split":"fresh-plugin","viewport":{"width":480,"height":320},"browser_interactions":"17-fresh-plugin-panel.interactions.json","expected_blockers":[]},
+    {"id":"gradient-border","source":"19-gradient-border.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","viewport":{"width":400,"height":180},"expected_blockers":[]},
+    {"id":"local-flatten","source":"22-local-flatten.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","viewport":{"width":640,"height":360},"expected_blockers":[]},
+    {"id":"flex-gap-knob","source":"20-flex-gap-knob.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","viewport":{"width":960,"height":680},"expected_blockers":[]},
+    {"id":"design-tool-heuristics","source":"21-design-tool-heuristics.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","viewport":{"width":800,"height":520},"expected_blockers":[],"expected_gaps":[{"id":"scaled-bordered-box-clamped","lab_signal":"geometry gate registered_max_abs_delta 1.69 CSS px on #h-scaled (Chromium 0.3125 px wide, native 2 px)","effect":"the capture drops transform and places the box by its scaled paint box, so native lays out a 0.3125 px box with two 1 px borders and clamps it to the 2 px the borders need"}]},
+    {"id":"backdrop-opacity","source":"22-backdrop-opacity.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","viewport":{"width":512,"height":260},"expected_blockers":[]},
+    {"id":"input-buttons","source":"23-input-buttons.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","expected_blockers":[]},
+    {
+      "id": "spectr-standalone",
+      "source": "holdout/spectr-standalone.html",
+      "shape": "self-contained-html",
+      "from": "claude",
+      "split": "holdout",
+      "sha256": "7ae6f1d807f2f356b8473d9e672a95535adbe7affea58af360f9ac5c211daf9e",
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "expected_blockers": [
+        "async_initialization",
+        "canvas",
+        "conditional_rendering",
+        "javascript_evaluation",
+        "webgl"
+      ],
+      "holdout": {
+        "frozen": "2026-10-23",
+        "tuning": "forbidden",
+        "reason": "a real panel kept out of importer tuning so a lab result on it measures generalisation"
+      },
+      "receipt": "holdout/spectr-standalone.receipt.json",
+      "volatile_regions": [
+        {
+          "id": "spectrum-canvas",
+          "rect": {
+            "x": 56,
+            "y": 56,
+            "width": 1168,
+            "height": 656
+          },
+          "unit": "css-px",
+          "reason": "animated spectrum drawn into a full-window canvas; frozen capture time differs per run. The rect is the whole plot the panel draws bands into (getGeom's padding inside the viewport), not only where one run's bands reached"
+        },
+        {
+          "id": "scrubber-canvas",
+          "rect": {
+            "x": 56,
+            "y": 749,
+            "width": 1168,
+            "height": 13
+          },
+          "unit": "css-px",
+          "reason": "animated viewport scrubber in the same canvas layer"
+        }
+      ],
+      "expected_gaps": [
+        {
+          "id": "flattened-tree-loses-ancestry",
+          "lab_signal": "structural.incorrect_parentage_count 69; structure 0.0795",
+          "effect": "ancestor opacity (6 wrappers, 0.35 to 0.55) is lost, so dimmed text paints 2.3x to 3.6x too bright"
+        },
+        {
+          "id": "theme-painted-range-not-drawn",
+          "lab_signal": "support boundary ua-default-form-chrome, 1 control",
+          "effect": "disabled <input type=range> with accent-color paints no track or thumb"
+        },
+        {
+          "id": "glyph-ink-heavier-than-chromium",
+          "lab_signal": "visual foreground residual on text nodes",
+          "effect": "text ink mass about 27% above Chromium's at equal peak"
+        },
+        {
+          "id": "per-glyph-fallback-not-carried",
+          "lab_signal": "visual residual on '▾', '▸', '⋯'",
+          "effect": "glyphs Chromium took from Menlo are drawn from a different fallback, smaller and offset"
+        },
+        {
+          "id": "svg-linecap-linejoin-dropped",
+          "lab_signal": "visual residual on PEAK and SCULPT icons",
+          "effect": "round caps and joins render as butt"
+        },
+        {
+          "id": "svg-shape-opacity-dropped",
+          "lab_signal": "visual residual on the PRESETS icon",
+          "effect": "per-<path> opacity 0.45 and 0.7 is ignored"
+        },
+        {
+          "id": "half-pixel-placement-snapped",
+          "lab_signal": "visual residual on boxes at .5 CSS px",
+          "effect": "logo, SPECTR and toolbar icons sit 1 device px high"
+        },
+        {
+          "id": "hairline-over-canvas-too-bright",
+          "lab_signal": "full-width failing rows at CSS y 744",
+          "effect": "rgba(255,255,255,.06) border over the canvas is about 13 LSB too bright"
+        },
+        {
+          "id": "hairline-over-gradient-colour",
+          "lab_signal": "full-width failing rows at CSS y 43",
+          "effect": "border over a padding-box gradient picks up the wrong gradient stop"
+        },
+        {
+          "id": "svg-primitive-boxed-at-viewport",
+          "lab_signal": "geometry rows for lowered SVG primitives",
+          "effect": "primitives carry the SVG viewport box, not their own bbox (no pixel effect)"
+        }
+      ],
+      "notes": [
+        "Not deterministic by construction: browser.png and the native render differ inside volatile_regions on every run, so the lab's three-run determinism is fail on the screenshot, render and capture-canonical digests. The DOM snapshot, native layout, platform fonts and render receipt digests are stable.",
+        "The geometry gate passes: registered_geometry mean 0.999999, max abs delta 0.0005 CSS px. The head <title> is still counted as a missing structural node (structure_missing 1).",
+        "Report gap ids follow the 2026-10-23 Spectr importer evaluation."
+      ]
+    },
+    {
+      "id": "lattice-panel",
+      "source": "holdout/lattice-panel.html",
+      "shape": "self-contained-html",
+      "from": "claude",
+      "split": "holdout",
+      "sha256": "d0f2bf0f297fc81852fc4bc2b01f526ab7a9c59ecb19b87106da6ccb364fe2d9",
+      "viewport": {
+        "width": 1280,
+        "height": 1127
+      },
+      "expected_blockers": [
+        "animation"
+      ],
+      "holdout": {
+        "frozen": "2026-10-23",
+        "tuning": "forbidden",
+        "reason": "a real panel kept out of importer tuning so a lab result on it measures generalisation"
+      },
+      "receipt": "holdout/lattice-panel.receipt.json",
+      "volatile_regions": [],
+      "expected_gaps": [
+        {
+          "id": "inline-gap-override-moves-label",
+          "lab_signal": "geometry gate registered_max_abs_delta 3.0 CSS px on 4 .knob-label boxes (RATE, GATE, OCTAVES, VELOCITY)",
+          "effect": "knobs with an inline gap:var(--space-3) override lay their label out 3 px above Chromium's; the knob box keeps Chromium's height"
+        },
+        {
+          "id": "binding-frames-not-in-dom",
+          "lab_signal": "structural extra_count 5 (capture:rate, swing, gate, octaves, velocity)",
+          "effect": "macro-binding frames have no DOM counterpart; structure 0.98998"
+        },
+        {
+          "id": "outside-frame-paint-not-drawn",
+          "lab_signal": "visual.outside_frame_residual browser 1520 differing device px, native 0; full_frame_classification unexplained",
+          "effect": "Chromium paints pixels outside the panel frame that the native render leaves as page background"
+        }
+      ],
+      "notes": [
+        "Every digest is stable over three runs.",
+        "Glyphs outside the embedded faces fall back to Helvetica Neue and Menlo on macOS."
+      ]
+    },
+    {
+      "id": "kelvin-panel",
+      "source": "holdout/kelvin-panel.html",
+      "shape": "self-contained-html",
+      "from": "claude",
+      "split": "holdout",
+      "sha256": "c6b236e4ebfcbb5b0593fee8194f7ccb93cf7b059b1d2699c679bd39c0d08309",
+      "viewport": {
+        "width": 1280,
+        "height": 1007
+      },
+      "expected_blockers": [
+        "animation"
+      ],
+      "holdout": {
+        "frozen": "2026-10-23",
+        "tuning": "forbidden",
+        "reason": "a real panel kept out of importer tuning so a lab result on it measures generalisation"
+      },
+      "receipt": "holdout/kelvin-panel.receipt.json",
+      "volatile_regions": [],
+      "expected_gaps": [
+        {
+          "id": "inline-gap-override-moves-label",
+          "lab_signal": "geometry gate registered_max_abs_delta 2.0 CSS px on 1 .knob-label box (RES)",
+          "effect": "the knob with an inline gap:var(--space-2-5) override lays its label out 2 px above Chromium's; the knob box keeps Chromium's height"
+        },
+        {
+          "id": "binding-frames-not-in-dom",
+          "lab_signal": "structural extra_count 6 (capture:cutoff, resonance, attack, release, drive, out)",
+          "effect": "macro-binding frames have no DOM counterpart; structure 0.981"
+        },
+        {
+          "id": "outside-frame-paint-not-drawn",
+          "lab_signal": "visual.outside_frame_residual browser 2846 differing device px, native 0; full_frame_classification unexplained",
+          "effect": "Chromium paints pixels outside the panel frame that the native render leaves as page background"
+        }
+      ],
+      "notes": [
+        "Every digest is stable over three runs.",
+        "Glyphs outside the embedded faces fall back to Helvetica Neue and Lucida Grande on macOS."
+      ]
+    }
   ]
 }

@@ -62,8 +62,9 @@ public:
     /// Routed node binding entry point. `user_data` must be the owning
     /// ProcessorNode. Reads the executor's gathered mono input view
     /// (ctx.node_inputs) and writes this node's mono output view
-    /// (ctx.node_outputs) by aliasing them into a stack-local single-bus
-    /// ProcessBlock, then forwards to process_processor_block(). Allocation-free
+    /// (ctx.node_outputs) by aliasing them into a block-local ProcessBlock
+    /// over the node's reused bus set, then forwards to
+    /// process_processor_block(). Allocation-free
     /// per block and only valid on the routed path (ctx.routed == true).
     static bool process_binding(ProcessBlock& block,
                                 const GraphRuntimeNodeProcessContext& ctx,
@@ -77,6 +78,10 @@ private:
     // Caller-owned MIDI/parameter fallback storage for the block bridge. Sized
     // once in prepare() and reused across blocks; never resized on the RT path.
     ProcessorBlockAdapterScratch scratch_;
+    // The block's bus set, rebuilt per block by clear() and add_*(). Reusing it
+    // avoids constructing all kMaxBuses entries for the one to three buses a
+    // node uses.
+    BusBufferSet buses_;
     NodeCapabilities capabilities_{};
     AudioInputBusProvider input_provider_{};
     std::array<BusRole, BusBufferSet::kMaxBuses> input_roles_{};

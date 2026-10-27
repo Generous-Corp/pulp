@@ -495,7 +495,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_runtime.hpp',
                 qualified_name='pulp::host::SignalGraph::prove_sample_region',
                 target='Pulp::host',
-                header_fingerprint='sha256:2215d3eba4d39138e0981407741cfde1002bb3fd6c7b84b317835e179e28b1dd',
+                header_fingerprint='sha256:a4b87a6d66b3a87383619454f6da74f3ab5e95381fe81c44e25ebfd488c2d390',
             ),
             binding(
                 role='graph_sample_region',
@@ -503,7 +503,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_runtime.hpp',
                 qualified_name='pulp::host::SignalGraph::sample_region',
                 target='Pulp::host',
-                header_fingerprint='sha256:2215d3eba4d39138e0981407741cfde1002bb3fd6c7b84b317835e179e28b1dd',
+                header_fingerprint='sha256:a4b87a6d66b3a87383619454f6da74f3ab5e95381fe81c44e25ebfd488c2d390',
             ),
             binding(
                 role='graph_sample_regions',
@@ -511,7 +511,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_runtime.hpp',
                 qualified_name='pulp::host::SignalGraph::sample_regions',
                 target='Pulp::host',
-                header_fingerprint='sha256:2215d3eba4d39138e0981407741cfde1002bb3fd6c7b84b317835e179e28b1dd',
+                header_fingerprint='sha256:a4b87a6d66b3a87383619454f6da74f3ab5e95381fe81c44e25ebfd488c2d390',
             ),
             binding(
                 role='SampleRegionCandidate',
@@ -1213,20 +1213,20 @@ EXPORTS = [
             binding(
                 role="voice", kind="cpp_type", include="pulp/signal/drum/tom.hpp",
                 qualified_name="pulp::signal::drum::TomVoice", target="Pulp::signal",
-                header_fingerprint="sha256:df13e3f7a6452302cc25acea7e84bd52aa77008e5ecbd46ad5517b14011f9d68",
+                header_fingerprint="sha256:7228487a4c0e7de5b2cfe5fe5ca26bb807cd1b44d1b4d021e6b43103adf5db41",
             ),
             binding(
                 role="ladder_profile", kind="cpp_type", include="pulp/signal/drum/tom.hpp",
                 qualified_name="pulp::signal::drum::TomVoice::LadderMathProfile",
                 target="Pulp::signal",
-                header_fingerprint="sha256:df13e3f7a6452302cc25acea7e84bd52aa77008e5ecbd46ad5517b14011f9d68",
+                header_fingerprint="sha256:7228487a4c0e7de5b2cfe5fe5ca26bb807cd1b44d1b4d021e6b43103adf5db41",
             ),
             binding(
                 role="set_ladder_profile", kind="cpp_function",
                 include="pulp/signal/drum/tom.hpp",
                 qualified_name="pulp::signal::drum::TomVoice::set_ladder_math_profile",
                 target="Pulp::signal",
-                header_fingerprint="sha256:df13e3f7a6452302cc25acea7e84bd52aa77008e5ecbd46ad5517b14011f9d68",
+                header_fingerprint="sha256:7228487a4c0e7de5b2cfe5fe5ca26bb807cd1b44d1b4d021e6b43103adf5db41",
                 address_expression=(
                     "static_cast<bool (pulp::signal::drum::TomVoice::*)("
                     "pulp::signal::drum::TomVoice::LadderMathProfile) noexcept>("
@@ -1238,7 +1238,7 @@ EXPORTS = [
                 include="pulp/signal/drum/tom.hpp",
                 qualified_name="pulp::signal::drum::TomVoice::ladder_math_profile",
                 target="Pulp::signal",
-                header_fingerprint="sha256:df13e3f7a6452302cc25acea7e84bd52aa77008e5ecbd46ad5517b14011f9d68",
+                header_fingerprint="sha256:7228487a4c0e7de5b2cfe5fe5ca26bb807cd1b44d1b4d021e6b43103adf5db41",
                 address_expression=(
                     "static_cast<pulp::signal::drum::TomVoice::LadderMathProfile "
                     "(pulp::signal::drum::TomVoice::*)() const noexcept>("
@@ -1840,10 +1840,10 @@ EXPORTS = [
         bindings=[
             binding(role="entrypoint", kind="cpp_type", include="pulp/signal/multi_channel_meter.hpp",
                     qualified_name="pulp::signal::MultiChannelMeterT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:5c272ef39e032b63e1008c458b23796626c6fccebe23427d6ef34be30f7407e6"),
+                    header_fingerprint="sha256:83d056fd906ff72eb37d3dde19a80293c3b7157af2934e2ca4e2e40cf6e57a15"),
             binding(role="loudness_support", kind="cpp_type", include="pulp/signal/multi_channel_meter.hpp",
                     qualified_name="pulp::signal::MultiChannelMeterT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:5c272ef39e032b63e1008c458b23796626c6fccebe23427d6ef34be30f7407e6"),
+                    header_fingerprint="sha256:83d056fd906ff72eb37d3dde19a80293c3b7157af2934e2ca4e2e40cf6e57a15"),
         ],
         _link_probes=[
             {"role": "entrypoint", "binding": "pulp::signal::MultiChannelMeterT<float>",

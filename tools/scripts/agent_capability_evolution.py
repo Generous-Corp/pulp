@@ -15,8 +15,18 @@ def contract_payload(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# The two counters are assigned at land: a branch changes capability material
+# and leaves the counter at its base value (the change is then "pending"), and
+# the version-at-land bump that assigns the SDK version advances the counter.
+# `unassigned` accepts changed material under an unchanged counter for a
+# pending tree; `assigning` accepts a one-step counter advance with unchanged
+# material, which is the bump assigning a pending base. Every other counter
+# rule still holds.
+
+
 def manifest_evolution_problems(
-    previous: Any, current: dict[str, Any], *, allow_unpublished_migration: bool
+    previous: Any, current: dict[str, Any], *, allow_unpublished_migration: bool,
+    unassigned: bool = False, assigning: bool = False,
 ) -> list[str]:
     if not isinstance(previous, dict):
         return []
@@ -116,19 +126,22 @@ def manifest_evolution_problems(
     new_material = copy.deepcopy(current)
     old_revision = old_material.pop("manifest_revision", None)
     new_revision = new_material.pop("manifest_revision", None)
-    if old_material != new_material and (
+    if old_material != new_material and not (unassigned and new_revision == old_revision) and (
         not isinstance(old_revision, int)
         or not isinstance(new_revision, int)
         or new_revision <= old_revision
     ):
         problems.append("manifest changed without a manifest_revision increase")
-    if old_material == new_material and new_revision != old_revision:
+    if old_material == new_material and new_revision != old_revision and not (
+        assigning and isinstance(old_revision, int) and new_revision == old_revision + 1
+    ):
         problems.append("manifest_revision changed without a manifest change")
     return problems
 
 
 def surface_evolution_problems(
-    previous: Any, current: dict[str, Any], surface_schema: str
+    previous: Any, current: dict[str, Any], surface_schema: str, *,
+    unassigned: bool = False, assigning: bool = False,
 ) -> list[str]:
     if not isinstance(previous, dict) or previous.get("schema") != surface_schema:
         return []
@@ -139,13 +152,15 @@ def surface_evolution_problems(
     new_material = copy.deepcopy(current)
     old_material.pop("inventory_version", None)
     new_material.pop("inventory_version", None)
-    if old_material != new_material and (
+    if old_material != new_material and not (unassigned and new_version == old_version) and (
         not isinstance(old_version, int)
         or not isinstance(new_version, int)
         or new_version <= old_version
     ):
         problems.append("public surface changed without an inventory_version increase")
-    if old_material == new_material and old_version != new_version:
+    if old_material == new_material and old_version != new_version and not (
+        assigning and isinstance(old_version, int) and new_version == old_version + 1
+    ):
         problems.append("surface inventory_version changed without a surface change")
 
     old_headers = {row["include"]: row for row in previous.get("headers", [])}

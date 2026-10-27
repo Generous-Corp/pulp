@@ -44,7 +44,14 @@ int g_sidechain_bus_channels = 2;
 // side-chain channel (so a stereo side chain proves both channels arrived), or
 // a -1 sentinel when no side chain is delivered.
 class SidechainProbe final : public pulp::format::Processor {
-public:
+  public:
+    // Its slice-alignment case needs the AU v2 per-slice render.
+    bool wants_sample_accurate_parameters() const override {
+        return true;
+    }
+    bool wants_au_scheduled_parameter_slices() const override {
+        return true;
+    }
     PluginDescriptor descriptor() const override {
         return {
             .name = "AUSidechainProbe",

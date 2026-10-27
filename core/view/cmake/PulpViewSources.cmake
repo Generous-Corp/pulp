@@ -39,6 +39,7 @@ target_sources(pulp-view-core PRIVATE
     src/press_reach.cpp
     src/caret.cpp
     src/continuous_frames.cpp
+    src/chart_shader_presets.cpp
     src/custom_shader_host.cpp
     src/host_surfaces.cpp
     src/yoga_measurement_internal.cpp
@@ -50,6 +51,8 @@ target_sources(pulp-view-core PRIVATE
     src/widget_schema.cpp
     src/knob_sprite_paint.cpp
     src/slider_core.cpp
+    src/widgets/button_surface.cpp
+    src/widgets/form_controls.cpp
     src/widgets/label.cpp
     src/widgets/visualizers.cpp
     src/inspector_facts.cpp
@@ -92,6 +95,7 @@ target_sources(pulp-view-core PRIVATE
     src/widgets/svg_rect.cpp
     src/widgets/svg_line.cpp
     src/frame_clock.cpp
+    src/lite_editor_host.cpp
     src/host_frame_pump.cpp
     src/gpu_acquire_diagnostics.cpp
     src/hover_cursor.cpp
@@ -200,6 +204,7 @@ target_sources(pulp-view-script PRIVATE
     src/script_engine.cpp
     src/js_engine_recommend.cpp
     src/widget_bridge.cpp
+    src/js_prelude_source.cpp
     src/widget_bridge/value_channel_access.cpp
     src/widget_bridge/bridge_dispatch.cpp
     src/widget_bridge/css_color.cpp

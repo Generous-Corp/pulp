@@ -114,10 +114,14 @@ public:
 
     // ── Child management ─────────────────────────────────────────────────
 
-    void add_child(std::unique_ptr<View> child);
+    /// Attaches `child` and returns nullptr. A child that is this view itself
+    /// or one of its ancestors is refused and handed back, so a caller that
+    /// cached the raw pointer can drop it instead of dangling.
+    std::unique_ptr<View> add_child(std::unique_ptr<View> child);
     // Transactional variant used by structural adapters that must recover the
     // owned child if an attach hook rejects it. On throw, `child` is restored.
-    void add_child_transactional(std::unique_ptr<View>& child);
+    // Returns false, with `child` untouched, when the child is refused.
+    bool add_child_transactional(std::unique_ptr<View>& child);
     /// Detaches `child` and returns its ownership, or `nullptr` when `child` is
     /// no longer this parent's child under the same instance id. A null result
     /// always means "not ours anymore" — never "moved for you".
@@ -1134,12 +1138,9 @@ public:
     Color background_color() const { return bg_color_; }
 
     /// Browser-compatible device-space paint rectangle for this box's own
-    /// background/border paint. It deliberately does not alter layout, hit
-    /// testing, child placement, or widget/text paint.
-    ///
-    /// The importer records the CSS-edge snapping contract verified against
-    /// Chromium, not a generic renderer rounding heuristic. Keeping both
-    /// edges matters: an integer origin can still have a fractional far edge.
+    /// paint (Chromium's CSS-edge snap, recorded by the importer). Layout, hit
+    /// testing and children keep the fractional box; both edges are kept
+    /// because an integer origin can still have a fractional far edge.
     void set_captured_box_paint_rect(float left, float top, float right,
                                      float bottom, float device_scale) {
         captured_box_paint_left_ = left;
@@ -1155,6 +1156,9 @@ public:
     float captured_box_paint_top() const { return captured_box_paint_top_; }
     float captured_box_paint_right() const { return captured_box_paint_right_; }
     float captured_box_paint_bottom() const { return captured_box_paint_bottom_; }
+    /// The rect, in local coordinates, this box's own paint covers: the snapped
+    /// captured rect when it is recorded and plausible, else local_bounds().
+    Rect self_paint_bounds() const;
 
     /// CSS `background-repeat` keyword. Storage-only at the View level:
     /// paint() of solid-color backgrounds is a no-op for repeat semantics, but
@@ -2279,8 +2283,8 @@ public:
     ///   • background-clip: `text` would clip the bg paint to text glyphs
     ///     via SkBlendMode::kSrcIn. Other values are no-ops on solid bg.
     ///     Catalog: partial.
-    ///   • background-origin: relevant only for repeating gradients (which
-    ///     we don't paint per-tile). Catalog: noop.
+    ///   • background-origin: the box a background gradient tile is sized
+    ///     and positioned in (`content-box` uses the padding box). Partial.
     void set_background_attachment(std::string kw) { style_extras().background_attachment = std::move(kw); }
     const std::string& background_attachment() const {
         static const std::string kEmpty;
@@ -2565,6 +2569,7 @@ public:
         /// mixes them — resolve through one expression.
         float radial_rx = 0.0f, radial_ry = 0.0f;
         float radial_rx_px = 0.0f, radial_ry_px = 0.0f;
+        canvas::GradientInterpolation interpolation; ///< CSS `in <space> [<hue> hue]`
     };
 
     /// A radial gradient's centre and radii in pixels, resolved against a box.
@@ -3177,7 +3182,7 @@ private:
         std::string object_position; // CSS object-position paired with object-fit
         std::string background_attachment;  // noop today
         std::string background_clip;        // partial (text deferred)
-        std::string background_origin;      // noop today
+        std::string background_origin;      // gradient tile box; content-box partial
         std::string background_position;    // repeating gradient tile phase; raster bg deferred
         std::string background_size;        // storage-only (raster bg deferred)
     };

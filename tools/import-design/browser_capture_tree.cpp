@@ -145,6 +145,44 @@ std::string escape_segment(std::string_view text) {
 /// `background_image` needs an asset — testing for `url(` specifically would
 /// classify `image-set(...)` and `-webkit-image-set(...)` as `native` and then
 /// draw nothing, which is the one answer the census must never give.
+/// Whether any side carries a border width, which draws even when the
+/// uniform slot is unset because the sides disagree.
+bool has_side_border(const pulp::view::IRStyle& style) {
+    const auto positive = [](const std::optional<float>& v) { return v && *v > 0.0f; };
+    return positive(style.border_width) || positive(style.border_top_width) ||
+           positive(style.border_right_width) || positive(style.border_bottom_width) ||
+           positive(style.border_left_width);
+}
+
+/// Whether Chrome would route pointer input to the node: a control by tag, an
+/// author handler or focus stop, an ARIA widget role, a pointer cursor, or a
+/// binding the capture lowers into a control.
+bool takes_input(const CapturedStyleIndex& index, int node_index, const pulp::view::IRNode& node) {
+    static const std::set<std::string, std::less<>> kControlTags = {
+        "a",     "audio",  "button", "details", "embed",   "iframe",   "input",
+        "label", "object", "option", "select",  "summary", "textarea", "video"};
+    if (kControlTags.count(index.tag_name(node_index)) != 0)
+        return true;
+    for (const char* attribute : {"onclick", "onpointerdown", "onmousedown", "tabindex",
+                                  "data-pulp-param", "data-pulp-meter"})
+        if (index.has_attribute(node_index, attribute))
+            return true;
+    const auto editable = index.attribute(node_index, "contenteditable");
+    if (index.has_attribute(node_index, "contenteditable") && editable != "false")
+        return true;
+    if (index.attribute(node_index, "draggable") == "true")
+        return true;
+    const auto role = index.attribute(node_index, "role");
+    if (!role.empty() && role != "presentation" && role != "none" && role != "img" &&
+        role != "group" && role != "region" && role != "heading" && role != "separator")
+        return true;
+    if (node.style.cursor && !node.style.cursor->empty() && *node.style.cursor != "auto" &&
+        *node.style.cursor != "default" && *node.style.cursor != "none")
+        return true;
+    return node.audio_widget != pulp::view::AudioWidgetType::none ||
+           node.attributes.count("binding") != 0;
+}
+
 bool references_asset(const pulp::view::IRStyle& style) {
     return style.background_image.has_value() &&
            !style.background_image->empty();
@@ -398,6 +436,15 @@ struct LoweredNode {
     /// is materialized, because materializing MOVES `node` into its parent and
     /// a moved-from style would answer "paints nothing" for every node.
     bool paints_ink = false;
+    /// Whether the node takes pointer input. Sibling order decides which of
+    /// two overlapping views a click reaches as surely as it decides which
+    /// one is drawn on top, so an interactive node is never moved and an
+    /// interactive pair drawn out of Chrome's order counts as a reorder.
+    bool interactive = false;
+    /// Whether the node may be drawn where its first ink lands rather than at
+    /// its own paint order: it paints nothing, takes no input, and does not
+    /// clip, composite as a group or transform what it holds.
+    bool reorderable = false;
 };
 
 /// The six components of a computed `matrix(a, b, c, d, e, f)`, or nothing for
@@ -750,6 +797,12 @@ public:
         return out;
     }
 
+    /// The rounded padding box `node_index` confines its overflow to, whether
+    /// or not the node actually clips.
+    ClipRect overflow_box(int node_index) {
+        return clip_box_of(node_index);
+    }
+
 private:
     ClipFacts facts_of(int node_index) {
         const auto seen = facts_.find(node_index);
@@ -865,6 +918,16 @@ private:
 };
 
 }  // namespace
+
+std::vector<std::string> capture_anchor_paths(const CapturedStyleIndex& index) {
+    const auto identity = sibling_identity(index);
+    std::vector<std::string> anchors(static_cast<size_t>(std::max(index.node_count(), 0)));
+    for (int node = 0; node < static_cast<int>(anchors.size()); ++node) {
+        if (!describe(index, node).empty())
+            anchors[static_cast<size_t>(node)] = anchor_path(index, identity, node);
+    }
+    return anchors;
+}
 
 std::string_view to_string(PaintClass paint_class) {
     switch (paint_class) {
@@ -1306,6 +1369,25 @@ lower_painted_tree(const CapturedStyleIndex& index, double dx, double dy, double
                               is_text ? ComputedStyleScope::text_only
                                       : ComputedStyleScope::box_and_text,
                               type_scale.ok() ? type_scale.scale : 1.0);
+        // The same post-transform box holds untransformed border, radius and
+        // shadow lengths. Scale them per axis where one factor per axis can
+        // carry them; refuse and record the rest.
+        if (!is_text && has_scale_variant_paint(lowered.style)) {
+            const auto paint_scale = index.inherited_paint_scale(node.node_index);
+            const auto applied =
+                paint_scale.ok() ? apply_paint_scale(lowered.style, paint_scale.x, paint_scale.y)
+                                 : PaintScaleResult{false, "transform"};
+            if (applied.scaled)
+                ++counts.paint_scaled;
+            if (!applied.refused.empty()) {
+                ++counts.paint_scale_refused;
+                lowered.attributes["paint_scale_refused"] =
+                    applied.refused + " under " +
+                    (paint_scale.ok() ? "scale(" + format_number(paint_scale.x) + ", " +
+                                            format_number(paint_scale.y) + ")"
+                                      : paint_scale.refused);
+            }
+        }
         // The style carrier deliberately drops most transforms because the
         // captured box is already post-transform. A descendant's page-space
         // rect is post-transform too, even when it has no transform of its
@@ -1461,6 +1543,12 @@ lower_painted_tree(const CapturedStyleIndex& index, double dx, double dy, double
         } else if (is_text) {
             lowered.type = "text";
             lowered.text_content = node.text;
+            // `auto` and `subpixel-antialiased` rasterize alike on macOS, so
+            // only `antialiased` is recorded; a capture without the property
+            // reads as `auto`.
+            if (const auto smoothing = computed.find("-webkit-font-smoothing");
+                smoothing != computed.end() && smoothing->second == "antialiased")
+                lowered.attributes["font_smoothing"] = "antialiased";
             // Chrome's own line breaking, kept BESIDE the paragraph rather than
             // in place of it. The node stays semantic — full text, one style,
             // one box — and a renderer that finds the basis still holding draws
@@ -1631,8 +1719,12 @@ lower_painted_tree(const CapturedStyleIndex& index, double dx, double dy, double
                 auto& attributes = slots.back().node.attributes;
                 attributes["native_appearance"] = appearance->second;
                 attributes["native_theme"] = theme.empty() ? "unresolved" : theme;
-                if (theme == "native")
+                if (theme == "native") {
                     ++counts.native_appearance_controls;
+                    if (detail::record_ua_control_state(index, node.node_index, tag, computed,
+                                                        attributes))
+                        detail::drop_theme_replaced_box_paint(slots.back().node.style);
+                }
             }
         }
 
@@ -1720,6 +1812,22 @@ lower_painted_tree(const CapturedStyleIndex& index, double dx, double dy, double
             if (shape.stroke) {
                 vector_node.attributes["svg_stroke_width"] =
                     format_number(shape.stroke_width);
+                // Cap and join are stated even at their SVG initial values,
+                // for the same reason as the paints: the renderer's defaults
+                // are a 2D canvas's, and its miter limit (10) is not SVG's (4).
+                vector_node.attributes["svg_stroke_linecap"] = shape.stroke_linecap;
+                vector_node.attributes["svg_stroke_linejoin"] = shape.stroke_linejoin;
+                if (shape.stroke_linejoin == "miter") {
+                    vector_node.attributes["svg_stroke_miterlimit"] =
+                        format_number(shape.stroke_miterlimit);
+                }
+                if (shape.stroke_dashoffset != 0.0) {
+                    vector_node.attributes["svg_stroke_dashoffset"] =
+                        format_number(shape.stroke_dashoffset);
+                }
+            }
+            if (shape.path_length) {
+                vector_node.attributes["svg_path_length"] = format_number(*shape.path_length);
             }
             vector_node.style.position = "absolute";
             vector_node.attributes["paint_class"] =
@@ -1890,7 +1998,39 @@ lower_painted_tree(const CapturedStyleIndex& index, double dx, double dy, double
                           !s.box_shadow.empty() || (s.border_width && *s.border_width > 0.0f) ||
                           !slot.node.text_content.empty() || slot.node.type == "image" ||
                           slot.node.attributes.count("captured_element") != 0 ||
-                          slot.node.type == "vector" || slot.node.type == "text";
+                          slot.node.type == "vector" || slot.node.type == "text" ||
+                          slot.node.type == "path" || has_side_border(s);
+        slot.interactive = takes_input(index, slot.node_index, slot.node);
+        const auto set_and_not = [](const std::optional<std::string>& value,
+                                    std::string_view none) {
+            return value && !value->empty() && *value != none;
+        };
+        slot.reorderable =
+            !slot.paints_ink && !slot.interactive && !slot.rotated &&
+            !set_and_not(s.clip_path, "none") && !set_and_not(s.mask_image, "none") &&
+            !(s.opacity && *s.opacity < 1.0f) && !set_and_not(s.mix_blend_mode, "normal") &&
+            !set_and_not(s.filter, "none") && !set_and_not(s.backdrop_filter, "none") &&
+            !set_and_not(s.transform, "none");
+        // A lowered node carries neither `overflow` (its descendants carry the
+        // clip it imposes, see above) nor `transform` (only a recovered
+        // rotation) nor `isolation`, so all three are read from the node's
+        // computed style.
+        if (slot.reorderable && transformed_ancestry(index, slot.node_index) == "transform")
+            slot.reorderable = false;
+        if (slot.reorderable) {
+            const auto computed = index.styles_for_node(slot.node_index);
+            const auto value_is = [&](const char* name, std::string_view value) {
+                const auto it = computed.find(name);
+                return it != computed.end() && it->second == value;
+            };
+            const auto clips = [&](const char* name) {
+                const auto it = computed.find(name);
+                return it != computed.end() && !it->second.empty() && it->second != "visible";
+            };
+            if (value_is("isolation", "isolate") || clips("overflow") || clips("overflow-x") ||
+                clips("overflow-y"))
+                slot.reorderable = false;
+        }
     }
 
     // Children in slot order, which IS Chrome's paint order among siblings.
@@ -1903,6 +2043,47 @@ lower_painted_tree(const CapturedStyleIndex& index, double dx, double dy, double
             slots[static_cast<size_t>(parent)].children.push_back(
                 static_cast<int>(i));
         }
+    }
+
+    // ── Siblings in the order their ink lands ───────────────────────────────
+    // Chrome's paint order numbers a node by when its OWN box paints, and a
+    // box that paints nothing still holds a number. Ordering siblings by that
+    // number put Spectr's inkless `div#root` (paint 2) ahead of the full-panel
+    // `body::before` behind it (paint 3), so the nested painter drew the
+    // backdrop over every one of #root's descendants (4 and on) and the whole
+    // panel had to be flattened. A node that draws nothing changes no pixel
+    // wherever it sits, so a reorderable one takes the earliest position at
+    // which its subtree draws. A node that takes input, clips, composites or
+    // transforms keeps its own number, and the audit below still judges the
+    // result; anything this cannot express falls back to the flat emission.
+    {
+        std::vector<int> key(slots.size(), -1);
+        const auto ink_key = [&](auto&& self, int slot) -> int {
+            auto& memo = key[static_cast<size_t>(slot)];
+            if (memo >= 0)
+                return memo;
+            memo = slot; // a malformed cycle reads as "stays put"
+            const auto& entry = slots[static_cast<size_t>(slot)];
+            if (!entry.reorderable)
+                return memo;
+            int earliest = -1;
+            for (const int child : entry.children) {
+                const int child_key = self(self, child);
+                if (earliest < 0 || child_key < earliest)
+                    earliest = child_key;
+            }
+            if (earliest >= 0)
+                memo = earliest;
+            return memo;
+        };
+        const auto by_ink = [&](std::vector<int>& list) {
+            std::stable_sort(list.begin(), list.end(), [&](int a, int b) {
+                return ink_key(ink_key, a) < ink_key(ink_key, b);
+            });
+        };
+        for (auto& slot : slots)
+            by_ink(slot.children);
+        by_ink(root_slots);
     }
 
     // ── Materialize ─────────────────────────────────────────────────────────
@@ -1983,19 +2164,156 @@ lower_painted_tree(const CapturedStyleIndex& index, double dx, double dy, double
     // clipping information and makes sibling order exactly Chromium's order.
     // The hierarchical form remains the default for callers that need source
     // ancestry rather than a pixel-faithful baked panel.
+    //
+    // The one structure the flat list keeps is a group that COMPOSITES as one
+    // layer: `opacity < 1`, `mix-blend-mode`, `filter`, `backdrop-filter` or a
+    // mask applies to the element's whole rendering, descendants included, so
+    // hung off the root its descendants would paint at full strength beside an
+    // empty translucent box. Pushing the alpha down into each descendant is no
+    // substitute wherever they overlap: a button's label over its own fill
+    // blends twice and comes out lighter than the browser's. Each of those
+    // properties starts a stacking context, so the group's descendants are one
+    // contiguous run of Chromium's paint list, and nesting them under the group
+    // reorders nothing. A group that cannot be nested exactly stays flat and
+    // says why in `isolating_group_refused`.
     if (flatten_to_paint_order) {
-        int flat_z = 0;
-        for (auto& entry : slots) {
+        const auto set_and_not = [](const std::optional<std::string>& value,
+                                    std::string_view none) {
+            return value && !value->empty() && *value != none;
+        };
+        const auto composites_as_group = [&](const IRNode& node) {
+            const auto& s = node.style;
+            return (s.opacity && *s.opacity < 1.0f) || set_and_not(s.mix_blend_mode, "normal") ||
+                   set_and_not(s.filter, "none") || set_and_not(s.backdrop_filter, "none") ||
+                   set_and_not(s.mask_image, "none");
+        };
+
+        // Every emitted descendant of each group root, ascending. Slots are
+        // pushed in index order, so each list is already sorted.
+        std::vector<std::vector<int>> members(slots.size());
+        std::vector<bool> isolating(slots.size(), false);
+        for (size_t i = 0; i < slots.size(); ++i)
+            isolating[i] = composites_as_group(slots[i].node);
+        for (size_t i = 0; i < slots.size(); ++i) {
+            int ancestor = slots[i].dom_parent_slot;
+            // Bounded by the slot count: a malformed `parentIndex` cycle must
+            // not spin here any more than it may in the parentage pass.
+            for (size_t step = 0; ancestor >= 0 && step < slots.size(); ++step) {
+                if (isolating[static_cast<size_t>(ancestor)])
+                    members[static_cast<size_t>(ancestor)].push_back(static_cast<int>(i));
+                ancestor = slots[static_cast<size_t>(ancestor)].dom_parent_slot;
+            }
+        }
+
+        // Why a group root cannot carry its descendants as one layer, or empty
+        // when it can. Each reason is a case where the nested tree would draw
+        // something the browser did not.
+        const auto refusal = [&](size_t group) -> std::string {
+            const auto& owner = slots[group];
+            const auto& list = members[group];
+            // A nested child is drawn inside its parent's transform, and its
+            // box is already the post-transform page box.
+            if (owner.rotated || set_and_not(owner.node.style.transform, "none"))
+                return "transform";
+            // Slots are in paint order. Contiguity means nothing outside the
+            // group paints between the root and its last descendant, which a
+            // stacking context guarantees and a captured raster can break.
+            if (list.front() < static_cast<int>(group) ||
+                list.back() - static_cast<int>(group) != static_cast<int>(list.size()))
+                return "interleaved-paint-order";
+            // The renderer's group layer is bounded by the root's box, so a
+            // descendant reaching past it would lose that ink.
+            const ClipRect layer = rect_of(owner.page_box);
+            const bool root_clips = owner.node.style.overflow &&
+                                    !owner.node.style.overflow->empty() &&
+                                    *owner.node.style.overflow != "visible";
+            const ClipRect overflow = css_chain.overflow_box(owner.node_index);
+            for (const int member : list) {
+                const auto& entry = slots[static_cast<size_t>(member)];
+                const auto& css = css_clip[static_cast<size_t>(member)];
+                const bool spills =
+                    !entry.node.style.box_shadow.empty() || entry.node.style.filter.has_value();
+                ClipRect ink = rect_of(entry.page_box);
+                if (css.clipped)
+                    ink = spills ? css.rect : intersect(ink, css.rect);
+                else if (spills)
+                    return "descendant-ink-outside-group";
+                if (!contains(layer, ink))
+                    return "descendant-ink-outside-group";
+                // Nested, the root's `overflow` clips the descendant too. That
+                // is harmless only where it would cut nothing.
+                if (root_clips && (!contains(overflow, ink) ||
+                                   (!css.clipped && intrudes_on_rounded_corner(overflow, ink))))
+                    return "descendant-escapes-group-clip";
+            }
+            return {};
+        };
+
+        std::vector<bool> nests(slots.size(), false);
+        for (size_t i = 0; i < slots.size(); ++i) {
+            if (!isolating[i] || members[i].empty())
+                continue;
+            auto reason = refusal(i);
+            if (reason.empty()) {
+                nests[i] = true;
+                ++counts.isolating_groups_nested;
+            } else {
+                ++counts.isolating_groups_refused;
+                slots[i].node.attributes["isolating_group_refused"] = std::move(reason);
+            }
+        }
+
+        // Each slot hangs off its nearest nesting group, or the root.
+        std::vector<std::vector<int>> group_children(slots.size());
+        std::vector<int> top_level;
+        for (size_t i = 0; i < slots.size(); ++i) {
+            int group = slots[i].dom_parent_slot;
+            for (size_t step = 0; group >= 0 && step < slots.size(); ++step) {
+                if (nests[static_cast<size_t>(group)])
+                    break;
+                group = slots[static_cast<size_t>(group)].dom_parent_slot;
+            }
+            if (group >= 0 && nests[static_cast<size_t>(group)])
+                group_children[static_cast<size_t>(group)].push_back(static_cast<int>(i));
+            else
+                top_level.push_back(static_cast<int>(i));
+        }
+
+        // Same offset arithmetic as the nested emission below: a root child
+        // is its page box plus the crop shift, and a group's child is placed
+        // against the group's padding box.
+        const auto emit = [&](auto&& self, int slot, double frame_left, double frame_top, int depth,
+                              int z, IRNode& parent) -> void {
+            auto& entry = slots[static_cast<size_t>(slot)];
             record_paint_rect(entry.node, entry.box);
-            entry.node.style.left = static_cast<float>(entry.box.left + dx);
-            entry.node.style.top = static_cast<float>(entry.box.top + dy);
+            entry.node.style.left = static_cast<float>(entry.box.left - frame_left);
+            entry.node.style.top = static_cast<float>(entry.box.top - frame_top);
             entry.node.style.width = static_cast<float>(entry.box.width);
             entry.node.style.height = static_cast<float>(entry.box.height);
-            entry.node.style.z_index = flat_z++;
-            root.children.push_back(std::move(entry.node));
-        }
-        counts.max_depth = slots.empty() ? 0 : 1;
-        counts.root_children = static_cast<int>(slots.size());
+            entry.node.style.z_index = z;
+            counts.max_depth = std::max(counts.max_depth, depth);
+            const auto border = [](const std::optional<float>& side,
+                                   const std::optional<float>& uniform) {
+                if (side)
+                    return static_cast<double>(std::max(0.0f, *side));
+                if (uniform)
+                    return static_cast<double>(std::max(0.0f, *uniform));
+                return 0.0;
+            };
+            const double child_left = entry.box.left + border(entry.node.style.border_left_width,
+                                                              entry.node.style.border_width);
+            const double child_top = entry.box.top + border(entry.node.style.border_top_width,
+                                                            entry.node.style.border_width);
+            parent.children.push_back(std::move(entry.node));
+            IRNode& placed = parent.children.back();
+            int child_z = 0;
+            for (const int child : group_children[static_cast<size_t>(slot)])
+                self(self, child, child_left, child_top, depth + 1, child_z++, placed);
+        };
+        int flat_z = 0;
+        for (const int slot : top_level)
+            emit(emit, slot, -dx, -dy, 1, flat_z++, root);
+        counts.root_children = static_cast<int>(top_level.size());
         return counts;
     }
 
@@ -2118,14 +2436,19 @@ lower_painted_tree(const CapturedStyleIndex& index, double dx, double dy, double
     // "nesting cost no fidelity" is a number rather than an assurance.
     for (size_t a = 0; a < composed_order.size(); ++a) {
         const auto& first = slots[static_cast<size_t>(composed_order[a])];
-        // `first` is the node that ends up ON TOP of a node Chrome painted
-        // later. If it paints nothing, there is nothing to be on top with.
+        // `first` is drawn BEFORE `second` here although Chrome painted it
+        // after, so `second` now covers it. That shows only where both put ink
+        // down; it changes where a click lands wherever either takes input.
         // Read from the slot, never from `first.node` — materializing has
         // already moved that out.
-        if (!first.paints_ink) continue;
+        if (!first.paints_ink && !first.interactive)
+            continue;
         for (size_t b = a + 1; b < composed_order.size(); ++b) {
             const auto& second = slots[static_cast<size_t>(composed_order[b])];
             if (first.paint_order <= second.paint_order) continue;
+            const bool hidden = first.paints_ink && second.paints_ink;
+            if (!hidden && !first.interactive && !second.interactive)
+                continue;
             // Page footprints: an overlap is a fact about where ink lands, and
             // a rotated node's own rectangle is not written in that space.
             if (!boxes_overlap(first.page_box, second.page_box)) continue;

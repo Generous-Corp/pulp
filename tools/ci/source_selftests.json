@@ -384,7 +384,8 @@
       "name": "gpu-audio-daw-continuity-v2-receipt-verifier-selftest",
       "argv": [
         "{repo}/tools/validation/test_verify_gpu_audio_daw_continuity_receipt_v2.py"
-      ]
+      ],
+      "timeout": 300.0
     },
     {
       "name": "gpu-fault-real-host-driver-selftest",
@@ -1136,6 +1137,18 @@
       "name": "verify-rendered-panel-selftest",
       "argv": [
         "{repo}/tools/scripts/test_verify_rendered_panel.py"
+      ]
+    },
+    {
+      "name": "script-inputs-precheck-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_script_inputs_precheck.py"
+      ]
+    },
+    {
+      "name": "migration-note-guard-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_migration_note_guard.py"
       ]
     },
     {

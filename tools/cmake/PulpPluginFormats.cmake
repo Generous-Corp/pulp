@@ -25,6 +25,33 @@ if(APPLE AND NOT COMMAND pulp_make_bundle_relocatable)
     include("${CMAKE_CURRENT_LIST_DIR}/PulpBundleRelocatable.cmake")
 endif()
 
+# Plug-in modules are loaded by hosts through a handful of exported entry
+# points, so everything a module does not reach from them is dead weight in the
+# shipped binary. On Apple, optimized builds link with -dead_strip. The linker
+# keeps everything reachable from an exported symbol, every static initializer
+# (and what it reaches, so self-registering factories survive), Objective-C
+# class and category metadata, and anything marked __attribute__((used)). Code
+# reached ONLY by a runtime name lookup the linker cannot see -- dlsym() of a
+# symbol that is not exported, or an Objective-C class looked up by name whose
+# object file nothing references -- must be exported or marked used.
+#
+# Opt out for every plug-in with -DPULP_DEAD_STRIP_PLUGINS=OFF, or for one
+# module by setting its PULP_DEAD_STRIP target property to OFF after
+# pulp_add_plugin(), e.g.
+#   set_target_properties(MyPlugin_VST3 PROPERTIES PULP_DEAD_STRIP OFF)
+if(NOT DEFINED PULP_DEAD_STRIP_PLUGINS)
+    set(PULP_DEAD_STRIP_PLUGINS ON CACHE BOOL
+        "Link Apple plug-in modules with -dead_strip in non-Debug configurations")
+endif()
+function(_pulp_plugin_module_link_hygiene module_target)
+    if(APPLE)
+        set_target_properties(${module_target} PROPERTIES
+            PULP_DEAD_STRIP "${PULP_DEAD_STRIP_PLUGINS}")
+        target_link_options(${module_target} PRIVATE
+            "$<$<AND:$<NOT:$<CONFIG:Debug>>,$<BOOL:$<TARGET_PROPERTY:${module_target},PULP_DEAD_STRIP>>>:LINKER:-dead_strip>")
+    endif()
+endfunction()
+
 # Post-build commands in this file run through the shell of whatever generator
 # is in use, and a bundle path carries the user's PLUGIN_NAME verbatim — spaces,
 # parentheses, apostrophes and all ("Spectr Freeze (dev)"). Every such command
@@ -42,6 +69,32 @@ function(_pulp_bundle_pkginfo_file out_var declaration)
     string(REPLACE "?" "_" _path "${_path}")
     file(CONFIGURE OUTPUT "${_path}" CONTENT "${declaration}\n" @ONLY)
     set(${out_var} "${_path}" PARENT_SCOPE)
+endfunction()
+
+# Writes Contents/PkgInfo into the bundle of `module_target`, which lives at
+# `bundle_dir`. A static module copies it after every link. A dev-shared module
+# (PULP_DEV_SHARED_UI) gets it from a separate build edge that reruns only when
+# the bundle lacks the file, so its relink costs only the link.
+function(_pulp_bundle_write_pkginfo module_target pkginfo bundle_dir)
+    get_filename_component(_bundle_name "${bundle_dir}" NAME)
+    get_target_property(_dev_shared ${module_target} PULP_DEV_SHARED_UI)
+    if(_dev_shared)
+        set(_output "${bundle_dir}/Contents/PkgInfo")
+        add_custom_command(OUTPUT "${_output}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${bundle_dir}/Contents"
+            COMMAND ${CMAKE_COMMAND} -E copy "${pkginfo}" "${_output}"
+            DEPENDS "${pkginfo}"
+            COMMENT "Writing PkgInfo into ${_bundle_name} bundle"
+            VERBATIM)
+        add_custom_target(${module_target}_PkgInfo DEPENDS "${_output}")
+        add_dependencies(${module_target} ${module_target}_PkgInfo)
+    else()
+        add_custom_command(TARGET ${module_target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy "${pkginfo}"
+                "$<TARGET_BUNDLE_DIR:${module_target}>/Contents/PkgInfo"
+            COMMENT "Writing PkgInfo into ${_bundle_name} bundle"
+            VERBATIM)
+    endif()
 endfunction()
 
 # An editor-less plug-in (pulp_add_plugin NO_EDITOR) links only the audio side
@@ -100,6 +153,7 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
         ${_PULP_VST3_SDK_DIR}/public.sdk/source/main/pluginfactory.cpp
         ${_PULP_VST3_SDK_DIR}/public.sdk/source/main/moduleinit.cpp
     )
+    _pulp_plugin_module_link_hygiene(${target}_VST3)
     if(PULP_${target}_NO_EDITOR)
         target_link_libraries(${target}_VST3 PRIVATE
             ${target}_Core
@@ -115,12 +169,17 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
         )
         target_compile_definitions(${target}_VST3 PRIVATE PULP_VST3_GUI=1)
         _pulp_apply_view_mac_objc_suffix(${target}_VST3)
+        _pulp_dev_shared_ui_attach(${target} ${target}_VST3 _pulp_dev_shared)
         _pulp_apply_ui_script_definition(${target}_VST3 "${PULP_${target}_UI_SCRIPT}")
     endif()
     _pulp_apply_macho_exports(${target}_VST3 "${target}_VST3"
         "_bundleEntry"
         "_bundleExit"
         "_GetPluginFactory")
+    _pulp_apply_elf_exports(${target}_VST3 "${target}_VST3"
+        "GetPluginFactory"
+        "ModuleEntry"
+        "ModuleExit")
     target_include_directories(${target}_VST3 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
     # VST3 bundle structure
@@ -171,12 +230,8 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
     # Write PkgInfo so Finder treats the .vst3 as an opaque bundle (not a folder)
     if(APPLE)
         _pulp_bundle_pkginfo_file(_pkginfo "BNDL????")
-        add_custom_command(TARGET ${target}_VST3 POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy "${_pkginfo}"
-                "$<TARGET_BUNDLE_DIR:${target}_VST3>/Contents/PkgInfo"
-            COMMENT "Writing PkgInfo into ${name}.vst3 bundle"
-            VERBATIM
-        )
+        _pulp_bundle_write_pkginfo(${target}_VST3 "${_pkginfo}"
+            "${CMAKE_BINARY_DIR}/VST3/${name}.vst3")
     endif()
     _pulp_attach_plugin_runtime_manifest(${target} ${target}_VST3)
 
@@ -284,6 +339,7 @@ function(_pulp_add_clap target name bundle_id version manufacturer category)
         ${PULP_${target}_CORE_OBJECTS}
         ${clap_entry}
     )
+    _pulp_plugin_module_link_hygiene(${target}_CLAP)
     if(PULP_${target}_NO_EDITOR)
         # The view-free adapter: PULP_CLAP_GUI stays undefined here and in it.
         target_link_libraries(${target}_CLAP PRIVATE
@@ -301,10 +357,13 @@ function(_pulp_add_clap target name bundle_id version manufacturer category)
         )
         target_compile_definitions(${target}_CLAP PRIVATE PULP_CLAP_GUI=1)
         _pulp_apply_view_mac_objc_suffix(${target}_CLAP)
+        _pulp_dev_shared_ui_attach(${target} ${target}_CLAP _pulp_dev_shared)
         _pulp_apply_ui_script_definition(${target}_CLAP "${PULP_${target}_UI_SCRIPT}")
     endif()
     _pulp_apply_macho_exports(${target}_CLAP "${target}_CLAP"
         "_clap_entry")
+    _pulp_apply_elf_exports(${target}_CLAP "${target}_CLAP"
+        "clap_entry")
     target_include_directories(${target}_CLAP PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
     set_target_properties(${target}_CLAP PROPERTIES
@@ -355,12 +414,8 @@ function(_pulp_add_clap target name bundle_id version manufacturer category)
         # reads as a folder can be browsed into and dragged apart in Finder,
         # and never renders a bundle icon.
         _pulp_bundle_pkginfo_file(_pkginfo "BNDL????")
-        add_custom_command(TARGET ${target}_CLAP POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy "${_pkginfo}"
-                "$<TARGET_BUNDLE_DIR:${target}_CLAP>/Contents/PkgInfo"
-            COMMENT "Writing PkgInfo into ${name}.clap bundle"
-            VERBATIM
-        )
+        _pulp_bundle_write_pkginfo(${target}_CLAP "${_pkginfo}"
+            "${CMAKE_BINARY_DIR}/CLAP/${name}.clap")
     endif()
 
     # Runtime sidecars: the wgpu runtime, the Apple @loader_path rpath, and
@@ -394,6 +449,7 @@ function(_pulp_add_lv2 target name bundle_id version manufacturer category)
         ${PULP_${target}_CORE_OBJECTS}
         ${lv2_entry}
     )
+    _pulp_plugin_module_link_hygiene(${target}_LV2)
     if(PULP_${target}_NO_EDITOR)
         target_link_libraries(${target}_LV2 PRIVATE
             ${target}_Core
@@ -409,6 +465,11 @@ function(_pulp_add_lv2 target name bundle_id version manufacturer category)
         )
     endif()
     target_include_directories(${target}_LV2 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    # lv2_descriptor is the host entry point; pulp-lv2-ttlgen dlopens the
+    # module and calls pulp_lv2_write_bundle_ttl to describe it.
+    _pulp_apply_elf_exports(${target}_LV2 "${target}_LV2"
+        "lv2_descriptor"
+        "pulp_lv2_write_bundle_ttl")
 
     # LV2 bundles: <name>.lv2/ directory containing the .so and .ttl files
     set_target_properties(${target}_LV2 PROPERTIES
@@ -491,6 +552,7 @@ function(_pulp_add_aax target name bundle_id version manufacturer category manuf
         ${_PULP_FORMAT_SOURCE_DIR}/aax_midi_node.cpp
         $<TARGET_OBJECTS:pulp-aax-export>
     )
+    _pulp_plugin_module_link_hygiene(${target}_AAX)
     if(APPLE AND NOT headless)
         target_sources(${target}_AAX PRIVATE
             ${_PULP_FORMAT_SOURCE_DIR}/aax_native_view_mac.mm)
@@ -590,6 +652,7 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
             ${PULP_${target}_CORE_OBJECTS}
             ${au_entry}
         )
+        _pulp_plugin_module_link_hygiene(${target}_AU)
         target_link_libraries(${target}_AU PRIVATE
             ${target}_Core
             ${_PULP_FORMAT_CORE_TARGET}
@@ -604,6 +667,7 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
             ${au_entry}
             ${_PULP_FORMAT_SOURCE_DIR}/au_v2_cocoa_view.mm
         )
+        _pulp_plugin_module_link_hygiene(${target}_AU)
         target_link_libraries(${target}_AU PRIVATE
             ${target}_Core
             ${_PULP_FORMAT_TARGET}
@@ -614,6 +678,7 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
             "-framework CoreAudio"
             "-framework Cocoa"
         )
+        _pulp_dev_shared_ui_attach(${target} ${target}_AU _pulp_dev_shared)
     endif()
     # Per-plugin-unique Cocoa view factory class name. ObjC class names are
     # process-global, so two Pulp AU components in one host would otherwise
@@ -699,12 +764,8 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
 
     # Write PkgInfo so Finder treats the .component as an opaque bundle (not a folder)
     _pulp_bundle_pkginfo_file(_pkginfo "BNDL????")
-    add_custom_command(TARGET ${target}_AU POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy "${_pkginfo}"
-            "$<TARGET_BUNDLE_DIR:${target}_AU>/Contents/PkgInfo"
-        COMMENT "Writing PkgInfo into ${name}.component bundle"
-        VERBATIM
-    )
+    _pulp_bundle_write_pkginfo(${target}_AU "${_pkginfo}"
+        "${CMAKE_BINARY_DIR}/AU/${name}.component")
 
     # Runtime sidecars: the wgpu runtime, the Apple @loader_path rpath, and
     # Skia's icudtl.dat on Windows. Unguarded on purpose —
@@ -723,7 +784,11 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
     # The strict post-build check proves every @rpath dependency also resolves
     # inside the bundle, so an external cache path can never be the only route.
     target_link_options(${target}_AU PRIVATE "LINKER:-rpath,@loader_path")
-    pulp_validate_bundle_relocatable(${target}_AU)
+    # A dev-shared AU loads its Pulp code from the build tree by design and the
+    # ship commands refuse it, so only a statically linked AU is checked.
+    if(NOT _pulp_dev_shared)
+        pulp_validate_bundle_relocatable(${target}_AU)
+    endif()
     _pulp_attach_plugin_runtime_manifest(${target} ${target}_AU)
     _pulp_attach_control_shipping(${target} ${target}_AU AUv2)
 endfunction()

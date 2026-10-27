@@ -1,8 +1,9 @@
 # The GPU device layer sits below the 2D renderer as two targets.
 #
-#   pulp-gpu-device-api  INTERFACE. The six device headers (gpu_surface,
-#                        gpu_compute, gpu_diagnostics, gpu_startup_report,
-#                        gpu_render_time, bench/perf_counters). They expose
+#   pulp-gpu-device-api  INTERFACE. The seven device headers (gpu_surface,
+#                        gpu_compute, gpu_diagnostics, gpu_proc_installer,
+#                        gpu_startup_report, gpu_render_time,
+#                        bench/perf_counters). They expose
 #                        opaque handles only, so this target names no Dawn,
 #                        WebGPU or Skia dependency and no Pulp module.
 #   pulp-gpu-device      The device implementation: the Dawn surface and
@@ -32,6 +33,8 @@ add_library(pulp-gpu-device)
 add_library(pulp::gpu-device ALIAS pulp-gpu-device)
 target_sources(pulp-gpu-device PRIVATE
     src/gpu_diagnostics.cpp
+    src/gpu_proc_installer.cpp
+    src/gpu_proc_installer_native.cpp
     src/gpu_startup_report.cpp
     src/gpu_surface_dawn.cpp
     src/render_observer.cpp
@@ -41,6 +44,18 @@ target_link_libraries(pulp-gpu-device
     PUBLIC pulp::gpu-device-api
     PRIVATE pulp::runtime
 )
+
+# Who installs Dawn's process-global proc table. OFF (Pulp's default): Pulp
+# installs Dawn's native procs once, on first use. ON: an embedding host owns
+# the table, Pulp compiles no proc-table setter, and every GpuSurface or
+# GpuCompute creation fails until the host registers an installer with
+# pulp::render::set_dawn_proc_installer(). The source list is the same either
+# way; only this definition differs.
+option(PULP_DAWN_PROCS_HOST_OWNED
+    "An embedding host owns Dawn's proc table; Pulp never installs it" OFF)
+if(PULP_DAWN_PROCS_HOST_OWNED)
+    target_compile_definitions(pulp-gpu-device PRIVATE PULP_DAWN_PROCS_HOST_OWNED=1)
+endif()
 
 # Apple Metal surface helpers for Dawn rendering
 if(PULP_MACOS OR (APPLE AND NOT PULP_IOS))

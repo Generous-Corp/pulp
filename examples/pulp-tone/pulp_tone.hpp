@@ -20,7 +20,14 @@ enum ToneParams : state::ParamID {
 
 // Simple 8-voice polyphonic synth
 class PulpToneProcessor : public format::Processor {
-public:
+  public:
+    // Reads its parameters once per block, so it opts out of per-point
+    // automation: the VST3, AU v2 and CLAP adapters then write each
+    // automated parameter once per block and dense automation costs nothing.
+    bool wants_sample_accurate_parameters() const override {
+        return false;
+    }
+
     format::PluginDescriptor descriptor() const override {
         return {
             .name = "PulpTone",

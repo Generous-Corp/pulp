@@ -36,6 +36,66 @@ std::string normalized_input_type(std::string raw) {
     return kKnownInputTypes.count(raw) != 0 ? raw : std::string("text");
 }
 
+bool record_ua_control_state(const CapturedStyleIndex& index, int node_index, std::string_view tag,
+                             const std::map<std::string, std::string>& computed,
+                             decltype(pulp::view::IRNode::attributes)& attributes) {
+    const auto type =
+        tag == "input" ? normalized_input_type(index.attribute(node_index, "type")) : std::string();
+    if (tag == "button" || type == "button" || type == "submit" || type == "reset") {
+        // A push button's theme paint reads only the scheme and whether it is
+        // disabled; Chromium ignores `accent-color` for it. A button-type
+        // input is the same theme part, its label the `#control-value` text.
+        attributes["ua_control"] = "button";
+        if (index.has_attribute(node_index, "disabled"))
+            attributes["ua_disabled"] = "1";
+        if (const auto scheme = computed.find("color-scheme"); scheme != computed.end())
+            attributes["ua_color_scheme"] = scheme->second;
+        return true;
+    }
+    if (type != "range" && type != "checkbox" && type != "radio")
+        return false;
+    attributes["ua_control"] = type;
+    if (type == "range") {
+        // Raw HTML strings: the widget applies HTML's own defaults and
+        // sanitising, so an absent or invalid value is not guessed here.
+        for (const char* name : {"min", "max", "step"}) {
+            if (index.has_attribute(node_index, name))
+                attributes[std::string("ua_") + name] = index.attribute(node_index, name);
+        }
+        // The live value; a script or a drag can leave it away from `value`.
+        if (auto value = index.control_value(node_index); !value.empty())
+            attributes["ua_value"] = std::move(value);
+    } else {
+        attributes["ua_checked"] = index.control_checked(node_index) ? "1" : "0";
+        if (type == "radio" && index.has_attribute(node_index, "name"))
+            attributes["ua_radio_group"] = index.attribute(node_index, "name");
+    }
+    if (index.has_attribute(node_index, "disabled"))
+        attributes["ua_disabled"] = "1";
+    if (const auto accent = computed.find("accent-color");
+        accent != computed.end() && accent->second != "auto" && !accent->second.empty())
+        attributes["ua_accent"] = accent->second;
+    if (const auto scheme = computed.find("color-scheme"); scheme != computed.end())
+        attributes["ua_color_scheme"] = scheme->second;
+    return true;
+}
+
+void drop_theme_replaced_box_paint(pulp::view::IRStyle& style) {
+    style.background_color.reset();
+    style.background_gradient.reset();
+    style.background_image.reset();
+    style.border.reset();
+    style.border_color.reset();
+    style.border_width.reset();
+    style.border_style.reset();
+    for (auto* color : {&style.border_top_color, &style.border_right_color,
+                        &style.border_bottom_color, &style.border_left_color})
+        color->reset();
+    for (auto* width : {&style.border_top_width, &style.border_right_width,
+                        &style.border_bottom_width, &style.border_left_width})
+        width->reset();
+}
+
 std::optional<ControlValueText>
 control_value_text(const CapturedStyleIndex& index, int node_index, const CapturedBox& box,
                    const std::map<std::string, std::string>& computed) {

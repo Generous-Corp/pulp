@@ -63,7 +63,7 @@ void BridgeRegistrars::register_widget_factory_controls_api(WidgetBridge& self) 
             auto* ptr = knob.get();
             self.widgets_[id] = ptr;
             self.wire_callbacks(id, ptr);
-            self.resolve_parent(pid)->add_child(std::move(knob));
+            self.attach_created(id, pid, std::move(knob));
         } else {
             knob->set_bounds({(float)args.get<double>(1,0), (float)args.get<double>(2,0),
                              (float)args.get<double>(3,48), (float)args.get<double>(4,48)});
@@ -88,7 +88,7 @@ void BridgeRegistrars::register_widget_factory_controls_api(WidgetBridge& self) 
             auto* ptr = fader.get();
             self.widgets_[id] = ptr;
             self.wire_callbacks(id, ptr);
-            self.resolve_parent(pid)->add_child(std::move(fader));
+            self.attach_created(id, pid, std::move(fader));
         } else {
             fader->set_bounds({(float)args.get<double>(1,0), (float)args.get<double>(2,0),
                               (float)args.get<double>(3,24), (float)args.get<double>(4,200)});
@@ -113,7 +113,7 @@ void BridgeRegistrars::register_widget_factory_controls_api(WidgetBridge& self) 
             auto* ptr = toggle.get();
             self.widgets_[id] = ptr;
             self.wire_callbacks(id, ptr);
-            self.resolve_parent(pid)->add_child(std::move(toggle));
+            self.attach_created(id, pid, std::move(toggle));
         } else {
             toggle->set_bounds({(float)args.get<double>(1,0), (float)args.get<double>(2,0),
                                (float)args.get<double>(3,50), (float)args.get<double>(4,30)});
@@ -134,7 +134,7 @@ void BridgeRegistrars::register_widget_factory_controls_api(WidgetBridge& self) 
         auto* ptr = rs.get();
         self.widgets_[id] = ptr;
         self.wire_callbacks(id, ptr);
-        self.resolve_parent(pid)->add_child(std::move(rs));
+        self.attach_created(id, pid, std::move(rs));
         return choc::value::createString(id);
     });
 
@@ -150,7 +150,7 @@ void BridgeRegistrars::register_widget_factory_controls_api(WidgetBridge& self) 
         else if (type_str == "close") icon->set_type(Icon::Type::close);
         else icon->set_type(Icon::Type::image_upload);
         self.widgets_[id] = icon.get();
-        self.resolve_parent(pid)->add_child(std::move(icon));
+        self.attach_created(id, pid, std::move(icon));
         return choc::value::createString(id);
     });
 
@@ -160,7 +160,7 @@ void BridgeRegistrars::register_widget_factory_controls_api(WidgetBridge& self) 
         auto pid = args.get<std::string>(1, "");
         auto img = std::make_unique<ImageView>(); img->set_id(id);
         self.widgets_[id] = img.get();
-        self.resolve_parent(pid)->add_child(std::move(img));
+        self.attach_created(id, pid, std::move(img));
         return choc::value::createString(id);
     });
 }
@@ -180,9 +180,26 @@ void BridgeRegistrars::register_widget_factory_form_api(WidgetBridge& self) {
             BridgeCallbackScope scope(alive);
             dispatch_event(alive, engine, id, "change", v ? "1" : "0");
         };
-        self.resolve_parent(pid)->add_child(std::move(cb));
+        self.attach_created(id, pid, std::move(cb));
         return choc::value::createString(id);
     });
+
+    // createButtonSurface(id, parentId, "row" | "column")
+    // Chromium's themed push-button surface: a container whose children are
+    // the button's own content (its label and icons), laid out in `direction`.
+    register_bridge_function(
+        api, "createButtonSurface", [&self](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto pid = args.get<std::string>(1, "");
+            auto surface = std::make_unique<ButtonSurface>();
+            surface->set_id(id);
+            surface->flex().direction = args.get<std::string>(2, "column") == "row"
+                                            ? FlexDirection::row
+                                            : FlexDirection::column;
+            self.widgets_[id] = surface.get();
+            self.attach_created(id, pid, std::move(surface));
+            return choc::value::createString(id);
+        });
 
     // createToggleButton(id, parentId)
     register_bridge_function(api, "createToggleButton", [&self](choc::javascript::ArgumentList args) {
@@ -196,7 +213,7 @@ void BridgeRegistrars::register_widget_factory_form_api(WidgetBridge& self) {
             BridgeCallbackScope scope(alive);
             dispatch_event(alive, engine, id, "toggle", v ? "1" : "0");
         };
-        self.resolve_parent(pid)->add_child(std::move(tb));
+        self.attach_created(id, pid, std::move(tb));
         return choc::value::createString(id);
     });
 
@@ -224,7 +241,7 @@ void BridgeRegistrars::register_widget_factory_form_api(WidgetBridge& self) {
         } else {
             auto pid = args.get<std::string>(2, "");
             self.widgets_[id] = label.get();
-            self.resolve_parent(pid)->add_child(std::move(label));
+            self.attach_created(id, pid, std::move(label));
         }
         return choc::value::createString(id);
     });
@@ -239,7 +256,7 @@ void BridgeRegistrars::register_widget_factory_container_api(WidgetBridge& self)
         auto v = std::make_unique<View>(); v->set_id(id);
         v->flex().direction = FlexDirection::row;
         self.widgets_[id] = v.get();
-        self.resolve_parent(pid)->add_child(std::move(v));
+        self.attach_created(id, pid, std::move(v));
         return choc::value::createString(id);
     });
 
@@ -249,7 +266,7 @@ void BridgeRegistrars::register_widget_factory_container_api(WidgetBridge& self)
         auto v = std::make_unique<View>(); v->set_id(id);
         v->flex().direction = FlexDirection::column;
         self.widgets_[id] = v.get();
-        self.resolve_parent(pid)->add_child(std::move(v));
+        self.attach_created(id, pid, std::move(v));
         return choc::value::createString(id);
     });
 
@@ -269,7 +286,7 @@ void BridgeRegistrars::register_widget_factory_container_api(WidgetBridge& self)
             dispatch_event(alive, engine, id, "dismiss", "0");
         };
         self.widgets_[id] = v.get();
-        self.resolve_parent(pid)->add_child(std::move(v));
+        self.attach_created(id, pid, std::move(v));
         return choc::value::createString(id);
     });
 
@@ -278,7 +295,7 @@ void BridgeRegistrars::register_widget_factory_container_api(WidgetBridge& self)
         auto pid = args.get<std::string>(1, "");
         auto p = std::make_unique<Panel>(); p->set_id(id);
         self.widgets_[id] = p.get();
-        self.resolve_parent(pid)->add_child(std::move(p));
+        self.attach_created(id, pid, std::move(p));
         return choc::value::createString(id);
     });
 }
@@ -296,14 +313,16 @@ void BridgeRegistrars::register_widget_factory_composite_api(WidgetBridge& self)
         m->set_id(id);
         if (o == "horizontal")
             level->set_level_orientation(LevelDisplay::Orientation::horizontal);
-        self.widgets_[id] = m.get(); self.resolve_parent(pid)->add_child(std::move(m));
+        self.widgets_[id] = m.get();
+        self.attach_created(id, pid, std::move(m));
         return choc::value::createString(id);
     });
 
     register_bridge_function(api, "createXYPad", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, ""); auto pid = args.get<std::string>(1, "");
         auto p = std::make_unique<XYPad>(); p->set_id(id);
-        self.widgets_[id] = p.get(); self.resolve_parent(pid)->add_child(std::move(p));
+        self.widgets_[id] = p.get();
+        self.attach_created(id, pid, std::move(p));
         return choc::value::createString(id);
     });
 
@@ -313,7 +332,8 @@ void BridgeRegistrars::register_widget_factory_composite_api(WidgetBridge& self)
         if (!w || !dynamic_cast<SeriesDisplay*>(w.get()))
             return display_unavailable();
         w->set_id(id);
-        self.widgets_[id] = w.get(); self.resolve_parent(pid)->add_child(std::move(w));
+        self.widgets_[id] = w.get();
+        self.attach_created(id, pid, std::move(w));
         return choc::value::createString(id);
     });
 
@@ -323,7 +343,8 @@ void BridgeRegistrars::register_widget_factory_composite_api(WidgetBridge& self)
         if (!s || !dynamic_cast<BinDisplay*>(s.get()))
             return display_unavailable();
         s->set_id(id);
-        self.widgets_[id] = s.get(); self.resolve_parent(pid)->add_child(std::move(s));
+        self.widgets_[id] = s.get();
+        self.attach_created(id, pid, std::move(s));
         return choc::value::createString(id);
     });
 
@@ -332,7 +353,7 @@ void BridgeRegistrars::register_widget_factory_composite_api(WidgetBridge& self)
         auto c = std::make_unique<ComboBox>(); c->set_id(id);
         auto* ptr = c.get(); self.widgets_[id] = ptr;
         self.wire_callbacks(id, ptr);
-        self.resolve_parent(pid)->add_child(std::move(c));
+        self.attach_created(id, pid, std::move(c));
         return choc::value::createString(id);
     });
 
@@ -350,21 +371,23 @@ void BridgeRegistrars::register_widget_factory_composite_api(WidgetBridge& self)
         auto seg = std::make_unique<SegmentedControl>(); seg->set_id(id);
         auto* ptr = seg.get(); self.widgets_[id] = ptr;
         self.wire_callbacks(id, ptr);
-        self.resolve_parent(pid)->add_child(std::move(seg));
+        self.attach_created(id, pid, std::move(seg));
         return choc::value::createString(id);
     });
 
     register_bridge_function(api, "createProgress", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, ""); auto pid = args.get<std::string>(1, "");
         auto p = std::make_unique<ProgressBar>(); p->set_id(id);
-        self.widgets_[id] = p.get(); self.resolve_parent(pid)->add_child(std::move(p));
+        self.widgets_[id] = p.get();
+        self.attach_created(id, pid, std::move(p));
         return choc::value::createString(id);
     });
 
     register_bridge_function(api, "createScrollView", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, ""); auto pid = args.get<std::string>(1, "");
         auto s = std::make_unique<ScrollView>(); s->set_id(id);
-        self.widgets_[id] = s.get(); self.resolve_parent(pid)->add_child(std::move(s));
+        self.widgets_[id] = s.get();
+        self.attach_created(id, pid, std::move(s));
         return choc::value::createString(id);
     });
 
@@ -375,7 +398,8 @@ void BridgeRegistrars::register_widget_factory_composite_api(WidgetBridge& self)
     register_bridge_function(api, "createNativeView", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, ""); auto pid = args.get<std::string>(1, "");
         auto nv = std::make_unique<NativeViewHost>(); nv->set_id(id);
-        self.widgets_[id] = nv.get(); self.resolve_parent(pid)->add_child(std::move(nv));
+        self.widgets_[id] = nv.get();
+        self.attach_created(id, pid, std::move(nv));
         return choc::value::createString(id);
     });
 
@@ -393,7 +417,7 @@ void BridgeRegistrars::register_widget_factory_composite_api(WidgetBridge& self)
             BridgeCallbackScope scope(alive);
             dispatch_event(alive, engine, id, "activate", std::to_string(idx));
         };
-        self.resolve_parent(pid)->add_child(std::move(lb));
+        self.attach_created(id, pid, std::move(lb));
         return choc::value::createString(id);
     });
 
@@ -402,7 +426,7 @@ void BridgeRegistrars::register_widget_factory_composite_api(WidgetBridge& self)
         auto list = std::make_unique<VirtualList>(); list->set_id(id);
         auto* ptr = list.get(); self.widgets_[id] = ptr;
         self.wire_callbacks(id, ptr);
-        self.resolve_parent(pid)->add_child(std::move(list));
+        self.attach_created(id, pid, std::move(list));
         return choc::value::createString(id);
     });
 
@@ -411,7 +435,7 @@ void BridgeRegistrars::register_widget_factory_composite_api(WidgetBridge& self)
         auto grid = std::make_unique<VirtualGrid>(); grid->set_id(id);
         auto* ptr = grid.get(); self.widgets_[id] = ptr;
         self.wire_callbacks(id, ptr);
-        self.resolve_parent(pid)->add_child(std::move(grid));
+        self.attach_created(id, pid, std::move(grid));
         return choc::value::createString(id);
     });
 
@@ -440,7 +464,7 @@ void BridgeRegistrars::register_widget_factory_text_editor_api(WidgetBridge& sel
             std::string e; for (char c : text) { if (c=='\'') e+= "\\'"; else if (c=='\n') e+= "\\n"; else e+= c; }
             dispatch_event(alive, engine, id, "change", "'" + e + "'");
         };
-        self.resolve_parent(pid)->add_child(std::move(ed));
+        self.attach_created(id, pid, std::move(ed));
         return choc::value::createString(id);
     });
 }
@@ -464,7 +488,7 @@ void BridgeRegistrars::register_widget_factory_design_system_api(WidgetBridge& s
         auto b = std::make_unique<Badge>(text, tone_from(tone));
         b->set_id(id);
         self.widgets_[id] = b.get();
-        self.resolve_parent(pid)->add_child(std::move(b));
+        self.attach_created(id, pid, std::move(b));
         return choc::value::createString(id);
     });
 
@@ -477,7 +501,7 @@ void BridgeRegistrars::register_widget_factory_design_system_api(WidgetBridge& s
         auto* ptr = s.get();
         self.widgets_[id] = ptr;
         self.wire_callbacks(id, ptr);
-        self.resolve_parent(pid)->add_child(std::move(s));
+        self.attach_created(id, pid, std::move(s));
         return choc::value::createString(id);
     });
 
@@ -495,7 +519,7 @@ void BridgeRegistrars::register_widget_factory_design_system_api(WidgetBridge& s
             BridgeCallbackScope scope(alive);
             dispatch_event(alive, engine, id, "change", std::to_string(v));
         };
-        self.resolve_parent(pid)->add_child(std::move(p));
+        self.attach_created(id, pid, std::move(p));
         return choc::value::createString(id);
     });
 }

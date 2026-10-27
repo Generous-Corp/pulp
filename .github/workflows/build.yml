@@ -3,6 +3,17 @@ name: Build and Test
 on:
   pull_request:
     branches: [main, 'develop/**']
+    # The default three only, never `labeled`. A label event starts a run whose
+    # check suite is newer than the head's real run but has no `macos` check
+    # run, and the merge queue reads the required `macos` context from that
+    # newest suite: it refuses to enqueue with "Required status check "macos"
+    # is expected" even though the earlier run's `macos` passed. Shipyard adds
+    # several labels to every new pull request, so `labeled` shadowed every
+    # head. With PULP_MACOS_PR_GATING on, the fleet App must move a head to the
+    # full lane by dispatching this workflow (workflow_dispatch), not by a
+    # label event. The `github.event.action == 'labeled'` branches below are
+    # now unreachable.
+    types: [opened, synchronize, reopened]
   # Publish the Linux/Windows ccache + FetchContent caches that PR runs restore
   # from. Only a non-PR run on the default branch may write to GitHub's cloud
   # cache — a PR-run cache entry is scoped to the PR's own ref and is invisible
@@ -86,8 +97,11 @@ on:
 concurrency:
   # A local proof must neither cancel nor be cancelled by ordinary validation.
   # The run ID gives each proof its own domain while preserving the historical
-  # build-<ref> domain byte-for-byte for every non-proof event.
-  group: build-${{ inputs.local_proof && format('local-proof-{0}', github.run_id) || github.ref }}
+  # build-<ref> domain byte-for-byte for every non-proof event. A label event
+  # does nothing unless gating is on and it is `macos-ci` applied by the fleet
+  # App, so every other one gets its own domain too: sharing build-<ref> would
+  # cancel the pull request's real run.
+  group: build-${{ inputs.local_proof && format('local-proof-{0}', github.run_id) || (github.event.action == 'labeled' && (vars.PULP_MACOS_PR_GATING != 'true' || github.event.label.name != 'macos-ci' || github.event.sender.login != 'shipyard-local[bot]')) && format('label-noop-{0}', github.run_id) || github.ref }}
   cancel-in-progress: ${{ github.event_name != 'push' && !inputs.local_proof }}
 
 permissions:
@@ -133,7 +147,9 @@ jobs:
     # pull_request and merge_group events an absent value must still run the
     # provider preamble; comparing the raw value to true keeps the opt-in
     # local-proof shortcut while avoiding a truthy string/empty-context skip.
-    if: ${{ github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true') }}
+    # A label event other than the fleet App's `macos-ci` with gating on skips
+    # every job from here down.
+    if: ${{ (github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true')) && (github.event.action != 'labeled' || (vars.PULP_MACOS_PR_GATING == 'true' && github.event.label.name == 'macos-ci' && github.event.sender.login == 'shipyard-local[bot]')) }}
     # Runner for the required-gate routing preamble. Defaults to ubuntu-latest
     # (no behaviour change). Set the PULP_PREAMBLE_RUNS_ON_JSON repo var to a
     # self-hosted Linux selector — e.g. ["self-hosted","Linux","ARM64",
@@ -239,6 +255,15 @@ jobs:
           OVERFLOW_MACOS_RUNS_ON_JSON: ${{ vars.PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON || '["macos-15"]' }}
           # gh CLI auth for the overflow-busy-count probe.
           GH_TOKEN: ${{ github.token }}
+          # Inputs to tools/ci/macos_pr_lane.py, which picks the macOS lane.
+          # The repository variable defaults off, which keeps the full lane on
+          # every pull request.
+          PULP_MACOS_PR_GATING: ${{ vars.PULP_MACOS_PR_GATING || '' }}
+          PR_EVENT_ACTION: ${{ github.event.action }}
+          PR_LABEL_NAME: ${{ github.event.label.name }}
+          PR_SENDER: ${{ github.event.sender.login }}
+          PR_LABELS_JSON: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         # Uses the shared resolver at tools/scripts/resolve_runs_on.py so the
         # same precedence (explicit input → repo var → provider fallback) is
         # reused by sanitizers.yml and any future workflow. See that script's
@@ -830,12 +855,52 @@ jobs:
           # with it. Without the leg, a push run finishes on hosted runners.
           # tools/scripts/test_fork_pr_runner_routing.py pins that no job
           # reachable on push routes to a self-hosted runner.
+          #
+          # A pull request takes the `contract` lane until the fleet App
+          # labels an approved head `macos-ci`: configure plus the pr-fast and
+          # pr-guard tiers, no build. Those catch the pull-request-caused
+          # failures that otherwise eject merge-group batches, in a few minutes
+          # of VM time; the build and the tests it feeds wait for approval.
+          # Most PR heads never merge, and their full macOS runs were the
+          # largest share of the eight-VM fleet. The rule, including the
+          # default-off PULP_MACOS_PR_GATING switch, is in
+          # tools/ci/macos_pr_lane.py.
+          macos_lane, macos_lane_reason = "full", "not a pull request"
+          if EVENT_NAME == "pull_request":
+              lane_result = subprocess.run(
+                  ["python3", str(WORKSPACE / "tools" / "ci" / "macos_pr_lane.py"),
+                   "--gating", os.environ.get("PULP_MACOS_PR_GATING", ""),
+                   "--event-name", EVENT_NAME,
+                   "--action", os.environ.get("PR_EVENT_ACTION", ""),
+                   "--label-name", os.environ.get("PR_LABEL_NAME", ""),
+                   "--sender", os.environ.get("PR_SENDER", ""),
+                   "--labels-json", os.environ.get("PR_LABELS_JSON", "") or "[]",
+                   "--repo", REPOSITORY,
+                   "--number", os.environ.get("PR_NUMBER", "")],
+                  check=False, capture_output=True, text=True,
+              )
+              if lane_result.returncode != 0:
+                  sys.stderr.write(lane_result.stderr)
+                  sys.exit(lane_result.returncode)
+              decision = json.loads(lane_result.stdout)
+              macos_lane, macos_lane_reason = decision["lane"], decision["reason"]
+          print(
+              f"resolve-provider: macOS lane = {macos_lane} ({macos_lane_reason})",
+              file=sys.stderr,
+          )
+          # A label event's run is macOS-only: the head's Linux leg already
+          # ran on the push that made it.
+          macos_only = (
+              EVENT_NAME == "pull_request"
+              and os.environ.get("PR_EVENT_ACTION", "") == "labeled"
+          )
           if EVENT_NAME != "push":
               include.append({
                   "key": "macos",
                   "name": "macOS (ARM64)",
                   "runs_on_json": macos_runs_on,
                   "provider": macos_provider,
+                  "lane": macos_lane,
               })
           # Windows is advisory, GitHub-hosted, and slow, and a run carries four
           # Windows jobs (this leg plus the three compile gates below). The repo
@@ -926,13 +991,17 @@ jobs:
                   "the required ubuntu check)",
                   file=sys.stderr,
               )
-          include.append({
-              "key": "linux",
-              "name": "Linux (x64)",
-              "runs_on_json": linux_runs_on,
-              "provider": linux_provider,
-              "route_reason": linux_route_reason,
-          })
+          if macos_only:
+              print("resolve-provider: label event — Linux leg omitted (macOS-only run)",
+                    file=sys.stderr)
+          else:
+              include.append({
+                  "key": "linux",
+                  "name": "Linux (x64)",
+                  "runs_on_json": linux_runs_on,
+                  "provider": linux_provider,
+                  "route_reason": linux_route_reason,
+              })
 
           matrix = {"include": include}
 
@@ -968,7 +1037,7 @@ jobs:
   # treats any uncertainty as "native build required". See that script's
   # module docstring + tools/scripts/test_classify_changes.py.
   classify:
-    if: ${{ github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true') }}
+    if: ${{ (github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true')) && (github.event.action != 'labeled' || (vars.PULP_MACOS_PR_GATING == 'true' && github.event.label.name == 'macos-ci' && github.event.sender.login == 'shipyard-local[bot]')) }}
     # Same PULP_PREAMBLE_RUNS_ON_JSON toggle as resolve-provider: keep the
     # required-gate preamble off the saturated GitHub-hosted pool when opted in.
     runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
@@ -980,6 +1049,8 @@ jobs:
       a2t_receipt_verification_required: ${{ steps.classify.outputs.verify }}
       a2t_receipt_attestation_required: ${{ steps.classify.outputs.issue }}
       a2t_evidence_head: ${{ steps.classify.outputs.head }}
+      queue_breaker_blocked_prs: ${{ steps.queue_breaker.outputs.blocked_prs }}
+      queue_breaker_reason: ${{ steps.queue_breaker.outputs.reason }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -1024,6 +1095,47 @@ jobs:
           GH_TOKEN="${{ github.token }}" python3 "$hold_check" \
             --repo "$GITHUB_REPOSITORY" \
             --base "$MERGE_GROUP_BASE_SHA" --head "$MERGE_GROUP_HEAD_SHA"
+      # The merge-queue circuit breaker (tools/ci/queue_breaker.py). While the
+      # PULP_QUEUE_BREAKER repository variable names a test failing on main,
+      # fail every merge group that carries neither its fix nor a trusted
+      # `queue-unblock` label, before any VM: a failed classify fails `macos`
+      # closed. It never skips a group (skipped reads as green). Like the HOLD
+      # check it runs the protected base branch's copy, and it fails open: a
+      # variable or group it cannot read lets the group proceed. On a pull
+      # request, PULP_QUEUE_BREAKER_CONTROL is judged report-only against the
+      # pull request itself, the positive control that the variable reaches here.
+      - name: Merge-queue circuit breaker
+        id: queue_breaker
+        if: ${{ github.event_name == 'merge_group' || github.event_name == 'pull_request' }}
+        env:
+          BASE_REF: ${{ github.event.merge_group.base_ref || format('refs/heads/{0}', github.event.pull_request.base.ref) }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          MERGE_GROUP_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          QUEUE_BREAKER: ${{ github.event_name == 'merge_group' && vars.PULP_QUEUE_BREAKER || vars.PULP_QUEUE_BREAKER_CONTROL }}
+        run: |
+          set -uo pipefail
+          title="queue-breaker"
+          if [ -z "$QUEUE_BREAKER" ]; then
+            echo "queue breaker: unset; proceeding"
+            exit 0
+          fi
+          if ! git fetch --no-tags --depth=1 origin "$BASE_REF" 2>/dev/null ||
+             ! git cat-file -e "FETCH_HEAD:tools/ci/queue_breaker.py" 2>/dev/null; then
+            echo "::warning title=$title::queue breaker: no protected copy on $BASE_REF; proceeding (fails open)"
+            exit 0
+          fi
+          breaker=$(mktemp)
+          trap 'rm -f "$breaker"' EXIT
+          git show "FETCH_HEAD:tools/ci/queue_breaker.py" >"$breaker"
+          if [ "$GITHUB_EVENT_NAME" = merge_group ]; then
+            GH_TOKEN="${{ github.token }}" python3 "$breaker" check-group \
+              --repo "$GITHUB_REPOSITORY" --output "$GITHUB_OUTPUT" \
+              --base "$MERGE_GROUP_BASE_SHA" --head "$MERGE_GROUP_HEAD_SHA"
+          else
+            GH_TOKEN="${{ github.token }}" python3 "$breaker" check-group \
+              --repo "$GITHUB_REPOSITORY" --pr "$PR_NUMBER" --report-only
+          fi
       - id: classify
         # The base is event-dependent: a PR diffs its pinned target-branch sha,
         # a push diffs the tip it moved away from. `origin/main` is correct for
@@ -1251,6 +1363,36 @@ jobs:
             echo "ios_compile_required=$ios_compile_required"
             echo "agent_capability_installed_sdk_required=$agent_capability_installed_sdk_required"
           } >> "$GITHUB_OUTPUT"
+
+  # Tells each pull request in a group the circuit breaker failed why, once
+  # per breaker state. A job of its own so the comment-writing token never
+  # shares a job with a queue entry's code: it checks out only the protected
+  # base branch, without persisted credentials.
+  queue-breaker-notify:
+    needs: classify
+    if: ${{ !inputs.local_proof && !cancelled() && github.event_name == 'merge_group' && needs.classify.outputs.queue_breaker_blocked_prs != '' }}
+    runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
+    timeout-minutes: 5
+    continue-on-error: true
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.merge_group.base_ref }}
+          fetch-depth: 1
+          lfs: false
+          persist-credentials: false
+      - name: Comment on the blocked pull requests
+        env:
+          GH_TOKEN: ${{ github.token }}
+          QUEUE_BREAKER: ${{ vars.PULP_QUEUE_BREAKER }}
+          BLOCKED_PRS: ${{ needs.classify.outputs.queue_breaker_blocked_prs }}
+          REASON: ${{ needs.classify.outputs.queue_breaker_reason }}
+        run: |
+          python3 tools/ci/queue_breaker.py notify --repo "$GITHUB_REPOSITORY" \
+            --prs "$BLOCKED_PRS" --reason "$REASON"
 
   protected-receipt-reuse:
     if: ${{ github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true') }}
@@ -1635,7 +1777,9 @@ jobs:
         if: runner.os == 'Linux'
         uses: ./.github/actions/install-linux-build-deps
         with:
-          extra-packages: ccache
+          # xvfb: the X11 plug-in host tests run under xvfb-run (see
+          # test/cmake/script_canvas_render_tests.cmake) rather than skipping.
+          extra-packages: ccache xvfb
 
       # ── Namespace cache ─────────────────────────────────────────────────
       # Namespace cache volumes persist across runs on the same workspace,
@@ -1724,10 +1868,23 @@ jobs:
           echo "::error::brew install ccache failed after 3 attempts"
           exit 1
 
-      - name: Install ccache (Windows)
+      # Ninja + cl from the developer environment, and ccache when the runner
+      # has it: the Visual Studio generator ignores the compiler launcher, so
+      # under it ccache saw no compiles ("ccache per-job: cacheable 0").
+      - name: Prepare the Windows build environment (Ninja, cl, ccache)
         if: runner.os == 'Windows'
-        continue-on-error: true
-        run: choco install ccache --no-progress -y
+        shell: powershell
+        run: tools/ci/windows_build_env.ps1
+
+      # A self-hosted Windows VM keeps nothing between jobs, so a host that
+      # serves a shared ccache names it in PULP_CCACHE_REMOTE_STORAGE. Unset,
+      # this writes nothing; set, only code already on main may store objects.
+      # The name must not start with "Configure": the pinned-Rust lane test
+      # finds the CMake configure step by that prefix.
+      - name: Point ccache at the host's remote storage (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: python3 tools/ci/ccache_remote_storage.py --github-env "$GITHUB_ENV"
 
       # ── Caches (#420) ──────────────────────────────────────────────────
       # The local macOS runner keeps these paths on disk between jobs.
@@ -2017,7 +2174,7 @@ jobs:
       # OFF) never pay for it; danielraffel/pulp sets it to `1`. It is a
       # canary, never a substitute for the Tier-2 nightly Intel build.
       - name: Intel canary — lint + x86_64 GPU-off compile
-        if: runner.os == 'macOS' && vars.PULP_INTEL_CANARY == '1'
+        if: (runner.os == 'macOS' && vars.PULP_INTEL_CANARY == '1') && matrix.lane != 'contract'
         shell: bash
         run: |
           set -euo pipefail
@@ -2133,8 +2290,9 @@ jobs:
           set -euo pipefail
           # macOS builds with Ninja — it schedules parallelism more
           # precisely and is meaningfully faster on the warm/incremental
-          # builds that are the self-hosted M1's common case. Linux and
-          # Windows keep their default generator. Self-hosted runners
+          # builds that are the self-hosted M1's common case. Windows uses
+          # Ninja with cl so ccache sees its compiles; Linux keeps its
+          # default generator. Self-hosted runners
           # reuse warm build dirs (clean: false), and CMake refuses to
           # reconfigure a dir created with a different generator, so the
           # build dir is recreated when its cached generator no longer
@@ -2169,6 +2327,10 @@ jobs:
             # root short so nested wgpu prebuilt-populate targets configure
             # reliably on GitHub-hosted Windows runners.
             cmake_extra=(-DFETCHCONTENT_BASE_DIR="$PWD/fc")
+            # Ninja with cl from the developer environment the "Prepare the
+            # Windows build environment" step entered.
+            gen=(-G Ninja)
+            cmake_extra+=(-DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl)
           fi
           # Every event that reaches this job publishes the required `macos`
           # context, so every event must configure the same way. Turning the GPU
@@ -2182,6 +2344,14 @@ jobs:
           # (tools/cmake/PulpLinkMaps.cmake). The map is a side output, the
           # linked bytes are unchanged, and it does nothing off Apple linkers.
           cmake_args=(-DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF -DPULP_RECORD_LINK_MAPS=ON)
+          # Compile, never run, the GPU-audio hardware-evidence targets: the
+          # arm64 gate has the GPU, tests and the pinned Skia/Dawn, so exact
+          # provider proof configures here, and the `gpu-proof` label keeps the
+          # tests out of every ctest selection (tools/ci/ctest_gate_args.py).
+          # Their receipts stay owner-run on a physical GPU.
+          if [ "${RUNNER_OS}" = "macOS" ] && [ "${RUNNER_ARCH}" = "ARM64" ]; then
+            cmake_args+=(-DPULP_GPU_AUDIO_EXACT_PROVIDER_PROOF=ON)
+          fi
           # Ask CMake for its codemodel: the pull-request step that runs the
           # tests a diff reaches maps changed files to targets through it.
           mkdir -p "$PULP_BUILD_DIR/.cmake/api/v1/query"
@@ -2194,6 +2364,33 @@ jobs:
             mkdir -p "$PULP_BUILD_DIR" && : > "$PULP_BUILD_DIR/.pulp-build-incomplete"
           fi
         shell: bash
+
+      - name: Verify GPU-audio proof targets are configured and never run
+        # The configure registers exactly the reviewed gpu-proof set
+        # (tools/ci/gpu_proof_tests.txt): a dropped proof target cannot pass by
+        # absence, and a new one is a reviewed allowlist diff. ctest adds a
+        # required fixture's setup even under -LE, so the selection this gate
+        # runs is checked too: it must contain no gpu-proof test.
+        if: runner.os == 'macOS' && runner.arch == 'ARM64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          names() { sed -n 's/^ *Test *#[0-9]*: //p' | LC_ALL=C sort; }
+          labelled="$(ctest --test-dir "$PULP_BUILD_DIR" -N -L '^gpu-proof$' | names)"
+          if ! diff -u tools/ci/gpu_proof_tests.txt <(printf '%s\n' "$labelled"); then
+            echo "::error title=gpu-audio-proof::the configured gpu-proof tests differ from tools/ci/gpu_proof_tests.txt"
+            exit 1
+          fi
+          eval "$(python3 tools/ci/ctest_gate_args.py \
+            --event-name "$GITHUB_EVENT_NAME" --runner-os "$RUNNER_OS")"
+          : "${label_exclude:?ctest gate arguments did not resolve}"
+          leaked="$(LC_ALL=C comm -12 tools/ci/gpu_proof_tests.txt \
+            <(ctest --test-dir "$PULP_BUILD_DIR" -N -LE "$label_exclude" | names))"
+          if [ -n "$leaked" ]; then
+            printf '%s\n' "$leaked"
+            echo "::error title=gpu-audio-proof::the gate's ctest selection would run gpu-proof tests"
+            exit 1
+          fi
 
       - name: Install visual-analysis Python dependencies
         shell: bash
@@ -2263,6 +2460,8 @@ jobs:
       - name: Build
         shell: bash
         id: build
+        # The contract lane (an unapproved pull-request head) configures only.
+        if: matrix.lane != 'contract'
         env:
           IOS_COMPILE_REQUIRED: ${{ needs.classify.outputs.ios_compile_required }}
           IOS_GATE_TOKEN: ${{ github.token }}
@@ -2423,7 +2622,7 @@ jobs:
         # only the fast tier. The rule and its fail-closed probe live in
         # tools/ci/ctest_gate_args.py; an unreadable pull request means fast.
         id: pr_suite
-        if: github.event_name == 'pull_request' && runner.os != 'Windows'
+        if: (github.event_name == 'pull_request' && runner.os != 'Windows') && matrix.lane != 'contract'
         shell: bash
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -2451,9 +2650,17 @@ jobs:
         # This is NOT test evidence for the merge: it writes its own JUnit file
         # (never ctest.junit.xml) and the merge queue still runs the full suite.
         # `--no-tests=error` makes a label that selects nothing a failure.
+        #
+        # It also runs on the contract lane (PULP_MACOS_PR_GATING on and no
+        # `macos-ci` from the fleet App: configured, not built), minus the
+        # members labelled `needs-build`.
+        # That lane's green says so in a `deferred` tier annotation, which the
+        # arm sweep refuses to arm on.
         id: pr_fast_tests
         if: runner.os != 'Windows' && github.event_name == 'pull_request'
         shell: bash
+        env:
+          PULP_MACOS_LANE: ${{ matrix.lane }}
         run: |
           set -euo pipefail
           # Same label exclusions as the full suite, from the same module.
@@ -2461,13 +2668,47 @@ jobs:
             --event-name "$GITHUB_EVENT_NAME" --runner-os "$RUNNER_OS")"
           eval "$gate_args"
           : "${label_exclude:?ctest gate arguments did not resolve}"
+          if [ "$PULP_MACOS_LANE" = contract ]; then
+            label_exclude="${label_exclude}|^needs-build$"
+          fi
           ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure -C Release \
             -L '^pr-fast$' -LE "$label_exclude" \
             --no-tests=error --timeout 120 -j4 \
             --output-junit "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest-pr-fast.junit.xml"
           # A green check here means the fast tier passed, not the suite. Say
           # so where `shipyard landing` reads it (a check-run annotation).
-          echo '::notice title=shipyard-test-tier::{"schema":"shipyard-test-tier/v1","tier":"fast","selector":"pr-fast","full_suite_runs_in":"merge_group"}'
+          if [ "$PULP_MACOS_LANE" = contract ]; then
+            echo '::notice title=shipyard-test-tier::{"schema":"shipyard-test-tier/v1","tier":"deferred","selector":"pr-fast+pr-guard","label":"macos-ci","full_suite_runs_in":"merge_group"}'
+            {
+              echo "### ⏸️ macos: contract lane only — build and tests wait for approval"
+              echo
+              echo "This head has no \`macos-ci\` from the fleet App, so the macOS leg configured"
+              echo "without building and ran only the \`pr-fast\` and \`pr-guard\` tiers."
+              echo "Its green is not a macOS build or test result. The fleet's arm"
+              echo "sweep applies \`macos-ci\` to an approved head, which runs the full"
+              echo "lane, and arming waits for that run. To run it now, dispatch"
+              echo "\`build.yml\` on this branch."
+            } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+          else
+            echo '::notice title=shipyard-test-tier::{"schema":"shipyard-test-tier/v1","tier":"fast","selector":"pr-fast","full_suite_runs_in":"merge_group"}'
+          fi
+
+      - name: Test merge-queue ejection guards (pull request head)
+        # The `pr-guard` label (test/cmake/pr_fast_tests.cmake): guards too slow
+        # for pr-fast that fail every pull request at once, so in a merge group
+        # they eject whole batches: today the A2T acceptance and verifier
+        # selftests, which hold the scope-history headroom guard. macOS only, on every pull-request head, approved or
+        # not; like the fast tier it is not test evidence for the merge.
+        id: pr_guard_tests
+        if: runner.os == 'macOS' && matrix.key == 'macos' && github.event_name == 'pull_request'
+        shell: bash
+        env:
+          PULP_A2T_HEADROOM_OUT: ${{ runner.temp }}/a2t-scope-headroom.json
+        run: |
+          set -euo pipefail
+          ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure -C Release \
+            -L '^pr-guard$' --no-tests=error --timeout 300 -j4 \
+            --output-junit "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest-pr-guard.junit.xml"
 
       - name: Test what this pull request reaches (pull request head)
         # Most merge-group macOS failures in a week were a pull request's OWN
@@ -2485,7 +2726,7 @@ jobs:
         # tests left over are listed as skipped, and the merge group still
         # runs everything. Rules and selection: tools/ci/pr_head_affected_tests.py.
         id: pr_affected_tests
-        if: runner.os != 'Windows' && github.event_name == 'pull_request'
+        if: (runner.os != 'Windows' && github.event_name == 'pull_request') && matrix.lane != 'contract'
         shell: bash
         run: |
           set -euo pipefail
@@ -2527,6 +2768,7 @@ jobs:
           runner.os != 'Windows'
           && (github.event_name != 'pull_request'
               || steps.pr_suite.outputs.suite == 'full')
+          && matrix.lane != 'contract'
         continue-on-error: ${{ github.event_name == 'pull_request' && steps.pr_suite.outputs.suite != 'full' }}
         shell: bash
         # Keep one hung ctest entry from burning the full workflow timeout.
@@ -2837,7 +3079,7 @@ jobs:
       # log and out of the required check until the runner's adapter state is
       # established; promote it by deleting that line.
       - name: Observe GPU adapter contract (self-hosted macOS)
-        if: runner.os == 'macOS' && matrix.key == 'macos' && runner.environment == 'self-hosted'
+        if: (runner.os == 'macOS' && matrix.key == 'macos' && runner.environment == 'self-hosted') && matrix.lane != 'contract'
         continue-on-error: true
         shell: bash
         env:
@@ -2856,6 +3098,7 @@ jobs:
           && needs.classify.outputs.agent_capability_installed_sdk_required == 'true'
           && github.event_name == 'pull_request'
           && steps.pr_suite.outputs.suite != 'full'
+          && matrix.lane != 'contract'
         shell: bash
         run: |
           set -euo pipefail
@@ -2875,6 +3118,7 @@ jobs:
           && (github.event_name == 'pull_request'
               || github.event_name == 'merge_group'
               || github.event_name == 'workflow_dispatch')
+          && matrix.lane != 'contract'
         shell: bash
         env:
           SDK_ARTIFACT_DIR: ${{ runner.temp }}/pulp-gpu-audio-sdk
@@ -2934,6 +3178,7 @@ jobs:
           && (github.event_name == 'pull_request'
               || github.event_name == 'merge_group'
               || github.event_name == 'workflow_dispatch')
+          && matrix.lane != 'contract'
         continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
@@ -3071,6 +3316,7 @@ jobs:
             ${{ env.PULP_BUILD_DIR }}/Testing/Temporary/
             ${{ env.PULP_BUILD_DIR }}/ctest.junit.xml
             ${{ env.PULP_BUILD_DIR }}/ctest-pr-fast.junit.xml
+            ${{ env.PULP_BUILD_DIR }}/ctest-pr-guard.junit.xml
             ${{ env.PULP_BUILD_DIR }}/ctest.nonruns.json
           if-no-files-found: ignore
           retention-days: 7
@@ -3087,7 +3333,7 @@ jobs:
       # in the build directory by an earlier run is never recorded as this one.
       - name: Record per-test results for reuse replay (macOS)
         id: reuse_record
-        if: ${{ !cancelled() && runner.os == 'macOS' && matrix.key == 'macos' }}
+        if: ${{ (!cancelled() && runner.os == 'macOS' && matrix.key == 'macos') && matrix.lane != 'contract' }}
         continue-on-error: true
         shell: bash
         env:
@@ -3162,9 +3408,9 @@ jobs:
         run: |
           chcp 65001
           set "PULP_CTEST_LABEL_EXCLUDE=validation"
-          if "%GITHUB_EVENT_NAME%"=="pull_request" set "PULP_CTEST_LABEL_EXCLUDE=validation|slow|windows-pr-quarantine|performance|bench|quality-lab"
-          if "%GITHUB_EVENT_NAME%"=="workflow_dispatch" set "PULP_CTEST_LABEL_EXCLUDE=validation|slow|windows-pr-quarantine|performance|bench|quality-lab"
-          if "%GITHUB_EVENT_NAME%"=="merge_group" set "PULP_CTEST_LABEL_EXCLUDE=validation|slow|windows-pr-quarantine|performance|bench|quality-lab"
+          if "%GITHUB_EVENT_NAME%"=="pull_request" set "PULP_CTEST_LABEL_EXCLUDE=validation|slow|windows-pr-quarantine|performance|bench|quality-lab|gpu-proof"
+          if "%GITHUB_EVENT_NAME%"=="workflow_dispatch" set "PULP_CTEST_LABEL_EXCLUDE=validation|slow|windows-pr-quarantine|performance|bench|quality-lab|gpu-proof"
+          if "%GITHUB_EVENT_NAME%"=="merge_group" set "PULP_CTEST_LABEL_EXCLUDE=validation|slow|windows-pr-quarantine|performance|bench|quality-lab|gpu-proof"
           ctest --test-dir "%PULP_BUILD_DIR%" --output-on-failure --repeat until-pass:2 -C Release -LE "%PULP_CTEST_LABEL_EXCLUDE%" -j8 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items|baked C.* exporter emits ownable C.* source artifacts|pulp-import-design handles literal file paths and rejects unsafe URLs"
 
       - name: Issue exact protected-validation receipt
@@ -3276,6 +3522,55 @@ jobs:
             ${{ env.PULP_BUILD_DIR }}/VST3/**/*.so
             ${{ env.PULP_BUILD_DIR }}/CLAP/**/*.so
           retention-days: 7
+
+      - name: Refuse a head armed before approval (contract lane)
+        # The contract lane's green satisfies the required `macos` check
+        # without a build, so a pull request armed for auto-merge before it
+        # was approved (arm-on-open) would be enqueued on it. Fail instead when
+        # this exact head is armed or already queued. It is the job's LAST
+        # step, after every always() step, so only the runner's post-steps
+        # separate it from the job's conclusion (test_build_workflow.py pins
+        # that). macos-ci-arm-refusal.yml refuses an arm at the source, and
+        # macos-ci-deferred-disarm.yml disarms or dequeues any that slip past.
+        # GraphQL, not REST: REST `auto_merge` reads null for a queued pull
+        # request. A read-only token is enough.
+        if: >-
+          vars.PULP_MACOS_PR_GATING == 'true'
+          && github.event_name == 'pull_request'
+          && matrix.lane == 'contract'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -uo pipefail
+          state=""
+          for attempt in 1 2 3; do
+            # shellcheck disable=SC2016  # $owner, $name and $number are GraphQL variables
+            if state=$(gh api graphql \
+                -f query='query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { headRefOid autoMergeRequest { enabledAt } mergeQueueEntry { state } } } }' \
+                -f owner="${GITHUB_REPOSITORY%%/*}" -f name="${GITHUB_REPOSITORY#*/}" -F number="$PR_NUMBER" \
+                --jq '.data.repository.pullRequest | [.headRefOid, (.autoMergeRequest != null | tostring), (.mergeQueueEntry != null | tostring)] | join(" ")'); then
+              break
+            fi
+            state=""
+            sleep $((attempt * 5))
+          done
+          if [ -z "$state" ]; then
+            echo "::error title=arm state unreadable::could not read whether #$PR_NUMBER is armed; a contract-lane green must not reach the queue unread. Re-run this job."
+            exit 1
+          fi
+          read -r head armed queued <<< "$state"
+          if [ "$head" != "$PR_HEAD_SHA" ]; then
+            echo "#$PR_NUMBER has moved past $PR_HEAD_SHA (now $head); its own run decides"
+            exit 0
+          fi
+          if [ "$armed" = true ] || [ "$queued" = true ]; then
+            echo "::error title=armed before approval::#$PR_NUMBER at $PR_HEAD_SHA is armed before approval and a full macOS run: remove auto-merge, get a trusted APPROVE; the fleet App applies macos-ci for the full lane"
+            exit 1
+          fi
+          echo "#$PR_NUMBER is not armed or queued at $PR_HEAD_SHA"
 
   # ── Windows MSVC release-path PR gate ────────────────────────────────────
   #
@@ -3489,14 +3784,18 @@ jobs:
   # owns `macos`; this inactive bootstrap is renamed so it cannot satisfy or
   # collide with that context. Routing/classification uncertainty remains
   # fail-closed.
+  # A label event that is not the fleet App's `macos-ci` (with gating on)
+  # skips this job under the unused name, so it can never replace the head's
+  # real `macos` result.
   macos:
-    name: ${{ (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') && (needs.resolve-provider.result != 'success' || needs.classify.result != 'success' || needs.classify.outputs.native_build_required != 'true') && 'macos' || 'macos-pr-unused' }}
+    name: ${{ (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') && (github.event.action != 'labeled' || (vars.PULP_MACOS_PR_GATING == 'true' && github.event.label.name == 'macos-ci' && github.event.sender.login == 'shipyard-local[bot]')) && (needs.resolve-provider.result != 'success' || needs.classify.result != 'success' || needs.classify.outputs.native_build_required != 'true') && 'macos' || 'macos-pr-unused' }}
     needs: [resolve-provider, classify]
     runs-on: ${{ fromJSON(vars.PULP_ALIAS_RUNS_ON_JSON || '"ubuntu-latest"') }}
     if: >-
       (github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true'))
       && !cancelled()
       && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch')
+      && (github.event.action != 'labeled' || (vars.PULP_MACOS_PR_GATING == 'true' && github.event.label.name == 'macos-ci' && github.event.sender.login == 'shipyard-local[bot]'))
       && (needs.resolve-provider.result != 'success'
           || needs.classify.result != 'success'
           || needs.classify.outputs.native_build_required != 'true')
@@ -3684,6 +3983,9 @@ jobs:
         run: echo "::warning title=reuse-record NOT written::checkout, record or upload did not succeed; this job's replay history is lost"
 
   linux:
+    # A label event's run is macOS-only: this job skips under another name,
+    # so the skipped check cannot replace the head's real `linux` result.
+    name: ${{ github.event.action != 'labeled' && 'linux' || 'linux-label-noop' }}
     needs: [build, classify]
     # Rides the same PULP_PREAMBLE_RUNS_ON_JSON toggle as the required `macos`
     # alias, and for a sharper reason than symmetry: an alias job pinned to the
@@ -3697,7 +3999,7 @@ jobs:
     runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
     # Push runs are cache-warming only — no gate to report, and the macOS
     # leg they would poll for is deliberately absent from the matrix.
-    if: ${{ (github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true')) && !cancelled() && github.event_name != 'push' && github.event_name != 'merge_group' }}
+    if: ${{ (github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true')) && !cancelled() && github.event_name != 'push' && github.event_name != 'merge_group' && github.event.action != 'labeled' }}
     steps:
       - name: Linux leg outcome (advisory)
         env:
@@ -3731,6 +4033,9 @@ jobs:
           exit 1
 
   windows:
+    # A label event's run is macOS-only: this job skips under another name,
+    # so the skipped check cannot replace the head's real `windows` result.
+    name: ${{ github.event.action != 'labeled' && 'windows' || 'windows-label-noop' }}
     needs: [build, windows-msvc-release-gate, classify, resolve-provider]
     # Rides the same PULP_PREAMBLE_RUNS_ON_JSON toggle as the required `macos`
     # alias, and for a sharper reason than symmetry: an alias job pinned to the
@@ -3744,7 +4049,7 @@ jobs:
     runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
     # Push runs are cache-warming only — no gate to report, and the macOS
     # leg they would poll for is deliberately absent from the matrix.
-    if: ${{ (github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true')) && !cancelled() && github.event_name != 'push' && github.event_name != 'merge_group' }}
+    if: ${{ (github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true')) && !cancelled() && github.event_name != 'push' && github.event_name != 'merge_group' && github.event.action != 'labeled' }}
     steps:
       - name: Windows leg outcome (advisory)
         env:
@@ -3843,9 +4148,12 @@ jobs:
   ci-cause:
     name: ci-cause (advisory)
     needs: [build, macos, macos-merge-group, linux, windows]
+    # Use GitHub's native post-failure hook as well as the explicit dependency
+    # result check. The latter documents exactly whose logs this job reads.
     if: >-
       (github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true'))
       && !cancelled()
+      && failure()
       && contains(needs.*.result, 'failure')
     runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
     continue-on-error: true

@@ -8,7 +8,9 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <pulp/canvas/bundled_fonts.hpp>
 #include <pulp/canvas/canvas.hpp>
+#include <pulp/canvas/font_resolver.hpp>
 #include <pulp/canvas/sdf_atlas.hpp>
 #include <algorithm>
 #include <cmath>
@@ -48,7 +50,6 @@ using namespace pulp::canvas;
 // returns null on a stock macOS install — and the next non-ASCII fill_text
 // call would throw std::out_of_range during glyph fallback.
 #include <pulp/canvas/bundled_fonts.hpp>
-#include <pulp/canvas/font_resolver.hpp>
 #include <pulp/canvas/text_run_planner.hpp>
 #include <pulp/canvas/text_shaper.hpp>
 #include <pulp/canvas/text_font_context.hpp>
@@ -1275,6 +1276,21 @@ TEST_CASE("Canvas::text_x_for_byte clamps mid-codepoint indices to a UTF-8 "
     }
 }
 
+// The `font-family` list parsing every text path shares. It is Skia-free, so
+// it runs in builds without a GPU backend too. "a quoted generic family is a
+// literal name on every text path" covers what the paths do with it.
+TEST_CASE("a quoted generic family parses as a literal name", "[canvas][text][generic-family]") {
+    CHECK(pulp::canvas::parse_css_font_family(" 'serif' ").quoted);
+    CHECK(pulp::canvas::parse_css_font_family(" 'serif' ").name == "serif");
+    CHECK_FALSE(pulp::canvas::parse_css_font_family("serif").quoted);
+    CHECK(pulp::canvas::split_css_font_family_list(" \"serif\" , Inter,, ") ==
+          std::vector<std::string>{"\"serif\"", "Inter"});
+    CHECK(pulp::canvas::platform_family_for_css_family("\"serif\"") == "serif");
+    CHECK(pulp::canvas::platform_family_for_css_family("'serif'") == "serif");
+#if defined(__APPLE__)
+    CHECK(pulp::canvas::platform_family_for_css_family("serif") == "Times");
+#endif
+}
 
 #ifdef PULP_HAS_SKIA
 
@@ -2007,6 +2023,68 @@ TEST_CASE("system-ui resolves to the system font at every weight",
 #endif
 }
 
+// SkParagraph finds a family by name in its FontCollection, so `system-ui`
+// reaches it as ".AppleSystemUIFont". CoreText's lookup by that name stops
+// answering for the rest of the process once a weight between named instances
+// has been asked for, and the paragraph then shapes in the next family of the
+// list while the resolver measures the system font.
+TEST_CASE("the paragraph path serves the system font at every weight",
+          "[canvas][skia][text][generic-family]") {
+#if !defined(__APPLE__)
+    SKIP("the system UI font lookup covers macOS");
+#else
+    bump_font_registration_generation();
+    const auto collection = TextFontContext::shared()->font_collection();
+    REQUIRE(collection != nullptr);
+    const std::vector<SkString> families{
+        SkString(platform_family_for_css_family("system-ui").c_str())};
+    const std::string text = "Hamburgefons";
+    const auto advance = [&](const sk_sp<SkTypeface>& face) {
+        SkFont font(face, 20.0f);
+        return font.measureText(text.data(), text.size(), SkTextEncoding::kUTF8);
+    };
+    // Between-instance weights first, then the named ones they used to break.
+    std::vector<int> weights{250, 400, 150, 700};
+    for (int w = 100; w <= 900; w += 50)
+        weights.push_back(w);
+    for (const bool italic : {false, true}) {
+        for (const int weight : weights) {
+            INFO("weight " << weight << (italic ? " italic" : " upright"));
+            const SkFontStyle style(weight, SkFontStyle::kNormal_Width,
+                                    italic ? SkFontStyle::kItalic_Slant
+                                           : SkFontStyle::kUpright_Slant);
+            const auto found = collection->findTypefaces(families, style);
+            REQUIRE_FALSE(found.empty());
+            const sk_sp<SkTypeface>& paragraph = found.front();
+            REQUIRE(paragraph != nullptr);
+
+            FontOptions options;
+            options.weight = static_cast<float>(weight);
+            options.slant = italic ? FontSlant::Italic : FontSlant::Normal;
+            options.family_stack = {"system-ui"};
+            const auto resolved = FontResolver::instance().resolve_family_list(options);
+            REQUIRE(resolved.typeface != nullptr);
+
+            SkString paragraph_name, resolved_name;
+            paragraph->getPostScriptName(&paragraph_name);
+            resolved.typeface->getPostScriptName(&resolved_name);
+            CHECK(std::string(paragraph_name.c_str()).rfind(".SFNS-", 0) == 0);
+            CHECK(std::string(paragraph_name.c_str()) == resolved_name.c_str());
+            CHECK(paragraph->fontStyle().weight() == weight);
+            CHECK(advance(paragraph) == Catch::Approx(advance(resolved.typeface)).margin(0.001));
+        }
+    }
+    // Control: the weights are told apart, so equal advances above are the
+    // same instance rather than the measure ignoring weight.
+    const auto at = [&](int weight) {
+        return collection->findTypefaces(
+            families, SkFontStyle(weight, SkFontStyle::kNormal_Width, SkFontStyle::kUpright_Slant));
+    };
+    REQUIRE(std::abs(advance(at(200).front()) - advance(at(250).front())) > 0.05f);
+    REQUIRE(std::abs(advance(at(250).front()) - advance(at(300).front())) > 0.05f);
+#endif
+}
+
 TEST_CASE("Canvas text keeps a generic family that leads a family list",
           "[canvas][skia][text][generic-family]") {
 #if !defined(__APPLE__)
@@ -2067,14 +2145,6 @@ TEST_CASE("a quoted generic family is a literal name on every text path",
 #if !defined(__APPLE__)
     SKIP("the generic-family table covers macOS");
 #else
-    CHECK(parse_css_font_family(" 'serif' ").quoted);
-    CHECK(parse_css_font_family(" 'serif' ").name == "serif");
-    CHECK_FALSE(parse_css_font_family("serif").quoted);
-    CHECK(split_css_font_family_list(" \"serif\" , Inter,, ") ==
-          std::vector<std::string>{"\"serif\"", "Inter"});
-    CHECK(platform_family_for_css_family("serif") == "Times");
-    CHECK(platform_family_for_css_family("\"serif\"") == "serif");
-
     FontResolver::instance().clear_cache();
     SkImageInfo info =
         SkImageInfo::Make(64, 64, kN32_SkColorType, kPremul_SkAlphaType, SkColorSpace::MakeSRGB());
@@ -2185,3 +2255,108 @@ TEST_CASE("a generic whose platform family is missing falls through the list",
 }
 
 #endif  // PULP_HAS_SKIA
+
+// ── Declared @font-face weight ranges ────────────────────────────────────────
+//
+// Chromium matches and synthesizes a page font against its @font-face rule's
+// declared font-weight range, not the weight the file reports.
+
+TEST_CASE("CSS font matching picks a declared weight range the way Chromium does",
+          "[canvas][fonts][synthetic-bold]") {
+    using pulp::canvas::css_match_declared_weight;
+    using pulp::canvas::DeclaredWeightRange;
+    const std::vector<DeclaredWeightRange> pair{{300, 300}, {700, 700}};
+    CHECK(css_match_declared_weight(pair, 700) == 1); // contained
+    CHECK(css_match_declared_weight(pair, 600) == 1); // over 500: nearest above first
+    CHECK(css_match_declared_weight(pair, 800) == 1); // then the nearest below
+    CHECK(css_match_declared_weight(pair, 350) == 0); // under 400: nearest below first
+    // 400..500: above up to 500, then below, then above 500.
+    CHECK(css_match_declared_weight(pair, 450) == 0);
+    CHECK(css_match_declared_weight({{500, 500}, {300, 300}}, 450) == 0);
+    CHECK(css_match_declared_weight({{600, 600}}, 450) == 0);
+    CHECK(css_match_declared_weight({{400, 700}}, 650) == 0);
+    CHECK(css_match_declared_weight({}, 400) == -1);
+}
+
+TEST_CASE("bold is synthesized only where the matched declared range ends below 600",
+          "[canvas][fonts][synthetic-bold]") {
+    using pulp::canvas::declare_font_face_weight_range;
+    using pulp::canvas::declared_face_synthesizes_bold;
+    CHECK_FALSE(declared_face_synthesizes_bold("SynthBoldUndeclared", 700).has_value());
+
+    declare_font_face_weight_range("SynthBoldRange", 400, 700);
+    CHECK(declared_face_synthesizes_bold("SynthBoldRange", 700) == false);
+    CHECK(declared_face_synthesizes_bold("SynthBoldRange", 400) == false);
+
+    declare_font_face_weight_range("SynthBoldNarrow", 400, 400);
+    CHECK(declared_face_synthesizes_bold("SynthBoldNarrow", 700) == true);
+    CHECK(declared_face_synthesizes_bold("SynthBoldNarrow", 600) == true);
+    CHECK(declared_face_synthesizes_bold("SynthBoldNarrow", 500) == false);
+
+    // Two faces: 600 matches the 700 face, which is declared bold.
+    declare_font_face_weight_range("SynthBoldPair", 400, 400);
+    declare_font_face_weight_range("SynthBoldPair", 700, 700);
+    CHECK(declared_face_synthesizes_bold("SynthBoldPair", 600) == false);
+    // Repeating a declaration changes nothing.
+    declare_font_face_weight_range("SynthBoldPair", 700, 700);
+    CHECK(declared_face_synthesizes_bold("SynthBoldPair", 700) == false);
+}
+
+#ifdef PULP_HAS_SKIA
+namespace {
+// Ink (sum of 255 - red) of one word painted black on white through SkiaCanvas.
+double declared_font_ink(const std::string& family, int weight) {
+    constexpr int kW = 360, kH = 64;
+    SkImageInfo info =
+        SkImageInfo::Make(kW, kH, kN32_SkColorType, kPremul_SkAlphaType, SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    surface->getCanvas()->clear(SK_ColorWHITE);
+    SkiaCanvas canvas(surface->getCanvas());
+    canvas.set_font_full(family, 32.0f, weight, /*slant=*/0, /*letter_spacing=*/0.0f);
+    canvas.set_fill_color(Color::rgba(0.0f, 0.0f, 0.0f, 1.0f));
+    canvas.fill_text("Hamburgefonstiv", 8.0f, 44.0f);
+    SkPixmap pm;
+    REQUIRE(surface->peekPixels(&pm));
+    double total = 0.0;
+    for (int y = 0; y < kH; ++y)
+        for (int x = 0; x < kW; ++x)
+            total += 255.0 - SkColorGetR(pm.getColor(x, y));
+    return total;
+}
+} // namespace
+
+TEST_CASE("a face declared across 400 700 is not emboldened at 700, a 400-only one is",
+          "[canvas][skia][fonts][synthetic-bold]") {
+    // One Regular file under two families, as a page binds it with two rules.
+    REQUIRE(pulp::canvas::register_font_file(PULP_TEST_FONT_PATH, "SynthBoldPaintRange"));
+    REQUIRE(pulp::canvas::register_font_file(PULP_TEST_FONT_PATH, "SynthBoldPaintNarrow"));
+    pulp::canvas::declare_font_face_weight_range("SynthBoldPaintRange", 400, 700);
+    pulp::canvas::declare_font_face_weight_range("SynthBoldPaintNarrow", 400, 400);
+
+    const double regular = declared_font_ink("SynthBoldPaintRange", 400);
+    REQUIRE(regular > 0.0);
+    // Declared to cover 700: Chromium draws the Regular file as it is.
+    CHECK(declared_font_ink("SynthBoldPaintRange", 700) == Catch::Approx(regular).epsilon(0.02));
+    // Declared 400 only: Chromium synthesizes bold, so the ink grows.
+    CHECK(declared_font_ink("SynthBoldPaintNarrow", 700) > regular * 1.08);
+    // Imported stacks quote the family and carry a fallback; the declared
+    // range still applies to the quoted entry.
+    CHECK(declared_font_ink("'SynthBoldPaintRange', serif", 700) ==
+          Catch::Approx(regular).epsilon(0.02));
+    CHECK(declared_font_ink("\"SynthBoldPaintNarrow\", serif", 700) > regular * 1.08);
+}
+
+TEST_CASE("a declared @font-face family keeps its own face at a weight its file is far from",
+          "[canvas][skia][fonts][synthetic-bold]") {
+    // Regular file, requested at 700: 300 apart, beyond the registry's usual
+    // tolerance. A page family stays on its face (CSS synthesizes the rest);
+    // a family registered without @font-face declarations keeps the tolerance.
+    REQUIRE(pulp::canvas::register_font_file(PULP_TEST_FONT_PATH, "SynthBoldNearestDeclared"));
+    REQUIRE(pulp::canvas::register_font_file(PULP_TEST_FONT_PATH, "SynthBoldNearestPlain"));
+    pulp::canvas::declare_font_face_weight_range("SynthBoldNearestDeclared", 400, 700);
+    const SkFontStyle bold(700, SkFontStyle::kNormal_Width, SkFontStyle::kUpright_Slant);
+    CHECK(pulp::canvas::match_registered_typeface("SynthBoldNearestDeclared", bold) != nullptr);
+    CHECK(pulp::canvas::match_registered_typeface("SynthBoldNearestPlain", bold) == nullptr);
+}
+#endif // PULP_HAS_SKIA

@@ -137,6 +137,7 @@
     "tools/cli/package_commands_search.cpp",
     "tools/cli/package_commands_util.cpp",
     "tools/cli/package_registry.cpp",
+    "tools/cli/package_registry_trust.cpp",
     "tools/cli/project_bump.cpp",
     "tools/cli/projects_registry.cpp",
     "tools/cli/pulp_cli.cpp",
@@ -144,6 +145,7 @@
     "tools/cli/sdk_distribution_guard.cpp",
     "tools/cli/shell_quote.cpp",
     "tools/cli/shell_redirect.cpp",
+    "tools/cli/ship_bundle_strip.cpp",
     "tools/cli/tartci_lease.cpp",
     "tools/cli/tool_registry.cpp",
     "tools/cli/update_check.cpp",
@@ -260,7 +262,11 @@
    "data": "declared",
    "detected_sources": [
     "test/test_browser_capture_backdrop_filter.cpp",
+    "test/test_browser_capture_font_smoothing.cpp",
+    "test/test_browser_capture_gradient_border.cpp",
+    "test/test_browser_capture_group_opacity.cpp",
     "test/test_browser_capture_ir.cpp",
+    "test/test_browser_capture_paint_scale.cpp",
     "test/test_browser_capture_svg_render.cpp",
     "test/test_browser_capture_text_metrics.cpp",
     "test/test_browser_capture_tree.cpp"
@@ -272,7 +278,11 @@
    "kind": "compiled",
    "sources": [
     "test/test_browser_capture_backdrop_filter.cpp",
+    "test/test_browser_capture_font_smoothing.cpp",
+    "test/test_browser_capture_gradient_border.cpp",
+    "test/test_browser_capture_group_opacity.cpp",
     "test/test_browser_capture_ir.cpp",
+    "test/test_browser_capture_paint_scale.cpp",
     "test/test_browser_capture_svg_render.cpp",
     "test/test_browser_capture_text_metrics.cpp",
     "test/test_browser_capture_tree.cpp"
@@ -393,7 +403,8 @@
     "tools/cli/kit_manifest_validation.cpp",
     "tools/cli/kit_policy.cpp",
     "tools/cli/kit_profile_verification.cpp",
-    "tools/cli/package_registry.cpp"
+    "tools/cli/package_registry.cpp",
+    "tools/cli/package_registry_trust.cpp"
    ],
    "spawning_sources": [
     "tools/cli/kit_profile_verification.cpp",
@@ -412,6 +423,7 @@
     "fixtures/packages/gain-dsp-kit",
     "fixtures/packages/simple-plugin-template",
     "tools/packages/registry.json",
+    "tools/templates/effect",
     "tools/templates/gain",
     "tools/templates/standalone"
    ],
@@ -523,9 +535,7 @@
   },
   "pulp-test-cli-import-detect": {
    "data": "declared",
-   "detected_sources": [
-    "test/test_cli_import_detect.cpp"
-   ],
+   "detected_sources": [],
    "inputs": [
     "compat.json",
     "test/fixtures/imports"
@@ -661,7 +671,8 @@
     "tools/cli/kit_manifest_validation.cpp",
     "tools/cli/kit_policy.cpp",
     "tools/cli/kit_profile_verification.cpp",
-    "tools/cli/package_registry.cpp"
+    "tools/cli/package_registry.cpp",
+    "tools/cli/package_registry_trust.cpp"
    ],
    "spawning_sources": [
     "test/test_cli_kit_commands.cpp",
@@ -730,7 +741,8 @@
    "sources": [
     "test/test_cli_package_analyzer_descriptors.cpp",
     "tools/cli/package_analyzer_descriptors.cpp",
-    "tools/cli/package_registry.cpp"
+    "tools/cli/package_registry.cpp",
+    "tools/cli/package_registry_trust.cpp"
    ],
    "spawning_sources": [
     "tools/cli/package_registry.cpp"
@@ -757,6 +769,7 @@
     "tools/cli/package_commands_search.cpp",
     "tools/cli/package_commands_util.cpp",
     "tools/cli/package_registry.cpp",
+    "tools/cli/package_registry_trust.cpp",
     "tools/cli/tool_registry.cpp"
    ],
    "spawning_sources": [
@@ -804,6 +817,7 @@
     "tools/cli/local_sdk_profile.cpp",
     "tools/cli/migration_runtime.cpp",
     "tools/cli/package_registry.cpp",
+    "tools/cli/package_registry_trust.cpp",
     "tools/cli/project_bump.cpp",
     "tools/cli/projects_registry.cpp",
     "tools/cli/shell_quote.cpp",
@@ -923,7 +937,8 @@
    "inputs": [],
    "kind": "compiled",
    "runtime_targets": [
-    "pulp-cli"
+    "pulp-cli",
+    "pulp-test-ship-strip-fixture"
    ],
    "sources": [],
    "spawning_sources": [
@@ -1069,6 +1084,7 @@
     "test/test_cli_upgrade_install.cpp"
    ],
    "inputs": [
+    "tools/cli/cli_sdk.cpp",
     "tools/cli/cmd_upgrade.cpp",
     "tools/import-design/browser_capture",
     "tools/import-design/jsx-runtime/materialized_binding_contract.mjs"
@@ -1283,13 +1299,32 @@
    "spawns": "declared",
    "undeclared_sources": []
   },
+  "pulp-test-design-emitter-conformance": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_design_emitter_conformance.cpp"
+   ],
+   "inputs": [
+    "test/fixtures/emitter-conformance",
+    "test/fixtures/import-fidelity/scene.pulp.json"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/test_design_emitter_conformance.cpp"
+   ],
+   "undeclared_sources": []
+  },
   "pulp-test-design-import": {
    "data": "declared",
    "detected_sources": [
     "test/test_design_import_ir.cpp",
+    "test/test_design_import_native_fonts.cpp",
     "test/test_recognition_resolver.cpp"
    ],
    "inputs": [
+    "external/fonts/FunnelDisplay-VariableFont_wght.ttf",
+    "external/fonts/Inter-Regular.ttf",
+    "test/fixtures/design-ir-observe/variable-font-label",
     "test/fixtures/import-fidelity/assets/knob_ref.png",
     "test/fixtures/imports/claude/vite-assets.html",
     "test/fixtures/imports/figma-plugin/synthetic-knob.png",
@@ -1298,6 +1333,7 @@
    "kind": "compiled",
    "sources": [
     "test/test_design_import_ir.cpp",
+    "test/test_design_import_native_fonts.cpp",
     "test/test_recognition_resolver.cpp"
    ],
    "undeclared_sources": []
@@ -1350,7 +1386,10 @@
     "core/signal/include",
     "core/state/include",
     "core/view/include",
-    "test/fixtures/import-fidelity/assets/fader_ref.png"
+    "external/fonts/Jost-Regular.ttf",
+    "test/fixtures/import-fidelity/assets/fader_ref.png",
+    "test/fixtures/import-fidelity/scene.pulp.json",
+    "test/fixtures/v0-dev/audio-control-panel.tsx"
    ],
    "kind": "compiled",
    "runtime_targets": [],
@@ -1417,6 +1456,20 @@
    "spawns": "none",
    "undeclared_sources": []
   },
+  "pulp-test-embed-compress": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_embed_compress.cpp"
+   ],
+   "inputs": [
+    "core/view/js/css-colors.js"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/test_embed_compress.cpp"
+   ],
+   "undeclared_sources": []
+  },
   "pulp-test-fixture-runner-cli": {
    "data": "declared",
    "detected_sources": [
@@ -1450,6 +1503,18 @@
    "sources": [
     "test/test_forge_catalog_index.cpp"
    ],
+   "undeclared_sources": []
+  },
+  "pulp-test-gpu-audio-transport": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_gpu_audio_transport.cpp"
+   ],
+   "spawns": "none",
    "undeclared_sources": []
   },
   "pulp-test-gpu-dpr-native-measurement": {
@@ -1492,6 +1557,23 @@
    "sources": [
     "test/test_gpu_wavenet_session.cpp"
    ],
+   "undeclared_sources": []
+  },
+  "pulp-test-graph-plugin-resolution": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "PulpNoEditorLinkFloor_CLAP",
+    "pulp-scan-worker",
+    "pulp-test-fixture-clap-abort",
+    "pulp-test-fixture-clap-probe"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_graph_plugin_resolution.cpp"
+   ],
+   "spawns": "declared",
    "undeclared_sources": []
   },
   "pulp-test-group-app-host": {
@@ -1551,7 +1633,8 @@
    "data": "declared",
    "detected_sources": [
     "test/test_coretext_text.cpp",
-    "test/test_font_woff2.cpp"
+    "test/test_font_woff2.cpp",
+    "test/test_paragraph_cache.cpp"
    ],
    "inputs": [
     "external/fonts/Inter-Regular.ttf",
@@ -1562,7 +1645,8 @@
    "kind": "compiled",
    "sources": [
     "test/test_coretext_text.cpp",
-    "test/test_font_woff2.cpp"
+    "test/test_font_woff2.cpp",
+    "test/test_paragraph_cache.cpp"
    ],
    "undeclared_sources": []
   },
@@ -1715,9 +1799,7 @@
   },
   "pulp-test-group-script-view": {
    "data": "declared",
-   "detected_sources": [
-    "test/test_threejs_resources.cpp"
-   ],
+   "detected_sources": [],
    "inputs": [],
    "kind": "compiled",
    "sources": [
@@ -1837,6 +1919,7 @@
    ],
    "inputs": [
     "test/fixtures/imports/fig/synthetic.fig",
+    "test/fixtures/v0-dev/audio-control-panel.tsx",
     "tools/import-design"
    ],
    "kind": "compiled",
@@ -1888,7 +1971,9 @@
    "kind": "compiled",
    "runtime_targets": [
     "pulp-isolated-scanner-crash-helper",
-    "pulp-scan-worker"
+    "pulp-scan-worker",
+    "pulp-test-fixture-clap-abort",
+    "pulp-test-fixture-clap-probe"
    ],
    "sources": [],
    "spawning_sources": [
@@ -1908,6 +1993,20 @@
    "kind": "compiled",
    "sources": [
     "test/test_js_bytecode_embed.cpp"
+   ],
+   "undeclared_sources": []
+  },
+  "pulp-test-js-preludes": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_js_preludes.cpp"
+   ],
+   "inputs": [
+    "core/view/js/*.js"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/test_js_preludes.cpp"
    ],
    "undeclared_sources": []
   },
@@ -2040,6 +2139,20 @@
    ],
    "undeclared_sources": []
   },
+  "pulp-test-neural-cpu-simd": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_neural_cpu_simd.cpp"
+   ],
+   "inputs": [
+    "test/fixtures/neural/example.nam"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/test_neural_cpu_simd.cpp"
+   ],
+   "undeclared_sources": []
+  },
   "pulp-test-node-pack": {
    "data": "none",
    "inputs": [],
@@ -2135,9 +2248,7 @@
   },
   "pulp-test-reload-library": {
    "data": "declared",
-   "detected_sources": [
-    "test/test_reload_library.cpp"
-   ],
+   "detected_sources": [],
    "inputs": [],
    "kind": "compiled",
    "sources": [
@@ -2241,6 +2352,20 @@
    ],
    "undeclared_sources": []
   },
+  "pulp-test-text-raster-policy": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_text_raster_policy.cpp"
+   ],
+   "inputs": [
+    "external/fonts/JetBrainsMono-Regular.ttf"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/test_text_raster_policy.cpp"
+   ],
+   "undeclared_sources": []
+  },
   "pulp-test-timeline-document-fuzz": {
    "data": "declared",
    "detected_sources": [
@@ -2338,9 +2463,7 @@
   },
   "pulp-test-validation-contract": {
    "data": "declared",
-   "detected_sources": [
-    "test/test_validation_contract.cpp"
-   ],
+   "detected_sources": [],
    "inputs": [
     "docs/contracts/phase1-reality-snapshot.yaml",
     "docs/contracts/validation-report-v1.schema.json"
@@ -2413,9 +2536,11 @@
   "pulp-control-trusted-host-fixture",
   "pulp-cpp",
   "pulp-denormal-null-refgen",
+  "pulp-emitter-conformance-gen",
   "pulp-fake-screenshot-tool",
   "pulp-fixture-runner",
   "pulp-generate-control-protocol-fuzz-corpus",
+  "pulp-generate-plugin-state-fuzz-corpus",
   "pulp-gpu-host-mapped-pointer-probe",
   "pulp-gpu-roofline-harness",
   "pulp-gpu-wavenet-scaling-bench",
@@ -2428,6 +2553,8 @@
   "pulp-osc-render-wav",
   "pulp-project-package-mutant-helper",
   "pulp-project-package-publish-helper",
+  "pulp-release-artifact-clean-fixture",
+  "pulp-release-artifact-forbidden-fixture",
   "pulp-reload-ship-fixture-dev",
   "pulp-reload-ship-fixture-ship",
   "pulp-render-provider-floor-wgpu-control",
@@ -2446,6 +2573,7 @@
   "pulp-test-au-bundle-entry",
   "pulp-test-au-param-visibility",
   "pulp-test-au-plugin-state",
+  "pulp-test-au-v2-cocoa-shipping",
   "pulp-test-au-v2-cocoa-ui",
   "pulp-test-au-v2-instrument-rt",
   "pulp-test-au-v2-param-display",
@@ -2528,6 +2656,7 @@
   "pulp-test-cli-project-bump-all",
   "pulp-test-cli-project-command",
   "pulp-test-cli-projects-registry",
+  "pulp-test-cli-release-checksum",
   "pulp-test-cli-run-options",
   "pulp-test-cli-sdk-tarball-filename",
   "pulp-test-cli-shell-quote",
@@ -2596,6 +2725,7 @@
   "pulp-test-cross-platform-audio-golden",
   "pulp-test-crossfade",
   "pulp-test-css-gradient-dither-gpu",
+  "pulp-test-css-gradient-interpolation-gpu",
   "pulp-test-css-gradient-render",
   "pulp-test-css-translator-gaps-1434",
   "pulp-test-data-display-link-floor",
@@ -2603,6 +2733,7 @@
   "pulp-test-dawproject-export",
   "pulp-test-denormal-null",
   "pulp-test-design-debug-contracts",
+  "pulp-test-design-emitter-conformance",
   "pulp-test-design-fidelity",
   "pulp-test-design-import",
   "pulp-test-design-import-benchmark",
@@ -2627,10 +2758,14 @@
   "pulp-test-dspx07-projection",
   "pulp-test-edit-history",
   "pulp-test-editor-open-stages",
+  "pulp-test-embed-compress",
+  "pulp-test-face-identity-full",
+  "pulp-test-face-identity-lite",
   "pulp-test-faithful-port-toolkit",
   "pulp-test-fast-math-no-contract",
   "pulp-test-fdn-reverb",
   "pulp-test-fdn-reverb-catalog",
+  "pulp-test-fdn-reverb-portable-lanes",
   "pulp-test-fir-filter",
   "pulp-test-fixture-runner-cli",
   "pulp-test-foreign-framework-coexistence",
@@ -2658,7 +2793,7 @@
   "pulp-test-gesture-threading",
   "pulp-test-golden",
   "pulp-test-golden-effect",
-  "pulp-test-gpu-audio-execution-controller",
+  "pulp-test-gpu-audio-capability-validation",
   "pulp-test-gpu-audio-plugin-boundary-continuity",
   "pulp-test-gpu-audio-trace",
   "pulp-test-gpu-audio-transport",
@@ -2673,10 +2808,17 @@
   "pulp-test-gpu-health-provider",
   "pulp-test-gpu-health-read-result",
   "pulp-test-gpu-health-result",
+  "pulp-test-gpu-neural-model-factory",
   "pulp-test-gpu-neural-plugin-boundary-continuity",
   "pulp-test-gpu-neural-realtime-node",
+  "pulp-test-gpu-neural-shadow-policy",
+  "pulp-test-gpu-neural-shadow-simd",
   "pulp-test-gpu-probe-native-recipes",
   "pulp-test-gpu-probe-result",
+  "pulp-test-gpu-proc-installer",
+  "pulp-test-gpu-proc-installer-host-owned",
+  "pulp-test-gpu-proc-installer-host-owned-registered",
+  "pulp-test-gpu-proc-installer-host-policy",
   "pulp-test-gpu-render-loss-consumer",
   "pulp-test-gpu-shared-io-convolution-pipeline",
   "pulp-test-gpu-shared-io-convolution-session",
@@ -2684,10 +2826,12 @@
   "pulp-test-gpu-shared-io-slot-ledger",
   "pulp-test-gpu-shared-io-wavenet-spec",
   "pulp-test-gpu-surface",
+  "pulp-test-gpu-surface-swapchain-macos",
   "pulp-test-gpu-wavenet-descriptor",
   "pulp-test-gpu-wavenet-realtime-node",
   "pulp-test-gpu-wavenet-session",
   "pulp-test-graph-executor-routing",
+  "pulp-test-graph-plugin-resolution",
   "pulp-test-graph-runtime-worker-pool",
   "pulp-test-graphic-eq",
   "pulp-test-group-app-audio",
@@ -2800,8 +2944,10 @@
   "pulp-test-ipc",
   "pulp-test-isolated-scanner",
   "pulp-test-js-bytecode-embed",
+  "pulp-test-js-preludes",
   "pulp-test-latency-contract",
   "pulp-test-lfo-sampling",
+  "pulp-test-lite-editor-host-mac",
   "pulp-test-live-dsp-telemetry",
   "pulp-test-live-dsp-telemetry-graph",
   "pulp-test-live-kernel-crossfade-null",
@@ -2855,6 +3001,7 @@
   "pulp-test-native-metal-compute",
   "pulp-test-negative-path",
   "pulp-test-network-service-discovery",
+  "pulp-test-neural-cpu-simd",
   "pulp-test-node-pack",
   "pulp-test-notary-env",
   "pulp-test-nsis-installer",
@@ -2883,6 +3030,7 @@
   "pulp-test-plugin-manager-panel",
   "pulp-test-plugin-state-io",
   "pulp-test-plugin-view-host-design-viewport",
+  "pulp-test-plugin-view-resize-macos",
   "pulp-test-popover-row-template-1147",
   "pulp-test-processor-node-adapter",
   "pulp-test-project-package",
@@ -2928,6 +3076,8 @@
   "pulp-test-sdk-distribution-guard",
   "pulp-test-sdl3-surface",
   "pulp-test-settings-sections",
+  "pulp-test-ship-child-process",
+  "pulp-test-ship-dev-build-guard",
   "pulp-test-ship-tracing-guard",
   "pulp-test-signal-additive-bank",
   "pulp-test-signal-analysis-frontends",
@@ -2959,6 +3109,7 @@
   "pulp-test-signal-nonlin-ambience",
   "pulp-test-signal-phaser-stages",
   "pulp-test-signal-pitch-shifter",
+  "pulp-test-signal-saturator",
   "pulp-test-signal-speaker-cabinet",
   "pulp-test-signal-spectral-delay-matrix",
   "pulp-test-signal-sub-oscillator-no-exceptions",
@@ -2971,11 +3122,13 @@
   "pulp-test-signal-zero-latency-convolver",
   "pulp-test-simd",
   "pulp-test-simd-header-fallback",
+  "pulp-test-simd-lanes-portable",
   "pulp-test-simd-parity",
   "pulp-test-simd-signal-link",
   "pulp-test-six-band-eq",
   "pulp-test-skewed-range",
   "pulp-test-skia-surface",
+  "pulp-test-skia-surface-readback-macos",
   "pulp-test-smf-interchange",
   "pulp-test-sos-cascade",
   "pulp-test-spectral-cross-synthesis",
@@ -2999,6 +3152,7 @@
   "pulp-test-synthesiser",
   "pulp-test-tcn-cpu-adapter",
   "pulp-test-template-ui-scripts",
+  "pulp-test-text-raster-policy",
   "pulp-test-texture-atlas",
   "pulp-test-threejs-bridge",
   "pulp-test-tilt-eq",
@@ -3203,6 +3357,7 @@
    "entry": "tools/scripts/test_agent_capability_manifest.py",
    "inputs": [
     ".github/workflows",
+    ".github/workflows/auto-release.yml",
     "core/audio/include/pulp/audio",
     "core/host/include",
     "core/midi/include/pulp/midi",
@@ -3322,6 +3477,14 @@
    ],
    "kind": "python"
   },
+  "android-jni-exports-selftest": {
+   "entry": "tools/scripts/test_check_android_jni_exports.py",
+   "inputs": [
+    "tools/scripts/check_android_jni_exports.py",
+    "tools/scripts/test_check_android_jni_exports.py"
+   ],
+   "kind": "python"
+  },
   "android-smoke": {
    "entry": "tools/scripts/android_smoke.sh",
    "inputs": [
@@ -3341,7 +3504,17 @@
    "entry": "tools/scripts/test_archive_symbol_closure_check.py",
    "inputs": [
     "tools/scripts/archive_symbol_closure_check.py",
+    "tools/scripts/nm_symbols.py",
+    "tools/scripts/rtti_ownership.py",
     "tools/scripts/test_archive_symbol_closure_check.py"
+   ],
+   "kind": "python"
+  },
+  "au-component-preflight-selftest": {
+   "entry": "tools/scripts/test_check_au_component_preflight.py",
+   "inputs": [
+    "tools/scripts/check_au_component_preflight.py",
+    "tools/scripts/test_check_au_component_preflight.py"
    ],
    "kind": "python"
   },
@@ -3378,6 +3551,7 @@
     "test/cmake/test_gpu_audio_sdk_consumer.cmake",
     "test/ctest_script_inputs.json",
     "tools/ci/base_poison_detector.py",
+    "tools/ci/fixtures/base_poison_2026-10-23.json",
     "tools/ci/install_visual_python_deps.sh",
     "tools/ci/test_base_poison_detector.py",
     "tools/motion/visual/requirements.lock",
@@ -3602,6 +3776,14 @@
    "entry": "tools/scripts/test_ccache_pch_isolation.py",
    "inputs": [
     "tools/scripts/test_ccache_pch_isolation.py"
+   ],
+   "kind": "python"
+  },
+  "ccache-remote-storage-selftest": {
+   "entry": "tools/ci/test_ccache_remote_storage.py",
+   "inputs": [
+    "tools/ci/ccache_remote_storage.py",
+    "tools/ci/test_ccache_remote_storage.py"
    ],
    "kind": "python"
   },
@@ -3862,6 +4044,9 @@
     "docs/status/gpu-recipes.yaml",
     "test/CMakeLists.txt",
     "test/cmake/check_bundle_build_info.cmake",
+    "test/cmake/check_plugin_module_dead_strip.cmake",
+    "test/cmake/check_plugin_module_editor_stack.cmake",
+    "test/cmake/check_plugin_module_no_script_runtime.cmake",
     "test/cmake/plugin_lab_clap_roundtrip.cmake",
     "test/cmake/pulp_state_link_closure.cmake.in",
     "test/cmake/quality_tests.cmake",
@@ -4124,6 +4309,14 @@
     "docs/status/dsp-capabilities.json",
     "tools/scripts/dsp_capability_registry.py",
     "tools/scripts/test_dsp_capability_registry.py"
+   ],
+   "kind": "python"
+  },
+  "cli-package-registry-signing-helper": {
+   "entry": "tools/scripts/test_sign_package_registry.py",
+   "inputs": [
+    "tools/scripts/sign_package_registry.py",
+    "tools/scripts/test_sign_package_registry.py"
    ],
    "kind": "python"
   },
@@ -4418,6 +4611,14 @@
    ],
    "kind": "python"
   },
+  "convolver-crossover-table": {
+   "entry": "tools/scripts/convolver_crossover_check.py",
+   "inputs": [
+    "core/signal/include/pulp/signal/fixed_ir_convolver.hpp",
+    "tools/scripts/convolver_crossover_check.py"
+   ],
+   "kind": "python"
+  },
   "create-templates-verify": {
    "entry": "tools/scripts/test_verify_create_templates.py",
    "inputs": [
@@ -4528,6 +4729,13 @@
    ],
    "kind": "python"
   },
+  "dawn-proc-setter-absent-when-host-owned": {
+   "entry": "test/verify_dawn_proc_setter_absent.py",
+   "inputs": [
+    "test/verify_dawn_proc_setter_absent.py"
+   ],
+   "kind": "python"
+  },
   "decisions-contract-selftest": {
    "entry": "tools/scripts/test_decisions_contract.py",
    "inputs": [
@@ -4591,15 +4799,43 @@
   "design-unit-boundary": {
    "entry": "tools/scripts/design_unit_boundary_check.py",
    "inputs": [
-    "tools/scripts/design_unit_boundary_check.py"
+    "core/platform",
+    "core/platform/include",
+    "core/runtime",
+    "core/runtime/include",
+    "core/simd",
+    "core/simd/include",
+    "core/view",
+    "core/view/audio",
+    "core/view/include",
+    "core/view/include/pulp/view/widgets.hpp",
+    "core/view/src/reload_exports.cpp",
+    "tools/scripts/design_unit_boundary_check.py",
+    "tools/scripts/include_boundary.py",
+    "tools/scripts/vellum_policy.json",
+    "tools/scripts/vellum_policy.py"
    ],
    "kind": "python"
   },
   "design-unit-boundary-selftest": {
    "entry": "tools/scripts/test_design_unit_boundary_check.py",
    "inputs": [
+    "core/platform",
+    "core/platform/include",
+    "core/runtime",
+    "core/runtime/include",
+    "core/simd",
+    "core/simd/include",
+    "core/view",
+    "core/view/audio",
+    "core/view/include",
+    "core/view/include/pulp/view/widgets.hpp",
+    "core/view/src/reload_exports.cpp",
     "tools/scripts/design_unit_boundary_check.py",
-    "tools/scripts/test_design_unit_boundary_check.py"
+    "tools/scripts/include_boundary.py",
+    "tools/scripts/test_design_unit_boundary_check.py",
+    "tools/scripts/vellum_policy.json",
+    "tools/scripts/vellum_policy.py"
    ],
    "kind": "python"
   },
@@ -4976,6 +5212,13 @@
    ],
    "kind": "shell"
   },
+  "format-header-view-boundary": {
+   "entry": "tools/scripts/format_header_view_boundary.py",
+   "inputs": [
+    "tools/scripts/format_header_view_boundary.py"
+   ],
+   "kind": "python"
+  },
   "foundation-include-lint": {
    "entry": "tools/scripts/foundation_include_lint.py",
    "inputs": [
@@ -4991,7 +5234,9 @@
     "core/view/include/pulp/view/widgets.hpp",
     "core/view/src/reload_exports.cpp",
     "tools/scripts/foundation_include_lint.py",
-    "tools/scripts/include_boundary.py"
+    "tools/scripts/include_boundary.py",
+    "tools/scripts/vellum_policy.json",
+    "tools/scripts/vellum_policy.py"
    ],
    "kind": "python"
   },
@@ -5180,6 +5425,20 @@
    "entry": "tools/validation/test_verify_gpu_audio_daw_continuity_receipt_v2.py",
    "inputs": [
     "tools/validation/test_verify_gpu_audio_daw_continuity_receipt_v2.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-audio-header-vocabulary-guard": {
+   "entry": "tools/scripts/gpu_audio_header_vocabulary_guard.py",
+   "inputs": [
+    "tools/scripts/gpu_audio_header_vocabulary_guard.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-audio-header-vocabulary-guard-selftest": {
+   "entry": "tools/scripts/test_gpu_audio_header_vocabulary_guard.py",
+   "inputs": [
+    "tools/scripts/test_gpu_audio_header_vocabulary_guard.py"
    ],
    "kind": "python"
   },
@@ -6340,6 +6599,14 @@
    ],
    "kind": "python"
   },
+  "gpu-same-device-storage-receipt-controls": {
+   "entry": "test/test_verify_gpu_same_device_storage.py",
+   "inputs": [
+    "test/test_verify_gpu_same_device_storage.py",
+    "test/verify_gpu_same_device_storage.py"
+   ],
+   "kind": "python"
+  },
   "gpu-test-resource-locks": {
    "entry": "tools/scripts/test_gpu_test_resource_locks.py",
    "inputs": [
@@ -6584,10 +6851,24 @@
    ],
    "kind": "python"
   },
+  "import-design-ir-observe-font-smoothing-label": {
+   "entry": "test/test_design_ir_observe_font_smoothing_label.py",
+   "inputs": [
+    "test/test_design_ir_observe_font_smoothing_label.py"
+   ],
+   "kind": "python"
+  },
   "import-design-ir-observe-gpu": {
    "entry": "test/test_design_ir_observe_gpu.py",
    "inputs": [
     "test/test_design_ir_observe_gpu.py"
+   ],
+   "kind": "python"
+  },
+  "import-design-ir-observe-half-pixel-label": {
+   "entry": "test/test_design_ir_observe_half_pixel_label.py",
+   "inputs": [
+    "test/test_design_ir_observe_half_pixel_label.py"
    ],
    "kind": "python"
   },
@@ -6610,6 +6891,13 @@
    "inputs": [
     "test/test_design_ir_observe_provider_boundary.py",
     "tools/import-design/design_ir_observe.cpp"
+   ],
+   "kind": "python"
+  },
+  "import-design-ir-observe-variable-font-label": {
+   "entry": "test/test_design_ir_observe_variable_font_label.py",
+   "inputs": [
+    "test/test_design_ir_observe_variable_font_label.py"
    ],
    "kind": "python"
   },
@@ -6696,6 +6984,7 @@
     "tools/import-validation/importer_differential/form_controls.py",
     "tools/import-validation/importer_differential/geometry_gate.py",
     "tools/import-validation/importer_differential/model.py",
+    "tools/import-validation/importer_differential/native_transform.py",
     "tools/import-validation/importer_differential/recognition.py",
     "tools/import-validation/importer_differential/reports.py",
     "tools/import-validation/importer_differential/snapshot.py",
@@ -6713,6 +7002,7 @@
     "tools/import-validation/importer_differential/form_controls.py",
     "tools/import-validation/importer_differential/geometry_gate.py",
     "tools/import-validation/importer_differential/model.py",
+    "tools/import-validation/importer_differential/native_transform.py",
     "tools/import-validation/importer_differential/recognition.py",
     "tools/import-validation/importer_differential/reports.py",
     "tools/import-validation/importer_differential/snapshot.py",
@@ -6734,6 +7024,15 @@
    "entry": "tools/import-validation/test_source_contract_schema.py",
    "inputs": [
     "tools/import-validation/test_source_contract_schema.py"
+   ],
+   "kind": "python"
+  },
+  "import-validation-text-raster-decomposition-selftest": {
+   "entry": "tools/import-validation/test_text_raster_decomposition.py",
+   "inputs": [
+    "test/fixtures/browser-capture-text-raster",
+    "tools/import-validation/test_text_raster_decomposition.py",
+    "tools/import-validation/text_raster_decomposition.py"
    ],
    "kind": "python"
   },
@@ -6765,11 +7064,23 @@
   "importer-differential-lab": {
    "entry": "test/test_importer_differential_lab.py",
    "inputs": [
+    "test/fixtures",
     "test/fixtures/browser-capture-layout-rows",
+    "test/fixtures/import-differential",
+    "test/fixtures/import-differential/manifest.json",
     "test/test_importer_differential_lab.py",
     "tools/import-design/browser_capture/form_control_theme.mjs",
     "tools/import-design/browser_capture_controls.cpp",
     "tools/import-validation/schemas"
+   ],
+   "kind": "python"
+  },
+  "importer-lab-capture-scale": {
+   "entry": "test/test_importer_lab_capture_scale.py",
+   "inputs": [
+    "test/fixtures/import-differential/01-basic-card.html",
+    "test/test_importer_lab_capture_scale.py",
+    "tools/import-validation/importer_differential_lab.py"
    ],
    "kind": "python"
   },
@@ -7113,6 +7424,14 @@
    ],
    "kind": "python"
   },
+  "migration-note-guard-selftest": {
+   "entry": "tools/scripts/test_migration_note_guard.py",
+   "inputs": [
+    "tools/scripts/migration_note_guard.py",
+    "tools/scripts/test_migration_note_guard.py"
+   ],
+   "kind": "python"
+  },
   "minblep-table-reproducible": {
    "entry": "tools/scripts/generate_minblep_table.py",
    "inputs": [
@@ -7157,6 +7476,14 @@
    "entry": "tools/ci/test_native_intel_runner.py",
    "inputs": [
     "tools/ci/test_native_intel_runner.py"
+   ],
+   "kind": "python"
+  },
+  "nm-symbols-selftest": {
+   "entry": "tools/scripts/test_nm_symbols.py",
+   "inputs": [
+    "tools/scripts/nm_symbols.py",
+    "tools/scripts/test_nm_symbols.py"
    ],
    "kind": "python"
   },
@@ -7330,11 +7657,14 @@
     "experimental/pulp-rs/src/main.rs",
     "experimental/pulp-rs/tests/fixtures/docs/mini_docs_tree/docs/reference/cli.md",
     "test/CMakeLists.txt",
+    "test/cmake",
     "test/cmake/cmake_smoke_tests.cmake",
     "test/cmake/pr_fast_tests.cmake",
     "test/cmake/test_ios_auv3_control_shipping.cmake",
     "test/fixtures",
+    "test/fixtures/no_editor_link_floor/no_editor_runtime_deps.cmake",
     "test/fixtures/no_editor_link_floor/scan_no_editor_link_floor.cmake",
+    "test/fixtures/perfetto-gpu",
     "test/fixtures/sample-region-compat/expected/abi.txt",
     "test/sample_region_compat/compat_runner.cpp",
     "test/support",
@@ -7360,8 +7690,10 @@
     "tools/ci/spawn_none_build_path_reviews.json",
     "tools/ci/test_pr_head_affected_tests.py",
     "tools/ci/wide_non_native_checks.json",
+    "tools/cmake",
     "tools/cmake/PulpGpuAudioProviderIdentity.cmake",
     "tools/cmake/PulpPlugin.cmake",
+    "tools/cmake/PulpSimdSupport.cmake",
     "tools/cmake/PulpTestData.cmake",
     "tools/deps/manifest.json",
     "tools/import-design/browser_capture/runtime_manifest.txt",
@@ -7403,6 +7735,7 @@
     "docs/status/consumption-profiles.schema.json",
     "test/cmake/pr_fast_tests.cmake",
     "test/fixtures",
+    "test/fixtures/perfetto-gpu",
     "test/support",
     "tools/ci",
     "tools/ci/build_dir_lock.py",
@@ -7498,6 +7831,7 @@
     "tools/scripts",
     "tools/scripts/agent_capability_manifest.py",
     "tools/scripts/changed_surface_script_families.py",
+    "tools/scripts/gates.sh",
     "tools/scripts/gates_script_inputs.py",
     "tools/scripts/merge_tree_script_state.py",
     "tools/scripts/refresh_push_check.py",
@@ -7541,54 +7875,101 @@
    "entry": "tools/import-design/browser_capture/run_integration.mjs",
    "inputs": [
     "tools/import-design/browser_capture/browser_pipe.integration.test.mjs",
+    "tools/import-design/browser_capture/browser_process.mjs",
     "tools/import-design/browser_capture/capture.integration.test.mjs",
     "tools/import-design/browser_capture/capture_frame_fitting.integration.test.mjs",
     "tools/import-design/browser_capture/capture_geometry.integration.test.mjs",
+    "tools/import-design/browser_capture/capture_horizon.integration.test.mjs",
+    "tools/import-design/browser_capture/capture_integration_support.mjs",
     "tools/import-design/browser_capture/capture_interaction_guards.integration.test.mjs",
     "tools/import-design/browser_capture/capture_interactions.integration.test.mjs",
     "tools/import-design/browser_capture/capture_paint.integration.test.mjs",
-    "tools/import-design/browser_capture/run_integration.mjs"
+    "tools/import-design/browser_capture/font_faces.integration.test.mjs",
+    "tools/import-design/browser_capture/form_control_theme.mjs",
+    "tools/import-design/browser_capture/motion_freeze.integration.test.mjs",
+    "tools/import-design/browser_capture/run_integration.mjs",
+    "tools/import-design/browser_capture/security.mjs",
+    "tools/import-design/browser_capture/semantics.mjs",
+    "tools/import-design/browser_capture/settle.mjs"
    ],
    "kind": "node"
   },
   "pulp-browser-capture-node-unit": {
-   "entry": "tools/import-design/browser_capture/form_control_theme.test.mjs",
+   "entry": "tools/import-design/browser_capture/document_canvas.test.mjs",
    "inputs": [
+    "tools/import-design/browser_capture/document_canvas.mjs",
+    "tools/import-design/browser_capture/document_canvas.test.mjs",
+    "tools/import-design/browser_capture/font_faces.mjs",
+    "tools/import-design/browser_capture/font_faces.test.mjs",
     "tools/import-design/browser_capture/form_control_theme.mjs",
     "tools/import-design/browser_capture/form_control_theme.test.mjs",
+    "tools/import-design/browser_capture/health.mjs",
     "tools/import-design/browser_capture/health.test.mjs",
+    "tools/import-design/browser_capture/interaction_executor.mjs",
+    "tools/import-design/browser_capture/interaction_plan.mjs",
     "tools/import-design/browser_capture/interactions.test.mjs",
+    "tools/import-design/browser_capture/lifecycle.mjs",
     "tools/import-design/browser_capture/lifecycle.test.mjs",
+    "tools/import-design/browser_capture/materialized_coordinate_space.mjs",
     "tools/import-design/browser_capture/materialized_coordinate_space.test.mjs",
+    "tools/import-design/browser_capture/materialized_layout_bindings.mjs",
     "tools/import-design/browser_capture/materialized_layout_bindings.test.mjs",
+    "tools/import-design/browser_capture/materialized_paint_bindings.mjs",
     "tools/import-design/browser_capture/materialized_paint_bindings.test.mjs",
+    "tools/import-design/browser_capture/materialized_pseudo_bindings.mjs",
     "tools/import-design/browser_capture/materialized_pseudo_bindings.test.mjs",
+    "tools/import-design/browser_capture/materialized_text_bindings.mjs",
     "tools/import-design/browser_capture/materialized_text_bindings.test.mjs",
+    "tools/import-design/browser_capture/native_text_diagnostics.mjs",
     "tools/import-design/browser_capture/native_text_diagnostics.test.mjs",
+    "tools/import-design/browser_capture/network_dependencies.mjs",
     "tools/import-design/browser_capture/network_dependencies.test.mjs",
+    "tools/import-design/browser_capture/platform_fonts.mjs",
     "tools/import-design/browser_capture/platform_fonts.test.mjs",
+    "tools/import-design/browser_capture/renderers.mjs",
     "tools/import-design/browser_capture/renderers.test.mjs",
+    "tools/import-design/browser_capture/run_integration.mjs",
     "tools/import-design/browser_capture/run_integration.test.mjs",
+    "tools/import-design/browser_capture/security.mjs",
     "tools/import-design/browser_capture/security.test.mjs",
+    "tools/import-design/browser_capture/semantics.mjs",
     "tools/import-design/browser_capture/semantics.test.mjs",
+    "tools/import-design/browser_capture/settle.mjs",
     "tools/import-design/browser_capture/settle.test.mjs",
+    "tools/import-design/browser_capture/text_diagnostics.mjs",
     "tools/import-design/browser_capture/text_diagnostics.test.mjs",
+    "tools/import-design/browser_capture/tokens.mjs",
     "tools/import-design/browser_capture/tokens.test.mjs",
+    "tools/import-design/browser_capture/vendor_payload.mjs",
     "tools/import-design/browser_capture/vendor_payload.test.mjs",
+    "tools/import-design/jsx-runtime/materialized_binding_contract.mjs",
     "tools/import-design/jsx-runtime/materialized_browser_document_schema.test.mjs",
+    "tools/import-design/jsx-runtime/materialized_css_variables.mjs",
     "tools/import-design/jsx-runtime/materialized_css_variables.test.mjs",
+    "tools/import-design/jsx-runtime/materialized_dynamic_layout.mjs",
     "tools/import-design/jsx-runtime/materialized_dynamic_layout.test.mjs",
+    "tools/import-design/jsx-runtime/materialized_font_bindings.mjs",
     "tools/import-design/jsx-runtime/materialized_font_bindings.test.mjs",
+    "tools/import-design/jsx-runtime/materialized_frame_contract.mjs",
     "tools/import-design/jsx-runtime/materialized_frame_contract.test.mjs",
+    "tools/import-design/jsx-runtime/materialized_ids_map.mjs",
     "tools/import-design/jsx-runtime/materialized_ids_map.test.mjs",
+    "tools/import-design/jsx-runtime/materialized_layer_contract.mjs",
     "tools/import-design/jsx-runtime/materialized_layer_contract.test.mjs",
+    "tools/import-design/jsx-runtime/materialized_metadata_contract.mjs",
     "tools/import-design/jsx-runtime/materialized_metadata_contract.test.mjs",
     "tools/import-design/jsx-runtime/materialized_runtime_canvas_owner.test.mjs",
     "tools/import-design/jsx-runtime/materialized_runtime_commit_cost.test.mjs",
+    "tools/import-design/jsx-runtime/materialized_runtime_entry.mjs",
     "tools/import-design/jsx-runtime/materialized_runtime_hot_region.test.mjs",
+    "tools/import-design/jsx-runtime/materialized_runtime_test_helpers.mjs",
+    "tools/import-design/jsx-runtime/materialized_source_emitter.mjs",
     "tools/import-design/jsx-runtime/materialized_source_emitter.test.mjs",
+    "tools/import-design/jsx-runtime/materialized_state_atlas.mjs",
     "tools/import-design/jsx-runtime/materialized_state_atlas.test.mjs",
+    "tools/import-design/jsx-runtime/materialized_text_contract.mjs",
     "tools/import-design/jsx-runtime/materialized_text_contract.test.mjs",
+    "tools/import-design/jsx-runtime/runtime_fingerprint.mjs",
     "tools/import-design/jsx-runtime/runtime_fingerprint.test.mjs",
     "tools/scripts/tmp_leak_guard.py"
    ],
@@ -7670,6 +8051,7 @@
     "tools/import-design/fig/paths.mjs",
     "tools/import-design/fig/paths.test.mjs",
     "tools/import-design/fig/scene.mjs",
+    "tools/import-design/material_audit.mjs",
     "tools/import-design/material_audit.test.mjs"
    ],
    "kind": "node"
@@ -7677,21 +8059,27 @@
   "pulp-format-clap-core-symbol-closure": {
    "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
-    "tools/scripts/archive_symbol_closure_check.py"
+    "tools/scripts/archive_symbol_closure_check.py",
+    "tools/scripts/nm_symbols.py",
+    "tools/scripts/rtti_ownership.py"
    ],
    "kind": "python"
   },
   "pulp-format-core-symbol-closure": {
    "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
-    "tools/scripts/archive_symbol_closure_check.py"
+    "tools/scripts/archive_symbol_closure_check.py",
+    "tools/scripts/nm_symbols.py",
+    "tools/scripts/rtti_ownership.py"
    ],
    "kind": "python"
   },
   "pulp-format-view-symbol-closure": {
    "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
-    "tools/scripts/archive_symbol_closure_check.py"
+    "tools/scripts/archive_symbol_closure_check.py",
+    "tools/scripts/nm_symbols.py",
+    "tools/scripts/rtti_ownership.py"
    ],
    "kind": "python"
   },
@@ -7742,6 +8130,7 @@
    "entry": "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.test.mjs",
    "inputs": [
     "tools/import-design/browser_capture/vendor_payload.mjs",
+    "tools/import-design/jsx-runtime/jsx-contract-audit.mjs",
     "tools/import-design/jsx-runtime/jsx-contract-audit.test.mjs",
     "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.mjs",
     "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.test.mjs"
@@ -7808,7 +8197,9 @@
   "pulp-state-symbol-closure": {
    "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
-    "tools/scripts/archive_symbol_closure_check.py"
+    "tools/scripts/archive_symbol_closure_check.py",
+    "tools/scripts/nm_symbols.py",
+    "tools/scripts/rtti_ownership.py"
    ],
    "kind": "python"
   },
@@ -7893,13 +8284,17 @@
   "pulp-view-audio-symbol-floor": {
    "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
-    "tools/scripts/archive_symbol_closure_check.py"
+    "tools/scripts/archive_symbol_closure_check.py",
+    "tools/scripts/nm_symbols.py",
+    "tools/scripts/rtti_ownership.py"
    ],
    "kind": "python"
   },
   "pulp-view-audio-symbol-floor-negative-contract": {
    "entry": "tools/scripts/test_view_audio_symbol_floor.py",
    "inputs": [
+    "test/cmake/view_host_tests.cmake",
+    "tools/scripts/nm_symbols.py",
     "tools/scripts/test_view_audio_symbol_floor.py"
    ],
    "kind": "python"
@@ -7918,7 +8313,9 @@
     "core/view/include",
     "core/view/include/pulp/view/widgets.hpp",
     "core/view/src/reload_exports.cpp",
-    "tools/scripts/include_boundary.py"
+    "tools/scripts/include_boundary.py",
+    "tools/scripts/vellum_policy.json",
+    "tools/scripts/vellum_policy.py"
    ],
    "kind": "python"
   },
@@ -7926,16 +8323,22 @@
    "entry": "tools/scripts/test_include_boundary.py",
    "inputs": [
     "core/audio/include/pulp/audio/buffer.hpp",
+    "core/content/include/pulp/state/content_registry.hpp",
+    "core/state/include/pulp/state/store.hpp",
     "core/view/include/pulp/view/view.hpp",
     "core/view/src/view.cpp",
-    "tools/scripts/test_include_boundary.py"
+    "tools/scripts/test_include_boundary.py",
+    "tools/scripts/vellum_policy.json",
+    "tools/scripts/vellum_policy.py"
    ],
    "kind": "python"
   },
   "pulp-view-tooling-symbol-floor": {
    "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
-    "tools/scripts/archive_symbol_closure_check.py"
+    "tools/scripts/archive_symbol_closure_check.py",
+    "tools/scripts/nm_symbols.py",
+    "tools/scripts/rtti_ownership.py"
    ],
    "kind": "python"
   },
@@ -7974,7 +8377,9 @@
     "tools/cmake/scripts/encode_binary_data.py",
     "tools/scripts/include_boundary.py",
     "tools/scripts/vellum_closure.py",
-    "tools/scripts/vellum_d3_units.json"
+    "tools/scripts/vellum_d3_units.json",
+    "tools/scripts/vellum_policy.json",
+    "tools/scripts/vellum_policy.py"
    ],
    "kind": "python"
   },
@@ -8012,7 +8417,9 @@
     "tools/cmake/scripts/encode_binary_data.py",
     "tools/scripts/include_boundary.py",
     "tools/scripts/vellum_closure.py",
-    "tools/scripts/vellum_d3_units.json"
+    "tools/scripts/vellum_d3_units.json",
+    "tools/scripts/vellum_policy.json",
+    "tools/scripts/vellum_policy.py"
    ],
    "kind": "python"
   },
@@ -8041,7 +8448,9 @@
     "tools/cmake/scripts/encode_binary_data.py",
     "tools/scripts/include_boundary.py",
     "tools/scripts/vellum_closure.py",
-    "tools/scripts/vellum_d3_units.json"
+    "tools/scripts/vellum_d3_units.json",
+    "tools/scripts/vellum_policy.json",
+    "tools/scripts/vellum_policy.py"
    ],
    "kind": "python"
   },
@@ -8080,7 +8489,9 @@
     "tools/scripts/include_boundary.py",
     "tools/scripts/vellum_closure.py",
     "tools/scripts/vellum_closure_allowlist.json",
-    "tools/scripts/vellum_d3_units.json"
+    "tools/scripts/vellum_d3_units.json",
+    "tools/scripts/vellum_policy.json",
+    "tools/scripts/vellum_policy.py"
    ],
    "kind": "python"
   },
@@ -8098,6 +8509,7 @@
    "inputs": [
     "core/canvas",
     "core/canvas/CMakeLists.txt",
+    "core/canvas/include/pulp/canvas/affine_transform.hpp",
     "core/canvas/platform/mac/cg_canvas.mm",
     "core/canvas/src/bundled_fonts.cpp",
     "core/canvas/src/skia_chromium_raw_ptr_compat.cpp",
@@ -8140,14 +8552,30 @@
     "tools/scripts/vellum_closure_allowlist.json",
     "tools/scripts/vellum_d3_units.json",
     "tools/scripts/vellum_mirror_edge_patterns.json",
-    "tools/scripts/vellum_mirror_edge_table.py"
+    "tools/scripts/vellum_mirror_edge_table.py",
+    "tools/scripts/vellum_policy.json",
+    "tools/scripts/vellum_policy.py"
    ],
    "kind": "python"
   },
   "pulp.vellum-view-core-pulp-kept": {
    "entry": "tools/scripts/vellum_view_core_pulp_kept_check.py",
    "inputs": [
+    "core/platform",
+    "core/platform/include",
+    "core/runtime",
+    "core/runtime/include",
+    "core/simd",
+    "core/simd/include",
+    "core/view",
+    "core/view/audio",
+    "core/view/include",
+    "core/view/include/pulp/view/widgets.hpp",
+    "core/view/src/reload_exports.cpp",
+    "tools/scripts/include_boundary.py",
     "tools/scripts/vellum_d3_units.json",
+    "tools/scripts/vellum_policy.json",
+    "tools/scripts/vellum_policy.py",
     "tools/scripts/vellum_view_core_pulp_kept_check.py"
    ],
    "kind": "python"
@@ -8201,6 +8629,15 @@
     "tools/scripts/script_argv.py",
     "tools/scripts/test_prepush_cannot_measure.py",
     "tools/scripts/test_queue_batch_attribute.py"
+   ],
+   "kind": "python"
+  },
+  "queue-breaker-selftest": {
+   "entry": "tools/ci/test_queue_breaker.py",
+   "inputs": [
+    ".github/workflows/build.yml",
+    "tools/ci/queue_breaker.py",
+    "tools/ci/test_queue_breaker.py"
    ],
    "kind": "python"
   },
@@ -8661,6 +9098,54 @@
     "tools/rack/param_units.py",
     "tools/rack/portmap_seed.py",
     "tools/rack/test_fidelity.py"
+   ],
+   "kind": "python"
+  },
+  "rack-gate-sandbox-selftest": {
+   "entry": "tools/rack/test_gate_sandbox.py",
+   "inputs": [
+    "core/audio",
+    "core/format",
+    "core/platform",
+    "core/runtime",
+    "core/signal",
+    "core/simd",
+    "core/state",
+    "core/timebase",
+    "tools/rack/acid_behavior.py",
+    "tools/rack/acid_runtime_gate.py",
+    "tools/rack/acid_taps.py",
+    "tools/rack/affordances.py",
+    "tools/rack/archive.py",
+    "tools/rack/attempt_artifacts.py",
+    "tools/rack/capability_lessons.py",
+    "tools/rack/crash_watch.py",
+    "tools/rack/cv_depth.py",
+    "tools/rack/deterministic_repair.py",
+    "tools/rack/fetch_sdk.py",
+    "tools/rack/fidelity.py",
+    "tools/rack/fidelity_signal.py",
+    "tools/rack/file_lock.py",
+    "tools/rack/forge_modular.py",
+    "tools/rack/generate.py",
+    "tools/rack/generation_lock.py",
+    "tools/rack/idiom_check.py",
+    "tools/rack/intent_context.py",
+    "tools/rack/knowledge.py",
+    "tools/rack/maker_intent.py",
+    "tools/rack/measure_ranges.py",
+    "tools/rack/module_kinds.py",
+    "tools/rack/param_units.py",
+    "tools/rack/patch.py",
+    "tools/rack/patch_vocabulary.py",
+    "tools/rack/portmap_seed.py",
+    "tools/rack/prompt_handoff.py",
+    "tools/rack/rack_open.py",
+    "tools/rack/run_state.py",
+    "tools/rack/signal_path.py",
+    "tools/rack/test_gate_sandbox.py",
+    "tools/rack/toolchain_headers.py",
+    "tools/rack/toolpaths.py"
    ],
    "kind": "python"
   },
@@ -9734,6 +10219,9 @@
     "docs/status/gpu-recipes.yaml",
     "test/CMakeLists.txt",
     "test/cmake/check_bundle_build_info.cmake",
+    "test/cmake/check_plugin_module_dead_strip.cmake",
+    "test/cmake/check_plugin_module_editor_stack.cmake",
+    "test/cmake/check_plugin_module_no_script_runtime.cmake",
     "test/cmake/plugin_lab_clap_roundtrip.cmake",
     "test/cmake/pulp_state_link_closure.cmake.in",
     "test/cmake/quality_tests.cmake",
@@ -10171,6 +10659,7 @@
     "core/host/src/signal_graph_diagnostics.cpp",
     "core/host/src/signal_graph_executor_routing.cpp",
     "core/host/src/signal_graph_live_swap.cpp",
+    "core/host/src/signal_graph_mailbox.cpp",
     "core/host/src/signal_graph_prepare.cpp",
     "core/host/src/signal_graph_prepared_topology_edit.cpp",
     "core/host/src/signal_graph_reference_walk.cpp",
@@ -11001,6 +11490,7 @@
     "core/host/src/signal_graph_diagnostics.cpp",
     "core/host/src/signal_graph_executor_routing.cpp",
     "core/host/src/signal_graph_live_swap.cpp",
+    "core/host/src/signal_graph_mailbox.cpp",
     "core/host/src/signal_graph_prepare.cpp",
     "core/host/src/signal_graph_prepared_topology_edit.cpp",
     "core/host/src/signal_graph_reference_walk.cpp",
@@ -11523,6 +12013,7 @@
     "external/tweetnacl/tweetnacl.c",
     "test/cmake/pr_fast_tests.cmake",
     "test/fixtures",
+    "test/fixtures/perfetto-gpu",
     "test/fixtures/sample-region-compat",
     "test/sample_region_compat/CMakeLists.txt",
     "test/sample_region_compat/README.md",
@@ -11657,6 +12148,27 @@
     "tools/scripts/script_argv.py",
     "tools/scripts/test_script_argv.py",
     "tools/scripts/trace_frame_cost.py"
+   ],
+   "kind": "python"
+  },
+  "script-inputs-precheck-selftest": {
+   "entry": "tools/scripts/test_script_inputs_precheck.py",
+   "inputs": [
+    ".github/workflows",
+    "core/host",
+    "core/host/include",
+    "docs/status",
+    "test/ctest_script_inputs.json",
+    "test/fixtures",
+    "test/support",
+    "tools/ci/cmake_registration_impact.py",
+    "tools/ci/load_api_exemptions.json",
+    "tools/ci/spawn_none_build_path_reviews.json",
+    "tools/cmake/PulpTestData.cmake",
+    "tools/scripts/gate_common.py",
+    "tools/scripts/script_inputs_precheck.py",
+    "tools/scripts/script_test_inputs.py",
+    "tools/scripts/test_script_inputs_precheck.py"
    ],
    "kind": "python"
   },
@@ -11836,6 +12348,27 @@
     "tools/scripts/test_setup_source_cache.sh"
    ],
    "kind": "shell"
+  },
+  "shipping-macro-guard": {
+   "entry": "tools/scripts/shipping_macro_guard.py",
+   "inputs": [
+    "core/format/src/au_v2_cocoa_view.mm",
+    "tools/scripts/shipping_macro_guard.py",
+    "tools/scripts/test_shipping_macro_guard.py"
+   ],
+   "kind": "python"
+  },
+  "shipping-macro-guard-negative-contract": {
+   "entry": "tools/scripts/test_shipping_macro_guard.py",
+   "inputs": [
+    ".github/workflows/build.yml",
+    "core/format/src/au_v2_cocoa_view.mm",
+    "core/format/src/au_v2_common.cpp",
+    "test/cmake/format_reload_tests.cmake",
+    "tools/cmake/PulpPluginFormats.cmake",
+    "tools/scripts/test_shipping_macro_guard.py"
+   ],
+   "kind": "python"
   },
   "shipyard-merge-gate-evidence-selftest": {
    "entry": "tools/scripts/test_shipyard_merge_gate_evidence.py",
@@ -12466,6 +12999,8 @@
    "entry": "tools/scripts/vellum_boundary_lint.py",
    "inputs": [
     "core/view",
+    "core/view/audio/src",
+    "core/view/platform",
     "core/view/src",
     "tools/import-design/pulp-package.json",
     "tools/scripts/vellum_boundary_lint.py",
@@ -12476,6 +13011,9 @@
   "vellum-boundary-lint-negative-contract": {
    "entry": "tools/scripts/test_vellum_boundary_lint.py",
    "inputs": [
+    "core/view/audio/include",
+    "core/view/platform/mac/window_host_mac_internal.hpp",
+    "core/view/src/view.cpp",
     "tools/import-design",
     "tools/import-design/pulp-package.json",
     "tools/scripts/test_vellum_boundary_lint.py",
@@ -12566,8 +13104,12 @@
    "entry": "tools/scripts/test_version_at_land.py",
    "inputs": [
     ".github/workflows",
+    "docs/status/agent-capabilities.json",
+    "docs/status/agent-capability-surface.json",
     "docs/status/gpu-vellum-handoff.yaml",
     "docs/status/pulp-tooling-disposition.json",
+    "tools/agent-capabilities/contract-history.json",
+    "tools/scripts/agent_capability_manifest.py",
     "tools/scripts/build_migration_index.py",
     "tools/scripts/connected_git_history.py",
     "tools/scripts/fold_migration_notes.py",

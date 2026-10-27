@@ -65,6 +65,38 @@ SOFTWARE.
 
 ---
 
+## Babel standalone (holdout fixture)
+
+Copyright (c) 2014-present Sebastian McKenzie and other contributors
+
+MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+`@babel/standalone` 7.29.0, unmodified, embedded in the importer differential
+lab holdout `test/fixtures/import-differential/holdout/spectr-standalone.html`.
+Evaluated only by Chromium inside the lab's browser capture; never built,
+linked, or shipped.
+
+---
+
 ## Catch2
 
 Copyright (c) 2022 Two Blue Cubes Ltd.
@@ -435,7 +467,7 @@ THE SOFTWARE.
 ## ICU
 
 ICU (International Components for Unicode) 78.2, linked through Skia's prebuilt `libskunicode_icu.a` (Skia
-`chrome/m153`) for text segmentation (line, word, sentence and grapheme
+`chrome/m157`) for text segmentation (line, word, sentence and grapheme
 breaks), bidi, normalization and character properties. The license text below
 is from https://github.com/unicode-org/icu/blob/release-78.2/LICENSE (tag
 `release-78.2`).
@@ -1629,6 +1661,38 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+## React (holdout fixture)
+
+Copyright (c) Facebook, Inc. and its affiliates.
+
+MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+`react` and `react-dom` 18.3.1 development UMD builds, unmodified, embedded in
+the importer differential lab holdout
+`test/fixtures/import-differential/holdout/spectr-standalone.html`. Evaluated
+only by Chromium inside the lab's browser capture; never built, linked, or
+shipped.
 
 ---
 

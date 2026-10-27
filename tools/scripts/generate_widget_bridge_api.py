@@ -301,7 +301,7 @@ SIGNATURE_OVERRIDES: dict[str, str] = {
     "readClipboard": "() => string",
     "registerContextMenu": "(id: string, callbackName: string) => void",
     "registerDrop": "(id: string) => void",
-    "registerFont": "(family: string, path: string) => boolean",
+    "registerFont": "(family: string, path: string, weightMin?: number, weightMax?: number) => boolean",
     "registerGesture": "(id: string) => void",
     "registerHover": "(id: string) => void",
     "registerPointer": "(id: string) => void",
@@ -312,6 +312,7 @@ SIGNATURE_OVERRIDES: dict[str, str] = {
     "releaseOverlay": "(id: string) => void",
     "removeWidget": "(id: string) => void",
     "insertChild": "(parentId: string, childId: string, index: number) => boolean",
+    "isWidgetParamBound": "(widgetId: string) => boolean",
     "saveStylePreset": "(name: string, payload: unknown) => void",
     "seekWidgetLottie": "(id: string, time01: number) => void",
     "setAICli": "(command: string) => void",
@@ -355,6 +356,7 @@ SIGNATURE_OVERRIDES: dict[str, str] = {
     "setSvgLine": "(id: string, x1: number, y1: number, x2: number, y2: number) => void",
     "setSvgPath": "(id: string, pathData: string) => void",
     "setSvgRect": "(id: string, x: number, y: number, width: number, height: number) => void",
+    "setSvgStrokeStyle": "(id: string, linecap: string, linejoin: string, miterLimit?: number) => void",
     "setSvgStrokeWidth": "(id: string, width: number) => void",
     "setSvgStrokeGradient": "(id: string, value: string) => void",
     "setSvgViewBox": "(id: string, width: number, height: number) => void",
@@ -612,6 +614,8 @@ def signature_for(row: ManifestRow) -> str:
             return "(id: string, text: string, parentId: string) => string"
         if row.name == "createBadge":
             return "(id: string, text: string, tone: string, parentId: string) => string"
+        if row.name == "createButtonSurface":
+            return "(id: string, parentId: string, direction?: 'row' | 'column') => string"
         return "(id: string, parentId: string) => string"
     if row.name in ID_BOOLEAN_SETTERS:
         return "(id: string, value: boolean) => void"

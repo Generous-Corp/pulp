@@ -87,6 +87,10 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
         // gets a per-slot timestamp query and an asynchronous mapped readback.
         // The default remains completely query/map-free.
         bool enable_timestamps = false;
+        // Wait budget for each drain() call; zero keeps the 15 s default. On
+        // expiry drain() abandons to quarantine: the device is destroyed and
+        // every slot stays pinned until a later drain() observes disposal.
+        std::uint64_t drain_budget_ns = 0;
     };
 
     struct CreateResult {
@@ -176,6 +180,7 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
     void poll() noexcept override;
     bool device_lost() const noexcept override;
     bool drain() noexcept override;
+    void set_drain_budget_ns(std::uint64_t budget_ns) noexcept override;
     bool can_resume_after_drain() const noexcept override;
     bool gpu_elapsed_ns(SlotToken token, std::uint64_t& elapsed) const noexcept override;
 
@@ -200,6 +205,16 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
     bool submit_wavenet_program(const SlotResources&, SlotToken,
                                 std::shared_ptr<SharedIoTerminalInbox>) noexcept;
     bool release_wavenet_program() noexcept;
+    // Zeroes the prepared WaveNet program's causal history and sets the stream
+    // position of the next block (for a host reset or a transport jump). Only
+    // while no submission is in flight; returns false otherwise or when no
+    // WaveNet program is prepared. Ordered on the queue before the next submit.
+    bool reset_wavenet_history(std::uint32_t next_position = 0) noexcept;
+    // Diagnostic readback of the WaveNet program's device stream position (the
+    // sample index of the next block). Blocks until the read completes or a
+    // 2 s deadline passes; host-thread test and diagnostic use only, while no
+    // submission is in flight.
+    bool read_wavenet_stream_position(std::uint32_t& position) noexcept;
 
   private:
     friend class DawnSharedIoConvolutionProgram;

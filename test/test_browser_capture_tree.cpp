@@ -21,7 +21,9 @@
 #include "tools/import-design/browser_capture_ir.hpp"
 #include "tools/import-design/browser_capture_tree.hpp"
 
+#include <pulp/view/design_import.hpp>
 #include <pulp/view/design_ir_io.hpp>
+#include <pulp/view/screenshot.hpp>
 #include <pulp/view/design_update.hpp>
 
 #include <choc/text/choc_JSON.h>
@@ -348,6 +350,197 @@ LoweredSnapshot lower_snapshot(const SnapshotSpec& spec,
 }
 
 }  // namespace
+
+namespace {
+
+/// Spectr's shape in six nodes. `body` holds a full-panel `::before` backdrop
+/// (paint 3, opaque) and a wrapper (paint 2) whose two cards paint after the
+/// backdrop (4 and 5). `wrapper_tag` and `wrapper_style` vary the wrapper: a
+/// bare `div` paints nothing and may move; an `<a>`, a pointer cursor or a
+/// clip pins it to its own paint order.
+///
+/// Strings: 0 #document 1 HTML 2 BODY 3 ::before 4 DIV 5 A
+///   6 background-color 7 display 8 block 9 rgba(0, 0, 0, 0)
+///  10 rgb(5, 7, 10) 11 rgb(200, 60, 60) 12 overflow 13 visible 14 hidden
+///  15 cursor 16 auto 17 pointer 18 rgb(60, 200, 60)
+/// Style rows are [background-color, display, overflow, cursor].
+constexpr std::string_view kBackdropStrings =
+    R"J("#document","HTML","BODY","::before","DIV","A","background-color","display",)J"
+    R"J("block","rgba(0, 0, 0, 0)","rgb(5, 7, 10)","rgb(200, 60, 60)","overflow",)J"
+    R"J("visible","hidden","cursor","auto","pointer","rgb(60, 200, 60)")J";
+
+SnapshotSpec backdrop_spec(int wrapper_tag, std::string_view wrapper_style) {
+    return {
+        .node_names = "[0,1,2,3," + std::to_string(wrapper_tag) + ",4,4]",
+        .node_types = "[9,1,1,1,1,1,1]",
+        .parents = "[-1,0,1,2,2,4,4]",
+        .attributes = "[[],[],[],[],[],[],[]]",
+        .layout_nodes = "[1,2,3,4,5,6]",
+        .styles = "[[9,8,13,16],[10,8,13,16],[10,8,13,16]," + std::string(wrapper_style) +
+                  ",[11,8,13,16],[18,8,13,16]]",
+        .bounds = "[[0,0,300,200],[0,0,300,200],[0,0,300,200],[0,0,300,200],"
+                  "[20,20,100,80],[140,40,120,100]]",
+        .paint_orders = "[1,2,3,2,4,5]",
+        .computed_names = R"(["background-color","display","overflow","cursor"])",
+        .strings = std::string(kBackdropStrings),
+    };
+}
+
+constexpr std::string_view kInklessWrapper = "[9,8,13,16]";
+
+/// Lower `spec` into a 300x200 panel, nested or in Chrome's flat paint order.
+LoweredSnapshot lower_panel(const SnapshotSpec& spec, const std::string& name, bool flat) {
+    LoweredSnapshot out;
+    out.root.style.width = 300.0f;
+    out.root.style.height = 200.0f;
+    out.counts = lower_into(spec, name, out.root, {}, flat);
+    return out;
+}
+
+/// The panel drawn through the importer's own materialize-then-raster path.
+std::vector<uint8_t> render_panel(const IRNode& root) {
+    pulp::view::DesignIR ir;
+    ir.root = root;
+    auto view = pulp::view::build_native_view_tree(ir, ir.asset_manifest);
+    REQUIRE(view != nullptr);
+    view->set_bounds({0.0f, 0.0f, 300.0f, 200.0f});
+    return pulp::view::render_to_png(*view, 300, 200, 2.0f, pulp::view::ScreenshotBackend::skia);
+}
+
+const IRNode* child_named(const IRNode& parent, std::string_view name) {
+    for (const auto& child : parent.children)
+        if (child.name == name)
+            return &child;
+    return nullptr;
+}
+
+} // namespace
+
+TEST_CASE("an inkless wrapper is drawn where its first ink lands, not at its own paint order",
+          "[browser-capture][native-lowering][paint-order]") {
+    // Spectr flattened its whole panel over this: ordering body's children by
+    // their own paint numbers drew the opaque backdrop over every card.
+    const auto nested = lower_panel(backdrop_spec(4, kInklessWrapper), "backdrop-nested", false);
+    CHECK(nested.counts.overlapping_reorders == 0);
+    const auto* html = child_named(nested.root, "html");
+    REQUIRE(html != nullptr);
+    const auto* body = child_named(*html, "body");
+    REQUIRE(body != nullptr);
+    REQUIRE(body->children.size() == 2);
+    CHECK(body->children[0].name == "::before");
+    CHECK(body->children[1].name == "div");
+    CHECK(body->children[1].children.size() == 2);
+
+    // The proof is the pixels: the nested tree draws exactly what Chrome's
+    // flat paint order draws.
+    if (!pulp::view::raw_rgba_render_available())
+        SKIP("no Skia backend in this build");
+    const auto flat = lower_panel(backdrop_spec(4, kInklessWrapper), "backdrop-flat", true);
+    CHECK(flat.counts.root_children > nested.counts.root_children);
+    CHECK(render_panel(nested.root) == render_panel(flat.root));
+}
+
+TEST_CASE("a wrapper that takes input or clips keeps its own paint order",
+          "[browser-capture][native-lowering][paint-order]") {
+    // Each of these may not move, so the backdrop again lands over the cards,
+    // and the audit has to say so: both are inked and they overlap.
+    const struct {
+        const char* name;
+        int tag;
+        const char* style;
+    } cases[] = {
+        {"anchor", 5, "[9,8,13,16]"},  // <a>: Chrome routes clicks to it
+        {"pointer", 4, "[9,8,13,17]"}, // cursor: pointer
+        {"clip", 4, "[9,8,14,16]"},    // overflow: hidden
+    };
+    for (const auto& c : cases) {
+        INFO("wrapper " << c.name);
+        const auto nested =
+            lower_panel(backdrop_spec(c.tag, c.style), std::string("pinned-") + c.name, false);
+        CHECK(nested.counts.overlapping_reorders == 2);
+    }
+}
+
+TEST_CASE("the reorder audit counts exactly the inversions a render can show",
+          "[browser-capture][native-lowering][paint-order]") {
+    if (!pulp::view::raw_rgba_render_available())
+        SKIP("no Skia backend in this build");
+    // The pinned anchor wrapper: the nested tree draws the backdrop over both
+    // cards, and the audit's two pairs are a real difference in the pixels.
+    const auto pinned = lower_panel(backdrop_spec(5, kInklessWrapper), "audit-pinned", false);
+    const auto pinned_flat =
+        lower_panel(backdrop_spec(5, kInklessWrapper), "audit-pinned-flat", true);
+    CHECK(pinned.counts.overlapping_reorders == 2);
+    CHECK(render_panel(pinned.root) != render_panel(pinned_flat.root));
+
+    // The backdrop painting nothing: the same out-of-order tree, but what is
+    // drawn on top has no ink to cover the cards with, so nothing differs and
+    // nothing may be counted.
+    auto spec = backdrop_spec(5, kInklessWrapper);
+    spec.styles = "[[9,8,13,16],[10,8,13,16],[9,8,13,16],[9,8,13,16],[11,8,13,16],[18,8,13,16]]";
+    const auto bare = lower_panel(spec, "audit-bare", false);
+    const auto bare_flat = lower_panel(spec, "audit-bare-flat", true);
+    CHECK(bare.counts.overlapping_reorders == 0);
+    CHECK(render_panel(bare.root) == render_panel(bare_flat.root));
+}
+
+TEST_CASE("an interactive node drawn out of Chrome's order counts even without ink",
+          "[browser-capture][native-lowering][paint-order]") {
+    // A clipping wrapper (pinned) holds a transparent <a> overlay that Chrome
+    // paints AFTER a later inked sibling card covering it. Nothing visible is
+    // wrong, but the card now sits over the link and would take its clicks.
+    //
+    // Nodes: 0 doc, 1 html, 2 body, 3 clipping div, 4 <a> overlay, 5 card.
+    const SnapshotSpec spec{
+        .node_names = "[0,1,2,4,5,4]",
+        .node_types = "[9,1,1,1,1,1]",
+        .parents = "[-1,0,1,2,3,2]",
+        .attributes = "[[],[],[],[],[],[]]",
+        .layout_nodes = "[1,2,3,4,5]",
+        .styles = "[[9,8,13,16],[9,8,13,16],[9,8,14,16],[9,8,13,16],[11,8,13,16]]",
+        .bounds = "[[0,0,300,200],[0,0,300,200],[0,0,300,200],[40,40,120,80],[20,20,200,140]]",
+        .paint_orders = "[1,2,2,4,3]",
+        .computed_names = R"(["background-color","display","overflow","cursor"])",
+        .strings = std::string(kBackdropStrings),
+    };
+    const auto nested = lower_panel(spec, "interactive-overlay", false);
+    CHECK(nested.counts.overlapping_reorders == 1);
+    REQUIRE(nested.counts.overlapping_reorder_pairs.size() == 1);
+}
+
+TEST_CASE("capture anchors match the vectors the lab's port is pinned to",
+          "[browser-capture][native-lowering][anchors]") {
+    // test_importer_differential_lab.py asserts the same file through the
+    // lab's Python `capture_anchors`. The lab pairs its two Chromium lanes by
+    // these strings, so a spelling change here that the port does not share
+    // reads there as every node missing.
+    const auto root = fs::path(PULP_BROWSER_CAPTURE_FIXTURE_ROOT);
+    const auto read = [](const fs::path& path) {
+        std::ifstream in(path, std::ios::binary);
+        REQUIRE(in.good());
+        return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    };
+    const auto vectors = choc::json::parse(read(root / "capture-anchor-vectors.json"));
+    const auto cases = vectors["cases"];
+    REQUIRE(cases.size() >= 8);
+    for (uint32_t c = 0; c < cases.size(); ++c) {
+        const auto entry = cases[static_cast<int>(c)];
+        const std::string name(entry["name"].toString());
+        INFO("case " << name);
+        const std::string bytes = entry.hasObjectMember("snapshot")
+                                      ? choc::json::toString(entry["snapshot"])
+                                      : read(root / std::string(entry["snapshot_path"].toString()));
+        const auto index = CapturedStyleIndex::load_bytes(bytes);
+        REQUIRE(index.has_value());
+        const auto anchors = capture_anchor_paths(*index);
+        const auto expected = entry["anchors"];
+        REQUIRE(anchors.size() == expected.size());
+        for (uint32_t node = 0; node < expected.size(); ++node) {
+            INFO("node " << node);
+            CHECK(anchors[node] == std::string(expected[static_cast<int>(node)].toString()));
+        }
+    }
+}
 
 TEST_CASE("native lowering draws the panel's real nodes, not a bitmap",
           "[browser-capture][native-lowering]") {
@@ -1345,6 +1538,171 @@ TEST_CASE("each refusal names the construct that caused it",
           "none");
     CHECK(attribute(*vector_shapes.front(), "svg_viewbox") == "0 0 12 12");
     CHECK(attribute(*vector_shapes.front(), "source_tag") == "rect");
+}
+
+// ── SVG stroke style and shape opacity ──────────────────────────────────────
+// test/fixtures/browser-capture-svg-stroke-style is a real Chromium capture of
+// the stroke constructs icon sets actually use. The first three icons are
+// Spectr's PEAK, SCULPT and PRESETS glyphs verbatim; the fourth is the Lucide
+// convention of declaring the stroke style once on the root `<svg>`.
+
+TEST_CASE("an svg stroke's cap, join and miter limit reach the IR",
+          "[browser-capture][native-lowering][svg]") {
+    const auto lowered = lower_capture("browser-capture-svg-stroke-style");
+    REQUIRE(lowered.design_ir);
+    const auto& root = lowered.design_ir->root;
+
+    // PEAK: ten 1.3-unit ticks. Butt caps cut every tick short by the
+    // half-disc a round cap adds at each end, which reads as a lighter icon.
+    const auto* peak =
+        vector_from(root, "M 3 20 L 3 14 M 7 20 L 7 10 M 11 20 L 11 6 M 15 20 L 15 12 "
+                          "M 19 20 L 19 8 M 1 14 L 5 14 M 5 10 L 9 10 M 9 6 L 13 6 "
+                          "M 13 12 L 17 12 M 17 8 L 21 8");
+    REQUIRE(peak != nullptr);
+    CHECK(attribute(*peak, "svg_stroke_linecap") == "round");
+    CHECK(attribute(*peak, "svg_stroke_linejoin") == "round");
+    // The limit only means something under a miter join.
+    CHECK(attribute(*peak, "svg_stroke_miterlimit").empty());
+
+    // SCULPT: one curve, round at both ends.
+    const auto* sculpt = vector_from(root, "M 2 14 Q 5 4 9 10 T 16 8 T 22 6");
+    REQUIRE(sculpt != nullptr);
+    CHECK(attribute(*sculpt, "svg_stroke_linecap") == "round");
+    CHECK(attribute(*sculpt, "svg_stroke_linejoin") == "round");
+
+    // Lucide: neither shape declares a cap or join; both inherit the root's.
+    for (const char* data :
+         {"M2 12 A10 10 0 0 1 22 12 A10 10 0 0 1 2 12 Z", "M12 6 L12 12 L16 14"}) {
+        const auto* shape = vector_from(root, data);
+        REQUIRE(shape != nullptr);
+        CHECK(attribute(*shape, "svg_stroke_linecap") == "round");
+        CHECK(attribute(*shape, "svg_stroke_linejoin") == "round");
+        CHECK(attribute(*shape, "svg_stroke_width") == "2");
+    }
+
+    // A miter join carries its limit, authored or not: SVG's initial value is
+    // 4 and a 2D canvas's is 10, so leaving it out changes which corners
+    // collapse to a bevel.
+    const auto* mitred = vector_from(root, "M2 20 L8 4 L14 20");
+    REQUIRE(mitred != nullptr);
+    CHECK(attribute(*mitred, "svg_stroke_linecap") == "butt");
+    CHECK(attribute(*mitred, "svg_stroke_linejoin") == "miter");
+    CHECK(attribute(*mitred, "svg_stroke_miterlimit") == "2");
+    // An inline `style` declaration is as authored as an attribute.
+    const auto* bevelled = vector_from(root, "M18 20 L24 4 L30 20");
+    REQUIRE(bevelled != nullptr);
+    CHECK(attribute(*bevelled, "svg_stroke_linejoin") == "bevel");
+    // A group's inline style is inherited like its attributes are.
+    const auto* squared = vector_from(root, "M4 12 L20 12");
+    REQUIRE(squared != nullptr);
+    CHECK(attribute(*squared, "svg_stroke_linecap") == "square");
+    CHECK(attribute(*squared, "svg_stroke_miterlimit") == "4");
+
+    // `pathLength` and `stroke-dashoffset` change nothing on a solid stroke,
+    // and are carried so a dash pattern drawn later measures against them.
+    const auto* measured = vector_from(root, "M 4 12 H 20");
+    REQUIRE(measured != nullptr);
+    CHECK(attribute(*measured, "svg_path_length") == "100");
+    CHECK(attribute(*measured, "svg_stroke_dashoffset") == "3");
+}
+
+TEST_CASE("an svg shape's own opacity folds into its one paint",
+          "[browser-capture][native-lowering][svg]") {
+    const auto lowered = lower_capture("browser-capture-svg-stroke-style");
+    REQUIRE(lowered.design_ir);
+    const auto& root = lowered.design_ir->root;
+
+    // PRESETS: three waves at 0.45, 0.7 and 1, stroked in an inherited
+    // `rgba(255, 255, 255, 0.85)`. The shape's opacity multiplies the alpha
+    // the colour already has rather than replacing it.
+    const std::pair<const char*, const char*> waves[] = {
+        {"M 2 13 Q 7 13 10 9 Q 13 5 17 5 Q 20 5 22 7", "rgba(255, 255, 255, 0.3825)"},
+        {"M 2 11 Q 6 11 9 7 Q 13 3 17 7 Q 20 10 22 10", "rgba(255, 255, 255, 0.595)"},
+        {"M 2 9 Q 5 4 9 10 Q 13 15 17 9 Q 20 5 22 6", "rgba(255, 255, 255, 0.85)"},
+    };
+    for (const auto& [data, stroke] : waves) {
+        const auto* wave = vector_from(root, data);
+        REQUIRE(wave != nullptr);
+        CHECK(attribute(*wave, "svg_stroke") == stroke);
+        CHECK(attribute(*wave, "svg_fill") == "none");
+        CHECK(attribute(*wave, "svg_stroke_linecap") == "round");
+    }
+
+    const auto* faded = vector_from(root, "M2 2 H11 V22 H2 Z");
+    REQUIRE(faded != nullptr);
+    CHECK(attribute(*faded, "svg_fill") == "rgba(143, 214, 148, 0.5)");
+    // `fill-opacity` over a colour that already has an alpha multiplies it.
+    const auto* translucent = vector_from(root, "M13 2 H22 V22 H13 Z");
+    REQUIRE(translucent != nullptr);
+    CHECK(attribute(*translucent, "svg_fill") == "rgba(240, 160, 75, 0.4)");
+}
+
+TEST_CASE("svg stroke constructs the lowering cannot draw refuse by name",
+          "[browser-capture][native-lowering][svg]") {
+    const auto lowered = lower_capture("browser-capture-svg-stroke-style");
+    REQUIRE(lowered.design_ir);
+    const auto& root = lowered.design_ir->root;
+
+    CHECK(attribute(root, "native_svg_lowered") == "8");
+    CHECK(attribute(root, "native_svg_refused") == "2");
+
+    std::map<std::string, std::string> refusals; // reason → detail
+    const std::function<void(const IRNode&)> walk = [&](const IRNode& node) {
+        for (const auto& child : node.children) {
+            if (attribute(child, "capture_fallback_element") == "svg") {
+                refusals[attribute(child, "capture_fallback_reason")] =
+                    attribute(child, "capture_fallback_detail");
+            }
+            walk(child);
+        }
+    };
+    walk(root);
+    // A fill and a stroke under one opacity composite as a layer; per-paint
+    // alpha would double-darken where the stroke overlaps the fill.
+    CHECK(refusals["svg-shape-opacity"] == "circle");
+    // A marker is a `<defs>` reference like a clip or a mask: the line drawn
+    // without it loses its arrowhead.
+    CHECK(refusals["svg-paint-reference"] == "line");
+    CHECK(refusals.size() == 2);
+}
+
+TEST_CASE("a captured stroke property outranks the authored attribute",
+          "[browser-capture][native-lowering][svg]") {
+    // A stylesheet rule can override `stroke-linecap="round"`, and only the
+    // browser has seen the stylesheet. When the capture collected the
+    // property, Chrome's value wins; when it did not, the attribute is the
+    // best evidence there is.
+    //
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 svg, 4 path
+    // strings: 0 #document 1 HTML 2 BODY 3 svg 4 path 5 none
+    //   6 rgb(1, 2, 3) 7 butt 8 d 9 "M0 0 L10 10" 10 stroke-linecap 11 round
+    //   12 viewBox 13 "0 0 10 10"
+    SnapshotSpec spec{
+        .node_names = "[0,1,2,3,4]",
+        .node_types = "[9,1,1,1,1]",
+        .parents = "[-1,0,1,2,3]",
+        .attributes = "[[],[],[],[12,13],[8,9,10,11]]",
+        .layout_nodes = "[0,1,2,3,4]",
+        .styles = "[[5,5,7],[5,5,7],[5,5,7],[5,5,7],[5,6,7]]",
+        .bounds = "[[0,0,100,100],[0,0,100,100],[0,0,100,100],"
+                  "[10,10,20,20],[10,10,20,20]]",
+        .paint_orders = "[0,1,1,2,3]",
+        .computed_names = R"(["fill","stroke","stroke-linecap"])",
+        .strings = R"J("#document","HTML","BODY","svg","path","none",)J"
+                   R"J("rgb(1, 2, 3)","butt","d","M0 0 L10 10",)J"
+                   R"J("stroke-linecap","round","viewBox","0 0 10 10")J",
+    };
+    const auto captured = lower_snapshot(spec, "svg");
+    const auto captured_shapes = vector_nodes(captured.root);
+    REQUIRE(captured_shapes.size() == 1);
+    CHECK(attribute(*captured_shapes.front(), "svg_stroke") == "rgb(1, 2, 3)");
+    CHECK(attribute(*captured_shapes.front(), "svg_stroke_linecap") == "butt");
+
+    spec.computed_names = R"(["fill","stroke","cursor"])";
+    const auto authored = lower_snapshot(spec, "svg");
+    const auto authored_shapes = vector_nodes(authored.root);
+    REQUIRE(authored_shapes.size() == 1);
+    CHECK(attribute(*authored_shapes.front(), "svg_stroke_linecap") == "round");
 }
 
 TEST_CASE("a capture with no SVG paint says so out loud",
@@ -3593,18 +3951,18 @@ TEST_CASE("the reorder audit counts a real inversion and only a visible one",
     //        5 DIV sibling of outer. Chrome paints outer(2), sibling(3),
     //        inner(4); nesting composes outer, inner, sibling — so the
     //        inner/sibling pair is emitted against Chrome's order.
-    // The inner node carries a background COLOUR, because the audit counts an
-    // inversion only where the node that ends up on top actually puts ink on
-    // the canvas. A bare positioning div reordered over a painted sibling is an
-    // empty rectangle in front of a filled one — nothing a painter can show —
-    // so a fixture of style-less divs would drive this to zero and assert
-    // nothing. Index 31 is "rgb(9, 11, 16)".
+    // All three carry a background COLOUR. The audit counts an inversion only
+    // where both nodes put ink down: the sibling drawn last now covers the
+    // inner node, which shows only if both paint. And `outer` must paint too,
+    // or it would be drawn where its first ink lands (after the sibling) and
+    // the inversion would not exist at all. A fixture of style-less divs would
+    // drive this to zero and assert nothing. Index 31 is "rgb(9, 11, 16)".
     const std::string names = "[0,1,2,3,3,3]";
     const std::string types = "[9,1,1,1,1,1]";
     const std::string parents = "[-1,0,1,2,3,2]";
     const std::string attributes = "[[],[],[],[],[],[]]";
     const std::string styles =
-        "[[11,11,14],[11,11,14],[11,11,14],[11,11,14],[31,11,14],[11,11,14]]";
+        "[[11,11,14],[11,11,14],[11,11,14],[31,11,14],[31,11,14],[31,11,14]]";
     const std::string inkless_styles =
         "[[11,11,14],[11,11,14],[11,11,14],[11,11,14],[11,11,14],[11,11,14]]";
     const std::string paint_names =
@@ -3633,10 +3991,10 @@ TEST_CASE("the reorder audit counts a real inversion and only a visible one",
     // renders.
     CHECK(overlapping.counts.overlapping_reorder_pairs.size() == 1);
 
-    // The SAME inversion, over the same overlapping boxes, with the node that
-    // lands on top painting nothing. The painter has no ink to show out of
-    // order, so this must not count — which is what stops the number being a
-    // tally of how hierarchical a document happens to be.
+    // The SAME document, over the same overlapping boxes, with nothing painting.
+    // The painter has no ink to show out of order, so this must not count —
+    // which is what stops the number being a tally of how hierarchical a
+    // document happens to be.
     const auto inkless = lower_snapshot(
         {
             .node_names = names,
@@ -4148,6 +4506,221 @@ TEST_CASE("form controls draw the string their own state holds",
     CHECK(unresolved == 1);
 }
 
+TEST_CASE("theme-painted ranges, checkboxes and radios record the state the theme paints",
+          "[browser-capture][native-lowering][form-controls]") {
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 INPUT[type=range] (themed,
+    // disabled, accented), 4 INPUT[type=checkbox] (themed, checked by state
+    // only), 5 INPUT[type=radio name=mode] (themed, checked), 6
+    // INPUT[type=range] whose author styling dropped the theme.
+    //
+    // Row order: display, appearance, accent-color, color-scheme,
+    // background-color.
+    const SnapshotSpec spec{
+        .node_names = "[0,1,2,3,3,3,3]",
+        .node_types = "[9,1,1,1,1,1,1]",
+        .parents = "[-1,0,1,2,2,2,2]",
+        .attributes = "[[],[],[],[4,5,6,7,8,9,10,11,12,13],[4,14],[4,15,16,17],[4,5]]",
+        .layout_nodes = "[1,2,3,4,5,6]",
+        .styles = "[[18,19,19,21,26],[18,19,19,21,26],[22,19,20,21,25],[22,19,19,24,25],"
+                  "[22,19,19,21,25],[22,19,19,21,25]]",
+        .bounds = "[[0,0,300,200],[0,0,300,200],[10.59375,10.5,129,16],"
+                  "[10,40,13,13],[30,40,13,13],[10,70,129,16]]",
+        .paint_orders = "[0,1,2,3,4,5]",
+        .computed_names =
+            R"(["display","appearance","accent-color","color-scheme","background-color"])",
+        .strings = R"J("#document","HTML","BODY","INPUT","type","range","min","0","max","1",)J"
+                   R"J("step","0.001","disabled","","checkbox","radio","name","mode","block",)J"
+                   R"J("auto","rgb(71, 180, 235)","normal","inline-block","0.25","dark",)J"
+                   R"J("rgb(255, 255, 255)","rgba(0, 0, 0, 0)")J",
+        .extra_nodes = R"(,"inputValue":{"index":[3],"value":[23]})"
+                       R"(,"inputChecked":{"index":[4,5]})",
+        .extra_top = R"(,"formControlTheme":{"controls":[)"
+                     R"({"node_index":3,"theme":"native"},)"
+                     R"({"node_index":4,"theme":"native"},)"
+                     R"({"node_index":5,"theme":"native"},)"
+                     R"({"node_index":6,"theme":"author"}]})",
+    };
+    const auto lowered = lower_snapshot(spec, "form-control-theme-state");
+    const auto by_control = [&](const std::string& control) {
+        return find_node(lowered.root,
+                         [&](const IRNode& n) { return attribute(n, "ua_control") == control; });
+    };
+
+    const auto* range = by_control("range");
+    REQUIRE(range != nullptr);
+    CHECK(attribute(*range, "ua_min") == "0");
+    CHECK(attribute(*range, "ua_max") == "1");
+    CHECK(attribute(*range, "ua_step") == "0.001");
+    // The live value, from control state rather than the `value` attribute.
+    CHECK(attribute(*range, "ua_value") == "0.25");
+    CHECK(attribute(*range, "ua_disabled") == "1");
+    CHECK(attribute(*range, "ua_accent") == "rgb(71, 180, 235)");
+    CHECK(attribute(*range, "ua_color_scheme") == "normal");
+    CHECK_FALSE(range->attributes.contains("ua_checked"));
+
+    const auto* checkbox = by_control("checkbox");
+    REQUIRE(checkbox != nullptr);
+    // Checked by `inputChecked` alone: no `checked` attribute was authored.
+    CHECK(attribute(*checkbox, "ua_checked") == "1");
+    CHECK(attribute(*checkbox, "ua_color_scheme") == "dark");
+    // `auto` is the theme's own accent, so nothing is recorded for it.
+    CHECK_FALSE(checkbox->attributes.contains("ua_accent"));
+    CHECK_FALSE(checkbox->attributes.contains("ua_disabled"));
+
+    const auto* radio = by_control("radio");
+    REQUIRE(radio != nullptr);
+    CHECK(attribute(*radio, "ua_checked") == "1");
+    CHECK(attribute(*radio, "ua_radio_group") == "mode");
+
+    // The white background a range or checkbox reports is the user-agent
+    // default the theme replaces, so a theme-painted control carries none.
+    CHECK_FALSE(range->style.background_color.has_value());
+    CHECK_FALSE(checkbox->style.background_color.has_value());
+
+    // The author-styled range is painted from CSS: no theme state at all, and
+    // its computed background is kept.
+    const int recorded = count_nodes(
+        lowered.root, [](const IRNode& n) { return n.attributes.contains("ua_control"); });
+    CHECK(recorded == 3);
+    const auto* styled = find_node(
+        lowered.root, [](const IRNode& n) { return attribute(n, "native_theme") == "author"; });
+    REQUIRE(styled != nullptr);
+    CHECK(styled->style.background_color.value_or("") == "rgb(255, 255, 255)");
+}
+
+TEST_CASE("theme-painted buttons record their scheme and lose the UA box paint",
+          "[browser-capture][native-lowering][form-controls]") {
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 BUTTON (themed, disabled), 4
+    // BUTTON (themed, dark scheme), 5 BUTTON whose author background dropped
+    // the theme.
+    //
+    // Row order: display, appearance, color-scheme, background-color,
+    // border-top-width, border-top-style.
+    const SnapshotSpec spec{
+        .node_names = "[0,1,2,3,3,3]",
+        .node_types = "[9,1,1,1,1,1]",
+        .parents = "[-1,0,1,2,2,2]",
+        .attributes = "[[],[],[],[4,5],[],[]]",
+        .layout_nodes = "[1,2,3,4,5]",
+        .styles = "[[6,7,8,12,15,16],[6,7,8,12,15,16],[9,7,8,11,14,17],[9,7,10,11,14,17],"
+                  "[9,7,8,13,14,17]]",
+        .bounds = "[[0,0,300,200],[0,0,300,200],[10,10,80,24],[10,40,80,24],[10,70,80,24]]",
+        .paint_orders = "[0,1,2,3,4]",
+        .computed_names = R"(["display","appearance","color-scheme","background-color",)"
+                          R"("border-top-width","border-top-style"])",
+        .strings = R"J("#document","HTML","BODY","BUTTON","disabled","","block","auto",)J"
+                   R"J("normal","inline-block","dark","rgb(239, 239, 239)","rgba(0, 0, 0, 0)",)J"
+                   R"J("rgb(200, 0, 0)","2px","0px","none","outset")J",
+        .extra_top = R"(,"formControlTheme":{"controls":[)"
+                     R"({"node_index":3,"theme":"native"},)"
+                     R"({"node_index":4,"theme":"native"},)"
+                     R"({"node_index":5,"theme":"author"}]})",
+    };
+    const auto lowered = lower_snapshot(spec, "form-control-theme-button");
+    std::vector<const IRNode*> buttons;
+    const std::function<void(const IRNode&)> collect = [&](const IRNode& node) {
+        if (attribute(node, "source_tag") == "button")
+            buttons.push_back(&node);
+        for (const auto& child : node.children)
+            collect(child);
+    };
+    collect(lowered.root);
+    REQUIRE(buttons.size() == 3);
+
+    CHECK(attribute(*buttons[0], "ua_control") == "button");
+    CHECK(attribute(*buttons[0], "ua_disabled") == "1");
+    CHECK(attribute(*buttons[0], "ua_color_scheme") == "normal");
+    CHECK(attribute(*buttons[1], "ua_control") == "button");
+    CHECK(attribute(*buttons[1], "ua_color_scheme") == "dark");
+    CHECK_FALSE(buttons[1]->attributes.contains("ua_disabled"));
+    // The grey fill and 2px outset border are the UA stylesheet's, which the
+    // theme paints over; a theme-painted button carries neither.
+    for (const auto* themed : {buttons[0], buttons[1]}) {
+        CHECK_FALSE(themed->style.background_color.has_value());
+        CHECK_FALSE(themed->style.border_top_width.has_value());
+    }
+
+    // The author-styled button is painted from CSS: no theme state, and its
+    // own background and border are kept.
+    CHECK(attribute(*buttons[2], "native_theme") == "author");
+    CHECK_FALSE(buttons[2]->attributes.contains("ua_control"));
+    CHECK(buttons[2]->style.background_color.value_or("") == "rgb(200, 0, 0)");
+    CHECK(buttons[2]->style.border_top_width.value_or(0.0f) == Catch::Approx(2.0f));
+}
+
+TEST_CASE("theme-painted button inputs record push-button state and keep their label",
+          "[browser-capture][native-lowering][form-controls]") {
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 INPUT[type=submit] (themed, no
+    // value), 4 INPUT[type=button value=Go] whose author background dropped
+    // the theme, 5 INPUT[type=reset disabled] (themed, dark scheme).
+    //
+    // Row order: display, appearance, color-scheme, background-color, the
+    // four border widths, border-top-style, the four paddings, font-size,
+    // color.
+    const std::string page = "[12,13,14,18,21,21,21,21,22,21,21,21,21,26,27]";
+    const std::string themed = "[15,13,14,17,20,20,20,20,23,25,24,25,24,26,27]";
+    const std::string styled = "[15,13,14,19,20,20,20,20,23,25,24,25,24,26,27]";
+    const std::string dark = "[15,13,16,17,20,20,20,20,23,25,24,25,24,26,27]";
+    const SnapshotSpec spec{
+        .node_names = "[0,1,2,3,3,3]",
+        .node_types = "[9,1,1,1,1,1]",
+        .parents = "[-1,0,1,2,2,2]",
+        .attributes = "[[],[],[],[4,5],[4,6,7,8],[4,9,10,11]]",
+        .layout_nodes = "[1,2,3,4,5]",
+        .styles = "[" + page + "," + page + "," + themed + "," + styled + "," + dark + "]",
+        .bounds = "[[0,0,300,200],[0,0,300,200],[10,10,80,24],[10,40,80,24],[10,70,80,24]]",
+        .paint_orders = "[0,1,2,3,4]",
+        .computed_names = R"(["display","appearance","color-scheme","background-color",)"
+                          R"("border-top-width","border-right-width","border-bottom-width",)"
+                          R"("border-left-width","border-top-style","padding-top",)"
+                          R"("padding-right","padding-bottom","padding-left","font-size",)"
+                          R"("color"])",
+        .strings = R"J("#document","HTML","BODY","INPUT","type","submit","button","value",)J"
+                   R"J("Go","reset","disabled","","block","auto","normal","inline-block",)J"
+                   R"J("dark","rgb(239, 239, 239)","rgba(0, 0, 0, 0)","rgb(200, 0, 0)",)J"
+                   R"J("2px","0px","none","outset","6px","1px","13.3333px","rgb(0, 0, 0)")J",
+        .extra_nodes = R"(,"inputValue":{"index":[4],"value":[8]})",
+        .extra_top = R"(,"formControlTheme":{"controls":[)"
+                     R"({"node_index":3,"theme":"native"},)"
+                     R"({"node_index":4,"theme":"author"},)"
+                     R"({"node_index":5,"theme":"native"}]})",
+    };
+    const auto lowered = lower_snapshot(spec, "form-control-theme-input-button");
+    std::vector<const IRNode*> inputs;
+    const std::function<void(const IRNode&)> collect = [&](const IRNode& node) {
+        if (attribute(node, "source_tag") == "input")
+            inputs.push_back(&node);
+        for (const auto& child : node.children)
+            collect(child);
+    };
+    collect(lowered.root);
+    REQUIRE(inputs.size() == 3);
+    const auto label = [](const IRNode& node) -> std::string {
+        for (const auto& child : node.children)
+            if (child.name == "#control-value")
+                return child.text_content;
+        return {};
+    };
+
+    // A submit input is the same theme part as a <button>; its label is the
+    // UA default, drawn as the control's own text child.
+    CHECK(attribute(*inputs[0], "ua_control") == "button");
+    CHECK_FALSE(inputs[0]->style.background_color.has_value());
+    CHECK_FALSE(inputs[0]->style.border_top_width.has_value());
+    CHECK(label(*inputs[0]) == "Submit");
+
+    CHECK(attribute(*inputs[2], "ua_control") == "button");
+    CHECK(attribute(*inputs[2], "ua_disabled") == "1");
+    CHECK(attribute(*inputs[2], "ua_color_scheme") == "dark");
+    CHECK(label(*inputs[2]) == "Reset");
+
+    // The author-styled input keeps its own paint and records no theme state.
+    CHECK(attribute(*inputs[1], "native_theme") == "author");
+    CHECK_FALSE(inputs[1]->attributes.contains("ua_control"));
+    CHECK(inputs[1]->style.background_color.value_or("") == "rgb(200, 0, 0)");
+    CHECK(label(*inputs[1]) == "Go");
+}
+
 namespace {
 
 /// True when `needle` appears in any text run, name, or attribute value of the
@@ -4298,4 +4871,148 @@ TEST_CASE("a control masked by -webkit-text-security never draws its value",
     CHECK(find_by_text(lowered.root, "visible-value") != nullptr);
     CHECK(lowered.counts.control_value_text == 1);
     CHECK_FALSE(tree_mentions(lowered.root, "hunter2"));
+}
+
+namespace {
+
+/// A panel of plain `div`s for the compositing-group cases: `display`,
+/// `opacity`, `overflow`, `transform` and `background-color` per row.
+///
+/// Strings: 0 #document  1 HTML  2 BODY  3 DIV  4 block  5 "1"  6 "0.5"
+///          7 none  8 visible  9 rgb(200, 200, 200)  10 rgba(0, 0, 0, 0)
+///          11 matrix(2, 0, 0, 2, 0, 0)
+constexpr std::string_view kGroupProperties =
+    R"(["display","opacity","overflow","transform","background-color"])";
+constexpr std::string_view kGroupStrings =
+    R"J("#document","HTML","BODY","DIV","block","1","0.5","none","visible",)J"
+    R"J("rgb(200, 200, 200)","rgba(0, 0, 0, 0)","matrix(2, 0, 0, 2, 0, 0)")J";
+constexpr std::string_view kPlainRow = "[4,5,8,7,10]";
+constexpr std::string_view kFilledRow = "[4,5,8,7,9]";
+constexpr std::string_view kGroupRow = "[4,6,8,7,10]";
+constexpr std::string_view kTransformedGroupRow = "[4,6,8,11,10]";
+
+/// Six nodes: #document, HTML, BODY, then three `div`s whose parents, rows,
+/// boxes and paint ranks the case supplies.
+SnapshotSpec group_spec(std::string parents, std::string_view row3, std::string_view row4,
+                        std::string_view row5, std::string box3, std::string box4, std::string box5,
+                        std::string paint_orders) {
+    const auto plain = std::string(kPlainRow);
+    return SnapshotSpec{
+        .node_names = "[0,1,2,3,3,3]",
+        .node_types = "[9,1,1,1,1,1]",
+        .parents = std::move(parents),
+        .attributes = "[[],[],[],[],[],[]]",
+        .layout_nodes = "[0,1,2,3,4,5]",
+        .styles = "[" + plain + "," + plain + "," + plain + "," + std::string(row3) + "," +
+                  std::string(row4) + "," + std::string(row5) + "]",
+        .bounds =
+            "[[0,0,200,100],[0,0,200,100],[0,0,200,100]," + box3 + "," + box4 + "," + box5 + "]",
+        .paint_orders = std::move(paint_orders),
+        .computed_names = std::string(kGroupProperties),
+        .strings = std::string(kGroupStrings),
+    };
+}
+
+const IRNode* translucent_node(const IRNode& root) {
+    return find_node(
+        root, [](const IRNode& node) { return node.style.opacity && *node.style.opacity < 1.0f; });
+}
+
+} // namespace
+
+TEST_CASE("a flattened panel keeps a translucent group's descendants inside it",
+          "[browser-capture][native-lowering][paint-order][opacity]") {
+    // div.group{opacity:.5} holding one filled child, beside a filled sibling.
+    // Hung off the root, the child would paint at full strength next to an
+    // empty translucent box; the browser composites the two as one layer.
+    const auto lowered = lower_snapshot(
+        group_spec("[-1,0,1,2,3,2]", kGroupRow, kFilledRow, kFilledRow, "[10,10,100,60]",
+                   "[20,20,40,20]", "[150,10,40,40]", "[0,1,1,2,3,4]"),
+        "group-opacity-nested", {}, /*flatten_to_paint_order=*/true);
+
+    CHECK(lowered.counts.isolating_groups_nested == 1);
+    CHECK(lowered.counts.isolating_groups_refused == 0);
+    CHECK(lowered.counts.max_depth == 2);
+    const auto* group = translucent_node(lowered.root);
+    REQUIRE(group != nullptr);
+    CHECK(*group->style.opacity == Catch::Approx(0.5f));
+    REQUIRE(group->children.size() == 1);
+    const auto& child = group->children[0];
+    CHECK(attribute(child, "paint_order") == "3");
+    // Re-expressed against the group, and carrying no alpha of its own: the
+    // group's layer applies it once.
+    CHECK(*child.style.left == Catch::Approx(10.0f));
+    CHECK(*child.style.top == Catch::Approx(10.0f));
+    CHECK_FALSE(child.style.opacity.has_value());
+    // Everything else stays a root child, in paint order.
+    for (const auto& top : lowered.root.children)
+        if (&top != group)
+            CHECK(top.children.empty());
+    CHECK(std::any_of(lowered.root.children.begin(), lowered.root.children.end(),
+                      [](const IRNode& node) { return attribute(node, "paint_order") == "4"; }));
+}
+
+TEST_CASE("a translucent group inside a translucent group nests twice",
+          "[browser-capture][native-lowering][paint-order][opacity]") {
+    const auto lowered = lower_snapshot(group_spec("[-1,0,1,2,3,4]", kGroupRow, kGroupRow,
+                                                   kFilledRow, "[10,10,100,60]", "[15,15,80,40]",
+                                                   "[20,20,40,20]", "[0,1,1,2,3,4]"),
+                                        "group-opacity-twice", {}, /*flatten_to_paint_order=*/true);
+
+    CHECK(lowered.counts.isolating_groups_nested == 2);
+    CHECK(lowered.counts.max_depth == 3);
+    const auto* outer = translucent_node(lowered.root);
+    REQUIRE(outer != nullptr);
+    REQUIRE(outer->children.size() == 1);
+    const auto& inner = outer->children[0];
+    REQUIRE(inner.style.opacity);
+    CHECK(*inner.style.opacity == Catch::Approx(0.5f));
+    REQUIRE(inner.children.size() == 1);
+    CHECK_FALSE(inner.children[0].style.opacity.has_value());
+    CHECK(*inner.children[0].style.left == Catch::Approx(5.0f));
+}
+
+TEST_CASE("a translucent group that cannot be nested exactly stays flat and says why",
+          "[browser-capture][native-lowering][paint-order][opacity]") {
+    const auto refused = [](const SnapshotSpec& spec, const std::string& name) {
+        const auto lowered = lower_snapshot(spec, name, {}, /*flatten_to_paint_order=*/true);
+        CHECK(lowered.counts.isolating_groups_nested == 0);
+        CHECK(lowered.counts.isolating_groups_refused == 1);
+        CHECK(lowered.counts.max_depth == 1);
+        const auto* group = translucent_node(lowered.root);
+        REQUIRE(group != nullptr);
+        CHECK(group->children.empty());
+        return attribute(*group, "isolating_group_refused");
+    };
+    SECTION("a descendant reaching past the group's box") {
+        // The group's layer is the size of its box, so nesting would cut the
+        // child where it overhangs.
+        CHECK(
+            refused(group_spec("[-1,0,1,2,3,2]", kGroupRow, kFilledRow, kFilledRow, "[10,10,60,60]",
+                               "[50,20,40,20]", "[150,10,40,40]", "[0,1,1,2,3,4]"),
+                    "group-opacity-overhang") == "descendant-ink-outside-group");
+    }
+    SECTION("an outside node painting between the group and its descendant") {
+        CHECK(
+            refused(group_spec("[-1,0,1,2,3,2]", kGroupRow, kFilledRow, kFilledRow,
+                               "[10,10,100,60]", "[20,20,40,20]", "[30,30,40,40]", "[0,1,1,2,4,3]"),
+                    "group-opacity-interleaved") == "interleaved-paint-order");
+    }
+}
+
+TEST_CASE("a scaled translucent group still nests, at its scaled page box",
+          "[browser-capture][native-lowering][paint-order][opacity]") {
+    // An axis-preserving transform reaches the IR only through the boxes,
+    // which are already Chrome's post-transform page boxes, so nesting adds no
+    // second transform and the group stays exact.
+    const auto lowered = lower_snapshot(
+        group_spec("[-1,0,1,2,3,2]", kTransformedGroupRow, kFilledRow, kFilledRow, "[10,10,100,60]",
+                   "[20,20,40,20]", "[150,10,40,40]", "[0,1,1,2,3,4]"),
+        "group-opacity-scaled", {}, /*flatten_to_paint_order=*/true);
+    CHECK(lowered.counts.isolating_groups_nested == 1);
+    const auto* group = translucent_node(lowered.root);
+    REQUIRE(group != nullptr);
+    CHECK_FALSE(group->style.transform.has_value());
+    REQUIRE(group->children.size() == 1);
+    CHECK(*group->children[0].style.left == Catch::Approx(10.0f));
 }

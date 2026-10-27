@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "event_id": "20261024-importer-anchor-collision-20261024",
+  "kind": "change",
+  "created_at": "2026-10-24T21:02:06Z",
+  "slices": [
+    "design-schema-compiler"
+  ],
+  "rationale": "anchor_strategy.cpp: under the adapter strategy, a node with no source id falls back to a content hash; that fallback now counts the per-signature sibling index (over id-less siblings only) that the content_hash strategy already counts, so id-less siblings of one shape no longer share one anchor. The first such sibling keeps its previous anchor, nodes with a source id are unchanged, and no API or authority boundary moves. Pulp-only: it fixes Pulp's importer identity assignment, which bindings and tweaks in Pulp consume.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "ctest --test-dir build -R pulp-test-design-import-anchors",
+    "ctest --test-dir build -R pulp-test-design-import-native-materializer",
+    "ctest --test-dir build -R pulp-test-import-design-tool"
+  ],
+  "disposition": "pulp-only"
+}

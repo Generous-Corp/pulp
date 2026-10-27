@@ -73,6 +73,17 @@ CssFontFamily parse_css_font_family(std::string_view entry);
 /// `FontOptions::family_stack` or to `platform_family_for_css_family`.
 std::vector<std::string> split_css_font_family_list(std::string_view list);
 
+/// Whether SkParagraph may fake the bold or oblique the matched face lacks,
+/// for text in `css_font_family` at `weight` and `slant`. SkParagraph judges
+/// on the face file's own weight; Chromium judges a page font on its
+/// @font-face's declared weight range, so a face declared `400 700` is never
+/// emboldened at 700 even when only a Regular file backs it. The first family
+/// with declared ranges decides; italic keeps the default, which the same
+/// switch covers. Every paragraph built for the same text must ask this:
+/// SkParagraph's shaping cache does not key on the switch, so a measurement
+/// paragraph left at the default hands its emboldened runs to the painter.
+bool paragraph_fakes_missing_font_styles(std::string_view css_font_family, int weight, int slant);
+
 /// The family name to ask a font matcher for, for one list entry (quotes
 /// allowed): the platform family an unquoted generic keyword stands for,
 /// otherwise the entry's name without its quotes.
@@ -193,9 +204,11 @@ struct SynthesisTrace {
 /// those break text differently. The PostScript name identifies the instance.
 ///
 /// Takes the raw CSS `font-family` value — the comma list is walked here so a
-/// caller does not need its own copy of that parsing. Returns empty when
-/// nothing resolves or the build has no Skia, and an empty answer must be read
-/// as "unknown", never as "matches".
+/// caller does not need its own copy of that parsing. Without Skia (and in
+/// the lite editor stack) on Apple platforms it answers with the face CoreText
+/// resolves, which is the face the CoreGraphics canvas paints. Returns empty
+/// when nothing resolves or the platform has neither, and an empty answer must
+/// be read as "unknown", never as "matches".
 std::string resolved_face_identity(const std::string& css_font_family,
                                    float weight,
                                    FontSlant slant = FontSlant::Normal);

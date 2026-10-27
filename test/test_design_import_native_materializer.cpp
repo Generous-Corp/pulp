@@ -1,3 +1,4 @@
+#include <pulp/canvas/bundled_fonts.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/platform/child_process.hpp>
 #include <pulp/runtime/base64.hpp>
@@ -5,6 +6,7 @@
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/control_painters.hpp>
 #include <pulp/view/css_gradient.hpp>
+#include <pulp/view/design_codegen.hpp>
 #include <pulp/view/design_frame_view.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/design_sources.hpp>
@@ -23,6 +25,7 @@
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <choc/text/choc_JSON.h>
 
 #include "support/unique_temp_dir.hpp"
 #include <cmath>
@@ -30,6 +33,7 @@
 #include <fstream>
 #include <iterator>
 #include <limits>
+#include <map>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -1988,6 +1992,39 @@ TEST_CASE("baked native materializer preserves per-layer background position",
     CHECK(root->background_position() == "0 0, 2px 2px");
 }
 
+TEST_CASE("background-origin reaches the View and every emitted form of the IR",
+          "[view][import][native-materializer][gradient][background-origin]") {
+    // The origin decides the box a tile is sized and positioned in, so a lane
+    // that drops it paints a border-box tile as padding-box, or the reverse.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "bar";
+    ir.root.style.width = 400.0f;
+    ir.root.style.height = 45.0f;
+    ir.root.style.background_gradient =
+        "linear-gradient(rgba(10, 14, 20, 0.8), rgba(10, 14, 20, 0))";
+    ir.root.style.background_origin = "border-box";
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    CHECK(root->background_origin() == "border-box");
+
+    const auto parsed = parse_design_ir_json(serialize_design_ir(ir));
+    REQUIRE(parsed.root.style.background_origin);
+    CHECK(*parsed.root.style.background_origin == "border-box");
+
+    CodeGenOptions web;
+    web.mode = CodeGenMode::web_compat;
+    CHECK(generate_pulp_js(ir, web).find("backgroundOrigin") != std::string::npos);
+    CHECK(generate_pulp_cpp(ir, ir.asset_manifest, {})
+              .source.find("set_background_origin(\"border-box\")") != std::string::npos);
+
+    // Control: absent stays absent, the initial padding-box.
+    ir.root.style.background_origin.reset();
+    CHECK_FALSE(parse_design_ir_json(serialize_design_ir(ir)).root.style.background_origin);
+    CHECK(generate_pulp_js(ir, web).find("backgroundOrigin") == std::string::npos);
+}
+
 TEST_CASE("baked native materializer maps a Dropdown frame to an interactive ComboBox",
           "[view][import][native-materializer][combo-box]") {
     // ELYSIUM's FX RACK ships explicit "Dropdown" frames (a selected-value text
@@ -3189,6 +3226,146 @@ TEST_CASE("tiny Stepper grid matches baked widget and binding descriptor and com
     INFO(diagnostics);
     REQUIRE(compiled);
 #endif
+}
+
+namespace {
+
+// Records the route of every widget the binder reached.
+class RouteRecordingContext final : public NativeImportBindingContext {
+  public:
+    void bind_knob(Knob&, const NativeImportBindingDescriptor& descriptor) override {
+        routes.emplace_back(descriptor.route_id);
+    }
+    void bind_fader(Fader&, const NativeImportBindingDescriptor& descriptor) override {
+        routes.emplace_back(descriptor.route_id);
+    }
+    void bind_level_display(View&, LevelDisplay&,
+                            const NativeImportMeterBindingDescriptor& descriptor) override {
+        routes.emplace_back(descriptor.route_id);
+    }
+    std::vector<std::string> routes;
+};
+
+std::size_t occurrences(const std::string& haystack, const std::string& needle) {
+    std::size_t count = 0;
+    for (auto at = haystack.find(needle); at != std::string::npos;
+         at = haystack.find(needle, at + needle.size()))
+        ++count;
+    return count;
+}
+
+} // namespace
+
+TEST_CASE("the figma-plugin fidelity scene binds every control in both native lanes",
+          "[view][import][native-materializer][binding][identity]") {
+    // The scene's three controls carry no Figma node ids, so their anchors come
+    // from the adapter's content-hash fallback. They used to share one anchor,
+    // and both binders, which require exactly one view per anchor, bound none.
+    std::ifstream in(fs::path(PULP_REPO_ROOT) / "test/fixtures/import-fidelity/scene.pulp.json",
+                     std::ios::binary);
+    REQUIRE(in.good());
+    const std::string json((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    const auto ir = parse_figma_plugin_json(json);
+    REQUIRE(ir.root.children.size() == 3);
+    CHECK(find_duplicate_anchors(ir.root).empty());
+
+    auto root = build_native_view_tree(ir, ir.asset_manifest, {.preview_mode = true});
+    REQUIRE(root != nullptr);
+    RouteRecordingContext binding;
+    std::vector<ImportDiagnostic> diagnostics;
+    bind_native_view_tree(*root, ir, binding, {.diagnostics_out = &diagnostics});
+    for (const auto& d : diagnostics) {
+        INFO(d.code << " at " << d.path << ": " << d.message);
+        CHECK(d.code != "native-binding-duplicate-anchor");
+    }
+    CHECK(binding.routes == std::vector<std::string>{"figma-plugin:filter.cutoff_hz",
+                                                     "figma-plugin:param.master_level",
+                                                     "figma-plugin:meter.out_l"});
+
+    // The baked binder looks each route up with find_imported_view_by_anchor
+    // and binds only on exactly one match, so each anchor must be set once.
+    const auto generated = generate_pulp_cpp(ir, ir.asset_manifest, {});
+    for (const auto& control : ir.root.children) {
+        REQUIRE(control.stable_anchor_id.has_value());
+        INFO("anchor " << *control.stable_anchor_id);
+        CHECK(occurrences(generated.source,
+                          "set_anchor_id(\"" + *control.stable_anchor_id + "\")") == 1);
+        CHECK(occurrences(generated.source, "find_imported_view_by_anchor(root, \"" +
+                                                *control.stable_anchor_id + "\"") == 1);
+    }
+
+#if defined(_WIN32)
+    SKIP("freestanding generated-source compile is unsupported on the Windows CI toolchain");
+#else
+    TempDir tmp("pulp-fidelity-scene-binding-cpp");
+    write_text(tmp.path / "imported_ui.hpp", generated.header);
+    write_text(tmp.path / "imported_ui.cpp", generated.source);
+    std::string compile_diagnostics;
+    const bool compiled = compile_generated_source(
+        tmp.path / "imported_ui.cpp", tmp.path / "imported_ui.o", &compile_diagnostics);
+    INFO(compile_diagnostics);
+    CHECK(compiled);
+#endif
+}
+
+TEST_CASE("the v0 audio panel's Drive and Tone sliders each bind",
+          "[view][import][native-materializer][binding][identity]") {
+    // Each slider sits in its own card with a caption, but an unlabelled range
+    // input hashes the same wherever it is, so both shared one anchor: their
+    // two routes named one anchor, which no host can resolve to one view.
+    std::ifstream in(fs::path(PULP_REPO_ROOT) / "test/fixtures/v0-dev/audio-control-panel.tsx",
+                     std::ios::binary);
+    REQUIRE(in.good());
+    const std::string tsx((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    const auto ir = parse_v0_tsx(tsx);
+    CHECK(find_duplicate_anchors(ir.root).empty());
+
+    std::vector<const IRNode*> sliders;
+    const auto collect = [&](auto& self, const IRNode& node) -> void {
+        if (node.attributes.count("pulpValueKey") &&
+            (node.attributes.at("pulpValueKey") == "drive" ||
+             node.attributes.at("pulpValueKey") == "tone"))
+            sliders.push_back(&node);
+        for (const auto& child : node.children)
+            self(self, child);
+    };
+    collect(collect, ir.root);
+    REQUIRE(sliders.size() == 2);
+    REQUIRE(sliders[0]->stable_anchor_id.has_value());
+    REQUIRE(sliders[1]->stable_anchor_id.has_value());
+    CHECK(*sliders[0]->stable_anchor_id != *sliders[1]->stable_anchor_id);
+
+    auto root = build_native_view_tree(ir, ir.asset_manifest, {.preview_mode = true});
+    REQUIRE(root != nullptr);
+    RouteRecordingContext binding;
+    std::vector<ImportDiagnostic> diagnostics;
+    bind_native_view_tree(*root, ir, binding, {.diagnostics_out = &diagnostics});
+    for (const auto& d : diagnostics) {
+        INFO(d.code << " at " << d.path << ": " << d.message);
+        CHECK(d.code != "native-binding-duplicate-anchor");
+    }
+
+    // The sliders bind by state value key (drive, tone): the baked binding
+    // manifest names each route's anchor, and a host resolves that anchor to
+    // the one view that carries it.
+    const auto generated = generate_pulp_cpp(ir, ir.asset_manifest, {});
+    const auto manifest = choc::json::parse(generated.binding_manifest);
+    std::map<std::string, std::string> anchor_of_key;
+    const auto entries = manifest["entries"];
+    for (uint32_t i = 0; i < entries.size(); ++i)
+        if (entries[i].hasObjectMember("value_key"))
+            anchor_of_key[std::string(entries[i]["value_key"].toString())] =
+                std::string(entries[i]["anchor_id"].toString());
+    REQUIRE(anchor_of_key.count("drive") == 1);
+    REQUIRE(anchor_of_key.count("tone") == 1);
+    CHECK(anchor_of_key["drive"] != anchor_of_key["tone"]);
+    for (const auto* slider : sliders) {
+        INFO("anchor " << *slider->stable_anchor_id);
+        CHECK(occurrences(generated.source,
+                          "set_anchor_id(\"" + *slider->stable_anchor_id + "\")") == 1);
+    }
+    CHECK(anchor_of_key["drive"] == *sliders[0]->stable_anchor_id);
+    CHECK(anchor_of_key["tone"] == *sliders[1]->stable_anchor_id);
 }
 
 TEST_CASE("compiled generated C++ binding helper binds and fails closed at runtime",
@@ -5123,4 +5300,149 @@ TEST_CASE(
         REQUIRE(compiled);
 #endif
     }
+}
+
+TEST_CASE("a captured antialiased text node materializes as an antialiased label",
+          "[design-import][native][font-smoothing]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.style.width = 240.0f;
+    ir.root.style.height = 60.0f;
+    for (const char* text : {"Antialiased", "Default"}) {
+        IRNode node;
+        node.type = "text";
+        node.text_content = text;
+        node.style.font_size = 15.0f;
+        node.style.width = 120.0f;
+        node.style.height = 20.0f;
+        if (std::string_view(text) == "Antialiased")
+            node.attributes["font_smoothing"] = "antialiased";
+        ir.root.children.push_back(node);
+    }
+    auto root = build_native_view_tree(ir, ir.asset_manifest);
+    REQUIRE(root);
+    const auto find = [&](const std::string& text) -> Label* {
+        const auto walk = [&](auto&& self, View& view) -> Label* {
+            if (auto* label = dynamic_cast<Label*>(&view); label && label->text() == text)
+                return label;
+            for (std::size_t i = 0; i < view.child_count(); ++i)
+                if (auto* child = view.child_at(i))
+                    if (auto* found = self(self, *child))
+                        return found;
+            return nullptr;
+        };
+        return walk(walk, *root);
+    };
+    auto* smooth = find("Antialiased");
+    auto* plain = find("Default");
+    REQUIRE(smooth != nullptr);
+    REQUIRE(plain != nullptr);
+    CHECK(smooth->font_smoothing() == pulp::canvas::FontSmoothing::antialiased);
+    CHECK(plain->font_smoothing() == pulp::canvas::FontSmoothing::auto_smoothing);
+    CHECK(design_ir_text_raster_policy(ir) == pulp::canvas::TextRasterPolicy::chromium);
+}
+
+// Generated JS and the bridge's registerFont carry each captured @font-face
+// rule's declared weight range to the text renderer.
+namespace {
+
+DesignIR ir_with_face(std::string family, std::string path, int weight, int weight_max) {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "root";
+    ir.root.style.width = 100.0f;
+    ir.root.style.height = 40.0f;
+    IRFontAsset face;
+    face.family = std::move(family);
+    face.resolved_path = std::move(path);
+    face.weight = weight;
+    face.weight_max = weight_max;
+    ir.font_family_assets.push_back(face);
+    return ir;
+}
+
+} // namespace
+
+TEST_CASE("generated JS registers a captured face with its declared weight range",
+          "[view][import][codegen][fonts][synthetic-bold]") {
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::bridge_native_js;
+    const auto range = generate_pulp_js(ir_with_face("Probe", "/fonts/Jost.ttf", 400, 700), opts);
+    CHECK(range.find("registerFont('Probe', '/fonts/Jost.ttf', 400, 700);") != std::string::npos);
+    const auto single = generate_pulp_js(ir_with_face("Probe", "/fonts/Jost.ttf", 400, 0), opts);
+    CHECK(single.find("registerFont('Probe', '/fonts/Jost.ttf', 400, 400);") != std::string::npos);
+}
+
+TEST_CASE("registerFont declares a range only for a registered face and valid weights",
+          "[view][bridge][fonts][synthetic-bold]") {
+    const std::string jost = std::string(PULP_REPO_ROOT) + "/external/fonts/Jost-Regular.ttf";
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 100, 40});
+    pulp::state::StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    const auto call = [&](const std::string& family, const std::string& path,
+                          const std::string& weights) {
+        return engine.evaluate("registerFont('" + family + "', '" + path + "'" + weights + ")")
+            .getWithDefault<bool>(false);
+    };
+
+    // Control: a resolvable face with a valid range declares it.
+    CHECK(call("BridgeFaceValid", jost, ", 400, 700"));
+    CHECK(pulp::canvas::declared_face_synthesizes_bold("BridgeFaceValid", 700) == false);
+
+    // A face that never registered must not leave a range behind.
+    CHECK_FALSE(call("BridgeFaceMissing", "/nonexistent/face.ttf", ", 400, 700"));
+    CHECK_FALSE(pulp::canvas::has_declared_font_face_weights("BridgeFaceMissing"));
+
+    // Non-finite weights declare nothing; the face itself still registers.
+    CHECK(call("BridgeFaceNaN", jost, ", NaN, 700"));
+    CHECK(call("BridgeFaceInf", jost, ", 400, Infinity"));
+    CHECK_FALSE(pulp::canvas::has_declared_font_face_weights("BridgeFaceNaN"));
+    CHECK_FALSE(pulp::canvas::has_declared_font_face_weights("BridgeFaceInf"));
+
+    // Out-of-range weights clamp to CSS's [1, 1000] instead of overflowing the cast.
+    CHECK(call("BridgeFaceHuge", jost, ", 400, 1e300"));
+    CHECK(pulp::canvas::declared_face_synthesizes_bold("BridgeFaceHuge", 1000) == false);
+
+    // A reversed pair is the same range.
+    CHECK(call("BridgeFaceReversed", jost, ", 700, 400"));
+    CHECK(pulp::canvas::declared_face_synthesizes_bold("BridgeFaceReversed", 700) == false);
+}
+
+TEST_CASE("registerFont weight ranges are removed with their bridge scope",
+          "[view][bridge][fonts][synthetic-bold][reload]") {
+    const std::string jost = std::string(PULP_REPO_ROOT) + "/external/fonts/Jost-Regular.ttf";
+    {
+        ScriptEngine engine;
+        View root;
+        pulp::state::StateStore store;
+        WidgetBridge bridge(engine, root, store);
+        REQUIRE(engine.evaluate("registerFont('ScopedFace', '" + jost + "', 400, 700)")
+                    .getWithDefault<bool>(false));
+        CHECK(pulp::canvas::declared_face_synthesizes_bold("ScopedFace", 700) == false);
+    }
+    CHECK_FALSE(pulp::canvas::has_declared_font_face_weights("ScopedFace"));
+}
+
+TEST_CASE("font declaration cleanup does not cross bridges sharing storage identity",
+          "[view][bridge][fonts][synthetic-bold][reload][scope]") {
+    const std::string jost = std::string(PULP_REPO_ROOT) + "/external/fonts/Jost-Regular.ttf";
+    ScriptEngine first_engine;
+    ScriptEngine second_engine;
+    View first_root;
+    View second_root;
+    pulp::state::StateStore first_store;
+    pulp::state::StateStore second_store;
+    WidgetBridge first(first_engine, first_root, first_store);
+    WidgetBridge second(second_engine, second_root, second_store);
+    first.set_storage_identity("shared-script");
+    second.set_storage_identity("shared-script");
+    REQUIRE(first_engine.evaluate("registerFont('SharedScopeFace', '" + jost + "', 400, 700)")
+                .getWithDefault<bool>(false));
+    REQUIRE(second_engine.evaluate("registerFont('SharedScopeFace', '" + jost + "', 400, 400)")
+                .getWithDefault<bool>(false));
+    CHECK(pulp::canvas::declared_face_synthesizes_bold("SharedScopeFace", 700) == false);
+    first.clear_for_realm_replacement();
+    CHECK(pulp::canvas::declared_face_synthesizes_bold("SharedScopeFace", 700) == true);
 }

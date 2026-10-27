@@ -160,6 +160,12 @@ if(PULP_HAS_SKIA)
         LIBRARIES pulp::canvas)
 endif()
 
+# CSS font-weight matching: the spec order as a table, and the face every
+# picking path reports for real platform families (macOS cases skip where the
+# family is not installed).
+pulp_add_test_suite(pulp-test-font-weight-match GROUP pulp-test-group-canvas-text
+    LIBRARIES pulp::canvas)
+
 # Font subsystem typed options and scope generation tests
 pulp_add_test_suite(pulp-test-font-options GROUP pulp-test-group-canvas-text
     LIBRARIES pulp::canvas)
@@ -210,6 +216,30 @@ if(PULP_HAS_SKIA)
         LIBRARIES pulp::canvas)
 endif()
 
+# Laid-out paragraph cache behind SkiaCanvas text: cached renders byte-equal
+# to uncached ones across every key input, a font registration and a width
+# change; build counts; entry and byte bounds. Raster-only.
+if(PULP_HAS_SKIA)
+    pulp_add_test_suite(pulp-test-paragraph-cache GROUP pulp-test-group-canvas-text
+        LIBRARIES pulp::canvas
+        COMPILE_DEFINITIONS
+            PULP_TEST_JOST_FONT_PATH="${CMAKE_SOURCE_DIR}/external/fonts/Jost-Regular.ttf")
+    pulp_test_data(pulp-test-paragraph-cache NO_DEFINE PATHS external/fonts/Jost-Regular.ttf)
+    # The key-switch case reaches the cache's internal key directly.
+    target_include_directories(pulp-test-group-canvas-text PRIVATE
+        ${PULP_ROOT_DIR}/core/canvas/src)
+endif()
+
+# Native builds must not pull Skia's Ganesh backend into pulp-canvas; see the
+# script for why one unguarded call keeps all of it alive.
+if(PULP_HAS_SKIA AND NOT EMSCRIPTEN AND CMAKE_NM AND NOT MSVC)
+    add_test(NAME pulp-canvas-native-no-ganesh
+        COMMAND "${CMAKE_COMMAND}"
+            "-DNM=${CMAKE_NM}"
+            "-DARCHIVE=$<TARGET_FILE:pulp-canvas>"
+            -P "${CMAKE_CURRENT_LIST_DIR}/check_canvas_no_ganesh_refs.cmake")
+endif()
+
 if(PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU)
     # Two live-GPU groups, split by compile line: the pulp::canvas + pulp::render
     # suites, and the ones that also drive a pulp::view tree.
@@ -225,6 +255,12 @@ if(PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU)
     # APPLE-gated, so the Windows webgpu DL_PATHS dance from the
     # PULP_GPU_TEST_DISCOVERY_ARGS block below isn't needed here.
     pulp_add_test_suite(pulp-test-font-rendering-goldens-gpu GROUP pulp-test-group-canvas-text-gpu
+        LIBRARIES pulp::canvas pulp::render
+        PROPERTIES RESOURCE_LOCK pulp_gpu)
+
+    # The paragraph cache on Graphite: a cached frame reads back the same
+    # bytes as an uncached one, through a text, paint and width change.
+    pulp_add_test_suite(pulp-test-paragraph-cache-gpu GROUP pulp-test-group-canvas-text-gpu
         LIBRARIES pulp::canvas pulp::render
         PROPERTIES RESOURCE_LOCK pulp_gpu)
 
@@ -280,10 +316,11 @@ if(PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU)
         LABELS bench)
 
     # Content-keyed inline image cache on a live offscreen Dawn/Graphite
-    # surface: keyed inline bytes (raw, ImageView data URI, SceneImage) build
-    # once and hit afterwards, a disabled cache rebuilds every draw, and cached
-    # frames match the uncached pixels. The [bench] case prints per-frame cost
-    # with the cache on and off. Soft-skips without an adapter.
+    # surface: keyed inline bytes (raw, ImageView data URIs in PNG, JPEG, WebP
+    # and GIF, SceneImage, Knob/Fader sprite strips) build once and hit
+    # afterwards, a disabled cache rebuilds every draw, undecodable bytes are
+    # tried once, and cached frames match the uncached pixels. The [bench] cases
+    # print per-frame cost with the cache on and off. Soft-skips without an adapter.
     pulp_add_test_suite(pulp-test-inline-image-cache-gpu
         LIBRARIES pulp::view pulp::canvas pulp::render
         TEST_SPEC "~[bench]"
@@ -298,6 +335,13 @@ if(PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU)
     # and measured the same way as pulp-test-css-gradient-dither's raster
     # cases. Soft-skips without an adapter.
     pulp_add_test_suite(pulp-test-css-gradient-dither-gpu
+        LIBRARIES pulp::view pulp::canvas pulp::render
+        PROPERTIES RESOURCE_LOCK pulp_gpu)
+
+    # CSS gradient interpolation methods on an offscreen Dawn/Graphite surface,
+    # midpoints held to Chrome's as pulp-test-css-gradient-interpolation holds
+    # the raster ones. Soft-skips without an adapter.
+    pulp_add_test_suite(pulp-test-css-gradient-interpolation-gpu
         LIBRARIES pulp::view pulp::canvas pulp::render
         PROPERTIES RESOURCE_LOCK pulp_gpu)
 

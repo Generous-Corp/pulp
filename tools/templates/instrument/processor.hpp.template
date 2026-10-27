@@ -1,7 +1,6 @@
 #pragma once
 
 #include <pulp/format/processor.hpp>
-#include <algorithm>
 #include <pulp/signal/oscillator.hpp>
 #include <pulp/signal/adsr.hpp>
 #include <cmath>
@@ -29,6 +28,11 @@ inline pulp::format::PluginDescriptor make_descriptor() {
 
 class {{CLASS_NAME}} : public pulp::format::Processor {
 public:
+    // Reads its parameters once per block, so it opts out of per-point
+    // automation: the VST3, AU v2 and CLAP adapters then write each
+    // automated parameter once per block and dense automation costs nothing.
+    bool wants_sample_accurate_parameters() const override { return false; }
+
     pulp::format::PluginDescriptor descriptor() const override {
         return make_descriptor();
     }
@@ -53,33 +57,10 @@ public:
 
     void process(
         pulp::audio::BufferView<float>& output,
-        const pulp::audio::BufferView<const float>& /*input*/,
+        const pulp::audio::BufferView<const float>& input,
         pulp::midi::MidiBuffer& midi_in,
-        pulp::midi::MidiBuffer& /*midi_out*/,
-        const pulp::format::ProcessContext& /*ctx*/) override
-    {
-        const float gain = std::pow(10.0f, gain_db_.get() / 20.0f);
-
-        for (const auto& event : midi_in) {
-            if (event.is_note_on()) {
-                const float freq = 440.0f * std::pow(2.0f, (static_cast<float>(event.note()) - 69.0f) / 12.0f);
-                osc_.set_frequency(freq);
-                env_.note_on();
-            } else if (event.is_note_off()) {
-                env_.note_off();
-            }
-        }
-
-        // Render the mono voice into the first channel, then copy it to the
-        // others; raw channel pointers keep member access out of the loop.
-        const std::size_t n = output.num_samples();
-        if (output.num_channels() == 0) return;
-        float* first = output.channel_ptr(0);
-        for (std::size_t i = 0; i < n; ++i)
-            first[i] = osc_.next() * env_.next() * gain;
-        for (std::size_t ch = 1; ch < output.num_channels(); ++ch)
-            std::copy_n(first, n, output.channel_ptr(ch));
-    }
+        pulp::midi::MidiBuffer& midi_out,
+        const pulp::format::ProcessContext& ctx) override;  // defined in {{SOURCE_NAME}}
 
 private:
     pulp::state::ParamReader gain_db_;

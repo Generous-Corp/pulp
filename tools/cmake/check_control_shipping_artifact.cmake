@@ -1,3 +1,84 @@
+# Pin the policy level. Run with -P and no minimum, CMake 3.x evaluates
+# `${var}` under the old CMP0053 rules, which stop at the first NUL byte; a
+# binary read below would then be a few bytes long and every marker search
+# would miss, which fails OPEN for the forbidden-marker checks. 3.24 is the
+# oldest CMake the project templates accept.
+cmake_minimum_required(VERSION 3.24)
+
+# Every marker this scanner looks for is printable ASCII without whitespace,
+# at least 14 bytes and free of `;`. _pulp_binary_contains refuses any other
+# marker, so the rule cannot erode silently when one is added; the selftest
+# hook below exercises the refusal.
+set(_pulp_marker_min_length 14)
+
+# Read the whole image as bytes. This is about a tenth of the cost of reading
+# its printable runs with file(STRINGS) (on a 40 MB plug-in, 0.03 s against
+# 0.38 s) and searches the raw bytes directly. Several CMake behaviours
+# matter, and each was measured:
+# - file(READ) folds each CRLF pair to LF. A marker contains neither byte, so
+#   the fold can neither hide a marker nor create one; the value is shorter
+#   than the file by the number of folded pairs, at most half its size.
+# - A NUL truncates the value in several places: `${var}` on CMake 3.x
+#   without the policy pin above, set(... PARENT_SCOPE) on every version, and
+#   string(REPLACE) / string(REGEX) on every version. string(LENGTH) and
+#   string(FIND) see the whole value. So this is a macro (the bytes land in the
+#   caller's scope directly), only LENGTH and FIND ever touch the bytes, and a
+#   function may read them but must never return them.
+# - Every truncation stops at the first NUL, which an executable has within its
+#   first few header bytes. A read shorter than half the file can only be such
+#   a truncation (CRLF folding removes at most half), so the scan fails closed.
+#   The length is also recorded as <var>_length, and _pulp_binary_contains
+#   refuses to search a value whose length differs from it.
+macro(_pulp_read_binary path out_var)
+    file(SIZE "${path}" _pulp_read_size)
+    file(READ "${path}" ${out_var})
+    string(LENGTH "${${out_var}}" _pulp_read_length)
+    math(EXPR _pulp_read_twice "${_pulp_read_length} * 2")
+    if(_pulp_read_length GREATER _pulp_read_size OR _pulp_read_twice LESS _pulp_read_size)
+        message(FATAL_ERROR
+            "control shipping scan read ${_pulp_read_length} of ${_pulp_read_size} bytes "
+            "of ${path}; refusing to scan a truncated image")
+    endif()
+    set(${out_var}_length "${_pulp_read_length}")
+endmacro()
+
+# `bytes_var` names the variable holding a _pulp_read_binary result; passing
+# the name avoids copying the image on every lookup.
+function(_pulp_binary_contains bytes_var marker out_var)
+    string(LENGTH "${marker}" _marker_length)
+    if(_marker_length LESS _pulp_marker_min_length
+       OR NOT marker MATCHES "^[!-:<-~]+$")
+        message(FATAL_ERROR
+            "control shipping marker must be printable ASCII without spaces or "
+            "semicolons and at least ${_pulp_marker_min_length} bytes: ${marker}")
+    endif()
+    string(LENGTH "${${bytes_var}}" _searched_length)
+    if(NOT _searched_length EQUAL ${bytes_var}_length)
+        message(FATAL_ERROR
+            "control shipping scan would search ${_searched_length} of "
+            "${${bytes_var}_length} bytes read into ${bytes_var}; refusing to scan "
+            "a truncated image")
+    endif()
+    string(FIND "${${bytes_var}}" "${marker}" _marker_position)
+    if(_marker_position GREATER_EQUAL 0)
+        set(${out_var} TRUE PARENT_SCOPE)
+    else()
+        set(${out_var} FALSE PARENT_SCOPE)
+    endif()
+endfunction()
+
+# Admission check for a single marker, for tests: run the scanner with
+# -DPULP_CONTROL_MARKER_SELFTEST=<marker> and it applies the rule
+# _pulp_binary_contains enforces, then stops without reading any artifact.
+if(DEFINED PULP_CONTROL_MARKER_SELFTEST)
+    set(_pulp_selftest_strings "")
+    set(_pulp_selftest_strings_length 0)
+    _pulp_binary_contains(_pulp_selftest_strings "${PULP_CONTROL_MARKER_SELFTEST}"
+        _pulp_selftest_found)
+    message(STATUS "control shipping marker accepted: ${PULP_CONTROL_MARKER_SELFTEST}")
+    return()
+endif()
+
 if(NOT EXISTS "${ARTIFACT}" OR NOT EXISTS "${MANIFEST}" OR
    NOT EXISTS "${SHIPPING_MANIFEST}")
     message(FATAL_ERROR
@@ -8,13 +89,19 @@ endif()
 # the artifact, both manifests, and this scanner means the artifact's POST_BUILD
 # scan already covered these exact inputs and wrote the report, so a second
 # scan would only repeat it. `IS_NEWER_THAN` is true on equal timestamps, so a
-# tie always rescans.
+# tie always rescans. SCAN_AFTER_INPUTS ("|"-separated) are the stamps of steps
+# that write into the bundle after the link, such as an embedded framework; a
+# rerun of one of them changes what the closure scan reads.
 if(SKIP_IF_FRESH_STAMP AND EXISTS "${SKIP_IF_FRESH_STAMP}"
    AND REPORT AND EXISTS "${REPORT}")
     set(_pulp_scan_stamp_fresh TRUE)
+    string(REPLACE "|" ";" _pulp_scan_after_inputs "${SCAN_AFTER_INPUTS}")
     foreach(_pulp_scan_input IN ITEMS
             "${ARTIFACT}" "${MANIFEST}" "${SHIPPING_MANIFEST}"
-            "${CMAKE_CURRENT_LIST_FILE}")
+            "${CMAKE_CURRENT_LIST_FILE}"
+            "${CMAKE_CURRENT_LIST_DIR}/PulpReleaseArtifactScan.cmake"
+            "${CMAKE_CURRENT_LIST_DIR}/release_artifact_forbidden.json"
+            ${_pulp_scan_after_inputs})
         if("${_pulp_scan_input}" IS_NEWER_THAN "${SKIP_IF_FRESH_STAMP}")
             set(_pulp_scan_stamp_fresh FALSE)
         endif()
@@ -24,43 +111,26 @@ if(SKIP_IF_FRESH_STAMP AND EXISTS "${SKIP_IF_FRESH_STAMP}"
     endif()
 endif()
 
-# Every marker this scanner looks for is printable ASCII without whitespace
-# and at least this many bytes long. A contiguous byte sequence like that always
-# lies inside one printable run of the binary, so searching the binary's
-# printable runs is the same as searching its raw bytes, and it avoids
-# hex-encoding the whole image: on a 40 MB plug-in, `file(READ ... HEX)` plus
-# hex-space searches cost several seconds on every link. The length floor is
-# the shortest marker ("view.param_set"); _pulp_binary_contains refuses any
-# marker that breaks either property, so the equivalence cannot erode
-# silently when a marker is added.
-set(_pulp_marker_min_length 14)
+# The forbidden strings, symbols and loader dependencies of a
+# production-stripped artifact are the `control-stripped` gate of the shared
+# release-artifact list, read through the scanner module installed beside this
+# file. Both are stamp inputs above, so a policy change rescans.
+include("${CMAKE_CURRENT_LIST_DIR}/PulpReleaseArtifactScan.cmake")
+pulp_release_artifact_load("${CMAKE_CURRENT_LIST_DIR}/release_artifact_forbidden.json")
+pulp_release_artifact_select(OUT_IDS _pulp_forbidden_string_ids
+    OUT_PATTERNS _pulp_forbidden_strings KIND string GATES control-stripped)
+pulp_release_artifact_select(OUT_IDS _pulp_forbidden_symbol_ids
+    OUT_PATTERNS _pulp_forbidden_symbols KIND symbol GATES control-stripped)
+pulp_release_artifact_select(OUT_IDS _pulp_forbidden_dependency_ids
+    OUT_PATTERNS _pulp_forbidden_dependencies KIND dependency GATES control-stripped)
+if(NOT _pulp_forbidden_strings OR NOT _pulp_forbidden_symbols
+   OR NOT _pulp_forbidden_dependencies)
+    message(FATAL_ERROR
+        "control shipping scan: the control-stripped gate of release_artifact_forbidden.json "
+        "must name at least one string, one symbol and one dependency marker")
+endif()
 
-function(_pulp_read_binary_strings path out_var)
-    file(STRINGS "${path}" _strings LENGTH_MINIMUM ${_pulp_marker_min_length})
-    set(${out_var} "${_strings}" PARENT_SCOPE)
-endfunction()
-
-# `strings_var` names the variable holding a _pulp_read_binary_strings result;
-# passing the name avoids copying the string table on every lookup.
-function(_pulp_binary_contains strings_var marker out_var)
-    string(LENGTH "${marker}" _marker_length)
-    # `;` is excluded because the runs are joined into a CMake list with `;`,
-    # so a marker containing one could match across two runs.
-    if(_marker_length LESS _pulp_marker_min_length
-       OR NOT marker MATCHES "^[!-:<-~]+$")
-        message(FATAL_ERROR
-            "control shipping marker must be printable ASCII without spaces or "
-            "semicolons and at least ${_pulp_marker_min_length} bytes: ${marker}")
-    endif()
-    string(FIND "${${strings_var}}" "${marker}" _marker_position)
-    if(_marker_position GREATER_EQUAL 0)
-        set(${out_var} TRUE PARENT_SCOPE)
-    else()
-        set(${out_var} FALSE PARENT_SCOPE)
-    endif()
-endfunction()
-
-_pulp_read_binary_strings("${ARTIFACT}" _binary)
+_pulp_read_binary("${ARTIFACT}" _binary)
 file(READ "${MANIFEST}" _manifest)
 file(READ "${SHIPPING_MANIFEST}" _shipping_manifest)
 file(SIZE "${ARTIFACT}" _artifact_size)
@@ -275,6 +345,27 @@ elseif(WIN32)
         list(APPEND _compiler_hints "${_compiler_dir}")
     endif()
     find_program(_pulp_dumpbin NAMES dumpbin.exe dumpbin HINTS ${_compiler_hints})
+    # dumpbin sits beside cl.exe, so the compiler hint finds it for MSVC. A
+    # clang-cl build outside a Developer Prompt has neither it nor dumpbin's
+    # directory on PATH (clang-cl lives in LLVM's bin), so ask the Visual Studio
+    # installer where the MSVC tools are.
+    if(NOT _pulp_dumpbin)
+        set(_pulp_vswhere "$ENV{ProgramFiles\(x86\)}/Microsoft Visual Studio/Installer/vswhere.exe")
+        if(EXISTS "${_pulp_vswhere}")
+            execute_process(COMMAND "${_pulp_vswhere}" -latest -products *
+                    -find "VC/Tools/MSVC/**/bin/Host*/*/dumpbin.exe"
+                RESULT_VARIABLE _vswhere_result OUTPUT_VARIABLE _vswhere_output
+                ERROR_QUIET)
+            if(_vswhere_result EQUAL 0)
+                string(REPLACE "\r" "" _vswhere_output "${_vswhere_output}")
+                string(REPLACE "\n" ";" _vswhere_found "${_vswhere_output}")
+                list(FILTER _vswhere_found INCLUDE REGEX "dumpbin\\.exe$")
+                if(_vswhere_found)
+                    list(GET _vswhere_found 0 _pulp_dumpbin)
+                endif()
+            endif()
+        endif()
+    endif()
     if(_pulp_dumpbin)
         execute_process(COMMAND "${_pulp_dumpbin}" /DEPENDENTS "${ARTIFACT}"
             RESULT_VARIABLE _dependency_result OUTPUT_VARIABLE _dependency_output
@@ -332,33 +423,22 @@ endif()
 
 set(_closure_binary_count 0)
 if(_profile STREQUAL "production-stripped")
-    foreach(_forbidden_marker IN ITEMS
-            PULP_INSPECT_SHIPPING_MANIFEST_V1
-            PULP_INSPECT_RUNTIME_EVAL_HIGH_RISK_COMPONENT_V1
-            PULP_REMOTE_VIEW_PARAMETER_AUTHORITY_V1
-            PULP_INSPECT_CAPABILITY_
-            view.param_set)
+    foreach(_forbidden_marker IN LISTS _pulp_forbidden_strings)
         _pulp_forbid_marker("${_forbidden_marker}"
             "production-stripped artifact contains forbidden control string")
     endforeach()
-    # Match canonical control implementation namespaces. Generic names such as
-    # ControlService or RemoteView are valid names for ordinary plugin code and
-    # are not evidence that a control implementation leaked into the artifact.
-    foreach(_forbidden_symbol IN ITEMS
-            "pulp::inspect::ControlBroker"
-            "pulp::inspect::ControlService"
-            "pulp::inspect::ControlEndpoint"
-            "pulp::inspect::RuntimeEvaluator")
+    # The symbol markers are canonical control implementation namespaces.
+    # Generic names such as ControlService or RemoteView are valid names for
+    # ordinary plugin code and are not evidence that a control implementation
+    # leaked into the artifact.
+    foreach(_forbidden_symbol IN LISTS _pulp_forbidden_symbols)
         string(FIND "${_symbol_output}" "${_forbidden_symbol}" _symbol_position)
         if(_symbol_position GREATER_EQUAL 0)
             message(FATAL_ERROR
                 "production-stripped artifact contains forbidden control symbol: ${_forbidden_symbol}")
         endif()
     endforeach()
-    foreach(_forbidden_dependency IN ITEMS
-            pulp-inspect-control pulp-inspect-client pulp-inspect-runtime
-            pulp-inspect-runtime-eval pulp-inspect-standalone-runtime
-            pulp-control-broker)
+    foreach(_forbidden_dependency IN LISTS _pulp_forbidden_dependencies)
         string(FIND "${_dependency_output}" "${_forbidden_dependency}" _dependency_position)
         if(_dependency_position GREATER_EQUAL 0)
             message(FATAL_ERROR
@@ -391,20 +471,18 @@ if(_profile STREQUAL "production-stripped")
                 continue()
             endif()
         endif()
+        # Four bytes identify ELF, Mach-O and fat Mach-O; a PE image (a Windows
+        # DLL inside a bundle) is identified by its first two, "MZ", so its
+        # last two hex bytes are free.
         file(READ "${_closure_candidate}" _closure_magic LIMIT 4 HEX)
         string(TOLOWER "${_closure_magic}" _closure_magic)
         if(NOT _closure_magic MATCHES
-           "^(7f454c46|4d5a|cffaedfe|cefaedfe|feedfacf|feedface|cafebabe|bebafeca)$")
+           "^(7f454c46|cffaedfe|cefaedfe|feedfacf|feedface|cafebabe|bebafeca|4d5a[0-9a-f][0-9a-f][0-9a-f][0-9a-f])$")
             continue()
         endif()
         math(EXPR _closure_binary_count "${_closure_binary_count} + 1")
-        _pulp_read_binary_strings("${_closure_candidate}" _closure_binary)
-        foreach(_forbidden_marker IN ITEMS
-                PULP_INSPECT_SHIPPING_MANIFEST_V1
-                PULP_INSPECT_RUNTIME_EVAL_HIGH_RISK_COMPONENT_V1
-                PULP_REMOTE_VIEW_PARAMETER_AUTHORITY_V1
-                PULP_INSPECT_CAPABILITY_
-                view.param_set)
+        _pulp_read_binary("${_closure_candidate}" _closure_binary)
+        foreach(_forbidden_marker IN LISTS _pulp_forbidden_strings)
             _pulp_binary_contains(_closure_binary "${_forbidden_marker}"
                 _closure_marker_found)
             if(_closure_marker_found)
@@ -424,11 +502,7 @@ if(_profile STREQUAL "production-stripped")
         # Fully stripped libraries can have no printable symbols; their
         # implementation-owned markers above remain fail-closed evidence.
         if(_closure_symbol_result EQUAL 0)
-            foreach(_forbidden_symbol IN ITEMS
-                    "pulp::inspect::ControlBroker"
-                    "pulp::inspect::ControlService"
-                    "pulp::inspect::ControlEndpoint"
-                    "pulp::inspect::RuntimeEvaluator")
+            foreach(_forbidden_symbol IN LISTS _pulp_forbidden_symbols)
                 string(FIND "${_closure_symbols}" "${_forbidden_symbol}"
                     _closure_symbol_position)
                 if(_closure_symbol_position GREATER_EQUAL 0)

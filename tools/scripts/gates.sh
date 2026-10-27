@@ -97,7 +97,13 @@ BASE="${1:-${PULP_GATES_BASE:-origin/main}}"
 
 MERGE_TREE_SCRIPT_STATE="$ROOT/tools/scripts/merge_tree_script_state.py"
 if [ -f "$MERGE_TREE_SCRIPT_STATE" ]; then
-    "$PYTHON" "$MERGE_TREE_SCRIPT_STATE" --repo-root "$ROOT" --base "$BASE" --head HEAD || exit $?
+    # Exit 4 means a check did not run (a timeout on a loaded host): that is
+    # not a pass, and it keeps its own code so it never reads as one.
+    "$PYTHON" "$MERGE_TREE_SCRIPT_STATE" --repo-root "$ROOT" --base "$BASE" --head HEAD || {
+        _merge_tree_rc=$?
+        [ "$_merge_tree_rc" -eq 4 ] && echo "gates: ✗ NOT CHECKED — a merge-tree check did not run (see above); exit 4, not a pass." >&2
+        exit "$_merge_tree_rc"
+    }
 fi
 
 # A tartci host that carries the required gate VMs refuses the heavy local
@@ -902,7 +908,8 @@ if [ -f "$CONFLICT_MARKER_GUARD" ]; then
 fi
 
 # ── 13. thread-safe-assertions guard ───────────────────────────────────────
-# Catch2 3.7.1 assertion macros aren't thread-safe; a REQUIRE/CHECK inside a
+# Catch2 assertion macros aren't thread-safe (Pulp leaves
+# CATCH_CONFIG_THREAD_SAFE_ASSERTIONS off); a REQUIRE/CHECK inside a
 # std::thread/async lambda in test/ is UB that bare metal tolerates but VM
 # scheduler timing trips (it reddened the required macOS gate on the Tart-VM
 # graduation). Also a ctest case, but running it here catches it pre-push.
@@ -1063,7 +1070,9 @@ if [ -f "$CAPABILITY_CONTRACT" ]; then
     elif ! PULP_AGENT_CAPABILITY_BASE_REF="$capability_base" \
             "$PYTHON" "$CAPABILITY_CONTRACT" --check; then
         echo "" >&2
-        echo "  Re-derive rather than choosing a number:" >&2
+        echo "  Counters are assigned at land: leave MANIFEST_REVISION and" >&2
+        echo "  SURFACE_INVENTORY_VERSION at the base value and rerun --write." >&2
+        echo "  For a branch that already hand-bumped, re-derive instead:" >&2
         echo "    PULP_AGENT_CAPABILITY_BASE_REF=$capability_base \\" >&2
         echo "      python3 tools/scripts/agent_capability_rederive.py" >&2
         echo "  If it lands on an integer an open branch already claimed, skip past it:" >&2
@@ -1123,6 +1132,23 @@ EOF
         fi
     done
 fi
+
+# ── 21. migration notes, text encoding, script inputs (diff-scoped) ────────
+# Each fails a required CI check and costs about a second here. A hand-written
+# docs/migrations/vX.Y.Z.md guesses a version that version-at-land assigns later;
+# the text-encoding lint refuses text I/O without encoding= beyond the committed
+# baseline; a new script-driven add_test() with no test/ctest_script_inputs.json
+# entry fails script-test-inputs-drift, which needs a configured build and so ran
+# only in CI. Each went red there on a push the local gates had called clean.
+for local_gate in migration_note_guard.py text_encoding_lint.py script_inputs_precheck.py; do
+    local_path="$ROOT/tools/scripts/$local_gate"
+    [ -f "$local_path" ] || continue
+    echo "" >&2
+    echo "▸ ${local_gate%.py}" >&2
+    if ! "$PYTHON" "$local_path" --root "$ROOT" --base "$BASE" >&2; then
+        fail=1
+    fi
+done
 
 # ── Summary ────────────────────────────────────────────────────────────────
 diff_cover_hint() {

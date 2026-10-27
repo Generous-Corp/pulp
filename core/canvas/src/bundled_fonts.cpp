@@ -14,6 +14,7 @@
 #include <pulp/canvas/bundled_fonts.hpp>
 #include <pulp/canvas/font_resolver.hpp>
 #include <pulp/canvas/font_options.hpp>
+#include "font_weight_match.hpp"
 
 #ifdef PULP_HAS_SKIA
 
@@ -87,7 +88,7 @@ std::span<const BundledBlob> bundled_blobs() {
 //
 // Pass 1 — exact weight + slant. The ideal path.
 //
-// Pass 2 — closest same-slant face within one approximate CSS weight step.
+// Pass 2 — the CSS-matched same-slant face within one approximate CSS weight step.
 // A family that ships several weights should satisfy a request from its own
 // members before the cascade abandons it for a system face. The bound is what
 // keeps that from overcorrecting: a family holding only a Regular must NOT
@@ -110,18 +111,27 @@ sk_sp<SkTypeface> best_style_match(const std::vector<sk_sp<SkTypeface>>& faces,
         }
     }
 
+    // Among the same-slant faces within the bound, the CSS weight rules pick,
+    // as they do for platform families, so a registered family weighs a
+    // missing weight the way the paragraph collection's provider does.
     constexpr int kMaxWeightGap = 200;
-    sk_sp<SkTypeface> best;
-    int best_gap = std::numeric_limits<int>::max();
+    std::vector<int> weights;
     for (const auto& f : faces) {
         if (!f) continue;
         SkFontStyle have = f->fontStyle();
         if (have.slant() != style.slant()) continue;
-        int gap = std::abs(have.weight() - style.weight());
-        if (gap > kMaxWeightGap) continue;
-        if (gap < best_gap) { best_gap = gap; best = f; }
+        if (std::abs(have.weight() - style.weight()) > kMaxWeightGap)
+            continue;
+        weights.push_back(have.weight());
     }
-    if (best) return best;
+    const int css_weight = css_match_font_weight(weights, style.weight());
+    for (const auto& f : faces) {
+        if (!f)
+            continue;
+        SkFontStyle have = f->fontStyle();
+        if (have.slant() == style.slant() && have.weight() == css_weight)
+            return f;
+    }
 
     for (const auto& f : faces) {
         if (!f) continue;
@@ -368,7 +378,28 @@ sk_sp<SkTypeface> match_registered_typeface(const std::string& family,
     auto& map = registered_fonts();
     auto it = map.find(family);
     if (it == map.end() || it->second.faces.empty()) return nullptr;
-    return best_style_match(it->second.faces, style);
+    if (auto match = best_style_match(it->second.faces, style))
+        return match;
+    // A page @font-face family never yields to another family over weight:
+    // CSS picks its nearest face and synthesizes the rest. Without this the
+    // resolver measured a 700 run in a system face while the paragraph painted
+    // the page's Regular face emboldened, and the text wrapped where it did not.
+    if (!has_declared_font_face_weights(family))
+        return nullptr;
+    sk_sp<SkTypeface> nearest;
+    int nearest_gap = std::numeric_limits<int>::max();
+    for (const auto& f : it->second.faces) {
+        if (!f)
+            continue;
+        const SkFontStyle have = f->fontStyle();
+        const int gap =
+            std::abs(have.weight() - style.weight()) + (have.slant() == style.slant() ? 0 : 10000);
+        if (gap < nearest_gap) {
+            nearest_gap = gap;
+            nearest = f;
+        }
+    }
+    return nearest;
 }
 
 std::vector<RegisteredTypeface> registered_typefaces_snapshot() {
@@ -465,6 +496,14 @@ bool register_font(const std::uint8_t* data, std::size_t size,
     return true;
 }
 
+namespace {
+std::atomic<std::uint64_t> g_woff2_file_routes{0};
+} // namespace
+
+std::uint64_t woff2_file_routes() noexcept {
+    return g_woff2_file_routes.load(std::memory_order_relaxed);
+}
+
 bool register_font_file(const std::string& path,
                         const std::string& family_override) {
     if (path.empty()) return false;
@@ -475,6 +514,15 @@ bool register_font_file(const std::string& path,
     file.seekg(0, std::ios::beg);
     std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
     if (!file.read(reinterpret_cast<char*>(bytes.data()), size)) return false;
+    // A captured page's @font-face file is often WOFF2, which not every
+    // platform font manager decodes (CoreText does; FreeType needs Brotli);
+    // it goes through the WOFF2 path, which decompresses and validates it
+    // first, so every platform reads it the same way.
+    if (bytes.size() >= 4 && bytes[0] == 'w' && bytes[1] == 'O' && bytes[2] == 'F' &&
+        bytes[3] == '2') {
+        g_woff2_file_routes.fetch_add(1, std::memory_order_relaxed);
+        return register_font_woff2(bytes.data(), bytes.size(), family_override);
+    }
     return register_font(bytes.data(), bytes.size(), family_override);
 }
 

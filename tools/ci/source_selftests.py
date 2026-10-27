@@ -1122,6 +1122,10 @@ def _resolve_members(names, commands, props, substitutions, repo):
                 member_props.pop("WORKING_DIRECTORY")
             else:
                 member_props["WORKING_DIRECTORY"] = wd
+        # A TIMEOUT computed at configure time (pulp_scaled_test_timeout's
+        # output variable) has no value here; ctest's default stands in.
+        if "${" in str(member_props.get("TIMEOUT", "")):
+            member_props.pop("TIMEOUT")
         entries.append(_entry_from_command(name, argv, member_props, repo))
     return entries, not_checked
 

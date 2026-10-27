@@ -143,9 +143,20 @@ if(PULP_ENABLE_FUZZING)
     target_link_libraries(pulp-fuzz-control-protocol PRIVATE
         pulp::inspect-protocol)
     target_compile_options(pulp-fuzz-control-protocol PRIVATE
-        -fsanitize=fuzzer,address -fno-omit-frame-pointer)
+        -fsanitize=${PULP_FUZZ_SANITIZERS} -fno-omit-frame-pointer)
     target_link_options(pulp-fuzz-control-protocol PRIVATE
-        -fsanitize=fuzzer,address)
+        -fsanitize=${PULP_FUZZ_SANITIZERS})
+
+    # A scripted UI document (ui.js) evaluated through the widget bridge in a
+    # QuickJS realm with no effectful capabilities granted. The smoke keeps a
+    # low iteration count: each input builds a fresh realm, so one run costs
+    # milliseconds rather than microseconds.
+    pulp_add_libfuzzer_target(pulp-fuzz-ui-script
+        SOURCES fuzz/ui_script_fuzz_target.cpp
+        LIBRARIES pulp::view pulp::format
+        CORPUS "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/fuzz/ui-script"
+        RUNS 200
+        MAX_LEN 16384)
 endif()
 
 # One executable for the pulp::inspect-control suites that spawn no fixture and
@@ -832,6 +843,17 @@ if(TARGET pulp-render)
     list(APPEND _pulp_widget_bridge_test_libs pulp::render)
 endif()
 pulp_add_test_suite(pulp-test-widget-bridge GROUP pulp-test-group-view-widgets LIBRARIES ${_pulp_widget_bridge_test_libs})
+# Named chart-shader presets: pure source generation plus raster renders.
+pulp_add_test_suite(pulp-test-chart-shader-presets GROUP pulp-test-group-view-widgets
+    LIBRARIES ${_pulp_widget_bridge_test_libs})
+# The JS preludes ship zlib-compressed: each must inflate to its source file
+# byte for byte, and a damaged stream must throw rather than evaluate.
+if(PULP_ENABLE_JS)
+    pulp_add_test_suite(pulp-test-js-preludes
+        LIBRARIES pulp::view-script pulp::runtime
+        INCLUDE_DIRS $<TARGET_PROPERTY:pulp-view-script,BINARY_DIR>)
+    pulp_test_data(pulp-test-js-preludes PATHS core/view/js/*.js)
+endif()
 # The late GPU/lifetime and stderr-diagnostic cases use the same private support
 # but compile as a second translation unit, keeping the original bridge suite
 # behavior and Catch2 names while limiting per-file rebuild cost.
@@ -842,7 +864,41 @@ pulp_add_test_suite(pulp-test-widget-bridge-gpu-tail
     SOURCES test_widget_bridge_gpu_tail.cpp
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/view/src/widget_bridge
     LIBRARIES ${_pulp_widget_bridge_test_libs})
-pulp_add_test_suite(pulp-test-widget-bridge-capabilities GROUP pulp-test-group-view-widgets LIBRARIES ${_pulp_widget_bridge_test_libs})
+# The capability suite also proves the compile-time exec gate, so it needs the
+# same PULP_BRIDGE_EXEC_ENABLED value pulp-view-script was built with. The
+# definition is private to that archive on purpose; mirror the option here.
+if(PULP_DEV_BRIDGE_EXEC)
+    set(_pulp_bridge_exec_enabled 1)
+else()
+    set(_pulp_bridge_exec_enabled 0)
+endif()
+pulp_add_test_suite(pulp-test-widget-bridge-capabilities GROUP pulp-test-group-view-widgets
+    LIBRARIES ${_pulp_widget_bridge_test_libs}
+    COMPILE_DEFINITIONS PULP_BRIDGE_EXEC_ENABLED=${_pulp_bridge_exec_enabled})
+
+# Ship-safety for the shell exec bridge. The registrar body lives in
+# platform_services_api.cpp beside always-present registrars, so gating only the
+# API-group table would still link the /bin/sh body into every consumer. Compile
+# that one translation unit twice — once per gate value — and inspect the
+# objects' symbol tables: the dev object must carry the registrar symbol
+# (positive control), the ship object must not.
+if(UNIX AND PULP_ENABLE_JS)
+    set(_pulp_bridge_exec_fixture_src
+        "${CMAKE_SOURCE_DIR}/core/view/src/widget_bridge/platform_services_api.cpp")
+    add_library(pulp-bridge-exec-fixture-dev OBJECT ${_pulp_bridge_exec_fixture_src})
+    target_compile_definitions(pulp-bridge-exec-fixture-dev PRIVATE PULP_BRIDGE_EXEC_ENABLED=1)
+    target_link_libraries(pulp-bridge-exec-fixture-dev PRIVATE pulp::view-script pulp::platform)
+
+    add_library(pulp-bridge-exec-fixture-ship OBJECT ${_pulp_bridge_exec_fixture_src})
+    target_compile_definitions(pulp-bridge-exec-fixture-ship PRIVATE PULP_BRIDGE_EXEC_ENABLED=0)
+    target_link_libraries(pulp-bridge-exec-fixture-ship PRIVATE pulp::view-script pulp::platform)
+
+    add_test(NAME pulp-bridge-exec-ship-symbol-absence
+        COMMAND ${CMAKE_COMMAND}
+            -DDEV_OBJ=$<TARGET_OBJECTS:pulp-bridge-exec-fixture-dev>
+            -DSHIP_OBJ=$<TARGET_OBJECTS:pulp-bridge-exec-fixture-ship>
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/bridge_exec_ship_symbol_check.cmake)
+endif()
 pulp_add_test_suite(pulp-test-widget-bridge-removal-lifetime GROUP pulp-test-group-view-widgets
     LIBRARIES ${_pulp_widget_bridge_test_libs})
 # Widget bridge — child ordering. Every createX appends, so a widget that
@@ -927,6 +983,15 @@ pulp_add_test_suite(pulp-test-widget-bridge-yoga-a4-oos GROUP pulp-test-group-vi
 # Widget bridge — compatibility cheap-wiring. Bundles the Canvas2D
 # wiring (DIVERGE → PASS) + CSS value-coverage entries from compat.json.
 pulp_add_test_suite(pulp-test-widget-bridge-wave2-cheap GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
+
+# The paragraph cache fed from script: setTextRuns keeps the inherited value for
+# a NaN letterSpacing or a non-positive fontSize and passes -0 through; a repaint
+# must find its entry and eviction must survive them. Skia-gated (paints through
+# the Skia screenshot backend).
+if(PULP_HAS_SKIA)
+    pulp_add_test_suite(pulp-test-paragraph-cache-bridge GROUP pulp-test-group-view-widgets
+        LIBRARIES pulp::view)
+endif()
 
 # Widget bridge — RN style-prop bridge primitives.
 # setShadow / setOpacity / setTransform RN-shaped style

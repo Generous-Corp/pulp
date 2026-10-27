@@ -14,6 +14,8 @@ target_sources(pulp-canvas PRIVATE
     # Skia-free on purpose: it is a value, so it must exist in every build
     # config, including the ones with no GPU backend at all.
     src/drawlist_format.cpp
+    # Reference CSS gradient colour interpolation; Skia-free, like Path.
+    src/gradient_interpolation.cpp
     src/path.cpp
     src/path_measure.cpp
     src/recording_canvas.cpp
@@ -184,6 +186,7 @@ if(PULP_HAS_SKIA)
         src/skia_canvas.cpp
         src/skia_canvas_fonts.cpp
         src/skia_canvas_text.cpp
+        src/skia_paragraph_cache.cpp
         src/skia_canvas_filter.cpp
         src/skia_canvas_mask.cpp
         src/skia_canvas_gradients.cpp
@@ -206,7 +209,24 @@ if(PULP_HAS_SKIA)
         # SkParagraph paths and owns the per-context FontCollection used
         # for Label/measurement.
         src/text_font_context.cpp
+        # CSS font-weight matching for the paragraph collection's default
+        # font manager (see font_weight_match.hpp).
+        src/font_weight_match.cpp
+        src/css_weight_font_manager.cpp
     )
+    if(NOT MSVC)
+        # It subclasses SkFontMgr, whose type info the prebuilt Skia does not
+        # export.
+        set_source_files_properties(src/css_weight_font_manager.cpp PROPERTIES
+            COMPILE_OPTIONS "-fno-rtti")
+    endif()
+    if(APPLE)
+        target_sources(pulp-canvas PRIVATE src/system_ui_font_manager.cpp)
+        # It subclasses SkFontMgr, whose type info the prebuilt Skia does not
+        # export.
+        set_source_files_properties(src/system_ui_font_manager.cpp PROPERTIES
+            COMPILE_OPTIONS "-fno-rtti")
+    endif()
 
 
     # Optional bundled Noto Color Emoji typeface — gated by the
@@ -390,17 +410,20 @@ set(PULP_CANVAS_UNIT_HEADERS
     include/pulp/canvas/font_options.hpp
     include/pulp/canvas/font_resolver.hpp
     include/pulp/canvas/font_scope.hpp
+    include/pulp/canvas/gradient_interpolation.hpp
     include/pulp/canvas/image_codecs.hpp
     include/pulp/canvas/image_convolution.hpp
     include/pulp/canvas/image_file_cache.hpp
     include/pulp/canvas/image_probe.hpp
     include/pulp/canvas/lottie_animation.hpp
     include/pulp/canvas/msdf_atlas.hpp
+    include/pulp/canvas/paragraph_cache.hpp
     include/pulp/canvas/path.hpp
     include/pulp/canvas/path_measure.hpp
     include/pulp/canvas/path_to_sdf.hpp
     include/pulp/canvas/psdf_atlas.hpp
     include/pulp/canvas/recording_canvas.hpp
+    include/pulp/canvas/resource_counters.hpp
     include/pulp/canvas/rectangle_list.hpp
     include/pulp/canvas/scene/scene.hpp
     include/pulp/canvas/scene/scene_group.hpp
@@ -417,10 +440,12 @@ set(PULP_CANVAS_UNIT_HEADERS
     include/pulp/canvas/sdf_text.hpp
     include/pulp/canvas/shaped_text.hpp
     include/pulp/canvas/skia_canvas.hpp
+    include/pulp/canvas/skia_text_raster_policy.hpp
     include/pulp/canvas/svg.hpp
     include/pulp/canvas/svg_dom_cache.hpp
     include/pulp/canvas/text_font_context.hpp
     include/pulp/canvas/text_layout.hpp
+    include/pulp/canvas/text_raster_policy.hpp
     include/pulp/canvas/text_run_planner.hpp
     include/pulp/canvas/text_shaper.hpp
     include/pulp/canvas/text_utf8.hpp

@@ -128,7 +128,19 @@ def classify_gaps(
     return result
 
 
-OBSERVER_COUNTER_SCHEMA = "pulp-design-ir-observer-counters-v1"
+OBSERVER_COUNTER_SCHEMA = "pulp-design-ir-observer-counters-v2"
+# Receipts written before the observer counted resource work. They are judged
+# on the v1 fields alone and say that the resource counters were absent.
+OBSERVER_COUNTER_SCHEMA_V1 = "pulp-design-ir-observer-counters-v1"
+OBSERVER_PHASE_FIELDS = ("layout_passes", "damage_requests", "unmarked_paint_mutations")
+# v2 resource work beneath the canvas, per phase.
+OBSERVER_RESOURCE_FIELDS = ("image_decodes", "gpu_uploads", "paragraph_builds",
+                            "scene_records", "scene_replays", "image_cache_builds")
+# Resource work a read-back must never do: it observes a painted tree, so a
+# decode, upload or image-cache rebuild there means the read-back repainted
+# or re-resolved images. Paragraph builds are not gated, because measuring
+# text legitimately shapes it.
+OBSERVER_READBACK_ZERO = ("image_decodes", "gpu_uploads", "image_cache_builds")
 
 
 def work_counter_gate(render_receipt: dict[str, Any]) -> dict[str, Any]:
@@ -137,17 +149,22 @@ def work_counter_gate(render_receipt: dict[str, Any]) -> dict[str, Any]:
     The counters come from the digest-bound render receipt, so they describe
     the exact native render that was scored. A receipt without them, a tree
     that outlived its teardown, or a read-back of the painted tree that staled
-    a cache without requesting a repaint each blocks threshold eligibility.
-    Build and first-frame mutations are reported but not gated: until a frame
-    has been painted there is no painted state to stale. The observer paints
-    one frame, so this gate proves complete teardown and a side-effect-free
-    read-back only; steady-state update behaviour is measured by the
-    benchmark's interactive phase, not here.
+    a cache without requesting a repaint each blocks threshold eligibility, as
+    does (v2) a read-back that decoded, uploaded or rebuilt an image.
+    Build and first-frame work is reported but not gated: until a frame has
+    been painted there is no painted state to stale, and the first frame is
+    where images are meant to be decoded. The observer paints one frame, so
+    this gate proves complete teardown and a side-effect-free read-back only;
+    steady-state frame behaviour is measured by the benchmark's interactive
+    phase and its steady-state resource gate, not here.
     """
     counters = render_receipt.get("counters")
-    if not isinstance(counters, dict) or counters.get("schema") != OBSERVER_COUNTER_SCHEMA:
-        return {"status": "absent", "counters": None,
+    schema = counters.get("schema") if isinstance(counters, dict) else None
+    if schema not in (OBSERVER_COUNTER_SCHEMA, OBSERVER_COUNTER_SCHEMA_V1):
+        return {"status": "absent", "counters": None, "resources": "absent",
                 "failures": ["observer receipt carries no work counters"]}
+    has_resources = schema == OBSERVER_COUNTER_SCHEMA
+    phase_fields = OBSERVER_PHASE_FIELDS + (OBSERVER_RESOURCE_FIELDS if has_resources else ())
     failures: list[str] = []
 
     def count(value: Any) -> int:
@@ -162,11 +179,13 @@ def work_counter_gate(render_receipt: dict[str, Any]) -> dict[str, Any]:
         destroyed = count(counters["views_destroyed"])
         live = count(counters["live_views_after_teardown"])
         for phase in ("build", "first_frame", "readback"):
-            for name in ("layout_passes", "damage_requests", "unmarked_paint_mutations"):
+            for name in phase_fields:
                 count(counters[phase][name])
-        unmarked = counters["readback"]["unmarked_paint_mutations"]
+        readback = counters["readback"]
+        unmarked = readback["unmarked_paint_mutations"]
     except (KeyError, TypeError, ValueError):
         return {"status": "absent", "counters": counters,
+                "resources": "gated" if has_resources else "absent",
                 "failures": ["observer work counters are malformed"]}
     if constructed <= 0:
         failures.append("observer built no views")
@@ -175,8 +194,12 @@ def work_counter_gate(render_receipt: dict[str, Any]) -> dict[str, Any]:
             f"{constructed - destroyed} of {constructed} views outlived teardown")
     if unmarked != 0:
         failures.append(f"{unmarked} unmarked paint mutations after the first frame")
+    if has_resources:
+        for name in OBSERVER_READBACK_ZERO:
+            if readback[name] != 0:
+                failures.append(f"read-back did {readback[name]} {name.replace('_', ' ')}")
     return {"status": "fail" if failures else "pass", "counters": counters,
-            "failures": failures}
+            "resources": "gated" if has_resources else "absent", "failures": failures}
 
 
 def promotion_recommendation(

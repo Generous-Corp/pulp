@@ -322,6 +322,35 @@ class BuildListTests(unittest.TestCase):
         n = self.lst["tests"]["node-run"]
         self.assertEqual(n["inputs"], ["tools/import/config.json", "tools/import/lib/util.mjs", "tools/import/run.mjs"])
 
+    def test_node_test_with_several_files_lists_every_files_imports(self) -> None:
+        # `node --test a.mjs b.mjs` runs both files, so an edit to a module
+        # only the SECOND file imports must still select the test.
+        root = self.repo.root
+        write(root, "tools/import/second.test.mjs", "import { g } from './lib/only_second.mjs';\n")
+        write(root, "tools/import/lib/only_second.mjs", "export const g = 2;\n")
+        write(root, "tools/import/lib/unused.mjs", "export const u = 3;\n")
+        test = {"name": "node-multi", "properties": [],
+                "command": ["/opt/homebrew/bin/node", "--test", f"{root}/tools/import/run.mjs",
+                            f"{root}/tools/import/second.test.mjs"]}
+        rec = sti.inputs_for(test, root)
+        self.assertIn("tools/import/second.test.mjs", rec["inputs"])
+        self.assertIn("tools/import/lib/only_second.mjs", rec["inputs"])
+        self.assertIn("tools/import/lib/util.mjs", rec["inputs"])  # the first file's import
+        # Negative control: a module neither file imports is not an input.
+        self.assertNotIn("tools/import/lib/unused.mjs", rec["inputs"])
+
+    def test_a_non_node_command_does_not_walk_its_arguments_as_modules(self) -> None:
+        # Control for the rule above: only node walks extra file arguments.
+        root = self.repo.root
+        write(root, "tools/import/arg.mjs", "import { z } from './lib/only_arg.mjs';\n")
+        write(root, "tools/import/lib/only_arg.mjs", "export const z = 1;\n")
+        test = {"name": "py-with-mjs-arg", "properties": [],
+                "command": ["/usr/bin/python3", f"{root}/tools/scripts/test_mod.py",
+                            f"{root}/tools/import/arg.mjs"]}
+        rec = sti.inputs_for(test, root)
+        self.assertIn("tools/import/arg.mjs", rec["inputs"])
+        self.assertNotIn("tools/import/lib/only_arg.mjs", rec["inputs"])
+
     def test_a_temp_leak_guarded_command_is_declared_as_what_it_wraps(self) -> None:
         # Classified as the guard, the node test would lose its import walk and
         # a change to its imports would no longer select it.
@@ -428,6 +457,40 @@ class ShellRootVariableTests(unittest.TestCase):
     def test_prose_docs_are_not_inputs(self) -> None:
         got = self.inputs('R="$(cd "$(dirname "$0")/../.." && pwd)"\ncat "$R/docs/guides/planted.md"\n')
         self.assertEqual(got, [])
+
+
+class WrappedCommandTests(unittest.TestCase):
+    """Commands whose script sits behind a wrapper the classifier unwraps."""
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name) / "repo"
+        self.root.mkdir()
+        write(self.root, "tools/scripts/planted_helper.py", "X = 1\n")
+        write(self.root, "tools/scripts/boundary.py", "import planted_helper\n")
+        write(self.root, "test/test_verify_planted.py", "import planted_helper\n")
+        write(self.root, "test/test_other.py", "\n")
+
+    def inputs(self, command: list[str]) -> list[str] | None:
+        rec = sti.inputs_for({"name": "t", "command": command, "properties": []},
+                             self.root, tracked=set())
+        return None if rec is None else rec["inputs"]
+
+    def test_cmake_env_wrapper_declares_the_wrapped_script(self) -> None:
+        got = self.inputs(["/usr/bin/cmake", "-E", "env", "PYTHONUTF8=1", "python3",
+                           str(self.root / "tools/scripts/boundary.py"), "--repo", str(self.root)])
+        self.assertEqual(got, ["tools/scripts/boundary.py", "tools/scripts/planted_helper.py"])
+
+    def test_unittest_discover_declares_the_matching_file(self) -> None:
+        got = self.inputs(["/usr/bin/python3", "-m", "unittest", "discover",
+                           "-s", str(self.root / "test"), "-p", "test_verify_planted.py"])
+        self.assertEqual(got, ["test/test_verify_planted.py", "tools/scripts/planted_helper.py"])
+
+    def test_control_other_cmake_commands_stay_undeclarable(self) -> None:
+        self.assertIsNone(self.inputs(["/usr/bin/cmake", "-P", str(self.root / "x.cmake")]))
+        self.assertIsNone(self.inputs(["/usr/bin/python3", "-m", "unittest", "discover",
+                                       "-s", str(self.root / "test"), "-p", "nothing_*.py"]))
 
 
 def tool_env(*, event: str | None, strict: bool) -> dict[str, str]:
@@ -930,7 +993,17 @@ class CompiledDataTests(unittest.TestCase):
             seeded["executables_scanned"].append("pulp-opt-diag")
             list_path.write_text(json.dumps(seeded), encoding="utf-8")
 
+            # The removed registration cannot be told apart from one this
+            # configure merely cannot see, so a plain --write refuses and
+            # leaves the list untouched.
+            before = list_path.read_text(encoding="utf-8")
             proc = self.run_tool(repo, "--write")
+            self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+            self.assertIn("refusing to write", proc.stderr)
+            self.assertIn("pulp-removed-test", proc.stderr)
+            self.assertEqual(list_path.read_text(encoding="utf-8"), before)
+
+            proc = self.run_tool(repo, "--write", "--allow-delete")
             self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
             lst = json.loads(list_path.read_text(encoding="utf-8"))
             self.assertEqual(lst["tests"].get("pulp-opt-diag-verify"), diag_test)
@@ -943,6 +1016,39 @@ class CompiledDataTests(unittest.TestCase):
             self.assertIn("alpha", lst["tests"])
             self.assertEqual(lst["executables_scanned"],
                              ["pulp-opt-diag", "pulp-test-a", "pulp-test-b", "pulp-test-c", "pulp-test-d"])
+
+    def test_write_never_deletes_an_executable_this_configure_cannot_see(self) -> None:
+        """A fixture executable whose name and target are generated (no CMake
+        token names it, e.g. "Pulp UI Script Fixture" built as
+        PulpUiScriptFixture_Standalone from ${_fmt}) used to vanish from any
+        --write on a configure that does not build it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp)); compiled_evidence(repo)
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            list_path = repo.root / sti.DEFAULT_LIST
+            seeded = json.loads(list_path.read_text(encoding="utf-8"))
+            fixture = {"kind": "compiled", "data": "undeclared", "inputs": [], "sources": [],
+                       "detected_sources": [], "undeclared_sources": []}
+            seeded["executables"]["Generated Fixture App"] = fixture
+            seeded["executable_targets"]["Generated Fixture App"] = "GeneratedFixture_Standalone"
+            seeded["executables_scanned"].append("Generated Fixture App")
+            list_path.write_text(json.dumps(seeded, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+            before = list_path.read_text(encoding="utf-8")
+
+            proc = self.run_tool(repo, "--write")
+            self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+            self.assertIn("Generated Fixture App", proc.stderr)
+            self.assertIn("--allow-delete", proc.stderr)
+            self.assertEqual(list_path.read_text(encoding="utf-8"), before)
+
+            # Control: with nothing to delete, --write succeeds as before.
+            seeded.pop("executables")
+            ok = json.loads(before)
+            ok["executables"].pop("Generated Fixture App")
+            ok["executable_targets"].pop("Generated Fixture App")
+            ok["executables_scanned"].remove("Generated Fixture App")
+            list_path.write_text(json.dumps(ok, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
 
     def test_write_regenerates_a_registered_test_rather_than_carrying_its_old_entry(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1181,9 +1287,7 @@ class GateProfileTests(unittest.TestCase):
                                (dict(PULP_SANITIZER="address", CMAKE_BUILD_TYPE="Debug"), "PULP_SANITIZER=address"),
                                (dict(CMAKE_BUILD_TYPE="Debug"), "CMAKE_BUILD_TYPE=Debug"),
                                (dict(PULP_HAS_VST3="FALSE"), "PULP_HAS_VST3=FALSE"),
-                               (dict(PULP_HAS_AUSDK="FALSE"), "PULP_HAS_AUSDK=FALSE"),
-                               (dict(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF="ON"),
-                                "PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF=ON")):
+                               (dict(PULP_HAS_AUSDK="FALSE"), "PULP_HAS_AUSDK=FALSE")):
             with self.subTest(reason=reason), tempfile.TemporaryDirectory() as tmp:
                 repo = Repo(Path(tmp)); compiled_evidence(repo)
                 self.assertEqual(self.run_tool(repo, "--write").returncode, 0)   # no cache: the gate's
@@ -1202,6 +1306,65 @@ class GateProfileTests(unittest.TestCase):
                 proc = self.run_tool(repo, "--write")
                 self.assertEqual(proc.returncode, 2)
                 self.assertIn("refusing to write", proc.stderr)
+
+
+class GpuProofTests(unittest.TestCase):
+    """The arm64 gate configures the exact-provider proof ON. Its hardware
+    registrations carry `gpu-proof` and never run in CI, so they are not
+    tracked; every other registration is judged exactly as before."""
+
+    def run_tool(self, repo: Repo, *args: str, inventory: dict) -> subprocess.CompletedProcess[str]:
+        inv = repo.build / "inv.json"
+        inv.write_text(json.dumps(inventory), encoding="utf-8")
+        return subprocess.run([sys.executable, str(SCRIPT), "--repo-root", str(repo.root),
+                               "--build-dir", str(repo.build), "--inventory-json", str(inv), *args],
+                              capture_output=True, text=True, encoding="utf-8", timeout=60,
+                              env=tool_env(event="pull_request", strict=False))
+
+    def proof_repo(self, tmp: str) -> Repo:
+        repo = Repo(Path(tmp)); compiled_evidence(repo)
+        write(repo.build, "CMakeCache.txt",
+              "CMAKE_BUILD_TYPE:STRING=Release\nPULP_BUILD_EXAMPLES:BOOL=OFF\n"
+              "PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF:BOOL=ON\n")
+        future = time.time() + 60
+        os.utime(repo.build / "CMakeCache.txt", (future, future))
+        return repo
+
+    def with_script(self, repo: Repo, labels: list[str]) -> dict:
+        write(repo.root, "tools/scripts/proof_identity.py", "import alpha_lib\n")
+        inventory = repo.inventory()
+        inventory["tests"].append({
+            "name": "proof-identity",
+            "command": ["/usr/bin/python3", f"{repo.root}/tools/scripts/proof_identity.py"],
+            "properties": [{"name": "LABELS", "value": labels}] if labels else []})
+        return inventory
+
+    def test_a_proof_configure_is_gate_shaped(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.proof_repo(tmp)
+            self.assertEqual(sti.outside_gate_profile_build(repo.build), [])
+
+    def test_a_gpu_proof_script_is_ignored_and_an_unlabelled_one_still_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.proof_repo(tmp)
+            self.assertEqual(self.run_tool(repo, "--write", inventory=repo.inventory()).returncode, 0)
+            labelled = self.run_tool(repo, "--check", "--full",
+                                     inventory=self.with_script(repo, ["gpu-proof"]))
+            self.assertEqual(labelled.returncode, 0, labelled.stdout + labelled.stderr)
+            unlabelled = self.run_tool(repo, "--check", "--full", inventory=self.with_script(repo, []))
+            self.assertEqual(unlabelled.returncode, 1, unlabelled.stdout + unlabelled.stderr)
+            self.assertIn("missing from list: proof-identity", unlabelled.stdout)
+
+    def test_a_gpu_proof_executable_is_not_scanned(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.proof_repo(tmp)
+            index = repo.build / "test" / "test-data" / "executables.json"
+            doc = json.loads(index.read_text(encoding="utf-8"))
+            self.assertIn("pulp-test-b", sti.test_executables(repo.build))
+            doc["executables"]["pulp-test-b"]["gpu_proof"] = True
+            index.write_text(json.dumps(doc), encoding="utf-8")
+            self.assertNotIn("pulp-test-b", sti.test_executables(repo.build))
+            self.assertIn("pulp-test-a", sti.test_executables(repo.build))
 
 
 class GatePlatformTests(unittest.TestCase):
@@ -1253,6 +1416,23 @@ class ScanScopeTests(unittest.TestCase):
             self.assertEqual(sti.source_signals(root, "test/file.cpp", []), [sti.SOURCE_FILE_SIGNAL])
             self.assertEqual(sti.source_signals(root, "test/build.cpp", []), [])  # the build tree
             self.assertEqual(sti.source_signals(root, "test/log.cpp", []), [])
+
+    def test_a_mention_inside_a_comment_is_not_a_read(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(root, "test/line.cpp", "// loads test/fixtures/a/clip.wav via PULP_SOURCE_DIR\nint x = 0;\n")
+            write(root, "test/block.cpp", "/* test/fixtures/a and FIXTURE_DIR */\nint y = 0;\n")
+            self.assertEqual(sti.source_signals(root, "test/line.cpp", []), [])
+            self.assertEqual(sti.source_signals(root, "test/block.cpp", ["FIXTURE_DIR"]), [])
+            # Control: the same mentions in code are still reads, including
+            # after a literal whose `/*` must not open a comment.
+            write(root, "test/code.cpp",
+                  'auto g = "**/*.json";\n'
+                  'auto p = fs::path(PULP_SOURCE_DIR) / "test/fixtures/a"; // reads it\n'
+                  "auto q = FIXTURE_DIR;\n"
+                  'auto h = "**/*.cpp";\n')
+            self.assertEqual(sti.source_signals(root, "test/code.cpp", ["FIXTURE_DIR"]),
+                             ["PULP_SOURCE_DIR", "test/fixtures", "FIXTURE_DIR"])
 
     def scope_build(self, tmp: Path) -> tuple[Path, Path]:
         root, build = tmp / "repo", tmp / "build"

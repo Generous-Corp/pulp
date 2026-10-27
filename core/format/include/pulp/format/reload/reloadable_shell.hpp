@@ -181,8 +181,13 @@ public:
     void set_reload_trust_policy(ReloadTrustPolicy policy) {
         std::lock_guard<std::mutex> g(controller_mutex_);
         reload_trust_policy_ = std::move(policy);
-        if (controller_) controller_.emplace(*session_, logic_path_,
-                                              std::filesystem::path{}, reload_trust_policy_);
+        if (controller_) {
+            const auto live = controller_->baseline();
+            controller_.emplace(*session_, logic_path_, std::filesystem::path{},
+                                reload_trust_policy_);
+            if (live)
+                controller_->set_baseline(*live);
+        }
     }
 
     // The host caches latency once (for plugin-delay compensation), so it is part
@@ -239,8 +244,16 @@ public:
             // The raw-path controller (dev filesystem reload) is compiled out of
             // a shipping build; without it reload_now() / the watcher have no
             // path to dlopen an arbitrary on-disk artifact.
+            // Keep the version the previous controller tracked (a re-prepare),
+            // else the one load_initial() loaded: the watcher must compare
+            // against what is live, not adopt whatever the file holds when it
+            // first polls.
+            std::optional<ReloadController::Baseline> live =
+                controller_ ? controller_->baseline() : loaded_baseline_;
             controller_.emplace(*session_, logic_path_, std::filesystem::path{},
                                  reload_trust_policy_);
+            if (live)
+                controller_->set_baseline(*live);
 #endif
         }
         start_watcher();  // no-op (compiled out) when the watcher is gated off
@@ -359,7 +372,18 @@ private:
         // overwritten freely. (The reload path already stages every version; see
         // ReloadController. macOS tolerates the in-place overwrite, so this only
         // bites on Linux.)
+        // Read the watched file's mtime BEFORE copying it. The baseline pairs this
+        // mtime with the hash of the bytes staged below; a build that lands
+        // after this read leaves the baseline at {old mtime, staged hash}, which
+        // the watcher's first poll sees as a change and reloads. Reading the
+        // mtime after the copy could pair a NEW mtime with the OLD bytes, and
+        // poll() would then treat the new build as already seen.
+        std::error_code mtime_ec;
+        const auto loaded_mtime = std::filesystem::last_write_time(logic_path_, mtime_ec);
         const std::string load_path = stage_initial(logic_path_);
+        // The version now live is the staged bytes; the watcher's baseline.
+        if (const auto hash = ReloadController::content_hash(load_path); hash && !mtime_ec)
+            loaded_baseline_ = ReloadController::Baseline{loaded_mtime, *hash};
 
         // Same fail-closed gate sequence the reload transaction uses (single
         // source of truth — gate_logic_image). On rejection we degrade to
@@ -405,6 +429,12 @@ private:
     void start_watcher() {
 #if PULP_RELOAD_DEV_WATCHER
         if (running_.exchange(true)) return;  // already running
+        // The token is the release-artifact scan's string marker for the dev
+        // watcher (tools/cmake/release_artifact_forbidden.json, gate
+        // reload-ship): a stripped shipping build has no symbol table to
+        // show watcher_loop in, so the bytes of this literal are the proof
+        // that the watcher is compiled out.
+        runtime::log_info("[reload-shell] dev watcher running (PULP_RELOAD_DEV_WATCHER_ACTIVE)");
         watcher_ = std::thread([this] { watcher_loop(); });
 #endif
     }
@@ -485,6 +515,8 @@ private:
     int initial_latency_ = 0;                     // host-cached latency of the initial logic
     std::unique_ptr<Processor> initial_;          // pre-prepare; moved into slot_
     std::vector<ReloadLibrary> initial_images_;   // retains the initial logic's code
+    std::optional<ReloadController::Baseline>
+        loaded_baseline_; // file version load_initial() loaded
     PrepareContext prepare_ctx_;
     ProcessorHotSwapSlot slot_;
 

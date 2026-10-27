@@ -16,21 +16,40 @@ param(
   [ValidateRange(1,60)][int]$AutomationSec = 8,
   [ValidateRange(5,300)][int]$TimeoutSec = 60,
   [int]$ContextX = -1,
-  [int]$ContextY = -1
+  [int]$ContextY = -1,
+  [switch]$Headless
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'windows_editor_common.ps1')
 $token = [Guid]::NewGuid().ToString('N')
 New-Item -ItemType Directory -Force -Path $EvidenceDir | Out-Null
-$run = Join-Path (Resolve-Path -LiteralPath $EvidenceDir).Path ('run-' + [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ') + '-' + $token.Substring(0,8))
+$resolvedEvidenceDir = (Resolve-Path -LiteralPath $EvidenceDir).Path
+$run = Join-Path $resolvedEvidenceDir ('run-' + [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ') + '-' + $token.Substring(0,8))
 New-Item -ItemType Directory -Path $run | Out-Null
 $receipt = [ordered]@{schema=2;token=$token;verdict='INCONCLUSIVE';scope='host insertion/editor/optional host parameter readback';started_utc=[DateTime]::UtcNow.ToString('o');error=$null;cleanup_errors=@()}
+if($Headless){$receipt.scope='host insertion/optional host parameter readback (headless)'}
+# Fail before launching REAPER when the selected evidence root belongs to a
+# different Windows account. Without this probe, the Lua status handshake can
+# be mistaken for a plugin failure after an ACL-denied write.
+$writeProbe = Join-Path $EvidenceDir ('.pulp-write-probe-' + $token)
+try {
+  [IO.File]::WriteAllText($writeProbe, 'probe', [Text.UTF8Encoding]::new($false))
+  Remove-Item -LiteralPath $writeProbe -Force
+} catch {
+  $receipt.error = "EvidenceDir is not writable by $env:USERNAME: $EvidenceDir ($($_.Exception.Message))"
+  $receipt.finished_utc=[DateTime]::UtcNow.ToString('o')
+  $receipt | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $run 'receipt.json') -Encoding utf8
+  Write-Warning $receipt.error
+  exit 3
+}
 $owned = New-Object 'System.Collections.Generic.List[object]'
 $priorEnv = @{}
 $envNames = @('FX','STATUS','TOKEN','PROJECT','PARAM_INDEX','DURATION') | ForEach-Object {'PULP_DAW_SMOKE_'+$_}
 foreach($name in $envNames){$priorEnv[$name]=[Environment]::GetEnvironmentVariable($name,'Process')}
 $exitCode=3
 $privateProfile=$null
+$priorTracePath=Get-ProcessTracePath
+$tracePathRestored=$false
 function Stop-Owned($Entry) {
   if ($Entry.process.HasExited) { return }
   Assert-OwnedIdentity $Entry.process $Entry.started
@@ -39,12 +58,14 @@ function Stop-Owned($Entry) {
 function Start-Owned([string[]]$Arguments,[string]$Label) {
   $command=Join-WindowsArguments $Arguments
   $p=Start-Process -FilePath $script:reaper -ArgumentList $command -WorkingDirectory $run -RedirectStandardOutput (Join-Path $run ($Label+'.stdout.txt')) -RedirectStandardError (Join-Path $run ($Label+'.stderr.txt')) -PassThru
-  $entry=@{process=$p;started=$p.StartTime.ToUniversalTime().ToString('o');command=$command}
+  if ($p.SessionId -ne [int]$receipt.session.session_id) { throw 'Owned REAPER process entered a different Windows session' }
+  $entry=@{process=$p;started=$p.StartTime.ToUniversalTime().ToString('o');command=$command;session_id=[int]$p.SessionId}
   $owned.Add($entry); return $entry
 }
 try {
   if(-not(Test-Path -LiteralPath $ReaperExe -PathType Leaf)){throw "REAPER executable missing: $ReaperExe"}
   $script:reaper=(Resolve-Path -LiteralPath $ReaperExe).Path
+  $receipt.session=Get-InteractiveDesktopContext
   $hostPe=Get-PeIdentity $reaper; $keys=Get-ReaperScanKeys $hostPe.execution_abi
   $receipt.host=@{path=$reaper;pe=$hostPe;sha256=(Get-FileHash -LiteralPath $reaper -Algorithm SHA256).Hash}
   if(-not(Test-Path -LiteralPath (Join-Path $SeedProfile 'reaper.ini') -PathType Leaf)){throw 'SeedProfile must contain an initialized reaper.ini'}
@@ -90,6 +111,13 @@ try {
   $env:PULP_DAW_SMOKE_STATUS=$status;$env:PULP_DAW_SMOKE_TOKEN=$token
   $env:PULP_DAW_SMOKE_PROJECT=Join-Path $run 'host-state.rpp'
   $env:PULP_DAW_SMOKE_PARAM_INDEX="$ParamIndex";$env:PULP_DAW_SMOKE_DURATION="$AutomationSec"
+  # The warm scan is only a cache/readiness probe.  Do not let it inherit the
+  # product trace destination: REAPER may load the plugin during scanning and
+  # close the trace before the measured startup script runs, leaving a tiny
+  # metadata-only capture.  Restore the caller's value immediately after the
+  # probe so the scripted editor run owns the complete trace.
+  Set-ProcessTracePath $null
+  $receipt.trace_environment=[ordered]@{warm_scan='cleared';scripted='pending'}
   $warm=Start-Owned @('-newinst','-cfgfile',$ini,'-new','-nosplash') 'warm'
   $deadline=[DateTime]::UtcNow.AddSeconds($TimeoutSec);$cacheMatch=$false
   while([DateTime]::UtcNow -lt $deadline){
@@ -98,10 +126,17 @@ try {
     if($cacheText -match [regex]::Escape([IO.Path]::GetFileName($staged))){$cacheMatch=$true;break}
     Start-Sleep -Milliseconds 250
   }
-  Stop-Owned $warm
   if(-not $cacheMatch){throw 'Scan cache did not acquire staged basename'}
+  Stop-Owned $warm
+  Set-ProcessTracePath $priorTracePath
+  $tracePathRestored=$true
+  $receipt.trace_environment.scripted=if($null -eq $priorTracePath){'cleared'}else{'restored'}
+  # A complete copied REAPER profile is required here. A minimal profile can
+  # stall before startup-script dispatch; with the private resource directory
+  # and its stale scan caches removed, the documented positional Lua form
+  # executes in the same owned host process that will load the staged module.
   $proc=Start-Owned @('-newinst','-cfgfile',$ini,'-new','-nosplash',$lua) 'scripted'
-  $receipt.process=@{pid=$proc.process.Id;started_utc=$proc.started;arguments=$proc.command}
+  $receipt.process=@{pid=$proc.process.Id;started_utc=$proc.started;arguments=$proc.command;session_id=$proc.session_id}
   $deadline=[DateTime]::UtcNow.AddSeconds($TimeoutSec);$hostStatus=$null
   while([DateTime]::UtcNow -lt $deadline){
     Assert-OwnedIdentity $proc.process $proc.started
@@ -121,7 +156,9 @@ try {
   }
   Assert-TerminalStatus $hostStatus $ParamIndex
   $receipt.host_status=$hostStatus
-  $modules=@($proc.process.Modules | Where-Object {[IO.Path]::GetExtension($_.FileName) -ieq ('.'+$Format)})
+  $modulePaths=@(Get-BoundModulePaths $proc.process.Id)
+  $modules=@($modulePaths | ForEach-Object { [pscustomobject]@{FileName=$_} } |
+    Where-Object {[IO.Path]::GetExtension($_.FileName) -ieq ('.'+$Format)})
   $bound=@()
   foreach($module in $modules){
     $hash=(Get-FileHash -LiteralPath $module.FileName -Algorithm SHA256).Hash
@@ -132,6 +169,7 @@ try {
   }
   if($bound.Count -ne 1){throw 'Expected exactly one manifest-bound loaded plugin PE'}
   $receipt.loaded_plugin=$bound[0]
+  if(-not $Headless){
   Add-Type -AssemblyName System.Drawing
   Add-Type -AssemblyName System.Windows.Forms
   Add-Type @'
@@ -162,11 +200,14 @@ public static class OwnedWindow {
   $editor=[IntPtr]([long]$hostStatus.editor_hwnd)
   function Guard-EditorOwner([long]$Hwnd) {
     Assert-OwnedIdentity $proc.process $proc.started
+    if ($proc.process.SessionId -ne [int]$receipt.session.session_id) { throw 'Bound REAPER process left the interactive session' }
     if($Hwnd -ne $editor.ToInt64() -or $proc.process.Path -ine $reaper){throw 'Bound editor/host identity changed'}
-    $current=@($proc.process.Modules | Where-Object {$_.FileName -ieq $receipt.loaded_plugin.path})
-    if($current.Count -ne 1){throw 'Bound plugin module disappeared'}
-    Assert-ModuleBinding $current[0].FileName (Get-FileHash -LiteralPath $current[0].FileName -Algorithm SHA256).Hash $manifest
-    Assert-EditorWindow $Hwnd ([OwnedWindow]::IsWindow($editor)) ([OwnedWindow]::IsWindowVisible($editor)) ([OwnedWindow]::IsOwned($editor,[uint32]$proc.process.Id))
+    if(-not(Test-Path -LiteralPath $receipt.loaded_plugin.path -PathType Leaf)){throw 'Bound plugin module disappeared'}
+    Assert-ModuleBinding $receipt.loaded_plugin.path (Get-FileHash -LiteralPath $receipt.loaded_plugin.path -Algorithm SHA256).Hash $manifest
+    # Saving a project can temporarily hide the floating editor.  Validate the
+    # HWND and process ownership here; visibility is checked after activation
+    # has had a chance to restore the owned window.
+    if($Hwnd -eq 0 -or -not [OwnedWindow]::IsWindow($editor) -or -not [OwnedWindow]::IsOwned($editor,[uint32]$proc.process.Id)){throw 'Floating editor HWND absent or foreign'}
   }
   $receipt.editor_activation=[ordered]@{editor_hwnd=$editor.ToInt64()}
   Invoke-OwnedEditorActivation $editor.ToInt64() ${function:Guard-EditorOwner} {
@@ -174,14 +215,25 @@ public static class OwnedWindow {
     $foreground=[OwnedWindow]::GetForegroundWindow()
     [uint32]$foregroundPid=0
     [OwnedWindow]::GetWindowThreadProcessId($foreground,[ref]$foregroundPid)|Out-Null
+    if ($foregroundPid -ne 0) {
+      try {
+        $foregroundSession=[Diagnostics.Process]::GetProcessById([int]$foregroundPid).SessionId
+        $receipt.editor_activation.foreground_session_id=$foregroundSession
+      } catch { $receipt.editor_activation.foreground_session_id=$null }
+    }
     $receipt.editor_activation.foreground_hwnd=$foreground.ToInt64()
     $receipt.editor_activation.foreground_pid=$foregroundPid
     [OwnedWindow]::Belongs([IntPtr]$Hwnd,$foreground)
   } {
     param([long]$Hwnd)
-    [OwnedWindow]::ShowWindow([IntPtr]$Hwnd,9) | Out-Null
-    [OwnedWindow]::SetForegroundWindow([IntPtr]$Hwnd)
+    for($i=0;$i -lt 20;$i++){
+      [OwnedWindow]::ShowWindow([IntPtr]$Hwnd,9) | Out-Null
+      [OwnedWindow]::SetForegroundWindow([IntPtr]$Hwnd) | Out-Null
+      if([OwnedWindow]::IsWindowVisible([IntPtr]$Hwnd)){break}
+      Start-Sleep -Milliseconds 100
+    }
   } -Observation $receipt.editor_activation -MaxObservations 51 | Out-Null
+  Assert-EditorWindow $editor.ToInt64() ([OwnedWindow]::IsWindow($editor)) ([OwnedWindow]::IsWindowVisible($editor)) ([OwnedWindow]::IsOwned($editor,[uint32]$proc.process.Id))
   function Guard-Editor {
     Guard-EditorOwner $editor.ToInt64()
     Assert-EditorEvidence $editor.ToInt64() ([OwnedWindow]::IsWindow($editor)) ([OwnedWindow]::IsWindowVisible($editor)) ([OwnedWindow]::IsOwned($editor,[uint32]$proc.process.Id)) ([OwnedWindow]::Belongs($editor,[OwnedWindow]::GetForegroundWindow()))
@@ -204,6 +256,7 @@ public static class OwnedWindow {
     Guard-Editor
     [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
   }
+  }
   $receipt.verdict='PASS';$receipt.product_ui_acceptance='NOT_EVALUATED';$receipt.live_audio='NOT_EVALUATED';$exitCode=0
 } catch {$receipt.error=$_.Exception.Message;Write-Warning $receipt.error} finally {
   foreach($entry in $owned){try{Stop-Owned $entry}catch{$receipt.cleanup_errors+= $_.Exception.Message;$exitCode=3;$receipt.verdict='INCONCLUSIVE'}}
@@ -211,6 +264,10 @@ public static class OwnedWindow {
     try{Remove-Item -LiteralPath $privateProfile -Recurse -Force}catch{$receipt.cleanup_errors+='Private profile cleanup failed';$exitCode=3;$receipt.verdict='INCONCLUSIVE'}
   }
   foreach($name in $envNames){[Environment]::SetEnvironmentVariable($name,$priorEnv[$name],'Process')}
+  # Restore tracing even when the warm scan or cache wait failed.  This keeps a
+  # caller-owned capture usable and prevents a failed probe from contaminating
+  # the next run.
+  if(-not $tracePathRestored){Set-ProcessTracePath $priorTracePath}
   $receipt.finished_utc=[DateTime]::UtcNow.ToString('o')
   $receipt | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $run 'receipt.json') -Encoding utf8
 }

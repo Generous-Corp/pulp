@@ -20,6 +20,9 @@ Pulp versions three surfaces independently:
   consume, not a surface we ship; see [Dependency Update
   Workflow](https://github.com/Generous-Corp/pulp/blob/main/CLAUDE.md#dependency-update-workflow) for pin bumps.
 
+  After a pin bump, regenerate every generated toolchain projection with
+  `python3 tools/toolchain/generate.py`; never hand-edit the derived files.
+
   This pin governs what a *fresh* checkout installs, so an
   already-provisioned machine keeps running whatever it has and any drift
   between the two is invisible from the repo. When reasoning about it,
@@ -71,11 +74,18 @@ the self-tests for the compiler-asymmetry lints:
 | `win32_include_lint.py` | raw `<windows.h>` in an installed header — leaks the `min`/`max` macros, `C2589` on MSVC |
 | `safe_path_guard_lint.py` | an untrusted-path guard in `core/` or `tools/cli/` that trusts `is_absolute()`, which on Windows accepts `/x`, `\x` and `C:x`, instead of calling `pulp::runtime::is_safe_relative_path` |
 | `text_encoding_lint.py` | Python text I/O (`read_text`, `write_text`, `open`, `subprocess` with `text=True`) without `encoding=`, which decodes with cp1252 on Windows; the existing backlog is held by a per-file baseline (`text_encoding_baseline.json`) that can only go down |
+| `migration_note_guard.py` | a pull request adding `docs/migrations/vX.Y.Z.md` by hand. The release version is assigned after the change lands, so the note belongs in `docs/migrations/unreleased/<topic>.md`, which the version-at-land bump folds; only a bump commit (one with the `Version-Bump-Applied:` marker) may add a released note. Editing a released note is allowed |
+| `script_inputs_precheck.py` | a new `add_test(NAME <name> COMMAND ...)` that runs a Python, shell or Node script but has no entry in `test/ctest_script_inputs.json`. Build-free counterpart of CI's `script-test-inputs-drift`: it reads only the CMake text the range adds. A computed name or the old `add_test(<name> <cmd>)` form is reported as not checked, never passed; `# script-inputs: not-gated <reason>` on or above the call skips a deliberately ungated test. Stale entries (a script that gained an import) still need the configured check |
 | `python_floor_syntax_check.py` | a tracked `*.py` file that Python 3.12 parses but 3.11, the gates' floor, rejects: an f-string field that reuses the enclosing quote or holds a backslash (including a line continuation, or in a nested f-string's text), comment or (single-quoted) line break. CI runs 3.12, so only a 3.11 run (CMake's default on a stock Homebrew Mac) would see it |
 
 `gates.sh` runs `designated_initializer_lint.py` diff-scoped and
 `win32_include_lint.py` over `core/*/include` before a push, and
-`safe_path_guard_lint.py` over `core/` and `tools/cli/`. All are canaries,
+`safe_path_guard_lint.py` over `core/` and `tools/cli/`. `gates.sh` and the
+pre-push hook also run `text_encoding_lint.py --base`, the same invocation as
+CI's `Enforce version & skill sync`, so a missing `encoding="utf-8"` fails
+before the push rather than in CI, and `script_inputs_precheck.py --base`, which
+catches a new script-driven ctest with no `test/ctest_script_inputs.json` entry
+without the configured build `script-test-inputs-drift` needs. All are canaries,
 not substitutes for building on the target: they check what a regex can check
 without a compiler, which for designated initializers means duplicates but not
 declaration order.
@@ -568,7 +578,8 @@ protected main's required-check set.
 The coverage matrix runs the instrumented build + a coverage-focused ctest suite under an
 internal time budget (below the job's `timeout-minutes`) enforced by a watchdog
 that terminates the suite before the job cap. When that budget is hit the leg
-drops any partial report and records `budget_hit`. Windows remains advisory,
+drops any partial report and records `budget_hit`. The Windows leg builds
+with examples OFF, as the normal Windows build does. Windows remains advisory,
 but Linux and macOS are receipt-authoritative: their Cobertura verifier still
 runs and fails when the report is absent, so a green workflow cannot hide a
 missing native upload. The shared coverage CTest policy excludes the
@@ -591,7 +602,10 @@ valid report when the other verifier fails.
 emitted exact, non-expired Linux, macOS, Python-tools, Apple Swift, Android
 Kotlin, and Pulp React receipts and Codecov reports those exact-run uploads as
 merged. Windows remains an explicitly inventoried best-effort producer while
-its bounded instrumented suite can exceed the job cap. Upload-axis Codecov
+its bounded instrumented suite can exceed the job cap, except on a dispatch
+that names a Windows runner: there `coverage_publish_barrier` requires the
+Windows Cobertura report too. The barrier runs under `always()` and fails when
+the native matrix did not succeed, because a skipped barrier reads green. Upload-axis Codecov
 flags do not carry forward,
 so a failed current lane cannot masquerade as fresh coverage from an older SHA.
 The native graph retains example-driven tests that exercise first-party core
@@ -731,6 +745,19 @@ sign the fleet App's APPROVE only from the base's `[auto_merge]
 reviewer_signers`. Its `shipyard changelog regenerate` renders CHANGELOG.md
 byte-identically to v0.269.1 for the same tag graph, and `shipyard config show`
 merges Pulp's configuration identically under both.
+
+The fleet guard reads `[auto_merge] carry_excluded_paths` from the base's
+`.shipyard/config.toml`. These are the paths whose change stops an APPROVE from
+carrying to a new head after a merge-only refresh. Setting the key replaces
+Shipyard's `DEFAULT_CARRY_EXCLUDED_PATHS`; it does not add to it. Pulp's list
+therefore restates the default (workflows, `.agents/contract.toml`, `tools/ci/`,
+the guard and arm code, release-please files, and signing and notarization),
+with one change. In place of the default's `.shipyard/**` it names only the
+policy files: `.shipyard/config.toml`, `.shipyard/ci-profiles/**` and
+`.shipyard/vm-image*.toml`. Generated data such as
+`.shipyard/changed-surface-families.toml` keeps carrying, so a PR that only
+regenerates it can still land on its approval. The guard only reads the key, so
+the Shipyard pin does not need to support it.
 
 The earlier v0.269.1 pin parses `executable_reuse` in a target's
 `changed_surface_selection`. Shipyard reads that table with

@@ -207,12 +207,13 @@ TEST_CASE("LadderFilter lowpass behavior", "[signal][ladder]") {
 }
 
 // The float ladder's saturator is gated by PULP_SIGNAL_FAST_LADDER_TANH
-// (fast_math.hpp): FastMath::tanh_accurate by DEFAULT, opt-in Padé
-// FastMath::tanh, and exact std::tanh through process_reference(). The
+// (fast_math.hpp): FastMath::tanh_accurate by DEFAULT, opt-in
+// FastMath::tanh_minimax, and exact std::tanh through process_reference(). The
 // references below reproduce the process loop with each saturator so the tests
 // can (a) bound how far the default moves the filter from exact tanh and (b)
-// pin how far the Padé path would — regardless of which way the gate is
-// compiled.
+// pin how far the efficient path would — regardless of which way the gate is
+// compiled. The Lambert-fraction reference is the control that shows the
+// clamp seam the efficient path no longer has.
 namespace {
 template <typename Sat>
 float ladder_reference(const std::vector<float>& in, float sr, float fc, float res, Sat sat) {
@@ -239,17 +240,28 @@ float ladder_reference_std_tanh(const std::vector<float>& in, float sr, float fc
 }
 [[maybe_unused]] float ladder_reference_fast_tanh(const std::vector<float>& in, float sr, float fc,
                                                   float res) {
-    return ladder_reference(in, sr, fc, res, [](float v) { return FastMath::tanh(v); });
+    return ladder_reference(in, sr, fc, res, [](float v) { return FastMath::tanh_minimax(v); });
+}
+// The Lambert [7/6] Pade with its output saturated at |x| = 4: a 6.7e-4 step
+// there, the seam a saturator must not have. Kept as the control below.
+float seamed_lambert_tanh(float v) {
+    if (v < -4.0f)
+        return -1.0f;
+    if (v > 4.0f)
+        return 1.0f;
+    const float x2 = v * v;
+    return v * (135135.0f + x2 * (17325.0f + x2 * (378.0f + x2))) /
+           (135135.0f + x2 * (62370.0f + x2 * (3150.0f + x2 * 28.0f)));
+}
+float ladder_reference_lambert_tanh(const std::vector<float>& in, float sr, float fc, float res) {
+    return ladder_reference(in, sr, fc, res, seamed_lambert_tanh);
 }
 } // namespace
 
-// Regression guard on the Padé approximation itself. This is what makes the
-// fast path safe to keep as an opt-in: a future edit to FastMath::tanh that
-// widened its error would break this before it could reach anyone's ears.
+// Regression guard on FastMath::tanh's error bound: a future edit that widened
+// it would break this before it could reach anyone's ears.
 TEST_CASE("FastMath::tanh stays within its pinned error bound of std::tanh",
           "[signal][ladder][fast_math]") {
-    // Central region the ladder lives in at normal levels — essentially float
-    // epsilon (~-130 dBFS).
     float max_err_2 = 0.0f, max_err_4 = 0.0f, max_err_full = 0.0f;
     for (int i = 0; i <= 200000; ++i) {
         const float x = -16.0f + 32.0f * static_cast<float>(i) / 200000.0f;
@@ -260,9 +272,10 @@ TEST_CASE("FastMath::tanh stays within its pinned error bound of std::tanh",
         if (std::abs(x) <= 2.0f)
             max_err_2 = std::max(max_err_2, e);
     }
-    REQUIRE(max_err_2 < 1e-6f);    // ~-133 dBFS — inaudible
-    REQUIRE(max_err_4 < 2e-5f);    // ~-94 dBFS  — Padé error inside |x|<4
-    REQUIRE(max_err_full < 7e-4f); // ~-63 dBFS  — the +/-4 hard-clamp seam (worst case)
+    // An equiripple minimax: the same worst case everywhere, not tiny near 0.
+    REQUIRE(max_err_2 < 5.8e-5f);
+    REQUIRE(max_err_4 < 5.8e-5f);
+    REQUIRE(max_err_full < 5.8e-5f); // ~-85 dBFS
 }
 
 // The default float ladder must track the EXACT std::tanh filter to within
@@ -293,25 +306,31 @@ TEST_CASE("LadderFilter default saturator tracks exact std::tanh", "[signal][lad
         max_abs_dev = std::max(max_abs_dev, std::abs(got - exact));
         REQUIRE(std::isfinite(got));
     }
-#if PULP_SIGNAL_FAST_LADDER_TANH
-    // Opt-in fast build: track the Padé reference, and pin how far it strays
-    // from the exact filter (the character delta the gate protects against).
-    float max_fast_dev = 0.0f;
-    prefix.clear();
-    ladder.reset();
-    for (float s : drive) {
-        prefix.push_back(s);
-        const float got = ladder.process(s);
-        max_fast_dev = std::max(max_fast_dev,
-                                std::abs(got - ladder_reference_fast_tanh(prefix, kSr, kFc, kRes)));
+    // The bound depends on which saturator the build made the default
+    // (PULP_SIGNAL_LADDER_SATURATION / PULP_SIGNAL_FAST_LADDER_TANH).
+    if constexpr (kDefaultLadderSaturation == LadderSaturation::realtime_efficient) {
+        // Track the efficient reference, and pin how far it strays from the
+        // exact filter: under the Lambert seam this was ~5e-4.
+        float max_fast_dev = 0.0f;
+        prefix.clear();
+        ladder.reset();
+        for (float s : drive) {
+            prefix.push_back(s);
+            const float got = ladder.process(s);
+            max_fast_dev = std::max(
+                max_fast_dev, std::abs(got - ladder_reference_fast_tanh(prefix, kSr, kFc, kRes)));
+        }
+        REQUIRE(max_fast_dev < 1e-5f); // tracks the efficient reference
+        REQUIRE(max_abs_dev > 0.0f);   // and is provably NOT the exact filter
+        REQUIRE(max_abs_dev < 2e-5f);  // with no clamp seam
+    } else if constexpr (kDefaultLadderSaturation == LadderSaturation::accurate) {
+        // Within a few times the saturator's 3.0e-7 bound of the exact filter
+        // at +10 dBFS drive.
+        REQUIRE(max_abs_dev < 4e-6f);
+    } else {
+        // Exact std::tanh: the reference loop reproduces it to round-off.
+        REQUIRE(max_abs_dev < 1e-6f);
     }
-    REQUIRE(max_fast_dev < 1e-3f); // tracks the Padé reference
-    REQUIRE(max_abs_dev > 1e-5f);  // and is provably NOT the exact filter
-#else
-    // Default build: within a few times the saturator's 3.0e-7 bound of the
-    // exact filter at +10 dBFS drive, far inside the Padé path's ~1e-3 seam.
-    REQUIRE(max_abs_dev < 4e-6f);
-#endif
 }
 
 TEST_CASE("LadderFilter explicit saturation profiles ignore the build default",
@@ -340,8 +359,41 @@ TEST_CASE("LadderFilter explicit saturation profiles ignore the build default",
     REQUIRE_THAT(reference_output,
                  WithinAbs(ladder_reference_std_tanh(drive, kSr, kFc, kRes), 1e-5f));
     REQUIRE_THAT(efficient_output,
-                 WithinAbs(ladder_reference_fast_tanh(drive, kSr, kFc, kRes), 1e-3f));
-    REQUIRE(std::abs(reference_output - efficient_output) > 1e-5f);
+                 WithinAbs(ladder_reference_fast_tanh(drive, kSr, kFc, kRes), 1e-5f));
+    REQUIRE(reference_output != efficient_output);
+}
+
+TEST_CASE("LadderFilter efficient profile has no clamp seam under hard drive",
+          "[signal][ladder][fast_math]") {
+    // Amplitude 3 at high resonance pushes stage arguments past |x| = 4 every
+    // cycle, which is where a Lambert fraction saturated at 4 steps to its
+    // clamp. The same prefix run through that form is the control: it must show the
+    // seam this stimulus exists to provoke, or a small deviation proves nothing.
+    constexpr float kSr = 48000.0f, kFc = 1200.0f, kRes = 0.9f;
+    LadderFilter exact;
+    LadderFilter efficient;
+    for (auto* ladder : {&exact, &efficient}) {
+        ladder->set_sample_rate(kSr);
+        ladder->set_frequency(kFc);
+        ladder->set_resonance(kRes);
+    }
+    const auto input = [&](int n) {
+        return 3.0f * std::sin(2.0f * 3.14159265f * 220.0f * static_cast<float>(n) / kSr);
+    };
+    float worst = 0.0f;
+    float lambert_worst = 0.0f;
+    std::vector<float> prefix;
+    for (int i = 0; i < 2048; ++i) {
+        const float e = exact.process_reference(input(i));
+        worst = std::max(worst, std::abs(efficient.process_realtime_efficient(input(i)) - e));
+        prefix.push_back(input(i));
+        if (i % 64 == 63)
+            lambert_worst = std::max(
+                lambert_worst, std::abs(ladder_reference_lambert_tanh(prefix, kSr, kFc, kRes) - e));
+    }
+    INFO("efficient " << worst << " lambert " << lambert_worst);
+    REQUIRE(lambert_worst > 1e-4f);
+    REQUIRE(worst < 2e-5f);
 }
 
 TEST_CASE("ladder_tanh_profiled boolean form keeps its exact and Pade meanings",
@@ -747,7 +799,14 @@ TEST_CASE("LadderFilter default saturator preserves resonance and drive behavior
                 prev_fast = a;
                 prev_exact = b;
             }
-            CHECK(worst < 1.0e-6f);
+            // The bound is the build default's (see kDefaultLadderSaturation):
+            // accurate and exact stay below -120 dBFS; realtime_efficient's
+            // 3.8e-6 saturator error, amplified by the resonant recursion,
+            // stays below -90 dBFS.
+            const float bound = kDefaultLadderSaturation == LadderSaturation::realtime_efficient
+                                    ? 3.0e-5f
+                                    : 1.0e-6f;
+            CHECK(worst < bound);
             CHECK(crossings_fast == crossings_exact);
         }
     }

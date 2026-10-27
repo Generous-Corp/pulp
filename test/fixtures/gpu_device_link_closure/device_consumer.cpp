@@ -8,12 +8,14 @@
 
 #include <pulp/render/gpu_compute.hpp>
 #include <pulp/render/gpu_diagnostics.hpp>
+#include <pulp/render/gpu_proc_installer.hpp>
 #include <pulp/render/gpu_startup_report.hpp>
 #include <pulp/render/gpu_surface.hpp>
 
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <string>
 
 namespace {
 
@@ -23,13 +25,16 @@ using SurfaceFactory = std::unique_ptr<pulp::render::GpuSurface> (*)();
 using ComputeFactory = std::unique_ptr<pulp::render::GpuCompute> (*)();
 volatile SurfaceFactory surface_factory = &pulp::render::GpuSurface::create_dawn;
 volatile ComputeFactory compute_factory = &pulp::render::GpuCompute::create;
+using ProcInstallerSetter = bool (*)(const pulp::render::DawnProcInstaller&, std::string*);
+volatile ProcInstallerSetter proc_installer_setter = &pulp::render::set_dawn_proc_installer;
 
 } // namespace
 
 int main() {
     using namespace pulp::render;
 
-    if (surface_factory == nullptr || compute_factory == nullptr) {
+    if (surface_factory == nullptr || compute_factory == nullptr ||
+        proc_installer_setter == nullptr) {
         return 1;
     }
     if (std::strcmp(to_string(GpuDiagnosticSeverity::error), "error") != 0) {

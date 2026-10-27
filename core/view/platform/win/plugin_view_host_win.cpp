@@ -21,6 +21,7 @@
 
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/host_frame_pump.hpp>
+#include "../../src/pending_resize.hpp"
 #include <pulp/view/platform/win_plugin_input_router.hpp>
 #include <pulp/view/platform/win_pointer_input.hpp>
 #include <pulp/view/platform/win_surface_lifecycle.hpp>
@@ -348,6 +349,7 @@ public:
         if (gpu_surface_ && skia_surface_) {
             render_frame(nullptr, nullptr, nullptr);
         } else if (dc) {
+            deliver_pending_resize();
             // Same contract as the GPU path: consume the damage for this frame
             // and put it back if the blit never happens, so a failed raster
             // frame does not silently retire a region nobody painted.
@@ -481,6 +483,7 @@ public:
 
     void set_size(uint32_t width, uint32_t height) override {
         size_ = {width, height};
+        physical_w_ = physical_h_ = 0; // a logical size: derive the pixels
         if (hwnd_) {
             // SetWindowPos re-enters the wndproc synchronously (WM_SIZE); the
             // guard makes handle_wm_size() ignore that self-driven echo so we
@@ -521,8 +524,16 @@ public:
         const uint32_t logical_h =
             static_cast<uint32_t>(static_cast<float>(physical_h) / s + 0.5f);
         if (logical_w == 0 || logical_h == 0) return;
-        if (logical_w == size_.width && logical_h == size_.height) return;  // no-op
+        // At a fractional scale two client widths round to one logical width
+        // (1000 and 1001 px are both 667 at 1.5x), so the physical size is
+        // compared too: the swapchain follows the client rect exactly, and
+        // only a logical change is news to the processor.
+        const bool logical_changed = logical_w != size_.width || logical_h != size_.height;
+        if (!logical_changed && physical_w == pixel_w() && physical_h == pixel_h())
+            return; // no-op
         size_ = {logical_w, logical_h};
+        physical_w_ = physical_w;
+        physical_h_ = physical_h;
 #ifdef PULP_HAS_SKIA
         // Mirror set_size()'s surface sizing (GPU at physical, Skia at logical +
         // scale) but WITHOUT the SetWindowPos.
@@ -530,8 +541,26 @@ public:
         if (gpu_surface_) gpu_surface_->resize(pixel_w(), pixel_h());
         if (skia_surface_) skia_surface_->resize(logical_w, logical_h, scale_);
 #endif
-        if (resize_cb_) resize_cb_(logical_w, logical_h);
+        // Delivered by the next frame, once per frame with the last size, and
+        // only when the logical size changed (a physical-only change is not
+        // news to the processor). An unattached editor has no frame timer, so
+        // nothing may paint (the raster path only invalidates): tell the
+        // processor now.
+        if (logical_changed) {
+            pending_resize_.record(logical_w, logical_h);
+            if (!attached_.load(std::memory_order_acquire))
+                deliver_pending_resize();
+        }
         repaint();
+    }
+
+    // Runs the host's resize callback for the last size handle_wm_size()
+    // recorded since the previous frame (see PendingResize).
+    void deliver_pending_resize() {
+        pending_resize_.deliver([this](uint32_t w, uint32_t h) {
+            if (resize_cb_)
+                resize_cb_(w, h);
+        });
     }
 
     Size get_size() const override { return size_; }
@@ -543,6 +572,9 @@ public:
         if (scale <= 0.0f) return;  // ignore non-positive; keep current scale
         if (scale == scale_) return;
         scale_ = scale;
+        // The client rect at the new scale arrives with the WM_SIZE that
+        // follows; until then derive it.
+        physical_w_ = physical_h_ = 0;
 #ifdef PULP_HAS_SKIA
         // Re-size surfaces at the new pixel resolution. Logical size is
         // unchanged, so the view tree layout is untouched.
@@ -570,6 +602,18 @@ public:
 
 #ifdef PULP_HAS_SKIA
     render::GpuSurface* gpu_surface() const override { return gpu_surface_.get(); }
+
+    GpuCacheUsage gpu_cache_usage() const override {
+        if (!skia_surface_)
+            return {};
+        const auto bytes = skia_surface_->gpu_cache_bytes();
+        return {bytes.budgeted, bytes.purgeable};
+    }
+
+    void release_gpu_caches() override {
+        if (skia_surface_)
+            skia_surface_->trim_gpu_resources(render::SkiaSurface::TrimLevel::everything());
+    }
 #endif
 
     void set_idle_callback(std::function<void()> cb) override {
@@ -634,6 +678,9 @@ public:
         if (!should_dispatch_host_frame(frame_pump_, needs_repaint_, continuous_frames_,
                                         static_cast<bool>(idle_callback_)))
             return;
+        // Before the tick, so the editor lays out the frame at the size the
+        // processor was told about.
+        deliver_pending_resize();
 
         const auto now =
             std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch())
@@ -651,6 +698,9 @@ public:
 private:
     View& root_;
     Size size_;        // LOGICAL (DPI-independent) size; layout coordinate space
+    // PHYSICAL client size from the last WM_SIZE; 0 when the size came from
+    // set_size() or a scale change and is derived from size_ × scale_.
+    uint32_t physical_w_ = 0, physical_h_ = 0;
     bool use_gpu_ = false;
     // Presentation + diagnostics policy, decided by the caller rather than
     // hardcoded here (WAH-13). Both this host and the Linux one read the
@@ -665,6 +715,7 @@ private:
     bool needs_repaint_ = true;
     bool continuous_frames_ = false;
     std::function<void(uint32_t, uint32_t)> resize_cb_;
+    PendingResize pending_resize_;
     float design_viewport_w_ = 0.0f;
     float design_viewport_h_ = 0.0f;
     float fixed_aspect_ratio_ = 0.0f;
@@ -778,6 +829,14 @@ private:
         FrameGeometry g;
         g.width = static_cast<float>(size_.width);
         g.height = static_cast<float>(size_.height);
+        if (physical_w_ != 0 && physical_h_ != 0) {
+            // Paint the logical size the client rect really has (667.33 at
+            // 1.5x for 1001 px), so the frame covers every physical pixel.
+            g.physical_width = physical_w_;
+            g.physical_height = physical_h_;
+            g.width = static_cast<float>(physical_w_) / scale_;
+            g.height = static_cast<float>(physical_h_) / scale_;
+        }
         g.scale = scale_;
         g.design_width = design_viewport_w_;
         g.design_height = design_viewport_h_;
@@ -889,6 +948,7 @@ private:
         // queries; without it the Windows editor showed only gpu_submit /
         // gpu_present and there was no frame span to attribute them to.
         PULP_TRACE_SCOPE_NAMED("render", "frame");
+        deliver_pending_resize();
         if (!gpu_surface_ || !skia_surface_) return false;
 
         PluginFrameRenderer::Request request;

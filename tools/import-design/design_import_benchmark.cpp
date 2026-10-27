@@ -1,5 +1,4 @@
 #include <pulp/canvas/canvas.hpp>
-#include <pulp/runtime/crypto.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/design_ir_io.hpp>
@@ -9,6 +8,9 @@
 #include <pulp/view/widgets.hpp>
 
 #include "test/harness/rt_allocation_probe.hpp"
+#include "tools/import-design/design_import_benchmark_fixture.hpp"
+#include "tools/import-design/design_import_benchmark_measure.hpp"
+#include "tools/import-design/design_import_benchmark_targets.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -23,6 +25,7 @@
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -31,22 +34,15 @@
 #include <utility>
 #include <vector>
 
-#if defined(__APPLE__)
-#include <mach/mach.h>
-#include <sys/resource.h>
+#if defined(__APPLE__) || defined(__linux__)
 #include <unistd.h>
-#elif defined(__linux__)
-#include <sys/resource.h>
-#include <unistd.h>
-#include <fstream>
 #endif
 
 using namespace pulp::view;
+using namespace pulp::design_import_bench;
 
 namespace {
 
-constexpr int kFixtureWidth = 760;
-constexpr int kFixtureHeight = 420;
 constexpr const char* kFixtureName = "phase5-imported-plugin-panel";
 
 using Clock = std::chrono::steady_clock;
@@ -60,13 +56,94 @@ struct Config {
     std::filesystem::path output_path;
     // An importer-produced DesignIR to measure instead of the built-in panel.
     std::filesystem::path ir_path;
+    // The materialized runtime bundle built from the same source as `ir_path`;
+    // the live lane mounts it as the behavior realm under the DesignIR.
+    std::filesystem::path bundle_path;
     // When set, each phase runs exactly this many frames without pacing, so
     // every counter in the receipt is reproducible run to run.
     std::optional<int> frames;
+    // Settled build/run/teardown cycles after the measured phases; the memory
+    // slope across them shows per-cycle growth a single run cannot.
+    std::optional<int> cycles;
     // Planted negative: leak one view past teardown, to prove the terminal
     // readback can fail.
     bool plant_leak = false;
+    // Planted negative: leak a fixed block per cycle, to prove the cycle slope
+    // sees growth.
+    bool plant_cycle_leak = false;
+    // Planted negative: report this one-minute load instead of the measured
+    // one, to prove a contended run is marked confounded.
+    std::optional<double> plant_load;
+    // recording | skia-raster | skia-graphite
+    std::string canvas = "recording";
+    // Exit non-zero when the steady-state resource gate fails.
+    bool require_steady_state = false;
+    // Planted negative: add a view that decodes an encoded image on every
+    // paint, to prove the steady-state gate fails on per-frame decodes.
+    bool plant_frame_decode = false;
+    // Off measures the uncached text path: every paint shapes its text.
+    bool paragraph_cache = true;
 };
+
+// Per-frame duration of one pipeline stage.
+struct StageStats {
+    double median_ms = 0.0;
+    double p95_ms = 0.0;
+    double max_ms = 0.0;
+};
+
+// Lap clock over one frame: update (the fixture's state change), layout,
+// record (painting the tree into the frame's canvas) and submit (handing the
+// frame to its target). Verification runs after the frame and is in none of
+// them. The stages are laps of one clock, so they sum to the frame; the
+// residual is the frame time the laps do not cover, which bounds the
+// instrument's own overhead.
+struct StageMetrics {
+    StageStats update;
+    StageStats layout;
+    StageStats record;
+    StageStats submit;
+    double residual_ms_max = 0.0;
+    // Sampled frames whose residual exceeded the threshold below.
+    std::uint64_t frames_over_residual = 0;
+};
+
+// Resource work over a phase's sampled frames. `frames_after_first_with_work`
+// counts sampled frames after the first that did any of it: the first frame
+// of a phase may legitimately build what later frames reuse.
+struct ResourceSeries {
+    std::uint64_t total = 0;
+    std::uint64_t per_frame_max = 0;
+    std::uint64_t frames_after_first_with_work = 0;
+
+    void add(std::uint64_t delta, bool first) {
+        total += delta;
+        per_frame_max = std::max(per_frame_max, delta);
+        if (!first && delta != 0)
+            ++frames_after_first_with_work;
+    }
+};
+
+struct PhaseResources {
+    ResourceSeries image_decodes;
+    ResourceSeries gpu_uploads;
+    ResourceSeries paragraph_builds;
+    // Paragraph builds of text the frame's update did not write: re-shaping
+    // that a cache should have served.
+    ResourceSeries paragraph_builds_unwritten;
+    ResourceSeries scene_records;
+    ResourceSeries scene_replays;
+    ResourceSeries image_cache_hits;
+    ResourceSeries image_cache_builds;
+};
+
+// A frame's residual is over threshold above 50 us or 2% of the frame,
+// whichever is larger. The stage split is reported inconsistent when more
+// than 5% of sampled frames are over it: a single frame preempted between two
+// clock reads is the scheduler, a systematic residual is untimed work.
+constexpr double kStageResidualFloorMs = 0.05;
+constexpr double kStageResidualFraction = 0.02;
+constexpr double kStageResidualFrameShare = 0.05;
 
 struct PhaseMetrics {
     int duration_ms = 0;
@@ -83,9 +160,10 @@ struct PhaseMetrics {
     double update_ms_p95 = 0.0;
     double update_ms_p99 = 0.0;
     double update_ms_max = 0.0;
-    std::uint64_t rss_median_bytes = 0;
-    std::uint64_t rss_p99_bytes = 0;
-    std::uint64_t rss_peak_bytes = 0;
+    StageMetrics stages;
+    bool stages_consistent = true;
+    MemoryStats rss;
+    MemoryStats phys_footprint;
     std::uint64_t allocations_total = 0;
     std::uint64_t allocated_bytes_total = 0;
     double allocations_per_frame_median = 0.0;
@@ -102,6 +180,10 @@ struct PhaseMetrics {
     std::uint64_t slot_identity_changes = 0;
     std::uint64_t slot_text_mismatches = 0;
     int js_evaluations = 0;
+    PhaseResources resources;
+    // Host conditions at the first and last frame of the phase.
+    std::optional<HostSample> host_start;
+    std::optional<HostSample> host_end;
 };
 
 struct StartupMetrics {
@@ -109,7 +191,7 @@ struct StartupMetrics {
     double first_frame_ms = 0.0;
     double first_frame_render_ms = 0.0;
     std::uint64_t first_frame_paint_commands = 0;
-    std::uint64_t rss_after_first_frame_bytes = 0;
+    Reading rss_after_first_frame;
 };
 
 std::string json_escape(std::string_view input) {
@@ -151,59 +233,6 @@ double cpu_clock_delta_ms(std::clock_t start, std::clock_t end) {
            static_cast<double>(CLOCKS_PER_SEC);
 }
 
-double percentile(std::vector<double> values, double pct) {
-    if (values.empty()) return 0.0;
-    std::sort(values.begin(), values.end());
-    const double rank = (pct / 100.0) * static_cast<double>(values.size() - 1);
-    const auto lo = static_cast<std::size_t>(std::floor(rank));
-    const auto hi = static_cast<std::size_t>(std::ceil(rank));
-    if (lo == hi) return values[lo];
-    const double w = rank - static_cast<double>(lo);
-    return values[lo] * (1.0 - w) + values[hi] * w;
-}
-
-std::uint64_t current_rss_bytes() {
-#if defined(__APPLE__)
-    mach_task_basic_info_data_t info{};
-    mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
-    if (task_info(mach_task_self(),
-                  MACH_TASK_BASIC_INFO,
-                  reinterpret_cast<task_info_t>(&info),
-                  &count) == KERN_SUCCESS) {
-        return static_cast<std::uint64_t>(info.resident_size);
-    }
-    return 0;
-#elif defined(__linux__)
-    std::ifstream statm("/proc/self/statm");
-    std::uint64_t pages = 0;
-    std::uint64_t resident = 0;
-    if (statm >> pages >> resident) {
-        const long page_size = sysconf(_SC_PAGESIZE);
-        if (page_size > 0) return resident * static_cast<std::uint64_t>(page_size);
-    }
-    return 0;
-#else
-    return 0;
-#endif
-}
-
-// Process resident-set high-water mark, which unlike sampled RSS cannot miss
-// a transient peak between frames.
-std::uint64_t rss_high_water_bytes() {
-#if defined(__APPLE__) || defined(__linux__)
-    rusage usage{};
-    if (getrusage(RUSAGE_SELF, &usage) != 0)
-        return 0;
-#if defined(__APPLE__)
-    return static_cast<std::uint64_t>(usage.ru_maxrss);
-#else
-    return static_cast<std::uint64_t>(usage.ru_maxrss) * 1024u;
-#endif
-#else
-    return 0;
-#endif
-}
-
 std::string host_name() {
     char buf[256] = {0};
 #if defined(_WIN32)
@@ -227,30 +256,6 @@ std::string platform_name() {
     return "unknown";
 #endif
 }
-
-class BenchmarkFixture {
-public:
-    virtual ~BenchmarkFixture() = default;
-    virtual View& root() = 0;
-    virtual void step(int frame) = 0;
-    virtual int js_evaluation_count() const = 0;
-    virtual std::uint64_t bridge_call_count() const {
-        return 0;
-    }
-    // Anchor-keyed text slots whose View changed identity across an update,
-    // and slots whose text did not read back as written. Only fixtures that
-    // drive keyed slots report non-zero.
-    virtual std::uint64_t slot_identity_change_count() const {
-        return 0;
-    }
-    virtual std::uint64_t slot_text_mismatch_count() const {
-        return 0;
-    }
-    // Untimed check that the update `step(frame)` made is what the tree now
-    // holds. run_phase calls it outside every clock, so verification cost
-    // never lands in update or frame time.
-    virtual void verify(int /*frame*/) {}
-};
 
 void place_absolute(IRNode& node, float left, float top, float width, float height) {
     node.style.position = "absolute";
@@ -535,7 +540,6 @@ public:
         if (auto* content = find_by_id(*root_, "preset-content")) {
             content->set_top(-static_cast<float>((frame * 3) % 180));
         }
-        root_->layout_children();
     }
 
     int js_evaluation_count() const override { return 0; }
@@ -624,7 +628,6 @@ public:
         shape_->set_x(0.5f + 0.45f * std::sin(t * 0.7f));
         shape_->set_y(0.5f + 0.45f * std::cos(t * 0.8f));
         preset_content_->set_top(-static_cast<float>((frame * 3) % 180));
-        root_->layout_children();
     }
 
     int js_evaluation_count() const override { return 0; }
@@ -814,7 +817,6 @@ function __pulpBenchStep(frame) {
   setMeterLevel('output', out, Math.max(0, out - 0.18));
   setXY('shape', 0.5 + 0.45 * Math.sin(t * 0.7), 0.5 + 0.45 * Math.cos(t * 0.8));
   setTop('preset-content', -((frame * 3) % 180));
-  layout();
 }
 
 layout();
@@ -828,208 +830,38 @@ layout();
     int js_evaluations_ = 0;
 };
 
-// Materializes a DesignIR and fails closed on any import error, so a
-// benchmark never measures a tree the importer reported as wrong. Warnings
-// (a design that states no widget palette, say) do not change the tree's
-// structure; their codes are returned so the receipt shows every one.
-std::unique_ptr<View> materialize_checked(const DesignIR& ir, float width, float height,
-                                          std::string_view lane,
-                                          std::vector<std::string>* warning_codes) {
-    NativeMaterializeOptions options;
-    std::vector<ImportDiagnostic> diagnostics;
-    options.diagnostics_out = &diagnostics;
-    auto root = build_native_view_tree(ir, ir.asset_manifest, options);
-    for (const auto& diagnostic : diagnostics) {
-        if (diagnostic.severity == ImportDiagnosticSeverity::error) {
-            std::ostringstream msg;
-            msg << lane << " materialization reported an error";
-            if (!diagnostic.code.empty())
-                msg << "; code=" << diagnostic.code;
-            if (!diagnostic.message.empty())
-                msg << ": " << diagnostic.message;
-            throw std::runtime_error(msg.str());
-        }
-        if (warning_codes && std::find(warning_codes->begin(), warning_codes->end(),
-                                       diagnostic.code) == warning_codes->end())
-            warning_codes->push_back(diagnostic.code);
-    }
-    if (!root)
-        throw std::runtime_error(std::string(lane) + " materialization returned null root");
-    root->set_bounds({0, 0, width, height});
-    root->layout_children();
-    return root;
-}
-
-// An importer-produced DesignIR, with the provenance that binds a receipt to
-// the exact bytes measured.
-struct LoadedIr {
-    DesignIR ir;
-    std::string sha256;
-    std::string file_name;
-    float width = static_cast<float>(kFixtureWidth);
-    float height = static_cast<float>(kFixtureHeight);
-    std::vector<std::string> slot_anchors;
-};
-
-LoadedIr load_ir(const std::filesystem::path& path) {
-    std::ifstream in(path, std::ios::binary);
-    if (!in)
-        throw std::runtime_error("cannot read DesignIR " + path.string());
-    const std::string text{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
-    LoadedIr loaded;
-    loaded.ir = parse_design_ir_json(text);
-    loaded.sha256 = pulp::runtime::sha256_hex(text);
-    loaded.file_name = path.filename().string();
-    if (loaded.ir.root.style.width && *loaded.ir.root.style.width > 0.0f)
-        loaded.width = *loaded.ir.root.style.width;
-    if (loaded.ir.root.style.height && *loaded.ir.root.style.height > 0.0f)
-        loaded.height = *loaded.ir.root.style.height;
-    const auto collect = [&](auto& self, const IRNode& node) -> void {
-        if (node.type == "text" && !node.text_content.empty() && node.stable_anchor_id &&
-            !node.stable_anchor_id->empty())
-            loaded.slot_anchors.push_back(*node.stable_anchor_id);
-        for (const auto& child : node.children)
-            self(self, child);
-    };
-    collect(collect, loaded.ir.root);
-    auto sorted = loaded.slot_anchors;
-    std::sort(sorted.begin(), sorted.end());
-    if (auto dup = std::adjacent_find(sorted.begin(), sorted.end()); dup != sorted.end())
-        throw std::runtime_error("DesignIR " + loaded.file_name + " repeats text slot anchor " +
-                                 *dup + "; a keyed slot needs a unique anchor");
-    if (loaded.slot_anchors.empty())
-        throw std::runtime_error("DesignIR " + loaded.file_name + " has no anchored text slots");
-    return loaded;
-}
-
-std::string slot_text(std::size_t slot, int frame) {
-    return "slot " + std::to_string(slot) + " frame " + std::to_string(frame);
-}
-
-// The retained-plan experiment over real importer output. Each anchored text
-// node is a typed slot. The retained lane resolves every slot to its Label
-// once and writes through it; the rebuild lane is the control, writing the
-// same text into a copy of the IR and rematerializing the whole tree. Both
-// read every slot back by anchor after the update, so a slot that rebound to
-// a different View, or kept stale text, is counted rather than assumed away.
-class IrBoundFixture final : public BenchmarkFixture {
+// Planted negative for the steady-state resource gate: draws a 1x1 PNG from
+// its encoded bytes on every paint, so every frame decodes. It goes through
+// the canvas's uncached encoded-bytes entry point, which no cache can absorb.
+class PlantedDecodeView final : public View {
   public:
-    IrBoundFixture(const std::filesystem::path& path, bool rebuild_each_step)
-        : loaded_(load_ir(path)), rebuild_each_step_(rebuild_each_step) {
-        materialize(loaded_.ir);
-        for (std::size_t i = 0; i < loaded_.slot_anchors.size(); ++i) {
-            auto* label = resolved_[i];
-            if (!label)
-                throw std::runtime_error("text slot " + loaded_.slot_anchors[i] +
-                                         " did not materialize as a Label");
-            slots_.push_back({label->import_binding_instance_id()});
-        }
+    PlantedDecodeView() {
+        set_id("planted-frame-decode");
+        set_position(View::Position::absolute);
+        set_left(0.0f);
+        set_top(0.0f);
+        flex().dim_width = {4.0f, DimensionUnit::px};
+        flex().dim_height = {4.0f, DimensionUnit::px};
     }
 
-    View& root() override {
-        return *root_;
+    void paint(pulp::canvas::Canvas& canvas) override {
+        static constexpr std::uint8_t kPng[] = {
+            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48,
+            0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
+            0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78,
+            0x9c, 0x63, 0x78, 0xd0, 0x66, 0xf3, 0x1f, 0x00, 0x06, 0x8e, 0x02, 0xa2, 0x86, 0xc6,
+            0xaa, 0xc4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82};
+        canvas.draw_image_from_data(kPng, sizeof(kPng), 0.0f, 0.0f, 4.0f, 4.0f);
     }
-    int js_evaluation_count() const override {
-        return 0;
-    }
-    std::uint64_t slot_identity_change_count() const override {
-        return identity_changes_;
-    }
-    std::uint64_t slot_text_mismatch_count() const override {
-        return text_mismatches_;
-    }
-    View& tree() {
-        return *root_;
-    }
-    const LoadedIr& loaded() const {
-        return loaded_;
-    }
-    const std::vector<std::string>& warning_codes() const {
-        return warning_codes_;
-    }
-
-    void step(int frame) override {
-        if (rebuild_each_step_) {
-            auto ir = loaded_.ir;
-            std::size_t slot = 0;
-            const auto write = [&](auto& self, IRNode& node) -> void {
-                if (node.type == "text" && node.stable_anchor_id &&
-                    slot < loaded_.slot_anchors.size() &&
-                    *node.stable_anchor_id == loaded_.slot_anchors[slot])
-                    node.text_content = slot_text(slot++, frame);
-                for (auto& child : node.children)
-                    self(self, child);
-            };
-            write(write, ir.root);
-            materialize(ir);
-        } else {
-            for (std::size_t i = 0; i < slots_.size(); ++i)
-                retained_[i]->set_text(slot_text(i, frame));
-            root_->layout_children();
-        }
-    }
-
-    // Reads every slot back through the anchors of the CURRENT tree, so a
-    // slot that rebound to another View, or kept stale text, is counted.
-    void verify(int frame) override {
-        resolve_slots();
-        for (std::size_t i = 0; i < slots_.size(); ++i) {
-            auto* label = resolved_[i];
-            if (!label || label->import_binding_instance_id() != slots_[i].instance_id) {
-                ++identity_changes_;
-                if (label)
-                    slots_[i].instance_id = label->import_binding_instance_id();
-            }
-            if (!label || label->text() != slot_text(i, frame))
-                ++text_mismatches_;
-        }
-    }
-
-  private:
-    struct Slot {
-        std::uint64_t instance_id = 0;
-    };
-
-    // Builds the tree and resolves every slot anchor in one walk. The
-    // retained lane keeps writing through the Labels resolved at
-    // construction; `resolved_` always describes the current tree.
-    void materialize(const DesignIR& ir) {
-        root_ = materialize_checked(ir, loaded_.width, loaded_.height, "IR-bound", &warning_codes_);
-        resolve_slots();
-        // Only the retained lane writes through the Labels of its first tree;
-        // the rebuild lane replaces that tree, so it keeps no such pointers.
-        if (!rebuild_each_step_ && retained_.empty())
-            retained_ = resolved_;
-    }
-
-    // Resolves every slot anchor against the CURRENT tree.
-    void resolve_slots() {
-        resolved_.assign(loaded_.slot_anchors.size(), nullptr);
-        const auto visit = [&](auto& self, View& view) -> void {
-            for (std::size_t i = 0; i < loaded_.slot_anchors.size(); ++i)
-                if (view.anchor_id() == loaded_.slot_anchors[i])
-                    resolved_[i] = dynamic_cast<Label*>(&view);
-            for (std::size_t c = 0; c < view.child_count(); ++c)
-                self(self, *view.child_at(c));
-        };
-        visit(visit, *root_);
-    }
-
-    LoadedIr loaded_;
-    bool rebuild_each_step_ = false;
-    std::unique_ptr<View> root_;
-    std::vector<Slot> slots_;
-    std::vector<Label*> resolved_;
-    std::vector<Label*> retained_;
-    std::vector<std::string> warning_codes_;
-    std::uint64_t identity_changes_ = 0;
-    std::uint64_t text_mismatches_ = 0;
 };
 
 std::unique_ptr<BenchmarkFixture> make_fixture(const Config& config) {
-    if (!config.ir_path.empty())
+    if (!config.ir_path.empty()) {
+        if (config.lane == "live")
+            return std::make_unique<IrLiveFixture>(config.ir_path, config.bundle_path);
         return std::make_unique<IrBoundFixture>(config.ir_path,
                                                 config.lane == "baked-native-rebuild");
+    }
     const auto& lane = config.lane;
     if (lane == "live") return std::make_unique<LiveFixture>();
     if (lane == "baked-native") return std::make_unique<BakedNativeFixture>();
@@ -1039,21 +871,47 @@ std::unique_ptr<BenchmarkFixture> make_fixture(const Config& config) {
     return nullptr;
 }
 
-std::uint64_t render_frame(View& root) {
+// One frame through `target`: layout, record and submit, without the lap
+// clock. Startup and tests use it; run_phase times the same three calls.
+std::uint64_t render_frame(View& root, FrameTarget& target) {
     root.layout_children();
-    pulp::canvas::RecordingCanvas canvas;
-    root.paint_all(canvas);
-    return static_cast<std::uint64_t>(canvas.command_count());
+    root.paint_all(target.begin());
+    return target.end();
 }
 
+std::uint64_t render_frame(View& root) {
+    RecordingTarget target;
+    return render_frame(root, target);
+}
+
+StageStats stage_stats(const std::vector<double>& values) {
+    StageStats stats;
+    if (values.empty())
+        return stats;
+    stats.median_ms = percentile(values, 50.0);
+    stats.p95_ms = percentile(values, 95.0);
+    stats.max_ms = *std::max_element(values.begin(), values.end());
+    return stats;
+}
+
+struct PhaseOptions {
+    // Null paints into a per-phase RecordingTarget.
+    FrameTarget* target = nullptr;
+    std::optional<double> planted_load;
+};
+
 PhaseMetrics run_phase(BenchmarkFixture& fixture, int duration_ms, std::optional<int> frames,
-                       int target_fps, bool interactive, int warmup_frames = 0) {
+                       int target_fps, bool interactive, int warmup_frames = 0,
+                       const PhaseOptions& options = {}) {
     PhaseMetrics metrics;
     metrics.duration_ms = frames ? 0 : duration_ms;
     metrics.warmup_frames = warmup_frames;
     if (frames ? *frames <= 0 : duration_ms <= 0)
         return metrics;
 
+    RecordingTarget default_target;
+    FrameTarget& target = options.target ? *options.target : default_target;
+    metrics.host_start = sample_host(options.planted_load);
     const auto interval = std::chrono::duration<double>(1.0 / std::max(1, target_fps));
     const auto interval_duration = std::chrono::duration_cast<Clock::duration>(interval);
     const auto phase_start = Clock::now();
@@ -1079,8 +937,26 @@ PhaseMetrics run_phase(BenchmarkFixture& fixture, int duration_ms, std::optional
     std::vector<double> frame_ms;
     std::vector<double> frame_cpu_ms;
     std::vector<double> update_ms;
-    std::vector<double> rss_bytes;
+    std::vector<double> layout_ms;
+    std::vector<double> record_ms;
+    std::vector<double> submit_ms;
     std::vector<double> frame_allocations;
+    // The text this frame's update wrote, and the builds of any other text.
+    // Ordered with a transparent comparator so the observer looks text up
+    // without allocating inside the measured frame.
+    std::set<std::string, std::less<>> written;
+    std::uint64_t unwritten_builds = 0;
+    set_paragraph_build_observer([&](std::string_view text) {
+        if (written.find(text) == written.end())
+            ++unwritten_builds;
+    });
+    struct ObserverReset {
+        ~ObserverReset() {
+            set_paragraph_build_observer({});
+        }
+    } observer_reset;
+    MemorySeries rss;
+    MemorySeries footprint;
 
     int frame = 0;
     do {
@@ -1095,40 +971,74 @@ PhaseMetrics run_phase(BenchmarkFixture& fixture, int duration_ms, std::optional
         }
         std::size_t allocations = 0;
         std::size_t allocated_bytes = 0;
-        double update_elapsed = 0.0;
+        Clock::time_point laps[4];
+        written.clear();
+        if (interactive)
+            for (auto& text : fixture.text_written_by_step(frame))
+                written.insert(std::move(text));
+        const auto unwritten_before = unwritten_builds;
+        const auto resources_before = sample_resources();
         const auto frame_start = Clock::now();
         const auto frame_cpu_start = std::clock();
         {
             pulp::test::RtAllocationProbe probe;
-            if (interactive) {
-                const auto update_start = Clock::now();
+            const auto update_start = Clock::now();
+            if (interactive)
                 fixture.step(frame);
-                update_elapsed = elapsed_ms(update_start);
-            }
-            metrics.paint_commands_last = render_frame(fixture.root());
+            laps[0] = Clock::now();
+            fixture.root().layout_children();
+            laps[1] = Clock::now();
+            fixture.root().paint_all(target.begin());
+            laps[2] = Clock::now();
+            metrics.paint_commands_last = target.end();
+            laps[3] = Clock::now();
             allocations = probe.allocation_count();
             allocated_bytes = probe.allocated_bytes();
+            if (sampled) {
+                update_ms.push_back(elapsed_ms(update_start, laps[0]));
+                layout_ms.push_back(elapsed_ms(laps[0], laps[1]));
+                record_ms.push_back(elapsed_ms(laps[1], laps[2]));
+                submit_ms.push_back(elapsed_ms(laps[2], laps[3]));
+            }
         }
         const auto frame_cpu_end = std::clock();
         const auto frame_end = Clock::now();
+        const auto resources_after = sample_resources();
         if (interactive) {
             const auto verify_cpu_start = std::clock();
             fixture.verify(frame);
             verify_cpu_ms += cpu_clock_delta_ms(verify_cpu_start, std::clock());
         }
         if (sampled) {
+            const bool first = frame == warmup_frames;
+            auto& r = metrics.resources;
+            const auto& a = resources_after;
+            const auto& b = resources_before;
+            r.image_decodes.add(a.image_decodes - b.image_decodes, first);
+            r.gpu_uploads.add(a.gpu_uploads - b.gpu_uploads, first);
+            r.paragraph_builds.add(a.paragraph_builds - b.paragraph_builds, first);
+            r.paragraph_builds_unwritten.add(unwritten_builds - unwritten_before, first);
+            r.scene_records.add(a.scene_records - b.scene_records, first);
+            r.scene_replays.add(a.scene_replays - b.scene_replays, first);
+            r.image_cache_hits.add(a.image_cache_hits - b.image_cache_hits, first);
+            r.image_cache_builds.add(a.image_cache_builds - b.image_cache_builds, first);
             metrics.paint_commands_total += metrics.paint_commands_last;
             ++metrics.paint_calls;
-            if (interactive)
-                update_ms.push_back(update_elapsed);
-            frame_ms.push_back(elapsed_ms(frame_start, frame_end));
+            const double total = elapsed_ms(frame_start, frame_end);
+            frame_ms.push_back(total);
+            const double laps_total =
+                update_ms.back() + layout_ms.back() + record_ms.back() + submit_ms.back();
+            metrics.stages.residual_ms_max =
+                std::max(metrics.stages.residual_ms_max, total - laps_total);
+            if (total - laps_total >
+                std::max(kStageResidualFloorMs, kStageResidualFraction * total))
+                ++metrics.stages.frames_over_residual;
             frame_cpu_ms.push_back(cpu_clock_delta_ms(frame_cpu_start, frame_cpu_end));
             frame_allocations.push_back(static_cast<double>(allocations));
             metrics.allocations_total += allocations;
             metrics.allocated_bytes_total += allocated_bytes;
-            const auto rss = current_rss_bytes();
-            rss_bytes.push_back(static_cast<double>(rss));
-            metrics.rss_peak_bytes = std::max(metrics.rss_peak_bytes, rss);
+            rss.add(rss_reading());
+            footprint.add(phys_footprint_reading());
         }
         ++frame;
 
@@ -1138,8 +1048,11 @@ PhaseMetrics run_phase(BenchmarkFixture& fixture, int duration_ms, std::optional
         const auto now = Clock::now();
         if (next_frame > now) std::this_thread::sleep_until(next_frame);
     } while (frames ? frame < *frames : elapsed_ms(phase_start) < static_cast<double>(duration_ms));
+    metrics.host_end = sample_host(options.planted_load);
 
     metrics.samples = static_cast<int>(frame_ms.size());
+    metrics.stages_consistent = static_cast<double>(metrics.stages.frames_over_residual) <=
+                                kStageResidualFrameShare * static_cast<double>(metrics.samples);
     if (!frame_ms.empty()) {
         metrics.frame_ms_median = percentile(frame_ms, 50.0);
         metrics.frame_ms_p95 = percentile(frame_ms, 95.0);
@@ -1150,7 +1063,11 @@ PhaseMetrics run_phase(BenchmarkFixture& fixture, int duration_ms, std::optional
         metrics.cpu_frame_ms_median = percentile(frame_cpu_ms, 50.0);
         metrics.cpu_frame_ms_p99 = percentile(frame_cpu_ms, 99.0);
     }
-    if (!update_ms.empty()) {
+    metrics.stages.update = stage_stats(update_ms);
+    metrics.stages.layout = stage_stats(layout_ms);
+    metrics.stages.record = stage_stats(record_ms);
+    metrics.stages.submit = stage_stats(submit_ms);
+    if (interactive && !update_ms.empty()) {
         metrics.update_ms_median = percentile(update_ms, 50.0);
         metrics.update_ms_p95 = percentile(update_ms, 95.0);
         metrics.update_ms_p99 = percentile(update_ms, 99.0);
@@ -1160,10 +1077,8 @@ PhaseMetrics run_phase(BenchmarkFixture& fixture, int duration_ms, std::optional
         metrics.allocations_per_frame_median = percentile(frame_allocations, 50.0);
         metrics.allocations_per_frame_p95 = percentile(frame_allocations, 95.0);
     }
-    if (!rss_bytes.empty()) {
-        metrics.rss_median_bytes = static_cast<std::uint64_t>(std::llround(percentile(rss_bytes, 50.0)));
-        metrics.rss_p99_bytes = static_cast<std::uint64_t>(std::llround(percentile(rss_bytes, 99.0)));
-    }
+    metrics.rss = rss.summary();
+    metrics.phys_footprint = footprint.summary();
     const auto cpu_end = std::clock();
     // Verification is the benchmark checking itself, not work under test.
     metrics.cpu_ms = std::max(0.0, cpu_clock_delta_ms(cpu_start, cpu_end) - verify_cpu_ms);
@@ -1183,6 +1098,66 @@ PhaseMetrics run_phase(BenchmarkFixture& fixture, int duration_ms, std::optional
     return metrics;
 }
 
+// Settled build/run/teardown cycles. The first cycle absorbs one-time
+// allocations (font caches, the script engine's runtime) and is excluded from
+// the slope; the rest are the steady state, where a correct implementation
+// returns to the same footprint after every teardown.
+struct CycleMetrics {
+    int count = 0;
+    int settle_cycles = 1;
+    std::vector<Reading> rss_after;
+    std::vector<Reading> footprint_after;
+    std::optional<double> rss_slope;
+    std::optional<double> footprint_slope;
+    std::string rss_reason;
+    std::string footprint_reason;
+    bool planted_leak = false;
+};
+
+constexpr std::size_t kPlantedCycleLeakBytes = 4u * 1024u * 1024u;
+
+std::optional<double> settled_slope(const std::vector<Reading>& readings, int settle,
+                                    std::string& reason) {
+    std::vector<double> values;
+    for (std::size_t i = static_cast<std::size_t>(settle); i < readings.size(); ++i) {
+        if (!readings[i].value) {
+            reason = readings[i].reason;
+            return std::nullopt;
+        }
+        values.push_back(static_cast<double>(*readings[i].value));
+    }
+    auto slope = least_squares_slope(values);
+    if (!slope)
+        reason = "fewer than two settled cycles";
+    return slope;
+}
+
+CycleMetrics run_cycles(const Config& config, int cycles) {
+    CycleMetrics metrics;
+    metrics.count = cycles;
+    metrics.planted_leak = config.plant_cycle_leak;
+    // Held for the life of the process: the planted leak must stay resident.
+    static std::vector<std::unique_ptr<char[]>> planted;
+    const int frames = config.frames.value_or(60);
+    for (int cycle = 0; cycle < cycles; ++cycle) {
+        {
+            auto fixture = make_fixture(config);
+            run_phase(*fixture, 0, frames, config.target_fps, true);
+        }
+        if (config.plant_cycle_leak) {
+            planted.push_back(std::make_unique<char[]>(kPlantedCycleLeakBytes));
+            // Touch every page so the leak is resident, not merely reserved.
+            std::fill_n(planted.back().get(), kPlantedCycleLeakBytes, char{1});
+        }
+        metrics.rss_after.push_back(rss_reading());
+        metrics.footprint_after.push_back(phys_footprint_reading());
+    }
+    metrics.rss_slope = settled_slope(metrics.rss_after, metrics.settle_cycles, metrics.rss_reason);
+    metrics.footprint_slope =
+        settled_slope(metrics.footprint_after, metrics.settle_cycles, metrics.footprint_reason);
+    return metrics;
+}
+
 bool write_file(const std::filesystem::path& path, const std::string& text) {
     if (path.empty()) return true;
     if (path.has_parent_path()) std::filesystem::create_directories(path.parent_path());
@@ -1190,6 +1165,108 @@ bool write_file(const std::filesystem::path& path, const std::string& text) {
     if (!out.is_open()) return false;
     out << text;
     return out.good();
+}
+
+// A JSON number, or null for an absent value; never a stand-in 0.
+template <typename T> std::string json_number_or_null(const std::optional<T>& value) {
+    if (!value)
+        return "null";
+    std::ostringstream out;
+    out << std::fixed << std::setprecision(4) << *value;
+    return out.str();
+}
+
+std::string json_string_or_null(const std::string& value) {
+    return value.empty() ? "null" : "\"" + json_escape(value) + "\"";
+}
+
+std::string reading_json(const Reading& reading) {
+    std::ostringstream out;
+    out << "{\"value\": " << (reading.value ? std::to_string(*reading.value) : std::string("null"))
+        << ", \"source\": " << json_string_or_null(reading.source)
+        << ", \"reason\": " << json_string_or_null(reading.reason) << "}";
+    return out.str();
+}
+
+std::string memory_json(const MemoryStats& stats) {
+    const auto bytes = [](const std::optional<std::uint64_t>& value) {
+        return value ? std::to_string(*value) : std::string("null");
+    };
+    std::ostringstream out;
+    out << "{\"median_bytes\": " << bytes(stats.median_bytes)
+        << ", \"p99_bytes\": " << bytes(stats.p99_bytes)
+        << ", \"peak_bytes\": " << bytes(stats.peak_bytes)
+        << ", \"source\": " << json_string_or_null(stats.source)
+        << ", \"reason\": " << json_string_or_null(stats.reason) << "}";
+    return out.str();
+}
+
+std::string host_sample_json(const std::optional<HostSample>& sample) {
+    if (!sample)
+        return "null";
+    std::ostringstream out;
+    out << "{\"load_1m\": " << json_number_or_null(sample->load_1m)
+        << ", \"load_reason\": " << json_string_or_null(sample->load_reason)
+        << ", \"thermal_state\": " << json_string_or_null(sample->thermal)
+        << ", \"thermal_reason\": " << json_string_or_null(sample->thermal_reason) << "}";
+    return out.str();
+}
+
+std::string stage_json(const StageStats& stats) {
+    std::ostringstream out;
+    out << std::fixed << std::setprecision(4) << "{\"median_ms\": " << stats.median_ms
+        << ", \"p95_ms\": " << stats.p95_ms << ", \"max_ms\": " << stats.max_ms << "}";
+    return out.str();
+}
+
+// Steady state does no resource work: after a phase's first frame, no frame
+// may decode an image, upload one to the GPU or rebuild an image-cache entry,
+// and no frame may shape more text runs than its update wrote. A target that
+// never decodes, uploads or shapes cannot fail this gate, so its verdict is
+// `blind`, not `pass`.
+struct SteadyStateGate {
+    std::string status;
+    std::vector<std::string> failures;
+};
+
+SteadyStateGate steady_state_gate(const PhaseMetrics& idle, const PhaseMetrics& interactive,
+                                  bool observes_resources) {
+    SteadyStateGate gate;
+    if (!observes_resources) {
+        gate.status = "blind";
+        return gate;
+    }
+    for (const auto& [name, phase] : {std::pair<const char*, const PhaseMetrics*>{"idle", &idle},
+                                      {"interactive", &interactive}}) {
+        const auto check = [&](const char* what, const ResourceSeries& series) {
+            if (series.frames_after_first_with_work != 0)
+                gate.failures.push_back(std::string(name) + ": " +
+                                        std::to_string(series.frames_after_first_with_work) +
+                                        " frames after the first did " + what);
+        };
+        check("image decodes", phase->resources.image_decodes);
+        check("GPU uploads", phase->resources.gpu_uploads);
+        check("image-cache builds", phase->resources.image_cache_builds);
+        check("paragraph builds of text the update did not write",
+              phase->resources.paragraph_builds_unwritten);
+    }
+    gate.status = gate.failures.empty() ? "pass" : "fail";
+    return gate;
+}
+
+std::string resource_json(const ResourceSeries& series) {
+    return "{\"total\": " + std::to_string(series.total) +
+           ", \"per_frame_max\": " + std::to_string(series.per_frame_max) +
+           ", \"frames_after_first_with_work\": " +
+           std::to_string(series.frames_after_first_with_work) + "}";
+}
+
+// Paragraph builds also carry the subset the gate judges: builds of text the
+// frame's update did not write.
+std::string paragraph_builds_json(const PhaseResources& r) {
+    auto json = resource_json(r.paragraph_builds);
+    json.pop_back();
+    return json + ", \"unwritten\": " + resource_json(r.paragraph_builds_unwritten) + "}";
 }
 
 void append_phase_json(std::ostringstream& out,
@@ -1211,9 +1288,21 @@ void append_phase_json(std::ostringstream& out,
     out << "    \"update_ms_p95\": " << metrics.update_ms_p95 << ",\n";
     out << "    \"update_ms_p99\": " << metrics.update_ms_p99 << ",\n";
     out << "    \"update_ms_max\": " << metrics.update_ms_max << ",\n";
-    out << "    \"rss_median_bytes\": " << metrics.rss_median_bytes << ",\n";
-    out << "    \"rss_p99_bytes\": " << metrics.rss_p99_bytes << ",\n";
-    out << "    \"rss_peak_bytes\": " << metrics.rss_peak_bytes << ",\n";
+    out << "    \"stages\": {\n";
+    out << "      \"update\": " << stage_json(metrics.stages.update) << ",\n";
+    out << "      \"layout\": " << stage_json(metrics.stages.layout) << ",\n";
+    out << "      \"record\": " << stage_json(metrics.stages.record) << ",\n";
+    out << "      \"submit\": " << stage_json(metrics.stages.submit) << ",\n";
+    out << "      \"residual_ms_max\": " << metrics.stages.residual_ms_max << ",\n";
+    out << "      \"frames_over_residual\": " << metrics.stages.frames_over_residual << ",\n";
+    out << "      \"consistent\": " << (metrics.stages_consistent ? "true" : "false") << "\n";
+    out << "    },\n";
+    out << "    \"memory\": {\n";
+    out << "      \"rss\": " << memory_json(metrics.rss) << ",\n";
+    out << "      \"phys_footprint\": " << memory_json(metrics.phys_footprint) << "\n";
+    out << "    },\n";
+    out << "    \"host\": {\"start\": " << host_sample_json(metrics.host_start)
+        << ", \"end\": " << host_sample_json(metrics.host_end) << "},\n";
     out << "    \"allocations_total\": " << metrics.allocations_total << ",\n";
     out << "    \"allocated_bytes_total\": " << metrics.allocated_bytes_total << ",\n";
     out << "    \"allocations_per_frame_median\": " << metrics.allocations_per_frame_median
@@ -1222,7 +1311,7 @@ void append_phase_json(std::ostringstream& out,
     out << "    \"paint_commands_last\": " << metrics.paint_commands_last << ",\n";
     out << "    \"js_evaluations_total\": " << metrics.js_evaluations << ",\n";
     out << "    \"counters\": {\n";
-    out << "      \"counter_schema\": \"pulp-design-import-benchmark-counters-v1\",\n";
+    out << "      \"counter_schema\": \"pulp-design-import-benchmark-counters-v2\",\n";
     out << "      \"bridge_calls\": " << metrics.bridge_calls << ",\n";
     out << "      \"layout_passes\": " << metrics.layout_passes << ",\n";
     out << "      \"paint_calls\": " << metrics.paint_calls << ",\n";
@@ -1232,7 +1321,17 @@ void append_phase_json(std::ostringstream& out,
     out << "      \"views_constructed\": " << metrics.views_constructed << ",\n";
     out << "      \"views_destroyed\": " << metrics.views_destroyed << ",\n";
     out << "      \"slot_identity_changes\": " << metrics.slot_identity_changes << ",\n";
-    out << "      \"slot_text_mismatches\": " << metrics.slot_text_mismatches << "\n";
+    out << "      \"slot_text_mismatches\": " << metrics.slot_text_mismatches << ",\n";
+    const auto& r = metrics.resources;
+    out << "      \"resources\": {\n";
+    out << "        \"image_decodes\": " << resource_json(r.image_decodes) << ",\n";
+    out << "        \"gpu_uploads\": " << resource_json(r.gpu_uploads) << ",\n";
+    out << "        \"paragraph_builds\": " << paragraph_builds_json(r) << ",\n";
+    out << "        \"scene_cache\": {\"records\": " << resource_json(r.scene_records)
+        << ", \"replays\": " << resource_json(r.scene_replays) << "},\n";
+    out << "        \"image_cache\": {\"hits\": " << resource_json(r.image_cache_hits)
+        << ", \"builds\": " << resource_json(r.image_cache_builds) << "}\n";
+    out << "      }\n";
     out << "    }\n";
     out << "  }" << (trailing_comma ? "," : "") << "\n";
 }
@@ -1250,17 +1349,58 @@ struct IrProvenance {
     std::string sha256;
     std::size_t slots = 0;
     std::vector<std::string> materialization_warnings;
+    // The materialized runtime bundle the live lane mounted, if any.
+    std::string bundle_file_name;
+    std::string bundle_sha256;
 };
+
+// Receipt fields that describe the run rather than one phase.
+struct RunContext {
+    Reading rss_high_water;
+    HostConditions host;
+    std::optional<double> planted_load;
+    std::optional<CycleMetrics> cycles;
+    std::string canvas = "recording";
+    SteadyStateGate steady_state{"blind", {}};
+    bool planted_frame_decode = false;
+    bool paragraph_cache = true;
+    std::uint64_t paint_commands_recorded = 0;
+};
+
+std::string cycles_json(const CycleMetrics& cycles) {
+    std::ostringstream out;
+    out << "{\n";
+    out << "    \"count\": " << cycles.count << ",\n";
+    out << "    \"settle_cycles\": " << cycles.settle_cycles << ",\n";
+    out << "    \"planted_leak\": " << (cycles.planted_leak ? "true" : "false") << ",\n";
+    out << "    \"rss_after\": [";
+    for (std::size_t i = 0; i < cycles.rss_after.size(); ++i)
+        out << (i ? ", " : "") << reading_json(cycles.rss_after[i]);
+    out << "],\n";
+    out << "    \"phys_footprint_after\": [";
+    for (std::size_t i = 0; i < cycles.footprint_after.size(); ++i)
+        out << (i ? ", " : "") << reading_json(cycles.footprint_after[i]);
+    out << "],\n";
+    out << "    \"rss_slope_bytes_per_cycle\": " << json_number_or_null(cycles.rss_slope) << ",\n";
+    out << "    \"rss_slope_reason\": " << json_string_or_null(cycles.rss_reason) << ",\n";
+    out << "    \"phys_footprint_slope_bytes_per_cycle\": "
+        << json_number_or_null(cycles.footprint_slope) << ",\n";
+    out << "    \"phys_footprint_slope_reason\": " << json_string_or_null(cycles.footprint_reason)
+        << "\n";
+    out << "  }";
+    return out.str();
+}
 
 std::string make_json(const Config& config, const std::optional<IrProvenance>& ir,
                       const StartupMetrics& startup, const PhaseMetrics& idle,
                       const PhaseMetrics& interactive, const TeardownMetrics& teardown,
-                      std::uint64_t rss_high_water = 0) {
+                      const RunContext& run = {}) {
     std::ostringstream out;
     out << std::fixed << std::setprecision(4);
     out << "{\n";
-    out << "  \"schema\": \"pulp-design-import-benchmark-v1\",\n";
+    out << "  \"schema\": \"pulp-design-import-benchmark-v2\",\n";
     out << "  \"lane\": \"" << json_escape(config.lane) << "\",\n";
+    out << "  \"canvas\": \"" << json_escape(run.canvas) << "\",\n";
     out << "  \"fixture\": \"" << (ir ? json_escape(ir->file_name) : std::string(kFixtureName))
         << "\",\n";
     if (ir) {
@@ -1270,7 +1410,12 @@ std::string make_json(const Config& config, const std::optional<IrProvenance>& i
         out << "    \"materialization_warnings\": [";
         for (std::size_t i = 0; i < ir->materialization_warnings.size(); ++i)
             out << (i ? ", " : "") << "\"" << json_escape(ir->materialization_warnings[i]) << "\"";
-        out << "]\n";
+        out << "],\n";
+        out << "    \"bundle\": "
+            << (ir->bundle_sha256.empty() ? std::string("null")
+                                          : "{\"file\": \"" + json_escape(ir->bundle_file_name) +
+                                                "\", \"sha256\": \"" + ir->bundle_sha256 + "\"}")
+            << "\n";
         out << "  },\n";
     }
     out << "  \"pacing\": \"" << (config.frames ? "fixed-frames" : "wall-clock") << "\",\n";
@@ -1278,21 +1423,45 @@ std::string make_json(const Config& config, const std::optional<IrProvenance>& i
         out << "  \"frames_per_phase\": " << *config.frames << ",\n";
     out << "  \"host\": \"" << json_escape(host_name()) << "\",\n";
     out << "  \"platform\": \"" << json_escape(platform_name()) << "\",\n";
+    out << "  \"host_conditions\": {\n";
+    out << "    \"cores\": " << run.host.cores << ",\n";
+    out << "    \"load_threshold\": " << run.host.load_threshold << ",\n";
+    out << "    \"planted_load\": " << json_number_or_null(run.planted_load) << ",\n";
+    out << "    \"confounded\": " << (run.host.confounded ? "true" : "false") << ",\n";
+    out << "    \"confounders\": [";
+    for (std::size_t i = 0; i < run.host.confounders.size(); ++i)
+        out << (i ? ", " : "") << "\"" << json_escape(run.host.confounders[i]) << "\"";
+    out << "]\n";
+    out << "  },\n";
     out << "  \"target_fps\": " << config.target_fps << ",\n";
     out << "  \"startup\": {\n";
     out << "    \"build_ms\": " << startup.build_ms << ",\n";
     out << "    \"first_frame_ms\": " << startup.first_frame_ms << ",\n";
     out << "    \"first_frame_render_ms\": " << startup.first_frame_render_ms << ",\n";
     out << "    \"first_frame_paint_commands\": " << startup.first_frame_paint_commands << ",\n";
-    out << "    \"rss_after_first_frame_bytes\": " << startup.rss_after_first_frame_bytes << "\n";
+    out << "    \"rss_after_first_frame\": " << reading_json(startup.rss_after_first_frame) << "\n";
     out << "  },\n";
-    out << "  \"rss_high_water_bytes\": " << rss_high_water << ",\n";
+    out << "  \"rss_high_water\": " << reading_json(run.rss_high_water) << ",\n";
+    out << "  \"paint_commands_recorded\": " << run.paint_commands_recorded << ",\n";
     out << "  \"interaction_model\": \"value drag plus overflow-panel scroll offset; live lane "
            "mutates through JS bridge, baked-native materializes once and uses direct native "
            "setters, baked-native-rebuild rematerializes the same IR per interactive step, "
-           "baked-cpp mutates generated-style native widgets directly\",\n";
+           "baked-cpp mutates generated-style native widgets directly; with --ir every lane "
+           "writes the IR's anchored text slots instead\",\n";
+    out << "  \"paragraph_cache\": " << (run.paragraph_cache ? "true" : "false") << ",\n";
+    out << "  \"steady_state_gate\": {\n";
+    out << "    \"status\": \"" << run.steady_state.status << "\",\n";
+    out << "    \"planted_frame_decode\": " << (run.planted_frame_decode ? "true" : "false")
+        << ",\n";
+    out << "    \"failures\": [";
+    for (std::size_t i = 0; i < run.steady_state.failures.size(); ++i)
+        out << (i ? ", " : "") << "\"" << json_escape(run.steady_state.failures[i]) << "\"";
+    out << "]\n";
+    out << "  },\n";
     append_phase_json(out, "idle", idle, true);
     append_phase_json(out, "interactive", interactive, true);
+    if (run.cycles)
+        out << "  \"cycles\": " << cycles_json(*run.cycles) << ",\n";
     out << "  \"teardown\": {\n";
     out << "    \"views_constructed\": " << teardown.views_constructed << ",\n";
     out << "    \"views_destroyed\": " << teardown.views_destroyed << ",\n";
@@ -1308,12 +1477,45 @@ void print_usage(std::ostream& out) {
            "[--lane=live|baked-native|baked-native-rebuild|baked-cpp] "
            "[--idle-ms=N] [--interactive-ms=N] [--target-fps=N] [--warmup-frames=N] "
            "[--output=PATH] "
-           "[--ir=DESIGN_IR_JSON] [--frames=N] [--plant-leak]\n"
-           "  --ir measures an importer-produced DesignIR (baked-native and\n"
-           "     baked-native-rebuild only) with anchored text nodes as keyed slots.\n"
+           "[--ir=DESIGN_IR_JSON] [--bundle=MATERIALIZED_BUNDLE_JS] [--frames=N] "
+           "[--cycles=N] [--canvas=recording|skia-raster|skia-graphite] "
+           "[--require-steady-state] [--plant-leak] [--plant-cycle-leak] [--plant-load=LOAD] "
+           "[--plant-frame-decode] [--paragraph-cache=on|off]\n"
+           "  --ir measures an importer-produced DesignIR with anchored text nodes as\n"
+           "     keyed slots (live, baked-native and baked-native-rebuild).\n"
+           "  --bundle mounts the materialized runtime bundle built from the same\n"
+           "     source under the live lane's DesignIR (requires --lane=live --ir).\n"
            "  --frames runs exactly N frames per phase without pacing, so every\n"
            "     counter in the receipt is reproducible.\n"
-           "  --plant-leak leaks one view past teardown; the run must then fail.\n";
+           "  --cycles runs N >= 3 build/run/teardown cycles after the phases and\n"
+           "     reports the memory slope across the settled ones.\n"
+           "  --canvas paints every frame into a RecordingCanvas (default) or through\n"
+           "     SkiaCanvas into a CPU raster or headless Graphite surface, where\n"
+           "     decodes, uploads and text shaping are measured.\n"
+           "  --require-steady-state exits 4 when a frame after a phase's first\n"
+           "     decodes, uploads or rebuilds an image, or shapes text its update\n"
+           "     did not write.\n"
+           "  --plant-leak leaks one view past teardown; the run must then fail.\n"
+           "  --plant-cycle-leak leaks 4 MiB per cycle; the slope must then rise.\n"
+           "  --plant-load reports LOAD as the one-minute load average; a load\n"
+           "     above cores/4 must mark the receipt confounded.\n"
+           "  --plant-frame-decode adds a view that decodes an image every paint;\n"
+           "     the steady-state gate must then fail.\n"
+           "  --paragraph-cache=off shapes every text run on every paint, the\n"
+           "     uncached text path; the steady-state gate must then fail on text.\n";
+}
+
+bool parse_double(std::string_view value, double& out) {
+    try {
+        std::size_t used = 0;
+        const double parsed = std::stod(std::string(value), &used);
+        if (used != value.size() || !std::isfinite(parsed))
+            return false;
+        out = parsed;
+        return true;
+    } catch (...) {
+        return false;
+    }
 }
 
 bool parse_int(std::string_view value, int& out) {
@@ -1371,8 +1573,36 @@ std::optional<Config> parse_args(int argc, char** argv) {
             if (!parse_int(*value, frames) || frames < 0)
                 return std::nullopt;
             config.frames = frames;
+        } else if (auto value = value_after("--bundle=")) {
+            config.bundle_path = *value;
+        } else if (arg == "--bundle" && i + 1 < argc) {
+            config.bundle_path = argv[++i];
+        } else if (auto value = value_after("--cycles=")) {
+            int cycles = 0;
+            if (!parse_int(*value, cycles))
+                return std::nullopt;
+            config.cycles = cycles;
+        } else if (auto value = value_after("--plant-load=")) {
+            double load = 0.0;
+            if (!parse_double(*value, load) || load < 0.0)
+                return std::nullopt;
+            config.plant_load = load;
+        } else if (auto value = value_after("--canvas=")) {
+            config.canvas = *value;
+        } else if (arg == "--canvas" && i + 1 < argc) {
+            config.canvas = argv[++i];
+        } else if (arg == "--require-steady-state") {
+            config.require_steady_state = true;
+        } else if (arg == "--plant-frame-decode") {
+            config.plant_frame_decode = true;
+        } else if (auto value = value_after("--paragraph-cache=")) {
+            if (*value != "on" && *value != "off")
+                return std::nullopt;
+            config.paragraph_cache = *value == "on";
         } else if (arg == "--plant-leak") {
             config.plant_leak = true;
+        } else if (arg == "--plant-cycle-leak") {
+            config.plant_cycle_leak = true;
         } else if (auto value = value_after("--output=")) {
             config.output_path = *value;
         } else if (arg == "--output" && i + 1 < argc) {
@@ -1384,13 +1614,33 @@ std::optional<Config> parse_args(int argc, char** argv) {
     if (config.lane != "live" && config.lane != "baked-native" &&
         config.lane != "baked-native-rebuild" && config.lane != "baked-cpp")
         return std::nullopt;
-    // The live lane runs a scripted UI and baked-cpp is compiled code; neither
-    // can be built from a DesignIR at run time, so neither can claim to have
-    // measured one.
-    if (!config.ir_path.empty() && config.lane != "baked-native" &&
-        config.lane != "baked-native-rebuild") {
-        std::cerr << "--ir applies to baked-native and baked-native-rebuild only; the "
+    // baked-cpp is compiled code; it cannot be built from a DesignIR at run
+    // time, so it cannot claim to have measured one.
+    if (!config.ir_path.empty() && config.lane == "baked-cpp") {
+        std::cerr << "--ir applies to live, baked-native and baked-native-rebuild; the "
                   << config.lane << " lane cannot be built from a DesignIR\n";
+        return std::nullopt;
+    }
+    // A bundle is the behavior realm of a DesignIR the live lane mounts; it
+    // means nothing on its own or to a natively materialized lane.
+    if (!config.bundle_path.empty() && (config.lane != "live" || config.ir_path.empty())) {
+        std::cerr << "--bundle requires --lane=live and the --ir it was built with\n";
+        return std::nullopt;
+    }
+    if (config.canvas != "recording" && config.canvas != "skia-raster" &&
+        config.canvas != "skia-graphite") {
+        std::cerr << "--canvas must be recording, skia-raster or skia-graphite\n";
+        return std::nullopt;
+    }
+    // A rebuild lane replaces its root every step, which would drop the plant.
+    if (config.plant_frame_decode && config.lane == "baked-native-rebuild") {
+        std::cerr << "--plant-frame-decode needs a lane that keeps its root\n";
+        return std::nullopt;
+    }
+    // A slope needs two settled points after the cycle that absorbs one-time
+    // allocations; fewer cycles cannot distinguish growth from noise.
+    if (config.cycles && *config.cycles < 3) {
+        std::cerr << "--cycles must be at least 3 (one settling cycle plus two measured)\n";
         return std::nullopt;
     }
     config.idle_ms = std::max(0, config.idle_ms);
@@ -1410,6 +1660,7 @@ int main(int argc, char** argv) {
         return 2;
     }
 
+    set_paragraph_cache_enabled(config->paragraph_cache);
     const auto views_constructed_start = View::constructed_count();
     const auto views_destroyed_start = View::destroyed_count();
     const auto build_start = Clock::now();
@@ -1425,27 +1676,64 @@ int main(int argc, char** argv) {
         return 2;
     }
     const auto build_end = Clock::now();
+    if (config->plant_frame_decode)
+        fixture->root().add_child(std::make_unique<PlantedDecodeView>());
 
-    const auto first_render_start = Clock::now();
-    const auto first_commands = render_frame(fixture->root());
-    const auto first_render_end = Clock::now();
-
+    std::string target_error;
+    const auto bounds = fixture->root().bounds();
+    auto target =
+        make_frame_target(config->canvas, static_cast<std::uint32_t>(std::max(1.0f, bounds.width)),
+                          static_cast<std::uint32_t>(std::max(1.0f, bounds.height)), target_error);
+    if (!target) {
+        std::cerr << "--canvas=" << config->canvas << " is unavailable: " << target_error << "\n";
+        return 2;
+    }
     StartupMetrics startup;
-    startup.build_ms = elapsed_ms(build_start, build_end);
-    startup.first_frame_render_ms = elapsed_ms(first_render_start, first_render_end);
-    startup.first_frame_ms = elapsed_ms(process_start, first_render_end);
-    startup.first_frame_paint_commands = first_commands;
-    startup.rss_after_first_frame_bytes = current_rss_bytes();
+    PhaseMetrics idle;
+    PhaseMetrics interactive;
+    std::uint64_t paint_commands_recorded = 0;
+    // A frame target that loses its device mid-run throws; the run then has
+    // no receipt rather than a partial one.
+    try {
+        const auto first_render_start = Clock::now();
+        const auto first_commands = render_frame(fixture->root(), *target);
+        const auto first_render_end = Clock::now();
 
-    const auto idle =
-        run_phase(*fixture, config->idle_ms, config->frames, config->target_fps, false);
-    const auto interactive = run_phase(*fixture, config->interactive_ms, config->frames,
-                                       config->target_fps, true, config->warmup_frames);
+        startup.build_ms = elapsed_ms(build_start, build_end);
+        startup.first_frame_render_ms = elapsed_ms(first_render_start, first_render_end);
+        startup.first_frame_ms = elapsed_ms(process_start, first_render_end);
+        startup.first_frame_paint_commands = first_commands;
+        startup.rss_after_first_frame = rss_reading();
+
+        PhaseOptions phase_options;
+        phase_options.target = target.get();
+        phase_options.planted_load = config->plant_load;
+        idle = run_phase(*fixture, config->idle_ms, config->frames, config->target_fps, false, 0,
+                         phase_options);
+        interactive = run_phase(*fixture, config->interactive_ms, config->frames,
+                                config->target_fps, true, config->warmup_frames, phase_options);
+        // A Skia target cannot count paint commands, so every receipt also
+        // records the final tree once into a RecordingCanvas, untimed. Two
+        // lanes that claim to paint the same tree must agree on this count.
+        RecordingTarget reference;
+        paint_commands_recorded = render_frame(fixture->root(), reference);
+    } catch (const std::exception& e) {
+        std::cerr << "benchmark run failed: " << e.what() << "\n";
+        return 1;
+    }
 
     std::optional<IrProvenance> ir;
     if (auto* bound = dynamic_cast<IrBoundFixture*>(fixture.get()))
-        ir = IrProvenance{bound->loaded().file_name, bound->loaded().sha256,
-                          bound->loaded().slot_anchors.size(), bound->warning_codes()};
+        ir = IrProvenance{bound->loaded().file_name,
+                          bound->loaded().sha256,
+                          bound->loaded().slot_anchors.size(),
+                          bound->warning_codes(),
+                          {},
+                          {}};
+    if (auto* live = dynamic_cast<IrLiveFixture*>(fixture.get()))
+        ir = IrProvenance{live->loaded().file_name,           live->loaded().sha256,
+                          live->loaded().slot_anchors.size(), {},
+                          live->bundle_file_name(),           live->bundle_sha256()};
 
     // Terminal readback: destroy the fixture, then count the views it left.
     TeardownMetrics teardown;
@@ -1466,8 +1754,36 @@ int main(int argc, char** argv) {
     teardown.live_views_after_teardown =
         teardown.views_constructed - std::min(teardown.views_constructed, teardown.views_destroyed);
     planted.reset();
-    const auto json =
-        make_json(*config, ir, startup, idle, interactive, teardown, rss_high_water_bytes());
+
+    RunContext run;
+    std::vector<HostSample> samples;
+    for (const auto* phase : {&idle, &interactive}) {
+        if (phase->host_start)
+            samples.push_back(*phase->host_start);
+        if (phase->host_end)
+            samples.push_back(*phase->host_end);
+    }
+    if (samples.empty())
+        samples.push_back(sample_host(config->plant_load));
+    if (config->cycles) {
+        try {
+            run.cycles = run_cycles(*config, *config->cycles);
+        } catch (const std::exception& e) {
+            std::cerr << "benchmark cycles failed: " << e.what() << "\n";
+            return 1;
+        }
+        samples.push_back(sample_host(config->plant_load));
+    }
+    run.host = classify_host(samples, logical_cores());
+    run.planted_load = config->plant_load;
+    run.rss_high_water = rss_high_water_reading();
+    run.canvas = target->name();
+    run.steady_state = steady_state_gate(idle, interactive, target->observes_resources());
+    run.planted_frame_decode = config->plant_frame_decode;
+    run.paragraph_cache = config->paragraph_cache;
+    run.paint_commands_recorded = paint_commands_recorded;
+    target.reset();
+    const auto json = make_json(*config, ir, startup, idle, interactive, teardown, run);
 
     if (!config->output_path.empty()) {
         if (!write_file(config->output_path, json)) {
@@ -1480,6 +1796,12 @@ int main(int argc, char** argv) {
     if (teardown.live_views_after_teardown != 0) {
         std::cerr << "teardown left " << teardown.live_views_after_teardown << " live views\n";
         return 3;
+    }
+    if (config->require_steady_state && run.steady_state.status != "pass") {
+        std::cerr << "steady-state resource gate: " << run.steady_state.status << "\n";
+        for (const auto& failure : run.steady_state.failures)
+            std::cerr << "  " << failure << "\n";
+        return 4;
     }
     return 0;
 }

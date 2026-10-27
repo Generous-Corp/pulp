@@ -1,4 +1,5 @@
 {
+  "schema": "pulp.vellum.closure.v1",
   "source_root": ".",
   "missing_targets": [],
   "targets": [],
@@ -7,7 +8,7 @@
     {
       "path": "@build/_deps/choc-src/include/choc/value_tree/value_tree.h",
       "source": "https://github.com/danielraffel/choc.git",
-      "pin": "df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60"
+      "pin": "b586f33d1c9e8bee98c2b420a5b20bf525c3c7be"
     }
   ],
   "generated_inputs": []

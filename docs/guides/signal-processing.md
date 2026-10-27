@@ -541,7 +541,7 @@ for (int i = 0; i < num_samples; ++i)
 | `process(float)` | Filter one sample. |
 | `process(float*, int)` | Filter buffer in-place. |
 | `process_reference(...)` | Same, with exact `std::tanh` stages (one sample or a buffer). |
-| `process_realtime_efficient(...)` | Same, with the cheaper Padé tanh (one sample or a buffer). |
+| `process_realtime_efficient(...)` | Same, with the cheaper `FastMath::tanh_minimax_recursive` (one sample or a buffer). |
 | `reset()` | Clear all stage states. |
 
 Each stage saturates for analog-style nonlinearity. The feedback path creates resonance: `resonance * 4.0 * (stage[3] - input * 0.5)`.
@@ -550,8 +550,12 @@ The saturator is a `LadderSaturation` choice. The default, `accurate`, is
 `FastMath::tanh_accurate`: within 3.0e-7 of `std::tanh` (3.6e-7 without fused
 multiply-add) and about 2.4x its throughput, keeping the filter's output within
 -124 dBFS of the exact-tanh ladder for input up to 0 dBFS (-102 dBFS at
-+20 dBFS drive). `exact` is `std::tanh`; `realtime_efficient` is the Padé
-`FastMath::tanh`, whose clamp at |x| = 4 audibly changes heavy overdrive.
++20 dBFS drive). `exact` is `std::tanh`; `realtime_efficient` is
+`FastMath::tanh_minimax_recursive`, the `tanh_minimax` fit evaluated in
+Estrin form: within 3.8e-6 of `std::tanh` and slope-matched where it clamps at
+|x| = 7, so heavy overdrive keeps its character. The Estrin form's shorter
+dependency chain keeps it the cheapest choice inside a polyphonic voice loop,
+where the Horner form could run 2.6x slower than `accurate`.
 Select the build default with `PULP_SIGNAL_LADDER_SATURATION` = 0 (exact),
 1 (accurate) or 2 (realtime_efficient), or call `process_reference()` /
 `process_realtime_efficient()` per call.
@@ -789,6 +793,7 @@ float gr = comp.gain_reduction_db();  // for metering
 | `process(float)` | Compress one sample. |
 | `process(float*, int)` | Compress buffer in-place. |
 | `gain_reduction_db()` | Current gain reduction (for meters). |
+| `set_ballistics(CompressorBallistics)` | Select how gain reduction is smoothed (`branching` default, or `decoupled`). |
 | `reset()` | Reset envelope to 0. |
 
 **Params struct:**
@@ -797,12 +802,40 @@ float gr = comp.gain_reduction_db();  // for metering
 |---|---|---|---|
 | `threshold_db` | -20.0 | dB | Level where compression begins |
 | `ratio` | 4.0 | :1 | Compression ratio |
-| `attack_ms` | 5.0 | ms | Attack time |
-| `release_ms` | 100.0 | ms | Release time |
+| `attack_ms` | 5.0 | ms | Attack time constant (tau) |
+| `release_ms` | 100.0 | ms | Release time constant (tau) |
 | `knee_db` | 6.0 | dB | Soft knee width (0 = hard knee) |
 | `makeup_db` | 0.0 | dB | Output makeup gain |
 
 **Sample rate dependency:** `set_sample_rate()` required (used for attack/release coefficients).
+
+**Attack, release and the ballistics.** The level detector is per sample
+(instantaneous peak), and the gain reduction the static curve asks for is
+smoothed in the dB domain by one of two forms (Giannoulis, Massberg and
+Reiss, "Digital Dynamic Range Compressor Design", JAES 2012). `attack_ms` and
+`release_ms` are one-pole time constants.
+
+- `branching` (default): a single one-pole that switches between the attack
+  and release coefficients. A steady-level step moves from 10% to 90% of its
+  gain change in 2.2x the setting either way (11 ms and 220 ms at 5 / 100 ms).
+  On a tone it rides the waveform: attack measures about twice the knob at
+  1 kHz, the reduction settles short of the static curve, and the gain
+  ripples at twice the tone frequency, which is harmonic distortion on low
+  tones.
+- `decoupled` (opt in with `set_ballistics(CompressorBallistics::decoupled)`):
+  a peak hold that decays at the release time, then an attack one-pole. On
+  tones it behaves like a step: attack follows the knob (2.2x), the reduction
+  lands on the static curve, and the gain stays steady within each cycle. Its
+  release is the hold and the attack pole in series, so a step releases in
+  2.2x `release_ms` only while attack is much shorter than release: 220 ms at
+  5 / 100 ms, but 155 ms at 30 / 60 ms and 168 ms at 50 / 50 ms (branching:
+  132 and 110 ms).
+
+| -6 dBFS tone, 5 / 100 ms, -20 dB 4:1 hard knee | `branching` | `decoupled` |
+|---|---|---|
+| 1 kHz attack, 10% to 90% (knob gives 11.0 ms) | 21.5 ms | 11.0 ms |
+| Settled reduction (static curve -10.50 dB) | -9.75 dB | -10.49 dB |
+| THD+N at 50 / 100 / 1000 Hz | -39.5 / -45.5 / -65.5 dB | -48.8 / -60.3 / -99.8 dB |
 
 ---
 
@@ -1004,6 +1037,27 @@ Include `<pulp/signal/fdn_reverb.hpp>` directly. See the
 [Multirate FDN Reverb guide](fdn-reverb.md) for controls, lifecycle rules,
 module ownership, finite-state recovery, and focused validation.
 
+### ClassicReverb
+
+`ClassicReverb` (`<pulp/signal/classic_reverb.hpp>`) is the conventional tier:
+eight lowpass-feedback combs per rail in parallel, then four allpasses in
+series, all at the host rate. It takes the same `fdn::Param` controls and
+`fdn::Mode` presets as `FdnReverb` and produces wet-only stereo, so it can stand
+in wherever the FDN's cost is not wanted — directly, or through
+`FdnReverb::set_tier(fdn::Tier::classic)`.
+
+```cpp
+signal::ClassicReverb reverb;
+reverb.prepare(sample_rate, max_block_size);
+reverb.set_parameter(signal::fdn::Param::decay, 1.5);  // T60, seconds
+reverb.process_block(in_left, in_right, wet_left, wet_right, num_samples);
+```
+
+Every comb's feedback gain follows the absorptive law, so `decay` is a real
+T60 rather than a feedback amount. `damp_lo`, `mod`, `shimmer`, `drive`, `bloom`,
+and `tank_rate` are accepted and ignored — the tier has none of that machinery.
+See [Tiers](fdn-reverb.md#tiers) for the full control mapping.
+
 ---
 
 ### WaveShaper
@@ -1100,7 +1154,7 @@ os.process_block(input, output, num_samples, [&](float s) {
 | `set_factor(Factor)` | `Factor::x2`, `Factor::x4`, `Factor::x8`, or `Factor::x16`. |
 | `set_sample_rate(float)` | Set base sample rate. Configures anti-aliasing filters. |
 | `set_kind(Kind)` | Select the minimum-phase polyphase IIR lane (the default), the linear-phase FIR lane, or the legacy Biquad lane. |
-| `set_quality(Quality)` | Linear-phase lane: `standard` (96 dB prototype, flat to 80% of Nyquist) or `pristine` (140 dB prototype, flat to 90% of Nyquist). Polyphase lane: `standard` (94.8 dB from 0.58 Fs, flat to 0.42 Fs) or `pristine` (146 dB from 0.55 Fs, flat to 0.45 Fs). No effect on the Biquad lane. |
+| `set_quality(Quality)` | Linear-phase lane: `standard` (96 dB prototype, flat to 80% of Nyquist) or `pristine` (140 dB prototype, flat to 90% of Nyquist). Polyphase lane: `standard` (114.6 dB) or `pristine` (153.2 dB), both from 0.515 Fs and flat to 0.485 Fs. No effect on the Biquad lane. |
 | `latency()` | Return host-rounded and exact base-rate latency plus whether the delay is constant. |
 | `latency_samples()` | Return the integer base-rate delay for `Processor::latency_samples()`. |
 | `process(float, callback)` | Upsample, process via callback, downsample. |
@@ -1316,6 +1370,32 @@ This is single-thread DSP history, not a producer/consumer queue. Do not use it
 for communication between the audio, UI, or worker threads; use the runtime
 SPSC publication primitives for those ownership boundaries. After `prepare()`,
 `push()`, `window()`, and `reset()` are allocation-free.
+
+---
+
+### MultiChannelMeter
+
+`MultiChannelMeter` (`<pulp/signal/multi_channel_meter.hpp>`) measures sample
+peak, RMS, clips, stereo correlation, and channel-based BS.1770 loudness
+(momentary, gated integrated, EBU short-term, loudness range) on the audio
+thread, and publishes a `MultiChannelMeterData` snapshot about every 10 ms.
+
+```cpp
+signal::MultiChannelMeter meter;
+meter.prepare(sample_rate, 2);                      // everything
+// or: meter.prepare(sample_rate, 2, nullptr, signal::MeterFeatures::levels);
+meter.process(channels, 2, num_samples);
+const auto& snapshot = meter.snapshot();
+```
+
+`process()` works a block at a time: peak, energy, and correlation come from
+vector reductions, and the K-weighting runs channel pairs as one two-lane
+recursion. A block holding a non-finite or out-of-range sample is measured
+sample by sample under the same sanitizing rules, so the readings do not depend
+on which path ran. Prepare with `MeterFeatures::levels` (or
+`MeterFeatures::correlation`) when only peak/RMS bars are drawn: loudness is
+most of the per-sample cost, and leaving it out makes the meter cost about as
+much as a plain peak + RMS pass.
 
 ---
 

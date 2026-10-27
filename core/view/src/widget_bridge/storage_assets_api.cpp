@@ -1,5 +1,6 @@
 // widget_bridge/storage_assets_api.cpp - storage and asset-loading registrations for WidgetBridge.
 
+#include <pulp/canvas/bundled_fonts.hpp>
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/asset_manager.hpp>
 #include <pulp/runtime/base64.hpp>
@@ -8,10 +9,13 @@
 
 #include <pulp/runtime/safe_relative_path.hpp>
 
+#include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -193,6 +197,53 @@ std::string base64_encode_blob(const std::vector<uint8_t>& data) {
 
 } // namespace
 
+void WidgetBridge::set_embedded_assets(std::vector<EmbeddedAsset> assets) {
+    embedded_assets_.clear();
+    embedded_assets_.reserve(assets.size());
+    for (auto& asset : assets) {
+        if (asset.name.empty() || asset.data == nullptr || asset.size == 0)
+            continue;
+        const auto name = std::filesystem::path(asset.name).lexically_normal();
+        if (!safe_relative_asset_path(name))
+            continue;
+        asset.name = name.generic_string();
+        embedded_assets_.push_back(std::move(asset));
+    }
+}
+
+const WidgetBridge::EmbeddedAsset*
+WidgetBridge::embedded_asset(std::string_view path) const noexcept {
+    if (embedded_assets_.empty() || path.empty() || path.find("://") != std::string_view::npos)
+        return nullptr;
+    const std::string stripped = strip_leading_slashes(std::string(path));
+    if (stripped.empty())
+        return nullptr;
+    const auto relative = std::filesystem::path(stripped).lexically_normal();
+    if (!safe_relative_asset_path(relative))
+        return nullptr;
+    const std::string wanted = relative.generic_string();
+    for (const auto& asset : embedded_assets_) {
+        if (asset.name == wanted)
+            return &asset;
+    }
+    return nullptr;
+}
+
+std::string WidgetBridge::embedded_asset_data_uri(const EmbeddedAsset& asset) const {
+    return "data:" + guess_bridge_asset_mime_type(asset.name) + ";base64," +
+           runtime::base64_encode(asset.data, asset.size);
+}
+
+std::string WidgetBridge::storage_identity() const {
+    if (!storage_identity_.empty())
+        return storage_identity_;
+    return script_base_dir_.generic_string();
+}
+
+std::string WidgetBridge::font_weight_scope() const {
+    return "widget-bridge/" + std::to_string(reinterpret_cast<std::uintptr_t>(this));
+}
+
 std::string WidgetBridge::resolve_script_relative(const std::string& path) const {
     if (path.empty() || path.find("://") != std::string::npos) return path;
     const std::filesystem::path relative(path);
@@ -225,7 +276,7 @@ void BridgeRegistrars::register_storage_key_value_api(WidgetBridge& self) {
     const auto entry_path = [&self](const std::string& key) -> std::filesystem::path {
         const auto& dir = detail::cached_private_dir(self.private_store_dirs_,
                                                      detail::PrivateStoreKind::WidgetStorage,
-                                                     self.script_base_dir_);
+                                                     self.storage_identity());
         if (dir.empty())
             return {};
         return dir / detail::storage_key_file_name(key);
@@ -280,7 +331,19 @@ void BridgeRegistrars::register_asset_loading_api(WidgetBridge& self) {
         auto roots = self.asset_roots_;
         if (!self.script_base_dir_.empty())
             roots.insert(roots.begin(), self.script_base_dir_);
-        auto asset = load_bridge_asset(url, roots);
+        BridgeAssetLoad asset;
+        if (const auto* embedded = self.embedded_asset(url)) {
+            // The script was compiled into the image, and so were the files
+            // beside it: they answer before any directory is consulted.
+            asset.ok = true;
+            asset.status = 200;
+            asset.resolved_path = "embedded:" + embedded->name;
+            asset.mime_type =
+                canonical_bridge_asset_mime_type(guess_bridge_asset_mime_type(embedded->name));
+            asset.blob.data.assign(embedded->data, embedded->data + embedded->size);
+        } else {
+            asset = load_bridge_asset(url, roots);
+        }
 
         auto result = choc::value::createObject("");
         result.addMember("ok", choc::value::createBool(asset.ok));
@@ -306,26 +369,60 @@ void BridgeRegistrars::register_font_assets_api(WidgetBridge& self) {
     // This is an existence probe for web-compat callers; actual renderer font
     // registration is handled by registerFont(family, path) below.
     register_bridge_function(api, "loadFont", [&self](choc::javascript::ArgumentList args) {
-        auto path = self.resolve_script_relative(args.get<std::string>(0, ""));
+        const auto requested = args.get<std::string>(0, "");
+        if (self.embedded_asset(requested) != nullptr)
+            return choc::value::createBool(true);
+        auto path = self.resolve_script_relative(requested);
         bool exists = !path.empty() && std::filesystem::exists(path);
         return choc::value::createBool(exists);
     });
 
-    // registerFont(family, path) - register a bundled .ttf/.otf with the text
-    // renderer under `family`, so set_font() / Label font_family resolve to the
-    // shipped face instead of a same-named system font (or a generic fallback).
-    // Codegen emits these from the envelope's font_family_assets before any
-    // setFontFamily.
+    // registerFont(family, path, weightMin?, weightMax?) - register a bundled
+    // .ttf/.otf with the text renderer under `family`, so set_font() / Label
+    // font_family resolve to the shipped face instead of a same-named system
+    // font. The optional weights are the @font-face rule's declared range, which
+    // decides where bold is synthesized. Codegen emits these from the envelope's
+    // font_family_assets before any setFontFamily.
     register_bridge_function(api, "registerFont", [&self](choc::javascript::ArgumentList args) {
         auto family = args.get<std::string>(0, "");
         auto path = args.get<std::string>(1, "");
         if (family.empty() || path.empty()) return choc::value::createBool(false);
+        // A range is recorded only once the face is registered, and only from
+        // finite weights clamped to CSS's [1, 1000]; a bad weight declares nothing.
+        std::optional<std::pair<int, int>> declared;
+        if (args.size() >= 3) {
+            const double low = args.get<double>(2, 400.0);
+            const double high = args.size() >= 4 ? args.get<double>(3, low) : low;
+            if (std::isfinite(low) && std::isfinite(high)) {
+                const auto css = [](double w) {
+                    return static_cast<int>(std::clamp(w, 1.0, 1000.0));
+                };
+                declared = std::minmax(css(low), css(high));
+            }
+        }
+        const auto declare = [&] {
+            if (declared)
+                pulp::canvas::declare_font_face_weight_range(
+                    family, declared->first, declared->second, self.font_weight_scope());
+        };
         if (path.rfind("file://", 0) == 0) path = path.substr(7);
+        if (const auto* embedded = self.embedded_asset(path)) {
+            // The face is already in memory; hand it to the font registry
+            // under a name only this bridge's embedded set can produce.
+            const std::string key =
+                "pulp-ui-embed/" + self.storage_identity() + "/" + embedded->name;
+            auto& assets = AssetManager::instance();
+            assets.register_embedded(key, embedded->data, embedded->size);
+            assets.register_font_family(family, key);
+            declare();
+            return choc::value::createBool(true);
+        }
         path = self.resolve_script_relative(path);
         if (!std::filesystem::exists(path)) return choc::value::createBool(false);
         // register_font_family decodes the file + registers the typeface with
         // the canvas font registry (Skia on GPU builds; no-op stub otherwise).
         AssetManager::instance().register_font_family(family, path);
+        declare();
         return choc::value::createBool(true);
     });
 }

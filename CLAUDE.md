@@ -965,6 +965,8 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
   - ⚠ **Cannot see:** Presence is not correctness — an element can be present, misplaced and unreadable.
 - Prove each hop of the agent-HTML -> Chromium -> DesignIR pipeline actually ran, before trusting any fidelity number from the same panel. → `tools/import-validation/check_pipeline_stages.py`
   - ⚠ **Cannot see:** Asserts MECHANISM, not quality. A panel can pass every stage and still render badly — that is score-native-panel's job. Conversely a high similarity score says nothing about whether Chromium ran at all, which is exactly the confusion this exists to end.
+- Get Chrome's own composite of backdrop-filter under element and ancestor opacity. → `tools/import-validation/chrome_backdrop_opacity_oracle.py`
+  - ⚠ **Cannot see:** Needs a local Chrome, like the rest of the browser-capture lane. The oracle is Chrome's interpretation, which is the target here but is not the CSS spec.
 - Get Chrome's own answer for a CSS gradient when the native paint disagrees. → `tools/import-validation/chrome_gradient_oracle.py`
   - ⚠ **Cannot see:** Needs a local Chrome, like the rest of the browser-capture lane. The oracle is Chrome's interpretation, which is the target here but is not the CSS spec.
 - Get one similarity score + verdict BEFORE showing the user any native screenshot. → `tools/import-validation/diff_against_reference.py`
@@ -991,6 +993,8 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
   - ⚠ **Cannot see:** Needs a design pack for the fixture's stylesheet and fonts; without one the page imports unstyled and every number is meaningless. Says so rather than scoring.
 - Attribute a natively rendered panel's failing pixels to the nodes that own them, against the Chromium capture that is its oracle. → `tools/import-validation/score_native_panel.py`
   - ⚠ **Cannot see:** A blank render scores WELL against a dark design, so the area-weighted number is not a fidelity measure without a companion coverage statistic; per-node scores are not yet usable as a gate.
+- Imported text fails a pixel score and you need to know whether the glyphs are too heavy, sit off by a fraction of a pixel, or have a different coverage curve, per text node. → `tools/import-validation/text_raster_decomposition.py crops`
+  - ⚠ **Cannot see:** Assumes light text on a locally flat darker background, which the box-border background estimate relies on; boxes with a busy border carry background_spread so a reader can discount them. Ink ratio is position-blind and centroid is ink-blind, so read them together. It decomposes; it gates nothing.
 - Triage an import's GROSS colour against Figma's own raster, offline, with no API call. Advisory only — never a gate. → `tools/import-design/thumb_parity.py`
   - ⚠ **Cannot see:** MATERIAL-BLIND by construction. It compares block MEANS, so it cannot see any error that preserves a region's mean — a flattened gradient matches its own mean exactly, 20%-vs-100% white thin strokes average out, a soft shadow on a dark panel vanishes. At ~0.4x it also cannot resolve features under ~3 design px. For geometry use layout-parity; for material survival use the material audit.
 - Prove the emitted ui.js artifact renders like the importer output it claims to ship. → `tools/import-validation/verify_rendered_panel.py`

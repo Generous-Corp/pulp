@@ -49,6 +49,7 @@
 #include <pulp/signal/linkwitz_riley.hpp>
 #include <pulp/signal/windowing.hpp>
 #include <pulp/signal/fft.hpp>
+#include <pulp/signal/overlap_add_convolver.hpp>
 #include <pulp/signal/fir_filter.hpp>
 #include <pulp/signal/fir_design.hpp>
 #include <pulp/signal/reverse_buffer.hpp>
@@ -103,6 +104,7 @@
 #include <pulp/signal/spectrogram.hpp>
 #include <pulp/signal/multi_channel_meter.hpp>
 #include <pulp/signal/convolver.hpp>
+#include <pulp/signal/fixed_ir_convolver.hpp>
 
 // Modulation and utility toolkit — deterministic randomness, LFO, control-signal
 // tools, the trigger/gate event kit, the envelope family, VCA, low-pass gate,

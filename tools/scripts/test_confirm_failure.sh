@@ -105,6 +105,18 @@ NOMATCH=$( ( cd "$TMP/nomatch" && "$UNDER_TEST" \
   ) >/dev/null 2>&1; echo $? )
 check "a break that changes nothing is INCONCLUSIVE" 2 "$NOMATCH"
 
+# A break that does not compile never produced a broken binary, so no test ran
+# against it. That is not evidence the test covers the change.
+make_project "$TMP/nocompile" meaningful
+NOCOMPILE=$( ( cd "$TMP/nocompile" && "$UNDER_TEST" \
+    --file value.cpp \
+    --break "perl -pi -e 's/return 42;/return not_declared;/'" \
+    --build-dir build --target fixture_test --test ./build/fixture_test --jobs 2 \
+  ) >/dev/null 2>&1; echo $? )
+check "a break that does not compile is INCONCLUSIVE" 2 "$NOCOMPILE"
+check "the tree is restored after a break that does not compile" "" \
+    "$(cd "$TMP/nocompile" && git status --porcelain -- value.cpp)"
+
 # ── The --no-build lane, for a test whose subject is interpreted ────────────
 #
 # A Node/Python/shell test has no object or binary between the edited source and
@@ -324,6 +336,102 @@ check "a shell-out test without --subject is INCONCLUSIVE" 2 \
     "$(run_shellout_under_test "$TMP/shellout")"
 check "a shell-out test with --subject is CONFIRMED" 0 \
     "$(run_shellout_under_test "$TMP/shellout" --subject ./build/fixture_subject)"
+
+# A compiled driver that runs the subject, with --target building the subject
+# alone: the driver must survive the run (it used to be deleted and never
+# rebuilt, so the next baseline failed with "No such file").
+make_shellout_project "$TMP/driver"
+printf 'add_executable(fixture_driver driver.cpp)\n' >> "$TMP/driver/CMakeLists.txt"
+printf '#include <cstdlib>\nint main() { return std::system("./build/fixture_subject") == 0 ? 0 : 1; }\n' \
+    > "$TMP/driver/driver.cpp"
+( cd "$TMP/driver" && git add -A && git commit -qm driver ) >/dev/null 2>&1
+cmake -S "$TMP/driver" -B "$TMP/driver/build" -DCMAKE_BUILD_TYPE=Release >/dev/null 2>&1
+cmake --build "$TMP/driver/build" --target fixture_driver >/dev/null 2>&1
+DRIVER=$( ( cd "$TMP/driver" && "$UNDER_TEST" \
+    --file value.cpp --break "perl -pi -e 's/return 42;/return 7;/'" \
+    --build-dir build --target fixture_subject \
+    --subject ./build/fixture_subject \
+    --test ./build/fixture_driver --jobs 2 \
+  ) >/dev/null 2>&1; echo $? )
+check "a driver test with --subject and a subject-only --target is CONFIRMED" 0 "$DRIVER"
+if [ -x "$TMP/driver/build/fixture_driver" ]; then
+    printf '  ok   the driver binary survives a --subject run\n'
+else
+    printf '  FAIL the driver binary is gone after a --subject run\n'
+    FAILURES=$((FAILURES + 1))
+fi
+
+# A driver that links the edited code itself, with --target building only the
+# subject: the driver keeps the unbroken copy and passes, which used to read as
+# NOT CONFIRMED. The loop must refuse instead.
+make_shellout_project "$TMP/driver-links"
+printf 'add_executable(fixture_driver driver.cpp)\ntarget_link_libraries(fixture_driver PRIVATE fixture_lib)\n' \
+    >> "$TMP/driver-links/CMakeLists.txt"
+printf '#include "value.hpp"\nint main() { return answer() == 42 ? 0 : 1; }\n' \
+    > "$TMP/driver-links/driver.cpp"
+( cd "$TMP/driver-links" && git add -A && git commit -qm driver ) >/dev/null 2>&1
+cmake -S "$TMP/driver-links" -B "$TMP/driver-links/build" -DCMAKE_BUILD_TYPE=Release >/dev/null 2>&1
+cmake --build "$TMP/driver-links/build" --target fixture_driver >/dev/null 2>&1
+LINKS=$( ( cd "$TMP/driver-links" && "$UNDER_TEST" \
+    --file value.cpp --break "perl -pi -e 's/return 42;/return 7;/'" \
+    --build-dir build --target fixture_subject \
+    --subject ./build/fixture_subject \
+    --test ./build/fixture_driver --jobs 2 \
+  ) >/dev/null 2>&1; echo $? )
+check "a driver that links the edited source, with a subject-only --target, is INCONCLUSIVE" 2 "$LINKS"
+# Control: the same project with the driver's own target (which also builds
+# the library) gets a real verdict.
+LINKS_OK=$( ( cd "$TMP/driver-links" && "$UNDER_TEST" \
+    --file value.cpp --break "perl -pi -e 's/return 42;/return 7;/'" \
+    --build-dir build --target fixture_driver \
+    --test ./build/fixture_driver --jobs 2 \
+  ) >/dev/null 2>&1; echo $? )
+check "the same driver with its own --target is CONFIRMED" 0 "$LINKS_OK"
+
+# The same refusal when the library is built with hidden visibility, which
+# turns its globals into local symbols of the linked driver.
+make_shellout_project "$TMP/driver-links-hidden"
+printf 'set_target_properties(fixture_lib PROPERTIES CXX_VISIBILITY_PRESET hidden)\nadd_executable(fixture_driver driver.cpp)\ntarget_link_libraries(fixture_driver PRIVATE fixture_lib)\n' \
+    >> "$TMP/driver-links-hidden/CMakeLists.txt"
+printf '#include "value.hpp"\nint main() { return answer() == 42 ? 0 : 1; }\n' \
+    > "$TMP/driver-links-hidden/driver.cpp"
+( cd "$TMP/driver-links-hidden" && git add -A && git commit -qm driver ) >/dev/null 2>&1
+cmake -S "$TMP/driver-links-hidden" -B "$TMP/driver-links-hidden/build" -DCMAKE_BUILD_TYPE=Release >/dev/null 2>&1
+cmake --build "$TMP/driver-links-hidden/build" --target fixture_driver >/dev/null 2>&1
+HIDDEN=$( ( cd "$TMP/driver-links-hidden" && "$UNDER_TEST" \
+    --file value.cpp --break "perl -pi -e 's/return 42;/return 7;/'" \
+    --build-dir build --target fixture_subject \
+    --subject ./build/fixture_subject \
+    --test ./build/fixture_driver --jobs 2 \
+  ) >/dev/null 2>&1; echo $? )
+check "a driver that links a hidden-visibility copy of the edited source is INCONCLUSIVE" 2 "$HIDDEN"
+
+# Negative control: a driver that does NOT link the edited object but defines
+# local symbols with the same names (an anonymous-namespace helper, a static
+# function, a static constant) must still get a verdict. Locals mangle the
+# same way in every object, so matching on them would refuse ordinary runs.
+make_shellout_project "$TMP/driver-locals"
+printf 'add_executable(fixture_driver driver.cpp)\n' >> "$TMP/driver-locals/CMakeLists.txt"
+LOCAL_DEFS='namespace {
+__attribute__((used, noinline)) int helper() { return 1; }
+}
+__attribute__((used, noinline)) static int sfun() { return 2; }
+__attribute__((used)) static int kName = 3;
+'
+printf '%s' "$LOCAL_DEFS" >> "$TMP/driver-locals/value.cpp"
+{ printf '%s' "$LOCAL_DEFS"
+  printf '#include <cstdlib>\nint main() { return std::system("./build/fixture_subject") == 0 ? 0 : 1; }\n'
+} > "$TMP/driver-locals/driver.cpp"
+( cd "$TMP/driver-locals" && git add -A && git commit -qm driver ) >/dev/null 2>&1
+cmake -S "$TMP/driver-locals" -B "$TMP/driver-locals/build" -DCMAKE_BUILD_TYPE=Release >/dev/null 2>&1
+cmake --build "$TMP/driver-locals/build" --target fixture_driver >/dev/null 2>&1
+LOCALS=$( ( cd "$TMP/driver-locals" && "$UNDER_TEST" \
+    --file value.cpp --break "perl -pi -e 's/return 42;/return 7;/'" \
+    --build-dir build --target fixture_subject \
+    --subject ./build/fixture_subject \
+    --test ./build/fixture_driver --jobs 2 \
+  ) >/dev/null 2>&1; echo $? )
+check "a driver sharing only local symbol names with the edited source is CONFIRMED" 0 "$LOCALS"
 
 # An INCONCLUSIVE exit must not leave the subject built from broken source.
 # Only the --test binary used to be invalidated on restore, so the next run's

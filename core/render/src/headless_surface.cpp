@@ -219,6 +219,7 @@ std::unique_ptr<HeadlessSurface> HeadlessSurface::create(
     skia_config.width = config.width;
     skia_config.height = config.height;
     skia_config.scale_factor = config.scale_factor;
+    skia_config.text_raster_policy = config.text_raster_policy;
     auto skia = SkiaSurface::create(*gpu, skia_config);
     if (!skia || !skia->is_available()) {
         set_err("HeadlessSurface::create: SkiaSurface::create() failed or reported unavailable");

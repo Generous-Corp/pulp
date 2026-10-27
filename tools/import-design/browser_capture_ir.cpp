@@ -1985,6 +1985,8 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
         };
         record_if("native_tree_flattened_overlapping_reorders",
                   tree.flattened_overlapping_reorders);
+        record_if("native_tree_isolating_groups_nested", tree.isolating_groups_nested);
+        record_if("native_tree_isolating_groups_refused", tree.isolating_groups_refused);
         record_if("native_nodes_skipped_empty_box", tree.skipped_empty_box);
         record_if("native_nodes_skipped_blank_text", tree.skipped_blank_text);
         record_if("native_nodes_skipped_non_visual", tree.skipped_non_visual);
@@ -2065,6 +2067,8 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
         }
         record_if("native_nodes_type_scaled", tree.type_scaled);
         record_if("native_nodes_type_scale_refused", tree.type_scale_refused);
+        record_if("native_nodes_paint_scaled", tree.paint_scaled);
+        record_if("native_nodes_paint_scale_refused", tree.paint_scale_refused);
         record_if("native_nodes_keyed_anchors", tree.keyed_anchors);
         // A duplicated `data-pulp-key` cannot identify either sibling, so both
         // keep positional anchors and a reorder would move edits between them.

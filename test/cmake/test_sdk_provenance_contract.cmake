@@ -11,12 +11,18 @@ file(MAKE_DIRECTORY "${_sdk}")
 file(MAKE_DIRECTORY "${_sdk}/include/pulp/view" "${_sdk}/lib")
 file(WRITE "${_sdk}/include/pulp/view/widget_bridge.hpp" "header fixture\n")
 file(WRITE "${_sdk}/lib/libpulp-view-script.a" "archive fixture\n")
+file(WRITE "${_sdk}/lib/pulp-view-script.lib" "windows archive fixture\n")
 file(SHA256 "${_sdk}/include/pulp/view/widget_bridge.hpp" _header_hash)
 file(SHA256 "${_sdk}/lib/libpulp-view-script.a" _archive_hash)
+file(SHA256 "${_sdk}/lib/pulp-view-script.lib" _windows_archive_hash)
 string(CONCAT _integrity
     ",\"integrity\":{\"schema\":\"pulp.sdk-integrity.v1\",\"algorithm\":\"sha256\","
     "\"files\":{\"include/pulp/view/widget_bridge.hpp\":\"${_header_hash}\","
     "\"lib/libpulp-view-script.a\":\"${_archive_hash}\"}}")
+string(CONCAT _windows_integrity
+    ",\"integrity\":{\"schema\":\"pulp.sdk-integrity.v1\",\"algorithm\":\"sha256\","
+    "\"files\":{\"include/pulp/view/widget_bridge.hpp\":\"${_header_hash}\","
+    "\"lib/pulp-view-script.lib\":\"${_windows_archive_hash}\"}}")
 
 set(PULP_SDK_DIR "${_sdk}")
 include("${_module}")
@@ -50,6 +56,88 @@ if(PULP_SDK_DEVELOPMENT OR NOT PULP_SDK_DISTRIBUTION_ELIGIBLE OR
    NOT PULP_SDK_SOURCE_GIT_SHA STREQUAL "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
     message(FATAL_ERROR "official release SDK contract was not exported")
 endif()
+
+# A release marker that records the shell exec bridge as absent exports FALSE…
+file(WRITE "${_sdk}/sdk-provenance.json"
+    "{\"schema\":\"pulp.sdk-provenance.v1\",\"kind\":\"release\","
+    "\"profile\":\"official-release\",\"distribution_eligible\":true,"
+    "\"sdk_version\":\"9.8.7\",\"source_git_ref\":\"v9.8.7\","
+    "\"source_git_sha\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\","
+    "\"source_git_dirty\":false,\"platform\":\"darwin-arm64\",\"build_type\":\"Release\","
+    "\"features\":{\"audio_probes\":false,\"inspector\":true,\"bridge_exec\":false}${_integrity}}")
+include("${_module}")
+if(NOT PULP_SDK_DISTRIBUTION_ELIGIBLE OR
+   NOT DEFINED PULP_SDK_BRIDGE_EXEC_ENABLED OR PULP_SDK_BRIDGE_EXEC_ENABLED OR
+   PULP_SDK_BRIDGE_EXEC_ENABLED STREQUAL "")
+    message(FATAL_ERROR "release SDK bridge_exec=false was not exported as FALSE")
+endif()
+
+# …and one that claims the bridge is present is refused outright.
+file(WRITE "${_sdk}/sdk-provenance.json"
+    "{\"schema\":\"pulp.sdk-provenance.v1\",\"kind\":\"release\","
+    "\"profile\":\"official-release\",\"distribution_eligible\":true,"
+    "\"sdk_version\":\"9.8.7\",\"source_git_ref\":\"v9.8.7\","
+    "\"source_git_sha\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\","
+    "\"source_git_dirty\":false,\"platform\":\"darwin-arm64\",\"build_type\":\"Release\","
+    "\"features\":{\"audio_probes\":false,\"inspector\":true,\"bridge_exec\":true}${_integrity}}")
+execute_process(
+    COMMAND "${CMAKE_COMMAND}"
+        "-DPULP_SDK_DIR=${_sdk}"
+        -P "${_module}"
+    RESULT_VARIABLE _bridge_exec_result
+    OUTPUT_VARIABLE _bridge_exec_stdout
+    ERROR_VARIABLE _bridge_exec_stderr)
+if(_bridge_exec_result EQUAL 0)
+    message(FATAL_ERROR "release SDK claiming the shell exec bridge did not fail closed")
+endif()
+if(NOT "${_bridge_exec_stdout}\n${_bridge_exec_stderr}"
+       MATCHES "unsafe release contract.*bridge_exec")
+    message(FATAL_ERROR
+        "shell-exec release failed without the expected diagnostic:\n"
+        "${_bridge_exec_stdout}\n${_bridge_exec_stderr}")
+endif()
+
+# A source-install marker exports its top-level bridge_exec verbatim.
+file(WRITE "${_sdk}/sdk-provenance.json"
+    "{\"schema\":\"pulp.sdk-provenance.v1\",\"kind\":\"source-install\","
+    "\"distribution_eligible\":false,\"source_git_sha\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\","
+    "\"source_git_dirty\":false,\"bridge_exec\":true}")
+include("${_module}")
+if(NOT PULP_SDK_DEVELOPMENT OR NOT PULP_SDK_BRIDGE_EXEC_ENABLED)
+    message(FATAL_ERROR "source-install bridge_exec=true was not exported as TRUE")
+endif()
+
+# A dev-experiment document records bridge_exec at top level, so a development
+# marker exports that key as well as features.bridge_exec.
+unset(PULP_SDK_BRIDGE_EXEC_ENABLED)
+file(WRITE "${_sdk}/sdk-provenance.json"
+    "{\"schema\":\"pulp.sdk-provenance.v1\",\"kind\":\"development\","
+    "\"distribution_eligible\":false,\"source_git_sha\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\","
+    "\"bridge_exec\":true}")
+include("${_module}")
+if(NOT PULP_SDK_DEVELOPMENT OR NOT DEFINED PULP_SDK_BRIDGE_EXEC_ENABLED OR
+   NOT PULP_SDK_BRIDGE_EXEC_ENABLED)
+    message(FATAL_ERROR "development top-level bridge_exec=true was not exported as TRUE")
+endif()
+unset(PULP_SDK_BRIDGE_EXEC_ENABLED)
+file(WRITE "${_sdk}/sdk-provenance.json"
+    "{\"schema\":\"pulp.sdk-provenance.v1\",\"kind\":\"development\","
+    "\"distribution_eligible\":false,\"source_git_sha\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\","
+    "\"features\":{\"bridge_exec\":false}}")
+include("${_module}")
+if(NOT PULP_SDK_DEVELOPMENT OR NOT DEFINED PULP_SDK_BRIDGE_EXEC_ENABLED OR
+   PULP_SDK_BRIDGE_EXEC_ENABLED)
+    message(FATAL_ERROR "development features.bridge_exec=false was not exported as FALSE")
+endif()
+
+# Restore the integrity-bound release marker for the coherence check below.
+file(WRITE "${_sdk}/sdk-provenance.json"
+    "{\"schema\":\"pulp.sdk-provenance.v1\",\"kind\":\"release\","
+    "\"profile\":\"official-release\",\"distribution_eligible\":true,"
+    "\"sdk_version\":\"9.8.7\",\"source_git_ref\":\"v9.8.7\","
+    "\"source_git_sha\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\","
+    "\"source_git_dirty\":false,\"platform\":\"darwin-arm64\",\"build_type\":\"Release\","
+    "\"features\":{\"audio_probes\":false,\"inspector\":true}${_integrity}}")
 
 file(WRITE "${_sdk}/include/pulp/view/widget_bridge.hpp" "stale header fixture\n")
 execute_process(
@@ -127,3 +215,54 @@ if(NOT "${_unsafe_release_stdout}\n${_unsafe_release_stderr}"
         "unsafe release failed without the expected diagnostic:\n"
         "${_unsafe_release_stdout}\n${_unsafe_release_stderr}")
 endif()
+
+# The same marker must accept a matching native ARM64 consumer and reject a
+# mixed ARM64EC/ARM64X consumer.  The mixed cases can link successfully and
+# later corrupt C++ objects at runtime, so they must fail during provenance
+# resolution, before a consumer target is created.
+function(_write_windows_release_provenance platform)
+    file(WRITE "${_sdk}/sdk-provenance.json"
+        "{\"schema\":\"pulp.sdk-provenance.v1\",\"kind\":\"release\","
+        "\"profile\":\"official-release\",\"distribution_eligible\":true,"
+        "\"sdk_version\":\"9.8.7\",\"source_git_ref\":\"v9.8.7\","
+        "\"source_git_sha\":\"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\","
+        "\"source_git_dirty\":false,\"platform\":\"${platform}\","
+        "\"build_type\":\"Release\",\"features\":{"
+        "\"audio_probes\":false,\"inspector\":true}${_windows_integrity}}")
+endfunction()
+
+function(_check_windows_sdk_target platform generator expected_result)
+    _write_windows_release_provenance("${platform}")
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}"
+            "-DPULP_SDK_DIR=${_sdk}"
+            "-DWIN32=TRUE"
+            "-DCMAKE_GENERATOR_PLATFORM=${generator}"
+            -P "${_module}"
+        RESULT_VARIABLE _result
+        OUTPUT_VARIABLE _stdout
+        ERROR_VARIABLE _stderr)
+    if(expected_result STREQUAL "pass")
+        if(NOT _result EQUAL 0)
+            message(FATAL_ERROR
+                "matching Windows ${generator} SDK failed unexpectedly:\n"
+                "${_stdout}\n${_stderr}")
+        endif()
+    else()
+        if(_result EQUAL 0)
+            message(FATAL_ERROR
+                "mixed Windows ${platform}/${generator} SDK provenance did not fail closed")
+        endif()
+        if(NOT "${_stdout}\n${_stderr}" MATCHES "Pulp SDK target mismatch")
+            message(FATAL_ERROR
+                "mixed Windows SDK failed without the expected target diagnostic:\n"
+                "${_stdout}\n${_stderr}")
+        endif()
+    endif()
+endfunction()
+
+_check_windows_sdk_target("windows-arm64" "ARM64" "pass")
+_check_windows_sdk_target("windows-arm64" "ARM64EC" "fail")
+_check_windows_sdk_target("windows-arm64" "ARM64X" "fail")
+_check_windows_sdk_target("windows-x64" "x64" "pass")
+_check_windows_sdk_target("windows-x64" "ARM64" "fail")

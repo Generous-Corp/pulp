@@ -189,7 +189,14 @@ TEST_CASE("fdn reverb catalog registers five modes of one engine",
         REQUIRE(type.lowerable);
         REQUIRE(type.num_input_ports == 2);
         REQUIRE(type.num_output_ports == 2);
-        REQUIRE(type.baked_params.size() == static_cast<std::size_t>(fdn::kNumParams));
+        // The engine's twelve, then the appended tier selector.
+        REQUIRE(type.baked_params.size() == static_cast<std::size_t>(fdn::kNumParams) + 1);
+        const auto& tier = type.baked_params.back();
+        REQUIRE(tier.id == catalog::kTier);
+        REQUIRE(tier.id == static_cast<pulp::state::ParamID>(fdn::kNumParams + 1));
+        REQUIRE(tier.min_value == 0.0f);
+        REQUIRE(tier.max_value == 1.0f);
+        REQUIRE(tier.default_value == 0.0f);
 
         // Every declared param must carry the engine's own range and the mode's
         // stamped default, walked exhaustively rather than spot-checked.
@@ -342,6 +349,89 @@ TEST_CASE("fdn reverb catalog maps non-finite injections to declared defaults",
     }
 }
 
+namespace {
+
+// The engine the node wraps, driven exactly as the node drives it: the mode's
+// declared defaults pushed through float at every 32-sample control chunk, and
+// the same stimulus `excited()` feeds the baked graph.
+std::vector<float> direct_render(fdn::Mode mode, fdn::Tier tier, int blocks) {
+    pulp::signal::FdnReverb engine;
+    engine.prepare(kSr, kFrames);
+    engine.set_mode(mode);
+    std::vector<float> out;
+    std::uint32_t state = 0xC0FFEEu;
+    Block in;
+    Block rendered;
+    for (int b = 0; b < blocks; ++b) {
+        for (int k = 0; k < kFrames; ++k) {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            const auto v = static_cast<float>(
+                (static_cast<double>(state >> 8) * (1.0 / 16777216.0) * 2.0 - 1.0) * 0.8);
+            in.left[static_cast<std::size_t>(k)] = v;
+            in.right[static_cast<std::size_t>(k)] = -v;
+        }
+        for (int offset = 0; offset < kFrames; offset += fdn::kControlRateSamples) {
+            for (int p = 0; p < fdn::kNumParams; ++p) {
+                const auto param = static_cast<fdn::Param>(p);
+                engine.set_parameter(
+                    param, static_cast<double>(static_cast<float>(fdn::mode_default(mode, param))));
+            }
+            engine.set_tier(tier);
+            engine.process_block(in.left.data() + offset, in.right.data() + offset,
+                                 rendered.left.data() + offset, rendered.right.data() + offset,
+                                 fdn::kControlRateSamples);
+        }
+        out.insert(out.end(), rendered.left.begin(), rendered.left.end());
+    }
+    return out;
+}
+
+} // namespace
+
+TEST_CASE("fdn reverb catalog tier defaults to the network engine",
+          "[fdn][catalog][reverb][tier]") {
+    // A patch that never sets the tier — every patch baked before the tier
+    // existed — must render exactly the network engine, bit for bit.
+    BakedReverb untouched(fdn::Mode::hall);
+    const auto untouched_render = excited(*untouched.result.processor, 40);
+    const auto network = direct_render(fdn::Mode::hall, fdn::Tier::network, 40);
+    REQUIRE(untouched_render == network);
+
+    // ... and so must an explicit tier of 0 and a hostile value, which the
+    // StateStore boundary resolves to the declared default.
+    for (float value : {0.0f, std::numeric_limits<float>::quiet_NaN()}) {
+        BakedReverb fixture(fdn::Mode::hall);
+        auto injector = fixture.baked().claim_param_injection(fixture.node);
+        REQUIRE(injector.inject(immediate(catalog::kTier, value)) == InjectStatus::Ok);
+        REQUIRE(excited(*fixture.result.processor, 40) == network);
+    }
+}
+
+TEST_CASE("fdn reverb catalog tier 1 renders the classic engine", "[fdn][catalog][reverb][tier]") {
+    BakedReverb fixture(fdn::Mode::hall);
+    auto injector = fixture.baked().claim_param_injection(fixture.node);
+    REQUIRE(injector.inject(immediate(catalog::kTier, 1.0f)) == InjectStatus::Ok);
+    const auto rendered = excited(*fixture.result.processor, 40);
+    for (float sample : rendered)
+        REQUIRE(std::isfinite(sample));
+    REQUIRE(peak(rendered) > 0.0);
+    REQUIRE(rendered == direct_render(fdn::Mode::hall, fdn::Tier::classic, 40));
+    // The control: the classic render is not the network's.
+    REQUIRE(rendered != direct_render(fdn::Mode::hall, fdn::Tier::network, 40));
+
+    // The descriptor advertises the tier as a stepped two-way choice.
+    const auto descriptor = catalog::fdn_reverb_descriptor();
+    const auto it = std::find_if(descriptor.params.begin(), descriptor.params.end(),
+                                 [](const auto& d) { return d.id == catalog::kTier; });
+    REQUIRE(it != descriptor.params.end());
+    REQUIRE(it->kind == ForgeParamKind::stepped);
+    REQUIRE(it->choices.size() == 2);
+    REQUIRE(it->choices[0].value == 0.0f);
+    REQUIRE(it->choices[1].value == 1.0f);
+}
+
 TEST_CASE("fdn reverb catalog node is true stereo", "[fdn][catalog][reverb]") {
     BakedReverb fixture(fdn::Mode::hall);
     // A left-only impulse must produce energy on BOTH outputs, because the two
@@ -410,6 +500,18 @@ TEST_CASE("fdn reverb catalog does not allocate on the audio thread",
             render_once();
             render_once();
             injector.inject(immediate(catalog::kTankRate, 7.0f));
+            render_once();
+            render_once();
+            // The classic tier, a switch into it (which flushes it), its own
+            // parameter changes, and a switch back to the network.
+            injector.inject(immediate(catalog::kTier, 1.0f));
+            render_once();
+            render_once();
+            injector.inject(immediate(catalog::kDecay, 3.0f));
+            render_once();
+            injector.inject(immediate(catalog::kSize, 0.4f));
+            render_once();
+            injector.inject(immediate(catalog::kTier, 0.0f));
             render_once();
             render_once();
             const auto count = probe.allocation_count();

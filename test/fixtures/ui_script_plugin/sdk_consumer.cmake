@@ -5,7 +5,10 @@
 # installed CMake helpers and headers.
 #
 #   cmake -DPULP_BUILD_DIR=<build> -DFIXTURE_DIR=<this dir> -DPROBE=<exe>
-#         -DEXPECT_GPU=<bool> -DCONFIG=<Release|Debug> -P sdk_consumer.cmake
+#         -DEXPECT_GPU=<bool> -DCONFIG=<Release|Debug>
+#         [-DPULP_PARENT_SANITIZER=<kind>] [-DPULP_PARENT_CXX_FLAGS=<flags>]
+#         [-DPULP_PARENT_INSTRUMENTATION_CXX_FLAGS=<flags>]
+#         [-DPULP_PARENT_INSTRUMENTATION_LINKER_FLAGS=<flags>] -P sdk_consumer.cmake
 
 cmake_minimum_required(VERSION 3.24)
 
@@ -63,6 +66,26 @@ string(TOLOWER "${CONFIG}" _config_lower)
 if(_config_lower STREQUAL "debug")
     list(APPEND _configure_args -DPULP_ALLOW_DEBUG_SDK=ON)
 endif()
+# A sanitizer or coverage producer installs static libraries that reference
+# its runtime: compile the consumer with the same instrumentation and link the
+# plug-in module (and any executable) against that runtime.
+set(_consumer_cxx_flags "${PULP_PARENT_CXX_FLAGS}")
+if(PULP_PARENT_INSTRUMENTATION_CXX_FLAGS)
+    string(APPEND _consumer_cxx_flags " ${PULP_PARENT_INSTRUMENTATION_CXX_FLAGS}")
+endif()
+string(STRIP "${_consumer_cxx_flags}" _consumer_cxx_flags)
+if(PULP_PARENT_SANITIZER)
+    list(APPEND _configure_args "-DPULP_SANITIZER=${PULP_PARENT_SANITIZER}")
+endif()
+if(_consumer_cxx_flags)
+    list(APPEND _configure_args "-DCMAKE_CXX_FLAGS=${_consumer_cxx_flags}")
+endif()
+if(PULP_PARENT_INSTRUMENTATION_LINKER_FLAGS)
+    foreach(_kind EXE SHARED MODULE)
+        list(APPEND _configure_args
+            "-DCMAKE_${_kind}_LINKER_FLAGS=${PULP_PARENT_INSTRUMENTATION_LINKER_FLAGS}")
+    endforeach()
+endif()
 execute_process(COMMAND "${CMAKE_COMMAND}" ${_configure_args}
     RESULT_VARIABLE _configure_rc OUTPUT_VARIABLE _configure_out ERROR_VARIABLE _configure_err)
 if(NOT _configure_rc EQUAL 0)
@@ -88,6 +111,47 @@ list(LENGTH _clap_binaries _clap_count)
 if(NOT _clap_count EQUAL 1)
     message(FATAL_ERROR "expected one built .clap bundle, found: ${_clap_binaries}")
 endif()
+
+# The consumer configured without PULP_DEV_BUILD, so its image carries the
+# embedded script and no on-disk path: the script's console marker proves the
+# scan reads the right bytes, and the absolute source path must be absent.
+# The image is named after PLUGIN_NAME (the CLAP target's OUTPUT_NAME), as the
+# bundle is, not after the CMake target, and that name contains spaces.
+file(GLOB_RECURSE _clap_images "${_clap_binaries}/*")
+get_filename_component(_clap_image_name "${_clap_binaries}" NAME_WLE)
+set(_clap_image "")
+foreach(_candidate IN LISTS _clap_images)
+    get_filename_component(_name "${_candidate}" NAME)
+    if(_name STREQUAL _clap_image_name OR _name MATCHES "\\.(so|dll|clap)$")
+        set(_clap_image "${_candidate}")
+    endif()
+endforeach()
+if(NOT _clap_image)
+    message(FATAL_ERROR "no plug-in image found inside ${_clap_binaries}: ${_clap_images}")
+endif()
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+function(_image_contains image needle out_var)
+    execute_process(
+        COMMAND "${Python3_EXECUTABLE}" -I -c
+            "import sys, pathlib; sys.exit(0 if sys.argv[2].encode() in pathlib.Path(sys.argv[1]).read_bytes() else 1)"
+            "${image}" "${needle}"
+        RESULT_VARIABLE _rv)
+    if(_rv EQUAL 0)
+        set(${out_var} TRUE PARENT_SCOPE)
+    else()
+        set(${out_var} FALSE PARENT_SCOPE)
+    endif()
+endfunction()
+_image_contains("${_clap_image}" "pulp-ui-script-fixture-mounted" _has_marker)
+_image_contains("${_clap_image}" "${_source}/ui/main.js" _has_path)
+if(NOT _has_marker)
+    message(FATAL_ERROR "${_clap_image} does not embed ui/main.js (the console marker is absent)")
+endif()
+if(_has_path)
+    message(FATAL_ERROR
+        "${_clap_image} names the on-disk script path ${_source}/ui/main.js in a release build")
+endif()
+message(STATUS "release image embeds the script and records no source path")
 
 set(FORMAT clap)
 set(BUNDLE "${_clap_binaries}")

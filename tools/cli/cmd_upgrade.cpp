@@ -9,7 +9,11 @@
 // "`pulp upgrade`" section and test_cli_upgrade_url.cpp.
 
 #include "cli_common.hpp"
+#include "cli_sdk.hpp"
 #include "migration_index.hpp"
+#include "private_temp_dir.hpp"
+#include "release_checksum.hpp"
+#include "release_floors_gen.h"
 #include "update_check.hpp"
 #include "upgrade_install.hpp"
 #include "upgrade_url.hpp"
@@ -290,6 +294,13 @@ int cmd_upgrade(const std::vector<std::string>& args) {
     }
 
     std::string version = target_version.empty() ? latest : target_version;
+    // The version is interpolated into a release URL, a directory name, and
+    // shell commands below; only a plain M.m.p release tag may get that far.
+    if (!pulp::cli::pulp_release_version_is_well_formed(version)) {
+        std::cerr << "Error: '" << version
+                  << "' is not a release version (expected M.m.p, e.g. 0.2.0)\n";
+        return 1;
+    }
     std::cout << "  Target version: " << version << "\n";
 
     std::string platform, arch;
@@ -322,18 +333,59 @@ int cmd_upgrade(const std::vector<std::string>& args) {
     auto [tarball, url] = pulp::cli::pulp_upgrade_url_for(version, platform, arch);
     std::cout << "  Downloading " << tarball << "...\n";
 
-    std::string tmp_dir = "/tmp/pulp-upgrade-" + version;
-    int rc = run("mkdir -p " + tmp_dir + " && curl -fSL -o " + tmp_dir + "/" + tarball + " " + url);
+    // Verify-then-extract runs in a directory this process created exclusively
+    // under the user's own Pulp home, never a predictable name in the shared
+    // system temp dir.
+    const fs::path tmp_root = pulp_home() / "tmp";
+    const auto private_dir = pulp::cli::make_private_temp_dir(tmp_root, "pulp-upgrade-" + version);
+    if (!private_dir) {
+        std::cerr << "Error: could not create a private download directory under " << tmp_root
+                  << "\n";
+        return 1;
+    }
+    const std::string tmp_dir = private_dir->string();
+    const auto discard_tmp = [&] {
+        std::error_code ec;
+        fs::remove_all(*private_dir, ec);
+    };
+    int rc =
+        run("curl -fSL -o " + shell_quote(fs::path(tmp_dir) / tarball) + " " + shell_quote(url));
     if (rc != 0) {
         std::cerr << "Download failed. Check: https://github.com/Generous-Corp/pulp/releases/tag/v" << version << "\n";
-        run("rm -rf " + tmp_dir);
+        discard_tmp();
         return 1;
     }
 
-    rc = run("tar -xzf " + tmp_dir + "/" + tarball + " -C " + tmp_dir);
+    {
+        namespace relcheck = pulp::cli::release_checksum;
+        const std::string sums_name(relcheck::kManifestAssetName);
+        const fs::path sums_path = fs::path(tmp_dir) / sums_name;
+        std::optional<std::string> sums;
+        if (run("curl -fsL -o " + shell_quote(sums_path) + " " +
+                shell_quote(pulp::cli::pulp_release_asset_url(version, sums_name))) == 0)
+            sums = read_file_contents(sums_path);
+        const auto verdict =
+            relcheck::verify_release_archive(fs::path(tmp_dir) / tarball, tarball, version,
+                                             PULP_RELEASE_CHECKSUM_MANIFEST_FLOOR, sums);
+        if (!verdict.ok()) {
+            std::cerr << "Error: " << verdict.message << "\n";
+            std::cerr
+                << "  Verify by hand from: https://github.com/Generous-Corp/pulp/releases/tag/v"
+                << version << "\n";
+            discard_tmp();
+            return 1;
+        }
+        if (verdict.status == relcheck::Status::unverified_legacy)
+            std::cerr << "WARNING: " << verdict.message << "\n";
+        else
+            std::cout << "  " << verdict.message << "\n";
+    }
+
+    rc =
+        run("tar -xzf " + shell_quote(fs::path(tmp_dir) / tarball) + " -C " + shell_quote(tmp_dir));
     if (rc != 0) {
         std::cerr << "Extraction failed.\n";
-        run("rm -rf " + tmp_dir);
+        discard_tmp();
         return 1;
     }
 
@@ -344,7 +396,7 @@ int cmd_upgrade(const std::vector<std::string>& args) {
         std::cerr << "Error: extracted archive does not contain '"
                   << pulp::cli::upgrade_install::primary_binary_name()
                   << "' binary.\n";
-        run("rm -rf " + tmp_dir);
+        discard_tmp();
         return 1;
     }
 
@@ -372,11 +424,11 @@ int cmd_upgrade(const std::vector<std::string>& args) {
         if (fs::exists(backup) && !fs::exists(self)) {
             fs::rename(backup, self);
         }
-        run("rm -rf " + tmp_dir);
+        discard_tmp();
         return 1;
     }
 
-    run("rm -rf " + tmp_dir);
+    discard_tmp();
 
     std::cout << "\n  \xe2\x9c\x93 Pulp CLI upgraded to v" << version << "\n";
     if (pulp::cli::upgrade_install::installed_cpp_delegate(installed_payloads)) {
@@ -500,8 +552,7 @@ int cmd_upgrade(const std::vector<std::string>& args) {
     if (!cli_only) {
         std::cout << "\n  Installing matching SDK v" << version << "...\n";
         // Use shell quoting because self_path might contain spaces.
-        int sdk_rc = run(shell_quote(self_path) + " sdk install --version "
-                         + version);
+        int sdk_rc = run(shell_quote(self_path) + " sdk install --version " + shell_quote(version));
         if (sdk_rc == 0) {
             std::cout << "    \xe2\x9c\x93 SDK v" << version << " installed.\n";
             if (installed != version) {

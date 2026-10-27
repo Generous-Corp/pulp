@@ -68,6 +68,9 @@ export const COMPUTED_STYLES = [
   "font-weight",
   "font-style",
   "font-variation-settings",
+  // Decides glyph hinting and the surface's text preblend; see
+  // core/canvas/include/pulp/canvas/text_raster_policy.hpp.
+  "-webkit-font-smoothing",
   "text-align",
   "letter-spacing",
   "word-spacing",
@@ -91,11 +94,13 @@ export const COMPUTED_STYLES = [
   // not describe those pixels: an unstyled range reports a white background it
   // never draws, and an unstyled button reports a 2px outset black border drawn
   // as a thin rounded grey one. `appearance` is what separates a control the
-  // computed style can reproduce from one it cannot. `accent-color` is the one
-  // author input the native theme honours. Padding places the text a control
-  // draws from its value rather than from a DOM text node.
+  // computed style can reproduce from one it cannot. `accent-color` and
+  // `color-scheme` are the author inputs the native theme honours (the latter
+  // picks its light or dark palette). Padding places the text a control draws
+  // from its value rather than from a DOM text node.
   "appearance",
   "accent-color",
+  "color-scheme",
   "padding-top",
   "padding-right",
   "padding-bottom",
@@ -122,6 +127,12 @@ export const COMPUTED_STYLES = [
   // rendered solid is a wrong picture, so its presence sends the subtree to the
   // element fallback instead.
   "stroke-dasharray",
+  // The shape of the stroke: Chromium's computed value is the only one that
+  // sees a cap, join or limit set from a stylesheet rather than inline.
+  "stroke-linecap",
+  "stroke-linejoin",
+  "stroke-miterlimit",
+  "stroke-dashoffset",
 ];
 
 export function semanticExpression(snapshotClickableIndexes = []) {

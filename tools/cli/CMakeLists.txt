@@ -7,6 +7,15 @@ configure_file(
     "${CMAKE_CURRENT_BINARY_DIR}/pulp_version_gen.h"
     @ONLY)
 
+# Release floors come from tools/scripts/release_product_matrix.json, the
+# same file the release workflow publishes with.
+include("${PROJECT_SOURCE_DIR}/tools/cmake/PulpReleaseMatrix.cmake")
+pulp_release_matrix_floor(PULP_RELEASE_CHECKSUM_MANIFEST_FLOOR checksum_manifest_floor)
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/release_floors_gen.h.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/release_floors_gen.h"
+    @ONLY)
+
 # ── Migration index codegen ─────────────────────────────────────────────────
 #
 # Scan docs/migrations/*.md at configure time, parse the TOML
@@ -90,6 +99,7 @@ add_executable(pulp-cli
     cmd_run.cpp
     cmd_run_parse.cpp
     cmd_ship.cpp
+    ship_bundle_strip.cpp
     inspector_container_report.cpp
     inspector_shipping_report.cpp
     cmd_bake.cpp
@@ -133,6 +143,7 @@ add_executable(pulp-cli
     create_build_commands.cpp
     create_targets.cpp
     package_registry.cpp
+    package_registry_trust.cpp
     package_analyzer_descriptors.cpp
     package_commands.cpp
     package_commands_util.cpp
@@ -608,6 +619,14 @@ if(PULP_BUILD_TESTS)
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     set_tests_properties(cli-cache-status PROPERTIES
         PASS_REGULAR_EXPRESSION "Pulp Cache")
+
+    add_test(NAME cli-cache-status-subdir
+        COMMAND "${CMAKE_COMMAND}"
+            "-DCLI=$<TARGET_FILE:pulp-cli>"
+            "-DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/cache-status-subdir"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/check_cache_status_subdir.cmake")
+    set_tests_properties(cli-cache-status-subdir PROPERTIES
+        PASS_REGULAR_EXPRESSION "cache status lists a directory entry")
 
     add_test(NAME cli-cache-help
         COMMAND pulp-cli cache

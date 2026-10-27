@@ -19,9 +19,11 @@ pub(super) const BROWSER_CAPTURE_ARCHIVE_DIR: &str = "browser_capture";
 const BROWSER_CAPTURE_PROTOCOL_DIR: &str = "browser_capture-v1";
 const JSX_RUNTIME_ARCHIVE_DIR: &str = "jsx-runtime";
 const MATERIALIZED_BINDING_CONTRACT: &str = "materialized_binding_contract.mjs";
-pub(super) const BROWSER_CAPTURE_RUNTIME_FILES: [&str; 21] = [
+pub(super) const BROWSER_CAPTURE_RUNTIME_FILES: [&str; 23] = [
     "browser_process.mjs",
     "capture.mjs",
+    "document_canvas.mjs",
+    "font_faces.mjs",
     "form_control_theme.mjs",
     "health.mjs",
     "interaction_executor.mjs",

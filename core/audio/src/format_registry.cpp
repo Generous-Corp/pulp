@@ -86,12 +86,12 @@ public:
     std::optional<AudioFileData> read(const std::string& path,
                                       const DecodeLimits& limits) override {
         // The header's frame and channel counts are what the decoder sizes
-        // its output from; refuse them before it allocates.
-        auto info = read_audio_file_info(path);
-        if (!info ||
-            !detail::within_decode_limits("WAV", info->num_frames, info->num_channels, limits))
-            return std::nullopt;
-        return read_audio_file(path);
+        // its output from; refuse them before it allocates, on the same open
+        // that decodes, so a path swapped between two opens cannot present a
+        // small header to the check and a large one to the decoder.
+        return read_audio_file(path, [&](const AudioFileInfo& info) {
+            return detail::within_decode_limits("WAV", info.num_frames, info.num_channels, limits);
+        });
     }
 
     bool supports_extension(std::string_view ext) const override {

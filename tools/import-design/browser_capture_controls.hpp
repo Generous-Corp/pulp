@@ -16,6 +16,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace pulp::import_design::detail {
 
@@ -49,6 +50,25 @@ struct ControlValueText {
 std::optional<ControlValueText>
 control_value_text(const CapturedStyleIndex& index, int node_index, const CapturedBox& box,
                    const std::map<std::string, std::string>& computed);
+
+/// The state the native theme paints a themed range, checkbox, radio or push
+/// button (`<button>`, or an input of type button, submit or reset) from,
+/// recorded as `ua_*` attributes on its lowered node: `ua_control` (the input
+/// type, or `button` for every push button), the HTML `ua_min` / `ua_max` /
+/// `ua_step` / `ua_value` of a range, the live `ua_checked` of a checkbox or
+/// radio and the `ua_radio_group` its `name` puts it in, `ua_disabled`, and the
+/// computed `ua_accent` (absent for `auto`, and never for a button, which the
+/// theme paints without it) and `ua_color_scheme`. Other elements record
+/// nothing; returns whether the node is one of them.
+bool record_ua_control_state(const CapturedStyleIndex& index, int node_index, std::string_view tag,
+                             const std::map<std::string, std::string>& computed,
+                             decltype(pulp::view::IRNode::attributes)& attributes);
+
+/// Clears the background and border a theme-painted control's computed style
+/// reports. They are the user-agent defaults the native theme replaces (an
+/// unstyled range reports a white background it never draws); author box
+/// styling would have dropped the theme, so none of it is the author's.
+void drop_theme_replaced_box_paint(pulp::view::IRStyle& style);
 
 /// The image node for a viewport-plane raster of a captured element.
 ///

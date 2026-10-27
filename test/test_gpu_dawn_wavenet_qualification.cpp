@@ -1,11 +1,14 @@
 #include "detail/dawn_shared_io_provider.hpp"
 #include "detail/dawn_shared_io_wavenet_program.hpp"
 #include "detail/gpu_convolver_trial_config.hpp"
+#include "detail/gpu_neural_model.hpp"
+#include "detail/gpu_neural_realtime_test_access.hpp"
 #include "detail/nam_tcn_artifact.hpp"
 #include "detail/realtime_gpu_audio_path.hpp"
 #include "detail/shared_io_compute_plan.hpp"
 #include "detail/shared_io_wavenet_spec.hpp"
 #include "detail/wavenet_realtime_channel.hpp"
+#include "detail/wavenet_streaming_backend.hpp"
 #include "support/dawn_transfer_call_counter.hpp"
 #include "support/physical_qualification_outcome.hpp"
 #include "support/wavenet_program_session_channel.hpp"
@@ -18,8 +21,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
-#include <memory>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -27,6 +30,7 @@
 #include <thread>
 #include <vector>
 
+#include <pulp/gpu_audio/gpu_neural_realtime_node.hpp>
 #include <pulp/gpu_audio/gpu_wavenet_realtime_node.hpp>
 
 #ifndef PULP_GPU_AUDIO_EXPECTED_DAWN_SHA
@@ -62,6 +66,141 @@ struct Fixture {
     }
 };
 
+std::string_view recovery_name(pulp::gpu_audio::GpuAudioRecoveryReason reason) {
+    using R = pulp::gpu_audio::GpuAudioRecoveryReason;
+    switch (reason) {
+    case R::None:
+        return "none";
+    case R::SequenceGap:
+        return "sequence_gap";
+    case R::InputSaturated:
+        return "input_saturated";
+    case R::ProviderFailure:
+        return "provider_failure";
+    case R::ProviderLost:
+        return "provider_lost";
+    case R::OfflineFence:
+        return "offline_fence";
+    case R::InvalidCallback:
+        return "invalid_callback";
+    case R::ProviderUnresponsive:
+        return "provider_unresponsive";
+    case R::ProviderReacquired:
+        return "provider_reacquired";
+    case R::SustainedDeadlineMisses:
+        return "sustained_deadline_misses";
+    }
+    return "unknown";
+}
+
+// One admission-time scenario: the stamped WaveNet node over a physical
+// provider for a fixed number of callbacks. `skip_pump_at` withholds the worker
+// pumps after one callback, so the block it admitted is still in flight when
+// the next admission needs a slot and must take slot 1.
+struct AdmissionRun {
+    bool ran = false;
+    std::uint64_t callbacks = 0;
+    std::uint64_t next_sequence = 0;
+    // Callbacks after which the bridge's next sequence was not one past the
+    // callback's own.
+    std::uint64_t sequence_drift = 0;
+    std::uint64_t gpu_blocks = 0;
+    std::uint64_t mismatches = 0;
+    // Most blocks the worker had in flight at once (trace telemetry).
+    std::uint64_t in_flight_high_water = 0;
+    // Submissions the provider refused, as the node's channel saw them.
+    std::uint64_t refused_submits = 0;
+    std::uint64_t first_refused = UINT64_MAX;
+    pulp::gpu_audio::GpuAudioRecoveryReason reason = pulp::gpu_audio::GpuAudioRecoveryReason::None;
+    std::uint64_t sequence = UINT64_MAX;
+    std::uint64_t latched_after = UINT64_MAX;
+    pulp::gpu_audio::GpuAudioProviderState state =
+        pulp::gpu_audio::GpuAudioProviderState::Uninitialized;
+    bool statuses_valid = true;
+    bool released = false;
+    std::string trace;
+    std::string error;
+
+    bool sequence_agrees() const noexcept {
+        return ran && sequence_drift == 0 && next_sequence == callbacks;
+    }
+};
+
+struct AdmissionScenario {
+    DawnSharedIoProvider::Fault fault = DawnSharedIoProvider::Fault::None;
+    std::uint32_t fault_slot = 0;
+    std::uint32_t lead = 1;
+    std::uint32_t inflight = 1;
+    std::uint64_t skip_pump_at = UINT64_MAX;
+};
+
+// Records the submissions the provider refused on their way from the node to
+// the physical channel, so a receipt can tie a latch to the refused block.
+class RefusalCountingChannel final : public WaveNetRealtimeChannel {
+  public:
+    RefusalCountingChannel(std::unique_ptr<WaveNetRealtimeChannel> inner, AdmissionRun& run)
+        : inner_(std::move(inner)), run_(run) {}
+    bool submit(std::span<const float> input,
+                const SharedIoSubmissionTicket& ticket) noexcept override {
+        if (inner_->submit(input, ticket))
+            return true;
+        if (run_.refused_submits++ == 0)
+            run_.first_refused = ticket.sequence;
+        return false;
+    }
+    void service(std::uint64_t now) noexcept override {
+        inner_->service(now);
+    }
+    void service_until(std::uint64_t now, std::uint64_t deadline) noexcept override {
+        inner_->service_until(now, deadline);
+    }
+    std::optional<WaveNetChannelCompletion> receive(std::span<float> output) noexcept override {
+        return inner_->receive(output);
+    }
+    bool release() noexcept override {
+        return inner_->release();
+    }
+    bool release_bounded(std::uint64_t budget_ns) noexcept override {
+        return inner_->release_bounded(budget_ns);
+    }
+    bool lost() const noexcept override {
+        return inner_->lost();
+    }
+
+  private:
+    std::unique_ptr<WaveNetRealtimeChannel> inner_;
+    AdmissionRun& run_;
+};
+
+struct RefusalRetryRun {
+    bool refused = false;
+    bool retried = false;
+    std::uint64_t delivered = 0;
+    std::uint64_t mismatches = 0;
+    std::string error;
+};
+
+void emit_admission(std::ostream& out, std::string_view name, const AdmissionRun& run,
+                    bool receipt) {
+    const auto signed_sequence = [](std::uint64_t value) {
+        return value == UINT64_MAX ? -1LL : static_cast<long long>(value);
+    };
+    out << R"(,")" << name << R"(":{"receipt":)" << (receipt ? "true" : "false")
+        << R"(,"sequence_agrees":)" << (run.sequence_agrees() ? "true" : "false")
+        << R"(,"callbacks":)" << run.callbacks << R"(,"bridge_next_sequence":)" << run.next_sequence
+        << R"(,"sequence_drift":)" << run.sequence_drift << R"(,"gpu_blocks":)" << run.gpu_blocks
+        << R"(,"gpu_mismatches":)" << run.mismatches << R"(,"in_flight_high_water":)"
+        << run.in_flight_high_water << R"(,"refused_submits":)" << run.refused_submits
+        << R"(,"first_refused_sequence":)" << signed_sequence(run.first_refused)
+        << R"(,"recovery_reason":")" << recovery_name(run.reason) << R"(","recovery_sequence":)"
+        << signed_sequence(run.sequence) << R"(,"latched_after_callback":)"
+        << signed_sequence(run.latched_after) << R"(,"provider_state":)"
+        << static_cast<int>(run.state) << R"(,"statuses_valid":)"
+        << (run.statuses_valid ? "true" : "false") << R"(,"released":)"
+        << (run.released ? "true" : "false") << R"(,"trace":")" << run.trace << R"(","error":")"
+        << run.error << R"("})";
+}
+
 struct Result {
     bool unavailable = false;
     bool identity = false;
@@ -92,6 +231,45 @@ struct Result {
     std::uint64_t node_hang_sequence = 0;
     std::uint64_t node_loss_blocks = 0;
     std::uint64_t node_hang_blocks = 0;
+    bool neural_loss_receipt = false;
+    bool neural_hang_receipt = false;
+    std::string neural_loss_reason = "not_run";
+    std::string neural_hang_reason = "not_run";
+    std::uint64_t neural_loss_sequence = 0;
+    std::uint64_t neural_hang_sequence = 0;
+    std::uint64_t neural_loss_blocks = 0;
+    std::uint64_t neural_hang_blocks = 0;
+    // Re-acquire after the same faults: a new physical provider replaces the
+    // faulted one while the stream continues, and GPU delivery resumes.
+    bool reacquire_loss_receipt = false;
+    bool reacquire_hang_receipt = false;
+    std::uint64_t reacquire_loss_resume_ns = 0;
+    std::uint64_t reacquire_hang_resume_ns = 0;
+    std::uint64_t reacquire_loss_reprepare_ns = 0;
+    std::uint64_t reacquire_hang_reprepare_ns = 0;
+    std::string reacquire_loss_reason = "not_run";
+    std::string reacquire_hang_reason = "not_run";
+    // Admission-time faults on the stamped WaveNet node over a physical
+    // provider, each with the bridge's sequence checked against the callbacks.
+    AdmissionRun admission_healthy;
+    AdmissionRun admission_loss;
+    AdmissionRun admission_reject;
+    AdmissionRun admission_skip_control;
+    AdmissionRun admission_reject_midstream;
+    AdmissionRun neural_default_depth;
+    bool neural_default_depth_receipt = false;
+    bool admission_healthy_receipt = false;
+    bool admission_loss_receipt = false;
+    bool admission_reject_receipt = false;
+    AdmissionRun admission_reject_unreachable_slot;
+    bool admission_reject_unreachable_slot_receipt = false;
+    bool admission_skip_control_receipt = false;
+    bool node_loss_default_depth_receipt = false;
+    bool node_hang_default_depth_receipt = false;
+    std::string node_default_depth_reasons = "not_run";
+    bool admission_reject_midstream_receipt = false;
+    RefusalRetryRun refusal_retry;
+    bool refusal_retry_receipt = false;
     std::uint64_t submissions = 0;
     std::uint64_t gpu_delivered = 0;
     std::uint64_t cpu_fallback = 0;
@@ -129,12 +307,57 @@ void emit(const Result& result, std::string_view status) {
               << R"(,"node_hang_receipt":)" << (result.node_hang_receipt ? "true" : "false")
               << R"(,"node_hang_reason":")" << result.node_hang_reason
               << R"(","node_hang_sequence":)" << result.node_hang_sequence
-              << R"(,"node_hang_blocks":)" << result.node_hang_blocks << R"(,"submissions":)"
-              << result.submissions << R"(,"gpu_delivered":)" << result.gpu_delivered
-              << R"(,"cpu_fallback_blocks":)" << result.cpu_fallback << R"(,"late_blocks":)"
-              << result.late << R"(,"resident_state_copies":)" << result.resident_state_copies
-              << R"(,"generation":)" << result.generation << R"(,"reprime_generation":)"
-              << result.reprime_generation << R"(,"reason":")" << result.reason << "\"}" << '\n';
+              << R"(,"node_hang_blocks":)" << result.node_hang_blocks
+              << R"(,"neural_loss_receipt":)" << (result.neural_loss_receipt ? "true" : "false")
+              << R"(,"neural_loss_reason":")" << result.neural_loss_reason
+              << R"(","neural_loss_sequence":)" << result.neural_loss_sequence
+              << R"(,"neural_loss_blocks":)" << result.neural_loss_blocks
+              << R"(,"neural_hang_receipt":)" << (result.neural_hang_receipt ? "true" : "false")
+              << R"(,"neural_hang_reason":")" << result.neural_hang_reason
+              << R"(","neural_hang_sequence":)" << result.neural_hang_sequence
+              << R"(,"neural_hang_blocks":)" << result.neural_hang_blocks
+              << R"(,"reacquire_loss_receipt":)"
+              << (result.reacquire_loss_receipt ? "true" : "false")
+              << R"(,"reacquire_loss_reason":")" << result.reacquire_loss_reason
+              << R"(","reacquire_loss_reprepare_ns":)" << result.reacquire_loss_reprepare_ns
+              << R"(,"reacquire_loss_resume_ns":)" << result.reacquire_loss_resume_ns
+              << R"(,"reacquire_hang_receipt":)"
+              << (result.reacquire_hang_receipt ? "true" : "false")
+              << R"(,"reacquire_hang_reason":")" << result.reacquire_hang_reason
+              << R"(","reacquire_hang_reprepare_ns":)" << result.reacquire_hang_reprepare_ns
+              << R"(,"reacquire_hang_resume_ns":)" << result.reacquire_hang_resume_ns;
+    std::cout << R"(,"node_loss_default_depth_receipt":)"
+              << (result.node_loss_default_depth_receipt ? "true" : "false")
+              << R"(,"node_hang_default_depth_receipt":)"
+              << (result.node_hang_default_depth_receipt ? "true" : "false")
+              << R"(,"node_default_depth_reasons":")" << result.node_default_depth_reasons << "\"";
+    emit_admission(std::cout, "admission_healthy", result.admission_healthy,
+                   result.admission_healthy_receipt);
+    emit_admission(std::cout, "admission_force_loss_before_submit", result.admission_loss,
+                   result.admission_loss_receipt);
+    emit_admission(std::cout, "admission_reject_before_submit", result.admission_reject,
+                   result.admission_reject_receipt);
+    emit_admission(std::cout, "admission_reject_unreachable_slot",
+                   result.admission_reject_unreachable_slot,
+                   result.admission_reject_unreachable_slot_receipt);
+    emit_admission(std::cout, "admission_skip_pump_control", result.admission_skip_control,
+                   result.admission_skip_control_receipt);
+    emit_admission(std::cout, "admission_reject_midstream", result.admission_reject_midstream,
+                   result.admission_reject_midstream_receipt);
+    emit_admission(std::cout, "neural_default_depth", result.neural_default_depth,
+                   result.neural_default_depth_receipt);
+    std::cout << R"(,"refusal_retry":{"receipt":)"
+              << (result.refusal_retry_receipt ? "true" : "false") << R"(,"refused_on_slot1":)"
+              << (result.refusal_retry.refused ? "true" : "false") << R"(,"retried_on_slot0":)"
+              << (result.refusal_retry.retried ? "true" : "false") << R"(,"delivered":)"
+              << result.refusal_retry.delivered << R"(,"gpu_mismatches":)"
+              << result.refusal_retry.mismatches << R"(,"error":")" << result.refusal_retry.error
+              << R"("})" << R"(,"submissions":)" << result.submissions << R"(,"gpu_delivered":)"
+              << result.gpu_delivered << R"(,"cpu_fallback_blocks":)" << result.cpu_fallback
+              << R"(,"late_blocks":)" << result.late << R"(,"resident_state_copies":)"
+              << result.resident_state_copies << R"(,"generation":)" << result.generation
+              << R"(,"reprime_generation":)" << result.reprime_generation << R"(,"reason":")"
+              << result.reason << "\"}" << '\n';
 }
 
 bool compare_block(std::span<const float> actual, std::span<const float> expected) {
@@ -231,33 +454,6 @@ void run_device_loss_negative(Result& result, const Fixture& fixture, const void
                         std::to_string(receipts.size()) + std::to_string(released);
 }
 
-std::string_view recovery_name(pulp::gpu_audio::GpuAudioRecoveryReason reason) {
-    using R = pulp::gpu_audio::GpuAudioRecoveryReason;
-    switch (reason) {
-    case R::None:
-        return "none";
-    case R::SequenceGap:
-        return "sequence_gap";
-    case R::InputSaturated:
-        return "input_saturated";
-    case R::ProviderFailure:
-        return "provider_failure";
-    case R::ProviderLost:
-        return "provider_lost";
-    case R::OfflineFence:
-        return "offline_fence";
-    case R::InvalidCallback:
-        return "invalid_callback";
-    case R::ProviderUnresponsive:
-        return "provider_unresponsive";
-    case R::ProviderReacquired:
-        return "provider_reacquired";
-    case R::SustainedDeadlineMisses:
-        return "sustained_deadline_misses";
-    }
-    return "unknown";
-}
-
 struct NodeFaultRun {
     bool ran = false;
     pulp::gpu_audio::GpuAudioRecoveryReason reason = pulp::gpu_audio::GpuAudioRecoveryReason::None;
@@ -267,13 +463,50 @@ struct NodeFaultRun {
     std::uint64_t blocks = 0;
     bool status_valid = false;
     std::string reason_text;
+    // Re-acquire, when requested.
+    bool reacquired = false;
+    bool resumed_with_parity = false;
+    std::uint64_t reprepare_ns = 0;
+    std::uint64_t resume_ns = 0;
+    std::uint64_t epoch = 0;
+};
+
+// Builds a session over a fresh, healthy physical provider for a re-acquire.
+struct PhysicalChannelFactory {
+    const Fixture* fixture = nullptr;
+    const void* proc_table = nullptr;
+    int created = 0;
+    static std::unique_ptr<WaveNetRealtimeChannel> make(void* context) noexcept {
+        auto& self = *static_cast<PhysicalChannelFactory*>(context);
+        auto created = DawnSharedIoProvider::create(
+            {.expected_dawn_revision = PULP_GPU_AUDIO_EXPECTED_DAWN_SHA,
+             .proc_table_override_for_testing = self.proc_table,
+             .storage_kind = SharedIoArenaProvider::StorageKind::ImportedHostPointer});
+        if (!created.provider)
+            return nullptr;
+        auto program = DawnSharedIoWavenetProgram::create(*created.provider, self.fixture->spec());
+        if (!program)
+            return nullptr;
+        const auto bytes = self.fixture->spec().block_size * sizeof(float);
+        auto session = std::make_unique<SharedIoProgramSession>();
+        if (!session->prepare(
+                {std::move(created.provider), std::move(program)},
+                {.slots = 2,
+                 .input_bytes_per_slot = bytes,
+                 .output_bytes_per_slot = bytes,
+                 .storage_kind = SharedIoArenaProvider::StorageKind::ImportedHostPointer}))
+            return nullptr;
+        ++self.created;
+        return std::make_unique<pulp::test::ProgramSessionChannel>(std::move(session));
+    }
 };
 
 // Drives the stamped node over a physical provider with `fault` until a
 // recovery reason latches. Callbacks and worker pumps alternate on this thread
 // with a short real wait, so the provider sees real device time.
 NodeFaultRun run_node_fault(const Fixture& fixture, const void* proc_table,
-                            DawnSharedIoProvider::Fault fault) {
+                            DawnSharedIoProvider::Fault fault, bool reacquire = false,
+                            std::uint32_t max_inflight = 1) {
     namespace ga = pulp::gpu_audio;
     NodeFaultRun run;
     auto created = DawnSharedIoProvider::create(
@@ -320,12 +553,247 @@ NodeFaultRun run_node_fault(const Fixture& fixture, const void* proc_table,
         .channels = 1,
         .lead_blocks = 1,
         .capacity = 4,
-        .max_inflight = 1};
+        .max_inflight = max_inflight,
+        // Hang detection within this receipt's short run: the ring-sized
+        // window. The time-based default has its own campaign receipt.
+        .watchdog_blocks = 3};
     ga::GpuWaveNetRealtimeNode node(config);
     std::vector<std::unique_ptr<WaveNetRealtimeChannel>> channels;
     channels.push_back(std::make_unique<pulp::test::ProgramSessionChannel>(std::move(session)));
     if (!WaveNetRealtimeTestAccess::prepare(node, std::move(channels))) {
         run.reason_text = "node_prepare_failed";
+        return run;
+    }
+    PhysicalChannelFactory factory{.fixture = &fixture, .proc_table = proc_table};
+    if (reacquire)
+        WaveNetRealtimeTestAccess::set_channel_factory(node, &PhysicalChannelFactory::make,
+                                                       &factory);
+    auto path = realtime_gpu_node_path(&node);
+    std::array<float, 2> input{}, output{};
+    const float* in_ptr = input.data();
+    float* out_ptr = output.data();
+    pulp::audio::BufferView<const float> in(&in_ptr, 1, 2);
+    pulp::audio::BufferView<float> out(&out_ptr, 1, 2);
+    run.ran = true;
+    // The fixture computes y[n] = tanh(0.5 x[n-1]); block B's input is
+    // {B, B + 0.25}, so a delivered block has a closed-form expectation.
+    const auto expected_block = [](std::uint64_t block) {
+        const float previous = block == 0 ? 0.0f : static_cast<float>(block - 1) + 0.25f;
+        return std::array<float, 2>{std::tanh(0.5f * previous),
+                                    std::tanh(0.5f * static_cast<float>(block))};
+    };
+    std::uint64_t fence_ns = 0, resumed_blocks = 0;
+    bool parity = true;
+    for (std::uint64_t sequence = 0; sequence < 256; ++sequence) {
+        input = {static_cast<float>(sequence), static_cast<float>(sequence) + 0.25f};
+        const auto status = path.process(path.context, in, out, 2, sequence, true, now_ns());
+        const auto disposition =
+            status == kRealtimeGpuReady     ? SharedIoDeliveryDisposition::GpuDelivered
+            : status == kRealtimeGpuPriming ? SharedIoDeliveryDisposition::Priming
+                                            : SharedIoDeliveryDisposition::SilenceDelivered;
+        path.delivered(path.context, sequence, static_cast<std::uint8_t>(disposition), 0, 0);
+        ++run.blocks;
+        if (run.reacquired && status == kRealtimeGpuReady) {
+            if (resumed_blocks++ == 0)
+                run.resume_ns = now_ns() - fence_ns;
+            parity = parity && compare_block(output, expected_block(sequence - 1));
+            if (resumed_blocks == 8)
+                break;
+        }
+        for (int pump = 0; pump < 4; ++pump) {
+            (void)path.service(path.context, 0);
+            std::this_thread::sleep_for(std::chrono::microseconds(250));
+        }
+        if (!run.reacquired && node.recovery_reason() != ga::GpuAudioRecoveryReason::None) {
+            run.reason = node.recovery_reason();
+            run.sequence = node.recovery_sequence();
+            const auto fenced = node.status_snapshot();
+            run.state = fenced.provider_state;
+            run.status_valid = ga::validate_gpu_audio_status(fenced).accepted() &&
+                               fenced.selected_engine != ga::GpuAudioEngine::Gpu;
+            if (!reacquire)
+                break;
+            fence_ns = now_ns();
+            run.reacquired = path.reprepare(path.context, 250'000'000);
+            run.reprepare_ns = now_ns() - fence_ns;
+            if (!run.reacquired)
+                break;
+        }
+    }
+    run.resumed_with_parity = run.reacquired && resumed_blocks == 8 && parity;
+    if (run.reacquired)
+        run.epoch = node.status_snapshot().epoch;
+    const auto status = node.status_snapshot();
+    if (reacquire)
+        run.status_valid = run.status_valid && ga::validate_gpu_audio_status(status).accepted() &&
+                           status.recovery_reason == ga::GpuAudioRecoveryReason::ProviderReacquired;
+    else
+        run.state = status.provider_state;
+    run.reason_text = std::string(recovery_name(run.reason));
+    if (!node.release())
+        run.reason_text += ":release_retained";
+    return run;
+}
+
+// A GpuWaveNetSession stand-in whose create() hands out a program session
+// prepared over a faulted physical provider, so the backend reaches it through
+// the same create path as the public session.
+struct FaultedSession {
+    struct CreateResult {
+        std::unique_ptr<FaultedSession> session;
+        pulp::gpu_audio::GpuWaveNetSessionError error =
+            pulp::gpu_audio::GpuWaveNetSessionError::ProviderUnavailable;
+        explicit operator bool() const noexcept {
+            return session != nullptr && error == pulp::gpu_audio::GpuWaveNetSessionError::None;
+        }
+    };
+    static inline std::unique_ptr<SharedIoProgramSession> next;
+    static CreateResult create(const pulp::gpu_audio::GpuWaveNetSession::Config&) {
+        if (!next)
+            return {};
+        auto session = std::make_unique<FaultedSession>();
+        session->channel = std::make_unique<pulp::test::ProgramSessionChannel>(std::move(next));
+        return {std::move(session), pulp::gpu_audio::GpuWaveNetSessionError::None};
+    }
+    std::unique_ptr<pulp::test::ProgramSessionChannel> channel;
+    bool submit_block(std::span<const float> input, std::uint64_t sequence) noexcept {
+        // The outer session channel keeps the node's ticket; this shim only
+        // needs the block's sequence.
+        return channel->submit(input, admit_submission(0, sequence));
+    }
+    std::size_t service(std::uint64_t now) noexcept {
+        channel->service(now);
+        return 0;
+    }
+    std::size_t service_until(std::uint64_t deadline) noexcept {
+        channel->service_until(now_ns(), deadline);
+        return 0;
+    }
+    std::optional<pulp::gpu_audio::GpuWaveNetBlockResult>
+    receive(std::span<float> output) noexcept {
+        return channel->receive_result(output);
+    }
+    bool release() noexcept {
+        return channel->release();
+    }
+    bool device_lost() const noexcept {
+        return channel->lost();
+    }
+};
+
+// The generic neural node's WaveNet model over a physical provider with
+// `fault`: its backend creates its one session through FaultedSession at the
+// backend's default depth, and its CPU model is a silent stand-in, since the
+// GPU path is what is under test. Null, with `error` set, when unavailable.
+pulp::gpu_audio::GpuNeuralModelHandle neural_model_over(const Fixture& fixture,
+                                                        const void* proc_table,
+                                                        DawnSharedIoProvider::Fault fault,
+                                                        std::string& error) {
+    namespace ga = pulp::gpu_audio;
+    auto created = DawnSharedIoProvider::create(
+        {.expected_dawn_revision = PULP_GPU_AUDIO_EXPECTED_DAWN_SHA,
+         .proc_table_override_for_testing = proc_table,
+         .fault = fault,
+         .storage_kind = SharedIoArenaProvider::StorageKind::ImportedHostPointer});
+    if (!created.provider) {
+        error = "provider_unavailable";
+        return {};
+    }
+    auto program = DawnSharedIoWavenetProgram::create(*created.provider, fixture.spec());
+    if (!program) {
+        error = "program_unavailable";
+        return {};
+    }
+    const auto block = fixture.spec().block_size;
+    const auto bytes = block * sizeof(float);
+    auto session = std::make_unique<SharedIoProgramSession>();
+    if (!session->prepare(
+            {std::move(created.provider), std::move(program)},
+            {.slots = 2,
+             .input_bytes_per_slot = bytes,
+             .output_bytes_per_slot = bytes,
+             .storage_kind = SharedIoArenaProvider::StorageKind::ImportedHostPointer})) {
+        error = "session_prepare_failed";
+        return {};
+    }
+    static const std::array<std::uint32_t, 1> dilations{1};
+    static const ga::GpuWaveNetLayerDescriptor layer{.input_size = 1,
+                                                     .condition_size = 1,
+                                                     .channels = 1,
+                                                     .kernel = 2,
+                                                     .head_size = 1,
+                                                     .tanh_activation = true,
+                                                     .dilations = dilations};
+    // max_inflight is left at the backend's default: two for two slots.
+    auto backend = std::make_unique<WaveNetStreamingBackend>(
+        WaveNetStreamingBackend::Config{
+            .session = {.descriptor = {.block_size = block,
+                                       .sample_rate = 48000,
+                                       .stream_instances = 1,
+                                       .layers = {&layer, 1},
+                                       .weight_count = fixture.weights.size()},
+                        .weights = fixture.weights,
+                        .slots = 2},
+            .channels = 1},
+        WaveNetStreamingBackend::ChannelFactory{}, &create_session_channel<FaultedSession>);
+    FaultedSession::next = std::move(session);
+    static int silent_state = 0;
+    const NeuralCpuKernel silent{
+        .state = &silent_state,
+        .prepare = [](void*, const StreamingPrepareContext&) noexcept { return true; },
+        .process = [](void*, const float*, float* out,
+                      std::uint32_t n) noexcept { std::fill_n(out, n, 0.0f); },
+        .reset = [](void*) noexcept {},
+        .quiesce = [](void*) noexcept { return true; },
+        .release = [](void*) noexcept { return true; }};
+    NeuralModelRequest request;
+    request.family = ga::NeuralFamily::WaveNet;
+    request.manifest = {.model_id = "pulp.qualification.wavenet",
+                        .architecture = "wavenet",
+                        .model_version = "1",
+                        .artifact_id = "pulp.qualification.wavenet.weights",
+                        .artifact_sha256 =
+                            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                        .license = "MIT",
+                        .runtime = "pulp.qualification.v1",
+                        .artifact_size_bytes = 64,
+                        .sample_rate_hz = 48000,
+                        .redistributable = true};
+    request.block_size = block;
+    request.channel_kernels = {&silent, 1};
+    request.backend = std::move(backend);
+    auto build = make_neural_model(std::move(request));
+    if (!build) {
+        error = "model_rejected";
+        return {};
+    }
+    return build.model;
+}
+
+// The same physical faults behind the generic neural node, at its default
+// depth (two in flight for this ring and backend).
+NodeFaultRun run_neural_node_fault(const Fixture& fixture, const void* proc_table,
+                                   DawnSharedIoProvider::Fault fault) {
+    namespace ga = pulp::gpu_audio;
+    NodeFaultRun run;
+    const auto model = neural_model_over(fixture, proc_table, fault, run.reason_text);
+    if (!model)
+        return run;
+    ga::GpuNeuralRealtimeNode node(
+        {.family = ga::NeuralFamily::WaveNet,
+         .model = model,
+         .channels = 1,
+         .lead_blocks = 1,
+         .capacity = 4,
+         .shadow_policy = ga::GpuNeuralRealtimeNode::ShadowPolicy::Inline,
+         // As run_node_fault: the ring-sized window for a short run.
+         .watchdog_blocks = 3});
+    // The fault must hit a node that is on the GPU, not one that fell back to
+    // its CPU model. (The injected provider is not the authenticated one, so
+    // the status says Degraded; the strict Ready receipt is the public one.)
+    if (!node.prepare() || !node.gpu_kernel_available() || node.epoch() == 0 ||
+        node.recovery_reason() != ga::GpuAudioRecoveryReason::None) {
+        run.reason_text = "node_not_on_gpu";
         return run;
     }
     auto path = realtime_gpu_node_path(&node);
@@ -341,7 +809,7 @@ NodeFaultRun run_node_fault(const Fixture& fixture, const void* proc_table,
         const auto disposition =
             status == kRealtimeGpuReady     ? SharedIoDeliveryDisposition::GpuDelivered
             : status == kRealtimeGpuPriming ? SharedIoDeliveryDisposition::Priming
-                                            : SharedIoDeliveryDisposition::SilenceDelivered;
+                                            : SharedIoDeliveryDisposition::CpuFallbackDelivered;
         path.delivered(path.context, sequence, static_cast<std::uint8_t>(disposition), 0, 0);
         ++run.blocks;
         for (int pump = 0; pump < 4; ++pump) {
@@ -363,6 +831,305 @@ NodeFaultRun run_node_fault(const Fixture& fixture, const void* proc_table,
     return run;
 }
 
+constexpr std::uint64_t kAdmissionCallbacks = 24;
+// Each harness callback block takes about a millisecond (four pumps with a
+// 250 us wait), far longer than the fixture's two-sample period, so the default
+// watchdog of capacity - 1 blocks would call a few milliseconds of host
+// scheduling delay an unresponsive provider. These runs test admission faults,
+// so the window and the ring are wide enough that only a real stall latches.
+constexpr std::uint32_t kAdmissionCapacity = 16;
+constexpr std::uint32_t kAdmissionWatchdogBlocks = 12;
+
+AdmissionRun run_admission(const Fixture& fixture, const void* proc_table,
+                           const AdmissionScenario& scenario) {
+    namespace ga = pulp::gpu_audio;
+    AdmissionRun run;
+    auto created = DawnSharedIoProvider::create(
+        {.expected_dawn_revision = PULP_GPU_AUDIO_EXPECTED_DAWN_SHA,
+         .proc_table_override_for_testing = proc_table,
+         .fault = scenario.fault,
+         .fault_slot = scenario.fault_slot,
+         .storage_kind = SharedIoArenaProvider::StorageKind::ImportedHostPointer});
+    if (!created.provider) {
+        run.error = "provider_unavailable";
+        return run;
+    }
+    auto program = DawnSharedIoWavenetProgram::create(*created.provider, fixture.spec());
+    const auto bytes = fixture.spec().block_size * sizeof(float);
+    auto session = std::make_unique<SharedIoProgramSession>();
+    if (!program ||
+        !session->prepare(
+            {std::move(created.provider), std::move(program)},
+            {.slots = 2,
+             .input_bytes_per_slot = bytes,
+             .output_bytes_per_slot = bytes,
+             .storage_kind = SharedIoArenaProvider::StorageKind::ImportedHostPointer})) {
+        run.error = "session_prepare_failed";
+        return run;
+    }
+    const std::array<std::uint32_t, 1> dilations{1};
+    const ga::GpuWaveNetLayerDescriptor layer{.input_size = 1,
+                                              .condition_size = 1,
+                                              .channels = 1,
+                                              .kernel = 2,
+                                              .head_size = 1,
+                                              .tanh_activation = true,
+                                              .dilations = dilations};
+    ga::GpuWaveNetRealtimeNode::Config config{
+        .session = {.descriptor = {.block_size = fixture.spec().block_size,
+                                   .sample_rate = 48000,
+                                   .stream_instances = 1,
+                                   .layers = {&layer, 1},
+                                   .weight_count = fixture.weights.size()},
+                    .weights = fixture.weights,
+                    .slots = 2},
+        .channels = 1,
+        .lead_blocks = scenario.lead,
+        .capacity = kAdmissionCapacity,
+        .max_inflight = scenario.inflight,
+        .watchdog_blocks = kAdmissionWatchdogBlocks};
+    ga::GpuWaveNetRealtimeNode node(config);
+    std::vector<std::unique_ptr<WaveNetRealtimeChannel>> channels;
+    channels.push_back(std::make_unique<RefusalCountingChannel>(
+        std::make_unique<pulp::test::ProgramSessionChannel>(std::move(session)), run));
+    // The trace telemetry records the in-flight high-water mark.
+    (void)node.configure_trace({.enabled = true});
+    if (!WaveNetRealtimeTestAccess::prepare(node, std::move(channels))) {
+        run.error = "node_prepare_failed";
+        return run;
+    }
+    auto path = realtime_gpu_node_path(&node);
+    std::array<float, 2> input{}, output{};
+    const float* in_ptr = input.data();
+    float* out_ptr = output.data();
+    pulp::audio::BufferView<const float> in(&in_ptr, 1, 2);
+    pulp::audio::BufferView<float> out(&out_ptr, 1, 2);
+    run.ran = true;
+    for (std::uint64_t sequence = 0; sequence < kAdmissionCallbacks; ++sequence) {
+        input = {static_cast<float>(sequence), static_cast<float>(sequence) + 0.25f};
+        const auto status = path.process(path.context, in, out, 2, sequence, true, now_ns());
+        const auto disposition =
+            status == kRealtimeGpuReady     ? SharedIoDeliveryDisposition::GpuDelivered
+            : status == kRealtimeGpuPriming ? SharedIoDeliveryDisposition::Priming
+                                            : SharedIoDeliveryDisposition::SilenceDelivered;
+        path.delivered(path.context, sequence, static_cast<std::uint8_t>(disposition), 0, 0);
+        ++run.callbacks;
+        if (path.next_sequence(path.context) != sequence + 1)
+            ++run.sequence_drift;
+        run.trace += status == kRealtimeGpuReady ? 'G' : status == kRealtimeGpuPriming ? 'P' : 'S';
+        if (status == kRealtimeGpuReady) {
+            // y[n] = tanh(0.5 x[n-1]) over the whole stream, so every GPU
+            // block also checks the history carried in from the block before.
+            ++run.gpu_blocks;
+            const auto due = sequence - scenario.lead;
+            const float previous = due == 0 ? 0.0f : static_cast<float>(due - 1) + 0.25f;
+            const std::array<float, 2> expected{std::tanh(0.5f * previous),
+                                                std::tanh(0.5f * static_cast<float>(due))};
+            if (!compare_block(output, expected))
+                ++run.mismatches;
+        }
+        for (int pump = 0; sequence != scenario.skip_pump_at && pump < 4; ++pump) {
+            (void)path.service(path.context, 0);
+            std::this_thread::sleep_for(std::chrono::microseconds(250));
+        }
+        run.statuses_valid =
+            run.statuses_valid && ga::validate_gpu_audio_status(node.status_snapshot()).accepted();
+        if (run.latched_after == UINT64_MAX &&
+            node.recovery_reason() != ga::GpuAudioRecoveryReason::None)
+            run.latched_after = sequence;
+    }
+    const auto status = node.status_snapshot();
+    run.reason = status.recovery_reason;
+    run.sequence = status.recovery_sequence;
+    run.state = status.provider_state;
+    run.statuses_valid = run.statuses_valid && ga::validate_gpu_audio_status(status).accepted();
+    run.next_sequence = path.next_sequence(path.context);
+    run.in_flight_high_water = WaveNetRealtimeTestAccess::telemetry(node).in_flight_high_water;
+    run.released = node.release();
+    return run;
+}
+
+// The generic neural node at its default depth over a healthy physical
+// provider, on the admission schedule: withholding the pumps after callback
+// `skip_pump_at` leaves that block in flight when the next is admitted, so the
+// node must hold two blocks at once on Dawn, and every block the GPU delivered
+// must match the CPU reference in order.
+AdmissionRun run_neural_default_depth(const Fixture& fixture, const void* proc_table,
+                                      std::uint32_t lead, std::uint64_t skip_pump_at) {
+    namespace ga = pulp::gpu_audio;
+    AdmissionRun run;
+    const auto model =
+        neural_model_over(fixture, proc_table, DawnSharedIoProvider::Fault::None, run.error);
+    if (!model)
+        return run;
+    ga::GpuNeuralRealtimeNode node(
+        {.family = ga::NeuralFamily::WaveNet,
+         .model = model,
+         .channels = 1,
+         .lead_blocks = lead,
+         .capacity = kAdmissionCapacity,
+         .shadow_policy = ga::GpuNeuralRealtimeNode::ShadowPolicy::Inline,
+         .watchdog_blocks = kAdmissionWatchdogBlocks});
+    if (!node.prepare() || !node.gpu_kernel_available()) {
+        run.error = "node_not_on_gpu";
+        return run;
+    }
+    auto path = realtime_gpu_node_path(&node);
+    std::array<float, 2> input{}, output{};
+    const float* in_ptr = input.data();
+    float* out_ptr = output.data();
+    pulp::audio::BufferView<const float> in(&in_ptr, 1, 2);
+    pulp::audio::BufferView<float> out(&out_ptr, 1, 2);
+    run.ran = true;
+    for (std::uint64_t sequence = 0; sequence < kAdmissionCallbacks; ++sequence) {
+        input = {static_cast<float>(sequence), static_cast<float>(sequence) + 0.25f};
+        const auto status = path.process(path.context, in, out, 2, sequence, true, now_ns());
+        const auto disposition =
+            status == kRealtimeGpuReady     ? SharedIoDeliveryDisposition::GpuDelivered
+            : status == kRealtimeGpuPriming ? SharedIoDeliveryDisposition::Priming
+                                            : SharedIoDeliveryDisposition::CpuFallbackDelivered;
+        path.delivered(path.context, sequence, static_cast<std::uint8_t>(disposition), 0, 0);
+        ++run.callbacks;
+        if (path.next_sequence(path.context) != sequence + 1)
+            ++run.sequence_drift;
+        run.trace += status == kRealtimeGpuReady ? 'G' : status == kRealtimeGpuPriming ? 'P' : 'S';
+        if (status == kRealtimeGpuReady) {
+            ++run.gpu_blocks;
+            const auto due = sequence - lead;
+            const float previous = due == 0 ? 0.0f : static_cast<float>(due - 1) + 0.25f;
+            const std::array<float, 2> expected{std::tanh(0.5f * previous),
+                                                std::tanh(0.5f * static_cast<float>(due))};
+            if (!compare_block(output, expected))
+                ++run.mismatches;
+        }
+        for (int pump = 0; sequence != skip_pump_at && pump < 4; ++pump) {
+            (void)path.service(path.context, 0);
+            std::this_thread::sleep_for(std::chrono::microseconds(250));
+        }
+        run.statuses_valid =
+            run.statuses_valid && ga::validate_gpu_audio_status(node.status_snapshot()).accepted();
+        if (run.latched_after == UINT64_MAX &&
+            node.recovery_reason() != ga::GpuAudioRecoveryReason::None)
+            run.latched_after = sequence;
+    }
+    const auto status = node.status_snapshot();
+    run.reason = status.recovery_reason;
+    run.sequence = status.recovery_sequence;
+    run.state = status.provider_state;
+    run.statuses_valid = run.statuses_valid && ga::validate_gpu_audio_status(status).accepted();
+    run.next_sequence = path.next_sequence(path.context);
+    run.in_flight_high_water = NeuralRealtimeTestAccess::in_flight_high_water(node);
+    run.released = node.release();
+    return run;
+}
+
+// A refused submission must not move the device-resident stream position.
+// Blocks 0..9 run one at a time on slot 0; block 10 is left in flight so block
+// 11 lands on the refusing slot 1; block 11 is then retried on slot 0 and the
+// stream continues. Every delivered block must match the whole-stream CPU
+// reference, so a position that advanced on the refusal shows as a one-block
+// history skew from block 11 on.
+RefusalRetryRun run_refusal_retry(const Fixture& fixture, const void* proc_table) {
+    RefusalRetryRun run;
+    auto created = DawnSharedIoProvider::create(
+        {.expected_dawn_revision = PULP_GPU_AUDIO_EXPECTED_DAWN_SHA,
+         .proc_table_override_for_testing = proc_table,
+         .fault = DawnSharedIoProvider::Fault::RejectBeforeSubmit,
+         .fault_slot = 1,
+         .storage_kind = SharedIoArenaProvider::StorageKind::ImportedHostPointer});
+    if (!created.provider) {
+        run.error = "provider_unavailable";
+        return run;
+    }
+    auto& provider = *created.provider;
+    auto program = DawnSharedIoWavenetProgram::create(provider, fixture.spec());
+    SharedIoComputePlan plan;
+    const auto bytes = fixture.spec().block_size * sizeof(float);
+    if (!program ||
+        !plan.prepare(provider,
+                      {.slots = 2,
+                       .input_bytes_per_slot = bytes,
+                       .output_bytes_per_slot = bytes,
+                       .storage_kind = SharedIoArenaProvider::StorageKind::ImportedHostPointer},
+                      std::move(program))) {
+        run.error = "plan_prepare_failed";
+        return run;
+    }
+    // Returns the slot the block was leased on, and whether the provider took it.
+    struct Admitted {
+        bool leased = false;
+        bool accepted = false;
+        std::uint32_t slot = 0;
+    };
+    const auto submit = [&](std::uint64_t block) {
+        Admitted admitted;
+        auto write = plan.acquire_input(block, 0);
+        if (!write || write->bytes.size() != bytes)
+            return admitted;
+        admitted.leased = true;
+        admitted.slot = write->token.slot;
+        const std::array<float, 2> input{static_cast<float>(block),
+                                         static_cast<float>(block) + 0.25f};
+        std::copy(input.begin(), input.end(), reinterpret_cast<float*>(write->bytes.data()));
+        const SharedIoComputePlan::SubmitToken token{write->token, 0};
+        admitted.accepted = plan.submit(token);
+        if (!admitted.accepted)
+            (void)plan.cancel(token);
+        return admitted;
+    };
+    const auto collect = [&](std::uint64_t block) {
+        std::optional<SharedIoComputePlan::Completion> completion;
+        const auto deadline = Clock::now() + std::chrono::seconds(5);
+        while (!completion && Clock::now() < deadline) {
+            plan.drain(now_ns());
+            completion = plan.pop_completion();
+            if (!completion)
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        if (!completion || completion->token.slot.stream_sequence != block)
+            return false;
+        auto output = plan.acquire_output(*completion);
+        if (!output || output->bytes.size() != bytes)
+            return false;
+        const float previous = block == 0 ? 0.0f : static_cast<float>(block - 1) + 0.25f;
+        const std::array<float, 2> expected{std::tanh(0.5f * previous),
+                                            std::tanh(0.5f * static_cast<float>(block))};
+        if (!compare_block({reinterpret_cast<const float*>(output->bytes.data()), 2}, expected))
+            ++run.mismatches;
+        ++run.delivered;
+        return plan.release_output({output->token});
+    };
+    constexpr std::uint64_t kRefusedBlock = 11;
+    for (std::uint64_t block = 0; block < 16; ++block) {
+        const auto admitted = submit(block);
+        if (block == kRefusedBlock) {
+            run.refused = admitted.leased && !admitted.accepted && admitted.slot == 1;
+            if (!collect(block - 1)) {
+                run.error = "collect_failed_at_" + std::to_string(block - 1);
+                break;
+            }
+            const auto retry = submit(block);
+            run.retried = retry.accepted && retry.slot == 0;
+            if (!run.retried) {
+                run.error = "retry_failed";
+                break;
+            }
+        } else if (!admitted.accepted) {
+            run.error = "submit_failed_at_" + std::to_string(block);
+            break;
+        }
+        if (block == kRefusedBlock - 1)
+            continue; // left in flight on slot 0
+        if (!collect(block)) {
+            run.error = "collect_failed_at_" + std::to_string(block);
+            break;
+        }
+    }
+    if (!plan.release() && run.error.empty())
+        run.error = "release_failed";
+    return run;
+}
+
 void run_node_faults(Result& result, const Fixture& fixture, const void* proc_table) {
     using ga_reason = pulp::gpu_audio::GpuAudioRecoveryReason;
     using ga_state = pulp::gpu_audio::GpuAudioProviderState;
@@ -379,9 +1146,155 @@ void run_node_faults(Result& result, const Fixture& fixture, const void* proc_ta
     result.node_hang_reason = hang.reason_text;
     result.node_hang_sequence = hang.sequence;
     result.node_hang_blocks = hang.blocks;
+    const auto reacquire_loss =
+        run_node_fault(fixture, proc_table,
+                       DawnSharedIoProvider::Fault::ForceLossAfterCompletionRegistration, true);
+    result.reacquire_loss_reason = reacquire_loss.reason_text;
+    result.reacquire_loss_reprepare_ns = reacquire_loss.reprepare_ns;
+    result.reacquire_loss_resume_ns = reacquire_loss.resume_ns;
+    result.reacquire_loss_receipt = reacquire_loss.reason == ga_reason::ProviderLost &&
+                                    reacquire_loss.resumed_with_parity &&
+                                    reacquire_loss.epoch == 2 && reacquire_loss.status_valid;
+    const auto reacquire_hang =
+        run_node_fault(fixture, proc_table, DawnSharedIoProvider::Fault::DelayCompletion, true);
+    result.reacquire_hang_reason = reacquire_hang.reason_text;
+    result.reacquire_hang_reprepare_ns = reacquire_hang.reprepare_ns;
+    result.reacquire_hang_resume_ns = reacquire_hang.resume_ns;
+    result.reacquire_hang_receipt = reacquire_hang.reason == ga_reason::ProviderUnresponsive &&
+                                    reacquire_hang.resumed_with_parity &&
+                                    reacquire_hang.epoch == 2 && reacquire_hang.status_valid;
     result.node_hang_receipt = hang.ran && hang.reason == ga_reason::ProviderUnresponsive &&
                                hang.sequence == 0 && hang.state == ga_state::Unavailable &&
                                hang.status_valid;
+    // The same faults at the node's default depth (two in flight).
+    const auto loss_default =
+        run_node_fault(fixture, proc_table,
+                       DawnSharedIoProvider::Fault::ForceLossAfterCompletionRegistration, false, 0);
+    result.node_loss_default_depth_receipt =
+        loss_default.ran && loss_default.reason == ga_reason::ProviderLost &&
+        loss_default.sequence == 0 && loss_default.state == ga_state::Unavailable &&
+        loss_default.status_valid;
+    const auto hang_default =
+        run_node_fault(fixture, proc_table, DawnSharedIoProvider::Fault::DelayCompletion, false, 0);
+    result.node_hang_default_depth_receipt =
+        hang_default.ran && hang_default.reason == ga_reason::ProviderUnresponsive &&
+        hang_default.sequence == 0 && hang_default.state == ga_state::Unavailable &&
+        hang_default.status_valid;
+    result.node_default_depth_reasons = loss_default.reason_text + "/" + hang_default.reason_text +
+                                        "@" + std::to_string(loss_default.sequence) + "/" +
+                                        std::to_string(hang_default.sequence);
+    const auto neural_loss = run_neural_node_fault(
+        fixture, proc_table, DawnSharedIoProvider::Fault::ForceLossBeforeSubmit);
+    result.neural_loss_reason = neural_loss.reason_text;
+    result.neural_loss_sequence = neural_loss.sequence;
+    result.neural_loss_blocks = neural_loss.blocks;
+    result.neural_loss_receipt = neural_loss.ran && neural_loss.reason == ga_reason::ProviderLost &&
+                                 neural_loss.sequence == 0 &&
+                                 neural_loss.state == ga_state::Unavailable &&
+                                 neural_loss.status_valid;
+    const auto neural_hang =
+        run_neural_node_fault(fixture, proc_table, DawnSharedIoProvider::Fault::DelayCompletion);
+    result.neural_hang_reason = neural_hang.reason_text;
+    result.neural_hang_sequence = neural_hang.sequence;
+    result.neural_hang_blocks = neural_hang.blocks;
+    result.neural_hang_receipt =
+        neural_hang.ran && neural_hang.reason == ga_reason::ProviderUnresponsive &&
+        neural_hang.sequence == 0 && neural_hang.state == ga_state::Unavailable &&
+        neural_hang.status_valid;
+
+    using Fault = DawnSharedIoProvider::Fault;
+    constexpr auto kCallbacks = kAdmissionCallbacks;
+    const auto clean = [](const AdmissionRun& run) {
+        return run.sequence_agrees() && run.statuses_valid && run.released && run.error.empty();
+    };
+    const auto latched = [&](const AdmissionRun& run, ga_reason reason, std::uint64_t sequence,
+                             ga_state state) {
+        return clean(run) && run.reason == reason && run.sequence == sequence &&
+               run.latched_after == sequence && run.state == state;
+    };
+    // A refusal latches ProviderFailure at the refused block in the pump that
+    // saw it, so the latch names the first refused sequence.
+    const auto refused_at = [&](const AdmissionRun& run, std::uint64_t sequence) {
+        return run.refused_submits >= 1 && run.first_refused == sequence &&
+               latched(run, ga_reason::ProviderFailure, sequence, ga_state::Degraded);
+    };
+    // A late block is a miss, not a fault: a host stall of several
+    // milliseconds shows as a run of late blocks. The counts are a sanity
+    // floor; refusals, latches and parity are the properties under test.
+    constexpr std::uint64_t kLateAllowance = 10;
+    auto& healthy = result.admission_healthy;
+    healthy = run_admission(fixture, proc_table, {});
+    result.admission_healthy_receipt = clean(healthy) && healthy.reason == ga_reason::None &&
+                                       healthy.gpu_blocks + kLateAllowance >= kCallbacks - 1 &&
+                                       healthy.mismatches == 0;
+    // Loss is forced on the first submission, so it latches at 0 with no GPU
+    // block before it.
+    auto& lost = result.admission_loss;
+    lost = run_admission(fixture, proc_table, {.fault = Fault::ForceLossBeforeSubmit});
+    result.admission_loss_receipt =
+        latched(lost, ga_reason::ProviderLost, 0, ga_state::Unavailable) && lost.gpu_blocks == 0;
+    // A refusal is a provider failure, not a loss.
+    auto& reject = result.admission_reject;
+    reject = run_admission(fixture, proc_table, {.fault = Fault::RejectBeforeSubmit});
+    result.admission_reject_receipt = refused_at(reject, 0) && reject.gpu_blocks == 0;
+    // With one block in flight the node takes its next block only after the
+    // last one's slot is released, so a refusing slot 1 is never reached: the
+    // run must refuse nothing and latch nothing. A stall seen in this
+    // configuration is therefore never a refusal.
+    auto& unreachable = result.admission_reject_unreachable_slot;
+    unreachable =
+        run_admission(fixture, proc_table, {.fault = Fault::RejectBeforeSubmit, .fault_slot = 1});
+    result.admission_reject_unreachable_slot_receipt =
+        clean(unreachable) && unreachable.refused_submits == 0 &&
+        unreachable.reason == ga_reason::None &&
+        unreachable.gpu_blocks + kLateAllowance >= kCallbacks - 1 && unreachable.mismatches == 0;
+    // Withholding the pumps after callback 10 alone latches nothing, so the
+    // mid-stream run's latch belongs to the refusal.
+    const AdmissionScenario midstream{.fault = Fault::RejectBeforeSubmit,
+                                      .fault_slot = 1,
+                                      .lead = 2,
+                                      .inflight = 2,
+                                      .skip_pump_at = 10};
+    // At the node's default depth (max_inflight = 0 resolves to two here),
+    // the same schedule puts two blocks physically in flight on Dawn; every
+    // delivered block still matches the CPU reference, in order.
+    auto control_scenario = midstream;
+    control_scenario.fault = Fault::None;
+    control_scenario.inflight = 0;
+    // The generic neural node at its default depth: the same schedule must put
+    // two of its blocks in flight on Dawn, matching the CPU reference in order.
+    auto& neural_depth = result.neural_default_depth;
+    neural_depth =
+        run_neural_default_depth(fixture, proc_table, midstream.lead, midstream.skip_pump_at);
+    result.neural_default_depth_receipt =
+        clean(neural_depth) && neural_depth.reason == ga_reason::None &&
+        neural_depth.gpu_blocks + kLateAllowance >= kCallbacks - 2 &&
+        neural_depth.mismatches == 0 && neural_depth.in_flight_high_water == 2;
+    auto& control = result.admission_skip_control;
+    control = run_admission(fixture, proc_table, control_scenario);
+    result.admission_skip_control_receipt = clean(control) && control.reason == ga_reason::None &&
+                                            control.gpu_blocks + kLateAllowance >= kCallbacks - 2 &&
+                                            control.mismatches == 0 &&
+                                            control.in_flight_high_water == 2;
+    // Withholding the pumps after callback 10 makes block 11 the first
+    // admission on slot 1, unless a host stall put two blocks in flight
+    // earlier: the refusal lands on the first block slot 1 takes, at or before
+    // 11. It latches at that block; the blocks before it that the GPU
+    // delivered match the CPU reference; and no GPU block is delivered after
+    // the latch, even one accepted before it: the node fails closed.
+    auto& refused = result.admission_reject_midstream;
+    refused = run_admission(fixture, proc_table, midstream);
+    const auto at = refused.first_refused;
+    const auto last_gpu = refused.trace.find_last_of('G');
+    result.admission_reject_midstream_receipt =
+        at >= 2 && at <= 11 && refused_at(refused, at) && refused.gpu_blocks >= 1 &&
+        last_gpu != std::string::npos && last_gpu <= at && refused.mismatches == 0;
+
+    result.refusal_retry = run_refusal_retry(fixture, proc_table);
+    result.refusal_retry_receipt = result.refusal_retry.refused && result.refusal_retry.retried &&
+                                   result.refusal_retry.delivered == 16 &&
+                                   result.refusal_retry.mismatches == 0 &&
+                                   result.refusal_retry.error.empty();
 }
 
 Result run() {
@@ -476,14 +1389,13 @@ Result run() {
     // the pad plus one block: the layer-input ring is 4 columns (16 bytes) and
     // the final activation ring, which carries no history, 2 columns (8 bytes).
     // Preparation zeroes each ring once. In the target-size histogram the 16-byte
-    // bucket also holds the scale uniform, and the 8-byte bucket the two-word
-    // device stream position.
+    // bucket also holds the scale uniform and the four-word device stream state.
     const auto prepared_transfer = transfer_counter.snapshot();
     constexpr std::size_t expected_history_bytes = sizeof(float);
     result.history_transfer_contract =
         resident_history_bytes == expected_history_bytes &&
-        prepared_transfer.queue_write_buffer_target_size_histogram[16] == 2 &&
-        prepared_transfer.queue_write_buffer_target_size_histogram[8] == 2 &&
+        prepared_transfer.queue_write_buffer_target_size_histogram[16] == 3 &&
+        prepared_transfer.queue_write_buffer_target_size_histogram[8] == 1 &&
         prepared_transfer.queue_write_buffer_target_size_histogram[expected_history_bytes] == 0;
 
     transfer_counter.reset();
@@ -646,7 +1558,14 @@ int main(int argc, char** argv) {
         result.cpu_parity && result.cpu_fallback_parity && result.cpu_fallback_delivered &&
         result.late_result_rejected && result.retired && result.reprimed &&
         result.immutable_provenance && result.device_loss_negative && result.device_loss_receipt &&
-        result.node_loss_receipt && result.node_hang_receipt;
+        result.node_loss_receipt && result.node_hang_receipt && result.neural_loss_receipt &&
+        result.neural_hang_receipt && result.admission_healthy_receipt &&
+        result.admission_loss_receipt && result.admission_reject_receipt &&
+        result.admission_reject_unreachable_slot_receipt && result.admission_skip_control_receipt &&
+        result.admission_reject_midstream_receipt && result.refusal_retry_receipt &&
+        result.node_loss_default_depth_receipt && result.node_hang_default_depth_receipt &&
+        result.reacquire_loss_receipt && result.reacquire_hang_receipt &&
+        result.neural_default_depth_receipt;
     emit(result, passed ? "passed" : "failed");
     return passed ? 0 : 1;
 }

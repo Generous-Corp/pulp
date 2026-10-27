@@ -30,7 +30,10 @@ void view_editor_prewarm_scheduler(const Processor::EditorPrewarm& request) {
     copy.materialized_documents.reserve(request.materialized_documents.size());
     for (const auto document : request.materialized_documents)
         copy.materialized_documents.emplace_back(document);
-    view::prewarm_scripted_ui(std::move(copy));
+    // Through the runtime's slot, not prewarm_scripted_ui() itself: naming it
+    // here would link the script runtime into every plug-in with an editor.
+    if (auto run = view::scripted_ui_prewarm_runner().load(std::memory_order_acquire))
+        run(std::move(copy));
 }
 }  // namespace detail
 
@@ -59,15 +62,14 @@ bool safe_supports_in_place_scripted_ui_reload(Processor& processor) noexcept {
     PULP_CATCH_ALL { return false; }
 }
 
-// The editor assets declared for this processor's plug-in: its keyed bundle
-// entry when it has one, otherwise the binary's own registration.
-EditorAssets editor_assets_for_processor(Processor& processor) noexcept {
-    std::string plugin_id;
+// The processor's plug-in id, or empty when its descriptor cannot be read.
+std::string safe_plugin_id(Processor& processor) noexcept {
     PULP_TRY {
-        plugin_id = processor.descriptor().bundle_id;
+        return processor.descriptor().bundle_id;
     }
-    PULP_CATCH_ALL {}
-    return editor_assets_for(plugin_id.empty() ? nullptr : plugin_id.c_str());
+    PULP_CATCH_ALL {
+        return {};
+    }
 }
 
 ViewSize safe_view_size(Processor& processor) noexcept {
@@ -185,9 +187,14 @@ bool ViewBridge::open(std::string* error) {
         // Fall back to the scripted-UI or AutoUi default.
         auto value_channel_access =
             processor_value_channel_access(processor_, owner_alive_);
-        auto instance = build_editor_ui_for_assets(editor_assets_for_processor(processor_), store_,
-                                                   options_.enable_hot_reload, &last_error_,
-                                                   std::move(value_channel_access));
+        // The editor assets declared for this plug-in: its keyed bundle entry
+        // when it has one, otherwise the binary's own registration. The id also
+        // keys an embedded editor's persisted stores.
+        const std::string plugin_id = safe_plugin_id(processor_);
+        const auto assets = editor_assets_for(plugin_id.empty() ? nullptr : plugin_id.c_str());
+        auto instance =
+            build_editor_ui_for_assets(assets, store_, options_.enable_hot_reload, &last_error_,
+                                       std::move(value_channel_access), plugin_id);
         if (!instance.root) {
             if (error) *error = last_error_.empty() ? "ViewBridge: failed to build editor UI" : last_error_;
             return false;
@@ -208,7 +215,7 @@ bool ViewBridge::open(std::string* error) {
 
     // Tell the scripted editor where it lives, so a document can keep its
     // plain-key global shortcuts standalone-only (see EditorHostKind).
-    if (auto* session = scripted_ui()) {
+    if (view::ScriptedEditorSession* session = scripted_ui()) {
         session->set_host_kind(
             processor_.editor_host_kind() == EditorHostKind::standalone
                 ? "standalone" : "plugin");
@@ -370,7 +377,8 @@ bool ViewBridge::prepare_first_frame(view::PluginViewHost& host) {
         return false;
     PULP_TRACE_SCOPE_NAMED("render", "editor_first_frame");
     {
-        if (auto* session = scripted_ui(); session && session->document_load_pending()) {
+        if (view::ScriptedEditorSession* session = scripted_ui();
+            session && session->document_load_pending()) {
             std::string load_error;
             // Reports through the session's loaded callback either way; a
             // failure leaves the root to the processor's fail-closed path.
@@ -385,7 +393,7 @@ bool ViewBridge::prepare_first_frame(view::PluginViewHost& host) {
         const auto pump = make_editor_idle_pump(*this);
         const auto started = std::chrono::steady_clock::now();
         for (int round = 0; round < kFirstFrameSettleRounds; ++round) {
-            auto* session = scripted_ui();
+            view::ScriptedEditorSession* session = scripted_ui();
             if (!session || !session->settling())
                 break;
             if (std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
@@ -493,7 +501,7 @@ void ViewBridge::close() {
     // realm before the root goes, unless the root was released to a new owner.
     // Only while the processor lives: once it is gone, so is its session.
     if (!released_ && owner_is_alive()) {
-        if (auto* session = safe_active_scripted_ui(processor_);
+        if (view::ScriptedEditorSession* session = safe_active_scripted_ui(processor_);
             session && session->borrows_root(*view_raw_))
             session->release_root();
     }

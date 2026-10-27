@@ -228,6 +228,12 @@ xcodebuild test -project ... -scheme AUv3Tests -sdk iphonesimulator
 
 ## Gotchas (hard-won)
 
+- **`IOSGpuPluginViewHost::release_gpu_caches()` trims, it does not tear down.**
+  The AU v3 controller calls it from `viewDidDisappear:`. It runs
+  `TrimLevel::everything()` on the Skia surface and keeps the Dawn and Skia
+  surfaces, so the next appearance repaints without recreating them. A host
+  with no GPU surface treats it as a no-op.
+
 ### When the iOS compile gate runs
 
 - **Per PR and merge group, only for iOS-only surfaces.** `ios_surface` in

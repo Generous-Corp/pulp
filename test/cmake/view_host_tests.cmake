@@ -158,6 +158,34 @@ if(APPLE AND NOT PULP_IOS)
         SOURCES test_window_host_first_frame_macos.mm
         LIBRARIES pulp::view "-framework AppKit")
 endif()
+
+# The lite editor stack's plug-in view host. The executable compiles the macOS
+# plug-in host sources itself with PULP_VIEW_LITE_HOST=1 and its own ObjC
+# suffix, exactly as a LITE_EDITOR plug-in's cluster does, so its objects stand
+# in for the library's: an editor that asks for the GPU host must get the
+# CoreGraphics host and one warning, and the GPU view class must be absent.
+if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA)
+    set(_pulp_mac_view_dir ${CMAKE_SOURCE_DIR}/core/view/platform/mac)
+    pulp_add_test_suite(pulp-test-lite-editor-host-mac
+        SOURCES test_lite_editor_host_mac.mm
+            ${_pulp_mac_view_dir}/plugin_view_host_mac.mm
+            ${_pulp_mac_view_dir}/plugin_view_host_mac_text_input.mm
+            ${_pulp_mac_view_dir}/plugin_view_host_mac_drag.mm
+        LIBRARIES pulp::view "-framework AppKit"
+        COMPILE_DEFINITIONS PULP_VIEW_LITE_HOST=1 PULP_VIEW_OBJC_SUFFIX=_LiteHostTest)
+    unset(_pulp_mac_view_dir)
+    # The same face-identity table against the full and the lite text stack.
+    if(TARGET pulp-canvas-lite-objects)
+        pulp_add_test_suite(pulp-test-face-identity-full
+            SOURCES test_face_identity_stacks.cpp
+            LIBRARIES pulp::canvas
+            COMPILE_DEFINITIONS PULP_FACE_IDENTITY_LITE=0)
+        pulp_add_test_suite(pulp-test-face-identity-lite
+            SOURCES test_face_identity_stacks.cpp $<TARGET_OBJECTS:pulp-canvas-lite-objects>
+            LIBRARIES pulp::canvas
+            COMPILE_DEFINITIONS PULP_FACE_IDENTITY_LITE=1)
+    endif()
+endif()
 # Windows UIA backend — compile-gated on _WIN32 in the
 # source. The sentinel test case keeps the binary present + named
 # consistently on non-Windows hosts so ctest output stays stable.
@@ -231,6 +259,17 @@ pulp_add_test_suite(pulp-test-dirty-region-consumption GROUP pulp-test-group-vie
 # logical state, and that lets a frame which never reached the screen keep its
 # damage for the retry.
 pulp_add_test_suite(pulp-test-pending-damage GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
+
+# PendingResize: a host's resize notification runs once per frame with the
+# latest size, however many size events the frame absorbed.
+pulp_add_test_suite(pulp-test-pending-resize GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
+
+# X11ResizeEcho: the Linux plug-in host drops a ConfigureNotify older than its
+# own last XResizeWindow, so a stale echo cannot revert the size. Serial
+# arithmetic only, so it runs on every platform.
+pulp_add_test_suite(pulp-test-x11-resize-echo GROUP pulp-test-group-view-host
     LIBRARIES pulp::view)
 
 # PluginViewHost GPU-surface lifecycle notification: delayed creation (the
@@ -374,6 +413,29 @@ if(NOT IOS AND NOT ANDROID)
     add_dependencies(pulp-test-isolated-scanner
         pulp-scan-worker
         pulp-isolated-scanner-crash-helper)
+    if(PULP_HAS_CLAP)
+        # Two bundles from one source (fixtures/scan_probe_clap.cpp): the
+        # probe marks the file PULP_TEST_DLOPEN_MARKER names when it is
+        # loaded and lists one descriptor; the other aborts in
+        # clap_entry.init. Flat `.clap` files, so every platform's scanner
+        # and loader open them the same way.
+        add_library(pulp-test-fixture-clap-probe MODULE fixtures/scan_probe_clap.cpp)
+        target_link_libraries(pulp-test-fixture-clap-probe PRIVATE clap)
+        set_target_properties(pulp-test-fixture-clap-probe PROPERTIES
+            OUTPUT_NAME "PulpScanProbe" PREFIX "" SUFFIX ".clap")
+        add_library(pulp-test-fixture-clap-abort MODULE fixtures/scan_probe_clap.cpp)
+        target_link_libraries(pulp-test-fixture-clap-abort PRIVATE clap)
+        target_compile_definitions(pulp-test-fixture-clap-abort PRIVATE
+            PULP_SCAN_FIXTURE_ABORT_ON_INIT=1)
+        set_target_properties(pulp-test-fixture-clap-abort PROPERTIES
+            OUTPUT_NAME "PulpScanAbort" PREFIX "" SUFFIX ".clap")
+        target_compile_definitions(pulp-test-isolated-scanner PRIVATE
+            PULP_SCAN_FIXTURE_PROBE_CLAP="$<TARGET_FILE:pulp-test-fixture-clap-probe>"
+            PULP_SCAN_FIXTURE_ABORT_CLAP="$<TARGET_FILE:pulp-test-fixture-clap-abort>")
+        add_dependencies(pulp-test-isolated-scanner
+            pulp-test-fixture-clap-probe
+            pulp-test-fixture-clap-abort)
+    endif()
     catch_discover_tests(pulp-test-isolated-scanner)
 endif()
 # Hosted editor API
@@ -610,24 +672,33 @@ pulp_add_test_suite(pulp-test-editor-open-stages
 # editor, and the audio widgets never reach pulp::host. The source lint excludes
 # core/view/audio, whose targets own the audio-dependent headers.
 if(TARGET pulp-view-core AND TARGET pulp-view AND TARGET pulp-view-audio AND TARGET pulp-view-platform)
-    set(_pulp_view_boundary_args)
-    foreach(_pulp_view_boundary_pair
-            "pulp-view-core;PULP_VIEW_CORE_LINKS"
-            "pulp-view;PULP_VIEW_LINKS"
-            "pulp-view-native;PULP_VIEW_NATIVE_LINKS"
-            "pulp-view-platform;PULP_VIEW_PLATFORM_LINKS"
-            "pulp-view-audio;PULP_VIEW_AUDIO_LINKS")
-        list(GET _pulp_view_boundary_pair 0 _pulp_view_boundary_target)
-        list(GET _pulp_view_boundary_pair 1 _pulp_view_boundary_var)
-        get_target_property(_pulp_view_boundary_links
-            ${_pulp_view_boundary_target} LINK_LIBRARIES)
-        if(NOT _pulp_view_boundary_links)
-            set(_pulp_view_boundary_links "")
-        endif()
-        string(REPLACE ";" "|" _pulp_view_boundary_links "${_pulp_view_boundary_links}")
-        list(APPEND _pulp_view_boundary_args
-            "-D${_pulp_view_boundary_var}=${_pulp_view_boundary_links}")
-    endforeach()
+    # Each target's LINK_LIBRARIES, read after the whole configure has run so a
+    # link added by any later directory is seen. The file sets one variable per
+    # target, with the list joined by "|".
+    set(_pulp_view_boundary_links_file "${CMAKE_CURRENT_BINARY_DIR}/view-boundary-links.cmake")
+    function(_pulp_record_view_boundary_links output)
+        set(_content "")
+        foreach(_pair
+                "pulp-view-core;PULP_VIEW_CORE_LINKS"
+                "pulp-view;PULP_VIEW_LINKS"
+                "pulp-view-native;PULP_VIEW_NATIVE_LINKS"
+                "pulp-view-platform;PULP_VIEW_PLATFORM_LINKS"
+                "pulp-view-audio;PULP_VIEW_AUDIO_LINKS")
+            list(GET _pair 0 _target)
+            list(GET _pair 1 _var)
+            get_target_property(_links ${_target} LINK_LIBRARIES)
+            if(NOT _links)
+                set(_links "")
+            endif()
+            string(REPLACE ";" "|" _links "${_links}")
+            string(APPEND _content "set(${_var} [==[${_links}]==])\n")
+        endforeach()
+        file(WRITE "${output}" "${_content}")
+    endfunction()
+    cmake_language(EVAL CODE "
+        cmake_language(DEFER DIRECTORY [[${CMAKE_SOURCE_DIR}]]
+            CALL _pulp_record_view_boundary_links
+                [[${_pulp_view_boundary_links_file}]])")
     # pulp-view-audio's own INTERFACE_COMPILE_DEFINITIONS, read after the whole
     # configure has run so a definition added anywhere is seen. The only one it
     # may publish is the widgets.hpp compatibility gate; the design-import binder
@@ -657,15 +728,20 @@ if(TARGET pulp-view-core AND TARGET pulp-view AND TARGET pulp-view-audio AND TAR
     add_test(NAME pulp-view-core-audio-free
         COMMAND ${CMAKE_COMMAND}
             -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
-            ${_pulp_view_boundary_args}
+            "-DPULP_VIEW_BOUNDARY_LINKS_FILE=${_pulp_view_boundary_links_file}"
+            "-DPULP_VELLUM_POLICY=${CMAKE_SOURCE_DIR}/tools/scripts/vellum_policy.json"
             "-DPULP_VIEW_AUDIO_INTERFACE_DEFINITIONS_FILE=${_pulp_view_audio_interface_definitions_file}"
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_view_core_audio_free.cmake)
-    set_tests_properties(pulp-view-core-audio-free PROPERTIES LABELS "pr;view;gate")
+    # It reads the link and definition interfaces CMake records for these
+    # targets, not an artifact of them.
+    set_tests_properties(pulp-view-core-audio-free PROPERTIES LABELS "pr;view;gate"
+        PULP_SELECT_WITH_TARGETS "pulp-view-core;pulp-view-audio")
 endif()
 
 # The include half of the same boundary: no core/view source outside
-# core/view/audio may reach an audio, signal, host, midi or format header, or an
-# audio widget's header, in any spelling (angle, quoted, #import, relative).
+# core/view/audio may reach an audio, signal, host, midi, format, timebase,
+# graph, playback, content or sample-bank header, or an audio widget's header,
+# in any spelling (angle, quoted, #import, relative).
 # The self-test plants each spelling and must turn red.
 add_test(NAME pulp-view-core-include-boundary
     COMMAND ${Python3_EXECUTABLE}
@@ -711,8 +787,11 @@ if(TARGET pulp-view-audio AND TARGET pulp-view-core)
             "-DOSX_SYSROOT=${CMAKE_OSX_SYSROOT}"
             "-DOSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_view_audio_widgets_gate.cmake")
+    # FLAGS_FILE is generated from these targets' include and definition
+    # properties, so the test reads the targets, not an artifact of them.
     set_tests_properties(pulp-view-audio-widgets-gate PROPERTIES
-        LABELS "pr;view;gate" TIMEOUT 300)
+        LABELS "pr;view;gate" TIMEOUT 300
+        PULP_SELECT_WITH_TARGETS "${_widgets_gate_targets};pulp-view-audio")
 endif()
 
 # Explicit registration without the build-tree convenience shim: the support
@@ -758,7 +837,8 @@ if(NOT WIN32 AND TARGET pulp-view-audio AND TARGET pulp-view-script AND TARGET p
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/archive_symbol_closure_check.py"
             --nm "${CMAKE_NM}"
-            --forbidden "$<TARGET_FILE:pulp-view-audio>" --no-control
+            --forbidden "$<TARGET_FILE:pulp-view-audio>" --forbidden-defines any
+            --weak-rtti-contamination --no-control
             --check "view-core=$<TARGET_FILE:pulp-view-core>"
             --check "view-script=$<TARGET_FILE:pulp-view-script>"
             --check "design-import=$<TARGET_FILE:pulp-design-import>"
@@ -769,6 +849,14 @@ if(NOT WIN32 AND TARGET pulp-view-audio AND TARGET pulp-view-script AND TARGET p
     set_tests_properties(pulp-view-audio-symbol-floor
         pulp-view-audio-symbol-floor-negative-contract
         PROPERTIES LABELS "pr;view;gate" TIMEOUT 60)
+    # --weak-rtti-contamination reads ownership through c++filt or
+    # llvm-cxxfilt. A host with neither on PATH exits 77 and says so; a
+    # demangler that is there but reads nothing still fails.
+    set_tests_properties(pulp-view-audio-symbol-floor PROPERTIES SKIP_RETURN_CODE 77)
+    # The negative contract reads the floor's registered command back from
+    # ctest, so the flags it checks are the ones that actually run.
+    set_tests_properties(pulp-view-audio-symbol-floor-negative-contract
+        PROPERTIES ENVIRONMENT "PULP_CTEST_BUILD_DIR=${CMAKE_BINARY_DIR}")
 endif()
 
 # The platform plug-in editor hosts, the frame pipeline and the PluginViewHost

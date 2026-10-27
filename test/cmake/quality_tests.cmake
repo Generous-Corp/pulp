@@ -78,6 +78,10 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME gpu-audio-daw-continuity-v2-receipt-verifier-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/validation/test_verify_gpu_audio_daw_continuity_receipt_v2.py")
+    # 53 cases: about 45 s on an M1 and 86 s to past 120 s on a GitHub-hosted
+    # Linux runner, so it needs more than ctest's default 120 s.
+    set_tests_properties(gpu-audio-daw-continuity-v2-receipt-verifier-selftest PROPERTIES
+        TIMEOUT 300)
 
     # The GPU fault-injection test hooks never reach a build that did not ask
     # for them: the self-test plants each way in; the gate scans this tree.
@@ -128,6 +132,20 @@ if(Python3_Interpreter_FOUND)
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_foundation_include_lint.py")
     set_tests_properties(foundation-include-lint foundation-include-lint-negative-contract
+        PROPERTIES LABELS "pr" TIMEOUT 60)
+
+    # Test-only compile macros (PULP_AU_V2_TEST_HOOKS guards an AU v2 accessor
+    # that hands out a PluginViewHost*) may be defined only under test/;
+    # elsewhere a line naming one may only guard on it or comment on it.
+    # Lexical and build-free; the self-test plants each shipping-path definition.
+    add_test(NAME shipping-macro-guard
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/shipping_macro_guard.py"
+            --root "${CMAKE_SOURCE_DIR}")
+    add_test(NAME shipping-macro-guard-negative-contract
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_shipping_macro_guard.py")
+    set_tests_properties(shipping-macro-guard shipping-macro-guard-negative-contract
         PROPERTIES LABELS "pr" TIMEOUT 60)
 
     # Inheritance entries are one file per change event so concurrent pull
@@ -433,7 +451,8 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/raw_this_async_check.py" --selftest)
 
     # Thread-safe assertions: fail on a Catch2 assertion macro invoked inside a
-    # worker-thread lambda. Catch2 3.7.1's macros aren't thread-safe; off-main
+    # worker-thread lambda. Catch2's macros aren't thread-safe without
+    # CATCH_CONFIG_THREAD_SAFE_ASSERTIONS, which Pulp leaves off; off-main
     # assertions are UB that bare metal tolerates but VM scheduler timing trips.
     add_test(NAME thread-safe-assertions COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/thread_assert_check.py")
@@ -1005,6 +1024,13 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/ci/test_ccache_job_delta.py")
     set_tests_properties(ccache-job-delta-selftest PROPERTIES TIMEOUT 60)
 
+    # Which Windows jobs may store objects in a host's shared ccache: only code
+    # already on main writes, everything else reads, and an unset
+    # PULP_CCACHE_REMOTE_STORAGE writes nothing.
+    add_test(NAME ccache-remote-storage-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_ccache_remote_storage.py")
+    set_tests_properties(ccache-remote-storage-selftest PROPERTIES TIMEOUT 60)
+
     # Queue-cascade guards. A break that reaches main is amplified by the merge
     # queue: every batch inherits it, fails, ejects its innocent entries, and
     # the next batch pays again. These four cover the rules that stop that.
@@ -1057,6 +1083,12 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME base-poison-detector-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_base_poison_detector.py")
     set_tests_properties(base-poison-detector-selftest PROPERTIES TIMEOUT 120)
+    # Merge-queue circuit breaker: the PULP_QUEUE_BREAKER state, which groups
+    # it fails pre-VM, the trusted queue-unblock override, fail-open on
+    # unreadable input, and the classify/notify wiring in build.yml.
+    add_test(NAME queue-breaker-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_queue_breaker.py")
+    set_tests_properties(queue-breaker-selftest PROPERTIES TIMEOUT 60)
 
     # ODR macro-gated-header guard. A macro-gated inline/template function in a
     # header, plus a TU that redefines that macro, is an ODR violation a Release
@@ -1613,6 +1645,16 @@ if(Python3_Interpreter_FOUND)
     # assigns. Pure file fixtures in a temporary directory.
     add_test(NAME fold-migration-notes-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_fold_migration_notes.py")
+
+    # A pull request may not add docs/migrations/vX.Y.Z.md by hand; only the
+    # version-at-land bump commit adds one. Throwaway git ranges.
+    add_test(NAME migration-note-guard-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_migration_note_guard.py")
+
+    # The build-free pre-push stand-in for script-test-inputs-drift: a new
+    # script-driven add_test needs a ctest_script_inputs.json entry.
+    add_test(NAME script-inputs-precheck-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_script_inputs_precheck.py")
 
     # GitHub's itemTypes-filtered timelineItems connection reports totalCount
     # over EVERY timeline item, so a filtered totalCount reads a never-queued

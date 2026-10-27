@@ -146,5 +146,46 @@ if(_hit LESS 0)
         "Generated array does not include the appended 0xff sentinel.")
 endif()
 
-message(STATUS "encode_binary_data.py: encoder, idempotency, "
-               "and regeneration smoke all pass.")
+# 4. --compress zlib: compressed symbols plus the inflated size, and the stored
+# stream inflates back to the input byte for byte. ----------------------------
+set(_zout "${_work}/asset_zlib.cpp")
+execute_process(
+    COMMAND "${Python3_EXECUTABLE}" "${_encoder}"
+            --src "${_input}" --out "${_zout}"
+            --namespace "binary_data_fixture" --var "asset_bin" --compress zlib
+    RESULT_VARIABLE _rc ERROR_VARIABLE _stderr)
+if(NOT _rc EQUAL 0)
+    message(FATAL_ERROR "encode_binary_data.py --compress zlib failed (rc=${_rc}): ${_stderr}")
+endif()
+file(READ "${_zout}" _zgenerated)
+foreach(_needle
+        "extern const unsigned char asset_bin_zlib[] = {"
+        "extern const std::size_t asset_bin_zlib_size = "
+        "extern const std::size_t asset_bin_size = 101;")
+    string(FIND "${_zgenerated}" "${_needle}" _hit)
+    if(_hit LESS 0)
+        message(FATAL_ERROR "Compressed output missing: ${_needle}\n${_zgenerated}")
+    endif()
+endforeach()
+string(FIND "${_zgenerated}" "unsigned char asset_bin[]" _hit)
+if(NOT _hit LESS 0)
+    message(FATAL_ERROR "Compressed output still declares the raw asset_bin array.")
+endif()
+execute_process(
+    COMMAND "${Python3_EXECUTABLE}" -c
+"import re, sys, zlib, pathlib
+src = pathlib.Path(sys.argv[1]).read_text()
+body = src.split('asset_bin_zlib[] = {', 1)[1].split('};', 1)[0]
+stream = bytes(int(h, 16) for h in re.findall(r'0x([0-9a-f]{2})', body))
+size = int(re.search(r'asset_bin_zlib_size = (\\d+);', src).group(1))
+assert len(stream) == size, (len(stream), size)
+assert zlib.decompress(stream) == pathlib.Path(sys.argv[2]).read_bytes()
+"
+            "${_zout}" "${_input}"
+    RESULT_VARIABLE _rc ERROR_VARIABLE _stderr)
+if(NOT _rc EQUAL 0)
+    message(FATAL_ERROR "Compressed stream does not inflate to the input: ${_stderr}")
+endif()
+
+message(STATUS "encode_binary_data.py: encoder, idempotency, regeneration "
+               "and compression smoke all pass.")

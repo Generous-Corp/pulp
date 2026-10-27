@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 77,
+  "manifest_revision": 83,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -9844,6 +9844,27 @@
             ]
           }
         ],
+        "classic_reverb.hpp": [
+          {
+            "class": "ClassicReverbT",
+            "qualified_name": "pulp::signal::ClassicReverbT",
+            "template": "typename SampleType = float",
+            "methods": [
+              "prepare(double sample_rate, int max_block_size)",
+              "reset()",
+              "set_mode(Mode mode)",
+              "set_parameter(Param p, double value)",
+              "parameter(Param p)",
+              "combs_silent()",
+              "snap_parameters()",
+              "latency_samples()",
+              "comb_length(int comb)",
+              "comb_gain(int comb)",
+              "process_block(const SampleType* in_l, const SampleType* in_r, SampleType* out_l, SampleType* out_r, int n)"
+            ],
+            "enums": []
+          }
+        ],
         "comb_filter.hpp": [
           {
             "class": "CombFilterSampleResult",
@@ -9926,6 +9947,8 @@
               "process(SampleType* buffer, int num_samples)",
               "reset()",
               "set_params(const Params& p)",
+              "set_ballistics(CompressorBallistics ballistics)",
+              "ballistics()",
               "set_sample_rate(SampleType sr)",
               "set_sidechain_hpf_hz(SampleType hz)",
               "sidechain_hpf_hz()",
@@ -9937,7 +9960,13 @@
               "attack_coefficient()",
               "release_coefficient()",
               "gain_reduction_db()",
-              "gain_reduction()"
+              "gain_reduction()",
+              "detector_level_db(SampleType detector)",
+              "gain_computer_db(SampleType input_db, const Params& params)",
+              "ballistic_coefficient(SampleType time_ms, SampleType sample_rate)",
+              "branching_step(SampleType envelope, SampleType target, SampleType attack, SampleType release)",
+              "decoupled_hold(SampleType hold, SampleType target, SampleType release)",
+              "db_to_gain(SampleType db)"
             ],
             "enums": []
           },
@@ -9978,6 +10007,22 @@
           }
         ],
         "convolver_messages.hpp": [
+          {
+            "class": "ConvolverSpectrumArenaT",
+            "qualified_name": "pulp::signal::ConvolverSpectrumArenaT",
+            "template": "typename SampleType = float",
+            "methods": [
+              "stride_for(std::size_t bins)",
+              "assign(std::size_t count, std::size_t bins)",
+              "size()",
+              "empty()",
+              "bins()",
+              "stride()",
+              "footprint_bytes()",
+              "fill_zero()"
+            ],
+            "enums": []
+          },
           {
             "class": "ConvolverIrSwapperT",
             "qualified_name": "pulp::signal::ConvolverIrSwapperT",
@@ -11434,8 +11479,13 @@
               "sin_cycles(float phase_cycles)",
               "sin_cycles(float phase_cycles, FastTrigProfile profile)",
               "tanh(float x)",
+              "tanh_clamp(float x)",
               "tanh_accurate(float x)",
               "tanh_accurate_rational(float x, float u)",
+              "tanh_minimax(float x)",
+              "tanh_minimax(const float* input, float* output, std::size_t count)",
+              "tanh_minimax_rational(T x)",
+              "tanh_minimax_recursive(float x)",
               "sin(float x)",
               "cos(float x)",
               "exp2(float x)",
@@ -11461,12 +11511,16 @@
             "qualified_name": "pulp::signal::fdn::AllpassStage",
             "template": "typename SampleType = float",
             "methods": [
-              "prepare(int max_delay_samples)",
+              "prepare(int max_delay_samples, std::size_t stagger = 0)",
               "reset()",
               "process(SampleType x, SampleType g)",
               "process(SampleType x, SampleType g, double fractional_delay)",
               "set_delay(int samples)",
-              "delay()"
+              "delay()",
+              "line()",
+              "process_block(SampleType* x, int n, SampleType g)",
+              "run(SampleType* __restrict x, const SampleType* __restrict delayed, SampleType* __restrict stored, int n, SampleType g)",
+              "process_block(SampleType* x, int n, SampleType g, const double* delays)"
             ],
             "enums": []
           },
@@ -11475,13 +11529,20 @@
             "qualified_name": "pulp::signal::fdn::AllpassCascade",
             "template": "typename SampleType = float",
             "methods": [
-              "prepare(double max_base_ms, double max_sample_rate, int num_stages)",
+              "prepare(double max_base_ms, double max_sample_rate, int num_stages, std::size_t stagger = 0)",
               "reset()",
               "process(SampleType x, SampleType g)",
               "configure(double base_ms, double sample_rate, int offset_samples)",
               "num_stages()",
+              "stage(int s)",
               "total_delay()",
-              "process_fluttered(SampleType x, SampleType g, double lfo, double depth)"
+              "min_delay()",
+              "process_block(SampleType* x, int n, SampleType g)",
+              "process_block_fluttered(SampleType* x, int n, SampleType g, const double* lfo, double depth)",
+              "process_fluttered(SampleType x, SampleType g, double lfo, double depth)",
+              "spans4(int n, SampleType** delayed, SampleType** stored)",
+              "commit4(int n)",
+              "run_spans4(SampleType* x, int n, SampleType g, SampleType* const* d, SampleType* const* o)"
             ],
             "enums": []
           }
@@ -11504,11 +11565,26 @@
             "qualified_name": "pulp::signal::fdn::FracDelayT",
             "template": "typename SampleType = float",
             "methods": [
-              "prepare(int max_delay_samples)",
+              "prepare(int max_delay_samples, std::size_t stagger = 0)",
               "reset()",
               "max_delay()",
               "push(SampleType x)",
               "read(int delay)",
+              "read_at(int ahead, int delay)",
+              "copy_out(int ahead, int delay, SampleType* dst, int n)",
+              "push_block(const SampleType* x, int n)",
+              "push_strided(const SampleType* x, std::size_t stride, int n)",
+              "taps_at(std::size_t start)",
+              "read_hermite_at(int ahead, double delay)",
+              "read_hermite_span(const double* delays, SampleType* out, int n, int behind = 0)",
+              "read_hermite_span(double delay, SampleType* out, int n, int behind = 0)",
+              "data()",
+              "size()",
+              "mask()",
+              "write_index()",
+              "mirror_samples()",
+              "skip(int n)",
+              "advance(int n)",
               "read(double delay)"
             ],
             "enums": []
@@ -11538,7 +11614,8 @@
               "set_band(int index, const EqBand& band)",
               "band(int index)",
               "configure(double tank_rate)",
-              "worst_case_boost()"
+              "worst_case_boost()",
+              "active_bands()"
             ],
             "enums": []
           },
@@ -11551,7 +11628,12 @@
               "process(int channel, SampleType x)",
               "configure(double tank_rate, double depth_db)",
               "tick_control(int samples_elapsed)",
-              "worst_case_boost()"
+              "worst_case_boost()",
+              "coefficients(int channel)",
+              "load_lanes(Lanes& l)",
+              "store_lanes(const Lanes& l)",
+              "process_lanes(Lanes& l, lanes::F4 (&v)[kNumChannels / 4])",
+              "heal()"
             ],
             "enums": []
           }
@@ -11593,6 +11675,22 @@
             "enums": []
           },
           {
+            "class": "QuadratureBank",
+            "qualified_name": "pulp::signal::fdn::QuadratureBank",
+            "template": "int N",
+            "methods": [
+              "reset(int i, double phase)",
+              "restart()",
+              "set_rate(int i, double hz, double sample_rate)",
+              "tick()",
+              "sin(int i)",
+              "cos(int i)",
+              "sin_data()",
+              "position(int i)"
+            ],
+            "enums": []
+          },
+          {
             "class": "DelayModulationBank",
             "qualified_name": "pulp::signal::fdn::DelayModulationBank",
             "template": null,
@@ -11600,7 +11698,7 @@
               "reset()",
               "configure(double tank_rate)",
               "step_walks()",
-              "tick(int channel)"
+              "tick(double* out)"
             ],
             "enums": []
           }
@@ -11641,6 +11739,50 @@
             "enums": []
           },
           {
+            "class": "StereoPositionRing",
+            "qualified_name": "pulp::signal::fdn::StereoPositionRing",
+            "template": "typename SampleType = float",
+            "methods": [
+              "prepare(int capacity)",
+              "reset()",
+              "push(lanes::D2 x)",
+              "written()",
+              "readable_through()",
+              "read(double position)"
+            ],
+            "enums": []
+          },
+          {
+            "class": "StereoSection",
+            "qualified_name": "pulp::signal::fdn::StereoSection",
+            "template": null,
+            "methods": [
+              "from(const BiquadCoefficientsT<double>& c)"
+            ],
+            "enums": []
+          },
+          {
+            "class": "StereoSectionLanes",
+            "qualified_name": "pulp::signal::fdn::StereoSectionLanes",
+            "template": null,
+            "methods": [
+              "from(const StereoSection& s)"
+            ],
+            "enums": []
+          },
+          {
+            "class": "StereoBiquadState",
+            "qualified_name": "pulp::signal::fdn::StereoBiquadState",
+            "template": "int Sections",
+            "methods": [
+              "reset()",
+              "process(const StereoSection* sections, lanes::D2 x)",
+              "process(const StereoSectionLanes* sections, lanes::D2 x)",
+              "heal()"
+            ],
+            "enums": []
+          },
+          {
             "class": "MultirateBridge",
             "qualified_name": "pulp::signal::fdn::MultirateBridge",
             "template": "typename SampleType = float",
@@ -11651,6 +11793,8 @@
               "tank_rate()",
               "resampling()",
               "interpolation_skew_samples()",
+              "input_read_position()",
+              "output_read_position()",
               "tank_input(int rail)",
               "tank_output(int rail)",
               "host_to_tank(const SampleType* left, const SampleType* right, int n)",
@@ -11683,6 +11827,8 @@
               "reset()",
               "process(double magnitude)",
               "configure(double sample_rate)",
+              "process_block(SampleType* l, SampleType* r, int n)",
+              "heal()",
               "fast_envelope()",
               "slow_envelope()"
             ],
@@ -11696,7 +11842,8 @@
               "prepare(double max_sample_rate)",
               "reset()",
               "process(SampleType& l, SampleType& r)",
-              "configure(double sample_rate)"
+              "configure(double sample_rate)",
+              "process_block(SampleType* l, SampleType* r, int n)"
             ],
             "enums": []
           }
@@ -11719,7 +11866,8 @@
               "loop_drive()",
               "worst_case_boost()",
               "target_delay_samples(int channel)",
-              "update_controls(const TankControls& c)"
+              "update_controls(const TankControls& c)",
+              "process_block(const SampleType* in_l, const SampleType* in_r, SampleType* out_l, SampleType* out_r, int n)"
             ],
             "enums": []
           }
@@ -11740,6 +11888,8 @@
               "set_active_channels(int n)",
               "set_flux_depth_db(double db)",
               "set_flutter(bool on)",
+              "set_tier(fdn::Tier tier)",
+              "tier()",
               "latency_samples()",
               "interpolation_skew_samples()",
               "tank_rate()",
@@ -11863,11 +12013,13 @@
             "methods": [
               "size()",
               "ready()",
+              "vdsp_split_offset_bytes(bool real_transform)",
               "forward(std::complex<SampleType>* data)",
               "inverse(std::complex<SampleType>* data)",
               "forward_real(const SampleType* input, std::complex<SampleType>* output)",
               "real_bins()",
-              "forward_real_half(const SampleType* input, std::complex<SampleType>* output, SampleType scale = SampleType{1})",
+              "forward_real_half(const SampleType* input, std::complex<SampleType>* output, SampleType scale)",
+              "forward_real_half(const SampleType* input, std::complex<SampleType>* output)",
               "inverse_real_half(const std::complex<SampleType>* input, SampleType* output, SampleType scale)",
               "inverse_real_half(const std::complex<SampleType>* input, SampleType* output)",
               "magnitude_db(const std::complex<SampleType>* freq, SampleType* out, int num_bins)",
@@ -11876,14 +12028,12 @@
             "enums": []
           },
           {
-            "class": "ConvolverT",
-            "qualified_name": "pulp::signal::ConvolverT",
-            "template": "typename SampleType = float",
+            "class": "FftRealSplit",
+            "qualified_name": "pulp::signal::detail::FftRealSplit",
+            "template": null,
             "methods": [
-              "process(SampleType input)",
-              "process(const SampleType* input, SampleType* output, int num_samples)",
-              "reset()",
-              "load_ir(const SampleType* ir, int ir_length, int block_size = 0)"
+              "constexpr(std::is_same_v<SampleType, float>)",
+              "checked_capacity_product(fft_size, kVdspFftSetupChargeBytesPerPoint, target_max_bytes, bytes)"
             ],
             "enums": []
           }
@@ -12016,12 +12166,34 @@
             "methods": [
               "process(SampleType input)",
               "process(SampleType* data, int num_samples)",
+              "process(const SampleType* input, SampleType* output, int num_samples)",
               "reset()",
               "set_coefficients(std::vector<SampleType> coeffs)",
               "order()",
               "coefficients()",
               "lowpass(int num_taps, SampleType cutoff_hz, SampleType sample_rate)",
               "highpass(int num_taps, SampleType cutoff_hz, SampleType sample_rate)"
+            ],
+            "enums": []
+          }
+        ],
+        "fixed_ir_convolver.hpp": [
+          {
+            "class": "FixedIrConvolverT",
+            "qualified_name": "pulp::signal::FixedIrConvolverT",
+            "template": "typename SampleType = float",
+            "methods": [
+              "process(const SampleType* input, SampleType* output, std::size_t num_samples)",
+              "reset()",
+              "load_ir(const SampleType* ir, std::size_t ir_length, std::size_t block_size)",
+              "load_ir(const SampleType* ir, std::size_t ir_length, std::size_t block_size, ConvolutionBackend engine)",
+              "choose_backend(std::size_t ir_length, std::size_t block_size)",
+              "direct_fir_limit(std::size_t block_size)",
+              "is_loaded()",
+              "block_size()",
+              "latency()",
+              "block_size_violations()",
+              "backend()"
             ],
             "enums": []
           }
@@ -12636,13 +12808,16 @@
             "enums": []
           },
           {
-            "class": "HalfBandIirStage",
-            "qualified_name": "pulp::signal::detail::HalfBandIirStage",
-            "template": "typename SampleType",
+            "class": "HalfBandIirStageT",
+            "qualified_name": "pulp::signal::HalfBandIirStageT",
+            "template": "typename SampleType = float",
             "methods": [
               "reset()",
               "configure(const HalfBandIirDesign& design)",
               "coefficient_count()",
+              "sections_a()",
+              "sections_b()",
+              "configured()",
               "upsample(const SampleType* input, SampleType* output, std::size_t n)",
               "downsample(const SampleType* input, SampleType* output, std::size_t n)"
             ],
@@ -12657,6 +12832,7 @@
               "process(SampleType x, SampleType& out_lo, SampleType& out_hi)",
               "sections_a()",
               "sections_b()",
+              "configured()",
               "process_block(std::span<const SampleType> input, std::span<SampleType> output)"
             ],
             "enums": []
@@ -12670,6 +12846,7 @@
               "process(SampleType in_lo, SampleType in_hi)",
               "sections_a()",
               "sections_b()",
+              "configured()",
               "process_block(std::span<const SampleType> input, std::span<SampleType> output)"
             ],
             "enums": []
@@ -13731,31 +13908,22 @@
             "template": "typename SampleType = float",
             "methods": [
               "prepare(double sample_rate, int num_channels)",
+              "prepare(double sample_rate, int num_channels, const LoudnessChannelRole* roles, MeterFeatures features)",
               "prepare(double sample_rate, int num_channels, const LoudnessChannelRole* roles)",
               "process(const SampleType* const* channels, int num_channels, int num_samples)",
               "reset()",
+              "features()",
               "snapshot()",
               "loudness_supported()"
             ],
             "enums": []
           },
           {
-            "class": "Biquad",
-            "qualified_name": "pulp::signal::Biquad",
+            "class": "Section",
+            "qualified_name": "pulp::signal::Section",
             "template": null,
             "methods": [
-              "process(double x)",
-              "reset()"
-            ],
-            "enums": []
-          },
-          {
-            "class": "KWeighting",
-            "qualified_name": "pulp::signal::KWeighting",
-            "template": null,
-            "methods": [
-              "process(double x)",
-              "reset()"
+              "from(const LoudnessBiquadCoefficients& c)"
             ],
             "enums": []
           }
@@ -14320,6 +14488,20 @@
             ]
           }
         ],
+        "overlap_add_convolver.hpp": [
+          {
+            "class": "ConvolverT",
+            "qualified_name": "pulp::signal::ConvolverT",
+            "template": "typename SampleType = float",
+            "methods": [
+              "process(SampleType input)",
+              "process(const SampleType* input, SampleType* output, int num_samples)",
+              "reset()",
+              "load_ir(const SampleType* ir, int ir_length, int block_size = 0)"
+            ],
+            "enums": []
+          }
+        ],
         "oversampling.hpp": [
           {
             "class": "OversamplerT",
@@ -14341,6 +14523,7 @@
               "latency_samples()",
               "group_delay_samples(double frequency)",
               "polyphase_stage_design(Quality quality, int stage)",
+              "polyphase_stopband_db(Quality quality)",
               "process_block(const SampleType* input, SampleType* output, std::size_t num_samples, Callback&& callback)"
             ],
             "enums": [
@@ -14402,6 +14585,31 @@
               "upsample(SampleType input, SampleType& even, SampleType& odd)",
               "downsample(SampleType even, SampleType odd)",
               "taps()"
+            ],
+            "enums": []
+          },
+          {
+            "class": "FixedOrderFirBranch",
+            "qualified_name": "pulp::signal::detail::FixedOrderFirBranch",
+            "template": "typename SampleType",
+            "methods": [
+              "reset()",
+              "process(const SampleType* input, SampleType* output, std::size_t n)",
+              "set_coefficients(const std::vector<SampleType>& time_order)",
+              "taps()"
+            ],
+            "enums": []
+          },
+          {
+            "class": "LinearPhaseOversamplingBlockStage2x",
+            "qualified_name": "pulp::signal::detail::LinearPhaseOversamplingBlockStage2x",
+            "template": "typename SampleType",
+            "methods": [
+              "reset()",
+              "configure(double passband_edge_fraction, double stopband_db, std::size_t taps)",
+              "taps()",
+              "upsample(const SampleType* input, SampleType* output, std::size_t n)",
+              "downsample(const SampleType* input, SampleType* output, std::size_t n)"
             ],
             "enums": []
           }
@@ -15133,7 +15341,19 @@
             "methods": [
               "f(SaturatorShape shape, double u)",
               "df(SaturatorShape shape, double u)",
-              "antiderivative(SaturatorShape shape, double u)"
+              "antiderivative(SaturatorShape shape, double u)",
+              "second_antiderivative(SaturatorShape shape, double u)",
+              "tanh_second_antiderivative(double u)"
+            ],
+            "enums": []
+          },
+          {
+            "class": "SaturatorAdaa2",
+            "qualified_name": "pulp::signal::SaturatorAdaa2",
+            "template": null,
+            "methods": [
+              "reset(SaturatorShape shape, double previous, double before)",
+              "step(SaturatorShape shape, double u)"
             ],
             "enums": []
           },
@@ -15160,6 +15380,7 @@
               "set_mix(double wet01)",
               "set_output_trim_db(double db)",
               "latency_samples()",
+              "group_delay_samples()",
               "worst_case_gain()",
               "shaped(double x)"
             ],
@@ -15178,7 +15399,8 @@
                 [
                   "adaa",
                   "oversample_2x",
-                  "off"
+                  "off",
+                  "adaa2"
                 ]
               ]
             ]

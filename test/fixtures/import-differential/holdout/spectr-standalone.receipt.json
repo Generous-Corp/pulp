@@ -1,0 +1,214 @@
+{
+  "schema": "pulp-importer-differential-holdout-receipt-v1",
+  "fixture": "spectr-standalone.html",
+  "source_sha256": "7ae6f1d807f2f356b8473d9e672a95535adbe7affea58af360f9ac5c211daf9e",
+  "source_bytes": 1860417,
+  "campaign": {
+    "command": "analyze-corpus",
+    "runs": 3,
+    "cache_state": "unknown",
+    "pulp_commit": "42b835074bc05f910f39cb1e7dd4b3fbbd514d08",
+    "host_class": "macOS arm64",
+    "viewport": {
+      "width": 1280,
+      "height": 800
+    }
+  },
+  "determinism": {
+    "status": "fail",
+    "completed_runs": 3,
+    "varying_digests": [
+      "browser_capture_canonical_sha256",
+      "browser_screenshot_sha256",
+      "native_capture_canonical_sha256",
+      "native_render_sha256"
+    ],
+    "stable_digests": {
+      "source_sha256": "7ae6f1d807f2f356b8473d9e672a95535adbe7affea58af360f9ac5c211daf9e",
+      "importer_sha256": "bd6132a08d06c8058bedf210685644acd5a54feb99285c1079863b50798d9658",
+      "observer_sha256": "c9e6e193574ba1f8e40f433b6acbaeac2d822d6134b227d1da3eb16eb392b7de",
+      "browser_build_hash": "@d0c02bfad08ec92a6ffcf989e53cd995e6381a4c",
+      "browser_snapshot_semantic_sha256": "be0266665041a4721b72267fe90db546da1299467efd4be1d6f373d5ed9d7497",
+      "native_snapshot_semantic_sha256": "be0266665041a4721b72267fe90db546da1299467efd4be1d6f373d5ed9d7497",
+      "native_layout_sha256": "c60eb45771cc431f607c25b150638d53350993cd9879f5a1a2b959aede3f7dd2",
+      "native_render_receipt_sha256": "53b38302d30a5490d975c6505becc31ca72cdfff5821495871a7766b73819527",
+      "platform_fonts_sha256": "86a43a37ca34732035a80ebad85708de0ef0cf1822df9057970329de00efb822"
+    }
+  },
+  "runs": [
+    {
+      "run": 1,
+      "status": "completed",
+      "digests": {
+        "source_sha256": "7ae6f1d807f2f356b8473d9e672a95535adbe7affea58af360f9ac5c211daf9e",
+        "importer_sha256": "bd6132a08d06c8058bedf210685644acd5a54feb99285c1079863b50798d9658",
+        "observer_sha256": "c9e6e193574ba1f8e40f433b6acbaeac2d822d6134b227d1da3eb16eb392b7de",
+        "browser_build_hash": "@d0c02bfad08ec92a6ffcf989e53cd995e6381a4c",
+        "browser_capture_canonical_sha256": "2435a729651c33c03f22498c756888b271763b9b276c669908fce8b1c206f515",
+        "native_capture_canonical_sha256": "b73c8cf1ee4c59d03df0861240e976c3696f6d3eeefee01274f552a3e8b63280",
+        "browser_snapshot_semantic_sha256": "be0266665041a4721b72267fe90db546da1299467efd4be1d6f373d5ed9d7497",
+        "native_snapshot_semantic_sha256": "be0266665041a4721b72267fe90db546da1299467efd4be1d6f373d5ed9d7497",
+        "browser_screenshot_sha256": "f8ae8deedf19e60764ff3989d50089ac2c0a1b1e3020cb2f8cad0629cb00078e",
+        "native_render_sha256": "9515c4dffb88db7ee6a5fa864db322cf9a83265986a6dd48a380f2b11179c499",
+        "native_layout_sha256": "c60eb45771cc431f607c25b150638d53350993cd9879f5a1a2b959aede3f7dd2",
+        "native_render_receipt_sha256": "53b38302d30a5490d975c6505becc31ca72cdfff5821495871a7766b73819527",
+        "platform_fonts_sha256": "86a43a37ca34732035a80ebad85708de0ef0cf1822df9057970329de00efb822"
+      },
+      "device_scale_factor": 2,
+      "scores": {
+        "structure": 0.07947,
+        "structure_incorrect_parentage": 69,
+        "structure_missing": 1,
+        "structure_extra": 0,
+        "geometry": 0.999999,
+        "geometry_gate_ok": true,
+        "geometry_gate_failed": [],
+        "registered_geometry_mean": 0.999999,
+        "registered_geometry_max_abs_delta": 0.000504,
+        "typography": 1.0,
+        "visual": 0.988044,
+        "visual_registered": 0.988044,
+        "visual_full_frame": 0.988044
+      },
+      "classification": "browser-required",
+      "threshold_eligible": false,
+      "unsupported_dynamic_features": [
+        "async_initialization",
+        "canvas",
+        "conditional_rendering",
+        "javascript_evaluation",
+        "webgl"
+      ],
+      "support_boundaries": [
+        {
+          "boundary": "ua-default-form-chrome",
+          "control_count": 1,
+          "foreground_error_share": 0.002556
+        }
+      ],
+      "reasons": [
+        "unsupported dynamic features: async_initialization, canvas, conditional_rendering, javascript_evaluation, javascript_evaluation, webgl",
+        "support boundary ua-default-form-chrome: 1 control(s), 0.3% of scored foreground error",
+        "structural score below 0.990",
+        "visual score below 0.995",
+        "full-frame visual 0.988 below 0.995 and classified unexplained"
+      ]
+    },
+    {
+      "run": 2,
+      "status": "completed",
+      "digests": {
+        "source_sha256": "7ae6f1d807f2f356b8473d9e672a95535adbe7affea58af360f9ac5c211daf9e",
+        "importer_sha256": "bd6132a08d06c8058bedf210685644acd5a54feb99285c1079863b50798d9658",
+        "observer_sha256": "c9e6e193574ba1f8e40f433b6acbaeac2d822d6134b227d1da3eb16eb392b7de",
+        "browser_build_hash": "@d0c02bfad08ec92a6ffcf989e53cd995e6381a4c",
+        "browser_capture_canonical_sha256": "2b2db72aa4bbb7d6ddc2a3580d22e435b7061fe8e9652e0585e48ff8f7302b23",
+        "native_capture_canonical_sha256": "35206503e9609004c143972b3bce37817220eace2a336f65b4eb46af25ee01fd",
+        "browser_snapshot_semantic_sha256": "be0266665041a4721b72267fe90db546da1299467efd4be1d6f373d5ed9d7497",
+        "native_snapshot_semantic_sha256": "be0266665041a4721b72267fe90db546da1299467efd4be1d6f373d5ed9d7497",
+        "browser_screenshot_sha256": "144ab09b608114841125306565bcc259bc365c6ac0a39f4e264d2805716b2e28",
+        "native_render_sha256": "3fc6440f62f8111b804c380bf209869b7652407306bf223a74d1c3ba45d14761",
+        "native_layout_sha256": "c60eb45771cc431f607c25b150638d53350993cd9879f5a1a2b959aede3f7dd2",
+        "native_render_receipt_sha256": "53b38302d30a5490d975c6505becc31ca72cdfff5821495871a7766b73819527",
+        "platform_fonts_sha256": "86a43a37ca34732035a80ebad85708de0ef0cf1822df9057970329de00efb822"
+      },
+      "device_scale_factor": 2,
+      "scores": {
+        "structure": 0.07947,
+        "structure_incorrect_parentage": 69,
+        "structure_missing": 1,
+        "structure_extra": 0,
+        "geometry": 0.999999,
+        "geometry_gate_ok": true,
+        "geometry_gate_failed": [],
+        "registered_geometry_mean": 0.999999,
+        "registered_geometry_max_abs_delta": 0.000504,
+        "typography": 1.0,
+        "visual": 0.986861,
+        "visual_registered": 0.986861,
+        "visual_full_frame": 0.986861
+      },
+      "classification": "browser-required",
+      "threshold_eligible": false,
+      "unsupported_dynamic_features": [
+        "async_initialization",
+        "canvas",
+        "conditional_rendering",
+        "javascript_evaluation",
+        "webgl"
+      ],
+      "support_boundaries": [
+        {
+          "boundary": "ua-default-form-chrome",
+          "control_count": 1,
+          "foreground_error_share": 0.002285
+        }
+      ],
+      "reasons": [
+        "unsupported dynamic features: async_initialization, canvas, conditional_rendering, javascript_evaluation, javascript_evaluation, webgl",
+        "support boundary ua-default-form-chrome: 1 control(s), 0.2% of scored foreground error",
+        "structural score below 0.990",
+        "visual score below 0.995",
+        "full-frame visual 0.987 below 0.995 and classified unexplained"
+      ]
+    },
+    {
+      "run": 3,
+      "status": "completed",
+      "digests": {
+        "source_sha256": "7ae6f1d807f2f356b8473d9e672a95535adbe7affea58af360f9ac5c211daf9e",
+        "importer_sha256": "bd6132a08d06c8058bedf210685644acd5a54feb99285c1079863b50798d9658",
+        "observer_sha256": "c9e6e193574ba1f8e40f433b6acbaeac2d822d6134b227d1da3eb16eb392b7de",
+        "browser_build_hash": "@d0c02bfad08ec92a6ffcf989e53cd995e6381a4c",
+        "browser_capture_canonical_sha256": "abef1404128d87bde5ccedfade88d0e0ec7ee2257876ca0532c72af4ee395d7e",
+        "native_capture_canonical_sha256": "35f890eede32c591c0c94c8b2a1401a1335a941a9b72145f064df0e3129162b0",
+        "browser_snapshot_semantic_sha256": "be0266665041a4721b72267fe90db546da1299467efd4be1d6f373d5ed9d7497",
+        "native_snapshot_semantic_sha256": "be0266665041a4721b72267fe90db546da1299467efd4be1d6f373d5ed9d7497",
+        "browser_screenshot_sha256": "5893267b76336912da41e7812515579a26eb2e7ad7270bd18443ae453a6f15b9",
+        "native_render_sha256": "fe14fc0f79b6015f3b8cc50cdb65187560bc6c8a716f26a91bbb99fcfb4e9089",
+        "native_layout_sha256": "c60eb45771cc431f607c25b150638d53350993cd9879f5a1a2b959aede3f7dd2",
+        "native_render_receipt_sha256": "53b38302d30a5490d975c6505becc31ca72cdfff5821495871a7766b73819527",
+        "platform_fonts_sha256": "86a43a37ca34732035a80ebad85708de0ef0cf1822df9057970329de00efb822"
+      },
+      "device_scale_factor": 2,
+      "scores": {
+        "structure": 0.07947,
+        "structure_incorrect_parentage": 69,
+        "structure_missing": 1,
+        "structure_extra": 0,
+        "geometry": 0.999999,
+        "geometry_gate_ok": true,
+        "geometry_gate_failed": [],
+        "registered_geometry_mean": 0.999999,
+        "registered_geometry_max_abs_delta": 0.000504,
+        "typography": 1.0,
+        "visual": 0.985418,
+        "visual_registered": 0.985418,
+        "visual_full_frame": 0.985418
+      },
+      "classification": "browser-required",
+      "threshold_eligible": false,
+      "unsupported_dynamic_features": [
+        "async_initialization",
+        "canvas",
+        "conditional_rendering",
+        "javascript_evaluation",
+        "webgl"
+      ],
+      "support_boundaries": [
+        {
+          "boundary": "ua-default-form-chrome",
+          "control_count": 1,
+          "foreground_error_share": 0.002089
+        }
+      ],
+      "reasons": [
+        "unsupported dynamic features: async_initialization, canvas, conditional_rendering, javascript_evaluation, javascript_evaluation, webgl",
+        "support boundary ua-default-form-chrome: 1 control(s), 0.2% of scored foreground error",
+        "structural score below 0.990",
+        "visual score below 0.995",
+        "full-frame visual 0.985 below 0.995 and classified unexplained"
+      ]
+    }
+  ]
+}

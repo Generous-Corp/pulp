@@ -9,6 +9,7 @@
 #ifdef PULP_HAS_SKIA
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <pulp/canvas/image_file_cache.hpp>
 #include <pulp/canvas/skia_canvas.hpp>
 #include <pulp/runtime/crypto.hpp>
@@ -20,7 +21,11 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -49,10 +54,25 @@ struct CacheDefaults {
         auto& cache = ImageFileCache::instance();
         cache.set_enabled(true);
         cache.set_capacity(32);
+        cache.set_byte_budget(ImageFileCache::kDefaultFileByteBudget);
         cache.set_inline_byte_budget(ImageFileCache::kDefaultInlineByteBudget);
+        cache.set_clock_for_testing(nullptr);
         cache.clear();
     }
 };
+
+// A clock the test advances by hand, installed as the cache's time source.
+struct ManualClock {
+    std::chrono::steady_clock::time_point now{};
+    ManualClock() {
+        ImageFileCache::instance().set_clock_for_testing([this] { return now; });
+    }
+    void advance(std::chrono::milliseconds by) {
+        now += by;
+    }
+};
+
+constexpr std::size_t kMiB = 1024u * 1024u;
 
 // One frame of a panel: ten file images, then @p inline_count distinct
 // inline images. With @p inline_in_path_pool the inline images go through
@@ -645,6 +665,8 @@ TEST_CASE("ImageFileCache: disabled always rebuilds and stores nothing",
 
 TEST_CASE("ImageFileCache: null build result is not stored (no poisoning)",
           "[canvas][image-cache][issue-6223]") {
+    CacheDefaults restore;
+    ManualClock clock;
     auto& cache = ImageFileCache::instance();
     cache.clear();
     cache.reset_stats();
@@ -659,6 +681,8 @@ TEST_CASE("ImageFileCache: null build result is not stored (no poisoning)",
     REQUIRE(miss == nullptr);
     REQUIRE(cache.stats().size == 0);   // failure not cached
 
+    // Once the failure memo expires, the next lookup builds again.
+    clock.advance(ImageFileCache::kFailureRetryDelay + std::chrono::milliseconds(1));
     std::atomic<int> ok_builds{0};
     auto ok = [&]() -> sk_sp<SkImage> { ++ok_builds; return make_dummy_image(); };
     auto good = cache.get_or_build("/tmp/flaky.png", backend, ok);
@@ -688,6 +712,312 @@ TEST_CASE("ImageFileCache: LRU capacity evicts oldest",
 
     cache.set_capacity(32);  // restore default
     cache.clear();
+}
+
+TEST_CASE("ImageFileCache: capacity() reads back the entry cap", "[canvas][image-cache]") {
+    auto& cache = ImageFileCache::instance();
+    const auto original = cache.capacity();
+    cache.set_capacity(7);
+    CHECK(cache.capacity() == 7);
+    // A zero cap is stored as one entry, and the getter reports what is stored.
+    cache.set_capacity(0);
+    CHECK(cache.capacity() == 1);
+    cache.set_capacity(original);
+    CHECK(cache.capacity() == original);
+}
+
+TEST_CASE("File pool stays within its byte budget, evicting least recently used",
+          "[canvas][image-cache][byte-budget]") {
+    CacheDefaults restore;
+    auto& cache = ImageFileCache::instance();
+    cache.clear();
+    cache.reset_stats();
+    cache.set_enabled(true);
+    cache.set_byte_budget(16 * kMiB);
+    // 2048x1024 N32 rasters: 8 MiB of pixels each.
+    auto build = [] { return make_image(2048, 1024); };
+
+    for (const char* path : {"/tmp/a.png", "/tmp/b.png", "/tmp/c.png"})
+        REQUIRE(cache.get_or_build(path, nullptr, build) != nullptr);
+    auto stats = cache.stats();
+    CHECK(stats.size == 2);
+    CHECK(stats.bytes == 16 * kMiB);
+    CHECK(stats.bytes <= cache.byte_budget());
+
+    // The first key was evicted and rebuilds; the newest two still hit.
+    cache.get_or_build("/tmp/c.png", nullptr, build);
+    CHECK(cache.stats().hits == 1);
+    cache.get_or_build("/tmp/a.png", nullptr, build);
+    CHECK(cache.stats().builds == 4);
+    CHECK(cache.stats().bytes <= 16 * kMiB);
+}
+
+TEST_CASE("File pool keeps a lone image larger than its byte budget",
+          "[canvas][image-cache][byte-budget]") {
+    CacheDefaults restore;
+    auto& cache = ImageFileCache::instance();
+    cache.clear();
+    cache.reset_stats();
+    cache.set_enabled(true);
+    cache.set_byte_budget(16 * kMiB);
+    cache.get_or_build("/tmp/small.png", nullptr, [] { return make_image(16, 16); });
+    REQUIRE(cache.stats().size == 1);
+
+    // A 24 MiB backdrop under a 16 MiB budget is returned and retained alone,
+    // so repainting it every frame is a hit rather than a decode per frame.
+    // The inline pool's rule (build uncached) is covered below.
+    int backdrop_builds = 0;
+    auto backdrop = [&] {
+        ++backdrop_builds;
+        return make_image(2048, 3072);
+    };
+    for (int frame = 0; frame < 3; ++frame)
+        REQUIRE(cache.get_or_build("/tmp/backdrop.png", nullptr, backdrop) != nullptr);
+    CHECK(backdrop_builds == 1);
+    const auto stats = cache.stats();
+    CHECK(stats.size == 1);
+    CHECK(stats.hits == 2);
+    CHECK(stats.bytes == 24 * kMiB);
+
+    // Shrinking the budget still keeps the newest entry.
+    cache.set_byte_budget(1);
+    CHECK(cache.stats().size == 1);
+    cache.get_or_build("/tmp/backdrop.png", nullptr, backdrop);
+    CHECK(backdrop_builds == 1);
+}
+
+TEST_CASE("Inline pool still builds an over-budget image uncached",
+          "[canvas][image-cache][byte-budget][inline-image]") {
+    CacheDefaults restore;
+    auto& cache = ImageFileCache::instance();
+    cache.clear();
+    cache.reset_stats();
+    cache.set_enabled(true);
+    cache.set_byte_budget(16 * kMiB);
+    cache.set_inline_byte_budget(16 * kMiB);
+
+    // The same 24 MiB image as the path-pool case: the inline pool's rule is
+    // unchanged by the path pool's keep-newest rule.
+    for (int frame = 0; frame < 2; ++frame)
+        REQUIRE(cache.get_or_build_inline("backdrop", nullptr, 0,
+                                          [] { return make_image(2048, 3072); }) != nullptr);
+    const auto stats = cache.inline_stats();
+    CHECK(stats.over_budget == 2);
+    CHECK(stats.builds == 2);
+    CHECK(stats.size == 0);
+    CHECK(stats.bytes == 0);
+}
+
+TEST_CASE("A failed build is remembered for the retry window",
+          "[canvas][image-cache][failure-memo]") {
+    CacheDefaults restore;
+    ManualClock clock;
+    auto& cache = ImageFileCache::instance();
+    cache.set_enabled(true);
+    const bool inline_pool = GENERATE(false, true);
+    CAPTURE(inline_pool);
+
+    int calls = 0;
+    bool succeed = false;
+    auto build = [&]() -> sk_sp<SkImage> {
+        ++calls;
+        return succeed ? make_dummy_image() : nullptr;
+    };
+    auto lookup = [&] {
+        return inline_pool ? cache.get_or_build_inline("corrupt", nullptr, 16, build)
+                           : cache.get_or_build("/tmp/corrupt.png", nullptr, build);
+    };
+    cache.clear();
+    cache.reset_stats();
+
+    // A second of frames at 60 Hz builds the failing key once.
+    for (int frame = 0; frame < 60; ++frame)
+        CHECK(lookup() == nullptr);
+    CHECK(calls == 1);
+
+    // After the retry window the key builds again, and fails again.
+    clock.advance(std::chrono::milliseconds(1100));
+    CHECK(lookup() == nullptr);
+    CHECK(calls == 2);
+    CHECK(lookup() == nullptr);
+    CHECK(calls == 2);
+
+    // clear() drops the memo.
+    cache.clear();
+    CHECK(lookup() == nullptr);
+    CHECK(calls == 3);
+
+    // A build that succeeds after the window is cached; the next lookup hits.
+    succeed = true;
+    clock.advance(std::chrono::milliseconds(1100));
+    CHECK(lookup() != nullptr);
+    CHECK(calls == 4);
+    CHECK(lookup() != nullptr);
+    CHECK(calls == 4);
+}
+
+TEST_CASE("clear_backend drops only that backend's failure records",
+          "[canvas][image-cache][failure-memo]") {
+    CacheDefaults restore;
+    ManualClock clock;
+    auto& cache = ImageFileCache::instance();
+    cache.clear();
+    cache.reset_stats();
+    cache.set_enabled(true);
+    const void* gpu_a = reinterpret_cast<const void*>(0xFA11);
+    const void* gpu_b = reinterpret_cast<const void*>(0xFA12);
+
+    int calls = 0;
+    auto failing = [&]() -> sk_sp<SkImage> {
+        ++calls;
+        return nullptr;
+    };
+    for (const void* backend : {gpu_a, gpu_b}) {
+        cache.get_or_build("/tmp/broken.png", backend, failing);
+        cache.get_or_build_inline("broken", backend, 16, failing);
+    }
+    REQUIRE(calls == 4);
+
+    cache.clear_backend(gpu_a);
+    for (const void* backend : {gpu_a, gpu_b}) {
+        cache.get_or_build("/tmp/broken.png", backend, failing);
+        cache.get_or_build_inline("broken", backend, 16, failing);
+    }
+    CHECK(calls == 6); // only backend A's two keys built again
+}
+
+TEST_CASE("File images drawn every frame stay cached when a frame exceeds the byte budget",
+          "[canvas][image-cache][byte-budget]") {
+    CacheDefaults restore;
+    auto& cache = ImageFileCache::instance();
+    cache.clear();
+    cache.reset_stats();
+    cache.set_enabled(true);
+    // Four 6 MiB layers (30% of the budget each) drawn in the same order every
+    // frame, the shape of an imported panel's full-frame chrome and canvases.
+    cache.set_byte_budget(20 * kMiB);
+    const void* backend = reinterpret_cast<const void*>(0xF8A3E);
+    auto build = [] { return make_image(1024, 1536); };
+
+    for (int frame = 0; frame < 10; ++frame) {
+        cache.begin_frame(backend);
+        for (int layer = 0; layer < 4; ++layer)
+            REQUIRE(cache.get_or_build("/tmp/layer-" + std::to_string(layer) + ".png", backend,
+                                       build) != nullptr);
+    }
+    const auto stats = cache.stats();
+    CHECK(stats.builds == 4);
+    CHECK(stats.hits == 36);
+    CHECK(stats.size == 4);
+    CHECK(stats.bytes == 24 * kMiB); // over budget for the frame, not evicting it
+}
+
+TEST_CASE("File images not drawn this frame are evicted to the byte budget",
+          "[canvas][image-cache][byte-budget]") {
+    CacheDefaults restore;
+    auto& cache = ImageFileCache::instance();
+    cache.clear();
+    cache.reset_stats();
+    cache.set_enabled(true);
+    cache.set_byte_budget(16 * kMiB);
+    const void* backend = reinterpret_cast<const void*>(0xF8A3F);
+    auto build = [] { return make_image(2048, 1024); }; // 8 MiB
+
+    cache.begin_frame(backend);
+    cache.get_or_build("/tmp/a.png", backend, build);
+    cache.get_or_build("/tmp/b.png", backend, build);
+    // The next frame draws b and a new c: a, from the earlier frame only,
+    // is evicted and the pool is back within its budget.
+    cache.begin_frame(backend);
+    cache.get_or_build("/tmp/b.png", backend, build);
+    cache.get_or_build("/tmp/c.png", backend, build);
+    auto stats = cache.stats();
+    CHECK(stats.size == 2);
+    CHECK(stats.bytes == 16 * kMiB);
+    CHECK(stats.builds == 3);
+    cache.get_or_build("/tmp/b.png", backend, build);
+    CHECK(cache.stats().builds == 3);
+    cache.get_or_build("/tmp/a.png", backend, build);
+    CHECK(cache.stats().builds == 4);
+
+    // A frame that drew three images overshoots; the next frame's first
+    // build trims what that frame no longer draws.
+    cache.begin_frame(backend);
+    for (const char* path : {"/tmp/a.png", "/tmp/b.png", "/tmp/c.png"})
+        cache.get_or_build(path, backend, build);
+    CHECK(cache.stats().bytes == 24 * kMiB);
+    cache.begin_frame(backend);
+    cache.get_or_build("/tmp/d.png", backend, build);
+    CHECK(cache.stats().size == 2);
+    CHECK(cache.stats().bytes == 16 * kMiB);
+}
+
+TEST_CASE("A failed file build is retried as soon as the file changes",
+          "[canvas][image-cache][failure-memo]") {
+    CacheDefaults restore;
+    ManualClock clock;
+    auto& cache = ImageFileCache::instance();
+    cache.clear();
+    cache.reset_stats();
+    cache.set_enabled(true);
+    const auto path =
+        (std::filesystem::temp_directory_path() / "pulp-image-cache-memo-test.png").string();
+    std::filesystem::remove(path);
+
+    // Stands in for a decode: a missing file or one reading "corrupt" fails.
+    int calls = 0;
+    auto build = [&]() -> sk_sp<SkImage> {
+        ++calls;
+        std::ifstream in(path, std::ios::binary);
+        std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        return !in || bytes == "corrupt" ? nullptr : make_dummy_image();
+    };
+    auto write = [&](const std::string& bytes) {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out << bytes;
+    };
+
+    CHECK(cache.get_or_build(path, nullptr, build) == nullptr); // missing
+    CHECK(cache.get_or_build(path, nullptr, build) == nullptr);
+    CHECK(calls == 1);
+
+    write("corrupt"); // appears inside the window: retried at once
+    CHECK(cache.get_or_build(path, nullptr, build) == nullptr);
+    CHECK(calls == 2);
+    CHECK(cache.get_or_build(path, nullptr, build) == nullptr);
+    CHECK(calls == 2);
+
+    write("a fixed image"); // fixed inside the window: retried and cached
+    CHECK(cache.get_or_build(path, nullptr, build) != nullptr);
+    CHECK(calls == 3);
+    CHECK(cache.get_or_build(path, nullptr, build) != nullptr);
+    CHECK(calls == 3);
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("CPU raster frames are independent of GPU backend frames",
+          "[canvas][image-cache][byte-budget]") {
+    CacheDefaults restore;
+    auto& cache = ImageFileCache::instance();
+    cache.clear();
+    cache.reset_stats();
+    cache.set_enabled(true);
+    cache.set_byte_budget(20 * kMiB);
+    const void* gpu = reinterpret_cast<const void*>(0xF8A40);
+    auto build = [] { return make_image(1024, 1536); }; // 6 MiB
+
+    // A GPU window starting its frames between the raster frame's draws does
+    // not end the raster frame: the null key has its own generation.
+    for (int frame = 0; frame < 10; ++frame) {
+        cache.begin_frame(nullptr);
+        for (int layer = 0; layer < 4; ++layer) {
+            cache.begin_frame(gpu);
+            cache.get_or_build("/tmp/raster-layer-" + std::to_string(layer) + ".png", nullptr,
+                               build);
+        }
+    }
+    CHECK(cache.stats().builds == 4);
+    CHECK(cache.stats().hits == 36);
 }
 
 #endif // PULP_HAS_SKIA

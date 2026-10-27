@@ -4,12 +4,22 @@
 #include "detail/gpu_convolver_test_access.hpp"
 #include "detail/realtime_gpu_audio_path.hpp"
 #include "detail/staged_async_trace_ledger.hpp"
+#include "detail/worker_pipeline_hosting.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <limits>
 #include <utility>
 
 namespace pulp::gpu_audio {
+
+// Defined before the constructors, which make_unique the staged state.
+struct GpuConvolver::SharedIoState {};
+
+struct GpuConvolver::StagedReadbackState {
+    GpuConvolverStagedBreaker breaker{};
+    std::atomic<std::uint8_t> reason{0};
+};
 
 GpuConvolver::GpuConvolver(uint32_t channels, uint32_t block_size, uint32_t sample_rate,
                            std::vector<float> impulse_response)
@@ -19,9 +29,51 @@ GpuConvolver::GpuConvolver(uint32_t channels, uint32_t block_size, uint32_t samp
 GpuConvolver::GpuConvolver(uint32_t channels, uint32_t block_size, uint32_t sample_rate,
                            std::vector<float> impulse_response, uint32_t latency_blocks)
     : channels_(channels), block_(block_size), sample_rate_(sample_rate),
-      latency_blocks_(latency_blocks), ir_(std::move(impulse_response)) {}
+      latency_blocks_(latency_blocks), ir_(std::move(impulse_response)),
+      staged_readback_(std::make_unique<StagedReadbackState>()) {}
 
-struct GpuConvolver::SharedIoState {};
+std::uint64_t GpuConvolver::staged_cpu_blocks() const noexcept {
+    return 0;
+}
+
+std::uint64_t GpuConvolver::staged_gpu_blocks() const noexcept {
+    return 0;
+}
+
+std::uint64_t GpuConvolver::staged_breaker_trips() const noexcept {
+    return 0;
+}
+
+GpuAudioRecoveryReason GpuConvolver::staged_latched_reason() const noexcept {
+    return static_cast<GpuAudioRecoveryReason>(
+        staged_readback_->reason.load(std::memory_order_acquire));
+}
+
+bool GpuConvolver::configure_staged_breaker(const GpuConvolverStagedBreaker& config) noexcept {
+    if (prepared_ || config.trip_after_misses == 0 || config.probe_interval_blocks == 0 ||
+        config.recover_after_hits == 0)
+        return false;
+    staged_readback_->breaker = config;
+    return true;
+}
+
+GpuConvolverStagedBreaker GpuConvolver::staged_breaker() const noexcept {
+    return staged_readback_->breaker;
+}
+
+// No staged device exists in this build: the staged GPU path never runs, so
+// its helpers have nothing to do and nothing is ever latched.
+bool GpuConvolver::wait_staged_readback(StagedReadbackState&, float*) {
+    return false;
+}
+
+void GpuConvolver::submit_staged_readback(StagedReadbackState&, std::size_t) {}
+
+void GpuConvolver::configure_staged_pipeline() {}
+
+void GpuConvolver::latch_staged_recovery(GpuAudioRecoveryReason) noexcept {}
+
+void GpuConvolver::update_staged_breaker(StagedReadbackState&, bool) noexcept {}
 
 GpuConvolver::~GpuConvolver() = default;
 
@@ -71,17 +123,14 @@ bool GpuConvolver::prepare() {
     prepared_ = false;
     if (provider_policy_ == ProviderPolicy::SharedRequired)
         return false;
-    if (channels_ == 0 || block_ == 0 || ir_.empty() || latency_blocks_ == 0 ||
+    if (channels_ == 0 || block_ == 0 || sample_rate_ == 0 || ir_.empty() || latency_blocks_ == 0 ||
         latency_blocks_ > kMaxLatencyBlocks)
         return false;
 
-    // The fallback is a signal::PartitionedConvolver loaded at `block_`, and
-    // load_ir() rounds a non-power-of-two block UP to the next power of two for
-    // its radix-2 FFT. It would then be partitioned for a block size the
-    // transport never delivers, so every block would be a block-size violation.
-    // Here that is fatal rather than degrading: with no render backend the
-    // fallback is the ONLY audio path, so the node would emit nothing but
-    // silence. Refuse to prepare instead.
+    // The GPU transport and its prepared CPU fallback both require the exact
+    // host block size. Keep rejecting non-power-of-two blocks: the no-render
+    // path is the only audio path, so silently normalizing a callback size
+    // would turn every block into a fail-closed violation.
     if ((block_ & (block_ - 1u)) != 0u)
         return false;
 
@@ -110,11 +159,20 @@ void GpuConvolver::process_block(const audio::BufferView<const float>& input,
 
 // No staged device or shared session exists in this build, so nothing is ever
 // latched and no shared health sample is available.
+bool GpuConvolver::bind_realtime_path(detail::RealtimeGpuNodeBinding&) noexcept {
+    return false; // the staged CPU worker is the only path in this build
+}
+
 GpuAudioRecoveryReason GpuConvolver::staged_recovery_reason() const noexcept {
     return GpuAudioRecoveryReason::None;
 }
 
 bool GpuConvolver::realtime_shared_io_health(const void*, detail::RealtimeGpuHealth&) noexcept {
+    return false;
+}
+
+bool GpuConvolver::set_realtime_shared_io_notifier(void*,
+                                                   detail::SharedIoCompletionNotifier) noexcept {
     return false;
 }
 
@@ -164,6 +222,10 @@ bool GpuConvolver::fenced() const noexcept {
     return status_snapshot().provider_state == GpuAudioProviderState::Uninitialized;
 }
 
+std::uint64_t GpuConvolver::sanitized_input_samples() const noexcept {
+    return 0;
+}
+
 GpuMultiConvolver::GpuMultiConvolver(uint32_t block_size, uint32_t sample_rate,
                                      std::vector<std::vector<float>> irs)
     : block_(block_size), sample_rate_(sample_rate), irs_(std::move(irs)),
@@ -187,6 +249,23 @@ GpuAudioNodeDescriptor GpuMultiConvolver::descriptor() const {
 std::string GpuMultiConvolver::backend() const {
     return {};
 }
+
+bool GpuMultiConvolver::device_lost() const noexcept {
+    return false;
+}
+
+bool GpuMultiConvolver::prepare_on(std::unique_ptr<render::GpuCompute>) {
+    prepared_ = false;
+    gpu_.reset();
+    return false;
+}
+
+namespace detail {
+bool prepare_gpu_multi_convolver_with(GpuMultiConvolver&,
+                                      std::unique_ptr<render::GpuCompute>) noexcept {
+    return false;
+}
+} // namespace detail
 
 bool GpuMultiConvolver::prepare() {
     prepared_ = false;

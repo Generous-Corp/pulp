@@ -104,6 +104,21 @@ function(pulp_wire_android_sources)
             target_sources(pulp-midi PRIVATE
                 ${_android_midi_dir}/android_midi.cpp
             )
+            # Nothing in libpulp.so calls these JNI entry points, so a static
+            # link drops android_midi.cpp's object and Java's first MIDI device
+            # callback throws UnsatisfiedLinkError. Force-reference them, as
+            # core/midi does for the BLE-MIDI natives: that keeps exactly this
+            # object, where --whole-archive would pull every pulp-midi object.
+            # tools/scripts/check_android_jni_exports.py proves every native
+            # the app declares is exported.
+            foreach(_android_midi_jni_symbol IN ITEMS
+                Java_com_pulp_midi_PulpMidiManager_nativeOnDeviceAdded
+                Java_com_pulp_midi_PulpMidiManager_nativeOnDeviceRemoved
+                Java_com_pulp_midi_PulpMidiManager_nativeOnMidiReceived
+                Java_com_pulp_midi_PulpMidiService_nativeOnVirtualMidiReceived)
+                target_link_options(pulp-midi INTERFACE
+                    "-Wl,--undefined=${_android_midi_jni_symbol}")
+            endforeach()
         endif()
         # AMidi NDK library — only available at API 29+. For minSdk 26, we use
         # the Java MIDI API via JNI instead. Only link amidi if building for API 29+.

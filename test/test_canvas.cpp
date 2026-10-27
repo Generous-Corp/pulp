@@ -931,16 +931,16 @@ TEST_CASE("SDF chart refuses and names every shape it cannot chart",
           "[canvas][sdf][shader]") {
     // A shape whose chart main() would mark invalid must be refused at install
     // with its own name, not accepted and then silently reported `valid = 0`
-    // at every fragment. flat_arc is the one shape the chart is derived for.
+    // at every fragment. A quadratic Bezier has no closed-form arc length and
+    // stays refused alongside the filled shapes.
     struct Case { Canvas::SDFShape shape; const char* name; };
     const Case refused[] = {
         {Canvas::SDFShape::arc, "arc"},
-        {Canvas::SDFShape::ring, "ring"},
-        {Canvas::SDFShape::stadium, "stadium"},
-        {Canvas::SDFShape::flat_segment, "flat_segment"},
-        {Canvas::SDFShape::rounded_segment, "rounded_segment"},
         {Canvas::SDFShape::quadratic_bezier, "quadratic_bezier"},
         {Canvas::SDFShape::circle, "circle"},
+        {Canvas::SDFShape::rect, "rect"},
+        {Canvas::SDFShape::rounded_rect, "rounded_rect"},
+        {Canvas::SDFShape::cross, "cross"},
     };
     for (const auto& c : refused) {
         const auto error = Canvas::compile_sdf_chart_sksl(
@@ -953,16 +953,260 @@ TEST_CASE("SDF chart refuses and names every shape it cannot chart",
         REQUIRE(error.find(c.name) != std::string::npos);
     }
 
-    // Control: the one charted shape must still compile, or the check above
+    // Control: every charted shape must still compile, or the check above
     // would pass simply because every shape is refused.
-    const auto ok = Canvas::compile_sdf_chart_sksl(
-        Canvas::SDFShape::flat_arc,
-        "half4 shade(PulpChart g) { return half4(g.t, abs(g.d), g.valid, 1); }");
+    const Case charted[] = {
+        {Canvas::SDFShape::flat_arc, "flat_arc"},
+        {Canvas::SDFShape::ring, "ring"},
+        {Canvas::SDFShape::flat_segment, "flat_segment"},
+        {Canvas::SDFShape::rounded_segment, "rounded_segment"},
+        {Canvas::SDFShape::stadium, "stadium"},
+    };
+    for (const auto& c : charted) {
+        const auto ok = Canvas::compile_sdf_chart_sksl(
+            c.shape, "half4 shade(PulpChart g) { return half4(g.t, abs(g.d), g.valid, 1); }");
+        INFO("shape " << c.name << " error=" << ok);
+        REQUIRE(ok.find("no stroke chart") == std::string::npos);
 #ifdef PULP_HAS_SKIA
-    INFO("flat_arc error=" << ok);
-    REQUIRE(ok.empty());
+        REQUIRE(ok.empty());
+#endif
+    }
+}
+
+#ifdef PULP_HAS_SKIA
+namespace {
+// Renders a chart shader that encodes the chart into colour and reads it back.
+// The draw sits at (0.5, 0.5), so pixel (i, j) samples the chart at
+// p = (i - w/2, j - h/2) exactly and the probe points below land on whole
+// pixels. Channels: r = t, g = cross / halfWidth mapped to 0..1, b = d /
+// halfWidth mapped so the centre line reads 0 and an edge 0.5, a = 1.
+struct ChartProbe {
+    sk_sp<SkSurface> surface;
+    bool drawn = false;
+
+    ChartProbe(Canvas::SDFShape shape, int w, int h, const Canvas::SDFStyle& style,
+               const char* shade =
+                   "half4 shade(PulpChart g) { "
+                   "float hw = max(g.halfWidth, 0.0001); "
+                   "return half4(half(g.t), half(clamp(g.cross / hw * 0.5 + 0.5, 0.0, 1.0)), "
+                   "half(clamp(g.d / hw * 0.5 + 0.5, 0.0, 1.0)), 1); }") {
+        surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(w, h));
+        REQUIRE(surface != nullptr);
+        surface->getCanvas()->clear(SK_ColorTRANSPARENT);
+        SkiaCanvas canvas(surface->getCanvas());
+        drawn = canvas.draw_sdf_shape_with_shader(shape, 0.5f, 0.5f, static_cast<float>(w),
+                                                  static_cast<float>(h), style, shade, {});
+    }
+    // Channel value in 0..1 at pixel (i, j).
+    float channel(int i, int j, int which) const {
+        SkPixmap pixels;
+        REQUIRE(surface->peekPixels(&pixels));
+        const SkColor c = pixels.getColor(i, j);
+        const unsigned v = which == 0   ? SkColorGetR(c)
+                           : which == 1 ? SkColorGetG(c)
+                                        : SkColorGetB(c);
+        return static_cast<float>(v) / 255.0f;
+    }
+    float t(int i, int j) const {
+        return channel(i, j, 0);
+    }
+    float cross(int i, int j) const {
+        return channel(i, j, 1) * 2.0f - 1.0f;
+    } // / halfWidth
+    float d(int i, int j) const {
+        return channel(i, j, 2) * 2.0f - 1.0f;
+    } // / halfWidth
+};
+
+constexpr float kChartTol = 0.02f;
+} // namespace
+#endif
+
+TEST_CASE("SDF chart: segments and stadium chart t along and cross across",
+          "[canvas][sdf][shader][chart]") {
+#ifdef PULP_HAS_SKIA
+    // 128 x 32: the centre line is row 16 and runs to |p.x| = halfLen.
+    struct Case {
+        Canvas::SDFShape shape;
+        const char* name;
+        float stroke;
+        int x0, x1;      // pixels where t is 0 and 1
+        int top, bottom; // rows of the +halfWidth and -halfWidth edges
+    };
+    const Case cases[] = {
+        // halfSize.x = 62; stroke 16 puts the edges 8 rows off the centre.
+        {Canvas::SDFShape::flat_segment, "flat_segment", 16.0f, 2, 126, 8, 24},
+        {Canvas::SDFShape::rounded_segment, "rounded_segment", 16.0f, 2, 126, 8, 24},
+        // The pill's radius is halfSize.y = 14, leaving halfLen 62 - 14 = 48.
+        {Canvas::SDFShape::stadium, "stadium", 0.0f, 16, 112, 2, 30},
+    };
+    for (const auto& c : cases) {
+        INFO("shape " << c.name);
+        Canvas::SDFStyle style;
+        style.stroke_width = c.stroke;
+        ChartProbe probe(c.shape, 128, 32, style);
+        REQUIRE(probe.drawn);
+        const int mid = (c.x0 + c.x1) / 2;
+        CHECK(probe.t(c.x0, 16) == Catch::Approx(0.0f).margin(kChartTol));
+        CHECK(probe.t(mid, 16) == Catch::Approx(0.5f).margin(kChartTol));
+        CHECK(probe.t(c.x1, 16) == Catch::Approx(1.0f).margin(kChartTol));
+        // Across: cross is 0 on the centre line and +/- halfWidth at the top
+        // and bottom edges; d is -halfWidth on the centre line and 0 at both.
+        CHECK(probe.cross(mid, 16) == Catch::Approx(0.0f).margin(kChartTol));
+        CHECK(probe.cross(mid, c.top) == Catch::Approx(1.0f).margin(kChartTol));
+        CHECK(probe.cross(mid, c.bottom) == Catch::Approx(-1.0f).margin(kChartTol));
+        CHECK(probe.d(mid, 16) == Catch::Approx(-1.0f).margin(kChartTol));
+        CHECK(probe.d(mid, c.top) == Catch::Approx(0.0f).margin(kChartTol));
+        CHECK(probe.d(mid, c.bottom) == Catch::Approx(0.0f).margin(kChartTol));
+    }
+
+    // Past a flat cap d turns positive; past a rounded cap the band continues
+    // as a half disc, so the same point is still inside.
+    Canvas::SDFStyle style;
+    style.stroke_width = 16.0f;
+    ChartProbe flat(Canvas::SDFShape::flat_segment, 128, 32, style);
+    ChartProbe round(Canvas::SDFShape::rounded_segment, 128, 32, style);
+    // Pixel 1 is one unit past the end (p.x = -63) on the centre line.
+    CHECK(flat.t(1, 16) == Catch::Approx(0.0f).margin(kChartTol));
+    CHECK(flat.d(1, 16) > 0.05f);
+    CHECK(round.d(1, 16) == Catch::Approx(-7.0f / 8.0f).margin(kChartTol));
+    // A rounded cap is a dome about its end point: cross is the distance from
+    // it on both sides of the axis, so it does not flip sign there.
+    CHECK(round.cross(1, 15) == Catch::Approx(std::sqrt(2.0f) / 8.0f).margin(kChartTol));
+    CHECK(round.cross(1, 17) == Catch::Approx(std::sqrt(2.0f) / 8.0f).margin(kChartTol));
 #else
-    SUCCEED("chart compile control requires PULP_HAS_SKIA");
+    SUCCEED("chart probes require PULP_HAS_SKIA");
+#endif
+}
+
+TEST_CASE("SDF chart: ring and flat arc chart t around and cross radially",
+          "[canvas][sdf][shader][chart]") {
+#ifdef PULP_HAS_SKIA
+    // 64 x 64: radius 30, inner radius 0.4 -> inner 12, centre line 21,
+    // halfWidth 9. Pixel (32 + x, 32 + y) samples p = (x, y).
+    constexpr float kPi = 3.14159265f;
+    Canvas::SDFStyle style;
+    style.inner_radius = 0.4f;
+    style.arc_start = -0.5f * kPi; // top; angles grow clockwise on screen
+
+    ChartProbe ring(Canvas::SDFShape::ring, 64, 64, style);
+    REQUIRE(ring.drawn);
+    CHECK(ring.t(53, 32) == Catch::Approx(0.25f).margin(kChartTol)); // right
+    CHECK(ring.t(32, 53) == Catch::Approx(0.5f).margin(kChartTol));  // bottom
+    CHECK(ring.t(11, 32) == Catch::Approx(0.75f).margin(kChartTol)); // left
+    // Either side of the seam at arcStart, t is just above 0 and just below 1.
+    CHECK(ring.t(33, 11) < 0.03f);
+    CHECK(ring.t(31, 11) > 0.97f);
+    // cross is radial and points outward: +halfWidth at the outer edge.
+    CHECK(ring.cross(53, 32) == Catch::Approx(0.0f).margin(kChartTol));
+    CHECK(ring.cross(62, 32) == Catch::Approx(1.0f).margin(kChartTol));
+    CHECK(ring.cross(44, 32) == Catch::Approx(-1.0f).margin(kChartTol));
+    CHECK(ring.d(53, 32) == Catch::Approx(-1.0f).margin(kChartTol));
+    CHECK(ring.d(62, 32) == Catch::Approx(0.0f).margin(kChartTol));
+    CHECK(ring.d(44, 32) == Catch::Approx(0.0f).margin(kChartTol));
+
+    // A half arc from the left over the top to the right.
+    style.arc_start = kPi;
+    style.arc_sweep = kPi;
+    ChartProbe arc(Canvas::SDFShape::flat_arc, 64, 64, style);
+    REQUIRE(arc.drawn);
+    CHECK(arc.t(11, 32) == Catch::Approx(0.0f).margin(kChartTol));
+    CHECK(arc.t(32, 11) == Catch::Approx(0.5f).margin(kChartTol));
+    CHECK(arc.t(53, 32) == Catch::Approx(1.0f).margin(kChartTol));
+    CHECK(arc.cross(32, 11) == Catch::Approx(0.0f).margin(kChartTol));
+    CHECK(arc.cross(32, 2) == Catch::Approx(1.0f).margin(kChartTol));
+    CHECK(arc.cross(32, 20) == Catch::Approx(-1.0f).margin(kChartTol));
+    CHECK(arc.d(32, 11) == Catch::Approx(-1.0f).margin(kChartTol));
+    CHECK(arc.d(32, 2) == Catch::Approx(0.0f).margin(kChartTol));
+    CHECK(arc.d(32, 20) == Catch::Approx(0.0f).margin(kChartTol));
+    // The flat cap cuts the band: two units past the right end, on the centre
+    // line, d is outside the band, where the ring's d is still inside.
+    CHECK(arc.d(53, 34) > 0.0f);
+    CHECK(ring.d(53, 34) < -0.5f);
+#else
+    SUCCEED("chart probes require PULP_HAS_SKIA");
+#endif
+}
+
+TEST_CASE("SDF chart reports tan in device orientation", "[canvas][sdf][shader][chart]") {
+#ifdef PULP_HAS_SKIA
+    // A horizontal flat segment, 64 x 32, drawn through a canvas transform.
+    // Channels: r = tan.x, g = tan.y (both mapped to 0..1), b = cross sign.
+    constexpr const char* kTan =
+        "half4 shade(PulpChart g) { return half4(half(g.tan.x * 0.5 + 0.5), "
+        "half(g.tan.y * 0.5 + 0.5), g.cross > 0.0 ? 1.0 : 0.0, 1); }";
+    auto render = [&](auto&& transform, int px, int py) {
+        auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(64, 64));
+        REQUIRE(surface != nullptr);
+        surface->getCanvas()->clear(SK_ColorTRANSPARENT);
+        SkiaCanvas canvas(surface->getCanvas());
+        canvas.save();
+        transform(canvas);
+        Canvas::SDFStyle style;
+        style.stroke_width = 16.0f;
+        REQUIRE(canvas.draw_sdf_shape_with_shader(Canvas::SDFShape::flat_segment, 0, 0, 64, 32,
+                                                  style, kTan, {}));
+        canvas.restore();
+        SkPixmap pixels;
+        REQUIRE(surface->peekPixels(&pixels));
+        const SkColor c = pixels.getColor(px, py);
+        return std::array<float, 3>{SkColorGetR(c) / 255.0f * 2.0f - 1.0f,
+                                    SkColorGetG(c) / 255.0f * 2.0f - 1.0f, SkColorGetB(c) / 255.0f};
+    };
+    // Untransformed: tan points right, and a point above the centre line
+    // (local y 12, centre 16) has positive cross.
+    const auto plain = render([](Canvas&) {}, 32, 12);
+    CHECK(plain[0] == Catch::Approx(1.0f).margin(0.02f));
+    CHECK(plain[1] == Catch::Approx(0.0f).margin(0.02f));
+    CHECK(plain[2] == 1.0f);
+    // Rotated a quarter turn counter-clockwise on screen: the segment runs
+    // up the left half of the surface, so tan points up (device y negative).
+    // Local (32, 12) lands at device (12, 64 - 32) = (12, 32).
+    const auto turned = render(
+        [](Canvas& c) {
+            c.translate(0.0f, 64.0f);
+            c.rotate(-1.5707963f);
+        },
+        12, 32);
+    INFO("rotated tan " << turned[0] << "," << turned[1]);
+    CHECK(turned[0] == Catch::Approx(0.0f).margin(0.02f));
+    CHECK(turned[1] == Catch::Approx(-1.0f).margin(0.02f));
+    CHECK(turned[2] == 1.0f);
+    // Mirrored vertically: tan still points right, and the same local point
+    // now sits below the line on screen, so cross turns negative there.
+    const auto mirrored = render(
+        [](Canvas& c) {
+            c.translate(0.0f, 32.0f);
+            c.scale(1.0f, -1.0f);
+        },
+        32, 20);
+    CHECK(mirrored[0] == Catch::Approx(1.0f).margin(0.02f));
+    CHECK(mirrored[1] == Catch::Approx(0.0f).margin(0.02f));
+    CHECK(mirrored[2] == 0.0f);
+#else
+    SUCCEED("chart probes require PULP_HAS_SKIA");
+#endif
+}
+
+TEST_CASE("SDF chart: degenerate bands report valid = 0", "[canvas][sdf][shader][chart]") {
+#ifdef PULP_HAS_SKIA
+    constexpr const char* kValid =
+        "half4 shade(PulpChart g) { return half4(half(g.valid), 0, 0, 1); }";
+    Canvas::SDFStyle style;
+    style.stroke_width = 8.0f;
+    ChartProbe live(Canvas::SDFShape::flat_segment, 64, 32, style, kValid);
+    style.stroke_width = 0.0f;
+    ChartProbe empty(Canvas::SDFShape::flat_segment, 64, 32, style, kValid);
+    // A square stadium is a circle: no centre line, so no t.
+    ChartProbe circle(Canvas::SDFShape::stadium, 32, 32, style, kValid);
+    style.inner_radius = 1.0f;
+    ChartProbe no_band(Canvas::SDFShape::ring, 32, 32, style, kValid);
+    CHECK(live.t(32, 16) == Catch::Approx(1.0f));
+    CHECK(empty.t(32, 16) == Catch::Approx(0.0f));
+    CHECK(circle.t(16, 16) == Catch::Approx(0.0f));
+    CHECK(no_band.t(16, 16) == Catch::Approx(0.0f));
+#else
+    SUCCEED("chart probes require PULP_HAS_SKIA");
 #endif
 }
 
@@ -1046,6 +1290,42 @@ TEST_CASE("SDF operator trees shade union subtract and intersect",
     REQUIRE(render("max(sdCircle(p, 12), sdBox(p, float2(8, 20)))", 42) == 0);
 #else
     SUCCEED("Skia raster operator probes require PULP_HAS_SKIA");
+#endif
+}
+
+TEST_CASE("SDF chart feather keeps the colour premultiplied", "[canvas][sdf][shader][feather]") {
+#ifdef PULP_HAS_SKIA
+    // A white chart with a glow: 3 units outside the arc the feather leaves
+    // partial coverage. The surface stores premultiplied bytes, so a channel
+    // above alpha there means the feather scaled alpha and not the colour.
+    auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(64, 64));
+    REQUIRE(surface != nullptr);
+    surface->getCanvas()->clear(SK_ColorTRANSPARENT);
+    SkiaCanvas canvas(surface->getCanvas());
+    Canvas::SDFStyle style;
+    style.arc_start = 0.0f;
+    style.arc_sweep = 6.28318530718f;
+    style.feather_sigma = 4.0f;
+    style.feather_mode = 1; // glow
+    Canvas::ShaderDrawOptions options;
+    options.reach = 12.0f;
+    REQUIRE(canvas.draw_sdf_shape_with_shader(
+        Canvas::SDFShape::flat_arc, 8, 8, 48, 48, style,
+        "half4 shade(PulpChart g) { return half4(1, 1, 1, 1); }", options));
+    SkPixmap pixels;
+    REQUIRE(surface->peekPixels(&pixels));
+    // The arc's outer edge is at x = 8 + 46 = 54; sample 3 units beyond it.
+    const auto* px = static_cast<const uint8_t*>(pixels.addr(57, 32));
+    const int a = px[3];
+    INFO("premultiplied bytes " << int(px[0]) << "," << int(px[1]) << "," << int(px[2]) << " alpha "
+                                << a);
+    REQUIRE(a > 0);
+    REQUIRE(a < 255);
+    REQUIRE(int(px[0]) <= a + 1);
+    REQUIRE(int(px[1]) <= a + 1);
+    REQUIRE(int(px[2]) <= a + 1);
+#else
+    SUCCEED("Skia feather probes require PULP_HAS_SKIA");
 #endif
 }
 

@@ -14,6 +14,8 @@ namespace pulp::canvas {
 // Does not actually render anything
 
 struct DrawCommand {
+    // A hand-aligned table: clang-format would re-flow every row of it.
+    // clang-format off
     enum class Type {
         save, restore,
         translate, scale, rotate, clip_rect,
@@ -54,6 +56,7 @@ struct DrawCommand {
         // the canvas2d bridge harness can assert flush order.
         set_miter_limit,     ///< limit in f[0]
         set_image_smoothing, ///< enabled in f[0] (0/1), quality in f[1] (0=low,1=med,2=high)
+        set_font_smoothing,  ///< f[0]: 0 = auto, 1 = antialiased
         // Canvas2D ctx.direction / ctx.filter sticky setters.
         // Direction enum (0=ltr, 1=rtl, 2=inherit) packed into f[0];
         // filter raw CSS <filter-function-list> string (e.g.
@@ -169,8 +172,10 @@ struct DrawCommand {
         // instead captures the shader source + rect and returns false
         // (a recorder cannot compile/execute SkSL). Callers that test the
         // base CPU fallback must invoke `rc.Canvas::draw_with_sksl(...)`.
-        draw_sksl             ///< rect x/y/w/h in f[0..3]; value f[4]; time f[5]; SkSL source in `text`
+        draw_sksl,            ///< rect x/y/w/h in f[0..3]; value f[4]; time f[5]; SkSL source in `text`
+        set_gradient_interpolation  ///< GradientColorSpace in f[0], GradientHueMethod in f[1]
     };
+    // clang-format on
 
     Type type;
     // Generic storage for command parameters
@@ -332,6 +337,7 @@ public:
                                  const Color* colors, const float* positions,
                                  int count) override;
     void clear_fill_gradient() override;
+    void set_gradient_interpolation(GradientInterpolation method) override;
 
     // ── Retained paths ───────────────────────────────────────────────────
     // `using` re-exposes the base-class polygon overloads: declaring
@@ -374,6 +380,7 @@ public:
     void set_miter_limit(float limit) override;
     void set_image_smoothing(bool enabled,
                              ImageSmoothingQuality quality) override;
+    void set_font_smoothing(FontSmoothing smoothing) override;
 
     // Canvas2D ctx.direction / ctx.filter capture.
     void set_direction(TextDirection direction) override;

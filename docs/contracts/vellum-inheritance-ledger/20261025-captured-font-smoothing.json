@@ -1,0 +1,13 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261025-captured-font-smoothing",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "vellum_obligation": "Canvas carries a font smoothing (auto or antialiased) scoped by save()/restore(); a backend drawing antialiased text turns glyph hinting off for shaping and measurement on every text path including glyph fallback, never serves cached hinted glyphs for unhinted text (a paragraph cache keys on the run's glyph hinting), and a recording canvas records it.",
+  "evidence": [
+    ".github/vellum-change-events/20261025-captured-font-smoothing.json",
+    "pulp-test-browser-capture-import [font-smoothing]",
+    "import-design-ir-observe-font-smoothing-label"
+  ]
+}

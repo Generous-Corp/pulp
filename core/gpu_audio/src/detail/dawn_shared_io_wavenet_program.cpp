@@ -93,6 +93,14 @@ bool DawnSharedIoWavenetProgram::submit(
            provider_->submit_wavenet_program(resources, token, std::move(terminal_inbox));
 }
 
+bool DawnSharedIoWavenetProgram::reset_history(std::uint32_t next_position) noexcept {
+    return prepared_ && provider_ != nullptr && provider_->reset_wavenet_history(next_position);
+}
+
+bool DawnSharedIoWavenetProgram::read_stream_position(std::uint32_t& position) noexcept {
+    return prepared_ && provider_ != nullptr && provider_->read_wavenet_stream_position(position);
+}
+
 bool DawnSharedIoWavenetProgram::release() noexcept {
     if (prepared_ && provider_ != nullptr && !provider_->release_wavenet_program())
         return false;

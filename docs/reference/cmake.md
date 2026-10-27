@@ -19,6 +19,9 @@ pulp_add_plugin(<target>
     ACCEPTS_MIDI
     NATIVE_UI
     NO_EDITOR
+    LITE_EDITOR
+    GPU_UI
+    FULL_EDITOR
     PLUGIN_CODE     <4-char>
     MANUFACTURER_CODE <4-char>
     AAX_PRODUCT_CODE <4-char>
@@ -52,13 +55,16 @@ An argument `pulp_add_plugin()` does not recognise (a misspelled keyword, a keyw
 | `ACCEPTS_MIDI` | No | Off | Mirrors `PluginDescriptor::accepts_midi` for package metadata. AU v2/AUv3 effects that accept MIDI need this so Pulp emits a MIDI-routable component type (`aumf`) instead of an audio-only effect (`aufx`). MIDI output is controlled by `PluginDescriptor::produces_midi`; there is no `pulp_add_plugin(PRODUCES_MIDI)` flag. |
 | `NATIVE_UI` | No | Off | Link the native scripted Skia/Dawn view composition (`Pulp::view-native` and, for Standalone, `Pulp::standalone-native`) without WebView/WebKit. `ScriptedUiSession`, `WidgetBridge`, and `@pulp/react` remain available. Omit this for editors that instantiate `WebViewPanel`; the existing WebView-capable targets remain the default. |
 | `NO_EDITOR` | No | Off | Editor-less (audio-only) plug-in. VST3, CLAP, AU v2 and LV2 modules link `Pulp::format-core` (CLAP also `Pulp::format-clap-core`, the adapter without its GUI extension) instead of the format + view umbrella, so the image carries no view, canvas, render, Skia, Dawn or wgpu code and stages no GPU runtime. The plug-in exposes no editor (Pulp's generated AutoUI editor is not built in); hosts show their generic parameter UI. The processor must not override `create_view()`. Cannot be combined with `NATIVE_UI` or `UI_SCRIPT`. Standalone, AUv3 and AAX outputs keep the default view-linked path. |
+| `GPU_UI` | No | Off | The plug-in's C++ editor needs the GPU host (a view whose `requires_gpu_host()` is true): link the full editor stack. Without it, macOS plug-ins get the lite editor stack (see `LITE_EDITOR`). |
+| `FULL_EDITOR` | No | Off | Link the full editor stack for any other reason (the escape hatch from the lite default). |
+| `LITE_EDITOR` | No | Default on macOS | States the default explicitly. Unless the plug-in declares `UI_SCRIPT`, `GPU_UI` or `FULL_EDITOR`, its macOS VST3, CLAP, AU v2 and Standalone binaries leave out the GPU plug-in and window hosts and link lite replacements for the few library functions that reach Skia unconditionally (text measurement, font resolution, the emoji fallback, native GPU textures), so the VST3, CLAP and AU v2 modules carry no Skia, Dawn or Tint (the Standalone app still links Dawn through the standalone host). The editor opens on the CoreGraphics host, which an AutoUi or CPU-painted C++ editor already uses, and measures text through CoreText, which it already paints with. An editor that asks for the GPU host anyway logs one warning naming `GPU_UI` and opens on the CoreGraphics host. Combining `LITE_EDITOR` with `UI_SCRIPT`, `GPU_UI` or `FULL_EDITOR` is a configure error. Other platforms build the full stack. See [Binary Footprint](#binary-footprint). |
 | `PLUGIN_CODE` | AU/AUv3 only | -- | 4-character AU plugin code |
 | `MANUFACTURER_CODE` | AU/AUv3/AAX only | -- | 4-character manufacturer code used by AU, AUv3, and AAX |
 | `AAX_PRODUCT_CODE` | AAX only | -- | 4-character stable AAX product identifier |
 | `AAX_NATIVE_CODE` | AAX only | -- | 4-character stable AAX Native identifier |
 | `SOURCES` | No | -- | Source files for the core object library |
 | `PROCESSOR_FACTORY` | No | -- | Factory function name (for generated entry points) |
-| `UI_SCRIPT` | No | -- | Path to a JavaScript UI entry file. Each created VST3, CLAP, AU, AAX and Standalone target registers the absolute path at load time through a generated source (`pulp::format::register_editor_assets()`), and every adapter's editor opens that script. AUv3 is not given the path, because an iOS app extension cannot resolve a build-machine path; ship the script inside the extension instead; the Standalone macOS lane owns runtime validation for live JS/theme reload. |
+| `UI_SCRIPT` | No | -- | Path to a JavaScript UI entry file. Its bytes, the `theme.json` beside it, and the image, font, data and shader files beside it (`png jpg jpeg gif webp bmp ico svg ttf otf woff woff2 json wgsl glsl sksl frag vert`, skipping dot-directories, `node_modules` and nested build trees; the script must sit in its own directory, and one holding a `CMakeLists.txt` is refused at configure) are compiled into every created format target and registered with `pulp::format` at load, so the shipped image carries its editor and the files it loads relative to itself, and never reads the developer's source tree. A dev build (`PULP_DEV_BUILD`: defaults to `PULP_BUILD_TESTS` in the Pulp checkout and OFF for an installed-SDK consumer, where the `pulp` CLI's configure passes `-DPULP_DEV_BUILD=ON`) also records the absolute path; a hot-reloading editor (the Standalone host, or a DAW launched with `PULP_DEV_HOT_RELOAD=1`) then reads that file while it exists, which is what keeps the edit-and-see loop live. Every other open evaluates the embedded bytes, and `pulp ship` builds a `build-ship/` that carries the dev build's whole configuration with the option off rather than shipping a dev build. A file added beside the script after configure re-runs CMake on the next build; an edit to an embedded file re-encodes it at build time. |
 | `ICON` | No | -- | A 1024x1024 PNG, converted to an `.icns` and bundled into every macOS bundle the call creates (Standalone, VST3, AU, CLAP, AAX). Mutually exclusive with `ICNS`. |
 | `ICNS` | No | -- | A finished `.icns`, bundled as-is into the same set. Prefer this when the asset is laid out per size; the `ICON` path downscales with `sips`, whose kernel rings small tiles. **Scope:** this fills `CFBundleIconFile` and ships the asset. macOS does not render that key for a non-`.app` bundle, so no icon appears in Finder for the plug-in formats; see the product-icon comment in `PulpUtils.cmake`. |
 | `CONTENT_CAPABILITIES` | No | -- | Runtime content capabilities the plugin actually consumes, such as `content.presets.v1`. Use this when the plugin can load installed content packs. Must be paired with `CONTENT_KINDS`. |
@@ -103,12 +109,15 @@ pulp_use_kit_ui(MyPlugin pulp_kit_dev_pulp_fixtures_basic_ui_kit)
 
 `pulp_use_kit_ui(<plugin-target> <kit-target> [SCRIPT <exported-path>] [TOKENS <exported-path>])`
 reads the reviewed kit target's `PULP_UI_SCRIPTS`, `PULP_DESIGN_TOKENS`, and
-`PULP_ASSETS` properties. The selected script, the selected token/theme file,
-and the declared asset directories are recorded on the existing format targets
-as the `PULP_UI_SCRIPT_PATH`, `PULP_UI_THEME_PATH`, and `PULP_UI_ASSET_ROOTS`
-target properties, which each target's generated editor-asset source registers
-at load time (`pulp/format/editor_assets.hpp`). Scripted editors can then use `__loadAssetSync__` with
-relative paths into those reviewed asset roots. Kits with multiple scripts or
+`PULP_ASSETS` properties. The selected script and token/theme file, and the
+files under the declared asset directories, are embedded into the existing
+format targets the same way `UI_SCRIPT` is, and the kit's selection replaces
+the plug-in's own `UI_SCRIPT` on those targets; a dev build (`PULP_DEV_BUILD`)
+also records the on-disk paths as the `PULP_UI_SCRIPT_PATH`,
+`PULP_UI_THEME_PATH`, and `PULP_UI_ASSET_ROOTS` target properties, which each
+target's generated editor-asset source registers at load time
+(`pulp/format/editor_assets.hpp`). Scripted editors can then use `__loadAssetSync__` with
+relative paths into those reviewed asset roots, embedded or on disk. Kits with multiple scripts or
 token files require the matching `SCRIPT` / `TOKENS` argument so the project
 makes the choice intentionally. The helper does not apply kits automatically
 and does not run package code.
@@ -275,6 +284,75 @@ Format targets are only created when the corresponding SDK is available:
 
 On Linux and Ubuntu, requesting `AAX` in `FORMATS` is a configure-time error.
 
+### Shipped Module Size
+
+Three defaults keep shipped plug-in modules small. Each changes what a shipped
+binary contains, so each has an opt-out.
+
+**Dead stripping.** In every non-Debug Apple build the VST3, CLAP, AU v2, LV2
+and AAX modules link with `-dead_strip`, so code no entry point reaches is
+removed. AU v3 targets are not dead-stripped. The linker keeps everything
+reachable from an exported symbol (the format entry points), every static
+initializer and what it reaches (self-registering factories survive),
+Objective-C class and category metadata, and anything marked
+`__attribute__((used))`. What it can drop is code reached only by a runtime
+name lookup it cannot see: `dlsym()` of a symbol the module does not export,
+or an Objective-C class found only through `NSClassFromString()`. Export such a
+symbol (`__attribute__((visibility("default")))`), mark it `used`, or
+reference it from code that is reached.
+
+Opt out for every plug-in with `-DPULP_DEAD_STRIP_PLUGINS=OFF`, or for one
+module after `pulp_add_plugin()`:
+
+```cmake
+set_target_properties(MyPlugin_VST3 PROPERTIES PULP_DEAD_STRIP OFF)
+```
+
+**Development-only shared runtime.** `-DPULP_DEV_SHARED_UI=ON` (macOS, off by
+default; `pulp dev` and `pulp loop` turn it on in SDK projects) links the VST3, CLAP, AU and
+Standalone binaries of plug-ins with the default view stack against one
+`libpulp-dev-shared-ui.<version>.dylib` in the build tree instead of the static
+Pulp libraries, so a one-file edit relinks a module of about a megabyte. Those
+artifacts load only from that build tree, and every ship path refuses them. See
+[Fast plug-in relinks](../guides/build.md#fast-plug-in-relinks-pulp_dev_shared_ui).
+
+Coverage: `plugin-module-dead-strip-PulpGain-<FORMAT>` checks the flag on
+PulpGain's modules, `cmake-plugin-dead-strip-switch` checks that the option and
+the property each remove it, and `test/test_host.cpp` loads and processes the
+dead-stripped Release `PulpGain.clap`. Opening a dead-stripped module's editor
+in every format is not covered by an automated test.
+
+**No script runtime unless the editor runs a script.** Editor glue that every
+plug-in links reaches a scripted editor only through
+`view::ScriptedEditorSession`'s virtual calls and a prewarm runner slot, so a
+plug-in whose editor runs no script (the generated AutoUI editor, or native
+views) links none of the JS engine, the widget bridge or the session code;
+about 5 MB of a stripped module, plus the Skia text and canvas code the
+widget bridge draws through. Linking follows code references, not a flag. A
+target that declares `UI_SCRIPT` (or gets one from `pulp_use_kit_ui()`) calls
+`pulp::format::install_scripted_editor_builder()` from its generated
+editor-assets source, which links the code that builds the scripted editor and
+with it the runtime. Any code in the plug-in that constructs a
+`view::ScriptedUiSession` links the runtime too, and the session's static
+initializer installs the prewarm runner; a plug-in that loads a script at run
+time without declaring `UI_SCRIPT` opts back in that way. A multi-plug-in
+bundle whose scripts come only from `PluginRegistration::ui_script` entries
+calls `install_scripted_editor_builder()` itself; without it the editor logs
+that the builder is missing and opens AutoUi. Reaching the runtime only by name
+at run time (`dlsym()`) cannot work, because nothing links it. Coverage:
+`plugin-module-no-script-runtime-PulpGain-<FORMAT>`.
+
+**Local symbols stripped at packaging.** `pulp ship package` and
+`tools/scripts/build_combined_installer.sh` ship a copy of each AU, VST3 and
+CLAP bundle with `strip -x` applied to its main executable; the build output
+keeps its symbols, and AAX is never touched. Before stripping, each writes a
+dSYM of the unstripped executable (`artifacts/symbols/<FORMAT>/<bundle>.dSYM`,
+or `<out>/symbols/<kind>/` for the installer script) under the UUID the
+stripped copy keeps, so crash reports from installed plug-ins still
+symbolicate; archive it with the release. Stripping happens at packaging, not
+at build time, so the opt-out is the packaging flag `--keep-symbols`, not a
+CMake option. See the `ship` skill for the details.
+
 ### Install Target
 
 `pulp-install-${target}` copies supported built bundles to platform-standard locations:
@@ -304,6 +382,29 @@ surprise falls back to the unchanged archive with a warning, and the footprint
 tests then fail on the size. Turn the option off only if your plug-in calls ICU
 services Pulp does not use itself.
 
+On macOS a plug-in gets the lite editor stack unless it declares `UI_SCRIPT`,
+`GPU_UI` or `FULL_EDITOR`; this suits every editor that paints on the
+CoreGraphics host (Pulp's generated AutoUi editor, or C++ views that never ask
+for the GPU host). Its binaries compile their Objective-C cluster without the
+GPU hosts and link `pulp-canvas-lite-objects` and `pulp-view-lite-objects`
+(`tools/cmake/PulpLiteEditorObjects.cmake`): copies of `text_shaper.cpp`,
+`font_resolver.cpp`, `canvas_widget.cpp` and `asset_manager.cpp` built with
+`PULP_LITE_EDITOR=1`, which measure through CoreText and skip the Skia-only
+paths. Objects on the link line take precedence over the library's archive
+members, so the Skia versions are never loaded, and the binary links with
+`-dead_strip` so nothing they would have reached survives. The editor opens on
+the CoreGraphics host in both builds and draws the same glyphs, and captured
+line breaks are reused in both, because the lite build resolves a face's
+identity through CoreText. Text measured without a capture can differ by up to
+1 logical pixel for a few system families at non-400 weights: the lite build
+measures with CoreText, the face it paints, while the full build measures with
+Skia, which can resolve a different face ("Helvetica Neue" 600 at 12 px: ascent
+13.92 and width 116.7 in Skia, 13.69 and 120.0 for the painted face), and for
+a face a design asks for that Pulp does not bundle, where Skia and CoreText fall
+back to different faces (a bold JetBrains Mono: Menlo-Bold in Skia, the bundled
+Regular in CoreText). AutoUi, Inter and design-imported panels whose faces are
+bundled render the same in both builds.
+
 A plug-in without a custom editor that does not need Pulp's generated parameter
 editor should use `NO_EDITOR`: it links none of the view, canvas, Skia, Dawn or
 JavaScript code. Measured on the `pulp-gain` examples (arm64, Release, Skia
@@ -313,12 +414,15 @@ m153), binary bytes per format:
 |-------|------|------|----|
 | `PulpGain`, full ICU data | 44.5 MB | 44.3 MB | 44.3 MB |
 | `PulpGain`, ICU subset | 38.4 MB | 38.2 MB | 38.3 MB |
+| `PulpGain` (lite editor stack, the default) | 2.58 MB | 2.46 MB | 2.54 MB |
+| `PulpEffect` (`FULL_EDITOR`) | 28.7 MB | | |
 | `PulpGainHeadless` (`NO_EDITOR`) | 0.83 MB | 0.61 MB | 0.67 MB |
 
 `tools/scripts/plugin_footprint_check.py` measures a built binary against the
 budgets in `tools/scripts/plugin_footprint_budget.json` (mapped code and data,
 which strip settings do not move; ICU data; and, for an editor-less binary, the
-symbols it must not contain). The `plugin-footprint-PulpGain`,
+symbols it must not contain). The `plugin-footprint-PulpEffect` (`FULL_EDITOR`,
+profile `editor`), `plugin-footprint-PulpGain` (lite stack, profile `lite-editor`),
 `plugin-footprint-PulpGainHeadless` and `icu-data-subset-linked` tests run it,
 and `pulp-test-icu-data-breaks` pins the word, line, sentence and grapheme
 boundaries the full data produces, so a subset that drops a rule file or
@@ -602,6 +706,49 @@ namespace myresources {
 |-----------|----------|---------|-------------|
 | `SOURCES` | Yes | -- | Files to embed |
 | `NAMESPACE` | No | `<target>` | C++ namespace for the generated symbols |
+| `COMPRESS` | No | Off | Store each asset as a zlib stream (see below) |
+
+### Compressed embeds
+
+`COMPRESS` stores each asset as a zlib (RFC 1950) stream at level 9. The
+stream is produced by the build host's Python zlib, so it is deterministic per
+zlib build: two hosts whose Python links different zlib builds (zlib 1.2.x and
+zlib-ng, for example) can embed different, equally valid streams, and they
+inflate to the same bytes. Leave `COMPRESS` off for a target whose binaries are
+byte-compared across hosts or built as a reproducible release. Switching
+`COMPRESS` on or off in an existing build directory needs no clean
+reconfigure: CMake reruns the encoder because its command line changed, with
+Makefile generators as well as Ninja. Verified with Unix Makefiles on CMake
+3.24.3 (the minimum Pulp supports) and 4.3.3;
+`cmake-pulp-add-binary-data-compress-toggle` checks it on every run. Text assets shrink the most: a materialized
+design's runtime bundle to about a tenth, its document JSON to about two
+fifths. Already-compressed formats (PNG, JPEG, WOFF2) gain nothing, so embed
+those in a separate call without `COMPRESS`. The symbols change, so code
+still reading the raw array fails to compile instead of reading compressed
+bytes:
+
+```cpp
+namespace myresources {
+    extern const unsigned char runtime_js_zlib[];   // compressed bytes
+    extern const std::size_t runtime_js_zlib_size;
+    extern const std::size_t runtime_js_size;       // inflated bytes
+}
+
+// Inflate where the asset is used, and drop the copy once it is consumed.
+// zlib_decompress_exact inflates into a string of exactly the recorded size,
+// and returns nullopt for a truncated, oversized or corrupt stream.
+auto text = pulp::runtime::zlib_decompress_exact(myresources::runtime_js_zlib,
+                                                 myresources::runtime_js_zlib_size,
+                                                 myresources::runtime_js_size);
+```
+
+The trade is a smaller binary against an inflate on each use and a transient
+heap copy. `zlib_decompress_exact` allocates its output, so never call it on the
+audio thread: inflate on the message thread or a background thread and hand
+the result over. Inflating costs about 1 ms per megabyte of text on an Apple
+silicon core. `COMPRESS` is not the default: the raw array is a public
+symbol that consumers read directly, so a default change would break their
+builds.
 
 ### Implementation notes
 

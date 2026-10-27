@@ -94,6 +94,26 @@ def main() -> int:
             print("require negative control did not fail closed", file=sys.stderr)
             print(require.stdout, require.stderr, file=sys.stderr)
             return 1
+        # The per-OS platform backends and the audio widgets' sources are as
+        # private as core/view/src; the audio widgets' installed headers are not.
+        write(root / "core/view/audio/include/pulp/view/meter.hpp", "// public\n")
+        for planted, target in (
+                ("tools/import-design/planted-platform.cpp", "core/view/platform/mac/window_host_mac_internal.hpp"),
+                ("packages/pulp-react/planted-audio-src.ts", "../../core/view/audio/src/visualizers.js"),
+                ("tools/ui-build/public-audio-header.cpp", "core/view/audio/include/pulp/view/meter.hpp")):
+            write(root / planted, f'#include "{target}"\n' if planted.endswith(".cpp")
+                  else f'import {{ meter }} from "{target}";\n')
+        trees = run(root)
+        expected = ("private core/view include 'core/view/platform/mac/window_host_mac_internal.hpp'",
+                    "private core/view include 'core/view/audio/src/visualizers.js'")
+        if trees.returncode == 0 or not all(e in trees.stderr for e in expected):
+            print("platform/audio-src negative control did not fail closed", file=sys.stderr)
+            print(trees.stdout, trees.stderr, file=sys.stderr)
+            return 1
+        if "core/view/audio/include" in trees.stderr:
+            print("public audio-widget header was flagged as private", file=sys.stderr)
+            print(trees.stderr, file=sys.stderr)
+            return 1
         # Reverse-boundary controls must resolve the include relative to the
         # source file and must cover Objective-C++ platform sources as well as
         # C/C++ files. This traversal lands in tools/import-design despite its
@@ -106,8 +126,41 @@ def main() -> int:
                   file=sys.stderr)
             print(reverse.stdout, reverse.stderr, file=sys.stderr)
             return 1
-        print("vellum_boundary_contract_verified=valid-current;planted-private-include")
-        return 0
+    # A tracked build/ or dist/ directory is package source; only what git
+    # ignores is skipped. A package with no visible source is an error.
+    with tempfile.TemporaryDirectory(prefix="pulp-vellum-boundary-git-") as raw:
+        root = Path(raw)
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        manifest = root / "pkg/pulp-package.json"
+        write(manifest, json.dumps({
+            "schema": "pulp.ui.package.v1", "name": "pkg", "root": "pkg", "kind": "sdk",
+            "dependencies": [], "test_targets": []}))
+        write(root / "core/view/include/pulp/view/public.hpp", "// public\n")
+        write(root / "core/view/src/view.cpp", "#include <pulp/view/public.hpp>\n")
+        write(root / "pkg/.gitignore", "node_modules/\n")
+        write(root / "pkg/good.cpp", "#include <pulp/view/public.hpp>\n")
+        write(root / "pkg/node_modules/dep/ignored.cpp", '#include "core/view/src/private.hpp"\n')
+        clean = run(root, manifest)
+        if clean.returncode != 0:
+            print("git-ignored dependency was scanned", file=sys.stderr)
+            print(clean.stdout, clean.stderr, file=sys.stderr)
+            return 1
+        for planted in ("pkg/build/evil.cpp", "pkg/dist/evil.cpp"):
+            write(root / planted, '#include "core/view/src/private.hpp"\n')
+            hidden = run(root, manifest)
+            if hidden.returncode == 0 or planted not in hidden.stderr:
+                print(f"{planted} hid a private include from the lint", file=sys.stderr)
+                print(hidden.stdout, hidden.stderr, file=sys.stderr)
+                return 1
+            (root / planted).unlink()
+        (root / "pkg/good.cpp").unlink()
+        empty = run(root, manifest)
+        if empty.returncode == 0 or "has no source files to check" not in empty.stderr:
+            print("a package with no visible source passed", file=sys.stderr)
+            print(empty.stdout, empty.stderr, file=sys.stderr)
+            return 1
+    print("vellum_boundary_contract_verified=valid-current;planted-private-include")
+    return 0
 
 
 if __name__ == "__main__":

@@ -66,6 +66,7 @@
 #if PULP_CANVAS_GANESH
 #include "include/gpu/ganesh/SkImageGanesh.h"
 #endif
+#include "skia_resource_counting.hpp"
 
 namespace pulp::canvas {
 
@@ -196,10 +197,8 @@ static sk_sp<SkTypeface> get_cached_typeface(const std::string& family) {
     return get_cached_typeface(family, SkFontStyle::kNormal_Weight, 0);
 }
 
-SkFont make_font(const std::string& family, float size,
-                        int weight = SkFontStyle::kNormal_Weight,
-                        int slant = 0,
-                        bool non_opaque_dst = false) {
+SkFont make_font(const std::string& family, float size, int weight = SkFontStyle::kNormal_Weight,
+                 int slant = 0, bool non_opaque_dst = false, bool hinted = true) {
     SkFont font;
     // If size is 0 here, fill_text records commands but produces zero-height
     // glyphs; clamp to a minimal visible default so labels render even when the
@@ -218,7 +217,7 @@ SkFont make_font(const std::string& family, float size,
     font.setEdging(non_opaque_dst
         ? SkFont::Edging::kAntiAlias            // Greyscale AA (browser parity inside opacity layers)
         : SkFont::Edging::kSubpixelAntiAlias);  // LCD-quality AA on opaque destinations
-    font.setHinting(SkFontHinting::kSlight);               // Light hinting preserves glyph shapes
+    font.setHinting(hinted ? SkFontHinting::kSlight : SkFontHinting::kNone); // none: antialiased
     font.setLinearMetrics(true);                           // Linear scaling for consistent metrics
 
     auto typeface = get_cached_typeface(family, weight, slant);
@@ -363,6 +362,7 @@ void SkiaCanvas::restore() {
         non_opaque_layer_stack_.pop_back();
     }
     canvas_->restore();
+    unwind_font_smoothing();
 }
 
 // Expose Skia's save-stack depth so CanvasWidget::paint() can snapshot it at
@@ -887,18 +887,14 @@ void SkiaCanvas::clear_font_features() {
 sk_sp<SkImage> SkiaCanvas::ensure_gpu_image(sk_sp<SkImage> image) const {
     if (!image) return image;
 #if PULP_CANVAS_GRAPHITE
-    if (recorder_) {
-        if (auto gpu = SkImages::TextureFromImage(recorder_, image.get())) {
+    if (recorder_)
+        if (auto gpu = upload_texture_image(recorder_, image.get()))
             return gpu;
-        }
-    }
 #endif
 #if PULP_CANVAS_GANESH
-    if (gr_context_) {
-        if (auto gpu = SkImages::TextureFromImage(gr_context_, image.get())) {
+    if (gr_context_)
+        if (auto gpu = upload_texture_image(gr_context_, image.get()))
             return gpu;
-        }
-    }
 #endif
     return image;
 }
@@ -919,7 +915,7 @@ sk_sp<SkImage> SkiaCanvas::image_from_file_cached(const std::string& path) const
         path, image_cache_backend_key(), [&]() -> sk_sp<SkImage> {
             auto sk_data = SkData::MakeFromFileName(path.c_str());
             if (!sk_data) return nullptr;
-            auto image = SkImages::DeferredFromEncodedData(sk_data);
+            auto image = decode_encoded_image(sk_data);
             if (!image) return nullptr;
             // Upload to a GPU texture up front so the cached value is ready to
             // draw with no per-frame re-upload. No-op on CPU raster canvases.
@@ -932,7 +928,7 @@ bool SkiaCanvas::draw_image_from_data(const uint8_t* data, size_t size,
     if (!canvas_ || !data || size == 0) return false;
 
     auto sk_data = SkData::MakeWithoutCopy(data, size);
-    auto image = SkImages::DeferredFromEncodedData(sk_data);
+    auto image = decode_encoded_image(sk_data);
     if (!image) return false;
     image = ensure_gpu_image(std::move(image));
 
@@ -994,7 +990,7 @@ bool SkiaCanvas::draw_image_from_data_rect(const uint8_t* data, size_t size,
                                             float dx, float dy, float dw, float dh) {
     if (!canvas_ || !data || size == 0) return false;
     auto sk_data = SkData::MakeWithoutCopy(data, size);
-    auto image = SkImages::DeferredFromEncodedData(sk_data);
+    auto image = decode_encoded_image(sk_data);
     if (!image) return false;
     image = ensure_gpu_image(std::move(image));
     canvas_->drawImageRect(image,
@@ -1022,7 +1018,7 @@ bool SkiaCanvas::draw_image_from_static_data_rect(const uint8_t* data, size_t si
             // (for example after a plugin unload). Own a copy so a deferred
             // decode never reads unmapped static storage.
             auto bytes = SkData::MakeWithCopy(data, size);
-            auto decoded = SkImages::DeferredFromEncodedData(bytes);
+            auto decoded = decode_encoded_image(bytes);
             return decoded ? ensure_gpu_image(std::move(decoded)) : nullptr;
         });
     if (!image)
@@ -1119,6 +1115,23 @@ bool SkiaCanvas::measure_image_from_file(const std::string& path,
     auto image = image_from_file_cached(path);
     if (!image) return false;
     out_width  = static_cast<float>(image->width());
+    out_height = static_cast<float>(image->height());
+    return true;
+}
+
+bool SkiaCanvas::measure_image_from_data(const uint8_t* data, size_t size, float& out_width,
+                                         float& out_height) {
+    out_width = 0.0f;
+    out_height = 0.0f;
+    if (!data || size == 0)
+        return false;
+    // A deferred image only parses the header, and its size already applies
+    // the encoded orientation, so it matches what draw_image_from_data draws.
+    // The image is dropped before returning, so borrowing the bytes is safe.
+    auto image = SkImages::DeferredFromEncodedData(SkData::MakeWithoutCopy(data, size));
+    if (!image || image->width() <= 0 || image->height() <= 0)
+        return false;
+    out_width = static_cast<float>(image->width());
     out_height = static_cast<float>(image->height());
     return true;
 }

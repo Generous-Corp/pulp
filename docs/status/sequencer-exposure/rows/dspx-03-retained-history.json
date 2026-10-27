@@ -8,6 +8,8 @@
     "core/host/include/pulp/host/signal_graph_node.hpp",
     "core/host/include/pulp/host/plugin_slot.hpp",
     "core/host/src/signal_graph_live_swap.cpp",
+    "core/host/src/signal_graph_live_swap_catalog.cpp",
+    "core/host/src/signal_graph_live_swap_detail.hpp",
     "test/test_retained_history_dspx03.cpp",
     "docs/status/sequencer-exposure/rows/dspx-03-retained-history.json",
     "docs/guides/retained-history-live-swaps.md"
@@ -27,6 +29,22 @@
       "needles": [
         "exact history key",
         "HistoryRefused"
+      ]
+    },
+    {
+      "path": "core/host/src/signal_graph_live_swap_catalog.cpp",
+      "needles": [
+        "set_node_live_swap_policy",
+        "register_scanned_plugin",
+        "clear_scanned_plugin_catalog"
+      ]
+    },
+    {
+      "path": "core/host/src/signal_graph_live_swap_detail.hpp",
+      "needles": [
+        "same_parameter_contract",
+        "reason_name",
+        "clamp_policy"
       ]
     }
   ],

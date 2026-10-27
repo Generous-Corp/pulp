@@ -217,7 +217,9 @@ If you want the parameter change to take effect *within* a block
 instead of polling atomics inside the loop:
 
 * `param_events()` exposes the host-delivered sparse
-  `ParameterEventQueue` for the current block.
+  `ParameterEventQueue` for the current block. The VST3, AU v2 and CLAP
+  adapters leave it empty for a processor that overrides
+  `wants_sample_accurate_parameters()` to return false.
 * `ParameterEventQueue` is fixed-capacity; excess events are dropped,
   counted for the current block, and never trigger audio-thread allocation.
 * `format::EventBlock::audio_rate_modulations` carries dense
@@ -515,6 +517,13 @@ load history survives topology changes, and they are only ever added (never
 erased) while a snapshot is live, so the audio thread's raw measurer pointers
 stay valid across snapshot swaps. This is what lets a host attribute a CPU
 spike to a specific node instead of just the whole callback.
+
+Per-node timing starts when someone reads it, because two clock reads per node
+per block are a large share of a small graph's cost. The first `node_loads()`
+call turns monitoring on, so that first reading is zero or stale and the next
+ones are live. `set_node_load_monitoring()` gives explicit control, and
+enabling live-DSP telemetry times nodes too. Whole-graph timing (`graph_load()`)
+always runs; the live-swap admission gate reads it.
 
 Validation and UI surfaces should classify that snapshot with
 `audio::evaluate_audio_runtime_overload()` instead of inventing local

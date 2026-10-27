@@ -1,3 +1,4 @@
+#include <pulp/canvas/resource_counters.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/layout_snapshot.hpp>
 #include <pulp/view/screenshot.hpp>
@@ -6,6 +7,7 @@
 
 #if defined(PULP_HAS_SKIA)
 #include <pulp/canvas/canvas.hpp>
+#include <pulp/canvas/image_file_cache.hpp>
 #include <pulp/render/gpu_surface.hpp>
 #include <pulp/render/headless_surface.hpp>
 #include "render_observer_private.hpp"
@@ -21,6 +23,7 @@
 #include <iostream>
 #include <optional>
 
+#include "observer_script_lane.hpp"
 #include "text_diagnostic_observer.hpp"
 #include <pulp/view/widgets.hpp>
 #include <sstream>
@@ -129,7 +132,8 @@ void usage() {
                  "<anchor>=<normalized>]... [--click <x>,<y>]... "
                  "[--drag <x1>,<y1>:<x2>,<y2>]... [--key <name>]... "
                  "[--interaction-log <json>] [--backend skia|gpu] "
-                 "[--render-receipt <json>] [--gpu-fault <fault>]\n";
+                 "[--render-receipt <json>] [--gpu-fault <fault>] "
+                 "[--emitter native|js]\n";
 }
 
 // One replayed input step. Steps run in command-line order after layout and
@@ -416,6 +420,9 @@ const char* gpu_fault_name(GpuFault fault) {
 }
 
 struct RenderReport {
+    /// Which emitter built the observed tree: the native materializer, or the
+    /// ui.js program generate_pulp_js() emits, run through the WidgetBridge.
+    std::string emitter = "native";
     std::string requested = "skia";
     std::string used;
     bool ok = false;
@@ -438,6 +445,13 @@ struct RenderReport {
         std::uint64_t layout_passes = 0;
         std::uint64_t damage_requests = 0;
         std::uint64_t unmarked_paint_mutations = 0;
+        // Resource work beneath the canvas (pulp/canvas/resource_counters.hpp).
+        std::uint64_t image_decodes = 0;
+        std::uint64_t gpu_uploads = 0;
+        std::uint64_t paragraph_builds = 0;
+        std::uint64_t scene_records = 0;
+        std::uint64_t scene_replays = 0;
+        std::uint64_t image_cache_builds = 0;
     };
     struct Counters {
         // Materialization and interaction replay. Paint state set here has no
@@ -467,11 +481,24 @@ struct ViewCounterSnapshot {
     std::uint64_t layout_passes = pulp::view::View::layout_pass_count();
     std::uint64_t damage_requests = pulp::view::View::damage_request_count();
     std::uint64_t unmarked = pulp::view::View::unmarked_paint_mutation_count();
+    pulp::canvas::ResourceCounters resources = pulp::canvas::resource_counters();
+#if defined(PULP_HAS_SKIA)
+    std::uint64_t image_cache_builds = pulp::canvas::ImageFileCache::instance().stats().builds;
+#else
+    std::uint64_t image_cache_builds = 0;
+#endif
 };
 
 RenderReport::Phase phase_between(const ViewCounterSnapshot& from, const ViewCounterSnapshot& to) {
-    return {to.layout_passes - from.layout_passes, to.damage_requests - from.damage_requests,
-            to.unmarked - from.unmarked};
+    return {to.layout_passes - from.layout_passes,
+            to.damage_requests - from.damage_requests,
+            to.unmarked - from.unmarked,
+            to.resources.image_decodes - from.resources.image_decodes,
+            to.resources.gpu_uploads - from.resources.gpu_uploads,
+            to.resources.paragraph_builds - from.resources.paragraph_builds,
+            to.resources.scene_records - from.resources.scene_records,
+            to.resources.scene_replays - from.resources.scene_replays,
+            to.image_cache_builds - from.image_cache_builds};
 }
 
 choc::value::Value phase_json(const RenderReport::Phase& phase) {
@@ -482,6 +509,15 @@ choc::value::Value phase_json(const RenderReport::Phase& phase) {
                   choc::value::createInt64(static_cast<std::int64_t>(phase.damage_requests)));
     out.addMember("unmarked_paint_mutations", choc::value::createInt64(static_cast<std::int64_t>(
                                                   phase.unmarked_paint_mutations)));
+    const auto count = [&](const char* name, std::uint64_t value) {
+        out.addMember(name, choc::value::createInt64(static_cast<std::int64_t>(value)));
+    };
+    count("image_decodes", phase.image_decodes);
+    count("gpu_uploads", phase.gpu_uploads);
+    count("paragraph_builds", phase.paragraph_builds);
+    count("scene_records", phase.scene_records);
+    count("scene_replays", phase.scene_replays);
+    count("image_cache_builds", phase.image_cache_builds);
     return out;
 }
 
@@ -523,6 +559,7 @@ const char* frame_outcome_name(pulp::render::FrameOutcome outcome) {
 // layout, paint, overlays), so a render here is comparable with one there.
 std::vector<std::uint8_t> render_gpu(pulp::view::View& root, std::uint32_t width,
                                      std::uint32_t height, float scale, GpuFault fault,
+                                     pulp::canvas::TextRasterPolicy text_raster,
                                      RenderReport& report) {
     auto gpu = pulp::render::GpuSurface::create_dawn();
     pulp::render::GpuSurface::Config gpu_config{};
@@ -540,8 +577,10 @@ std::vector<std::uint8_t> render_gpu(pulp::view::View& root, std::uint32_t width
         report.error = "no native GPU adapter (Dawn Null backend)";
         return {};
     }
-    auto skia = pulp::render::SkiaSurface::create(
-        *gpu, {.width = width, .height = height, .scale_factor = scale});
+    auto skia = pulp::render::SkiaSurface::create(*gpu, {.width = width,
+                                                         .height = height,
+                                                         .scale_factor = scale,
+                                                         .text_raster_policy = text_raster});
     if (!skia || !skia->is_available()) {
         report.error = "SkiaSurface unavailable on this device";
         return {};
@@ -616,6 +655,7 @@ std::string render_receipt_json(const RenderReport& report) {
     receipt.addMember("ok", choc::value::createBool(report.ok));
     receipt.addMember("error", choc::value::createString(report.error));
     receipt.addMember("seeded_fault", choc::value::createString(report.fault));
+    receipt.addMember("emitter", choc::value::createString(report.emitter));
 #if defined(PULP_HAS_SKIA)
     const auto versions = pulp::render::render_observer::toolchain_versions();
     receipt.addMember("skia_milestone", choc::value::createInt32(versions.skia_milestone));
@@ -653,10 +693,12 @@ std::string render_receipt_json(const RenderReport& report) {
         const auto& c = *report.counters;
         auto counters = choc::value::createObject("");
         counters.addMember("schema",
-                           choc::value::createString("pulp-design-ir-observer-counters-v1"));
-        // The observer materializes DesignIR as native views; no script
-        // context is created, so there is no bridge traffic to count.
-        counters.addMember("script_bridge", choc::value::createString("not-instantiated"));
+                           choc::value::createString("pulp-design-ir-observer-counters-v2"));
+        // The native lane creates no script context, so there is no bridge
+        // traffic to count; the ui.js lane's bridge traffic is not counted yet.
+        counters.addMember(
+            "script_bridge",
+            choc::value::createString(report.emitter == "js" ? "not-counted" : "not-instantiated"));
         counters.addMember("views_constructed", choc::value::createInt64(static_cast<std::int64_t>(
                                                     c.views_constructed)));
         counters.addMember("views_destroyed",
@@ -692,6 +734,7 @@ int main(int argc, char** argv) {
     std::filesystem::path render_receipt_path;
     Backend backend = Backend::skia;
     GpuFault gpu_fault = GpuFault::none;
+    std::string emitter = "native";
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         if (i + 1 >= argc) {
@@ -774,6 +817,12 @@ int main(int argc, char** argv) {
                 std::cerr << "Error: --backend expects skia or gpu\n";
                 return 2;
             }
+        } else if (arg == "--emitter") {
+            emitter = value;
+            if (emitter != "native" && emitter != "js") {
+                std::cerr << "Error: --emitter expects native or js\n";
+                return 2;
+            }
         } else if (arg == "--gpu-fault") {
             auto fault = parse_gpu_fault(value);
             if (!fault) {
@@ -820,9 +869,18 @@ int main(int argc, char** argv) {
     // points at its bytes is recovered by content hash from the asset folders
     // beside it. Without this the tool depends on the process CWD.
     const ViewCounterSnapshot before_build;
-    auto root = pulp::view::build_native_view_tree(
-        ir, ir.asset_manifest,
-        {.asset_base_directory = input_path.parent_path()});
+    std::unique_ptr<pulp::view::View> native_root;
+    std::unique_ptr<pulp::import_design::ObservedScript> script_root;
+    if (emitter == "js")
+        script_root =
+            pulp::import_design::ObservedScript::run(ir, input_path.parent_path(), width, height);
+    else
+        native_root = pulp::view::build_native_view_tree(
+            ir, ir.asset_manifest, {.asset_base_directory = input_path.parent_path()});
+    pulp::view::View* root = script_root ? &script_root->root() : native_root.get();
+    // Captured `antialiased` text is drawn unhinted, which matches Chromium
+    // only on a surface created with the matching preblend.
+    const auto text_raster = pulp::view::design_ir_text_raster_policy(ir);
     if (!root) {
         std::cerr << "Error: could not materialize DesignIR\n";
         return 1;
@@ -872,6 +930,7 @@ int main(int argc, char** argv) {
     pulp::view::Label::reset_line_break_path_counts();
     const ViewCounterSnapshot before_render;
     RenderReport report;
+    report.emitter = emitter;
     if (has_origin)
         report.origin = std::make_pair(origin_x, origin_y);
     report.page_background = page_background;
@@ -888,13 +947,13 @@ int main(int argc, char** argv) {
     std::vector<std::uint8_t> png;
     if (raster) {
         png = pulp::view::render_to_png(*root, pixel_w, pixel_h, scale,
-                                        pulp::view::ScreenshotBackend::skia);
+                                        pulp::view::ScreenshotBackend::skia, text_raster);
         report.used = gpu_fault == GpuFault::raster_fallback_unreported ? "gpu" : "skia";
         if (png.empty())
             report.error = "Skia raster render failed";
     } else {
 #if defined(PULP_HAS_SKIA)
-        png = render_gpu(*root, pixel_w, pixel_h, scale, gpu_fault, report);
+        png = render_gpu(*root, pixel_w, pixel_h, scale, gpu_fault, text_raster, report);
         report.used = "gpu";
 #else
         report.error = "this build has no GPU backend (PULP_HAS_SKIA is off)";
@@ -944,7 +1003,8 @@ int main(int argc, char** argv) {
     // Tear the tree down before reading the lifetime counters, so the
     // receipt's terminal readback describes a destroyed tree rather than a
     // live one.
-    root.reset();
+    script_root.reset();
+    native_root.reset();
     const ViewCounterSnapshot after_teardown;
     RenderReport::Counters counters;
     counters.build = phase_between(before_build, before_render);

@@ -205,6 +205,7 @@ public:
     void set_font(const std::string& family, float size) override;
     void set_font_full(const std::string& family, float size,
                        int weight, int slant, float letter_spacing) override;
+    void set_font_smoothing(FontSmoothing smoothing) override;
     // OpenType feature flags via SkShaper Feature API.
     // Captured into font_features_ vector and flushed at shape time.
     void set_font_features(std::vector<FontFeature> features) override;
@@ -285,6 +286,9 @@ public:
                                     float dx, float dy, float dw, float dh) override;
     bool measure_image_from_file(const std::string& path,
                                   float& out_width, float& out_height) override;
+    // Reads the header through SkCodec; no pixels are decoded.
+    bool measure_image_from_data(const uint8_t* data, size_t size, float& out_width,
+                                 float& out_height) override;
 
     // Skia-specific: draw an already-constructed SkImage (e.g. a GPU
     // surface snapshot or atlas texture) into the active rect. The
@@ -591,6 +595,21 @@ private:
     int font_weight_ = 400;             ///< CSS weight 100..900
     int font_slant_ = 0;                ///< 0=upright, 1=italic
     float letter_spacing_ = 0.0f;       ///< Extra advance per glyph in px
+    /// `antialiased` shapes and measures text with glyph hinting off.
+    FontSmoothing font_smoothing_ = FontSmoothing::auto_smoothing;
+    bool glyph_hinting() const {
+        return font_smoothing_ != FontSmoothing::antialiased;
+    }
+    /// A smoothing set inside a save() scope reverts when that scope is
+    /// restored, like the clip and matrix: each entry is the save count it
+    /// was set at and the value it replaced.
+    struct SmoothingScope {
+        int save_count;
+        FontSmoothing previous;
+    };
+    std::vector<SmoothingScope> smoothing_scopes_;
+    /// Drop the scopes restore() has closed; defined in skia_canvas_text.cpp.
+    void unwind_font_smoothing();
     // OpenType feature flags (e.g. tnum / smcp / onum /
     // lnum / pnum) for CSS font-variant. Captured by set_font_features
     // / cleared by clear_font_features. Applied via

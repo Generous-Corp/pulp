@@ -1,5 +1,7 @@
 {
   "contract_floor": "0.759.1",
+  "checksum_manifest_floor": "0.663.1",
+  "checksum_manifest_floor_note": "SHA256SUMS is verified whenever a release carries it; this floor governs only absence. It is the first release whose publish step guaranteed the manifest (--exact-required), so a missing manifest is refused from here and warned about below.",
   "sdk_provenance_floor": "0.764.0",
   "capability_handoff_floor": "0.790.1",
   "inspector_sdk_floor": "0.772.0",
@@ -39,6 +41,8 @@
   "common_cli_members": [
     "browser_capture/browser_process.mjs",
     "browser_capture/capture.mjs",
+    "browser_capture/document_canvas.mjs",
+    "browser_capture/font_faces.mjs",
     "browser_capture/form_control_theme.mjs",
     "browser_capture/health.mjs",
     "browser_capture/interaction_executor.mjs",

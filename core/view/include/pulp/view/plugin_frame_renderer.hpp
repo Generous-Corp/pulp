@@ -53,14 +53,27 @@ struct FrameGeometry {
     /// `PluginViewHost::Options::background_rgb`.
     std::uint32_t background_rgb = kEditorHostClearRgb;
 
+    /// The surface's exact physical size, when the platform reports one (the
+    /// client rect a Windows WM_SIZE carries). 0 derives it from logical ×
+    /// scale instead, which loses a pixel at a fractional scale: at 1.5× a
+    /// 1001 px client is 667 logical, and 667 × 1.5 truncates to 1000, so the
+    /// frame would be stretched over the window by a pixel, blurring it.
+    std::uint32_t physical_width = 0;
+    std::uint32_t physical_height = 0;
+
     bool has_design_viewport() const {
         return design_width > 0.0f && design_height > 0.0f;
     }
 
-    /// Physical-pixel dimensions = logical × scale, clamped to at least 1 so a
-    /// collapsed editor cannot ask for a zero-sized surface.
-    std::uint32_t pixel_width() const { return to_pixels(width); }
-    std::uint32_t pixel_height() const { return to_pixels(height); }
+    /// Physical-pixel dimensions: the reported physical size when there is
+    /// one, else logical × scale, clamped to at least 1 so a collapsed editor
+    /// cannot ask for a zero-sized surface.
+    std::uint32_t pixel_width() const {
+        return physical_width ? physical_width : to_pixels(width);
+    }
+    std::uint32_t pixel_height() const {
+        return physical_height ? physical_height : to_pixels(height);
+    }
 
 private:
     std::uint32_t to_pixels(float logical) const {
@@ -248,10 +261,13 @@ EditorSurfaces create_editor_surfaces(void* native_handle,
 /// path guaranteed to exist — the headless capture that proves a non-black
 /// frame with no GPU at all — so a divergence between the two copies would
 /// have meant the proof differed from the thing it proves.
-std::vector<std::uint8_t> raster_plugin_scene_rgba(View& root,
-                                                   const FrameGeometry& geometry,
-                                                   std::uint32_t* out_w,
-                                                   std::uint32_t* out_h);
+///
+/// `text_raster` is the glyph preblend the raster surface is created with, the
+/// same choice `SkiaSurface::set_text_raster_policy()` makes for the GPU path.
+std::vector<std::uint8_t>
+raster_plugin_scene_rgba(View& root, const FrameGeometry& geometry, std::uint32_t* out_w,
+                         std::uint32_t* out_h,
+                         canvas::TextRasterPolicy text_raster = canvas::TextRasterPolicy::legacy);
 
 /// Encode tightly packed RGBA8888 pixels as a PNG byte stream. Empty on
 /// failure or on empty input.

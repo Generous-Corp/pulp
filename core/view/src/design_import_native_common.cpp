@@ -1,4 +1,6 @@
 #include "design_import_native_common.hpp"
+#include "design_import_form_controls.hpp"
+#include "design_import_svg_stroke.hpp"
 #include "design_ir_helpers.hpp"
 
 #include "design_binding_metadata.hpp"
@@ -309,8 +311,7 @@ bool bind_imported_view(View& view,
                             .gesture_contract = text_or_empty(md.gesture_contract)});
         return true;
     }
-    if (auto* level = dynamic_cast<LevelDisplay*>(&view);
-        level && has_text(md.meter_source) && has_text(md.meter_channel)) {
+    if (auto* level = dynamic_cast<LevelDisplay*>(&view); level && md.has_meter_input()) {
         const NativeImportMeterBindingDescriptor descriptor{
             .route_id = text_or_empty(md.route_id),
             .meter_source = text_or_empty(md.meter_source),
@@ -390,8 +391,7 @@ bool can_bind_imported_view(View& view,
         return true;
     if (dynamic_cast<XYPad*>(&view) && has_text(md.x_param_key) && has_text(md.y_param_key))
         return true;
-    if (dynamic_cast<LevelDisplay*>(&view) && has_text(md.meter_source) &&
-        has_text(md.meter_channel))
+    if (dynamic_cast<LevelDisplay*>(&view) && md.has_meter_input())
         return true;
     if (dynamic_cast<SeriesDisplay*>(&view) && has_text(md.param_key) &&
         has_text(md.waveform_shape))
@@ -795,8 +795,10 @@ ResolvedNativeNode resolve_node(const IRNode& node,
     // the authored presentation (type). A select is collapsed; a tab remains
     // segmented. Respect the more specific presentation before the generic
     // selector audio role can erase it.
-    if (node.audio_widget == AudioWidgetType::selector &&
-        lower_copy(node.type) == "select") {
+    if (auto ua_kind = ua_form_control_kind(node)) {
+        out.kind = *ua_kind;
+    } else if (node.audio_widget == AudioWidgetType::selector &&
+               lower_copy(node.type) == "select") {
         out.kind = NativeWidgetKind::combo_box;
     } else if (auto audio_kind = kind_from_audio(node.audio_widget)) {
         out.kind = *audio_kind;
@@ -1403,31 +1405,16 @@ void apply_layout(View& view, const IRNode& node, std::optional<LayoutDirection>
         flex.dim_min_height = {100.0f, DimensionUnit::percent};
 }
 
-// Every CSS color a design can write, from ONE place.
-//
-// This exists because the fallback used to live at a single call site. Prefer
-// the hex fast path, then the shared CSS parser for rgb()/rgba()/transparent:
-// Figma demotes a hairline stroke (the FILTER & EQ grid `Line`s) to a 1px frame
-// whose fill is the stroke color — often rgba(171,171,171,0.1) — which
-// parse_hex_color drops, leaving the grid invisible.
-//
-// That fallback was attached to `background_color` alone, while SEVEN paint
-// sites here call parse_hex_color: background, text `color`, `border_color`, and
-// the four per-side border colors. So a design saying `color: rgba(...)` got
-// its background right and silently lost its TEXT and every BORDER. One branch
-// learned the lesson; its six siblings never heard it — the same shape as
-// setBoxShadow being emitted from the frame branch alone, so that 16 declared
-// shadows became 1.
-//
-// A helper rather than six more fallbacks, because the bug is that the
-// knowledge lived at a call site: the eighth paint site added later would have
-// repeated it.
-// The allowlist is what decides whether a colour reaches the paint site at all,
-// so a function missing from it is a colour silently NOT applied — the view
-// keeps its default and nothing reports a loss. `oklab()` / `oklch()` are the
-// forms Chromium serializes every modern colour syntax into, so a captured
-// design's text and fills arrive in them; without these two entries a bright
-// accent label rendered in the default text colour.
+// Every CSS color a design can write, from ONE place: the hex fast path, then
+// the shared CSS parser. Every paint site (background, text `color`, border and
+// the four per-side borders) goes through it, because a fallback that lives at
+// one call site leaves its siblings silently dropping `rgba(...)`: a Figma
+// hairline demoted to a 1px frame filled rgba(171,171,171,0.1) vanished, and a
+// `color: rgba(...)` lost its text and borders while its background survived.
+// The allowlist decides whether a colour reaches the paint site at all, so a
+// function missing from it is a colour silently NOT applied. `oklab()` /
+// `oklch()` are the forms Chromium serializes every modern colour syntax into;
+// without them a captured accent label rendered in the default text colour.
 static std::optional<Color> parse_any_css_color(const std::string& value) {
     if (auto color = parse_hex_color(value)) return color;
     if (value.rfind("rgb", 0) == 0 || value.rfind("hsl", 0) == 0 ||
@@ -1459,25 +1446,13 @@ void apply_visual_style(View& view, const IRStyle& style,
     if (style.background_gradient && !style.background_gradient->empty())
         apply_css_background_gradient(view, *style.background_gradient);
 
-    // Box-shadows, in CSS author order.
-    //
-    // Not painting these was the single largest fidelity gap in an imported
-    // panel, and it did not present as a shadow bug. A knob whose softness IS
-    // its shadow stack — an inset bottom sheen plus two spread rings — renders
-    // as a flat, hard-edged disc, so the face reads as an over-contrasty
-    // gradient and the search goes to the gradient code, which was correct all
-    // along. Measured on one generated panel: the conic samples matched Chrome
-    // within 4/255 while the same node failed on the annulus its rings should
-    // have drawn.
-    //
-    // The first layer paints ON TOP (View::add_box_shadow appends and the
-    // painter iterates in reverse), which is the order the IR already holds, so
-    // set-then-append reproduces the cascade without reversing anything here.
-    //
-    // `skip_box_shadow` is for a node whose body is painted by the layer
-    // BENEATH it — see body_is_painted_beneath(). Installing the stack there
-    // draws every layer a second time over the copy that layer already drew,
-    // and two composites of one translucent layer are not one composite.
+    // Box-shadows, in CSS author order. A knob whose softness IS its shadow
+    // stack (an inset sheen plus spread rings) otherwise renders as a flat,
+    // hard-edged disc that reads as a gradient bug. The first layer paints ON
+    // TOP (add_box_shadow appends and the painter iterates in reverse), which is
+    // the IR's order, so set-then-append reproduces the cascade. `skip_box_shadow`
+    // marks a node whose body the layer BENEATH paints (body_is_painted_beneath()):
+    // installing the stack there would composite each translucent layer twice.
     if (!skip_box_shadow && !style.box_shadow.empty()) {
         bool first = true;
         for (const auto& layer : style.box_shadow) {
@@ -1503,9 +1478,10 @@ void apply_visual_style(View& view, const IRStyle& style,
         view.set_background_position(*style.background_position);
     if (style.background_size)
         view.set_background_size(*style.background_size);
-    // object-fit is honored by ImageView::paint; on plain Views it sits in the
-    // same style_extras slot the bridge writes, so applying it unconditionally
-    // keeps the native tree in lockstep with the JS lane's setObjectFit.
+    if (style.background_origin)
+        view.set_background_origin(*style.background_origin);
+    // object-fit is honored by ImageView::paint; plain Views keep it in the bridge's
+    // style_extras slot, so the native tree matches the JS lane's setObjectFit.
     if (style.object_fit)
         view.set_object_fit(*style.object_fit);
     if (style.color) {
@@ -1517,12 +1493,10 @@ void apply_visual_style(View& view, const IRStyle& style,
     if (style.border_radius)
         view.set_border_radius(*style.border_radius);
 
-    // Filters, backdrop filters and blend modes. The JS lane already parses
-    // these — web-compat-style-decl-paint.js pulls the blur radius out and
-    // routes it to setBackdropFilter -> View::set_backdrop_blur — but the
-    // native tree did not, so the same document rendered soft through one lane
-    // and hard-edged through the other. An atmospheric design lives or dies on
-    // this: a 60px bloom with no blur is a solid shape sitting on the panel.
+    // Filters, backdrop filters and blend modes, lowered the way the JS lane does
+    // (web-compat-style-decl-paint.js routes the blur radius to setBackdropFilter ->
+    // View::set_backdrop_blur) so both lanes render the same document equally soft.
+    // An atmospheric design depends on it: a 60px bloom with no blur is a solid shape.
     if (style.filter) {
         if (const auto radius = css_blur_radius(*style.filter))
             view.set_filter_blur(*radius);
@@ -1746,16 +1720,12 @@ void apply_label_style(Label& label, const IRStyle& style) {
     }
     if (style.white_space && lower_copy(*style.white_space) != "nowrap")
         label.set_multi_line(true);
-    // Vertically center a single-line label whose design slot is taller than its
-    // font (e.g. an 8px "SEARCH" in a 17px box, tab digits in a 20px button).
-    // Figma centers text in a fixed-height frame but the IR drops
-    // textAlignVertical, so derive it from slot-vs-font. The web-compat codegen
-    // emits the SAME rule as `verticalAlign:middle` (design_codegen.cpp), so
-    // both render paths converge on Label::set_vertical_align(center) and the
-    // screenshot-parity invariant holds. The Label default is top.
-    if (style.height && style.font_size &&
-        *style.height > *style.font_size * 1.15f)
+    // The rule every lane shares (design_ir_helpers.hpp); the Label default is top.
+    const auto valign = imported_vertical_align(style);
+    if (valign == ImportedVerticalAlign::center)
         label.set_vertical_align(canvas::TextVerticalAlign::center);
+    else if (valign == ImportedVerticalAlign::bottom)
+        label.set_vertical_align(canvas::TextVerticalAlign::bottom);
 }
 
 canvas::AttributedString build_attributed_text(const IRNode& node) {
@@ -1918,6 +1888,13 @@ void apply_svg_paint(SvgPathWidget& path, const IRNode& node) {
             break;
         }
     }
+    const auto stroke_style = svg_stroke_style_attributes(node);
+    if (stroke_style.cap)
+        path.set_stroke_cap(*stroke_style.cap);
+    if (stroke_style.join)
+        path.set_stroke_join(*stroke_style.join);
+    if (stroke_style.miter_limit)
+        path.set_stroke_miter_limit(*stroke_style.miter_limit);
 }
 
 void apply_svg_paint(SvgRectWidget& rect, const IRNode& node) {
@@ -2240,6 +2217,7 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             auto label = std::make_unique<Label>(text);
             apply_label_style(*label, node.style);
             apply_text_runs(*label, node);
+            label->set_font_smoothing(captured_font_smoothing(node));
             // Adopt the browser's own line breaking when the capture carried
             // it. Label validates the basis before using it, so a stale cache
             // costs a reflow rather than a wrong layout.
@@ -2330,8 +2308,13 @@ std::unique_ptr<View> make_widget(const IRNode& node,
         case NativeWidgetKind::checkbox: {
             auto checkbox = std::make_unique<Checkbox>();
             checkbox->set_checked(semantics.checked);
+            apply_ua_checkbox(*checkbox, node);
             return checkbox;
         }
+        case NativeWidgetKind::range_slider:
+            return make_ua_range_slider(node);
+        case NativeWidgetKind::button_surface:
+            return make_ua_button_surface(node);
         case NativeWidgetKind::stepper: {
             auto stepper = std::make_unique<Stepper>();
             stepper->set_range(node.audio_min, node.audio_max);
@@ -2787,6 +2770,8 @@ bool is_interactive_native_kind(NativeWidgetKind kind) {
         case NativeWidgetKind::text_button:
         case NativeWidgetKind::text_editor:
         case NativeWidgetKind::checkbox:
+        case NativeWidgetKind::range_slider:
+        case NativeWidgetKind::button_surface:
         case NativeWidgetKind::toggle_button:
         case NativeWidgetKind::combo_box:
         case NativeWidgetKind::knob:
@@ -2815,6 +2800,8 @@ bool native_kind_owns_imported_child_hits(NativeWidgetKind kind) {
         case NativeWidgetKind::text_button:
         case NativeWidgetKind::text_editor:
         case NativeWidgetKind::checkbox:
+        case NativeWidgetKind::range_slider:
+        case NativeWidgetKind::button_surface:
         case NativeWidgetKind::toggle_button:
         case NativeWidgetKind::combo_box:
         case NativeWidgetKind::knob:
@@ -2893,6 +2880,10 @@ const char* native_widget_kind_name(NativeWidgetKind kind) {
         case NativeWidgetKind::text_button: return "text_button";
         case NativeWidgetKind::text_editor: return "text_editor";
         case NativeWidgetKind::checkbox: return "checkbox";
+        case NativeWidgetKind::range_slider:
+            return "range_slider";
+        case NativeWidgetKind::button_surface:
+            return "button_surface";
         case NativeWidgetKind::toggle_button: return "toggle_button";
         case NativeWidgetKind::segmented: return "segmented";
         case NativeWidgetKind::stepper: return "stepper";
@@ -3115,7 +3106,7 @@ std::unique_ptr<View> build_native_view_tree(const DesignIR& ir,
                                              const NativeMaterializeOptions& options) {
     try {
         const auto& effective_manifest = manifest.assets.empty() ? ir.asset_manifest : manifest;
-        const DesignIR prepared = prepare_native_design_ir(ir);
+        const DesignIR prepared = prepare_native_ir_with_fonts(ir, effective_manifest, options);
         auto resolved = resolve_design_ir_native(prepared, effective_manifest);
 
         std::vector<ImportDiagnostic> materialize_diagnostics;

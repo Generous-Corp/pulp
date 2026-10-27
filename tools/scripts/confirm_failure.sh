@@ -35,7 +35,16 @@
 # pulp-test-cli-shellout while the edited code is compiled into pulp-cpp.
 # Without it the loop fingerprints the wrong file, never sees the edit land,
 # and reports INCONCLUSIVE by construction - which reads as "the test does not
-# cover this" when the truth is "the wrong file was fingerprinted".
+# cover this" when the truth is "the wrong file was fingerprinted". With
+# --subject the test executable is left in place (it only drives the subject),
+# so --target may name the subject's target alone, unless the driver links the
+# edited source too: then the run stops INCONCLUSIVE and asks for a --target
+# that rebuilds the driver as well.
+#
+# A Catch2 test spec splits on commas, so a --test naming a test case whose
+# name contains a comma matches nothing and the baseline comes back
+# INCONCLUSIVE. Select such a case by a comma-free tag or a wildcard instead
+# ("[my-tag]", "Name up to the comma*").
 #
 #   confirm_failure.sh --file <path> --break <sed/perl cmd> \
 #                      --no-build --test <command>
@@ -291,8 +300,15 @@ bump_mtime() {
 # recreate, so the rest of the build dir ends as it began.
 invalidate() {
     [ "$NO_BUILD" -eq 1 ] && return 0
-    rm -f "$TEST_BINARY" 2>/dev/null || true
-    [ -z "$SUBJECT" ] || rm -f "$SUBJECT" 2>/dev/null || true
+    # With --subject the edit lands in the subject, and the test executable is
+    # only the driver that runs it. --target may build the subject alone, so a
+    # deleted driver would never come back; leave it and invalidate the
+    # subject instead.
+    if [ -n "$SUBJECT" ]; then
+        rm -f "$SUBJECT" 2>/dev/null || true
+    else
+        rm -f "$TEST_BINARY" 2>/dev/null || true
+    fi
     local objects="${OBJ_BASE}.o"
     # A header's dependents are unknown here, so every object goes.
     [ "$IS_HEADER" -eq 1 ] && objects='*.o'
@@ -333,8 +349,9 @@ build_and_verify_recompile() {
     if ! PULP_BUILD_JOBS="$JOBS" bash "$GOVERNED_BUILD" \
         cmake --build "$BUILD_DIR" --target "$TARGET" > "$BUILD_LOG" 2>&1; then
         if grep -qE '\berror:' "$BUILD_LOG"; then
-            # A break that does not compile still proves the test depends on the
-            # code, but it is not the same evidence, so say which one happened.
+            # A break that does not compile proves nothing about the test: the
+            # binary it would run was never built. The caller treats it as
+            # INCONCLUSIVE.
             say "$phase: the edit does not compile"
             return 1
         fi
@@ -414,6 +431,51 @@ if [ "$BASELINE_BINARY" = "absent" ]; then
     --no-build"
 fi
 
+# With --subject the driver is left in place, so it must not carry the edited
+# code itself: --target rebuilds the subject only, and a driver that also links
+# the edited object would run the stale copy and could pass with the fix
+# broken (a false NOT CONFIRMED). Compare the strong global symbols the edited
+# object defines with the strong symbols the driver defines; any overlap means
+# the driver links it. A header edit has no object of its own, so it cannot be checked
+# this way and is left to the caller.
+driver_links_edited_object() {
+    [ -n "$SUBJECT" ] && [ "$NO_BUILD" -eq 0 ] && [ "$IS_HEADER" -eq 0 ] || return 1
+    [ -f "$TEST_BINARY" ] || return 1
+    command -v nm >/dev/null 2>&1 || return 1
+    python3 - "$BUILD_DIR" "${OBJ_BASE}.o" "$TEST_BINARY" "$STASH" <<'PY'
+import os, subprocess, sys
+build, obj_name, driver, stash = sys.argv[1:5]
+# Strong text/data definitions only: weak (W/w, V/v) and inline template
+# instantiations appear in every user and prove nothing.
+def defined(path, kinds):
+    out = subprocess.run(["nm", path], capture_output=True, text=True).stdout
+    syms = set()
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) >= 3 and parts[-2] in kinds:
+            syms.add(parts[-1])
+    return syms
+# The object contributes its global definitions only. Its locals (statics as
+# _ZL<name>, anonymous namespaces as _GLOBAL__N_1) recur in unrelated objects
+# and would match a driver that never linked it. The driver side keeps locals
+# too: a hidden-visibility global is local once linked into an executable.
+edited = set()
+for root, dirs, files in os.walk(build):
+    if stash and os.path.abspath(root).startswith(os.path.abspath(stash)):
+        continue
+    if obj_name in files:
+        edited |= defined(os.path.join(root, obj_name), ("T", "D", "S", "B"))
+linked = defined(driver, ("T", "t", "D", "d", "S", "s", "B", "b"))
+sys.exit(0 if edited and edited & linked else 1)
+PY
+}
+if driver_links_edited_object; then
+    die_inconclusive "the test driver '$TEST_BINARY' also links $BASE, and with
+    --subject the driver is not rebuilt, so it would run the unbroken copy.
+    Pass a --target that builds the driver as well as the subject (the driver's
+    own target usually does)"
+fi
+
 # ── 2. Break the fix ─────────────────────────────────────────────────────────
 say "breaking the fix in $FILE"
 BEFORE_HASH="$(git hash-object "$FILE")"
@@ -461,6 +523,11 @@ if ! run_test restored; then
 fi
 
 # ── 4. Verdict ───────────────────────────────────────────────────────────────
+if [ "$BUILD_STATUS" -eq 1 ]; then
+    die_inconclusive "the break does not compile, so the test never ran against
+    broken code. Write a --break that still builds (change a value or a branch,
+    not a signature)"
+fi
 if [ "$BROKEN_PASSES" -eq 1 ]; then
     say "NOT CONFIRMED — the test passed with the fix broken."
     say "  It does not cover this change. Common causes: the assertion restates"
