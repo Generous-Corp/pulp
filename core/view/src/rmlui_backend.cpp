@@ -5,10 +5,12 @@
 
 #include <algorithm>
 #include <atomic>
+#include <climits>
 #include <cstddef>
 #include <fstream>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -23,7 +25,8 @@ namespace {
 
 class RenderAdapter final : public Rml::RenderInterface {
   public:
-    explicit RenderAdapter(pulp::view::rmlui::RenderInterface& sink) : sink_(sink) {}
+    RenderAdapter(AssetProvider& assets, pulp::view::rmlui::RenderInterface& sink)
+        : assets_(assets), sink_(sink) {}
 
     Rml::CompiledGeometryHandle CompileGeometry(Rml::Span<const Rml::Vertex> vertices,
                                                 Rml::Span<const int> indices) override {
@@ -49,16 +52,22 @@ class RenderAdapter final : public Rml::RenderInterface {
     }
 
     void RenderGeometry(Rml::CompiledGeometryHandle handle, Rml::Vector2f translation,
-                        Rml::TextureHandle) override {
+                        Rml::TextureHandle texture_handle) override {
         if (handle == 0 || handle > geometries_.size())
             return;
         const auto& geometry = geometries_[static_cast<std::size_t>(handle - 1)];
-        sink_.submit(DrawCommand{DrawCommand::Kind::rectangle,
-                                 geometry.x + translation.x,
-                                 geometry.y + translation.y,
-                                 geometry.width,
-                                 geometry.height,
-                                 {}});
+        DrawCommand command{DrawCommand::Kind::rectangle,
+                            geometry.x + translation.x,
+                            geometry.y + translation.y,
+                            geometry.width,
+                            geometry.height,
+                            {},
+                            {}};
+        if (texture_handle != 0 && texture_handle <= textures_.size()) {
+            command.kind = DrawCommand::Kind::texture;
+            command.texture_path = textures_[static_cast<std::size_t>(texture_handle - 1)].path;
+        }
+        sink_.submit(command);
     }
 
     void ReleaseGeometry(Rml::CompiledGeometryHandle handle) override {
@@ -66,17 +75,59 @@ class RenderAdapter final : public Rml::RenderInterface {
             geometries_[static_cast<std::size_t>(handle - 1)] = {};
     }
 
-    Rml::TextureHandle LoadTexture(Rml::Vector2i&, const Rml::String&) override {
-        return 0;
+    Rml::TextureHandle LoadTexture(Rml::Vector2i& dimensions, const Rml::String& source) override {
+        Asset asset;
+        if (assets_.load(source, asset) != Status::ok)
+            return 0;
+        const auto size = image_dimensions(asset.bytes);
+        if (!size)
+            return 0;
+        dimensions = {size->first, size->second};
+        textures_.push_back(Texture{std::move(asset.path)});
+        return static_cast<Rml::TextureHandle>(textures_.size());
     }
-    Rml::TextureHandle GenerateTexture(Rml::Span<const Rml::byte>, Rml::Vector2i) override {
-        return 0;
+    Rml::TextureHandle GenerateTexture(Rml::Span<const Rml::byte>,
+                                       Rml::Vector2i dimensions) override {
+        if (dimensions.x <= 0 || dimensions.y <= 0)
+            return 0;
+        textures_.push_back(Texture{});
+        return static_cast<Rml::TextureHandle>(textures_.size());
     }
-    void ReleaseTexture(Rml::TextureHandle) override {}
+    void ReleaseTexture(Rml::TextureHandle handle) override {
+        if (handle != 0 && handle <= textures_.size())
+            textures_[static_cast<std::size_t>(handle - 1)] = {};
+    }
     void EnableScissorRegion(bool) override {}
     void SetScissorRegion(Rml::Rectanglei) override {}
 
   private:
+    struct Texture {
+        std::string path;
+    };
+
+    static std::optional<std::pair<int, int>> image_dimensions(const std::string& bytes) {
+        // PNG: signature, IHDR length/type, then big-endian width/height.
+        if (bytes.size() >= 24 && static_cast<unsigned char>(bytes[0]) == 0x89 && bytes[1] == 'P' &&
+            bytes[2] == 'N' && bytes[3] == 'G' && bytes[12] == 'I' && bytes[13] == 'H' &&
+            bytes[14] == 'D' && bytes[15] == 'R') {
+            const auto u32 = [&](std::size_t offset) {
+                return (static_cast<std::uint32_t>(static_cast<unsigned char>(bytes[offset]))
+                        << 24) |
+                       (static_cast<std::uint32_t>(static_cast<unsigned char>(bytes[offset + 1]))
+                        << 16) |
+                       (static_cast<std::uint32_t>(static_cast<unsigned char>(bytes[offset + 2]))
+                        << 8) |
+                       static_cast<std::uint32_t>(static_cast<unsigned char>(bytes[offset + 3]));
+            };
+            const auto width = u32(16);
+            const auto height = u32(20);
+            if (width > 0 && height > 0 && width <= INT_MAX && height <= INT_MAX)
+                return std::pair{static_cast<int>(width), static_cast<int>(height)};
+        }
+        return std::nullopt;
+    }
+
+    AssetProvider& assets_;
     struct Geometry {
         float x = 0.0f;
         float y = 0.0f;
@@ -86,6 +137,7 @@ class RenderAdapter final : public Rml::RenderInterface {
 
     pulp::view::rmlui::RenderInterface& sink_;
     std::vector<Geometry> geometries_;
+    std::vector<Texture> textures_;
 };
 
 class FileAdapter final : public Rml::FileInterface {
@@ -148,7 +200,7 @@ class FileAdapter final : public Rml::FileInterface {
 
 struct Backend::Runtime {
     Runtime(AssetProvider& assets, RenderInterface& renderer)
-        : file(assets), render(renderer),
+        : file(assets), render(assets, renderer),
           context_name("pulp-rmlui-" + std::to_string(next_context_id.fetch_add(1))) {}
 
     FileAdapter file;

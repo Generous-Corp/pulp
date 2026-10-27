@@ -47,6 +47,29 @@ TEST_CASE("RmlUi backend parses and lowers a document through the Pulp renderer 
     backend.close();
 }
 
+TEST_CASE("RmlUi backend admits manifest textures and records their source path") {
+    Headless headless;
+    // A valid PNG signature and IHDR dimensions are sufficient at this seam;
+    // the eventual Skia/Dawn sink owns pixel upload and decoding.
+    std::string png("\x89PNG\r\n\x1a\n", 8);
+    png.append("\0\0\0\rIHDR\0\0\0\x10\0\0\0\x08\x08\06\0\0\0", 21);
+    headless.add_asset("skin/button.png", std::move(png));
+    headless.add_asset(
+        "editor.rml",
+        "<rml><body><img src='skin/button.png' style='width:16px;height:8px;'/></body></rml>");
+    Backend backend(headless, headless, headless);
+
+    REQUIRE(backend.open(64, 64) == Status::ok);
+    REQUIRE(backend.load_document("editor.rml") == Status::ok);
+    backend.render();
+    const auto texture = std::find_if(
+        headless.commands().begin(), headless.commands().end(),
+        [](const DrawCommand& command) { return command.kind == DrawCommand::Kind::texture; });
+    REQUIRE(texture != headless.commands().end());
+    REQUIRE(texture->texture_path == "skin/button.png");
+    backend.close();
+}
+
 TEST_CASE("RmlUi backend fails closed instead of double-initializing process-global RmlUi") {
     Headless first_headless;
     Headless second_headless;
@@ -75,7 +98,7 @@ TEST_CASE("headless RmlUi contract fails closed for missing and rejected assets"
 TEST_CASE("headless RmlUi render commands are isolated per frame") {
     Headless headless;
     headless.begin_frame(100, 80);
-    headless.submit(DrawCommand{DrawCommand::Kind::rectangle, 1, 2, 3, 4, {}});
+    headless.submit(DrawCommand{DrawCommand::Kind::rectangle, 1, 2, 3, 4, {}, {}});
     headless.end_frame();
     REQUIRE(headless.commands().size() == 1);
     headless.begin_frame(20, 10);

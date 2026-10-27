@@ -49,13 +49,16 @@ class RootedAssetProvider final : public AssetProvider {
 };
 
 struct DrawCommand {
-    enum class Kind : std::uint8_t { rectangle, text };
+    enum class Kind : std::uint8_t { rectangle, texture, text };
     Kind kind = Kind::rectangle;
     float x = 0.0f;
     float y = 0.0f;
     float width = 0.0f;
     float height = 0.0f;
     std::string text;
+    // For texture commands this is the manifest-relative source path. An
+    // empty path identifies a generated texture submitted by RmlUi.
+    std::string texture_path;
 };
 
 class RenderInterface {
