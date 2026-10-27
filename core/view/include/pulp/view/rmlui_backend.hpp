@@ -99,6 +99,12 @@ class Backend {
     Status load_document(std::string_view path);
     Status dispatch_lua(std::string_view callback);
     Status invoke_action(std::string_view action);
+    Status process_mouse_move(int x, int y, int key_modifier_state = 0);
+    Status process_mouse_button_down(int button_index, int key_modifier_state = 0);
+    Status process_mouse_button_up(int button_index, int key_modifier_state = 0);
+    Status process_mouse_wheel(float x, float y, int key_modifier_state = 0);
+    Status process_mouse_leave();
+    [[nodiscard]] bool mouse_interacting() const noexcept;
     void render();
     void close();
     [[nodiscard]] bool is_open() const noexcept {

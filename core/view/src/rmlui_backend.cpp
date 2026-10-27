@@ -356,6 +356,45 @@ Status Backend::invoke_action(std::string_view action) {
     return actions_ ? actions_->invoke(action) : Status::rejected;
 }
 
+Status Backend::process_mouse_move(int x, int y, int key_modifier_state) {
+    if (!open_ || !runtime_ || !runtime_->context)
+        return Status::not_open;
+    runtime_->context->ProcessMouseMove(x, y, key_modifier_state);
+    return Status::ok;
+}
+
+Status Backend::process_mouse_button_down(int button_index, int key_modifier_state) {
+    if (!open_ || !runtime_ || !runtime_->context)
+        return Status::not_open;
+    runtime_->context->ProcessMouseButtonDown(button_index, key_modifier_state);
+    return Status::ok;
+}
+
+Status Backend::process_mouse_button_up(int button_index, int key_modifier_state) {
+    if (!open_ || !runtime_ || !runtime_->context)
+        return Status::not_open;
+    runtime_->context->ProcessMouseButtonUp(button_index, key_modifier_state);
+    return Status::ok;
+}
+
+Status Backend::process_mouse_wheel(float x, float y, int key_modifier_state) {
+    if (!open_ || !runtime_ || !runtime_->context)
+        return Status::not_open;
+    runtime_->context->ProcessMouseWheel({x, y}, key_modifier_state);
+    return Status::ok;
+}
+
+Status Backend::process_mouse_leave() {
+    if (!open_ || !runtime_ || !runtime_->context)
+        return Status::not_open;
+    runtime_->context->ProcessMouseLeave();
+    return Status::ok;
+}
+
+bool Backend::mouse_interacting() const noexcept {
+    return open_ && runtime_ && runtime_->context && runtime_->context->IsMouseInteracting();
+}
+
 void Backend::render() {
     if (!open_)
         return;
