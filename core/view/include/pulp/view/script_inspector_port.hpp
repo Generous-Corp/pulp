@@ -5,6 +5,8 @@
 #include <memory>
 #include <string>
 
+#include <pulp/view/reload_capabilities.hpp>
+
 namespace pulp::view {
 
 class ScriptEngine;
@@ -22,6 +24,12 @@ class ScriptInspectorPort {
     using EvaluationDeadline = std::chrono::steady_clock::time_point;
 
     virtual ~ScriptInspectorPort();
+
+    /// Tell the port which native capabilities the realm it is about to be
+    /// attached to holds. The session calls this before every attach() so an
+    /// evaluator can refuse a realm whose explicit grant carries an effectful
+    /// capability. The default keeps a port that does not evaluate unchanged.
+    virtual void set_realm_capabilities(const CapabilitySet& /*granted*/) {}
 
     /// Point the port at `engine`, or at none with nullptr.
     virtual void attach(ScriptEngine* engine) = 0;

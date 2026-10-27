@@ -386,24 +386,34 @@ TEST_CASE("WebCompat: fetch bridge preserves UTF-8 JSON asset payloads", "[webco
 TEST_CASE("WebCompat: file and blob URLs stay readable through the browser helpers", "[webcompat][browser][fetch]") {
     TestEnvironment env;
 
+    // A file URL is readable when it names a file under a reviewed asset
+    // root; the same URL outside every root is refused.
     const std::string fileText = "Pulp ✓ file";
-    const auto tempPath = std::filesystem::temp_directory_path() / "pulp-phase13-fetch.txt";
-    {
-        std::ofstream out(tempPath, std::ios::binary);
+    const auto assetRoot = std::filesystem::temp_directory_path() / "pulp-phase13-fetch-root";
+    std::filesystem::create_directories(assetRoot);
+    const auto tempPath = assetRoot / "pulp-phase13-fetch.txt";
+    const auto outsidePath =
+        std::filesystem::temp_directory_path() / "pulp-phase13-fetch-outside.txt";
+    for (const auto& path : {tempPath, outsidePath}) {
+        std::ofstream out(path, std::ios::binary);
         out << fileText;
     }
+    env.bridge->set_asset_roots({assetRoot});
 
-    const auto genericPath = tempPath.generic_string();
-    const std::string fileUrl = std::string("file://")
-        + (genericPath.empty() || genericPath.front() == '/' ? "" : "/")
-        + genericPath;
-    const std::string fileExpr = "'" + fileUrl + "'";
+    const auto fileUrlFor = [](const std::filesystem::path& path) {
+        const auto genericPath = path.generic_string();
+        return std::string("file://") +
+               (genericPath.empty() || genericPath.front() == '/' ? "" : "/") + genericPath;
+    };
+    const std::string fileExpr = "'" + fileUrlFor(tempPath) + "'";
 
     auto fetchedText = env.engine.evaluate(
         "(function() {"
         "  var response = __responseFromAssetRecord(__loadAssetSync__(" + fileExpr + "));"
         "  return response.text();"
         "})()");
+    auto outsideStatus =
+        env.engine.evaluate("__loadAssetSync__('" + fileUrlFor(outsidePath) + "').status");
 
     env.eval(R"(
         var phase13Blob = new Blob(
@@ -416,11 +426,14 @@ TEST_CASE("WebCompat: file and blob URLs stay readable through the browser helpe
     auto blobLabel = env.engine.evaluate("__responseFromDataUri(phase13BlobUrl, phase13BlobUrl).json().label");
 
     REQUIRE(std::string(fetchedText.getWithDefault<std::string_view>("")) == fileText);
+    REQUIRE(outsideStatus.getWithDefault<int32_t>(0) == 403);
     const auto blobUrlString = std::string(blobUrl.getWithDefault<std::string_view>(""));
     REQUIRE(blobUrlString.find("data:application/json;charset=utf-8;base64,") == 0);
     REQUIRE(std::string(blobLabel.getWithDefault<std::string_view>("")) == "Pulp ✓");
 
-    std::filesystem::remove(tempPath);
+    std::error_code ec;
+    std::filesystem::remove_all(assetRoot, ec);
+    std::filesystem::remove(outsidePath, ec);
 }
 
 TEST_CASE("WebCompat: element.id assignment", "[webcompat][element]") {
