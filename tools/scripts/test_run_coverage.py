@@ -44,6 +44,7 @@ from unittest import mock
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 SCRIPT = REPO_ROOT / "scripts" / "run_coverage.sh"
 CTEST_POLICY = REPO_ROOT / "scripts" / "coverage_ctest_policy.sh"
+NATIVE_PATHS = REPO_ROOT / "scripts" / "coverage_native_paths.sh"
 sys.path.insert(0, str(REPO_ROOT / "tools" / "scripts"))
 from lcov_cobertura import LcovCobertura  # noqa: E402
 
@@ -236,10 +237,11 @@ class ObjectDiscoveryTests(unittest.TestCase):
         text = SCRIPT.read_text()
         self.assertIn('OBJ_RSP=', text,
                       "object list must be written to a response file")
-        self.assertIn('printf -- \'-object\\n"%s"\\n\' "${tok}" >> "${OBJ_RSP}"', text,
+        self.assertIn('printf -- \'-object\\n"%s"\\n\' "${native}"', text,
                       "response file must be built one -object/path pair at a time, "
                       "with the path double-quoted so a workspace path containing a "
                       "space stays a single -object argument")
+        self.assertIn('done > "${OBJ_RSP}"', text)
         self.assertGreaterEqual(
             text.count('"@${OBJ_RSP}"'), 3,
             "llvm-cov report, show, and export must each pass objects via the "
@@ -409,7 +411,8 @@ class ObjectDiscoveryTests(unittest.TestCase):
     def test_merge_uses_one_input_list_invocation(self) -> None:
         text = SCRIPT.read_text()
         self.assertIn(
-            'find "${PROFRAW_DIR}" -name \'*.profraw\' -type f -print > "${PROFILE_INPUTS}"',
+            'find "${PROFRAW_DIR}" -name \'*.profraw\' -type f -print \\\n'
+            '    | coverage_native_path_list > "${PROFILE_INPUTS}"',
             text,
         )
         self.assertIn('--input-files="${PROFILE_INPUTS}"', text)
@@ -419,6 +422,71 @@ class ObjectDiscoveryTests(unittest.TestCase):
             "xargs may split a large shard set into multiple merges whose "
             "shared output path causes later invocations to discard earlier data.",
         )
+
+
+class NativePathListTests(unittest.TestCase):
+    """Path lists that native Windows LLVM tools read from a file.
+
+    MSYS translates argv for a native program but never the contents of a
+    file, so the llvm-profdata --input-files list and the llvm-cov @response
+    file must already hold native paths on the os-windows leg.
+    """
+
+    # Mimics `cygpath -m -f -` for drive paths: /d/a/x -> D:/a/x.
+    CYGPATH_STUB = textwrap.dedent("""\
+        #!/usr/bin/env bash
+        echo "$*" >> "$CYGPATH_CALLS"
+        while IFS= read -r line; do
+            drive=$(printf '%s' "${line:1:1}" | tr '[:lower:]' '[:upper:]')
+            printf '%s:%s\\n' "${drive}" "${line:2}"
+        done
+        """)
+
+    def _run(self, stdin: str, *, msystem: str | None, cygpath: bool) -> tuple[subprocess.CompletedProcess, str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            stub_bin = Path(tmp) / "bin"
+            stub_bin.mkdir()
+            calls = Path(tmp) / "calls"
+            if cygpath:
+                stub = stub_bin / "cygpath"
+                stub.write_text(self.CYGPATH_STUB, encoding="utf-8")
+                stub.chmod(0o755)
+            env = {"PATH": f"{stub_bin}:/usr/bin:/bin", "CYGPATH_CALLS": str(calls)}
+            if msystem is not None:
+                env["MSYSTEM"] = msystem
+            result = subprocess.run(
+                ["bash", "-c", f'source "{NATIVE_PATHS}"; coverage_native_path_list'],
+                input=stdin, capture_output=True, text=True, encoding="utf-8", env=env, check=False,
+            )
+            return result, calls.read_text(encoding="utf-8") if calls.exists() else ""
+
+    def test_msys_lists_are_rewritten_to_native_paths(self) -> None:
+        result, calls = self._run(
+            "/d/a/pulp/build-coverage/profraw/pulp-1_0.profraw\n/d/a/b c/x.exe\n",
+            msystem="MINGW64", cygpath=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(),
+                         ["D:/a/pulp/build-coverage/profraw/pulp-1_0.profraw", "D:/a/b c/x.exe"])
+        self.assertEqual(calls.strip(), "-m -f -")
+
+    def test_posix_hosts_pass_lists_through_unchanged(self) -> None:
+        lines = "/home/runner/build-coverage/profraw/pulp-1_0.profraw\n/Volumes/CI Builds/x\n"
+        result, calls = self._run(lines, msystem=None, cygpath=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, lines)
+        self.assertEqual(calls, "", "cygpath must not run outside MSYS")
+
+    def test_msys_without_cygpath_passes_through(self) -> None:
+        result, _ = self._run("/d/a/x\n", msystem="MINGW64", cygpath=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "/d/a/x\n")
+
+    def test_both_file_read_lists_go_through_the_helper(self) -> None:
+        text = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn('source "${SCRIPT_DIR}/coverage_native_paths.sh"', text)
+        self.assertEqual(text.count("| coverage_native_path_list"), 2,
+                         "the profdata input list and the llvm-cov response file "
+                         "must both be rewritten to native paths")
 
 
 class ProfilePoolBehaviourTests(unittest.TestCase):
@@ -580,6 +648,7 @@ class StaleCacheTests(unittest.TestCase):
         (repo / "scripts").mkdir()
         (repo / "scripts" / "run_coverage.sh").symlink_to(SCRIPT)
         (repo / "scripts" / "coverage_ctest_policy.sh").symlink_to(CTEST_POLICY)
+        (repo / "scripts" / "coverage_native_paths.sh").symlink_to(NATIVE_PATHS)
 
         # Provide stub clang/llvm-profdata/llvm-cov so the preflight
         # checks pass even on hosts without a real toolchain.
@@ -632,6 +701,7 @@ class BuildFailureDiagnosticsTests(unittest.TestCase):
             stub_cmake = stub_bin / "cmake"
             stub_cmake.write_text(
                 "#!/usr/bin/env bash\n"
+                'if [[ -n "${STUB_CMAKE_ARGS_LOG:-}" ]]; then printf \'%s\\n\' "$@" >> "$STUB_CMAKE_ARGS_LOG"; fi\n'
                 'if [[ "$1" == "--build" ]]; then\n'
                 f"{build_body}\n"
                 "    exit 2\n"
@@ -661,6 +731,7 @@ class BuildFailureDiagnosticsTests(unittest.TestCase):
             (repo / "scripts").mkdir(parents=True)
             (repo / "scripts" / "run_coverage.sh").symlink_to(SCRIPT)
             (repo / "scripts" / "coverage_ctest_policy.sh").symlink_to(CTEST_POLICY)
+            (repo / "scripts" / "coverage_native_paths.sh").symlink_to(NATIVE_PATHS)
             # The governed wrapper's lease logic is not under test here.
             (repo / "tools" / "ci").mkdir(parents=True)
             wrapper = repo / "tools" / "ci" / "governed-build.sh"
@@ -670,6 +741,8 @@ class BuildFailureDiagnosticsTests(unittest.TestCase):
             env = os.environ.copy()
             env["PATH"] = f"{stub_bin}:{env['PATH']}"
             env.pop("GITHUB_ACTIONS", None)
+            env.pop("MSYSTEM", None)
+            env.pop("OS", None)
             env.update(extra_env or {})
             return subprocess.run(
                 ["bash", str(repo / "scripts" / "run_coverage.sh")],
@@ -713,6 +786,38 @@ class BuildFailureDiagnosticsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("flood 1", result.stderr)
         self.assertIn("stdout-only-step", result.stderr)
+
+    def test_lld_link_errors_print_the_mismatching_objects(self) -> None:
+        # lld-link puts the two disagreeing objects on the lines after the
+        # error; without them a /failifmismatch does not say which library.
+        result = self._run_failing_build(
+            '    echo "FAILED: CLAP/PulpGain.clap"\n'
+            '    echo "lld-link: error: /failifmismatch: mismatch detected for \'_ITERATOR_DEBUG_LEVEL\':"\n'
+            '    echo ">>> gain.obj has value 2"\n'
+            '    echo ">>> skia.lib(SkFoo.obj) has value 0"'
+        )
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("lld-link errors with context", result.stderr)
+        self.assertIn(">>> skia.lib(SkFoo.obj) has value 0", result.stderr)
+
+    def _configured_build_type(self, extra_env: dict[str, str]) -> list[str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "cmake-args.txt"
+            self._run_failing_build('    echo "x.cpp:1:1: error: stop" >&2',
+                                    {**extra_env, "STUB_CMAKE_ARGS_LOG": str(log)})
+            return [a for a in log.read_text(encoding="utf-8").splitlines()
+                    if a.startswith("-DCMAKE_BUILD_TYPE=")]
+
+    def test_windows_configures_relwithdebinfo_not_debug(self) -> None:
+        # A Debug Windows build links the /MTd runtime, which the prebuilt
+        # release Skia rejects at link time (_ITERATOR_DEBUG_LEVEL 2 vs 0).
+        self.assertEqual(self._configured_build_type({"MSYSTEM": "MINGW64"}),
+                         ["-DCMAKE_BUILD_TYPE=RelWithDebInfo"])
+        self.assertEqual(self._configured_build_type({"OS": "Windows_NT"}),
+                         ["-DCMAKE_BUILD_TYPE=RelWithDebInfo"])
+
+    def test_posix_configures_debug(self) -> None:
+        self.assertEqual(self._configured_build_type({}), ["-DCMAKE_BUILD_TYPE=Debug"])
 
 
 class LcovCoberturaTests(unittest.TestCase):

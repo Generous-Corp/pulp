@@ -453,6 +453,10 @@ Projection swift_lane(const DesignIR& ir) {
     const auto entries = manifest["entries"];
     for (uint32_t i = 0; i < entries.size(); ++i) {
         const auto e = entries[i];
+        // The manifest also lists a control's binding contract when SwiftUI
+        // does not bind it; only an entry with a resolution block is bound.
+        if (!e.hasObjectMember("resolve_name"))
+            continue;
         const std::string anchor(e["anchor_id"].toString());
         const std::string family(e["source_family"].toString());
         std::string binding =

@@ -59,6 +59,8 @@ struct BridgeRegistrars {
     static void register_metadata_source_api(WidgetBridge& self);
     static void register_metadata_computed_api(WidgetBridge& self);
     static void register_platform_services_ai_api(WidgetBridge& self);
+    // Defined only when PULP_BRIDGE_EXEC_ENABLED is 1 (PULP_DEV_BRIDGE_EXEC);
+    // the API-group table references it under the same guard.
     static void register_platform_services_exec_api(WidgetBridge& self);
     static void register_query_service_api(WidgetBridge& self);
     static void register_platform_services_dialog_api(WidgetBridge& self);

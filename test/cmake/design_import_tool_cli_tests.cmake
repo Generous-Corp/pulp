@@ -161,6 +161,7 @@ endif()
 # can be tested without launching Chromium.
 add_executable(pulp-test-browser-capture-import
     test_browser_capture_backdrop_filter.cpp
+    test_browser_capture_font_smoothing.cpp
     test_browser_capture_fonts.cpp
     test_browser_capture_group_opacity.cpp
     test_browser_capture_gradient_border.cpp
@@ -192,6 +193,7 @@ add_executable(pulp-test-browser-capture-import
     ${CMAKE_SOURCE_DIR}/tools/import-design/import_png_codec.cpp)
 pulp_test_data(pulp-test-browser-capture-import NO_DEFINE
     SOURCES test_browser_capture_backdrop_filter.cpp
+        test_browser_capture_font_smoothing.cpp
         test_browser_capture_group_opacity.cpp
         test_browser_capture_gradient_border.cpp test_browser_capture_ir.cpp
         test_browser_capture_paint_scale.cpp
@@ -502,6 +504,19 @@ if(Python3_Interpreter_FOUND AND PULP_HAS_SKIA AND PROJECT_IS_TOP_LEVEL)
         SKIP_RETURN_CODE 77)
 endif()
 
+# Labels authored `-webkit-font-smoothing: antialiased` render as Chromium drew
+# them: unhinted, on a surface with the matching text preblend.
+if(Python3_Interpreter_FOUND AND PULP_HAS_SKIA AND PROJECT_IS_TOP_LEVEL)
+    add_test(NAME import-design-ir-observe-font-smoothing-label
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_design_ir_observe_font_smoothing_label.py
+                --observer $<TARGET_FILE:pulp-design-ir-observe>)
+    set_tests_properties(import-design-ir-observe-font-smoothing-label PROPERTIES
+        LABELS "parser-import;import"
+        TIMEOUT 120
+        SKIP_RETURN_CODE 77)
+endif()
+
 # Labels set in a captured page's own variable font render where Chromium put
 # them: the import carries the font and the native tree registers it, so each
 # label is shaped with the variable instance at its weight.
@@ -528,6 +543,21 @@ if(Python3_Interpreter_FOUND AND PULP_HAS_SKIA AND PROJECT_IS_TOP_LEVEL)
     set_tests_properties(import-design-external-asset-localized PROPERTIES
         LABELS "parser-import;import"
         TIMEOUT 120)
+endif()
+
+# The importer lab end to end with a real browser: the capture browser runs at
+# the capture's device scale, and the snapshot it lowers from must still be in
+# CSS pixels, or the native render comes out at twice the reference's size.
+if(Python3_Interpreter_FOUND AND PULP_HAS_SKIA AND PROJECT_IS_TOP_LEVEL)
+    add_test(NAME importer-lab-capture-scale
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_importer_lab_capture_scale.py
+                --importer $<TARGET_FILE:pulp-import-design>
+                --observer $<TARGET_FILE:pulp-design-ir-observe>)
+    set_tests_properties(importer-lab-capture-scale PROPERTIES
+        SKIP_RETURN_CODE 77
+        LABELS "parser-import;import;browser-capture"
+        TIMEOUT 600)
 endif()
 
 # pulp-design-ir-observe interaction replay: --click/--drag/--key steps run

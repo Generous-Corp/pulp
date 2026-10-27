@@ -418,6 +418,34 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      # Agent-capability counters are assigned by the version-at-land bump, so
+      # a tree can carry capability changes whose counter is still pending. A
+      # pending counter names no published contract, so the SDK tag waits for
+      # a bump that assigns it. The plugin surface is never held.
+      - name: Agent-capability pre-tag check
+        id: capability_precheck
+        if: >-
+          steps.guard.outputs.skip == '0' &&
+          steps.versions.outputs.sdk_should_tag == '1'
+        shell: bash
+        env:
+          SDK_AFTER: ${{ steps.versions.outputs.sdk_after }}
+        run: |
+          set -euo pipefail
+          if python3 tools/scripts/agent_capability_manifest.py --require-assigned; then
+            echo "block=0" >> "$GITHUB_OUTPUT"
+          else
+            echo "block=1" >> "$GITHUB_OUTPUT"
+            echo "::error title=SDK tag withheld::v${SDK_AFTER} not tagged: agent-capability counters are pending assignment"
+            {
+              echo "### SDK tag withheld"
+              echo ""
+              echo "\`v${SDK_AFTER}\` was not tagged: an agent-capability counter is pending."
+              echo "The version-at-land bump should have assigned it; its run log names the failure."
+              echo "The next SDK bump that assigns the counters tags the then-current version."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Configure release bot SSH signing
         if: >-
           steps.guard.outputs.skip == '0' &&
@@ -434,9 +462,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
           SDK_AFTER: ${{ steps.versions.outputs.sdk_after }}
-          # The pre-tag check can withhold the SDK tag; it never touches the
+          # The pre-tag checks can withhold the SDK tag; they never touch the
           # plugin surface.
-          SDK_SHOULD_TAG: ${{ steps.windows_precheck.outputs.block == '1' && '0' || steps.versions.outputs.sdk_should_tag }}
+          SDK_SHOULD_TAG: ${{ (steps.windows_precheck.outputs.block == '1' || steps.capability_precheck.outputs.block == '1') && '0' || steps.versions.outputs.sdk_should_tag }}
           PLUGIN_AFTER: ${{ steps.versions.outputs.plugin_after }}
           PLUGIN_SHOULD_TAG: ${{ steps.versions.outputs.plugin_should_tag }}
         run: |

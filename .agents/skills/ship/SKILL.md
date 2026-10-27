@@ -250,6 +250,10 @@ built with PULP_TRACING=ON," the fix is to rebuild with tracing off (the
 default `pulp build`), not to reach for `--allow-tracing`. The scanner lives in
 `tools/cli/ship_tracing_guard.hpp` (unit-tested in `test/test_ship_tracing_guard.cpp`).
 
+## Shell exec bridge ship guard
+
+Release and SDK configures pass `-DPULP_DEV_BRIDGE_EXEC=OFF` (`release-cli.yml`, `sign-and-release.yml`, `pulp sdk install`, the local SDK profile), which compiles the JS `exec`/`execAsync` bridge body out of `pulp-view-script`. The installed SDK records the outcome in `sdk-provenance.json` as `features.bridge_exec` (release marker, forge-dev/trace) or top-level `bridge_exec` (source-install stamp); minting a release marker refuses a configure cache with the option ON or missing, and `PulpSdkProvenance.cmake` fails on a release marker claiming `true`. A dev checkout keeps the bridge because the option follows `PULP_BUILD_TESTS`. Prove an artifact with `strings <archive> | grep -c execAsync` (0 for ship) or the `pulp-bridge-exec-ship-symbol-absence` ctest.
+
 ## Release-artifact forbidden-marker list
 
 Every "a shipped binary must not contain X" check reads ONE list:

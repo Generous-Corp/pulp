@@ -1150,6 +1150,10 @@ def verify_sdk_archive(
             archived_features = provenance.get("features")
             if isinstance(archived_features, dict) and "tracing" in archived_features:
                 expected_features["tracing"] = False
+            # `bridge_exec` follows the same rule: absent in archives minted
+            # before the key existed, and binding (must be false) when present.
+            if isinstance(archived_features, dict) and "bridge_exec" in archived_features:
+                expected_features["bridge_exec"] = False
             expected = {
                 "schema": "pulp.sdk-provenance.v1",
                 "kind": "release",

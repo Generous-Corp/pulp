@@ -29,7 +29,8 @@ namespace pulp::view {
 /// A capability gates one effectful bridge-API group. Ungranted → the group's JS
 /// functions are absent. Ordering is stable (persisted/signed by name, never index).
 enum class ReloadCapability : std::uint8_t {
-    Exec,          ///< shell exec/execAsync — ALSO compiled out of shipping builds
+    Exec,          ///< shell exec/execAsync — ALSO compiled out unless the
+                   ///< PULP_DEV_BRIDGE_EXEC CMake option is ON (release/SDK: OFF)
     Clipboard,     ///< read/write the system clipboard
     Filesystem,    ///< read arbitrary file paths (asset file loads, native dialogs)
     Storage,       ///< persistent key/value + preset temp files

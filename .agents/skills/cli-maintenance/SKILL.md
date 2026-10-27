@@ -4104,6 +4104,20 @@ the CLI dispatch, Rust/C++ help summaries, command documentation, and the
 clean-output manifest-role rules synchronized. A generated or vendor fixture
 must be hash-verified even when it is excluded from authored-source linting.
 
+## SDK profiles compile the shell exec JS bridge out
+
+Every SDK configure the CLI emits — `cli_sdk.cpp` (checkout SDK) and
+`local_sdk_profile.cpp` (forge-dev and trace profiles) — passes
+`-DPULP_DEV_BRIDGE_EXEC=OFF`. Tests OFF already implies it, but the flag is
+explicit because `validate_staged_install` asserts the cache key is PRESENT and
+off: a missing key means a source tree that predates the option and compiled
+the `/bin/sh` bridge in unconditionally, so absence is not safety. The profile
+provenance records `features.bridge_exec: false`, and adding a feature key
+changes that exact text, which is why `kForgeProfileRevision` and
+`kTraceProfileRevision` moved with it — a prefix built under the old contract
+keeps its own fingerprint. Bump the revision again whenever the feature object
+changes; never edit an installed `sdk-provenance.json` to match.
+
 ## Advisory lane dispatch
 
 The `pulp pr` wrapper invokes `tools/scripts/dispatch_advisory_lanes.sh` only

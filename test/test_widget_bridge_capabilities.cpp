@@ -9,10 +9,20 @@
 //   setImageSource → ReloadCapability::Filesystem (register_widget_assets_api)
 // runtime_import (__pulpRuntimeImport__) installs lazily, so it is covered by the
 // early-return guard in install_runtime_import_handlers, not a typeof check here.
+//
+// `exec` has a second, compile-time lock: PULP_BRIDGE_EXEC_ENABLED (from the
+// PULP_DEV_BRIDGE_EXEC CMake option, mirrored onto this suite by its manifest
+// entry). When it is 0 the registrar is not compiled at all, so `exec` must be
+// absent even for a UI granted every capability.
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/view/asset_manager.hpp>
 #include <pulp/view/canvas_widget.hpp>
+#ifndef PULP_BRIDGE_EXEC_ENABLED
+#error                                                                                             \
+    "PULP_BRIDGE_EXEC_ENABLED must mirror PULP_DEV_BRIDGE_EXEC; see test/cmake/view_widget_bridge_tests.cmake"
+#endif
+
 #include <pulp/view/reload_capabilities.hpp>
 #include <pulp/view/script_engine.hpp>
 #include <pulp/view/view.hpp>
@@ -56,7 +66,11 @@ TEST_CASE("empty capabilities → effectful JS functions are absent",
 TEST_CASE("all() capabilities → effectful JS functions are present (dev-unenforced)",
           "[view][bridge][capabilities]") {
     auto all = CapabilitySet::all();
+#if PULP_BRIDGE_EXEC_ENABLED
     REQUIRE(typeof_global(all, "exec") == "function");
+#else
+    REQUIRE(typeof_global(all, "exec") == "undefined");
+#endif
     REQUIRE(typeof_global(all, "setImageSource") == "function");
 }
 
@@ -69,8 +83,34 @@ TEST_CASE("capability gates are independent — Filesystem does not grant Exec",
 
     CapabilitySet ex;
     ex.grant(ReloadCapability::Exec);
+#if PULP_BRIDGE_EXEC_ENABLED
     REQUIRE(typeof_global(ex, "exec") == "function");            // granted
+#else
+    REQUIRE(typeof_global(ex, "exec") == "undefined"); // granted, but not compiled in
+#endif
     REQUIRE(typeof_global(ex, "setImageSource") == "undefined"); // NOT granted
+}
+
+// The compile-time lock is independent of the capability lock. With the bridge
+// compiled in, Exec alone exposes both shell functions and nothing less does;
+// with it compiled out, no grant — not even all() — can bring them back.
+TEST_CASE("the shell exec bridge honours its compile-time gate whatever is granted",
+          "[view][bridge][capabilities]") {
+    const CapabilitySet none;
+    CapabilitySet ex;
+    ex.grant(ReloadCapability::Exec);
+    const auto all = CapabilitySet::all();
+    for (const char* name : {"exec", "execAsync"}) {
+        INFO("shell function: " << name);
+        REQUIRE(typeof_global(none, name) == "undefined");
+#if PULP_BRIDGE_EXEC_ENABLED
+        REQUIRE(typeof_global(ex, name) == "function");
+        REQUIRE(typeof_global(all, name) == "function");
+#else
+        REQUIRE(typeof_global(ex, name) == "undefined");
+        REQUIRE(typeof_global(all, name) == "undefined");
+#endif
+    }
 }
 
 // register_api() drives a table whose entries carry their required capability as
@@ -100,11 +140,13 @@ TEST_CASE("every gated API group is absent without its capability and present wi
         {ReloadCapability::Filesystem, "showOpenDialog"},
         {ReloadCapability::Filesystem, "__loadAssetSync__"},
         {ReloadCapability::Filesystem, "loadFont"},
-        {ReloadCapability::Storage,    "setWidgetSchema"},
-        {ReloadCapability::Storage,    "storageGetItem"},
-        {ReloadCapability::Ai,         "setAICli"},
-        {ReloadCapability::Clipboard,  "readClipboard"},
-        {ReloadCapability::Exec,       "exec"},
+        {ReloadCapability::Storage, "setWidgetSchema"},
+        {ReloadCapability::Storage, "storageGetItem"},
+        {ReloadCapability::Ai, "setAICli"},
+        {ReloadCapability::Clipboard, "readClipboard"},
+#if PULP_BRIDGE_EXEC_ENABLED
+        {ReloadCapability::Exec, "exec"},
+#endif
     };
 
     const CapabilitySet none;
