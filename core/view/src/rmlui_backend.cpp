@@ -47,6 +47,23 @@ class RenderAdapter final : public Rml::RenderInterface {
         geometry.y = min_y;
         geometry.width = max_x - min_x;
         geometry.height = max_y - min_y;
+        auto vertex_payload = std::make_shared<std::vector<DrawVertex>>();
+        vertex_payload->reserve(vertices.size());
+        for (const auto& vertex : vertices) {
+            const auto& colour = vertex.colour;
+            const auto packed = (static_cast<std::uint32_t>(colour.red) << 24) |
+                                (static_cast<std::uint32_t>(colour.green) << 16) |
+                                (static_cast<std::uint32_t>(colour.blue) << 8) |
+                                static_cast<std::uint32_t>(colour.alpha);
+            vertex_payload->push_back(DrawVertex{vertex.position.x, vertex.position.y,
+                                                 vertex.tex_coord.x, vertex.tex_coord.y, packed});
+        }
+        auto index_payload = std::make_shared<std::vector<std::uint32_t>>();
+        index_payload->reserve(indices.size());
+        for (const auto index : indices)
+            index_payload->push_back(static_cast<std::uint32_t>(index));
+        geometry.vertices = std::move(vertex_payload);
+        geometry.indices = std::move(index_payload);
         geometries_.push_back(geometry);
         return static_cast<Rml::CompiledGeometryHandle>(geometries_.size());
     }
@@ -71,6 +88,8 @@ class RenderAdapter final : public Rml::RenderInterface {
             command.texture_width = texture.width;
             command.texture_height = texture.height;
         }
+        command.vertices = geometry.vertices;
+        command.indices = geometry.indices;
         sink_.submit(command);
     }
 
@@ -146,6 +165,8 @@ class RenderAdapter final : public Rml::RenderInterface {
         float y = 0.0f;
         float width = 0.0f;
         float height = 0.0f;
+        std::shared_ptr<const std::vector<DrawVertex>> vertices;
+        std::shared_ptr<const std::vector<std::uint32_t>> indices;
     };
 
     pulp::view::rmlui::RenderInterface& sink_;
