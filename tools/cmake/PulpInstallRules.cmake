@@ -351,30 +351,12 @@ endif()
 
 if(TARGET pulp-view-rmlui AND TARGET rmlui_core)
     set_target_properties(pulp-view-rmlui PROPERTIES EXPORT_NAME view-rmlui)
-    set_target_properties(rmlui_core PROPERTIES EXPORT_NAME rmlui_core)
-    if(TARGET rmlui_debugger)
-        set_target_properties(rmlui_debugger PROPERTIES EXPORT_NAME rmlui_debugger)
-    endif()
     install(TARGETS pulp-view-rmlui
         EXPORT PulpTargets
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
         INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-    install(TARGETS rmlui_core
-        EXPORT PulpTargets
-        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-        INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-    if(TARGET rmlui_debugger)
-        install(TARGETS rmlui_debugger
-            EXPORT PulpTargets
-            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-            INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-    endif()
 endif()
 
 if(TARGET rmlui_core)
@@ -387,7 +369,14 @@ endif()
 # only installs the matching target export when it is the top-level project.
 # Export that same target set here so find_package(RmlUi CONFIG) remains a
 # valid, self-contained entry point for SDK consumers that use RmlUi directly.
-if(TARGET pulp-view-rmlui AND TARGET rmlui_core)
+# Keep these targets in their own export set.  Putting them in PulpTargets
+# rewrites the public RmlUi::Core dependency as Pulp::rmlui_core and leaves
+# RmlUiConfig.cmake unable to resolve the upstream package contract.
+if(TARGET rmlui_core)
+    # RmlUi registers rmlui_core, rmlui_debugger, and its aggregate rmlui
+    # interface target in this export set while it is embedded.  Only the
+    # export file is missing in that mode; registering the targets a second
+    # time here makes CMake reject the export set as duplicated.
     install(EXPORT RmlUiTargets
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/RmlUi"
         NAMESPACE RmlUi::
