@@ -358,6 +358,12 @@ in JS on the family. Chromium matches and synthesizes against the declared
 range, not the file: one Regular file declared `400 700` draws 700
 unemboldened, and declared `400` it draws 700 faux-bold.
 
+`registerFont` declarations are owned by a unique per-bridge scope, separate
+from the persisted storage identity: reload clears the retiring bridge's ranges
+before registering the replacement realm, and bridge teardown removes only that
+bridge's declarations. Lookup still unions declarations from all live owners of
+a family; sharing a bare family across live editors with conflicting ranges is
+therefore deliberately ambiguous and should use distinct family names.
 `paragraph_fakes_missing_font_styles` decides SkParagraph's fake-styles switch
 (CSS font matching over the declared ranges; bold only when the request is 600+
 and the matched range ends below 600; italic keeps the default, which shares the

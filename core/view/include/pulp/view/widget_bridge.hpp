@@ -200,6 +200,9 @@ public:
     /// The identity the persisted stores hash: `set_storage_identity()`'s value
     /// when set, else the script base directory, else empty (no store).
     std::string storage_identity() const;
+    /// Process-local identity for declarations owned by this bridge lifetime.
+    /// Unlike storage_identity(), this must never be shared by two bridges.
+    std::string font_weight_scope() const;
 
     /// Preferred directory for resolving RELATIVE filesystem paths handed to
     /// path-taking bridge APIs. Imported code emits `assets/<file>` beside its

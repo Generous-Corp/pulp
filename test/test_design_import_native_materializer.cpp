@@ -5409,3 +5409,40 @@ TEST_CASE("registerFont declares a range only for a registered face and valid we
     CHECK(call("BridgeFaceReversed", jost, ", 700, 400"));
     CHECK(pulp::canvas::declared_face_synthesizes_bold("BridgeFaceReversed", 700) == false);
 }
+
+TEST_CASE("registerFont weight ranges are removed with their bridge scope",
+          "[view][bridge][fonts][synthetic-bold][reload]") {
+    const std::string jost = std::string(PULP_REPO_ROOT) + "/external/fonts/Jost-Regular.ttf";
+    {
+        ScriptEngine engine;
+        View root;
+        pulp::state::StateStore store;
+        WidgetBridge bridge(engine, root, store);
+        REQUIRE(engine.evaluate("registerFont('ScopedFace', '" + jost + "', 400, 700)")
+                    .getWithDefault<bool>(false));
+        CHECK(pulp::canvas::declared_face_synthesizes_bold("ScopedFace", 700) == false);
+    }
+    CHECK_FALSE(pulp::canvas::has_declared_font_face_weights("ScopedFace"));
+}
+
+TEST_CASE("font declaration cleanup does not cross bridges sharing storage identity",
+          "[view][bridge][fonts][synthetic-bold][reload][scope]") {
+    const std::string jost = std::string(PULP_REPO_ROOT) + "/external/fonts/Jost-Regular.ttf";
+    ScriptEngine first_engine;
+    ScriptEngine second_engine;
+    View first_root;
+    View second_root;
+    pulp::state::StateStore first_store;
+    pulp::state::StateStore second_store;
+    WidgetBridge first(first_engine, first_root, first_store);
+    WidgetBridge second(second_engine, second_root, second_store);
+    first.set_storage_identity("shared-script");
+    second.set_storage_identity("shared-script");
+    REQUIRE(first_engine.evaluate("registerFont('SharedScopeFace', '" + jost + "', 400, 700)")
+                .getWithDefault<bool>(false));
+    REQUIRE(second_engine.evaluate("registerFont('SharedScopeFace', '" + jost + "', 400, 400)")
+                .getWithDefault<bool>(false));
+    CHECK(pulp::canvas::declared_face_synthesizes_bold("SharedScopeFace", 700) == false);
+    first.clear_for_realm_replacement();
+    CHECK(pulp::canvas::declared_face_synthesizes_bold("SharedScopeFace", 700) == true);
+}
