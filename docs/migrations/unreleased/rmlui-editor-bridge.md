@@ -18,7 +18,10 @@ The admitted core slice is pinned to RmlUi commit
 `58c751531f4c1a1eb2dc56f409b8e8a323a0c9ad`, with samples, debugger, Lua
 bindings, font engines, SVG/Lottie, HarfBuzz sample, and Tracy disabled. The
 `pulp-test-rmlui-backend` suite now proves core initialization, document
-parsing, update, render, and teardown through a recording render interface.
+parsing, update, render, and teardown through the optional backend. Its RmlUi
+render adapter lowers compiled geometry to bounded Pulp draw commands, and its
+file adapter resolves document resources through the rooted provider. This is
+a CPU recording seam, not yet a Skia/Dawn production renderer.
 The optional backend also exposes a rooted, SHA-256-checked asset provider;
 its tests cover traversal, missing-manifest entries, tampering, size limits,
 and symlink escapes.
@@ -86,8 +89,8 @@ reading the developer checkout.
    default target changes. **Complete for the Pulp-owned seam.**
 2. **CPU render proof.** Pin RmlUi and Lua, implement the Canvas lowering, and
    prove deterministic frame output and context isolation without a DAW. **RmlUi
-   core admission and lifecycle smoke are complete; Canvas lowering, Lua, and
-   font providers remain open.**
+   core admission, lifecycle smoke, rooted file loading, and a geometry-recording
+   adapter are complete; Skia/Dawn lowering, Lua, and font providers remain open.**
 3. **Product adapter.** Add a generated/imported Nodal model namespace and
    action bridge. Existing RML/RCSS/Lua files remain external or embedded by
    the importer; no hand-edited skin coordinates are accepted.

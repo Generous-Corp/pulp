@@ -4,8 +4,13 @@
 #include <pulp/runtime/crypto.hpp>
 
 #include <algorithm>
+#include <cstddef>
 #include <fstream>
 #include <iterator>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace pulp::view::rmlui {
 
@@ -14,11 +19,150 @@ namespace {
     Rml::Vector2i viewport{0, 0};
     (void)viewport;
 }
+
+class RenderAdapter final : public Rml::RenderInterface {
+  public:
+    explicit RenderAdapter(pulp::view::rmlui::RenderInterface& sink) : sink_(sink) {}
+
+    Rml::CompiledGeometryHandle CompileGeometry(Rml::Span<const Rml::Vertex> vertices,
+                                                Rml::Span<const int> indices) override {
+        if (vertices.empty() || indices.empty())
+            return 0;
+        Geometry geometry;
+        float min_x = vertices[0].position.x;
+        float min_y = vertices[0].position.y;
+        float max_x = min_x;
+        float max_y = min_y;
+        for (const auto& vertex : vertices) {
+            min_x = std::min(min_x, vertex.position.x);
+            min_y = std::min(min_y, vertex.position.y);
+            max_x = std::max(max_x, vertex.position.x);
+            max_y = std::max(max_y, vertex.position.y);
+        }
+        geometry.x = min_x;
+        geometry.y = min_y;
+        geometry.width = max_x - min_x;
+        geometry.height = max_y - min_y;
+        geometries_.push_back(geometry);
+        return static_cast<Rml::CompiledGeometryHandle>(geometries_.size());
+    }
+
+    void RenderGeometry(Rml::CompiledGeometryHandle handle, Rml::Vector2f translation,
+                        Rml::TextureHandle) override {
+        if (handle == 0 || handle > geometries_.size())
+            return;
+        const auto& geometry = geometries_[static_cast<std::size_t>(handle - 1)];
+        sink_.submit(DrawCommand{DrawCommand::Kind::rectangle,
+                                 geometry.x + translation.x,
+                                 geometry.y + translation.y,
+                                 geometry.width,
+                                 geometry.height,
+                                 {}});
+    }
+
+    void ReleaseGeometry(Rml::CompiledGeometryHandle handle) override {
+        if (handle != 0 && handle <= geometries_.size())
+            geometries_[static_cast<std::size_t>(handle - 1)] = {};
+    }
+
+    Rml::TextureHandle LoadTexture(Rml::Vector2i&, const Rml::String&) override {
+        return 0;
+    }
+    Rml::TextureHandle GenerateTexture(Rml::Span<const Rml::byte>, Rml::Vector2i) override {
+        return 0;
+    }
+    void ReleaseTexture(Rml::TextureHandle) override {}
+    void EnableScissorRegion(bool) override {}
+    void SetScissorRegion(Rml::Rectanglei) override {}
+
+  private:
+    struct Geometry {
+        float x = 0.0f;
+        float y = 0.0f;
+        float width = 0.0f;
+        float height = 0.0f;
+    };
+
+    pulp::view::rmlui::RenderInterface& sink_;
+    std::vector<Geometry> geometries_;
+};
+
+class FileAdapter final : public Rml::FileInterface {
+  public:
+    explicit FileAdapter(AssetProvider& assets) : assets_(assets) {}
+
+    Rml::FileHandle Open(const Rml::String& path) override {
+        Asset asset;
+        if (assets_.load(path, asset) != Status::ok)
+            return 0;
+        return reinterpret_cast<Rml::FileHandle>(new Handle{std::move(asset.bytes), 0});
+    }
+
+    void Close(Rml::FileHandle file) override {
+        delete reinterpret_cast<Handle*>(static_cast<std::uintptr_t>(file));
+    }
+
+    size_t Read(void* buffer, size_t size, Rml::FileHandle file) override {
+        auto* handle = reinterpret_cast<Handle*>(static_cast<std::uintptr_t>(file));
+        if (!handle || !buffer)
+            return 0;
+        const auto available =
+            handle->bytes.size() - std::min(handle->offset, handle->bytes.size());
+        const auto count = std::min(size, available);
+        std::copy_n(handle->bytes.data() + handle->offset, count, static_cast<char*>(buffer));
+        handle->offset += count;
+        return count;
+    }
+
+    bool Seek(Rml::FileHandle file, long offset, int origin) override {
+        auto* handle = reinterpret_cast<Handle*>(static_cast<std::uintptr_t>(file));
+        if (!handle)
+            return false;
+        std::int64_t base = 0;
+        if (origin == SEEK_CUR)
+            base = static_cast<std::int64_t>(handle->offset);
+        else if (origin == SEEK_END)
+            base = static_cast<std::int64_t>(handle->bytes.size());
+        const auto next = base + offset;
+        if (next < 0 || static_cast<std::uint64_t>(next) > handle->bytes.size())
+            return false;
+        handle->offset = static_cast<std::size_t>(next);
+        return true;
+    }
+
+    size_t Tell(Rml::FileHandle file) override {
+        const auto* handle = reinterpret_cast<const Handle*>(static_cast<std::uintptr_t>(file));
+        return handle ? handle->offset : 0;
+    }
+
+  private:
+    struct Handle {
+        std::string bytes;
+        std::size_t offset;
+    };
+
+    AssetProvider& assets_;
+};
 } // namespace
+
+struct Backend::Runtime {
+    Runtime(AssetProvider& assets, RenderInterface& renderer) : file(assets), render(renderer) {}
+
+    FileAdapter file;
+    RenderAdapter render;
+    Rml::FontEngineInterface font;
+    Rml::Context* context = nullptr;
+    Rml::ElementDocument* document = nullptr;
+    bool initialised = false;
+};
 
 Backend::Backend(AssetProvider& assets, RenderInterface& renderer, LuaInterface& lua,
                  ActionSink* actions)
     : assets_(assets), renderer_(renderer), lua_(lua), actions_(actions) {}
+
+Backend::~Backend() {
+    close();
+}
 
 RootedAssetProvider::RootedAssetProvider(std::filesystem::path root,
                                          std::vector<AssetManifestEntry> manifest,
@@ -75,8 +219,21 @@ Status RootedAssetProvider::load(std::string_view path, Asset& out) {
 Status Backend::open(std::uint32_t width, std::uint32_t height) {
     if (open_)
         return Status::already_open;
+    auto runtime = std::make_unique<Runtime>(assets_, renderer_);
+    Rml::SetFileInterface(&runtime->file);
+    Rml::SetFontEngineInterface(&runtime->font);
+    if (!Rml::Initialise())
+        return Status::rejected;
+    runtime->initialised = true;
+    runtime->context = Rml::CreateContext(
+        "pulp-rmlui", {static_cast<int>(width), static_cast<int>(height)}, &runtime->render);
+    if (!runtime->context) {
+        Rml::Shutdown();
+        return Status::rejected;
+    }
     width_ = width;
     height_ = height;
+    runtime_ = std::move(runtime);
     open_ = true;
     return Status::ok;
 }
@@ -88,9 +245,18 @@ Status Backend::load_document(std::string_view path) {
     auto status = assets_.load(path, asset);
     if (status != Status::ok)
         return status;
-    status = lua_.load(asset.bytes, asset.path);
-    if (status != Status::ok)
-        return status;
+    const auto is_lua = asset.path.size() >= 4 && asset.path.ends_with(".lua");
+    if (is_lua) {
+        status = lua_.load(asset.bytes, asset.path);
+        if (status != Status::ok)
+            return status;
+    } else if (!runtime_ || !runtime_->context ||
+               !(runtime_->document =
+                     runtime_->context->LoadDocumentFromMemory(asset.bytes, asset.path))) {
+        return Status::rejected;
+    } else {
+        runtime_->document->Show();
+    }
     document_ = std::move(asset);
     return Status::ok;
 }
@@ -111,10 +277,23 @@ void Backend::render() {
     if (!open_)
         return;
     renderer_.begin_frame(width_, height_);
+    if (runtime_ && runtime_->context) {
+        const auto updated = runtime_->context->Update();
+        const auto rendered = runtime_->context->Render();
+        (void)updated;
+        (void)rendered;
+    }
     renderer_.end_frame();
 }
 
 void Backend::close() {
+    if (runtime_) {
+        if (runtime_->context)
+            Rml::RemoveContext(runtime_->context->GetName());
+        if (runtime_->initialised)
+            Rml::Shutdown();
+        runtime_.reset();
+    }
     document_ = {};
     open_ = false;
     width_ = height_ = 0;
