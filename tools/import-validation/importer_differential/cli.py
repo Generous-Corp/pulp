@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import os
 import platform
 import re
@@ -28,8 +27,30 @@ from .core import (
     source_files,
     write_json,
 )
+from .aggregate import percentile
 from .reports import format_corpus_summary, format_summary
+from .rescore import replay, rescore_corpus
 from tools.harness.differential.contract import normalize_report
+
+
+def viewport_size(value: str) -> dict[str, int]:
+    match = re.fullmatch(r"([1-9][0-9]*)x([1-9][0-9]*)", value)
+    if not match:
+        raise argparse.ArgumentTypeError("must be WIDTHxHEIGHT in CSS px, e.g. 1280x1127")
+    return {"width": int(match.group(1)), "height": int(match.group(2))}
+
+
+def pillow_missing() -> bool:
+    """Every comparison reads PNGs; say so once instead of failing each fixture."""
+    try:
+        import PIL.Image  # noqa: F401
+    except ImportError:
+        print("importer_differential_lab: Pillow is required to compare renders; "
+              "install the pinned visual dependencies with "
+              "`tools/ci/install_visual_python_deps.sh` (or `mise run visual-deps`)",
+              file=sys.stderr)
+        return True
+    return False
 
 
 def positive_int(value: str) -> int:
@@ -40,13 +61,17 @@ def positive_int(value: str) -> int:
 
 
 def command_compare(args: argparse.Namespace) -> int:
+    if pillow_missing():
+        return 2
     try:
         budgets = read_timing_budgets(getattr(args, "timing_budget", None))
         report = compare_one(
             args.importer.resolve(), args.observer.resolve(),
             args.file.resolve(), args.output.resolve(), args.timeout_seconds,
             args.from_source, args.browser.resolve() if args.browser else None,
-            cache_state=args.cache_state, timing_budgets_ms=budgets)
+            fixture_metadata=viewport_metadata(args),
+            cache_state=args.cache_state, timing_budgets_ms=budgets,
+            emitter=getattr(args, "emitter", "native"))
     except (LabError, OSError, ValueError, json.JSONDecodeError) as exc:
         error = sanitized_error(
             exc, [args.importer.resolve(), args.observer.resolve(),
@@ -57,7 +82,13 @@ def command_compare(args: argparse.Namespace) -> int:
     return 1 if report["timing_budget"]["status"] == "fail" else 0
 
 
+def viewport_metadata(args: argparse.Namespace) -> dict[str, Any] | None:
+    return {"viewport": args.viewport} if getattr(args, "viewport", None) else None
+
+
 def command_corpus(args: argparse.Namespace) -> int:
+    if pillow_missing():
+        return 2
     if args.manifest:
         manifest_path = args.manifest.resolve()
         manifest = json.loads(manifest_path.read_text())
@@ -71,9 +102,10 @@ def command_corpus(args: argparse.Namespace) -> int:
         ]
     else:
         input_root = args.input.resolve()
+        # Exclusion is relative to the root, so `--input .../holdout` asks for it.
         fixtures = [
             (path.relative_to(input_root).as_posix(), path, None)
-            for path in source_files(input_root)]
+            for path in source_files(input_root, args.include_holdout)]
     if not fixtures:
         print("importer_differential_lab: corpus contains no supported sources",
               file=sys.stderr)
@@ -99,7 +131,7 @@ def command_corpus(args: argparse.Namespace) -> int:
                 metadata.get("from", args.from_source) if metadata else args.from_source,
                 args.browser.resolve() if args.browser else None, metadata,
                 metadata.get("cache_state", args.cache_state) if metadata else args.cache_state,
-                budgets))
+                budgets, emitter=getattr(args, "emitter", "native")))
         except (LabError, OSError, ValueError, json.JSONDecodeError) as exc:
             failures.append({
                 "fixture_id": fixture_id,
@@ -147,11 +179,6 @@ def command_corpus(args: argparse.Namespace) -> int:
         report.get("timing_budget", {}).get("status") == "fail"
         for report in reports)
     return 1 if failures or budget_failed else 0
-
-
-def percentile(values: list[int], fraction: float) -> int:
-    ordered = sorted(values)
-    return ordered[max(0, math.ceil(len(ordered) * fraction) - 1)]
 
 
 def sanitized_error(error: Exception, paths: list[Path]) -> str:
@@ -209,7 +236,76 @@ def cache_bucket(
     }
 
 
+DETERMINISM_FIELDS = (
+    "source_sha256",
+    "importer_sha256",
+    "observer_sha256",
+    "browser_capture_canonical_sha256",
+    "native_capture_canonical_sha256",
+    "browser_snapshot_semantic_sha256",
+    "native_snapshot_semantic_sha256",
+    "browser_screenshot_sha256",
+    "native_render_sha256",
+    "native_layout_sha256",
+    "native_render_receipt_sha256",
+    "platform_fonts_sha256",
+    "interaction_plan_sha256",
+)
+
+
+def determinism_receipt(reports: list[dict[str, Any]]) -> dict[str, Any]:
+    """Require three identical authenticated run digests before promotion.
+
+    A repeated process invocation is not evidence of deterministic rendering
+    unless the source, browser capture, native capture, PNG, layout, and Skia
+    receipt digests all agree. Fewer than three runs remains explicitly
+    unverified so existing exploratory one- and two-run calls stay diagnostic.
+    """
+    if len(reports) < 3:
+        return {
+            "schema": "pulp-importer-differential-determinism-v1",
+            "status": "unverified",
+            "required_runs": 3,
+            "runs": len(reports),
+            "reason": "three runs are required before determinism can be claimed",
+        }
+    run_digests: list[dict[str, str]] = []
+    missing: dict[int, list[str]] = {}
+    for index, report in enumerate(reports, 1):
+        integrity = report.get("integrity")
+        if not isinstance(integrity, dict):
+            missing[index] = list(DETERMINISM_FIELDS)
+            continue
+        digest = {field: integrity.get(field) for field in DETERMINISM_FIELDS}
+        absent = [field for field, value in digest.items() if not isinstance(value, str) or not value]
+        if absent:
+            missing[index] = absent
+        else:
+            run_digests.append(digest)
+    if missing:
+        return {
+            "schema": "pulp-importer-differential-determinism-v1",
+            "status": "unverified",
+            "required_runs": 3,
+            "runs": len(reports),
+            "missing_fields": {str(index): fields for index, fields in missing.items()},
+            "reason": "one or more runs lack authenticated integrity digests",
+        }
+    agreed = all(digest == run_digests[0] for digest in run_digests[1:])
+    return {
+        "schema": "pulp-importer-differential-determinism-v1",
+        "status": "pass" if agreed else "fail",
+        "required_runs": 3,
+        "runs": len(reports),
+        "fields": list(DETERMINISM_FIELDS),
+        "run_digests": run_digests,
+        "reason": "all authenticated run digests agree" if agreed else "authenticated run digests disagree",
+    }
+
+
 def command_benchmark(args: argparse.Namespace) -> int:
+    if pillow_missing():
+        return 2
     output = args.output.resolve()
     reports = []
     try:
@@ -221,8 +317,9 @@ def command_benchmark(args: argparse.Namespace) -> int:
                 args.file.resolve(), output / "runs" / str(index + 1),
                 args.timeout_seconds, args.from_source,
                 args.browser.resolve() if args.browser else None,
+                fixture_metadata=viewport_metadata(args),
                 cache_state=args.cache_state,
-                timing_budgets_ms=budgets))
+                timing_budgets_ms=budgets, emitter=getattr(args, "emitter", "native")))
     except (LabError, OSError, ValueError, json.JSONDecodeError) as exc:
         error = sanitized_error(
             exc, [args.importer.resolve(), args.observer.resolve(),
@@ -259,6 +356,7 @@ def command_benchmark(args: argparse.Namespace) -> int:
              "fidelity": report.get("comparison")}
             for index, report in enumerate(reports)
         ],
+        "determinism": determinism_receipt(reports),
         # Keep these v1 keys for readers of existing receipts, but populate a
         # bucket only when every run was explicitly declared in that state.
         # Run position is recorded separately and is never called cold/warm.
@@ -295,7 +393,7 @@ def command_benchmark(args: argparse.Namespace) -> int:
     }
     write_json(output / "benchmark.json", benchmark)
     print(json.dumps(benchmark, indent=2))
-    return 1 if benchmark["timing_budget"]["status"] == "fail" else 0
+    return 1 if benchmark["timing_budget"]["status"] == "fail" or benchmark["determinism"]["status"] == "fail" else 0
 
 
 def read_timing_budgets(path: Path | None) -> dict[str, int] | None:
@@ -336,11 +434,17 @@ def build_parser() -> argparse.ArgumentParser:
         subparser.add_argument(
             "--timing-budget", type=Path,
             help="JSON object of caller-supplied importer timing budgets in milliseconds")
+        subparser.add_argument(
+            "--emitter", choices=("native", "js"), default="native",
+            help="render the candidate IR through the native materializer (default) or "
+                 "through the ui.js program it emits")
 
     compare = subparsers.add_parser("compare")
     shared(compare)
     compare.add_argument("--file", type=Path, required=True)
     compare.add_argument("--output", type=Path, required=True)
+    compare.add_argument("--viewport", type=viewport_size,
+                         help="WIDTHxHEIGHT CSS px viewport (default 1280x800)")
     compare.set_defaults(func=command_compare)
 
     corpus = subparsers.add_parser("analyze-corpus")
@@ -350,6 +454,8 @@ def build_parser() -> argparse.ArgumentParser:
     inputs.add_argument("--manifest", type=Path)
     corpus.add_argument("--output", type=Path, required=True)
     corpus.add_argument("--fail-fast", action="store_true")
+    corpus.add_argument("--include-holdout", action="store_true",
+                        help="with --input, also score fixtures under holdout/ directories")
     corpus.set_defaults(func=command_corpus)
 
     benchmark = subparsers.add_parser("benchmark")
@@ -357,10 +463,41 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark.add_argument("--file", type=Path, required=True)
     benchmark.add_argument("--output", type=Path, required=True)
     benchmark.add_argument("--runs", type=positive_int, default=5)
+    benchmark.add_argument("--viewport", type=viewport_size,
+                           help="WIDTHxHEIGHT CSS px viewport (default 1280x800)")
     benchmark.set_defaults(func=command_benchmark)
+
+    rescore = subparsers.add_parser(
+        "rescore", help="replay a finished corpus's artifacts through the scorer")
+    rescore.add_argument("--corpus", type=Path, required=True)
+    rescore.add_argument("--output", type=Path, required=True)
+    rescore.add_argument(
+        "--fixture-sources", type=Path,
+        default=_REPO_ROOT / "test" / "fixtures" / "import-differential",
+        help="directory holding the interaction plans fixtures name")
+    rescore.set_defaults(func=command_rescore)
     return parser
 
 
+def command_rescore(args: argparse.Namespace) -> int:
+    try:
+        receipt = rescore_corpus(
+            args.corpus.resolve(), args.output.resolve(),
+            args.fixture_sources.resolve())
+    except (LabError, OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"importer_differential_lab: {exc}", file=sys.stderr)
+        return 2
+    for name, row in receipt["fixtures"].items():
+        print(f"{row['report_sha256']}  {name}")
+    for name in receipt["skipped_without_report"]:
+        print(f"skipped (no stored report)  {name}")
+    return 0
+
+
 def main() -> int:
+    # The rescore replay stands in for the importer and observer processes, so
+    # it takes their argv verbatim instead of going through argparse.
+    if len(sys.argv) > 2 and sys.argv[1] == "replay-artifact":
+        return replay(sys.argv[2], sys.argv[3:])
     args = build_parser().parse_args()
     return args.func(args)

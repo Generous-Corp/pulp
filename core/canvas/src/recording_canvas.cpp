@@ -607,6 +607,12 @@ void RecordingCanvas::set_image_smoothing(bool enabled,
     commands_.push_back(cmd);
 }
 
+void RecordingCanvas::set_font_smoothing(FontSmoothing smoothing) {
+    DrawCommand cmd{DrawCommand::Type::set_font_smoothing};
+    cmd.f[0] = smoothing == FontSmoothing::antialiased ? 1.0f : 0.0f;
+    commands_.push_back(cmd);
+}
+
 // Capture Canvas2D ctx.direction. Enum packed into f[0] (0=ltr, 1=rtl,
 // 2=inherit). RecordingCanvas doesn't shape text — it models the bridge intent
 // so tests can assert the JS shim flushed the direction setter at the right
@@ -883,6 +889,16 @@ void RecordingCanvas::set_fill_gradient_conic(float cx, float cy,
 
 void RecordingCanvas::clear_fill_gradient() {
     commands_.push_back({DrawCommand::Type::clear_fill_gradient});
+}
+
+// Recorded as its own command, and only when a caller sets it, so a stream
+// without an interpolation space reads exactly as it always has.
+void RecordingCanvas::set_gradient_interpolation(GradientInterpolation method) {
+    Canvas::set_gradient_interpolation(method);
+    DrawCommand cmd{DrawCommand::Type::set_gradient_interpolation};
+    cmd.f[0] = static_cast<float>(method.space);
+    cmd.f[1] = static_cast<float>(method.hue);
+    commands_.push_back(std::move(cmd));
 }
 
 // ── Retained paths ───────────────────────────────────────────────────────────

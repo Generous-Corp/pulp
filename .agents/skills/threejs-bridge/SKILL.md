@@ -222,7 +222,12 @@ sealed-provider (`FindV8.cmake`) section) and that the GPU is real hardware
 (`gpu_backend=Metal`, `gpu_software=0`). The strict
 `v8_provider_identity_strict` CTest (gated on
 `PULP_VALIDATE_V8_PROVIDER_STRICT`) parses that block with no skip-pass and
-then requires a non-empty `--demo cube --capture` PNG.
+then requires a non-empty `--demo cube --capture` PNG. It also compares the
+printed `runtime_version` with `PULP_V8_EXPECTED_RUNTIME_VERSION`, which
+`PulpViewJsEngines.cmake` parses from the manifest's V8 tag. After a V8 pin
+bump, a build tree still linking the previous provider
+fails this gate rather than passing, so reconfigure against the new provider
+before reading a failure as a regression.
 
 ### 4a. A capture test that skips is not a capture test that passed
 

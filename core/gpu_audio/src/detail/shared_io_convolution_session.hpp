@@ -5,11 +5,14 @@
 #include "shared_io_provider_identity.hpp"
 #include "shared_io_trace.hpp"
 
+#include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -50,6 +53,15 @@ class SharedIoConvolutionSession {
         SharedIoArenaProvider::StorageKind storage_kind =
             SharedIoArenaProvider::StorageKind::ImportedHostPointer;
         SharedIoExecutionPredictor::Config prediction{};
+        SharedIoCalibrationIdentity calibration_identity;
+        bool authenticated_calibration = false;
+        std::uint64_t calibration_max_age_ns = 0;
+        std::string calibration_source_revision;
+        // Bounded wait, in ns, for completions already in flight after a
+        // service step submits. The provider may block for up to this long
+        // (TimedWaitAny) instead of returning at once; zero keeps service
+        // nonblocking. The budget starts after the submit, on steady_clock.
+        std::uint64_t completion_service_wait_ns = 0;
     };
 
     struct ProviderPair {
@@ -94,11 +106,35 @@ class SharedIoConvolutionSession {
         return prepared_ ? pipeline_.begin_callback(samples, sequence, callback_start_ns)
                          : Callback{};
     }
-    void request_recovery(SharedIoRecoveryReason reason) noexcept {
-        pipeline_.request_recovery(reason);
+    // A latched cause names the block it latched at, as the stamped nodes do.
+    void request_recovery(SharedIoRecoveryReason reason, std::uint64_t sequence) noexcept {
+        pipeline_.request_recovery(reason, sequence);
     }
     SharedIoRecoveryReason recovery_reason() const noexcept {
         return pipeline_.recovery_reason();
+    }
+    std::uint64_t recovery_sequence() const noexcept {
+        return pipeline_.recovery_sequence();
+    }
+    // Zero while the bridge keeps callbacks CPU-only.
+    std::uint64_t delivery_epoch() const noexcept {
+        return pipeline_.delivery_epoch();
+    }
+    // Serialized non-RT (see SharedIoStampedBridge::epoch_first_sequence()).
+    std::uint64_t epoch_first_sequence() const noexcept {
+        return pipeline_.epoch_first_sequence();
+    }
+    // Serialized non-RT diagnostic, like the provider query it forwards.
+    bool provider_device_lost() const noexcept {
+        return provider_ != nullptr && provider_->device_lost();
+    }
+    // GPU terminal dispositions recorded since prepare(), whether or not a
+    // trace recorder is attached. Single writer (the serialized worker).
+    std::uint64_t gpu_terminal_count(SharedIoGpuTerminalDisposition disposition) const noexcept {
+        const auto index = static_cast<std::size_t>(disposition);
+        return index < gpu_terminal_counts_.size()
+                   ? gpu_terminal_counts_[index].load(std::memory_order_relaxed)
+                   : 0;
     }
     bool complete_callback_delivery(const Callback& callback, SharedIoDeliveryDisposition actual,
                                     std::uint64_t callback_end_ns = 0,
@@ -127,8 +163,18 @@ class SharedIoConvolutionSession {
     bool prepared() const noexcept {
         return prepared_;
     }
+    // Host only, while no service call runs. False when the provider has no
+    // completion event source.
+    bool set_completion_notifier(SharedIoCompletionNotifier notifier) noexcept {
+        return prepared_ && plan_.set_completion_notifier(notifier);
+    }
     bool fenced() const noexcept {
         return failed_ || pipeline_.fenced();
+    }
+    // The prepared program can still run for this preparation. The offline
+    // fence ends it; only release and a fresh prepare bring one back.
+    bool kernel_prepared() const noexcept {
+        return prepared_ && !offline_fenced_;
     }
     std::uint64_t epoch() const noexcept {
         return pipeline_.epoch();
@@ -164,6 +210,11 @@ class SharedIoConvolutionSession {
     bool last_closed_trace_retention_overflow() const noexcept {
         return last_closed_trace_retention_overflow_;
     }
+    // Result of the final quiescent drain that closed the last generation;
+    // its telemetry_error is the release receipt's validation verdict.
+    SharedIoTraceDrainResult last_close_trace_drain() const noexcept {
+        return last_close_trace_drain_;
+    }
     std::vector<SharedIoTraceRecord> take_last_closed_trace_records() noexcept {
         return std::exchange(last_closed_trace_records_, {});
     }
@@ -174,7 +225,26 @@ class SharedIoConvolutionSession {
         return trace_recorder_ != nullptr && trace_recorder_->enabled();
     }
     // Exactly one serialized diagnostic consumer, stopped before any lifetime/epoch operation.
-    SharedIoTraceDrainResult drain_trace(std::uint32_t budget = 256) noexcept;
+    SharedIoTraceDrainResult drain_trace(std::uint32_t budget = 256,
+                                         bool telemetry_quiescent = false) noexcept;
+    // Private campaign sink. The observer is called only by the serialized
+    // non-RT drain consumer and must outlive the session's final release.
+    bool set_trace_observer(const SharedIoTraceDrainObserver* observer) noexcept {
+        if (!valid_shared_io_trace_drain_observer(observer))
+            return false;
+        // Rows already moved into the bounded legacy retention vectors cannot
+        // be replayed through the observer without changing their delivery
+        // order or proving that the observer owns them. Reject a late install
+        // instead of silently discarding that prefix at generation close.
+        if (observer && (trace_retention_overflow_ || !retained_trace_records_.empty() ||
+                         !retained_trace_admissions_.empty()))
+            return false;
+        trace_observer_ = observer;
+        return true;
+    }
+    bool trace_observer_enabled() const noexcept {
+        return trace_observer_ != nullptr;
+    }
     template <class Sink> std::uint32_t drain_trace_records(std::uint32_t budget, Sink&& sink) {
         if (!trace_recorder_)
             return 0;
@@ -197,8 +267,12 @@ class SharedIoConvolutionSession {
 
     std::optional<std::uint64_t>
     callback_deadline_ns(const SharedIoConvolutionPipeline::Lease&) const noexcept;
+    // ProviderFailure at `sequence`; without one, at the first block the
+    // provider has not delivered.
     void fail_closed() noexcept;
-    bool drain_completions(std::uint64_t now_ns, ServiceResult&) noexcept;
+    void fail_closed(std::uint64_t sequence) noexcept;
+    bool drain_completions(std::uint64_t now_ns, ServiceResult&,
+                           std::uint64_t service_deadline_ns = 0) noexcept;
     bool submit_available(ServiceResult&) noexcept;
     bool discard_all_completions() noexcept;
     bool drain_quiescent() noexcept;
@@ -220,8 +294,12 @@ class SharedIoConvolutionSession {
                         bool gpu_elapsed_available = false) noexcept;
     std::vector<TraceSlot> trace_slots_;
     SharedIoTelemetry trace_telemetry_;
+    std::array<std::atomic<std::uint64_t>,
+               static_cast<std::size_t>(SharedIoGpuTerminalDisposition::CancelledTeardown) + 1>
+        gpu_terminal_counts_{};
     SharedIoTelemetrySnapshot last_closed_trace_telemetry_{};
     std::unique_ptr<SharedIoTraceRecorder> trace_recorder_;
+    const SharedIoTraceDrainObserver* trace_observer_ = nullptr;
     SharedIoTraceConfig trace_template_{};
     SharedIoTraceStats last_closed_trace_stats_{};
     std::vector<SharedIoTraceRecord> last_closed_trace_records_;
@@ -230,12 +308,18 @@ class SharedIoConvolutionSession {
     std::vector<SharedIoTraceAdmission> retained_trace_admissions_;
     bool trace_retention_overflow_ = false;
     bool last_closed_trace_retention_overflow_ = false;
+    SharedIoTraceDrainResult last_close_trace_drain_{};
     std::uint64_t provider_starved_ = 0;
     std::optional<SharedIoConvolutionPipeline::Lease> pending_ingress_;
     std::vector<float> terminal_;
     Config config_{};
     bool prepared_ = false;
     bool failed_ = false;
+    // Set by fence_for_offline(). Kept apart from the recovery reason, which
+    // latches first-wins. prepare() and release clear it defensively, but this
+    // session's pipeline prepares once, so recovery after an offline fence is
+    // a new session from the factory.
+    bool offline_fenced_ = false;
 };
 
 } // namespace pulp::gpu_audio::detail

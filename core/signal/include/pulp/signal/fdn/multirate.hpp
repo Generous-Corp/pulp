@@ -26,22 +26,35 @@
 // reported-zero latency story: there is no block-scale buffering anywhere, only
 // this interpolation window, and it is ratio-dependent by construction.
 //
+// BOTH RAILS AT ONCE
+// The bridge carries a stereo pair through identical filters at identical
+// positions, so it stores the rails interleaved and runs each filter section
+// and each Hermite read on a two-lane double vector holding left and right.
+// Input is sanitized where it enters each leg; the recursive filter state is
+// snapped and sanitized every kHealIntervalSamples of the filter's own clock
+// rather than at every multiply-add.
+//
 // RT contract: prepare() allocates for the worst case (96 kHz tank at the
 // maximum block size). configure() re-derives every rate-dependent value and
 // allocates nothing, so a live tank-rate change is RT-safe.
 
 #include <pulp/signal/biquad.hpp>
+#include <pulp/signal/denormal.hpp>
 #include <pulp/signal/fdn/config.hpp>
 #include <pulp/signal/fdn/filter_state.hpp>
 #include <pulp/signal/fdn/interp.hpp>
+#include <pulp/signal/detail/simd_lanes.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <type_traits>
 #include <vector>
 
 namespace pulp::signal::fdn {
+
+namespace lanes = signal::detail::lanes;
 
 // A ring addressed by ABSOLUTE stream position rather than by delay. Positions
 // before the start of the stream read as silence, which is what makes the
@@ -131,6 +144,167 @@ private:
     std::array<SanitizedBiquadState, 2> s_{};
 };
 
+// An interleaved stereo ring addressed by absolute stream position, as
+// PositionRing is for one rail, and like it reading positions outside the
+// written stream as silence.
+template <typename SampleType = float> class StereoPositionRing {
+  public:
+    void prepare(int capacity) {
+        std::size_t size = 8;
+        while (size < static_cast<std::size_t>(std::max(capacity, 1) + 4))
+            size <<= 1;
+        buffer_.assign(size * 2, SampleType{0});
+        mask_ = size - 1;
+        written_ = 0;
+    }
+
+    void reset() {
+        std::fill(buffer_.begin(), buffer_.end(), SampleType{0});
+        written_ = 0;
+    }
+
+    void push(lanes::D2 x) {
+        const std::size_t slot = (static_cast<std::size_t>(written_) & mask_) * 2;
+        if constexpr (std::is_same_v<SampleType, float>) {
+            lanes::store_narrow2(&buffer_[slot], x);
+        } else {
+            buffer_[slot] = static_cast<SampleType>(lanes::lane(x, 0));
+            buffer_[slot + 1] = static_cast<SampleType>(lanes::lane(x, 1));
+        }
+        ++written_;
+    }
+
+    std::int64_t written() const {
+        return written_;
+    }
+    double readable_through() const {
+        return static_cast<double>(written_ - 3);
+    }
+
+    lanes::D2 read(double position) const {
+        const double floor_pos = std::floor(position);
+        const auto i = static_cast<std::int64_t>(floor_pos);
+        const lanes::D2 t = lanes::splat(position - floor_pos);
+        // Positions outside the written stream read as silence, as they do
+        // in PositionRing: before the start, and past the newest sample.
+        const bool inside = i >= 1 && i + 2 < written_;
+        const lanes::D2 y0 = inside ? at(i - 1) : guarded(i - 1);
+        const lanes::D2 y1 = inside ? at(i) : guarded(i);
+        const lanes::D2 y2 = inside ? at(i + 1) : guarded(i + 1);
+        const lanes::D2 y3 = inside ? at(i + 2) : guarded(i + 2);
+        // Interpolator::hermite, both rails at once.
+        const lanes::D2 c1 = lanes::splat(0.5) * (y2 - y0);
+        const lanes::D2 c2 =
+            y0 - lanes::splat(2.5) * y1 + lanes::splat(2.0) * y2 - lanes::splat(0.5) * y3;
+        const lanes::D2 c3 = lanes::splat(0.5) * (y3 - y0) + lanes::splat(1.5) * (y1 - y2);
+        return ((c3 * t + c2) * t + c1) * t + y1;
+    }
+
+  private:
+    lanes::D2 guarded(std::int64_t index) const {
+        return index < 0 || index >= written_ ? lanes::splat(0.0) : at(index);
+    }
+
+    lanes::D2 at(std::int64_t index) const {
+        const std::size_t slot = (static_cast<std::size_t>(index) & mask_) * 2;
+        if constexpr (std::is_same_v<SampleType, float>)
+            return lanes::load_widen2(&buffer_[slot]);
+        else
+            return lanes::make(static_cast<double>(buffer_[slot]),
+                               static_cast<double>(buffer_[slot + 1]));
+    }
+
+    std::vector<SampleType> buffer_;
+    std::size_t mask_ = 0;
+    std::int64_t written_ = 0;
+};
+
+// A normalized biquad section rearranged so its recursion is one
+// multiply-add deep. Transposed direct form II computes y = b0 x + s1 and then
+// s1' = b1 x - a1 y + s2, which puts two dependent multiply-adds between one
+// s1 and the next. Substituting y gives
+//   s1' = (b1 - a1 b0) x - a1 s1 + s2,   s2' = (b2 - a2 b0) x - a2 s1,
+// the same state and the same transfer function, with y now off the
+// recursion — half the latency per sample for a filter that cannot be
+// vectorized along time.
+struct StereoSection {
+    double b0 = 1.0, c1 = 0.0, c2 = 0.0, a1 = 0.0, a2 = 0.0;
+
+    static StereoSection from(const BiquadCoefficientsT<double>& c) {
+        return {c.b0, c.b1 - c.a1 * c.b0, c.b2 - c.a2 * c.b0, c.a1, c.a2};
+    }
+};
+
+// One biquad cascade's state for both rails, two lanes per section. The state
+// is snapped and sanitized every kHealIntervalSamples samples it processes,
+// counted from reset(), so the cleanup never depends on the caller's blocks.
+// A StereoSection with every coefficient already broadcast to both lanes,
+// built once per block rather than at every sample.
+struct StereoSectionLanes {
+    lanes::D2 b0, c1, c2, a1, a2;
+
+    static StereoSectionLanes from(const StereoSection& s) {
+        return {lanes::splat(s.b0), lanes::splat(s.c1), lanes::splat(s.c2), lanes::splat(s.a1),
+                lanes::splat(s.a2)};
+    }
+};
+
+template <int Sections> class StereoBiquadState {
+  public:
+    void reset() {
+        for (auto& s : s1_)
+            s = lanes::splat(0.0);
+        for (auto& s : s2_)
+            s = lanes::splat(0.0);
+        count_ = 0;
+    }
+
+    lanes::D2 process(const StereoSection* sections, lanes::D2 x) {
+        StereoSectionLanes l[Sections];
+        for (int k = 0; k < Sections; ++k)
+            l[k] = StereoSectionLanes::from(sections[k]);
+        return process(l, x);
+    }
+
+    lanes::D2 process(const StereoSectionLanes* sections, lanes::D2 x) {
+        for (int k = 0; k < Sections; ++k) {
+            const auto& c = sections[k];
+            const lanes::D2 s1 = s1_[k];
+            const lanes::D2 y = c.b0 * x + s1;
+            s1_[k] = c.c1 * x + s2_[k] - c.a1 * s1;
+            s2_[k] = c.c2 * x - c.a2 * s1;
+            x = y;
+        }
+        if (++count_ == kHealIntervalSamples) {
+            heal();
+            count_ = 0;
+        }
+        return x;
+    }
+
+    // Snap decayed state to zero and clear state that went non-finite.
+    void heal() {
+        for (int k = 0; k < Sections; ++k) {
+            s1_[k] = healed(s1_[k]);
+            s2_[k] = healed(s2_[k]);
+        }
+    }
+
+  private:
+    static lanes::D2 healed(lanes::D2 v) {
+        const double a = lanes::lane(v, 0);
+        const double b = lanes::lane(v, 1);
+        return lanes::make(std::isfinite(a) ? snap_to_zero(a) : 0.0,
+                           std::isfinite(b) ? snap_to_zero(b) : 0.0);
+    }
+
+  public:
+  private:
+    lanes::D2 s1_[Sections] = {};
+    lanes::D2 s2_[Sections] = {};
+    int count_ = 0;
+};
+
 // Host <-> tank stereo bridge.
 template <typename SampleType = float>
 class MultirateBridge {
@@ -144,9 +318,9 @@ public:
             static_cast<int>(std::ceil(static_cast<double>(max_block_) * kMaxTankRate /
                                        host_rate_)) +
             kHermiteGuard;
+        in_ring_.prepare(max_block_ * 2 + kHermiteGuard);
+        out_ring_.prepare(max_tank_samples_ * 2 + kHermiteGuard);
         for (int c = 0; c < kNumRails; ++c) {
-            in_ring_[c].prepare(max_block_ * 2 + kHermiteGuard);
-            out_ring_[c].prepare(max_tank_samples_ * 2 + kHermiteGuard);
             tank_in_[c].assign(static_cast<std::size_t>(max_tank_samples_), SampleType{0});
             tank_out_[c].assign(static_cast<std::size_t>(max_tank_samples_), SampleType{0});
         }
@@ -164,6 +338,8 @@ public:
             const double fast = std::max(host_rate_, tank_rate_);
             const double slow = std::min(host_rate_, tank_rate_);
             filter_.design(kAaCutoffFraction * slow, fast);
+            for (int k = 0; k < 2; ++k)
+                sections_[k] = StereoSection::from(filter_.sections()[static_cast<std::size_t>(k)]);
         }
         reset();
     }
@@ -175,21 +351,24 @@ public:
     // tank-rate change drops the running tail rather than reinterpreting it at
     // the new rate, so no pitch-shifted tail artifact is possible.
     void reset() {
+        in_ring_.reset();
+        out_ring_.reset();
+        aa_in_.reset();
+        aa_out_.reset();
         for (int c = 0; c < kNumRails; ++c) {
-            in_ring_[c].reset();
-            out_ring_[c].reset();
-            aa_in_[c].reset();
-            aa_out_[c].reset();
             std::fill(tank_in_[c].begin(), tank_in_[c].end(), SampleType{0});
             std::fill(tank_out_[c].begin(), tank_out_[c].end(), SampleType{0});
         }
+        tank_count_ = 0;
+        host_count_ = 0;
         next_tank_pos_ = 0.0;
         // Start the output leg behind the tank stream by enough that its
         // Hermite window is satisfied for every block size: three tank samples
         // for its own taps, plus the input leg's three-host-sample window
         // expressed in tank samples, plus a sample of slack for the floor() at
         // the boundary.
-        next_host_pos_ = -(4.0 * tank_per_host_ + 4.0);
+        host_origin_ = -(4.0 * tank_per_host_ + 4.0);
+        next_host_pos_ = host_origin_;
     }
 
     // Upper bound on the interpolation skew, in host samples, between an input
@@ -202,6 +381,16 @@ public:
         return 3.0 + (4.0 * tank_per_host_ + 4.0) * host_per_tank_;
     }
 
+    // The next read positions of the two legs, on their stream clocks: the
+    // host-sample position of the next tank sample, and the tank-sample
+    // position of the next host sample.
+    double input_read_position() const {
+        return next_tank_pos_;
+    }
+    double output_read_position() const {
+        return next_host_pos_;
+    }
+
     SampleType* tank_input(int rail) { return tank_in_[rail].data(); }
     SampleType* tank_output(int rail) { return tank_out_[rail].data(); }
 
@@ -210,36 +399,39 @@ public:
     // decimation when downsampling, at the tank rate after interpolation when
     // upsampling.
     int host_to_tank(const SampleType* left, const SampleType* right, int n) {
+        SampleType* tl = tank_in_[0].data();
+        SampleType* tr = tank_in_[1].data();
         if (!resampling_) {
             for (int i = 0; i < n; ++i) {
-                tank_in_[0][static_cast<std::size_t>(i)] =
-                    finite_or_zero(left[i]);
-                tank_in_[1][static_cast<std::size_t>(i)] =
-                    finite_or_zero(right[i]);
+                tl[i] = finite_or_zero(left[i]);
+                tr[i] = finite_or_zero(right[i]);
             }
             return n;
         }
 
         const bool downsampling = tank_rate_ < host_rate_;
+        const StereoSectionLanes sections[2] = {StereoSectionLanes::from(sections_[0]),
+                                                StereoSectionLanes::from(sections_[1])};
         int produced = 0;
+        // The filter state as a local for the loop: the stores to the tank
+        // buffers would otherwise force it through memory every sample.
+        StereoBiquadState<2> aa = aa_in_;
         for (int i = 0; i < n; ++i) {
-            for (int c = 0; c < kNumRails; ++c) {
-                const double x = static_cast<double>(c == 0 ? left[i] : right[i]);
-                in_ring_[c].push(static_cast<SampleType>(
-                    downsampling ? aa_in_[c].process(filter_.sections(), x) : x));
-            }
-            const double limit = in_ring_[0].readable_through();
+            const lanes::D2 x = lanes::make(static_cast<double>(finite_or_zero(left[i])),
+                                            static_cast<double>(finite_or_zero(right[i])));
+            in_ring_.push(downsampling ? aa.process(sections, x) : x);
+            const double limit = in_ring_.readable_through();
             while (next_tank_pos_ <= limit && produced < max_tank_samples_) {
-                for (int c = 0; c < kNumRails; ++c) {
-                    double v = in_ring_[c].read(next_tank_pos_);
-                    if (!downsampling) v = aa_in_[c].process(filter_.sections(), v);
-                    tank_in_[c][static_cast<std::size_t>(produced)] =
-                        static_cast<SampleType>(v);
-                }
+                lanes::D2 v = in_ring_.read(next_tank_pos_);
+                if (!downsampling)
+                    v = aa.process(sections, v);
+                tl[produced] = static_cast<SampleType>(lanes::lane(v, 0));
+                tr[produced] = static_cast<SampleType>(lanes::lane(v, 1));
                 ++produced;
-                next_tank_pos_ += host_per_tank_;
+                next_tank_pos_ = tank_position(++tank_count_);
             }
         }
+        aa_in_ = aa;
         return produced;
     }
 
@@ -247,46 +439,62 @@ public:
     // samples. The lag chosen in reset() guarantees every position read below
     // is already inside the tank stream's Hermite window.
     void tank_to_host(int tank_n, SampleType* left, SampleType* right, int host_n) {
+        const SampleType* tl = tank_out_[0].data();
+        const SampleType* tr = tank_out_[1].data();
         if (!resampling_) {
             for (int i = 0; i < tank_n; ++i) {
-                left[i] =
-                    finite_or_zero(tank_out_[0][static_cast<std::size_t>(i)]);
-                right[i] =
-                    finite_or_zero(tank_out_[1][static_cast<std::size_t>(i)]);
+                left[i] = finite_or_zero(tl[i]);
+                right[i] = finite_or_zero(tr[i]);
             }
             return;
         }
         const bool downsampling = tank_rate_ < host_rate_;
+        const StereoSectionLanes sections[2] = {StereoSectionLanes::from(sections_[0]),
+                                                StereoSectionLanes::from(sections_[1])};
+        StereoBiquadState<2> aa = aa_out_;
         for (int i = 0; i < tank_n; ++i) {
-            for (int c = 0; c < kNumRails; ++c) {
-                double v = static_cast<double>(tank_out_[c][static_cast<std::size_t>(i)]);
-                if (!downsampling) v = aa_out_[c].process(filter_.sections(), v);
-                out_ring_[c].push(static_cast<SampleType>(v));
-            }
+            const lanes::D2 v = lanes::make(static_cast<double>(finite_or_zero(tl[i])),
+                                            static_cast<double>(finite_or_zero(tr[i])));
+            out_ring_.push(downsampling ? v : aa.process(sections, v));
         }
         for (int i = 0; i < host_n; ++i) {
-            for (int c = 0; c < kNumRails; ++c) {
-                double v = out_ring_[c].read(next_host_pos_);
-                if (downsampling) v = aa_out_[c].process(filter_.sections(), v);
-                (c == 0 ? left : right)[i] = static_cast<SampleType>(v);
-            }
-            next_host_pos_ += tank_per_host_;
+            lanes::D2 v = out_ring_.read(next_host_pos_);
+            if (downsampling)
+                v = aa.process(sections, v);
+            left[i] = static_cast<SampleType>(lanes::lane(v, 0));
+            right[i] = static_cast<SampleType>(lanes::lane(v, 1));
+            next_host_pos_ = host_position(++host_count_);
         }
+        aa_out_ = aa;
     }
 
-private:
-    std::array<PositionRing<SampleType>, kNumRails> in_ring_{};
-    std::array<PositionRing<SampleType>, kNumRails> out_ring_{};
+  private:
+    StereoPositionRing<SampleType> in_ring_{};
+    StereoPositionRing<SampleType> out_ring_{};
     std::array<std::vector<SampleType>, kNumRails> tank_in_{};
     std::array<std::vector<SampleType>, kNumRails> tank_out_{};
-    std::array<ButterworthState, kNumRails> aa_in_{};
-    std::array<ButterworthState, kNumRails> aa_out_{};
+    StereoBiquadState<2> aa_in_{};
+    StereoBiquadState<2> aa_out_{};
     ButterworthPair filter_{};
+    StereoSection sections_[2] = {};
 
     double host_rate_ = 48000.0;
     double tank_rate_ = 20000.0;
     double host_per_tank_ = 1.0;
     double tank_per_host_ = 1.0;
+    // Read positions are derived from sample counts, not accumulated: adding
+    // an inexact rate ratio once per sample drifts by whole samples over a
+    // long session, until the output leg reads past what the tank wrote.
+    double tank_position(std::int64_t count) const {
+        return static_cast<double>(count) * host_rate_ / tank_rate_;
+    }
+    double host_position(std::int64_t count) const {
+        return host_origin_ + static_cast<double>(count) * tank_rate_ / host_rate_;
+    }
+
+    std::int64_t tank_count_ = 0;
+    std::int64_t host_count_ = 0;
+    double host_origin_ = 0.0;
     double next_tank_pos_ = 0.0;
     double next_host_pos_ = 0.0;
     int max_block_ = 0;

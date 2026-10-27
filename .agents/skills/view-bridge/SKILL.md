@@ -41,6 +41,35 @@ installed and does not cross a PRIVATE static-library link. The proofs live in
 `test/fixtures/data_display_editor/` (plug-in editor and hot reload, both with
 the registry cleared first) and `cmake-view-audio-sdk-consumer`.
 
+### The UI_SCRIPT selection is a runtime value, never a compile definition
+
+`pulp_add_plugin(UI_SCRIPT ...)` and `pulp_use_kit_ui()` record the script,
+theme, and asset roots as target properties, and one generated source per
+format target (`<build>/pulp_editor_assets/<target>.cpp`) registers them at
+load time through `pulp::format::register_editor_assets()`. ViewBridge reads
+them back with `editor_assets_for(<bundle id>)`: a keyed bundle entry's
+`ui_*` fields win, then the binary-wide record. That precedence is what lets
+each plug-in in a multi-plug-in bundle carry its own editor; a single-plug-in
+binary has no keyed entry and uses its own record.
+
+The registered paths are absolute paths on the build machine. `UI_SCRIPT`
+therefore applies to VST3, CLAP, AU, AAX, Standalone and ControlHost targets
+and deliberately not to AUv3: an iOS app extension cannot open a path from the
+machine that built it, so an AUv3 editor ships its script inside the extension
+and loads it from there. `pulp_use_kit_ui()` applies to every format target
+that already exists, AUv3 included, which only resolves when the editor runs on
+the machine that built it.
+
+Do not reintroduce a `#ifdef PULP_UI_SCRIPT_PATH` reader. ViewBridge is
+compiled once into the shared format library, so a per-target compile
+definition never reaches it, and every plug-in format silently opens AutoUi
+with no test failing. An inline
+function whose body depends on a per-TU define is also an ODR hazard: the
+linker keeps whichever copy it sees first. The proof is
+`ui-script-plugin-editor-{vst3,clap,au}` (built bundles opened through
+`PluginSlot`, asserting `mode=scripted`, `gpu=true`, and the script's own
+console line) plus `ui-script-plugin-editor-installed-sdk`.
+
 ### Native scripted UI is not a WebView
 
 When a materialized canvas is retained as the native paint and hit-test
@@ -70,6 +99,45 @@ is the fast check before pushing. The same rule applies to non-view Processor
 virtuals: additive callbacks such as `process_f64(...)` belong after the
 existing f32 process surface, and descriptor fields added for new capabilities
 should be appended when positional aggregate initializer compatibility matters.
+
+### Editor stack: lite by default, GPU host by declaration
+
+On macOS a plug-in links the **lite editor stack** unless its
+`pulp_add_plugin(...)` declares otherwise. A lite binary has no GPU plug-in or
+window host, no Skia, Dawn or Tint, and its editor always opens on the
+CoreGraphics host (`PluginViewHost::create` in
+`core/view/platform/mac/plugin_view_host_mac.mm`, compiled with
+`PULP_VIEW_LITE_HOST` through `mac_gpu_host_config.h`). Pick the keyword by what
+the editor draws:
+
+| Declare | When |
+|---|---|
+| nothing (or `LITE_EDITOR`) | AutoUi, or C++ views that paint on the CoreGraphics host and never set `requires_gpu_host()` |
+| `UI_SCRIPT` | a scripted UI; it renders on the GPU host, so it always gets the full stack |
+| `GPU_UI` | C++ views that need the GPU host: `requires_gpu_host()` is true, Skia SVG that must composite, shaders, Dawn textures, 3D |
+| `FULL_EDITOR` | the full stack for any other reason (a deliberate control, a GPU feature that does not set the flag) |
+
+`LITE_EDITOR` with any of the other three is a configure error. Other
+platforms always build the full stack.
+
+A lite plug-in whose editor asks for the GPU host anyway (`decide_gpu_host`
+returns `use_gpu`) does not fail: `PluginViewHost::create` calls
+`detail::note_lite_host_gpu_request()`, which logs **one** warning per process
+naming `GPU_UI` and counts every request, and the editor opens on the
+CoreGraphics host, where GPU-only drawing is blank. That warning in a log means
+the plug-in is missing `GPU_UI`. `pulp-test-lite-editor-host-mac` holds this
+behavior; `editor-stack-*` tests check which stack each example module links.
+
+How the stack is cut, so a change does not reattach Skia by accident: the
+per-binary ObjC cluster leaves out the GPU hosts, and the binary links
+`pulp-canvas-lite-objects` / `pulp-view-lite-objects`, copies of
+`text_shaper.cpp`, `font_resolver.cpp`, `canvas_widget.cpp` and
+`asset_manager.cpp` built with `PULP_LITE_EDITOR=1`
+(`tools/cmake/PulpLiteEditorObjects.cmake`). Objects on the link line win over
+the library's archive members. `PULP_LITE_EDITOR` may change function bodies
+only, never a declaration. A new unconditional Skia call in a library function
+a lite editor reaches puts Skia back in every lite binary; the `editor-stack-*`
+symbol checks are what catch it.
 
 ## Editor open: content-first — the host's first image is the mounted document
 
@@ -166,6 +234,11 @@ that opens the editor immediately after insert loses nothing. It removes the
 cold `script_compile` (~105–145 ms for a 1.6 MB runtime), the inline-script
 compiles (~20 ms) and `runtime_import_verify` (~24 ms) from the factory; it
 does not touch per-open work (`script_execute`, the bind, layout, frame 0).
+"Loses nothing" is relative to compiling on open: an editor opened right after
+insert still WAITS on the prewarm (65–80 ms of Spectr's fresh-process open sat
+in `script_bytecode_lookup`). Build-time bytecode (`pulp_add_js_bytecode()`,
+registered from `editor_prewarm()`; see the `engine` skill) removes that wait
+and the prewarm's own compile; Windows, where the prewarm is off, gains most.
 Rules: return static data (embedded assets) — the views must outlive the
 plug-in image; keep `editor_prewarm()` cheap (it runs on the host's
 instantiation thread); a request that is already cached costs a lookup. The
@@ -387,6 +460,15 @@ Gate: `[lifetime]` in `test/test_view_bridge.cpp`; under ASan its failure
 without the fix is the use-after-free itself.
 
 ## Lifecycle protocol — adapter author side
+
+- **A hidden editor's GPU memory: `PluginViewHost::release_gpu_caches()`.**
+  One owner for every adapter: the mac, iOS, Windows and Linux GPU hosts
+  implement it with `TrimLevel::everything()` and keep their surfaces; CPU
+  hosts and a host with no surface make it a no-op. Callers: CLAP `gui_hide`,
+  AU v3 `viewDidDisappear`, and the mac GPU view's `-viewDidHide` (the only
+  hide signal an AU v2 editor gets). VST3 has no hide callback; `removed()`
+  destroys the host, which frees everything. `gpu_cache_usage()` reports the
+  host's cache bytes for tests.
 
 ```
 bridge.open(&err)                 // builds the view; does NOT fire on_view_opened
@@ -2463,6 +2545,83 @@ is false, because choc's watcher needs macOS `FSEventStream*`), the flag is
 accepted and file-watch reload is inert. `ScriptedUiSession` logs once in that
 case so the degradation is visible rather than mysterious.
 
+## The UI_SCRIPT editor is embedded; the on-disk path is a dev-build override
+
+`pulp_add_plugin(UI_SCRIPT)` no longer ships a plug-in that reads `ui.js` from
+the developer's absolute source path at every editor open. The script's bytes,
+the `theme.json` beside it, and the asset files beside it (images, fonts,
+`.json` sidecars and shaders: the allowlist in `PulpUiAssets.cmake`;
+dot-directories, `node_modules` and nested build trees are skipped, and a
+script whose directory holds a `CMakeLists.txt` is refused so a project root
+never ships its own files) are encoded by `encode_binary_data.py` into one
+`pulp_ui_embed_<hash>` static library per distinct (script, theme, files) set,
+and a generated header returns them as the embedded half of a
+`pulp::format::EditorAssets`. The per-target registration unit
+(`pulp_editor_assets/<target>.cpp`, generated with `$<TARGET_PROPERTY>` so a
+later `pulp_use_kit_ui` selection still lands) includes that header, so one static
+initializer registers the embedded editor and the on-disk paths together, and
+the data archive's members are referenced from a direct source and survive
+the link. `select_editor_ui_source()` in `editor_ui.hpp` is the pure decision;
+`test_headless.cpp` tests its matrix and `test_view_bridge.cpp` opens an
+embedded registration through a real ViewBridge.
+
+Gotchas:
+
+- **Hot reload needs the on-disk path, and only a dev build records it.**
+  `PULP_UI_SCRIPT_PATH`, `PULP_UI_THEME_PATH` and `PULP_UI_ASSET_ROOTS` are set
+  as target properties only when `PULP_DEV_BUILD` is on. In the checkout it is
+  a root option defaulting to `PULP_BUILD_TESTS`; `PulpUiAssets.cmake`
+  declares it OFF for an installed-SDK consumer, and the `pulp` CLI's
+  configure (`pulp build`/`dev`/`loop`/`run`, and `pulp create`'s project
+  configure) passes `-DPULP_DEV_BUILD=ON` on a fresh dir or one that never
+  recorded it. `pulp ship` builds `build-ship/` with it off rather than
+  shipping the dev dir (`ship` skill). At run time
+  `select_editor_ui_source()` honors the path only for a hot-reloading editor
+  (standalone, or `PULP_DEV_HOT_RELOAD=1`) and only while the file exists, so
+  a stale path falls back to the embedded bytes rather than to AutoUi.
+  `cmake-ui-script-embed` proves both halves on a throwaway project: bytes,
+  theme and sibling file embedded and registered with no path, and the path
+  present under `PULP_DEV_BUILD=ON`; `ui-script-plugin-*` prove the real
+  plug-in targets.
+- **An embedded session is path-less.** `script_path()` is empty,
+  `uses_embedded_source()` is true, `theme_path()` is empty (never a
+  `theme.json` relative to the host's cwd), the script base dir is empty, and
+  `enable_hot_reload` creates no `HotReloader` (`hot_reload_watching()` is
+  false; it logs once). Log lines name the script through `script_label()`.
+  `reload()` re-evaluates the bytes; `reload_from({})` returns to them, which
+  is how `ScriptedUiSwapUnit` rolls an embedded editor back.
+- **Embedded files stand in for the script directory.**
+  `ScriptedUiOptions::embedded_assets` reaches every bridge the session
+  builds (`WidgetBridge::set_embedded_assets`). `__loadAssetSync__` answers
+  from it first (`resolvedPath` is `embedded:<name>`), `setImageSource` hands
+  the widget a `data:` URI (`ImageView` draws inline bytes through the keyed
+  decode cache; it has no in-memory file scheme), `setKnobSpriteStrip` reads
+  the bytes, and `registerFont` registers them with the AssetManager under a
+  per-bridge key. Names are screened by `is_safe_relative_path` after
+  normalization: `..`, absolute paths and URIs never match. Not covered: the
+  sprite-knob body/indicator pair (`SpriteStrip::load_from_file`) and any
+  other API that hands a bare filesystem path to the canvas.
+- **Persisted stores need an identity without a directory.** The widget
+  storage and style-preset namespaces hashed the script base dir; an embedded
+  editor has none, so `ScriptedUiOptions::storage_identity` (the default
+  editor passes `<bundle id>/<script name>`, from ViewBridge) is hashed
+  instead (`WidgetBridge::storage_identity()`). A file-backed session still
+  hashes its directory, so nothing moves for existing plug-ins.
+- **The old mechanism depended on a weak-symbol override.** The compiled-in
+  path only reached `ViewBridge` (in `pulp-format-view`, built without the
+  define) when a plug-in TU that includes `editor_ui.hpp` -- `clap_entry.hpp`
+  -- supplied a competing definition of the inline builder. The registry is
+  explicit, so VST3/AU/Standalone no longer rely on link order.
+- **A file added beside the script re-runs CMake** (the glob is
+  `CONFIGURE_DEPENDS`); an edit to an embedded file re-encodes it at build
+  time without a reconfigure. Embedding more than 16 MiB beside one script
+  warns. A kit (`pulp_use_kit_ui`) embeds the files under its `PULP_ASSETS`
+  directories too, named relative to each directory.
+- **The last selection on a target wins.** `pulp_use_kit_ui` runs after
+  `pulp_add_plugin` and overwrites the embed and path properties the generated
+  unit reads at generate time; there is one registration per target, so no
+  static-initializer ordering is involved.
+
 ## Scripted UI joins a unified live-swap transaction (SwapUnit)
 
 `ScriptedUiSwapUnit` (`core/format/include/pulp/format/reload/scripted_ui_swap_unit.hpp`)
@@ -2921,8 +3080,12 @@ arrives AFTER the first render -- a mount effect that requests state, a
 passive effect that hands that hydrate on, a native `load_script` that flips a
 flag -- is another commit, and in a materialized import each one re-applies
 the captured document. Host-callback batching (`__pulpBatchUpdates__` around
-rAF/timer callbacks and one native message's listeners) merges updates inside
-ONE callback; it cannot merge a promise job with a later frame or a passive
+rAF/timer callbacks, one native message's listeners, and every handler one
+native widget event reaches through `__dispatch__`, nested dispatches
+included; a handler that reads the native tree right after a `setState` sees
+the previous commit until the dispatch returns, so it calls `flushSync`, as in
+a browser) merges updates inside ONE callback; it cannot merge a promise job
+with a later frame or a passive
 effect, and Pulp deliberately does not batch the microtask queue: @pulp/react
 renders a LegacyRoot, code may read the tree right after a `setState` in a
 `.then`, and wrapping the engine's job drain would re-enter it from script.
@@ -3049,6 +3212,75 @@ or a probe that cannot see damage passes every budget
 host that clips to bounded damage would paint exactly what the probe reports;
 the macOS plug-in host still repaints in full, so on that host the win is the
 avoided layout and commit, and the bound is what a partial-repaint host uses.
+
+## A live clock subscriber ticks the editor; only damage composites it
+
+`begin_host_frame` reports two things: `continuous` (anything wants FrameClock
+ticks: a running animation, or a live render subscriber such as a source-bound
+`Meter`) and `animating` (the tree paints new pixels every frame on its own:
+`needs_continuous_frames`). The macOS plug-in hosts and the standalone GPU
+window keep their vsync gate open for `continuous`, but composite a frame only
+for `animating` or real damage (`host_frame_composites`). So:
+
+- A FrameClock subscriber that changes what it draws must request a repaint.
+  `animate()`, the caret blinks and `LottieView` already do; the value-source
+  bindings repaint their owner when the snapshot changes
+  (`View::on_meter_snapshot_changed`, default whole-view; `Meter` overrides it
+  and keeps its own bounded, ballistics-gated invalidation). A subscriber that
+  silently mutates paint state is now a frozen view, not a slow one.
+- A paint that reads time (`frame_clock()->time()`, a shader clock) must keep
+  the view in `needs_continuous_frames` (continuous repaint / a registered
+  predicate), or it stops on the first frame nothing dirtied. `Stepper` and
+  `NumberBox` draw their typing caret from the clock's time, so they hold
+  `set_continuous_repaint` equal to their editing state through
+  `set_editing_()` and release it on commit, cancel, focus loss and a scrub;
+  an indeterminate `Spinner` holds it while it spins. A new caret or
+  time-driven widget needs the same, plus a headless test that
+  `needs_continuous_frames()` follows the state.
+- A permanent FrameClock subscriber that republishes on every audio block
+  defeats gating. If it posts a new frame of data into the script (a spectrum,
+  a scope trace) whenever the DSP's sequence number advances, the host's
+  silence still advances it, and every post becomes a commit, then damage, then
+  a composite at the display rate. One imported analyzer editor stayed at
+  ~62 composited frames per second and ~40% CPU while idle. Publish only when
+  the data changes at display resolution (quantize like a meter readout), and
+  unsubscribe while there is nothing to show. To tell this apart from a
+  host-side gap, stop the host's render calls with the editor idle (edbench's
+  `editor-idle-stopped` phase): frames dropping to zero means the product
+  is publishing per block.
+- Before this split, an editor with one bound meter re-composited its whole
+  surface every vsync through silence. Measured with an 8-knob, 16-meter
+  editor at 60 Hz on an M5 Max (process CPU, editor open and silent, host
+  baseline about 1.5%): CPU host 4.8% -> 2.5%; GPU host 7.3% -> 2.5% and 62
+  -> 0 presented drawables per second.
+
+The CPU (CoreGraphics) plug-in host draws from its display link, bounded:
+
+- While the link runs, `repaint()` records damage and opens the frame gate;
+  the paint half of the tick hands it to AppKit. Marking the NSView directly
+  let AppKit re-rasterize at the end of every run-loop turn that carried a
+  request, i.e. at the automation or pointer event rate, not the display's.
+- `request_repaint(Rect)` reaches `-setNeedsDisplayInRect:` through the design
+  viewport transform, so AppKit re-rasterizes only that region of the layer's
+  backing store (RGBA16F on a Retina/XDR display, so a whole-editor redraw is
+  expensive). A layer-backed NSView redraws the bounding box of several dirty
+  rects, so a frame's bounded requests union into one rect on purpose.
+- Requests made from the idle half (host automation reaching the editor
+  through the store listeners) stay bounded; they used to be escalated to a
+  whole-view redraw, so a knob following automation redrew the whole editor.
+- Held drag motion only opens the gate (`onNeedsDisplay`); the motion the
+  frame delivers repaints what it moved.
+- A rect-less `request_repaint()` is still whole-view. Widgets on a value hot
+  path must use `request_repaint_self()` (Knob, Fader, Meter do), or each tick
+  redraws the editor.
+- `drawRect:` lays out with `layout_children_if_needed()`, like the GPU host; a
+  geometry change that does not bump the layout generation is not re-laid out
+  there either.
+
+Measure redraw rate and area from outside the plug-in: count
+`-[NSViewBackingLayer display]` calls and the area passed to
+`-setNeedsDisplayInRect:` / `-setNeedsDisplay:` per second in the host
+process. Process CPU alone hides whether a frame was full or bounded.
 
 ## Present pacing on macOS: Mailbox is Fifo, and acquire waits on drawables
 
@@ -3455,3 +3687,41 @@ ordered and deterministic, validate generated output with the bridge drift and
 missing-handler controls, and keep inbound commands distinct from outbound
 publications. This seed contract does not replace payload parsing or handler
 registration for existing plugins.
+
+## Editor glue must not name the script runtime
+
+Every plug-in with an editor links `ViewBridge`, the per-format plug views,
+`editor_idle_pump.hpp` and `gpu_host_select.hpp`, but most editors are AutoUi
+and never run a script. A static link keeps the QuickJS engine, the widget
+bridge and the session code (about 5 MB stripped) only when something live
+references them, so this glue reaches a session only through
+`view::ScriptedEditorSession`'s virtual calls (`poll`, `settling`,
+`complete_pending_load`, `release_root`, `set_host_kind`,
+`attach_gpu_surface`, destruction), and schedules editor prewarm through
+`view::scripted_ui_prewarm_runner()`, which `scripted_ui.cpp` fills in when
+session code is linked. `ScopedDeferredDocumentLoad` is header-inline for the
+same reason. A new direct call to a non-virtual `ScriptedUiSession` method (or
+any other view-script symbol) from glue pulls the whole runtime back into every
+plug-in; `plugin-module-no-script-runtime-PulpGain-*` (packaging label) fails
+when that happens, and `-Wl,-why_load` on the module link names the caller.
+The default editor's own scripted branch is the trap that broke this once:
+when the `UI_SCRIPT` selection became a runtime value, the inline
+`build_editor_ui_for_assets()` could no longer fold its
+`make_unique<ScriptedUiSession>` away, so every AutoUi plug-in linked the
+runtime again (PulpGain 18.7 -> 23.8 MB stripped) while the build stayed
+green. That branch now lives in `core/format/src/scripted_editor_builder.cpp`
+and is reached through `format::scripted_editor_builder_slot()`;
+`install_scripted_editor_builder()` fills the slot, and only the generated
+editor-assets source of a target with a script calls it. A runtime-valued
+choice in glue every plug-in links never removes code; only a reference that
+is absent at link time does.
+A processor that builds its own `ScriptedUiSession` needs no opt-in: its
+constructor call links the runtime, and that also installs the prewarm runner.
+That is also how a plug-in that loads a script at run time without declaring
+`UI_SCRIPT` opts back in; there is deliberately no CMake switch, because the
+link follows the reference. A bundle whose scripts come only from keyed
+`PluginRegistration::ui_script` entries calls
+`install_scripted_editor_builder()` itself; without it ViewBridge logs the
+missing builder, reports it in `last_error()` and opens AutoUi. Reaching the runtime only by name (`dlsym`) cannot
+work: nothing links it. `docs/reference/cmake.md` "Shipped Module Size" is the
+user-facing version.

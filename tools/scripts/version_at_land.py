@@ -469,6 +469,86 @@ def _refresh_derived(repo: Path) -> list[str]:
     return refreshed
 
 
+# The surface whose version `pulp upgrade --notes` compares against: migration
+# notes are keyed to the CLI that ships with the SDK.
+MIGRATION_NOTES_SURFACE = "sdk"
+
+
+def _fold_migration_notes(repo: Path, plan: list[Assignment]) -> list[str]:
+    """Fold docs/migrations/unreleased/ into the note for the SDK version
+    this bump assigns, returning the paths that changed.
+
+    A pull request cannot know which version it ships in, so its migration
+    note waits in unreleased/ until the bump that assigns that version. Best-
+    effort like the regenerators: a failure leaves the notes in unreleased/,
+    where the next SDK bump folds them, rather than stopping the release."""
+    sdk = next((a for a in plan if a.surface == MIGRATION_NOTES_SURFACE), None)
+    if sdk is None:
+        return []
+    try:
+        from fold_migration_notes import fold, shipped_version
+        # The release tags decide which release a note's change already
+        # shipped in; a clone that lacks the newest tag folds that note into
+        # this bump's version, the behaviour before tags were consulted.
+        _git(repo, "fetch", "--quiet", "--tags", "origin", check=False)
+        return fold(repo, sdk.assigned, lambda rel: shipped_version(repo, rel))
+    except (Exception, SystemExit) as error:  # noqa: BLE001 - a bump must still finish
+        print(
+            f"version-at-land: could not fold docs/migrations/unreleased/ into "
+            f"v{sdk.assigned}.md; the notes stay unreleased until the next SDK "
+            f"bump: {error}",
+            file=sys.stderr,
+        )
+        return []
+
+
+# What `agent_capability_manifest.py --assign-pending` rewrites: the counter
+# constants and the three generated artifacts that carry them.
+CAPABILITY_SCRIPT = "tools/scripts/agent_capability_manifest.py"
+CAPABILITY_ASSIGNED_PATHS = (
+    CAPABILITY_SCRIPT,
+    "docs/status/agent-capabilities.json",
+    "docs/status/agent-capability-surface.json",
+    "tools/agent-capabilities/contract-history.json",
+)
+
+
+# --assign-pending regenerates the manifest, surface ledger and history, which
+# takes seconds; a hung run must not hold the bump that releases everything else.
+CAPABILITY_ASSIGN_TIMEOUT_SECS = 300
+
+
+def _assign_capability_counters(repo: Path, plan: list[Assignment]) -> list[str]:
+    """Assign the agent-capability counters a pending tree carries.
+
+    Branches change capability material and leave `MANIFEST_REVISION` /
+    `SURFACE_INVENTORY_VERSION` at the base value, so no two branches contend
+    for the next integer. The SDK bump is the first point the change is
+    released, so it advances each pending counter by one. Best-effort like the
+    regenerators: a failure leaves the counters pending, and the release tag
+    guard (`--require-assigned`) withholds the SDK tag until a bump assigns
+    them."""
+    if not any(a.surface == MIGRATION_NOTES_SURFACE for a in plan):
+        return []
+    if not (repo / CAPABILITY_SCRIPT).is_file():
+        return []
+    try:
+        subprocess.run([sys.executable, CAPABILITY_SCRIPT, "--assign-pending"],
+                       cwd=repo, check=True, capture_output=True,
+                       timeout=CAPABILITY_ASSIGN_TIMEOUT_SECS)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as error:
+        print(f"version-at-land: could not assign pending capability counters; "
+              f"they stay pending{_failure_tail(error)}", file=sys.stderr)
+        # One path at a time: a pathspec the tree does not track would make a
+        # combined checkout restore nothing.
+        for path in CAPABILITY_ASSIGNED_PATHS:
+            subprocess.run(["git", "checkout", "--", path], cwd=repo, capture_output=True)
+        return []
+    moved = subprocess.run(["git", "status", "--porcelain", "--", *CAPABILITY_ASSIGNED_PATHS],
+                           cwd=repo, capture_output=True, text=True, encoding="utf-8").stdout
+    return [line[3:] for line in moved.splitlines() if line.strip()]
+
+
 def _write_plan(repo: Path, config: Config, plan: list[Assignment]) -> list[str]:
     surfaces_by_name: dict[str, Surface] = {s.name: s for s in config.surfaces}
     edited: list[str] = []
@@ -479,6 +559,8 @@ def _write_plan(repo: Path, config: Config, plan: list[Assignment]) -> list[str]
     # Only when a version actually moved — regenerating on a no-op plan would
     # sweep unrelated drift into a bump commit.
     if edited:
+        edited.extend(_fold_migration_notes(repo, plan))
+        edited.extend(_assign_capability_counters(repo, plan))
         edited.extend(_refresh_derived(repo))
     return edited
 
@@ -541,15 +623,7 @@ def apply_and_push(
         # Stage ONLY the version files we edited (never `git add -A` — this repo
         # carries a submodule gitlink that a blanket add would re-stage).
         _git(repo, "add", "--", *dict.fromkeys(edited))
-        summary = "; ".join(f"{a.surface} {a.current}->{a.assigned} ({a.level})"
-                            for a in plan)
-        message = (
-            f"{BUMP_SUBJECT}\n\n"
-            f"Assigned from Version-Bump intent on {base[:12]}..{head[:12]}.\n"
-            f"{summary}\n\n"
-            f"{APPLIED_MARKER}: {head}\n"
-        )
-        _git(repo, "commit", "--no-verify", "-m", message)
+        _git(repo, "commit", "--no-verify", "-m", _bump_message(plan, base, head, edited))
 
         if on_before_push is not None:
             on_before_push(attempt)
@@ -592,14 +666,21 @@ def _gh(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProce
     )
 
 
-def _bump_message(plan: list[Assignment], base: str, head: str) -> str:
+def _bump_message(plan: list[Assignment], base: str, head: str,
+                  edited: list[str] = ()) -> str:
     summary = "; ".join(f"{a.surface} {a.current}->{a.assigned} ({a.level})"
                         for a in plan)
+    trailers = f"{APPLIED_MARKER}: {head}\n"
+    if any(path in CAPABILITY_ASSIGNED_PATHS for path in edited):
+        # The bump rewrites files the agent-capabilities skill owns; assigning
+        # a counter is mechanical, not a decision the skill should record.
+        trailers += ('Skill-Update: skip skill=agent-capabilities '
+                     'reason="version-at-land assigned pending capability counters"\n')
     return (
         f"{BUMP_SUBJECT}\n\n"
         f"Assigned from Version-Bump intent on {base[:12]}..{head[:12]}.\n"
         f"{summary}\n\n"
-        f"{APPLIED_MARKER}: {head}\n"
+        f"{trailers}"
     )
 
 
@@ -992,7 +1073,7 @@ def apply_via_pr(
     # Stage ONLY the edited version files (never `git add -A` — a blanket add
     # re-stages this repo's submodule gitlink).
     _git(repo, "add", "--", *dict.fromkeys(edited))
-    _git(repo, "commit", "--no-verify", "-m", _bump_message(plan, base, head))
+    _git(repo, "commit", "--no-verify", "-m", _bump_message(plan, base, head, edited))
 
     # Plain push first — creates the branch or fast-forwards it. A NON-force
     # push cannot clobber anyone.

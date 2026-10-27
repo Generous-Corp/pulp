@@ -19,6 +19,11 @@ docs:
     summary: Subsystem dependencies, thread model, build system, GPU stack
 
   # Guides
+  - slug: gpu-audio-macos-reliability
+    path: guides/gpu-audio-macos-reliability.md
+    kind: guide
+    summary: What GPU audio guarantees on macOS when the GPU is slow, hung or lost, how to read its health, and what real DAWs have validated
+
   - slug: gpu-audio-wavenet-trace
     path: guides/gpu-audio-wavenet-trace.md
     kind: guide
@@ -637,6 +642,11 @@ docs:
     kind: reference
     summary: All subsystems with status and key headers
 
+  - slug: oversampling-and-real-fft
+    path: reference/oversampling-and-real-fft.md
+    kind: reference
+    summary: Oversampler filter kinds, rejection and delay, the elliptic half-band design functions, and the half-spectrum real FFT
+
   - slug: fir-design
     path: reference/fir-design.md
     kind: reference
@@ -697,6 +707,16 @@ docs:
     path: validation/fast-trigonometry.md
     kind: reference
     summary: Reproducible fast-sine consumer benchmarks, quality gates, selected paths, rejected alternatives, and reopen rules
+
+  - slug: convolver-crossover
+    path: validation/convolver-crossover.md
+    kind: reference
+    summary: Measured direct-FIR versus partitioned-FFT crossover behind FixedIrConvolver, per-chip receipts, and the command that regenerates them
+
+  - slug: nonuniform-head
+    path: validation/nonuniform-head.md
+    kind: reference
+    summary: Measured head-length table behind NonUniformPartitionedConvolver's default tail multiplier, per-chip receipts, and the command that regenerates them
 
   - slug: drum-whole-voice-math
     path: validation/drum-whole-voice-math.md

@@ -61,6 +61,9 @@ public:
     // immediately (no per-draw re-push needed since they hang off the
     // current GState).
     void set_miter_limit(float limit) override;
+    /// `antialiased` turns CoreText font smoothing off, the switch Chromium
+    /// flips on macOS. It is graphics state, so save()/restore() scope it.
+    void set_font_smoothing(FontSmoothing smoothing) override;
     void set_image_smoothing(bool enabled,
                              ImageSmoothingQuality quality) override;
 
@@ -198,6 +201,10 @@ public:
     void set_blend_mode(BlendMode mode) override;
 
     void set_font(const std::string& family, float size) override;
+    void set_font_full(const std::string& family, float size, int weight, int slant,
+                       float letter_spacing) override;
+    void set_font_features(std::vector<FontFeature> features) override;
+    void clear_font_features() override;
     void set_text_align(TextAlign align) override;
     void fill_text(const std::string& text, float x, float y) override;
     // Canvas2D fillText(text,x,y,maxWidth) + strokeText(text,x,y,maxWidth).
@@ -244,6 +251,8 @@ public:
     bool draw_image_from_file_rect(const std::string& path,
                                    float sx, float sy, float sw, float sh,
                                    float dx, float dy, float dw, float dh) override;
+    bool measure_image_from_data(const uint8_t* data, size_t size, float& out_width,
+                                 float& out_height) override;
     bool measure_image_from_file(const std::string& path,
                                  float& out_width, float& out_height) override;
 
@@ -267,6 +276,9 @@ private:
     Color stroke_color_ = Color::rgba(1.0f, 1.0f, 1.0f);
     std::string font_family_ = "Helvetica";
     float font_size_ = 14.0f;
+    int font_weight_ = 400;
+    int font_slant_ = 0;
+    std::vector<FontFeature> font_features_;
     TextAlign text_align_ = TextAlign::left;
 
     // Canvas2D path-building state. Owned, retained CG mutable path; null until
@@ -372,7 +384,9 @@ private:
     // Strokes the current path using either apply_stroke_color or, when
     // has_stroke_gradient_ is set, draws the active stroke gradient
     // clipped to the stroked-path outline (via CGContextReplacePathWithStrokedPath).
-    void stroke_with_active_paint();
+    // `apply_sticky_dash` is false for stroke_path, whose StrokeStyle has already
+    // set the dash for this draw and must not be overridden by the sticky one.
+    void stroke_with_active_paint(bool apply_sticky_dash = true);
     void release_path();
 
     // ── Retained layer state (cg_canvas_path.mm) ─────────────────────────

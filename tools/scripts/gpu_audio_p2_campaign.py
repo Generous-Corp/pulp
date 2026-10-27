@@ -19,6 +19,8 @@ import sys
 import time
 from typing import Any
 
+import gpu_audio_provider_identity as identity_contract
+
 SCHEMA = "pulp.gpu-audio.p2.authenticated-slots-lead.v1"
 SLOTS = (2, 4, 8, 16)
 LEADS = (1, 2, 4, 8)
@@ -54,7 +56,12 @@ PROVIDER_IDENTITY_SCHEMA = "pulp.gpu-audio-provider-identity.v1"
 PROVIDER_IDENTITY_FIELDS = (
     "expected_asset_sha256", "validated_asset_sha256", "expected_dawn_revision",
     "header_dawn_revision", "linked_dawn_archive_sha256", "manifest_sha256",
-    "generation_receipt_sha256",
+    "generation_receipt_sha256", "executable_sha256",
+    "configured_receipt_sha256", "prelink_receipt_sha256",
+)
+PROVIDER_RECEIPT_PATH_FIELDS = (
+    ("configured_receipt_path", "configured_receipt_sha256"),
+    ("prelink_receipt_path", "prelink_receipt_sha256"),
 )
 
 
@@ -85,18 +92,42 @@ def _nonnegative_integer(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
-def validate_provider_identity_fixture(path: Path) -> dict[str, Any]:
+def validate_provider_identity_fixture(path: Path, provider_platform: str | None = None
+                                      ) -> dict[str, Any]:
     """Load an exact-provider receipt and bind it to this checkout's manifest."""
 
-    return load_provider_identity_receipt(path)[0]
+    return load_provider_identity_receipt(path, provider_platform)[0]
 
 
-def load_provider_identity_receipt(path: Path) -> tuple[dict[str, Any], str]:
+def host_provider_platform() -> str:
+    """The Skia release-matrix platform whose provider this host links.
+
+    The campaign measures Metal, so only macOS hosts have a provider platform.
+    """
+
+    if sys.platform != "darwin":
+        raise RuntimeError("the P2 campaign measures Metal and needs a macOS provider platform")
+    machine = platform.machine().lower()
+    if machine in ("arm64", "aarch64"):
+        return "darwin-arm64"
+    if machine in ("x86_64", "amd64"):
+        return "darwin-x64"
+    raise RuntimeError(f"no Skia provider platform for macOS machine {machine!r}")
+
+
+def load_provider_identity_receipt(path: Path, provider_platform: str | None = None,
+                                   verification: argparse.Namespace | None = None
+                                   ) -> tuple[dict[str, Any], str]:
     """The validated receipt and the SHA-256 of the exact bytes validated.
 
     The file is read once. Hashing a second read for the campaign manifest
     would record whatever the path held then, which need not be the receipt
     that passed these checks.
+
+    The receipt's expected asset and Dawn revision are re-derived from the
+    manifest it is bound to, for ``provider_platform`` (the host's when
+    omitted). Matching the manifest's hash alone would accept a hand-written
+    receipt that names any other asset or revision.
     """
 
     if path.is_symlink() or not path.is_file():
@@ -116,11 +147,41 @@ def load_provider_identity_receipt(path: Path) -> tuple[dict[str, Any], str]:
         if not isinstance(value, str) or re.fullmatch(pattern, value) is None:
             raise RuntimeError(f"provider identity fixture {field} is invalid")
     manifest_path = REPO_ROOT / "tools/deps/manifest.json"
-    if not _matches_sha256(manifest_path, fixture["manifest_sha256"]):
+    try:
+        manifest_bytes = (None if manifest_path.is_symlink() or not manifest_path.is_file()
+                          else manifest_path.read_bytes())
+    except OSError:
+        manifest_bytes = None
+    # The same bytes are hashed here and parsed below, so the pins checked
+    # are the ones the receipt's manifest_sha256 names.
+    if manifest_bytes is None or hashlib.sha256(manifest_bytes).hexdigest() != fixture["manifest_sha256"]:
         raise RuntimeError("provider identity fixture is not bound to the current provider manifest")
     if fixture["expected_asset_sha256"] != fixture["validated_asset_sha256"] \
             or fixture["expected_dawn_revision"] != fixture["header_dawn_revision"]:
         raise RuntimeError("provider identity fixture contains inconsistent provider identity")
+    for path_field, digest_field in PROVIDER_RECEIPT_PATH_FIELDS:
+        value = fixture.get(path_field)
+        if not isinstance(value, str) or not value or not Path(value).is_absolute():
+            raise RuntimeError(f"provider identity fixture {path_field} is invalid")
+        receipt_path = Path(value)
+        if receipt_path.is_symlink() or not receipt_path.is_file():
+            raise RuntimeError(f"provider identity fixture {path_field} is unavailable")
+        if sha256(receipt_path) != fixture[digest_field]:
+            raise RuntimeError(f"provider identity fixture {digest_field} does not match {path_field}")
+    if verification is not None:
+        verified = identity_contract.verify(verification)
+        for field in (*PROVIDER_IDENTITY_FIELDS, "configured_receipt_path", "prelink_receipt_path"):
+            if verified.get(field) != fixture.get(field):
+                raise RuntimeError(f"provider identity fixture {field} disagrees with authoritative verification")
+    try:
+        manifest = json.loads(manifest_bytes.decode("utf-8"))
+        pinned_dawn, pinned_asset = identity_contract.skia_contract(
+            manifest, provider_platform or host_provider_platform())
+    except (UnicodeError, json.JSONDecodeError, identity_contract.IdentityError) as exc:
+        raise RuntimeError(f"provider manifest does not pin a provider identity: {exc}") from exc
+    if fixture["expected_dawn_revision"].lower() != pinned_dawn.lower() \
+            or fixture["expected_asset_sha256"].lower() != pinned_asset.lower():
+        raise RuntimeError("provider identity fixture names a provider the manifest does not pin")
     return fixture, hashlib.sha256(raw).hexdigest()
 
 
@@ -175,6 +236,8 @@ def _validate_provider_identity(provenance: dict[str, Any],
             raise RuntimeError("raw provenance provider asset disagrees with exact-provider receipt")
         if provenance.get("dawn_archive_sha256") != expected_fixture["linked_dawn_archive_sha256"]:
             raise RuntimeError("raw provenance Dawn archive disagrees with exact-provider receipt")
+        if provenance.get("executable_observed_sha256") != expected_fixture["executable_sha256"]:
+            raise RuntimeError("raw provenance executable disagrees with bound provider receipt")
         bindings = provenance.get("manifest_bindings")
         if not isinstance(bindings, dict) or any(
                 bindings.get(field) != expected_fixture["manifest_sha256"]
@@ -518,6 +581,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                    help="fresh source-bound quiet-host receipt (required for hardware runs)")
     p.add_argument("--provider-identity-receipt", type=Path,
                    help="passed exact-provider receipt bound to tools/deps/manifest.json (required for hardware runs)")
+    p.add_argument("--provider-configured-receipt", type=Path)
+    p.add_argument("--provider-prelink-receipt", type=Path)
+    p.add_argument("--provider-manifest", type=Path)
+    p.add_argument("--provider-skia-dir", type=Path)
+    p.add_argument("--provider-dawn-header", type=Path)
+    p.add_argument("--provider-dawn-library", type=Path)
     p.add_argument("--frames", type=int, default=32, choices=(32, 64, 128))
     p.add_argument("--blocks", type=int, default=REQUIRED_MEASURED_BLOCKS)
     p.add_argument("--warmup", type=int, default=16)
@@ -821,9 +890,25 @@ def run(args: argparse.Namespace) -> int:
         raise RuntimeError("--host-preflight is required for a hardware campaign")
     if args.provider_identity_receipt is None:
         raise RuntimeError("--provider-identity-receipt is required for a hardware campaign")
+    provider_inputs = {
+        "provider_configured_receipt": args.provider_configured_receipt,
+        "provider_prelink_receipt": args.provider_prelink_receipt,
+        "provider_manifest": args.provider_manifest,
+        "provider_skia_dir": args.provider_skia_dir,
+        "provider_dawn_header": args.provider_dawn_header,
+        "provider_dawn_library": args.provider_dawn_library,
+    }
+    if any(value is None for value in provider_inputs.values()):
+        raise RuntimeError("all authoritative provider verification inputs are required")
     host_preflight = validate_host_preflight(args.host_preflight, source_revision)
+    verification = argparse.Namespace(
+        manifest=str(args.provider_manifest), platform=host_provider_platform(),
+        skia_dir=str(args.provider_skia_dir), dawn_header=str(args.provider_dawn_header),
+        dawn_library=str(args.provider_dawn_library), configured_receipt=str(args.provider_configured_receipt),
+        prelink_receipt=str(args.provider_prelink_receipt), executable=str(args.probe),
+        receipt=str(args.provider_identity_receipt))
     provider_identity, provider_identity_receipt_sha256 = load_provider_identity_receipt(
-        args.provider_identity_receipt)
+        args.provider_identity_receipt, verification=verification)
     host_preflight_sha256 = sha256(args.host_preflight)
     if args.expected_source_revision is not None and args.expected_source_revision != source_revision:
         raise RuntimeError("expected source revision does not match the measured source")

@@ -165,8 +165,8 @@ private:
         // Apply window
         WindowFunction::apply(windowed_.data(), window_);
 
-        // Forward FFT
-        fft_.forward_real(windowed_.data(), freq_.data());
+        // Forward FFT (DC..Nyquist is all the frame reads)
+        fft_.forward_real_half(windowed_.data(), freq_.data());
 
         // Extract magnitude and phase for positive frequencies
         for (int i = 0; i < num_bins_; ++i) {

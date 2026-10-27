@@ -30,9 +30,10 @@
 
 namespace {
 
-using pulp::format::GraphRuntimeExecutor;
+using pulp::format::GraphRuntimeBufferPool;
 using pulp::format::GraphRuntimeCommandDecision;
 using pulp::format::GraphRuntimeCommandStatus;
+using pulp::format::GraphRuntimeExecutor;
 using pulp::format::GraphRuntimeNodeBinding;
 using pulp::format::GraphRuntimeSnapshot;
 using pulp::graph::GraphCommandType;
@@ -51,6 +52,45 @@ using pulp::test::graph_routing::make_snapshot;
 using pulp::test::graph_routing::RoutedHarness;
 using pulp::test::graph_routing::routing_gain;
 using pulp::test::graph_routing::test_signal;
+
+// A two-input reduction binding makes an unconnected-port gather observable.
+// The direct-copy path must zero every unused input port before this callback
+// runs, just as the general clear-then-gather path does.
+bool routing_sum_inputs(pulp::format::ProcessBlock&,
+                        const pulp::format::GraphRuntimeNodeProcessContext& ctx, void*) noexcept {
+    const auto& in = ctx.node_inputs;
+    auto out = ctx.node_outputs;
+    if (out.num_channels() == 0)
+        return true;
+    float* destination = out.channel_ptr(0);
+    for (std::size_t frame = 0; frame < out.num_samples(); ++frame) {
+        float value = 0.0f;
+        for (std::size_t channel = 0; channel < in.num_channels(); ++channel)
+            value += in.channel_ptr(channel)[frame];
+        destination[frame] = value;
+    }
+    return true;
+}
+
+// Writes both output channels so the first node in the unused-port test leaves
+// a nonzero same-size region that the allocator can recycle into the target's
+// input region. This catches a fast path that forgets to clear unconnected ports.
+bool routing_duplicate_outputs(pulp::format::ProcessBlock&,
+                               const pulp::format::GraphRuntimeNodeProcessContext& ctx,
+                               void*) noexcept {
+    const auto& in = ctx.node_inputs;
+    auto out = ctx.node_outputs;
+    if (in.num_channels() == 0)
+        return true;
+    const float* source = in.channel_ptr(0);
+    for (std::size_t frame = 0; frame < out.num_samples(); ++frame) {
+        if (out.num_channels() > 0)
+            out.channel_ptr(0)[frame] = source[frame] * 2.0f;
+        if (out.num_channels() > 1)
+            out.channel_ptr(1)[frame] = source[frame] * 3.0f;
+    }
+    return true;
+}
 
 // Reference: input -> gain g1 -> gain g2 -> output (stereo). Per-channel output.
 std::vector<std::vector<float>> signal_graph_chain(float g1, float g2, double sr, int frames,
@@ -411,6 +451,171 @@ TEST_CASE("GraphRuntimeExecutor routing matches SignalGraph for a split-lifetime
             for (std::size_t i = 0; i < ref.size(); ++i) {
                 REQUIRE(ref[i] == h.outs[0][i]);  // bit-exact under reuse
             }
+        }
+    }
+}
+
+TEST_CASE("GraphRuntimeExecutor direct copy clears unused multi-port inputs",
+          "[graph][executor][routing][parity][fastpath]") {
+    // The dead node's two-slot output is recycled as the target's two-slot
+    // input region. The target receives only port 1; port 0 therefore contains
+    // stale nonzero data unless the one-audio-edge fast path clears it.
+    const std::array nodes = {
+        GraphRuntimeNodeSpec{1, GraphRuntimeNodeKind::AudioInput, 0, 1},
+        GraphRuntimeNodeSpec{2, GraphRuntimeNodeKind::Processor, 1, 2},
+        GraphRuntimeNodeSpec{3, GraphRuntimeNodeKind::Processor, 2, 1},
+        GraphRuntimeNodeSpec{4, GraphRuntimeNodeKind::AudioOutput, 1, 0},
+    };
+    const std::array conns = {
+        GraphRuntimeConnectionSpec{1, 0, 2, 0},
+        GraphRuntimeConnectionSpec{1, 0, 3, 1},
+        GraphRuntimeConnectionSpec{3, 0, 4, 0},
+    };
+    const std::array bindings = {
+        GraphRuntimeNodeBinding{1, nullptr, nullptr, false},
+        GraphRuntimeNodeBinding{2, routing_duplicate_outputs, nullptr, true},
+        GraphRuntimeNodeBinding{3, routing_sum_inputs, nullptr, true},
+        GraphRuntimeNodeBinding{4, nullptr, nullptr, false},
+    };
+    constexpr int kFrames = 64;
+    GraphRuntimeSnapshot snapshot;
+    REQUIRE(make_snapshot(snapshot, nodes, conns, bindings));
+
+    const auto& plan = snapshot.plan();
+    const auto& assignment = snapshot.buffer_assignment();
+    REQUIRE(assignment.nodes.size() == plan.nodes.size());
+    // Verify the setup really creates the stale-region alias that makes the
+    // clear observable; this is an allocator contract, not an output oracle.
+    REQUIRE(assignment.nodes[1].output_base == assignment.nodes[2].input_base);
+    REQUIRE(plan.nodes[2].audio_inbound_connection_count == 1);
+    REQUIRE(plan.nodes[2].single_audio_inbound_connection != 0xFFFFFFFFu);
+
+    auto pool = make_pool(snapshot, kFrames);
+    const auto input = test_signal(kFrames, 0.8f);
+    RoutedHarness h(kSr, kFrames, {input}, 1);
+    GraphRuntimeExecutor exec;
+    REQUIRE(h.run(exec, snapshot, pool).ok());
+    for (int frame = 0; frame < kFrames; ++frame)
+        REQUIRE(h.outs[0][static_cast<std::size_t>(frame)] ==
+                input[static_cast<std::size_t>(frame)]);
+}
+
+TEST_CASE("GraphRuntimeExecutor direct copy preserves a feedback-only fast path",
+          "[graph][executor][routing][parity][feedback][fastpath]") {
+    // With no feedforward input, the feedback edge is the node's sole audio
+    // inbound connection, so this exercises the one-audio-edge branch rather
+    // than the general reduction. Seed its previous-block slot explicitly and
+    // then check the recurrence across several blocks.
+    const std::array nodes = {
+        GraphRuntimeNodeSpec{1, GraphRuntimeNodeKind::AudioInput, 0, 1},
+        GraphRuntimeNodeSpec{2, GraphRuntimeNodeKind::Processor, 1, 1},
+        GraphRuntimeNodeSpec{3, GraphRuntimeNodeKind::AudioOutput, 1, 0},
+    };
+    const std::array conns = {
+        GraphRuntimeConnectionSpec{2, 0, 3, 0},
+        GraphRuntimeConnectionSpec{2, 0, 2, 0, /*feedback=*/true},
+    };
+    constexpr int kFrames = 32;
+    constexpr float kGain = 0.5f;
+    GainState gain{kGain};
+    const std::array bindings = {
+        GraphRuntimeNodeBinding{1, nullptr, nullptr, false},
+        GraphRuntimeNodeBinding{2, routing_gain, &gain, true},
+        GraphRuntimeNodeBinding{3, nullptr, nullptr, false},
+    };
+    GraphRuntimeSnapshot snapshot;
+    REQUIRE(make_snapshot(snapshot, nodes, conns, bindings));
+    REQUIRE(snapshot.plan().nodes[1].audio_inbound_connection_count == 1);
+    REQUIRE(snapshot.plan().nodes[1].single_audio_inbound_connection == 1);
+    auto pool = make_pool(snapshot, kFrames);
+    const auto feedback_index = snapshot.plan().nodes[1].single_audio_inbound_connection;
+    const auto feedback_slot = snapshot.buffer_assignment().feedback_prev_slot[feedback_index];
+    REQUIRE(feedback_slot != pulp::graph::kGraphRuntimeNoSlot);
+    float* previous = pool.slot_data(feedback_slot);
+    REQUIRE(previous != nullptr);
+    const auto seed = test_signal(kFrames, 0.6f);
+    std::copy(seed.begin(), seed.end(), previous);
+
+    std::vector<float> expected = seed;
+    GraphRuntimeExecutor exec;
+    for (int block = 0; block < 5; ++block) {
+        CAPTURE(block);
+        RoutedHarness h(kSr, kFrames, {std::vector<float>(kFrames, 0.0f)}, 1);
+        REQUIRE(h.run(exec, snapshot, pool).ok());
+        for (int frame = 0; frame < kFrames; ++frame) {
+            expected[static_cast<std::size_t>(frame)] *= kGain;
+            REQUIRE(h.outs[0][static_cast<std::size_t>(frame)] ==
+                    expected[static_cast<std::size_t>(frame)]);
+        }
+    }
+}
+
+TEST_CASE("GraphRuntimeExecutor delayed edge falls back from direct copy across split blocks",
+          "[graph][executor][routing][parity][pdc][fastpath]") {
+    // The two-port mixer has one edge that must be delayed by PDC. The
+    // one-edge-per-port shape is otherwise eligible for direct copies, so the
+    // delayed-ring check must force the general gather path. Vary block sizes
+    // while retaining one pool to exercise the ring state across boundaries.
+    const std::array nodes = {
+        GraphRuntimeNodeSpec{1, GraphRuntimeNodeKind::AudioInput, 0, 2},
+        GraphRuntimeNodeSpec{2, GraphRuntimeNodeKind::Processor, 1, 1, 0, 0, false, 4},
+        GraphRuntimeNodeSpec{3, GraphRuntimeNodeKind::Processor, 1, 1},
+        GraphRuntimeNodeSpec{4, GraphRuntimeNodeKind::Processor, 2, 1},
+        GraphRuntimeNodeSpec{5, GraphRuntimeNodeKind::AudioOutput, 1, 0},
+    };
+    const std::array conns = {
+        GraphRuntimeConnectionSpec{1, 0, 2, 0}, GraphRuntimeConnectionSpec{1, 1, 3, 0},
+        GraphRuntimeConnectionSpec{2, 0, 4, 0}, GraphRuntimeConnectionSpec{3, 0, 4, 1},
+        GraphRuntimeConnectionSpec{4, 0, 5, 0},
+    };
+    GainState latent_gain{1.0f};
+    GainState plain_gain{1.0f};
+    GainState mix_gain{1.0f};
+    const std::array bindings = {
+        GraphRuntimeNodeBinding{1, nullptr, nullptr, false},
+        GraphRuntimeNodeBinding{2, routing_gain, &latent_gain, true},
+        GraphRuntimeNodeBinding{3, routing_gain, &plain_gain, true},
+        GraphRuntimeNodeBinding{4, routing_sum_inputs, &mix_gain, true},
+        GraphRuntimeNodeBinding{5, nullptr, nullptr, false},
+    };
+    constexpr int kMaxFrames = 64;
+    constexpr std::uint32_t kDelay = 4;
+    GraphRuntimeSnapshot snapshot;
+    REQUIRE(make_snapshot(snapshot, nodes, conns, bindings));
+    const auto& plan = snapshot.plan();
+    const auto& assignment = snapshot.buffer_assignment();
+    REQUIRE(assignment.connection_delay_samples.size() == conns.size());
+    std::size_t delayed_index = conns.size();
+    for (std::size_t i = 0; i < plan.connections.size(); ++i) {
+        const auto& connection = plan.connections[i];
+        if (connection.source_index == 2 && connection.dest_index == 3 &&
+            connection.dest_port == 1) {
+            delayed_index = i;
+            break;
+        }
+    }
+    REQUIRE(delayed_index < conns.size());
+    REQUIRE(assignment.connection_delay_samples[delayed_index] == kDelay);
+    REQUIRE(plan.nodes[3].audio_inbound_connection_count == 2);
+    REQUIRE(plan.nodes[3].audio_inbound_port_mask == 0x3u);
+
+    GraphRuntimeBufferPool pool;
+    REQUIRE(
+        pool.reset(snapshot.buffer_slot_count(), kMaxFrames, assignment.connection_delay_samples));
+    std::vector<float> delay_line(kDelay, 0.0f);
+    GraphRuntimeExecutor exec;
+    for (const int frames : {7, 32, 5, 64, 11}) {
+        CAPTURE(frames);
+        const auto left = test_signal(frames, 0.7f + static_cast<float>(frames) * 0.001f);
+        const auto right = test_signal(frames, 0.3f + static_cast<float>(frames) * 0.002f);
+        RoutedHarness h(kSr, frames, {left, right}, 1);
+        REQUIRE(h.run(exec, snapshot, pool).ok());
+        for (int frame = 0; frame < frames; ++frame) {
+            const float delayed = delay_line.front();
+            delay_line.erase(delay_line.begin());
+            delay_line.push_back(right[static_cast<std::size_t>(frame)]);
+            const float expected = left[static_cast<std::size_t>(frame)] + delayed;
+            REQUIRE(h.outs[0][static_cast<std::size_t>(frame)] == expected);
         }
     }
 }

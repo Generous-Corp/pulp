@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none",
+  "event_id": "20261026-paragraph-cache-test-pins-watch",
+  "created_at": "2026-10-26T04:10:01Z",
+  "capability_families": [
+    "visual-proof-harness"
+  ],
+  "rationale": "Test-only. The paragraph cache's tests now pin setTextRuns' fontSize and letterSpacing guards by painting each guarded run against the style it should inherit, and pin the key's weight and family list with direct key comparisons. No production code changes. No design-import, Chromium, rendering or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R 'Paragraph cache keys the paragraph style switches the build reads'",
+    "ctest --test-dir build -R 'setTextRuns keeps the inherited size for a non-finite or non-positive fontSize'",
+    "ctest --test-dir build -R 'setTextRuns keeps the inherited spacing for a non-finite letterSpacing'",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ]
+}

@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MIT
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import {
   access,
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   rm,
   symlink,
@@ -197,18 +199,90 @@ test("real browser capture waits through a delayed DOM commit",
         "--timeout-ms", String(CAPTURE_DEADLINE_MS),
       ], { maxBuffer: 1024 * 1024 });
 
-      const snapshot = JSON.parse(
-        await readFile(path.join(output, "dom-snapshot.json"), "utf8"));
+      const snapshotBytes = await readFile(path.join(output, "dom-snapshot.json"));
+      const snapshot = JSON.parse(snapshotBytes.toString("utf8"));
       assert.ok(snapshot.strings.includes("DELAYED READY"));
       assert.equal(snapshot.strings.includes("EARLY"), false);
       const envelope = JSON.parse(
         await readFile(path.join(output, "capture.json"), "utf8"));
+      assert.equal(envelope.documents[0].snapshot_asset, "dom-snapshot.json");
+      assert.match(envelope.documents[0].snapshot_sha256, /^[0-9a-f]{64}$/);
+      assert.equal(envelope.documents[0].snapshot_sha256,
+        createHash("sha256").update(snapshotBytes).digest("hex"));
       assert.deepEqual(envelope.provenance.readiness, {
         contract: "__pulpCaptureReady",
         awaited: true,
       });
       await assert.rejects(
         access(path.join(output, "interaction-report.json")));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+test("real browser capture writes no masked secret into any artifact",
+  { timeout: captureCaseTimeout() }, async (context) => {
+    const browser = await installedBrowser();
+    if (!browser) {
+      context.skip("no compatible system browser is installed");
+      return;
+    }
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "pulp-browser-masked-secrets-"));
+    const input = path.join(root, "masked.html");
+    const output = path.join(root, "capture");
+    const script = fileURLToPath(new URL("./capture.mjs", import.meta.url));
+    const secrets = [
+      "pwattrsecret", "pwtypedsecret", "tsfieldsecret", "tsareasecret",
+      "tsdivsecret", "hiddenfieldsecret"];
+    try {
+      // The typed password exists only as control state (`inputValue`), never
+      // in the markup; the rest also sit in attributes and text.
+      await writeFile(input, `<!doctype html>
+<style>
+  body { margin: 0; background: #fff; font: 14px sans-serif; }
+  main { width: 320px; height: 240px; }
+</style>
+<main>
+  <input type="password" value="pwattrsecret">
+  <input id="typed" type="password">
+  <input type="text" style="-webkit-text-security: disc" value="tsfieldsecret">
+  <textarea style="-webkit-text-security: circle">tsareasecret</textarea>
+  <div style="-webkit-text-security: square">tsdivsecret</div>
+  <input type="text" style="display: none" value="hiddenfieldsecret">
+  <div>clearcontroltext</div>
+</main>
+<script>
+  // Assembled at run time so the markup never spells it.
+  document.getElementById("typed").value = ["pwtyped", "secret"].join("");
+</script>
+`);
+      await execute(process.execPath, [
+        script, "capture", "--browser", browser, "--input", input,
+        "--root", root, "--output", output,
+        "--initial-width", "320", "--initial-height", "240",
+        "--dpr", "2", "--timeout-ms", String(CAPTURE_DEADLINE_MS),
+      ], { maxBuffer: 1024 * 1024 });
+
+      const files = (await readdir(output, { recursive: true }))
+        .filter((name) => /\.json$/u.test(name));
+      assert.ok(files.includes("dom-snapshot.json"));
+      assert.ok(files.includes("capture.json"));
+      assert.ok(files.includes("semantic-report.json"));
+      for (const name of files) {
+        const text = await readFile(path.join(output, name), "utf8");
+        for (const secret of secrets)
+          assert.equal(text.includes(secret), false, `${secret} in ${name}`);
+      }
+      // Control: unmasked text from the same page reaches the snapshot, so an
+      // absent secret is the mask's doing, not an empty capture.
+      const snapshotBytes = await readFile(path.join(output, "dom-snapshot.json"));
+      assert.ok(snapshotBytes.toString("utf8").includes("clearcontroltext"));
+      // The hash binds the masked bytes actually written.
+      const envelope = JSON.parse(
+        await readFile(path.join(output, "capture.json"), "utf8"));
+      assert.equal(envelope.documents[0].snapshot_sha256,
+        createHash("sha256").update(snapshotBytes).digest("hex"));
     } finally {
       await rm(root, { recursive: true, force: true });
     }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/host/forge_lofi_catalog.hpp>
+#include <pulp/host/detail/forge_compressor_ballistics.hpp>
 #include <pulp/host/forge_param_descriptor.hpp>
 
 #include <string_view>
@@ -161,7 +162,8 @@ inline ForgeNodeDescriptor compressor_descriptor() {
          {"attack_ms", kCompAttackMs, "Attack", "ms", "Time for compression to engage.",
           ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
          {"release_ms", kCompReleaseMs, "Release", "ms", "Time for compression to recover.",
-          ForgeParamKind::continuous, ForgeParamCurve::logarithmic}});
+          ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+         forge_compressor::ballistics_descriptor(kCompBallistics)});
 }
 
 inline ForgeNodeDescriptor gate_descriptor() {

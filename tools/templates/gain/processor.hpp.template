@@ -1,5 +1,6 @@
 #pragma once
 
+#include <pulp/audio/buffer_ops.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/view/value_channel_set.hpp>
 #include <pulp/view/value_source.hpp>
@@ -36,6 +37,11 @@ public:
 
     pulp::view::ValueChannelSet* value_channels() override { return &channels_; }
 
+    // Reads its parameters once per block, so it opts out of per-point
+    // automation: the VST3, AU v2 and CLAP adapters then write each
+    // automated parameter once per block and dense automation costs nothing.
+    bool wants_sample_accurate_parameters() const override { return false; }
+
     pulp::format::PluginDescriptor descriptor() const override {
         return make_descriptor();
     }
@@ -55,7 +61,13 @@ public:
         });
     }
 
-    void prepare(const pulp::format::PrepareContext&) override {}
+    void prepare(const pulp::format::PrepareContext&) override {
+        // Resolve parameter handles once, off the audio thread. Reading a
+        // handle in process() is a single atomic load; state().get_value(id)
+        // would look the ID up again on every call.
+        gain_db_ = state().param_reader(kGain);
+        bypass_ = state().param_reader(kBypass);
+    }
 
     void process(
         pulp::audio::BufferView<float>& output,
@@ -64,13 +76,23 @@ public:
         pulp::midi::MidiBuffer& /*midi_out*/,
         const pulp::format::ProcessContext& /*ctx*/) override
     {
-        const bool bypassed = state().get_value(kBypass) >= 0.5f;
-        const float gain = bypassed ? 1.0f
-                                    : std::pow(10.0f, state().get_value(kGain) / 20.0f);
+        const bool bypassed = bypass_.get() >= 0.5f;
+        const float gain = bypassed ? 1.0f : std::pow(10.0f, gain_db_.get() / 20.0f);
 
-        for (std::size_t ch = 0; ch < output.num_channels() && ch < input.num_channels(); ++ch)
-            for (std::size_t i = 0; i < output.num_samples(); ++i)
-                output.channel(ch)[i] = input.channel(ch)[i] * gain;
+        // Take each channel's raw pointers once, outside the sample loop.
+        // map_samples() vectorizes whether the host hands us separate
+        // buffers or processes in place (input and output the same memory).
+        const std::size_t n = output.num_samples();
+        const std::size_t channels = std::min(output.num_channels(), input.num_channels());
+        for (std::size_t ch = 0; ch < channels; ++ch) {
+            pulp::audio::buffer_ops::map_samples(
+                input.channel_ptr(ch), output.channel_ptr(ch), n,
+                [gain](float x) { return x * gain; });
+        }
+        // Output channels with no matching input channel are silenced rather
+        // than left holding whatever the host's buffer contained.
+        for (std::size_t ch = channels; ch < output.num_channels(); ++ch)
+            std::fill_n(output.channel_ptr(ch), n, 0.0f);
 
         publish_output_level(output);
     }
@@ -133,29 +155,24 @@ public:
     //     VisualizationBacklogPolicy::latest_window.
 
 private:
-    // Audio thread: one peak/RMS reading per block. publish() is lock-free and
-    // allocation-free.
+    // Audio thread: one peak/RMS reading per block. measure_peak_rms() is a
+    // vectorized single pass; publish() is lock-free and allocation-free.
     void publish_output_level(const pulp::audio::BufferView<float>& output) {
         if (output_meter_ == nullptr) return;
         pulp::view::MeterFrame frame;
         frame.channels = static_cast<int>(std::min<std::size_t>(
             output.num_channels(), pulp::view::MeterFrame::kMaxChannels));
         for (int ch = 0; ch < frame.channels; ++ch) {
-            float peak = 0.0f;
-            float sum = 0.0f;
-            const auto samples = output.channel(static_cast<std::size_t>(ch));
-            for (std::size_t i = 0; i < output.num_samples(); ++i) {
-                peak = std::max(peak, std::abs(samples[i]));
-                sum += samples[i] * samples[i];
-            }
-            frame.peak[ch] = peak;
-            frame.rms[ch] = output.num_samples() > 0
-                ? std::sqrt(sum / static_cast<float>(output.num_samples()))
-                : 0.0f;
+            const auto level = pulp::audio::buffer_ops::measure_peak_rms(
+                output, static_cast<std::size_t>(ch));
+            frame.peak[ch] = level.peak;
+            frame.rms[ch] = level.rms;
         }
         output_meter_->publish(frame);
     }
 
+    pulp::state::ParamReader gain_db_;
+    pulp::state::ParamReader bypass_;
     pulp::view::ValueChannelSet channels_;
     pulp::view::MeterSource* output_meter_ = nullptr;
 };

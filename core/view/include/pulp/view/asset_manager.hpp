@@ -6,6 +6,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -88,6 +89,13 @@ public:
     /// Load image from data: URI (base64-encoded PNG/JPEG).
     ImageData load_image_from_data_uri(const std::string& uri);
 
+    /// The payload of a data: URI as encoded bytes, whatever their format;
+    /// dimensions are left to a decoder. Per RFC 2397 a payload marked
+    /// `;base64` is base64-decoded (leniently) and any other payload is
+    /// percent-decoded. Empty when the URI has no comma, no payload, or a
+    /// malformed percent escape.
+    static std::vector<uint8_t> decode_data_uri_bytes(std::string_view uri);
+
     // ── Font Loading ────────────────────────────────────────────────────────
 
     /// Load font from file path.
@@ -122,8 +130,19 @@ public:
 
     // ── Generic Blob Loading ────────────────────────────────────────────────
 
-    /// Load raw bytes from file path.
+    /// Load raw bytes from file path. Refused (invalid blob) when the file is
+    /// larger than max_file_bytes().
     BlobData load_blob(const std::string& path);
+
+    /// Ceiling for one file read through load_blob / load_image / load_font /
+    /// load_shader. A script-chosen path reaches these loaders through the
+    /// widget bridge, so an uncapped read lets a UI pin an arbitrarily large
+    /// file into memory. Default 256 MiB; 0 disables the ceiling.
+    static constexpr size_t kDefaultMaxFileBytes = size_t{256} * 1024 * 1024;
+    void set_max_file_bytes(size_t bytes);
+    size_t max_file_bytes() const {
+        return max_file_bytes_;
+    }
 
     /// Load raw bytes from embedded resource.
     BlobData load_blob_embedded(const std::string& name);
@@ -181,6 +200,7 @@ private:
     mutable uint64_t access_counter_ = 0;
     size_t cache_bytes_ = 0;
     size_t max_cache_bytes_ = 64 * 1024 * 1024; // 64 MB
+    size_t max_file_bytes_ = kDefaultMaxFileBytes;
     float display_scale_ = 1.0f;
 
     // Font system
@@ -196,7 +216,7 @@ private:
 
     // PNG decoding (minimal — uses stb_image or platform API)
     static ImageData decode_png(const uint8_t* data, size_t size);
-    static BlobData read_file_bytes(const std::string& path);
+    BlobData read_file_bytes(const std::string& path) const;
 };
 
 } // namespace pulp::view

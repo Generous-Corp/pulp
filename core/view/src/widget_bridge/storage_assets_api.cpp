@@ -1,16 +1,23 @@
 // widget_bridge/storage_assets_api.cpp - storage and asset-loading registrations for WidgetBridge.
 
+#include <pulp/canvas/bundled_fonts.hpp>
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/asset_manager.hpp>
 #include <pulp/runtime/base64.hpp>
+#include <pulp/runtime/log.hpp>
 #include "api_registry.hpp"
+#include "private_storage.hpp"
 
 #include <pulp/runtime/safe_relative_path.hpp>
 
+#include <algorithm>
+#include <atomic>
 #include <cctype>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -97,8 +104,63 @@ struct BridgeAssetLoad {
     BlobData blob;
 };
 
+bool looks_like_absolute_file_path(const std::string& path) {
+    if (path.empty())
+        return false;
+    if (path.front() == '/' || path.front() == '\\')
+        return true;
+    return path.size() > 2 && std::isalpha(static_cast<unsigned char>(path[0])) && path[1] == ':' &&
+           (path[2] == '/' || path[2] == '\\');
+}
+
+// The filesystem path a `file://` URL names. `file:///C:/x` names `C:/x`.
+std::string strip_file_scheme(const std::string& url) {
+    std::string path = url.substr(7);
+#if defined(_WIN32)
+    if (path.size() > 2 && path[0] == '/' && std::isalpha(static_cast<unsigned char>(path[1])) &&
+        path[2] == ':')
+        path.erase(path.begin());
+#endif
+    return path;
+}
+
+// Whether `path` is a file larger than the asset manager's per-file ceiling.
+// Every bridge API that hands a resolved path to a loader checks this, so the
+// ceiling holds for loaders that read the file themselves.
+bool exceeds_read_ceiling(const std::filesystem::path& path) {
+    const auto ceiling = AssetManager::instance().max_file_bytes();
+    if (ceiling == 0)
+        return false;
+    std::error_code ec;
+    const auto size = std::filesystem::file_size(path, ec);
+    return !ec && size > ceiling;
+}
+
+// Report a path the bridge declined to open. Bounded so a script that retries
+// in a loop cannot flood the log.
+void log_refused_file_path(const std::string& path) {
+    static std::atomic<int> reported{0};
+    constexpr int kMaxReports = 32;
+    const int n = reported.fetch_add(1, std::memory_order_relaxed);
+    if (n < kMaxReports) {
+        runtime::log_warn("WidgetBridge: '{}' is not a file under the script directory or a "
+                          "reviewed asset root; not opened",
+                          path);
+    } else if (n == kMaxReports) {
+        runtime::log_warn("WidgetBridge: further refused file paths are not reported");
+    }
+}
+
+// A `file://` URL or an absolute path is judged by
+// WidgetBridge::resolve_script_relative(), the same rule every other
+// path-taking bridge API applies: it loads when it resolves inside the script
+// directory or a reviewed asset root (or the host opted into unreviewed
+// paths), and is refused with 403 otherwise. A relative name that matches no
+// embedded asset and no root falls back to the filesystem only under that
+// opt-in.
 BridgeAssetLoad load_bridge_asset(const std::string& url,
-                                  const std::vector<std::filesystem::path>& asset_roots) {
+                                  const std::vector<std::filesystem::path>& asset_roots,
+                                  const WidgetBridge& bridge) {
     BridgeAssetLoad result;
     if (url.empty()) {
         result.status = 400;
@@ -106,7 +168,7 @@ BridgeAssetLoad load_bridge_asset(const std::string& url,
     }
 
     auto& assets = AssetManager::instance();
-    const bool reviewed_roots_only = !asset_roots.empty();
+    const bool reviewed_roots_only = !bridge.allow_unreviewed_file_paths();
 
     auto load_from_file = [&](std::string path) {
         if (path.empty()) {
@@ -159,17 +221,25 @@ BridgeAssetLoad load_bridge_asset(const std::string& url,
             result.blob = load_from_file(strip_leading_slashes(ref));
         }
     } else if (url.rfind("file://", 0) == 0) {
-        if (reviewed_roots_only) {
+        const auto path = bridge.resolve_script_relative(url);
+        if (path.empty()) {
             result.status = 403;
             return result;
         }
-        result.blob = load_from_file(url.substr(7));
+        result.blob = load_from_file(path);
     } else {
         result.blob = load_from_embedded(url);
         if (!result.blob.valid()) {
             result.blob = load_from_asset_roots(url);
         }
-        if (!result.blob.valid() && !reviewed_roots_only) {
+        if (!result.blob.valid() && looks_like_absolute_file_path(url)) {
+            const auto path = bridge.resolve_script_relative(url);
+            if (path.empty()) {
+                result.status = 403;
+                return result;
+            }
+            result.blob = load_from_file(path);
+        } else if (!result.blob.valid() && !reviewed_roots_only) {
             result.blob = load_from_file(url);
         }
     }
@@ -192,62 +262,180 @@ std::string base64_encode_blob(const std::vector<uint8_t>& data) {
 
 } // namespace
 
-std::string WidgetBridge::resolve_script_relative(const std::string& path) const {
-    if (path.empty() || path.find("://") != std::string::npos) return path;
-    const std::filesystem::path relative(path);
-    if (relative.is_absolute()) return path;
+bool WidgetBridge::permits_file_path(const std::filesystem::path& path) const {
+    if (path.empty())
+        return false;
+    if (!granted_capabilities_.has(ReloadCapability::Filesystem))
+        return false;
+    if (allow_unreviewed_file_paths_)
+        return true;
+    const auto candidate = best_effort_canonical(path);
+    if (!script_base_dir_.empty() &&
+        path_within(candidate, best_effort_canonical(script_base_dir_)))
+        return true;
+    for (const auto& root : asset_roots_) {
+        if (path_within(candidate, best_effort_canonical(root)))
+            return true;
+    }
+    return false;
+}
 
+void WidgetBridge::set_embedded_assets(std::vector<EmbeddedAsset> assets) {
+    embedded_assets_.clear();
+    embedded_assets_.reserve(assets.size());
+    for (auto& asset : assets) {
+        if (asset.name.empty() || asset.data == nullptr || asset.size == 0)
+            continue;
+        const auto name = std::filesystem::path(asset.name).lexically_normal();
+        if (!safe_relative_asset_path(name))
+            continue;
+        asset.name = name.generic_string();
+        embedded_assets_.push_back(std::move(asset));
+    }
+}
+
+const WidgetBridge::EmbeddedAsset*
+WidgetBridge::embedded_asset(std::string_view path) const noexcept {
+    // An embedded file answers only for a name resolve_script_relative()
+    // would also judge as script-relative: no scheme (so no file:// URL), not
+    // absolute, and no `..` segment. Anything else falls through to the
+    // filesystem rule and its refusals.
+    if (embedded_assets_.empty() || path.empty() || path.find("://") != std::string_view::npos)
+        return nullptr;
+    const std::string requested(path);
+    if (looks_like_absolute_file_path(requested))
+        return nullptr;
+    for (const auto& part : std::filesystem::path(requested)) {
+        if (part == "..")
+            return nullptr;
+    }
+    const auto relative = std::filesystem::path(requested).lexically_normal();
+    if (!safe_relative_asset_path(relative))
+        return nullptr;
+    const std::string wanted = relative.generic_string();
+    for (const auto& asset : embedded_assets_) {
+        if (asset.name == wanted)
+            return &asset;
+    }
+    return nullptr;
+}
+
+std::string WidgetBridge::embedded_asset_data_uri(const EmbeddedAsset& asset) const {
+    return "data:" + guess_bridge_asset_mime_type(asset.name) + ";base64," +
+           runtime::base64_encode(asset.data, asset.size);
+}
+
+std::string WidgetBridge::storage_identity() const {
+    if (!storage_identity_.empty())
+        return storage_identity_;
+    return script_base_dir_.generic_string();
+}
+
+std::string WidgetBridge::font_weight_scope() const {
+    return "widget-bridge/" + std::to_string(reinterpret_cast<std::uintptr_t>(this));
+}
+
+std::string WidgetBridge::resolve_script_relative(const std::string& path) const {
+    if (path.empty())
+        return path;
+    const auto refuse = [&path] {
+        log_refused_file_path(path);
+        return std::string{};
+    };
+    if (path.rfind("file://", 0) == 0)
+        return resolve_script_relative(strip_file_scheme(path));
+    // Callers open the result as a file, so any other scheme would be read as
+    // a path relative to the process working directory.
+    if (path.find("://") != std::string::npos)
+        return allow_unreviewed_file_paths_ ? path : refuse();
+
+    const std::filesystem::path requested(path);
+    if (requested.is_absolute() || looks_like_absolute_file_path(path)) {
+        if (!permits_file_path(requested) || exceeds_read_ceiling(requested))
+            return refuse();
+        return path;
+    }
+    // A relative path that climbs out of its directory is refused outright.
+    if (!safe_relative_asset_path(requested))
+        return refuse();
+
+    // Containment is judged on canonical forms, so a symlink cannot escape.
+    // The script-directory result keeps the caller's spelling; a root result
+    // is canonical.
     if (!script_base_dir_.empty()) {
-        auto candidate = (script_base_dir_ / relative).lexically_normal();
+        const auto candidate = (script_base_dir_ / requested).lexically_normal();
         std::error_code ec;
-        if (std::filesystem::exists(candidate, ec) && !ec)
-            return candidate.generic_string();
+        if (path_within(best_effort_canonical(candidate),
+                        best_effort_canonical(script_base_dir_)) &&
+            std::filesystem::exists(candidate, ec) && !ec)
+            return exceeds_read_ceiling(candidate) ? refuse() : candidate.generic_string();
     }
 
     for (const auto& root : asset_roots_) {
         const auto canonical_root = best_effort_canonical(root);
-        const auto candidate = best_effort_canonical(root / relative);
+        const auto candidate = best_effort_canonical(root / requested);
         if (!path_within(candidate, canonical_root)) continue;
         std::error_code ec;
         if (std::filesystem::exists(candidate, ec) && !ec)
-            return candidate.generic_string();
+            return exceeds_read_ceiling(candidate) ? refuse() : candidate.generic_string();
     }
-    return path;
+
+    // Not found under any root. Only a host that opted into unreviewed paths
+    // gets the name back unchanged, to be opened relative to its working
+    // directory.
+    return allow_unreviewed_file_paths_ ? path : refuse();
 }
 
 void BridgeRegistrars::register_storage_key_value_api(WidgetBridge& self) {
     BridgeApiContext api{self.engine_};
 
-    // localStorage equivalent - file-based key-value in plugin data dir.
-    register_bridge_function(api, "storageGetItem", [](choc::javascript::ArgumentList args) {
-        auto key = args.get<std::string>(0, "");
-        if (key.empty()) return choc::value::createString("");
-        auto dir = std::filesystem::temp_directory_path() / "pulp-storage";
-        auto path = dir / (key + ".dat");
-        if (!std::filesystem::exists(path)) return choc::value::createString("");
-        std::ifstream f(path);
-        std::string val((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-        return choc::value::createString(val);
-    });
+    // localStorage equivalent - one hashed file per key under the per-user,
+    // per-bridge store (see private_storage.hpp). An empty dir means no
+    // per-user root is known and every call is a safe no-op.
+    const auto entry_path = [&self](const std::string& key) -> std::filesystem::path {
+        const auto& dir = detail::cached_private_dir(self.private_store_dirs_,
+                                                     detail::PrivateStoreKind::WidgetStorage,
+                                                     self.storage_identity());
+        if (dir.empty())
+            return {};
+        return dir / detail::storage_key_file_name(key);
+    };
 
-    register_bridge_function(api, "storageSetItem", [](choc::javascript::ArgumentList args) {
-        auto key = args.get<std::string>(0, "");
-        auto val = args.get<std::string>(1, "");
-        if (key.empty()) return choc::value::Value();
-        auto dir = std::filesystem::temp_directory_path() / "pulp-storage";
-        std::filesystem::create_directories(dir);
-        std::ofstream f(dir / (key + ".dat"));
-        f << val;
-        return choc::value::Value();
-    });
+    register_bridge_function(
+        api, "storageGetItem", [entry_path](choc::javascript::ArgumentList args) {
+            auto key = args.get<std::string>(0, "");
+            if (key.empty())
+                return choc::value::createString("");
+            const auto path = entry_path(key);
+            if (path.empty())
+                return choc::value::createString("");
+            return choc::value::createString(detail::read_private_file(path).value_or(""));
+        });
 
-    register_bridge_function(api, "storageRemoveItem", [](choc::javascript::ArgumentList args) {
-        auto key = args.get<std::string>(0, "");
-        if (key.empty()) return choc::value::Value();
-        auto dir = std::filesystem::temp_directory_path() / "pulp-storage";
-        std::filesystem::remove(dir / (key + ".dat"));
-        return choc::value::Value();
-    });
+    register_bridge_function(api, "storageSetItem",
+                             [entry_path](choc::javascript::ArgumentList args) {
+                                 auto key = args.get<std::string>(0, "");
+                                 auto val = args.get<std::string>(1, "");
+                                 if (key.empty())
+                                     return choc::value::Value();
+                                 const auto path = entry_path(key);
+                                 if (!path.empty())
+                                     detail::write_private_file(path, val);
+                                 return choc::value::Value();
+                             });
+
+    register_bridge_function(api, "storageRemoveItem",
+                             [entry_path](choc::javascript::ArgumentList args) {
+                                 auto key = args.get<std::string>(0, "");
+                                 if (key.empty())
+                                     return choc::value::Value();
+                                 const auto path = entry_path(key);
+                                 if (path.empty())
+                                     return choc::value::Value();
+                                 std::error_code ec;
+                                 std::filesystem::remove(path, ec);
+                                 return choc::value::Value();
+                             });
 }
 
 void BridgeRegistrars::register_asset_loading_api(WidgetBridge& self) {
@@ -262,7 +450,19 @@ void BridgeRegistrars::register_asset_loading_api(WidgetBridge& self) {
         auto roots = self.asset_roots_;
         if (!self.script_base_dir_.empty())
             roots.insert(roots.begin(), self.script_base_dir_);
-        auto asset = load_bridge_asset(url, roots);
+        BridgeAssetLoad asset;
+        if (const auto* embedded = self.embedded_asset(url)) {
+            // The script was compiled into the image, and so were the files
+            // beside it: they answer before any directory is consulted.
+            asset.ok = true;
+            asset.status = 200;
+            asset.resolved_path = "embedded:" + embedded->name;
+            asset.mime_type =
+                canonical_bridge_asset_mime_type(guess_bridge_asset_mime_type(embedded->name));
+            asset.blob.data.assign(embedded->data, embedded->data + embedded->size);
+        } else {
+            asset = load_bridge_asset(url, roots, self);
+        }
 
         auto result = choc::value::createObject("");
         result.addMember("ok", choc::value::createBool(asset.ok));
@@ -288,26 +488,60 @@ void BridgeRegistrars::register_font_assets_api(WidgetBridge& self) {
     // This is an existence probe for web-compat callers; actual renderer font
     // registration is handled by registerFont(family, path) below.
     register_bridge_function(api, "loadFont", [&self](choc::javascript::ArgumentList args) {
-        auto path = self.resolve_script_relative(args.get<std::string>(0, ""));
+        const auto requested = args.get<std::string>(0, "");
+        if (self.embedded_asset(requested) != nullptr)
+            return choc::value::createBool(true);
+        auto path = self.resolve_script_relative(requested);
         bool exists = !path.empty() && std::filesystem::exists(path);
         return choc::value::createBool(exists);
     });
 
-    // registerFont(family, path) - register a bundled .ttf/.otf with the text
-    // renderer under `family`, so set_font() / Label font_family resolve to the
-    // shipped face instead of a same-named system font (or a generic fallback).
-    // Codegen emits these from the envelope's font_family_assets before any
-    // setFontFamily.
+    // registerFont(family, path, weightMin?, weightMax?) - register a bundled
+    // .ttf/.otf with the text renderer under `family`, so set_font() / Label
+    // font_family resolve to the shipped face instead of a same-named system
+    // font. The optional weights are the @font-face rule's declared range, which
+    // decides where bold is synthesized. Codegen emits these from the envelope's
+    // font_family_assets before any setFontFamily.
     register_bridge_function(api, "registerFont", [&self](choc::javascript::ArgumentList args) {
         auto family = args.get<std::string>(0, "");
         auto path = args.get<std::string>(1, "");
         if (family.empty() || path.empty()) return choc::value::createBool(false);
-        if (path.rfind("file://", 0) == 0) path = path.substr(7);
+        // A range is recorded only once the face is registered, and only from
+        // finite weights clamped to CSS's [1, 1000]; a bad weight declares nothing.
+        std::optional<std::pair<int, int>> declared;
+        if (args.size() >= 3) {
+            const double low = args.get<double>(2, 400.0);
+            const double high = args.size() >= 4 ? args.get<double>(3, low) : low;
+            if (std::isfinite(low) && std::isfinite(high)) {
+                const auto css = [](double w) {
+                    return static_cast<int>(std::clamp(w, 1.0, 1000.0));
+                };
+                declared = std::minmax(css(low), css(high));
+            }
+        }
+        const auto declare = [&] {
+            if (declared)
+                pulp::canvas::declare_font_face_weight_range(
+                    family, declared->first, declared->second, self.font_weight_scope());
+        };
+        if (const auto* embedded = self.embedded_asset(path)) {
+            // The face is already in memory; hand it to the font registry
+            // under a name only this bridge's embedded set can produce.
+            const std::string key =
+                "pulp-ui-embed/" + self.storage_identity() + "/" + embedded->name;
+            auto& assets = AssetManager::instance();
+            assets.register_embedded(key, embedded->data, embedded->size);
+            assets.register_font_family(family, key);
+            declare();
+            return choc::value::createBool(true);
+        }
         path = self.resolve_script_relative(path);
-        if (!std::filesystem::exists(path)) return choc::value::createBool(false);
+        if (path.empty() || !std::filesystem::exists(path))
+            return choc::value::createBool(false);
         // register_font_family decodes the file + registers the typeface with
         // the canvas font registry (Skia on GPU builds; no-op stub otherwise).
         AssetManager::instance().register_font_family(family, path);
+        declare();
         return choc::value::createBool(true);
     });
 }

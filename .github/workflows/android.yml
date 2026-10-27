@@ -15,6 +15,7 @@ on:
       - 'tools/cmake/PulpAndroid.cmake'
       - 'tools/cmake/PulpDependencies.cmake'
       - 'tools/scripts/test_android_aligned_buffer.py'
+      - 'tools/scripts/check_android_jni_exports.py'
       - '.github/workflows/android.yml'
       - 'CMakeLists.txt'
 
@@ -38,6 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       macos_runs_on: ${{ steps.resolve.outputs.macos_runs_on }}
+      matrix: ${{ steps.resolve.outputs.matrix }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -46,6 +48,8 @@ jobs:
       - id: resolve
         env:
           MACOS_RUNS_ON_JSON: ${{ vars.PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON }}
+          EVENT_NAME: ${{ github.event_name }}
+          ALLOW_HOSTED_WINDOWS_VAR: ${{ vars.PULP_ALLOW_HOSTED_WINDOWS || '' }}
         run: |
           set -euo pipefail
           macos=$(python3 tools/scripts/resolve_runs_on.py \
@@ -54,16 +58,23 @@ jobs:
             --override-env MACOS_RUNS_ON_JSON \
             --default-label macos-latest)
           echo "macos_runs_on=${macos}" >>"${GITHUB_OUTPUT}"
+          # GitHub-hosted Windows is opt-in (PULP_ALLOW_HOSTED_WINDOWS=1) on
+          # every event but the nightly schedule, which is the only Windows
+          # coverage until local Windows lanes serve. No required context reads
+          # this workflow.
+          matrix=$(MACOS="$macos" python3 -c '
+          import json, os
+          rows = [{"os": "macos-latest", "runs_on_json": os.environ["MACOS"]}]
+          if os.environ["EVENT_NAME"] == "schedule" or os.environ.get("ALLOW_HOSTED_WINDOWS_VAR") == "1":
+              rows.append({"os": "windows-latest", "runs_on_json": json.dumps("windows-latest")})
+          print(json.dumps({"include": rows}))
+          ')
+          echo "matrix=${matrix}" >>"${GITHUB_OUTPUT}"
 
   android-build:
     needs: resolve-runners
     strategy:
-      matrix:
-        include:
-          - os: macos-latest
-            runs_on_json: ${{ needs.resolve-runners.outputs.macos_runs_on }}
-          - os: windows-latest
-            runs_on_json: '"windows-latest"'
+      matrix: ${{ fromJSON(needs.resolve-runners.outputs.matrix) }}
     runs-on: ${{ fromJSON(matrix.runs_on_json) }}
     timeout-minutes: 30
 
@@ -148,6 +159,17 @@ jobs:
             echo "❌ libpulp.so NOT found in APK"
             exit 1
           fi
+
+      # A JNI function in a static library that nothing in libpulp.so
+      # references is dropped at link time; the build stays green and the
+      # app throws UnsatisfiedLinkError the first time Java calls it.
+      - name: Verify libpulp.so exports every declared JNI native
+        shell: bash
+        run: |
+          python3 tools/scripts/check_android_jni_exports.py \
+            --sources android/app/src/main \
+            --apk android/app/build/outputs/apk/debug/app-debug.apk \
+            --require-abi arm64-v8a
 
       # Always upload APK + Gradle/NDK logs so a failed "Verify APK"
       # step (historically flaky on windows-latest — #403, #418) can
@@ -257,22 +279,43 @@ jobs:
         working-directory: android
         run: ./gradlew --no-daemon --max-workers=2 :app:connectedBleMidiValidationAndroidTest
 
+      - name: Verify the APK exports every declared JNI native
+        run: python3 tools/scripts/check_android_jni_exports.py --sources android/app/src/main --apk app-debug.apk --require-abi arm64-v8a
+
+      # On a freshly booted emulator the app receives a MIDI device-removed
+      # callback within its first second, which calls the MIDI natives; an
+      # app whose natives are missing dies there.
       - name: Install and launch
         run: |
           adb install app-debug.apk
-          adb shell am start -n com.pulp.app/com.pulp.PulpActivity
-          sleep 5
+          adb logcat -c
+          adb shell am start -W -n com.pulp.app/com.pulp.PulpActivity
+          sleep 8
 
-      - name: Verify JNI bridge initialization
+      # JNI_OnLoad logs before anything else runs, so the marker alone also
+      # passes for an app that dies right after it. Require the process to be
+      # alive and no fatal exception as well.
+      - name: Verify JNI bridge initialization and that the app survives launch
         run: |
-          adb logcat -d -s Pulp:V | tee /tmp/pulp-logcat.txt
+          adb logcat -d -s Pulp:V AndroidRuntime:E | tee /tmp/pulp-logcat.txt
+          status=0
           if grep -q "JNI_OnLoad: Pulp native bridge initialized" /tmp/pulp-logcat.txt; then
-            echo "✅ JNI bridge initialized successfully"
+            echo "✅ JNI bridge initialized"
           else
             echo "❌ JNI bridge did not initialize"
-            cat /tmp/pulp-logcat.txt
-            exit 1
+            status=1
           fi
+          if grep -Eq "FATAL EXCEPTION|UnsatisfiedLinkError" /tmp/pulp-logcat.txt; then
+            echo "❌ fatal exception after launch"
+            status=1
+          fi
+          if [ -n "$(adb shell pidof com.pulp.app | tr -d '\r')" ]; then
+            echo "✅ app process alive 8 s after launch"
+          else
+            echo "❌ app process is not running 8 s after launch"
+            status=1
+          fi
+          exit "$status"
 
       - name: Kill emulator
         if: always()

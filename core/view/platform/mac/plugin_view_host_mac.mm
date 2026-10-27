@@ -1,6 +1,7 @@
 #include <pulp/view/plugin_view_host.hpp>
 
 #include <TargetConditionals.h>
+#include "mac_gpu_host_config.h"
 #if TARGET_OS_OSX
 
 // Per-binary-unique ObjC class names (renames PulpPluginView / PulpGpuPluginView
@@ -17,6 +18,7 @@
 #include <pulp/view/continuous_frames.hpp> // needs_continuous_frames (CPU + GPU host repaint gate)
 #include <pulp/view/host_drag_coalescer.hpp> // per-presented-frame drag coalescing
 #include <pulp/view/input_events.hpp>
+#include "../../src/pending_resize.hpp"
 #include <pulp/view/overlay_dismissal.hpp>
 #include <pulp/view/platform/ns_role_mapping.hpp>
 #include <pulp/view/pointer_dispatch.hpp> // dispatch_context_menu (no-Skia builds too)
@@ -414,11 +416,11 @@ pulp_plugin_drag_deliverer(pulp::view::View* root, pulp::view::ViewCapture* drag
 // and on release but never DURING the drag.
 //
 // The sample is HELD for the next presented frame rather than delivered now
-// (see host_drag_coalescer.hpp). Returns whether the caller should arm a
-// repaint: exactly once per held run, not once per raw AppKit event. One
-// request per frame marks the surface dirty and keeps the frame driver's
-// dispatch gate open, which is all a flush needs; one per sample is precisely
-// the O(events) cost coalescing exists to remove.
+// (see host_drag_coalescer.hpp). Returns whether the caller should arm the
+// frame driver: exactly once per held run, not once per raw AppKit event. One
+// signal per frame keeps the frame driver's dispatch gate open, which is all a
+// flush needs (what the flushed motion changes repaints itself); one per
+// sample is precisely the O(events) cost coalescing exists to remove.
 bool pulp_plugin_mouse_drag(pulp::view::View* root, NSEvent* event, pulp::view::Point pt,
                             pulp::view::ViewCapture* drag_target,
                             pulp::view::HostDragCoalescer* coalescer) {
@@ -1074,6 +1076,18 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
     pulp::view::HostDragCoalescer _dragCoalescer;
 }
 
+- (void)dealloc {
+    // The editor owner's teardown runs first, while the view is still whole.
+    void (^handler)(void) = _pulpWillDeallocHandler;
+    _pulpWillDeallocHandler = nil;
+    if (handler)
+        handler();
+#if !__has_feature(objc_arc)
+    [handler release];
+    [super dealloc];
+#endif
+}
+
 - (BOOL)isFlipped { return NO; }
 // A press that lands while the editor's window is not key must still act on the
 // control under it. AppKit withholds that press from any view answering NO here
@@ -1225,12 +1239,14 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
     return _dragCoalescer.frame_driver_running() ? YES : NO;
 }
 - (void)mouseDragged:(NSEvent*)event {
-    // One dirty signal per HELD RUN, not per raw AppKit event: -setNeedsDisplay:
-    // both marks the surface dirty and re-opens the display link's dispatch
-    // gate, and one request per frame is enough for both.
+    // Held motion only needs the display link's dispatch gate opened: the next
+    // tick delivers it, and whatever it moves asks for its own (bounded)
+    // repaint. Marking the whole view here re-rasterized the editor at the
+    // pointer's event rate, on top of the frame that drew the drag.
     if (pulp_plugin_mouse_drag(self.rootView, event, [self localPoint:event], &_dragTarget,
-                               &_dragCoalescer))
-        [self setNeedsDisplay:YES];
+                               &_dragCoalescer) &&
+        self.onNeedsDisplay)
+        self.onNeedsDisplay();
 }
 - (void)mouseUp:(NSEvent*)event {
     pulp_plugin_mouse_up(self.rootView, event, [self localPoint:event], &_dragTarget,
@@ -1361,7 +1377,9 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
 
         if (has_viewport) {
             self.rootView->set_bounds({0, 0, self.designW, self.designH});
-            self.rootView->layout_children();
+            // Every repaint lands here (a meter tick, a knob drag): lay out
+            // only when geometry actually changed, as the GPU host does.
+            self.rootView->layout_children_if_needed();
             const int saved = canvas.save_count();
             canvas.save();
             canvas.translate(tx, ty);
@@ -1378,7 +1396,7 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
             canvas.restore_to_count(saved);
         } else {
             self.rootView->set_bounds({0, 0, bw, bh});
-            self.rootView->layout_children();
+            self.rootView->layout_children_if_needed();
             self.rootView->paint_all(canvas);
             pulp::view::View::paint_overlays(canvas, self.rootView);
         }
@@ -1402,6 +1420,14 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
 - (void)setNeedsDisplay:(BOOL)flag {
     [super setNeedsDisplay:flag];
     if (flag && self.onNeedsDisplay) self.onNeedsDisplay();
+}
+
+// A bounded repaint (a meter's own rect) arrives here instead; it must open
+// the same gate.
+- (void)setNeedsDisplayInRect:(NSRect)rect {
+    [super setNeedsDisplayInRect:rect];
+    if (self.onNeedsDisplay)
+        self.onNeedsDisplay();
 }
 
 - (void)viewDidMoveToWindow {
@@ -1526,6 +1552,9 @@ public:
             if (parent_view && view_) {
                 [parent_view addSubview:view_];
                 [view_ setNeedsDisplay:YES];
+                // That whole-view mark is the first frame's full repaint, so
+                // the next bounded request can stay bounded.
+                damage_.clear();
             }
         }
     }
@@ -1550,17 +1579,70 @@ public:
     }
 
     void repaint() override {
-        if (in_idle_half_) {
-            // A repaint the idle work asks for (the document mount above all)
-            // waits for this tick's paint half. Marking the view now would let
-            // AppKit's own display pass, which runs before the main queue is
-            // drained again, draw it ahead of a host resize queued meanwhile.
-            display_deferred_to_paint_ = true;
+        // A plain repaint() carries no damage of its own: it is whole-view.
+        if (!damage_.is_full() && !damage_.has_bounds())
+            damage_.mark_full();
+        if (in_idle_half_ || render_link_.is_open()) {
+            // While the display link runs, a request waits for its paint half
+            // as damage. Marking the view now would let AppKit's own display
+            // pass, which runs before the main queue drains again, draw it
+            // ahead of a host resize queued meanwhile (the idle work, the
+            // document mount above all); and it would re-rasterize at the end
+            // of every run-loop turn that carries a request, so a 120 Hz
+            // automation stream or pointer drag redrew at the event rate. A
+            // bounded request (a knob following automation) stays bounded.
+            link_state_->needs_repaint.store(true, std::memory_order_relaxed);
             return;
         }
+        invalidate_pending_damage();
+    }
+
+    // The content-first frame goes to AppKit now rather than at the next tick:
+    // this is the host asking to see the mounted document, so it must not wait
+    // a vsync behind the deferral above.
+    bool present_first_frame() override {
+        damage_.mark_full();
+        invalidate_pending_damage();
+        return false;
+    }
+
+    // Hand the pending damage to AppKit. A bounded request
+    // (View::request_repaint(Rect) -> mark_dirty_region) invalidates only its
+    // rect, so AppKit re-rasterizes that region of the backing store instead of
+    // the whole editor. Several requests in one frame union into one rect,
+    // which is also what AppKit does with several -setNeedsDisplayInRect:
+    // calls on a layer-backed view. AppKit keeps the region until it draws, so
+    // the damage is taken here.
+    void invalidate_pending_damage() {
+        const auto damage = damage_.take();
+        if (!damage.is_full() && !damage.has_bounds())
+            return; // nothing pending
         @autoreleasepool {
-            [view_ setNeedsDisplay:YES];
+            if (damage.is_bounded())
+                [view_ setNeedsDisplayInRect:view_rect_for_root_rect(damage.bounds())];
+            else
+                [view_ setNeedsDisplay:YES];
         }
+    }
+
+    // Root-space rect -> this NSView's (unflipped) coordinates, through the
+    // same design-viewport transform drawRect: paints with, outset by a pixel
+    // so antialiased edges are re-cleared.
+    NSRect view_rect_for_root_rect(const Rect& r) const {
+        const NSRect b = view_.bounds;
+        const float bw = static_cast<float>(b.size.width);
+        const float bh = static_cast<float>(b.size.height);
+        float sx = 1.0f, sy = 1.0f, tx = 0.0f, ty = 0.0f;
+        if (view_.designW > 0.0f && view_.designH > 0.0f &&
+            !WindowHost::compute_design_viewport_transform(bw, bh, view_.designW, view_.designH, sx,
+                                                           sy, tx, ty)) {
+            return b;
+        }
+        const CGFloat x = r.x * sx + tx - 1.0;
+        const CGFloat top = r.y * sy + ty - 1.0;
+        const CGFloat w = r.width * sx + 2.0;
+        const CGFloat h = r.height * sy + 2.0;
+        return NSIntegralRect(NSMakeRect(x, bh - (top + h), w, h));
     }
 
     // The CPU host repaints only on input (setNeedsDisplay) by default, which
@@ -1725,10 +1807,6 @@ public:
     // half. Releases the link's `queued` flag on every path.
     void paint_tick(double frame_time) {
         auto& link = *link_state_;
-        if (display_deferred_to_paint_) {
-            display_deferred_to_paint_ = false;
-            if (view_) [view_ setNeedsDisplay:YES];  // also arms link.needs_repaint
-        }
         // Frame-tick focus reconciliation — the event-independent cadence.
         // syncKeyFocus is only called on discrete key/mouse events, so a
         // focus slot that clears WITHOUT a following event (a failed/rejected
@@ -1773,8 +1851,21 @@ public:
                 // open for the settling frame after the last animation one.
                 // A dirty-ONLY frame must NOT re-mark here — that would feed
                 // needs_repaint through -setNeedsDisplay: forever (an ungated
-                // link with extra steps).
-                if (tick.continuous) [view_ setNeedsDisplay:YES];
+                // link with extra steps). Nor may a frame that ticked only for
+                // a live clock subscriber: a bound meter in silence would
+                // repaint the whole editor every vsync. A subscriber whose
+                // content moved already marked the view while it advanced.
+                if (tick.animating)
+                    [view_ setNeedsDisplay:YES];
+                // The requests this frame collected (repaint() defers them
+                // while the link runs). Marking the view re-arms the gate
+                // through -setNeedsDisplay:; this frame draws them, so the
+                // next vsync must not be dispatched for them again.
+                {
+                    const bool armed = link.needs_repaint.load(std::memory_order_relaxed);
+                    invalidate_pending_damage();
+                    link.needs_repaint.store(armed, std::memory_order_relaxed);
+                }
                 // DRIVE the paint from the display-link tick — the CPU
                 // analogue of the GPU host presenting from render_frame().
                 // AppKit only services a pending -setNeedsDisplay: on its
@@ -1802,6 +1893,7 @@ public:
         @autoreleasepool {
             [view_ setFrameSize:NSMakeSize(width, height)];
             [view_ setNeedsDisplay:YES];
+            damage_.clear(); // covered by the whole-view mark above
         }
     }
 
@@ -1931,9 +2023,9 @@ private:
     };
     std::shared_ptr<FrameLink> link_state_ = std::make_shared<FrameLink>();
     // True while the render link runs the idle callback; a repaint() requested
-    // then is held for that tick's paint half (display_deferred_to_paint_).
+    // then is held as damage for that tick's paint half.
     bool in_idle_half_ = false;
-    bool display_deferred_to_paint_ = false;
+
     // Design viewport: when (>0, >0) root paints at design size and the
     // canvas applies translate+scale to fit the host bounds. Mouse coords
     // are inverse-mapped via window_to_root_point().
@@ -1950,7 +2042,7 @@ private:
 
 // ── MacGpuPluginViewHost (Dawn/Skia Graphite) ────────────────────────────────
 
-#ifdef PULP_HAS_SKIA
+#if PULP_VIEW_MAC_GPU_HOST
 
 // Interface in plugin_view_host_mac_view.h, beside PulpPluginView.
 @implementation PulpGpuPluginView {
@@ -1968,6 +2060,18 @@ private:
     // Holds raw AppKit drag motion between presented frames. Ordering rules and
     // the fail-safe live in the shared type, not here.
     pulp::view::HostDragCoalescer _dragCoalescer;
+}
+
+- (void)dealloc {
+    // The editor owner's teardown runs first, while the view is still whole.
+    void (^handler)(void) = _pulpWillDeallocHandler;
+    _pulpWillDeallocHandler = nil;
+    if (handler)
+        handler();
+#if !__has_feature(objc_arc)
+    [handler release];
+    [super dealloc];
+#endif
 }
 
 // A press in a non-key editor window acts on the control under it. See
@@ -2196,6 +2300,13 @@ private:
         // requesting layer-backing; AppKit calls -makeBackingLayer synchronously.
         _backgroundRGB = pulp::view::kEditorHostClearRgb;
         self.wantsLayer = YES;
+        // Between a resize and the frame that draws it, the layer keeps
+        // showing the last frame at its own pixel size, anchored like the
+        // view's content, rather than stretched into the new bounds. Only an
+        // area the view grew into shows the background, for at most that one
+        // frame. AppKit owns a layer-backed view's contentsGravity and sets it
+        // from this placement, so the layer's own property would not stick.
+        self.layerContentsPlacement = NSViewLayerContentsPlacementTopLeft;
     }
     return self;
 }
@@ -2259,7 +2370,9 @@ private:
     CGFloat scale = self.window ? self.window.backingScaleFactor
                                 : [NSScreen mainScreen].backingScaleFactor;
     self.metalLayer.contentsScale = scale;
-    self.metalLayer.drawableSize = CGSizeMake(newSize.width * scale, newSize.height * scale);
+    // The drawable size is the swapchain's, set when the next frame configures
+    // it. Setting it here emptied the layer on every size event of a drag, so
+    // the host composited the background until that frame.
     // AU v2 resizes this NSView directly (no host size callback). Notify the
     // host; it resizes surfaces and forwards to ViewBridge::resize. The host
     // guards against re-entrancy when *it* drove the frame change.
@@ -2289,13 +2402,19 @@ private:
     }
 }
 
+- (void)viewDidHide {
+    [super viewDidHide];
+    if (self.onHide)
+        self.onHide();
+}
+
 - (void)viewDidChangeBackingProperties {
     [super viewDidChangeBackingProperties];
     CGFloat scale = self.window ? self.window.backingScaleFactor
                                 : [NSScreen mainScreen].backingScaleFactor;
     self.metalLayer.contentsScale = scale;
-    self.metalLayer.drawableSize = CGSizeMake(self.bounds.size.width * scale,
-                                              self.bounds.size.height * scale);
+    // The host re-sizes the swapchain at the new scale; the next frame sets
+    // the drawable size.
     if (self.onBackingChange) self.onBackingChange();
 }
 
@@ -2332,6 +2451,9 @@ public:
             // there too.
             metal_view_.onWindowChange = ^{ this->handle_window_change(); };
             metal_view_.onBackingChange = ^{ this->handle_backing_change(); };
+            metal_view_.onHide = ^{
+              this->release_gpu_caches();
+            };
             metal_view_.onResize = ^(uint32_t w, uint32_t h) {
                 this->on_native_frame_changed(w, h);
             };
@@ -2362,6 +2484,7 @@ public:
             metal_view_.pointTransform = nil;
             metal_view_.onWindowChange = nil;
             metal_view_.onBackingChange = nil;
+            metal_view_.onHide = nil;
             metal_view_.onResize = nil;
         }
         // Publish the teardown while the surfaces are still alive, so a
@@ -2453,10 +2576,10 @@ public:
     // the run-loop turn is not enough out of process: AUHostingService commits
     // the container's intermediate sizes before the turn ends, and about one
     // open in twenty-five showed the backing colour. Nor is skipping a view
-    // that has no window yet: the new drawable size empties the layer, which a
-    // host that resizes its container before showing it then composites.
+    // that has no window yet: a host that resizes its container before
+    // showing it composites whatever the layer holds at that moment.
     void present_resize_before_first_link_frame() {
-        if (!only_first_frame_presented_)
+        if (!only_first_frame_presented_ || delivering_resize_)
             return;
         if (size_.width == 0 || size_.height == 0)
             return;
@@ -2496,6 +2619,18 @@ public:
     // paints the editor.
     render::GpuSurface* gpu_surface() const override {
         return gpu_surface_.get();
+    }
+
+    GpuCacheUsage gpu_cache_usage() const override {
+        if (!skia_surface_)
+            return {};
+        const auto bytes = skia_surface_->gpu_cache_bytes();
+        return {bytes.budgeted, bytes.purgeable};
+    }
+
+    void release_gpu_caches() override {
+        if (skia_surface_)
+            skia_surface_->trim_gpu_resources(render::SkiaSurface::TrimLevel::everything());
     }
 
     void set_idle_callback(std::function<void()> callback) override {
@@ -2628,10 +2763,15 @@ private:
     HostFramePump frame_pump_;
     std::atomic<bool> needs_repaint_{true};
     std::atomic<bool> continuous_frames_{false};
+    // The subset of continuous_frames_ that paints without asking: re-arms
+    // needs_repaint_ after a frame (HostFrameTick::animating).
+    std::atomic<bool> animating_frames_{false};
     std::atomic<bool> render_dispatch_queued_{false};
     std::function<void()> idle_callback_;
     std::atomic<bool> has_idle_callback_{false};
     std::function<void(uint32_t, uint32_t)> resize_cb_;
+    PendingResize pending_resize_;
+    bool delivering_resize_ = false;
     // Liveness token captured by the display-link main-thread dispatch
     // blocks. Flipped false in the destructor so a queued block after
     // teardown is a no-op (DAW teardown order is not under our control).
@@ -2780,6 +2920,7 @@ private:
                       uint32_t* capture_width = nullptr,
                       uint32_t* capture_height = nullptr) {
         if (!gpu_surface_ || !skia_surface_) return false;
+        deliver_pending_resize();
         commit_layer_geometry_before_present();
         if (!gpu_surface_->begin_frame()) return false;
 
@@ -2813,14 +2954,14 @@ private:
 
         paint_scene(*canvas);
 
-        continuous_frames_.store(
-            // The O(1) question first. `needs_continuous_frames` walks the
-            // whole view tree; `has_active_subscribers` is a count. Asking the
-            // expensive one first meant the walk ran on every frame of every
-            // animation, when the answer was already yes.
-            frame_clock_.has_active_subscribers() ||
-                pulp::view::needs_continuous_frames(&root_),
-            std::memory_order_relaxed);
+        // Two liveness answers (see HostFrameTick::animating): the gate stays
+        // open while anything wants clock ticks, but only a tree that paints
+        // new pixels on its own re-arms the dirty flag below. A live subscriber
+        // that changes what it draws requests its own repaint.
+        const bool animating = pulp::view::needs_continuous_frames(&root_);
+        animating_frames_.store(animating, std::memory_order_relaxed);
+        continuous_frames_.store(animating || frame_clock_.has_active_subscribers(),
+                                 std::memory_order_relaxed);
 
         // PULP_EMBED_GPU_FRAME_STAT — env-gated LIVE display-link present-path
         // pixel proof (NOT the forced capture path). Every Nth on-screen frame,
@@ -2904,7 +3045,7 @@ private:
             skia_surface_->wait_for_submitted_work();
         gpu_surface_->end_frame();
 
-        needs_repaint_.store(continuous_frames_.load(std::memory_order_relaxed),
+        needs_repaint_.store(animating_frames_.load(std::memory_order_relaxed),
                              std::memory_order_relaxed);
         return captured;
     }
@@ -3024,6 +3165,9 @@ private:
         // generation, a programmatic blur). Cheap + idempotent: syncKeyFocus
         // only touches first responder on a transition.
         if (metal_view_) [metal_view_ syncKeyFocus];
+        // Before the tick, so the editor lays out the frame at the size the
+        // processor was told about.
+        deliver_pending_resize();
 
         const auto tick = pulp::view::begin_host_frame(
             &root_, frame_clock_, frame_pump_, frame_time,
@@ -3050,8 +3194,17 @@ private:
         // the only chance to update the cursor: AppKit re-asks on
         // pointer motion, never because the content moved.
         [metal_view_ refreshHoverCursor];
-        if (tick.continuous) {
+        if (tick.animating) {
             needs_repaint_.store(true, std::memory_order_relaxed);
+        }
+        // A tick that advanced only for a live clock subscriber, which nothing
+        // dirtied, presents nothing: the drawable already shows these pixels.
+        // The gate stays open so the subscribers keep ticking.
+        if (!pulp::view::host_frame_composites(tick,
+                                               needs_repaint_.load(std::memory_order_relaxed))) {
+            continuous_frames_.store(tick.continuous, std::memory_order_relaxed);
+            render_dispatch_queued_.store(false, std::memory_order_release);
+            return;
         }
         only_first_frame_presented_ = false;
         render_frame();
@@ -3066,7 +3219,32 @@ private:
         if (w == size_.width && h == size_.height) return;
         if (w == 0 || h == 0) return;
         set_size(w, h);
-        if (resize_cb_) resize_cb_(w, h);
+        // A drag resizes the view per mouse move; the next frame tells the
+        // processor once, with the last size. With no display link running
+        // there is no next frame, so tell it now.
+        pending_resize_.record(w, h);
+        if (!display_link_.is_open()) {
+            const Size delivered = size_;
+            deliver_pending_resize();
+            // A size the callback set was not presented while it ran.
+            if (size_.width != delivered.width || size_.height != delivered.height)
+                present_resize_before_first_link_frame();
+        }
+    }
+
+    // Runs the host's resize callback for the last size recorded since the
+    // previous frame (see PendingResize). A set_size() from inside the
+    // callback is painted by the frame that is delivering it, not presented
+    // on its own (see present_resize_before_first_link_frame).
+    void deliver_pending_resize() {
+        if (delivering_resize_)
+            return;
+        delivering_resize_ = true;
+        pending_resize_.deliver([this](uint32_t w, uint32_t h) {
+            if (resize_cb_)
+                resize_cb_(w, h);
+        });
+        delivering_resize_ = false;
     }
 
     void handle_window_change() {
@@ -3079,8 +3257,9 @@ private:
     }
 
     void handle_backing_change() {
-        // The view already updated its layer's contentsScale/drawableSize;
-        // re-sync the surfaces at the new scale and re-arm a paint.
+        // The view already updated its layer's contentsScale; re-sync the
+        // surfaces at the new scale, which the next frame configures (and so
+        // sets the drawable size), and re-arm a paint.
         set_size(size_.width, size_.height);
     }
 
@@ -3138,7 +3317,7 @@ private:
 
 } // namespace pulp::view (close GPU class block)
 
-#endif // PULP_HAS_SKIA
+#endif // PULP_VIEW_MAC_GPU_HOST
 
 namespace pulp::view { // reopen for factory functions
 
@@ -3151,7 +3330,7 @@ std::unique_ptr<PluginViewHost> PluginViewHost::create(View& root, Size size) {
 }
 
 std::unique_ptr<PluginViewHost> PluginViewHost::create(View& root, const Options& options) {
-#ifdef PULP_HAS_SKIA
+#if PULP_VIEW_MAC_GPU_HOST
     if (options.use_gpu) {
         auto host = std::make_unique<MacGpuPluginViewHost>(root, options.size,
                                                            options.background_rgb);
@@ -3164,6 +3343,11 @@ std::unique_ptr<PluginViewHost> PluginViewHost::create(View& root, const Options
         // The adapter's runtime scream-guard logs the mismatch loudly.
         host.reset();
     }
+#else
+    // A lite editor binary has no GPU host to give; say so once and open the
+    // CoreGraphics host, so the editor still appears.
+    if (options.use_gpu)
+        detail::note_lite_host_gpu_request();
 #endif
     auto host = std::make_unique<MacPluginViewHost>(root, options.size,
                                                     options.background_rgb);

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "browser_capture_canvas.hpp"
+
 #include <pulp/view/design_ir.hpp>
 
 #include <filesystem>
@@ -82,12 +84,22 @@ struct CapturedPaintNode {
 /// owns that three-hop join (backend id → node index → layout index → style row)
 /// so callers can ask for an element's appearance directly.
 class CapturedStyleIndex {
-public:
+  public:
+    const std::optional<detail::DocumentCanvasPaint>& document_canvas_paint() const {
+        return document_canvas_paint_;
+    }
+
     /// Read a `dom-snapshot.json` sidecar. Returns nullopt when the file is
     /// absent, unreadable, or does not carry per-node computed styles — a
     /// capture without solved styles still lowers, it just gains no appearance.
     static std::optional<CapturedStyleIndex> load(
         const std::filesystem::path& snapshot_path);
+
+    /// Parse bytes that were already integrity-verified by the capture
+    /// consumer. Keeping parsing on the verified buffer avoids a second file
+    /// open after the SHA-256 check.
+    static std::optional<CapturedStyleIndex> load_bytes(std::string_view snapshot_bytes,
+                                                        std::filesystem::path snapshot_path = {});
 
     /// Computed declarations for the element that paints `paint_box`, searched
     /// within the subtree rooted at `backend_node_id`.
@@ -130,6 +142,20 @@ public:
     /// The box Chrome laid the element out at, in page coordinates.
     std::optional<CapturedBox> bounds_for(int backend_node_id) const;
 
+    /// The layout row that carries a DOM node's own box, or nullopt when the
+    /// node produced no layout object.
+    ///
+    /// Chromium can emit several layout rows for one node: a pseudo-element's
+    /// box is followed by a zero-size row for its generated content, a list
+    /// marker by its paint record, and a split inline by one row per line box.
+    /// The own row is the first with positive area; a node whose rows are all
+    /// empty keeps its first row. Every per-node lookup in this index and the
+    /// document-canvas proof read this one rule. The differential lab's
+    /// `principal_layout_rows` (tools/import-validation/importer_differential/
+    /// snapshot.py) is its Python twin; test/fixtures/browser-capture-layout-rows
+    /// pins both to the same answer.
+    std::optional<int> own_layout_row(int node_index) const;
+
     /// The inline line boxes Chrome broke one layout node's text across, in
     /// document order.
     ///
@@ -151,12 +177,19 @@ public:
     /// empty answer must be treated as "cannot validate" rather than "matches".
     std::string resolved_face_for_layout(int layout_index) const;
 
+    /// The line metrics Blink used for this run's primary font, or nullopt
+    /// when the capture did not measure them.
+    std::optional<pulp::view::LineMetrics> line_metrics_for_layout(int layout_index) const;
+
     /// Every laid-out node, in Chrome's paint order, ties broken by document
     /// order. This is the set a native renderer has to draw.
     std::vector<CapturedPaintNode> painted_nodes() const;
 
     /// An element's authored attribute value, or empty when absent.
     std::string attribute(int node_index, std::string_view name) const;
+    /// Whether an element carries the attribute at all, which an empty
+    /// `attribute()` cannot tell from an empty value.
+    bool has_attribute(int node_index, std::string_view name) const;
 
     /// A node's lowercase tag name, for any node in the document — not only the
     /// ones that were laid out. Ancestry questions have to reach elements that
@@ -165,6 +198,26 @@ public:
 
     /// Walk up `parentIndex` from `node_index`. Returns -1 at the root.
     int parent_of(int node_index) const;
+
+    /// The string a form control draws from its own state rather than from a
+    /// DOM text node: an `<input>`'s current value (`inputValue`), or the text
+    /// of a `<select>`'s selected option (`optionSelected`). Chrome paints both
+    /// inside a user-agent shadow tree the snapshot does not serialize, so this
+    /// is the only place the string survives. Empty when the node has none.
+    std::string control_value(int node_index) const;
+
+    /// Whether Chromium's native theme painted a form control, as the capture
+    /// recorded it from matched-rule origins: "native", "author" (computed
+    /// appearance is not `none`, but author box styling dropped the theme),
+    /// "author-arrow" (a select whose box is CSS but whose arrow is the
+    /// theme's), or "none". Empty when the capture holds no verdict for the
+    /// node, which means unknown — computed `appearance` cannot answer it.
+    std::string control_theme(int node_index) const;
+
+    /// Whether a checkbox or radio is checked (`inputChecked`): the live state,
+    /// which a script or a click can leave different from the `checked`
+    /// attribute.
+    bool control_checked(int node_index) const;
 
     /// The product of every ancestor `transform` scale above `node_index`.
     ///
@@ -184,6 +237,28 @@ public:
     };
     InheritedTypeScale inherited_type_scale(int node_index) const;
 
+    /// The per-axis scale a node's own paint carries: the product of its own
+    /// computed `transform` and every ancestor's. The box is placed
+    /// post-transform, while border widths, corner radii and shadow lengths
+    /// are the untransformed computed values, so a bordered box under
+    /// `scale(0.05, 1)` keeps a 1px border inside a 0.3px box. Unlike type,
+    /// paint can carry two axes: a border has a width per side. A rotation
+    /// keeps the factor when every scale in the chain is uniform; a flip, a
+    /// skew, a `matrix3d`, or a rotation anywhere in a chain with a
+    /// non-uniform scale is refused, because the per-axis factors no longer
+    /// line up with the box's sides.
+    struct InheritedPaintScale {
+        double x = 1.0;
+        double y = 1.0;
+        /// Empty when the chain reduced; otherwise the computed `transform`
+        /// that refused it.
+        std::string refused;
+        bool ok() const {
+            return refused.empty();
+        }
+    };
+    InheritedPaintScale inherited_paint_scale(int node_index) const;
+
     /// A node's DOM `nodeType` (1 element, 3 text), or 0 when out of range.
     ///
     /// A doctype carries the same `nodeName` as the root element, so tag name
@@ -193,6 +268,17 @@ public:
         if (node_index < 0 || node_index >= static_cast<int>(node_type_.size()))
             return 0;
         return node_type_[static_cast<size_t>(node_index)];
+    }
+
+    /// A node's Chromium `backendNodeId`, or -1 when absent or out of range.
+    ///
+    /// The painted-node list carries this for every laid-out row, but a node
+    /// lowered outside that list (an SVG shape emitted beside its `<svg>`)
+    /// still needs the same identity to bind to the DOM node it draws.
+    int backend_node_id_of(int node_index) const noexcept {
+        if (node_index < 0 || node_index >= static_cast<int>(node_to_backend_.size()))
+            return -1;
+        return node_to_backend_[static_cast<size_t>(node_index)];
     }
 
     /// How many nodes the document declares, laid out or not.
@@ -207,8 +293,8 @@ public:
 
     bool empty() const noexcept { return style_rows_.empty(); }
 
-private:
-    std::optional<int> layout_for_node(int node_index) const;
+  private:
+    std::optional<detail::DocumentCanvasPaint> document_canvas_paint_;
     bool is_descendant(int node_index, int ancestor_index) const;
     std::string string_at(int index) const;
 
@@ -218,9 +304,14 @@ private:
     std::vector<int> node_type_;                     ///< node index → nodeType
     std::vector<int> node_name_;                     ///< node index → string
     std::vector<std::vector<int>> node_attributes_;  ///< node index → name/value
+    std::vector<int> node_value_;                    ///< node index → nodeValue
+    std::unordered_map<int, int> input_value_;       ///< node index → string
+    std::vector<int> option_selected_;               ///< selected option nodes
+    std::vector<int> input_checked_;                 ///< checked input nodes
+    std::unordered_map<int, std::string> control_theme_; ///< node → verdict
     std::unordered_map<int, int> backend_to_node_;
     std::vector<int> node_to_backend_;               ///< node index → backend
-    std::unordered_map<int, int> node_to_layout_;
+    std::unordered_map<int, int> node_to_layout_;    ///< node → own row
     std::vector<int> layout_to_node_;                ///< layout index → node
     std::vector<int> layout_text_;                   ///< layout index → string
     /// Text with only browser-omitted, same-line collapsible whitespace
@@ -235,6 +326,8 @@ private:
     /// layout index → the PostScript name Blink resolved, when the capture
     /// carried a platform-fonts sidecar.
     std::unordered_map<int, std::string> layout_resolved_face_;
+    /// layout index → the measured primary-font line metrics, when present.
+    std::unordered_map<int, pulp::view::LineMetrics> layout_line_metrics_;
 };
 
 /// Which half of an element's appearance to fold onto a node.
@@ -268,6 +361,28 @@ void apply_computed_styles(
     pulp::view::IRStyle& style,
     ComputedStyleScope scope = ComputedStyleScope::box_and_text,
     double type_scale = 1.0);
+
+/// What `apply_paint_scale` did with one node's style.
+struct PaintScaleResult {
+    /// A border, radius or shadow length was multiplied.
+    bool scaled = false;
+    /// The properties left unscaled because one factor per axis cannot
+    /// express them (an elliptical corner, a blur under two axes), joined
+    /// with ", ". Empty when nothing was refused.
+    std::string refused;
+};
+
+/// Multiply the lengths `apply_computed_styles` read in the untransformed
+/// space by the scale the node's box already carries: left and right border
+/// widths by `sx`, top and bottom by `sy`, and corner radii and shadow blur
+/// and spread by the factor only when the two axes agree. Shadow offsets take
+/// one axis each. Anything a per-axis factor cannot express is left as it
+/// was and named in the result.
+PaintScaleResult apply_paint_scale(pulp::view::IRStyle& style, double sx, double sy);
+
+/// Whether `style` paints anything whose size does not follow the box:
+/// a border width, a corner radius, or a shadow.
+bool has_scale_variant_paint(const pulp::view::IRStyle& style);
 
 /// Split a CSS list on top-level commas, ignoring commas nested in functions
 /// (`rgba(0, 0, 0, .5)` is one value, not four).

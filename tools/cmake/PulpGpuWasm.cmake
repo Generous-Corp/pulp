@@ -50,10 +50,14 @@ set(_PULP_GPU_DSP_INCLUDES
 # never-blocking convolver. Nothing else — GpuCompute's only other Pulp
 # dependency is pulp/runtime/log.hpp, which is header-only, so NO runtime TU is
 # linked (core/runtime/src/runtime.cpp would pull choc + the background-job pool
-# in for symbols this module never calls). If this list ever needs a third core
-# source, that is a signal the module is growing a dependency it should not have.
+# in for symbols this module never calls). The diagnostics TU is part of the
+# compute contract: gpu_compute.cpp reports device loss and uncaptured errors
+# through emit_gpu_diagnostic(), while its tracing and Skia bridge code compile
+# out in this Skia-free worker. Keep this list explicit so a new dependency is
+# reviewed rather than pulled in transitively.
 set(_PULP_GPU_DSP_SOURCES
     ${_PULP_GPU_DSP_ROOT}/core/render/src/gpu_compute.cpp
+    ${_PULP_GPU_DSP_ROOT}/core/render/src/gpu_diagnostics.cpp
     ${_PULP_GPU_DSP_ROOT}/core/gpu_audio/src/web/web_gpu_convolver.cpp
 )
 

@@ -13,6 +13,7 @@
 
 #include "design_binding_metadata.hpp"
 #include "design_import_internal.hpp"
+#include "design_ir_json_primitives.hpp"
 
 #include <choc/text/choc_JSON.h>
 #include <choc/text/choc_StringUtilities.h>
@@ -33,25 +34,7 @@
 
 namespace pulp::view {
 
-// ── JSON parsing helpers ────────────────────────────────────────────────
-
-static std::string get_string(const choc::value::ValueView& obj, const char* key, const char* def = "") {
-    if (obj.hasObjectMember(key))
-        return std::string(obj[key].toString());
-    return def;
-}
-
-static float get_float(const choc::value::ValueView& obj, const char* key, float def = 0.0f) {
-    if (obj.hasObjectMember(key))
-        return static_cast<float>(obj[key].getWithDefault<double>(def));
-    return def;
-}
-
-static bool get_bool(const choc::value::ValueView& obj, const char* key, bool def = false) {
-    if (obj.hasObjectMember(key))
-        return obj[key].getWithDefault<bool>(def);
-    return def;
-}
+using namespace ir_json;
 
 // ── Faithful-vector import enum<->id ────────────────────────────────────
 static std::optional<NodeRenderMode> render_mode_from_id(const std::string& s) {
@@ -324,12 +307,10 @@ static IRStyle parse_ir_style(const choc::value::ValueView& obj) {
         auto k = resolve_key(key);
         if (!k) return;
         const auto& v = obj[k->c_str()];
-        // v0 / Stitch / Pencil emit CSS string dimensions ("100px", "12") where
-        // the figma-plugin lane emits a bare number. getWithDefault<double> on a
-        // string returns 0, which silently degenerates the dimension (a "1px"
-        // border or width collapses to 0). Coerce a px-suffixed / numeric string
-        // through the shared length parser; a non-length string (e.g. "auto",
-        // "50%") leaves the field unset for the sizing-mode path to handle.
+        // v0 / Stitch / Pencil emit CSS string dimensions ("100px", "12") where the
+        // figma-plugin lane emits a number; getWithDefault<double> on a string returns 0
+        // and collapses a "1px" border to 0. Coerce lengths through the shared parser; a
+        // non-length ("auto", "50%") stays unset for the sizing-mode path to handle.
         if (v.isString()) {
             float parsed = 0.0f;
             if (bxsh_parse_length(std::string(v.toString()), parsed)) field = parsed;
@@ -347,6 +328,7 @@ static IRStyle parse_ir_style(const choc::value::ValueView& obj) {
     set_opt_str("backgroundRepeat", s.background_repeat);
     set_opt_str("backgroundPosition", s.background_position);
     set_opt_str("backgroundSize", s.background_size);
+    set_opt_str("backgroundOrigin", s.background_origin);
     set_opt_str("objectFit", s.object_fit);
     set_opt_str("color", s.color);
     set_opt_float("opacity", s.opacity);
@@ -868,39 +850,6 @@ static std::optional<std::string> normalize_v_constraint(std::string s) {
 // or `textRuns`: an array of {start,end, fontSize?, fontWeight?, italic? |
 // fontStyle?, color?, letterSpacing?, textDecoration?}. Source-agnostic —
 // any source expressing styled ranges feeds the same IR runs.
-static void parse_ir_text_line_boxes(IRNode& node,
-                                    const choc::value::ValueView& obj) {
-    if (!obj.isObject()) return;
-    if (obj.hasObjectMember("lineBoxes")) {
-        const auto boxes = obj["lineBoxes"];
-        if (boxes.isArray()) {
-            for (uint32_t i = 0; i < boxes.size(); ++i) {
-                const auto entry = boxes[static_cast<int>(i)];
-                if (!entry.isObject()) continue;
-                IRTextLineBox box;
-                box.left = get_float(entry, "left");
-                box.top = get_float(entry, "top");
-                box.width = get_float(entry, "width");
-                box.height = get_float(entry, "height");
-                box.start = static_cast<int>(get_float(entry, "start"));
-                box.length = static_cast<int>(get_float(entry, "length"));
-                node.text_line_boxes.push_back(box);
-            }
-        }
-    }
-    if (obj.hasObjectMember("lineBoxBasis")) {
-        const auto basis = obj["lineBoxBasis"];
-        if (basis.isObject()) {
-            IRTextLayoutBasis parsed;
-            parsed.width = get_float(basis, "width");
-            parsed.resolved_face = get_string(basis, "resolvedFace");
-            node.text_layout_basis = std::move(parsed);
-        }
-    }
-    // Boxes without a basis cannot be validated, so they are not a cache.
-    if (!node.text_layout_basis) node.text_line_boxes.clear();
-}
-
 static void parse_ir_text_runs(IRNode& node, const choc::value::ValueView& obj) {
     for (const char* runs_key : {"runs", "textRuns"}) {
         if (!obj.hasObjectMember(runs_key) || !obj[runs_key].isArray()) continue;
@@ -1098,13 +1047,13 @@ static bool parse_ir_audio_widget(IRNode& node, const choc::value::ValueView& ob
     return explicit_audio_widget;
 }
 
-IRNode parse_ir_node(const choc::value::ValueView& obj) {
+IRNode parse_ir_node(const choc::value::ValueView& obj, const IRParseOptions& options) {
     IRNode node;
     node.type = get_string(obj, "type", "frame");
     node.name = get_string(obj, "name");
     node.text_content = get_string(obj, "content");
     parse_ir_text_runs(node, obj);
-    parse_ir_text_line_boxes(node, obj);
+    parse_ir_text_line_layout(node, obj);
     parse_ir_identity_fields(node, obj);
 
     // ── Faithful-vector import: render mode + SVG asset + overlays ──
@@ -1536,7 +1485,7 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
     if (obj.hasObjectMember("children") && obj["children"].isArray()) {
         auto children = obj["children"];
         for (uint32_t i = 0; i < children.size(); ++i)
-            node.children.push_back(parse_ir_node(children[static_cast<int>(i)]));
+            node.children.push_back(parse_ir_node(children[static_cast<int>(i)], options));
     }
 
     // Alternate frames (multi-state capture). Array ORDER is the frame index a
@@ -1547,7 +1496,7 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
         for (uint32_t i = 0; i < frames.size(); ++i) {
             const auto f = frames[static_cast<int>(i)];
             if (!f.isObject()) continue;
-            node.alternate_frames.push_back(parse_ir_node(f));
+            node.alternate_frames.push_back(parse_ir_node(f, options));
         }
         if (!node.alternate_frames.empty()) break;
     }
@@ -1558,10 +1507,11 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
     // (design_ir_normalize.cpp). Runs after children and alternate frames
     // are parsed so every rule sees final child geometry; children were
     // normalized during their own parse_ir_node recursion.
-    normalize_design_ir(node);
+    normalize_design_ir(node, options);
 
     // Tail post-passes, extracted into named functions.
-    detect_node_audio_widget(node, explicit_audio_widget);
+    if (!options.measured_geometry)
+        detect_node_audio_widget(node, explicit_audio_widget);
     parse_shape_stroke_color(node, obj);
     extract_widget_shape_dims(node);
 
@@ -1630,7 +1580,9 @@ static const char* design_source_id(DesignSource source) {
         case DesignSource::designmd: return "designmd";
         case DesignSource::jsx:      return "jsx";
         case DesignSource::figma_plugin: return "figma-plugin";
-    }
+        case DesignSource::preconverted_svg:
+            return "preconverted-svg";
+        }
     return "figma";
 }
 
@@ -1776,56 +1728,6 @@ std::string json_escape(std::string_view text) {
     return out.str();
 }
 
-static void write_key(std::ostringstream& out, bool& first, const char* key) {
-    if (!first) out << ',';
-    first = false;
-    out << '"' << key << "\":";
-}
-
-static void write_string_member(std::ostringstream& out, bool& first,
-                                const char* key, std::string_view value) {
-    write_key(out, first, key);
-    out << '"' << json_escape(value) << '"';
-}
-
-static void write_string_member(std::ostringstream& out, bool& first,
-                                const char* key, const char* value) {
-    write_string_member(out, first, key, std::string_view(value ? value : ""));
-}
-
-static void write_string_member(std::ostringstream& out, bool& first,
-                                const char* key, const std::string& value) {
-    write_string_member(out, first, key, std::string_view(value));
-}
-
-static void write_string_member(std::ostringstream& out, bool& first,
-                                const char* key,
-                                const std::optional<std::string>& value) {
-    if (value) write_string_member(out, first, key, *value);
-}
-
-static void write_float_member(std::ostringstream& out, bool& first,
-                               const char* key, float value) {
-    write_key(out, first, key);
-    out << value;
-}
-
-static void write_float_member(std::ostringstream& out, bool& first,
-                               const char* key, const std::optional<float>& value) {
-    if (value) write_float_member(out, first, key, *value);
-}
-
-static void write_int_member(std::ostringstream& out, bool& first,
-                             const char* key, int value) {
-    write_key(out, first, key);
-    out << value;
-}
-
-static void write_int_member(std::ostringstream& out, bool& first,
-                             const char* key, const std::optional<int>& value) {
-    if (value) write_int_member(out, first, key, *value);
-}
-
 template <typename Map, typename Fn>
 static void for_each_sorted_map_entry(const Map& map, Fn&& fn) {
     std::vector<typename Map::key_type> keys;
@@ -1885,6 +1787,7 @@ static void write_ir_style_json(std::ostringstream& out, const IRStyle& s) {
     write_string_member(out, first, "backgroundRepeat", s.background_repeat);
     write_string_member(out, first, "backgroundPosition", s.background_position);
     write_string_member(out, first, "backgroundSize", s.background_size);
+    write_string_member(out, first, "backgroundOrigin", s.background_origin);
     write_string_member(out, first, "objectFit", s.object_fit);
     write_string_member(out, first, "color", s.color);
     write_float_member(out, first, "opacity", s.opacity);
@@ -2050,32 +1953,7 @@ static void write_ir_node_json(std::ostringstream& out, const IRNode& node,
 
     // Chrome's own line breaking, cached beside the paragraph. A consumer that
     // finds the basis still holding draws these verbatim instead of reflowing.
-    if (!node.text_line_boxes.empty() && node.text_layout_basis) {
-        write_key(out, first, "lineBoxes");
-        out << '[';
-        for (size_t i = 0; i < node.text_line_boxes.size(); ++i) {
-            if (i) out << ',';
-            const auto& b = node.text_line_boxes[i];
-            out << '{';
-            bool bf = true;
-            write_float_member(out, bf, "left", b.left);
-            write_float_member(out, bf, "top", b.top);
-            write_float_member(out, bf, "width", b.width);
-            write_float_member(out, bf, "height", b.height);
-            write_int_member(out, bf, "start", b.start);
-            write_int_member(out, bf, "length", b.length);
-            out << '}';
-        }
-        out << ']';
-        write_key(out, first, "lineBoxBasis");
-        out << '{';
-        bool basis_first = true;
-        write_float_member(out, basis_first, "width",
-                           node.text_layout_basis->width);
-        write_string_member(out, basis_first, "resolvedFace",
-                            node.text_layout_basis->resolved_face);
-        out << '}';
-    }
+    write_ir_text_line_layout(out, first, node);
 
     write_key(out, first, "style");
     write_ir_style_json(out, node.style);
@@ -2430,24 +2308,7 @@ std::string serialize_design_ir(const DesignIR& ir,
         write_key(out, first, "assetManifest");
         write_asset_manifest_json(out, ir.asset_manifest);
     }
-    if (!ir.font_family_assets.empty()) {
-        write_key(out, first, "fontFamilyAssets");
-        out << "[";
-        bool ffirst = true;
-        for (const auto& fa : ir.font_family_assets) {
-            if (!ffirst) out << ",";
-            ffirst = false;
-            out << "{";
-            bool mf = true;
-            write_string_member(out, mf, "family", fa.family);
-            if (!fa.style.empty()) write_string_member(out, mf, "style", fa.style);
-            write_key(out, mf, "weight"); out << fa.weight;
-            if (!fa.asset_id.empty()) write_string_member(out, mf, "asset_id", fa.asset_id);
-            if (!fa.resolved_path.empty()) write_string_member(out, mf, "resolvedPath", fa.resolved_path);
-            out << "}";
-        }
-        out << "]";
-    }
+    write_ir_font_family_assets(out, first, ir);
     if (!ir.diagnostics.empty()) {
         write_key(out, first, "diagnostics");
         write_diagnostics_array_json(out, ir.diagnostics);
@@ -2555,31 +2416,12 @@ DesignIR parse_design_ir_json(const std::string& json) {
         if (ir.source_version.empty()) ir.source_version = get_string(parsed, "sourceVersion");
         ir.imported_at = get_string(parsed, "imported_at");
         if (ir.imported_at.empty()) ir.imported_at = get_string(parsed, "importedAt");
-        ir.root = parse_ir_node(parsed["root"]);
+        ir.root = parse_ir_node(parsed["root"], ir_parse_options_for(ir));
         if (parsed.hasObjectMember("tokens"))
             ir.tokens = parse_ir_tokens(parsed["tokens"]);
         if (parsed.hasObjectMember("assetManifest"))
             ir.asset_manifest = parse_asset_manifest(parsed["assetManifest"]);
-        for (const char* fk : {"fontFamilyAssets", "font_family_assets"}) {
-            if (parsed.hasObjectMember(fk) && parsed[fk].isArray()) {
-                auto arr = parsed[fk];
-                for (uint32_t i = 0; i < arr.size(); ++i) {
-                    auto e = arr[static_cast<int>(i)];
-                    if (!e.isObject()) continue;
-                    IRFontAsset fa;
-                    fa.family = get_string(e, "family");
-                    fa.style = get_string(e, "style");
-                    if (e.hasObjectMember("weight"))
-                        fa.weight = static_cast<int>(e["weight"].getWithDefault<int64_t>(400));
-                    fa.asset_id = get_string(e, "asset_id");
-                    if (fa.asset_id.empty()) fa.asset_id = get_string(e, "assetId");
-                    fa.resolved_path = get_string(e, "resolvedPath");
-                    if (fa.resolved_path.empty()) fa.resolved_path = get_string(e, "resolved_path");
-                    if (!fa.family.empty()) ir.font_family_assets.push_back(std::move(fa));
-                }
-                break;
-            }
-        }
+        parse_ir_font_family_assets(ir, parsed);
         if (parsed.hasObjectMember("diagnostics"))
             ir.diagnostics = parse_import_diagnostics(parsed["diagnostics"]);
         validate_blend_modes(ir.root, ir.diagnostics);

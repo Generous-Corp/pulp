@@ -421,6 +421,44 @@ inline bool is_discrete_param(const ParamInfo& info) {
     return info.kind != ParamKind::Continuous;
 }
 
+/// The plain value a host means by a normalized write. A host sees a
+/// continuous parameter as continuous (no step count), so its value is kept
+/// exactly: `range.step` quantizes what a UI control emits, not host
+/// automation, and plain-value formats (AU, CLAP) store the same exact value.
+/// Discrete parameters still snap to their steps.
+///
+/// Hosts hand normalized values as doubles. A linear range is mapped in
+/// double precision and rounded once, so a host's own 0 dB on a -60..24 range
+/// lands on 0.0f rather than a single-precision (or fused multiply-add) residue
+/// such as 1.4e-6 dB -- which is a gain of 1 + 1 ulp, and a failed null test.
+inline float value_from_host_normalized(const ParamInfo& info, double normalized) {
+    const ParamRange& range = info.range;
+    if (is_discrete_param(info))
+        return range.denormalize(static_cast<float>(normalized));
+    if (!range.is_linear()) {
+        ParamRange exact = range;
+        exact.step = 0.0f;
+        return exact.denormalize(static_cast<float>(normalized));
+    }
+    const double n = std::clamp(normalized, 0.0, 1.0);
+    const double plain = static_cast<double>(range.min) +
+                         n * (static_cast<double>(range.max) - static_cast<double>(range.min));
+    return std::clamp(static_cast<float>(plain), range.min, range.max);
+}
+
+/// The normalized value to report to a host for @p value: the inverse of
+/// value_from_host_normalized(), in double precision for a linear range, so a
+/// value the host reads back (a default, an output parameter) maps to exactly
+/// the same plain value when the host writes it again.
+inline double host_normalized_from_value(const ParamInfo& info, float value) {
+    const ParamRange& range = info.range;
+    if (!range.is_linear() || range.max == range.min)
+        return static_cast<double>(range.normalize(value));
+    const double span = static_cast<double>(range.max) - static_cast<double>(range.min);
+    return std::clamp((static_cast<double>(value) - static_cast<double>(range.min)) / span, 0.0,
+                      1.0);
+}
+
 inline bool is_boolean_param(const ParamInfo& info) {
     return info.kind == ParamKind::Toggle;
 }
@@ -567,8 +605,12 @@ inline bool is_automatable_param(const ParamInfo& info) {
 /// for free) and ARM (each load/store is individually atomic; reordering
 /// between independent parameters is harmless).
 class ParamValue {
-public:
-    using VersionedValue = std::uint64_t;
+  public:
+    /// Packed base identity: low 32 bits are float bits, high 32 bits are a
+    /// monotonic per-parameter revision. The revision is not StateStore's
+    /// global generation and never wraps.
+    using PackedIdentity = std::uint64_t;
+    using VersionedValue = PackedIdentity; // source compatibility alias
 
     ParamValue() = default;
 
@@ -595,33 +637,51 @@ public:
     /// Read the current base value (lock-free, relaxed ordering).
     float get() const { return unpack_value(value_.load(std::memory_order_relaxed)); }
 
-    /// Write a new base value (lock-free, relaxed ordering).
-    void set(float v) {
-        const auto current = value_.load(std::memory_order_relaxed);
-        value_.store(pack(v, unpack_generation(current)), std::memory_order_relaxed);
+    /// Write a new base value through the same bounded revision CAS as every
+    /// other base-value writer. A saturated revision is a terminal no-op.
+    void set(float v) noexcept {
+        (void)set_revisioned(v, 0, 8);
     }
 
     VersionedValue versioned_value() const {
         return value_.load(std::memory_order_relaxed);
     }
 
+    /// Highest StateStore generation claimed or committed by a write to this
+    /// parameter. It only ever rises. Ordinary generation-ordered writers
+    /// claim it before publishing so an older paused writer cannot overwrite
+    /// a newer one; conditional writers authorize on the packed identity and
+    /// only raise it, so they never revoke a pending ordinary writer's claim.
     std::uint64_t committed_generation() const {
         return committed_generation_.load(std::memory_order_relaxed);
     }
 
-    static VersionedValue make_versioned_value(float value, std::uint64_t generation) {
-        return pack(value, static_cast<std::uint32_t>(generation));
+    static VersionedValue make_versioned_value(float value, std::uint64_t revision) {
+        return pack(value, static_cast<std::uint32_t>(revision));
     }
 
     static float value_from_versioned(VersionedValue value) {
         return unpack_value(value);
     }
 
+    static std::uint32_t revision_from_versioned(VersionedValue value) {
+        return unpack_generation(value);
+    }
+
+    bool revision_available() const noexcept {
+        return revisions_available(1);
+    }
+
+    bool revisions_available(std::uint32_t writes) const noexcept {
+        const auto revision = revision_from_versioned(versioned_value());
+        return revision <= std::numeric_limits<std::uint32_t>::max() - writes;
+    }
+
+    /// Legacy generation-ordered writer retained for source compatibility.
+    /// StateStore uses set_packed_revisioned() instead; this split API is not
+    /// suitable for conditional authorization.
     bool set_versioned_if_newer(float value, std::uint64_t generation,
                                 std::uint32_t max_attempts) {
-        // The full generation remains StateStore-owned. The packed low bits
-        // are only an atomic ABA stamp for the bounded compare/apply window;
-        // they never replace or limit the public 64-bit authority.
         auto committed = committed_generation_.load(std::memory_order_relaxed);
         for (std::uint32_t attempt = 0; attempt < max_attempts; ++attempt) {
             if (committed >= generation)
@@ -631,19 +691,36 @@ public:
                     std::memory_order_relaxed))
                 break;
         }
-        if (committed_generation() != generation)
+        if (committed_generation_.load(std::memory_order_relaxed) != generation)
             return false;
-        auto current = value_.load(std::memory_order_relaxed);
-        const auto desired = pack(value, static_cast<std::uint32_t>(generation));
+        auto current = value_.load(std::memory_order_acquire);
         for (std::uint32_t attempt = 0; attempt < max_attempts; ++attempt) {
-            if (committed_generation() != generation)
+            if (committed_generation_.load(std::memory_order_relaxed) != generation)
                 return false;
-            if (value_.compare_exchange_strong(current, desired,
-                                               std::memory_order_relaxed,
-                                               std::memory_order_relaxed))
+            const auto revision = unpack_generation(current);
+            if (revision == std::numeric_limits<std::uint32_t>::max())
+                return false;
+            if (value_.compare_exchange_weak(current, pack(value, revision + 1),
+                                             std::memory_order_acq_rel, std::memory_order_acquire))
                 return true;
         }
         return false;
+    }
+
+    /// StateStore's ordinary base-value publication boundary.
+    ///
+    /// Ordinary writers are ordered by StateStore's global generation. Claim
+    /// that generation before publishing the packed value; a writer that was
+    /// paused after claiming an older generation must not overwrite a newer
+    /// writer that has already published. Conditional feedback deliberately
+    /// uses compare_exchange_packed() below instead, because its exact packed
+    /// identity is the authorization token and the global generation is only
+    /// diagnostic there.
+    bool set_packed_revisioned(float value, std::uint64_t generation,
+                               std::uint32_t max_attempts) noexcept {
+        if (!claim_generation(generation, max_attempts))
+            return false;
+        return publish_after_generation_claim(value, generation, max_attempts);
     }
 
     bool compare_exchange_versioned(VersionedValue& expected,
@@ -656,6 +733,24 @@ public:
         return value_.compare_exchange_strong(
             expected, pack(desired, static_cast<std::uint32_t>(generation)),
             std::memory_order_relaxed, std::memory_order_relaxed);
+    }
+
+    /// Conditional feedback publication boundary. Unlike the legacy
+    /// generation API above, this compares only the exact packed identity and
+    /// advances its per-parameter revision; the StateStore generation is
+    /// diagnostic metadata and cannot participate in a split check/write.
+    bool compare_exchange_packed(VersionedValue& expected, float desired,
+                                 std::uint64_t generation) {
+        const auto current_revision = unpack_generation(expected);
+        if (current_revision == std::numeric_limits<std::uint32_t>::max())
+            return false;
+        const auto replacement = pack(desired, current_revision + 1);
+        if (!value_.compare_exchange_strong(expected, replacement, std::memory_order_acq_rel,
+                                            std::memory_order_acquire))
+            return false;
+        expected = replacement;
+        raise_committed_generation(generation);
+        return true;
     }
 
     /// Read the modulated value: base + mod_offset.
@@ -741,7 +836,68 @@ public:
         set(range.denormalize(n));
     }
 
-private:
+  private:
+    friend class ParamValueTest;
+
+    bool claim_generation(std::uint64_t generation, std::uint32_t max_attempts) noexcept {
+        auto committed = committed_generation_.load(std::memory_order_relaxed);
+        for (std::uint32_t attempt = 0; attempt < max_attempts; ++attempt) {
+            if (committed >= generation)
+                return false;
+            if (committed_generation_.compare_exchange_strong(
+                    committed, generation, std::memory_order_acq_rel, std::memory_order_acquire))
+                return true;
+        }
+        return false;
+    }
+
+    bool publish_after_generation_claim(float value, std::uint64_t generation,
+                                        std::uint32_t max_attempts) noexcept {
+        if (committed_generation_.load(std::memory_order_acquire) != generation)
+            return false;
+        auto current = value_.load(std::memory_order_acquire);
+        for (std::uint32_t attempt = 0; attempt < max_attempts; ++attempt) {
+            if (committed_generation_.load(std::memory_order_acquire) != generation)
+                return false;
+            const auto revision = unpack_generation(current);
+            if (revision == std::numeric_limits<std::uint32_t>::max())
+                return false;
+            const auto replacement = pack(value, revision + 1);
+            if (value_.compare_exchange_weak(current, replacement, std::memory_order_acq_rel,
+                                             std::memory_order_acquire))
+                return true;
+        }
+        return false;
+    }
+
+    // Raise-only update. Lowering the mark would revoke the claim of an
+    // ordinary writer that claimed a newer generation and has not published
+    // yet, and would let an older writer claim past it.
+    void raise_committed_generation(std::uint64_t generation) noexcept {
+        auto committed = committed_generation_.load(std::memory_order_relaxed);
+        while (committed < generation &&
+               !committed_generation_.compare_exchange_weak(
+                   committed, generation, std::memory_order_acq_rel, std::memory_order_relaxed)) {
+        }
+    }
+
+    bool set_revisioned(float value, std::uint64_t generation,
+                        std::uint32_t max_attempts) noexcept {
+        auto current = value_.load(std::memory_order_acquire);
+        for (std::uint32_t attempt = 0; attempt < max_attempts; ++attempt) {
+            const auto revision = unpack_generation(current);
+            if (revision == std::numeric_limits<std::uint32_t>::max())
+                return false;
+            const auto replacement = pack(value, revision + 1);
+            if (value_.compare_exchange_weak(current, replacement, std::memory_order_acq_rel,
+                                             std::memory_order_acquire)) {
+                raise_committed_generation(generation);
+                return true;
+            }
+        }
+        return false;
+    }
+
     static VersionedValue pack(float value, std::uint32_t generation) {
         return (static_cast<VersionedValue>(generation) << 32) |
                std::bit_cast<std::uint32_t>(value);
@@ -756,16 +912,17 @@ private:
     }
 
     std::atomic<VersionedValue> value_{pack(0.0f, 0)};
-    // A ticket copied from StateStore's one generation authority. This is not
-    // independently advanced; it prevents an older reserved writer from
-    // publishing after a newer writer has claimed this parameter.
+    // Generation high-water mark. Ordinary writers claim it before publishing
+    // (claim_generation) and abort publication if a newer claim replaced
+    // theirs; every other writer may only raise it. The packed value CAS
+    // remains the publication boundary.
     std::atomic<std::uint64_t> committed_generation_{0};
     std::atomic<VersionedValue> mod_offset_{pack(0.0f, 0)};
     std::atomic<std::uint64_t> committed_mod_generation_{0};
     std::atomic<float> display_mod_{std::numeric_limits<float>::quiet_NaN()};
 
-    // The packed base value/generation stamp and modulation offset are read and
-    // written on the audio thread through relaxed atomics. Fail the build if a
+    // The packed base value/revision identity and modulation offset are read
+    // and written on the audio thread through lock-free atomics. Fail the build if a
     // target would implement either with a hidden mutex. See
     // docs/guides/dsp-threading.md "The three rules".
     static_assert(std::atomic<VersionedValue>::is_always_lock_free,

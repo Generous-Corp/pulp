@@ -6,6 +6,7 @@
 #include "css_color.hpp"
 
 #include <functional>
+#include <cmath>
 #include <string>
 #include <utility>
 
@@ -75,6 +76,27 @@ void BridgeRegistrars::register_widget_style_state_api(WidgetBridge& self) {
         }
         return choc::value::Value();
     });
+
+    // setCapturedPaintRect(id, left, top, right, bottom, devicePixelRatio)
+    // The CSS-px-snapped rect a browser capture recorded for this box's own
+    // paint, in page CSS px, at the capture's DPR. A box (and a theme part)
+    // then paints in that rect, as Chromium did, instead of in its fractional
+    // layout box; see View::self_paint_bounds(). A rect that is not finite and
+    // non-empty, or a DPR that is not positive, is ignored.
+    register_bridge_function(
+        api, "setCapturedPaintRect", [&self](choc::javascript::ArgumentList args) {
+            auto* v = self.widget(args.get<std::string>(0, ""));
+            const auto left = static_cast<float>(args.get<double>(1, 0.0));
+            const auto top = static_cast<float>(args.get<double>(2, 0.0));
+            const auto right = static_cast<float>(args.get<double>(3, 0.0));
+            const auto bottom = static_cast<float>(args.get<double>(4, 0.0));
+            const auto dpr = static_cast<float>(args.get<double>(5, 0.0));
+            if (v && std::isfinite(left) && std::isfinite(top) && std::isfinite(right) &&
+                std::isfinite(bottom) && std::isfinite(dpr) && dpr > 0.0f && right > left &&
+                bottom > top)
+                v->set_captured_box_paint_rect(left, top, right, bottom, dpr);
+            return choc::value::Value();
+        });
 
     // setEnabled(id, bool) - CSS :disabled equivalent.
     register_bridge_function(api, "setEnabled", [&self](choc::javascript::ArgumentList args) {

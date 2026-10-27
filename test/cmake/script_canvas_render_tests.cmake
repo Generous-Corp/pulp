@@ -25,6 +25,13 @@ pulp_add_test_suite(pulp-test-widget-animation GROUP pulp-test-group-script-view
 # Auto UI tests
 pulp_add_test_suite(pulp-test-auto-ui GROUP pulp-test-group-script-view
     LIBRARIES pulp::view)
+if(APPLE)
+    # The CoreGraphics-vs-Skia face parity case decodes both PNGs with ImageIO.
+    target_sources(pulp-test-group-script-view PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/png_rgba_decode_apple.cpp)
+    target_link_libraries(pulp-test-group-script-view PRIVATE
+        "-framework ImageIO" "-framework CoreGraphics" "-framework CoreFoundation")
+endif()
 
 # One executable for the pulp::format suites: HostQuirks, HostVersion and the
 # ViewBridge lifecycle.
@@ -69,9 +76,32 @@ catch_discover_tests(pulp-test-scripted-ui PROPERTIES LABELS slow)
 pulp_add_test_suite(pulp-test-scripted-ui-runtime-eval GROUP pulp-test-group-script-view
     LIBRARIES pulp::view)
 
+# Embedded-source sessions never touch the file watcher, so they stay in the
+# normal-speed lane rather than the `slow` file-watch suite above.
+pulp_add_test_suite(pulp-test-scripted-ui-embedded GROUP pulp-test-group-script-view
+    LIBRARIES pulp::view)
+
 # JS engine abstraction tests (shared across all backends)
 pulp_add_test_suite(pulp-test-js-engine GROUP pulp-test-group-script-view
     LIBRARIES pulp::view)
+
+# Build-time script bytecode: pulp_add_js_bytecode() end to end (generator,
+# embedding, registration) plus the blob checks.
+include("${CMAKE_SOURCE_DIR}/tools/cmake/PulpJsBytecode.cmake")
+set(_pulp_js_bytecode_fixture "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/js-bytecode/embedded_fixture.js")
+configure_file("${_pulp_js_bytecode_fixture}"
+    "${CMAKE_CURRENT_BINARY_DIR}/js-bytecode/embedded_bridge_fixture.js" COPYONLY)
+pulp_add_js_bytecode(js_bytecode_embed_fixture
+    SOURCES "${_pulp_js_bytecode_fixture}")
+pulp_add_js_bytecode(js_bytecode_embed_bridge_fixture
+    SOURCES "${CMAKE_CURRENT_BINARY_DIR}/js-bytecode/embedded_bridge_fixture.js"
+    NAMESPACE js_bytecode_embed_fixture
+    WIDGET_BRIDGE_SCRIPT)
+pulp_add_test_suite(pulp-test-js-bytecode-embed
+    LIBRARIES pulp::view js_bytecode_embed_fixture js_bytecode_embed_bridge_fixture
+    COMPILE_DEFINITIONS PULP_TEST_JS_BYTECODE_FIXTURE="${_pulp_js_bytecode_fixture}")
+pulp_test_data(pulp-test-js-bytecode-embed NO_DEFINE
+    PATHS test/fixtures/js-bytecode/embedded_fixture.js)
 
 # Cooperative-interrupt (runaway-abort) tests for the QuickJS backend
 pulp_add_test_suite(pulp-test-js-engine-interrupt GROUP pulp-test-group-script-view
@@ -152,12 +182,29 @@ if(PULP_HAS_SKIA AND NOT APPLE AND NOT ANDROID)
     if(_pulp_has_platform_pvh)
         add_executable(pulp-test-plugin-view-host-factory test_plugin_view_host_factory.cpp)
         target_link_libraries(pulp-test-plugin-view-host-factory PRIVATE pulp::view Catch2::Catch2WithMain)
+        set(_pulp_pvh_discovery_args)
         if(_pulp_pvh_x11)
             target_link_libraries(pulp-test-plugin-view-host-factory PRIVATE ${X11_LIBRARIES})
             target_include_directories(pulp-test-plugin-view-host-factory PRIVATE ${X11_INCLUDE_DIR})
             target_compile_definitions(pulp-test-plugin-view-host-factory PRIVATE PULP_TEST_HAS_X11=1)
+            # With xvfb-run available, every case runs on its own virtual
+            # display, so the X11 cases (XDND handshake, host-driven resize,
+            # stale resize echo) execute in CI instead of skipping, and a
+            # missing display FAILS them (PULP_TEST_REQUIRE_X11_DISPLAY).
+            # xvfb-run -a picks a free display number but races when several
+            # start at once, hence the lock. A case that waits on a grabbed
+            # server fails at the timeout instead of hanging the suite.
+            find_program(PULP_XVFB_RUN xvfb-run)
+            if(PULP_XVFB_RUN)
+                set_property(TARGET pulp-test-plugin-view-host-factory PROPERTY
+                    CROSSCOMPILING_EMULATOR "${PULP_XVFB_RUN};-a")
+                set(_pulp_pvh_discovery_args PROPERTIES
+                    RESOURCE_LOCK pulp_xvfb
+                    TIMEOUT 120
+                    ENVIRONMENT "PULP_TEST_REQUIRE_X11_DISPLAY=1")
+            endif()
         endif()
-        catch_discover_tests(pulp-test-plugin-view-host-factory)
+        catch_discover_tests(pulp-test-plugin-view-host-factory ${_pulp_pvh_discovery_args})
     endif()
 endif()
 
@@ -228,9 +275,13 @@ pulp_add_test_suite(pulp-test-canvas-fonts GROUP pulp-test-group-canvas
         "PULP_TEST_FONT_PATH=\"${CMAKE_SOURCE_DIR}/external/fonts/Inter-Regular.ttf\""
         # Deterministic variable font (wght axis 300-800) for the variable-font
         # weight-instancing regression tests. Test-only; not in bundled_blobs().
-        "PULP_TEST_VARIABLE_FONT_PATH=\"${CMAKE_SOURCE_DIR}/external/fonts/FunnelDisplay-VariableFont_wght.ttf\"")
+        "PULP_TEST_VARIABLE_FONT_PATH=\"${CMAKE_SOURCE_DIR}/external/fonts/FunnelDisplay-VariableFont_wght.ttf\""
+        # Self-authored opsz axis + AAT trak table with analytic expectations;
+        # regenerate with test/fixtures/fonts/make_opsz_trak_font.py.
+        "PULP_TEST_OPSZ_TRAK_FONT_PATH=\"${CMAKE_SOURCE_DIR}/test/fixtures/fonts/pulp-test-opsz-trak.ttf\"")
 pulp_test_data(pulp-test-canvas-fonts NO_DEFINE
-    PATHS external/fonts/Inter-Regular.ttf external/fonts/FunnelDisplay-VariableFont_wght.ttf)
+    PATHS external/fonts/Inter-Regular.ttf external/fonts/FunnelDisplay-VariableFont_wght.ttf
+          test/fixtures/fonts/pulp-test-opsz-trak.ttf)
 
 # CSS gradient strings judged by the pixels they produce. Every defect this
 # covers was a value the parser ACCEPTED and painted wrong, so a string
@@ -253,6 +304,32 @@ endif()
 if(PULP_HAS_SKIA)
     pulp_add_test_suite(pulp-test-css-gradient-geometry GROUP pulp-test-group-script-view
         LIBRARIES pulp::view)
+endif()
+
+# backdrop-filter under opacity against Chrome's own render of the same tree.
+# The expected pixels are read off Chromium by
+# tools/import-validation/chrome_backdrop_opacity_oracle.py.
+if(PULP_HAS_SKIA)
+    pulp_add_test_suite(pulp-test-css-backdrop-opacity GROUP pulp-test-group-script-view
+        SOURCES test_css_backdrop_opacity.cpp harness/rt_allocation_probe.cpp
+        LIBRARIES pulp::view)
+endif()
+
+# CSS gradients are dithered as Chromium dithers them. Measures rows that are
+# not one colour, which an undithered vertical gradient never has; the
+# Graphite counterpart is pulp-test-css-gradient-dither-gpu.
+if(PULP_HAS_SKIA)
+    pulp_add_test_suite(pulp-test-css-gradient-dither GROUP pulp-test-group-script-view
+        LIBRARIES pulp::view pulp::canvas)
+endif()
+
+# CSS `<color-interpolation-method>` (`in oklab`, hue methods): parsing, the
+# view-to-canvas handoff, and Skia raster / CoreGraphics midpoints held to
+# Chrome's, read by chrome_gradient_oracle.py --colors. The Graphite
+# counterpart is pulp-test-css-gradient-interpolation-gpu.
+if(PULP_HAS_SKIA)
+    pulp_add_test_suite(pulp-test-css-gradient-interpolation GROUP pulp-test-group-script-view
+        LIBRARIES pulp::view pulp::canvas)
 endif()
 
 # CG-degraded gradient + pattern cluster. Apple-only TU, registered only on
@@ -385,6 +462,12 @@ pulp_add_test_suite(pulp-test-view GROUP pulp-test-group-script-view
 # resolution, reflow-on-bounds-change, view border stroke + outline +
 # box-shadow honoring effective_corner_radius.
 pulp_add_test_suite(pulp-test-view-corner-radius GROUP pulp-test-group-script-view
+    LIBRARIES pulp::view)
+
+# View border paint, asserted against pixel spans and shades read off
+# Chrome's render: inside-the-box placement, per-side widths and colours,
+# dash cadence, and the shaded (inset/outset/groove/ridge) and double styles.
+pulp_add_test_suite(pulp-test-view-border-render GROUP pulp-test-group-script-view
     LIBRARIES pulp::view)
 
 # View z-index + overflow tests extracted from test_view.cpp. Covers

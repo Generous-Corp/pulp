@@ -462,6 +462,20 @@ A good answer reads like this:
 > per editor open) and cache the compiled JS module. Re-opens should drop from
 > ~2.4 s to well under 500 ms.
 
+### Instantiation and first editor open: the `lifecycle` category
+
+The format adapters wrap host lifecycle calls in `lifecycle` spans:
+`vst3_initialize`, `vst3_setup_processing`, `vst3_set_active`,
+`vst3_create_view`, `vst3_editor_attached`, `clap_init`, `clap_activate` and
+`au_v2_initialize`. Capture with `--categories lifecycle,layout,text` to split
+"slow to instantiate" from "slow to open". Two things these spans showed that
+are easy to misread. The adapter phases themselves are tens of microseconds; a
+slow instantiation is almost always module load (dyld) or a static
+initializer, outside every span. And the text stack's one-time cost (building
+the platform font manager, about 15-18 ms for CoreText) lands in the first
+layout after `vst3_editor_attached` returns, so it does not show up as part of
+attach.
+
 ### Editor-open recipe for a scripted / imported plug-in editor
 
 Measure the open the way the host does it, and measure the *full UI drawn*,
@@ -496,7 +510,9 @@ WHERE s.dur > 2e6 AND s.depth <= r.depth + 3 ORDER BY s.ts;
 Spans Pulp emits on this path: `scripted_ui_document_load`,
 `scripted_ui_probe_realm` (should be ABSENT on a first load — if present the
 document is evaluated twice), `scripted_ui_live_realm`, `script_compile` vs
-`script_bytecode_read` (a warm open should read, not compile),
+`script_bytecode_read` (a warm open should read, not compile; with build-time
+bytecode a fresh process shows `script_embedded_lookup` + `script_bytecode_read`
+instead of `script_precompile`),
 `script_execute`, `runtime_import_parse` / `runtime_import_fonts` /
 `runtime_import_payload_eval` / `runtime_import_inline_eval`,
 `frame_callback_pump` → `raf_flush` (the post-mount settle).
@@ -810,6 +826,14 @@ plug-in loads but produces no file, distinguish an untraced installed SDK from
 a session that merely has not flushed before changing instrumentation.
 
 ### The auto-flush timer is owned, joined, and generation-tagged
+
+An access violation at traced Windows plug-in insertion can occur before a
+capture exists. In the timeout arm call, read the ownership token's generation
+into a local **before** passing a callback that move-captures that token:
+sibling argument evaluation can otherwise move it before the dereference.
+Exercise this path with `PULP_TRACING=ON`, a positive timeout, an emitted marker,
+and a successfully auto-flushed trace; the default tracing-OFF tests cannot
+validate it. Bind the repaired loaded PE hash before comparing startup runs.
 
 `PULP_TRACE_SECONDS` used to arm a DETACHED `std::thread` that slept and
 then called back into process-global tracing state. Two consequences you

@@ -205,7 +205,7 @@ configure = "tools/ci/require_build_generator.sh build Ninja && tools/ci/build-d
 # here and run_changed_surface_tests.py writes it for a bounded plan. A failed
 # recording only warns: the run's verdict is ctest's.
 reuse_record = true
-test      = "PULP_BUILD_CLASS=background python3 tools/ci/build_dir_lock.py --build-dir build -- python3 tools/ci/lane_reuse_record.py test --build-dir build -- tools/ci/governed-build.sh ctest --test-dir build --output-on-failure --repeat until-pass:2 --exclude-regex AudioWorkgroup --label-exclude \"validation|slow|performance|bench|quality-lab\""
+test      = "PULP_BUILD_CLASS=background python3 tools/ci/build_dir_lock.py --build-dir build -- python3 tools/ci/lane_reuse_record.py test --build-dir build -- tools/ci/governed-build.sh ctest --test-dir build --output-on-failure --repeat until-pass:2 --exclude-regex AudioWorkgroup --label-exclude \"validation|slow|performance|bench|quality-lab|gpu-proof\""
 
 [validation.gates]
 # Layer-3 authoritative gates — same scripts CI runs via
@@ -813,3 +813,75 @@ attribution = "🤖 Generated with [Claude Code](https://claude.com/claude-code)
 # who reviewed. Shipyard's server-side `review-verdict` reads only this list
 # (never a host file), and refuses every App approval here if it is missing.
 reviewer_signers = ["pulp-review", "infra-review2"]
+# A PR changing a path that matches one of these never carries an APPROVE to a
+# new head: it needs a verdict naming its exact head. Setting the key REPLACES
+# Shipyard's DEFAULT_CARRY_EXCLUDED_PATHS rather than extending it, so this
+# restates every default except `.shipyard/**`. That default would also stop
+# carry for PRs that only regenerate .shipyard/changed-surface-families.toml.
+# The policy files under .shipyard stay excluded by name. Keep the rest equal
+# to Shipyard's default (scripts/ghapp_queue_arm_guard.py).
+carry_excluded_paths = [
+    ".github/workflows/**",
+    ".agents/contract.toml",
+    ".shipyard/config.toml",
+    ".shipyard/ci-profiles/**",
+    ".shipyard/vm-image*.toml",
+    "tools/ci/**",
+    "scripts/ghapp*",
+    "src/head_approval*",
+    "src/head_approval/**",
+    "src/queue_arm_gate*",
+    "src/auto_arm*",
+    "src/auto_arm/**",
+    "src/ghapp_guards*",
+    "src/app/ship_cmd/auto_arm*",
+    "src/app/merge_steward_cmd/native_arm*",
+    "release-please-config.json",
+    ".release-please-manifest.json",
+    "**/*codesign*",
+    "**/*notariz*",
+    "**/*signing*",
+]
+
+[base_health]
+# `shipyard base-health --act` records "would jump PR #n" once per poisoned
+# episode (tools/ci/base_poison_detector.py names the fix) and changes nothing.
+# `on` re-enqueues the fix with `jump: true`; it stays off until Shipyard checks
+# a trusted approval on the head it enqueues and survives a failed re-enqueue.
+auto_jump = "dry-run"
+
+[train]
+# Shipyard's merge train, read-only (phase 1): `shipyard train status
+# [--record]` and `shipyard train metrics` report each open PR's stage and
+# the queue's throughput. With `mode` unset ("off") nothing forms, arms,
+# enqueues or merges; rollups need `mode = "rollup"` (PR #11159).
+enabled = true
+mode = "rollup"
+landing = "merge-queue"
+max_members = 4
+exclude_paths = [
+    ".github/workflows/**",
+    "tools/ci/**",
+    "tools/install-shipyard.sh",
+    "tools/scripts/queue_*",
+    "tools/scripts/test_queue_*",
+    "tools/scripts/fixtures/queue_*",
+    "tools/shipyard.toml",
+    "tools/toolchain/**",
+    "**/*codesign*",
+    "**/*signing*",
+    "**/*notariz*",
+    "**/*notary*",
+    "tools/scripts/sign-notarize-*",
+]
+hot_files = [
+    "test/ctest_script_inputs.json",
+    "**/SKILL.md",
+    ".claude-plugin/**",
+    "docs/status/*capabilit*.json",
+    "tools/agent-capabilities/**",
+    "tools/scripts/agent_capability_manifest.py",
+    ".shipyard/changed-surface-families.toml",
+    "tools/scripts/text_encoding_baseline.json",
+]
+require_counted_approval = true

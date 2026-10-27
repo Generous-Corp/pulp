@@ -34,6 +34,7 @@ public:
         d.supports_cpu_fallback = true; return d;
     }
     bool prepare() override { return true; }
+    bool cpu_fallback_prepared() const noexcept override { return true; }
     void process_block(const pulp::audio::BufferView<const float>& in,
                        pulp::audio::BufferView<float>& out, uint32_t n) override {
         for (uint32_t i = 0; i < n; ++i) out.channel_ptr(0)[i] = in.channel_ptr(0)[i];
@@ -90,6 +91,7 @@ public:
                 .supports_cpu_fallback = true};
     }
     bool prepare() override { return true; }
+    bool cpu_fallback_prepared() const noexcept override { return true; }
     void process_block(const BufferView<const float>& in, BufferView<float>& out,
                        std::uint32_t n) override {
         ++gpu_calls;

@@ -13,7 +13,10 @@ const std::vector<RegisteredModel>& registered_models() {
         .task_tags = {"music", "excerpt_find"},
         .size_bytes = 2523293286ULL,
         .download_url = "https://huggingface.co/lukewys/laion_clap/resolve/main/music.pt",
-        .sha256 = "",  // Populated after first verified download
+        // No digest is recorded yet, so install_model() refuses this entry until the
+        // caller passes allow_unverified (a CLI/UI exposes that as --unverified).
+        // Record the digest of a verified download here to lift that requirement.
+        .sha256 = "",
         .auto_downloadable = true,
     }};
     return models;

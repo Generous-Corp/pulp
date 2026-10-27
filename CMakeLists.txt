@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.985.0
+    VERSION 1.25.1
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -365,6 +365,12 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/Ccache.cmake)
 # ship; the properties those targets check are also driven by deterministic
 # replays in the normal test suite, which need no special toolchain.
 option(PULP_ENABLE_FUZZING "Build libFuzzer targets (requires a libFuzzer runtime)" OFF)
+# The -fsanitize list every libFuzzer target compiles and links with. The CI
+# lane keeps ASan on; a host whose ASan runtime cannot start (Homebrew LLVM on
+# a macOS release its compiler-rt predates deadlocks in AsanInitFromRtl before
+# main) can still build and run the targets with "fuzzer" alone.
+set(PULP_FUZZ_SANITIZERS "fuzzer,address" CACHE STRING
+    "Comma-separated -fsanitize= list for libFuzzer targets")
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/Sanitizers.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInstrumentation.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAAX.cmake)
@@ -401,6 +407,23 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpTracing.cmake)
 # static-library dependency even though the eventual cached value was ON.
 option(PULP_ENABLE_JS
     "Build the JS scripting + web-compat layer (pulp::view-script)" ON)
+# The shell exec/execAsync JS bridge hands a scripted UI a /bin/sh. It is a
+# developer-only affordance, so it follows PULP_BUILD_TESTS: release and SDK
+# builds (tests OFF) compile the registrar out of pulp-view-script entirely, and
+# those lanes also pass OFF explicitly. core/view/cmake/PulpViewJsEngines.cmake
+# turns the option into the PULP_BRIDGE_EXEC_ENABLED compile definition;
+# widget_bridge.cpp refuses to build without it, so a missing define fails loudly.
+option(PULP_DEV_BRIDGE_EXEC
+    "Compile the developer-only shell exec/execAsync JS bridge into pulp-view-script"
+    ${PULP_BUILD_TESTS})
+# Development-only paths: a dev checkout (tests on) compiles in the on-disk
+# UI_SCRIPT path so a hot-reloading editor reads the file being edited; a
+# tests-off or SDK build carries only the embedded script bytes. An installed-SDK
+# consumer gets the same option from PulpUiAssets.cmake (default OFF; the CLI's
+# configure turns it on, and `pulp ship` refuses a build with it on). The
+# release profile module owns this option once it lands.
+option(PULP_DEV_BUILD
+    "Compile development-only paths (on-disk ui.js override) in" ${PULP_BUILD_TESTS})
 add_subdirectory(core/platform)
 add_subdirectory(core/simd)
 add_subdirectory(core/runtime)
@@ -445,6 +468,15 @@ endif()
 # enabled. The transport itself is GPU-agnostic and builds regardless.
 add_subdirectory(core/gpu_audio)
 add_subdirectory(core/view)
+# The lite editor stack's replacement objects (see PulpLiteEditorObjects.cmake).
+# Apple only: the lite TextShaper measures through CoreText.
+if(APPLE AND NOT IOS AND PULP_HAS_SKIA AND TARGET pulp-canvas AND TARGET pulp-view-core)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpLiteEditorObjects.cmake")
+    _pulp_add_lite_editor_objects(pulp-canvas-lite-objects HOME pulp-canvas
+        SOURCES core/canvas/src/text_shaper.cpp core/canvas/src/font_resolver.cpp)
+    _pulp_add_lite_editor_objects(pulp-view-lite-objects HOME pulp-view-core
+        SOURCES core/view/src/canvas_widget.cpp core/view/src/asset_manager.cpp)
+endif()
 # The arranger rung sits above both the editor kernel and the view stack, so it
 # is added after core/view rather than beside core/timeline_editor.
 add_subdirectory(core/timeline_view)
@@ -612,7 +644,12 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
                 --build-dir "${CMAKE_BINARY_DIR}"
                 --unit-manifest "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json"
                 --output "${CMAKE_BINARY_DIR}/vellum-closure.json")
+        # The boundary test writes vellum-closure.json. The gate and the
+        # Pulp-kept check grade that file, so they require it as a fixture:
+        # DEPENDS only orders tests, and a filtered run would grade whatever
+        # manifest an earlier configure left behind.
         set_tests_properties(pulp.vellum-closure-boundary PROPERTIES
+            FIXTURES_SETUP pulp-vellum-closure-manifest
             LABELS "pr")
         add_test(NAME pulp.vellum-closure-gate
             COMMAND "${Python3_EXECUTABLE}"
@@ -625,7 +662,7 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
                 --build-dir "${CMAKE_BINARY_DIR}"
                 --unit-manifest "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json")
         set_tests_properties(pulp.vellum-closure-gate PROPERTIES
-            DEPENDS pulp.vellum-closure-boundary
+            FIXTURES_REQUIRED pulp-vellum-closure-manifest
             LABELS "pr")
         add_test(NAME pulp.vellum-view-core-pulp-kept
             COMMAND "${Python3_EXECUTABLE}"
@@ -634,7 +671,7 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
                 --unit-manifest "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json"
                 --source-root "${CMAKE_CURRENT_SOURCE_DIR}")
         set_tests_properties(pulp.vellum-view-core-pulp-kept PROPERTIES
-            DEPENDS pulp.vellum-closure-boundary
+            FIXTURES_REQUIRED pulp-vellum-closure-manifest
             LABELS "pr")
         # The units exported so far, and render, hold no forbidden mirror
         # edge in any file, comments included; export refuses one.
@@ -645,7 +682,7 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
                 --source-root "${CMAKE_CURRENT_SOURCE_DIR}"
                 --build-dir "${CMAKE_BINARY_DIR}"
                 --unit-manifest "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json"
-                --unit foundation --unit gpu-device-api --unit canvas --unit render-2d --unit render-3d --unit state-core)
+                --unit foundation --unit gpu-device-api --unit canvas --unit render-2d --unit render-3d --unit state-core --unit design-import)
         set_tests_properties(pulp.vellum-closure-export-mentions PROPERTIES
             DEPENDS pulp.vellum-closure-boundary
             LABELS "pr")
@@ -710,7 +747,7 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
     add_test(NAME pulp.vellum-closure-external-input-negative
         COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/confirm_failure.sh"
             --file "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_external_input_fixture.json"
-            --break "perl -0pi -e 's/https:\\/\\/github.com\\/danielraffel\\/choc.git/build-tree/; s/df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60/unresolved/'"
+            --break "perl -0pi -e 's/https:\\/\\/github.com\\/danielraffel\\/choc.git/build-tree/; s/b586f33d1c9e8bee98c2b420a5b20bf525c3c7be/unresolved/'"
             --no-build
             --test "${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py gate --manifest ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_external_input_fixture.json")
     set_tests_properties(pulp.vellum-closure-external-input-negative PROPERTIES
@@ -731,11 +768,11 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
     set_tests_properties(pulp.vellum-closure-policy-selftest PROPERTIES
         LABELS "pr")
     include(FetchContent)
-    pulp_register_fetchcontent_source(Catch2 DIR catch2 REF v3.7.1)
+    pulp_register_fetchcontent_source(Catch2 DIR catch2 REF v3.16.1)
     FetchContent_Declare(
         Catch2
         GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-        GIT_TAG v3.7.1
+        GIT_TAG v3.16.1
     )
     FetchContent_MakeAvailable(Catch2)
     list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
@@ -865,6 +902,9 @@ if(PULP_BUILD_TESTS)
     add_subdirectory(test/fixtures/native_ui_link_floor)
     add_subdirectory(test/fixtures/no_editor_link_floor)
     add_subdirectory(test/fixtures/data_display_editor)
+    add_subdirectory(test/fixtures/linux_plugin_isolation)
+    add_subdirectory(test/fixtures/linux_reload_host)
+    add_subdirectory(test/fixtures/ui_script_plugin)
 endif()
 
 # ── CPU-only GPU-probe contract model (desktop tooling) ───────────────────

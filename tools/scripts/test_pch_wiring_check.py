@@ -35,6 +35,7 @@ def ninja_tree(
     headless_flags: str = f"-O3 -std=gnu++23 {_use(PCH23)}",
     noexc_flags: str = "-O3 -std=gnu++20 -fno-exceptions",
     sdl_flags: str = "-O3 -std=gnu11",
+    carrier20_flags: str = "-O3 -std=gnu++20",
     carrier20_defines: str = "",
     carrier23_defines: str = "",
     carrier_launcher: str = CCACHE_ISOLATED,
@@ -43,7 +44,7 @@ def ninja_tree(
         "rule CXX_COMPILER__x",
         "  command = c++ $FLAGS $DEFINES -c $in -o $out",
         f"build {PCH20}.pch: CXX_COMPILER__pulp-test-pch-cxx20_Release /b/pulp-test-pch/cxx20_stub.cpp",
-        "  FLAGS = -O3 -std=gnu++20 -Xclang -fno-pch-timestamp -Xclang -emit-pch -x c++-header",
+        f"  FLAGS = {carrier20_flags} -Xclang -fno-pch-timestamp -Xclang -emit-pch -x c++-header",
         f"  DEFINES = {carrier20_defines}",
         f"  LAUNCHER = {carrier_launcher}",
         f"build {PCH23}.pch: CXX_COMPILER__pulp-test-pch-cxx23_Release /b/pulp-test-pch/cxx23_stub.cpp",
@@ -138,6 +139,20 @@ class PchWiringCheckTest(unittest.TestCase):
         self._write("Ninja", ninja_tree(biquad_flags=f"-O3 -std=c++20 {_use(PCH20)}"), LEDGER_ON)
         problems = pwc.check(self.build, True, EXPECT)
         self.assertTrue(any("-std" in p and "pulp-test-biquad" in p for p in problems), problems)
+
+    def test_pic_carrier_with_pie_consumer_fails(self) -> None:
+        # A static carrier gets -fPIC, an executable consumer -fPIE; Linux clang
+        # rejects that PCH ("is pie differs"), Apple clang does not.
+        self._write("Ninja", ninja_tree(carrier20_flags="-O3 -std=gnu++20 -fPIC",
+                                        biquad_flags=f"-O3 -std=gnu++20 -fPIE {_use(PCH20)}"), LEDGER_ON)
+        problems = pwc.check(self.build, True, EXPECT)
+        self.assertTrue(any("pulp-test-biquad" in p and "-fPIE differs" in p and "-fPIC" in p
+                            for p in problems), problems)
+
+    def test_matching_pie_carrier_and_consumer_pass(self) -> None:
+        self._write("Ninja", ninja_tree(carrier20_flags="-O3 -std=gnu++20 -fPIE",
+                                        biquad_flags=f"-O3 -std=gnu++20 -fPIE {_use(PCH20)}"), LEDGER_ON)
+        self.assertEqual(pwc.check(self.build, True, EXPECT), [])
 
     def test_carrier_define_missing_on_consumer_fails(self) -> None:
         self._write("Ninja", ninja_tree(carrier20_defines="-DCARRIER_ONLY=1"), LEDGER_ON)

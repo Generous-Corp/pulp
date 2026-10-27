@@ -60,7 +60,8 @@ void BridgeRegistrars::register_canvas2d_api(WidgetBridge& self) {
         c->set_native_gpu_texture_provider([&self, id]() {
             return self.describe_native_canvas_frame(id);
         });
-        self.widgets_[id] = c.get(); self.resolve_parent(pid)->add_child(std::move(c));
+        self.widgets_[id] = c.get();
+        self.attach_created(id, pid, std::move(c));
         return choc::value::createString(id);
     });
 
@@ -1191,21 +1192,20 @@ void BridgeRegistrars::register_canvas2d_api(WidgetBridge& self) {
 
     // Canvas drawImage(canvasId, imagePath, dx, dy, dw, dh)
     //   or 9-arg form: canvasDrawImage(id, path, dx,dy,dw,dh, sx,sy,sw,sh)
-    // When args[6..9] are present the JS shim is using the
-    // source-rect 9-arg form. Bridge stashes it in x2/y2/x3/y3 + sets
-    // has_source_rect; the canvas_widget renderer routes through the
-    // _rect overload so the source sub-rectangle lands on the dst rect.
+    // The 9-arg source rect (args[6..9]) lands in x2/y2/x3/y3 with has_source_rect,
+    // and the renderer's _rect overload maps that sub-rectangle onto the dst rect.
     register_bridge_function(api, "canvasDrawImage", [&self](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(self.widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::draw_image;
-            cmd.text = args.get<std::string>(1, ""); // image source path
+            // Paths go through resolve_script_relative(); a refusal paints the placeholder.
+            cmd.text = args.get<std::string>(1, "");
+            if (cmd.text.rfind("data:", 0) != 0)
+                cmd.text = self.resolve_script_relative(cmd.text);
             cmd.x = (float)args.get<double>(2, 0);
             cmd.y = (float)args.get<double>(3, 0);
             cmd.w = (float)args.get<double>(4, 0);
             cmd.h = (float)args.get<double>(5, 0);
-            // 9-arg drawImage source rect — JS appends sx,sy,sw,sh
-            // when the caller used the 9-arg form. choc reports
-            // missing args as defaults, so we gate on numArgs >= 10.
+            // 9-arg form appends sx,sy,sw,sh; choc defaults missing args.
             if (args.numArgs >= 10) {
                 cmd.x2 = (float)args.get<double>(6, 0);
                 cmd.y2 = (float)args.get<double>(7, 0);

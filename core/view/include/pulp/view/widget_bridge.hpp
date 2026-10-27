@@ -24,6 +24,7 @@ namespace pulp::view { struct ClaudeBundle; }
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <functional>
 #include <limits>
 #include <string>
@@ -163,6 +164,48 @@ public:
     }
     const std::vector<std::filesystem::path>& asset_roots() const noexcept { return asset_roots_; }
 
+    /// One file compiled into the plug-in beside its editor script. `name` is
+    /// the script-relative path with forward slashes (`assets/knob.png`); the
+    /// bytes live for the process (a static array in the plug-in image).
+    struct EmbeddedAsset {
+        std::string name;
+        const unsigned char* data = nullptr;
+        std::size_t size = 0;
+    };
+
+    /// Install the files embedded beside the script. For an editor whose
+    /// script was compiled into the image, these stand in for the script's
+    /// directory: `__loadAssetSync__`, `setImageSource`, sprite strips and
+    /// fonts resolve a relative path here first, before the asset roots.
+    void set_embedded_assets(std::vector<EmbeddedAsset> assets);
+    const std::vector<EmbeddedAsset>& embedded_assets() const noexcept {
+        return embedded_assets_;
+    }
+
+    /// The embedded file a script-relative `path` names, or nullptr. A leading
+    /// `./` is ignored; `..` segments, absolute paths (including a leading
+    /// `/`) and URIs (including `file://`) never match, so an embedded file
+    /// answers only names resolve_script_relative() treats as relative.
+    /// Matching is exact on the normalized name.
+    const EmbeddedAsset* embedded_asset(std::string_view path) const noexcept;
+    /// `data:<mime>;base64,...` for an embedded file, which is how an image
+    /// widget draws bytes that have no file behind them.
+    std::string embedded_asset_data_uri(const EmbeddedAsset& asset) const;
+
+    /// Identity of this bridge's persisted stores (widget storage, style
+    /// presets). A path-backed script is keyed by its directory; an embedded
+    /// script has no directory, so its host names it here (the plug-in's
+    /// bundle id and script name) and the stores keep working across hosts.
+    void set_storage_identity(std::string identity) {
+        storage_identity_ = std::move(identity);
+    }
+    /// The identity the persisted stores hash: `set_storage_identity()`'s value
+    /// when set, else the script base directory, else empty (no store).
+    std::string storage_identity() const;
+    /// Process-local identity for declarations owned by this bridge lifetime.
+    /// Unlike storage_identity(), this must never be shared by two bridges.
+    std::string font_weight_scope() const;
+
     /// Preferred directory for resolving RELATIVE filesystem paths handed to
     /// path-taking bridge APIs. Imported code emits `assets/<file>` beside its
     /// generated script; a host may instead keep the script in a scratch file
@@ -176,10 +219,38 @@ public:
     }
     const std::filesystem::path& script_base_dir() const noexcept { return script_base_dir_; }
 
-    /// Resolve an existing relative file against the script directory or a
-    /// reviewed asset root. Asset-root candidates are canonicalized and must
-    /// remain inside their root so symlinks and `..` cannot escape it.
-    /// Absolute paths, URIs, and misses pass through unchanged.
+    /// Whether path-taking bridge APIs (setImageSource, registerFont,
+    /// loadFont, sprite strips, __loadAssetSync__) may open a file that lies
+    /// outside the script directory and the reviewed asset roots. Off by
+    /// default: an absolute path or `file://` URL is refused unless it
+    /// resolves inside one of those roots, and `__loadAssetSync__` never falls
+    /// back to a raw filesystem read. A desktop tool that renders its own
+    /// import output, or an app whose UI legitimately previews user-picked
+    /// files, opts in; a DAW-hosted editor never should. The Filesystem
+    /// capability is still required for the API group to exist at all.
+    void set_allow_unreviewed_file_paths(bool allow) noexcept {
+        allow_unreviewed_file_paths_ = allow;
+    }
+    bool allow_unreviewed_file_paths() const noexcept {
+        return allow_unreviewed_file_paths_;
+    }
+
+    /// Whether a script may open `path`, an absolute filesystem path. True
+    /// when the realm holds Filesystem AND either unreviewed paths are allowed
+    /// or the canonicalized path stays inside the script directory or a
+    /// reviewed asset root. Pure; opens nothing.
+    bool permits_file_path(const std::filesystem::path& path) const;
+
+    /// Resolve a file a script named against the script directory or a
+    /// reviewed asset root, for a caller that will open the result. A
+    /// `file://` URL is judged as the path it names. A relative path resolves
+    /// to an existing file inside the script directory or a root; candidates
+    /// are canonicalized and must remain inside their root so symlinks and
+    /// `..` cannot escape it. An absolute path is returned unchanged only when
+    /// permits_file_path() allows it. A file above AssetManager's per-file
+    /// ceiling, any other URI scheme, and a relative name found under no root
+    /// all resolve to the empty string, which the caller treats as a refusal;
+    /// with allow_unreviewed_file_paths() the last two are returned unchanged.
     std::string resolve_script_relative(const std::string& path) const;
 
     /// load_script overload that retains a script identifier. `script_id` is
@@ -456,6 +527,20 @@ private:
     std::unique_ptr<NativeGpuBridgeState> native_gpu_bridge_state_;
     std::vector<std::filesystem::path> asset_roots_;
     std::filesystem::path script_base_dir_;
+    bool allow_unreviewed_file_paths_ = false;
+    std::vector<EmbeddedAsset> embedded_assets_;
+    std::string storage_identity_;
+
+    /// Per-bridge persisted-store directories (widget storage, style presets),
+    /// resolved once per storage identity by the storage registrars so a UI
+    /// that mirrors every control change into storage never re-walks the
+    /// directory tree. Reset whenever the identity it was resolved for changes.
+    struct PrivateStoreDirs {
+        std::string identity;
+        std::optional<std::filesystem::path> widget_storage;
+        std::optional<std::filesystem::path> style_presets;
+    };
+    PrivateStoreDirs private_store_dirs_;
 
     // Per-id cache entry: the resolved View plus the tree structure generation
     // at which that View was last CONFIRMED to live under `root_`. A fresh entry
@@ -847,7 +932,16 @@ private:
 #endif
 
     // Resolve parent: returns view for parentId, or &root_ if empty
-    View* resolve_parent(const std::string& parent_id);
+    // The view a script named as a parent, or the root for an unknown id. With
+    // `child`, a parent that is the child itself or one of its descendants also
+    // resolves to the root: a script registers a widget under its id before
+    // attaching it, so naming that id as the parent must not build a cycle.
+    View* resolve_parent(const std::string& parent_id, const View* child = nullptr);
+    // Attaches a freshly created widget already registered under `id`. A
+    // refused attach drops that registration before the view is destroyed,
+    // so the registry never holds a pointer to a view the tree rejected.
+    bool attach_created(const std::string& id, const std::string& parent_id,
+                        std::unique_ptr<View> view);
 
     // Install on_change/on_toggle callbacks that dispatch to JS
     void wire_callbacks(const std::string& id, View* w);

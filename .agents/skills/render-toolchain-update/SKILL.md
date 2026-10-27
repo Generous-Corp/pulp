@@ -11,6 +11,13 @@ description: |
 
 # Update the matched render toolchain
 
+The desktop source fallback in `tools/build-skia.sh` publishes only into a
+real checkout-owned `external/skia-build` directory. It refuses a symlink into
+the shared immutable cache and removes fetcher asset/generation receipts after
+publishing source-built bytes; those receipts authenticate release archives,
+not source builds. Keep the source-fallback negative controls in
+`tools/scripts/test_build_skia_source_pin.py` green when changing this path.
+
 This procedure expects `ghapp` and `python3`, and operates on
 `tools/deps/manifest.json`, `tools/scripts/fetch_skia_for_release.py`, and
 `tools/scripts/fetch_v8_for_release.py`.
@@ -40,9 +47,9 @@ Keep these values distinct in notes and manifests:
 `v8-builder/tools/milestone_pin.py` resolves and enforces this contract. For example:
 
 ```bash
-python3 ../v8-builder/tools/milestone_pin.py 153 \
-  --skia-release-tag chrome/m153 > /tmp/m153-render-lock.json
-python3 -m json.tool /tmp/m153-render-lock.json
+python3 ../v8-builder/tools/milestone_pin.py 157 \
+  --skia-release-tag chrome/m157 > /tmp/m157-render-lock.json
+python3 -m json.tool /tmp/m157-render-lock.json
 ```
 
 The result must have the requested `milestone`, `skia_release_tag`, exact Chromium
@@ -65,8 +72,8 @@ For a historical Skia release or recovery, manually start the same idempotent la
 ```bash
 ghapp workflow run matched-milestone.yml \
   --repo danielraffel/v8-builder \
-  -f milestone=153 \
-  -f skia_release_tag=chrome/m153
+  -f milestone=157 \
+  -f skia_release_tag=chrome/m157
 ```
 
 Do not update Pulp's V8 pin until that matched release is published and every requested
@@ -79,38 +86,48 @@ Present the Skia/Dawn and V8 release URLs together as the milestone collection, 
 download only the assets the user needs:
 
 ```bash
-ghapp release view chrome/m153 --repo danielraffel/skia-builder --json url
+ghapp release view chrome/m157 --repo danielraffel/skia-builder --json url
 ghapp release list --repo danielraffel/v8-builder --limit 100 --json tagName \
-  --jq '.[] | select(.tagName | startswith("v8-m153-")) |
+  --jq '.[] | select(.tagName | startswith("v8-m157-")) |
     "https://github.com/danielraffel/v8-builder/releases/tag/\(.tagName)"'
 ```
 
 The collection is a provenance and compatibility convenience, not one combined archive:
 Skia/Dawn, V8, or both may be consumed independently.
 
+## Realtime FFT backend boundary
+
+The optional muFFT FetchContent dependency is separate from the Apple render
+toolchain. It supplies the float `FftT` backend only off Apple; Apple remains on
+vDSP with byte-identical admission. Keep muFFT's Pulp-owned shim allocation-free
+after preparation and do not build or ship its FFTW-linked upstream tools.
+
 ## Independent Skia/Dawn advance
 
-When the user explicitly asks to advance Skia/Dawn before the matching V8 build
-is complete, keep the lanes separate instead of blocking the render update or
-claiming a matched tuple:
+`fetch_v8_for_release.py` binds a milestone-matched V8 archive to Pulp's active
+Skia release, Skia commit, and built Dawn. Moving Skia/Dawn ahead of the pinned
+V8 therefore fails the V8 fetch, and there is no manifest flag that waives it.
+Prefer moving the whole tuple together. When the matched V8 is missing an asset
+or fails Pulp's gates, hold the whole render update until that V8 is fixed
+rather than pairing a new Skia with an older V8.
 
-1. Update the active Skia entry and its built-Dawn provenance from published
-   assets. Leave the V8 version, assets, and its internal `paired_*` metadata at
-   their last verified milestone.
-2. State the mixed active-provider selection in `DEPENDENCIES.md` and the V8
-   manifest notes. Do not rewrite V8's historical `skia_release_tag`,
-   `paired_skia`, or `paired_dawn` to the newer active Skia values.
-3. Run the sealed V8 provider-identity/ODR gate against the new Skia/Dawn
-   provider. Keep this in the required release-path CI surface while the mixed
-   selection is active; a successful one-off local or Skia-only build does not
-   prove mixed-provider safety.
-4. Record a precise follow-up trigger: adopt V8 only after the matched release
-   contains every required platform asset and its embedded pair manifest passes
-   the normal milestone checks.
+If a mixed selection is ever genuinely needed, it requires a reviewed fetcher
+change in that same PR that:
 
-This is a bounded compatibility state, not a new default release policy. Return
-to a fully milestone-matched selection as soon as the verified V8 release is
-available.
+1. Names the exact active Skia release, commit, and built Dawn the older V8 is
+   allowed to run against, so the exception goes stale and fails closed the
+   next time Skia moves.
+2. Still binds the embedded pair to the V8 entry's own `paired_*` fields; do not
+   rewrite V8's historical `skia_release_tag`, `paired_skia`, or `paired_dawn`
+   to the newer active Skia values.
+3. Ships tests for the declared, stale, and undeclared cases, and keeps the
+   sealed V8 provider-identity/ODR gate in the required release-path CI surface
+   against the new Skia/Dawn provider while the mixed selection is active. A
+   successful one-off local or Skia-only build does not prove mixed-provider
+   safety.
+4. States the mixed selection in `DEPENDENCIES.md` and the V8 manifest notes,
+   with an exit condition, and removes the exception in the change that
+   restores a matched tuple.
 
 ## Pulp update checklist
 
@@ -128,7 +145,38 @@ generation receipt, capability result, cache result, and mixed-provider result;
 retain those fields in the PR/landing evidence.
 
 1. Work from current `origin/main` in a clean worktree. Read release notes from M+1
-   through the target and search Pulp for removed APIs.
+   through the target and search Pulp for removed APIs. The notes live on the
+   branch itself; this prints every milestone between the old and new pin:
+
+   ```bash
+   curl -sSfL "https://skia.googlesource.com/skia/+/refs/heads/chrome/mNEW/RELEASE_NOTES.md?format=TEXT" \
+     | base64 -d | awk '/^Milestone NEW/,/^Milestone OLD/'
+   rg -n 'RemovedApi|OtherRemovedApi' core apple examples tools test
+   ```
+
+   Empty milestones are normal. Grep `tools/scripts/verify_skia_m153_capabilities.py`
+   too: its probe compiles real Skia API, so a removed API breaks it before it
+   breaks a product build (m157 removed the `SkExecutor` thread-pool factories
+   it used). Recompile the probe source against the new headers by hand before
+   pushing, and compile it once with the old API as a negative control.
+
+   Release notes do not list every break. Skia stages API changes behind
+   `SK_LEGACY_*` guards whose default selects the old form, then deletes the
+   guard a few milestones later, silently. m157 dropped
+   `SK_LEGACY_DESERIAL_IMAGE_PROC`, so `SkDeserialImageProc` gained a
+   `std::optional<SkAlphaType>` argument and `test/test_skia_surface.cpp` stopped
+   compiling, with no release-note entry. Before pushing, diff the guard set and
+   the header list between the old and new materialized generations:
+
+   ```bash
+   comm -23 <(grep -rhoE 'SK_LEGACY_[A-Z0-9_]+' "$OLD/build/include" | sort -u) \
+            <(grep -rhoE 'SK_LEGACY_[A-Z0-9_]+' "$NEW/build/include" | sort -u)
+   comm -23 <(cd "$OLD/build/include" && find . -name '*.h' | sort) \
+            <(cd "$NEW/build/include" && find . -name '*.h' | sort)
+   ```
+
+   Then grep `core`, `test`, `tools`, `examples` and `apple` for each hit. Test
+   files count: CI compiles them on every lane.
 2. Inspect the published Skia release with `ghapp release view chrome/mNNN --repo
    danielraffel/skia-builder --json assets,publishedAt`. Update every platform URL and
    SHA-256 in `tools/deps/manifest.json`; do not omit Windows, Linux ARM64, Apple device
@@ -198,20 +246,41 @@ retain those fields in the PR/landing evidence.
     alters this compatibility or install boundary must update the dependency
     manifest, attribution surfaces, runtime manifest, and installed-SDK proof.
 12. After merge, prewarm every active build host through the fetcher's normal
-    immutable cache-owner path. For each M3, M5, M1, Mac mini, and Mac Pro host,
+    immutable cache-owner path. On each macOS host, from an up-to-date checkout:
+
+    ```bash
+    for i in 1 2; do python3 tools/scripts/fetch_skia_for_release.py darwin-arm64 \
+      --cache-root "${PULP_SKIA_CACHE_ROOT:-$HOME/.cache/pulp/skia}" --cache-lock-timeout 300; done
+    python3 tools/scripts/fetch_skia_for_release.py darwin-arm64 \
+      --cache-root "${PULP_SKIA_CACHE_ROOT:-$HOME/.cache/pulp/skia}" --print-cache-dest
+    ```
+
+    Windows builders run the same fetch with `windows-x64` or `windows-arm64`,
+    and V8 consumers add `fetch_v8_for_release.py <platform>`. The previous
+    generation stays in place for consumers still bound to it, so a prewarm
+    never breaks an in-flight build. For each M3, M5, M1, Mac mini, and Mac Pro host,
     record the exact asset SHA, materialized `libskia.a` plus
     `libdawn_combined.a`, and a second invocation that reports the complete
     generation and performs no download. Skip or defer a host only with an
     explicit offline/retired disposition; never copy a checkout cache between
     machines.
-13. Treat missing provenance as a cold cache. A materialized library plus a
+13. Tell the people and agents building on other machines, especially Windows
+    builders and the GPU/front-end lanes: the new tags, what moved in the
+    release notes, the prewarm commands above, and any new toolchain floor. A
+    pin that lands silently strands a Windows VM on an old cache until its next
+    link fails. Golden VMs re-bake through tartci; until then a gate job fetches
+    the new generation at configure time, which is correct but slower.
+14. Treat missing provenance as a cold cache. A materialized library plus a
     tracked `VERSION.md` digest is not proof that those bytes came from that
     archive: without the exact fetcher-written asset stamp, re-download and
     verify before publication. Source fallbacks must likewise pin the builder
-    revision and fail before copying output unless the built Skia checkout HEAD
-    equals the manifest's immutable `skia_commit`; a milestone branch name alone
-    is never sufficient provenance.
-13. Treat any provider release marked `release_immutable: false` as mutable until
+    revision, build the manifest's immutable `skia_commit` itself (skia-builder
+    `-revision`, or `fetch --depth 1 <sha>` + `checkout --detach`), and fail
+    before copying output unless the built Skia HEAD equals `skia_commit` and
+    the synced Dawn HEAD equals `built_dawn`. Never compare against or build a
+    milestone branch head: Chromium release branches keep moving after the pin,
+    so a branch-head check breaks every pinned release.
+15. Treat any provider release marked `release_immutable: false` as mutable until
     its publishing workflow is terminal. Record the exact publisher run and
     release `updated_at`, collect every asset ID/digest plus metadata and pair
     digests, then re-query the same release immediately before publication. If
@@ -221,6 +290,41 @@ retain those fields in the PR/landing evidence.
     that time; it does not authorize landing after the release was replaced.
 
 ## Common traps
+
+- **A Skia bump can move the ICU Pulp ships.** Skia's `libskunicode_icu.a`
+  carries ICU code and data (`icudt<NN>_dat`; `icuver.res` names the exact
+  version, 78.2 for `chrome/m153` and `chrome/m157`). When the symbol or version changes, update
+  the ICU entry in NOTICE.md from that release's `LICENSE` (verbatim, shipped
+  sections only), the ICU rows in DEPENDENCIES.md, `docs/reference/licensing.md`
+  and `tools/deps/manifest.json`, and re-check that
+  `tools/cmake/scripts/icu_data_subset.py` still rewrites the new archive
+  (`icu-data-subset-deterministic`, `pulp-test-icu-data-breaks`).
+- **A `pulp_register_fetchcontent_source(... REF <sha>)` pin is enforced at configure.** `pulp_materialize_mutable_fetchcontent_source` fails closed when the shared-cache git checkout's HEAD is not the registered commit, so a `GIT_TAG` must be the same full SHA (CHOC is the first consumer). The cache directory name is only a key, not proof of the commit. Symbolic refs and tarball sources skip the check. Selftest: `tools/scripts/test_setup_source_cache.sh`.
+- **QuickJS has its own manifest row** even though it rides inside CHOC's `choc_javascript_QuickJS.h`; its version is the embedded `CONFIG_VERSION`. Bumping CHOC must update that row.
+- A V8 bump can break choc's V8 bridge without any Pulp change: the release-path
+  cube capture is the canary, and the m153 to m157 move tripped it. V8 15.4
+  (commit `3186b30e34b4`) runs the `v8::Array::Iterate` callback inside its own
+  `HandleScope`, so choc's `v8ToChoc`, which stored property values from that
+  callback and converted them afterwards, read freed handles and SIGBUSed in
+  `KeyAccumulator::CollectOwnElementIndices` on any object whose early members
+  are objects or functions. `tools/cmake/PulpPatchChoc.cmake` replaces the
+  `Iterate` walk with an index loop, and `test/test_js_engine.cpp` "converts an
+  object whose early members are objects" covers it on every engine. When the
+  capture crashes after a V8 bump, split the providers first (old V8 against new
+  Skia/Dawn on the same host), then read V8's `src/api/api.cc` history for the
+  API choc uses before suspecting Pulp.
+- A V8 bump can change the provider's `consumer_defines` (the `manifest.json`
+  list of macros the library was built with: embedder field counts, cppgc
+  caging and pointer compression, target arch). `FindV8.cmake` applies that
+  list verbatim to `v8::v8` through `PulpV8ConsumerDefines.cmake`, and fails
+  configure when a sealed provider's manifest is missing, unsealed, or holds
+  anything but `NAME`/`NAME=VALUE` tokens. A consumer compiled without the
+  defines still links and then disagrees with the library about object layout,
+  so never work around that configure failure by dropping the list. The legacy
+  `V8_INCLUDE_DIR`/`V8_LIB_DIR` override has no manifest and gets no defines;
+  on Windows `PulpV8Windows.cmake` adds `V8_COMPRESS_POINTERS` itself only in
+  that case. `cmake-v8-consumer-defines` covers both paths with fixture
+  providers.
 
 - On Windows ARM64, a Ninja build using the ARM-hosted x64 MSVC compiler has
   an empty `CMAKE_GENERATOR_PLATFORM` and an ARM64 host processor. Choose the
@@ -239,7 +343,10 @@ retain those fields in the PR/landing evidence.
   `resolve_release_runners.py --apply-class-label pulp-release-pr-gate` after a
   sparse checkout. With `PULP_RELEASE_CLASS_TOKENS` unset the selector is
   verbatim; set, a self-hosted selector gains `pulp-release-pr-gate`, so a gate
-  run that never starts may be an unserved class, not a toolchain failure.
+  run that never starts may be an unserved class, not a toolchain failure. A
+  fork pull request ignores these variables and runs its darwin-arm64 leg on
+  hosted `macos-15` (`--fork-pr-gate-route`), so a fork PR's macOS timing is
+  not evidence about the self-hosted gate.
 - A Skia milestone name alone does not select a V8 revision. Resolve through Chromium's
   milestone branch, preserve its raw Skia SHA, and separately prove the release's
   validated `built_skia`/`built_dawn` pair equals Pulp's active provider.
@@ -306,7 +413,7 @@ retain those fields in the PR/landing evidence.
   **opt-in**, never implied by "Apple". Older text said "default is QuickJS, JSC
   on Apple", which reads as JSC being automatic on Apple platforms and is wrong.
   Likewise iOS is no longer "JSC-only": Pulp has no device/AUv3 V8 runtime
-  acceptance or packaging contract. The m153 V8 release includes a jitless
+  acceptance or packaging contract. The pinned V8 release includes a jitless
   simulator framework only for provider/header provenance validation; it is not
   selectable as an iOS runtime. QuickJS is the default and JSC stays opt-in.
   When a pin or min-OS note is edited, keep these three files saying the same
@@ -373,6 +480,22 @@ retain those fields in the PR/landing evidence.
   failure.
 
 ## Windows GPU slices
+
+Read each Windows archive's `build/win-gpu/msvc-toolchain.json` before pinning
+and copy its `runtime.consumer_requirement` into `external/skia-build/VERSION.md`.
+The static libraries leave MSVC STL `__std_*` helpers for the consumer's
+runtime to supply, so the consumer must link with that MSVC toolset or newer.
+x64 and ARM64 are built on different runner images and can differ: m157 x64
+needs MSVC 14.44 (VS 2022) while m157 ARM64 needs 14.51 (VS 18), and a VS 2022
+ARM64 VM fails at link. A receipt with `unknown` fields proves nothing.
+
+To confirm every slice came from one Skia revision, compare the shipped
+headers across archives after normalising line endings: Windows archives
+carry CRLF headers, so a byte compare reports every header as different.
+
+```python
+a.read(n).replace(b"\r\n", b"\n") == b.read(n).replace(b"\r\n", b"\n")
+```
 
 For Windows GPU consumers, record separate `windows-x64` and `windows-arm64`
 release assets in the manifest. Select the slice from the CMake target

@@ -28,6 +28,11 @@ inline pulp::format::PluginDescriptor make_descriptor() {
 
 class {{CLASS_NAME}} : public pulp::format::Processor {
 public:
+    // Reads its parameters once per block, so it opts out of per-point
+    // automation: the VST3, AU v2 and CLAP adapters then write each
+    // automated parameter once per block and dense automation costs nothing.
+    bool wants_sample_accurate_parameters() const override { return false; }
+
     pulp::format::PluginDescriptor descriptor() const override {
         return make_descriptor();
     }
@@ -45,37 +50,20 @@ public:
         osc_.set_sample_rate(static_cast<float>(ctx.sample_rate));
         env_.set_sample_rate(static_cast<float>(ctx.sample_rate));
         env_.set_params({0.01f, 0.1f, 0.7f, 0.3f});
+        // Resolve parameter handles once, off the audio thread; reading one
+        // in process() is a single atomic load with no ID lookup.
+        gain_db_ = state().param_reader(kGain);
     }
 
     void process(
         pulp::audio::BufferView<float>& output,
-        const pulp::audio::BufferView<const float>& /*input*/,
+        const pulp::audio::BufferView<const float>& input,
         pulp::midi::MidiBuffer& midi_in,
-        pulp::midi::MidiBuffer& /*midi_out*/,
-        const pulp::format::ProcessContext& /*ctx*/) override
-    {
-        float gain_db = state().get_value(kGain);
-        float gain = std::pow(10.0f, gain_db / 20.0f);
-
-        for (const auto& event : midi_in) {
-            if (event.event.is_note_on()) {
-                float freq = 440.0f * std::pow(2.0f, (event.event.note() - 69) / 12.0f);
-                osc_.set_frequency(freq);
-                env_.note_on();
-            } else if (event.event.is_note_off()) {
-                env_.note_off();
-            }
-        }
-
-        output.clear();
-        for (std::size_t i = 0; i < output.num_samples(); ++i) {
-            float sample = osc_.next() * env_.next() * gain;
-            for (std::size_t ch = 0; ch < output.num_channels(); ++ch)
-                output.channel(ch)[i] = sample;
-        }
-    }
+        pulp::midi::MidiBuffer& midi_out,
+        const pulp::format::ProcessContext& ctx) override;  // defined in {{SOURCE_NAME}}
 
 private:
+    pulp::state::ParamReader gain_db_;
     pulp::signal::Oscillator osc_;
     pulp::signal::Adsr env_;
 };

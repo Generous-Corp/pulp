@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261023-attack-surface-host-loading-20261022-watch",
+  "created_at": "2026-10-23T03:39:36Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Host-loading hardening only: .pulpgraph plugin nodes resolve against known plugin roots with scanning off by default, CLAP scanning runs in the isolated worker with no in-process fallback, and the worker protects its descriptor protocol from plugin stdout. The family is touched through docs/reference/cli.md and docs/status/cli-commands.yaml edits for the pulp scan --in-process flag and the removed bake flag; no design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-graph-plugin-resolution",
+    "ctest --test-dir build -R pulp-test-isolated-scanner",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

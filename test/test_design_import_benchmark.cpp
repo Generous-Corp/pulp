@@ -99,11 +99,20 @@ void require_lane_schema(const std::string& json, const std::string& lane) {
     REQUIRE(contains_key(json, "interactive"));
     REQUIRE(contains_key(json, "frame_ms_median"));
     REQUIRE(contains_key(json, "frame_ms_p99"));
+    REQUIRE(contains_key(json, "update_ms_median"));
+    REQUIRE(contains_key(json, "update_ms_p99"));
+    REQUIRE(contains_key(json, "update_ms_max"));
     REQUIRE(contains_key(json, "cpu_frame_ms_median"));
     REQUIRE(contains_key(json, "cpu_frame_ms_p99"));
-    REQUIRE(contains_key(json, "rss_median_bytes"));
-    REQUIRE(contains_key(json, "rss_p99_bytes"));
-    REQUIRE(contains_key(json, "rss_peak_bytes"));
+    REQUIRE(contains_key(json, "memory"));
+    REQUIRE(contains_key(json, "median_bytes"));
+    REQUIRE(contains_key(json, "p99_bytes"));
+    REQUIRE(contains_key(json, "peak_bytes"));
+    REQUIRE(contains_key(json, "stages"));
+    REQUIRE(contains_key(json, "host_conditions"));
+    REQUIRE(contains_key(json, "confounded"));
+    // A resident set this process can read is never reported as 0.
+    REQUIRE(json.find("\"median_bytes\": 0,") == std::string::npos);
     REQUIRE(contains_key(json, "js_evaluations_total"));
     REQUIRE(contains_key(json, "counters"));
     REQUIRE(contains_key(json, "bridge_calls"));
@@ -126,13 +135,12 @@ void require_lane_schema(const std::string& json, const std::string& lane) {
 
 }  // namespace
 
-TEST_CASE("design-import benchmark emits live, baked-native, and baked-cpp lane JSON",
-          "[design-import][benchmark]") {
+TEST_CASE("design-import benchmark emits all declared lane JSON", "[design-import][benchmark]") {
     set_no_launch_env();
     const auto bin = bench_binary();
     REQUIRE(fs::exists(bin));
 
-    for (const auto& lane : {"live", "baked-native", "baked-cpp"}) {
+    for (const auto& lane : {"live", "baked-native", "baked-native-rebuild", "baked-cpp"}) {
         const auto out = unique_output_path(lane);
         fs::remove(out);
         std::vector<std::string> args = {

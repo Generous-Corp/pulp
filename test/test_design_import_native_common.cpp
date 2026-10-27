@@ -582,12 +582,29 @@ TEST_CASE("border_style dashed reaches View::BorderStyle in the native materiali
     REQUIRE(root != nullptr);
     CHECK(root->border_style() == View::BorderStyle::dashed);
 
-    // Solid (and any keyword View degrades to solid) keeps the default.
+    // Solid keeps the default.
     DesignIR solid = ir;
     solid.root.style.border_style = "solid";
     auto solid_root = build_native_view_tree(solid, {}, {});
     REQUIRE(solid_root != nullptr);
     CHECK(solid_root->border_style() == View::BorderStyle::solid);
+
+    // The shaded and double styles reach View too, which paints them in
+    // per-side bands; dropped here, a user-agent button's `2px outset` drew as
+    // a flat black frame.
+    const std::pair<const char*, View::BorderStyle> banded[] = {
+        {"double", View::BorderStyle::double_}, {"groove", View::BorderStyle::groove},
+        {"ridge", View::BorderStyle::ridge},    {"inset", View::BorderStyle::inset},
+        {"outset", View::BorderStyle::outset},
+    };
+    for (const auto& [keyword, expected] : banded) {
+        INFO("border-style " << keyword);
+        DesignIR styled = ir;
+        styled.root.style.border_style = keyword;
+        auto styled_root = build_native_view_tree(styled, {}, {});
+        REQUIRE(styled_root != nullptr);
+        CHECK(styled_root->border_style() == expected);
+    }
 }
 
 TEST_CASE("an unparseable CSS color leaves the paint site untouched",
@@ -721,6 +738,60 @@ TEST_CASE("SVG fill and stroke accept non-hex CSS across every shape widget",
     REQUIRE(svg_line != nullptr);
     check_color(svg_line->stroke_color(), 171.0f / 255.0f, 171.0f / 255.0f,
                 171.0f / 255.0f, 0.1f);
+}
+
+TEST_CASE("native SVG path and baked C++ take the imported stroke cap, join and miter limit",
+          "[view][import][native-common][svg-stroke]") {
+    const auto vector = [](std::string cap, std::string join, std::string limit) {
+        IRNode path;
+        path.type = "vector";
+        path.attributes["path_data"] = "M4 12L12 4L20 12";
+        path.attributes["svg_viewbox"] = "0 0 24 24";
+        path.attributes["svg_fill"] = "none";
+        path.attributes["svg_stroke"] = "#89b4fa";
+        path.attributes["svg_stroke_width"] = "2";
+        if (!cap.empty())
+            path.attributes["svg_stroke_linecap"] = std::move(cap);
+        if (!join.empty())
+            path.attributes["svg_stroke_linejoin"] = std::move(join);
+        if (!limit.empty())
+            path.attributes["svg_stroke_miterlimit"] = std::move(limit);
+        return path;
+    };
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.children.push_back(vector("round", "round", ""));
+    ir.root.children.push_back(vector("square", "miter-clip", "8"));
+    // Values the browser would also reject leave the widget on its own state.
+    ir.root.children.push_back(vector("pointed", "spiky", "0.5"));
+    ir.root.children.push_back(vector("", "", ""));
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root->child_count() == 4);
+    auto* round = dynamic_cast<SvgPathWidget*>(root->child_at(0));
+    auto* square = dynamic_cast<SvgPathWidget*>(root->child_at(1));
+    auto* invalid = dynamic_cast<SvgPathWidget*>(root->child_at(2));
+    auto* plain = dynamic_cast<SvgPathWidget*>(root->child_at(3));
+    REQUIRE((round && square && invalid && plain));
+    CHECK(round->stroke_cap() == pulp::canvas::LineCap::round);
+    CHECK(round->stroke_join() == pulp::canvas::LineJoin::round);
+    CHECK_FALSE(round->stroke_miter_limit().has_value());
+    CHECK(square->stroke_cap() == pulp::canvas::LineCap::square);
+    CHECK(square->stroke_join() == pulp::canvas::LineJoin::miter);
+    CHECK(square->stroke_miter_limit() == 8.0f);
+    for (auto* widget : {invalid, plain}) {
+        CHECK_FALSE(widget->stroke_cap().has_value());
+        CHECK_FALSE(widget->stroke_join().has_value());
+        CHECK_FALSE(widget->stroke_miter_limit().has_value());
+    }
+
+    const auto cpp = generate_pulp_cpp(ir, ir.asset_manifest, {}).source;
+    CHECK(cpp.find("->set_stroke_cap(pulp::canvas::LineCap::round);") != std::string::npos);
+    CHECK(cpp.find("->set_stroke_join(pulp::canvas::LineJoin::round);") != std::string::npos);
+    CHECK(cpp.find("->set_stroke_cap(pulp::canvas::LineCap::square);") != std::string::npos);
+    CHECK(cpp.find("->set_stroke_join(pulp::canvas::LineJoin::miter);") != std::string::npos);
+    CHECK(cpp.find("->set_stroke_miter_limit(8") != std::string::npos);
+    CHECK(cpp.find("pointed") == std::string::npos);
 }
 
 TEST_CASE("native SVG path consumes canonical imported stroke channels",
@@ -1229,6 +1300,8 @@ TEST_CASE("build_native_view_tree opts the imported root into sub-pixel layout",
     auto root = build_native_view_tree(ir, {}, {});
     REQUIRE(root != nullptr);
     REQUIRE(root->subpixel_layout());
+    // The import root is also the captured frame its text baselines snap to.
+    CHECK(root->captured_frame_root());
 }
 
 TEST_CASE("sub-pixel layout keeps concentric siblings on one centre",

@@ -301,7 +301,7 @@ SIGNATURE_OVERRIDES: dict[str, str] = {
     "readClipboard": "() => string",
     "registerContextMenu": "(id: string, callbackName: string) => void",
     "registerDrop": "(id: string) => void",
-    "registerFont": "(family: string, path: string) => boolean",
+    "registerFont": "(family: string, path: string, weightMin?: number, weightMax?: number) => boolean",
     "registerGesture": "(id: string) => void",
     "registerHover": "(id: string) => void",
     "registerPointer": "(id: string) => void",
@@ -310,8 +310,10 @@ SIGNATURE_OVERRIDES: dict[str, str] = {
     "releaseDocumentNavigationFocus": "() => void",
     "setFocus": "(id: string) => boolean",
     "releaseOverlay": "(id: string) => void",
+    "removeToken": "(name: string) => void",
     "removeWidget": "(id: string) => void",
     "insertChild": "(parentId: string, childId: string, index: number) => boolean",
+    "isWidgetParamBound": "(widgetId: string) => boolean",
     "saveStylePreset": "(name: string, payload: unknown) => void",
     "seekWidgetLottie": "(id: string, time01: number) => void",
     "setAICli": "(command: string) => void",
@@ -328,6 +330,7 @@ SIGNATURE_OVERRIDES: dict[str, str] = {
     "setFaderTrackBorder": "(id: string, color: string) => void",
     "setFaderTrackWidth": "(id: string, width: number) => void",
     "setFlex": "(id: string, key: string, value: number | string) => void",
+    "resetStyleProperty": "(id: string, slot: string) => boolean",
     "setGrid": "(id: string, key: string, value: number | string) => void",
     "setImageSource": "(id: string, path: string) => void",
     "setItems": "(id: string, items: string[] | string) => void",
@@ -343,6 +346,7 @@ SIGNATURE_OVERRIDES: dict[str, str] = {
     "setPanelStyle": "(id: string, backgroundToken: string, borderToken?: string, radius?: number, width?: number) => void",
     "setPosition": "(id: string, position: string) => void",
     "setSubpixelLayout": "(id: string, enabled: boolean) => void",
+    "setCapturedFrameRoot": "(id: string, enabled: boolean) => void",
     "setTop": "(id: string, value: number | string) => void",
     "setRight": "(id: string, value: number | string) => void",
     "setBottom": "(id: string, value: number | string) => void",
@@ -353,12 +357,13 @@ SIGNATURE_OVERRIDES: dict[str, str] = {
     "setSvgLine": "(id: string, x1: number, y1: number, x2: number, y2: number) => void",
     "setSvgPath": "(id: string, pathData: string) => void",
     "setSvgRect": "(id: string, x: number, y: number, width: number, height: number) => void",
+    "setSvgStrokeStyle": "(id: string, linecap: string, linejoin: string, miterLimit?: number) => void",
     "setSvgStrokeWidth": "(id: string, width: number) => void",
     "setSvgStrokeGradient": "(id: string, value: string) => void",
     "setSvgViewBox": "(id: string, width: number, height: number) => void",
     "setSvgStretchToBounds": "(id: string, stretch: boolean) => void",
     "setTextRuns": "(id: string, runs: Array<{ start: number; end: number; fontWeight?: number; fontSize?: number; fontFamily?: string; color?: string; fontStyle?: string; letterSpacing?: number; textDecoration?: string }>) => void",
-    "setCapturedLineBoxes": "(id: string, boxes: Array<{ left: number; top: number; width: number; height: number; start: number; length: number }>, basisWidth: number, basisFace: string, wrapOnCacheMiss?: boolean) => void",
+    "setCapturedLineBoxes": "(id: string, boxes: Array<{ left: number; top: number; width: number; height: number; start: number; length: number }>, basisWidth: number, basisFace: string, wrapOnCacheMiss?: boolean, ascent?: number, descent?: number) => void",
     "clearCapturedLineBoxes": "(id: string) => void",
     "setVisibleAtAnchor": "(anchor: string, visible: boolean) => boolean",
     "bindCanvasBehaviorAt": "(anchor: string, sourceRootId: string, canvasIndex: number, behaviorOwnerId?: string) => boolean",
@@ -610,6 +615,8 @@ def signature_for(row: ManifestRow) -> str:
             return "(id: string, text: string, parentId: string) => string"
         if row.name == "createBadge":
             return "(id: string, text: string, tone: string, parentId: string) => string"
+        if row.name == "createButtonSurface":
+            return "(id: string, parentId: string, direction?: 'row' | 'column') => string"
         return "(id: string, parentId: string) => string"
     if row.name in ID_BOOLEAN_SETTERS:
         return "(id: string, value: boolean) => void"
@@ -647,6 +654,20 @@ def emit_interface(name: str, rows: list[ManifestRow]) -> list[str]:
     return lines
 
 
+# Globals the standard DOM library (lib.dom.d.ts) already declares. A bridge
+# function with one of these names stays on its PulpBridge*Globals interface
+# but gets no `declare global` var: redeclaring it is a duplicate-identifier
+# error in every consumer compiled with the DOM lib and library checking on.
+DOM_LIB_GLOBALS = frozenset({
+    "alert", "atob", "blur", "btoa", "cancelAnimationFrame", "clearInterval",
+    "clearTimeout", "close", "confirm", "fetch", "focus", "getComputedStyle",
+    "getSelection", "matchMedia", "moveBy", "moveTo", "open", "postMessage",
+    "print", "prompt", "queueMicrotask", "reportError", "requestAnimationFrame",
+    "resizeBy", "resizeTo", "scroll", "scrollBy", "scrollTo", "setInterval",
+    "setTimeout", "stop", "structuredClone",
+})
+
+
 def emit_types(rows: list[ManifestRow], autocaps: dict[str, str], fingerprint: str) -> str:
     manifest_names = {row.name for row in rows}
     extra_autocaps = sorted(set(autocaps) - manifest_names)
@@ -681,6 +702,8 @@ def emit_types(rows: list[ManifestRow], autocaps: dict[str, str], fingerprint: s
     lines.append("")
     lines.append("declare global {")
     for row in rows:
+        if row.name in DOM_LIB_GLOBALS:
+            continue
         cap = autocaps.get(row.name)
         iface = interface_name_for_capability(cap)
         type_expr = f"{iface}['{row.name}']"

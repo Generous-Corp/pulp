@@ -1,7 +1,7 @@
 {
   "_generated": "by tools/toolchain/generate.py from tools/toolchain/manifest.toml; do not edit",
   "schema": 1,
-  "source_sha256": "ae9f37dac197fd10f1dba20cc1007f5b33d7a20445993484c021ee75833ac51b",
+  "source_sha256": "3cbe8514fd7c32c4d2bb544618182804766356a96d57110f4df82d02cb16d4a6",
   "enforcement": "warn",
   "tools": {
     "python": "3.14.4",
@@ -22,14 +22,21 @@
     }
   },
   "mise": {
-    "version": "2026.10.8",
-    "path": "~/.local/opt/mise-2026.10.8/bin/mise",
+    "version": "2026.10.17",
+    "path": "~/.local/opt/mise-2026.10.17/bin/mise",
     "sha256": {
-      "macos-arm64": "87c18142dd67f5848b0236738eb9338976329266937ecd79b11121de64dd2d47"
+      "macos-arm64": "284869e5b5f57211377f026309910bea91ef65b3a71b934295fa8bd712436dfc"
     }
   },
   "npm_prefixes": [
     "tools/import-design/jsx-runtime",
     "tools/scripts"
+  ],
+  "rust_components": [
+    "rustfmt",
+    "clippy"
+  ],
+  "rust_targets": [
+    "x86_64-apple-darwin"
   ]
 }

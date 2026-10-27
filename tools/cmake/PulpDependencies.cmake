@@ -24,25 +24,31 @@ set(FETCHCONTENT_UPDATES_DISCONNECTED ${PULP_FETCHCONTENT_UPDATES_DISCONNECTED})
 #
 # ⚠ INTERIM FORK PIN — temporarily pinned to a fork tag that adds WebView
 # file drag-and-drop (window.chocStartFileDrag([...]) + `chocfilesdropped`
-# event) — the PoC from upstream Tracktion/choc#64. The fork
-# is upstream f0f5cdf5a938 + 5 commits, 0 behind, so reverting is a one-line
-# repoint. WHEN choc#64 MERGES UPSTREAM, restore:
+# event) — the PoC from upstream Tracktion/choc#64 — plus a cherry-pick of
+# upstream 9181665, which makes choc::json parseString() throw at end of
+# input instead of reading past an unterminated string (a fuzzed content-pack
+# manifest reached that heap over-read). The fork is upstream f0f5cdf5a938 +
+# the DnD and EOF commits, 0 behind, so reverting is a one-line repoint once
+# upstream carries both. WHEN choc#64 MERGES UPSTREAM, restore:
 #     GIT_REPOSITORY https://github.com/Tracktion/choc.git
 #     GIT_TAG        <upstream merge commit>   (was f0f5cdf5a938b8b779fea6c083571cce5ccab925)
 # and update tools/deps/manifest.json + DEPENDENCIES.md back to Tracktion/choc.
-pulp_register_fetchcontent_source(choc REF df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60)
+pulp_register_fetchcontent_source(choc REF b586f33d1c9e8bee98c2b420a5b20bf525c3c7be)
 file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPatchChoc.cmake" _pulp_choc_patch_key)
 pulp_materialize_mutable_fetchcontent_source(choc PATCH_KEY "${_pulp_choc_patch_key}")
 unset(_pulp_choc_patch_key)
 FetchContent_Declare(
     choc
     GIT_REPOSITORY https://github.com/danielraffel/choc.git
-    GIT_TAG pulp-webview-dnd-poc1  # df148a41 — fork of Tracktion/choc#64 PoC
+    # Pinned to the commit the shared-cache REF above names, so the fetched
+    # tree and the cache key cannot drift apart (tag pulp-webview-dnd-poc2).
+    GIT_TAG b586f33d1c9e8bee98c2b420a5b20bf525c3c7be  # tag pulp-webview-dnd-poc2 on the danielraffel/choc fork
 )
 FetchContent_MakeAvailable(choc)
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPatchChoc.cmake)
 pulp_patch_choc_v8("${choc_SOURCE_DIR}")
 pulp_patch_choc_json_number_exponent("${choc_SOURCE_DIR}")
+pulp_patch_choc_file_watcher("${choc_SOURCE_DIR}")
 
 # WebGPU (Dawn) — cross-platform GPU abstraction (BSD-3-Clause)
 # Uses eliemichel/WebGPU-distribution for CMake-friendly integration
@@ -492,16 +498,28 @@ if(PULP_TEXT_SHAPING AND NOT PULP_ENABLE_GPU)
 endif()
 
 # SDL3 — cross-platform windowing, input, GPU context (zlib license)
-pulp_register_fetchcontent_source(SDL3 DIR sdl3 REF release-3.2.12)
+pulp_register_fetchcontent_source(SDL3 DIR sdl3 REF release-3.4.18)
 FetchContent_Declare(
     SDL3
     GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
-    GIT_TAG release-3.2.12
+    GIT_TAG release-3.4.18
     GIT_SHALLOW TRUE
 )
 set(SDL_SHARED OFF CACHE BOOL "" FORCE)
 set(SDL_STATIC ON CACHE BOOL "" FORCE)
-set(SDL_TEST OFF CACHE BOOL "" FORCE)
+set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    include(${CMAKE_CURRENT_LIST_DIR}/PulpSdl3Linux.cmake)
+    pulp_sdl3_missing_x11_extensions(_pulp_sdl3_missing_x11)
+    foreach(_pulp_sdl3_option IN LISTS _pulp_sdl3_missing_x11)
+        set(${_pulp_sdl3_option} OFF CACHE BOOL "Disabled: development headers not installed")
+    endforeach()
+    if(_pulp_sdl3_missing_x11)
+        message(STATUS "SDL3: X11 extensions without headers, defaulting OFF: ${_pulp_sdl3_missing_x11} (cached; a build directory keeps these OFF after the package is installed; set SDL_X11_* explicitly to override)")
+    endif()
+    unset(_pulp_sdl3_missing_x11)
+    unset(_pulp_sdl3_option)
+endif()
 # SDL3 precompiles src/SDL_internal.h into every one of its ~400 objects. A
 # TU compiled against a PCH is uncacheable for ccache unless the cache runs
 # with pch_defines sloppiness, and the PCH itself embeds the build path, so
@@ -527,7 +545,7 @@ if(PULP_ENABLE_DRACO)
     FetchContent_Declare(
         draco
         GIT_REPOSITORY https://github.com/google/draco.git
-        GIT_TAG 1.5.7
+        GIT_TAG 1.5.9
         GIT_SHALLOW TRUE
     )
     set(DRACO_TRANSCODER_SUPPORTED OFF CACHE BOOL "" FORCE)
@@ -567,11 +585,11 @@ if(PULP_ENABLE_SCENE3D)
     set(FASTGLTF_ENABLE_ASSIMP OFF CACHE BOOL "" FORCE)
     set(FASTGLTF_ENABLE_CPP_MODULES OFF CACHE BOOL "" FORCE)
     set(FASTGLTF_COMPILE_AS_CPP20 ON CACHE BOOL "" FORCE)
-    pulp_register_fetchcontent_source(fastgltf REF v0.9.0)
+    pulp_register_fetchcontent_source(fastgltf REF v0.9.1)
     FetchContent_Declare(
         fastgltf
         GIT_REPOSITORY https://github.com/spnda/fastgltf.git
-        GIT_TAG v0.9.0
+        GIT_TAG v0.9.1
         GIT_SHALLOW TRUE
     )
     FetchContent_MakeAvailable(fastgltf)
@@ -639,11 +657,11 @@ else()
 endif()
 
 # CLAP (MIT license) — header-only plugin format
-pulp_register_fetchcontent_source(clap REF 1.2.9)
+pulp_register_fetchcontent_source(clap REF 1.2.10)
 FetchContent_Declare(
     clap
     GIT_REPOSITORY https://github.com/free-audio/clap.git
-    GIT_TAG 1.2.9
+    GIT_TAG 1.2.10
     GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(clap)
@@ -754,13 +772,13 @@ endif()
 # stable ref and skips the re-fetch on every reconfigure.
 #
 # MSVC ARM64EC defines both the ARM64 and x64 architecture macros. Highway
-# 1.2.0 intentionally rejects that ambiguous combination at configure time,
+# 1.4.0 intentionally rejects that ambiguous combination at configure time,
 # so an ARM64EC Pulp build must use the scalar reference backend. Detect the
 # target architecture from CMake's compiler identity (with the generator
 # platform as a fallback for older CMake/toolchain combinations) before
 # declaring Highway; this keeps the unusable target out of the install export
 # as well as out of the pulp-simd link line.
-pulp_register_fetchcontent_source(highway REF 1.2.0)
+pulp_register_fetchcontent_source(highway REF 1.4.0)
 pulp_simd_target_is_arm64ec(_pulp_simd_arm64ec)
 
 if(_pulp_simd_arm64ec)
@@ -776,8 +794,8 @@ else()
     FetchContent_Declare(
         highway
         GIT_REPOSITORY https://github.com/google/highway.git
-        # 1.2.0 release commit
-        GIT_TAG 457c891775a7397bdb0376bb1031e6e027af1c48
+        # 1.4.0 release commit
+        GIT_TAG 2607d3b5b0113992fe84d3848859eae13b3b52c1
     )
     FetchContent_MakeAvailable(highway)
     set(PULP_HAS_HIGHWAY TRUE)
@@ -867,14 +885,31 @@ FetchContent_MakeAvailable(SheenBidi)
 set(PULP_HAS_SHEENBIDI TRUE)
 message(STATUS "Pulp: SheenBidi bidi engine enabled (v3.0.0)")
 
+# muFFT (MIT) — the float FFT behind FftT on every non-Apple target (Apple
+# uses vDSP). Pinned to an exact commit: upstream has no release tags. Only
+# fft.c, kernel.c, cpu.c and the x86 SIMD kernels are compiled, by
+# core/signal/CMakeLists.txt, so muFFT's own CMake (which builds FFTW-linked
+# bench and test binaries) never runs. Apple fetches it only for tests, which
+# exercise the portable backend on every host.
+if(NOT APPLE OR PULP_BUILD_TESTS)
+    pulp_register_fetchcontent_source(mufft REF 47bb08652eab399c2c7d460abe5184857110f130)
+    FetchContent_Declare(
+        mufft
+        GIT_REPOSITORY https://github.com/Themaister/muFFT.git
+        GIT_TAG 47bb08652eab399c2c7d460abe5184857110f130
+        SOURCE_SUBDIR pulp-fetch-only
+    )
+    FetchContent_MakeAvailable(mufft)
+endif()
+
 # Brotli + Google's WOFF2 decoder (MIT licenses) — captured browser imports
 # commonly package their exact @font-face payloads as WOFF2. Native import must
 # decode those same bytes rather than silently substituting a system face.
-pulp_register_fetchcontent_source(brotli REF v1.2.0)
+pulp_register_fetchcontent_source(brotli REF v1.2.1)
 FetchContent_Declare(
     brotli
     GIT_REPOSITORY https://github.com/google/brotli.git
-    GIT_TAG 028fb5a23661f123017c060daa546b55cf4bde29
+    GIT_TAG db24a98aed38a16de78cc05ca15cdd8dc2a0d92d
     # Only the c/ decoder sources are compiled; setup.sh primes this cache
     # without submodules, and the network fallback must match it.
     GIT_SUBMODULES ""
@@ -900,26 +935,21 @@ set(PULP_HAS_WOFF2_DECODER TRUE)
 message(STATUS "Pulp: captured WOFF2 font decoder enabled")
 
 # yaml-cpp (MIT license) — YAML parser used by the DESIGN.md import pipeline
-# Note: yaml-cpp 0.8.0's CMakeLists declares cmake_minimum_required(3.4),
-# which CMake 4.x refuses. Set CMAKE_POLICY_VERSION_MINIMUM in the
-# subdirectory scope so the dependency configures cleanly.
 set(YAML_CPP_BUILD_TESTS  OFF CACHE BOOL "" FORCE)
 set(YAML_CPP_BUILD_TOOLS  OFF CACHE BOOL "" FORCE)
 set(YAML_CPP_BUILD_CONTRIB OFF CACHE BOOL "" FORCE)
 set(YAML_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(YAML_CPP_INSTALL      OFF CACHE BOOL "" FORCE)
-set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
-pulp_register_fetchcontent_source(yaml-cpp REF 0.8.0)
+pulp_register_fetchcontent_source(yaml-cpp REF yaml-cpp-0.9.0)
 FetchContent_Declare(
     yaml-cpp
     GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
-    GIT_TAG 0.8.0
+    GIT_TAG yaml-cpp-0.9.0
     GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(yaml-cpp)
-unset(CMAKE_POLICY_VERSION_MINIMUM CACHE)
 set(PULP_HAS_YAMLCPP TRUE)
-message(STATUS "Pulp: yaml-cpp 0.8.0 available (DESIGN.md import)")
+message(STATUS "Pulp: yaml-cpp 0.9.0 available (DESIGN.md import)")
 
 # three.js (MIT license) — native WebGPU bridge runtime, demos, and tests.
 # An explicit runtime directory lets release/install verification consume the

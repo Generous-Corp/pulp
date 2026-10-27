@@ -171,8 +171,58 @@ carries the current absolute per-voice expression value.
 
 ## Sample-Accurate Automation
 
-Format adapters preserve sparse host automation points in a per-block
-`ParameterEventQueue` and expose it during `Processor::process()`:
+The VST3, AU v2 and CLAP adapters preserve sparse host automation points in a
+per-block `ParameterEventQueue` and expose it during `Processor::process()`,
+each point at its offset in the block. AU v2 renders one call per slice
+between scheduled events, with each slice's points relative to the slice. AU
+v3, LV2, AAX and the standalone and headless hosts deliver every point too.
+
+Sample-accurate delivery is the default, and the speedup is an opt-out rather
+than an opt-in, because a processor that reads `param_events()` and silently
+received an empty queue would step its automation once per block (zipper noise
+on sweeps) with nothing failing, warning, or refusing to compile. The AU v2
+per-slice render is the default for the same reason: rendering once per buffer
+changes the output of a processor that reads the store inside each slice.
+
+A processor that reads its parameters once per block, through
+`state().get_value()`, opts out:
+
+```cpp
+bool wants_sample_accurate_parameters() const override { return false; }
+```
+
+Those three adapters then write each automated parameter's last value in the
+block to `StateStore`, leave the queue empty, and AU v2 renders the buffer in
+one call, so dense automation costs the processor nothing per point. A
+sample-accurate processor that reads automation only through `param_events()`
+can also override `wants_au_scheduled_parameter_slices()` to return false: AU
+v2 then renders the buffer in one call with every point at its buffer offset
+(a scheduled ramp arrives as a step to the ramp's starting value plus a ramp
+to its value at the block's end), as VST3 and CLAP do:
+
+```cpp
+bool wants_au_scheduled_parameter_slices() const override { return false; }
+```
+
+The adapters ask both hooks once, when they create the processor, so the
+answer must not change afterwards. The examples and
+the `pulp create` templates opt out because they read parameters once per
+block.
+
+Opting out a processor that does read `param_events()` is the one way to get
+this wrong: its queue is always empty and its parameters move once per block.
+The VST3, AU v2 and CLAP adapters record such a read on the audio thread (one
+relaxed atomic store) and log a warning once per processor, naming the
+processor and the override to remove. The warning is logged at deactivation or
+teardown, off the audio thread: VST3 `setActive(false)` and `terminate()`,
+CLAP `deactivate` and `destroy`, AU v2 `Cleanup()`.
+
+The record is a fixed table of 256 slots per plug-in module, found by
+hashing the queue's address and probing at most 8 slots, so the audio thread
+never allocates or locks for it. With very many opted-out instances of one
+plug-in alive at once (hundreds), a new instance may find no free slot and
+its misuse goes unreported; the warning is a development aid, not a
+guarantee.
 
 ```cpp
 void process(audio::BufferView<float>& output,
@@ -366,6 +416,15 @@ plugin-owned payloads are restored.
 `deserialize_plugin_state()` receives an empty span when loading an older blob
 that contains only `StateStore` data. Override implementations should treat
 empty input as "reset persisted plugin-owned state to defaults".
+
+State blobs carry content or root-relative references, never absolute paths. A
+session or preset is authored by whoever saved it, so a path inside it is
+untrusted input: a plugin that restored it verbatim would open any file the
+author named. A plugin that still has to read a path from an older blob should
+pass it through `pulp::audio::confine_restored_path(path, root)`
+(`core/audio/include/pulp/audio/restored_path.hpp`), which follows symlinks and
+returns the path only when it resolves inside the directory the plugin is
+allowed to read from, and skip the file (with a log line) otherwise.
 
 ## Thread Model
 

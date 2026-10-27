@@ -24,6 +24,12 @@ def load_json(path: pathlib.Path) -> dict:
     return data
 
 
+# The schema and its artifacts live in the private planning/ submodule, which an
+# external clone (and CI checkouts that do not fetch it) does not have.
+@unittest.skipUnless(
+    SCHEMA_PATH.is_file(),
+    f"planning/ submodule not checked out: {SCHEMA_PATH.relative_to(ROOT)} is missing",
+)
 class FrontendIrSchemaContractTests(unittest.TestCase):
     def setUp(self) -> None:
         self.schema = load_json(SCHEMA_PATH)

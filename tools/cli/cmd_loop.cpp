@@ -69,6 +69,9 @@ void print_help() {
            "  --examples                        Configure the source checkout with example "
            "projects\n"
            "  --no-watch                        Set/clear focus state and exit (no watch)\n"
+           "  --no-dev-shared                   Link plug-ins statically instead of against the\n"
+           "                                    development-only shared Pulp runtime (macOS SDK "
+           "projects)\n"
            "  --allow-unsupported-sdk           Bypass the CLI-vs-project SDK guard (unsupported)\n"
            "  -h, --help                        Show this help\n\n"
            "Examples:\n"
@@ -102,7 +105,7 @@ bool missing_value(const std::vector<std::string>& args, size_t i) {
 int cmd_loop(const std::vector<std::string>& args) {
     bool standalone_mode = false;
     auto project_root = resolve_active_project_root(&standalone_mode);
-    (void)standalone_mode; // Reserved for future loop-mode-specific divergences.
+    // An SDK project (standalone_mode) gets the dev-shared link by default.
 
     // Parse flags. We accept --status / --off / --help even outside a
     // project root so the user can clear focus state from anywhere.
@@ -115,6 +118,7 @@ int cmd_loop(const std::vector<std::string>& args) {
     bool run_validate = false;
     bool allow_unsupported_sdk = false;
     bool examples = false;
+    bool no_dev_shared = false;
     bool after_separator = false;
     std::string test_filter;
     std::string launch_target;
@@ -181,6 +185,8 @@ int cmd_loop(const std::vector<std::string>& args) {
             allow_unsupported_sdk = true;
         } else if (a == "--examples") {
             examples = true;
+        } else if (a == "--no-dev-shared") {
+            no_dev_shared = true;
         } else if (a == "--run") {
             if (missing_value(args, i)) {
                 std::cerr << "pulp loop: --run requires a value\n";
@@ -312,8 +318,8 @@ int cmd_loop(const std::vector<std::string>& args) {
 
     auto build_dir = project_root / "build";
 
-    BuildPlan plan(
-        {project_root, build_dir, standalone_mode, examples, build_all, build_args, "pulp loop"});
+    BuildPlan plan({project_root, build_dir, standalone_mode, examples, build_all, build_args,
+                    "pulp loop", dev_shared_ui_default(no_dev_shared, standalone_mode)});
     if (!plan.ok()) {
         std::cerr << "pulp loop: " << plan.error() << "\n";
         return plan.exit_code();

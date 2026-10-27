@@ -727,7 +727,6 @@
     "tools/scripts/test_build_migration_index.py",
     "tools/scripts/test_build_migration_index_extra.py",
     "tools/scripts/test_build_skia_android_pin.py",
-    "tools/scripts/test_check_au_component_preflight.py",
     "tools/scripts/test_check_daw_bench_evidence.py",
     "tools/scripts/test_check_docs_consistency.py",
     "tools/scripts/test_check_format_validation.py",

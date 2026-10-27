@@ -35,9 +35,12 @@
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
+#include <pulp/view/audio_widgets.hpp>
+#include <pulp/view/value_source.hpp>
 #include <pulp/canvas/canvas.hpp>
 
 #include <atomic>
+#include <objc/runtime.h>
 #include <cstdlib>
 #include <memory>
 #include <string>
@@ -81,7 +84,18 @@ public:
             l->flex().preferred_height = 28;
             root->add_child(std::move(l));
         }
+        root->add_child(make_blurred_panel());
         return root;
+    }
+
+    // A blurred panel paints through a layer, so each frame leaves a scratch
+    // target in Skia's cache that a GPU trim can return.
+    static std::unique_ptr<view::View> make_blurred_panel() {
+        auto panel = std::make_unique<view::View>();
+        panel->set_background_color(canvas::Color::rgba8(90, 140, 220));
+        panel->set_filter_blur(4.0f);
+        panel->flex().preferred_height = 64;
+        return panel;
     }
 };
 
@@ -516,6 +530,581 @@ TEST_CASE("mac CPU plugin host reopen survives a display-link teardown race",
 
         host2->detach();
         host2.reset();
+        [window close];
+    }
+}
+
+namespace smoke {
+
+/// Counts every paint the host drives through the tree.
+class PaintCountingView : public view::View {
+  public:
+    void paint(canvas::Canvas&) override {
+        paints.fetch_add(1, std::memory_order_relaxed);
+    }
+    std::atomic<int> paints{0};
+};
+
+} // namespace smoke
+
+TEST_CASE("a silent source-bound meter editor stops painting on both mac plugin hosts",
+          "[gpu][skia][plugin-gpu-host][mac][display-link][idle-gate]") {
+    // A bound meter is a FrameClock subscriber for as long as it is bound. The
+    // hosts used to composite the whole editor every vsync while any subscriber
+    // was live, so a static editor with a silent meter repainted at the display
+    // rate forever. The clock must keep ticking (the meter keeps reading its
+    // source) while no frame is painted, and a real level must still paint.
+    smoke::clear_no_editor_env();
+    for (const bool gpu : {false, true}) {
+        DYNAMIC_SECTION((gpu ? "GPU" : "CPU") << " host") {
+            @autoreleasepool {
+                NSWindow* window =
+                    [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, smoke::kW, smoke::kH)
+                                                styleMask:NSWindowStyleMaskTitled
+                                                  backing:NSBackingStoreBuffered
+                                                    defer:NO];
+                if (!window || !window.contentView)
+                    SKIP("No Cocoa window available.");
+
+                auto root = std::make_unique<view::View>();
+                if (gpu)
+                    root->set_requires_gpu_host(true);
+                auto counting = std::make_unique<smoke::PaintCountingView>();
+                auto* counter = counting.get();
+                counter->set_bounds({0, 0, 40, 40});
+                root->add_child(std::move(counting));
+                auto meter = std::make_unique<view::Meter>();
+                view::Meter* m = meter.get();
+                m->set_bounds({60, 10, 20, 200});
+                root->add_child(std::move(meter));
+                auto source = std::make_shared<view::MeterSource>();
+                view::MeterFrame silent;
+                silent.channels = 1;
+                source->publish(silent);
+                m->set_source(source, 0);
+
+                view::PluginViewHost::Options opts;
+                opts.size = {smoke::kW, smoke::kH};
+                opts.use_gpu = gpu;
+                auto host = view::PluginViewHost::create(*root, opts);
+                REQUIRE(host != nullptr);
+                if (gpu && !host->is_gpu_backed()) {
+                    host.reset();
+                    [window close];
+                    SKIP("GPU plugin host unavailable on this runner.");
+                }
+                auto ticks = std::make_shared<std::atomic<int>>(0);
+                host->set_idle_callback([ticks]() { ticks->fetch_add(1); });
+                REQUIRE(host->try_attach_to_parent((__bridge void*)window.contentView));
+
+                int frames = 0;
+                while (ticks->load() == 0 && frames < 200) {
+                    smoke::pump_run_loop(1);
+                    ++frames;
+                }
+                if (ticks->load() == 0) {
+                    host->detach();
+                    host.reset();
+                    [window close];
+                    SKIP("No display link fired (no active CGDisplay).");
+                }
+                // Let the first frame(s) land, then measure a quiet window.
+                smoke::pump_run_loop(10);
+                const int paints_before = counter->paints.load();
+                const int ticks_before = ticks->load();
+                smoke::pump_run_loop(25); // ~0.5 s
+                const int quiet_ticks = ticks->load() - ticks_before;
+                const int quiet_paints = counter->paints.load() - paints_before;
+                INFO("ticks during the quiet window: " << quiet_ticks
+                                                       << ", paints: " << quiet_paints);
+                REQUIRE(quiet_ticks >= 5); // the editor is live and being pumped
+                CHECK(quiet_paints == 0);
+
+                // Control: a real level must paint.
+                view::MeterFrame loud;
+                loud.channels = 1;
+                loud.peak[0] = 0.8f;
+                loud.rms[0] = 0.5f;
+                source->publish(loud);
+                smoke::pump_run_loop(10);
+                CHECK(counter->paints.load() > paints_before + quiet_paints);
+
+                host->detach();
+                host.reset();
+                root.reset();
+                [window close];
+            }
+        }
+    }
+}
+
+namespace smoke {
+
+/// Records the region AppKit is redrawing (-getRectsBeingDrawn:count: on the
+/// host's NSView, valid only inside its drawRect:) while the CPU host paints
+/// the tree.
+class ClipProbeView : public view::View {
+  public:
+    void paint(canvas::Canvas&) override {
+        if (!host_view)
+            return;
+        const NSRect* rects = nullptr;
+        NSInteger count = 0;
+        [host_view getRectsBeingDrawn:&rects count:&count];
+        NSRect u = NSZeroRect;
+        for (NSInteger i = 0; i < count; ++i)
+            u = NSUnionRect(u, rects[i]);
+        last_clip = u;
+        ++paints;
+    }
+    NSView* __unsafe_unretained host_view = nil;
+    NSRect last_clip = NSZeroRect;
+    int paints = 0;
+};
+
+} // namespace smoke
+
+TEST_CASE("the mac CPU plugin host redraws only a bounded repaint's rect",
+          "[plugin-host][mac][display-link][partial-repaint]") {
+    // A knob value tick asks for its own box (request_repaint_self). The CPU
+    // host used to answer every request with -setNeedsDisplay:YES, so AppKit
+    // re-rasterized the whole editor for one knob or one meter; now the rect
+    // reaches -setNeedsDisplayInRect: and only that region is redrawn.
+    smoke::clear_no_editor_env();
+    @autoreleasepool {
+        NSWindow* window =
+            [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, smoke::kW, smoke::kH)
+                                        styleMask:NSWindowStyleMaskTitled
+                                          backing:NSBackingStoreBuffered
+                                            defer:NO];
+        if (!window || !window.contentView)
+            SKIP("No Cocoa window available.");
+
+        auto root = std::make_unique<view::View>();
+        auto probe_owned = std::make_unique<smoke::ClipProbeView>();
+        auto* probe = probe_owned.get();
+        probe_owned->set_position(view::View::Position::absolute);
+        probe_owned->flex().preferred_width = static_cast<float>(smoke::kW);
+        probe_owned->flex().preferred_height = static_cast<float>(smoke::kH);
+        root->add_child(std::move(probe_owned));
+        auto knob_owned = std::make_unique<view::Knob>();
+        auto* knob = knob_owned.get();
+        knob_owned->set_position(view::View::Position::absolute);
+        knob_owned->set_left(20);
+        knob_owned->set_top(20);
+        knob_owned->flex().preferred_width = 64;
+        knob_owned->flex().preferred_height = 64;
+        root->add_child(std::move(knob_owned));
+
+        view::PluginViewHost::Options opts;
+        opts.size = {smoke::kW, smoke::kH};
+        opts.use_gpu = false;
+        auto host = view::PluginViewHost::create(*root, opts);
+        REQUIRE(host != nullptr);
+        REQUIRE_FALSE(host->is_gpu_backed());
+        REQUIRE(host->try_attach_to_parent((__bridge void*)window.contentView));
+        probe->host_view = (__bridge NSView*)host->native_handle();
+
+        int frames = 0;
+        while (probe->paints == 0 && frames < 200) {
+            smoke::pump_run_loop(1);
+            ++frames;
+        }
+        if (probe->paints == 0) {
+            host->detach();
+            host.reset();
+            [window close];
+            SKIP("The CPU host never painted (no display link / window server).");
+        }
+        smoke::pump_run_loop(5);
+
+        // A bounded request: only the knob's box (plus halo) is redrawn.
+        const int before = probe->paints;
+        knob->set_value(knob->value() > 0.5f ? 0.1f : 0.9f);
+        smoke::pump_run_loop(5);
+        REQUIRE(probe->paints > before);
+        INFO("bounded clip: " << probe->last_clip.size.width << "x"
+                              << probe->last_clip.size.height);
+        CHECK(probe->last_clip.size.width <= 64 + 16);
+        CHECK(probe->last_clip.size.height <= 64 + 16);
+        CHECK(probe->last_clip.size.width >= 64);
+
+        // Control: a rect-less request still redraws the whole editor.
+        const int before_full = probe->paints;
+        root->request_repaint();
+        smoke::pump_run_loop(5);
+        REQUIRE(probe->paints > before_full);
+        CHECK(probe->last_clip.size.width >= smoke::kW);
+        CHECK(probe->last_clip.size.height >= smoke::kH);
+
+        // A bounded request made from the idle half of a tick (host automation
+        // reaching the editor through the store listeners) stays bounded too.
+        auto from_idle = std::make_shared<std::atomic<bool>>(false);
+        host->set_idle_callback([from_idle, knob]() {
+            if (from_idle->exchange(false))
+                knob->set_value(knob->value() > 0.5f ? 0.15f : 0.85f);
+        });
+        smoke::pump_run_loop(3);
+        const int before_idle = probe->paints;
+        from_idle->store(true);
+        smoke::pump_run_loop(5);
+        if (from_idle->load()) {
+            // The idle half only runs from the display link, which does not
+            // fire while the display sleeps.
+            host->set_idle_callback({});
+            host->detach();
+            host.reset();
+            root.reset();
+            [window close];
+            SKIP("No display link fired; the idle-half request was not exercised.");
+        } else {
+            REQUIRE(probe->paints > before_idle);
+            INFO("idle-half clip: " << probe->last_clip.size.width << "x"
+                                    << probe->last_clip.size.height);
+            CHECK(probe->last_clip.size.width <= 64 + 16);
+            CHECK(probe->last_clip.size.height <= 64 + 16);
+        }
+        host->set_idle_callback({});
+
+        host->detach();
+        host.reset();
+        root.reset();
+        [window close];
+    }
+}
+
+TEST_CASE("the mac CPU plugin host draws at the display rate, not the request rate",
+          "[plugin-host][mac][display-link][partial-repaint]") {
+    // Host automation and pointer drags arrive faster than the display
+    // refreshes. Each request used to mark the NSView at once, and AppKit
+    // re-rasterized at the end of every run-loop turn that carried one; the
+    // CPU host now holds requests for its display-link tick.
+    smoke::clear_no_editor_env();
+    @autoreleasepool {
+        NSWindow* window =
+            [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, smoke::kW, smoke::kH)
+                                        styleMask:NSWindowStyleMaskTitled
+                                          backing:NSBackingStoreBuffered
+                                            defer:NO];
+        if (!window || !window.contentView)
+            SKIP("No Cocoa window available.");
+
+        auto root = std::make_unique<view::View>();
+        auto counting = std::make_unique<smoke::PaintCountingView>();
+        auto* counter = counting.get();
+        counter->set_bounds({0, 0, 40, 40});
+        root->add_child(std::move(counting));
+
+        view::PluginViewHost::Options opts;
+        opts.size = {smoke::kW, smoke::kH};
+        opts.use_gpu = false;
+        auto host = view::PluginViewHost::create(*root, opts);
+        REQUIRE(host != nullptr);
+        auto ticks = std::make_shared<std::atomic<int>>(0);
+        host->set_idle_callback([ticks]() { ticks->fetch_add(1); });
+        REQUIRE(host->try_attach_to_parent((__bridge void*)window.contentView));
+        int frames = 0;
+        while (ticks->load() == 0 && frames < 200) {
+            smoke::pump_run_loop(1);
+            ++frames;
+        }
+        if (ticks->load() == 0) {
+            host->detach();
+            host.reset();
+            [window close];
+            SKIP("No display link fired (no active CGDisplay).");
+        }
+        smoke::pump_run_loop(5);
+
+        // 40 requests, one per ~1 ms run-loop turn: about 40 ms, a handful of
+        // vsyncs at any refresh rate.
+        const int before = counter->paints.load();
+        const int ticks_before = ticks->load();
+        for (int i = 0; i < 40; ++i) {
+            root->request_repaint();
+            @autoreleasepool {
+                [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
+                                         beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.001]];
+            }
+        }
+        smoke::pump_run_loop(3);
+        const int paints = counter->paints.load() - before;
+        const int link_ticks = ticks->load() - ticks_before;
+        INFO("paints: " << paints << " for 40 requests over " << link_ticks << " link ticks");
+        CHECK(paints >= 1);
+        CHECK(paints <= link_ticks + 1);
+        CHECK(paints < 20);
+
+        host->detach();
+        host.reset();
+        root.reset();
+        [window close];
+    }
+}
+
+TEST_CASE("a knob drag on the mac CPU plugin host redraws the knob once per frame",
+          "[plugin-host][mac][display-link][partial-repaint][drag]") {
+    // Pointer motion is held for the next display-link frame. The held run used
+    // to mark the whole NSView, so AppKit redrew the full editor mid-frame and
+    // again when the frame delivered the motion; now only the gate opens and
+    // the knob's own bounded repaint is drawn, once per frame.
+    smoke::clear_no_editor_env();
+    @autoreleasepool {
+        NSWindow* window =
+            [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, smoke::kW, smoke::kH)
+                                        styleMask:NSWindowStyleMaskTitled
+                                          backing:NSBackingStoreBuffered
+                                            defer:NO];
+        if (!window || !window.contentView)
+            SKIP("No Cocoa window available.");
+
+        auto root = std::make_unique<view::View>();
+        auto probe_owned = std::make_unique<smoke::ClipProbeView>();
+        auto* probe = probe_owned.get();
+        probe_owned->set_position(view::View::Position::absolute);
+        probe_owned->flex().preferred_width = static_cast<float>(smoke::kW);
+        probe_owned->flex().preferred_height = static_cast<float>(smoke::kH);
+        probe_owned->set_hit_testable(false);
+        root->add_child(std::move(probe_owned));
+        auto knob_owned = std::make_unique<view::Knob>();
+        auto* knob = knob_owned.get();
+        knob_owned->set_position(view::View::Position::absolute);
+        knob_owned->set_left(20);
+        knob_owned->set_top(20);
+        knob_owned->flex().preferred_width = 64;
+        knob_owned->flex().preferred_height = 64;
+        root->add_child(std::move(knob_owned));
+
+        view::PluginViewHost::Options opts;
+        opts.size = {smoke::kW, smoke::kH};
+        opts.use_gpu = false;
+        auto host = view::PluginViewHost::create(*root, opts);
+        REQUIRE(host != nullptr);
+        auto ticks = std::make_shared<std::atomic<int>>(0);
+        host->set_idle_callback([ticks]() { ticks->fetch_add(1); });
+        REQUIRE(host->try_attach_to_parent((__bridge void*)window.contentView));
+        NSView* hv = (__bridge NSView*)host->native_handle();
+        probe->host_view = hv;
+        int frames = 0;
+        while (ticks->load() == 0 && frames < 200) {
+            smoke::pump_run_loop(1);
+            ++frames;
+        }
+        if (ticks->load() == 0) {
+            host->detach();
+            host.reset();
+            [window close];
+            SKIP("No display link fired (no active CGDisplay).");
+        }
+        smoke::pump_run_loop(5);
+
+        // The knob's centre, in window coordinates (the view is unflipped).
+        const NSPoint centre = [hv convertPoint:NSMakePoint(52, smoke::kH - 52) toView:nil];
+        auto mouse = [&](NSEventType type, NSPoint p) {
+            return [NSEvent mouseEventWithType:type
+                                      location:p
+                                 modifierFlags:0
+                                     timestamp:[[NSProcessInfo processInfo] systemUptime]
+                                  windowNumber:window.windowNumber
+                                       context:nil
+                                   eventNumber:0
+                                    clickCount:1
+                                      pressure:1.0];
+        };
+        const float before_value = knob->value();
+        [hv mouseDown:mouse(NSEventTypeLeftMouseDown, centre)];
+        smoke::pump_run_loop(2);
+        const int paints_before = probe->paints;
+        const int ticks_before = ticks->load();
+        for (int i = 1; i <= 40; ++i) {
+            [hv mouseDragged:mouse(NSEventTypeLeftMouseDragged,
+                                   NSMakePoint(centre.x, centre.y + i))];
+            @autoreleasepool {
+                [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
+                                         beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.001]];
+            }
+        }
+        smoke::pump_run_loop(3);
+        const int paints = probe->paints - paints_before;
+        const int link_ticks = ticks->load() - ticks_before;
+        const NSRect clip = probe->last_clip;
+        [hv mouseUp:mouse(NSEventTypeLeftMouseUp, NSMakePoint(centre.x, centre.y + 40))];
+        smoke::pump_run_loop(2);
+
+        INFO("paints " << paints << " over " << link_ticks << " ticks; last clip "
+                       << clip.size.width << "x" << clip.size.height);
+        REQUIRE(knob->value() != before_value); // the drag reached the knob
+        CHECK(paints >= 1);
+        CHECK(paints <= link_ticks + 1);
+        CHECK(clip.size.width <= 64 + 16);
+        CHECK(clip.size.height <= 64 + 16);
+
+        host->detach();
+        host.reset();
+        root.reset();
+        [window close];
+    }
+}
+
+TEST_CASE("a hidden GPU plugin host returns its GPU caches and repaints when shown (mac)",
+          "[gpu][skia][plugin-gpu-host][mac][gpu-trim]") {
+    smoke::clear_no_editor_env();
+    @autoreleasepool {
+        NSWindow* window =
+            [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, smoke::kW, smoke::kH)
+                                        styleMask:NSWindowStyleMaskTitled
+                                          backing:NSBackingStoreBuffered
+                                            defer:NO];
+        if (!window || !window.contentView)
+            SKIP("No Cocoa window available.");
+
+        smoke::GpuEditorProcessor p;
+        state::StateStore store;
+        p.set_state_store(&store);
+        p.define_parameters(store);
+        format::ViewBridge bridge(p, store);
+        std::string err;
+        REQUIRE(bridge.open(&err));
+
+        view::PluginViewHost::Options opts;
+        opts.size = {smoke::kW, smoke::kH};
+        opts.use_gpu = true;
+        auto host = view::PluginViewHost::create(*bridge.view(), opts);
+        REQUIRE(host != nullptr);
+        if (!host->is_gpu_backed()) {
+            bridge.close();
+            [window close];
+            SKIP("No GPU adapter (CPU fallback).");
+        }
+        host->set_idle_callback(format::make_editor_idle_pump(bridge));
+        REQUIRE(host->try_attach_to_parent((__bridge void*)window.contentView));
+        bridge.notify_attached();
+        smoke::pump_run_loop(6);
+
+        const auto shown = host->capture_back_buffer_png();
+        REQUIRE(smoke::looks_like_png(shown));
+        const auto before = host->gpu_cache_usage();
+        INFO("before hide: budgeted " << before.budgeted << " purgeable " << before.purgeable);
+        // Control: the blurred panel's layer target is purgeable between frames,
+        // so there is something for a hide to return.
+        REQUIRE(before.purgeable > 0);
+
+        // The host hides the editor. AppKit sends -viewDidHide, which is how an
+        // AU v2 editor (no view controller) learns it is hidden.
+        auto* view = (__bridge NSView*)host->native_handle();
+        REQUIRE(view != nil);
+        view.hidden = YES;
+        const auto hidden = host->gpu_cache_usage();
+        INFO("hidden: budgeted " << hidden.budgeted << " purgeable " << hidden.purgeable);
+        CHECK(hidden.purgeable == 0);
+        CHECK(hidden.budgeted < before.budgeted);
+
+        // Shown again, the editor repaints from its kept surfaces: same pixels,
+        // no blank frame.
+        view.hidden = NO;
+        host->repaint();
+        smoke::pump_run_loop(6);
+        const auto reshown = host->capture_back_buffer_png();
+        REQUIRE(smoke::looks_like_png(reshown));
+        CHECK(reshown == shown);
+
+        host->detach();
+        // A detached host still owns its surfaces until it is destroyed; the
+        // release stays safe there and frees what the last frame left.
+        host->release_gpu_caches();
+        CHECK(host->gpu_cache_usage().purgeable == 0);
+        host.reset();
+        bridge.close();
+        [window close];
+    }
+}
+
+TEST_CASE("release_gpu_caches is a no-op on a CPU plugin host (mac)",
+          "[plugin-gpu-host][mac][gpu-trim]") {
+    smoke::clear_no_editor_env();
+    @autoreleasepool {
+        auto root = smoke::make_cpu_content_view();
+        view::PluginViewHost::Options opts;
+        opts.size = {smoke::kW, smoke::kH};
+        opts.use_gpu = false;
+        auto host = view::PluginViewHost::create(*root, opts);
+        REQUIRE(host != nullptr);
+        REQUIRE_FALSE(host->is_gpu_backed());
+        host->release_gpu_caches();
+        const auto usage = host->gpu_cache_usage();
+        CHECK(usage.budgeted == 0);
+        CHECK(usage.purgeable == 0);
+    }
+}
+
+TEST_CASE("CLAP gui_hide returns the editor's GPU caches; gui_show repaints (mac)",
+          "[gpu][skia][plugin-gpu-host][mac][clap][gpu-trim]") {
+    smoke::clear_no_editor_env();
+    @autoreleasepool {
+        REQUIRE(clap_entry.init("test"));
+        auto* factory = static_cast<const clap_plugin_factory_t*>(
+            clap_entry.get_factory(CLAP_PLUGIN_FACTORY_ID));
+        REQUIRE(factory != nullptr);
+        auto* desc = factory->get_plugin_descriptor(factory, 0);
+        const clap_plugin_t* plugin = factory->create_plugin(factory, nullptr, desc->id);
+        REQUIRE(plugin != nullptr);
+        REQUIRE(plugin->init(plugin));
+        auto* gui =
+            static_cast<const clap_plugin_gui_t*>(plugin->get_extension(plugin, CLAP_EXT_GUI));
+        REQUIRE(gui != nullptr);
+        auto finish = [&] {
+            plugin->destroy(plugin);
+            clap_entry.deinit();
+        };
+        if (!gui->is_api_supported(plugin, CLAP_WINDOW_API_COCOA, false) ||
+            !gui->create(plugin, CLAP_WINDOW_API_COCOA, false)) {
+            finish();
+            SKIP("No Cocoa GUI or window server.");
+        }
+        auto* adapter = static_cast<format::clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
+        REQUIRE(adapter->editor_host != nullptr);
+        if (!adapter->editor_host->is_gpu_backed()) {
+            gui->destroy(plugin);
+            finish();
+            SKIP("No GPU adapter (CPU fallback).");
+        }
+
+        NSWindow* window =
+            [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, smoke::kW, smoke::kH)
+                                        styleMask:NSWindowStyleMaskTitled
+                                          backing:NSBackingStoreBuffered
+                                            defer:NO];
+        REQUIRE(window.contentView != nil);
+        clap_window_t cw{};
+        cw.api = CLAP_WINDOW_API_COCOA;
+        cw.cocoa = (__bridge void*)window.contentView;
+        REQUIRE(gui->set_parent(plugin, &cw));
+        REQUIRE(gui->show(plugin));
+        smoke::pump_run_loop(6);
+
+        const auto shown = adapter->editor_host->capture_back_buffer_png();
+        REQUIRE(smoke::looks_like_png(shown));
+        const auto before = adapter->editor_host->gpu_cache_usage();
+        INFO("before gui_hide: budgeted " << before.budgeted << " purgeable " << before.purgeable);
+        REQUIRE(before.purgeable > 0);
+
+        REQUIRE(gui->hide(plugin));
+        const auto hidden = adapter->editor_host->gpu_cache_usage();
+        INFO("after gui_hide: budgeted " << hidden.budgeted << " purgeable " << hidden.purgeable);
+        CHECK(hidden.purgeable == 0);
+        CHECK(hidden.budgeted < before.budgeted);
+
+        REQUIRE(gui->show(plugin));
+        adapter->editor_host->repaint();
+        smoke::pump_run_loop(6);
+        const auto reshown = adapter->editor_host->capture_back_buffer_png();
+        REQUIRE(smoke::looks_like_png(reshown));
+        CHECK(reshown == shown);
+
+        // Closing destroys the host, and with it every GPU resource it held.
+        gui->destroy(plugin);
+        CHECK(adapter->editor_host == nullptr);
+        finish();
         [window close];
     }
 }

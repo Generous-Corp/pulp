@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "event_id": "20261024-importer-followups-batch-20261024",
+  "kind": "change",
+  "created_at": "2026-10-24T12:10:04Z",
+  "slices": [
+    "retained-ui-kernel"
+  ],
+  "rationale": "retained-ui-kernel: SvgPathWidget strokes a styled gradient through Canvas::stroke_path, which both backends already honour with the active stroke gradient, instead of setting the canvas's sticky cap/join/miter and resetting them to defaults. Fixes a caller's non-default stroke state being clobbered; no API or authority boundary moves; Pulp-only.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "ctest --test-dir build -R pulp-test-svg-path-widget",
+    "python3 test/test_importer_differential_lab.py"
+  ],
+  "disposition": "pulp-only"
+}

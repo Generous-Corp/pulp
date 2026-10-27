@@ -38,6 +38,7 @@ class SdkProvenanceTests(unittest.TestCase):
             "PULP_TRACING:BOOL=OFF\n"
             "PULP_ENABLE_AUDIO_PROBES:BOOL=OFF\n"
             "PULP_ENABLE_INSPECTOR:BOOL=ON\n"
+            "PULP_DEV_BRIDGE_EXEC:BOOL=OFF\n"
             "PULP_GPU_AUDIO_HAS_VELLUM_D15:INTERNAL=FALSE\n"
             "PULP_GPU_AUDIO_VELLUM_D15_RELEASE_ELIGIBLE:INTERNAL=FALSE\n",
             encoding="utf-8",
@@ -117,7 +118,7 @@ class SdkProvenanceTests(unittest.TestCase):
         )
         self.assertEqual(
             marker["features"],
-            {"audio_probes": False, "inspector": True, "tracing": False},
+            {"audio_probes": False, "bridge_exec": False, "inspector": True, "tracing": False},
         )
         self.assertEqual(marker["integrity"]["schema"], provenance.INTEGRITY_SCHEMA)
         self.assertEqual(
@@ -283,6 +284,53 @@ class SdkProvenanceTests(unittest.TestCase):
         with self.assertRaises(provenance.ProvenanceError) as caught:
             self.marker()
         self.assertIn("tracing=OFF", str(caught.exception))
+
+    def test_build_with_shell_exec_bridge_cannot_mint_release_provenance(self) -> None:
+        # Control: the fixture cache says OFF and mints cleanly.
+        self.assertEqual(self.marker()["features"]["bridge_exec"], False)
+
+        path = self.build / "CMakeCache.txt"
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                "PULP_DEV_BRIDGE_EXEC:BOOL=OFF\n", "PULP_DEV_BRIDGE_EXEC:BOOL=ON\n"
+            ),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(provenance.ProvenanceError, "bridge_exec=OFF"):
+            self.marker()
+
+        # A source tree that predates the option compiled the bridge in
+        # unconditionally; a missing key must not read as "absent".
+        path.write_text(
+            path.read_text(encoding="utf-8").replace("PULP_DEV_BRIDGE_EXEC:BOOL=ON\n", ""),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(provenance.ProvenanceError, "PULP_DEV_BRIDGE_EXEC is missing"):
+            self.marker()
+
+    def test_verify_rejects_a_marker_claiming_the_shell_exec_bridge(self) -> None:
+        marker = self.marker()
+        marker["features"]["bridge_exec"] = True
+        provenance.write_atomically(self.prefix / "sdk-provenance.json", marker)
+        with self.assertRaisesRegex(provenance.ProvenanceError, "feature contract is unsafe"):
+            provenance.verify_release_marker(
+                self.prefix,
+                expected_platform="darwin-arm64",
+                expected_source_sha=self.sha,
+            )
+
+    def test_verify_accepts_a_marker_minted_before_the_bridge_exec_key_existed(self) -> None:
+        marker = self.marker()
+        del marker["features"]["bridge_exec"]
+        provenance.write_atomically(self.prefix / "sdk-provenance.json", marker)
+        self.assertEqual(
+            provenance.verify_release_marker(
+                self.prefix,
+                expected_platform="darwin-arm64",
+                expected_source_sha=self.sha,
+            ),
+            marker,
+        )
 
     def test_development_vellum_d15_cannot_mint_release_provenance(self) -> None:
         # Control: a build without D15 mints the production marker.
@@ -484,6 +532,7 @@ class SdkProvenanceTests(unittest.TestCase):
             "PULP_TRACING:BOOL=OFF\n"
             "PULP_ENABLE_AUDIO_PROBES:BOOL=OFF\n"
             "PULP_ENABLE_INSPECTOR:BOOL=OFF\n"
+            "PULP_DEV_BRIDGE_EXEC:BOOL=OFF\n"
             "PULP_GPU_AUDIO_HAS_VELLUM_D15:INTERNAL=FALSE\n"
             "PULP_GPU_AUDIO_VELLUM_D15_RELEASE_ELIGIBLE:INTERNAL=FALSE\n",
             encoding="utf-8",
@@ -499,6 +548,7 @@ class SdkProvenanceTests(unittest.TestCase):
             "PULP_TRACING:BOOL=OFF\n"
             "PULP_ENABLE_AUDIO_PROBES:BOOL=OFF\n"
             "PULP_ENABLE_INSPECTOR:BOOL=OFF\n"
+            "PULP_DEV_BRIDGE_EXEC:BOOL=OFF\n"
             "PULP_GPU_AUDIO_HAS_VELLUM_D15:INTERNAL=FALSE\n"
             "PULP_GPU_AUDIO_VELLUM_D15_RELEASE_ELIGIBLE:INTERNAL=FALSE\n",
             encoding="utf-8",
@@ -511,7 +561,7 @@ class SdkProvenanceTests(unittest.TestCase):
         provenance.write_atomically(self.prefix / "sdk-provenance.json", marker)
         self.assertEqual(
             marker["features"],
-            {"audio_probes": False, "inspector": False, "tracing": False},
+            {"audio_probes": False, "bridge_exec": False, "inspector": False, "tracing": False},
         )
         self.assertNotIn("integrity", marker)
         self.assertEqual(

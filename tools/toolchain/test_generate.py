@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import stat
 import tempfile
@@ -32,8 +33,9 @@ class GenerateTests(unittest.TestCase):
         (root / ".shipyard/vm-image.intel.toml").write_text(body, encoding="utf-8")
         for name in (
             generate.MISE_CONFIG, generate.MISE_TOOLS_CONFIG, generate.MISE_LOCK, generate.EXPECTED,
-            generate.SHIPYARD_PIN, generate.SHIPYARD_SUMS,
+            generate.SHIPYARD_PIN, generate.SHIPYARD_SUMS, generate.RUST_TOOLCHAIN,
         ):
+            (root / name).parent.mkdir(parents=True, exist_ok=True)
             (root / name).write_bytes((REPO / name).read_bytes())
 
     def test_five_runs_are_byte_identical(self) -> None:
@@ -186,6 +188,23 @@ class StrictPinTests(unittest.TestCase):
                 generate.load(path)
             self.assertIn("evidence.node", str(ctx.exception))
 
+    def test_dependency_inventory_names_the_pinned_mise_release(self) -> None:
+        # The weekly upstream-drift audit compares tools/deps/manifest.json's
+        # mise tag with jdx/mise's latest release, so it must name the release
+        # the toolchain manifest pins, or the audit measures a stale tag.
+        version = tomllib.loads(generate.SOURCE.read_text(encoding="utf-8"))["mise"]["version"]
+        inventory = json.loads((REPO / "tools/deps/manifest.json").read_text(encoding="utf-8"))
+        rows = [d for d in inventory["dependencies"] if d["name"] == "mise"]
+        self.assertEqual(1, len(rows))
+        self.assertEqual(version, rows[0]["version"])
+        upstream = rows[0]["upstream"]
+        self.assertEqual("git-tag", upstream["kind"])
+        self.assertEqual(f"v{version}", upstream["ref"])
+        # jdx/mise also tags sub-crates, so the audit only trusts tags matching
+        # mise's own release pattern; the pinned tag must be one of them.
+        self.assertEqual(r"v\d{4}\.\d{1,2}\.\d{1,3}", upstream["tag_pattern"])
+        self.assertRegex(upstream["ref"], f"^(?:{upstream['tag_pattern']})$")
+
     def test_rust_is_not_a_mise_tool(self) -> None:
         source = generate.SOURCE.read_text(encoding="utf-8")
         with tempfile.TemporaryDirectory() as td:
@@ -228,6 +247,42 @@ class StrictPinTests(unittest.TestCase):
             path.write_text(path.read_text(encoding="utf-8").replace('"cmake": "4.3.3"', '"cmake": "4.4.3"'), encoding="utf-8")
             self.assert_check_refuses(root, "stale or hand-edited")
 
+    def test_hand_edited_rust_toolchain_refuses(self) -> None:
+        # rustup reads this file, so a floating channel typed back into it
+        # would let every host build with its own `stable` again.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.fixture(root)
+            generate.generate(root, None, True)  # control: the copy is current
+            path = root / generate.RUST_TOOLCHAIN
+            path.write_text(path.read_text(encoding="utf-8").replace('channel = "1.', 'channel = "stable" # 1.'), encoding="utf-8")
+            self.assert_check_refuses(root, "rust-toolchain.toml: differs from tools/toolchain/manifest.toml")
+
+    def test_rust_toolchain_pins_the_manifest_rust_exactly(self) -> None:
+        data, _ = generate.load()
+        tc = data["toolchain"]
+        pinned = tomllib.loads((REPO / generate.RUST_TOOLCHAIN).read_text(encoding="utf-8"))["toolchain"]
+        self.assertEqual(tc["rust"], pinned["channel"])
+        self.assertRegex(pinned["channel"], generate.EXACT)
+        self.assertEqual(tc["rust_components"], pinned["components"])
+        self.assertEqual(tc["rust_targets"], pinned["targets"])
+        self.assertEqual("minimal", pinned["profile"])
+        expected = json.loads((REPO / generate.EXPECTED).read_text(encoding="utf-8"))
+        self.assertEqual(tc["rust_components"], expected["rust_components"])
+        self.assertEqual(tc["rust_targets"], expected["rust_targets"])
+
+    def test_a_rust_bump_moves_the_toolchain_file(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.fixture(root)
+            manifest = self.manifest(root)
+            manifest.write_text(re.sub(r'(?m)^rust = "[^"]*"', 'rust = "1.98.0"', manifest.read_text(encoding="utf-8"), count=1), encoding="utf-8")
+            with self.assertRaises(ValueError):
+                generate.update_rust_toolchain(root / generate.RUST_TOOLCHAIN, generate.load(manifest)[0], True)
+            generate.generate(root, None, False)
+            self.assertIn('channel = "1.98.0"', (root / generate.RUST_TOOLCHAIN).read_text(encoding="utf-8"))
+            generate.generate(root, None, True)
+
     def test_expectation_carries_the_checked_pins(self) -> None:
         import json
 
@@ -240,11 +295,11 @@ class StrictPinTests(unittest.TestCase):
 
     def test_mise_binary_must_be_pinned_by_digest(self) -> None:
         source = generate.SOURCE.read_text(encoding="utf-8")
-        digest = '87c18142dd67f5848b0236738eb9338976329266937ecd79b11121de64dd2d47'
+        digest = '284869e5b5f57211377f026309910bea91ef65b3a71b934295fa8bd712436dfc'
         cases = (
             (f'macos-arm64 = "{digest}"', f'macos-arm64 = "{digest[:-1]}"', "64-hex"),
             (f'macos-arm64 = "{digest}"', f'macos-arm65 = "{digest}"', "64-hex"),
-            ('path = "~/.local/opt/mise-2026.10.8/bin/mise"', 'path = "/opt/homebrew/bin/mise"', "with its version in the path"),
+            ('path = "~/.local/opt/mise-2026.10.17/bin/mise"', 'path = "/opt/homebrew/bin/mise"', "with its version in the path"),
         )
         for old, new, needle in cases:
             with self.subTest(new=new), tempfile.TemporaryDirectory() as td:
@@ -551,13 +606,14 @@ class StrictPinTests(unittest.TestCase):
             fake.write_text(
                 "#!/bin/sh\n"
                 f'if [ "$1" = --version ]; then echo "{data["mise"]["version"]} macos-arm64"; exit 0; fi\n'
-                f'echo "$1 MISE_DISABLE_UPDATE_WARNING=$MISE_DISABLE_UPDATE_WARNING" >> "{seen}"\n',
+                f'echo "$1 MISE_DISABLE_UPDATE_WARNING=$MISE_DISABLE_UPDATE_WARNING '
+                f'MISE_AUTO_INSTALL=$MISE_AUTO_INSTALL" >> "{seen}"\n',
                 encoding="utf-8")
             fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
             generate.write_mise_lock(root, data, fake)
             lines = seen.read_text(encoding="utf-8").splitlines()
             self.assertTrue(lines)  # control: the lock command ran
-            self.assertTrue(all(line == "lock MISE_DISABLE_UPDATE_WARNING=1" for line in lines), lines)
+            self.assertTrue(all(line == "lock MISE_DISABLE_UPDATE_WARNING=1 MISE_AUTO_INSTALL=0" for line in lines), lines)
 
 
 if __name__ == "__main__":

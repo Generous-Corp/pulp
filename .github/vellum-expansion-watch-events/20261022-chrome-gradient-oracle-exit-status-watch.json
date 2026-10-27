@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261022-chrome-gradient-oracle-exit-status-watch",
+  "created_at": "2026-10-22T19:25:21Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging",
+    "design-source-ingest",
+    "visual-proof-harness"
+  ],
+  "rationale": "Record a robustness fix to the gradient oracle: tools/import-validation/chrome_gradient_oracle.py stops treating headless Chrome's exit status as the verdict and instead accepts a run only when the screenshot PNG exists, decodes and has the requested size, failing loudly otherwise. Chrome 156 writes a complete screenshot and then exits 2 when its teardown watchdog expires, which made every oracle case raise. A fake-Chrome selftest (import-validation-chrome-gradient-oracle-selftest) pins success on PNG-then-exit-2 and failure on no PNG, a wrong-size PNG and an unreadable PNG. The import-design skill gains the matching gotcha for any other direct --screenshot launcher. The Chrome command line, capture semantics, DesignIR, rendering, thresholds and packaging are unchanged. Registered as watch-only so family coverage stays honest. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "import-validation-chrome-gradient-oracle-selftest",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

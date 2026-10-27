@@ -413,6 +413,17 @@ tools:
   availability: always
   skill: screenshot
   docs: guides/testing-advanced.md
+- name: frame-stamp-decode
+  path: tools/motion/visual/frame_stamp_decode.py
+  category: harness
+  use_when: You need proof that committed update N actually reached the screen (a retained or persistent scene that stops refreshing passes every similarity score), or how many captures showed the due update, held one, skipped one, or juddered.
+  invocation: python3 -m tools.motion.visual.frame_stamp_decode --frames-dir <captures> --scale 2
+  inputs: A PNG capture sequence of frames that paint `pulp::test_support::FrameStampView` (test/support/frame_stamp.hpp) or `paint_frame_stamp` at a known layout; optionally per-capture timestamps and the refresh period.
+  outputs: JSON with the decoded index per capture (-1 when unreadable), exact count and percentage, held, skipped, unknown, judder, regressed and distinct counts, and the list of problems; --min-exact-pct turns it into a gate (exit 1).
+  caveat: Sees only frames that carry the stamp; it proves which update a capture shows, never that the rest of the frame is drawn right. A capture that crops, scales or color-manages the stamp off its declared layout decodes as -1, so a run that is all -1 says the instrument is blind, not that nothing presented. Without --timestamps-json the captures are assumed one refresh apart, so judder is measured in capture slots, not time; and an unreadable capture is reported as unknown rather than counted held or skipped. It needs Pillow and exits 3 (a ctest skip) without it.
+  availability: always
+  skill: motion
+  docs: guides/motion-observability.md
 - name: check-label-coverage
   path: tools/import-validation/check_label_coverage.sh
   category: import-roundtrip
@@ -781,6 +792,18 @@ tools:
   availability: always
   skill: import-design
   docs: guides/importing-designs.md
+- name: chrome-backdrop-opacity-oracle
+  path: tools/import-validation/chrome_backdrop_opacity_oracle.py
+  category: visual-compare
+  use_when: Get Chrome's own composite of backdrop-filter under element and ancestor opacity.
+  invocation: python3 tools/import-validation/chrome_backdrop_opacity_oracle.py --help
+  inputs: test/fixtures/import-differential/22-backdrop-opacity.html.
+  outputs: A gridline and a gap pixel under each frosted box, as the C++ initializers test_css_backdrop_opacity.cpp asserts.
+  caveat: Needs a local Chrome, like the rest of the browser-capture lane. The oracle is Chrome's interpretation,
+    which is the target here but is not the CSS spec.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
 - name: diff-against-reference
   path: tools/import-validation/diff_against_reference.py
   category: visual-compare
@@ -806,7 +829,10 @@ tools:
     away.
   caveat: Only the regions you hand it. Anything outside a declared rect is UNCHECKED, and the built-in
     defaults are hand-authored percent rects for one specific design (Spectr) — pointing it at another
-    design silently scores the wrong boxes. Each region still scores by the position-blind metric above.
+    design silently scores the wrong boxes. The score itself is the position-blind metric above. The
+    ink-coverage gates catch reference ink the candidate left empty (a missing control shows as one
+    uncovered patch at its own size), but only in regions that declare coverage_floor or
+    max_uncovered_fraction, and only for presence (wrong colour and extra ink pass).
   availability: always
   skill: import-design
   docs: guides/importing-designs.md
@@ -902,7 +928,10 @@ tools:
   use_when: An import "looks off" and you need the NODE and the exact pixel delta, not a score.
   invocation: python3 tools/import-design/layout_parity.py <layout.json> [--gate-px 16] [--json report.json]
   inputs: The --dump-layout JSON from pulp-import-design, plus the design's own solved rects (its <stem>.geometry.json
-    sibling, which --dump-layout writes for you).
+    sibling, which --dump-layout writes for you). For an HTML/JSX import, `--capture <x.pulp-browser-capture>
+    --observer-layout <json>` instead takes Chromium's DOM-snapshot boxes as the design side, joined to the
+    pulp-design-ir-observe --layout views through the IR's backend_node_id (--ir defaults to the capture's
+    x.pulp.json sibling); an IR from a different capture session is refused, exit 2.
   outputs: Per-node dx/dy/dw/dh in design px, clustered by parent so one dropped alignment reports ONCE
     naming the parent; unmatched ids listed as dropped/extra (the import's synthetic `/mask-scope` clip
     wrappers are tallied separately as synthetic_extra, never as EXTRA). Exit 1 on findings; --gate-px
@@ -993,6 +1022,23 @@ tools:
   availability: always
   skill: import-design
   docs: guides/importing-designs.md
+- name: text-raster-decomposition
+  path: tools/import-validation/text_raster_decomposition.py
+  category: visual-compare
+  use_when: Imported text fails a pixel score and you need to know whether the glyphs are too heavy, sit
+    off by a fraction of a pixel, or have a different coverage curve, per text node.
+  invocation: python3 tools/import-validation/text_raster_decomposition.py crops --capture <browser-capture-dir>
+    --cand <render.png> [--json <report.json>]
+  inputs: A browser-capture directory (browser.png plus dom-snapshot.json) and an equal-sized render; or
+    a labels file with Chromium baselines and two renders (analyze).
+  outputs: Per text node ink ratio, lit-pixel ratio, centroid dx/dy, best integer shift and the coverage
+    transfer curve, plus a summary. Writes a Chromium fixture page (html) and a probe spec (spec).
+  caveat: Assumes light text on a locally flat darker background, which the box-border background estimate
+    relies on; boxes with a busy border carry background_spread so a reader can discount them. Ink ratio
+    is position-blind and centroid is ink-blind, so read them together. It decomposes; it gates nothing.
+  availability: always
+  skill: text-metrics
+  docs: guides/importing-designs.md
 - name: thumb-parity
   path: tools/import-design/thumb_parity.py
   category: visual-compare
@@ -1027,6 +1073,10 @@ tools:
   skill: import-design
   docs: guides/importing-designs.md
 exclude:
+- path: tools/audio/fdn_reference/generate.sh
+  reason: Test-fixture generator. It records the FDN reverb's reference envelopes from a released
+    engine for test_fdn_reverb_block_engine.cpp; it is rerun only when that table is deliberately
+    re-recorded, not a tool an agent reaches for.
 - path: tools/import-design/jsx-runtime/materialized_source_emitter.mjs
   reason: Internal source-emitter implementation launched by pulp-import-design's --emit materialized-runtime; agents should invoke pulp import-design so browser capture, IDs, and packaging contracts stay together.
 - path: tools/import-design/browser_capture/browser_process.mjs

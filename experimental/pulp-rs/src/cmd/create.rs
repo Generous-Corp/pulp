@@ -394,6 +394,7 @@ pub fn scaffold(
     let ns = to_namespace_name(&args.name);
     let lower_underscored = lower_name.replace('-', "_");
     let header_name = format!("{lower_underscored}.hpp");
+    let source_name = format!("{lower_underscored}.cpp");
     let plugin_code = make_plugin_code(&class_name);
     let aax_product_code = make_aax_product_code(&class_name);
     let mfr_code = make_mfr_code(&args.manufacturer);
@@ -415,6 +416,7 @@ pub fn scaffold(
         ("NAMESPACE", &ns),
         ("FACTORY_NAME", &ns),
         ("HEADER_NAME", &header_name),
+        ("SOURCE_NAME", &source_name),
         ("TARGET_NAME", &class_name),
         ("MANUFACTURER", &args.manufacturer),
         ("MANUFACTURER_CODE", &mfr_code),
@@ -466,8 +468,9 @@ pub fn scaffold(
 
     // File map — same source-to-output list as C++.
     let test_name = format!("test_{lower_underscored}.cpp");
-    let file_map: [(&str, &str); 8] = [
+    let file_map: [(&str, &str); 9] = [
         ("processor.hpp.template", "processor.hpp"), // overwritten below
+        ("processor.cpp.template", "processor.cpp"), // overwritten below
         ("CMakeLists.txt.template", "CMakeLists.txt"),
         ("clap_entry.cpp.template", "clap_entry.cpp"),
         ("vst3_entry.cpp.template", "vst3_entry.cpp"),
@@ -478,8 +481,9 @@ pub fn scaffold(
     ];
     // We overwrite the processor header to <header_name>, and the test
     // to test_<lower>.cpp, via this table:
-    let rename: [(&str, &str); 2] = [
+    let rename: [(&str, &str); 3] = [
         ("processor.hpp", header_name.as_str()),
+        ("processor.cpp", source_name.as_str()),
         ("test.cpp", test_name.as_str()),
     ];
 
@@ -757,12 +761,25 @@ pub fn run(cwd: &Path, args: &CreateArgs, out: &mut impl Write) -> Result<i32> {
         )
         .map_err(io)?;
     }
+    // The generated CMakeLists.txt pins `find_package(Pulp <SDK_VERSION>)`, so
+    // this must be the SDK version the CLI was built from (the C++ path uses
+    // PULP_SDK_VERSION, which CMake also hands Cargo as PULP_RS_BUILD_VERSION).
+    // It is the baked value, never the PULP_RS_CLI_VERSION test override.
+    let sdk_version = crate::build_info::baked_cli_version();
+    if crate::build_info::baked_sdk_version().is_none() {
+        eprintln!(
+            "warning: this pulp was built by cargo alone, so it knows no Pulp SDK version; \
+             the project pins find_package(Pulp {sdk_version}) and sdk_version = \"{sdk_version}\", \
+             which is the CLI crate's version, not an SDK release. Rebuild the CLI with \
+             `pulp build` or fix both pins by hand."
+        );
+    }
     scaffold(
         args,
         &out_dir,
         &templates_base,
         project_root.as_deref(),
-        "0.0.0-pulp-rs",
+        sdk_version,
         out,
     )?;
     writeln!(out, "\nScaffolding complete at {}", out_dir.display()).map_err(io)?;

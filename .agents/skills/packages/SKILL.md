@@ -40,6 +40,47 @@ Or read the registry directly for full details:
 cat tools/packages/registry.json | python3 -m json.tool
 ```
 
+## Remote registry signing (registry owner)
+
+`pulp search` reaches the remote registry
+(`default_remote_registry_url()` in `tools/cli/package_registry.hpp`) only
+when the project has no `tools/packages/registry.json`. The CLI trusts that
+remote `registry.json` only with a verified `registry.json.sig` beside it: an
+Ed25519 signature over `"pulp-package-registry-sig-v1\n" + sha256_hex(bytes)
++ "\n"`, checked against `kPinnedRegistrySignerPublicKeyHex` in
+`tools/cli/package_registry_trust.hpp`. Enforcement is keyed on that pin:
+while it is empty (no key pinned yet) the registry is used unsigned and
+`pulp search` prints a one-line notice; once a key is pinned, unsigned or
+mismatching registries are refused (`--allow-unsigned-registry` overrides for
+one run, loudly), and a cached copy is reused only while the
+`registry-cache.json.sig` cached beside it still verifies against the pinned
+key (re-checked on every load, so writing the cache directory cannot forge
+trust).
+Pinning the key is therefore the switch that turns verification on; ship it
+only after `registry.json.sig` is published.
+
+Owner steps, once per registry change, with nothing but Python:
+
+```bash
+# once: create the seed (private; back it up) and pin the printed public key
+python3 tools/scripts/sign_package_registry.py keygen --out ~/.config/pulp/secrets/package-registry.seed
+#   -> paste the public key into kPinnedRegistrySignerPublicKeyHex and ship that CLI
+
+# every change: sign the exact bytes you publish, then publish both files
+python3 tools/scripts/sign_package_registry.py sign --key ~/.config/pulp/secrets/package-registry.seed registry.json
+#   -> registry.json.sig next to registry.json, same URL prefix
+
+# optional: prove the pair before publishing
+python3 tools/scripts/sign_package_registry.py verify --public-key <hex> registry.json registry.json.sig
+```
+
+Sign the bytes as served: any re-serialisation (pretty-printing, CRLF) after
+signing invalidates the signature. Rotating the key means pinning the new
+public key in a CLI release first, then signing with the new seed; CLIs still
+pinned to the old key will refuse the newly signed registry. The helper's
+`test_sign_package_registry.py` and the C++ registry tests share one fixed
+vector so the two implementations cannot drift apart silently.
+
 ## Package Categories
 
 | Category | Packages | What They Provide |
@@ -145,6 +186,17 @@ commit. When you bump such a tag, update `upstream.commit` in the same change
 (`git ls-remote <repo> 'refs/tags/<tag>^{}'` gives the peeled commit), or the
 gate fails on every row from that dependency.
 
+### An upstream that tags more than one product needs `tag_pattern`
+
+`audit.py --check-upstream` reports `latest=` from the GitHub releases API, else
+the highest semver tag. A repository that also tags sub-crates or side products
+can win with the wrong tag. Add `"tag_pattern": "<regex>"` to the row's
+`upstream` (full-match against the tag name): tags outside it are ignored, and a
+releases-API answer outside it is discarded and reported as a "tag-order guess".
+A declared pattern also disables the year-shaped-major filter, so date-versioned
+projects (mise) work. An invalid regex flags only that row; the rest of the audit
+still runs.
+
 ## Overlap Awareness
 
 Before suggesting a package, check if Pulp's built-in `core/signal/` already covers the need:
@@ -183,6 +235,22 @@ blocked by default, but the current CLI also accepts
 `--license-override commercial` for them, records a compliance warning, and
 leaves distribution responsibility with the project. Prefer permissive
 alternatives from the registry when available.
+
+### A registry `license` must name the license the project actually ships
+
+Read the project's own LICENSE file at the pinned commit before writing the
+`license` field; "BSD-like" is not `BSD-3-Clause`. PFFFT was listed as
+BSD-3-Clause for months, although its LICENSE.txt is the FFTPACK license from
+UCAR, with its own wording. A permissive license with no SPDX identifier gets a
+`LicenseRef-<Name>` token and a `license_note` stating its conditions. The CLI
+then reports it for review, instead of calling it allowed under a name it does
+not carry.
+
+Check a pinned annotated tag on a full clone, or with
+`git ls-remote <repo> 'refs/tags/<tag>^{}'`. A `git clone --depth 1 --branch
+<tag>` can print "is not a commit!" for an annotated tag that resolves fine.
+The package's test stub under `tools/packages/test-stubs/` is the install-path
+check: configure, build and run it.
 
 ## Attribution Audit
 
@@ -272,6 +340,25 @@ alias differs from the canonical name — add the alias to
 `DEFAULT_ALIASES` in `tools/deps/audit.py` or the `external_names`
 list on the manifest entry.
 
+**Material embedded inside a fixture is redistribution too.** A
+self-contained HTML test fixture (a Claude standalone bundle, a panel with an
+inlined design pack) can carry base64 fonts and whole script builds such as
+React or `@babel/standalone`. Nothing scans for them, so `--strict` stays green
+while the repo ships them undeclared. Decode the bundle's assets and read each
+font's `name` table (IDs 0, 5, 13, 14) and each script's banner before
+committing. Then give every one the four attribution entries above (category
+`test-fixture`) and ship the license text beside the fixture. The
+`holdout/` panels under `test/fixtures/import-differential/` are the worked
+example. For an MIT script, fetch the package's own `LICENSE` from its
+registry tarball instead of reusing another entry's text: `@babel/standalone`
+wraps the same words on different lines from React's.
+
+**Edit `tools/deps/manifest.json` as text, not with `json.dump`.** The file is
+hand-formatted, with one-line `upstream` objects and inline lists, so a
+load-and-dump round trip rewrites every entry. A one-entry change then becomes
+a ~500-line diff. Splice the new block in, then `json.loads` the result to
+confirm it still parses.
+
 ## Bundled Toolchain Pins
 
 Some prebuilt toolchains carry bundled third-party components that are not
@@ -324,7 +411,7 @@ physically cannot disagree about which binary is in use — and a pin bump
 self-invalidates the cache. When you bump either the slice or the toolchain,
 bump them in the manifest, never by editing a URL into a workflow.
 
-The Skia toolchain itself is pinned at `chrome/m153` via the
+The Skia toolchain itself is pinned at `chrome/m157` via the
 `danielraffel/skia-builder` fork (see `tools/deps/manifest.json` →
 `determinism.skia_builder_fork`). The fork tracks upstream
 `olilarkin/skia-builder`'s tag pattern and additionally publishes iOS
@@ -363,7 +450,7 @@ Apple Silicon dev machines) only needs `arm64`.
 
 The **V8** toolchain follows the same prebuilt-pin pattern (added 2026-06).
 It is the optional JS engine backend (`PULP_JS_ENGINE=v8`), a sealed
-embeddable `libv8` pinned at tag `v8-m153-15.3.76.5-26cef0256b0e` via the
+embeddable `libv8` pinned at tag `v8-m157-15.7.112.5-3362da6c495d` via the
 `danielraffel/v8-builder` fork (`tools/deps/manifest.json` → V8 entry,
 `determinism.release_assets` per-platform URL + sha256). Fetched by
 `tools/scripts/fetch_v8_for_release.py` into `external/v8-build/<platform>/`
@@ -373,7 +460,7 @@ manifest row for V8 (BSD-3-Clause) plus the bundled-component NOTICE
 attribution (ICU/zlib/Abseil), NOT separate manifest rows for the nested
 libs (their distribution boundary is the parent `libv8`). Re-verify the
 NOTICE list against the v8-builder source and artifact evidence when the V8 pin
-bumps; the m153 assets do not carry a separate third-party manifest, so absence
+bumps; the m153 and m157 assets do not carry a separate third-party manifest, so absence
 of that file is not evidence of an empty bundled dependency set. iOS publishes
 an actual jitless simulator `V8.framework` marked `library: false`: Pulp
 validates its provenance and headers but has no device/AUv3 runtime acceptance
@@ -498,6 +585,14 @@ the shared contract in
 - [`kits`](../kits/SKILL.md) — reusable Pulp code/UI/templates → a project
 - [`content`](../content/SKILL.md) — data-only packs (presets/samples) → an installed plugin
 - [`installable-tools`](../installable-tools/SKILL.md) — machine-level dev/agent tooling under `~/.pulp/tools/`, plus the shared validate-and-uninstall-from-outside-a-checkout bar
+
+## Realtime FFT dependency boundary
+
+Pulp's optional muFFT backend is a pinned, MIT-licensed FetchContent dependency
+used by `FftT` on non-Apple targets. Its C shim and plans preserve the
+audio-thread allocation contract: admission accounts for the largest single
+backend allocation, and Apple continues to use byte-identical vDSP admission.
+muFFT's own FFTW-linked benchmark and test targets are never built or shipped.
 
 ## JS-engine attribution in the dependency inventory
 

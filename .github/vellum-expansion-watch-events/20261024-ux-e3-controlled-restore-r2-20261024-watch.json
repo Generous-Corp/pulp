@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261024-ux-e3-controlled-restore-r2-20261024-watch",
+  "created_at": "2026-10-24T16:46:57Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "@pulp/react puts a controlled value control back to its committed value or checked prop after a handler rejects a discrete edit: the event trampoline records the delivered payload, the bridge's __dispatch__ prelude calls an after-dispatch hook once the outermost batch returns, and a new isWidgetParamBound query keeps parameter-bound widgets out of it. The checked prop now reaches the widget, and the bundle-size guard rises. Product bridge behaviour only: no design-import, capture, render-backend or proof authority moves.",
+  "tests": [
+    "cd packages/pulp-react && npm run build && npx vitest run",
+    "cd packages/pulp-react && npx vitest run test/controlled-value-restore.test.ts",
+    "ctest --test-dir build -R pulp-test-widget-bridge-animation",
+    "ctest --test-dir build -R pulp-test-widget-bridge-param-binding",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

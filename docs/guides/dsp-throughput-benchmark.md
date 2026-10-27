@@ -12,7 +12,8 @@ on a shared machine is noisy and a flaky perf gate is worse than none.
   non-uniform and zero-latency convolution, the FDN reverb, x4 oversampling
   (`fir_biquad`, `polyphase_iir`, `linear_phase_fir`) around a `tanh`, FIR
   filters, character delays, pitch/time, an 8-voice synth loop, compressor,
-  meter, biquad/SVF/ladder filters, oscillators, gain, FFT and resampling.
+  meter, biquad/SVF/ladder filters, oscillators, gain, FFT (full mirrored
+  forward and the half-spectrum real forward+inverse pair) and resampling.
   Each row reports:
   - **mean** ns/frame: median over repetitions of the whole-run time;
   - **p50**, **p99** and **max** ns/frame of individually timed blocks. Realtime

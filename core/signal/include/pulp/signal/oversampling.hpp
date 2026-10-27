@@ -1,13 +1,17 @@
 #pragma once
 
 #include <pulp/signal/biquad.hpp>
+#include <pulp/signal/frequency_response.hpp>
 #include <pulp/signal/halfband_iir.hpp>
 #include <pulp/signal/oversampling_fir.hpp>
 
 #include <algorithm>
 #include <array>
+#include <cmath>
+#include <complex>
 #include <cstddef>
 #include <functional>
+#include <numbers>
 #include <utility>
 
 namespace pulp::signal {
@@ -17,21 +21,42 @@ namespace pulp::signal {
 //
 // Three filter `Kind`s are available:
 //
-//   * `fir_biquad` (default) — a Butterworth Biquad pair per 2x stage.
+//   * `fir_biquad` — a Butterworth Biquad pair per 2x stage.
 //     Lightweight and symmetric, but a single biquad cannot reject much near
 //     the fold boundary: worst-case base-band alias rejection is only around
 //     7 dB, and the passband is about -1.9 dB at 0.3 of the base rate. Those
 //     figures hold at every factor — raising the factor buys headroom for the
 //     callback's own harmonics, not a cleaner filter. Reach for one of the
 //     kinds below when the anti-aliasing itself has to be good.
-//   * `polyphase_iir` — half-band polyphase IIR (Vaidyanathan /
-//     Regalia-Mitra) using `HalfBandUpsampler2x` /
-//     `HalfBandDownsampler2x`. Sample-rate-invariant, < 0.001 dB
-//     passband ripple, single-multiply-per-section inner loop. x4
-//     cascades two half-band stages.
+//   * `polyphase_iir` (default) — elliptic polyphase half-band IIR per 2x
+//     stage (`design_halfband_iir`). Minimum phase, so no constant latency,
+//     and the cheapest of the three: about a sixth of the biquad lane's cost
+//     at x2 while rejecting about 106 dB more. Its round trip delays the base band
+//     by 3.79 samples near DC at x2 (4.90 at x4), rising toward the passband
+//     edge, against the biquad lane's 0.97 (1.46). Both qualities keep the
+//     base band flat (< 1e-8 dB droop) to 0.485 Fs and reject images and
+//     aliases from 0.515 Fs: by 114.6 dB at `Quality::standard` and by
+//     153.2 dB at `Quality::pristine`, in the float
+//     build too: the stages keep their state in double, so a float round trip
+//     adds only the rounding of its float samples (about -150 dB). Upper
+//     stages only guard the base band, so they use short designs.
+//     `polyphase_stopband_db()` returns the per-quality figure,
+//     `polyphase_stage_design()` each stage's design, and
+//     `group_delay_samples()` the round trip's frequency-dependent delay.
 //   * `linear_phase_fir` — Kaiser-windowed FIR with a transition that ends at
 //     the base-rate Nyquist. `Quality::standard` is a 96 dB design flat to
 //     80% of Nyquist; `Quality::pristine` uses a 140 dB prototype flat to 90%.
+//     Pristine is a deliberately stricter tier than the ~86-90 dB equiripple
+//     half-band designs common elsewhere: its x2 stage is 385 taps (192
+//     samples of latency), so it costs more than such a design and should be
+//     compared with one only at a matched rejection. Standard is the tier to
+//     compare against those designs on cost. Each branch filters a whole
+//     chunk at a time (`detail::LinearPhaseOversamplingBlockStage2x`).
+//
+// A half-band IIR's transition is symmetric about base Nyquist, so content
+// in (0.5, 0.515) Fs folds onto (0.485, 0.5) Fs with only partial rejection:
+// above the passband and, at 44.1 kHz or more, above 21 kHz. The linear-phase
+// lane ends its transition at Nyquist instead and has no such region.
 //
 // Switch with `set_kind()`. All kinds share the same callback API so
 // callers don't need to know which filter is active. Configure factor,
@@ -39,20 +64,31 @@ namespace pulp::signal {
 // `process_block()` do not allocate after construction/configuration as
 // long as the supplied callback is also allocation-free.
 //
+// For the polyphase IIR and linear-phase lanes, `process_block()` runs each
+// filter stage over a whole chunk of samples and calls the callback for every
+// oversampled sample of the chunk before any decimation. The callback sees
+// exactly the samples, in exactly the order, that per-sample `process()`
+// calls would hand it, and the output is identical — every stage is causal
+// and processes its input in time order either way. The one exception: the
+// polyphase stages flush state below ~1e-30 (float) to zero at the end of
+// each chunk so silence decays to exact zero instead of a subnormal limit
+// cycle, and per-sample calls flush every sample, so the two can differ by
+// that much while a signal is dying away.
+//
 template <typename SampleType = float> class OversamplerT {
   public:
     enum class Factor { x2 = 2, x4 = 4, x8 = 8, x16 = 16 };
 
     /// Which anti-aliasing filter family the oversampler uses.
     enum class Kind {
-        fir_biquad,       ///< Original biquad lowpass on both sides.
-        polyphase_iir,    ///< Half-band polyphase IIR (allpass-network).
+        fir_biquad,       ///< Butterworth biquad lowpass on both sides; ~7 dB rejection.
+        polyphase_iir,    ///< Elliptic half-band polyphase IIR (allpass network). Default.
         linear_phase_fir, ///< Linear-phase FIR with reported integer latency.
     };
 
     enum class Quality {
-        standard, ///< 96 dB stopband, passband edge at 80% of Nyquist.
-        pristine, ///< 140 dB prototype, passband edge at 90% of Nyquist.
+        standard, ///< FIR: 96 dB, flat to 0.40 Fs. IIR: 114.6 dB, flat to 0.485 Fs.
+        pristine, ///< FIR: 140 dB, flat to 0.45 Fs. IIR: 153.2 dB, flat to 0.485 Fs.
     };
 
     struct Latency {
@@ -84,14 +120,12 @@ template <typename SampleType = float> class OversamplerT {
     }
     void set_kind(Kind kind) {
         kind_ = kind;
-        if (kind_ == Kind::linear_phase_fir)
-            configure_linear_phase_filters();
+        configure_kind_filters();
         reset();
     }
     void set_quality(Quality quality) {
         quality_ = quality;
-        if (kind_ == Kind::linear_phase_fir)
-            configure_linear_phase_filters();
+        configure_kind_filters();
         reset();
     }
     Kind kind() const {
@@ -109,7 +143,8 @@ template <typename SampleType = float> class OversamplerT {
 
     /// Linear-phase modes expose a constant delay suitable for host
     /// compensation. Minimum-phase IIR modes have frequency-dependent group
-    /// delay, so `constant` is false and no exact scalar is claimed.
+    /// delay, so `constant` is false and no exact scalar is claimed; see
+    /// `group_delay_samples()`.
     Latency latency() const noexcept {
         if (kind_ != Kind::linear_phase_fir)
             return {};
@@ -126,13 +161,85 @@ template <typename SampleType = float> class OversamplerT {
         return latency().input_samples;
     }
 
+    /// Group delay of the round trip (upsample, identity callback, downsample)
+    /// in base-rate samples at `frequency` cycles per base sample. Constant and
+    /// equal to `latency().exact_input_samples` for the linear-phase lane. The
+    /// figure is the LTI delay of the filter cascade; the biquad lane rejects
+    /// images so weakly that above ~0.2 Fs the decimator folds a tone's own
+    /// image back onto it, and the measured phase there departs from it.
+    double group_delay_samples(double frequency) const noexcept {
+        if (kind_ == Kind::linear_phase_fir)
+            return latency().exact_input_samples;
+        double total = 0.0;
+        const int stages = stage_count();
+        for (int stage = 0; stage < stages; ++stage) {
+            const double rate = static_cast<double>(1u << (stage + 1));
+            const double f = frequency / rate;
+            if (kind_ == Kind::polyphase_iir) {
+                // The interpolator is H on the zero-stuffed input; the
+                // decimator keeps H's odd-phase samples, one high-rate sample
+                // ahead of H's own delay.
+                const auto& design = iir_designs_[static_cast<std::size_t>(stage)];
+                total += (2.0 * halfband_iir_group_delay<SampleType>(design, f) - 1.0) / rate;
+            } else {
+                // Both biquads of a stage see the full high-rate stream and the
+                // decimator keeps even-phase samples.
+                total += 2.0 *
+                         section_group_delay(
+                             biquad_up_stages_[static_cast<std::size_t>(stage)].coefficients(),
+                             2.0 * std::numbers::pi * f) /
+                         rate;
+            }
+        }
+        return total;
+    }
+
+    /// The elliptic half-band design stage `stage` (0 to 3) uses in the
+    /// polyphase_iir lane at `quality`. Stage 0 runs at twice the base rate,
+    /// stage s at 2^(s+1) times it; frequencies in the design are relative to
+    /// that stage's own rate. A stage outside 0..3 returns an invalid design.
+    static HalfBandIirDesign polyphase_stage_design(Quality quality, int stage) noexcept {
+        // Stage 0 fixes the base-band edge; stage s only has to keep the same
+        // absolute band clean at 2^s times the rate, so its edge halves each
+        // stage and a much shorter design reaches the same floor. The base
+        // edge, 0.2425 of the 2x rate, is 0.485 Fs: a 0.03 Fs transition, so
+        // anything a callback creates between 0.515 Fs and the stage's own
+        // Nyquist meets the full stopband. Both qualities share it; pristine
+        // spends its extra sections on depth.
+        const bool pristine = quality == Quality::pristine;
+        constexpr std::array<std::size_t, kMaxStages> kStandardCounts = {12, 4, 3, 2};
+        constexpr std::array<std::size_t, kMaxStages> kPristineCounts = {16, 6, 4, 3};
+        constexpr double base_edge = 0.2425;
+        if (stage < 0 || stage >= static_cast<int>(kMaxStages))
+            return {};
+        const auto index = static_cast<std::size_t>(stage);
+        const double edge = base_edge / static_cast<double>(1u << index);
+        return design_halfband_iir(pristine ? kPristineCounts[index] : kStandardCounts[index],
+                                   edge);
+    }
+
+    /// The polyphase lane's stopband floor at `quality`, in dB (negative): the
+    /// worst equiripple level over every stage design. Each stage guards the
+    /// same absolute base band, so the lane rejects images and aliases into
+    /// that band by at least this much at any factor. -114.62 dB standard,
+    /// -153.23 dB pristine; documentation quotes them as 114.6 and 153.2 dB.
+    static double polyphase_stopband_db(Quality quality) noexcept {
+        double worst = -1e300;
+        for (int stage = 0; stage < static_cast<int>(kMaxStages); ++stage)
+            worst =
+                std::max(worst, halfband_iir_stopband_db(polyphase_stage_design(quality, stage)));
+        return worst;
+    }
+
     // Process a single sample with oversampled callback.
     // The callback receives an upsampled sample and returns the processed
     // output. The same callback fires N times per `process()` call for factor
     // xN (the loop runs at the oversampled rate). Prefer this templated path
     // for realtime use; it does not need to type-erase callbacks.
     template <typename Callback> SampleType process(SampleType input, Callback&& callback) {
-        return process_with_callback(input, std::forward<Callback>(callback));
+        SampleType output;
+        process_chunk(&input, &output, 1, callback);
+        return output;
     }
 
     // Convenience overload for callers that already hold a std::function. Taken by
@@ -142,7 +249,9 @@ template <typename SampleType = float> class OversamplerT {
     // std::function still costs an indirect call; hot paths want the templated
     // overload above.
     SampleType process(SampleType input, const std::function<SampleType(SampleType)>& callback) {
-        return process_with_callback(input, callback);
+        SampleType output;
+        process_chunk(&input, &output, 1, callback);
+        return output;
     }
 
     // Process a contiguous block through the same callback. `input` and
@@ -150,10 +259,11 @@ template <typename SampleType = float> class OversamplerT {
     template <typename Callback>
     void process_block(const SampleType* input, SampleType* output, std::size_t num_samples,
                        Callback&& callback) {
-        // Dispatch straight to the implementation instead of re-running overload
-        // resolution once per sample.
-        for (std::size_t i = 0; i < num_samples; ++i)
-            output[i] = process_with_callback(input[i], callback);
+        const std::size_t chunk = kScratchSamples / static_cast<std::size_t>(factor_value());
+        for (std::size_t offset = 0; offset < num_samples; offset += chunk) {
+            const std::size_t count = std::min(chunk, num_samples - offset);
+            process_chunk(input + offset, output + offset, count, callback);
+        }
     }
 
     void reset() {
@@ -161,9 +271,7 @@ template <typename SampleType = float> class OversamplerT {
             stage.reset();
         for (auto& stage : biquad_down_stages_)
             stage.reset();
-        for (auto& stage : hb_up_stages_)
-            stage.reset();
-        for (auto& stage : hb_down_stages_)
+        for (auto& stage : iir_stages_)
             stage.reset();
         for (auto& stage : fir_stages_)
             stage.reset();
@@ -171,10 +279,16 @@ template <typename SampleType = float> class OversamplerT {
 
   private:
     static constexpr std::size_t kMaxStages = 4;
+    // Oversampled samples per chunk; the base-rate chunk is this over the factor.
+    static constexpr std::size_t kScratchSamples = 512;
     Factor factor_ = Factor::x2;
-    Kind kind_ = Kind::fir_biquad;
+    Kind kind_ = Kind::polyphase_iir;
     Quality quality_ = Quality::standard;
     SampleType sample_rate_ = SampleType{44100.0f};
+
+    // Ping-pong buffers for the rate-changing stages.
+    std::array<SampleType, kScratchSamples> scratch_a_{};
+    std::array<SampleType, kScratchSamples> scratch_b_{};
 
     static constexpr int factor_value(Factor factor) noexcept {
         return static_cast<int>(factor);
@@ -187,15 +301,98 @@ template <typename SampleType = float> class OversamplerT {
         return count;
     }
 
+    // `count` must not exceed kScratchSamples / factor. `input` is fully
+    // consumed by the first stage before `output` is written, so they may
+    // alias.
     template <typename Callback>
-    SampleType process_with_callback(SampleType input, Callback&& callback) {
-        if (kind_ == Kind::linear_phase_fir) {
-            return process_linear_phase_fir(input, callback);
+    void process_chunk(const SampleType* input, SampleType* output, std::size_t count,
+                       Callback& callback) {
+        if (kind_ == Kind::fir_biquad) {
+            for (std::size_t i = 0; i < count; ++i)
+                output[i] = process_biquad_sample(input[i], callback);
+            return;
         }
+        const int stages = stage_count();
+        SampleType* buffers[2] = {scratch_a_.data(), scratch_b_.data()};
+        const SampleType* source = input;
+        std::size_t n = count;
+        int next = 0;
+        for (int stage = 0; stage < stages; ++stage) {
+            upsample_stage(stage, source, buffers[next], n);
+            source = buffers[next];
+            n *= 2;
+            next ^= 1;
+        }
+        SampleType* work = buffers[next ^ 1];
+        for (std::size_t i = 0; i < n; ++i)
+            work[i] = callback(work[i]);
+        for (int stage = stages; stage-- > 0;) {
+            n /= 2;
+            SampleType* destination = stage == 0 ? output : buffers[next];
+            downsample_stage(stage, work, destination, n);
+            work = destination;
+            next ^= 1;
+        }
+    }
+
+    void upsample_stage(int stage, const SampleType* input, SampleType* output, std::size_t n) {
+        const auto s = static_cast<std::size_t>(stage);
         if (kind_ == Kind::polyphase_iir) {
-            return process_polyphase_iir(input, callback);
+            iir_stages_[s].upsample(input, output, n);
+            return;
         }
-        return process_fir_biquad(input, callback);
+        fir_stages_[s].upsample(input, output, n);
+    }
+
+    void downsample_stage(int stage, const SampleType* input, SampleType* output, std::size_t n) {
+        const auto s = static_cast<std::size_t>(stage);
+        if (kind_ == Kind::polyphase_iir) {
+            iir_stages_[s].downsample(input, output, n);
+            return;
+        }
+        fir_stages_[s].downsample(input, output, n);
+    }
+
+    // The biquad lane stays sample by sample. Each biquad is one serial
+    // recurrence, so running a stage over a whole chunk leaves the core waiting
+    // on a single dependency chain; interleaving every stage's up and down
+    // filters per input sample lets those independent chains overlap, and
+    // measured about twice as fast.
+    template <typename Callback>
+    SampleType process_biquad_sample(SampleType input, Callback& callback) {
+        constexpr auto kMax = static_cast<std::size_t>(Factor::x16);
+        std::array<SampleType, kMax> values; // only [0, count) is ever read
+        std::array<SampleType, kMax> expanded;
+        values[0] = input;
+        std::size_t count = 1;
+        const int stages = stage_count();
+        for (int stage = 0; stage < stages; ++stage) {
+            auto& up = biquad_up_stages_[static_cast<std::size_t>(stage)];
+            for (std::size_t i = 0; i < count; ++i) {
+                expanded[2 * i] = up.process(SampleType{2} * values[i]);
+                expanded[2 * i + 1] = up.process(SampleType{0});
+            }
+            count *= 2;
+            std::copy_n(expanded.begin(), count, values.begin());
+        }
+        for (std::size_t i = 0; i < count; ++i)
+            values[i] = callback(values[i]);
+        for (int stage = stages; stage-- > 0;) {
+            auto& down = biquad_down_stages_[static_cast<std::size_t>(stage)];
+            count /= 2;
+            for (std::size_t i = 0; i < count; ++i) {
+                values[i] = down.process(values[2 * i]);
+                static_cast<void>(down.process(values[2 * i + 1]));
+            }
+        }
+        return values[0];
+    }
+
+    void configure_kind_filters() {
+        if (kind_ == Kind::linear_phase_fir)
+            configure_linear_phase_filters();
+        else if (kind_ == Kind::polyphase_iir)
+            configure_polyphase_filters();
     }
 
     // ── fir_biquad lane ────────────────────────────────────────────────
@@ -219,8 +416,7 @@ template <typename SampleType = float> class OversamplerT {
                                                         stage_cutoff, SampleType{0.707f},
                                                         stage_rate);
         }
-        if (kind_ == Kind::linear_phase_fir)
-            configure_linear_phase_filters();
+        configure_kind_filters();
     }
 
     void configure_linear_phase_filters() {
@@ -243,87 +439,19 @@ template <typename SampleType = float> class OversamplerT {
         }
     }
 
-    template <typename Callback>
-    SampleType process_fir_biquad(SampleType input, Callback& callback) {
-        std::array<SampleType, static_cast<std::size_t>(Factor::x16)> values{};
-        std::array<SampleType, static_cast<std::size_t>(Factor::x16)> expanded{};
-        values[0] = input;
-        std::size_t count = 1;
-        const int stages = stage_count();
-        for (int stage = 0; stage < stages; ++stage) {
-            for (std::size_t i = 0; i < count; ++i) {
-                expanded[2 * i] = biquad_up_stages_[stage].process(SampleType{2} * values[i]);
-                expanded[2 * i + 1] = biquad_up_stages_[stage].process(SampleType{0});
-            }
-            count *= 2;
-            std::copy_n(expanded.begin(), count, values.begin());
-        }
-        for (std::size_t i = 0; i < count; ++i)
-            values[i] = callback(values[i]);
-        for (int stage = stages; stage-- > 0;) {
-            count /= 2;
-            for (std::size_t i = 0; i < count; ++i) {
-                values[i] = biquad_down_stages_[stage].process(values[2 * i]);
-                static_cast<void>(biquad_down_stages_[stage].process(values[2 * i + 1]));
-            }
-        }
-        return values[0];
-    }
-
     // ── polyphase_iir lane ─────────────────────────────────────────────
-    std::array<HalfBandUpsampler2xT<SampleType>, kMaxStages> hb_up_stages_;
-    std::array<HalfBandDownsampler2xT<SampleType>, kMaxStages> hb_down_stages_;
-    std::array<detail::LinearPhaseOversamplingStage2x<SampleType>, kMaxStages> fir_stages_;
+    std::array<HalfBandIirDesign, kMaxStages> iir_designs_{};
+    std::array<HalfBandIirStageT<SampleType>, kMaxStages> iir_stages_;
 
-    template <typename Callback>
-    SampleType process_polyphase_iir(SampleType input, Callback& callback) {
-        std::array<SampleType, static_cast<std::size_t>(Factor::x16)> values{};
-        std::array<SampleType, static_cast<std::size_t>(Factor::x16)> expanded{};
-        values[0] = input;
-        std::size_t count = 1;
-        const int stages = stage_count();
-        for (int stage = 0; stage < stages; ++stage) {
-            for (std::size_t i = 0; i < count; ++i) {
-                hb_up_stages_[stage].process(values[i], expanded[2 * i], expanded[2 * i + 1]);
-            }
-            count *= 2;
-            std::copy_n(expanded.begin(), count, values.begin());
+    void configure_polyphase_filters() {
+        for (std::size_t stage = 0; stage < kMaxStages; ++stage) {
+            iir_designs_[stage] = polyphase_stage_design(quality_, static_cast<int>(stage));
+            iir_stages_[stage].configure(iir_designs_[stage]);
         }
-        for (std::size_t i = 0; i < count; ++i)
-            values[i] = callback(values[i]);
-        for (int stage = stages; stage-- > 0;) {
-            count /= 2;
-            for (std::size_t i = 0; i < count; ++i) {
-                values[i] = hb_down_stages_[stage].process(values[2 * i], values[2 * i + 1]);
-            }
-        }
-        return values[0];
     }
 
-    template <typename Callback>
-    SampleType process_linear_phase_fir(SampleType input, Callback& callback) {
-        std::array<SampleType, static_cast<std::size_t>(Factor::x16)> values{};
-        std::array<SampleType, static_cast<std::size_t>(Factor::x16)> expanded{};
-        values[0] = input;
-        std::size_t count = 1;
-        const int stages = stage_count();
-        for (int stage = 0; stage < stages; ++stage) {
-            for (std::size_t i = 0; i < count; ++i) {
-                fir_stages_[stage].upsample(values[i], expanded[2 * i], expanded[2 * i + 1]);
-            }
-            count *= 2;
-            std::copy_n(expanded.begin(), count, values.begin());
-        }
-        for (std::size_t i = 0; i < count; ++i)
-            values[i] = callback(values[i]);
-        for (int stage = stages; stage-- > 0;) {
-            count /= 2;
-            for (std::size_t i = 0; i < count; ++i) {
-                values[i] = fir_stages_[stage].downsample(values[2 * i], values[2 * i + 1]);
-            }
-        }
-        return values[0];
-    }
+    // ── linear_phase_fir lane ──────────────────────────────────────────
+    std::array<detail::LinearPhaseOversamplingBlockStage2x<SampleType>, kMaxStages> fir_stages_;
 };
 
 using Oversampler = OversamplerT<float>;

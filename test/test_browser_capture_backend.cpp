@@ -4,6 +4,7 @@
 #include "support/unique_temp_dir.hpp"
 #include "tools/import-design/browser_capture_backend.hpp"
 #include "tools/import-design/browser_capture_provenance.hpp"
+#include "tools/import-design/browser_probe_cache.hpp"
 
 #include <pulp/runtime/crypto.hpp>
 
@@ -199,6 +200,125 @@ TEST_CASE("browser capture provenance binds source browser viewport and material
     });
     INFO(result.message);
     REQUIRE(result);
+}
+
+TEST_CASE("browser capture provenance verifies a declared DOM snapshot binding",
+          "[import-design][browser-capture][provenance]") {
+    TempTree tree("provenance-snapshot");
+    const auto fixture = write_provenance_fixture(tree);
+    const std::string snapshot = "snapshot bytes";
+    tree.write("dom-snapshot.json", snapshot);
+    const auto snapshot_hash = pulp::runtime::sha256_hex(snapshot);
+    const auto legacy_envelope = read_file(fixture.envelope);
+    auto envelope = replace_once(
+        legacy_envelope, R"JSON("reference":)JSON",
+        R"JSON("documents":[{"snapshot_asset":"dom-snapshot.json","snapshot_sha256":")JSON" +
+            snapshot_hash + R"JSON("}],"reference":)JSON");
+    tree.write("capture.json", envelope);
+
+    const auto result = capture::validate_capture_provenance({
+        .envelope = tree.root() / "capture.json",
+        .source = fixture.source,
+        .materialized_document = fixture.materialized,
+        .browser = fixture.browser,
+        .initial_width = 1280,
+        .initial_height = 800,
+        .device_scale_factor = 2,
+    });
+    INFO(result.message);
+    REQUIRE(result);
+
+    SECTION("malformed document containers do not bypass snapshot validation") {
+        for (const auto* documents : {"{}", "null", "[]", "[null]", "42"}) {
+            const auto malformed =
+                replace_once(legacy_envelope, R"JSON("reference":)JSON",
+                             std::string("\"documents\":") + documents + ",\"reference\":");
+            tree.write("capture.json", malformed);
+            const auto rejected = capture::validate_capture_provenance({
+                .envelope = tree.root() / "capture.json",
+                .source = fixture.source,
+                .materialized_document = fixture.materialized,
+                .browser = fixture.browser,
+                .initial_width = 1280,
+                .initial_height = 800,
+                .device_scale_factor = 2,
+            });
+            INFO(documents);
+            REQUIRE_FALSE(rejected);
+            REQUIRE(rejected.message.find("snapshot documents are malformed") != std::string::npos);
+        }
+    }
+
+    SECTION("mismatch") {
+        auto mismatched = replace_once(envelope, snapshot_hash, std::string(64, '0'));
+        tree.write("capture.json", mismatched);
+        const auto rejected = capture::validate_capture_provenance({
+            .envelope = tree.root() / "capture.json",
+            .source = fixture.source,
+            .materialized_document = fixture.materialized,
+            .browser = fixture.browser,
+            .initial_width = 1280,
+            .initial_height = 800,
+            .device_scale_factor = 2,
+        });
+        REQUIRE_FALSE(rejected);
+        REQUIRE(rejected.message.find("does not match its sidecar") != std::string::npos);
+    }
+
+    SECTION("malformed declaration") {
+        auto malformed = replace_once(envelope, snapshot_hash, "ABCDEF");
+        tree.write("capture.json", malformed);
+        const auto rejected = capture::validate_capture_provenance({
+            .envelope = tree.root() / "capture.json",
+            .source = fixture.source,
+            .materialized_document = fixture.materialized,
+            .browser = fixture.browser,
+            .initial_width = 1280,
+            .initial_height = 800,
+            .device_scale_factor = 2,
+        });
+        REQUIRE_FALSE(rejected);
+        REQUIRE(rejected.message.find("declaration is malformed") != std::string::npos);
+    }
+
+    SECTION("missing sidecar") {
+        auto missing = replace_once(envelope, "dom-snapshot.json", "missing-snapshot.json");
+        tree.write("capture.json", missing);
+        const auto rejected = capture::validate_capture_provenance({
+            .envelope = tree.root() / "capture.json",
+            .source = fixture.source,
+            .materialized_document = fixture.materialized,
+            .browser = fixture.browser,
+            .initial_width = 1280,
+            .initial_height = 800,
+            .device_scale_factor = 2,
+        });
+        REQUIRE_FALSE(rejected);
+        REQUIRE(rejected.message.find("missing") != std::string::npos);
+    }
+
+    SECTION("escaping symlink") {
+        TempTree outside_tree("provenance-snapshot-outside");
+        outside_tree.write("snapshot.json", snapshot);
+        const auto outside = outside_tree.root() / "snapshot.json";
+        std::error_code ec;
+        fs::create_symlink(outside, tree.root() / "escaped-snapshot.json", ec);
+        if (ec)
+            SKIP("symlink creation unavailable: " << ec.message());
+        auto escaped = replace_once(envelope, "dom-snapshot.json", "escaped-snapshot.json");
+        tree.write("capture.json", escaped);
+        const auto rejected = capture::validate_capture_provenance({
+            .envelope = tree.root() / "capture.json",
+            .source = fixture.source,
+            .materialized_document = fixture.materialized,
+            .browser = fixture.browser,
+            .initial_width = 1280,
+            .initial_height = 800,
+            .device_scale_factor = 2,
+        });
+        REQUIRE_FALSE(rejected);
+        REQUIRE(rejected.message.find("escapes") != std::string::npos);
+    }
 }
 
 TEST_CASE("browser capture provenance rejects source hash omission and mismatch",
@@ -630,6 +750,175 @@ TEST_CASE("redaction keeps a leading-slash token that is not a path",
 #endif
 
 #ifndef _WIN32
+TEST_CASE("a remembered browser probe is reused until the browser changes",
+          "[import-design][browser-capture][probe-cache]") {
+    TempTree tree("probe-cache");
+    // Every --version read leaves a mark, so the test counts real launches.
+    const auto wrapper = [&](std::string_view version, std::string_view extra) {
+        const auto path = tree.write(
+            "browser-wrapper",
+            std::string("#!/bin/sh\n") + "echo launched >> \"$(dirname \"$0\")/launches\"\n" +
+                "echo 'Google Chrome " + std::string(version) + "'\n" + std::string(extra));
+        fs::permissions(path,
+                        fs::perms::owner_read | fs::perms::owner_write | fs::perms::owner_exec);
+        return path;
+    };
+    const auto launches = [&] {
+        std::ifstream input(tree.root() / "launches");
+        int count = 0;
+        for (std::string line; std::getline(input, line);)
+            ++count;
+        return count;
+    };
+    const auto browser = wrapper("123.0.0.0", "");
+    const auto script = tree.write("capture.mjs", "// fixture");
+
+    capture::BrowserDiscoveryOptions options;
+    options.node_executable = fs::path(PULP_BROWSER_CAPTURE_FIXTURE_PATH);
+    options.capture_script = script;
+    options.probe_cache_directory = tree.root() / "cache";
+    const capture::BrowserCandidate candidate{browser, capture::BrowserOrigin::explicit_override};
+
+    const auto fresh = capture::probe_browser(candidate, options);
+    INFO(fresh.failure);
+    REQUIRE(fresh.compatible);
+    CHECK(launches() == 1);
+
+    // The second discovery answers from the cache, field for field.
+    const auto remembered = capture::probe_browser(candidate, options);
+    REQUIRE(remembered.compatible);
+    CHECK(launches() == 1);
+    CHECK(remembered.product == fresh.product);
+    CHECK(remembered.version == fresh.version);
+    CHECK(remembered.major_version == fresh.major_version);
+    CHECK(remembered.protocol_version == fresh.protocol_version);
+    CHECK(remembered.build_hash == fresh.build_hash);
+    REQUIRE(remembered.node.ok());
+
+    // A replaced browser is a different key and is probed again.
+    wrapper("999.0.0.0", "# updated\n");
+    const auto updated = capture::probe_browser(candidate, options);
+    REQUIRE(updated.compatible);
+    CHECK(launches() == 2);
+    CHECK(updated.major_version == 999);
+
+    // Same bytes, new modification time: still a different browser.
+    fs::last_write_time(browser, fs::last_write_time(browser) + std::chrono::seconds(10));
+    REQUIRE(capture::probe_browser(candidate, options).compatible);
+    CHECK(launches() == 3);
+    REQUIRE(capture::probe_browser(candidate, options).compatible);
+    CHECK(launches() == 3);
+
+    // A changed capture script is part of the key too.
+    tree.write("capture.mjs", "// fixture, revised");
+    REQUIRE(capture::probe_browser(candidate, options).compatible);
+    CHECK(launches() == 4);
+
+    // Without a cache directory every discovery probes.
+    auto uncached = options;
+    uncached.probe_cache_directory.reset();
+    REQUIRE(capture::probe_browser(candidate, uncached).compatible);
+    CHECK(launches() == 5);
+}
+
+TEST_CASE("a failed browser probe is never remembered",
+          "[import-design][browser-capture][probe-cache]") {
+    TempTree tree("probe-cache-failure");
+    const auto browser =
+        tree.write("browser-wrapper", "#!/bin/sh\necho launched >> \"$(dirname \"$0\")/launches\"\n"
+                                      "echo 'Google Chrome 123.0.0.0'\n");
+    fs::permissions(browser,
+                    fs::perms::owner_read | fs::perms::owner_write | fs::perms::owner_exec);
+    const auto script = tree.write("probe-refuses.mjs", "// fixture");
+
+    capture::BrowserDiscoveryOptions options;
+    options.node_executable = fs::path(PULP_BROWSER_CAPTURE_FIXTURE_PATH);
+    options.capture_script = script;
+    options.probe_cache_directory = tree.root() / "cache";
+    const capture::BrowserCandidate candidate{browser, capture::BrowserOrigin::explicit_override};
+    CHECK_FALSE(capture::probe_browser(candidate, options).compatible);
+    CHECK_FALSE(capture::probe_browser(candidate, options).compatible);
+    std::ifstream input(tree.root() / "launches");
+    int count = 0;
+    for (std::string line; std::getline(input, line);)
+        ++count;
+    CHECK(count == 2);
+}
+
+TEST_CASE("a browser probe cache key follows the bytes of every module the probe can import",
+          "[import-design][browser-capture][probe-cache]") {
+    TempTree tree("probe-cache-modules");
+    const auto browser = tree.write("browser", "#!/bin/sh\n");
+    const auto script = tree.write("capture/capture.mjs", "// script");
+    const auto launcher = tree.write("capture/browser_process.mjs", "// launcher");
+    const fs::path node(PULP_BROWSER_CAPTURE_FIXTURE_PATH);
+    const auto key = [&] {
+        const auto value = capture::browser_probe_cache_key(browser, script, node);
+        REQUIRE(value);
+        return *value;
+    };
+    const auto original = key();
+
+    // Same size and modification time, different bytes: a different key.
+    const auto modified = fs::last_write_time(launcher);
+    tree.write("capture/browser_process.mjs", "// LAUNCHER");
+    fs::last_write_time(launcher, modified);
+    CHECK(key() != original);
+    tree.write("capture/browser_process.mjs", "// launcher");
+    fs::last_write_time(launcher, modified + std::chrono::seconds(10));
+    CHECK(key() == original);
+
+    // A test file never loads; a new module can.
+    tree.write("capture/browser_process.test.mjs", "// test");
+    CHECK(key() == original);
+    tree.write("capture/settle.mjs", "// module");
+    CHECK(key() != original);
+}
+
+TEST_CASE("a remembered browser probe is forgotten when the browser contradicts it",
+          "[import-design][browser-capture][probe-cache]") {
+    for (const std::string_view name : {"identity-drift.mjs", "launch-fails.mjs", "capture.mjs"}) {
+        INFO(name);
+        TempTree tree("probe-cache-forget");
+        const auto browser = tree.write(
+            "browser-wrapper", "#!/bin/sh\necho launched >> \"$(dirname \"$0\")/launches\"\n"
+                               "echo 'Google Chrome 123.0.0.0'\n");
+        fs::permissions(browser,
+                        fs::perms::owner_read | fs::perms::owner_write | fs::perms::owner_exec);
+        const auto launches = [&] {
+            std::ifstream input(tree.root() / "launches");
+            int count = 0;
+            for (std::string line; std::getline(input, line);)
+                ++count;
+            return count;
+        };
+        const auto script = tree.write(name, "// fixture");
+
+        capture::BrowserDiscoveryOptions options;
+        options.explicit_path = browser;
+        options.environment_override = "";
+        options.mode_override = "";
+        options.include_default_system_candidates = false;
+        options.managed_root = tree.root() / "managed";
+        options.node_executable = fs::path(PULP_BROWSER_CAPTURE_FIXTURE_PATH);
+        options.capture_script = script;
+        options.probe_cache_directory = tree.root() / "cache";
+
+        const auto result = capture::discover_and_capture(options, fixture_request(tree, script));
+        REQUIRE(result.discovery.selected);
+        REQUIRE(launches() == 1);
+        const bool contradicted = name != "capture.mjs";
+        CHECK(result.capture.ok() == !contradicted);
+
+        // A contradicted answer is probed again; a capture that succeeded
+        // leaves the remembered one in place.
+        const capture::BrowserCandidate candidate{browser,
+                                                  capture::BrowserOrigin::explicit_override};
+        REQUIRE(capture::probe_browser(candidate, options).compatible);
+        CHECK(launches() == (contradicted ? 2 : 1));
+    }
+}
+
 TEST_CASE("a transient version read is retried instead of rejecting a browser",
           "[import-design][browser-capture]") {
     TempTree tree("version-retry");
@@ -1161,6 +1450,27 @@ TEST_CASE("capture requests one authored-frame fit without pinning width",
     CHECK(contains_line(args, "--initial-width"));
     CHECK_FALSE(contains_line(args, "--width"));
     CHECK_FALSE(contains_line(args, "--interactions"));
+}
+
+TEST_CASE("capture reads the materialized document only when asked to",
+          "[import-design][browser-capture]") {
+    TempTree tree("materialized-argv");
+    const auto script = tree.write("capture.mjs", "// fixture");
+
+    auto request = fixture_request(tree, script);
+    const auto kept = capture::capture_document(fixture_browser(), request);
+    INFO(kept.diagnostic.message);
+    REQUIRE(kept.ok());
+    CHECK_FALSE(contains_line(read_lines(fs::canonical(request.output_directory) / "argv.txt"),
+                              "--omit-materialized-document"));
+
+    request.output_directory = tree.root() / "omitted";
+    request.capture_materialized_document = false;
+    const auto omitted = capture::capture_document(fixture_browser(), request);
+    INFO(omitted.diagnostic.message);
+    REQUIRE(omitted.ok());
+    CHECK(contains_line(read_lines(fs::canonical(request.output_directory) / "argv.txt"),
+                        "--omit-materialized-document"));
 }
 
 TEST_CASE("capture preserves the runtime diagnostic code",

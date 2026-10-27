@@ -1,7 +1,7 @@
 // signal_graph_live_swap.cpp — SignalGraph's LIVE-SWAP TRANSACTION ENGINE.
 //
-// Holds everything behind the no-silence topology edit: the scanned-plugin
-// catalog and per-node swap policy, the staged-replacement pipeline
+// Holds everything behind the no-silence topology edit: the staged-replacement
+// pipeline
 // (stage_plugin_replacement: load → prepare → contract/shape/latency gates →
 // warm-up cost probe → state restore), the swap-edit transaction
 // (begin_swap_edit / prepare_swap / abort_swap_edit) with its crossfade publish
@@ -24,15 +24,13 @@
 #include <pulp/format/processor.hpp>
 #include <pulp/runtime/log.hpp>
 #include "signal_graph_internal.hpp"
+#include "signal_graph_live_swap_detail.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cstdint>
-#include <filesystem>
-#include <limits>
 #include <span>
 #include <string>
-#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -50,133 +48,10 @@ static_assert(kLiveSwapWarmBlocks >= kLiveSwapMinAdmissionCallbacks);
 // rather than risk an xrun. Combined with admission's already-conservative
 // whole-graph-plus-full-new-node projection, this keeps different-instance swaps safe.
 constexpr float kLiveSwapWarmSafetyMargin = 1.5f;
-constexpr int kLiveSwapMinFadeMs = 5;
-constexpr int kLiveSwapMaxFadeMs = 200;
-
-NodeLiveSwapPolicy clamp_live_swap_policy(NodeLiveSwapPolicy policy) {
-    // fade_ms == 0 is the explicit "instant switch, no crossfade" request and passes
-    // through unclamped; any positive value is clamped into the supported fade range.
-    if (policy.fade_ms != 0) {
-        policy.fade_ms = std::clamp(policy.fade_ms,
-                                    kLiveSwapMinFadeMs,
-                                    kLiveSwapMaxFadeMs);
-    }
-    policy.headroom_threshold =
-        std::clamp(policy.headroom_threshold, 0.0f, 1.0f);
-    return policy;
-}
-
-std::string normalized_plugin_path(const std::string& path) {
-    if (path.empty()) return {};
-    namespace fs = std::filesystem;
-    std::error_code ec;
-    const fs::path p(path);
-    const fs::path weak = fs::weakly_canonical(p, ec);
-    if (!ec) return weak.string();
-    ec.clear();
-    const fs::path abs = fs::absolute(p, ec);
-    if (!ec) return abs.lexically_normal().string();
-    return p.lexically_normal().string();
-}
-
-std::string plugin_identity_key(const PluginInfo& info) {
-    std::string key = normalized_plugin_path(info.path);
-    key += '\n';
-    key += std::to_string(static_cast<int>(info.format));
-    key += '\n';
-    key += info.unique_id;
-    key += '\n';
-    key += info.is_effect ? 'E' : 'e';
-    key += info.is_instrument ? 'I' : 'i';
-    return key;
-}
-
-bool same_plugin_identity(const PluginInfo& a, const PluginInfo& b) {
-    return plugin_identity_key(a) == plugin_identity_key(b);
-}
-
-struct ComparableParam {
-    uint32_t id = 0;
-    float min_value = 0.0f;
-    float max_value = 1.0f;
-    float default_value = 0.0f;
-    ParamFlags flags;
-    state::ParamRate rate = state::ParamRate::ControlRate;
-};
-
-std::vector<ComparableParam>
-comparable_params(std::vector<HostParamInfo> params) {
-    std::vector<ComparableParam> out;
-    out.reserve(params.size());
-    for (const auto& p : params) {
-        out.push_back({
-            p.id,
-            p.min_value,
-            p.max_value,
-            p.default_value,
-            p.flags,
-            p.rate,
-        });
-    }
-    std::sort(out.begin(), out.end(),
-              [](const ComparableParam& a, const ComparableParam& b) {
-                  return a.id < b.id;
-              });
-    return out;
-}
-
-bool same_param_flags(const ParamFlags& a, const ParamFlags& b) {
-    return a.automatable == b.automatable
-        && a.read_only == b.read_only
-        && a.hidden == b.hidden
-        && a.stepped == b.stepped
-        && a.is_bypass == b.is_bypass
-        && a.rampable == b.rampable
-        && a.modulatable == b.modulatable;
-}
-
-bool same_parameter_contract(std::vector<HostParamInfo> a,
-                             std::vector<HostParamInfo> b) {
-    auto ca = comparable_params(std::move(a));
-    auto cb = comparable_params(std::move(b));
-    if (ca.size() != cb.size()) return false;
-    for (std::size_t i = 0; i < ca.size(); ++i) {
-        if (ca[i].id != cb[i].id) return false;
-        if (ca[i].min_value != cb[i].min_value) return false;
-        if (ca[i].max_value != cb[i].max_value) return false;
-        if (ca[i].default_value != cb[i].default_value) return false;
-        if (ca[i].rate != cb[i].rate) return false;
-        if (!same_param_flags(ca[i].flags, cb[i].flags)) return false;
-    }
-    return true;
-}
-
-const char* live_swap_reason_name(LiveSwapFallbackReason reason) {
-    switch (reason) {
-    case LiveSwapFallbackReason::None: return "None";
-    case LiveSwapFallbackReason::NotOptedIn: return "NotOptedIn";
-    case LiveSwapFallbackReason::LoadFailed: return "LoadFailed";
-    case LiveSwapFallbackReason::PrepareFailed: return "PrepareFailed";
-    case LiveSwapFallbackReason::StateRestoreFailed: return "StateRestoreFailed";
-    case LiveSwapFallbackReason::HistoryRefused:
-        return "HistoryRefused";
-    case LiveSwapFallbackReason::StateTooLarge: return "StateTooLarge";
-    case LiveSwapFallbackReason::ShapeMismatch: return "ShapeMismatch";
-    case LiveSwapFallbackReason::LatencyChanged: return "LatencyChanged";
-    case LiveSwapFallbackReason::EditorOpen: return "EditorOpen";
-    case LiveSwapFallbackReason::ParamContractMismatch:
-        return "ParamContractMismatch";
-    case LiveSwapFallbackReason::FeedbackNotSwappable:
-        return "FeedbackNotSwappable";
-    case LiveSwapFallbackReason::OverBudget: return "OverBudget";
-    case LiveSwapFallbackReason::NoLoadHistory: return "NoLoadHistory";
-    case LiveSwapFallbackReason::PredicateExcluded: return "PredicateExcluded";
-    case LiveSwapFallbackReason::UntrustedIdentity: return "UntrustedIdentity";
-    }
-    return "Unknown";
-}
 
 } // namespace
+
+using namespace live_swap_detail;
 
 LiveSwapAdmission evaluate_live_swap_admission(
     const pulp::audio::AudioProcessLoadSnapshot& graph,
@@ -194,56 +69,6 @@ LiveSwapAdmission evaluate_live_swap_admission(
     for (const auto& n : staged_nodes) projected += std::max(n.load, n.last_load);
     if (projected > headroom_threshold) return {false, "over budget"};
     return {true, "ok"};
-}
-
-bool SignalGraph::set_node_live_swap_policy(NodeId id,
-                                            NodeLiveSwapPolicy policy) {
-    GraphMutationLock mutation_lock(*this);
-    auto* n = node_mut_locked_(id);
-    if (!n || n->type != NodeType::Plugin) return false;
-    n->live_swap_policy = clamp_live_swap_policy(std::move(policy));
-    ++authoring_generation_;
-    return true;
-}
-
-bool SignalGraph::set_node_hosted_editor_open(NodeId id, bool open) {
-    GraphMutationLock mutation_lock(*this);
-    auto* n = node_mut_locked_(id);
-    if (!n || n->type != NodeType::Plugin) return false;
-    n->hosted_editor_open = open;
-    ++authoring_generation_;
-    return true;
-}
-
-SignalGraph::PluginCatalogToken
-SignalGraph::register_scanned_plugin(const PluginInfo& info) {
-    GraphMutationLock mutation_lock(*this);
-    const auto key = plugin_identity_key(info);
-    if (auto it = scanned_plugin_identity_to_token_.find(key);
-        it != scanned_plugin_identity_to_token_.end()) {
-        return PluginCatalogToken{it->second};
-    }
-    const std::uint64_t token = next_scanned_plugin_token_++;
-    scanned_plugin_catalog_[token] = info;
-    scanned_plugin_identity_to_token_[key] = token;
-    return PluginCatalogToken{token};
-}
-
-void SignalGraph::clear_scanned_plugin_catalog() {
-    GraphMutationLock mutation_lock(*this);
-    scanned_plugin_catalog_.clear();
-    scanned_plugin_identity_to_token_.clear();
-}
-
-LiveSwapDiagnostics SignalGraph::last_swap_diagnostics() const {
-    GraphMutationLock mutation_lock(*this);
-    return last_swap_diagnostics_;
-}
-
-void SignalGraph::set_live_swap_plugin_loader_for_test(
-    PluginLoaderForTest loader) {
-    GraphMutationLock mutation_lock(*this);
-    live_swap_plugin_loader_for_test_ = std::move(loader);
 }
 
 SignalGraph::SwapResult
@@ -564,10 +389,8 @@ void SignalGraph::set_live_swap_diagnostics_locked_(
         .message = std::move(message),
     };
     if (reason != LiveSwapFallbackReason::None) {
-        runtime::log_info("SignalGraph: live plugin swap refused for node {}: {} ({})",
-                          node,
-                          live_swap_reason_name(reason),
-                          last_swap_diagnostics_.message);
+        runtime::log_info("SignalGraph: live plugin swap refused for node {}: {} ({})", node,
+                          reason_name(reason), last_swap_diagnostics_.message);
     }
 }
 

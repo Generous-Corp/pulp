@@ -11,6 +11,7 @@
 #include <pulp/canvas/skia_canvas.hpp>
 
 #include "skia_canvas_internal.hpp"
+#include "skia_gradient_compat.hpp"
 
 #include "include/core/SkCanvas.h"
 #include "include/core/SkImage.h"
@@ -22,10 +23,13 @@
 #include "include/core/SkRect.h"
 #include "include/core/SkSamplingOptions.h"
 #include "include/core/SkSurface.h"
+#include "include/core/SkSurfaceProps.h"
 #include "include/effects/SkDashPathEffect.h"
 #include "include/effects/SkImageFilters.h"
+#if PULP_CANVAS_GANESH
 #include "include/gpu/ganesh/GrDirectContext.h"
 #include "include/gpu/ganesh/SkSurfaceGanesh.h"
+#endif
 #include "include/gpu/graphite/Recorder.h"
 #include "include/gpu/graphite/Surface.h"
 
@@ -305,7 +309,7 @@ void SkiaCanvas::fill_path(const Path& path, FillRule rule) {
     // Mirror fill_current_path's paint construction: an active gradient shader
     // wins over the solid fill color.
     if (has_gradient_ && gradient_shader_) {
-        paint.setShader(gradient_shader_);
+        skia_gradient::set_paint_shader(paint, gradient_shader_);
     } else {
         paint.setColor4f(to_sk_color4f(fill_color_));
     }
@@ -351,7 +355,8 @@ void SkiaCanvas::stroke_path(const Path& path, const StrokeStyle& style) {
         }
     }
 
-    if (stroke_shader_) paint.setShader(stroke_shader_);
+    if (stroke_shader_)
+        skia_gradient::set_paint_shader(paint, stroke_shader_);
     apply_shadow_filter(paint);
     apply_filter(paint);
 
@@ -430,14 +435,22 @@ Canvas::LayerHandle SkiaCanvas::begin_layer(Rect2D bounds, bool cacheable) {
         SkImageInfo::MakeN32Premul(pw, ph, canvas_->imageInfo().refColorSpace());
 
     // Match the surface to whatever backend owns this canvas, so a GPU layer
-    // stays on the GPU instead of round-tripping through system memory.
+    // stays on the GPU instead of round-tripping through system memory. The
+    // layer carries the target's props: glyph contrast and gamma come from the
+    // surface text is drawn into, so a layer created with defaults would cache
+    // its text at a different weight than the same text drawn directly.
+    const SkSurfaceProps props = canvas_->getBaseProps();
     sk_sp<SkSurface> surface;
-    if (recorder_ != nullptr) {
-        surface = SkSurfaces::RenderTarget(recorder_, info);
-    } else if (gr_context_ != nullptr) {
-        surface = SkSurfaces::RenderTarget(gr_context_, skgpu::Budgeted::kYes, info);
-    }
-    if (!surface) surface = SkSurfaces::Raster(info);
+    if (recorder_ != nullptr)
+        surface = SkSurfaces::RenderTarget(recorder_, info, skgpu::Mipmapped::kNo, &props);
+#if PULP_CANVAS_GANESH
+    // Only a Ganesh build (the WebGL browser host) sets gr_context_. Compiling
+    // this call out elsewhere lets dead-strip drop Skia's Ganesh backend.
+    if (recorder_ == nullptr && gr_context_ != nullptr)
+        surface = SkSurfaces::RenderTarget(gr_context_, skgpu::Budgeted::kYes, info, 0, &props);
+#endif
+    if (!surface)
+        surface = SkSurfaces::Raster(info, &props);
     if (!surface) return LayerHandle{};  // out of memory — caller draws direct
 
     SkCanvas* lc = surface->getCanvas();
@@ -473,7 +486,15 @@ Canvas::LayerHandle SkiaCanvas::end_layer() {
     if (open.layer.surface) {
         // Seal it. The snapshot is what OUTLIVES the frame — this is the step
         // a scoped save_layer/restore pair can never hand back to a caller.
-        open.layer.image = open.layer.surface->makeImageSnapshot();
+        // On Graphite the image shares the surface's texture rather than
+        // copying it; that is safe because the surface is released on the
+        // next line and nothing draws into it again. The image keeps the
+        // layer's device alive. A surface that is not textureable is copied.
+        // Ganesh and raster snapshots are already copy-on-write.
+        if (recorder_ != nullptr)
+            open.layer.image = SkSurfaces::AsImage(open.layer.surface);
+        if (!open.layer.image)
+            open.layer.image = open.layer.surface->makeImageSnapshot();
         open.layer.surface.reset();  // the surface's job is done; free it
     }
     if (!open.layer.image) return LayerHandle{};

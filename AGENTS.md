@@ -30,6 +30,52 @@ hooks (`hooks/scripts/decisions-contract-*.sh`, wired for both Codex via
 `.codex/hooks.json` and Claude via the plugin) are advisory context only — the
 authoritative block is this CLI's `validate` gate plus CI required checks.
 
+## Pulp landing loop (queue throughput)
+
+Treat an open PR and a landable PR as different states. The normal Pulp path is:
+
+1. **Author:** open with `shipyard pr --no-arm --no-steward-handoff`. The author
+   does not approve, arm, enqueue, or merge its own PR.
+2. **Review:** a counted `pulp-review` or `pulp-review2` session on **m3** reviews
+   the exact full head SHA and ends with `verdict: APPROVE head:<sha>` or
+   `verdict: HOLD head:<sha>`. A review of an older head is not approval of the
+   current head. `shipyard review-verdict --repo Generous-Corp/pulp --pr <n> --json`
+   is the read-only authority for whether the current head is approved.
+3. **Admission:** the m3 team-lead/sweep admits approved, non-draft PRs whose
+   required checks are green. Check the live model with
+   `shipyard landing --repo Generous-Corp/pulp --json` and the queue with the
+   GraphQL merge-queue read before diagnosing capacity. Pulp's queue batches
+   entries according to the live ruleset; the m3 team-lead/sweep may arm several
+   ready PRs so the queue can fill its batch window. Authoring and review agents
+   do not arm, enqueue, or call the merge API; they leave admission to that
+   owner and report a refused landing to the m3 team-lead. Do not hand-rebase a
+   merely `BEHIND` PR to chase strict protection; the queue's merge ref performs
+   that work. Conflicts, drafts, and exact-head HOLDs must be resolved or held
+   before admission.
+4. **Evidence:** after admission, record `shipyard who --repo Generous-Corp/pulp
+   --pr <n> --json`, then use one bounded `shipyard wait`/background wait for the
+   merge or ejection. A queue entry disappearing is an ejection until the main
+   branch and PR state prove a merge; inspect the failing merge-group checks before
+   re-admitting it.
+
+### Stalls and reviewer failover
+
+- A review has a roughly 30-minute deadline. Check the m3 reviewer/team-lead
+  session is alive, nudge it once with the exact PR number and head, then route to
+  the other counted m3 reviewer. Do not approve as the author, copy a reviewer
+  marker, or wait indefinitely for a dead session.
+- If m3 is unavailable, keep the PR unarmed and report the exact missing reviewer
+  evidence. A Codex/Claude fresh-eyes review can find defects, but it does not
+  become a counted approval unless it runs through the configured m3 reviewer
+  identity and session stamp.
+- Queue capacity and build placement are separate. Never make m1 a universal gate
+  by habit or edit runner labels to unblock one PR. Use the live `shipyard landing`
+  placement and the workflow resolver; route a stalled runner through the
+  fleet/TartCI recovery procedure and preserve the required-check contract.
+- Do not fill the queue with chore bumps while material PRs wait for review. The
+  sweep should prioritize approved, green material work, then admit independent
+  ready PRs until the live queue batch window is full.
+
 ## Vellum source-authority routing
 
 `.github/vellum-ownership.json` is the authoritative source-routing projection.

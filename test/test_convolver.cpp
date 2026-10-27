@@ -1,8 +1,12 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/signal/convolver.hpp>
-#include <vector>
+#include <pulp/signal/fixed_ir_convolver.hpp>
+#include <pulp/signal/fft.hpp>
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <vector>
 
 using namespace pulp::signal;
 using Catch::Matchers::WithinAbs;
@@ -163,6 +167,360 @@ TEST_CASE("Convolver: block size is rounded to a processable power of two",
     REQUIRE_THAT(single_output[0], WithinAbs(single_input[0], 1e-5f));
 }
 
+// The table is measured in single precision only; double keeps the FFT engine
+// everywhere.
+static_assert(FixedIrConvolver64::direct_fir_limit(8) == 0);
+static_assert(FixedIrConvolver64::direct_fir_limit(512) == 0);
+
+TEST_CASE("FixedIrConvolver crossover edges follow the measured per-block table",
+          "[signal][convolver][fixed-ir]") {
+    using Backend = ConvolutionBackend;
+#if PULP_FIXED_IR_MEASURED_TABLE
+    // At 8-frame callbacks and below the direct engine covers the whole
+    // measured range; longer IRs keep the FFT engine.
+    for (const std::size_t block :
+         {std::size_t{0}, std::size_t{1}, std::size_t{7}, std::size_t{8}}) {
+        INFO("block " << block);
+        REQUIRE(FixedIrConvolver::direct_fir_limit(block) == 4096);
+        REQUIRE(FixedIrConvolver::choose_backend(4096, block) == Backend::direct_fir);
+        REQUIRE(FixedIrConvolver::choose_backend(4097, block) == Backend::partitioned_fft);
+        REQUIRE(FixedIrConvolver::choose_backend(65536, block) == Backend::partitioned_fft);
+    }
+    struct Edge {
+        std::size_t block, limit;
+    };
+    // Non-power-of-two requests normalize up, so 9 shares the 16-frame row,
+    // 17 the 32-frame row, 65 the 128-frame row, and 4096 the large-block row.
+    for (const Edge e : {Edge{9, 576}, Edge{16, 576}, Edge{17, 128}, Edge{32, 128}, Edge{33, 128},
+                         Edge{64, 128}, Edge{65, 64}, Edge{128, 64}, Edge{256, 64}, Edge{512, 64},
+                         Edge{1024, 64}, Edge{4096, 64}}) {
+        INFO("block " << e.block);
+        REQUIRE(FixedIrConvolver::direct_fir_limit(e.block) == e.limit);
+        REQUIRE(FixedIrConvolver::choose_backend(e.limit, e.block) == Backend::direct_fir);
+        REQUIRE(FixedIrConvolver::choose_backend(e.limit + 1, e.block) == Backend::partitioned_fft);
+    }
+#else
+    // Targets without their own measurements keep the partitioned engine.
+    for (const std::size_t block : {std::size_t{1}, std::size_t{16}, std::size_t{512}}) {
+        REQUIRE(FixedIrConvolver::direct_fir_limit(block) == 0);
+        REQUIRE(FixedIrConvolver::choose_backend(1, block) == Backend::partitioned_fft);
+    }
+#endif
+}
+
+TEST_CASE("FixedIrConvolver without an IR passes audio through unchanged",
+          "[signal][convolver][fixed-ir]") {
+    FixedIrConvolver conv;
+    REQUIRE_FALSE(conv.is_loaded());
+    REQUIRE(conv.backend() == ConvolutionBackend::none);
+    REQUIRE(conv.block_size() == 0);
+
+    std::vector<float> data = {0.5f, -0.25f, 0.125f, 1.0f};
+    const std::vector<float> original = data;
+    conv.process(data.data(), data.data(), data.size()); // exact alias
+    REQUIRE(data == original);
+
+    std::vector<float> output(data.size(), -1.0f);
+    conv.process(data.data(), output.data(), data.size());
+    REQUIRE(output == original);
+
+    // Loading an empty IR after a real one returns to the unloaded state.
+    const std::vector<float> ir(33, 0.1f);
+    conv.load_ir(ir.data(), ir.size(), 4);
+    REQUIRE(conv.is_loaded());
+    conv.load_ir(nullptr, 0, 4);
+    REQUIRE_FALSE(conv.is_loaded());
+    REQUIRE(conv.backend() == ConvolutionBackend::none);
+    REQUIRE(conv.block_size() == 0);
+    // Naming no engine unloads a real IR too.
+    conv.load_ir(ir.data(), ir.size(), 4, ConvolutionBackend::direct_fir);
+    REQUIRE(conv.is_loaded());
+    conv.load_ir(ir.data(), ir.size(), 4, ConvolutionBackend::none);
+    REQUIRE_FALSE(conv.is_loaded());
+    conv.reset();
+    output.assign(data.size(), -1.0f);
+    conv.process(data.data(), output.data(), data.size());
+    REQUIRE(output == original);
+    REQUIRE(conv.block_size_violations() == 0);
+}
+
+TEST_CASE("FixedIrConvolver direct and partitioned paths match a streamed FIR",
+          "[signal][convolver][fixed-ir]") {
+    constexpr std::size_t block = 64;
+    constexpr std::size_t blocks = 8;
+    const std::size_t total = block * blocks;
+    std::vector<float> ir(255);
+    for (std::size_t i = 0; i < ir.size(); ++i)
+        ir[i] = 0.003f * std::sin(0.17f * static_cast<float>(i));
+    std::vector<float> input(total);
+    for (std::size_t i = 0; i < input.size(); ++i)
+        input[i] = std::sin(0.11f * static_cast<float>(i)) -
+                   0.25f * std::cos(0.037f * static_cast<float>(i));
+
+    FixedIrConvolver conv;
+    conv.load_ir(ir.data(), ir.size(), block, ConvolutionBackend::direct_fir);
+    REQUIRE(conv.backend() == ConvolutionBackend::direct_fir);
+
+    std::vector<float> output(total);
+    for (std::size_t b = 0; b < blocks; ++b)
+        conv.process(input.data() + b * block, output.data() + b * block, block);
+
+    for (std::size_t n = 0; n < total; ++n) {
+        double expected = 0.0;
+        for (std::size_t k = 0; k < ir.size() && k <= n; ++k)
+            expected += static_cast<double>(ir[k]) * input[n - k];
+        REQUIRE_THAT(output[n], WithinAbs(expected, 2e-5));
+    }
+
+    // A longer IR takes the FFT path but has the same stream-level oracle.
+    ir.resize(1025);
+    for (std::size_t i = 255; i < ir.size(); ++i)
+        ir[i] = 0.001f * std::sin(0.07f * static_cast<float>(i));
+    conv.load_ir(ir.data(), ir.size(), block, ConvolutionBackend::partitioned_fft);
+    REQUIRE(conv.backend() == ConvolutionBackend::partitioned_fft);
+    conv.reset();
+    std::fill(output.begin(), output.end(), 0.0f);
+    for (std::size_t b = 0; b < blocks; ++b)
+        conv.process(input.data() + b * block, output.data() + b * block, block);
+    for (std::size_t n = 0; n < total; ++n) {
+        double expected = 0.0;
+        for (std::size_t k = 0; k < ir.size() && k <= n; ++k)
+            expected += static_cast<double>(ir[k]) * input[n - k];
+        REQUIRE_THAT(output[n], WithinAbs(expected, 2e-5));
+    }
+}
+
+TEST_CASE("FixedIrConvolver direct processing remains stable across history wrap",
+          "[signal][convolver][fixed-ir][rt]") {
+    // In place, 49 blocks of 32 cross the FIR's 512-sample history compaction
+    // three times; every output must still be the streamed convolution.
+    constexpr std::size_t block = 32;
+    constexpr std::size_t blocks = 49;
+    std::vector<float> ir(65);
+    for (std::size_t i = 0; i < ir.size(); ++i)
+        ir[i] = 0.02f * std::cos(0.31f * static_cast<float>(i)) /
+                (1.0f + 0.05f * static_cast<float>(i));
+    std::vector<float> input(block * blocks);
+    for (std::size_t i = 0; i < input.size(); ++i)
+        input[i] =
+            0.5f * std::sin(0.043f * static_cast<float>(i)) + ((i % 37u) == 0u ? 0.3f : 0.0f);
+
+    FixedIrConvolver conv;
+    conv.load_ir(ir.data(), ir.size(), block, ConvolutionBackend::direct_fir);
+    std::vector<float> data = input;
+    for (std::size_t b = 0; b < blocks; ++b)
+        conv.process(data.data() + b * block, data.data() + b * block, block);
+
+    for (std::size_t n = 0; n < input.size(); ++n) {
+        double expected = 0.0;
+        for (std::size_t k = 0; k < ir.size() && k <= n; ++k)
+            expected += static_cast<double>(ir[k]) * input[n - k];
+        INFO("sample " << n);
+        REQUIRE_THAT(data[n], WithinAbs(expected, 1e-5));
+    }
+    REQUIRE(conv.block_size_violations() == 0);
+}
+
+TEST_CASE("FixedIrConvolver direct engine streams any block size up to its maximum",
+          "[signal][convolver][fixed-ir]") {
+    // The direct FIR has no partitioning, so a host whose callback is not a
+    // power of two (48, 37, 480 frames) or varies from call to call gets the
+    // same stream as a FirFilter, with no violations.
+    std::vector<float> ir(100);
+    for (std::size_t i = 0; i < ir.size(); ++i)
+        ir[i] = 0.03f * std::sin(0.17f * static_cast<float>(i) + 0.4f) /
+                (1.0f + 0.02f * static_cast<float>(i));
+    for (const std::size_t block : {std::size_t{48}, std::size_t{37}, std::size_t{480}}) {
+        INFO("block " << block);
+        FixedIrConvolver conv;
+        conv.load_ir(ir.data(), ir.size(), block, ConvolutionBackend::direct_fir);
+        REQUIRE(conv.block_size() >= block);
+        FirFilter reference;
+        reference.set_coefficients(ir);
+
+        std::vector<float> input(block * 23);
+        for (std::size_t i = 0; i < input.size(); ++i)
+            input[i] = 0.6f * std::sin(0.029f * static_cast<float>(i)) +
+                       0.2f * std::cos(0.41f * static_cast<float>(i));
+        std::vector<float> got(input.size()), want(input.size());
+        for (std::size_t at = 0; at < input.size(); at += block) {
+            // Alternate a full and a shorter call, as a varying host would.
+            const std::size_t first = (at / block) % 2 ? block / 3 + 1 : block;
+            conv.process(input.data() + at, got.data() + at, first);
+            if (first < block)
+                conv.process(input.data() + at + first, got.data() + at + first, block - first);
+        }
+        reference.process(input.data(), want.data(), static_cast<int>(input.size()));
+        for (std::size_t n = 0; n < input.size(); ++n)
+            REQUIRE_THAT(got[n], WithinAbs(want[n], 1e-6));
+        REQUIRE(conv.block_size_violations() == 0);
+    }
+
+    // More than the prepared maximum still fails closed.
+    FixedIrConvolver conv;
+    conv.load_ir(ir.data(), ir.size(), 48, ConvolutionBackend::direct_fir);
+    std::vector<float> big(conv.block_size() + 1, 1.0f), out(big.size(), 9.0f);
+    conv.process(big.data(), out.data(), big.size());
+    REQUIRE(conv.block_size_violations() == 1);
+    REQUIRE(std::all_of(out.begin(), out.end(), [](float v) { return v == 0.0f; }));
+}
+
+TEST_CASE(
+    "FixedIrConvolver direct path preserves a long stream across repeated history compactions",
+    "[signal][convolver][fixed-ir][rt]") {
+    constexpr std::size_t block = 16;
+    constexpr std::size_t ir_length = 513;
+    constexpr std::size_t blocks = 96;
+    const std::size_t total = block * blocks;
+
+    // 513 taps stays on the direct path for a 16-sample callback while forcing
+    // FirFilterT to compact its >512-sample history several times.
+    std::vector<float> ir(ir_length);
+    for (std::size_t i = 0; i < ir.size(); ++i) {
+        const float phase = static_cast<float>(i);
+        ir[i] = (0.0015f * std::sin(0.071f * phase) + 0.0007f * std::cos(0.013f * phase)) /
+                (1.0f + 0.002f * phase);
+    }
+    std::vector<float> input(total);
+    for (std::size_t i = 0; i < input.size(); ++i) {
+        const float phase = static_cast<float>(i);
+        input[i] = 0.65f * std::sin(0.037f * phase) + 0.23f * std::cos(0.113f * phase) +
+                   ((i % 29u) == 0u ? 0.4f : 0.0f);
+    }
+
+    FixedIrConvolver conv;
+    conv.load_ir(ir.data(), ir.size(), block, ConvolutionBackend::direct_fir);
+    REQUIRE(conv.backend() == ConvolutionBackend::direct_fir);
+
+    std::vector<float> output(total, 0.0f);
+    for (std::size_t b = 0; b < blocks; ++b)
+        conv.process(input.data() + b * block, output.data() + b * block, block);
+
+    for (std::size_t n = 0; n < total; ++n) {
+        double expected = 0.0;
+        const std::size_t taps = std::min(ir.size(), n + 1);
+        for (std::size_t k = 0; k < taps; ++k)
+            expected += static_cast<double>(ir[k]) * input[n - k];
+        INFO("sample " << n);
+        REQUIRE_THAT(output[n], WithinAbs(expected, 3e-5));
+    }
+    REQUIRE(conv.block_size_violations() == 0);
+}
+
+TEST_CASE("FixedIrConvolver fails closed and resets after a wrong block size",
+          "[signal][convolver][fixed-ir]") {
+    const std::vector<float> ir(1025, 0.01f);
+    constexpr std::size_t block = 64;
+    FixedIrConvolver conv;
+    conv.load_ir(ir.data(), ir.size(), block, ConvolutionBackend::partitioned_fft);
+    REQUIRE(conv.backend() == ConvolutionBackend::partitioned_fft);
+
+    std::vector<float> input(block, 0.25f);
+    std::vector<float> history_out(block);
+    conv.process(input.data(), history_out.data(), block); // leave IR history behind
+    std::vector<float> output(block, -1.0f);
+    conv.process(input.data(), output.data(), block - 1);
+    REQUIRE(conv.block_size_violations() == 1);
+    for (std::size_t i = 0; i < block - 1; ++i)
+        REQUIRE(output[i] == 0.0f);
+    REQUIRE(output.back() == -1.0f);
+
+    // The first valid block after the violation must equal a fresh engine's
+    // first block: no history from before the violation may leak through.
+    FixedIrConvolver fresh;
+    fresh.load_ir(ir.data(), ir.size(), block, ConvolutionBackend::partitioned_fft);
+    std::vector<float> expected(block);
+    fresh.process(input.data(), expected.data(), block);
+    output.assign(block, -1.0f);
+    conv.process(input.data(), output.data(), block);
+    REQUIRE(conv.block_size_violations() == 1);
+    for (std::size_t i = 0; i < block; ++i)
+        REQUIRE_THAT(output[i], WithinAbs(expected[i], 1e-6));
+}
+
+TEST_CASE("FixedIrConvolver64 matches a long-double oracle on both engines",
+          "[signal][convolver][fixed-ir]") {
+    constexpr std::size_t block = 64;
+    for (const std::size_t taps : {std::size_t{65}, std::size_t{1025}}) {
+        std::vector<double> ir(taps);
+        for (std::size_t i = 0; i < taps; ++i)
+            ir[i] = 0.01 * std::sin(0.19 * static_cast<double>(i)) *
+                    std::exp(-0.003 * static_cast<double>(i));
+        for (const auto engine :
+             {ConvolutionBackend::direct_fir, ConvolutionBackend::partitioned_fft}) {
+            FixedIrConvolver64 conv;
+            conv.load_ir(ir.data(), ir.size(), block, engine);
+            INFO("taps " << taps << " backend " << static_cast<int>(conv.backend()));
+            const std::size_t total = block * 24;
+            std::vector<double> input(total), output(total);
+            for (std::size_t i = 0; i < total; ++i)
+                input[i] = std::sin(0.071 * static_cast<double>(i)) + ((i % 37u) == 0u ? 0.5 : 0.0);
+            for (std::size_t b = 0; b < total / block; ++b)
+                conv.process(input.data() + b * block, output.data() + b * block, block);
+            for (std::size_t n = 0; n < total; ++n) {
+                long double expected = 0.0L;
+                for (std::size_t k = 0; k < taps && k <= n; ++k)
+                    expected += static_cast<long double>(ir[k]) * input[n - k];
+                REQUIRE_THAT(output[n], WithinAbs(static_cast<double>(expected), 1e-9));
+            }
+        }
+    }
+}
+
+TEST_CASE("FixedIrConvolver direct path recovers cleanly after a wrong block size",
+          "[signal][convolver][fixed-ir]") {
+    constexpr std::size_t block = 16;
+    constexpr std::size_t ir_length = 513;
+    const std::vector<float> ir = [] {
+        std::vector<float> value(ir_length);
+        for (std::size_t i = 0; i < value.size(); ++i)
+            value[i] =
+                0.002f * std::exp(-0.004f * static_cast<float>(i)) * (i % 3u == 0u ? 1.0f : -0.45f);
+        return value;
+    }();
+
+    FixedIrConvolver conv;
+    conv.load_ir(ir.data(), ir.size(), block, ConvolutionBackend::direct_fir);
+    REQUIRE(conv.backend() == ConvolutionBackend::direct_fir);
+
+    FirFilter reference;
+    reference.set_coefficients(ir);
+
+    std::vector<float> first(block, 0.35f), first_output(block), first_expected(block);
+    conv.process(first.data(), first_output.data(), block);
+    reference.process(first.data(), first_expected.data(), static_cast<int>(block));
+    for (std::size_t i = 0; i < block; ++i)
+        REQUIRE_THAT(first_output[i], WithinAbs(first_expected[i], 3e-5));
+
+    // The direct engine takes any count up to its block; only more fails.
+    const std::size_t wrong_size = block + 7;
+    std::vector<float> bad_input(wrong_size, 0.8f);
+    std::vector<float> bad_output(wrong_size, -1.0f);
+    conv.process(bad_input.data(), bad_output.data(), wrong_size);
+    REQUIRE(conv.block_size_violations() == 1);
+    REQUIRE(std::all_of(bad_output.begin(), bad_output.end(),
+                        [](float sample) { return sample == 0.0f; }));
+
+    // The reference never sees the invalid callback. A stale direct history
+    // would make the first valid block below diverge from this stream.
+    reference.reset();
+    std::vector<float> input(block), output(block), expected(block);
+    for (int b = 0; b < 4; ++b) {
+        for (std::size_t i = 0; i < block; ++i) {
+            const float phase = static_cast<float>(b * block + i);
+            input[i] =
+                std::sin(0.09f * phase) + (i == 0u ? 0.25f * static_cast<float>(b + 1) : 0.0f);
+        }
+        conv.process(input.data(), output.data(), block);
+        reference.process(input.data(), expected.data(), static_cast<int>(block));
+        for (std::size_t i = 0; i < block; ++i) {
+            INFO("block " << b << " sample " << i);
+            REQUIRE_THAT(output[i], WithinAbs(expected[i], 3e-5));
+        }
+    }
+    REQUIRE(conv.block_size_violations() == 1);
+}
+
 TEST_CASE("Convolver: an empty IR passes input through",
           "[signal][convolver][issue-645]") {
     float dummy_ir = 0.0f;
@@ -262,4 +620,90 @@ TEST_CASE("Convolver: a block-size violation does not corrupt the stream after i
     REQUIRE(worst_recovered < kTol);
 
     REQUIRE(torn.block_size_violations() == 0);  // cleared by the recovery reset()
+}
+
+namespace {
+
+// Broadband deterministic stimulus / IR in [-1, 1].
+std::vector<double> lcg_signal(std::size_t n, std::uint32_t seed, double decay) {
+    std::vector<double> out(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        seed = seed * 1664525u + 1013904223u;
+        const double v = static_cast<double>(seed >> 8) / 8388608.0 - 1.0;
+        out[i] = v * std::exp(-decay * static_cast<double>(i));
+    }
+    return out;
+}
+
+// Residual of `actual` against a long-double direct convolution of the same
+// (already rounded) input and IR, in dB relative to the reference energy.
+template <typename T>
+double convolution_null_db(const std::vector<T>& input, const std::vector<T>& ir,
+                           const std::vector<T>& actual) {
+    long double err = 0, ref = 0;
+    for (std::size_t n = 0; n < actual.size(); ++n) {
+        long double y = 0;
+        const std::size_t taps = std::min(ir.size(), n + 1);
+        for (std::size_t k = 0; k < taps; ++k)
+            y += static_cast<long double>(ir[k]) * static_cast<long double>(input[n - k]);
+        const long double d = static_cast<long double>(actual[n]) - y;
+        err += d * d;
+        ref += y * y;
+    }
+    return 10.0 * std::log10(static_cast<double>(err / ref) + 1e-300);
+}
+
+template <typename T>
+std::vector<T> run_partitioned(const std::vector<T>& input, const std::vector<T>& ir,
+                               std::size_t block) {
+    PartitionedConvolverT<T> conv;
+    conv.load_ir(ir.data(), ir.size(), block);
+    std::vector<T> out(input.size());
+    for (std::size_t off = 0; off < input.size(); off += block)
+        conv.process(input.data() + off, out.data() + off, block);
+    REQUIRE(conv.block_size_violations() == 0);
+    return out;
+}
+
+} // namespace
+
+TEST_CASE("Convolver: output nulls against a long-double direct convolution",
+          "[signal][convolver][null]") {
+    struct Case {
+        std::size_t block;
+        std::size_t ir_length;
+    };
+    for (const Case c :
+         {Case{2, 37}, Case{32, 64}, Case{128, 4096}, Case{512, 512}, Case{512, 9000}}) {
+        const std::size_t frames = c.block * ((3 * c.ir_length) / c.block + 8);
+        const auto in64 = lcg_signal(frames, 0x1234567u, 0.0);
+        const auto ir64 = lcg_signal(c.ir_length, 0xBEEFu, 4.0 / static_cast<double>(c.ir_length));
+        const std::vector<float> in32(in64.begin(), in64.end());
+        const std::vector<float> ir32(ir64.begin(), ir64.end());
+
+        const double null32 = convolution_null_db(in32, ir32, run_partitioned(in32, ir32, c.block));
+        const double null64 = convolution_null_db(in64, ir64, run_partitioned(in64, ir64, c.block));
+        INFO("block=" << c.block << " ir=" << c.ir_length << " float null=" << null32
+                      << " dB, double null=" << null64 << " dB");
+        REQUIRE(null32 < -120.0);
+        REQUIRE(null64 < -250.0);
+    }
+}
+
+TEST_CASE("Convolver: the null gate sees a one-tap defect", "[signal][convolver][null]") {
+    // Negative control: render with an IR whose one tap is off by 1e-5 of the
+    // IR's norm and grade it against the true IR. A -100 dB defect must fail the
+    // -120 dB gate, or the gate is grading nothing.
+    const auto in64 = lcg_signal(128 * 40, 0x1234567u, 0.0);
+    const auto ir64 = lcg_signal(1000, 0xBEEFu, 0.004);
+    double norm = 0.0;
+    for (double v : ir64)
+        norm += v * v;
+    auto planted = ir64;
+    planted[333] += 1e-5 * std::sqrt(norm);
+    const std::vector<float> in32(in64.begin(), in64.end());
+    const std::vector<float> ir32(ir64.begin(), ir64.end());
+    const std::vector<float> planted32(planted.begin(), planted.end());
+    REQUIRE(convolution_null_db(in32, ir32, run_partitioned(in32, ir32, 128)) < -120.0);
+    REQUIRE(convolution_null_db(in32, ir32, run_partitioned(in32, planted32, 128)) > -120.0);
 }

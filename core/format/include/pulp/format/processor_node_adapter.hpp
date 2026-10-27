@@ -1,12 +1,14 @@
 #pragma once
 
 #include <pulp/format/graph_runtime_executor.hpp>
+#include <pulp/format/audio_input_provider.hpp>
 #include <pulp/format/process_block.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/processor_block_adapter.hpp>
 #include <pulp/state/store.hpp>
 
 #include <memory>
+#include <array>
 #include <span>
 #include <vector>
 
@@ -45,6 +47,14 @@ public:
     bool prepare(const PrepareContext& context);
     bool release() noexcept;
 
+    /// Install a host-owned route provider before prepare(). The handle is
+    /// copied as a small immutable POD and read from the audio thread without
+    /// allocation or locking. Clearing it requires the audio thread to be
+    /// stopped and the node to be prepared again.
+    void set_audio_input_provider(AudioInputBusProvider provider) noexcept {
+        input_provider_ = provider;
+    }
+
     /// Build the only valid graph binding for this adapter. The cached
     /// capability selects dense views or the legacy event expansion.
     GraphRuntimeNodeBinding binding(graph::NodeId node_id, bool required = true) noexcept;
@@ -52,8 +62,9 @@ public:
     /// Routed node binding entry point. `user_data` must be the owning
     /// ProcessorNode. Reads the executor's gathered mono input view
     /// (ctx.node_inputs) and writes this node's mono output view
-    /// (ctx.node_outputs) by aliasing them into a stack-local single-bus
-    /// ProcessBlock, then forwards to process_processor_block(). Allocation-free
+    /// (ctx.node_outputs) by aliasing them into a block-local ProcessBlock
+    /// over the node's reused bus set, then forwards to
+    /// process_processor_block(). Allocation-free
     /// per block and only valid on the routed path (ctx.routed == true).
     static bool process_binding(ProcessBlock& block,
                                 const GraphRuntimeNodeProcessContext& ctx,
@@ -67,7 +78,16 @@ private:
     // Caller-owned MIDI/parameter fallback storage for the block bridge. Sized
     // once in prepare() and reused across blocks; never resized on the RT path.
     ProcessorBlockAdapterScratch scratch_;
+    // The block's bus set, rebuilt per block by clear() and add_*(). Reusing it
+    // avoids constructing all kMaxBuses entries for the one to three buses a
+    // node uses.
+    BusBufferSet buses_;
     NodeCapabilities capabilities_{};
+    AudioInputBusProvider input_provider_{};
+    std::array<BusRole, BusBufferSet::kMaxBuses> input_roles_{};
+    std::array<int, BusBufferSet::kMaxBuses> input_channels_{};
+    std::array<bool, BusBufferSet::kMaxBuses> input_optional_{};
+    std::size_t input_bus_count_ = 0;
     bool prepared_ = false;
 };
 
@@ -85,6 +105,9 @@ class ProcessorNodeInstance final {
 
     bool prepare(const PrepareContext& context) noexcept;
     bool release() noexcept;
+    void set_audio_input_provider(AudioInputBusProvider provider) noexcept {
+        adapter_.set_audio_input_provider(provider);
+    }
     GraphRuntimeNodeBinding binding(graph::NodeId node_id, bool required = true) noexcept {
         return adapter_.binding(node_id, required);
     }

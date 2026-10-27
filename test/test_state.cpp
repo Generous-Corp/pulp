@@ -31,19 +31,34 @@
 
 using namespace pulp::state;
 
-// The audio thread reads a value with ONE relaxed load of a single atomic
-// member, so the lock-free guarantee belongs to that member and is already
-// asserted beside it (parameter.hpp: is_always_lock_free on
-// std::atomic<VersionedValue>) — not to this enclosing class, which holds four
-// separate 64-bit atomics (value, generation, mod offset, mod generation) plus
-// the display-only modulated value a plugin publishes (written by the audio
-// thread, read only by the editor, padded to a word).
+// The audio thread reads a value with ONE atomic load of the packed value and
+// per-parameter revision. The other words are independent modulation and
+// diagnostic state; they do not participate in base-value publication.
 // What is worth guarding here is that the class does not silently GROW another
 // atomic word, since each one added is another load some reader has to make.
 static_assert(sizeof(ParamValue) == 5 * sizeof(std::uint64_t),
               "ParamValue changed atomic-word count; re-check that every audio-thread "
               "read still needs only one relaxed load per value");
 using Catch::Matchers::WithinAbs;
+
+namespace pulp::state {
+class ParamValueTest {
+  public:
+    static void seed_revision(ParamValue& value, std::uint32_t revision) {
+        value.value_.store(ParamValue::make_versioned_value(0.0f, revision),
+                           std::memory_order_relaxed);
+    }
+    static bool claim_generation(ParamValue& value, std::uint64_t generation,
+                                 std::uint32_t max_attempts) {
+        return value.claim_generation(generation, max_attempts);
+    }
+    static bool publish_after_generation_claim(ParamValue& value, float next,
+                                               std::uint64_t generation,
+                                               std::uint32_t max_attempts) {
+        return value.publish_after_generation_claim(next, generation, max_attempts);
+    }
+};
+} // namespace pulp::state
 
 namespace {
 
@@ -1302,7 +1317,7 @@ TEST_CASE("generation-bound gesture rejects stale ownership before begin and rol
     CHECK(store.open_gesture_count() == 0);
 }
 
-TEST_CASE("versioned parameter writes preserve newer reservations across delay and stamp wrap",
+TEST_CASE("versioned parameter writes use a monotonic packed revision",
           "[state][store][generation][race]") {
     ParamValue value(0.0f);
     REQUIRE(value.set_versioned_if_newer(0.25f, 1, 1));
@@ -1310,12 +1325,271 @@ TEST_CASE("versioned parameter writes preserve newer reservations across delay a
     CHECK_FALSE(value.set_versioned_if_newer(0.5f, 1, 2));
     CHECK_THAT(value.get(), WithinAbs(0.75f, 0.001f));
 
+    ParamValue packed(0.0f);
+    REQUIRE(packed.set_packed_revisioned(0.25f, 1, 1));
+    REQUIRE(packed.set_packed_revisioned(0.25f, 2, 1));
+    CHECK(ParamValue::revision_from_versioned(packed.versioned_value()) == 2);
+
+    ParamValue ordered(0.0f);
+    REQUIRE(ordered.set_packed_revisioned(0.75f, 2, 1));
+    CHECK_FALSE(ordered.set_packed_revisioned(0.25f, 1, 2));
+    CHECK_THAT(ordered.get(), WithinAbs(0.75f, 0.001f));
+
+    ParamValue paused(0.0f);
+    REQUIRE(ParamValueTest::claim_generation(paused, 1, 1));
+    REQUIRE(paused.set_packed_revisioned(0.75f, 2, 1));
+    CHECK_FALSE(ParamValueTest::publish_after_generation_claim(paused, 0.25f, 1, 2));
+    CHECK_THAT(paused.get(), WithinAbs(0.75f, 0.001f));
+
     ParamValue long_lived(0.0f);
     constexpr auto wrap = std::uint64_t{std::numeric_limits<std::uint32_t>::max()};
     REQUIRE(long_lived.set_versioned_if_newer(0.25f, wrap, 1));
     REQUIRE(long_lived.set_versioned_if_newer(0.75f, wrap + 1, 1));
     CHECK_THAT(long_lived.get(), WithinAbs(0.75f, 0.001f));
     CHECK(long_lived.committed_generation() == wrap + 1);
+}
+
+TEST_CASE("conditional and plain writes never revoke a pending ordinary claim",
+          "[state][store][generation][race]") {
+    // A conditional write at an older generation lands between an ordinary
+    // writer's claim and its publication; the ordinary writer must still win.
+    ParamValue feedback(0.0f);
+    REQUIRE(ParamValueTest::claim_generation(feedback, 5, 1));
+    auto expected = feedback.versioned_value();
+    REQUIRE(feedback.compare_exchange_packed(expected, 0.25f, 3));
+    CHECK(feedback.committed_generation() == 5);
+    CHECK(ParamValueTest::publish_after_generation_claim(feedback, 0.75f, 5, 4));
+    CHECK_THAT(feedback.get(), WithinAbs(0.75f, 0.001f));
+
+    // A plain set() between claim and publication must not reset the mark.
+    ParamValue plain(0.0f);
+    REQUIRE(ParamValueTest::claim_generation(plain, 5, 1));
+    plain.set(0.25f);
+    CHECK(plain.committed_generation() == 5);
+    CHECK(ParamValueTest::publish_after_generation_claim(plain, 0.75f, 5, 4));
+    CHECK_THAT(plain.get(), WithinAbs(0.75f, 0.001f));
+
+    // Nor may a lowered mark let an older ordinary writer claim past a newer one.
+    ParamValue older(0.0f);
+    REQUIRE(older.set_packed_revisioned(0.75f, 5, 1));
+    auto older_expected = older.versioned_value();
+    REQUIRE(older.compare_exchange_packed(older_expected, 0.5f, 2));
+    older.set(0.5f);
+    CHECK(older.committed_generation() == 5);
+    CHECK_FALSE(older.set_packed_revisioned(0.25f, 4, 4));
+    CHECK_THAT(older.get(), WithinAbs(0.5f, 0.001f));
+}
+
+TEST_CASE("committed parameter generation is monotonic under concurrent writers",
+          "[state][store][generation][race]") {
+    constexpr int kOrdinaryWriters = 3;
+    constexpr int kConditionalWriters = 2;
+    constexpr int kPlainWriters = 1;
+    constexpr int kIterations = 20000;
+
+    ParamValue value(0.0f);
+    std::atomic<std::uint64_t> next_generation{0};
+    std::atomic<std::uint64_t> highest_issued{0};
+    std::atomic<bool> start{false};
+    std::atomic<int> running{0};
+    std::atomic<bool> regressed{false};
+
+    const auto issue = [&] {
+        const auto generation = next_generation.fetch_add(1, std::memory_order_acq_rel) + 1;
+        auto seen = highest_issued.load(std::memory_order_relaxed);
+        while (seen < generation &&
+               !highest_issued.compare_exchange_weak(seen, generation, std::memory_order_relaxed)) {
+        }
+        return generation;
+    };
+
+    std::vector<std::thread> threads;
+    for (int t = 0; t < kOrdinaryWriters; ++t) {
+        threads.emplace_back([&, t] {
+            ++running;
+            while (!start.load(std::memory_order_acquire)) {
+            }
+            for (int i = 0; i < kIterations; ++i)
+                (void)value.set_packed_revisioned(static_cast<float>(t), issue(), 64);
+            --running;
+        });
+    }
+    for (int t = 0; t < kConditionalWriters; ++t) {
+        threads.emplace_back([&] {
+            ++running;
+            while (!start.load(std::memory_order_acquire)) {
+            }
+            for (int i = 0; i < kIterations; ++i) {
+                auto expected = value.versioned_value();
+                (void)value.compare_exchange_packed(expected, 0.5f, issue());
+            }
+            --running;
+        });
+    }
+    for (int t = 0; t < kPlainWriters; ++t) {
+        threads.emplace_back([&] {
+            ++running;
+            while (!start.load(std::memory_order_acquire)) {
+            }
+            for (int i = 0; i < kIterations; ++i)
+                value.set(0.125f);
+            --running;
+        });
+    }
+    std::thread observer([&] {
+        while (!start.load(std::memory_order_acquire)) {
+        }
+        std::uint64_t last = 0;
+        do {
+            const auto now = value.committed_generation();
+            if (now < last)
+                regressed.store(true, std::memory_order_relaxed);
+            last = now;
+        } while (running.load(std::memory_order_acquire) > 0);
+    });
+
+    while (running.load(std::memory_order_acquire) <
+           kOrdinaryWriters + kConditionalWriters + kPlainWriters) {
+    }
+    start.store(true, std::memory_order_release);
+    for (auto& thread : threads)
+        thread.join();
+    observer.join();
+
+    CHECK_FALSE(regressed.load());
+    const auto final_mark = value.committed_generation();
+    CHECK(final_mark > 0);
+    CHECK(final_mark <= highest_issued.load());
+    value.set(0.0f);
+    auto expected = value.versioned_value();
+    REQUIRE(value.compare_exchange_packed(expected, 0.25f, 1));
+    CHECK(value.committed_generation() == final_mark);
+}
+
+TEST_CASE("packed feedback revision exhaustion never wraps", "[state][store][feedback][negative]") {
+    ParamValue exhausted(0.0f);
+    ParamValueTest::seed_revision(exhausted, std::numeric_limits<std::uint32_t>::max());
+    const auto identity = exhausted.versioned_value();
+
+    auto expected = identity;
+    CHECK_FALSE(exhausted.compare_exchange_packed(expected, 0.5f, 1));
+    CHECK_FALSE(exhausted.set_versioned_if_newer(0.5f, 1, 4));
+    CHECK(exhausted.versioned_value() == identity);
+    CHECK(ParamValue::revision_from_versioned(exhausted.versioned_value()) ==
+          std::numeric_limits<std::uint32_t>::max());
+}
+
+TEST_CASE("conditional RT feedback rejects a stale recall without notification",
+          "[state][store][feedback][rt]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "Gain", "", {0.0f, 1.0f, 0.0f}));
+    int audio_notifications = 0;
+    auto token = store.add_audio_listener([&](ParamID, float) { ++audio_notifications; });
+    float main_value = -1.0f;
+    auto main_token =
+        store.add_listener([&](ParamID, float value) { main_value = value; }, ListenerThread::Main);
+
+    const auto baseline = store.capture_feedback_baseline(1);
+    REQUIRE(baseline);
+    store.set_value_rt(1, 0.8f);
+    const auto result = store.set_value_rt_if_baseline(*baseline, 0.2f);
+
+    CHECK(result.status == ConditionalParameterApplyStatus::Conflict);
+    CHECK_THAT(store.get_value(1), WithinAbs(0.8f, 0.001f));
+    CHECK(audio_notifications == 1);
+    CHECK(store.pump_listeners() == 1);
+    CHECK_THAT(main_value, WithinAbs(0.8f, 0.001f));
+}
+
+TEST_CASE("conditional RT feedback distinguishes same-value and ABA edits",
+          "[state][store][feedback][aba]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "Gain", "", {0.0f, 1.0f, 0.0f}));
+
+    const auto same_value = store.capture_feedback_baseline(1);
+    REQUIRE(same_value);
+    store.set_value_rt(1, 0.0f);
+    auto result = store.set_value_rt_if_baseline(*same_value, 0.5f);
+    CHECK(result.status == ConditionalParameterApplyStatus::Conflict);
+
+    const auto aba = store.capture_feedback_baseline(1);
+    REQUIRE(aba);
+    store.set_value_rt(1, 0.25f);
+    store.set_value_rt(1, 0.0f);
+    result = store.set_value_rt_if_baseline(*aba, 0.75f);
+    CHECK(result.status == ConditionalParameterApplyStatus::Conflict);
+    CHECK_THAT(store.get_value(1), WithinAbs(0.0f, 0.001f));
+}
+
+TEST_CASE("conditional RT feedback applies and notifies only after exact CAS",
+          "[state][store][feedback][rt-safety]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "Gain", "", {0.0f, 1.0f, 0.0f}));
+    int audio_notifications = 0;
+    float notified = -1.0f;
+    auto token = store.add_audio_listener([&](ParamID, float value) {
+        ++audio_notifications;
+        notified = value;
+    });
+    pulp::test::RtAllocationProbe probe;
+
+    const auto baseline = store.capture_feedback_baseline(1);
+    REQUIRE(baseline);
+    const auto result = store.set_value_rt_if_baseline(*baseline, 0.75f);
+
+    REQUIRE(result.status == ConditionalParameterApplyStatus::Applied);
+    CHECK_THAT(store.get_value(1), WithinAbs(0.75f, 0.001f));
+    CHECK(audio_notifications == 1);
+    CHECK_THAT(notified, WithinAbs(0.75f, 0.001f));
+    CHECK_FALSE(probe.saw_allocation());
+}
+
+TEST_CASE("restore advances feedback identity while remaining listener-silent",
+          "[state][store][feedback][restore]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "Gain", "", {0.0f, 1.0f, 0.0f}));
+    int notifications = 0;
+    auto token = store.add_audio_listener([&](ParamID, float) { ++notifications; });
+    const auto baseline = store.capture_feedback_baseline(1);
+    REQUIRE(baseline);
+
+    StateStore source;
+    source.add_parameter(make_param_info(1, "Gain", "", {0.0f, 1.0f, 0.9f}));
+    const auto payload = source.serialize();
+    REQUIRE(store.deserialize(payload));
+    CHECK(notifications == 0);
+
+    const auto result = store.set_value_rt_if_baseline(*baseline, 0.2f);
+    CHECK(result.status == ConditionalParameterApplyStatus::Conflict);
+    CHECK_THAT(store.get_value(1), WithinAbs(0.9f, 0.001f));
+}
+
+TEST_CASE("conditional RT feedback rejects unknown parameter and mismatched token",
+          "[state][store][feedback][negative]") {
+    StateStore store;
+    store.add_parameter(make_param_info(0, "Zero", "", {0.0f, 1.0f, 0.0f}));
+    store.add_parameter(make_param_info(1, "Gain", "", {0.0f, 1.0f, 0.0f}));
+    const auto baseline = store.capture_feedback_baseline(1);
+    REQUIRE(baseline);
+    const auto unknown = store.set_value_rt_if_baseline(ParameterFeedbackBaseline{}, 0.2f);
+    CHECK(unknown.status == ConditionalParameterApplyStatus::InvalidParameter);
+    const auto wrong_id = store.set_value_rt_if_baseline(ParameterFeedbackBaseline{}, 0.2f);
+    CHECK(wrong_id.status == ConditionalParameterApplyStatus::InvalidParameter);
+}
+
+TEST_CASE("conditional RT feedback rejects a token from another store",
+          "[state][store][feedback][negative]") {
+    StateStore store_a;
+    store_a.add_parameter(make_param_info(1, "Gain", "", {0.0f, 1.0f, 0.0f}));
+    StateStore store_b;
+    store_b.add_parameter(make_param_info(1, "Gain", "", {0.0f, 1.0f, 0.0f}));
+
+    const auto baseline = store_a.capture_feedback_baseline(1);
+    REQUIRE(baseline);
+    const auto result = store_b.set_value_rt_if_baseline(*baseline, 0.75f);
+
+    CHECK(result.status == ConditionalParameterApplyStatus::InvalidParameter);
+    CHECK_THAT(store_b.get_value(1), WithinAbs(0.0f, 0.001f));
 }
 
 TEST_CASE("StateStore preserves parameter display conversion callbacks",
@@ -3067,4 +3341,190 @@ TEST_CASE("StateStore quantizes explicitly typed parameters on every write path"
     store.add_parameter(legacy);
     store.set_value(2, 0.6f);
     REQUIRE_THAT(store.get_value(2), WithinAbs(0.6, 0.0001));
+}
+
+TEST_CASE("A host-normalized write keeps continuous values exact and snaps discrete ones",
+          "[state][param-kind][host]") {
+    // Continuous with a UI step: a host sees it as continuous, so the value it
+    // sends is the value stored, exactly as a plain-value host would store it.
+    auto gain = make_param_info(1, "Gain", "dB", {-60.0f, 24.0f, 0.0f, 0.1f});
+    const float target = -19.963f;
+    const float normalized = gain.range.normalize(target);
+    REQUIRE_THAT(value_from_host_normalized(gain, normalized), WithinAbs(target, 1e-4));
+    // The UI path still quantizes to the step.
+    REQUIRE_THAT(gain.range.denormalize(normalized), WithinAbs(-20.0, 1e-4));
+
+    auto steps = make_param_info(2, "Steps", "", {0.0f, 8.0f, 0.0f, 1.0f});
+    steps.kind = ParamKind::Integer;
+    REQUIRE_THAT(value_from_host_normalized(steps, steps.range.normalize(3.4f)),
+                 WithinAbs(3.0, 1e-6));
+}
+
+TEST_CASE("ParamReader reads the live base value without an ID lookup", "[state][param-reader]") {
+    StateStore store;
+    store.add_parameter({.id = 7, .name = "Gain", .range = {0.0f, 2.0f, 1.0f}});
+    store.add_parameter({.id = 9, .name = "Mix", .range = {0.0f, 1.0f, 0.25f}});
+
+    const auto gain = store.param_reader(7);
+    const auto mix = store.param_reader(9);
+    REQUIRE(gain.valid());
+    REQUIRE(mix.valid());
+    REQUIRE(gain.get() == 1.0f);
+    REQUIRE(mix.get() == 0.25f);
+
+    store.set_value(7, 0.5f);
+    store.set_value(9, 0.75f);
+    REQUIRE(gain.get() == 0.5f);
+    REQUIRE(gain.get() == store.get_value(7));
+    REQUIRE(mix.get() == 0.75f);
+}
+
+TEST_CASE("ParamReader for an unknown ID or default handle reads zero", "[state][param-reader]") {
+    StateStore store;
+    store.add_parameter({.id = 1, .name = "Gain", .range = {0.0f, 2.0f, 1.0f}});
+
+    const auto unknown = store.param_reader(42);
+    REQUIRE_FALSE(unknown.valid());
+    REQUIRE(unknown.get() == store.get_value(42));
+    REQUIRE(unknown.get() == 0.0f);
+
+    const pulp::state::ParamReader unbound;
+    REQUIRE_FALSE(unbound.valid());
+    REQUIRE(unbound.get() == 0.0f);
+}
+
+TEST_CASE("ParamReader survives later parameter registration", "[state][param-reader]") {
+    StateStore store;
+    store.add_parameter({.id = 1, .name = "First", .range = {0.0f, 10.0f, 3.0f}});
+    const auto first = store.param_reader(1);
+
+    // Grow the value table well past any initial capacity so it reallocates.
+    for (pulp::state::ParamID id = 2; id < 300; ++id)
+        store.add_parameter({.id = id, .name = "P", .range = {0.0f, 1.0f, 0.0f}});
+
+    store.set_value(1, 6.0f);
+    REQUIRE(first.get() == 6.0f);
+    const auto last = store.param_reader(299);
+    store.set_value(299, 0.5f);
+    REQUIRE(last.get() == 0.5f);
+}
+
+TEST_CASE("ParamReader::get does not allocate", "[state][param-reader][rt-safety]") {
+    StateStore store;
+    store.add_parameter({.id = 1, .name = "Gain", .range = {0.0f, 2.0f, 1.0f}});
+    const auto gain = store.param_reader(1);
+    float sum = 0.0f;
+    {
+        pulp::test::RtAllocationProbe probe;
+        for (int i = 0; i < 64; ++i)
+            sum += gain.get();
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+    REQUIRE(sum == 64.0f);
+}
+
+TEST_CASE("ParamReader reads the base value, not the modulated value", "[state][param-reader]") {
+    StateStore store;
+    store.add_parameter({.id = 3, .name = "Cutoff", .range = {0.0f, 1.0f, 0.25f}});
+    const auto cutoff = store.param_reader(3);
+    store.set_mod_offset(3, 0.5f);
+    REQUIRE(store.get_modulated(3) == 0.75f);
+    REQUIRE(cutoff.get() == 0.25f);
+    REQUIRE(cutoff.get() == store.get_value(3));
+}
+
+TEST_CASE("StateStore lookups agree for dense, sparse, and mixed parameter IDs",
+          "[state][store][lookup]") {
+    // Small IDs resolve through the direct index table; registering an ID past
+    // its limit switches every lookup to the hash map. Both paths must read and
+    // write the same parameter, and an unknown ID must stay inert either way.
+    auto check = [](std::initializer_list<pulp::state::ParamID> ids) {
+        pulp::state::StateStore store;
+        float v = 0.1f;
+        for (auto id : ids) {
+            store.add_parameter(
+                {.id = id, .name = "p" + std::to_string(id), .range = {0.0f, 1.0f, v, 0.0f}});
+            v += 0.1f;
+        }
+        float expected = 0.1f;
+        for (auto id : ids) {
+            REQUIRE_THAT(store.get_value(id), Catch::Matchers::WithinAbs(expected, 1e-6));
+            store.set_value(id, expected + 0.05f);
+            REQUIRE_THAT(store.get_value(id), Catch::Matchers::WithinAbs(expected + 0.05f, 1e-6));
+            REQUIRE_THAT(store.get_normalized(id),
+                         Catch::Matchers::WithinAbs(expected + 0.05f, 1e-6));
+            store.set_value_rt(id, expected);
+            REQUIRE_THAT(store.get_modulated(id), Catch::Matchers::WithinAbs(expected, 1e-6));
+            expected += 0.1f;
+        }
+        REQUIRE(store.get_value(7) == 0.0f);
+        REQUIRE(store.get_value(0x7FFF'0000u) == 0.0f);
+        store.set_value(7, 0.9f); // unknown: ignored, no crash
+        REQUIRE(store.get_value(7) == 0.0f);
+    };
+    check({1, 2, 3});
+    check({3, 1, 2});
+    check({0x4741'4E31u, 0x4741'4E32u}); // four-char-code style IDs
+    check({1, 0x4741'4E31u, 2});         // dense, then sparse, then dense again
+    check({40000, 5});
+}
+
+TEST_CASE("StateStore::set_values_rt writes a batch as one store write", "[state][store][rt]") {
+    pulp::state::StateStore store;
+    for (pulp::state::ParamID id : {1u, 2u, 3u, 0x7042'7970u})
+        store.add_parameter(
+            {.id = id, .name = "p" + std::to_string(id), .range = {0.0f, 1.0f, 0.0f, 0.0f}});
+    std::vector<std::pair<pulp::state::ParamID, float>> seen;
+    auto listener = store.add_listener(
+        [&](pulp::state::ParamID id, float value) { seen.emplace_back(id, value); },
+        pulp::state::ListenerThread::Audio);
+
+    const auto before = store.state_generation();
+    const std::array<pulp::state::StateStore::ParamWrite, 5> writes{
+        {{3, 0.3f}, {0x7042'7970u, 1.0f}, {1, 2.0f}, {99, 0.5f}, {3, 0.9f}}};
+    store.set_values_rt(writes);
+
+    // Every known parameter written and clamped, in batch order, notified
+    // once per applied write; the unknown ID is skipped and a repeated ID
+    // ends at its last value, as consecutive set_value_rt() calls would.
+    REQUIRE(store.state_generation() == before + 4);
+    REQUIRE_THAT(store.get_value(3), WithinAbs(0.9, 1e-6));
+    REQUIRE_THAT(store.get_value(0x7042'7970u), WithinAbs(1.0, 1e-6));
+    REQUIRE_THAT(store.get_value(1), WithinAbs(1.0, 1e-6));
+    REQUIRE_THAT(store.get_value(2), WithinAbs(0.0, 1e-6));
+    REQUIRE(seen == std::vector<std::pair<pulp::state::ParamID, float>>{
+                        {3, 0.3f}, {0x7042'7970u, 1.0f}, {1, 1.0f}, {3, 0.9f}});
+
+    // An empty batch writes nothing and does not move the generation.
+    store.set_values_rt({});
+    REQUIRE(store.state_generation() == before + 4);
+    listener.reset();
+}
+
+TEST_CASE("StateStore::set_values_rt lets the last write to a parameter win",
+          "[state][store][rt]") {
+    pulp::state::StateStore store;
+    for (pulp::state::ParamID id : {1u, 2u})
+        store.add_parameter(
+            {.id = id, .name = "p" + std::to_string(id), .range = {0.0f, 1.0f, 0.0f, 0.0f}});
+
+    // A host that sends two values for one parameter in a block ends at the
+    // second.
+    const std::array<pulp::state::StateStore::ParamWrite, 2> repeated{{{1, 0.2f}, {1, 0.8f}}};
+    store.set_values_rt(repeated);
+    REQUIRE_THAT(store.get_value(1), WithinAbs(0.8, 1e-6));
+
+    // An Audio listener on A that writes B mid-batch does not swallow the
+    // host's later write to B.
+    auto listener = store.add_listener(
+        [&](pulp::state::ParamID id, float) {
+            if (id == 1)
+                store.set_value_rt(2, 0.1f);
+        },
+        pulp::state::ListenerThread::Audio);
+    const std::array<pulp::state::StateStore::ParamWrite, 2> chained{{{1, 1.0f}, {2, 0.9f}}};
+    store.set_values_rt(chained);
+    REQUIRE_THAT(store.get_value(1), WithinAbs(1.0, 1e-6));
+    REQUIRE_THAT(store.get_value(2), WithinAbs(0.9, 1e-6));
+    listener.reset();
 }

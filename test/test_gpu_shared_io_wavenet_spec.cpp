@@ -69,6 +69,45 @@ struct TinyReference {
 };
 } // namespace
 
+TEST_CASE("WaveNet causal pad is the per-layer history span", "[gpu_audio][shared_io][wavenet]") {
+    CHECK(wavenet_causal_pad(0, 17) == 0);
+    CHECK(wavenet_causal_pad(1, 17) == 0);
+    CHECK(wavenet_causal_pad(3, 1) == 2);
+    CHECK(wavenet_causal_pad(3, 8) == 16);
+}
+
+#if defined(PULP_GPU_AUDIO_WAVENET_RUNTIME)
+TEST_CASE("WaveNet program history sums each activation's causal pad",
+          "[gpu_audio][shared_io][wavenet]") {
+    const std::array<std::uint32_t, 2> dilations{1, 2};
+    const WavenetLayerSpec layer{
+        .input_size = 1,
+        .condition_size = 1,
+        .channels = 3,
+        .kernel = 3,
+        .head_size = 1,
+        .gated = 0,
+        .head_bias = 0,
+        .dilations = dilations,
+    };
+    // Per-layer pads are 2 and 4. The final pointwise activation has no
+    // history: (2 + 4) * 3 channels * 2 streams * sizeof(float).
+    std::vector<float> weights(3 + 2 * (3 * 3 * 3 + 3 + 3 + 3 * 3 + 3) + 3 + 1, 0.0f);
+    weights.back() = 1.0f;
+    const WavenetProgramSpec spec{
+        .block_size = 32,
+        .head_scale = 1.0f,
+        .stream_instances = 2,
+        .arrays = std::span<const WavenetLayerSpec>(&layer, 1),
+        .weights = weights,
+    };
+    REQUIRE(validate_wavenet_spec(spec).accepted());
+    const auto program = DawnSharedIoWavenetProgram::create(spec);
+    REQUIRE(program);
+    CHECK(program->history_bytes() == static_cast<std::size_t>((2 + 4) * 3 * 2 * sizeof(float)));
+}
+#endif
+
 TEST_CASE("WaveNet shared spec accepts the authenticated flat-weight shape",
           "[gpu_audio][shared_io][wavenet]") {
     Fixture fixture;
@@ -206,6 +245,58 @@ TEST_CASE("WaveNet shared spec rejects zero stream instances and dilation",
     };
     result = validate_wavenet_spec(instance_spec);
     CHECK(result.error == WavenetSpecError::InvalidShape);
+}
+
+TEST_CASE("WaveNet shared spec bounds each layer's causal reach before allocation",
+          "[gpu_audio][shared_io][wavenet]") {
+    // Every layer's history lives in a power-of-two ring of at least
+    // reach + block columns. A model asking for more than kWavenetMaxRingColumns
+    // is rejected by the validator, so no program or provider ever sizes it.
+    const auto spec_with = [](Fixture& fixture, std::uint32_t dilation, std::uint32_t block) {
+        fixture.dilations[1] = dilation; // kernel 2: reach == dilation
+        return WavenetProgramSpec{
+            .block_size = block,
+            .head_scale = 1.0f,
+            .stream_instances = 1,
+            .arrays = std::span<const WavenetLayerSpec>(&fixture.layer, 1),
+            .weights = fixture.weights,
+        };
+    };
+    constexpr std::uint32_t block = 64;
+    const auto limit = static_cast<std::uint32_t>(kWavenetMaxRingColumns);
+
+    Fixture at_limit;
+    CHECK(validate_wavenet_spec(spec_with(at_limit, limit - block, block)).accepted());
+
+    Fixture over_limit;
+    CHECK(validate_wavenet_spec(spec_with(over_limit, limit - block + 1u, block)).error ==
+          WavenetSpecError::HistoryOverflow);
+
+    // A crafted capture whose reach is near 2^31 used to pass validation and
+    // then spin the provider's ring sizing forever. Every WaveNet program and
+    // provider prepare runs this validator first, so it must refuse it at once.
+    // (Kept free of the Dawn program factory so the test links with GPU off.)
+    Fixture crafted;
+    const auto crafted_spec = spec_with(crafted, std::uint32_t{1} << 31, block);
+    const auto started = std::chrono::steady_clock::now();
+    CHECK(validate_wavenet_spec(crafted_spec).error == WavenetSpecError::HistoryOverflow);
+    CHECK(std::chrono::steady_clock::now() - started < std::chrono::seconds(1));
+}
+
+TEST_CASE("WaveNet shared spec rejects an array without layers",
+          "[gpu_audio][shared_io][wavenet]") {
+    // The first layer of array 0 starts each block's head sum on the GPU, so a
+    // spec whose array has no layers must never reach a provider.
+    Fixture fixture;
+    fixture.layer.dilations = {};
+    const WavenetProgramSpec spec{
+        .block_size = 32,
+        .head_scale = 1.0f,
+        .stream_instances = 1,
+        .arrays = std::span<const WavenetLayerSpec>(&fixture.layer, 1),
+        .weights = fixture.weights,
+    };
+    CHECK(validate_wavenet_spec(spec).error == WavenetSpecError::InvalidLayer);
 }
 
 TEST_CASE("WaveNet shared spec rejects invalid flags and non-mono final heads",

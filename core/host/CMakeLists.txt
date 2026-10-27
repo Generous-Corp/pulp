@@ -11,6 +11,7 @@ target_include_directories(pulp-host
 target_sources(pulp-host PRIVATE
     src/scanner.cpp
     src/signal_graph.cpp
+    src/signal_graph_mailbox.cpp
     src/signal_graph_authoring.cpp
     src/signal_graph_process.cpp
     src/signal_graph_diagnostics.cpp
@@ -19,6 +20,7 @@ target_sources(pulp-host PRIVATE
     src/signal_graph_prepare.cpp
     src/signal_graph_reference_walk.cpp
     src/signal_graph_live_swap.cpp
+    src/signal_graph_live_swap_catalog.cpp
     src/signal_graph_prepared_topology_edit.cpp
     src/offline_signal_graph_host.cpp
     src/plugin_slot.cpp
@@ -35,6 +37,7 @@ target_sources(pulp-host PRIVATE
     src/forge_catalog_export_eurorack_drums.cpp
     src/forge_catalog_export_dynamics.cpp
     src/forge_dynamics_catalog.cpp
+    src/forge_distortion_catalog.cpp
     src/forge_synthesis_catalog.cpp
     src/forge_catalog_export_modulation.cpp
     src/forge_modulation_catalog.cpp
@@ -42,6 +45,7 @@ target_sources(pulp-host PRIVATE
     src/forge_catalog_export_lofi.cpp
     src/forge_lofi_catalog.cpp
     src/forge_catalog_export_pitch_sequencing.cpp
+    src/forge_pitch_catalog.cpp
     src/forge_sequencing_catalog.cpp
     src/forge_catalog_export_space_synthesis.cpp
     src/forge_space_catalog.cpp

@@ -11,6 +11,10 @@ set(PULP_SDK_SOURCE_GIT_SHA "")
 set(PULP_SDK_PLATFORM "")
 set(PULP_SDK_AUDIO_PROBES_ENABLED "")
 set(PULP_SDK_INSPECTOR_ENABLED "")
+# Whether the installed pulp-view-script carries the shell exec/execAsync JS
+# bridge (`features.bridge_exec` on a release or profile marker, top-level
+# `bridge_exec` on a source install). Empty when the marker predates the key.
+set(PULP_SDK_BRIDGE_EXEC_ENABLED "")
 
 set(_pulp_sdk_provenance "${PULP_SDK_DIR}/sdk-provenance.json")
 if(EXISTS "${_pulp_sdk_provenance}")
@@ -59,7 +63,41 @@ if(EXISTS "${_pulp_sdk_provenance}")
                 "or unsafe contract; refusing to consume it.")
         endif()
         set(PULP_SDK_DEVELOPMENT TRUE)
+        # Development profiles may legitimately carry either value; export it so
+        # a consumer can refuse a shell-capable SDK for its own reasons. The
+        # forge-dev/trace profiles record it under features; the dev-experiment
+        # document records it at top level, so read either.
+        string(JSON _pulp_sdk_bridge_exec_type ERROR_VARIABLE _pulp_sdk_bridge_exec_error
+               TYPE "${_pulp_sdk_provenance_json}" features bridge_exec)
+        if(NOT _pulp_sdk_bridge_exec_error AND _pulp_sdk_bridge_exec_type STREQUAL "BOOLEAN")
+            string(JSON PULP_SDK_BRIDGE_EXEC_ENABLED
+                   GET "${_pulp_sdk_provenance_json}" features bridge_exec)
+        else()
+            string(JSON _pulp_sdk_bridge_exec_type ERROR_VARIABLE _pulp_sdk_bridge_exec_error
+                   TYPE "${_pulp_sdk_provenance_json}" bridge_exec)
+            if(NOT _pulp_sdk_bridge_exec_error AND _pulp_sdk_bridge_exec_type STREQUAL "BOOLEAN")
+                string(JSON PULP_SDK_BRIDGE_EXEC_ENABLED
+                       GET "${_pulp_sdk_provenance_json}" bridge_exec)
+            endif()
+        endif()
     elseif(_pulp_sdk_kind STREQUAL "source-install")
+        # New source installs carry the target platform even though they are
+        # not distribution eligible.  Keep accepting older markers locally,
+        # but use the field whenever present for the same ABI guard applied to
+        # official SDKs below.
+        string(JSON _pulp_sdk_platform ERROR_VARIABLE _pulp_sdk_platform_error
+               GET "${_pulp_sdk_provenance_json}" platform)
+        string(JSON _pulp_sdk_platform_type ERROR_VARIABLE _pulp_sdk_platform_type_error
+               TYPE "${_pulp_sdk_provenance_json}" platform)
+        if(NOT _pulp_sdk_platform_error)
+            if(_pulp_sdk_platform_type_error OR
+               NOT _pulp_sdk_platform_type STREQUAL "STRING" OR
+               NOT _pulp_sdk_platform MATCHES "^(android|darwin|ios|linux|windows)-[a-z0-9-]+$")
+                message(FATAL_ERROR
+                    "Pulp source install provenance has an invalid platform; refusing to consume it.")
+            endif()
+            set(PULP_SDK_PLATFORM "${_pulp_sdk_platform}")
+        endif()
         string(JSON _pulp_sdk_dirty ERROR_VARIABLE _pulp_sdk_dirty_error
                GET "${_pulp_sdk_provenance_json}" source_git_dirty)
         string(JSON _pulp_sdk_dirty_type ERROR_VARIABLE _pulp_sdk_dirty_type_error
@@ -68,6 +106,12 @@ if(EXISTS "${_pulp_sdk_provenance}")
            _pulp_sdk_dirty_type_error OR
            NOT _pulp_sdk_dirty_type STREQUAL "BOOLEAN")
             message(FATAL_ERROR "Pulp source install provenance is unsafe at ${_pulp_sdk_provenance}")
+        endif()
+        string(JSON _pulp_sdk_bridge_exec_type ERROR_VARIABLE _pulp_sdk_bridge_exec_error
+               TYPE "${_pulp_sdk_provenance_json}" bridge_exec)
+        if(NOT _pulp_sdk_bridge_exec_error AND _pulp_sdk_bridge_exec_type STREQUAL "BOOLEAN")
+            string(JSON PULP_SDK_BRIDGE_EXEC_ENABLED
+                   GET "${_pulp_sdk_provenance_json}" bridge_exec)
         endif()
         set(PULP_SDK_DEVELOPMENT TRUE)
     elseif(_pulp_sdk_kind STREQUAL "release")
@@ -138,6 +182,22 @@ if(EXISTS "${_pulp_sdk_provenance}")
                 "Pulp SDK provenance at ${_pulp_sdk_provenance} has an unknown "
                 "or unsafe release contract; refusing to consume it.")
         endif()
+        # Markers minted before the key existed carry no claim; a present key
+        # must be a boolean false, because an official SDK never ships the
+        # shell bridge.
+        string(JSON _pulp_sdk_bridge_exec_type ERROR_VARIABLE _pulp_sdk_bridge_exec_error
+               TYPE "${_pulp_sdk_provenance_json}" features bridge_exec)
+        if(NOT _pulp_sdk_bridge_exec_error)
+            string(JSON _pulp_sdk_bridge_exec
+                   GET "${_pulp_sdk_provenance_json}" features bridge_exec)
+            if(NOT _pulp_sdk_bridge_exec_type STREQUAL "BOOLEAN" OR _pulp_sdk_bridge_exec)
+                message(FATAL_ERROR
+                    "Pulp SDK provenance at ${_pulp_sdk_provenance} has an unknown "
+                    "or unsafe release contract: it claims the shell exec bridge "
+                    "(features.bridge_exec); refusing to consume it.")
+            endif()
+            set(PULP_SDK_BRIDGE_EXEC_ENABLED FALSE)
+        endif()
         set(PULP_SDK_DISTRIBUTION_ELIGIBLE TRUE)
         set(PULP_SDK_PLATFORM "${_pulp_sdk_platform}")
         set(PULP_SDK_AUDIO_PROBES_ENABLED FALSE)
@@ -198,6 +258,38 @@ if(EXISTS "${_pulp_sdk_provenance}")
     endif()
     set(PULP_SDK_PROVENANCE_KIND "${_pulp_sdk_kind}")
     set(PULP_SDK_SOURCE_GIT_SHA "${_pulp_sdk_source_sha}")
+endif()
+
+# A Windows host can target native ARM64, ARM64EC/ARM64X, or x64 from the same
+# ARM machine.  The compiler can therefore produce a plausible PE even when a
+# consumer links a static SDK built for a different ABI.  That mix is unsafe
+# for C++ object layout and CRT ownership (and has caused a std::string
+# fail-fast in REAPER).  Reject it while resolving find_package(Pulp), before
+# any plugin target is created.  Legacy source-install markers without a
+# platform remain usable but are not distribution eligible.
+if(WIN32 AND PULP_SDK_PLATFORM MATCHES "^windows-")
+    include("${CMAKE_CURRENT_LIST_DIR}/PulpWindowsTargetArch.cmake")
+    pulp_windows_target_arch(_pulp_consumer_arch)
+    if(_pulp_consumer_arch STREQUAL "arm64-win")
+        set(_pulp_consumer_platform "windows-arm64")
+    elseif(_pulp_consumer_arch STREQUAL "x86_64-win")
+        set(_pulp_consumer_platform "windows-x64")
+    elseif(_pulp_consumer_arch STREQUAL "arm64ec-win")
+        set(_pulp_consumer_platform "windows-arm64ec")
+    elseif(_pulp_consumer_arch STREQUAL "arm64x-win")
+        set(_pulp_consumer_platform "windows-arm64x")
+    else()
+        set(_pulp_consumer_platform "windows-${_pulp_consumer_arch}")
+    endif()
+    if(NOT PULP_SDK_PLATFORM STREQUAL _pulp_consumer_platform)
+        message(FATAL_ERROR
+            "Pulp SDK target mismatch: SDK platform '${PULP_SDK_PLATFORM}' "
+            "cannot be consumed by Windows target '${_pulp_consumer_arch}' "
+            "(expected '${_pulp_consumer_platform}'). Rebuild or select a "
+            "matching Pulp SDK; refusing a mixed-ABI C++ link.")
+    endif()
+    unset(_pulp_consumer_arch)
+    unset(_pulp_consumer_platform)
 endif()
 
 # Cache the resolved contract so release tools inspecting the consumer build

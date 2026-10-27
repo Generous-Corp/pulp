@@ -54,6 +54,8 @@ include(${CMAKE_CURRENT_LIST_DIR}/PulpTestData.cmake)
 #     clang accepts a consumer macro the PCH never saw *silently*, which is
 #     the one mismatch that changes semantics without an error;
 #   * an explicit CXX_STANDARD / CXX_EXTENSIONS other than the carrier's;
+#   * a POSITION_INDEPENDENT_CODE other than the tree's (the carrier compiles
+#     with the executable PIE option, and Linux clang rejects a PIE mismatch);
 #   * NO_PCH on the pulp_add_test_suite or pulp_add_test_group call (or
 #     PULP_TEST_NO_PCH on a raw add_executable target). A group is one compile
 #     line, so its members cannot opt out one at a time.
@@ -141,6 +143,18 @@ function(_pulp_test_pch_carrier out std)
         # a diagnostic. The carrier must carry no definition of its own.
         target_include_directories(${_carrier} PRIVATE
             $<TARGET_PROPERTY:Catch2::Catch2,INTERFACE_INCLUDE_DIRECTORIES>)
+        # Consumers are executables, which compile with the PIE option under
+        # POSITION_INDEPENDENT_CODE, while a static library gets the PIC one.
+        # Linux clang refuses a PCH whose PIE setting differs ("is pie differs
+        # in PCH file vs. current file"); Apple clang accepts it, so a mismatch
+        # only fails off macOS. Compile the carrier as an executable would.
+        set_target_properties(${_carrier} PROPERTIES POSITION_INDEPENDENT_CODE OFF)
+        if(CMAKE_POSITION_INDEPENDENT_CODE AND CMAKE_CXX_COMPILE_OPTIONS_PIE)
+            target_compile_options(${_carrier} PRIVATE ${CMAKE_CXX_COMPILE_OPTIONS_PIE})
+            set_target_properties(${_carrier} PROPERTIES PULP_TEST_PCH_PIE ON)
+        else()
+            set_target_properties(${_carrier} PROPERTIES PULP_TEST_PCH_PIE OFF)
+        endif()
         if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
             # Without this clang stamps the build time into the .pch, so a
             # regenerated PCH differs byte-for-byte and every consumer misses
@@ -355,6 +369,15 @@ function(_pulp_test_pch_classify out target)
     endforeach()
     if(NOT "${_ext}" STREQUAL "${_carrier_ext}")
         set(${out} "skip\tcxx-extensions:${_ext}" PARENT_SCOPE)
+        return()
+    endif()
+    # The carrier compiles as a position-independent executable when the tree
+    # sets CMAKE_POSITION_INDEPENDENT_CODE; a consumer that overrides that has
+    # a different PIE setting, which Linux clang rejects.
+    get_target_property(_pic ${target} POSITION_INDEPENDENT_CODE)
+    get_target_property(_carrier_pie ${_carrier} PULP_TEST_PCH_PIE)
+    if((_pic AND NOT _carrier_pie) OR (NOT _pic AND _carrier_pie))
+        set(${out} "skip\tposition-independent-code:${_pic}" PARENT_SCOPE)
         return()
     endif()
     get_target_property(_carrier_dir_opts ${_carrier} PULP_TEST_PCH_DIRECTORY_OPTIONS)
@@ -770,6 +793,55 @@ function(pulp_add_test_suite NAME)
     endif()
     catch_discover_tests(${_target} ${_discover_args})
     _pulp_test_data_register_suite(${NAME} ${_target} ${P_SOURCES})
+endfunction()
+
+# A libFuzzer target plus its bounded ctest smoke. Only meaningful under
+# PULP_ENABLE_FUZZING (the caller guards the call); the smoke runs the target
+# over its seed corpus for a fixed number of iterations so the required lane of
+# a fuzzing build proves every target links, loads its seeds and survives a
+# short mutation pass. The open-ended exploration budget belongs to the
+# nightly workflow, which runs the same binaries with -max_total_time.
+#
+#   pulp_add_libfuzzer_target(<name>
+#       SOURCES <src>...            fuzz entry point and oracles
+#       LIBRARIES <lib>...          link line
+#       CORPUS <dir>                seed corpus directory (absolute)
+#       [INCLUDE_DIRECTORIES ...]   extra private include dirs
+#       [RUNS <n>]                  mutation iterations for the smoke (default 2000)
+#       [MAX_LEN <bytes>]           input ceiling for the smoke (default 65536)
+#       [FIXTURES_REQUIRED <f>...]  ctest fixtures the smoke needs (a corpus generator))
+function(pulp_add_libfuzzer_target NAME)
+    cmake_parse_arguments(P "" "CORPUS;RUNS;MAX_LEN"
+        "SOURCES;LIBRARIES;INCLUDE_DIRECTORIES;FIXTURES_REQUIRED" ${ARGN})
+    if(NOT P_SOURCES OR NOT P_CORPUS)
+        message(FATAL_ERROR "pulp_add_libfuzzer_target(${NAME}): SOURCES and CORPUS are required")
+    endif()
+    if(NOT P_RUNS)
+        set(P_RUNS 2000)
+    endif()
+    if(NOT P_MAX_LEN)
+        set(P_MAX_LEN 65536)
+    endif()
+    add_executable(${NAME} ${P_SOURCES})
+    target_include_directories(${NAME} PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/fuzz ${P_INCLUDE_DIRECTORIES})
+    target_link_libraries(${NAME} PRIVATE ${P_LIBRARIES})
+    target_compile_options(${NAME} PRIVATE -fsanitize=${PULP_FUZZ_SANITIZERS} -fno-omit-frame-pointer)
+    target_link_options(${NAME} PRIVATE -fsanitize=${PULP_FUZZ_SANITIZERS})
+    # libFuzzer writes every new interesting input into the first corpus
+    # directory it is given, so the smoke gets a scratch directory first and
+    # the seeds second; a checked-in seed corpus is never grown by a test run.
+    set(_scratch "${CMAKE_CURRENT_BINARY_DIR}/fuzz-corpus/${NAME}-smoke")
+    file(MAKE_DIRECTORY "${_scratch}")
+    add_test(NAME ${NAME}-smoke
+        COMMAND ${NAME} -runs=${P_RUNS} -max_len=${P_MAX_LEN} -seed=1 -timeout=25
+            -rss_limit_mb=2048 "${_scratch}" "${P_CORPUS}")
+    set_tests_properties(${NAME}-smoke PROPERTIES
+        LABELS "fuzz;libfuzzer"
+        ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0:halt_on_error=1")
+    if(P_FIXTURES_REQUIRED)
+        set_tests_properties(${NAME}-smoke PROPERTIES FIXTURES_REQUIRED "${P_FIXTURES_REQUIRED}")
+    endif()
 endfunction()
 
 # The test directory compiles its shared support sources once (see

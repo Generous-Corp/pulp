@@ -94,6 +94,45 @@ fs::path write_archive_without_hashes(const fs::path& archive,
     return archive;
 }
 
+// A hash-listed archive of `source_root` plus `extra_files` (archive path,
+// body), each listed and hashed like the tree's own files.
+fs::path write_archive_with_extra_files(
+    const fs::path& archive, const fs::path& source_root,
+    const std::vector<std::pair<std::string, std::string>>& extra_files) {
+    mz_zip_archive zip{};
+    REQUIRE(mz_zip_writer_init_file(&zip, archive.string().c_str(), 0));
+    std::error_code ec;
+    std::vector<std::pair<std::string, std::string>> hashes;
+    for (fs::recursive_directory_iterator it(source_root, ec), end; !ec && it != end;
+         it.increment(ec)) {
+        if (!it->is_regular_file(ec))
+            continue;
+        const auto rel = fs::relative(it->path(), source_root, ec).generic_string();
+        std::ifstream file(it->path(), std::ios::binary);
+        std::string body((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        REQUIRE(mz_zip_writer_add_mem(&zip, rel.c_str(), body.data(), body.size(),
+                                      MZ_DEFAULT_COMPRESSION));
+        hashes.push_back({rel, "sha256-" + pulp::runtime::sha256_hex(body)});
+    }
+    for (const auto& [rel, body] : extra_files) {
+        REQUIRE(mz_zip_writer_add_mem(&zip, rel.c_str(), body.data(), body.size(),
+                                      MZ_DEFAULT_COMPRESSION));
+        hashes.push_back({rel, "sha256-" + pulp::runtime::sha256_hex(body)});
+    }
+    std::sort(hashes.begin(), hashes.end());
+    std::string sha_manifest = "{\n  \"schema\": \"pulp-files-sha256-v1\",\n  \"files\": {";
+    for (std::size_t i = 0; i < hashes.size(); ++i) {
+        sha_manifest += i == 0 ? "\n" : ",\n";
+        sha_manifest += "    \"" + hashes[i].first + "\": \"" + hashes[i].second + "\"";
+    }
+    sha_manifest += "\n  }\n}\n";
+    REQUIRE(mz_zip_writer_add_mem(&zip, "files.sha256.json", sha_manifest.data(),
+                                  sha_manifest.size(), MZ_DEFAULT_COMPRESSION));
+    REQUIRE(mz_zip_writer_finalize_archive(&zip));
+    mz_zip_writer_end(&zip);
+    return archive;
+}
+
 fs::path write_archive_with_unlisted_payload(const fs::path& archive,
                                              const fs::path& source_root) {
     mz_zip_archive zip{};
@@ -180,6 +219,35 @@ TEST_CASE("pulp content installs, lists, reveals, and removes data-only packs",
     REQUIRE(remove_out.find(installed.string()) != std::string::npos);
     REQUIRE_FALSE(fs::exists(installed));
     REQUIRE(fs::exists(data.path / "Content" / plugin / "UserPresets" / "mine.json"));
+}
+
+TEST_CASE("pulp content install refuses a pack above --max-pack-bytes before extracting",
+          "[cli][content]") {
+    TempDir data;
+    const auto fixture = repo_root() / "fixtures/packages/basic-content-pack";
+    const std::string plugin = "dev.pulp.fixtures.content-target";
+    // 1 MiB of whitespace around a valid theme: a few hundred bytes on disk, a
+    // megabyte once inflated.
+    const std::string padded =
+        std::string(std::size_t{1} << 20, ' ') + R"json({"name":"Padded"})json";
+    const auto archive = write_archive_with_extra_files(data.path / "padded.pulpcontent", fixture,
+                                                        {{"themes/padded.json", padded}});
+
+    REQUIRE(cmd_content({"validate", archive.string(), "--max-pack-bytes", "65536"}) == 1);
+    REQUIRE(cmd_content({"install", archive.string(), "--plugin", plugin, "--root",
+                         data.path.string(), "--yes", "--max-pack-bytes", "65536"}) == 1);
+    REQUIRE_FALSE(fs::exists(data.path / "Content"));
+    REQUIRE(cmd_content({"install", archive.string(), "--plugin", plugin, "--root",
+                         data.path.string(), "--yes", "--max-pack-bytes", "0"}) == 2);
+
+    // Positive control: under the default caps the same archive installs whole.
+    REQUIRE(cmd_content({"validate", archive.string()}) == 0);
+    REQUIRE(cmd_content({"install", archive.string(), "--plugin", plugin, "--root",
+                         data.path.string(), "--yes"}) == 0);
+    const auto extracted = data.path / "Content" / plugin / "dev.pulp.fixtures.basic-content-pack" /
+                           "0.1.0" / "themes" / "padded.json";
+    REQUIRE(fs::exists(extracted));
+    REQUIRE(fs::file_size(extracted) == padded.size());
 }
 
 TEST_CASE("pulp content install writes the index atomically with no temp sidecar",
@@ -691,4 +759,29 @@ TEST_CASE("pulp content validation rejects sample-bank symlink escapes",
 })json");
 
     REQUIRE(cmd_content({"validate", pack.path.string(), "--json"}) == 1);
+}
+
+TEST_CASE("pulp content preview rejects a manifest whose string never closes",
+          "[cli][content][attack-surface]") {
+    // A downloaded pack manifest is attacker-controlled. An unterminated
+    // string used to carry the JSON parser past the end of the manifest
+    // buffer; it must now surface as an ordinary parse error.
+    const std::string unterminated = R"json({"schema": "pulp-package-v1", "id": "never-closed)json";
+    REQUIRE_THROWS_AS(choc::json::parse(std::string_view(unterminated)), choc::json::ParseError);
+
+    TempDir data;
+    TempDir pack;
+    write_file(pack.path / "pulp.package.json", unterminated);
+
+    ContentCapabilityManifest plugin;
+    plugin.plugin_id = "dev.pulp.tests.unterminated-target";
+    plugin.capabilities = {"content.presets.v1"};
+    plugin.content_kinds = {"presets"};
+
+    const auto preview = pulp::state::preview_content_pack_install(pack.path, plugin, data.path);
+    REQUIRE_FALSE(preview.ok);
+    REQUIRE(std::any_of(preview.issues.begin(), preview.issues.end(), [](const std::string& issue) {
+        return issue.rfind("invalid-json", 0) == 0;
+    }));
+    REQUIRE_FALSE(fs::exists(data.path / "Content"));
 }

@@ -47,6 +47,62 @@ class RouteProcessor final : public pulp::format::Processor {
     }
 };
 
+class ProviderProbe final : public pulp::format::Processor {
+  public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        pulp::format::PluginDescriptor d;
+        d.name = "Provider probe";
+        d.manufacturer = "Pulp";
+        d.bundle_id = "com.pulp.test.provider-probe";
+        d.version = "1";
+        d.category = pulp::format::PluginCategory::Effect;
+        d.input_buses = {
+            {"Main In", 1, false, pulp::format::BusRole::Main},
+            {"Route", 1, true, pulp::format::BusRole::Aux},
+        };
+        d.output_buses = {{"Main Out", 1, false, pulp::format::BusRole::Main}};
+        return d;
+    }
+
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const pulp::format::PrepareContext&) override {}
+
+    void process(pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {}
+
+    void process(pulp::format::ProcessBuffers& audio, pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&, const pulp::format::ProcessContext&) override {
+        const auto* main = audio.main_input();
+        const auto* route = audio.inputs.find_by_index(1);
+        auto* output = audio.main_output();
+        if (output == nullptr)
+            return;
+        for (std::size_t frame = 0; frame < output->num_samples(); ++frame) {
+            const float main_sample = main ? main->channel_ptr(0)[frame] : 0.0f;
+            const float route_sample =
+                route && route->active() ? route->buffer.channel_ptr(0)[frame] : 0.0f;
+            output->channel_ptr(0)[frame] = main_sample + route_sample;
+        }
+    }
+};
+
+struct ProviderFixture {
+    pulp::audio::BufferView<const float> route;
+    std::size_t calls = 0;
+
+    static bool read(void* context, std::size_t bus_index, std::size_t frame_count,
+                     pulp::audio::BufferView<const float>& output) noexcept {
+        auto& fixture = *static_cast<ProviderFixture*>(context);
+        ++fixture.calls;
+        if (bus_index != 1 || fixture.route.num_channels() != 1 ||
+            fixture.route.num_samples() != frame_count)
+            return false;
+        output = fixture.route;
+        return true;
+    }
+};
+
 void prepare_graph(pulp::host::SignalGraph& graph, pulp::host::NodeId& source,
                    pulp::host::NodeId& destination) {
     source = graph.add_input_node(1, "source");
@@ -84,6 +140,45 @@ std::string insert_params(pulp::host::NodeId source, pulp::host::NodeId destinat
            R"(,"parameter_id":7,"audio_rate":true,"range_lo":-2,"range_hi":3,"smoothing_ms":10}]})";
 }
 } // namespace
+
+TEST_CASE("SignalGraph forwards an input provider to a Processor node",
+          "[host][graph][processor-node][audio-route]") {
+    constexpr int frames = 8;
+    pulp::host::SignalGraph graph;
+    const auto source = graph.add_input_node(1, "source");
+    const auto processor = graph.add_processor_node(std::make_unique<ProviderProbe>());
+    const auto output = graph.add_output_node(1, "output");
+    REQUIRE(source != 0);
+    REQUIRE(processor != 0);
+    REQUIRE(output != 0);
+    REQUIRE(graph.connect(source, 0, processor, 0));
+    REQUIRE(graph.connect(processor, 0, output, 0));
+
+    pulp::audio::Buffer<float> main(1, frames);
+    pulp::audio::Buffer<float> route(1, frames);
+    pulp::audio::Buffer<float> rendered(1, frames);
+    for (int frame = 0; frame < frames; ++frame) {
+        main.channel(0)[static_cast<std::size_t>(frame)] = static_cast<float>(frame + 1);
+        route.channel(0)[static_cast<std::size_t>(frame)] = static_cast<float>(10 + frame);
+    }
+    ProviderFixture provider;
+    const auto& const_route = route;
+    provider.route = const_route.view();
+    REQUIRE(
+        graph.set_processor_audio_input_provider(processor, {&provider, &ProviderFixture::read}));
+    REQUIRE_FALSE(graph.set_processor_audio_input_provider(processor, {}));
+
+    graph.set_canonical_executor_routing_enabled(true);
+    REQUIRE(graph.prepare(48000.0, frames));
+    const auto& const_main = main;
+    auto rendered_view = rendered.view();
+    graph.process(rendered_view, const_main.view(), frames);
+    REQUIRE(provider.calls == 1);
+    for (int frame = 0; frame < frames; ++frame) {
+        REQUIRE(rendered.channel(0)[static_cast<std::size_t>(frame)] ==
+                static_cast<float>(11 + 2 * frame));
+    }
+}
 
 TEST_CASE("DSPX-04 host authority lifecycle and dense refusal", "[dspx-04][host-authority]") {
     pulp::host::SignalGraph graph;

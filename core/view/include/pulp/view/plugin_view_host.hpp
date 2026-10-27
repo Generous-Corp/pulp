@@ -1,8 +1,11 @@
 #pragma once
 
+#include <cstddef>
+
 #include <pulp/view/pending_damage.hpp>
 #include <pulp/view/view.hpp>
 #include <memory>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <vector>
@@ -20,6 +23,16 @@ namespace detail {
 /// shared_ptr in the host and weak_ptr in each subscription, so neither
 /// destruction order is a use-after-free.
 class GpuSurfaceObserverRegistry;
+
+/// A lite editor binary (pulp_add_plugin LITE_EDITOR) is built without the GPU
+/// host. When its editor asks for one anyway (a scripted UI, or a view whose
+/// requires_gpu_host() is true), PluginViewHost::create notes the request here
+/// and opens the CoreGraphics host. The first request in the process logs a
+/// warning naming the fix; every request is counted. Returns true for the
+/// request that logged.
+bool note_lite_host_gpu_request();
+/// Requests noted by note_lite_host_gpu_request() in this process.
+std::size_t lite_host_gpu_request_count() noexcept;
 }  // namespace detail
 
 // Platform-specific handle types
@@ -118,8 +131,8 @@ public:
     // Create a plugin view host for the given view tree.
     //
     // create(), set_factory(), clear_factory(), has_factory(), and
-    // register_platform_plugin_view_host() are declared here but DEFINED in pulp-view-tooling
-    // (pulp::view and pulp::format-view link it), together with the platform hosts. A target
+    // register_platform_plugin_view_host() are declared here but DEFINED in pulp-view-tooling,
+    // together with the platform hosts. A target
     // that links only pulp-view-core can subclass PluginViewHost but cannot create one.
     //
     // Platform support:
@@ -277,6 +290,26 @@ public:
     // capture the raw pointer; the WidgetBridge must be destroyed before
     // the host.
     virtual render::GpuSurface* gpu_surface() const { return nullptr; }
+
+    /// Bytes held by this host's GPU resource caches: `budgeted` against
+    /// Skia's budget, `purgeable` what a trim can return. Zero on a host with
+    /// no GPU surface yet, or a CPU host.
+    struct GpuCacheUsage {
+        std::size_t budgeted = 0;
+        std::size_t purgeable = 0;
+    };
+    virtual GpuCacheUsage gpu_cache_usage() const {
+        return {};
+    }
+
+    /// Return every GPU cache resource nothing references to the device. A
+    /// format adapter calls this when the host hides the editor without
+    /// closing it (CLAP gui_hide, an AU view leaving its window), so a hidden
+    /// editor stops holding GPU memory it is not drawing with. The surfaces
+    /// stay, so showing the editor again repaints without recreating them.
+    /// Call it on the thread that renders, between frames. A no-op on a host
+    /// with no GPU surface yet, and on CPU hosts.
+    virtual void release_gpu_caches() {}
 
     // ── GPU-surface lifecycle ───────────────────────────────────────────
     //

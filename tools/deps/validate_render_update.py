@@ -94,7 +94,7 @@ def validate(cache_root: Path, build_dir: Path, cache_only: bool) -> dict[str, o
     if not cache_only and matrix_platform != "darwin-arm64":
         raise RuntimeError(
             "full render-update validation requires a darwin-arm64 host so the "
-            "mixed Skia/Dawn m153 plus V8 provider proof cannot be skipped; "
+            "mixed Skia/Dawn plus V8 provider proof cannot be skipped; "
             "use --cache-only on this host and run the full leg on darwin-arm64"
         )
     _, asset = skia_fetch.manifest_asset(matrix_platform)

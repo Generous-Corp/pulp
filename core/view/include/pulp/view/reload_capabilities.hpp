@@ -29,7 +29,8 @@ namespace pulp::view {
 /// A capability gates one effectful bridge-API group. Ungranted → the group's JS
 /// functions are absent. Ordering is stable (persisted/signed by name, never index).
 enum class ReloadCapability : std::uint8_t {
-    Exec,          ///< shell exec/execAsync — ALSO compiled out of shipping builds
+    Exec,          ///< shell exec/execAsync — ALSO compiled out unless the
+                   ///< PULP_DEV_BRIDGE_EXEC CMake option is ON (release/SDK: OFF)
     Clipboard,     ///< read/write the system clipboard
     Filesystem,    ///< read arbitrary file paths (asset file loads, native dialogs)
     Storage,       ///< persistent key/value + preset temp files
@@ -77,12 +78,23 @@ public:
     static CapabilitySet all() {
         CapabilitySet s;
         s.bits_ = kAllBits;
+        s.legacy_default_ = true;
         return s;
     }
 
     void grant(ReloadCapability c) { bits_ |= bit(c); }
     bool has(ReloadCapability c) const { return (bits_ & bit(c)) != 0; }
     bool empty() const { return bits_ == 0; }
+
+    /// True only for a set produced by all(): the unenforced grant every
+    /// trusted/local realm still receives by default. A policy that must not
+    /// fire until that default is replaced by an explicit grant keys on this,
+    /// so an EXPLICIT grant of the same capabilities counts as a decision
+    /// while the legacy default does not. Parsing a manifest or granting onto
+    /// an empty set never yields a legacy-default set.
+    bool is_legacy_default() const noexcept {
+        return legacy_default_;
+    }
 
     /// Return the first granted effectful capability in stable declaration
     /// order. All current reload capabilities expose native side effects, so a
@@ -121,6 +133,7 @@ private:
         (std::uint32_t{1} << 7) - 1;  // 7 capabilities (Exec..Network)
 
     std::uint32_t bits_ = 0;
+    bool legacy_default_ = false;
 };
 
 }  // namespace pulp::view

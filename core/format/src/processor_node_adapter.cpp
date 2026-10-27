@@ -13,7 +13,23 @@ bool ProcessorNode::prepare(const PrepareContext& context) {
         return false;
     prepared_ = false;
     PULP_TRY {
-        capabilities_ = processor_->descriptor().effective_capabilities();
+        const auto descriptor = processor_->descriptor();
+        capabilities_ = descriptor.effective_capabilities();
+        // Reserve one inline bus slot for the required output.  The routed
+        // adapter cannot represent all kMaxBuses inputs and an output in the
+        // same ProcessBlock otherwise.
+        input_bus_count_ = std::min(descriptor.input_buses.size(), input_roles_.size() - 1);
+        for (std::size_t index = 0; index < input_bus_count_; ++index) {
+            auto role = descriptor.input_buses[index].role;
+            // Preserve compatibility with the legacy three-field descriptor:
+            // an optional secondary input was historically a sidechain and
+            // had no explicit role field.
+            if (index > 0 && descriptor.input_buses[index].optional && role == BusRole::Main)
+                role = BusRole::Sidechain;
+            input_roles_[index] = role;
+            input_channels_[index] = descriptor.input_buses[index].default_channels;
+            input_optional_[index] = descriptor.input_buses[index].optional;
+        }
         processor_->prepare(context);
         // Pre-size the discard MIDI sinks so the per-block clear() the bridge runs
         // on the unused fallback buffers never reallocates on the RT thread.
@@ -24,6 +40,7 @@ bool ProcessorNode::prepare(const PrepareContext& context) {
     }
     PULP_CATCH_ALL {
         capabilities_ = {};
+        input_bus_count_ = 0;
         return false;
     }
     prepared_ = true;
@@ -33,6 +50,7 @@ bool ProcessorNode::prepare(const PrepareContext& context) {
 bool ProcessorNode::release() noexcept {
     prepared_ = false;
     capabilities_ = {};
+    input_bus_count_ = 0;
     if (processor_ == nullptr)
         return false;
     PULP_TRY {
@@ -73,13 +91,32 @@ bool ProcessorNode::process_binding(ProcessBlock& block, const GraphRuntimeNodeP
     if (!ctx.routed)
         return false;
 
-    // Stack-local single-bus set aliasing the executor's routed mono views.
-    // BusBufferSet stores its buses inline (no heap), and BufferView only holds
-    // the executor-owned channel-pointer array, so this aliases without copying
-    // samples and stays allocation-free.
-    BusBufferSet local_buses;
-    if (!local_buses.add_input("main", ctx.node_inputs, BusRole::Main))
+    // The node's bus set aliases the executor's routed main view and any
+    // host-provided optional input views. BusBufferSet stores its buses inline
+    // and BufferView only holds host-owned channel pointers, so this aliases
+    // without copying samples and stays allocation-free. A node is never run
+    // on two threads at once, so its set is reused rather than rebuilt.
+    BusBufferSet& local_buses = self->buses_;
+    local_buses.clear();
+    const auto main_role = self->input_bus_count_ > 0 ? self->input_roles_[0] : BusRole::Main;
+    if (!local_buses.add_input("main", ctx.node_inputs, main_role, true))
         return false;
+    for (std::size_t bus = 1; bus < self->input_bus_count_; ++bus) {
+        audio::BufferView<const float> route_view;
+        bool active = false;
+        if (self->input_provider_ &&
+            self->input_provider_.read(self->input_provider_.context, bus, block.frame_count,
+                                       route_view) &&
+            route_view.num_samples() == block.frame_count &&
+            route_view.num_channels() ==
+                static_cast<std::size_t>(std::max(0, self->input_channels_[bus]))) {
+            active = true;
+        } else {
+            route_view = {};
+        }
+        if (!local_buses.add_input("aux", route_view, self->input_roles_[bus], active))
+            return false;
+    }
     if (!local_buses.add_output("main", ctx.node_outputs, BusRole::Main))
         return false;
 
@@ -98,10 +135,11 @@ bool ProcessorNode::process_binding(ProcessBlock& block, const GraphRuntimeNodeP
     events.midi_out = ctx.node_midi_out;
     events.audio_rate_modulations = ctx.node_audio_rate_modulations;
     local_block.events = &events;
-    if (!local_block.validate())
-        return false;
 
     if (self->capabilities_.consumes_audio_rate_modulations) {
+        // process_processor_block() validates the legacy path itself.
+        if (!local_block.validate())
+            return false;
         PULP_TRY {
             runtime::ScopedNoAlloc no_alloc_guard;
             if (self->processor_->process_block(local_block))

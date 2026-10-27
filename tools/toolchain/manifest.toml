@@ -40,8 +40,8 @@ clang_format = { status = "target", source = "the hosted format check pins PyPI 
 # reproducible with the same mise: releases before this one select aqua
 # version-prefix overrides and percent-encoded release URLs differently, so
 # the same [tools] table can lock to different URLs.
-version = "2026.10.8"
-source_commit = "b671d356aaf33b87e48e7469a77abb40c3553c68"
+version = "2026.10.17"
+source_commit = "f0636505badf917a68cf5d5ed815c046593eaed4"
 lock_platforms = ["linux-arm64", "linux-x64", "macos-arm64", "macos-x64", "windows-arm64", "windows-x64"]
 # warn: nothing refuses an environment yet. enforce: emits a hard min_version.
 enforcement = "warn"
@@ -52,13 +52,14 @@ lock_sha256 = "3e3d93b19c8ea8f1b8f034e5713bdae59c7c9552d1f26ab725e6309d53b39a05"
 
 # The installed binary hosts run, checked by digest (tools/toolchain/check_env.py).
 # Self-update is off for it: its lib/mise-self-update-instructions.toml points
-# at `pulp deps update mise`. macos-arm64 is the build live on m1, m3, m5 and
-# m5s since 2026-10-12. A rebuild from source_commit that hashes differently is
+# at `pulp deps update mise`. macos-arm64 is a source build of source_commit;
+# each host moves to it in its own rollout step and keeps the previous pinned
+# binary installed beside it as the rollback. A rebuild that hashes differently is
 # a reproducibility finding to investigate, not a replacement. A platform with
 # no digest here is reported as unpinned, never as a match.
 [mise.binary]
-path = "~/.local/opt/mise-2026.10.8/bin/mise"
-sha256 = { macos-arm64 = "87c18142dd67f5848b0236738eb9338976329266937ecd79b11121de64dd2d47" }
+path = "~/.local/opt/mise-2026.10.17/bin/mise"
+sha256 = { macos-arm64 = "284869e5b5f57211377f026309910bea91ef65b3a71b934295fa8bd712436dfc" }
 
 # One table per tool mise installs. Rust is deliberately absent: rustup
 # installs it and cargo reads rust-toolchain.toml, so the lock never records
@@ -103,20 +104,20 @@ unlocked = { windows-arm64 = "conda-forge publishes no windows-arm64 clang-forma
 # tools/toolchain/shipyard.sha256, which tools/install-shipyard.sh checks every
 # download against before installing. The digests are the release's own
 # checksums.sha256; `generate.py --shipyard <tag>` rewrites this table from it.
-version = "v0.335.0"
+version = "v0.364.0"
 repo = "danielraffel/Shipyard"
 # sha256 of install.sh at refs/tags/<version>: install-shipyard.sh runs that
 # script, so it is pinned like a binary and refused if it differs.
-installer_sha256 = "c6ad3645c90cbe91ab6c5caef20b3cc11d4a71abf2443f59aef38fee7387c9a8"
+installer_sha256 = "64fbb7ec1136e1cbf1e799754abc0132832e20b1c8e63f98bd1ad079883fc029"
 
 [shipyard.assets]
-"shipyard-linux-arm64" = "8c4b542bd744b7b76f552d51f7b8314e4fe5ef684b113d4517188972712f3f24"
-"shipyard-linux-x64" = "e0e7c5198adace9e092444c7eeb4ed14ca87114ed42617cef9c9b79a6d467d57"
-"shipyard-macos-arm64.dmg" = "b43228abec588b9093636cec4ebda5c85f69773d902d12baf5bd72b3a28c3ba8"
-"shipyard-windows-x64.exe" = "50c7ce8401a8b35cb6e24c085bf693bae5adf68c9b4037ed136feca1ad971d9a"
-"shipyard-workstream-provider-linux-arm64" = "9ec56631e1b60588505ee7efd4f8865f8ef4b0cbf9bdc8990f36778477acbc8e"
-"shipyard-workstream-provider-linux-x64" = "d97c3cf32a2e2aa6c2c763279581d7dbadd3038f1b7dfde80cbbf130f7082318"
-"shipyard-workstream-provider-windows-x64.exe" = "bf42f0bb5dfee507343cc5d93ef56005479f14b19518c94d5614e1199500f4a1"
+"shipyard-linux-arm64" = "163217e5dd27be3e33dc398129e7c8f8d285cc902af4f5930355385f42b6ac71"
+"shipyard-linux-x64" = "a669bbdfe07d29b75727d0390ba69569c0d43e8f611d4c252870eaeb30472767"
+"shipyard-macos-arm64.dmg" = "0f9cfb16ced982d6057f3feaaf3f3f927f02d6fd0457af1e8a0554fa96fb36c0"
+"shipyard-windows-x64.exe" = "658ab432941778c9a825b26d411e8b441fba265567afba9f9359f2297322cab0"
+"shipyard-workstream-provider-linux-arm64" = "4a14f733fea00c6b46fbe10405114ea7a31ff4a4dfdfe11ab390c5a353f5115b"
+"shipyard-workstream-provider-linux-x64" = "a096bd35e8ce7a3ec782b37f88a23bf52308e9b6d3089ac2b9d3e85d166156cf"
+"shipyard-workstream-provider-windows-x64.exe" = "ed75c30de5e37c5c5f29272303816c4772d31888e90d6c9cc9642b9b22ad9009"
 
 [npm]
 # Project dependencies install with `npm ci` from these committed lockfiles,

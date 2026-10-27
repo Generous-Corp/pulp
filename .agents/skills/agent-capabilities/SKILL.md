@@ -5,12 +5,42 @@ description: Maintain Pulp's installed design-time agent capability manifest and
 
 # Agent Capabilities
 
+## The counters are assigned at land
+
+`MANIFEST_REVISION` and `SURFACE_INVENTORY_VERSION` are assigned by the
+version-at-land bump, not by branches. A branch changes the registry, headers
+and fingerprints, runs `--write`, and leaves both constants at the base value.
+The regenerated snapshot is then **pending**: its material differs from the
+last state `tools/agent-capabilities/contract-history.json` recorded, under the
+same counter. `--check` accepts that, and the next SDK bump runs
+`agent_capability_manifest.py --assign-pending`, which advances each pending
+counter by one and regenerates inside the bump commit. A hand-picked counter
+was a single integer every open branch raced for; one merge staled the rest.
+
+- `--status` prints each counter as `assigned` or `pending` (JSON). A pending
+  revision names no published contract; do not cite it as one.
+- `--require-assigned` is the release guard: `auto-release.yml` withholds the
+  SDK tag while a counter is pending.
+- A branch that still hand-bumps a counter to base + 1 keeps working; the
+  rule only stopped requiring it.
+- A pending state is never appended to the history, so two materials never
+  share a counter there.
+- If the bump's assignment keeps failing (its log says `could not assign
+  pending capability counters` or `timed out`), fix the cause and land
+  `--assign-pending` by hand as an ordinary PR from `main`. The withheld SDK
+  version is tagged by the next push only if `main` is still at it; once a
+  later bump moves the version, it is skipped. See
+  `docs/guides/release-watchdog.md`.
+
+The sections below that say "increase the counter" describe the hand-bump
+flow that branches no longer need; leave the constants alone instead.
+
 ## Public-header fingerprint refresh
 
 When a SignalGraph or other covered public header changes bytes while its
 consumer capability remains the same, refresh the reviewed SHA-256 in the
-catalog and surface ledger, increment `SURFACE_INVENTORY_VERSION`, and update
-any sequencer-exposure rows that name the old version. Run
+catalog and surface ledger and update any sequencer-exposure rows that name the
+old version (the bump assigns `SURFACE_INVENTORY_VERSION`). Run
 `python3 tools/scripts/agent_capability_manifest.py --check` and the sequencer
 exposure checker before pushing. This keeps focused-header refactors visible
 to installed-SDK consumers without turning an include-only change into a new
@@ -118,6 +148,15 @@ with the key it serves and a durable rationale), register its owner in
 `agent_capability_rederive.py` and `--check`. The baseline file itself is not
 edited; the header simply stops being legacy.
 
+A header that serves no capability (a plain DSP primitive such as
+`waveshaper.hpp`, `svf.hpp` or `tpt_filter.hpp`) takes an `infrastructure` row
+with empty `capability_keys` instead, and needs no `REVIEWED_MINIMAL_TARGETS`
+entry. Its fingerprint is the SHA-256 of the header bytes (`shasum -a 256`).
+`agent_capability_rederive.py` derives `SURFACE_INVENTORY_VERSION` as the
+protected base's value plus one and overwrites a hand-set value, so set the
+sequencer-exposure rows that quote it to the derived number after rederiving,
+not before.
+
 ## Classify the change
 
 For a new public header or symbol:
@@ -135,8 +174,8 @@ For a new public header or symbol:
    `tools/scripts/agent_capability_registry.py` instead:
    `capability_support`, `infrastructure`, or `unsupported_capability`. Give a
    durable rationale. Never grow the frozen `legacy_unreviewed` baseline.
-4. Increase `SURFACE_INVENTORY_VERSION` for any ledger change. Increase
-   `MANIFEST_REVISION` whenever the installed manifest changes.
+4. Leave `SURFACE_INVENTORY_VERSION` and `MANIFEST_REVISION` at the base
+   value; the version-at-land bump assigns them (see the top of this skill).
 
 For overloaded C++ free functions, keep the public `qualified_name` as the real
 API name and give each overload a distinct binding role. Use private generator
@@ -229,11 +268,9 @@ For an existing capability change:
   `--build-dir` at a sibling worktree's build rewrites every include root to
   the other tree, so for a stacked branch without its own build add the one
   header line by hand instead.
-- A pending sequencer-exposure row can pin the current inventory integer as an
-  evidence needle (`"SURFACE_INVENTORY_VERSION = 95"`). Bumping the version
-  stales that row and `sequencer_exposure_check.py` fails on it, not on your
-  change. Repoint the needle to the new integer — it is a pending row, so the
-  edit is allowed — and grep every pending row for the outgoing literal first.
+- Do not pin a counter integer as a sequencer-exposure evidence needle
+  (`"SURFACE_INVENTORY_VERSION = 95"`): the bump that assigns the counter stales
+  the row. Name the API or header fingerprint the row is about instead.
 - A summary-only edit to a capability row is not a contract change: raising
   `contract_version` for it is refused ("contract_version changed without a
   contract change"). Leave the version, bump `MANIFEST_REVISION`, and let
@@ -248,13 +285,15 @@ For an existing capability change:
   fingerprint and a durable rationale, and leave the baseline untouched. The
   reviewed branch is consulted ahead of the baseline, so the stale baseline
   entry is simply no longer read; dozens of headers already sit in both.
-- `--write` also appends a full snapshot to
-  `tools/agent-capabilities/contract-history.json` — tens of thousands of lines
-  that dwarf the change that caused them. `--check` does not require it, so for
-  a byte-level fingerprint refresh, revert that file and keep the three-file
-  change; `--check` still reports `fresh`. Reverting it is not free of meaning,
-  so keep the snapshot when the change is a real contract movement whose history
-  someone will read back.
+- `--write` appends a full snapshot to
+  `tools/agent-capabilities/contract-history.json` (tens of thousands of lines)
+  only when the change moves `MANIFEST_REVISION` or `SURFACE_INVENTORY_VERSION`.
+  The snapshot is the previous published state, so a refresh that leaves both
+  counters alone (a catalog binding's `header_fingerprint`) appends nothing,
+  and the next counter move records the state it started from. `--check` never
+  requires a snapshot at the current version. Before this rule, a
+  fingerprint-only `--write` appended a same-version snapshot that then sat in
+  the append-only history for good.
 - Increase the capability minor version for compatible additive contract
   changes.
 - Increase the capability major version when a binding is removed, renamed, or
@@ -466,6 +505,19 @@ that conflict by hand.
 python3 tools/scripts/agent_capability_rederive.py --print   # read-only: what would change
 python3 tools/scripts/agent_capability_rederive.py           # rewrite both, then --write
 ```
+
+**Merge the protected base first; the tool refuses otherwise.** Rederive
+compares this tree against the base, so on a branch that is behind the base,
+every change the base made since the branch point reads as this branch's own. It
+bumps a counter for them, and `--write` appends a full history entry (about
+20,000 lines, the size of every entry) that records the base's material rolled
+back: an untouched header's fingerprint reverting to its old value. So it
+refuses, writing nothing, unless the base tip is an ancestor of `HEAD`, or a
+merge in progress has the base as its incoming commit. The refusal names the
+base sha and, as a hint, the fingerprinted headers that differ; the fix is
+`git merge origin/main`, then re-run. A shallow clone cannot prove ancestry and
+refuses too; fetch the full history. A correct run on a merged branch appends at
+most one entry and leaves every existing entry byte-identical.
 
 It resolves the same protected tip `--check` uses, compares this tree's
 generated material against the base's with the counter excluded, and moves each
@@ -710,6 +762,10 @@ header under `core/host/include` leaves `--check` reporting `fresh`, since the
 surface never saw it. The header ships public and unguarded, and a later byte
 change to it trips nothing. **Add it to the tuple in the same slice that adds the
 header.**
+
+Product-neutral host catalog seams follow this same rule: classify the reusable
+descriptor/factory machinery as host infrastructure and leave product-specific
+Forge compatibility names and serialization in their existing authority.
 
 Two further rules, both learned by getting them wrong:
 

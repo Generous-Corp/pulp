@@ -1,3 +1,4 @@
+#include <pulp/canvas/resource_counters.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/layout_snapshot.hpp>
 #include <pulp/view/screenshot.hpp>
@@ -6,22 +7,23 @@
 
 #if defined(PULP_HAS_SKIA)
 #include <pulp/canvas/canvas.hpp>
+#include <pulp/canvas/image_file_cache.hpp>
 #include <pulp/render/gpu_surface.hpp>
 #include <pulp/render/headless_surface.hpp>
+#include "render_observer_private.hpp"
 #include <pulp/render/skia_surface.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 
-#include "include/core/SkMilestone.h"
-#include <dawn/dawn_version.h>
-#include <webgpu/webgpu_cpp.h>
 #endif
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <optional>
 
+#include "observer_script_lane.hpp"
 #include "text_diagnostic_observer.hpp"
 #include <pulp/view/widgets.hpp>
 #include <sstream>
@@ -57,14 +59,81 @@ bool write_text(const std::filesystem::path& path, const std::string& text) {
     return static_cast<bool>(output);
 }
 
+// Places a panel-local DesignIR in its browser page-space rect, for comparing
+// the render against a full-page Chromium screenshot. An observer-only page
+// node fills the viewport with the page colour the caller resolved, and the
+// importer's panel root becomes its one child, positioned at the authored
+// origin with its own size, clip and background untouched. So a backdrop the
+// importer dropped stays dropped inside the panel, while the page around it
+// matches Chromium's canvas.
+//
+// The move is rigid for every coordinate recorded relative to the panel
+// origin: the captured box paint rects the painter validates against a view's
+// absolute position move with it, or the painter would reject them as stale
+// and fall back to unsnapped geometry production never draws. Captured raster
+// origins are not moved: the sprite pass crops them out of the full-page
+// screenshot, so they are page-space already.
+void place_in_page(pulp::view::DesignIR& ir, float dx, float dy, float page_width,
+                   float page_height, const std::string& page_background) {
+    const auto shift = [](pulp::view::IRNode& node, const char* key, double by) {
+        auto it = node.attributes.find(key);
+        if (it == node.attributes.end())
+            return;
+        try {
+            it->second = std::to_string(std::stod(it->second) + by);
+        } catch (const std::exception&) {
+            // Unparseable metadata is left for the painter to reject.
+        }
+    };
+    // Device pixels at the DPR the capture recorded beside them.
+    const auto dpr_of = [](const pulp::view::IRNode& node, const char* key) {
+        auto it = node.attributes.find(key);
+        if (it == node.attributes.end())
+            return 0.0;
+        try {
+            return std::stod(it->second);
+        } catch (const std::exception&) {
+        }
+        return 0.0;
+    };
+    const auto visit = [&](auto& self, pulp::view::IRNode& node) -> void {
+        if (const double dpr = dpr_of(node, "browser_box_paint_dpr"); dpr > 0.0) {
+            shift(node, "browser_box_paint_left_px", dx * dpr);
+            shift(node, "browser_box_paint_right_px", dx * dpr);
+            shift(node, "browser_box_paint_top_px", dy * dpr);
+            shift(node, "browser_box_paint_bottom_px", dy * dpr);
+        }
+        for (auto& child : node.children)
+            self(self, child);
+    };
+    visit(visit, ir.root);
+
+    pulp::view::IRNode page;
+    page.type = "frame";
+    page.name = "observer page";
+    page.stable_anchor_id = "observer:page";
+    page.style.width = page_width;
+    page.style.height = page_height;
+    page.style.position = "relative";
+    if (!page_background.empty())
+        page.style.background_color = page_background;
+    ir.root.style.position = "absolute";
+    ir.root.style.left = dx;
+    ir.root.style.top = dy;
+    page.children.push_back(std::move(ir.root));
+    ir.root = std::move(page);
+}
+
 void usage() {
     std::cerr << "Usage: pulp-design-ir-observe --input <design.ir.json> "
                  "--render <png> --layout <json> --width <px> --height <px> "
-                 "[--scale <factor>] [--text-diagnostics <json>] [--set-value "
+                 "[--scale <factor>] [--origin <x>,<y>] [--page-background <css-color>] "
+                 "[--text-diagnostics <json>] [--set-value "
                  "<anchor>=<normalized>]... [--click <x>,<y>]... "
                  "[--drag <x1>,<y1>:<x2>,<y2>]... [--key <name>]... "
                  "[--interaction-log <json>] [--backend skia|gpu] "
-                 "[--render-receipt <json>] [--gpu-fault <fault>]\n";
+                 "[--render-receipt <json>] [--gpu-fault <fault>] "
+                 "[--emitter native|js]\n";
 }
 
 // One replayed input step. Steps run in command-line order after layout and
@@ -351,6 +420,9 @@ const char* gpu_fault_name(GpuFault fault) {
 }
 
 struct RenderReport {
+    /// Which emitter built the observed tree: the native materializer, or the
+    /// ui.js program generate_pulp_js() emits, run through the WidgetBridge.
+    std::string emitter = "native";
     std::string requested = "skia";
     std::string used;
     bool ok = false;
@@ -366,7 +438,88 @@ struct RenderReport {
 #if defined(PULP_HAS_SKIA)
     pulp::render::GpuSurface::AdapterInfo adapter;
 #endif
+    // Work this run did, from building the native tree to destroying it.
+    // Absent until the tree has been torn down, so a receipt that carries
+    // counters always carries the terminal readback with them.
+    struct Phase {
+        std::uint64_t layout_passes = 0;
+        std::uint64_t damage_requests = 0;
+        std::uint64_t unmarked_paint_mutations = 0;
+        // Resource work beneath the canvas (pulp/canvas/resource_counters.hpp).
+        std::uint64_t image_decodes = 0;
+        std::uint64_t gpu_uploads = 0;
+        std::uint64_t paragraph_builds = 0;
+        std::uint64_t scene_records = 0;
+        std::uint64_t scene_replays = 0;
+        std::uint64_t image_cache_builds = 0;
+    };
+    struct Counters {
+        // Materialization and interaction replay. Paint state set here has no
+        // earlier frame to stale.
+        Phase build;
+        // The tree's first layout and paint -- the render itself.
+        Phase first_frame;
+        // Everything that reads the painted tree back: the layout and text
+        // observations. A paint mutation here would stale a frame that exists.
+        Phase readback;
+        std::uint64_t views_constructed = 0;
+        std::uint64_t views_destroyed = 0;
+        std::uint64_t live_views_after_teardown = 0;
+    };
+    std::optional<Counters> counters;
+    // How the panel was placed in the observed viewport, so the receipt alone
+    // says which registration and page colour produced the pixels.
+    std::optional<std::pair<float, float>> origin;
+    std::string page_background;
 };
+
+// Process-wide View counters at one instant; differences between two
+// snapshots attribute work to the code that ran between them.
+struct ViewCounterSnapshot {
+    std::uint64_t constructed = pulp::view::View::constructed_count();
+    std::uint64_t destroyed = pulp::view::View::destroyed_count();
+    std::uint64_t layout_passes = pulp::view::View::layout_pass_count();
+    std::uint64_t damage_requests = pulp::view::View::damage_request_count();
+    std::uint64_t unmarked = pulp::view::View::unmarked_paint_mutation_count();
+    pulp::canvas::ResourceCounters resources = pulp::canvas::resource_counters();
+#if defined(PULP_HAS_SKIA)
+    std::uint64_t image_cache_builds = pulp::canvas::ImageFileCache::instance().stats().builds;
+#else
+    std::uint64_t image_cache_builds = 0;
+#endif
+};
+
+RenderReport::Phase phase_between(const ViewCounterSnapshot& from, const ViewCounterSnapshot& to) {
+    return {to.layout_passes - from.layout_passes,
+            to.damage_requests - from.damage_requests,
+            to.unmarked - from.unmarked,
+            to.resources.image_decodes - from.resources.image_decodes,
+            to.resources.gpu_uploads - from.resources.gpu_uploads,
+            to.resources.paragraph_builds - from.resources.paragraph_builds,
+            to.resources.scene_records - from.resources.scene_records,
+            to.resources.scene_replays - from.resources.scene_replays,
+            to.image_cache_builds - from.image_cache_builds};
+}
+
+choc::value::Value phase_json(const RenderReport::Phase& phase) {
+    auto out = choc::value::createObject("");
+    out.addMember("layout_passes",
+                  choc::value::createInt64(static_cast<std::int64_t>(phase.layout_passes)));
+    out.addMember("damage_requests",
+                  choc::value::createInt64(static_cast<std::int64_t>(phase.damage_requests)));
+    out.addMember("unmarked_paint_mutations", choc::value::createInt64(static_cast<std::int64_t>(
+                                                  phase.unmarked_paint_mutations)));
+    const auto count = [&](const char* name, std::uint64_t value) {
+        out.addMember(name, choc::value::createInt64(static_cast<std::int64_t>(value)));
+    };
+    count("image_decodes", phase.image_decodes);
+    count("gpu_uploads", phase.gpu_uploads);
+    count("paragraph_builds", phase.paragraph_builds);
+    count("scene_records", phase.scene_records);
+    count("scene_replays", phase.scene_replays);
+    count("image_cache_builds", phase.image_cache_builds);
+    return out;
+}
 
 #if defined(PULP_HAS_SKIA)
 const char* adapter_type_name(pulp::render::GpuSurface::AdapterType type) {
@@ -399,27 +552,6 @@ const char* frame_outcome_name(pulp::render::FrameOutcome outcome) {
     return "unknown";
 }
 
-std::string dawn_version_hex() {
-    static constexpr char digits[] = "0123456789abcdef";
-    std::string hex;
-    for (auto byte : dawn::kDawnVersion) {
-        hex += digits[byte >> 4];
-        hex += digits[byte & 0x0f];
-    }
-    return hex;
-}
-
-// True once the device's lost future has resolved. Polls with a zero timeout,
-// which Dawn accepts without the timed-wait instance feature.
-bool device_lost(const pulp::render::GpuSurface& gpu) {
-    auto* device = static_cast<wgpu::Device*>(gpu.dawn_device_handle());
-    auto* instance = static_cast<wgpu::Instance*>(gpu.dawn_instance_handle());
-    if (!device || !*device || !instance || !*instance)
-        return true;
-    wgpu::FutureWaitInfo wait{device->GetLostFuture()};
-    return instance->WaitAny(1, &wait, 0) == wgpu::WaitStatus::Success && wait.completed;
-}
-
 // Renders through Skia Graphite on a Dawn device with no presentation surface:
 // the composition HeadlessSurface uses, opened up so the receipt can record the
 // adapter, the frame outcome and whether the device survived the frame. The
@@ -427,6 +559,7 @@ bool device_lost(const pulp::render::GpuSurface& gpu) {
 // layout, paint, overlays), so a render here is comparable with one there.
 std::vector<std::uint8_t> render_gpu(pulp::view::View& root, std::uint32_t width,
                                      std::uint32_t height, float scale, GpuFault fault,
+                                     pulp::canvas::TextRasterPolicy text_raster,
                                      RenderReport& report) {
     auto gpu = pulp::render::GpuSurface::create_dawn();
     pulp::render::GpuSurface::Config gpu_config{};
@@ -444,27 +577,29 @@ std::vector<std::uint8_t> render_gpu(pulp::view::View& root, std::uint32_t width
         report.error = "no native GPU adapter (Dawn Null backend)";
         return {};
     }
-    auto skia = pulp::render::SkiaSurface::create(
-        *gpu, {.width = width, .height = height, .scale_factor = scale});
+    auto skia = pulp::render::SkiaSurface::create(*gpu, {.width = width,
+                                                         .height = height,
+                                                         .scale_factor = scale,
+                                                         .text_raster_policy = text_raster});
     if (!skia || !skia->is_available()) {
         report.error = "SkiaSurface unavailable on this device";
         return {};
     }
     report.surface_created = true;
     if (fault == GpuFault::device_destroyed)
-        static_cast<wgpu::Device*>(gpu->dawn_device_handle())->Destroy();
+        pulp::render::render_observer::inject_device_loss(*gpu);
 
     if (fault != GpuFault::no_frame) {
         if (!gpu->begin_frame()) {
             report.error = "GpuSurface::begin_frame failed";
-            report.device_lost = device_lost(*gpu);
+            report.device_lost = pulp::render::render_observer::device_lost(*gpu);
             return {};
         }
         auto* canvas = skia->begin_frame();
         if (!canvas) {
             gpu->end_frame();
             report.error = "SkiaSurface::begin_frame returned no canvas";
-            report.device_lost = device_lost(*gpu);
+            report.device_lost = pulp::render::render_observer::device_lost(*gpu);
             return {};
         }
         canvas->set_fill_color(pulp::canvas::Color::rgba8(0, 0, 0, 255));
@@ -486,7 +621,7 @@ std::vector<std::uint8_t> render_gpu(pulp::view::View& root, std::uint32_t width
     pulp::render::HeadlessSurface::Rgba rgba;
     report.readback_completed = skia->read_current_rgba(rgba.pixels, rgba.width, rgba.height);
     gpu->end_frame();
-    report.device_lost = device_lost(*gpu);
+    report.device_lost = pulp::render::render_observer::device_lost(*gpu);
     report.pixel_width = rgba.width;
     report.pixel_height = rgba.height;
     if (!report.readback_completed) {
@@ -520,9 +655,11 @@ std::string render_receipt_json(const RenderReport& report) {
     receipt.addMember("ok", choc::value::createBool(report.ok));
     receipt.addMember("error", choc::value::createString(report.error));
     receipt.addMember("seeded_fault", choc::value::createString(report.fault));
+    receipt.addMember("emitter", choc::value::createString(report.emitter));
 #if defined(PULP_HAS_SKIA)
-    receipt.addMember("skia_milestone", choc::value::createInt32(SK_MILESTONE));
-    receipt.addMember("dawn_version", choc::value::createString(dawn_version_hex()));
+    const auto versions = pulp::render::render_observer::toolchain_versions();
+    receipt.addMember("skia_milestone", choc::value::createInt32(versions.skia_milestone));
+    receipt.addMember("dawn_version", choc::value::createString(versions.dawn_version));
     if (report.requested == "gpu") {
         auto gpu = choc::value::createObject("");
         gpu.addMember("surface_created", choc::value::createBool(report.surface_created));
@@ -545,6 +682,35 @@ std::string render_receipt_json(const RenderReport& report) {
         receipt.addMember("gpu", gpu);
     }
 #endif
+    auto placement = choc::value::createObject("");
+    if (report.origin) {
+        placement.addMember("origin_x", choc::value::createFloat64(report.origin->first));
+        placement.addMember("origin_y", choc::value::createFloat64(report.origin->second));
+    }
+    placement.addMember("page_background", choc::value::createString(report.page_background));
+    receipt.addMember("placement", placement);
+    if (report.counters) {
+        const auto& c = *report.counters;
+        auto counters = choc::value::createObject("");
+        counters.addMember("schema",
+                           choc::value::createString("pulp-design-ir-observer-counters-v2"));
+        // The native lane creates no script context, so there is no bridge
+        // traffic to count; the ui.js lane's bridge traffic is not counted yet.
+        counters.addMember(
+            "script_bridge",
+            choc::value::createString(report.emitter == "js" ? "not-counted" : "not-instantiated"));
+        counters.addMember("views_constructed", choc::value::createInt64(static_cast<std::int64_t>(
+                                                    c.views_constructed)));
+        counters.addMember("views_destroyed",
+                           choc::value::createInt64(static_cast<std::int64_t>(c.views_destroyed)));
+        counters.addMember(
+            "live_views_after_teardown",
+            choc::value::createInt64(static_cast<std::int64_t>(c.live_views_after_teardown)));
+        counters.addMember("build", phase_json(c.build));
+        counters.addMember("first_frame", phase_json(c.first_frame));
+        counters.addMember("readback", phase_json(c.readback));
+        receipt.addMember("counters", counters);
+    }
     return choc::json::toString(receipt, true);
 }
 
@@ -558,12 +724,17 @@ int main(int argc, char** argv) {
     float width = 0.0f;
     float height = 0.0f;
     float scale = 2.0f;
+    float origin_x = 0.0f;
+    float origin_y = 0.0f;
+    bool has_origin = false;
+    std::string page_background;
     std::vector<std::pair<std::string, float>> value_overrides;
     std::vector<InteractionStep> steps;
     std::filesystem::path interaction_log_path;
     std::filesystem::path render_receipt_path;
     Backend backend = Backend::skia;
     GpuFault gpu_fault = GpuFault::none;
+    std::string emitter = "native";
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         if (i + 1 >= argc) {
@@ -571,6 +742,22 @@ int main(int argc, char** argv) {
             return 2;
         }
         const char* value = argv[++i];
+        // Panel placement for page-space observation; see place_in_page.
+        if (arg == "--origin") {
+            auto point = parse_point(value);
+            if (!point) {
+                std::cerr << "Error: --origin expects <x>,<y>\n";
+                return 2;
+            }
+            origin_x = point->x;
+            origin_y = point->y;
+            has_origin = true;
+            continue;
+        }
+        if (arg == "--page-background" && *value != '\0') {
+            page_background = value;
+            continue;
+        }
         if (arg == "--input") input_path = value;
         else if (arg == "--render") render_path = value;
         else if (arg == "--layout") layout_path = value;
@@ -630,6 +817,12 @@ int main(int argc, char** argv) {
                 std::cerr << "Error: --backend expects skia or gpu\n";
                 return 2;
             }
+        } else if (arg == "--emitter") {
+            emitter = value;
+            if (emitter != "native" && emitter != "js") {
+                std::cerr << "Error: --emitter expects native or js\n";
+                return 2;
+            }
         } else if (arg == "--gpu-fault") {
             auto fault = parse_gpu_fault(value);
             if (!fault) {
@@ -669,13 +862,25 @@ int main(int argc, char** argv) {
         std::cerr << "Error: invalid DesignIR: " << error.what() << "\n";
         return 1;
     }
+    if (has_origin || !page_background.empty())
+        place_in_page(ir, origin_x, origin_y, width, height, page_background);
     // The document's own directory is the search root for its manifest assets:
     // relative local_paths resolve against it, and a local_path that no longer
     // points at its bytes is recovered by content hash from the asset folders
     // beside it. Without this the tool depends on the process CWD.
-    auto root = pulp::view::build_native_view_tree(
-        ir, ir.asset_manifest,
-        {.asset_base_directory = input_path.parent_path()});
+    const ViewCounterSnapshot before_build;
+    std::unique_ptr<pulp::view::View> native_root;
+    std::unique_ptr<pulp::import_design::ObservedScript> script_root;
+    if (emitter == "js")
+        script_root =
+            pulp::import_design::ObservedScript::run(ir, input_path.parent_path(), width, height);
+    else
+        native_root = pulp::view::build_native_view_tree(
+            ir, ir.asset_manifest, {.asset_base_directory = input_path.parent_path()});
+    pulp::view::View* root = script_root ? &script_root->root() : native_root.get();
+    // Captured `antialiased` text is drawn unhinted, which matches Chromium
+    // only on a surface created with the matching preblend.
+    const auto text_raster = pulp::view::design_ir_text_raster_policy(ir);
     if (!root) {
         std::cerr << "Error: could not materialize DesignIR\n";
         return 1;
@@ -723,7 +928,12 @@ int main(int argc, char** argv) {
     // the same pixels when the reflow happens to agree — and only one of those
     // is the mechanism working.
     pulp::view::Label::reset_line_break_path_counts();
+    const ViewCounterSnapshot before_render;
     RenderReport report;
+    report.emitter = emitter;
+    if (has_origin)
+        report.origin = std::make_pair(origin_x, origin_y);
+    report.page_background = page_background;
     report.requested = backend == Backend::gpu ? "gpu" : "skia";
     report.fault = gpu_fault_name(gpu_fault);
     const auto write_receipt = [&] {
@@ -737,18 +947,19 @@ int main(int argc, char** argv) {
     std::vector<std::uint8_t> png;
     if (raster) {
         png = pulp::view::render_to_png(*root, pixel_w, pixel_h, scale,
-                                        pulp::view::ScreenshotBackend::skia);
+                                        pulp::view::ScreenshotBackend::skia, text_raster);
         report.used = gpu_fault == GpuFault::raster_fallback_unreported ? "gpu" : "skia";
         if (png.empty())
             report.error = "Skia raster render failed";
     } else {
 #if defined(PULP_HAS_SKIA)
-        png = render_gpu(*root, pixel_w, pixel_h, scale, gpu_fault, report);
+        png = render_gpu(*root, pixel_w, pixel_h, scale, gpu_fault, text_raster, report);
         report.used = "gpu";
 #else
         report.error = "this build has no GPU backend (PULP_HAS_SKIA is off)";
 #endif
     }
+    const ViewCounterSnapshot after_first_frame;
     report.ok = !png.empty();
     if (!report.ok) {
         // Never substitute another backend: a missing GPU render is a
@@ -785,6 +996,27 @@ int main(int argc, char** argv) {
         !write_text(text_diagnostics_path,
                     pulp::import_design::observe_text(*root, input_path.string()))) {
         std::cerr << "Error: could not write text observation\n";
+        return 1;
+    }
+
+    const ViewCounterSnapshot after_render;
+    // Tear the tree down before reading the lifetime counters, so the
+    // receipt's terminal readback describes a destroyed tree rather than a
+    // live one.
+    script_root.reset();
+    native_root.reset();
+    const ViewCounterSnapshot after_teardown;
+    RenderReport::Counters counters;
+    counters.build = phase_between(before_build, before_render);
+    counters.first_frame = phase_between(before_render, after_first_frame);
+    counters.readback = phase_between(after_first_frame, after_render);
+    counters.views_constructed = after_teardown.constructed - before_build.constructed;
+    counters.views_destroyed = after_teardown.destroyed - before_build.destroyed;
+    counters.live_views_after_teardown =
+        counters.views_constructed - std::min(counters.views_constructed, counters.views_destroyed);
+    report.counters = counters;
+    if (!write_receipt()) {
+        std::cerr << "Error: could not write render receipt\n";
         return 1;
     }
     return 0;

@@ -4,6 +4,7 @@
 #include "detail/shared_io_host_scheduling.hpp"
 #include "detail/shared_io_trace.hpp"
 #include "detail/staged_async_trace_ledger.hpp"
+#include "harness/fake_shared_io_provider.hpp"
 #include "harness/rt_allocation_probe.hpp"
 #include "support/physical_qualification_outcome.hpp"
 
@@ -67,140 +68,18 @@ SharedIoTraceConfig config(std::uint32_t stride = 4) {
     return value;
 }
 
-class ProductTraceProvider final : public SharedIoArenaProvider {
-    struct Slot {
-        std::uint32_t index = 0;
-        std::vector<std::byte> input;
-        std::vector<std::byte> output;
-        bool retired = false;
-    };
-    struct Pending {
-        SlotToken token;
-        std::shared_ptr<SharedIoTerminalInbox> inbox;
-    };
+using ProductTraceProvider = pulp::test::FakeSharedIoProvider;
 
-  public:
-    bool create_slot(std::uint32_t index, std::size_t input_bytes, std::size_t output_bytes,
-                     SlotResources& resources) noexcept override {
-        try {
-            auto slot = std::make_unique<Slot>();
-            slot->index = index;
-            slot->input.resize(input_bytes);
-            slot->output.resize(output_bytes);
-            resources.input = slot->input.data();
-            resources.input_size = input_bytes;
-            resources.output = slot->output.data();
-            resources.output_size = output_bytes;
-            resources.opaque = slot.get();
-            resources.input_lifecycle = {
-                .allocated = true, .import_attempted = true, .import_succeeded = true};
-            resources.output_lifecycle = resources.input_lifecycle;
-            slots_.push_back(std::move(slot));
-            return true;
-        } catch (...) {
-            return false;
-        }
-    }
-
-    void retire_slot(SlotResources& resources) noexcept override {
-        if (auto* slot = static_cast<Slot*>(resources.opaque))
-            slot->retired = true;
-        resources.input_lifecycle.dispose_observed = true;
-        resources.output_lifecycle.dispose_observed = true;
-    }
-
-    void destroy_slot(SlotResources& resources) noexcept override {
-        auto* slot = static_cast<Slot*>(resources.opaque);
-        std::erase_if(slots_, [slot](const auto& candidate) { return candidate.get() == slot; });
-        resources.input_lifecycle.host_freed = true;
-        resources.output_lifecycle.host_freed = true;
-        resources.opaque = nullptr;
-    }
-
-    bool acquire_slot_buffers(const SlotResources& resources,
-                              SlotBufferHandle& handle) const noexcept override {
-        const auto* slot = static_cast<const Slot*>(resources.opaque);
-        if (!slot || slot->retired)
-            return false;
-        handle = {.provider = this,
-                  .device = this,
-                  .input_buffer = slot->input.data(),
-                  .output_buffer = slot->output.data(),
-                  .slot = slot->index,
-                  .generation = 1,
-                  .lifetime = lifetime_};
-        return true;
-    }
-
-    bool validate_slot_buffers(const SlotBufferHandle& handle) const noexcept override {
-        return handle.provider == this && handle.device == this && !handle.lifetime.expired() &&
-               std::any_of(slots_.begin(), slots_.end(), [&](const auto& slot) {
-                   return !slot->retired && handle.slot == slot->index &&
-                          handle.input_buffer == slot->input.data() &&
-                          handle.output_buffer == slot->output.data();
-               });
-    }
-
-    bool submit(const SlotResources& resources, SlotToken token,
-                std::shared_ptr<SharedIoTerminalInbox> inbox) noexcept override {
-        return submit_program(resources, token, std::move(inbox));
-    }
-
-    bool can_resume_after_drain() const noexcept override {
-        return true;
-    }
-    void poll() noexcept override {}
-
-    bool drain() noexcept override {
-        if (!allow_drain)
-            return false;
-        complete_all();
-        return pending_.empty();
-    }
-
-    bool submit_program(const SlotResources& resources, SlotToken token,
-                        std::shared_ptr<SharedIoTerminalInbox> inbox) noexcept {
-        ++submits;
-        if (!accept_submissions)
-            return false;
-        const auto bytes = std::min(resources.input_size, resources.output_size);
-        std::memcpy(resources.output, resources.input, bytes);
-        pending_.push_back({token, std::move(inbox)});
-        return true;
-    }
-
-    void complete_sequence(std::uint64_t sequence) noexcept {
-        const auto found =
-            std::find_if(pending_.begin(), pending_.end(), [sequence](const auto& item) {
-                return item.token.stream_sequence == sequence;
-            });
-        if (found == pending_.end())
-            return;
-        const auto pushed = found->inbox->push(found->token, terminal_status);
-        if (pushed == SharedIoTerminalInbox::PushResult::Accepted)
-            pending_.erase(found);
-    }
-
-    void complete_all() noexcept {
-        for (auto cursor = pending_.begin(); cursor != pending_.end();) {
-            const auto pushed = cursor->inbox->push(cursor->token, terminal_status);
-            if (pushed == SharedIoTerminalInbox::PushResult::Accepted)
-                cursor = pending_.erase(cursor);
-            else
-                ++cursor;
-        }
-    }
-
-    bool accept_submissions = true;
-    bool allow_drain = true;
-    CompletionStatus terminal_status = CompletionStatus::RetiredSuccess;
-    std::uint32_t submits = 0;
-
-  private:
-    std::shared_ptr<const void> lifetime_ = std::make_shared<int>(0);
-    std::vector<std::unique_ptr<Slot>> slots_;
-    std::vector<Pending> pending_;
-};
+// Copies input to output at submission; each terminal is published only when
+// the test completes its sequence, and drain() retires what is left.
+std::unique_ptr<ProductTraceProvider> make_product_trace_provider() {
+    auto provider = std::make_unique<ProductTraceProvider>();
+    provider->transform = ProductTraceProvider::Transform::Affine;
+    provider->transform_at_submit = true;
+    provider->drain_completes = true;
+    provider->resume_supported = true;
+    return provider;
+}
 
 class ProductTraceProgram final : public SharedIoPreparedProgram {
   public:
@@ -243,7 +122,7 @@ struct ProductTraceFixture {
         trace.retention_capacity = retention_capacity;
         trace.enabled = true;
 
-        auto owner = std::make_unique<ProductTraceProvider>();
+        auto owner = make_product_trace_provider();
         provider = owner.get();
         auto program = std::make_unique<ProductTraceProgram>(*provider);
         REQUIRE(session.prepare(
@@ -570,6 +449,60 @@ TEST_CASE("GPU audio trace records require ordered timestamps and preserve unava
     REQUIRE_FALSE(late_gpu_delivery.valid());
 }
 
+TEST_CASE("GPU audio trace records refuse callback timing that cannot be emitted signed",
+          "[gpu_audio][trace]") {
+    constexpr auto max_signed =
+        static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
+    SharedIoTraceRecorder recorder(config(1));
+
+    // Positive controls sit exactly on each refused boundary.
+    auto boundary = raw_delivery(0);
+    boundary.callback_start_ns = max_signed - 2;
+    boundary.callback_end_ns = max_signed - 1;
+    boundary.result_visible_ns = max_signed;
+    REQUIRE(boundary.valid());
+    REQUIRE(recorder.publish_callback(boundary));
+    auto equal_timing = raw_delivery(1);
+    equal_timing.callback_end_ns = equal_timing.callback_start_ns;
+    equal_timing.result_visible_ns = equal_timing.callback_end_ns;
+    REQUIRE(equal_timing.valid());
+    REQUIRE(recorder.publish_callback(equal_timing));
+    auto ingress = record(2);
+    ingress.callback_ingress_ns = max_signed;
+    REQUIRE(ingress.valid());
+    REQUIRE(recorder.publish_worker(ingress));
+    // Unavailable callback timing carries no claim, so stale values are inert.
+    auto unavailable = raw_delivery(3);
+    unavailable.callback_timing_available = false;
+    unavailable.callback_end_ns = 0;
+    unavailable.result_visible_ns = std::numeric_limits<std::uint64_t>::max();
+    REQUIRE(unavailable.valid());
+    REQUIRE(recorder.publish_callback(unavailable));
+
+    // Each planted negative differs from a positive control by one field.
+    auto wrapped_visible = boundary;
+    wrapped_visible.result_visible_ns = max_signed + 1;
+    auto end_before_start = equal_timing;
+    end_before_start.callback_end_ns = end_before_start.callback_start_ns - 1;
+    auto visible_before_end = equal_timing;
+    visible_before_end.result_visible_ns = visible_before_end.callback_end_ns - 1;
+    auto wrapped_ingress = ingress;
+    wrapped_ingress.callback_ingress_ns = max_signed + 1;
+    REQUIRE_FALSE(wrapped_visible.valid());
+    REQUIRE_FALSE(end_before_start.valid());
+    REQUIRE_FALSE(visible_before_end.valid());
+    REQUIRE_FALSE(wrapped_ingress.valid());
+    REQUIRE_FALSE(recorder.publish_callback(wrapped_visible));
+    REQUIRE_FALSE(recorder.publish_callback(end_before_start));
+    REQUIRE_FALSE(recorder.publish_callback(visible_before_end));
+    REQUIRE_FALSE(recorder.publish_worker(wrapped_ingress));
+
+    const auto stats = recorder.stats();
+    REQUIRE(stats.attempted == 8);
+    REQUIRE(stats.enqueued == 4);
+    REQUIRE(stats.invalid == 4);
+}
+
 TEST_CASE("GPU audio trace samples successes but keeps every anomaly", "[gpu_audio][trace]") {
     SharedIoTraceRecorder recorder(config(4));
     REQUIRE(recorder.enabled());
@@ -678,9 +611,209 @@ TEST_CASE("GPU audio trace rejects generation mismatch and separates sessions",
     REQUIRE(generation_four.stats().invalid == 1);
 }
 
+TEST_CASE("GPU audio trace observer streams bounded chunks with typed negatives",
+          "[gpu_audio][trace][observer]") {
+    auto trace_config = config(1);
+    trace_config.capture_admissions = true;
+    SharedIoTraceRecorder recorder(trace_config);
+
+    struct Sink {
+        std::vector<SharedIoTraceAdmission> admissions;
+        std::vector<SharedIoTraceRecord> records;
+        bool engine_ok = true;
+        std::uint64_t duplicate_admissions = 0;
+        std::uint64_t duplicate_records = 0;
+        std::uint64_t wrong_generation = 0;
+
+        Sink() {
+            // Observer callbacks are noexcept and must never grow storage while
+            // the bounded drain is running. Campaign callers reserve their
+            // complete census before handing ownership to the observer.
+            admissions.reserve(32);
+            records.reserve(32);
+        }
+
+        static void admission(void* context, std::uint64_t engine,
+                              const SharedIoTraceAdmission& value) noexcept {
+            auto* sink = static_cast<Sink*>(context);
+            sink->engine_ok &= engine == 17;
+            if (value.generation != 3)
+                ++sink->wrong_generation;
+            if (std::find_if(sink->admissions.begin(), sink->admissions.end(),
+                             [&](const auto& previous) {
+                                 return previous.generation == value.generation &&
+                                        previous.sequence == value.sequence;
+                             }) != sink->admissions.end())
+                ++sink->duplicate_admissions;
+            sink->admissions.push_back(value);
+        }
+        static void record(void* context, std::uint64_t engine,
+                           const SharedIoTraceRecord& value) noexcept {
+            auto* sink = static_cast<Sink*>(context);
+            sink->engine_ok &= engine == 17;
+            if (value.generation != 3)
+                ++sink->wrong_generation;
+            if (std::find_if(sink->records.begin(), sink->records.end(), [&](const auto& previous) {
+                    return previous.generation == value.generation &&
+                           previous.sequence == value.sequence;
+                }) != sink->records.end())
+                ++sink->duplicate_records;
+            sink->records.push_back(value);
+        }
+    } sink;
+    const SharedIoTraceDrainObserver observer{
+        .context = &sink, .record = &Sink::record, .admission = &Sink::admission};
+    const SharedIoTraceDrainObserver partial_observer{.context = &sink, .record = &Sink::record};
+    REQUIRE(valid_shared_io_trace_drain_observer(&observer));
+    REQUIRE_FALSE(valid_shared_io_trace_drain_observer(&partial_observer));
+    SharedIoTraceRecorder malformed(config(1));
+    REQUIRE(malformed.publish_admission(3, 0));
+    REQUIRE(malformed.publish_worker(record(0)));
+    const auto before_rejected_drain = malformed.stats();
+    const auto rejected_drain = drain_shared_io_trace(malformed, {}, 2, &partial_observer);
+    REQUIRE_FALSE(rejected_drain.observer_valid);
+    REQUIRE(rejected_drain.records_drained == 0);
+    const auto after_rejected_drain = malformed.stats();
+    REQUIRE(after_rejected_drain.admissions_drained == before_rejected_drain.admissions_drained);
+    REQUIRE(after_rejected_drain.drained == before_rejected_drain.drained);
+    REQUIRE(drain_shared_io_trace(malformed, {}, 2, &observer).observer_valid);
+    REQUIRE(sink.admissions.size() == 1);
+    REQUIRE(sink.records.size() == 1);
+    sink.admissions.clear();
+    sink.records.clear();
+    ProductTraceFixture observer_fixture;
+    observer_fixture.prepare();
+    REQUIRE_FALSE(observer_fixture.session.set_trace_observer(&partial_observer));
+    REQUIRE_FALSE(observer_fixture.session.trace_observer_enabled());
+    REQUIRE(observer_fixture.session.set_trace_observer(&observer));
+    REQUIRE(observer_fixture.session.trace_observer_enabled());
+    REQUIRE(observer_fixture.session.release());
+    constexpr std::uint64_t count = 24;
+    for (std::uint64_t sequence = 0; sequence < count; ++sequence) {
+        REQUIRE(recorder.publish_admission(3, sequence));
+        REQUIRE(recorder.publish_worker(record(sequence)));
+    }
+    while (recorder.stats().drained < count || recorder.stats().admissions_drained < count) {
+        const auto drained = drain_shared_io_trace(recorder, {}, 2, &observer);
+        REQUIRE(drained.records_drained + recorder.stats().admissions_drained > 0);
+    }
+
+    const auto stats = recorder.stats();
+    REQUIRE(sink.admissions.size() == count);
+    REQUIRE(sink.records.size() == count);
+    REQUIRE(sink.engine_ok);
+    REQUIRE(sink.duplicate_admissions == 0);
+    REQUIRE(sink.duplicate_records == 0);
+    REQUIRE(sink.wrong_generation == 0);
+    REQUIRE(stats.admissions_enqueued == count);
+    REQUIRE(stats.admissions_drained == count);
+    REQUIRE(stats.admissions_dropped == 0);
+    REQUIRE(stats.enqueued == count);
+    REQUIRE(stats.drained == count);
+    REQUIRE(stats.dropped == 0);
+    for (const auto& admission : sink.admissions) {
+        const auto match =
+            std::find_if(sink.records.begin(), sink.records.end(), [&](const auto& value) {
+                return value.generation == admission.generation &&
+                       value.sequence == admission.sequence;
+            });
+        REQUIRE(match != sink.records.end());
+    }
+    for (const auto& value : sink.records) {
+        const auto match = std::find_if(sink.admissions.begin(), sink.admissions.end(),
+                                        [&](const auto& admission) {
+                                            return admission.generation == value.generation &&
+                                                   admission.sequence == value.sequence;
+                                        });
+        REQUIRE(match != sink.admissions.end());
+    }
+
+    // Typed negatives stay producer-side and cannot masquerade as a lossless
+    // campaign result: generation-invalid records are rejected, while an
+    // accepted duplicate is surfaced by the sink's identity census.
+    Sink negative_sink;
+    const SharedIoTraceDrainObserver negative_observer{
+        .context = &negative_sink, .record = &Sink::record, .admission = &Sink::admission};
+    SharedIoTraceRecorder negative(config(1));
+    REQUIRE(negative.publish_admission(3, 91));
+    REQUIRE(negative.publish_worker(record(91)));
+    REQUIRE(negative.publish_worker(record(91)));
+    auto wrong_generation = record(92);
+    wrong_generation.generation = 4;
+    REQUIRE_FALSE(negative.publish_worker(wrong_generation));
+    REQUIRE_FALSE(negative.publish_admission(4, 92));
+    while (negative.stats().drained < negative.stats().enqueued ||
+           negative.stats().admissions_drained < negative.stats().admissions_enqueued)
+        (void)drain_shared_io_trace(negative, {}, 2, &negative_observer);
+    REQUIRE(negative.stats().invalid == 2);
+    REQUIRE(negative_sink.duplicate_records == 1);
+    REQUIRE(negative_sink.wrong_generation == 0);
+
+    Sink orphan_sink;
+    const SharedIoTraceDrainObserver orphan_observer{
+        .context = &orphan_sink, .record = &Sink::record, .admission = &Sink::admission};
+    SharedIoTraceRecorder orphan(config(1));
+    REQUIRE(orphan.publish_worker(record(123)));
+    (void)drain_shared_io_trace(orphan, {}, 2, &orphan_observer);
+    REQUIRE(orphan_sink.records.size() == 1);
+    REQUIRE(orphan_sink.admissions.empty());
+    REQUIRE(std::none_of(
+        orphan_sink.records.begin(), orphan_sink.records.end(), [&](const auto& value) {
+            return std::any_of(orphan_sink.admissions.begin(), orphan_sink.admissions.end(),
+                               [&](const auto& admission) {
+                                   return admission.generation == value.generation &&
+                                          admission.sequence == value.sequence;
+                               });
+        }));
+
+    SharedIoTraceRecorder overflow(config(1));
+    for (std::uint64_t sequence = 0; sequence < SharedIoTraceRecorder::capacity + 1; ++sequence)
+        if (sequence < SharedIoTraceRecorder::capacity)
+            REQUIRE(overflow.publish_worker(record(sequence)));
+        else
+            REQUIRE_FALSE(overflow.publish_worker(record(sequence)));
+    REQUIRE(overflow.stats().dropped > 0);
+    Sink overflow_sink;
+    overflow_sink.records.reserve(SharedIoTraceRecorder::capacity);
+    const SharedIoTraceDrainObserver overflow_observer{
+        .context = &overflow_sink, .record = &Sink::record, .admission = &Sink::admission};
+    while (overflow.stats().drained < overflow.stats().enqueued)
+        (void)drain_shared_io_trace(overflow, {}, 2, &overflow_observer);
+    REQUIRE(overflow.stats().dropped > 0);
+}
+
 namespace {
 using Kind = SharedIoTraceKind;
 using Delivery = SharedIoConvolutionSession::Delivery;
+
+struct SessionObserverSink {
+    std::vector<SharedIoTraceRecord> records;
+    std::vector<SharedIoTraceAdmission> admissions;
+    bool engine_ok = true;
+    std::uint64_t orphan_terminals = 0;
+
+    SessionObserverSink() {
+        records.reserve(SharedIoTraceRecorder::capacity * 3 + 16);
+        admissions.reserve(SharedIoTraceRecorder::capacity + 16);
+    }
+
+    static void record(void* context, std::uint64_t engine,
+                       const SharedIoTraceRecord& value) noexcept {
+        auto* sink = static_cast<SessionObserverSink*>(context);
+        sink->engine_ok &= engine == 17;
+        if (value.kind == SharedIoTraceKind::Terminal && !value.admission_identity_matched)
+            ++sink->orphan_terminals;
+        sink->records.push_back(value);
+    }
+
+    static void admission(void* context, std::uint64_t engine,
+                          const SharedIoTraceAdmission& value) noexcept {
+        auto* sink = static_cast<SessionObserverSink*>(context);
+        sink->engine_ok &= engine == 17;
+        sink->admissions.push_back(value);
+    }
+};
+
 std::vector<SharedIoTraceRecord> take_records(SharedIoConvolutionSession& session) {
     std::vector<SharedIoTraceRecord> records;
     session.drain_trace_records(256, [&](const auto& value) { records.push_back(value); });
@@ -723,6 +856,128 @@ TEST_CASE("session tracing observes distinct physical terminals and actual bridg
         }
     }
     REQUIRE(fixture.session.trace_stats().invalid == 0);
+}
+
+TEST_CASE("session observer streams a complete census through release and reprime",
+          "[gpu_audio][trace][observer][generation]") {
+    ProductTraceFixture fixture;
+    fixture.prepare();
+    SessionObserverSink sink;
+    const SharedIoTraceDrainObserver observer{.context = &sink,
+                                              .record = &SessionObserverSink::record,
+                                              .admission = &SessionObserverSink::admission};
+    REQUIRE(fixture.session.set_trace_observer(&observer));
+    drive_two_deliveries(fixture);
+    REQUIRE(sink.engine_ok);
+    REQUIRE(sink.admissions.size() == 2);
+    // The worker drain sees terminal rows as service runs; callback eligible
+    // and delivery rows remain in the callback queue until the quiescent close.
+    REQUIRE(sink.records.size() == 2);
+    REQUIRE(fixture.session.trace_stats().dropped == 0);
+    REQUIRE(fixture.session.trace_stats().admissions_dropped == 0);
+    REQUIRE(fixture.session.trace_stats().invalid == 0);
+    const auto old_generation = fixture.session.epoch();
+    REQUIRE(fixture.session.fence_and_reprime());
+    REQUIRE(fixture.session.epoch() == old_generation + 1);
+    REQUIRE(fixture.session.last_closed_trace_stats().dropped == 0);
+    REQUIRE(fixture.session.last_closed_trace_stats().admissions_dropped == 0);
+    REQUIRE(fixture.session.last_closed_trace_stats().invalid == 0);
+    REQUIRE(std::any_of(sink.records.begin(), sink.records.end(), [&](const auto& value) {
+        return value.kind == Kind::Recovery && value.generation == old_generation &&
+               value.next_generation == old_generation + 1;
+    }));
+    const auto records_before_new_generation = sink.records.size();
+    const std::array<float, 2> input{1.f, 2.f};
+    std::array<float, 2> output{};
+    const auto callback = fixture.session.begin_callback(input);
+    REQUIRE(callback.stamp.epoch == old_generation + 1);
+    REQUIRE(fixture.session.consume_output(callback, output) == Delivery::Priming);
+    REQUIRE(fixture.session.service(0).submitted == 1);
+    REQUIRE(sink.records.size() == records_before_new_generation);
+    REQUIRE(fixture.session.release());
+    REQUIRE(sink.records.size() > records_before_new_generation);
+    REQUIRE(std::all_of(sink.records.begin(), sink.records.end(), [&](const auto& value) {
+        return value.generation == old_generation || value.generation == old_generation + 1;
+    }));
+}
+
+TEST_CASE("late session observer install rejects retained rows without loss",
+          "[gpu_audio][trace][observer][negative]") {
+    ProductTraceFixture fixture;
+    fixture.prepare(8);
+    const std::array<float, 2> input{1.f, 2.f};
+    std::array<float, 2> output{};
+    const auto callback = fixture.session.begin_callback(input);
+    REQUIRE(fixture.session.consume_output(callback, output) == Delivery::Priming);
+    REQUIRE(fixture.session.service(0).submitted == 1);
+    fixture.provider->complete_sequence(callback.stamp.sequence);
+    REQUIRE(fixture.session.service(0).completions == 1);
+
+    SessionObserverSink sink;
+    const SharedIoTraceDrainObserver observer{.context = &sink,
+                                              .record = &SessionObserverSink::record,
+                                              .admission = &SessionObserverSink::admission};
+    REQUIRE_FALSE(fixture.session.set_trace_observer(&observer));
+    REQUIRE_FALSE(fixture.session.trace_observer_enabled());
+    REQUIRE(fixture.session.release());
+    REQUIRE(sink.records.empty());
+    REQUIRE(sink.admissions.empty());
+    REQUIRE(fixture.session.last_closed_trace_stats().dropped == 0);
+    REQUIRE(fixture.session.last_closed_trace_stats().admissions_dropped == 0);
+    REQUIRE_FALSE(fixture.session.last_closed_trace_retention_overflow());
+    REQUIRE_FALSE(fixture.session.take_last_closed_trace_records().empty());
+    REQUIRE_FALSE(fixture.session.take_last_closed_trace_admissions().empty());
+}
+
+TEST_CASE("session observer closes failed on admission drops and orphan terminals",
+          "[gpu_audio][trace][observer][negative]") {
+    ProductTraceFixture fixture;
+    fixture.prepare();
+    const std::array<float, 2> input{1.f, 2.f};
+    std::array<float, 2> output{};
+    constexpr std::uint64_t submissions = SharedIoTraceRecorder::capacity;
+    for (std::uint64_t sequence = 0; sequence < submissions; ++sequence) {
+        auto callback = fixture.session.begin_callback(input);
+        REQUIRE(callback.stamp.sequence == sequence);
+        fixture.session.consume_output(callback, output);
+        REQUIRE(fixture.session.service(0).submitted == 1);
+        fixture.provider->complete_sequence(sequence);
+        REQUIRE(fixture.session.service(0).completions == 1);
+    }
+    REQUIRE(fixture.session.trace_stats().admissions_dropped == 0);
+    // Drain only the worker/callback record queues. The admission queue remains
+    // full, making the next admission a typed negative while its terminal has
+    // room to enqueue and therefore exposes an orphan identity.
+    REQUIRE(fixture.session.drain_trace_records(
+                static_cast<std::uint32_t>(SharedIoTraceRecorder::capacity),
+                [](const SharedIoTraceRecord&) {}) == SharedIoTraceRecorder::capacity);
+    SessionObserverSink sink;
+    const SharedIoTraceDrainObserver observer{.context = &sink,
+                                              .record = &SessionObserverSink::record,
+                                              .admission = &SessionObserverSink::admission};
+    REQUIRE(fixture.session.set_trace_observer(&observer));
+    REQUIRE(fixture.session.trace_observer_enabled());
+    auto callback = fixture.session.begin_callback(input);
+    REQUIRE(callback.stamp.sequence == submissions);
+    fixture.session.consume_output(callback, output);
+    REQUIRE(fixture.session.service(0).submitted == 1);
+    fixture.provider->complete_sequence(submissions);
+    REQUIRE(fixture.session.service(0).completions == 1);
+    const auto before_release = fixture.session.trace_stats();
+    REQUIRE(before_release.admissions_dropped > 0);
+    REQUIRE(before_release.dropped > 0);
+    REQUIRE(fixture.session.release());
+    const auto closed = fixture.session.last_closed_trace_stats();
+    REQUIRE(closed.dropped > 0);
+    REQUIRE(closed.admissions_dropped > 0);
+    REQUIRE(closed.invalid == 0);
+    REQUIRE(fixture.session.last_closed_trace_retention_overflow());
+    REQUIRE(sink.engine_ok);
+    // The worker queue still had room after the admission queue filled, so the
+    // next terminal is intentionally emitted as an orphan typed negative.
+    REQUIRE(sink.orphan_terminals > 0);
+    REQUIRE(sink.records.size() > 0);
+    REQUIRE(sink.admissions.size() == closed.admissions_drained);
 }
 
 TEST_CASE("session tracing does not turn a late GPU terminal into an audible delivery",
@@ -812,10 +1067,65 @@ TEST_CASE("diagnostic overflow never refuses physical session submissions", "[gp
         fixture.provider->complete_sequence(sequence);
         REQUIRE(fixture.session.service(0).completions == 1);
     }
-    REQUIRE(fixture.provider->submits == submissions);
+    REQUIRE(fixture.provider->lifecycle_state->submits == submissions);
     REQUIRE(fixture.session.trace_stats().dropped > 0);
     REQUIRE(fixture.session.trace_stats().admissions_dropped > 0);
     REQUIRE(fixture.session.trace_stats().invalid == 0);
+}
+
+TEST_CASE("observer-backed session release validates the closing telemetry receipt",
+          "[gpu_audio][trace][observer][telemetry]") {
+    ProductTraceFixture fixture;
+    fixture.prepare();
+    SessionObserverSink sink;
+    const SharedIoTraceDrainObserver observer{.context = &sink,
+                                              .record = &SessionObserverSink::record,
+                                              .admission = &SessionObserverSink::admission};
+    REQUIRE(fixture.session.set_trace_observer(&observer));
+    drive_two_deliveries(fixture);
+    // Negative control: a drain while producers may still run defers.
+    const auto live = fixture.session.drain_trace();
+    CHECK_FALSE(live.telemetry_valid);
+    CHECK(live.telemetry_error == SharedIoTelemetryError::TelemetryValidationDeferred);
+
+    REQUIRE(fixture.session.release());
+    const auto closed = fixture.session.last_close_trace_drain();
+    CHECK(closed.recording_enabled);
+    CHECK(closed.telemetry_valid);
+    CHECK(closed.telemetry_error == SharedIoTelemetryError::None);
+}
+
+TEST_CASE("session close without an observer drains every row into the closed census",
+          "[gpu_audio][trace][telemetry]") {
+    ProductTraceFixture fixture;
+    fixture.prepare();
+    drive_two_deliveries(fixture);
+    REQUIRE(fixture.session.release());
+    REQUIRE_FALSE(fixture.session.last_closed_trace_retention_overflow());
+    const auto closed = fixture.session.last_close_trace_drain();
+    CHECK(closed.telemetry_valid);
+    CHECK(closed.telemetry_error == SharedIoTelemetryError::None);
+    const auto admissions = fixture.session.take_last_closed_trace_admissions();
+    const auto records = fixture.session.take_last_closed_trace_records();
+    REQUIRE(admissions.size() == 2);
+    REQUIRE(records.size() == 6);
+    for (std::uint64_t sequence = 0; sequence < 2; ++sequence) {
+        for (const auto kind : {Kind::Terminal, Kind::Eligible, Kind::Delivery}) {
+            CHECK(std::count_if(records.begin(), records.end(), [&](const auto& r) {
+                      return r.kind == kind && r.sequence == sequence &&
+                             (kind != Kind::Terminal || r.admission_identity_matched);
+                  }) == 1);
+        }
+    }
+
+    // A one-row retention bound keeps a bounded prefix and reports the loss.
+    ProductTraceFixture bounded;
+    bounded.prepare(1);
+    drive_two_deliveries(bounded);
+    REQUIRE(bounded.session.release());
+    CHECK(bounded.session.last_closed_trace_retention_overflow());
+    CHECK(bounded.session.take_last_closed_trace_records().size() == 1);
+    CHECK(bounded.session.take_last_closed_trace_admissions().size() == 1);
 }
 
 TEST_CASE("trial retention drains fixed queues without dropping a long census",
@@ -951,6 +1261,12 @@ TEST_CASE("GPU audio trace persists authoritative positive and planted invalid c
             event.sequence = 0;
             recorder.publish_callback(event);
             drain_shared_io_trace(recorder, {}, 256);
+            // Planted impossible quiescent counters: more retirements than
+            // submissions must surface as an invalid_telemetry issue.
+            SharedIoTelemetrySnapshot forged;
+            forged.retired_failure = 1;
+            REQUIRE(drain_shared_io_trace(recorder, forged, 0, nullptr, true).telemetry_error ==
+                    SharedIoTelemetryError::RetirementsExceedSubmissions);
             for (std::uint64_t sequence = 1000;
                  sequence < 1000 + SharedIoTraceRecorder::capacity + 44; ++sequence) {
                 terminal = record(sequence);
@@ -964,6 +1280,32 @@ TEST_CASE("GPU audio trace persists authoritative positive and planted invalid c
         REQUIRE(stopped.ok);
         REQUIRE(stopped.trace_bytes > 0);
     }
+}
+
+TEST_CASE("trace drain marks impossible telemetry receipts invalid",
+          "[gpu_audio][trace][telemetry][negative]") {
+    SharedIoTraceRecorder recorder(config());
+    // Positive control: a coherent quiescent snapshot validates through the
+    // same drain, so the rejection below is caused by the forged counters.
+    SharedIoTelemetrySnapshot coherent;
+    coherent.admitted_blocks = 1;
+    coherent.submitted_blocks = 1;
+    coherent.retired_failure = 1;
+    const auto accepted = drain_shared_io_trace(recorder, coherent, 0, nullptr, true);
+    CHECK(accepted.telemetry_valid);
+    CHECK(accepted.telemetry_error == SharedIoTelemetryError::None);
+
+    SharedIoTelemetrySnapshot forged;
+    forged.submitted_blocks = 0;
+    forged.retired_failure = 1;
+
+    const auto result = drain_shared_io_trace(recorder, forged, 0, nullptr, true);
+    CHECK_FALSE(result.telemetry_valid);
+    CHECK(result.telemetry_error == SharedIoTelemetryError::RetirementsExceedSubmissions);
+
+    const auto live = drain_shared_io_trace(recorder, forged, 0);
+    CHECK_FALSE(live.telemetry_valid);
+    CHECK(live.telemetry_error == SharedIoTelemetryError::TelemetryValidationDeferred);
 }
 
 TEST_CASE("session trace producers preserve identities across callback and service threads",

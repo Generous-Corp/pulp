@@ -1,5 +1,8 @@
 #include <pulp/gpu_audio/gpu_convolution_reverb.hpp>
 
+#include "detail/gpu_convolution_reverb_test_access.hpp"
+#include "detail/realtime_gpu_health_mirror.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -66,7 +69,7 @@ bool GpuConvolutionReverb::valid_config() const noexcept {
     return true;
 }
 
-bool GpuConvolutionReverb::prepare_lanes() noexcept {
+bool GpuConvolutionReverb::prepare_lanes(LaneNodePreparer prepare_node, void* context) noexcept {
     try {
         signal::ZeroLatencyConvolver prepared;
         prepared.prepare(static_cast<double>(config_.sample_rate),
@@ -103,9 +106,14 @@ bool GpuConvolutionReverb::prepare_lanes() noexcept {
                                                         lane->ir, GpuConvolver::kLatencyBlocks);
             if (!lane->node->configure_trace(config_.trace))
                 return false;
-            if (!lane->node->set_provider_policy(GpuConvolver::ProviderPolicy::SharedRequired) ||
-                !lane->node->prepare())
+            if (prepare_node != nullptr) {
+                if (!prepare_node(*lane->node, context))
+                    return false;
+            } else if (!lane->node->set_provider_policy(
+                           GpuConvolver::ProviderPolicy::SharedRequired) ||
+                       !lane->node->prepare()) {
                 return false;
+            }
 
             lane->transport = std::make_unique<GpuAudioTransport>();
             const GpuAudioTransport::Config transport_config{
@@ -164,10 +172,14 @@ void GpuConvolutionReverb::clear_runtime_buffers() noexcept {
 }
 
 bool GpuConvolutionReverb::prepare() noexcept {
+    return prepare_with(nullptr, nullptr);
+}
+
+bool GpuConvolutionReverb::prepare_with(LaneNodePreparer prepare_node, void* context) noexcept {
     release();
     if (!valid_config())
         return false;
-    if (!prepare_lanes()) {
+    if (!prepare_lanes(prepare_node, context)) {
         release();
         return false;
     }
@@ -419,6 +431,7 @@ GpuConvolutionReverbReport GpuConvolutionReverb::report() const noexcept {
         result.lanes[lane].capability = lanes_[lane]->transport->capability_report();
         result.lanes[lane].stats = lanes_[lane]->transport->stats();
         result.lanes[lane].delivery = lanes_[lane]->transport->delivery_snapshot();
+        result.lanes[lane].status = lanes_[lane]->transport->status_snapshot();
         const auto& capability = result.lanes[lane].capability;
         result.authenticated_shared_provider &=
             capability.prepared && capability.provider == GpuAudioProvider::Dawn &&
@@ -426,6 +439,42 @@ GpuConvolutionReverbReport GpuConvolutionReverb::report() const noexcept {
             capability.prepared_lead_blocks == GpuConvolver::kLatencyBlocks;
     }
     return result;
+}
+
+GpuAudioStatus GpuConvolutionReverb::status_snapshot() const noexcept {
+    if (!prepared_)
+        return {};
+    std::array<GpuAudioStatus, 2> statuses{};
+    std::array<const GpuAudioStatus*, 2> present{};
+    for (std::size_t lane = 0; lane < lanes_.size(); ++lane) {
+        if (!lanes_[lane] || !lanes_[lane]->transport)
+            continue;
+        statuses[lane] = lanes_[lane]->transport->status_snapshot();
+        present[lane] = &statuses[lane];
+    }
+    const auto* worst = detail::least_healthy_status(present.data(), present.size());
+    return worst != nullptr ? *worst : GpuAudioStatus{};
+}
+
+GpuAudioRecoveryReason GpuConvolutionReverb::recovery_reason() const noexcept {
+    return status_snapshot().recovery_reason;
+}
+
+bool GpuConvolutionReverb::fenced() const noexcept {
+    if (!prepared_)
+        return true;
+    for (const auto& lane : lanes_) {
+        if (!lane || !lane->node || lane->node->fenced())
+            return true;
+    }
+    return false;
+}
+
+bool detail::GpuConvolutionReverbTestAccess::prepare_with(GpuConvolutionReverb& route,
+                                                          bool (*prepare_node)(GpuConvolver&,
+                                                                               void*) noexcept,
+                                                          void* context) noexcept {
+    return prepare_node != nullptr && route.prepare_with(prepare_node, context);
 }
 
 } // namespace pulp::gpu_audio

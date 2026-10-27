@@ -28,6 +28,7 @@
 #include <cmath>
 #include <cstdint>
 #include <memory>
+#include <thread>
 #include <vector>
 
 using pulp::audio::BufferView;
@@ -582,6 +583,55 @@ TEST_CASE("An expired convolve_batch_async leaves dest untouched and never hangs
     REQUIRE(gpu->readbacks_in_flight() == 0);
 }
 
+TEST_CASE("Detached expired maps retain admission capacity after completion",
+          "[render][gpu][compute][async]") {
+    auto gpu = make_gpu();
+    if (!gpu)
+        SKIP(kNoGpu);
+
+    constexpr uint32_t kBins = 512;
+    const auto pairs = constant_pairs(kBins, 3.0f, 4.0f);
+    std::vector<float> first(kBins, -1.0f);
+    std::vector<float> second(kBins, -1.0f);
+    GpuCompute::ReadbackResult result{};
+    gpu->set_max_readbacks_in_flight(1);
+    REQUIRE(gpu->compute_magnitude_async(pairs.data(), first.data(), kBins,
+                                         std::chrono::microseconds(0),
+                                         [&result](const GpuCompute::ReadbackResult& completion) {
+                                             result = completion;
+                                         }) != 0);
+
+    // The completion is delivered as Expired while an unresolved map is kept
+    // detached. The callback-pending count is zero, but admission remains full
+    // until the late map callback or bounded cleanup releases the slot.
+    const auto before_poll = gpu->async_stats();
+    gpu->poll_readbacks();
+    REQUIRE(result.status == GpuCompute::ReadbackStatus::Expired);
+    REQUIRE(gpu->readbacks_in_flight() == 0);
+    const auto after_poll = gpu->async_stats();
+    const auto second_id =
+        gpu->compute_magnitude_async(pairs.data(), second.data(), kBins, std::chrono::seconds(2),
+                                     [](const GpuCompute::ReadbackResult&) {});
+    if (after_poll.map_resolves == before_poll.map_resolves)
+        REQUIRE(second_id == 0);
+
+    // Polling with no callback-pending requests still services the late map.
+    // The detached slot is then reaped and admission reopens before the
+    // bounded cleanup grace can leave the test permanently blocked.
+    uint64_t reopened = 0;
+    const auto recovery_deadline = Clock::now() + std::chrono::milliseconds(1500);
+    while (reopened == 0 && Clock::now() < recovery_deadline) {
+        gpu->poll_readbacks();
+        reopened = gpu->compute_magnitude_async(pairs.data(), second.data(), kBins,
+                                                std::chrono::seconds(2),
+                                                [](const GpuCompute::ReadbackResult&) {});
+        if (reopened == 0)
+            std::this_thread::yield();
+    }
+    REQUIRE(reopened != 0);
+    drain(*gpu);
+}
+
 TEST_CASE("Async admission control rejects past the in-flight cap",
           "[render][gpu][compute][async]") {
     auto gpu = make_gpu();
@@ -710,4 +760,181 @@ TEST_CASE("A GPU device is not lost until it is",
     // Idempotent.
     gpu->notify_device_lost();
     REQUIRE(gpu->device_lost());
+}
+
+TEST_CASE("Published GPU loss closes initialization admission immediately",
+          "[render][gpu][compute][async]") {
+    auto gpu = make_gpu();
+    if (!gpu)
+        SKIP(kNoGpu);
+
+    const auto generation = gpu->device_generation();
+    REQUIRE(gpu->is_initialized());
+    REQUIRE_FALSE(gpu->device_lost());
+
+    gpu->post_device_lost(generation);
+
+    REQUIRE(gpu->device_lost());
+    REQUIRE_FALSE(gpu->is_initialized());
+}
+
+TEST_CASE("GPU device loss notifications are generation-scoped across reinitialization",
+          "[render][gpu][compute][async]") {
+    auto gpu = make_gpu();
+    if (!gpu)
+        SKIP(kNoGpu);
+
+    constexpr uint32_t kBins = 64;
+    const auto pairs = constant_pairs(kBins, 3.0f, 4.0f);
+
+    const auto first_generation = gpu->device_generation();
+    REQUIRE(first_generation != 0);
+
+    gpu->notify_device_lost(first_generation - 1);
+    REQUIRE_FALSE(gpu->device_lost());
+    REQUIRE(gpu->is_initialized());
+
+    gpu->notify_device_lost(first_generation);
+    REQUIRE(gpu->device_lost());
+    REQUIRE_FALSE(gpu->is_initialized());
+
+    REQUIRE(gpu->initialize_standalone());
+    const auto second_generation = gpu->device_generation();
+    REQUIRE(second_generation > first_generation);
+    REQUIRE_FALSE(gpu->device_lost());
+    REQUIRE(gpu->is_initialized());
+
+    std::vector<float> recovered_dest(kBins, -1.0f);
+    GpuCompute::ReadbackResult recovered_result{};
+    REQUIRE(gpu->compute_magnitude_async(pairs.data(), recovered_dest.data(), kBins,
+                                         std::chrono::seconds(2),
+                                         [&recovered_result](const GpuCompute::ReadbackResult& r) {
+                                             recovered_result = r;
+                                         }) != 0);
+    drain(*gpu);
+    REQUIRE(recovered_result.status == GpuCompute::ReadbackStatus::Success);
+
+    // A late callback from the prior device must not poison the replacement.
+    gpu->notify_device_lost(first_generation);
+    REQUIRE_FALSE(gpu->device_lost());
+    REQUIRE(gpu->is_initialized());
+
+    gpu->notify_device_lost(second_generation);
+    REQUIRE(gpu->device_lost());
+    REQUIRE_FALSE(gpu->is_initialized());
+}
+
+TEST_CASE("Accepted async readback completes failed when its owner is destroyed",
+          "[render][gpu][compute][async]") {
+    constexpr uint32_t kBins = 64;
+    const auto pairs = constant_pairs(kBins, 3.0f, 4.0f);
+    std::vector<float> dest(kBins, -1.0f);
+    GpuCompute::ReadbackResult result{};
+    uint32_t completions = 0;
+    uint64_t id = 0;
+
+    {
+        auto gpu = make_gpu();
+        if (!gpu)
+            SKIP(kNoGpu);
+
+        id = gpu->compute_magnitude_async(pairs.data(), dest.data(), kBins, std::chrono::seconds(2),
+                                          [&](const GpuCompute::ReadbackResult& completion) {
+                                              result = completion;
+                                              ++completions;
+                                          });
+        REQUIRE(id != 0);
+        REQUIRE(gpu->readbacks_in_flight() == 1);
+    }
+
+    REQUIRE(completions == 1);
+    REQUIRE(result.id == id);
+    REQUIRE(result.status == GpuCompute::ReadbackStatus::Failed);
+    REQUIRE(result.bytes == 0);
+    REQUIRE(std::all_of(dest.begin(), dest.end(), [](float value) { return value == -1.0f; }));
+}
+
+TEST_CASE("GPU loss completion may reinitialize without tearing down replacement resources",
+          "[render][gpu][compute][async]") {
+    auto gpu = make_gpu();
+    if (!gpu)
+        SKIP(kNoGpu);
+
+    constexpr uint32_t kBins = 64;
+    const auto pairs = constant_pairs(kBins, 3.0f, 4.0f);
+    std::vector<float> dest(kBins, -1.0f);
+    bool completed = false;
+    bool reinitialized = false;
+
+    const auto generation = gpu->device_generation();
+    REQUIRE(gpu->compute_magnitude_async(pairs.data(), dest.data(), kBins, std::chrono::seconds(2),
+                                         [&](const GpuCompute::ReadbackResult& result) {
+                                             completed = result.status ==
+                                                         GpuCompute::ReadbackStatus::Failed;
+                                             reinitialized = gpu->initialize_standalone();
+                                         }) != 0);
+
+    gpu->notify_device_lost(generation);
+    REQUIRE(completed);
+    REQUIRE(reinitialized);
+    REQUIRE(gpu->is_initialized());
+    REQUIRE(gpu->device_generation() > generation);
+}
+
+TEST_CASE("Successful readback completion may destroy its compute owner",
+          "[render][gpu][compute][async]") {
+    auto gpu = make_gpu();
+    if (!gpu)
+        SKIP(kNoGpu);
+
+    constexpr uint32_t kBins = 64;
+    const auto pairs = constant_pairs(kBins, 3.0f, 4.0f);
+    std::vector<float> dest(kBins, -1.0f);
+    bool completed = false;
+    REQUIRE(gpu->compute_magnitude_async(pairs.data(), dest.data(), kBins, std::chrono::seconds(5),
+                                         [&](const GpuCompute::ReadbackResult& result) {
+                                             completed = result.status ==
+                                                         GpuCompute::ReadbackStatus::Success;
+                                             gpu.reset();
+                                         }) != 0);
+
+    while (gpu && !completed)
+        gpu->poll_readbacks();
+    REQUIRE(completed);
+    REQUIRE_FALSE(gpu);
+}
+
+TEST_CASE("Successful readback completion leaves replacement generation for a new poll",
+          "[render][gpu][compute][async]") {
+    auto gpu = make_gpu();
+    if (!gpu)
+        SKIP(kNoGpu);
+
+    constexpr uint32_t kBins = 64;
+    const auto pairs = constant_pairs(kBins, 3.0f, 4.0f);
+    std::vector<float> first_dest(kBins, -1.0f), replacement_dest(kBins, -1.0f);
+    bool first_succeeded = false, replacement_succeeded = false;
+    bool reinitialized = false;
+    std::uint64_t replacement_id = 0;
+    const auto old_generation = gpu->device_generation();
+    REQUIRE(gpu->compute_magnitude_async(
+                pairs.data(), first_dest.data(), kBins, std::chrono::seconds(5),
+                [&](const GpuCompute::ReadbackResult& result) {
+                    first_succeeded = result.status == GpuCompute::ReadbackStatus::Success;
+                    reinitialized = gpu->initialize_standalone();
+                    if (reinitialized)
+                        replacement_id = gpu->compute_magnitude_async(
+                            pairs.data(), replacement_dest.data(), kBins, std::chrono::seconds(5),
+                            [&](const GpuCompute::ReadbackResult& next) {
+                                replacement_succeeded =
+                                    next.status == GpuCompute::ReadbackStatus::Success;
+                            });
+                }) != 0);
+
+    drain(*gpu);
+    REQUIRE(first_succeeded);
+    REQUIRE(reinitialized);
+    REQUIRE(gpu->device_generation() > old_generation);
+    REQUIRE(replacement_id != 0);
+    REQUIRE(replacement_succeeded);
 }

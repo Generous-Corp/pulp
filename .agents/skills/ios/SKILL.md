@@ -228,6 +228,12 @@ xcodebuild test -project ... -scheme AUv3Tests -sdk iphonesimulator
 
 ## Gotchas (hard-won)
 
+- **`IOSGpuPluginViewHost::release_gpu_caches()` trims, it does not tear down.**
+  The AU v3 controller calls it from `viewDidDisappear:`. It runs
+  `TrimLevel::everything()` on the Skia surface and keeps the Dawn and Skia
+  surfaces, so the next appearance repaints without recreating them. A host
+  with no GPU surface treats it as a no-op.
+
 ### When the iOS compile gate runs
 
 - **Per PR and merge group, only for iOS-only surfaces.** `ios_surface` in
@@ -293,6 +299,23 @@ xcodebuild test -project ... -scheme AUv3Tests -sdk iphonesimulator
   `stop_display_link()` / `start_display_link()`: a UI that idled at 0 fps for 30 s
   must not resume with a 30-second dt — that would teleport any animation that
   starts on wake straight to its end state.
+- **A CADisplayLink runs at 60 Hz on ProMotion unless it asks for more.** Every
+  iOS host that owns a link feeds `render::DisplayRateBoost` (in
+  `pulp/render/render_loop.hpp`) once per tick with whether it drew, and passes
+  the result to `render::apply_display_rate_change(link, change)`, which sets
+  `preferredFrameRateRange` to the panel maximum while drawing and back to the
+  default after 30 idle ticks; `stop_display_link()` feeds `on_stop()`. On an
+  iPhone the request is ignored unless the Info.plist of the process that owns
+  the link sets `CADisableMinimumFrameDurationOnPhone`. An AUv3 editor's link
+  runs in the extension process, so both `templates/ios-auv3/HostApp/Info.plist.in`
+  and the appex's `templates/ios-auv3/Info.plist.in` (top-level dict, not inside
+  `NSExtension`) set it. Which bundle iOS actually reads for an out-of-process
+  extension is unverified on device. An iOS standalone app built without these
+  templates gets no key and stays at 60 Hz on iPhone. `IOSRenderLoop`
+  is not what the window and plug-in view hosts use; they hand-roll their links,
+  so a change made only in `render_loop_apple.mm` never reaches a shipping
+  editor. Proof is device-only: log `link.targetTimestamp` deltas (8.3 ms at
+  120 Hz) while animating.
 - **`window_host_ios.mm` used to own no FrameClock at all** (only
   `plugin_view_host_ios.mm` did), so a *standalone* iOS app advanced nothing but
   gesture recognizers — no FrameClock subscribers, no widget animations, no CSS
@@ -1110,7 +1133,7 @@ The iOS-D.3b plumbing landed the IIFE bundler and the NSBundle loader, but it di
 
 1. **Concatenate at runtime (recommended for plugin examples).** In `Processor::create_view()`, read `pulp::view::threejs_iife_source()`, read the bundled scene script via `[NSBundle pathForResource:ofType:inDirectory:@"threejs"]`, concatenate `IIFE + shim + scene`, write to `NSTemporaryDirectory()`, and hand THAT path to `ScriptedUiSession::ScriptedUiOptions::script_path`. The session's `load()` eval-orders everything correctly because it all lives in one file. Cleanup happens in `Processor::on_view_closed()`. This is what `examples/ios-auv3-jsc-threejs/` does — keep the per-instance filename unique (encoding `this` works) so split-view / multi-insert hosts don't collide on the tempfile.
 
-2. **Use the framework's default editor path** (`PULP_UI_SCRIPT_PATH` via `pulp_add_plugin`). The IIFE has to live INSIDE that script file (you'd `configure_file` it in at build time). Bigger build hammer, but means no runtime concat. Suitable for plugin authors who already manage their script via Pulp's existing tooling.
+2. **Use the framework's default editor path** (`UI_SCRIPT` via `pulp_add_plugin`). The IIFE has to live INSIDE that script file (you'd `configure_file` it in at build time). Bigger build hammer, but means no runtime concat. Suitable for plugin authors who already manage their script via Pulp's existing tooling.
 
 Don't reach for "register a native function on the bridge that returns the IIFE source then call eval(...) from JS first thing." There is no public API on `ScriptedUiSession` / `WidgetBridge` to register native functions BEFORE `load_script` runs, and registering AFTER means the JS evaluate has already failed on `new THREE.WebGPURenderer(...)`. Concatenation is the smaller change.
 

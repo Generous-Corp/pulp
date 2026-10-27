@@ -9,6 +9,10 @@
 
 #include "cli_common.hpp"
 #include "fetchcontent_cache.hpp"
+#include "private_temp_dir.hpp"
+#include "release_checksum.hpp"
+#include "upgrade_url.hpp"
+#include "release_floors_gen.h"
 #include "tartci_lease.hpp"
 #include "version_diag.hpp"
 #include "update_check.hpp"
@@ -92,6 +96,16 @@ fs::path pulp_home() {
 
 fs::path sdk_cache_path(const std::string& version) {
     return pulp_home() / "sdk" / version;
+}
+
+// Shell command that downloads `url` to `dest`; non-zero exit on any failure,
+// including an HTTP error status.
+static std::string download_command(const std::string& url, const std::string& dest) {
+#ifdef _WIN32
+    return "powershell -Command \"Invoke-WebRequest -Uri '" + url + "' -OutFile '" + dest + "'\"";
+#else
+    return "curl -fsSL -o " + shell_quote(dest) + " " + shell_quote(url);
+#endif
 }
 
 static void remove_tree(const fs::path& path) {
@@ -270,33 +284,65 @@ fs::path ensure_sdk(const std::string& version) {
     std::string url = "https://github.com/" + std::string(PULP_GITHUB_REPO)
                     + "/releases/download/v" + version + "/" + tarball;
 
+    if (!pulp::cli::pulp_release_version_is_well_formed(version)) {
+        std::cerr << "Error: '" << version
+                  << "' is not a release version (expected M.m.p, e.g. 0.2.0)\n";
+        return {};
+    }
     std::cout << "Downloading Pulp SDK v" << version << " (" << platform << ")...\n";
 
     // Create cache directory
     fs::create_directories(sdk_dir);
 
-    std::string tmp_dir = "/tmp/pulp-sdk-download-" + version;
-#ifdef _WIN32
-    tmp_dir = pulp::runtime::get_env("TEMP").value_or(".") + "\\pulp-sdk-download-" + version;
-#endif
-    fs::create_directories(tmp_dir);
+    // Verify-then-extract runs in a directory this process created exclusively
+    // under the user's own Pulp home, never a predictable name in the shared
+    // system temp dir.
+    const fs::path tmp_root = pulp_home() / "tmp";
+    const auto private_dir =
+        pulp::cli::make_private_temp_dir(tmp_root, "pulp-sdk-download-" + version);
+    if (!private_dir) {
+        std::cerr << "Error: could not create a private download directory under " << tmp_root
+                  << "\n";
+        fs::remove_all(sdk_dir);
+        return {};
+    }
+    const std::string tmp_dir = private_dir->string();
 
     // Download
-    std::string download_cmd;
-#ifdef _WIN32
-    download_cmd = "powershell -Command \"Invoke-WebRequest -Uri '" + url
-                 + "' -OutFile '" + tmp_dir + "\\" + tarball + "'\"";
-#else
-    download_cmd = "mkdir -p " + tmp_dir + " && curl -fSL -o " + tmp_dir + "/" + tarball + " " + url;
-#endif
-
-    int rc = run_with_spinner(download_cmd, "Downloading SDK");
+    const fs::path archive_path = fs::path(tmp_dir) / tarball;
+    int rc = run_with_spinner(download_command(url, archive_path.string()), "Downloading SDK");
     if (rc != 0) {
         std::cerr << "Error: failed to download SDK from:\n  " << url << "\n";
         std::cerr << "Check your internet connection or download manually.\n";
         fs::remove_all(sdk_dir);
         remove_tree(tmp_dir);
         return {};
+    }
+
+    // Verify against the release's SHA256SUMS before anything extracts it.
+    {
+        namespace relcheck = pulp::cli::release_checksum;
+        const std::string sums_name(relcheck::kManifestAssetName);
+        const fs::path sums_path = fs::path(tmp_dir) / sums_name;
+        const std::string sums_url = "https://github.com/" + std::string(PULP_GITHUB_REPO) +
+                                     "/releases/download/v" + version + "/" + sums_name;
+        std::optional<std::string> sums;
+        if (run(download_command(sums_url, sums_path.string())) == 0)
+            sums = read_file_contents(sums_path);
+        const auto verdict = relcheck::verify_release_archive(
+            archive_path, tarball, version, PULP_RELEASE_CHECKSUM_MANIFEST_FLOOR, sums);
+        if (!verdict.ok()) {
+            std::cerr << "Error: " << verdict.message << "\n";
+            std::cerr << "  Verify by hand from: https://github.com/" << PULP_GITHUB_REPO
+                      << "/releases/tag/v" << version << "\n";
+            fs::remove_all(sdk_dir);
+            remove_tree(tmp_dir);
+            return {};
+        }
+        if (verdict.status == relcheck::Status::unverified_legacy)
+            std::cerr << "WARNING: " << verdict.message << "\n";
+        else
+            std::cout << "  " << verdict.message << "\n";
     }
 
     // Extract
@@ -406,7 +452,11 @@ fs::path ensure_checkout_sdk(const fs::path& repo_root, const std::string& versi
         // runtime design-import) from the shipped SDK. The runtime W3C token API
         // stays. Re-enable with -DPULP_ENABLE_DESIGN_IMPORT=ON for a plugin that
         // needs runtime design import.
-        + " -DPULP_ENABLE_DESIGN_IMPORT=OFF" + " -DPULP_ENABLE_GPU=OFF";
+        + " -DPULP_ENABLE_DESIGN_IMPORT=OFF" +
+        " -DPULP_ENABLE_GPU=OFF"
+        // Tests OFF already implies this, but an installed SDK must never carry
+        // the shell exec/execAsync JS bridge, so say so explicitly.
+        + " -DPULP_DEV_BRIDGE_EXEC=OFF";
     append_windows_visual_studio_generator_args(configure_cmd);
     if (run_with_spinner(configure_cmd, "Configuring local SDK") != 0) {
         return {};

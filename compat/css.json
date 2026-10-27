@@ -674,9 +674,11 @@
       "supportedValues": [
         "linear-gradient(...)",
         "radial-gradient(...)",
-        "conic-gradient(...)"
+        "conic-gradient(...)",
+        "a `<color-interpolation-method>` (`in oklab`, `in oklch longer hue`, ...) in any of the three prefix positions, for every CSS Color 4 space; a gradient that names none blends in Oklab when a stop is a non-legacy colour (`oklab()`, `lch()`, `color()`), as Chrome does"
       ],
       "unsupportedValues": [
+        "a custom `--profile` interpolation space, or a hue method on a rectangular space: refused, as Chrome refuses them",
         "radial-gradient(... at <length> ...) — an `at` position given as a LENGTH is ignored and the shape silently re-centres; only keywords and percentages resolve (css_gradient.cpp axis_frac)",
         "background-position on a gradient layer, and `background-size` on a NON-repeating one: both are stored on the View and ignored at paint. `background-size` IS honoured wherever the layer repeats, so the gradient paints into the sized tile and the tile covers the box. `cover` / `contain` / `auto` still mean the element's box, because CSS gives a gradient no intrinsic size to fit",
         "a named-keyword <color> (e.g. `red`) resolves to opaque WHITE — parse_css_color has no named-colour table",
@@ -688,25 +690,29 @@
         "test/test_widget_bridge_wave2_cheap.cpp::\"setBackgroundGradient resolves radial sizing keywords per axis\"",
         "test/test_screenshot_compare.cpp::\"radial and conic background gradients render non-flat\"",
         "test/test_css_gradient_geometry.cpp::\"an explicitly sized radial gradient is an ellipse over the box\"",
-        "test/test_css_gradient_geometry.cpp::\"a fade to transparent keeps its hue\""
+        "test/test_css_gradient_geometry.cpp::\"a fade to transparent keeps its hue\"",
+        "test/test_css_gradient_interpolation.cpp::\"Interpolation method parses in every prefix position\"",
+        "test/test_css_gradient_interpolation.cpp::\"Skia raster midpoints match Chrome for every interpolation method\""
       ],
       "notes": "url() / image() / image-set() backgrounds are not implemented (arch-deferred-image-loader). linear-gradient, radial-gradient, and conic-gradient round-trip through the same setBackgroundGradient path and render as canvas linear/radial/sweep gradients. MULTIPLE comma-separated layers ARE supported and painted first-on-top; the real limit is that one unreadable layer refuses the whole list, so a single url() layer in an otherwise-gradient stack drops the background entirely. Gradient geometry resolves against the laid-out box at paint time — see css/background for the full statement.",
       "issue": ""
     },
     "css/backgroundOrigin": {
       "status": "partial",
-      "mapsTo": "web-compat-style-decl.js -> setBackgroundOrigin(id, kw); bridge stores the keyword on View::background_origin_. The paint path does not read it: the tile grid is anchored on the border box.",
+      "mapsTo": "web-compat-style-decl.js -> setBackgroundOrigin(id, kw); bridge stores the keyword on View::background_origin_, and browser capture lowers a non-initial origin to IRStyle::background_origin. View::paint sizes and positions each background gradient layer's tile in that box (the padding box by default, inset by the resolved border widths) and keeps clipping to the border box, so a repeating tile wraps into the border strip as in a browser.",
       "supportedValues": [
-        "border-box / padding-box / content-box — all accepted and stored, and all round-trip"
+        "padding-box (initial) and border-box on gradient layers, per layer when given as a list; percentage background-size and background-position resolve against the origin box"
       ],
       "unsupportedValues": [
-        "padding-box / content-box on a TILED background layer — the tile grid is anchored on the border box, so on any node with a border or padding the stripe train sits borderWidth early against a browser. border-box happens to agree by accident.",
-        "the origin box a percentage background-size resolves against — also taken from the border box"
+        "content-box — positioned in the padding box; paint does not inset the tile by the padding",
+        "url() / image-set() raster backgrounds — not painted at all (see backgroundImage)"
       ],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1517]"
+        "test/test_widget_bridge.cpp [issue-1517]",
+        "test/test_browser_capture_gradient_border.cpp::\"a padding-box gradient tile repeats under a translucent border\"",
+        "test/test_browser_capture_gradient_border.cpp::\"a border-box gradient origin and an unrepeated tile paint what Chrome painted under the border\""
       ],
-      "notes": "This entry previously claimed `supported`, justified by 'all paint identically because pulp doesn't paint repeating gradient tiles (the only case where this would matter)'. Pulp now paints repeating gradient tiles, so the one case the entry named as mattering is the normal case, and the claim went false without anyone editing it. Demoted to `partial` until the paint path reads the slot. Recorded plainly because the original entry did the right thing by writing its assumption down — what failed was re-reading it when the assumption changed.",
+      "notes": "Checked against a Chrome capture of three bars under a translucent 1px bottom border (test/fixtures/browser-capture-gradient-border): the initial padding-box origin shows the tile's first stop in the border row, border-box shows its last, and no-repeat leaves only the page.",
       "issue": "1517"
     },
     "css/backgroundPosition": {

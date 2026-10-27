@@ -14,6 +14,9 @@ Makefile build) and verifies:
   * every `-D` the carrier's PCH was compiled with is present on the consumer
     (clang accepts a PCH macro the consumer lacks WITHOUT a diagnostic, so
     this is the one mismatch nothing else would ever report);
+  * each consumer's PIC/PIE option matches its carrier's (Linux clang rejects
+    "is pie differs in PCH file"; Apple clang accepts it, so only a Linux
+    build would otherwise report the mismatch);
   * no consumer carries -fno-exceptions / -fno-rtti;
   * every compile that produces a PCH and runs through ccache turns base_dir
     off (`CCACHE_BASEDIR=` in its launcher). A .pch embeds its build tree's
@@ -37,6 +40,7 @@ from pathlib import Path
 LEDGER_NAME = "pulp-test-pch.tsv"
 CARRIER_PREFIX = "pulp-test-pch-cxx"
 INCOMPATIBLE_FLAGS = ("-fno-exceptions", "-fno-rtti")
+PIC_FLAGS = ("-fPIC", "-fpic", "-fPIE", "-fpie", "-fno-pic", "-fno-pie", "-fno-PIC", "-fno-PIE")
 
 
 @dataclass
@@ -60,6 +64,12 @@ class CompileLine:
     def std(self) -> str | None:
         m = re.search(r"(?:^|\s)(-std=\S+)", self.flags)
         return m.group(1) if m else None
+
+    @property
+    def pic_mode(self) -> str | None:
+        """The last PIC/PIE option on the line; clang honors the last one."""
+        modes = [tok for tok in self.flags.split() if tok in PIC_FLAGS]
+        return modes[-1] if modes else None
 
     def define_set(self) -> set[str]:
         return {tok for tok in shlex.split(self.defines) if tok.startswith("-D")}
@@ -279,6 +289,10 @@ def check(build_dir: Path, option_on: bool, expectations: dict[str, str]) -> lis
                 continue
             if line.std != carrier_line.std:
                 problems.append(f"{target}: -std {line.std} differs from carrier {carrier} {carrier_line.std}")
+            if line.pic_mode != carrier_line.pic_mode:
+                problems.append(
+                    f"{target}: {line.pic_mode or 'no PIC/PIE option'} differs from carrier {carrier} "
+                    f"{carrier_line.pic_mode or 'no PIC/PIE option'}")
             for flag in INCOMPATIBLE_FLAGS:
                 if flag in line.flags.split():
                     problems.append(f"{target}: {flag} on a PCH consumer")

@@ -31,6 +31,21 @@ on:
   # Manual trigger retained for bisecting a regression or re-running
   # after a fix lands without waiting for the next nightly.
   workflow_dispatch:
+    inputs:
+      # Proves a self-hosted Windows lane (the Mac Pro Windows x64 slot,
+      # docs/guides/local-ci.md) on the full Windows suite without spending a
+      # macOS gate VM, which a build.yml dispatch always does. The nightly
+      # never sees an input, so it keeps windows-latest.
+      windows_runner_selector_json:
+        description: "Optional JSON runs-on for the Windows job; empty keeps windows-latest"
+        required: false
+        default: ""
+        type: string
+      windows_only:
+        description: "Run only the Windows job"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -44,8 +59,12 @@ permissions:
 # suites run in parallel, while two runs of the same ref (the nightly on main)
 # still never overlap. A single repo-wide group kept only one pending run, so
 # every branch waited for every other branch's dispatch.
+#
+# A dispatch that sets windows_only or a Windows runner selector is a one-off
+# proof, not the nightly, so it gets its own group per run: a long proof on
+# main must never hold the group a pending nightly on main is waiting for.
 concurrency:
-  group: cross-platform-check-${{ github.ref }}
+  group: cross-platform-check-${{ github.ref }}${{ (inputs.windows_only || inputs.windows_runner_selector_json) && format('-dispatch-{0}', github.run_id) || '' }}
   cancel-in-progress: false
 
 jobs:
@@ -55,7 +74,7 @@ jobs:
   # ctest filters. GitHub-hosted ubuntu-latest only.
   linux:
     name: Linux build + test
-    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
+    if: (github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO) && !inputs.windows_only
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
@@ -180,7 +199,7 @@ jobs:
   # windows-latest only.
   linux-arm64:
     name: Linux ARM64 build + test
-    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
+    if: (github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO) && !inputs.windows_only
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 60
     env:
@@ -283,10 +302,33 @@ jobs:
   # configure, same UTF-8-code-page-wrapped ctest. GitHub-hosted
   # windows-latest only.
 
+  # Resolves the Windows job's runs-on before any runner is chosen. A
+  # dispatch input that names a macOS or Linux pool (the gate VMs, the Linux
+  # clones, the preamble slot) is refused here, so a typo cannot put a Windows
+  # build on a gate host. Empty keeps windows-latest.
+  windows-runner:
+    name: Resolve Windows runner
+    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      runs_on: ${{ steps.resolve.outputs.runs_on }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: tools/scripts/windows_runner_selector.py
+          sparse-checkout-cone-mode: false
+      - name: Resolve and police the selector
+        id: resolve
+        env:
+          SELECTOR: ${{ inputs.windows_runner_selector_json || '' }}
+        run: python3 tools/scripts/windows_runner_selector.py --selector "$SELECTOR" --github-output
+
   windows:
     name: Windows build + test
+    needs: windows-runner
     if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
-    runs-on: windows-latest
+    runs-on: ${{ fromJSON(needs.windows-runner.outputs.runs_on) }}
     timeout-minutes: 180
     env:
       PULP_BUILD_DIR: build-windows
@@ -299,23 +341,44 @@ jobs:
         shell: bash
         run: python3 tools/scripts/hydrate_gpu_provenance_commits.py
 
-      - name: Install ccache (Windows)
-        continue-on-error: true
-        run: choco install ccache --no-progress -y
+      # Ninja + cl from the developer environment, and ccache when the runner
+      # has it (see tools/ci/windows_build_env.ps1).
+      - name: Prepare the Windows build environment (Ninja, cl, ccache)
+        shell: powershell
+        run: tools/ci/windows_build_env.ps1
+
+      - name: Point ccache at the host's remote storage
+        shell: bash
+        run: python3 tools/ci/ccache_remote_storage.py --github-env "$GITHUB_ENV"
 
       - name: Bootstrap repository dependencies
         run: ./setup.sh --ci --deps-only
         shell: bash
 
+      # A runner that keeps a persistent Skia cache (a baked golden) names its
+      # root in PULP_SKIA_CACHE_ROOT; the fetcher validates the generation's
+      # receipt there and downloads only on a miss. Unset, the archive is
+      # fetched into the checkout as before.
       - name: Fetch pinned Skia/Dawn (Windows software-GPU proof)
         shell: bash
         run: |
           set -euo pipefail
-          python3 tools/scripts/fetch_skia_for_release.py windows-x64 \
-            --dest external/skia-build \
-            --cache-lock-timeout 300
-          test -s external/skia-build/build/win-gpu/lib/Release/skia.lib
-          test -s external/skia-build/build/win-gpu/lib/Release/dawn_combined.lib
+          if [ -n "${PULP_SKIA_CACHE_ROOT:-}" ]; then
+            skia_dir="$(python3 tools/scripts/fetch_skia_for_release.py windows-x64 \
+              --cache-root "$PULP_SKIA_CACHE_ROOT" --print-cache-dest)"
+            skia_dir="${skia_dir//\\//}"
+            python3 tools/scripts/fetch_skia_for_release.py windows-x64 \
+              --cache-root "$PULP_SKIA_CACHE_ROOT" \
+              --cache-lock-timeout 300
+          else
+            skia_dir="$GITHUB_WORKSPACE/external/skia-build"
+            python3 tools/scripts/fetch_skia_for_release.py windows-x64 \
+              --dest external/skia-build \
+              --cache-lock-timeout 300
+          fi
+          test -s "$skia_dir/build/win-gpu/lib/Release/skia.lib"
+          test -s "$skia_dir/build/win-gpu/lib/Release/dawn_combined.lib"
+          echo "PULP_WINDOWS_SKIA_DIR=$skia_dir" >> "$GITHUB_ENV"
 
       - name: Configure
         shell: bash
@@ -327,19 +390,38 @@ jobs:
           # cancelled build instead of the cross-platform signal it exists to
           # provide. Example compile coverage stays with nightly-full-build
           # (macOS, examples ON) and examples-validation.
-          cmake -S . -B "$PULP_BUILD_DIR" -DCMAKE_BUILD_TYPE=Release \
+          cmake -S . -B "$PULP_BUILD_DIR" -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl \
             -DPULP_BUILD_EXAMPLES=OFF -DPULP_ENABLE_GPU=ON \
-            -DPULP_ENABLE_SCENE3D=ON -DSKIA_DIR="$GITHUB_WORKSPACE/external/skia-build"
+            -DPULP_ENABLE_SCENE3D=ON -DSKIA_DIR="$PULP_WINDOWS_SKIA_DIR"
 
       - name: Build
         shell: bash
         id: build
-        # The wrapper is invoked from Git Bash on the hosted Windows runner;
-        # it preserves the MSBuild configuration while owning parallelism and
-        # the build-directory lock.
+        # The wrapper is invoked from Git Bash on the Windows runner; it owns
+        # parallelism and the build-directory lock. `--config Release` is
+        # ignored by the single-configuration Ninja build.
         run: |
           set -euo pipefail
+          # Snapshot the ccache counters so "Ccache stats" can print this job's
+          # own calls (tools/ci/ccache_job_delta.py).
+          if command -v ccache >/dev/null 2>&1; then
+            ccache --print-stats > "$RUNNER_TEMP/ccache-before.txt" || true
+          fi
           tools/ci/governed-build.sh cmake --build "$PULP_BUILD_DIR" --config Release 2>&1 | tee build-windows.log
+
+      - name: Ccache stats
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          if command -v ccache >/dev/null 2>&1; then
+            ccache --print-stats > "$RUNNER_TEMP/ccache-after.txt" || true
+            python3 tools/ci/ccache_job_delta.py \
+              "$RUNNER_TEMP/ccache-before.txt" "$RUNNER_TEMP/ccache-after.txt" || true
+          else
+            echo "ccache not available; skipping stats"
+          fi
 
       - name: Test (UTF-8 code page wrapped)
         # Runs after a build that finished with errors, not only after a clean
@@ -410,7 +492,7 @@ jobs:
   # runners, see android.yml #487) and needs a KVM-capable runner.
   android:
     name: Android NDK build
-    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
+    if: (github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO) && !inputs.windows_only
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -512,8 +594,10 @@ jobs:
     name: Maintain per-platform tracking issues
     needs: [linux, linux-arm64, windows, android]
     # The tracking issues describe main. A proof-branch dispatch must neither
-    # open nor close them, and branches now run concurrently with main.
-    if: ${{ always() && github.ref == 'refs/heads/main' }}
+    # open nor close them, and branches now run concurrently with main. A run
+    # that skipped platforms or moved Windows off windows-latest measured
+    # something else, so it leaves the issues alone too.
+    if: ${{ always() && github.ref == 'refs/heads/main' && !inputs.windows_only && !inputs.windows_runner_selector_json }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:

@@ -45,6 +45,7 @@
 #include "native_components/rt_test_scope.hpp"
 #endif
 #include "harness/rt_allocation_probe.hpp"
+#include "support/step_gain_fixture.hpp"
 
 #include <clap/ext/preset-load.h>
 
@@ -178,7 +179,10 @@ public:
 
 // Captures midi_in so the test can assert what the CLAP adapter handed up.
 class CapturingProcessor : public Processor {
-public:
+  public:
+    bool wants_sample_accurate_parameters() const override {
+        return true;
+    }
     static constexpr state::ParamID kParamId = 9001;
     static constexpr state::ParamID kBypassParamId = 9002;
     static constexpr std::size_t kMaxCapturedSysex = 8;
@@ -601,6 +605,7 @@ public:
     float store_only_value = 0.0f;
     float value_0 = 0.25f;             // exactly representable in float+double
     float value_1 = 0.75f;
+    int process_calls = 0;
 
     PluginDescriptor descriptor() const override {
         PluginDescriptor d;
@@ -624,6 +629,7 @@ public:
                  midi::MidiBuffer&,
                  midi::MidiBuffer& midi_out,
                  const ProcessContext&) override {
+        ++process_calls;
         if (push_events) {
             push_output_param_event(kParamId, value_0, 0);
             push_output_param_event(kParamId, value_1, 16);
@@ -652,6 +658,8 @@ public:
     std::uint32_t observed_event_drops = 0;
     std::uint32_t observed_sysex_drops = 0;
     bool observed_reset_requested = false;
+    // Lets a case model a plug-in with no note input port.
+    static inline bool declares_midi_input = true;
 
     PluginDescriptor descriptor() const override {
         PluginDescriptor d;
@@ -659,7 +667,7 @@ public:
         d.manufacturer = "PulpTest";
         d.bundle_id = "com.pulp.test.clap.observing-midi-in";
         d.version = "1.0.0";
-        d.accepts_midi = true;
+        d.accepts_midi = declares_midi_input;
         return d;
     }
     void define_parameters(state::StateStore&) override {}
@@ -693,6 +701,11 @@ public:
 class ObservingParamIngressProcessor : public Processor {
 public:
     static constexpr state::ParamID kParamId = 9101;
+    // Read by the adapter at clap_init(); the cases here inspect the queue.
+    static inline bool sample_accurate = true;
+    bool wants_sample_accurate_parameters() const override {
+        return sample_accurate;
+    }
 
     bool observed_param_events_attached = false;
     std::size_t observed_param_event_count = 0;
@@ -2881,6 +2894,60 @@ TEST_CASE("CLAP store-only param change still emits a single event at time 0",
     REQUIRE(params[0]->value == 0.625);
 }
 
+TEST_CASE("CLAP activation warm-up never reaches the Processor or the transport diff",
+          "[clap][activation][rt-safety]") {
+    // clap_activate() runs the per-block path once on silence so the host's
+    // first block is not charged for cold code. That run must stop before the
+    // Processor and leave the transport diff at "no previous block".
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    Harness h(make_output_param);
+    REQUIRE(g_output_param != nullptr);
+    REQUIRE(g_output_param->process_calls == 0);
+    REQUIRE_FALSE(h.plugin.playhead_prev.has_previous);
+    REQUIRE_FALSE(h.plugin.warming_render_path);
+
+    InputEventList events;
+    OutputEventList out;
+    REQUIRE(h.run(events, &out) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(g_output_param->process_calls == 1);
+}
+
+TEST_CASE("CLAP reports a store-only change once and stays quiet on idle blocks",
+          "[clap][params][out-events]") {
+    // The adapter skips its snapshot and diff while the store is unchanged, so
+    // idle blocks must emit nothing and a later processor write must still be
+    // reported exactly once.
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    Harness h(make_output_param);
+    REQUIRE(g_output_param != nullptr);
+
+    InputEventList events;
+    for (int block = 0; block < 3; ++block) {
+        OutputEventList idle;
+        REQUIRE(h.run(events, &idle) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(idle.by_type<clap_event_param_value_t>(CLAP_EVENT_PARAM_VALUE).empty());
+    }
+
+    g_output_param->mutate_store_only = true;
+    g_output_param->store_only_value = 0.375f;
+    {
+        OutputEventList out;
+        REQUIRE(h.run(events, &out) == CLAP_PROCESS_CONTINUE);
+        auto params = out.by_type<clap_event_param_value_t>(CLAP_EVENT_PARAM_VALUE);
+        REQUIRE(params.size() == 1);
+        REQUIRE(params[0]->param_id == OutputParamProcessor::kParamId);
+        REQUIRE(params[0]->value == 0.375);
+    }
+    // Same value again: nothing moved, nothing to report.
+    for (int block = 0; block < 2; ++block) {
+        OutputEventList out;
+        REQUIRE(h.run(events, &out) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(out.by_type<clap_event_param_value_t>(CLAP_EVENT_PARAM_VALUE).empty());
+    }
+}
+
 TEST_CASE("CLAP release backlog does not suppress accepted parameter output",
           "[clap][params][out-events][midi][ownership][regression]") {
     g_pending_opts_mpe = false;
@@ -2889,6 +2956,7 @@ TEST_CASE("CLAP release backlog does not suppress accepted parameter output",
     REQUIRE(g_output_param != nullptr);
     g_output_param->push_events = true;
     h.plugin.outbound_note_release_debt[3 * 128 + 60] = 2;
+    h.plugin.outbound_release_debt_pending = true; // seeded directly, not via record
 
     InputEventList events;
     OutputEventList out;
@@ -3041,6 +3109,179 @@ TEST_CASE("CLAP parameter automation drops past realtime event capacity without 
     REQUIRE(h.plugin.param_events.capacity() == state::ParameterEventQueue::kCapacity);
     REQUIRE(h.plugin.param_events.overflowed());
     REQUIRE(h.plugin.param_events.dropped_event_count() == 1);
+}
+
+TEST_CASE("CLAP delivers automation points only to a processor that asks for them",
+          "[clap][params][automation]") {
+    // Opted out: the store takes the block's last value and the event queue
+    // stays empty. Opted in: every point reaches the queue with its offset.
+    for (const bool sample_accurate : {false, true}) {
+        CAPTURE(sample_accurate);
+        ObservingParamIngressProcessor::sample_accurate = sample_accurate;
+        Harness h(make_observing_param_ingress);
+        REQUIRE(g_observing_param_ingress != nullptr);
+        int writes = 0;
+        auto listener = g_observing_param_ingress->state().add_listener(
+            [&](state::ParamID id, float) {
+                if (id == ObservingParamIngressProcessor::kParamId)
+                    ++writes;
+            },
+            state::ListenerThread::Audio);
+        InputEventList events;
+        for (uint32_t i = 0; i < 3; ++i) {
+            clap_event_param_value_t ev{};
+            ev.header = make_header(sizeof(ev), CLAP_EVENT_PARAM_VALUE, i * 10);
+            ev.param_id = ObservingParamIngressProcessor::kParamId;
+            ev.value = 0.25 * (i + 1);
+            events.push(ev);
+        }
+        REQUIRE(h.run(events) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(g_observing_param_ingress->observed_param_events_attached);
+        REQUIRE(g_observing_param_ingress->observed_state_value == 0.75f);
+        if (sample_accurate) {
+            REQUIRE(g_observing_param_ingress->observed_param_event_count == 3);
+            REQUIRE(g_observing_param_ingress->observed_last_sample_offset == 20);
+            REQUIRE(writes == 3);
+            REQUIRE_FALSE(h.plugin.param_events_monitor.read_while_opted_out());
+        } else {
+            REQUIRE(g_observing_param_ingress->observed_param_event_count == 0);
+            // One store write per parameter per block: the last value only.
+            REQUIRE(writes == 1);
+            // Reading the empty queue while opted out is recorded and
+            // reported once.
+            REQUIRE(h.plugin.param_events_monitor.read_while_opted_out());
+            REQUIRE(h.plugin.param_events_monitor.report(*g_observing_param_ingress));
+            REQUIRE_FALSE(h.plugin.param_events_monitor.report(*g_observing_param_ingress));
+        }
+        listener.reset();
+    }
+    ObservingParamIngressProcessor::sample_accurate = true;
+}
+
+TEST_CASE("CLAP block-rate automation writes a gesture's value before the gesture closes",
+          "[clap][params][automation]") {
+    // A gesture end flushes that parameter's pending value, so the store
+    // holds what the host sent when the gesture closed; a later value in the
+    // same block is written again once, at the end.
+    ObservingParamIngressProcessor::sample_accurate = false;
+    Harness h(make_observing_param_ingress);
+    REQUIRE(g_observing_param_ingress != nullptr);
+    std::vector<float> written;
+    auto listener = g_observing_param_ingress->state().add_listener(
+        [&](state::ParamID id, float value) {
+            if (id == ObservingParamIngressProcessor::kParamId)
+                written.push_back(value);
+        },
+        state::ListenerThread::Audio);
+    InputEventList events;
+    clap_event_param_gesture_t begin{};
+    begin.header = make_header(sizeof(begin), CLAP_EVENT_PARAM_GESTURE_BEGIN, 0);
+    begin.param_id = ObservingParamIngressProcessor::kParamId;
+    events.push(begin);
+    for (const auto [time, value] : {std::pair{1u, 0.1}, std::pair{2u, 0.2}}) {
+        clap_event_param_value_t ev{};
+        ev.header = make_header(sizeof(ev), CLAP_EVENT_PARAM_VALUE, time);
+        ev.param_id = ObservingParamIngressProcessor::kParamId;
+        ev.value = value;
+        events.push(ev);
+    }
+    clap_event_param_gesture_t end{};
+    end.header = make_header(sizeof(end), CLAP_EVENT_PARAM_GESTURE_END, 5);
+    end.param_id = ObservingParamIngressProcessor::kParamId;
+    events.push(end);
+    clap_event_param_value_t later{};
+    later.header = make_header(sizeof(later), CLAP_EVENT_PARAM_VALUE, 10);
+    later.param_id = ObservingParamIngressProcessor::kParamId;
+    later.value = 0.4;
+    events.push(later);
+
+    REQUIRE(h.run(events) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(written == std::vector<float>{0.2f, 0.4f});
+    REQUIRE(g_observing_param_ingress->observed_state_value == 0.4f);
+    listener.reset();
+    ObservingParamIngressProcessor::sample_accurate = true;
+}
+
+TEST_CASE("CLAP reads a misaligned or short parameter-value event safely",
+          "[clap][params][automation]") {
+    // A full-size, aligned event is read in place; anything else is copied.
+    // Byte images with 4-byte alignment place the event off an 8-byte
+    // boundary, behind a 20-byte event in a foreign namespace the adapter
+    // skips.
+    struct alignas(4) Skipped {
+        clap_event_header_t header;
+        std::uint32_t pad;
+    };
+    struct alignas(4) ValueBytes {
+        unsigned char bytes[sizeof(clap_event_param_value_t)];
+    };
+    const auto value_event = [](double value, std::uint32_t size) {
+        clap_event_param_value_t ev{};
+        ev.header = make_header(sizeof(ev), CLAP_EVENT_PARAM_VALUE, 0);
+        ev.header.size = size;
+        ev.param_id = ObservingParamIngressProcessor::kParamId;
+        ev.value = value;
+        ValueBytes out{};
+        std::memcpy(out.bytes, &ev, sizeof(ev));
+        return out;
+    };
+    Skipped skipped{};
+    skipped.header = make_header(sizeof(skipped), CLAP_EVENT_PARAM_VALUE, 0);
+    skipped.header.space_id = CLAP_CORE_EVENT_SPACE_ID + 1;
+
+    ObservingParamIngressProcessor::sample_accurate = false;
+    {
+        Harness h(make_observing_param_ingress);
+        InputEventList events;
+        events.push(skipped);
+        events.push(value_event(0.625, sizeof(clap_event_param_value_t)));
+        REQUIRE(h.run(events) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(g_observing_param_ingress->observed_state_value == 0.625f);
+    }
+    {
+        // A short event lacks the value field; the missing bytes read as zero,
+        // so it replaces the full event before it.
+        Harness h(make_observing_param_ingress);
+        InputEventList events;
+        events.push(value_event(0.625, sizeof(clap_event_param_value_t)));
+        events.push(value_event(
+            0.625, static_cast<std::uint32_t>(offsetof(clap_event_param_value_t, value))));
+        REQUIRE(h.run(events) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(g_observing_param_ingress->observed_state_value == 0.0f);
+    }
+    ObservingParamIngressProcessor::sample_accurate = true;
+}
+
+TEST_CASE("CLAP delivers sample-accurate automation at each point's offset",
+          "[clap][params][automation][parity]") {
+    // The same steps the VST3 and AU v2 cases send; all three must produce
+    // step_gain_expected() exactly. A schedule one sample late must not.
+    for (const int shift : {0, 1}) {
+        CAPTURE(shift);
+        Harness h(pulp::test::make_step_gain_processor,
+                  static_cast<uint32_t>(pulp::test::kStepGainFrames));
+        for (std::size_t n = 0; n < h.in_left.size(); ++n) {
+            h.in_left[n] = pulp::test::step_gain_input(0, n);
+            h.in_right[n] = pulp::test::step_gain_input(1, n);
+        }
+        InputEventList events;
+        for (const auto& [offset, value] : pulp::test::kStepGainPoints) {
+            clap_event_param_value_t ev{};
+            ev.header = make_header(sizeof(ev), CLAP_EVENT_PARAM_VALUE,
+                                    static_cast<uint32_t>(offset + shift));
+            ev.param_id = pulp::test::kStepGainParam;
+            ev.value = value;
+            events.push(ev);
+        }
+        pulp::test::StepGainProcessor::process_calls = 0;
+        REQUIRE(h.run(events) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(pulp::test::StepGainProcessor::process_calls == 1);
+        bool matches = true;
+        for (std::size_t n = 0; n < h.out_left.size(); ++n)
+            matches = matches && h.out_left[n] == pulp::test::step_gain_expected(0, n) &&
+                      h.out_right[n] == pulp::test::step_gain_expected(1, n);
+        CHECK(matches == (shift == 0));
+    }
 }
 
 TEST_CASE("CLAP_EVENT_MIDI decodes CC into MidiBuffer",
@@ -3951,6 +4192,30 @@ TEST_CASE("CLAP retries rejected outbound ownership releases before new attacks"
         CHECK(no_duplicate.size() == 0);
     }
 
+    SECTION("a release debt recorded after an earlier debt drained still retries") {
+        // The drain skips its slot walk while no debt is pending; a later debt
+        // must re-arm it.
+        for (int note : {66, 67}) {
+            g_emitting->to_emit = {midi::MidiEvent::note_off(1, static_cast<uint8_t>(note))};
+            OutputEventList rejecting;
+            rejecting.accept_at_most(0);
+            REQUIRE(h.run(in, &rejecting) == CLAP_PROCESS_CONTINUE);
+            REQUIRE(h.plugin.outbound_release_debt_pending);
+
+            g_emitting->to_emit.clear();
+            OutputEventList accepted;
+            REQUIRE(h.run(in, &accepted) == CLAP_PROCESS_CONTINUE);
+            auto events = accepted.by_type<clap_event_midi_t>(CLAP_EVENT_MIDI);
+            REQUIRE(events.size() == 1);
+            CHECK(events[0]->data[1] == note);
+            CHECK_FALSE(h.plugin.outbound_release_debt_pending);
+
+            OutputEventList idle;
+            REQUIRE(h.run(in, &idle) == CLAP_PROCESS_CONTINUE);
+            CHECK(idle.size() == 0);
+        }
+    }
+
     SECTION("a missing host sink retains a release") {
         g_emitting->to_emit = {midi::MidiEvent::note_off(1, 61)};
         REQUIRE(h.run(in, nullptr) == CLAP_PROCESS_CONTINUE);
@@ -4109,6 +4374,7 @@ TEST_CASE("CLAP retries rejected outbound ownership releases before new attacks"
     SECTION("retry work is bounded and later blocks eventually drain") {
         for (std::size_t note = 0; note < 65; ++note)
             h.plugin.outbound_note_release_debt[7 * 128 + note] = 1;
+        h.plugin.outbound_release_debt_pending = true;
         auto attack = midi::MidiEvent::note_on(7, 72, 100);
         attack.sample_offset = 8;
         g_emitting->to_emit = {attack};
@@ -4137,6 +4403,7 @@ TEST_CASE("CLAP retries rejected outbound ownership releases before new attacks"
         for (int block = 0; block < 4; ++block) {
             for (std::size_t note = 0; note < 128; ++note)
                 h.plugin.outbound_note_release_debt[note] = 1;
+            h.plugin.outbound_release_debt_pending = true;
             OutputEventList accepted;
             REQUIRE(h.run(in, &accepted) == CLAP_PROCESS_CONTINUE);
             CHECK(accepted.attempt_count() <= 64);
@@ -4363,6 +4630,34 @@ TEST_CASE("CLAP inbound SysEx drops payloads larger than realtime sidecar storag
     REQUIRE(g_observing_midi_in->observed_sysex_payload_capacity == 4096);
     REQUIRE(g_observing_midi_in->observed_sysex_count == 0);
     REQUIRE(g_observing_midi_in->observed_sysex_drops == 1);
+}
+
+TEST_CASE("CLAP reserves no SysEx payload pool for a plug-in without a note input",
+          "[clap][midi][realtime][sysex]") {
+    ObservingMidiInProcessor::declares_midi_input = false;
+    struct Restore {
+        ~Restore() {
+            ObservingMidiInProcessor::declares_midi_input = true;
+        }
+    } restore;
+    Harness h(make_observing_midi_in);
+    InputEventList in;
+    static const uint8_t kPayload[] = {0xF0, 0x7D, 0x01, 0xF7};
+    clap_event_midi_sysex_t ev{};
+    ev.header = make_header(sizeof(ev), CLAP_EVENT_MIDI_SYSEX, 3);
+    ev.port_index = 0;
+    ev.buffer = kPayload;
+    ev.size = sizeof(kPayload);
+    in.push(ev);
+
+    REQUIRE(h.run(in) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(g_observing_midi_in != nullptr);
+    REQUIRE(g_observing_midi_in->observed_sysex_payload_capacity == 0);
+    REQUIRE(g_observing_midi_in->observed_sysex_count == 0);
+    REQUIRE(g_observing_midi_in->observed_sysex_drops == 1);
+    // A dropped SysEx carries no note ownership, so the block is not reset.
+    REQUIRE_FALSE(g_observing_midi_in->observed_reset_requested);
+    REQUIRE(g_observing_midi_in->observed_event_capacity == state::ParameterEventQueue::kCapacity);
 }
 
 TEST_CASE("CLAP outbound MIDI drops past realtime event capacity without growing",

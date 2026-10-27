@@ -6,8 +6,8 @@
 
 namespace pulp::view {
 namespace {
-// Written on every editor creation (register_audio_widgets) and read while a
-// tree is bound, possibly on another thread, so access is serialised.
+// Written on every editor creation (the audio-widget registration path) and
+// read while a tree is bound, possibly on another thread, so access is serialised.
 std::unordered_map<std::string, LegacyImportBinder>& binders() {
     static std::unordered_map<std::string, LegacyImportBinder> value;
     return value;

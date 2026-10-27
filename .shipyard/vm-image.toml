@@ -55,7 +55,7 @@ packages = [
 # test otherwise hangs until its timeout on the VM golden.
 
 # BEGIN GENERATED PULP TOOLCHAIN (tools/toolchain/manifest.toml)
-# source_sha256 = ae9f37dac197fd10f1dba20cc1007f5b33d7a20445993484c021ee75833ac51b
+# source_sha256 = 3cbe8514fd7c32c4d2bb544618182804766356a96d57110f4df82d02cb16d4a6
 # generated_platform = macos
 # END GENERATED PULP TOOLCHAIN
 

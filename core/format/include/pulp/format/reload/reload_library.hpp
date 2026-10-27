@@ -77,8 +77,16 @@ inline void promote_host_symbols_once() {
         if (::dladdr(reinterpret_cast<const void*>(&promote_host_symbols_once), &info) &&
             info.dli_fname) {
             // RTLD_NOLOAD: do not map a new copy — just look up the already-loaded
-            // host image and (via RTLD_GLOBAL) promote its symbols' scope.
-            if (void* self = ::dlopen(info.dli_fname, RTLD_GLOBAL | RTLD_NOLOAD)) {
+            // host image and (via RTLD_GLOBAL) promote its symbols' scope. glibc
+            // rejects a mode without RTLD_LAZY or RTLD_NOW ("invalid mode"), so
+            // on Linux the promotion silently did nothing and thin logic failed
+            // to bind in a plug-in loaded RTLD_LOCAL.
+#if defined(__linux__)
+            constexpr int kPromoteMode = RTLD_LAZY | RTLD_GLOBAL | RTLD_NOLOAD;
+#else
+            constexpr int kPromoteMode = RTLD_GLOBAL | RTLD_NOLOAD;
+#endif
+            if (void* self = ::dlopen(info.dli_fname, kPromoteMode)) {
                 // Intentionally leak this handle: we only wanted the scope change;
                 // the image is the running host and is never unloaded regardless.
                 (void)self;

@@ -491,21 +491,20 @@ def apply_lag_trim(
     return ref.copy(), cand.copy()
 
 
-def attack_rise(seg: np.ndarray, sr: int) -> float:
-    """Attack sharpness of an anchored window = amplitude / 10-90% rise time of the smoothed
-    high-band energy envelope (energy per sample). Higher = sharper. Shared by the
-    `transient_sharpness` detector and `compare`'s `transient-integrity` axis so the two measure
-    attacks identically (no forked DSP)."""
+def attack_shape(seg: np.ndarray, sr: int) -> tuple[float, float]:
+    """(amplitude, sharpness) of an anchored window's smoothed high-band energy envelope.
+    Amplitude is the envelope's rise from its pre-peak minimum to its peak (energy per sample);
+    sharpness is :func:`attack_rise`. Both are 0.0 for a window with no attack."""
     env, hop = smooth_energy_env(seg, sr)
     if env.size < 4:
-        return 0.0
+        return 0.0, 0.0
     peak = int(np.argmax(env))
     if peak < 1:
-        return 0.0
+        return 0.0, 0.0
     base = float(np.min(env[: peak + 1]))
     amp = float(env[peak]) - base
     if amp <= 1e-12:
-        return 0.0
+        return 0.0, 0.0
     lo_th, hi_th = base + 0.1 * amp, base + 0.9 * amp
     pre = env[: peak + 1]
     below_lo = np.where(pre <= lo_th)[0]
@@ -513,7 +512,15 @@ def attack_rise(seg: np.ndarray, sr: int) -> float:
     i_lo = int(below_lo[-1]) if below_lo.size else 0
     i_hi = int(below_hi[-1]) if below_hi.size else peak
     rise_samples = max(1, (i_hi - i_lo) * hop)
-    return (0.8 * amp) / rise_samples
+    return amp, (0.8 * amp) / rise_samples
+
+
+def attack_rise(seg: np.ndarray, sr: int) -> float:
+    """Attack sharpness of an anchored window = amplitude / 10-90% rise time of the smoothed
+    high-band energy envelope (energy per sample). Higher = sharper. Shared by the
+    `transient_sharpness` detector and `compare`'s `transient-integrity` axis so the two measure
+    attacks identically (no forked DSP)."""
+    return attack_shape(seg, sr)[1]
 
 
 # ── Resampling (varispeed alignment) ─────────────────────────────────────
@@ -628,6 +635,49 @@ def resample_by_ratio(y: np.ndarray, ratio: float, *, zeros: int = 32, beta: flo
     return _kaiser_sinc_resample(y, int(round(y.size * ratio)), zeros, beta)
 
 
+class OnsetAttack(NamedTuple):
+    """One onset pair's attack comparison (see :func:`onset_attack_measure`)."""
+
+    deficit: float
+    amp_ratio: float
+    energy_delay_ms: float
+
+
+def energy_median_ms(seg: np.ndarray, sr: int) -> float:
+    """Time (ms from the window start) by which half of the window's smoothed high-band energy has
+    arrived. An aggregate over the whole window, so unlike a threshold crossing it does not jump
+    when a small perturbation moves one envelope sample across a level."""
+    env, hop = smooth_energy_env(seg, sr)
+    total = float(np.sum(env))
+    if env.size == 0 or total <= 0.0:
+        return 0.0
+    return hop * float(np.searchsorted(np.cumsum(env), 0.5 * total)) / sr * 1000.0
+
+
+def onset_attack_measure(
+    reference: np.ndarray, candidate: np.ndarray, sr: int, ref_t: float, cand_t: float
+) -> OnsetAttack | None:
+    """Attack comparison for ONE onset pair, or None when the window can't be measured (boundary,
+    or a silent reference attack). ``deficit`` is :func:`onset_attack_deficit`'s. ``amp_ratio`` is
+    the candidate's high-band attack amplitude over the reference's, clipped to [0, 1]: near 1 when
+    the attack's energy survived (whatever its rise time), near 0 when the attack is gone.
+    ``energy_delay_ms`` is how much later the candidate's window reaches half its high-band energy
+    (:func:`energy_median_ms`): an attack spread out in time moves it later by milliseconds, while a
+    rise-time estimate that jumped on intact energy leaves it at zero."""
+    ref_seg, cand_seg, _lag = local_align(reference, candidate, sr, ref_t, cand_t)
+    if ref_seg is None:
+        return None
+    a_ref, s_ref = attack_shape(ref_seg, sr)
+    a_cand, s_cand = attack_shape(cand_seg, sr)
+    if s_ref <= 1e-9:
+        return None
+    return OnsetAttack(
+        float(np.clip(1.0 - s_cand / s_ref, 0.0, 1.0)),
+        float(np.clip(a_cand / a_ref, 0.0, 1.0)) if a_ref > 1e-12 else 1.0,
+        energy_median_ms(cand_seg, sr) - energy_median_ms(ref_seg, sr),
+    )
+
+
 def onset_attack_deficit(
     reference: np.ndarray, candidate: np.ndarray, sr: int, ref_t: float, cand_t: float
 ) -> float | None:
@@ -637,13 +687,8 @@ def onset_attack_deficit(
     (:func:`attack_rise`). Clipping to [0,1] tames the small-``s_ref`` blow-up a raw ratio has. The
     single home for the per-onset attack measurement — shared by the transient_sharpness detector and
     compare's transient-integrity axis (no forked loop)."""
-    ref_seg, cand_seg, _lag = local_align(reference, candidate, sr, ref_t, cand_t)
-    if ref_seg is None:
-        return None
-    s_ref, s_cand = attack_rise(ref_seg, sr), attack_rise(cand_seg, sr)
-    if s_ref <= 1e-9:
-        return None
-    return float(np.clip(1.0 - s_cand / s_ref, 0.0, 1.0))
+    measured = onset_attack_measure(reference, candidate, sr, ref_t, cand_t)
+    return None if measured is None else measured[0]
 
 
 def local_align(

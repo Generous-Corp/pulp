@@ -10,40 +10,113 @@ that design import feeds it. It exists because four separate bugs in this area
 all shared one shape: **the number was wrong but nothing failed**, because the
 test asserted the same rule of thumb the code used.
 
-## The one rule: half-leading has a single reference
+## Captured boxes: read the baseline off the BOTTOM
 
-CSS puts the baseline of a line box at:
+A captured line's baseline comes from `captured_baseline_offset()` and
+`captured_baseline()` in `pulp/view/text_line_metrics.hpp`, pure functions;
+`Label` only gathers their inputs.
+
+`TextShaper` / `PreparedText::ascent()` and `descent()` are the face's
+**worst-case glyph extents** (the larger of fTop/fAscent, fBottom/fDescent).
+That is right for sizing a box that must never clip a glyph and wrong for
+placing a CSS baseline. A captured line box is the rect Chromium gave the text
+run, its content area: `round(fAscent) + round(fDescent)` tall **whatever the
+line-height**, plus an ascent adjustment Blink applies on macOS to Times,
+Helvetica and Courier (Times 16px: 12 + 4 + 2 = 18), with the baseline the
+descent above the rect's bottom. So the captured branch places the baseline at
 
 ```
-baseline_y = line_box.y + (line_box.height - ink_height) / 2 + ascent
-             where ink_height = ascent + descent
+baseline_y = box.bottom - descent
+             descent = measured LineMetrics descent, else round(typographic_descent())
 ```
 
-The surplus you divide **must be measured against the same ink you then descend
-by**. Measuring the surplus against the em box (`font_size`) and then descending
-by a real face ascent double-counts the difference between those two references,
-and paints every line low by exactly that gap.
+- The browser's **measured** line metrics (`LineMetrics`, recorded by the
+  capture from canvas `fontBoundingBox*`) win whenever present. They carry
+  Blink's rounding and its per-face macOS adjustments, which no font table
+  states.
+- Otherwise the face's **typographic** descent
+  (`PreparedText::typographic_descent()`, fDescent), rounded to a whole CSS px,
+  never the clip-safe glyph bounding box.
+- With no real face metrics either, the ink is centred in the box (unclamped).
 
-Worked example, the bug that shipped:
+This is measured, not derived. Two independent probes agree:
+
+- a zero-size `vertical-align: baseline` probe captured through the importer:
+  Arial, Arial Bold, Inter, Georgia, Verdana, Times, Helvetica, Courier, the
+  default serif, 11-32px, `line-height: normal` and explicit;
+- a CDP probe at emulated DPR 2 (Chrome 151), 216 cases: Arial, Inter,
+  Georgia, Verdana, Times, Helvetica, Courier, `serif`, `system-ui` at 11, 13,
+  16, 17, 22 and 32px, line-height `normal`, `1.0`, `1.5` and `40px`. The text
+  range's client rect was exactly canvas `fontBoundingBoxAscent + Descent`
+  tall in 216/216, and the baseline sat the measured descent above its bottom
+  in 216/216. A line-height never makes the rect taller, so a half-leading
+  split inside the rect has nothing to split. That probe cannot tell the
+  measured rules apart (bottom minus measured descent and top plus measured
+  ascent coincide there); it does discriminate the fallbacks. With the faces'
+  CoreText fAscent/fDescent and no measured metrics, `bottom - round(fDescent)`
+  was exact in 192/192 cases (Inter excluded: it is not installed
+  system-wide, so CoreText substitutes Helvetica), while the old
+  rounded-ascent/half-leading fallback was exact in 96/192 and up to 2.86 px
+  high on Times, Helvetica, Courier and `serif`.
+- The fallback is wrong where Chromium's descent is not the file's: Arial
+  16px under `@font-face { descent-override: 40% }` gives a 20px rect with its
+  baseline 14px down, while `bottom - round(fDescent)` puts it at 17.
+  `captured_baseline_offset`'s test pins both that miss and the measured fix.
+
+Rules that look equivalent are not:
+
+| rule | Arial / Georgia / Verdana | Times, Helvetica, Courier |
+|---|---|---|
+| `top + round(fAscent) + half-leading` | right | **1-2px high** |
+| `top + worst-case ascent` (the old code) | 1px high (Arial Bold 24) | high |
+| `bottom - round(fDescent)` | right | right |
+| `bottom - measured descent` | right | right |
+
+Worked example, Inter 12px in a captured 15px box:
 
 | quantity | value |
 |---|---|
 | captured line box height | 15.0 |
 | `font_size` | 12.0 |
-| Inter's real ascent at 12px | 13.294921875 (≈1.108 em) |
-| Inter's real ink (ascent+descent) at 12px | 17.162109 (≈1.43 em) |
+| Inter's worst-case glyph ascent (fTop) at 12px | 13.294921875 (≈1.108 em) |
+| Inter's worst-case ink at 12px | 17.162109 (≈1.43 em) |
+| Inter's typographic ascent / descent (fAscent / fDescent) at 12px | 11.625 / 2.906 |
 | **buggy** `max(0,(15−12)/2) + 13.2949` | **14.794922** |
-| **correct** `(15−17.1621)/2 + 13.2949` | **12.213867** |
+| **still wrong** `(15−17.1621)/2 + 13.2949` (worst-case extents) | **12.213867** |
+| **Chromium** `15 − round(2.906)` (bottom minus rounded fDescent) | **12.0** |
+
+The rounding is in CSS px even at DPR 2 (Arial Bold 24px gives a 27px rect;
+device-px rounding would give 26.5). Known limits, all measured on macOS
+Chromium: Linux Blink moves a unit from ascent to descent when the descent
+rounds down under subpixel positioning; an `@font-face` with
+`descent-override`/`size-adjust` makes Chromium's descent the override value
+while the label still reads the file's `fDescent` when nothing was measured.
+Measure before extending the rule to those cases. The native (uncaptured)
+branch is different: it has no box from Chromium and still centres the real
+ink, and its half-leading surplus must be measured against the same ink it
+then descends by.
 
 **Negative half-leading is legal and must not be clamped.** A face whose ink
-exceeds the captured line box has negative leading, and CSS lets the glyphs
-overflow the box evenly, top and bottom. Clamping at 0 silently reintroduces the
-line-height dependence the captured branch exists to remove — the 15px box above
-carries −1.081 of leading, and clamping it is precisely the old bug.
+exceeds the box has negative leading, and CSS lets the glyphs overflow the box
+evenly, top and bottom.
 
-`1.5 + 0.85 * font_size` is the rule of thumb this replaced. If you see `0.85`
-anywhere near a baseline, it is measuring an em box while descending by a real
-ascent. It is wrong even when the test agrees with it.
+`1.5 + 0.85 * font_size` is the rule of thumb the native branch replaced. If
+you see `0.85` anywhere near a baseline, it is measuring an em box while
+descending by a real ascent. It is wrong even when the test agrees with it.
+
+## Captured baselines snap on the captured frame's grid
+
+Chromium paints each captured line with its baseline on a whole CSS px of the
+page. `captured_baseline()` takes the grid's origin as `root_y`: the label's
+offset from its **captured frame**, the nearest ancestor with
+`captured_frame_root()` set. Every import lane marks its root: the native
+materializer and the C++ codegen call `set_captured_frame_root(true)`, the JS
+codegen emits `setCapturedFrameRoot('', true)`. It is deliberately separate
+from `subpixel_layout()`, which a hand-built tree can set without being a
+captured frame; an import lane that skips the marker snaps to the tree top. Never
+sum offsets up to the application root: an import mounted at y=10.5, or under
+a scaled or animating host, then snaps against the host's grid and its text
+moves by a pixel. Native, non-captured text is not snapped at all.
 
 ## Measure and paint must resolve the SAME font family
 
@@ -66,6 +139,92 @@ inherited face, so a wider painted face simply overflows and clips. It clips
 
 Fix shape: one `effective_font_family()` helper, used by paint and every metric,
 so the walk cannot drift again.
+
+The same rule holds one level down, for the FACE a family resolves to. The
+resolver reaches `system-ui` through CoreText's UI-font API at the exact
+weight, but SkParagraph finds families by name, so the paragraph path sees the
+private `.AppleSystemUIFont`. The CoreText manager's style set for that name
+holds only the named instances, so a weight between them (250) shaped in the
+nearest one (200) while the resolver measured an interpolated 250, which is
+what Chrome draws; and `matchFamilyStyle` by that name returns null for the
+rest of the process once such a weight has been asked for. The font collection
+now consults `make_system_ui_font_manager` (`core/canvas/src/system_ui_typeface.hpp`)
+first. Compare a family's paragraph face with its resolver face per weight,
+names and advances, before trusting either. A subclass of `SkFontMgr` (or of
+SkParagraph's `TypefaceFontProvider`) must live in a TU built with `-fno-rtti`:
+the prebuilt Skia exports no type info for them and the link fails. Keep that
+TU free of anything that can throw (`std::vector`, `std::string`, inline
+helpers that use them): a throw site compiled without RTTI emits hidden copies
+of `std::exception`'s type info, the linker binds the whole binary's catch
+clauses to them, and a `std::runtime_error` thrown anywhere else then escapes
+`catch (const std::exception&)`. Put such code in an ordinary TU, as
+`font_weight_match.cpp` does, and check with `nm -m <tu>.o | grep __ZTISt`.
+
+The weight a family resolves is the other half of the face. CoreText (and
+every platform manager's `matchFamilyStyle`) takes the NEAREST weight; CSS
+Fonts 4 searches in a fixed direction: from 400 to 500 it tries heavier faces
+up to 500, then lighter, then heavier; below 400 lighter first; above 500
+heavier first. Helvetica Neue ships Medium (500) and Bold (700), so at 600
+CoreText picks Medium and Chromium picks Bold. The import painted lighter and
+narrower (dx -0.54 CSS px, ink 0.858 against the capture) and, because the
+resolved face no longer matched the capture's recorded face, Label rejected the
+captured basis and placed the baseline natively (dy +0.45 at whole-pixel
+tops). `css_match_font_weight()` in `core/canvas/src/font_weight_match.hpp`
+is the one matcher: the resolver (and so `resolved_face_identity()`), the
+paragraph collection's default manager and bundled families all go through it.
+Never call `mgr->matchFamilyStyle()` directly for a named family; the face it
+returns is the face the captured-basis check will disagree with. When a weight
+looks wrong, ask the same question at 700 first: if 700 is exact and 600 is
+not, the family is missing the weight and the matcher is deciding.
+
+## The CoreGraphics host measures through the face CoreText paints
+
+The rule above has a second half that lives below the family name: the
+measuring backend must resolve the same *face* the painting backend draws.
+The CoreGraphics host paints text through CoreText. A lite editor (the macOS
+default; see the `view-bridge` skill's editor stack section) also measures
+through CoreText (`TextShaper`'s `PULP_TEXT_SHAPER_SKIA == 0` branch), so the
+line box comes from the glyphs actually drawn. That is a deliberate choice:
+measure equals paint.
+
+A full-stack build still measures through Skia's `SkFontMgr`, and for some
+families and weights Skia resolves a different face than CoreText paints:
+
+- "Helvetica Neue" 600 at 12 px: Skia ascent 13.92, width 116.7; the painted
+  face ascent 13.69, width 120.0.
+- JetBrains Mono at 9 px: Skia adds 0.12 px of leading the painted face lacks.
+
+Captured text is not affected: a Label reuses a capture's line breaks only
+when `resolved_face_identity()` matches the capture's face, and the lite stack
+answers that through CoreText (`coretext_face_postscript_name`), the face it
+paints. When the lite answer was empty, every captured label re-broke with its
+own measurement and the design panels moved by whole labels (0.31% and 0.47%
+of pixels on PulpDesignSynth and PulpDesignArp); with the answer they match the
+full build: 0 pixels on PulpDesignSynth, and on PulpDesignArp a bold 9 px "07"
+whose identical glyphs sit 1 capture px lower. That label asks for
+JetBrainsMono-Bold, which Pulp does not bundle; Skia falls back to Menlo-Bold
+and CoreText to the bundled Regular, so the full build places CoreText-painted
+glyphs with Menlo's metrics. A lite-vs-full diff on a design panel is a
+regression to chase unless the differing text resolves to a face Pulp does not
+bundle: check `resolved_face_identity()` on each stack against the capture's
+`lineBoxBasis.resolvedFace` before concluding either.
+`pulp-test-face-identity-full` and `-lite` hold the bundled faces' identities
+equal across the two stacks. Text measured without a capture can still differ
+by up to 1 logical px for the system families listed above.
+
+## Font smoothing is per draw, and the preblend is per surface
+
+`-webkit-font-smoothing: antialiased` is two settings, owned by two layers.
+Glyph hinting is per draw: `Canvas::set_font_smoothing(antialiased)` makes
+SkiaCanvas shape and measure with hinting off on both text paths, SkParagraph
+and glyph fallback. The canvas keeps the last value, so a caller that sets it
+resets it; Label does this around its own paint. The contrast and gamma
+preblend is a property of the surface (`TextRasterPolicy`,
+`pulp/canvas/text_raster_policy.hpp`). Only both together reproduce
+Chromium's antialiased glyphs. Hinting off on a `legacy` surface still paints
+heavy, and a `chromium` surface with hinting on is not exact either. When an
+imported label's ink is off by about a fifth, check its `font_smoothing`
+attribute and the surface's policy before you look at weight or face.
 
 ## A Label with element children does not paint at its own origin
 
@@ -159,6 +318,37 @@ line on the captured box` in `test/test_widgets_label.cpp`.
 
 ## Gotchas
 
+- **On Apple the CoreGraphics canvas paints through a CoreText registry, not
+  CTFontCreateWithName.** CoreText answers `CTFontCreateWithName("Inter")` with
+  Helvetica, because Inter (Pulp's default UI family) is bundled, not
+  installed. So an AutoUi editor measured Inter (through Skia) and painted
+  Helvetica, and without Skia it was not measured at all (0.85 em / 0.6 em
+  guesses), putting labels 2-4 pt high. `core/canvas/platform/mac/coretext_text.mm`
+  holds the bundled fonts and every `register_font()` face; the CG canvas
+  paints through it and TextShaper measures through it when Skia is absent,
+  with Skia's CoreText metric definitions (bounding-box extents). The faces live
+  in Pulp's own table, never `CTFontManagerRegisterGraphicsFont`, so a plug-in
+  cannot add fonts to its host. What holds it: the PulpGain editor renders
+  pixel-identically with and without Skia; `test_coretext_text.cpp` pins the
+  Skia and CoreText metrics to within 0.01; and the AutoUi Skia-vs-CoreGraphics
+  case in `test_auto_ui.cpp` compares every label's ink box. The two rasterizers
+  still differ by about one device pixel vertically (baseline rounding), which
+  is not a measurement drift.
+
+- **`SkiaCanvas::fill_text` must land the baseline exactly on `y`, and
+  SkParagraph rounds it.** SkParagraph draws a line's glyphs `round(ascent)`
+  below the paragraph's top, regardless of `ParagraphStyle`'s rounding hack,
+  while `getAlphabeticBaseline()` reports the unrounded ascent. Painting the
+  top at `y - getAlphabeticBaseline()` therefore put every fillText up to half
+  a unit off `y` — low when the ascent rounds up, high when it rounds down —
+  so a correct `baseline_y` from Label still painted a device pixel off for
+  some face/size pairs and not others. `make_paragraph` returns the rounded
+  value; `test_canvas_fonts.cpp` "fill_text places the alphabetic baseline at
+  y" pins both directions. When a baseline looks off by a pixel, sweep the
+  label's top in 1/16 px steps and read where the glyph rows switch: a switch
+  that is not at the half-pixel is an offset between the requested and drawn
+  baseline, not a metrics bug.
+
 - **`white-space` is inherited, and wrapping is `soft_wraps()`, not
   `multi_line()`.** The React and DOM importers stamp `white-space: normal` on
   every text element they create, so `multi_line()` is true for nearly every
@@ -227,6 +417,16 @@ line on the captured box` in `test/test_widgets_label.cpp`.
   layout is self-consistent and still paints text off-centre, and the inspector's
   caret and selection band drift off the glyphs they are supposed to sit on.
 
+- **`painted_text_extents().ink` is read from pixels, not derived.** Paint
+  centres a line block taller than its box over it, so a wrapped readout in a
+  short box inks above its top; a captured layout draws Chromium's line boxes
+  rather than a native re-shape; and glyphs overhang their advance. Each of
+  those is a placement rule of `paint_text_()`, so with Skia the extents paint
+  the text once into a scratch raster and read back the touched pixels,
+  restoring the selection geometry and line-break counters paint records.
+  `width`, `height` and `line_count` follow the captured line boxes when the
+  captured layout is usable. Do not re-derive the ink from line heights: that
+  is the drift this replaced, and it reported 0 for every ink above the box.
 - **`TextShaper::prepare()` is not cheap on a warm cache — do not call it from a
   measurement path more than once.** The name suggests a lookup, but every call
   re-validates the UTF-8, re-allocates, and re-segments the string, taking a
@@ -286,6 +486,39 @@ line on the captured box` in `test/test_widgets_label.cpp`.
   max-content makes Yoga reserve the full string length as *width* and starves
   every sibling in the row. Check `text_direction_` before returning an advance
   from any width path.
+
+- **SkParagraph's `LineMetrics::fHeight` is ONE line's height, whatever
+  `Metrics.h` says.** The header documents it as the paragraph height through
+  the current line; `TextLine::getMetrics` assigns the line's own advance.
+  Reading it as a running total made every equal-height line after the first
+  contribute nothing, and a later fallback-face line (Thai then CJK, both 22px
+  at 16px) lose its descent. `paragraph_text_extents()` holds the max-over-lines
+  rule as a pure function; the `[skia]` control in `test_text_shaper.cpp` pins
+  the library's per-line semantics so a Skia bump that changes them fails
+  there, not in a layout. An all-Latin multi-line test cannot see this bug:
+  equal lines give the same max under both readings.
+
+- **A text write into a pinned captured box must not dirty layout.** The
+  materializer passes `wrap_on_cache_miss` for every non-nowrap single-line
+  capture, so `captured_wrap_fallback()` is true on most imported text, and
+  that alone used to send every `set_text` through `invalidate_layout()`. On the
+  example instrument and MIDI-effect panels, 34 of 44 and 59 of 68 slot writes
+  cost a full Yoga pass on each frame. `Label::set_text` now requests paint only
+  when width and height are both fixed, the Label is not a baseline
+  participant, has no children and no text slot of its own, and either holds
+  captured line boxes or changes between two non-empty copies. "Fixed" is what
+  `yoga_layout()` hands Yoga as a number: a px size through `preferred_*`
+  (a px `dim_*` alone is never applied), a viewport size, or a percent whose
+  every ancestor up to the root fixes that axis. A percent under an auto-sized
+  parent is not fixed. Without captured boxes, a centred lone Label gets an
+  anonymous text slot from layout that is sized from its copy, so new copy
+  moves layout output inside a pinned box. The older single-line fast path
+  skipped that layout and painted into the stale slot (72 px wide for a
+  277 px string). Any Label with `has_own_text_box()` now lays out on a text
+  write. The benchmark's
+  reported `layout_passes` cannot see any of this, because its step and
+  `render_frame` lay out unconditionally. Count `tree_layout_generation()`
+  changes per write instead.
 
 ## Selection geometry is recorded at PAINT, and only paint can record it
 
@@ -366,6 +599,53 @@ reason. The two must agree: `pulp-test-selectable-text` walks the whole run
 asserting `selectable_index_at_point()` and `char_index_at_point()` return the
 same byte at every x. If you touch either hit-test, that is the test that
 notices.
+
+## SkiaCanvas paragraphs are cached, and the paint is not in the key
+
+`SkiaCanvas` text that goes through SkParagraph (`fill_text`, `stroke_text`,
+`measure_text`, `measure_text_full`, `text_x_for_byte`) looks its laid-out
+paragraph up in the process-wide `ParagraphCache`
+(`pulp/canvas/paragraph_cache.hpp`). It has to be process-wide: hosts build a
+new `SkiaCanvas` every frame, so a per-canvas cache never hits.
+
+- **Anything `build_paragraph` reads must be in `ParagraphKey`.** Adding an
+  input to the paragraph build without adding it to the key paints a stale
+  layout for every run that differed only in that input, and nothing fails
+  unless a test draws two runs that differ in exactly that input. The variant
+  cases in `test_paragraph_cache.cpp` do that per field; add one with the
+  field. Wrap width, text-align and line height are deliberately absent: the
+  paragraph is laid out at infinite width, left-aligned, and the caller aligns
+  the run.
+- **Key on the resolved family stack, not the CSS string.** Generic keywords
+  map to platform families through state that does not bump
+  `font_registration_generation()` (the test-only generic override), so the
+  same CSS string can resolve differently within one process.
+- **The generation is not redundant with the primary typeface.** A
+  registration can change only a fallback entry in the stack (a glyph the
+  primary lacks), leaving the primary face and every other key input equal.
+- **Never update a cached paragraph's foreground paint.**
+  `Paragraph::updateForegroundPaint` rewrites the text styles but not the
+  text-blob records `TextLine` fills on the first paint, which carry the paint
+  they were built with, so a second colour silently paints in the first. The
+  cache builds paragraphs with no foreground paint and draws them through a
+  `ParagraphPainter` that applies the caller's paint to each glyph run.
+- **Every use holds the entry's mutex** (`ParagraphUse`): SkParagraph mutates
+  itself on first paint and in queries such as `getRectsForRange`. Never hold
+  two uses at once; the same key twice on one thread waits on itself.
+- **Key floats must be canonical.** The key compares floats by value and
+  hashes them by bits, so a NaN letter spacing (script can send one through
+  `setTextRuns`) never found its own entry, piled one in per paint, and then
+  crashed eviction; `-0` and `+0` hashed apart. `make_paragraph` replaces
+  non-finite size and spacing and folds `-0` to `+0` before building the key.
+- **Eviction is a segmented LRU on purpose.** A meter readout is a new string
+  every frame; with plain LRU it flushes every label that is not repainted
+  each frame. New entries start on probation and are protected on a second
+  lookup. Admitting only on a second miss instead would shape every stable
+  label twice and fail the benchmark's zero-build steady-state frame.
+- **Unspaced text the primary face cannot cover never reaches SkParagraph.**
+  `fill_text` sends it to the per-run SkShaper fallback, so a cache test that
+  draws a missing glyph must add letter spacing (or a feature) to exercise the
+  cache at all.
 
 ## How to verify a change here
 

@@ -25,6 +25,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #ifdef PULP_HAS_SKIA
@@ -35,6 +36,66 @@ class SkTypeface;
 #endif
 
 namespace pulp::canvas {
+
+/// The platform family a CSS generic family keyword stands for, matching the
+/// browser's defaults on this platform, or empty when `css_family` is not a
+/// generic keyword or the platform's font matcher resolves it on its own.
+///
+/// A generic keyword (`system-ui`, `sans-serif`, `monospace`, ...) is not a
+/// family name, and the macOS font manager matches none of them: asked for
+/// `system-ui` it returns nothing, so text falls through to whatever default
+/// the caller has, which is a different face from the one the browser drew.
+/// Pass the trimmed list entry WITH any quotes still on it: a quoted name is a
+/// family literally called that, never the keyword.
+std::string platform_family_for_css_generic(const std::string& css_family);
+
+/// Map the generic `keyword` to `family` instead of the platform default, or
+/// restore the built-in mapping when `family` is empty. Process-wide. It exists
+/// so a test can name a generic whose platform family the host lacks, which a
+/// stock install never does; call FontResolver::clear_cache() after it.
+void set_css_generic_family_override(const std::string& keyword, const std::string& family);
+
+/// One entry of a CSS `font-family` list, as written.
+struct CssFontFamily {
+    std::string name;    ///< without surrounding whitespace or quotes
+    bool quoted = false; ///< written as a string: a family literally named
+                         ///< `name`, never a generic keyword
+};
+
+/// Parse one `font-family` list entry: trim whitespace, then strip one
+/// matching pair of single or double quotes and record that there was one.
+CssFontFamily parse_css_font_family(std::string_view entry);
+
+/// Split a `font-family` list on commas into trimmed entries, each KEPT with
+/// its quotes, dropping empty ones. Quotes stay on so every consumer applies
+/// the same rule: an unquoted generic keyword names a platform family, a
+/// quoted one is a family of that name. Hand the entries to
+/// `FontOptions::family_stack` or to `platform_family_for_css_family`.
+std::vector<std::string> split_css_font_family_list(std::string_view list);
+
+/// Whether SkParagraph may fake the bold or oblique the matched face lacks,
+/// for text in `css_font_family` at `weight` and `slant`. SkParagraph judges
+/// on the face file's own weight; Chromium judges a page font on its
+/// @font-face's declared weight range, so a face declared `400 700` is never
+/// emboldened at 700 even when only a Regular file backs it. The first family
+/// with declared ranges decides; italic keeps the default, which the same
+/// switch covers. Every paragraph built for the same text must ask this:
+/// SkParagraph's shaping cache does not key on the switch, so a measurement
+/// paragraph left at the default hands its emboldened runs to the painter.
+bool paragraph_fakes_missing_font_styles(std::string_view css_font_family, int weight, int slant);
+
+/// The family name to ask a font matcher for, for one list entry (quotes
+/// allowed): the platform family an unquoted generic keyword stands for,
+/// otherwise the entry's name without its quotes.
+std::string platform_family_for_css_family(std::string_view entry);
+
+/// Whether a face that reports `actual_family` is the family a matcher was
+/// asked for as `platform_family`, rather than the default face a matcher
+/// hands back on a miss. Names match case-insensitively when either contains
+/// the other ("Helvetica" / "Helvetica Neue"). A hidden system family (a
+/// leading '.') answers with another hidden name (".AppleSystemUIFont" reports
+/// ".SF NS"), so it matches any hidden family.
+bool platform_face_is_family(std::string_view platform_family, std::string_view actual_family);
 
 #ifdef PULP_HAS_SKIA
 
@@ -143,9 +204,11 @@ struct SynthesisTrace {
 /// those break text differently. The PostScript name identifies the instance.
 ///
 /// Takes the raw CSS `font-family` value — the comma list is walked here so a
-/// caller does not need its own copy of that parsing. Returns empty when
-/// nothing resolves or the build has no Skia, and an empty answer must be read
-/// as "unknown", never as "matches".
+/// caller does not need its own copy of that parsing. Without Skia (and in
+/// the lite editor stack) on Apple platforms it answers with the face CoreText
+/// resolves, which is the face the CoreGraphics canvas paints. Returns empty
+/// when nothing resolves or the platform has neither, and an empty answer must
+/// be read as "unknown", never as "matches".
 std::string resolved_face_identity(const std::string& css_font_family,
                                    float weight,
                                    FontSlant slant = FontSlant::Normal);

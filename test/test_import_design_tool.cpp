@@ -18,9 +18,11 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <optional>
 #include <regex>
 #include <sstream>
+#include <set>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -443,6 +445,30 @@ TEST_CASE("pulp-import-design reports help and argument diagnostics",
                     "--fit-authored-frame applies only to browser-solved runnable HTML") !=
                 std::string::npos);
     }
+}
+
+TEST_CASE("pulp-import-design refuses unconverted Illustrator and PDF sources",
+          "[cli][import-design][tool][preconverted-svg][fail-closed]") {
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
+
+    for (const std::string source : {"illustrator", "ai", "pdf"}) {
+        const auto result = run_import_design({"--from", source});
+        REQUIRE_FALSE(result.timed_out);
+        REQUIRE(result.exit_code == 2);
+        CHECK(result.stderr_output.find("Error: source '" + source + "' is unsupported") !=
+              std::string::npos);
+        CHECK(result.stderr_output.find(
+                  "convert to preconverted-svg with a validated control-map sidecar") !=
+              std::string::npos);
+    }
+
+    const auto generation = run_import_design({"--from", "preconverted-svg"});
+    REQUIRE_FALSE(generation.timed_out);
+    REQUIRE(generation.exit_code == 2);
+    CHECK(generation.stderr_output.find("--from preconverted-svg requires --validate-only") !=
+          std::string::npos);
 }
 
 TEST_CASE("pulp-import-design validates phase 0.5 import vocabulary",
@@ -3486,6 +3512,116 @@ TEST_CASE("captured states that cannot render fail loudly instead of dropping",
     CHECK_FALSE(fs::exists(out));
 }
 
+namespace {
+
+// Two knobs in one figma-plugin frame, with the Figma node ids given.
+std::string two_knob_envelope(const std::string& first_id, const std::string& second_id) {
+    const auto knob = [](const std::string& id, const std::string& name,
+                         const std::string& binding) {
+        return R"({"type": "frame", "id": ")" + id + R"(", "name": ")" + name +
+               R"(", "audio_widget": "knob", "attributes": {"binding": ")" + binding +
+               R"("}, "style": {"width": 80, "height": 80}})";
+    };
+    return R"({"format_version": "2026.05-figma-plugin-v1", "root": {"type": "frame", )"
+           R"("id": "1:1", "name": "Panel", "style": {"width": 200, "height": 100}, )"
+           R"("children": [)" +
+           knob(first_id, "Cutoff", "filter.cutoff_hz") + ", " +
+           knob(second_id, "Drive", "filter.drive") + "]}}";
+}
+
+} // namespace
+
+TEST_CASE("a repeated stable anchor fails the import and names both nodes",
+          "[cli][import-design][tool][identity]") {
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
+    TempDir tmp("pulp-duplicate-anchor");
+
+    SECTION("two nodes with one Figma id are refused before anything is written") {
+        write_text(tmp.path / "dup.pulp.json", two_knob_envelope("1:2", "1:2"));
+        for (const char* emit : {"js", "ir-json", "cpp", "swiftui"}) {
+            INFO("--emit " << emit);
+            const auto out = tmp.path / (std::string("out-") + emit);
+            std::vector<std::string> args = {
+                "--from", "figma-plugin", "--file",   (tmp.path / "dup.pulp.json").string(),
+                "--emit", emit,           "--output", out.string()};
+            if (std::string(emit) != "js") {
+                args.push_back("--mode");
+                args.push_back("baked");
+            }
+            auto r = run_import_design(args, 60000);
+            INFO("stderr: " << r.stderr_output);
+            REQUIRE_FALSE(r.timed_out);
+            CHECK(r.exit_code == 2);
+            CHECK(
+                r.stderr_output.find("1 node repeats an earlier node's explicit source identity") !=
+                std::string::npos);
+            CHECK(r.stderr_output.find("'Drive' at $/children[1] has anchor "
+                                       "'figma-plugin:1:2', already used by 'Cutoff' at "
+                                       "$/children[0]") != std::string::npos);
+            CHECK_FALSE(fs::exists(out));
+        }
+    }
+
+    SECTION("the same panel with distinct ids imports") {
+        write_text(tmp.path / "ok.pulp.json", two_knob_envelope("1:2", "1:3"));
+        const auto out = tmp.path / "ok.cpp";
+        auto r = run_import_design({"--from", "figma-plugin", "--file",
+                                    (tmp.path / "ok.pulp.json").string(), "--mode", "baked",
+                                    "--emit", "cpp", "--output", out.string()},
+                                   60000);
+        INFO("stderr: " << r.stderr_output);
+        REQUIRE_FALSE(r.timed_out);
+        CHECK(r.exit_code == 0);
+        CHECK(r.stderr_output.find("stable anchor") == std::string::npos);
+        CHECK(fs::exists(out));
+    }
+}
+
+TEST_CASE("repeated content-derived anchors are disambiguated rather than refused",
+          "[cli][import-design][tool][identity]") {
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
+    // The v0 audio panel holds two cards, each a caption and an unlabelled
+    // range input. A content hash does not include the parent, so the two
+    // inputs (and their two value readouts) hashed to one anchor each. That is
+    // not a source defect, so the import succeeds with every anchor unique.
+    const std::string fixture = PULP_V0_AUDIO_PANEL_FIXTURE;
+    TempDir tmp("pulp-derived-anchor-collision");
+    const auto ir_out = tmp.path / "panel.ir.json";
+    auto r = run_import_design({"--from", "v0", "--file", fixture, "--mode", "baked", "--emit",
+                                "ir-json", "--output", ir_out.string()},
+                               60000);
+    INFO("stderr: " << r.stderr_output);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    CHECK(r.stderr_output.find("duplicate stable anchor") == std::string::npos);
+    CHECK(r.stderr_output.find("explicit source identity") == std::string::npos);
+
+    std::ifstream in(ir_out);
+    const std::string json((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    std::vector<std::string> anchors;
+    const std::string key = "\"stable_anchor_id\":";
+    for (auto at = json.find(key); at != std::string::npos; at = json.find(key, at + 1)) {
+        const auto open = json.find('"', at + key.size());
+        const auto close = json.find('"', open + 1);
+        anchors.push_back(json.substr(open + 1, close - open - 1));
+    }
+    REQUIRE(anchors.size() > 10);
+    CHECK(std::set<std::string>(anchors.begin(), anchors.end()).size() == anchors.size());
+
+    const auto cpp_out = tmp.path / "panel.cpp";
+    auto cpp = run_import_design({"--from", "v0", "--file", fixture, "--mode", "baked", "--emit",
+                                  "cpp", "--output", cpp_out.string()},
+                                 60000);
+    INFO("cpp stderr: " << cpp.stderr_output);
+    REQUIRE_FALSE(cpp.timed_out);
+    CHECK(cpp.exit_code == 0);
+    CHECK(fs::exists(cpp_out));
+}
+
 TEST_CASE("repeated --frame on a source that resolves one frame is rejected",
           "[cli][import-design][tool][multi-state]") {
     if (!binary_exists()) {
@@ -3670,6 +3806,49 @@ TEST_CASE("generic browser HTML supplies the reference for --fail-below",
     CHECK(fs::exists(output));
     CHECK(r.stderr_output.find("--fail-below requires --reference") ==
           std::string::npos);
+#endif
+}
+
+TEST_CASE("a plain ir-json import keeps the fonts a page serves from Blob URLs",
+          "[import][browser][fonts]") {
+    // The materialized document is skipped for an ir-json import, so a page's
+    // Blob URL fonts have to reach the IR through the faces read in the page.
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
+#ifndef PULP_IMPORT_DESIGN_TEST_HAS_SKIA
+    SKIP("Skia image compositing is unavailable in this build");
+#else
+    TempDir tmp("pulp-import-design-blob-fonts");
+    fs::copy_file(PULP_TEST_JOST_REGULAR_TTF, tmp.path / "face.ttf");
+    const auto input = tmp.path / "page.html";
+    // A loader in the shape of a Claude standalone export: it serves the font
+    // from a Blob URL and installs a DOMParser document that names it.
+    write_text(input, R"HTML(<!DOCTYPE html><html><body><script>
+      (async () => {
+        const bytes = await (await fetch("face.ttf")).arrayBuffer();
+        const url = URL.createObjectURL(new Blob([bytes], { type: "font/ttf" }));
+        const html = "<html><head><style>@font-face{font-family:'Blob Face';" +
+          "src:url(" + url + ") format('truetype');font-weight:400}" +
+          "html,body{margin:0;background:#fff}body{width:320px;height:120px;" +
+          "font:24px 'Blob Face'}</style></head><body><p>Blob font</p></body></html>";
+        const parsed = new DOMParser().parseFromString(html, "text/html");
+        document.documentElement.replaceWith(parsed.documentElement);
+      })();
+    </script></body></html>)HTML");
+    const auto output = tmp.path / "design.json";
+
+    const auto r =
+        run_import_design({"--from", "html", "--file", input.string(), "--emit", "ir-json",
+                           "--render-size", "320x120", "--output", output.string()},
+                          120000);
+    REQUIRE_FALSE(r.timed_out);
+    INFO(r.stdout_output << "\n" << r.stderr_output);
+    REQUIRE(r.exit_code == 0);
+    const auto design = read_text(output);
+    CHECK(design.find("\"fontFamilyAssets\"") != std::string::npos);
+    CHECK(design.find("Blob Face") != std::string::npos);
+    CHECK(design.find("pulp-materialized-asset-") != std::string::npos);
 #endif
 }
 

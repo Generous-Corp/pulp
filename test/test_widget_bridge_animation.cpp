@@ -3,6 +3,7 @@
 // (Element.animate(...) / KeyframeEffect), motion provenance, and the
 // pulp-motion-bench harness output.
 
+#include "../core/view/src/widget_bridge/bridge_dispatch.hpp"
 #include "support/unique_temp_dir.hpp"
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -765,6 +766,327 @@ TEST_CASE("WidgetBridge frame and timer callbacks run unbatched without a hook",
     CHECK(engine.evaluate("timer_ran").getWithDefault<int>(-1) == 1);
 }
 
+// A stand-in for React's batchedUpdates that counts how many batches opened
+// and how deep inside one each listener ran. A native event whose handlers
+// make several state updates must run them inside exactly one batch.
+static constexpr const char* kCountingBatchHook = R"(
+    var batch_depth = 0;
+    var batches = 0;
+    globalThis.__pulpBatchUpdates__ = function (fn, arg) {
+        batch_depth += 1; batches += 1;
+        try { return fn(arg); } finally { batch_depth -= 1; }
+    };
+)";
+
+TEST_CASE("WidgetBridge runs a native widget event inside one UI batch",
+          "[view][bridge][event-batch]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(kCountingBatchHook);
+    bridge.load_script(R"(
+        var seen = [];
+        on('w1', 'click', function () {
+            seen.push(batch_depth + '/' + __pulpDispatchDepth__);
+            if (seen.length === 1) __dispatch__('w1', 'click', {});
+        });
+    )");
+
+    dispatch_event(engine, "w1", "click", "{}");
+
+    // The handler ran inside the hook, and the dispatch it made from inside
+    // itself joined that batch (dispatch depth 2) instead of opening another.
+    CHECK(engine.evaluate("seen.join(',')").toString() == "1/1,1/2");
+    CHECK(engine.evaluate("batches").getWithDefault<int>(-1) == 1);
+    CHECK(engine.evaluate("__pulpDispatchDepth__").getWithDefault<int>(-1) == 0);
+}
+
+TEST_CASE("WidgetBridge reports a handler error even without a dispatch hook",
+          "[view][bridge][event-batch]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // No __dispatchError__ is installed, the case that used to drop the error.
+    bridge.load_script(R"(
+        on('w1', 'click', function () { throw new RangeError('handler boom'); });
+    )");
+    REQUIRE(engine.evaluate("typeof __dispatchError__").toString() == "undefined");
+
+    dispatch_event(engine, "w1", "click", "{}");
+
+    CHECK(engine.evaluate("__pulpDispatchErrorCount__").getWithDefault<int>(-1) == 1);
+    // The report keeps the error's own message, not only its stack frames.
+    CHECK(engine.evaluate("__pulpLastDispatchError__.indexOf('RangeError: handler boom') === 0")
+              .getWithDefault<bool>(false));
+
+    // With a hook installed, the hook receives the same text.
+    bridge.load_script(R"(
+        var hooked = '';
+        globalThis.__dispatchError__ = function (id, ev, text) { hooked = id + '|' + ev + '|' + text; };
+    )");
+    dispatch_event(engine, "w1", "click", "{}");
+    CHECK(engine.evaluate("__pulpDispatchErrorCount__").getWithDefault<int>(-1) == 2);
+    CHECK(engine.evaluate("hooked.indexOf('w1|click|RangeError: handler boom') === 0")
+              .getWithDefault<bool>(false));
+}
+
+TEST_CASE("WidgetBridge reports an after-dispatch hook error even without a dispatch hook",
+          "[view][bridge][event-batch]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // The UI framework's post-commit hook throws, and no __dispatchError__ is
+    // installed: the error must still be counted and keep its message.
+    bridge.load_script(R"(
+        on('w1', 'click', function () {});
+        globalThis.__pulpAfterDiscreteDispatch__ = function () { throw new RangeError('hook boom'); };
+    )");
+    REQUIRE(engine.evaluate("typeof __dispatchError__").toString() == "undefined");
+
+    dispatch_event(engine, "w1", "click", "{}");
+
+    CHECK(engine.evaluate("__pulpDispatchErrorCount__").getWithDefault<int>(-1) == 1);
+    CHECK(engine.evaluate("__pulpLastDispatchError__.indexOf('RangeError: hook boom') === 0")
+              .getWithDefault<bool>(false));
+}
+
+TEST_CASE("WidgetBridge reports a thrown value that has no toString",
+          "[view][bridge][event-batch]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        on('w1', 'click', function () { throw Object.create(null); });
+    )");
+    dispatch_event(engine, "w1", "click", "{}");
+
+    // String() on a null-prototype object throws; the report must not.
+    CHECK(engine.evaluate("__pulpDispatchErrorCount__").getWithDefault<int>(-1) == 1);
+    CHECK(engine.evaluate("__pulpLastDispatchError__").toString() == "[object Object]");
+}
+
+TEST_CASE("WidgetBridge prints a repeating handler error once per hundred repeats",
+          "[view][bridge][event-batch]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var printed = [];
+        globalThis.console = globalThis.console || {};
+        console.error = function (text) { printed.push(String(text)); };
+        on('w1', 'pointermove', function () { throw new Error('move boom'); });
+        on('w2', 'pointermove', function () { throw new Error('other boom'); });
+    )");
+    for (int i = 0; i < 250; ++i)
+        dispatch_event(engine, "w1", "pointermove", "{}");
+
+    // Every error is counted; the console sees the first, then every 100th
+    // repeat with how many it stood for.
+    CHECK(engine.evaluate("__pulpDispatchErrorCount__").getWithDefault<int>(-1) == 250);
+    CHECK(engine.evaluate("printed.length").getWithDefault<int>(-1) == 3);
+    CHECK(engine.evaluate("printed[2].indexOf('(repeated 200 more times)') > 0")
+              .getWithDefault<bool>(false));
+
+    // A different error prints at once.
+    dispatch_event(engine, "w2", "pointermove", "{}");
+    CHECK(engine.evaluate("printed.length").getWithDefault<int>(-1) == 4);
+    CHECK(engine.evaluate("printed[3].indexOf('other boom') > 0").getWithDefault<bool>(false));
+}
+
+TEST_CASE("WidgetBridge runs a nested dispatch without another batch frame",
+          "[view][bridge][event-batch]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(kCountingBatchHook);
+    bridge.load_script(R"(
+        var inner_stack = '';
+        on('w1', 'click', function () { __dispatch__('w2', 'click', {}); });
+        on('w2', 'click', function () { inner_stack = new Error('probe').stack; });
+    )");
+
+    dispatch_event(engine, "w1", "click", "{}");
+
+    // Only the outermost dispatch goes through the batch runner; the nested
+    // one joins the open batch directly, so a nested chain stays shallow.
+    CHECK(engine.evaluate("inner_stack.split('__pulpRunDispatchBatch__').length - 1")
+              .getWithDefault<int>(-1) == 1);
+    CHECK(engine.evaluate("batches").getWithDefault<int>(-1) == 1);
+    CHECK(engine.evaluate("__pulpDispatchDepth__").getWithDefault<int>(-1) == 0);
+
+    // A nested dispatch whose own body throws is contained and reported like
+    // the batched path, and the depth unwinds.
+    bridge.load_script(R"(
+        var errors_before = __pulpDispatchErrorCount__;
+        var saved = __pulpDispatchUnbatched__;
+        on('w3', 'click', function () {
+            __pulpDispatchUnbatched__ = function () { throw new Error('body boom'); };
+            try { __dispatch__('w4', 'click', {}); } finally { __pulpDispatchUnbatched__ = saved; }
+            globalThis.after_nested = true;
+        });
+    )");
+    dispatch_event(engine, "w3", "click", "{}");
+    CHECK(engine.evaluate("after_nested === true").getWithDefault<bool>(false));
+    CHECK(engine.evaluate("__pulpDispatchErrorCount__ - errors_before").getWithDefault<int>(-1) ==
+          1);
+    CHECK(engine.evaluate("__pulpLastDispatchError__.indexOf('Error: body boom') === 0")
+              .getWithDefault<bool>(false));
+    CHECK(engine.evaluate("__pulpDispatchDepth__").getWithDefault<int>(-1) == 0);
+}
+
+TEST_CASE("WidgetBridge keeps the propagation level a batched handler returns",
+          "[view][bridge][event-batch]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(kCountingBatchHook);
+    bridge.load_script(R"(
+        var runs = 0;
+        on('w1', 'pointerdown', function () {
+            runs += 1;
+            return { __pulpEventPropagation: 1 };
+        });
+    )");
+
+    // stopPropagation's level comes back out of the batch.
+    CHECK(engine.evaluate("__dispatchCallbackOnly__('w1', 'pointerdown', {})")
+              .getWithDefault<int>(-1) == 1);
+    CHECK(engine.evaluate("batches").getWithDefault<int>(-1) == 1);
+
+    // Through the C++ entry the level is remembered against the dispatch
+    // token, so a second delivery of the same native event reports it without
+    // running the handler again.
+    const auto alive = std::make_shared<BridgeCallbackState>(nullptr);
+    dispatch_callback_only(alive, &engine, "w1", "pointerdown", "{__pulpDispatchToken: 7}");
+    CHECK(engine.evaluate("runs").getWithDefault<int>(-1) == 2);
+    CHECK(engine.evaluate("batches").getWithDefault<int>(-1) == 2);
+    CHECK(engine
+              .evaluate("__dispatchCallbackOnly__('w1', 'pointerdown', "
+                        "{__pulpDispatchToken: 7})")
+              .getWithDefault<int>(-1) == 1);
+    CHECK(engine.evaluate("runs").getWithDefault<int>(-1) == 2);
+}
+
+TEST_CASE("WidgetBridge fans window and document listeners out inside the event batch",
+          "[view][bridge][event-batch]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(kCountingBatchHook);
+    bridge.load_script(R"(
+        var fanout = [];
+        window.addEventListener('keydown', function () {
+            fanout.push('window:' + batch_depth + '/' + __pulpDispatchDepth__);
+        });
+        document.addEventListener('mousedown', function () {
+            fanout.push('document:' + batch_depth + '/' + __pulpDispatchDepth__);
+        });
+    )");
+
+    dispatch_event(engine, "__global__", "keydown", "{}");
+    dispatch_event(engine, "document", "mousedown", "{}");
+
+    CHECK(engine.evaluate("fanout.join(',')").toString() == "window:1/1,document:1/1");
+    CHECK(engine.evaluate("batches").getWithDefault<int>(-1) == 2);
+}
+
+TEST_CASE("WidgetBridge runs the after-dispatch hook once the outermost batch returns",
+          "[view][bridge][event-batch]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(kCountingBatchHook);
+    bridge.load_script(R"(
+        var after = [];
+        globalThis.__pulpAfterDiscreteDispatch__ = function (id, eventName) {
+            after.push(id + ':' + eventName + ':' + batch_depth + '/' + __pulpDispatchDepth__);
+        };
+        on('w1', 'click', function () {
+            if (after.length === 0) __dispatch__('w1', 'click', {});
+        });
+    )");
+
+    dispatch_event(engine, "w1", "click", "{}");
+
+    // Once for the outer dispatch, after its batch closed; the dispatch made
+    // from inside the handler did not run it.
+    CHECK(engine.evaluate("after.join(',')").toString() == "w1:click:0/0");
+    CHECK(engine.evaluate("batches").getWithDefault<int>(-1) == 1);
+}
+
+TEST_CASE("WidgetBridge after-dispatch value write does not dispatch the change again",
+          "[view][bridge][event-batch]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createKnob('k');
+        setValue('k', 0.5);
+        var changes = 0;
+        on('k', 'change', function () { changes += 1; });
+        globalThis.__pulpAfterDiscreteDispatch__ = function (id) { setValue(id, 0.5); };
+    )");
+    auto* knob = dynamic_cast<Knob*>(bridge.widget("k"));
+    REQUIRE(knob != nullptr);
+
+    // A user edit: the knob moves and reports it, and the hook puts the
+    // committed value back.
+    knob->set_value(0.8f);
+    REQUIRE(knob->on_change);
+    knob->on_change(0.8f);
+
+    CHECK(knob->value() == Catch::Approx(0.5f));
+    CHECK(engine.evaluate("changes").getWithDefault<int>(-1) == 1);
+}
+
+TEST_CASE("WidgetBridge native widget events run unbatched without a hook",
+          "[view][bridge][event-batch]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var clicks = 0;
+        on('w1', 'click', function () { clicks += 1; });
+    )");
+    dispatch_event(engine, "w1", "click", "{}");
+
+    CHECK(engine.evaluate("clicks").getWithDefault<int>(-1) == 1);
+    CHECK(engine.evaluate("__pulpDispatchDepth__").getWithDefault<int>(-1) == 0);
+}
+
 TEST_CASE("WidgetBridge poll_async_results alone does NOT fire setTimeout (regression guard)",
           "[view][bridge][issue-1412]") {
     // This test is the inverse of the fix: it asserts the historical
@@ -1092,6 +1414,9 @@ TEST_CASE("WidgetBridge loadAssetSync covers embedded file and missing records",
     root.set_bounds({0, 0, 400, 300});
     StateStore store;
     WidgetBridge bridge(engine, root, store);
+    // file:// reads with no asset root are the app-side raw-path posture;
+    // the default refuses them (see test_widget_bridge_capabilities.cpp).
+    bridge.set_allow_unreviewed_file_paths(true);
 
     static const char kEmbeddedJson[] = "{\"label\":\"pulp\"}";
     AssetManager::instance().register_embedded(
@@ -1146,6 +1471,7 @@ TEST_CASE("WidgetBridge loadAssetSync covers text mime variants and path normali
     root.set_bounds({0, 0, 400, 300});
     StateStore store;
     WidgetBridge bridge(engine, root, store);
+    bridge.set_allow_unreviewed_file_paths(true); // raw file:// read below
 
     static const char kEmbeddedCss[] = "body { color: red; }\n";
     static const char kEmbeddedSvg[] = "<svg><path d='M0 0h1v1z'/></svg>";
@@ -1425,6 +1751,13 @@ TEST_CASE("WidgetBridge loadFont reports existing and missing paths",
 
     const auto existing = js_single_quoted(font_path.string());
     const auto missing = js_single_quoted((font_path.string() + ".missing"));
+    // An absolute path outside every configured root is refused by default,
+    // so the probe reports "missing" for a file that exists: the existence
+    // oracle is closed unless the host opts into unreviewed paths.
+    bridge.load_script("var font_contained = loadFont('" + existing + "');");
+    REQUIRE_FALSE(engine.evaluate("font_contained").getWithDefault<bool>(true));
+
+    bridge.set_allow_unreviewed_file_paths(true);
     bridge.load_script(
         "var font_existing = loadFont('" + existing + "');"
         "var font_missing = loadFont('" + missing + "');"

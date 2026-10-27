@@ -98,3 +98,17 @@ if(PULP_BUILD_TESTS OR PULP_HAS_SKIA)
             LABELS "reload;example" TIMEOUT 60)
     endif()
 endif()
+
+# Linux: the reload cycle through the real HotReloadMorph_CLAP (the fixture in
+# test/fixtures/linux_reload_host runs the same check with examples off).
+if(PULP_BUILD_TESTS AND TARGET pulp-test-reload-cycle-host AND TARGET HotReloadMorph_CLAP)
+    add_test(NAME hot-reload-morph-clap-linux-reload-cycle
+        COMMAND pulp-test-reload-cycle-host
+            $<TARGET_FILE:HotReloadMorph_CLAP>
+            $<TARGET_FILE:hot-reload-morph-logic-warm>
+            $<TARGET_FILE:hot-reload-morph-logic-harsh>
+            ${CMAKE_CURRENT_BINARY_DIR}/linux-reload-cycle)
+    set_tests_properties(hot-reload-morph-clap-linux-reload-cycle PROPERTIES
+        LABELS "reload;example;linux"
+        TIMEOUT 120)
+endif()

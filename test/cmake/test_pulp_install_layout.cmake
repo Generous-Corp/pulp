@@ -78,6 +78,50 @@ if(NOT _header_parity_rc EQUAL 0)
         "${_header_parity_stdout}${_header_parity_stderr}")
 endif()
 
+# `pulp ship` in an SDK consumer project resolves its signing preflight and
+# default entitlements from the selected SDK, so both must be installed
+# byte-identical, and the preflight must stay executable.
+foreach(_ship_pair IN ITEMS
+        "tools/scripts/ensure_signing_ready.sh|ensure_signing_ready.sh"
+        "ship/templates/entitlements.plist|entitlements.plist")
+    string(REPLACE "|" ";" _ship_pair "${_ship_pair}")
+    list(GET _ship_pair 0 _ship_source_rel)
+    list(GET _ship_pair 1 _ship_installed_name)
+    set(_ship_installed "${_prefix}/share/pulp/ship/${_ship_installed_name}")
+    if(NOT EXISTS "${_ship_installed}")
+        message(FATAL_ERROR
+            "pulp ship support file is missing from the installed SDK:\n"
+            "${_ship_installed}")
+    endif()
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" -E compare_files
+                "${CMAKE_CURRENT_LIST_DIR}/../../${_ship_source_rel}" "${_ship_installed}"
+        RESULT_VARIABLE _ship_compare_rc)
+    if(NOT _ship_compare_rc EQUAL 0)
+        message(FATAL_ERROR
+            "Installed ${_ship_installed_name} differs from ${_ship_source_rel}.")
+    endif()
+endforeach()
+if(NOT WIN32)
+    execute_process(
+        COMMAND test -x "${_prefix}/share/pulp/ship/ensure_signing_ready.sh"
+        RESULT_VARIABLE _ship_script_exec_rc)
+    if(NOT _ship_script_exec_rc EQUAL 0)
+        message(FATAL_ERROR "Installed ensure_signing_ready.sh is not executable.")
+    endif()
+endif()
+
+# Every file under share/pulp reaches each consumer's SDK, so none may
+# name a build host, a local path, a user or a private repository.
+execute_process(
+    COMMAND "${CMAKE_COMMAND}" "-DSCAN_DIR=${_prefix}/share/pulp"
+            -P "${CMAKE_CURRENT_LIST_DIR}/check_no_host_identifiers.cmake"
+    RESULT_VARIABLE _ship_hosts_rc OUTPUT_VARIABLE _ship_hosts_out
+    ERROR_VARIABLE _ship_hosts_err)
+if(NOT _ship_hosts_rc EQUAL 0)
+    message(FATAL_ERROR "${_ship_hosts_out}${_ship_hosts_err}")
+endif()
+
 # Installed CLI/MCP consumers must be able to locate the exact versioned
 # machine contract without a Pulp checkout. Check both presence and bytes so a
 # stale generated copy cannot silently diverge from the implementation corpus.
@@ -421,9 +465,15 @@ string(JSON _provenance_kind ERROR_VARIABLE _provenance_kind_error
     GET "${_installed_provenance_json}" kind)
 string(JSON _provenance_sha ERROR_VARIABLE _provenance_sha_error
     GET "${_installed_provenance_json}" source_git_sha)
+string(JSON _provenance_bridge_exec_type ERROR_VARIABLE _provenance_bridge_exec_error
+    TYPE "${_installed_provenance_json}" bridge_exec)
+# CMake regular expressions have no {n} quantifier ("{40}" matches the literal
+# text), so the 40-hex-digit SHA pattern is spelled out.
+string(REPEAT "[0-9a-f]" 40 _provenance_sha_pattern)
 if(_provenance_schema_error OR NOT _provenance_schema STREQUAL "pulp.sdk-provenance.v1" OR
    _provenance_kind_error OR NOT _provenance_kind STREQUAL "source-install" OR
-   _provenance_sha_error OR NOT _provenance_sha MATCHES "^[0-9a-f]{40}$")
+   _provenance_sha_error OR NOT _provenance_sha MATCHES "^${_provenance_sha_pattern}$" OR
+   _provenance_bridge_exec_error OR NOT _provenance_bridge_exec_type STREQUAL "BOOLEAN")
     message(FATAL_ERROR "Source install provenance is incomplete: ${_installed_provenance_json}")
 endif()
 

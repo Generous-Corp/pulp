@@ -21,9 +21,12 @@ class ControlShippingNativeWorkflowTest(unittest.TestCase):
             "linux-x64",
             "linux-arm64",
             "windows-x64",
+            "windows-arm64",
             "ubuntu-24.04-arm",
             "windows-2022",
+            "windows-11-arm",
             "arm64;x86_64",
+            "'ARM64'",
         ):
             self.assertIn(value, self.workflow)
 
@@ -31,6 +34,18 @@ class ControlShippingNativeWorkflowTest(unittest.TestCase):
             "- leg:", 1
         )[0]
         self.assertIn("report_architectures: 'x86_64-win'", windows_leg)
+
+        windows_arm_leg = self.workflow.split("- leg: windows-arm64", 1)[1].split(
+            "- leg:", 1
+        )[0]
+        self.assertIn("os: windows-11-arm", windows_arm_leg)
+        self.assertIn("cmake_architectures: 'ARM64'", windows_arm_leg)
+        self.assertIn("report_architectures: 'arm64-win'", windows_arm_leg)
+
+        self.assertGreaterEqual(
+            self.workflow.count('if [ -n "${{ matrix.cmake_architectures }}" ]'),
+            2,
+        )
 
     def test_installed_sdk_builds_real_format_targets(self) -> None:
         self.assertIn("tools/validation/sdk-smoke", self.workflow)
@@ -40,6 +55,19 @@ class ControlShippingNativeWorkflowTest(unittest.TestCase):
         self.assertIn("verify_control_shipping_native_evidence.py", self.workflow)
         self.assertNotIn("cmake --build build-sdk --config Release --parallel", self.workflow)
         self.assertNotIn("cmake --build smoke/build --config Release --parallel", self.workflow)
+
+    def test_installed_sdk_carries_the_scanner_and_its_marker_list(self) -> None:
+        # check_control_shipping_artifact.cmake reads the shared forbidden-marker
+        # list through its module from its own directory; an SDK staged without
+        # either fails closed at scan time, so the workflow asserts both at install.
+        for installed in (
+            "check_control_shipping_artifact.cmake",
+            "PulpReleaseArtifactScan.cmake",
+            "release_artifact_forbidden.json",
+        ):
+            self.assertIn(f'test -f "$prefix/lib/cmake/Pulp/{installed}"', self.workflow)
+        self.assertIn("PulpReleaseArtifactScan.cmake", self.scanner)
+        self.assertIn("release_artifact_forbidden.json", self.scanner)
 
     def test_gpu_audio_lifecycle_probe_executes_and_retains_receipt(self) -> None:
         self.assertIn("PulpSDKSmokeGpuAudioLifecycleProbe", self.workflow)

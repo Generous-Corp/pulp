@@ -5,6 +5,7 @@
 #include "harness/rt_allocation_probe.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <pulp/format/processor.hpp>
 #include <pulp/host/baked_graph_processor.hpp>
 #include <pulp/host/graph_serializer.hpp>
 #include <pulp/host/plugin_slot.hpp>
@@ -3224,6 +3225,20 @@ TEST_CASE("SignalGraph ordinary failed live swap invalidates the published snaps
     REQUIRE(graph.prepare(48000.0, 8));
     REQUIRE(graph.set_node_gain(gain, 0.5f));
 
+    // Positive control: the prepared graph is live before the failed swap and
+    // applies the authored gain. This keeps the later silence checks tied to
+    // the ordinary refusal path rather than an accidentally unpublished setup.
+    std::array<float, 8> pre_swap_input{};
+    std::array<float, 8> pre_swap_output{};
+    pre_swap_input.fill(1.0f);
+    const float* pre_swap_input_ptrs[1] = {pre_swap_input.data()};
+    float* pre_swap_output_ptrs[1] = {pre_swap_output.data()};
+    pulp::audio::BufferView<const float> pre_swap_input_view(pre_swap_input_ptrs, 1, 8);
+    pulp::audio::BufferView<float> pre_swap_output_view(pre_swap_output_ptrs, 1, 8);
+    graph.process(pre_swap_output_view, pre_swap_input_view, 8);
+    for (const float sample : pre_swap_output)
+        CHECK(sample == 0.5f);
+
     // Feedback changes the execution state carried by a compiled snapshot, so
     // prepare_swap must reject the candidate. Ordinary refusals fail closed by
     // invalidating the published snapshot; only the documented MIDI-output
@@ -5389,7 +5404,8 @@ TEST_CASE("SignalGraph node_loads() reports per-node CPU load after processing",
     REQUIRE(graph.connect(input, 0, gain, 0));
     REQUIRE(graph.connect(gain, 0, output, 0));
 
-    // No telemetry before prepare() builds the measurers.
+    // No telemetry before prepare() builds the measurers. This first read also
+    // turns per-node monitoring on, so the blocks below are timed.
     REQUIRE(graph.node_loads().empty());
 
     constexpr int kFrames = 64;
@@ -5449,6 +5465,7 @@ TEST_CASE("SignalGraph node_loads() is reported on the canonical-executor path t
     REQUIRE(graph.connect(input, 0, gain, 0));
     REQUIRE(graph.connect(gain, 0, output, 0));
     graph.set_canonical_executor_routing_enabled(true);  // route, not walk
+    graph.set_node_load_monitoring(true);
 
     constexpr int kFrames = 64;
     REQUIRE(graph.prepare(48000.0, kFrames));
@@ -5493,6 +5510,7 @@ TEST_CASE("SignalGraph node_loads() is reported on the parallel-executor path",
     }
     graph.set_canonical_executor_routing_enabled(true);
     graph.set_parallel_routing_enabled(true);  // route across worker threads
+    graph.set_node_load_monitoring(true);
 
     constexpr int kFrames = 64;
     REQUIRE(graph.prepare(48000.0, kFrames));
@@ -5514,6 +5532,424 @@ TEST_CASE("SignalGraph node_loads() is reported on the parallel-executor path",
     for (const auto& report : loads) {
         REQUIRE(report.load.callback_count == kBlocks);  // exactly one per block
         REQUIRE(report.load.available_ns > 0);
+    }
+}
+
+namespace {
+
+// Stereo y = -x: turns a +0 input into -0, so a chain of them makes the sign of
+// zero observable at every edge.
+class NegateProcessor final : public pulp::format::Processor {
+  public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        pulp::format::PluginDescriptor d;
+        d.name = "Negate";
+        d.manufacturer = "Pulp";
+        d.bundle_id = "com.pulp.test.negate";
+        d.version = "1.0.0";
+        d.category = pulp::format::PluginCategory::Effect;
+        d.input_buses = {{"Main In", 2, false}};
+        d.output_buses = {{"Main Out", 2, false}};
+        return d;
+    }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>& in, pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&, const pulp::format::ProcessContext&) override {
+        for (std::size_t c = 0; c < out.num_channels(); ++c)
+            for (std::size_t i = 0; i < out.num_samples(); ++i)
+                out.channel_ptr(c)[i] = -in.channel_ptr(c)[i];
+    }
+};
+
+bool same_bits(const std::vector<float>& a, const std::vector<float>& b) {
+    return a.size() == b.size() && std::memcmp(a.data(), b.data(), a.size() * sizeof(float)) == 0;
+}
+
+} // namespace
+
+TEST_CASE("A graph of Processors equals calling them in sequence including the sign of zero",
+          "[host][graph][executor][parity]") {
+    // An edge carries its source's samples unchanged: one inbound edge is read
+    // in place, and the only AudioOutput copies into the output bus. So a chain
+    // as graph nodes produces the same bits as the same Processors called back
+    // to back, including -0, which a sum onto zero would have turned into +0.
+    constexpr int kFrames = 16;
+    std::vector<float> l(kFrames), r(kFrames);
+    for (int i = 0; i < kFrames; ++i) {
+        l[i] = (i % 4 == 0) ? 0.0f : (i % 4 == 1) ? -0.0f : 0.25f * static_cast<float>(i);
+        r[i] = (i % 3 == 0) ? -0.0f : -0.125f * static_cast<float>(i);
+    }
+
+    for (const int stages : {1, 2, 3}) {
+        INFO("stages " << stages);
+        // Direct: the same Processors in sequence.
+        std::vector<NegateProcessor> direct(static_cast<std::size_t>(stages));
+        std::vector<float> dl = l, dr = r, tl(kFrames), tr(kFrames);
+        for (auto& p : direct) {
+            std::array<const float*, 2> in_ch{dl.data(), dr.data()};
+            std::array<float*, 2> out_ch{tl.data(), tr.data()};
+            pulp::audio::BufferView<const float> in(in_ch.data(), 2, kFrames);
+            pulp::audio::BufferView<float> out(out_ch.data(), 2, kFrames);
+            pulp::midi::MidiBuffer mi, mo;
+            p.process(out, in, mi, mo, pulp::format::ProcessContext{});
+            dl = tl;
+            dr = tr;
+        }
+
+        SignalGraph graph;
+        auto prev = graph.add_input_node(2, "In");
+        const auto first = prev;
+        for (int s = 0; s < stages; ++s) {
+            const auto node = graph.add_processor_node(std::make_unique<NegateProcessor>());
+            REQUIRE(node != 0);
+            REQUIRE(graph.connect(prev, 0, node, 0));
+            REQUIRE(graph.connect(prev, 1, node, 1));
+            prev = node;
+        }
+        (void)first;
+        const auto out_node = graph.add_output_node(2, "Out");
+        REQUIRE(graph.connect(prev, 0, out_node, 0));
+        REQUIRE(graph.connect(prev, 1, out_node, 1));
+        REQUIRE(graph.prepare(48000.0, kFrames));
+
+        std::vector<float> gl(kFrames, 1.0f), gr(kFrames, 1.0f);
+        std::array<const float*, 2> in_ch{l.data(), r.data()};
+        std::array<float*, 2> out_ch{gl.data(), gr.data()};
+        pulp::audio::BufferView<const float> in_view(in_ch.data(), 2, kFrames);
+        pulp::audio::BufferView<float> out_view(out_ch.data(), 2, kFrames);
+        graph.process(out_view, in_view, kFrames);
+
+        REQUIRE(same_bits(gl, dl));
+        REQUIRE(same_bits(gr, dr));
+        // The planted zeros came through with their sign.
+        REQUIRE(std::signbit(gl[0]) == (stages % 2 == 1));
+        REQUIRE(std::signbit(gl[1]) == (stages % 2 == 0));
+    }
+}
+
+namespace {
+
+// Stereo y = x that then zeroes its input through a const_cast: a stand-in for
+// a hosted plug-in or native core that writes into the buffer it was handed.
+class InputClobberProcessor final : public pulp::format::Processor {
+  public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        pulp::format::PluginDescriptor d;
+        d.name = "InputClobber";
+        d.manufacturer = "Pulp";
+        d.bundle_id = "com.pulp.test.inputclobber";
+        d.version = "1.0.0";
+        d.category = pulp::format::PluginCategory::Effect;
+        d.input_buses = {{"Main In", 2, false}};
+        d.output_buses = {{"Main Out", 2, false}};
+        return d;
+    }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>& in, pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&, const pulp::format::ProcessContext&) override {
+        for (std::size_t c = 0; c < out.num_channels(); ++c) {
+            auto* writable = const_cast<float*>(in.channel_ptr(c));
+            for (std::size_t i = 0; i < out.num_samples(); ++i) {
+                out.channel_ptr(c)[i] = writable[i];
+                writable[i] = 12345.0f;
+            }
+        }
+    }
+};
+
+} // namespace
+
+TEST_CASE("A node that writes through its input cannot reach a fan-out sibling",
+          "[host][graph][executor][in-place]") {
+    // Inputs reach a binding as const views, but a plug-in or native core can
+    // cast that away. An edge is read in place only when it is its source's
+    // only reader, so a fan-out sibling always reads the source's own bits.
+    constexpr int kFrames = 16;
+    std::vector<float> l(kFrames), r(kFrames);
+    for (int i = 0; i < kFrames; ++i) {
+        l[i] = 0.1f * static_cast<float>(i) - 0.5f;
+        r[i] = (i % 2 == 0) ? -0.0f : 0.03f * static_cast<float>(i);
+    }
+    for (const bool clobber_first : {true, false}) {
+        INFO("clobber node added first " << clobber_first);
+        SignalGraph graph;
+        const auto input = graph.add_input_node(2, "In");
+        NodeId clobber = 0, negate = 0;
+        if (clobber_first) {
+            clobber = graph.add_processor_node(std::make_unique<InputClobberProcessor>());
+            negate = graph.add_processor_node(std::make_unique<NegateProcessor>());
+        } else {
+            negate = graph.add_processor_node(std::make_unique<NegateProcessor>());
+            clobber = graph.add_processor_node(std::make_unique<InputClobberProcessor>());
+        }
+        const auto output = graph.add_output_node(4, "Out");
+        for (PortIndex c = 0; c < 2; ++c) {
+            REQUIRE(graph.connect(input, c, clobber, c));
+            REQUIRE(graph.connect(input, c, negate, c));
+            REQUIRE(graph.connect(negate, c, output, c));
+            REQUIRE(graph.connect(clobber, c, output, static_cast<PortIndex>(c + 2)));
+        }
+        REQUIRE(graph.prepare(48000.0, kFrames));
+
+        std::vector<float> o0(kFrames), o1(kFrames), o2(kFrames), o3(kFrames);
+        std::array<const float*, 2> in_ch{l.data(), r.data()};
+        std::array<float*, 4> out_ch{o0.data(), o1.data(), o2.data(), o3.data()};
+        pulp::audio::BufferView<const float> in_view(in_ch.data(), 2, kFrames);
+        pulp::audio::BufferView<float> out_view(out_ch.data(), 4, kFrames);
+        graph.process(out_view, in_view, kFrames);
+
+        std::vector<float> nl(kFrames), nr(kFrames);
+        for (int i = 0; i < kFrames; ++i) {
+            nl[i] = -l[i];
+            nr[i] = -r[i];
+        }
+        REQUIRE(same_bits(o0, nl));
+        REQUIRE(same_bits(o1, nr));
+        REQUIRE(same_bits(o2, l));
+        REQUIRE(same_bits(o3, r));
+    }
+}
+
+TEST_CASE("Feedback read in place survives until both of its readers have run",
+          "[host][graph][executor][in-place][feedback]") {
+    // One source feeds back to two readers through two feedback edges. Each
+    // reads its own previous-block slot in place, and capture_feedback writes
+    // those only after every node has run, so the executor matches the
+    // reference walk (which copies) bit for bit, block after block.
+    constexpr int kFrames = 8;
+    constexpr int kBlocks = 6;
+    auto render = [&](bool routed) {
+        SignalGraph graph;
+        const auto input = graph.add_input_node(2, "In");
+        const auto source = graph.add_gain_node("Source");
+        const auto first = graph.add_gain_node("FirstReader");
+        const auto second = graph.add_gain_node("SecondReader");
+        const auto output = graph.add_output_node(2, "Out");
+        REQUIRE(graph.connect(input, 0, source, 0));
+        REQUIRE(graph.connect(input, 1, source, 1));
+        REQUIRE(graph.connect_feedback(source, 0, first, 0));
+        REQUIRE(graph.connect_feedback(source, 0, second, 0));
+        REQUIRE(graph.connect(first, 0, output, 0));
+        REQUIRE(graph.connect(second, 0, output, 1));
+        REQUIRE(graph.connect(source, 1, output, 1));
+        REQUIRE(graph.set_node_gain(source, -0.5f));
+        REQUIRE(graph.set_node_gain(first, 0.75f));
+        REQUIRE(graph.set_node_gain(second, -1.25f));
+        graph.set_canonical_executor_routing_enabled(routed);
+        REQUIRE(graph.prepare(48000.0, kFrames));
+        std::vector<float> rendered;
+        std::vector<float> l(kFrames), r(kFrames), lo(kFrames), ro(kFrames);
+        for (int b = 0; b < kBlocks; ++b) {
+            for (int i = 0; i < kFrames; ++i) {
+                l[i] = std::sin(0.37f * static_cast<float>(b * kFrames + i));
+                r[i] = (i == 0) ? -0.0f : 0.2f * static_cast<float>(b - i);
+            }
+            std::array<const float*, 2> in_ch{l.data(), r.data()};
+            std::array<float*, 2> out_ch{lo.data(), ro.data()};
+            pulp::audio::BufferView<const float> in_view(in_ch.data(), 2, kFrames);
+            pulp::audio::BufferView<float> out_view(out_ch.data(), 2, kFrames);
+            graph.process(out_view, in_view, kFrames);
+            rendered.insert(rendered.end(), lo.begin(), lo.end());
+            rendered.insert(rendered.end(), ro.begin(), ro.end());
+        }
+        return rendered;
+    };
+    const auto walk = render(false);
+    const auto routed = render(true);
+    REQUIRE(same_bits(walk, routed));
+    // Control: the feedback actually carried signal into the output.
+    REQUIRE(std::any_of(walk.begin(), walk.end(), [](float v) { return v != 0.0f; }));
+}
+
+TEST_CASE("Re-preparing a changed topology rebuilds in-place reads with no stale slots",
+          "[host][graph][executor][in-place]") {
+    // A graph re-prepared into a different topology must render exactly what a
+    // fresh graph of that topology renders. Run under ASan this also catches a
+    // read through a slot pointer left over from the old layout.
+    constexpr int kFrames = 16;
+    std::vector<float> l(kFrames), r(kFrames);
+    for (int i = 0; i < kFrames; ++i) {
+        l[i] = 0.05f * static_cast<float>(i) - 0.3f;
+        r[i] = (i % 3 == 0) ? -0.0f : -0.07f * static_cast<float>(i);
+    }
+    auto run = [&](SignalGraph& graph) {
+        std::vector<float> lo(kFrames), ro(kFrames);
+        std::array<const float*, 2> in_ch{l.data(), r.data()};
+        std::array<float*, 2> out_ch{lo.data(), ro.data()};
+        pulp::audio::BufferView<const float> in_view(in_ch.data(), 2, kFrames);
+        pulp::audio::BufferView<float> out_view(out_ch.data(), 2, kFrames);
+        for (int b = 0; b < 3; ++b)
+            graph.process(out_view, in_view, kFrames);
+        lo.insert(lo.end(), ro.begin(), ro.end());
+        return lo;
+    };
+    auto chain = [](SignalGraph& graph, int stages) {
+        const auto input = graph.add_input_node(2, "In");
+        NodeId prev = input;
+        for (int s = 0; s < stages; ++s) {
+            const auto g = graph.add_gain_node("G");
+            REQUIRE(graph.set_node_gain(g, (s % 2 == 0) ? -1.0f : 0.5f));
+            REQUIRE(graph.connect(prev, 0, g, 0));
+            REQUIRE(graph.connect(prev, 1, g, 1));
+            prev = g;
+        }
+        return prev;
+    };
+    for (const bool routed : {false, true}) {
+        INFO("routed " << routed);
+        SignalGraph changed;
+        changed.set_canonical_executor_routing_enabled(routed);
+        const auto last = chain(changed, 2);
+        auto out = changed.add_output_node(2, "Out");
+        REQUIRE(changed.connect(last, 0, out, 0));
+        REQUIRE(changed.connect(last, 1, out, 1));
+        REQUIRE(changed.prepare(48000.0, kFrames));
+        (void)run(changed);
+        // Grow the chain by three stages and fan the tail out to the output
+        // twice (a mix), then re-prepare.
+        REQUIRE(changed.remove_node(out));
+        NodeId prev = last;
+        for (int s = 0; s < 3; ++s) {
+            const auto g = changed.add_gain_node("H");
+            REQUIRE(changed.set_node_gain(g, -0.25f));
+            REQUIRE(changed.connect(prev, 0, g, 0));
+            REQUIRE(changed.connect(prev, 1, g, 1));
+            prev = g;
+        }
+        out = changed.add_output_node(2, "Out");
+        REQUIRE(changed.connect(prev, 0, out, 0));
+        REQUIRE(changed.connect(prev, 1, out, 1));
+        REQUIRE(changed.connect(last, 0, out, 0));
+        REQUIRE(changed.prepare(48000.0, kFrames));
+        const auto after = run(changed);
+
+        SignalGraph fresh;
+        fresh.set_canonical_executor_routing_enabled(routed);
+        const auto f_last = chain(fresh, 2);
+        NodeId f_prev = f_last;
+        for (int s = 0; s < 3; ++s) {
+            const auto g = fresh.add_gain_node("H");
+            REQUIRE(fresh.set_node_gain(g, -0.25f));
+            REQUIRE(fresh.connect(f_prev, 0, g, 0));
+            REQUIRE(fresh.connect(f_prev, 1, g, 1));
+            f_prev = g;
+        }
+        const auto f_out = fresh.add_output_node(2, "Out");
+        REQUIRE(fresh.connect(f_prev, 0, f_out, 0));
+        REQUIRE(fresh.connect(f_prev, 1, f_out, 1));
+        REQUIRE(fresh.connect(f_last, 0, f_out, 0));
+        REQUIRE(fresh.prepare(48000.0, kFrames));
+        const auto expected = run(fresh);
+        REQUIRE(same_bits(after, expected));
+    }
+}
+
+TEST_CASE("The reference walk and the executor both keep the sign of zero at edges",
+          "[host][graph][executor][parity]") {
+    // Gain nodes at -1 on silence produce -0. The walk (the parity oracle) and
+    // the canonical executor must both hand it through unchanged.
+    for (const bool routed : {false, true}) {
+        INFO("routed " << routed);
+        SignalGraph graph;
+        const auto input = graph.add_input_node(2, "In");
+        const auto gain = graph.add_gain_node("Invert");
+        const auto output = graph.add_output_node(2, "Out");
+        REQUIRE(graph.connect(input, 0, gain, 0));
+        REQUIRE(graph.connect(input, 1, gain, 1));
+        REQUIRE(graph.connect(gain, 0, output, 0));
+        REQUIRE(graph.connect(gain, 1, output, 1));
+        REQUIRE(graph.set_node_gain(gain, -1.0f));
+        graph.set_canonical_executor_routing_enabled(routed);
+        constexpr int kFrames = 8;
+        REQUIRE(graph.prepare(48000.0, kFrames));
+
+        std::vector<float> l(kFrames, 0.0f), r(kFrames, 0.0f);
+        std::vector<float> lo(kFrames, 1.0f), ro(kFrames, 1.0f);
+        std::array<const float*, 2> in_ch{l.data(), r.data()};
+        std::array<float*, 2> out_ch{lo.data(), ro.data()};
+        pulp::audio::BufferView<const float> in_view(in_ch.data(), 2, kFrames);
+        pulp::audio::BufferView<float> out_view(out_ch.data(), 2, kFrames);
+        // A few blocks, so any gain smoothing has settled at -1.
+        for (int b = 0; b < 4; ++b)
+            graph.process(out_view, in_view, kFrames);
+        for (int i = 0; i < kFrames; ++i) {
+            REQUIRE(lo[i] == 0.0f);
+            REQUIRE(std::signbit(lo[i]));
+            REQUIRE(std::signbit(ro[i]));
+        }
+    }
+}
+
+TEST_CASE("SignalGraph times nodes only once someone reads their load",
+          "[host][graph][telemetry][executor]") {
+    // Per-node timing is two clock reads per node per block, so it starts off.
+    // The first node_loads() turns it on; set_node_load_monitoring(false) stops
+    // it until the next read; live-DSP telemetry times nodes too. Whole-graph
+    // timing, which live-swap admission reads, always runs. Checked on the
+    // reference walk, the serial executor and the parallel executor.
+    enum class Path { Walk, Serial, Parallel };
+    for (const auto path : {Path::Walk, Path::Serial, Path::Parallel}) {
+        INFO("path " << static_cast<int>(path));
+        SignalGraph graph;
+        const auto input = graph.add_input_node(2, "Input");
+        const auto output = graph.add_output_node(2, "Output");
+        for (int i = 0; i < 4; ++i) {
+            const auto gn = graph.add_gain_node("G");
+            REQUIRE(graph.connect(input, 0, gn, 0));
+            REQUIRE(graph.connect(gn, 0, output, 0));
+        }
+        graph.set_canonical_executor_routing_enabled(path != Path::Walk);
+        graph.set_parallel_routing_enabled(path == Path::Parallel);
+
+        constexpr int kFrames = 64;
+        REQUIRE(graph.prepare(48000.0, kFrames));
+        std::vector<float> l(kFrames, 0.5f), r(kFrames, 0.5f);
+        std::vector<float> lo(kFrames, 0.0f), ro(kFrames, 0.0f);
+        std::array<const float*, 2> in_ch{l.data(), r.data()};
+        std::array<float*, 2> out_ch{lo.data(), ro.data()};
+        pulp::audio::BufferView<const float> in_view(in_ch.data(), 2, kFrames);
+        pulp::audio::BufferView<float> out_view(out_ch.data(), 2, kFrames);
+        const auto run = [&](int blocks) {
+            for (int i = 0; i < blocks; ++i)
+                graph.process(out_view, in_view, kFrames);
+        };
+        // Every node's callback count, which must agree across nodes.
+        const auto node_callbacks = [&] {
+            const auto loads = graph.node_loads();
+            REQUIRE(loads.size() == 6);
+            for (const auto& report : loads)
+                REQUIRE(report.load.callback_count == loads.front().load.callback_count);
+            return loads.front().load.callback_count;
+        };
+
+        REQUIRE_FALSE(graph.node_load_monitoring());
+        run(3);
+        REQUIRE(graph.graph_load().callback_count == 3);
+        // The first read sees nothing measured yet, and turns monitoring on.
+        REQUIRE(node_callbacks() == 0);
+        REQUIRE(graph.node_load_monitoring());
+        run(2);
+        REQUIRE(node_callbacks() == 2);
+
+        // Turned off, timing stops; the next read reports the frozen count and
+        // turns it back on.
+        graph.set_node_load_monitoring(false);
+        run(2);
+        REQUIRE(node_callbacks() == 2);
+        run(1);
+        REQUIRE(node_callbacks() == 3);
+
+        // Live-DSP telemetry reads the node measurers, so it times them too.
+        graph.set_node_load_monitoring(false);
+        graph.set_live_dsp_telemetry_enabled(true);
+        run(2);
+        REQUIRE_FALSE(graph.node_load_monitoring());
+        REQUIRE(node_callbacks() == 5);
+        REQUIRE(graph.graph_load().callback_count == 10);
     }
 }
 

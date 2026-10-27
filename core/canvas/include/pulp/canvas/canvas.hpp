@@ -6,8 +6,10 @@
 #include <cstring>
 #include <pulp/canvas/affine_transform.hpp>
 #include <pulp/canvas/canvas_capability.hpp>
+#include <pulp/canvas/gradient_interpolation.hpp>
 #include <pulp/canvas/path.hpp>
 #include <pulp/canvas/scene_recording.hpp>
+#include <pulp/canvas/text_raster_policy.hpp>
 #include <pulp/canvas/text_utf8.hpp>
 #include <string>
 #include <vector>
@@ -1179,6 +1181,16 @@ public:
         set_font(family, size);
     }
 
+    /// CSS `-webkit-font-smoothing` for the text drawn and measured after it.
+    /// `antialiased` turns glyph hinting off, which with a `chromium` surface
+    /// (pulp/canvas/text_raster_policy.hpp) reproduces Chromium's
+    /// `antialiased` glyphs; `auto` keeps the default light hinting. Scoped
+    /// by save()/restore() like the clip and matrix. Skia, CoreGraphics and
+    /// RecordingCanvas implement it; the default ignores it.
+    virtual void set_font_smoothing(FontSmoothing smoothing) {
+        (void)smoothing;
+    }
+
     // OpenType feature flags for font-variant. Each
     // FontFeature is a 4-byte tag (e.g. "tnum" / "smcp" / "onum" /
     // "lnum" / "pnum") + an on/off value (0 disables, 1 enables).
@@ -1434,15 +1446,21 @@ public:
     /// Draw a shape through an author-supplied geometry chart shader. The
     /// shader must define `half4 shade(PulpChart g)`.
     ///
-    /// A shape whose chart is not implemented is refused here rather than
-    /// drawn, and the refusal names the shape; `flat_arc` is the shape the
-    /// chart is derived for. `g.valid` is zero for degenerate geometry — a
-    /// zero sweep, or an inner radius that does not leave a band — and
-    /// callers must not interpret chart fields when it is zero.
+    /// Charted shapes are flat_arc, ring, flat_segment, rounded_segment and
+    /// stadium; any other shape is refused, by name, rather than drawn.
+    /// `g.cross` is the signed offset from the centre line, `g.d` the band's
+    /// distance. `g.valid` is zero for degenerate geometry (no sweep, length
+    /// or band); callers must not interpret chart fields when it is zero.
     ///
     /// `g.px` is one device pixel expressed in the same units as `g.d`, taken
     /// from `backing_scale()`, so `2.0 * g.px` is two device pixels at any
     /// backing scale rather than only at 1x.
+    ///
+    /// The shader is evaluated over the `w` x `h` rect grown by
+    /// `options.reach` on every side, so a feather or glow can paint past the
+    /// shape's box. A glow or outer feather whose reach is below
+    /// `sdf_feather_min_reach(style)` is refused (returns false, draws
+    /// nothing) rather than drawn with its falloff cut off at the rect edge.
     virtual bool draw_sdf_shape_with_shader(SDFShape shape, float x, float y,
                                              float w, float h,
                                              const SDFStyle& style,
@@ -1681,6 +1699,19 @@ public:
     /// Compile an author chart shader against the geometry prelude used by
     /// draw_sdf_shape_with_shader. The author source must define shade(PulpChart).
     static std::string compile_sdf_chart_sksl(SDFShape shape, const std::string& sksl);
+
+    /// The smallest draw-rect reach that holds `style`'s feather: 3 sigma for
+    /// the glow (1) and outer (3) modes, whose coverage lives outside the
+    /// shape, and 0 for every other mode or a zero sigma. Beyond 3 sigma the
+    /// Gaussian falloff is under 0.15%, so a reach at or above this value never
+    /// shows a hard edge where the draw rect ends.
+    static float sdf_feather_min_reach(const SDFStyle& style) {
+        if (!(style.feather_sigma > 0.0f))
+            return 0.0f;
+        if (style.feather_mode != 1 && style.feather_mode != 3)
+            return 0.0f;
+        return 3.0f * style.feather_sigma;
+    }
 
     /// Whether an SkSL shader declares a uniform of the given name. Compiles via
     /// the same process-lifetime cache as `compile_sksl`, so repeat queries are
@@ -1937,6 +1968,76 @@ protected:
                                                   float dw, float dh) {
         return draw_image_from_data_rect(data, size, sx, sy, sw, sh, dx, dy, dw, dh);
     }
+
+    /// Draw encoded image bytes identified by @p content_key, the lowercase
+    /// hex SHA-256 of exactly those bytes. A backend may retain the decoded or
+    /// GPU-uploaded image under that key across frames, so the key must change
+    /// whenever the bytes do and must never be derived from the buffer address
+    /// (a freed buffer's address is reused for different bytes). An empty key
+    /// draws uncached. The default does not cache; it draws exactly as
+    /// `draw_image_from_data`. Appended to preserve existing vtable slots.
+    virtual bool draw_image_from_keyed_data(const std::string& content_key, const uint8_t* data,
+                                            size_t size, float x, float y, float w, float h) {
+        (void)content_key;
+        return draw_image_from_data(data, size, x, y, w, h);
+    }
+
+    /// Source-rect form of `draw_image_from_keyed_data`, with the same key
+    /// contract. The default draws exactly as `draw_image_from_data_rect`.
+    virtual bool draw_image_from_keyed_data_rect(const std::string& content_key,
+                                                 const uint8_t* data, size_t size, float sx,
+                                                 float sy, float sw, float sh, float dx, float dy,
+                                                 float dw, float dh) {
+        (void)content_key;
+        return draw_image_from_data_rect(data, size, sx, sy, sw, sh, dx, dy, dw, dh);
+    }
+
+    /// Intrinsic pixel size of encoded image bytes, read from the image header
+    /// without decoding pixels: the size `draw_image_from_data` would draw the
+    /// full image at. Returns false (sizes 0) when the bytes are not an image
+    /// this backend can decode. The default reads a PNG IHDR only, so a backend
+    /// with no decoder still sizes PNGs; Skia and CoreGraphics read every
+    /// format their decoders accept. Appended after the existing virtuals.
+    virtual bool measure_image_from_data(const uint8_t* data, size_t size, float& out_width,
+                                         float& out_height) {
+        out_width = 0.0f;
+        out_height = 0.0f;
+        static constexpr uint8_t kPngSignature[] = {0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a};
+        if (!data || size < 24)
+            return false;
+        for (size_t i = 0; i < sizeof(kPngSignature); ++i)
+            if (data[i] != kPngSignature[i])
+                return false;
+        const auto read_be32 = [&](size_t offset) {
+            return (static_cast<uint32_t>(data[offset]) << 24) |
+                   (static_cast<uint32_t>(data[offset + 1]) << 16) |
+                   (static_cast<uint32_t>(data[offset + 2]) << 8) |
+                   static_cast<uint32_t>(data[offset + 3]);
+        };
+        // The first chunk must be IHDR; PNG caps each dimension at 2^31 - 1.
+        if (data[12] != 'I' || data[13] != 'H' || data[14] != 'D' || data[15] != 'R')
+            return false;
+        const uint32_t w = read_be32(16);
+        const uint32_t h = read_be32(20);
+        if (w == 0 || h == 0 || w > 0x7fffffffu || h > 0x7fffffffu)
+            return false;
+        out_width = static_cast<float>(w);
+        out_height = static_cast<float>(h);
+        return true;
+    }
+
+    /// Colour space every LATER gradient setter blends its stops in (CSS
+    /// `<color-interpolation-method>`), until set again; save() does not keep
+    /// it. Appended for the vtable. Skia blends natively, CoreGraphics resamples.
+    virtual void set_gradient_interpolation(GradientInterpolation m) {
+        gradient_interpolation_ = m;
+    }
+    GradientInterpolation gradient_interpolation() const {
+        return gradient_interpolation_;
+    }
+
+  private:
+    GradientInterpolation gradient_interpolation_{};
 };
 
 } // namespace pulp::canvas

@@ -37,6 +37,8 @@ INCLUDE_SLOW_TESTS=false
 
 # shellcheck source=coverage_ctest_policy.sh
 source "${SCRIPT_DIR}/coverage_ctest_policy.sh"
+# shellcheck source=coverage_native_paths.sh
+source "${SCRIPT_DIR}/coverage_native_paths.sh"
 
 # Coverage measures executable source lines. It does not need to repeat the
 # long soak/configuration proofs that the primary build matrix already owns.
@@ -115,7 +117,22 @@ if ! command -v llvm-cov >/dev/null 2>&1; then
     exit 1
 fi
 
-echo "=== Configuring coverage build in ${BUILD_DIR} ==="
+# Phase marker. On GitHub Actions it is also raised as an annotation, which is
+# stored apart from the job log: a hosted runner lost to memory or disk
+# exhaustion loses its whole log, and the annotations are then the only record
+# of how far the run got.
+coverage_phase() {
+    echo "=== $1 ==="
+    if [ -n "${GITHUB_ACTIONS:-}" ]; then
+        local mem=""
+        if [ -r /proc/meminfo ]; then
+            mem=" mem_available=$(awk '/^MemAvailable:/ {printf "%.1fG", $2/1048576}' /proc/meminfo)"
+        fi
+        echo "::notice title=coverage phase::$(date -u +%H:%M:%SZ) $1${mem}"
+    fi
+}
+
+coverage_phase "Configuring coverage build in ${BUILD_DIR}"
 
 # On Windows we need `clang-cl`, not plain `clang`. Some bundled deps
 # (mbedtls, notably) pass MSVC-style flags like /W3 and /utf-8 when
@@ -124,18 +141,26 @@ echo "=== Configuring coverage build in ${BUILD_DIR} ==="
 # `clang-cl` is Clang's MSVC-compatible driver: it accepts MSVC flags
 # AND the GCC-style `-fprofile-instr-generate -fcoverage-mapping` that
 # PulpInstrumentation.cmake emits for source-based coverage.
+#
+# Windows builds RelWithDebInfo rather than Debug. Pulp links the static
+# MSVC runtime, so Debug means /MTd and _ITERATOR_DEBUG_LEVEL=2, while the
+# prebuilt Skia is release (/MT, level 0); lld-link's /failifmismatch then
+# rejects every target that links Skia. PulpInstrumentation.cmake adds
+# /Od /Ob0 on clang-cl, so the build stays unoptimized.
 if [ "${OS:-}" = "Windows_NT" ] || [ -n "${MSYSTEM:-}" ]; then
     CLANG_C=clang-cl
     CLANG_CXX=clang-cl
+    COVERAGE_BUILD_TYPE=RelWithDebInfo
 else
     CLANG_C=clang
     CLANG_CXX=clang++
+    COVERAGE_BUILD_TYPE=Debug
 fi
 
 cmake_args=(
     -S "${REPO_ROOT}"
     -B "${BUILD_DIR}"
-    -DCMAKE_BUILD_TYPE=Debug
+    -DCMAKE_BUILD_TYPE="${COVERAGE_BUILD_TYPE}"
     -DPULP_ENABLE_COVERAGE=ON
     -DCMAKE_C_COMPILER="${CLANG_C}"
     -DCMAKE_CXX_COMPILER="${CLANG_CXX}"
@@ -170,7 +195,7 @@ if ! grep -q '^PULP_ENABLE_COVERAGE:BOOL=ON$' "${CACHE_FILE}" 2>/dev/null; then
     exit 3
 fi
 
-echo "=== Building ==="
+coverage_phase "Building"
 BUILD_LOG="${BUILD_DIR}/build.log"
 BUILD_STDOUT_LOG="${BUILD_DIR}/build.stdout.log"
 if ! PULP_BUILD_JOBS="${JOBS}" bash "${REPO_ROOT}/tools/ci/governed-build.sh" \
@@ -180,117 +205,56 @@ if ! PULP_BUILD_JOBS="${JOBS}" bash "${REPO_ROOT}/tools/ci/governed-build.sh" \
     # last lines are usually unrelated warnings. Print the error lines from
     # both streams first; a failing custom command reports on stdout.
     echo "=== Coverage build failed; error lines from the full build log ===" >&2
-    grep -n -E "error:|Error [0-9]+|\*\*\*|undefined reference|FAILED|fatal|CMake Error" \
-        "${BUILD_LOG}" "${BUILD_STDOUT_LOG}" 2>/dev/null | head -n 100 >&2 || true
+    # Each log gets its own cap, so a stderr flood cannot crowd out a failing
+    # step that only reports on stdout.
+    for log in "${BUILD_LOG}" "${BUILD_STDOUT_LOG}"; do
+        grep -n -H -E "error:|Error [0-9]+|\*\*\*|undefined reference|FAILED|fatal|CMake Error" \
+            "${log}" 2>/dev/null | head -n 100 >&2 || true
+    done
+    # lld-link names the two objects that disagree on the lines after a
+    # /failifmismatch (or any other) error; print them too.
+    if grep -q "lld-link: error:" "${BUILD_LOG}" "${BUILD_STDOUT_LOG}" 2>/dev/null; then
+        echo "=== lld-link errors with context ===" >&2
+        grep -h -A3 "lld-link: error:" "${BUILD_LOG}" "${BUILD_STDOUT_LOG}" 2>/dev/null \
+            | head -n 60 >&2 || true
+    fi
     echo "=== last 200 stderr lines ===" >&2
     tail -n 200 "${BUILD_LOG}" >&2 || true
     exit 1
 fi
 
-echo "=== Running tests with LLVM_PROFILE_FILE ==="
+coverage_phase "Running tests with LLVM_PROFILE_FILE"
 mkdir -p "${PROFRAW_DIR}"
 find "${PROFRAW_DIR}" -name '*.profraw' -type f -delete
 cd "${BUILD_DIR}"
 
-# ---------------------------------------------------------------------------
-# Incremental profile reclamation.
-#
-# Per-process shards are what make this lane's coverage correct, but they also
-# accumulate for the whole suite: a full run holds roughly 20k shards / ~17 GiB
-# at peak. A hosted macOS runner arrives with ~76 GiB free, and measured
-# failures land during the test run while that pile is still growing — long
-# after the workflow's one-shot pre-flight disk check has passed.
-#
-# So absorb finished shards into a running profdata while the suite is still
-# running and delete them as they are absorbed, bounding the peak instead of
-# letting it grow monotonically. Counter merging is additive and associative,
-# so feeding the running profdata back in as an input yields the same result as
-# a single final merge over every shard.
-#
-# A shard may be absorbed IFF no live process owns it. `%p-%m` puts the owning
-# PID in the filename, so `kill -0` answers that exactly. Do NOT gate on mtime:
-# a slow test's shard looks stale while its process is still writing, and
-# reclaiming it would drop that test's coverage silently — the same class of
-# quiet under-reporting this lane already fixed once by leaving the shared pool.
-# A recycled PID only ever makes this MORE conservative (the shard is skipped
-# and the final merge collects it), never less.
 mkdir -p "${REPORT_DIR}"
-RUNNING_PROFDATA="${REPORT_DIR}/pulp-running.profdata"
-RECLAIM_LOG="${REPORT_DIR}/llvm-profdata-reclaim.log"
-RECLAIM_STOP_FILE="${BUILD_DIR}/.coverage-reclaim-stop"
-RECLAIM_COUNT_FILE="${BUILD_DIR}/.coverage-reclaim-count"
-# Absorb only under disk pressure, so an uncontended run keeps the original
-# single-merge behaviour and pays nothing.
-COVERAGE_RECLAIM_FREE_KIB="${PULP_COVERAGE_RECLAIM_FREE_KIB:-$((25 * 1024 * 1024))}"
-COVERAGE_RECLAIM_POLL_SECS="${PULP_COVERAGE_RECLAIM_POLL_SECS:-20}"
-rm -f "${RECLAIM_STOP_FILE}" "${RUNNING_PROFDATA}" "${RECLAIM_LOG}"
-printf '0\n' > "${RECLAIM_COUNT_FILE}"
 
 coverage_free_kib() {
     df -Pk "${BUILD_DIR}" 2>/dev/null | awk 'NR==2 {print $4}'
 }
 
-# Absorb every shard whose owning process has exited. Returns 0 always; a
-# failed merge leaves the shards in place for the final merge to collect.
-coverage_absorb_finished_shards() {
-    local batch="${BUILD_DIR}/.coverage-reclaim-batch"
-    local inputs="${BUILD_DIR}/.coverage-reclaim-inputs"
-    local merged="${REPORT_DIR}/pulp-running.next.profdata"
-    local shard name pid absorbed previous free
-
-    : > "${batch}"
-    while IFS= read -r shard; do
-        name="${shard##*/}"
-        [[ "${name}" =~ ^pulp-([0-9]+)-[0-9]+_[0-9]+\.profraw$ ]] || continue
-        pid="${BASH_REMATCH[1]}"
-        # Live owner: leave it alone.
-        kill -0 "${pid}" 2>/dev/null && continue
-        printf '%s\n' "${shard}" >> "${batch}"
-    done < <(find "${PROFRAW_DIR}" -name 'pulp-*.profraw' -type f 2>/dev/null)
-
-    absorbed=$(wc -l < "${batch}" | tr -d ' ')
-    if [[ "${absorbed}" -eq 0 ]]; then
-        rm -f "${batch}"
-        return 0
-    fi
-
-    cp "${batch}" "${inputs}"
-    if [[ -f "${RUNNING_PROFDATA}" ]]; then
-        printf '%s\n' "${RUNNING_PROFDATA}" >> "${inputs}"
-    fi
-    if llvm-profdata merge -sparse --failure-mode=all \
-        --input-files="${inputs}" -o "${merged}" 2>>"${RECLAIM_LOG}"; then
-        mv -f "${merged}" "${RUNNING_PROFDATA}"
-        # Delete exactly the shards that were absorbed, never the profdata.
-        tr '\n' '\0' < "${batch}" | xargs -0 rm -f
-        previous=$(cat "${RECLAIM_COUNT_FILE}" 2>/dev/null || echo 0)
-        printf '%s\n' "$(( previous + absorbed ))" > "${RECLAIM_COUNT_FILE}"
-        free="$(coverage_free_kib)"
-        echo "=== reclaim: absorbed ${absorbed} finished shard(s); free ${free:-unknown} KiB ==="
-    else
-        rm -f "${merged}"
-        echo "run_coverage.sh: incremental reclaim merge failed; leaving shards for the final merge" >&2
-    fi
-    rm -f "${batch}" "${inputs}"
-    return 0
-}
-
-coverage_reclaim_loop() {
-    local free
-    while [[ ! -f "${RECLAIM_STOP_FILE}" ]]; do
-        free="$(coverage_free_kib)"
-        if [[ -n "${free}" && "${free}" -lt "${COVERAGE_RECLAIM_FREE_KIB}" ]]; then
-            coverage_absorb_finished_shards || true
-        fi
-        sleep "${COVERAGE_RECLAIM_POLL_SECS}"
-    done
-}
-# Give every test PROCESS its own profile (`%p-%m`, set below). A shared `%Nm`
-# pool was tried and removed: one pool is shared across binaries, profiles with
-# different counter layouts cannot merge into a single shard, and most were
-# discarded — a full run left seven shards and the lane reported well under the
-# coverage it actually had. Per-process shards are correct but they accumulate,
-# so they are absorbed incrementally while the suite runs (see below).
+# ---------------------------------------------------------------------------
+# Profile naming: one online-merge pool per BINARY, never one file per process.
+#
+# `pulp-%8m.profraw` expands `%m` to the instrumented module's signature, so
+# every test binary (and every instrumented child it spawns) gets its own pool
+# of eight files, `pulp-<signature>_<pid % 8>.profraw`. Each exiting process
+# locks one pool file and merges its counters into it, so the shard count is
+# bounded by binaries x 8 instead of growing with every process the suite
+# starts. One file per process (`%p-%m`) put the whole suite's raw profiles on
+# disk at once — tens of thousands of shards — and filled the hosted Linux
+# runner's root volume mid-suite even with incremental reclamation running.
+#
+# The pool must stay keyed by `%m`. A pool shared ACROSS binaries cannot work:
+# profiles with different counter layouts cannot merge into one file, and the
+# runtime discards the loser silently. That failure once left a handful of
+# shards for hundreds of binaries and under-reported coverage by twenty points,
+# so the merge step below fails closed when the pools cover far fewer modules
+# than the suite has test binaries. Plain `%m` (a one-file pool per module) is
+# also wrong: parallel exits of one binary corrupted that single file. Eight
+# slots match the eight-way CTest cap below.
+COVERAGE_PROFILE_PATTERN="pulp-%8m.profraw"
 
 # Regression guard for #317: track the test-suite outcome without aborting the
 # coverage report. A broken test run should still upload its partial coverage
@@ -309,11 +273,8 @@ CTEST_RC=0
 # even the macOS leg past the workflow's internal budget (a killed run drops the
 # Cobertura report and reddens main). `-j` matches the parallelism the primary
 # build.yml/build-macos.yml lanes already use; source-based instrumentation is
-# parallel-safe because `%p-%m` gives each test PROCESS its own merge-enabled
-# profile. This comment used to claim that of the `%Nm` pool, which was not
-# true: an N-file pool is shared across binaries, profiles with different
-# counter layouts cannot merge, and most were discarded — so this lane was
-# reporting a number well below the coverage it actually had. Cap at 8 like the
+# parallel-safe because concurrent exits of one binary lock and merge into
+# its per-module pool (see COVERAGE_PROFILE_PATTERN above). Cap at 8 like the
 # primary lanes so a
 # high-core self-hosted runner doesn't oversubscribe memory with instrumented
 # Debug test processes. `--timeout` bounds a single wedged test so it can't eat
@@ -323,10 +284,8 @@ CTEST_RC=0
 CTEST_JOBS="${TEST_JOBS}"
 if [[ "${CTEST_JOBS}" -gt 8 ]]; then CTEST_JOBS=8; fi
 CTEST_PER_TEST_TIMEOUT="${PULP_COVERAGE_CTEST_TIMEOUT:-600}"
-export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%p-%m.profraw"
-echo "=== Free space before tests: $(coverage_free_kib) KiB (reclaim below ${COVERAGE_RECLAIM_FREE_KIB} KiB) ==="
-coverage_reclaim_loop &
-RECLAIM_PID=$!
+export LLVM_PROFILE_FILE="${PROFRAW_DIR}/${COVERAGE_PROFILE_PATTERN}"
+echo "=== Free space before tests: $(coverage_free_kib) KiB ==="
 # CTest writes a progress line for every test. With nearly 22,000 tests this
 # can fill the hosted runner's Actions log pager (and its root disk) before
 # coverage generation starts, producing an ENOSPC failure with no receipt.
@@ -344,17 +303,13 @@ run_ctest() {
     fi
 }
 run_ctest || CTEST_RC=$?
-touch "${RECLAIM_STOP_FILE}"
-wait "${RECLAIM_PID}" 2>/dev/null || true
-rm -f "${RECLAIM_STOP_FILE}"
-RECLAIMED_SHARDS=$(cat "${RECLAIM_COUNT_FILE}" 2>/dev/null || echo 0)
-echo "=== Free space after tests: $(coverage_free_kib) KiB; ${RECLAIMED_SHARDS} shard(s) absorbed during the run ==="
+echo "=== Free space after tests: $(coverage_free_kib) KiB ==="
 if [[ "${CTEST_RC}" -ne 0 ]]; then
     echo "=== ctest failed with exit ${CTEST_RC}; replaying failed tests for diagnostics. Coverage report WILL be generated from partial profile data. ==="
     ctest --rerun-failed --output-on-failure -j"${CTEST_JOBS}" --timeout "${CTEST_PER_TEST_TIMEOUT}" || true
 fi
 
-echo "=== Merging profiles ==="
+coverage_phase "Merging profiles"
 mkdir -p "${REPORT_DIR}"
 PROFDATA="${REPORT_DIR}/pulp.profdata"
 MERGE_LOG="${REPORT_DIR}/llvm-profdata-merge.log"
@@ -362,16 +317,16 @@ PROFILE_INPUTS="${REPORT_DIR}/llvm-profdata-inputs.txt"
 # Keep argv bounded and use one llvm-profdata invocation. xargs may split a
 # large profile set into multiple merges, and each later -o invocation
 # overwrites the prior result instead of accumulating it.
-find "${PROFRAW_DIR}" -name '*.profraw' -type f -print > "${PROFILE_INPUTS}"
+# llvm-profdata reads this list itself, so its entries must be native paths.
+find "${PROFRAW_DIR}" -name '*.profraw' -type f -print \
+    | coverage_native_path_list > "${PROFILE_INPUTS}"
 PROFILE_SHARDS=$(wc -l < "${PROFILE_INPUTS}" | tr -d ' ')
-RECLAIMED_SHARDS=$(cat "${RECLAIM_COUNT_FILE}" 2>/dev/null || echo 0)
-# Anything absorbed mid-run lives in the running profdata, which merges in as
-# just another input. Total shards seen = still on disk + already absorbed.
-if [[ -f "${RUNNING_PROFDATA}" ]]; then
-    printf '%s\n' "${RUNNING_PROFDATA}" >> "${PROFILE_INPUTS}"
-fi
-PROFILE_SHARDS_SEEN=$(( PROFILE_SHARDS + RECLAIMED_SHARDS ))
-if [[ "${PROFILE_SHARDS_SEEN}" -eq 0 ]]; then
+# Distinct module signatures among the pool files: one per instrumented binary
+# that wrote a profile. Checked against the test-binary count once that is
+# known, below.
+PROFILE_MODULES=$(sed -n 's|.*/pulp-\([0-9][0-9]*\)_[0-9]\.profraw$|\1|p' "${PROFILE_INPUTS}" \
+    | sort -u | wc -l | tr -d ' ')
+if [[ "${PROFILE_SHARDS}" -eq 0 ]]; then
     echo "run_coverage.sh: no raw profile shards were produced" >&2
     exit 1
 fi
@@ -384,20 +339,13 @@ if ! llvm-profdata merge -sparse --failure-mode=all \
     exit 1
 fi
 cat "${MERGE_LOG}" >&2
-# Corruption can surface in either merge, so count both logs against the full
-# population of shards seen. Scoping this to the final merge alone would shrink
-# the denominator every time reclamation ran and make the guard fire spuriously.
 INVALID_PROFILE_SHARDS=$(grep -Ec '^(warning|error): .*\.profraw:' "${MERGE_LOG}" || true)
-if [[ -f "${RECLAIM_LOG}" ]]; then
-    INVALID_RECLAIMED_SHARDS=$(grep -Ec '^(warning|error): .*\.profraw:' "${RECLAIM_LOG}" || true)
-    INVALID_PROFILE_SHARDS=$(( INVALID_PROFILE_SHARDS + INVALID_RECLAIMED_SHARDS ))
-fi
 if [[ "${INVALID_PROFILE_SHARDS}" -gt 25 \
-      && $((INVALID_PROFILE_SHARDS * 100)) -gt $((PROFILE_SHARDS_SEEN * 5)) ]]; then
-    echo "run_coverage.sh: ${INVALID_PROFILE_SHARDS}/${PROFILE_SHARDS_SEEN} raw profile shards were invalid (>5%) — refusing to publish incomplete coverage" >&2
+      && $((INVALID_PROFILE_SHARDS * 100)) -gt $((PROFILE_SHARDS * 5)) ]]; then
+    echo "run_coverage.sh: ${INVALID_PROFILE_SHARDS}/${PROFILE_SHARDS} raw profile shards were invalid (>5%) — refusing to publish incomplete coverage" >&2
     exit 1
 fi
-echo "=== Merged ${PROFILE_SHARDS_SEEN} raw profile shard(s) (${RECLAIMED_SHARDS} absorbed during the run); ignored ${INVALID_PROFILE_SHARDS} invalid shard(s) ==="
+echo "=== Merged ${PROFILE_SHARDS} raw profile shard(s) from ${PROFILE_MODULES} module pool(s); ignored ${INVALID_PROFILE_SHARDS} invalid shard(s) ==="
 
 # The merged profdata is now the complete coverage input. Raw shards are no
 # longer needed, and retaining thousands of them leaves too little room for
@@ -406,7 +354,6 @@ echo "=== Merged ${PROFILE_SHARDS_SEEN} raw profile shard(s) (${RECLAIMED_SHARDS
 # if cleanup cannot complete, fail closed instead of generating a report from
 # an unbounded disk state.
 echo "=== Reclaiming merged raw profile shards ==="
-rm -f "${RUNNING_PROFDATA}" "${RECLAIM_COUNT_FILE}"
 if ! find "${PROFRAW_DIR}" -name '*.profraw' -type f -delete; then
     echo "run_coverage.sh: could not delete merged raw profile shards" >&2
     exit 1
@@ -495,6 +442,18 @@ if [[ ${#TEST_BINARIES[@]} -eq 0 ]]; then
     exit 1
 fi
 
+# Every test binary the full suite runs writes its own `%m` pool. Far fewer
+# pools than binaries means profiles from different binaries collided in one
+# pool and the runtime discarded them — coverage would silently under-report.
+# A filtered run (--tests) legitimately touches fewer binaries, so the check
+# applies to the full suite only; half leaves room for binaries whose every
+# test is excluded by the default CTest policy.
+if [[ -z "${TESTS_REGEX}" ]] \
+      && (( PROFILE_MODULES * 2 < ${#TEST_BINARIES[@]} )); then
+    echo "run_coverage.sh: only ${PROFILE_MODULES} profile module pool(s) for ${#TEST_BINARIES[@]} test binaries — profiles from different binaries are colliding, refusing to publish under-reported coverage" >&2
+    exit 1
+fi
+
 # First-party non-test executables — CLI, standalone host, inspector.
 # Test binaries under build/test/ are already included above; exclude
 # anything under /_deps/ or /external/ to avoid third-party objects.
@@ -566,19 +525,14 @@ OBJ_RSP="${REPORT_DIR}/llvm-cov-objects.rsp"
 # missing -object ("failed to load coverage: '…': no such file or directory"),
 # so one disappearing fixture would blackhole the whole os-windows leg. Drop any
 # that are no longer present instead.
-: > "${OBJ_RSP}"
+KEPT_OBJECT_PATHS=()
 KEPT_OBJECTS=0
 VANISHED_OBJECTS=0
 prev=""
 for tok in "${BINARIES[@]}"; do
     if [[ "${prev}" == "-object" ]]; then
         if [[ -f "${tok}" ]]; then
-            # Quote the path: LLVM response files are whitespace-tokenized but
-            # honor double quotes, so a runner workdir containing a space
-            # (e.g. /Volumes/CI Builds/...) stays a single -object argument
-            # instead of splitting into bogus tokens. Harmless for the common
-            # space-free GitHub/self-hosted paths.
-            printf -- '-object\n"%s"\n' "${tok}" >> "${OBJ_RSP}"
+            KEPT_OBJECT_PATHS+=("${tok}")
             KEPT_OBJECTS=$((KEPT_OBJECTS + 1))
         else
             VANISHED_OBJECTS=$((VANISHED_OBJECTS + 1))
@@ -606,9 +560,17 @@ if [[ "${VANISHED_OBJECTS}" -gt 25 \
     echo "run_coverage.sh: ${VANISHED_OBJECTS}/${TOTAL_OBJECTS} -object entries vanished after the pre-flight probe (>5%) — refusing to upload coverage from the survivors; object discovery or the build tree is likely broken." >&2
     exit 1
 fi
+# llvm-cov reads the response file itself, so its paths must be native. Quote
+# each one: LLVM response files are whitespace-tokenized but honor double
+# quotes, so a runner workdir containing a space (e.g. /Volumes/CI Builds/...)
+# stays a single -object argument instead of splitting into bogus tokens.
+printf '%s\n' "${KEPT_OBJECT_PATHS[@]}" | coverage_native_path_list \
+    | while IFS= read -r native; do
+        printf -- '-object\n"%s"\n' "${native}"
+    done > "${OBJ_RSP}"
 echo "=== Wrote ${KEPT_OBJECTS} -object tokens to a response file (avoids Windows ARG_MAX) ==="
 
-echo "=== llvm-cov report (top-level summary) ==="
+coverage_phase "llvm-cov report (top-level summary)"
 llvm-cov report \
     "@${OBJ_RSP}" \
     -instr-profile="${PROFDATA}" \
@@ -658,7 +620,7 @@ if [[ ! -f "${LCOV_COBERTURA}" ]]; then
     exit 1
 fi
 
-echo "=== llvm-cov export → LCOV ==="
+coverage_phase "llvm-cov export → LCOV"
 llvm-cov export --format=lcov \
     "@${OBJ_RSP}" \
     -instr-profile="${PROFDATA}" \

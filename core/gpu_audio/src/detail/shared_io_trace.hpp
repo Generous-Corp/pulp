@@ -281,6 +281,13 @@ class SharedIoTraceRecorder {
 struct SharedIoTraceDrainResult {
     bool tracing_compiled = false;
     bool recording_enabled = false;
+    // The counters event is a health receipt, so consumers must not treat it
+    // as authoritative when its snapshot violates the shared-I/O contract.
+    bool telemetry_valid = false;
+    SharedIoTelemetryError telemetry_error = SharedIoTelemetryError::TelemetryValidationDeferred;
+    // False means a non-null observer was malformed; no queue rows were
+    // consumed. A lossless observer must own both identity streams.
+    bool observer_valid = true;
     std::uint32_t records_drained = 0;
     // Emission attempts do not prove an active session or enabled category.
     // The flushed trace and its session marker are the positive control.
@@ -302,6 +309,14 @@ struct SharedIoTraceDrainObserver {
     void (*ownership)(void*, const SharedIoTraceOwnership&) noexcept = nullptr;
 };
 
+// Lossless campaign sinks must receive both identity streams. An observer
+// with only one callback would silently discard the other stream, so callers
+// reject it before switching the session away from bounded retention.
+inline bool
+valid_shared_io_trace_drain_observer(const SharedIoTraceDrainObserver* observer) noexcept {
+    return observer == nullptr || (observer->record != nullptr && observer->admission != nullptr);
+}
+
 // Final failed-release disclosure. No per-sequence terminal or retirement is
 // implied. Call after quiescent draining, before destroying the recorder.
 void emit_shared_io_unresolved_ownership(
@@ -311,9 +326,10 @@ void emit_shared_io_unresolved_ownership(
 // realtime auxiliary worker. This is the sole Perfetto edge for these records.
 // Counters are approximate cumulative snapshots; no per-block timing is
 // inferred from the independent "latest sample" atomics.
-SharedIoTraceDrainResult
-drain_shared_io_trace(SharedIoTraceRecorder& recorder, const SharedIoTelemetrySnapshot& telemetry,
-                      std::uint32_t budget = 256,
-                      const SharedIoTraceDrainObserver* observer = nullptr) noexcept;
+SharedIoTraceDrainResult drain_shared_io_trace(SharedIoTraceRecorder& recorder,
+                                               const SharedIoTelemetrySnapshot& telemetry,
+                                               std::uint32_t budget = 256,
+                                               const SharedIoTraceDrainObserver* observer = nullptr,
+                                               bool telemetry_quiescent = false) noexcept;
 
 } // namespace pulp::gpu_audio::detail

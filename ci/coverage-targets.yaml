@@ -59,6 +59,7 @@ tiers:
       - core/playback/**
       - core/sequence/**
       - core/signal/**
+      - core/simd/**           # vector kernels under the signal path
       - core/smf/**
       - core/timebase/**
       - core/timeline/**
@@ -95,6 +96,8 @@ tiers:
       - core/interchange/**
       - core/osc/**
       - core/project_package/**
+      - core/authoring_capsule/**   # capsule archive, manifest and staging
+      - core/content/**        # content-pack registry (pulp/state/content_registry)
       - ship/**
       - tools/**
       # Platform integration. Kotlin (`android/**.kt`) and Swift

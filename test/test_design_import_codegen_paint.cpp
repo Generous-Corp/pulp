@@ -630,6 +630,43 @@ TEST_CASE("native codegen paints a stroke declared as the CSS border shorthand",
     REQUIRE(js.find("setSvgStrokeWidth('") != std::string::npos);
 }
 
+TEST_CASE("generated JS carries an imported vector's stroke cap, join and miter limit",
+          "[view][import][svg-stroke]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.style.width = 100.0f;
+    ir.root.style.height = 100.0f;
+    const auto vector = [](std::string name, std::string cap, std::string join, std::string limit) {
+        IRNode path;
+        path.type = "vector";
+        path.name = std::move(name);
+        path.attributes["path_data"] = "M4 12L12 4L20 12";
+        path.attributes["svg_stroke"] = "#89b4fa";
+        path.attributes["svg_stroke_width"] = "2";
+        if (!cap.empty())
+            path.attributes["svg_stroke_linecap"] = std::move(cap);
+        if (!join.empty())
+            path.attributes["svg_stroke_linejoin"] = std::move(join);
+        if (!limit.empty())
+            path.attributes["svg_stroke_miterlimit"] = std::move(limit);
+        path.style.width = 24.0f;
+        path.style.height = 24.0f;
+        return path;
+    };
+    ir.root.children.push_back(vector("Peak", "round", "round", ""));
+    ir.root.children.push_back(vector("Miter", "", "miter", "8"));
+    ir.root.children.push_back(vector("Plain", "", "", ""));
+    const auto js = native_js(ir);
+    CHECK(js.find("', 'round', 'round');") != std::string::npos);
+    CHECK(js.find("', '', 'miter', 8);") != std::string::npos);
+    // A vector with no stroke style emits no call at all.
+    std::size_t calls = 0;
+    for (auto at = js.find("setSvgStrokeStyle("); at != std::string::npos;
+         at = js.find("setSvgStrokeStyle(", at + 1))
+        ++calls;
+    CHECK(calls == 2);
+}
+
 namespace {
 
 // Build the TRIAZ slider triplet: a short wide container with a full-width dark
@@ -897,6 +934,9 @@ TEST_CASE("generated JS opts its layout pass into sub-pixel geometry", "[view][i
     const auto js = generate_pulp_js(ir, opts);
     REQUIRE(js.find("if (typeof setSubpixelLayout === 'function') "
                     "setSubpixelLayout('', true);") != std::string::npos);
+    // The same root is marked as the captured frame its text snaps to.
+    REQUIRE(js.find("if (typeof setCapturedFrameRoot === 'function') "
+                    "setCapturedFrameRoot('', true);") != std::string::npos);
 }
 
 TEST_CASE("generate_pulp_cpp re-opens a promoted button so its interactive child stays reachable") {
@@ -1037,6 +1077,116 @@ TEST_CASE("generate_pulp_js escapes raw box shadows and keeps audio labels escap
     commented.include_comments = true;
     const auto with_comments = generate_pulp_js(ir, commented);
     REQUIRE(with_comments.find("\nsetTheme('light');\n") == std::string::npos);
+}
+
+TEST_CASE("generate_pulp_cpp does not report a style property set to its initial keyword",
+          "[view][import][cpp-codegen][fidelity]") {
+    // An initial value (`none`, `normal`, `auto`, `clip`) or one the lane
+    // already renders (a solid border of recorded width, a border of zero
+    // width) drops nothing, so a note claiming it did would send someone
+    // hunting a gap that does not exist.
+    const auto unlowered_notes = [](const IRStyle& style) {
+        DesignIR ir;
+        ir.root.type = "frame";
+        ir.root.name = "Panel";
+        ir.root.style = style;
+        std::vector<FidelityIssue> report;
+        CppExportOptions opts;
+        opts.fidelity_report = &report;
+        generate_pulp_cpp(ir, ir.asset_manifest, opts);
+        std::vector<std::string> details;
+        for (const auto& issue : report)
+            if (issue.kind == "cpp-unlowered-style")
+                details.push_back(issue.detail);
+        return details;
+    };
+
+    IRStyle initial;
+    initial.mix_blend_mode = "normal";
+    initial.filter = "none";
+    initial.backdrop_filter = " NONE ";
+    initial.clip_path = "None";
+    initial.transform = "none";
+    initial.box_shadow = parse_css_box_shadow("none");
+    initial.text_overflow = "clip";
+    initial.pointer_events = "auto";
+    initial.border_style = "solid";
+    initial.border_width = 2.0f;
+    CHECK(unlowered_notes(initial).empty());
+
+    IRStyle widthless_border;
+    widthless_border.border_style = "dashed";
+    widthless_border.border_width = 0.0f;
+    CHECK(unlowered_notes(widthless_border).empty());
+    widthless_border.border_style = "none";
+    CHECK(unlowered_notes(widthless_border).empty());
+    IRStyle unrecorded_hidden_border;
+    unrecorded_hidden_border.border_style = "hidden";
+    CHECK(unlowered_notes(unrecorded_hidden_border).empty());
+    IRStyle zero_width_solid_border;
+    zero_width_solid_border.border_style = "solid";
+    zero_width_solid_border.border_width = 0.0f;
+    CHECK(unlowered_notes(zero_width_solid_border).empty());
+
+    IRStyle live;
+    live.mix_blend_mode = "screen";
+    live.filter = "blur(2px)";
+    live.backdrop_filter = "blur(8px)";
+    live.clip_path = "circle(50%)";
+    live.transform = "scale(2)";
+    live.box_shadow = parse_css_box_shadow("0 1px 2px #000");
+    live.text_overflow = "ellipsis";
+    live.pointer_events = "none";
+    live.border_style = "dashed";
+    live.border_top_width = 1.0f;
+    const auto notes = unlowered_notes(live);
+    const auto noted = [&](std::string_view property) {
+        return std::any_of(notes.begin(), notes.end(), [&](const std::string& detail) {
+            return detail.rfind(std::string(property) + " is set", 0) == 0;
+        });
+    };
+    CHECK(noted("mix-blend-mode"));
+    CHECK(noted("filter"));
+    CHECK(noted("backdrop-filter"));
+    CHECK(noted("clip-path"));
+    CHECK(noted("transform"));
+    CHECK(noted("box-shadow"));
+    CHECK(noted("text-overflow"));
+    CHECK(noted("pointer-events"));
+    CHECK(noted("border-style"));
+
+    // `none` hides a border this lane would stroke solid at the declared width.
+    IRStyle hidden_border;
+    hidden_border.border_style = "none";
+    hidden_border.border_width = 2.0f;
+    const auto hidden_notes = unlowered_notes(hidden_border);
+    CHECK(std::any_of(hidden_notes.begin(), hidden_notes.end(), [](const std::string& detail) {
+        return detail.rfind("border-style is set", 0) == 0;
+    }));
+
+    // With no recorded width CSS paints `medium`, which this lane does not draw,
+    // whatever the style.
+    const auto border_note = [&](const IRStyle& style) {
+        const auto notes = unlowered_notes(style);
+        const auto found = std::find_if(notes.begin(), notes.end(), [](const std::string& detail) {
+            return detail.rfind("border-style is set", 0) == 0;
+        });
+        return found == notes.end() ? std::string() : *found;
+    };
+    for (const char* unrecorded_style : {"dashed", "solid"}) {
+        IRStyle unrecorded_width_border;
+        unrecorded_width_border.border_style = unrecorded_style;
+        CAPTURE(unrecorded_style);
+        CHECK(border_note(unrecorded_width_border).find("the border does not render") !=
+              std::string::npos);
+    }
+
+    // A solid border stroked on one side only leaves CSS's `medium` sides bare.
+    IRStyle partial_solid_border;
+    partial_solid_border.border_style = "solid";
+    partial_solid_border.border_top_width = 2.0f;
+    CHECK(border_note(partial_solid_border).find("sides with no recorded width do not render") !=
+          std::string::npos);
 }
 
 // A faithful browser capture is one absolutely-positioned backdrop image with

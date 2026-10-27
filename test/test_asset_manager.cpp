@@ -542,6 +542,43 @@ TEST_CASE("AssetManager rejects malformed data URIs", "[view][assets]") {
     REQUIRE_FALSE(no_payload.valid());
 }
 
+TEST_CASE("AssetManager data URI bytes are returned whatever the image format",
+          "[view][assets][inline-image]") {
+    // "GIF87a" plus two bytes, base64-encoded with a line break in the payload.
+    auto gif = AssetManager::decode_data_uri_bytes("data:image/gif;base64,R0lGODdh\nEAA=");
+    REQUIRE(gif == std::vector<uint8_t>{'G', 'I', 'F', '8', '7', 'a', 0x10, 0x00});
+    // The PNG-only image loader still reports no dimensions for those bytes.
+    REQUIRE_FALSE(AssetManager::instance()
+                      .load_image_from_data_uri("data:image/gif;base64,R0lGODdhEAA=")
+                      .valid());
+
+    REQUIRE(AssetManager::decode_data_uri_bytes("data:image/gif;base64").empty());
+    REQUIRE(AssetManager::decode_data_uri_bytes("data:image/gif;base64,").empty());
+}
+
+TEST_CASE("AssetManager data URI without ;base64 is percent-decoded",
+          "[view][assets][inline-image]") {
+    REQUIRE(AssetManager::decode_data_uri_bytes("data:image/gif,GIF87a%10%00%ff") ==
+            std::vector<uint8_t>{'G', 'I', 'F', '8', '7', 'a', 0x10, 0x00, 0xff});
+    // The media type is optional and its parameters are not the base64 marker.
+    REQUIRE(AssetManager::decode_data_uri_bytes("data:,a%2Cb") ==
+            std::vector<uint8_t>{'a', ',', 'b'});
+    REQUIRE(AssetManager::decode_data_uri_bytes("data:image/svg+xml;charset=utf-8,%3Csvg%3E") ==
+            std::vector<uint8_t>{'<', 's', 'v', 'g', '>'});
+    // The base64 marker is case-insensitive.
+    REQUIRE(AssetManager::decode_data_uri_bytes("data:image/gif;BASE64,R0lGODdh") ==
+            std::vector<uint8_t>{'G', 'I', 'F', '8', '7', 'a'});
+    // A base64 payload that is itself URL-escaped is unescaped first: "+/8="
+    // written as %2B%2F8%3D is the bytes 0xfb 0xff.
+    REQUIRE(AssetManager::decode_data_uri_bytes("data:image/gif;base64,%2B%2F8%3D") ==
+            std::vector<uint8_t>{0xfb, 0xff});
+    REQUIRE(AssetManager::decode_data_uri_bytes("data:image/gif;base64,R0lGODdh%0A") ==
+            std::vector<uint8_t>{'G', 'I', 'F', '8', '7', 'a'});
+    // A malformed escape yields no bytes rather than a corrupted payload.
+    REQUIRE(AssetManager::decode_data_uri_bytes("data:image/png,%89PNG%0").empty());
+    REQUIRE(AssetManager::decode_data_uri_bytes("data:image/png,%zzPNG").empty());
+}
+
 // ── Display Scale ───────────────────────────────────────────────────────────
 
 TEST_CASE("AssetManager display scale", "[view][assets]") {
@@ -758,4 +795,30 @@ TEST_CASE("Theme fill_from fills missing tokens", "[view][theme][validation]") {
     REQUIRE(partial.color("bg.primary")->r8() == 0xFF);
     // Missing tokens should come from dark
     REQUIRE(partial.color("text.primary").has_value());
+}
+
+TEST_CASE("AssetManager refuses a file larger than its per-file ceiling",
+          "[view][assets][security]") {
+    auto& assets = AssetManager::instance();
+    const auto previous = assets.max_file_bytes();
+    REQUIRE(previous == AssetManager::kDefaultMaxFileBytes);
+
+    const auto small = make_temp_asset_path("pulp-asset-cap-small", ".bin");
+    const auto large = make_temp_asset_path("pulp-asset-cap-large", ".bin");
+    write_bytes(small, std::vector<uint8_t>(8, 0x5A));
+    write_bytes(large, std::vector<uint8_t>(64, 0x5A));
+
+    assets.set_max_file_bytes(16);
+    REQUIRE(assets.load_blob(small.string()).valid());
+    REQUIRE_FALSE(assets.load_blob(large.string()).valid());
+    REQUIRE_FALSE(assets.load_font(large.string()).valid());
+
+    // Control: lifting the ceiling (0 = unlimited) reads the same file.
+    assets.set_max_file_bytes(0);
+    REQUIRE(assets.load_blob(large.string()).data.size() == 64);
+
+    assets.set_max_file_bytes(previous);
+    std::error_code ec;
+    std::filesystem::remove(small, ec);
+    std::filesystem::remove(large, ec);
 }

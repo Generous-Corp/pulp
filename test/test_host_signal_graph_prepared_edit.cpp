@@ -961,12 +961,21 @@ TEST_CASE("SignalGraph Concurrent scalar preparation status tolerates lifecycle 
 
     const bool observer_started = pulp::test::wait_for_progress(reads);
     bool prepared = true;
+    bool overlapped = false;
     if (observer_started) {
+        // Thirty-two prepare/release cycles take well under a millisecond, so a
+        // fixed cycle count can finish while the observer is descheduled and
+        // never overlap it. Keep cycling until a read has landed during the
+        // mutation; the deadline fails a graph that blocks its readers.
+        int cycles = 0;
         mutating.store(true, std::memory_order_relaxed);
-        for (int cycle = 0; cycle < 32; ++cycle) {
-            prepared = graph.prepare(48000.0, 64) && prepared;
-            graph.release();
-        }
+        overlapped = pulp::test::pump_until(
+            [&] { return cycles >= 32 && concurrent_reads.load(std::memory_order_relaxed) > 0; },
+            [&] {
+                prepared = graph.prepare(48000.0, 64) && prepared;
+                graph.release();
+                ++cycles;
+            });
         mutating.store(false, std::memory_order_relaxed);
     }
     stop.store(true, std::memory_order_release);
@@ -974,6 +983,7 @@ TEST_CASE("SignalGraph Concurrent scalar preparation status tolerates lifecycle 
 
     REQUIRE(observer_started);
     REQUIRE(prepared);
+    REQUIRE(overlapped);
     REQUIRE(concurrent_reads.load(std::memory_order_relaxed) > 0);
     REQUIRE(valid_sizes.load(std::memory_order_relaxed));
     REQUIRE_FALSE(graph.is_prepared());

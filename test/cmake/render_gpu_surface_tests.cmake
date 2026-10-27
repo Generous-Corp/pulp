@@ -24,8 +24,8 @@
                 --receipt "${CMAKE_CURRENT_BINARY_DIR}/wgpu-native-staged-receipt.json")
         set_tests_properties(pulp-gpu-wgpu-native-staged-diagnostic PROPERTIES
             RESOURCE_LOCK pulp_gpu
-            SKIP_RETURN_CODE 77
-            TIMEOUT 60)
+            TIMEOUT 60
+            SKIP_RETURN_CODE 77)
         add_test(NAME pulp-gpu-wgpu-native-staged-identity-negative-control
             COMMAND "${Python3_EXECUTABLE}"
                 "${PROJECT_SOURCE_DIR}/tools/diagnostics/test_verify_wgpu_native_staged.py"
@@ -39,9 +39,65 @@
             TIMEOUT 60)
     endif()
 
+    # Typed verifier controls are pure Python and must run even when the
+    # opt-in native diagnostic is unavailable. Keep the planted positive and
+    # negative controls in the default test graph whenever Python is present.
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME pulp-gpu-wgpu-native-staged-verifier-typed-controls
+            COMMAND "${Python3_EXECUTABLE}"
+                "${PROJECT_SOURCE_DIR}/tools/diagnostics/test_verify_wgpu_native_staged.py"
+                --typed-only)
+        set_tests_properties(pulp-gpu-wgpu-native-staged-verifier-typed-controls PROPERTIES
+            TIMEOUT 30)
+    endif()
+
     add_executable(pulp-test-gpu-surface test_gpu_surface.cpp)
     target_link_libraries(pulp-test-gpu-surface PRIVATE pulp::render Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-gpu-surface ${PULP_GPU_TEST_DISCOVERY_ARGS})
+
+    # SkiaSurface readback size on a real CAMetalLayer swapchain.
+    if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA)
+        add_executable(pulp-test-skia-surface-readback-macos
+            test_skia_surface_readback_macos.mm)
+        target_link_libraries(pulp-test-skia-surface-readback-macos PRIVATE
+            pulp::render Catch2::Catch2WithMain
+            "-framework Metal" "-framework QuartzCore")
+        catch_discover_tests(pulp-test-skia-surface-readback-macos
+            ${PULP_GPU_TEST_DISCOVERY_ARGS})
+    endif()
+
+    # Swapchain configures counted on a real CAMetalLayer. Reads the acquired
+    # wgpu::Texture's size, so it needs the Dawn headers Skia ships.
+    if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA)
+        add_executable(pulp-test-gpu-surface-swapchain-macos
+            test_gpu_surface_swapchain_macos.mm)
+        target_link_libraries(pulp-test-gpu-surface-swapchain-macos PRIVATE
+            pulp::render Catch2::Catch2WithMain
+            "-framework AppKit" "-framework Metal" "-framework QuartzCore")
+        target_include_directories(pulp-test-gpu-surface-swapchain-macos PRIVATE
+            ${SKIA_INCLUDE_DIRS})
+        if(EXISTS "${SKIA_INCLUDE_DIRS}/dawn")
+            target_include_directories(pulp-test-gpu-surface-swapchain-macos PRIVATE
+                "${SKIA_INCLUDE_DIRS}/dawn")
+        endif()
+        catch_discover_tests(pulp-test-gpu-surface-swapchain-macos
+            ${PULP_GPU_TEST_DISCOVERY_ARGS})
+    endif()
+
+    # Live resize through the GPU plug-in host: a set_size flood, one final
+    # set_size, and a native resize with no host call (Logic's AU v2 path).
+    # Each frame configures once and notifies the processor once, with the
+    # latest size. It reads the host's GpuSurface, so it lives with the GPU
+    # tests (this file is included only with PULP_ENABLE_GPU) and links
+    # pulp::render, not in the pulp::view-only AppKit group.
+    if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA)
+        add_executable(pulp-test-plugin-view-resize-macos
+            test_plugin_view_host_resize_macos.mm)
+        target_link_libraries(pulp-test-plugin-view-resize-macos PRIVATE
+            pulp::view pulp::render Catch2::Catch2WithMain "-framework AppKit")
+        catch_discover_tests(pulp-test-plugin-view-resize-macos
+            ${PULP_GPU_TEST_DISCOVERY_ARGS})
+    endif()
 
     # Skia surface test — also covers SkPicture (.skp) serialization on the
     # Graphite backend. The .skp round-trip cases include
@@ -61,6 +117,22 @@
     endif()
     catch_discover_tests(pulp-test-skia-surface ${PULP_GPU_TEST_DISCOVERY_ARGS})
 
+    # The glyph preblend every Skia surface is created with: selection rule,
+    # props, and that retained layers, screenshots and GPU surfaces carry it.
+    # The raster cases run everywhere; the GPU cases skip without an adapter.
+    add_executable(pulp-test-text-raster-policy test_text_raster_policy.cpp)
+    target_link_libraries(pulp-test-text-raster-policy PRIVATE
+        pulp::render pulp::view Catch2::Catch2WithMain)
+    target_compile_definitions(pulp-test-text-raster-policy PRIVATE
+        PULP_TEST_JETBRAINS_TTF="${CMAKE_SOURCE_DIR}/external/fonts/JetBrainsMono-Regular.ttf")
+    if(PULP_HAS_SKIA)
+        target_compile_definitions(pulp-test-text-raster-policy PRIVATE PULP_HAS_SKIA=1)
+        target_include_directories(pulp-test-text-raster-policy PRIVATE ${SKIA_INCLUDE_DIRS})
+    endif()
+    pulp_test_data(pulp-test-text-raster-policy NO_DEFINE
+        PATHS external/fonts/JetBrainsMono-Regular.ttf)
+    catch_discover_tests(pulp-test-text-raster-policy ${PULP_GPU_TEST_DISCOVERY_ARGS})
+
     # HeadlessSurface CI wrapper: one-call offscreen Dawn/Skia helper
     # for golden-test fixtures. Compiles on every
     # build; runtime cases gate on PULP_HAS_SKIA && __APPLE__ at the
@@ -79,6 +151,23 @@
     catch_discover_tests(pulp-test-headless-surface
         ${PULP_GPU_TEST_DISCOVERY_ARGS})
 
+    # Caller SkSL whose locals share Graphite's runtime-effect parameter names
+    # (pos, inColor, destColor), drawn and read back on offscreen Graphite,
+    # plus a direct SkRuntimeEffect draw proving the hazard still exists.
+    add_executable(pulp-test-runtime-effect-names-gpu
+        test_runtime_effect_names_gpu.cpp)
+    target_link_libraries(pulp-test-runtime-effect-names-gpu PRIVATE
+        pulp::render pulp::canvas Catch2::Catch2WithMain)
+    if(PULP_HAS_SKIA)
+        target_compile_definitions(pulp-test-runtime-effect-names-gpu PRIVATE
+            PULP_HAS_SKIA=1)
+        # The negative control compiles SkSL with SkRuntimeEffect directly.
+        target_include_directories(pulp-test-runtime-effect-names-gpu PRIVATE
+            ${SKIA_INCLUDE_DIRS})
+    endif()
+    catch_discover_tests(pulp-test-runtime-effect-names-gpu
+        ${PULP_GPU_TEST_DISCOVERY_ARGS})
+
     # Direct native Metal availability/timing probe. This is test-only: it
     # establishes the host capability before any production backend integration.
     if(APPLE AND NOT IOS AND NOT PULP_IOS)
@@ -93,22 +182,76 @@
             SKIP_RETURN_CODE 77
             TIMEOUT 20)
 
-        # Matched ordinary-Metal and Metal 4 controls for the shared audio
-        # multiply. These remain test-only and never run from an audio callback.
+        # Matched Dawn-vs-native-Metal comparator (WP-Q): the same convolution
+        # program on both sides, paced, idle and under a Skia render load.
+        # Test-only; never runs from an audio callback. The ctest is a short
+        # smoke plus the planted unmatched-kernel negative; the campaign runs
+        # through tools/scripts/gpu_audio_comparator_v2.py run.
         add_executable(pulp-test-native-metal-audio-comparator
             test_metal_native_audio_comparator.mm)
         target_link_libraries(pulp-test-native-metal-audio-comparator PRIVATE
             "-framework Metal" "-framework Foundation" pulp::gpu-audio)
+        target_compile_options(pulp-test-native-metal-audio-comparator PRIVATE -fobjc-arc)
         target_include_directories(pulp-test-native-metal-audio-comparator PRIVATE
             "${PROJECT_SOURCE_DIR}/core/gpu_audio/src")
+        set(_pulp_comparator_dawn_sha "")
+        if(TARGET pulp-gpu-audio)
+            get_target_property(_pulp_comparator_dawn_sha pulp-gpu-audio
+                PULP_PROVIDER_expected_dawn_sha)
+            if(NOT _pulp_comparator_dawn_sha)
+                set(_pulp_comparator_dawn_sha "")
+            endif()
+        endif()
+        # Hash the provider WGSL at configure time: that is the WGSL compiled into
+        # pulp-gpu-audio, and the comparator refuses a run whose source tree
+        # disagrees with it.
+        set(_pulp_comparator_provider
+            "${PROJECT_SOURCE_DIR}/core/gpu_audio/src/detail/dawn_shared_io_provider.cpp")
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+            "${_pulp_comparator_provider}")
+        file(READ "${_pulp_comparator_provider}" _pulp_comparator_src)
+        foreach(_kernel Fft Mul)
+            string(TOUPPER "${_kernel}" _kernel_upper)
+            set(_pulp_comparator_${_kernel_upper} "")
+            set(_marker "constexpr auto kSharedIo${_kernel}Wgsl = R\"wgsl(")
+            string(FIND "${_pulp_comparator_src}" "${_marker}" _begin)
+            if(_begin GREATER -1)
+                string(LENGTH "${_marker}" _marker_length)
+                math(EXPR _begin "${_begin} + ${_marker_length}")
+                string(SUBSTRING "${_pulp_comparator_src}" ${_begin} -1 _rest)
+                string(FIND "${_rest}" ")wgsl\"" _end)
+                if(_end GREATER -1)
+                    string(SUBSTRING "${_rest}" 0 ${_end} _body)
+                    string(SHA256 _pulp_comparator_${_kernel_upper} "${_body}")
+                endif()
+            endif()
+        endforeach()
         target_compile_definitions(pulp-test-native-metal-audio-comparator PRIVATE
-            PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_pulp_gpu_audio_expected_dawn_sha}")
+            PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_pulp_comparator_dawn_sha}"
+            PULP_GPU_AUDIO_PROVIDER_SOURCE="${_pulp_comparator_provider}"
+            PULP_COMPARATOR_BUILD_FFT_WGSL_SHA256="${_pulp_comparator_FFT}"
+            PULP_COMPARATOR_BUILD_MUL_WGSL_SHA256="${_pulp_comparator_MUL}")
+        unset(_pulp_comparator_dawn_sha)
+        unset(_pulp_comparator_src)
+        # The kernel digest reads the WGSL the provider compiles from its source.
+        pulp_test_data(pulp-test-native-metal-audio-comparator NO_DEFINE
+            PATHS core/gpu_audio/src/detail/dawn_shared_io_provider.cpp)
+        if(PULP_HAS_SKIA AND TARGET pulp::render AND TARGET pulp::canvas)
+            target_link_libraries(pulp-test-native-metal-audio-comparator PRIVATE
+                pulp::render pulp::canvas)
+            target_compile_definitions(pulp-test-native-metal-audio-comparator PRIVATE
+                PULP_COMPARATOR_HAS_RENDER_LOAD=1)
+        endif()
+        find_package(Python3 REQUIRED COMPONENTS Interpreter)
         add_test(NAME pulp-test-native-metal-audio-comparator
-            COMMAND pulp-test-native-metal-audio-comparator)
+            COMMAND "${Python3_EXECUTABLE}"
+                "${PROJECT_SOURCE_DIR}/tools/scripts/gpu_audio_comparator_v2.py" smoke
+                --binary "$<TARGET_FILE:pulp-test-native-metal-audio-comparator>"
+                --out-dir "${CMAKE_CURRENT_BINARY_DIR}/gpu-audio-comparator-smoke")
         set_tests_properties(pulp-test-native-metal-audio-comparator PROPERTIES
             RESOURCE_LOCK pulp_gpu
             SKIP_RETURN_CODE 77
-            TIMEOUT 30)
+            TIMEOUT 300)
     endif()
 
     # GPU compute tests.
@@ -144,6 +287,7 @@
             PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_pulp_gpu_audio_expected_dawn_sha}"
             PULP_GPU_AUDIO_BUILD_TYPE="$<CONFIG>")
         if(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
+            pulp_gpu_proof_begin()
             find_package(Python3 REQUIRED COMPONENTS Interpreter)
             set_property(TARGET pulp-gpu-host-mapped-pointer-probe APPEND PROPERTY
                 LINK_DEPENDS
@@ -200,6 +344,7 @@
             set_tests_properties(pulp-gpu-audio-provider-identity PROPERTIES
                 FIXTURES_SETUP pulp_gpu_audio_provider_identity
                 TIMEOUT 60)
+            pulp_gpu_proof_end()
         endif()
         add_test(NAME pulp-gpu-host-mapped-pointer-probe
             COMMAND pulp-gpu-host-mapped-pointer-probe)
@@ -241,19 +386,12 @@
                 SKIP_RETURN_CODE 77
                 TIMEOUT 20)
         if(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
-            set_tests_properties(
-                pulp-gpu-host-mapped-pointer-probe
-                pulp-gpu-host-mapped-pointer-oracle-negative-control
-                pulp-gpu-host-mapped-pointer-feature-gate-negative-control
-                pulp-gpu-host-mapped-pointer-write-buffer-counter-negative-control
-                pulp-gpu-host-mapped-pointer-copy-buffer-counter-negative-control
-                pulp-gpu-host-mapped-pointer-map-async-counter-negative-control
-                PROPERTIES FIXTURES_REQUIRED pulp_gpu_audio_provider_identity)
-            if(_pulp_gpu_audio_target_is_arm64)
-                set_tests_properties(
-                    pulp-gpu-host-mapped-pointer-provider-negative-control
-                    PROPERTIES FIXTURES_REQUIRED pulp_gpu_audio_provider_identity)
-            endif()
+            pulp_gpu_proof_begin()
+            # The host-mapped pointer tests above are ordinary gate tests, not
+            # gpu-proof: they check the linked Dawn revision themselves at run
+            # time and never read the bound identity receipt. Requiring the
+            # identity fixture here would make ctest pull that gpu-proof setup
+            # into every selection that runs them, including the gate.
 
             add_executable(pulp-gpu-dawn-shared-io-provider-probe
                 test_gpu_dawn_shared_io_provider_probe.cpp)
@@ -599,11 +737,50 @@
                     RESOURCE_LOCK pulp_gpu
                     TIMEOUT 60)
 
+            # The provider conformance kit instantiated for the physical Dawn
+            # provider (the fake instantiation runs on every lane). Its receipt
+            # must derive kind=real from an authenticated identity, skip no
+            # scenario and carry a Dawn imported/staged pair. Catch2 exits 4
+            # when the device is unavailable; that run deletes the receipt
+            # first, so the verify step then skips (77) instead of reading a
+            # stale file.
+            add_executable(pulp-test-gpu-dawn-shared-io-provider-conformance
+                test_gpu_dawn_shared_io_provider_conformance.cpp)
+            target_link_libraries(pulp-test-gpu-dawn-shared-io-provider-conformance PRIVATE
+                pulp::gpu-audio Catch2::Catch2WithMain)
+            target_include_directories(pulp-test-gpu-dawn-shared-io-provider-conformance PRIVATE
+                ../core/gpu_audio/src)
+            target_compile_definitions(pulp-test-gpu-dawn-shared-io-provider-conformance PRIVATE
+                PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_pulp_gpu_audio_expected_dawn_sha}")
+            add_dependencies(pulp-test-gpu-dawn-shared-io-provider-conformance
+                pulp-gpu-dawn-shared-io-provider-probe)
+            set(_pulp_gpu_dawn_conformance_receipt
+                "${CMAKE_CURRENT_BINARY_DIR}/gpu-audio-provider-conformance-dawn.json")
+            add_test(NAME pulp-test-gpu-dawn-shared-io-provider-conformance
+                COMMAND "${CMAKE_COMMAND}" -E env
+                    "PULP_PROVIDER_CONFORMANCE_RECEIPT=${_pulp_gpu_dawn_conformance_receipt}"
+                    $<TARGET_FILE:pulp-test-gpu-dawn-shared-io-provider-conformance>)
+            set_tests_properties(pulp-test-gpu-dawn-shared-io-provider-conformance PROPERTIES
+                FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
+                FIXTURES_SETUP pulp_gpu_dawn_provider_conformance_receipt
+                RESOURCE_LOCK pulp_gpu
+                SKIP_RETURN_CODE 4
+                TIMEOUT 300)
+            add_test(NAME pulp-gpu-dawn-provider-conformance-receipt-verify
+                COMMAND "${Python3_EXECUTABLE}"
+                    "${PROJECT_SOURCE_DIR}/tools/validation/verify_gpu_audio_provider_conformance.py"
+                    "${_pulp_gpu_dawn_conformance_receipt}" --forbid-skips --require-pair
+                    --require-kind real --skip-if-missing)
+            set_tests_properties(pulp-gpu-dawn-provider-conformance-receipt-verify PROPERTIES
+                FIXTURES_REQUIRED pulp_gpu_dawn_provider_conformance_receipt
+                SKIP_RETURN_CODE 77
+                TIMEOUT 30)
+
             # Bounded private one-stream WaveNet qualification. This probe is
             # admitted only after exact provider identity and exercises the
             # resident causal plan, imported audio-slot accounting, CPU oracle,
-            # late-result rejection, explicit reprime, and immutable receipt
-            # digest. It has no installed/public provider or generic runtime
+            # late-result rejection, explicit reprime, immutable receipt
+            # digest, and admission-time loss and refusal on the stamped node. It has no installed/public provider or generic runtime
             # surface; unavailable physical Dawn remains a typed skip (77).
             add_executable(pulp-gpu-dawn-wavenet-qualification
                 test_gpu_dawn_wavenet_qualification.cpp)
@@ -625,6 +802,19 @@
             endif()
             add_dependencies(pulp-gpu-dawn-wavenet-qualification
                 pulp-gpu-dawn-shared-io-provider-probe)
+            # Real-Dawn campaign for the WaveNet node's watchdog window: per-block
+            # silence in callback blocks and wall time behind the production
+            # session and transport worker, true-hang detection latency, and
+            # which cause latches first at each capacity. A measurement tool,
+            # not a ctest.
+            add_executable(pulp-gpu-dawn-wavenet-watchdog-campaign
+                test_gpu_dawn_wavenet_watchdog_campaign.mm)
+            target_link_libraries(pulp-gpu-dawn-wavenet-watchdog-campaign PRIVATE
+                pulp::gpu-audio "-framework Foundation")
+            target_include_directories(pulp-gpu-dawn-wavenet-watchdog-campaign PRIVATE
+                ../core/gpu_audio/src)
+            target_compile_definitions(pulp-gpu-dawn-wavenet-watchdog-campaign PRIVATE
+                PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_pulp_gpu_audio_expected_dawn_sha}")
             # Bind this qualification executable to the exact provider inputs
             # just as the shared-I/O probe is bound. A passing runtime result
             # is not sufficient when the executable could have been relinked
@@ -697,6 +887,71 @@
                 SKIP_RETURN_CODE 77
                 TIMEOUT 60)
 
+            # Narrow physical proof for the private WaveNet provider's mixed
+            # dilation history layout. The test binds the preparation writes to
+            # the independently expected per-layer ring sizes and requires a
+            # submission to make no copies or host writes; it does not alter the
+            # provider's runtime behavior.
+            add_executable(pulp-gpu-dawn-wavenet-history-probe
+                test_gpu_dawn_wavenet_history_probe.cpp)
+            target_link_libraries(pulp-gpu-dawn-wavenet-history-probe PRIVATE
+                pulp::gpu-audio)
+            target_include_directories(pulp-gpu-dawn-wavenet-history-probe PRIVATE
+                ../core/gpu_audio/src)
+            target_include_directories(pulp-gpu-dawn-wavenet-history-probe PRIVATE
+                ${SKIA_INCLUDE_DIRS})
+            if(EXISTS "${SKIA_INCLUDE_DIRS}/dawn")
+                target_include_directories(pulp-gpu-dawn-wavenet-history-probe PRIVATE
+                    "${SKIA_INCLUDE_DIRS}/dawn")
+            endif()
+            target_compile_definitions(pulp-gpu-dawn-wavenet-history-probe PRIVATE
+                PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_pulp_gpu_audio_expected_dawn_sha}")
+            if(PULP_GPU_AUDIO_HAS_VELLUM_D15)
+                target_link_libraries(pulp-gpu-dawn-wavenet-history-probe PRIVATE
+                    Vellum::Gpu Vellum::DawnHeaders)
+            endif()
+            add_dependencies(pulp-gpu-dawn-wavenet-history-probe
+                pulp-gpu-dawn-shared-io-provider-probe)
+            add_test(NAME pulp-gpu-dawn-wavenet-history-probe
+                COMMAND pulp-gpu-dawn-wavenet-history-probe)
+            set_tests_properties(pulp-gpu-dawn-wavenet-history-probe PROPERTIES
+                FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
+                RESOURCE_LOCK pulp_gpu
+                SKIP_RETURN_CODE 77
+                TIMEOUT 60)
+
+            # Physical proof that the private WaveNet provider keeps completing
+            # blocks with staged storage plus opt-in GPU timestamps (two slots,
+            # six blocks, bounded per-block deadline) and that the audio matches
+            # imported storage byte for byte, for an ungated and a gated net.
+            add_executable(pulp-gpu-dawn-wavenet-staged-timestamps-probe
+                test_gpu_dawn_wavenet_staged_timestamps_probe.cpp)
+            target_link_libraries(pulp-gpu-dawn-wavenet-staged-timestamps-probe PRIVATE
+                pulp::gpu-audio)
+            target_include_directories(pulp-gpu-dawn-wavenet-staged-timestamps-probe PRIVATE
+                ../core/gpu_audio/src)
+            target_include_directories(pulp-gpu-dawn-wavenet-staged-timestamps-probe PRIVATE
+                ${SKIA_INCLUDE_DIRS})
+            if(EXISTS "${SKIA_INCLUDE_DIRS}/dawn")
+                target_include_directories(pulp-gpu-dawn-wavenet-staged-timestamps-probe PRIVATE
+                    "${SKIA_INCLUDE_DIRS}/dawn")
+            endif()
+            target_compile_definitions(pulp-gpu-dawn-wavenet-staged-timestamps-probe PRIVATE
+                PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_pulp_gpu_audio_expected_dawn_sha}")
+            if(PULP_GPU_AUDIO_HAS_VELLUM_D15)
+                target_link_libraries(pulp-gpu-dawn-wavenet-staged-timestamps-probe PRIVATE
+                    Vellum::Gpu Vellum::DawnHeaders)
+            endif()
+            add_dependencies(pulp-gpu-dawn-wavenet-staged-timestamps-probe
+                pulp-gpu-dawn-shared-io-provider-probe)
+            add_test(NAME pulp-gpu-dawn-wavenet-staged-timestamps-probe
+                COMMAND pulp-gpu-dawn-wavenet-staged-timestamps-probe)
+            set_tests_properties(pulp-gpu-dawn-wavenet-staged-timestamps-probe PROPERTIES
+                FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
+                RESOURCE_LOCK pulp_gpu
+                SKIP_RETURN_CODE 77
+                TIMEOUT 120)
+
             if(PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER)
                 # Matched staged/shared lifecycle screening. This is deliberately
                 # an intermediate p4.matched.v1 diagnostic and never emits p4.raw.v1:
@@ -762,6 +1017,7 @@
                         TIMEOUT 180)
                 endif()
             endif()
+            pulp_gpu_proof_end()
         endif()
 
         unset(_pulp_gpu_audio_asset_sha256)
@@ -779,3 +1035,10 @@
     add_executable(pulp-gpu-roofline-harness
         "${PROJECT_SOURCE_DIR}/tools/gpu_roofline/gpu_roofline_harness.cpp")
     target_link_libraries(pulp-gpu-roofline-harness PRIVATE pulp::render pulp::signal)
+
+    # Multi-instance WaveNet scaling bench (tooling, not a test): per-period wall,
+    # thread CPU and GPU-busy time for N streams via per-instance or batched
+    # forwards, each stream checked against a double-precision CPU reference.
+    add_executable(pulp-gpu-wavenet-scaling-bench
+        "${PROJECT_SOURCE_DIR}/tools/gpu_roofline/gpu_wavenet_scaling_bench.cpp")
+    target_link_libraries(pulp-gpu-wavenet-scaling-bench PRIVATE pulp::render pulp::runtime)

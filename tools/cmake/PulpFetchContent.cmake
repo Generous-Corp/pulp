@@ -79,6 +79,8 @@ function(pulp_register_fetchcontent_source name)
     set(fetchcontent_var "FETCHCONTENT_SOURCE_DIR_${upper_name}")
     set(shared_marker "PULP_FETCHCONTENT_SOURCE_IS_SHARED_${upper_name}")
     set(shared_path_marker "PULP_FETCHCONTENT_SHARED_SELECTED_PATH_${upper_name}")
+    # The registered REF is the pin a materialized git checkout must sit on.
+    set(PULP_FETCHCONTENT_REGISTERED_REF_${upper_name} "${PFC_REF}" PARENT_SCOPE)
 
     set(expected_shared_candidate "")
     if(PULP_USE_SHARED_FETCHCONTENT_SOURCES)
@@ -239,6 +241,22 @@ function(pulp_materialize_mutable_fetchcontent_source name)
                 set(source_commit "")
             endif()
         endif()
+    endif()
+    # A shared-cache entry is keyed by its registered REF, but the key is
+    # only a directory name: nothing else proves the checkout inside it is
+    # the pinned commit. When the REF is a commit hash and the source is a
+    # git checkout, the two must agree before the tree is copied and
+    # patched. Tarball sources and symbolic REFs carry no HEAD to compare.
+    set(registered_ref "${PULP_FETCHCONTENT_REGISTERED_REF_${upper_name}}")
+    string(TOLOWER "${registered_ref}" registered_ref)
+    if(source_commit AND registered_ref MATCHES "^[0-9a-f]+$"
+       AND NOT source_commit MATCHES "^${registered_ref}")
+        message(FATAL_ERROR
+            "Pulp: ${name} shared source ${source_real} is at commit "
+            "${source_commit}, but pulp_register_fetchcontent_source pinned "
+            "${registered_ref}. Refusing to patch a tree that is not the "
+            "registered pin; re-run ./setup.sh or point "
+            "FETCHCONTENT_SOURCE_DIR_${upper_name} at the pinned checkout.")
     endif()
     set(expected_stamp "${source_real}\n${PMFS_PATCH_KEY}\n${source_commit}\n")
     set(current_stamp "")

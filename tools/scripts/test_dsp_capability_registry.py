@@ -23,7 +23,13 @@ spec.loader.exec_module(registry)
 projection = registry.extract(ROOT)
 assert len(projection["catalogs"]) == 29
 assert sum(len(c["type_ids"]) for c in projection["catalogs"]) == 115
-assert sum(len(n["baked_params"]) for c in projection["catalogs"] for n in c["nodes"]) == 400
+# The baked-parameter total grows whenever any catalog gains a control, so it
+# is pinned to the reviewed snapshot's own count rather than a literal. That
+# keeps it a cross-check of the extractor's walk (the count is summed from the
+# fresh projection) without a hand edit for every new control; the per-node
+# lists below stay literal where a dropped parameter would matter.
+snapshot_counts = json.loads((ROOT / registry.SNAPSHOT).read_text(encoding="utf-8"))["counts"]
+assert sum(len(n["baked_params"]) for c in projection["catalogs"] for n in c["nodes"]) == snapshot_counts["baked_params"]
 
 sequencing = next(
     c for c in projection["catalogs"]

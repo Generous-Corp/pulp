@@ -253,3 +253,51 @@ TEST_CASE("a collapsed editor still asks for at least one pixel",
     REQUIRE(g.pixel_width() == 1);
     REQUIRE(g.pixel_height() == 1);
 }
+
+// ── Physical size at a fractional scale ─────────────────────────────────────
+
+TEST_CASE("frame geometry keeps a reported physical size at a fractional scale",
+          "[plugin-frame-renderer][hidpi]") {
+    // A 1001 x 751 client at 1.5x is 667 x 501 logical, which multiplies back
+    // to 1000 x 751: the derived surface loses a column.
+    FrameGeometry derived;
+    derived.width = 667.0f;
+    derived.height = 501.0f;
+    derived.scale = 1.5f;
+    REQUIRE(derived.pixel_width() == 1000);
+    REQUIRE(derived.pixel_height() == 751);
+
+    FrameGeometry reported = derived;
+    reported.physical_width = 1001;
+    reported.physical_height = 751;
+    CHECK(reported.pixel_width() == 1001);
+    CHECK(reported.pixel_height() == 751);
+
+    // Neighbouring client widths that round to one logical width stay apart.
+    reported.physical_width = 1000;
+    CHECK(reported.pixel_width() == 1000);
+}
+
+TEST_CASE("frame geometry paints to the edge of a reported physical size",
+          "[plugin-frame-renderer][hidpi]") {
+    // With the logical size taken from the client rect (1001 / 1.5), the
+    // background fill reaches the last physical column instead of stopping
+    // half a pixel short of it at 667 logical.
+    FrameGeometry g;
+    g.scale = 1.5f;
+    g.physical_width = 1001;
+    g.physical_height = 751;
+    g.width = 1001.0f / g.scale;
+    g.height = 751.0f / g.scale;
+    pulp::canvas::RecordingCanvas canvas;
+    View root;
+    paint_plugin_scene(canvas, root, g, nullptr);
+
+    const auto& cmds = canvas.commands();
+    const auto fill = std::find_if(cmds.begin(), cmds.end(), [](const auto& c) {
+        return c.type == pulp::canvas::DrawCommand::Type::fill_rect;
+    });
+    REQUIRE(fill != cmds.end());
+    CHECK(fill->f[2] * g.scale >= 1001.0f - 1e-3f);
+    CHECK(fill->f[3] * g.scale >= 751.0f - 1e-3f);
+}

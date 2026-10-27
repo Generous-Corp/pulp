@@ -9,7 +9,9 @@
 // as text_editor_paint.cpp. All definitions are View:: members declared in
 // view.hpp, so the move needs no friend decls or header churn.
 
+#include <pulp/canvas/resource_counters.hpp>
 #include <pulp/view/view.hpp>
+#include <pulp/view/border_style.hpp>
 #include <pulp/view/tracing_badge.hpp>
 #include <pulp/view/capability_fallback.hpp>
 #include <pulp/canvas/canvas.hpp>
@@ -22,8 +24,10 @@
 #endif
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <optional>
@@ -106,16 +110,12 @@ void build_per_corner_rounded_rect_path(
     pulp::canvas::Canvas& canvas,
     float w, float h,
     float tl, float tr, float bl, float br) {
-    const float half_w = w * 0.5f;
-    const float half_h = h * 0.5f;
-    auto clamp = [&](float r) {
-        const float lim = std::min(half_w, half_h);
-        return std::max(0.0f, std::min(r, lim));
-    };
-    tl = clamp(tl);
-    tr = clamp(tr);
-    bl = clamp(bl);
-    br = clamp(br);
+    const auto fitted =
+        pulp::view::fit_corner_radii(w, h, pulp::view::CornerRadii::circular(tl, tr, br, bl));
+    tl = fitted.tl_x;
+    tr = fitted.tr_x;
+    bl = fitted.bl_x;
+    br = fitted.br_x;
     // Cubic kappa for quarter-circle approximation.
     constexpr float k = 0.5522847498f;
 
@@ -330,36 +330,69 @@ namespace {
 /// serves both the element layer (`filter`) and the backdrop layer
 /// (`backdrop-filter`) rather than each keeping its own copy. The switch has
 /// no `default:` so adding a kind to either enum surfaces here.
-std::vector<canvas::Canvas::FilterChainEntry> to_canvas_filter_chain(
-    const std::vector<View::FilterOp>& ops) {
+canvas::Canvas::FilterChainEntry to_canvas_filter_entry(const View::FilterOp& op) {
     using ViewK = View::FilterOp::Kind;
     using CanvK = canvas::Canvas::FilterChainEntry::Kind;
+    canvas::Canvas::FilterChainEntry e{};
+    switch (op.kind) {
+    case ViewK::blur:
+        e.kind = CanvK::blur;
+        break;
+    case ViewK::brightness:
+        e.kind = CanvK::brightness;
+        break;
+    case ViewK::contrast:
+        e.kind = CanvK::contrast;
+        break;
+    case ViewK::grayscale:
+        e.kind = CanvK::grayscale;
+        break;
+    case ViewK::hue_rotate:
+        e.kind = CanvK::hue_rotate;
+        break;
+    case ViewK::invert:
+        e.kind = CanvK::invert;
+        break;
+    case ViewK::opacity:
+        e.kind = CanvK::opacity;
+        break;
+    case ViewK::saturate:
+        e.kind = CanvK::saturate;
+        break;
+    case ViewK::sepia:
+        e.kind = CanvK::sepia;
+        break;
+    case ViewK::drop_shadow:
+        e.kind = CanvK::drop_shadow;
+        break;
+    }
+    e.amount = op.amount;
+    e.angle_deg = op.angle_deg;
+    e.ds_offset_x = op.ds_offset_x;
+    e.ds_offset_y = op.ds_offset_y;
+    e.ds_blur = op.ds_blur;
+    e.ds_color = op.ds_color;
+    return e;
+}
+
+std::vector<canvas::Canvas::FilterChainEntry>
+to_canvas_filter_chain(const std::vector<View::FilterOp>& ops) {
     std::vector<canvas::Canvas::FilterChainEntry> chain;
     chain.reserve(ops.size());
-    for (const auto& op : ops) {
-        canvas::Canvas::FilterChainEntry e{};
-        switch (op.kind) {
-            case ViewK::blur:        e.kind = CanvK::blur;        break;
-            case ViewK::brightness:  e.kind = CanvK::brightness;  break;
-            case ViewK::contrast:    e.kind = CanvK::contrast;    break;
-            case ViewK::grayscale:   e.kind = CanvK::grayscale;   break;
-            case ViewK::hue_rotate:  e.kind = CanvK::hue_rotate;  break;
-            case ViewK::invert:      e.kind = CanvK::invert;      break;
-            case ViewK::opacity:     e.kind = CanvK::opacity;     break;
-            case ViewK::saturate:    e.kind = CanvK::saturate;    break;
-            case ViewK::sepia:       e.kind = CanvK::sepia;       break;
-            case ViewK::drop_shadow: e.kind = CanvK::drop_shadow; break;
-        }
-        e.amount      = op.amount;
-        e.angle_deg   = op.angle_deg;
-        e.ds_offset_x = op.ds_offset_x;
-        e.ds_offset_y = op.ds_offset_y;
-        e.ds_blur     = op.ds_blur;
-        e.ds_color    = op.ds_color;
-        chain.push_back(e);
-    }
+    for (const auto& op : ops)
+        chain.push_back(to_canvas_filter_entry(op));
     return chain;
 }
+
+// Paint runs inside a ScopedNoAlloc region, so a backdrop list, plus the blur
+// and opacity steps push_effect_layers may append, is built on the stack. A
+// longer list, which no design emits, goes to the heap rather than losing
+// entries.
+constexpr std::size_t kInlineBackdropChain = 16;
+
+// Below one 8-bit level of coverage an element paints nothing, so its
+// backdrop is not drawn either.
+constexpr float kMinVisibleOpacity = 1.0f / 255.0f;
 
 }  // namespace
 
@@ -371,9 +404,18 @@ View::EffectLayerState View::push_effect_layers(canvas::Canvas& canvas) {
     // widget's own opacity/filter layer so background, border, and children
     // composite over the frosted backdrop. Paired with the matching restore()
     // in pop_effect_layers.
+    //
+    // CSS opacity covers the element's whole rendering, the backdrop-filter
+    // result included. Chrome draws the filtered backdrop at the element's
+    // opacity and then the element over it at that opacity
+    // (tools/import-validation/chrome_backdrop_opacity_oracle.py), so at
+    // opacity 0 the layer is not opened at all, and below 1 the chain ends in
+    // an opacity() step. An ancestor below opacity 1 needs nothing here: its
+    // own layer is open beneath this one, which makes it the backdrop's root,
+    // as it is in Chrome.
     const auto& backdrop_chain = backdrop_filter_chain();
     bool needs_backdrop_layer =
-        !backdrop_chain.empty() || backdrop_blur() > 0.0f;
+        opacity_ >= kMinVisibleOpacity && (!backdrop_chain.empty() || backdrop_blur() > 0.0f);
     if (needs_backdrop_layer) {
         if (!canvas.supports(canvas::CanvasCapability::backdrop_filter)) {
             warn_capability_fallback_once(
@@ -381,14 +423,15 @@ View::EffectLayerState View::push_effect_layers(canvas::Canvas& canvas) {
                 "canvas backend has no backdrop-filter blur; backdrop-filter "
                 "renders as an unblurred tint");
         }
-        if (backdrop_chain.empty()) {
+        if (backdrop_chain.empty() && opacity_ >= 1.0f) {
             canvas.save_backdrop_filter(0, 0, bounds_.width, bounds_.height,
                                         backdrop_blur());
         } else {
             // A list beyond a bare blur — `saturate()`, `invert()`, a pair of
-            // them. A backend without the chain keeps whatever blur the list
-            // carries and drops the colour half, so the frosting survives but
-            // the tint does not; say so rather than let it pass as faithful.
+            // them — or any backdrop under opacity below 1. A backend without
+            // the chain keeps whatever blur the list carries and drops the
+            // rest, so the frosting survives but the tint and the fade do not;
+            // say so rather than let it pass as faithful.
             if (!canvas.supports(
                     canvas::CanvasCapability::backdrop_filter_chain)) {
                 warn_capability_fallback_once(
@@ -396,10 +439,25 @@ View::EffectLayerState View::push_effect_layers(canvas::Canvas& canvas) {
                     "canvas backend does not honor backdrop-filter color ops; "
                     "backdrop-filter collapses to its blur");
             }
-            const auto chain = to_canvas_filter_chain(backdrop_chain);
-            canvas.save_backdrop_filter_chain(0, 0, bounds_.width,
-                                              bounds_.height, chain.data(),
-                                              static_cast<int>(chain.size()));
+            std::array<canvas::Canvas::FilterChainEntry, kInlineBackdropChain> inline_chain{};
+            std::vector<canvas::Canvas::FilterChainEntry> long_chain;
+            canvas::Canvas::FilterChainEntry* chain = inline_chain.data();
+            if (backdrop_chain.size() + 2 > inline_chain.size()) {
+                long_chain.resize(backdrop_chain.size() + 2);
+                chain = long_chain.data();
+            }
+            int count = 0;
+            for (const auto& op : backdrop_chain)
+                chain[count++] = to_canvas_filter_entry(op);
+            if (backdrop_chain.empty()) {
+                chain[count].kind = canvas::Canvas::FilterChainEntry::Kind::blur;
+                chain[count++].amount = backdrop_blur();
+            }
+            if (opacity_ < 1.0f) {
+                chain[count].kind = canvas::Canvas::FilterChainEntry::Kind::opacity;
+                chain[count++].amount = opacity_;
+            }
+            canvas.save_backdrop_filter_chain(0, 0, bounds_.width, bounds_.height, chain, count);
         }
     }
     state.backdrop_pushed = needs_backdrop_layer;
@@ -684,11 +742,14 @@ void View::apply_overflow_clip(canvas::Canvas& canvas) {
             // overflow:hidden with border-radius clips to the rounded border box,
             // so a square clip saws the corners off (an imported card lost its
             // rounded top and bottom once it opted into clip). Clip to the same
-            // rounded rect the background paints. Each radius is clamped to half
-            // the shorter side so a large radius cannot self-cross the path.
-            const float m = 0.5f * std::min(clip_w, clip_h);
-            ctl = std::min(ctl, m); ctr = std::min(ctr, m);
-            cbl = std::min(cbl, m); cbr = std::min(cbr, m);
+            // rounded rect the background paints, its radii fitted the same way
+            // so a large radius cannot self-cross the path.
+            const auto fitted =
+                fit_corner_radii(clip_w, clip_h, CornerRadii::circular(ctl, ctr, cbr, cbl));
+            ctl = fitted.tl_x;
+            ctr = fitted.tr_x;
+            cbl = fitted.bl_x;
+            cbr = fitted.br_x;
             std::ostringstream d;
             d << "M " << ctl << " 0"
               << " H " << (clip_w - ctr) << " A " << ctr << " " << ctr << " 0 0 1 " << clip_w << " " << ctr
@@ -1133,6 +1194,49 @@ BackgroundPosition resolve_background_position(std::string_view position_css,
 
 // The first tile must cover the element's origin. A positive CSS offset of
 // 2px on a 4px tile therefore starts its visible sequence at -2px, then 2px.
+// The widths each border side paints in a `w` x `h` border box. An explicitly
+// set side wins even when it is 0, otherwise the uniform shorthand applies, as
+// in yoga_layout.cpp's `resolve_edge`. Opposite sides cannot want more than the
+// box has: Chrome gives the NEAR side its full width and the far side only what
+// is left (`border-left: 50px; border-right: 50px` on a 60px-wide box paints
+// 50 and 10, measured). A `none` or `hidden` border has no width at all.
+struct BorderEdges {
+    float top = 0.0f, right = 0.0f, bottom = 0.0f, left = 0.0f;
+};
+
+struct BorderSide {
+    bool set = false;
+    float width = 0.0f;
+};
+
+BorderEdges resolve_border_edges(bool styled, bool has_uniform, float uniform, BorderSide top,
+                                 BorderSide right, BorderSide bottom, BorderSide left, float w,
+                                 float h) {
+    if (!styled)
+        return {};
+    const float uniform_w = has_uniform ? std::max(0.0f, uniform) : 0.0f;
+    const auto edge = [&](BorderSide side) {
+        return side.set ? std::max(0.0f, side.width) : uniform_w;
+    };
+    BorderEdges out;
+    out.top = std::min(edge(top), h);
+    out.bottom = std::min(edge(bottom), std::max(0.0f, h - out.top));
+    out.left = std::min(edge(left), w);
+    out.right = std::min(edge(right), std::max(0.0f, w - out.left));
+    return out;
+}
+
+// Which box a background layer's `background-origin` keyword positions and
+// sizes its tile in. Empty is the initial `padding-box`. `content-box` would
+// also inset by the padding, which paint does not resolve, so it positions in
+// the padding box.
+enum class BackgroundOriginBox { border, padding };
+
+BackgroundOriginBox background_origin_box(std::string_view keyword) {
+    return trim_css(keyword) == "border-box" ? BackgroundOriginBox::border
+                                             : BackgroundOriginBox::padding;
+}
+
 float first_tiled_origin(float offset, float tile_extent) {
     if (!(tile_extent > 0.0f)) return 0.0f;
     return offset - std::ceil(offset / tile_extent) * tile_extent;
@@ -1150,53 +1254,53 @@ constexpr int kMaxTilesPerAxis = 512;
 
 }  // namespace
 
-void View::paint_background_and_border(canvas::Canvas& canvas) {
+Rect View::self_paint_bounds() const {
     // Browser lowering retains the capture-time browser-compatible paint rect
-    // for this box. Layout stays fractional; adjusting only this self-paint
-    // restores its snapped edges without moving descendants or hit bounds. A
-    // transformed node never receives this metadata, and an implausibly
-    // distant target is ignored rather than turning stale capture data into a
-    // visible jump.
-    bool captured_box_paint = false;
-    float paint_w = bounds_.width;
-    float paint_h = bounds_.height;
-    if (captured_box_paint_scale_ > 0.0f &&
-        std::isfinite(captured_box_paint_left_) &&
-        std::isfinite(captured_box_paint_top_) &&
-        std::isfinite(captured_box_paint_right_) &&
-        std::isfinite(captured_box_paint_bottom_)) {
-        float actual_x = bounds_.x, actual_y = bounds_.y;
-        for (const View* parent = parent_; parent != nullptr;
-             parent = parent->parent_) {
-            actual_x += parent->bounds_.x;
-            actual_y += parent->bounds_.y;
-        }
-        const float target_w = captured_box_paint_right_ - captured_box_paint_left_;
-        const float target_h = captured_box_paint_bottom_ - captured_box_paint_top_;
-        const float dx = captured_box_paint_left_ - actual_x;
-        const float dy = captured_box_paint_top_ - actual_y;
-        // CSS edges are snapped before DPR is applied, so a valid origin can
-        // move by half a CSS pixel at every DPR. Both independently snapped
-        // far edges can change the width or height by one CSS pixel.
-        constexpr float kOriginLimit = 0.501f;
-        constexpr float kExtentLimit = 1.001f;
-        const float width_delta = target_w - bounds_.width;
-        const float height_delta = target_h - bounds_.height;
-        if (bounds_.width > 0.0f && bounds_.height > 0.0f &&
-            target_w > 0.0f && target_h > 0.0f &&
-            std::fabs(dx) <= kOriginLimit && std::fabs(dy) <= kOriginLimit &&
-            std::fabs(width_delta) <= kExtentLimit &&
-            std::fabs(height_delta) <= kExtentLimit) {
-            canvas.save();
-            canvas.translate(dx, dy);
-            // This is outer paint geometry only. CSS percentage background
-            // sizes/positions, gradient vectors, border widths, and radii
-            // continue resolving from bounds_ below; only the final coverage
-            // rect and border outline use paint_w/paint_h.
-            paint_w = target_w;
-            paint_h = target_h;
-            captured_box_paint = true;
-        }
+    // for this box. Layout stays fractional; adjusting only self-paint restores
+    // its snapped edges without moving descendants or hit bounds. A transformed
+    // node never receives this metadata, and an implausibly distant target is
+    // ignored rather than turning stale capture data into a visible jump.
+    const Rect local = local_bounds();
+    if (!(captured_box_paint_scale_ > 0.0f) || !std::isfinite(captured_box_paint_left_) ||
+        !std::isfinite(captured_box_paint_top_) || !std::isfinite(captured_box_paint_right_) ||
+        !std::isfinite(captured_box_paint_bottom_))
+        return local;
+    float actual_x = bounds_.x, actual_y = bounds_.y;
+    for (const View* parent = parent_; parent != nullptr; parent = parent->parent_) {
+        actual_x += parent->bounds_.x;
+        actual_y += parent->bounds_.y;
+    }
+    const float target_w = captured_box_paint_right_ - captured_box_paint_left_;
+    const float target_h = captured_box_paint_bottom_ - captured_box_paint_top_;
+    const float dx = captured_box_paint_left_ - actual_x;
+    const float dy = captured_box_paint_top_ - actual_y;
+    // CSS edges are snapped before DPR is applied, so a valid origin can move
+    // by half a CSS pixel at every DPR. Both independently snapped far edges
+    // can change the width or height by one CSS pixel.
+    constexpr float kOriginLimit = 0.501f;
+    constexpr float kExtentLimit = 1.001f;
+    if (bounds_.width > 0.0f && bounds_.height > 0.0f && target_w > 0.0f && target_h > 0.0f &&
+        std::fabs(dx) <= kOriginLimit && std::fabs(dy) <= kOriginLimit &&
+        std::fabs(target_w - bounds_.width) <= kExtentLimit &&
+        std::fabs(target_h - bounds_.height) <= kExtentLimit)
+        return {dx, dy, target_w, target_h};
+    return local;
+}
+
+void View::paint_background_and_border(canvas::Canvas& canvas) {
+    const Rect snapped = self_paint_bounds();
+    const bool captured_box_paint = snapped.x != 0.0f || snapped.y != 0.0f ||
+                                    snapped.width != bounds_.width ||
+                                    snapped.height != bounds_.height;
+    // This is outer paint geometry only. CSS percentage background sizes and
+    // positions, gradient vectors, border widths, and radii continue resolving
+    // from bounds_ below; only the final coverage rect and border outline use
+    // paint_w/paint_h.
+    const float paint_w = snapped.width;
+    const float paint_h = snapped.height;
+    if (captured_box_paint) {
+        canvas.save();
+        canvas.translate(snapped.x, snapped.y);
     }
     // Per-corner border-radius: when any of the
     // setBorderTopLeftRadius / TopRight / BottomLeft / BottomRight setters
@@ -1275,6 +1379,11 @@ void View::paint_background_and_border(canvas::Canvas& canvas) {
     // whole element — a monotone wash where the design asked for a stripe every
     // 32px. Size and repeat are CSS layers too: resolve the value paired with
     // each image, cycling a shorter list per the CSS list-matching rule.
+    const BorderEdges border_edges = resolve_border_edges(
+        border_style_ != BorderStyle::none && border_style_ != BorderStyle::hidden, has_border_,
+        border_width_, {border_top_set_, border_top_.width},
+        {border_right_set_, border_right_.width}, {border_bottom_set_, border_bottom_.width},
+        {border_left_set_, border_left_.width}, bounds_.width, bounds_.height);
     for (std::size_t reverse_index = bg_gradients_.size(); reverse_index > 0;
          --reverse_index) {
         const std::size_t gradient_index = reverse_index - 1;
@@ -1286,10 +1395,22 @@ void View::paint_background_and_border(canvas::Canvas& canvas) {
         // a non-painting `none`).  Keep the authored list association while
         // reverse-walking the compact paint stack.
         const std::size_t css_layer_index = layer->css_image_layer_index;
+        // `background-origin` is the box the tile is sized and positioned in;
+        // the clip below stays the border box. The initial `padding-box`
+        // origin is why a repeating tile wraps into the border strip: under a
+        // translucent bottom border Chrome shows the tile's first rows.
+        float area_x = 0.0f, area_y = 0.0f;
+        float area_w = bounds_.width, area_h = bounds_.height;
+        if (background_origin_box(background_layer_value(background_origin(), css_layer_index)) ==
+            BackgroundOriginBox::padding) {
+            area_x = border_edges.left;
+            area_y = border_edges.top;
+            area_w = std::max(0.0f, bounds_.width - border_edges.left - border_edges.right);
+            area_h = std::max(0.0f, bounds_.height - border_edges.top - border_edges.bottom);
+        }
         const BackgroundTile bg_tile = resolve_background_tile(
             background_layer_value(background_size(), css_layer_index),
-            background_layer_value(background_repeat(), css_layer_index),
-            bounds_.width, bounds_.height);
+            background_layer_value(background_repeat(), css_layer_index), area_w, area_h);
         if (!bg_tile.valid || !(bg_tile.w > 0.0f) || !(bg_tile.h > 0.0f))
             continue;  // unsupported authoring must not silently phase at 0,0
         const bool tile_count_safe =
@@ -1298,10 +1419,12 @@ void View::paint_background_and_border(canvas::Canvas& canvas) {
         if (!tile_count_safe) continue;
         const float tile_w = bg_tile.w;
         const float tile_h = bg_tile.h;
-        const BackgroundPosition bg_position = resolve_background_position(
-            background_layer_value(background_position(), css_layer_index),
-            bounds_.width, bounds_.height, tile_w, tile_h);
+        BackgroundPosition bg_position = resolve_background_position(
+            background_layer_value(background_position(), css_layer_index), area_w, area_h, tile_w,
+            tile_h);
         if (!bg_position.supported) continue;
+        bg_position.x += area_x;
+        bg_position.y += area_y;
         const int grad_n = static_cast<int>(layer->colors.size());
         const Color* grad_c = layer->colors.data();
         const float* grad_p = layer->positions.data();
@@ -1425,6 +1548,12 @@ void View::paint_background_and_border(canvas::Canvas& canvas) {
         // floor every backend implements; a rounded box additionally clips to
         // its corner path, and a backend without a path clip no-ops that and
         // leaves the tiles square-cornered rather than spilling past the box.
+        // The interpolation space is canvas state the shader is built from, so
+        // it is set only around a layer that names one and leaves every other
+        // command stream untouched.
+        const bool custom_interpolation = layer->interpolation != canvas::GradientInterpolation{};
+        if (custom_interpolation)
+            canvas.set_gradient_interpolation(layer->interpolation);
         canvas.save();
         canvas.clip_rect(0, 0, paint_w, paint_h);
         if (use_per_corner) {
@@ -1456,6 +1585,8 @@ void View::paint_background_and_border(canvas::Canvas& canvas) {
             }
         }
         canvas.restore();
+        if (custom_interpolation)
+            canvas.set_gradient_interpolation({});
     }
 
     paint_border(canvas, paint_w, paint_h, use_per_corner, build_corner_path,
@@ -1495,27 +1626,20 @@ void View::paint_border(canvas::Canvas& canvas, float paint_w, float paint_h,
         return;
     }
 
-    // Resolution order matches yoga_layout.cpp's `resolve_edge`: an explicitly
-    // set edge wins even when it is 0, otherwise the uniform shorthand applies.
-    const float uniform_w = has_border_ ? std::max(0.0f, border_width_) : 0.0f;
-    const auto edge_w = [&](bool was_set, float value) {
-        return was_set ? std::max(0.0f, value) : uniform_w;
-    };
     const float w = paint_w;
     const float h = paint_h;
 
-    // Opposite sides cannot want more than the box has. Chrome resolves that
-    // over-constraint by giving the NEAR side its full width and handing the
-    // far side only what is left: `border-left: 50px; border-right: 50px` on a
-    // 60px-wide box paints 50 on the left and 10 on the right, measured. It is
-    // also what keeps the inset stroke below from being handed a negative
-    // rectangle, which no backend has a sensible answer for.
-    const float wt = std::min(edge_w(border_top_set_, border_top_.width), h);
-    const float wb = std::min(edge_w(border_bottom_set_, border_bottom_.width),
-                              std::max(0.0f, h - wt));
-    const float wl = std::min(edge_w(border_left_set_, border_left_.width), w);
-    const float wr = std::min(edge_w(border_right_set_, border_right_.width),
-                              std::max(0.0f, w - wl));
+    // The clamp is also what keeps the inset stroke below from being handed a
+    // negative rectangle, which no backend has a sensible answer for.
+    const BorderEdges edges = resolve_border_edges(
+        border_style_ != BorderStyle::none && border_style_ != BorderStyle::hidden, has_border_,
+        border_width_, {border_top_set_, border_top_.width},
+        {border_right_set_, border_right_.width}, {border_bottom_set_, border_bottom_.width},
+        {border_left_set_, border_left_.width}, w, h);
+    const float wt = edges.top;
+    const float wb = edges.bottom;
+    const float wl = edges.left;
+    const float wr = edges.right;
     if (wt <= 0.0f && wr <= 0.0f && wb <= 0.0f && wl <= 0.0f) return;
 
     const auto edge_c = [&](bool was_set, Color value) {
@@ -1525,6 +1649,30 @@ void View::paint_border(canvas::Canvas& canvas, float paint_w, float paint_h,
     const Color cr = edge_c(border_right_color_set_, border_right_.color);
     const Color cb = edge_c(border_bottom_color_set_, border_bottom_.color);
     const Color cl = edge_c(border_left_color_set_, border_left_.color);
+
+    // Shaded and multi-line styles are bands of per-side colour, painted by
+    // border_style.cpp. A per-corner path that is not circular (a continuous
+    // corner curve) is approximated by its circular radii there.
+    if (is_banded_border_style(border_style_)) {
+        BandedBorder banded;
+        banded.style = border_style_;
+        banded.width = w;
+        banded.height = h;
+        banded.top = wt;
+        banded.right = wr;
+        banded.bottom = wb;
+        banded.left = wl;
+        banded.top_color = ct;
+        banded.right_color = cr;
+        banded.bottom_color = cb;
+        banded.left_color = cl;
+        banded.radius_tl = use_per_corner ? eff_tl : eff_r;
+        banded.radius_tr = use_per_corner ? eff_tr : eff_r;
+        banded.radius_br = use_per_corner ? eff_br : eff_r;
+        banded.radius_bl = use_per_corner ? eff_bl : eff_r;
+        paint_banded_border(canvas, banded);
+        return;
+    }
 
     if (wt == wr && wr == wb && wb == wl && ct == cr && cr == cb && cb == cl) {
         const float bw = wt;
@@ -1546,13 +1694,15 @@ void View::paint_border(canvas::Canvas& canvas, float paint_w, float paint_h,
         }
 
         if (use_per_corner) {
+            // Fit the OUTER radii to the border box before insetting, so the
+            // stroke's outer edge is the background's curve.
+            const auto outer =
+                fit_corner_radii(w, h, CornerRadii::circular(eff_tl, eff_tr, eff_br, eff_bl));
             canvas.save();
             canvas.translate(half, half);
-            build_corner_path(w - bw, h - bw,
-                              std::max(0.0f, eff_tl - half),
-                              std::max(0.0f, eff_tr - half),
-                              std::max(0.0f, eff_bl - half),
-                              std::max(0.0f, eff_br - half));
+            build_corner_path(w - bw, h - bw, std::max(0.0f, outer.tl_x - half),
+                              std::max(0.0f, outer.tr_x - half), std::max(0.0f, outer.bl_x - half),
+                              std::max(0.0f, outer.br_x - half));
             canvas.stroke_current_path();
             canvas.restore();
         } else if (eff_r > 0) {
@@ -2034,14 +2184,18 @@ void View::paint_content_maybe_cached(canvas::Canvas& canvas,
                 paint_content(rec, layers, children_ns);
             });
         scene_cache_valid_ = (scene_cache_ != nullptr);
+        if (scene_cache_valid_)
+            canvas::note_scene_record();
     }
 
     // Replay the recording. On a cache HIT children are NOT re-walked, so
     // children_ns stays 0 and the whole replay is attributed as self-time
     // (which it is — one drawPicture). If replay is refused (foreign recording,
     // defensive), fall back to a direct paint so the frame is never blank.
-    if (scene_cache_valid_ && scene_cache_ && canvas.draw_scene(*scene_cache_))
+    if (scene_cache_valid_ && scene_cache_ && canvas.draw_scene(*scene_cache_)) {
+        canvas::note_scene_replay();
         return;
+    }
     paint_content(canvas, layers, children_ns);
 }
 

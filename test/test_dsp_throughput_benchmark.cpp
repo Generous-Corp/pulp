@@ -22,8 +22,10 @@
 #include <pulp/signal/adsr.hpp>
 #include <pulp/signal/biquad.hpp>
 #include <pulp/signal/character_delay.hpp>
+#include <pulp/signal/classic_reverb.hpp>
 #include <pulp/signal/compressor.hpp>
 #include <pulp/signal/convolver.hpp>
+#include <pulp/signal/fixed_ir_convolver.hpp>
 #include <pulp/signal/convolver_non_uniform.hpp>
 #include <pulp/signal/fdn_reverb.hpp>
 #include <pulp/signal/fft.hpp>
@@ -41,6 +43,7 @@
 #include <pulp/simd/simd.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <complex>
@@ -394,6 +397,18 @@ void run_processors(int B) {
             clobber(&m);
         });
     }
+    {
+        // Peak, RMS, and clips only: the like-for-like row against a plain
+        // peak + RMS block meter.
+        MultiChannelMeter m;
+        m.prepare(kSampleRate, 2, nullptr, MeterFeatures::levels);
+        bench("meter.multichannel stereo levels-only", B, [&](int n) {
+            fill_stereo();
+            const float* ch[2] = {left.data(), right.data()};
+            m.process(ch, 2, n);
+            clobber(&m);
+        });
+    }
 
     // Oversampling around a tanh waveshaper.
     for (auto kind : {Oversampler::Kind::fir_biquad, Oversampler::Kind::polyphase_iir,
@@ -429,6 +444,22 @@ void run_processors(int B) {
         });
     }
     {
+        Fft f(1024);
+        std::vector<std::complex<float>> spectrum(513);
+        std::vector<float> frame(1024);
+        int acc = 0;
+        bench("fft.1024 real half forward+inverse float hop1024", B, [&](int n) {
+            acc += n;
+            if (acc >= 1024) {
+                acc -= 1024;
+                feed.fill(frame.data(), 1024);
+                f.forward_real_half(frame.data(), spectrum.data());
+                f.inverse_real_half(spectrum.data(), frame.data());
+                clobber(frame.data());
+            }
+        });
+    }
+    {
         Fft64 f(1024);
         std::vector<std::complex<double>> spectrum(1024);
         std::vector<double> frame(1024);
@@ -446,6 +477,76 @@ void run_processors(int B) {
     }
 
     // Convolution.
+    for (int taps : {65, 257, 385, 513, 641, 769, 1025}) {
+        FixedIrConvolver cv;
+        const auto ir = decaying_ir(std::size_t(taps), 11, 3.0f);
+        cv.load_ir(ir.data(), ir.size(), std::size_t(B));
+        bench("conv.fixed-ir " + std::to_string(taps) + " taps " +
+                  (cv.backend() == ConvolutionBackend::direct_fir ? "direct" : "fft"),
+              B, [&](int n) {
+                  cv.process(feed.next(n), out.data(), std::size_t(n));
+                  clobber(out.data());
+              });
+
+        // Forced arms use the identical IR and workload. These rows make the
+        // selector's choice auditable instead of treating the policy constants
+        // as a speedup claim by themselves.
+        FirFilter direct;
+        direct.set_coefficients(ir);
+        bench("conv.forced-direct " + std::to_string(taps) + " taps", B, [&](int n) {
+            const float* input = feed.next(n);
+            direct.process(input, buf.data(), n);
+            clobber(buf.data());
+        });
+
+        PartitionedConvolver fft;
+        fft.load_ir(ir.data(), ir.size(), std::size_t(B));
+        bench("conv.forced-fft " + std::to_string(taps) + " taps", B, [&](int n) {
+            fft.process(feed.next(n), out.data(), std::size_t(n));
+            clobber(out.data());
+        });
+    }
+
+    // Capacity arm: repeated plugin instances share the same input stream but
+    // retain independent convolution history. This exposes the aggregate cost
+    // that a single-instance hot-cache result can hide.
+    {
+        constexpr int kInstances = 8;
+        constexpr int kTaps = 1025;
+        const auto ir = decaying_ir(kTaps, 29, 3.0f);
+        std::vector<FixedIrConvolver> fixed_ir;
+        fixed_ir.reserve(kInstances);
+        for (int i = 0; i < kInstances; ++i) {
+            fixed_ir.emplace_back();
+            fixed_ir.back().load_ir(ir.data(), ir.size(), std::size_t(B));
+        }
+        std::vector<float> outputs(std::size_t(kInstances) * std::size_t(B));
+        InputFeed input;
+        bench("conv.fixed-ir.multi8 1025 taps", B, [&](int n) {
+            const float* source = input.next(n);
+            for (int i = 0; i < kInstances; ++i) {
+                fixed_ir[std::size_t(i)].process(
+                    source, outputs.data() + std::size_t(i) * std::size_t(B), std::size_t(n));
+                clobber(outputs.data() + std::size_t(i) * std::size_t(B));
+            }
+        });
+
+        std::vector<FirFilter> forced;
+        forced.reserve(kInstances);
+        for (int i = 0; i < kInstances; ++i) {
+            forced.emplace_back();
+            forced.back().set_coefficients(ir);
+        }
+        InputFeed forced_input;
+        bench("conv.forced-direct.multi8 1025 taps", B, [&](int n) {
+            const float* source = forced_input.next(n);
+            for (int i = 0; i < kInstances; ++i) {
+                forced[std::size_t(i)].process(source,
+                                               outputs.data() + std::size_t(i) * std::size_t(B), n);
+                clobber(outputs.data() + std::size_t(i) * std::size_t(B));
+            }
+        });
+    }
     for (int ir_seconds : {1, 3}) {
         PartitionedConvolver cv;
         const auto ir = decaying_ir(std::size_t(ir_seconds * 48000), 7, 4.0f);
@@ -519,6 +620,16 @@ void run_processors(int B) {
         FdnReverb r;
         r.prepare(kSampleRate, B);
         bench("reverb.fdn stereo", B, [&](int n) {
+            fill_stereo();
+            r.process_block(left.data(), right.data(), out.data(), out2.data(), n);
+            clobber(out.data());
+            clobber(out2.data());
+        });
+    }
+    {
+        ClassicReverb r;
+        r.prepare(kSampleRate, B);
+        bench("reverb.classic stereo", B, [&](int n) {
             fill_stereo();
             r.process_block(left.data(), right.data(), out.data(), out2.data(), n);
             clobber(out.data());
@@ -1276,14 +1387,196 @@ int usage() {
     std::fprintf(stderr,
                  "usage: pulp-dsp-throughput-benchmark [--json PATH] [--filter SUBSTRING]\n"
                  "                                     [--seconds S] [--commit SHA] [--host NAME]\n"
-                 "                                     [--smoke]\n");
+                 "                                     [--smoke] [--convolver-crossover CSV]\n"
+                 "                                     [--nonuniform-head CSV]\n");
     return 2;
 }
 
 } // namespace
 
+/// The data behind FixedIrConvolver's engine table: forced direct FIR, forced
+/// partitioned FFT and the policy's own choice on identical input, over IR
+/// lengths x block sizes x instance counts. Writes CSV rows
+/// `taps,block,instances,arm,selected,mean,p50,p99,max` in ns per frame for
+/// the whole instance group; mean is the median of five timed passes.
+int run_convolver_crossover(const std::string& path) {
+    std::FILE* csv = std::fopen(path.c_str(), "w");
+    if (csv == nullptr) {
+        std::fprintf(stderr, "error: could not write %s\n", path.c_str());
+        return 1;
+    }
+    std::fprintf(csv, "taps,block,instances,arm,selected,mean_ns_frame,p50,p99,max\n");
+    const double audio_seconds = std::min(g_options.seconds, 0.25);
+    const auto time_arm = [&](int block, auto&& fn) {
+        const long blocks = std::max(32L, long(kSampleRate * audio_seconds) / block);
+        for (long b = 0; b < std::max(8L, blocks / 4); ++b)
+            fn();
+        std::vector<double> reps;
+        for (int r = 0; r < 5; ++r) {
+            const auto t0 = Clock::now();
+            for (long b = 0; b < blocks; ++b)
+                fn();
+            reps.push_back(std::chrono::duration<double, std::nano>(Clock::now() - t0).count() /
+                           double(blocks * block));
+        }
+        std::sort(reps.begin(), reps.end());
+        std::vector<double> per(static_cast<std::size_t>(blocks));
+        for (auto& v : per) {
+            const auto t0 = Clock::now();
+            fn();
+            v = std::chrono::duration<double, std::nano>(Clock::now() - t0).count() / block;
+        }
+        std::sort(per.begin(), per.end());
+        const auto pct = [&](double q) {
+            return per[std::min(per.size() - 1, std::size_t(q * double(per.size())))];
+        };
+        return std::array<double, 4>{reps[2], pct(0.5), pct(0.99), per.back()};
+    };
+    for (const int B : {1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024}) {
+        std::vector<float> input(std::size_t(B) * 64 + 64);
+        for (std::size_t i = 0; i < input.size(); ++i)
+            input[i] = 0.5f * std::sin(0.013f * float(i)) + 0.25f * std::sin(0.31f * float(i));
+        for (const int taps :
+             {8, 16, 32, 64, 128, 192, 256, 384, 448, 512, 576, 640, 768, 1024, 1536, 2048, 4096}) {
+            const auto ir = decaying_ir(std::size_t(taps), 11, 3.0f);
+            const char* selected =
+                FixedIrConvolver::choose_backend(std::size_t(taps), std::size_t(B)) ==
+                        ConvolutionBackend::direct_fir
+                    ? "direct"
+                    : "fft";
+            for (const int instances : {1, 8, 16, 32}) {
+                std::vector<float> out(std::size_t(B) * std::size_t(instances));
+                std::size_t cursor = 0;
+                const auto next = [&] {
+                    const float* p = input.data() + cursor;
+                    cursor = (cursor + std::size_t(B)) % (input.size() - std::size_t(B) + 1);
+                    return p;
+                };
+                const auto emit = [&](const char* arm, const std::array<double, 4>& s) {
+                    std::fprintf(csv, "%d,%d,%d,%s,%s,%.3f,%.3f,%.3f,%.3f\n", taps, B, instances,
+                                 arm, selected, s[0], s[1], s[2], s[3]);
+                };
+                std::vector<FirFilter> direct(static_cast<std::size_t>(instances));
+                for (auto& f : direct)
+                    f.set_coefficients(ir);
+                emit("direct", time_arm(B, [&] {
+                         const float* x = next();
+                         for (int i = 0; i < instances; ++i)
+                             direct[std::size_t(i)].process(x, out.data() + std::size_t(i) * B, B);
+                         clobber(out.data());
+                     }));
+                std::vector<PartitionedConvolver> fft(static_cast<std::size_t>(instances));
+                for (auto& c : fft)
+                    c.load_ir(ir.data(), ir.size(), std::size_t(B));
+                emit("fft", time_arm(B, [&] {
+                         const float* x = next();
+                         for (int i = 0; i < instances; ++i)
+                             fft[std::size_t(i)].process(x, out.data() + std::size_t(i) * B,
+                                                         std::size_t(B));
+                         clobber(out.data());
+                     }));
+                std::vector<FixedIrConvolver> chosen(static_cast<std::size_t>(instances));
+                for (auto& c : chosen)
+                    c.load_ir(ir.data(), ir.size(), std::size_t(B));
+                emit("fixed_ir", time_arm(B, [&] {
+                         const float* x = next();
+                         for (int i = 0; i < instances; ++i)
+                             chosen[std::size_t(i)].process(x, out.data() + std::size_t(i) * B,
+                                                            std::size_t(B));
+                         clobber(out.data());
+                     }));
+                std::fflush(csv);
+            }
+        }
+    }
+    std::fclose(csv);
+    std::printf("wrote %s\n", path.c_str());
+    return 0;
+}
+
+/// The data behind NonUniformPartitionedConvolver's tail-multiplier table:
+/// every power-of-two K whose head (K x B samples) fits the IR, on identical
+/// input, interleaved over five rounds, for IR lengths x block sizes. Writes
+/// CSV rows `ir,B,K,head,round,mean_ns_frame,p99_ns_call,max_ns_call,
+/// max_abs_vs_K1,ref_rms`: the mean cost per frame over the run, the 99th
+/// percentile and maximum of the per-callback times, and each K's largest
+/// output difference from K = 1 (the uniform engine) beside that output's RMS.
+int run_nonuniform_head(const std::string& path) {
+    std::FILE* csv = std::fopen(path.c_str(), "w");
+    if (csv == nullptr) {
+        std::fprintf(stderr, "error: could not write %s\n", path.c_str());
+        return 1;
+    }
+    std::fprintf(csv,
+                 "ir,B,K,head,round,mean_ns_frame,p99_ns_call,max_ns_call,max_abs_vs_K1,ref_rms\n");
+    constexpr int kRounds = 5;
+    for (const int ir_len : {4096, 16384, 48000, 96000}) {
+        const auto ir = decaying_ir(std::size_t(ir_len), 23, 6.0f);
+        for (const int B : {16, 32, 64, 128, 256, 512}) {
+            std::vector<int> ks;
+            for (int K = 1; K <= 256 && std::size_t(K) * std::size_t(B) <= std::size_t(ir_len);
+                 K *= 2)
+                ks.push_back(K);
+            // At least four firings of the largest tail and one second of audio.
+            const int frames = std::max(int(kSampleRate), 4 * ks.back() * B) / B * B;
+            std::vector<float> in(static_cast<std::size_t>(frames));
+            std::uint32_t seed = 0x9E3779B9u ^ std::uint32_t(ir_len * 31 + B);
+            for (auto& v : in) {
+                seed = seed * 1664525u + 1013904223u;
+                v = float(seed >> 8) / 8388608.0f - 1.0f;
+            }
+            std::vector<float> ref(in.size()), out(in.size());
+            {
+                NonUniformPartitionedConvolver uniform;
+                uniform.load_ir(ir.data(), ir.size(), std::size_t(B), 1);
+                for (int o = 0; o < frames; o += B)
+                    uniform.process(in.data() + o, ref.data() + o, std::size_t(B));
+            }
+            double ref_rms = 0.0;
+            for (const float v : ref)
+                ref_rms += double(v) * double(v);
+            ref_rms = std::sqrt(ref_rms / frames);
+            std::vector<NonUniformPartitionedConvolver> conv(ks.size());
+            for (std::size_t k = 0; k < ks.size(); ++k)
+                conv[k].load_ir(ir.data(), ir.size(), std::size_t(B), std::size_t(ks[k]));
+            std::vector<double> calls(static_cast<std::size_t>(frames / B));
+            for (int r = 0; r < kRounds; ++r) {
+                for (std::size_t kk = 0; kk < ks.size(); ++kk) {
+                    // Alternate the order each round so drift is shared.
+                    const std::size_t k = (r & 1) ? ks.size() - 1 - kk : kk;
+                    conv[k].reset();
+                    for (int o = 0, c = 0; o < frames; o += B, ++c) {
+                        const auto t0 = Clock::now();
+                        conv[k].process(in.data() + o, out.data() + o, std::size_t(B));
+                        calls[std::size_t(c)] =
+                            std::chrono::duration<double, std::nano>(Clock::now() - t0).count();
+                    }
+                    double sum = 0.0;
+                    for (const double v : calls)
+                        sum += v;
+                    std::vector<double> sorted = calls;
+                    std::sort(sorted.begin(), sorted.end());
+                    double err = 0.0;
+                    for (std::size_t i = 0; i < out.size(); ++i)
+                        err = std::max(err, double(std::fabs(out[i] - ref[i])));
+                    std::fprintf(csv, "%d,%d,%d,%d,%d,%.3f,%.0f,%.0f,%.3g,%.4g\n", ir_len, B, ks[k],
+                                 ks[k] * B, r, sum / frames,
+                                 sorted[std::size_t(double(sorted.size() - 1) * 0.99)],
+                                 sorted.back(), err, ref_rms);
+                }
+                std::fflush(csv);
+            }
+        }
+    }
+    std::fclose(csv);
+    std::printf("wrote %s\n", path.c_str());
+    return 0;
+}
+
 int main(int argc, char** argv) {
     bool smoke = false;
+    std::string crossover_path;
+    std::string nonuniform_head_path;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         const auto value = [&]() -> std::string {
@@ -1298,6 +1591,10 @@ int main(int argc, char** argv) {
         else if (arg == "--commit") g_options.commit = value();
         else if (arg == "--host") g_options.host = value();
         else if (arg == "--smoke") smoke = true;
+        else if (arg == "--convolver-crossover")
+            crossover_path = value();
+        else if (arg == "--nonuniform-head")
+            nonuniform_head_path = value();
         else return usage();
     }
     if (g_options.commit.empty())
@@ -1314,6 +1611,10 @@ int main(int argc, char** argv) {
         // not meaningful.
         g_options.seconds = 0.001;
     }
+    if (!crossover_path.empty())
+        return run_convolver_crossover(crossover_path);
+    if (!nonuniform_head_path.empty())
+        return run_nonuniform_head(nonuniform_head_path);
     const double timer_overhead_ns = measure_timer_overhead_ns();
     std::printf("dsp throughput: %s, %s, timer overhead %.1f ns\n", platform_tag().c_str(),
                 cpu_brand().c_str(), timer_overhead_ns);

@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 140,
+  "inventory_version": 166,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -42,22 +42,22 @@
     }
   ],
   "counts": {
-    "public_headers": 506,
-    "reviewed_headers": 230,
-    "legacy_unreviewed_headers": 276,
+    "public_headers": 514,
+    "reviewed_headers": 261,
+    "legacy_unreviewed_headers": 253,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 121,
       "capability_support": 46,
-      "infrastructure": 61,
-      "legacy_unreviewed": 276,
+      "infrastructure": 92,
+      "legacy_unreviewed": 253,
       "unsupported_capability": 2
     },
     "by_domain": {
       "audio": {
-        "public_headers": 113,
-        "reviewed_headers": 11,
-        "legacy_unreviewed_headers": 102,
+        "public_headers": 114,
+        "reviewed_headers": 16,
+        "legacy_unreviewed_headers": 98,
         "unsupported_headers": 0
       },
       "midi": {
@@ -85,9 +85,9 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 273,
-        "reviewed_headers": 128,
-        "legacy_unreviewed_headers": 145,
+        "public_headers": 279,
+        "reviewed_headers": 153,
+        "legacy_unreviewed_headers": 126,
         "unsupported_headers": 2
       },
       "timebase": {
@@ -97,8 +97,8 @@
         "unsupported_headers": 0
       },
       "host": {
-        "public_headers": 9,
-        "reviewed_headers": 9,
+        "public_headers": 10,
+        "reviewed_headers": 10,
         "legacy_unreviewed_headers": 0,
         "unsupported_headers": 0
       }
@@ -144,11 +144,11 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/audio_file.hpp",
-      "fingerprint": "sha256:421cd28fdbc1bd053d8cae09c8b6771031c410e1521f17fd6d2a030ef911d3d6",
+      "fingerprint": "sha256:6a97b20f7bb9a869f33f6cc52367cc2f9629660a9cb1341b284bfdf3479ee990",
       "include": "pulp/audio/audio_file.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Whole-file audio decoding (read_audio_file with an admission predicate over the opened reader) is host infrastructure consumed by sample, impulse-response and offline-render capabilities; it is not an independently selected generator-facing capability."
     },
     {
       "domain": "audio",
@@ -252,11 +252,11 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/buffer_ops.hpp",
-      "fingerprint": "sha256:9f7a193dd29ab2ef40a3c6d92ded708777885e4099532403ed6b397613666df2",
+      "fingerprint": "sha256:3fbb9aafb8571d0423a6b4aeb7998d7fa0137d87f6772a2f6c52615cf8d17bc3",
       "include": "pulp/audio/buffer_ops.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Allocation-free buffer helpers a processor uses inside process(): gain, copy, mix, a one-pass peak/RMS meter, in-place-aware per-sample mapping, and a constant channel-count dispatch. Authoring infrastructure rather than a generator DSP claim."
     },
     {
       "domain": "audio",
@@ -333,11 +333,11 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/format_registry.hpp",
-      "fingerprint": "sha256:7241d82c4bdf004085cb68ce3293e8948dce6ea08758d29e9df06778e57705d1",
+      "fingerprint": "sha256:caedada7e925bc78317407961d313052ce4e92c14ec12ca51477e567823ac128",
       "include": "pulp/audio/format_registry.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Audio file decoding (FormatRegistry::read with DecodeLimits) is host infrastructure that sample, impulse-response and offline-render capabilities consume; it is not an independently selected generator-facing capability in the installed contract."
     },
     {
       "domain": "audio",
@@ -351,11 +351,11 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/impulse_response.hpp",
-      "fingerprint": "sha256:6decae41f09fa9859a8973196e8ccba6b729e81d39b46eb2f5510479c4e86b0d",
+      "fingerprint": "sha256:740702d0bf9e54f8584de49999cfcf91c7c9b71c84c355b46a6a686e283bbe69",
       "include": "pulp/audio/impulse_response.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Impulse-response loading is host infrastructure consumed by the convolution and offline-render capabilities; it is not an independently selected generator-facing capability in the installed contract."
     },
     {
       "domain": "audio",
@@ -533,6 +533,15 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "audio",
+      "source": "core/audio/include/pulp/audio/restored_path.hpp",
+      "fingerprint": "sha256:5070b5aa15535869b72106ae976074d4e35b1dda6a8df9d303acfaabf4b9a7ec",
+      "include": "pulp/audio/restored_path.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Confinement gate for file paths that arrive through restored host or preset state: resolves symlinks and admits a path only inside the directory the plugin may read from. Shared safety infrastructure for state restore, not an advertised generator capability."
     },
     {
       "domain": "audio",
@@ -1139,6 +1148,15 @@
     },
     {
       "domain": "host",
+      "source": "core/host/include/pulp/host/catalog_descriptor.hpp",
+      "fingerprint": "sha256:1a5a790b3ae48d3992d429c12f35963293577fd49bfd3f7c9a6dec9548d9e539",
+      "include": "pulp/host/catalog_descriptor.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Product-neutral catalog descriptor aliases and validates the host-facing descriptor and export machinery. It is reusable host infrastructure, while product-specific Forge headers, symbols, and serialization remain the compatibility authority; it is not an independently advertised generator-facing capability."
+    },
+    {
+      "domain": "host",
       "source": "core/host/include/pulp/host/custom_node_events.hpp",
       "fingerprint": "sha256:3593ccc6cb772b630fc61bec7014eb5315b5bef7e99d6047206947384c7c6006",
       "include": "pulp/host/custom_node_events.hpp",
@@ -1227,7 +1245,7 @@
     {
       "domain": "host",
       "source": "core/host/include/pulp/host/signal_graph_runtime.hpp",
-      "fingerprint": "sha256:06c9bfa6a843bf728157cb7ed977981416d1ca00872e57199c57bf3b67df8dcf",
+      "fingerprint": "sha256:a4b87a6d66b3a87383619454f6da74f3ab5e95381fe81c44e25ebfd488c2d390",
       "include": "pulp/host/signal_graph_runtime.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -2257,7 +2275,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/analysis_frontends.hpp",
-      "fingerprint": "sha256:24460c48e2c2206aa41867c5d21cc43a40a665824dbab774730da37abd862b93",
+      "fingerprint": "sha256:6ebbd05760a83309228a7c7ac5d0ae7e2460529b20e1866295821012f96a56ec",
       "include": "pulp/signal/analysis_frontends.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -2321,7 +2339,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/biquad.hpp",
-      "fingerprint": "sha256:938e359bcd792fb4b8d4205d94ec5ab2db6684ec99ea1f927a417539cb09c55b",
+      "fingerprint": "sha256:fdbc7b3053b72c4a8dc102e034e405bcaab68ba07083e5ac610c2b9ae35ec07e",
       "include": "pulp/signal/biquad.hpp",
       "disposition": "capability_support",
       "capability_keys": [
@@ -2508,6 +2526,15 @@
     },
     {
       "domain": "signal",
+      "source": "core/signal/include/pulp/signal/classic_reverb.hpp",
+      "fingerprint": "sha256:ef4d852f267095f4e18a7ed2114640adaeaf8fbbd57087cc3a1aaa1d3a4c796f",
+      "include": "pulp/signal/classic_reverb.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "The classic comb-and-allpass reverb tier, driven by the same fdn::Param set as the FDN engine. A processor primitive driven from the owner's own process(); it makes no installed agent capability claim of its own."
+    },
+    {
+      "domain": "signal",
       "source": "core/signal/include/pulp/signal/comb_filter.hpp",
       "fingerprint": "sha256:6f5963276c7fc2f68985dba678754f7afc4216b2486f3f4c356b3344eeceda4c",
       "include": "pulp/signal/comb_filter.hpp",
@@ -2531,7 +2558,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/compressor.hpp",
-      "fingerprint": "sha256:9bf4c81430a11eedaae9e69b19dd8c5ce9fd5c50191e111fe86c3cada3e73fb3",
+      "fingerprint": "sha256:f75d915e4d7f6ac4fc70bcef81454146163aa5f647c80b185c563846e84fd8b3",
       "include": "pulp/signal/compressor.hpp",
       "disposition": "capability_support",
       "capability_keys": [
@@ -2542,7 +2569,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/convolver.hpp",
-      "fingerprint": "sha256:7b6f5cc6d4bd8a3c71c07149958db256d08aa0f264544df0abfa07eb3a4b5825",
+      "fingerprint": "sha256:dcf17ae7acdf07ad6bfc3082876bf5c2f695a9dda49c933f56a074b3a7b5621d",
       "include": "pulp/signal/convolver.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -2551,20 +2578,20 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/convolver_messages.hpp",
-      "fingerprint": "sha256:2d4d3361cfa9099d4cd549fc250de196c1053c9c5448fa15b540089433e74e29",
+      "fingerprint": "sha256:bf0a804475fb6f8879ad5d734f586c6b76c2d119215af65d370d250bb7364a08",
       "include": "pulp/signal/convolver_messages.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Audio-thread hand-off plumbing behind PartitionedConvolver: the per-IR state, the convolver's shared input history, and the lock-free swapper that shuttles them between a worker thread and the audio thread over runtime::Handoff. Real-time ownership-transfer infrastructure for that engine rather than an advertised generator surface; it carries no capability claim of its own."
+      "rationale": "Audio-thread hand-off plumbing behind PartitionedConvolver: the per-IR state, the convolver's shared input history, the spectrum arena both keep their half spectra in, and the lock-free swapper that shuttles them between a worker thread and the audio thread over runtime::Handoff. Real-time ownership-transfer infrastructure for that engine rather than an advertised generator surface; it carries no capability claim of its own."
     },
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/convolver_non_uniform.hpp",
-      "fingerprint": "sha256:29591426ae6ab0fe96c9d9eaa57a2dacc0bb1ffde3465f08d13aa42b493b620d",
+      "fingerprint": "sha256:598a096100daada3acac86a98d29856d23172b620dab4215349664d0dc600035",
       "include": "pulp/signal/convolver_non_uniform.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Two-stage zero-latency partitioned convolution: a small-block head beside a K-times-larger tail, both PartitionedConvolver engines. A bounded DSP primitive a processor drives from its own process() at a fixed block size, documented with the convolution engines in the signal guide; it makes no installed agent capability claim of its own."
     },
     {
       "domain": "signal",
@@ -2636,11 +2663,11 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/denormal.hpp",
-      "fingerprint": "sha256:e9b473e4eebb1c10a1fc3d0e2610d8082a6cdd8a7e0c939c077b152addf74c91",
+      "fingerprint": "sha256:c139f6695a9b995b89dc3b9d00430bc0776391286bec850213c8e278bf67e099",
       "include": "pulp/signal/denormal.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Denormal handling helpers: flush-to-zero scopes, value snapping, and the shared snap-chunk length recursive filters use to bound subnormal decay within a block. Internal numeric hygiene that processors call from their own process(); it makes no installed agent capability claim of its own."
     },
     {
       "domain": "signal",
@@ -2688,6 +2715,15 @@
       "disposition": "infrastructure",
       "capability_keys": [],
       "rationale": "This internal header shares the pure scalar Schroeder allpass recurrence used by several processors; it is not an independent authoring surface."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/detail/simd_lanes.hpp",
+      "fingerprint": "sha256:7f66643caad7bb5dea9e17c238067924f382681b2554f7c8a9deb517f9614e29",
+      "include": "pulp/signal/detail/simd_lanes.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Four-lane float and two-lane double vector helpers for the reverb and meter block kernels. Internal numeric support with no agent-facing surface."
     },
     {
       "domain": "signal",
@@ -2873,7 +2909,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/drum/tom.hpp",
-      "fingerprint": "sha256:66feaffef9ec91c1002150734abf7f1579e7a2213f8c650928050cbebc99f147",
+      "fingerprint": "sha256:7228487a4c0e7de5b2cfe5fe5ca26bb807cd1b44d1b4d021e6b43103adf5db41",
       "include": "pulp/signal/drum/tom.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -3004,7 +3040,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/fast_math.hpp",
-      "fingerprint": "sha256:0819835609a2b5287293638d869edac03e2e9d916d90ca98bb77e5b94289e9be",
+      "fingerprint": "sha256:1ec60855acbc4b9fd41b37161c308bc3bf499c231be901222b11bfb1bf75a73e",
       "include": "pulp/signal/fast_math.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -3013,20 +3049,20 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/fdn/config.hpp",
-      "fingerprint": "sha256:dcb742b910fff18d48565ff191d9447f00144b4fd7629e0e17106781aba6bd7a",
+      "fingerprint": "sha256:7c86120bda9c7619a3c92f490b4e9cf7f88dfdcc40ecf330d045b3db63eb387a",
       "include": "pulp/signal/fdn/config.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Internal building block of the FDN reverb engine (fdn/config). It is reached only through FdnReverb and makes no installed agent capability claim of its own."
     },
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/fdn/diffusion.hpp",
-      "fingerprint": "sha256:25d95b590e6b7942e8c3fc5c50ce1b6f98408256516fd81c88378cd5f314d47e",
+      "fingerprint": "sha256:f13e994a57fde15e7042439506fdd9ab226d35f53369f93ea3117637bf754e01",
       "include": "pulp/signal/fdn/diffusion.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Internal building block of the FDN reverb engine (fdn/diffusion). It is reached only through FdnReverb and makes no installed agent capability claim of its own."
     },
     {
       "domain": "signal",
@@ -3040,47 +3076,47 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/fdn/frac_delay.hpp",
-      "fingerprint": "sha256:366074ccef78b5a51305c52c5b362304148650123af8d208533ce5df1861aee7",
+      "fingerprint": "sha256:6ae028912b0f69c9698a23788caedee47f5dfd59edf292f7e1be01d80556f151",
       "include": "pulp/signal/fdn/frac_delay.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Internal building block of the FDN reverb engine (fdn/frac_delay). It is reached only through FdnReverb and makes no installed agent capability claim of its own."
     },
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/fdn/interp.hpp",
-      "fingerprint": "sha256:b19071caf4663f1ccfde2663bff4d7504543eab1143810cca1a4748b2eeb7960",
+      "fingerprint": "sha256:2ef007b4975090651752065daf26b48972d3743a121e4984b653b16b1cdab9dd",
       "include": "pulp/signal/fdn/interp.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Internal building block of the FDN reverb engine (fdn/interp). It is reached only through FdnReverb and makes no installed agent capability claim of its own."
     },
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/fdn/loop_eq.hpp",
-      "fingerprint": "sha256:06132e980081bca3042d589b2504502735697677aa15eeec33f0f6b030c83cb9",
+      "fingerprint": "sha256:791f7d56e50ffd8143ae7c4bb339536b4febed45c298aca2792a3fcd4c6915e2",
       "include": "pulp/signal/fdn/loop_eq.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Internal building block of the FDN reverb engine (fdn/loop_eq). It is reached only through FdnReverb and makes no installed agent capability claim of its own."
     },
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/fdn/modulation.hpp",
-      "fingerprint": "sha256:95d0b6ecf64fbdd7a7ec2e0d4bcf6b6a22a662a44a595fd7e494fb1f7be99abd",
+      "fingerprint": "sha256:906f603c217334ecf34d63eaa76b971a75b4e774b280e54d552e7d3388e3ff36",
       "include": "pulp/signal/fdn/modulation.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Internal building block of the FDN reverb engine (fdn/modulation). It is reached only through FdnReverb and makes no installed agent capability claim of its own."
     },
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/fdn/multirate.hpp",
-      "fingerprint": "sha256:0004f34796384c5e261de5f96915d076a086a91451ba54ef57a3ceb56c00b85b",
+      "fingerprint": "sha256:dfad7d64648cbd7e5ced29e8629fa6590b6911f8def641c58b5f5803bf006a2f",
       "include": "pulp/signal/fdn/multirate.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Internal building block of the FDN reverb engine (fdn/multirate). It is reached only through FdnReverb and makes no installed agent capability claim of its own."
     },
     {
       "domain": "signal",
@@ -3103,29 +3139,29 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/fdn/stages.hpp",
-      "fingerprint": "sha256:5f65f0ca32f5d52c40582eb9f2621bd941cef8d9be2458ec4c0cbbabce34f9e3",
+      "fingerprint": "sha256:02a305c4607e4e42fd4e51d161bfc46f6c10d13d8fe4bb0fb9d3d6d5cbcf9e75",
       "include": "pulp/signal/fdn/stages.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Internal building block of the FDN reverb engine (fdn/stages). It is reached only through FdnReverb and makes no installed agent capability claim of its own."
     },
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/fdn/tank.hpp",
-      "fingerprint": "sha256:3232020917fc2d77ab8fcd6d7716833cd1c106491d6dec1505b9fd4ba825b2c7",
+      "fingerprint": "sha256:baa049a48e5171b5e467376568be1e52b73bf72816a47f2096bdf4fe8ac45216",
       "include": "pulp/signal/fdn/tank.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Internal building block of the FDN reverb engine (fdn/tank). It is reached only through FdnReverb and makes no installed agent capability claim of its own."
     },
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/fdn_reverb.hpp",
-      "fingerprint": "sha256:1cf5183054034ec774acadd7ed8429333fbc89ec3f8baf2545e944d4c379d7c2",
+      "fingerprint": "sha256:c980772afae85436de3904079bfe8cfb3cd328f4c33b03531ce075f974797df5",
       "include": "pulp/signal/fdn_reverb.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "The multirate sixteen-line FDN reverb engine and its block-processing entry points. A processor primitive driven from the owner's own process(); the Forge FDN reverb catalog exposes it to products, and it makes no installed agent capability claim of its own."
     },
     {
       "domain": "signal",
@@ -3152,7 +3188,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/fft.hpp",
-      "fingerprint": "sha256:cf26ffef2f59dcc9e06e9bd578b48ae214f34f893f9cedc61e18fab9151c50ab",
+      "fingerprint": "sha256:2a700b468370542ef5e55bce174be8938ea3d8927b58142341405118f60e9465",
       "include": "pulp/signal/fft.hpp",
       "disposition": "capability_support",
       "capability_keys": [
@@ -3215,11 +3251,20 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/fir_filter.hpp",
-      "fingerprint": "sha256:1f3e4bda478177961e284380af65de670de421902e114be6ef55820dead438b7",
+      "fingerprint": "sha256:6f7610684f4b26bb9cd9cf258ec7131f6ecd9bf69fce36e4fa43caf22a1876df",
       "include": "pulp/signal/fir_filter.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
       "rationale": "General FIR filter over a linear sample history whose outputs are pulp::simd dot and correlate calls. A bounded DSP primitive a processor drives from its own process(); its coefficient generators and taps are documented in the signal guide, and it makes no installed agent capability claim of its own."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/fixed_ir_convolver.hpp",
+      "fingerprint": "sha256:80ba7f87cc92c3a7fb71238aea463f3839b977fe11877e80aeb029860edffe80",
+      "include": "pulp/signal/fixed_ir_convolver.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Fixed-IR convolution that runs FirFilterT or PartitionedConvolverT, chosen once at prepare time by a pure policy. A bounded DSP primitive a processor drives from its own process() at a fixed block size, documented beside the partitioned convolver in the signal guide; it makes no installed agent capability claim of its own."
     },
     {
       "domain": "signal",
@@ -3286,7 +3331,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/frequency_response.hpp",
-      "fingerprint": "sha256:0b571e77442e31ca61913ccbef792f1f775b691e730006bde351ca18f57581f8",
+      "fingerprint": "sha256:565a9cd6416db2a6cb57af4b49585a9715605ba516cbd76e6896a21b1bb08bea",
       "include": "pulp/signal/frequency_response.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -3349,7 +3394,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/graphic_eq.hpp",
-      "fingerprint": "sha256:63dafa17e4e4650647680a41b29ab3db78435aecf2136adc0195c827102d4d25",
+      "fingerprint": "sha256:a556beb98a3e89254fe51ff90866a8290246410a7e4ae6e0b9f0f3a8cbc2561f",
       "include": "pulp/signal/graphic_eq.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -3360,11 +3405,11 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/halfband_iir.hpp",
-      "fingerprint": "sha256:2c82382d9cdd84e5b349e3929f9b29f33d4c9c5976f842c009ab2f6f7004b143",
+      "fingerprint": "sha256:c47732fc56150293213d048f7ac113f3f3ac0341a83167eb40bae9c4f89ccdfc",
       "include": "pulp/signal/halfband_iir.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Closed-form elliptic half-band allpass designs, their pure response, group-delay and stopband evaluators, and the polyphase stage kernels OversamplerT cascades. Filter-design infrastructure behind the oversampler rather than an advertised generator surface; it makes no installed agent capability claim of its own."
     },
     {
       "domain": "signal",
@@ -3428,8 +3473,17 @@
     },
     {
       "domain": "signal",
+      "source": "core/signal/include/pulp/signal/ladder_bank.hpp",
+      "fingerprint": "sha256:4b69722977f1fc7c92ae2aff3d0864b5c264bdc49d4fa86fc9d5bdc51a4c44e9",
+      "include": "pulp/signal/ladder_bank.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Runs N ladder-filter voices in lockstep structure-of-arrays lanes, each voice bit-identical to LadderFilter. A voice-processing primitive for polyphonic processors; it makes no installed agent capability claim of its own."
+    },
+    {
+      "domain": "signal",
       "source": "core/signal/include/pulp/signal/ladder_filter.hpp",
-      "fingerprint": "sha256:1c586ff41aceec5c574002dbb5d9ae8b7d4a052c5e605a5fd27988fc7d7a7399",
+      "fingerprint": "sha256:399f80b1a8d01250ac1cbad10b0c511dc5cf465e1d48a85b9489828f8908a16a",
       "include": "pulp/signal/ladder_filter.hpp",
       "disposition": "capability_support",
       "capability_keys": [
@@ -3654,7 +3708,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/multi_channel_meter.hpp",
-      "fingerprint": "sha256:5c272ef39e032b63e1008c458b23796626c6fccebe23427d6ef34be30f7407e6",
+      "fingerprint": "sha256:83d056fd906ff72eb37d3dde19a80293c3b7157af2934e2ca4e2e40cf6e57a15",
       "include": "pulp/signal/multi_channel_meter.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -3883,17 +3937,26 @@
     },
     {
       "domain": "signal",
-      "source": "core/signal/include/pulp/signal/oversampling.hpp",
-      "fingerprint": "sha256:3d5227ff3c98232170387e48a1ed3f08f1e5e2a6bf3e073f306eb12b2e2bc9fd",
-      "include": "pulp/signal/oversampling.hpp",
-      "disposition": "legacy_unreviewed",
+      "source": "core/signal/include/pulp/signal/overlap_add_convolver.hpp",
+      "fingerprint": "sha256:a673761c3cbeb7eecaaea03f8f49a663cff7fe63f8e422b8538b6c66bafd3307",
+      "include": "pulp/signal/overlap_add_convolver.hpp",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "The single-partition overlap-add ConvolverT, moved out of fft.hpp (which still includes it) with an unchanged interface. A one-block-latency convolution utility that runs its spectra in split form internally; it carries no capability claim of its own, PartitionedConvolver being the advertised engine."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/oversampling.hpp",
+      "fingerprint": "sha256:08bc7cb21e50cddb3cea2f9aa2405cbbf4e02ca6a2d790e03668e2e23f448760",
+      "include": "pulp/signal/oversampling.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Block-processing up/downsampler that runs a caller's nonlinearity at 2x-16x with minimum-phase IIR, linear-phase FIR or legacy biquad anti-aliasing and truthful latency reporting. A bounded DSP primitive a processor drives from its own process(), documented in the signal guide; it makes no installed agent capability claim of its own."
     },
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/oversampling_fir.hpp",
-      "fingerprint": "sha256:b9834233787912af899e21571b08517b4c60135e4a61f5be6e04391ac2e4831a",
+      "fingerprint": "sha256:2579a2a2e987d5fc1a960d91fd42ea3d645097fb5d5fd96ac85ba94373cfcef0",
       "include": "pulp/signal/oversampling_fir.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -3922,7 +3985,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/parametric_eq.hpp",
-      "fingerprint": "sha256:a213fcce6ab12b3e62108af2ad99a414e875ba6245969ff1b7c037d67ab4151a",
+      "fingerprint": "sha256:7fac0742c304d74e201ece2799ee172c81805e3f7bf1ba5dcc7a8fab70d5fbb6",
       "include": "pulp/signal/parametric_eq.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -4067,11 +4130,11 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/processor_duplicator.hpp",
-      "fingerprint": "sha256:053dfa828a26904b3fc1403c956f24e1fc0b0a9dc582fd5eb3b7f6c8ccabc0e9",
+      "fingerprint": "sha256:33de816a4f93227ff63d3e78e95cb43c3a40731a113548622a98e4653f177298",
       "include": "pulp/signal/processor_duplicator.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Runs one mono processor instance per channel and dispatches to a processor's block path when it has one. Composition infrastructure for multichannel use of existing DSP rather than a generator surface; it makes no installed agent capability claim of its own."
     },
     {
       "domain": "signal",
@@ -4178,7 +4241,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/saturator.hpp",
-      "fingerprint": "sha256:575576593e3edcd18104082feebfc48584a3f160cc5dcd24d8d48909cb8e6b2b",
+      "fingerprint": "sha256:5f3e39f13efe4c52be18675c58fb85a23a8dff283eb5abefadd0e5304df0073b",
       "include": "pulp/signal/saturator.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -4218,16 +4281,16 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/scoped_flush_denormals.hpp",
-      "fingerprint": "sha256:989e43be3e1f6f2f806f3896116b98f21e6959fda976530659ccf4f7d99c6e16",
+      "fingerprint": "sha256:c9d2a472c1f096bc19969299925b933c21976d66a0e6492fa306ca309bc942ad",
       "include": "pulp/signal/scoped_flush_denormals.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "ScopedFlushDenormals is numeric-mode infrastructure for processor audio boundaries. It does not expose a standalone generator capability; the Windows MSVC include ordering is part of that shared implementation contract."
     },
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/signal.hpp",
-      "fingerprint": "sha256:429d4f7631c77db36e446bb91359d053059dd767f123d9e45dffd96efa4105e5",
+      "fingerprint": "sha256:26407cd80b39ea50a5d842c23c91a7d0136f5efdad6be9a52a8f381c427df22b",
       "include": "pulp/signal/signal.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -4254,7 +4317,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/six_band_eq.hpp",
-      "fingerprint": "sha256:85f2051455ad88b04aa92f73aa44605ec07007acd8761df8deecaa755b08066a",
+      "fingerprint": "sha256:25699c04e11bdd358bbde25071f8528ec81bfddd3a5defda58f1afc3556def09",
       "include": "pulp/signal/six_band_eq.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -4292,7 +4355,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/sos_cascade.hpp",
-      "fingerprint": "sha256:8cdd74d36ba12f1b19d85a28d57b501e5b96f8c3a1eae3f82cd96dbb7f027d79",
+      "fingerprint": "sha256:d0521809894f9de1c0ab61ab94d5f14d5d6ad90bd64a5f4bb39706f16a817af3",
       "include": "pulp/signal/sos_cascade.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -4387,7 +4450,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/spectral_frame_engine.hpp",
-      "fingerprint": "sha256:0ecaccef2ad745c8509a74447eb12b07d9fd061743d850bfe563497d77264d05",
+      "fingerprint": "sha256:79757445451e61f1e9d043abe9fc566b89a07df381c76f4b1d3cae525eeb5d49",
       "include": "pulp/signal/spectral_frame_engine.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -4477,7 +4540,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/stft.hpp",
-      "fingerprint": "sha256:0b42a15443f679c5eb3c7f92940403f4886ff7286a62dfaa2b1e50645758ae27",
+      "fingerprint": "sha256:1e8bf8737a90a4fc8b7330af7c4b1c9d39f5db95ad24803544369801ccc181ad",
       "include": "pulp/signal/stft.hpp",
       "disposition": "capability_support",
       "capability_keys": [
@@ -4529,11 +4592,20 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/svf.hpp",
-      "fingerprint": "sha256:5de2664969eb9eebd63e1af7791a5f9738cc857686102d8cde57fe7174e896f4",
+      "fingerprint": "sha256:50341bc965475434473aaca48a378ca56c4c19d757922fd1b2ae23406a5ebb66",
       "include": "pulp/signal/svf.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Trapezoidal state-variable filter with lowpass/highpass/bandpass/notch modes, a pure design() for its coefficients, and a register-resident block path. A bounded DSP primitive documented in the signal guide; it makes no installed agent capability claim of its own."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/svf_bank.hpp",
+      "fingerprint": "sha256:feedf8dd0862d2fe70a0640b2f3c4cccb684ff045052f713d11fc31f527ea5d2",
+      "include": "pulp/signal/svf_bank.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Runs N state-variable-filter voices in lockstep structure-of-arrays lanes with a per-voice mode, each voice bit-identical to Svf. A voice-processing primitive for polyphonic processors; it makes no installed agent capability claim of its own."
     },
     {
       "domain": "signal",
@@ -4587,11 +4659,11 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/tpt_filter.hpp",
-      "fingerprint": "sha256:280fe931e00700159f4fb526b5f35e08228c4091c09068b111a89d21fc46a974",
+      "fingerprint": "sha256:2e70a37436a0e624d192e38cd15dbf71c936230d21577b35271251d97b04b69c",
       "include": "pulp/signal/tpt_filter.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "First-order topology-preserving-transform lowpass/highpass/allpass with per-sample and block paths. A bounded DSP primitive documented in the signal guide; it makes no installed agent capability claim of its own."
     },
     {
       "domain": "signal",
@@ -4827,11 +4899,11 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/waveshaper.hpp",
-      "fingerprint": "sha256:4673695872790612c9282cf395c6b197af14f500acc0cf86d18366b0ccb48a47",
+      "fingerprint": "sha256:414fae751de0700326a73c259418799514ef35bf134e15d2cf1f29a766719b53",
       "include": "pulp/signal/waveshaper.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Static waveshaping curves (soft, hard, tanh, fold, sine fold) with a drive, as per-sample and buffer paths that agree bit for bit. A bounded DSP primitive; it makes no installed agent capability claim of its own."
     },
     {
       "domain": "signal",
@@ -4876,7 +4948,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/zero_latency_convolver.hpp",
-      "fingerprint": "sha256:f2ffe01d98618d870a3e7c7dee8e935948a3333090f01094d8bb0dd601a0861e",
+      "fingerprint": "sha256:b83e4d485420696d9598771185be0856b0fb377dd106c5d6ea76a7b5ef9e124e",
       "include": "pulp/signal/zero_latency_convolver.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -4885,7 +4957,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/zero_latency_convolver_support.hpp",
-      "fingerprint": "sha256:8a70ab86dcf8dcdd7df62d8d7c6720ec3d71f947866d1310ee5675a3a158c815",
+      "fingerprint": "sha256:2617e8cdff61bb3899d2c2b4529339116634d86c0ec7d7f3492ae929a02cadfb",
       "include": "pulp/signal/zero_latency_convolver_support.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],

@@ -29,6 +29,11 @@
 
 @interface PulpPluginView : NSView
 @property(nonatomic, assign) pulp::view::View* rootView;
+// Runs at the start of -dealloc, while the view is still whole, then is
+// dropped. The owner of an editor whose lifetime is the view's (the AU v2
+// Cocoa view: the host app holds the only reference) tears the editor down
+// here, because the PluginViewHost destructor still messages the view.
+@property(nonatomic, copy) void (^pulpWillDeallocHandler)(void);
 @property(nonatomic, copy) void (^onResize)(uint32_t, uint32_t);
 // Fired from -viewDidMoveToWindow so the host can start/stop its CPU frame
 // driver only while the view actually lives in a window.
@@ -109,9 +114,15 @@
 @interface PulpGpuPluginView : NSView
 @property(nonatomic, readonly) CAMetalLayer* metalLayer;
 @property(nonatomic, assign) pulp::view::View* rootView;
+// See PulpPluginView::pulpWillDeallocHandler.
+@property(nonatomic, copy) void (^pulpWillDeallocHandler)(void);
 @property(nonatomic, copy) void (^onWindowChange)(void);
 @property(nonatomic, copy) void (^onBackingChange)(void);
 @property(nonatomic, copy) void (^onResize)(uint32_t, uint32_t);
+// Fired from -viewDidHide, which AppKit also sends when a hidden ancestor
+// hides this view: an AU v2 editor, which has no view controller, learns
+// that the host hid it only this way.
+@property(nonatomic, copy) void (^onHide)(void);
 // Inverse-design-viewport transform applied to every host-space input point
 // before hit_test. Mirrors PulpPluginView + the standalone host. nil =
 // identity. Set by MacGpuPluginViewHost::set_design_viewport.

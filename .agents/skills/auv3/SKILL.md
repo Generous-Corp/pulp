@@ -253,7 +253,8 @@ not apply — `_bridge` is a C++ struct). The block:
    override the richer overload can inspect AUv3 bus metadata directly.
 7. Forwards any `midi_out` events back to the host via
    `self.MIDIOutputEventBlock` (AU v3.1+). Each event's
-   `sample_offset` is added to `timestamp->mSampleTime`.
+   `sample_offset` is added to `timestamp->mSampleTime` rounded to the nearest
+   sample (`detail::au_event_sample_time`).
 
 The bypass short-circuit (before step 6, when `shouldBypassEffect`) must NOT
 `memcpy` the dry input straight to the output. When the Processor reports a
@@ -654,10 +655,28 @@ You MUST:
 3. **Sign the .appex** with `--entitlements <sandbox>.plist` (the
    `com.apple.security.app-sandbox` entitlement is REQUIRED for app
    extensions; without it pkd logs "plug-ins must be sandboxed" and
-   rejects). Plus `allow-jit` + `allow-unsigned-executable-memory` +
-   `disable-library-validation` for JS-engine + Skia/Dawn editors.
-4. **Sign the container .app** (also with hardened-runtime entitlements
-   for library validation)
+   rejects). Use the build's rendered
+   `build/AUv3/<target>_AUv3.entitlements`: `PulpAuv3Entitlements.cmake`
+   emits `com.apple.security.cs.allow-jit` only for `PULP_JS_ENGINE=v8`
+   or `jsc` (QuickJS, Skia and Dawn need no executable memory), never
+   emits `allow-unsigned-executable-memory` (V8/JSC use `MAP_JIT`, which
+   `allow-jit` covers), and emits `disable-library-validation` only when
+   `-DPULP_AUV3_DISABLE_LIBRARY_VALIDATION=ON`. Library validation admits
+   code signed by Apple or by the host's own Team ID, so the inner-out
+   same-identity recipe here passes without it; turn it on only for a
+   vendor-signed prebuilt dylib you cannot re-sign, or an ad-hoc
+   (`codesign -s -`) dev build whose components carry no Team ID. The
+   old unconditional trio let any signed-by-anyone dylib load into the
+   extension. Gotcha: `pulp ship sign` / `ship share` refuse to sign an
+   app or appex of a `v8`/`jsc` build whose entitlements grant no
+   `allow-jit` (they read `PULP_JS_ENGINE` from the build's
+   `CMakeCache.txt`), because such a bundle signs fine and then fails the
+   instant the editor starts the engine. Plug-in bundles are exempt; they
+   run under the host's entitlements.
+4. **Sign the container .app** with the rendered
+   `build/AUv3/<target>_AUv3Host.entitlements` (same per-engine policy;
+   the host opens the AU UI in-process so it needs `allow-jit` exactly
+   when the appex does)
 5. **Notarize the container .app** via `xcrun notarytool submit
    --apple-id <id> --team-id <team> --password <app-specific-pwd>
    --wait`
@@ -960,6 +979,20 @@ links it into the framework. Mirrors `PULP_CLAP_PLUGIN` and
 `PULP_AU_INSTRUMENT`.
 
 ## Gotchas
+
+### `transportStateBlock`'s sample position is a double — round it, never truncate
+
+`transportStateBlock` returns `currentSamplePosition` as a `double`, and some hosts send a value a hair below the true sample: REAPER reports `13823.9999` for sample `13824`. A `static_cast<int64_t>` truncates it, so `position_samples` steps back one sample and then jumps two on the next block. Convert through `pulp::format::detail::host_sample_position()` (`detail/host_sample_position.hpp`, shared with AUv2). It returns the nearest sample (`std::round`, independent of the rounding mode), or `nullopt` for a non-finite or out-of-range value; leave `TransportField::SamplePosition` unset in that case.
+
+The render timestamp's `mSampleTime` is a double too, and the same rule applies to the two places that use it as the block start: an incoming render event's offset into the block (`detail::au_event_block_offset`) and an outgoing MIDI event's `AUEventSampleTime` (`detail::au_event_sample_time`). Truncating `13823.9999` placed every event one sample late. Both helpers fall back rather than overflow: an unusable block start makes the incoming event's own time its offset, and makes MIDI out go at `AUEventSampleTimeImmediate + offset`.
+
+### A hidden AU v3 editor returns its GPU caches from `viewDidDisappear`
+
+Both view controllers (`au_view_controller_mac.mm`, `au_view_controller_ios.mm`)
+call `PluginViewHost::release_gpu_caches()` there, and only on the main thread: the
+appearance callbacks arrive on main, but `createAudioUnit…` and `-dealloc` can
+arrive on the XPC queue (see the view-bridge skill), and a trim off the render
+thread would race a frame.
 
 ### `AURenderEventMIDIEventList` = UMP — not short MIDI, not raw sysex
 

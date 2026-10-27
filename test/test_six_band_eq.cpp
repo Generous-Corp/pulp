@@ -10,6 +10,8 @@
 #include <cmath>
 #include <complex>
 #include <cstddef>
+#include <cstring>
+#include <vector>
 #include <limits>
 
 using Catch::Matchers::WithinAbs;
@@ -50,10 +52,12 @@ void require_float_and_double_contract() {
         expected_parameters[band] = eq.band(band);
     const auto expected = legacy_process<T>(impulse, expected_parameters, T{48000});
     REQUIRE(eq.process_block(impulse.data(), impulse.size()));
+    // The float block path may run the cascade's regrouped DF2T order, which
+    // differs from the per-sample cascade by float round-off.
     for (std::size_t i = 0; i < impulse.size(); ++i)
-        REQUIRE_THAT(static_cast<double>(impulse[i]),
-                     WithinAbs(static_cast<double>(expected[i]),
-                               std::is_same_v<T, float> ? 1e-7 : 1e-13));
+        REQUIRE_THAT(
+            static_cast<double>(impulse[i]),
+            WithinAbs(static_cast<double>(expected[i]), std::is_same_v<T, float> ? 1e-6 : 1e-13));
 }
 
 double dft_magnitude(const std::array<double, 32768>& impulse, double frequency_hz,
@@ -380,4 +384,40 @@ TEST_CASE("SixBandEq control process response and reset paths allocate nothing",
         allocations = probe.allocation_count();
     }
     REQUIRE(allocations == 0);
+}
+
+TEST_CASE("SixBandEq block processing matches the sample path through a transition",
+          "[signal][eq][determinism]") {
+    std::vector<float> input(6000);
+    for (std::size_t i = 0; i < input.size(); ++i)
+        input[i] = 0.6f * std::sin(0.0371f * static_cast<float>(i)) +
+                   0.3f * std::sin(0.4113f * static_cast<float>(i));
+    SixBandEq by_block;
+    SixBandEq by_sample;
+    for (auto* eq : {&by_block, &by_sample}) {
+        eq->prepare(48000.0f);
+        eq->set_transition_samples(300);
+        REQUIRE(eq->set_band(0, {120.0f, 6.0f, 0.8f}));
+        REQUIRE(eq->set_band(2, {850.0f, -7.0f, 2.5f}));
+    }
+    auto a = input;
+    auto b = input;
+    for (std::size_t start = 0; start < a.size(); start += 1000) {
+        if (start == 2000) {
+            // The 300-sample transition ends inside this block.
+            REQUIRE(by_block.set_band(3, {2500.0f, 4.0f, 1.5f}));
+            REQUIRE(by_sample.set_band(3, {2500.0f, 4.0f, 1.5f}));
+        }
+        REQUIRE(by_block.process_block(a.data() + start, 1000));
+        for (std::size_t i = start; i < start + 1000; ++i)
+            b[i] = by_sample.process(b[i]);
+    }
+    // Round-off level: the block path may regroup the cascade's recurrence.
+    float worst = 0.0f;
+    for (std::size_t i = 0; i < a.size(); ++i)
+        worst = std::max(worst, std::abs(a[i] - b[i]));
+    // The paths differ by the cascade's float round-off (up to about
+    // -86 dBFS on these low bands); the block path's accuracy contract is
+    // gated by the Biquad and SosCascade precision tests.
+    CHECK(worst < 1.0e-4f);
 }

@@ -171,10 +171,14 @@ if(Python3_Interpreter_FOUND)
         COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_SOURCE_DIR}/tools/motion/visual/test_capture_smoke.py
     )
+    # A sanitizer build runs the capture several times slower; under the
+    # gate's load ASan took just over 60 s, so the budget scales with the
+    # build instead of the test doing less.
+    pulp_scaled_test_timeout(_pulp_motion_capture_smoke_timeout 60)
     set_tests_properties(pulp-motion-visual-capture-smoke PROPERTIES
         SKIP_RETURN_CODE 3
         LABELS "motion;visual"
-        TIMEOUT 60
+        TIMEOUT ${_pulp_motion_capture_smoke_timeout}
     )
 
     # The one registration in this set that must not skip. Every test above
@@ -205,4 +209,51 @@ if(Python3_Interpreter_FOUND)
         LABELS "motion;visual"
         TIMEOUT 60
     )
+endif()
+
+# Frame-identity stamp: FrameStampView paints an update index as bit and
+# complement rows, and the C++ decoder reads it back from the view raster.
+pulp_add_test_suite(pulp-test-frame-stamp
+    SOURCES test_frame_stamp.cpp support/frame_stamp.cpp
+    LIBRARIES pulp::view)
+
+if(Python3_Interpreter_FOUND)
+    # Decoder and sequence scoring on synthetic stamps. Stdlib only, no skip.
+    add_test(
+        NAME pulp-motion-frame-stamp-decode-selftest
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tools/motion/visual/test_frame_stamp_decode.py
+    )
+    set_tests_properties(pulp-motion-frame-stamp-decode-selftest PROPERTIES
+        LABELS "motion;visual"
+        TIMEOUT 60
+    )
+
+    # The Python decoder reads PNG sequences the C++ painter rendered (a live
+    # sequence and a frozen one), so a layout drift between them fails here.
+    if(PULP_HAS_SKIA)
+        set(_pulp_frame_stamp_out "${CMAKE_CURRENT_BINARY_DIR}/frame-stamp-frames")
+        add_test(
+            NAME pulp-motion-frame-stamp-emit
+            COMMAND pulp-test-frame-stamp "[frame-stamp-emit]"
+        )
+        set_tests_properties(pulp-motion-frame-stamp-emit PROPERTIES
+            ENVIRONMENT "PULP_FRAME_STAMP_OUT=${_pulp_frame_stamp_out}"
+            FIXTURES_SETUP pulp_frame_stamp_frames
+            LABELS "motion;visual"
+            TIMEOUT 60
+        )
+        add_test(
+            NAME pulp-motion-frame-stamp-decode-cpp-frames
+            COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_SOURCE_DIR}/tools/motion/visual/test_frame_stamp_decode.py
+                    --cpp-frames "${_pulp_frame_stamp_out}"
+        )
+        set_tests_properties(pulp-motion-frame-stamp-decode-cpp-frames PROPERTIES
+            FIXTURES_REQUIRED pulp_frame_stamp_frames
+            SKIP_RETURN_CODE 3
+            LABELS "motion;visual"
+            TIMEOUT 60
+        )
+    endif()
 endif()

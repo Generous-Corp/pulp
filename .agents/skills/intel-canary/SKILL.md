@@ -56,9 +56,12 @@ nothing, and the release ships THIN per-arch binaries. It lives in
 path: a redundant canary for an artifact we do not ship must never be able to
 block or starve a release. `intel-portability.yml` covers Intel at PR time.
 
-Before Tier 3 accepts the universal build, its m153 capability step must produce
-one source/asset/generation-bound receipt containing both an arm64 native
-compile/link/run and an explicitly Rosetta-run x86_64 compile/link/run. The
+Before Tier 3 accepts the universal build, its universal Skia capability step
+(`verify_skia_m153_capabilities.py`, which checks the m153-and-later provider
+contract, so the step and its `skia-universal-capabilities.json` result carry no
+milestone) must produce one source/asset/generation-bound receipt containing
+both an arm64 native compile/link/run and an explicitly Rosetta-run x86_64
+compile/link/run. The
 final `Compute result` step consumes that status alongside build, lipo, and
 dual-arch auval; an absent or partial capability receipt is a failure, not an
 advisory skip.
@@ -280,4 +283,7 @@ YAML, and the required macOS CTest hosts carry no PyYAML.
 The Intel portability workflow is advisory and is scheduled nightly on `main`
 or dispatched by Shipyard at arm time for an approved PR head. It intentionally
 has no `pull_request` trigger, so ordinary PR pushes do not consume the hosted
-Intel capacity.
+Intel capacity. Its job also skips the release bot's `release/version-bump`
+pull request (`github.head_ref != 'release/version-bump' && (...)`): the bump's
+tree is main's plus version files. Keep that guard on any job added here;
+`tools/scripts/test_bump_fastpath.py` checks it.

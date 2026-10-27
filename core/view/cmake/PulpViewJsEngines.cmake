@@ -49,6 +49,7 @@ set(PULP_V8_EXPECTED_RUNTIME_VERSION "")
 set(PULP_JS_ENGINE_SOURCES
     src/js_quickjs_engine.cpp
     src/js_engine_factory.cpp
+    src/script_bytecode_blob.cpp
 )
 
 set(_pulp_ubsan_enabled OFF)
@@ -79,18 +80,18 @@ if(PULP_JS_ENGINE STREQUAL "v8")
     # acceptance or packaging contract, so selection fails loudly.
     if(IOS OR PULP_IOS)
         message(FATAL_ERROR
-            "PULP_JS_ENGINE=v8 is not supported on iOS: the pinned m153 V8 "
+            "PULP_JS_ENGINE=v8 is not supported on iOS: the pinned m157 V8 "
             "artifact is a jitless simulator framework validated only for "
             "provider provenance/header consumption; Pulp has no device/AUv3 "
             "runtime acceptance or packaging contract. Use QuickJS (the default) "
             "or JSC.")
     endif()
-    # The sealed m153 Android provider was built with NDK API 29. Refuse a
+    # The sealed m157 Android provider was built with NDK API 29. Refuse a
     # lower-minSdk consumer instead of allowing a library that may load only on
     # newer devices than the application advertises.
     if(ANDROID AND ANDROID_NATIVE_API_LEVEL LESS 29)
         message(FATAL_ERROR
-            "PULP_JS_ENGINE=v8 on Android requires API 29+ for the pinned m153 "
+            "PULP_JS_ENGINE=v8 on Android requires API 29+ for the pinned m157 "
             "provider (configured API ${ANDROID_NATIVE_API_LEVEL}). Raise "
             "ANDROID_NATIVE_API_LEVEL/minSdk, use QuickJS, or rebuild V8 for the "
             "lower API and update the provider receipt.")
@@ -126,7 +127,7 @@ if(PULP_JS_ENGINE STREQUAL "v8")
         # regardless of sibling-field order within the entry (a name→version text
         # bridge breaks when a braces-delimited field like "upstream": { ... } is
         # reordered ahead of "version"). The tag may carry an LKGR suffix (e.g.
-        # "v8-m153-15.3.76.5-<sha>", "v8-15.2.24-lkgr-<sha>", or the older
+        # "v8-m157-15.7.112.5-<sha>", "v8-15.2.24-lkgr-<sha>", or the older
         # bare "v8-15.1.27"); discard an optional milestone prefix and reduce
         # it to the dotted-numeric run so the gate compares the runtime version
         # rather than the full release tag.
@@ -188,6 +189,13 @@ endif()
 # retain a stale ON value.
 set(PULP_HAS_JSC_ACTUAL "${PULP_HAS_JSC_ACTUAL}" CACHE INTERNAL
     "Whether this build compiles and links the JavaScriptCore backend" FORCE)
+
+# Shell exec/execAsync JS bridge (PULP_DEV_BRIDGE_EXEC, declared by the root
+# project). Private on purpose: only widget_bridge.cpp (the API-group table) and
+# widget_bridge/platform_services_api.cpp (the registrar body) read it, and no
+# installed header does, so a consumer cannot drift from the archive it links.
+target_compile_definitions(pulp-view-script
+    PRIVATE PULP_BRIDGE_EXEC_ENABLED=$<BOOL:${PULP_DEV_BRIDGE_EXEC}>)
 
 # Set compile definitions for engine availability / defaults.
 if(PULP_HAS_V8_ACTUAL)

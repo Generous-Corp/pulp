@@ -466,6 +466,112 @@ mod build_configure_argv {
         assert!(joined.contains("-G Ninja"), "{joined}");
         assert!(argv.iter().any(|a| a == "-DCMAKE_BUILD_TYPE=Release"), "{joined}");
         assert!(argv.iter().any(|a| a == "-DPULP_BUILD_EXAMPLES=OFF"), "{joined}");
+        assert!(argv.iter().any(|a| a == "-DPULP_DEV_BUILD=ON"), "{joined}");
+    }
+
+    /// A standalone project (pulp.toml, no core/) beside the fake tool dir.
+    fn standalone_fixture(td: &Path, sdk_version: &str) -> std::path::PathBuf {
+        let root = td.join("standalone");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("CMakeLists.txt"), "project(Consumer)\n").unwrap();
+        std::fs::write(
+            root.join("pulp.toml"),
+            format!("sdk_version = \"{sdk_version}\"\n"),
+        )
+        .unwrap();
+        root
+    }
+
+    #[test]
+    fn standalone_configure_passes_the_installed_sdk_prefix() {
+        let (td, bin, log) = fixture(true);
+        let home = td.path().join("pulp-home");
+        let sdk = home.join("sdk").join("0.0.1");
+        std::fs::create_dir_all(sdk.join("lib/cmake/Pulp")).unwrap();
+        std::fs::write(sdk.join("lib/cmake/Pulp/PulpConfig.cmake"), "").unwrap();
+        std::fs::write(sdk.join("version.txt"), "0.0.1\n").unwrap();
+        let root = standalone_fixture(td.path(), "latest");
+
+        let out = pulp_rs_no_fallthrough()
+            .arg("build")
+            .current_dir(&root)
+            .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+            .env("PULP_HOME", &home)
+            .env("PULP_TARTCI_LEASES", "0")
+            .env_remove("PULP_BUILD_TYPE")
+            .output()
+            .expect("run pulp build");
+        assert!(out.status.success(), "pulp build failed: {out:?}");
+        let text = std::fs::read_to_string(&log).unwrap();
+        let configure: Vec<&str> = text.lines().next().unwrap().split('\u{1f}').collect();
+        let want = format!("-DCMAKE_PREFIX_PATH={}", sdk.display());
+        assert!(configure.contains(&want.as_str()), "{configure:?}");
+        assert!(
+            !configure.contains(&"-DPULP_REQUIRE_CHECKOUT_DEPENDENCIES=ON"),
+            "{configure:?}"
+        );
+    }
+
+    #[test]
+    fn standalone_without_an_installed_sdk_hands_the_build_to_pulp_cpp() {
+        let (td, bin, log) = fixture(true);
+        let home = td.path().join("empty-pulp-home");
+        std::fs::create_dir_all(&home).unwrap();
+        let root = standalone_fixture(td.path(), "latest");
+        let cpp_log = td.path().join("pulp-cpp-argv.log");
+        let cpp = bin.join("fake-pulp-cpp");
+        write_exe(
+            &cpp,
+            &format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$*\" > '{}'\necho fake-pulp-cpp-ran\nexit 7\n",
+                cpp_log.display()
+            ),
+        );
+
+        let out = super::pulp_rs()
+            .arg("build")
+            .current_dir(&root)
+            .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+            .env("PULP_HOME", &home)
+            .env("PULP_RS_CPP_BINARY", &cpp)
+            .env_remove("PULP_RS_NO_FALLTHROUGH")
+            .env_remove("PULP_RS_FALLTHROUGH")
+            .env("PULP_TARTCI_LEASES", "0")
+            .output()
+            .expect("run pulp build");
+        // The delegate's exit code and output come back unchanged ...
+        assert_eq!(out.status.code(), Some(7), "{out:?}");
+        assert!(
+            String::from_utf8_lossy(&out.stdout).contains("fake-pulp-cpp-ran"),
+            "{out:?}"
+        );
+        assert_eq!(std::fs::read_to_string(&cpp_log).unwrap().trim(), "build");
+        // ... and the Rust side never configured without a prefix.
+        assert!(!log.exists(), "cmake ran: {:?}", std::fs::read_to_string(&log));
+    }
+
+    #[test]
+    fn standalone_without_an_installed_sdk_or_delegate_names_the_fix() {
+        let (td, bin, log) = fixture(true);
+        let home = td.path().join("empty-pulp-home");
+        std::fs::create_dir_all(&home).unwrap();
+        let root = standalone_fixture(td.path(), "9.8.7");
+        let out = pulp_rs_no_fallthrough()
+            .arg("build")
+            .current_dir(&root)
+            .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+            .env("PULP_HOME", &home)
+            .env("PULP_TARTCI_LEASES", "0")
+            .output()
+            .expect("run pulp build");
+        assert!(!out.status.success(), "{out:?}");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("no installed Pulp SDK matches this project's pulp.toml")
+                && stderr.contains("pulp sdk install"),
+            "{stderr}"
+        );
+        assert!(!log.exists(), "cmake ran: {:?}", std::fs::read_to_string(&log));
     }
 
     #[test]

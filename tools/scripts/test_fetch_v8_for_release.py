@@ -198,6 +198,23 @@ class EmbeddedPairManifest(unittest.TestCase):
                 fetch_v8.validate_embedded_manifest(
                     zf, manifest, manifest["dependencies"][1], "mac-arm64")
 
+    def test_skia_ahead_of_the_v8_pair_fails_closed(self):
+        # A V8 release stays bound to the Skia/Dawn it was built against: moving
+        # Pulp's active Skia ahead of the pair is refused even when the archive
+        # agrees with the V8 entry's own paired_* fields.
+        manifest, pair = _matched_pair_fixture()
+        skia = manifest["dependencies"][0]
+        skia["version"] = "chrome/m157"
+        skia["determinism"] = {"skia_commit": "7" * 40, "built_dawn": "8" * 40}
+        embedded = {"v8_version": "15.3.76.5", "platform": "mac", "arch": "arm64",
+                    "lib": "lib/libv8.dylib", "shared": True, "sealed": True,
+                    "i18n": True, "pair": pair}
+        with tempfile.TemporaryDirectory() as td, self._archive(
+                pathlib.Path(td), embedded) as zf:
+            with self.assertRaisesRegex(ValueError, "active validated_skia_release"):
+                fetch_v8.validate_embedded_manifest(
+                    zf, manifest, manifest["dependencies"][1], "mac-arm64")
+
     def test_top_level_artifact_identity_drift_fails_closed(self):
         manifest, pair = _matched_pair_fixture()
         embedded = {"v8_version": "15.3.76.5", "platform": "mac",
@@ -783,7 +800,11 @@ class FindV8ReceiptSelection(unittest.TestCase):
         (root / "lib").mkdir(parents=True)
         (root / "include/v8.h").write_bytes(b"header")
         (root / "lib/libv8.dylib").write_bytes(b"provider")
-        (root / "manifest.json").write_text("{}", encoding="utf-8")
+        # FindV8 applies the sealed provider's ABI contract at configure time;
+        # keep this receipt fixture representative of a real v8-builder asset.
+        (root / "manifest.json").write_text(
+            json.dumps({"sealed": True, "consumer_defines": ["V8_COMPRESS_POINTERS"]}),
+            encoding="utf-8")
         fetch_v8.write_generation_receipt(
             root, "mac-arm64", asset_sha, metadata_sha)
         (root / ".v8-asset-sha256").write_text(asset_sha + "\n", encoding="utf-8")

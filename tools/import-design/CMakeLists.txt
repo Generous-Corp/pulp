@@ -8,6 +8,7 @@ add_library(pulp-browser-capture-backend STATIC
     browser_capture_provenance.cpp
     browser_discovery.cpp
     browser_capture_diagnostics.cpp
+    browser_probe_cache.cpp
     node_runtime.cpp)
 add_library(pulp::browser-capture-backend ALIAS
     pulp-browser-capture-backend)
@@ -32,13 +33,17 @@ target_link_libraries(pulp-import-design-cli-policy PUBLIC
 
 add_executable(pulp-import-design
     pulp_import_design.cpp
+    annotated_capture.cpp
     import_design_cli_help.cpp
+    import_document_refusals.cpp
     browser_import_cli.cpp
     browser_import_session.cpp
     browser_html_import.cpp
+    browser_capture_fonts.cpp
     browser_capture_workspace.cpp
     browser_capture_ir.cpp
     browser_capture_styles.cpp
+    browser_capture_controls.cpp
     browser_capture_tree.cpp
     browser_capture_validation.cpp
     browser_knob_sprites.cpp
@@ -199,8 +204,14 @@ install(FILES
     "${_pulp_materialized_ids_map}"
     DESTINATION bin/jsx-runtime)
 
+# The allocation probe replaces global operator new in this binary so every
+# lane's per-frame allocation count is measured the same way.
 add_executable(pulp-design-import-bench
-    design_import_benchmark.cpp)
+    design_import_benchmark.cpp
+    design_import_benchmark_ir.cpp
+    design_import_benchmark_measure.cpp
+    design_import_benchmark_targets.cpp
+    ${CMAKE_SOURCE_DIR}/test/harness/rt_allocation_probe.cpp)
 target_include_directories(pulp-design-import-bench PRIVATE ${CMAKE_SOURCE_DIR})
 target_link_libraries(pulp-design-import-bench PRIVATE
     pulp::view
@@ -211,8 +222,11 @@ target_link_libraries(pulp-design-import-bench PRIVATE
 # serialized DesignIR directly, avoiding codegen/QuickJS as a confounding layer
 # when measuring the candidate importer's native tree.
 add_executable(pulp-design-ir-observe
-    design_ir_observe.cpp)
-target_include_directories(pulp-design-ir-observe PRIVATE ${CMAKE_SOURCE_DIR})
+    design_ir_observe.cpp
+    observer_script_lane.cpp)
+target_include_directories(pulp-design-ir-observe PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/core/render/src)
 target_link_libraries(pulp-design-ir-observe PRIVATE
     pulp::view
     pulp::state

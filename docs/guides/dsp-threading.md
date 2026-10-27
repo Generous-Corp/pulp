@@ -97,9 +97,10 @@ the prepared core state coherent, keep fixed per-block scratch accounted in
 
 ## Read parameters once per block, not per sample
 
-`store.get_value(id)` is a `std::atomic<float>::load(relaxed)`. Cheap,
-but not free: repeated atomic loads add inner-loop work and prevent the
-compiler from treating the value as an ordinary loop-local scalar.
+`store.get_value(id)` is an out-of-line call that looks the ID up in a hash
+map and then does a `std::atomic<float>::load(relaxed)`. Cheap, but not
+free: repeated reads add inner-loop work and prevent the compiler from
+treating the value as an ordinary loop-local scalar.
 
 The right pattern is to **snapshot** the parameters you need at the
 top of `process()`, then read from the snapshot inside the per-sample
@@ -148,6 +149,48 @@ For modulated reads (the CLAP per-voice modulation path), use
 `snapshot_modulated()` — same idea, but each slot is
 `base + mod_offset` instead of just `base`.
 
+To skip the ID lookup as well, resolve a `StateStore::param_reader()` handle
+once in `prepare()` and read it per block. `ParamReader::get()` is an inline
+relaxed atomic load; the handle stays valid for the store's lifetime, and an
+unknown ID reads `0.0f` just as `get_value()` does:
+
+```cpp
+void prepare(const PrepareContext&) override {
+    gain_ = state().param_reader(kGainId);
+}
+
+void process(audio::BufferView<float>& out, const audio::BufferView<const float>& in,
+             midi::MidiBuffer&, midi::MidiBuffer&, const ProcessContext&) override {
+    const float gain = gain_.get();
+    const std::size_t n = out.num_samples();
+    const std::size_t channels = std::min(out.num_channels(), in.num_channels());
+    for (std::size_t ch = 0; ch < channels; ++ch) {
+        // channel_ptr() once per channel, not per sample.
+        audio::buffer_ops::map_samples(in.channel_ptr(ch), out.channel_ptr(ch), n,
+                                       [gain](float x) { return x * gain; });
+    }
+}
+```
+
+Take `channel_ptr(ch)` outside the sample loop rather than indexing
+`out.channel(ch)[s]`, which rebuilds a `std::span` from the view on every
+sample. Hosts usually process in place, and a plain `dst[s] = src[s] * gain`
+loop then runs its scalar fallback: the compiler guards the vector loop with
+an overlap check that `dst == src` fails. `buffer_ops::map_samples()` gives
+the in-place case its own single-pointer loop, so both cases vectorize; write
+the same split yourself for a loop it does not fit.
+
+A stateful loop that walks samples in the outer loop and channels in the
+inner one (a filter or delay that keeps per-channel state) should not iterate
+a runtime channel count: the compiler cannot unroll across channels, so it
+re-addresses per-channel state every sample. Dispatch the count once per block
+with `buffer_ops::with_channel_count<1, 2>(channels, [&](auto count) { ... })`;
+for a listed count the lambda receives a compile-time constant, and any other
+count still runs through the same body. For a per-block UI meter, `audio::buffer_ops::measure_peak_rms()`
+returns peak and RMS in one vectorized pass; a hand-written
+`sum += x * x` loop is a single serial add chain and can cost more than the
+processing it measures. `pulp create` templates use all three.
+
 ## How parameter changes reach the UI
 
 Format adapters write host-driven parameter changes via
@@ -174,7 +217,9 @@ If you want the parameter change to take effect *within* a block
 instead of polling atomics inside the loop:
 
 * `param_events()` exposes the host-delivered sparse
-  `ParameterEventQueue` for the current block.
+  `ParameterEventQueue` for the current block. The VST3, AU v2 and CLAP
+  adapters leave it empty for a processor that overrides
+  `wants_sample_accurate_parameters()` to return false.
 * `ParameterEventQueue` is fixed-capacity; excess events are dropped,
   counted for the current block, and never trigger audio-thread allocation.
 * `format::EventBlock::audio_rate_modulations` carries dense
@@ -472,6 +517,13 @@ load history survives topology changes, and they are only ever added (never
 erased) while a snapshot is live, so the audio thread's raw measurer pointers
 stay valid across snapshot swaps. This is what lets a host attribute a CPU
 spike to a specific node instead of just the whole callback.
+
+Per-node timing starts when someone reads it, because two clock reads per node
+per block are a large share of a small graph's cost. The first `node_loads()`
+call turns monitoring on, so that first reading is zero or stale and the next
+ones are live. `set_node_load_monitoring()` gives explicit control, and
+enabling live-DSP telemetry times nodes too. Whole-graph timing (`graph_load()`)
+always runs; the live-swap admission gate reads it.
 
 Validation and UI surfaces should classify that snapshot with
 `audio::evaluate_audio_runtime_overload()` instead of inventing local

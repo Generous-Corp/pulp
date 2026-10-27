@@ -1,0 +1,189 @@
+{
+  "schema": "pulp-importer-differential-holdout-receipt-v1",
+  "fixture": "lattice-panel.html",
+  "source_sha256": "d0f2bf0f297fc81852fc4bc2b01f526ab7a9c59ecb19b87106da6ccb364fe2d9",
+  "source_bytes": 833090,
+  "campaign": {
+    "command": "analyze-corpus",
+    "runs": 3,
+    "cache_state": "unknown",
+    "pulp_commit": "42b835074bc05f910f39cb1e7dd4b3fbbd514d08",
+    "host_class": "macOS arm64",
+    "viewport": {
+      "width": 1280,
+      "height": 1127
+    }
+  },
+  "determinism": {
+    "status": "pass",
+    "completed_runs": 3,
+    "varying_digests": [],
+    "stable_digests": {
+      "source_sha256": "d0f2bf0f297fc81852fc4bc2b01f526ab7a9c59ecb19b87106da6ccb364fe2d9",
+      "importer_sha256": "bd6132a08d06c8058bedf210685644acd5a54feb99285c1079863b50798d9658",
+      "observer_sha256": "c9e6e193574ba1f8e40f433b6acbaeac2d822d6134b227d1da3eb16eb392b7de",
+      "browser_build_hash": "@d0c02bfad08ec92a6ffcf989e53cd995e6381a4c",
+      "browser_capture_canonical_sha256": "d0fea2d93b42d00811f77160f9a28e39020fa2ad1fd8fc63e101252a2ee0984a",
+      "native_capture_canonical_sha256": "d0fea2d93b42d00811f77160f9a28e39020fa2ad1fd8fc63e101252a2ee0984a",
+      "browser_snapshot_semantic_sha256": "93970c668977c5d60f97837997ffda40f9829c0f869f18f9adb470ba6606aba3",
+      "native_snapshot_semantic_sha256": "93970c668977c5d60f97837997ffda40f9829c0f869f18f9adb470ba6606aba3",
+      "browser_screenshot_sha256": "600887146df3b20f799397f659c20afff2ec16dd32be9b1df80627f7e4afd780",
+      "native_render_sha256": "3ca27ab09ae0e967e602afcc816c731fd07beb554086e45e2436e097997420be",
+      "native_layout_sha256": "ee3d9a01cd15c12d3c58576b0dc3f21676ad22ad00e27bb6f58294b78ec8b350",
+      "native_render_receipt_sha256": "8c4cb63130f44162ada06cbcbcef5f085575cd5351b24efd6b2023705c52b78c",
+      "platform_fonts_sha256": "86a43e830865d9e63986bb8ac3d63e6718f5ccc212f14189484bf681019f7576"
+    }
+  },
+  "runs": [
+    {
+      "run": 1,
+      "status": "completed",
+      "digests": {
+        "source_sha256": "d0f2bf0f297fc81852fc4bc2b01f526ab7a9c59ecb19b87106da6ccb364fe2d9",
+        "importer_sha256": "bd6132a08d06c8058bedf210685644acd5a54feb99285c1079863b50798d9658",
+        "observer_sha256": "c9e6e193574ba1f8e40f433b6acbaeac2d822d6134b227d1da3eb16eb392b7de",
+        "browser_build_hash": "@d0c02bfad08ec92a6ffcf989e53cd995e6381a4c",
+        "browser_capture_canonical_sha256": "d0fea2d93b42d00811f77160f9a28e39020fa2ad1fd8fc63e101252a2ee0984a",
+        "native_capture_canonical_sha256": "d0fea2d93b42d00811f77160f9a28e39020fa2ad1fd8fc63e101252a2ee0984a",
+        "browser_snapshot_semantic_sha256": "93970c668977c5d60f97837997ffda40f9829c0f869f18f9adb470ba6606aba3",
+        "native_snapshot_semantic_sha256": "93970c668977c5d60f97837997ffda40f9829c0f869f18f9adb470ba6606aba3",
+        "browser_screenshot_sha256": "600887146df3b20f799397f659c20afff2ec16dd32be9b1df80627f7e4afd780",
+        "native_render_sha256": "3ca27ab09ae0e967e602afcc816c731fd07beb554086e45e2436e097997420be",
+        "native_layout_sha256": "ee3d9a01cd15c12d3c58576b0dc3f21676ad22ad00e27bb6f58294b78ec8b350",
+        "native_render_receipt_sha256": "8c4cb63130f44162ada06cbcbcef5f085575cd5351b24efd6b2023705c52b78c",
+        "platform_fonts_sha256": "86a43e830865d9e63986bb8ac3d63e6718f5ccc212f14189484bf681019f7576"
+      },
+      "device_scale_factor": 2,
+      "scores": {
+        "structure": 0.98998,
+        "structure_incorrect_parentage": 0,
+        "structure_missing": 0,
+        "structure_extra": 5,
+        "geometry": 0.99998,
+        "geometry_gate_ok": false,
+        "geometry_gate_failed": [
+          "registered_max_abs_delta"
+        ],
+        "registered_geometry_mean": 0.999977,
+        "registered_geometry_max_abs_delta": 3.000366,
+        "typography": 1.0,
+        "visual": 0.994201,
+        "visual_registered": 0.992103,
+        "visual_full_frame": 0.994201
+      },
+      "classification": "browser-required",
+      "threshold_eligible": false,
+      "unsupported_dynamic_features": [
+        "animation"
+      ],
+      "support_boundaries": [],
+      "reasons": [
+        "unsupported dynamic features: animation",
+        "structural score below 0.990",
+        "geometry gate failed: registered_max_abs_delta",
+        "visual score below 0.995",
+        "full-frame visual 0.994 below 0.995 and classified unexplained"
+      ]
+    },
+    {
+      "run": 2,
+      "status": "completed",
+      "digests": {
+        "source_sha256": "d0f2bf0f297fc81852fc4bc2b01f526ab7a9c59ecb19b87106da6ccb364fe2d9",
+        "importer_sha256": "bd6132a08d06c8058bedf210685644acd5a54feb99285c1079863b50798d9658",
+        "observer_sha256": "c9e6e193574ba1f8e40f433b6acbaeac2d822d6134b227d1da3eb16eb392b7de",
+        "browser_build_hash": "@d0c02bfad08ec92a6ffcf989e53cd995e6381a4c",
+        "browser_capture_canonical_sha256": "d0fea2d93b42d00811f77160f9a28e39020fa2ad1fd8fc63e101252a2ee0984a",
+        "native_capture_canonical_sha256": "d0fea2d93b42d00811f77160f9a28e39020fa2ad1fd8fc63e101252a2ee0984a",
+        "browser_snapshot_semantic_sha256": "93970c668977c5d60f97837997ffda40f9829c0f869f18f9adb470ba6606aba3",
+        "native_snapshot_semantic_sha256": "93970c668977c5d60f97837997ffda40f9829c0f869f18f9adb470ba6606aba3",
+        "browser_screenshot_sha256": "600887146df3b20f799397f659c20afff2ec16dd32be9b1df80627f7e4afd780",
+        "native_render_sha256": "3ca27ab09ae0e967e602afcc816c731fd07beb554086e45e2436e097997420be",
+        "native_layout_sha256": "ee3d9a01cd15c12d3c58576b0dc3f21676ad22ad00e27bb6f58294b78ec8b350",
+        "native_render_receipt_sha256": "8c4cb63130f44162ada06cbcbcef5f085575cd5351b24efd6b2023705c52b78c",
+        "platform_fonts_sha256": "86a43e830865d9e63986bb8ac3d63e6718f5ccc212f14189484bf681019f7576"
+      },
+      "device_scale_factor": 2,
+      "scores": {
+        "structure": 0.98998,
+        "structure_incorrect_parentage": 0,
+        "structure_missing": 0,
+        "structure_extra": 5,
+        "geometry": 0.99998,
+        "geometry_gate_ok": false,
+        "geometry_gate_failed": [
+          "registered_max_abs_delta"
+        ],
+        "registered_geometry_mean": 0.999977,
+        "registered_geometry_max_abs_delta": 3.000366,
+        "typography": 1.0,
+        "visual": 0.994201,
+        "visual_registered": 0.992103,
+        "visual_full_frame": 0.994201
+      },
+      "classification": "browser-required",
+      "threshold_eligible": false,
+      "unsupported_dynamic_features": [
+        "animation"
+      ],
+      "support_boundaries": [],
+      "reasons": [
+        "unsupported dynamic features: animation",
+        "structural score below 0.990",
+        "geometry gate failed: registered_max_abs_delta",
+        "visual score below 0.995",
+        "full-frame visual 0.994 below 0.995 and classified unexplained"
+      ]
+    },
+    {
+      "run": 3,
+      "status": "completed",
+      "digests": {
+        "source_sha256": "d0f2bf0f297fc81852fc4bc2b01f526ab7a9c59ecb19b87106da6ccb364fe2d9",
+        "importer_sha256": "bd6132a08d06c8058bedf210685644acd5a54feb99285c1079863b50798d9658",
+        "observer_sha256": "c9e6e193574ba1f8e40f433b6acbaeac2d822d6134b227d1da3eb16eb392b7de",
+        "browser_build_hash": "@d0c02bfad08ec92a6ffcf989e53cd995e6381a4c",
+        "browser_capture_canonical_sha256": "d0fea2d93b42d00811f77160f9a28e39020fa2ad1fd8fc63e101252a2ee0984a",
+        "native_capture_canonical_sha256": "d0fea2d93b42d00811f77160f9a28e39020fa2ad1fd8fc63e101252a2ee0984a",
+        "browser_snapshot_semantic_sha256": "93970c668977c5d60f97837997ffda40f9829c0f869f18f9adb470ba6606aba3",
+        "native_snapshot_semantic_sha256": "93970c668977c5d60f97837997ffda40f9829c0f869f18f9adb470ba6606aba3",
+        "browser_screenshot_sha256": "600887146df3b20f799397f659c20afff2ec16dd32be9b1df80627f7e4afd780",
+        "native_render_sha256": "3ca27ab09ae0e967e602afcc816c731fd07beb554086e45e2436e097997420be",
+        "native_layout_sha256": "ee3d9a01cd15c12d3c58576b0dc3f21676ad22ad00e27bb6f58294b78ec8b350",
+        "native_render_receipt_sha256": "8c4cb63130f44162ada06cbcbcef5f085575cd5351b24efd6b2023705c52b78c",
+        "platform_fonts_sha256": "86a43e830865d9e63986bb8ac3d63e6718f5ccc212f14189484bf681019f7576"
+      },
+      "device_scale_factor": 2,
+      "scores": {
+        "structure": 0.98998,
+        "structure_incorrect_parentage": 0,
+        "structure_missing": 0,
+        "structure_extra": 5,
+        "geometry": 0.99998,
+        "geometry_gate_ok": false,
+        "geometry_gate_failed": [
+          "registered_max_abs_delta"
+        ],
+        "registered_geometry_mean": 0.999977,
+        "registered_geometry_max_abs_delta": 3.000366,
+        "typography": 1.0,
+        "visual": 0.994201,
+        "visual_registered": 0.992103,
+        "visual_full_frame": 0.994201
+      },
+      "classification": "browser-required",
+      "threshold_eligible": false,
+      "unsupported_dynamic_features": [
+        "animation"
+      ],
+      "support_boundaries": [],
+      "reasons": [
+        "unsupported dynamic features: animation",
+        "structural score below 0.990",
+        "geometry gate failed: registered_max_abs_delta",
+        "visual score below 0.995",
+        "full-frame visual 0.994 below 0.995 and classified unexplained"
+      ]
+    }
+  ]
+}

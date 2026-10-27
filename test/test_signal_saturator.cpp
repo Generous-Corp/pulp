@@ -20,9 +20,12 @@
 
 #include "harness/rt_allocation_probe.hpp"
 
+#include <pulp/audio/analysis/audio_spectrum.hpp>
 #include <pulp/signal/saturator.hpp>
 #include <pulp/signal/units.hpp>
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 #include <numbers>
@@ -516,7 +519,7 @@ TEST_CASE("A9 render, reset, re-render is bit-identical", "[saturator][determini
     for (auto shape : {SaturatorShape::tanh_soft, SaturatorShape::atan_soft,
                        SaturatorShape::cubic_soft, SaturatorShape::sinh_arc}) {
         for (auto policy : {SaturatorAliasPolicy::adaa, SaturatorAliasPolicy::oversample_2x,
-                            SaturatorAliasPolicy::off}) {
+                            SaturatorAliasPolicy::off, SaturatorAliasPolicy::adaa2}) {
             SaturatorT<double> sat;
             sat.prepare(kSr);
             sat.set_shape(shape);
@@ -676,7 +679,7 @@ TEST_CASE("A10 the saturator allocates nothing on the audio thread",
             sat.set_bias(std::sin(0.001 * n));
             if ((n % 1000) == 0) {
                 sat.set_shape(static_cast<SaturatorShape>((n / 1000) % 4));
-                sat.set_alias_policy(static_cast<SaturatorAliasPolicy>((n / 1000) % 3));
+                sat.set_alias_policy(static_cast<SaturatorAliasPolicy>((n / 1000) % 4));
             }
             (void)sat.process(0.5f * std::sin(0.05f * static_cast<float>(n)));
         }
@@ -728,5 +731,270 @@ TEST_CASE("non-finite saturator audio has exact bounded fresh recovery",
             const double x = 0.27 * std::sin(0.037 * i);
             REQUIRE(poisoned.process(x) == fresh.process(x));
         }
+    }
+}
+
+// ── Second-order ADAA ─────────────────────────────────────────────────────
+
+namespace {
+
+constexpr std::array<SaturatorShape, 4> kAllShapes = {
+    SaturatorShape::tanh_soft, SaturatorShape::atan_soft, SaturatorShape::cubic_soft,
+    SaturatorShape::sinh_arc};
+
+/// `2·F2[x0, x1, x2]` by the Hermite–Genocchi formula: twice the integral of
+/// `F2'' = f` over the unit simplex, i.e. the mean of the curve over the
+/// triangle the three arguments span. Only `f` is used, so this checks the
+/// closed-form `F2`, the sorting, and every fallback branch against a
+/// definition that shares none of their code. Composite midpoint rule on a
+/// fine triangular grid; accurate to ~1e-9 for these smooth curves.
+double adaa2_oracle(SaturatorShape shape, double x0, double x1, double x2) {
+    constexpr int kSteps = 600;
+    const double h = 1.0 / kSteps;
+    double sum = 0.0;
+    int count = 0;
+    for (int i = 0; i < kSteps; ++i) {
+        for (int j = 0; j < kSteps - i; ++j) {
+            // Midpoints of the lower and (where present) upper sub-triangles.
+            const double a = (i + 1.0 / 3.0) * h, b = (j + 1.0 / 3.0) * h;
+            sum += detail::SaturatorShapeMath::f(shape, x0 + a * (x1 - x0) + b * (x2 - x0));
+            ++count;
+            if (j < kSteps - i - 1) {
+                const double c = (i + 2.0 / 3.0) * h, d = (j + 2.0 / 3.0) * h;
+                sum += detail::SaturatorShapeMath::f(shape, x0 + c * (x1 - x0) + d * (x2 - x0));
+                ++count;
+            }
+        }
+    }
+    return sum / count;
+}
+
+double adaa2_kernel(SaturatorShape shape, double x0, double x1, double x2) {
+    SaturatorAdaa2 kernel;
+    kernel.reset(shape, x1, x2);
+    return kernel.step(shape, x0);
+}
+
+/// Worst in-band (<= 20 kHz) alias of a rendered tone, in dBc, by joint
+/// least-squares projection onto the harmonic and fold-back sites.
+double worst_alias_dbc(const std::vector<double>& rendered, double f0) {
+    std::vector<float> samples(rendered.begin(), rendered.end());
+    const float* channels[1] = {samples.data()};
+    pulp::audio::BufferView<const float> view(channels, 1, samples.size());
+    pulp::test::audio::AliasOptions options;
+    options.num_harmonics = static_cast<int>(3.0 * kSr / f0) + 2;
+    const auto report = pulp::test::audio::measure_aliasing(view, f0, kSr, options);
+    REQUIRE_FALSE(report.has_unresolved_in_band_alias);
+    return report.worst_alias_db;
+}
+
+} // namespace
+
+TEST_CASE("ADAA2's second antiderivative integrates the first, and is odd",
+          "[saturator][aliasing][adaa2]") {
+    for (auto shape : kAllShapes) {
+        for (double u : {-37.0, -6.0, -1.3, -1.0, -0.4, -1e-3, 0.0, 2e-4, 0.07, 0.999, 1.0, 1.001,
+                         2.5, 9.0, 41.0}) {
+            const double h = 1e-5 * std::max(1.0, std::abs(u));
+            const double derivative =
+                (detail::SaturatorShapeMath::second_antiderivative(shape, u + h) -
+                 detail::SaturatorShapeMath::second_antiderivative(shape, u - h)) /
+                (2.0 * h);
+            INFO("shape " << static_cast<int>(shape) << " u " << u);
+            REQUIRE_THAT(derivative, WithinAbs(detail::SaturatorShapeMath::antiderivative(shape, u),
+                                               2e-8 * std::max(1.0, u * u)));
+            REQUIRE(detail::SaturatorShapeMath::second_antiderivative(shape, -u) ==
+                    -detail::SaturatorShapeMath::second_antiderivative(shape, u));
+        }
+    }
+    // Absolute accuracy at the origin is what the divided difference
+    // amplifies; tanh's closed form subtracts O(1) terms there.
+    REQUIRE(std::abs(detail::SaturatorShapeMath::second_antiderivative(SaturatorShape::tanh_soft,
+                                                                       1e-6)) < 1e-16);
+}
+
+TEST_CASE("ADAA2 matches the simplex mean of the curve, including degenerate stencils",
+          "[saturator][aliasing][adaa2]") {
+    struct Triple {
+        double x0, x1, x2;
+    };
+    const Triple triples[] = {
+        {0.3, -0.2, 0.9},              // generic
+        {2.7, 0.4, -1.9},              // spans the knee
+        {-3.0, 3.0, -2.5},             // reversal through the origin
+        {1.5, 1.5 + 2e-6, 0.2},        // close pair: midpoint expansion
+        {0.8, -0.6, 0.8 + 3e-6},       // x0 ≈ x2, the textbook ill-conditioned case
+        {0.5, 0.5 + 1e-5, 0.5 - 2e-5}, // near-constant triple
+        {25.0, 24.0, 26.5},            // deep in saturation, F2 ~ u²/2
+        {0.9999, 1.0003, 0.9995},      // the cubic's clip boundary
+    };
+    for (auto shape : kAllShapes) {
+        for (const auto& t : triples) {
+            INFO("shape " << static_cast<int>(shape) << " triple " << t.x0 << " " << t.x1 << " "
+                          << t.x2);
+            REQUIRE_THAT(adaa2_kernel(shape, t.x0, t.x1, t.x2),
+                         WithinAbs(adaa2_oracle(shape, t.x0, t.x1, t.x2), 2e-6));
+        }
+        // Both pairs inside the fallback threshold while the spread is just
+        // outside it: here the midpoint rule's δ²·f'/24 correction is the
+        // whole difference between ~1e-6 error and ~1e-10, so the tolerance
+        // is set to see it.
+        INFO("shape " << static_cast<int>(shape) << " both pairs on the series branch");
+        REQUIRE_THAT(adaa2_kernel(shape, 0.5, 0.5 + 0.9e-4, 0.5 + 1.5e-4),
+                     WithinAbs(adaa2_oracle(shape, 0.5, 0.5 + 0.9e-4, 0.5 + 1.5e-4), 2e-7));
+    }
+}
+
+TEST_CASE("ADAA2's linear path is the three-tap mean adaa_linear_magnitude describes",
+          "[saturator][aliasing][adaa2]") {
+    // At floor drive a 0.5-peak tone stays on the linear part of tanh to
+    // ~1e-4, so the measured gain is the stencil's own response.
+    for (auto [policy, order] :
+         {std::pair{SaturatorAliasPolicy::adaa, 1}, std::pair{SaturatorAliasPolicy::adaa2, 2}}) {
+        for (double hz : {1000.0, 6000.0, 12000.0}) {
+            auto sat = make_saturator(SaturatorShape::tanh_soft, -12.0, 0.0, policy);
+            const auto out = render_sine(sat, hz, 0.02, 4800);
+            const double measured = magnitude_at_hz(out, hz) / 0.02;
+            INFO("order " << order << " hz " << hz);
+            REQUIRE_THAT(measured, WithinAbs(adaa_linear_magnitude(order, hz / kSr), 1e-4));
+        }
+    }
+    // The figures the documentation quotes.
+    REQUIRE_THAT(units::linear_to_db(adaa_linear_magnitude(2, 0.25)), WithinAbs(-9.54, 0.01));
+    REQUIRE_THAT(units::linear_to_db(adaa_linear_magnitude(1, 0.25)), WithinAbs(-3.01, 0.01));
+    REQUIRE(adaa_linear_magnitude(2, 1.0 / 3.0) < 1e-12);
+}
+
+TEST_CASE("ADAA2 reports one sample of latency and aligns its dry path",
+          "[saturator][latency][adaa2]") {
+    SaturatorT<double> sat;
+    sat.prepare(kSr);
+    sat.set_drive_db(SaturatorT<double>::kDriveDbMin);
+    sat.set_alias_policy(SaturatorAliasPolicy::adaa2);
+    REQUIRE(sat.latency_samples() == 1);
+    REQUIRE(sat.group_delay_samples() == 1.0);
+    sat.set_alias_policy(SaturatorAliasPolicy::adaa);
+    REQUIRE(sat.latency_samples() == 0);
+    REQUIRE(sat.group_delay_samples() == 0.5);
+
+    // On the linear part the impulse response is three equal taps centred on
+    // the reported latency.
+    sat.set_alias_policy(SaturatorAliasPolicy::adaa2);
+    sat.reset();
+    std::array<double, 4> h{};
+    for (std::size_t n = 0; n < h.size(); ++n)
+        h[n] = sat.process(n == 0 ? 1e-3 : 0.0);
+    REQUIRE_THAT(h[0], WithinRel(h[1], 1e-4));
+    REQUIRE_THAT(h[2], WithinRel(h[1], 1e-4));
+    REQUIRE(std::abs(h[3]) < 1e-15);
+
+    // A half-wet mix of a linear wet path that is not delay-matched would
+    // comb; matched, the 1 kHz tone passes at the stencil's own gain.
+    sat.set_mix(0.5);
+    sat.reset();
+    const auto out = render_sine(sat, kToneHz, 0.02, 4800);
+    const double expected = 0.5 + 0.5 * adaa_linear_magnitude(2, kToneHz / kSr);
+    REQUIRE_THAT(magnitude_at_hz(out, kToneHz) / 0.02, WithinAbs(expected, 1e-4));
+}
+
+TEST_CASE("ADAA paths re-seed on a parameter change instead of mixing two settings",
+          "[saturator][aliasing][adaa2]") {
+    // Hold a constant input, then move drive and bias. Every cached
+    // antiderivative was taken under the old setting; re-seeded, the very next
+    // output is already the new curve's value at that input, with no transient.
+    for (auto policy : {SaturatorAliasPolicy::adaa, SaturatorAliasPolicy::adaa2}) {
+        for (auto shape : kAllShapes) {
+            auto sat = make_saturator(shape, 6.0, 0.2, policy);
+            for (int n = 0; n < 8; ++n)
+                (void)sat.process(0.35);
+            sat.set_drive_db(20.0);
+            sat.set_bias(-0.4);
+            INFO("policy " << static_cast<int>(policy) << " shape " << static_cast<int>(shape));
+            REQUIRE_THAT(sat.process(0.35), WithinAbs(sat.shaped(0.35), 1e-9));
+        }
+    }
+}
+
+TEST_CASE("ADAA2 lowers the alias floor below ADAA1 for content under a sixth of the rate",
+          "[saturator][aliasing][adaa2]") {
+    // tanh at +18 dB on a 0.5-peak tone (u-domain peak 4), 4987.1 Hz: the
+    // fold sites of harmonics 5 and up land inside 20 kHz. The measurement is
+    // the joint least-squares projection, proven below to read a clean series
+    // as clean and a planted alias at its planted level.
+    constexpr double kF0 = 4987.1;
+    const auto render = [&](SaturatorAliasPolicy policy) {
+        auto sat = make_saturator(SaturatorShape::tanh_soft, 18.0, 0.0, policy);
+        return render_sine(sat, kF0, kTestPeak, 24000);
+    };
+    const double raw = worst_alias_dbc(render(SaturatorAliasPolicy::off), kF0);
+    const double first = worst_alias_dbc(render(SaturatorAliasPolicy::adaa), kF0);
+    const double second = worst_alias_dbc(render(SaturatorAliasPolicy::adaa2), kF0);
+    INFO("off " << raw << " adaa " << first << " adaa2 " << second);
+    REQUIRE(raw > -30.0);
+    REQUIRE(first < raw - 8.0);
+    REQUIRE(second < first - 12.0);
+    REQUIRE(second < -50.0);
+
+    // Negative control: the same tone synthesised from its in-band harmonics
+    // only has no alias by construction and must read at the analyzer floor;
+    // the same series with one fold site planted at -60 dBc must read -60.
+    std::vector<double> clean(24000), planted(24000);
+    const double w = 2.0 * std::numbers::pi * kF0 / kSr;
+    const double fold = pulp::test::audio::fold_frequency(7.0 * kF0, kSr);
+    for (std::size_t n = 0; n < clean.size(); ++n) {
+        const double t = static_cast<double>(n);
+        clean[n] = 0.6 * std::sin(w * t) + 0.1 * std::sin(3.0 * w * t + 0.4);
+        planted[n] = clean[n] + 0.6e-3 * std::sin(2.0 * std::numbers::pi * fold / kSr * t);
+    }
+    REQUIRE(worst_alias_dbc(clean, kF0) < -110.0);
+    REQUIRE_THAT(worst_alias_dbc(planted, kF0), WithinAbs(-60.0, 0.5));
+}
+
+TEST_CASE("ADAA2 aligns its dry path without prepare()", "[saturator][latency][adaa2]") {
+    // A zero-initialised instance is a valid one; its dry path must be
+    // delayed by the latency it reports, or a dry mix combs.
+    SaturatorT<double> sat;
+    sat.set_alias_policy(SaturatorAliasPolicy::adaa2);
+    sat.set_mix(0.0);
+    REQUIRE(sat.latency_samples() == 1);
+    std::array<double, 4> dry{};
+    for (std::size_t n = 0; n < dry.size(); ++n)
+        dry[n] = sat.process(n == 0 ? 0.25 : 0.0);
+    CHECK(dry[0] == 0.0);
+    CHECK(dry[1] == 0.25);
+    CHECK(dry[2] == 0.0);
+}
+
+TEST_CASE("Switching alias policy seeds the ADAA paths from the true input history",
+          "[saturator][aliasing][adaa2]") {
+    // A path that ran earlier still holds the inputs it saw then. Switching to
+    // it must reseed from the latest inputs, so the first sample after the
+    // switch equals a run that used that policy all along.
+    for (const auto target : {SaturatorAliasPolicy::adaa, SaturatorAliasPolicy::adaa2}) {
+        INFO("target " << static_cast<int>(target));
+        SaturatorT<double> always;
+        SaturatorT<double> switched;
+        for (auto* s : {&always, &switched}) {
+            s->prepare(kSr);
+            s->set_drive_db(12.0);
+            s->set_mix(1.0);
+        }
+        always.set_alias_policy(target);
+        // `switched` runs the target first, then off long enough for its
+        // stored history to be stale, then switches back.
+        switched.set_alias_policy(target);
+        double worst = 0.0;
+        for (int n = 0; n < 2000; ++n) {
+            const double x = 0.8 * std::sin(0.0517 * static_cast<double>(n));
+            if (n == 100)
+                switched.set_alias_policy(SaturatorAliasPolicy::off);
+            if (n == 900)
+                switched.set_alias_policy(target);
+            const double a = always.process(x);
+            const double b = switched.process(x);
+            if (n >= 900)
+                worst = std::max(worst, std::abs(a - b));
+        }
+        CHECK(worst < 1e-12);
     }
 }

@@ -52,6 +52,83 @@ test("indicator-free capture removes only declared moving art",
     }
   });
 
+// The capture emulates its DPR, and Chrome composites a backdrop-filter at
+// the browser's own device scale. With the two disagreeing, a frosted box over
+// fine lines came back with unblurred streaks of them; a plain screenshot of
+// the same page at the same scale is one even colour across the box.
+test("a frosted box captures blurred evenly at the capture scale",
+  { timeout: captureCaseTimeout() }, async (context) => {
+    const browser = await installedBrowser();
+    if (!browser) return context.skip("no compatible system browser is installed");
+    const root = await mkdtemp(path.join(os.tmpdir(), "pulp-browser-backdrop-"));
+    const input = path.join(root, "panel.html");
+    const output = path.join(root, "capture");
+    const script = fileURLToPath(new URL("./capture.mjs", import.meta.url));
+    try {
+      const lines = Array.from({ length: 12 }, (_, i) =>
+        `<div class="grid" style="left:${5 + i * 10}px"></div>`).join("");
+      await writeFile(input, `<!doctype html><style>
+        html,body{margin:0;width:120px;height:80px;background:#0b0f14}
+        .grid{position:absolute;top:0;width:1px;height:80px;background:#8090a0}
+        .frost{position:absolute;left:20px;top:10px;width:80px;height:60px;
+          background:rgba(12,16,22,.5);backdrop-filter:blur(8px)}
+      </style>${lines}<div class="frost"></div>`);
+      await runCapture(script, browser, input, root, output, 120, 80);
+      const png = await readFile(path.join(output, "browser.png"));
+      // Device pixels of the box at DPR 2, every 8th one in each direction.
+      const reds = [];
+      for (let y = 20; y < 140; y += 8)
+        for (let x = 40; x < 200; x += 8) reds.push(rgbaPixel(png, x, y)[0]);
+      assert.ok(Math.max(...reds) - Math.min(...reds) <= 2,
+        `the blurred box is one colour, red ${Math.min(...reds)}..${Math.max(...reds)}`);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+// The UA canvas follows the root's used color-scheme, set by CSS or by a
+// color-scheme meta tag; the capture records the colour Chromium resolved,
+// and it must be the colour Chromium painted outside every box.
+test("capture records the UA canvas colour Chromium painted",
+  { timeout: captureCaseTimeout(4) }, async (context) => {
+    const browser = await installedBrowser();
+    if (!browser) return context.skip("no compatible system browser is installed");
+    const root = await mkdtemp(path.join(os.tmpdir(), "pulp-browser-ua-canvas-"));
+    const script = fileURLToPath(new URL("./capture.mjs", import.meta.url));
+    const panel = "main{width:20px;height:20px;background:#357}</style><main></main>";
+    const cases = [
+      ["light", `<!doctype html><style>${panel}`, "rgb(255, 255, 255)"],
+      ["root-dark", `<!doctype html><style>:root{color-scheme:dark}${panel}`,
+        "rgb(18, 18, 18)"],
+      ["meta-dark",
+        `<!doctype html><meta name="color-scheme" content="dark"><style>${panel}`,
+        "rgb(18, 18, 18)"],
+      // The canvas takes the root's scheme, not the body's.
+      ["body-dark", `<!doctype html><style>body{color-scheme:dark}${panel}`,
+        "rgb(255, 255, 255)"],
+    ];
+    try {
+      for (const [name, html, expected] of cases) {
+        const input = path.join(root, `${name}.html`);
+        const output = path.join(root, name);
+        await writeFile(input, html);
+        await runCapture(script, browser, input, root, output, 120, 80);
+        const snapshot = JSON.parse(
+          await readFile(path.join(output, "dom-snapshot.json"), "utf8"));
+        const painted = rgbaPixel(
+          await readFile(path.join(output, "browser.png"), null), 230, 150);
+        assert.equal(snapshot.documentCanvas?.schema, "pulp-document-canvas-v1", name);
+        assert.equal(snapshot.documentCanvas.canvas_color, expected, name);
+        assert.equal(snapshot.documentCanvas.canvas_color,
+          `rgb(${painted.slice(0, 3).join(", ")})`, `${name} painted`);
+        // The probe left nothing behind in the captured tree.
+        assert.ok(!snapshot.strings.includes("PULP-DOCUMENT-CANVAS-PROBE"), name);
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
 test("a panel without declared indicators reuses its exact screenshot",
   { timeout: captureCaseTimeout() }, async (context) => {
     const browser = await installedBrowser();
@@ -189,6 +266,65 @@ test("real browser capture freezes a canvas animation and names its browser",
 // that resize even when the settled document exactly fills the active
 // viewport. The handler clears the backing store, and the capture has already
 // disabled rAF, so a second paint cannot repair the accepted frame.
+// Chromium draws a canvas bitmap inside the element's content box; the border
+// and padding are the element's own box paint. The isolated canvas plane must
+// put the bitmap there too, or every importer that places the plane at page
+// geometry draws the drawing stretched across the border.
+test("canvas plane holds the bitmap in the content box, not the border box",
+  { timeout: captureCaseTimeout() }, async (context) => {
+    const browser = await installedBrowser();
+    if (!browser) {
+      context.skip("no compatible system browser is installed");
+      return;
+    }
+
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "pulp-browser-canvas-content-box-"));
+    const input = path.join(root, "panel.html");
+    const output = path.join(root, "capture");
+    const script = fileURLToPath(new URL("./capture.mjs", import.meta.url));
+    try {
+      // Border box 20..148 x 20..108 CSS px; content box 30..138 x 30..98
+      // (6px border + 4px padding on every side).
+      await writeFile(input, `<!doctype html>
+<style>
+  body { margin: 0; background: #111; }
+  canvas { position: absolute; left: 20px; top: 20px; border: 6px solid #444;
+           padding: 4px; background: #222; }
+</style>
+<canvas id="surface" width="108" height="68"></canvas>
+<script>
+  const context = document.getElementById("surface").getContext("2d");
+  context.fillStyle = "rgb(210, 40, 70)";
+  context.fillRect(0, 0, 108, 68);
+</script>
+`);
+      await runCapture(script, browser, input, root, output, 240, 160);
+      const envelope = JSON.parse(
+        await readFile(path.join(output, "capture.json"), "utf8"));
+      const canvasAsset = envelope.assets.find(
+        (asset) => asset.kind === "canvas-snapshot");
+      assert.ok(canvasAsset, "canvas must be captured as a plane");
+      const plane = await readFile(path.join(output, canvasAsset.path));
+      // Device px at DPR 2. Inside the content box: the bitmap.
+      const inside = rgbaPixel(plane, 2 * 31, 2 * 31);
+      assert.ok(inside[0] > 180 && inside[1] < 80 && inside[3] > 240,
+        `content box lost the bitmap: rgba(${inside.join(", ")})`);
+      // On the border and in the padding: nothing from the bitmap.
+      for (const [x, y] of [[2 * 22, 2 * 60], [2 * 28, 2 * 60], [2 * 80, 2 * 27]]) {
+        const pixel = rgbaPixel(plane, x, y);
+        assert.ok(pixel[3] < 16,
+          `bitmap stretched into the box at (${x}, ${y}): rgba(${pixel.join(", ")})`);
+      }
+      // Chromium's own frame agrees: the bitmap starts at the content box.
+      const screenshot = await readFile(path.join(output, "browser.png"));
+      const padding = rgbaPixel(screenshot, 2 * 28, 2 * 60);
+      assert.ok(padding[0] < 80, `padding is not box paint: rgba(${padding.join(", ")})`);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
 test("viewport capture preserves a canvas across resize-sensitive panels",
   { timeout: captureCaseTimeout() }, async (context) => {
     const browser = await installedBrowser();

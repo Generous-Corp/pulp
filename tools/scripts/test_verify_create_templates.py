@@ -225,6 +225,48 @@ class TestRealtimePatterns(unittest.TestCase):
             self.assertIn("processor.hpp.template", failures[0])
             self.assertIn("calls load_script", failures[0])
 
+    def _flag_processor_edit(self, old: str, new: str, expected: str) -> None:
+        with TemporaryDirectory() as td:
+            gain = self._gain_copy(td) / "gain"
+            proc = gain / "processor.hpp.template"
+            text = proc.read_text(encoding="utf-8")
+            self.assertIn(old, text)
+            proc.write_text(text.replace(old, new, 1), encoding="utf-8")
+            failures = vct.check_realtime_patterns("gain", gain)
+            self.assertEqual(len(failures), 1, failures)
+            self.assertIn("processor.hpp.template", failures[0])
+            self.assertIn(expected, failures[0])
+
+    def test_get_value_in_processor_is_flagged(self) -> None:
+        self._flag_processor_edit(
+            "bypass_.get() >= 0.5f",
+            "state().get_value(kBypass) >= 0.5f",
+            "calls get_value")
+
+    def test_per_sample_span_subscript_is_flagged(self) -> None:
+        self._flag_processor_edit(
+            "pulp::audio::buffer_ops::map_samples(",
+            "for (std::size_t i = 0; i < n; ++i)\n"
+            "                output.channel(ch)[i] *= gain;\n"
+            "            pulp::audio::buffer_ops::map_samples(",
+            "subscripts channel(ch)[i]")
+
+    def test_hand_rolled_meter_is_flagged(self) -> None:
+        self._flag_processor_edit(
+            "pulp::audio::buffer_ops::measure_peak_rms(\n"
+            "                output, static_cast<std::size_t>(ch));",
+            "my_meter(output, ch);",
+            "does not measure it")
+
+    def test_processor_idioms_in_comments_are_not_flagged(self) -> None:
+        with TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "processor.hpp.template").write_text(
+                "// state().get_value(id) looks the ID up every call\n"
+                "/* output.channel(ch)[i] rebuilds a span */\n",
+                encoding="utf-8")
+            self.assertEqual(vct.check_realtime_patterns("gain", root), [])
+
     def test_load_script_in_a_comment_is_not_flagged(self) -> None:
         with TemporaryDirectory() as td:
             root = Path(td)
@@ -232,6 +274,74 @@ class TestRealtimePatterns(unittest.TestCase):
                 "// never load_script() per tick\n/* load_script(x) */\n",
                 encoding="utf-8")
             self.assertEqual(vct.check_realtime_patterns("gain", root), [])
+
+
+
+class TestCatch2Fetch(unittest.TestCase):
+    """The Catch2 fetch in the standalone templates runs on every first
+    configure of a generated project. The real tree must pass, and each slow or
+    broken shape must fail when planted."""
+
+    GOOD = (
+        "include(FetchContent)\n"
+        "FetchContent_Declare(Catch2\n"
+        "    URL https://github.com/catchorg/Catch2/archive/refs/tags/v3.7.1.tar.gz\n"
+        "    URL_HASH SHA256=" + "c" * 64 + "\n"
+        "    FIND_PACKAGE_ARGS 3.7.1 CONFIG\n"
+        ")\n"
+        "FetchContent_MakeAvailable(Catch2)\n"
+        "if(catch2_SOURCE_DIR)\n"
+        "    list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)\n"
+        "endif()\n"
+    )
+
+    def _check(self, text: str) -> list[str]:
+        with TemporaryDirectory() as td:
+            d = Path(td) / "standalone" / "effect"
+            d.mkdir(parents=True)
+            (d / "CMakeLists.txt.template").write_text(text, encoding="utf-8")
+            return vct.check_catch2_fetch("standalone", Path(td) / "standalone")
+
+    def test_real_standalone_templates_pass_and_are_scanned(self) -> None:
+        root = _HERE.parent / "templates" / "standalone"
+        templates = sorted(root.rglob("CMakeLists.txt.template"))
+        # Positive control: the scan must reach real Catch2 declarations.
+        self.assertGreaterEqual(len(templates), 4)
+        for t in templates:
+            self.assertIn("FetchContent_Declare(Catch2", t.read_text(encoding="utf-8"))
+        self.assertEqual(vct.check_catch2_fetch("standalone", root), [])
+
+    def test_good_shape_passes(self) -> None:
+        self.assertEqual(self._check(self.GOOD), [])
+
+    def test_git_clone_is_flagged(self) -> None:
+        text = self.GOOD.replace(
+            "    URL https://github.com/catchorg/Catch2/archive/refs/tags/v3.7.1.tar.gz\n",
+            "    GIT_REPOSITORY https://github.com/catchorg/Catch2.git\n    GIT_TAG v3.7.1\n")
+        self.assertTrue(any("fetched with git" in f for f in self._check(text)))
+
+    def test_unpinned_archive_is_flagged(self) -> None:
+        text = self.GOOD.replace("    URL_HASH SHA256=" + "c" * 64 + "\n", "")
+        self.assertTrue(any("URL_HASH" in f for f in self._check(text)))
+
+    def test_missing_find_package_args_is_flagged(self) -> None:
+        text = self.GOOD.replace("    FIND_PACKAGE_ARGS 3.7.1 CONFIG\n", "")
+        self.assertTrue(any("FIND_PACKAGE_ARGS" in f for f in self._check(text)))
+
+    def test_bare_major_find_package_version_is_flagged(self) -> None:
+        # "3" would accept an installed Catch2 older than the pinned 3.7.1.
+        text = self.GOOD.replace("FIND_PACKAGE_ARGS 3.7.1 CONFIG", "FIND_PACKAGE_ARGS 3 CONFIG")
+        self.assertTrue(any("pinned version 3.7.1" in f for f in self._check(text)))
+
+    def test_find_package_version_must_match_the_archive(self) -> None:
+        text = self.GOOD.replace("FIND_PACKAGE_ARGS 3.7.1 CONFIG", "FIND_PACKAGE_ARGS 3.6.0 CONFIG")
+        self.assertTrue(any("pinned version 3.7.1" in f for f in self._check(text)))
+
+    def test_unguarded_extras_path_is_flagged(self) -> None:
+        text = self.GOOD.replace(
+            "if(catch2_SOURCE_DIR)\n    list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)\nendif()\n",
+            "list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)\n")
+        self.assertTrue(any("unconditionally" in f for f in self._check(text)))
 
 
 if __name__ == "__main__":

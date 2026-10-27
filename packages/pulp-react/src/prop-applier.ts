@@ -16,6 +16,13 @@ import { applyPaintProp } from './prop-applier-paint.js';
 import { applyTypographyProp } from './prop-applier-typography.js';
 import { applyTransformProp } from './prop-applier-transform.js';
 import { applyEventProp, reclaimOverlayForMovedParent } from './prop-applier-events.js';
+import { resetRemovedStyleKeys } from './prop-applier-reset.js';
+import {
+    forgetControlled,
+    noteControlledProps,
+    noteDiscreteEdit,
+    writeControlledValue,
+} from './prop-applier-controlled.js';
 
 // Per-domain handler modules own layout, paint, typography, transform,
 // and declarative event-routing props. `applyOne` below is the thin
@@ -54,6 +61,36 @@ export function clearMaterializedEventCallbacks(id: string): void {
     for (const key of registry.keys()) {
         if (key.startsWith(prefix)) registry.delete(key);
     }
+    forgetNativeListeners(id);
+    forgetControlled(id);
+}
+
+/// Native listeners this module has armed and installed, per widget id, by
+/// the event name the bridge dispatches. A listener installed here is a
+/// trampoline that reads the registry at dispatch time, so while it stays
+/// installed a handler whose identity changes (every inline arrow function,
+/// every render) needs a registry write and no bridge call. The record
+/// belongs to one native widget and one installed bridge: a widget created
+/// again under the same id (applyAllProps), a detached subtree
+/// (clearMaterializedEventCallbacks) or a replaced bridge starts it over.
+const nativeListeners = new Map<string, Set<string>>();
+let nativeListenersBridge: unknown = null;
+
+function nativeListenerSet(id: string): Set<string> {
+    if (g.on !== nativeListenersBridge) {
+        nativeListeners.clear();
+        nativeListenersBridge = g.on;
+    }
+    let set = nativeListeners.get(id);
+    if (!set) {
+        set = new Set<string>();
+        nativeListeners.set(id, set);
+    }
+    return set;
+}
+
+function forgetNativeListeners(id: string): void {
+    nativeListeners.delete(id);
 }
 
 let _aap_count = 0;
@@ -109,6 +146,11 @@ function orderedPropKeys(type: string, props: Record<string, unknown>): string[]
         .map((key, index) => ({ key, index }))
         .sort((a, b) => virtualListPropRank(a.key) - virtualListPropRank(b.key) || a.index - b.index)
         .map((item) => item.key);
+}
+
+/// A prop that is missing, or present with nothing to apply.
+function isAbsent(props: Record<string, unknown>, key: string): boolean {
+    return !(key in props) || props[key] === undefined || props[key] === null;
 }
 
 function isVirtualListType(type: string): boolean {
@@ -303,26 +345,12 @@ function gestureRegistrarFor(eventName: string): string | null {
     }
 }
 
-function applyEventHandler(id: string, key: string, value: unknown): void {
-    const eventName = eventNameFor(key);
-    if (typeof value !== 'function') {
-        eventCallbackRegistry().delete(`${id}:${eventName}`);
-        // WidgetBridge's listener table is replace-only. Install an inert
-        // callback so a conditional React handler cannot remain live after
-        // its prop disappears. This is intentionally different from leaving
-        // the old closure registered: dynamic imported controls frequently
-        // change ownership while a menu/modal mounts or unmounts.
-        if (isHoverEvent(eventName)) {
-            // Re-arm the fan-out so the sibling spelling, if any, survives.
-            installHoverFanout(id, nativeHoverNameFor(eventName));
-            return;
-        }
-        call('on', id, eventName, () => ({ __pulpEventPropagation: 0 }));
-        return;
-    }
+/// Arm the native dispatch path an event needs. Each registrar is idempotent
+/// on the bridge; it runs once when the listener is first installed.
+function armNativeEvent(id: string, eventName: string): void {
     if (isHoverEvent(eventName)) {
-        // Arm the native hover dispatchers exactly once (idempotent on
-        // the bridge — re-registers replace the lambdas, same shape).
+        // Arm the native hover dispatchers (re-registers replace the
+        // lambdas, same shape).
         call('registerHover', id);
     }
     if (eventName === 'click') {
@@ -359,17 +387,20 @@ function applyEventHandler(id: string, key: string, value: unknown): void {
     if (gestureRegistrar) {
         call(gestureRegistrar, id);
     }
-    // Wrap the React handler in a synthetic-event factory so JSX
-    // consumers receive a React-DOM-shaped event object (with
-    // `currentTarget`, `target`, `preventDefault`, `nativeEvent.rawArgs`,
-    // and event-type-specific fields) instead of the bridge's raw
-    // positional args. Without this, idiomatic handlers like
-    //   onMouseEnter={e => e.currentTarget.style.background = 'rgba(...)'}
-    // crash with `Cannot read property 'style' of undefined`. See the
-    // synthetic-event module header for the full surface and the
-    // event-type → field-extraction routing.
-    const handler = value as (e: unknown) => void;
-    const callback = (...rawArgs: unknown[]) => {
+}
+
+/// Wrap the React handler in a synthetic-event factory so JSX
+/// consumers receive a React-DOM-shaped event object (with
+/// `currentTarget`, `target`, `preventDefault`, `nativeEvent.rawArgs`,
+/// and event-type-specific fields) instead of the bridge's raw
+/// positional args. Without this, idiomatic handlers like
+///   onMouseEnter={e => e.currentTarget.style.background = 'rgba(...)'}
+/// crash with `Cannot read property 'style' of undefined`. See the
+/// synthetic-event module header for the full surface and the
+/// event-type → field-extraction routing.
+function syntheticEventCallback(id: string, eventName: string,
+                                handler: (e: unknown) => void): (...rawArgs: unknown[]) => unknown {
+    return (...rawArgs: unknown[]) => {
         const evt = makeSyntheticEvent(id, eventName, rawArgs);
         handler(evt);
         // The native pointer router walks registered View ancestors after the
@@ -382,13 +413,50 @@ function applyEventHandler(id: string, key: string, value: unknown): void {
                 : 0,
         };
     };
-    eventCallbackRegistry().set(`${id}:${eventName}`, callback);
-    if (isHoverEvent(eventName)) {
-        // Both hover spellings route through one native dispatch name.
-        installHoverFanout(id, nativeHoverNameFor(eventName));
+}
+
+const INERT_EVENT_RESULT = () => ({ __pulpEventPropagation: 0 });
+
+function applyEventHandler(id: string, key: string, value: unknown): void {
+    const eventName = eventNameFor(key);
+    const registryKey = `${id}:${eventName}`;
+    const hover = isHoverEvent(eventName);
+    const nativeName = hover ? nativeHoverNameFor(eventName) : eventName;
+    const installed = nativeListenerSet(id);
+    if (typeof value !== 'function') {
+        const registry = eventCallbackRegistry();
+        registry.delete(registryKey);
+        // Nothing was installed for this event, so nothing can stay live.
+        if (!installed.has(nativeName)) return;
+        // The other hover spelling still owns the shared native listener,
+        // which reads the registry at dispatch and now skips this one.
+        if (hover && hoverAliasesFor(nativeName).some(
+            (alias) => registry.has(`${id}:${alias}`))) return;
+        // WidgetBridge's listener table is replace-only. Install an inert
+        // callback so a conditional React handler cannot remain live after
+        // its prop disappears. This is intentionally different from leaving
+        // the old closure registered: dynamic imported controls frequently
+        // change ownership while a menu/modal mounts or unmounts.
+        call('on', id, nativeName, INERT_EVENT_RESULT);
+        installed.delete(nativeName);
         return;
     }
-    call('on', id, eventName, callback);
+    eventCallbackRegistry().set(registryKey,
+        syntheticEventCallback(id, eventName, value as (e: unknown) => void));
+    // A new closure for an installed listener is a registry write only.
+    if (installed.has(nativeName)) return;
+    armNativeEvent(id, eventName);
+    installed.add(nativeName);
+    if (hover) {
+        // Both hover spellings route through one native dispatch name.
+        installHoverFanout(id, nativeName);
+        return;
+    }
+    call('on', id, nativeName, (...rawArgs: unknown[]) => {
+        noteDiscreteEdit(id, nativeName, rawArgs[0]);
+        const callback = eventCallbackRegistry().get(registryKey);
+        return callback ? callback(...rawArgs) : INERT_EVENT_RESULT();
+    });
 }
 
 /// Emit one setSvgRect call carrying the full geometry (x, y, width,
@@ -460,9 +528,8 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
             if (key === 'selectionMode') call('setVirtualListSelectionMode', id, 'single');
             if (key === 'selected') call('setVirtualListSelected', id, -1);
         }
-        // No-op — Pulp has no "unset" for most setters; rely on React
-        // unmount + recreate for full clears. Selective resets can be
-        // added per-prop here if a regression appears.
+        // Nothing to write; applyChangedProps resets the slots of a prop
+        // whose value became null or undefined (prop-applier-reset.ts).
         return;
     }
 
@@ -558,7 +625,9 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
             // Waveform use the 'data' prop handled above.
             if (type === 'Progress')   return call('setProgress', id, value as number);
             if (type === 'Meter')      return call('setMeterLevel', id, value as number);
-            return call('setValue', id, value as number);
+            return writeControlledValue(id, value as number);
+        // A Toggle or Checkbox position, as the 0/1 setValue takes.
+        case 'checked':     return writeControlledValue(id, value ? 1 : 0);
         case 'min':         return call('setMin', id, Number(value));
         case 'max':         return call('setMax', id, Number(value));
         case 'step':        return call('setStep', id, Number(value));
@@ -633,26 +702,20 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
 // Merge precedence: className rules < inline style < explicit flat
 // props. Later overrides earlier.
 
-/// Non-enumerable flag stamped on prop sets produced by style/className
-/// flattening. Distinguishes DERIVED visual props from author-written ones.
+/// Non-enumerable slot on prop sets produced by style/className flattening,
+/// holding the keys that came from the style source. Distinguishes DERIVED
+/// props from author-written ones.
 const DERIVED_STYLE_MARKER = '__pulpDerivedStyle';
-
-/// Visual keys that only ever reach the bridge by being hoisted out of
-/// `style`/`className`. Their absence is meaningful only when both prop
-/// sets came from the same shape.
-function isDerivedVisualKey(key: string): boolean {
-    return (
-        key === 'background' || key === 'backgroundGradient'
-        || key === 'textColor'
-        || key === 'border' || key === 'borderColor' || key === 'borderWidth'
-        || key === 'borderTop' || key === 'borderRight'
-        || key === 'borderBottom' || key === 'borderLeft'
-    );
-}
 
 /// True when `props` was produced by normalizeHostProps' flattening path.
 function isDerivedStyleProps(props: Record<string, unknown>): boolean {
-    return props[DERIVED_STYLE_MARKER] === true;
+    return props[DERIVED_STYLE_MARKER] instanceof Set;
+}
+
+/// Whether `key` was hoisted out of `style`/`className` into `props`.
+function isDerivedKey(props: Record<string, unknown>, key: string): boolean {
+    const keys = props[DERIVED_STYLE_MARKER];
+    return keys instanceof Set && keys.has(key);
 }
 
 type ClassRulesProvider = (className: string) => Record<string, unknown> | null;
@@ -682,12 +745,16 @@ export function normalizeHostProps(
     const hasClassName = typeof rawProps.className === 'string'
         && (rawProps.className as string).length > 0;
     // A render WITHOUT a style/className source yields a differently SHAPED
-    // prop set than one with it: the flattened visual keys (background,
-    // border, textColor) are simply absent rather than removed. The removal
-    // walk in applyChangedProps must not read that absence as a deletion, or
-    // the element is erased instead of restyled. Mark which shape a prop set
-    // came from so the two are separable.
-    if (!hasStyle && !hasClassName) return rawProps;
+    // prop set than one with it: the flattened keys are simply absent rather
+    // than removed. The removal walk in applyChangedProps must not read that
+    // absence as a deletion, or the element is erased instead of restyled.
+    // Mark which shape a prop set came from so the two are separable.
+    //
+    // A source that is present but empty (`style={hidden ? s : undefined}`,
+    // `className=""`) is the author clearing it, not a render that left it
+    // out, so it keeps the flattened shape and its removals still reset.
+    if (!hasStyle && !hasClassName
+        && !('style' in rawProps) && !('className' in rawProps)) return rawProps;
 
     // Use a null-prototype prop map so malformed CSS rules or hostile
     // class-rules JSON carrying `__proto__` / `constructor` /
@@ -704,6 +771,7 @@ export function normalizeHostProps(
     const isSafeKey = (k: string): boolean =>
         k !== '__proto__' && k !== 'constructor' && k !== 'prototype';
 
+    const derived = new Set<string>();
     if (hasClassName && _classRulesProvider) {
         const tokens = (rawProps.className as string)
             .split(/\s+/).filter(t => t.length > 0);
@@ -711,14 +779,19 @@ export function normalizeHostProps(
             const rules = _classRulesProvider(tok);
             if (!rules) continue;
             for (const k of Object.keys(rules)) {
-                if (isSafeKey(k)) out[k] = (rules as Record<string, unknown>)[k];
+                if (!isSafeKey(k)) continue;
+                out[k] = (rules as Record<string, unknown>)[k];
+                derived.add(k);
             }
         }
     }
 
     if (hasStyle) {
         const style = rawProps.style as Record<string, unknown>;
-        for (const k of Object.keys(style)) out[k] = style[k];
+        for (const k of Object.keys(style)) {
+            out[k] = style[k];
+            derived.add(k);
+        }
     }
 
     for (const k of Object.keys(rawProps)) {
@@ -729,9 +802,15 @@ export function normalizeHostProps(
     // Non-enumerable so the marker never reaches a bridge setter, a key
     // walk, or a shallow diff.
     Object.defineProperty(out, DERIVED_STYLE_MARKER, {
-        value: true, enumerable: false,
+        value: derived, enumerable: false,
     });
     return out;
+}
+
+/// Apply a style object to a widget the host config is creating, through the
+/// same per-key setters an authored prop uses.
+export function applyStyleProps(id: string, type: string, style: Record<string, unknown>): void {
+    for (const key of Object.keys(style)) applyOne(id, type, key, style[key], style);
 }
 
 /// Apply ALL props for first-attach. Called from appendInitialChild /
@@ -739,6 +818,10 @@ export function normalizeHostProps(
 export function applyAllProps(instance: PulpInstance): void {
     const { id, type, props } = instance;
     logApply('applyAll', id, type, Object.keys(props).length);
+    // A first attach is a new native widget: nothing is installed on it yet,
+    // whatever an earlier widget under this id had.
+    forgetNativeListeners(id);
+    noteControlledProps(id, props);
     // For SvgRect / SvgLine, emit the geometry call once up-front from
     // the full props snapshot, then skip the per-prop dispatch for the
     // four geometry keys. Otherwise we'd issue four identical
@@ -784,6 +867,7 @@ export function applyChangedProps(
 ): boolean {
     const { id, type } = instance;
     let mutated = false;
+    noteControlledProps(id, newProps);
     const selectionModeChanged = isVirtualListType(type) &&
         oldProps.selectionMode !== newProps.selectionMode;
     const rowCountChanged = isVirtualListType(type) &&
@@ -847,93 +931,70 @@ export function applyChangedProps(
     // nothing, leaving a lifted submenu nested on the menu it just left.
     if (reclaimOverlayForMovedParent(id, oldProps, newProps)) mutated = true;
 
-    // Visual props hoisted out of `style`/`className` are DERIVED, not
-    // authored. When a render arrives without its style source — the style
-    // object is omitted, or a className token the class-rules provider
-    // cannot resolve — the derived keys are ABSENT rather than deleted, so
-    // resetting them here erases the element (a chip loses fill, border and
-    // text in one frame and reads as "disappeared on hover"). Only honour a
-    // removal when both prop sets came from the same shape. A genuinely
-    // author-removed style — both sides flattened, key dropped from one —
-    // still resets.
+    // Props hoisted out of `style`/`className` are DERIVED, not authored.
+    // When a render arrives with no style source at all, the derived keys
+    // are ABSENT rather than deleted, so resetting them here erases the
+    // element (a chip loses fill, border, padding and text in one frame and
+    // reads as "disappeared on hover"). Only honour a removal when both prop
+    // sets came from the same shape. An author-removed style — a key dropped
+    // from a style object, or a style prop set to undefined — still resets.
     const derivedShapeChanged =
         isDerivedStyleProps(oldProps) && !isDerivedStyleProps(newProps);
 
-    // Walk old props — clear anything that disappeared (best-effort —
-    // most setters have no inverse; visible/opacity are obvious cases)
+    // Walk old props — every key that disappeared hands its native slots back
+    // to the widget's starting value (prop-applier-reset.ts). A key whose
+    // value became null or undefined is gone too: the walk above skips it,
+    // because applyOne has nothing to write for an absent value.
+    const removed: Array<{ key: string; oldValue: unknown }> = [];
     for (const key of Object.keys(oldProps)) {
         if (isReactInternal(key)) continue;
         if (key === 'children') continue;
         if (svgPathStrokeChanged && (key === 'stroke' || key === 'strokeGradient')) continue;
-        if (derivedShapeChanged && isDerivedVisualKey(key)) continue;
-        if (!(key in newProps)) {
-            if (isEventHandler(key)) {
-                applyEventHandler(id, key, undefined);
-                mutated = true;
-                continue;
-            }
-            // Specific resets we can do meaningfully
-            if (key === 'visible')  { call('setVisible', id, true); mutated = true; }
-            if (key === 'opacity')  { call('setOpacity', id, 1.0); mutated = true; }
-            // When overlay flips off or disappears from props, release
-            // the global overlay slot so the platform host does not keep
-            // routing clicks to a stale popover.
-            if (key === 'overlay' && oldProps[key]) {
-                call('releaseOverlay', id);
-                mutated = true;
-            }
-            // Visual cluster keys must clear when they fall out of
-            // newProps. The conditional-spread idiom
-            //   style={{ ...base, ...(active ? activeStyle : {}) }}
-            // contributes nothing to the spread on the inactive side, so
-            // the active-only keys vanish from newProps but the bridge
-            // keeps painting them. Reset to the canonical "no visual"
-            // value here so the next paint reflects React's intent.
-            // Any imported design using the same conditional-spread
-            // pattern needs this reset path.
-            if (key === 'background' || key === 'backgroundGradient') {
-                call('setBackground', id, 'transparent');
-                mutated = true;
-            }
-            if (key === 'border' || key === 'borderColor' || key === 'borderWidth') {
-                // Width-zero collapses the painted edge regardless of the
-                // color slot; cheaper than a 4-arg setBorder reset and
-                // keeps borderRadius (a separate slot) untouched.
-                call('setBorderWidth', id, 0);
-                mutated = true;
-            }
-            if (key === 'borderTop' || key === 'borderRight' || key === 'borderBottom' || key === 'borderLeft') {
-                const side = key.slice('border'.length).toLowerCase();
-                call('setBorderSide', id, side, 0, 'transparent');
-                mutated = true;
-            }
-            if (key === 'textColor') {
-                // Empty string is the bridge-side "use default" sentinel.
-                call('setTextColor', id, '');
-                mutated = true;
-            }
-            // `<Image>` whose `src` is removed clears the ImageView back
-            // to the empty placeholder, matching the web-compat
-            // removeAttribute('src') reset semantics. Empty string is the
-            // bridge-side "no source" sentinel.
-            // `type` is typed as keyof IntrinsicElementMap (which lists 'Image'
-            // but not the lowercase 'img' intrinsic — host-config routes 'img'
-            // through its string-fallback switch). Cast for the 'img' compare so
-            // the clear-on-removal seam matches the same element types as the
-            // set seam above.
-            if (key === 'src' && ((type as string) === 'img' || type === 'Image')) {
-                call('setImageSource', id, '');
-                mutated = true;
-            }
-            if (isVirtualListType(type) && key === 'selectionMode') {
-                call('setVirtualListSelectionMode', id, 'single');
-                mutated = true;
-            }
-            if (isVirtualListType(type) && key === 'selected') {
-                call('setVirtualListSelected', id, -1);
-                mutated = true;
-            }
-            // Other setters: no-op — let the next mount cycle handle it
+        if (derivedShapeChanged && isDerivedKey(oldProps, key)) continue;
+        if (isEventHandler(key)) {
+            if (key in newProps) continue;
+            applyEventHandler(id, key, undefined);
+            mutated = true;
+            continue;
+        }
+        if (!isAbsent(newProps, key) || isAbsent(oldProps, key)) continue;
+        // `<Image>` whose `src` is removed clears the ImageView back to the
+        // empty placeholder, matching the web-compat removeAttribute('src')
+        // reset semantics. Empty string is the bridge-side "no source"
+        // sentinel. `type` is typed as keyof IntrinsicElementMap (which lists
+        // 'Image' but not the lowercase 'img' intrinsic); cast for the 'img'
+        // compare so the clear-on-removal seam matches the set seam.
+        if (key === 'src' && ((type as string) === 'img' || type === 'Image')) {
+            call('setImageSource', id, '');
+            mutated = true;
+            continue;
+        }
+        // A null selection value was already reset by applyOne above.
+        if (isVirtualListType(type) && (key === 'selectionMode' || key === 'selected')
+            && key in newProps) continue;
+        if (isVirtualListType(type) && key === 'selectionMode') {
+            call('setVirtualListSelectionMode', id, 'single');
+            mutated = true;
+            continue;
+        }
+        if (isVirtualListType(type) && key === 'selected') {
+            call('setVirtualListSelected', id, -1);
+            mutated = true;
+            continue;
+        }
+        removed.push({ key, oldValue: oldProps[key] });
+    }
+    if (removed.length > 0) {
+        const survivors = orderedPropKeys(type, newProps).filter((key) =>
+            !isReactInternal(key) && key !== 'children' && !isEventHandler(key)
+            && !isAbsent(newProps, key));
+        const creationStyle = instance.creationStyle;
+        if (resetRemovedStyleKeys(id, type, removed, survivors, creationStyle,
+            (key, value, fromCreation) => {
+                if (fromCreation) applyOne(id, type, key, value, creationStyle);
+                else applyOne(id, type, key, newProps[key], newProps);
+            })) {
+            mutated = true;
         }
     }
 

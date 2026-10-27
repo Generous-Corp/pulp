@@ -21,9 +21,11 @@
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
 #include <chrono>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 #endif
 
@@ -32,6 +34,8 @@
 // WM_SIZE, MAKELPARAM, GetClientRect).
 #include <pulp/platform/win32_sane.hpp>
 #include <cstdint>
+#include <utility>
+#include <vector>
 #endif
 
 using namespace pulp::view;
@@ -71,6 +75,26 @@ TEST_CASE("PluginViewHost::create returns a native host with headless capture",
 }
 
 #if defined(PULP_TEST_HAS_X11)
+
+namespace {
+
+// A display, or a skip, or a failure. With no display these cases cannot run
+// and a bare return would record a pass, so they SKIP. Where the build wires
+// them through xvfb-run (test/cmake/script_canvas_render_tests.cmake), it
+// also sets PULP_TEST_REQUIRE_X11_DISPLAY, and a missing display there means
+// the wiring broke: that fails instead of skipping.
+Display* open_test_display(const char* what) {
+    Display* display = XOpenDisplay(nullptr);
+    if (!display) {
+        const char* required = std::getenv("PULP_TEST_REQUIRE_X11_DISPLAY");
+        if (required && *required == '1')
+            FAIL("no X display although this build runs X11 tests under xvfb-run");
+        SKIP(std::string("no X display (run under xvfb-run): ") + what + " skipped");
+    }
+    return display;
+}
+
+} // namespace
 
 // ── XDND synthetic-source handshake (Linux X11 target, #3645) ────────────────
 //
@@ -120,11 +144,7 @@ void send_client_message(Display* dpy, Window target, Window source, Atom type,
 
 TEST_CASE("X11 plugin host runs the XDND target handshake into dispatch_drop",
           "[view][plugin-view-host][xdnd][linux]") {
-    Display* src = XOpenDisplay(nullptr);
-    if (!src) {
-        WARN("no X display (run under xvfb-run) — XDND handshake skipped");
-        return;
-    }
+    Display* src = open_test_display("XDND handshake");
 
     // Build the host with a recording drop zone covering the whole surface.
     // The host re-runs a Yoga layout pass on every paint (attach_to_parent ->
@@ -286,6 +306,160 @@ TEST_CASE("X11 plugin host runs the XDND target handshake into dispatch_drop",
     XCloseDisplay(src);
 }
 
+// A DAW resizes the embedded editor with XResizeWindow on its own X
+// connection and never calls set_size(). The ConfigureNotify on the editor's
+// child window is the only signal, and pump_x_events() must act on it: until
+// it does the surfaces stay at the old size and the swapchain scales that
+// size onto the window every frame.
+TEST_CASE("X11 plugin host follows a resize the host applied to its window",
+          "[view][plugin-view-host][resize][linux]") {
+    Display* daw = open_test_display("ConfigureNotify check");
+    pulp::view::View root;
+    pulp::view::register_platform_plugin_view_host();
+    pulp::view::PluginViewHost::Options opts;
+    opts.size = {200, 150};
+    opts.use_gpu = false;
+    auto host = pulp::view::PluginViewHost::create(root, opts);
+    REQUIRE(host != nullptr);
+    host->attach_to_parent(reinterpret_cast<void*>(static_cast<uintptr_t>(DefaultRootWindow(daw))));
+    Window child = static_cast<Window>(reinterpret_cast<uintptr_t>(host->native_handle()));
+    REQUIRE(child != 0);
+    // The X server orders requests within one connection, not across two. The
+    // attach's own XResizeWindow and XMapWindow went out on the editor's
+    // connection; until the server has processed them, a resize from the DAW
+    // connection can land first and be undone by the attach. The window turning
+    // viewable proves the attach's requests, the resize before the map
+    // included, are done. Running out of time is a failure, not a reason to
+    // carry on into the race this wait exists to avoid. The budget is 5 s:
+    // xvfb on a loaded CI runner can be slow, and a passing run stops at the
+    // first poll that sees the window.
+    bool viewable = false;
+    for (int i = 0; i < 1000 && !viewable; ++i) {
+        XWindowAttributes attrs{};
+        viewable = XGetWindowAttributes(daw, child, &attrs) && attrs.map_state == IsViewable;
+        if (!viewable) {
+            host->pump_x_events();
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+    }
+    REQUIRE(viewable);
+    host->pump_x_events(); // drain the attach's own events
+
+    std::vector<std::pair<uint32_t, uint32_t>> notified;
+    host->set_resize_callback([&](uint32_t w, uint32_t h) { notified.emplace_back(w, h); });
+
+    // A drag: several sizes land before the editor's next pump.
+    for (unsigned i = 1; i <= 5; ++i)
+        XResizeWindow(daw, child, 300 + i, 220);
+    XSync(daw, False);
+    for (int i = 0; i < 100 && host->get_size().width != 305; ++i) {
+        host->pump_x_events();
+        if (host->get_size().width != 305)
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    CHECK(host->get_size().width == 305);
+    CHECK(host->get_size().height == 220);
+    REQUIRE_FALSE(notified.empty());
+    CHECK(notified.back() == std::make_pair(305u, 220u));
+    const auto calls = notified.size();
+
+    // The frame is the window's new size.
+    const auto png = host->capture_back_buffer_png();
+    REQUIRE(png.size() >= 24);
+    auto be32 = [&](size_t at) {
+        return (uint32_t(png[at]) << 24) | (uint32_t(png[at + 1]) << 16) |
+               (uint32_t(png[at + 2]) << 8) | uint32_t(png[at + 3]);
+    };
+    const float scale = host->scale_factor();
+    CHECK(be32(16) == static_cast<uint32_t>(305 * scale));
+    CHECK(be32(20) == static_cast<uint32_t>(220 * scale));
+
+    // The editor's own set_size() echoes back as a ConfigureNotify at the size
+    // it set; that is not a host resize and notifies nothing.
+    host->set_size(320, 240);
+    XSync(daw, False);
+    for (int i = 0; i < 20; ++i) {
+        host->pump_x_events();
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    CHECK(notified.size() == calls);
+    CHECK(host->get_size().width == 320);
+
+    host.reset();
+    XCloseDisplay(daw);
+}
+
+// set_size() only flushes its XResizeWindow, so the ConfigureNotify of an
+// earlier size can still be queued when the next set_size() drains events.
+// That stale echo must not put the editor back to the earlier size. The DAW's
+// connection makes it deterministic: a ConfigureNotify it sends and syncs
+// reaches the editor with a serial older than the editor's next request, and
+// holding a server grab while that set_size() drains keeps the real echo of
+// the new size from arriving in the same drain and masking the revert.
+// Nothing the editor does under the grab may wait on the server, or the case
+// deadlocks: it runs CPU-only (PULP_TEST_X11_HOST_CPU_ONLY, because the GPU
+// surfaces make X round trips on resize and paint) and stays unattached (an
+// attached raster editor would write its frame).
+TEST_CASE("X11 plugin host ignores a stale echo of an earlier resize",
+          "[view][plugin-view-host][resize][linux]") {
+    Display* daw = open_test_display("stale ConfigureNotify check");
+    setenv("PULP_TEST_X11_HOST_CPU_ONLY", "1", 1);
+    pulp::view::View root;
+    pulp::view::register_platform_plugin_view_host();
+    pulp::view::PluginViewHost::Options opts;
+    opts.size = {200, 150};
+    opts.use_gpu = false;
+    auto host = pulp::view::PluginViewHost::create(root, opts);
+    REQUIRE(host != nullptr);
+    Window child = static_cast<Window>(reinterpret_cast<uintptr_t>(host->native_handle()));
+    REQUIRE(child != 0);
+    host->set_size(300, 220);
+    XSync(daw, False);
+    for (int i = 0; i < 20; ++i) {
+        host->pump_x_events();
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    REQUIRE(host->get_size().width == 300);
+
+    std::vector<std::pair<uint32_t, uint32_t>> notified;
+    host->set_resize_callback([&](uint32_t w, uint32_t h) { notified.emplace_back(w, h); });
+
+    // The echo of the 300 x 220 resize, queued before the next set_size().
+    XEvent echo{};
+    echo.xconfigure.type = ConfigureNotify;
+    echo.xconfigure.display = daw;
+    echo.xconfigure.event = child;
+    echo.xconfigure.window = child;
+    echo.xconfigure.width = 300;
+    echo.xconfigure.height = 220;
+    REQUIRE(XSendEvent(daw, child, False, StructureNotifyMask, &echo) != 0);
+    XSync(daw, False);
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+
+    XGrabServer(daw);
+    XSync(daw, False);
+    host->set_size(400, 260); // drains the stale echo; its own echo waits
+    XUngrabServer(daw);
+    XSync(daw, False);
+    for (int i = 0; i < 20; ++i) {
+        host->pump_x_events();
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    CHECK(host->get_size().width == 400);
+    CHECK(host->get_size().height == 260);
+    CHECK(notified.empty());
+    Window root_return = 0;
+    int x = 0, y = 0;
+    unsigned int w = 0, h = 0, border = 0, depth = 0;
+    REQUIRE(XGetGeometry(daw, child, &root_return, &x, &y, &w, &h, &border, &depth) != 0);
+    CHECK(w == 400u);
+    CHECK(h == 260u);
+
+    host.reset();
+    unsetenv("PULP_TEST_X11_HOST_CPU_ONLY");
+    XCloseDisplay(daw);
+}
+
 #endif  // PULP_TEST_HAS_X11
 
 #if defined(_WIN32)
@@ -387,6 +561,277 @@ TEST_CASE("Windows plugin host reconciles a WM_SIZE host resize",
     } else {
         WARN("no GPU adapter/device (headless CI) — GPU swapchain check skipped");
     }
+}
+
+namespace {
+
+// Width and height from a PNG's IHDR chunk (big-endian, bytes 16..23).
+bool png_size(const std::vector<uint8_t>& png, uint32_t& w, uint32_t& h) {
+    if (png.size() < 24)
+        return false;
+    auto be32 = [&](size_t at) {
+        return (uint32_t(png[at]) << 24) | (uint32_t(png[at + 1]) << 16) |
+               (uint32_t(png[at + 2]) << 8) | uint32_t(png[at + 3]);
+    };
+    w = be32(16);
+    h = be32(20);
+    return true;
+}
+
+} // namespace
+
+// At a fractional scale a client width does not survive the trip through
+// logical units: 1001 px at 1.5x is 667 logical, and 667 x 1.5 is 1000. The
+// frame must be the client rect's own size, or it is stretched over the
+// window by a pixel and every frame is blurred.
+TEST_CASE("Windows plugin host frames a fractional-DPI client at its exact pixel size",
+          "[view][plugin-view-host][resize][hidpi][windows]") {
+    View root;
+    root.set_theme(Theme::dark());
+    register_platform_plugin_view_host();
+    PluginViewHost::Options opts;
+    opts.size = {64, 64};
+    opts.use_gpu = true; // may degrade to raster-only on a GPU-less runner
+    auto host = PluginViewHost::create(root, opts);
+    REQUIRE(host != nullptr);
+    host->set_scale_factor(1.5f);
+    REQUIRE(host->scale_factor() == 1.5f);
+    auto hwnd = static_cast<HWND>(host->native_handle());
+    REQUIRE(hwnd != nullptr);
+
+    int notified = 0;
+    host->set_resize_callback([&](uint32_t, uint32_t) { ++notified; });
+
+    SendMessageW(hwnd, WM_SIZE, SIZE_RESTORED, static_cast<LPARAM>(MAKELPARAM(1001, 751)));
+    CHECK(host->get_size().width == 667);
+    CHECK(host->get_size().height == 501);
+    CHECK(notified == 1);
+    uint32_t w = 0, h = 0;
+    REQUIRE(png_size(host->capture_back_buffer_png(), w, h));
+    CHECK(w == 1001);
+    CHECK(h == 751);
+
+    // 1000 px is also 667 logical. The frame still follows the client rect,
+    // and the processor, whose logical size did not change, hears nothing.
+    SendMessageW(hwnd, WM_SIZE, SIZE_RESTORED, static_cast<LPARAM>(MAKELPARAM(1000, 751)));
+    CHECK(notified == 1);
+    REQUIRE(png_size(host->capture_back_buffer_png(), w, h));
+    CHECK(w == 1000);
+    CHECK(h == 751);
+}
+
+// A resize callback can resize the editor again: here the callback's own
+// WM_SIZE arrives while it runs, on an unattached editor that delivers at
+// once. The second size is delivered after the first callback returns, never
+// from inside it.
+TEST_CASE("Windows plugin host does not re-enter its resize callback",
+          "[view][plugin-view-host][resize][windows]") {
+    View root;
+    root.set_theme(Theme::dark());
+    register_platform_plugin_view_host();
+    PluginViewHost::Options opts;
+    opts.size = {64, 64};
+    opts.use_gpu = true; // may degrade to raster-only on a GPU-less runner
+    auto host = PluginViewHost::create(root, opts);
+    REQUIRE(host != nullptr);
+    auto hwnd = static_cast<HWND>(host->native_handle());
+    REQUIRE(hwnd != nullptr);
+    const float scale = host->scale_factor();
+    const auto send_logical = [&](uint32_t w, uint32_t h) {
+        const auto pw = static_cast<uint32_t>(w * scale + 0.5f);
+        const auto ph = static_cast<uint32_t>(h * scale + 0.5f);
+        SendMessageW(hwnd, WM_SIZE, SIZE_RESTORED, static_cast<LPARAM>(MAKELPARAM(pw, ph)));
+    };
+
+    std::vector<std::pair<uint32_t, uint32_t>> notified;
+    int depth = 0, max_depth = 0;
+    host->set_resize_callback([&](uint32_t w, uint32_t h) {
+        ++depth;
+        max_depth = depth > max_depth ? depth : max_depth;
+        notified.emplace_back(w, h);
+        if (notified.size() == 1)
+            send_logical(180, 120);
+        --depth;
+    });
+    send_logical(200, 150);
+    CHECK(max_depth == 1);
+    REQUIRE(notified.size() == 2);
+    CHECK(notified[0] == std::make_pair(200u, 150u));
+    CHECK(notified[1] == std::make_pair(180u, 120u));
+    CHECK(host->get_size().width == 180);
+}
+
+// A DAW drag resizes the attached editor once per mouse move. The processor
+// hears about it once per frame, from the frame timer, with the last size.
+TEST_CASE("Windows attached editor notifies a WM_SIZE flood once per frame",
+          "[view][plugin-view-host][resize][windows]") {
+    struct ParentWindow {
+        HWND hwnd =
+            CreateWindowExW(0, L"STATIC", L"Pulp resize coalescing", WS_OVERLAPPEDWINDOW, 0, 0, 512,
+                            512, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+        ~ParentWindow() {
+            if (hwnd)
+                DestroyWindow(hwnd);
+        }
+    } parent;
+    REQUIRE(parent.hwnd != nullptr);
+
+    View root;
+    root.set_theme(Theme::dark());
+    register_platform_plugin_view_host();
+    PluginViewHost::Options opts;
+    opts.size = {64, 64};
+    opts.use_gpu = true; // may degrade to raster-only on a GPU-less runner
+    auto host = PluginViewHost::create(root, opts);
+    REQUIRE(host != nullptr);
+    host->attach_to_parent(parent.hwnd);
+    REQUIRE(host->is_attached());
+
+    const auto child = static_cast<HWND>(host->native_handle());
+    REQUIRE(child != nullptr);
+    const auto dispatch_frame_timer = [&] {
+        const auto deadline = GetTickCount64() + 1000;
+        MSG msg{};
+        while (GetTickCount64() < deadline) {
+            if (PeekMessageW(&msg, child, WM_TIMER, WM_TIMER, PM_REMOVE)) {
+                DispatchMessageW(&msg);
+                return true;
+            }
+            Sleep(1);
+        }
+        return false;
+    };
+
+    std::vector<std::pair<uint32_t, uint32_t>> notified;
+    host->set_resize_callback([&](uint32_t w, uint32_t h) { notified.emplace_back(w, h); });
+    const float scale = host->scale_factor();
+    REQUIRE(scale > 0.0f);
+    const auto send_logical = [&](uint32_t w, uint32_t h) {
+        const auto pw = static_cast<uint32_t>(w * scale + 0.5f);
+        const auto ph = static_cast<uint32_t>(h * scale + 0.5f);
+        SendMessageW(child, WM_SIZE, SIZE_RESTORED, static_cast<LPARAM>(MAKELPARAM(pw, ph)));
+    };
+
+    for (uint32_t i = 1; i <= 60; ++i)
+        send_logical(100 + i, 80);
+    CHECK(notified.empty());
+    REQUIRE(dispatch_frame_timer());
+    REQUIRE(notified.size() == 1);
+    CHECK(notified.back() == std::make_pair(160u, 80u));
+    CHECK(host->get_size().width == 160);
+
+    // A frame with no resize notifies nothing.
+    host->repaint();
+    REQUIRE(dispatch_frame_timer());
+    CHECK(notified.size() == 1);
+    host->detach();
+}
+
+TEST_CASE("Windows attached GPU editor coalesces scripted repaint requests",
+          "[view][plugin-view-host][repaint][windows][gpu]") {
+    struct ParentWindow {
+        HWND hwnd =
+            CreateWindowExW(0, L"STATIC", L"Pulp repaint regression", WS_OVERLAPPEDWINDOW, 0, 0,
+                            128, 128, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+        ~ParentWindow() {
+            if (hwnd)
+                DestroyWindow(hwnd);
+        }
+    } parent;
+    REQUIRE(parent.hwnd != nullptr);
+
+    View root;
+    root.set_bounds({0, 0, 64, 64});
+    root.set_theme(Theme::dark());
+    register_platform_plugin_view_host();
+    int idle_calls = 0;
+    bool requested_inside_idle = false;
+    PluginViewHost::Options opts;
+    opts.size = {64, 64};
+    opts.use_gpu = true;
+    auto host = PluginViewHost::create(root, opts);
+    REQUIRE(host != nullptr);
+    host->attach_to_parent(parent.hwnd);
+    REQUIRE(host->is_attached());
+    // Repeated attachment to the same HWND is an idempotent no-op.
+    host->attach_to_parent(parent.hwnd);
+    CHECK(host->is_attached());
+    if (!host->is_gpu_backed())
+        SKIP("Dawn GPU unavailable: this regression requires a real GPU-backed HWND");
+
+    const auto child = static_cast<HWND>(host->native_handle());
+    REQUIRE(child != nullptr);
+    const auto dispatch_frame_timer = [&] {
+        const auto deadline = GetTickCount64() + 1000;
+        MSG msg{};
+        while (GetTickCount64() < deadline) {
+            if (PeekMessageW(&msg, child, WM_TIMER, WM_TIMER, PM_REMOVE)) {
+                DispatchMessageW(&msg);
+                return true;
+            }
+            Sleep(1);
+        }
+        return false;
+    };
+    ValidateRect(child, nullptr);
+    host->set_idle_callback([&] { ++idle_calls; });
+    for (int i = 0; i != 32; ++i)
+        host->repaint();
+    CHECK(idle_calls == 0);
+    CHECK(GetUpdateRect(child, nullptr, FALSE) == 0);
+    REQUIRE(dispatch_frame_timer());
+    CHECK(idle_calls == 1);
+
+    idle_calls = 0;
+    host->set_idle_callback([&] {
+        ++idle_calls;
+        if (!requested_inside_idle) {
+            requested_inside_idle = true;
+            host->repaint();
+        }
+    });
+    host->repaint();
+    CHECK(idle_calls == 0);
+    REQUIRE(dispatch_frame_timer());
+    CHECK(requested_inside_idle);
+    CHECK(idle_calls == 1);
+    CHECK(GetUpdateRect(child, nullptr, FALSE) == 0);
+    REQUIRE(dispatch_frame_timer());
+    CHECK(idle_calls == 2);
+    host->set_idle_callback({});
+    host->detach();
+}
+
+TEST_CASE("Windows attached GPU editor rolls back when its frame timer fails",
+          "[view][plugin-view-host][repaint][windows][timer]") {
+    struct ParentWindow {
+        HWND hwnd =
+            CreateWindowExW(0, L"STATIC", L"Pulp timer failure regression", WS_OVERLAPPEDWINDOW, 0,
+                            0, 128, 128, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+        ~ParentWindow() {
+            if (hwnd)
+                DestroyWindow(hwnd);
+        }
+    } parent;
+    REQUIRE(parent.hwnd != nullptr);
+
+    View root;
+    root.set_bounds({0, 0, 64, 64});
+    root.set_theme(Theme::dark());
+    register_platform_plugin_view_host();
+    PluginViewHost::Options opts;
+    opts.size = {64, 64};
+    opts.use_gpu = true;
+    auto host = PluginViewHost::create(root, opts);
+    REQUIRE(host != nullptr);
+
+    _putenv_s("PULP_TEST_FORCE_WIN_FRAME_TIMER_FAILURE", "1");
+    host->attach_to_parent(parent.hwnd);
+    _putenv_s("PULP_TEST_FORCE_WIN_FRAME_TIMER_FAILURE", "");
+
+    CHECK_FALSE(host->is_attached());
+    CHECK(GetParent(static_cast<HWND>(host->native_handle())) == nullptr);
+    host->detach();
 }
 
 #endif  // _WIN32

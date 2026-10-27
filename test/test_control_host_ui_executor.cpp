@@ -724,3 +724,52 @@ TEST_CASE("Standalone UI adapter reports a self-unmounting pointer event as appl
     REQUIRE(detached);
     CHECK(static_cast<SelfUnmountNode*>(detached.get())->modern_down_calls == 1);
 }
+
+TEST_CASE("runtime evaluation is policy-denied when the live realm holds an effectful grant",
+          "[inspect][control][runtime-eval][capabilities][security]") {
+    class RefusingEvaluator final : public RuntimeEvaluator {
+      public:
+        RuntimeEvaluatorCapabilities capabilities() const override {
+            return {.engine = "fixture",
+                    .can_evaluate = false,
+                    .can_interrupt = true,
+                    .effectful_grant = "exec"};
+        }
+        RuntimeEvaluationResult evaluate(std::string_view, std::chrono::milliseconds,
+                                         std::size_t) override {
+            ++calls;
+            return {.ok = true, .json = "1"};
+        }
+        bool interrupt() override {
+            return false;
+        }
+        std::string_view binary_marker() const noexcept override {
+            return "PULP_INSPECT_RUNTIME_EVAL_HIGH_RISK_COMPONENT_V1";
+        }
+        int calls = 0;
+    };
+    PostedQueue queue;
+    auto evaluator = std::make_shared<RefusingEvaluator>();
+    auto unsafe = binding(ControlBuildProfile::ResearchUnsafe);
+    auto executor =
+        ControlHostUiExecutor::create({.binding = unsafe,
+                                       .main_thread_rpc = rpc(queue),
+                                       .runtime_evaluator = evaluator,
+                                       .redact_runtime_eval_result = [](std::string_view value) {
+                                           return std::optional<std::string>{std::string(value)};
+                                       }});
+    REQUIRE(executor);
+    const auto admission = plan(InspectorCapability::RuntimeEval, "dev.pulp.runtime/evaluate@1");
+    const auto envelope = request(
+        admission,
+        R"json({"source":"({ answer: 42 })","timeout_ms":1000,"idempotency_key":"eval-c5"})json");
+    const auto outcome =
+        run_on_worker(executor->executor(), admission, envelope,
+                      {.checkpoint = [] { return ControlExecutionCheckpoint::Continue; }}, queue);
+    REQUIRE(outcome.terminal_state == ControlReceiptState::Failed);
+    CHECK(outcome.result.result_code == ControlResultCode::PolicyDenied);
+    CHECK(outcome.result.retry == ControlRetryClassification::Never);
+    CHECK(outcome.result.explanation.find("exec") != std::string::npos);
+    // Refused before any source reached the evaluator.
+    CHECK(evaluator->calls == 0);
+}

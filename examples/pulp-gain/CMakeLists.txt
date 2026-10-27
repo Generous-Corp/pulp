@@ -31,6 +31,33 @@ pulp_add_plugin(PulpGain
     AAX_NATIVE_CODE "PGan"
 )
 
+# PulpGain built without an editor: the UI-less reference for footprint.
+add_subdirectory(headless)
+
+# ── Footprint ─────────────────────────────────────────────────────────────
+# PulpGain has the lite editor stack (the default): its AutoUi editor paints
+# on the CoreGraphics host,
+# so its binaries must carry none of Skia, Dawn, Tint, ICU, the GPU host or the
+# script runtime, and stay under the lite budget
+# (tools/scripts/plugin_footprint_budget.json, profile "lite-editor").
+# PulpEffect holds the full stack's budget and the trimmed ICU data.
+if(APPLE AND Python3_EXECUTABLE AND PULP_HAS_SKIA AND TARGET pulp-canvas-lite-objects)
+    set(_pulp_gain_footprint_binaries "")
+    foreach(_fmt VST3 CLAP AU)
+        if(TARGET PulpGain_${_fmt})
+            list(APPEND _pulp_gain_footprint_binaries "$<TARGET_FILE:PulpGain_${_fmt}>")
+        endif()
+    endforeach()
+    add_test(NAME plugin-footprint-PulpGain
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/plugin_footprint_check.py"
+            --profile lite-editor ${_pulp_gain_footprint_binaries})
+    set_tests_properties(plugin-footprint-PulpGain PROPERTIES
+        LABELS "packaging;footprint"
+        TIMEOUT 60
+        SKIP_RETURN_CODE 77)
+endif()
+
 # ── Validation Tests ──────────────────────────────────────────────────────
 
 # CLAP dlopen test
@@ -98,4 +125,59 @@ if(APPLE AND NOT PULP_IOS)
     set_tests_properties(bundle-build-info-PulpGain PROPERTIES
         LABELS "packaging;ship"
         TIMEOUT 60)
+endif()
+
+# Plug-in modules ship dead-stripped on Apple so code no entry point reaches
+# does not land in the binary.
+if(APPLE)
+    foreach(_fmt VST3 AU CLAP)
+        if(TARGET PulpGain_${_fmt})
+            add_test(NAME plugin-module-dead-strip-PulpGain-${_fmt}
+                COMMAND ${CMAKE_COMMAND}
+                    "-DOPTIONS=$<TARGET_PROPERTY:PulpGain_${_fmt},LINK_OPTIONS>"
+                    "-DCONFIG=$<CONFIG>"
+                    -DMODULE=PulpGain_${_fmt}
+                    -P ${CMAKE_SOURCE_DIR}/test/cmake/check_plugin_module_dead_strip.cmake)
+            set_tests_properties(plugin-module-dead-strip-PulpGain-${_fmt} PROPERTIES
+                LABELS "packaging"
+                TIMEOUT 30)
+            # PulpGain's editor is AutoUi, so its module must not carry the
+            # script runtime.
+            add_test(NAME plugin-module-no-script-runtime-PulpGain-${_fmt}
+                COMMAND ${CMAKE_COMMAND}
+                    "-DBINARY=$<TARGET_FILE:PulpGain_${_fmt}>"
+                    "-DCONFIG=$<CONFIG>"
+                    -DMODULE=PulpGain_${_fmt}
+                    -P ${CMAKE_SOURCE_DIR}/test/cmake/check_plugin_module_no_script_runtime.cmake)
+            set_tests_properties(plugin-module-no-script-runtime-PulpGain-${_fmt} PROPERTIES
+                LABELS "packaging"
+                TIMEOUT 60)
+        endif()
+    endforeach()
+endif()
+
+# The AutoUi editor gets the lite editor stack by default: its modules carry
+# no Skia, Dawn, Tint or GPU host.
+if(PULP_BUILD_TESTS AND APPLE AND CMAKE_NM AND TARGET pulp-canvas-lite-objects)
+    if(TARGET PulpGain_VST3)
+        add_test(NAME editor-stack-PulpGain_VST3
+            COMMAND ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
+                -DMODULE=$<TARGET_FILE:PulpGain_VST3> -DEXPECT=lite
+                -P ${CMAKE_SOURCE_DIR}/test/cmake/check_plugin_module_editor_stack.cmake)
+        set_tests_properties(editor-stack-PulpGain_VST3 PROPERTIES LABELS "plugin-footprint" TIMEOUT 60)
+    endif()
+    if(TARGET PulpGain_CLAP)
+        add_test(NAME editor-stack-PulpGain_CLAP
+            COMMAND ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
+                -DMODULE=$<TARGET_FILE:PulpGain_CLAP> -DEXPECT=lite
+                -P ${CMAKE_SOURCE_DIR}/test/cmake/check_plugin_module_editor_stack.cmake)
+        set_tests_properties(editor-stack-PulpGain_CLAP PROPERTIES LABELS "plugin-footprint" TIMEOUT 60)
+    endif()
+    if(TARGET PulpGain_AU)
+        add_test(NAME editor-stack-PulpGain_AU
+            COMMAND ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
+                -DMODULE=$<TARGET_FILE:PulpGain_AU> -DEXPECT=lite
+                -P ${CMAKE_SOURCE_DIR}/test/cmake/check_plugin_module_editor_stack.cmake)
+        set_tests_properties(editor-stack-PulpGain_AU PROPERTIES LABELS "plugin-footprint" TIMEOUT 60)
+    endif()
 endif()

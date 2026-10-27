@@ -6,8 +6,10 @@
 #include <pulp/view/theme.hpp>
 #include <pulp/view/script_engine.hpp>
 #include <pulp/view/widget_bridge.hpp>
+#if PULP_SCREENSHOT_HAS_DESIGN_IMPORT
 #include <pulp/view/design_codegen.hpp>
 #include <pulp/view/design_import.hpp>
+#endif
 #include <pulp/view/design_ir.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/screenshot_compare.hpp>
@@ -574,6 +576,14 @@ int main(int argc, char* argv[]) {
     auto options = parse_options(argc, argv);
     if (options.help) { print_usage(); return 0; }
 
+#if !PULP_SCREENSHOT_HAS_DESIGN_IMPORT
+    if (!options.design_ir_path.empty()) {
+        std::cerr << "Error: --design-ir is unavailable in this build; "
+                     "PULP_ENABLE_DESIGN_IMPORT is OFF\n";
+        return 2;
+    }
+#endif
+
     // Refuse a silent downgrade. If the caller explicitly asked for Skia
     // but Skia isn't compiled in, fail loudly with exit code 2 so CI and
     // harness diffs catch the mismatch instead of comparing CoreGraphics
@@ -662,6 +672,10 @@ int main(int argc, char* argv[]) {
             // ui.js), not relative to the process working directory.
             auto js_dir = std::filesystem::path(options.script_path).parent_path();
             bridge.set_script_base_dir(js_dir);
+            // A developer screenshot of the developer's own artifact: bundled
+            // font paths are baked absolute into generated JS and may point
+            // outside js_dir, so allow them here (never in a hosted editor).
+            bridge.set_allow_unreviewed_file_paths(true);
             for (auto& lib : {"oklch.js"}) {
                 auto lib_path = js_dir / lib;
                 if (std::filesystem::exists(lib_path)) {
@@ -677,6 +691,7 @@ int main(int argc, char* argv[]) {
             bridge.load_script(code);
         }
 
+#if PULP_SCREENSHOT_HAS_DESIGN_IMPORT
         // Runtime behavior materializes first because the original executable
         // document legitimately replaces document.body while bootstrapping.
         // Mount the Chromium-computed DesignIR only after that replacement,
@@ -709,6 +724,7 @@ int main(int argc, char* argv[]) {
                     ? "root" : "__pulp_design_ir_root__";
                 bridge.set_script_base_dir(
                     std::filesystem::path(options.design_ir_path).parent_path());
+                bridge.set_allow_unreviewed_file_paths(true);
                 const auto generated = generate_pulp_js(ir, codegen);
                 if (const char* dump = std::getenv("PULP_SHOT_DUMP_DESIGN_JS"))
                     if (*dump) write_text_file(dump, generated);
@@ -718,6 +734,7 @@ int main(int argc, char* argv[]) {
                 return 1;
             }
         }
+#endif
         if (!options.script_path.empty() && !options.design_ir_path.empty()) {
             bridge.load_script(
                 "if (typeof __pulpBindMaterializedCanvases__ !== 'function') "

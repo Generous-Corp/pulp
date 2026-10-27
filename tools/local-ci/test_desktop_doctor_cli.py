@@ -434,7 +434,14 @@ class DesktopDoctorCliTests(unittest.TestCase):
     def test_cmd_desktop_doctor_treats_macos_accessibility_as_optional(self):
         self.mod.cmd_desktop_install(SimpleNamespace(target="mac"))
 
-        with mock.patch.object(self.mod, "macos_accessibility_trusted", return_value=False):
+        # Only accessibility is under test. The other mac checks probe the real
+        # host (platform, a live screen capture), which fails on Linux and in
+        # any session without Screen Recording, so they are stubbed to pass.
+        with mock.patch.object(self.mod, "macos_accessibility_trusted", return_value=False), \
+                mock.patch.object(self.mod.sys, "platform", "darwin"), \
+                mock.patch.object(self.mod.shutil, "which", side_effect=lambda name: f"/usr/bin/{name}"), \
+                mock.patch.object(self.mod, "probe_macos_screencapture", return_value=(True, "ok")), \
+                mock.patch.object(self.mod, "probe_macos_avfoundation_screen", return_value=(True, "ok")):
             buf = io.StringIO()
             with redirect_stdout(buf):
                 exit_code = self.mod.cmd_desktop_doctor(SimpleNamespace(target="mac"))

@@ -4,6 +4,8 @@
 #include "clap_remote_controls.hpp"
 #include "clap_note_name.hpp"
 
+#include <pulp/runtime/trace.hpp>
+#include <pulp/format/detail/host_sample_position.hpp>
 #include <pulp/format/clap_adapter.hpp>
 #include <pulp/format/editor_prewarm.hpp>
 #include <pulp/format/adapter_boundary.hpp>
@@ -22,6 +24,7 @@
 #include <array>
 #include <span>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <filesystem>
 
@@ -171,9 +174,10 @@ boundary::HostTransport decode_clap_transport(const clap_event_transport_t* tr,
     if (flags & CLAP_TRANSPORT_HAS_SECONDS_TIMELINE) {
         const double seconds =
             static_cast<double>(tr->song_pos_seconds) / CLAP_SECTIME_FACTOR;
-        transport.validity.set(TransportField::SamplePosition);
-        transport.position_samples = static_cast<int64_t>(
-            std::llround(seconds * sample_rate));
+        if (const auto position = detail::host_sample_position(seconds * sample_rate)) {
+            transport.validity.set(TransportField::SamplePosition);
+            transport.position_samples = *position;
+        }
     }
     if (flags & CLAP_TRANSPORT_HAS_TIME_SIGNATURE) {
         transport.validity.set(TransportField::TimeSignature);
@@ -238,12 +242,33 @@ static T load_event(const clap_event_header_t* hdr) {
     return out;
 }
 
+// The two fields of a CLAP_EVENT_PARAM_VALUE the store needs. A full-size,
+// aligned event (what hosts send) is the struct the host built, so the fields
+// are read in place; copying the whole event cost an out-of-line memcpy per
+// event, a third of a dense block. A short or misaligned event is copied.
+struct ParamValueFields {
+    clap_id param_id = 0;
+    double value = 0.0;
+};
+static ParamValueFields load_param_value(const clap_event_header_t* hdr) {
+    if (hdr->size >= sizeof(clap_event_param_value_t) &&
+        reinterpret_cast<std::uintptr_t>(hdr) % alignof(clap_event_param_value_t) == 0) {
+        const auto* ev = reinterpret_cast<const clap_event_param_value_t*>(hdr);
+        return {ev->param_id, ev->value};
+    }
+    const auto ev = load_event<clap_event_param_value_t>(hdr);
+    return {ev.param_id, ev.value};
+}
+
 bool clap_init(const clap_plugin_t* plugin) {
+    PULP_TRACE_SCOPE_NAMED("lifecycle", "clap_init");
     auto* self = get_self(plugin);
     self->main_thread_id = std::this_thread::get_id();
     self->owner_alive.reset();
     self->processor = self->factory();
     if (!self->processor) return false;
+    self->sample_accurate_params = self->processor->wants_sample_accurate_parameters();
+    self->param_events_monitor.arm(!self->sample_accurate_params, &self->param_events);
     self->processor->set_state_store(&self->store);
     self->processor->define_parameters(self->store);
     request_editor_prewarm(*self->processor);
@@ -330,12 +355,14 @@ bool clap_init(const clap_plugin_t* plugin) {
         runtime::log_info("CLAP: UMP sidecar enabled for '{}'", desc.name);
     }
 
-    runtime::log_info("CLAP: initialized '{}'", desc.name);
+    runtime::log_debug("CLAP: initialized '{}'", desc.name);
     return true;
 }
 
 void clap_destroy(const clap_plugin_t* plugin) {
     auto* self = get_self(plugin);
+    if (self->processor)
+        self->param_events_monitor.report(*self->processor);
     self->owner_alive.retire();
     self->store.set_gesture_callbacks({}, {});
     self->outbound_param_listener.reset();
@@ -363,17 +390,72 @@ static void publish_latency_changed(PulpClapPlugin* self) {
     if (ext && ext->changed) ext->changed(self->host);
 }
 
+static uint32_t clap_warm_event_count(const clap_input_events_t*) {
+    return 0;
+}
+static const clap_event_header_t* clap_warm_event_get(const clap_input_events_t*, uint32_t) {
+    return nullptr;
+}
+
+// Runs the adapter's per-block path once on silence at activation so the
+// host's first real block is not charged for cold code and buffers. The run
+// stops before the Processor and before anything host-visible, and the
+// transport diff is restored so the first real block still reports a start.
+static void clap_warm_render_path(const clap_plugin_t* plugin, PulpClapPlugin* self) {
+    const int frames = std::min(self->max_buffer_size, 64);
+    if (frames <= 0)
+        return;
+    std::vector<std::vector<float>> storage;
+    std::vector<std::vector<float*>> pointers;
+    storage.reserve(kMaxChannels * (kMaxInputBuses + kMaxOutputBuses));
+    pointers.reserve(kMaxInputBuses + kMaxOutputBuses);
+    auto make = [&](uint32_t count, const auto& widths, std::vector<clap_audio_buffer_t>& out) {
+        out.assign(count, clap_audio_buffer_t{});
+        for (uint32_t b = 0; b < count; ++b) {
+            const int channels = std::clamp(widths[b], 0, kMaxChannels);
+            auto& ptrs = pointers.emplace_back();
+            for (int ch = 0; ch < channels; ++ch)
+                ptrs.push_back(storage.emplace_back(static_cast<std::size_t>(frames), 0.0f).data());
+            out[b].channel_count = static_cast<uint32_t>(channels);
+            out[b].data32 = channels > 0 ? ptrs.data() : nullptr;
+        }
+    };
+    std::vector<clap_audio_buffer_t> inputs, outputs;
+    make(std::min<uint32_t>(self->declared_input_bus_count, kMaxInputBuses),
+         self->declared_input_channels, inputs);
+    make(std::min<uint32_t>(self->declared_output_bus_count, kMaxOutputBuses),
+         self->declared_output_channels, outputs);
+    clap_input_events_t no_events{nullptr, clap_warm_event_count, clap_warm_event_get};
+    clap_process_t process{};
+    process.steady_time = -1;
+    process.frames_count = static_cast<uint32_t>(frames);
+    process.audio_inputs = inputs.empty() ? nullptr : inputs.data();
+    process.audio_inputs_count = static_cast<uint32_t>(inputs.size());
+    process.audio_outputs = outputs.empty() ? nullptr : outputs.data();
+    process.audio_outputs_count = static_cast<uint32_t>(outputs.size());
+    process.in_events = &no_events;
+    const auto playhead = self->playhead_prev;
+    self->warming_render_path = true;
+    (void)clap_process(plugin, &process);
+    self->warming_render_path = false;
+    self->playhead_prev = playhead;
+}
+
 bool clap_activate(const clap_plugin_t* plugin, double sr, uint32_t, uint32_t max_frames) {
+    PULP_TRACE_SCOPE_NAMED("lifecycle", "clap_activate");
     auto* self = get_self(plugin);
     self->sample_rate = sr;
     self->max_buffer_size = static_cast<int>(max_frames);
     clear_midi_event_buffers(*self);
-    self->midi_in.reserve(kRealtimeMidiEventCapacity,
-                          kRealtimeMidiSysexCapacity,
-                          kRealtimeMidiSysexPayloadCapacity);
-    self->midi_out.reserve(kRealtimeMidiEventCapacity,
-                           kRealtimeMidiSysexCapacity,
-                           kRealtimeMidiSysexPayloadCapacity);
+    auto desc = self->processor->descriptor();
+    // The SysEx copy pool is 128 separate 4 KiB payloads per direction, the
+    // largest allocation activation makes. A direction with no note port can
+    // receive or emit no SysEx, so it gets no pool; a stray copy there drops
+    // like any other overflow.
+    self->midi_in.reserve(kRealtimeMidiEventCapacity, kRealtimeMidiSysexCapacity,
+                          desc.accepts_midi ? kRealtimeMidiSysexPayloadCapacity : 0);
+    self->midi_out.reserve(kRealtimeMidiEventCapacity, kRealtimeMidiSysexCapacity,
+                           desc.produces_midi ? kRealtimeMidiSysexPayloadCapacity : 0);
     self->midi_in.set_realtime_capacity_limit(true);
     self->midi_out.set_realtime_capacity_limit(true);
     self->mpe.reserve(kRealtimeMidiEventCapacity);
@@ -383,12 +465,17 @@ bool clap_activate(const clap_plugin_t* plugin, double sr, uint32_t, uint32_t ma
     self->ump_buffer.reserve(kRealtimeMidiEventCapacity);
     self->ump_buffer.set_realtime_capacity_limit(true);
     self->param_snapshot.reserve(self->store.all_params().size());
+    self->latest_param_value.assign(self->store.all_params().size(), 0.0f);
+    self->latest_param_pending.assign(self->store.all_params().size(), 0);
+    self->latest_param_touched.clear();
+    self->latest_param_touched.reserve(self->store.all_params().size());
+    self->latest_param_writes.clear();
+    self->latest_param_writes.reserve(self->store.all_params().size());
     // Sized here, not on the audio thread: process() calls assign()/resize() to
     // all_params().size() at block start, which would grow-and-allocate on the
     // first block without this reserve (param_snapshot mirrors it above).
     self->output_param_has_event.reserve(self->store.all_params().size());
 
-    auto desc = self->processor->descriptor();
     PrepareContext ctx;
     ctx.sample_rate = sr;
     ctx.max_buffer_size = static_cast<int>(max_frames);
@@ -492,11 +579,14 @@ bool clap_activate(const clap_plugin_t* plugin, double sr, uint32_t, uint32_t ma
     }
 
     self->is_active = true;
+    clap_warm_render_path(plugin, self);
     return true;
 }
 
 void clap_deactivate(const clap_plugin_t* plugin) {
     auto* self = get_self(plugin);
+    if (self->processor)
+        self->param_events_monitor.report(*self->processor);
     // Cleared before anything else: a latency change raised from here on is
     // seen by an INACTIVE plugin, which needs no restart. Note that
     // `latency_restart_pending` deliberately survives deactivation — the
@@ -635,6 +725,26 @@ static void clap_phase_decode_param_events(PulpClapPlugin* self,
     self->param_events.clear();
     self->modulation_events.clear();
 
+    // A block-rate processor's parameters are written once each, after the
+    // events are read, with the block's last value: CLAP delivers events in
+    // time order, so the last one read is the latest.
+    const auto params = self->store.all_params();
+    // latest_param_pending: 0 = not touched this block, 1 = a value is
+    // waiting, 2 = touched and already written (a gesture flushed it). A
+    // parameter enters latest_param_touched once per block, so the list never
+    // outgrows the capacity clap_activate() reserved.
+    const auto write_latest = [self, params](std::uint32_t index) {
+        self->latest_param_pending[index] = 2;
+        self->store.set_value_rt(params[index].id, self->latest_param_value[index]);
+    };
+    const auto flush_latest = [&](state::ParamID id) {
+        if (const auto* info = self->store.info(id)) {
+            const auto index = static_cast<std::uint32_t>(info - params.data());
+            if (index < self->latest_param_pending.size() && self->latest_param_pending[index] == 1)
+                write_latest(index);
+        }
+    };
+
     // Handle parameter, modulation, and gesture events from host
     auto* in_events = process->in_events;
     if (in_events) {
@@ -647,17 +757,33 @@ static void clap_phase_decode_param_events(PulpClapPlugin* self,
             // core type IDs. clap-validator `param-set-wrong-namespace`.
             if (hdr->space_id != CLAP_CORE_EVENT_SPACE_ID) continue;
             if (hdr->type == CLAP_EVENT_PARAM_VALUE) {
-                const auto ev = load_event<clap_event_param_value_t>(hdr);
+                const auto ev = load_param_value(hdr);
                 // Shared dual-write (SF-1): enqueue for the sample-accurate DSP
                 // cursor AND publish to Main/Audio listeners via the RT-safe
                 // set_value_rt path (atomic store + non-allocating SPSC push).
                 // The editor calls store.pump_listeners() from its UI tick to
                 // deliver the queued notifications; Audio listeners fire inline.
-                boundary::apply_param_value(
-                    self->param_events, self->store,
-                    static_cast<state::ParamID>(ev.param_id),
-                    static_cast<int32_t>(hdr->time),
-                    static_cast<float>(ev.value));
+                // A processor that does not read sample-accurate automation
+                // gets the value in the store only, so the block's last event
+                // wins and nothing is queued.
+                if (self->sample_accurate_params) {
+                    boundary::apply_param_value(
+                        self->param_events, self->store, static_cast<state::ParamID>(ev.param_id),
+                        static_cast<int32_t>(hdr->time), static_cast<float>(ev.value));
+                } else {
+                    const auto id = static_cast<state::ParamID>(ev.param_id);
+                    const auto* info = self->store.info(id);
+                    const auto index =
+                        info ? static_cast<std::size_t>(info - params.data()) : params.size();
+                    if (index < self->latest_param_pending.size()) {
+                        if (self->latest_param_pending[index] == 0)
+                            self->latest_param_touched.push_back(static_cast<std::uint32_t>(index));
+                        self->latest_param_pending[index] = 1;
+                        self->latest_param_value[index] = static_cast<float>(ev.value);
+                    } else {
+                        self->store.set_value_rt(id, static_cast<float>(ev.value));
+                    }
+                }
             } else if (hdr->type == CLAP_EVENT_PARAM_MOD) {
                 const auto ev = load_event<clap_event_param_mod_t>(hdr);
                 state::ModulationLane lane;
@@ -676,13 +802,27 @@ static void clap_phase_decode_param_events(PulpClapPlugin* self,
                 }
             } else if (hdr->type == CLAP_EVENT_PARAM_GESTURE_BEGIN) {
                 const auto ev = load_event<clap_event_param_gesture_t>(hdr);
+                flush_latest(static_cast<state::ParamID>(ev.param_id));
                 self->store.begin_gesture(static_cast<state::ParamID>(ev.param_id));
             } else if (hdr->type == CLAP_EVENT_PARAM_GESTURE_END) {
                 const auto ev = load_event<clap_event_param_gesture_t>(hdr);
+                // A gesture closes on the value the host last sent for it.
+                flush_latest(static_cast<state::ParamID>(ev.param_id));
                 self->store.end_gesture(static_cast<state::ParamID>(ev.param_id));
             }
         }
     }
+    // The pending values go to the store as one batch; latest_param_writes
+    // holds one slot per parameter, like latest_param_touched.
+    self->latest_param_writes.clear();
+    for (const auto index : self->latest_param_touched) {
+        if (self->latest_param_pending[index] == 1)
+            self->latest_param_writes.push_back(
+                {params[index].id, self->latest_param_value[index]});
+        self->latest_param_pending[index] = 0;
+    }
+    self->latest_param_touched.clear();
+    self->store.set_values_rt(self->latest_param_writes);
     self->param_events.sort();
     self->modulation_events.sort();
 }
@@ -988,8 +1128,9 @@ static void clap_phase_snapshot_params(
     // clap_activate() or the first block grow-and-allocates. Adding a new
     // per-param scratch below requires a matching reserve there; the
     // `ClapSlot::process is allocation-free` rt-safety test guards this.
-    boundary::snapshot_param_values(self->store, all_params,
-                                    self->param_snapshot);
+    self->pre_process_generation = self->store.state_generation();
+    boundary::refresh_param_snapshot(self->store, all_params, self->param_snapshot,
+                                     self->snapshot_state, self->pre_process_generation);
     self->output_param_has_event.assign(all_params.size(), 0);
 }
 
@@ -1244,6 +1385,7 @@ static void record_outbound_release_debt(PulpClapPlugin* self,
             static_cast<std::size_t>(channel) * kOutboundReleaseControllers.size() +
             static_cast<std::size_t>(index)];
     }
+    self->outbound_release_debt_pending = true;
     if (*counter != std::numeric_limits<uint8_t>::max()) {
         ++*counter;
         return;
@@ -1278,6 +1420,8 @@ static OutboundReleaseDrainResult drain_outbound_release_debt(
     // Bound callback work even in that state. The persistent cursor gives
     // every debt slot a turn; debt remaining after the budget is exhausted
     // suppresses fresh MIDI attacks until a later block completes the drain.
+    if (!self->outbound_release_debt_pending)
+        return {.host_accepting = true, .debt_remaining = false};
     constexpr std::size_t kMaxReleaseRetriesPerBlock = 64;
     constexpr std::size_t kSlotsPerChannel =
         1 + 128 + kOutboundReleaseControllers.size();
@@ -1340,6 +1484,7 @@ static OutboundReleaseDrainResult drain_outbound_release_debt(
         std::any_of(self->outbound_control_release_debt.begin(),
                     self->outbound_control_release_debt.end(),
                     [](uint8_t count) { return count != 0; });
+    self->outbound_release_debt_pending = debt_remaining;
     return {.host_accepting = true, .debt_remaining = debt_remaining};
 }
 
@@ -1388,8 +1533,12 @@ static void clap_phase_emit_output(
         // (1) Snapshot-diff fallback, at time 0, for params WITHOUT explicit
         // events. These are all at offset 0 (the earliest time), so emitting
         // them before the offset-ordered merge below preserves CLAP's global
-        // ascending-time contract.
-        for (std::size_t i = 0; i < all_params.size(); ++i) {
+        // ascending-time contract. Skipped entirely while no store write landed
+        // across process(): every value still equals its snapshot.
+        const bool store_moved = self->store.state_generation() != self->pre_process_generation;
+        if (store_moved)
+            self->snapshot_state.valid = false;
+        for (std::size_t i = 0; store_moved && i < all_params.size(); ++i) {
             if (self->output_param_has_event[i]) continue;
             float current = self->store.get_value(all_params[i].id);
             if (boundary::changed_since_snapshot(current,
@@ -1740,7 +1889,7 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     // Build one ProcessBusBufferView per routed output bus. Index 0 is the
     // main output (already wired into output_view above); each subsequent entry
     // wires the host's aux output channel pointers into per-bus storage.
-    std::array<ProcessBusBufferView<float>, kMaxOutputBuses> output_buses{};
+    auto& output_buses = self->rt_output_buses;
     output_buses[0] = {
         .info = {"Main Out", 0, BusDirection::Output, BusRole::Main,
                  out_channels, false, process->audio_outputs_count > 0},
@@ -1823,7 +1972,7 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
             .buffer = sidechain64_view,
         },
     }};
-    std::array<ProcessBusBufferView<double>, kMaxOutputBuses> output64_buses{};
+    auto& output64_buses = self->rt_output64_buses;
     output64_buses[0] = {
         .info = {"Main Out", 0, BusDirection::Output, BusRole::Main,
                  out_channels, false, process->audio_outputs_count > 0},
@@ -1931,6 +2080,8 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
 
     auto all_params = self->store.all_params();
     clap_phase_snapshot_params(self, all_params);
+    if (self->warming_render_path)
+        return CLAP_PROCESS_CONTINUE;
 
     // Prove no state.load is installing underneath this block. state.load is a
     // main-thread call that hosts may make while the plug-in is active, and
@@ -2019,7 +2170,7 @@ void clap_params_flush(const clap_plugin_t* plugin,
             const auto* hdr = in->get(in, i);
             if (!hdr || hdr->space_id != CLAP_CORE_EVENT_SPACE_ID) continue;
             if (hdr->type == CLAP_EVENT_PARAM_VALUE) {
-                const auto ev = load_event<clap_event_param_value_t>(hdr);
+                const auto ev = load_param_value(hdr);
                 self->store.set_value(static_cast<state::ParamID>(ev.param_id),
                                       static_cast<float>(ev.value));
             } else if (hdr->type == CLAP_EVENT_PARAM_GESTURE_BEGIN) {

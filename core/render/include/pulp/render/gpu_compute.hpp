@@ -2,6 +2,7 @@
 
 #include <pulp/render/gpu_surface.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -62,7 +63,9 @@ public:
     /// Returns false on a null handle or pipeline-creation failure.
     virtual bool initialize_from_device(void* wgpu_device) = 0;
 
-    bool is_initialized() const { return initialized_; }
+    bool is_initialized() const {
+        return initialized_.load(std::memory_order_acquire);
+    }
 
     /// True once the WebGPU device has been lost. Device loss is normal — a
     /// browser tab can lose its device at any time — so it is reported as state,
@@ -71,14 +74,39 @@ public:
     /// expected to re-acquire a device and re-`prepare_*`.
     virtual bool device_lost() const = 0;
 
+    /// Monotonic device generation. A generation changes at every initialize
+    /// attempt, so an owner can tag an adopted-device loss notification and
+    /// reject a callback from an older device after reinitialization.
+    virtual std::uint64_t device_generation() const {
+        return 0;
+    }
+
     /// Report that an ADOPTED device (initialize_from_device /
     /// initialize_from_surface) has been lost. A device-lost callback can only be
     /// installed on the device *descriptor*, i.e. at creation, so a device this
     /// object did not create cannot observe its own loss — its owner must say so.
     /// In the browser that owner is the worker's JS, which awaits `device.lost`.
     /// Idempotent. A device created by initialize_standalone() observes loss on
-    /// its own and needs no call.
+    /// its own and needs no call. The owner must call this on the instance's
+    /// worker strand. Backend callbacks must call post_device_lost() to publish
+    /// a transition and never drain readbacks directly.
     virtual void notify_device_lost() = 0;
+
+    virtual void notify_device_lost(std::uint64_t generation) {
+        if (generation == device_generation())
+            notify_device_lost();
+    }
+
+    /// Publish a loss from a backend callback without touching readback queues
+    /// or invoking user completions. The owner strand applies the transition on
+    /// its next operation. A backend with asynchronous callbacks must override
+    /// this method with a publish-only implementation. The compatibility
+    /// default forwards synchronously to notify_device_lost() for existing
+    /// downstream implementations, so it is only safe on the owner strand;
+    /// new backends must override it before publishing from a callback thread.
+    virtual void post_device_lost(std::uint64_t generation) {
+        notify_device_lost(generation);
+    }
 
     // ── Compute operations ──────────────────────────────────────────────
 
@@ -385,7 +413,7 @@ public:
     // chained array→array. The whole block's samples compute in PARALLEL (the
     // net is feedforward), every pass encodes into ONE submit over
     // device-resident activations, and only the final mono block is read back —
-    // the round-trip is paid once per block. Dilation history slides across
+    // the round-trip is paid once per block. Dilation history carries across
     // calls so streaming blocks are continuous. Not real-time-safe (blocks on
     // the readback); run on the GPU worker / offline. It is the GPU counterpart
     // to a streaming CPU WaveNet and drives neural waveshaping / amp inference.
@@ -418,8 +446,11 @@ public:
     /// per-array/per-layer device-resident activation + head buffers for
     /// `block_size` samples, and compile the fused passes. Returns false on
     /// invalid args (channels > 64, condition_size != 1, an array-chaining shape
-    /// mismatch, a weight-count mismatch) or GPU failure. Call once before
-    /// wavenet_forward(block_size).
+    /// mismatch, a weight-count mismatch, a zero dilation, a layer whose causal
+    /// reach dilation*(kernel-1) plus `block_size` exceeds 2^20 samples, or a
+    /// history buffer larger than the device can bind) or GPU failure. The reach
+    /// bound is checked before anything is allocated, so an untrusted model
+    /// cannot stall preparation. Call once before wavenet_forward(block_size).
     ///
     /// `instance` selects an independent plan slot on THIS device: two instances
     /// (e.g. stereo channels) prepared with the same `block_size` get separate
@@ -441,6 +472,74 @@ public:
     /// `instance` selects the plan slot prepared above (default 0).
     virtual bool wavenet_forward(const float* in_block, float* out_block,
                                  uint32_t block_size, uint32_t instance = 0) = 0;
+
+    /// Prepare a group of `count` independent WaveNet instances that share one
+    /// shape (`arrays`) and run as one unit: `weights[i]` / `head_scales[i]` are
+    /// instance i's blob and head_scale, laid out exactly as for
+    /// prepare_wavenet(). All instances live in shared device buffers and every
+    /// pass dispatches the whole group at once, so the per-block GPU command
+    /// count stays that of ONE instance however many instances run — the shape
+    /// to use for many plugin instances of the same model architecture. Groups
+    /// are identified by `(block_size, group)`, separately from prepare_wavenet()
+    /// plans; re-preparing a group replaces it and resets its history. Returns
+    /// false on invalid args (the prepare_wavenet() shape rules apply), on a
+    /// group too large for 32-bit buffer sizes, or on GPU failure. The default
+    /// implementation reports the capability as unavailable.
+    virtual bool prepare_wavenet_group(const WavenetLayerArraySpec* /*arrays*/,
+                                       uint32_t /*num_arrays*/, const float* const* /*weights*/,
+                                       uint32_t /*weights_len*/, const float* /*head_scales*/,
+                                       uint32_t /*count*/, uint32_t /*block_size*/,
+                                       uint32_t /*group*/) {
+        return false;
+    }
+
+    /// Run one block for every instance of a prepared group: `in_blocks[i]` /
+    /// `out_blocks[i]` are instance i's `block_size` samples, and `count` must
+    /// equal the prepared count. One submit, one readback. Each instance's output
+    /// is bit-identical to running it alone through wavenet_forward(). When
+    /// `gpu_busy_us` is non-null it receives the GPU-busy microseconds of the
+    /// block, or -1 without timestamp queries. Blocks on the readback: GPU
+    /// worker or offline only.
+    virtual bool wavenet_forward_group(const float* const* /*in_blocks*/,
+                                       float* const* /*out_blocks*/, uint32_t /*count*/,
+                                       uint32_t /*block_size*/, uint32_t /*group*/,
+                                       double* gpu_busy_us = nullptr) {
+        if (gpu_busy_us)
+            *gpu_busy_us = -1.0;
+        return false;
+    }
+
+    /// Run one block for `count` independent WaveNet instances at once. Each
+    /// `instances[i]` must have been prepared with `block_size`, and an instance
+    /// may appear at most once. Every instance's passes are encoded into ONE
+    /// command buffer, submitted once, and the `count` output blocks come back
+    /// through ONE readback map — so the fixed submit + map round trip is paid
+    /// once per block for the whole set instead of once per instance. Each
+    /// instance's output and dilation history are exactly what `count` separate
+    /// wavenet_forward() calls would produce. When `gpu_busy_us` is non-null it
+    /// receives the GPU-busy microseconds spanning the batch, or -1 when the
+    /// device has no timestamp queries. Returns false on an unprepared or
+    /// repeated instance; the Dawn implementation validates the whole set before
+    /// encoding, so a rejected batch advances no instance's history. Blocks on the
+    /// readback like wavenet_forward(): run it on a GPU worker or offline, never
+    /// on the audio thread. The default implementation calls wavenet_forward()
+    /// per instance.
+    virtual bool wavenet_forward_batch(const float* const* in_blocks, float* const* out_blocks,
+                                       const uint32_t* instances, uint32_t count,
+                                       uint32_t block_size, double* gpu_busy_us = nullptr) {
+        if (gpu_busy_us)
+            *gpu_busy_us = -1.0;
+        if (!in_blocks || !out_blocks || !instances || count == 0)
+            return false;
+        for (uint32_t i = 0; i < count; ++i)
+            for (uint32_t j = i + 1; j < count; ++j)
+                if (instances[i] == instances[j])
+                    return false;
+        for (uint32_t i = 0; i < count; ++i)
+            if (!wavenet_forward(in_blocks[i], out_blocks[i], block_size, instances[i]))
+                return false;
+        return true;
+    }
 
     // ── Asynchronous readback (compute_magnitude + convolve_batch) ──────────
     //
@@ -523,10 +622,15 @@ public:
 
     /// Pump the device event queue once and fire the completions that are ready
     /// or past their deadline. Never blocks. Returns the number of requests
-    /// still in flight. Re-entrant calls (from inside a completion) are a no-op.
+    /// whose completion has not fired yet. Re-entrant calls (from inside a
+    /// completion) are a no-op. Detached late-map cleanup is not included.
     virtual std::size_t poll_readbacks() = 0;
 
-    /// Requests submitted whose completion has not fired yet.
+    /// Requests submitted whose completion has not fired yet. A request whose
+    /// deadline fired before its map resolved is removed from this count after
+    /// its Expired completion, but its detached map cleanup still consumes the
+    /// admission cap until the late map callback arrives or bounded cleanup
+    /// grace expires.
     virtual std::size_t readbacks_in_flight() const = 0;
 
     /// Cap on concurrently in-flight async readbacks (default 4). Admission
@@ -686,8 +790,8 @@ public:
     virtual void set_bench_counters(bench::PerfCounters* counters) = 0;
 #endif
 
-protected:
-    bool initialized_ = false;
+  protected:
+    std::atomic<bool> initialized_{false};
 };
 
 } // namespace pulp::render

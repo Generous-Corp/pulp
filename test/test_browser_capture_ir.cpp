@@ -8,6 +8,8 @@
 
 #include <pulp/runtime/crypto.hpp>
 #include <pulp/view/screenshot_compare.hpp>
+#include <pulp/view/design_ir_io.hpp>
+#include <choc/text/choc_JSON.h>
 
 #include <atomic>
 #include <chrono>
@@ -203,6 +205,40 @@ std::string with_reference_member(std::string capture,
     capture.replace(position, anchor.size(),
                     anchor + "," + std::string(member));
     return capture;
+}
+
+std::string with_snapshot_sha256(std::string capture, std::string_view hash,
+                                 std::string_view asset = "snapshot:main") {
+    const std::string anchor = R"JSON("snapshot_asset":"snapshot:main")JSON";
+    const auto position = capture.find(anchor);
+    REQUIRE(position != std::string::npos);
+    capture.replace(position, anchor.size(),
+                    R"JSON("snapshot_asset":")JSON" + std::string(asset) +
+                        R"JSON(","snapshot_sha256":")JSON" + std::string(hash) + R"JSON(")JSON");
+    return capture;
+}
+
+std::string valid_snapshot() {
+    return R"JSON({
+      "computedStyleNames":["color"],
+      "strings":["div","red"],
+      "documents":[{
+        "nodes":{
+          "backendNodeId":[1],
+          "parentIndex":[-1],
+          "nodeType":[1],
+          "nodeName":[0],
+          "attributes":[[]]
+        },
+        "layout":{
+          "nodeIndex":[0],
+          "styles":[[1]],
+          "bounds":[[0,0,1,1]],
+          "text":[],
+          "paintOrders":[0]
+        }
+      }]
+    })JSON";
 }
 
 std::string with_static_runtime_asset(
@@ -463,6 +499,755 @@ TEST_CASE("browser capture names each web font the browser could not decode",
     CHECK(fonts[0].severity == pulp::view::ImportDiagnosticSeverity::warning);
     CHECK(fonts[0].message.find("'Broken'") != std::string::npos);
     CHECK(fonts[0].message.find("failed to decode") != std::string::npos);
+}
+
+namespace {
+
+std::string root_canvas_snapshot() {
+    const auto path = fs::path(PULP_BROWSER_CAPTURE_STYLE_FIXTURE_DIR).parent_path() /
+                      "browser-capture-root-canvas/dom-snapshot.json";
+    std::ifstream input(path, std::ios::binary);
+    REQUIRE(input.good());
+    return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+}
+
+void replace_canvas_fact(std::string& text, std::string_view before, std::string_view after) {
+    const auto at = text.find(before);
+    REQUIRE(at != std::string::npos);
+    text.replace(at, before.size(), after);
+}
+
+// Mutate a single declaration in the frozen capture without changing the
+// HTML/body string-table aliases or any other declaration.
+void change_canvas_style(std::string& snapshot, int layout_row, std::string_view property,
+                         std::string_view value) {
+    const auto parsed = choc::json::parse(snapshot);
+    const auto names = parsed["computedStyleNames"];
+    const auto strings = parsed["strings"];
+    const auto rows = parsed["documents"][0]["layout"]["styles"];
+    int column = -1;
+    for (uint32_t i = 0; i < names.size(); ++i)
+        if (names[static_cast<int>(i)].toString() == property)
+            column = static_cast<int>(i);
+    REQUIRE(column >= 0);
+    std::string replacement = "[";
+    for (uint32_t i = 0; i < rows.size(); ++i) {
+        if (i != 0)
+            replacement += ", ";
+        const auto row = rows[static_cast<int>(i)];
+        replacement += "[";
+        for (uint32_t j = 0; j < row.size(); ++j) {
+            if (j != 0)
+                replacement += ", ";
+            replacement += static_cast<int>(i) == layout_row && static_cast<int>(j) == column
+                               ? std::to_string(strings.size())
+                               : choc::json::toString(row[static_cast<int>(j)], false);
+        }
+        replacement += "]";
+    }
+    replacement += "]";
+    const auto old_strings = choc::json::toString(strings, false);
+    auto new_strings = old_strings;
+    new_strings.insert(new_strings.size() - 1, ", \"" + std::string(value) + "\"");
+    snapshot = choc::json::toString(parsed, false);
+    replace_canvas_fact(snapshot, choc::json::toString(rows, false), replacement);
+    replace_canvas_fact(snapshot, old_strings, new_strings);
+}
+
+std::string root_canvas_envelope(std::string_view png_hash) {
+    auto capture = envelope("browser.png", png_hash);
+    // Match the frozen producer's actual viewport and authored frame.
+    for (const auto& [from, to] : std::vector<std::pair<std::string, std::string>>{
+             {"\"width_px\":1912", "\"width_px\":2560"},
+             {"\"height_px\":1272", "\"height_px\":1600"},
+             {"\"logical_width\":956", "\"logical_width\":1280"},
+             {"\"logical_height\":636", "\"logical_height\":800"}}) {
+        auto at = capture.find(from);
+        while (at != std::string::npos) {
+            capture.replace(at, from.size(), to);
+            at = capture.find(from, at + to.size());
+        }
+    }
+    replace_canvas_fact(
+        capture, R"("device_scale_factor":2)",
+        R"("device_scale_factor":2,"authored_frame":{"x":0,"y":0,"width":1280,"height":200})");
+    replace_canvas_fact(
+        capture, R"("settle":{"rounds":4,"stable_rounds":2,"elapsed_ms":120})",
+        R"("settle":{"rounds":4,"stable_rounds":2,"elapsed_ms":120},"viewport":{"resolved":{"width":1280,"height":800},"document":{"width":1280,"height":800,"primary_surface":{"left":0,"top":0,"width":1280,"height":200}},"device_scale_factor":2})");
+    return capture;
+}
+
+pulp::import_design::BrowserCaptureIrResult lower_root_canvas(const TempCapture& temp,
+                                                              const std::string& snapshot,
+                                                              std::string capture, bool bound,
+                                                              bool native = true) {
+    temp.write("snapshot.json", snapshot);
+    if (bound)
+        capture = with_snapshot_sha256(std::move(capture), pulp::runtime::sha256_hex(snapshot),
+                                       "snapshot.json");
+    else
+        replace_canvas_fact(capture, "snapshot:main", "snapshot.json");
+    temp.write("capture.json", capture);
+    pulp::import_design::BrowserCaptureIrOptions options;
+    options.native_panel_lowering = native;
+    return pulp::import_design::lower_browser_capture_to_ir(temp.root / "capture.json", options);
+}
+
+} // namespace
+
+TEST_CASE("producer-bound native document canvas changes only root background",
+          "[import-design][browser-capture][ir][root-canvas]") {
+    TempCapture temp;
+    const auto png = png_header(2560, 1600);
+    temp.write("browser.png", png);
+    write_valid_reports(temp);
+    // Semantic widgets are appended alongside the painted HTML tree. They
+    // must not turn a document canvas into an arbitrary subtree root.
+    temp.write("semantic-report.json", R"({
+      "schema":"pulp-browser-semantics-v1","version":1,
+      "summary":{"candidates":7,"resolved":2,"unresolved":5},
+      "candidates":[{"kind":"knob","binding_status":"bound","name":"gain",
+        "bounds":{"left":10,"top":10,"width":64,"height":64},
+        "paint_bounds":{"left":10,"top":10,"width":64,"height":64},
+        "data_pulp":{"param":"gain"}}]})");
+    auto snapshot = root_canvas_snapshot();
+    std::string expected_background = "rgb(16, 21, 34)";
+    SECTION("opaque matching body") {}
+    SECTION("transparent body") {
+        change_canvas_style(snapshot, 2, "background-color", "rgba(0, 0, 0, 0)");
+    }
+    SECTION("transparent document canvas defaults to Chromium white") {
+        change_canvas_style(snapshot, 1, "background-color", "rgba(0, 0, 0, 0)");
+        change_canvas_style(snapshot, 2, "background-color", "rgba(0, 0, 0, 0)");
+        expected_background = "rgb(255, 255, 255)";
+    }
+    // The UA canvas follows the root's used color-scheme; the capture records
+    // the colour Chromium resolved for it.
+    const auto with_canvas_report = [&](std::string_view report) {
+        REQUIRE(snapshot.front() == '{');
+        snapshot.insert(1, "\"documentCanvas\":" + std::string(report) + ",");
+    };
+    constexpr std::string_view dark_report =
+        R"j({"schema":"pulp-document-canvas-v1","root_color_scheme":"dark",)j"
+        R"j("canvas_color":"rgb(18, 18, 18)"})j";
+    SECTION("transparent document canvas takes the recorded UA canvas colour") {
+        change_canvas_style(snapshot, 1, "background-color", "rgba(0, 0, 0, 0)");
+        change_canvas_style(snapshot, 2, "background-color", "rgba(0, 0, 0, 0)");
+        with_canvas_report(dark_report);
+        expected_background = "rgb(18, 18, 18)";
+    }
+    SECTION("a canvas report that is not an opaque colour keeps Chromium white") {
+        change_canvas_style(snapshot, 1, "background-color", "rgba(0, 0, 0, 0)");
+        change_canvas_style(snapshot, 2, "background-color", "rgba(0, 0, 0, 0)");
+        with_canvas_report(R"j({"schema":"pulp-document-canvas-v1",)j"
+                           R"j("canvas_color":"rgba(18, 18, 18, 0.5)"})j");
+        expected_background = "rgb(255, 255, 255)";
+    }
+    SECTION("a canvas report from another schema keeps Chromium white") {
+        change_canvas_style(snapshot, 1, "background-color", "rgba(0, 0, 0, 0)");
+        change_canvas_style(snapshot, 2, "background-color", "rgba(0, 0, 0, 0)");
+        with_canvas_report(R"j({"schema":"pulp-document-canvas-v0",)j"
+                           R"j("canvas_color":"rgb(18, 18, 18)"})j");
+        expected_background = "rgb(255, 255, 255)";
+    }
+    SECTION("an opaque root background outranks the UA canvas report") {
+        with_canvas_report(dark_report);
+    }
+    SECTION("opaque body paints a transparent HTML canvas") {
+        change_canvas_style(snapshot, 1, "background-color", "rgba(0, 0, 0, 0)");
+        change_canvas_style(snapshot, 2, "background-color", "rgb(1, 2, 3)");
+        expected_background = "rgb(1, 2, 3)";
+    }
+    SECTION("omitted optional sparse metadata means no entries") {
+        snapshot = choc::json::toString(choc::json::parse(snapshot), false);
+        replace_canvas_fact(snapshot, "\"pseudoType\": {\"index\": [], \"value\": []}, ", "");
+    }
+    SECTION("renderer clear color remains a computed color") {
+        replace_canvas_fact(snapshot, "rgb(16, 21, 34)", "rgb(30, 30, 46)");
+        expected_background = "rgb(30, 30, 46)";
+    }
+    const auto capture = root_canvas_envelope(pulp::runtime::sha256_hex(png));
+    auto baseline = lower_root_canvas(temp, snapshot, capture, false);
+    auto result = lower_root_canvas(temp, snapshot, capture, true);
+    INFO(result.error);
+    REQUIRE(baseline);
+    REQUIRE(result);
+    REQUIRE_FALSE(baseline.design_ir->root.style.background_color);
+    REQUIRE(result.design_ir->root.style.background_color);
+    CHECK(*result.design_ir->root.style.background_color == expected_background);
+    CHECK(result.design_ir->root.children.size() > 1);
+    CHECK(result.design_ir->root.style.width == 1280);
+    CHECK(result.design_ir->root.style.height == 200);
+    result.design_ir->root.style.background_color.reset();
+    CHECK(pulp::view::serialize_design_ir(*result.design_ir) ==
+          pulp::view::serialize_design_ir(*baseline.design_ir));
+}
+
+namespace {
+
+// Append `extra` to the array value of the first `"key"` at or after `from`
+// in serialized JSON.
+void append_to_array(std::string& json, std::string_view key, std::string_view extra,
+                     std::string_view from = {}) {
+    const auto start = from.empty() ? 0 : json.find(from);
+    REQUIRE(start != std::string::npos);
+    INFO(key);
+    const auto at = json.find("\"" + std::string(key) + "\":", start);
+    REQUIRE(at != std::string::npos);
+    auto cursor = json.find_first_not_of(' ', at + key.size() + 3);
+    REQUIRE(cursor != std::string::npos);
+    REQUIRE(json[cursor] == '[');
+    int depth = 0;
+    for (; cursor < json.size(); ++cursor) {
+        if (json[cursor] == '[')
+            ++depth;
+        if (json[cursor] == ']' && --depth == 0)
+            break;
+    }
+    REQUIRE(cursor < json.size());
+    const bool empty = json[cursor - 1] == '[';
+    json.insert(cursor, (empty ? "" : ",") + std::string(extra));
+}
+
+// The frozen root-canvas capture plus one `::before` on its innermost DIV,
+// laid out as Chromium lays out an absolutely positioned pseudo with empty
+// `content`: its own box, then `generated` (the generated-content row).
+std::string root_canvas_with_pseudo(const std::vector<std::string>& generated) {
+    const auto parsed = choc::json::parse(root_canvas_snapshot());
+    const auto strings = parsed["strings"];
+    const auto div_style =
+        choc::json::toString(parsed["documents"][0]["layout"]["styles"][5], false);
+    const auto pseudo_name = std::to_string(strings.size());
+    // One row per layout entry: the pseudo's own box, then each generated row.
+    const auto rows = [&](const std::string& value) {
+        std::string joined = value;
+        for (size_t i = 0; i < generated.size(); ++i)
+            joined += "," + value;
+        return joined;
+    };
+    std::string bounds = "[42,44,10,10]";
+    for (const auto& box : generated)
+        bounds += "," + box;
+    auto json = choc::json::toString(parsed, false);
+    append_to_array(json, "strings", "\"::before\",\"before\"");
+    append_to_array(json, "parentIndex", "11");
+    append_to_array(json, "nodeType", "1");
+    append_to_array(json, "nodeName", pseudo_name);
+    append_to_array(json, "nodeValue", "-1");
+    append_to_array(json, "backendNodeId", "9001");
+    append_to_array(json, "attributes", "[]");
+    append_to_array(json, "index", "13", "\"pseudoType\"");
+    append_to_array(json, "value", std::to_string(strings.size() + 1), "\"pseudoType\"");
+    append_to_array(json, "nodeIndex", rows("13"));
+    append_to_array(json, "styles", rows(div_style));
+    append_to_array(json, "bounds", bounds);
+    append_to_array(json, "text", rows("-1"));
+    append_to_array(json, "paintOrders", rows("3"));
+    for (const auto* key : {"offsetRects", "scrollRects", "clientRects"})
+        append_to_array(json, key, rows("[]"));
+    append_to_array(json, "blendedBackgroundColors", rows("-1"));
+    append_to_array(json, "textColorOpacities", rows("1"));
+    return json;
+}
+
+std::optional<pulp::import_design::detail::DocumentCanvasPaint>
+canvas_paint_of(const std::string& snapshot, const std::string& name) {
+    const auto path = fs::temp_directory_path() / (name + ".json");
+    {
+        std::ofstream output(path, std::ios::binary);
+        output << snapshot;
+    }
+    const auto index = pulp::import_design::CapturedStyleIndex::load(path);
+    fs::remove(path);
+    REQUIRE(index);
+    return index->document_canvas_paint();
+}
+
+} // namespace
+
+TEST_CASE("an empty pseudo-element's generated row keeps the document canvas",
+          "[import-design][browser-capture][ir][root-canvas]") {
+    // Control: the frozen capture proves its canvas paint on its own.
+    REQUIRE(canvas_paint_of(root_canvas_snapshot(), "root-canvas-plain"));
+
+    // A `::before` with `content: ""` adds a zero-size row for its generated
+    // content beside its own box. That row paints nothing, so the document
+    // canvas proof must survive it.
+    const auto empty =
+        canvas_paint_of(root_canvas_with_pseudo({"[0,0,0,0]"}), "root-canvas-empty-pseudo");
+    REQUIRE(empty);
+    CHECK(empty->color == canvas_paint_of(root_canvas_snapshot(), "root-canvas-again")->color);
+
+    // Negative control: a repeated row WITH area is a conflicting layout fact
+    // for one node and still withholds the proof.
+    CHECK_FALSE(canvas_paint_of(root_canvas_with_pseudo({"[42,44,10,10]"}),
+                                "root-canvas-conflicting-pseudo"));
+    // And a pseudo gets one generated row, not an unbounded run of them.
+    CHECK_FALSE(canvas_paint_of(root_canvas_with_pseudo({"[0,0,0,0]", "[0,0,0,0]"}),
+                                "root-canvas-repeated-pseudo"));
+}
+
+TEST_CASE("a node's own layout row is its first row with area",
+          "[import-design][browser-capture][ir][layout-rows]") {
+    // The same snapshot and expected rows pin the differential lab's Python
+    // reader (test/test_importer_differential_lab.py), so the two languages
+    // cannot drift onto different rules.
+    const fs::path root =
+        fs::path(PULP_BROWSER_CAPTURE_FIXTURE_ROOT) / "browser-capture-layout-rows";
+    const auto index = pulp::import_design::CapturedStyleIndex::load(root / "dom-snapshot.json");
+    REQUIRE(index);
+    std::ifstream input(root / "expected-own-rows.json", std::ios::binary);
+    const std::string text{std::istreambuf_iterator<char>(input), {}};
+    const auto parsed = choc::json::parse(text);
+    const auto expected = parsed["own_rows"];
+    REQUIRE(expected.size() == 6);
+    for (int node = 0; node < index->node_count(); ++node) {
+        INFO("node " << node);
+        const auto key = std::to_string(node);
+        if (expected.hasObjectMember(key)) {
+            REQUIRE(index->own_layout_row(node));
+            CHECK(*index->own_layout_row(node) == expected[key].getWithDefault<int>(-1));
+        } else {
+            CHECK_FALSE(index->own_layout_row(node));
+        }
+    }
+    // The split inline's lookups read its own fragment, not a continuation.
+    const auto span = index->bounds_for(6);
+    REQUIRE(span);
+    CHECK(span->left == 20.0);
+    CHECK(span->top == 58.0);
+}
+
+namespace {
+
+// The frozen root-canvas capture plus one `<canvas>` (backend 9002) inside its
+// MAIN, laid out at 300,40 100x50 CSS px with no border or padding.
+std::string root_canvas_with_canvas() {
+    const auto parsed = choc::json::parse(root_canvas_snapshot());
+    const auto strings = parsed["strings"];
+    const auto section_style =
+        choc::json::toString(parsed["documents"][0]["layout"]["styles"][4], false);
+    auto json = choc::json::toString(parsed, false);
+    append_to_array(json, "strings", "\"CANVAS\"");
+    append_to_array(json, "parentIndex", "9");
+    append_to_array(json, "nodeType", "1");
+    append_to_array(json, "nodeName", std::to_string(strings.size()));
+    append_to_array(json, "nodeValue", "-1");
+    append_to_array(json, "backendNodeId", "9002");
+    append_to_array(json, "attributes", "[]");
+    append_to_array(json, "nodeIndex", "13");
+    append_to_array(json, "styles", section_style);
+    append_to_array(json, "bounds", "[300,40,100,50]");
+    append_to_array(json, "text", "-1");
+    append_to_array(json, "paintOrders", "4");
+    for (const auto* key : {"offsetRects", "scrollRects", "clientRects"})
+        append_to_array(json, key, "[]");
+    append_to_array(json, "blendedBackgroundColors", "-1");
+    append_to_array(json, "textColorOpacities", "1");
+    return json;
+}
+
+const pulp::view::IRNode* find_captured_canvas(const pulp::view::IRNode& node) {
+    if (node.attributes.count("captured_element"))
+        return &node;
+    for (const auto& child : node.children)
+        if (const auto* found = find_captured_canvas(child))
+            return found;
+    return nullptr;
+}
+
+} // namespace
+
+TEST_CASE("a capture-sized canvas asset lowers as a viewport plane",
+          "[import-design][browser-capture][ir][canvas]") {
+    // Capture: 1280x800 CSS px at DPR 2, so a viewport plane is 2560x1600 px.
+    TempCapture temp;
+    const auto reference = png_header(2560, 1600);
+    temp.write("browser.png", reference);
+    write_valid_reports(temp);
+    const auto lower_with_asset = [&](int width, int height) {
+        const auto asset = png_header(width, height);
+        temp.write("canvas-9002.png", asset);
+        const auto capture =
+            with_canvas_asset(root_canvas_envelope(pulp::runtime::sha256_hex(reference)),
+                              pulp::runtime::sha256_hex(asset), 9002, "canvas:9002",
+                              "canvas-9002.png", width, height);
+        return lower_root_canvas(temp, root_canvas_with_canvas(), capture, false);
+    };
+
+    SECTION("an asset the capture's size is a plane placed inside the canvas") {
+        const auto result = lower_with_asset(2560, 1600);
+        INFO(result.error);
+        REQUIRE(result);
+        const auto* canvas = find_captured_canvas(result.design_ir->root);
+        REQUIRE(canvas != nullptr);
+        CHECK(canvas->type == "frame");
+        REQUIRE(canvas->children.size() == 1);
+        const auto& plane = canvas->children[0];
+        CHECK(plane.type == "image");
+        CHECK(plane.attributes.at("asset_ref") == "canvas:9002");
+        CHECK(plane.attributes.at("captured_layer") == "viewport");
+        // The plane is the capture's CSS extent, not the canvas box.
+        CHECK(*plane.style.width == Catch::Approx(1280.0));
+        CHECK(*plane.style.height == Catch::Approx(800.0));
+    }
+    SECTION("an element-sized asset is the canvas picture itself") {
+        const auto result = lower_with_asset(200, 100);
+        INFO(result.error);
+        REQUIRE(result);
+        const auto* canvas = find_captured_canvas(result.design_ir->root);
+        REQUIRE(canvas != nullptr);
+        CHECK(canvas->type == "image");
+        CHECK(canvas->attributes.at("asset_ref") == "canvas:9002");
+        CHECK(canvas->style.object_fit.value_or("") == "fill");
+        CHECK(canvas->children.empty());
+    }
+    SECTION("one pixel off the capture size is not a plane") {
+        const auto result = lower_with_asset(2559, 1600);
+        INFO(result.error);
+        REQUIRE(result);
+        const auto* canvas = find_captured_canvas(result.design_ir->root);
+        REQUIRE(canvas != nullptr);
+        CHECK(canvas->type == "image");
+    }
+}
+
+TEST_CASE("unsupported document canvas facts preserve complete legacy lowering",
+          "[import-design][browser-capture][ir][root-canvas]") {
+    TempCapture temp;
+    const auto png = png_header(2560, 1600);
+    temp.write("browser.png", png);
+    write_valid_reports(temp);
+    auto snapshot = choc::json::toString(choc::json::parse(root_canvas_snapshot()), false);
+    auto capture = root_canvas_envelope(pulp::runtime::sha256_hex(png));
+    bool native = true;
+    bool expect_body_only_background = false;
+    SECTION("faithful capture is unchanged") {
+        native = false;
+    }
+    SECTION("body-only color") {
+        change_canvas_style(snapshot, 1, "background-color", "rgba(0, 0, 0, 0)");
+        expect_body_only_background = true;
+    }
+    SECTION("nonfinite color") {
+        replace_canvas_fact(snapshot, "rgb(16, 21, 34)", "rgb(nan, 21, 34)");
+    }
+    SECTION("unsupported color syntax") {
+        replace_canvas_fact(snapshot, "rgb(16, 21, 34)", "#101522");
+    }
+    SECTION("fractional alpha") {
+        replace_canvas_fact(snapshot, "rgb(16, 21, 34)", "rgba(16, 21, 34, 0.5)");
+    }
+    SECTION("image") {
+        change_canvas_style(snapshot, 1, "background-image", "url(image.png)");
+    }
+    SECTION("different body") {
+        change_canvas_style(snapshot, 2, "background-color", "rgb(1, 2, 3)");
+    }
+    SECTION("filter") {
+        change_canvas_style(snapshot, 1, "filter", "blur(2px)");
+    }
+    SECTION("backdrop filter") {
+        change_canvas_style(snapshot, 2, "backdrop-filter", "blur(2px)");
+    }
+    SECTION("transform") {
+        change_canvas_style(snapshot, 1, "transform", "matrix(1, 0, 0, 1, 2, 0)");
+    }
+    SECTION("clip") {
+        change_canvas_style(snapshot, 1, "clip-path", "inset(1px)");
+    }
+    SECTION("mask") {
+        change_canvas_style(snapshot, 2, "mask-image", "url(mask.png)");
+    }
+    SECTION("background blend") {
+        change_canvas_style(snapshot, 1, "background-blend-mode", "multiply");
+    }
+    SECTION("mix blend") {
+        change_canvas_style(snapshot, 2, "mix-blend-mode", "multiply");
+    }
+    SECTION("opacity") {
+        replace_canvas_fact(snapshot, "\"1\"", "\"0.5\"");
+    }
+    SECTION("missing required declaration") {
+        replace_canvas_fact(snapshot, "background-image", "uncaptured-image");
+    }
+    SECTION("duplicate required declaration") {
+        replace_canvas_fact(snapshot, "background-image", "background-color");
+    }
+    SECTION("ambiguous HTML element") {
+        replace_canvas_fact(snapshot, "\"MAIN\"", "\"HTML\"");
+    }
+    SECTION("ambiguous BODY element") {
+        replace_canvas_fact(snapshot, "\"MAIN\"", "\"BODY\"");
+    }
+    SECTION("body ancestry") {
+        replace_canvas_fact(snapshot, "\"parentIndex\": [-1, 0, 0, 2, 3, 4, 3, 6, 2, 8",
+                            "\"parentIndex\": [-1, 0, 0, 2, 3, 4, 3, 6, 3, 8");
+    }
+    SECTION("style row arity") {
+        replace_canvas_fact(snapshot, "[6, 7, 8, 9, 10, 11,", "[7, 8, 9, 10, 11,");
+    }
+    SECTION("invalid style string index") {
+        replace_canvas_fact(snapshot, "[6, 7, 8, 9, 10, 11,", "[6, 7, 8, 9, 10, 99999,");
+    }
+    SECTION("duplicate layout identity") {
+        replace_canvas_fact(snapshot, "\"nodeIndex\": [0, 2, 8, 9, 10, 11]",
+                            "\"nodeIndex\": [0, 2, 8, 9, 10, 10]");
+    }
+    SECTION("invalid node name string index") {
+        replace_canvas_fact(snapshot, "\"nodeName\": [3, 4, 5,", "\"nodeName\": [3, 4, 99999,");
+    }
+    SECTION("missing root style row") {
+        replace_canvas_fact(snapshot, "\"nodeIndex\": [0, 2, 8,", "\"nodeIndex\": [0, 3, 8,");
+    }
+    SECTION("missing body style row") {
+        replace_canvas_fact(snapshot, "\"nodeIndex\": [0, 2, 8,", "\"nodeIndex\": [0, 2, 3,");
+    }
+    SECTION("extra snapshot document") {
+        const auto parsed = choc::json::parse(snapshot);
+        const auto doc = parsed["documents"][0];
+        const auto encoded = choc::json::toString(doc, false);
+        replace_canvas_fact(snapshot, encoded, encoded + "," + encoded);
+    }
+    SECTION("scroll extent") {
+        replace_canvas_fact(snapshot, "\"contentHeight\": 800", "\"contentHeight\": 801");
+    }
+    SECTION("scroll offset") {
+        replace_canvas_fact(snapshot, "\"scrollOffsetX\": 0", "\"scrollOffsetX\": 1");
+    }
+    SECTION("primary offset") {
+        replace_canvas_fact(capture, "\"left\":0", "\"left\":1");
+    }
+    SECTION("authored offset") {
+        replace_canvas_fact(capture, "\"x\":0", "\"x\":1");
+    }
+    SECTION("missing viewport fact") {
+        replace_canvas_fact(capture, "\"resolved\"", "\"missing\"");
+    }
+    SECTION("missing authored frame") {
+        replace_canvas_fact(capture, "\"authored_frame\"", "\"missing\"");
+    }
+    SECTION("viewport DPR disagrees with reference") {
+        // The first scale factor belongs to provenance.viewport; the later
+        // reference stays at the accepted DPR 2, so this tests registration.
+        replace_canvas_fact(capture, "\"device_scale_factor\":2", "\"device_scale_factor\":1");
+    }
+    SECTION("missing primary frame") {
+        replace_canvas_fact(capture, "\"primary_surface\"", "\"missing_surface\"");
+    }
+    SECTION("authored width disagrees") {
+        replace_canvas_fact(capture, "\"authored_frame\":{\"x\":0,\"y\":0,\"width\":1280",
+                            "\"authored_frame\":{\"x\":0,\"y\":0,\"width\":1279");
+    }
+    SECTION("authored height disagrees") {
+        replace_canvas_fact(capture,
+                            "\"authored_frame\":{\"x\":0,\"y\":0,\"width\":1280,\"height\":200}",
+                            "\"authored_frame\":{\"x\":0,\"y\":0,\"width\":1280,\"height\":199}");
+    }
+    SECTION("missing snapshot extent") {
+        replace_canvas_fact(snapshot, "\"contentWidth\"", "\"missingWidth\"");
+    }
+    SECTION("nonnumeric snapshot extent") {
+        replace_canvas_fact(snapshot, "\"contentWidth\": 1280", "\"contentWidth\": \"Infinity\"");
+    }
+    SECTION("nonnumeric envelope document extent") {
+        replace_canvas_fact(capture, "\"document\":{\"width\":1280",
+                            "\"document\":{\"width\":\"Infinity\"");
+    }
+    SECTION("HTML origin offset") {
+        const auto parsed = choc::json::parse(snapshot);
+        const auto box = choc::json::toString(parsed["documents"][0]["layout"]["bounds"][1], false);
+        replace_canvas_fact(snapshot, box, "[1, 0, 1280, 200]");
+    }
+    SECTION("HTML outside canvas") {
+        const auto parsed = choc::json::parse(snapshot);
+        const auto box = choc::json::toString(parsed["documents"][0]["layout"]["bounds"][1], false);
+        replace_canvas_fact(snapshot, box, "[0, 0, 1281, 200]");
+    }
+    SECTION("HTML empty bounds") {
+        const auto parsed = choc::json::parse(snapshot);
+        const auto box = choc::json::toString(parsed["documents"][0]["layout"]["bounds"][1], false);
+        replace_canvas_fact(snapshot, box, "[0, 0, 0, 200]");
+    }
+    SECTION("direct body pseudo metadata") {
+        replace_canvas_fact(snapshot, "\"pseudoType\": {\"index\": [], \"value\": []}",
+                            "\"pseudoType\": {\"index\": [9], \"value\": [4]}");
+    }
+    SECTION("direct HTML pseudo metadata") {
+        replace_canvas_fact(snapshot, "\"pseudoType\": {\"index\": [], \"value\": []}",
+                            "\"pseudoType\": {\"index\": [3], \"value\": [4]}");
+    }
+    SECTION("duplicate pseudo indices") {
+        replace_canvas_fact(snapshot, "\"pseudoType\": {\"index\": [], \"value\": []}",
+                            "\"pseudoType\": {\"index\": [11, 11], \"value\": [4, 4]}");
+    }
+    SECTION("malformed pseudo indices") {
+        replace_canvas_fact(snapshot, "\"pseudoType\": {\"index\": [], \"value\": []}",
+                            "\"pseudoType\": {\"index\": [9999], \"value\": [4]}");
+    }
+    auto baseline = lower_root_canvas(temp, snapshot, capture, false, native);
+    auto result = lower_root_canvas(temp, snapshot, capture, true, native);
+    INFO(result.error);
+    REQUIRE(baseline);
+    REQUIRE(result);
+    if (expect_body_only_background) {
+        REQUIRE(result.design_ir->root.style.background_color);
+        CHECK(*result.design_ir->root.style.background_color == "rgb(16, 21, 34)");
+    } else {
+        CHECK_FALSE(result.design_ir->root.style.background_color);
+    }
+    if (expect_body_only_background)
+        result.design_ir->root.style.background_color.reset();
+    CHECK(pulp::view::serialize_design_ir(*result.design_ir) ==
+          pulp::view::serialize_design_ir(*baseline.design_ir));
+}
+
+TEST_CASE("document canvas lowering retains the existing DPR1 import refusal",
+          "[import-design][browser-capture][ir][root-canvas]") {
+    TempCapture temp;
+    const auto png = png_header(2560, 1600);
+    temp.write("browser.png", png);
+    write_valid_reports(temp);
+    auto capture = root_canvas_envelope(pulp::runtime::sha256_hex(png));
+    replace_canvas_fact(capture, "\"device_scale_factor\":2,\"authored_frame\"",
+                        "\"device_scale_factor\":1,\"authored_frame\"");
+    const auto result = lower_root_canvas(temp, root_canvas_snapshot(), capture, true);
+    REQUIRE_FALSE(result);
+    CHECK(result.error == "browser capture reference requires DPR 2");
+}
+
+TEST_CASE("bound document canvas paint does not enter materialized composition",
+          "[import-design][browser-capture][ir][root-canvas]") {
+    TempCapture temp;
+    const auto png = png_header(2560, 1600);
+    const auto canvas = png_header(8, 4);
+    temp.write("browser.png", png);
+    temp.write("browser-chrome.png", png);
+    temp.write("browser-canvas-composite.png", png);
+    temp.write("canvas-42.png", canvas);
+    write_valid_reports(temp);
+    auto capture = with_canvas_asset(root_canvas_envelope(pulp::runtime::sha256_hex(png)),
+                                     pulp::runtime::sha256_hex(canvas));
+    capture = with_chrome_asset(capture, pulp::runtime::sha256_hex(png));
+    capture = with_canvas_composite_asset(capture, pulp::runtime::sha256_hex(png));
+    for (const auto& [from, to] :
+         std::vector<std::pair<std::string, std::string>>{{"1912", "2560"}, {"1272", "1600"}}) {
+        while (capture.find(from) != std::string::npos)
+            replace_canvas_fact(capture, from, to);
+    }
+    const auto snapshot = root_canvas_snapshot();
+    temp.write("snapshot.json", snapshot);
+    auto unbound = capture;
+    replace_canvas_fact(unbound, "snapshot:main", "snapshot.json");
+    temp.write("capture.json", unbound);
+    pulp::import_design::BrowserCaptureIrOptions options;
+    options.materialized_canvas_composition = true;
+    const auto baseline =
+        pulp::import_design::lower_browser_capture_to_ir(temp.root / "capture.json", options);
+    temp.write("capture.json",
+               with_snapshot_sha256(capture, pulp::runtime::sha256_hex(snapshot), "snapshot.json"));
+    const auto result =
+        pulp::import_design::lower_browser_capture_to_ir(temp.root / "capture.json", options);
+    INFO(result.error);
+    REQUIRE(baseline);
+    REQUIRE(result);
+    CHECK_FALSE(result.design_ir->root.style.background_color);
+    CHECK(pulp::view::serialize_design_ir(*result.design_ir) ==
+          pulp::view::serialize_design_ir(*baseline.design_ir));
+}
+
+TEST_CASE("browser capture verifies a declared DOM snapshot SHA-256 before parsing",
+          "[import-design][browser-capture][ir][provenance]") {
+    TempCapture temp;
+    const auto png = png_header(1912, 1272);
+    temp.write("browser.png", png);
+    write_valid_reports(temp);
+    const std::string snapshot = valid_snapshot();
+    temp.write("snapshot.json", snapshot);
+    temp.write("capture.json",
+               with_snapshot_sha256(envelope("browser.png", pulp::runtime::sha256_hex(png)),
+                                    pulp::runtime::sha256_hex(snapshot), "snapshot.json"));
+
+    const auto result =
+        pulp::import_design::lower_browser_capture_to_ir(temp.root / "capture.json");
+
+    REQUIRE(result);
+}
+
+TEST_CASE("browser capture rejects a malformed DOM snapshot SHA-256 declaration",
+          "[import-design][browser-capture][ir][fail-closed]") {
+    TempCapture temp;
+    const auto png = png_header(1912, 1272);
+    temp.write("browser.png", png);
+    write_valid_reports(temp);
+    temp.write("snapshot.json", "{}");
+    temp.write("capture.json",
+               with_snapshot_sha256(envelope("browser.png", pulp::runtime::sha256_hex(png)),
+                                    "ABCDEF", "snapshot.json"));
+
+    const auto result =
+        pulp::import_design::lower_browser_capture_to_ir(temp.root / "capture.json");
+
+    REQUIRE_FALSE(result);
+    REQUIRE(result.error.find("declaration is malformed") != std::string::npos);
+}
+
+TEST_CASE("browser capture rejects a hash-matching malformed DOM snapshot",
+          "[import-design][browser-capture][ir][fail-closed]") {
+    TempCapture temp;
+    const auto png = png_header(1912, 1272);
+    temp.write("browser.png", png);
+    write_valid_reports(temp);
+    const std::string snapshot = "{}";
+    temp.write("snapshot.json", snapshot);
+    temp.write("capture.json",
+               with_snapshot_sha256(envelope("browser.png", pulp::runtime::sha256_hex(png)),
+                                    pulp::runtime::sha256_hex(snapshot), "snapshot.json"));
+
+    const auto result =
+        pulp::import_design::lower_browser_capture_to_ir(temp.root / "capture.json");
+
+    REQUIRE_FALSE(result);
+    REQUIRE(result.error.find("sidecar is malformed") != std::string::npos);
+}
+
+TEST_CASE("browser capture rejects a mismatched DOM snapshot SHA-256",
+          "[import-design][browser-capture][ir][fail-closed]") {
+    TempCapture temp;
+    const auto png = png_header(1912, 1272);
+    temp.write("browser.png", png);
+    write_valid_reports(temp);
+    temp.write("snapshot.json", "snapshot bytes");
+    temp.write(
+        "capture.json",
+        with_snapshot_sha256(envelope("browser.png", pulp::runtime::sha256_hex(png)),
+                             "0000000000000000000000000000000000000000000000000000000000000000",
+                             "snapshot.json"));
+
+    const auto result =
+        pulp::import_design::lower_browser_capture_to_ir(temp.root / "capture.json");
+
+    REQUIRE_FALSE(result);
+    REQUIRE(result.error.find("does not match its sidecar") != std::string::npos);
+}
+
+TEST_CASE("browser capture rejects a declared DOM snapshot with no sidecar",
+          "[import-design][browser-capture][ir][fail-closed]") {
+    TempCapture temp;
+    const auto png = png_header(1912, 1272);
+    temp.write("browser.png", png);
+    write_valid_reports(temp);
+    temp.write(
+        "capture.json",
+        with_snapshot_sha256(envelope("browser.png", pulp::runtime::sha256_hex(png)),
+                             "0000000000000000000000000000000000000000000000000000000000000000",
+                             "snapshot.json"));
+
+    const auto result =
+        pulp::import_design::lower_browser_capture_to_ir(temp.root / "capture.json");
+
+    REQUIRE_FALSE(result);
+    REQUIRE(result.error.find("sidecar is missing") != std::string::npos);
 }
 
 TEST_CASE("browser static frame is a validated runtime asset, not the A/B oracle",

@@ -233,6 +233,293 @@ export async function disableMotion(cdp) {
   });
 }
 
+// Whether encoded image bytes animate, and in which container: "gif", "apng"
+// or "webp" for an image with more than one frame, null for a still image or
+// bytes this does not recognize. Self-contained, because the motion freeze
+// below runs its source inside the page.
+export function animatedImageKind(bytes) {
+  const n = bytes.length;
+  const at = (offset, text) => {
+    if (offset + text.length > n) return false;
+    for (let i = 0; i < text.length; i += 1) {
+      if (bytes[offset + i] !== text.charCodeAt(i)) return false;
+    }
+    return true;
+  };
+  if (at(0, "GIF87a") || at(0, "GIF89a")) {
+    if (n < 13) return null;
+    const colorTable = (packed) =>
+      (packed & 0x80) ? 3 * (1 << ((packed & 7) + 1)) : 0;
+    let p = 13 + colorTable(bytes[10]);
+    const skipSubBlocks = () => {
+      while (p < n) {
+        const size = bytes[p++];
+        if (size === 0) return true;
+        p += size;
+      }
+      return false;
+    };
+    let frames = 0;
+    while (p < n) {
+      const block = bytes[p++];
+      if (block === 0x21) {
+        p += 1;
+        if (!skipSubBlocks()) return null;
+      } else if (block === 0x2c) {
+        frames += 1;
+        if (frames > 1) return "gif";
+        if (p + 9 > n) return null;
+        p += 9 + colorTable(bytes[p + 8]) + 1;
+        if (!skipSubBlocks()) return null;
+      } else {
+        return null;
+      }
+    }
+    return null;
+  }
+  if (at(0, "\x89PNG\r\n\x1a\n")) {
+    const u32 = (offset) => ((bytes[offset] << 24) | (bytes[offset + 1] << 16) |
+      (bytes[offset + 2] << 8) | bytes[offset + 3]) >>> 0;
+    // acTL must precede the first IDAT; its first field is the frame count.
+    for (let p = 8; p + 8 <= n; p += 12 + u32(p)) {
+      if (at(p + 4, "acTL")) return p + 12 <= n && u32(p + 8) > 1 ? "apng" : null;
+      if (at(p + 4, "IDAT")) return null;
+    }
+    return null;
+  }
+  if (at(0, "RIFF") && at(8, "WEBP")) {
+    let frames = 0;
+    for (let p = 12; p + 8 <= n;) {
+      const size = (bytes[p + 4] | (bytes[p + 5] << 8) | (bytes[p + 6] << 16) |
+        (bytes[p + 7] << 24)) >>> 0;
+      if (at(p, "ANMF")) {
+        frames += 1;
+        if (frames > 1) return "webp";
+      }
+      p += 8 + size + (size & 1);
+    }
+    return null;
+  }
+  return null;
+}
+
+// Images the freeze reads to classify, and the byte budget for each. Both
+// bound the work on a page that references thousands of images.
+const MAX_MOTION_IMAGE_SOURCES = 256;
+const MAX_MOTION_IMAGE_BYTES = 32 * 1024 * 1024;
+
+const MOTION_FREEZE_SOURCE = `async (declareSources) => {
+  const animatedImageKind = ${animatedImageKind.toString()};
+  // Every pass over one document shares this state, so an animation or video
+  // is counted once however often it is settled, and the receipt is the
+  // document's total.
+  const state = globalThis.__pulpMotionFreeze ??= {
+    settled: new WeakSet(),
+    rewound: new WeakSet(),
+    receipt: {
+      schema: "pulp-browser-capture-motion-v1",
+      animations: { finished: 0, paused: 0, left_to_css_freeze: 0, not_time_driven: 0 },
+      videos: { paused: 0, rewound: 0, poster: 0 },
+      volatile_sources: [],
+      images_examined: 0,
+      images_unreadable: 0,
+    },
+  };
+  const receipt = state.receipt;
+  // The controls whose theme verdict reads inline author styling.
+  const THEMED_CONTROLS = "button, input, textarea, select, progress";
+  const KEYFRAME_FIELDS = new Set(["offset", "computedOffset", "easing", "composite"]);
+  const cssName = (name) => name.startsWith("--") ? name
+    : name === "cssFloat" ? "float" : name === "cssOffset" ? "offset"
+    : name.replace(/[A-Z]/g, (letter) => "-" + letter.toLowerCase());
+  // Whether the target's inline style holds an !important declaration for a
+  // property the animation drives. Such a declaration beats the animation, and
+  // commitStyles would rewrite it at normal priority, where a stylesheet
+  // !important rule it used to beat would win.
+  // A probe declaration expands each animated shorthand into its longhands.
+  const overridesImportant = (animation, target) => {
+    const probe = document.createElement("div").style;
+    for (const keyframe of animation.effect.getKeyframes()) {
+      for (const name of Object.keys(keyframe)) {
+        if (!KEYFRAME_FIELDS.has(name)) probe.setProperty(cssName(name), "initial");
+      }
+    }
+    for (const longhand of probe) {
+      if (target.style.getPropertyPriority(longhand) === "important") return true;
+    }
+    return false;
+  };
+
+  // Web Animations run on the document timeline, which the CSS freeze and the
+  // scheduler stubs cannot reach. Settle each one to a single frame: a finite
+  // animation to its end state, which is where the page comes to rest, and an
+  // infinite or unresolved one to its start, which is the only frame it is
+  // guaranteed to show. CSS animations and transitions keep their own path:
+  // the motion stylesheet already removed them, and finishing one here would
+  // replace that rule with a different end state.
+  for (const animation of document.getAnimations ? document.getAnimations() : []) {
+    // Settled before and not restarted by the page since.
+    const first = !state.settled.has(animation);
+    if (!first && animation.playState !== "running") continue;
+    state.settled.add(animation);
+    const count = (kind) => { if (first) receipt.animations[kind] += 1; };
+    if ((typeof CSSAnimation === "function" && animation instanceof CSSAnimation) ||
+        (typeof CSSTransition === "function" && animation instanceof CSSTransition)) {
+      count("left_to_css_freeze");
+      continue;
+    }
+    if (!(animation.timeline instanceof DocumentTimeline)) {
+      // A scroll- or view-driven animation is a function of scroll position,
+      // which the capture has already fixed; a null timeline never advances.
+      count("not_time_driven");
+      continue;
+    }
+    const end = animation.effect?.getComputedTiming?.().endTime;
+    if (Number.isFinite(end) && animation.playbackRate !== 0) {
+      try {
+        animation.finish();
+        count("finished");
+        continue;
+      } catch {}
+    }
+    animation.pause();
+    animation.currentTime = 0;
+    // A paused animation can keep painting where the compositor last had it:
+    // with the browser at its real device scale, the page and the DOM read
+    // time zero while the presented frame showed the box mid-cycle. Writing
+    // the time-zero values inline and dropping the animation leaves nothing
+    // for the compositor to hold. commitStyles throws for a target that is
+    // not rendered; that animation stays paused at zero. A form control
+    // stays paused too: the committed values would be inline author styling,
+    // which turns a control the native theme paints into an author-styled one.
+    // So does a target whose inline !important declaration the commit would
+    // overwrite.
+    const target = animation.effect?.target;
+    if (!target?.matches?.(THEMED_CONTROLS)) {
+      try {
+        if (!overridesImportant(animation, target)) {
+          animation.commitStyles();
+          animation.cancel();
+        }
+      } catch {}
+    }
+    count("paused");
+  }
+
+  // A video that never presented a frame shows its poster; leave that frame.
+  // Any other video is stopped on its first frame.
+  const seeks = [];
+  for (const video of document.querySelectorAll("video")) {
+    const first = !state.settled.has(video);
+    if (!first && video.paused) continue;
+    state.settled.add(video);
+    video.autoplay = false;
+    video.pause();
+    if (first) receipt.videos.paused += 1;
+    if (video.poster && video.played.length === 0 && video.currentTime === 0) {
+      if (first) receipt.videos.poster += 1;
+      continue;
+    }
+    if (video.readyState >= 1 && video.currentTime !== 0) {
+      seeks.push(new Promise((resolve) =>
+        video.addEventListener("seeked", resolve, { once: true })));
+      video.currentTime = 0;
+      if (!state.rewound.has(video)) receipt.videos.rewound += 1;
+      state.rewound.add(video);
+    }
+  }
+  if (seeks.length > 0) {
+    await Promise.race([
+      Promise.all(seeks),
+      new Promise((resolve) => setTimeout(resolve, 2000)),
+    ]);
+  }
+
+  // An animated GIF, APNG or WebP advances on the image decoder's own clock,
+  // which nothing in the page can pause. It is left to animate and declared,
+  // so a consumer knows these pixels are one frame of several.
+  if (!declareSources) return receipt;
+  receipt.volatile_sources = [];
+  receipt.images_examined = 0;
+  receipt.images_unreadable = 0;
+  const sources = new Map();
+  const add = (url, element) => {
+    if (!url || sources.size >= ${MAX_MOTION_IMAGE_SOURCES} || sources.has(url)) return;
+    sources.set(url, element);
+  };
+  const cssUrls = /url\\(\\s*(['"]?)(.*?)\\1\\s*\\)/g;
+  const imageProperties = ["background-image", "border-image-source",
+    "list-style-image", "mask-image", "-webkit-mask-image", "content"];
+  for (const element of document.querySelectorAll("*")) {
+    const name = element.localName;
+    if (name === "img") add(element.currentSrc || element.src, name);
+    else if (name === "input" && element.type === "image") add(element.src, name);
+    else if (name === "video" && element.poster) add(element.poster, "video-poster");
+    else if (name === "image" && element.href?.baseVal) {
+      try { add(new URL(element.href.baseVal, document.baseURI).href, name); } catch {}
+    }
+    for (const pseudo of [null, "::before", "::after"]) {
+      const style = getComputedStyle(element, pseudo);
+      for (const property of imageProperties) {
+        const value = style.getPropertyValue(property);
+        if (!value || !value.includes("url(")) continue;
+        for (const match of value.matchAll(cssUrls)) {
+          add(match[2], pseudo ? name + pseudo : name);
+        }
+      }
+    }
+  }
+  for (const [url, element] of sources) {
+    receipt.images_examined += 1;
+    let bytes;
+    try {
+      const response = await fetch(url, { cache: "force-cache" });
+      if (!response.ok) throw new Error(String(response.status));
+      const buffer = await response.arrayBuffer();
+      if (buffer.byteLength > ${MAX_MOTION_IMAGE_BYTES}) throw new Error("too large");
+      bytes = new Uint8Array(buffer);
+    } catch {
+      receipt.images_unreadable += 1;
+      continue;
+    }
+    const format = animatedImageKind(bytes);
+    if (!format) continue;
+    receipt.volatile_sources.push({
+      kind: "animated-image",
+      format,
+      element,
+      url: url.startsWith("data:") ? url.slice(0, url.search(/[;,]/)) : url,
+      byte_length: bytes.length,
+    });
+  }
+  return receipt;
+}`;
+
+// Stops the motion that keeps a still page from presenting one frame and
+// returns what it did, for the capture receipt. A page-settle runs it as soon
+// as the document has loaded, so a Web Animation that moves a box cannot keep
+// the layout from settling, and the capture runs it once more after every
+// settle and before the frame is read, for whatever started since. Only that
+// last pass, `declareSources`, reads the page's images to declare animated
+// ones. Each pass settles only what an earlier one did not, or what the page
+// has restarted since.
+export async function freezeMotion(cdp, { declareSources = true } = {}) {
+  const evaluated = await cdp.call("Runtime.evaluate", {
+    expression: `(${MOTION_FREEZE_SOURCE})(${declareSources === true})`,
+    awaitPromise: true,
+    returnByValue: true,
+  });
+  if (evaluated.exceptionDetails || !evaluated.result?.value) {
+    const error = new Error(
+      "the page's motion could not be frozen: " +
+      (evaluated.exceptionDetails?.exception?.description ??
+        evaluated.exceptionDetails?.text ?? "no receipt"));
+    error.code = "capture-motion-freeze-failed";
+    throw error;
+  }
+  return evaluated.result.value;
+}
+
 export async function freezeDynamicTime(cdp) {
   await cdp.call("Runtime.evaluate", {
     // Stop tracked page work, then reject any scheduling after the freeze.
@@ -272,14 +559,62 @@ export async function resumeDynamicTime(cdp) {
   });
 }
 
+// A horizon accepts its last frame when the final STABLE_RUN_FRAMES frames are
+// byte-identical. The run counter resets on any change and the loop never
+// exits early, so that verdict, and the bytes returned, are a function of the
+// final STABLE_RUN_FRAMES frames alone. Every earlier frame exists only to push
+// the decisive ones past that many fresh compositor presentations (an early
+// plateau must not hide a later change), and nothing reads its bytes.
+export const SCREENSHOT_HORIZON_FRAMES = 32;
+export const STABLE_RUN_FRAMES = 3;
+
+// The output options of a presentation-only frame. Encoding happens after
+// readback, so these change the cost of a frame and not which pixels are read.
+// Everything that describes geometry (clip, captureBeyondViewport, fromSurface)
+// is left exactly as the caller passed it: a geometry change resizes the
+// capture surface and is visible to the page.
+export const PRESENTATION_FRAME_ENCODING = Object.freeze({
+  format: "jpeg",
+  quality: 1,
+});
+
+export function presentationFrameOptions(
+  screenshotOptions, encoding = PRESENTATION_FRAME_ENCODING) {
+  return { ...screenshotOptions, ...encoding };
+}
+
+// The presentation encoding for a capture whose motion has been frozen, or
+// null to take every frame in the caller's encoding. An animated image is the
+// one motion the freeze leaves running, on the decoder's wall clock, and its
+// verdict depends on when the decisive frames land. Cheaper presentation
+// frames move them earlier, so a page that declares one keeps the horizon's
+// full wall duration and the verdict it had.
+export function horizonPresentationEncoding(motion) {
+  return motion?.volatile_sources?.length > 0 ? null : PRESENTATION_FRAME_ENCODING;
+}
+
+// The decisive frames, exactly `requiredTrailingFrames` of them, are taken with
+// the caller's own options and compared byte for byte, so they are the frames
+// the rule judges and the bytes the capture ships. Because their count equals
+// the required run, a presentation frame before them can never extend the run
+// that decides: the first decisive frame always restarts it, as any change
+// would. Requiring a longer run than the decisive frames would let encoding
+// break that equivalence, so the two are the same parameter. A null
+// `presentationEncoding` takes every frame with the caller's options.
 export async function captureStableScreenshot(
-  cdp, screenshotOptions, maximumAttempts = 32, intervalMs = 16,
-  requiredTrailingFrames = 3) {
+  cdp, screenshotOptions, maximumAttempts = SCREENSHOT_HORIZON_FRAMES,
+  intervalMs = 16, requiredTrailingFrames = STABLE_RUN_FRAMES,
+  presentationEncoding = PRESENTATION_FRAME_ENCODING) {
+  const presentationFrames = presentationEncoding
+    ? Math.max(0, maximumAttempts - requiredTrailingFrames) : 0;
+  const presentationOptions =
+    presentationFrameOptions(screenshotOptions, presentationEncoding ?? {});
   let previous;
   let trailingFrames = 0;
   for (let attempt = 0; attempt < maximumAttempts; attempt += 1) {
-    const screenshot =
-      await cdp.call("Page.captureScreenshot", screenshotOptions);
+    const screenshot = await cdp.call(
+      "Page.captureScreenshot",
+      attempt < presentationFrames ? presentationOptions : screenshotOptions);
     const current = Buffer.from(screenshot.data, "base64");
     trailingFrames =
       previous?.equals(current) ? trailingFrames + 1 : 1;
@@ -298,10 +633,12 @@ export async function captureStableScreenshot(
 // reused; anything else is observed, with one fresh horizon if the first
 // misses its identical tail.
 export async function captureStableFrameWithHiddenPaint(
-  cdp, screenshotOptions, acceptedBytes, hiddenCount) {
+  cdp, screenshotOptions, acceptedBytes, hiddenCount,
+  presentationEncoding = PRESENTATION_FRAME_ENCODING) {
   if (hiddenCount === 0) return acceptedBytes;
-  return await captureStableScreenshot(cdp, screenshotOptions) ??
-    await captureStableScreenshot(cdp, screenshotOptions);
+  const horizon = () => captureStableScreenshot(cdp, screenshotOptions,
+    undefined, undefined, undefined, presentationEncoding);
+  return await horizon() ?? await horizon();
 }
 
 export async function waitForStable(cdp, options = {}) {
@@ -310,6 +647,9 @@ export async function waitForStable(cdp, options = {}) {
   const intervalMs = options.intervalMs ?? 100;
   const minimumElapsedMs = options.minimumElapsedMs ?? 0;
   const networkIdle = options.networkIdle ?? (() => true);
+  // Runs before every sample, so work the page starts mid-settle is handled
+  // before the round that would see it move.
+  const beforeSample = options.beforeSample ?? (async () => {});
   const started = Date.now();
 
   await cdp.call("Runtime.evaluate", {
@@ -324,6 +664,7 @@ export async function waitForStable(cdp, options = {}) {
   let rounds = 0;
   const recentSamples = [];
   for (; rounds < maximumRounds; rounds++) {
+    await beforeSample();
     const evaluated = await cdp.call("Runtime.evaluate", {
       expression: SAMPLE_EXPRESSION,
       returnByValue: true,

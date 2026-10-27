@@ -42,6 +42,7 @@
 #include "include/core/SkSurface.h"
 #include "include/core/SkBlendMode.h"
 #include "skia_gradient_compat.hpp"
+#include "skia_resource_counting.hpp"
 #include "include/effects/SkImageFilters.h"
 #include "include/effects/SkRuntimeEffect.h"
 
@@ -341,10 +342,12 @@ sk_sp<SkShader> parse_url_image_mask(
     constexpr std::string_view kFile = "file://";
     if (path.size() >= kFile.size() && path.compare(0, kFile.size(), kFile) == 0)
         path = path.substr(kFile.size());
-    if (path.empty()) return nullptr;
+    // Fragment (`#id`) and `data:` references name no file.
+    if (path.empty() || path.front() == '#' || path.rfind("data:", 0) == 0)
+        return nullptr;
     auto data = SkData::MakeFromFileName(path.c_str());
     if (!data) return nullptr;
-    auto image = SkImages::DeferredFromEncodedData(data);
+    auto image = decode_encoded_image(data);
     if (!image || image->width() <= 0 || image->height() <= 0) return nullptr;
     // A GPU backend cannot draw a raster-backed image as a shader — Graphite
     // logs "Couldn't convert SkImage to a Graphite-backed representation" and

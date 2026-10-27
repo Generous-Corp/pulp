@@ -197,6 +197,15 @@ void BridgeRegistrars::register_widget_typography_api(WidgetBridge& self) {
         label->set_cached_line_boxes(
             std::move(boxes), basis_width, std::move(basis_face),
             wrap_on_cache_miss);
+        // Optional measured line metrics (ascent, descent in CSS px). Both or
+        // neither. Label keeps them only while it holds cached line boxes and
+        // only when LineMetrics::valid() holds (finite, positive ascent,
+        // non-negative descent); it does not check them against the boxes'
+        // heights.
+        if (args.numArgs >= 7 && args[5] && args[6] && (args[5]->isFloat() || args[5]->isInt()) &&
+            (args[6]->isFloat() || args[6]->isInt()))
+            label->set_cached_line_metrics({static_cast<float>(args.get<double>(5, 0.0)),
+                                            static_cast<float>(args.get<double>(6, 0.0))});
         return choc::value::Value();
     });
 

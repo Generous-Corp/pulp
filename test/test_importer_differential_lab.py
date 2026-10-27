@@ -7,10 +7,45 @@ from argparse import Namespace
 from contextlib import redirect_stderr, redirect_stdout
 import io
 import json
+import math
+import re
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from pathlib import Path
+
+
+class StageProvenanceTests(unittest.TestCase):
+    def test_command_record_keeps_safe_argv_and_import_timing(self) -> None:
+        from importer_differential.core import CommandResult, command_record
+
+        result = CommandResult(
+            ["/private/build/pulp-import-design", "--file",
+             "/private/source/fixture.html"],
+            1234,
+            0,
+            '✓ imported "fixture" in 9.30s  — decode 9.10s · parse 20ms\n',
+            "",
+        )
+        record = command_record(result)
+        self.assertEqual(record["argv"], ["pulp-import-design", "--file", "fixture.html"])
+        self.assertEqual(record["import_timing_line"], result.stdout.strip())
+        self.assertEqual(len(record["stdout_sha256"]), 64)
+
+    def test_a_timed_out_command_records_its_partial_output_as_text(self) -> None:
+        from importer_differential.core import command_record, run_command
+
+        script = ("import sys, time; print('started', flush=True); "
+                  "print('still going', file=sys.stderr, flush=True); time.sleep(30)")
+        result = run_command([sys.executable, "-c", script], timeout_seconds=1)
+        self.assertEqual(result.returncode, 124)
+        self.assertIsInstance(result.stdout, str)
+        self.assertIsInstance(result.stderr, str)
+        self.assertIn("started", result.stdout)
+        self.assertIn("still going", result.stderr)
+        self.assertEqual(len(command_record(result)["stderr_sha256"]), 64)
+
 from unittest.mock import patch
 
 try:
@@ -27,9 +62,35 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "tools" / "import-validation"))
 from importer_differential import core as LAB  # noqa: E402
 from importer_differential import cli as LAB_CLI  # noqa: E402
+from importer_differential import form_controls as FORM_CONTROLS  # noqa: E402
+from importer_differential.model import has_reference_box  # noqa: E402
+
+
+def observer_placement(argv: list[str]) -> dict[str, object]:
+    """The placement block the real observer records for these arguments."""
+    x, y = (float(v) for v in argv[argv.index("--origin") + 1].split(","))
+    background = (argv[argv.index("--page-background") + 1]
+                  if "--page-background" in argv else "")
+    return {"origin_x": x, "origin_y": y, "page_background": background}
+
+
+def observer_root_rect(argv: list[str], width: float, height: float) -> dict[str, float]:
+    """The panel root's layout rect: the real observer lays it out at --origin."""
+    placement = observer_placement(argv)
+    return {"x": placement["origin_x"], "y": placement["origin_y"], "w": width, "h": height}
+
+
+REAL_PILLOW_MISSING = LAB_CLI.pillow_missing
 
 
 class DifferentialLabTests(unittest.TestCase):
+    def setUp(self) -> None:
+        # Command tests stub compare_one, so they must not depend on whether
+        # the interpreter running them has Pillow; the preflight has its own test.
+        patcher = patch.object(LAB_CLI, "pillow_missing", return_value=False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_source_recognition_records_dynamic_blockers(self) -> None:
         recognition = LAB.source_recognition("""
             import {Dialog} from "@radix-ui/react-dialog";
@@ -105,7 +166,7 @@ class DifferentialLabTests(unittest.TestCase):
         self.assertEqual(len(missing), 1)
         self.assertIn("title", {match[1].anchor for match in matches})
 
-    def test_backend_node_id_matches_element_to_element_before_text_heuristics(self) -> None:
+    def test_capture_anchor_matches_element_to_element_before_text_heuristics(self) -> None:
         strings = ["DIV", "#text", "Gain", "display", "block"]
         snapshot = {
             "strings": strings,
@@ -131,39 +192,195 @@ class DifferentialLabTests(unittest.TestCase):
             "root": {
                 "type": "frame",
                 "name": "div",
-                "stable_anchor_id": "root",
-                "attributes": {"backend_node_id": "35"},
+                "stable_anchor_id": "capture:div[0]",
+                "attributes": {"backend_node_id": "41"},
                 "children": [{
                     "type": "text",
                     "name": "#text",
                     "content": "Gain",
-                    "stable_anchor_id": "text",
-                    "attributes": {"backend_node_id": "36"},
+                    "stable_anchor_id": "capture:div[0]/#text[0]",
+                    "attributes": {"backend_node_id": "42"},
                     "children": [],
                 }],
             },
         }
         layout = {"views": [
-            {"anchor_id": "root", "x": 0, "y": 0, "width": 100, "height": 40},
-            {"anchor_id": "text", "x": 0, "y": 0, "width": 30, "height": 20},
+            {"anchor_id": "capture:div[0]", "x": 0, "y": 0, "width": 100, "height": 40},
+            {"anchor_id": "capture:div[0]/#text[0]", "x": 0, "y": 0, "width": 30, "height": 20},
         ]}
         native = LAB.native_nodes(ir, layout)
         matches, missing, extra = LAB.match_nodes(browser, native)
         self.assertEqual(len(matches), 1)
+        # The candidate lane numbered the div 41 where the browser lane said
+        # 35; the anchor still pairs the div with the div, not with its text.
         self.assertEqual(matches[0][0].backend_node_id, 35)
-        self.assertEqual(matches[0][1].backend_node_id, 35)
+        self.assertEqual(matches[0][1].anchor, "capture:div[0]")
         self.assertEqual(len(missing), 0)
         self.assertEqual(len(extra), 1)
 
-    def test_mismatched_backend_ids_fail_closed_despite_same_text_and_tag(self) -> None:
+    def test_native_rotation_maps_the_layout_box_like_chromium(self) -> None:
+        # kelvin's ADSR attack segment: a 3 px bar under rotate(-56.02deg). The
+        # native layout reports the unrotated bar; Chromium reported the
+        # rotated bar's bounding box, (501.75, 274.48) 64.5 x 93.69.
+        def ir(transform, child_transform=None):
+            child = {"type": "frame", "stable_anchor_id": "dot", "children": [],
+                     "style": {"transform": child_transform} if child_transform else {}}
+            return {"root": {"type": "frame", "stable_anchor_id": "bar",
+                             "style": {"transform": transform}, "children": [child]}}
+        layout = {"views": [
+            {"anchor_id": "bar", "x": 478.518, "y": 319.831, "width": 110.963, "height": 2.993},
+            {"anchor_id": "dot", "x": 478.518, "y": 319.831, "width": 2.0, "height": 2.993},
+        ]}
+        bar, dot = LAB.native_nodes(ir("rotate(-56.02deg)"), layout)
+        for got, want in zip(bar.bounds, (501.75, 274.484, 64.5, 93.6875)):
+            self.assertAlmostEqual(got, want, delta=0.05)
+        # A child turns with its parent, about the parent's centre: the dot at
+        # the bar's left end lands at the bar's lower-left corner.
+        self.assertAlmostEqual(dot.bounds[0], bar.bounds[0], delta=0.05)
+        self.assertAlmostEqual(dot.bounds[1] + dot.bounds[3],
+                               bar.bounds[1] + bar.bounds[3], delta=0.05)
+        # Native lowering rotates only a lone rotate() in degrees; anything it
+        # does not rotate keeps its layout box here too.
+        for transform in ("rotate(30deg) scale(2)", "rotate(1rad)", "scale(2)", None):
+            with self.subTest(transform=transform):
+                untouched, _ = LAB.native_nodes(ir(transform), layout)
+                self.assertEqual(untouched.bounds, (478.518, 319.831, 110.963, 2.993))
+
+    def test_nested_native_rotations_compose_like_chromium(self) -> None:
+        # DOMSnapshot layout bounds from Chrome for Testing 151.0.7922.47
+        # (headless, DPR 2, the browser-capture flags) for this page, captured
+        # with `importer_differential_lab.py compare --viewport 400x300`:
+        #   #panel{position:relative;width:400px;height:300px}
+        #   .outer{position:absolute;left:120px;top:90px;width:160px;height:40px;
+        #          transform:rotate(30deg)}
+        #   .inner{position:absolute;left:100px;top:10px;width:50px;height:12px;
+        #          transform:rotate(-75deg)}   (inside .outer)
+        # Both rotate about their own centres (the CSS default origin):
+        #   outer (120.703125, 52.671875) 158.59375 x 114.65625
+        #   inner (219.046875, 107.109375) 43.859375 x 43.859375
+        # The native layout reports the untransformed boxes; the lab must
+        # apply the child's rotation inside the parent's, not before it.
+        ir = {"root": {"type": "frame", "stable_anchor_id": "outer",
+                       "style": {"transform": "rotate(30deg)"},
+                       "children": [{"type": "frame", "stable_anchor_id": "inner",
+                                     "style": {"transform": "rotate(-75deg)"},
+                                     "children": []}]}}
+        layout = {"views": [
+            {"anchor_id": "outer", "x": 120.0, "y": 90.0, "width": 160.0, "height": 40.0},
+            {"anchor_id": "inner", "x": 220.0, "y": 100.0, "width": 50.0, "height": 12.0},
+        ]}
+        outer, inner = LAB.native_nodes(ir, layout)
+        chromium = {"outer": (120.703125, 52.671875, 158.59375, 114.65625),
+                    "inner": (219.046875, 107.109375, 43.859375, 43.859375)}
+        for node in (outer, inner):
+            for got, want in zip(node.bounds, chromium[node.anchor]):
+                self.assertAlmostEqual(got, want, delta=0.05)
+        # Negative control: the child's rotation applied outside the parent's
+        # lands about 25 px away, so the assertion above can tell the orders apart.
+        from importer_differential.native_transform import compose, rotation_about, transformed_bounds
+        parent = rotation_about(30.0, 200.0, 110.0)
+        wrong = transformed_bounds(compose(rotation_about(-75.0, 245.0, 106.0), parent),
+                                   (220.0, 100.0, 50.0, 12.0))
+        self.assertGreater(abs(wrong[0] - chromium["inner"][0]), 20.0)
+
+    def test_mismatched_anchors_fail_closed_despite_same_text_tag_and_backend_id(self) -> None:
+        # Equal backend ids from two sessions name nothing in common, so they
+        # cannot rescue a node whose anchor says it is a different element.
         browser = LAB.BrowserNode(
-            1, "span", -1, "Gain", {}, (0, 0, 40, 20), {}, 35)
+            1, "span", -1, "Gain", {}, (0, 0, 40, 20), {}, 35, anchor="capture:span[0]")
         native = LAB.NativeNode(
-            "wrong", "frame", "span", "Gain", None, {}, (0, 0, 40, 20), 99)
+            "capture:span[1]", "frame", "span", "Gain", None, {}, (0, 0, 40, 20), 35)
         matches, missing, extra = LAB.match_nodes([browser], [native])
         self.assertEqual(matches, [])
         self.assertEqual(len(missing), 1)
         self.assertEqual(len(extra), 1)
+
+    @staticmethod
+    def _two_gain_spans_snapshot(backend: tuple[int, int, int],
+                                 second_display: str = "block") -> dict:
+        strings = ["DIV", "SPAN", "#text", "Gain", "id", "panel", "display", "block", "none"]
+        return {
+            "strings": strings,
+            "computedStyleNames": ["display"],
+            "documents": [{
+                "nodes": {
+                    "parentIndex": [-1, 0, 1, 0, 3],
+                    "nodeType": [1, 1, 3, 1, 3],
+                    "nodeName": [0, 1, 2, 1, 2],
+                    "nodeValue": [-1, -1, 3, -1, 3],
+                    "backendNodeId": [backend[0], backend[1], 90, backend[2], 91],
+                    "attributes": [[4, 5], [], [], [], []],
+                },
+                "layout": {
+                    "nodeIndex": [0, 1, 3],
+                    "bounds": [[0, 0, 200, 40], [10, 10, 40, 20], [60, 10, 40, 20]],
+                    "styles": [[7], [7], [7 if second_display == "block" else 8]],
+                },
+            }],
+        }
+
+    @staticmethod
+    def _two_gain_spans_ir(backend: tuple[int, int, int], spans: tuple[int, ...]) -> tuple:
+        children = [{"type": "frame", "name": "span", "content": "Gain",
+                     "stable_anchor_id": f"capture:div#panel[0]/span[{ordinal}]",
+                     "attributes": {"backend_node_id": str(backend[1 + ordinal])},
+                     "children": []} for ordinal in spans]
+        ir = {"root": {"type": "frame", "name": "div#panel",
+                       "stable_anchor_id": "capture:div#panel[0]",
+                       "attributes": {"backend_node_id": str(backend[0])},
+                       "children": children}}
+        layout = {"views": [
+            {"anchor_id": "capture:div#panel[0]", "x": 0, "y": 0, "width": 200, "height": 40},
+            {"anchor_id": "capture:div#panel[0]/span[0]", "x": 10, "y": 10, "width": 40, "height": 20},
+            {"anchor_id": "capture:div#panel[0]/span[1]", "x": 60, "y": 10, "width": 40, "height": 20},
+        ]}
+        return ir, layout
+
+    def test_lanes_with_renumbered_backend_ids_match_by_anchor(self) -> None:
+        # The browser and candidate lanes are two Chromium sessions. Spectr's
+        # div#root came back 31 in one and 30 in the other; renumbering every
+        # node must not cost a single match.
+        browser = LAB.browser_nodes(self._two_gain_spans_snapshot((30, 31, 32)))
+        native = LAB.native_nodes(*self._two_gain_spans_ir((47, 48, 49), (0, 1)))
+        matches, missing, extra = LAB.match_nodes(browser, native)
+        self.assertEqual(missing, [])
+        self.assertEqual(extra, [])
+        self.assertEqual(sorted((b.anchor, n.anchor) for b, n, _ in matches), [
+            ("capture:div#panel[0]", "capture:div#panel[0]"),
+            ("capture:div#panel[0]/span[0]", "capture:div#panel[0]/span[0]"),
+            ("capture:div#panel[0]/span[1]", "capture:div#panel[0]/span[1]"),
+        ])
+
+    def test_a_missing_node_fails_closed_against_its_same_text_sibling(self) -> None:
+        # Chromium drew only the first span; the native lost it and drew the
+        # second. The survivor has the same tag and text and, by coincidence,
+        # the backend id the browser lane gave the lost span. It is still a
+        # different element, so the lost span is missing and the survivor
+        # extra, never a pair.
+        browser = LAB.browser_nodes(self._two_gain_spans_snapshot(
+            (30, 31, 32), second_display="none"))
+        self.assertEqual([node.anchor for node in browser if node.tag == "span"],
+                         ["capture:div#panel[0]/span[0]"])
+        native = LAB.native_nodes(*self._two_gain_spans_ir((30, 99, 31), (1,)))
+        matches, missing, extra = LAB.match_nodes(browser, native)
+        self.assertEqual([node.anchor for node in missing], ["capture:div#panel[0]/span[0]"])
+        self.assertEqual([node.anchor for node in extra], ["capture:div#panel[0]/span[1]"])
+        self.assertEqual([(b.anchor, n.anchor) for b, n, _ in matches],
+                         [("capture:div#panel[0]", "capture:div#panel[0]")])
+
+    def test_capture_anchors_match_the_vectors_anchor_path_is_pinned_to(self) -> None:
+        # test_browser_capture_tree.cpp asserts the same file through the
+        # importer's own `anchor_path`, so a spelling change on either side
+        # fails the other instead of reading here as every node missing.
+        fixtures = REPO / "test/fixtures"
+        vectors = json.loads(
+            (fixtures / "capture-anchor-vectors.json").read_text(encoding="utf-8"))
+        self.assertGreaterEqual(len(vectors["cases"]), 8)
+        for case in vectors["cases"]:
+            with self.subTest(case=case["name"]):
+                snapshot = case.get("snapshot") or json.loads(
+                    (fixtures / case["snapshot_path"]).read_text(encoding="utf-8"))
+                self.assertEqual(LAB.capture_anchors(snapshot), case["anchors"])
 
     @staticmethod
     def _panel_with_gain_span():
@@ -202,6 +419,53 @@ class DifferentialLabTests(unittest.TestCase):
         self.assertEqual(result["structurally_valid_matches"], 2)
         self.assertAlmostEqual(result["precision"], 1.0)
         self.assertAlmostEqual(result["score"], 1.0)
+
+    @staticmethod
+    def _canvas_ir(with_canvas: bool) -> dict:
+        plane = {
+            "type": "image", "name": "canvas#scope/layer",
+            "stable_anchor_id": "capture:div[0]/canvas#scope[0]/layer[0]",
+            "attributes": {"asset_ref": "canvas:14", "captured_layer": "viewport"},
+            "children": [],
+        }
+        canvas = {
+            "type": "frame", "name": "canvas#scope", "stable_anchor_id": "capture:div[0]/canvas#scope[0]",
+            "attributes": {"backend_node_id": "14", "captured_element": "canvas"},
+            "children": [plane],
+        }
+        return {"root": {
+            "type": "frame", "name": "div", "stable_anchor_id": "capture:div[0]",
+            "attributes": {"backend_node_id": "11"},
+            "children": [canvas] if with_canvas else [plane],
+        }}
+
+    def test_a_captured_canvas_plane_is_its_canvas_paint(self) -> None:
+        browser = [
+            LAB.BrowserNode(0, "div", -1, "", {}, (0, 0, 100, 40), {}, 11,
+                            anchor="capture:div[0]"),
+            LAB.BrowserNode(1, "canvas", 0, "", {"id": "scope"}, (0, 0, 80, 30), {}, 14,
+                            anchor="capture:div[0]/canvas#scope[0]"),
+        ]
+        native = LAB.native_nodes(self._canvas_ir(True), {"views": []})
+        result = LAB.structural_comparison(browser, native)
+        self.assertEqual(result["extra"], [])
+        self.assertIn("capture:div[0]/canvas#scope[0]/layer[0]",
+                      [node.anchor for node in result["ignored_native"]])
+        self.assertAlmostEqual(result["score"], 1.0)
+
+    def test_control_a_plane_without_its_canvas_is_not_excused(self) -> None:
+        browser = [
+            LAB.BrowserNode(0, "div", -1, "", {}, (0, 0, 100, 40), {}, 11,
+                            anchor="capture:div[0]"),
+            LAB.BrowserNode(1, "canvas", 0, "", {"id": "scope"}, (0, 0, 80, 30), {}, 14,
+                            anchor="capture:div[0]/canvas#scope[0]"),
+        ]
+        native = LAB.native_nodes(self._canvas_ir(False), {"views": []})
+        result = LAB.structural_comparison(browser, native)
+        self.assertEqual([node.tag for node in result["missing"]], ["canvas"])
+        self.assertEqual([node.anchor for node in result["extra"]],
+                         ["capture:div[0]/canvas#scope[0]/layer[0]"])
+        self.assertLess(result["score"], LAB.PROMOTION_THRESHOLDS["structural"])
 
     def test_representation_nodes_are_not_structural_element_extras(self) -> None:
         native = [
@@ -245,6 +509,58 @@ class DifferentialLabTests(unittest.TestCase):
             with self.assertRaises(LAB.LabError):
                 LAB.visual_metrics(reference, candidate, root / "mismatch")
 
+    @requires_pillow
+    def test_visual_lens_keeps_renderer_floor_advisory_and_kills_gate_controls(self) -> None:
+        """The strict visual gate tolerates tiny edge AA variance only.
+
+        This is a deterministic calibration control, not a Chromium/Skia
+        claim. A real floor campaign must replace the synthetic pair with
+        authenticated same-source captures and retain its receipt.
+        """
+        from PIL import Image, ImageDraw
+
+        def panel(*, shift=0, fill=(220, 220, 220), border=2, rounded=False):
+            image = Image.new("RGBA", (64, 48), (24, 28, 36, 255))
+            draw = ImageDraw.Draw(image)
+            box = (14 + shift, 10, 49 + shift, 37)
+            draw.rectangle(box, fill=fill, outline=(120, 130, 145, 255), width=border)
+            if rounded:
+                draw.rounded_rectangle(box, radius=12, fill=fill, outline=(120, 130, 145, 255), width=border)
+            return image
+
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            reference_image = panel()
+            reference = root / "reference.png"
+            reference_image.save(reference)
+
+            healthy_image = reference_image.copy()
+            healthy_pixels = healthy_image.load()
+            for x in range(14, 50):
+                for y in (10, 37):
+                    red, green, blue, alpha = healthy_pixels[x, y]
+                    healthy_pixels[x, y] = (min(255, red + 12), min(255, green + 12), min(255, blue + 12), alpha)
+            healthy = root / "healthy.png"
+            healthy_image.save(healthy)
+            healthy_metrics = LAB.visual_metrics(reference, healthy, root / "healthy-artifacts")
+            self.assertGreaterEqual(healthy_metrics["score"], LAB.PROMOTION_THRESHOLDS["visual"])
+            self.assertGreater(healthy_metrics["differing_pixel_count"], 0)
+
+            controls = {
+                "one-pixel-shift": panel(shift=1),
+                "color-change": panel(fill=(90, 220, 160)),
+                "missing-border": panel(border=0),
+                "wrong-weight": panel(border=4),
+                "corner-radius": panel(rounded=True),
+            }
+            for name, image in controls.items():
+                with self.subTest(control=name):
+                    candidate = root / f"{name}.png"
+                    image.save(candidate)
+                    metrics = LAB.visual_metrics(reference, candidate, root / f"{name}-artifacts")
+                    self.assertLess(metrics["score"], LAB.PROMOTION_THRESHOLDS["visual"])
+                    self.assertGreater(metrics["differing_pixel_count"], 0)
+
     def test_missing_typography_counts_as_missing_coverage(self) -> None:
         browser = LAB.BrowserNode(
             1, "span", -1, "Gain", {}, (0, 0, 40, 20),
@@ -283,6 +599,239 @@ class DifferentialLabTests(unittest.TestCase):
         }
         self.assertEqual(LAB.capture_logical_size(capture), (1440, 1200))
 
+    def test_geometry_metrics_preserves_signed_residuals_and_root(self) -> None:
+        browser = [
+            LAB.BrowserNode(0, "main", -1, "", {}, (10, 20, 100, 40), {}),
+            LAB.BrowserNode(1, "span", 0, "Gain", {}, (20, 30, 40, 10), {}),
+        ]
+        native = [
+            LAB.NativeNode("root", "frame", "main", "", None, {}, (11, 18, 102, 39)),
+            LAB.NativeNode("gain", "text", "span", "Gain", "root", {}, (19, 31, 40, 11)),
+        ]
+        metrics = LAB.geometry_metrics([
+            (browser[0], native[0], 1.0), (browser[1], native[1], 1.0)])
+        self.assertEqual(metrics["rows"][0]["signed_delta"],
+                         {"x": 1, "y": -2, "width": 2, "height": -1})
+        self.assertEqual(metrics["root_residual"]["native_anchor"], "root")
+        self.assertEqual(metrics["signed_delta_summary"]["x"]["median"], 0.0)
+
+    @staticmethod
+    def _pseudo_badge_snapshot() -> dict:
+        # A badge whose ::before is absolutely positioned. Chromium emits the
+        # pseudo's own box first, then a zero-size row for its empty generated
+        # content, both pointing at the same DOM node.
+        strings = ["DIV", "::before", "#text", "On", "display", "block"]
+        return {
+            "strings": strings,
+            "computedStyleNames": ["display"],
+            "documents": [{
+                "nodes": {
+                    "parentIndex": [-1, 0, 0],
+                    "nodeType": [1, 1, 3],
+                    "nodeName": [0, 1, 2],
+                    "nodeValue": [-1, -1, 3],
+                    "backendNodeId": [11, 12, 13],
+                    "attributes": [[], [], []],
+                },
+                "layout": {
+                    "nodeIndex": [0, 1, 1, 2],
+                    "bounds": [[28, 28, 131, 42], [42, 44, 10, 10],
+                               [0, 0, 0, 0], [64, 40, 77, 17]],
+                    "styles": [[5], [5], [5], [5]],
+                },
+            }],
+        }
+
+    def test_a_pseudo_element_keeps_its_own_box_not_its_generated_row(self) -> None:
+        browser = LAB.browser_nodes(self._pseudo_badge_snapshot())
+        pseudo = [node for node in browser if node.tag == "::before"]
+        self.assertEqual(len(pseudo), 1)
+        self.assertEqual(pseudo[0].bounds, (42.0, 44.0, 10.0, 10.0))
+        native = [
+            LAB.NativeNode("capture:div[0]", "frame", "div.badge", "", None, {},
+                           (28, 28, 131, 42), 11),
+            LAB.NativeNode("capture:div[0]/::before[0]", "frame", "::before", "",
+                           "capture:div[0]", {}, (42, 44, 10, 10), 12),
+            LAB.NativeNode("capture:div[0]/#text[0]", "text", "#text", "On",
+                           "capture:div[0]", {}, (64, 40, 77, 17), 13),
+        ]
+        result = LAB.structural_comparison(browser, native)
+        self.assertEqual(result["missing"], [])
+        self.assertEqual(result["extra"], [])
+        self.assertAlmostEqual(result["score"], 1.0)
+
+    def test_control_a_native_that_drops_the_pseudo_element_is_missing_it(self) -> None:
+        browser = LAB.browser_nodes(self._pseudo_badge_snapshot())
+        native = [
+            LAB.NativeNode("capture:div[0]", "frame", "div.badge", "", None, {},
+                           (28, 28, 131, 42), 11),
+            LAB.NativeNode("capture:div[0]/#text[0]", "text", "#text", "On",
+                           "capture:div[0]", {}, (64, 40, 77, 17), 13),
+        ]
+        result = LAB.structural_comparison(browser, native)
+        self.assertEqual([node.tag for node in result["missing"]], ["::before"])
+        self.assertLess(result["score"], LAB.PROMOTION_THRESHOLDS["structural"])
+
+    def test_own_layout_rows_agree_with_the_cpp_reader_fixture(self) -> None:
+        # test_browser_capture_ir.cpp asserts CapturedStyleIndex::own_layout_row
+        # against the same expected rows, so the two readers share one rule.
+        fixture = REPO / "test/fixtures/browser-capture-layout-rows"
+        snapshot = json.loads((fixture / "dom-snapshot.json").read_text(encoding="utf-8"))
+        expected = json.loads((fixture / "expected-own-rows.json").read_text(encoding="utf-8"))
+        rows = LAB.principal_layout_rows(snapshot["documents"][0]["layout"])
+        self.assertEqual({str(node): row for node, row in rows.items()},
+                         expected["own_rows"])
+        bounds = snapshot["documents"][0]["layout"]["bounds"]
+        browser = {node.index: node.bounds for node in LAB.browser_nodes(snapshot)}
+        for node in (4, 5):
+            self.assertEqual(browser[node],
+                             tuple(float(v) for v in bounds[expected["own_rows"][str(node)]]))
+
+    def test_an_all_empty_node_still_reports_its_first_row(self) -> None:
+        rows = LAB.principal_layout_rows({
+            "nodeIndex": [0, 1, 1],
+            "bounds": [[0, 0, 10, 10], [0, 0, 0, 0], [5, 5, 0, 3]],
+        })
+        self.assertEqual(rows, {0: 0, 1: 1})
+
+    @staticmethod
+    def _icon_snapshot() -> dict:
+        strings = ["DIV", "svg", "circle", "display", "block"]
+        return {
+            "strings": strings,
+            "computedStyleNames": ["display"],
+            "documents": [{
+                "nodes": {
+                    "parentIndex": [-1, 0, 1],
+                    "nodeType": [1, 1, 1],
+                    "nodeName": [0, 1, 2],
+                    "nodeValue": [-1, -1, -1],
+                    "backendNodeId": [11, 12, 13],
+                    "attributes": [[], [], []],
+                },
+                "layout": {
+                    "nodeIndex": [0, 1, 2],
+                    "bounds": [[24, 24, 212, 124], [40, 40, 64, 64],
+                               [45, 45, 54, 54]],
+                    "styles": [[4], [4], [4]],
+                },
+            }],
+        }
+
+    def _icon_geometry(self, shape_box):
+        browser = LAB.browser_nodes(self._icon_snapshot())
+        native = [
+            LAB.NativeNode("capture:div[0]", "frame", "div", "", None, {},
+                           (24, 24, 212, 124), 11),
+            LAB.NativeNode("capture:div[0]/svg[0]", "frame", "svg", "", "capture:div[0]", {},
+                           (40, 40, 64, 64), 12),
+            LAB.NativeNode("capture:div[0]/svg[0]/circle[0]", "path", "circle", "",
+                           "capture:div[0]/svg[0]", {}, shape_box, 13),
+        ]
+        result = LAB.structural_comparison(browser, native)
+        return result, LAB.geometry_metrics(result["matches"])
+
+    def test_a_vector_shape_is_placed_in_its_svg_viewport_frame(self) -> None:
+        # The native shape carries its root <svg>'s box (the viewBox frame its
+        # path data is drawn in), not the circle's own ink box.
+        result, geometry = self._icon_geometry((40, 40, 64, 64))
+        self.assertEqual(result["missing"], [])
+        self.assertAlmostEqual(result["score"], 1.0)
+        shape_row = next(row for row in geometry["rows"]
+                         if row["native_anchor"] == "capture:div[0]/svg[0]/circle[0]")
+        self.assertEqual(shape_row["reference_frame"], "svg-viewport")
+        self.assertEqual(shape_row["max_abs_delta"], 0)
+        element_rows = [row for row in geometry["rows"]
+                        if row["native_anchor"] != "capture:div[0]/svg[0]/circle[0]"]
+        self.assertTrue(all(row["reference_frame"] == "element"
+                            for row in element_rows))
+
+    def test_control_a_shape_outside_its_svg_frame_fails_geometry(self) -> None:
+        _result, geometry = self._icon_geometry((43, 40, 64, 64))
+        shape_row = next(row for row in geometry["rows"]
+                         if row["native_anchor"] == "capture:div[0]/svg[0]/circle[0]")
+        self.assertEqual(shape_row["max_abs_delta"], 3)
+        self.assertGreater(shape_row["max_abs_delta"],
+                           LAB.GEOMETRY_MAX_ABS_DELTA_PX)
+
+    def test_svg_viewport_frame_registers_with_the_authored_frame(self) -> None:
+        browser = LAB.browser_nodes(self._icon_snapshot())
+        capture = {"reference": {"authored_frame": {"x": 24, "y": 24}}}
+        registered, _ = LAB.register_browser_nodes_to_native_frame(
+            browser, capture, capture)
+        shape = next(node for node in registered if node.tag == "circle")
+        self.assertEqual(shape.svg_viewport, (16.0, 16.0, 64.0, 64.0))
+        self.assertEqual(shape.bounds, (21.0, 21.0, 54.0, 54.0))
+
+    def test_viewport_dpr_audit_rejects_wrong_pixel_extent(self) -> None:
+        capture, native_capture, _source_sha256 = self._bound_captures()
+        for item in (capture, native_capture):
+            item["reference"] = {
+                "logical_width": 1280, "logical_height": 800,
+                "device_scale_factor": 2,
+            }
+        audit = LAB.viewport_dpr_audit(
+            capture, native_capture, (1280, 800), (2559, 1600))
+        self.assertFalse(audit["ok"])
+        self.assertFalse(audit["checks"]["render_size_matches_dpr"])
+
+    def test_viewport_dpr_audit_requires_native_dpr_and_allows_overflow_extent(self) -> None:
+        capture, native_capture, _source_sha256 = self._bound_captures()
+        capture["reference"] = {
+            "logical_width": 1440, "logical_height": 1200,
+            "device_scale_factor": 2,
+        }
+        native_capture["reference"] = {
+            "logical_width": 1440, "logical_height": 1200,
+        }
+        with self.assertRaisesRegex(LAB.LabError, "device scale"):
+            LAB.viewport_dpr_audit(capture, native_capture, (1280, 800), (2880, 2400))
+        native_capture["reference"]["device_scale_factor"] = 2
+        audit = LAB.viewport_dpr_audit(
+            capture, native_capture, (1280, 800), (2880, 2400))
+        self.assertTrue(audit["ok"])
+        self.assertTrue(audit["checks"]["logical_extent_covers_request"])
+
+    def test_viewport_dpr_audit_accepts_matching_root_contract(self) -> None:
+        capture, native_capture, _source_sha256 = self._bound_captures()
+        for item in (capture, native_capture):
+            item["reference"] = {
+                "logical_width": 1280, "logical_height": 800,
+                "device_scale_factor": 2,
+            }
+        audit = LAB.viewport_dpr_audit(
+            capture, native_capture, (1280, 800), (2560, 1600))
+        self.assertTrue(audit["ok"])
+
+    def test_viewport_dpr_audit_each_negative_check_fails_closed(self) -> None:
+        cases = {
+            "resolved_viewport_matches_request": lambda capture, native: (
+                capture["provenance"]["viewport"]["resolved"].update(width=1279)),
+            "logical_extent_covers_request": lambda capture, native: (
+                capture["reference"].update(logical_width=1279)),
+            "native_logical_size_matches_browser": lambda capture, native: (
+                native["reference"].update(logical_width=1279)),
+            "dpr_matches_native": lambda capture, native: (
+                native["reference"].update(device_scale_factor=1)),
+            "resolved_viewport_matches_native": lambda capture, native: (
+                native["provenance"]["viewport"]["resolved"].update(width=1279)),
+            "render_size_matches_dpr": lambda capture, native: None,
+        }
+        for name, mutate in cases.items():
+            with self.subTest(check=name):
+                capture, native_capture, _source_sha256 = self._bound_captures()
+                for item in (capture, native_capture):
+                    item["reference"] = {
+                        "logical_width": 1280, "logical_height": 800,
+                        "device_scale_factor": 2,
+                    }
+                mutate(capture, native_capture)
+                actual_size = (2559, 1600) if name == "render_size_matches_dpr" else (2560, 1600)
+                audit = LAB.viewport_dpr_audit(
+                    capture, native_capture, (1280, 800), actual_size)
+                self.assertFalse(audit["ok"])
+                self.assertFalse(audit["checks"][name])
+
     @staticmethod
     def _bound_captures() -> tuple[dict, dict, str]:
         source_sha256 = "a" * 64
@@ -292,12 +841,55 @@ class DifferentialLabTests(unittest.TestCase):
                          "resolved": {"width": 1280, "height": 800}},
             "browser": {"product": "Chrome", "version": "140.0"},
         }
-        return ({"provenance": json.loads(json.dumps(provenance))},
-                {"provenance": json.loads(json.dumps(provenance))}, source_sha256)
+        return ({"provenance": json.loads(json.dumps(provenance)),
+                 "reference": {"device_scale_factor": 1}},
+                {"provenance": json.loads(json.dumps(provenance)),
+                 "reference": {"device_scale_factor": 1}}, source_sha256)
 
     def test_capture_binding_accepts_captures_of_the_same_input(self) -> None:
         capture, native_capture, source_sha256 = self._bound_captures()
         LAB.verify_capture_binding(capture, native_capture, source_sha256)
+
+    def test_interaction_plan_identity_matches_capture_redaction(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            plan = Path(raw) / "plan.json"
+            plan.write_text(json.dumps({
+                "schema": "pulp-browser-interactions-v1",
+                "version": 1,
+                "actions": [{"action": "click", "selector": "#go"}],
+            }), encoding="utf-8")
+            self.assertEqual(
+                LAB.interaction_plan_sha256(plan),
+                "92231b6cd069d5bd57b91c23334cbe13456cd987664773ca070806f49df1d40c",
+            )
+
+    def test_interaction_plan_identity_matches_javascript_utf16_length(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            plan = Path(raw) / "plan.json"
+            plan.write_text(json.dumps({
+                "schema": "pulp-browser-interactions-v1",
+                "version": 1,
+                "actions": [{"action": "type", "selector": "#name", "text": "😀"}],
+            }), encoding="utf-8")
+            expected = {
+                "schema": "pulp-browser-interactions-v1", "version": 1,
+                "actions": [{"action": "type", "selector": "#name",
+                              "timeout_ms": 5000, "text_length": 2}],
+            }
+            canonical = json.dumps(expected, separators=(",", ":"), ensure_ascii=False).encode()
+            import hashlib
+            self.assertEqual(LAB.interaction_plan_sha256(plan), hashlib.sha256(canonical).hexdigest())
+
+    def test_capture_binding_rejects_unbound_interaction_plan(self) -> None:
+        capture, native_capture, source_sha256 = self._bound_captures()
+        interactions = {"plan_sha256": "a" * 64}
+        capture["provenance"]["interactions"] = interactions
+        native_capture["provenance"]["interactions"] = dict(interactions)
+        with self.assertRaisesRegex(LAB.LabError, "not bound"):
+            LAB.verify_capture_binding(
+                capture, native_capture, source_sha256,
+                expected_interaction_plan_sha256="b" * 64,
+            )
 
     def test_capture_binding_fails_closed_on_each_mismatch(self) -> None:
         cases = {
@@ -316,6 +908,148 @@ class DifferentialLabTests(unittest.TestCase):
                 mutate(capture, native_capture)
                 with self.assertRaisesRegex(LAB.LabError, message):
                     LAB.verify_capture_binding(capture, native_capture, source_sha256)
+
+    def test_capture_binding_checks_dpr_and_interaction_provenance(self) -> None:
+        capture, native_capture, source_sha256 = self._bound_captures()
+        capture["reference"] = {"device_scale_factor": 2}
+        native_capture["reference"] = {"device_scale_factor": 1}
+        with self.assertRaisesRegex(LAB.LabError, "device scale factor"):
+            LAB.verify_capture_binding(capture, native_capture, source_sha256)
+        native_capture["reference"]["device_scale_factor"] = 2
+        capture["provenance"]["interactions"] = {"plan_sha256": "a" * 64}
+        native_capture["provenance"]["interactions"] = {"plan_sha256": "b" * 64}
+        with self.assertRaisesRegex(LAB.LabError, "interaction provenance"):
+            LAB.verify_capture_binding(capture, native_capture, source_sha256)
+
+        for missing in ("browser", "native"):
+            with self.subTest(missing=missing):
+                browser, native, source = self._bound_captures()
+                target = browser if missing == "browser" else native
+                target["reference"].pop("device_scale_factor")
+                with self.assertRaisesRegex(LAB.LabError, "device scale factor"):
+                    LAB.verify_capture_binding(browser, native, source)
+
+    @requires_pillow
+    def test_capture_image_binding_rejects_stale_png(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            image_path = root / "browser.png"
+            Image.new("RGBA", (2, 1), (0, 0, 0, 255)).save(image_path)
+            capture = {
+                "reference": {"asset_id": "reference:browser"},
+                "assets": [{"id": "reference:browser", "sha256": LAB.sha256_file(image_path),
+                            "width_px": 2, "height_px": 1}],
+            }
+            LAB.verify_capture_image_binding(capture, image_path)
+            Image.new("RGBA", (2, 1), (255, 0, 0, 255)).save(image_path)
+            with self.assertRaisesRegex(LAB.LabError, "digest"):
+                LAB.verify_capture_image_binding(capture, image_path)
+            Image.new("RGBA", (3, 1), (0, 0, 0, 255)).save(image_path)
+            capture["assets"][0]["sha256"] = LAB.sha256_file(image_path)
+            with self.assertRaisesRegex(LAB.LabError, "dimensions"):
+                LAB.verify_capture_image_binding(capture, image_path)
+
+    def test_snapshot_binding_preserves_legacy_but_requires_producer_for_experiment(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = Path(directory)
+            snapshot = evidence / "dom-snapshot.json"
+            snapshot.write_text('{"background":"black"}\n', encoding="utf-8")
+            self.assertEqual(LAB.verify_capture_snapshot_binding({}, evidence)[0],
+                             {"status": "legacy-unbound", "sha256": None})
+            self.assertEqual(LAB.verify_capture_snapshot_binding(
+                {"documents": [{"snapshot_asset": "dom-snapshot.json"}]}, evidence)[0],
+                {"status": "legacy-unbound", "sha256": None})
+            # Legacy native envelopes may name the snapshot through an asset ID.
+            legacy = {"documents": [{"snapshot_asset": "snapshot:main"}]}
+            self.assertEqual(LAB.verify_capture_snapshot_binding(legacy, evidence)[0],
+                             {"status": "legacy-unbound", "sha256": None})
+            with self.assertRaisesRegex(LAB.LabError, "no producer digest"):
+                LAB.verify_capture_snapshot_binding(legacy, evidence, required=True)
+            with self.assertRaisesRegex(LAB.LabError, "no producer digest"):
+                LAB.verify_capture_snapshot_binding({}, evidence, required=True)
+            capture = {"documents": [{"snapshot_asset": "dom-snapshot.json",
+                                      "snapshot_sha256": LAB.sha256_file(snapshot)}]}
+            binding, verified_bytes = LAB.verify_capture_snapshot_binding(capture, evidence, required=True)
+            self.assertEqual(verified_bytes, snapshot.read_bytes())
+            self.assertEqual(binding,
+                             {"status": "producer-bound", "sha256": LAB.sha256_file(snapshot)})
+            # A style-only edit and a different valid snapshot are both wrong bytes.
+            for replacement in ('{"background":"white"}\n', '{"documents":[]}\n'):
+                snapshot.write_text(replacement, encoding="utf-8")
+                with self.assertRaisesRegex(LAB.LabError, "does not match"):
+                    LAB.verify_capture_snapshot_binding(capture, evidence)
+            snapshot.unlink()
+            with self.assertRaisesRegex(LAB.LabError, "unavailable"):
+                LAB.verify_capture_snapshot_binding(capture, evidence)
+            # Windows symlink creation requires an optional OS privilege.
+            if sys.platform != "win32":
+                outside = evidence.parent / (evidence.name + "-snapshot.json")
+                try:
+                    outside.write_text('{"background":"black"}\n', encoding="utf-8")
+                    snapshot.symlink_to(outside)
+                    with self.assertRaisesRegex(LAB.LabError, "escapes evidence"):
+                        LAB.verify_capture_snapshot_binding(capture, evidence)
+                finally:
+                    outside.unlink(missing_ok=True)
+
+    def test_snapshot_binding_refuses_oversize_before_open_for_bound_and_legacy(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = Path(directory)
+            snapshot = evidence / "dom-snapshot.json"
+            snapshot.write_bytes(b"123456789")
+            capture = {"documents": [{"snapshot_asset": "dom-snapshot.json",
+                                      "snapshot_sha256": LAB.sha256_file(snapshot)}]}
+            for envelope in ({}, capture):
+                with self.subTest(bound=bool(envelope)), \
+                        patch.object(LAB, "MAX_SNAPSHOT_BYTES", 8), \
+                        patch.object(Path, "open") as opened, \
+                        self.assertRaisesRegex(LAB.LabError, "exceeds 256 MiB"):
+                    LAB.verify_capture_snapshot_binding(envelope, evidence)
+                opened.assert_not_called()
+
+    def test_snapshot_binding_rejects_growth_and_truncation_during_bounded_read(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = Path(directory)
+            snapshot = evidence / "dom-snapshot.json"
+            original = b'{"documents":[]}\n'
+            fstat = LAB.os.fstat
+            for replacement in (original + b"extra", original[:-1]):
+                snapshot.write_bytes(original)
+                capture = {"documents": [{"snapshot_asset": "dom-snapshot.json",
+                                          "snapshot_sha256": LAB.sha256_file(snapshot)}]}
+
+                def mutate_after_measurement(descriptor):
+                    info = fstat(descriptor)
+                    snapshot.write_bytes(replacement)
+                    return info
+
+                with self.subTest(length=len(replacement)), \
+                        patch.object(LAB.os, "fstat", side_effect=mutate_after_measurement), \
+                        self.assertRaisesRegex(LAB.LabError, "changed during bounded read"):
+                    LAB.verify_capture_snapshot_binding(capture, evidence, required=True)
+
+    def test_snapshot_binding_rejects_malformed_declarations(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = Path(directory)
+            for digest in (None, True, 12, "", "a" * 63, "A" * 64):
+                with self.subTest(digest=digest), self.assertRaisesRegex(LAB.LabError, "malformed"):
+                    LAB.verify_capture_snapshot_binding({"documents": [{
+                        "snapshot_asset": "dom-snapshot.json", "snapshot_sha256": digest,
+                    }]}, evidence)
+            with self.assertRaisesRegex(LAB.LabError, "dom-snapshot.json document"):
+                LAB.verify_capture_snapshot_binding({"documents": [{
+                    "snapshot_asset": "../dom-snapshot.json", "snapshot_sha256": "a" * 64,
+                }]}, evidence)
+            with self.assertRaisesRegex(LAB.LabError, "exactly one"):
+                LAB.verify_capture_snapshot_binding({"documents": [{
+                    "snapshot_asset": "dom-snapshot.json", "snapshot_sha256": "a" * 64,
+                }, {}]}, evidence)
+            for documents in ([{}], [None], ["x"], {}):
+                for required in (False, True):
+                    with self.subTest(documents=documents, required=required), \
+                            self.assertRaises(LAB.LabError):
+                        LAB.verify_capture_snapshot_binding(
+                            {"documents": documents}, evidence, required=required)
 
     def test_capture_binding_refuses_a_capture_without_provenance(self) -> None:
         _, native_capture, source_sha256 = self._bound_captures()
@@ -375,50 +1109,257 @@ class DifferentialLabTests(unittest.TestCase):
             root = Path(directory)
             source = root / "panel.html"
             source.write_text("<div></div>", encoding="utf-8")
+            plan = root / "plan.json"
+            plan.write_text(json.dumps({
+                "schema": "pulp-browser-interactions-v1",
+                "version": 1,
+                "actions": [{"action": "click", "selector": "#go"}],
+            }), encoding="utf-8")
             evidence = root / "evidence"
             evidence.mkdir()
             source_sha256 = LAB.sha256_file(source)
+            plan_sha256 = LAB.interaction_plan_sha256(plan)
             provenance = {
                 "source": {"sha256": source_sha256},
                 "viewport": {"requested": {"width": 1, "height": 1},
                              "resolved": {"width": 1, "height": 1}},
                 "browser": {"product": "Chrome", "version": "140.0"},
+                "interactions": {"plan_sha256": plan_sha256},
             }
             capture = {
                 "provenance": provenance,
-                "reference": {"logical_width": 1, "logical_height": 1,
-                               "device_scale_factor": 1},
+                "reference": {"asset_id": "reference:browser",
+                               "logical_width": 1, "logical_height": 1,
+                               "device_scale_factor": 1,
+                               "authored_frame": {"x": 0, "y": 0,
+                                                   "width": 1, "height": 1}},
             }
             (evidence / "capture.json").write_text(json.dumps(capture), encoding="utf-8")
             Image.new("RGBA", (1, 1), (0, 0, 0, 255)).save(evidence / "browser.png")
+            capture["assets"] = [{"id": "reference:browser", "sha256": LAB.sha256_file(evidence / "browser.png"),
+                                  "width_px": 1, "height_px": 1}]
+            (evidence / "capture.json").write_text(json.dumps(capture), encoding="utf-8")
             (evidence / "dom-snapshot.json").write_text(
                 json.dumps({"documents": []}), encoding="utf-8")
+            mutate_snapshot_during_render = False
+            receipt_emitter = None
 
             def fake_run(argv: list[str], timeout_seconds: int) -> LAB.CommandResult:
                 if "--render" in argv:
+                    if mutate_snapshot_during_render:
+                        (evidence / "dom-snapshot.json").write_text(
+                            '{"documents":[],"changedAfterVerification":true}', encoding="utf-8")
+                        (evidence / "capture.json").write_text(
+                            '{"changedAfterVerification":true}', encoding="utf-8")
                     Image.new("RGBA", (1, 1), (0, 0, 0, 255)).save(
                         Path(argv[argv.index("--render") + 1]))
                     Path(argv[argv.index("--layout") + 1]).write_text(
-                        json.dumps({"views": []}), encoding="utf-8")
+                        json.dumps({"views": [], "nodes": [{
+                            "id": "browser:root",
+                            "rect": observer_root_rect(argv, 1, 1),
+                        }]}), encoding="utf-8")
+                    emitter = (argv[argv.index("--emitter") + 1]
+                               if "--emitter" in argv else "native")
                     Path(argv[argv.index("--render-receipt") + 1]).write_text(
                         json.dumps({"schema": "pulp-design-ir-render-receipt-v1",
                                     "backend_requested": "skia", "backend_used": "skia",
-                                    "ok": True}), encoding="utf-8")
+                                    "ok": True, "emitter": receipt_emitter or emitter,
+                                    "placement": observer_placement(argv)}), encoding="utf-8")
                 else:
                     output = Path(argv[argv.index("--output") + 1])
-                    output.write_text(json.dumps({"root": {"type": "frame",
-                                                              "children": []}}),
+                    output.write_text(json.dumps({"root": {
+                        "type": "frame", "style": {"width": 1, "height": 1},
+                        "children": []}}),
                                       encoding="utf-8")
                 return LAB.CommandResult(argv, 1, 0, "", "")
 
             with patch.object(LAB, "run_command", side_effect=fake_run), \
-                    patch.object(LAB, "find_browser_evidence", return_value=evidence):
+                    patch.object(LAB, "find_browser_evidence", return_value=evidence), \
+                    patch.object(LAB, "verify_capture_binding", wraps=LAB.verify_capture_binding) as binding, \
+                    patch.object(LAB, "verify_capture_image_binding", wraps=LAB.verify_capture_image_binding) as image_binding, \
+                    patch.object(LAB, "verify_capture_snapshot_binding", wraps=LAB.verify_capture_snapshot_binding) as snapshot_binding:
                 report = LAB.compare_one(
                     Path("importer"), Path("observer"), source, root / "out", 60,
                     "claude", Path("chrome"),
-                    fixture_metadata={"viewport": {"width": 1, "height": 1}})
+                    fixture_metadata={"viewport": {"width": 1, "height": 1},
+                                      "browser_interactions": "plan.json"})
             self.assertEqual(report["integrity"]["source_sha256"], source_sha256)
             self.assertTrue(report["integrity"]["source_bound"])
+            self.assertTrue(report["comparison"]["viewport_dpr_audit"]["ok"])
+            self.assertEqual(report["candidate"]["emitter"], "native")
+            binding.assert_called_once()
+
+            # The ui.js lane renders the same IR through the program it emits;
+            # the native lane's observer argv does not change.
+            with patch.object(LAB, "run_command", side_effect=fake_run) as run, \
+                    patch.object(LAB, "find_browser_evidence", return_value=evidence):
+                js_report = LAB.compare_one(
+                    Path("importer"), Path("observer"), source, root / "out-js", 60,
+                    "claude", Path("chrome"),
+                    fixture_metadata={"viewport": {"width": 1, "height": 1},
+                                      "browser_interactions": "plan.json"},
+                    emitter="js")
+            render_argv = [c.args[0] for c in run.call_args_list if "--render" in c.args[0]]
+            self.assertEqual(len(render_argv), 1)
+            self.assertEqual(render_argv[0][render_argv[0].index("--emitter") + 1], "js")
+            self.assertEqual(js_report["candidate"]["emitter"], "js")
+            with patch.object(LAB, "run_command", side_effect=fake_run) as run, \
+                    patch.object(LAB, "find_browser_evidence", return_value=evidence):
+                LAB.compare_one(
+                    Path("importer"), Path("observer"), source, root / "out-native", 60,
+                    "claude", Path("chrome"),
+                    fixture_metadata={"viewport": {"width": 1, "height": 1},
+                                      "browser_interactions": "plan.json"})
+            self.assertFalse(any("--emitter" in c.args[0] for c in run.call_args_list))
+            # A render that says another emitter made it is not this lane's render.
+            receipt_emitter = "native"
+            with patch.object(LAB, "run_command", side_effect=fake_run), \
+                    patch.object(LAB, "find_browser_evidence", return_value=evidence):
+                with self.assertRaisesRegex(LAB.LabError, "names emitter 'native'"):
+                    LAB.compare_one(
+                        Path("importer"), Path("observer"), source, root / "out-js-wrong", 60,
+                        "claude", Path("chrome"),
+                        fixture_metadata={"viewport": {"width": 1, "height": 1},
+                                          "browser_interactions": "plan.json"},
+                        emitter="js")
+            receipt_emitter = None
+            self.assertEqual(binding.call_args.kwargs["expected_interaction_plan_sha256"], plan_sha256)
+            # Each lane's screenshot, then the candidate lane's retained copy
+            # that the visual lens scores.
+            self.assertEqual(image_binding.call_count, 3)
+            image_binding.assert_any_call(capture, evidence / "browser.png")
+            image_binding.assert_any_call(capture, root / "out/candidate/browser.png")
+            self.assertEqual(snapshot_binding.call_count, 2)
+            self.assertEqual(report["integrity"]["browser_snapshot_binding"]["status"], "legacy-unbound")
+            # Verify declared bytes on compare_one's real path, before rendering.
+            snapshot_path = evidence / "dom-snapshot.json"
+            capture["documents"] = [{"snapshot_asset": "dom-snapshot.json",
+                                     "snapshot_sha256": LAB.sha256_file(snapshot_path)}]
+            (evidence / "capture.json").write_text(json.dumps(capture), encoding="utf-8")
+            verified_capture_bytes = (evidence / "capture.json").read_bytes()
+            mutate_snapshot_during_render = True
+            with patch.object(LAB, "run_command", side_effect=fake_run), \
+                    patch.object(LAB, "find_browser_evidence", return_value=evidence):
+                bound_report = LAB.compare_one(
+                    Path("importer"), Path("observer"), source, root / "out-bound", 60,
+                    "claude", Path("chrome"),
+                    fixture_metadata={"viewport": {"width": 1, "height": 1},
+                                      "browser_interactions": "plan.json"})
+            self.assertEqual(bound_report["integrity"]["browser_snapshot_binding"]["status"], "producer-bound")
+            self.assertEqual(bound_report["integrity"]["native_snapshot_binding"]["sha256"],
+                             capture["documents"][0]["snapshot_sha256"])
+            self.assertEqual(LAB.sha256_file(root / "out-bound/browser/dom-snapshot.json"),
+                             capture["documents"][0]["snapshot_sha256"])
+            self.assertNotEqual(LAB.sha256_file(snapshot_path), capture["documents"][0]["snapshot_sha256"])
+            self.assertEqual((root / "out-bound/browser/capture.json").read_bytes(), verified_capture_bytes)
+            self.assertEqual(bound_report["integrity"]["browser_capture_sha256"],
+                             LAB.sha256_file(root / "out-bound/browser/capture.json"))
+            self.assertEqual(bound_report["integrity"]["native_capture_canonical_sha256"],
+                             LAB.canonical_json_sha256(verified_capture_bytes))
+            mutate_snapshot_during_render = False
+            (evidence / "capture.json").write_bytes(verified_capture_bytes)
+            snapshot_path.write_text('{"documents":[],"changedStyle":"white"}', encoding="utf-8")
+            with patch.object(LAB, "run_command", side_effect=fake_run) as run, \
+                    patch.object(LAB, "find_browser_evidence", return_value=evidence), \
+                    self.assertRaisesRegex(LAB.LabError, "snapshot digest does not match"):
+                LAB.compare_one(
+                    Path("importer"), Path("observer"), source, root / "out-tampered", 60,
+                    "claude", Path("chrome"),
+                    fixture_metadata={"viewport": {"width": 1, "height": 1},
+                                      "browser_interactions": "plan.json"})
+            self.assertFalse(any("--render" in call.args[0] for call in run.call_args_list))
+            snapshot_path.write_text(json.dumps({"documents": []}), encoding="utf-8")
+            # Exercise compare_one's wiring, not just the metrics helper: a
+            # panel-local match must not replace the raw page-space score.
+            capture["reference"]["authored_frame"] = {
+                "x": 0.25, "y": 0.25, "width": 1, "height": 1}
+            (evidence / "capture.json").write_text(json.dumps(capture), encoding="utf-8")
+            browser = LAB.BrowserNode(
+                0, "main", -1, "", {}, (0.25, 0.25, 0.5, 0.5), {}, 10,
+                anchor="capture:main[0]")
+            native = LAB.NativeNode(
+                "capture:main[0]", "frame", "main", "", None, {}, (0, 0, 0.5, 0.5), 10)
+            with patch.object(LAB, "run_command", side_effect=fake_run) as offset_run, \
+                    patch.object(LAB, "find_browser_evidence", return_value=evidence), \
+                    patch.object(LAB, "browser_nodes", return_value=[browser]), \
+                    patch.object(LAB, "native_nodes", return_value=[native]):
+                offset_report = LAB.compare_one(
+                    Path("importer"), Path("observer"), source, root / "out-offset", 60,
+                    "claude", Path("chrome"),
+                    fixture_metadata={"viewport": {"width": 1, "height": 1},
+                                      "browser_interactions": "plan.json"})
+            render_argv = next(call.args[0] for call in offset_run.call_args_list
+                               if "--render" in call.args[0])
+            # The observer receives the signed origin; the lab never shifts the
+            # browser nodes as well, so a native panel that did not move stays
+            # a page-space placement error.
+            self.assertEqual(render_argv[render_argv.index("--origin") + 1], "0.25,0.25")
+            # An empty snapshot proves no page canvas, so none is invented.
+            self.assertNotIn("--page-background", render_argv)
+            self.assertEqual(offset_report["comparison"]["page_background"]["status"],
+                             "unresolved")
+            geometry = offset_report["comparison"]["geometry"]
+            self.assertLess(geometry["score"], 1.0)
+            # The fake native panel sits at the native origin although the
+            # observer was told to place it at 0.25,0.25: the unplaced panel
+            # is an error page-space and registered alike.
+            self.assertLess(geometry["registered_geometry"]["score"], 1.0)
+            self.assertEqual(geometry["registration_applied"]["x"], -0.25)
+            self.assertEqual(geometry["registration"]["x"], 0.25)
+            self.assertEqual(geometry["registration"]["applied_to"], "native-render-and-layout")
+            # The snapshot has no DOM authored root, so frame placement fails
+            # closed as well.
+            self.assertFalse(
+                geometry["gate"]["checks"]["frame_placement"]["checks"]
+                ["dom_authored_root_found"]["ok"])
+            self.assertIn("geometry score below 0.980", offset_report["promotion"]["reasons"])
+            self.assertIn("geometry gate failed: page_space_mean, frame_placement, "
+                          "registered_mean", offset_report["promotion"]["reasons"])
+            summary = (root / "out-offset/comparison/summary.md").read_text(encoding="utf-8")
+            self.assertIn("Geometry gate: fail (page_space_mean, frame_placement", summary)
+            self.assertIn("Page-space geometry (gated)", summary)
+            # A receipt that records a different placement than was requested
+            # means the render was registered by something else.
+            def misplaced_run(argv: list[str], timeout_seconds: int) -> LAB.CommandResult:
+                result = fake_run(argv, timeout_seconds)
+                if "--render" in argv:
+                    receipt = Path(argv[argv.index("--render-receipt") + 1])
+                    data = json.loads(receipt.read_text(encoding="utf-8"))
+                    data["placement"]["origin_x"] += 24.0
+                    receipt.write_text(json.dumps(data), encoding="utf-8")
+                return result
+            with patch.object(LAB, "run_command", side_effect=misplaced_run), \
+                    patch.object(LAB, "find_browser_evidence", return_value=evidence), \
+                    self.assertRaisesRegex(LAB.LabError, "requested placement"):
+                LAB.compare_one(
+                    Path("importer"), Path("observer"), source, root / "out-misplaced", 60,
+                    "claude", Path("chrome"),
+                    fixture_metadata={"viewport": {"width": 1, "height": 1},
+                                      "browser_interactions": "plan.json"})
+            with patch.object(
+                LAB, "viewport_dpr_audit",
+                return_value={"ok": False, "checks": {"planted_negative": False}},
+            ):
+                with patch.object(LAB, "run_command", side_effect=fake_run), \
+                        patch.object(LAB, "find_browser_evidence", return_value=evidence):
+                    with self.assertRaisesRegex(LAB.LabError, "viewport/DPR audit failed"):
+                        LAB.compare_one(
+                            Path("importer"), Path("observer"), source, root / "out-refusal", 60,
+                            "claude", Path("chrome"),
+                            fixture_metadata={"viewport": {"width": 1, "height": 1},
+                                              "browser_interactions": "plan.json"})
+            with patch.object(
+                LAB, "viewport_dpr_audit",
+                side_effect=LAB.LabError("viewport/DPR audit failed"),
+            ):
+                with patch.object(LAB, "run_command", side_effect=fake_run), \
+                        patch.object(LAB, "find_browser_evidence", return_value=evidence):
+                    with self.assertRaisesRegex(LAB.LabError, "viewport/DPR audit failed"):
+                        LAB.compare_one(
+                            Path("importer"), Path("observer"), source, root / "out-fail", 60,
+                            "claude", Path("chrome"),
+                            fixture_metadata={"viewport": {"width": 1, "height": 1},
+                                              "browser_interactions": "plan.json"})
 
     @requires_pillow
     def test_compare_one_scores_structure_through_the_shared_comparison(self) -> None:
@@ -438,11 +1379,17 @@ class DifferentialLabTests(unittest.TestCase):
             }
             capture = {
                 "provenance": provenance,
-                "reference": {"logical_width": 1, "logical_height": 1,
-                               "device_scale_factor": 1},
+                "reference": {"asset_id": "reference:browser",
+                               "logical_width": 1, "logical_height": 1,
+                               "device_scale_factor": 1,
+                               "authored_frame": {"x": 0, "y": 0,
+                                                   "width": 1, "height": 1}},
             }
             (evidence / "capture.json").write_text(json.dumps(capture), encoding="utf-8")
             Image.new("RGBA", (1, 1), (0, 0, 0, 255)).save(evidence / "browser.png")
+            capture["assets"] = [{"id": "reference:browser", "sha256": LAB.sha256_file(evidence / "browser.png"),
+                                  "width_px": 1, "height_px": 1}]
+            (evidence / "capture.json").write_text(json.dumps(capture), encoding="utf-8")
             (evidence / "dom-snapshot.json").write_text(
                 json.dumps({"documents": []}), encoding="utf-8")
 
@@ -451,15 +1398,20 @@ class DifferentialLabTests(unittest.TestCase):
                     Image.new("RGBA", (1, 1), (0, 0, 0, 255)).save(
                         Path(argv[argv.index("--render") + 1]))
                     Path(argv[argv.index("--layout") + 1]).write_text(
-                        json.dumps({"views": []}), encoding="utf-8")
+                        json.dumps({"views": [], "nodes": [{
+                            "id": "browser:root",
+                            "rect": observer_root_rect(argv, 1, 1),
+                        }]}), encoding="utf-8")
                     Path(argv[argv.index("--render-receipt") + 1]).write_text(
                         json.dumps({"schema": "pulp-design-ir-render-receipt-v1",
                                     "backend_requested": "skia", "backend_used": "skia",
-                                    "ok": True}), encoding="utf-8")
+                                    "ok": True,
+                                    "placement": observer_placement(argv)}), encoding="utf-8")
                 else:
                     output = Path(argv[argv.index("--output") + 1])
-                    output.write_text(json.dumps({"root": {"type": "frame",
-                                                              "children": []}}),
+                    output.write_text(json.dumps({"root": {
+                        "type": "frame", "style": {"width": 1, "height": 1},
+                        "children": []}}),
                                       encoding="utf-8")
                 return LAB.CommandResult(argv, 1, 0, "", "")
 
@@ -501,6 +1453,163 @@ class DifferentialLabTests(unittest.TestCase):
                 LAB.canonical_json_sha256(first),
                 LAB.canonical_json_sha256(second))
 
+    def test_canonical_capture_digest_ignores_settle_poll_counters(self) -> None:
+        def capture(rounds: int, stable: int, frame_x: float = 20.0,
+                    asset: str = "dom-snapshot.json") -> bytes:
+            return json.dumps({
+                "schema": "pulp-browser-capture-v1",
+                "provenance": {"settle": {"rounds": rounds, "stable_rounds": stable,
+                                          "elapsed_ms": rounds * 90}},
+                "reference": {"authored_frame": {"x": frame_x, "y": 20.0,
+                                                 "width": 420.0, "height": 220.0}},
+                "documents": [{"snapshot_asset": asset}],
+            }).encode()
+
+        baseline = LAB.canonical_json_sha256(capture(14, 12))
+        self.assertEqual(baseline, LAB.canonical_json_sha256(capture(15, 13)))
+        # Negative controls: content fields still enter the digest.
+        self.assertNotEqual(baseline, LAB.canonical_json_sha256(capture(15, 13, frame_x=21.0)))
+        self.assertNotEqual(baseline, LAB.canonical_json_sha256(
+            capture(15, 13, asset="other-snapshot.json")))
+        # The counters are scrubbed only in capture envelopes, and only there.
+        other = json.loads(capture(14, 12))
+        other["schema"] = "pulp-design-ir-v1"
+        changed = json.loads(capture(15, 13))
+        changed["schema"] = "pulp-design-ir-v1"
+        self.assertNotEqual(LAB.canonical_json_sha256(json.dumps(other).encode()),
+                            LAB.canonical_json_sha256(json.dumps(changed).encode()))
+        nested = json.loads(capture(14, 12))
+        nested["reference"]["rounds"] = 1
+        nested_changed = json.loads(capture(14, 12))
+        nested_changed["reference"]["rounds"] = 2
+        self.assertNotEqual(LAB.canonical_json_sha256(json.dumps(nested).encode()),
+                            LAB.canonical_json_sha256(json.dumps(nested_changed).encode()))
+
+    def test_canonical_capture_digest_excludes_only_raw_document_bindings(self) -> None:
+        first = {"schema": "pulp-browser-capture-v1", "documents": [
+            {"snapshot_asset": "dom-snapshot.json", "snapshot_sha256": "a" * 64}]}
+        raw = json.dumps(first).encode()
+        first["documents"][0]["snapshot_sha256"] = "b" * 64
+        changed = json.dumps(first).encode()
+        self.assertNotEqual(raw, changed)
+        self.assertNotEqual(LAB.hashlib.sha256(raw).hexdigest(),
+                            LAB.hashlib.sha256(changed).hexdigest())
+        self.assertEqual(LAB.canonical_json_sha256(raw), LAB.canonical_json_sha256(changed))
+        first["documents"][0]["snapshot_asset"] = "changed.json"
+        self.assertNotEqual(LAB.canonical_json_sha256(raw),
+                            LAB.canonical_json_sha256(json.dumps(first).encode()))
+
+    def test_semantic_dom_digest_sees_content_and_ignores_session_ids(self) -> None:
+        def snapshot(frame: str, theme: str, loader: str = "L1",
+                     backend: tuple[int, ...] = (7, 9)) -> bytes:
+            return json.dumps({
+                "strings": ["about:blank", frame, "INPUT"],
+                "documents": [{"documentURL": 0, "frameId": 1,
+                               "nodes": {"nodeName": [2, 2],
+                                         "backendNodeId": list(backend)},
+                               "loaderId": loader}],
+                "formControlTheme": {"controls": [
+                    {"node_index": 0, "theme": theme}]},
+            }).encode()
+
+        baseline = LAB.snapshot_semantic_sha256(snapshot("F" * 32, "native"))
+        # Per-session CDP identifiers do not move it.
+        self.assertEqual(baseline, LAB.snapshot_semantic_sha256(
+            snapshot("A" * 32, "native", loader="L2")))
+        # Chromium can number the same nodes in a different order per run.
+        self.assertEqual(baseline, LAB.snapshot_semantic_sha256(
+            snapshot("F" * 32, "native", backend=(12, 4))))
+        # Content inside the snapshot does, where the canonical capture digest
+        # (which drops the snapshot binding) cannot.
+        self.assertNotEqual(baseline, LAB.snapshot_semantic_sha256(
+            snapshot("F" * 32, "author")))
+        changed = json.loads(snapshot("F" * 32, "native"))
+        changed["strings"][2] = "SELECT"
+        self.assertNotEqual(baseline, LAB.snapshot_semantic_sha256(
+            json.dumps(changed).encode()))
+        # Key order and whitespace are not content.
+        self.assertEqual(baseline, LAB.snapshot_semantic_sha256(json.dumps(
+            json.loads(snapshot("F" * 32, "native")), indent=2,
+            sort_keys=True).encode()))
+
+    def test_platform_fonts_digest_sees_faces_and_ignores_backend_ids(self) -> None:
+        def report(backend: tuple[int, int] = (28, 31),
+                   face: str = "JetBrainsMono-Medium") -> dict:
+            return {
+                "schema": "pulp-browser-platform-fonts-v1", "version": 1,
+                "runs": [
+                    {"layout_index": 9, "node_index": 26, "owner_node_index": 25,
+                     "backend_node_id": backend[0],
+                     "requested": {"font_family": "JetBrains Mono", "font_weight": "500"},
+                     "resolved": [{"family_name": "JetBrains Mono Medium",
+                                   "post_script_name": face, "glyph_count": 37}]},
+                    {"layout_index": 12, "node_index": 30, "owner_node_index": 29,
+                     "backend_node_id": backend[1],
+                     "requested": {"font_family": "JetBrains Mono", "font_weight": "400"},
+                     "resolved": [{"family_name": "JetBrains Mono",
+                                   "post_script_name": "JetBrainsMono-Regular",
+                                   "glyph_count": 12}]},
+                ],
+            }
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "platform-fonts.json"
+
+            def digest(value: dict) -> str | None:
+                path.write_text(json.dumps(value), encoding="utf-8")
+                return LAB.platform_fonts_semantic_sha256(path)
+
+            baseline = digest(report())
+            self.assertIsNotNone(baseline)
+            # Chromium numbered the same nodes 4 lower in one of three runs.
+            self.assertEqual(baseline, digest(report(backend=(24, 27))))
+            self.assertEqual(baseline, digest(report(backend=(31, 28))))
+            # A different resolved face is content.
+            self.assertNotEqual(baseline, digest(report(face="JetBrainsMono-Regular")))
+            moved = report()
+            moved["runs"][1]["node_index"] = 31
+            self.assertNotEqual(baseline, digest(moved))
+            path.unlink()
+            self.assertIsNone(LAB.platform_fonts_semantic_sha256(path))
+
+    def test_semantic_dom_digests_are_determinism_fields(self) -> None:
+        self.assertIn("browser_snapshot_semantic_sha256", LAB_CLI.DETERMINISM_FIELDS)
+        self.assertIn("native_snapshot_semantic_sha256", LAB_CLI.DETERMINISM_FIELDS)
+
+    def test_canonical_digest_preserves_same_named_fields_outside_capture_document(self) -> None:
+        for document in (
+            {"documents": [{"snapshot_sha256": "a" * 64}]},
+            {"schema": "different", "documents": [{"snapshot_sha256": "a" * 64}]},
+            {"schema": "pulp-browser-capture-v1", "snapshot_sha256": "a" * 64},
+            {"schema": "pulp-browser-capture-v1", "nested": {
+                "documents": [{"snapshot_sha256": "a" * 64}]}},
+            {"schema": "pulp-browser-capture-v1", "documents": [{
+                "nested": {"snapshot_sha256": "a" * 64}}]},
+        ):
+            with self.subTest(document=document):
+                raw = json.dumps(document).encode()
+                changed = raw.replace(("a" * 64).encode(), ("b" * 64).encode())
+                self.assertNotEqual(LAB.canonical_json_sha256(raw),
+                                    LAB.canonical_json_sha256(changed))
+
+    def test_canonical_equivalence_does_not_bypass_snapshot_verification(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = Path(directory)
+            snapshot = evidence / "dom-snapshot.json"
+            snapshot.write_bytes(b'{"documents":[]}\n')
+            capture = {"schema": "pulp-browser-capture-v1", "documents": [{
+                "snapshot_asset": "dom-snapshot.json",
+                "snapshot_sha256": LAB.sha256_file(snapshot)}]}
+            raw = json.dumps(capture).encode()
+            binding, verified = LAB.verify_capture_snapshot_binding(capture, evidence, required=True)
+            self.assertEqual(verified, snapshot.read_bytes())
+            self.assertEqual(binding["status"], "producer-bound")
+            capture["documents"][0]["snapshot_sha256"] = "0" * 64
+            self.assertEqual(LAB.canonical_json_sha256(raw),
+                             LAB.canonical_json_sha256(json.dumps(capture).encode()))
+            with self.assertRaises(LAB.LabError):
+                LAB.verify_capture_snapshot_binding(capture, evidence, required=True)
+
     def test_intrinsic_sizing_gap_is_emitted(self) -> None:
         recognition = LAB.source_recognition(
             "<!doctype html><html><body><div>Panel</div></body></html>")
@@ -513,16 +1622,160 @@ class DifferentialLabTests(unittest.TestCase):
 
     def test_promotion_is_conservative_and_advisory(self) -> None:
         perfect = {"score": 1.0}
+        geometry = {"score": 1.0, "gate": {"ok": True, "failed": []}}
+        counted = {"status": "pass", "failures": []}
         result = LAB.promotion_recommendation(
-            ["canvas"], perfect, perfect, perfect, perfect)
+            ["canvas"], perfect, geometry, perfect, perfect, counted)
         self.assertEqual(result["classification"], "browser-required")
         self.assertTrue(result["advisory_only"])
         result = LAB.promotion_recommendation(
-            [], perfect, perfect, perfect, perfect)
+            [], perfect, geometry, perfect, perfect, counted)
         self.assertEqual(
             result["classification"], "native-with-browser-validation")
         self.assertTrue(result["threshold_eligible"])
         self.assertFalse(result["production_promotion_enabled"])
+        # A geometry result without an evaluated gate is a failure.
+        result = LAB.promotion_recommendation(
+            [], perfect, perfect, perfect, perfect, counted)
+        self.assertFalse(result["threshold_eligible"])
+        self.assertIn("geometry gate failed: gate not evaluated", result["reasons"])
+
+    def test_promotion_thresholds_are_pinned(self) -> None:
+        # Every other test reads PROMOTION_THRESHOLDS symbolically, so a lowered
+        # threshold would pass them all. The values are policy: changing one
+        # must be a deliberate edit here, not a side effect.
+        self.assertEqual(LAB.PROMOTION_THRESHOLDS, {
+            "structural": 0.99,
+            "geometry": 0.98,
+            "typography": 0.98,
+            "visual": 0.995,
+        })
+        perfect = {"score": 1.0}
+        gated = {"score": 1.0, "gate": {"ok": True, "failed": []}}
+        counted = {"status": "pass", "failures": []}
+        just_below = LAB.promotion_recommendation(
+            [], perfect, gated, perfect, {"score": 0.994999}, counted)
+        self.assertFalse(just_below["threshold_eligible"])
+        at_threshold = LAB.promotion_recommendation(
+            [], perfect, gated, perfect, {"score": 0.995}, counted)
+        self.assertTrue(at_threshold["threshold_eligible"])
+        # A geometry score without its evaluated gate never passes.
+        gateless = LAB.promotion_recommendation(
+            [], perfect, perfect, perfect, {"score": 0.995}, counted)
+        self.assertFalse(gateless["threshold_eligible"])
+        self.assertIn("geometry gate failed: gate not evaluated", gateless["reasons"])
+        for bad in (float("nan"), float("inf")):
+            with self.subTest(score=bad):
+                result = LAB.promotion_recommendation(
+                    [], perfect, gated, perfect, {"score": bad}, counted)
+                self.assertFalse(result["threshold_eligible"])
+
+    def test_work_counters_gate_threshold_eligibility(self) -> None:
+        perfect = {"score": 1.0}
+        resources = {"image_decodes": 0, "gpu_uploads": 0, "paragraph_builds": 0,
+                     "scene_records": 0, "scene_replays": 0, "image_cache_builds": 0}
+        clean = {"schema": LAB.OBSERVER_COUNTER_SCHEMA, "views_constructed": 9,
+                 "views_destroyed": 9, "live_views_after_teardown": 0,
+                 "build": {"layout_passes": 0, "damage_requests": 4,
+                           "unmarked_paint_mutations": 83, **resources},
+                 "first_frame": {"layout_passes": 1, "damage_requests": 0,
+                                 "unmarked_paint_mutations": 7, **resources,
+                                 "image_decodes": 2, "image_cache_builds": 2,
+                                 "paragraph_builds": 11},
+                 "readback": {"layout_passes": 0, "damage_requests": 0,
+                              "unmarked_paint_mutations": 0, **resources,
+                              "paragraph_builds": 5}}
+        passed = LAB.work_counter_gate({"counters": clean})
+        self.assertEqual(passed["status"], "pass")
+        self.assertEqual(passed["resources"], "gated")
+        # A receipt written before the observer counted resource work is
+        # judged on its v1 fields and says the resource counters were absent.
+        legacy = {**clean, "schema": "pulp-design-ir-observer-counters-v1"}
+        for phase in ("build", "first_frame", "readback"):
+            legacy[phase] = {k: v for k, v in clean[phase].items() if k not in resources}
+        legacy_gate = LAB.work_counter_gate({"counters": legacy})
+        self.assertEqual(legacy_gate["status"], "pass")
+        self.assertEqual(legacy_gate["resources"], "absent")
+        planted = {
+            "no counters": {},
+            "wrong schema": {"counters": {**clean, "schema": "other"}},
+            "leaked view": {"counters": {**clean, "views_destroyed": 8,
+                                         "live_views_after_teardown": 1}},
+            "unmarked mutation": {"counters": {**clean, "readback": {
+                **clean["readback"], "unmarked_paint_mutations": 2}}},
+            "empty tree": {"counters": {**clean, "views_constructed": 0,
+                                        "views_destroyed": 0}},
+            "incomplete": {"counters": {"schema": LAB.OBSERVER_COUNTER_SCHEMA}},
+            "bool counts": {"counters": {**clean, "views_constructed": True,
+                                         "views_destroyed": True,
+                                         "live_views_after_teardown": False}},
+            "fractional mutation": {"counters": {**clean, "readback": {
+                **clean["readback"], "unmarked_paint_mutations": 0.9}}},
+            "negative count": {"counters": {**clean, "views_destroyed": -1}},
+            "string count": {"counters": {**clean, "views_constructed": "9"}},
+            "missing readback field": {"counters": {**clean, "readback": {
+                "unmarked_paint_mutations": 0}}},
+            # Planted negatives for the v2 resource counters.
+            "read-back decoded an image": {"counters": {**clean, "readback": {
+                **clean["readback"], "image_decodes": 1}}},
+            "read-back uploaded an image": {"counters": {**clean, "readback": {
+                **clean["readback"], "gpu_uploads": 3}}},
+            "read-back rebuilt a cached image": {"counters": {**clean, "readback": {
+                **clean["readback"], "image_cache_builds": 1}}},
+            "v2 without resource counters": {"counters": {**clean, "first_frame": {
+                k: v for k, v in clean["first_frame"].items() if k != "gpu_uploads"}}},
+        }
+        for name, receipt in planted.items():
+            with self.subTest(name):
+                gate = LAB.work_counter_gate(receipt)
+                self.assertNotEqual(gate["status"], "pass")
+                result = LAB.promotion_recommendation(
+                    [], perfect, perfect, perfect, perfect, gate)
+                self.assertFalse(result["threshold_eligible"])
+                self.assertTrue(result["reasons"])
+
+    def test_only_a_cropped_panel_borrows_the_page_colour(self) -> None:
+        def capture(x: float, y: float, w: float, h: float) -> dict[str, object]:
+            return {"reference": {"logical_width": 480, "logical_height": 320,
+                                  "authored_frame": {"x": x, "y": y, "width": w, "height": h}}}
+        # A whole-page panel's importer root owns the document canvas.
+        self.assertTrue(LAB.panel_covers_page(capture(0, 0, 480, 320)))
+        self.assertTrue(LAB.panel_covers_page(capture(0, 0, 480, 400)))
+        # Anything smaller or offset leaves page around it for the lab to fill.
+        self.assertFalse(LAB.panel_covers_page(capture(24, 24, 362, 97)))
+        self.assertFalse(LAB.panel_covers_page(capture(0, 0, 480, 300)))
+        self.assertFalse(LAB.panel_covers_page({"reference": {"logical_width": 480,
+                                                              "logical_height": 320}}))
+
+    def test_canonical_digest_ignores_only_settle_poll_counts(self) -> None:
+        def capture(rounds: int, stable: int, color: str) -> bytes:
+            return json.dumps({"schema": "pulp-browser-capture-v1",
+                               "provenance": {"settle": {"rounds": rounds,
+                                                         "stable_rounds": stable,
+                                                         "elapsed_ms": 900}},
+                               "reference": {"color": color}}).encode("utf-8")
+        self.assertEqual(LAB.canonical_json_sha256(capture(14, 12, "red")),
+                         LAB.canonical_json_sha256(capture(15, 13, "red")))
+        self.assertNotEqual(LAB.canonical_json_sha256(capture(14, 12, "red")),
+                            LAB.canonical_json_sha256(capture(14, 12, "blue")))
+        ir = lambda rounds, text: json.dumps(
+            {"settle_rounds": rounds, "root": {"text": text}}).encode("utf-8")
+        self.assertEqual(LAB.canonical_json_sha256(ir(14, "a")),
+                         LAB.canonical_json_sha256(ir(15, "a")))
+        # Only the top-level IR field: a node property of that name still counts.
+        self.assertNotEqual(
+            LAB.canonical_json_sha256(json.dumps({"root": {"settle_rounds": 1}}).encode()),
+            LAB.canonical_json_sha256(json.dumps({"root": {"settle_rounds": 2}}).encode()))
+
+    def test_semantic_snapshot_digest_ignores_the_frame_id_but_not_text(self) -> None:
+        def snapshot(frame: str, text: str) -> bytes:
+            return json.dumps({"strings": ["#document", frame, text],
+                               "documents": [{"frameId": 1, "nodes": {"nodeValue": [2]}}]}
+                              ).encode("utf-8")
+        self.assertEqual(LAB.snapshot_semantic_sha256(snapshot("AAAA", "Signal")),
+                         LAB.snapshot_semantic_sha256(snapshot("BBBB", "Signal")))
+        self.assertNotEqual(LAB.snapshot_semantic_sha256(snapshot("AAAA", "Signal")),
+                            LAB.snapshot_semantic_sha256(snapshot("AAAA", "Signals")))
 
     def test_corpus_aggregation_ranks_repeated_impact(self) -> None:
         report = {
@@ -613,11 +1866,11 @@ class DifferentialLabTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
             unknown = root / "unknown.json"
-            unknown.write_text(json.dumps({"ttfp_ms": 10}))
+            unknown.write_text(json.dumps({"ttfp_ms": 10}), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "unknown metric"):
                 LAB_CLI.read_timing_budgets(unknown)
             empty = root / "empty.json"
-            empty.write_text("{}")
+            empty.write_text("{}", encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "at least one"):
                 LAB_CLI.read_timing_budgets(empty)
 
@@ -648,6 +1901,25 @@ class DifferentialLabTests(unittest.TestCase):
                 "native_total_p95_ms": 20,
                 "p50_ms_saved": 75.0,
             },
+        )
+
+    def test_determinism_receipt_requires_three_runs(self) -> None:
+        reports = [{"integrity": {field: "a" for field in LAB_CLI.DETERMINISM_FIELDS}}]
+        receipt = LAB_CLI.determinism_receipt(reports)
+        self.assertEqual(receipt["status"], "unverified")
+        self.assertEqual(receipt["required_runs"], 3)
+
+    def test_determinism_receipt_passes_only_when_all_authenticated_digests_agree(self) -> None:
+        def report(seed: str) -> dict:
+            return {"integrity": {field: seed for field in LAB_CLI.DETERMINISM_FIELDS}}
+
+        self.assertEqual(
+            LAB_CLI.determinism_receipt([report("a"), report("a"), report("a")])["status"],
+            "pass",
+        )
+        self.assertEqual(
+            LAB_CLI.determinism_receipt([report("a"), report("a"), report("b")])["status"],
+            "fail",
         )
 
     def test_benchmark_receipt_does_not_infer_cache_state_from_run_order(self) -> None:
@@ -733,6 +2005,247 @@ class DifferentialLabTests(unittest.TestCase):
             }
             validator.validate(legacy)
 
+    def test_command_benchmark_fails_when_authenticated_runs_disagree(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            source = root / "fixture.html"
+            importer = root / "importer"
+            observer = root / "observer"
+            source.write_text("<main>fixture</main>", encoding="utf-8")
+            importer.write_text("importer", encoding="utf-8")
+            observer.write_text("observer", encoding="utf-8")
+            reports = iter((
+                {"integrity": {field: "a" for field in LAB_CLI.DETERMINISM_FIELDS},
+                 "observability": {"cache_state": {"identity": "unknown"},
+                                    "ttni_proxy": {"value_ms": 1}},
+                 "timings": {"browser_import_ms": 1, "native_total_ms": 1},
+                 "timing_budget": {"status": "not-requested"},
+                 "fixture": {}, "source": {}, "oracle": {}, "promotion": {},
+                 "comparison": {}},
+                {"integrity": {field: "a" for field in LAB_CLI.DETERMINISM_FIELDS},
+                 "observability": {"cache_state": {"identity": "unknown"},
+                                    "ttni_proxy": {"value_ms": 1}},
+                 "timings": {"browser_import_ms": 1, "native_total_ms": 1},
+                 "timing_budget": {"status": "not-requested"},
+                 "fixture": {}, "source": {}, "oracle": {}, "promotion": {},
+                 "comparison": {}},
+                {"integrity": {field: "b" for field in LAB_CLI.DETERMINISM_FIELDS},
+                 "observability": {"cache_state": {"identity": "unknown"},
+                                    "ttni_proxy": {"value_ms": 1}},
+                 "timings": {"browser_import_ms": 1, "native_total_ms": 1},
+                 "timing_budget": {"status": "not-requested"},
+                 "fixture": {}, "source": {}, "oracle": {}, "promotion": {},
+                 "comparison": {}},
+            ))
+            args = Namespace(importer=importer, observer=observer, file=source,
+                             output=root / "benchmark", runs=3, timeout_seconds=1,
+                             from_source="html", browser=None, cache_state="unknown",
+                             timing_budget=None)
+            with patch.object(LAB_CLI, "compare_one", side_effect=lambda *args, **kwargs: next(reports)), \
+                    redirect_stdout(io.StringIO()):
+                self.assertEqual(LAB_CLI.command_benchmark(args), 1)
+
+    @requires_pillow
+    def test_visual_reference_is_the_candidate_lanes_own_capture(self) -> None:
+        """Score the native render against the moment it was lowered from."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "panel.html"
+            source.write_text("<canvas></canvas>", encoding="utf-8")
+            source_sha256 = LAB.sha256_file(source)
+
+            def lane_evidence(name: str, colour: tuple[int, int, int, int],
+                              snapshot: dict[str, object]) -> Path:
+                evidence = root / name
+                evidence.mkdir()
+                Image.new("RGBA", (2, 1), colour).save(evidence / "browser.png")
+                (evidence / "dom-snapshot.json").write_text(
+                    json.dumps(snapshot), encoding="utf-8")
+                (evidence / "capture.json").write_text(json.dumps({
+                    "provenance": {
+                        "source": {"sha256": source_sha256},
+                        "viewport": {"requested": {"width": 2, "height": 1},
+                                     "resolved": {"width": 2, "height": 1}},
+                        "browser": {"product": "Chrome", "version": "140.0"},
+                    },
+                    "reference": {"asset_id": "reference:browser",
+                                  "logical_width": 2, "logical_height": 1,
+                                  "device_scale_factor": 1,
+                                  "authored_frame": {"x": 0, "y": 0,
+                                                     "width": 2, "height": 1}},
+                    "assets": [{"id": "reference:browser",
+                                "sha256": LAB.sha256_file(evidence / "browser.png"),
+                                "width_px": 2, "height_px": 1}],
+                }), encoding="utf-8")
+                return evidence
+
+            # The canvas animates between the two lanes' captures; the native
+            # lowering reproduces the candidate lane's moment exactly.
+            moment_a, moment_b = (10, 20, 30, 255), (200, 40, 40, 255)
+            page = {"documents": []}
+
+            def run(name: str, candidate_snapshot: dict[str, object]) -> dict:
+                browser = lane_evidence(f"{name}-browser", moment_a, page)
+                candidate = lane_evidence(f"{name}-candidate", moment_b, candidate_snapshot)
+
+                def fake_run(argv: list[str], timeout_seconds: int) -> LAB.CommandResult:
+                    if "--render" in argv:
+                        Image.new("RGBA", (2, 1), moment_b).save(
+                            Path(argv[argv.index("--render") + 1]))
+                        Path(argv[argv.index("--layout") + 1]).write_text(
+                            json.dumps({"views": [], "nodes": [{
+                                "id": "browser:root",
+                                "rect": observer_root_rect(argv, 2, 1),
+                            }]}), encoding="utf-8")
+                        Path(argv[argv.index("--render-receipt") + 1]).write_text(
+                            json.dumps({"schema": "pulp-design-ir-render-receipt-v1",
+                                        "backend_requested": "skia", "backend_used": "skia",
+                                        "ok": True,
+                                        "placement": observer_placement(argv)}),
+                            encoding="utf-8")
+                    else:
+                        Path(argv[argv.index("--output") + 1]).write_text(json.dumps({
+                            "root": {"type": "frame", "style": {"width": 2, "height": 1},
+                                     "children": []}}), encoding="utf-8")
+                    return LAB.CommandResult(argv, 1, 0, "", "")
+
+                def evidence_for(ir: Path) -> Path:
+                    return candidate if ir.parent.name == "candidate" else browser
+
+                with patch.object(LAB, "run_command", side_effect=fake_run), \
+                        patch.object(LAB, "find_browser_evidence", side_effect=evidence_for):
+                    return LAB.compare_one(
+                        Path("importer"), Path("observer"), source, root / name, 60,
+                        "claude", Path("chrome"),
+                        fixture_metadata={"viewport": {"width": 2, "height": 1}})
+
+            same = run("same-page", page)
+            visual = same["comparison"]["visual"]
+            self.assertEqual(visual["reference"]["source"], "candidate-lane-capture")
+            self.assertTrue(visual["reference"]["dom_snapshots_match"])
+            self.assertEqual(visual["reference"]["path"], "candidate/browser.png")
+            self.assertEqual(visual["score"], 1.0)
+            self.assertEqual(visual["differing_pixel_count"], 0)
+            # The capture-timing noise is still reported, apart from the score.
+            self.assertEqual(visual["reference"]["capture_moment_residual"], {
+                "differing_pixel_count": 2, "differing_pixel_fraction": 1.0,
+                "bounds_css": [0.0, 0.0, 2.0, 1.0]})
+            self.assertEqual(same["integrity"]["candidate_screenshot_sha256"],
+                             LAB.sha256_file(root / "same-page/candidate/browser.png"))
+
+            # A candidate lane that evaluated a different DOM is not the page
+            # the structure lens read, so the browser lane stays the reference.
+            diverged = run("diverged", {"documents": [], "extra": True})
+            visual = diverged["comparison"]["visual"]
+            self.assertEqual(visual["reference"]["source"], "browser-lane-capture")
+            self.assertFalse(visual["reference"]["dom_snapshots_match"])
+            self.assertEqual(visual["differing_pixel_count"], 2)
+            self.assertLess(visual["score"], 1.0)
+
+    def test_manifest_volatile_regions_stay_inside_the_viewport(self) -> None:
+        manifest = json.loads((REPO / "test/fixtures/import-differential/manifest.json")
+                              .read_text(encoding="utf-8"))
+        checked = 0
+        for entry in manifest["fixtures"]:
+            viewport = entry.get("viewport", {"width": 1280, "height": 800})
+            for region in entry.get("volatile_regions", []):
+                rect = region["rect"]
+                with self.subTest(fixture=entry["id"], region=region["id"]):
+                    self.assertEqual(region["unit"], "css-px")
+                    self.assertGreater(rect["width"], 0)
+                    self.assertGreater(rect["height"], 0)
+                    self.assertGreaterEqual(rect["x"], 0)
+                    self.assertGreaterEqual(rect["y"], 0)
+                    self.assertLessEqual(rect["x"] + rect["width"], viewport["width"])
+                    self.assertLessEqual(rect["y"] + rect["height"], viewport["height"])
+                checked += 1
+        self.assertGreater(checked, 0)
+
+    def test_spectr_volatile_spectrum_covers_the_whole_plot(self) -> None:
+        """The spectrum can be drawn anywhere in the plot, not only where one run drew it."""
+        manifest = json.loads((REPO / "test/fixtures/import-differential/manifest.json")
+                              .read_text(encoding="utf-8"))
+        entry = next(item for item in manifest["fixtures"] if item["id"] == "spectr-standalone")
+        source = (REPO / "test/fixtures/import-differential" / entry["source"]).read_text(
+            encoding="utf-8")
+        # The panel's getGeom insets its plot from a full-viewport wrap by this padding.
+        pad = re.search(
+            r"const pad = \{ l: (\d+), r: (\d+), t: (\d+), b: (\d+) \};", source)
+        self.assertIsNotNone(pad)
+        left, right, top, bottom = (int(value) for value in pad.groups())
+        viewport = entry["viewport"]
+        plot = (left, top, viewport["width"] - right, viewport["height"] - bottom)
+        region = next(item["rect"] for item in entry["volatile_regions"]
+                      if item["id"] == "spectrum-canvas")
+        self.assertLessEqual(region["x"], plot[0])
+        self.assertLessEqual(region["y"], plot[1])
+        self.assertGreaterEqual(region["x"] + region["width"], plot[2])
+        self.assertGreaterEqual(region["y"] + region["height"], plot[3])
+
+    def test_corpus_input_skips_holdout_fixtures_unless_asked(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw).resolve()
+            for name in ("a.html", "nested/b.html", "holdout/c.html", "nested/holdout/d.html"):
+                (root / name).parent.mkdir(parents=True, exist_ok=True)
+                (root / name).write_text("<p>x</p>", encoding="utf-8")
+            def names(files, base=root):
+                return [path.relative_to(base).as_posix() for path in files]
+            self.assertEqual(names(LAB.source_files(root)), ["a.html", "nested/b.html"])
+            self.assertEqual(names(LAB.source_files(root, include_holdout=True)), [
+                "a.html", "holdout/c.html", "nested/b.html", "nested/holdout/d.html"])
+            # A fixture's own file name is not a directory and is never excluded.
+            (root / "holdout.html").write_text("<p>x</p>", encoding="utf-8")
+            self.assertIn("holdout.html", names(LAB.source_files(root)))
+            # Naming the holdout directory as the corpus root asks for it.
+            seen = []
+            args = Namespace(manifest=None, input=root / "holdout", include_holdout=False,
+                             output=root / "out", importer=root / "i", observer=root / "o",
+                             timeout_seconds=1, from_source="claude", browser=None,
+                             fail_fast=False, cache_state="unknown", timing_budget=None)
+            with patch.object(LAB_CLI, "compare_one",
+                              side_effect=lambda *a, **k: seen.append(a[2]) or (_ for _ in ()).throw(
+                                  LAB.LabError("stop"))), \
+                    redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                LAB_CLI.command_corpus(args)
+            self.assertEqual(names(seen, root / "holdout"), ["c.html"])
+
+    def test_compare_and_benchmark_pass_a_declared_viewport(self) -> None:
+        self.assertEqual(LAB_CLI.viewport_size("1280x1127"), {"width": 1280, "height": 1127})
+        for bad in ("1280", "0x800", "1280x", "1280 x 800", "-1x2"):
+            with self.subTest(bad=bad), self.assertRaises(Exception):
+                LAB_CLI.viewport_size(bad)
+        parser = LAB_CLI.build_parser()
+        for command in ("compare", "benchmark"):
+            with self.subTest(command=command):
+                args = parser.parse_args([command, "--importer", "i", "--observer", "o",
+                                          "--file", "f.html", "--output", "out",
+                                          "--viewport", "1280x1007"])
+                seen = {}
+                def capture(*_args, **kwargs):
+                    seen.update(kwargs)
+                    raise LAB.LabError("stop")
+                with patch.object(LAB_CLI, "compare_one", side_effect=capture), \
+                        redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                    self.assertEqual(args.func(args), 2)
+                self.assertEqual(seen["fixture_metadata"],
+                                 {"viewport": {"width": 1280, "height": 1007}})
+
+    def test_missing_pillow_is_one_clear_preflight_error(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            args = LAB_CLI.build_parser().parse_args([
+                "compare", "--importer", "i", "--observer", "o",
+                "--file", str(root / "f.html"), "--output", str(root / "out")])
+            stderr = io.StringIO()
+            with patch.dict(sys.modules, {"PIL": None, "PIL.Image": None}), \
+                    patch.object(LAB_CLI, "pillow_missing", REAL_PILLOW_MISSING), \
+                    patch.object(LAB_CLI, "compare_one") as compare_one, \
+                    redirect_stderr(stderr):
+                self.assertEqual(args.func(args), 2)
+            compare_one.assert_not_called()
+            self.assertIn("Pillow is required", stderr.getvalue())
+            self.assertIn("install_visual_python_deps.sh", stderr.getvalue())
+
     def test_missing_corpus_fixture_is_counted_in_report(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
@@ -744,7 +2257,7 @@ class DifferentialLabTests(unittest.TestCase):
                     "source": "missing.html",
                     "from": "claude",
                 }],
-            }))
+            }), encoding="utf-8")
             output = root / "output"
             with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
                 result = LAB_CLI.command_corpus(Namespace(
@@ -759,10 +2272,821 @@ class DifferentialLabTests(unittest.TestCase):
                     fail_fast=False,
                 ))
             self.assertEqual(result, 1)
-            report = json.loads((output / "report.json").read_text())
+            report = json.loads((output / "report.json").read_text(encoding="utf-8"))
             self.assertEqual(report["fixture_count"], 1)
             self.assertEqual(report["completed_fixture_count"], 0)
             self.assertEqual(report["failed_fixture_count"], 1)
+
+
+def surface_snapshot(surface: tuple[float, float, float, float],
+                     children: list[tuple[float, float, float, float]]) -> dict:
+    """Minimal DOMSnapshot: html > body > authored root > children."""
+    strings = ["#document", "HTML", "BODY", "MAIN", "SPAN"]
+    names = [0, 1, 2, 3] + [4] * len(children)
+    parents = [-1, 0, 1, 2] + [3] * len(children)
+    types = [9, 1, 1, 1] + [1] * len(children)
+    bounds = [[0, 0, 1280, 800], [0, 0, 1280, 800], list(surface)] + [
+        list(child) for child in children]
+    return {
+        "strings": strings,
+        "documents": [{
+            "nodes": {"parentIndex": parents, "nodeType": types,
+                      "nodeName": names},
+            "layout": {"nodeIndex": list(range(1, 4 + len(children))),
+                       "bounds": bounds},
+        }],
+    }
+
+
+class GeometryGateTests(unittest.TestCase):
+    # Shapes taken from the absolute-overlay fixture: a 420x220 stage at
+    # (20, 20) and a far-right peak label.
+    FRAME = (20.0, 20.0, 420.0, 220.0)
+    CHILD = (368.4, 38.0, 51.6, 18.0)
+    ROOT_ANCHOR = "capture:html[0]/body[0]/main[0]"
+    CHILD_ANCHOR = "capture:html[0]/body[0]/main[0]/span[0]"
+
+    def local_child(self, dx=0.0, dw_scale=1.0):
+        return (self.CHILD[0] - self.FRAME[0] + dx, self.CHILD[1] - self.FRAME[1],
+                self.CHILD[2] * dw_scale, self.CHILD[3])
+
+    def build(self, *, native_child=None, recorded_shift=0.0, html_shift=0.0,
+              root_shift=0.0, provide_placement=True, unmatched_reference=0,
+              boxless_reference=0, matched_zero_area=0):
+        snapshot = surface_snapshot(self.FRAME, [self.CHILD])
+        capture = {"reference": {"authored_frame": dict(
+            zip(("x", "y", "width", "height"), self.FRAME))}}
+        ir = {"root": {"attributes": {
+            "browser_authored_frame_x": f"{self.FRAME[0] + recorded_shift:.6f}",
+            "browser_authored_frame_y": f"{self.FRAME[1]:.6f}",
+        }}}
+        # The observer lays the panel-local import out at the authored origin,
+        # so every native rect below is page-space: the panel-local box plus
+        # that origin.
+        ox, oy = self.FRAME[0], self.FRAME[1]
+        local = native_child or self.local_child()
+        child = (local[0] + ox, local[1] + oy, local[2], local[3])
+        root_box = (ox, oy, self.FRAME[2], self.FRAME[3])
+        layout = {"nodes": [
+            {"id": "observer:page", "rect": {"x": 0.0, "y": 0.0, "w": 1280, "h": 800}},
+            {"id": "browser:root", "rect": {"x": ox, "y": oy, "w": 420, "h": 220}},
+            {"id": "capture:html[0]", "rect": {
+                "x": html_shift, "y": 0.0, "w": 1280, "h": 260}},
+            # A root shift moves only the layout rect the placement proof
+            # reads, so it is caught there and nowhere else.
+            {"id": self.ROOT_ANCHOR, "rect": dict(zip("xywh", (
+                ox + root_shift, oy, self.FRAME[2], self.FRAME[3])))},
+            {"id": self.CHILD_ANCHOR, "rect": dict(zip("xywh", child))},
+        ]}
+        browser_raw = [
+            LAB.BrowserNode(3, "main", 2, "", {}, self.FRAME, {}, 3),
+            LAB.BrowserNode(4, "span", 3, "", {}, self.CHILD, {}, 4),
+        ]
+        registered_browser, registration = LAB.register_browser_nodes_to_native_frame(
+            browser_raw, capture, capture)
+        native_page = [
+            LAB.NativeNode(self.ROOT_ANCHOR, "frame", "main", "", None, {}, root_box, 3),
+            LAB.NativeNode(self.CHILD_ANCHOR, "frame", "span", "", None, {}, child, 4),
+        ]
+        native = LAB.native_nodes_in_panel_space(native_page, (ox, oy))
+        registered = list(zip(registered_browser, native, [100.0, 100.0]))
+        raw = list(zip(browser_raw, native_page, [100.0, 100.0]))
+        # Matched pairs whose reference box has no area (a collapsed span):
+        # exact on both sides, so only the coverage arithmetic can see them.
+        zero_area = []
+        for i in range(matched_zero_area):
+            box = (40.0 + i, 30.0, 0.0, 18.0)
+            browser = LAB.BrowserNode(300 + i, "span", 3, "", {}, box, {})
+            pair = (browser, LAB.NativeNode(f"{self.ROOT_ANCHOR}/b[{i}]", "frame", "b", "",
+                                            None, {}, box, 300 + i), 100.0)
+            zero_area.append(browser)
+            registered.append(pair)
+            raw.append(pair)
+        placement = (LAB.frame_placement_check(snapshot, ir, layout, registered, capture)
+                     if provide_placement else None)
+        # Reference nodes no native box matched: laid-out boxes, and elements
+        # with no layout object at all (a `<title>`).
+        unmatched = [LAB.BrowserNode(100 + i, "div", 3, "", {}, (0.0, 0.0, 8.0, 8.0), {})
+                     for i in range(unmatched_reference)]
+        boxless = [LAB.BrowserNode(200 + i, "title", 2, "Panel", {}, None, {})
+                   for i in range(boxless_reference)]
+        return LAB.geometry_metrics_with_registration(
+            raw, registered, registration, placement,
+            reference_nodes=registered_browser + unmatched + boxless + zero_area)
+
+    def test_known_good_panel_local_import_passes_with_raw_reported(self) -> None:
+        geometry = self.build()
+        self.assertTrue(geometry["gate"]["ok"], geometry["gate"])
+        self.assertEqual(geometry["gate"]["matched_bounds"], 2)
+        # The observer placed the panel, so page-space geometry passes too.
+        self.assertGreaterEqual(geometry["score"], 0.98)
+        self.assertTrue(geometry["gate"]["checks"]["page_space_mean"]["ok"])
+        self.assertEqual(geometry["role"], "page-space-gated")
+
+    def test_registration_without_placement_proof_fails(self) -> None:
+        geometry = self.build(provide_placement=False)
+        self.assertEqual(geometry["gate"]["failed"], ["frame_placement"])
+
+    def test_design_ir_origin_shift_fails_with_dom_and_layout_untouched(self) -> None:
+        geometry = self.build(recorded_shift=3.0)
+        self.assertEqual(geometry["gate"]["failed"], ["frame_placement"])
+        checks = geometry["gate"]["checks"]["frame_placement"]["checks"]
+        self.assertFalse(checks["design_ir_origin_matches_dom"]["ok"])
+        self.assertTrue(checks["native_html_layout_at_page_origin"]["ok"])
+
+    def test_native_html_rect_shift_fails(self) -> None:
+        geometry = self.build(html_shift=3.0)
+        self.assertEqual(geometry["gate"]["failed"], ["frame_placement"])
+        checks = geometry["gate"]["checks"]["frame_placement"]["checks"]
+        self.assertFalse(checks["native_html_layout_at_page_origin"]["ok"])
+
+    def test_native_root_layout_off_panel_origin_fails(self) -> None:
+        geometry = self.build(root_shift=3.0)
+        self.assertEqual(geometry["gate"]["failed"], ["frame_placement"])
+        checks = geometry["gate"]["checks"]["frame_placement"]["checks"]
+        self.assertFalse(checks["native_root_layout_at_dom_origin"]["ok"])
+
+    def test_placement_within_half_pixel_passes(self) -> None:
+        self.assertTrue(self.build(recorded_shift=0.4, html_shift=-0.4)["gate"]["ok"])
+
+    def test_split_inline_root_reads_its_own_row_not_a_continuation(self) -> None:
+        # An inline authored root broken across lines carries one layout row
+        # per line box. The placement proof must read the same row as the
+        # browser node it is matched to; a continuation row starts at the
+        # next line's left edge and would fail a correctly placed panel.
+        snapshot = surface_snapshot(self.FRAME, [self.CHILD])
+        layout = snapshot["documents"][0]["layout"]
+        root_row = layout["nodeIndex"].index(3)
+        layout["nodeIndex"].insert(root_row + 1, 3)
+        layout["bounds"].insert(root_row + 1, [0.0, 240.0, 64.0, 18.0])
+        surface = LAB.dom_authored_surface(snapshot)
+        self.assertEqual(surface["bounds"], self.FRAME)
+        browser = {node.index: node for node in LAB.browser_nodes(snapshot)}
+        self.assertEqual(surface["bounds"], browser[surface["index"]].bounds)
+
+    def test_missing_dom_authored_root_fails_closed(self) -> None:
+        placement = LAB.frame_placement_check({"documents": []}, {}, {}, [])
+        self.assertFalse(placement["ok"])
+        self.assertFalse(placement["checks"]["dom_authored_root_found"]["ok"])
+
+    def test_three_pixel_shift_on_farthest_node_fails_both_directions(self) -> None:
+        for dx in (3.0, -3.0):
+            with self.subTest(dx=dx):
+                geometry = self.build(native_child=self.local_child(dx=dx))
+                # The relative mean cannot see a few pixels this far from the
+                # origin; the per-node maximum must.
+                self.assertGreaterEqual(geometry["gate"]["score"], 0.98)
+                self.assertEqual(geometry["gate"]["failed"],
+                                 ["registered_max_abs_delta"])
+                violation = (geometry["gate"]["checks"]["registered_max_abs_delta"]
+                             ["violations"][0])
+                self.assertEqual(violation["native_anchor"], self.CHILD_ANCHOR)
+                self.assertAlmostEqual(violation["signed_delta"]["x"], dx)
+        # Page-space geometry cannot see a 3 px shift this far from the page
+        # origin either, which is why it gates beside the per-node bound and
+        # never replaces it.
+        self.assertGreaterEqual(
+            self.build(native_child=self.local_child(dx=3.0))["score"], 0.98)
+
+    def test_ten_percent_narrow_box_fails(self) -> None:
+        geometry = self.build(native_child=self.local_child(dw_scale=0.9))
+        self.assertIn("registered_max_abs_delta", geometry["gate"]["failed"])
+
+    def test_non_finite_delta_is_a_violation(self) -> None:
+        # x is the first edge `max` sees and width is not; a NaN must count
+        # wherever it sits.
+        for child in (self.local_child(dx=math.nan), self.local_child(dx=math.inf),
+                      self.local_child(dw_scale=math.nan)):
+            with self.subTest(child=child):
+                geometry = self.build(native_child=child)
+                self.assertIn("registered_max_abs_delta", geometry["gate"]["failed"])
+                bound = geometry["gate"]["checks"]["registered_max_abs_delta"]
+                self.assertEqual(bound["violation_count"], 1)
+                self.assertEqual(bound["violations"][0]["native_anchor"],
+                                 self.CHILD_ANCHOR)
+
+    def test_a_few_correct_boxes_among_many_unmatched_fail_coverage(self) -> None:
+        # Both matched boxes are exact; 98 reference nodes found no match.
+        geometry = self.build(unmatched_reference=98)
+        self.assertTrue(geometry["gate"]["checks"]["registered_max_abs_delta"]["ok"])
+        self.assertEqual(geometry["gate"]["failed"], ["registered_coverage"])
+        coverage = geometry["gate"]["checks"]["registered_coverage"]
+        self.assertAlmostEqual(coverage["coverage"], 0.02)
+        self.assertEqual(coverage["floor"], LAB.PROMOTION_THRESHOLDS["structural"])
+        # Control: the same boxes with every reference node matched pass.
+        self.assertTrue(self.build()["gate"]["ok"])
+
+    def test_a_reference_element_without_a_box_does_not_count_against_coverage(self) -> None:
+        # A head `<title>` has no layout row. Every laid-out box matched, so
+        # the page passes; the boxless node is reported, not scored.
+        geometry = self.build(boxless_reference=1)
+        self.assertTrue(geometry["gate"]["ok"], geometry["gate"])
+        coverage = geometry["gate"]["checks"]["registered_coverage"]
+        self.assertEqual(coverage["coverage"], 1.0)
+        self.assertEqual(coverage["reference_node_count"], 2)
+        self.assertEqual(coverage["unmeasurable_reference_count"], 1)
+        # Negative control: an unmatched laid-out box still counts. Two
+        # matched of three is below the floor whether or not a title sits
+        # beside them.
+        for boxless in (0, 1):
+            with self.subTest(boxless=boxless):
+                geometry = self.build(unmatched_reference=1, boxless_reference=boxless)
+                self.assertEqual(geometry["gate"]["failed"], ["registered_coverage"])
+                self.assertAlmostEqual(
+                    geometry["gate"]["checks"]["registered_coverage"]["coverage"], 2 / 3,
+                    places=5)
+
+    def test_matched_zero_area_boxes_cannot_lift_coverage(self) -> None:
+        # Two exact boxes of three measurable fail the floor. Matched boxes the
+        # denominator excludes must not count in the numerator either, or two
+        # collapsed spans turn 2/3 into 4/3 and the page passes.
+        for zero_area in (0, 2):
+            with self.subTest(zero_area=zero_area):
+                geometry = self.build(unmatched_reference=1, matched_zero_area=zero_area)
+                self.assertEqual(geometry["gate"]["failed"], ["registered_coverage"])
+                coverage = geometry["gate"]["checks"]["registered_coverage"]
+                self.assertAlmostEqual(coverage["coverage"], 2 / 3, places=5)
+                self.assertEqual(coverage["matched_measurable"], 2)
+                self.assertEqual(coverage["matched_bounds"], 2 + zero_area)
+        # Coverage is a fraction of measurable boxes, never above 1.
+        coverage = self.build(matched_zero_area=2)["gate"]["checks"]["registered_coverage"]
+        self.assertEqual(coverage["coverage"], 1.0)
+
+    def test_reference_box_predicate_follows_layout(self) -> None:
+        node = LAB.BrowserNode(1, "div", 0, "", {}, (0.0, 0.0, 4.0, 4.0), {})
+        self.assertTrue(has_reference_box(node))
+        for bounds in (None, (0.0, 0.0, 0.0, 4.0), (0.0, 0.0, 4.0, 0.0)):
+            with self.subTest(bounds=bounds):
+                self.assertFalse(has_reference_box(
+                    LAB.BrowserNode(1, "div", 0, "", {}, bounds, {})))
+        # A shape inside an inline svg is measured in the svg's frame.
+        self.assertTrue(has_reference_box(LAB.BrowserNode(
+            1, "path", 0, "", {}, None, {}, svg_viewport=(0.0, 0.0, 24.0, 24.0))))
+
+    def test_sub_pixel_delta_passes(self) -> None:
+        geometry = self.build(native_child=self.local_child(dx=0.9))
+        self.assertTrue(geometry["gate"]["ok"], geometry["gate"])
+
+    def test_large_intra_panel_defect_fails_registered_mean(self) -> None:
+        geometry = self.build(native_child=(4.0, 120.0, 60.0, 4.0))
+        self.assertIn("registered_mean", geometry["gate"]["failed"])
+
+    def test_aggregate_counts_geometry_gate_not_score(self) -> None:
+        def report(geometry):
+            return {
+                "promotion": {"classification": "native-with-browser-validation"},
+                "comparison": {
+                    "structural": {"score": 1.0}, "geometry": geometry,
+                    "typography": {"score": 1.0}, "visual": {"score": 1.0}},
+                "timings": {"browser_import_ms": 1, "native_import_ms": 1,
+                            "native_render_ms": 1, "native_total_ms": 2,
+                            "browser_to_native_import_speedup": 1.0},
+                "classifications": [],
+            }
+
+        aggregate = LAB.aggregate_reports([
+            report(self.build()),
+            report(self.build(native_child=self.local_child(dx=3.0)))])
+        self.assertEqual(aggregate["gate_summary"]["geometry"]["pass_count"], 1)
+        raw = aggregate["diagnostics"]["raw_page_space_geometry"]
+        self.assertEqual(raw["role"], "gated-within-geometry-gate")
+        self.assertEqual(raw["fixture_count"], 2)
+
+
+class InputTypeTableTests(unittest.TestCase):
+    """The three input-type tables, one per language, must not drift apart."""
+
+    CPP_CONTROLS = REPO / "tools/import-design/browser_capture_controls.cpp"
+    JS_THEME = REPO / "tools/import-design/browser_capture/form_control_theme.mjs"
+
+    @staticmethod
+    def string_set(text: str, opening: str, closing: str) -> set[str]:
+        start = text.index(opening) + len(opening)
+        return set(re.findall(r'"([^"]*)"', text[start:text.index(closing, start)]))
+
+    def tables(self) -> tuple[set[str], set[str], set[str], frozenset[str]]:
+        cpp = self.CPP_CONTROLS.read_text(encoding="utf-8")
+        js = self.JS_THEME.read_text(encoding="utf-8")
+        value_types = self.string_set(cpp, "kValueTypes = {", "};")
+        text_types = self.string_set(js, "const TEXT_INPUT_TYPES = new Set([", "]);")
+        button_types = self.string_set(js, "const BUTTON_INPUT_TYPES = new Set([", "]);")
+        return value_types, text_types, button_types, FORM_CONTROLS.SHADOW_PART_INPUT_TYPES
+
+    def test_value_text_types_are_the_theme_families_without_password(self) -> None:
+        value_types, text_types, button_types, _ = self.tables()
+        self.assertIn("password", text_types)
+        self.assertEqual(value_types, (text_types | button_types) - {"password"})
+
+    def test_known_input_type_tables_agree_across_languages(self) -> None:
+        cpp = self.CPP_CONTROLS.read_text(encoding="utf-8")
+        js = self.JS_THEME.read_text(encoding="utf-8")
+        cpp_known = self.string_set(cpp, "kKnownInputTypes = {", "};")
+        js_known = self.string_set(js, "const KNOWN_INPUT_TYPES = new Set([", "]);")
+        self.assertEqual(len(cpp_known), 22)
+        self.assertEqual(cpp_known, js_known)
+        self.assertEqual(cpp_known, set(FORM_CONTROLS.KNOWN_INPUT_TYPES))
+        value_types, text_types, button_types, shadow = self.tables()
+        # Every family is drawn from the known states, so an unknown type can
+        # only ever reach them as `text`.
+        for table in (value_types, text_types, button_types, set(shadow)):
+            self.assertLessEqual(table, cpp_known)
+
+    def test_type_normalisation_follows_html(self) -> None:
+        normalize = FORM_CONTROLS.normalize_input_type
+        self.assertEqual(normalize(None), "text")
+        self.assertEqual(normalize(""), "text")
+        self.assertEqual(normalize("bogus"), "text")
+        self.assertEqual(normalize("PASSWORD"), "password")
+        self.assertEqual(normalize("Range"), "range")
+        # Not trimmed: Chromium paints type=" password " as a text field.
+        self.assertEqual(normalize(" password "), "text")
+        # ASCII case-insensitive only: U+0130 does not fold to "i".
+        self.assertEqual(normalize("\u0130mage"), "text")
+
+    def test_unknown_type_is_a_text_field_for_the_boundary(self) -> None:
+        node = SimpleNamespace(
+            tag="input", index=1, bounds=(0.0, 0.0, 10.0, 10.0),
+            attributes={"type": "bogus"}, styles={"appearance": "auto"})
+        snapshot = {"documents": [], "strings": [], "formControlTheme": {
+            "controls": [{"node_index": 1, "theme": "author"}]}}
+        rows = FORM_CONTROLS.form_controls([node], snapshot)
+        self.assertEqual(rows[0]["type"], "text")
+        self.assertEqual(rows[0]["status"], FORM_CONTROLS.AUTHOR_STYLED)
+
+    def test_shadow_part_types_are_outside_both_theme_families(self) -> None:
+        _, text_types, button_types, shadow = self.tables()
+        self.assertTrue(shadow)
+        self.assertEqual(set(shadow) & (text_types | button_types), set())
+
+
+class FormControlBoundaryTests(unittest.TestCase):
+    """Themed form controls are a stated boundary, never a hidden score."""
+
+    @staticmethod
+    def form_snapshot(with_theme: bool = True) -> dict:
+        # 0 DIV, 1 INPUT[type=range] (themed), 2 INPUT[type=checkbox]
+        # (appearance:none), 3 INPUT[type=range] (appearance:none), 4 SELECT,
+        # 5 OPTION (no layout), 6 its text, 7 SPAN (no layout, outside a select),
+        # 8 BUTTON (appearance:auto, author background), 9 BUTTON
+        # (appearance:auto, unstyled).
+        strings = [
+            "DIV", "INPUT", "SELECT", "OPTION", "#text", "SPAN", "type",
+            "range", "checkbox", "block", "auto", "none", "inline-block",
+            "A", "BUTTON",
+        ]
+        snapshot = {
+            "strings": strings,
+            "computedStyleNames": ["display", "appearance"],
+            "documents": [{
+                "nodes": {
+                    "parentIndex": [-1, 0, 0, 0, 0, 4, 5, 0, 0, 0],
+                    "nodeType": [1, 1, 1, 1, 1, 1, 3, 1, 1, 1],
+                    "nodeName": [0, 1, 1, 1, 2, 3, 4, 5, 14, 14],
+                    "nodeValue": [-1, -1, -1, -1, -1, -1, 13, -1, -1, -1],
+                    "attributes": [[], [6, 7], [6, 8], [6, 7], [], [], [], [],
+                                   [], []],
+                },
+                "layout": {
+                    "nodeIndex": [0, 1, 2, 3, 4, 8, 9],
+                    "bounds": [[0, 0, 100, 140], [10, 10, 40, 10],
+                               [10, 30, 10, 10], [10, 50, 40, 10],
+                               [10, 70, 40, 20], [10, 95, 40, 20],
+                               [10, 118, 40, 20]],
+                    "styles": [[9, 11], [12, 10], [12, 11], [12, 11], [12, 11],
+                               [12, 10], [12, 10]],
+                },
+            }],
+        }
+        if with_theme:
+            # The capture's verdicts, as `form_control_theme.mjs` writes them.
+            snapshot["formControlTheme"] = {
+                "schema": "pulp-form-control-theme-v1",
+                "controls": [
+                    {"node_index": 1, "theme": "native"},
+                    {"node_index": 2, "theme": "none"},
+                    {"node_index": 3, "theme": "none"},
+                    {"node_index": 4, "theme": "none"},
+                    {"node_index": 8, "theme": "author"},
+                    {"node_index": 9, "theme": "native"},
+                ],
+            }
+        return snapshot
+
+    def test_unlaid_out_options_are_not_expected_boxes(self) -> None:
+        tags = [node.tag for node in LAB.browser_nodes(self.form_snapshot())]
+        # The select draws its option; the option has no box to lower.
+        self.assertNotIn("option", tags)
+        # Control: an element without layout OUTSIDE a select is still counted,
+        # so the exclusion is the select's ownership and not missing layout.
+        self.assertIn("span", tags)
+        self.assertIn("select", tags)
+
+    def test_control_status_separates_theme_from_author_styling(self) -> None:
+        from importer_differential.form_controls import form_controls
+
+        snapshot = self.form_snapshot()
+        rows = form_controls(LAB.browser_nodes(snapshot), snapshot)
+        status = {row["browser_node"]: row["status"] for row in rows}
+        # A themed range is the theme's, and the lowering reskins it.
+        self.assertEqual(status[1], "ua-theme-skinned")
+        self.assertEqual(status[2], "author-styled")
+        # appearance:none does not reach a range's thumb.
+        self.assertEqual(status[3], "ua-shadow-form-part")
+        self.assertEqual(status[4], "author-styled")
+        # Both buttons compute `appearance: auto`. Author box styling drops
+        # Chromium's theme, so only the unstyled one is the theme's.
+        self.assertEqual(status[8], "author-styled")
+        self.assertEqual(status[9], "ua-theme-skinned")
+
+        # A capture without verdicts cannot say who painted an `auto`
+        # control, and does not guess either way.
+        legacy = self.form_snapshot(with_theme=False)
+        rows = form_controls(LAB.browser_nodes(legacy), legacy)
+        status = {row["browser_node"]: row["status"] for row in rows}
+        self.assertEqual(status[8], "theme-unresolved")
+        self.assertEqual(status[9], "theme-unresolved")
+        self.assertEqual(status[2], "author-styled")
+        from importer_differential.form_controls import control_status
+        self.assertEqual(control_status("button", "", {}),
+                         "appearance-unrecorded")
+
+    def test_only_themed_controls_without_a_native_skin_are_a_boundary(
+            self) -> None:
+        from importer_differential.form_controls import control_status
+
+        auto = {"appearance": "auto"}
+
+        def status(tag: str, input_type: str = "", theme: str = "native") -> str:
+            return control_status(tag, input_type, auto, theme, True)
+
+        for tag, input_type in (("button", ""), ("input", "range"),
+                                ("input", "checkbox"), ("input", "radio"),
+                                ("input", "button"), ("input", "submit"),
+                                ("input", "reset")):
+            self.assertEqual(status(tag, input_type), "ua-theme-skinned",
+                             (tag, input_type))
+        # The theme still paints these and the lowering has no skin for them.
+        for tag, input_type in (("select", ""), ("textarea", ""),
+                                ("meter", ""), ("progress", ""),
+                                ("input", "text"), ("input", "date"),
+                                ("input", "color"), ("input", "file"),
+                                ("input", "image")):
+            self.assertEqual(status(tag, input_type), "ua-default-form-chrome",
+                             (tag, input_type))
+        # Only the native verdict is reskinned: an author-styled button is the
+        # author's, and a styled select's arrow is still the UA's.
+        self.assertEqual(status("button", "", "author"), "author-styled")
+        self.assertEqual(status("select", "", "author-arrow"),
+                         "ua-shadow-form-part")
+
+    def test_skinned_types_are_the_ones_the_capture_records_state_for(
+            self) -> None:
+        from importer_differential import form_controls as fc
+
+        cpp = InputTypeTableTests.CPP_CONTROLS.read_text(encoding="utf-8")
+        start = cpp.index("bool record_ua_control_state(")
+        body = cpp[start:cpp.index("\n}\n", start)]
+        tags = set(re.findall(r'tag == "([^"]+)"', body)) - {"input"}
+        types = set(re.findall(r'type == "([^"]+)"', body))
+        types |= set(re.findall(r'type != "([^"]+)"', body))
+        self.assertEqual(tags, set(fc.THEME_SKINNED_TAGS))
+        self.assertEqual(types, set(fc.THEME_SKINNED_INPUT_TYPES))
+
+    @requires_pillow
+    def test_a_skinned_control_keeps_its_share_but_is_no_boundary(self) -> None:
+        from importer_differential.form_controls import (
+            attribute_residual, support_boundaries)
+
+        controls = [
+            {"tag": "button", "type": None, "appearance": "auto",
+             "status": "ua-theme-skinned", "bounds": [10, 10, 20, 10]},
+            {"tag": "select", "type": None, "appearance": "auto",
+             "status": "ua-default-form-chrome", "bounds": [60, 10, 20, 10]},
+        ]
+        reference = Image.new("RGBA", (100, 40), (240, 240, 240, 255))
+        for x in range(6, 24):
+            for y in range(6, 14):
+                reference.putpixel((x, y), (0, 0, 255, 255))
+        attribution = attribute_residual(
+            controls, reference, Image.new("RGBA", (100, 40), (240, 240, 240, 255)),
+            (5.0, 5.0), 1.0)
+        # The skinned button still owns its error, and that error is the
+        # importer's: no boundary claims it.
+        self.assertEqual(attribution["controls"][0]["foreground_error_share"], 1.0)
+        self.assertEqual(attribution["boundary_foreground_error_share"], 0.0)
+        self.assertEqual([b["boundary"] for b in support_boundaries(attribution)],
+                         ["ua-default-form-chrome"])
+        self.assertEqual(support_boundaries(
+            {"controls": attribution["controls"][:1]}), [])
+
+    @requires_pillow
+    def test_residual_is_attributed_to_the_control_that_owns_it(self) -> None:
+        from importer_differential.form_controls import (
+            attribute_residual, support_boundaries)
+
+        controls = [
+            {"tag": "input", "type": "range", "appearance": "auto",
+             "status": "ua-default-form-chrome", "bounds": [10, 10, 20, 10]},
+            {"tag": "input", "type": "checkbox", "appearance": "none",
+             "status": "author-styled", "bounds": [60, 10, 10, 10]},
+        ]
+        reference = Image.new("RGBA", (100, 40), (240, 240, 240, 255))
+        candidate = reference.copy()
+        # Error only inside the themed control's box (page origin (5, 5)).
+        for x in range(6, 24):
+            for y in range(6, 14):
+                reference.putpixel((x, y), (0, 0, 255, 255))
+        attribution = attribute_residual(controls, reference, candidate,
+                                         (5.0, 5.0), 1.0)
+        shares = [row["foreground_error_share"]
+                  for row in attribution["controls"]]
+        self.assertEqual(shares, [1.0, 0.0])
+        self.assertEqual(attribution["boundary_foreground_error_share"], 1.0)
+        boundaries = support_boundaries(attribution)
+        self.assertEqual([b["boundary"] for b in boundaries],
+                         ["ua-default-form-chrome"])
+        # Negative control: the same error under the author-styled control is
+        # not the theme's, and no boundary takes credit for it.
+        candidate = reference.copy()
+        reference = Image.new("RGBA", (100, 40), (240, 240, 240, 255))
+        for x in range(56, 64):
+            for y in range(6, 14):
+                reference.putpixel((x, y), (0, 0, 255, 255))
+        attribution = attribute_residual(controls, reference,
+                                         Image.new("RGBA", (100, 40),
+                                                   (240, 240, 240, 255)),
+                                         (5.0, 5.0), 1.0)
+        self.assertEqual(attribution["boundary_foreground_error_share"], 0.0)
+        self.assertEqual(attribution["controls"][1]["foreground_error_share"],
+                         1.0)
+
+    def test_boundary_makes_fixture_browser_required_without_moving_scores(
+            self) -> None:
+        perfect = {"score": 1.0}
+        visual = {"score": 0.7, "registered_visual": {"score": 0.71}}
+        boundary = [{"boundary": "ua-default-form-chrome", "control_count": 2,
+                     "controls": ["button", "input[type=range]"],
+                     "foreground_error_share": 0.9}]
+        result = LAB.promotion_recommendation(
+            [], perfect, perfect, perfect, visual, {"status": "pass", "failures": []},
+            support_boundaries=boundary)
+        self.assertEqual(result["classification"], "browser-required")
+        self.assertFalse(result["threshold_eligible"])
+        self.assertEqual(result["visual_gate_score"], 0.71)
+        self.assertEqual(result["visual_full_frame_score"], 0.7)
+        self.assertEqual(result["support_boundaries"], [
+            {"boundary": "ua-default-form-chrome", "control_count": 2,
+             "foreground_error_share": 0.9}])
+        self.assertFalse(result["boundary_overrides_passing_gates"])
+        self.assertTrue(any("visual score below" in reason
+                            for reason in result["reasons"]))
+        # A fixture whose every numeric gate passes stays ineligible across the
+        # boundary, and the report says the boundary, not a score, decided it.
+        gated = {"score": 1.0, "gate": {"ok": True, "failed": []}}
+        result = LAB.promotion_recommendation(
+            [], perfect, gated, perfect, perfect, {"status": "pass", "failures": []},
+            support_boundaries=boundary)
+        self.assertTrue(result["numeric_gates_pass"])
+        self.assertFalse(result["threshold_eligible"])
+        self.assertTrue(result["boundary_overrides_passing_gates"])
+        self.assertIn("every numeric gate passes", result["reasons"][0])
+        self.assertEqual(result["support_boundaries"][0]
+                         ["foreground_error_share"], 0.9)
+        # Without the boundary the same scores are eligible: the override is
+        # the boundary's alone.
+        result = LAB.promotion_recommendation(
+            [], perfect, gated, perfect, perfect, {"status": "pass", "failures": []},
+            support_boundaries=[])
+        self.assertTrue(result["threshold_eligible"])
+        self.assertFalse(result["boundary_overrides_passing_gates"])
+        recognition = LAB.source_recognition("<!doctype html><html></html>")
+        causes = [finding["cause"] for finding in LAB.classify_gaps(
+            recognition, perfect, perfect, perfect, visual,
+            {"support_boundaries": boundary, "controls": []})]
+        self.assertIn("ua-default-form-chrome", causes)
+
+    def test_corpus_lists_every_boundary_reclassification(self) -> None:
+        def report(path, promotion):
+            return {
+                "source": {"path": path},
+                "promotion": {"classification": "browser-required",
+                              **promotion},
+                "comparison": {
+                    "structural": {"score": 1.0},
+                    "geometry": {"score": 1.0, "gate": {"ok": True}},
+                    "typography": {"score": 1.0}, "visual": {"score": 1.0}},
+                "timings": {"browser_import_ms": 1, "native_import_ms": 1,
+                            "native_render_ms": 1, "native_total_ms": 2,
+                            "browser_to_native_import_speedup": 1.0},
+                "classifications": [],
+            }
+
+        boundary = [{"boundary": "ua-default-form-chrome", "control_count": 1,
+                     "foreground_error_share": 0.4}]
+        aggregate = LAB.aggregate_reports([
+            report("passing.html", {"support_boundaries": boundary,
+                                    "boundary_overrides_passing_gates": True}),
+            report("plain.html", {})])
+        rows = aggregate["support_boundary_fixtures"]
+        self.assertEqual([row["fixture"] for row in rows], ["passing.html"])
+        self.assertTrue(rows[0]["boundary_overrides_passing_gates"])
+        from importer_differential.reports import format_corpus_summary
+        self.assertIn("every numeric gate passes",
+                      format_corpus_summary(aggregate))
+
+
+@requires_pillow
+class FullFrameClassificationTests(unittest.TestCase):
+    PAGE = (16, 21, 34, 255)
+    PANEL = (40, 60, 90, 255)
+    INK = (230, 230, 230, 255)
+    FRAME = {"x": 6, "y": 4, "width": 12, "height": 10}
+
+    def panel(self, image, left, top):
+        for y in range(top, top + 10):
+            for x in range(left, left + 12):
+                image.putpixel((x, y), self.PANEL)
+        for x in range(left + 2, left + 8):
+            image.putpixel((x, top + 4), self.INK)
+
+    def classify(self, native_hook=None):
+        browser = Image.new("RGBA", (40, 30), self.PAGE)
+        self.panel(browser, 6, 4)
+        native = Image.new("RGBA", (40, 30), self.PAGE)
+        self.panel(native, 0, 0)
+        if native_hook:
+            native_hook(native)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            browser.save(root / "browser.png")
+            native.save(root / "native.png")
+            return LAB.visual_metrics(
+                root / "browser.png", root / "native.png", root / "overlays",
+                (40, 30), self.FRAME, 1.0)
+
+    def promote(self, visual):
+        perfect = {"score": 1.0}
+        geometry = {"score": 1.0, "gate": {"ok": True, "failed": []}}
+        return LAB.promotion_recommendation(
+            [], perfect, geometry, perfect, visual, {"status": "pass", "failures": []})
+
+    def test_panel_translation_is_measured_and_promotes(self) -> None:
+        visual = self.classify()
+        self.assertLess(visual["score"], 0.995)
+        self.assertEqual(visual["registered_visual"]["score"], 1.0)
+        classification = visual["full_frame_classification"]
+        self.assertEqual(classification["classification"], "panel-translation")
+        self.assertEqual(classification["offset_px"], [6, 4])
+        self.assertEqual(classification["shifted_score"], 1.0)
+        self.assertEqual(
+            classification["shifted_outside_frame"]["differing_pixel_count"], 0)
+        self.assertTrue(LAB.full_frame_ok(visual))
+        self.assertTrue(self.promote(visual)["threshold_eligible"])
+
+    def test_planted_outside_frame_defect_stays_unexplained_and_blocks(self) -> None:
+        def blob(native):
+            for y in range(20, 24):
+                for x in range(30, 34):
+                    native.putpixel((x, y), self.INK)
+        visual = self.classify(blob)
+        # The panel itself still registers perfectly; only the full-frame
+        # classification can see the defect.
+        self.assertEqual(visual["registered_visual"]["score"], 1.0)
+        classification = visual["full_frame_classification"]
+        self.assertEqual(classification["classification"], "unexplained")
+        self.assertIn("outside-frame", classification["residual_locus"])
+        self.assertGreater(
+            classification["shifted_outside_frame"]["differing_pixel_count"], 0)
+        self.assertFalse(LAB.full_frame_ok(visual))
+        result = self.promote(visual)
+        self.assertFalse(result["threshold_eligible"])
+        self.assertTrue(any(reason.startswith("full-frame visual")
+                            and reason.endswith("classified unexplained")
+                            for reason in result["reasons"]), result["reasons"])
+
+    def test_page_background_mismatch_stays_unexplained(self) -> None:
+        def host_clear(native):
+            for y in range(native.height):
+                for x in range(native.width):
+                    if not (x < 12 and y < 10):
+                        native.putpixel((x, y), (30, 30, 46, 255))
+        classification = self.classify(host_clear)["full_frame_classification"]
+        self.assertEqual(classification["classification"], "unexplained")
+        self.assertIn("outside-frame", classification["residual_locus"])
+
+    def test_subtle_outside_frame_defect_blocks_despite_high_shifted_score(self) -> None:
+        def faint(native):
+            native.putpixel((20, 15), (22, 21, 34, 255))
+        classification = self.classify(faint)["full_frame_classification"]
+        # One faint pixel barely moves the similarity score, but any differing
+        # outside-frame pixel leaves the residual unexplained.
+        self.assertGreaterEqual(classification["shifted_score"], 0.995)
+        self.assertEqual(
+            classification["shifted_outside_frame"]["differing_pixel_count"], 1)
+        self.assertEqual(classification["classification"], "unexplained")
+
+    def test_vacated_margin_uses_native_background_not_browser(self) -> None:
+        # A panel that nearly fills the native canvas leaves only margin that
+        # shifts out of view. The vacated page margin must be filled from the
+        # native render; filling it from the browser would hide a native page
+        # background that differs from Chromium's.
+        browser = Image.new("RGBA", (40, 30), self.PAGE)
+        native = Image.new("RGBA", (40, 30), (30, 30, 46, 255))
+        for image, left, top in ((browser, 6, 4), (native, 0, 0)):
+            for y in range(top, top + 26):
+                for x in range(left, left + 34):
+                    image.putpixel((x, y), self.PANEL)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            browser.save(root / "browser.png")
+            native.save(root / "native.png")
+            visual = LAB.visual_metrics(
+                root / "browser.png", root / "native.png", root / "overlays",
+                (40, 30), {"x": 6, "y": 4, "width": 34, "height": 26}, 1.0)
+        classification = visual["full_frame_classification"]
+        self.assertEqual(classification["fill"], [30, 30, 46, 255])
+        self.assertEqual(classification["classification"], "unexplained")
+
+    def test_unoffset_residual_is_unexplained(self) -> None:
+        frame = Image.new("RGBA", (40, 30), self.PAGE)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            frame.save(root / "browser.png")
+            Image.new("RGBA", (40, 30), self.INK).save(root / "native.png")
+            visual = LAB.visual_metrics(
+                root / "browser.png", root / "native.png", root / "overlays",
+                (40, 30), {"x": 0, "y": 0, "width": 40, "height": 30}, 1.0)
+        self.assertEqual(visual["full_frame_classification"]["classification"],
+                         "unexplained")
+        self.assertFalse(LAB.full_frame_ok(visual))
+
+    def placed(self, status):
+        # The observer placed the panel at the authored origin but left the
+        # page around it unpainted: only the outside of the frame differs.
+        browser = Image.new("RGBA", (40, 30), self.PAGE)
+        self.panel(browser, 6, 4)
+        native = Image.new("RGBA", (40, 30), (0, 0, 0, 0))
+        self.panel(native, 6, 4)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            browser.save(root / "browser.png")
+            native.save(root / "native.png")
+            return LAB.visual_metrics(
+                root / "browser.png", root / "native.png", root / "overlays",
+                (40, 30), self.FRAME, 1.0, (6, 4), status)
+
+    def test_unresolved_page_background_names_the_outside_residual(self) -> None:
+        visual = self.placed("unresolved")
+        classification = visual["full_frame_classification"]
+        self.assertEqual(classification["classification"], "page-background-unresolved")
+        self.assertEqual(classification["residual_locus"], ["outside-frame"])
+        self.assertEqual(visual["registered_visual"]["score"], 1.0)
+        # Named, not excused: it still blocks promotion.
+        self.assertFalse(LAB.full_frame_ok(visual))
+        result = self.promote(visual)
+        self.assertFalse(result["threshold_eligible"])
+        self.assertIn("classified page-background-unresolved", " ".join(result["reasons"]))
+
+    def test_resolved_page_background_outside_residual_stays_unexplained(self) -> None:
+        # Control: the same outside residual with a resolved page colour is a
+        # real page defect, not a missing input.
+        for status in ("resolved", "importer-owned", None):
+            with self.subTest(status=status):
+                visual = self.placed(status)
+                self.assertEqual(visual["full_frame_classification"]["classification"],
+                                 "unexplained")
+                self.assertFalse(LAB.full_frame_ok(visual))
+
+    def test_low_full_frame_without_classification_fails_closed(self) -> None:
+        self.assertFalse(LAB.full_frame_ok({"score": 0.9}))
+        self.assertFalse(LAB.full_frame_ok({"score": 0.9, "full_frame_classification": {
+            "classification": "panel-translation", "shifted_score": 0.9,
+            "shifted_outside_frame": {"differing_pixel_count": 0}}}))
+        self.assertFalse(LAB.full_frame_ok({"score": 0.9, "full_frame_classification": {
+            "classification": "panel-translation", "shifted_score": 1.0,
+            "shifted_outside_frame": {"differing_pixel_count": 3}}}))
+        self.assertTrue(LAB.full_frame_ok({"score": 0.999}))
+
+    def test_boundary_and_full_frame_reasons_are_both_reported(self) -> None:
+        def blob(native):
+            for y in range(20, 24):
+                for x in range(30, 34):
+                    native.putpixel((x, y), self.INK)
+        perfect = {"score": 1.0}
+        geometry = {"score": 1.0, "gate": {"ok": True, "failed": []}}
+        boundary = [{"boundary": "ua-default-form-chrome", "control_count": 1,
+                     "controls": ["input[type=range]"],
+                     "foreground_error_share": 0.5}]
+        result = LAB.promotion_recommendation(
+            [], perfect, geometry, perfect, self.classify(blob), {"status": "pass", "failures": []},
+            support_boundaries=boundary)
+        self.assertEqual(result["classification"], "browser-required")
+        self.assertFalse(result["threshold_eligible"])
+        self.assertTrue(any(reason.startswith("support boundary ua-default-form-chrome")
+                            for reason in result["reasons"]), result["reasons"])
+        self.assertTrue(any(reason.startswith("full-frame visual")
+                            and reason.endswith("classified unexplained")
+                            for reason in result["reasons"]), result["reasons"])
 
 
 if __name__ == "__main__":

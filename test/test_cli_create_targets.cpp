@@ -135,12 +135,21 @@ TEST_CASE("CLI create standalone commands quote paths with spaces",
     const fs::path sdk_dir = fs::path("SDK Cache") / "Pulp SDK";
 
     const auto configure =
-        create_standalone_configure_command(source_dir, build_dir, false, sdk_dir);
+        create_standalone_configure_command(source_dir, build_dir, false, sdk_dir, false);
     CHECK(configure.find("-S \"" + source_dir.string() + "\"") != std::string::npos);
     CHECK(configure.find("-B \"" + build_dir.string() + "\"") != std::string::npos);
     CHECK(configure.find("-DCMAKE_BUILD_TYPE=\"Release\"") != std::string::npos);
     CHECK(configure.find("-DCMAKE_PREFIX_PATH=\"" + sdk_dir.string() + "\"")
           != std::string::npos);
+    // The scaffolded project is the developer loop: its ui.js hot reload needs
+    // the on-disk override compiled in.
+    CHECK(configure.find(" -DPULP_DEV_BUILD=ON ") != std::string::npos);
+
+    CHECK(configure.find(" -G ") == std::string::npos);
+
+    const auto ninja =
+        create_standalone_configure_command(source_dir, build_dir, false, sdk_dir, true);
+    CHECK(ninja.find(" -G Ninja ") != std::string::npos);
 
     const auto ctest = create_standalone_ctest_command(build_dir, true);
     CHECK(ctest.find("--test-dir \"" + build_dir.string() + "\"") != std::string::npos);

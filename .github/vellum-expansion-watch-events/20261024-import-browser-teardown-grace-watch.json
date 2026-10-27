@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261024-import-browser-teardown-grace-watch",
+  "created_at": "2026-10-25T01:05:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-output-and-packaging",
+    "design-source-ingest"
+  ],
+  "rationale": "Capture browser teardown ends its SIGTERM grace once the custody anchor that leads the browser's process group is the group's only member, instead of always waiting the full window for an anchor that ignores SIGTERM by design; the identity recheck and SIGKILL escalation are unchanged, and a helper that ignores SIGTERM still gets the full window. Teardown runs after every artifact is written, so no captured value, lowering rule, or DesignIR output changes, and no design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "node --test tools/import-design/browser_capture/browser_process.test.mjs",
+    "ctest --test-dir build -R pulp-browser-capture-node-unit",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

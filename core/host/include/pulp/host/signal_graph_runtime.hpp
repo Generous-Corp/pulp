@@ -16,6 +16,7 @@
 #include <pulp/audio/buffer.hpp>
 #include <pulp/audio/live_dsp_telemetry.hpp>
 #include <pulp/audio/load_measurer.hpp>
+#include <pulp/format/audio_input_provider.hpp>
 #include <pulp/format/audio_workgroup_client.hpp>
 #include <pulp/format/graph_runtime_executor.hpp>
 #include <pulp/host/anticipation_lane.hpp>
@@ -68,7 +69,7 @@ std::shared_ptr<ExactParameterIngressOwner> make_exact_parameter_ingress_owner()
 // private lifetime map remains the sole owner of ProcessorNode reachability.
 std::optional<std::vector<HostParamInfo>> processor_node_parameters(const SignalGraph& graph,
                                                                     NodeId id);
-}
+} // namespace detail
 
 class TimelineGraphPlaybackBinding;
 class SampleRegionParameterBinding;
@@ -76,7 +77,7 @@ class SampleRegionParameterBinding;
 // ── Signal Graph ────────────────────────────────────────────────────────
 
 class SignalGraph : public format::AudioWorkgroupClient {
-public:
+  public:
     class PreparedTopologyEdit;
     class ExecutionSnapshot;
 
@@ -104,8 +105,7 @@ public:
 
     struct GeneratedGraphValidation {
         bool accepted = true;
-        GeneratedGraphValidationRejectReason reason =
-            GeneratedGraphValidationRejectReason::None;
+        GeneratedGraphValidationRejectReason reason = GeneratedGraphValidationRejectReason::None;
         std::size_t actual = 0;
         std::size_t limit = 0;
     };
@@ -135,9 +135,10 @@ public:
 
     struct PluginCatalogToken {
         std::uint64_t value = 0;
-        explicit operator bool() const noexcept { return value != 0; }
-        friend bool operator==(PluginCatalogToken a,
-                               PluginCatalogToken b) noexcept {
+        explicit operator bool() const noexcept {
+            return value != 0;
+        }
+        friend bool operator==(PluginCatalogToken a, PluginCatalogToken b) noexcept {
             return a.value == b.value;
         }
     };
@@ -148,15 +149,13 @@ public:
     NodeId add_input_node(int channels, const std::string& name = "Input");
     NodeId add_output_node(int channels, const std::string& name = "Output");
     NodeId add_plugin_node(const PluginInfo& info);
-    NodeId add_unresolved_plugin_node(const PluginInfo& info,
-                                      int num_inputs, int num_outputs,
+    NodeId add_unresolved_plugin_node(const PluginInfo& info, int num_inputs, int num_outputs,
                                       const std::string& name);
 
     // Add a plugin node wrapping a caller-provided slot. Useful for tests
     // (mock latency, mock processing) and for hosts that build their own
     // PluginSlot implementations outside of PluginSlot::load().
-    NodeId add_plugin_node(std::unique_ptr<PluginSlot> slot,
-                           int num_inputs, int num_outputs,
+    NodeId add_plugin_node(std::unique_ptr<PluginSlot> slot, int num_inputs, int num_outputs,
                            const std::string& name = "Plugin");
     /// Add an owned in-process Processor. The main-bus channel counts and default
     /// name come from its frozen descriptor. Processor nodes are runtime-only:
@@ -166,6 +165,14 @@ public:
     NodeId add_processor_node(std::unique_ptr<format::Processor> processor,
                               const std::string& name = {});
     bool is_processor_node(NodeId id) const;
+
+    /// Install a host-owned realtime input-bus provider on an in-process
+    /// Processor node. The small POD handle is copied before prepare(); the
+    /// provider itself must remain immutable and valid for every audio block
+    /// until the node is removed. Returns false for unknown/non-Processor
+    /// nodes or after a live snapshot has been prepared.
+    bool set_processor_audio_input_provider(NodeId id,
+                                            format::AudioInputBusProvider provider) noexcept;
     NodeId add_gain_node(const std::string& name = "Gain");
     NodeId add_midi_input_node(const std::string& name = "MIDI In");
     NodeId add_midi_output_node(const std::string& name = "MIDI Out");
@@ -201,8 +208,7 @@ public:
     // and after this graph is destroyed.
     std::vector<CustomNodeTypeMetadata> custom_node_types() const;
     const CustomNodeType* custom_node_type(std::string_view type_id) const;
-    const CustomNodeType* custom_node_type(std::string_view type_id,
-                                           int version) const;
+    const CustomNodeType* custom_node_type(std::string_view type_id, int version) const;
     const SampleKernelDescriptor* sample_kernel_type(std::string_view type_id, int version) const;
     SampleRegionProof prove_sample_region(SampleRegionId id) const;
     std::optional<SampleRegionDescriptor> sample_region(SampleRegionId id) const;
@@ -210,16 +216,10 @@ public:
     const SampleRegionParameterBinding* sample_region_parameter_binding() const noexcept {
         return sample_region_parameter_binding_;
     }
-    NodeId add_custom_node(std::string_view type_id,
-                           const std::string& name = {});
-    NodeId add_custom_node(std::string_view type_id,
-                           int version,
-                           const std::string& name = {});
-    NodeId add_unresolved_custom_node(std::string_view type_id,
-                                      int version,
-                                      int num_inputs,
-                                      int num_outputs,
-                                      const std::string& name);
+    NodeId add_custom_node(std::string_view type_id, const std::string& name = {});
+    NodeId add_custom_node(std::string_view type_id, int version, const std::string& name = {});
+    NodeId add_unresolved_custom_node(std::string_view type_id, int version, int num_inputs,
+                                      int num_outputs, const std::string& name);
 
     // Opaque per-node state for stateful custom nodes.
     // custom_node_state() returns the live instance's save_state() when the node
@@ -235,15 +235,13 @@ public:
     bool remove_node(NodeId id);
 
     // Connect two nodes (port-to-port)
-    bool connect(NodeId source, PortIndex source_port,
-                 NodeId dest, PortIndex dest_port);
+    bool connect(NodeId source, PortIndex source_port, NodeId dest, PortIndex dest_port);
 
     // Connect with an explicit one-block delay. Permitted to close a cycle
     // (the back-edge the user is intentionally introducing) and invisible to
     // topological sort. The destination reads the source's previous-block
     // output, giving the feedback loop a block-sized delay.
-    bool connect_feedback(NodeId source, PortIndex source_port,
-                          NodeId dest, PortIndex dest_port);
+    bool connect_feedback(NodeId source, PortIndex source_port, NodeId dest, PortIndex dest_port);
 
     // MIDI connection: routes events from source's MIDI output into dest's
     // MIDI input. Ports are ignored (MIDI is node-scoped, not port-scoped).
@@ -265,8 +263,8 @@ public:
     // port) → (dest, dest sidechain port). Calling this is equivalent to
     // connect() with an extra flag, plus a guard that the destination is
     // a Plugin node (sidechain only makes sense on plugins).
-    bool connect_sidechain(NodeId source, PortIndex source_port,
-                           NodeId dest, PortIndex dest_sidechain_port);
+    bool connect_sidechain(NodeId source, PortIndex source_port, NodeId dest,
+                           PortIndex dest_sidechain_port);
 
     // Automation connection: the audio samples on `src`'s output port drive
     // `dest`'s parameter `dest_param_id`. Two control points per block (first
@@ -281,20 +279,17 @@ public:
     // MixMode::Replace is the default; a second Replace edge targeting the
     // same (dest, param) is rejected. MixMode::Add sums multiple edges,
     // then clamps to the param's range.
-    bool connect_automation(NodeId src, PortIndex src_audio_port,
-                            NodeId dest, uint32_t dest_param_id,
-                            float range_lo, float range_hi,
-                            float smoothing_ms = 0.0f,
-                            AutomationMix mix = AutomationMix::Replace);
+    bool connect_automation(NodeId src, PortIndex src_audio_port, NodeId dest,
+                            uint32_t dest_param_id, float range_lo, float range_hi,
+                            float smoothing_ms = 0.0f, AutomationMix mix = AutomationMix::Replace);
 
     // Audio-rate modulation connection: source audio samples drive every
     // sample of an AudioRate destination parameter. This edge is distinct
     // from sparse automation above; it is accepted only when the edge can be
     // represented as a valid GraphNode-scoped state::ModulationLane targeting
     // a continuous AudioRate destination parameter.
-    bool connect_audio_rate_modulation(NodeId src, PortIndex src_audio_port,
-                                       NodeId dest, uint32_t dest_param_id,
-                                       float range_lo, float range_hi,
+    bool connect_audio_rate_modulation(NodeId src, PortIndex src_audio_port, NodeId dest,
+                                       uint32_t dest_param_id, float range_lo, float range_hi,
                                        float smoothing_ms = 0.0f,
                                        AutomationMix mix = AutomationMix::Replace);
 
@@ -319,8 +314,7 @@ public:
     // the live node is unavailable or the bounded mailbox retained only a prefix;
     // that retained prefix is still published. A preserved MidiInput NodeId keeps
     // its unconsumed publication across a gap-free prepare_swap().
-    bool inject_midi(NodeId midi_input_node,
-                     const midi::MidiBuffer& events) noexcept;
+    bool inject_midi(NodeId midi_input_node, const midi::MidiBuffer& events) noexcept;
 
     // Inject sample-accurate parameter events into a Plugin node. Call before
     // process(); the latest published batch is consumed exactly once by that
@@ -330,8 +324,7 @@ public:
     // capacity priority. Returns false for an unprepared/non-Plugin/unresolved
     // node or when `events` already reports source-side overflow; the retained
     // prefix is still published in the overflow case.
-    bool inject_parameter_events(NodeId plugin_node,
-                                 const state::ParameterEventQueue& events);
+    bool inject_parameter_events(NodeId plugin_node, const state::ParameterEventQueue& events);
 
     // Drain queued nonempty MIDI blocks from a MidiOutput sink node in process
     // order. Appends to `out`; returns false if bounded egress overflowed, a
@@ -342,13 +335,16 @@ public:
     bool extract_midi(NodeId midi_output_node, midi::MidiBuffer& out) const;
 
     // Disconnect
-    bool disconnect(NodeId source, PortIndex source_port,
-                    NodeId dest, PortIndex dest_port);
+    bool disconnect(NodeId source, PortIndex source_port, NodeId dest, PortIndex dest_port);
 
     // Query
     const GraphNode* node(NodeId id) const;
-    const std::vector<GraphNode>& nodes() const { return nodes_; }
-    const std::vector<Connection>& connections() const { return connections_; }
+    const std::vector<GraphNode>& nodes() const {
+        return nodes_;
+    }
+    const std::vector<Connection>& connections() const {
+        return connections_;
+    }
 
     // Capture and validate control-side authoring lineage.  These operations
     // take the same mutation lock as graph edits, so a receipt is never a
@@ -426,22 +422,22 @@ public:
     SwapResult stage_plugin_replacement(NodeId id, PluginCatalogToken token);
     LiveSwapDiagnostics last_swap_diagnostics() const;
 
-    using PluginLoaderForTest =
-        std::function<std::unique_ptr<PluginSlot>(const PluginInfo&)>;
+    using PluginLoaderForTest = std::function<std::unique_ptr<PluginSlot>(const PluginInfo&)>;
     void set_live_swap_plugin_loader_for_test(PluginLoaderForTest loader);
 
     // Test seam for the non-zero MIDI-ingress publication sequence. The value
     // becomes the predecessor consumed by the next inject_midi() call.
     bool seed_midi_input_sequence_for_test(NodeId midi_input_node,
                                            std::uint64_t predecessor) noexcept;
-    std::uint64_t midi_input_sequence_for_test(
-        NodeId midi_input_node) const noexcept;
+    std::uint64_t midi_input_sequence_for_test(NodeId midi_input_node) const noexcept;
 
     // Prepare-time topology bounds. Hosts that accept generated or user-built
     // graphs can lower these before prepare() so oversized graphs fail before
     // snapshot allocation or plugin prepare.
     void set_limits(GraphLimits limits);
-    GraphLimits limits() const { return limits_; }
+    GraphLimits limits() const {
+        return limits_;
+    }
     std::size_t estimate_generated_graph_work_units(int max_block_size) const;
     GeneratedGraphValidation validate_generated_graph(int max_block_size) const;
     PreparedStats prepared_stats() const;
@@ -456,11 +452,16 @@ public:
     // has been prepared (removed nodes' lingering measurers are filtered out),
     // each a latest-value snapshot (may mix adjacent callbacks). Safe to poll
     // while the audio thread runs.
+    // Nodes are timed only once read (two clock reads per node per block): the
+    // first call turns monitoring on, returning current (zero or stale) values.
     struct NodeLoadReport {
         NodeId node_id = 0;
         audio::AudioProcessLoadSnapshot load;
     };
     std::vector<NodeLoadReport> node_loads() const;
+    // true times nodes before any read; false stops until the next node_loads().
+    void set_node_load_monitoring(bool enabled) noexcept;
+    bool node_load_monitoring() const noexcept;
 
     // Whole-graph process-load snapshot (load == callback-budget fullness; 1.0 == a
     // full buffer). callback_count == 0 means no measurement yet. Safe to poll while
@@ -521,8 +522,7 @@ public:
     // node, or nullptr when the node's type registered none. Same lifetime
     // contract as live_custom_processor; non-null iff that node's
     // GraphNode::transport_sensitive was resolved true.
-    const CustomNodeTransportProcessFn* live_custom_transport_processor(
-        NodeId id) const noexcept;
+    const CustomNodeTransportProcessFn* live_custom_transport_processor(NodeId id) const noexcept;
     // The live compiled snapshot's event-aware custom callback for a Custom
     // node, or nullptr when the node's type registered none. Same lifetime
     // contract as live_custom_processor.
@@ -537,8 +537,7 @@ public:
     // value (keepalive), so a bake() that copies it stays self-contained. Same
     // lifetime contract as live_custom_processor. Used only by the bake-layer
     // parameter-injection path — never by live-graph processing.
-    const CustomNodeParamProcessFn* live_custom_param_processor(
-        NodeId id) const noexcept;
+    const CustomNodeParamProcessFn* live_custom_param_processor(NodeId id) const noexcept;
     // Opaque keepalive for the live compiled snapshot so a translated routing
     // can pin the lifetime of the gain atomics + plugin slots it references.
     // Takes the graph mutation lock to copy the snapshot pointer, so it blocks
@@ -617,8 +616,7 @@ public:
     void set_audio_workgroup(void* workgroup) noexcept override {
         worker_pool_.set_audio_workgroup(workgroup);
     }
-    void set_audio_workgroup_from_render_context(
-        void* workgroup) noexcept override {
+    void set_audio_workgroup_from_render_context(void* workgroup) noexcept override {
         worker_pool_.set_audio_workgroup_from_render_context(workgroup);
     }
     bool prepare_audio_workgroup_for_render() noexcept override {
@@ -724,8 +722,7 @@ public:
         bool required = false) const noexcept;
 
     // Process one block of audio through the graph
-    void process(audio::BufferView<float>& output,
-                 const audio::BufferView<const float>& input,
+    void process(audio::BufferView<float>& output, const audio::BufferView<const float>& input,
                  int num_samples);
 
     // Process one block with host transport/timeline context. Additive overload
@@ -739,10 +736,8 @@ public:
     // exterior, so every interior node that IS ahead-rendered is
     // transport-insensitive by construction and ignores the populated transport
     // (see set_anticipation_enabled / transport_suppressed_for_anticipation).
-    void process(audio::BufferView<float>& output,
-                 const audio::BufferView<const float>& input,
-                 int num_samples,
-                 const format::ProcessContext& transport);
+    void process(audio::BufferView<float>& output, const audio::BufferView<const float>& input,
+                 int num_samples, const format::ProcessContext& transport);
 
     // Count of transport-sensitive nodes that anticipation forced to run
     // exterior (excluded from the ahead-rendered interior so they observe the
@@ -768,7 +763,9 @@ public:
     // Latency in samples from any AudioInput to the graph's AudioOutput, as
     // computed by prepare(). Reflects plugin-reported latencies plus any
     // delay inserted by PDC. Returns 0 when not prepared.
-    int latency_samples() const { return (int)total_latency_samples_.load(std::memory_order_relaxed); }
+    int latency_samples() const {
+        return (int)total_latency_samples_.load(std::memory_order_relaxed);
+    }
 
     // Latency arriving at a specific node's input (samples). Returns 0 when
     // the node is unknown or the graph is not prepared.
@@ -789,36 +786,34 @@ public:
     // that generate short-lived custom types.
     std::size_t custom_node_type_count() const;
 
-private:
-  // The standalone executor-routing builder must resolve every pointer and
-  // capture the matching snapshot keepalive as one publication-serialized
-  // operation.  It is a friend rather than a new public locking API so the
-  // existing source/ABI surface stays unchanged.
-  friend bool build_signal_graph_executor_routing(const SignalGraph&, SignalGraphExecutorRouting&);
+  private:
+    // The standalone executor-routing builder must resolve every pointer and
+    // capture the matching snapshot keepalive as one publication-serialized
+    // operation.  It is a friend rather than a new public locking API so the
+    // existing source/ABI surface stays unchanged.
+    friend bool build_signal_graph_executor_routing(const SignalGraph&,
+                                                    SignalGraphExecutorRouting&);
 
-  friend std::optional<std::vector<HostParamInfo>>
-  detail::processor_node_parameters(const SignalGraph&, NodeId);
+    friend std::optional<std::vector<HostParamInfo>>
+    detail::processor_node_parameters(const SignalGraph&, NodeId);
 
-  friend class GraphSerializer;
-  friend bool register_builtin_sample_region_types(SignalGraph& graph);
-  friend class ExecutionSnapshot;
-  struct PrepareLifecycleObserver {
-      void* context = nullptr;
-      void (*plugin_will_prepare)(void*, PluginSlot*) noexcept = nullptr;
-      void (*custom_will_prepare)(void*, void*) noexcept = nullptr;
-  };
+    friend class GraphSerializer;
+    friend bool register_builtin_sample_region_types(SignalGraph& graph);
+    friend class ExecutionSnapshot;
+    struct PrepareLifecycleObserver {
+        void* context = nullptr;
+        void (*plugin_will_prepare)(void*, PluginSlot*) noexcept = nullptr;
+        void (*custom_will_prepare)(void*, void*) noexcept = nullptr;
+    };
     struct MidiBlockSnapshot {
         MidiBlockSnapshot();
         MidiBlockSnapshot(const MidiBlockSnapshot& other);
         MidiBlockSnapshot& operator=(const MidiBlockSnapshot& other) noexcept;
-        bool set_from_midi(const midi::MidiBuffer& src,
-                           uint64_t new_sequence,
+        bool set_from_midi(const midi::MidiBuffer& src, uint64_t new_sequence,
                            bool source_incomplete = false) noexcept;
         bool copy_to_midi(midi::MidiBuffer& dst) const noexcept;
-        bool append_to_midi(midi::MidiBuffer& dst,
-                            std::size_t& event_index,
-                            std::size_t& sysex_index,
-                            std::size_t& ump_index) const noexcept;
+        bool append_to_midi(midi::MidiBuffer& dst, std::size_t& event_index,
+                            std::size_t& sysex_index, std::size_t& ump_index) const noexcept;
         bool has_payload() const noexcept;
 
         midi::MidiBuffer events;
@@ -853,8 +848,7 @@ private:
     };
 
     struct ParameterBlockSnapshot {
-        std::array<state::ParameterEvent,
-                   state::ParameterEventQueue::kCapacity> events{};
+        std::array<state::ParameterEvent, state::ParameterEventQueue::kCapacity> events{};
         std::size_t size = 0;
         std::uint64_t sequence = 0;
         bool source_incomplete = false;
@@ -948,8 +942,7 @@ private:
         // ExecutionSnapshot injection is generation-local. Unlike the live
         // mailbox above, this mailbox is never carried across recompiles.
         std::unique_ptr<ParameterInputMailbox> exact_parameter_input_mailbox;
-        std::weak_ptr<detail::ExactParameterIngressOwner>
-            exact_parameter_event_owner;
+        std::weak_ptr<detail::ExactParameterIngressOwner> exact_parameter_event_owner;
 
         // Audio-rate modulation scratch. Each listed param gets one
         // max-block-sized region in audio_rate_param_data, filled immediately
@@ -980,7 +973,7 @@ private:
         std::shared_ptr<State> state;
         // Feedback edges hold the previous block's source-port audio so the
         // destination can read it before the source writes the current block.
-        std::vector<float> feedback_prev;  // size = max_block_size_
+        std::vector<float> feedback_prev; // size = max_block_size_
 
         // Per-source automation slew state. Holds the value
         // we last delivered to the destination (post-slew, post range-
@@ -1007,7 +1000,7 @@ private:
     // if GraphNode owners are mutated before the audio thread releases its
     // reference. The old snapshot is destroyed only when both threads let go.
     enum class PdcExecutionDomain : std::uint8_t {
-        Dynamic,  // no PDC: runtime routing toggles remain live
+        Dynamic, // no PDC: runtime routing toggles remain live
         Legacy,
         RoutedSerial,
         RoutedParallel,
@@ -1035,7 +1028,7 @@ private:
         std::vector<Connection> connections;
         std::vector<std::uint64_t> connection_identities;
         std::vector<NodeRuntime::EdgeRef> feedback_edges;
-        std::vector<ConnectionDelay> connection_delays;  // parallel to connections
+        std::vector<ConnectionDelay> connection_delays; // parallel to connections
         // Runtime + plugin + node-info keyed by NodeId so we don't rely on
         // pointers into an outer container.
         std::unordered_map<NodeId, NodeRuntime> runtime;
@@ -1090,8 +1083,8 @@ private:
         // member is safe. Rides this snapshot's RCU lifetime.
         audio::LiveDspTelemetryStore live_dsp_telemetry;
         int max_block_size = 0;
-        double sample_rate = 0.0;  // needed to convert automation_smoothing_ms
-                                   // into samples.
+        double sample_rate = 0.0; // needed to convert automation_smoothing_ms
+                                  // into samples.
         int64_t total_latency_samples = 0;
         // Non-Dynamic when this snapshot owns feed-forward delay history. The
         // selected path is captured at prepare time so a relaxed runtime toggle
@@ -1147,7 +1140,11 @@ private:
         // would consume this block, captured during the ingress pre-fill and
         // committed to the shared mailbox's sequence_seen only after routed dispatch
         // succeeds (so a fallback to the legacy walk re-consumes the same block).
-        struct RoutedMidiNode { std::uint32_t plan_index; NodeId id; std::uint64_t pending_seq = 0; };
+        struct RoutedMidiNode {
+            std::uint32_t plan_index;
+            NodeId id;
+            std::uint64_t pending_seq = 0;
+        };
         struct RoutedProcessorNode {
             std::uint32_t plan_index;
             NodeId id;
@@ -1213,8 +1210,8 @@ private:
             AnticipationLane lane;
             std::vector<std::uint8_t> skip_mask;
             struct Prefill {
-                std::uint32_t out_channel = 0;  // lane output channel
-                std::uint32_t slot = 0;         // routed.serial.pool mono slot to fill
+                std::uint32_t out_channel = 0; // lane output channel
+                std::uint32_t slot = 0;        // routed.serial.pool mono slot to fill
             };
             std::vector<Prefill> prefill;
             std::vector<std::vector<float>> consume_scratch;
@@ -1364,7 +1361,7 @@ private:
     // transport). Control-thread writer (compile_) only.
     std::atomic<std::uint64_t> transport_suppressed_for_anticipation_{0};
     format::GraphRuntimeWorkerPool worker_pool_;
-    std::atomic<int64_t> total_latency_samples_{0};  // reflected for const-query access
+    std::atomic<int64_t> total_latency_samples_{0}; // reflected for const-query access
     std::atomic<std::size_t> prepared_node_count_{0};
     std::atomic<std::size_t> prepared_ordered_node_count_{0};
     std::atomic<std::size_t> prepared_connection_count_{0};
@@ -1381,8 +1378,7 @@ private:
     // audio thread's raw measurer pointers stay valid across snapshot swaps —
     // the measurers are heap-stable behind unique_ptr regardless of map
     // rehash). node_loads() reads their snapshots.
-    std::unordered_map<NodeId, std::unique_ptr<audio::AudioProcessLoadMeasurer>>
-        node_load_;
+    std::unordered_map<NodeId, std::unique_ptr<audio::AudioProcessLoadMeasurer>> node_load_;
     // Guards node_load_ MAP structure (insert in compile_ vs iterate in
     // node_loads()) — those can run on different control threads (host
     // prepare() vs UI poll). Control-side only; the audio thread never takes
@@ -1393,6 +1389,7 @@ private:
     // node_load_). process_impl brackets each block with begin()/end() via an RAII
     // scope; the control thread reads graph_load() for the live-swap admission gate.
     // Heap-stable behind unique_ptr; snapshot() is concurrency-safe.
+    mutable std::atomic<bool> node_load_monitoring_{false}; // node_loads() sets it
     std::unique_ptr<audio::AudioProcessLoadMeasurer> graph_load_ =
         std::make_unique<audio::AudioProcessLoadMeasurer>();
 
@@ -1481,11 +1478,12 @@ private:
     // unique_lock over the same mutex. unlock() releases early for the one caller
     // (prepare_swap) that drops the lock before invoking user callbacks.
     class GraphMutationLock {
-    public:
+      public:
         explicit GraphMutationLock(const SignalGraph& graph)
             : lock_(graph.graph_mutation_mutex_)
 #ifndef NDEBUG
-            , owner_(&graph.graph_mutation_owner_)
+              ,
+              owner_(&graph.graph_mutation_owner_)
 #endif
         {
             note_acquired_();
@@ -1504,7 +1502,8 @@ private:
             return lock_.owns_lock();
         }
         ~GraphMutationLock() {
-            if (lock_.owns_lock()) note_released_();
+            if (lock_.owns_lock())
+                note_released_();
         }
         GraphMutationLock(const GraphMutationLock&) = delete;
         GraphMutationLock& operator=(const GraphMutationLock&) = delete;
@@ -1513,7 +1512,7 @@ private:
             lock_.unlock();
         }
 
-    private:
+      private:
         void note_acquired_() noexcept {
 #ifndef NDEBUG
             owner_->store(std::this_thread::get_id(), std::memory_order_relaxed);
@@ -1535,9 +1534,9 @@ private:
     // holding graph_mutation_mutex_. Compiles to nothing in release.
     void assert_graph_mutation_locked_() const noexcept {
 #ifndef NDEBUG
-        assert(graph_mutation_owner_.load(std::memory_order_relaxed)
-                   == std::this_thread::get_id()
-               && "graph_mutation_mutex_ must be held by the calling thread");
+        assert(graph_mutation_owner_.load(std::memory_order_relaxed) ==
+                   std::this_thread::get_id() &&
+               "graph_mutation_mutex_ must be held by the calling thread");
 #endif
     }
 
@@ -1568,38 +1567,32 @@ private:
     // Shared body of both process() overloads. `transport` is the host
     // transport context for the block, or nullptr for the no-transport path.
     // RT-safe (no allocation per block).
-    void process_impl(audio::BufferView<float>& output,
-                      const audio::BufferView<const float>& input,
-                      int num_samples,
-                      const format::ProcessContext* transport);
+    void process_impl(audio::BufferView<float>& output, const audio::BufferView<const float>& input,
+                      int num_samples, const format::ProcessContext* transport);
     void process_snapshot_impl(audio::BufferView<float>& output,
-                               const audio::BufferView<const float>& input,
-                               int num_samples,
-                               const format::ProcessContext* transport,
-                               CompiledGraph* snapshot);
+                               const audio::BufferView<const float>& input, int num_samples,
+                               const format::ProcessContext* transport, CompiledGraph* snapshot);
     static bool inject_midi_into_snapshot_(CompiledGraph& snapshot, NodeId id,
                                            const midi::MidiBuffer& events) noexcept;
-    static bool inject_parameter_events_into_snapshot_(
-        CompiledGraph& snapshot, NodeId id,
-        const state::ParameterEventQueue& events) noexcept;
+    static bool
+    inject_parameter_events_into_snapshot_(CompiledGraph& snapshot, NodeId id,
+                                           const state::ParameterEventQueue& events) noexcept;
     // Exact-generation injection into a claimed node's exact mailbox. Fails for
     // any node that is not currently owner-claimed for exact ingress.
-    static bool inject_exact_parameter_events_into_snapshot_(
-        CompiledGraph& snapshot, NodeId id,
-        const state::ParameterEventQueue& events) noexcept;
+    static bool
+    inject_exact_parameter_events_into_snapshot_(CompiledGraph& snapshot, NodeId id,
+                                                 const state::ParameterEventQueue& events) noexcept;
     static PluginBindingContext::PendingParameterEventSequences
-    append_parameter_mailbox_events_(
-        void* runtime,
-        state::ParameterEventQueue& destination) noexcept;
+    append_parameter_mailbox_events_(void* runtime,
+                                     state::ParameterEventQueue& destination) noexcept;
     // Legacy serial reference walk — the hand-maintained, bit-exact inter-node
     // DSP oracle and fallback for process_impl(). Lives in its own translation
     // unit (signal_graph_reference_walk.cpp) but stays a member so it can name
     // the private nested CompiledGraph / NodeRuntime types without promotion.
     // process_impl() invokes it when no routed path takes a block.
     void run_reference_walk_(audio::BufferView<float>& output,
-                             const audio::BufferView<const float>& input,
-                             int num_samples,
-                             CompiledGraph* cg);
+                             const audio::BufferView<const float>& input, int num_samples,
+                             CompiledGraph* cg, bool time_nodes);
     // compile_ mode. Normal is the full build (prepare()). SwapNoAnticipation is
     // used by (2.2b) prepare_swap: it HARD-skips the anticipation-lane build so a
     // swap-time recompile can never construct an AnticipationLane over the live
@@ -1620,11 +1613,10 @@ private:
     // prepared_plugin_meta_, never the live PluginSlot, so a swap-time recompile
     // makes no live metadata call. Called from compile_ (caller holds
     // graph_mutation_mutex_); load resolution takes node_load_mu_ internally.
-    bool build_routing_snapshot_locked_(
-        CompiledGraph& cg, bool parallel_safe,
-        std::vector<PluginBindingContext>& plugin_ctx,
-        std::vector<CustomBindingContext>& custom_ctx,
-        format::GraphRuntimeSnapshot& out);
+    bool build_routing_snapshot_locked_(CompiledGraph& cg, bool parallel_safe,
+                                        std::vector<PluginBindingContext>& plugin_ctx,
+                                        std::vector<CustomBindingContext>& custom_ctx,
+                                        format::GraphRuntimeSnapshot& out);
     std::shared_ptr<const void> live_snapshot_handle_locked_() const noexcept;
     // Shared preflight (generated-graph limits + audio-rate automation
     // event-capacity gate) for prepare() and prepare_swap(). PURE — mutates no
@@ -1642,8 +1634,8 @@ private:
     // state across snapshots.
     // The latency-equality gate is checked POST-compile in prepare_swap(). Pure
     // const read; caller holds the mutation mutex.
-    bool snapshot_is_plugin_reinit_free_locked_(const CompiledGraph& old_cg,
-                                                double sr, int bs) const;
+    bool snapshot_is_plugin_reinit_free_locked_(const CompiledGraph& old_cg, double sr,
+                                                int bs) const;
     // Edit-time plugin parameter list for connection validation. Prefers the
     // prepare-time cache (prepared_plugin_meta_) so a connect during a swap-edit
     // does NOT call the live PluginSlot::parameters() concurrently with process()
@@ -1656,22 +1648,18 @@ private:
     bool node_has_feedback_edge_locked_(NodeId id) const;
     bool node_has_parameter_or_automation_contract_locked_(NodeId id) const;
     bool staged_replacement_relaxes_identity_locked_(NodeId id) const;
-    void set_live_swap_diagnostics_locked_(LiveSwapFallbackReason reason,
-                                           NodeId node,
+    void set_live_swap_diagnostics_locked_(LiveSwapFallbackReason reason, NodeId node,
                                            std::string message);
-    SwapResult fail_swap_edit_locked_(LiveSwapFallbackReason reason,
-                                      NodeId node,
+    SwapResult fail_swap_edit_locked_(LiveSwapFallbackReason reason, NodeId node,
                                       std::string message);
     void cancel_swap_edit_locked_();
-    std::vector<audio::AudioProcessLoadSnapshot>
-    staged_node_loads_locked_() const;
+    std::vector<audio::AudioProcessLoadSnapshot> staged_node_loads_locked_() const;
     void publish_prepared_stats_locked_(const CompiledGraph& cg);
     void clear_prepared_stats_locked_();
     void invalidate_live_locked_();
-    static void compute_latencies_for_(CompiledGraph& cg,
-                                       const std::vector<Connection>& connections,
-                                       const std::unordered_map<NodeId, PreparedPluginMetadata>&
-                                           plugin_meta);
+    static void
+    compute_latencies_for_(CompiledGraph& cg, const std::vector<Connection>& connections,
+                           const std::unordered_map<NodeId, PreparedPluginMetadata>& plugin_meta);
 };
 
 // Drag-add helper.
@@ -1692,8 +1680,7 @@ private:
 // responsibility to call `graph.prepare(...)` afterwards before the
 // next audio block. We do NOT do that here because real hosts batch
 // drops and prepare once at the end of the UI tick.
-NodeId add_plugin_node_from_drop(SignalGraph& graph,
-                                 const PluginInfo& info,
+NodeId add_plugin_node_from_drop(SignalGraph& graph, const PluginInfo& info,
                                  bool* loaded_out = nullptr);
 
 // Live-swap admission decision: whether a live plugin-instance swap can proceed
@@ -1710,10 +1697,10 @@ struct LiveSwapAdmission {
 // iff max(graph.load, graph.last_load) + the sum over staged nodes of
 // max(node.load, node.last_load) (the fade's added second-render cost) is within
 // headroom_threshold. Pure — no graph state, so it is unit-testable in isolation.
-LiveSwapAdmission evaluate_live_swap_admission(
-    const audio::AudioProcessLoadSnapshot& graph,
-    const std::vector<audio::AudioProcessLoadSnapshot>& staged_nodes,
-    float headroom_threshold, std::uint64_t min_callbacks);
+LiveSwapAdmission
+evaluate_live_swap_admission(const audio::AudioProcessLoadSnapshot& graph,
+                             const std::vector<audio::AudioProcessLoadSnapshot>& staged_nodes,
+                             float headroom_threshold, std::uint64_t min_callbacks);
 
 // Explicitly registers the closed framework-owned v1 scalar cohort. There are
 // no process-global registries or static-initializer side effects.

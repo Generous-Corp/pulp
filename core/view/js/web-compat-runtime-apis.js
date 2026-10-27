@@ -186,24 +186,8 @@ function structuredClone(obj) {
     return JSON.parse(JSON.stringify(obj));
 }
 
-// fetch — minimal exec-backed implementation.
-function fetch(url, opts) {
-    return new Promise(function(resolve, reject) {
-        try {
-            var method = (opts && opts.method) || "GET";
-            var cmd = "curl -s";
-            if (method !== "GET") cmd += " -X " + method;
-            if (opts && opts.headers) {
-                for (var k in opts.headers) cmd += " -H '" + k + ": " + opts.headers[k] + "'";
-            }
-            if (opts && opts.body) cmd += " -d '" + opts.body + "'";
-            cmd += " '" + url + "'";
-            var body = exec(cmd);
-            resolve({
-                ok: true, status: 200,
-                text: function() { return body; },
-                json: function() { return JSON.parse(body); }
-            });
-        } catch (e) { reject(e); }
-    });
+// fetch — this harness runtime has no network: the promise rejects so a page
+// that depends on fetch fails visibly instead of shelling out to curl.
+function fetch(url) {
+    return Promise.reject(new Error("fetch is not available in the harness runtime: " + url));
 }

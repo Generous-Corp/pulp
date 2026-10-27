@@ -11,6 +11,8 @@
 #include <pulp/canvas/text_shaper.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/view/capability_fallback.hpp>
+#include <pulp/runtime/crypto.hpp>
+#include <pulp/runtime/log.hpp>
 #include <choc/text/choc_JSON.h>
 
 #include <algorithm>
@@ -21,6 +23,16 @@
 #include <string_view>
 
 namespace pulp::view {
+
+namespace {
+
+// "image/jpeg" from "data:image/jpeg;base64,...".
+std::string_view inline_media_type(std::string_view uri) {
+    uri.remove_prefix(std::min(uri.size(), std::string_view("data:").size()));
+    return uri.substr(0, uri.find_first_of(";,"));
+}
+
+} // namespace
 
 void ImageView::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
@@ -116,32 +128,38 @@ void ImageView::paint(canvas::Canvas& canvas) {
     // platform) fall back to the stretch-to-bounds path (= object-fit: fill).
     float img_w = 0.0f, img_h = 0.0f;
     const bool is_inline_image = path_.starts_with("data:image/");
-    if (is_inline_image && cached_data_.empty()) {
-        auto decoded = AssetManager::instance().load_image_from_data_uri(path_);
-        if (decoded.valid()) cached_data_ = std::move(decoded.pixels);
+    if (is_inline_image && cached_data_.empty() && !inline_decode_failed_) {
+        // Keep the encoded payload whatever its format (PNG, JPEG, WebP,
+        // GIF, ...); the canvas decoder reads it, so the size comes from the
+        // image header rather than a PNG-only parse here.
+        cached_data_ = AssetManager::decode_data_uri_bytes(path_);
+        // Hash once per source so a caching backend can keep the decoded
+        // texture across paints, keyed by content rather than address.
+        if (!cached_data_.empty())
+            cached_data_key_ = runtime::sha256_hex(cached_data_.data(), cached_data_.size());
     }
-    const bool valid_inline_png = [&] {
-        static constexpr uint8_t kPngSignature[] = {
-            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a};
-        if (cached_data_.size() < 24 ||
-            !std::equal(std::begin(kPngSignature), std::end(kPngSignature),
-                        cached_data_.begin()))
-            return false;
-        const auto read_be32 = [&](std::size_t offset) {
-            return (static_cast<uint32_t>(cached_data_[offset]) << 24) |
-                   (static_cast<uint32_t>(cached_data_[offset + 1]) << 16) |
-                   (static_cast<uint32_t>(cached_data_[offset + 2]) << 8) |
-                   static_cast<uint32_t>(cached_data_[offset + 3]);
-        };
-        img_w = static_cast<float>(read_be32(16));
-        img_h = static_cast<float>(read_be32(20));
-        return img_w > 0.0f && img_h > 0.0f;
-    }();
+    const bool inline_ready = is_inline_image && !inline_decode_failed_ && !cached_data_.empty();
+    if (inline_ready && cached_data_width_ <= 0.0f) {
+        float w = 0.0f, h = 0.0f;
+        if (canvas.measure_image_from_data(cached_data_.data(), cached_data_.size(), w, h) &&
+            w > 0.0f && h > 0.0f) {
+            cached_data_width_ = w;
+            cached_data_height_ = h;
+        }
+    }
+    if (is_inline_image) {
+        img_w = cached_data_width_;
+        img_h = cached_data_height_;
+    }
+    // `fill` stretches the whole image over the box whatever its size, and
+    // object-position has no slack to place it in, so the intrinsic size of
+    // a file image changes nothing. Skip measuring it: each measure is a
+    // second lookup of the same image-cache entry on every paint.
+    const bool fills_box = object_fit().empty() || object_fit() == "fill";
     const bool has_intrinsic =
-        (is_inline_image && valid_inline_png) ||
-        (!is_inline_image && !fs_path.empty() &&
-         canvas.measure_image_from_file(fs_path, img_w, img_h) &&
-         img_w > 0.0f && img_h > 0.0f);
+        (inline_ready && img_w > 0.0f && img_h > 0.0f) ||
+        (!is_inline_image && !fills_box && !fs_path.empty() &&
+         canvas.measure_image_from_file(fs_path, img_w, img_h) && img_w > 0.0f && img_h > 0.0f);
 
     struct FitRect { float x, y, width, height; };
     auto compute_fit = [&]() -> std::pair<FitRect, FitRect> {
@@ -300,10 +318,9 @@ void ImageView::paint(canvas::Canvas& canvas) {
             std::abs(src.width  - img_w) > 0.001f ||
             std::abs(src.height - img_h) > 0.001f) {
             if (is_inline_image) {
-                drawn = canvas.draw_image_from_data_rect(
-                    cached_data_.data(), cached_data_.size(),
-                    src.x, src.y, src.width, src.height,
-                    dst.x, dst.y, dst.width, dst.height);
+                drawn = canvas.draw_image_from_keyed_data_rect(
+                    cached_data_key_, cached_data_.data(), cached_data_.size(), src.x, src.y,
+                    src.width, src.height, dst.x, dst.y, dst.width, dst.height);
             } else {
                 drawn = canvas.draw_image_from_file_rect(
                     fs_path,
@@ -312,9 +329,9 @@ void ImageView::paint(canvas::Canvas& canvas) {
             }
         } else {
             if (is_inline_image) {
-                drawn = canvas.draw_image_from_data(
-                    cached_data_.data(), cached_data_.size(),
-                    dst.x, dst.y, dst.width, dst.height);
+                drawn = canvas.draw_image_from_keyed_data(cached_data_key_, cached_data_.data(),
+                                                          cached_data_.size(), dst.x, dst.y,
+                                                          dst.width, dst.height);
             } else {
                 drawn = canvas.draw_image_from_file(
                     fs_path, dst.x, dst.y, dst.width, dst.height);
@@ -325,11 +342,29 @@ void ImageView::paint(canvas::Canvas& canvas) {
             emit_silhouette_fill(fs_path);
             return;
         }
-    } else if (!fs_path.empty() &&
-               canvas.draw_image_from_file(fs_path, 0, 0, b.width, b.height)) {
+    } else if (is_inline_image) {
+        // No intrinsic size from this backend: stretch to the box (object-fit: fill).
+        if (inline_ready &&
+            canvas.draw_image_from_keyed_data(cached_data_key_, cached_data_.data(),
+                                              cached_data_.size(), 0, 0, b.width, b.height)) {
+            loaded_ = true;
+            emit_silhouette_fill(fs_path);
+            return;
+        }
+    } else if (!fs_path.empty() && canvas.draw_image_from_file(fs_path, 0, 0, b.width, b.height)) {
         loaded_ = true;
         emit_silhouette_fill(fs_path);
         return;
+    }
+
+    // Inline bytes that a decoding backend could not draw are reported once
+    // and never decoded again: later paints go straight to the placeholder.
+    if (is_inline_image && !inline_decode_failed_ &&
+        canvas.supports(canvas::CanvasCapability::images)) {
+        inline_decode_failed_ = true;
+        runtime::log_warn("ImageView: inline {} image ({} bytes) could not be decoded; "
+                          "drawing the placeholder",
+                          inline_media_type(path_), cached_data_.size());
     }
 
     // Decode failed (file missing, unsupported codec, or backend doesn't
@@ -351,9 +386,10 @@ void ImageView::paint(canvas::Canvas& canvas) {
     canvas.set_font("Inter", 9);
     canvas.set_text_align(canvas::TextAlign::center);
 
-    // Show filename
-    auto name = path_;
-    auto slash = name.rfind('/');
+    // Show the filename, or the media type of an inline source (its base64
+    // payload is not a name).
+    std::string name = is_inline_image ? std::string(inline_media_type(path_)) : path_;
+    auto slash = is_inline_image ? std::string::npos : name.rfind('/');
     if (slash != std::string::npos) name = name.substr(slash + 1);
     canvas.fill_text_anchored(name, b.width * 0.5f, b.height * 0.5f, canvas::Canvas::TextAnchor::GlyphCenter);
 }

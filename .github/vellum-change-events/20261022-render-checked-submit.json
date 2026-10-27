@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "event_id": "20261022-render-checked-submit",
+  "kind": "change",
+  "created_at": "2026-10-22T05:04:34Z",
+  "slices": [
+    "render-skia-dawn"
+  ],
+  "rationale": "design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger); SkiaSurface::read_current_rgba() now judges the Graphite InsertStatus of its mid-frame flush the same way end_frame() already does, so a rejected recording fails the capture and leaves the frame unsubmitted, and wait_for_submitted_work() returns the synchronizing submit's result instead of a constant true. A process-wide insert-outcome test seam is added beside them. No frame, present, readback-format, design-import, Chromium, packaging or authority boundary moves; the Pulp render target has not adopted a Vellum package.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "ctest --test-dir build -R 'SkiaSurface readback fails when Graphite rejects the flushed recording'"
+  ],
+  "disposition": "pulp-only",
+  "vellum_inherits": true
+}

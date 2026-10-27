@@ -12,6 +12,8 @@
 /// kMaxMeterChannels. `MultiChannelBallistics::update()` and `clear_clips()`
 /// also use fixed storage and allocate no memory.
 
+#include <pulp/signal/detail/simd_lanes.hpp>
+
 #include <array>
 #include <cmath>
 #include <algorithm>
@@ -19,6 +21,7 @@
 #include <limits>
 #include <numbers>
 #include <numeric>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -36,6 +39,25 @@ static constexpr int kMaxMeterChannels = 16;
 /// This keeps double-input arithmetic deterministic instead of allowing a
 /// finite but non-audio value to overflow a squared-energy accumulator.
 static constexpr double kMaxMeterInputMagnitude = 1.0e6;
+
+/// What a MultiChannelMeter computes. Sample peak, RMS, and clip detection are
+/// always on; stereo correlation and BS.1770 loudness (K-weighted momentary,
+/// integrated, short-term, and loudness range) can be left out when nothing
+/// reads them, which removes their per-sample cost. Combine with `|`.
+enum class MeterFeatures : std::uint8_t {
+    levels = 0,
+    correlation = 1u << 0,
+    loudness = 1u << 1,
+    all = correlation | loudness,
+};
+
+constexpr MeterFeatures operator|(MeterFeatures a, MeterFeatures b) noexcept {
+    return static_cast<MeterFeatures>(static_cast<std::uint8_t>(a) | static_cast<std::uint8_t>(b));
+}
+
+constexpr bool has_feature(MeterFeatures set, MeterFeatures feature) noexcept {
+    return (static_cast<std::uint8_t>(set) & static_cast<std::uint8_t>(feature)) != 0;
+}
 
 /// Speaker roles used by the BS.1770 channel summation. LFE is excluded;
 /// lateral surrounds receive 1.41 while rear channels at +/-135 degrees use
@@ -258,6 +280,14 @@ struct MultiChannelBallistics {
 /// This supplies the EBU short-term (3 s) and loudness-range core. Scale/UI
 /// behavior and true peak remain outside this processor.
 ///
+/// process() works a block at a time: it splits the block at loudness-hop
+/// boundaries, measures each piece's peak, energy, and correlation with vector
+/// reductions, and runs the K-weighting recursion for channel pairs as one
+/// two-lane vector. A piece holding any non-finite or over-range sample is
+/// measured sample by sample with the sanitizing rules above instead, so the
+/// readings follow the same definitions either way; only the summation order
+/// of the energy accumulators differs, at double-precision rounding.
+///
 /// Call process() from the audio callback. Read results via snapshot().
 template <typename SampleType = float>
 class MultiChannelMeterT {
@@ -266,12 +296,35 @@ public:
         prepare(sample_rate, num_channels, nullptr);
     }
 
-    /// Prepare the loudness meter with an explicit speaker layout. Integrated
-    /// gating uses a prepared 0.01 LU Fenwick histogram: memory and update
-    /// cost remain fixed regardless of measurement duration. Allocation occurs
-    /// only here.
+    /// Prepare with a feature set. Without MeterFeatures::loudness the
+    /// loudness fields stay at their empty values and loudness_supported()
+    /// reports false; without MeterFeatures::correlation the correlation reads
+    /// 0. Peak, RMS, and clip detection are always measured.
+    void prepare(double sample_rate, int num_channels, const LoudnessChannelRole* roles,
+                 MeterFeatures features) {
+        features_ = features;
+        prepare_with_features(sample_rate, num_channels, roles);
+    }
+
+    /// The feature set the meter was prepared with.
+    MeterFeatures features() const noexcept {
+        return features_;
+    }
+
+    /// Prepare the loudness meter with an explicit speaker layout and every
+    /// feature (MeterFeatures::all), whatever an earlier prepare() selected.
+    /// Integrated gating uses a prepared 0.01 LU Fenwick histogram: memory and
+    /// update cost remain fixed regardless of measurement duration. Allocation
+    /// occurs only here.
     void prepare(double sample_rate, int num_channels,
                  const LoudnessChannelRole* roles) {
+        features_ = MeterFeatures::all;
+        prepare_with_features(sample_rate, num_channels, roles);
+    }
+
+  private:
+    void prepare_with_features(double sample_rate, int num_channels,
+                               const LoudnessChannelRole* roles) {
         constexpr double maximum_safe_sample_rate =
             static_cast<double>(std::numeric_limits<int>::max());
         const bool sample_rate_supported = std::isfinite(sample_rate)
@@ -281,9 +334,9 @@ public:
         const bool channel_count_supported = num_channels > 0
                                           && num_channels <= kMaxMeterChannels;
         num_channels_ = std::clamp(num_channels, 0, kMaxMeterChannels);
-        loudness_valid_ = sample_rate_supported
-                       && channel_count_supported
-                       && configure_channel_roles(roles);
+        loudness_valid_ = has_feature(features_, MeterFeatures::loudness) &&
+                          sample_rate_supported && channel_count_supported &&
+                          configure_channel_roles(roles);
         loudness_hop_samples_ = loudness_valid_
             ? std::max(1, static_cast<int>(std::llround(sample_rate_ * 0.1))) : 0;
 
@@ -299,6 +352,7 @@ public:
         reset_measurement_state(num_channels_);
     }
 
+  public:
     /// Process a block of interleaved or deinterleaved audio.
     /// channels: array of channel pointers. num_samples: samples per channel.
     void process(const SampleType* const* channels, int num_channels, int num_samples) {
@@ -324,36 +378,25 @@ public:
             || process_loudness != active_loudness_processing_)
             reset_measurement_state(num_channels, process_loudness);
 
-        for (int i = 0; i < num_samples; ++i) {
-            for (int ch = 0; ch < num_channels; ++ch) {
-                // Non-finite samples (NaN/Inf) would poison RMS/LUFS/integrated
-                // accumulators irrecoverably (#2695). Treat them as silence.
-                const double sd = sanitize_sample(channels[ch][i]);
-                double abs_s = std::abs(sd);
-
-                if (abs_s > block_peak_[ch]) block_peak_[ch] = abs_s;
-                if (abs_s >= 1.0) block_clipped_[ch] = true;
-
-                block_sum_sq_[ch] += sd * sd;
-                if (process_loudness) {
-                    const double weighted = k_filters_[ch].process(sd);
-                    loudness_hop_energy_[ch] += weighted * weighted;
-                }
+        const bool correlate =
+            num_channels >= 2 && has_feature(features_, MeterFeatures::correlation);
+        int offset = 0;
+        while (offset < num_samples) {
+            int piece = num_samples - offset;
+            if (process_loudness)
+                piece = std::min(piece, loudness_hop_samples_ - loudness_hop_position_);
+            if (!measure_piece(channels, num_channels, offset, piece, correlate, process_loudness))
+                measure_piece_sanitized(channels, num_channels, offset, piece, correlate,
+                                        process_loudness);
+            offset += piece;
+            block_samples_ += piece;
+            if (correlate)
+                correlation_samples_ += piece;
+            if (process_loudness) {
+                loudness_hop_position_ += piece;
+                if (loudness_hop_position_ == loudness_hop_samples_)
+                    finish_loudness_hop(num_channels);
             }
-
-            // Stereo correlation
-            if (num_channels >= 2) {
-                const double ld = sanitize_sample(channels[0][i]);
-                const double rd = sanitize_sample(channels[1][i]);
-                correlation_sum_xy_ += ld * rd;
-                correlation_sum_xx_ += ld * ld;
-                correlation_sum_yy_ += rd * rd;
-                ++correlation_samples_;
-            }
-
-            ++block_samples_;
-            if (process_loudness && ++loudness_hop_position_ == loudness_hop_samples_)
-                finish_loudness_hop(num_channels);
         }
 
         // Emit snapshot when we have enough samples for a meaningful measurement
@@ -379,6 +422,228 @@ public:
 
 private:
     friend struct detail::MultiChannelMeterTestAccess;
+
+    using D2 = detail::lanes::D2;
+    using F4 = detail::lanes::F4;
+
+    // A normalized K-weighting section.
+    struct Section {
+        double b0 = 1.0, b1 = 0.0, b2 = 0.0, a1 = 0.0, a2 = 0.0;
+
+        static Section from(const LoudnessBiquadCoefficients& c) {
+            return {c.b0, c.b1, c.b2, c.a1, c.a2};
+        }
+    };
+
+    // One piece's level readings for one channel.
+    struct PieceLevels {
+        double peak = 0.0;
+        double energy = 0.0;
+    };
+
+    // Vector pass over one channel's piece: peak, sum of squares (in double),
+    // and whether every sample is finite and inside the supported magnitude.
+    // Returns false at the first piece that is not, leaving the caller to
+    // measure it sample by sample.
+    static bool measure_levels(const SampleType* x, int n, PieceLevels& out) {
+        namespace lanes = detail::lanes;
+        int k = 0;
+        double peak = 0.0;
+        double energy = 0.0;
+        if constexpr (std::is_same_v<SampleType, float>) {
+            const F4 limit = lanes::splat(static_cast<float>(kMaxMeterInputMagnitude));
+            F4 peak4 = lanes::splat(0.0f);
+            auto in_range = lanes::less_equal(peak4, limit);
+            D2 e0 = lanes::splat(0.0), e1 = lanes::splat(0.0);
+            for (; k + 4 <= n; k += 4) {
+                const F4 v = lanes::load(x + k);
+                const F4 a = lanes::abs(v);
+                in_range = lanes::both(in_range, lanes::less_equal(a, limit));
+                peak4 = lanes::max(peak4, a);
+                const D2 lo = lanes::widen_low(v);
+                const D2 hi = lanes::widen_high(v);
+                e0 = e0 + lo * lo;
+                e1 = e1 + hi * hi;
+            }
+            if (!lanes::all(in_range))
+                return false;
+            for (int lane = 0; lane < 4; ++lane)
+                peak = std::max(peak, static_cast<double>(lanes::lane(peak4, lane)));
+            energy = (lanes::lane(e0, 0) + lanes::lane(e1, 0)) +
+                     (lanes::lane(e0, 1) + lanes::lane(e1, 1));
+        }
+        for (; k < n; ++k) {
+            const double v = static_cast<double>(x[k]);
+            const double a = std::abs(v);
+            if (!(a <= kMaxMeterInputMagnitude))
+                return false;
+            peak = std::max(peak, a);
+            energy += v * v;
+        }
+        out.peak = peak;
+        out.energy = energy;
+        return true;
+    }
+
+    // Sum of x[k] * y[k] in double, for a piece already known to be clean.
+    static double cross_energy(const SampleType* x, const SampleType* y, int n) {
+        namespace lanes = detail::lanes;
+        int k = 0;
+        double sum = 0.0;
+        if constexpr (std::is_same_v<SampleType, float>) {
+            D2 s0 = lanes::splat(0.0), s1 = lanes::splat(0.0);
+            for (; k + 4 <= n; k += 4) {
+                const F4 a = lanes::load(x + k);
+                const F4 b = lanes::load(y + k);
+                s0 = s0 + lanes::widen_low(a) * lanes::widen_low(b);
+                s1 = s1 + lanes::widen_high(a) * lanes::widen_high(b);
+            }
+            sum = (lanes::lane(s0, 0) + lanes::lane(s1, 0)) +
+                  (lanes::lane(s0, 1) + lanes::lane(s1, 1));
+        }
+        for (; k < n; ++k)
+            sum += static_cast<double>(x[k]) * static_cast<double>(y[k]);
+        return sum;
+    }
+
+    // Measure a piece with the vector kernels. Returns false, having changed
+    // nothing, when any sample in it needs sanitizing.
+    bool measure_piece(const SampleType* const* channels, int num_channels, int offset, int n,
+                       bool correlate, bool loudness) {
+        std::array<PieceLevels, kMaxMeterChannels> levels{};
+        for (int ch = 0; ch < num_channels; ++ch)
+            if (!measure_levels(channels[ch] + offset, n, levels[static_cast<std::size_t>(ch)]))
+                return false;
+        for (int ch = 0; ch < num_channels; ++ch) {
+            const auto& l = levels[static_cast<std::size_t>(ch)];
+            block_peak_[ch] = std::max(block_peak_[ch], l.peak);
+            if (l.peak >= 1.0)
+                block_clipped_[ch] = true;
+            block_sum_sq_[ch] += l.energy;
+        }
+        if (correlate) {
+            correlation_sum_xy_ += cross_energy(channels[0] + offset, channels[1] + offset, n);
+            correlation_sum_xx_ += levels[0].energy;
+            correlation_sum_yy_ += levels[1].energy;
+        }
+        if (loudness)
+            k_weight_piece(channels, num_channels, offset, n);
+        return true;
+    }
+
+    // The per-sample definition: every sample sanitized, then measured.
+    void measure_piece_sanitized(const SampleType* const* channels, int num_channels, int offset,
+                                 int n, bool correlate, bool loudness) {
+        for (int i = offset; i < offset + n; ++i) {
+            for (int ch = 0; ch < num_channels; ++ch) {
+                // Non-finite samples (NaN/Inf) would poison RMS/LUFS/integrated
+                // accumulators irrecoverably. Treat them as silence.
+                const double sd = sanitize_sample(channels[ch][i]);
+                const double abs_s = std::abs(sd);
+                if (abs_s > block_peak_[ch])
+                    block_peak_[ch] = abs_s;
+                if (abs_s >= 1.0)
+                    block_clipped_[ch] = true;
+                block_sum_sq_[ch] += sd * sd;
+                if (loudness) {
+                    const double weighted = k_weight(ch, sd);
+                    loudness_hop_energy_[ch] += weighted * weighted;
+                }
+            }
+            if (correlate) {
+                const double ld = sanitize_sample(channels[0][i]);
+                const double rd = sanitize_sample(channels[1][i]);
+                correlation_sum_xy_ += ld * rd;
+                correlation_sum_xx_ += ld * ld;
+                correlation_sum_yy_ += rd * rd;
+            }
+        }
+    }
+
+    // K-weighting for a clean piece: channels in pairs, each pair one
+    // two-lane vector through both sections, accumulating its weighted
+    // energy into two alternating sums. An odd last channel runs alone.
+    void k_weight_piece(const SampleType* const* channels, int num_channels, int offset, int n) {
+        namespace lanes = detail::lanes;
+        int ch = 0;
+        for (; ch + 2 <= num_channels; ch += 2) {
+            const SampleType* a = channels[ch] + offset;
+            const SampleType* b = channels[ch + 1] + offset;
+            const auto u = static_cast<std::size_t>(ch);
+            auto pair = [&](const std::array<double, kMaxMeterChannels>& v) {
+                return lanes::make(v[u], v[u + 1]);
+            };
+            D2 x1 = pair(k_x1_), x2 = pair(k_x2_);
+            D2 y1 = pair(k_y1_), y2 = pair(k_y2_);
+            D2 w1 = pair(k_w1_), w2 = pair(k_w2_);
+            D2 even = lanes::splat(0.0), odd = lanes::splat(0.0);
+            const Section& sc = shelf_;
+            const Section& hc = high_pass_;
+            int k = 0;
+            auto step = [&](D2 x) {
+                const D2 y = section(sc, x, x1, x2, y1, y2);
+                const D2 w = section(hc, y, y1, y2, w1, w2);
+                x2 = x1;
+                x1 = x;
+                y2 = y1;
+                y1 = y;
+                w2 = w1;
+                w1 = w;
+                return w;
+            };
+            for (; k + 2 <= n; k += 2) {
+                const D2 w0 =
+                    step(lanes::make(static_cast<double>(a[k]), static_cast<double>(b[k])));
+                even = even + w0 * w0;
+                const D2 w1k =
+                    step(lanes::make(static_cast<double>(a[k + 1]), static_cast<double>(b[k + 1])));
+                odd = odd + w1k * w1k;
+            }
+            for (; k < n; ++k) {
+                const D2 w0 =
+                    step(lanes::make(static_cast<double>(a[k]), static_cast<double>(b[k])));
+                even = even + w0 * w0;
+            }
+            const D2 energy = even + odd;
+            store_pair(k_x1_, u, x1);
+            store_pair(k_x2_, u, x2);
+            store_pair(k_y1_, u, y1);
+            store_pair(k_y2_, u, y2);
+            store_pair(k_w1_, u, w1);
+            store_pair(k_w2_, u, w2);
+            loudness_hop_energy_[u] += lanes::lane(energy, 0);
+            loudness_hop_energy_[u + 1] += lanes::lane(energy, 1);
+        }
+        for (; ch < num_channels; ++ch) {
+            const SampleType* a = channels[ch] + offset;
+            double energy = 0.0;
+            for (int k = 0; k < n; ++k) {
+                const double w = k_weight(ch, static_cast<double>(a[k]));
+                energy += w * w;
+            }
+            loudness_hop_energy_[ch] += energy;
+        }
+    }
+
+    // One K-weighting section in direct form I, evaluated so the recursion is
+    // one multiply-add per sample: the feed-forward sum and the older output
+    // term do not depend on the newest output.
+    template <typename T> static T section(const Section& c, T x, T x1, T x2, T y1, T y2) {
+        if constexpr (std::is_same_v<T, double>) {
+            const double head = c.b0 * x + c.b1 * x1 + c.b2 * x2 - c.a2 * y2;
+            return head - c.a1 * y1;
+        } else {
+            namespace lanes = detail::lanes;
+            const T head = lanes::splat(c.b0) * x + lanes::splat(c.b1) * x1 +
+                           lanes::splat(c.b2) * x2 - lanes::splat(c.a2) * y2;
+            return head - lanes::splat(c.a1) * y1;
+        }
+    }
+
+    static void store_pair(std::array<double, kMaxMeterChannels>& v, std::size_t u, D2 x) {
+        v[u] = detail::lanes::lane(x, 0);
+        v[u + 1] = detail::lanes::lane(x, 1);
+    }
 
     void reset_measurement_state(int active_channels,
                                  bool process_loudness = false) {
@@ -455,24 +720,20 @@ private:
     static constexpr double kGateMaximumEnergy = 1.0e14;
     static constexpr std::size_t kShortTermHopCount = 30;
 
-    struct Biquad {
-        double b0 = 1.0, b1 = 0.0, b2 = 0.0, a1 = 0.0, a2 = 0.0;
-        double z1 = 0.0, z2 = 0.0;
-        double process(double x) {
-            const double y = b0 * x + z1;
-            z1 = b1 * x - a1 * y + z2;
-            z2 = b2 * x - a2 * y;
-            return y;
-        }
-        void reset() { z1 = z2 = 0.0; }
-    };
-
-    struct KWeighting {
-        Biquad shelf;
-        Biquad high_pass;
-        double process(double x) { return high_pass.process(shelf.process(x)); }
-        void reset() { shelf.reset(); high_pass.reset(); }
-    };
+    // One channel, one sample, through both K-weighting sections — the same
+    // arithmetic k_weight_piece() runs on channel pairs.
+    double k_weight(int channel, double x) {
+        const auto c = static_cast<std::size_t>(channel);
+        const double y = section(shelf_, x, k_x1_[c], k_x2_[c], k_y1_[c], k_y2_[c]);
+        const double w = section(high_pass_, y, k_y1_[c], k_y2_[c], k_w1_[c], k_w2_[c]);
+        k_x2_[c] = k_x1_[c];
+        k_x1_[c] = x;
+        k_y2_[c] = k_y1_[c];
+        k_y1_[c] = y;
+        k_w2_[c] = k_w1_[c];
+        k_w1_[c] = w;
+        return w;
+    }
 
     static double sanitize_sample(SampleType sample) {
         const double value = static_cast<double>(sample);
@@ -571,22 +832,25 @@ private:
     }
 
     void configure_k_weighting() {
-        for (auto& filter : k_filters_) filter = {};
+        shelf_ = {};
+        high_pass_ = {};
+        reset_k_weighting_state();
         const auto coefficients = k_weighting_coefficients(sample_rate_);
         if (!loudness_valid_ || !coefficients.valid) {
             loudness_valid_ = false;
             return;
         }
-        for (auto& filter : k_filters_) {
-            const auto& s = coefficients.shelf;
-            const auto& h = coefficients.high_pass;
-            filter.shelf = {s.b0, s.b1, s.b2, s.a1, s.a2};
-            filter.high_pass = {h.b0, h.b1, h.b2, h.a1, h.a2};
-        }
+        shelf_ = Section::from(coefficients.shelf);
+        high_pass_ = Section::from(coefficients.high_pass);
+    }
+
+    void reset_k_weighting_state() {
+        for (auto* v : {&k_x1_, &k_x2_, &k_y1_, &k_y2_, &k_w1_, &k_w2_})
+            v->fill(0.0);
     }
 
     void reset_loudness_state() {
-        for (auto& filter : k_filters_) filter.reset();
+        reset_k_weighting_state();
         loudness_hop_energy_.fill(0.0);
         for (auto& hop : loudness_energy_ring_) hop.fill(0.0);
         loudness_short_term_ring_.fill(0.0);
@@ -766,6 +1030,7 @@ private:
 
     double sample_rate_ = 44100.0;
     int num_channels_ = 2;
+    MeterFeatures features_ = MeterFeatures::all;
 
     // Block accumulators
     double block_peak_[kMaxMeterChannels] = {};
@@ -780,7 +1045,16 @@ private:
     std::size_t loudness_ring_position_ = 0;
     int active_num_channels_ = 0;
     bool active_loudness_processing_ = false;
-    std::array<KWeighting, kMaxMeterChannels> k_filters_{};
+    Section shelf_{};
+    Section high_pass_{};
+    // Direct-form-I history per channel: the input (x), the shelf output
+    // (y, which is also the high-pass input), and the high-pass output (w).
+    std::array<double, kMaxMeterChannels> k_x1_{};
+    std::array<double, kMaxMeterChannels> k_x2_{};
+    std::array<double, kMaxMeterChannels> k_y1_{};
+    std::array<double, kMaxMeterChannels> k_y2_{};
+    std::array<double, kMaxMeterChannels> k_w1_{};
+    std::array<double, kMaxMeterChannels> k_w2_{};
     std::array<double, kMaxMeterChannels> channel_weights_{};
     std::array<double, kMaxMeterChannels> loudness_hop_energy_{};
     std::array<std::array<double, kMaxMeterChannels>, 4> loudness_energy_ring_{};

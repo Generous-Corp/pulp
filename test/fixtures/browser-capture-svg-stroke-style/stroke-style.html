@@ -1,0 +1,88 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>svg stroke style</title>
+<style>
+  html,body{margin:0;padding:0}
+  body{width:560px;height:150px;background:#101418;font-family:system-ui}
+  .row{display:flex;flex-wrap:wrap;gap:10px;padding:12px}
+  .cell{width:56px;height:44px;border-radius:6px;background:#1b2229;
+        display:flex;align-items:center;justify-content:center;
+        color:rgba(255,255,255,0.85)}
+  svg{display:block}
+</style></head>
+<body>
+  <div class="row">
+    <!-- peak: round caps and joins as attributes on the path (Spectr) -->
+    <div class="cell" id="peak"><svg width="22" height="16" viewBox="0 0 24 24">
+      <path d="M 3 20 L 3 14 M 7 20 L 7 10 M 11 20 L 11 6 M 15 20 L 15 12 M 19 20 L 19 8 M 1 14 L 5 14 M 5 10 L 9 10 M 9 6 L 13 6 M 13 12 L 17 12 M 17 8 L 21 8"
+            stroke="currentColor" stroke-width="1.3" fill="none"
+            stroke-linecap="round" stroke-linejoin="round"/>
+    </svg></div>
+
+    <!-- sculpt: one round-capped curve (Spectr) -->
+    <div class="cell" id="sculpt"><svg width="22" height="16" viewBox="0 0 24 24">
+      <path d="M 2 14 Q 5 4 9 10 T 16 8 T 22 6" stroke="currentColor"
+            stroke-width="1.4" fill="none" stroke-linecap="round"
+            stroke-linejoin="round"/>
+    </svg></div>
+
+    <!-- presets: three stroked paths at their own opacity (Spectr) -->
+    <div class="cell" id="presets"><svg width="18" height="13" viewBox="0 0 24 16">
+      <path d="M 2 13 Q 7 13 10 9 Q 13 5 17 5 Q 20 5 22 7" stroke="currentColor"
+            stroke-width="1.3" fill="none" stroke-linecap="round" opacity="0.45"/>
+      <path d="M 2 11 Q 6 11 9 7 Q 13 3 17 7 Q 20 10 22 10" stroke="currentColor"
+            stroke-width="1.3" fill="none" stroke-linecap="round" opacity="0.7"/>
+      <path d="M 2 9 Q 5 4 9 10 Q 13 15 17 9 Q 20 5 22 6" stroke="currentColor"
+            stroke-width="1.4" fill="none" stroke-linecap="round"/>
+    </svg></div>
+
+    <!-- lucide: stroke style declared once on the root, inherited by every shape -->
+    <div class="cell" id="lucide"><svg width="24" height="24" viewBox="0 0 24 24"
+         fill="none" stroke="currentColor" stroke-width="2"
+         stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="10"/>
+      <polyline points="12 6 12 12 16 14"/>
+    </svg></div>
+
+    <!-- miter: an explicit miter limit, and a bevel join from an inline style -->
+    <div class="cell" id="miter"><svg width="32" height="24" viewBox="0 0 32 24">
+      <polyline points="2 20 8 4 14 20" fill="none" stroke="#e8b552"
+                stroke-width="3" stroke-miterlimit="2"/>
+      <polyline points="18 20 24 4 30 20" fill="none" stroke="#7cd6c1"
+                stroke-width="3" style="stroke-linejoin: bevel"/>
+    </svg></div>
+
+    <!-- square: a cap from a group's inline style -->
+    <div class="cell" id="square"><svg width="24" height="24" viewBox="0 0 24 24">
+      <g style="stroke-linecap: square">
+        <line x1="4" y1="12" x2="20" y2="12" stroke="#c86ad0" stroke-width="4"/>
+      </g>
+    </svg></div>
+
+    <!-- length: pathLength and a dash offset on a solid stroke -->
+    <div class="cell" id="length"><svg width="24" height="24" viewBox="0 0 24 24">
+      <path d="M 4 12 H 20" pathLength="100" stroke-dashoffset="3"
+            stroke="#63b3ed" stroke-width="2"/>
+    </svg></div>
+
+    <!-- faded: a fill-only shape's opacity, and an rgba fill under fill-opacity -->
+    <div class="cell" id="faded"><svg width="24" height="24" viewBox="0 0 24 24">
+      <rect x="2" y="2" width="9" height="20" fill="#8fd694" opacity="0.5"/>
+      <rect x="13" y="2" width="9" height="20" fill="rgba(240, 160, 75, 0.8)"
+            fill-opacity="0.5"/>
+    </svg></div>
+
+    <!-- shape-opacity: a fill and a stroke composite as one layer -->
+    <div class="cell" id="two-paints"><svg width="24" height="24" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="8" fill="#4a90d4" stroke="#f0f0f0"
+              stroke-width="3" opacity="0.5"/>
+    </svg></div>
+
+    <!-- paint-reference: a marker draws an arrowhead the lowering cannot -->
+    <div class="cell" id="marker"><svg width="24" height="24" viewBox="0 0 24 24">
+      <defs><marker id="head" markerWidth="4" markerHeight="4" refX="2" refY="2"
+                    orient="auto"><path d="M 0 0 L 4 2 L 0 4 Z" fill="#d4544a"/></marker></defs>
+      <line x1="3" y1="12" x2="18" y2="12" stroke="#d4544a" stroke-width="2"
+            marker-end="url(#head)"/>
+    </svg></div>
+  </div>
+</body></html>

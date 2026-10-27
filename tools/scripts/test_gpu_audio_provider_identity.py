@@ -255,6 +255,18 @@ class GpuAudioProviderIdentityTest(unittest.TestCase):
             verified = fixture.run("verify")
             self.assertEqual(verified.returncode, 0, verified.stdout + verified.stderr)
 
+    def test_bind_records_exact_receipt_chain_paths(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            bound = fixture.establish_binding()
+            self.assertEqual(bound.returncode, 0, bound.stdout + bound.stderr)
+            receipt = json.loads(bound.stdout)
+            self.assertEqual(receipt["configured_receipt_path"], str(fixture.result.resolve()))
+            self.assertEqual(receipt["prelink_receipt_path"], str(fixture.prelink.resolve()))
+            persisted = json.loads(fixture.bound.read_text(encoding="utf-8"))
+            self.assertEqual(persisted["configured_receipt_path"], str(fixture.result.resolve()))
+            self.assertEqual(persisted["prelink_receipt_path"], str(fixture.prelink.resolve()))
+
     def test_executable_mutation_after_binding_is_rejected(self) -> None:
         temporary, fixture = self.fixture()
         with temporary:

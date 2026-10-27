@@ -28,6 +28,17 @@ assert BACKGROUND_SPEC is not None and BACKGROUND_SPEC.loader is not None
 background = importlib.util.module_from_spec(BACKGROUND_SPEC)
 BACKGROUND_SPEC.loader.exec_module(background)
 
+from importer_differential.core import (  # noqa: E402
+    BrowserNode,
+    LabError,
+    NativeNode,
+    authenticated_authored_origin,
+    document_canvas_background,
+    geometry_metrics_with_registration,
+    promotion_recommendation,
+    register_browser_nodes_to_native_frame,
+)
+
 
 class FakeImage:
     def __init__(
@@ -92,6 +103,200 @@ class FakeViewportImage:
 
 
 class HelperScoringTests(unittest.TestCase):
+    @staticmethod
+    def _capture(x: float, y: float) -> dict[str, object]:
+        return {"reference": {"authored_frame": {"x": x, "y": y}}}
+
+    def test_authenticated_frame_registers_page_bounds_to_panel_origin(self) -> None:
+        node = BrowserNode(1, "main", -1, "", {}, (45.0, 81.0, 320.0, 18.0), {})
+        registered, metadata = register_browser_nodes_to_native_frame(
+            [node], self._capture(24.0, 24.0), self._capture(24.0, 24.0))
+        self.assertEqual(registered[0].bounds, (21.0, 57.0, 320.0, 18.0))
+        self.assertEqual(metadata["x"], -24.0)
+        self.assertEqual(metadata["y"], -24.0)
+
+    def test_zero_frame_is_identity(self) -> None:
+        nodes = [BrowserNode(1, "main", -1, "", {}, (0.0, 0.0, 320.0, 18.0), {})]
+        registered, metadata = register_browser_nodes_to_native_frame(
+            nodes, self._capture(0.0, 0.0), self._capture(0.0, 0.0))
+        self.assertIs(registered, nodes)
+        self.assertEqual(metadata["x"], 0.0)
+
+    def test_authenticated_origin_is_the_signed_authored_frame(self) -> None:
+        self.assertEqual(
+            authenticated_authored_origin(self._capture(24.0, 18.5), self._capture(24.0, 18.5)),
+            (24.0, 18.5))
+
+    def test_authored_frame_disagreement_fails_closed(self) -> None:
+        with self.assertRaises(LabError):
+            authenticated_authored_origin(self._capture(24.0, 24.0), self._capture(0.0, 0.0))
+
+    def test_missing_or_nonfinite_authored_frame_fails_closed(self) -> None:
+        with self.assertRaises(LabError):
+            authenticated_authored_origin({"reference": {}}, self._capture(0.0, 0.0))
+        with self.assertRaises(LabError):
+            authenticated_authored_origin(
+                self._capture(float("nan"), 0.0), self._capture(float("nan"), 0.0))
+
+    def test_unregistered_panel_placement_lowers_page_space_geometry(self) -> None:
+        # A native panel left at the panel origin instead of its page-space
+        # rect must score as a placement error; nothing re-registers it.
+        browser = BrowserNode(
+            1, "main", -1, "", {}, (24.0, 24.0, 320.0, 18.0), {})
+        native = NativeNode(
+            "browser:main", "element", "main", "", None, {},
+            (0.0, 0.0, 320.0, 18.0))
+        raw_match = [(browser, native, 1.0)]
+        registered_browser = BrowserNode(
+            1, "main", -1, "", {}, (0.0, 0.0, 320.0, 18.0), {})
+        registered = [(registered_browser, native, 1.0)]
+        geometry = geometry_metrics_with_registration(
+            raw_match, registered, {"x": -24.0, "y": -24.0},
+            reference_nodes=[registered_browser])
+        self.assertLess(geometry["score"], 1.0)
+        recommendation = promotion_recommendation(
+            [],
+            {"score": 1.0},
+            geometry,
+            {"score": 1.0},
+            {"score": 1.0},
+            {"status": "pass", "failures": []},
+        )
+        self.assertFalse(recommendation["threshold_eligible"])
+        self.assertFalse(recommendation["production_promotion_enabled"])
+        # Page-space geometry gates beside the registered checks: the unplaced
+        # panel fails it, and the missing frame placement proof fails too.
+        self.assertEqual(geometry["role"], "page-space-gated")
+        self.assertEqual(geometry["gate"]["failed"], ["page_space_mean", "frame_placement"])
+        self.assertIn("geometry score below 0.980", recommendation["reasons"])
+        self.assertIn("geometry gate failed: page_space_mean, frame_placement",
+                      recommendation["reasons"])
+
+    @staticmethod
+    def _canvas_snapshot(html: dict[str, str], body: dict[str, str]) -> dict[str, object]:
+        names = ["background-color", "background-image", "opacity", "filter",
+                 "transform", "mix-blend-mode"]
+        defaults = {"background-image": "none", "opacity": "1", "filter": "none",
+                    "transform": "none", "mix-blend-mode": "normal",
+                    "background-color": "rgba(0, 0, 0, 0)"}
+        strings = ["#document", "html", "HTML", "BODY"]
+
+        def row(styles: dict[str, str]) -> list[int]:
+            out = []
+            for name in names:
+                value = styles.get(name, defaults[name])
+                if value not in strings:
+                    strings.append(value)
+                out.append(strings.index(value))
+            return out
+
+        rows = [row(html), row(body)]
+        return {
+            "strings": strings,
+            "computedStyleNames": names,
+            "documents": [{
+                # The doctype is also named "html" and is never laid out.
+                "nodes": {"nodeName": [0, 1, 2, 3], "nodeType": [9, 10, 1, 1],
+                          "parentIndex": [-1, 0, 0, 2]},
+                "layout": {"nodeIndex": [2, 3], "styles": rows},
+            }],
+        }
+
+    def _canvas(self, html: dict[str, str], body: dict[str, str],
+                scheme: str = "light") -> dict[str, object]:
+        return document_canvas_background(
+            self._canvas_snapshot(html, body), {"provenance": {"color_scheme": scheme}})
+
+    def test_canvas_takes_the_root_background_first(self) -> None:
+        result = self._canvas({"background-color": "rgb(1, 2, 3)"},
+                              {"background-color": "rgb(9, 9, 9)"})
+        self.assertEqual(result, {"status": "resolved", "source": "html-background",
+                                  "color": "rgb(1, 2, 3)"})
+
+    def test_canvas_propagates_the_body_background(self) -> None:
+        result = self._canvas({}, {"background-color": "rgb(16, 21, 34)"})
+        self.assertEqual(result["source"], "body-background")
+        self.assertEqual(result["color"], "rgb(16, 21, 34)")
+
+    def test_transparent_root_and_body_stay_unresolved(self) -> None:
+        # The UA canvas colour follows the page's own color-scheme; without
+        # the colour Chromium reported for it, the emulated preference is not
+        # enough.
+        for scheme in ("light", "dark"):
+            with self.subTest(scheme=scheme):
+                result = self._canvas({}, {}, scheme=scheme)
+                self.assertEqual(result["status"], "unresolved")
+                self.assertIsNone(result["color"])
+
+    def _canvas_with_report(self, html: dict[str, str], body: dict[str, str],
+                            report: object) -> dict[str, object]:
+        snapshot = self._canvas_snapshot(html, body)
+        snapshot["documentCanvas"] = report
+        return document_canvas_background(snapshot, {"provenance": {"color_scheme": "light"}})
+
+    def test_transparent_root_and_body_take_the_recorded_ua_canvas(self) -> None:
+        report = {"schema": "pulp-document-canvas-v1", "root_color_scheme": "dark",
+                  "canvas_color": "rgb(18, 18, 18)"}
+        self.assertEqual(self._canvas_with_report({}, {}, report), {
+            "status": "resolved", "source": "ua-canvas", "color": "rgb(18, 18, 18)",
+            "root_color_scheme": "dark"})
+        # An opaque root or body still paints the canvas itself.
+        result = self._canvas_with_report({}, {"background-color": "rgb(16, 21, 34)"}, report)
+        self.assertEqual(result["source"], "body-background")
+
+    def test_a_malformed_ua_canvas_report_stays_unresolved(self) -> None:
+        for report in (
+            None,
+            "rgb(18, 18, 18)",
+            {"schema": "pulp-document-canvas-v0", "canvas_color": "rgb(18, 18, 18)"},
+            {"schema": "pulp-document-canvas-v1", "canvas_color": None},
+            {"schema": "pulp-document-canvas-v1", "canvas_color": "rgba(18, 18, 18, 0.5)"},
+            {"schema": "pulp-document-canvas-v1", "canvas_color": "rgb(256, 0, 0)"},
+            {"schema": "pulp-document-canvas-v1", "canvas_color": "Canvas"},
+        ):
+            with self.subTest(report=report):
+                result = self._canvas_with_report({}, {}, report)
+                self.assertEqual(result["status"], "unresolved")
+                self.assertIsNone(result["color"])
+
+    def test_canvas_refuses_shapes_it_cannot_reproduce(self) -> None:
+        for html, body in (
+            ({"background-image": "linear-gradient(red, blue)"}, {}),
+            ({}, {"background-color": "rgba(16, 21, 34, 0.5)"}),
+            ({"background-color": "hsl(0, 0%, 0%)"}, {}),
+            ({"background-color": "rgb(1, 2, 3)", "filter": "invert(1)"}, {}),
+            ({"background-color": "rgb(1, 2, 3)", "opacity": "0.5"}, {}),
+            ({}, {"background-color": "rgb(1, 2, 3)", "mix-blend-mode": "multiply"}),
+            ({}, {"background-color": "rgb(1, 2, 3)", "transform": "matrix(1, 0, 0, 1, 2, 0)"}),
+        ):
+            with self.subTest(html=html, body=body):
+                result = self._canvas(html, body)
+                self.assertEqual(result["status"], "unresolved")
+                self.assertIsNone(result["color"])
+
+    @staticmethod
+    def _panel_pixels(*, shift: int = 0, fill: tuple[int, int, int] = (220, 220, 220),
+                      border_width: int = 2, rounded: bool = False) -> FakeImage:
+        """Build a deterministic panel for strict planted-negative controls."""
+        width, height = 64, 48
+        background = (24, 28, 36)
+        pixels = [background] * (width * height)
+        left, top, right, bottom = 14 + shift, 10, 49 + shift, 37
+        for y in range(top, bottom + 1):
+            for x in range(left, right + 1):
+                corner = rounded and (
+                    (x - left < 4 and y - top < 4)
+                    or (right - x < 4 and y - top < 4)
+                    or (x - left < 4 and bottom - y < 4)
+                    or (right - x < 4 and bottom - y < 4)
+                )
+                if corner:
+                    continue
+                edge = (x - left < border_width or right - x < border_width
+                        or y - top < border_width or bottom - y < border_width)
+                pixels[y * width + x] = (120, 130, 145) if edge else fill
+        return FakeImage(pixels, size=(width, height))
+
     def test_image_module_imports_pillow_or_reports_install_hint(self) -> None:
         def fake_import(name: str, *args: object, **kwargs: object) -> object:
             if name == "PIL":
@@ -108,6 +313,36 @@ class HelperScoringTests(unittest.TestCase):
         a = FakeImage([(0, 0, 0)], histogram=[1, 2, 3])
         self.assertAlmostEqual(diff.histogram_similarity(a, a), 1.0)
         self.assertEqual(diff.histogram_similarity(FakeImage([], histogram=[]), a), 0.0)
+
+    def test_strict_floor_controls_keep_healthy_edge_variance_advisory(self) -> None:
+        reference = self._panel_pixels()
+        healthy = list(reference._pixels)
+        # A small edge-only tonal change models a renderer AA disagreement. It
+        # must remain inside the strict floor while still being visible to the
+        # residual profiler; it never relaxes the production threshold.
+        for x in range(14, 50):
+            for y in (10, 37):
+                index = y * 64 + x
+                red, green, blue = healthy[index]
+                healthy[index] = (min(255, red + 12), min(255, green + 12), min(255, blue + 12))
+        healthy_image = FakeImage(healthy, size=(64, 48))
+        self.assertGreaterEqual(diff.similarity_score(reference, healthy_image), 0.995)
+        self.assertGreater(diff.residual_profile(reference, healthy_image)["differing_pixels"], 0)
+
+    def test_all_gate_planted_negatives_fail_strict_floor(self) -> None:
+        reference = self._panel_pixels()
+        controls = {
+            "one-pixel-shift": self._panel_pixels(shift=1),
+            "color-change": self._panel_pixels(fill=(90, 220, 160)),
+            "missing-border": self._panel_pixels(border_width=0),
+            "wrong-weight": self._panel_pixels(border_width=4),
+            "corner-radius": self._panel_pixels(rounded=True),
+        }
+        for name, candidate in controls.items():
+            with self.subTest(control=name):
+                self.assertLess(diff.similarity_score(reference, candidate), 0.995)
+                profile = diff.residual_profile(reference, candidate)
+                self.assertGreater(profile["differing_pixels"], 0)
 
     def test_mean_pixel_distance_scores_identical_different_and_mismatched_lengths(self) -> None:
         white = FakeImage([(255, 255, 255)])

@@ -33,7 +33,7 @@
 #include "include/effects/SkDashPathEffect.h"
 #include "include/effects/SkColorMatrix.h"
 #include "include/core/SkColorFilter.h"
-#include "include/core/SkPathBuilder.h"
+#include "font_tables.hpp"
 #include "include/core/SkBlendMode.h"
 #include "include/core/SkPicture.h"
 #include "include/core/SkPictureRecorder.h"
@@ -59,14 +59,14 @@
 
 #include "runtime_effect_cache.hpp"
 #include "skia_canvas_filter.hpp"  // parse_filter_chain — CSS `filter` parser
-#include "include/effects/SkImageFilters.h"
-#include "include/core/SkColorFilter.h"
+#include "skia_gradient_compat.hpp"
 #if PULP_CANVAS_GRAPHITE
 #include "include/gpu/graphite/Image.h"
 #endif
 #if PULP_CANVAS_GANESH
 #include "include/gpu/ganesh/SkImageGanesh.h"
 #endif
+#include "skia_resource_counting.hpp"
 
 namespace pulp::canvas {
 
@@ -118,32 +118,6 @@ SkPaint make_stroke_paint(Color c, float width) {
     return paint;
 }
 
-// Splits a CSS `font-family` value (e.g. `"SF Pro, system-ui, sans-serif"`)
-// into individual family names, stripping outer quotes and whitespace.
-// Used by get_cached_typeface to walk the fallback chain — each family
-// is tried in order through the existing match cascade (registered →
-// bundled → SkFontMgr) until one resolves.
-static std::vector<std::string> split_font_family_list(const std::string& list) {
-    std::vector<std::string> out;
-    size_t i = 0;
-    while (i < list.size()) {
-        while (i < list.size() && std::isspace(static_cast<unsigned char>(list[i]))) ++i;
-        if (i >= list.size()) break;
-        size_t comma = list.find(',', i);
-        std::string seg = list.substr(i, (comma == std::string::npos ? list.size() : comma) - i);
-        while (!seg.empty() && std::isspace(static_cast<unsigned char>(seg.back()))) seg.pop_back();
-        if (seg.size() >= 2
-            && (seg.front() == '"' || seg.front() == '\'')
-            && seg.back() == seg.front()) {
-            seg = seg.substr(1, seg.size() - 2);
-        }
-        if (!seg.empty()) out.push_back(std::move(seg));
-        if (comma == std::string::npos) break;
-        i = comma + 1;
-    }
-    return out;
-}
-
 // Forward decl — defined below.
 static sk_sp<SkTypeface> get_cached_typeface_single(const std::string& family,
                                                     int weight, int slant);
@@ -158,34 +132,23 @@ static sk_sp<SkTypeface> get_cached_typeface(const std::string& family,
     if (family.find(',') == std::string::npos) {
         return get_cached_typeface_single(family, weight, slant);
     }
-    auto families = split_font_family_list(family);
+    // Entries keep their quotes, so a quoted generic is a literal family.
+    auto families = split_css_font_family_list(family);
     sk_sp<SkTypeface> resolved;
     for (const auto& fam : families) {
         resolved = get_cached_typeface_single(fam, weight, slant);
         if (resolved) {
-            // We need to check whether the resolution is the GENUINE
-            // family or the SkFontMgr's "no match → null fallback".
-            // get_cached_typeface_single's last step does
-            // matchFamilyStyle(nullptr) when matchFamilyStyle(family)
-            // returns null — that fallback typeface has a name that
-            // doesn't match `fam`. Compare and reject the fallback so
-            // we keep walking the list to give later families a chance.
+            // The resolver hands back the font manager's default face when
+            // `fam` matched nothing. Keep walking past it so later families
+            // get their chance — including past a generic keyword whose
+            // platform family the host lacks.
             SkString actual_name;
             resolved->getFamilyName(&actual_name);
-            // Case-insensitive comparison — Skia normalizes but some
-            // platforms canonicalise differently (e.g. "Helvetica" vs
-            // "Helvetica Neue"). Accept if the actual name CONTAINS
-            // the requested family or vice-versa.
-            std::string actual(actual_name.c_str(), actual_name.size());
-            auto lower = [](std::string s) {
-                for (auto& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-                return s;
-            };
-            std::string a = lower(actual), f = lower(fam);
-            if (a == f || a.find(f) != std::string::npos || f.find(a) != std::string::npos) {
+            if (platform_face_is_family(
+                    platform_family_for_css_family(fam),
+                    std::string_view(actual_name.c_str(), actual_name.size()))) {
                 return resolved;
             }
-            // Else: SkFontMgr returned a default — keep walking.
         }
     }
     // No exact match across the list — return the last attempted resolution
@@ -234,10 +197,8 @@ static sk_sp<SkTypeface> get_cached_typeface(const std::string& family) {
     return get_cached_typeface(family, SkFontStyle::kNormal_Weight, 0);
 }
 
-SkFont make_font(const std::string& family, float size,
-                        int weight = SkFontStyle::kNormal_Weight,
-                        int slant = 0,
-                        bool non_opaque_dst = false) {
+SkFont make_font(const std::string& family, float size, int weight = SkFontStyle::kNormal_Weight,
+                 int slant = 0, bool non_opaque_dst = false, bool hinted = true) {
     SkFont font;
     // If size is 0 here, fill_text records commands but produces zero-height
     // glyphs; clamp to a minimal visible default so labels render even when the
@@ -256,7 +217,7 @@ SkFont make_font(const std::string& family, float size,
     font.setEdging(non_opaque_dst
         ? SkFont::Edging::kAntiAlias            // Greyscale AA (browser parity inside opacity layers)
         : SkFont::Edging::kSubpixelAntiAlias);  // LCD-quality AA on opaque destinations
-    font.setHinting(SkFontHinting::kSlight);               // Light hinting preserves glyph shapes
+    font.setHinting(hinted ? SkFontHinting::kSlight : SkFontHinting::kNone); // none: antialiased
     font.setLinearMetrics(true);                           // Linear scaling for consistent metrics
 
     auto typeface = get_cached_typeface(family, weight, slant);
@@ -277,7 +238,8 @@ SkFont make_font(const std::string& family, float size,
         // which draws nothing. A bundled face is the only real default here.
         if (!typeface) typeface = bundled_fallback_typeface();
     }
-    if (typeface) font.setTypeface(std::move(typeface));
+    if (typeface)
+        font.setTypeface(typeface_at_auto_optical_size(std::move(typeface), size));
 
     return font;
 }
@@ -400,6 +362,7 @@ void SkiaCanvas::restore() {
         non_opaque_layer_stack_.pop_back();
     }
     canvas_->restore();
+    unwind_font_smoothing();
 }
 
 // Expose Skia's save-stack depth so CanvasWidget::paint() can snapshot it at
@@ -545,7 +508,7 @@ SkPaint SkiaCanvas::current_fill_paint() const {
     paint.setAntiAlias(true);
     paint.setBlendMode(blend_mode_);
     if (has_gradient_ && gradient_shader_) {
-        paint.setShader(gradient_shader_);
+        skia_gradient::set_paint_shader(paint, gradient_shader_);
     } else {
         paint.setColor4f(to_sk_color4f(fill_color_));
     }
@@ -705,7 +668,7 @@ void SkiaCanvas::apply_stroke_state(SkPaint& paint) const {
     // Canvas2D ctx.createPattern on strokeStyle wins over the solid stroke
     // color when present.
     if (stroke_shader_) {
-        paint.setShader(stroke_shader_);
+        skia_gradient::set_paint_shader(paint, stroke_shader_);
     }
 }
 
@@ -924,18 +887,14 @@ void SkiaCanvas::clear_font_features() {
 sk_sp<SkImage> SkiaCanvas::ensure_gpu_image(sk_sp<SkImage> image) const {
     if (!image) return image;
 #if PULP_CANVAS_GRAPHITE
-    if (recorder_) {
-        if (auto gpu = SkImages::TextureFromImage(recorder_, image.get())) {
+    if (recorder_)
+        if (auto gpu = upload_texture_image(recorder_, image.get()))
             return gpu;
-        }
-    }
 #endif
 #if PULP_CANVAS_GANESH
-    if (gr_context_) {
-        if (auto gpu = SkImages::TextureFromImage(gr_context_, image.get())) {
+    if (gr_context_)
+        if (auto gpu = upload_texture_image(gr_context_, image.get()))
             return gpu;
-        }
-    }
 #endif
     return image;
 }
@@ -956,7 +915,7 @@ sk_sp<SkImage> SkiaCanvas::image_from_file_cached(const std::string& path) const
         path, image_cache_backend_key(), [&]() -> sk_sp<SkImage> {
             auto sk_data = SkData::MakeFromFileName(path.c_str());
             if (!sk_data) return nullptr;
-            auto image = SkImages::DeferredFromEncodedData(sk_data);
+            auto image = decode_encoded_image(sk_data);
             if (!image) return nullptr;
             // Upload to a GPU texture up front so the cached value is ready to
             // draw with no per-frame re-upload. No-op on CPU raster canvases.
@@ -969,7 +928,7 @@ bool SkiaCanvas::draw_image_from_data(const uint8_t* data, size_t size,
     if (!canvas_ || !data || size == 0) return false;
 
     auto sk_data = SkData::MakeWithoutCopy(data, size);
-    auto image = SkImages::DeferredFromEncodedData(sk_data);
+    auto image = decode_encoded_image(sk_data);
     if (!image) return false;
     image = ensure_gpu_image(std::move(image));
 
@@ -1031,7 +990,7 @@ bool SkiaCanvas::draw_image_from_data_rect(const uint8_t* data, size_t size,
                                             float dx, float dy, float dw, float dh) {
     if (!canvas_ || !data || size == 0) return false;
     auto sk_data = SkData::MakeWithoutCopy(data, size);
-    auto image = SkImages::DeferredFromEncodedData(sk_data);
+    auto image = decode_encoded_image(sk_data);
     if (!image) return false;
     image = ensure_gpu_image(std::move(image));
     canvas_->drawImageRect(image,
@@ -1059,9 +1018,56 @@ bool SkiaCanvas::draw_image_from_static_data_rect(const uint8_t* data, size_t si
             // (for example after a plugin unload). Own a copy so a deferred
             // decode never reads unmapped static storage.
             auto bytes = SkData::MakeWithCopy(data, size);
+            auto decoded = decode_encoded_image(bytes);
+            return decoded ? ensure_gpu_image(std::move(decoded)) : nullptr;
+        });
+    if (!image)
+        return false;
+    canvas_->drawImageRect(image, SkRect::MakeXYWH(sx, sy, sw, sh),
+                           SkRect::MakeXYWH(dx, dy, dw, dh), sampling_options_for_image_smoothing(),
+                           nullptr, SkCanvas::kStrict_SrcRectConstraint);
+    return true;
+}
+
+sk_sp<SkImage> SkiaCanvas::image_from_keyed_data_cached(const std::string& content_key,
+                                                        const uint8_t* data, size_t size) const {
+    // Inline bytes live in their own byte-budgeted pool. The byte count rides
+    // along with the digest as a cheap extra guard.
+    const std::string key =
+        std::string("\0inline-sha256:", 15) + content_key + ":" + std::to_string(size);
+    return ImageFileCache::instance().get_or_build_inline(
+        key, image_cache_backend_key(), size, [&]() -> sk_sp<SkImage> {
+            // The cached image can outlive the caller's buffer, and a raster
+            // canvas keeps the decode deferred, so own a copy of the bytes.
+            auto bytes = SkData::MakeWithCopy(data, size);
             auto decoded = SkImages::DeferredFromEncodedData(bytes);
             return decoded ? ensure_gpu_image(std::move(decoded)) : nullptr;
         });
+}
+
+bool SkiaCanvas::draw_image_from_keyed_data(const std::string& content_key, const uint8_t* data,
+                                            size_t size, float x, float y, float w, float h) {
+    if (content_key.empty())
+        return draw_image_from_data(data, size, x, y, w, h);
+    if (!canvas_ || !data || size == 0)
+        return false;
+    auto image = image_from_keyed_data_cached(content_key, data, size);
+    if (!image)
+        return false;
+    canvas_->drawImageRect(image, SkRect::MakeXYWH(x, y, w, h),
+                           sampling_options_for_image_smoothing());
+    return true;
+}
+
+bool SkiaCanvas::draw_image_from_keyed_data_rect(const std::string& content_key,
+                                                 const uint8_t* data, size_t size, float sx,
+                                                 float sy, float sw, float sh, float dx, float dy,
+                                                 float dw, float dh) {
+    if (content_key.empty())
+        return draw_image_from_data_rect(data, size, sx, sy, sw, sh, dx, dy, dw, dh);
+    if (!canvas_ || !data || size == 0)
+        return false;
+    auto image = image_from_keyed_data_cached(content_key, data, size);
     if (!image)
         return false;
     canvas_->drawImageRect(image, SkRect::MakeXYWH(sx, sy, sw, sh),
@@ -1109,6 +1115,23 @@ bool SkiaCanvas::measure_image_from_file(const std::string& path,
     auto image = image_from_file_cached(path);
     if (!image) return false;
     out_width  = static_cast<float>(image->width());
+    out_height = static_cast<float>(image->height());
+    return true;
+}
+
+bool SkiaCanvas::measure_image_from_data(const uint8_t* data, size_t size, float& out_width,
+                                         float& out_height) {
+    out_width = 0.0f;
+    out_height = 0.0f;
+    if (!data || size == 0)
+        return false;
+    // A deferred image only parses the header, and its size already applies
+    // the encoded orientation, so it matches what draw_image_from_data draws.
+    // The image is dropped before returning, so borrowing the bytes is safe.
+    auto image = SkImages::DeferredFromEncodedData(SkData::MakeWithoutCopy(data, size));
+    if (!image || image->width() <= 0 || image->height() <= 0)
+        return false;
+    out_width = static_cast<float>(image->width());
     out_height = static_cast<float>(image->height());
     return true;
 }
@@ -1308,7 +1331,7 @@ void SkiaCanvas::fill_current_path(FillRule rule) {
     SkPaint paint;
     paint.setAntiAlias(true);
     if (has_gradient_ && gradient_shader_) {
-        paint.setShader(gradient_shader_);
+        skia_gradient::set_paint_shader(paint, gradient_shader_);
     } else {
         paint.setColor4f(to_sk_color4f(fill_color_));
     }

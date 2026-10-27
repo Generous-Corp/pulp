@@ -67,8 +67,10 @@ What the full create path does:
 3. Scaffolds source files from built-in templates or an explicitly named local template kit (processor, format entries, test, CMakeLists.txt)
 4. In in-tree mode: adds the project to `examples/CMakeLists.txt`
 5. In standalone product mode: generates `pulp.toml` with `sdk_version = "latest"` by default, an exact SDK version when `--pin` is passed, and local SDK hints when created from a checkout
-6. Configures, builds the generated test target plus the default platform outputs, and runs tests
+6. Configures (with `-G Ninja` when `ninja` is on `PATH` and the build dir is new, as `pulp build` does), builds the generated test target plus the default platform outputs, and runs tests
 7. Leaves the project ready for `pulp build`, which you use for rebuilds, explicit targets, or optional deliverables after changing configuration
+
+The generated test target uses Catch2 3. When CMake can find an installed Catch2 at least as new as the pinned 3.16.1, within major version 3 (for example from `brew install catch2`, or a prefix on `CMAKE_PREFIX_PATH`), the project uses it and skips downloading and compiling Catch2; otherwise configure downloads the pinned Catch2 release archive and checks its SHA-256.
 
 Notes:
 - `pulp create` is meant to prove that a fresh machine and fresh project can scaffold, configure, build the default native outputs, and pass the generated tests.
@@ -92,6 +94,8 @@ and Ubuntu do not support AAX.
 
 Configure and build the project. Auto-detects when CMake reconfiguration is needed. Works with both repo-based and standalone projects.
 
+A standalone project's first configure (or one after the build dir's cache was moved aside) passes `-DCMAKE_PREFIX_PATH=<sdk>` for the SDK its `pulp.toml` selects: `sdk_path` when it holds that version, a local SDK built from `sdk_checkout`, or the cached download under `~/.pulp/sdk/<version>`; `sdk_version = "latest"` means the newest one installed. When none of those is on disk, `pulp build` hands the build to `pulp-cpp`, which downloads the pinned SDK or builds one from the checkout. Later configures keep the prefix the cache recorded.
+
 ```bash
 pulp build                    # Build the targets affected by your diff (source checkout)
 pulp build --all              # Build every target — do this before opening a PR
@@ -107,6 +111,7 @@ pulp build --allow-unsupported-sdk # Bypass the CLI-vs-project SDK guard (unsupp
 pulp build --check-identity    # Verify .pulp/identity.lock before configure (Track 3.12)
 pulp build --check-identity --allow-identity-change  # Treat identity drift as a warning
 pulp build --examples          # Source checkout: also configure/build the example projects
+pulp build --dev-shared        # macOS: link plug-ins against the dev-only shared runtime (never shippable)
 pulp build --seed-build        # New worktree: clone + retarget a sibling's warm build dir first (APFS)
 pulp build --seed-build=../pulp-main  # Same, naming the donor worktree
 pulp build --js-engine=v8      # Force the JS engine backend and reconfigure
@@ -119,6 +124,8 @@ pulp build -f wclap -j8        # Short form, with a cmake passthrough flag
 ```
 
 Extra arguments are passed through to `cmake --build`.
+
+`pulp build` makes shippable artifacts, so it links plug-in modules statically. When the build dir was left in dev-shared mode (`PULP_DEV_SHARED_UI=ON`, which `pulp dev` and `pulp loop` use for SDK projects on macOS), it reconfigures it back to static links and says so; that costs a relink, not a recompile. `--dev-shared` keeps or turns on dev-shared mode instead, and a non-empty `PULP_DEV_SHARED_UI` environment value (`1`/`ON` or `0`/`OFF`) overrides both. See [Fast plug-in relinks](../guides/build.md#fast-plug-in-relinks-pulp_dev_shared_ui).
 
 In a Pulp source checkout `pulp build` is **focused by default**: it builds only the targets the working diff affects, selected by [`pulp affected`](#affected). The banner names the selection (`FOCUSED: building 3/1708 targets affected by your diff - run 'pulp build --all' before opening a PR`) and a full build is one flag away. `--all`, an explicit `--target`, or `PULP_BUILD_FOCUS=0` restore the full build; `--install` and `--validate` always build everything because every bundle must exist. The selector falls back to `all` (and says why) when the diff is empty, touches the build system, cannot be mapped, or exceeds ~40% of all targets. Standalone SDK projects are never focused. The first focused build in an existing build directory configures once to record the CMake file-API codemodel. The pre-push hook and Shipyard keep building `all`, so a focused green run is a development signal, not a landing gate.
 
@@ -140,6 +147,8 @@ Web formats build to `.wasm`/`.js` and are not installed to native plug-in folde
 For a standalone project the resolved SDK must itself carry Perfetto; an ordinary release SDK cannot be traced no matter what the project configures. Install one with `pulp sdk install --local --profile trace` (see [`pulp sdk install`](#pulp-sdk)). `pulp status` reports whether tracing is available in this project.
 
 A traced build must not ship: it links Perfetto and carries a retained sentinel that `pulp ship` rejects. `--trace` therefore refuses `--install` unless you also pass `--allow-tracing`, and cannot be combined with `--format wam|wclap`.
+
+Every developer-loop configure (`pulp build`, `pulp dev`, `pulp loop`, `pulp run`, and the project `pulp create` configures) passes `-DPULP_DEV_BUILD=ON` on a fresh build dir, or one whose cache never recorded the option, and keeps a recorded value. A dev build records the on-disk `UI_SCRIPT` path so the standalone host can hot-reload `ui.js`; the embedded editor is compiled in either way. `pulp ship sign|package|release` on such a project configure `build-ship/` from the dev cache (every configured entry except the dev-only switches, loaded through `cmake -C`; `PULP_DEV_BUILD=OFF`), build it, refuse if it lacks a plug-in artifact `build/` has, and ship from there; `check`, `notarize` and `share` read `build-ship/` once it exists. Pass `--allow-dev-build` to ship the dev build dir as it is.
 
 `--check-identity` runs the same comparison as `pulp identity check` before the configure step, so a PR that changes an AU 4CC / VST3 FUID / CLAP id / AAX product code without re-recording the lock fails the build with a per-field diff. See `docs/reference/identity-lock.md`.
 
@@ -872,15 +881,15 @@ stays encouraged-not-mandated. The real work lives in the script; the command ju
 makes it discoverable and forwards flags.
 
 ```bash
-pulp ci-host setup --class m5                       # minimum: register the m5 host-class label
-pulp ci-host setup --class m5 --copy-from 'macstudio:/Volumes/Workshop/VMs/vms/pulp-build-runner:latest'
-pulp ci-host setup --class m5 --validate            # also run a one-shot VM build to prove it
+pulp ci-host setup --class studio                   # minimum: register the studio host-class label
+pulp ci-host setup --class studio --copy-from 'buildhost:/path/to/vms/pulp-build-runner:latest'
+pulp ci-host setup --class studio --validate        # also run a one-shot VM build to prove it
 pulp ci-host setup --help                           # full flag list (delegated to the script)
 ```
 
 Common flags (forwarded verbatim to `setup-ci-host.sh`):
 
-- `--class <name>` — **required** host class for the runner label (`m5`, `studio`, `macbook`, …)
+- `--class <name>` — **required** host class for the runner label (`studio`, `macbook`, `mini`, …)
 - `--copy-from <ssh:path | path>` — rsync a golden in from another host/drive (sparse-safe)
 - `--validate` — after setup, run one ephemeral VM build on the host-only label
 - `--no-agent` — do everything except install/load the launchd agent
@@ -1109,6 +1118,10 @@ runs the bounded parse against a `--trust` key set — it never executes the pla
 or loads custom state. Key handling reuses the reload-trust key file, the same
 path `ship swap-pack` uses.
 
+Baking refuses hosted Plugin nodes, so `pulp bake` never loads a plugin: each
+plugin node in the input stays an unresolved placeholder (no library the file
+names is opened) and the lowerability check reports it.
+
 ### ship
 
 **Status**: experimental
@@ -1120,6 +1133,7 @@ pulp ship sign --identity "Developer ID Application: ..."
 pulp ship sign --identity "..." --entitlements path/to/entitlements.plist
 pulp ship sign --identity "..." --path MyApp.app   # sign one explicit artifact
 pulp ship package --version 1.0.0
+pulp ship package --version 1.0.0 --allow-dev-build  # ship build/ as it is instead of building build-ship/
 pulp ship check
 pulp ship swap-pack --bundle ui/ --plugin-id com.you.synth   # sign a hot-reload UX bundle (caps inferred; key from keychain)
 pulp ship doctor                                   # make signing non-interactive (no keychain/1Password prompt)
@@ -1140,8 +1154,8 @@ pulp ship auv3-xcodeproj MyPlugin --sdk iphonesimulator --dry-run
 |------------|-------------|
 | `sign`     | Code-sign all built plugin bundles (VST3, CLAP, AU), or one `--path` artifact |
 | `notarize` | Submit packaged artifacts to Apple notarytool (macOS); prefer `release` or `--path` with `.pkg`, `.dmg`, or `.zip` |
-| `package`  | Create macOS `.pkg`/`.dmg`, Windows NSIS, Linux `.deb`/`.tar.gz`, or Android APK/AAB packages in `artifacts/` |
-| `release`  | macOS one-command pipeline: sign → package → **notarize the .pkg/.dmg it builds** → staple |
+| `package`  | Create macOS `.pkg`/`.dmg`, Windows NSIS, Linux `.deb`/`.tar.gz`, or Android APK/AAB packages in `artifacts/`. On macOS each AU/VST3/CLAP bundle ships as a copy with local symbols stripped (`strip -x`) and re-signed (`--identity`, or ad hoc for an unsigned build); a dSYM of the unstripped executable is written first to `artifacts/symbols/<FORMAT>/<bundle>.dSYM` for crash symbolication, and the build output keeps its symbols. The stripped copy is re-signed with the original's entitlements unless `--entitlements` names a file. `--keep-symbols` opts out |
+| `release`  | macOS one-command pipeline: sign → package → **notarize the .pkg/.dmg it builds** → staple. `--entitlements <plist>` is passed to both the sign and package stages |
 | `share`    | One-shot for sharing a single artifact: sign → wrap `.app` in DMG → notarize → staple → Gatekeeper-verify |
 | `appcast`  | Generate a Sparkle-compatible appcast feed from a package URL or local artifact |
 | `auv3-xcodeproj` | Generate an Xcode project for an AUv3 target (macOS) |
@@ -1150,13 +1164,16 @@ pulp ship auv3-xcodeproj MyPlugin --sdk iphonesimulator --dry-run
 
 `doctor` materializes a dedicated signing keychain authorized for `codesign` (so the login keychain / 1Password is never consulted) and validates a file-based App Store Connect `.p8` notary key. `--check-online` also proves the `.p8` against Apple (read-only) and refreshes the optional `pulp-notary` keychain profile; `--print-env` emits resolved identity/keychain handles (no secret values). Secrets live in `~/.config/pulp/secrets/` (`keychain.env` + `notary.env`), never in the repo; same-named env vars override the files. No build directory is required.
 
-`sign` requires `--identity`. The default entitlements file is `ship/templates/entitlements.plist`.
+`ship` runs in a Pulp source checkout or in an SDK consumer project (`pulp.toml`, no `core/`); both package from `<project>/build`. The signing preflight (`tools/scripts/ensure_signing_ready.sh` in a checkout) and the default entitlements (`ship/templates/entitlements.plist`) come, in a consumer project, from the selected SDK's `share/pulp/ship/`. An SDK installed before that directory existed has neither, and `ship doctor` / `ship sign` name the missing path.
+
+`sign` requires `--identity`. The default entitlements file is `ship/templates/entitlements.plist` (from the SDK in a consumer project).
+`sign` and `share` check the entitlements they are about to apply before any signing preflight or `codesign` runs. `com.apple.security.cs.allow-jit` is the approved JIT entitlement; a file that asks for `allow-unsigned-executable-memory` or `disable-executable-page-protection` without it is refused. When the build directory's `CMakeCache.txt` selects a JIT JS engine (`PULP_JS_ENGINE=v8` or `jsc`), an app (`.app`, `.appex`, or a bare executable via `--path`) must grant `allow-jit`, because the hardened runtime would let it sign and then stop the engine from mapping JIT pages. Plug-in bundles (`.vst3`, `.component`, `.clap`) run under their host's entitlements, so the default entitlements, which grant no JIT, are correct for them. The AUv3 build renders per-engine files under `build/AUv3/`.
 `--path` signs exactly one explicit desktop artifact instead of scanning the build dirs:
 macOS `.app`/`.dmg`/plugin bundles, or Windows `.exe`/plugin bundles. `.pkg`
 installers are signed at creation time with a Developer ID **Installer**
 identity, not here.
 
-`package` creates per-format `.pkg` files using `pkgbuild` on macOS, or `.dmg` files with `--dmg`. On Windows, it packages VST3/CLAP bundles as an NSIS `.exe` installer; `--per-user` switches plugin destinations to `%LOCALAPPDATA%\Programs\Common\...`, and plugin-only installers do not create Start Menu shortcuts. On Linux, it packages VST3/CLAP/LV2 bundles as a `.deb` using `dpkg-deb`, with a `.tar.gz` fallback when `dpkg-deb` is unavailable. If no Linux plugin bundles are present, it reports `no VST3/CLAP/LV2 plugins found` instead of creating an empty macOS-style artifact summary. For Android, `--target android` runs the Gradle package flow and copies APK/AAB outputs into `artifacts/`.
+`package` creates per-format `.pkg` files using `pkgbuild` on macOS, or `.dmg` files with `--dmg`. On Windows, it packages VST3/CLAP bundles as an NSIS `.exe` installer; `--per-user` switches plugin destinations to `%LOCALAPPDATA%\Programs\Common\...`, and plugin-only installers do not create Start Menu shortcuts. On Linux, it packages VST3/CLAP/LV2 bundles as a `.deb` using `dpkg-deb`, with a `.tar.gz` fallback when `dpkg-deb` is unavailable. If no Linux plugin bundles are present, it reports `no VST3/CLAP/LV2 plugins found` instead of creating an empty macOS-style artifact summary. On macOS, `package` exits 1 when any installer fails to build (each failure prints a `FAILED` line) or when it finds nothing to package, so `release` and scripts can rely on the exit code. For Android, `--target android` runs the Gradle package flow and copies APK/AAB outputs into `artifacts/`.
 
 For notarization, prefer `pulp ship release` for the end-to-end sign/package/notarize flow, or `pulp ship notarize --path <artifact>` for one packaged upload container (`.pkg`, `.dmg`, or `.zip`). Raw `.app` bundles are rejected with a pointer to `share`; raw plugin bundle directories should be packaged before distribution.
 
@@ -2219,6 +2236,8 @@ pulp sdk clean                                # Remove all cached SDK versions
 
 Set `PULP_HOME` to relocate the SDK cache, asset cache, and config root.
 
+`pulp sdk install` verifies the downloaded SDK archive against the release's `SHA256SUMS` before extracting it, under the same rules as [`pulp upgrade`](#upgrade): a mismatch or a missing manifest on a release at or above `checksum_manifest_floor` refuses the install; older manifest-less releases install with a warning.
+
 The `forge-dev` profile is for trying newly committed Pulp DSP in a local Forge
 build before publishing a versioned SDK. It is deliberately stricter than the
 ordinary `--local` cache:
@@ -2331,7 +2350,10 @@ Flags:
 | `--design SCRIPT` | Build `pulp-design-tool` and launch it with SCRIPT; delegated watch mode relaunches on rebuild, Rust fallback launches once |
 | `--target T` | Pass `--target T` to `cmake --build` |
 | `--allow-unsupported-sdk` | Delegated C++ path: bypass the CLI-vs-project SDK compatibility guard and continue anyway (unsupported) |
+| `--no-dev-shared` | Link plug-in modules statically instead of against the development-only shared Pulp runtime |
 | `-- args...` | Arguments passed to the launched app |
+
+In an SDK project on macOS, `pulp dev` links plug-in modules against one development-only shared Pulp runtime (`-DPULP_DEV_SHARED_UI=ON`), so a one-file edit relinks a module of about a megabyte instead of the full static image, and it reconfigures an existing build dir to match. `--no-dev-shared` or `PULP_DEV_SHARED_UI=0` keeps static links. The Pulp source checkout keeps static links unless `PULP_DEV_SHARED_UI=1` asks, because its own tests inspect example and fixture modules as they ship. The ship commands refuse dev-shared artifacts; `pulp build` switches the dir back. See [Fast plug-in relinks](../guides/build.md#fast-plug-in-relinks-pulp_dev_shared_ui).
 
 `pulp dev` runs the same active-project compatibility preflight as `pulp build`. If the project pins an SDK or `cli_min_version` newer than the installed CLI, the command stops before SDK resolution/build and points at `pulp upgrade`.
 
@@ -2366,6 +2388,7 @@ Flags:
 | `--validate` | Run quick plugin dlopen validation after build |
 | `--run TARGET` | Launch TARGET from build dir, relaunch on rebuild |
 | `--target T` | Pass `--target T` to `cmake --build` |
+| `--no-dev-shared` | Link plug-in modules statically instead of against the development-only shared Pulp runtime `pulp loop` uses on macOS, as with `pulp dev` |
 | `--allow-unsupported-sdk` | Bypass the CLI-vs-project SDK compatibility guard |
 | `-- args...` | Arguments passed to the launched app |
 
@@ -2388,6 +2411,7 @@ pulp scan --format auv3             # Only AUv3
 pulp scan --format lv2              # Only LV2
 pulp scan -f clap                   # Short alias for --format
 pulp scan --no-load                 # Compatibility no-op on Rust; filesystem-only mode for pulp-cpp
+pulp scan --in-process              # pulp-cpp: run CLAP entry points in this process, not a worker
 pulp scan --help                    # Print usage; never opens any plug-in
 ```
 
@@ -2396,6 +2420,8 @@ Output is one line per plug-in: `[<format>]` header per section, then `<name>  <
 On the Rust front end, `--no-load` is accepted for compatibility and is effectively the default behavior. On `pulp-cpp scan`, `--no-load` skips the dlopen step entirely and uses the same filename-derived inventory mode; use it when the rich path errors out with `libc++abi: terminating` or when you want a quick path-only listing.
 
 `pulp scan --help` is handled by the Rust CLI help path and does not enumerate or load plug-ins. `pulp-cpp scan --help` has the same pre-scan help behavior, so help remains safe while diagnosing a malformed plug-in that crashes the rich metadata path.
+
+On `pulp-cpp scan`, each CLAP bundle's entry point runs in a disposable `pulp-scan-worker` child process, so a bundle that crashes or hangs is skipped (and recorded in the caller's scan blacklist) instead of ending the scan. The worker is found beside the executable (an installed SDK's `bin/`, or `tools/scan-worker/` in a build tree) or through `PULP_SCAN_WORKER`; a group- or world-writable worker is refused. When no worker can be found, CLAP bundles are not enumerated at all and the command prints why; `--in-process` is the explicit opt-in that runs their entry points in the scanning process instead.
 
 ### host
 
@@ -2538,6 +2564,8 @@ pulp upgrade --notes --from 0.25.0 --to 0.29.0    # explicit hop override
 ```
 
 Downloads the release from GitHub, installs the archive's top-level companion payloads next to the current binary, replaces the current binary, and verifies. Current archives install Rust `pulp` plus the `pulp-cpp` fallthrough delegate together. Requires `curl`.
+
+Before anything is extracted, the archive is checked against the release's `SHA256SUMS` asset (the manifest every release publishes beside its archives). A digest mismatch, a manifest with no entry for the archive, or a missing manifest on a release at or above the floor in `tools/scripts/release_product_matrix.json` (`checksum_manifest_floor`) refuses the upgrade and prints the expected and observed digests. Older releases without a manifest still install, with a `WARNING:` line saying the archive was not verified. A successful check prints `Verified SHA-256: <digest>`.
 
 `--check-only` reads the on-disk cache written by the on-every-invocation background refresh and prints installed/latest/notes. If the cache is empty (first run), it falls through to a single live GitHub query.
 
@@ -3111,10 +3139,10 @@ Subcommands:
 
 | Subcommand | What it does |
 |------------|--------------|
-| `validate <path>` | Validate a `.pulpcontent` archive or `content-pack` directory without executing package code |
+| `validate <path>` | Validate a `.pulpcontent` archive or `content-pack` directory without executing package code. An archive is refused before extraction when its declared decompressed size exceeds the pack cap (4 GiB total, 1 GiB per entry, 65536 entries by default); `--max-pack-bytes <n>` lowers both byte caps and never raises them |
 | `preview <path> --plugin-runtime <manifest>` | Preview compatibility and reload/restart policy without installing anything |
-| `install <path> --plugin <id> --yes` | Copy a validated content pack into the plugin-specific user content root and update the content index with `plugin_id` and `manifest_sha256` |
-| `update <path> --plugin <id> --yes` | Replace or add a validated local content pack, write the target plugin id and new manifest digest, and roll back a replaced version on failure |
+| `install <path> --plugin <id> --yes` | Copy a validated content pack into the plugin-specific user content root and update the content index with `plugin_id` and `manifest_sha256`; accepts `--max-pack-bytes <n>` |
+| `update <path> --plugin <id> --yes` | Replace or add a validated local content pack, write the target plugin id and new manifest digest, and roll back a replaced version on failure; accepts `--max-pack-bytes <n>` |
 | `list [--plugin <id>]` | List installed content packs |
 | `rescan` | Rebuild `Content/index.json` from installed local manifests without copying, deleting, fetching, or executing package code; index entries include `plugin_id` and `manifest_sha256` |
 | `reveal <package-id> --plugin <id>` | Print the installed content path |
@@ -3174,11 +3202,24 @@ pulp search "pitch detection"
 pulp search dsp
 pulp search fft --format json
 pulp search fft --refresh
+pulp search fft --refresh --allow-unsigned-registry
 ```
 
 Use `--refresh` with a query to bypass the remote-registry cache while
 searching. `--format json` emits machine-readable output; omit `--format` for
 the default text output.
+
+When no project registry (`tools/packages/registry.json`) is present, search
+falls back to the remote registry. Once the CLI pins a signer key
+(`kPinnedRegistrySignerPublicKeyHex` in `tools/cli/package_registry_trust.hpp`),
+that registry is only trusted when the `registry.json.sig` published beside it
+carries an Ed25519 signature that verifies against the key; an unsigned,
+tampered, or unverifiable registry is refused, and a cached copy is reused only
+if it was verified when fetched. `--allow-unsigned-registry` overrides the
+refusal for one invocation and prints a `WARNING:` naming the gap. While no key
+is pinned, the registry is used unsigned as before and a one-line notice says
+verification is enforced once a signer key is pinned. The registry owner signs
+with `tools/scripts/sign_package_registry.py` (see the `packages` skill).
 
 ### update
 

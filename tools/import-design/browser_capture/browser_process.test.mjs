@@ -5,11 +5,13 @@ import { createHash } from "node:crypto";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { PassThrough } from "node:stream";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   browserProcessIdentity,
+  CdpPipe,
   createBrowserCustody,
   createEmptyProfile,
   GUARDIAN_CUSTODY_MIN_TIMEOUT_MS,
@@ -90,10 +92,10 @@ for arg in "$@"; do
   esac
 done
 test -n "$profile" || exit 64
-printf '9222\\n/devtools/browser/test\\n' > "$profile/DevToolsActivePort"
 printf '%s\\n' "$$" > "$profile/browser.pid"
 /bin/sh -c 'trap "" TERM; while :; do sleep 1; done' &
 printf '%s\\n' "$!" > "$profile/renderer.pid"
+printf '{"id":1,"result":{}}\\000' >&4
 while :; do printf 'browser diagnostic\n' >&2; sleep 0.05; done
 `, "utf8");
       await chmod(fakeBrowser, 0o700);
@@ -173,8 +175,8 @@ test -n "$profile" || exit 64
 test -n "$HOME" || exit 65
 case "$HOME" in "$profile"/*) ;; *) exit 66 ;; esac
 test -d "$XDG_CACHE_HOME" || exit 67
-printf '9222\\n/devtools/browser/test\\n' > "$profile/DevToolsActivePort"
 printf '%s\\n' "$$" > "$profile/browser.pid"
+printf '{"id":1,"result":{}}\\000' >&4
 while :; do sleep 1; done
 `, "utf8");
       await chmod(fakeBrowser, 0o700);
@@ -211,10 +213,10 @@ for arg in "$@"; do
   esac
 done
 test -n "$profile" || exit 64
-printf '9222\\n/devtools/browser/test\\n' > "$profile/DevToolsActivePort"
 printf '%s\\n' "$$" > "$profile/browser.pid"
 /bin/sh -c 'trap "" TERM; while :; do sleep 1; done' &
 printf '%s\\n' "$!" > "$profile/renderer.pid"
+printf '{"id":1,"result":{}}\\000' >&4
 while :; do sleep 1; done
 `, "utf8");
       await chmod(fakeBrowser, 0o700);
@@ -242,6 +244,93 @@ while :; do sleep 1; done
         !processExists(browserPid) && !processExists(rendererPid));
     } finally {
       if (launched?.child) await terminateBrowser(launched.child);
+      if (launched?.child?.pid) {
+        try { process.kill(-launched.child.pid, "SIGKILL"); } catch {}
+      }
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+test("normal termination ends the grace once only the custody anchor is left",
+  { skip: process.platform === "win32" }, async () => {
+    // The anchor that leads the group waits out SIGTERM by design. A browser
+    // and helper that exit on it leave only the anchor, and teardown used to
+    // wait out the whole 1.5 s grace for a group that could not empty.
+    const root = await mkdtemp(path.join(os.tmpdir(), "pulp-browser-process-test-"));
+    const profile = path.join(root, "pulp-browser-capture-prompt-grace");
+    const fakeBrowser = path.join(root, "fake-browser.sh");
+    let launched;
+    try {
+      await writeFile(fakeBrowser, `#!/bin/sh
+profile=""
+for arg in "$@"; do
+  case "$arg" in
+    --user-data-dir=*) profile="\${arg#--user-data-dir=}" ;;
+  esac
+done
+test -n "$profile" || exit 64
+/bin/sh -c 'while :; do sleep 1; done' &
+printf '%s\\n' "$!" > "$profile/renderer.pid"
+printf '{"id":1,"result":{}}\\000' >&4
+while :; do sleep 1; done
+`, "utf8");
+      await chmod(fakeBrowser, 0o700);
+      await createEmptyProfile(profile);
+      launched = await launchBrowser(fakeBrowser, profile, 2000);
+      const rendererPid = Number((await readFile(
+        path.join(profile, "renderer.pid"), "utf8")).trim());
+      assert.equal(await processGroupId(rendererPid), launched.child.pid);
+      const started = Date.now();
+      await terminateBrowser(launched.child);
+      const elapsed = Date.now() - started;
+      await waitFor(() => !processExists(launched.child.pid) &&
+        !processExists(rendererPid), 2000, "the browser group to be reaped");
+      assert.ok(elapsed < 1400,
+        `teardown took ${elapsed}ms; the grace outlived every process it was for`);
+    } finally {
+      if (launched?.child?.pid) {
+        try { process.kill(-launched.child.pid, "SIGKILL"); } catch {}
+      }
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+test("normal termination still grants the grace to a helper that is exiting",
+  { skip: process.platform === "win32" }, async () => {
+    // Ending the grace early must wait for every process but the anchor: a
+    // helper that takes a moment to exit cleanly on SIGTERM must finish
+    // before anything escalates to SIGKILL.
+    const root = await mkdtemp(path.join(os.tmpdir(), "pulp-browser-process-test-"));
+    const profile = path.join(root, "pulp-browser-capture-graceful-helper");
+    const fakeBrowser = path.join(root, "fake-browser.sh");
+    let launched;
+    try {
+      await writeFile(fakeBrowser, `#!/bin/sh
+profile=""
+for arg in "$@"; do
+  case "$arg" in
+    --user-data-dir=*) profile="\${arg#--user-data-dir=}" ;;
+  esac
+done
+test -n "$profile" || exit 64
+/bin/sh -c 'trap "sleep 0.4; echo done > \\"$1/graceful\\"; exit 0" TERM; while :; do sleep 0.1; done' helper "$profile" &
+printf '%s\\n' "$!" > "$profile/renderer.pid"
+printf '{"id":1,"result":{}}\\000' >&4
+while :; do sleep 1; done
+`, "utf8");
+      await chmod(fakeBrowser, 0o700);
+      await createEmptyProfile(profile);
+      launched = await launchBrowser(fakeBrowser, profile, 2000);
+      const rendererPid = Number((await readFile(
+        path.join(profile, "renderer.pid"), "utf8")).trim());
+      assert.equal(await processGroupId(rendererPid), launched.child.pid);
+      await terminateBrowser(launched.child);
+      await waitFor(() => !processExists(launched.child.pid) &&
+        !processExists(rendererPid), 2000, "the browser group to be reaped");
+      assert.equal(
+        (await readFile(path.join(profile, "graceful"), "utf8")).trim(), "done",
+        "the helper was killed before its SIGTERM handler finished");
+    } finally {
       if (launched?.child?.pid) {
         try { process.kill(-launched.child.pid, "SIGKILL"); } catch {}
       }
@@ -547,7 +636,7 @@ for arg in "$@"; do
   esac
 done
 test -n "$profile" || exit 64
-printf '9222\\n/devtools/browser/test\\n' > "$profile/DevToolsActivePort"
+printf '{"id":1,"result":{}}\\000' >&4
 while :; do sleep 1; done
 `, "utf8");
       await chmod(fakeBrowser, 0o700);
@@ -577,6 +666,85 @@ process.stdout.write("terminated\\n");
       assert.ok(exitedAt - terminatedAt < 2000,
         `owner lingered ${exitedAt - terminatedAt}ms after teardown returned`);
     } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+test("the CDP pipe frames NUL-terminated messages across chunk boundaries",
+  async () => {
+    const toBrowser = new PassThrough();
+    const fromBrowser = new PassThrough();
+    const pipe = new CdpPipe(toBrowser, fromBrowser);
+    const received = [];
+    pipe.onMessage((message) => received.push(JSON.parse(message)));
+    const written = [];
+    toBrowser.on("data", (chunk) => written.push(chunk));
+
+    pipe.send(JSON.stringify({ id: 7, method: "Browser.getVersion" }));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(Buffer.concat(written).toString("utf8"),
+      '{"id":7,"method":"Browser.getVersion"}\0');
+
+    // One message split inside a multi-byte character, then a chunk holding
+    // the rest of it and a complete second message, as a large reply arrives.
+    const bytes = Buffer.from(
+      '{"id":1,"result":{"text":"\u00e9"}}\0{"method":"Page.loadEventFired",');
+    const split = bytes.indexOf(0xc3) + 1;
+    fromBrowser.write(bytes.subarray(0, split));
+    fromBrowser.write(bytes.subarray(split));
+    fromBrowser.write('"sessionId":"S"}\0');
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(received, [
+      { id: 1, result: { text: "\u00e9" } },
+      { method: "Page.loadEventFired", sessionId: "S" },
+    ]);
+
+    let closed = false;
+    pipe.onClose(() => { closed = true; });
+    fromBrowser.end();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(closed, true);
+    assert.throws(() => pipe.send("{}"), /CDP pipe closed/);
+  });
+
+test("the browser is driven over a debugging pipe, not a TCP port",
+  { skip: process.platform === "win32" }, async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "pulp-browser-process-test-"));
+    const profile = path.join(root, "pulp-browser-capture-pipe");
+    const fakeBrowser = path.join(root, "fake-browser.sh");
+    let launched;
+    try {
+      // Answer the launch's readiness request only on fd 4, so the launch
+      // succeeds only if its CDP traffic really travels the pipe.
+      await writeFile(fakeBrowser, `#!/bin/sh
+profile=""
+for arg in "$@"; do
+  case "$arg" in
+    --user-data-dir=*) profile="\${arg#--user-data-dir=}" ;;
+  esac
+done
+test -n "$profile" || exit 64
+for arg in "$@"; do printf '%s\\n' "$arg"; done > "$profile/browser.args"
+request=$(dd bs=1 count=38 <&3 2>/dev/null)
+test "$request" = '{"id":1,"method":"Browser.getVersion"}' || exit 65
+printf '{"id":1,"result":{}}\\000' >&4
+while :; do sleep 1; done
+`, "utf8");
+      await chmod(fakeBrowser, 0o700);
+      await createEmptyProfile(profile);
+      launched = await launchBrowser(fakeBrowser, profile, 5000);
+      assert.ok(launched.pipe instanceof CdpPipe);
+      assert.equal("endpoint" in launched, false);
+      const args = (await readFile(
+        path.join(profile, "browser.args"), "utf8")).trim().split("\n");
+      assert.ok(args.includes("--remote-debugging-pipe"), args.join(" "));
+      assert.deepEqual(
+        args.filter((argument) =>
+          argument.startsWith("--remote-debugging-port") ||
+          argument.startsWith("--remote-debugging-address")),
+        []);
+    } finally {
+      if (launched?.child) await terminateBrowser(launched.child);
       await rm(root, { recursive: true, force: true });
     }
   });

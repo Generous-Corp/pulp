@@ -6,11 +6,17 @@ cmake_minimum_required(VERSION 3.24)
 
 file(REMOVE_RECURSE "${FIXTURE_DIR}")
 file(MAKE_DIRECTORY "${FIXTURE_DIR}")
-# A private copy of the scanner, so a policy change (a newer scanner) can be
+# A private copy of the scanner and of the forbidden-marker list it reads from
+# its own directory, so a policy change (a newer scanner, a new marker) can be
 # simulated without touching the source tree.
 set(_scanner "${FIXTURE_DIR}/check_control_shipping_artifact.cmake")
+set(_list "${FIXTURE_DIR}/release_artifact_forbidden.json")
 file(COPY_FILE "${PULP_SOURCE_DIR}/tools/cmake/check_control_shipping_artifact.cmake"
     "${_scanner}")
+file(COPY_FILE "${PULP_SOURCE_DIR}/tools/cmake/PulpReleaseArtifactScan.cmake"
+    "${FIXTURE_DIR}/PulpReleaseArtifactScan.cmake")
+file(COPY_FILE "${PULP_SOURCE_DIR}/tools/cmake/release_artifact_forbidden.json"
+    "${_list}")
 set(_artifact "${FIXTURE_DIR}/artifact.bin")
 set(_manifest "${FIXTURE_DIR}/manifest.json")
 set(_shipping "${FIXTURE_DIR}/shipping.json")
@@ -57,7 +63,7 @@ _settle()
 file(TOUCH "${_stamp}")
 _scan(TRUE "report restored under a newer stamp")
 
-foreach(_input IN ITEMS artifact manifest shipping scanner)
+foreach(_input IN ITEMS artifact manifest shipping scanner list)
     _settle()
     file(TOUCH "${_${_input}}")
     _scan(FALSE "${_input} newer than stamp")

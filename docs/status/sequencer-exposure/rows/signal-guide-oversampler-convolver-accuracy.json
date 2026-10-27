@@ -1,0 +1,53 @@
+{
+  "id": "signal-guide-oversampler-convolver-accuracy",
+  "title": "The signal-processing guide describes the shipped oversampler default and the Convolver's long-IR overlap-add",
+  "classification": "engine_internal",
+  "delivery_state": "pending",
+  "claim_id": "9db85cc1-18bb-4003-bf38-072410293a00",
+  "owned_paths": [
+    "docs/status/sequencer-exposure/rows/signal-guide-oversampler-convolver-accuracy.json"
+  ],
+  "evidence": [
+    {
+      "path": "docs/guides/signal-processing.md",
+      "needles": [
+        "The default anti-aliasing lane, `Kind::polyphase_iir`",
+        "Output is delayed by exactly one block"
+      ]
+    },
+    {
+      "path": "core/signal/include/pulp/signal/oversampling.hpp",
+      "needles": [
+        "Kind kind_ = Kind::polyphase_iir;"
+      ]
+    },
+    {
+      "path": "core/signal/include/pulp/signal/overlap_add_convolver.hpp",
+      "needles": [
+        "pending overlap is accumulated and shifted down"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "A guide correction only. It describes the oversampler default and Convolver behavior already on main and adds no header, type, parameter or callable surface."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No command, flag or projection changes."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP tool, request or response shape changes."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No operation, executor binding, grant or profile policy is added."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "No design-time capability row is added or changed; the documented classes keep their existing capability entries."
+    }
+  }
+}
