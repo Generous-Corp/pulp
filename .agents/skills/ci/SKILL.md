@@ -493,10 +493,12 @@ gate added to a merge_group workflow should reuse the same resolver.
 
 ## `[train]` rollups are member-approved
 
-The merge train's switch is on in `.shipyard/config.toml`; once the live
-scratch-repository test passes, `mode = "rollup"` permits only rollups whose
-members each have an exact counted approval and whose replayed file tree and
-merge parents pass the guard. Before that test, leave the mode off.
+The merge train's switch is on in `.shipyard/config.toml`; `mode = "rollup"`
+permits only rollups whose members each have an exact counted approval and
+whose replayed file tree and merge parents pass the guard. Each rollup lands
+through the merge queue as a merge commit. `SHIPYARD_TRAIN=off` or a
+`train.pause` file disables the train, and `shipyard rollup reconcile --apply`
+is manual because Pulp has no merge steward.
 
 ## A HOLD on a queued head fails the merge group
 

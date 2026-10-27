@@ -281,6 +281,7 @@ use a guest-local mise cache. Keep the guest isolated from the persistent
 interactive VM, and destroy the overlay after the receipt is copied out. A
 successful configure or SDK build is useful evidence, but it is not plugin GUI
 or DAW proof; retain that distinction in the status report.
+
 ## Generated Shipyard pin updates
 
 The generated mise toolchain blocks are refreshed by `tools/toolchain/generate.py`

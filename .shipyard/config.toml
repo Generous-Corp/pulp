@@ -862,7 +862,9 @@ max_members = 4
 exclude_paths = [
     ".github/workflows/**",
     "tools/ci/**",
+    "tools/install-shipyard.sh",
     "tools/scripts/queue_*",
+    "tools/scripts/test_queue_*",
     "tools/scripts/fixtures/queue_*",
     "tools/shipyard.toml",
     "tools/toolchain/**",
