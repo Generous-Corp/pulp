@@ -1170,8 +1170,10 @@ bundles they are about to sign, package or report on. The gates come from what
 the build directory's `CMakeCache.txt` and the installed SDK's
 `sdk-provenance.json` prove (`PULP_TRACING=OFF` forbids the Perfetto markers,
 `PULP_DEV_BUILD=OFF` the dev environment hooks and the reload watcher,
-`PULP_DEV_BRIDGE_EXEC=OFF` or an SDK with `bridge_exec: false` the shell exec
-bridge, `PULP_ENABLE_JS=OFF` the JS engine). A hit refuses the step with the
+`PULP_DEV_BRIDGE_EXEC=OFF` or an SDK whose provenance says `bridge_exec: false`
+the shell exec bridge, `PULP_ENABLE_JS=OFF` the JS engine; an official release
+SDK's `profile: official-release` proves the dev-environment, reload-watcher
+and exec-bridge gates for everything linked against it). A hit refuses the step with the
 scanner's report naming the marker; `--skip-artifact-scan` overrides it with a
 loud warning. A build that recorded none of those options, a build dir without
 a cache, or a project whose SDK does not install the scanner is skipped, and

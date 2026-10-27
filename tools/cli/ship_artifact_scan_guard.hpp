@@ -122,23 +122,36 @@ inline std::vector<std::string> release_scan_gates_from_cache(std::string_view c
 }
 
 // The gates an installed SDK's provenance proves for every binary linked
-// against it: `bridge_exec: false` means the exec bridge body was compiled out
-// of the SDK, and `build_profile: release` means the SDK was built under the
-// release profile, whose enforced options compile out the dev environment
-// hooks, the reload watcher and the exec bridge. A consumer project's own
-// cache rarely records those options, so without this an SDK-based plug-in
-// would be scanned against nothing.
+// against it. Two marker shapes exist (tools/scripts/sdk_provenance.py and
+// tools/cmake/PulpStampSourceInstall.cmake.in):
+// - an official release SDK: `"profile": "official-release"` with a
+//   `"features"` object carrying `"bridge_exec": false` and `"tracing": false`;
+// - a source install: top-level `"bridge_exec"` and, once recorded,
+//   `"build_profile": "release"` or `"dev"`.
+// A release-profile SDK compiles out the dev environment hooks, the reload
+// watcher and the exec bridge, so `official-release` and `build_profile:
+// release` each prove `dev-env-off`, `reload-ship` and `bridge-exec-off`;
+// `bridge_exec: false` proves `bridge-exec-off` and `tracing: false` proves
+// `tracing-off` wherever they sit. A consumer project's own cache rarely
+// records those options, so without this an SDK-based plug-in would be
+// scanned against nothing. The lookup is by key name, not by nesting: a key
+// of the same name under another object would be misread, and no marker
+// shape carries one.
 inline std::vector<std::string> release_scan_gates_from_provenance(std::string_view provenance) {
     std::vector<std::string> gates;
-    if (const auto bridge = detail::flat_json_scalar(provenance, "bridge_exec");
-        bridge && *bridge == "false")
-        detail::add_gate(gates, kGateBridgeExecOff);
-    if (const auto profile = detail::flat_json_scalar(provenance, "build_profile");
-        profile && *profile == "release") {
+    const auto is = [&provenance](std::string_view key, std::string_view want) {
+        const auto value = detail::flat_json_scalar(provenance, key);
+        return value && *value == want;
+    };
+    if (is("profile", "official-release") || is("build_profile", "release")) {
         detail::add_gate(gates, kGateDevEnvOff);
         detail::add_gate(gates, kGateReloadShip);
         detail::add_gate(gates, kGateBridgeExecOff);
     }
+    if (is("bridge_exec", "false"))
+        detail::add_gate(gates, kGateBridgeExecOff);
+    if (is("tracing", "false"))
+        detail::add_gate(gates, kGateTracingOff);
     return gates;
 }
 

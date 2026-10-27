@@ -266,8 +266,11 @@ classes they build; this holds it on the bytes that get signed and notarized.
   `CMakeCache.txt` recorded contributes (`PULP_ENABLE_JS`, `PULP_TRACING`,
   `PULP_DEV_BUILD`, `PULP_RELOAD_DEV_WATCHER`, `PULP_DEV_BRIDGE_EXEC` /
   `PULP_BRIDGE_EXEC_ENABLED`, explicit value over profile fallback), plus the
-  installed SDK's `sdk-provenance.json` (`bridge_exec: false` → `bridge-exec-off`;
-  `build_profile: release` → `dev-env-off`, `reload-ship`, `bridge-exec-off`), so
+  installed SDK's `sdk-provenance.json`: an official release marker
+  (`profile: official-release`, `features.bridge_exec: false`,
+  `features.tracing: false`) proves `dev-env-off`, `reload-ship`,
+  `bridge-exec-off` and `tracing-off`; a source-install stamp (top-level
+  `bridge_exec`, `build_profile: release`) proves the first three, so
   an SDK-based plug-in whose own cache records none of those options is still
   scanned against what its SDK proves. `control-stripped` is never derived here.
 - **Skips say why.** No cache, no gate recorded, no scanner (it is looked for

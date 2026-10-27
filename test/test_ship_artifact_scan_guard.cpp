@@ -90,26 +90,72 @@ TEST_CASE("an explicit watcher or bridge-exec entry wins over its profile fallba
 
 TEST_CASE("SDK provenance supplies the gates a consumer's cache never records",
           "[ship][artifact-scan]") {
-    const std::string release =
-        "{\n  \"schema\": \"pulp.sdk-provenance.v1\",\n  \"bridge_exec\": false,\n"
-        "  \"build_profile\": \"release\"\n}\n";
-    auto gates = release_scan_gates_from_provenance(release);
-    CHECK(has(gates, kGateBridgeExecOff));
+    // The official release marker, as tools/scripts/sdk_provenance.py mints it
+    // and tools/cmake/PulpSdkProvenance.cmake consumes it: the gates live in
+    // "profile" and the nested "features" object.
+    const std::string official =
+        "{\n"
+        "  \"schema\": \"pulp.sdk-provenance.v1\",\n"
+        "  \"kind\": \"release\",\n"
+        "  \"profile\": \"official-release\",\n"
+        "  \"distribution_eligible\": true,\n"
+        "  \"sdk_version\": \"1.2.3\",\n"
+        "  \"source_git_ref\": \"v1.2.3\",\n"
+        "  \"source_git_sha\": \"0123456789abcdef0123456789abcdef01234567\",\n"
+        "  \"source_git_dirty\": false,\n"
+        "  \"platform\": \"darwin-arm64\",\n"
+        "  \"build_type\": \"Release\",\n"
+        "  \"features\": {\n"
+        "    \"audio_probes\": false,\n"
+        "    \"bridge_exec\": false,\n"
+        "    \"inspector\": true,\n"
+        "    \"tracing\": false\n"
+        "  }\n"
+        "}\n";
+    auto gates = release_scan_gates_from_provenance(official);
     CHECK(has(gates, kGateDevEnvOff));
     CHECK(has(gates, kGateReloadShip));
+    CHECK(has(gates, kGateBridgeExecOff));
+    CHECK(has(gates, kGateTracingOff));
+    CHECK(gates.size() == 4);
+
+    // An official marker minted before features.bridge_exec existed still
+    // proves the profile gates; one that claims the bridge proves no bridge
+    // gate of its own, only the profile's.
+    const std::string early =
+        "{\"profile\": \"official-release\", \"features\": {\"tracing\": false}}";
+    gates = release_scan_gates_from_provenance(early);
+    CHECK(has(gates, kGateBridgeExecOff));
+    CHECK(has(gates, kGateTracingOff));
+    CHECK(gates.size() == 4);
+
+    // The source-install stamp (PulpStampSourceInstall.cmake.in): top-level
+    // bridge_exec and build_profile.
+    const std::string source_release =
+        "{\n  \"schema\": \"pulp.sdk-provenance.v1\",\n  \"kind\": \"source-install\",\n"
+        "  \"distribution_eligible\": false,\n  \"bridge_exec\": false,\n"
+        "  \"platform\": \"darwin-arm64\",\n  \"build_profile\": \"release\"\n}\n";
+    gates = release_scan_gates_from_provenance(source_release);
+    CHECK(has(gates, kGateDevEnvOff));
+    CHECK(has(gates, kGateReloadShip));
+    CHECK(has(gates, kGateBridgeExecOff));
+    CHECK_FALSE(has(gates, kGateTracingOff));
     CHECK(gates.size() == 3);
 
-    const std::string dev = "{\"bridge_exec\": true, \"build_profile\": \"dev\"}";
-    CHECK(release_scan_gates_from_provenance(dev).empty());
-
-    // A stamp that predates build_profile still proves the exec bridge.
+    // A dev source install proves nothing but what it states.
+    const std::string source_dev =
+        "{\"kind\": \"source-install\", \"bridge_exec\": true, \"build_profile\": \"dev\"}";
+    CHECK(release_scan_gates_from_provenance(source_dev).empty());
     CHECK(release_scan_gates_from_provenance("{\"bridge_exec\": false}") ==
           std::vector<std::string>{std::string(kGateBridgeExecOff)});
+    CHECK(release_scan_gates_from_provenance(
+              "{\"profile\": \"dev\", \"features\": {\"tracing\": true}}")
+              .empty());
     CHECK(release_scan_gates_from_provenance("not json").empty());
 
     // The union keeps each gate once, cache order first.
     const auto merged =
-        release_scan_gates("PULP_TRACING:BOOL=OFF\nPULP_DEV_BRIDGE_EXEC:BOOL=OFF\n", release);
+        release_scan_gates("PULP_TRACING:BOOL=OFF\nPULP_DEV_BRIDGE_EXEC:BOOL=OFF\n", official);
     CHECK(merged ==
           std::vector<std::string>{std::string(kGateTracingOff), std::string(kGateBridgeExecOff),
                                    std::string(kGateDevEnvOff), std::string(kGateReloadShip)});
