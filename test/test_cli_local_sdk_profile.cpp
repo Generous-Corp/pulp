@@ -557,3 +557,29 @@ TEST_CASE("trace SDK provenance records the profile and stays non-distributable"
     REQUIRE(forge.find("\"profile\": \"forge-dev\"") != std::string::npos);
     REQUIRE(forge.find("\"tracing\"") == std::string::npos);
 }
+
+// The from-source checkout SDK (`pulp sdk install` from a checkout) is a
+// developer SDK by decision: it stays on the dev profile so hot reload and the
+// dev bridge keep working for a project built against it, while the stripped
+// flags are still passed explicitly. The configure is read out of the source
+// so a later "hardening" to the release profile fails here, not in a
+// developer's loop.
+TEST_CASE("the from-source checkout SDK configures with the dev profile",
+          "[cli][sdk][checkout]") {
+    const auto source = read_file(fs::path{PULP_SOURCE_DIR} / "tools" / "cli" / "cli_sdk.cpp");
+    const auto begin = source.find("fs::path ensure_checkout_sdk(");
+    REQUIRE(begin != std::string::npos);
+    const auto end = source.find("\n}\n", begin);
+    REQUIRE(end != std::string::npos);
+    const auto body = source.substr(begin, end - begin);
+    const auto contains = [&](const char* text) { return body.find(text) != std::string::npos; };
+
+    REQUIRE(contains("cmake -S "));
+    REQUIRE(contains("-DPULP_PROFILE=dev"));
+    REQUIRE_FALSE(contains("-DPULP_PROFILE=release"));
+    // The dev profile enforces nothing, so the stripped set stays explicit.
+    REQUIRE(contains("-DPULP_BUILD_TESTS=OFF"));
+    REQUIRE(contains("-DPULP_BUILD_EXAMPLES=OFF"));
+    REQUIRE(contains("-DPULP_ENABLE_AUDIO_PROBES=OFF"));
+    REQUIRE(contains("-DPULP_DEV_BRIDGE_EXEC=OFF"));
+}

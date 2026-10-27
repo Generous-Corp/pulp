@@ -6,12 +6,23 @@
 #   release  the enforced options below are OFF, and a configure that disagrees
 #            is refused.
 #
-# Every release and SDK site (release-cli.yml, sign-and-release.yml,
-# release-cli-local.sh, `pulp sdk install`) passes -DPULP_PROFILE=release
-# instead of hand-picking the same security flags, so there is one place that
-# says what a shipped Pulp carries. The profile is recorded in every
-# sdk-provenance.json as `build_profile`, and minting a release marker refuses
-# a cache whose profile is not `release`.
+# Every release site (release-cli.yml, sign-and-release.yml,
+# release-cli-local.sh, tools/ci/intel-vm-cross-build.sh and the lanes that
+# rehearse them) passes -DPULP_PROFILE=release instead of hand-picking the same
+# security flags, so there is one place that says what a shipped Pulp carries.
+# The profile is recorded in every sdk-provenance.json as `build_profile`, and
+# minting a release marker refuses a cache whose profile is not `release`.
+#
+# The from-source checkout SDK that `pulp sdk install` builds from a checkout
+# (ensure_checkout_sdk in tools/cli/cli_sdk.cpp) is NOT a release site. It is
+# a developer SDK and passes -DPULP_PROFILE=dev on purpose: the dev profile
+# keeps hot reload and the dev bridge working for a project built against it,
+# and its provenance records build_profile `dev`, so `pulp ship` can never
+# mistake it for a release SDK. It still passes the stripped flags explicitly
+# (tests, examples, audio probes and the exec bridge OFF). The local forge-dev
+# and trace profiles are dev for the same reason. A release SDK comes only
+# from release-cli.yml; pulp-test-cli-local-sdk-profile pins the checkout
+# SDK's profile so a later "hardening" cannot flip it silently.
 #
 # Mechanism, in two steps around the ordinary option() declarations:
 #   1. Include this module BEFORE the first governed option(). For `release`

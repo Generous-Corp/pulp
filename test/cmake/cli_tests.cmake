@@ -659,10 +659,13 @@ target_link_libraries(pulp-test-cli-sdk-tarball-filename PRIVATE
 catch_discover_tests(pulp-test-cli-sdk-tarball-filename)
 
 # Immutable checkout-backed SDK profile policy and provenance validation.
+# PULP_SOURCE_DIR lets the checkout-SDK case read ensure_checkout_sdk's
+# configure out of cli_sdk.cpp and pin its dev profile.
 add_executable(pulp-test-cli-local-sdk-profile
     test_cli_local_sdk_profile.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/local_sdk_profile.cpp
 )
+pulp_test_data(pulp-test-cli-local-sdk-profile PATHS tools/cli/cli_sdk.cpp)
 target_include_directories(pulp-test-cli-local-sdk-profile PRIVATE
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/tools/cli)

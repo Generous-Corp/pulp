@@ -12937,9 +12937,15 @@ set. `-DPULP_PROFILE=release` seeds `PULP_BUILD_TESTS`, `PULP_BUILD_EXAMPLES`,
 `PULP_ENABLE_FUZZING`, `PULP_BENCHMARK` and `PULP_RT_WORK_COUNTERS` OFF, and
 the configure FATAL_ERRORs if any of them is ON from a `-D` or a stale cache.
 Every release site (`release-cli.yml` CLI + both SDK configures,
-`sign-and-release.yml`, `release-cli-local.sh`, `pulp sdk install`) passes the
-profile and nothing from that list; do not add one of those flags back, and
-do not add a new release configure without the profile. Site-specific flags
+`sign-and-release.yml`, `release-cli-local.sh`,
+`tools/ci/intel-vm-cross-build.sh`) passes the profile and nothing from that
+list; do not add one of those flags back, and do not add a new release
+configure without the profile. `pulp sdk install`'s from-source checkout SDK
+(`ensure_checkout_sdk`, `tools/cli/cli_sdk.cpp`) is not a release site: by
+decision it passes `-DPULP_PROFILE=dev`, because it is a developer SDK and the
+dev profile keeps hot reload and the dev bridge working for a project built
+against it; its stamp records `build_profile: dev` and
+`pulp-test-cli-local-sdk-profile` pins the flag. Site-specific flags
 (`PULP_ENABLE_INSPECTOR` on the tag version, `PULP_ENABLE_DESIGN_IMPORT`,
 GPU, SCENE3D, WEBVIEW) stay beside it: the profile records those two but does
 not enforce them. A release leg that fails with `PULP_PROFILE=release requires
