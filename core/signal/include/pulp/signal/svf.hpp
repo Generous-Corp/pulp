@@ -128,8 +128,8 @@ private:
                 else
                     buffer[i] = input - k * v1;
             }
-            ic1 = snap_to_zero(ic1);
-            ic2 = snap_to_zero(ic2);
+            ic1 = snap_recursion_state(ic1);
+            ic2 = snap_recursion_state(ic2);
         }
         ic1_ = ic1;
         ic2_ = ic2;

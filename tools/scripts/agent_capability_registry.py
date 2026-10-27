@@ -857,7 +857,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/biquad.hpp",
-        "fingerprint": "sha256:6a885b8c54ff3ba32c66b3647036e7e12d6aeec763d751e967611917a364c396",
+        "fingerprint": "sha256:fe75a55776c74b033175b200afc8aaf807c0647afe20cc60464a778964e3786b",
         "disposition": "capability_support",
         "capability_keys": ["signal.sos-cascade"],
         "rationale": (
@@ -1699,7 +1699,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/svf.hpp",
-        "fingerprint": "sha256:9d3b9632299a64a68d78b62fb79fd264860d62b7b4d10269323cc25a94c5c87e",
+        "fingerprint": "sha256:58576c15695dd3ad65affd7912fbfb4e41f331e6bb60fcc65ca605b7a9c1bc5c",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1711,7 +1711,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/tpt_filter.hpp",
-        "fingerprint": "sha256:44621a5e2035d72cce3ef0c62d3a334c913ef7059780d2c7475834df4dfce04f",
+        "fingerprint": "sha256:c157a3dd2d891918bee3ca01f3eec9fd3aaf01ad2091469721514d766bcc44c0",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
