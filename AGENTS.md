@@ -45,10 +45,13 @@ Treat an open PR and a landable PR as different states. The normal Pulp path is:
    required checks are green. Check the live model with
    `shipyard landing --repo Generous-Corp/pulp --json` and the queue with the
    GraphQL merge-queue read before diagnosing capacity. Pulp's queue batches
-   entries according to the live ruleset; arm several ready PRs so the queue can
-   fill its batch window. Do not hand-rebase a merely `BEHIND` PR to chase strict
-   protection; the queue's merge ref performs that work. Conflicts, drafts, and
-   exact-head HOLDs must be resolved or held before admission.
+   entries according to the live ruleset; the m3 team-lead/sweep may arm several
+   ready PRs so the queue can fill its batch window. Authoring and review agents
+   do not arm, enqueue, or call the merge API; they leave admission to that
+   owner and report a refused landing to the m3 team-lead. Do not hand-rebase a
+   merely `BEHIND` PR to chase strict protection; the queue's merge ref performs
+   that work. Conflicts, drafts, and exact-head HOLDs must be resolved or held
+   before admission.
 4. **Evidence:** after admission, record `shipyard who --repo Generous-Corp/pulp
    --pr <n> --json`, then use one bounded `shipyard wait`/background wait for the
    merge or ejection. A queue entry disappearing is an ejection until the main
