@@ -19,7 +19,8 @@ The admitted core slice is pinned to RmlUi commit
 bindings, font engines, SVG/Lottie, HarfBuzz sample, and Tracy disabled. The
 `pulp-test-rmlui-backend` suite now proves core initialization, document
 parsing, update, render, and teardown through the optional backend. Its RmlUi
-render adapter lowers compiled geometry to bounded Pulp draw commands, and its
+render adapter lowers compiled geometry to bounded Pulp draw commands,
+preserves validated image bytes and dimensions for texture commands, and its
 file adapter resolves document resources through the rooted provider. This is
 a CPU recording seam, not yet a Skia/Dawn production renderer.
 The optional backend also exposes a rooted, SHA-256-checked asset provider;
