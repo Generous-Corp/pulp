@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261027-rmlui-production-bridge-20261026-watch",
+  "created_at": "2026-10-27T01:34:20Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "The optional default-off RmlUi backend contract adds Pulp-owned render and asset interfaces plus headless tests. It does not move Vellum authority, design-import authority, Chromium authority, or packaging authority; the target is absent unless explicitly enabled and has no external runtime dependency yet.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-rmlui-backend",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
