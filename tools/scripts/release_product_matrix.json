@@ -110,7 +110,6 @@
     "pulp-sample-bank-manifest",
     "pulp-sequence",
     "pulp-signal-fft-backend",
-    "pulp-signal-mufft",
     "pulp-signal-modal-spec",
     "pulp-simd",
     "pulp-smf-interchange",
@@ -135,7 +134,7 @@
   ],
   "platform_library_stems": {
     "darwin": ["pulp-bundled-fonts"],
-    "linux": ["pulp-bundled-fonts", "pulp-bundled-noto-color-emoji"],
+    "linux": ["pulp-bundled-fonts", "pulp-bundled-noto-color-emoji", "pulp-signal-mufft"],
     "windows": ["pulp-bundled-fonts"],
     "windows-x64": ["pulp-bundled-fonts"]
   },
