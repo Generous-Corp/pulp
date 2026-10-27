@@ -60,4 +60,4 @@ jobs:
       - name: Run RmlUi backend and installed SDK consumer tests
         run: |
           ctest --test-dir build-rmlui -C Release --output-on-failure \
-            -R '^(RmlUi backend|headless RmlUi|rooted RmlUi|cmake-rmlui-sdk-consumer)'
+            -R '^(RmlUi backend|RmlUi font|headless RmlUi|rooted RmlUi|cmake-rmlui-sdk-consumer)'

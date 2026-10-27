@@ -4,16 +4,26 @@
 #include <pulp/runtime/crypto.hpp>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <climits>
 #include <cstddef>
+#include <cstdint>
+#include <cerrno>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
 #include <utility>
 #include <vector>
+
+#if !defined(_WIN32)
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 namespace pulp::view::rmlui {
 
@@ -351,10 +361,64 @@ Status RootedAssetProvider::load(std::string_view path, Asset& out) {
     if (size > max_bytes_)
         return Status::rejected;
 
+    std::string bytes;
+#if !defined(_WIN32)
+    // Keep the confinement check and the read on one opened file description.
+    // The descriptor pins the inode after open, while O_NOFOLLOW prevents a
+    // final symlink swap from bypassing the canonical-path check. Read at most
+    // max_bytes_ + 1 bytes so a growth race can never cause an unbounded
+    // allocation before the size/digest check below.
+    const int fd = ::open(candidate.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    if (fd < 0)
+        return errno == ENOENT ? Status::missing_asset : Status::rejected;
+    struct stat opened_stat {};
+    const bool stat_ok = ::fstat(fd, &opened_stat) == 0;
+    if (!stat_ok || !S_ISREG(opened_stat.st_mode) || opened_stat.st_size < 0 ||
+        static_cast<std::uint64_t>(opened_stat.st_size) > max_bytes_) {
+        ::close(fd);
+        return stat_ok && opened_stat.st_size > 0 &&
+                       static_cast<std::uint64_t>(opened_stat.st_size) > max_bytes_
+                   ? Status::rejected
+                   : Status::missing_asset;
+    }
+    const auto opened_size = static_cast<std::size_t>(opened_stat.st_size);
+    const auto bounded_limit = max_bytes_ == std::numeric_limits<std::size_t>::max()
+                                   ? max_bytes_
+                                   : max_bytes_ + 1;
+    bytes.reserve(std::min<std::uint64_t>(max_bytes_, opened_size));
+    std::array<char, 8192> chunk{};
+    while (bytes.size() <= max_bytes_) {
+        const auto remaining = bounded_limit - bytes.size();
+        if (remaining == 0)
+            break;
+        const auto want = std::min<std::size_t>(chunk.size(), remaining);
+        const auto count = ::read(fd, chunk.data(), want);
+        if (count == 0)
+            break;
+        if (count < 0) {
+            if (errno == EINTR)
+                continue;
+            ::close(fd);
+            return Status::rejected;
+        }
+        bytes.append(chunk.data(), static_cast<std::size_t>(count));
+    }
+    ::close(fd);
+#else
+    // Windows has no POSIX descriptor API. Keep the same bounded-read
+    // contract here; the canonical path check above and the final digest bind
+    // the bytes to the admitted manifest entry.
     std::ifstream stream(candidate, std::ios::binary);
     if (!stream)
         return Status::missing_asset;
-    std::string bytes((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+    bytes.resize(static_cast<std::size_t>(size));
+    stream.read(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    if (stream.gcount() != static_cast<std::streamsize>(bytes.size()))
+        return Status::rejected;
+    char extra = 0;
+    if (stream.read(&extra, 1) || stream.gcount() != 0)
+        bytes.push_back(extra);
+#endif
     if (bytes.size() != size || pulp::runtime::sha256_hex(bytes) != manifest->sha256)
         return Status::rejected;
     out = Asset{std::string(path), std::move(bytes)};
