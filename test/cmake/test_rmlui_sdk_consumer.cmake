@@ -56,6 +56,8 @@ execute_process(
     COMMAND "${CMAKE_COMMAND}" -S "${_source}" -B "${_build}"
             -G Ninja -DCMAKE_BUILD_TYPE=${_config}
             -DCMAKE_PREFIX_PATH=${_prefix}
+            -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF
+            -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF
     RESULT_VARIABLE _configure_result
     OUTPUT_VARIABLE _configure_output
     ERROR_VARIABLE _configure_error)
