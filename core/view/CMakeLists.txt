@@ -19,9 +19,9 @@ add_library(pulp::view-core ALIAS pulp-view-core)
 # Consumers (and view-core's own headers) gate any optional JS use on this.
 target_compile_definitions(pulp-view-core PUBLIC PULP_ENABLE_JS=$<BOOL:${PULP_ENABLE_JS}>)
 
-# Optional RmlUi integration is deliberately a separate target.  This first
-# slice contains only Pulp-owned contracts and a headless double; the actual
-# RmlUi/Lua dependencies are admitted by a later, separately audited slice.
+# Optional RmlUi integration is deliberately a separate target. The target
+# contains the pinned RmlUi core plus the Pulp-owned file/render seams. Lua,
+# font, GPU, and host adapters remain separately admitted slices.
 if(PULP_ENABLE_RMLUI)
     if(NOT TARGET RmlUi::Core)
         message(FATAL_ERROR "PULP_ENABLE_RMLUI=ON requires the pinned RmlUi core target")
