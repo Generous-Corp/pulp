@@ -8,7 +8,8 @@ target_include_directories(pulp-platform
 )
 
 # PULP_DEV_BUILD is the build profile's compile-time axis
-# (tools/cmake/PulpProfiles.cmake): 1 under PULP_PROFILE=dev, 0 under release.
+# (tools/cmake/PulpProfiles.cmake): the PULP_DEV_BUILD option is ON under the dev
+# profile and forced OFF under release; exported here as 1 or 0.
 # It lives on pulp-platform because this is the lowest library every Pulp
 # target links (pulp-runtime PUBLIC-links it, and everything links runtime) and
 # because pulp-platform is exported with the SDK, so a consumer inherits the
@@ -18,9 +19,16 @@ target_include_directories(pulp-platform
 # Every gated reader refuses to compile without it.
 if(NOT DEFINED PULP_DEV_BUILD)
     message(FATAL_ERROR
-        "PULP_DEV_BUILD is not set; include tools/cmake/PulpProfiles.cmake before core/platform")
+        "PULP_DEV_BUILD is not set; declare the option (tools/cmake/PulpProfiles.cmake governs it) before core/platform")
 endif()
-target_compile_definitions(pulp-platform PUBLIC PULP_DEV_BUILD=${PULP_DEV_BUILD})
+# The option is ON/OFF; the readers test `#if PULP_DEV_BUILD`, so export 1/0.
+if(PULP_DEV_BUILD)
+    set(_pulp_dev_build_axis 1)
+else()
+    set(_pulp_dev_build_axis 0)
+endif()
+target_compile_definitions(pulp-platform PUBLIC PULP_DEV_BUILD=${_pulp_dev_build_axis})
+unset(_pulp_dev_build_axis)
 
 target_sources(pulp-platform PRIVATE
     src/platform.cpp

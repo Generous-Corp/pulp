@@ -46,8 +46,9 @@
 # cache as a dev build: the release marker refuses to mint, and the
 # source-install stamp and dev-experiment document record build_profile "dev".
 #
-# The profile is also a compile-time axis. PULP_DEV_BUILD is 1 under the dev
-# profile and 0 under release, and core/platform exports it as a PUBLIC
+# The profile is also a compile-time axis. PULP_DEV_BUILD is ON under the dev
+# profile (it follows PULP_BUILD_TESTS) and forced OFF under release; core/platform
+# exports it as 1 or 0 through a PUBLIC
 # compile definition on pulp-platform, the lowest library every Pulp target and
 # every installed-SDK consumer links. Header-inline code that reads a
 # development-only environment variable (PULP_DEV_HOT_RELOAD, the reload
@@ -75,16 +76,11 @@ if(NOT PULP_PROFILE MATCHES "^(dev|release)$")
         "PULP_PROFILE=${PULP_PROFILE} is not a Pulp build profile; use dev or release")
 endif()
 
-# The compile-time axis (see above). Cached INTERNAL so a configure log, the
-# provenance writers, and the profile contract test can read the value the
-# targets were given.
-if(PULP_PROFILE STREQUAL "release")
-    set(PULP_DEV_BUILD 0 CACHE INTERNAL
-        "1 under PULP_PROFILE=dev, 0 under release; exported as a compile definition" FORCE)
-else()
-    set(PULP_DEV_BUILD 1 CACHE INTERNAL
-        "1 under PULP_PROFILE=dev, 0 under release; exported as a compile definition" FORCE)
-endif()
+# The compile-time axis (see above) is derived from the PULP_DEV_BUILD option
+# the root declares: core/platform turns ON into 1 and OFF into 0 for the
+# PUBLIC compile definition, and the release profile forces the option OFF
+# like every other enforced option, so the axis is 0 wherever build_profile
+# is release.
 
 # Every option the release profile forces OFF. The order is the report order.
 # PULP_DEV_BUILD is the on-disk UI_SCRIPT hot-reload path: a shipped image must

@@ -65,10 +65,10 @@ if(NOT _module_enforced STREQUAL _enforced)
         "proves '${_enforced}'; update _enforced to match")
 endif()
 
-# The compile-time axis every gated reader keys on is 1 under dev.
+# The compile-time axis every gated reader keys on follows the option: ON under dev.
 _cache_value(dev PULP_DEV_BUILD _value)
-if(NOT _value STREQUAL "1")
-    message(FATAL_ERROR "dev profile cached PULP_DEV_BUILD='${_value}' (expected 1)")
+if(NOT _value)
+    message(FATAL_ERROR "dev profile cached PULP_DEV_BUILD='${_value}' (expected ON)")
 endif()
 
 # (a) release seeds every enforced option OFF; neutral options keep their default.
@@ -94,8 +94,8 @@ if(NOT _value STREQUAL "release")
 endif()
 # ... and 0 under release, so the environment-variable readers compile out.
 _cache_value(release PULP_DEV_BUILD _value)
-if(NOT _value STREQUAL "0")
-    message(FATAL_ERROR "release profile cached PULP_DEV_BUILD='${_value}' (expected 0)")
+if(_value)
+    message(FATAL_ERROR "release profile cached PULP_DEV_BUILD='${_value}' (expected OFF)")
 endif()
 if(NOT _output MATCHES "Pulp profile: release \\(PULP_ENABLE_DESIGN_IMPORT=ON PULP_ENABLE_INSPECTOR=ON\\)")
     message(FATAL_ERROR "release profile did not record the neutral options:\n${_output}")
