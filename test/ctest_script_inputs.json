@@ -3217,6 +3217,7 @@
   "pulp-test-web-gpu-convolver",
   "pulp-test-webgpu-mock-buffer",
   "pulp-test-webgpu-native-draw",
+  "pulp-test-webview-backend-platform",
   "pulp-test-widget-bridge-api-contracts",
   "pulp-test-widget-bridge-no-gpu-gates",
   "pulp-test-windowing",
@@ -7486,6 +7487,14 @@
    "inputs": [
     "tools/scripts/nm_symbols.py",
     "tools/scripts/test_nm_symbols.py"
+   ],
+   "kind": "python"
+  },
+  "nonuniform-head-table": {
+   "entry": "tools/scripts/nonuniform_head_check.py",
+   "inputs": [
+    "core/signal/include/pulp/signal/convolver_non_uniform.hpp",
+    "tools/scripts/nonuniform_head_check.py"
    ],
    "kind": "python"
   },

@@ -9,6 +9,22 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1230"></a>
+## [1.23.0] - 2026-10-27
+
+- release/version bump ([#11215](https://github.com/Generous-Corp/pulp/pull/11215))
+- release/version bump ([#11213](https://github.com/Generous-Corp/pulp/pull/11213))
+- campaign/mufft gate fixes ([#11177](https://github.com/Generous-Corp/pulp/pull/11177))
+
+<a id="v1220"></a>
+## [1.22.0] - 2026-10-27
+
+- release/version bump ([#11210](https://github.com/Generous-Corp/pulp/pull/11210))
+- m157 wrapup review ([#11176](https://github.com/Generous-Corp/pulp/pull/11176))
+- feature/attack surface daw leftovers 20261023 ([#10924](https://github.com/Generous-Corp/pulp/pull/10924))
+- fix/gpu transport coalesce deterministic ([#11165](https://github.com/Generous-Corp/pulp/pull/11165))
+- fix/convolver ir swap copy budget ([#11189](https://github.com/Generous-Corp/pulp/pull/11189))
+
 <a id="v1211"></a>
 ## [1.21.1] - 2026-10-27
 
@@ -11785,6 +11801,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.23.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.23.0
+[1.22.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.22.0
 [1.21.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.21.1
 [1.21.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.21.0
 [1.20.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.20.0
