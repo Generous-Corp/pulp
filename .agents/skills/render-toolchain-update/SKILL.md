@@ -95,6 +95,13 @@ ghapp release list --repo danielraffel/v8-builder --limit 100 --json tagName \
 The collection is a provenance and compatibility convenience, not one combined archive:
 Skia/Dawn, V8, or both may be consumed independently.
 
+## Realtime FFT backend boundary
+
+The optional muFFT FetchContent dependency is separate from the Apple render
+toolchain. It supplies the float `FftT` backend only off Apple; Apple remains on
+vDSP with byte-identical admission. Keep muFFT's Pulp-owned shim allocation-free
+after preparation and do not build or ship its FFTW-linked upstream tools.
+
 ## Independent Skia/Dawn advance
 
 `fetch_v8_for_release.py` binds a milestone-matched V8 archive to Pulp's active
