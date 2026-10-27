@@ -9,10 +9,18 @@ summary = "Document the optional RmlUi editor bridge boundary"
 
 This document records the production boundary for importing an existing
 RmlUi/RCSS/Lua editor into a JUCE-free Pulp plugin. The current Pulp tree has
-no RmlUi or Lua runtime dependency. Existing scripted editors use
+an opt-in, core-only RmlUi dependency and no Lua runtime dependency. Existing scripted editors use
 `ScriptedUiSession`, QuickJS, `WidgetBridge`, and the Skia/Dawn view host. The
 Nodal importer currently proves the unchanged RmlUi product behavior in a
 separate product-backed probe; that probe is not the installed AU/CLAP editor.
+
+The admitted core slice is pinned to RmlUi commit
+`58c751531f4c1a1eb2dc56f409b8e8a323a0c9ad`, with samples, debugger, Lua
+bindings, font engines, SVG/Lottie, HarfBuzz sample, and Tracy disabled. The
+`pulp-test-rmlui-backend` suite now proves core initialization, document
+parsing, update, render, and teardown through a recording render interface.
+This is dependency and lifecycle evidence only; it is not production editor
+or unchanged-skin support.
 
 ## Design boundary
 
@@ -30,12 +38,11 @@ policy in `tools/deps/manifest.json`, `DEPENDENCIES.md`, and `NOTICE.md`.
 test must prove that the new target is absent from the ordinary view/format
 closure. No dependency is admitted until those records exist.
 
-The first admission must choose the RmlUi feature set explicitly: use the MIT
-RmlUi core, one pinned Lua implementation, and Pulp's font/render providers;
-disable RmlUi sample-only integrations unless each one is separately admitted.
-In particular, FreeType, rlottie, LunaSVG, HarfBuzz, and LuaJIT are not
-transitive freebies. They are either disabled or receive their own manifest,
-license, notice, hash, and export decision before configure can enable them.
+The first admission chooses the MIT RmlUi core explicitly. Lua and Pulp font/render
+providers remain later admissions with their own manifests, licenses, notices,
+hashes, and export decisions. In particular, FreeType, rlottie, LunaSVG,
+HarfBuzz, and LuaJIT are not transitive freebies. They are either disabled or
+receive their own admission before configure can enable them.
 
 The backend owns one `Rml::Context` per editor instance and implements:
 
@@ -73,9 +80,11 @@ reading the developer checkout.
 
 1. **Backend contract.** Add `pulp-view-rmlui` interfaces and a headless test
    double for render, file, font, input, Lua, and action boundaries. No host or
-   default target changes.
+   default target changes. **Complete for the Pulp-owned seam.**
 2. **CPU render proof.** Pin RmlUi and Lua, implement the Canvas lowering, and
-   prove deterministic frame output and context isolation without a DAW.
+   prove deterministic frame output and context isolation without a DAW. **RmlUi
+   core admission and lifecycle smoke are complete; Canvas lowering, Lua, and
+   font providers remain open.**
 3. **Product adapter.** Add a generated/imported Nodal model namespace and
    action bridge. Existing RML/RCSS/Lua files remain external or embedded by
    the importer; no hand-edited skin coordinates are accepted.
@@ -106,7 +115,7 @@ native editor recovery.
 ## Nodal handoff
 
 The importer-side plan and product probe are authoritative for Nodal behavior
-at importer head `92d78e20e59d8ed6aed59d13c2bbfc79c63afb57` in branch
+at importer head `b1c5937b02bdc10bf06daa604eb4ae2887d8e179` in branch
 `codex/nodal-host-probe-20261022`. That worktree currently proves the
 unchanged Trancy skin in the product-backed probe, while the installed package
 still uses the native Pulp editor. This Pulp document is the integration
