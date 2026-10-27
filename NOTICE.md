@@ -1779,7 +1779,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 RmlUi 6.1 is fetched only for the opt-in `pulp-view-rmlui` target. Optional
-samples, debugger, Lua bindings, font engines, SVG/Lottie plugins, HarfBuzz
+samples, Lua bindings, third-party containers, font engines, SVG/Lottie plugins, HarfBuzz
 sample, and Tracy profiling are disabled.
 
 ---

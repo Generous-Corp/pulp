@@ -64,8 +64,16 @@ class RenderAdapter final : public Rml::RenderInterface {
             index_payload->push_back(static_cast<std::uint32_t>(index));
         geometry.vertices = std::move(vertex_payload);
         geometry.indices = std::move(index_payload);
-        geometries_.push_back(geometry);
-        return static_cast<Rml::CompiledGeometryHandle>(geometries_.size());
+        Rml::CompiledGeometryHandle handle = 0;
+        if (!free_geometry_handles_.empty()) {
+            handle = free_geometry_handles_.back();
+            free_geometry_handles_.pop_back();
+            geometries_[static_cast<std::size_t>(handle - 1)] = std::move(geometry);
+        } else {
+            geometries_.push_back(std::move(geometry));
+            handle = static_cast<Rml::CompiledGeometryHandle>(geometries_.size());
+        }
+        return handle;
     }
 
     void RenderGeometry(Rml::CompiledGeometryHandle handle, Rml::Vector2f translation,
@@ -98,8 +106,11 @@ class RenderAdapter final : public Rml::RenderInterface {
     }
 
     void ReleaseGeometry(Rml::CompiledGeometryHandle handle) override {
-        if (handle != 0 && handle <= geometries_.size())
+        if (handle != 0 && handle <= geometries_.size() &&
+            geometries_[static_cast<std::size_t>(handle - 1)].vertices) {
             geometries_[static_cast<std::size_t>(handle - 1)] = {};
+            free_geometry_handles_.push_back(handle);
+        }
     }
 
     Rml::TextureHandle LoadTexture(Rml::Vector2i& dimensions, const Rml::String& source) override {
@@ -110,10 +121,9 @@ class RenderAdapter final : public Rml::RenderInterface {
         if (!size)
             return 0;
         dimensions = {size->first, size->second};
-        textures_.push_back(Texture{
+        return store_texture(Texture{
             std::move(asset.path), std::make_shared<const std::string>(std::move(asset.bytes)),
             static_cast<std::uint32_t>(size->first), static_cast<std::uint32_t>(size->second)});
-        return static_cast<Rml::TextureHandle>(textures_.size());
     }
     Rml::TextureHandle GenerateTexture(Rml::Span<const Rml::byte> bytes,
                                        Rml::Vector2i dimensions) override {
@@ -121,14 +131,16 @@ class RenderAdapter final : public Rml::RenderInterface {
             return 0;
         auto payload = std::make_shared<std::string>(reinterpret_cast<const char*>(bytes.data()),
                                                      bytes.size());
-        textures_.push_back(Texture{"", std::move(payload),
-                                    static_cast<std::uint32_t>(dimensions.x),
-                                    static_cast<std::uint32_t>(dimensions.y)});
-        return static_cast<Rml::TextureHandle>(textures_.size());
+        return store_texture(Texture{"", std::move(payload),
+                                     static_cast<std::uint32_t>(dimensions.x),
+                                     static_cast<std::uint32_t>(dimensions.y)});
     }
     void ReleaseTexture(Rml::TextureHandle handle) override {
-        if (handle != 0 && handle <= textures_.size())
+        if (handle != 0 && handle <= textures_.size() &&
+            textures_[static_cast<std::size_t>(handle - 1)].bytes) {
             textures_[static_cast<std::size_t>(handle - 1)] = {};
+            free_texture_handles_.push_back(handle);
+        }
     }
     void EnableScissorRegion(bool enable) override {
         scissor_enabled_ = enable;
@@ -151,6 +163,19 @@ class RenderAdapter final : public Rml::RenderInterface {
         std::uint32_t width = 0;
         std::uint32_t height = 0;
     };
+
+    Rml::TextureHandle store_texture(Texture texture) {
+        Rml::TextureHandle handle = 0;
+        if (!free_texture_handles_.empty()) {
+            handle = free_texture_handles_.back();
+            free_texture_handles_.pop_back();
+            textures_[static_cast<std::size_t>(handle - 1)] = std::move(texture);
+        } else {
+            textures_.push_back(std::move(texture));
+            handle = static_cast<Rml::TextureHandle>(textures_.size());
+        }
+        return handle;
+    }
 
     static std::optional<std::pair<int, int>> image_dimensions(const std::string& bytes) {
         // PNG: signature, IHDR length/type, then big-endian width/height.
@@ -186,7 +211,9 @@ class RenderAdapter final : public Rml::RenderInterface {
 
     pulp::view::rmlui::RenderInterface& sink_;
     std::vector<Geometry> geometries_;
+    std::vector<Rml::CompiledGeometryHandle> free_geometry_handles_;
     std::vector<Texture> textures_;
+    std::vector<Rml::TextureHandle> free_texture_handles_;
     bool scissor_enabled_ = false;
     ScissorRect scissor_{};
     bool transform_enabled_ = false;

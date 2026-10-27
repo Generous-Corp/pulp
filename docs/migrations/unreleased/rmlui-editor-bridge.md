@@ -15,8 +15,10 @@ Nodal importer currently proves the unchanged RmlUi product behavior in a
 separate product-backed probe; that probe is not the installed AU/CLAP editor.
 
 The admitted core slice is pinned to RmlUi commit
-`58c751531f4c1a1eb2dc56f409b8e8a323a0c9ad`, with samples, debugger, Lua
-bindings, font engines, SVG/Lottie, HarfBuzz sample, and Tracy disabled. The
+`58c751531f4c1a1eb2dc56f409b8e8a323a0c9ad`, with samples, Lua bindings,
+third-party containers, font engines, SVG/Lottie, HarfBuzz sample, and Tracy
+disabled. The upstream debugger target remains available in the SDK export,
+but the Pulp bridge links only `RmlUi::Core`. The
 `pulp-test-rmlui-backend` suite now proves core initialization, document
 parsing, update, render, and teardown through the optional backend. Its RmlUi
 render adapter lowers compiled geometry to bounded Pulp draw commands,

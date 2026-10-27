@@ -41,7 +41,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Pulp CONFIG REQUIRED)
 find_package(RmlUi CONFIG REQUIRED)
 add_executable(pulp-rmlui-sdk-consumer main.cpp)
-target_link_libraries(pulp-rmlui-sdk-consumer PRIVATE Pulp::view-rmlui RmlUi::RmlUi)
+target_link_libraries(pulp-rmlui-sdk-consumer PRIVATE Pulp::view-rmlui RmlUi::Core)
 ]=])
 file(WRITE "${_source}/main.cpp" [=[
 #include <RmlUi/Core/Variant.h>

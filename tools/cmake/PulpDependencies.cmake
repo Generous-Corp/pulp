@@ -20,10 +20,25 @@ include(FetchContent)
 set(FETCHCONTENT_UPDATES_DISCONNECTED ${PULP_FETCHCONTENT_UPDATES_DISCONNECTED})
 
 # RmlUi core is an explicit opt-in. Keep all optional plugins, font engines,
-# samples, Lua bindings, and debugger disabled until their independent
-# dependency and sandbox contracts are reviewed.
+# samples, and Lua bindings disabled until their independent dependency and
+# sandbox contracts are reviewed. The upstream debugger target is exported by
+# RmlUi but is not linked by Pulp's bridge.
 if(PULP_ENABLE_RMLUI)
+    # RmlUi defaults BUILD_SHARED_LIBS to ON. Scope that option to the
+    # dependency so opting into this backend cannot silently change Pulp's
+    # link model; preserve an explicit consumer choice for Pulp targets.
+    set(_pulp_rmlui_build_shared_libs_was_defined FALSE)
+    if(DEFINED BUILD_SHARED_LIBS)
+        set(_pulp_rmlui_build_shared_libs_was_defined TRUE)
+        set(_pulp_rmlui_build_shared_libs_saved "${BUILD_SHARED_LIBS}")
+    endif()
+    set(PULP_RMLUI_BUILD_SHARED_LIBS_REQUESTED
+        "${_pulp_rmlui_build_shared_libs_saved}"
+        CACHE INTERNAL "BUILD_SHARED_LIBS requested before RmlUi admission")
+    set(BUILD_SHARED_LIBS OFF)
+
     set(RMLUI_SAMPLES OFF CACHE BOOL "" FORCE)
+    set(RMLUI_THIRDPARTY_CONTAINERS OFF CACHE BOOL "" FORCE)
     set(RMLUI_FONT_ENGINE "none" CACHE STRING "" FORCE)
     set(RMLUI_LUA_BINDINGS OFF CACHE BOOL "" FORCE)
     set(RMLUI_LOTTIE_PLUGIN OFF CACHE BOOL "" FORCE)
@@ -38,6 +53,16 @@ if(PULP_ENABLE_RMLUI)
         GIT_REPOSITORY https://github.com/mikke89/RmlUi.git
         GIT_TAG 58c751531f4c1a1eb2dc56f409b8e8a323a0c9ad)
     FetchContent_MakeAvailable(rmlui)
+
+    if(_pulp_rmlui_build_shared_libs_was_defined)
+        set(BUILD_SHARED_LIBS "${_pulp_rmlui_build_shared_libs_saved}")
+        set(BUILD_SHARED_LIBS "${_pulp_rmlui_build_shared_libs_saved}" CACHE BOOL "" FORCE)
+    else()
+        unset(BUILD_SHARED_LIBS CACHE)
+        unset(BUILD_SHARED_LIBS)
+    endif()
+    unset(_pulp_rmlui_build_shared_libs_was_defined)
+    unset(_pulp_rmlui_build_shared_libs_saved)
 endif()
 
 # CHOC: header-only C++ utilities (ISC license)
