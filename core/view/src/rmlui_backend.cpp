@@ -6,10 +6,10 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cerrno>
 #include <climits>
 #include <cstddef>
 #include <cstdint>
-#include <cerrno>
 #include <fstream>
 #include <iterator>
 #include <limits>
@@ -371,7 +371,7 @@ Status RootedAssetProvider::load(std::string_view path, Asset& out) {
     const int fd = ::open(candidate.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
     if (fd < 0)
         return errno == ENOENT ? Status::missing_asset : Status::rejected;
-    struct stat opened_stat {};
+    struct stat opened_stat{};
     const bool stat_ok = ::fstat(fd, &opened_stat) == 0;
     if (!stat_ok || !S_ISREG(opened_stat.st_mode) || opened_stat.st_size < 0 ||
         static_cast<std::uint64_t>(opened_stat.st_size) > max_bytes_) {
@@ -382,9 +382,8 @@ Status RootedAssetProvider::load(std::string_view path, Asset& out) {
                    : Status::missing_asset;
     }
     const auto opened_size = static_cast<std::size_t>(opened_stat.st_size);
-    const auto bounded_limit = max_bytes_ == std::numeric_limits<std::size_t>::max()
-                                   ? max_bytes_
-                                   : max_bytes_ + 1;
+    const auto bounded_limit =
+        max_bytes_ == std::numeric_limits<std::size_t>::max() ? max_bytes_ : max_bytes_ + 1;
     bytes.reserve(std::min<std::uint64_t>(max_bytes_, opened_size));
     std::array<char, 8192> chunk{};
     while (bytes.size() <= max_bytes_) {
