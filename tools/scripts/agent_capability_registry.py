@@ -512,7 +512,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     ],
     {
         "include": "pulp/signal/fft.hpp",
-        "fingerprint": "sha256:c8d584f4ac4d82c8f85bfaf02cfa9712df34f5480846008286c70468ef7cdcf4",
+        "fingerprint": "sha256:2a700b468370542ef5e55bce174be8938ea3d8927b58142341405118f60e9465",
         "disposition": "capability_support",
         "capability_keys": ["signal.source-filter-analysis", "signal.streaming-analysis-frontends"],
         "rationale": (
