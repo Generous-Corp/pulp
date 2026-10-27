@@ -1184,6 +1184,32 @@ endif()
 # Shared SDK install/export rules live in tools/cmake/PulpInstallRules.cmake.
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInstallRules.cmake)
 
+# Keep the opt-in RmlUi SDK consumer honest on clean runners. The install
+# script stages every configured PULP_SDK_TARGETS archive, so a focused RmlUi
+# workflow must build that same closure before running cmake --install. This
+# aggregate target is deliberately opt-in and only depends on targets that
+# exist in the current configuration; it does not widen the default graph.
+if(PULP_ENABLE_RMLUI)
+    set(_pulp_rmlui_sdk_closure ${PULP_SDK_TARGETS})
+    foreach(_pulp_rmlui_tool IN ITEMS
+        pulp-runtime-pins
+        pulp-mcp
+        pulp-scan-worker
+        pulp-import-design)
+        if(TARGET "${_pulp_rmlui_tool}")
+            list(APPEND _pulp_rmlui_sdk_closure "${_pulp_rmlui_tool}")
+        endif()
+    endforeach()
+    list(REMOVE_DUPLICATES _pulp_rmlui_sdk_closure)
+    add_custom_target(pulp-rmlui-sdk-closure)
+    foreach(_pulp_rmlui_target IN LISTS _pulp_rmlui_sdk_closure)
+        if(TARGET "${_pulp_rmlui_target}")
+            add_dependencies(pulp-rmlui-sdk-closure "${_pulp_rmlui_target}")
+        endif()
+    endforeach()
+    unset(_pulp_rmlui_sdk_closure)
+endif()
+
 # Match the target names exported by find_package(Pulp) for source consumers.
 # Aliases are global targets, so the parent of add_subdirectory(Pulp) sees them.
 foreach(_pulp_export_target IN LISTS PULP_SDK_TARGETS)
