@@ -407,7 +407,7 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/load_measurer.hpp",
-      "fingerprint": "sha256:268b2aa45e278f04876fa0f5590a36523d35ee13882d37f89c2890b8d4321253",
+      "fingerprint": "sha256:bb274a929c7cdb0acc82111440650a6e1c594af6beb23bfadce63d01e882c586",
       "include": "pulp/audio/load_measurer.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -1245,7 +1245,7 @@
     {
       "domain": "host",
       "source": "core/host/include/pulp/host/signal_graph_runtime.hpp",
-      "fingerprint": "sha256:a4b87a6d66b3a87383619454f6da74f3ab5e95381fe81c44e25ebfd488c2d390",
+      "fingerprint": "sha256:30c125ede1300e944db42e79bbfbfc295b22dc732005b520030ee68ea5d19eee",
       "include": "pulp/host/signal_graph_runtime.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
