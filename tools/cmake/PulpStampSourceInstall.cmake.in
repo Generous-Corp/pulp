@@ -38,7 +38,11 @@ endif()
 # `build_profile`.
 set(_build_profile "@PULP_PROFILE@")
 # An overridden release profile (PULP_PROFILE_ALLOW_OVERRIDE) is a dev build.
-if("@PULP_PROFILE_OVERRIDDEN@")
+# Tested through a variable: this script runs under `cmake -P` with no policy
+# version, where CMake 3 (CMP0012 unset) reads a quoted "ON" as an undefined
+# variable and records the override as a release build.
+set(_profile_overridden "@PULP_PROFILE_OVERRIDDEN@")
+if(_profile_overridden)
     set(_build_profile "dev")
 endif()
 string(LENGTH "${_sha}" _sha_length)
