@@ -60,7 +60,8 @@ jobs:
           # timeout before the RmlUi contract is exercised.
           tools/ci/governed-build.sh cmake --build build-rmlui \
             --target pulp-test-rmlui-backend rmlui_debugger pulp-runtime-pins pulp-mcp \
-            pulp-scan-worker pulp-import-design
+            pulp-scan-worker pulp-import-design pulp-control-standalone-host \
+            pulp-control-broker pulp-au-instrument-probe pulp-au-effect-ab
 
       - name: Run RmlUi backend and installed SDK consumer tests
         run: |
