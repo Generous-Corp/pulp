@@ -55,7 +55,11 @@ jobs:
 
       - name: Build RmlUi backend and SDK consumer
         run: |
-          tools/ci/governed-build.sh cmake --build build-rmlui
+          # Keep this opt-in lane focused.  Building the default graph here
+          # pulls in thousands of unrelated targets and can exhaust the job
+          # timeout before the RmlUi contract is exercised.
+          tools/ci/governed-build.sh cmake --build build-rmlui \
+            --target pulp-test-rmlui-backend
 
       - name: Run RmlUi backend and installed SDK consumer tests
         run: |
