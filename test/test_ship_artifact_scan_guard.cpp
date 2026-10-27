@@ -4,9 +4,10 @@
 
 #include "tools/cli/ship_artifact_scan_guard.hpp"
 
+#include "support/unique_temp_dir.hpp"
+
 #include <catch2/catch_test_macros.hpp>
 
-#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -18,10 +19,7 @@ using namespace pulp::cli;
 namespace {
 
 fs::path temp_dir(const std::string& tag) {
-    const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
-    auto dir = fs::temp_directory_path() / ("pulp-ship-scan-" + tag + "-" + std::to_string(stamp));
-    fs::create_directories(dir);
-    return dir;
+    return pulp::test::make_unique_temp_dir("pulp-ship-scan-" + tag);
 }
 
 void write(const fs::path& p, const std::string& bytes) {
@@ -43,7 +41,8 @@ const std::string kElf = std::string("\x7F"
                                      "ELF",
                                      4) +
                          "elf";
-const std::string kPe = "MZ\x90\x00 pe";
+// Built with an explicit length: the DOS header's NUL would end a C string.
+const std::string kPe = std::string("MZ\x90\x00 pe", 7);
 
 } // namespace
 
