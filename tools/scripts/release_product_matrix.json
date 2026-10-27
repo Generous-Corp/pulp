@@ -130,6 +130,7 @@
     "pulp-view-native",
     "pulp-view-platform",
     "pulp-view-webview",
+    "pulp-view-webview-backend",
     "pulp-view-script"
   ],
   "platform_library_stems": {

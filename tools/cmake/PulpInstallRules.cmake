@@ -77,7 +77,7 @@ if(PULP_ENABLE_DESIGN_IMPORT)
     list(APPEND PULP_SDK_TARGETS pulp-design-import pulp-design-import-audio-pack)
 endif()
 if(PULP_BUILD_WEBVIEW)
-    list(APPEND PULP_SDK_TARGETS pulp-view-webview)
+    list(APPEND PULP_SDK_TARGETS pulp-view-webview pulp-view-webview-backend)
 endif()
 
 # pulp-signal-fft-backend is the optional multi-backend FFT facade. It's
