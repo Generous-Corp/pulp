@@ -391,6 +391,31 @@ Status Backend::process_mouse_leave() {
     return Status::ok;
 }
 
+Status Backend::process_key_down(int key_identifier, int key_modifier_state) {
+    if (!open_ || !runtime_ || !runtime_->context)
+        return Status::not_open;
+    runtime_->context->ProcessKeyDown(static_cast<Rml::Input::KeyIdentifier>(key_identifier),
+                                      key_modifier_state);
+    return Status::ok;
+}
+
+Status Backend::process_key_up(int key_identifier, int key_modifier_state) {
+    if (!open_ || !runtime_ || !runtime_->context)
+        return Status::not_open;
+    runtime_->context->ProcessKeyUp(static_cast<Rml::Input::KeyIdentifier>(key_identifier),
+                                    key_modifier_state);
+    return Status::ok;
+}
+
+Status Backend::process_text_input(std::string_view text) {
+    if (!open_ || !runtime_ || !runtime_->context)
+        return Status::not_open;
+    if (text.empty())
+        return Status::rejected;
+    runtime_->context->ProcessTextInput(Rml::String{text});
+    return Status::ok;
+}
+
 bool Backend::mouse_interacting() const noexcept {
     return open_ && runtime_ && runtime_->context && runtime_->context->IsMouseInteracting();
 }

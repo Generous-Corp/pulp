@@ -91,8 +91,13 @@ TEST_CASE("RmlUi backend routes host pointer and wheel events") {
     REQUIRE(backend.process_mouse_wheel(0.0f, 1.0f) == Status::ok);
     REQUIRE(backend.process_mouse_leave() == Status::ok);
     REQUIRE_FALSE(backend.mouse_interacting());
+    REQUIRE(backend.process_key_down(65) == Status::ok);
+    REQUIRE(backend.process_key_up(65) == Status::ok);
+    REQUIRE(backend.process_text_input("x") == Status::ok);
+    REQUIRE(backend.process_text_input("") == Status::rejected);
     backend.close();
     REQUIRE(backend.process_mouse_move(0, 0) == Status::not_open);
+    REQUIRE(backend.process_key_down(65) == Status::not_open);
 }
 
 TEST_CASE("RmlUi backend fails closed instead of double-initializing process-global RmlUi") {

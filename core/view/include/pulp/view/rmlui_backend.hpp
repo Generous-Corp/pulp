@@ -104,6 +104,9 @@ class Backend {
     Status process_mouse_button_up(int button_index, int key_modifier_state = 0);
     Status process_mouse_wheel(float x, float y, int key_modifier_state = 0);
     Status process_mouse_leave();
+    Status process_key_down(int key_identifier, int key_modifier_state = 0);
+    Status process_key_up(int key_identifier, int key_modifier_state = 0);
+    Status process_text_input(std::string_view text);
     [[nodiscard]] bool mouse_interacting() const noexcept;
     void render();
     void close();

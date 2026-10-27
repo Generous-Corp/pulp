@@ -23,8 +23,8 @@ render adapter lowers compiled geometry to bounded Pulp draw commands,
 preserves validated image bytes and dimensions for texture commands, and its
 file adapter resolves document resources through the rooted provider. The
 backend also routes host mouse, button, wheel, and leave events into the
-RmlUi context. This is a CPU recording seam, not yet a Skia/Dawn production
-renderer.
+RmlUi context, along with key and text input. This is a CPU recording seam,
+not yet a Skia/Dawn production renderer.
 The optional backend also exposes a rooted, SHA-256-checked asset provider;
 its tests cover traversal, missing-manifest entries, tampering, size limits,
 and symlink escapes.
