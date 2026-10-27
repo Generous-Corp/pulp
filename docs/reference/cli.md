@@ -1134,7 +1134,8 @@ pulp ship sign --identity "..." --entitlements path/to/entitlements.plist
 pulp ship sign --identity "..." --path MyApp.app   # sign one explicit artifact
 pulp ship package --version 1.0.0
 pulp ship package --version 1.0.0 --allow-dev-build  # ship build/ as it is instead of building build-ship/
-pulp ship check
+pulp ship check                                     # signing status + the release-artifact forbidden-marker scan
+pulp ship check --skip-artifact-scan               # signing status only
 pulp ship swap-pack --bundle ui/ --plugin-id com.you.synth   # sign a hot-reload UX bundle (caps inferred; key from keychain)
 pulp ship doctor                                   # make signing non-interactive (no keychain/1Password prompt)
 pulp ship notarize --path MyApp-1.0.dmg --api-key ~/key.p8 --api-key-id ABC --api-issuer <uuid>
@@ -1161,6 +1162,23 @@ pulp ship auv3-xcodeproj MyPlugin --sdk iphonesimulator --dry-run
 | `auv3-xcodeproj` | Generate an Xcode project for an AUv3 target (macOS) |
 | `check`    | Check signing status of built desktop plugins or Android APK/AAB artifacts |
 | `doctor`   | Make signing+notarization non-interactive (no keychain/1Password prompt): self-heal the dedicated signing keychain, require the full partition list, prove a real timestamped signing operation, and validate the file-based `.p8` notary key. Run automatically as a mandatory fail-closed preflight by `sign`; failure stops before production `codesign`. |
+
+**Release-artifact scan.** `sign`, `package` and `check` run
+`tools/cmake/PulpReleaseArtifactScan.cmake`, the one scanner behind every
+"a release artifact must not contain X" check, over the native binaries of the
+bundles they are about to sign, package or report on. The gates come from what
+the build directory's `CMakeCache.txt` and the installed SDK's
+`sdk-provenance.json` prove (`PULP_TRACING=OFF` forbids the Perfetto markers,
+`PULP_DEV_BUILD=OFF` the dev environment hooks and the reload watcher,
+`PULP_DEV_BRIDGE_EXEC=OFF` or an SDK with `bridge_exec: false` the shell exec
+bridge, `PULP_ENABLE_JS=OFF` the JS engine). A hit refuses the step with the
+scanner's report naming the marker; `--skip-artifact-scan` overrides it with a
+loud warning. A build that recorded none of those options, a build dir without
+a cache, or a project whose SDK does not install the scanner is skipped, and
+the command says which. `check --json` reports the verdict as `artifact_scan`
+(`clean`, `forbidden-marker`, `overridden` or `skipped`). The scanner is the
+same one the build's ctests run over the SDK libraries, the CLI and the fixture
+plug-in; this runs it on the bytes that leave the machine.
 
 `doctor` materializes a dedicated signing keychain authorized for `codesign` (so the login keychain / 1Password is never consulted) and validates a file-based App Store Connect `.p8` notary key. `--check-online` also proves the `.p8` against Apple (read-only) and refreshes the optional `pulp-notary` keychain profile; `--print-env` emits resolved identity/keychain handles (no secret values). Secrets live in `~/.config/pulp/secrets/` (`keychain.env` + `notary.env`), never in the repo; same-named env vars override the files. No build directory is required.
 

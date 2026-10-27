@@ -250,6 +250,46 @@ built with PULP_TRACING=ON," the fix is to rebuild with tracing off (the
 default `pulp build`), not to reach for `--allow-tracing`. The scanner lives in
 `tools/cli/ship_tracing_guard.hpp` (unit-tested in `test/test_ship_tracing_guard.cpp`).
 
+## Release-artifact scan at ship time
+
+`sign`, `package` and `check` run `tools/cmake/PulpReleaseArtifactScan.cmake`
+(the one forbidden-marker list, see "Release-artifact forbidden-marker list"
+below) over the **native binaries of the artifacts they are about to vouch
+for**: every Mach-O / ELF / PE file under a bundle, found by image header, or
+the loose file itself. The build's ctests already hold the list on the artifact
+classes they build; this holds it on the bytes that get signed and notarized.
+
+- **Gates come from evidence, not from the command line.** The guard
+  (`tools/cli/ship_artifact_scan_guard.hpp`, unit-tested in
+  `test/test_ship_artifact_scan_guard.cpp`) mirrors
+  `pulp_release_artifact_active_gates`: only an option the build dir's
+  `CMakeCache.txt` recorded contributes (`PULP_ENABLE_JS`, `PULP_TRACING`,
+  `PULP_DEV_BUILD`, `PULP_RELOAD_DEV_WATCHER`, `PULP_DEV_BRIDGE_EXEC` /
+  `PULP_BRIDGE_EXEC_ENABLED`, explicit value over profile fallback), plus the
+  installed SDK's `sdk-provenance.json` (`bridge_exec: false` → `bridge-exec-off`;
+  `build_profile: release` → `dev-env-off`, `reload-ship`, `bridge-exec-off`), so
+  an SDK-based plug-in whose own cache records none of those options is still
+  scanned against what its SDK proves. `control-stripped` is never derived here.
+- **Skips say why.** No cache, no gate recorded, no scanner (it is looked for
+  at `<CMAKE_HOME_DIRECTORY>/tools/cmake/` then `<Pulp_DIR>/`, where the SDK
+  installs it), or nothing native under the artifact (a `.dmg`, a `.pkg`) each
+  print one line and proceed. A skip is not a pass; `check --json` reports
+  `artifact_scan` as `skipped` in that case, `clean` / `forbidden-marker`
+  otherwise, and `overridden` under `--skip-artifact-scan`.
+- **A hit fails closed** with the scanner's own report (marker id, kind,
+  pattern, gates) and exits 1 — including a scanner that could not run (nm
+  failing on an input, no evidence source at all). The fix is a release
+  configure (`pulp ship` builds `build-ship/` for a dev build); `--skip-artifact-scan`
+  is the deliberate, loud override, on `sign`, `package` and `check`.
+  `release` inherits the guard through its `sign` and `package` stages and has
+  no override of its own.
+- **Testing it needs a real image.** The scanner runs `nm` on every target and
+  a text file fails it, so the shell-out cases (`[artifact-scan]` in
+  `test/test_cli_ship_shellout.cpp`) copy the Mach-O strip fixture into a fake
+  bundle and append the marker bytes after its segments; the fake project's
+  cache records `PULP_TRACING`/`PULP_DEV_BUILD` and its `tools/cmake/` holds a
+  copy of the real scanner and list (declared through `pulp_test_data`).
+
 ## Shell exec bridge ship guard
 
 Release and SDK configures pass `-DPULP_DEV_BRIDGE_EXEC=OFF` (`release-cli.yml`, `sign-and-release.yml`, `pulp sdk install`, the local SDK profile), which compiles the JS `exec`/`execAsync` bridge body out of `pulp-view-script`. The installed SDK records the outcome in `sdk-provenance.json` as `features.bridge_exec` (release marker, forge-dev/trace) or top-level `bridge_exec` (source-install stamp); minting a release marker refuses a configure cache with the option ON or missing, and `PulpSdkProvenance.cmake` fails on a release marker claiming `true`. A dev checkout keeps the bridge because the option follows `PULP_BUILD_TESTS`. Prove an artifact with `strings <archive> | grep -c execAsync` (0 for ship) or the `pulp-bridge-exec-ship-symbol-absence` ctest.

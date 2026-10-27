@@ -4138,3 +4138,23 @@ copy is signed, never on the build output. `test_cli_ship_shellout.cpp` finds
 the CLI relative to its working directory (`../tools/cli/pulp-cpp`), so run the
 binary from `build/test` (ctest does). From the repo root every ship case
 SKIPs and the run still exits 0, which looks like a pass.
+
+### A ship-time guard runs on the artifact, with evidence from the cache
+
+`pulp ship sign|package|check` run the release-artifact forbidden-marker scan
+(`tools/cli/ship_artifact_scan_guard.hpp` + `enforce_release_artifact_scan` in
+`cmd_ship.cpp`) over the native binaries of the bundles they select. Two
+rules when touching it:
+
+- The gates are **derived from `CMakeCache.txt` and the SDK's
+  `sdk-provenance.json`**, never passed by the caller, so a guard cannot be
+  talked into a weaker gate set; keep `release_scan_gates_from_cache` in step
+  with `pulp_release_artifact_active_gates` in
+  `tools/cmake/PulpReleaseArtifactScan.cmake` (same precedence rules).
+- A guard that cannot run (no scanner, no gate, no cache) **says so and
+  proceeds**; one that ran and failed **refuses**. `--skip-artifact-scan` is
+  the only override, and it prints a warning on stderr every time. New ship
+  stages that vouch for bytes call the same function with the artifacts they
+  selected, after product filtering, never the whole build dir (test binaries
+  legitimately carry every marker).
+
