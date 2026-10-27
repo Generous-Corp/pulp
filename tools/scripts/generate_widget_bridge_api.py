@@ -310,6 +310,7 @@ SIGNATURE_OVERRIDES: dict[str, str] = {
     "releaseDocumentNavigationFocus": "() => void",
     "setFocus": "(id: string) => boolean",
     "releaseOverlay": "(id: string) => void",
+    "removeToken": "(name: string) => void",
     "removeWidget": "(id: string) => void",
     "insertChild": "(parentId: string, childId: string, index: number) => boolean",
     "isWidgetParamBound": "(widgetId: string) => boolean",
