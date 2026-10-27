@@ -491,13 +491,14 @@ failure on a merge group names a commit that is not in the ejected PR, read the
 `diff base:` line in the job log before touching the PR. Any new diff-scoped
 gate added to a merge_group workflow should reuse the same resolver.
 
-## `[train] enabled = true` is read-only
+## `[train]` rollups are member-approved
 
-The merge train's switch is on in `.shipyard/config.toml` with no `mode`, so
-only `shipyard train status` and `shipyard train metrics` act on it, and
-both only read. It does not form rollups or arm, enqueue or merge anything.
-Do not add `mode = "rollup"` here: that is PR #11159, and it waits on the
-live test.
+The merge train's switch is on in `.shipyard/config.toml`; `mode = "rollup"`
+permits only rollups whose members each have an exact counted approval and
+whose replayed file tree and merge parents pass the guard. Each rollup lands
+through the merge queue as a merge commit. `SHIPYARD_TRAIN=off` or a
+`train.pause` file disables the train, and `shipyard rollup reconcile --apply`
+is manual because Pulp has no merge steward.
 
 ## A HOLD on a queued head fails the merge group
 
