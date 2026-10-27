@@ -108,6 +108,26 @@ if(TARGET pulp-view-audio)
     list(APPEND PULP_SDK_TARGETS pulp-view-audio)
 endif()
 
+# The RmlUi bridge is an opt-in SDK surface.  Keep it out of the default
+# export, but when a PULP_ENABLE_RMLUI SDK is installed export both sides of
+# its public link boundary.  RmlUi is brought in with FetchContent, so its
+# normal standalone RmlUiTargets export is not installed by the parent
+# project; leaving the dependency out makes a downstream find_package(Pulp)
+# consumer fail while loading PulpTargets.cmake.
+if(TARGET pulp-view-rmlui AND TARGET rmlui_core)
+    set_target_properties(rmlui_core PROPERTIES EXPORT_NAME rmlui-core)
+    list(APPEND PULP_SDK_TARGETS pulp-view-rmlui rmlui_core)
+    # RmlUi's embedded project always emits an install rule for its debugger
+    # archive, even when debugger support is not linked by Pulp. Include the
+    # target in this optional SDK slice so that the generated nested install
+    # script has a real archive to install and downstream exports remain
+    # self-contained.
+    if(TARGET rmlui_debugger)
+        set_target_properties(rmlui_debugger PROPERTIES EXPORT_NAME rmlui-debugger)
+        list(APPEND PULP_SDK_TARGETS rmlui_debugger)
+    endif()
+endif()
+
 # The GPU device layer is exported with the renderer that links it, and on its
 # own for pulp-gpu-audio, which links the device without the 2D renderer.
 if(TARGET pulp-gpu-device-api)
@@ -334,6 +354,12 @@ endif()
 if(TARGET SDL3_Headers)
     set_target_properties(SDL3_Headers PROPERTIES EXPORT_NAME sdl3-headers)
     install(TARGETS SDL3_Headers EXPORT PulpTargets)
+endif()
+
+if(TARGET rmlui_core)
+    install(DIRECTORY "${rmlui_SOURCE_DIR}/Include/RmlUi/"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/RmlUi"
+        FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
 endif()
 
 # Public headers for each SDK subsystem. Keep platform-conditional surfaces
