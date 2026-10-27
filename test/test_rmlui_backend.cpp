@@ -67,6 +67,10 @@ TEST_CASE("RmlUi backend admits manifest textures and records their source path"
         [](const DrawCommand& command) { return command.kind == DrawCommand::Kind::texture; });
     REQUIRE(texture != headless.commands().end());
     REQUIRE(texture->texture_path == "skin/button.png");
+    REQUIRE(texture->texture_bytes != nullptr);
+    REQUIRE(texture->texture_bytes->size() == 29);
+    REQUIRE(texture->texture_width == 16);
+    REQUIRE(texture->texture_height == 8);
     backend.close();
 }
 

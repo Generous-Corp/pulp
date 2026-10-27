@@ -58,7 +58,10 @@ struct DrawCommand {
     std::string text;
     // For texture commands this is the manifest-relative source path. An
     // empty path identifies a generated texture submitted by RmlUi.
-    std::string texture_path;
+    std::string texture_path{};
+    std::shared_ptr<const std::string> texture_bytes{};
+    std::uint32_t texture_width = 0;
+    std::uint32_t texture_height = 0;
 };
 
 class RenderInterface {
