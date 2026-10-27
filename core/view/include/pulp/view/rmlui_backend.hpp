@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -41,6 +42,13 @@ struct DrawVertex {
     std::uint32_t colour = 0;
 };
 
+struct ScissorRect {
+    int x = 0;
+    int y = 0;
+    int width = 0;
+    int height = 0;
+};
+
 // Reads only regular files inside a declared asset root. The manifest is a
 // content closure: an empty or mismatched digest rejects the read.
 class RootedAssetProvider final : public AssetProvider {
@@ -72,6 +80,10 @@ struct DrawCommand {
     std::uint32_t texture_height = 0;
     std::shared_ptr<const std::vector<DrawVertex>> vertices{};
     std::shared_ptr<const std::vector<std::uint32_t>> indices{};
+    bool scissor_enabled = false;
+    ScissorRect scissor{};
+    bool transform_enabled = false;
+    std::array<float, 16> transform{};
 };
 
 class RenderInterface {

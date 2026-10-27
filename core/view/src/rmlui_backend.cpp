@@ -90,6 +90,10 @@ class RenderAdapter final : public Rml::RenderInterface {
         }
         command.vertices = geometry.vertices;
         command.indices = geometry.indices;
+        command.scissor_enabled = scissor_enabled_;
+        command.scissor = scissor_;
+        command.transform_enabled = transform_enabled_;
+        command.transform = transform_;
         sink_.submit(command);
     }
 
@@ -126,8 +130,19 @@ class RenderAdapter final : public Rml::RenderInterface {
         if (handle != 0 && handle <= textures_.size())
             textures_[static_cast<std::size_t>(handle - 1)] = {};
     }
-    void EnableScissorRegion(bool) override {}
-    void SetScissorRegion(Rml::Rectanglei) override {}
+    void EnableScissorRegion(bool enable) override {
+        scissor_enabled_ = enable;
+    }
+    void SetScissorRegion(Rml::Rectanglei region) override {
+        scissor_ = {region.Left(), region.Top(), region.Width(), region.Height()};
+    }
+    void SetTransform(const Rml::Matrix4f* transform) override {
+        transform_enabled_ = transform != nullptr;
+        if (transform)
+            std::copy_n(transform->data(), transform_.size(), transform_.begin());
+        else
+            transform_.fill(0.0f);
+    }
 
   private:
     struct Texture {
@@ -172,6 +187,10 @@ class RenderAdapter final : public Rml::RenderInterface {
     pulp::view::rmlui::RenderInterface& sink_;
     std::vector<Geometry> geometries_;
     std::vector<Texture> textures_;
+    bool scissor_enabled_ = false;
+    ScissorRect scissor_{};
+    bool transform_enabled_ = false;
+    std::array<float, 16> transform_{};
 };
 
 class FileAdapter final : public Rml::FileInterface {
