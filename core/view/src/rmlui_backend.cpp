@@ -1,8 +1,16 @@
 #include <pulp/view/rmlui_backend.hpp>
+#include <RmlUi/Core.h>
 
 #include <algorithm>
 
 namespace pulp::view::rmlui {
+
+namespace {
+[[maybe_unused]] void rmlui_core_compile_smoke() {
+    Rml::Vector2i viewport{0, 0};
+    (void)viewport;
+}
+} // namespace
 
 Backend::Backend(AssetProvider& assets, RenderInterface& renderer, LuaInterface& lua,
                  ActionSink* actions)

@@ -994,6 +994,23 @@
       ]
     },
     {
+      "name": "RmlUi",
+      "category": "view",
+      "license": "MIT",
+      "version": "6.1",
+      "source_kind": "fetchcontent",
+      "repository": "https://github.com/mikke89/RmlUi.git",
+      "upstream": { "kind": "git-tag", "ref": "6.1", "commit": "58c751531f4c1a1eb2dc56f409b8e8a323a0c9ad" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "notes": "Optional core-only editor backend dependency. Fetched only when PULP_ENABLE_RMLUI=ON; samples, debugger, Lua bindings, font engines, SVG/Lottie plugins, HarfBuzz sample, and Tracy profiling are forced OFF. No runtime or shipped artifact claim is made by the default-off build.",
+      "source_files": [
+        "tools/cmake/PulpDependencies.cmake",
+        "core/view/CMakeLists.txt",
+        "core/view/src/rmlui_backend.cpp"
+      ]
+    },
+    {
       "name": "scheduler",
       "category": "packages/pulp-react",
       "license": "MIT",
