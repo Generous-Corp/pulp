@@ -82,7 +82,9 @@ if(PULP_ENABLE_RMLUI)
         add_library(pulp-rmlui-lua STATIC ${_pulp_rmlui_lua_sources})
         target_compile_definitions(pulp-rmlui-lua PRIVATE LUA_USE_POSIX)
         target_include_directories(pulp-rmlui-lua PUBLIC
-                                   "${pulp_rmlui_lua_SOURCE_DIR}/src")
+                                   $<BUILD_INTERFACE:${pulp_rmlui_lua_SOURCE_DIR}/src>
+                                   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/lua>)
+        set(PULP_RMLUI_LUA_SOURCE_DIR "${pulp_rmlui_lua_SOURCE_DIR}")
         add_library(Lua::Lua INTERFACE IMPORTED GLOBAL)
         set_target_properties(Lua::Lua PROPERTIES
             INTERFACE_LINK_LIBRARIES pulp-rmlui-lua

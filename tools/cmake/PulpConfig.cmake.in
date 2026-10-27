@@ -37,7 +37,17 @@ set(PULP_IOS_AUV3_TEMPLATE_DIR "${PULP_SDK_DIR}/templates/ios-auv3")
 # PulpTargets file is validated. Keep this conditional on the SDK that was
 # actually configured; ordinary Pulp installs remain independent of RmlUi.
 set(PULP_SDK_HAS_RMLUI "@PULP_ENABLE_RMLUI@")
+set(PULP_SDK_HAS_RMLUI_LUA "@PULP_ENABLE_RMLUI_LUA@")
 if(PULP_SDK_HAS_RMLUI)
+    # RmlUi's exported Lua target names Lua::Lua in its interface.  Recreate
+    # that target before loading RmlUiConfig; the actual static archive is
+    # exported below as Pulp::rmlui-lua.
+    if(PULP_SDK_HAS_RMLUI_LUA AND NOT TARGET Lua::Lua)
+        add_library(Lua::Lua INTERFACE IMPORTED GLOBAL)
+        set_target_properties(Lua::Lua PROPERTIES
+            INTERFACE_LINK_LIBRARIES Pulp::rmlui-lua
+            INTERFACE_INCLUDE_DIRECTORIES "${PULP_SDK_DIR}/include/lua")
+    endif()
     if(NOT DEFINED RmlUi_DIR)
         set(RmlUi_DIR "${PULP_SDK_LIBRARY_DIR}/cmake/RmlUi")
     endif()

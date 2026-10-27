@@ -33,24 +33,30 @@ if(NOT EXISTS "${_prefix}/include/RmlUi/Core/Variant.inl")
     message(FATAL_ERROR "installed RmlUi headers are missing Variant.inl")
 endif()
 
+set(_consumer_lua_include "")
+set(_consumer_lua_probe "")
+if(PULP_ENABLE_RMLUI_LUA)
+    set(_consumer_lua_include "#include <RmlUi/Lua/Lua.h>\n")
+    set(_consumer_lua_probe "  Rml::Lua::Initialise();\n")
+endif()
+
 file(WRITE "${_source}/CMakeLists.txt" [=[
 cmake_minimum_required(VERSION 3.24)
 project(PulpRmlUiSdkConsumer LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Pulp CONFIG REQUIRED)
-find_package(RmlUi CONFIG REQUIRED)
 add_executable(pulp-rmlui-sdk-consumer main.cpp)
 target_link_libraries(pulp-rmlui-sdk-consumer PRIVATE Pulp::view-rmlui RmlUi::Core)
 ]=])
-file(WRITE "${_source}/main.cpp" [=[
-#include <RmlUi/Core/Variant.h>
-#include <pulp/view/rmlui_backend.hpp>
-int main() {
-    Rml::Variant value;
-    return value.GetType() == Rml::Variant::NONE ? 0 : 0;
-}
-]=])
+file(WRITE "${_source}/main.cpp"
+"${_consumer_lua_include}#include <RmlUi/Core/Variant.h>\n"
+"#include <pulp/view/rmlui_backend.hpp>\n"
+"int main() {\n"
+"${_consumer_lua_probe}"
+"    Rml::Variant value;\n"
+"    return value.GetType() == Rml::Variant::NONE ? 0 : 0;\n"
+"}\n")
 
 execute_process(
     COMMAND "${CMAKE_COMMAND}" -S "${_source}" -B "${_build}"

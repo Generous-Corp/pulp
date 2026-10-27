@@ -359,6 +359,21 @@ if(TARGET pulp-view-rmlui AND TARGET rmlui_core)
         INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 endif()
 
+# The optional RmlUi Lua plugin links an admitted, Pulp-owned Lua archive.
+# Export and install that archive with the SDK so an installed RmlUi target
+# never retains a build-tree include path or an unresolved Lua::Lua edge.
+if(TARGET pulp-rmlui-lua)
+    set_target_properties(pulp-rmlui-lua PROPERTIES EXPORT_NAME rmlui-lua)
+    install(TARGETS pulp-rmlui-lua
+        EXPORT PulpTargets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/lua)
+    install(DIRECTORY "${PULP_RMLUI_LUA_SOURCE_DIR}/src/"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/lua"
+        FILES_MATCHING PATTERN "*.h")
+endif()
+
 if(TARGET rmlui_core)
     install(DIRECTORY "${rmlui_SOURCE_DIR}/Include/RmlUi/"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/RmlUi"
