@@ -1,7 +1,6 @@
 #include "test_signal_phaser_stages_support.hpp"
 
-TEST_CASE("Nothing allocates after construction",
-          "[signal][phaser][rt]") {
+TEST_CASE("Nothing allocates after construction", "[signal][phaser][rt]") {
     // Stronger than the spec's "allocation-free post-prepare()": every buffer
     // in this class is a fixed-size member, so `prepare()` does not allocate
     // either.
@@ -23,13 +22,12 @@ TEST_CASE("Nothing allocates after construction",
         engine->set_seed(12345u);
         engine->process(in.data(), in.data(), ol.data(), orr.data(), 512);
         engine->process_mono(in.data(), ol.data(), 512);
-        (void) engine->sweep_frequency_hz(1);
-        (void) engine->stage_count();
+        (void)engine->sweep_frequency_hz(1);
+        (void)engine->stage_count();
     });
 }
 
-TEST_CASE("Process is safe when the output aliases the input",
-          "[signal][phaser][rt]") {
+TEST_CASE("Process is safe when the output aliases the input", "[signal][phaser][rt]") {
     // Hosts pass the same buffer for in and out constantly. Each frame's input
     // is read into a local before its output is written, so in-place is exact —
     // asserted against a rendered-to-separate-buffers reference rather than
@@ -37,7 +35,8 @@ TEST_CASE("Process is safe when the output aliases the input",
     // a plausible-looking but different signal.
     Xorshift32 rng(0xFACEB00Cu);
     std::vector<double> in(2048);
-    for (auto& v : in) v = rng.next_bipolar<double>();
+    for (auto& v : in)
+        v = rng.next_bipolar<double>();
 
     Phaser reference;
     reference.prepare(kSr);
@@ -55,8 +54,7 @@ TEST_CASE("Process is safe when the output aliases the input",
     in_place.set_rate_hz(2.0);
     in_place.reset();
     std::vector<double> a = in, b = in;
-    in_place.process(a.data(), b.data(), a.data(), b.data(),
-                     static_cast<int>(in.size()));
+    in_place.process(a.data(), b.data(), a.data(), b.data(), static_cast<int>(in.size()));
 
     for (std::size_t i = 0; i < in.size(); ++i) {
         REQUIRE(a[i] == ref_l[i]);
@@ -70,8 +68,7 @@ TEST_CASE("Latency is zero and an impulse produces output at sample zero",
     REQUIRE(PhaserStages::latency_samples() == 0);
 
     for (double mix : {0.5, 1.0}) {
-        for (int stages = Phaser::kMinStages; stages <= Phaser::kMaxStages;
-             stages += 2) {
+        for (int stages = Phaser::kMinStages; stages <= Phaser::kMaxStages; stages += 2) {
             Config cfg;
             cfg.mix = mix;
             cfg.stages = stages;
@@ -115,16 +112,17 @@ TEST_CASE("A decaying tail reaches exact zero rather than lingering subnormal",
     std::vector<double> ol, orr;
     render(engine, in, ol, orr);
 
-    for (double v : ol) REQUIRE(std::isfinite(v));
+    for (double v : ol)
+        REQUIRE(std::isfinite(v));
 
 #if defined(__aarch64__) || defined(_M_ARM64)
     // ARM handles subnormal arithmetic in hardware. The per-sample path keeps
     // the mathematical tail running, but it must be negligible by the end of
     // the five-second window.
     const auto tail_begin = ol.size() - static_cast<std::size_t>(kSr);
-    const auto tail_max = std::max_element(
-        ol.begin() + static_cast<std::ptrdiff_t>(tail_begin), ol.end(),
-        [](double a, double b) { return std::abs(a) < std::abs(b); });
+    const auto tail_max =
+        std::max_element(ol.begin() + static_cast<std::ptrdiff_t>(tail_begin), ol.end(),
+                         [](double a, double b) { return std::abs(a) < std::abs(b); });
     REQUIRE(std::abs(*tail_max) <= 1e-13);
     return;
 #else
@@ -135,11 +133,11 @@ TEST_CASE("A decaying tail reaches exact zero rather than lingering subnormal",
     // window leaves 2.4 s of margin. Asserting 1 s of margin keeps the test
     // meaningful without sitting on the edge of the measurement.
     const auto last_nonzero = static_cast<std::size_t>(
-        std::find_if(ol.rbegin(), ol.rend(), [](double v) { return v != 0.0; })
-            .base() -
+        std::find_if(ol.rbegin(), ol.rend(), [](double v) { return v != 0.0; }).base() -
         ol.begin());
     REQUIRE(ol.size() - last_nonzero > static_cast<std::size_t>(kSr));
-    for (std::size_t i = last_nonzero; i < ol.size(); ++i) REQUIRE(ol[i] == 0.0);
+    for (std::size_t i = last_nonzero; i < ol.size(); ++i)
+        REQUIRE(ol[i] == 0.0);
 #endif
 
     // And the flush point moves the way the loop says it should — longer with
@@ -153,8 +151,7 @@ TEST_CASE("A decaying tail reaches exact zero rather than lingering subnormal",
         c.mix = 1.0;
         const auto h = frozen_impulse_response(c, static_cast<int>(5.0 * kSr));
         return static_cast<std::size_t>(
-            std::find_if(h.rbegin(), h.rend(), [](double v) { return v != 0.0; })
-                .base() -
+            std::find_if(h.rbegin(), h.rend(), [](double v) { return v != 0.0; }).base() -
             h.begin());
     };
     REQUIRE(flush_sample(Phaser::kMaxStages, Phaser::kFeedbackMax) >
@@ -166,19 +163,19 @@ TEST_CASE("A decaying tail reaches exact zero rather than lingering subnormal",
     // the feedback memory has been snapped too, not just the stage integrators.
     std::vector<double> more(1024, 0.0), m_l, m_r;
     render(engine, more, m_l, m_r);
-    for (double v : m_l) REQUIRE(v == 0.0);
+    for (double v : m_l)
+        REQUIRE(v == 0.0);
 }
 
-TEST_CASE("Stage count clamps into range and rounds down to even",
-          "[signal][phaser][stages]") {
+TEST_CASE("Stage count clamps into range and rounds down to even", "[signal][phaser][stages]") {
     // Documented behaviour, not a silent no-op: out-of-range and odd requests
     // resolve to a specific value that `stage_count()` reports back.
     Phaser engine;
     engine.prepare(kSr);
 
     const std::pair<int, int> cases[] = {
-        {-5, 4}, {0, 4},  {3, 4},  {4, 4},   {5, 4},   {6, 6},
-        {7, 6},  {9, 8},  {11, 10}, {12, 12}, {13, 12}, {100, 12},
+        {-5, 4}, {0, 4}, {3, 4},   {4, 4},   {5, 4},   {6, 6},
+        {7, 6},  {9, 8}, {11, 10}, {12, 12}, {13, 12}, {100, 12},
     };
     for (auto [requested, expected] : cases) {
         engine.set_stage_count(requested);
@@ -217,9 +214,9 @@ TEST_CASE("The module is exactly linear so there is nothing to alias",
 
     const int window = 48000;
     const int settle = 16384;
-    const int fundamental = 997;   // prime, so no harmonic lands exactly on a
-                                   // notch and gets flattered by the notch
-                                   // rather than by the module's linearity
+    const int fundamental = 997; // prime, so no harmonic lands exactly on a
+                                 // notch and gets flattered by the notch
+                                 // rather than by the module's linearity
     {
         // ONE tone rendered, then the harmonic bins of THAT render read. (The
         // wrong way to do this is to render each harmonic separately and read
@@ -238,8 +235,7 @@ TEST_CASE("The module is exactly linear so there is nothing to alias",
             std::complex<double> acc(0.0, 0.0);
             for (int i = 0; i < window; ++i) {
                 const double phase = -2.0 * kPi * static_cast<double>(cycles) *
-                                     static_cast<double>(i) /
-                                     static_cast<double>(window);
+                                     static_cast<double>(i) / static_cast<double>(window);
                 acc += ol[static_cast<std::size_t>(settle + i)] *
                        std::complex<double>(std::cos(phase), std::sin(phase));
             }
@@ -282,7 +278,8 @@ TEST_CASE("The module is exactly linear so there is nothing to alias",
         REQUIRE_THAT(rsum[i], WithinAbs(rx[i] + ry[i], 1e-9));
 
     std::vector<double> scaled(x.size());
-    for (std::size_t i = 0; i < x.size(); ++i) scaled[i] = 7.5 * x[i];
+    for (std::size_t i = 0; i < x.size(); ++i)
+        scaled[i] = 7.5 * x[i];
     const auto rscaled = render_with(scaled);
     for (std::size_t i = 0; i < x.size(); ++i)
         REQUIRE_THAT(rscaled[i], WithinAbs(7.5 * rx[i], 1e-9));
@@ -299,8 +296,7 @@ TEST_CASE("Stagger is off by default and detunes the notch set when engaged",
     // On: the stages' corners spread, the tangent law's premise (N IDENTICAL
     // sections) no longer holds, and the notches move. Undocumented as hardware
     // behaviour, so the only claim made for it is that it does something.
-    const double f1 =
-        Phaser::notch_frequency_hz(1, kSmallStoneStages, kRefCenterHz, kSr);
+    const double f1 = Phaser::notch_frequency_hz(1, kSmallStoneStages, kRefCenterHz, kSr);
 
     Config staggered;
     staggered.stagger = 1.08;
@@ -338,8 +334,7 @@ TEST_CASE("Phaser: the float and double instantiations agree on the physics",
     const auto h64 = frozen_impulse_response<PhaserStages64>(cfg, kIrLenOpenLoop);
 
     for (int k = 1; k <= Phaser::notch_count(cfg.stages); ++k) {
-        const double predicted =
-            Phaser::notch_frequency_hz(k, cfg.stages, cfg.center_hz, kSr);
+        const double predicted = Phaser::notch_frequency_hz(k, cfg.stages, cfg.center_hz, kSr);
         const double f32 = refine_minimum(h32, predicted * 0.9, predicted * 1.1);
         const double f64 = refine_minimum(h64, predicted * 0.9, predicted * 1.1);
         REQUIRE_THAT(f32, WithinRel(f64, 1e-4));
@@ -351,8 +346,7 @@ TEST_CASE("Phaser: the float and double instantiations agree on the physics",
                  WithinRel(PhaserStages64::worst_case_gain(), 1e-12));
 }
 
-TEST_CASE("A default instance is the documented Small Stone preset",
-          "[signal][phaser][defaults]") {
+TEST_CASE("A default instance is the documented Small Stone preset", "[signal][phaser][defaults]") {
     Phaser engine;
     REQUIRE(engine.stage_count() == Phaser::kStageCountDefault);
     REQUIRE_THAT(engine.center_hz(), WithinRel(kRefCenterHz, 1e-12));
@@ -367,7 +361,6 @@ TEST_CASE("A default instance is the documented Small Stone preset",
     // control, not a mode flag — both are reachable through the same setter.
     REQUIRE(Phaser::kColorOffFeedback < Phaser::kColorOnFeedback);
     REQUIRE(Phaser::kColorOnFeedback < Phaser::kFeedbackMax);
-
 }
 
 TEST_CASE("Colour feedback adds a resonant peak and does not deepen the notch",
@@ -394,8 +387,7 @@ TEST_CASE("Colour feedback adds a resonant peak and does not deepen the notch",
     // This is also WHY every notch-position test above sets feedback to zero:
     // the tangent law is an OPEN-LOOP law. It describes the cascade, not the
     // loop around it.
-    const double f1_open =
-        Phaser::notch_frequency_hz(1, kSmallStoneStages, kRefCenterHz, kSr);
+    const double f1_open = Phaser::notch_frequency_hz(1, kSmallStoneStages, kRefCenterHz, kSr);
 
     struct Measured {
         double peak, peak_hz, audible_peak_hz, null_depth_db, null_hz;
@@ -407,24 +399,19 @@ TEST_CASE("Colour feedback adds a resonant peak and does not deepen the notch",
         const auto s = spectrum_of(h);
         Measured m{};
         const auto highest = static_cast<std::size_t>(
-            std::max_element(s.magnitude.begin(), s.magnitude.end()) -
-            s.magnitude.begin());
+            std::max_element(s.magnitude.begin(), s.magnitude.end()) - s.magnitude.begin());
         m.peak = s.magnitude[highest];
         m.peak_hz = s.frequency(highest);
 
         // The largest response inside the audible band, which excludes both
         // exact-attainment endpoints below.
-        const auto lo = s.magnitude.begin() +
-                        static_cast<std::ptrdiff_t>(s.bin_for(20.0));
-        const auto hi = s.magnitude.begin() +
-                        static_cast<std::ptrdiff_t>(s.bin_for(20000.0));
-        m.audible_peak_hz = s.frequency(static_cast<std::size_t>(
-            std::max_element(lo, hi) - s.magnitude.begin()));
+        const auto lo = s.magnitude.begin() + static_cast<std::ptrdiff_t>(s.bin_for(20.0));
+        const auto hi = s.magnitude.begin() + static_cast<std::ptrdiff_t>(s.bin_for(20000.0));
+        m.audible_peak_hz =
+            s.frequency(static_cast<std::size_t>(std::max_element(lo, hi) - s.magnitude.begin()));
         // The deepest null of the whole response, wherever the loop has put it.
-        const auto lowest =
-            static_cast<std::size_t>(std::min_element(s.magnitude.begin() + 1,
-                                                      s.magnitude.end()) -
-                                     s.magnitude.begin());
+        const auto lowest = static_cast<std::size_t>(
+            std::min_element(s.magnitude.begin() + 1, s.magnitude.end()) - s.magnitude.begin());
         m.null_hz = refine_minimum(h, s.frequency(lowest) - 2.0 * s.bin_hz,
                                    s.frequency(lowest) + 2.0 * s.bin_hz);
         m.null_depth_db = db(m.peak / magnitude_at(h, m.null_hz));
@@ -449,14 +436,14 @@ TEST_CASE("Colour feedback adds a resonant peak and does not deepen the notch",
     const auto inverted = measure(-Phaser::kColorOnFeedback);
     const auto inverted_max = measure(-Phaser::kFeedbackMax);
 
-    for (auto [fb, m] : {std::pair{Phaser::kColorOnFeedback, on},
-                         std::pair{Phaser::kFeedbackMax, maxed},
-                         std::pair{-Phaser::kColorOnFeedback, inverted},
-                         std::pair{-Phaser::kFeedbackMax, inverted_max}}) {
+    for (auto [fb, m] :
+         {std::pair{Phaser::kColorOnFeedback, on}, std::pair{Phaser::kFeedbackMax, maxed},
+          std::pair{-Phaser::kColorOnFeedback, inverted},
+          std::pair{-Phaser::kFeedbackMax, inverted_max}}) {
         // The bound depends on |k|, so both signs reach the same height. That
         // is not a coincidence to be tolerated, it is the bound being tight.
-        const double bound = (1.0 - Phaser::kMixDefault) +
-                             Phaser::kMixDefault / (1.0 - std::abs(fb));
+        const double bound =
+            (1.0 - Phaser::kMixDefault) + Phaser::kMixDefault / (1.0 - std::abs(fb));
         REQUIRE(m.peak <= bound + 1e-3);
         REQUIRE(m.peak > 0.995 * bound);
     }
@@ -480,8 +467,8 @@ TEST_CASE("Colour feedback adds a resonant peak and does not deepen the notch",
     //
     // Not approached, attained — so this is asserted to 1e-6, not to a
     // grid-resolution tolerance.
-    const double peak_bound = (1.0 - Phaser::kMixDefault) +
-                              Phaser::kMixDefault * Phaser::worst_case_gain();
+    const double peak_bound =
+        (1.0 - Phaser::kMixDefault) + Phaser::kMixDefault * Phaser::worst_case_gain();
     REQUIRE_THAT(maxed.peak_hz, WithinAbs(0.0, 1e-12));
     REQUIRE_THAT(maxed.peak, WithinRel(peak_bound, 1e-6));
     REQUIRE_THAT(inverted_max.peak_hz, WithinAbs(kSr / 2.0, 1.0));
@@ -504,15 +491,37 @@ TEST_CASE("phaser retains controls and recovers from non-finite audio",
           "[signal][phaser][nonfinite]") {
     for (double bad : {NAN, INFINITY, -INFINITY}) {
         Phaser a, b;
-        for (auto* p : {&a, &b}) { p->prepare(kSr); p->set_rate_hz(1.2); p->set_depth(.7f);
-            p->set_center_hz(913); p->set_feedback(.31f); p->set_mix(.62f);
-            p->set_stereo_spread(.17f); p->set_stagger_ratio(1.13); p->reset(); }
-        a.set_rate_hz(bad); a.set_depth(static_cast<float>(bad)); a.set_center_hz(bad);
-        a.set_feedback(static_cast<float>(bad)); a.set_mix(static_cast<float>(bad));
-        a.set_stereo_spread(static_cast<float>(bad)); a.set_stagger_ratio(bad);
-        REQUIRE(a.center_hz() == b.center_hz()); REQUIRE(a.feedback() == b.feedback());
-        double inl=bad,inr=.2,al=1,ar=1; a.process(&inl,&inr,&al,&ar,1);
-        REQUIRE(al==0); REQUIRE(ar==0); b.reset();
-        for(int i=0;i<64;++i){ double x=.2,ya=0,za=0,yb=0,zb=0; a.process(&x,&x,&ya,&za,1); b.process(&x,&x,&yb,&zb,1); REQUIRE(ya==yb); REQUIRE(za==zb); }
+        for (auto* p : {&a, &b}) {
+            p->prepare(kSr);
+            p->set_rate_hz(1.2);
+            p->set_depth(.7f);
+            p->set_center_hz(913);
+            p->set_feedback(.31f);
+            p->set_mix(.62f);
+            p->set_stereo_spread(.17f);
+            p->set_stagger_ratio(1.13);
+            p->reset();
+        }
+        a.set_rate_hz(bad);
+        a.set_depth(static_cast<float>(bad));
+        a.set_center_hz(bad);
+        a.set_feedback(static_cast<float>(bad));
+        a.set_mix(static_cast<float>(bad));
+        a.set_stereo_spread(static_cast<float>(bad));
+        a.set_stagger_ratio(bad);
+        REQUIRE(a.center_hz() == b.center_hz());
+        REQUIRE(a.feedback() == b.feedback());
+        double inl = bad, inr = .2, al = 1, ar = 1;
+        a.process(&inl, &inr, &al, &ar, 1);
+        REQUIRE(al == 0);
+        REQUIRE(ar == 0);
+        b.reset();
+        for (int i = 0; i < 64; ++i) {
+            double x = .2, ya = 0, za = 0, yb = 0, zb = 0;
+            a.process(&x, &x, &ya, &za, 1);
+            b.process(&x, &x, &yb, &zb, 1);
+            REQUIRE(ya == yb);
+            REQUIRE(za == zb);
+        }
     }
 }
