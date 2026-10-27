@@ -1,4 +1,5 @@
 #include "widget_bridge_test_support.hpp"
+#include <pulp/canvas/bundled_fonts.hpp>
 #include <pulp/view/chart_shader_presets.hpp>
 #include <pulp/view/screenshot.hpp>
 
@@ -4179,6 +4180,22 @@ TEST_CASE("WidgetBridge deadline rejects an oversized realm before detachment",
         bridge.clear_for_realm_replacement([] {}),
         "Runtime.evaluate realm reset tree exceeds bounded cleanup limit");
     REQUIRE(root.child_count() == 2049);
+}
+
+TEST_CASE("WidgetBridge rejected retirement preserves font declarations",
+          "[view][bridge][fonts][lifetime][deadline][runtime-eval]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    pulp::canvas::declare_font_face_weight_range("RollbackFace", 400, 700,
+                                                 bridge.font_weight_scope());
+    for (int index = 0; index < 2049; ++index)
+        root.add_child(std::make_unique<View>());
+
+    REQUIRE_THROWS_WITH(bridge.clear_for_realm_replacement([] {}),
+                        "Runtime.evaluate realm reset tree exceeds bounded cleanup limit");
+    CHECK(pulp::canvas::declared_face_synthesizes_bold("RollbackFace", 700) == false);
 }
 
 TEST_CASE("WidgetBridge deadline rejects an attached native view before detachment",
