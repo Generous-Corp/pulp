@@ -107,7 +107,7 @@ class HostBridge final {
         auto elements = elements_;
         try {
             const auto status = elements->register_element(std::move(registration));
-            return elements_ == elements ? status : HostStatus::rejected;
+            return active_ && elements_ == elements ? status : HostStatus::rejected;
         } catch (...) {
             return HostStatus::rejected;
         }
@@ -141,7 +141,7 @@ class HostBridge final {
         auto lua = lua_;
         try {
             const auto status = lua->dispatch(callback);
-            return lua_ == lua ? status : HostStatus::rejected;
+            return active_ && lua_ == lua ? status : HostStatus::rejected;
         } catch (...) {
             close();
             return HostStatus::rejected;
@@ -156,7 +156,7 @@ class HostBridge final {
         auto product = product_;
         try {
             const auto status = product->dispatch(std::move(event));
-            return product_ == product ? status : HostStatus::rejected;
+            return active_ && product_ == product ? status : HostStatus::rejected;
         } catch (...) {
             close();
             return HostStatus::rejected;
