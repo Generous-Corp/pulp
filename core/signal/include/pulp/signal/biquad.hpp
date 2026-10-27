@@ -539,7 +539,7 @@ public:
     // Snap each lane of a recursive state value.
     template <typename V> static void snap_lanes(V& v) noexcept {
         for (std::size_t lane = 0; lane < simd::lane_count<V>; ++lane)
-            simd::set_lane(v, lane, snap_recursion_state(simd::get_lane(v, lane)));
+            simd::set_lane(v, lane, snap_to_zero(simd::get_lane(v, lane)));
     }
 
     // A sample-major pass of Count sections over Width channels, coefficients
@@ -691,8 +691,8 @@ public:
         hy1_ = y1;
         hy2_ = y2;
         const double b1 = b1_, b2 = b2_, a1 = a1_, a2 = a2_;
-        s2_ = snap_recursion_state(static_cast<SampleType>(b2 * x1 - a2 * y1));
-        s1_ = snap_recursion_state(static_cast<SampleType>(b1 * x1 - a1 * y1 + b2 * x2 - a2 * y2));
+        s2_ = snap_to_zero(static_cast<SampleType>(b2 * x1 - a2 * y1));
+        s1_ = snap_to_zero(static_cast<SampleType>(b1 * x1 - a1 * y1 + b2 * x2 - a2 * y2));
         history_valid_ = true;
     }
 

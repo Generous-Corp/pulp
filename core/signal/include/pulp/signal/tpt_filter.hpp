@@ -163,7 +163,7 @@ template <typename SampleType = float> class TptFilterT {
                 s = two_g * d + s;
                 buffer[i] = output(input, lp);
             }
-            s = snap_recursion_state(s);
+            s = snap_to_zero(s);
         }
         state_ = s;
     }
