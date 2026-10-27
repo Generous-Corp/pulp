@@ -1032,6 +1032,27 @@
       ]
     },
     {
+      "name": "Lua",
+      "category": "view",
+      "license": "MIT",
+      "version": "5.4.7",
+      "source_kind": "fetchcontent",
+      "repository": "https://www.lua.org/ftp/lua-5.4.7.tar.gz",
+      "upstream": {
+        "kind": "release-archive",
+        "ref": "lua-5.4.7.tar.gz",
+        "sha256": "9fbf5e28ef86c69858f6d3d34eccc32e911c1a28b4120ff3e84aaa70cfbf1e30"
+      },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "notes": "Optional RmlUi Lua plugin dependency. Fetched only with PULP_ENABLE_RMLUI_LUA=ON, compiled as a private static library, and linked only through the opt-in pulp-view-rmlui target. No Lua runtime or script execution is enabled by default.",
+      "source_files": [
+        "tools/cmake/PulpDependencies.cmake",
+        "CMakeLists.txt",
+        "core/view/CMakeLists.txt"
+      ]
+    },
+    {
       "name": "scheduler",
       "category": "packages/pulp-react",
       "license": "MIT",
