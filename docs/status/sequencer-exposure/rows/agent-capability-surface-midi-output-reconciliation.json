@@ -22,12 +22,6 @@
         "sha256:3b3e65207b2467e835cade6fd5ed82d9c22c5ac5515715528cb85dcdf62ee716",
         "the vocabulary those behaviors are"
       ]
-    },
-    {
-      "path": "tools/scripts/agent_capability_manifest.py",
-      "needles": [
-        "SURFACE_INVENTORY_VERSION = 166"
-      ]
     }
   ],
   "surfaces": {
