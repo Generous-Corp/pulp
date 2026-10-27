@@ -264,12 +264,19 @@ option(PULP_ENABLE_ARA "Enable optional ARA 2.x support with a developer-supplie
 option(PULP_ENABLE_MTS_ESP "Enable optional ODDSound MTS-ESP microtuning client integration" OFF)
 option(PULP_ENABLE_SCALA_TUNING "Enable optional Scala .scl/.kbm microtuning support via Surge Synth Team tuning-library" OFF)
 option(PULP_ENABLE_RMLUI "Build the optional RmlUi editor backend and pinned core dependency" OFF)
+option(PULP_ENABLE_RMLUI_LUA
+       "Enable the optional RmlUi Lua plugin for the RmlUi editor backend"
+       OFF)
 option(PULP_ENABLE_RMLUI_FONTS
        "Enable the optional RmlUi FreeType font engine (requires PULP_ENABLE_RMLUI)"
        OFF)
 if(PULP_ENABLE_RMLUI_FONTS AND NOT PULP_ENABLE_RMLUI)
     message(FATAL_ERROR
             "PULP_ENABLE_RMLUI_FONTS=ON requires PULP_ENABLE_RMLUI=ON")
+endif()
+if(PULP_ENABLE_RMLUI_LUA AND NOT PULP_ENABLE_RMLUI)
+    message(FATAL_ERROR
+            "PULP_ENABLE_RMLUI_LUA=ON requires PULP_ENABLE_RMLUI=ON")
 endif()
 option(PULP_FETCHCONTENT_UPDATES_DISCONNECTED "Avoid implicit FetchContent updates during configure" ON)
 option(PULP_USE_SHARED_FETCHCONTENT_SOURCES "Prefer machine-local shared source caches for FetchContent dependencies" ON)

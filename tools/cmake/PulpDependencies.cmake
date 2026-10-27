@@ -64,7 +64,35 @@ if(PULP_ENABLE_RMLUI)
     else()
         set(RMLUI_FONT_ENGINE "none" CACHE STRING "" FORCE)
     endif()
-    set(RMLUI_LUA_BINDINGS OFF CACHE BOOL "" FORCE)
+    if(PULP_ENABLE_RMLUI_LUA)
+        # Lua is built from the official 5.4.7 source archive so the opt-in
+        # runtime does not depend on an ambient Homebrew/system Lua ABI. The
+        # exact URL hash is repeated in the dependency manifest and is part of
+        # the compatibility receipt.
+        FetchContent_Declare(
+            pulp_rmlui_lua
+            URL https://www.lua.org/ftp/lua-5.4.7.tar.gz
+            URL_HASH SHA256=9fbf5e28ef86c69858f6d3d34eccc32e911c1a28b4120ff3e84aaa70cfbf1e30)
+        FetchContent_MakeAvailable(pulp_rmlui_lua)
+        file(GLOB _pulp_rmlui_lua_sources CONFIGURE_DEPENDS
+             "${pulp_rmlui_lua_SOURCE_DIR}/src/*.c")
+        list(REMOVE_ITEM _pulp_rmlui_lua_sources
+             "${pulp_rmlui_lua_SOURCE_DIR}/src/lua.c"
+             "${pulp_rmlui_lua_SOURCE_DIR}/src/luac.c")
+        add_library(pulp-rmlui-lua STATIC ${_pulp_rmlui_lua_sources})
+        target_compile_definitions(pulp-rmlui-lua PRIVATE LUA_USE_POSIX)
+        target_include_directories(pulp-rmlui-lua PUBLIC
+                                   "${pulp_rmlui_lua_SOURCE_DIR}/src")
+        add_library(Lua::Lua INTERFACE IMPORTED GLOBAL)
+        set_target_properties(Lua::Lua PROPERTIES
+            INTERFACE_LINK_LIBRARIES pulp-rmlui-lua
+            INTERFACE_INCLUDE_DIRECTORIES "${pulp_rmlui_lua_SOURCE_DIR}/src")
+        set(RMLUI_LUA_BINDINGS ON CACHE BOOL "" FORCE)
+        set(RMLUI_LUA_BINDINGS_LIBRARY lua CACHE STRING "" FORCE)
+        unset(_pulp_rmlui_lua_sources)
+    else()
+        set(RMLUI_LUA_BINDINGS OFF CACHE BOOL "" FORCE)
+    endif()
     set(RMLUI_LOTTIE_PLUGIN OFF CACHE BOOL "" FORCE)
     set(RMLUI_SVG_PLUGIN OFF CACHE BOOL "" FORCE)
     set(RMLUI_HARFBUZZ_SAMPLE OFF CACHE BOOL "" FORCE)

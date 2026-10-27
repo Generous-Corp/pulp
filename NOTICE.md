@@ -1779,8 +1779,19 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 RmlUi 6.1 is fetched only for the opt-in `pulp-view-rmlui` target. Optional
-samples, Lua bindings, third-party containers, font engines, SVG/Lottie plugins, HarfBuzz
-sample, and Tracy profiling are disabled.
+samples, third-party containers, font engines, SVG/Lottie plugins, HarfBuzz
+sample, and Tracy profiling are disabled. The Lua plugin is a separate opt-in
+and uses the Lua 5.4.7 source archive below.
+
+## Lua
+
+Copyright (c) 1994-2023 Lua.org, PUC-Rio
+
+Lua is distributed under the MIT license. The complete license text is
+available at https://www.lua.org/license.html and is included with the
+official Lua 5.4.7 source archive. Pulp fetches that archive only when
+`PULP_ENABLE_RMLUI_LUA=ON`; it is not part of the default build or shipped
+plugin closure.
 
 The embedded RmlUi debugger target is not linked by `pulp-view-rmlui`, but its
 upstream export may be present for SDK consumers. Its embedded third-party font

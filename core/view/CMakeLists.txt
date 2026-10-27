@@ -41,9 +41,16 @@ if(PULP_ENABLE_RMLUI)
     # consumers that exercise the admitted core lifecycle.  The ordinary view
     # targets never link this target, so the dependency remains opt-in.
     target_link_libraries(pulp-view-rmlui PUBLIC pulp::view-core RmlUi::Core)
+    if(PULP_ENABLE_RMLUI_LUA)
+        if(NOT TARGET RmlUi::Lua)
+            message(FATAL_ERROR "PULP_ENABLE_RMLUI_LUA=ON requires the RmlUi Lua target")
+        endif()
+        target_link_libraries(pulp-view-rmlui PUBLIC RmlUi::Lua)
+    endif()
     target_compile_features(pulp-view-rmlui PUBLIC cxx_std_20)
     target_compile_definitions(pulp-view-rmlui PUBLIC
-        PULP_RMLUI_FONTS_ENABLED=$<BOOL:${PULP_ENABLE_RMLUI_FONTS}>)
+        PULP_RMLUI_FONTS_ENABLED=$<BOOL:${PULP_ENABLE_RMLUI_FONTS}>
+        PULP_RMLUI_LUA_ENABLED=$<BOOL:${PULP_ENABLE_RMLUI_LUA}>)
 
     # Catch a future FetchContent option leak at configure time, before it can
     # alter the plugin SDK's link model. Respect an explicit shared-library
