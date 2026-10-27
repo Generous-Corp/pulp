@@ -4139,7 +4139,7 @@ pull request costs a classify run, not a VM. Tests:
 `tools/ci/test_queue_breaker.py` (ctest `queue-breaker-selftest`).
 
 Who may sign the fleet App's approvals is set in `.shipyard/config.toml`:
-`[auto_merge] reviewer_signers = ["pulp-review", "infra-review2"]`. Every
+`[auto_merge] reviewer_signers = ["pulp-review", "pulp-review2", "infra-review2"]`. Every
 agent posts verdicts as the same App, so Shipyard's guards count an App
 `verdict: APPROVE` only with a `reviewer: <name>` line naming one of these, and
 never one `ghapp` stamped with an `unattributed` session. Shipyard's
