@@ -12,7 +12,7 @@
 using namespace pulp::view::rmlui;
 
 namespace {
-std::string read_binary(const std::filesystem::path& path) {
+[[maybe_unused]] std::string read_binary(const std::filesystem::path& path) {
     std::ifstream stream(path, std::ios::binary);
     return {std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
 }
@@ -59,13 +59,25 @@ TEST_CASE("RmlUi font loading is admitted, rooted, and renders text") {
     Headless headless;
     Backend backend(headless, headless, headless);
     REQUIRE(backend.open(320, 120) == Status::ok);
+#if PULP_RMLUI_FONTS_ENABLED
     REQUIRE(backend.load_font_face("missing.ttf", "Inter") == Status::missing_asset);
+#else
+    REQUIRE(backend.load_font_face("missing.ttf", "Inter") == Status::rejected);
+#endif
+    FontFaceOptions invalid_weight;
+    invalid_weight.weight = 1001;
+    REQUIRE(backend.load_font_face("missing.ttf", "Inter", invalid_weight) == Status::rejected);
 
 #if PULP_RMLUI_FONTS_ENABLED
     const auto bytes = read_binary(PULP_RMLUI_TEST_FONT_PATH);
     REQUIRE_FALSE(bytes.empty());
     headless.add_asset("Inter-Regular.ttf", bytes);
     REQUIRE(backend.load_font_face("Inter-Regular.ttf", "Inter") == Status::ok);
+    headless.add_asset("Inter-Italic.ttf", bytes);
+    FontFaceOptions italic;
+    italic.style = FontStyle::italic;
+    italic.weight = 700;
+    REQUIRE(backend.load_font_face("Inter-Italic.ttf", "Inter", italic) == Status::ok);
     headless.add_asset("font.rml",
                        "<rml><body><div style='font-family:Inter;font-size:24px;'>Pulp</div>"
                        "</body></rml>");
