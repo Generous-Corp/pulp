@@ -24,6 +24,9 @@ set(FETCHCONTENT_UPDATES_DISCONNECTED ${PULP_FETCHCONTENT_UPDATES_DISCONNECTED})
 # sandbox contracts are reviewed. The upstream debugger target is exported by
 # RmlUi but is not linked by Pulp's bridge.
 if(PULP_ENABLE_RMLUI)
+    if(PULP_ENABLE_RMLUI_FONTS)
+        find_package(Freetype REQUIRED)
+    endif()
     # RmlUi defaults BUILD_SHARED_LIBS to ON. Scope that option to the
     # dependency so opting into this backend cannot silently change Pulp's
     # link model; preserve an explicit consumer choice for Pulp targets.
@@ -39,7 +42,11 @@ if(PULP_ENABLE_RMLUI)
 
     set(RMLUI_SAMPLES OFF CACHE BOOL "" FORCE)
     set(RMLUI_THIRDPARTY_CONTAINERS OFF CACHE BOOL "" FORCE)
-    set(RMLUI_FONT_ENGINE "none" CACHE STRING "" FORCE)
+    if(PULP_ENABLE_RMLUI_FONTS)
+        set(RMLUI_FONT_ENGINE "freetype" CACHE STRING "" FORCE)
+    else()
+        set(RMLUI_FONT_ENGINE "none" CACHE STRING "" FORCE)
+    endif()
     set(RMLUI_LUA_BINDINGS OFF CACHE BOOL "" FORCE)
     set(RMLUI_LOTTIE_PLUGIN OFF CACHE BOOL "" FORCE)
     set(RMLUI_SVG_PLUGIN OFF CACHE BOOL "" FORCE)

@@ -23,6 +23,10 @@ target_compile_definitions(pulp-view-core PUBLIC PULP_ENABLE_JS=$<BOOL:${PULP_EN
 # contains the pinned RmlUi core plus the Pulp-owned file/render seams. Lua,
 # font, GPU, and host adapters remain separately admitted slices.
 if(PULP_ENABLE_RMLUI)
+    if(PULP_ENABLE_RMLUI_FONTS AND NOT TARGET Freetype::Freetype)
+        message(FATAL_ERROR
+            "PULP_ENABLE_RMLUI_FONTS=ON requires the admitted Freetype::Freetype target")
+    endif()
     if(NOT TARGET RmlUi::Core)
         message(FATAL_ERROR "PULP_ENABLE_RMLUI=ON requires the pinned RmlUi core target")
     endif()
@@ -38,6 +42,8 @@ if(PULP_ENABLE_RMLUI)
     # targets never link this target, so the dependency remains opt-in.
     target_link_libraries(pulp-view-rmlui PUBLIC pulp::view-core RmlUi::Core)
     target_compile_features(pulp-view-rmlui PUBLIC cxx_std_20)
+    target_compile_definitions(pulp-view-rmlui PUBLIC
+        PULP_RMLUI_FONTS_ENABLED=$<BOOL:${PULP_ENABLE_RMLUI_FONTS}>)
 
     # Catch a future FetchContent option leak at configure time, before it can
     # alter the plugin SDK's link model. Respect an explicit shared-library

@@ -6,9 +6,17 @@
 #include "support/unique_temp_dir.hpp"
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <vector>
 
 using namespace pulp::view::rmlui;
+
+namespace {
+std::string read_binary(const std::filesystem::path& path) {
+    std::ifstream stream(path, std::ios::binary);
+    return {std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
+}
+} // namespace
 
 TEST_CASE("headless RmlUi contract loads, renders, and dispatches") {
     Headless headless;
@@ -44,6 +52,38 @@ TEST_CASE("RmlUi backend parses and lowers a document through the Pulp renderer 
     REQUIRE(headless.frame_width() == 640);
     REQUIRE(headless.frame_height() == 480);
     REQUIRE_FALSE(headless.commands().empty());
+    backend.close();
+}
+
+TEST_CASE("RmlUi font loading is admitted, rooted, and renders text") {
+    Headless headless;
+    Backend backend(headless, headless, headless);
+    REQUIRE(backend.open(320, 120) == Status::ok);
+    REQUIRE(backend.load_font_face("missing.ttf", "Inter") == Status::missing_asset);
+
+#if PULP_RMLUI_FONTS_ENABLED
+    const auto bytes = read_binary(PULP_RMLUI_TEST_FONT_PATH);
+    REQUIRE_FALSE(bytes.empty());
+    headless.add_asset("Inter-Regular.ttf", bytes);
+    REQUIRE(backend.load_font_face("Inter-Regular.ttf", "Inter") == Status::ok);
+    headless.add_asset("font.rml",
+                       "<rml><body><div style='font-family:Inter;font-size:24px;'>Pulp</div>"
+                       "</body></rml>");
+    REQUIRE(backend.load_document("font.rml") == Status::ok);
+    backend.render();
+    const auto text_texture = std::find_if(
+        headless.commands().begin(), headless.commands().end(), [](const DrawCommand& command) {
+            return command.kind == DrawCommand::Kind::texture && command.texture_bytes &&
+                   command.texture_path.empty();
+        });
+    REQUIRE(text_texture != headless.commands().end());
+    REQUIRE_FALSE(text_texture->texture_bytes->empty());
+    REQUIRE(text_texture->texture_width > 0);
+    REQUIRE(text_texture->texture_height > 0);
+#else
+    headless.add_asset("Inter-Regular.ttf", "not-a-font");
+    REQUIRE(backend.load_font_face("Inter-Regular.ttf", "Inter") == Status::rejected);
+#endif
     backend.close();
 }
 

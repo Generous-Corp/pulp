@@ -6,6 +6,10 @@ if(PULP_ENABLE_RMLUI)
             test_rmlui_backend.cpp
             test_rmlui_core_smoke.cpp
         LIBRARIES pulp::view-rmlui)
+    if(PULP_ENABLE_RMLUI_FONTS)
+        target_compile_definitions(pulp-test-rmlui-backend PRIVATE
+            PULP_RMLUI_TEST_FONT_PATH="${PULP_ROOT_DIR}/external/fonts/Inter-Regular.ttf")
+    endif()
 else()
     add_test(NAME pulp.rmlui-default-off
         COMMAND ${CMAKE_COMMAND}
