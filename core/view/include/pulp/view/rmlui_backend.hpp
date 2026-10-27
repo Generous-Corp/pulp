@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -83,6 +84,10 @@ class ActionSink {
 class Backend {
   public:
     Backend(AssetProvider&, RenderInterface&, LuaInterface&, ActionSink* = nullptr);
+    ~Backend();
+
+    Backend(const Backend&) = delete;
+    Backend& operator=(const Backend&) = delete;
 
     Status open(std::uint32_t width, std::uint32_t height);
     Status load_document(std::string_view path);
@@ -95,6 +100,7 @@ class Backend {
     }
 
   private:
+    struct Runtime;
     AssetProvider& assets_;
     RenderInterface& renderer_;
     LuaInterface& lua_;
@@ -103,6 +109,7 @@ class Backend {
     std::uint32_t height_ = 0;
     bool open_ = false;
     Asset document_;
+    std::unique_ptr<Runtime> runtime_;
 };
 
 // Headless test double used to prove the Pulp-owned contract without a host

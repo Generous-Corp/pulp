@@ -12,11 +12,11 @@ using namespace pulp::view::rmlui;
 
 TEST_CASE("headless RmlUi contract loads, renders, and dispatches") {
     Headless headless;
-    headless.add_asset("editor.rml", "<rml/>\n");
+    headless.add_asset("editor.lua", "return true\n");
     Backend backend(headless, headless, headless, &headless);
 
     REQUIRE(backend.open(640, 480) == Status::ok);
-    REQUIRE(backend.load_document("editor.rml") == Status::ok);
+    REQUIRE(backend.load_document("editor.lua") == Status::ok);
     REQUIRE(backend.dispatch_lua("onload") == Status::ok);
     REQUIRE(backend.invoke_action("parameter.gain") == Status::ok);
     backend.render();
@@ -24,12 +24,27 @@ TEST_CASE("headless RmlUi contract loads, renders, and dispatches") {
     REQUIRE(backend.is_open());
     REQUIRE(headless.frame_width() == 640);
     REQUIRE(headless.frame_height() == 480);
-    REQUIRE(headless.callbacks() == std::vector<std::string>{"editor.rml", "onload"});
+    REQUIRE(headless.callbacks() == std::vector<std::string>{"editor.lua", "onload"});
     REQUIRE(headless.actions() == std::vector<std::string>{"parameter.gain"});
 
     backend.close();
     REQUIRE_FALSE(backend.is_open());
     REQUIRE(backend.dispatch_lua("late") == Status::not_open);
+}
+
+TEST_CASE("RmlUi backend parses and lowers a document through the Pulp renderer seam") {
+    Headless headless;
+    headless.add_asset("editor.rml", "<rml><body><div style='display:block;width:120px;height:40px;"
+                                     "background-color:#204060;'></div></body></rml>");
+    Backend backend(headless, headless, headless);
+
+    REQUIRE(backend.open(640, 480) == Status::ok);
+    REQUIRE(backend.load_document("editor.rml") == Status::ok);
+    backend.render();
+    REQUIRE(headless.frame_width() == 640);
+    REQUIRE(headless.frame_height() == 480);
+    REQUIRE_FALSE(headless.commands().empty());
+    backend.close();
 }
 
 TEST_CASE("headless RmlUi contract fails closed for missing and rejected assets") {
