@@ -35,13 +35,17 @@ jobs:
           # runtime even when the RmlUi bridge itself is the only feature under
           # test. Keep this enabled until that unrelated baseline registration
           # gap is fixed.
+          # GitHub's Ubuntu runner is intentionally headless. SDL otherwise
+          # fails configure when neither X11 nor Wayland development headers
+          # are installed, even though these tests never create a window.
           cmake -S . -B build-rmlui -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DPULP_ENABLE_RMLUI=ON \
             -DPULP_ENABLE_GPU=OFF \
             -DPULP_BUILD_EXAMPLES=OFF \
             -DPULP_ENABLE_INSPECTOR=ON \
-            -DPULP_ENABLE_AUDIO_PROBES=OFF
+            -DPULP_ENABLE_AUDIO_PROBES=OFF \
+            -DSDL_UNIX_CONSOLE_BUILD=ON
 
       - name: Build RmlUi backend and SDK consumer
         run: |
