@@ -94,10 +94,22 @@ TEST_CASE("RmlUi host bridge propagates refusals and catches provider exceptions
     REQUIRE_FALSE(bridge.active());
     lua->throw_on_initialise = false;
     REQUIRE(bridge.activate() == HostStatus::ok);
+    REQUIRE(bridge.dispatch_product({static_cast<ProductEventKind>(99), "bad", 0.0}) ==
+            HostStatus::rejected);
     lua->throw_on_dispatch = true;
     REQUIRE(bridge.dispatch_lua("onload") == HostStatus::rejected);
+    REQUIRE_FALSE(bridge.active());
+    // A provider fault closes the bridge and releases all ownership; it cannot
+    // be resumed with a stale callback graph.
+    REQUIRE(bridge.dispatch_product({ProductEventKind::action, "PresetNext", 0.0}) ==
+            HostStatus::not_active);
+    REQUIRE(bridge.bind_lua(lua) == HostStatus::ok);
+    REQUIRE(bridge.bind_elements(elements) == HostStatus::ok);
+    REQUIRE(bridge.bind_product(product) == HostStatus::ok);
+    REQUIRE(bridge.activate() == HostStatus::ok);
     product->throw_on_dispatch = true;
     REQUIRE(bridge.dispatch_product({ProductEventKind::action, "PresetNext", 0.0}) == HostStatus::rejected);
+    REQUIRE_FALSE(bridge.active());
 }
 
 TEST_CASE("RmlUi host bridge rejects null providers and is noncopyable") {

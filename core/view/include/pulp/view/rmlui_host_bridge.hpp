@@ -61,7 +61,8 @@ class ProductHost {
 // details and expose only typed lifecycle and product events here. All methods
 // are UI-thread calls and must be serialized by the adapter. Provider calls are
 // synchronous; callback and registration names are copied at the boundary, and
-// provider exceptions are converted to rejected status.
+// provider exceptions are converted to rejected status. close() releases the
+// current graph; a fresh provider set may then be bound and activated.
 class HostBridge final {
   public:
     HostBridge() = default;
@@ -103,8 +104,10 @@ class HostBridge final {
             return HostStatus::not_active;
         if (registration.name.empty() || !registration.dispatch)
             return HostStatus::rejected;
+        auto elements = elements_;
         try {
-            return elements_->register_element(std::move(registration));
+            const auto status = elements->register_element(std::move(registration));
+            return elements_ == elements ? status : HostStatus::rejected;
         } catch (...) {
             return HostStatus::rejected;
         }
@@ -115,34 +118,47 @@ class HostBridge final {
             return HostStatus::already_bound;
         if (!lua_ || !elements_ || !product_)
             return HostStatus::missing_capability;
+        auto lua = lua_;
         HostStatus status = HostStatus::rejected;
         try {
-            status = lua_->initialise();
+            status = lua->initialise();
         } catch (...) {
             return HostStatus::rejected;
         }
         if (status != HostStatus::ok)
             return status;
+        if (lua_ != lua || !elements_ || !product_)
+            return HostStatus::rejected;
         active_ = true;
         return HostStatus::ok;
     }
 
     HostStatus dispatch_lua(std::string_view callback) {
-        if (!active_ || callback.empty())
+        if (!active_)
             return HostStatus::not_active;
+        if (callback.empty())
+            return HostStatus::rejected;
+        auto lua = lua_;
         try {
-            return lua_->dispatch(callback);
+            const auto status = lua->dispatch(callback);
+            return lua_ == lua ? status : HostStatus::rejected;
         } catch (...) {
+            close();
             return HostStatus::rejected;
         }
     }
 
     HostStatus dispatch_product(ProductEvent event) {
-        if (!active_ || event.id.empty())
+        if (!active_)
             return HostStatus::not_active;
+        if (event.id.empty() || !valid_event_kind(event.kind))
+            return HostStatus::rejected;
+        auto product = product_;
         try {
-            return product_->dispatch(std::move(event));
+            const auto status = product->dispatch(std::move(event));
+            return product_ == product ? status : HostStatus::rejected;
         } catch (...) {
+            close();
             return HostStatus::rejected;
         }
     }
@@ -156,6 +172,16 @@ class HostBridge final {
     [[nodiscard]] bool active() const noexcept { return active_; }
 
   private:
+    static bool valid_event_kind(ProductEventKind kind) noexcept {
+        switch (kind) {
+            case ProductEventKind::parameter:
+            case ProductEventKind::action:
+            case ProductEventKind::selection:
+                return true;
+        }
+        return false;
+    }
+
     std::shared_ptr<LuaHost> lua_;
     std::shared_ptr<ElementHost> elements_;
     std::shared_ptr<ProductHost> product_;
