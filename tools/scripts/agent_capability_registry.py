@@ -92,6 +92,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/diffusion_network.hpp": "Pulp::signal",
     "pulp/signal/spectral_cross_synthesis.hpp": "Pulp::signal",
     "pulp/signal/fm_operator_engine.hpp": "Pulp::signal",
+    "pulp/signal/two_pole_resonator.hpp": "Pulp::signal",
     "pulp/signal/fir_design.hpp": "Pulp::signal",
     "pulp/signal/fractional_delay.hpp": "Pulp::signal",
     "pulp/signal/tempo_delay_wrapper.hpp": "Pulp::signal",
@@ -439,7 +440,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/ballistics_filter.hpp",
-        "fingerprint": "sha256:58f673ad243d35a4df20b30d0bd68b76034ac04d57f028b9835df9ead58498c1",
+        "fingerprint": "sha256:cac378cc3b7b0c69765f929d530b292c17743b17ec491fcffcf66b774d350349",
         "disposition": "capability_support",
         "capability_keys": ["signal.dynamics-envelope-contract"],
         "rationale": (
@@ -856,7 +857,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/biquad.hpp",
-        "fingerprint": "sha256:fdbc7b3053b72c4a8dc102e034e405bcaab68ba07083e5ac610c2b9ae35ec07e",
+        "fingerprint": "sha256:6a885b8c54ff3ba32c66b3647036e7e12d6aeec763d751e967611917a364c396",
         "disposition": "capability_support",
         "capability_keys": ["signal.sos-cascade"],
         "rationale": (
@@ -1368,6 +1369,16 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         ),
     },
     {
+        "include": "pulp/signal/two_pole_resonator.hpp",
+        "fingerprint": "sha256:46c762aca702becc33f51ad1a0db963ee84a3b397e6202a859944c619d9bc2ec",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Two-pole resonance is composable realtime signal infrastructure, not an "
+            "independently advertised generator capability."
+        ),
+    },
+    {
         "include": "pulp/signal/classic_reverb.hpp",
         "fingerprint": "sha256:ef4d852f267095f4e18a7ed2114640adaeaf8fbbd57087cc3a1aaa1d3a4c796f",
         "disposition": "infrastructure",
@@ -1501,7 +1512,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/denormal.hpp",
-        "fingerprint": "sha256:c139f6695a9b995b89dc3b9d00430bc0776391286bec850213c8e278bf67e099",
+        "fingerprint": "sha256:e833a00a6974d4fbb18bec9e1c2312285c7387d8f7aa4757b606425e39452277",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1688,7 +1699,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/svf.hpp",
-        "fingerprint": "sha256:50341bc965475434473aaca48a378ca56c4c19d757922fd1b2ae23406a5ebb66",
+        "fingerprint": "sha256:9d3b9632299a64a68d78b62fb79fd264860d62b7b4d10269323cc25a94c5c87e",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1700,7 +1711,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/tpt_filter.hpp",
-        "fingerprint": "sha256:2e70a37436a0e624d192e38cd15dbf71c936230d21577b35271251d97b04b69c",
+        "fingerprint": "sha256:44621a5e2035d72cce3ef0c62d3a334c913ef7059780d2c7475834df4dfce04f",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
