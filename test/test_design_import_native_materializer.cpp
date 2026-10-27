@@ -5420,6 +5420,7 @@ TEST_CASE("registerFont weight ranges are removed with their bridge scope",
         View root;
         pulp::state::StateStore store;
         WidgetBridge bridge(engine, root, store);
+        bridge.set_asset_roots({std::filesystem::path(PULP_REPO_ROOT) / "external/fonts"});
         REQUIRE(engine.evaluate("registerFont('ScopedFace', '" + jost + "', 400, 700)")
                     .getWithDefault<bool>(false));
         CHECK(pulp::canvas::declared_face_synthesizes_bold("ScopedFace", 700) == false);
@@ -5440,6 +5441,10 @@ TEST_CASE("font declaration cleanup does not cross bridges sharing storage ident
     WidgetBridge second(second_engine, second_root, second_store);
     first.set_storage_identity("shared-script");
     second.set_storage_identity("shared-script");
+    // The face lives outside any script directory, so both bridges declare the
+    // fonts tree as a reviewed asset root.
+    first.set_asset_roots({std::filesystem::path(PULP_REPO_ROOT) / "external/fonts"});
+    second.set_asset_roots({std::filesystem::path(PULP_REPO_ROOT) / "external/fonts"});
     REQUIRE(first_engine.evaluate("registerFont('SharedScopeFace', '" + jost + "', 400, 700)")
                 .getWithDefault<bool>(false));
     REQUIRE(second_engine.evaluate("registerFont('SharedScopeFace', '" + jost + "', 400, 400)")
