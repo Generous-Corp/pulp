@@ -19,6 +19,9 @@ The admitted core slice is pinned to RmlUi commit
 bindings, font engines, SVG/Lottie, HarfBuzz sample, and Tracy disabled. The
 `pulp-test-rmlui-backend` suite now proves core initialization, document
 parsing, update, render, and teardown through a recording render interface.
+The optional backend also exposes a rooted, SHA-256-checked asset provider;
+its tests cover traversal, missing-manifest entries, tampering, size limits,
+and symlink escapes.
 This is dependency and lifecycle evidence only; it is not production editor
 or unchanged-skin support.
 
