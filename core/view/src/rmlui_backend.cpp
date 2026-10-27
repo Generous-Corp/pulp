@@ -13,6 +13,7 @@
 #include <fstream>
 #include <iterator>
 #include <limits>
+#include <list>
 #include <memory>
 #include <optional>
 #include <string>
@@ -303,6 +304,11 @@ struct Backend::Runtime {
     bool initialised = false;
     std::string context_name;
     bool active = false;
+#if PULP_RMLUI_FONTS_ENABLED
+    // RmlUi retains memory-backed font spans until shutdown. Stable storage
+    // keeps FreeType from observing a reclaimed temporary Asset buffer.
+    std::list<std::string> font_storage;
+#endif
 
     static std::atomic_uint64_t next_context_id;
     static std::atomic_flag process_active;
@@ -493,12 +499,15 @@ Status Backend::load_font_face(std::string_view path, std::string_view family, b
     const auto status = assets_.load(path, asset);
     if (status != Status::ok)
         return status;
-    const auto* bytes = reinterpret_cast<const Rml::byte*>(asset.bytes.data());
-    return Rml::LoadFontFace(Rml::Span<const Rml::byte>(bytes, asset.bytes.size()),
+    runtime_->font_storage.emplace_back(std::move(asset.bytes));
+    const auto& owned = runtime_->font_storage.back();
+    const auto* bytes = reinterpret_cast<const Rml::byte*>(owned.data());
+    const auto loaded = Rml::LoadFontFace(Rml::Span<const Rml::byte>(bytes, owned.size()),
                              Rml::String(family), Rml::Style::FontStyle::Normal,
-                             Rml::Style::FontWeight::Auto, fallback)
-               ? Status::ok
-               : Status::rejected;
+                             Rml::Style::FontWeight::Auto, fallback);
+    if (!loaded)
+        runtime_->font_storage.pop_back();
+    return loaded ? Status::ok : Status::rejected;
 #endif
 }
 
