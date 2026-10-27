@@ -88,8 +88,9 @@ It is a development-only link mode, by design:
   dev-shared build:
   - `pulp ship package`, `release`, and `pulp ship sign` with a distribution
     identity (Developer ID) configure and build a statically linked sibling,
-    `build-ship/`, from the dev build's cache with `PULP_DEV_SHARED_UI` (and
-    `PULP_DEV_BUILD`) off, and ship from there; the dev build is left as it is.
+    `build-ship/`, from the dev build's cache with `PULP_DEV_SHARED_UI` and
+    every option the release profile enforces (`PULP_DEV_BUILD`, tests,
+    examples, ...) off, and ship from there; the dev build is left as it is.
     `notarize`, `share` and `check` read `build-ship/` once it exists.
     `--allow-dev-build` does not keep a dev-shared dir.
   - When a distribution step still meets dev-shared bits (a `sign --path` of a

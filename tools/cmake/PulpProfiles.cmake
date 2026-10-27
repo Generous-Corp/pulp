@@ -80,6 +80,13 @@ set(PULP_PROFILE_ENFORCED_OPTIONS
     PULP_ENABLE_FUZZING
     PULP_BENCHMARK
     PULP_RT_WORK_COUNTERS)
+# The enforced list as C++ initializer lines for tools/cli/build_profile_gen.h.in,
+# so the CLI reads the same list this module enforces.
+set(PULP_PROFILE_ENFORCED_OPTIONS_CXX "")
+foreach(_pulp_profile_option IN LISTS PULP_PROFILE_ENFORCED_OPTIONS)
+    string(APPEND PULP_PROFILE_ENFORCED_OPTIONS_CXX "    \"${_pulp_profile_option}\",\n")
+endforeach()
+unset(_pulp_profile_option)
 # Options the profile records but does not enforce.
 set(PULP_PROFILE_NEUTRAL_OPTIONS
     PULP_ENABLE_DESIGN_IMPORT

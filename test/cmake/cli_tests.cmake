@@ -477,9 +477,17 @@ endif()
 # real PULP_TRACING=ON binary. PULP_SOURCE_DIR lets the sync-guard case read the
 # runtime source to prove the sentinel bytes still match.
 # Ship-time PULP_DEV_BUILD guard: a header-only CMakeCache.txt reader
-# (ship_dev_build_guard.hpp) proven against fixture caches.
+# (ship_dev_build_guard.hpp) proven against fixture caches. It reads the
+# release profile's enforced list from the generated build_profile_gen.h.
 add_executable(pulp-test-ship-dev-build-guard test_ship_dev_build_guard.cpp)
-target_include_directories(pulp-test-ship-dev-build-guard PRIVATE ${CMAKE_SOURCE_DIR})
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/tools/cli")
+configure_file(
+    "${CMAKE_SOURCE_DIR}/tools/cli/build_profile_gen.h.in"
+    "${CMAKE_BINARY_DIR}/tools/cli/build_profile_gen.h"
+    @ONLY)
+target_include_directories(pulp-test-ship-dev-build-guard PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_BINARY_DIR}/tools/cli)
 target_link_libraries(pulp-test-ship-dev-build-guard PRIVATE Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-ship-dev-build-guard)
 

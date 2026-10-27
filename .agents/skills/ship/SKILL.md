@@ -330,9 +330,14 @@ Gotchas:
   `ship_build_initial_cache()` writes every non-INTERNAL/STATIC cache entry
   (formats such as `PULP_ENABLE_AAX`/`PULP_AAX_SDK_DIR`, `PULP_ENABLE_ARA`,
   compiler, sysroot, SDK paths) into `build-ship/pulp-ship-initial-cache.cmake`,
-  which the configure loads with `cmake -C`; only `PULP_BUILD_TESTS`,
-  `PULP_DEV_BUILD`, `PULP_DEV_BRIDGE_EXEC` and `PULP_ENABLE_AUDIO_PROBES` are
-  dropped (the first two set OFF) and `PULP_PROFILE` is forced to `release`.
+  which the configure loads with `cmake -C`; only the release profile's
+  enforced options (`PULP_PROFILE_ENFORCED_OPTIONS` in `PulpProfiles.cmake`,
+  read from the generated `tools/cli/build_profile_gen.h`: `PULP_DEV_BUILD`,
+  tests, examples, audio probes, the exec bridge, tracing, fuzzing, benchmark,
+  RT work counters) plus `PULP_DEV_SHARED_UI` are dropped and set OFF, and
+  `PULP_PROFILE` is forced to `release`. The drop list is not a second copy:
+  adding an option to the profile drops it from `build-ship/` too, and a
+  `static_assert` fails the CLI build if the list ever loses `PULP_DEV_BUILD`.
   The generator is INTERNAL and goes on the command line (`-G`). An earlier
   version carried ten named entries and silently dropped an AAX-enabled
   plug-in's AAX bundle.
