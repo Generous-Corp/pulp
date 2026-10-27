@@ -31,6 +31,19 @@ set(PULP_FORMAT_SOURCE_DIR "${PULP_SDK_DIR}/src/pulp/format")
 set(PULP_AUV3_TEMPLATE_DIR "${PULP_SDK_DIR}/templates/auv3")
 set(PULP_IOS_AUV3_TEMPLATE_DIR "${PULP_SDK_DIR}/templates/ios-auv3")
 
+# The optional RmlUi bridge has a public link dependency on the upstream
+# RmlUi::Core target. The embedded RmlUi project registers that target in its
+# own export set, so an installed Pulp SDK must load RmlUiConfig before its
+# PulpTargets file is validated. Keep this conditional on the SDK that was
+# actually configured; ordinary Pulp installs remain independent of RmlUi.
+set(PULP_SDK_HAS_RMLUI "@PULP_ENABLE_RMLUI@")
+if(PULP_SDK_HAS_RMLUI)
+    if(NOT DEFINED RmlUi_DIR)
+        set(RmlUi_DIR "${PULP_SDK_LIBRARY_DIR}/cmake/RmlUi")
+    endif()
+    find_dependency(RmlUi CONFIG)
+endif()
+
 # Platform detection → PULP_APPLE / PULP_LINUX / PULP_WINDOWS / etc.
 include("${CMAKE_CURRENT_LIST_DIR}/PulpPlatformConfig.cmake")
 
