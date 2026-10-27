@@ -88,6 +88,12 @@ if(TARGET pulp-signal-fft-backend)
     list(APPEND PULP_SDK_TARGETS pulp-signal-fft-backend)
 endif()
 
+# The float FFT backend behind FftT off Apple. pulp::signal links it, so an
+# installed SDK must export it or every FFT user fails to link.
+if(TARGET pulp-signal-mufft AND NOT APPLE)
+    list(APPEND PULP_SDK_TARGETS pulp-signal-mufft)
+endif()
+
 # Modal-spec JSON parsing has a source-bearing library separate from the
 # header-only signal umbrella. Export it or installed consumers can include
 # modal_spec.hpp but cannot link parse_modal_spec()/to_json().
@@ -897,6 +903,8 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPortable.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpBundleRelocatable.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAuv3.cmake"
+    # Included by PulpAuv3.cmake for the per-engine entitlement fragments.
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAuv3Entitlements.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpIosHostApp.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAppTargets.cmake"
     # Included by PulpAppTargets.cmake, so an installed SDK without it fails

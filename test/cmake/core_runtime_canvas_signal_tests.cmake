@@ -469,6 +469,27 @@ pulp_add_test_suite(pulp-test-frequency-response GROUP pulp-test-group-core-sign
 # WindowFunction / FFT / Convolver TEST_CASE clusters moved verbatim.
 pulp_add_test_suite(pulp-test-signal-spectral GROUP pulp-test-group-core-signal
     LIBRARIES pulp::signal)
+# FftT accuracy against a double reference, once per backend: the build's own
+# (vDSP on Apple, muFFT elsewhere), the built-in radix-2, and muFFT forced on
+# where it builds. The backend macros change inline definitions, so each
+# variant is its own binary and never shares an object with another.
+pulp_add_test_suite(pulp-test-fft-backend-accuracy
+    SOURCES test_fft_backend_accuracy.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-fft-backend-accuracy-builtin
+    SOURCES test_fft_backend_accuracy.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TEST_PREFIX "builtin: ")
+target_compile_definitions(pulp-test-fft-backend-accuracy-builtin PRIVATE
+    PULP_FFT_FORCE_PORTABLE PULP_FFT_FORCE_BUILTIN)
+if(TARGET pulp-signal-mufft)
+    pulp_add_test_suite(pulp-test-fft-backend-accuracy-mufft
+        SOURCES test_fft_backend_accuracy.cpp harness/rt_allocation_probe.cpp
+        LIBRARIES pulp::signal pulp::signal-mufft
+        TEST_PREFIX "mufft: ")
+    target_compile_definitions(pulp-test-fft-backend-accuracy-mufft PRIVATE
+        PULP_FFT_FORCE_PORTABLE PULP_FFT_HAS_MUFFT=1)
+endif()
 # Window coefficient, spectral-shape, STFT-consumer, and RT apply contracts.
 pulp_add_test_suite(pulp-test-windowing
     SOURCES test_windowing.cpp harness/rt_allocation_probe.cpp

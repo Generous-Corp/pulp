@@ -70,12 +70,10 @@
 # LNK2038 mismatch at link time; using it would need both settings switched,
 # which has not been link/run verified on Windows.
 #
-# pulp_v8_windows_apply_abi puts the __Cr libc++ headers on every source in
-# the target it is given (pulp-view-script), while pulp-view-core and the tests
-# compile against the MSVC STL. A non-virtual call that passes std:: types
-# across that boundary therefore names a symbol in one std ABI and resolves it
-# in the other, and will not link. Narrowing the __Cr flags to a target that
-# holds only js_v8_engine.cpp behind a std-free surface is still open.
+# pulp_v8_windows_apply_abi puts the __Cr libc++ headers only on
+# js_v8_engine.cpp. The rest of pulp-view-script remains on the MSVC STL;
+# applying the __Cr headers to that whole target makes ordinary std::mutex and
+# friends disappear from translation units that do not consume V8.
 set(PULP_V8_WIN_LIBCXX_INCLUDE "" CACHE PATH
     "Chromium-style libc++ header root for the Windows V8 consumer (dir with <vector>, <__config>)")
 set(PULP_V8_WIN_LIBCXX_CONFIG "" CACHE PATH
@@ -210,19 +208,22 @@ function(pulp_v8_windows_apply_abi target)
         _pulp_v8_windows_generate_libcxx_config(_cfg_dir)
     endif()
 
-    # ── Compile flags ────────────────────────────────────────────────────────
+    # The caller applies this before the engine source list is attached to the
+    # target, so use the canonical source path directly.
+    set(_v8_source "src/js_v8_engine.cpp")
+
+    # ── Compile flags (V8 source only) ───────────────────────────────────────
     # Route libc++ header dirs through clang-cl's /clang: escape — clang-cl
     # silently DROPS bare -nostdinc++/-isystem, and that drop is exactly what
     # makes a build fall back to the MSVC STL and fail to link. The config dir is
     # searched first so libc++'s `#include <__config_site>` resolves to the
     # __Cr-pinned one. /GR- matches the use_rtti=false sealed build.
-    target_compile_options(${target} PRIVATE
-        "$<$<COMPILE_LANGUAGE:CXX>:/clang:-nostdinc++>"
-        "$<$<COMPILE_LANGUAGE:CXX>:/clang:-isystem>"
-        "$<$<COMPILE_LANGUAGE:CXX>:/clang:${_cfg_dir}>"
-        "$<$<COMPILE_LANGUAGE:CXX>:/clang:-isystem>"
-        "$<$<COMPILE_LANGUAGE:CXX>:/clang:${PULP_V8_WIN_LIBCXX_INCLUDE}>"
-        "$<$<COMPILE_LANGUAGE:CXX>:/GR->")
+    # Keep each clang-cl /clang:-isystem<dir> spelling as one argv token.
+    # Splitting the option and directory into two /clang: tokens makes
+    # clang-cl treat the directory as a second source file when CMake adds
+    # `-c -- <source>`; /Fo then fails with "multiple source files".
+    set_source_files_properties("${_v8_source}" PROPERTIES
+        COMPILE_OPTIONS "/clang:-nostdinc++;/clang:-isystem${_cfg_dir};/clang:-isystem${PULP_V8_WIN_LIBCXX_INCLUDE};/GR-")
 
     pulp_v8_windows_abi_defines(_v8_abi_defines)
     if(_v8_abi_defines)
@@ -230,17 +231,14 @@ function(pulp_v8_windows_apply_abi target)
     else()
         set(_v8_abi_defines_source "the provider consumer_defines")
     endif()
-    target_compile_definitions(${target} PRIVATE
-        ${_v8_abi_defines}
+    # Suppress libc++'s autolink and match the CRT wide-stdio setting baked
+    # into the standalone __Cr runtime.
+    set(_v8_source_defines ${_v8_abi_defines}
         _LIBCPP_DISABLE_AVAILABILITY
-        # Suppress libc++'s `#pragma comment(lib,"c++")` autolink — we link the
-        # __Cr libc++.lib explicitly below; the default autolink would pull a
-        # mismatched system libc++.
         _LIBCPP_NO_AUTO_LINK
-        # Match the CRT wide-stdio specifier the libc++.lib was built with
-        # (LIBCXX standalone builds bake _CRT_STDIO_ISO_WIDE_SPECIFIERS=1); a
-        # mismatch trips lld-link /FAILIFMISMATCH.
         _CRT_STDIO_ISO_WIDE_SPECIFIERS=1)
+    set_source_files_properties("${_v8_source}" PROPERTIES
+        COMPILE_DEFINITIONS "${_v8_source_defines}")
     # Do NOT define V8_ENABLE_SANDBOX — the sealed build is sandbox OFF.
 
     # ── Link the libc++ runtime ──────────────────────────────────────────────

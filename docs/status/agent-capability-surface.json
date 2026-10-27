@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 166,
+  "inventory_version": 165,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -43,14 +43,14 @@
   ],
   "counts": {
     "public_headers": 514,
-    "reviewed_headers": 262,
-    "legacy_unreviewed_headers": 252,
+    "reviewed_headers": 261,
+    "legacy_unreviewed_headers": 253,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 121,
       "capability_support": 46,
-      "infrastructure": 93,
-      "legacy_unreviewed": 252,
+      "infrastructure": 92,
+      "legacy_unreviewed": 253,
       "unsupported_capability": 2
     },
     "by_domain": {
@@ -86,8 +86,8 @@
       },
       "signal": {
         "public_headers": 279,
-        "reviewed_headers": 154,
-        "legacy_unreviewed_headers": 125,
+        "reviewed_headers": 153,
+        "legacy_unreviewed_headers": 126,
         "unsupported_headers": 2
       },
       "timebase": {
@@ -2308,7 +2308,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/ballistics_filter.hpp",
-      "fingerprint": "sha256:cac378cc3b7b0c69765f929d530b292c17743b17ec491fcffcf66b774d350349",
+      "fingerprint": "sha256:58f673ad243d35a4df20b30d0bd68b76034ac04d57f028b9835df9ead58498c1",
       "include": "pulp/signal/ballistics_filter.hpp",
       "disposition": "capability_support",
       "capability_keys": [
@@ -2339,7 +2339,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/biquad.hpp",
-      "fingerprint": "sha256:fe75a55776c74b033175b200afc8aaf807c0647afe20cc60464a778964e3786b",
+      "fingerprint": "sha256:fdbc7b3053b72c4a8dc102e034e405bcaab68ba07083e5ac610c2b9ae35ec07e",
       "include": "pulp/signal/biquad.hpp",
       "disposition": "capability_support",
       "capability_keys": [
@@ -2663,7 +2663,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/denormal.hpp",
-      "fingerprint": "sha256:e833a00a6974d4fbb18bec9e1c2312285c7387d8f7aa4757b606425e39452277",
+      "fingerprint": "sha256:c139f6695a9b995b89dc3b9d00430bc0776391286bec850213c8e278bf67e099",
       "include": "pulp/signal/denormal.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -3188,7 +3188,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/fft.hpp",
-      "fingerprint": "sha256:e5cb316d6a41224282447d106d52358f6245a768556f7b44e271ec81e5fbf433",
+      "fingerprint": "sha256:2a700b468370542ef5e55bce174be8938ea3d8927b58142341405118f60e9465",
       "include": "pulp/signal/fft.hpp",
       "disposition": "capability_support",
       "capability_keys": [
@@ -3554,7 +3554,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/linkwitz_riley.hpp",
-      "fingerprint": "sha256:8aae04787676825f9eae118a9d52df318e8c67af2c8c7138572be8da61bc0545",
+      "fingerprint": "sha256:38fca0b926e0b4cb492528f95a69af89eb7ec5a0e83ed8692eb195c0cd35fa64",
       "include": "pulp/signal/linkwitz_riley.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -4592,7 +4592,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/svf.hpp",
-      "fingerprint": "sha256:58576c15695dd3ad65affd7912fbfb4e41f331e6bb60fcc65ca605b7a9c1bc5c",
+      "fingerprint": "sha256:50341bc965475434473aaca48a378ca56c4c19d757922fd1b2ae23406a5ebb66",
       "include": "pulp/signal/svf.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -4659,7 +4659,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/tpt_filter.hpp",
-      "fingerprint": "sha256:c157a3dd2d891918bee3ca01f3eec9fd3aaf01ad2091469721514d766bcc44c0",
+      "fingerprint": "sha256:2e70a37436a0e624d192e38cd15dbf71c936230d21577b35271251d97b04b69c",
       "include": "pulp/signal/tpt_filter.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -4746,11 +4746,11 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/two_pole_resonator.hpp",
-      "fingerprint": "sha256:46c762aca702becc33f51ad1a0db963ee84a3b397e6202a859944c619d9bc2ec",
+      "fingerprint": "sha256:090ff7de0a8d1eb6d9abc4260f09eb40062b83a8018f5728edd9da111f3cf202",
       "include": "pulp/signal/two_pole_resonator.hpp",
-      "disposition": "infrastructure",
+      "disposition": "legacy_unreviewed",
       "capability_keys": [],
-      "rationale": "Two-pole resonance is composable realtime signal infrastructure, not an independently advertised generator capability."
+      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
     },
     {
       "domain": "signal",
@@ -4879,7 +4879,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/waveguide_reflection_filter.hpp",
-      "fingerprint": "sha256:4584a07804fabc91d7651938e057f9118db29c15dc725be6b9dba5611630d74e",
+      "fingerprint": "sha256:13cde0afa486a160cdfc055160ac97230a191569261c7b7e9f04a5f7396141f6",
       "include": "pulp/signal/waveguide_reflection_filter.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
