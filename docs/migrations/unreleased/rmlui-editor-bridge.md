@@ -125,10 +125,11 @@ native editor recovery.
 
 ## Nodal handoff
 
-The importer-side plan and product probe are authoritative for Nodal behavior
-at importer head `b1c5937b02bdc10bf06daa604eb4ae2887d8e179` in branch
-`codex/nodal-host-probe-20261022`. That worktree currently proves the
-unchanged Trancy skin in the product-backed probe, while the installed package
-still uses the native Pulp editor. This Pulp document is the integration
-contract for the next slice; it does not claim that production RmlUi support
-has landed.
+The importer-side plan and product probe were landed in
+[`danielraffel/pulp-import-juce#72`](https://github.com/danielraffel/pulp-import-juce/pull/72)
+at exact source head `b1c5937b02bdc10bf06daa604eb4ae2887d8e179` (merge commit
+`43525f931116e92a6c790f9d1a0585cf14455283`). That merge preserves and validates
+Usual Suspects RML/RCSS/Lua and skin asset provenance, and records the
+product-backed unchanged Trancy probe. The installed package still uses the
+native Pulp editor; this Pulp document remains the integration contract and
+does not claim that production RmlUi support has landed.
