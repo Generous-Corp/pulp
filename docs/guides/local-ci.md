@@ -3152,32 +3152,17 @@ signing identity) becomes a distinct authorization boundary, first publish its
 public fingerprint on protected main and then pin the embedded SSH signature
 key to that reviewed value.
 
-## Rollups: several approved PRs as one queue entry (not on yet)
+## The merge train reports, read-only
 
-`.shipyard/config.toml` `[train]` sets up Shipyard rollups (Shipyard's
-docs/rollups.md), but they stay off in practice until the live test passes
-on a scratch repository. That test checks whether GitHub marks member PRs
-merged when their heads land. A rollup is the branch
-`shipyard-train/rollup-<n>`: one merge per member, at the member's exact
-approved head, and nothing else. It enters the merge queue as one entry, so
-up to four members cost one `macos` run instead of four. The queue merges
-with MERGE, which a rollup needs.
-
-- `exclude_paths` keeps a member that changes workflows, `tools/ci/**`, the
-  queue's own scripts, the Shipyard pin, or signing out of any rollup. The
-  guard's carry exclusions (`.shipyard/**` among them) apply on top.
-- `hot_files` lets at most one member per rollup change each generated or
-  shared file: `test/ctest_script_inputs.json`, any `SKILL.md`,
-  `.claude-plugin/**`, the capability inventory and manifest,
-  `.shipyard/changed-surface-families.toml` and
-  `tools/scripts/text_encoding_baseline.json`.
-- Approve each member, not the rollup: the guard accepts a rollup head only
-  from its members' own exact-head approvals. A HOLD on the rollup head stops
-  it.
-- Pulp has no steward running, so a rollup is armed like any PR (auto-merge
-  with MERGE, head bound) and the guard judges it. Members GitHub does not
-  mark merged are closed by `shipyard rollup reconcile --apply`, and only
-  once their exact head is on `main`.
+`.shipyard/config.toml` sets `[train] enabled = true` and, after the live
+scratch-repository test, sets `mode = "rollup"`. `shipyard train status --repo Generous-Corp/pulp` prints
+each open PR's stage. `--record` appends a sample to the host's sample file,
+and `shipyard train metrics` summarises those samples: queue depth, time
+from approval to merge, and merges per hour. Nothing forms, arms, enqueues
+or merges from this setting. `SHIPYARD_TRAIN=off` or a `train.pause` file
+stops even the reads. The baseline numbers are recorded in the Shipyard
+merge-train design handoff; the after measurement uses the same scripts and
+rollback rule.
 
 ## A merge_group batch stops at the first failing test
 

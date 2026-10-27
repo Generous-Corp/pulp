@@ -491,16 +491,12 @@ failure on a merge group names a commit that is not in the ejected PR, read the
 `diff base:` line in the job log before touching the PR. Any new diff-scoped
 gate added to a merge_group workflow should reuse the same resolver.
 
-## A `shipyard-train/rollup-*` PR is approved through its members
+## `[train]` rollups are member-approved
 
-A rollup PR, configured in `.shipyard/config.toml` `[train]` and off until
-the live test passes, carries no verdict of its own. The guard lands it
-only when every merge on it is a member's exact approved head and nothing
-else changed (docs/guides/local-ci.md, "Rollups"). Review and approve the
-members; a HOLD on the rollup head stops it. Never push a commit to a rollup
-branch by hand, because the guard then refuses it. Members that change
-workflows, `tools/ci/**`, the queue scripts, the Shipyard pin or signing
-never join one.
+The merge train's switch is on in `.shipyard/config.toml`; once the live
+scratch-repository test passes, `mode = "rollup"` permits only rollups whose
+members each have an exact counted approval and whose replayed file tree and
+merge parents pass the guard. Before that test, leave the mode off.
 
 ## A HOLD on a queued head fails the merge group
 
@@ -533,6 +529,16 @@ an App `verdict: APPROVE` only with a `reviewer: <name>` line naming one of
 them, and never one `ghapp` stamped with an `unattributed` session. A reviewer
 agent puts `reviewer: <its name>` on the line above the verdict. Adding a
 reviewer means adding it to that list.
+
+**`carry_excluded_paths` replaces Shipyard's default; it does not add to it.**
+The same `[auto_merge]` table lists the paths whose change stops an APPROVE
+from carrying to a new head after a merge-only refresh. Shipyard's guard reads
+the key as the whole list. Pulp's copy therefore restates Shipyard's
+`DEFAULT_CARRY_EXCLUDED_PATHS` except `.shipyard/**`, which it narrows to the
+policy files: `config.toml`, `ci-profiles/**` and `vm-image*.toml`. That keeps
+a regenerated `changed-surface-families.toml` carrying. To add an exclusion,
+append it to that list. When Shipyard's default changes, compare the two lists
+again, or Pulp silently drops the new protection.
 
 ## A failed batch's branch name is not the culprit
 
@@ -12902,6 +12908,21 @@ first.
 
 ## Hosted macOS advisory cadence
 
+## Release lanes pin the shell exec JS bridge OFF
+
+`PULP_DEV_BRIDGE_EXEC` compiles the developer-only `exec` / `execAsync` JS
+bridge (a `/bin/sh` for scripted UIs) into `pulp-view-script`. It defaults to
+`PULP_BUILD_TESTS`, so tests OFF already implies it, but every release
+configure — `release-cli.yml` (CLI build and both SDK builds) and
+`sign-and-release.yml` — passes `-DPULP_DEV_BRIDGE_EXEC=OFF` explicitly and
+`sdk_provenance.py` refuses to mint a release marker from a cache where it is
+ON or missing. The marker records it as `features.bridge_exec: false`;
+`PulpSdkProvenance.cmake` fails a release SDK whose marker claims `true`. When
+adding a release configure site, carry the flag; when a release leg fails on
+`bridge_exec=OFF`, the leg dropped the flag or configured from a source tree
+that predates the option — neither is a test failure. The same refusal
+stops a `workflow_dispatch` backfill of a tag older than the option: those
+SDKs do carry the bridge, so re-minting their provenance is refused by design.
 The TSan workflow's focused SignalGraph selector must retain exact-name entries
 for mailbox and retirement-reader race cases when those cases are extracted or
 renamed. Validate the selected names with `ctest -N` before changing the regex;

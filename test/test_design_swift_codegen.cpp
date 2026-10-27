@@ -13,8 +13,11 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/design_codegen.hpp>
 #include <pulp/view/design_ir.hpp>
+#include <pulp/view/design_import.hpp>
+#include <pulp/view/view.hpp>
 #include <pulp/platform/child_process.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -105,17 +108,23 @@ DesignIR build_swift_fixture() {
     knob.audio_widget = AudioWidgetType::knob;
     knob.audio_label = "Drive";
     knob.attributes["pulpParamKey"] = "Drive";
+    knob.attributes["pulpRouteId"] = "route.drive";
+    knob.stable_anchor_id = "anchor-drive";
     ir.root.children.push_back(std::move(knob));
 
     auto fader = frame_node("mix", "Mix", 48.0f, 96.0f, LayoutDirection::column);
     fader.audio_widget = AudioWidgetType::fader;
     fader.audio_label = "Mix";
     fader.attributes["pulpParamKey"] = "Mix";
+    fader.attributes["pulpRouteId"] = "route.mix";
+    fader.stable_anchor_id = "anchor-mix";
     ir.root.children.push_back(std::move(fader));
 
     auto toggle = frame_node("bypass", "Bypass", 60.0f, 24.0f, LayoutDirection::column);
     toggle.type = "toggle_button";
     toggle.attributes["pulpParamKey"] = "Bypass";
+    toggle.attributes["pulpRouteId"] = "route.bypass";
+    toggle.stable_anchor_id = "anchor-bypass";
     ir.root.children.push_back(std::move(toggle));
 
     return ir;
@@ -418,6 +427,9 @@ TEST_CASE("generated SwiftUI type-checks with hostile control chars in names/tex
     auto knob = frame_node("k", "Drive", 60.0f, 60.0f, LayoutDirection::column);
     knob.audio_widget = AudioWidgetType::knob;
     knob.audio_label = std::string("Gain\x1b\x07");  // control bytes in the bound resolve name
+    knob.attributes["pulpParamKey"] = "gain";
+    knob.attributes["pulpRouteId"] = "route.gain";
+    knob.stable_anchor_id = "anchor-gain";
     ir.root.children.push_back(std::move(knob));
     require_generated_swift_compiles(ir, "hostile-controls");
 }
@@ -879,9 +891,31 @@ TEST_CASE("generated SwiftUI with full B2 style + text-runs type-checks",
 namespace {
 
 IRNode audio_widget_node(std::string id, std::string label, AudioWidgetType type) {
-    IRNode n = frame_node(std::move(id), label, 80.0f, 40.0f, LayoutDirection::column);
+    IRNode n = frame_node(id, label, 80.0f, 40.0f, LayoutDirection::column);
     n.audio_widget = type;
     n.audio_label = label;
+    // The keys each kind reads before any lane binds it.
+    n.attributes["pulpRouteId"] = "route." + id;
+    n.stable_anchor_id = "anchor-" + id;
+    switch (type) {
+    case AudioWidgetType::meter:
+        n.attributes["pulpMeterSource"] = "output";
+        n.attributes["pulpMeterChannel"] = "0";
+        break;
+    case AudioWidgetType::xy_pad:
+        n.attributes["pulpParamKeyX"] = id + ".x";
+        n.attributes["pulpParamKeyY"] = id + ".y";
+        break;
+    case AudioWidgetType::waveform:
+        n.attributes["pulpParamKey"] = id;
+        n.attributes["pulpWaveformShape"] = "sine";
+        break;
+    case AudioWidgetType::spectrum:
+        break; // takes no parameter in any lane
+    default:
+        n.attributes["pulpParamKey"] = id;
+        break;
+    }
     return n;
 }
 
@@ -912,7 +946,10 @@ TEST_CASE("generate_pulp_swift binds meter/xy_pad/waveform/spectrum + emits text
     REQUIRE(contains(out.view, "PulpMeter(parameter: p)"));
     REQUIRE(contains(out.view, "PulpXYPad(parameter: p)"));
     REQUIRE(contains(out.view, "PulpWaveform(parameter: p)"));
-    REQUIRE(contains(out.view, "PulpSpectrum(parameter: p)"));
+    // A spectrum binds in no lane: native draws it as a bin display that takes
+    // no parameter, and the baked C++ binder has no route for one.
+    REQUIRE_FALSE(contains(out.view, "PulpSpectrum(parameter: p)"));
+    REQUIRE(contains(out.view, "PulpSpectrum(parameter: .detached(name: \"Analyzer\""));
     // Text button → an inert SwiftUI Button carrying the label.
     REQUIRE(contains(out.view, "Button(action: {}) {"));
     REQUIRE(contains(out.view, "Text(\"Go\")"));
@@ -952,7 +989,8 @@ TEST_CASE("generate_pulp_swift records the new audio widgets in the binding mani
     REQUIRE(contains(manifest, "\"native_primitive\": \"xy_pad\""));
     REQUIRE(contains(manifest, "\"native_primitive\": \"waveform\""));
     REQUIRE(contains(manifest, "\"native_primitive\": \"spectrum\""));
-    REQUIRE(contains(manifest, "\"resolve_name\": \"Analyzer\""));
+    REQUIRE(contains(manifest, "\"resolve_name\": \"Level\""));
+    REQUIRE_FALSE(contains(manifest, "\"resolve_name\": \"Analyzer\""));
 }
 
 TEST_CASE("generated SwiftUI with the B3 widget set type-checks",
@@ -994,7 +1032,7 @@ TEST_CASE("generated SwiftUI with a grid + bundled/remote images type-checks (B5
 TEST_CASE("generate_pulp_swift handles degraded SwiftUI branches and compiles",
           "[view][import][swiftui][swiftc]") {
     // Exercise + compile-gate degradation paths: unsupported leaf/container
-    // image handling, dark-only/non-hex tokens, and an unbound control placeholder.
+    // image handling, dark-only/non-hex tokens, and an unbound control drawn inert.
     DesignIR ir;
     ir.source = DesignSource::figma;
     ir.tokens.colors["overlayOnly.dark"] = "#0a0b0c";          // dark-only color
@@ -1005,6 +1043,10 @@ TEST_CASE("generate_pulp_swift handles degraded SwiftUI branches and compiles",
 
     auto meter = frame_node("lvl", "Level", 80.0f, 16.0f, LayoutDirection::column);
     meter.audio_widget = AudioWidgetType::meter;               // B3: now a bound PulpMeter
+    meter.attributes["pulpRouteId"] = "route.level";           // the keys every lane binds by
+    meter.attributes["pulpMeterSource"] = "output";
+    meter.attributes["pulpMeterChannel"] = "0";
+    meter.stable_anchor_id = "anchor-level";
     ir.root.children.push_back(std::move(meter));
 
     auto icon = frame_node("ico", "Icon", 24.0f, 24.0f, LayoutDirection::column);
@@ -1026,11 +1068,189 @@ TEST_CASE("generate_pulp_swift handles degraded SwiftUI branches and compiles",
     REQUIRE(contains(view, "image_view has no SwiftUI exporter; rendered as Color.clear"));
     REQUIRE_FALSE(contains(view, "not supported in B1"));
     REQUIRE(contains(view, "PulpMeter(parameter: p)"));        // B3: meter now binds
-    REQUIRE(contains(view, "⚠︎ unbound"));                     // unbound control placeholder
+    REQUIRE(contains(view, "PulpKnob(parameter: .detached(name: \"\"")); // unbound, drawn inert
+    REQUIRE(contains(view, ".allowsHitTesting(false)"));
+    REQUIRE_FALSE(contains(view, "⚠︎ unbound"));
     const auto theme = generate_pulp_swift(ir, ir.asset_manifest).theme_source;
     REQUIRE(contains(theme, "overlayOnly"));                   // dark-only color emitted
     REQUIRE(contains(theme, "insetDark"));                     // dark-only dimension companion
     REQUIRE_FALSE(contains(theme, "brandNamed"));              // non-hex color skipped
 
     require_generated_swift_compiles(ir, "degradation");       // all of it still compiles
+}
+
+// ── One binding rule in every lane ──────────────────────────────────────────
+
+namespace {
+
+/// What the native binder reports for `ir`: each refused binding's code.
+class SilentBindingContext final : public NativeImportBindingContext {};
+
+std::vector<std::string> native_binding_codes(const DesignIR& ir) {
+    auto root = build_native_view_tree(ir, ir.asset_manifest);
+    REQUIRE(root != nullptr);
+    SilentBindingContext ctx;
+    std::vector<ImportDiagnostic> diagnostics;
+    bind_native_view_tree(*root, ir, ctx, {.diagnostics_out = &diagnostics});
+    std::vector<std::string> codes;
+    for (const auto& d : diagnostics)
+        if (d.code.rfind("native-binding-", 0) == 0)
+            codes.push_back(d.code);
+    std::sort(codes.begin(), codes.end());
+    return codes;
+}
+
+std::vector<std::string> swift_binding_codes(const std::vector<FidelityIssue>& issues) {
+    std::vector<std::string> codes;
+    for (const auto& i : issues)
+        if (i.kind.rfind("native-binding-", 0) == 0)
+            codes.push_back(i.kind);
+    std::sort(codes.begin(), codes.end());
+    return codes;
+}
+
+/// Controls the other lanes treat differently: a checkbox and a knob carry only
+/// a display label, and an XY pad is routed with only its X key. `keyed` and
+/// kelvin's meter, which carries a route and a value key but no source or
+/// channel, have everything a binding needs.
+DesignIR build_binding_rule_fixture() {
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root = frame_node("root", "Panel", 400.0f, 200.0f, LayoutDirection::row);
+
+    auto keyed = frame_node("keyed", "Drive", 60.0f, 60.0f, LayoutDirection::column);
+    keyed.audio_widget = AudioWidgetType::knob;
+    keyed.audio_label = "Drive";
+    keyed.attributes["pulpParamKey"] = "drive";
+    keyed.attributes["pulpRouteId"] = "route.drive";
+    keyed.stable_anchor_id = "anchor-drive";
+    ir.root.children.push_back(std::move(keyed));
+
+    auto labelled = frame_node("labelled", "Tone", 60.0f, 60.0f, LayoutDirection::column);
+    labelled.audio_widget = AudioWidgetType::knob;
+    labelled.audio_label = "Tone";
+    labelled.stable_anchor_id = "anchor-tone";
+    ir.root.children.push_back(std::move(labelled));
+
+    auto checkbox = frame_node("check", "Oversample", 24.0f, 24.0f, LayoutDirection::column);
+    checkbox.type = "toggle_button";
+    checkbox.stable_anchor_id = "anchor-oversample";
+    ir.root.children.push_back(std::move(checkbox));
+
+    auto meter = frame_node("out", "Out", 16.0f, 120.0f, LayoutDirection::column);
+    meter.audio_widget = AudioWidgetType::meter;
+    meter.audio_label = "Out";
+    meter.attributes["pulpRouteId"] = "capture:out:38";
+    meter.attributes["pulpMeterValueKey"] = "out";
+    meter.stable_anchor_id = "capture:out:38";
+    ir.root.children.push_back(std::move(meter));
+
+    auto pad = frame_node("pan", "Pan", 60.0f, 60.0f, LayoutDirection::column);
+    pad.audio_widget = AudioWidgetType::xy_pad;
+    pad.audio_label = "Pan";
+    pad.attributes["pulpParamKeyX"] = "pan";
+    pad.attributes["pulpRouteId"] = "route.pan";
+    pad.stable_anchor_id = "anchor-pan";
+    ir.root.children.push_back(std::move(pad));
+
+    auto unrouted = frame_node("mix", "Mix", 60.0f, 60.0f, LayoutDirection::column);
+    unrouted.audio_widget = AudioWidgetType::knob;
+    unrouted.audio_label = "Mix";
+    unrouted.attributes["pulpParamKey"] = "mix";
+    unrouted.stable_anchor_id = "anchor-mix";
+    ir.root.children.push_back(std::move(unrouted));
+    return ir;
+}
+
+} // namespace
+
+TEST_CASE("SwiftUI binds only the controls the native and C++ lanes bind",
+          "[view][import][swiftui][binding-rule]") {
+    const auto ir = build_binding_rule_fixture();
+    auto out = generate_with_fidelity(ir);
+    const auto manifest = generate_pulp_swift(ir, ir.asset_manifest).binding_manifest;
+    INFO(out.view);
+    INFO(manifest);
+
+    // The keyed knob and the key-only meter bind, by the routes the other lanes
+    // use too.
+    CHECK(contains(out.view, "switch resolver.resolveParameter(named: \"Drive\")"));
+    CHECK(contains(manifest, "\"resolve_name\": \"Drive\""));
+    CHECK(contains(out.view, "switch resolver.resolveParameter(named: \"Out\")"));
+    CHECK(contains(manifest, "\"resolve_name\": \"Out\""));
+
+    // A display label alone binds nothing: renaming "Tone" must not rebind it.
+    for (const char* label : {"Tone", "Oversample", "Pan", "Mix"}) {
+        INFO("control " << label);
+        CHECK_FALSE(contains(out.view, std::string("resolveParameter(named: \"") + label + "\")"));
+        CHECK_FALSE(contains(manifest, std::string("\"resolve_name\": \"") + label + "\""));
+    }
+    CHECK(contains(manifest, "\"anchor_id\": \"capture:out:38\""));
+    CHECK(contains(manifest, "\"meter_value_key\": \"out\""));
+    // Label-only controls carry no binding metadata, so no entry at all.
+    CHECK_FALSE(contains(manifest, "anchor-tone"));
+    CHECK_FALSE(contains(manifest, "anchor-oversample"));
+    // They are still drawn, inert, the way native draws an unbound control.
+    CHECK(contains(out.view, "PulpKnob(parameter: .detached(name: \"Tone\""));
+    CHECK_FALSE(contains(out.view, "PulpMeter(parameter: .detached"));
+    CHECK_FALSE(contains(out.view, "⚠︎ unbound"));
+}
+
+TEST_CASE("SwiftUI reports a refused binding with the native binder's diagnostic",
+          "[view][import][swiftui][binding-rule]") {
+    const auto ir = build_binding_rule_fixture();
+    const auto out = generate_with_fidelity(ir);
+    const auto swift = swift_binding_codes(out.issues);
+    // The meter's metadata cannot drive a meter; the unrouted knob has no route.
+    CHECK(swift ==
+          std::vector<std::string>{"native-binding-missing-route", "native-binding-not-applied"});
+    // And they are the native binder's own answers for the same IR, at its
+    // weight: native imports anyway, so a strict-fidelity export must too.
+    CHECK(swift == native_binding_codes(ir));
+    CHECK(count_strict_fidelity_failures(out.issues) == 0);
+}
+
+TEST_CASE("a design-only import keeps every control, drawn inert",
+          "[view][import][swiftui][binding-rule][swiftc]") {
+    // A plain Figma panel carries no routes or keys: nothing binds in any lane,
+    // and every control must still render as its widget, not as warning text.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root = frame_node("root", "Design", 480.0f, 240.0f, LayoutDirection::row);
+    const struct {
+        const char* label;
+        AudioWidgetType type;
+        const char* view;
+    } controls[] = {
+        {"Cutoff", AudioWidgetType::knob, "PulpKnob(parameter: .detached(name: \"Cutoff\""},
+        {"Mix", AudioWidgetType::fader, "PulpSlider(parameter: .detached(name: \"Mix\""},
+        {"Level", AudioWidgetType::meter, "PulpMeter(parameter: .detached(name: \"Level\""},
+        {"Pan", AudioWidgetType::xy_pad, "PulpXYPad(parameter: .detached(name: \"Pan\""},
+        {"Scope", AudioWidgetType::waveform, "PulpWaveform(parameter: .detached(name: \"Scope\""},
+        {"Analyzer", AudioWidgetType::spectrum,
+         "PulpSpectrum(parameter: .detached(name: \"Analyzer\""},
+    };
+    for (const auto& c : controls) {
+        IRNode n = frame_node(c.label, c.label, 60.0f, 60.0f, LayoutDirection::column);
+        n.audio_widget = c.type;
+        n.audio_label = c.label;
+        ir.root.children.push_back(std::move(n));
+    }
+    auto toggle = frame_node("bypass", "Bypass", 60.0f, 24.0f, LayoutDirection::column);
+    toggle.type = "toggle_button";
+    ir.root.children.push_back(std::move(toggle));
+
+    auto out = generate_with_fidelity(ir);
+    INFO(out.view);
+    for (const auto& c : controls) {
+        INFO("control " << c.label);
+        CHECK(contains(out.view, c.view));
+    }
+    CHECK(contains(out.view, "PulpToggle(parameter: .detached(name: \"Bypass\""));
+    CHECK_FALSE(contains(out.view, "resolveParameter"));
+    CHECK_FALSE(contains(out.view, "⚠︎ unbound"));
+    // A design-only import is not an error in any lane.
+    CHECK(swift_binding_codes(out.issues).empty());
+    CHECK(count_strict_fidelity_failures(out.issues) == 0);
+    require_generated_swift_compiles(ir, "design-only-inert");
 }

@@ -262,6 +262,7 @@
    "data": "declared",
    "detected_sources": [
     "test/test_browser_capture_backdrop_filter.cpp",
+    "test/test_browser_capture_font_smoothing.cpp",
     "test/test_browser_capture_gradient_border.cpp",
     "test/test_browser_capture_group_opacity.cpp",
     "test/test_browser_capture_ir.cpp",
@@ -277,6 +278,7 @@
    "kind": "compiled",
    "sources": [
     "test/test_browser_capture_backdrop_filter.cpp",
+    "test/test_browser_capture_font_smoothing.cpp",
     "test/test_browser_capture_gradient_border.cpp",
     "test/test_browser_capture_group_opacity.cpp",
     "test/test_browser_capture_ir.cpp",
@@ -6848,6 +6850,13 @@
    ],
    "kind": "python"
   },
+  "import-design-ir-observe-font-smoothing-label": {
+   "entry": "test/test_design_ir_observe_font_smoothing_label.py",
+   "inputs": [
+    "test/test_design_ir_observe_font_smoothing_label.py"
+   ],
+   "kind": "python"
+  },
   "import-design-ir-observe-gpu": {
    "entry": "test/test_design_ir_observe_gpu.py",
    "inputs": [
@@ -7062,6 +7071,15 @@
     "tools/import-design/browser_capture/form_control_theme.mjs",
     "tools/import-design/browser_capture_controls.cpp",
     "tools/import-validation/schemas"
+   ],
+   "kind": "python"
+  },
+  "importer-lab-capture-scale": {
+   "entry": "test/test_importer_lab_capture_scale.py",
+   "inputs": [
+    "test/fixtures/import-differential/01-basic-card.html",
+    "test/test_importer_lab_capture_scale.py",
+    "tools/import-validation/importer_differential_lab.py"
    ],
    "kind": "python"
   },

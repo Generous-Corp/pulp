@@ -516,3 +516,9 @@ store. Their captured `.path` starts with `/usr/bin:/bin:/usr/sbin:/sbin` so
 runner bootstrap resolves system `tar` before Homebrew. The private fleet
 manifest declares this through `actions_runner_policy`; apply is idle-gated and
 must not interrupt a live `Runner.Worker`.
+## Generated Shipyard pin updates
+
+The generated VM-image toolchain blocks are refreshed by
+`tools/toolchain/generate.py` when Pulp updates its pinned Shipyard release.
+Keep those generated files in sync with the manifest and digest; no separate
+TartCI behavior change is implied.

@@ -1,0 +1,95 @@
+{
+  "schema": "pulp-browser-platform-fonts-v1",
+  "version": 1,
+  "summary": {
+    "text_runs": 3,
+    "interrogated": 3,
+    "resolved": 3,
+    "truncated": false
+  },
+  "faces_by_glyph_count": [
+    {
+      "family_name": "Helvetica Neue",
+      "post_script_name": "HelveticaNeue",
+      "is_custom_font": false,
+      "glyph_count": 26
+    }
+  ],
+  "runs": [
+    {
+      "layout_index": 5,
+      "node_index": 14,
+      "owner_node_index": 13,
+      "backend_node_id": 15,
+      "requested": {
+        "font_family": "\"Helvetica Neue\", sans-serif",
+        "font_size": "15px",
+        "font_weight": "400",
+        "font_style": "normal",
+        "letter_spacing": "normal"
+      },
+      "resolved": [
+        {
+          "family_name": "Helvetica Neue",
+          "post_script_name": "HelveticaNeue",
+          "is_custom_font": false,
+          "glyph_count": 11
+        }
+      ],
+      "line_metrics": {
+        "ascent": 14,
+        "descent": 3
+      }
+    },
+    {
+      "layout_index": 7,
+      "node_index": 17,
+      "owner_node_index": 16,
+      "backend_node_id": 18,
+      "requested": {
+        "font_family": "\"Helvetica Neue\", sans-serif",
+        "font_size": "15px",
+        "font_weight": "400",
+        "font_style": "normal",
+        "letter_spacing": "normal"
+      },
+      "resolved": [
+        {
+          "family_name": "Helvetica Neue",
+          "post_script_name": "HelveticaNeue",
+          "is_custom_font": false,
+          "glyph_count": 7
+        }
+      ],
+      "line_metrics": {
+        "ascent": 14,
+        "descent": 3
+      }
+    },
+    {
+      "layout_index": 9,
+      "node_index": 20,
+      "owner_node_index": 19,
+      "backend_node_id": 21,
+      "requested": {
+        "font_family": "\"Helvetica Neue\", sans-serif",
+        "font_size": "15px",
+        "font_weight": "400",
+        "font_style": "normal",
+        "letter_spacing": "normal"
+      },
+      "resolved": [
+        {
+          "family_name": "Helvetica Neue",
+          "post_script_name": "HelveticaNeue",
+          "is_custom_font": false,
+          "glyph_count": 8
+        }
+      ],
+      "line_metrics": {
+        "ascent": 14,
+        "descent": 3
+      }
+    }
+  ]
+}

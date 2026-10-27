@@ -8540,6 +8540,7 @@ tests = [
   "clean-worktree-planning-selftest",
   "gpu-audio-p4-evidence-selftest",
   "gpu-health-run-attestation",
+  "importer-lab-capture-scale",
   "process-deadline-selftest",
   "pulp-browser-capture-node-integration",
   "pulp-browser-capture-node-unit",
@@ -8555,6 +8556,8 @@ tests = [
 ]
 build_targets = [
   "pulp-cli",
+  "pulp-design-ir-observe",
+  "pulp-import-design",
   "pulp-test-native-metal-audio-comparator",
 ]
 supported_build_types = [

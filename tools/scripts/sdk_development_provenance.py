@@ -23,7 +23,7 @@ from sdk_provenance import ProvenanceError, parse_build_info, verify_build_info_
 FEATURE_KEYS = (
     'PULP_ENABLE_GPU', 'PULP_HAS_SKIA', 'PULP_BUILD_WEBVIEW',
     'PULP_ENABLE_DESIGN_IMPORT', 'PULP_ENABLE_AUDIO_PROBES',
-    'PULP_ENABLE_INSPECTOR', 'PULP_TRACING', 'PULP_HAS_VST3',
+    'PULP_ENABLE_INSPECTOR', 'PULP_DEV_BRIDGE_EXEC', 'PULP_TRACING', 'PULP_HAS_VST3',
     'PULP_HAS_AUSDK', 'PULP_HAS_CLAP',
     'PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF',
     'PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER',
@@ -33,6 +33,19 @@ FEATURE_KEYS = (
 def require(value, message):
     if not value:
         raise ProvenanceError(message)
+
+
+def bridge_exec_compiled_in(cache):
+    """Whether the build carries the shell exec/execAsync JS bridge.
+
+    A cache without PULP_DEV_BRIDGE_EXEC comes from a source tree that predates
+    the option and compiled the bridge in unconditionally, so absence reads as
+    present rather than as safe.
+    """
+    value = cache.get('PULP_DEV_BRIDGE_EXEC')
+    if value is None:
+        return True
+    return value.strip().upper() in ('ON', 'TRUE', '1', 'YES', 'Y')
 
 
 def digest(data):
@@ -133,6 +146,7 @@ def inspect(source, build, prefix, sha):
             'source_dir': str(source), 'build_dir': str(build),
             'cache_sha256': digest(cache_bytes),
             'cache_features': {k: cache[k] for k in FEATURE_KEYS if k in cache},
+            'bridge_exec': bridge_exec_compiled_in(cache),
             'artifacts_sha256': artifacts,
             'build_gpu_archive_sha256': digest(built_archive),
             'gpu_archive_identity_sha256': archive_identity(built_archive)}
