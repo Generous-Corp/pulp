@@ -31,12 +31,16 @@ jobs:
 
       - name: Configure RmlUi opt-in build
         run: |
+          # The current signal-graph test registration requires the inspector
+          # runtime even when the RmlUi bridge itself is the only feature under
+          # test. Keep this enabled until that unrelated baseline registration
+          # gap is fixed.
           cmake -S . -B build-rmlui -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DPULP_ENABLE_RMLUI=ON \
             -DPULP_ENABLE_GPU=OFF \
             -DPULP_BUILD_EXAMPLES=OFF \
-            -DPULP_ENABLE_INSPECTOR=OFF \
+            -DPULP_ENABLE_INSPECTOR=ON \
             -DPULP_ENABLE_AUDIO_PROBES=OFF
 
       - name: Build RmlUi backend and SDK consumer
@@ -46,4 +50,4 @@ jobs:
       - name: Run RmlUi backend and installed SDK consumer tests
         run: |
           ctest --test-dir build-rmlui -C Release --output-on-failure \
-            -R '^(pulp-test-rmlui-backend|cmake-rmlui-sdk-consumer)$'
+            -R '^(RmlUi backend|headless RmlUi|rooted RmlUi|cmake-rmlui-sdk-consumer)'
