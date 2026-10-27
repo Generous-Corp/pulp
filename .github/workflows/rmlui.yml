@@ -29,6 +29,9 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v7
 
+      - name: Install Linux build dependencies
+        uses: ./.github/actions/install-linux-build-deps
+
       - name: Configure RmlUi opt-in build
         run: |
           # The current signal-graph test registration requires the inspector
