@@ -564,8 +564,7 @@ TEST_CASE("trace SDK provenance records the profile and stays non-distributable"
 // flags are still passed explicitly. The configure is read out of the source
 // so a later "hardening" to the release profile fails here, not in a
 // developer's loop.
-TEST_CASE("the from-source checkout SDK configures with the dev profile",
-          "[cli][sdk][checkout]") {
+TEST_CASE("the from-source checkout SDK configures with the dev profile", "[cli][sdk][checkout]") {
     const auto source = read_file(fs::path{PULP_SOURCE_DIR} / "tools" / "cli" / "cli_sdk.cpp");
     const auto begin = source.find("fs::path ensure_checkout_sdk(");
     REQUIRE(begin != std::string::npos);

@@ -104,9 +104,9 @@ TEST_CASE("the shippable initial cache carries every configured entry except the
     // dev-shared runtime, is dropped (never carried verbatim) and set OFF.
     CHECK(has("set(PULP_PROFILE [==[release]==] CACHE STRING"));
     CHECK_FALSE(has("forge-dev"));
-    for (const char* option : {"PULP_BUILD_TESTS", "PULP_BUILD_EXAMPLES", "PULP_DEV_BUILD",
-                               "PULP_DEV_BRIDGE_EXEC", "PULP_ENABLE_AUDIO_PROBES", "PULP_TRACING",
-                               "PULP_DEV_SHARED_UI"}) {
+    for (const char* option :
+         {"PULP_BUILD_TESTS", "PULP_BUILD_EXAMPLES", "PULP_DEV_BUILD", "PULP_DEV_BRIDGE_EXEC",
+          "PULP_ENABLE_AUDIO_PROBES", "PULP_TRACING", "PULP_DEV_SHARED_UI"}) {
         INFO(option);
         CHECK(has("set(" + std::string(option) + " OFF CACHE BOOL"));
         CHECK_FALSE(has(std::string(option) + " [==["));
