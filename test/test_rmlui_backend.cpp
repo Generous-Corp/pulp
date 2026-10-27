@@ -78,6 +78,28 @@ TEST_CASE("RmlUi backend admits manifest textures and records their source path"
     backend.close();
 }
 
+TEST_CASE("RmlUi backend preserves clipping and transform state on geometry") {
+    Headless headless;
+    headless.add_asset(
+        "editor.rml",
+        "<rml><body><div style='display:block;overflow:hidden;width:48px;height:32px;'>"
+        "<div style='display:block;transform:rotate(8deg);width:24px;height:16px;"
+        "background-color:#204060;'>"
+        "x</div></div></body></rml>");
+    Backend backend(headless, headless, headless);
+
+    REQUIRE(backend.open(64, 64) == Status::ok);
+    REQUIRE(backend.load_document("editor.rml") == Status::ok);
+    backend.render();
+    REQUIRE_FALSE(headless.commands().empty());
+    const auto stateful = std::find_if(
+        headless.commands().begin(), headless.commands().end(), [](const DrawCommand& command) {
+            return command.scissor_enabled || command.transform_enabled;
+        });
+    REQUIRE(stateful != headless.commands().end());
+    backend.close();
+}
+
 TEST_CASE("RmlUi backend routes host pointer and wheel events") {
     Headless headless;
     headless.add_asset(

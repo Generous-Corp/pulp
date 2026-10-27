@@ -93,7 +93,9 @@ reading the developer checkout.
 2. **CPU render proof.** Pin RmlUi and Lua, implement the Canvas lowering, and
    prove deterministic frame output and context isolation without a DAW. **RmlUi
    core admission, lifecycle smoke, rooted file loading, and a geometry-recording
-   adapter are complete; Skia/Dawn lowering, Lua, and font providers remain open.**
+   adapter are complete. The adapter carries indexed vertices, UVs, packed
+   colours, scissor state, and active transforms to the renderer seam;
+   Skia/Dawn lowering, Lua, and font providers remain open.**
 3. **Product adapter.** Add a generated/imported Nodal model namespace and
    action bridge. Existing RML/RCSS/Lua files remain external or embedded by
    the importer; no hand-edited skin coordinates are accepted.
