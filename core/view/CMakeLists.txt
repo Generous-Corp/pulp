@@ -19,6 +19,7 @@ add_library(pulp::view-core ALIAS pulp-view-core)
 # Consumers (and view-core's own headers) gate any optional JS use on this.
 target_compile_definitions(pulp-view-core PUBLIC PULP_ENABLE_JS=$<BOOL:${PULP_ENABLE_JS}>)
 
+
 add_library(pulp-view-script)
 add_library(pulp::view-script ALIAS pulp-view-script)
 
@@ -572,4 +573,22 @@ if(TARGET pulp-render)
     # (sanitizer matrix) have no pulp-render target, so mark_dirty() there
     # degrades to a direct repaint(); the define gates that cleanly.
     target_compile_definitions(pulp-view-core PRIVATE PULP_VIEW_HAS_RENDER_LOOP=1)
+endif()
+
+# The importer handoff is public and dependency-free, but its opt-in runtime
+# target must not be enabled until the optional RmlUi admission exports a
+# backend target. This keeps configure from fabricating an integration.
+option(PULP_ENABLE_RMLUI_IMPORTER_ADAPTER
+    "Enable the opt-in importer adapter only with an admitted RmlUi backend" OFF)
+if(PULP_ENABLE_RMLUI_IMPORTER_ADAPTER AND NOT TARGET pulp-view-rmlui)
+    message(FATAL_ERROR
+        "PULP_ENABLE_RMLUI_IMPORTER_ADAPTER=ON requires the admitted pulp-view-rmlui target")
+endif()
+if(PULP_ENABLE_RMLUI_IMPORTER_ADAPTER)
+    add_library(pulp-view-rmlui-importer-adapter INTERFACE)
+    add_library(pulp::view-rmlui-importer-adapter ALIAS pulp-view-rmlui-importer-adapter)
+    target_link_libraries(pulp-view-rmlui-importer-adapter INTERFACE pulp::view-rmlui)
+    target_include_directories(pulp-view-rmlui-importer-adapter INTERFACE
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>)
 endif()
