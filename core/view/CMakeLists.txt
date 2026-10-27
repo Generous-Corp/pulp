@@ -19,6 +19,21 @@ add_library(pulp::view-core ALIAS pulp-view-core)
 # Consumers (and view-core's own headers) gate any optional JS use on this.
 target_compile_definitions(pulp-view-core PUBLIC PULP_ENABLE_JS=$<BOOL:${PULP_ENABLE_JS}>)
 
+# Optional RmlUi integration is deliberately a separate target.  This first
+# slice contains only Pulp-owned contracts and a headless double; the actual
+# RmlUi/Lua dependencies are admitted by a later, separately audited slice.
+if(PULP_ENABLE_RMLUI)
+    add_library(pulp-view-rmlui
+        src/rmlui_backend.cpp)
+    add_library(pulp::view-rmlui ALIAS pulp-view-rmlui)
+    target_include_directories(pulp-view-rmlui
+        PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<INSTALL_INTERFACE:include>)
+    target_link_libraries(pulp-view-rmlui PUBLIC pulp::view-core)
+    target_compile_features(pulp-view-rmlui PUBLIC cxx_std_20)
+endif()
+
 add_library(pulp-view-script)
 add_library(pulp::view-script ALIAS pulp-view-script)
 
