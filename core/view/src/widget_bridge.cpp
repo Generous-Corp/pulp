@@ -1,4 +1,5 @@
 #include <pulp/view/widget_bridge.hpp>
+#include <pulp/canvas/bundled_fonts.hpp>
 #include <pulp/view/data_display.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/gap_widgets.hpp>
@@ -415,6 +416,7 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
 }
 
 WidgetBridge::~WidgetBridge() {
+    pulp::canvas::clear_declared_font_face_weight_ranges(font_weight_scope());
     if (callback_alive_->engine_alive() && engine_.bridge_call_counter() == bridge_call_count_)
         engine_.set_bridge_call_counter(nullptr);
     release_document_navigation_focus();
