@@ -33,6 +33,14 @@ struct AssetManifestEntry {
     std::string sha256;
 };
 
+struct DrawVertex {
+    float x = 0.0f;
+    float y = 0.0f;
+    float u = 0.0f;
+    float v = 0.0f;
+    std::uint32_t colour = 0;
+};
+
 // Reads only regular files inside a declared asset root. The manifest is a
 // content closure: an empty or mismatched digest rejects the read.
 class RootedAssetProvider final : public AssetProvider {
@@ -62,6 +70,8 @@ struct DrawCommand {
     std::shared_ptr<const std::string> texture_bytes{};
     std::uint32_t texture_width = 0;
     std::uint32_t texture_height = 0;
+    std::shared_ptr<const std::vector<DrawVertex>> vertices{};
+    std::shared_ptr<const std::vector<std::uint32_t>> indices{};
 };
 
 class RenderInterface {

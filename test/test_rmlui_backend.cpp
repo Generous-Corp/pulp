@@ -71,6 +71,10 @@ TEST_CASE("RmlUi backend admits manifest textures and records their source path"
     REQUIRE(texture->texture_bytes->size() == 29);
     REQUIRE(texture->texture_width == 16);
     REQUIRE(texture->texture_height == 8);
+    REQUIRE(texture->vertices != nullptr);
+    REQUIRE(texture->indices != nullptr);
+    REQUIRE_FALSE(texture->vertices->empty());
+    REQUIRE_FALSE(texture->indices->empty());
     backend.close();
 }
 
