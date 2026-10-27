@@ -13,10 +13,24 @@ separate product-backed probe; that probe is not the installed AU/CLAP editor.
 
 RmlUi must be an optional editor backend. It must not be linked into
 `pulp-view-core`, the format adapters, or every plugin by default. A plugin
-that opts in gets a separate `pulp-view-rmlui` target and declares its RmlUi,
-Lua, and asset licenses and exact dependency pins. A plugin that does not opt
-in keeps the existing native and JavaScript scripted paths byte-for-byte
+that opts in gets a separate `pulp-view-rmlui` target. A plugin that does not
+opt in keeps the existing native and JavaScript scripted paths byte-for-byte
 unchanged.
+
+Admission is a repository change, not a CMake URL: RmlUi, the selected Lua
+runtime or binding, and every transitive dependency need an exact upstream URL,
+commit or release, archive/tree SHA-256, license, notice text, and export
+policy in `tools/deps/manifest.json`, `DEPENDENCIES.md`, and `NOTICE.md`.
+`tools/deps/audit.py --strict --check-upstream` and a default-off configure
+test must prove that the new target is absent from the ordinary view/format
+closure. No dependency is admitted until those records exist.
+
+The first admission must choose the RmlUi feature set explicitly: use the MIT
+RmlUi core, one pinned Lua implementation, and Pulp's font/render providers;
+disable RmlUi sample-only integrations unless each one is separately admitted.
+In particular, FreeType, rlottie, LunaSVG, HarfBuzz, and LuaJIT are not
+transitive freebies. They are either disabled or receive their own manifest,
+license, notice, hash, and export decision before configure can enable them.
 
 The backend owns one `Rml::Context` per editor instance and implements:
 
@@ -30,10 +44,25 @@ The backend owns one `Rml::Context` per editor instance and implements:
 * parameter, gesture, browser, and product actions through the existing
   `HostParamSurface` and `HostActionSurface` contracts.
 
-The format adapters remain unchanged. `ViewBridge` continues to own
-open/attach/resize/close ordering, `notify_attached()` is sent only after the
-host parent exists, and editor teardown releases open gestures before the RmlUi
-context and Lua state are destroyed.
+The format adapters continue to use `ViewBridge`, but the RmlUi session must
+plug into the existing scripted-editor and GPU-host seams rather than adding a
+parallel lifecycle. `ViewBridge` owns open/attach/resize/close ordering,
+`notify_attached()` is sent only after the host parent exists, and editor
+teardown releases open gestures before the RmlUi context and Lua state are
+destroyed. A dependency-graph test must reject any edge from the default
+`pulp-view` or format targets to `pulp-view-rmlui`.
+
+Lua is capability-restricted: no `io`, `os`, `package`, `debug`, filesystem,
+network, process, or native-pointer access. Every callback has an instruction
+and memory quota, cancellation and time budget, and a documented UI-thread
+reentrancy/lifetime rule. Denied capabilities, quota exhaustion, cancellation,
+and callbacks after teardown are typed test failures, not warnings.
+
+The asset provider admits only an embedded or signed asset closure with a
+hash manifest. It rejects traversal, symlink escapes, ambiguous Unicode or
+case aliases, TOCTOU changes, oversized archives, and assets outside the
+declared root. Installed-consumer tests must resolve the same closure without
+reading the developer checkout.
 
 ## Implementation slices
 
@@ -46,12 +75,14 @@ context and Lua state are destroyed.
    action bridge. Existing RML/RCSS/Lua files remain external or embedded by
    the importer; no hand-edited skin coordinates are accepted.
 4. **GPU and host proof.** Attach the backend through `ViewBridge` and
-   `PluginViewHost`, then validate arm64 AUv2 and CLAP in REAPER and Logic with
-   pointer gestures, automation, playback, state recall, browser navigation,
-   and nonzero audio.
-5. **Packaging.** Add dependency notices, ROM-free payload scanning, strict
-   signatures, notarization, and installed-consumer receipts. Repeat on Windows
-   and Linux only after the macOS row is complete.
+   `PluginViewHost`, then validate the exact Forge host tuples: AUv2 in Logic,
+   and VST3 plus CLAP in REAPER. Each tuple gets its own binary, scan,
+   lifecycle, pointer, automation, playback, state-recall, browser, and audio
+   receipt. Logic is not used as the CLAP host, and REAPER is not used as the
+   AUv2 host substitute.
+5. **Packaging.** Add dependency notices, the named ROM-free payload scanner,
+   strict signatures, notarization, and installed-consumer receipts. Repeat on
+   Windows and Linux only after the macOS row is complete.
 
 ## Promotion gates
 
@@ -60,14 +91,19 @@ row needs exact source and dependency hashes, unchanged asset/font resolution,
 Lua callback evidence, deterministic render and hit-region checks, parameter
 and action readback, AU/CLAP discovery, real host interaction, automation and
 state round-trip, and audio evidence. Missing Lua APIs or assets fail closed
-with a typed residual. The native editor remains the rollback path until every
-gate passes.
+with a typed residual. Render coverage must exercise transforms, clipping,
+scissor, opacity, blend modes, textures, text, DPI, and unsupported custom
+geometry; each unsupported operation is an explicit residual. The native
+editor remains the rollback path until every gate passes, and a test must
+exercise a failed RmlUi load or backend initialization followed by successful
+native editor recovery.
 
 ## Nodal handoff
 
-The importer-side plan and product probe are authoritative for Nodal behavior:
-`RMLUI_LUA_COMPAT_PLAN.md` in `pulp-import-juce-nodal-current-20261022`.
-That worktree currently proves the unchanged Trancy skin in the product-backed
-probe, while the installed package still uses the native Pulp editor. This
-Pulp document is the integration contract for the next slice; it does not
-claim that production RmlUi support has landed.
+The importer-side plan and product probe are authoritative for Nodal behavior
+at importer head `92d78e20e59d8ed6aed59d13c2bbfc79c63afb57` in branch
+`codex/nodal-host-probe-20261022`. That worktree currently proves the
+unchanged Trancy skin in the product-backed probe, while the installed package
+still uses the native Pulp editor. This Pulp document is the integration
+contract for the next slice; it does not claim that production RmlUi support
+has landed.
