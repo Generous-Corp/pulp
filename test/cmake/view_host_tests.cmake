@@ -55,6 +55,8 @@ endif()
 # TableModel data/sort layer
 pulp_add_test_suite(pulp-test-table-model GROUP pulp-test-group-view-host
     LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-rmlui-host-bridge GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view LABELS "view;rmlui;host")
 # ModulationMatrix data model
 pulp_add_test_suite(pulp-test-modulation-matrix GROUP pulp-test-group-view-host
     LIBRARIES pulp::view)
