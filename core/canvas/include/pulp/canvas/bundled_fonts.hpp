@@ -95,9 +95,14 @@ struct DeclaredWeightRange {
     int max = 400;
 };
 
-/// Records that an `@font-face` rule bound `family` at a declared weight range.
-/// Repeating a range already recorded for the family is a no-op.
-void declare_font_face_weight_range(const std::string& family, int weight_min, int weight_max);
+/// Records that an `@font-face` rule bound `family` at a declared weight range
+/// for `scope`. Repeating a range already recorded by that owner is a no-op.
+void declare_font_face_weight_range(const std::string& family, int weight_min, int weight_max,
+                                    const std::string& scope = {});
+
+/// Remove all declared ranges owned by `scope`. The empty scope is the legacy
+/// process-wide bucket and is intentionally not cleared by bridge teardown.
+void clear_declared_font_face_weight_ranges(const std::string& scope);
 
 /// Whether any `@font-face` weight range has been declared for `family`.
 bool has_declared_font_face_weights(const std::string& family);

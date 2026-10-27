@@ -11,6 +11,13 @@ description: |
 
 # Update the matched render toolchain
 
+The desktop source fallback in `tools/build-skia.sh` publishes only into a
+real checkout-owned `external/skia-build` directory. It refuses a symlink into
+the shared immutable cache and removes fetcher asset/generation receipts after
+publishing source-built bytes; those receipts authenticate release archives,
+not source builds. Keep the source-fallback negative controls in
+`tools/scripts/test_build_skia_source_pin.py` green when changing this path.
+
 This procedure expects `ghapp` and `python3`, and operates on
 `tools/deps/manifest.json`, `tools/scripts/fetch_skia_for_release.py`, and
 `tools/scripts/fetch_v8_for_release.py`.

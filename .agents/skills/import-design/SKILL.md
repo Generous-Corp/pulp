@@ -358,6 +358,12 @@ in JS on the family. Chromium matches and synthesizes against the declared
 range, not the file: one Regular file declared `400 700` draws 700
 unemboldened, and declared `400` it draws 700 faux-bold.
 
+`registerFont` declarations are owned by a unique per-bridge scope, separate
+from the persisted storage identity: reload clears the retiring bridge's ranges
+before registering the replacement realm, and bridge teardown removes only that
+bridge's declarations. Lookup still unions declarations from all live owners of
+a family; sharing a bare family across live editors with conflicting ranges is
+therefore deliberately ambiguous and should use distinct family names.
 `paragraph_fakes_missing_font_styles` decides SkParagraph's fake-styles switch
 (CSS font matching over the declared ranges; bold only when the request is 600+
 and the matched range ends below 600; italic keeps the default, which shares the
@@ -2248,6 +2254,19 @@ their scratch dirs, and hundreds had accumulated before the sweep existed.
 When testing emitted JS, note the unquoted `// Source:` header comment still
 names the decode-time input; assert on QUOTED paths (`'assets/...'`) when
 pinning "no absolute references".
+
+**Fonts are NOT localized, and a hosted editor now refuses the absolute
+path.** `localize_ir_assets` rewrites image/sprite paths to `assets/<file>`
+but leaves `font.resolved_path` absolute (it points into the design pack or
+`base_dir`), so emitted `registerFont('Family', '/abs/.../face.ttf')` names a
+file outside the script directory. `WidgetBridge` refuses an absolute path
+that is not inside the script directory or a reviewed asset root unless the
+host calls `set_allow_unreviewed_file_paths(true)`; `--validate`,
+`pulp-screenshot` and `pulp-design-tool` opt in (developer tools rendering
+the developer's own import), but `ScriptedUiSession` (every DAW-hosted
+editor) does not, so such a font silently falls back to the system face in a
+plugin. Until fonts are localized like images, copy the face beside `ui.js`
+and reference it as `assets/<face>.ttf`.
 
 **Windows path-separator gotcha (asset/font paths baked into generated JS):**
 when the CLI's asset pass (`resolve_sprite_skins` in `sprite_skins.cpp`) resolves an `asset_ref`/font `asset_id` to a path

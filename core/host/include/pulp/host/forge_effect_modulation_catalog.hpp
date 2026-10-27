@@ -78,18 +78,15 @@
 
 #include <pulp/host/custom_node_type.hpp>
 
+#include <vector>
+
 #include <pulp/signal/chorus_family.hpp>
 #include <pulp/signal/frequency_shifter_ssb.hpp>
 #include <pulp/signal/phaser_stages.hpp>
-#include <pulp/signal/tpt_filter.hpp>
 #include <pulp/signal/vibrato.hpp>
 
-#include <algorithm>
 #include <cmath>
 #include <string>
-#include <vector>
-#include <cstddef>
-#include <cstdint>
 
 namespace pulp::host::modulation {
 
@@ -310,33 +307,11 @@ CustomNodeType make_phaser_node(int stages = Engine::kStageCountDefault);
 
 namespace vibrato {
 
-/// L1 norm of a static allpass cascade's impulse response, at fixed corners.
-///
-/// This is the honest worst-case SAMPLE gain of the two phase engines, and it
-/// is not 1. Unity magnitude response bounds steady-state sinusoids only; an
-/// allpass's impulse response changes sign, so a sign-matched bounded input
-/// accumulates, and both engines measure above a factor of two in practice. The
-/// DSP suite computes this same quantity the same way and asserts the realised
-/// peak stays under it — reporting the sinusoidal bound of 1 instead would put a
-/// number in the registry that the DSP's own suite disproves.
-///
-/// Registration-time only. It runs a long impulse response and is never called
-/// from the audio thread.
-inline double allpass_cascade_l1(const std::vector<double>& corners_hz, double sample_rate,
-                                 int length = 200000) {
-    std::vector<signal::TptFilter64> stages(corners_hz.size());
-    for (std::size_t i = 0; i < corners_hz.size(); ++i) {
-        stages[i].prepare(sample_rate);
-        stages[i].set_cutoff(corners_hz[i]);
-    }
-    double l1 = 0.0;
-    for (int i = 0; i < length; ++i) {
-        double x = (i == 0) ? 1.0 : 0.0;
-        for (auto& stage : stages) x = stage.process_allpass(x);
-        l1 += std::abs(x);
-    }
-    return l1;
-}
+// Public for compatibility with the modulation catalog's response tests and
+// downstream characterization tools. The implementation remains in the
+// catalog translation unit so the public header carries no DSP helper body.
+double allpass_cascade_l1(const std::vector<double>& corners_hz, double sample_rate,
+                          int length = 200000);
 
 // ── Delay vibrato — the only one that really shifts pitch ─────────────────
 
@@ -344,112 +319,30 @@ namespace delay_line {
 
 using Engine = signal::DelayVibrato;
 
-// ── Injectable param ids ──────────────────────────────────────────────────
-inline constexpr state::ParamID kRateHz = 1;      // Hz
-inline constexpr state::ParamID kDepthCents = 2;  // cents
-inline constexpr state::ParamID kDelayMs = 3;     // ms, onset
-inline constexpr state::ParamID kFadeInMs = 4;    // ms, onset
+// Injectable parameter ids.
+inline constexpr state::ParamID kRateHz = 1;
+inline constexpr state::ParamID kDepthCents = 2;
+inline constexpr state::ParamID kDelayMs = 3;
+inline constexpr state::ParamID kFadeInMs = 4;
 
 struct Instance {
     Engine engine;
-    // Last values actually pushed into the onset setters. See the process
-    // callback for why these two cannot be written unconditionally.
+    // Last values applied to the onset setters. Those setters re-arm the
+    // lifecycle envelope, so the process callback updates them only when the
+    // injected value changes.
     float applied_delay_ms = -1.0f;
     float applied_fade_in_ms = -1.0f;
 };
 
-inline std::string delay_vibrato_type_id(float min_rate_hz) {
-    // The floor changes the injectable rate range, so it remains part of the
-    // stable realization identity even though vibrato declares no PDC latency.
-    return "modulation.vibrato.delay." +
-           std::to_string(static_cast<int>(std::lround(min_rate_hz * 10.0f)));
-}
+// The floor is part of the realization identity because it changes the
+// injectable rate range.
+std::string delay_vibrato_type_id(float min_rate_hz);
 
-/// Worst-case linear gain for the Forge registry (series law 8).
-///
-/// One unit-gain tap, and still not 0 dB: the tap is read through the 4-point
-/// Lagrange kernel, whose L1 norm peaks at 1.25 at a half-sample offset. The
-/// DSP suite scans the whole fractional range and asserts that constant is the
-/// maximum, and separately that the engine's realised peak stays under it.
-inline float delay_vibrato_worst_case_gain() {
-    return static_cast<float>(Engine::kInterpolatorPeakGain);
-}
+/// Worst-case linear gain at the registered interpolator ceiling.
+float delay_vibrato_worst_case_gain();
 
-/// True pitch vibrato as a lowerable custom node. Mono: the engine has no
-/// stereo coupling, so a stereo source is two instances rather than a pretend
-/// stereo image.
-///
-/// The delay tap moves with the injectable rate and depth controls, so it is an
-/// intentional modulation delay rather than a fixed processing latency. The
-/// node therefore leaves CustomNodeType::latency_samples empty: publishing a
-/// worst-case bound would make PDC delay parallel dry paths by the wrong amount
-/// for every setting except that single extreme.
-inline CustomNodeType make_delay_vibrato_node(float min_rate_hz = 4.0f) {
-    const float floor_hz = std::clamp(min_rate_hz, static_cast<float>(Engine::kMinRateHz),
-                                      static_cast<float>(Engine::kMaxRateHz));
-
-    CustomNodeType t;
-    t.type_id = delay_vibrato_type_id(floor_hz);
-    t.version = 1;
-    t.num_input_ports = 1;
-    t.num_output_ports = 1;
-    t.default_name = "Vibrato (Delay)";
-    t.lowerable = true;
-
-    t.create = []() -> void* { return new Instance{}; };
-    t.destroy = [](void* p) { delete static_cast<Instance*>(p); };
-    t.prepare = [](void* p, double sr, int /*max_block*/) {
-        static_cast<Instance*>(p)->engine.prepare(sr);
-    };
-    t.reset = [](void* p) {
-        auto* s = static_cast<Instance*>(p);
-        s->engine.reset();
-        s->applied_delay_ms = -1.0f;
-        s->applied_fade_in_ms = -1.0f;
-    };
-
-    t.baked_params.push_back({kRateHz, floor_hz, static_cast<float>(Engine::kMaxRateHz),
-                              std::max(floor_hz, static_cast<float>(Engine::kDefaultRateHz))});
-    t.baked_params.push_back({kDepthCents, 0.0f, static_cast<float>(Engine::kMaxDepthCents),
-                              static_cast<float>(Engine::kDefaultDepthCents)});
-    t.baked_params.push_back({kDelayMs, 0.0f, static_cast<float>(Engine::kMaxLifecycleMs), 0.0f});
-    t.baked_params.push_back({kFadeInMs, 0.0f, static_cast<float>(Engine::kMaxLifecycleMs), 0.0f});
-
-    t.process_instance_baked_param = [](void* p, audio::BufferView<float>& out,
-                                        const audio::BufferView<const float>& in, int n,
-                                        const BakedParamView& params) {
-        auto* s = static_cast<Instance*>(p);
-        const float* input = in.channel_ptr(0);
-        float* output = out.channel_ptr(0);
-
-        for (int k = 0; k < n; ++k) {
-            const auto offset = static_cast<std::int32_t>(k);
-            s->engine.set_rate_hz(params.value_at(kRateHz, offset));
-            s->engine.set_depth_cents(params.value_at(kDepthCents, offset));
-
-            // The two onset controls are applied ONLY WHEN THEY CHANGE, and
-            // that is load-bearing rather than an optimisation. Both setters
-            // re-arm the lifecycle envelope, which zeroes its depth scale — so
-            // writing them every sample would hold the envelope at zero forever
-            // and the node would pass audio through with no vibrato at all,
-            // while every parameter read back exactly the value that was set.
-            const float delay_ms = params.value_at(kDelayMs, offset);
-            if (delay_ms != s->applied_delay_ms) {
-                s->engine.set_delay_ms(delay_ms);
-                s->applied_delay_ms = delay_ms;
-            }
-            const float fade_ms = params.value_at(kFadeInMs, offset);
-            if (fade_ms != s->applied_fade_in_ms) {
-                s->engine.set_fade_in_ms(fade_ms);
-                s->applied_fade_in_ms = fade_ms;
-            }
-
-            output[static_cast<std::size_t>(k)] =
-                s->engine.process(input[static_cast<std::size_t>(k)]);
-        }
-    };
-    return t;
-}
+/// True pitch vibrato as a lowerable mono custom node.
+CustomNodeType make_delay_vibrato_node(float min_rate_hz = 4.0f);
 
 }  // namespace delay_line
 
@@ -459,90 +352,23 @@ namespace phase {
 
 using Engine = signal::PhaseVibrato;
 
-inline constexpr state::ParamID kRateHz = 1;    // Hz
-inline constexpr state::ParamID kDepth = 2;     // %
-inline constexpr state::ParamID kCenterHz = 3;  // Hz
-inline constexpr state::ParamID kMix = 4;       // %
+// Injectable parameter ids.
+inline constexpr state::ParamID kRateHz = 1;
+inline constexpr state::ParamID kDepth = 2;
+inline constexpr state::ParamID kCenterHz = 3;
+inline constexpr state::ParamID kMix = 4;
 
 struct Instance {
     Engine engine;
 };
 
-inline std::string phase_vibrato_type_id(int stages) {
-    return "modulation.vibrato.phase." + std::to_string(stages);
-}
+std::string phase_vibrato_type_id(int stages);
 
-/// Worst-case linear gain for the Forge registry (series law 8).
-///
-/// The cascade's impulse-response L1 at the LOWEST corner the registered sweep
-/// can reach with every stage active — which is what the DSP suite asserts the
-/// realised peak stays under, and which is well above 1. See
-/// `allpass_cascade_l1` for why the unity-magnitude property does not bound
-/// this.
-inline float phase_vibrato_worst_case_gain(int stages, double sample_rate) {
-    const double lowest_corner = Engine::kMinCenterHz * std::exp2(-Engine::kSweepOctaves);
-    return static_cast<float>(allpass_cascade_l1(
-        std::vector<double>(static_cast<std::size_t>(stages), lowest_corner), sample_rate));
-}
+/// Worst-case linear gain at the lowest registered allpass corner.
+float phase_vibrato_worst_case_gain(int stages, double sample_rate);
 
-/// Phase vibrato as a lowerable custom node. Mono, for the same reason as the
-/// delay engine.
-///
-/// `stages` is a REGISTRATION-TIME REALIZATION: it is the length of the allpass
-/// cascade, so it sets how many notches the summed path has and how much phase
-/// the sweep can accumulate. Latency is zero at every count, so this is the
-/// topology rule rather than the latency rule. The DSP also resets stages as
-/// they become active, which is a state discontinuity a user would hear as a
-/// click if it happened under automation.
-inline CustomNodeType make_phase_vibrato_node(int stages = Engine::kDefaultStageCount) {
-    const int clamped = std::clamp(stages, 1, Engine::kMaxStages);
-
-    CustomNodeType t;
-    t.type_id = phase_vibrato_type_id(clamped);
-    t.version = 1;
-    t.num_input_ports = 1;
-    t.num_output_ports = 1;
-    t.default_name = "Vibrato (Phase, " + std::to_string(clamped) + "-stage)";
-    t.lowerable = true;
-
-    t.create = []() -> void* { return new Instance{}; };
-    t.destroy = [](void* p) { delete static_cast<Instance*>(p); };
-    t.prepare = [clamped](void* p, double sr, int /*max_block*/) {
-        auto* s = static_cast<Instance*>(p);
-        s->engine.prepare(sr);
-        s->engine.set_stage_count(clamped);
-    };
-    t.reset = [](void* p) { static_cast<Instance*>(p)->engine.reset(); };
-
-    t.baked_params.push_back({kRateHz, static_cast<float>(Engine::kMinRateHz),
-                              static_cast<float>(Engine::kMaxRateHz),
-                              static_cast<float>(Engine::kDefaultRateHz)});
-    t.baked_params.push_back({kDepth, 0.0f, 100.0f,
-                              static_cast<float>(Engine::kDefaultDepth * 100.0)});
-    t.baked_params.push_back({kCenterHz, static_cast<float>(Engine::kMinCenterHz),
-                              static_cast<float>(Engine::kMaxCenterHz),
-                              static_cast<float>(Engine::kDefaultCenterHz)});
-    t.baked_params.push_back({kMix, 0.0f, 100.0f,
-                              static_cast<float>(Engine::kDefaultMix * 100.0)});
-
-    t.process_instance_baked_param = [](void* p, audio::BufferView<float>& out,
-                                        const audio::BufferView<const float>& in, int n,
-                                        const BakedParamView& params) {
-        auto* s = static_cast<Instance*>(p);
-        const float* input = in.channel_ptr(0);
-        float* output = out.channel_ptr(0);
-        for (int k = 0; k < n; ++k) {
-            const auto offset = static_cast<std::int32_t>(k);
-            s->engine.set_rate_hz(params.value_at(kRateHz, offset));
-            s->engine.set_depth(params.value_at(kDepth, offset) * 0.01);
-            s->engine.set_center_hz(params.value_at(kCenterHz, offset));
-            s->engine.set_mix(params.value_at(kMix, offset) * 0.01);
-            output[static_cast<std::size_t>(k)] =
-                s->engine.process(input[static_cast<std::size_t>(k)]);
-        }
-    };
-    return t;
-}
+/// Phase vibrato as a lowerable mono custom node.
+CustomNodeType make_phase_vibrato_node(int stages = Engine::kDefaultStageCount);
 
 }  // namespace phase
 
@@ -553,98 +379,25 @@ namespace univibe {
 using Engine = signal::UniVibe;
 using Mode = Engine::Mode;
 
-inline constexpr state::ParamID kRateHz = 1;  // Hz
-inline constexpr state::ParamID kDepth = 2;   // %
-inline constexpr state::ParamID kMode = 3;    // stepped 0 = vibrato, 1 = chorus
-
+inline constexpr state::ParamID kRateHz = 1;
+inline constexpr state::ParamID kDepth = 2;
+inline constexpr state::ParamID kMode = 3;
 inline constexpr float kModeVibrato = 0.0f;
 inline constexpr float kModeChorus = 1.0f;
-
 inline constexpr const char* kTypeId = "modulation.vibrato.univibe";
 
 struct Instance {
     Engine engine;
 };
 
-/// Decodes the stepped `mode` param, rounding to the nearest step.
-inline Mode mode_from_param(float value) {
-    return std::lround(value) >= 1 ? Mode::chorus : Mode::vibrato;
-}
+/// Decodes the stepped mode parameter.
+Mode mode_from_param(float value);
 
-/// Worst-case linear gain for the Forge registry (series law 8).
-///
-/// As the phase engine: the four staggered stages' impulse-response L1 at the
-/// bottom of the sweep, which is the ceiling the DSP suite asserts against.
-inline float univibe_worst_case_gain(double sample_rate) {
-    const double scale = Engine::corner_scale(0.0, 1.0);
-    std::vector<double> corners(static_cast<std::size_t>(Engine::kStageCount));
-    for (int i = 0; i < Engine::kStageCount; ++i)
-        corners[static_cast<std::size_t>(i)] =
-            Engine::kStageBaseHz[static_cast<std::size_t>(i)] * scale;
-    return static_cast<float>(allpass_cascade_l1(corners, sample_rate));
-}
+/// Worst-case linear gain at the lowest registered allpass corner.
+float univibe_worst_case_gain(double sample_rate);
 
-/// The Univibe as a lowerable custom node.
-///
-/// TWO PORTS IN, and the engine takes one — the input is folded to mono at the
-/// node boundary, deliberately. The circuit is a mono instrument pedal whose
-/// chorus position SPLITS one input into an untouched path and a phase-shifted
-/// one, so it is genuinely mono-in/stereo-out. Registering it that way would
-/// make it the only asymmetric node in the family and would not survive a
-/// stereo insert; folding at the boundary keeps the stereo image the mode
-/// creates while accepting a stereo source.
-///
-/// NO REALIZATION AXIS. The stage count is fixed at four by the circuit and is
-/// not settable, and `mode` is a coefficient change over one unchanged path —
-/// it re-weights the direct and shifted paths, touches no state, and leaves
-/// latency at zero — so it injects, exactly like the FET compressor's ratio
-/// buttons.
-inline CustomNodeType make_univibe_node() {
-    CustomNodeType t;
-    t.type_id = kTypeId;
-    t.version = 1;
-    t.num_input_ports = 2;
-    t.num_output_ports = 2;
-    t.default_name = "Univibe";
-    t.lowerable = true;
-
-    t.create = []() -> void* { return new Instance{}; };
-    t.destroy = [](void* p) { delete static_cast<Instance*>(p); };
-    t.prepare = [](void* p, double sr, int /*max_block*/) {
-        static_cast<Instance*>(p)->engine.prepare(sr);
-    };
-    t.reset = [](void* p) { static_cast<Instance*>(p)->engine.reset(); };
-
-    t.baked_params.push_back({kRateHz, static_cast<float>(Engine::kMinRateHz),
-                              static_cast<float>(Engine::kMaxRateHz),
-                              static_cast<float>(Engine::kDefaultRateHz)});
-    t.baked_params.push_back({kDepth, 0.0f, 100.0f,
-                              static_cast<float>(Engine::kDefaultDepth * 100.0)});
-    t.baked_params.push_back({kMode, kModeVibrato, kModeChorus, kModeVibrato});
-
-    t.process_instance_baked_param = [](void* p, audio::BufferView<float>& out,
-                                        const audio::BufferView<const float>& in, int n,
-                                        const BakedParamView& params) {
-        auto* s = static_cast<Instance*>(p);
-        const float* in_left = in.channel_ptr(0);
-        const float* in_right = in.channel_ptr(1);
-        float* out_left = out.channel_ptr(0);
-        float* out_right = out.channel_ptr(1);
-
-        for (int k = 0; k < n; ++k) {
-            const auto offset = static_cast<std::int32_t>(k);
-            s->engine.set_rate_hz(params.value_at(kRateHz, offset));
-            s->engine.set_depth(params.value_at(kDepth, offset) * 0.01);
-            s->engine.set_mode(mode_from_param(params.value_at(kMode, offset)));
-
-            const float mono = 0.5f * (in_left[static_cast<std::size_t>(k)] +
-                                       in_right[static_cast<std::size_t>(k)]);
-            s->engine.process(mono, out_left[static_cast<std::size_t>(k)],
-                              out_right[static_cast<std::size_t>(k)]);
-        }
-    };
-    return t;
-}
+/// Univibe as a lowerable stereo-in/stereo-out custom node.
+CustomNodeType make_univibe_node();
 
 }  // namespace univibe
 
