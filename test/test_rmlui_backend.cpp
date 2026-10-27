@@ -3,7 +3,7 @@
 #include <pulp/runtime/crypto.hpp>
 #include <pulp/view/rmlui_backend.hpp>
 
-#include <chrono>
+#include "support/unique_temp_dir.hpp"
 #include <filesystem>
 #include <fstream>
 #include <vector>
@@ -83,10 +83,7 @@ TEST_CASE("headless RmlUi render commands are isolated per frame") {
 }
 
 TEST_CASE("rooted RmlUi assets require a confined, hash-checked manifest") {
-    const auto root = std::filesystem::temp_directory_path() /
-                      ("pulp-rmlui-assets-" +
-                       std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    std::filesystem::create_directories(root);
+    const auto root = pulp::test::make_unique_temp_dir("pulp-rmlui-assets");
     std::ofstream(root / "editor.rml") << "<rml/>\n";
     const auto digest = pulp::runtime::sha256_hex(std::string_view("<rml/>\n"));
     RootedAssetProvider assets(root, {{"editor.rml", digest}});
