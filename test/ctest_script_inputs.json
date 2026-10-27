@@ -154,6 +154,7 @@
     "tools/cli/version_diag.cpp"
    ],
    "spawning_sources": [
+    "build/tools/cli/generated/migration_index.cpp",
     "tools/cli/cli_common.cpp",
     "tools/cli/cli_delegate.cpp",
     "tools/cli/cli_doctor_helpers.cpp",
@@ -3100,6 +3101,7 @@
   "pulp-test-signal-formant-filter-bank",
   "pulp-test-signal-fractional-delay",
   "pulp-test-signal-frequency-shifter-ssb",
+  "pulp-test-signal-gain",
   "pulp-test-signal-granular",
   "pulp-test-signal-graph-audio-parity",
   "pulp-test-signal-graph-control-authority",
