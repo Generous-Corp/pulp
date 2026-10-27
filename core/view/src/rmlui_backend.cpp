@@ -502,9 +502,9 @@ Status Backend::load_font_face(std::string_view path, std::string_view family, b
     runtime_->font_storage.emplace_back(std::move(asset.bytes));
     const auto& owned = runtime_->font_storage.back();
     const auto* bytes = reinterpret_cast<const Rml::byte*>(owned.data());
-    const auto loaded = Rml::LoadFontFace(Rml::Span<const Rml::byte>(bytes, owned.size()),
-                             Rml::String(family), Rml::Style::FontStyle::Normal,
-                             Rml::Style::FontWeight::Auto, fallback);
+    const auto loaded =
+        Rml::LoadFontFace(Rml::Span<const Rml::byte>(bytes, owned.size()), Rml::String(family),
+                          Rml::Style::FontStyle::Normal, Rml::Style::FontWeight::Auto, fallback);
     if (!loaded)
         runtime_->font_storage.pop_back();
     return loaded ? Status::ok : Status::rejected;
