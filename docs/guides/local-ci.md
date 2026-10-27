@@ -5552,6 +5552,25 @@ health only when the instrument demonstrably ran** — so when reading a quiet
 sweep, confirm its snapshot shows a non-zero open-PR count and queue depth
 rather than trusting the absence of findings.
 
+**Fifth check — review latency.** Every reviewer is an agent, and an agent
+session can stop without saying so. Nothing turns red when it does, and the
+merge-stall predicate cannot see it, because arming waits on the verdict. So
+the same workflow pages when a **ready (non-draft) PR has waited more than
+`review_latency_minutes` (default 60) with no verdict on its current head**: no
+comment line `verdict: <WORD> head:<sha>` naming the head (a full sha or a
+prefix of at least 7 characters) and no submitted APPROVED or
+CHANGES_REQUESTED review on it. The wait starts at the latest of the PR
+opening, leaving draft, and its current head arriving (the head commit's first
+check suite, else its committed date), so a push restarts it and a verdict on
+an older head does not count. It keeps its own tracking issue, `Review latency:
+ready PRs are waiting for a verdict`, maintained by the same tracker function
+(open, update in place, close on recovery, never close on a degraded sweep). A
+failed read is a `blind_alarm` here too. The scan step runs with
+`continue-on-error`, so a failure in it never hides the merge-stall result.
+Who wrote a verdict comment is not checked: this is an alert, not a gate.
+Predicate and tests: `tools/scripts/review_latency_watchdog.py` and
+`tools/scripts/test_review_latency_watchdog.py`.
+
 Reads are kept inside the budget that completes: the open-PR query pages 25 at
 a time (50 asks GitHub for 50 check rollups at once and times out with HTTP 504
 under normal load), and transient 502/503/504 responses get a bounded retry.
@@ -5573,9 +5592,11 @@ gh workflow run merge-stall-check.yml -f dry_run=true
 gh workflow run merge-stall-check.yml -f threshold_minutes=60
 gh workflow run merge-stall-check.yml -f queue_threshold_minutes=30
 gh workflow run merge-stall-check.yml -f throughput_threshold_minutes=90
+gh workflow run merge-stall-check.yml -f review_latency_minutes=60
 
 # Replay a recorded snapshot offline (no API calls, verdict pinned to capture time)
 python3 tools/scripts/merge_stall_watchdog.py --snapshot snapshot.json --prev-state state.json
+python3 tools/scripts/review_latency_watchdog.py --snapshot review-snapshot.json
 ```
 
 ### GraphQL quota fallback for PR sweeps

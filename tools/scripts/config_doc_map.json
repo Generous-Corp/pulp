@@ -85,7 +85,8 @@
   {
    "paths": [
     ".github/workflows/merge-stall-check.yml",
-    "tools/scripts/merge_stall_watchdog.py"
+    "tools/scripts/merge_stall_watchdog.py",
+    "tools/scripts/review_latency_watchdog.py"
    ],
    "docs": [
     "docs/guides/local-ci.md"

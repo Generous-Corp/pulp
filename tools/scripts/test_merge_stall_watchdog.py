@@ -573,7 +573,10 @@ class TestMainCli(unittest.TestCase):
         for level in ("alarm", "queue_alarm", "throughput_alarm", "blind_alarm"):
             self.assertIn(f"'{level}'", workflow)
         self.assertIn('degraded=${degraded}', workflow)
-        self.assertIn('if [ "$DEGRADED" = "true" ]', workflow)
+        # The tracker function receives the scan's DEGRADED flag and refuses
+        # to close a tracker on a degraded sweep.
+        self.assertIn('maintain_tracker "${TRACKING_TITLE}" "$COUNT" "${DEGRADED:-false}"', workflow)
+        self.assertIn('if [ "$degraded" = "true" ]', workflow)
 
     def test_this_suite_is_actually_executed_by_ci(self):
         """A test nothing runs cannot fail, so it guards nothing.

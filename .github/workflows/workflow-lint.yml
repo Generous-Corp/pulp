@@ -85,6 +85,8 @@ on:
       - 'tools/scripts/fixtures/nightly_intel_unserved_jobs.json'
       - 'tools/scripts/merge_stall_watchdog.py'
       - 'tools/scripts/test_merge_stall_watchdog.py'
+      - 'tools/scripts/review_latency_watchdog.py'
+      - 'tools/scripts/test_review_latency_watchdog.py'
       - 'tools/scripts/stale_run_reaper.py'
       - 'tools/scripts/test_stale_run_reaper.py'
       - 'tools/scripts/test_release_breakage_watchdog_wiring.py'
@@ -227,6 +229,8 @@ on:
       - 'tools/scripts/fixtures/nightly_intel_unserved_jobs.json'
       - 'tools/scripts/merge_stall_watchdog.py'
       - 'tools/scripts/test_merge_stall_watchdog.py'
+      - 'tools/scripts/review_latency_watchdog.py'
+      - 'tools/scripts/test_review_latency_watchdog.py'
       - 'tools/scripts/stale_run_reaper.py'
       - 'tools/scripts/test_stale_run_reaper.py'
       - 'tools/scripts/test_release_breakage_watchdog_wiring.py'
@@ -431,6 +435,7 @@ jobs:
           python3 tools/scripts/test_queue_age_watchdog.py
           python3 tools/scripts/test_unserved_job_check.py
           python3 tools/scripts/test_merge_stall_watchdog.py
+          python3 tools/scripts/test_review_latency_watchdog.py
           python3 tools/scripts/test_stale_run_reaper.py
           python3 tools/scripts/test_gpu_provenance_ci_wiring.py
 

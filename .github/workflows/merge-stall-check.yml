@@ -50,6 +50,15 @@ name: Merge-stall check
 # alarm that names the verdicts it could not reach, and a degraded sweep may
 # never close a tracker on the strength of an observation it did not make.
 #
+# Review latency
+# --------------
+# A fifth check pages when a ready (non-draft) PR has waited more than
+# `review_latency_minutes` (default 60) with no verdict naming its current
+# head. Reviewers are agents and can stop silently; nothing turns red when they
+# do, and the merge-stall predicate cannot see it because arming waits on the
+# verdict. It keeps its own tracking issue, maintained by the same function.
+# Predicate and tests: tools/scripts/review_latency_watchdog.py.
+#
 # Issue lifecycle mirrors auto-release-watchdog.yml / runner-health-check.yml:
 # one tracking issue, edited in place each sweep, closed automatically on
 # recovery. REST search rather than GraphQL for the issue lookup — the shared
@@ -73,8 +82,12 @@ on:
         description: 'Minutes with zero merges, while the queue is non-empty, that opens an issue'
         required: false
         default: '90'
+      review_latency_minutes:
+        description: 'Minutes a ready PR may wait for a verdict on its current head before an issue opens'
+        required: false
+        default: '60'
       dry_run:
-        description: 'Log findings but do not touch the tracking issue'
+        description: 'Log findings but do not touch the tracking issues'
         required: false
         default: 'false'
 
@@ -99,7 +112,9 @@ jobs:
       QUEUE_THRESHOLD_MINUTES: ${{ github.event.inputs.queue_threshold_minutes || '30' }}
       THROUGHPUT_THRESHOLD_MINUTES: ${{ github.event.inputs.throughput_threshold_minutes || '90' }}
       DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+      REVIEW_LATENCY_MINUTES: ${{ github.event.inputs.review_latency_minutes || '60' }}
       TRACKING_TITLE: 'Merge stall: green PRs are not merging'
+      REVIEW_TRACKING_TITLE: 'Review latency: ready PRs are waiting for a verdict'
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
@@ -174,71 +189,122 @@ jobs:
           retention-days: 7
           if-no-files-found: warn
 
-      - name: Maintain tracking issue
-        if: env.DRY_RUN != 'true'
+      - name: Scan review latency
+        id: review
+        # Its own step, so a failure here never hides the merge-stall result.
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 tools/scripts/review_latency_watchdog.py \
+              --repo '${{ github.repository }}' \
+              --base main \
+              --threshold-minutes "${REVIEW_LATENCY_MINUTES}" \
+              --findings-out review-findings.json \
+              --snapshot-out review-snapshot.json \
+              --body-out review-body.md \
+              --summary-out "${GITHUB_STEP_SUMMARY}" \
+              | tee review-scan.log
+
+          count=$(python3 -c "import json; print(len(json.load(open('review-findings.json'))))")
+          echo "count=${count}" >> "$GITHUB_OUTPUT"
+          degraded=$(python3 -c "import json; print('true' if json.load(open('review-snapshot.json')).get('errors') else 'false')")
+          echo "degraded=${degraded}" >> "$GITHUB_OUTPUT"
+          echo "Review-latency alarm count: ${count}"
+
+      - name: Maintain tracking issues
+        if: ${{ !cancelled() && env.DRY_RUN != 'true' }}
         shell: bash
         env:
           COUNT: ${{ steps.scan.outputs.count }}
           DEGRADED: ${{ steps.scan.outputs.degraded }}
+          REVIEW_COUNT: ${{ steps.review.outputs.count }}
+          REVIEW_DEGRADED: ${{ steps.review.outputs.degraded }}
         run: |
           set -euo pipefail
 
           repo='${{ github.repository }}'
-          title="${TRACKING_TITLE}"
           run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
-          # Look up in both OPEN and CLOSED state so a recovered sweep only
-          # closes an OPEN tracker and a recurrence reopens the same issue
-          # rather than spawning a new one every 30 minutes.
-          search_json=$(
-              gh api --method GET "/search/issues" \
-                  -f q="repo:${repo} is:issue in:title ${title}"
-          )
-          existing_json=$(printf '%s' "$search_json" | TRACKING_TITLE="$title" python3 -c 'import json, os, sys; title = os.environ["TRACKING_TITLE"]; data = json.load(sys.stdin); match = next((item for item in data.get("items", []) if item.get("title") == title), None); print(json.dumps({"number": match.get("number", ""), "state": str(match.get("state", "")).upper()}) if match else "{}")')
-          existing=$(echo "$existing_json" | python3 -c "import json, sys; d=json.load(sys.stdin); print(d.get('number','') or '')")
-          existing_state=$(echo "$existing_json" | python3 -c "import json, sys; d=json.load(sys.stdin); print(d.get('state','') or '')")
+          # maintain_tracker TITLE COUNT DEGRADED BODY_FILE LABELS_JSON RECOVERED
+          # One tracking issue per TITLE, edited in place each sweep, closed on
+          # recovery, reopened on recurrence.
+          maintain_tracker() {
+              local title="$1" count="$2" degraded="$3" body_file="$4" labels="$5" recovered="$6"
+              local search_json existing_json existing existing_state
 
-          if [ "$COUNT" -eq 0 ]; then
-              if [ "$DEGRADED" = "true" ]; then
-                  # Unreachable while the scan emits a blind_alarm for every
-                  # degraded sweep (which COUNT now includes), and kept as a
-                  # backstop: a degraded sweep must never close a tracker on
-                  # the strength of an observation it did not make.
-                  echo "Collection was degraded — preserving any existing tracker until a complete sweep proves recovery."
-                  exit 0
+              # Look up in both OPEN and CLOSED state so a recovered sweep only
+              # closes an OPEN tracker and a recurrence reopens the same issue
+              # rather than spawning a new one every 30 minutes.
+              search_json=$(
+                  gh api --method GET "/search/issues" \
+                      -f q="repo:${repo} is:issue in:title ${title}"
+              )
+              existing_json=$(printf '%s' "$search_json" | TRACKING_TITLE="$title" python3 -c 'import json, os, sys; title = os.environ["TRACKING_TITLE"]; data = json.load(sys.stdin); match = next((item for item in data.get("items", []) if item.get("title") == title), None); print(json.dumps({"number": match.get("number", ""), "state": str(match.get("state", "")).upper()}) if match else "{}")')
+              existing=$(echo "$existing_json" | python3 -c "import json, sys; d=json.load(sys.stdin); print(d.get('number','') or '')")
+              existing_state=$(echo "$existing_json" | python3 -c "import json, sys; d=json.load(sys.stdin); print(d.get('state','') or '')")
+
+              if [ "$count" -eq 0 ]; then
+                  if [ "$degraded" = "true" ]; then
+                      # Unreachable while each scan emits a blind_alarm for a
+                      # degraded sweep (which its count includes), and kept as a
+                      # backstop: a degraded sweep must never close a tracker on
+                      # the strength of an observation it did not make.
+                      echo "${title}: collection was degraded — preserving any existing tracker until a complete sweep proves recovery."
+                      return 0
+                  fi
+                  if [ -n "${existing:-}" ] && [ "$existing_state" = "OPEN" ]; then
+                      echo "${title}: recovered — closing tracker #${existing}."
+                      gh api -X POST "/repos/${repo}/issues/${existing}/comments" \
+                          -f body="Sweep on $(date -u '+%Y-%m-%d %H:%M UTC') ${recovered}. Closing. (${run_url})"
+                      gh api -X PATCH "/repos/${repo}/issues/${existing}" \
+                          -f state=closed \
+                          -f state_reason=completed
+                  else
+                      echo "${title}: nothing to report and no open tracker — nothing to do."
+                  fi
+                  return 0
               fi
-              if [ -n "${existing:-}" ] && [ "$existing_state" = "OPEN" ]; then
-                  echo "Merges are flowing again — closing tracker #${existing}."
-                  gh api -X POST "/repos/${repo}/issues/${existing}/comments" \
-                      -f body="Sweep on $(date -u '+%Y-%m-%d %H:%M UTC') found no PR stuck merge-ready: merges are flowing (or nothing is ready). Closing. (${run_url})"
-                  gh api -X PATCH "/repos/${repo}/issues/${existing}" \
-                      -f state=closed \
-                      -f state_reason=completed
+
+              {
+                cat "$body_file"
+                echo
+                echo "**Sweep:** ${run_url}"
+              } > issue-body.md
+
+              if [ -z "${existing:-}" ]; then
+                  echo "${title}: creating tracking issue."
+                  TRACKING_TITLE="$title" LABELS="$labels" python3 -c 'import json, os; body = open("issue-body.md", encoding="utf-8").read(); print(json.dumps({"title": os.environ["TRACKING_TITLE"], "body": body, "labels": json.loads(os.environ["LABELS"])}))' > issue.json
+                  gh api -X POST "/repos/${repo}/issues" --input issue.json 2>&1 || {
+                      # Labels may not exist on a fresh repo; the tracker matters
+                      # more than its tags, so retry without them.
+                      TRACKING_TITLE="$title" python3 -c 'import json, os; body = open("issue-body.md", encoding="utf-8").read(); print(json.dumps({"title": os.environ["TRACKING_TITLE"], "body": body}))' > issue.json
+                      gh api -X POST "/repos/${repo}/issues" --input issue.json
+                  }
               else
-                  echo "No stuck PRs and no open tracker — nothing to do."
+                  echo "${title}: updating tracking issue #${existing} in place."
+                  gh api -X PATCH "/repos/${repo}/issues/${existing}" -F body=@issue-body.md
+                  gh api -X PATCH "/repos/${repo}/issues/${existing}" -f state=open 2>/dev/null || true
               fi
-              exit 0
-          fi
+          }
 
-          {
-            cat body.md
-            echo
-            echo "**Sweep:** ${run_url}"
-          } > issue-body.md
-
-          if [ -z "${existing:-}" ]; then
-              echo "Creating tracking issue."
-              TRACKING_TITLE="$title" python3 -c 'import json, os; body = open("issue-body.md", encoding="utf-8").read(); print(json.dumps({"title": os.environ["TRACKING_TITLE"], "body": body, "labels": ["bug", "ci", "blocks-release"]}))' > issue.json
-              gh api -X POST "/repos/${repo}/issues" --input issue.json 2>&1 || {
-                  # Labels may not exist on a fresh repo; the tracker matters
-                  # more than its tags, so retry without them.
-                  TRACKING_TITLE="$title" python3 -c 'import json, os; body = open("issue-body.md", encoding="utf-8").read(); print(json.dumps({"title": os.environ["TRACKING_TITLE"], "body": body}))' > issue.json
-                  gh api -X POST "/repos/${repo}/issues" --input issue.json
-              }
+          # A scan that did not finish leaves its count empty; skip its tracker
+          # rather than read the gap as a clean sweep.
+          if [ -n "${COUNT:-}" ]; then
+              maintain_tracker "${TRACKING_TITLE}" "$COUNT" "${DEGRADED:-false}" body.md \
+                  '["bug", "ci", "blocks-release"]' \
+                  "found no PR stuck merge-ready: merges are flowing (or nothing is ready)"
           else
-              echo "Updating tracking issue #${existing} in place."
-              gh api -X PATCH "/repos/${repo}/issues/${existing}" -F body=@issue-body.md
-              gh api -X PATCH "/repos/${repo}/issues/${existing}" -f state=open 2>/dev/null || true
+              echo "${TRACKING_TITLE}: scan did not finish; tracker left as it is."
+          fi
+          if [ -n "${REVIEW_COUNT:-}" ]; then
+              maintain_tracker "${REVIEW_TRACKING_TITLE}" "$REVIEW_COUNT" "${REVIEW_DEGRADED:-false}" review-body.md \
+                  '["ci"]' \
+                  "found every ready PR with a verdict on its current head, or waiting less than ${REVIEW_LATENCY_MINUTES} min"
+          else
+              echo "${REVIEW_TRACKING_TITLE}: scan did not finish; tracker left as it is."
           fi
 
       - name: Upload snapshot + findings
@@ -249,5 +315,7 @@ jobs:
           path: |
             findings.json
             snapshot.json
+            review-findings.json
+            review-snapshot.json
           retention-days: 14
           if-no-files-found: ignore
