@@ -65,7 +65,11 @@ class RenderAdapter final : public Rml::RenderInterface {
                             {}};
         if (texture_handle != 0 && texture_handle <= textures_.size()) {
             command.kind = DrawCommand::Kind::texture;
-            command.texture_path = textures_[static_cast<std::size_t>(texture_handle - 1)].path;
+            const auto& texture = textures_[static_cast<std::size_t>(texture_handle - 1)];
+            command.texture_path = texture.path;
+            command.texture_bytes = texture.bytes;
+            command.texture_width = texture.width;
+            command.texture_height = texture.height;
         }
         sink_.submit(command);
     }
@@ -83,14 +87,20 @@ class RenderAdapter final : public Rml::RenderInterface {
         if (!size)
             return 0;
         dimensions = {size->first, size->second};
-        textures_.push_back(Texture{std::move(asset.path)});
+        textures_.push_back(Texture{
+            std::move(asset.path), std::make_shared<const std::string>(std::move(asset.bytes)),
+            static_cast<std::uint32_t>(size->first), static_cast<std::uint32_t>(size->second)});
         return static_cast<Rml::TextureHandle>(textures_.size());
     }
-    Rml::TextureHandle GenerateTexture(Rml::Span<const Rml::byte>,
+    Rml::TextureHandle GenerateTexture(Rml::Span<const Rml::byte> bytes,
                                        Rml::Vector2i dimensions) override {
         if (dimensions.x <= 0 || dimensions.y <= 0)
             return 0;
-        textures_.push_back(Texture{});
+        auto payload = std::make_shared<std::string>(reinterpret_cast<const char*>(bytes.data()),
+                                                     bytes.size());
+        textures_.push_back(Texture{"", std::move(payload),
+                                    static_cast<std::uint32_t>(dimensions.x),
+                                    static_cast<std::uint32_t>(dimensions.y)});
         return static_cast<Rml::TextureHandle>(textures_.size());
     }
     void ReleaseTexture(Rml::TextureHandle handle) override {
@@ -103,6 +113,9 @@ class RenderAdapter final : public Rml::RenderInterface {
   private:
     struct Texture {
         std::string path;
+        std::shared_ptr<const std::string> bytes;
+        std::uint32_t width = 0;
+        std::uint32_t height = 0;
     };
 
     static std::optional<std::pair<int, int>> image_dimensions(const std::string& bytes) {
