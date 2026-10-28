@@ -108,6 +108,8 @@ def receipt(args: argparse.Namespace, selected: dict, full: dict) -> dict:
     full_failures = {name for name, state in full_outcomes.items() if state == "fail"}
     selected_failures = {name for name, state in selected_outcomes.items() if state == "fail"}
     outside = sorted(full_failures - selected_names)
+    selected_outcome = selected.get("outcome", "unavailable")
+    full_outcome = full.get("outcome", "unavailable")
     return {
         "schema": SCHEMA,
         "mode": "shadow",
@@ -126,7 +128,15 @@ def receipt(args: argparse.Namespace, selected: dict, full: dict) -> dict:
         "full_outcomes": full_outcomes,
         "full_failures": sorted(full_failures),
         "failed_outside_selection": outside,
-        "full_outcome": full.get("outcome", "unavailable"),
+        "full_outcome": full_outcome,
+        # An absent authoritative run is never a successful observation.
+        "full_success": full_outcome == "success",
+        "outcome_comparison": {
+            "selected": selected_outcome,
+            "full": full_outcome,
+            "same": selected_outcome == full_outcome,
+            "full_success": full_outcome == "success",
+        },
         "selected_process": selected.get("process", {}),
         "full_process": full.get("process", {}),
         "selection_complete": bool(selected_outcomes) and selected_names.issubset(selected_outcomes),
@@ -245,11 +255,16 @@ def main(argv: list[str] | None = None) -> int:
                      cwd=str(full_cwd))
 
     selected_plan["process"] = selected_proc
+    selected_plan["outcome"] = ("success" if selected_rc == 0 else "failure"
+                                 if selected_rc is not None else "unavailable")
     full = {"process": full_proc, "outcome": "success" if full_proc.get("returncode") == 0 else "failure" if full_proc.get("returncode") is not None else "unavailable"}
     out = receipt(args, selected_plan, full)
     args.receipt_out.write_text(json.dumps(out, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print("::notice title=paired-affected-tests-shadow::" + json.dumps({"schema": SCHEMA, "failed_outside_selection": out["failed_outside_selection"], "full_outcome": out["full_outcome"]}, separators=(",", ":")))
-    return 0
+    print("::notice title=paired-affected-tests-shadow::" + json.dumps({"schema": SCHEMA, "failed_outside_selection": out["failed_outside_selection"], "full_outcome": out["full_outcome"], "full_success": out["full_success"], "outcome_comparison": out["outcome_comparison"]}, separators=(",", ":")))
+    # The selected run is advisory, but the authoritative full run remains the
+    # step's truth.  Preserve its exit status and fail closed when it could not
+    # start; otherwise a red full suite could be reported as green.
+    return full_rc if full_rc is not None else 1
 
 
 if __name__ == "__main__":
