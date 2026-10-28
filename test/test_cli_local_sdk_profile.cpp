@@ -86,7 +86,7 @@ void plant_install(const fs::path& prefix, const fs::path& build,
                                          "PULP_HAS_CLAP:INTERNAL=TRUE\n"
                                          "PULP_ENABLE_RMLUI:BOOL=ON\n"
                                          "PULP_ENABLE_RMLUI_LUA:BOOL=ON\n"
-                                         "PULP_ENABLE_RMLUI_FONTS:BOOL=OFF\n"
+                                         "PULP_ENABLE_RMLUI_FONTS:BOOL=ON\n"
                                          "PULP_ENABLE_AUDIO_PROBES:BOOL=OFF\n"
                                          "PULP_ENABLE_INSPECTOR:BOOL=OFF\n"
                                          "PULP_DEV_BRIDGE_EXEC:BOOL=OFF\n");
@@ -164,7 +164,7 @@ TEST_CASE("forge development SDK configure profile pins required capabilities",
     REQUIRE(contains("-DPULP_ENABLE_INSPECTOR=OFF"));
     REQUIRE(contains("-DPULP_ENABLE_RMLUI=ON"));
     REQUIRE(contains("-DPULP_ENABLE_RMLUI_LUA=ON"));
-    REQUIRE(contains("-DPULP_ENABLE_RMLUI_FONTS=OFF"));
+    REQUIRE(contains("-DPULP_ENABLE_RMLUI_FONTS=ON"));
     REQUIRE(contains("-DPULP_DEV_BRIDGE_EXEC=OFF"));
     REQUIRE(contains("-DPULP_BUILD_TESTS=OFF"));
     REQUIRE(contains("-DPULP_BUILD_EXAMPLES=OFF"));
@@ -280,7 +280,7 @@ TEST_CASE("forge development SDK provenance is explicitly non-distributable",
     REQUIRE(json.find("\"bridge_exec\": false") != std::string::npos);
     REQUIRE(json.find("\"rmlui\": true") != std::string::npos);
     REQUIRE(json.find("\"rmlui_lua\": true") != std::string::npos);
-    REQUIRE(json.find("\"rmlui_fonts\": false") != std::string::npos);
+    REQUIRE(json.find("\"rmlui_fonts\": true") != std::string::npos);
     REQUIRE(json.find(tmp.path.string()) == std::string::npos);
 
     std::string error;
@@ -372,7 +372,7 @@ void plant_tracing_evidence(const fs::path& prefix, const fs::path& build) {
                              "PULP_HAS_CLAP:INTERNAL=TRUE\n"
                              "PULP_ENABLE_RMLUI:BOOL=ON\n"
                              "PULP_ENABLE_RMLUI_LUA:BOOL=ON\n"
-                             "PULP_ENABLE_RMLUI_FONTS:BOOL=OFF\n"
+                             "PULP_ENABLE_RMLUI_FONTS:BOOL=ON\n"
                              "PULP_ENABLE_AUDIO_PROBES:BOOL=OFF\n"
                              "PULP_ENABLE_INSPECTOR:BOOL=OFF\n"
                              "PULP_DEV_BRIDGE_EXEC:BOOL=OFF\n"

@@ -17,10 +17,15 @@ separate product-backed probe; that probe is not the installed AU/CLAP editor.
 The admitted core slice is pinned to RmlUi commit
 `58c751531f4c1a1eb2dc56f409b8e8a323a0c9ad`, with samples, Lua bindings,
 third-party containers, font engines, SVG/Lottie, HarfBuzz sample, and Tracy
-disabled. The upstream debugger target remains available in the SDK export,
-but the Pulp bridge links only `RmlUi::Core`. A separate, default-off
+disabled by default. The upstream debugger target remains available in the SDK
+export, but the Pulp bridge links only `RmlUi::Core`. A separate, default-off
 `PULP_ENABLE_RMLUI_FONTS` admission enables RmlUi's FreeType engine from the
-developer/CI system package; it is not exported or bundled. The
+developer/CI system package. The `forge-dev` and `trace` SDK profiles enable
+that admission because unchanged Usual Suspects skins call
+`Backend::load_font_face()` for their authored faces; those profiles stage the
+exact runtime beside the consumer. Ordinary Pulp builds remain font-engine
+free, and the font engine is never enabled implicitly or bundled in public
+artifacts. The
 `pulp-test-rmlui-backend` suite now proves core initialization, document
 parsing, update, render, and teardown through the optional backend. Its RmlUi
 render adapter lowers compiled geometry to bounded Pulp draw commands,

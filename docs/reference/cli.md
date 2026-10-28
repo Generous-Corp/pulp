@@ -2249,7 +2249,9 @@ ordinary `--local` cache:
   fingerprint under
   `$PULP_HOME/sdk-dev/forge-v1/darwin-arm64/<sha>/<fingerprint>/`.
 - It builds Release arm64 with GPU and design import enabled, and refuses the
-  staged SDK unless AU, VST3, CLAP, and Standalone support are present.
+  staged SDK unless AU, VST3, CLAP, Standalone, RmlUi, Lua, and RmlUi's font
+  engine support are present. The font engine is required by unchanged source
+  skins that register authored faces such as DSEG7.
 - The SDK version comes from that commit's `project(Pulp VERSION ...)`, not the
   running CLI. `--version` is therefore rejected with `--profile forge-dev`.
 - Publication is an atomic rename from a same-filesystem staging directory.

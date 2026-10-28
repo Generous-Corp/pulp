@@ -16,7 +16,7 @@ namespace fs = std::filesystem;
 // exec/execAsync JS bridge are recorded in `features`), so a prefix built under
 // the old contract keeps its own fingerprint instead of being mistaken for the
 // new one.
-inline constexpr int kForgeProfileRevision = 4;
+inline constexpr int kForgeProfileRevision = 5;
 inline constexpr const char* kForgeProfileName = "forge-dev";
 
 // The tracing profile: the forge-dev feature set plus Perfetto compiled in.
@@ -26,7 +26,7 @@ inline constexpr const char* kForgeProfileName = "forge-dev";
 // shipped — and because the two must not collide at one prefix. A prefix whose
 // name promises tracing while its libraries contain none is the exact failure
 // this profile exists to make impossible.
-inline constexpr int kTraceProfileRevision = 3;
+inline constexpr int kTraceProfileRevision = 4;
 inline constexpr const char* kTraceProfileName = "trace";
 inline constexpr const char* kProvenanceSchema = "pulp.sdk-provenance.v1";
 

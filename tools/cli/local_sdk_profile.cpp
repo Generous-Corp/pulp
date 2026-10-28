@@ -241,11 +241,13 @@ std::vector<std::string> configure_arguments(const fs::path& source, const fs::p
         // consumer lane. Keep this explicit rather than inheriting a cache or
         // relying on a downstream to rediscover the optional target: the
         // installed SDK must export Pulp::view-rmlui and the Lua bindings that
-        // existing Usual Suspects projects use. Fonts remain a separate
-        // admission because they add a host/runtime dependency (and are not
-        // needed to expose the RmlUi/Lua ABI).
+        // existing Usual Suspects projects use. The source skins also load
+        // their authored font faces through Backend::load_font_face(), so the
+        // admitted FreeType engine is part of this consumer profile. Keeping
+        // it off makes the profile compile but causes every source font load
+        // to return Status::rejected.
         "-DPULP_ENABLE_RMLUI=ON", "-DPULP_ENABLE_RMLUI_LUA=ON",
-        "-DPULP_ENABLE_RMLUI_FONTS=OFF",
+        "-DPULP_ENABLE_RMLUI_FONTS=ON",
         // Tests OFF already implies this; it is passed explicitly because the
         // staged-install validator asserts the cache value, and a consumer
         // reads the matching `bridge_exec` provenance key.
@@ -306,8 +308,8 @@ Validation validate_staged_install(const fs::path& prefix, const fs::path& build
             "RmlUi support was not enabled in the development SDK", out);
     require(cache_true(cache, "PULP_ENABLE_RMLUI_LUA"),
             "RmlUi Lua bindings were not enabled in the development SDK", out);
-    require(!cache_true(cache, "PULP_ENABLE_RMLUI_FONTS"),
-            "RmlUi fonts must remain a separate opt-in in the development SDK", out);
+    require(cache_true(cache, "PULP_ENABLE_RMLUI_FONTS"),
+            "RmlUi fonts must be enabled in the development SDK for source skins", out);
     require(!cache_true(cache, "PULP_ENABLE_AUDIO_PROBES"),
             "audio probes must stay disabled in the SDK", out);
     require(!cache_true(cache, "PULP_ENABLE_INSPECTOR"),
@@ -404,11 +406,11 @@ std::string serialize_provenance(const Identity& i, const std::string& fingerpri
         << (i.tracing ? "  \"features\": {\"gpu\": true, \"design_import\": true, "
                         "\"webview\": true, \"audio_probes\": false, \"inspector\": false, "
                         "\"bridge_exec\": false, \"rmlui\": true, \"rmlui_lua\": true, "
-                        "\"rmlui_fonts\": false, \"tracing\": true},\n"
+                        "\"rmlui_fonts\": true, \"tracing\": true},\n"
                       : "  \"features\": {\"gpu\": true, \"design_import\": true, "
                         "\"webview\": true, \"audio_probes\": false, \"inspector\": false, "
                         "\"bridge_exec\": false, \"rmlui\": true, \"rmlui_lua\": true, "
-                        "\"rmlui_fonts\": false},\n")
+                        "\"rmlui_fonts\": true},\n")
         << "  \"formats\": {\"AU\": true, \"VST3\": true, \"CLAP\": true, "
            "\"Standalone\": true},\n"
         << "  \"dependencies\": {\"skia\": " << json_string(i.skia_identity)
