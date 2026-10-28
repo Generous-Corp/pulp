@@ -8503,3 +8503,12 @@ inactive without an error. Keep this mode explicit and fail closed on missing
 or malformed `canvas_bindings`, multiple implicit states, or non-canvas match
 selectors. The optional `canvas_index` preserves identity when a capture has
 multiple canvases; live canvas behavior remains a separate proof surface.
+
+## Capture determinism hashing
+
+`provenance.timings` in a browser capture envelope contains per-run diagnostic
+clocks and is expected to vary between otherwise identical imports. Canonical
+determinism hashing strips that field only for `pulp-browser-capture-v1`
+envelopes; report-level timing data and timings in other input shapes remain
+hashed. Do not treat this normalization as proof that browser animation,
+canvas, or WebGL output is deterministic.

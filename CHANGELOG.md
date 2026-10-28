@@ -9,6 +9,17 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1290"></a>
+## [1.29.0] - 2026-10-28
+
+- release/version bump ([#11244](https://github.com/Generous-Corp/pulp/pull/11244))
+- perf/fft plane gap ([#11203](https://github.com/Generous-Corp/pulp/pull/11203))
+- release/version bump ([#11243](https://github.com/Generous-Corp/pulp/pull/11243))
+- fix/importer text ink polarity ([#11197](https://github.com/Generous-Corp/pulp/pull/11197))
+- plan/importer canonical hash 20261027 ([#11188](https://github.com/Generous-Corp/pulp/pull/11188))
+- release/version bump ([#11237](https://github.com/Generous-Corp/pulp/pull/11237))
+- feature/portable fft mufft ([#11228](https://github.com/Generous-Corp/pulp/pull/11228))
+
 <a id="v1280"></a>
 ## [1.28.0] - 2026-10-28
 
@@ -11851,6 +11862,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.29.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.29.0
 [1.28.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.28.0
 [1.27.2]: https://github.com/Generous-Corp/pulp/releases/tag/v1.27.2
 [1.27.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.27.1
