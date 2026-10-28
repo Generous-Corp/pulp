@@ -259,7 +259,8 @@
 
     pulp::canvas::CoreGraphicsCanvas canvas(ctx,
         static_cast<float>(bounds.size.width),
-        static_cast<float>(bounds.size.height));
+        static_cast<float>(bounds.size.height),
+        /*flip_y=*/false);
 
     // Clear background
     canvas.set_fill_color(pulp::canvas::Color::rgba8(30, 30, 46));

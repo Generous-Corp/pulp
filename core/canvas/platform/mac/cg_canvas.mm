@@ -27,11 +27,16 @@ float CoreGraphicsCanvas::backing_scale() const noexcept {
     return std::isfinite(scale) && scale > 0.0f ? scale : 1.0f;
 }
 
-CoreGraphicsCanvas::CoreGraphicsCanvas(CGContextRef ctx, float width, float height)
+CoreGraphicsCanvas::CoreGraphicsCanvas(CGContextRef ctx, float width, float height,
+                                       bool flip_y)
     : ctx_(ctx), width_(width), height_(height) {
-    // Flip coordinate system (CG is bottom-up, we use top-down)
-    CGContextTranslateCTM(ctx_, 0, height);
-    CGContextScaleCTM(ctx_, 1.0, -1.0);
+    // Flip coordinate system (CG is bottom-up, we use top-down). AppKit's
+    // embedded plugin drawRect: path already supplies this conversion, so it
+    // opts out with flip_y=false; all other callers retain the old default.
+    if (flip_y) {
+        CGContextTranslateCTM(ctx_, 0, height);
+        CGContextScaleCTM(ctx_, 1.0, -1.0);
+    }
 }
 
 CoreGraphicsCanvas::~CoreGraphicsCanvas() {

@@ -22,7 +22,12 @@ public:
         return RendererBackend::core_graphics;
     }
     float backing_scale() const noexcept override;
-    explicit CoreGraphicsCanvas(CGContextRef ctx, float width, float height);
+    // `flip_y` keeps the historical top-down conversion for bitmap and
+    // standalone/window contexts. Embedded AppKit plugin NSViews already
+    // provide a top-down CTM to drawRect:, so those hosts pass false to avoid
+    // applying the conversion twice.
+    explicit CoreGraphicsCanvas(CGContextRef ctx, float width, float height,
+                                bool flip_y = true);
     ~CoreGraphicsCanvas() override;
 
     void save() override;

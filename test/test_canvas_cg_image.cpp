@@ -123,6 +123,24 @@ TEST_CASE("CoreGraphicsCanvas reports image-draw capability",
     REQUIRE_FALSE(rec.supports_image_draw());
 }
 
+TEST_CASE("CoreGraphicsCanvas can preserve an already top-down host CTM",
+          "[canvas][cg][transform][plugin-host]") {
+    std::vector<uint8_t> px;
+    CGContextRef ctx = cg_make_bitmap(16, 12, px);
+    REQUIRE(ctx != nullptr);
+    {
+        CoreGraphicsCanvas canvas(ctx, 16, 12, /*flip_y=*/false);
+        const auto t = canvas.current_transform();
+        CHECK(t.a == 1.0f);
+        CHECK(t.b == 0.0f);
+        CHECK(t.c == 0.0f);
+        CHECK(t.d == 1.0f);
+        CHECK(t.e == 0.0f);
+        CHECK(t.f == 0.0f);
+    }
+    CGContextRelease(ctx);
+}
+
 TEST_CASE("CoreGraphicsCanvas draw_image_from_file paints the image right-side-up",
           "[canvas][cg][image][issue-6223]") {
     const std::string src = write_source_png();
