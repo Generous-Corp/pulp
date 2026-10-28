@@ -1196,7 +1196,10 @@ if(PULP_ENABLE_RMLUI)
         pulp-runtime-pins
         pulp-mcp
         pulp-scan-worker
-        pulp-import-design)
+        pulp-import-design
+        rmlui
+        rmlui_core
+        rmlui_debugger)
         if(TARGET "${_pulp_rmlui_tool}")
             list(APPEND _pulp_rmlui_sdk_closure "${_pulp_rmlui_tool}")
         endif()
