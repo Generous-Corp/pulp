@@ -303,6 +303,17 @@ TEST_CASE("ContextMenu modulation callbacks retain sibling lane edits",
     REQUIRE(observed_depth == 0.6f);
 }
 
+TEST_CASE("ContextMenu can expose a product's supported lane count",
+          "[view][context-menu][modulation]") {
+    ContextMenu::ModulationMenuSpec spec;
+    spec.lane_count = 1;
+    spec.lanes[0].shapes = {"Sine"};
+    const auto items = ContextMenu::make_modulation_items(spec);
+    REQUIRE(items.size() == 6);
+    REQUIRE(items[0].header);
+    REQUIRE(items[4].control_kind == Item::ControlKind::slider);
+}
+
 TEST_CASE("ContextMenu click on a disabled row does not select",
           "[view][context-menu]") {
     auto root = make_root();
