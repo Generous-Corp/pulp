@@ -6,6 +6,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace pulp::view::rmlui {
@@ -119,6 +120,45 @@ class ActionSink {
     virtual Status invoke(std::string_view action) = 0;
 };
 
+// Renderer-neutral product model seam. Concrete importers expose their
+// product state through this interface; the backend owns the RmlUi data-model
+// bindings and never exposes RmlUi headers to the importer ABI.
+struct ModelValue {
+    enum class Kind : std::uint8_t { number, boolean, string };
+    Kind kind = Kind::number;
+    double number = 0.0;
+    bool boolean = false;
+    std::string string;
+
+    static ModelValue number_value(double value) {
+        ModelValue result;
+        result.number = value;
+        return result;
+    }
+    static ModelValue boolean_value(bool value) {
+        ModelValue result;
+        result.kind = Kind::boolean;
+        result.boolean = value;
+        return result;
+    }
+    static ModelValue string_value(std::string value) {
+        ModelValue result;
+        result.kind = Kind::string;
+        result.string = std::move(value);
+        return result;
+    }
+};
+
+class ModelHost {
+  public:
+    virtual ~ModelHost() = default;
+    // Called on the owning UI thread while the RmlUi context is active.
+    virtual Status read(std::string_view field, ModelValue& out) = 0;
+    // Called on the owning UI thread by an RmlUi setter. Implementations must
+    // enqueue product/DSP work rather than touching realtime state directly.
+    virtual Status write(std::string_view field, const ModelValue& value) = 0;
+};
+
 // Pulp-owned seam for the optional RmlUi adapter. It intentionally contains
 // no RmlUi or Lua headers; those dependencies remain behind this boundary.
 class Backend {
@@ -140,6 +180,12 @@ class Backend {
     // call above while allowing bold/italic and variable-font faces to retain
     // their CSS selection semantics.
     Status load_font_face(std::string_view path, std::string_view family, FontFaceOptions options);
+    // Create a named RmlUi data model and bind fields on the UI thread. The
+    // host is retained until close(); callers must publish changes with
+    // dirty_model() after a successful product-state update.
+    Status bind_model(std::string_view name, std::shared_ptr<ModelHost> host,
+                      std::vector<std::string> fields);
+    Status dirty_model(std::string_view name, std::string_view field);
     Status dispatch_lua(std::string_view callback);
     Status invoke_action(std::string_view action);
     Status process_mouse_move(int x, int y, int key_modifier_state = 0);

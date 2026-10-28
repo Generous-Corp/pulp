@@ -16,6 +16,33 @@ namespace {
     std::ifstream stream(path, std::ios::binary);
     return {std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
 }
+
+struct TestModel final : ModelHost {
+    Status read(std::string_view field, ModelValue& out) override {
+        if (field == "gain") {
+            out = ModelValue::number_value(gain);
+            return Status::ok;
+        }
+        if (field == "enabled") {
+            out = ModelValue::boolean_value(enabled);
+            return Status::ok;
+        }
+        return Status::rejected;
+    }
+    Status write(std::string_view field, const ModelValue& value) override {
+        if (field == "gain" && value.kind == ModelValue::Kind::number) {
+            gain = value.number;
+            return Status::ok;
+        }
+        if (field == "enabled" && value.kind == ModelValue::Kind::boolean) {
+            enabled = value.boolean;
+            return Status::ok;
+        }
+        return Status::rejected;
+    }
+    double gain = 0.25;
+    bool enabled = false;
+};
 } // namespace
 
 TEST_CASE("headless RmlUi contract loads, renders, and dispatches") {
@@ -53,6 +80,24 @@ TEST_CASE("RmlUi backend parses and lowers a document through the Pulp renderer 
     REQUIRE(headless.frame_height() == 480);
     REQUIRE_FALSE(headless.commands().empty());
     backend.close();
+}
+
+TEST_CASE("RmlUi backend binds and dirties a typed product model") {
+    Headless headless;
+    headless.add_asset("editor.rml", "<rml><body><div>{part.gain}</div></body></rml>");
+    Backend backend(headless, headless, headless);
+    auto model = std::make_shared<TestModel>();
+
+    REQUIRE(backend.open(320, 120) == Status::ok);
+    REQUIRE(backend.bind_model("part", model, {"gain", "enabled"}) == Status::ok);
+    REQUIRE(backend.bind_model("part", model, {"gain", "enabled"}) == Status::rejected);
+    REQUIRE(backend.dirty_model("part", "gain") == Status::ok);
+    REQUIRE(backend.dirty_model("missing", "gain") == Status::rejected);
+    REQUIRE(backend.load_document("editor.rml") == Status::ok);
+    backend.render();
+    REQUIRE_FALSE(headless.commands().empty());
+    backend.close();
+    REQUIRE(backend.dirty_model("part", "gain") == Status::not_open);
 }
 
 TEST_CASE("RmlUi font loading is admitted, rooted, and renders text") {
