@@ -56,7 +56,7 @@ EXPORTS = [
                 include="pulp/format/processor_node_adapter.hpp",
                 qualified_name="pulp::format::ProcessorNodeInstance::create",
                 target="Pulp::format",
-                header_fingerprint="sha256:f0fb9306f69771cc40a4c4fdd3e8b4061dab032cef36af714f852ccc55005376",
+                header_fingerprint="sha256:37fee4424e76610a54647698a167653ded5f335a059179d99129cc255a8c4bb0",
             ),
         ],
         _link_probes=[
