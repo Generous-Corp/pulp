@@ -7,6 +7,7 @@
   "DRACO": {"fetchcontent": ["draco"]},
   "fastgltf": {"fetchcontent": ["fastgltf"]},
   "Highway": {"fetchcontent": ["highway"]},
+  "Lua": {"fetchcontent": ["pulp_rmlui_lua"], "targets": ["pulp-rmlui-lua", "pulp-view-rmlui"], "anchors": ["\\bpulp_register_fetchcontent_source\\(pulp_rmlui_lua\\b"]},
   "Mbed TLS": {"fetchcontent": ["mbedtls"]},
   "muFFT": {"fetchcontent": ["mufft"], "targets": ["pulp-signal-mufft"]},
   "Oboe": {"fetchcontent": ["oboe"], "platforms": ["android"]},
