@@ -15,6 +15,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -329,6 +330,11 @@ struct Backend::Runtime {
     FileAdapter file;
     RenderAdapter render;
 #if !PULP_RMLUI_FONTS_ENABLED
+    // The pinned RmlUi core supplies a concrete no-op FontEngineInterface. Keep a
+    // compile-time guard here so a future RmlUi pin cannot silently turn the
+    // default-off font configuration into an abstract-type build failure.
+    static_assert(!std::is_abstract_v<Rml::FontEngineInterface>,
+                  "RmlUi font-off mode requires a concrete null font engine");
     Rml::FontEngineInterface font;
 #endif
     Rml::Context* context = nullptr;
