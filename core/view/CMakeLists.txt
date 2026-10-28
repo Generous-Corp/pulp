@@ -47,6 +47,14 @@ if(PULP_ENABLE_RMLUI)
         endif()
         target_link_libraries(pulp-view-rmlui PUBLIC RmlUi::Lua)
     endif()
+    # RmlUi's admitted FreeType engine is a linked Mach-O runtime on Apple.
+    # Register it with the common staging path so plugin bundles copy the
+    # exact SDK-selected dylib and rewrite the consumer reference to
+    # @loader_path. This keeps installed RmlUi bundles relocatable and avoids
+    # leaking a developer machine's Homebrew prefix into shipped AU/CLAP code.
+    if(APPLE AND PULP_ENABLE_RMLUI_FONTS)
+        pulp_register_macho_linked_runtime_dependency_target(Freetype::Freetype)
+    endif()
     target_compile_features(pulp-view-rmlui PUBLIC cxx_std_20)
     target_compile_definitions(pulp-view-rmlui PUBLIC
         PULP_RMLUI_FONTS_ENABLED=$<BOOL:${PULP_ENABLE_RMLUI_FONTS}>

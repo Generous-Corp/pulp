@@ -77,7 +77,9 @@ foreach(_otool_line IN LISTS _otool_lines)
     # stable otool suffix from the right so the complete name remains intact.
     if(_otool_line MATCHES "^(.+) \\(compatibility version .+$")
         set(_loaded_runtime_ref "${CMAKE_MATCH_1}")
-        if(_loaded_runtime_ref STREQUAL _registered_runtime_id)
+        if(_loaded_runtime_ref STREQUAL _registered_runtime_id
+           OR _loaded_runtime_ref STREQUAL
+              "@loader_path/${PULP_LINKED_RUNTIME_NAME}")
             set(_runtime_ref_found TRUE)
             break()
         endif()
@@ -142,7 +144,9 @@ if(NOT _runtime_ref_found)
                 string(STRIP "${_peer_otool_line}" _peer_otool_line)
                 if(_peer_otool_line MATCHES
                    "^(.+) \\(compatibility version .+$"
-                   AND CMAKE_MATCH_1 STREQUAL _registered_runtime_id)
+                   AND (CMAKE_MATCH_1 STREQUAL _registered_runtime_id
+                        OR CMAKE_MATCH_1 STREQUAL
+                           "@loader_path/${PULP_LINKED_RUNTIME_NAME}"))
                     set(_other_image_needs_runtime TRUE)
                     break()
                 endif()
@@ -219,6 +223,29 @@ if(NOT _runtime_ref_found)
     return()
 endif()
 
+# A linked runtime can carry an absolute SDK or package-manager install name
+# (FreeType is the common RmlUi example). Rewrite only the exact admitted
+# reference on this final image before staging the matching file. The bundle
+# then resolves the sidecar relative to its own executable on every host.
+if(_loaded_runtime_ref MATCHES "^/")
+    find_program(_install_name_tool install_name_tool)
+    if(NOT _install_name_tool)
+        message(FATAL_ERROR
+            "${PULP_STAGING_LABEL}: install_name_tool is required to make "
+            "${PULP_LINKED_RUNTIME_NAME} relocatable")
+    endif()
+    execute_process(
+        COMMAND "${_install_name_tool}" -change "${_registered_runtime_id}"
+                "@loader_path/${PULP_LINKED_RUNTIME_NAME}" "${PULP_LINKED_IMAGE}"
+        RESULT_VARIABLE _rewrite_rc
+        ERROR_VARIABLE _rewrite_err)
+    if(NOT _rewrite_rc EQUAL 0)
+        message(FATAL_ERROR
+            "${PULP_STAGING_LABEL}: failed to rewrite ${_registered_runtime_id} "
+            "in ${PULP_LINKED_IMAGE}: ${_rewrite_err}")
+    endif()
+endif()
+
 execute_process(
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
         "${PULP_LINKED_RUNTIME}" "${PULP_STAGING_DIR}"
@@ -233,6 +260,21 @@ if(NOT EXISTS "${PULP_STAGING_DIR}/${PULP_LINKED_RUNTIME_NAME}")
     message(FATAL_ERROR
         "${PULP_STAGING_LABEL}: copy completed without "
         "${PULP_LINKED_RUNTIME_NAME}")
+endif()
+# Give the copied dylib a bundle-local identity as well. This prevents a
+# second-level loader from reintroducing the source machine's absolute path.
+if(_registered_runtime_id MATCHES "^/")
+    execute_process(
+        COMMAND "${_install_name_tool}" -id
+                "@loader_path/${PULP_LINKED_RUNTIME_NAME}"
+                "${PULP_STAGING_DIR}/${PULP_LINKED_RUNTIME_NAME}"
+        RESULT_VARIABLE _runtime_id_rewrite_rc
+        ERROR_VARIABLE _runtime_id_rewrite_err)
+    if(NOT _runtime_id_rewrite_rc EQUAL 0)
+        message(FATAL_ERROR
+            "${PULP_STAGING_LABEL}: failed to rewrite staged identity for "
+            "${PULP_LINKED_RUNTIME_NAME}: ${_runtime_id_rewrite_err}")
+    endif()
 endif()
 file(SHA256 "${PULP_STAGING_DIR}/${PULP_LINKED_RUNTIME_NAME}"
     _receipt_runtime_sha256)
