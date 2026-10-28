@@ -57,7 +57,8 @@ std::string normalized_identity(const Identity& i) {
     std::ostringstream out;
     // The serialization is exact text: a profile revision bump moves every
     // prefix of that profile to a new fingerprint, so an installed SDK whose
-    // provenance predates a field (bridge_exec) is rebuilt rather than reused.
+    // provenance predates a field (RmlUi/Lua or bridge_exec) is rebuilt rather
+    // than reused.
     out << "profile=" << profile_name_for(i) << "\n"
         << "revision=" << profile_revision_for(i) << "\n"
         << "sdk_version=" << i.sdk_version << "\n"
@@ -236,6 +237,15 @@ std::vector<std::string> configure_arguments(const fs::path& source, const fs::p
         "-DPULP_ENABLE_GPU=ON", "-DPULP_REQUIRE_GPU_FOR_SDK=ON", "-DPULP_ENABLE_DESIGN_IMPORT=ON",
         "-DPULP_BUILD_WEBVIEW=ON", "-DPULP_ENABLE_AUDIO_PROBES=OFF", "-DPULP_ENABLE_INSPECTOR=OFF",
         "-DPULP_BUILD_TESTS=OFF", "-DPULP_BUILD_EXAMPLES=OFF",
+        // The Forge/importer development profiles are the admitted RmlUi
+        // consumer lane. Keep this explicit rather than inheriting a cache or
+        // relying on a downstream to rediscover the optional target: the
+        // installed SDK must export Pulp::view-rmlui and the Lua bindings that
+        // existing Usual Suspects projects use. Fonts remain a separate
+        // admission because they add a host/runtime dependency (and are not
+        // needed to expose the RmlUi/Lua ABI).
+        "-DPULP_ENABLE_RMLUI=ON", "-DPULP_ENABLE_RMLUI_LUA=ON",
+        "-DPULP_ENABLE_RMLUI_FONTS=OFF",
         // Tests OFF already implies this; it is passed explicitly because the
         // staged-install validator asserts the cache value, and a consumer
         // reads the matching `bridge_exec` provenance key.
@@ -292,6 +302,12 @@ Validation validate_staged_install(const fs::path& prefix, const fs::path& build
     require(cache_true(cache, "PULP_HAS_VST3"), "VST3 SDK was not resolved", out);
     require(cache_true(cache, "PULP_HAS_AUSDK"), "AudioUnitSDK was not resolved", out);
     require(cache_true(cache, "PULP_HAS_CLAP"), "CLAP was not resolved", out);
+    require(cache_true(cache, "PULP_ENABLE_RMLUI"),
+            "RmlUi support was not enabled in the development SDK", out);
+    require(cache_true(cache, "PULP_ENABLE_RMLUI_LUA"),
+            "RmlUi Lua bindings were not enabled in the development SDK", out);
+    require(!cache_true(cache, "PULP_ENABLE_RMLUI_FONTS"),
+            "RmlUi fonts must remain a separate opt-in in the development SDK", out);
     require(!cache_true(cache, "PULP_ENABLE_AUDIO_PROBES"),
             "audio probes must stay disabled in the SDK", out);
     require(!cache_true(cache, "PULP_ENABLE_INSPECTOR"),
@@ -334,6 +350,12 @@ Validation validate_staged_install(const fs::path& prefix, const fs::path& build
         require(!cache_true(cache, "PULP_TRACING"),
                 "tracing must stay disabled outside the trace profile", out);
     }
+
+    const auto targets = read_file(prefix / "lib" / "cmake" / "Pulp" / "PulpTargets.cmake");
+    require(targets.find("Pulp::view-rmlui") != std::string::npos,
+            "the exported CMake package does not declare Pulp::view-rmlui", out);
+    require(targets.find("Pulp::rmlui-lua") != std::string::npos,
+            "the exported CMake package does not declare Pulp::rmlui-lua", out);
 
     out.ok = out.errors.empty();
     return out;
@@ -378,13 +400,15 @@ std::string serialize_provenance(const Identity& i, const std::string& fingerpri
         // so a downstream consumer can assert the shell bridge is absent from
         // the archive without opening it. The traced variant adds the one key
         // that distinguishes it. Adding a feature key changes this exact text,
-        // which is why each profile revision moved when it arrived.
+        // which is why each profile revision moves when a capability arrives.
         << (i.tracing ? "  \"features\": {\"gpu\": true, \"design_import\": true, "
                         "\"webview\": true, \"audio_probes\": false, \"inspector\": false, "
-                        "\"bridge_exec\": false, \"tracing\": true},\n"
+                        "\"bridge_exec\": false, \"rmlui\": true, \"rmlui_lua\": true, "
+                        "\"rmlui_fonts\": false, \"tracing\": true},\n"
                       : "  \"features\": {\"gpu\": true, \"design_import\": true, "
                         "\"webview\": true, \"audio_probes\": false, \"inspector\": false, "
-                        "\"bridge_exec\": false},\n")
+                        "\"bridge_exec\": false, \"rmlui\": true, \"rmlui_lua\": true, "
+                        "\"rmlui_fonts\": false},\n")
         << "  \"formats\": {\"AU\": true, \"VST3\": true, \"CLAP\": true, "
            "\"Standalone\": true},\n"
         << "  \"dependencies\": {\"skia\": " << json_string(i.skia_identity)

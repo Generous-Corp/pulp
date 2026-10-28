@@ -65,7 +65,8 @@ void plant_install(const fs::path& prefix, const fs::path& build,
     write_file(prefix / "lib/cmake/Pulp/PulpConfig.cmake", "# config\n");
     write_file(
         prefix / "lib/cmake/Pulp/PulpTargets.cmake",
-        "Pulp::format Pulp::standalone Pulp::render Pulp::clap Pulp::vst3-sdk Pulp::ausdk\n");
+        "Pulp::format Pulp::standalone Pulp::render Pulp::clap Pulp::vst3-sdk Pulp::ausdk "
+        "Pulp::view-rmlui Pulp::rmlui-lua\n");
     write_file(prefix / "include/pulp/runtime/build_info.hpp",
                "kBuildType   = \"Release\";\n"
                "kGitSha      = \"" +
@@ -83,6 +84,9 @@ void plant_install(const fs::path& prefix, const fs::path& build,
                                          "PULP_HAS_VST3:INTERNAL=TRUE\n"
                                          "PULP_HAS_AUSDK:INTERNAL=TRUE\n"
                                          "PULP_HAS_CLAP:INTERNAL=TRUE\n"
+                                         "PULP_ENABLE_RMLUI:BOOL=ON\n"
+                                         "PULP_ENABLE_RMLUI_LUA:BOOL=ON\n"
+                                         "PULP_ENABLE_RMLUI_FONTS:BOOL=OFF\n"
                                          "PULP_ENABLE_AUDIO_PROBES:BOOL=OFF\n"
                                          "PULP_ENABLE_INSPECTOR:BOOL=OFF\n"
                                          "PULP_DEV_BRIDGE_EXEC:BOOL=OFF\n");
@@ -158,6 +162,9 @@ TEST_CASE("forge development SDK configure profile pins required capabilities",
     REQUIRE(contains("-DPULP_BUILD_WEBVIEW=ON"));
     REQUIRE(contains("-DPULP_ENABLE_AUDIO_PROBES=OFF"));
     REQUIRE(contains("-DPULP_ENABLE_INSPECTOR=OFF"));
+    REQUIRE(contains("-DPULP_ENABLE_RMLUI=ON"));
+    REQUIRE(contains("-DPULP_ENABLE_RMLUI_LUA=ON"));
+    REQUIRE(contains("-DPULP_ENABLE_RMLUI_FONTS=OFF"));
     REQUIRE(contains("-DPULP_DEV_BRIDGE_EXEC=OFF"));
     REQUIRE(contains("-DPULP_BUILD_TESTS=OFF"));
     REQUIRE(contains("-DPULP_BUILD_EXAMPLES=OFF"));
@@ -217,7 +224,7 @@ TEST_CASE("forge development SDK validation rejects missing format and GPU targe
     const auto validation = local_sdk::validate_staged_install(
         prefix, build, expected, "/source/external/skia-build");
     REQUIRE_FALSE(validation.ok);
-    REQUIRE(validation.errors.size() == 4);
+    REQUIRE(validation.errors.size() == 6);
 }
 
 TEST_CASE("forge development SDK validation rejects environment-selected build inputs",
@@ -271,6 +278,9 @@ TEST_CASE("forge development SDK provenance is explicitly non-distributable",
     REQUIRE(json.find("\"architectures\": [\"arm64\"]") != std::string::npos);
     REQUIRE(json.find("\"webview\": true") != std::string::npos);
     REQUIRE(json.find("\"bridge_exec\": false") != std::string::npos);
+    REQUIRE(json.find("\"rmlui\": true") != std::string::npos);
+    REQUIRE(json.find("\"rmlui_lua\": true") != std::string::npos);
+    REQUIRE(json.find("\"rmlui_fonts\": false") != std::string::npos);
     REQUIRE(json.find(tmp.path.string()) == std::string::npos);
 
     std::string error;
@@ -360,6 +370,9 @@ void plant_tracing_evidence(const fs::path& prefix, const fs::path& build) {
                              "PULP_HAS_VST3:INTERNAL=TRUE\n"
                              "PULP_HAS_AUSDK:INTERNAL=TRUE\n"
                              "PULP_HAS_CLAP:INTERNAL=TRUE\n"
+                             "PULP_ENABLE_RMLUI:BOOL=ON\n"
+                             "PULP_ENABLE_RMLUI_LUA:BOOL=ON\n"
+                             "PULP_ENABLE_RMLUI_FONTS:BOOL=OFF\n"
                              "PULP_ENABLE_AUDIO_PROBES:BOOL=OFF\n"
                              "PULP_ENABLE_INSPECTOR:BOOL=OFF\n"
                              "PULP_DEV_BRIDGE_EXEC:BOOL=OFF\n"
@@ -367,7 +380,7 @@ void plant_tracing_evidence(const fs::path& prefix, const fs::path& build) {
     write_file(build / "CMakeCache.txt", cache);
     write_file(prefix / "lib/cmake/Pulp/PulpTargets.cmake",
                "Pulp::format Pulp::standalone Pulp::render Pulp::clap Pulp::vst3-sdk "
-               "Pulp::ausdk Pulp::tracing\n");
+               "Pulp::ausdk Pulp::view-rmlui Pulp::rmlui-lua Pulp::tracing\n");
     write_file(prefix / "lib/libpulp-runtime.a",
                std::string("\x21<arch>\npadding") + std::string(pulp::cli::kTracingShipSentinel) +
                    "more padding");
@@ -425,6 +438,10 @@ TEST_CASE("trace SDK configure enables tracing and forge-dev does not", "[cli][s
     // is about tracing rather than about one list being empty.
     REQUIRE(has(traced, "-DPULP_ENABLE_GPU=ON"));
     REQUIRE(has(forge, "-DPULP_ENABLE_GPU=ON"));
+    REQUIRE(has(traced, "-DPULP_ENABLE_RMLUI=ON"));
+    REQUIRE(has(traced, "-DPULP_ENABLE_RMLUI_LUA=ON"));
+    REQUIRE(has(forge, "-DPULP_ENABLE_RMLUI=ON"));
+    REQUIRE(has(forge, "-DPULP_ENABLE_RMLUI_LUA=ON"));
 }
 
 TEST_CASE("trace SDK validation accepts a build that really carries Perfetto",
@@ -500,6 +517,7 @@ TEST_CASE("trace SDK provenance records the profile and stays non-distributable"
     REQUIRE(json.find("\"kind\": \"development\"") != std::string::npos);
     REQUIRE(json.find("\"profile\": \"trace\"") != std::string::npos);
     REQUIRE(json.find("\"tracing\": true") != std::string::npos);
+    REQUIRE(json.find("\"rmlui_lua\": true") != std::string::npos);
     REQUIRE(json.find("\"distribution_eligible\": false") != std::string::npos);
 
     // Control: the forge-dev marker is byte-stable and carries no tracing key,
