@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 import tempfile
@@ -13,7 +12,9 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(HERE.parent / "scripts"))
 import paired_affected_tests_shadow as _runner  # noqa: E402,F401
+from process_liveness import pid_alive  # noqa: E402
 
 
 def command(code: str) -> list[str]:
@@ -138,9 +139,7 @@ class PairedShadowTests(unittest.TestCase):
             child = int(child_pid.read_text(encoding="utf-8"))
             deadline = time.monotonic() + 2
             while time.monotonic() < deadline:
-                try:
-                    os.kill(child, 0)
-                except ProcessLookupError:
+                if pid_alive(child) is False:
                     break
                 time.sleep(0.05)
             else:
