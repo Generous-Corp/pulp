@@ -1516,8 +1516,17 @@ CSSStyleDeclaration.prototype.getPropertyValue = function(name) {
 };
 
 CSSStyleDeclaration.prototype.removeProperty = function(name) {
+    var old = this.getPropertyValue(name);
+    if (name.indexOf("--") === 0) {
+        var tokenName = name.slice(2);
+        if (typeof removeToken === 'function') removeToken(tokenName);
+        else {
+            if (typeof setStringToken === 'function') setStringToken(tokenName, "");
+            if (typeof setMotionToken === 'function') setMotionToken(tokenName, 0);
+        }
+        return old;
+    }
     var camel = name.replace(/-([a-z])/g, function(_, c) { return c.toUpperCase(); });
-    var old = this._props[camel] || "";
     delete this._props[camel];
     return old;
 };

@@ -1471,6 +1471,37 @@ TEST_CASE("WebCompat: setProperty('--name') clears stale slots on type-change re
     REQUIRE(motionSlot3.getWithDefault<double>(-1.0) == 0.0);
 }
 
+TEST_CASE("WebCompat: removeProperty clears every custom-token slot",
+          "[webcompat][css-var][remove-property]") {
+    TestEnvironment env;
+
+    // String and length values are exposed through the dedicated token
+    // getters. Removing either declaration must make var() take its fallback,
+    // rather than leaving a process-local token behind for later nodes.
+    env.eval(R"JS(
+        var __removeEl = document.createElement('div');
+        __removeEl.style.setProperty('--remove-string', 'JetBrains Mono');
+        __removeEl.style.removeProperty('--remove-string');
+        __removeEl.style.setProperty('--remove-length', '12px');
+        __removeEl.style.removeProperty('--remove-length');
+    )JS");
+    auto stringSlot = env.engine.evaluate("getStringToken('remove-string')");
+    auto lengthSlot = env.engine.evaluate("getMotionToken('remove-length')");
+    REQUIRE(std::string(stringSlot.getWithDefault<std::string_view>("")).empty());
+    REQUIRE(lengthSlot.getWithDefault<double>(-1.0) == 0.0);
+    auto fallback = env.engine.evaluate("_resolveVar('var(--remove-string, fallback)') + '|' + "
+                                        "_resolveVar('var(--remove-length, 7px)')");
+    REQUIRE(std::string(fallback.getWithDefault<std::string_view>("")) == "fallback|7px");
+
+    // Colors live in a third theme map and cannot be cleared by assigning an
+    // empty string or zero. The native removeToken bridge must erase it.
+    env.eval("__removeEl.style.setProperty('--remove-color', 'red'); "
+             "__removeEl.style.removeProperty('--remove-color');");
+    auto theme_json = env.engine.evaluate("getThemeJson()");
+    REQUIRE(std::string(theme_json.getWithDefault<std::string_view>("")).find("remove-color") ==
+            std::string::npos);
+}
+
 TEST_CASE("WebCompat: StyleSheet attach applies rules to existing elements (issue-1551)",
           "[webcompat][stylesheet][issue-1551]") {
     TestEnvironment env;
