@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 """Run an affected-test command beside the authoritative full command.
 
-This is an observation-only primitive for merge-group experiments.  Both
-commands receive the same checkout and build directory; the full command is
-authoritative and its exit status is never changed by the selected command.
+This is an observation-only primitive for merge-group experiments.  The full
+command is authoritative and its exit status is never changed by the selected
+command. Callers must provide separate working directories: the selected run
+is not allowed to race the full run's build or test outputs.
 The receipt records exact identities, outcomes, and failures outside the
 selected result so a promotion decision can be made from evidence.
 
 Commands are supplied as JSON arrays rather than shell strings.  That keeps
 argument boundaries unambiguous and avoids giving a shadow experiment shell
 authority.  A caller should use separate JUnit paths for the two processes.
+The selected process has a bounded timeout and is terminated as a process group
+if it does not finish; the full process has no such bound here because its
+normal CI timeout remains authoritative.
 The process returns zero after writing a receipt, including when either
 experiment cannot start; shadow telemetry must never make the merge gate red.
 """
@@ -19,6 +23,7 @@ import argparse
 import hashlib
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -32,14 +37,45 @@ def _digest(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
-def _run(command: list[str], log: Path) -> tuple[int | None, float, str | None]:
-    started = time.monotonic()
+def _popen(command: list[str], log: Path, cwd: Path) -> tuple[subprocess.Popen[bytes] | None, Any, str | None]:
+    """Start one experiment in its own output stream and process group."""
     try:
-        with log.open("w", encoding="utf-8") as stream:
-            proc = subprocess.run(command, stdout=stream, stderr=subprocess.STDOUT, check=False)
-        return proc.returncode, round(time.monotonic() - started, 1), None
+        stream = log.open("wb")
+        kwargs: dict[str, Any] = {
+            "stdout": stream,
+            "stderr": subprocess.STDOUT,
+            "cwd": str(cwd),
+        }
+        if os.name == "posix":
+            kwargs["start_new_session"] = True
+        elif hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
+            kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        return subprocess.Popen(command, **kwargs), stream, None
     except OSError as exc:
-        return None, round(time.monotonic() - started, 1), repr(exc)
+        return None, None, repr(exc)
+
+
+def _terminate(proc: subprocess.Popen[bytes]) -> str:
+    """Stop a timed-out selected process, including descendants."""
+    if proc.poll() is not None:
+        return "already-exited"
+    try:
+        if os.name == "posix":
+            os.killpg(proc.pid, signal.SIGTERM)
+        else:
+            proc.terminate()
+        try:
+            proc.wait(timeout=2)
+            return "terminated"
+        except subprocess.TimeoutExpired:
+            if os.name == "posix":
+                os.killpg(proc.pid, signal.SIGKILL)
+            else:
+                proc.kill()
+            proc.wait(timeout=2)
+            return "killed"
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return f"termination-error:{exc!r}"
 
 
 def _junit(path: Path) -> dict[str, str]:
@@ -101,6 +137,10 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--selected-command", type=Path, required=True, help="JSON array")
     ap.add_argument("--full-command", type=Path, required=True, help="JSON array")
+    ap.add_argument("--selected-cwd", type=Path, required=True, help="isolated selected-test working directory")
+    ap.add_argument("--full-cwd", type=Path, required=True, help="isolated full-test working directory")
+    ap.add_argument("--selected-timeout-seconds", type=float, default=120.0,
+                    help="bound selected-test execution (default: 120 seconds)")
     ap.add_argument("--selected-junit", required=True)
     ap.add_argument("--full-junit", required=True)
     ap.add_argument("--selection", type=Path, required=True, help="JSON selection plan")
@@ -124,29 +164,57 @@ def main(argv: list[str] | None = None) -> int:
         selected_plan = {"tests": [], "selection_error": str(exc)}
         selected_cmd, full_cmd = [], []
 
+    if args.selected_timeout_seconds <= 0:
+        selected_plan["selection_error"] = "selected timeout must be positive"
+        selected_cmd = []
+    try:
+        selected_cwd = args.selected_cwd.resolve()
+        full_cwd = args.full_cwd.resolve()
+        if selected_cwd == full_cwd:
+            raise ValueError("selected and full working directories must be different")
+        if not selected_cwd.is_dir() or not full_cwd.is_dir():
+            raise ValueError("selected and full working directories must already exist")
+    except (OSError, ValueError) as exc:
+        selected_plan["selection_error"] = str(exc)
+        selected_cmd, full_cmd = [], []
+
     work = args.receipt_out.parent
     work.mkdir(parents=True, exist_ok=True)
     selected_proc: dict[str, Any] = {"command_digest": _digest(selected_cmd)}
     full_proc: dict[str, Any] = {"command_digest": _digest(full_cmd)}
-    # Start selected first, then immediately run the authoritative suite.  The
-    # selected process is deliberately independent and never shares output.
+    # Start selected first, then immediately run the authoritative suite.  Both
+    # have isolated working directories and output.  Monitor the selected child
+    # while full runs so a hung selector cannot hold the shadow job forever.
     selected_started = time.monotonic()
-    selected_error = None
+    selected_child, selected_stream, selected_error = _popen(selected_cmd, work / "selected.log", selected_cwd) if selected_cmd else (None, None, "selection command unavailable")
+    full_started = time.monotonic()
+    full_child, full_stream, full_error = _popen(full_cmd, work / "full.log", full_cwd) if full_cmd else (None, None, "full command unavailable")
+    selected_timed_out = False
+    selected_termination = None
     selected_rc: int | None = None
-    try:
-        selected_log = work / "selected.log"
-        with selected_log.open("w", encoding="utf-8") as stream:
-            selected_child = subprocess.Popen(selected_cmd, stdout=stream, stderr=subprocess.STDOUT) if selected_cmd else None
-            if selected_child is None:
-                selected_error = "selection command unavailable"
-            full_rc, full_seconds, full_error = _run(full_cmd, work / "full.log") if full_cmd else (None, 0.0, "full command unavailable")
-            if selected_child is not None:
-                selected_rc = selected_child.wait()
-        selected_proc.update(returncode=selected_rc, seconds=round(time.monotonic() - selected_started, 1), error=selected_error)
-        full_proc.update(returncode=full_rc, seconds=full_seconds, error=full_error)
-    except OSError as exc:
-        selected_proc.update(returncode=selected_rc, seconds=round(time.monotonic() - selected_started, 1), error=repr(exc))
-        full_proc.update(returncode=None, seconds=0.0, error=repr(exc))
+    full_rc: int | None = None
+    while (selected_child is not None and selected_rc is None) or (full_child is not None and full_rc is None):
+        now = time.monotonic()
+        if selected_child is not None and selected_rc is None:
+            selected_rc = selected_child.poll()
+            if selected_rc is None and now - selected_started >= args.selected_timeout_seconds:
+                selected_timed_out = True
+                selected_termination = _terminate(selected_child)
+                selected_rc = selected_child.returncode
+        if full_child is not None and full_rc is None:
+            full_rc = full_child.poll()
+        if (selected_child is None or selected_rc is not None) and (full_child is None or full_rc is not None):
+            break
+        time.sleep(0.05)
+    if selected_stream is not None:
+        selected_stream.close()
+    if full_stream is not None:
+        full_stream.close()
+    selected_proc.update(returncode=selected_rc, seconds=round(time.monotonic() - selected_started, 1),
+                         error=selected_error, cwd=str(selected_cwd), timeout_seconds=args.selected_timeout_seconds,
+                         timed_out=selected_timed_out, termination=selected_termination)
+    full_proc.update(returncode=full_rc, seconds=round(time.monotonic() - full_started, 1), error=full_error,
+                     cwd=str(full_cwd))
 
     selected_plan["process"] = selected_proc
     full = {"process": full_proc, "outcome": "success" if full_proc.get("returncode") == 0 else "failure" if full_proc.get("returncode") is not None else "unavailable"}
