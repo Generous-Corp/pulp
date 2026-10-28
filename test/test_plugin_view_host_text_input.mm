@@ -7,6 +7,7 @@
 #include <pulp/view/view.hpp>
 
 #include <stdexcept>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -587,6 +588,20 @@ std::pair<uint32_t, uint32_t> orientation_png_dimensions(const std::vector<uint8
     return {read_be32(16), read_be32(20)};
 }
 
+struct ScopedOrientationHost {
+    std::unique_ptr<PluginViewHost> host;
+    NSWindow* window = nil;
+
+    ~ScopedOrientationHost() {
+        if (host) {
+            host->detach();
+            host.reset();
+        }
+        if (window)
+            [window close];
+    }
+};
+
 TEST_CASE("PluginViewHost (mac GPU) preserves top-down presentable orientation",
           "[plugin-view-host][gpu][mac][orientation]") {
     @autoreleasepool {
@@ -601,12 +616,11 @@ TEST_CASE("PluginViewHost (mac GPU) preserves top-down presentable orientation",
         PluginViewHost::Options opts;
         opts.size = {240u, 120u};
         opts.use_gpu = true;
-        auto host = PluginViewHost::create(root, opts);
+        ScopedOrientationHost scoped{PluginViewHost::create(root, opts), window};
+        auto& host = scoped.host;
         REQUIRE(host != nullptr);
         if (!host->is_gpu_backed()) {
-            SUCCEED("No GPU-backed plugin host in this process — orientation test skipped.");
-            [window close];
-            return;
+            SKIP("No GPU-backed plugin host in this process — orientation test skipped.");
         }
         host->attach_to_parent((__bridge void*)window.contentView);
         [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.20]];
@@ -629,9 +643,6 @@ TEST_CASE("PluginViewHost (mac GPU) preserves top-down presentable orientation",
         // this relationship.
         REQUIRE(bottom.luminance_mean > top.luminance_mean + 80.0);
 
-        host->detach();
-        host.reset();
-        [window close];
     }
 }
 
