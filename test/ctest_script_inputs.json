@@ -154,6 +154,7 @@
     "tools/cli/version_diag.cpp"
    ],
    "spawning_sources": [
+    "build/tools/cli/generated/migration_index.cpp",
     "tools/cli/cli_common.cpp",
     "tools/cli/cli_delegate.cpp",
     "tools/cli/cli_doctor_helpers.cpp",
@@ -3100,6 +3101,7 @@
   "pulp-test-signal-formant-filter-bank",
   "pulp-test-signal-fractional-delay",
   "pulp-test-signal-frequency-shifter-ssb",
+  "pulp-test-signal-gain",
   "pulp-test-signal-granular",
   "pulp-test-signal-graph-audio-parity",
   "pulp-test-signal-graph-control-authority",
@@ -3217,6 +3219,7 @@
   "pulp-test-web-gpu-convolver",
   "pulp-test-webgpu-mock-buffer",
   "pulp-test-webgpu-native-draw",
+  "pulp-test-webview-backend-platform",
   "pulp-test-widget-bridge-api-contracts",
   "pulp-test-widget-bridge-no-gpu-gates",
   "pulp-test-windowing",
@@ -3494,6 +3497,14 @@
     "tools/scripts/android_smoke.sh"
    ],
    "kind": "shell"
+  },
+  "android-surface-runtime-contract": {
+   "entry": "tools/scripts/test_android_surface_runtime_contract.py",
+   "inputs": [
+    "core/render/platform/android/surface_runtime_android.cpp",
+    "tools/scripts/test_android_surface_runtime_contract.py"
+   ],
+   "kind": "python"
   },
   "apple-bundle-signing-check": {
    "entry": "tools/scripts/test_check_apple_bundle_signing.py",
@@ -7486,6 +7497,14 @@
    "inputs": [
     "tools/scripts/nm_symbols.py",
     "tools/scripts/test_nm_symbols.py"
+   ],
+   "kind": "python"
+  },
+  "nonuniform-head-table": {
+   "entry": "tools/scripts/nonuniform_head_check.py",
+   "inputs": [
+    "core/signal/include/pulp/signal/convolver_non_uniform.hpp",
+    "tools/scripts/nonuniform_head_check.py"
    ],
    "kind": "python"
   },

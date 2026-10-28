@@ -427,8 +427,11 @@ private:
                 // host block cannot make the next one do double work.
                 const long target =
                     static_cast<long>((static_cast<long long>(g.total_cost) * elapsed) / period);
+                const long long previous_cost = block_cost_;
                 run_group_work(g, target - g.granted);
-                g.granted = target;
+                // An indivisible work item can leave credit unused. Carry it
+                // into the next slice instead of deferring it to the boundary.
+                g.granted += static_cast<long>(block_cost_ - previous_cost);
             }
 
             if (phase != 0) continue;
@@ -437,10 +440,11 @@ private:
             // proportional grant above can land exactly on the last item of the
             // last job, in which case the work is finished but the job walker
             // has not yet stepped past the final cell to say so. This call is
-            // free when the period is genuinely complete (it consumes no
-            // budget) and is NOT a catch-up branch — `total_cost` is the exact
-            // metered cost of the period, so there is never real work left.
-            if (g.armed) run_group_work(g, g.total_cost);
+            // free when the period is complete. The one-unit minimum lets
+            // the walker publish an exactly completed job; any real work is
+            // limited to the period's remaining credit.
+            if (g.armed)
+                run_group_work(g, std::max(1L, g.total_cost - g.granted));
 
             if (g.has_result) {
                 for (int cell = 0; cell < cell_count_; ++cell)
@@ -475,16 +479,106 @@ private:
     /// Job list for one period, in order:
     ///   jobs [0, channels)           forward transform of each audio channel's
     ///                                closed frame into its FDL slot
-    ///   jobs [channels, channels+C)  per cell: spectral MAC over the FDL's
-    ///                                lower half, Hermitian mirror, inverse
-    ///                                transform, and the overlap-save extract
+    ///   remaining jobs: per cell, or per destination for a four-channel
+    ///                   true-stereo IR: spectral MAC, spectrum packing,
+    ///                   inverse transform, and overlap-save extract
     void run_group_work(Group& g, long budget) {
         if (!g.armed || budget <= 0) return;
         const int np = g.num_partitions;
         const int K = g.fft_size;
         const int L = g.block_len;
         const int half = K / 2;  // Nyquist bin
+        const bool packed_stereo = channels_ == 2 && (cell_count_ == 2 || cell_count_ == 4);
+        const int output_jobs = packed_stereo ? (cell_count_ == 2 ? 1 : 2) : cell_count_;
         long spent = 0;
+        const auto finish = [&]() noexcept { block_cost_ += spent; };
+
+        // A fused stereo group uses one complex FFT for z = xL + i*xR.  The
+        // packed frame lives in accum[0], which is otherwise only an output
+        // accumulator and is therefore already allocated for this group.
+        // Gather in natural order (the in-place forward cursor performs the
+        // bit-reversal), then recover the independent lower-half spectra.
+        if (packed_stereo && g.job == 0) {
+            auto& packed = g.accum[0];
+            if (g.job_step == 0) {
+                g.job_step = 1;
+                g.job_cursor = 0;
+            }
+            if (g.job_step == 1) {
+                const long unit = 2L * detail::SlicedFftPlanT<SampleType>::kGatherCost;
+                const int take =
+                    static_cast<int>(std::min<long>((budget - spent) / unit, K - g.job_cursor));
+                if (take <= 0) {
+                    finish();
+                    return;
+                }
+                const auto* left = history_[0].data();
+                const auto* right = history_[1].data();
+                for (int i = g.job_cursor; i < g.job_cursor + take; ++i) {
+                    const std::size_t index =
+                        (g.frame_base + static_cast<std::size_t>(i)) & history_mask_;
+                    packed[static_cast<std::size_t>(i)] = {left[index], right[index]};
+                }
+                g.job_cursor += take;
+                spent += static_cast<long>(take) * unit;
+                if (g.job_cursor >= K) {
+                    g.fft.begin_forward_in_place();
+                    g.job_step = 2;
+                    g.job_cursor = 0;
+                }
+                if (spent >= budget || g.job_step == 1) {
+                    finish();
+                    return;
+                }
+            }
+            if (g.job_step == 2) {
+                spent += g.fft.advance(g.plan, packed.data(), budget - spent);
+                if (!g.fft.done()) {
+                    finish();
+                    return;
+                }
+                g.job_step = 3;
+                g.job_cursor = 0;
+            }
+            if (g.job_step == 3) {
+                constexpr long unpack_unit = 8;
+                const int take = static_cast<int>(
+                    std::min<long>((budget - spent) / unpack_unit, half + 1 - g.job_cursor));
+                if (take <= 0) {
+                    finish();
+                    return;
+                }
+                auto& left = g.spectra[static_cast<std::size_t>(g.slot)];
+                auto& right = g.spectra[static_cast<std::size_t>(np + g.slot)];
+                for (int i = g.job_cursor; i < g.job_cursor + take; ++i) {
+                    if (i == 0 || i == half) {
+                        left[static_cast<std::size_t>(i)] = {
+                            packed[static_cast<std::size_t>(i)].real(), 0};
+                        right[static_cast<std::size_t>(i)] = {
+                            packed[static_cast<std::size_t>(i)].imag(), 0};
+                    } else {
+                        const auto z = packed[static_cast<std::size_t>(i)];
+                        const auto mirror = std::conj(packed[static_cast<std::size_t>(K - i)]);
+                        const auto sum = z + mirror;
+                        const auto diff = z - mirror;
+                        left[static_cast<std::size_t>(i)] = sum * SampleType{0.5};
+                        right[static_cast<std::size_t>(i)] = {diff.imag() * SampleType{0.5},
+                                                              -diff.real() * SampleType{0.5}};
+                    }
+                }
+                g.job_cursor += take;
+                spent += static_cast<long>(take) * unpack_unit;
+                if (g.job_cursor >= half + 1) {
+                    g.job = channels_;
+                    g.job_step = 0;
+                    g.job_cursor = 0;
+                }
+                if (spent >= budget || g.job_step == 3) {
+                    finish();
+                    return;
+                }
+            }
+        }
 
         while (spent < budget) {
             if (g.job < channels_) {
@@ -503,12 +597,17 @@ private:
                 continue;
             }
 
-            const int cell = g.job - channels_;
-            if (cell >= cell_count_) {
+            const int output_job = g.job - channels_;
+            if (output_job >= output_jobs) {
                 g.armed = false;
                 g.has_result = true;
                 break;
             }
+            // A destination's diagonal accumulator holds the packed inverse:
+            // real output is diagonal, imaginary output is crossfeed. Extract
+            // both into separate cell buffers so render_chunk can gate them.
+            const int cell =
+                packed_stereo ? (cell_count_ == 2 ? 0 : (output_job == 0 ? 0 : 3)) : output_job;
             if (!cell_active(cell)) {
                 std::fill(g.ready[static_cast<std::size_t>(cell)].begin(),
                           g.ready[static_cast<std::size_t>(cell)].end(), SampleType{0});
@@ -519,8 +618,6 @@ private:
             }
 
             auto& acc = g.accum[static_cast<std::size_t>(cell)];
-            const Cell& k = cells_[static_cast<std::size_t>(cell)];
-
             if (g.job_step == 0) {
                 // ── spectral multiply-accumulate over the FDL ──
                 // Partition p covers IR delays [2L + pL, 3L + pL) and consumes
@@ -528,45 +625,96 @@ private:
                 // SAME output range and share one inverse transform. Input and
                 // IR spectra are both Hermitian, so only bins [0, K/2] are
                 // independent; the mirror step below reconstructs the rest.
-                const long unit = detail::SlicedFftPlanT<SampleType>::kMacCost * np;
+                const long unit =
+                    detail::SlicedFftPlanT<SampleType>::kMacCost * np * (packed_stereo ? 2 : 1);
                 const int remaining = half + 1 - g.job_cursor;
                 const int take = static_cast<int>(
                     std::min<long>((budget - spent) / unit, remaining));
                 if (take <= 0) break;
-                for (int p = 0; p < np; ++p) {
-                    const int slot = (g.slot - p + np) % np;
-                    const std::complex<SampleType>* x =
-                        g.spectra[static_cast<std::size_t>(k.src * np + slot)].data();
-                    const std::complex<SampleType>* h =
-                        g.ir_spectra[static_cast<std::size_t>(cell * np + p)].data();
-                    std::complex<SampleType>* a = acc.data();
-                    if (p == 0)
-                        for (int i = g.job_cursor; i < g.job_cursor + take; ++i)
-                            a[i] = x[i] * h[i];
-                    else
-                        for (int i = g.job_cursor; i < g.job_cursor + take; ++i)
-                            a[i] += x[i] * h[i];
+                if (!packed_stereo) {
+                    for (int p = 0; p < np; ++p) {
+                        const int slot = (g.slot - p + np) % np;
+                        const Cell& source = cells_[static_cast<std::size_t>(cell)];
+                        const std::complex<SampleType>* x =
+                            g.spectra[static_cast<std::size_t>(source.src * np + slot)].data();
+                        const std::complex<SampleType>* h =
+                            g.ir_spectra[static_cast<std::size_t>(cell * np + p)].data();
+                        std::complex<SampleType>* a = acc.data();
+                        if (p == 0)
+                            for (int i = g.job_cursor; i < g.job_cursor + take; ++i)
+                                a[i] = x[i] * h[i];
+                        else
+                            for (int i = g.job_cursor; i < g.job_cursor + take; ++i)
+                                a[i] += x[i] * h[i];
+                    }
+                } else {
+                    // Compute the cross tail even while its render gate is off.
+                    // An enable during partial work then exposes complete state,
+                    // rather than a spectrum assembled under mixed gate values.
+                    const int cross_cell = cell_count_ == 2 ? 1 : (output_job == 0 ? 2 : 1);
+                    auto& cross_acc = g.accum[static_cast<std::size_t>(cross_cell)];
+                    for (int i = g.job_cursor; i < g.job_cursor + take; ++i) {
+                        acc[static_cast<std::size_t>(i)] = {};
+                        cross_acc[static_cast<std::size_t>(i)] = {};
+                    }
+                    for (int source_cell = 0; source_cell < cell_count_; ++source_cell) {
+                        const Cell& source = cells_[static_cast<std::size_t>(source_cell)];
+                        if (cell_count_ == 4 && source.dst != output_job)
+                            continue;
+                        for (int p = 0; p < np; ++p) {
+                            const int slot = (g.slot - p + np) % np;
+                            const std::complex<SampleType>* x =
+                                g.spectra[static_cast<std::size_t>(source.src * np + slot)].data();
+                            const std::complex<SampleType>* h =
+                                g.ir_spectra[static_cast<std::size_t>(source_cell * np + p)].data();
+                            auto* a = acc.data();
+                            auto* b = cross_acc.data();
+                            for (int i = g.job_cursor; i < g.job_cursor + take; ++i) {
+                                if (source_cell == cross_cell)
+                                    b[i] += x[i] * h[i];
+                                else
+                                    a[i] += x[i] * h[i];
+                            }
+                        }
+                    }
                 }
                 g.job_cursor += take;
                 spent += static_cast<long>(take) * unit;
                 if (g.job_cursor > half) {
                     g.job_step = 1;
-                    g.job_cursor = half + 1;
+                    g.job_cursor = packed_stereo ? 0 : half + 1;
                 }
                 continue;
             }
 
             if (g.job_step == 1) {
                 // ── Hermitian mirror onto the upper half ──
+                const int mirror_end = packed_stereo ? half + 1 : K;
+                const long mirror_unit = packed_stereo ? 2L : 1L;
                 const int take = static_cast<int>(
-                    std::min<long>(budget - spent, K - g.job_cursor));
+                    std::min<long>((budget - spent) / mirror_unit, mirror_end - g.job_cursor));
                 if (take <= 0) break;
                 std::complex<SampleType>* a = acc.data();
-                for (int i = g.job_cursor; i < g.job_cursor + take; ++i)
-                    a[i] = std::conj(a[K - i]);
+                if (packed_stereo) {
+                    const int cross_cell = cell_count_ == 2 ? 1 : (output_job == 0 ? 2 : 1);
+                    const auto* b = g.accum[static_cast<std::size_t>(cross_cell)].data();
+                    for (int i = g.job_cursor; i < g.job_cursor + take; ++i) {
+                        const auto av = a[i];
+                        const auto bv = b[i];
+                        if (i == 0 || i == half)
+                            a[i] = {av.real(), bv.real()};
+                        else
+                            a[i] = {av.real() - bv.imag(), av.imag() + bv.real()};
+                        if (i > 0 && i < half)
+                            a[K - i] = {av.real() + bv.imag(), -av.imag() + bv.real()};
+                    }
+                } else {
+                    for (int i = g.job_cursor; i < g.job_cursor + take; ++i)
+                        a[i] = std::conj(a[K - i]);
+                }
                 g.job_cursor += take;
-                spent += take;
-                if (g.job_cursor >= K) {
+                spent += static_cast<long>(take) * mirror_unit;
+                if (g.job_cursor >= mirror_end) {
                     g.job_step = 2;
                     g.job_cursor = 0;
                     g.fft.begin_inverse_in_place();
@@ -583,13 +731,21 @@ private:
             }
 
             // ── extract: overlap-save keeps the LAST L samples ──
-            const int take = static_cast<int>(std::min<long>(budget - spent, L - g.job_cursor));
+            const long extract_unit = packed_stereo ? 2L : 1L;
+            const int take =
+                static_cast<int>(std::min<long>((budget - spent) / extract_unit, L - g.job_cursor));
             if (take <= 0) break;
             SampleType* dst = g.ready[static_cast<std::size_t>(cell)].data();
             for (int i = g.job_cursor; i < g.job_cursor + take; ++i)
                 dst[i] = acc[static_cast<std::size_t>(L + i)].real();
+            if (packed_stereo) {
+                const int cross_cell = cell_count_ == 2 ? 1 : (output_job == 0 ? 2 : 1);
+                SampleType* cross = g.ready[static_cast<std::size_t>(cross_cell)].data();
+                for (int i = g.job_cursor; i < g.job_cursor + take; ++i)
+                    cross[i] = acc[static_cast<std::size_t>(L + i)].imag();
+            }
             g.job_cursor += take;
-            spent += take;
+            spent += static_cast<long>(take) * extract_unit;
             if (g.job_cursor >= L) {
                 ++g.job;
                 g.job_step = 0;
@@ -855,14 +1011,27 @@ private:
             }
         }
 
-        // Metered cost of one period: one forward per audio channel, then per
-        // cell a spectral MAC over the independent bins, the Hermitian mirror,
-        // an inverse, and the extract.
-        g.total_cost = static_cast<long>(channels_) * g.plan.forward_cost();
+        // Metered cost of one period: one forward per audio channel and one
+        // spectral MAC per cell. For a four-cell stereo IR, pack two real
+        // outputs into one complex inverse per destination; packing and both
+        // output extractions are included in the distributed work budget.
+        const bool packed_stereo = channels_ == 2 && (cell_count_ == 2 || cell_count_ == 4);
+        if (packed_stereo) {
+            constexpr long packed_unpack_cost = 8;
+            g.total_cost =
+                2L * static_cast<long>(K) * detail::SlicedFftPlanT<SampleType>::kGatherCost +
+                g.plan.forward_cost() + static_cast<long>(K / 2 + 1) * packed_unpack_cost;
+        } else {
+            g.total_cost = static_cast<long>(channels_) * g.plan.forward_cost();
+        }
         g.total_cost +=
             static_cast<long>(cell_count_) *
-            (static_cast<long>(K / 2 + 1) * detail::SlicedFftPlanT<SampleType>::kMacCost * np +
-             static_cast<long>(K / 2 - 1) + g.plan.inverse_cost() + L);
+            (static_cast<long>(K / 2 + 1) * detail::SlicedFftPlanT<SampleType>::kMacCost * np);
+        const int output_jobs = packed_stereo ? (cell_count_ == 2 ? 1 : 2) : cell_count_;
+        const long mirror_cost = packed_stereo ? 2L * (K / 2 + 1) : K / 2 - 1;
+        const long extract_cost = packed_stereo ? 2L * L : L;
+        g.total_cost +=
+            static_cast<long>(output_jobs) * (mirror_cost + g.plan.inverse_cost() + extract_cost);
         return g;
     }
 

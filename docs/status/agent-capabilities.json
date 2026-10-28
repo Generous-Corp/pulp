@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 83,
+  "manifest_revision": 86,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -10051,7 +10051,12 @@
             "methods": [
               "process(const SampleType* input, SampleType* output, std::size_t num_samples)",
               "reset()",
-              "load_ir(const SampleType* ir, std::size_t ir_length, std::size_t block_size, std::size_t tail_multiplier = kDefaultTailMultiplier)",
+              "choose_tail_multiplier(std::size_t ir_length, std::size_t block_size)",
+              "table_measured_on(std::string_view cpu_brand)",
+              "default_tail_multiplier_for(std::string_view cpu_brand, std::size_t ir_length, std::size_t block_size)",
+              "default_tail_multiplier(std::size_t ir_length, std::size_t block_size)",
+              "load_ir(const SampleType* ir, std::size_t ir_length, std::size_t block_size)",
+              "load_ir(const SampleType* ir, std::size_t ir_length, std::size_t block_size, std::size_t tail_multiplier)",
               "latency()",
               "block_size()",
               "block_size_violations()",
@@ -12645,6 +12650,7 @@
             "methods": [
               "process(SampleType input)",
               "process(SampleType* buffer, int num_samples)",
+              "set_ramp_time(SampleType seconds, SampleType sample_rate)",
               "set_gain_db(SampleType db)",
               "set_gain_linear(SampleType linear)",
               "gain_db()",
@@ -17311,6 +17317,7 @@
             "methods": [
               "done()",
               "begin_forward_from_ring(const SampleType* ring, std::size_t base, std::size_t mask)",
+              "begin_forward_in_place()",
               "begin_inverse_in_place()",
               "cancel()",
               "advance(const SlicedFftPlanT& plan, std::complex<SampleType>* data, long budget)"
