@@ -224,6 +224,46 @@ TEST_CASE("RmlUi backend routes host pointer and wheel events") {
     REQUIRE(backend.process_key_down(65) == Status::not_open);
 }
 
+TEST_CASE("RmlUi backend admits custom RCSS and element extensions before documents") {
+    Headless headless;
+    Backend backend(headless, headless, headless, nullptr, &headless);
+    REQUIRE(backend.register_custom_property({"items-per-column", "16", "number", false}) ==
+            Status::ok);
+    REQUIRE(backend.register_element_instancer({"combo"}) == Status::ok);
+    REQUIRE(backend.register_element_instancer({"combo"}) == Status::rejected);
+    REQUIRE(backend.open(64, 64) == Status::ok);
+    REQUIRE(headless.custom_properties().size() == 1);
+    REQUIRE(headless.custom_properties().front().name == "items-per-column");
+    REQUIRE(headless.custom_properties().front().parser == "number");
+    REQUIRE(headless.element_instancers().size() == 1);
+    REQUIRE(headless.element_instancers().front().name == "combo");
+    REQUIRE(backend.register_custom_property({"late", "1", "number", false}) ==
+            Status::rejected);
+    backend.close();
+}
+
+TEST_CASE("RmlUi extension admission fails closed without a host or with invalid declarations") {
+    Headless headless;
+    Backend without_host(headless, headless, headless);
+    REQUIRE(without_host.register_custom_property({"items-per-column", "16", "number", false}) ==
+            Status::ok);
+    REQUIRE(without_host.open(32, 32) == Status::rejected);
+
+    Backend invalid(headless, headless, headless, nullptr, &headless);
+    REQUIRE(invalid.register_custom_property({"", "16", "number", false}) == Status::rejected);
+    REQUIRE(invalid.register_custom_property({"items-per-column", "", "number", false}) ==
+            Status::rejected);
+    REQUIRE(invalid.register_custom_property({"items-per-column", "16", "", false}) ==
+            Status::rejected);
+    REQUIRE(invalid.register_element_instancer({""}) == Status::rejected);
+
+    Headless rejecting;
+    rejecting.reject_extensions(true);
+    Backend rejected(rejecting, rejecting, rejecting, nullptr, &rejecting);
+    REQUIRE(rejected.register_element_instancer({"combo"}) == Status::ok);
+    REQUIRE(rejected.open(32, 32) == Status::rejected);
+}
+
 TEST_CASE("RmlUi backend fails closed instead of double-initializing process-global RmlUi") {
     Headless first_headless;
     Headless second_headless;

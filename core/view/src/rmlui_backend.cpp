@@ -14,6 +14,7 @@
 #include <list>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
@@ -362,8 +363,8 @@ std::atomic_uint64_t Backend::Runtime::next_context_id{1};
 std::atomic_flag Backend::Runtime::process_active = ATOMIC_FLAG_INIT;
 
 Backend::Backend(AssetProvider& assets, RenderInterface& renderer, LuaInterface& lua,
-                 ActionSink* actions)
-    : assets_(assets), renderer_(renderer), lua_(lua), actions_(actions) {}
+                 ActionSink* actions, ExtensionHost* extensions)
+    : assets_(assets), renderer_(renderer), lua_(lua), actions_(actions), extensions_(extensions) {}
 
 Backend::~Backend() {
     close();
@@ -514,6 +515,27 @@ Status Backend::open(std::uint32_t width, std::uint32_t height) {
         return Status::rejected;
     }
     runtime->initialised = true;
+    if ((!custom_properties_.empty() || !element_instancers_.empty()) && !extensions_) {
+        Rml::Shutdown();
+        Runtime::process_active.clear(std::memory_order_release);
+        return Status::rejected;
+    }
+    try {
+        if (extensions_) {
+            for (const auto& registration : custom_properties_) {
+                if (extensions_->register_custom_property(registration) != Status::ok)
+                    throw std::runtime_error("RmlUi custom property admission rejected");
+            }
+            for (const auto& registration : element_instancers_) {
+                if (extensions_->register_element_instancer(registration) != Status::ok)
+                    throw std::runtime_error("RmlUi element instancer admission rejected");
+            }
+        }
+    } catch (...) {
+        Rml::Shutdown();
+        Runtime::process_active.clear(std::memory_order_release);
+        return Status::rejected;
+    }
     runtime->context =
         Rml::CreateContext(runtime->context_name,
                            {static_cast<int>(width), static_cast<int>(height)}, &runtime->render);
@@ -526,6 +548,27 @@ Status Backend::open(std::uint32_t width, std::uint32_t height) {
     height_ = height;
     runtime_ = std::move(runtime);
     open_ = true;
+    return Status::ok;
+}
+
+Status Backend::register_custom_property(CustomPropertyRegistration registration) {
+    if (open_ || registration.name.empty() || registration.parser.empty() ||
+        registration.default_value.empty())
+        return Status::rejected;
+    if (std::any_of(custom_properties_.begin(), custom_properties_.end(),
+                    [&](const auto& item) { return item.name == registration.name; }))
+        return Status::rejected;
+    custom_properties_.push_back(std::move(registration));
+    return Status::ok;
+}
+
+Status Backend::register_element_instancer(ElementInstancerRegistration registration) {
+    if (open_ || registration.name.empty())
+        return Status::rejected;
+    if (std::any_of(element_instancers_.begin(), element_instancers_.end(),
+                    [&](const auto& item) { return item.name == registration.name; }))
+        return Status::rejected;
+    element_instancers_.push_back(std::move(registration));
     return Status::ok;
 }
 
@@ -814,6 +857,21 @@ Status Headless::invoke(std::string_view action) {
     if (action.empty())
         return Status::rejected;
     actions_.push_back(std::string(action));
+    return Status::ok;
+}
+
+Status Headless::register_custom_property(CustomPropertyRegistration registration) {
+    if (reject_extensions_ || registration.name.empty() || registration.parser.empty() ||
+        registration.default_value.empty())
+        return Status::rejected;
+    custom_properties_.push_back(std::move(registration));
+    return Status::ok;
+}
+
+Status Headless::register_element_instancer(ElementInstancerRegistration registration) {
+    if (reject_extensions_ || registration.name.empty())
+        return Status::rejected;
+    element_instancers_.push_back(std::move(registration));
     return Status::ok;
 }
 

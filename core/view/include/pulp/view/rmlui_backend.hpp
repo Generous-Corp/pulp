@@ -149,6 +149,29 @@ struct ModelValue {
     }
 };
 
+// Optional compatibility declarations for source skins that use custom RCSS
+// properties or element tags.  Pulp owns the admission boundary; the adapter
+// behind ExtensionHost owns the RmlUi property parser and element-instancer
+// objects.  Keeping those objects out of this header prevents RmlUi headers
+// from leaking into importer or SDK ABI surfaces.
+struct CustomPropertyRegistration {
+    std::string name;
+    std::string default_value;
+    std::string parser;
+    bool inherited = false;
+};
+
+struct ElementInstancerRegistration {
+    std::string name;
+};
+
+class ExtensionHost {
+  public:
+    virtual ~ExtensionHost() = default;
+    virtual Status register_custom_property(CustomPropertyRegistration registration) = 0;
+    virtual Status register_element_instancer(ElementInstancerRegistration registration) = 0;
+};
+
 class ModelHost {
   public:
     virtual ~ModelHost() = default;
@@ -163,7 +186,8 @@ class ModelHost {
 // no RmlUi or Lua headers; those dependencies remain behind this boundary.
 class Backend {
   public:
-    Backend(AssetProvider&, RenderInterface&, LuaInterface&, ActionSink* = nullptr);
+    Backend(AssetProvider&, RenderInterface&, LuaInterface&, ActionSink* = nullptr,
+            ExtensionHost* = nullptr);
     ~Backend();
 
     Backend(const Backend&) = delete;
@@ -180,6 +204,11 @@ class Backend {
     // call above while allowing bold/italic and variable-font faces to retain
     // their CSS selection semantics.
     Status load_font_face(std::string_view path, std::string_view family, FontFaceOptions options);
+    // Queue compatibility declarations before open(). Registration is
+    // admitted during open(), after RmlUi is initialised and before a document
+    // can be loaded. A rejecting extension host fails open() closed.
+    Status register_custom_property(CustomPropertyRegistration registration);
+    Status register_element_instancer(ElementInstancerRegistration registration);
     // Create a named RmlUi data model and bind fields on the UI thread. The
     // host is retained until close(); callers must publish changes with
     // dirty_model() after a successful product-state update.
@@ -209,10 +238,13 @@ class Backend {
     RenderInterface& renderer_;
     LuaInterface& lua_;
     ActionSink* actions_ = nullptr;
+    ExtensionHost* extensions_ = nullptr;
     std::uint32_t width_ = 0;
     std::uint32_t height_ = 0;
     bool open_ = false;
     Asset document_;
+    std::vector<CustomPropertyRegistration> custom_properties_;
+    std::vector<ElementInstancerRegistration> element_instancers_;
     std::unique_ptr<Runtime> runtime_;
 };
 
@@ -221,7 +253,8 @@ class Backend {
 class Headless final : public AssetProvider,
                        public RenderInterface,
                        public LuaInterface,
-                       public ActionSink {
+                       public ActionSink,
+                       public ExtensionHost {
   public:
     Status load(std::string_view path, Asset& out) override;
     void begin_frame(std::uint32_t width, std::uint32_t height) override;
@@ -230,9 +263,12 @@ class Headless final : public AssetProvider,
     Status load(std::string_view source, std::string_view source_name) override;
     Status dispatch(std::string_view callback) override;
     Status invoke(std::string_view action) override;
+    Status register_custom_property(CustomPropertyRegistration registration) override;
+    Status register_element_instancer(ElementInstancerRegistration registration) override;
 
     void add_asset(std::string path, std::string bytes);
     void reject_path(std::string path);
+    void reject_extensions(bool reject) noexcept { reject_extensions_ = reject; }
     [[nodiscard]] const std::vector<DrawCommand>& commands() const noexcept {
         return commands_;
     }
@@ -241,6 +277,12 @@ class Headless final : public AssetProvider,
     }
     [[nodiscard]] const std::vector<std::string>& actions() const noexcept {
         return actions_;
+    }
+    [[nodiscard]] const std::vector<CustomPropertyRegistration>& custom_properties() const noexcept {
+        return custom_properties_;
+    }
+    [[nodiscard]] const std::vector<ElementInstancerRegistration>& element_instancers() const noexcept {
+        return element_instancers_;
     }
     [[nodiscard]] std::uint32_t frame_width() const noexcept {
         return frame_width_;
@@ -255,6 +297,9 @@ class Headless final : public AssetProvider,
     std::vector<DrawCommand> commands_;
     std::vector<std::string> callbacks_;
     std::vector<std::string> actions_;
+    std::vector<CustomPropertyRegistration> custom_properties_;
+    std::vector<ElementInstancerRegistration> element_instancers_;
+    bool reject_extensions_ = false;
     std::uint32_t frame_width_ = 0;
     std::uint32_t frame_height_ = 0;
 };
