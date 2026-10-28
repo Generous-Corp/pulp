@@ -10238,6 +10238,19 @@ required context is evidence of capacity pressure, not a disposable run; only
 cancel exact-current advisory work after proving it cannot contribute to a
 required context or another agent's live PR.
 
+### Review latency: a ready PR waiting on a silent reviewer
+
+`merge-stall-check.yml` also runs `tools/scripts/review_latency_watchdog.py`.
+It keeps the tracking issue `Review latency: ready PRs are waiting for a
+verdict` open while any non-draft PR has gone more than 60 min
+(`review_latency_minutes`) with no verdict on its current head. A verdict is a
+`verdict: <WORD> head:<sha>` comment line (a full sha or a prefix of at least 7
+characters) or an APPROVED or CHANGES_REQUESTED review on that head. The wait
+restarts on every push, so a verdict on an older head does not count. When the
+issue opens, check that a reviewer session is alive and has the listed PRs; do
+not post a verdict just to close it. The issue mechanics are the shared
+`maintain_tracker` function, so a degraded sweep never closes it.
+
 ### Install consumer smoke (`install-consumer-smoke.yml`)
 
 Pulp #2087 piggyback. Catches the class of bug where in-tree builds

@@ -133,7 +133,7 @@ def _gh(args: list[str]) -> str:
     gh_bin = os.environ.get("PULP_GH_BIN") or "gh"
     last: subprocess.CalledProcessError | None = None
     for attempt in range(_GH_RETRIES):
-        proc = subprocess.run([gh_bin, *args], capture_output=True, text=True)
+        proc = subprocess.run([gh_bin, *args], capture_output=True, text=True, encoding="utf-8")
         if proc.returncode == 0:
             return proc.stdout
         last = subprocess.CalledProcessError(

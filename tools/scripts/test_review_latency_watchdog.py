@@ -186,16 +186,16 @@ class CliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             snap = tmp_path / "snap.json"
-            snap.write_text(json.dumps({"generated_at": NOW.isoformat(), "prs": [pr(head_at=90)], "errors": []}))
+            snap.write_text(json.dumps({"generated_at": NOW.isoformat(), "prs": [pr(head_at=90)], "errors": []}), encoding="utf-8")
             body = tmp_path / "body.md"
             findings = tmp_path / "findings.json"
             self.assertEqual(rlw.main([
                 "--snapshot", str(snap), "--findings-out", str(findings), "--body-out", str(body),
             ]), 0)
-            self.assertIn("#1", body.read_text())
-            self.assertEqual(len(json.loads(findings.read_text())), 1)
+            self.assertIn("#1", body.read_text(encoding="utf-8"))
+            self.assertEqual(len(json.loads(findings.read_text(encoding="utf-8"))), 1)
 
-            snap.write_text(json.dumps({"generated_at": NOW.isoformat(), "prs": [pr(verdicts=[HEAD])], "errors": []}))
+            snap.write_text(json.dumps({"generated_at": NOW.isoformat(), "prs": [pr(verdicts=[HEAD])], "errors": []}), encoding="utf-8")
             body.unlink()
             rlw.main(["--snapshot", str(snap), "--findings-out", str(findings), "--body-out", str(body)])
             self.assertFalse(body.exists())
