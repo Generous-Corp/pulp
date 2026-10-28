@@ -151,6 +151,11 @@ void ContextMenu::adjust_control(Item& item, float delta) {
         item.set_toggled(!item.checked);
     } else if (item.control_kind == Item::ControlKind::slider) {
         item.set_normalized_value(item.normalized_value + delta);
+    } else if (item.control_kind == Item::ControlKind::choice && !item.choices.empty()) {
+        const auto n = static_cast<long long>(item.choices.size());
+        auto next = static_cast<long long>(item.choice_index) + (delta < 0.0f ? -1 : 1);
+        next = std::clamp(next, 0LL, n - 1);
+        item.set_choice_index(static_cast<std::size_t>(next));
     }
     request_repaint();
 }
@@ -349,6 +354,15 @@ void ContextMenu::paint(canvas::Canvas& canvas) {
             const float thumb = left + (right - left) * std::clamp(it.normalized_value, 0.0f, 1.0f);
             canvas.set_fill_color(accent_c);
             canvas.fill_circle(thumb, cy, 4.0f);
+        } else if (it.control_kind == Item::ControlKind::choice && !it.choices.empty()) {
+            const auto selected = std::min(it.choice_index, it.choices.size() - 1);
+            canvas.set_text_align(canvas::TextAlign::right);
+            canvas.set_fill_color(i == hover_index_ && it.enabled
+                                     ? canvas::Color::rgba8(255, 255, 255)
+                                     : text_dim);
+            canvas.fill_text(it.choices[selected], row.x + row.width - 10,
+                             iy + rh * 0.5f + 4.0f);
+            canvas.set_text_align(canvas::TextAlign::left);
         }
     }
 
@@ -441,6 +455,8 @@ void ContextMenu::on_mouse_event(const MouseEvent& event) {
             active_pointer_id_ = event.pointer_id;
             set_pointer_capture(active_pointer_id_);
             set_control_from_pointer(it, lay.rows[static_cast<size_t>(row)], event.position);
+        } else if (it.control_kind == Item::ControlKind::choice) {
+            adjust_control(it, 1.0f);
         } else {
             fire_close(it.id); // commit action selection
         }
@@ -454,7 +470,8 @@ bool ContextMenu::on_key_event(const KeyEvent& event) {
     case KeyCode::up:
     case KeyCode::left:
         if (hover_index_ >= 0 && hover_index_ < static_cast<int>(items_.size()) &&
-            items_[static_cast<size_t>(hover_index_)].control_kind == Item::ControlKind::slider) {
+            (items_[static_cast<size_t>(hover_index_)].control_kind == Item::ControlKind::slider ||
+             items_[static_cast<size_t>(hover_index_)].control_kind == Item::ControlKind::choice)) {
             adjust_control(items_[static_cast<size_t>(hover_index_)],
                            -items_[static_cast<size_t>(hover_index_)].normalized_step);
             return true;
@@ -464,7 +481,8 @@ bool ContextMenu::on_key_event(const KeyEvent& event) {
     case KeyCode::down:
     case KeyCode::right:
         if (hover_index_ >= 0 && hover_index_ < static_cast<int>(items_.size()) &&
-            items_[static_cast<size_t>(hover_index_)].control_kind == Item::ControlKind::slider) {
+            (items_[static_cast<size_t>(hover_index_)].control_kind == Item::ControlKind::slider ||
+             items_[static_cast<size_t>(hover_index_)].control_kind == Item::ControlKind::choice)) {
             adjust_control(items_[static_cast<size_t>(hover_index_)],
                            items_[static_cast<size_t>(hover_index_)].normalized_step);
             return true;
@@ -489,6 +507,8 @@ bool ContextMenu::on_key_event(const KeyEvent& event) {
                 adjust_control(item, 0.0f);
             else if (item.control_kind == Item::ControlKind::slider)
                 adjust_control(item, item.normalized_step);
+            else if (item.control_kind == Item::ControlKind::choice)
+                adjust_control(item, 1.0f);
             else
                 fire_close(item.id);
         }
@@ -534,6 +554,62 @@ ContextMenu* ContextMenu::show(View* root, Point pos, std::vector<Item> items,
     raw->set_focus(true);
     raw->claim_input_focus();
     return raw;
+}
+
+std::vector<ContextMenu::Item>
+ContextMenu::make_modulation_items(const ModulationMenuSpec& spec) {
+    std::vector<Item> items;
+    items.reserve(16);
+    if (!spec.target_label.empty()) {
+        items.push_back(Item::make_header("Modulate " + spec.target_label));
+        items.push_back(Item::make_separator());
+    }
+    for (std::size_t lane_index = 0; lane_index < 2; ++lane_index) {
+        const auto lane = spec.lanes[lane_index];
+        const int base = 100 + static_cast<int>(lane_index) * 10;
+        const auto notify = [lane](auto update) {
+            auto next = lane;
+            update(next);
+            if (next.on_change)
+                next.on_change(next);
+        };
+        items.push_back(Item::make_header(lane.label.empty()
+            ? ("LFO " + std::to_string(lane_index + 1)) : lane.label));
+        items.push_back(Item::make_toggle(
+            base, "Enabled", lane.enabled,
+            [notify](const Item& item) {
+                notify([&](auto& next) { next.enabled = item.checked; });
+            }));
+        items.push_back(Item::make_choice(
+            base + 1, "Shape", lane.shapes, lane.shape_index,
+            [notify](const Item& item) {
+                notify([&](auto& next) { next.shape_index = item.choice_index; });
+            }));
+        items.push_back(Item::make_slider(
+            base + 2, "Rate", lane.rate_normalized, 0.05f,
+            [notify](const Item& item) {
+                notify([&](auto& next) { next.rate_normalized = item.normalized_value; });
+            }));
+        items.push_back(Item::make_slider(
+            base + 3, "Depth", lane.depth_normalized, 0.05f,
+            [notify](const Item& item) {
+                notify([&](auto& next) { next.depth_normalized = item.normalized_value; });
+            }));
+        if (lane_index == 0)
+            items.push_back(Item::make_separator());
+    }
+    items.push_back({1, "Reset modulation"});
+    return items;
+}
+
+ContextMenu* ContextMenu::show_modulation(View* root, Point pos,
+                                           ModulationMenuSpec spec) {
+    auto items = make_modulation_items(spec);
+    auto reset = std::move(spec.on_reset);
+    return show(root, pos, std::move(items), [reset = std::move(reset)](std::optional<int> id) {
+        if (id && *id == 1 && reset)
+            reset();
+    });
 }
 
 }  // namespace pulp::view

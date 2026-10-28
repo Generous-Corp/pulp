@@ -238,6 +238,52 @@ TEST_CASE("ContextMenu controls clamp and notify through their callbacks", "[vie
     REQUIRE(value == 0.0f);
 }
 
+TEST_CASE("ContextMenu builds the shared two-LFO modulation hierarchy", "[view][context-menu][modulation]") {
+    ContextMenu::ModulationMenuSpec spec;
+    spec.target_label = "Density";
+    spec.lanes[0].label = "LFO 1";
+    spec.lanes[0].enabled = true;
+    spec.lanes[0].shapes = {"Sine", "Triangle", "Square"};
+    spec.lanes[0].shape_index = 1;
+    spec.lanes[1].label = "LFO 2";
+    spec.lanes[1].shapes = {"Sine", "Saw"};
+
+    auto items = ContextMenu::make_modulation_items(spec);
+    REQUIRE(items.size() == 14);
+    REQUIRE(items[0].header);
+    REQUIRE(items[2].header);
+    REQUIRE(items[3].control_kind == Item::ControlKind::toggle);
+    REQUIRE(items[4].control_kind == Item::ControlKind::choice);
+    REQUIRE(items[4].choices[items[4].choice_index] == "Triangle");
+    REQUIRE(items[5].control_kind == Item::ControlKind::slider);
+    REQUIRE(items[8].header);
+    REQUIRE(items[9].control_kind == Item::ControlKind::toggle);
+}
+
+TEST_CASE("ContextMenu choice controls cycle with arrows and invoke their callback",
+          "[view][context-menu][modulation]") {
+    auto root = make_root();
+    ContextMenu::ModulationMenuSpec spec;
+    spec.lanes[0].label = "LFO 1";
+    spec.lanes[0].shapes = {"Sine", "Triangle", "Square"};
+    int selected = -1;
+    spec.lanes[0].on_change = [&](const auto& lane) {
+        selected = static_cast<int>(lane.shape_index);
+    };
+    auto* menu = ContextMenu::show_modulation(root.get(), {kAnchorX, kAnchorY}, spec);
+    REQUIRE(menu != nullptr);
+    // Down skips the header and lands on Enabled; down again lands on Shape.
+    REQUIRE(menu->on_key_event(key_down(KeyCode::down)));
+    REQUIRE(menu->on_key_event(key_down(KeyCode::down)));
+    REQUIRE(menu->hovered_index() == 2);
+    REQUIRE(menu->on_key_event(key_down(KeyCode::right)));
+    REQUIRE(selected == 1);
+    REQUIRE(menu->on_key_event(key_down(KeyCode::left)));
+    REQUIRE(selected == 0);
+    REQUIRE(menu->on_key_event(key_down(KeyCode::escape)));
+    REQUIRE(root->child_count() == 0);
+}
+
 TEST_CASE("ContextMenu click on a disabled row does not select",
           "[view][context-menu]") {
     auto root = make_root();
