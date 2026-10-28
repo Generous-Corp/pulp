@@ -143,3 +143,24 @@ TEST_CASE("RmlUi host bridge close releases provider ownership") {
     bridge.close();
     REQUIRE(weak_lua.expired());
 }
+
+TEST_CASE("RmlUi host bridge rejects retained callbacks after reactivation") {
+    HostBridge bridge;
+    auto lua = std::make_shared<Lua>();
+    auto elements = std::make_shared<Elements>();
+    auto product = std::make_shared<Product>();
+    bridge.bind_lua(lua);
+    bridge.bind_elements(elements);
+    bridge.bind_product(product);
+    REQUIRE(bridge.activate() == HostStatus::ok);
+    REQUIRE(bridge.register_element({"knob", [](std::string_view) { return HostStatus::ok; }}) ==
+            HostStatus::ok);
+    auto retained = elements->registrations.front().dispatch;
+
+    bridge.close();
+    REQUIRE(bridge.bind_lua(lua) == HostStatus::ok);
+    REQUIRE(bridge.bind_elements(elements) == HostStatus::ok);
+    REQUIRE(bridge.bind_product(product) == HostStatus::ok);
+    REQUIRE(bridge.activate() == HostStatus::ok);
+    REQUIRE(retained("stale") == HostStatus::not_active);
+}
