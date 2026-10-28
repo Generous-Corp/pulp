@@ -1501,6 +1501,26 @@ class DifferentialLabTests(unittest.TestCase):
         # A sibling provenance field is content, not a per-run clock.
         self.assertNotEqual(baseline, LAB.canonical_json_sha256(capture(99, 421)))
 
+    def test_canonical_capture_digest_ignores_non_object_provenance_timings(self) -> None:
+        def capture(timings: object) -> bytes:
+            return json.dumps({
+                "schema": "pulp-browser-capture-v1",
+                "provenance": {
+                    "timings": timings,
+                    "viewport": {"resolved": {"width": 420}},
+                },
+                "documents": [{"snapshot_asset": "dom-snapshot.json"}],
+            }).encode()
+
+        baseline = LAB.canonical_json_sha256(capture(None))
+        for timings in ("worker-clock", ["capture", 12], {"capture_ms": 12}):
+            self.assertEqual(baseline, LAB.canonical_json_sha256(capture(timings)))
+
+        # The sibling provenance field remains part of the digest.
+        changed = json.loads(capture(None))
+        changed["provenance"]["viewport"]["resolved"]["width"] = 421
+        self.assertNotEqual(baseline, LAB.canonical_json_sha256(json.dumps(changed).encode()))
+
     def test_non_capture_timings_remain_part_of_canonical_digest(self) -> None:
         first = json.dumps({"provenance": {"timings": {"capture_ms": 12}}}).encode()
         second = json.dumps({"provenance": {"timings": {"capture_ms": 99}}}).encode()

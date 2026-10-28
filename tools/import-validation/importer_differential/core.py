@@ -228,14 +228,17 @@ def canonical_json_sha256(source: Path | bytes) -> str:
             document_entry = (capture_envelope and len(path) == 2
                               and path[0] == "documents" and isinstance(path[1], int))
             settle_record = capture_envelope and path == ("provenance", "settle")
-            capture_timings = capture_envelope and path == ("provenance", "timings")
             return {
                 key: scrub(item, (*path, key))
                 for key, item in value.items()
                 if key not in volatile_keys
                 and not (document_entry and key == "snapshot_sha256")
                 and not (settle_record and key in SETTLE_COUNTER_KEYS)
-                and not capture_timings
+                # The optional timings member is diagnostic-only regardless of
+                # its JSON shape.  Filter it at its parent so null, scalar,
+                # and list values cannot leak into the canonical digest.
+                and not (capture_envelope and path == ("provenance",)
+                         and key == "timings")
                 and not (path == () and key == "settle_rounds")
             }
         if isinstance(value, list):
