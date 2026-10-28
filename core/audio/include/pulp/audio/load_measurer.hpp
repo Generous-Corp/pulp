@@ -180,7 +180,7 @@ struct LoadClockRatio {
 /// }
 /// @endcode
 class AudioProcessLoadMeasurer {
-public:
+  public:
     /// Reads the platform timebase once, here, so begin() and end() never
     /// query it. Construct the measurer off the audio thread.
     AudioProcessLoadMeasurer() noexcept : AudioProcessLoadMeasurer(LoadClockRatio::host()) {}
@@ -190,7 +190,9 @@ public:
     explicit AudioProcessLoadMeasurer(LoadClockRatio ratio) noexcept : ratio_(ratio) {}
 
     /// The tick-to-nanosecond ratio captured at construction.
-    LoadClockRatio clock_ratio() const noexcept { return ratio_; }
+    LoadClockRatio clock_ratio() const noexcept {
+        return ratio_;
+    }
 
     /// One raw read of the measurer's monotonic clock, in its own ticks
     /// (convert spans with clock_ratio()). Apple targets read

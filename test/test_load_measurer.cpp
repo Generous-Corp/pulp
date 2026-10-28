@@ -151,8 +151,7 @@ TEST_CASE("AudioProcessLoadMeasurer clock reads are ordered and monotonic",
     for (int i = 0; i < 1'000'000; ++i) {
         const auto now = AudioProcessLoadMeasurer::read_ticks();
         if (now < previous) {
-            FAIL("read_ticks went backwards at read " << i << ": " << previous << " then "
-                                                      << now);
+            FAIL("read_ticks went backwards at read " << i << ": " << previous << " then " << now);
         }
         previous = now;
     }
@@ -176,8 +175,7 @@ TEST_CASE("AudioProcessLoadMeasurer clock reads are ordered and monotonic",
         REQUIRE(end >= start);
         const auto span_ns = ratio.to_ns(end - start);
         if (span_ns + 1'000 < inner_ns) {
-            FAIL("span " << span_ns << " ns is shorter than the bracketed " << inner_ns
-                         << " ns");
+            FAIL("span " << span_ns << " ns is shorter than the bracketed " << inner_ns << " ns");
         }
     }
     static_cast<void>(sink);
@@ -196,9 +194,9 @@ TEST_CASE("AudioProcessLoadMeasurer clock read cost against steady_clock",
             const auto start = std::chrono::steady_clock::now();
             for (int i = 0; i < kReads; ++i)
                 acc += read();
-            const auto ns = std::chrono::duration<double, std::nano>(
-                                std::chrono::steady_clock::now() - start)
-                                .count();
+            const auto ns =
+                std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - start)
+                    .count();
             REQUIRE(acc != 0);
             best = std::min(best, ns / kReads);
         }
