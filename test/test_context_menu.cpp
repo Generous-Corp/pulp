@@ -284,6 +284,24 @@ TEST_CASE("ContextMenu choice controls cycle with arrows and invoke their callba
     REQUIRE(root->child_count() == 0);
 }
 
+TEST_CASE("ContextMenu modulation callbacks retain sibling lane edits",
+          "[view][context-menu][modulation]") {
+    ContextMenu::ModulationMenuSpec spec;
+    spec.lanes[0].shapes = {"Sine", "Triangle"};
+    float observed_rate = -1.0f;
+    float observed_depth = -1.0f;
+    spec.lanes[0].on_change = [&](const auto& lane) {
+        observed_rate = lane.rate_normalized;
+        observed_depth = lane.depth_normalized;
+    };
+    auto items = ContextMenu::make_modulation_items(spec);
+    // With no target label, lane 1 is header/toggle/shape/rate/depth.
+    items[3].set_normalized_value(0.8f);
+    items[4].set_normalized_value(0.6f);
+    REQUIRE(observed_rate == 0.8f);
+    REQUIRE(observed_depth == 0.6f);
+}
+
 TEST_CASE("ContextMenu click on a disabled row does not select",
           "[view][context-menu]") {
     auto root = make_root();
