@@ -219,6 +219,25 @@ TEST_CASE("ContextMenu Escape dismisses with nullopt",
     REQUIRE(root->child_count() == 0);
 }
 
+TEST_CASE("ContextMenu controls clamp and notify through their callbacks", "[view][context-menu]") {
+    bool toggled = false;
+    auto toggle =
+        Item::make_toggle(1, "LFO 1", false, [&](const Item& item) { toggled = item.checked; });
+    toggle.set_toggled(true);
+    REQUIRE(toggle.checked);
+    REQUIRE(toggled);
+
+    float value = -1.0f;
+    auto slider = Item::make_slider(2, "Depth", 0.25f, 0.1f,
+                                    [&](const Item& item) { value = item.normalized_value; });
+    slider.set_normalized_value(2.0f);
+    REQUIRE(slider.normalized_value == 1.0f);
+    REQUIRE(value == 1.0f);
+    slider.set_normalized_value(-1.0f);
+    REQUIRE(slider.normalized_value == 0.0f);
+    REQUIRE(value == 0.0f);
+}
+
 TEST_CASE("ContextMenu click on a disabled row does not select",
           "[view][context-menu]") {
     auto root = make_root();
