@@ -40,6 +40,8 @@ class ImporterAdapter final {
             receipt_.host_bridge_active = true;
             receipt_.lua_initialised = true;
             receipt_.product_callbacks = true;
+        } else {
+            sync_receipt();
         }
         return status;
     }
@@ -47,10 +49,13 @@ class ImporterAdapter final {
         const auto status = bridge_.register_element(std::move(registration));
         if (status == HostStatus::ok)
             receipt_.elements_registered = true;
+        sync_receipt();
         return status;
     }
     HostStatus dispatch_product(ProductEvent event) {
-        return bridge_.dispatch_product(std::move(event));
+        const auto status = bridge_.dispatch_product(std::move(event));
+        sync_receipt();
+        return status;
     }
     void close() noexcept {
         bridge_.close();
@@ -61,6 +66,14 @@ class ImporterAdapter final {
     }
 
   private:
+    void sync_receipt() noexcept {
+        // HostBridge quarantines itself when a provider throws. The receipt is
+        // the importer’s typed capability proof, so it must never continue to
+        // advertise a live product/Lua graph after that boundary closes.
+        if (!bridge_.active())
+            receipt_ = {};
+    }
+
     HostBridge bridge_;
     ImporterCapabilityReceipt receipt_;
 };
