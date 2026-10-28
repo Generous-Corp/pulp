@@ -7,14 +7,22 @@ using namespace pulp::view::rmlui;
 
 namespace {
 struct Lua final : LuaHost {
-    HostStatus initialise() override { return HostStatus::ok; }
-    HostStatus dispatch(std::string_view) override { return HostStatus::ok; }
+    HostStatus initialise() override {
+        return HostStatus::ok;
+    }
+    HostStatus dispatch(std::string_view) override {
+        return HostStatus::ok;
+    }
 };
 struct Elements final : ElementHost {
-    HostStatus register_element(ElementRegistration) override { return HostStatus::ok; }
+    HostStatus register_element(ElementRegistration) override {
+        return HostStatus::ok;
+    }
 };
 struct Product final : ProductHost {
-    HostStatus dispatch(ProductEvent) override { return HostStatus::ok; }
+    HostStatus dispatch(ProductEvent) override {
+        return HostStatus::ok;
+    }
 };
 } // namespace
 

@@ -71,7 +71,9 @@ class ProductHost {
 class HostBridge final {
   public:
     HostBridge() = default;
-    ~HostBridge() { close(); }
+    ~HostBridge() {
+        close();
+    }
     HostBridge(const HostBridge&) = delete;
     HostBridge& operator=(const HostBridge&) = delete;
     HostBridge(HostBridge&&) = delete;
@@ -185,7 +187,8 @@ class HostBridge final {
         const auto generation = generation_;
         try {
             const auto status = lua->dispatch(callback);
-            return active_ && lua_ == lua && generation_ == generation ? status : HostStatus::rejected;
+            return active_ && lua_ == lua && generation_ == generation ? status
+                                                                       : HostStatus::rejected;
         } catch (...) {
             close();
             return HostStatus::rejected;
@@ -201,8 +204,9 @@ class HostBridge final {
         const auto generation = generation_;
         try {
             const auto status = product->dispatch(std::move(event));
-            return active_ && product_ == product && generation_ == generation ? status
-                                                                                  : HostStatus::rejected;
+            return active_ && product_ == product && generation_ == generation
+                       ? status
+                       : HostStatus::rejected;
         } catch (...) {
             close();
             return HostStatus::rejected;
@@ -219,7 +223,9 @@ class HostBridge final {
         elements_.reset();
         lua_.reset();
     }
-    [[nodiscard]] bool active() const noexcept { return active_; }
+    [[nodiscard]] bool active() const noexcept {
+        return active_;
+    }
 
   private:
     struct BridgeGate {
@@ -252,10 +258,10 @@ class HostBridge final {
 
     static bool valid_event_kind(ProductEventKind kind) noexcept {
         switch (kind) {
-            case ProductEventKind::parameter:
-            case ProductEventKind::action:
-            case ProductEventKind::selection:
-                return true;
+        case ProductEventKind::parameter:
+        case ProductEventKind::action:
+        case ProductEventKind::selection:
+            return true;
         }
         return false;
     }

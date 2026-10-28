@@ -13,11 +13,13 @@ namespace {
 struct Lua final : LuaHost {
     HostStatus initialise() override {
         ++initialise_count;
-        if (throw_on_initialise) throw std::runtime_error("init");
+        if (throw_on_initialise)
+            throw std::runtime_error("init");
         return result;
     }
     HostStatus dispatch(std::string_view callback) override {
-        if (throw_on_dispatch) throw std::runtime_error("dispatch");
+        if (throw_on_dispatch)
+            throw std::runtime_error("dispatch");
         callbacks.emplace_back(callback);
         return result;
     }
@@ -31,7 +33,8 @@ struct Elements final : ElementHost {
     HostStatus register_element(ElementRegistration registration) override {
         names.emplace_back(registration.name);
         registrations.push_back(std::move(registration));
-        if (throw_on_register) throw std::runtime_error("register");
+        if (throw_on_register)
+            throw std::runtime_error("register");
         return result;
     }
     HostStatus result = HostStatus::ok;
@@ -41,7 +44,8 @@ struct Elements final : ElementHost {
 };
 struct Product final : ProductHost {
     HostStatus dispatch(ProductEvent event) override {
-        if (throw_on_dispatch) throw std::runtime_error("product");
+        if (throw_on_dispatch)
+            throw std::runtime_error("product");
         events.push_back(std::move(event));
         return result;
     }
@@ -59,11 +63,13 @@ TEST_CASE("RmlUi host bridge requires all providers and stages registration") {
     REQUIRE(bridge.activate() == HostStatus::missing_capability);
     REQUIRE(bridge.bind_lua(lua) == HostStatus::ok);
     REQUIRE(bridge.bind_elements(elements) == HostStatus::ok);
-    REQUIRE(bridge.register_element({"knob", [](std::string_view) { return HostStatus::ok; }}) == HostStatus::not_active);
+    REQUIRE(bridge.register_element({"knob", [](std::string_view) { return HostStatus::ok; }}) ==
+            HostStatus::not_active);
     REQUIRE(bridge.bind_product(product) == HostStatus::ok);
     REQUIRE(bridge.activate() == HostStatus::ok);
     REQUIRE(lua->initialise_count == 1);
-    REQUIRE(bridge.register_element({"knob", [](std::string_view) { return HostStatus::ok; }}) == HostStatus::ok);
+    REQUIRE(bridge.register_element({"knob", [](std::string_view) { return HostStatus::ok; }}) ==
+            HostStatus::ok);
     REQUIRE(elements->names == std::vector<std::string>{"knob"});
     REQUIRE(elements->registrations.front().dispatch("before-close") == HostStatus::ok);
     bridge.close();
@@ -75,7 +81,9 @@ TEST_CASE("RmlUi host bridge owns providers and event identifiers") {
     auto lua = std::make_shared<Lua>();
     auto elements = std::make_shared<Elements>();
     auto product = std::make_shared<Product>();
-    bridge.bind_lua(lua); bridge.bind_elements(elements); bridge.bind_product(product);
+    bridge.bind_lua(lua);
+    bridge.bind_elements(elements);
+    bridge.bind_product(product);
     REQUIRE(bridge.dispatch_lua("onload") == HostStatus::not_active);
     REQUIRE(bridge.activate() == HostStatus::ok);
     std::string callback = "onload";
@@ -87,7 +95,8 @@ TEST_CASE("RmlUi host bridge owns providers and event identifiers") {
     REQUIRE(lua->callbacks == std::vector<std::string>{"onload"});
     bridge.close();
     REQUIRE_FALSE(bridge.active());
-    REQUIRE(bridge.dispatch_product({ProductEventKind::action, "PresetNext", 0.0}) == HostStatus::not_active);
+    REQUIRE(bridge.dispatch_product({ProductEventKind::action, "PresetNext", 0.0}) ==
+            HostStatus::not_active);
 }
 
 TEST_CASE("RmlUi host bridge propagates refusals and catches provider exceptions") {
@@ -96,7 +105,9 @@ TEST_CASE("RmlUi host bridge propagates refusals and catches provider exceptions
     auto elements = std::make_shared<Elements>();
     auto product = std::make_shared<Product>();
     lua->throw_on_initialise = true;
-    bridge.bind_lua(lua); bridge.bind_elements(elements); bridge.bind_product(product);
+    bridge.bind_lua(lua);
+    bridge.bind_elements(elements);
+    bridge.bind_product(product);
     REQUIRE(bridge.activate() == HostStatus::rejected);
     REQUIRE_FALSE(bridge.active());
     lua->throw_on_initialise = false;
@@ -118,7 +129,8 @@ TEST_CASE("RmlUi host bridge propagates refusals and catches provider exceptions
     REQUIRE(bridge.bind_product(product) == HostStatus::ok);
     REQUIRE(bridge.activate() == HostStatus::ok);
     product->throw_on_dispatch = true;
-    REQUIRE(bridge.dispatch_product({ProductEventKind::action, "PresetNext", 0.0}) == HostStatus::rejected);
+    REQUIRE(bridge.dispatch_product({ProductEventKind::action, "PresetNext", 0.0}) ==
+            HostStatus::rejected);
     REQUIRE_FALSE(bridge.active());
 }
 

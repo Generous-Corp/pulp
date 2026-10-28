@@ -19,7 +19,6 @@ add_library(pulp::view-core ALIAS pulp-view-core)
 # Consumers (and view-core's own headers) gate any optional JS use on this.
 target_compile_definitions(pulp-view-core PUBLIC PULP_ENABLE_JS=$<BOOL:${PULP_ENABLE_JS}>)
 
-
 add_library(pulp-view-script)
 add_library(pulp::view-script ALIAS pulp-view-script)
 
