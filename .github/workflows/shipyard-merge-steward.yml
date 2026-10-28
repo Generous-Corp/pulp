@@ -17,7 +17,7 @@ on:
 
 permissions:
   contents: read
-  actions: write
+  actions: read
 
 concurrency:
   group: shipyard-merge-steward-${{ github.repository }}
@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           ref: main
           fetch-depth: 1
@@ -79,6 +79,31 @@ jobs:
           assert status["mutation_machine"] == "github-actions"
           PY
 
+      - name: Audit exact-head review gates before mutation
+        id: review_gate
+        if: steps.configure.outcome == 'success' && (github.event_name == 'schedule' || inputs.apply)
+        env:
+          GH_TOKEN: ${{ steps.shipyard-app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          # The steward remains the sole mutation planner. This read-only pass
+          # independently proves every planned arm candidate is allowed at its
+          # current head before the apply pass can mutate GitHub state.
+          shipyard runner steward --repo "$GITHUB_REPOSITORY" --base main --arm-unqueued --json \
+            > "$RUNNER_TEMP/steward/audit.json"
+          jq -c '.repos[].prs[] | select(.mutation != null) | {number,head_sha}' \
+            "$RUNNER_TEMP/steward/audit.json" > "$RUNNER_TEMP/steward/review-candidates.jsonl"
+          while IFS= read -r candidate; do
+            [ -n "$candidate" ] || continue
+            pr=$(jq -r '.number' <<<"$candidate")
+            head=$(jq -r '.head_sha' <<<"$candidate")
+            verdict=$(shipyard review-verdict --repo "$GITHUB_REPOSITORY" --pr "$pr" --head "$head" --json)
+            jq -e '.verdict.verdict == "allowed"' <<<"$verdict" >/dev/null || {
+              echo "refusing mutation: PR $pr head $head lacks an allowed exact-head review" >&2
+              exit 1
+            }
+          done < "$RUNNER_TEMP/steward/review-candidates.jsonl"
+
       - name: Reconcile and feed the native queue
         id: reconcile
         if: steps.configure.outcome == 'success'
@@ -95,7 +120,7 @@ jobs:
 
       - name: Publish feeder evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: shipyard-merge-steward-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/steward
