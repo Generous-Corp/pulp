@@ -10,7 +10,9 @@
 #include <cstdint>
 #include <limits>
 
-#if defined(__APPLE__) && !defined(__aarch64__)
+#include <numeric>
+
+#if defined(__APPLE__)
 #include <mach/mach_time.h>
 #endif
 
@@ -116,6 +118,49 @@ inline AudioRuntimeOverloadReport evaluate_audio_runtime_overload(
     return report;
 }
 
+/// Converts a span of monotonic clock ticks to nanoseconds.
+///
+/// The ratio is reduced once, off the audio thread, so converting a span is
+/// one 64-bit multiply and divide. host() reads the platform timebase:
+/// mach_timebase_info() on Apple (125/3 on M1, 1/1 on later chips), and 1/1
+/// elsewhere, where the ticks are already steady_clock nanoseconds.
+struct LoadClockRatio {
+    std::uint64_t numer = 1;
+    std::uint64_t denom = 1;
+
+    /// numer/denom reduced by their GCD. A zero numerator or denominator names
+    /// an unavailable clock, which converts every span to 0.
+    static constexpr LoadClockRatio reduced(std::uint64_t numer, std::uint64_t denom) noexcept {
+        if (numer == 0 || denom == 0)
+            return LoadClockRatio{0, 1};
+        const std::uint64_t divisor = std::gcd(numer, denom);
+        return LoadClockRatio{numer / divisor, denom / divisor};
+    }
+
+    /// The running platform's timebase. Not for the audio thread.
+    static LoadClockRatio host() noexcept {
+#if defined(__APPLE__)
+        mach_timebase_info_data_t timebase{};
+        mach_timebase_info(&timebase); // leaves {0, 0} on failure: unavailable
+        return reduced(timebase.numer, timebase.denom);
+#else
+        return LoadClockRatio{1, 1};
+#endif
+    }
+
+    /// Nanoseconds in a span of `ticks`, saturating at INT64_MAX.
+    constexpr std::int64_t to_ns(std::uint64_t ticks) const noexcept {
+        constexpr auto kMax = static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
+        if (denom == 0 || numer == 0)
+            return 0;
+        if (ticks > kMax / numer)
+            return std::numeric_limits<std::int64_t>::max();
+        return static_cast<std::int64_t>(std::min(ticks * numer / denom, kMax));
+    }
+
+    friend constexpr bool operator==(const LoadClockRatio&, const LoadClockRatio&) = default;
+};
+
 /// Measures the CPU load of an audio processing callback.
 ///
 /// Call begin() at the start and end() at the end of your process() method.
@@ -136,6 +181,30 @@ inline AudioRuntimeOverloadReport evaluate_audio_runtime_overload(
 /// @endcode
 class AudioProcessLoadMeasurer {
 public:
+    /// Reads the platform timebase once, here, so begin() and end() never
+    /// query it. Construct the measurer off the audio thread.
+    AudioProcessLoadMeasurer() noexcept : AudioProcessLoadMeasurer(LoadClockRatio::host()) {}
+
+    /// Uses `ratio` to convert clock ticks to nanoseconds. A test can inject a
+    /// known ratio; production code uses the default constructor.
+    explicit AudioProcessLoadMeasurer(LoadClockRatio ratio) noexcept : ratio_(ratio) {}
+
+    /// The tick-to-nanosecond ratio captured at construction.
+    LoadClockRatio clock_ratio() const noexcept { return ratio_; }
+
+    /// One raw read of the measurer's monotonic clock, in its own ticks
+    /// (convert spans with clock_ratio()). Apple targets read
+    /// mach_absolute_time(); others read steady_clock in nanoseconds.
+    static std::uint64_t read_ticks() noexcept {
+#if defined(__APPLE__)
+        return mach_absolute_time();
+#else
+        return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                              std::chrono::steady_clock::now().time_since_epoch())
+                                              .count());
+#endif
+    }
+
     /// Call at the start of the audio callback.
     /// @param num_frames Number of samples in this buffer.
     /// @param sample_rate Current sample rate in Hz.
@@ -147,7 +216,7 @@ public:
         (void)sample_rate;
         return;
 #else
-        start_time_ = clock::now();
+        start_ticks_ = read_ticks();
 
         if (num_frames <= 0 || !(sample_rate > 0.0f)) {
             available_ns_ = 0;
@@ -172,9 +241,9 @@ public:
 #if defined(PULP_AUDIOWORKLET_DISABLE_LOAD_TIMING)
         return;
 #else
-        auto elapsed = clock::now() - start_time_;
-        const int64_t elapsed_ns = std::max<int64_t>(
-            0, std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count());
+        const std::uint64_t end_ticks = read_ticks();
+        const int64_t elapsed_ns =
+            ratio_.to_ns(end_ticks >= start_ticks_ ? end_ticks - start_ticks_ : 0);
 
         if (available_ns_ > 0) {
             float raw = static_cast<float>(elapsed_ns) / static_cast<float>(available_ns_);
@@ -246,7 +315,7 @@ public:
         callback_count_.store(0, std::memory_order_relaxed);
         overload_count_.store(0, std::memory_order_relaxed);
         available_ns_ = 0;
-        start_time_ = {};
+        start_ticks_ = 0;
     }
 
     /// Set smoothing factor (0 = no smoothing, 1 = no averaging).
@@ -262,62 +331,22 @@ public:
     }
 
   private:
-    // A monotonic clock read twice per measured span. On Apple platforms
-    // std::chrono::steady_clock goes through clock_gettime() and
-    // mach_continuous_time(), which showed as about 8% of a small SignalGraph
-    // block for the always-on whole-graph span alone. Continuous time also counts
-    // system sleep, which a callback span never contains, so a cheaper uptime
-    // counter measures the same durations:
-    // - Apple arm64 reads the architectural virtual counter directly. An ISB
-    //   orders the counter read without the heavier mach_absolute_time() path,
-    //   which cost about 10 ns per read inside a graph block. Its rate comes
-    //   from CNTFRQ_EL0, read once: it differs across chips (24 MHz on M1,
-    //   1 GHz on M5) and need not match mach_absolute_time()'s timebase. Both
-    //   ends of a span use the same ordered counter, and a span that would
-    //   come out negative is clamped to zero.
-    // - Other Apple targets use mach_absolute_time().
-    struct clock {
-        using duration = std::chrono::nanoseconds;
-        using rep = duration::rep;
-        using period = duration::period;
-        using time_point = std::chrono::time_point<clock, duration>;
-        static constexpr bool is_steady = true;
-
-        static time_point now() noexcept {
-#if defined(__APPLE__) && defined(__aarch64__)
-            // Read the counter frequency on each call. This is one register
-            // read and avoids function-local static initialization on the first
-            // audio callback. The architectural counter is stable for the life
-            // of the system; a zero frequency is treated as an unavailable
-            // clock rather than dividing by zero.
-            std::uint64_t frequency = 0;
-            asm volatile("mrs %0, cntfrq_el0" : "=r"(frequency));
-            std::uint64_t ticks = 0;
-            asm volatile("isb" ::: "memory");
-            asm volatile("mrs %0, cntvct_el0" : "=r"(ticks));
-            if (frequency == 0)
-                return time_point{};
-            const auto nanos = (static_cast<unsigned __int128>(ticks) * 1000000000u) /
-                               static_cast<unsigned __int128>(frequency);
-            return time_point(duration(static_cast<rep>(nanos)));
-#elif defined(__APPLE__)
-            // Avoid guarded function-local initialization on the first
-            // callback. mach_timebase_info is a read-only kernel query; its
-            // result is stable, and this path is used only on non-arm64 Apple
-            // targets where the callback budget is less constrained.
-            mach_timebase_info_data_t timebase{};
-            mach_timebase_info(&timebase);
-            const std::uint64_t ticks = mach_absolute_time();
-            return time_point(duration(static_cast<rep>(ticks * timebase.numer / timebase.denom)));
-#else
-            return time_point(std::chrono::duration_cast<duration>(
-                std::chrono::steady_clock::now().time_since_epoch()));
-#endif
-        }
-    };
-    using time_point = clock::time_point;
-
-    time_point start_time_{};
+    // The measurer reads its clock twice per measured span, on the audio
+    // thread. On Apple platforms std::chrono::steady_clock goes through
+    // clock_gettime() and mach_continuous_time(), which showed as about 8% of
+    // a small SignalGraph block for the always-on whole-graph span alone, so
+    // Apple targets read mach_absolute_time() instead: the uptime counter,
+    // whose libsystem implementation orders the counter read. Continuous time
+    // also counts system sleep, which a callback span never contains, so
+    // uptime measures the same durations. Measured on an Apple M3 Ultra, best
+    // of 9 runs of 2M reads: mach_absolute_time() 5.3 ns, steady_clock::now()
+    // 15.2 ns, and an isb plus cntvct_el0 read converted with a 128-bit
+    // divide on every read 36.9 ns. The tick-to-nanosecond ratio is read once
+    // at construction (ratio_), so begin() and end() take no lock, run no
+    // guarded static initialization, and convert each span with one 64-bit
+    // multiply and divide.
+    LoadClockRatio ratio_;
+    std::uint64_t start_ticks_ = 0;
     int64_t available_ns_ = 0;
     std::atomic<float> load_{0.0f};
     std::atomic<float> peak_load_{0.0f};
