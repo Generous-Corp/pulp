@@ -31,9 +31,11 @@ struct Elements final : ElementHost {
     HostStatus register_element(ElementRegistration registration) override {
         names.emplace_back(registration.name);
         registrations.push_back(std::move(registration));
+        if (throw_on_register) throw std::runtime_error("register");
         return result;
     }
     HostStatus result = HostStatus::ok;
+    bool throw_on_register = false;
     std::vector<std::string> names;
     std::vector<ElementRegistration> registrations;
 };
@@ -163,4 +165,22 @@ TEST_CASE("RmlUi host bridge rejects retained callbacks after reactivation") {
     REQUIRE(bridge.bind_product(product) == HostStatus::ok);
     REQUIRE(bridge.activate() == HostStatus::ok);
     REQUIRE(retained("stale") == HostStatus::not_active);
+}
+
+TEST_CASE("RmlUi host bridge quarantines partial element registration") {
+    HostBridge bridge;
+    auto lua = std::make_shared<Lua>();
+    auto elements = std::make_shared<Elements>();
+    auto product = std::make_shared<Product>();
+    bridge.bind_lua(lua);
+    bridge.bind_elements(elements);
+    bridge.bind_product(product);
+    REQUIRE(bridge.activate() == HostStatus::ok);
+    elements->throw_on_register = true;
+    REQUIRE(bridge.register_element({"knob", [](std::string_view) { return HostStatus::ok; }}) ==
+            HostStatus::rejected);
+    REQUIRE_FALSE(bridge.active());
+    REQUIRE(bridge.dispatch_product({ProductEventKind::action, "PresetNext", 0.0}) ==
+            HostStatus::not_active);
+    REQUIRE(elements->registrations.front().dispatch("stale") == HostStatus::not_active);
 }

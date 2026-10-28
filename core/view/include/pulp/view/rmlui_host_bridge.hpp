@@ -140,6 +140,7 @@ class HostBridge final {
                        : HostStatus::rejected;
         } catch (...) {
             registering_ = false;
+            close();
             return HostStatus::rejected;
         }
     }
