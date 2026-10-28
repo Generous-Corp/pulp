@@ -112,8 +112,11 @@ TEST_CASE("A decaying tail reaches exact zero rather than lingering subnormal",
     std::vector<double> ol, orr;
     render(engine, in, ol, orr);
 
-    for (double v : ol)
+    for (double v : ol) {
         REQUIRE(std::isfinite(v));
+        if constexpr (!kSubnormalsAreFree)
+            REQUIRE(std::fpclassify(v) != FP_SUBNORMAL);
+    }
 
 #if defined(__aarch64__) || defined(_M_ARM64)
     // ARM handles subnormal arithmetic in hardware. The per-sample path keeps
