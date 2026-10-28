@@ -6909,7 +6909,8 @@
   "import-design-ir-observe-variable-font-label": {
    "entry": "test/test_design_ir_observe_variable_font_label.py",
    "inputs": [
-    "test/test_design_ir_observe_variable_font_label.py"
+    "test/test_design_ir_observe_variable_font_label.py",
+    "tools/import-validation/text_raster_decomposition.py"
    ],
    "kind": "python"
   },
