@@ -141,6 +141,29 @@ class PairedShadowTests(unittest.TestCase):
             self.assertEqual(receipt["full_outcome"], "success")
             self.assertEqual(receipt["full_process"]["returncode"], 0)
 
+    def test_invalid_selection_disables_only_selected_run(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "selected-cwd").mkdir()
+            (root / "full-cwd").mkdir()
+            (root / "selected.json").write_text(json.dumps(command("raise SystemExit(9)")), encoding="utf-8")
+            (root / "full.json").write_text(json.dumps(command("pass")), encoding="utf-8")
+            (root / "selection.json").write_text("not json", encoding="utf-8")
+            out = root / "receipt.json"
+            proc = subprocess.run([sys.executable, str(HERE / "paired_affected_tests_shadow.py"),
+                                   "--selected-command", str(root / "selected.json"),
+                                   "--full-command", str(root / "full.json"),
+                                   "--selected-cwd", str(root / "selected-cwd"),
+                                   "--full-cwd", str(root / "full-cwd"),
+                                   "--selected-junit", str(root / "s.xml"), "--full-junit", str(root / "f.xml"),
+                                   "--selection", str(root / "selection.json"), "--receipt-out", str(out)],
+                                  capture_output=True, text=True, encoding="utf-8", check=False)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            receipt = json.loads(out.read_text(encoding="utf-8"))
+            self.assertIn("selection unavailable", receipt["selected_process"]["error"])
+            self.assertEqual(receipt["full_outcome"], "success")
+            self.assertEqual(receipt["full_process"]["returncode"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

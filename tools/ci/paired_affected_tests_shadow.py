@@ -153,12 +153,14 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     selected_plan: dict[str, Any]
+    selection_error: str | None = None
     try:
         selected_plan = json.loads(args.selection.read_text(encoding="utf-8"))
         if not isinstance(selected_plan, dict):
             raise ValueError("selection must be a JSON object")
     except (OSError, ValueError, json.JSONDecodeError) as exc:
-        selected_plan = {"tests": [], "selection_error": str(exc)}
+        selection_error = str(exc)
+        selected_plan = {"tests": [], "selection_error": selection_error}
 
     def load_command(path: Path, name: str) -> tuple[list[str], str | None]:
         try:
@@ -171,6 +173,9 @@ def main(argv: list[str] | None = None) -> int:
 
     selected_cmd, selected_command_error = load_command(args.selected_command, "selected")
     full_cmd, full_command_error = load_command(args.full_command, "full")
+    if selection_error is not None:
+        selected_cmd = []
+        selected_command_error = f"selection unavailable: {selection_error}"
 
     if args.selected_timeout_seconds <= 0:
         selected_plan["selection_error"] = "selected timeout must be positive"
