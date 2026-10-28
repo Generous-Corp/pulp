@@ -216,7 +216,9 @@ public:
     struct ModulationMenuSpec {
         std::string target_label;
         ModulationLane lanes[2];
+        std::size_t lane_count = 2;
         std::function<void()> on_reset;
+        std::function<void()> on_dismiss;
     };
 
     /// Build the canonical Spectr-style two-LFO menu. This is deliberately a

@@ -568,7 +568,8 @@ std::vector<ContextMenu::Item> ContextMenu::make_modulation_items(const Modulati
         items.push_back(Item::make_header("Modulate " + spec.target_label));
         items.push_back(Item::make_separator());
     }
-    for (std::size_t lane_index = 0; lane_index < 2; ++lane_index) {
+    const auto lane_count = std::min<std::size_t>(spec.lane_count, 2);
+    for (std::size_t lane_index = 0; lane_index < lane_count; ++lane_index) {
         const auto lane = (*lanes)[lane_index];
         const int base = 100 + static_cast<int>(lane_index) * 10;
         const auto notify = [lanes, lane_index](auto update) {
@@ -595,7 +596,7 @@ std::vector<ContextMenu::Item> ContextMenu::make_modulation_items(const Modulati
             base + 3, "Depth", lane.depth_normalized, 0.05f, [notify](const Item& item) {
                 notify([&](auto& next) { next.depth_normalized = item.normalized_value; });
             }));
-        if (lane_index == 0)
+        if (lane_index + 1 < lane_count)
             items.push_back(Item::make_separator());
     }
     items.push_back({1, "Reset modulation"});
@@ -605,10 +606,16 @@ std::vector<ContextMenu::Item> ContextMenu::make_modulation_items(const Modulati
 ContextMenu* ContextMenu::show_modulation(View* root, Point pos, ModulationMenuSpec spec) {
     auto items = make_modulation_items(spec);
     auto reset = std::move(spec.on_reset);
-    return show(root, pos, std::move(items), [reset = std::move(reset)](std::optional<int> id) {
-        if (id && *id == 1 && reset)
-            reset();
-    });
+    auto dismiss = std::move(spec.on_dismiss);
+    return show(root, pos, std::move(items),
+                [reset = std::move(reset), dismiss = std::move(dismiss)](std::optional<int> id) {
+                    if (!id) {
+                        if (dismiss)
+                            dismiss();
+                    } else if (*id == 1 && reset) {
+                        reset();
+                    }
+                });
 }
 
 }  // namespace pulp::view
