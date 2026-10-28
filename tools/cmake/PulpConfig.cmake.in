@@ -38,6 +38,7 @@ set(PULP_IOS_AUV3_TEMPLATE_DIR "${PULP_SDK_DIR}/templates/ios-auv3")
 # actually configured; ordinary Pulp installs remain independent of RmlUi.
 set(PULP_SDK_HAS_RMLUI "@PULP_ENABLE_RMLUI@")
 set(PULP_SDK_HAS_RMLUI_LUA "@PULP_ENABLE_RMLUI_LUA@")
+set(PULP_SDK_HAS_RMLUI_FONTS "@PULP_ENABLE_RMLUI_FONTS@")
 if(PULP_SDK_HAS_RMLUI)
     # RmlUi's exported Lua target names Lua::Lua in its interface.  Recreate
     # that target before loading RmlUiConfig; the actual static archive is
@@ -144,6 +145,17 @@ include("${CMAKE_CURRENT_LIST_DIR}/PulpWebGpuImportedTarget.cmake")
 # After the webgpu module, which supplies target_copy_webgpu_binaries() for
 # consumers that do not have the upstream FetchContent package in scope.
 include("${CMAKE_CURRENT_LIST_DIR}/PulpRuntimeStaging.cmake")
+
+# Recreate the source-build registration for installed SDK consumers. The
+# exported static RmlUi bridge still links the admitted font engine, so a
+# consumer's AU/CLAP target must stage that exact Mach-O runtime and rewrite
+# its package-manager install name just like an in-tree target does.
+if(APPLE AND PULP_SDK_HAS_RMLUI AND PULP_SDK_HAS_RMLUI_FONTS)
+    find_dependency(Freetype)
+    if(TARGET Freetype::Freetype)
+        pulp_register_macho_linked_runtime_dependency_target(Freetype::Freetype)
+    endif()
+endif()
 
 # A Pulp SDK built with the coordinated Vellum D15 provider carries the
 # provider dylib in its own lib directory. Recreate only the narrow runtime

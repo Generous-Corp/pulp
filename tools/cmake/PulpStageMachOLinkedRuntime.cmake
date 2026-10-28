@@ -276,6 +276,71 @@ if(_registered_runtime_id MATCHES "^/")
             "${PULP_LINKED_RUNTIME_NAME}: ${_runtime_id_rewrite_err}")
     endif()
 endif()
+
+# Close the admitted runtime's absolute dependency chain as well. Package
+# manager dylibs commonly have one more absolute edge (for example FreeType
+# -> libpng). Keep this bounded and deterministic: only existing absolute
+# paths are copied, system frameworks are left to the host, and every copied
+# image receives a loader-relative identity/reference.
+set(_runtime_queue "${PULP_STAGING_DIR}/${PULP_LINKED_RUNTIME_NAME}")
+set(_runtime_seen "${PULP_STAGING_DIR}/${PULP_LINKED_RUNTIME_NAME}")
+set(_runtime_depth 0)
+while(_runtime_queue AND _runtime_depth LESS 16)
+    list(POP_FRONT _runtime_queue _runtime_parent)
+    math(EXPR _runtime_depth "${_runtime_depth} + 1")
+    execute_process(COMMAND /usr/bin/otool -L "${_runtime_parent}"
+        RESULT_VARIABLE _deps_rc OUTPUT_VARIABLE _deps_out ERROR_QUIET)
+    if(NOT _deps_rc EQUAL 0)
+        continue()
+    endif()
+    string(REPLACE "\n" ";" _deps_lines "${_deps_out}")
+    foreach(_dep_line IN LISTS _deps_lines)
+        string(STRIP "${_dep_line}" _dep_line)
+        if(NOT _dep_line MATCHES "^(/[^ ]+) \\(compatibility version .+$")
+            continue()
+        endif()
+        set(_dep_path "${CMAKE_MATCH_1}")
+        if(_dep_path MATCHES "^/System/Library/|^/usr/lib/" OR
+           NOT EXISTS "${_dep_path}")
+            continue()
+        endif()
+        get_filename_component(_dep_name "${_dep_path}" NAME)
+        set(_dep_dest "${PULP_STAGING_DIR}/${_dep_name}")
+        if(_dep_dest IN_LIST _runtime_seen)
+            continue()
+        endif()
+        execute_process(COMMAND "${_install_name_tool}" -change "${_dep_path}"
+                "@loader_path/${_dep_name}" "${_runtime_parent}"
+            RESULT_VARIABLE _dep_rewrite_rc ERROR_VARIABLE _dep_rewrite_err)
+        if(NOT _dep_rewrite_rc EQUAL 0)
+            message(FATAL_ERROR
+                "${PULP_STAGING_LABEL}: failed to rewrite ${_dep_path} in "
+                "${_runtime_parent}: ${_dep_rewrite_err}")
+        endif()
+        execute_process(COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${_dep_path}" "${_dep_dest}"
+            RESULT_VARIABLE _dep_copy_rc ERROR_VARIABLE _dep_copy_err)
+        if(NOT _dep_copy_rc EQUAL 0 OR NOT EXISTS "${_dep_dest}")
+            message(FATAL_ERROR
+                "${PULP_STAGING_LABEL}: failed to stage ${_dep_path}: "
+                "${_dep_copy_err}")
+        endif()
+        execute_process(COMMAND "${_install_name_tool}" -id
+                "@loader_path/${_dep_name}" "${_dep_dest}"
+            RESULT_VARIABLE _dep_id_rc ERROR_VARIABLE _dep_id_err)
+        if(NOT _dep_id_rc EQUAL 0)
+            message(FATAL_ERROR
+                "${PULP_STAGING_LABEL}: failed to rewrite staged ${_dep_name}: "
+                "${_dep_id_err}")
+        endif()
+        list(APPEND _runtime_seen "${_dep_dest}")
+        list(APPEND _runtime_queue "${_dep_dest}")
+    endforeach()
+endwhile()
+if(_runtime_queue)
+    message(FATAL_ERROR
+        "${PULP_STAGING_LABEL}: runtime dependency closure exceeded 16 images")
+endif()
 file(SHA256 "${PULP_STAGING_DIR}/${PULP_LINKED_RUNTIME_NAME}"
     _receipt_runtime_sha256)
 
