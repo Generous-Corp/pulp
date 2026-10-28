@@ -1419,6 +1419,8 @@
       "pulp/view/reorder_list.hpp",
       "pulp/view/repaint_damage.hpp",
       "pulp/view/resizable_shell.hpp",
+      "pulp/view/rmlui_host_bridge.hpp",
+      "pulp/view/rmlui_importer_adapter.hpp",
       "pulp/view/screenshot.hpp",
       "pulp/view/screenshot_compare.hpp",
       "pulp/view/script_engine.hpp",
