@@ -158,12 +158,47 @@ public:
     }
     std::uint32_t buffer_slot_count() const noexcept { return assignment_.slot_count; }
 
-private:
+    // Where one input port of a node reads from each block, resolved in reset()
+    // from the plan and the assignment so the routed walk does not rediscover
+    // it from the connection table on every block.
+    struct InputPortSource {
+        enum class Mode : std::uint8_t {
+            Zero,    // no audio edge: the port's own slot, zeroed
+            InPlace, // one undelayed edge read in place from `slot`
+            Copy,    // one undelayed edge copied bit-exactly from `slot`
+            Sum,     // several edges, or one through a PDC ring: summed
+        };
+        Mode mode = Mode::Zero;
+        std::uint32_t slot = 0;
+    };
+    // The node's input ports, in port order (empty for a node with none).
+    std::span<const InputPortSource> input_port_sources(std::uint32_t node_index) const noexcept {
+        if (node_index + 1 >= input_port_base_.size())
+            return {};
+        return std::span<const InputPortSource>(input_ports_)
+            .subspan(input_port_base_[node_index],
+                     input_port_base_[node_index + 1] - input_port_base_[node_index]);
+    }
+    // True when the plan has exactly one AudioOutput node.
+    bool sole_audio_output() const noexcept {
+        return sole_audio_output_;
+    }
+
+  private:
+    bool compute_valid() const noexcept;
+    void resolve_input_ports();
+
     graph::GraphRuntimePlan plan_;
     std::vector<GraphRuntimeNodeBinding> bindings_;
     std::vector<graph::NodeId> node_ids_sorted_;
     graph::GraphRuntimeBufferAssignment assignment_;
     bool parallel_safe_ = false;
+    // Computed once in reset() and clear(); the snapshot does not change in
+    // between. An empty snapshot is valid (it processes nothing).
+    bool valid_ = true;
+    bool sole_audio_output_ = false;
+    std::vector<InputPortSource> input_ports_;
+    std::vector<std::uint32_t> input_port_base_;
 };
 
 struct GraphRuntimeEventSink {
