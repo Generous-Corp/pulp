@@ -3101,6 +3101,7 @@
   "pulp-test-signal-formant-filter-bank",
   "pulp-test-signal-fractional-delay",
   "pulp-test-signal-frequency-shifter-ssb",
+  "pulp-test-signal-gain",
   "pulp-test-signal-granular",
   "pulp-test-signal-graph-audio-parity",
   "pulp-test-signal-graph-control-authority",

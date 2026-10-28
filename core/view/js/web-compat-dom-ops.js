@@ -275,6 +275,13 @@ if (!Element.prototype.appendChild ||
             ? previousParent._children.indexOf(newChild) : -1;
         var idx = this._children.indexOf(refChild);
         if (idx < 0) return this.appendChild(newChild);
+        // Already directly ahead of refChild: nothing moves.
+        if (previousParent === this && this._children[idx - 1] === newChild)
+            return newChild;
+        // A child that already has a native widget under this parent is being
+        // reordered, as a keyed list does. Its widget, styles, attributes, and
+        // listeners are all still in place, so only its position changes.
+        var reorder = previousParent === this && newChild._nativeCreated === true;
         // As in appendChild(), detach the JS relationship without retiring
         // the native subtree. The C++ append path must see the existing widget
         // so retained ScrollView aliases and callback identity survive.
@@ -296,8 +303,19 @@ if (!Element.prototype.appendChild ||
         __pulpRememberNativeElement__(newChild);
         var __insertHint = (typeof __pulpElementWantsScrollView__ === "function" &&
             __pulpElementWantsScrollView__(newChild)) ? "scroll" : "";
+        // The native append lands last unless it names the sibling to precede.
+        // refChild itself may not be materialized yet, so take the first
+        // following sibling that is.
+        var nativeBefore = "";
+        for (var ni = idx + 1; ni < this._children.length; ni++) {
+            if (this._children[ni]._nativeCreated) {
+                nativeBefore = this._children[ni]._id;
+                break;
+            }
+        }
         try {
-            __domAppend(this._id, newChild._id, newChild.tagName.toLowerCase(), __insertHint);
+            __domAppend(this._id, newChild._id, newChild.tagName.toLowerCase(),
+                        __insertHint, nativeBefore);
         } catch (e) {
             var rollbackIndex = this._children.indexOf(newChild);
             if (rollbackIndex >= 0) this._children.splice(rollbackIndex, 1);
@@ -305,6 +323,11 @@ if (!Element.prototype.appendChild ||
             if (previousParent && previousIndex >= 0)
                 previousParent._children.splice(previousIndex, 0, newChild);
             throw e;
+        }
+        // Position can still change which stylesheet rules match.
+        if (reorder) {
+            newChild._reapplyStylesheets();
+            return newChild;
         }
         newChild._nativeCreated = true;
         __invalidateStyleCache__(newChild);
@@ -345,8 +368,14 @@ if (!Element.prototype.appendChild ||
     Element.prototype.replaceChild = function(newChild, oldChild) {
         var idx = this._children.indexOf(oldChild);
         if (idx < 0) return oldChild;
+        if (newChild === oldChild) return oldChild;
+        // The replacement takes oldChild's slot, not the end of the list.
+        var next = this._children[idx + 1] || null;
+        if (next === newChild) next = this._children[idx + 2] || null;
         this.removeChild(oldChild);
-        this.appendChild(newChild);  // fragment-aware via appendChild above
+        // Both paths are fragment-aware.
+        if (next) this.insertBefore(newChild, next);
+        else this.appendChild(newChild);
         return oldChild;
     };
     Element.prototype.replaceChild.__pulp_dom_ops__ = true;

@@ -43,14 +43,14 @@
   ],
   "counts": {
     "public_headers": 514,
-    "reviewed_headers": 261,
-    "legacy_unreviewed_headers": 253,
+    "reviewed_headers": 262,
+    "legacy_unreviewed_headers": 252,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 121,
       "capability_support": 46,
-      "infrastructure": 92,
-      "legacy_unreviewed": 253,
+      "infrastructure": 93,
+      "legacy_unreviewed": 252,
       "unsupported_capability": 2
     },
     "by_domain": {
@@ -86,8 +86,8 @@
       },
       "signal": {
         "public_headers": 279,
-        "reviewed_headers": 153,
-        "legacy_unreviewed_headers": 126,
+        "reviewed_headers": 154,
+        "legacy_unreviewed_headers": 125,
         "unsupported_headers": 2
       },
       "timebase": {
@@ -3367,11 +3367,11 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/gain.hpp",
-      "fingerprint": "sha256:8cf5c1c81f789ad47b98f7e05c3859969f7938a0fe63b93da2297d74dc390469",
+      "fingerprint": "sha256:54651b70d3f4f19684907be44323e35fd4d726d7e9795b04c07eda1b79aab503",
       "include": "pulp/signal/gain.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "GainT is a composable signal processor used by plugins and graph nodes; its optional smoothing API is implementation infrastructure rather than an independently advertised generator-facing capability."
     },
     {
       "domain": "signal",

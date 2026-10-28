@@ -202,7 +202,11 @@ still runs.
 Before suggesting a package, check if Pulp's built-in `core/signal/` already covers the need:
 
 - **Filters**: biquad, SVF, TPT, Linkwitz-Riley, ladder, FIR — built-in
-- **FFT/STFT**: built-in (use PFFFT only if benchmarks show it's needed)
+- **FFT/STFT**: built-in on Apple; the MIT muFFT backend is used off Apple
+  when enabled. muFFT is compiled from the pinned source files only; its
+  upstream CMake tests and FFTW-linked tools are never built or shipped.
+  The real-time FFT admission rule applies to the largest single allocation,
+  and every transform path must remain allocation-free on the audio thread.
 - **Delay**: built-in
 - **Reverb, compressor, oscillator, ADSR**: built-in
 - **Pitch detection**: NOT built-in → suggest cycfi-q
