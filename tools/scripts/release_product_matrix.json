@@ -130,13 +130,14 @@
     "pulp-view-native",
     "pulp-view-platform",
     "pulp-view-webview",
+    "pulp-view-webview-backend",
     "pulp-view-script"
   ],
   "platform_library_stems": {
     "darwin": ["pulp-bundled-fonts"],
-    "linux": ["pulp-bundled-fonts", "pulp-bundled-noto-color-emoji"],
-    "windows": ["pulp-bundled-fonts"],
-    "windows-x64": ["pulp-bundled-fonts"]
+    "linux": ["pulp-bundled-fonts", "pulp-bundled-noto-color-emoji", "pulp-signal-mufft"],
+    "windows": ["pulp-bundled-fonts", "pulp-signal-mufft"],
+    "windows-x64": ["pulp-bundled-fonts", "pulp-signal-mufft"]
   },
   "common_sdk_members": [
     "pulp-sdk/LICENSE.md",
