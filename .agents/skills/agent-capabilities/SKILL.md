@@ -1711,3 +1711,11 @@ contract changes.
 ## SysEx core storage and representation
 
 SysEx7 reassembly is reviewed MIDI infrastructure, not a new musical capability. Refresh both reviewed-header fingerprints and generated surface history after bounded-storage or copy-semantics changes.
+
+## FFT surface refreshes
+
+When a DSP change modifies a fingerprinted signal header such as
+`pulp/signal/fft.hpp`, update the registry fingerprint, re-derive the manifest
+and surface counters against the protected base, and refresh the two sequencer
+exposure evidence needles before running the gates. This keeps the generated
+contract and its evidence rows aligned with the new header bytes.
