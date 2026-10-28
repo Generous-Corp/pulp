@@ -1,0 +1,120 @@
+{
+  "schema": "pulp.beadsy.delivery-reconciliation.v1",
+  "recorded_at": "2026-10-28T06:20:00Z",
+  "objective": "Deliver an independently branded, faithful Beads-inspired Pulp instrument and reusable, provenance-backed design import, UI, audio-routing, validation, and packaging capabilities.",
+  "delivery_contract": {
+    "source": "https://github.com/danielraffel/pulp-planning/blob/codex/live-drain-refresh-20261028/2026-10-28-agent-delivery-contract.md",
+    "applied_rules": [
+      "Start from a fresh worktree based on origin/main.",
+      "Reconcile exact PR head, required checks, reviews, queue state, and Shipyard receipts before acting.",
+      "Commit durable progress early; do not treat local bytes or old receipts as authorization.",
+      "Use shipyard pr --no-arm for validation and native GitHub merge queue for landing.",
+      "A changed head invalidates prior review and receipts.",
+      "Do not infer ownership or consent from old approvals; record a specific blocked/follow-up state."
+    ]
+  },
+  "authoritative_state": {
+    "repository": "Generous-Corp/pulp",
+    "base_ref": "origin/main",
+    "base_sha": "aeae096e028534d0f59326e7cdc4dfa69c7f53f0",
+    "base_commit": "Merge pull request #11237 from Generous-Corp/release/version-bump",
+    "base_protected": true,
+    "open_beadsy_prs": [],
+    "shipyard": {
+      "version": "0.364.0",
+      "running": 0,
+      "pending": 1,
+      "reachable_targets": {"mac": true},
+      "orphaned_states": ["danielraffel/Shipyard PR #963", "danielraffel/Shipyard PR #966", "danielraffel/Shipyard PR #970"],
+      "beadsy_receipt": "absent"
+    },
+    "main_workflows": "GitHub API reports the recent main workflows successful at the exact base SHA; this is not Beadsy implementation evidence."
+  },
+  "historical_local_heads": [
+    {
+      "branch": "fix/beadsy-final-pulp-integrated-20261027",
+      "sha": "0013a8fa46c3d977ad263a1a3dd7acc2733e5613",
+      "worktree": "/Users/danielraffel/Code/agent-worktrees/pulp-beadsy-integrated-20261027",
+      "pr": null,
+      "review_or_arm": null,
+      "base_at_creation": "2845a264225da6cfe62acd9fd1eff1aa5b1842e7",
+      "disposition": "historical local-only branch; do not resume or force-push"
+    },
+    {
+      "branch": "fix/beadsy-context-menu-lifecycle-20261027",
+      "sha": "5c5425247b1c0107651a2a67ef883033171ae499",
+      "worktree": "/Users/danielraffel/Code/agent-worktrees/pulp-context-menu-lifecycle-20261027",
+      "pr": null,
+      "review_or_arm": null,
+      "base_at_creation": "e36b0549e6f7c8c8de844509512e6b289f94c4ed",
+      "disposition": "historical local-only branch; do not resume or force-push"
+    },
+    {
+      "branch": "feature/beadsy-route-channel-core-on-latest-main-20261027",
+      "sha": "934fe954abc01e75c9bf26091e2d6ec0ddc4674b",
+      "worktree": "/Users/danielraffel/Code/pulp-beadsy-sdk-latest-main-20261027",
+      "pr": null,
+      "review_or_arm": null,
+      "base_at_creation": "0d817a9e4ddbe41f6da4a89248c3ae4204eb9a46",
+      "disposition": "historical local-only branch; route ideas only after fresh implementation"
+    },
+    {
+      "branch": "feature/beadsy-capability-integration-20261027",
+      "sha": "bc5e0a70006175fe260b08f74c4a60cabedce220",
+      "worktree": "/Users/danielraffel/Code/pulp-beadsy-capability-integration-20261027",
+      "pr": null,
+      "review_or_arm": null,
+      "base_at_creation": "0d817a9e4ddbe41f6da4a89248c3ae4204eb9a46",
+      "disposition": "historical local-only branch; route ideas only after fresh implementation"
+    },
+    {
+      "branch": "fix/beadsy-orientation-poka-yoke-20261027",
+      "sha": "0013a8fa46c3d977ad263a1a3dd7acc2733e5613",
+      "worktree": "/Users/danielraffel/Code/agent-worktrees/beadsy-orientation-poka-yoke-20261027",
+      "pr": null,
+      "review_or_arm": null,
+      "base_at_creation": "2845a264225da6cfe62acd9fd1eff1aa5b1842e7",
+      "disposition": "historical local-only branch; do not resume or force-push"
+    }
+  ],
+  "ownership": {
+    "source": ".github/vellum-ownership.json",
+    "pulp_owned": [
+      "core/audio/",
+      "core/format/",
+      "core/host/",
+      "core/midi/",
+      "core/signal/",
+      "tools/cli/",
+      "tools/mcp/",
+      "DEPENDENCIES.md",
+      "NOTICE.md",
+      "LICENSE.md"
+    ],
+    "transferred_or_excluded": [
+      "core/canvas/**",
+      "core/render/**",
+      "core/view design-schema/compiler paths",
+      "core/view screenshot/capture paths"
+    ],
+    "routing_decision": "Do not resume historical branches that modify transferred or excluded framework/rendering/import paths. Any generic design-import or Skia/Dawn editor hardening must use the separately reviewed Pulp/Vellum change-routing protocol and immutable event; this reconciliation does not widen ownership."
+  },
+  "follow_up": {
+    "status": "incomplete_and_not_authorized_to_merge",
+    "next_safe_action": "Create a new exact-head implementation branch from aeae096e… with a dependency ledger and claim-before-edit entries; first land only Pulp-owned audio/format/host behavior and proof fixtures, then obtain the required Vellum route event before any transferred framework change.",
+    "required_gates": [
+      "Fresh branch exact-head review and Shipyard receipt",
+      "Beads manual/source/DSP parameter inventory and independent branding/provenance",
+      "Audio A/B RenderScenario/reference evidence and external-input routing proof",
+      "UI source-export/Chromium versus Skia/Dawn screenshots with region-aware fidelity receipt",
+      "Context-menu interaction proof: toggle, arrows, return, escape/outside dismissal, LFO shape/depth/rate",
+      "AUv2, VST3, CLAP, AAX build/validator evidence; REAPER and Logic smoke where available",
+      "Signed, notarized, stapled installer evidence only after exact-head checks and review"
+    ],
+    "do_not_claim": [
+      "No Beadsy build, installer, DAW behavior, or artwork fidelity is proven by this receipt.",
+      "Green main checks do not validate the unsubmitted historical branches.",
+      "Local historical branches have no merge authorization."
+    ]
+  }
+}
