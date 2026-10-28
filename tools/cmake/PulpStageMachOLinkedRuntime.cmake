@@ -284,6 +284,7 @@ endif()
 # image receives a loader-relative identity/reference.
 set(_runtime_queue "${PULP_STAGING_DIR}/${PULP_LINKED_RUNTIME_NAME}")
 set(_runtime_seen "${PULP_STAGING_DIR}/${PULP_LINKED_RUNTIME_NAME}")
+set(_runtime_images "${PULP_LINKED_IMAGE}")
 set(_runtime_depth 0)
 while(_runtime_queue AND _runtime_depth LESS 16)
     list(POP_FRONT _runtime_queue _runtime_parent)
@@ -335,11 +336,53 @@ while(_runtime_queue AND _runtime_depth LESS 16)
         endif()
         list(APPEND _runtime_seen "${_dep_dest}")
         list(APPEND _runtime_queue "${_dep_dest}")
+        list(APPEND _runtime_images "${_dep_dest}")
     endforeach()
 endwhile()
 if(_runtime_queue)
     message(FATAL_ERROR
         "${PULP_STAGING_LABEL}: runtime dependency closure exceeded 16 images")
+endif()
+
+# install_name_tool changes the bytes covered by a Mach-O code signature.  The
+# linker may have emitted a valid ad-hoc signature for the target and the
+# copied runtimes may also have one, but both become invalid after the
+# relocatability rewrites above.  macOS 27 can terminate a host with
+# CODESIGNING/Invalid Page before it reports a plug-in discovery error, so this
+# is a correctness requirement for every development and installed consumer.
+# Release signing may replace these ad-hoc signatures later; this step only
+# restores a valid nested-code boundary after staging.
+find_program(_pulp_codesign codesign)
+if(_pulp_codesign)
+    foreach(_runtime_image IN LISTS _runtime_images)
+        if(NOT EXISTS "${_runtime_image}")
+            message(FATAL_ERROR
+                "${PULP_STAGING_LABEL}: cannot sign missing Mach-O image "
+                "${_runtime_image}")
+        endif()
+        execute_process(
+            COMMAND "${_pulp_codesign}" --force --sign - "${_runtime_image}"
+            RESULT_VARIABLE _codesign_rc
+            ERROR_VARIABLE _codesign_err)
+        if(NOT _codesign_rc EQUAL 0)
+            message(FATAL_ERROR
+                "${PULP_STAGING_LABEL}: ad-hoc signing failed for "
+                "${_runtime_image}: ${_codesign_err}")
+        endif()
+        execute_process(
+            COMMAND "${_pulp_codesign}" --verify --strict "${_runtime_image}"
+            RESULT_VARIABLE _codesign_verify_rc
+            ERROR_VARIABLE _codesign_verify_err)
+        if(NOT _codesign_verify_rc EQUAL 0)
+            message(FATAL_ERROR
+                "${PULP_STAGING_LABEL}: ad-hoc signature verification failed "
+                "for ${_runtime_image}: ${_codesign_verify_err}")
+        endif()
+    endforeach()
+else()
+    message(FATAL_ERROR
+        "${PULP_STAGING_LABEL}: codesign is required to seal staged Mach-O "
+        "images after install_name_tool rewrites")
 endif()
 file(SHA256 "${PULP_STAGING_DIR}/${PULP_LINKED_RUNTIME_NAME}"
     _receipt_runtime_sha256)
