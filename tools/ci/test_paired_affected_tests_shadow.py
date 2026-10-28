@@ -54,7 +54,7 @@ class PairedShadowTests(unittest.TestCase):
             self.assertTrue(receipt["identity_complete"])
             self.assertEqual(receipt["selection_digest"], receipt["selection_digest"])
 
-    def test_full_failure_does_not_change_runner_exit_and_missing_commands_are_explicit(self) -> None:
+    def test_full_failure_propagates_and_missing_commands_are_explicit(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             for name, value in (("selected.json", [sys.executable, "-c", "raise SystemExit(3)"]),

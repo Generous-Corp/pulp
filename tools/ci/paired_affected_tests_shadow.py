@@ -14,8 +14,9 @@ authority.  A caller should use separate JUnit paths for the two processes.
 The selected process has a bounded timeout and is terminated as a process group
 if it does not finish; the full process has no such bound here because its
 normal CI timeout remains authoritative.
-The process returns zero after writing a receipt, including when either
-experiment cannot start; shadow telemetry must never make the merge gate red.
+The process returns the authoritative full command's status after writing a
+receipt, or a nonzero status when that command cannot start. Selected-test
+telemetry never changes the merge gate result.
 """
 from __future__ import annotations
 
