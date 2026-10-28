@@ -357,10 +357,7 @@ void ContextMenu::paint(canvas::Canvas& canvas) {
         } else if (it.control_kind == Item::ControlKind::choice && !it.choices.empty()) {
             const auto selected = std::min(it.choice_index, it.choices.size() - 1);
             canvas.set_text_align(canvas::TextAlign::right);
-            canvas.set_fill_color(
-                i == hover_index_ && it.enabled
-                    ? canvas::Color::rgba8(255, 255, 255)
-                    : text_dim); // token-lint:allow -- hovered choice value uses the same white highlight as stock menu text
+            canvas.set_fill_color(i == hover_index_ && it.enabled ? text_c : text_dim);
             canvas.fill_text(it.choices[selected], row.x + row.width - 10, iy + rh * 0.5f + 4.0f);
             canvas.set_text_align(canvas::TextAlign::left);
         }
@@ -616,6 +613,8 @@ ContextMenu* ContextMenu::show_modulation(View* root, Point pos, ModulationMenuS
                             dismiss();
                     } else if (*id == 1 && reset) {
                         reset();
+                        if (dismiss)
+                            dismiss();
                     }
                 });
 }
