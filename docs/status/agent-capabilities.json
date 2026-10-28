@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 85,
+  "manifest_revision": 86,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -12650,6 +12650,7 @@
             "methods": [
               "process(SampleType input)",
               "process(SampleType* buffer, int num_samples)",
+              "set_ramp_time(SampleType seconds, SampleType sample_rate)",
               "set_gain_db(SampleType db)",
               "set_gain_linear(SampleType linear)",
               "gain_db()",
