@@ -59,6 +59,8 @@ TEST_CASE("ContextMenu show mounts as last child and set_items round-trips",
     REQUIRE(menu->parent() == root.get());
     REQUIRE(menu->bounds().width == 400);
     REQUIRE(menu->bounds().height == 400);
+    REQUIRE(menu->overlay_depth() == 1);
+    REQUIRE(menu->overlay_consumes_outside_click());
 }
 
 TEST_CASE("ContextMenu click on a row selects and removes the menu",
@@ -281,6 +283,33 @@ TEST_CASE("ContextMenu choice controls cycle with arrows and invoke their callba
     REQUIRE(selected == 1);
     REQUIRE(menu->on_key_event(key_down(KeyCode::left)));
     REQUIRE(selected == 0);
+    REQUIRE(menu->on_key_event(key_down(KeyCode::escape)));
+    REQUIRE(root->child_count() == 0);
+}
+
+TEST_CASE("ContextMenu modulation lane toggles are actionable for both lanes",
+          "[view][context-menu][modulation]") {
+    auto root = make_root();
+    ContextMenu::ModulationMenuSpec spec;
+    spec.lanes[0].shapes = {"Sine"};
+    spec.lanes[1].shapes = {"Sine"};
+    bool lane1 = false;
+    bool lane2 = false;
+    spec.lanes[0].on_change = [&](const auto& lane) { lane1 = lane.enabled; };
+    spec.lanes[1].on_change = [&](const auto& lane) { lane2 = lane.enabled; };
+    auto* menu = ContextMenu::show_modulation(root.get(), {kAnchorX, kAnchorY}, spec);
+    REQUIRE(menu != nullptr);
+
+    // Header -> LFO 1 Enabled; activate with Return.
+    REQUIRE(menu->on_key_event(key_down(KeyCode::down)));
+    REQUIRE(menu->on_key_event(key_down(KeyCode::enter)));
+    REQUIRE(lane1);
+    // Walk to LFO 2 Enabled and activate it as well.
+    for (int i = 0; i < 12 && menu->hovered_index() != 7; ++i)
+        REQUIRE(menu->on_key_event(key_down(KeyCode::down)));
+    REQUIRE(menu->hovered_index() == 7);
+    REQUIRE(menu->on_key_event(key_down(KeyCode::enter)));
+    REQUIRE(lane2);
     REQUIRE(menu->on_key_event(key_down(KeyCode::escape)));
     REQUIRE(root->child_count() == 0);
 }
