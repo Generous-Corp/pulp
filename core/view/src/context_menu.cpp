@@ -357,11 +357,9 @@ void ContextMenu::paint(canvas::Canvas& canvas) {
         } else if (it.control_kind == Item::ControlKind::choice && !it.choices.empty()) {
             const auto selected = std::min(it.choice_index, it.choices.size() - 1);
             canvas.set_text_align(canvas::TextAlign::right);
-            canvas.set_fill_color(i == hover_index_ && it.enabled
-                                     ? canvas::Color::rgba8(255, 255, 255)
-                                     : text_dim);
-            canvas.fill_text(it.choices[selected], row.x + row.width - 10,
-                             iy + rh * 0.5f + 4.0f);
+            canvas.set_fill_color(
+                i == hover_index_ && it.enabled ? canvas::Color::rgba8(255, 255, 255) : text_dim);
+            canvas.fill_text(it.choices[selected], row.x + row.width - 10, iy + rh * 0.5f + 4.0f);
             canvas.set_text_align(canvas::TextAlign::left);
         }
     }
@@ -556,8 +554,7 @@ ContextMenu* ContextMenu::show(View* root, Point pos, std::vector<Item> items,
     return raw;
 }
 
-std::vector<ContextMenu::Item>
-ContextMenu::make_modulation_items(const ModulationMenuSpec& spec) {
+std::vector<ContextMenu::Item> ContextMenu::make_modulation_items(const ModulationMenuSpec& spec) {
     std::vector<Item> items;
     items.reserve(16);
     // Keep one live copy for the lifetime of the popup. Without this shared
@@ -580,26 +577,22 @@ ContextMenu::make_modulation_items(const ModulationMenuSpec& spec) {
             if (next.on_change)
                 next.on_change(next);
         };
-        items.push_back(Item::make_header(lane.label.empty()
-            ? ("LFO " + std::to_string(lane_index + 1)) : lane.label));
-        items.push_back(Item::make_toggle(
-            base, "Enabled", lane.enabled,
-            [notify](const Item& item) {
+        items.push_back(Item::make_header(
+            lane.label.empty() ? ("LFO " + std::to_string(lane_index + 1)) : lane.label));
+        items.push_back(
+            Item::make_toggle(base, "Enabled", lane.enabled, [notify](const Item& item) {
                 notify([&](auto& next) { next.enabled = item.checked; });
             }));
         items.push_back(Item::make_choice(
-            base + 1, "Shape", lane.shapes, lane.shape_index,
-            [notify](const Item& item) {
+            base + 1, "Shape", lane.shapes, lane.shape_index, [notify](const Item& item) {
                 notify([&](auto& next) { next.shape_index = item.choice_index; });
             }));
         items.push_back(Item::make_slider(
-            base + 2, "Rate", lane.rate_normalized, 0.05f,
-            [notify](const Item& item) {
+            base + 2, "Rate", lane.rate_normalized, 0.05f, [notify](const Item& item) {
                 notify([&](auto& next) { next.rate_normalized = item.normalized_value; });
             }));
         items.push_back(Item::make_slider(
-            base + 3, "Depth", lane.depth_normalized, 0.05f,
-            [notify](const Item& item) {
+            base + 3, "Depth", lane.depth_normalized, 0.05f, [notify](const Item& item) {
                 notify([&](auto& next) { next.depth_normalized = item.normalized_value; });
             }));
         if (lane_index == 0)
@@ -609,8 +602,7 @@ ContextMenu::make_modulation_items(const ModulationMenuSpec& spec) {
     return items;
 }
 
-ContextMenu* ContextMenu::show_modulation(View* root, Point pos,
-                                           ModulationMenuSpec spec) {
+ContextMenu* ContextMenu::show_modulation(View* root, Point pos, ModulationMenuSpec spec) {
     auto items = make_modulation_items(spec);
     auto reset = std::move(spec.on_reset);
     return show(root, pos, std::move(items), [reset = std::move(reset)](std::optional<int> id) {

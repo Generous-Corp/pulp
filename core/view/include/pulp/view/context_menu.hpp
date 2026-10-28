@@ -85,17 +85,14 @@ public:
             i.on_change = std::move(on_change);
             return i;
         }
-        static Item make_choice(int id, std::string label,
-                                std::vector<std::string> choices,
-                                std::size_t selected,
-                                std::function<void(const Item&)> on_change) {
+        static Item make_choice(int id, std::string label, std::vector<std::string> choices,
+                                std::size_t selected, std::function<void(const Item&)> on_change) {
             Item i;
             i.id = id;
             i.label = std::move(label);
             i.control_kind = ControlKind::choice;
             i.choices = std::move(choices);
-            i.choice_index = i.choices.empty() ? 0 :
-                std::min(selected, i.choices.size() - 1);
+            i.choice_index = i.choices.empty() ? 0 : std::min(selected, i.choices.size() - 1);
             i.on_change = std::move(on_change);
             return i;
         }
@@ -207,11 +204,11 @@ public:
     /// copy after each edit through `on_change`; the SDK owns the hierarchy,
     /// controls, keyboard behavior, hover state, and dismissal lifecycle.
     struct ModulationLane {
-        std::string label;                  ///< e.g. "LFO 1"
+        std::string label; ///< e.g. "LFO 1"
         bool enabled = false;
         float rate_normalized = 0.25f;
         float depth_normalized = 0.0f;
-        std::vector<std::string> shapes;     ///< e.g. Sine, Triangle, Square
+        std::vector<std::string> shapes; ///< e.g. Sine, Triangle, Square
         std::size_t shape_index = 0;
         std::function<void(const ModulationLane&)> on_change;
     };
@@ -231,10 +228,9 @@ public:
     /// Show the canonical modulation popup at a root-local anchor. The reset
     /// action is returned as the final command and invokes `on_reset`; all lane
     /// edits invoke the lane's callback while the menu remains open.
-    static ContextMenu* show_modulation(View* root, Point pos,
-                                        ModulationMenuSpec spec);
+    static ContextMenu* show_modulation(View* root, Point pos, ModulationMenuSpec spec);
 
-private:
+  private:
     // Row index under a local point, or -1 if outside the box / on a non-row.
     int row_at(Point local_point, const MenuLayout& lay) const;
     // Keyboard nav must not move the hover somewhere the panel is not showing.

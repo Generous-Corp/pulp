@@ -238,7 +238,8 @@ TEST_CASE("ContextMenu controls clamp and notify through their callbacks", "[vie
     REQUIRE(value == 0.0f);
 }
 
-TEST_CASE("ContextMenu builds the shared two-LFO modulation hierarchy", "[view][context-menu][modulation]") {
+TEST_CASE("ContextMenu builds the shared two-LFO modulation hierarchy",
+          "[view][context-menu][modulation]") {
     ContextMenu::ModulationMenuSpec spec;
     spec.target_label = "Density";
     spec.lanes[0].label = "LFO 1";
