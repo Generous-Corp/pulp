@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import paired_affected_tests_shadow as _runner  # noqa: E402,F401
 
 
 def command(code: str) -> list[str]:
@@ -67,7 +71,7 @@ class PairedShadowTests(unittest.TestCase):
                                    "--selected-junit", str(root / "s.xml"), "--full-junit", str(root / "f.xml"),
                                    "--selection", str(root / "selection.json"), "--receipt-out", str(out)],
                                   capture_output=True, text=True, encoding="utf-8", check=False)
-            self.assertEqual(proc.returncode, 0)
+            self.assertEqual(proc.returncode, 7)
             receipt = json.loads(out.read_text(encoding="utf-8"))
             self.assertEqual(receipt["full_outcome"], "failure")
             self.assertFalse(receipt["full_success"])
@@ -78,12 +82,42 @@ class PairedShadowTests(unittest.TestCase):
             self.assertEqual(receipt["selected_process"]["returncode"], 3)
             self.assertEqual(receipt["full_process"]["returncode"], 7)
 
+    def test_selected_failure_does_not_change_successful_full_exit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            for name, value in (("selected.json", [sys.executable, "-c", "raise SystemExit(3)"]),
+                                ("full.json", [sys.executable, "-c", "pass"])):
+                (root / name).write_text(json.dumps(value), encoding="utf-8")
+            (root / "selected-cwd").mkdir()
+            (root / "full-cwd").mkdir()
+            (root / "selection.json").write_text(json.dumps({"tests": []}), encoding="utf-8")
+            out = root / "receipt.json"
+            proc = subprocess.run([sys.executable, str(HERE / "paired_affected_tests_shadow.py"),
+                                   "--selected-command", str(root / "selected.json"),
+                                   "--full-command", str(root / "full.json"),
+                                   "--selected-cwd", str(root / "selected-cwd"),
+                                   "--full-cwd", str(root / "full-cwd"),
+                                   "--selected-junit", str(root / "s.xml"), "--full-junit", str(root / "f.xml"),
+                                   "--selection", str(root / "selection.json"), "--receipt-out", str(out)],
+                                  capture_output=True, text=True, encoding="utf-8", check=False)
+            self.assertEqual(proc.returncode, 0)
+            receipt = json.loads(out.read_text(encoding="utf-8"))
+            self.assertEqual(receipt["selected_process"]["returncode"], 3)
+            self.assertEqual(receipt["full_process"]["returncode"], 0)
+
     def test_selected_timeout_terminates_process_group_and_full_still_finishes(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             (root / "selected-cwd").mkdir()
             (root / "full-cwd").mkdir()
-            (root / "selected.json").write_text(json.dumps(command("import time; time.sleep(30)")), encoding="utf-8")
+            child_pid = root / "child.pid"
+            child_code = "import time; time.sleep(30)"
+            selected_code = (
+                "import pathlib, subprocess, sys, time; "
+                f"p=subprocess.Popen([sys.executable, '-c', {child_code!r}]); "
+                f"pathlib.Path({str(child_pid)!r}).write_text(str(p.pid)); time.sleep(30)"
+            )
+            (root / "selected.json").write_text(json.dumps(command(selected_code)), encoding="utf-8")
             (root / "full.json").write_text(json.dumps(command("pass")), encoding="utf-8")
             (root / "selection.json").write_text(json.dumps({"tests": []}), encoding="utf-8")
             out = root / "receipt.json"
@@ -101,6 +135,16 @@ class PairedShadowTests(unittest.TestCase):
             self.assertTrue(receipt["selected_process"]["timed_out"])
             self.assertIn(receipt["selected_process"]["termination"], {"terminated", "killed"})
             self.assertEqual(receipt["full_process"]["returncode"], 0)
+            child = int(child_pid.read_text(encoding="utf-8"))
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline:
+                try:
+                    os.kill(child, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.05)
+            else:
+                self.fail(f"selected timeout left descendant process {child} alive")
             self.assertTrue(receipt["full_success"])
 
     def test_shared_working_directory_is_rejected(self) -> None:
@@ -188,7 +232,7 @@ class PairedShadowTests(unittest.TestCase):
                                    "--selected-junit", str(root / "s.xml"), "--full-junit", str(root / "f.xml"),
                                    "--selection", str(root / "selection.json"), "--receipt-out", str(out)],
                                   capture_output=True, text=True, encoding="utf-8", check=False)
-            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(proc.returncode, 1, proc.stderr)
             receipt = json.loads(out.read_text(encoding="utf-8"))
             self.assertEqual(receipt["full_outcome"], "unavailable")
             self.assertFalse(receipt["full_success"])

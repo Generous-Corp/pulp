@@ -7555,6 +7555,7 @@
   "paired-affected-tests-shadow-selftest": {
    "entry": "tools/ci/test_paired_affected_tests_shadow.py",
    "inputs": [
+    "tools/ci/paired_affected_tests_shadow.py",
     "tools/ci/test_paired_affected_tests_shadow.py"
    ],
    "kind": "python"

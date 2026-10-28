@@ -261,7 +261,10 @@ def main(argv: list[str] | None = None) -> int:
     out = receipt(args, selected_plan, full)
     args.receipt_out.write_text(json.dumps(out, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print("::notice title=paired-affected-tests-shadow::" + json.dumps({"schema": SCHEMA, "failed_outside_selection": out["failed_outside_selection"], "full_outcome": out["full_outcome"], "full_success": out["full_success"], "outcome_comparison": out["outcome_comparison"]}, separators=(",", ":")))
-    return 0
+    # The selected run is advisory, but the authoritative full run remains the
+    # step's truth.  Preserve its exit status and fail closed when it could not
+    # start; otherwise a red full suite could be reported as green.
+    return full_rc if full_rc is not None else 1
 
 
 if __name__ == "__main__":
