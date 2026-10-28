@@ -321,6 +321,12 @@ class ActionMajorPinTests(unittest.TestCase):
         self.assertNotIn("dispatch_recovery", text)
         self.assertIn('"shipyard-merge-steward.yml", "cadence_minutes": 10',
                       (REPO_ROOT / ".github" / "schedule-backstop.json").read_text(encoding="utf-8"))
+        self.assertIn("actions: read", text)
+        self.assertIn("actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09", text)
+        self.assertIn("actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02", text)
+        self.assertIn("Audit exact-head review gates before mutation", text)
+        self.assertIn("shipyard review-verdict", text)
+        self.assertIn('.verdict.verdict == "allowed"', text)
 
 
 if __name__ == "__main__":
