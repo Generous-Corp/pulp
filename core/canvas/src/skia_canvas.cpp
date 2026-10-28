@@ -938,6 +938,49 @@ bool SkiaCanvas::draw_image_from_data(const uint8_t* data, size_t size,
     return true;
 }
 
+bool SkiaCanvas::draw_image_from_rgba(const uint8_t* data, size_t size,
+                                      uint32_t width, uint32_t height,
+                                      float x, float y, float w, float h) {
+    if (!canvas_ || !data || width == 0 || height == 0 ||
+        width > SIZE_MAX / (static_cast<size_t>(height) * 4u) ||
+        size != static_cast<size_t>(width) * static_cast<size_t>(height) * 4u ||
+        w <= 0.0f || h <= 0.0f)
+        return false;
+    const auto info = SkImageInfo::Make(static_cast<int>(width), static_cast<int>(height),
+                                        kRGBA_8888_SkColorType, kPremul_SkAlphaType,
+                                        SkColorSpace::MakeSRGB());
+    auto image = SkImages::RasterFromData(
+        info, SkData::MakeWithCopy(data, size), static_cast<size_t>(width) * 4u);
+    if (!image) return false;
+    image = ensure_gpu_image(std::move(image));
+    canvas_->drawImageRect(image, SkRect::MakeXYWH(x, y, w, h),
+                           sampling_options_for_image_smoothing());
+    return true;
+}
+
+bool SkiaCanvas::draw_image_from_rgba_rect(const uint8_t* data, size_t size,
+                                           uint32_t width, uint32_t height,
+                                           float sx, float sy, float sw, float sh,
+                                           float dx, float dy, float dw, float dh) {
+    if (!canvas_ || !data || width == 0 || height == 0 ||
+        width > SIZE_MAX / (static_cast<size_t>(height) * 4u) ||
+        size != static_cast<size_t>(width) * static_cast<size_t>(height) * 4u ||
+        sw <= 0.0f || sh <= 0.0f || dw <= 0.0f || dh <= 0.0f)
+        return false;
+    const auto info = SkImageInfo::Make(static_cast<int>(width), static_cast<int>(height),
+                                        kRGBA_8888_SkColorType, kPremul_SkAlphaType,
+                                        SkColorSpace::MakeSRGB());
+    auto image = SkImages::RasterFromData(
+        info, SkData::MakeWithCopy(data, size), static_cast<size_t>(width) * 4u);
+    if (!image) return false;
+    image = ensure_gpu_image(std::move(image));
+    canvas_->drawImageRect(image, SkRect::MakeXYWH(sx, sy, sw, sh),
+                           SkRect::MakeXYWH(dx, dy, dw, dh),
+                           sampling_options_for_image_smoothing(), nullptr,
+                           SkCanvas::kStrict_SrcRectConstraint);
+    return true;
+}
+
 bool SkiaCanvas::draw_image_from_file(const std::string& path,
                                        float x, float y, float w, float h) {
     if (!canvas_ || path.empty()) return false;

@@ -1318,6 +1318,53 @@ bool CoreGraphicsCanvas::draw_image_from_data(const uint8_t* data, size_t size,
     return draw_cg_image_in_rect(img, /*has_src=*/false, 0, 0, 0, 0, x, y, w, h);
 }
 
+namespace {
+
+CGImageRef cg_create_rgba_image(const uint8_t* data, size_t size,
+                                uint32_t width, uint32_t height) {
+    if (!data || width == 0 || height == 0 ||
+        width > SIZE_MAX / (static_cast<size_t>(height) * 4u) ||
+        size != static_cast<size_t>(width) * static_cast<size_t>(height) * 4u)
+        return nullptr;
+    CFDataRef bytes = CFDataCreate(kCFAllocatorDefault, data, static_cast<CFIndex>(size));
+    if (!bytes) return nullptr;
+    CGDataProviderRef provider = CGDataProviderCreateWithCFData(bytes);
+    CGColorSpaceRef color_space = CGColorSpaceCreateDeviceRGB();
+    CGImageRef image = nullptr;
+    if (provider && color_space) {
+        image = CGImageCreate(width, height, 8, 32,
+                              static_cast<size_t>(width) * 4u, color_space,
+                              kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big,
+                              provider, nullptr, false, kCGRenderingIntentDefault);
+    }
+    if (color_space) CGColorSpaceRelease(color_space);
+    if (provider) CGDataProviderRelease(provider);
+    CFRelease(bytes);
+    return image;
+}
+
+}  // namespace
+
+bool CoreGraphicsCanvas::draw_image_from_rgba(const uint8_t* data, size_t size,
+                                               uint32_t width, uint32_t height,
+                                               float x, float y, float w, float h) {
+    if (w <= 0.0f || h <= 0.0f) return false;
+    CGImageRef image = cg_create_rgba_image(data, size, width, height);
+    if (!image) return false;
+    return draw_cg_image_in_rect(image, /*has_src=*/false, 0, 0, 0, 0, x, y, w, h);
+}
+
+bool CoreGraphicsCanvas::draw_image_from_rgba_rect(const uint8_t* data, size_t size,
+                                                    uint32_t width, uint32_t height,
+                                                    float sx, float sy, float sw, float sh,
+                                                    float dx, float dy, float dw, float dh) {
+    if (sw <= 0.0f || sh <= 0.0f || dw <= 0.0f || dh <= 0.0f) return false;
+    CGImageRef image = cg_create_rgba_image(data, size, width, height);
+    if (!image) return false;
+    return draw_cg_image_in_rect(image, /*has_src=*/true, sx, sy, sw, sh,
+                                 dx, dy, dw, dh);
+}
+
 bool CoreGraphicsCanvas::draw_image_from_file_rect(const std::string& path,
                                                    float sx, float sy,
                                                    float sw, float sh,

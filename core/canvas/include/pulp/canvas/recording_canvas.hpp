@@ -277,6 +277,13 @@ public:
     bool draw_image_from_data_rect(const uint8_t* data, size_t size,
                                     float sx, float sy, float sw, float sh,
                                     float dx, float dy, float dw, float dh) override;
+    bool draw_image_from_rgba(const uint8_t* data, size_t size,
+                              uint32_t width, uint32_t height,
+                              float x, float y, float w, float h) override;
+    bool draw_image_from_rgba_rect(const uint8_t* data, size_t size,
+                                   uint32_t width, uint32_t height,
+                                   float sx, float sy, float sw, float sh,
+                                   float dx, float dy, float dw, float dh) override;
     bool write_pixels(const uint8_t* data, int width, int height,
                       int dx, int dy) override;
     void save_backdrop_filter(float x, float y, float w, float h,

@@ -2036,6 +2036,30 @@ protected:
         return gradient_interpolation_;
     }
 
+    /// Draw an uncompressed, tightly packed RGBA8 image.  This is distinct
+    /// from draw_image_from_data(), whose bytes are encoded PNG/JPEG/WebP.
+    /// The method is appended to preserve the existing Canvas ABI slots.
+    /// Implementations must not retain the caller's buffer after returning.
+    virtual bool draw_image_from_rgba(const uint8_t* data, size_t size,
+                                      uint32_t width, uint32_t height,
+                                      float x, float y, float w, float h) {
+        (void)data; (void)size; (void)width; (void)height;
+        (void)x; (void)y; (void)w; (void)h;
+        return false;
+    }
+
+    /// Draw a source rectangle from an uncompressed RGBA8 image.  Source
+    /// coordinates are in top-left-origin pixel space, matching RmlUi's
+    /// texture coordinates and draw_image_from_data_rect().
+    virtual bool draw_image_from_rgba_rect(const uint8_t* data, size_t size,
+                                           uint32_t width, uint32_t height,
+                                           float sx, float sy, float sw, float sh,
+                                           float dx, float dy, float dw, float dh) {
+        (void)data; (void)size; (void)width; (void)height;
+        (void)sx; (void)sy; (void)sw; (void)sh;
+        return draw_image_from_rgba(data, size, width, height, dx, dy, dw, dh);
+    }
+
   private:
     GradientInterpolation gradient_interpolation_{};
 };

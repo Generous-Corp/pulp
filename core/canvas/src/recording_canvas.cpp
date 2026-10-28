@@ -373,6 +373,36 @@ bool RecordingCanvas::draw_image_from_data_rect(const uint8_t* data, size_t size
     return true;
 }
 
+bool RecordingCanvas::draw_image_from_rgba(const uint8_t* data, size_t size,
+                                           uint32_t width, uint32_t height,
+                                           float x, float y, float w, float h) {
+    if (!data || width == 0 || height == 0 ||
+        width > SIZE_MAX / (static_cast<size_t>(height) * 4u) ||
+        size != static_cast<size_t>(width) * static_cast<size_t>(height) * 4u)
+        return false;
+    DrawCommand cmd{DrawCommand::Type::draw_image};
+    cmd.f[0] = x; cmd.f[1] = y; cmd.f[2] = w; cmd.f[3] = h;
+    cmd.text.assign(reinterpret_cast<const char*>(data), size);
+    commands_.push_back(std::move(cmd));
+    return true;
+}
+
+bool RecordingCanvas::draw_image_from_rgba_rect(const uint8_t* data, size_t size,
+                                                uint32_t width, uint32_t height,
+                                                float sx, float sy, float sw, float sh,
+                                                float dx, float dy, float dw, float dh) {
+    if (!data || width == 0 || height == 0 ||
+        width > SIZE_MAX / (static_cast<size_t>(height) * 4u) ||
+        size != static_cast<size_t>(width) * static_cast<size_t>(height) * 4u)
+        return false;
+    DrawCommand cmd{DrawCommand::Type::draw_image};
+    cmd.f[0] = dx; cmd.f[1] = dy; cmd.f[2] = dw; cmd.f[3] = dh;
+    cmd.text.assign(reinterpret_cast<const char*>(data), size);
+    cmd.floats = {sx, sy, sw, sh};
+    commands_.push_back(std::move(cmd));
+    return true;
+}
+
 bool RecordingCanvas::write_pixels(const uint8_t* data, int width, int height,
                                     int dx, int dy) {
     DrawCommand cmd{DrawCommand::Type::write_pixels};
