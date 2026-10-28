@@ -1548,6 +1548,17 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         ),
     },
     {
+        "include": "pulp/signal/gain.hpp",
+        "fingerprint": "sha256:54651b70d3f4f19684907be44323e35fd4d726d7e9795b04c07eda1b79aab503",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "GainT is a composable signal processor used by plugins and graph nodes; its "
+            "optional smoothing API is implementation infrastructure rather than an "
+            "independently advertised generator-facing capability."
+        ),
+    },
+    {
         "include": "pulp/signal/fixed_ir_convolver.hpp",
         "fingerprint": "sha256:80ba7f87cc92c3a7fb71238aea463f3839b977fe11877e80aeb029860edffe80",
         "disposition": "infrastructure",
@@ -1574,7 +1585,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/zero_latency_convolver.hpp",
-        "fingerprint": "sha256:b83e4d485420696d9598771185be0856b0fb377dd106c5d6ea76a7b5ef9e124e",
+        "fingerprint": "sha256:f2ffe01d98618d870a3e7c7dee8e935948a3333090f01094d8bb0dd601a0861e",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1587,7 +1598,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/zero_latency_convolver_support.hpp",
-        "fingerprint": "sha256:2617e8cdff61bb3899d2c2b4529339116634d86c0ec7d7f3492ae929a02cadfb",
+        "fingerprint": "sha256:8a70ab86dcf8dcdd7df62d8d7c6720ec3d71f947866d1310ee5675a3a158c815",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1649,7 +1660,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/convolver_non_uniform.hpp",
-        "fingerprint": "sha256:e36fe1a2424f6a0f64c30c3f0d395c6884633ebf78cce4b9b834369c2b6f3079",
+        "fingerprint": "sha256:598a096100daada3acac86a98d29856d23172b620dab4215349664d0dc600035",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
