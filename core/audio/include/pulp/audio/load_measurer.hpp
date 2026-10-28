@@ -268,14 +268,13 @@ public:
     // block for the always-on whole-graph span alone. Continuous time also counts
     // system sleep, which a callback span never contains, so a cheaper uptime
     // counter measures the same durations:
-    // - Apple arm64 reads the architectural virtual counter directly, without
-    //   the instruction barrier mach_absolute_time() issues, which drains the
-    //   pipeline and cost about 10 ns per read inside a graph block. Its rate
-    //   comes from CNTFRQ_EL0, read once: it differs across chips (24 MHz on M1,
-    //   1 GHz on M5) and need not match mach_absolute_time()'s timebase. Without
-    //   the barrier a read may execute a few instructions early; both ends of a
-    //   span shift alike, and a span that would come out negative is clamped to
-    //   zero.
+    // - Apple arm64 reads the architectural virtual counter directly. An ISB
+    //   orders the counter read without the heavier mach_absolute_time() path,
+    //   which cost about 10 ns per read inside a graph block. Its rate comes
+    //   from CNTFRQ_EL0, read once: it differs across chips (24 MHz on M1,
+    //   1 GHz on M5) and need not match mach_absolute_time()'s timebase. Both
+    //   ends of a span use the same ordered counter, and a span that would
+    //   come out negative is clamped to zero.
     // - Other Apple targets use mach_absolute_time().
     struct clock {
         using duration = std::chrono::nanoseconds;

@@ -407,7 +407,7 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/load_measurer.hpp",
-      "fingerprint": "sha256:66ea231ad6ea862546ca422e19b839f9a90e5d9c9523648df30a8acdff9b619f",
+      "fingerprint": "sha256:f9db8d9137d108dfca2ad36e7d7f49e1c9cc247352482097f6781d5c9eec4368",
       "include": "pulp/audio/load_measurer.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
