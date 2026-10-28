@@ -560,15 +560,22 @@ std::vector<ContextMenu::Item>
 ContextMenu::make_modulation_items(const ModulationMenuSpec& spec) {
     std::vector<Item> items;
     items.reserve(16);
+    // Keep one live copy for the lifetime of the popup. Without this shared
+    // model, each row callback would capture the lane as it looked when the
+    // menu opened and a later edit could silently restore an earlier rate or
+    // depth when the product persisted the whole lane.
+    auto lanes = std::make_shared<std::array<ModulationLane, 2>>();
+    (*lanes)[0] = spec.lanes[0];
+    (*lanes)[1] = spec.lanes[1];
     if (!spec.target_label.empty()) {
         items.push_back(Item::make_header("Modulate " + spec.target_label));
         items.push_back(Item::make_separator());
     }
     for (std::size_t lane_index = 0; lane_index < 2; ++lane_index) {
-        const auto lane = spec.lanes[lane_index];
+        const auto lane = (*lanes)[lane_index];
         const int base = 100 + static_cast<int>(lane_index) * 10;
-        const auto notify = [lane](auto update) {
-            auto next = lane;
+        const auto notify = [lanes, lane_index](auto update) {
+            auto& next = (*lanes)[lane_index];
             update(next);
             if (next.on_change)
                 next.on_change(next);

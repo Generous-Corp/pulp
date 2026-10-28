@@ -19,6 +19,8 @@
 #include <pulp/canvas/canvas.hpp>
 #include <functional>
 #include <algorithm>
+#include <array>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
