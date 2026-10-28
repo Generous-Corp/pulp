@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 85,
+  "manifest_revision": 86,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -12018,6 +12018,7 @@
             "methods": [
               "size()",
               "ready()",
+              "vdsp_split_plane_gap_floats(bool real_transform)",
               "vdsp_split_offset_bytes(bool real_transform)",
               "forward(std::complex<SampleType>* data)",
               "inverse(std::complex<SampleType>* data)",
