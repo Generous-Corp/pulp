@@ -642,7 +642,6 @@ TEST_CASE("PluginViewHost (mac GPU) preserves top-down presentable orientation",
         // Removing it restores the upside-down REAPER presentation and flips
         // this relationship.
         REQUIRE(bottom.luminance_mean > top.luminance_mean + 80.0);
-
     }
 }
 
