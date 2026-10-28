@@ -1,7 +1,9 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -75,30 +77,33 @@ class HostBridge final {
     HostStatus bind_lua(std::shared_ptr<LuaHost> host) noexcept {
         if (!host)
             return HostStatus::rejected;
-        if (lua_ || active_)
+        if (lua_ || active_ || generation_exhausted_)
             return HostStatus::already_bound;
+        if (!advance_generation())
+            return HostStatus::rejected;
         lua_ = std::move(host);
-        ++generation_;
         return HostStatus::ok;
     }
 
     HostStatus bind_elements(std::shared_ptr<ElementHost> host) noexcept {
         if (!host)
             return HostStatus::rejected;
-        if (elements_ || active_)
+        if (elements_ || active_ || generation_exhausted_)
             return HostStatus::already_bound;
+        if (!advance_generation())
+            return HostStatus::rejected;
         elements_ = std::move(host);
-        ++generation_;
         return HostStatus::ok;
     }
 
     HostStatus bind_product(std::shared_ptr<ProductHost> host) noexcept {
         if (!host)
             return HostStatus::rejected;
-        if (product_ || active_)
+        if (product_ || active_ || generation_exhausted_)
             return HostStatus::already_bound;
+        if (!advance_generation())
+            return HostStatus::rejected;
         product_ = std::move(host);
-        ++generation_;
         return HostStatus::ok;
     }
 
@@ -110,13 +115,14 @@ class HostBridge final {
         if (registration.name.empty() || !registration.dispatch)
             return HostStatus::rejected;
         auto elements = elements_;
-        const auto generation = generation_;
+        const auto identity = gate_->identity.load(std::memory_order_acquire);
         auto gate = gate_;
         auto dispatch = std::move(registration.dispatch);
-        registration.dispatch = [weak_gate = std::weak_ptr<BridgeGate>(gate), generation,
+        registration.dispatch = [weak_gate = std::weak_ptr<BridgeGate>(gate), identity,
                                  dispatch = std::move(dispatch)](std::string_view value) mutable {
             const auto locked = weak_gate.lock();
-            if (!locked || !locked->active || locked->generation != generation)
+            if (!locked || locked->identity.load(std::memory_order_acquire) != identity ||
+                !is_active_identity(identity))
                 return HostStatus::not_active;
             try {
                 return dispatch(value);
@@ -128,8 +134,10 @@ class HostBridge final {
         try {
             const auto status = elements->register_element(std::move(registration));
             registering_ = false;
-            return active_ && elements_ == elements && generation_ == generation ? status
-                                                                                     : HostStatus::rejected;
+            return active_ && elements_ == elements &&
+                           gate_->identity.load(std::memory_order_acquire) == identity
+                       ? status
+                       : HostStatus::rejected;
         } catch (...) {
             registering_ = false;
             return HostStatus::rejected;
@@ -142,7 +150,9 @@ class HostBridge final {
         if (!lua_ || !elements_ || !product_)
             return HostStatus::missing_capability;
         auto lua = lua_;
-        const auto generation = ++generation_;
+        if (!advance_generation())
+            return HostStatus::rejected;
+        const auto generation = generation_;
         activating_ = true;
         HostStatus status = HostStatus::rejected;
         try {
@@ -158,8 +168,7 @@ class HostBridge final {
         if (generation_ != generation || lua_ != lua || !elements_ || !product_)
             return HostStatus::rejected;
         active_ = true;
-        gate_->active = true;
-        gate_->generation = generation_;
+        gate_->identity.store(pack_identity(true, generation_), std::memory_order_release);
         return HostStatus::ok;
     }
 
@@ -200,9 +209,8 @@ class HostBridge final {
         active_ = false;
         activating_ = false;
         registering_ = false;
-        ++generation_;
-        gate_->active = false;
-        gate_->generation = generation_;
+        (void)advance_generation();
+        gate_->identity.store(pack_identity(false, generation_), std::memory_order_release);
         product_.reset();
         elements_.reset();
         lua_.reset();
@@ -211,9 +219,32 @@ class HostBridge final {
 
   private:
     struct BridgeGate {
-        bool active = false;
-        std::uint64_t generation = 0;
+        // The active bit and generation are one publication unit. Retained
+        // callbacks must never observe a newly active bridge with an older
+        // generation between two separate stores.
+        std::atomic<std::uint64_t> identity{0};
     };
+
+    static constexpr std::uint64_t kMaxGeneration = std::numeric_limits<std::uint64_t>::max() >> 1;
+
+    static constexpr std::uint64_t pack_identity(bool active, std::uint64_t generation) noexcept {
+        return (generation << 1) | (active ? 1u : 0u);
+    }
+
+    static constexpr bool is_active_identity(std::uint64_t identity) noexcept {
+        return (identity & 1u) != 0;
+    }
+
+    bool advance_generation() noexcept {
+        // A wrapped identity would make an old retained callback valid again.
+        // Exhaust the bridge instead of allowing ABA after the finite counter.
+        if (generation_exhausted_ || generation_ == kMaxGeneration) {
+            generation_exhausted_ = true;
+            return false;
+        }
+        ++generation_;
+        return true;
+    }
 
     static bool valid_event_kind(ProductEventKind kind) noexcept {
         switch (kind) {
@@ -232,6 +263,7 @@ class HostBridge final {
     bool activating_ = false;
     bool registering_ = false;
     std::uint64_t generation_ = 0;
+    bool generation_exhausted_ = false;
     std::shared_ptr<BridgeGate> gate_ = std::make_shared<BridgeGate>();
 };
 
