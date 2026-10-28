@@ -601,7 +601,8 @@ Status Backend::bind_model(std::string_view name, std::shared_ptr<ModelHost> hos
     if (std::adjacent_find(fields.begin(), fields.end()) != fields.end())
         return Status::rejected;
     for (const auto& field : fields)
-        if (field.empty()) return Status::rejected;
+        if (field.empty())
+            return Status::rejected;
 
     auto constructor = runtime_->context->CreateDataModel(Rml::String(name));
     if (!constructor)
@@ -655,8 +656,7 @@ Status Backend::bind_model(std::string_view name, std::shared_ptr<ModelHost> hos
             return Status::rejected;
     }
     runtime_->models.emplace(std::string(name),
-                             Runtime::ModelBinding{std::move(host),
-                                                   constructor.GetModelHandle()});
+                             Runtime::ModelBinding{std::move(host), constructor.GetModelHandle()});
     return Status::ok;
 }
 
