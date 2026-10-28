@@ -83,7 +83,13 @@ if(PULP_ENABLE_RMLUI)
         target_compile_definitions(pulp-rmlui-lua PRIVATE LUA_USE_POSIX)
         target_include_directories(pulp-rmlui-lua PUBLIC
                                    $<BUILD_INTERFACE:${pulp_rmlui_lua_SOURCE_DIR}/src>
-                                   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/lua>)
+                                   # PulpInstallRules includes GNUInstallDirs
+                                   # after this dependency module is evaluated.
+                                   # Keep the install interface relative to the
+                                   # prefix so an unset CMAKE_INSTALL_INCLUDEDIR
+                                   # cannot export the invalid absolute path
+                                   # `/lua` to SDK consumers.
+                                   $<INSTALL_INTERFACE:include/lua>)
         set(PULP_RMLUI_LUA_SOURCE_DIR "${pulp_rmlui_lua_SOURCE_DIR}")
         add_library(Lua::Lua INTERFACE IMPORTED GLOBAL)
         set_target_properties(Lua::Lua PROPERTIES
