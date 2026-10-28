@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 1.27.0
+    VERSION 1.27.1
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -1134,6 +1134,7 @@ if(ANDROID)
         target_sources(pulp-jni PRIVATE
             core/render/platform/android/gpu_surface_android.cpp
             core/render/platform/android/gpu_surface_android_jni.cpp
+            core/render/platform/android/surface_runtime_android.cpp
         )
         target_link_libraries(pulp-jni PRIVATE pulp::render)
     endif()
