@@ -30,13 +30,30 @@ if(PULP_ENABLE_RMLUI)
     # RmlUi defaults BUILD_SHARED_LIBS to ON. Scope that option to the
     # dependency so opting into this backend cannot silently change Pulp's
     # link model; preserve an explicit consumer choice for Pulp targets.
-    set(_pulp_rmlui_build_shared_libs_was_defined FALSE)
+    # FetchContent projects are allowed to set BUILD_SHARED_LIBS in either the
+    # normal-variable or cache scope. Preserve both scopes exactly so opting
+    # into RmlUi cannot mutate the parent project's cache on the way out.
+    set(_pulp_rmlui_build_shared_libs_normal_defined FALSE)
     if(DEFINED BUILD_SHARED_LIBS)
-        set(_pulp_rmlui_build_shared_libs_was_defined TRUE)
-        set(_pulp_rmlui_build_shared_libs_saved "${BUILD_SHARED_LIBS}")
+        set(_pulp_rmlui_build_shared_libs_normal_defined TRUE)
+        set(_pulp_rmlui_build_shared_libs_normal_value "${BUILD_SHARED_LIBS}")
+    endif()
+    set(_pulp_rmlui_build_shared_libs_cache_defined FALSE)
+    if(DEFINED CACHE{BUILD_SHARED_LIBS})
+        set(_pulp_rmlui_build_shared_libs_cache_defined TRUE)
+        get_property(_pulp_rmlui_build_shared_libs_cache_value CACHE BUILD_SHARED_LIBS PROPERTY VALUE)
+        get_property(_pulp_rmlui_build_shared_libs_cache_type CACHE BUILD_SHARED_LIBS PROPERTY TYPE)
+        get_property(_pulp_rmlui_build_shared_libs_cache_help CACHE BUILD_SHARED_LIBS PROPERTY HELPSTRING)
+    endif()
+    if(_pulp_rmlui_build_shared_libs_normal_defined)
+        set(_pulp_rmlui_build_shared_libs_requested "${_pulp_rmlui_build_shared_libs_normal_value}")
+    elseif(_pulp_rmlui_build_shared_libs_cache_defined)
+        set(_pulp_rmlui_build_shared_libs_requested "${_pulp_rmlui_build_shared_libs_cache_value}")
+    else()
+        set(_pulp_rmlui_build_shared_libs_requested "")
     endif()
     set(PULP_RMLUI_BUILD_SHARED_LIBS_REQUESTED
-        "${_pulp_rmlui_build_shared_libs_saved}"
+        "${_pulp_rmlui_build_shared_libs_requested}"
         CACHE INTERNAL "BUILD_SHARED_LIBS requested before RmlUi admission")
     set(BUILD_SHARED_LIBS OFF)
 
@@ -61,15 +78,25 @@ if(PULP_ENABLE_RMLUI)
         GIT_TAG 58c751531f4c1a1eb2dc56f409b8e8a323a0c9ad)
     FetchContent_MakeAvailable(rmlui)
 
-    if(_pulp_rmlui_build_shared_libs_was_defined)
-        set(BUILD_SHARED_LIBS "${_pulp_rmlui_build_shared_libs_saved}")
-        set(BUILD_SHARED_LIBS "${_pulp_rmlui_build_shared_libs_saved}" CACHE BOOL "" FORCE)
+    if(_pulp_rmlui_build_shared_libs_cache_defined)
+        set(BUILD_SHARED_LIBS "${_pulp_rmlui_build_shared_libs_cache_value}"
+            CACHE "${_pulp_rmlui_build_shared_libs_cache_type}"
+            "${_pulp_rmlui_build_shared_libs_cache_help}" FORCE)
     else()
         unset(BUILD_SHARED_LIBS CACHE)
+    endif()
+    if(_pulp_rmlui_build_shared_libs_normal_defined)
+        set(BUILD_SHARED_LIBS "${_pulp_rmlui_build_shared_libs_normal_value}")
+    else()
         unset(BUILD_SHARED_LIBS)
     endif()
-    unset(_pulp_rmlui_build_shared_libs_was_defined)
-    unset(_pulp_rmlui_build_shared_libs_saved)
+    unset(_pulp_rmlui_build_shared_libs_normal_defined)
+    unset(_pulp_rmlui_build_shared_libs_normal_value)
+    unset(_pulp_rmlui_build_shared_libs_cache_defined)
+    unset(_pulp_rmlui_build_shared_libs_cache_value)
+    unset(_pulp_rmlui_build_shared_libs_cache_type)
+    unset(_pulp_rmlui_build_shared_libs_cache_help)
+    unset(_pulp_rmlui_build_shared_libs_requested)
 endif()
 
 # CHOC: header-only C++ utilities (ISC license)

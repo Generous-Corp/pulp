@@ -36,12 +36,27 @@ namespace {
 
 class RenderAdapter final : public Rml::RenderInterface {
   public:
+    // Bound per-editor resource admission so repeated document rebuilds cannot
+    // grow handle tables or backing payloads without limit.
+    static constexpr std::size_t max_geometry_handles = 4096;
+    static constexpr std::size_t max_geometry_vertices = 1u << 20;
+    static constexpr std::size_t max_geometry_indices = 1u << 20;
+    static constexpr std::size_t max_geometry_bytes = 64u * 1024u * 1024u;
+    static constexpr std::size_t max_texture_handles = 4096;
+    static constexpr std::size_t max_texture_bytes = 64u * 1024u * 1024u;
+
     RenderAdapter(AssetProvider& assets, pulp::view::rmlui::RenderInterface& sink)
         : assets_(assets), sink_(sink) {}
 
     Rml::CompiledGeometryHandle CompileGeometry(Rml::Span<const Rml::Vertex> vertices,
                                                 Rml::Span<const int> indices) override {
-        if (vertices.empty() || indices.empty())
+        if (vertices.empty() || indices.empty() || vertices.size() > max_geometry_vertices ||
+            indices.size() > max_geometry_indices)
+            return 0;
+        const auto payload_bytes =
+            vertices.size() * sizeof(DrawVertex) + indices.size() * sizeof(std::uint32_t);
+        if (payload_bytes > max_geometry_bytes ||
+            geometry_bytes_ > max_geometry_bytes - payload_bytes)
             return 0;
         Geometry geometry;
         float min_x = vertices[0].position.x;
@@ -75,15 +90,19 @@ class RenderAdapter final : public Rml::RenderInterface {
             index_payload->push_back(static_cast<std::uint32_t>(index));
         geometry.vertices = std::move(vertex_payload);
         geometry.indices = std::move(index_payload);
+        geometry.bytes = payload_bytes;
         Rml::CompiledGeometryHandle handle = 0;
         if (!free_geometry_handles_.empty()) {
             handle = free_geometry_handles_.back();
             free_geometry_handles_.pop_back();
             geometries_[static_cast<std::size_t>(handle - 1)] = std::move(geometry);
         } else {
+            if (geometries_.size() >= max_geometry_handles)
+                return 0;
             geometries_.push_back(std::move(geometry));
             handle = static_cast<Rml::CompiledGeometryHandle>(geometries_.size());
         }
+        geometry_bytes_ += payload_bytes;
         return handle;
     }
 
@@ -119,6 +138,7 @@ class RenderAdapter final : public Rml::RenderInterface {
     void ReleaseGeometry(Rml::CompiledGeometryHandle handle) override {
         if (handle != 0 && handle <= geometries_.size() &&
             geometries_[static_cast<std::size_t>(handle - 1)].vertices) {
+            geometry_bytes_ -= geometries_[static_cast<std::size_t>(handle - 1)].bytes;
             geometries_[static_cast<std::size_t>(handle - 1)] = {};
             free_geometry_handles_.push_back(handle);
         }
@@ -138,7 +158,8 @@ class RenderAdapter final : public Rml::RenderInterface {
     }
     Rml::TextureHandle GenerateTexture(Rml::Span<const Rml::byte> bytes,
                                        Rml::Vector2i dimensions) override {
-        if (dimensions.x <= 0 || dimensions.y <= 0)
+        if (dimensions.x <= 0 || dimensions.y <= 0 || bytes.size() > max_texture_bytes ||
+            texture_bytes_ > max_texture_bytes - bytes.size())
             return 0;
         auto payload = std::make_shared<std::string>(reinterpret_cast<const char*>(bytes.data()),
                                                      bytes.size());
@@ -149,6 +170,7 @@ class RenderAdapter final : public Rml::RenderInterface {
     void ReleaseTexture(Rml::TextureHandle handle) override {
         if (handle != 0 && handle <= textures_.size() &&
             textures_[static_cast<std::size_t>(handle - 1)].bytes) {
+            texture_bytes_ -= textures_[static_cast<std::size_t>(handle - 1)].bytes->size();
             textures_[static_cast<std::size_t>(handle - 1)] = {};
             free_texture_handles_.push_back(handle);
         }
@@ -176,15 +198,21 @@ class RenderAdapter final : public Rml::RenderInterface {
     };
 
     Rml::TextureHandle store_texture(Texture texture) {
+        if (!texture.bytes || texture.bytes->size() > max_texture_bytes ||
+            texture_bytes_ > max_texture_bytes - texture.bytes->size())
+            return 0;
         Rml::TextureHandle handle = 0;
         if (!free_texture_handles_.empty()) {
             handle = free_texture_handles_.back();
             free_texture_handles_.pop_back();
             textures_[static_cast<std::size_t>(handle - 1)] = std::move(texture);
         } else {
+            if (textures_.size() >= max_texture_handles)
+                return 0;
             textures_.push_back(std::move(texture));
             handle = static_cast<Rml::TextureHandle>(textures_.size());
         }
+        texture_bytes_ += textures_[static_cast<std::size_t>(handle - 1)].bytes->size();
         return handle;
     }
 
@@ -218,6 +246,7 @@ class RenderAdapter final : public Rml::RenderInterface {
         float height = 0.0f;
         std::shared_ptr<const std::vector<DrawVertex>> vertices;
         std::shared_ptr<const std::vector<std::uint32_t>> indices;
+        std::size_t bytes = 0;
     };
 
     pulp::view::rmlui::RenderInterface& sink_;
@@ -225,6 +254,8 @@ class RenderAdapter final : public Rml::RenderInterface {
     std::vector<Rml::CompiledGeometryHandle> free_geometry_handles_;
     std::vector<Texture> textures_;
     std::vector<Rml::TextureHandle> free_texture_handles_;
+    std::size_t geometry_bytes_ = 0;
+    std::size_t texture_bytes_ = 0;
     bool scissor_enabled_ = false;
     ScissorRect scissor_{};
     bool transform_enabled_ = false;
@@ -473,11 +504,15 @@ Status Backend::load_document(std::string_view path) {
         status = lua_.load(asset.bytes, asset.path);
         if (status != Status::ok)
             return status;
-    } else if (!runtime_ || !runtime_->context ||
-               !(runtime_->document =
-                     runtime_->context->LoadDocumentFromMemory(asset.bytes, asset.path))) {
+    } else if (!runtime_ || !runtime_->context) {
         return Status::rejected;
     } else {
+        auto* document = runtime_->context->LoadDocumentFromMemory(asset.bytes, asset.path);
+        if (!document)
+            return Status::rejected;
+        if (runtime_->document)
+            runtime_->context->UnloadDocument(runtime_->document);
+        runtime_->document = document;
         runtime_->document->Show();
     }
     document_ = std::move(asset);
