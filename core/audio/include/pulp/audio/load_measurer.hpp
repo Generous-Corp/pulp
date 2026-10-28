@@ -286,32 +286,27 @@ public:
 
         static time_point now() noexcept {
 #if defined(__APPLE__) && defined(__aarch64__)
-            // Ticks to nanoseconds as a reduced ratio of 1e9 to the counter
-            // frequency (125/3 at 24 MHz, 1/1 at 1 GHz), so the product stays in
-            // range.
-            struct ratio {
-                std::uint64_t numer, denom;
-            };
-            static const ratio scale = [] {
-                std::uint64_t frequency = 0;
-                asm volatile("mrs %0, cntfrq_el0" : "=r"(frequency));
-                std::uint64_t a = 1000000000ULL, b = frequency;
-                while (b != 0) {
-                    const std::uint64_t t = a % b;
-                    a = b;
-                    b = t;
-                }
-                return frequency == 0 ? ratio{1, 1} : ratio{1000000000ULL / a, frequency / a};
-            }();
+            // Read the counter frequency on each call. This is one register
+            // read and avoids function-local static initialization on the first
+            // audio callback. The architectural counter is stable for the life
+            // of the system; a zero frequency is treated as an unavailable
+            // clock rather than dividing by zero.
+            std::uint64_t frequency = 0;
+            asm volatile("mrs %0, cntfrq_el0" : "=r"(frequency));
             std::uint64_t ticks = 0;
             asm volatile("mrs %0, cntvct_el0" : "=r"(ticks));
-            return time_point(duration(static_cast<rep>(ticks * scale.numer / scale.denom)));
+            if (frequency == 0)
+                return time_point{};
+            const auto nanos = (static_cast<unsigned __int128>(ticks) * 1000000000u) /
+                               static_cast<unsigned __int128>(frequency);
+            return time_point(duration(static_cast<rep>(nanos)));
 #elif defined(__APPLE__)
-            static const mach_timebase_info_data_t timebase = [] {
-                mach_timebase_info_data_t info{};
-                mach_timebase_info(&info);
-                return info;
-            }();
+            // Avoid guarded function-local initialization on the first
+            // callback. mach_timebase_info is a read-only kernel query; its
+            // result is stable, and this path is used only on non-arm64 Apple
+            // targets where the callback budget is less constrained.
+            mach_timebase_info_data_t timebase{};
+            mach_timebase_info(&timebase);
             const std::uint64_t ticks = mach_absolute_time();
             return time_point(duration(static_cast<rep>(ticks * timebase.numer / timebase.denom)));
 #else

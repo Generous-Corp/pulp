@@ -1711,3 +1711,8 @@ contract changes.
 ## SysEx core storage and representation
 
 SysEx7 reassembly is reviewed MIDI infrastructure, not a new musical capability. Refresh both reviewed-header fingerprints and generated surface history after bounded-storage or copy-semantics changes.
+
+
+## Audio callback clock changes
+
+When a realtime clock implementation changes, refresh the owning public-header fingerprint before re-deriving capability counters. Keep first-use initialization out of the callback and validate the generated manifest and sequencer evidence against the protected base.

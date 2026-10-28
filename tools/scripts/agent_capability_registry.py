@@ -1599,7 +1599,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/audio/load_measurer.hpp",
-        "fingerprint": "sha256:bb274a929c7cdb0acc82111440650a6e1c594af6beb23bfadce63d01e882c586",
+        "fingerprint": "sha256:fc04074364eeaf37c89821db17c7ea65e342239d546754871a344fb98eeacb20",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
