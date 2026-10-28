@@ -19,6 +19,62 @@ add_library(pulp::view-core ALIAS pulp-view-core)
 # Consumers (and view-core's own headers) gate any optional JS use on this.
 target_compile_definitions(pulp-view-core PUBLIC PULP_ENABLE_JS=$<BOOL:${PULP_ENABLE_JS}>)
 
+# Optional RmlUi integration is deliberately a separate target. The target
+# contains the pinned RmlUi core plus the Pulp-owned file/render seams. Lua,
+# font, GPU, and host adapters remain separately admitted slices.
+if(PULP_ENABLE_RMLUI)
+    if(PULP_ENABLE_RMLUI_FONTS AND NOT TARGET Freetype::Freetype)
+        message(FATAL_ERROR
+            "PULP_ENABLE_RMLUI_FONTS=ON requires the admitted Freetype::Freetype target")
+    endif()
+    if(NOT TARGET RmlUi::Core)
+        message(FATAL_ERROR "PULP_ENABLE_RMLUI=ON requires the pinned RmlUi core target")
+    endif()
+    add_library(pulp-view-rmlui
+        src/rmlui_backend.cpp)
+    add_library(pulp::view-rmlui ALIAS pulp-view-rmlui)
+    target_include_directories(pulp-view-rmlui
+        PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<INSTALL_INTERFACE:include>)
+    # The optional target's public link carries RmlUi's headers and library to
+    # consumers that exercise the admitted core lifecycle.  The ordinary view
+    # targets never link this target, so the dependency remains opt-in.
+    target_link_libraries(pulp-view-rmlui PUBLIC pulp::view-core RmlUi::Core)
+    if(PULP_ENABLE_RMLUI_LUA)
+        if(NOT TARGET RmlUi::Lua)
+            message(FATAL_ERROR "PULP_ENABLE_RMLUI_LUA=ON requires the RmlUi Lua target")
+        endif()
+        target_link_libraries(pulp-view-rmlui PUBLIC RmlUi::Lua)
+    endif()
+    target_compile_features(pulp-view-rmlui PUBLIC cxx_std_20)
+    target_compile_definitions(pulp-view-rmlui PUBLIC
+        PULP_RMLUI_FONTS_ENABLED=$<BOOL:${PULP_ENABLE_RMLUI_FONTS}>
+        PULP_RMLUI_LUA_ENABLED=$<BOOL:${PULP_ENABLE_RMLUI_LUA}>)
+
+    # Catch a future FetchContent option leak at configure time, before it can
+    # alter the plugin SDK's link model. Respect an explicit shared-library
+    # request; the default Pulp build remains static.
+    get_target_property(_pulp_rmlui_type pulp-view-rmlui TYPE)
+    if(PULP_RMLUI_BUILD_SHARED_LIBS_REQUESTED)
+        set(_pulp_rmlui_expected_type SHARED_LIBRARY)
+    else()
+        set(_pulp_rmlui_expected_type STATIC_LIBRARY)
+    endif()
+    if(NOT _pulp_rmlui_type STREQUAL _pulp_rmlui_expected_type)
+        message(FATAL_ERROR
+            "pulp-view-rmlui link model changed unexpectedly; expected ${_pulp_rmlui_expected_type}, got ${_pulp_rmlui_type}")
+    endif()
+    get_target_property(_pulp_runtime_type pulp-runtime TYPE)
+    if(NOT _pulp_runtime_type STREQUAL _pulp_rmlui_expected_type)
+        message(FATAL_ERROR
+            "PULP_ENABLE_RMLUI changed pulp-runtime link model; expected ${_pulp_rmlui_expected_type}, got ${_pulp_runtime_type}")
+    endif()
+    unset(_pulp_rmlui_type)
+    unset(_pulp_rmlui_expected_type)
+    unset(_pulp_runtime_type)
+endif()
+
 add_library(pulp-view-script)
 add_library(pulp::view-script ALIAS pulp-view-script)
 

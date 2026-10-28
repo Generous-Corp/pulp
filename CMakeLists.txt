@@ -263,6 +263,21 @@ option(PULP_ENABLE_ABLETON_LINK "Enable optional desktop Ableton Link support wi
 option(PULP_ENABLE_ARA "Enable optional ARA 2.x support with a developer-supplied Celemony SDK" OFF)
 option(PULP_ENABLE_MTS_ESP "Enable optional ODDSound MTS-ESP microtuning client integration" OFF)
 option(PULP_ENABLE_SCALA_TUNING "Enable optional Scala .scl/.kbm microtuning support via Surge Synth Team tuning-library" OFF)
+option(PULP_ENABLE_RMLUI "Build the optional RmlUi editor backend and pinned core dependency" OFF)
+option(PULP_ENABLE_RMLUI_LUA
+       "Enable the optional RmlUi Lua plugin for the RmlUi editor backend"
+       OFF)
+option(PULP_ENABLE_RMLUI_FONTS
+       "Enable the optional RmlUi FreeType font engine (requires PULP_ENABLE_RMLUI)"
+       OFF)
+if(PULP_ENABLE_RMLUI_FONTS AND NOT PULP_ENABLE_RMLUI)
+    message(FATAL_ERROR
+            "PULP_ENABLE_RMLUI_FONTS=ON requires PULP_ENABLE_RMLUI=ON")
+endif()
+if(PULP_ENABLE_RMLUI_LUA AND NOT PULP_ENABLE_RMLUI)
+    message(FATAL_ERROR
+            "PULP_ENABLE_RMLUI_LUA=ON requires PULP_ENABLE_RMLUI=ON")
+endif()
 option(PULP_FETCHCONTENT_UPDATES_DISCONNECTED "Avoid implicit FetchContent updates during configure" ON)
 option(PULP_USE_SHARED_FETCHCONTENT_SOURCES "Prefer machine-local shared source caches for FetchContent dependencies" ON)
 option(PULP_BENCHMARK "Enable zero-copy benchmark perf counters. Tooling-only; OFF by default so production builds see zero overhead." OFF)
@@ -1176,6 +1191,59 @@ endif()
 # ── SDK Install Rules ──────────────────────────────────────────────────────
 # Shared SDK install/export rules live in tools/cmake/PulpInstallRules.cmake.
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInstallRules.cmake)
+
+# Keep the opt-in RmlUi SDK consumer honest on clean runners. The install
+# script stages every configured PULP_SDK_TARGETS archive, so a focused RmlUi
+# workflow must build that same closure before running cmake --install. This
+# aggregate target is deliberately opt-in and only depends on targets that
+# exist in the current configuration; it does not widen the default graph.
+if(PULP_ENABLE_RMLUI)
+    set(_pulp_rmlui_sdk_closure ${PULP_SDK_TARGETS})
+    foreach(_pulp_rmlui_tool IN ITEMS
+        pulp-runtime-pins
+        pulp-mcp
+        pulp-scan-worker
+        pulp-import-design
+        rmlui
+        rmlui_core
+        rmlui_debugger)
+        if(TARGET "${_pulp_rmlui_tool}")
+            list(APPEND _pulp_rmlui_sdk_closure "${_pulp_rmlui_tool}")
+        endif()
+    endforeach()
+    list(REMOVE_DUPLICATES _pulp_rmlui_sdk_closure)
+    add_custom_target(pulp-rmlui-sdk-closure)
+    foreach(_pulp_rmlui_target IN LISTS _pulp_rmlui_sdk_closure)
+        if(TARGET "${_pulp_rmlui_target}")
+            add_dependencies(pulp-rmlui-sdk-closure "${_pulp_rmlui_target}")
+        endif()
+    endforeach()
+    # The installed-consumer test stages the complete configured SDK. Keep its
+    # focused build target tied to the same closure, otherwise `cmake --install`
+    # can reach an exported optional archive (for example RmlUi's debugger)
+    # that was never built by the test target.
+    if(TARGET pulp-test-rmlui-backend)
+        add_dependencies(pulp-test-rmlui-backend pulp-rmlui-sdk-closure)
+        # The SDK consumer uses the normal project install script.  That script
+        # also stages conditionally enabled helper executables, so make the
+        # focused target build those install inputs before staging.
+        foreach(_pulp_rmlui_install_target IN ITEMS
+                pulp-cli
+                pulp-mcp
+                pulp-import-design
+                pulp-scan-worker
+                pulp-control-standalone-host
+                pulp-control-broker
+                pulp-au-instrument-probe
+                pulp-au-effect-ab)
+            if(TARGET ${_pulp_rmlui_install_target})
+                add_dependencies(pulp-test-rmlui-backend
+                    ${_pulp_rmlui_install_target})
+            endif()
+        endforeach()
+    endif()
+    unset(_pulp_rmlui_sdk_closure)
+endif()
 
 # Match the target names exported by find_package(Pulp) for source consumers.
 # Aliases are global targets, so the parent of add_subdirectory(Pulp) sees them.

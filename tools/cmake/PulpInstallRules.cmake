@@ -114,6 +114,13 @@ if(TARGET pulp-view-audio)
     list(APPEND PULP_SDK_TARGETS pulp-view-audio)
 endif()
 
+# The RmlUi bridge is an opt-in SDK surface.  Keep it out of the default
+# export, but when a PULP_ENABLE_RMLUI SDK is installed export both sides of
+# its public link boundary. RmlUi is brought in with FetchContent, so its
+# targets are installed through the optional SDK rules below rather than being
+# added to the canonical SDK target manifest. The manifest is parsed by
+# release gates and must contain only Pulp-owned target names.
+
 # The GPU device layer is exported with the renderer that links it, and on its
 # own for pulp-gpu-audio, which links the device without the 2D renderer.
 if(TARGET pulp-gpu-device-api)
@@ -340,6 +347,55 @@ endif()
 if(TARGET SDL3_Headers)
     set_target_properties(SDL3_Headers PROPERTIES EXPORT_NAME sdl3-headers)
     install(TARGETS SDL3_Headers EXPORT PulpTargets)
+endif()
+
+if(TARGET pulp-view-rmlui AND TARGET rmlui_core)
+    set_target_properties(pulp-view-rmlui PROPERTIES EXPORT_NAME view-rmlui)
+    install(TARGETS pulp-view-rmlui
+        EXPORT PulpTargets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+endif()
+
+# The optional RmlUi Lua plugin links an admitted, Pulp-owned Lua archive.
+# Export and install that archive with the SDK so an installed RmlUi target
+# never retains a build-tree include path or an unresolved Lua::Lua edge.
+if(TARGET pulp-rmlui-lua)
+    set_target_properties(pulp-rmlui-lua PROPERTIES EXPORT_NAME rmlui-lua)
+    install(TARGETS pulp-rmlui-lua
+        EXPORT PulpTargets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/lua)
+    install(DIRECTORY "${PULP_RMLUI_LUA_SOURCE_DIR}/src/"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/lua"
+        FILES_MATCHING PATTERN "*.h")
+endif()
+
+if(TARGET rmlui_core)
+    install(DIRECTORY "${rmlui_SOURCE_DIR}/Include/RmlUi/"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/RmlUi"
+        FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp" PATTERN "*.inl")
+endif()
+
+# RmlUi's embedded project installs its package config unconditionally, but it
+# only installs the matching target export when it is the top-level project.
+# Export that same target set here so find_package(RmlUi CONFIG) remains a
+# valid, self-contained entry point for SDK consumers that use RmlUi directly.
+# Keep these targets in their own export set.  Putting them in PulpTargets
+# rewrites the public RmlUi::Core dependency as Pulp::rmlui_core and leaves
+# RmlUiConfig.cmake unable to resolve the upstream package contract.
+if(TARGET rmlui_core)
+    # RmlUi registers rmlui_core, rmlui_debugger, and its aggregate rmlui
+    # interface target in this export set while it is embedded.  Only the
+    # export file is missing in that mode; registering the targets a second
+    # time here makes CMake reject the export set as duplicated.
+    install(EXPORT RmlUiTargets
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/RmlUi"
+        NAMESPACE RmlUi::
+        FILE RmlUiTargets.cmake)
 endif()
 
 # Public headers for each SDK subsystem. Keep platform-conditional surfaces

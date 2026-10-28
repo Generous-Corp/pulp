@@ -19,6 +19,116 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpSimdSupport.cmake)
 include(FetchContent)
 set(FETCHCONTENT_UPDATES_DISCONNECTED ${PULP_FETCHCONTENT_UPDATES_DISCONNECTED})
 
+# RmlUi core is an explicit opt-in. Keep all optional plugins, font engines,
+# samples, and Lua bindings disabled until their independent dependency and
+# sandbox contracts are reviewed. The upstream debugger target is exported by
+# RmlUi but is not linked by Pulp's bridge.
+if(PULP_ENABLE_RMLUI)
+    if(PULP_ENABLE_RMLUI_FONTS)
+        find_package(Freetype REQUIRED)
+    endif()
+    # RmlUi defaults BUILD_SHARED_LIBS to ON. Scope that option to the
+    # dependency so opting into this backend cannot silently change Pulp's
+    # link model; preserve an explicit consumer choice for Pulp targets.
+    # FetchContent projects are allowed to set BUILD_SHARED_LIBS in either the
+    # normal-variable or cache scope. Preserve both scopes exactly so opting
+    # into RmlUi cannot mutate the parent project's cache on the way out.
+    set(_pulp_rmlui_build_shared_libs_normal_defined FALSE)
+    if(DEFINED BUILD_SHARED_LIBS)
+        set(_pulp_rmlui_build_shared_libs_normal_defined TRUE)
+        set(_pulp_rmlui_build_shared_libs_normal_value "${BUILD_SHARED_LIBS}")
+    endif()
+    set(_pulp_rmlui_build_shared_libs_cache_defined FALSE)
+    if(DEFINED CACHE{BUILD_SHARED_LIBS})
+        set(_pulp_rmlui_build_shared_libs_cache_defined TRUE)
+        get_property(_pulp_rmlui_build_shared_libs_cache_value CACHE BUILD_SHARED_LIBS PROPERTY VALUE)
+        get_property(_pulp_rmlui_build_shared_libs_cache_type CACHE BUILD_SHARED_LIBS PROPERTY TYPE)
+        get_property(_pulp_rmlui_build_shared_libs_cache_help CACHE BUILD_SHARED_LIBS PROPERTY HELPSTRING)
+    endif()
+    if(_pulp_rmlui_build_shared_libs_normal_defined)
+        set(_pulp_rmlui_build_shared_libs_requested "${_pulp_rmlui_build_shared_libs_normal_value}")
+    elseif(_pulp_rmlui_build_shared_libs_cache_defined)
+        set(_pulp_rmlui_build_shared_libs_requested "${_pulp_rmlui_build_shared_libs_cache_value}")
+    else()
+        set(_pulp_rmlui_build_shared_libs_requested "")
+    endif()
+    set(PULP_RMLUI_BUILD_SHARED_LIBS_REQUESTED
+        "${_pulp_rmlui_build_shared_libs_requested}"
+        CACHE INTERNAL "BUILD_SHARED_LIBS requested before RmlUi admission")
+    set(BUILD_SHARED_LIBS OFF)
+
+    set(RMLUI_SAMPLES OFF CACHE BOOL "" FORCE)
+    set(RMLUI_THIRDPARTY_CONTAINERS OFF CACHE BOOL "" FORCE)
+    if(PULP_ENABLE_RMLUI_FONTS)
+        set(RMLUI_FONT_ENGINE "freetype" CACHE STRING "" FORCE)
+    else()
+        set(RMLUI_FONT_ENGINE "none" CACHE STRING "" FORCE)
+    endif()
+    if(PULP_ENABLE_RMLUI_LUA)
+        # Lua is built from the official 5.4.7 source archive so the opt-in
+        # runtime does not depend on an ambient Homebrew/system Lua ABI. The
+        # exact URL hash is repeated in the dependency manifest and is part of
+        # the compatibility receipt.
+        FetchContent_Declare(
+            pulp_rmlui_lua
+            URL https://www.lua.org/ftp/lua-5.4.7.tar.gz
+            URL_HASH SHA256=9fbf5e28ef86c69858f6d3d34eccc32e911c1a28b4120ff3e84aaa70cfbf1e30)
+        FetchContent_MakeAvailable(pulp_rmlui_lua)
+        file(GLOB _pulp_rmlui_lua_sources CONFIGURE_DEPENDS
+             "${pulp_rmlui_lua_SOURCE_DIR}/src/*.c")
+        list(REMOVE_ITEM _pulp_rmlui_lua_sources
+             "${pulp_rmlui_lua_SOURCE_DIR}/src/lua.c"
+             "${pulp_rmlui_lua_SOURCE_DIR}/src/luac.c")
+        add_library(pulp-rmlui-lua STATIC ${_pulp_rmlui_lua_sources})
+        target_compile_definitions(pulp-rmlui-lua PRIVATE LUA_USE_POSIX)
+        target_include_directories(pulp-rmlui-lua PUBLIC
+                                   $<BUILD_INTERFACE:${pulp_rmlui_lua_SOURCE_DIR}/src>
+                                   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/lua>)
+        set(PULP_RMLUI_LUA_SOURCE_DIR "${pulp_rmlui_lua_SOURCE_DIR}")
+        add_library(Lua::Lua INTERFACE IMPORTED GLOBAL)
+        set_target_properties(Lua::Lua PROPERTIES
+            INTERFACE_LINK_LIBRARIES pulp-rmlui-lua
+            INTERFACE_INCLUDE_DIRECTORIES "${pulp_rmlui_lua_SOURCE_DIR}/src")
+        set(RMLUI_LUA_BINDINGS ON CACHE BOOL "" FORCE)
+        set(RMLUI_LUA_BINDINGS_LIBRARY lua CACHE STRING "" FORCE)
+        unset(_pulp_rmlui_lua_sources)
+    else()
+        set(RMLUI_LUA_BINDINGS OFF CACHE BOOL "" FORCE)
+    endif()
+    set(RMLUI_LOTTIE_PLUGIN OFF CACHE BOOL "" FORCE)
+    set(RMLUI_SVG_PLUGIN OFF CACHE BOOL "" FORCE)
+    set(RMLUI_HARFBUZZ_SAMPLE OFF CACHE BOOL "" FORCE)
+    set(RMLUI_TRACY_PROFILING OFF CACHE BOOL "" FORCE)
+    set(RMLUI_INSTALL_LICENSES_AND_BUILD_INFO OFF CACHE BOOL "" FORCE)
+    pulp_register_fetchcontent_source(rmlui
+        REF 58c751531f4c1a1eb2dc56f409b8e8a323a0c9ad)
+    FetchContent_Declare(
+        rmlui
+        GIT_REPOSITORY https://github.com/mikke89/RmlUi.git
+        GIT_TAG 58c751531f4c1a1eb2dc56f409b8e8a323a0c9ad)
+    FetchContent_MakeAvailable(rmlui)
+
+    if(_pulp_rmlui_build_shared_libs_cache_defined)
+        set(BUILD_SHARED_LIBS "${_pulp_rmlui_build_shared_libs_cache_value}"
+            CACHE "${_pulp_rmlui_build_shared_libs_cache_type}"
+            "${_pulp_rmlui_build_shared_libs_cache_help}" FORCE)
+    else()
+        unset(BUILD_SHARED_LIBS CACHE)
+    endif()
+    if(_pulp_rmlui_build_shared_libs_normal_defined)
+        set(BUILD_SHARED_LIBS "${_pulp_rmlui_build_shared_libs_normal_value}")
+    else()
+        unset(BUILD_SHARED_LIBS)
+    endif()
+    unset(_pulp_rmlui_build_shared_libs_normal_defined)
+    unset(_pulp_rmlui_build_shared_libs_normal_value)
+    unset(_pulp_rmlui_build_shared_libs_cache_defined)
+    unset(_pulp_rmlui_build_shared_libs_cache_value)
+    unset(_pulp_rmlui_build_shared_libs_cache_type)
+    unset(_pulp_rmlui_build_shared_libs_cache_help)
+    unset(_pulp_rmlui_build_shared_libs_requested)
+endif()
+
 # CHOC: header-only C++ utilities (ISC license)
 # Used for: JS engine abstraction, MIDI utilities, WebView (drag-and-drop)
 #
