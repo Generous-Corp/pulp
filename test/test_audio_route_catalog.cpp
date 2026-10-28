@@ -133,3 +133,22 @@ TEST_CASE("MutableAudioRouteCatalog restores only available stable route IDs") {
     REQUIRE(catalog.selected_route_ids() == std::vector<std::string>{"input:1", "track:piano"});
     REQUIRE(connected == std::vector<std::string>{"input:1:0", "track:piano:1"});
 }
+
+TEST_CASE("MutableAudioRouteCatalog keeps independent left and right selections") {
+    pulp::host::MutableAudioRouteCatalog catalog;
+    catalog.set_routes({
+        {"track:piano", "Piano", pulp::host::AudioRouteKind::Track, 2, true},
+        {"bus:reverb", "Reverb", pulp::host::AudioRouteKind::Bus, 2, true},
+    });
+
+    REQUIRE(catalog.connect_channel("track:piano", 0, 0));
+    REQUIRE(catalog.connect_channel("bus:reverb", 0, 1));
+    REQUIRE(catalog.connected_route_channel(0, 0) == "track:piano");
+    REQUIRE(catalog.connected_route_channel(0, 1) == "bus:reverb");
+    REQUIRE(catalog.connected_route(0) == "track:piano");
+
+    REQUIRE_FALSE(catalog.connect_channel("track:piano", 0, 2));
+    REQUIRE(catalog.disconnect(0));
+    REQUIRE(catalog.connected_route_channel(0, 0).empty());
+    REQUIRE(catalog.connected_route_channel(0, 1).empty());
+}

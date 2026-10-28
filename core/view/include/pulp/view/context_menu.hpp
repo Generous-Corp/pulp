@@ -70,8 +70,7 @@ public:
             i.on_change = std::move(on_change);
             return i;
         }
-        static Item make_slider(int id, std::string label, float normalized,
-                                float step,
+        static Item make_slider(int id, std::string label, float normalized, float step,
                                 std::function<void(const Item&)> on_change) {
             Item i;
             i.id = id;
@@ -83,23 +82,30 @@ public:
             return i;
         }
         void set_toggled(bool value) {
-            if (control_kind != ControlKind::toggle || checked == value) return;
+            if (control_kind != ControlKind::toggle || checked == value)
+                return;
             checked = value;
-            if (on_change) on_change(*this);
+            if (on_change)
+                on_change(*this);
         }
         void set_normalized_value(float value) {
-            if (control_kind != ControlKind::slider) return;
+            if (control_kind != ControlKind::slider)
+                return;
             const float next = std::clamp(value, 0.0f, 1.0f);
-            if (normalized_value == next) return;
+            if (normalized_value == next)
+                return;
             normalized_value = next;
-            if (on_change) on_change(*this);
+            if (on_change)
+                on_change(*this);
         }
     };
 
     ContextMenu() { set_focusable(true); }
 
     void set_items(std::vector<Item> items) { items_ = std::move(items); }
-    std::vector<Item>& items() { return items_; }
+    std::vector<Item>& items() {
+        return items_;
+    }
     const std::vector<Item>& items() const { return items_; }
 
     /// Fired with the chosen item id on select, or with std::nullopt on dismiss

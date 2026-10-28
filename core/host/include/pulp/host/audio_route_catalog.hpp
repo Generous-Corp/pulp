@@ -67,8 +67,7 @@ class AudioRouteCatalog {
 
     /// Connect one channel of a declared input bus. Hosts that do not expose
     /// independent channel routing inherit the bus-level connection behavior.
-    virtual bool connect_channel(std::string_view stable_id,
-                                 std::size_t bus_index,
+    virtual bool connect_channel(std::string_view stable_id, std::size_t bus_index,
                                  std::size_t channel_index) {
         (void)channel_index;
         return connect(stable_id, bus_index);
@@ -189,8 +188,8 @@ class MutableAudioRouteCatalog final : public AudioRouteCatalog {
                          std::size_t channel_index) override {
         if (channel_index >= 2)
             return false;
-        const auto it = std::find_if(
-            routes_.begin(), routes_.end(), [stable_id](const AudioRouteInfo& route) {
+        const auto it =
+            std::find_if(routes_.begin(), routes_.end(), [stable_id](const AudioRouteInfo& route) {
                 return route.stable_id == stable_id && route.available && route.channels > 0;
             });
         if (it == routes_.end())
