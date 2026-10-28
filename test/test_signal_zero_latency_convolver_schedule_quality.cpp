@@ -367,7 +367,74 @@ TEST_CASE("True-stereo matrix routes [LL, LR, RL, RR]",
         REQUIRE(amplitude_db(max_abs_error(mono[0], expect(0))) < -120.0);
         double cross = 0.0;
         for (double v : mono[1]) cross = std::max(cross, std::abs(v));
-        REQUIRE(cross == 0.0);
+        REQUIRE(cross < 1e-12);
+    }
+}
+
+TEST_CASE("True-stereo simultaneous inputs match the direct sum",
+          "[signal][convolution][acceptance][stereo]") {
+    constexpr int ir_len = 3072;
+    constexpr int frames = 6144;
+    std::vector<std::vector<float>> ir(4, std::vector<float>(ir_len));
+    for (int c = 0; c < 4; ++c) {
+        const auto source = decaying_noise_ir(ir_len, 4.0, 0x3100u + c);
+        for (int i = 0; i < ir_len; ++i)
+            ir[c][i] = static_cast<float>(source[static_cast<std::size_t>(i)]);
+    }
+    const float* ir_ptrs[4] = {ir[0].data(), ir[1].data(), ir[2].data(), ir[3].data()};
+    std::vector<std::vector<float>> input(2, std::vector<float>(frames));
+    Rng rng(0x40FFEE);
+    for (int i = 0; i < frames; ++i) {
+        input[0][i] = static_cast<float>(rng.bipolar());
+        input[1][i] = static_cast<float>(rng.bipolar());
+    }
+    std::vector<double> left_input(input[0].begin(), input[0].end());
+    std::vector<double> right_input(input[1].begin(), input[1].end());
+
+    for (int block : {16, 64, 128, 512}) {
+        ZeroLatencyConvolver conv;
+        conv.prepare(kFs, block, 2);
+        conv.set_normalize_mode(IrNormalizeMode::none);
+        conv.set_true_stereo(true);
+        REQUIRE(conv.load_impulse_response(ir_ptrs, 4, ir_len, kFs));
+        REQUIRE(conv.latency_samples() == 0);
+
+        auto want_left = direct_convolve(left_input, prepared_taps(conv, 0));
+        const auto left_cross = direct_convolve(right_input, prepared_taps(conv, 2));
+        auto want_right = direct_convolve(left_input, prepared_taps(conv, 1));
+        const auto right_cross = direct_convolve(right_input, prepared_taps(conv, 3));
+        for (int i = 0; i < frames; ++i) {
+            want_left[i] += left_cross[i];
+            want_right[i] += right_cross[i];
+        }
+
+        const auto got = render(conv, input, block);
+        const std::vector<double> got_left(got[0].begin(), got[0].end());
+        const std::vector<double> got_right(got[1].begin(), got[1].end());
+        INFO("block " << block);
+        REQUIRE(rms_error_db(got_left, want_left) < -95.0);
+        REQUIRE(rms_error_db(got_right, want_right) < -95.0);
+        if (block == 128) {
+            conv.reset();
+            REQUIRE(render(conv, input, block) == got);
+
+            conv.reset();
+            std::vector<std::vector<float>> ragged(2, std::vector<float>(frames));
+            const int sizes[] = {1, 7, 64, 128, 33, 100, 5};
+            int part = 0;
+            for (int pos = 0; pos < frames;) {
+                const int n = std::min(sizes[part++ % 7], frames - pos);
+                const float* in[2] = {input[0].data() + pos, input[1].data() + pos};
+                float* out[2] = {ragged[0].data() + pos, ragged[1].data() + pos};
+                conv.process(in, out, n);
+                pos += n;
+            }
+            for (int c = 0; c < 2; ++c) {
+                const std::vector<double> fixed(got[c].begin(), got[c].end());
+                const std::vector<double> split(ragged[c].begin(), ragged[c].end());
+                REQUIRE(rms_error_db(split, fixed) < -120.0);
+            }
+        }
     }
 }
 
@@ -430,8 +497,14 @@ TEST_CASE("process and reset are allocation-free", "[signal][convolution][accept
     std::vector<float> taps = to_float(ir);
     std::vector<float> taps2 = taps;
     for (auto& v : taps2) v *= 0.7f;
-    const float* channels[2] = {taps.data(), taps2.data()};
-    REQUIRE(conv.load_impulse_response(channels, 2, static_cast<int>(taps.size()), kFs));
+    std::vector<float> taps3 = taps;
+    std::vector<float> taps4 = taps;
+    for (auto& v : taps3)
+        v *= 0.4f;
+    for (auto& v : taps4)
+        v *= 0.9f;
+    const float* channels[4] = {taps.data(), taps2.data(), taps3.data(), taps4.data()};
+    REQUIRE(conv.load_impulse_response(channels, 4, static_cast<int>(taps.size()), kFs));
 
     std::vector<float> in_l(kBlock), in_r(kBlock), out_l(kBlock), out_r(kBlock);
     const float* in[2] = {in_l.data(), in_r.data()};
@@ -518,6 +591,38 @@ TEST_CASE("Per-block compute bound", "[signal][convolution][acceptance][cost]") 
         2.0 * 5.0 * (2.0 * largest) * std::log2(2.0 * largest);
     INFO("undistributed single-transform block would cost " << naive_single_transform);
     REQUIRE(static_cast<double>(peak) < 0.5 * naive_single_transform);
+}
+
+TEST_CASE("Packed stereo keeps partition work distributed",
+          "[signal][convolution][acceptance][cost]") {
+    const auto kernel = decaying_noise_ir(65536, 6.0, 0xC05A);
+    const std::vector<float> ir(kernel.begin(), kernel.end());
+    const float* taps[4] = {ir.data(), ir.data(), ir.data(), ir.data()};
+    for (int block : {1, 2, 3, 7, 16, 128, 512}) {
+        for (bool enabled : {false, true}) {
+            ZeroLatencyConvolver conv;
+            conv.prepare(kFs, block, 2);
+            conv.set_true_stereo(enabled);
+            REQUIRE(conv.load_impulse_response(taps, 4, static_cast<int>(ir.size()), kFs));
+            std::vector<float> input(block, 0.01f), left(block), right(block);
+            const float* in[2] = {input.data(), input.data()};
+            float* out[2] = {left.data(), right.data()};
+            const int largest = conv.level_block_length(conv.num_levels() - 1);
+            for (int b = 0; b < 4 * largest / block; ++b)
+                conv.process(in, out, block);
+            const int blocks = 2 * largest / block;
+            long long total = 0, peak = 0;
+            for (int b = 0; b < blocks; ++b) {
+                conv.process(in, out, block);
+                total += conv.last_block_cost();
+                peak = std::max(peak, conv.last_block_cost());
+            }
+            const double mean = static_cast<double>(total) / blocks;
+            INFO("block " << block << ", enabled " << enabled << ", peak/mean " << peak / mean);
+            REQUIRE(mean > 0.0);
+            REQUIRE(peak / mean <= ZeroLatencyConvolver::kBlockCostSlackDefault);
+        }
+    }
 }
 
 TEST_CASE("Resampled IR keeps its first arrival at index 0",
@@ -736,4 +841,261 @@ TEST_CASE("Tail trim ends on an exact zero through the shipped fade",
     const auto y = render_mono(conv, x, kBlock);
     for (std::size_t i = static_cast<std::size_t>(keep); i < y.size(); ++i)
         REQUIRE(std::abs(y[i]) < 1e-12);
+}
+TEST_CASE("Disabling true stereo mutes an active cross tail", "[signal][convolution][stereo]") {
+    constexpr int ir_len = 12000;
+    constexpr int frames = 20000;
+    std::vector<std::vector<double>> ir(4, std::vector<double>(ir_len));
+    for (int i = 3000; i < 9000; ++i)
+        ir[1][i] = 0.25;
+    const double* p[4] = {ir[0].data(), ir[1].data(), ir[2].data(), ir[3].data()};
+    ZeroLatencyConvolver64 conv;
+    conv.prepare(kFs, kBlock, 2);
+    conv.set_normalize_mode(IrNormalizeMode::none);
+    REQUIRE(conv.load_impulse_response(p, 4, ir_len, kFs));
+    conv.set_true_stereo(true);
+
+    std::vector<std::vector<double>> first(2, std::vector<double>(4000));
+    first[0][0] = 1.0;
+    const auto before = render(conv, first, kBlock);
+    double before_peak = 0.0;
+    for (double v : before[1])
+        before_peak = std::max(before_peak, std::abs(v));
+    REQUIRE(before_peak > 0.01);
+
+    conv.set_true_stereo(false);
+    std::vector<std::vector<double>> rest(2, std::vector<double>(frames - 4000));
+    const auto after = render(conv, rest, kBlock);
+    double after_peak = 0.0;
+    for (double v : after[1])
+        after_peak = std::max(after_peak, std::abs(v));
+    REQUIRE(after_peak < 1e-12);
+}
+
+TEST_CASE("Packed ordinary stereo matches independent 2IR convolutions",
+          "[signal][convolution][acceptance][stereo][packed]") {
+    constexpr int ir_len = 4097;
+    constexpr int frames = 8192;
+    constexpr int kBlock = 128;
+    std::vector<std::vector<double>> ir(2, std::vector<double>(ir_len, 0.0));
+    ir[0][0] = 0.75;
+    ir[0][1] = -0.125;
+    ir[0][1024] = 0.03125;
+    ir[0][4096] = -0.015625;
+    ir[1][0] = 0.00075;
+    ir[1][3] = 0.000125;
+    ir[1][1025] = -0.00003125;
+    ir[1][4096] = 0.000015625;
+
+    auto run = [&]<typename Conv, typename T> {
+        std::vector<T> ir0(ir[0].begin(), ir[0].end());
+        std::vector<T> ir1(ir[1].begin(), ir[1].end());
+        const T* ir_ptrs[2] = {ir0.data(), ir1.data()};
+        Conv conv;
+        conv.prepare(kFs, kBlock, 2);
+        conv.set_normalize_mode(IrNormalizeMode::none);
+        REQUIRE(conv.load_impulse_response(ir_ptrs, 2, ir_len, kFs));
+
+        std::vector<std::vector<T>> input(2, std::vector<T>(frames));
+        Rng rng(0x2A2u);
+        for (int i = 0; i < frames; ++i) {
+            input[0][i] = static_cast<T>(rng.bipolar());
+            input[1][i] = static_cast<T>(0.5 * rng.bipolar() + ((i & 1) ? -0.2 : 0.2));
+        }
+        const std::vector<double> x0(input[0].begin(), input[0].end());
+        const std::vector<double> x1(input[1].begin(), input[1].end());
+        const auto want0 = direct_convolve(x0, prepared_taps(conv, 0));
+        const auto want1 = direct_convolve(x1, prepared_taps(conv, 1));
+        const auto got = render(conv, input, kBlock);
+        const std::vector<double> got0(got[0].begin(), got[0].end());
+        const std::vector<double> got1(got[1].begin(), got[1].end());
+        REQUIRE(rms_error_db(got0, want0) < -95.0);
+        REQUIRE(rms_error_db(got1, want1) < -95.0);
+        REQUIRE(amplitude_db(max_abs_error(got0, want0)) < -85.0);
+        REQUIRE(amplitude_db(max_abs_error(got1, want1)) < -85.0);
+
+        conv.reset();
+        std::vector<std::vector<T>> split(2, std::vector<T>(frames));
+        const int sizes[] = {1, 7, 64, 128, 33, 5};
+        int part = 0;
+        for (int pos = 0; pos < frames;) {
+            const int n = std::min(sizes[part++ % 6], frames - pos);
+            const T* in[2] = {input[0].data() + pos, input[1].data() + pos};
+            T* out[2] = {split[0].data() + pos, split[1].data() + pos};
+            conv.process(in, out, n);
+            pos += n;
+        }
+        for (int c = 0; c < 2; ++c) {
+            const std::vector<double> split_d(split[c].begin(), split[c].end());
+            const auto& want = c == 0 ? want0 : want1;
+            REQUIRE(rms_error_db(split_d, want) < -95.0);
+        }
+
+        // Complex packing has a small absolute roundoff floor from the loud
+        // channel. Check quiet and silent channels with an absolute dBFS gate
+        // so the oracle does not turn that floor into a misleading relative
+        // error when the expected signal is near zero.
+        for (int loud = 0; loud < 2; ++loud) {
+            const int quiet = 1 - loud;
+            for (T quiet_gain : {T{0}, T{1e-5}, T{1e-4}}) {
+                Conv quiet_conv;
+                quiet_conv.prepare(kFs, kBlock, 2);
+                quiet_conv.set_normalize_mode(IrNormalizeMode::none);
+                REQUIRE(quiet_conv.load_impulse_response(ir_ptrs, 2, ir_len, kFs));
+                std::vector<std::vector<T>> quiet_input(2, std::vector<T>(frames));
+                Rng quiet_rng(0x5EEDu);
+                for (int i = 0; i < frames; ++i) {
+                    quiet_input[loud][i] = static_cast<T>(0.75 * quiet_rng.bipolar());
+                    quiet_input[quiet][i] = quiet_gain * static_cast<T>(quiet_rng.bipolar());
+                }
+                const std::vector<double> quiet_x(quiet_input[quiet].begin(),
+                                                  quiet_input[quiet].end());
+                const auto quiet_want = direct_convolve(quiet_x, prepared_taps(quiet_conv, quiet));
+                const auto quiet_got = render(quiet_conv, quiet_input, kBlock);
+                for (const auto& channel : quiet_got)
+                    REQUIRE(std::all_of(channel.begin(), channel.end(),
+                                        [](T sample) { return std::isfinite(sample); }));
+                const std::vector<double> quiet_actual(quiet_got[quiet].begin(),
+                                                       quiet_got[quiet].end());
+                REQUIRE(amplitude_db(max_abs_error(quiet_actual, quiet_want)) < -145.0);
+            }
+        }
+    };
+
+    SECTION("float") {
+        run.template operator()<ZeroLatencyConvolver, float>();
+    }
+    SECTION("double") {
+        run.template operator()<ZeroLatencyConvolver64, double>();
+    }
+}
+
+TEST_CASE("Packed stereo preserves DC and Nyquist components", "[signal][convolution][stereo]") {
+    constexpr int ir_len = 1537;
+    constexpr int frames = 4096;
+    std::vector<std::vector<float>> ir(4, std::vector<float>(ir_len));
+    for (int c = 0; c < 4; ++c) {
+        ir[c][0] = 0.125f * (c + 1);
+        ir[c][67 + c] = -0.03f;
+        ir[c][710 + c] = 0.015f;
+        ir[c][1300 + c] = -0.007f;
+    }
+    const float* p[4] = {ir[0].data(), ir[1].data(), ir[2].data(), ir[3].data()};
+    for (int block : {16, 64, 128, 512}) {
+        for (int source = 0; source < 2; ++source) {
+            ZeroLatencyConvolver conv;
+            conv.prepare(kFs, block, 2);
+            conv.set_normalize_mode(IrNormalizeMode::none);
+            conv.set_true_stereo(true);
+            REQUIRE(conv.load_impulse_response(p, 4, ir_len, kFs));
+            std::vector<std::vector<float>> input(2, std::vector<float>(frames));
+            for (int i = 0; i < frames; ++i)
+                input[source][i] = 0.25f + ((i & 1) ? -0.125f : 0.125f);
+            const std::vector<double> x(input[source].begin(), input[source].end());
+            const auto got = render(conv, input, block);
+            for (int dst = 0; dst < 2; ++dst) {
+                INFO("block " << block << ", source " << source << ", destination " << dst);
+                const auto want = direct_convolve(x, prepared_taps(conv, source * 2 + dst));
+                const std::vector<double> actual(got[dst].begin(), got[dst].end());
+                REQUIRE(rms_error_db(actual, want) < -100.0);
+                REQUIRE(amplitude_db(max_abs_error(actual, want)) < -100.0);
+            }
+        }
+    }
+}
+
+TEST_CASE("True-stereo tail state survives render gating during partial work",
+          "[signal][convolution][stereo]") {
+    constexpr int frames = 8192;
+    constexpr int ir_len = 4096;
+    std::vector<std::vector<float>> ir(4, std::vector<float>(ir_len));
+    for (int i = 900; i < 3000; ++i) {
+        ir[1][i] = 0.03f;
+        ir[2][i] = -0.02f;
+    }
+    const float* p[4] = {ir[0].data(), ir[1].data(), ir[2].data(), ir[3].data()};
+    ZeroLatencyConvolver gated, reference;
+    for (auto* conv : {&gated, &reference}) {
+        conv->prepare(kFs, kBlock, 2);
+        conv->set_normalize_mode(IrNormalizeMode::none);
+        conv->set_true_stereo(true);
+        REQUIRE(conv->load_impulse_response(p, 4, ir_len, kFs));
+    }
+    std::vector<std::vector<float>> input(2, std::vector<float>(frames));
+    input[0][0] = 1.0f;
+    input[1][11] = 0.5f;
+    std::vector<std::vector<float>> got(2, std::vector<float>(frames));
+    std::vector<std::vector<float>> want(2, std::vector<float>(frames));
+    double reference_tail_peak = 0.0;
+    double muted_peak = 0.0;
+    double enabled_error = 0.0;
+    // Seven-frame calls leave transforms partially complete when the gate changes.
+    for (int pos = 0; pos < frames; pos += 7) {
+        const int n = std::min(7, frames - pos);
+        const bool enabled = pos < 1001 || pos >= 2002;
+        gated.set_true_stereo(enabled);
+        const float* in[2] = {input[0].data() + pos, input[1].data() + pos};
+        float* out[2] = {got[0].data() + pos, got[1].data() + pos};
+        float* ref[2] = {want[0].data() + pos, want[1].data() + pos};
+        gated.process(in, out, n);
+        reference.process(in, ref, n);
+        for (int c = 0; c < 2; ++c) {
+            for (int i = 0; i < n; ++i) {
+                if (enabled) {
+                    enabled_error =
+                        std::max(enabled_error, std::abs(double(out[c][i]) - double(ref[c][i])));
+                    if (pos >= 2002)
+                        reference_tail_peak =
+                            std::max(reference_tail_peak, std::abs(double(ref[c][i])));
+                } else {
+                    muted_peak = std::max(muted_peak, std::abs(double(out[c][i])));
+                }
+            }
+        }
+    }
+    REQUIRE(reference_tail_peak > 0.001);
+    REQUIRE(enabled_error < 1e-7);
+    REQUIRE(muted_peak < 1e-7);
+}
+
+TEST_CASE("Packed stereo preserves quiet diagonal channels", "[signal][convolution][stereo]") {
+    constexpr int frames = 8192;
+    constexpr int ir_len = 2048;
+    std::vector<std::vector<float>> ir(4, std::vector<float>(ir_len));
+    for (int cell : {0, 3}) {
+        ir[cell][0] = 0.5f;
+        ir[cell][511] = 0.1f;
+        ir[cell][1023] = -0.2f;
+        ir[cell][1900] = 0.05f;
+    }
+    const float* taps[4] = {ir[0].data(), ir[1].data(), ir[2].data(), ir[3].data()};
+    for (int loud : {0, 1}) {
+        for (float quiet_gain : {0.0f, 1e-5f}) {
+            ZeroLatencyConvolver conv;
+            conv.prepare(kFs, 64, 2);
+            conv.set_normalize_mode(IrNormalizeMode::none);
+            conv.set_true_stereo(false);
+            REQUIRE(conv.load_impulse_response(taps, 4, ir_len, kFs));
+            Rng rng(0x51A1CE);
+            std::vector<std::vector<float>> input(2, std::vector<float>(frames));
+            const int quiet = 1 - loud;
+            for (int i = 0; i < frames; ++i) {
+                input[loud][i] = static_cast<float>(0.75 * rng.bipolar());
+                input[quiet][i] = quiet_gain * static_cast<float>(rng.bipolar());
+            }
+            // Non-finite input is sanitized before either channel enters the FFT.
+            input[loud][111] = std::numeric_limits<float>::quiet_NaN();
+            input[loud][222] = std::numeric_limits<float>::infinity();
+            const auto got = render(conv, input, 7);
+            const std::vector<double> x(input[quiet].begin(), input[quiet].end());
+            const auto want = direct_convolve(x, prepared_taps(conv, quiet * 3));
+            const std::vector<double> actual(got[quiet].begin(), got[quiet].end());
+            for (const auto& channel : got)
+                REQUIRE(std::all_of(channel.begin(), channel.end(),
+                                    [](float sample) { return std::isfinite(sample); }));
+            INFO("loud channel " << loud << ", quiet gain " << quiet_gain << ", peak residual "
+                                 << amplitude_db(max_abs_error(actual, want)) << " dBFS");
+            REQUIRE(amplitude_db(max_abs_error(actual, want)) < -120.0);
+        }
+    }
 }
