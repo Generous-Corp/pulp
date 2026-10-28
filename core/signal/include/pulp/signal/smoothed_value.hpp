@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <algorithm>
+#include <limits>
 
 namespace pulp::signal {
 
@@ -31,6 +32,19 @@ public:
     /// any other mutable control object.
     // Set the smoothing time in seconds and sample rate
     void set_ramp_time(T seconds, T sample_rate) {
+        // Public control inputs can be malformed. Keep the conversion to int
+        // defined and fail closed to the historical one-sample behavior.
+        constexpr int kMaxRampSamples = (std::numeric_limits<int>::max)();
+        const T max_samples = static_cast<T>(kMaxRampSamples);
+        if (!std::isfinite(seconds) || !std::isfinite(sample_rate) ||
+            seconds <= T(0) || sample_rate <= T(0)) {
+            ramp_samples_ = 1;
+            return;
+        }
+        if (seconds > max_samples / sample_rate) {
+            ramp_samples_ = kMaxRampSamples;
+            return;
+        }
         ramp_samples_ = static_cast<int>(seconds * sample_rate);
         if (ramp_samples_ < 1) ramp_samples_ = 1;
     }
