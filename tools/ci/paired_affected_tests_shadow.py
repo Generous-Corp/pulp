@@ -152,31 +152,49 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--tree", default="")
     args = ap.parse_args(argv)
 
+    selected_plan: dict[str, Any]
     try:
         selected_plan = json.loads(args.selection.read_text(encoding="utf-8"))
-        selected_cmd = json.loads(args.selected_command.read_text(encoding="utf-8"))
-        full_cmd = json.loads(args.full_command.read_text(encoding="utf-8"))
-        if not all(isinstance(x, list) and all(isinstance(y, str) for y in x) for x in (selected_cmd, full_cmd)):
-            raise ValueError("commands must be JSON arrays of strings")
         if not isinstance(selected_plan, dict):
             raise ValueError("selection must be a JSON object")
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         selected_plan = {"tests": [], "selection_error": str(exc)}
-        selected_cmd, full_cmd = [], []
+
+    def load_command(path: Path, name: str) -> tuple[list[str], str | None]:
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(value, list) or not all(isinstance(x, str) for x in value):
+                raise ValueError(f"{name} command must be a JSON array of strings")
+            return value, None
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            return [], f"{name} command unavailable: {exc}"
+
+    selected_cmd, selected_command_error = load_command(args.selected_command, "selected")
+    full_cmd, full_command_error = load_command(args.full_command, "full")
 
     if args.selected_timeout_seconds <= 0:
         selected_plan["selection_error"] = "selected timeout must be positive"
         selected_cmd = []
+        selected_command_error = "selected timeout must be positive"
+    selected_cwd = args.selected_cwd
+    full_cwd = args.full_cwd
     try:
         selected_cwd = args.selected_cwd.resolve()
         full_cwd = args.full_cwd.resolve()
         if selected_cwd == full_cwd:
             raise ValueError("selected and full working directories must be different")
-        if not selected_cwd.is_dir() or not full_cwd.is_dir():
-            raise ValueError("selected and full working directories must already exist")
     except (OSError, ValueError) as exc:
         selected_plan["selection_error"] = str(exc)
-        selected_cmd, full_cmd = [], []
+        selected_cmd = []
+        selected_command_error = str(exc)
+
+    if not selected_cwd.is_dir():
+        selected_plan["selection_error"] = "selected working directory must already exist"
+        selected_cmd = []
+        selected_command_error = "selected working directory must already exist"
+    if not full_cwd.is_dir():
+        full_cmd = []
+        full_command_error = "full working directory must already exist"
 
     work = args.receipt_out.parent
     work.mkdir(parents=True, exist_ok=True)
@@ -186,9 +204,9 @@ def main(argv: list[str] | None = None) -> int:
     # have isolated working directories and output.  Monitor the selected child
     # while full runs so a hung selector cannot hold the shadow job forever.
     selected_started = time.monotonic()
-    selected_child, selected_stream, selected_error = _popen(selected_cmd, work / "selected.log", selected_cwd) if selected_cmd else (None, None, "selection command unavailable")
+    selected_child, selected_stream, selected_error = _popen(selected_cmd, work / "selected.log", selected_cwd) if selected_cmd else (None, None, selected_command_error or "selection command unavailable")
     full_started = time.monotonic()
-    full_child, full_stream, full_error = _popen(full_cmd, work / "full.log", full_cwd) if full_cmd else (None, None, "full command unavailable")
+    full_child, full_stream, full_error = _popen(full_cmd, work / "full.log", full_cwd) if full_cmd else (None, None, full_command_error or "full command unavailable")
     selected_timed_out = False
     selected_termination = None
     selected_rc: int | None = None
@@ -201,6 +219,11 @@ def main(argv: list[str] | None = None) -> int:
                 selected_timed_out = True
                 selected_termination = _terminate(selected_child)
                 selected_rc = selected_child.returncode
+                if selected_rc is None:
+                    # Do not let a broken wait/kill path wedge the observer.
+                    # The termination status remains in the receipt, while
+                    # 124 is the conventional bounded-timeout sentinel.
+                    selected_rc = 124
         if full_child is not None and full_rc is None:
             full_rc = full_child.poll()
         if (selected_child is None or selected_rc is not None) and (full_child is None or full_rc is not None):
