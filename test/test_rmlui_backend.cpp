@@ -227,16 +227,38 @@ TEST_CASE("RmlUi backend routes host pointer and wheel events") {
 TEST_CASE("RmlUi backend admits custom RCSS and element extensions before documents") {
     Headless headless;
     Backend backend(headless, headless, headless, nullptr, &headless);
-    REQUIRE(backend.register_custom_property({"items-per-column", "16", "number", false}) ==
-            Status::ok);
-    REQUIRE(backend.register_element_instancer({"combo"}) == Status::ok);
+    const std::array<CustomPropertyRegistration, 15> properties{{
+        {"isToggle", "1", "number", false},
+        {"valueOn", "1", "number", false},
+        {"valueOff", "-1", "number", false},
+        {"frames", "128", "number", false},
+        {"speed", "0.01", "number", false},
+        {"spriteprefix", "frame", "string", false},
+        {"speedScaleShift", "0.1", "number", false},
+        {"speedScaleCtrl", "0.2", "number", false},
+        {"speedScaleAlt", "0.5", "number", false},
+        {"items-per-column", "16", "number", false},
+        {"indent-margin-left", "0", "length", false},
+        {"indent-padding-left", "0", "length", false},
+        {"stroke-width", "2dp", "length", false},
+        {"stroke-outline-width", "0dp", "length", false},
+        {"stroke-outline-color", "#000000", "color", false},
+    }};
+    for (const auto& property : properties)
+        REQUIRE(backend.register_custom_property(property) == Status::ok);
+    const std::array<std::string_view, 12> instancers{{
+        "button", "canvas", "combo", "knob", "list", "listentry",
+        "splitter", "strokes", "tree", "treenode", "buttonhittest", "combotext",
+    }};
+    for (const auto name : instancers)
+        REQUIRE(backend.register_element_instancer({std::string(name)}) == Status::ok);
     REQUIRE(backend.register_element_instancer({"combo"}) == Status::rejected);
     REQUIRE(backend.open(64, 64) == Status::ok);
-    REQUIRE(headless.custom_properties().size() == 1);
-    REQUIRE(headless.custom_properties().front().name == "items-per-column");
-    REQUIRE(headless.custom_properties().front().parser == "number");
-    REQUIRE(headless.element_instancers().size() == 1);
-    REQUIRE(headless.element_instancers().front().name == "combo");
+    REQUIRE(headless.custom_properties().size() == properties.size());
+    REQUIRE(headless.custom_properties()[9].name == "items-per-column");
+    REQUIRE(headless.custom_properties()[9].parser == "number");
+    REQUIRE(headless.element_instancers().size() == instancers.size());
+    REQUIRE(headless.element_instancers()[2].name == "combo");
     REQUIRE(backend.register_custom_property({"late", "1", "number", false}) ==
             Status::rejected);
     backend.close();
