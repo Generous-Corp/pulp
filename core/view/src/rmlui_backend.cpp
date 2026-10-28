@@ -16,6 +16,7 @@
 #include <optional>
 #include <string>
 #include <type_traits>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -339,6 +340,11 @@ struct Backend::Runtime {
 #endif
     Rml::Context* context = nullptr;
     Rml::ElementDocument* document = nullptr;
+    struct ModelBinding {
+        std::shared_ptr<ModelHost> host;
+        Rml::DataModelHandle handle;
+    };
+    std::unordered_map<std::string, ModelBinding> models;
     bool initialised = false;
     std::string context_name;
     bool active = false;
@@ -583,6 +589,85 @@ Status Backend::load_font_face(std::string_view path, std::string_view family,
         runtime_->font_storage.pop_back();
     return loaded ? Status::ok : Status::rejected;
 #endif
+}
+
+Status Backend::bind_model(std::string_view name, std::shared_ptr<ModelHost> host,
+                           std::vector<std::string> fields) {
+    if (!open_ || !runtime_ || !runtime_->context)
+        return Status::not_open;
+    if (name.empty() || !host || fields.empty() || runtime_->models.contains(std::string(name)))
+        return Status::rejected;
+    std::sort(fields.begin(), fields.end());
+    if (std::adjacent_find(fields.begin(), fields.end()) != fields.end())
+        return Status::rejected;
+    for (const auto& field : fields)
+        if (field.empty()) return Status::rejected;
+
+    auto constructor = runtime_->context->CreateDataModel(Rml::String(name));
+    if (!constructor)
+        return Status::rejected;
+    for (const auto& field : fields) {
+        const auto field_name = Rml::String(field);
+        const auto getter_host = host;
+        const auto setter_host = host;
+        if (!constructor.BindFunc(
+                field_name,
+                [getter_host, field](Rml::Variant& value) {
+                    ModelValue model_value;
+                    if (getter_host->read(field, model_value) != Status::ok)
+                        return;
+                    switch (model_value.kind) {
+                    case ModelValue::Kind::number:
+                        value = model_value.number;
+                        break;
+                    case ModelValue::Kind::boolean:
+                        value = model_value.boolean;
+                        break;
+                    case ModelValue::Kind::string:
+                        value = Rml::String(model_value.string);
+                        break;
+                    }
+                },
+                [setter_host, field](const Rml::Variant& value) {
+                    ModelValue model_value;
+                    switch (value.GetType()) {
+                    case Rml::Variant::BOOL:
+                        model_value = ModelValue::boolean_value(value.Get<bool>());
+                        break;
+                    case Rml::Variant::STRING:
+                        model_value = ModelValue::string_value(value.Get<Rml::String>());
+                        break;
+                    case Rml::Variant::BYTE:
+                    case Rml::Variant::CHAR:
+                    case Rml::Variant::FLOAT:
+                    case Rml::Variant::DOUBLE:
+                    case Rml::Variant::INT:
+                    case Rml::Variant::INT64:
+                    case Rml::Variant::UINT:
+                    case Rml::Variant::UINT64:
+                        model_value = ModelValue::number_value(value.Get<double>());
+                        break;
+                    default:
+                        return;
+                    }
+                    (void)setter_host->write(field, model_value);
+                }))
+            return Status::rejected;
+    }
+    runtime_->models.emplace(std::string(name),
+                             Runtime::ModelBinding{std::move(host),
+                                                   constructor.GetModelHandle()});
+    return Status::ok;
+}
+
+Status Backend::dirty_model(std::string_view name, std::string_view field) {
+    if (!open_ || !runtime_ || !runtime_->context)
+        return Status::not_open;
+    const auto it = runtime_->models.find(std::string(name));
+    if (it == runtime_->models.end() || field.empty())
+        return Status::rejected;
+    it->second.handle.DirtyVariable(Rml::String(field));
+    return Status::ok;
 }
 
 Status Backend::dispatch_lua(std::string_view callback) {
