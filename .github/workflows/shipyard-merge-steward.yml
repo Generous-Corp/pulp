@@ -65,6 +65,8 @@ jobs:
 
       - name: Install pinned Shipyard
         id: install
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           ./tools/install-shipyard.sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
