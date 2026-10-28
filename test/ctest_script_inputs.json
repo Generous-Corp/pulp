@@ -7552,6 +7552,15 @@
    ],
    "kind": "python"
   },
+  "paired-affected-tests-shadow-selftest": {
+   "entry": "tools/ci/test_paired_affected_tests_shadow.py",
+   "inputs": [
+    "tools/ci/paired_affected_tests_shadow.py",
+    "tools/ci/test_paired_affected_tests_shadow.py",
+    "tools/scripts/process_liveness.py"
+   ],
+   "kind": "python"
+  },
   "palette-health-selftest": {
    "entry": "tools/import-validation/test_check_palette_health.py",
    "inputs": [
