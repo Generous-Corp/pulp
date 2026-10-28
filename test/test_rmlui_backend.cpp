@@ -84,7 +84,8 @@ TEST_CASE("RmlUi backend parses and lowers a document through the Pulp renderer 
 
 TEST_CASE("RmlUi backend binds and dirties a typed product model") {
     Headless headless;
-    headless.add_asset("editor.rml", "<rml><body><div>{part.gain}</div></body></rml>");
+    headless.add_asset("editor.rml", "<rml><body><div style='display:block;width:120px;height:40px;"
+                                     "background-color:#204060;'>{part.gain}</div></body></rml>");
     Backend backend(headless, headless, headless);
     auto model = std::make_shared<TestModel>();
 
