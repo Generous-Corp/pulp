@@ -92,6 +92,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/diffusion_network.hpp": "Pulp::signal",
     "pulp/signal/spectral_cross_synthesis.hpp": "Pulp::signal",
     "pulp/signal/fm_operator_engine.hpp": "Pulp::signal",
+    "pulp/signal/gain.hpp": "Pulp::signal",
     "pulp/signal/fir_design.hpp": "Pulp::signal",
     "pulp/signal/fractional_delay.hpp": "Pulp::signal",
     "pulp/signal/tempo_delay_wrapper.hpp": "Pulp::signal",
@@ -1365,6 +1366,17 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "aliased identity. It is the playback engine's own control object; its "
             "agent-facing exposure is claimed by the capability rows that bind a "
             "transport surface, not by this header."
+        ),
+    },
+    {
+        "include": "pulp/signal/gain.hpp",
+        "fingerprint": "sha256:54651b70d3f4f19684907be44323e35fd4d726d7e9795b04c07eda1b79aab503",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "GainT is a composable signal processor used by plugins and graph nodes; "
+            "its optional smoothing API is implementation infrastructure rather than "
+            "an independently advertised generator-facing capability."
         ),
     },
     {
