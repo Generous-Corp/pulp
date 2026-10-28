@@ -26,6 +26,7 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "workflow-lint.yml"
 ACTIONLINT_CONFIG = REPO_ROOT / ".github" / "actionlint.yaml"
+STEWARD_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "shipyard-merge-steward.yml"
 
 
 def _workflow_text() -> str:
@@ -309,6 +310,15 @@ class ActionMajorPinTests(unittest.TestCase):
             1,
             f"actions/setup-python is pinned to more than one major: {majors}",
         )
+
+    def test_merge_steward_is_a_scheduled_queue_feeder(self) -> None:
+        text = STEWARD_WORKFLOW.read_text(encoding="utf-8")
+        document = yaml.load(text, Loader=yaml.BaseLoader)
+        self.assertEqual(document["on"]["schedule"][0]["cron"], "*/10 * * * *")
+        self.assertIn("github.event_name == 'schedule' || inputs.apply", text)
+        self.assertIn("inputs.dispatch_recovery && steps.recovery_plan.outcome", text)
+        self.assertIn('"shipyard-merge-steward.yml", "cadence_minutes": 10',
+                      (REPO_ROOT / ".github" / "schedule-backstop.json").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
