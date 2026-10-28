@@ -36,8 +36,8 @@ public:
         // defined and fail closed to the historical one-sample behavior.
         constexpr int kMaxRampSamples = (std::numeric_limits<int>::max)();
         const T max_samples = static_cast<T>(kMaxRampSamples);
-        if (!std::isfinite(seconds) || !std::isfinite(sample_rate) ||
-            seconds <= T(0) || sample_rate <= T(0)) {
+        if (!std::isfinite(seconds) || !std::isfinite(sample_rate) || seconds <= T(0) ||
+            sample_rate <= T(0)) {
             ramp_samples_ = 1;
             return;
         }

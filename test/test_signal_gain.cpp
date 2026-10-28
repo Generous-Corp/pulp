@@ -28,7 +28,6 @@ TEST_CASE("Gain setters remain immediate before ramp opt-in", "[signal][gain]") 
     REQUIRE_THAT(gain.process(0.5f), Catch::Matchers::WithinAbs(1.0f, 1.0e-5f));
 }
 
-
 TEST_CASE("Gain ramp rejects non-finite and invalid timing inputs", "[signal][gain][robustness]") {
     for (const float seconds : {0.0f, -1.0f, std::numeric_limits<float>::quiet_NaN(),
                                 std::numeric_limits<float>::infinity()}) {
