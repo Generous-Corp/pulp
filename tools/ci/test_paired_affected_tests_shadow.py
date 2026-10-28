@@ -23,11 +23,11 @@ class PairedShadowTests(unittest.TestCase):
             selected_junit = root / "selected.xml"
             full_junit = root / "full.xml"
             xml = '<testsuite><testcase name="selected"/><testcase name="outside"><failure>boom</failure></testcase></testsuite>'
-            write = f"from pathlib import Path; Path({str(full_junit)!r}).write_text({xml!r})"
-            selected_junit.write_text('<testsuite><testcase name="selected"/></testsuite>')
-            (root / "selection.json").write_text(json.dumps({"tests": ["selected"]}))
-            (root / "selected.json").write_text(json.dumps(command("pass")))
-            (root / "full.json").write_text(json.dumps(command(write)))
+            write = f"from pathlib import Path; Path({str(full_junit)!r}).write_text({xml!r}, encoding=\'utf-8\')"
+            selected_junit.write_text('<testsuite><testcase name="selected"/></testsuite>', encoding="utf-8")
+            (root / "selection.json").write_text(json.dumps({"tests": ["selected"]}), encoding="utf-8")
+            (root / "selected.json").write_text(json.dumps(command("pass")), encoding="utf-8")
+            (root / "full.json").write_text(json.dumps(command(write)), encoding="utf-8")
             out = root / "receipt.json"
             proc = subprocess.run([sys.executable, str(HERE / "paired_affected_tests_shadow.py"),
                                    "--selected-command", str(root / "selected.json"),
@@ -36,9 +36,9 @@ class PairedShadowTests(unittest.TestCase):
                                    "--selection", str(root / "selection.json"), "--receipt-out", str(out),
                                    "--repository", "O/R", "--event", "merge_group",
                                    "--base", "base", "--head", "head", "--tree", "tree"],
-                                  capture_output=True, text=True, check=False)
+                                  capture_output=True, text=True, encoding="utf-8", check=False)
             self.assertEqual(proc.returncode, 0, proc.stderr)
-            receipt = json.loads(out.read_text())
+            receipt = json.loads(out.read_text(encoding="utf-8"))
             self.assertTrue(receipt["shadow_only"])
             self.assertEqual(receipt["full_outcome"], "success")
             self.assertEqual(receipt["failed_outside_selection"], ["outside"])
@@ -50,17 +50,17 @@ class PairedShadowTests(unittest.TestCase):
             root = Path(temp)
             for name, value in (("selected.json", [sys.executable, "-c", "raise SystemExit(3)"]),
                                 ("full.json", [sys.executable, "-c", "raise SystemExit(7)"])):
-                (root / name).write_text(json.dumps(value))
-            (root / "selection.json").write_text(json.dumps({"tests": []}))
+                (root / name).write_text(json.dumps(value), encoding="utf-8")
+            (root / "selection.json").write_text(json.dumps({"tests": []}), encoding="utf-8")
             out = root / "receipt.json"
             proc = subprocess.run([sys.executable, str(HERE / "paired_affected_tests_shadow.py"),
                                    "--selected-command", str(root / "selected.json"),
                                    "--full-command", str(root / "full.json"),
                                    "--selected-junit", str(root / "s.xml"), "--full-junit", str(root / "f.xml"),
                                    "--selection", str(root / "selection.json"), "--receipt-out", str(out)],
-                                  capture_output=True, text=True, check=False)
+                                  capture_output=True, text=True, encoding="utf-8", check=False)
             self.assertEqual(proc.returncode, 0)
-            receipt = json.loads(out.read_text())
+            receipt = json.loads(out.read_text(encoding="utf-8"))
             self.assertEqual(receipt["full_outcome"], "failure")
             self.assertFalse(receipt["identity_complete"])
             self.assertEqual(receipt["selected_process"]["returncode"], 3)

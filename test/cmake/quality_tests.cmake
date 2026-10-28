@@ -914,6 +914,7 @@ if(Python3_Interpreter_FOUND)
         set_tests_properties(merge-group-shadows-selftest PROPERTIES TIMEOUT 180)
         # Paired affected-test shadow runner: selected execution is concurrent
         # with, and never authoritative over, the full merge-group command.
+        # script-inputs: not-gated advisory fixture test uses only temporary inputs
         add_test(NAME paired-affected-tests-shadow-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_paired_affected_tests_shadow.py")
         set_tests_properties(paired-affected-tests-shadow-selftest PROPERTIES TIMEOUT 120)
