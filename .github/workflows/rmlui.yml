@@ -9,6 +9,8 @@ on:
       - "tools/cmake/PulpConfig.cmake.in"
       - "tools/cmake/PulpDependencies.cmake"
       - "tools/cmake/PulpInstallRules.cmake"
+      - "tools/deps/manifest.json"
+      - "tools/ci/dependency_pin_map.json"
       - "test/cmake/rmlui_*.cmake"
       - "test/test_rmlui_*.cpp"
       - "DEPENDENCIES.md"
@@ -59,9 +61,9 @@ jobs:
           # pulls in thousands of unrelated targets and can exhaust the job
           # timeout before the RmlUi contract is exercised.
           tools/ci/governed-build.sh cmake --build build-rmlui \
-            --target pulp-test-rmlui-backend rmlui_debugger pulp-rmlui-sdk-closure
+            --target pulp-test-rmlui-backend pulp-rmlui-sdk-closure
 
       - name: Run RmlUi backend and installed SDK consumer tests
         run: |
           ctest --test-dir build-rmlui -C Release --output-on-failure \
-            -R '^(RmlUi backend|RmlUi font|headless RmlUi|rooted RmlUi|cmake-rmlui-sdk-consumer)'
+            -R '^(RmlUi backend|RmlUi core|RmlUi font|headless RmlUi|rooted RmlUi|cmake-rmlui-sdk-consumer)'
