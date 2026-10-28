@@ -155,6 +155,18 @@ class Label : public View, public SelectableText {
     float letter_spacing() const { return letter_spacing_; }
     bool has_own_letter_spacing() const { return has_own_letter_spacing_; }
 
+    /// CSS `-webkit-font-smoothing` this text was authored with. `antialiased`
+    /// paints it unhinted; see canvas::Canvas::set_font_smoothing.
+    void set_font_smoothing(canvas::FontSmoothing smoothing) {
+        if (font_smoothing_ == smoothing)
+            return;
+        font_smoothing_ = smoothing;
+        request_repaint();
+    }
+    canvas::FontSmoothing font_smoothing() const {
+        return font_smoothing_;
+    }
+
     void set_line_height(float lh) {
         if (line_height_ == lh)
             return;
@@ -630,6 +642,7 @@ private:
     int font_weight_ = 400;       ///< 400=normal, 700=bold
     int font_style_ = 0;          ///< 0=normal, 1=italic, 2=oblique
     float letter_spacing_ = 0;    ///< Extra spacing between characters (px)
+    canvas::FontSmoothing font_smoothing_ = canvas::FontSmoothing::auto_smoothing;
     float line_height_ = 0;       ///< 0=auto (font_size * 1.4)
     LabelAlign text_align_ = LabelAlign::left;
     bool multi_line_ = false;

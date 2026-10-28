@@ -60,6 +60,10 @@ namespace pulp::signal {
 
 namespace detail {
 
+inline constexpr bool is_power_of_two(int value) noexcept {
+    return value > 0 && (value & (value - 1)) == 0;
+}
+
 inline constexpr std::size_t fft_twiddle_index(int phase_index, int stride) noexcept {
     const auto index = static_cast<std::size_t>(phase_index);
     const auto step = static_cast<std::size_t>(stride);
@@ -226,6 +230,14 @@ public:
     }
 
     explicit FftT(int size) : size_(size) {
+        // Every implementation below is radix-2, including vDSP and muFFT.
+        // Reject invalid geometry before allocating twiddles or backend
+        // storage; otherwise a non-power-of-two size can report ready() and
+        // silently run a truncated log2 transform.
+        if (!detail::is_power_of_two(size)) {
+            size_ = 0;
+            return;
+        }
 #if PULP_FFT_HAS_VDSP
         // Use vDSP for FFT — much faster for large sizes
         if constexpr (std::is_same_v<SampleType, float>) {

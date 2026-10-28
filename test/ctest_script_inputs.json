@@ -262,6 +262,7 @@
    "data": "declared",
    "detected_sources": [
     "test/test_browser_capture_backdrop_filter.cpp",
+    "test/test_browser_capture_font_smoothing.cpp",
     "test/test_browser_capture_gradient_border.cpp",
     "test/test_browser_capture_group_opacity.cpp",
     "test/test_browser_capture_ir.cpp",
@@ -277,6 +278,7 @@
    "kind": "compiled",
    "sources": [
     "test/test_browser_capture_backdrop_filter.cpp",
+    "test/test_browser_capture_font_smoothing.cpp",
     "test/test_browser_capture_gradient_border.cpp",
     "test/test_browser_capture_group_opacity.cpp",
     "test/test_browser_capture_ir.cpp",
@@ -2764,6 +2766,9 @@
   "pulp-test-fdn-reverb",
   "pulp-test-fdn-reverb-catalog",
   "pulp-test-fdn-reverb-portable-lanes",
+  "pulp-test-fft-backend-accuracy",
+  "pulp-test-fft-backend-accuracy-builtin",
+  "pulp-test-fft-backend-accuracy-mufft",
   "pulp-test-fir-filter",
   "pulp-test-fixture-runner-cli",
   "pulp-test-foreign-framework-coexistence",
@@ -3212,6 +3217,7 @@
   "pulp-test-web-gpu-convolver",
   "pulp-test-webgpu-mock-buffer",
   "pulp-test-webgpu-native-draw",
+  "pulp-test-webview-backend-platform",
   "pulp-test-widget-bridge-api-contracts",
   "pulp-test-widget-bridge-no-gpu-gates",
   "pulp-test-windowing",
@@ -3354,6 +3360,7 @@
    "entry": "tools/scripts/test_agent_capability_manifest.py",
    "inputs": [
     ".github/workflows",
+    ".github/workflows/auto-release.yml",
     "core/audio/include/pulp/audio",
     "core/host/include",
     "core/midi/include/pulp/midi",
@@ -6847,6 +6854,13 @@
    ],
    "kind": "python"
   },
+  "import-design-ir-observe-font-smoothing-label": {
+   "entry": "test/test_design_ir_observe_font_smoothing_label.py",
+   "inputs": [
+    "test/test_design_ir_observe_font_smoothing_label.py"
+   ],
+   "kind": "python"
+  },
   "import-design-ir-observe-gpu": {
    "entry": "test/test_design_ir_observe_gpu.py",
    "inputs": [
@@ -7061,6 +7075,15 @@
     "tools/import-design/browser_capture/form_control_theme.mjs",
     "tools/import-design/browser_capture_controls.cpp",
     "tools/import-validation/schemas"
+   ],
+   "kind": "python"
+  },
+  "importer-lab-capture-scale": {
+   "entry": "test/test_importer_lab_capture_scale.py",
+   "inputs": [
+    "test/fixtures/import-differential/01-basic-card.html",
+    "test/test_importer_lab_capture_scale.py",
+    "tools/import-validation/importer_differential_lab.py"
    ],
    "kind": "python"
   },
@@ -7464,6 +7487,14 @@
    "inputs": [
     "tools/scripts/nm_symbols.py",
     "tools/scripts/test_nm_symbols.py"
+   ],
+   "kind": "python"
+  },
+  "nonuniform-head-table": {
+   "entry": "tools/scripts/nonuniform_head_check.py",
+   "inputs": [
+    "core/signal/include/pulp/signal/convolver_non_uniform.hpp",
+    "tools/scripts/nonuniform_head_check.py"
    ],
    "kind": "python"
   },
@@ -13084,8 +13115,12 @@
    "entry": "tools/scripts/test_version_at_land.py",
    "inputs": [
     ".github/workflows",
+    "docs/status/agent-capabilities.json",
+    "docs/status/agent-capability-surface.json",
     "docs/status/gpu-vellum-handoff.yaml",
     "docs/status/pulp-tooling-disposition.json",
+    "tools/agent-capabilities/contract-history.json",
+    "tools/scripts/agent_capability_manifest.py",
     "tools/scripts/build_migration_index.py",
     "tools/scripts/connected_git_history.py",
     "tools/scripts/fold_migration_notes.py",

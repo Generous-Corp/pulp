@@ -19,6 +19,13 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PULP_ROOT="$(dirname "$SCRIPT_DIR")"
 SKIA_BUILDER_DIR="$PULP_ROOT/external/skia-builder"
 SKIA_BUILD_OUTPUT="$PULP_ROOT/external/skia-build"
+# The source fallback publishes into the checkout-owned tree. A symlink here
+# could redirect the publish (and its cleanup) into an immutable shared cache.
+if [ -L "$SKIA_BUILD_OUTPUT" ]; then
+    echo "ERROR: refusing to publish source-built Skia through symlink $SKIA_BUILD_OUTPUT" >&2
+    echo "Use a real checkout-owned external/skia-build directory; shared caches are fetcher-owned." >&2
+    exit 1
+fi
 # Reproducible fallbacks default to the immutable revisions recorded beside the
 # release assets. Explicit overrides remain available for builder development.
 MANIFEST="$PULP_ROOT/tools/deps/manifest.json"
@@ -202,6 +209,12 @@ mv "$stage_dir" "$PUBLISH_DIR"
 if [ -n "$retired_dir" ]; then
     rm -rf "$retired_dir"
 fi
+# This tree is source-built, not a fetched release asset. Remove fetcher's
+# legacy provenance files so a later fetch cannot treat these bytes as a warm
+# verified archive generation.
+rm -f "$SKIA_BUILD_OUTPUT/.skia-asset-sha256" \
+      "$SKIA_BUILD_OUTPUT/.skia-generation-manifest.json" \
+      "$SKIA_BUILD_OUTPUT/.skia-source-archive.zip"
 trap - EXIT
 
 echo ""

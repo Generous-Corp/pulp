@@ -8,6 +8,7 @@
 #include <optional>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -33,6 +34,12 @@ void write_file(const fs::path& path, const std::string& text) {
     REQUIRE(out);
     out << text;
     REQUIRE(out.good());
+}
+
+std::string read_file(const fs::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    REQUIRE(in);
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
 }
 
 local_sdk::Identity identity(std::string sha = std::string(40, 'a')) {
@@ -77,7 +84,8 @@ void plant_install(const fs::path& prefix, const fs::path& build,
                                          "PULP_HAS_AUSDK:INTERNAL=TRUE\n"
                                          "PULP_HAS_CLAP:INTERNAL=TRUE\n"
                                          "PULP_ENABLE_AUDIO_PROBES:BOOL=OFF\n"
-                                         "PULP_ENABLE_INSPECTOR:BOOL=OFF\n");
+                                         "PULP_ENABLE_INSPECTOR:BOOL=OFF\n"
+                                         "PULP_DEV_BRIDGE_EXEC:BOOL=OFF\n");
 }
 
 } // namespace
@@ -150,6 +158,7 @@ TEST_CASE("forge development SDK configure profile pins required capabilities",
     REQUIRE(contains("-DPULP_BUILD_WEBVIEW=ON"));
     REQUIRE(contains("-DPULP_ENABLE_AUDIO_PROBES=OFF"));
     REQUIRE(contains("-DPULP_ENABLE_INSPECTOR=OFF"));
+    REQUIRE(contains("-DPULP_DEV_BRIDGE_EXEC=OFF"));
     REQUIRE(contains("-DPULP_BUILD_TESTS=OFF"));
     REQUIRE(contains("-DPULP_BUILD_EXAMPLES=OFF"));
     REQUIRE(contains("-DCMAKE_INSTALL_PREFIX=/stage with spaces"));
@@ -261,12 +270,52 @@ TEST_CASE("forge development SDK provenance is explicitly non-distributable",
     REQUIRE(json.find("\"source_git_dirty\": false") != std::string::npos);
     REQUIRE(json.find("\"architectures\": [\"arm64\"]") != std::string::npos);
     REQUIRE(json.find("\"webview\": true") != std::string::npos);
+    REQUIRE(json.find("\"bridge_exec\": false") != std::string::npos);
     REQUIRE(json.find(tmp.path.string()) == std::string::npos);
 
     std::string error;
     REQUIRE(local_sdk::write_file_atomically(prefix / "sdk-provenance.json", json, error));
     REQUIRE(error.empty());
     REQUIRE(local_sdk::validate_published_install(prefix, expected).ok);
+}
+
+TEST_CASE("forge development SDK validation rejects a shell exec bridge in the archive",
+          "[cli][sdk][forge-dev]") {
+    TempDir tmp;
+    const auto expected = identity();
+    const auto prefix = tmp.path / "prefix";
+    const auto build = tmp.path / "build";
+    plant_install(prefix, build, expected);
+    const auto bridge_error = [](const local_sdk::Validation& v) {
+        return std::find_if(v.errors.begin(), v.errors.end(), [](const std::string& e) {
+                   return e.find("shell exec/execAsync JS bridge") != std::string::npos;
+               }) != v.errors.end();
+    };
+
+    // Control: the planted cache says OFF, so nothing below fails for another reason.
+    REQUIRE(
+        local_sdk::validate_staged_install(prefix, build, expected, "/source/external/skia-build")
+            .ok);
+
+    auto cache = read_file(build / "CMakeCache.txt");
+    const auto off = cache.find("PULP_DEV_BRIDGE_EXEC:BOOL=OFF\n");
+    REQUIRE(off != std::string::npos);
+
+    // ON: the archive would carry exec/execAsync while provenance promises it does not.
+    auto on = cache;
+    on.replace(off, std::string("PULP_DEV_BRIDGE_EXEC:BOOL=OFF\n").size(),
+               "PULP_DEV_BRIDGE_EXEC:BOOL=ON\n");
+    write_file(build / "CMakeCache.txt", on);
+    REQUIRE(bridge_error(local_sdk::validate_staged_install(prefix, build, expected,
+                                                            "/source/external/skia-build")));
+
+    // Absent: a source tree that predates the option compiled the bridge in
+    // unconditionally, so a missing key is not evidence of absence.
+    auto absent = cache;
+    absent.erase(off, std::string("PULP_DEV_BRIDGE_EXEC:BOOL=OFF\n").size());
+    write_file(build / "CMakeCache.txt", absent);
+    REQUIRE(bridge_error(local_sdk::validate_staged_install(prefix, build, expected,
+                                                            "/source/external/skia-build")));
 }
 
 TEST_CASE("forge development SDK provenance rejects a different source commit",
@@ -300,21 +349,21 @@ local_sdk::Identity trace_identity() {
 // the runtime archive carries the retained ship sentinel that
 // `core/runtime/src/trace.cpp` emits only under PULP_TRACING.
 void plant_tracing_evidence(const fs::path& prefix, const fs::path& build) {
-    auto cache = std::string(
-        "CMAKE_BUILD_TYPE:STRING=Release\n"
-        "CMAKE_OSX_ARCHITECTURES:STRING=arm64\n"
-        "CMAKE_OSX_DEPLOYMENT_TARGET:STRING=13.4\n"
-        "SKIA_DIR:PATH=/source/external/skia-build\n"
-        "PULP_ENABLE_GPU:BOOL=ON\n"
-        "PULP_HAS_SKIA:INTERNAL=TRUE\n"
-        "PULP_ENABLE_DESIGN_IMPORT:BOOL=ON\n"
-        "PULP_BUILD_WEBVIEW:BOOL=ON\n"
-        "PULP_HAS_VST3:INTERNAL=TRUE\n"
-        "PULP_HAS_AUSDK:INTERNAL=TRUE\n"
-        "PULP_HAS_CLAP:INTERNAL=TRUE\n"
-        "PULP_ENABLE_AUDIO_PROBES:BOOL=OFF\n"
-        "PULP_ENABLE_INSPECTOR:BOOL=OFF\n"
-        "PULP_TRACING:BOOL=ON\n");
+    auto cache = std::string("CMAKE_BUILD_TYPE:STRING=Release\n"
+                             "CMAKE_OSX_ARCHITECTURES:STRING=arm64\n"
+                             "CMAKE_OSX_DEPLOYMENT_TARGET:STRING=13.4\n"
+                             "SKIA_DIR:PATH=/source/external/skia-build\n"
+                             "PULP_ENABLE_GPU:BOOL=ON\n"
+                             "PULP_HAS_SKIA:INTERNAL=TRUE\n"
+                             "PULP_ENABLE_DESIGN_IMPORT:BOOL=ON\n"
+                             "PULP_BUILD_WEBVIEW:BOOL=ON\n"
+                             "PULP_HAS_VST3:INTERNAL=TRUE\n"
+                             "PULP_HAS_AUSDK:INTERNAL=TRUE\n"
+                             "PULP_HAS_CLAP:INTERNAL=TRUE\n"
+                             "PULP_ENABLE_AUDIO_PROBES:BOOL=OFF\n"
+                             "PULP_ENABLE_INSPECTOR:BOOL=OFF\n"
+                             "PULP_DEV_BRIDGE_EXEC:BOOL=OFF\n"
+                             "PULP_TRACING:BOOL=ON\n");
     write_file(build / "CMakeCache.txt", cache);
     write_file(prefix / "lib/cmake/Pulp/PulpTargets.cmake",
                "Pulp::format Pulp::standalone Pulp::render Pulp::clap Pulp::vst3-sdk "

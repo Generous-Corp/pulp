@@ -184,6 +184,16 @@ set_tests_properties(cmake-js-engine-selection PROPERTIES
     LABELS "cmake;view;js-engine"
     TIMEOUT 30)
 
+# AUv3 entitlement templates render per engine under `cmake -P`: QuickJS gets
+# no JIT or library-validation entitlement, V8/JSC get allow-jit only, and
+# allow-unsigned-executable-memory never appears.
+add_test(NAME cmake-auv3-entitlements
+    COMMAND ${CMAKE_COMMAND} -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_auv3_entitlements.cmake)
+set_tests_properties(cmake-auv3-entitlements PROPERTIES
+    LABELS "cmake;auv3;entitlements;security"
+    TIMEOUT 30)
+
 # A sealed V8 provider's manifest consumer_defines reach v8::v8, and a manifest
 # that cannot supply them fails configure. Each case configures a throwaway
 # LANGUAGES NONE project against the real FindV8.cmake and a fixture provider,
@@ -1147,6 +1157,11 @@ if(UNIX)
     add_test(NAME pulp-coverage-instrumentation-flags
         COMMAND ${CMAKE_COMMAND} -P ${CMAKE_SOURCE_DIR}/tools/cmake/test_pulp_instrumentation_flags.cmake)
     set_tests_properties(pulp-coverage-instrumentation-flags PROPERTIES TIMEOUT 60)
+    # WindowsApp also imports the OS icu.dll; as a link input it collides with
+    # Skia's bundled ICU under lld-link, so it must stay a default library.
+    add_test(NAME pulp-midi-windows-link-libs
+        COMMAND ${CMAKE_COMMAND} -P ${CMAKE_SOURCE_DIR}/tools/cmake/test_midi_windows_link_libs.cmake)
+    set_tests_properties(pulp-midi-windows-link-libs PROPERTIES TIMEOUT 60)
     # Fail at CONFIGURE if the script is not where the registration says.
     # A wrong path here does not fail configure on its own -- it produces
     # `***Failed 0.00 sec  No such file or directory` at run time, which reads

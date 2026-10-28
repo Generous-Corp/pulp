@@ -590,6 +590,14 @@ the shared contract in
 - [`content`](../content/SKILL.md) — data-only packs (presets/samples) → an installed plugin
 - [`installable-tools`](../installable-tools/SKILL.md) — machine-level dev/agent tooling under `~/.pulp/tools/`, plus the shared validate-and-uninstall-from-outside-a-checkout bar
 
+## Realtime FFT dependency boundary
+
+Pulp's optional muFFT backend is a pinned, MIT-licensed FetchContent dependency
+used by `FftT` on non-Apple targets. Its C shim and plans preserve the
+audio-thread allocation contract: admission accounts for the largest single
+backend allocation, and Apple continues to use byte-identical vDSP admission.
+muFFT's own FFTW-linked benchmark and test targets are never built or shipped.
+
 ## JS-engine attribution in the dependency inventory
 
 `DEPENDENCIES.md`, `NOTICE.md`, and `tools/deps/manifest.json` describe which JS

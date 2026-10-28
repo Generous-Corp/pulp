@@ -168,12 +168,23 @@ elseif(WIN32)
     target_link_libraries(pulp-midi PRIVATE
         winmm
         # WinRT activation + COM apartment for the BLE advertisement watcher.
-        # WindowsApp is the desktop umbrella import lib (init_apartment,
-        # activation factories, event tokens); runtimeobject provides the
-        # WinRT/COM runtime helpers. Both ship with the base Windows SDK.
-        WindowsApp
+        # runtimeobject provides the WinRT/COM runtime helpers; WindowsApp is
+        # added below. Both ship with the base Windows SDK.
         runtimeobject
     )
+    # WindowsApp is the desktop umbrella import lib (init_apartment,
+    # activation factories, event tokens). It also imports the OS icu.dll, so
+    # as an ordinary link input it can win ICU symbols such as ures_getByKey
+    # ahead of Skia's bundled ICU (skunicode_icu), and lld-link then rejects
+    # the second definition when a Skia ICU object is pulled in anyway. A
+    # default library is searched only after every library named on the
+    # command line, so Skia's ICU always resolves first and WindowsApp supplies
+    # only what nothing else defines.
+    if(MSVC)
+        target_link_options(pulp-midi INTERFACE "/DEFAULTLIB:WindowsApp.lib")
+    else()
+        target_link_libraries(pulp-midi PRIVATE WindowsApp)
+    endif()
     # Opt-in WinRT MIDI 2.0 (UMP) backend — Windows MIDI Services SDK.
     #
     # Enable with -DPULP_HAS_WINRT_MIDI=ON. The backend consumes the
@@ -234,7 +245,12 @@ elseif(WIN32)
             endif()
             target_include_directories(pulp-midi PRIVATE
                 "${PULP_WINRT_MIDI_INCLUDE}")
-            target_link_libraries(pulp-midi PRIVATE WindowsApp runtimeobject)
+            # WindowsApp is already a default library on MSVC-style linkers
+            # (see the BLE block above).
+            target_link_libraries(pulp-midi PRIVATE runtimeobject)
+            if(NOT MSVC)
+                target_link_libraries(pulp-midi PRIVATE WindowsApp)
+            endif()
             message(STATUS
                 "Pulp: WinRT MIDI 2.0 backend enabled "
                 "(manual projection: ${PULP_WINRT_MIDI_INCLUDE})")

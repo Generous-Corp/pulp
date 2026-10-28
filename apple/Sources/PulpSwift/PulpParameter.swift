@@ -13,20 +13,45 @@ public final class PulpParameter: ObservableObject, Identifiable {
     public let maxValue: Float
     public let defaultValue: Float
     public let step: Float
+    /// Whether no plugin owns this parameter: the stand-in a design-only
+    /// control is drawn with. It holds a value and never reads or writes the
+    /// host's parameter store.
+    public let isDetached: Bool
 
     @Published public var value: Float {
         didSet {
-            pulp_param_set(id, value)
+            if !isDetached { pulp_param_set(id, value) }
         }
     }
 
     @Published public var normalizedValue: Float {
         didSet {
-            pulp_param_set_normalized(id, normalizedValue)
+            if !isDetached { pulp_param_set_normalized(id, normalizedValue) }
         }
     }
 
+    /// A parameter no plugin owns, drawn at `normalizedValue` (0...1). An
+    /// imported control the design does not bind renders with one, so it keeps
+    /// its widget and look without driving anything.
+    public static func detached(name: String, normalizedValue: Float = 0) -> PulpParameter {
+        PulpParameter(detachedName: name, normalizedValue: min(max(normalizedValue, 0), 1))
+    }
+
+    private init(detachedName: String, normalizedValue: Float) {
+        self.id = 0
+        self.name = detachedName
+        self.unit = ""
+        self.minValue = 0
+        self.maxValue = 1
+        self.defaultValue = normalizedValue
+        self.step = 0
+        self.isDetached = true
+        self.value = normalizedValue
+        self.normalizedValue = normalizedValue
+    }
+
     init(info: PulpParamInfo) {
+        self.isDetached = false
         self.id = info.id
         self.name = String(cString: info.name ?? pulpEmptyCString)
         self.unit = String(cString: info.unit ?? pulpEmptyCString)
@@ -40,16 +65,21 @@ public final class PulpParameter: ObservableObject, Identifiable {
 
     /// Begin a gesture (for undo grouping in the host).
     public func beginGesture() {
-        pulp_param_begin_gesture(id)
+        if !isDetached { pulp_param_begin_gesture(id) }
     }
 
     /// End a gesture.
     public func endGesture() {
-        pulp_param_end_gesture(id)
+        if !isDetached { pulp_param_end_gesture(id) }
     }
 
     /// Reset to default value.
     public func reset() {
+        guard !isDetached else {
+            value = defaultValue
+            normalizedValue = defaultValue
+            return
+        }
         pulp_param_reset(id)
         value = pulp_param_get(id)
         normalizedValue = pulp_param_get_normalized(id)
@@ -57,6 +87,7 @@ public final class PulpParameter: ObservableObject, Identifiable {
 
     /// Sync from the C++ store (call periodically to detect host automation).
     public func poll() {
+        guard !isDetached else { return }
         let current = pulp_param_get(id)
         if abs(current - value) > 1e-7 {
             value = current

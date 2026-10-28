@@ -345,6 +345,27 @@ elseif(WIN32)
         list(APPEND _compiler_hints "${_compiler_dir}")
     endif()
     find_program(_pulp_dumpbin NAMES dumpbin.exe dumpbin HINTS ${_compiler_hints})
+    # dumpbin sits beside cl.exe, so the compiler hint finds it for MSVC. A
+    # clang-cl build outside a Developer Prompt has neither it nor dumpbin's
+    # directory on PATH (clang-cl lives in LLVM's bin), so ask the Visual Studio
+    # installer where the MSVC tools are.
+    if(NOT _pulp_dumpbin)
+        set(_pulp_vswhere "$ENV{ProgramFiles\(x86\)}/Microsoft Visual Studio/Installer/vswhere.exe")
+        if(EXISTS "${_pulp_vswhere}")
+            execute_process(COMMAND "${_pulp_vswhere}" -latest -products *
+                    -find "VC/Tools/MSVC/**/bin/Host*/*/dumpbin.exe"
+                RESULT_VARIABLE _vswhere_result OUTPUT_VARIABLE _vswhere_output
+                ERROR_QUIET)
+            if(_vswhere_result EQUAL 0)
+                string(REPLACE "\r" "" _vswhere_output "${_vswhere_output}")
+                string(REPLACE "\n" ";" _vswhere_found "${_vswhere_output}")
+                list(FILTER _vswhere_found INCLUDE REGEX "dumpbin\\.exe$")
+                if(_vswhere_found)
+                    list(GET _vswhere_found 0 _pulp_dumpbin)
+                endif()
+            endif()
+        endif()
+    endif()
     if(_pulp_dumpbin)
         execute_process(COMMAND "${_pulp_dumpbin}" /DEPENDENTS "${ARTIFACT}"
             RESULT_VARIABLE _dependency_result OUTPUT_VARIABLE _dependency_output

@@ -26,6 +26,7 @@
 #include "design_import_native_common.hpp"
 #include "design_ir_helpers.hpp"
 #include "design_binding_metadata.hpp"
+#include "design_cpp_binding_codegen.hpp"
 
 #include <algorithm>
 #include <array>
@@ -477,15 +478,23 @@ void push_fidelity(const SwiftEmitCtx& ctx, const IRNode& node,
 // The string the generated control resolves against PulpParameter.name. B1's
 // convention is an exact match on the runtime parameter's *display name*, so we
 // use the widget's display label — the audio label (e.g. "Gain") or, lacking
-// one, the node name. We deliberately do NOT use pulpParamKey here: that is the
-// design tool's *canonical* key (e.g. "filter.cutoff_hz"), a different concept
-// from ParamInfo's human-readable `name`, and would systematically miss. The
-// canonical key is preserved as metadata in the binding manifest for B4, which
-// will add a real key→parameter resolver. Until then a name mismatch surfaces
-// as a visible missing/duplicate placeholder, never a silent mis-bind.
+// one, the node name. pulpParamKey is the design tool's *canonical* key (e.g.
+// "filter.cutoff_hz"), a different concept from ParamInfo's human-readable
+// `name`, so it is only the last resort: a keyed, routed control with neither
+// label nor name (a captured fader often has none) would otherwise bind in
+// every lane except this one. A key-only meter (pulpMeterValueKey, no source or
+// channel) falls back to that key the same way: it names what the meter shows,
+// as the bridge's bindMeter(id, key) resolves it. A name mismatch still surfaces
+// as a visible missing/duplicate placeholder, never a silent mis-bind; B4's
+// key→parameter resolver retires the guess.
 std::string binding_resolve_name(const IRNode& node) {
     if (!node.audio_label.empty()) return node.audio_label;
-    return node.name;
+    if (!node.name.empty())
+        return node.name;
+    const auto md = NativeBindingMetadata::parse(node);
+    if (md.param_key && !md.param_key->empty())
+        return *md.param_key;
+    return md.meter_value_key.value_or(std::string{});
 }
 
 bool is_bound_widget(NativeWidgetKind kind) {
@@ -559,50 +568,71 @@ void report_captured_raster_fidelity(const SwiftEmitCtx& ctx,
 
 // Emit a bound control as an inline `switch` over the resolver result so a
 // missing or duplicate parameter is visible rather than silently mis-bound.
+// `key` empty emits the control inert: the same widget and look, drawn at the
+// value native shows it at, on a detached parameter that drives nothing and
+// takes no input. That is what the native lane materializes for a control it
+// does not bind, so a design-only import keeps its controls.
 void emit_bound_control(std::ostringstream& out, const SwiftEmitCtx& ctx,
                         NativeWidgetKind kind, const IRNode& node,
                         const std::string& key, int depth) {
     const int s = ctx.opts.indent_spaces;
+    const bool inert = key.empty();
+    const std::string p =
+        inert ? ".detached(name: " +
+                    swift_string_literal(node.audio_label.empty() ? node.name : node.audio_label) +
+                    ", normalizedValue: " + format_float(normalized_audio_value(node)) + ")"
+              : "p";
     std::string control;
     switch (kind) {
         case NativeWidgetKind::knob: {
             float size = 60.0f;
             if (node.style.width) size = *node.style.width;
             else if (node.style.height) size = *node.style.height;
-            control = "PulpKnob(parameter: p, size: " + format_float(size) + ")";
+            control = "PulpKnob(parameter: " + p + ", size: " + format_float(size) + ")";
             break;
         }
         case NativeWidgetKind::fader:
-            control = "PulpSlider(parameter: p)";
+            control = "PulpSlider(parameter: " + p + ")";
             break;
         case NativeWidgetKind::toggle_button:
         case NativeWidgetKind::checkbox:
-            control = "PulpToggle(parameter: p)";
+            control = "PulpToggle(parameter: " + p + ")";
             break;
         case NativeWidgetKind::meter:
-            control = "PulpMeter(parameter: p)";
+            control = "PulpMeter(parameter: " + p + ")";
             break;
         case NativeWidgetKind::xy_pad:
-            control = "PulpXYPad(parameter: p)";
-            push_fidelity(ctx, node, "swiftui-xypad-single-axis",
-                          "xy_pad binds its X axis to the one parameter the IR carries; "
-                          "the Y axis is unbound visual state", /*informational=*/true);
+            control = "PulpXYPad(parameter: " + p + ")";
+            if (!inert)
+                push_fidelity(ctx, node, "swiftui-xypad-single-axis",
+                              "xy_pad binds its X axis to the one parameter the IR carries; "
+                              "the Y axis is unbound visual state",
+                              /*informational=*/true);
             break;
         case NativeWidgetKind::waveform:
-            control = "PulpWaveform(parameter: p)";
-            push_fidelity(ctx, node, "swiftui-static-visualizer",
-                          "waveform has no audio buffer in a baked import; rendered as a "
-                          "static shape scaled by the bound parameter", /*informational=*/true);
+            control = "PulpWaveform(parameter: " + p + ")";
+            if (!inert)
+                push_fidelity(ctx, node, "swiftui-static-visualizer",
+                              "waveform has no audio buffer in a baked import; rendered as a "
+                              "static shape scaled by the bound parameter",
+                              /*informational=*/true);
             break;
         case NativeWidgetKind::spectrum:
-            control = "PulpSpectrum(parameter: p)";
-            push_fidelity(ctx, node, "swiftui-static-visualizer",
-                          "spectrum has no audio buffer in a baked import; rendered as a "
-                          "static shape scaled by the bound parameter", /*informational=*/true);
+            control = "PulpSpectrum(parameter: " + p + ")";
+            if (!inert)
+                push_fidelity(ctx, node, "swiftui-static-visualizer",
+                              "spectrum has no audio buffer in a baked import; rendered as a "
+                              "static shape scaled by the bound parameter",
+                              /*informational=*/true);
             break;
         default:
             control = "EmptyView()";
             break;
+    }
+    if (inert) {
+        emit_line(out, depth, s, control);
+        emit_line(out, depth + 1, s, ".allowsHitTesting(false)");
+        return;
     }
     const std::string lit = swift_string_literal(key);
     emit_line(out, depth, s, "switch resolver.resolveParameter(named: " + lit + ") {");
@@ -1585,18 +1615,29 @@ void emit_node(std::ostringstream& out, const SwiftEmitCtx& ctx,
         return;
     }
 
-    // Bound audio controls (knob/slider/toggle).
+    // Audio controls. A control binds only when its metadata would install a
+    // binding in the native and baked C++ lanes too (`binding_route_installable`);
+    // one resolved by its display label alone would bind controls the other
+    // lanes leave unbound, and a renamed label would silently rebind it. Every
+    // other control is still drawn, inert, the way native draws it.
+    //
+    // A refused binding reports the native binder's own code, at the native
+    // binder's weight: informational, because native logs it as a warning and
+    // still imports, so it must not fail a strict-fidelity export either. A
+    // control with no binding metadata at all reports nothing, as in native:
+    // there is nothing to refuse, and a design-only import is not an error.
     if (is_bound_widget(kind)) {
-        const std::string key = binding_resolve_name(node);
-        if (key.empty()) {
-            if (ctx.opts.include_comments)
-                emit_line(out, depth, s, "// unbound " + std::string(native_widget_kind_name(kind))
-                                              + " (no param key)");
-            emit_line(out, depth, s,
-                      "Text(\"⚠︎ unbound " + std::string(native_widget_kind_name(kind)) + "\")");
-            emit_line(out, depth + 1, s, ".font(.caption).foregroundColor(.orange)");
-            return;
+        const auto md = NativeBindingMetadata::parse(node);
+        const bool installable = binding_route_installable(node, kind, md);
+        const std::string key = installable ? binding_resolve_name(node) : std::string{};
+        if (!installable) {
+            if (const auto refusal = binding_refusal(node, kind, md))
+                push_fidelity(ctx, node, refusal->code, refusal->message, /*informational=*/true);
         }
+        if (key.empty() && ctx.opts.include_comments)
+            emit_line(out, depth, s,
+                      "// unbound " + std::string(native_widget_kind_name(kind)) +
+                          ": drawn inert, not wired to a parameter");
         emit_bound_control(out, ctx, kind, node, key, depth);
         return;
     }
@@ -1841,8 +1882,9 @@ std::string emit_view(const DesignIR& ir, const ResolvedNativeNode& resolved,
 // (B1's exact-`PulpParameter.name` strategy — Pulp's state model has no stable
 // string key, so bound controls resolve by display name). An entry is emitted
 // for any node the C++ manifest would include (carries `pulp*` binding
-// metadata) OR any resolvable bound widget — the union gives the host both the
-// full contract and the name-resolution pre-flight. The field set is asserted
+// metadata); only a control whose metadata would install a binding in the
+// native and C++ lanes (`binding_route_installable`) is marked bound and gets
+// the name-resolution block. The field set is asserted
 // to match the C++ manifest by a cross-check test (test_design_swift_codegen).
 
 // The same manifest-eligibility predicate the C++ path uses (the `pulp*`
@@ -1882,7 +1924,10 @@ struct SwiftBindingEntry {
 
 void collect_swift_bindings(const IRNode& node, const ResolvedNativeNode& resolved,
                             std::string_view ir_path, std::vector<SwiftBindingEntry>& out) {
-    const bool bound = is_bound_widget(resolved.kind) && !binding_resolve_name(node).empty();
+    const bool bound =
+        is_bound_widget(resolved.kind) &&
+        binding_route_installable(node, resolved.kind, NativeBindingMetadata::parse(node)) &&
+        !binding_resolve_name(node).empty();
     if (bound || swift_node_has_binding_metadata(node))
         out.push_back({std::string(ir_path), &node, resolved.kind, bound});
     const std::size_t count = std::min(node.children.size(), resolved.children.size());

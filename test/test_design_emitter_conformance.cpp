@@ -453,13 +453,21 @@ Projection swift_lane(const DesignIR& ir) {
     const auto entries = manifest["entries"];
     for (uint32_t i = 0; i < entries.size(); ++i) {
         const auto e = entries[i];
+        // The manifest also lists a control's binding contract when SwiftUI
+        // does not bind it; only an entry with a resolution block is bound.
+        if (!e.hasObjectMember("resolve_name"))
+            continue;
         const std::string anchor(e["anchor_id"].toString());
         const std::string family(e["source_family"].toString());
+        // A meter projects the key it reads, as the native lane records it,
+        // whether the manifest marks it a meter by source family or only by
+        // its primitive (a key-only meter carries no family).
+        const bool meter = family == "meter" || e["native_primitive"].toString() == "meter";
         std::string binding =
-            family == "meter" ? "meter:" + meter_key(std::string(e["meter_value_key"].toString()),
-                                                     std::string(e["meter_source"].toString()),
-                                                     std::string(e["meter_channel"].toString()))
-                              : "param:" + std::string(e["param_key"].toString());
+            meter ? "meter:" + meter_key(std::string(e["meter_value_key"].toString()),
+                                         std::string(e["meter_source"].toString()),
+                                         std::string(e["meter_channel"].toString()))
+                  : "param:" + std::string(e["param_key"].toString());
         auto& value = out[anchor]["binding"];
         value += (value.empty() ? "" : " ") + binding;
     }

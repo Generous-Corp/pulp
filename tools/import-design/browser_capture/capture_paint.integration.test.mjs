@@ -52,6 +52,40 @@ test("indicator-free capture removes only declared moving art",
     }
   });
 
+// The capture emulates its DPR, and Chrome composites a backdrop-filter at
+// the browser's own device scale. With the two disagreeing, a frosted box over
+// fine lines came back with unblurred streaks of them; a plain screenshot of
+// the same page at the same scale is one even colour across the box.
+test("a frosted box captures blurred evenly at the capture scale",
+  { timeout: captureCaseTimeout() }, async (context) => {
+    const browser = await installedBrowser();
+    if (!browser) return context.skip("no compatible system browser is installed");
+    const root = await mkdtemp(path.join(os.tmpdir(), "pulp-browser-backdrop-"));
+    const input = path.join(root, "panel.html");
+    const output = path.join(root, "capture");
+    const script = fileURLToPath(new URL("./capture.mjs", import.meta.url));
+    try {
+      const lines = Array.from({ length: 12 }, (_, i) =>
+        `<div class="grid" style="left:${5 + i * 10}px"></div>`).join("");
+      await writeFile(input, `<!doctype html><style>
+        html,body{margin:0;width:120px;height:80px;background:#0b0f14}
+        .grid{position:absolute;top:0;width:1px;height:80px;background:#8090a0}
+        .frost{position:absolute;left:20px;top:10px;width:80px;height:60px;
+          background:rgba(12,16,22,.5);backdrop-filter:blur(8px)}
+      </style>${lines}<div class="frost"></div>`);
+      await runCapture(script, browser, input, root, output, 120, 80);
+      const png = await readFile(path.join(output, "browser.png"));
+      // Device pixels of the box at DPR 2, every 8th one in each direction.
+      const reds = [];
+      for (let y = 20; y < 140; y += 8)
+        for (let x = 40; x < 200; x += 8) reds.push(rgbaPixel(png, x, y)[0]);
+      assert.ok(Math.max(...reds) - Math.min(...reds) <= 2,
+        `the blurred box is one colour, red ${Math.min(...reds)}..${Math.max(...reds)}`);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
 // The UA canvas follows the root's used color-scheme, set by CSS or by a
 // color-scheme meta tag; the capture records the colour Chromium resolved,
 // and it must be the colour Chromium painted outside every box.

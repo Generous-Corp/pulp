@@ -9,6 +9,7 @@
 #include <pulp/canvas/gradient_interpolation.hpp>
 #include <pulp/canvas/path.hpp>
 #include <pulp/canvas/scene_recording.hpp>
+#include <pulp/canvas/text_raster_policy.hpp>
 #include <pulp/canvas/text_utf8.hpp>
 #include <string>
 #include <vector>
@@ -1178,6 +1179,16 @@ public:
                                 int weight, int slant, float letter_spacing) {
         (void)weight; (void)slant; (void)letter_spacing;
         set_font(family, size);
+    }
+
+    /// CSS `-webkit-font-smoothing` for the text drawn and measured after it.
+    /// `antialiased` turns glyph hinting off, which with a `chromium` surface
+    /// (pulp/canvas/text_raster_policy.hpp) reproduces Chromium's
+    /// `antialiased` glyphs; `auto` keeps the default light hinting. Scoped
+    /// by save()/restore() like the clip and matrix. Skia, CoreGraphics and
+    /// RecordingCanvas implement it; the default ignores it.
+    virtual void set_font_smoothing(FontSmoothing smoothing) {
+        (void)smoothing;
     }
 
     // OpenType feature flags for font-variant. Each

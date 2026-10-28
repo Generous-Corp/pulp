@@ -77,7 +77,7 @@ if(PULP_ENABLE_DESIGN_IMPORT)
     list(APPEND PULP_SDK_TARGETS pulp-design-import pulp-design-import-audio-pack)
 endif()
 if(PULP_BUILD_WEBVIEW)
-    list(APPEND PULP_SDK_TARGETS pulp-view-webview)
+    list(APPEND PULP_SDK_TARGETS pulp-view-webview pulp-view-webview-backend)
 endif()
 
 # pulp-signal-fft-backend is the optional multi-backend FFT facade. It's
@@ -767,6 +767,11 @@ if(_pulp_source_install_status STREQUAL "")
 else()
     set(PULP_SOURCE_INSTALL_DIRTY true)
 endif()
+if(PULP_DEV_BRIDGE_EXEC)
+    set(PULP_SOURCE_INSTALL_BRIDGE_EXEC true)
+else()
+    set(PULP_SOURCE_INSTALL_BRIDGE_EXEC false)
+endif()
 # A source-install SDK is intentionally non-distributable, but its target
 # architecture still matters: a native ARM64 archive must never be consumed
 # by an ARM64EC/ARM64X plugin just because both builds run on Windows ARM.
@@ -898,6 +903,8 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPortable.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpBundleRelocatable.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAuv3.cmake"
+    # Included by PulpAuv3.cmake for the per-engine entitlement fragments.
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAuv3Entitlements.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpIosHostApp.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAppTargets.cmake"
     # Included by PulpAppTargets.cmake, so an installed SDK without it fails

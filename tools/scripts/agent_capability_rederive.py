@@ -8,10 +8,14 @@ numbers you reserved, and leave your branch failing `manifest changed without a
 manifest_revision increase` with a conflict on exactly those two constant
 lines.
 
-The recorded fix is to re-read both counters from the current base and
-regenerate rather than resolving that conflict by hand. This performs that,
-deterministically:
+The recorded fix is to merge the current base into the branch, then re-read
+both counters from it and regenerate rather than resolving that conflict by
+hand. This performs the second half, deterministically:
 
+  0. refuse unless the branch contains the protected tip (or is mid-merge
+     with it): a branch behind the base would read every change the base made
+     since the branch point as its own, bump a counter for it, and append a
+     history entry recording the base's material rolled back,
   1. resolve the protected tip (the same resolution `--check` uses),
   2. read its `manifest_revision` / `inventory_version`,
   3. compare this tree's generated material against the base's, counter
@@ -127,6 +131,98 @@ def _merge_head(root: pathlib.Path) -> str | None:
     return first[0] if first else None
 
 
+def _fingerprinted_sources(surface_text: str | None) -> list[str]:
+    """Every header path the protected surface snapshot fingerprints."""
+    try:
+        document = history.json.loads(surface_text or "")
+    except history.json.JSONDecodeError:
+        return []
+    headers = document.get("headers") if isinstance(document, dict) else None
+    return sorted(
+        item["source"]
+        for item in headers or []
+        if isinstance(item, dict) and isinstance(item.get("source"), str)
+    )
+
+
+def _require_base_merged(
+    root: pathlib.Path,
+    comparison: history.GitComparisonProvenance,
+    merge_head: str | None,
+    surface_text: str | None,
+) -> None:
+    """Refuse unless this branch contains the protected base.
+
+    The counters are derived by comparing this tree's generated material with
+    the base's. That comparison only means "what this branch changed" when the
+    branch already has the base. A branch behind it differs from the base in
+    every input the base changed since the branch point, so those changes read
+    as this branch's: the counter is bumped for them, and `--write` appends a
+    history entry recording the base's material rolled back. Merging the base
+    first is the documented workflow; this enforces it. A merge in progress
+    whose incoming commit is the base already has the base in its tree.
+
+    Ancestry, not a per-file comparison, is the test, so it cannot miss an
+    input the fingerprint list does not name. Anything git cannot decide (a
+    shallow clone, a missing object) refuses rather than skipping the check.
+    """
+    tip = comparison.resolved_base_tip
+    if tip is None:
+        raise DeriveError(
+            "the protected base did not resolve to a commit, so this branch "
+            "cannot be shown to contain it; comparison receipt="
+            + history.git_comparison_receipt(comparison)
+        )
+    if merge_head is not None and merge_head == tip:
+        return
+    try:
+        completed = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", tip, "HEAD"],
+            cwd=root, capture_output=True, text=True, encoding="utf-8",
+        )
+    except OSError as error:
+        raise DeriveError(
+            f"could not run git to check that this branch contains the "
+            f"protected base {tip}: {error}"
+        ) from error
+    if completed.returncode == 0:
+        return
+    if completed.returncode != 1:
+        raise DeriveError(
+            f"git could not decide whether this branch contains the protected "
+            f"base {tip} ({completed.stderr.strip() or 'no output'}). A shallow "
+            "clone cannot prove it: fetch the full history, then re-run."
+        )
+    differing: list[str] = []
+    sources = _fingerprinted_sources(surface_text)
+    if sources:
+        diff = subprocess.run(
+            ["git", "diff", "--name-only", tip, "HEAD", "--", *sources],
+            cwd=root, capture_output=True, text=True, encoding="utf-8",
+        )
+        if diff.returncode == 0:
+            differing = [line for line in diff.stdout.splitlines() if line]
+    shallow = history._git_output(root, ["rev-parse", "--is-shallow-repository"])
+    hint = ""
+    if differing:
+        shown = differing[:20]
+        more = len(differing) - len(shown)
+        hint = (
+            "\n  fingerprinted headers that differ from the base (a hint, not "
+            "the whole test):\n    - " + "\n    - ".join(shown)
+            + (f"\n    ... and {more} more" if more > 0 else "")
+        )
+    if shallow == "true":
+        hint += "\n  this is a shallow clone; fetch the full history if the base is merged."
+    raise DeriveError(
+        f"this branch does not contain the protected base {tip}. Deriving "
+        "against it would count every change the base made since the branch "
+        "point as this branch's, and append a history entry that rolls them "
+        "back. Merge origin/main first (`git merge origin/main`), then re-run."
+        + hint
+    )
+
+
 def _resolve_base(
     root: pathlib.Path,
 ) -> tuple[Any, Any, history.GitComparisonProvenance]:
@@ -164,6 +260,7 @@ def _resolve_base(
         )
     manifest_read = history.read_git_path(root, comparison, history.SNAPSHOT)
     surface_read = history.read_git_path(root, comparison, surface.SURFACE_SNAPSHOT)
+    _require_base_merged(root, comparison, merge_head, surface_read.content)
     for item in (manifest_read, surface_read):
         if item.status in {"history_unavailable", "command_failed"}:
             raise DeriveError(

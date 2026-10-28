@@ -678,6 +678,13 @@ if(Python3_Interpreter_FOUND)
             "${CMAKE_SOURCE_DIR}/tools/scripts/convolver_crossover_check.py"
             --repo-root "${CMAKE_SOURCE_DIR}")
     set_tests_properties(convolver-crossover-table PROPERTIES LABELS "signal;convolver;docs")
+    # NonUniformPartitionedConvolver's tail-multiplier table must be the one
+    # its committed receipts give (docs/validation/nonuniform-head/).
+    add_test(NAME nonuniform-head-table
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/nonuniform_head_check.py"
+            --repo-root "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(nonuniform-head-table PROPERTIES LABELS "signal;convolver;docs")
 endif()
 
 # Background-IR-swap tests for PartitionedConvolver. Lock-free

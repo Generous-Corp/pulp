@@ -1543,6 +1543,12 @@ lower_painted_tree(const CapturedStyleIndex& index, double dx, double dy, double
         } else if (is_text) {
             lowered.type = "text";
             lowered.text_content = node.text;
+            // `auto` and `subpixel-antialiased` rasterize alike on macOS, so
+            // only `antialiased` is recorded; a capture without the property
+            // reads as `auto`.
+            if (const auto smoothing = computed.find("-webkit-font-smoothing");
+                smoothing != computed.end() && smoothing->second == "antialiased")
+                lowered.attributes["font_smoothing"] = "antialiased";
             // Chrome's own line breaking, kept BESIDE the paragraph rather than
             // in place of it. The node stays semantic — full text, one style,
             // one box — and a renderer that finds the basis still holding draws
