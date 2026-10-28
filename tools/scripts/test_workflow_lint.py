@@ -316,7 +316,9 @@ class ActionMajorPinTests(unittest.TestCase):
         document = yaml.load(text, Loader=yaml.BaseLoader)
         self.assertEqual(document["on"]["schedule"][0]["cron"], "*/10 * * * *")
         self.assertIn("github.event_name == 'schedule' || inputs.apply", text)
-        self.assertIn("inputs.dispatch_recovery && steps.recovery_plan.outcome", text)
+        self.assertIn("runner steward --repo", text)
+        self.assertIn("--arm-unqueued", text)
+        self.assertNotIn("dispatch_recovery", text)
         self.assertIn('"shipyard-merge-steward.yml", "cadence_minutes": 10',
                       (REPO_ROOT / ".github" / "schedule-backstop.json").read_text(encoding="utf-8"))
 
