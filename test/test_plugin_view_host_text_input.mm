@@ -562,7 +562,7 @@ TEST_CASE("PluginViewHost (mac CPU) — right click routes to the painted overla
 
 #ifdef PULP_HAS_SKIA
 class OrientationProbeView final : public View {
-public:
+  public:
     void paint(pulp::canvas::Canvas& canvas) override {
         // Pulp view coordinates are top-down. The bright band is authored at
         // y=0 and the dark band at the bottom so an embedded presentable
@@ -571,15 +571,13 @@ public:
         canvas.set_fill_color(pulp::canvas::Color::rgba8(246, 210, 70, 255));
         canvas.fill_rect(0.0f, 0.0f, bounds().width, bounds().height * 0.5f);
         canvas.set_fill_color(pulp::canvas::Color::rgba8(24, 28, 42, 255));
-        canvas.fill_rect(0.0f, bounds().height * 0.5f,
-                        bounds().width, bounds().height * 0.5f);
+        canvas.fill_rect(0.0f, bounds().height * 0.5f, bounds().width, bounds().height * 0.5f);
     }
 };
 
-std::pair<uint32_t, uint32_t> orientation_png_dimensions(
-    const std::vector<uint8_t>& png) {
-    if (png.size() < 24 || png[0] != 0x89 || png[1] != 0x50 ||
-        png[2] != 0x4e || png[3] != 0x47) return {};
+std::pair<uint32_t, uint32_t> orientation_png_dimensions(const std::vector<uint8_t>& png) {
+    if (png.size() < 24 || png[0] != 0x89 || png[1] != 0x50 || png[2] != 0x4e || png[3] != 0x47)
+        return {};
     const auto read_be32 = [&](size_t offset) {
         return (static_cast<uint32_t>(png[offset]) << 24u) |
                (static_cast<uint32_t>(png[offset + 1]) << 16u) |
@@ -592,11 +590,10 @@ std::pair<uint32_t, uint32_t> orientation_png_dimensions(
 TEST_CASE("PluginViewHost (mac GPU) preserves top-down presentable orientation",
           "[plugin-view-host][gpu][mac][orientation]") {
     @autoreleasepool {
-        NSWindow* window =
-            [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 240, 120)
-                                        styleMask:NSWindowStyleMaskBorderless
-                                          backing:NSBackingStoreBuffered
-                                            defer:NO];
+        NSWindow* window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 240, 120)
+                                                       styleMask:NSWindowStyleMaskBorderless
+                                                         backing:NSBackingStoreBuffered
+                                                           defer:NO];
         if (!window || !window.contentView)
             SKIP("No Cocoa window — GPU orientation test skipped.");
 
@@ -612,8 +609,7 @@ TEST_CASE("PluginViewHost (mac GPU) preserves top-down presentable orientation",
             return;
         }
         host->attach_to_parent((__bridge void*)window.contentView);
-        [[NSRunLoop currentRunLoop]
-            runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.20]];
+        [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.20]];
 
         const auto png = host->capture_back_buffer_png();
         REQUIRE_FALSE(png.empty());
