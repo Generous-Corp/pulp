@@ -138,7 +138,7 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
         // move_child_to_index only reorders: focus, drag, and popup state in
         // the moved subtree survive.
         const auto place_before = [&self, &beforeId](View* destination, View* view) {
-            if (beforeId.empty() || destination == nullptr)
+            if (destination == nullptr)
                 return;
             const auto slot_of = [destination](View* v) {
                 while (v != nullptr && v->parent() != destination)
@@ -146,6 +146,16 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                 return v;
             };
             View* moving = slot_of(view);
+            if (moving == nullptr)
+                return;
+            // An empty anchor is appendChild's explicit tail position. This
+            // matters for retained scroll wrappers: the wrapper occupies the
+            // native slot, while the authored DOM node may have been moved to
+            // the end after the JS side found no materialized sibling to name.
+            if (beforeId.empty()) {
+                destination->move_child_to_index(moving, destination->child_count());
+                return;
+            }
             View* anchor = slot_of(self.widget(beforeId));
             if (moving == nullptr || anchor == nullptr || moving == anchor)
                 return;

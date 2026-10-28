@@ -261,6 +261,50 @@ TEST_CASE("DOM reorder of a keyed row keeps its widget, focus, and applied style
     CHECK(engine.evaluate("backgroundWrites").getWithDefault<int>(-1) == 0);
 }
 
+TEST_CASE("DOM append moves a retained scroll wrapper to the native tail",
+          "[view][bridge][child-order][web-compat][scroll]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"JS(
+        var list = document.createElement('div');
+        document.body.appendChild(list);
+        var wrapped = document.createElement('div');
+        var tail = document.createElement('div');
+        list.appendChild(wrapped);
+        list.appendChild(tail);
+        var listId = list._id, wrappedId = wrapped._id, tailId = tail._id;
+    )JS");
+
+    const auto list_id = engine.evaluate("listId").toString();
+    const auto wrapped_id = engine.evaluate("wrappedId").toString();
+    const auto tail_id = engine.evaluate("tailId").toString();
+    auto* list = bridge.widget(list_id);
+    REQUIRE(list != nullptr);
+    auto* wrapped = bridge.widget(wrapped_id);
+    REQUIRE(wrapped != nullptr);
+    auto* tail = bridge.widget(tail_id);
+    REQUIRE(tail != nullptr);
+
+    // Upgrade the authored child to the retained scroll-wrapper form.
+    // Move it to the front first so the later append has a visible tail move.
+    engine.evaluate("__domAppend(listId, wrappedId, 'div', 'scroll')");
+    bridge.load_script("insertChild(listId, wrappedId, 0);");
+    auto* wrapper = bridge.scroll_wrapper(wrapped_id);
+    REQUIRE(wrapper != nullptr);
+    REQUIRE(static_cast<const void*>(list->child_at(0)) == static_cast<const void*>(wrapper));
+    REQUIRE(list->child_at(1) == tail);
+
+    // No following materialized sibling exists after appendChild, so the JS
+    // bridge passes an empty nativeBefore. The wrapper must still move to the
+    // tail rather than remaining in its old slot.
+    bridge.load_script("list.appendChild(wrapped);");
+    CHECK(list->child_at(0) == tail);
+    CHECK(static_cast<const void*>(list->child_at(1)) == static_cast<const void*>(wrapper));
+}
+
 TEST_CASE("View reorders a child without running the attach lifecycle",
           "[view][child-order]") {
     View parent;
