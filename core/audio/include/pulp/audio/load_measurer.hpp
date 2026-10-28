@@ -294,6 +294,7 @@ public:
             std::uint64_t frequency = 0;
             asm volatile("mrs %0, cntfrq_el0" : "=r"(frequency));
             std::uint64_t ticks = 0;
+            asm volatile("isb" ::: "memory");
             asm volatile("mrs %0, cntvct_el0" : "=r"(ticks));
             if (frequency == 0)
                 return time_point{};
