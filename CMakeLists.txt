@@ -77,6 +77,26 @@ elseif(UNIX)
     set(PULP_PLATFORM "linux")
 endif()
 
+# ARM64EC is a mixed-ABI target: every translation unit, including C-only
+# FetchContent dependencies such as Brotli and miniz, must be compiled with
+# the EC code-generation switch.  Relying on the C++ flags alone leaves those
+# archives as native ARM64 and produces unresolved EC thunk symbols when a
+# plugin links them.  Keep the correction at the project boundary so all
+# dependencies inherit the same ABI.
+if(WIN32 AND
+   (CMAKE_GENERATOR_PLATFORM MATCHES "^(ARM64EC|ARM64X)$" OR
+    CMAKE_CXX_FLAGS MATCHES "ARM64EC|arm64EC" OR
+    CMAKE_CXX_COMPILER_ARCHITECTURE_ID MATCHES "^ARM64EC$"))
+    foreach(_pulp_ec_flag_var CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
+        if(NOT "${${_pulp_ec_flag_var}}" MATCHES "(^|[ ;])/arm64EC([ ;]|$)")
+            string(APPEND ${_pulp_ec_flag_var} " /arm64EC")
+            set(${_pulp_ec_flag_var} "${${_pulp_ec_flag_var}}" CACHE STRING
+                "ARM64EC compile flags" FORCE)
+        endif()
+    endforeach()
+    unset(_pulp_ec_flag_var)
+endif()
+
 message(STATUS "Pulp ${PROJECT_VERSION} — platform: ${PULP_PLATFORM}")
 
 # ── Options ─────────────────────────────────────────────────────────────────
