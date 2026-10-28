@@ -358,7 +358,9 @@ void ContextMenu::paint(canvas::Canvas& canvas) {
             const auto selected = std::min(it.choice_index, it.choices.size() - 1);
             canvas.set_text_align(canvas::TextAlign::right);
             canvas.set_fill_color(
-                i == hover_index_ && it.enabled ? canvas::Color::rgba8(255, 255, 255) : text_dim);
+                i == hover_index_ && it.enabled
+                    ? canvas::Color::rgba8(255, 255, 255)
+                    : text_dim); // token-lint:allow -- hovered choice value uses the same white highlight as stock menu text
             canvas.fill_text(it.choices[selected], row.x + row.width - 10, iy + rh * 0.5f + 4.0f);
             canvas.set_text_align(canvas::TextAlign::left);
         }
