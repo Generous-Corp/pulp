@@ -10,8 +10,6 @@
 #include <climits>
 #include <cstddef>
 #include <cstdint>
-#include <fstream>
-#include <iterator>
 #include <limits>
 #include <list>
 #include <memory>
@@ -24,6 +22,9 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#else
+#define NOMINMAX
+#include <windows.h>
 #endif
 
 namespace pulp::view::rmlui {
@@ -441,19 +442,43 @@ Status RootedAssetProvider::load(std::string_view path, Asset& out) {
     }
     ::close(fd);
 #else
-    // Windows has no POSIX descriptor API. Keep the same bounded-read
-    // contract here; the canonical path check above and the final digest bind
-    // the bytes to the admitted manifest entry.
-    std::ifstream stream(candidate, std::ios::binary);
-    if (!stream)
-        return Status::missing_asset;
-    bytes.resize(static_cast<std::size_t>(size));
-    stream.read(bytes.data(), static_cast<std::streamsize>(bytes.size()));
-    if (stream.gcount() != static_cast<std::streamsize>(bytes.size()))
-        return Status::rejected;
-    char extra = 0;
-    if (stream.read(&extra, 1) || stream.gcount() != 0)
-        bytes.push_back(extra);
+    // Open the final path as a handle with reparse-point traversal disabled.
+    // The handle pins the object for the bounded read, matching the POSIX
+    // descriptor path above and preventing a check-then-open replacement race.
+    const auto native_path = candidate.native();
+    const HANDLE handle =
+        ::CreateFileW(native_path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                      FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    if (handle == INVALID_HANDLE_VALUE)
+        return ::GetLastError() == ERROR_FILE_NOT_FOUND ? Status::missing_asset : Status::rejected;
+    BY_HANDLE_FILE_INFORMATION information{};
+    const bool info_ok = ::GetFileInformationByHandle(handle, &information) != 0;
+    const bool regular = info_ok && !(information.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT);
+    const std::uint64_t opened_size =
+        (static_cast<std::uint64_t>(information.nFileSizeHigh) << 32) | information.nFileSizeLow;
+    if (!regular || opened_size > max_bytes_) {
+        ::CloseHandle(handle);
+        return regular && opened_size > max_bytes_ ? Status::rejected : Status::missing_asset;
+    }
+    const auto bounded_limit =
+        max_bytes_ == std::numeric_limits<std::size_t>::max() ? max_bytes_ : max_bytes_ + 1;
+    bytes.reserve(static_cast<std::size_t>(opened_size));
+    std::array<char, 8192> chunk{};
+    while (bytes.size() <= max_bytes_) {
+        const auto remaining = bounded_limit - bytes.size();
+        if (remaining == 0)
+            break;
+        const auto want = static_cast<DWORD>(std::min<std::size_t>(chunk.size(), remaining));
+        DWORD count = 0;
+        if (!::ReadFile(handle, chunk.data(), want, &count, nullptr)) {
+            ::CloseHandle(handle);
+            return Status::rejected;
+        }
+        if (count == 0)
+            break;
+        bytes.append(chunk.data(), count);
+    }
+    ::CloseHandle(handle);
 #endif
     if (bytes.size() != size || pulp::runtime::sha256_hex(bytes) != manifest->sha256)
         return Status::rejected;
