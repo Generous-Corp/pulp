@@ -83,9 +83,10 @@ struct FftRealSplit;
 inline constexpr std::uint64_t kVdspFftSetupChargeBytesPerPoint = 64;
 
 /// Floats a float FftT's vDSP split buffer holds beyond its two N-point
-/// halves: up to 15 to reach a 64-byte boundary plus a 4-float (16-byte)
-/// step off it, which is how the halves' placement is pinned (see FftT).
-inline constexpr std::uint64_t kVdspSplitPaddingFloats = 20;
+/// halves: up to 15 to reach a 64-byte boundary, a 4-float (16-byte) step off
+/// it, and a 64-float (256-byte) gap between the halves, which is how their
+/// placement is pinned (see FftT).
+inline constexpr std::uint64_t kVdspSplitPaddingFloats = 84;
 
 template <typename SampleType>
 inline bool checked_fft_platform_setup_bytes(std::uint64_t fft_size,
@@ -305,6 +306,24 @@ public:
         }
 #endif
         return true;
+    }
+
+    /// Floats between the end of the real half and the start of the
+    /// imaginary half the vDSP transforms use (64 for every ready float
+    /// transform; see the placement note on the split storage), or -1 when
+    /// this transform does not use vDSP.
+    [[nodiscard]] int vdsp_split_plane_gap_floats(bool real_transform) const noexcept {
+#if PULP_FFT_HAS_VDSP
+        if constexpr (std::is_same_v<SampleType, float>) {
+            if (!ready())
+                return -1;
+            const DSPSplitComplex z = real_transform ? real_split() : split();
+            const int half = real_transform ? size_ / 2 : size_;
+            return static_cast<int>(z.imagp - z.realp) - half;
+        }
+#endif
+        static_cast<void>(real_transform);
+        return -1;
     }
 
     /// Byte offset past a 64-byte boundary of the real and imaginary halves
@@ -597,25 +616,43 @@ public:
     //
     // Separate allocations made the same transform's speed and error depend
     // on where the buffers happened to land.
+    //
+    // The imaginary half starts 64 floats (256 bytes) after the real half
+    // ends, not directly after it. Directly after puts the halves a power of
+    // two apart, and once that distance reaches 64 KB (complex transforms
+    // from 16384 points, real ones from 32768, whose halves are N/2 long)
+    // the two streams contend and the transform slows sharply. With the gap,
+    // forward transforms take 0.53-0.87x the time on M5 Max and 0.46-0.78x on
+    // M1 Max at complex 16384-131072 and real 32768-131072 points (paired,
+    // interleaved; loaded), the complex inverse 0.48-0.88x, with the error
+    // unchanged in every cell. Smaller transforms are unaffected (0.92-1.11x,
+    // within noise). The gap is a whole number of 64-byte lines, so both
+    // halves keep the 16-byte offset above.
     mutable std::vector<float> split_;
     std::size_t split_base_ = 0;
-    static constexpr std::size_t kVdspSplitOffsetFloats = 4; // 16 bytes
-    static_assert(kVdspSplitPaddingFloats >= 64 / sizeof(float) - 1 + kVdspSplitOffsetFloats,
-                  "split padding must cover the 64-byte alignment slack plus the 16-byte step");
+    static constexpr std::size_t kVdspSplitOffsetFloats = 4;    // 16 bytes
+    static constexpr std::size_t kVdspSplitPlaneGapFloats = 64; // 256 bytes
+    static_assert(kVdspSplitPlaneGapFloats % (64 / sizeof(float)) == 0,
+                  "the plane gap must be whole 64-byte lines to keep both halves' offset");
+    static_assert(kVdspSplitPaddingFloats >=
+                      64 / sizeof(float) - 1 + kVdspSplitOffsetFloats + kVdspSplitPlaneGapFloats,
+                  "split padding must cover the 64-byte alignment slack, the 16-byte step "
+                  "and the gap between the halves");
 #endif
 
 #if PULP_FFT_HAS_VDSP
     // N-point halves for complex transforms, each 16 bytes past a 64-byte
-    // boundary (N is a power of two, so the second half keeps the offset).
+    // boundary (N is a power of two and the gap is whole lines, so the second
+    // half keeps the offset), with the plane gap between them.
     DSPSplitComplex split() const {
         float* base = split_.data() + split_base_ + kVdspSplitOffsetFloats;
-        return {base, base + size_};
+        return {base, base + size_ + kVdspSplitPlaneGapFloats};
     }
 
     // N/2-point halves for real transforms, placed like split()'s.
     DSPSplitComplex real_split() const {
         float* base = split_.data() + split_base_ + kVdspSplitOffsetFloats;
-        return {base, base + size_ / 2};
+        return {base, base + size_ / 2 + kVdspSplitPlaneGapFloats};
     }
 
     void forward_vdsp(std::complex<float>* data) const {
