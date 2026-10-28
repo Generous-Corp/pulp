@@ -354,6 +354,23 @@ endif()
 # restores a valid nested-code boundary after staging.
 find_program(_pulp_codesign codesign)
 if(_pulp_codesign)
+    # A reused bundle directory can retain a previously staged dependency
+    # whose load commands no longer appear in the current closure.  It is still
+    # a nested code object and an invalid signature there can kill a host while
+    # the host scans the bundle.  Include every Mach-O sidecar currently in
+    # the managed staging directory, not only the images discovered this pass.
+    file(GLOB _staged_entries LIST_DIRECTORIES FALSE
+        "${PULP_STAGING_DIR}/*")
+    foreach(_staged_entry IN LISTS _staged_entries)
+        execute_process(
+            COMMAND /usr/bin/file -b "${_staged_entry}"
+            OUTPUT_VARIABLE _staged_type
+            ERROR_QUIET)
+        if(_staged_type MATCHES "Mach-O")
+            list(APPEND _runtime_images "${_staged_entry}")
+        endif()
+    endforeach()
+    list(REMOVE_DUPLICATES _runtime_images)
     foreach(_runtime_image IN LISTS _runtime_images)
         if(NOT EXISTS "${_runtime_image}")
             message(FATAL_ERROR
