@@ -11,6 +11,14 @@ description: |
 
 # Update the matched render toolchain
 
+Pulp's signal FFT backend is a separate dependency surface from the Apple
+render toolchain: Apple uses vDSP, while non-Apple builds may use the pinned
+MIT muFFT source. Keep muFFT's exact commit and source-file allowlist in the
+dependency manifest when touching cross-platform build inputs. Its transform
+path is audio-thread code, so the per-allocation admission ceiling is checked
+against the largest single allocation and must not be relaxed to permit
+per-transform allocation.
+
 This procedure expects `ghapp` and `python3`, and operates on
 `tools/deps/manifest.json`, `tools/scripts/fetch_skia_for_release.py`, and
 `tools/scripts/fetch_v8_for_release.py`.
