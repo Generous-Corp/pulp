@@ -45,27 +45,28 @@ using namespace Steinberg::Vst;
 namespace {
 
 // Opt-in diagnostics for a host that stalls while instantiating a VST3. The
-// default path performs no extra logging or clock reads. This is intentionally
-// scoped to the adapter boundary so a diagnostic package can identify whether
-// the host is blocked in initialization, prepare, activation, or view creation
-// without changing the sequencing of those calls.
+// existing process-wide tracing session is the switch and sink, so the default
+// path does no getenv, clock, or logging work of its own.
 class StartupTraceScope {
   public:
     explicit StartupTraceScope(const char* operation)
-        : operation_(operation), start_(std::chrono::steady_clock::now()) {
-        const char* value = std::getenv("PULP_VST3_STARTUP_TRACE");
-        enabled_ = value != nullptr && std::strcmp(value, "0") != 0 && std::strcmp(value, "") != 0;
-        if (enabled_)
+        : operation_(operation), enabled_(runtime::Tracing::active()) {
+        if (enabled_) {
+            start_ = std::chrono::steady_clock::now();
             mark("begin");
+        }
     }
 
     void mark(const char* stage) const {
-        if (!enabled_)
-            return;
-        const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
-                                 std::chrono::steady_clock::now() - start_)
-                                 .count();
-        runtime::log_info("VST3 startup {} {} elapsed_us={}", operation_, stage, elapsed);
+        if constexpr (runtime::kTracingEnabled) {
+            if (!enabled_)
+                return;
+            const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+                                     std::chrono::steady_clock::now() - start_)
+                                     .count();
+            PULP_TRACE_INSTANT_ARGS("lifecycle", "vst3_startup_stage", "operation", operation_,
+                                    "stage", stage, "elapsed_us", elapsed);
+        }
     }
 
     ~StartupTraceScope() {
