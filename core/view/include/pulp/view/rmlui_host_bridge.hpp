@@ -63,8 +63,11 @@ class ProductHost {
 // details and expose only typed lifecycle and product events here. All methods
 // are UI-thread calls and must be serialized by the adapter. Provider calls are
 // synchronous; callback and registration names are copied at the boundary, and
-// provider exceptions are converted to rejected status. close() releases the
-// current graph; a fresh provider set may then be bound and activated.
+// provider exceptions are converted to rejected status. A retained element
+// callback is part of that same UI-thread serialization contract: providers
+// must invoke it on the owning UI thread and must not race close(). close()
+// releases the current graph; a fresh provider set may then be bound and
+// activated.
 class HostBridge final {
   public:
     HostBridge() = default;
