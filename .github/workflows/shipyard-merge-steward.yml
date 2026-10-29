@@ -44,6 +44,7 @@ jobs:
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
           permission-administration: read
+          permission-actions: read
           permission-contents: write
           permission-issues: write
           permission-merge-queues: write
