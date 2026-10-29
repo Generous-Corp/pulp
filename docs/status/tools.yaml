@@ -257,6 +257,16 @@ tools:
   availability: always
   skill: import-design
   docs: guides/importing-designs.md
+- name: illustrator-to-svg
+  path: tools/import-design/illustrator_to_svg.py
+  category: design-import
+  use_when: Convert PDF-compatible Illustrator artwork or a PDF artboard to SVG before validated design import.
+  invocation: python3 tools/import-design/illustrator_to_svg.py [--output <svg>] [--provenance <receipt.json>] [--page <n>] <design.ai|design.pdf>
+  inputs: A PDF-compatible .ai or .pdf artwork file and an executable Poppler pdftocairo converter.
+  outputs: An SVG plus a pulp.illustrator-svg-provenance.v1 JSON receipt containing source/output hashes and converter version.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
 - name: figma-rest-export
   path: tools/import-design/figma_rest_export.py
   category: design-import

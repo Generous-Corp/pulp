@@ -192,6 +192,25 @@ endif()
 install(TARGETS pulp-import-design
     RUNTIME DESTINATION bin
     BUNDLE DESTINATION bin)
+# Keep the PDF-compatible Illustrator conversion helper available in SDK
+# installs alongside the compiled importer.  It remains an explicit boundary:
+# Poppler is discovered at runtime and the helper records its own provenance.
+install(PROGRAMS
+    "${CMAKE_CURRENT_SOURCE_DIR}/illustrator_to_svg.py"
+    DESTINATION bin/import-design)
+
+# Keep the pure-Python Illustrator boundary on the same source-selftest lane as
+# the other importer contracts.  It deliberately runs without a configured
+# SDK/build dependency so CI can validate converter provenance on the
+# build-free lane as well as locally.
+if(Python3_EXECUTABLE)
+    add_test(NAME illustrator-to-svg-selftest
+        COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/test_illustrator_to_svg.py")
+    set_tests_properties(illustrator-to-svg-selftest PROPERTIES
+        LABELS "source-selftest")
+endif()
+
 install(FILES ${_pulp_browser_capture_runtime_files}
     DESTINATION bin/browser_capture-v1)
 install(FILES
