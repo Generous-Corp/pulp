@@ -1448,7 +1448,7 @@ TEST_CASE("Parallel aliased output clears with no AudioInput node",
     REQUIRE(executor.process_parallel(block, snapshot, levels, pool, workers).ok());
     workers.stop();
     for (const auto sample : samples)
-        REQUIRE(sample == 6.0f);
+        REQUIRE(sample == 0.0f);
 }
 
 TEST_CASE("A pool routes another snapshot through the unbound path and unbinds on reset or copy",
