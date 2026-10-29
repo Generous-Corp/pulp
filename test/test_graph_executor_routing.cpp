@@ -1369,8 +1369,8 @@ TEST_CASE("Overlapping buses are cleared when host-input aliasing is ineligible"
     samples.fill(2.0f);
     pulp::format::GraphRuntimeWorkerPool workers;
     REQUIRE(workers.start(2));
-    REQUIRE(executor.process_parallel(block, parallel_snapshot, levels, parallel_pool, workers)
-                .ok());
+    REQUIRE(
+        executor.process_parallel(block, parallel_snapshot, levels, parallel_pool, workers).ok());
     workers.stop();
     for (const float sample : samples)
         REQUIRE(sample == 2.0f);
