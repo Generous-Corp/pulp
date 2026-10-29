@@ -361,10 +361,10 @@ endif()
 # generator expression — these are the static-link variants. CMake
 # 3.15+ honors this via CMP0091 (set automatically by our minimum
 # version 3.24).
-if(MSVC)
+if(MSVC AND NOT DEFINED CMAKE_MSVC_RUNTIME_LIBRARY)
     set(CMAKE_MSVC_RUNTIME_LIBRARY
         "MultiThreaded$<$<CONFIG:Debug>:Debug>"
-        CACHE STRING "MSVC runtime library variant (static)" FORCE)
+        CACHE STRING "MSVC runtime library variant (static)")
 endif()
 
 if(WIN32)
