@@ -91,7 +91,20 @@ jobs:
           # The steward remains the sole mutation planner. This read-only pass
           # independently proves every planned arm candidate is allowed at its
           # current head before the apply pass can mutate GitHub state.
-          shipyard runner steward --repo "$GITHUB_REPOSITORY" --base main --arm-unqueued --json \
+          run_steward_with_retry() {
+            local attempt status
+            for attempt in 1 2 3; do
+              if "$@"; then
+                return 0
+              fi
+              status=$?
+              if [ "$attempt" -eq 3 ]; then
+                return "$status"
+              fi
+              sleep "$attempt"
+            done
+          }
+          run_steward_with_retry shipyard runner steward --repo "$GITHUB_REPOSITORY" --base main --arm-unqueued --json \
             > "$RUNNER_TEMP/steward/audit.json"
           jq -c '.repos[].prs[] | select(.mutation != null) | {number,head_sha}' \
             "$RUNNER_TEMP/steward/audit.json" > "$RUNNER_TEMP/steward/review-candidates.jsonl"
@@ -118,7 +131,20 @@ jobs:
           if [ "$APPLY" = true ]; then
             args+=(--apply)
           fi
-          shipyard "${args[@]}" | tee "$RUNNER_TEMP/steward/report.json"
+          run_steward_with_retry() {
+            local attempt status
+            for attempt in 1 2 3; do
+              if "$@"; then
+                return 0
+              fi
+              status=$?
+              if [ "$attempt" -eq 3 ]; then
+                return "$status"
+              fi
+              sleep "$attempt"
+            done
+          }
+          run_steward_with_retry shipyard "${args[@]}" | tee "$RUNNER_TEMP/steward/report.json"
 
       - name: Publish feeder evidence
         if: always()
