@@ -10,10 +10,6 @@
 
 #include <pulp/view/window_host.hpp>
 
-#if defined(PULP_HAS_SDL3)
-#include <pulp/view/sdl_window_host.hpp>
-#endif
-
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/view/view.hpp>
 
@@ -22,7 +18,6 @@
 #endif
 
 #include <mutex>
-#include <utility>
 
 namespace pulp::view {
 
@@ -122,65 +117,6 @@ void WindowHost::paint_root(canvas::Canvas& canvas, View& root,
 
 #if !defined(__APPLE__)
 
-#if defined(PULP_HAS_SDL3)
-// Standalone applications on Windows/Linux use the cross-platform SDL host.
-// Keep the platform-neutral WindowHost contract at the boundary so callers
-// (including standalone.cpp) do not need a second window API.  Host adapters
-// may still install a richer native factory; this is the deterministic default
-// for a standalone process that has no embedding host.
-class SdlWindowHostAdapter final : public WindowHost {
-  public:
-    SdlWindowHostAdapter(View& root, const WindowOptions& options)
-        : size_{static_cast<uint32_t>(options.width), static_cast<uint32_t>(options.height)} {
-        SdlWindowHost::Options sdl_options;
-        sdl_options.title = options.title;
-        sdl_options.width = size_.width;
-        sdl_options.height = size_.height;
-        sdl_options.resizable = options.resizable;
-        host_ = SdlWindowHost::create(root, std::move(sdl_options));
-    }
-
-    bool valid() const {
-        return host_ != nullptr;
-    }
-    void show() override {
-        if (host_) {
-            host_->show();
-            visible_ = true;
-        }
-    }
-    void hide() override {
-        if (host_) {
-            host_->hide();
-            visible_ = false;
-        }
-    }
-    bool is_visible() const override {
-        return visible_;
-    }
-    void repaint() override {
-        if (host_)
-            host_->repaint();
-    }
-    ContentSize get_content_size() const override {
-        return size_;
-    }
-    void set_close_callback(std::function<void()> cb) override {
-        if (host_)
-            host_->set_close_callback(std::move(cb));
-    }
-    void run_event_loop() override {
-        if (host_)
-            host_->run_event_loop();
-    }
-
-  private:
-    std::unique_ptr<SdlWindowHost> host_;
-    ContentSize size_;
-    bool visible_ = false;
-};
-#endif
-
 std::unique_ptr<WindowHost> WindowHost::create(View& root,
                                                 const WindowOptions& options) {
     // Copy the factory out, release the lock, then invoke. Creating a native
@@ -189,19 +125,8 @@ std::unique_ptr<WindowHost> WindowHost::create(View& root,
     WindowHost::Factory local;
     {
         std::lock_guard lock(g_factory_mu);
-        if (g_factory_installed && g_factory)
-            local = g_factory;
-    }
-    if (!local) {
-#if defined(PULP_HAS_SDL3)
-        auto fallback = std::make_unique<SdlWindowHostAdapter>(root, options);
-        if (!fallback->valid())
-            return nullptr;
-        root.set_window_host(fallback.get());
-        return fallback;
-#else
-        return nullptr;
-#endif
+        if (!g_factory_installed || !g_factory) return nullptr;
+        local = g_factory;
     }
     auto host = local(root, options);
     if (host) {
