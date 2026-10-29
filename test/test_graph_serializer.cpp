@@ -2678,7 +2678,7 @@ TEST_CASE("SignalGraph processes missing-plugin node as deterministic pass-throu
     }
 }
 
-TEST_CASE("SignalGraph propagates non-finite plugin output without a fault receipt",
+TEST_CASE("SignalGraph propagates non-finite plugin output through a prepared graph",
           "[host][fault][nonfinite]") {
     SignalGraph graph;
     const auto input = graph.add_input_node(2, "Input");
