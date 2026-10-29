@@ -1561,7 +1561,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/smoothed_value.hpp",
-        "fingerprint": "sha256:de094f551a7f8a12ec7e2990cfc7dddacc947303e7046a897827d28a0df5fed3",
+        "fingerprint": "sha256:a5d89682865f60834c678e5f43e3ceba8ae00d3f96bbed258db58054e7ad5097",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
