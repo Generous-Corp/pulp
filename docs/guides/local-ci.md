@@ -4313,7 +4313,9 @@ arm path. Do not bypass the queue-arm guard or use an empty commit. If the VM
 reaches the guest but its hydration SSH process remains stuck before `Connected
 to GitHub`, terminate only that recorded process and let TartCI discard the VM;
 then wait for GitHub to finish cancelling the ghost run before re-admitting the
-new head.
+new head. A merge-group run that reaches the runner and then exits because
+hydration was terminated is a failed-check batch, so it also requires a new
+reviewed head before admission; do not force-arm the unchanged head.
 
 ### The failure this prevents
 
