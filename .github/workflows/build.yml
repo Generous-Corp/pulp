@@ -661,10 +661,22 @@ jobs:
                   and "self-hosted" in parsed_macos_selector
                   and event_class_label not in parsed_macos_selector
               ):
+                  # The shared repo selector may already contain the other
+                  # event class (the PR-head selector is also the default
+                  # operator value).  Event classes are exclusive: leaving
+                  # both labels on a merge-group job makes it unassignable to
+                  # the event-class-v2 fleet, whose runner advertises exactly
+                  # one class.  Remove every managed class before appending
+                  # the class for this event.
+                  managed_event_classes = {
+                      "pulp-build-pr-head",
+                      "pulp-build-merge-group",
+                  }
                   parsed_macos_selector = [
                       label
                       for label in parsed_macos_selector
-                      if label != "pulp-gate-fast"
+                      if label not in managed_event_classes
+                      and label != "pulp-gate-fast"
                   ]
                   parsed_macos_selector.append(event_class_label)
                   chosen_macos_selector = json.dumps(

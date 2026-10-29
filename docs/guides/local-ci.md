@@ -4297,6 +4297,13 @@ workflow and repository runner-group ID, and declares no fixed lane priority.
 The contract records that transformation separately from the repo variable so
 neither representation is mistaken for the other.
 
+The transformation removes any existing managed event-class labels before
+adding the current event's class. This matters because the shared repository
+selector normally carries the PR-head class; a merge-group job must request
+only `pulp-build-merge-group`. GitHub treats labels as an all-of set, so a job
+requesting both classes is unschedulable by the event-class-v2 fleet, whose
+ephemeral runners advertise one class at a time.
+
 ### The failure this prevents
 
 GitHub does not validate `runs-on`. **A job that asks for a label no runner

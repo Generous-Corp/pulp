@@ -12910,6 +12910,16 @@ first.
 
 ## Hosted macOS advisory cadence
 
+### Event-class labels are exclusive
+
+The shared `PULP_LOCAL_MACOS_RUNS_ON_JSON` selector may contain the PR-head
+class. Before dispatching a protected `merge_group`, `build.yml` must remove
+both managed event-class labels (`pulp-build-pr-head` and
+`pulp-build-merge-group`) and append only the class for the current event.
+GitHub requires every requested label, while TartCI event-class-v2 runners
+advertise exactly one class; leaving both labels creates a queued job that no
+runner can serve.
+
 ## Release lanes pin the shell exec JS bridge OFF
 
 `PULP_DEV_BRIDGE_EXEC` compiles the developer-only `exec` / `execAsync` JS
