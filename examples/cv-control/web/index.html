@@ -1,0 +1,58 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Pulp CV Face Tone</title>
+<style>body{font:16px system-ui;max-width:52rem;margin:2rem auto;padding:0 1rem}video{width:320px;transform:scaleX(-1)}button{padding:.6rem 1rem}#status{white-space:pre-wrap}</style>
+<h1>Pulp CV Face Tone</h1>
+<p>Browser camera → MediaPipe Face Landmarker → one coherent face frame → Pulp WAM parameter.</p>
+<button id="start">Start camera and audio</button>
+<video id="camera" autoplay muted playsinline></video>
+<pre id="status">Idle</pre>
+<script type="module">
+import { FaceMapping } from "./face_mapping.mjs";
+import { createWamAdapter } from "../../../packages/pulp-web-player/src/adapters/wam.js";
+
+const PARAM_BRIGHTNESS = 100;
+const WORKLET_DSP = "../../web-demos/wasm-build/build/CvFaceToneWorklet.js";
+const WORKLET_PROCESSOR = "../../../packages/pulp-web-player/src/vendor/pulp-wasm/wam-processor.js";
+const status = (s) => document.querySelector("#status").textContent = s;
+const mapping = new FaceMapping();
+
+async function start() {
+  const video = document.querySelector("#camera");
+  const stream = await navigator.mediaDevices.getUserMedia({video: true, audio: false});
+  video.srcObject = stream;
+  await video.play();
+  const ctx = new AudioContext();
+  const adapter = await createWamAdapter(ctx, {dsp: WORKLET_DSP, processor: WORKLET_PROCESSOR});
+  adapter.audioNode.connect(ctx.destination);
+  const infos = await adapter.getParameterInfo();
+  const base = await adapter.getParameterValue(PARAM_BRIGHTNESS);
+  const {FilesetResolver, FaceLandmarker} = await import(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22-rc.20250304/vision_bundle.mjs");
+  const fileset = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22-rc.20250304/wasm");
+  const landmarker = await FaceLandmarker.createFromOptions(fileset, {
+    baseOptions: {modelAssetPath:
+      "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"},
+    runningMode: "VIDEO", numFaces: 1, outputFaceBlendshapes: true
+  });
+  let sequence = 0;
+  const tick = () => {
+    const result = landmarker.detectForVideo(video, performance.now());
+    const categories = result.faceBlendshapes?.[0]?.categories || [];
+    const mouth = categories.find((x) => x.categoryName === "jawOpen")?.score || 0;
+    const value = mapping.submit({sequence: ++sequence, mouthOpen: mouth,
+      confidence: result.faceLandmarks?.length ? 1 : 0, tracked: result.faceLandmarks?.length > 0});
+    // WAM exposes parameter writes, so the browser keeps the user's base value
+    // in this closure and sends only the mapped effective value to the worklet.
+    // Native/plugin deployments use the additive internal modulation path.
+    adapter.setParameterValue(PARAM_BRIGHTNESS, Math.max(0, Math.min(1, base + value * .5)));
+    status(`provider: MediaPipe Face Landmarker\nsequence: ${sequence}\n` +
+      `mouth_open: ${mouth.toFixed(3)}\nbrightness: ${value.toFixed(3)}`);
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
+document.querySelector("#start").addEventListener("click", () => start().catch((e) => status(`Error: ${e}`)));
+</script>
