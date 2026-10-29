@@ -94,6 +94,15 @@ bool routing_duplicate_outputs(pulp::format::ProcessBlock&,
     return true;
 }
 
+bool routing_constant_output(pulp::format::ProcessBlock&,
+                             const pulp::format::GraphRuntimeNodeProcessContext& ctx,
+                             void*) noexcept {
+    auto out = ctx.node_outputs;
+    for (std::size_t channel = 0; channel < out.num_channels(); ++channel)
+        std::fill_n(out.channel_ptr(channel), out.num_samples(), 3.0f);
+    return true;
+}
+
 // Reference: input -> gain g1 -> gain g2 -> output (stereo). Per-channel output.
 std::vector<std::vector<float>> signal_graph_chain(float g1, float g2, double sr, int frames,
                                                    const std::vector<std::vector<float>>& in) {
@@ -1349,6 +1358,97 @@ TEST_CASE("A parallel bound routed graph preserves aliased input during multi-ou
     workers.stop();
     for (std::size_t i = 0; i < samples.size(); ++i)
         REQUIRE(samples[i] == 2.0f * original[i]);
+}
+
+TEST_CASE("Aliased output clears before an output path with a later disconnected AudioInput",
+          "[format][graph][executor][routing][rt-safety]") {
+    const std::array nodes = {
+        GraphRuntimeNodeSpec{1, GraphRuntimeNodeKind::Processor, 0, 1},
+        GraphRuntimeNodeSpec{2, GraphRuntimeNodeKind::AudioOutput, 1, 0},
+        GraphRuntimeNodeSpec{3, GraphRuntimeNodeKind::AudioOutput, 1, 0},
+        GraphRuntimeNodeSpec{99, GraphRuntimeNodeKind::AudioInput, 0, 1},
+    };
+    const std::array connections = {
+        GraphRuntimeConnectionSpec{1, 0, 2, 0},
+        GraphRuntimeConnectionSpec{1, 0, 3, 0},
+    };
+    const std::array bindings = {
+        GraphRuntimeNodeBinding{1, routing_constant_output, nullptr, true},
+        GraphRuntimeNodeBinding{2, nullptr, nullptr, false},
+        GraphRuntimeNodeBinding{3, nullptr, nullptr, false},
+        GraphRuntimeNodeBinding{99, nullptr, nullptr, false},
+    };
+    GraphRuntimeSnapshot snapshot;
+    REQUIRE(make_snapshot(snapshot, nodes, connections, bindings));
+    GraphRuntimeBufferPool pool;
+    REQUIRE(pool.reset(snapshot.buffer_slot_count(), 4));
+    REQUIRE(pool.bind(snapshot));
+
+    std::array<float, 4> samples{1.0f, 1.0f, 1.0f, 1.0f};
+    std::array<const float*, 1> in_ptrs{samples.data()};
+    std::array<float*, 1> out_ptrs{samples.data()};
+    pulp::audio::BufferView<const float> in_view(in_ptrs.data(), 1, 4);
+    pulp::audio::BufferView<float> out_view(out_ptrs.data(), 1, 4);
+    pulp::format::BusBufferSet buses;
+    REQUIRE(buses.add_input("main", in_view, pulp::format::BusRole::Main));
+    REQUIRE(buses.add_output("main", out_view, pulp::format::BusRole::Main));
+    pulp::format::ProcessBlock block;
+    block.sample_rate = kSr;
+    block.frame_count = 4;
+    block.buses = &buses;
+    REQUIRE(block.validate());
+
+    GraphRuntimeExecutor executor;
+    REQUIRE(executor.process_routed(block, snapshot, pool).ok());
+    for (const auto sample : samples)
+        REQUIRE(sample == 6.0f);
+}
+
+TEST_CASE("Parallel aliased output clears with no AudioInput node",
+          "[format][graph][executor][routing][parallel][rt-safety]") {
+    const std::array nodes = {
+        GraphRuntimeNodeSpec{1, GraphRuntimeNodeKind::Processor, 0, 1},
+        GraphRuntimeNodeSpec{2, GraphRuntimeNodeKind::AudioOutput, 1, 0},
+        GraphRuntimeNodeSpec{3, GraphRuntimeNodeKind::AudioOutput, 1, 0},
+    };
+    const std::array connections = {
+        GraphRuntimeConnectionSpec{1, 0, 2, 0},
+        GraphRuntimeConnectionSpec{1, 0, 3, 0},
+    };
+    const std::array bindings = {
+        GraphRuntimeNodeBinding{1, routing_constant_output, nullptr, true},
+        GraphRuntimeNodeBinding{2, nullptr, nullptr, false},
+        GraphRuntimeNodeBinding{3, nullptr, nullptr, false},
+    };
+    GraphRuntimeSnapshot snapshot;
+    REQUIRE(make_snapshot(snapshot, nodes, connections, bindings, /*parallel_safe=*/true));
+    const auto levels = pulp::graph::build_graph_runtime_levelization(snapshot.plan());
+    REQUIRE(levels.ok);
+    GraphRuntimeBufferPool pool;
+    REQUIRE(pool.reset(snapshot.buffer_slot_count(), 4));
+    REQUIRE(pool.bind(snapshot));
+
+    std::array<float, 4> samples{1.0f, 1.0f, 1.0f, 1.0f};
+    std::array<const float*, 1> in_ptrs{samples.data()};
+    std::array<float*, 1> out_ptrs{samples.data()};
+    pulp::audio::BufferView<const float> in_view(in_ptrs.data(), 1, 4);
+    pulp::audio::BufferView<float> out_view(out_ptrs.data(), 1, 4);
+    pulp::format::BusBufferSet buses;
+    REQUIRE(buses.add_input("main", in_view, pulp::format::BusRole::Main));
+    REQUIRE(buses.add_output("main", out_view, pulp::format::BusRole::Main));
+    pulp::format::ProcessBlock block;
+    block.sample_rate = kSr;
+    block.frame_count = 4;
+    block.buses = &buses;
+    REQUIRE(block.validate());
+
+    pulp::format::GraphRuntimeWorkerPool workers;
+    REQUIRE(workers.start(2));
+    GraphRuntimeExecutor executor;
+    REQUIRE(executor.process_parallel(block, snapshot, levels, pool, workers).ok());
+    workers.stop();
+    for (const auto sample : samples)
+        REQUIRE(sample == 6.0f);
 }
 
 TEST_CASE("A pool routes another snapshot through the unbound path and unbinds on reset or copy",
