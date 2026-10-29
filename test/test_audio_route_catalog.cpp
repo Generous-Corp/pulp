@@ -152,3 +152,54 @@ TEST_CASE("MutableAudioRouteCatalog keeps independent left and right selections"
     REQUIRE(catalog.connected_route_channel(0, 0).empty());
     REQUIRE(catalog.connected_route_channel(0, 1).empty());
 }
+
+TEST_CASE("MutableAudioRouteCatalog rejects channels outside a route's width") {
+    pulp::host::MutableAudioRouteCatalog catalog;
+    catalog.set_routes({
+        {"mono", "Mono", pulp::host::AudioRouteKind::PhysicalInput, 1, true},
+        {"stereo", "Stereo", pulp::host::AudioRouteKind::Track, 2, true},
+    });
+
+    std::vector<std::size_t> callback_channels;
+    catalog.set_connect_channel_callback(
+        [&](const pulp::host::AudioRouteInfo&, std::size_t, std::size_t channel) {
+            callback_channels.push_back(channel);
+            return true;
+        });
+
+    REQUIRE(catalog.connect_channel("mono", 0, 0));
+    REQUIRE_FALSE(catalog.connect_channel("mono", 0, 1));
+    REQUIRE(catalog.connect_channel("stereo", 0, 1));
+    REQUIRE(callback_channels == std::vector<std::size_t>{0, 1});
+}
+
+TEST_CASE("MutableAudioRouteCatalog only clears state after host disconnect succeeds") {
+    pulp::host::MutableAudioRouteCatalog catalog;
+    catalog.set_routes({
+        {"track", "Track", pulp::host::AudioRouteKind::Track, 2, true},
+    });
+    REQUIRE(catalog.connect("track", 0));
+
+    bool allow_disconnect = false;
+    std::size_t disconnected_bus = 99;
+    catalog.set_disconnect_callback([&](std::size_t bus) {
+        disconnected_bus = bus;
+        return allow_disconnect;
+    });
+    REQUIRE_FALSE(catalog.disconnect(0));
+    REQUIRE(catalog.connected_route(0) == "track");
+    allow_disconnect = true;
+    REQUIRE(catalog.disconnect(0));
+    REQUIRE(disconnected_bus == 0);
+    REQUIRE(catalog.connected_route(0).empty());
+}
+
+TEST_CASE("MutableAudioRouteCatalog disconnects a channel-only selection") {
+    pulp::host::MutableAudioRouteCatalog catalog;
+    catalog.set_routes({
+        {"stereo", "Stereo", pulp::host::AudioRouteKind::Track, 2, true},
+    });
+    REQUIRE(catalog.connect_channel("stereo", 0, 1));
+    REQUIRE(catalog.disconnect(0));
+    REQUIRE(catalog.connected_route_channel(0, 1).empty());
+}
