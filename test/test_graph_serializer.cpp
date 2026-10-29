@@ -19,6 +19,7 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <limits>
 #include <numeric>
 #include <set>
 #include <string>
@@ -48,26 +49,36 @@ PluginInfo make_fake_plugin_info(const std::string& name,
     return info;
 }
 
-class SerializerSlot final : public PluginSlot {
+class SerializerSlot : public PluginSlot {
 public:
     static constexpr uint32_t kParamId = 42;
 
     explicit SerializerSlot(PluginInfo info,
                             std::vector<uint8_t> state = {},
-                            ParamRate rate = ParamRate::ControlRate)
-        : info_(std::move(info)), state_(std::move(state)), rate_(rate) {}
+                            ParamRate rate = ParamRate::ControlRate,
+                            bool emit_nonfinite = false)
+        : info_(std::move(info)), state_(std::move(state)), rate_(rate),
+          emit_nonfinite_(emit_nonfinite) {}
 
     const PluginInfo& info() const override { return info_; }
     bool is_loaded() const override { return true; }
     bool prepare(double, int) override { return true; }
     void release() override {}
 
-    void process(pulp::audio::BufferView<float>&,
+    void process(pulp::audio::BufferView<float>& output,
                  const pulp::audio::BufferView<const float>&,
                  const pulp::midi::MidiBuffer&,
                  pulp::midi::MidiBuffer&,
                  const ParameterEventQueue&,
-                 int) override {}
+                 int) override {
+        if (!emit_nonfinite_) return;
+        for (std::size_t channel = 0; channel < output.num_channels(); ++channel) {
+            auto* dst = output.channel_ptr(channel);
+            for (std::size_t sample = 0; sample < output.num_samples(); ++sample)
+                dst[sample] = (channel == 0) ? std::numeric_limits<float>::quiet_NaN()
+                                             : std::numeric_limits<float>::infinity();
+        }
+    }
 
     std::vector<HostParamInfo> parameters() const override {
         HostParamInfo p;
@@ -99,6 +110,7 @@ private:
     PluginInfo info_;
     std::vector<uint8_t> state_;
     ParamRate rate_ = ParamRate::ControlRate;
+    bool emit_nonfinite_ = false;
 };
 
 bool missing_plugins_contain(const GraphSerializer::LoadResult& result,
@@ -2664,6 +2676,39 @@ TEST_CASE("SignalGraph processes missing-plugin node as deterministic pass-throu
         REQUIRE(out_l[i] == 0.0f);
         REQUIRE(out_r[i] == 0.0f);
     }
+}
+
+TEST_CASE("SignalGraph propagates non-finite plugin output without a fault receipt",
+          "[host][fault][nonfinite]") {
+    SignalGraph graph;
+    const auto input = graph.add_input_node(2, "Input");
+    const auto info = make_fake_plugin_info("NonFinite", "pulp.test.nonfinite", PluginFormat::CLAP,
+                                            2, 2);
+    const auto plugin = graph.add_plugin_node(
+        std::make_unique<SerializerSlot>(info, std::vector<uint8_t>{}, ParamRate::ControlRate,
+                                         true),
+        2, 2, "NonFinite");
+    const auto output = graph.add_output_node(2, "Output");
+    REQUIRE(graph.connect(input, 0, plugin, 0));
+    REQUIRE(graph.connect(input, 1, plugin, 1));
+    REQUIRE(graph.connect(plugin, 0, output, 0));
+    REQUIRE(graph.connect(plugin, 1, output, 1));
+    REQUIRE(graph.prepare(48000.0, 8));
+
+    std::array<float, 8> input_left{};
+    std::array<float, 8> input_right{};
+    std::array<float, 8> output_left{};
+    std::array<float, 8> output_right{};
+    const float* inputs[2] = {input_left.data(), input_right.data()};
+    float* outputs[2] = {output_left.data(), output_right.data()};
+    pulp::audio::BufferView<const float> input_view(inputs, 2, 8);
+    pulp::audio::BufferView<float> output_view(outputs, 2, 8);
+    graph.process(output_view, input_view, 8);
+
+    REQUIRE(std::isnan(output_left[0]));
+    REQUIRE(std::isinf(output_right[0]));
+    REQUIRE(std::isnan(output_left[7]));
+    REQUIRE(std::isinf(output_right[7]));
 }
 
 namespace {
