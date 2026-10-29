@@ -1383,6 +1383,20 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
     BusBuffer* out_bus =
         block.buses ? block.buses->first(BusDirection::Output, BusRole::Main) : nullptr;
 
+    const bool bound = pool.bound_to(snapshot);
+    // A bound pool reads the host input in place for this block when the graph
+    // allows it, undone on every return below. This must happen before clearing
+    // the output bus: host input and output may intentionally alias.
+    struct HostInputRelease {
+        GraphRuntimeBufferPool* pool;
+        ~HostInputRelease() {
+            if (pool != nullptr)
+                pool->release_host_input();
+        }
+    } host_input_release{
+        bound && skip_mask.empty() && pool.alias_host_input(in_bus, out_bus, frames) ? &pool
+                                                                                     : nullptr};
+
     // Zero the main output bus once; AudioOutput nodes accumulate into it, so N
     // output nodes mix (and any output channel no node drives stays silent),
     // matching the host graph this executor mirrors. A sole AudioOutput node
@@ -1391,13 +1405,31 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
     // the whole bus is zeroed up front.
     const bool sole_output = snapshot.sole_audio_output();
     std::size_t sole_output_channels = 0;
+    bool defer_output_clear = false;
     if (out_bus != nullptr) {
         const std::size_t channels = out_bus->output.num_channels();
         if (sole_output && skip_mask.empty())
             sole_output_channels =
                 std::min<std::size_t>(channels, snapshot.sole_audio_output_ports());
-        for (std::size_t c = sole_output_channels; c < channels; ++c)
-            std::fill_n(out_bus->output.channel_ptr(c), frames, 0.0f);
+        if (in_bus != nullptr) {
+            const auto bytes = static_cast<std::uintptr_t>(frames) * sizeof(float);
+            for (std::size_t c = 0; c < in_bus->input.num_channels() && !defer_output_clear; ++c) {
+                const auto in_begin =
+                    reinterpret_cast<std::uintptr_t>(in_bus->input.channel_ptr(c));
+                for (std::size_t k = 0; k < channels; ++k) {
+                    const auto out_begin =
+                        reinterpret_cast<std::uintptr_t>(out_bus->output.channel_ptr(k));
+                    if (in_begin < out_begin + bytes && out_begin < in_begin + bytes) {
+                        defer_output_clear = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if (!defer_output_clear) {
+            for (std::size_t c = sole_output_channels; c < channels; ++c)
+                std::fill_n(out_bus->output.channel_ptr(c), frames, 0.0f);
+        }
     }
     const auto zero_unwritten_sole_output = [&]() noexcept {
         for (std::size_t c = 0; c < sole_output_channels; ++c)
@@ -1433,19 +1465,6 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
 
     const auto command_decisions = command_results.first(commands.size());
     const bool time_nodes = node_load_timing();
-    const bool bound = pool.bound_to(snapshot);
-    // A bound pool reads the host input in place for this block when the graph
-    // allows it, undone on every return below. A skip mask keeps the slots,
-    // which the caller may have pre-filled.
-    struct HostInputRelease {
-        GraphRuntimeBufferPool* pool;
-        ~HostInputRelease() {
-            if (pool != nullptr)
-                pool->release_host_input();
-        }
-    } host_input_release{
-        bound && skip_mask.empty() && pool.alias_host_input(in_bus, out_bus, frames) ? &pool
-                                                                                     : nullptr};
     for (const auto node_index : plan.processing_order_indices) {
         if (node_index >= bindings.size()) {
             zero_unwritten_sole_output();
@@ -1475,6 +1494,13 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
         }
         if (plan.nodes[node_index].kind == graph::GraphRuntimeNodeKind::AudioOutput)
             sole_output_channels = 0;
+        if (defer_output_clear &&
+            plan.nodes[node_index].kind == graph::GraphRuntimeNodeKind::AudioInput &&
+            out_bus != nullptr) {
+            for (std::size_t c = sole_output_channels; c < out_bus->output.num_channels(); ++c)
+                std::fill_n(out_bus->output.channel_ptr(c), frames, 0.0f);
+            defer_output_clear = false;
+        }
         ++result.nodes_processed;
     }
     // One shared-counter update per block rather than one per node.
