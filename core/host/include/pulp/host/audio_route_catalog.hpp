@@ -43,8 +43,8 @@ class AudioRouteCatalog {
   public:
     using ChangeCallback = std::function<void()>;
     using ConnectCallback = std::function<bool(const AudioRouteInfo&, std::size_t bus_index)>;
-    using ConnectChannelCallback =
-        std::function<bool(const AudioRouteInfo&, std::size_t bus_index, std::size_t channel_index)>;
+    using ConnectChannelCallback = std::function<bool(const AudioRouteInfo&, std::size_t bus_index,
+                                                      std::size_t channel_index)>;
     using DisconnectCallback = std::function<bool(std::size_t bus_index)>;
 
     virtual ~AudioRouteCatalog() = default;
@@ -253,8 +253,9 @@ class MutableAudioRouteCatalog final : public AudioRouteCatalog {
         const bool bus_selected = bus_index < selected_.size() && !selected_[bus_index].empty();
         const bool channel_selected =
             bus_index < selected_channels_.size() &&
-            std::any_of(selected_channels_[bus_index].begin(), selected_channels_[bus_index].end(),
-                        [](const std::string& selected) { return !selected.empty(); });
+            std::any_of(
+                selected_channels_[bus_index].begin(), selected_channels_[bus_index].end(),
+                [](const std::string& selected) { return !selected.empty(); });
         if (!bus_selected && !channel_selected)
             return false;
         if (disconnect_callback_ && !disconnect_callback_(bus_index))
