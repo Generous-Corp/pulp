@@ -327,6 +327,9 @@ class ActionMajorPinTests(unittest.TestCase):
         self.assertIn("Audit exact-head review gates before mutation", text)
         self.assertIn("shipyard review-verdict", text)
         self.assertIn('.verdict.verdict == "allowed"', text)
+        self.assertEqual(text.count("run_steward_with_retry()"), 2)
+        self.assertEqual(text.count("for attempt in 1 2 3; do"), 2)
+        self.assertEqual(text.count('sleep "$attempt"'), 2)
 
 
 if __name__ == "__main__":
