@@ -6,6 +6,7 @@
     {"file": "landing-watchdog.yml", "cadence_minutes": 30},
     {"file": "main-health-detector.yml", "cadence_minutes": 30},
     {"file": "merge-stall-check.yml", "cadence_minutes": 30},
+    {"file": "shipyard-merge-steward.yml", "cadence_minutes": 10},
     {"file": "pending-intent-liveness.yml", "cadence_minutes": 30},
     {"file": "read-audit-cadence-check.yml", "cadence_minutes": 30},
     {"file": "release-cadence-check.yml", "cadence_minutes": 30},
