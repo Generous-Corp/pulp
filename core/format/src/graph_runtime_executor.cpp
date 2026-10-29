@@ -1396,6 +1396,17 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
     } host_input_release{
         bound && skip_mask.empty() && pool.alias_host_input(in_bus, out_bus, frames) ? &pool
                                                                                      : nullptr};
+    // An overlapping host bus may still be safe to defer when an AudioInput
+    // node will run and clear it after copying.  If aliasing was disabled by a
+    // skip mask, only an unskipped AudioInput can perform that clear.
+    bool can_defer_output_clear = false;
+    for (std::uint32_t i = 0; i < plan.nodes.size(); ++i) {
+        if (plan.nodes[i].kind == graph::GraphRuntimeNodeKind::AudioInput &&
+            (skip_mask.empty() || i >= skip_mask.size() || skip_mask[i] == 0)) {
+            can_defer_output_clear = true;
+            break;
+        }
+    }
 
     // Zero the main output bus once; AudioOutput nodes accumulate into it, so N
     // output nodes mix (and any output channel no node drives stays silent),
@@ -1411,7 +1422,7 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
         if (sole_output && skip_mask.empty())
             sole_output_channels =
                 std::min<std::size_t>(channels, snapshot.sole_audio_output_ports());
-        if (in_bus != nullptr) {
+        if (can_defer_output_clear && in_bus != nullptr) {
             const auto bytes = static_cast<std::uintptr_t>(frames) * sizeof(float);
             for (std::size_t c = 0; c < in_bus->input.num_channels() && !defer_output_clear; ++c) {
                 const auto in_begin =
@@ -1611,9 +1622,16 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_parallel(
                 pool->release_host_input();
         }
     } host_input_release{bound && pool.alias_host_input(in_bus, out_bus, frames) ? &pool : nullptr};
+    bool can_defer_output_clear = false;
+    for (const auto& node : plan.nodes) {
+        if (node.kind == graph::GraphRuntimeNodeKind::AudioInput) {
+            can_defer_output_clear = true;
+            break;
+        }
+    }
     bool defer_output_clear = false;
     if (out_bus != nullptr) {
-        if (in_bus != nullptr) {
+        if (can_defer_output_clear && in_bus != nullptr) {
             const auto bytes = static_cast<std::uintptr_t>(frames) * sizeof(float);
             for (std::size_t c = 0; c < in_bus->input.num_channels() && !defer_output_clear; ++c) {
                 const auto in_begin =
