@@ -129,10 +129,9 @@ void WindowHost::paint_root(canvas::Canvas& canvas, View& root,
 // may still install a richer native factory; this is the deterministic default
 // for a standalone process that has no embedding host.
 class SdlWindowHostAdapter final : public WindowHost {
-public:
+  public:
     SdlWindowHostAdapter(View& root, const WindowOptions& options)
-        : size_{static_cast<uint32_t>(options.width),
-                static_cast<uint32_t>(options.height)} {
+        : size_{static_cast<uint32_t>(options.width), static_cast<uint32_t>(options.height)} {
         SdlWindowHost::Options sdl_options;
         sdl_options.title = options.title;
         sdl_options.width = size_.width;
@@ -141,18 +140,41 @@ public:
         host_ = SdlWindowHost::create(root, std::move(sdl_options));
     }
 
-    bool valid() const { return host_ != nullptr; }
-    void show() override { if (host_) { host_->show(); visible_ = true; } }
-    void hide() override { if (host_) { host_->hide(); visible_ = false; } }
-    bool is_visible() const override { return visible_; }
-    void repaint() override { if (host_) host_->repaint(); }
-    ContentSize get_content_size() const override { return size_; }
-    void set_close_callback(std::function<void()> cb) override {
-        if (host_) host_->set_close_callback(std::move(cb));
+    bool valid() const {
+        return host_ != nullptr;
     }
-    void run_event_loop() override { if (host_) host_->run_event_loop(); }
+    void show() override {
+        if (host_) {
+            host_->show();
+            visible_ = true;
+        }
+    }
+    void hide() override {
+        if (host_) {
+            host_->hide();
+            visible_ = false;
+        }
+    }
+    bool is_visible() const override {
+        return visible_;
+    }
+    void repaint() override {
+        if (host_)
+            host_->repaint();
+    }
+    ContentSize get_content_size() const override {
+        return size_;
+    }
+    void set_close_callback(std::function<void()> cb) override {
+        if (host_)
+            host_->set_close_callback(std::move(cb));
+    }
+    void run_event_loop() override {
+        if (host_)
+            host_->run_event_loop();
+    }
 
-private:
+  private:
     std::unique_ptr<SdlWindowHost> host_;
     ContentSize size_;
     bool visible_ = false;
@@ -167,12 +189,14 @@ std::unique_ptr<WindowHost> WindowHost::create(View& root,
     WindowHost::Factory local;
     {
         std::lock_guard lock(g_factory_mu);
-        if (g_factory_installed && g_factory) local = g_factory;
+        if (g_factory_installed && g_factory)
+            local = g_factory;
     }
     if (!local) {
 #if defined(PULP_HAS_SDL3)
         auto fallback = std::make_unique<SdlWindowHostAdapter>(root, options);
-        if (!fallback->valid()) return nullptr;
+        if (!fallback->valid())
+            return nullptr;
         root.set_window_host(fallback.get());
         return fallback;
 #else
