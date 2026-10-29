@@ -1692,6 +1692,13 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_parallel(
         return result;
     };
 
+    const auto clear_deferred_output = [&]() noexcept {
+        if (!defer_output_clear || out_bus == nullptr) return;
+        for (std::size_t c = 0; c < out_bus->output.num_channels(); ++c)
+            std::fill_n(out_bus->output.channel_ptr(c), frames, 0.0f);
+        defer_output_clear = false;
+    };
+
     for (std::uint32_t level = 0; level < levels.level_count; ++level) {
         const std::uint32_t base = levels.level_offsets[level];
         const std::uint32_t width = levels.level_offsets[level + 1] - base;
@@ -1735,6 +1742,7 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_parallel(
                                                snapshot.input_port_sources(node_index),
                                                bound ? &pool.bound_node(node_index) : nullptr);
                 if (e != GraphRuntimeExecutorErrorCode::None) {
+                    clear_deferred_output();
                     return report_failure(e, node_index);
                 }
             }
@@ -1753,6 +1761,7 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_parallel(
             workers.run(width, run_level_node, &task);
             if (const std::uint32_t code = error_code.load(std::memory_order_relaxed);
                 code != 0) {
+                clear_deferred_output();
                 return report_failure(
                     static_cast<GraphRuntimeExecutorErrorCode>(code - 1),
                     failed_node.load(std::memory_order_relaxed));
@@ -1763,6 +1772,7 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_parallel(
         nodes_processed_.fetch_add(width, std::memory_order_relaxed);
     }
 
+    clear_deferred_output();
     capture_feedback(plan, assignment, pool, frames);
 
     blocks_processed_.fetch_add(1, std::memory_order_relaxed);
