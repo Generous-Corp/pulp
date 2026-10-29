@@ -4309,7 +4309,11 @@ re-admission must use a new reviewed head. Shipyard intentionally refuses to
 re-arm an unchanged head after a guarded manual removal, because doing so could
 re-enqueue a known-bad batch state. Make the smallest relevant follow-up
 correction, push it, obtain a fresh exact-head review, and then re-run the normal
-arm path. Do not bypass the queue-arm guard or use an empty commit.
+arm path. Do not bypass the queue-arm guard or use an empty commit. If the VM
+reaches the guest but its hydration SSH process remains stuck before `Connected
+to GitHub`, terminate only that recorded process and let TartCI discard the VM;
+then wait for GitHub to finish cancelling the ghost run before re-admitting the
+new head.
 
 ### The failure this prevents
 
