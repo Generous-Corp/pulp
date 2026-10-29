@@ -979,7 +979,12 @@ bool GraphRuntimeBufferPool::bind(const GraphRuntimeSnapshot& snapshot) noexcept
     }
     bool aliasable = input_nodes == 1;
     const auto bindings = snapshot.bindings();
-    const auto& input_slots = assignment.nodes[input_node];
+    // An empty snapshot is valid and has no buffer assignment.  The alias
+    // analysis below only applies when the unique AudioInput node actually
+    // exists; do not index the empty assignment while checking that case.
+    const auto* input_slots = (input_nodes == 1 && input_node < assignment.nodes.size())
+                                  ? &assignment.nodes[input_node]
+                                  : nullptr;
     try {
         for (const auto& conn : plan.connections) {
             if (!aliasable)
@@ -1001,14 +1006,14 @@ bool GraphRuntimeBufferPool::bind(const GraphRuntimeSnapshot& snapshot) noexcept
                 break;
             }
             host_input_aliases_.push_back({&bound_nodes_[conn.dest_index].inputs[conn.dest_port],
-                                           slot_data(input_slots.output_base + conn.source_port),
+                                           slot_data(input_slots->output_base + conn.source_port),
                                            conn.source_port});
         }
     } catch (...) {
         unbind();
         return false;
     }
-    if (aliasable) {
+    if (aliasable && input_slots != nullptr) {
         host_input_node_ = input_node;
         host_input_channels_ = plan.nodes[input_node].output_ports;
         host_input_aliasable_ = true;
@@ -1378,6 +1383,31 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
     BusBuffer* out_bus =
         block.buses ? block.buses->first(BusDirection::Output, BusRole::Main) : nullptr;
 
+    const bool bound = pool.bound_to(snapshot);
+    // A bound pool reads the host input in place for this block when the graph
+    // allows it, undone on every return below. This must happen before clearing
+    // the output bus: host input and output may intentionally alias.
+    struct HostInputRelease {
+        GraphRuntimeBufferPool* pool;
+        ~HostInputRelease() {
+            if (pool != nullptr)
+                pool->release_host_input();
+        }
+    } host_input_release{
+        bound && skip_mask.empty() && pool.alias_host_input(in_bus, out_bus, frames) ? &pool
+                                                                                     : nullptr};
+    // An overlapping host bus may still be safe to defer when an AudioInput
+    // node will run and clear it after copying.  If aliasing was disabled by a
+    // skip mask, only an unskipped AudioInput can perform that clear.
+    bool can_defer_output_clear = false;
+    for (std::uint32_t i = 0; i < plan.nodes.size(); ++i) {
+        if (plan.nodes[i].kind == graph::GraphRuntimeNodeKind::AudioInput &&
+            (skip_mask.empty() || i >= skip_mask.size() || skip_mask[i] == 0)) {
+            can_defer_output_clear = true;
+            break;
+        }
+    }
+
     // Zero the main output bus once; AudioOutput nodes accumulate into it, so N
     // output nodes mix (and any output channel no node drives stays silent),
     // matching the host graph this executor mirrors. A sole AudioOutput node
@@ -1386,13 +1416,31 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
     // the whole bus is zeroed up front.
     const bool sole_output = snapshot.sole_audio_output();
     std::size_t sole_output_channels = 0;
+    bool defer_output_clear = false;
     if (out_bus != nullptr) {
         const std::size_t channels = out_bus->output.num_channels();
         if (sole_output && skip_mask.empty())
             sole_output_channels =
                 std::min<std::size_t>(channels, snapshot.sole_audio_output_ports());
-        for (std::size_t c = sole_output_channels; c < channels; ++c)
-            std::fill_n(out_bus->output.channel_ptr(c), frames, 0.0f);
+        if (can_defer_output_clear && in_bus != nullptr) {
+            const auto bytes = static_cast<std::uintptr_t>(frames) * sizeof(float);
+            for (std::size_t c = 0; c < in_bus->input.num_channels() && !defer_output_clear; ++c) {
+                const auto in_begin =
+                    reinterpret_cast<std::uintptr_t>(in_bus->input.channel_ptr(c));
+                for (std::size_t k = 0; k < channels; ++k) {
+                    const auto out_begin =
+                        reinterpret_cast<std::uintptr_t>(out_bus->output.channel_ptr(k));
+                    if (in_begin < out_begin + bytes && out_begin < in_begin + bytes) {
+                        defer_output_clear = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if (!defer_output_clear) {
+            for (std::size_t c = sole_output_channels; c < channels; ++c)
+                std::fill_n(out_bus->output.channel_ptr(c), frames, 0.0f);
+        }
     }
     const auto zero_unwritten_sole_output = [&]() noexcept {
         for (std::size_t c = 0; c < sole_output_channels; ++c)
@@ -1428,19 +1476,6 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
 
     const auto command_decisions = command_results.first(commands.size());
     const bool time_nodes = node_load_timing();
-    const bool bound = pool.bound_to(snapshot);
-    // A bound pool reads the host input in place for this block when the graph
-    // allows it, undone on every return below. A skip mask keeps the slots,
-    // which the caller may have pre-filled.
-    struct HostInputRelease {
-        GraphRuntimeBufferPool* pool;
-        ~HostInputRelease() {
-            if (pool != nullptr)
-                pool->release_host_input();
-        }
-    } host_input_release{
-        bound && skip_mask.empty() && pool.alias_host_input(in_bus, out_bus, frames) ? &pool
-                                                                                     : nullptr};
     for (const auto node_index : plan.processing_order_indices) {
         if (node_index >= bindings.size()) {
             zero_unwritten_sole_output();
@@ -1470,6 +1505,13 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
         }
         if (plan.nodes[node_index].kind == graph::GraphRuntimeNodeKind::AudioOutput)
             sole_output_channels = 0;
+        if (defer_output_clear &&
+            plan.nodes[node_index].kind == graph::GraphRuntimeNodeKind::AudioInput &&
+            out_bus != nullptr) {
+            for (std::size_t c = sole_output_channels; c < out_bus->output.num_channels(); ++c)
+                std::fill_n(out_bus->output.channel_ptr(c), frames, 0.0f);
+            defer_output_clear = false;
+        }
         ++result.nodes_processed;
     }
     // One shared-counter update per block rather than one per node.
@@ -1572,16 +1614,47 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_parallel(
         block.buses ? block.buses->first(BusDirection::Input, BusRole::Main) : nullptr;
     BusBuffer* out_bus =
         block.buses ? block.buses->first(BusDirection::Output, BusRole::Main) : nullptr;
+    const bool bound = pool.bound_to(snapshot);
+    struct HostInputRelease {
+        GraphRuntimeBufferPool* pool;
+        ~HostInputRelease() {
+            if (pool != nullptr)
+                pool->release_host_input();
+        }
+    } host_input_release{bound && pool.alias_host_input(in_bus, out_bus, frames) ? &pool : nullptr};
+    bool can_defer_output_clear = false;
+    for (const auto& node : plan.nodes) {
+        if (node.kind == graph::GraphRuntimeNodeKind::AudioInput) {
+            can_defer_output_clear = true;
+            break;
+        }
+    }
+    bool defer_output_clear = false;
     if (out_bus != nullptr) {
-        for (std::size_t c = 0; c < out_bus->output.num_channels(); ++c) {
-            std::fill_n(out_bus->output.channel_ptr(c), frames, 0.0f);
+        if (can_defer_output_clear && in_bus != nullptr) {
+            const auto bytes = static_cast<std::uintptr_t>(frames) * sizeof(float);
+            for (std::size_t c = 0; c < in_bus->input.num_channels() && !defer_output_clear; ++c) {
+                const auto in_begin =
+                    reinterpret_cast<std::uintptr_t>(in_bus->input.channel_ptr(c));
+                for (std::size_t k = 0; k < out_bus->output.num_channels(); ++k) {
+                    const auto out_begin =
+                        reinterpret_cast<std::uintptr_t>(out_bus->output.channel_ptr(k));
+                    if (in_begin < out_begin + bytes && out_begin < in_begin + bytes) {
+                        defer_output_clear = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if (!defer_output_clear) {
+            for (std::size_t c = 0; c < out_bus->output.num_channels(); ++c)
+                std::fill_n(out_bus->output.channel_ptr(c), frames, 0.0f);
         }
     }
 
     const auto command_decisions = command_results.first(commands.size());
     const bool time_nodes = node_load_timing();
     const bool sole_output = snapshot.sole_audio_output();
-    const bool bound = pool.bound_to(snapshot);
     std::atomic<std::uint32_t> error_code{0};
     std::atomic<std::uint32_t> failed_node{0};
 
@@ -1657,6 +1730,22 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_parallel(
                 return report_failure(
                     static_cast<GraphRuntimeExecutorErrorCode>(code - 1),
                     failed_node.load(std::memory_order_relaxed));
+            }
+        }
+
+        if (defer_output_clear) {
+            bool has_audio_input = false;
+            for (std::uint32_t k = 0; k < width; ++k) {
+                if (plan.nodes[levels.level_nodes[base + k]].kind ==
+                    graph::GraphRuntimeNodeKind::AudioInput) {
+                    has_audio_input = true;
+                    break;
+                }
+            }
+            if (has_audio_input && out_bus != nullptr) {
+                for (std::size_t c = 0; c < out_bus->output.num_channels(); ++c)
+                    std::fill_n(out_bus->output.channel_ptr(c), frames, 0.0f);
+                defer_output_clear = false;
             }
         }
 
