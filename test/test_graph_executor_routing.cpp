@@ -1303,6 +1303,54 @@ TEST_CASE("A bound routed graph preserves aliased input during multi-output mix"
         REQUIRE(samples[i] == 2.0f * original[i]);
 }
 
+TEST_CASE("A parallel bound routed graph preserves aliased input during multi-output mix",
+          "[format][graph][executor][routing][parallel][rt-safety]") {
+    const std::array nodes = {
+        GraphRuntimeNodeSpec{1, GraphRuntimeNodeKind::AudioInput, 0, 1},
+        GraphRuntimeNodeSpec{2, GraphRuntimeNodeKind::AudioOutput, 1, 0},
+        GraphRuntimeNodeSpec{3, GraphRuntimeNodeKind::AudioOutput, 1, 0},
+    };
+    const std::array connections = {
+        GraphRuntimeConnectionSpec{1, 0, 2, 0},
+        GraphRuntimeConnectionSpec{1, 0, 3, 0},
+    };
+    const std::array bindings = {
+        GraphRuntimeNodeBinding{1, nullptr, nullptr, false},
+        GraphRuntimeNodeBinding{2, nullptr, nullptr, false},
+        GraphRuntimeNodeBinding{3, nullptr, nullptr, false},
+    };
+    GraphRuntimeSnapshot snapshot;
+    REQUIRE(make_snapshot(snapshot, nodes, connections, bindings, /*parallel_safe=*/true));
+    const auto levels = pulp::graph::build_graph_runtime_levelization(snapshot.plan());
+    REQUIRE(levels.ok);
+    GraphRuntimeBufferPool pool;
+    REQUIRE(pool.reset(snapshot.buffer_slot_count(), 4));
+    REQUIRE(pool.bind(snapshot));
+
+    std::array<float, 4> samples{1.0f, -2.0f, 3.0f, -4.0f};
+    const auto original = samples;
+    std::array<const float*, 1> in_ptrs{samples.data()};
+    std::array<float*, 1> out_ptrs{samples.data()};
+    pulp::audio::BufferView<const float> in_view(in_ptrs.data(), 1, 4);
+    pulp::audio::BufferView<float> out_view(out_ptrs.data(), 1, 4);
+    pulp::format::BusBufferSet buses;
+    REQUIRE(buses.add_input("main", in_view, pulp::format::BusRole::Main));
+    REQUIRE(buses.add_output("main", out_view, pulp::format::BusRole::Main));
+    pulp::format::ProcessBlock block;
+    block.sample_rate = kSr;
+    block.frame_count = 4;
+    block.buses = &buses;
+    REQUIRE(block.validate());
+
+    pulp::format::GraphRuntimeWorkerPool workers;
+    REQUIRE(workers.start(2));
+    GraphRuntimeExecutor executor;
+    REQUIRE(executor.process_parallel(block, snapshot, levels, pool, workers).ok());
+    workers.stop();
+    for (std::size_t i = 0; i < samples.size(); ++i)
+        REQUIRE(samples[i] == 2.0f * original[i]);
+}
+
 TEST_CASE("A pool routes another snapshot through the unbound path and unbinds on reset or copy",
           "[format][graph][executor][routing]") {
     constexpr int kFrames = 32;
