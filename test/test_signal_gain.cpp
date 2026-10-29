@@ -50,3 +50,11 @@ TEST_CASE("Gain ramp clamps timing before integer conversion", "[signal][gain][r
     REQUIRE(gain.process(1.0f) == 1.0f);
     REQUIRE(gain.gain_linear() == 1.0f);
 }
+
+TEST_CASE("Gain ramp clamps the float-rounded INT_MAX boundary", "[signal][gain][robustness]") {
+    pulp::signal::Gain gain;
+    gain.set_ramp_time(static_cast<float>((std::numeric_limits<int>::max)()), 1.0f);
+    gain.set_gain_linear(2.0f);
+    REQUIRE(gain.process(1.0f) == 1.0f);
+    REQUIRE(gain.gain_linear() == 1.0f);
+}
