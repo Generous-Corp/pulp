@@ -4304,6 +4304,13 @@ only `pulp-build-merge-group`. GitHub treats labels as an all-of set, so a job
 requesting both classes is unschedulable by the event-class-v2 fleet, whose
 ephemeral runners advertise one class at a time.
 
+If a merge-group run is manually removed while recovering this routing defect,
+re-admission must use a new reviewed head. Shipyard intentionally refuses to
+re-arm an unchanged head after a guarded manual removal, because doing so could
+re-enqueue a known-bad batch state. Make the smallest relevant follow-up
+correction, push it, obtain a fresh exact-head review, and then re-run the normal
+arm path. Do not bypass the queue-arm guard or use an empty commit.
+
 ### The failure this prevents
 
 GitHub does not validate `runs-on`. **A job that asks for a label no runner
