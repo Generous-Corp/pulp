@@ -93,6 +93,7 @@ GraphRuntimeNodeBinding ProcessorNode::binding(graph::NodeId node_id, bool requi
     result.process = &ProcessorNode::process_binding;
     result.user_data = this;
     result.required = required;
+    result.reads_inputs_only = !capabilities_.writes_input_buffers;
     result.audio_rate_modulation_delivery =
         capabilities_.consumes_audio_rate_modulations
             ? AudioRateModulationDelivery::DenseViews
@@ -196,19 +197,25 @@ bool ProcessorNode::process_main_bus_block(const ProcessBlock& block,
     output.buffer = ctx.node_outputs;
     output.info.declared_channels = static_cast<int>(ctx.node_outputs.num_channels());
 
+    // Without routed MIDI the processor gets the node's own empty buffers. They
+    // are cleared only when the last block left something in them.
+    const auto empty_fallback = [](midi::MidiBuffer& buffer) noexcept {
+        if (!buffer.empty() || buffer.dropped_event_count() != 0)
+            buffer.clear();
+        if (buffer.sysex_size() != 0 || buffer.dropped_sysex_count() != 0)
+            buffer.clear_sysex();
+        if (buffer.ump() != nullptr)
+            buffer.attach_ump(nullptr);
+    };
     midi::MidiBuffer* midi_in = ctx.node_midi_in;
     if (midi_in == nullptr) {
         midi_in = &scratch_.fallback_midi_in;
-        midi_in->clear();
-        midi_in->clear_sysex();
-        midi_in->attach_ump(nullptr);
+        empty_fallback(*midi_in);
     }
     midi::MidiBuffer* midi_out = ctx.node_midi_out;
     if (midi_out == nullptr) {
         midi_out = &scratch_.fallback_midi_out;
-        midi_out->clear();
-        midi_out->clear_sysex();
-        midi_out->attach_ump(nullptr);
+        empty_fallback(*midi_out);
     }
     const state::ParameterEventQueue* params = ctx.node_param_events;
     if (params == nullptr) {

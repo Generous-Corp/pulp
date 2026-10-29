@@ -567,3 +567,48 @@ TEST_CASE("GraphRuntimeSnapshot resolves each input port once at reset",
     CHECK(snapshot.input_port_sources(index_of(3)).empty());
     CHECK_FALSE(snapshot.sole_audio_output());
 }
+
+TEST_CASE(
+    "Read-only consumers read a shared or persistent source in place and a writer forces copies",
+    "[format][graph-runtime][executor]") {
+    // P is a persistent source fanned out to two consumers. When both bindings
+    // declare reads_inputs_only, both read P's slot in place. When one of them
+    // may write its inputs, both fall back to private copies.
+    using Mode = GraphRuntimeSnapshot::InputPortSource::Mode;
+    auto build = [](bool second_reads_only) {
+        std::array nodes = {
+            node(1, 0, 1), // P
+            node(2, 1, 1), // first consumer
+            node(3, 1, 1), // second consumer
+        };
+        nodes[0].persistent_output = true;
+        const std::array connections = {connect(1, 0, 2, 0), connect(1, 0, 3, 0)};
+        std::array bindings = {
+            GraphRuntimeNodeBinding{1, record_visit, nullptr, false},
+            GraphRuntimeNodeBinding{2, record_visit, nullptr, false},
+            GraphRuntimeNodeBinding{3, record_visit, nullptr, false},
+        };
+        bindings[1].reads_inputs_only = true;
+        bindings[2].reads_inputs_only = second_reads_only;
+        return make_snapshot(nodes, connections, bindings);
+    };
+    auto modes = [](const GraphRuntimeSnapshot& snapshot) {
+        std::array<Mode, 2> out{};
+        const auto& plan = snapshot.plan();
+        for (std::uint32_t i = 0; i < plan.nodes.size(); ++i) {
+            if (plan.nodes[i].id == 2)
+                out[0] = snapshot.input_port_sources(i)[0].mode;
+            if (plan.nodes[i].id == 3)
+                out[1] = snapshot.input_port_sources(i)[0].mode;
+        }
+        return out;
+    };
+
+    const auto shared = build(true);
+    CHECK(modes(shared)[0] == Mode::InPlace);
+    CHECK(modes(shared)[1] == Mode::InPlace);
+
+    const auto with_writer = build(false);
+    CHECK(modes(with_writer)[0] == Mode::Copy);
+    CHECK(modes(with_writer)[1] == Mode::Copy);
+}
