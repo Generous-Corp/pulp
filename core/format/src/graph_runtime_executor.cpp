@@ -1603,6 +1603,14 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_parallel(
         block.buses ? block.buses->first(BusDirection::Input, BusRole::Main) : nullptr;
     BusBuffer* out_bus =
         block.buses ? block.buses->first(BusDirection::Output, BusRole::Main) : nullptr;
+    const bool bound = pool.bound_to(snapshot);
+    struct HostInputRelease {
+        GraphRuntimeBufferPool* pool;
+        ~HostInputRelease() {
+            if (pool != nullptr)
+                pool->release_host_input();
+        }
+    } host_input_release{bound && pool.alias_host_input(in_bus, out_bus, frames) ? &pool : nullptr};
     bool defer_output_clear = false;
     if (out_bus != nullptr) {
         if (in_bus != nullptr) {
@@ -1629,7 +1637,6 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_parallel(
     const auto command_decisions = command_results.first(commands.size());
     const bool time_nodes = node_load_timing();
     const bool sole_output = snapshot.sole_audio_output();
-    const bool bound = pool.bound_to(snapshot);
     std::atomic<std::uint32_t> error_code{0};
     std::atomic<std::uint32_t> failed_node{0};
 
