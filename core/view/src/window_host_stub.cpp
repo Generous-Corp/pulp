@@ -125,7 +125,8 @@ std::unique_ptr<WindowHost> WindowHost::create(View& root,
     WindowHost::Factory local;
     {
         std::lock_guard lock(g_factory_mu);
-        if (!g_factory_installed || !g_factory) return nullptr;
+        if (!g_factory_installed || !g_factory)
+            return nullptr;
         local = g_factory;
     }
     auto host = local(root, options);
