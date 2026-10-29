@@ -1694,7 +1694,8 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_parallel(
 
     bool audio_input_seen = false;
     const auto clear_deferred_output = [&]() noexcept {
-        if (audio_input_seen || !defer_output_clear || out_bus == nullptr) return;
+        if (audio_input_seen || !defer_output_clear || out_bus == nullptr)
+            return;
         for (std::size_t c = 0; c < out_bus->output.num_channels(); ++c)
             std::fill_n(out_bus->output.channel_ptr(c), frames, 0.0f);
         defer_output_clear = false;
@@ -1705,9 +1706,8 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_parallel(
         const std::uint32_t width = levels.level_offsets[level + 1] - base;
         if (width == 0) continue;
         for (std::uint32_t k = 0; k < width; ++k)
-            audio_input_seen = audio_input_seen ||
-                               plan.nodes[levels.level_nodes[base + k]].kind ==
-                                   graph::GraphRuntimeNodeKind::AudioInput;
+            audio_input_seen = audio_input_seen || plan.nodes[levels.level_nodes[base + k]].kind ==
+                                                       graph::GraphRuntimeNodeKind::AudioInput;
 
         // A level runs serially when it can't safely parallelize: a single node
         // (no benefit), no worker threads, or it contains an AudioOutput node
