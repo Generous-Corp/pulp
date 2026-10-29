@@ -1603,9 +1603,26 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_parallel(
         block.buses ? block.buses->first(BusDirection::Input, BusRole::Main) : nullptr;
     BusBuffer* out_bus =
         block.buses ? block.buses->first(BusDirection::Output, BusRole::Main) : nullptr;
+    bool defer_output_clear = false;
     if (out_bus != nullptr) {
-        for (std::size_t c = 0; c < out_bus->output.num_channels(); ++c) {
-            std::fill_n(out_bus->output.channel_ptr(c), frames, 0.0f);
+        if (in_bus != nullptr) {
+            const auto bytes = static_cast<std::uintptr_t>(frames) * sizeof(float);
+            for (std::size_t c = 0; c < in_bus->input.num_channels() && !defer_output_clear; ++c) {
+                const auto in_begin =
+                    reinterpret_cast<std::uintptr_t>(in_bus->input.channel_ptr(c));
+                for (std::size_t k = 0; k < out_bus->output.num_channels(); ++k) {
+                    const auto out_begin =
+                        reinterpret_cast<std::uintptr_t>(out_bus->output.channel_ptr(k));
+                    if (in_begin < out_begin + bytes && out_begin < in_begin + bytes) {
+                        defer_output_clear = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if (!defer_output_clear) {
+            for (std::size_t c = 0; c < out_bus->output.num_channels(); ++c)
+                std::fill_n(out_bus->output.channel_ptr(c), frames, 0.0f);
         }
     }
 
@@ -1688,6 +1705,22 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_parallel(
                 return report_failure(
                     static_cast<GraphRuntimeExecutorErrorCode>(code - 1),
                     failed_node.load(std::memory_order_relaxed));
+            }
+        }
+
+        if (defer_output_clear) {
+            bool has_audio_input = false;
+            for (std::uint32_t k = 0; k < width; ++k) {
+                if (plan.nodes[levels.level_nodes[base + k]].kind ==
+                    graph::GraphRuntimeNodeKind::AudioInput) {
+                    has_audio_input = true;
+                    break;
+                }
+            }
+            if (has_audio_input && out_bus != nullptr) {
+                for (std::size_t c = 0; c < out_bus->output.num_channels(); ++c)
+                    std::fill_n(out_bus->output.channel_ptr(c), frames, 0.0f);
+                defer_output_clear = false;
             }
         }
 
