@@ -979,7 +979,12 @@ bool GraphRuntimeBufferPool::bind(const GraphRuntimeSnapshot& snapshot) noexcept
     }
     bool aliasable = input_nodes == 1;
     const auto bindings = snapshot.bindings();
-    const auto& input_slots = assignment.nodes[input_node];
+    // An empty snapshot is valid and has no buffer assignment.  The alias
+    // analysis below only applies when the unique AudioInput node actually
+    // exists; do not index the empty assignment while checking that case.
+    const auto* input_slots = (input_nodes == 1 && input_node < assignment.nodes.size())
+                                  ? &assignment.nodes[input_node]
+                                  : nullptr;
     try {
         for (const auto& conn : plan.connections) {
             if (!aliasable)
@@ -1001,14 +1006,14 @@ bool GraphRuntimeBufferPool::bind(const GraphRuntimeSnapshot& snapshot) noexcept
                 break;
             }
             host_input_aliases_.push_back({&bound_nodes_[conn.dest_index].inputs[conn.dest_port],
-                                           slot_data(input_slots.output_base + conn.source_port),
+                                           slot_data(input_slots->output_base + conn.source_port),
                                            conn.source_port});
         }
     } catch (...) {
         unbind();
         return false;
     }
-    if (aliasable) {
+    if (aliasable && input_slots != nullptr) {
         host_input_node_ = input_node;
         host_input_channels_ = plan.nodes[input_node].output_ports;
         host_input_aliasable_ = true;

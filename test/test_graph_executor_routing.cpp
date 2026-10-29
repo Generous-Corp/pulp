@@ -1244,6 +1244,22 @@ TEST_CASE("A bound pool routes bit-exact with an unbound pool across blocks and 
     CHECK(energy > 1.0f);
 }
 
+TEST_CASE("A bound pool safely handles an empty valid snapshot",
+          "[format][graph][executor][routing][rt-safety]") {
+    const std::array<GraphRuntimeNodeSpec, 0> nodes{};
+    const std::array<GraphRuntimeConnectionSpec, 0> connections{};
+    const std::array<GraphRuntimeNodeBinding, 0> bindings{};
+    GraphRuntimeSnapshot snapshot;
+    REQUIRE(make_snapshot(snapshot, nodes, connections, bindings));
+    REQUIRE(snapshot.valid());
+    REQUIRE(snapshot.node_count() == 0);
+
+    GraphRuntimeBufferPool pool;
+    REQUIRE(pool.reset(snapshot.buffer_slot_count(), 64));
+    REQUIRE(pool.bind(snapshot));
+    REQUIRE(pool.bound_to(snapshot));
+}
+
 TEST_CASE("A pool routes another snapshot through the unbound path and unbinds on reset or copy",
           "[format][graph][executor][routing]") {
     constexpr int kFrames = 32;
