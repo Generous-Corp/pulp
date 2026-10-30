@@ -311,26 +311,24 @@ class ActionMajorPinTests(unittest.TestCase):
             f"actions/setup-python is pinned to more than one major: {majors}",
         )
 
-    def test_merge_steward_is_a_scheduled_queue_feeder(self) -> None:
+    def test_merge_steward_workflow_is_a_manual_diagnostic(self) -> None:
+        # The local steward tick on the mutation machine is the single
+        # admission writer; this workflow must not race it on a schedule.
         text = STEWARD_WORKFLOW.read_text(encoding="utf-8")
         document = yaml.load(text, Loader=yaml.BaseLoader)
-        self.assertEqual(document["on"]["schedule"][0]["cron"], "*/10 * * * *")
-        self.assertIn("github.event_name == 'schedule' || inputs.apply", text)
+        self.assertNotIn("schedule", document["on"])
+        self.assertIn("workflow_dispatch", document["on"])
+        self.assertIn("APPLY: ${{ inputs.apply }}", text)
+        self.assertNotIn("github.event_name == 'schedule'", text)
         self.assertIn("runner steward --repo", text)
         self.assertIn("--arm-unqueued", text)
         self.assertNotIn("dispatch_recovery", text)
-        self.assertIn('"shipyard-merge-steward.yml", "cadence_minutes": 10',
-                      (REPO_ROOT / ".github" / "schedule-backstop.json").read_text(encoding="utf-8"))
+        self.assertNotIn("shipyard-merge-steward.yml",
+                         (REPO_ROOT / ".github" / "schedule-backstop.json").read_text(encoding="utf-8"))
         self.assertIn("actions: read", text)
         self.assertIn("actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09", text)
         self.assertIn("actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02", text)
-        self.assertIn("Audit exact-head review gates before mutation", text)
-        self.assertIn("shipyard review-verdict", text)
-        self.assertIn('.verdict.verdict == "allowed"', text)
-        self.assertEqual(text.count("run_steward_with_retry()"), 2)
-        self.assertEqual(text.count("for attempt in 1 2 3; do"), 2)
-        self.assertEqual(text.count('sleep "$attempt"'), 2)
-
+        self.assertEqual(text.count("run_steward_with_retry()"), 1)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
