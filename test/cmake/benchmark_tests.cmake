@@ -49,7 +49,8 @@ if(PULP_GRAPH_DIRECT_COPY_BENCHMARK)
     target_link_libraries(pulp-graph-direct-copy-benchmark PRIVATE
         pulp::host pulp::format pulp::graph)
     add_executable(pulp-graph-r2-measurement
-        test_graph_r2_measurement.cpp)
+        test_graph_r2_measurement.cpp
+        harness/rt_allocation_probe.cpp)
     target_link_libraries(pulp-graph-r2-measurement PRIVATE
         pulp::host pulp::format pulp::graph)
 endif()

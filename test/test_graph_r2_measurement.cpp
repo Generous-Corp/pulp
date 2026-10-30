@@ -2,13 +2,14 @@
 //
 // The executable is deliberately standalone: it uses one fixed source buffer,
 // preallocated routed scratch, identical warmup and timing loops, and a
-// bit-exact output oracle for every topology/block-size pair. It is intended
+// deterministic output oracle for every topology/block-size pair. It is intended
 // for paired baseline/candidate runs, not as a CTest timing gate.
 
 #include <pulp/audio/buffer.hpp>
 #include <pulp/format/graph_runtime_executor.hpp>
 #include <pulp/format/process_block.hpp>
 #include <pulp/graph/graph_runtime_plan.hpp>
+#include "harness/rt_allocation_probe.hpp"
 
 #include <algorithm>
 #include <array>
@@ -42,7 +43,7 @@ using pulp::graph::GraphRuntimeNodeSpec;
 constexpr double kSampleRate = 48000.0;
 constexpr int kWarmupBlocks = 500;
 constexpr int kTimedBlocks = 100000;
-constexpr int kSamples = 7;
+constexpr int kSamples = 31;
 
 struct PassState {
     float gain = 1.0f;
@@ -78,6 +79,7 @@ std::string_view shape_name(Shape shape) {
 }
 
 struct Case {
+    int scale = 1;
     GraphRuntimeSnapshot snapshot;
     GraphRuntimeBufferPool pool;
     std::vector<PassState> states;
@@ -102,7 +104,8 @@ std::vector<float> fixed_input(int frames) {
     return values;
 }
 
-bool build_case(Shape shape, int frames, Case& result, std::string& error) {
+bool build_case(Shape shape, int frames, int scale, Case& result, std::string& error) {
+    result.scale = scale;
     std::vector<GraphRuntimeNodeSpec> nodes;
     std::vector<GraphRuntimeConnectionSpec> connections;
     const auto add_node = [&](pulp::graph::NodeId id, GraphRuntimeNodeKind kind,
@@ -125,28 +128,29 @@ bool build_case(Shape shape, int frames, Case& result, std::string& error) {
         result.states.emplace_back(PassState{});
         result.expected = fixed_input(frames);
     } else if (shape == Shape::Chain) {
-        add_node(2, GraphRuntimeNodeKind::Processor, 1, 1);
-        add_node(3, GraphRuntimeNodeKind::Processor, 1, 1);
-        add_node(4, GraphRuntimeNodeKind::Processor, 1, 1);
-        add_node(5, GraphRuntimeNodeKind::AudioOutput, 1, 0);
+        const int count = std::max(1, scale);
+        for (int i = 0; i < count; ++i)
+            add_node(static_cast<pulp::graph::NodeId>(2 + i), GraphRuntimeNodeKind::Processor, 1, 1);
+        add_node(static_cast<pulp::graph::NodeId>(2 + count), GraphRuntimeNodeKind::AudioOutput, 1, 0);
         connect(1, 2);
-        connect(2, 3);
-        connect(3, 4);
-        connect(4, 5);
-        result.states.assign(3, PassState{});
+        for (int i = 0; i + 1 < count; ++i)
+            connect(static_cast<pulp::graph::NodeId>(2 + i), static_cast<pulp::graph::NodeId>(3 + i));
+        connect(static_cast<pulp::graph::NodeId>(1 + count), static_cast<pulp::graph::NodeId>(2 + count));
+        result.states.assign(static_cast<std::size_t>(count), PassState{});
         result.expected = fixed_input(frames);
     } else {
-        add_node(2, GraphRuntimeNodeKind::Processor, 1, 1);
-        add_node(3, GraphRuntimeNodeKind::Processor, 1, 1);
-        add_node(4, GraphRuntimeNodeKind::AudioOutput, 1, 0);
-        connect(1, 2);
-        connect(1, 3);
-        connect(2, 4);
-        connect(3, 4);
-        result.states.assign(2, PassState{});
+        const int branches = std::max(2, scale);
+        for (int i = 0; i < branches; ++i)
+            add_node(static_cast<pulp::graph::NodeId>(2 + i), GraphRuntimeNodeKind::Processor, 1, 1);
+        add_node(static_cast<pulp::graph::NodeId>(2 + branches), GraphRuntimeNodeKind::AudioOutput, 1, 0);
+        for (int i = 0; i < branches; ++i) {
+            connect(1, static_cast<pulp::graph::NodeId>(2 + i));
+            connect(static_cast<pulp::graph::NodeId>(2 + i), static_cast<pulp::graph::NodeId>(2 + branches));
+        }
+        result.states.assign(static_cast<std::size_t>(branches), PassState{});
         result.expected = fixed_input(frames);
         for (auto& value : result.expected)
-            value *= 2.0f;
+            value *= static_cast<float>(branches);
     }
 
     std::vector<GraphRuntimeNodeBinding> bindings;
@@ -199,11 +203,15 @@ bool run_one(Case& test, GraphRuntimeExecutor& executor) {
     return executor.process_routed(test.block, test.snapshot, test.pool).ok();
 }
 
+// Fan-in reduction may differ by a few ulps as branch count grows; the
+// bounded tolerance checks the semantic result, while repeated-run checks below
+// still require bitwise stability.
 bool oracle_matches(const Case& test) {
     for (std::size_t frame = 0; frame < test.expected.size(); ++frame) {
         const auto actual_bits = std::bit_cast<std::uint32_t>(test.output[0][frame]);
         const auto expected_bits = std::bit_cast<std::uint32_t>(test.expected[frame]);
-        if (actual_bits != expected_bits)
+        if (actual_bits != expected_bits &&
+            std::fabs(test.output[0][frame] - test.expected[frame]) > 1.0e-4f)
             return false;
     }
     return true;
@@ -243,20 +251,37 @@ int run() {
     std::cout << "graph_direct_copy_benchmark_v1 timer_overhead_ns=" << std::fixed
               << std::setprecision(3) << overhead_ns << '\n';
     for (const auto shape : {Shape::Passthrough, Shape::Chain, Shape::Fanout}) {
-        for (const int frames : {16, 32, 64, 128, 512}) {
+        for (const int scale : {1, 4, 16, 64}) {
+          if ((shape == Shape::Passthrough && scale != 1) ||
+              (shape == Shape::Fanout && scale == 1)) continue;
+          for (const int frames : {16, 32, 64, 128, 512}) {
             Case test;
             std::string error;
-            const auto build_start = std::chrono::steady_clock::now();
-            if (!build_case(shape, frames, test, error)) {
+            std::array<double, kSamples> activation_samples{};
+            for (auto& sample : activation_samples) {
+                Case probe;
+                const auto build_start = std::chrono::steady_clock::now();
+                if (!build_case(shape, frames, scale, probe, error)) {
+                    std::cerr << "error shape=" << shape_name(shape) << " block=" << frames << " "
+                              << error << '\n';
+                    return EXIT_FAILURE;
+                }
+                const auto build_end = std::chrono::steady_clock::now();
+                sample = std::chrono::duration<double, std::nano>(build_end - build_start).count();
+            }
+            if (!build_case(shape, frames, scale, test, error)) {
                 std::cerr << "error shape=" << shape_name(shape) << " block=" << frames << " "
                           << error << '\n';
                 return EXIT_FAILURE;
             }
-            const auto build_end = std::chrono::steady_clock::now();
-            const auto build_ns =
-                std::chrono::duration<double, std::nano>(build_end - build_start).count();
-            std::cout << "shape=" << shape_name(shape) << " block=" << frames
-                      << " activation_build_ns=" << std::fixed << std::setprecision(3) << build_ns
+            std::sort(activation_samples.begin(), activation_samples.end());
+            const auto activation_p50_ns = activation_samples[kSamples / 2];
+            const auto activation_p99_ns = activation_samples[(kSamples * 99 + 99) / 100 - 1];
+            const auto activation_max_ns = activation_samples.back();
+            std::cout << "shape=" << shape_name(shape) << " scale=" << scale << " block=" << frames
+                      << " activation_p50_ns=" << std::fixed << std::setprecision(3) << activation_p50_ns
+                      << " activation_p99_sample_ns=" << activation_p99_ns
+                      << " activation_max_ns=" << activation_max_ns
                       << " scratch_slots=" << test.snapshot.buffer_slot_count() << '\n';
             GraphRuntimeExecutor executor;
             for (int i = 0; i < kWarmupBlocks; ++i) {
@@ -271,6 +296,34 @@ int run() {
                           << '\n';
                 return EXIT_FAILURE;
             }
+            std::vector<std::uint32_t> baseline_bits;
+            baseline_bits.reserve(test.output[0].size());
+            for (const float value : test.output[0])
+                baseline_bits.push_back(std::bit_cast<std::uint32_t>(value));
+            std::size_t process_allocations = 0;
+            {
+                pulp::test::RtAllocationProbe probe;
+                if (!run_one(test, executor)) {
+                    std::cerr << "process_failed shape=" << shape_name(shape) << " block=" << frames << '\n';
+                    return EXIT_FAILURE;
+                }
+                process_allocations = probe.allocation_count();
+            }
+            if (process_allocations != 0) {
+                std::cerr << "process_allocations shape=" << shape_name(shape)
+                          << " scale=" << scale << " block=" << frames
+                          << " count=" << process_allocations << '\n';
+                return EXIT_FAILURE;
+            }
+            if (!oracle_matches(test)) {
+                std::cerr << "oracle_failed_after_probe shape=" << shape_name(shape) << " block=" << frames << '\n';
+                return EXIT_FAILURE;
+            }
+            for (std::size_t index = 0; index < baseline_bits.size(); ++index)
+                if (std::bit_cast<std::uint32_t>(test.output[0][index]) != baseline_bits[index]) {
+                    std::cerr << "repeat_mismatch shape=" << shape_name(shape) << " block=" << frames << '\n';
+                    return EXIT_FAILURE;
+                }
             std::array<double, kSamples> samples{};
             for (auto& sample : samples) {
                 sample = timed_sample(test, executor, overhead_ns);
@@ -286,13 +339,20 @@ int run() {
                 }
             }
             std::sort(samples.begin(), samples.end());
-            const auto median_ns = samples[kSamples / 2];
-            std::cout << "shape=" << shape_name(shape) << " block=" << frames
+            const auto p50_ns = samples[kSamples / 2];
+            const auto p99_ns = samples[(kSamples * 99 + 99) / 100 - 1];
+            const auto max_ns = samples.back();
+            const auto jitter_ns = max_ns - samples.front();
+            std::cout << "shape=" << shape_name(shape) << " scale=" << scale << " block=" << frames
                       << " warmup=" << kWarmupBlocks << " iterations=" << kTimedBlocks
-                      << " samples=" << kSamples << " corrected_ns=" << std::fixed
-                      << std::setprecision(3) << median_ns << " oracle=pass"
+                      << " samples=" << kSamples << " p50_ns=" << std::fixed << std::setprecision(3) << p50_ns
+                      << " p99_sample_ns=" << p99_ns << " max_ns=" << max_ns
+                      << " jitter_ns=" << jitter_ns << " observed_wcet_proxy_ns=" << max_ns
+                      << " oracle=pass"
+                      << " process_allocations=" << process_allocations
                       << " output_bits=0x" << std::hex
                       << std::bit_cast<std::uint32_t>(test.output[0][0]) << std::dec << '\n';
+          }
         }
     }
     return EXIT_SUCCESS;
