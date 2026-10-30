@@ -29,14 +29,16 @@ struct GainState {
     float gain = 0.5f;
 };
 
-CustomNodeType make_gain_type() {
+CustomNodeType make_gain_type(float initial_gain) {
     CustomNodeType type;
     type.type_id = kNodeType;
     type.version = 1;
     type.num_input_ports = 1;
     type.num_output_ports = 1;
     type.default_name = "Project Gain";
-    type.create = [] { return static_cast<void*>(new GainState); };
+    type.create = [initial_gain] {
+        return static_cast<void*>(new GainState{initial_gain});
+    };
     type.destroy = [](void* p) { delete static_cast<GainState*>(p); };
     type.prepare = [](void*, double, int) {};
     type.release = [](void*) {};
@@ -83,7 +85,7 @@ std::unique_ptr<Project> make_project(float parameter_value) {
     auto project = std::make_unique<Project>();
     project->state.add_parameter({.id = kGainParam, .name = "Gain", .range = {0.0, 2.0, 0.5}});
     project->state.set_value(kGainParam, parameter_value);
-    REQUIRE(project->graph.register_custom_node_type(make_gain_type()));
+    REQUIRE(project->graph.register_custom_node_type(make_gain_type(parameter_value)));
     project->input = project->graph.add_input_node(1, "Input");
     project->gain = project->graph.add_custom_node(kNodeType, "Gain");
     project->output = project->graph.add_output_node(1, "Output");
@@ -120,7 +122,18 @@ std::uint64_t midi_hash(const pulp::midi::MidiBuffer& midi) {
 TEST_CASE("public graph, state, preset, MIDI, and offline render round-trip together",
           "[host][state][project][cc8]") {
     pulp::test::PresetTestSandbox sandbox("pulp-project-roundtrip");
+    auto baseline = make_project(0.5f);
     auto source = make_project(1.25f);
+    pulp::audio::Buffer<float> baseline_input(1, 32);
+    for (int i = 0; i < 32; ++i) baseline_input.channel(0)[i] = static_cast<float>(i + 1);
+    const auto baseline_input_view =
+        static_cast<const pulp::audio::Buffer<float>&>(baseline_input).view();
+    OfflineSignalGraphHost baseline_host(baseline->graph);
+    REQUIRE(baseline_host.prepare({.sample_rate = 48000.0, .block_frames = 32,
+                                   .input_channels = 1, .output_channels = 1}));
+    const auto baseline_render =
+        baseline_host.render({.frame_count = 32, .input = baseline_input_view});
+    REQUIRE(baseline_render.ok);
     REQUIRE(source->graph.prepare(48000.0, 32));
 
     pulp::midi::MidiBuffer events;
@@ -142,6 +155,7 @@ TEST_CASE("public graph, state, preset, MIDI, and offline render round-trip toge
                                       .input_channels = 1, .output_channels = 1}));
     const auto source_fine_render = source_fine_host.render({.frame_count = 32, .input = input_view});
     REQUIRE(source_fine_render.ok);
+    REQUIRE(audio_hash(source_render.audio) != audio_hash(baseline_render.audio));
     pulp::midi::MidiBuffer source_events;
     source_events.reserve_events(4);
     REQUIRE(source->graph.extract_midi(source->midi_out, source_events));
