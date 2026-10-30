@@ -7,6 +7,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -200,6 +201,50 @@ void render_blocks(SignalGraph& graph, int blocks) {
     pulp::audio::BufferView<float> ov(out_ptrs.data(), 2, kFrames);
     pulp::audio::BufferView<const float> iv(in_ptrs.data(), 2, kFrames);
     for (int i = 0; i < blocks; ++i) graph.process(ov, iv, kFrames);
+}
+
+bool render_phase_block(SignalGraph& graph, std::uint64_t first_frame) {
+    std::array<float, kFrames> input_l{};
+    std::array<float, kFrames> input_r{};
+    std::array<float, kFrames> output_l{};
+    std::array<float, kFrames> output_r{};
+    for (int i = 0; i < kFrames; ++i)
+        input_l[static_cast<std::size_t>(i)] =
+            1.0f + 0.001f * static_cast<float>(first_frame + static_cast<std::uint64_t>(i));
+    input_r = input_l;
+    const std::array<const float*, 2> inputs{input_l.data(), input_r.data()};
+    const std::array<float*, 2> outputs{output_l.data(), output_r.data()};
+    pulp::audio::BufferView<const float> input_view(inputs.data(), 2, kFrames);
+    pulp::audio::BufferView<float> output_view(outputs.data(), 2, kFrames);
+    graph.process(output_view, input_view, kFrames);
+    for (int i = 0; i < kFrames; ++i) {
+        const auto index = static_cast<std::size_t>(i);
+        const float expected = input_l[index] * 0.25f;
+        if (!std::isfinite(output_l[index]) || !std::isfinite(output_r[index]) ||
+            output_l[index] == 0.0f || output_r[index] == 0.0f ||
+            std::fabs(output_l[index] - expected) > 1.0e-6f ||
+            std::fabs(output_r[index] - expected) > 1.0e-6f)
+            return false;
+    }
+    return true;
+}
+
+bool render_silent_block(SignalGraph& graph) {
+    std::array<float, kFrames> input{};
+    std::array<float, kFrames> output_l{};
+    std::array<float, kFrames> output_r{};
+    input.fill(1.0f);
+    output_l.fill(0.125f);
+    output_r.fill(0.125f);
+    const std::array<const float*, 2> inputs{input.data(), input.data()};
+    const std::array<float*, 2> outputs{output_l.data(), output_r.data()};
+    pulp::audio::BufferView<const float> input_view(inputs.data(), 2, kFrames);
+    pulp::audio::BufferView<float> output_view(outputs.data(), 2, kFrames);
+    graph.process(output_view, input_view, kFrames);
+    return std::all_of(output_l.begin(), output_l.end(),
+                       [](float value) { return std::isfinite(value) && value == 0.0f; }) &&
+           std::all_of(output_r.begin(), output_r.end(),
+                       [](float value) { return std::isfinite(value) && value == 0.0f; });
 }
 
 NodeLiveSwapPolicy allowing_policy() {
@@ -468,6 +513,51 @@ TEST_CASE("live plugin swap staging rejects default-off nodes",
                   LiveSwapFallbackReason::NotOptedIn,
                   s->plugin);
     CHECK(destroyed_count(s->replacement_stats) == 0);
+}
+
+TEST_CASE("latency-changing replacement has an intentional interruption contract",
+          "[host][graph][live-swap][latency][continuity]") {
+    SlotBehavior old_behavior{.info = make_info("same"), .latency = 0};
+    SlotBehavior replacement_behavior{.info = make_info("same"), .latency = 32};
+    auto s = make_stage_setup(std::move(old_behavior), std::move(replacement_behavior));
+    std::uint64_t frame = 0;
+    REQUIRE(render_phase_block(s->graph, frame));
+    frame += kFrames;
+    render_blocks(s->graph, 10); // establish live-swap admission history
+
+    s->graph.begin_swap_edit();
+    CHECK(s->graph.stage_plugin_replacement(s->plugin, s->token) ==
+          SignalGraph::SwapResult::NeedsEagerPrepare);
+    expect_reason(s->graph, LiveSwapFallbackReason::LatencyChanged, s->plugin);
+
+    // Latency changes are outside the no-silence live-swap contract. The
+    // refusal intentionally invalidates the live snapshot, so the bounded
+    // interruption is explicit silence until eager preparation completes.
+    for (int block = 0; block < 3; ++block) {
+        REQUIRE(render_silent_block(s->graph));
+        frame += kFrames;
+    }
+    CHECK(destroyed_count(s->replacement_stats) == 1);
+
+    REQUIRE(s->graph.prepare(kSr, kFrames));
+    CHECK(render_phase_block(s->graph, frame));
+}
+
+TEST_CASE("unchanged-latency replacement preserves playback continuity",
+          "[host][graph][live-swap][latency][continuity]") {
+    SlotBehavior old_behavior{.info = make_info("same"), .latency = 0};
+    SlotBehavior replacement_behavior{.info = make_info("same"), .latency = 0};
+    auto s = make_stage_setup(std::move(old_behavior), std::move(replacement_behavior));
+    std::uint64_t frame = 0;
+    REQUIRE(render_phase_block(s->graph, frame));
+    frame += kFrames;
+    render_blocks(s->graph, 10); // establish live-swap admission history
+
+    s->graph.begin_swap_edit();
+    REQUIRE(s->graph.stage_plugin_replacement(s->plugin, s->token) ==
+            SignalGraph::SwapResult::Staged);
+    REQUIRE(s->graph.prepare_swap(kSr, kFrames) == SignalGraph::SwapResult::Swapped);
+    CHECK(render_phase_block(s->graph, frame));
 }
 
 TEST_CASE("live plugin swap staging reports refusal reasons and releases candidates",
