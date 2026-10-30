@@ -573,12 +573,33 @@ TEST_CASE("live plugin swap staging reports refusal reasons and releases candida
                                           .latency = 32};
         auto s = make_stage_setup(std::move(old_behavior),
                                   std::move(replacement_behavior));
+        std::atomic<int> swap_acks{0};
+        auto policy = allowing_policy();
+        policy.on_instance_swapped =
+            [&](NodeId, std::shared_ptr<PluginSlot>, std::shared_ptr<PluginSlot>) {
+                swap_acks.fetch_add(1, std::memory_order_relaxed);
+            };
+        REQUIRE(s->graph.set_node_live_swap_policy(s->plugin, std::move(policy)));
+        render_blocks(s->graph, 2);
         s->graph.begin_swap_edit();
         CHECK(s->graph.stage_plugin_replacement(s->plugin, s->token)
               == SignalGraph::SwapResult::NeedsEagerPrepare);
         expect_reason(s->graph,
                       LiveSwapFallbackReason::LatencyChanged,
                       s->plugin);
+        // The latency-changing candidate is never published and no swap
+        // acknowledgement is emitted. The transaction invalidates the live
+        // snapshot, so the caller must explicitly re-prepare the unchanged
+        // authoring graph before processing can resume.
+        CHECK(swap_acks.load(std::memory_order_relaxed) == 0);
+        CHECK(destroyed_count(s->replacement_stats) == 1);
+        const int calls_while_invalidated = process_call_count(s->old_stats);
+        render_blocks(s->graph, 1);
+        CHECK(process_call_count(s->old_stats) == calls_while_invalidated);
+        REQUIRE(s->graph.prepare(kSr, kFrames));
+        const int calls_before_reprepare_render = process_call_count(s->old_stats);
+        render_blocks(s->graph, 2);
+        CHECK(process_call_count(s->old_stats) > calls_before_reprepare_render);
         CHECK(destroyed_count(s->replacement_stats) == 1);
     }
 
