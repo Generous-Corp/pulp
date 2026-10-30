@@ -34,6 +34,10 @@
 #include "support/thread_progress.hpp"
 #include "support/unique_temp_dir.hpp"
 
+#ifdef PULP_TEST_VST3_PATH
+#include "../examples/pulp-gain/pulp_gain.hpp"
+#endif
+
 #include <atomic>
 #include <chrono>
 #include <cstdio>
@@ -1207,6 +1211,17 @@ TEST_CASE("Source-owned VST3 gain parameter output probe",
                                  [](const HostParamInfo& p) { return p.name == "Input Gain"; });
     REQUIRE(it != infos.end());
     const auto gain_id = it->id;
+    pulp::state::StateStore source_store;
+    pulp::examples::PulpGainProcessor source_processor;
+    source_processor.define_parameters(source_store);
+    const auto* source_info = source_store.info(pulp::examples::kInputGain);
+    REQUIRE(source_info != nullptr);
+    std::fprintf(stderr, "VST3_SOURCE_RANGE name=%s min=%g max=%g default=%g unit=%s\n",
+                 source_info->name.c_str(), source_info->range.min, source_info->range.max,
+                 source_info->range.default_value, source_info->unit.c_str());
+    REQUIRE(std::isfinite(source_info->range.min));
+    REQUIRE(std::isfinite(source_info->range.max));
+    REQUIRE(std::isfinite(source_info->range.default_value));
     std::fprintf(stderr, "VST3_METADATA name=%s id=%u min=%g max=%g default=%g unit=%s\n",
                  it->name.c_str(), it->id, it->min_value, it->max_value, it->default_value,
                  it->unit.c_str());
