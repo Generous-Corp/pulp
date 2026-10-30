@@ -1180,6 +1180,106 @@ TEST_CASE("Scanner -> load -> process -> unload round-trip on real CLAP plugin",
 }
 #endif
 
+
+#ifdef PULP_TEST_VST3_PATH
+TEST_CASE("Source-owned VST3 gain parameter output probe",
+          "[host][vst3][integration][state][regression]") {
+    const fs::path vst3_path = PULP_TEST_VST3_PATH;
+    REQUIRE(fs::exists(vst3_path));
+    ScratchDir scratch("vst3-gain-probe");
+    const fs::path isolated = copy_bundle_for_scan(vst3_path, scratch.path);
+    ScanOptions opts;
+    opts.scan_vst3 = true;
+    opts.scan_au = false;
+    opts.scan_lv2 = false;
+    opts.scan_clap = false;
+    opts.only_extra_paths = true;
+    opts.extra_paths.push_back(isolated.parent_path().string());
+    PluginScanner scanner;
+    const auto plugins = scanner.scan(opts);
+    REQUIRE(plugins.size() == 1);
+    REQUIRE(plugins.front().format == PluginFormat::VST3);
+    auto slot = PluginSlot::load(plugins.front());
+    REQUIRE(slot != nullptr);
+    REQUIRE(slot->prepare(48000.0, 256));
+    const auto infos = slot->parameters();
+    const auto it = std::find_if(infos.begin(), infos.end(),
+                                 [](const HostParamInfo& p) { return p.name == "Input Gain"; });
+    REQUIRE(it != infos.end());
+    const auto gain_id = it->id;
+    auto render = [&]() {
+        constexpr int kFrames = 256;
+        std::vector<float> in_l(kFrames, 1.f), in_r(kFrames, 1.f);
+        std::vector<float> out_l(kFrames, 0.f), out_r(kFrames, 0.f);
+        const float* ins[2] = {in_l.data(), in_r.data()};
+        float* outs[2] = {out_l.data(), out_r.data()};
+        pulp::audio::BufferView<const float> input(ins, 2, kFrames);
+        pulp::audio::BufferView<float> output(outs, 2, kFrames);
+        pulp::midi::MidiBuffer midi_in, midi_out;
+        ParameterEventQueue params;
+        slot->process(output, input, midi_in, midi_out, params, kFrames);
+        float energy = 0.f;
+        for (int i = 0; i < kFrames; ++i)
+            energy += std::abs(out_l[i]) + std::abs(out_r[i]);
+        return energy;
+    };
+    const float baseline = render();
+    slot->set_parameter(gain_id, -6.f);
+    const float readback = slot->get_parameter(gain_id);
+    const float changed = render();
+    INFO("gain_id=" << gain_id << " baseline_energy=" << baseline
+         << " readback=" << readback << " changed_energy=" << changed);
+    REQUIRE(std::abs(baseline - 512.f) < 1e-3f);
+    const float expected = 512.f * std::pow(10.f, -6.f / 20.f);
+    REQUIRE(std::abs(readback + 6.f) < 1e-4f);
+    REQUIRE(std::abs(changed - expected) < 1e-3f);
+    slot->release();
+}
+#endif
+
+#ifdef PULP_TEST_TONE_VST3_PATH
+TEST_CASE("Source-owned VST3 tone event output probe",
+          "[host][vst3][integration][midi][regression]") {
+    const fs::path vst3_path = PULP_TEST_TONE_VST3_PATH;
+    REQUIRE(fs::exists(vst3_path));
+    ScratchDir scratch("vst3-tone-probe");
+    const fs::path isolated = copy_bundle_for_scan(vst3_path, scratch.path);
+    ScanOptions opts;
+    opts.scan_vst3 = true;
+    opts.scan_au = false;
+    opts.scan_lv2 = false;
+    opts.scan_clap = false;
+    opts.only_extra_paths = true;
+    opts.extra_paths.push_back(isolated.parent_path().string());
+    PluginScanner scanner;
+    const auto plugins = scanner.scan(opts);
+    REQUIRE(plugins.size() == 1);
+    auto slot = PluginSlot::load(plugins.front());
+    REQUIRE(slot != nullptr);
+    REQUIRE(slot->prepare(48000.0, 256));
+    constexpr int kFrames = 256;
+    std::vector<float> out_l(kFrames, 0.f), out_r(kFrames, 0.f);
+    float* outs[2] = {out_l.data(), out_r.data()};
+    pulp::audio::BufferView<float> output(outs, 2, kFrames);
+    pulp::audio::BufferView<const float> input;
+    pulp::midi::MidiBuffer midi_in, midi_out;
+    REQUIRE(midi_in.add(pulp::midi::MidiEvent::note_on(0, 60, 100)));
+    ParameterEventQueue params;
+    slot->process(output, input, midi_in, midi_out, params, kFrames);
+    float left = 0.f, right = 0.f;
+    bool finite = true;
+    for (int i = 0; i < kFrames; ++i) {
+        finite = finite && std::isfinite(out_l[i]) && std::isfinite(out_r[i]);
+        left += std::abs(out_l[i]);
+        right += std::abs(out_r[i]);
+    }
+    REQUIRE(finite);
+    REQUIRE(left > 0.f);
+    REQUIRE(right > 0.f);
+    slot->release();
+}
+#endif
+
 // Regression for #545: sanity-check that `only_extra_paths` actually
 // suppresses the default scan roots. Uses an empty scratch directory so
 // the scanner has nothing legitimate to find — under the fix, the plugin
