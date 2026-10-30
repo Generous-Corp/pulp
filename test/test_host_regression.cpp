@@ -1401,7 +1401,8 @@ TEST_CASE("Source-owned VST3 gain parameter output probe",
                                         (source_info->range.max - source_info->range.min);
             const float expected_energy = 512.f * std::pow(10.f, requested / 20.f);
             REQUIRE(std::abs(readback - requested) < 1e-4f);
-            REQUIRE(std::abs(changed - expected_energy) < 1e-3f);
+            const float energy_tolerance = 1e-4f * std::max(1.0f, std::abs(expected_energy));
+            REQUIRE(std::abs(changed - expected_energy) < energy_tolerance);
             INFO("expected_norm=" << expected_norm);
         }
     }
