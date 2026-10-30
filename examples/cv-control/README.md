@@ -27,10 +27,27 @@ the browser WAM. Brightness remains the saved and automatable base value.
   graded confidence score. The page's Start button also starts a demo note.
 
 Build the native target with `pulp build --target pulp-cv-control-standalone` and
-run `pulp-cv-control-test`. Build the WAM target using the existing web-demo
-instructions; it emits `CvFaceToneWorklet.js` for the page. Serve this directory
-through HTTP(S), since camera APIs and AudioWorklet are not available from
-`file://`.
+run `pulp-cv-control-test`. For the browser, install Emscripten and run these
+commands from the Pulp repository root (`PULP_WAM_CHOC_INCLUDE` is needed only
+when CMake cannot locate choc):
+
+```sh
+emcmake cmake -S examples/web-demos/wasm-build -B examples/web-demos/wasm-build/build -DCMAKE_BUILD_TYPE=Release
+tools/ci/governed-build.sh cmake --build examples/web-demos/wasm-build/build --target CvFaceToneWorklet-wam
+node examples/cv-control/web/assemble.mjs
+python3 -m http.server 8731
+```
+
+Open `http://localhost:8731/examples/cv-control/web/`. The assembly step copies
+the generated single-file DSP next to WAM's processor and runtime module; the
+processor imports `./wam-dsp.js` directly. The web page cannot load the DSP
+from a separate build directory through the adapter's `dsp` option. Camera
+APIs and AudioWorklet require localhost or another secure origin, not `file://`.
+With `playwright-core` and Chrome installed, run
+`node examples/cv-control/web/validate.mjs` from the repository root to test
+the assembled worklet and C++ modulation in a real headless browser without
+camera hardware. The Web Plugins CI lane runs this smoke test. A live camera
+and permission check still requires an interactive browser session.
 
 The browser requires a secure context for camera access and a user gesture for
 audio. Stop releases camera tracks and audio resources. If the provider stops

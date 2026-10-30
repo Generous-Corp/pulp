@@ -14,8 +14,9 @@ import { sendControlSample } from "./control_input.mjs";
 import { createWamAdapter } from "../../../packages/pulp-web-player/src/adapters/wam.js";
 
 const PARAM_BRIGHTNESS = 100;
-const WORKLET_DSP = "../../web-demos/wasm-build/build/CvFaceToneWorklet.js";
-const WORKLET_PROCESSOR = "../../../packages/pulp-web-player/src/vendor/pulp-wasm/wam-processor.js";
+// assemble.mjs places the DSP beside its worklet processor, as WAM requires.
+const WORKLET_DSP = "./wam/wam-dsp.js";
+const WORKLET_PROCESSOR = "./wam/wam-processor.js";
 const status = (s) => document.querySelector("#status").textContent = s;
 let active = null;
 
