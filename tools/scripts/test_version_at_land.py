@@ -22,6 +22,7 @@ concurrent post-merge drains must not lose or duplicate a version (the
 from __future__ import annotations
 
 import contextlib
+from dataclasses import replace
 import hashlib
 import io
 import json
@@ -1984,6 +1985,25 @@ class MigrationFoldRouteTest(unittest.TestCase):
         self._bump_pr_lands_after("fader", tag=False)
         self.assertIn("fader changed", self._show("main", "docs/migrations/v0.3.0.md") or "")
         self.assertNotIn("fader changed", self._show("main", "docs/migrations/v0.2.0.md") or "")
+
+
+class WriterAllowlistTest(unittest.TestCase):
+    def test_release_outputs_are_allowed(self) -> None:
+        val._validate_writer_paths(CONFIG, [
+            "CMakeLists.txt",
+            "CHANGELOG.md",
+            "docs/migrations/v1.2.3.md",
+            "docs/migrations/unreleased/note.md",
+        ])
+
+    def test_unapproved_path_fails_closed(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "unapproved release paths"):
+            val._validate_writer_paths(CONFIG, ["core/runtime/src/evil.cpp"])
+
+    def test_empty_allowlist_fails_closed(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "allowlist is empty"):
+            val._validate_writer_paths(
+                replace(CONFIG, writer_allowed_globs=[]), ["CMakeLists.txt"])
 
 
 if __name__ == "__main__":
