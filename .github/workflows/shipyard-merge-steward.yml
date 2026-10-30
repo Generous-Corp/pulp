@@ -120,8 +120,23 @@ jobs:
             [ -n "$candidate" ] || continue
             pr=$(jq -r '.number' <<<"$candidate")
             head=$(jq -r '.head_sha' <<<"$candidate")
+            review_verdict_with_retry() {
+              local attempt status output
+              for attempt in 1 2 3;
+              do
+                set +e
+                output=$(shipyard review-verdict --repo "$GITHUB_REPOSITORY" --pr "$pr" --head "$head" --json)
+                status=$?
+                set -e
+                if [ "$status" -lt 2 ] || [ "$attempt" -eq 3 ]; then
+                  printf '%s\n' "$output"
+                  return "$status"
+                fi
+                sleep "$((attempt))"
+              done
+            }
             set +e
-            verdict=$(shipyard review-verdict --repo "$GITHUB_REPOSITORY" --pr "$pr" --head "$head" --json)
+            verdict=$(review_verdict_with_retry)
             verdict_status=$?
             set -e
             if [ "$verdict_status" -ge 2 ]; then
