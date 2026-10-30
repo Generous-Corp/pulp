@@ -1314,7 +1314,6 @@ TEST_CASE("Source-owned CLAP tone consumes a note event",
 #endif
 #endif
 
-
 #ifdef PULP_TEST_VST3_PATH
 TEST_CASE("Source-owned VST3 gain parameter output probe",
           "[host][vst3][integration][state][regression]") {
