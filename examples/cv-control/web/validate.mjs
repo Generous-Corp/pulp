@@ -35,6 +35,7 @@ try {
   await sleep(400);
   browser = await chromium.launch({ executablePath: browserPath, headless: true });
   const page = await browser.newPage();
+  page.on("console", (message) => console.log("browser console:", message.text()));
   page.on("pageerror", (error) => console.error("browser error:", error));
   await page.goto(`http://127.0.0.1:${port}/examples/cv-control/web/`);
   const levels = await page.evaluate(async () => {
@@ -45,10 +46,16 @@ try {
       const adapter = await createWamAdapter(ctx, {
         dsp: "./wam/wam-dsp.js", processor: "./wam/wam-processor.js"
       });
+      // Chrome's offline worklet path needs an upstream source to render.
+      const source = ctx.createConstantSource();
+      source.offset.value = 0.5;
+      source.connect(adapter.audioNode);
       adapter.audioNode.connect(ctx.destination);
+      source.start();
       adapter.setParameterValue(100, 0.2);
       adapter.scheduleMidi(0x90, 60, 100);
       sendControlSample(adapter, value, true);
+      await new Promise((resolve) => setTimeout(resolve, 50));
       const audio = await ctx.startRendering();
       adapter.destroy();
       // The DSP initializes asynchronously; compare the steady render tail.

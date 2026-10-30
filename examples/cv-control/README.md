@@ -7,7 +7,8 @@ the browser WAM. Brightness remains the saved and automatable base value.
 - `cv_control.hpp` is the application-owned sample, smoothing, confidence,
   and loss policy. An IMU, proximity sensor, or CV provider can reduce its
   result to the same normalized sample. The audio thread owns this mapping.
-- `main.cpp` is a native standalone host. Set `PULP_CV_OSC_PORT=9001` and send
+- `main.cpp` is a native standalone host. It starts a held demo note so
+  modulation is audible without a MIDI keyboard. Set `PULP_CV_OSC_PORT=9001` and send
   `/pulp/cv/face` with `mouth_open`, `confidence`, `tracked`, and optional
   `sequence` arguments, or `/pulp/control` with normalized `value`,
   `confidence`, `valid`, and optional `sequence` for other inputs. The first
