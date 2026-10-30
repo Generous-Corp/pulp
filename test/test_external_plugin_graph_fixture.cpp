@@ -15,6 +15,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -184,9 +185,45 @@ TEST_CASE("external CLAP lifecycle has explicit identity and removal controls",
     const auto baseline = render_one(*parts);
     const auto baseline_hash = fingerprint(baseline);
     REQUIRE(baseline_hash != 0);
+    auto expected_replay_hash = baseline_hash;
     REQUIRE(parts->graph.live_plugin_slot(parts->plugin));
-    const auto state = parts->graph.live_plugin_slot(parts->plugin)->save_state();
-    REQUIRE_FALSE(state.empty());
+    auto* live_slot = parts->graph.live_plugin_slot(parts->plugin);
+    const auto original_state = live_slot->save_state();
+    REQUIRE_FALSE(original_state.empty());
+
+    const auto parameters = live_slot->parameters();
+    std::vector<std::uint8_t> state_to_restore = original_state;
+    std::optional<std::pair<std::uint32_t, float>> mutated_parameter;
+    const auto writable = std::find_if(parameters.begin(), parameters.end(),
+                                       [](const pulp::host::HostParamInfo& parameter) {
+                                           return parameter.flags.automatable &&
+                                                  !parameter.flags.read_only;
+                                       });
+    if (writable == parameters.end()) {
+        std::cout << "parameter_state=refused reason=no_writable_automatable_parameter\n";
+    } else {
+        const float before = live_slot->get_parameter(writable->id);
+        const float target = std::abs(before - 0.73f) > 0.05f ? 0.73f : 0.17f;
+        live_slot->set_parameter(writable->id, target);
+        const float after = live_slot->get_parameter(writable->id);
+        REQUIRE(std::abs(after - before) > 1.0e-4f);
+        const auto mutated = render_one(*parts);
+        const auto mutated_hash = fingerprint(mutated);
+        std::cout << "parameter_output_changed=" << (mutated_hash != baseline_hash) << '\n';
+        const auto mutated_state = live_slot->save_state();
+        if (mutated_state == original_state) {
+            CHECK(mutated_state == original_state);
+            std::cout << "parameter_state=refused reason=state_blob_unchanged id="
+                      << writable->id << " before=" << before << " after=" << after << '\n';
+        } else {
+            expected_replay_hash = mutated_hash;
+            state_to_restore = mutated_state;
+            mutated_parameter = std::make_pair(writable->id, after);
+            std::cout << "parameter_state=id=" << writable->id << " before=" << before
+                      << " after=" << after << " bytes_before=" << original_state.size()
+                      << " bytes_after=" << mutated_state.size() << '\n';
+        }
+    }
 
     REQUIRE(parts->graph.remove_node(parts->plugin));
     REQUIRE(parts->graph.prepare(48000.0, 128));
@@ -197,8 +234,13 @@ TEST_CASE("external CLAP lifecycle has explicit identity and removal controls",
 
     auto replacement = pulp::host::PluginSlot::load(info);
     REQUIRE(replacement);
-    const bool restored = replacement->restore_state(state);
-    std::cout << "state_restore=" << restored << " bytes=" << state.size() << '\n';
+    const bool restored = replacement->restore_state(state_to_restore);
+    REQUIRE(restored);
+    if (mutated_parameter) {
+        REQUIRE(std::abs(replacement->get_parameter(mutated_parameter->first) -
+                         mutated_parameter->second) < 1.0e-3f);
+    }
+    std::cout << "state_restore=" << restored << " bytes=" << state_to_restore.size() << '\n';
     const auto replacement_node =
         parts->graph.add_plugin_node(std::move(replacement), info.num_inputs, info.num_outputs,
                                      "external lifecycle replacement");
@@ -212,5 +254,5 @@ TEST_CASE("external CLAP lifecycle has explicit identity and removal controls",
     for (const auto* channel : {&replay.left, &replay.right})
         for (const auto value : *channel)
             REQUIRE(std::isfinite(value));
-    REQUIRE(fingerprint(replay) == baseline_hash);
+    REQUIRE(fingerprint(replay) == expected_replay_hash);
 }
