@@ -181,3 +181,39 @@ TEST_CASE("MutableAudioRouteCatalog rejects independent binding through legacy c
 
     REQUIRE_FALSE(catalog.connect_channel("stereo", 0, 1));
 }
+
+TEST_CASE("MutableAudioRouteCatalog whole-bus transitions match graph bindings") {
+    pulp::host::MutableAudioRouteCatalog catalog;
+    catalog.set_routes({
+        {"left", "Left", pulp::host::AudioRouteKind::Track, 2, true},
+        {"right", "Right", pulp::host::AudioRouteKind::Track, 2, true},
+        {"bus", "Bus", pulp::host::AudioRouteKind::Bus, 2, true},
+    });
+    std::array<std::string, 2> graph;
+    catalog.set_connect_channel_callback(
+        [&](const auto& route, std::size_t, std::size_t channel) {
+            graph[channel] = route.stable_id;
+            return true;
+        });
+    REQUIRE(catalog.connect_channel("left", 0, 0));
+    REQUIRE(catalog.connect_channel("right", 0, 1));
+    REQUIRE_FALSE(catalog.connect("bus", 0));
+    REQUIRE(graph[1] == "right");
+    REQUIRE(catalog.connected_route_channel(0, 1) == graph[1]);
+
+    bool reject = true;
+    catalog.set_connect_callback([&](const auto& route, std::size_t) {
+        if (reject)
+            return false;
+        graph = {route.stable_id, {}};
+        return true;
+    });
+    REQUIRE_FALSE(catalog.connect("bus", 0));
+    REQUIRE(catalog.connected_route_channel(0, 1) == graph[1]);
+    reject = false;
+    REQUIRE(catalog.connect("bus", 0));
+    REQUIRE(graph[0] == "bus");
+    REQUIRE(graph[1].empty());
+    REQUIRE(catalog.connected_route_channel(0, 0) == graph[0]);
+    REQUIRE(catalog.connected_route_channel(0, 1) == graph[1]);
+}

@@ -53,6 +53,7 @@ class AudioRouteCatalog {
     /// Install the host graph/bus binding invoked by connect(). This runs on
     /// the control thread; the callback owns the actual graph mutation and
     /// publishes the resulting audio buffers to the realtime processor.
+    /// A successful whole-bus binding replaces every prior channel binding.
     /// Format adapters that cannot retarget project routes leave it unset.
     virtual void set_connect_callback(ConnectCallback callback) {
         (void)callback;
@@ -201,10 +202,12 @@ class MutableAudioRouteCatalog final : public AudioRouteCatalog {
             });
         if (it == routes_.end())
             return false;
-        if (connect_channel_callback_) {
-            if (!connect_channel_callback_(*it, bus_index, 0))
+        if (connect_callback_) {
+            if (!connect_callback_(*it, bus_index))
                 return false;
-        } else if (connect_callback_ && !connect_callback_(*it, bus_index)) {
+        } else if (connect_channel_callback_) {
+            // A per-channel binding cannot replace a whole bus atomically.
+            // Preserve both graph and catalog until the host supplies that operation.
             return false;
         }
         ensure_bus(bus_index);
