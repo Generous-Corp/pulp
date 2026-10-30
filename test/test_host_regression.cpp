@@ -1207,6 +1207,14 @@ TEST_CASE("Source-owned VST3 gain parameter output probe",
                                  [](const HostParamInfo& p) { return p.name == "Input Gain"; });
     REQUIRE(it != infos.end());
     const auto gain_id = it->id;
+    std::fprintf(stderr, "VST3_METADATA name=%s id=%u min=%g max=%g default=%g unit=%s\n",
+                 it->name.c_str(), it->id, it->min_value, it->max_value, it->default_value,
+                 it->unit.c_str());
+    REQUIRE(std::isfinite(it->min_value));
+    REQUIRE(std::isfinite(it->max_value));
+    REQUIRE(std::isfinite(it->default_value));
+    REQUIRE(it->min_value <= it->default_value);
+    REQUIRE(it->default_value <= it->max_value);
     auto render = [&]() {
         constexpr int kFrames = 256;
         std::vector<float> in_l(kFrames, 1.f), in_r(kFrames, 1.f);
