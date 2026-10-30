@@ -283,6 +283,7 @@
       "pulp/format/detail/standalone_key_sequence.hpp",
       "pulp/format/detail/standalone_musical_typing.hpp",
       "pulp/format/detail/standalone_updater.hpp",
+      "pulp/format/detail/standalone_window_factory.hpp",
       "pulp/format/detail/vst3_bus_layout.hpp",
       "pulp/format/detail/vst3_frame_rate.hpp",
       "pulp/format/detail/vst3_midi_mapping.hpp",
