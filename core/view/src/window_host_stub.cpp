@@ -18,6 +18,7 @@
 #endif
 
 #include <mutex>
+#include <utility>
 
 namespace pulp::view {
 
