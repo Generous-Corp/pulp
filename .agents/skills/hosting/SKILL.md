@@ -52,6 +52,15 @@ audio edges. Add a permutation replay with a topology mutation negative control
 when changing this path so agents can distinguish deterministic replay from a
 test that only passes for one insertion order.
 
+The flat execution plan and processor-node adapter caches are prepared-state
+artifacts. Build them only after topology publication, keep bindings read-only
+while the audio callback runs, and invalidate the cached routing/register view
+when a prepared graph generation changes. The adapter fast path is valid only
+for the main audio bus; auxiliary buses still use the bounded routing path.
+Keep the flat-plan, adapter, and load-measurer tests together when changing
+these contracts so a cache hit cannot hide a stale generation or an incorrect
+bus route.
+
 ### SignalGraph snapshot readers
 
 `runtime::Slot::live()` is publisher-thread-only. A status or telemetry

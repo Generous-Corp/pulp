@@ -912,6 +912,12 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME merge-group-shadows-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_merge_group_shadows.py")
         set_tests_properties(merge-group-shadows-selftest PROPERTIES TIMEOUT 180)
+        # Paired affected-test shadow runner: selected execution is concurrent
+        # with, and never authoritative over, the full merge-group command.
+        # script-inputs: not-gated advisory fixture test uses only temporary inputs
+        add_test(NAME paired-affected-tests-shadow-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_paired_affected_tests_shadow.py")
+        set_tests_properties(paired-affected-tests-shadow-selftest PROPERTIES TIMEOUT 120)
         # Per-test content-hash receipts (key derivation, always-run rules,
         # trusted reads), reported in shadow by merge-group macos jobs.
         add_test(NAME test-receipts-shadow-selftest COMMAND ${Python3_EXECUTABLE}

@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 170,
+  "inventory_version": 173,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -43,14 +43,14 @@
   ],
   "counts": {
     "public_headers": 514,
-    "reviewed_headers": 263,
-    "legacy_unreviewed_headers": 251,
+    "reviewed_headers": 264,
+    "legacy_unreviewed_headers": 250,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 121,
       "capability_support": 46,
-      "infrastructure": 94,
-      "legacy_unreviewed": 251,
+      "infrastructure": 95,
+      "legacy_unreviewed": 250,
       "unsupported_capability": 2
     },
     "by_domain": {
@@ -86,8 +86,8 @@
       },
       "signal": {
         "public_headers": 279,
-        "reviewed_headers": 155,
-        "legacy_unreviewed_headers": 124,
+        "reviewed_headers": 156,
+        "legacy_unreviewed_headers": 123,
         "unsupported_headers": 2
       },
       "timebase": {
@@ -407,7 +407,7 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/load_measurer.hpp",
-      "fingerprint": "sha256:268b2aa45e278f04876fa0f5590a36523d35ee13882d37f89c2890b8d4321253",
+      "fingerprint": "sha256:6208bb80a1ef427c9f69ea11a6f0911dfbd0ab832fe55328ecdd12034e4e5b10",
       "include": "pulp/audio/load_measurer.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -1245,7 +1245,7 @@
     {
       "domain": "host",
       "source": "core/host/include/pulp/host/signal_graph_runtime.hpp",
-      "fingerprint": "sha256:a4b87a6d66b3a87383619454f6da74f3ab5e95381fe81c44e25ebfd488c2d390",
+      "fingerprint": "sha256:30c125ede1300e944db42e79bbfbfc295b22dc732005b520030ee68ea5d19eee",
       "include": "pulp/host/signal_graph_runtime.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -4337,11 +4337,11 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/smoothed_value.hpp",
-      "fingerprint": "sha256:bd2d00db0d73183efc1b19ebb0a01ac1f4795525662669e30f8d4fc539406ce3",
+      "fingerprint": "sha256:6d2a27eec926cbe11fecf51dcddebd91f431038ef08ab7067048fc0ee0397044",
       "include": "pulp/signal/smoothed_value.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "SmoothedValue is the bounded parameter-ramping primitive used by signal processors; its timing conversion is implementation infrastructure and is not an independently advertised generator-facing capability."
     },
     {
       "domain": "signal",

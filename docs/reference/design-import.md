@@ -68,6 +68,39 @@ fingerprints retain `claude` provenance; ordinary pages use the distinct
 
 Either `--file` or `--url` is required (or `--directory` for `--detect-only`). When `--url` is provided without `--file`, the URL is fetched through an argv-safe `curl` invocation into a unique temporary file. Literal `--file` paths are read directly and may contain normal filesystem punctuation; `--url` still rejects shell metacharacters before fetching.
 
+### Illustrator and PDF artwork
+
+Illustrator `.ai` files that contain a PDF-compatible payload can be converted
+to SVG with the repository helper.  The same path handles PDF artboards and
+keeps the conversion outside the semantic design importer, where it can be
+reviewed and reproduced independently:
+
+```bash
+pulp import-design --from illustrator \
+  --file hardware_design/panel/beads.ai \
+  --output build/design/beads.svg \
+  --provenance build/design/beads.svg.provenance.json
+```
+
+The aliases `--from ai` and `--from pdf` are equivalent. The Python helper is
+also available for source-checkout automation and emits the same receipt.
+
+The helper uses Poppler's `pdftocairo` through an argv-only subprocess.  It
+requires the converter to be present and executable, accepts only `.ai` and
+`.pdf` inputs, limits conversion to one selected page/artboard (`--page`),
+and writes the SVG atomically.  Set `PULP_PDF_TO_SVG` to an explicitly pinned
+converter for a hermetic build; an absent or invalid converter is a hard
+error.  Existing SVG files stay on the preconverted-SVG validation path and
+are not passed through this converter.
+
+Every successful conversion emits a JSON receipt with schema
+`pulp.illustrator-svg-provenance.v1`.  It binds the source and generated SVG
+SHA-256 digests, byte counts, absolute paths, selected page, and the exact
+`pdftocairo` version.  Keep the receipt next to the SVG when importing the
+artwork so visual comparisons can be tied to the exact source.  Conversion
+does not grant a license to artwork; source and output rights remain with the
+artwork owner and must be reviewed separately.
+
 For a self-sizing runnable HTML panel, opt into authored-frame fitting through
 the normal CLI:
 

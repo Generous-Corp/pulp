@@ -1189,6 +1189,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
             // routed sparse automation. Empty (node_count 0) for graphs with no
             // sparse automation.
             format::GraphRuntimeAutomationScratch automation;
+            format::BusBufferSet buses; // the block's main buses, rebuilt per block
             // The MIDI/automation scratch and the MidiInput/Output node lists are
             // deliberately SHARED across the two paths: the plans are identical and
             // only ONE path runs per block.

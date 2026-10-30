@@ -2775,8 +2775,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/view-bridge/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "18c39091bb81ceb14f07564eb6a9ed060490346c",
-          "object_id": "447dbaf1307f9732e394fb13aebbf3f2299ca560",
+          "revision": "e38795cc50ee6728ac7e0ba1743a1de839c725ec",
+          "object_id": "13c84014ca04efed4940fea3611b5e00bba0ceb0",
           "object_type": "blob"
         },
         {
@@ -3010,8 +3010,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".github/workflows/release-cli.yml",
           "state": "pulp-owned-retained",
-          "revision": "f5de5db36eeccb7e445c2e36b2a43d8061a79d06",
-          "object_id": "49173b4db6877b2b5aba7348696e06d98cdb64b5",
+          "revision": "b8dbd08811425d35c27995a00781d79856098df6",
+          "object_id": "5f2b72852d6a6b5c5ba54cbb570ddcc86ed2b406",
           "object_type": "blob"
         },
         {
@@ -3042,40 +3042,40 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/package_cli.py",
           "state": "pulp-owned-retained",
-          "revision": "5cd6293671d645f6f6658c55aad65c1a960dad28",
-          "object_id": "6b02c0e65795ebfa16ee67dc854e53b8d68bea5f",
+          "revision": "b8dbd08811425d35c27995a00781d79856098df6",
+          "object_id": "e603b271b9bbdcd28d0d4c31b5be5fbbbc687f79",
           "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/release_artifact_contents.py",
           "state": "pulp-owned-retained",
-          "revision": "a922798c4c3e9548aa27f315af972b404ad42915",
-          "object_id": "6d7e9f00ff7cf2032a0e73504fc8ee667758167c",
+          "revision": "267257a57355e84a89d1d4e8a621736e7cd70d3c",
+          "object_id": "f6b51a24f4728a5084d6e1877c44a90a295353cb",
           "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/release_product_matrix.json",
           "state": "pulp-owned-retained",
-          "revision": "2845a264225da6cfe62acd9fd1eff1aa5b1842e7",
-          "object_id": "f9ef228b8ffc07e58b3213a0d69ba35218049e1b",
+          "revision": "b8dbd08811425d35c27995a00781d79856098df6",
+          "object_id": "8a68392839da82bfc2ee0121d1bdbf23a62572ac",
           "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/test_package_cli.py",
           "state": "pulp-owned-retained",
-          "revision": "5cd6293671d645f6f6658c55aad65c1a960dad28",
-          "object_id": "3b8ef1fe6e2977608d37c611e4761a62d0dc491e",
+          "revision": "b8dbd08811425d35c27995a00781d79856098df6",
+          "object_id": "ec379f9fab0317caeab1062548fbab8248261000",
           "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/test_release_artifact_contents.py",
           "state": "pulp-owned-retained",
-          "revision": "a922798c4c3e9548aa27f315af972b404ad42915",
-          "object_id": "48cd042e9ceec94e61d620679ef1efc081808ebb",
+          "revision": "b8dbd08811425d35c27995a00781d79856098df6",
+          "object_id": "37d72c178b887a0f99774e9c3c00e5728112ab3b",
           "object_type": "blob"
         }
       ],

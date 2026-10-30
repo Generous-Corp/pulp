@@ -215,6 +215,7 @@ class ScriptBehaviour(unittest.TestCase):
             binary = idd / "pulp-import-design"
             binary.write_text("", encoding="utf-8")
             binary.chmod(binary.stat().st_mode | stat.S_IXUSR)
+            (idd / "illustrator_to_svg.py").write_text("#!/usr/bin/env python3\n", encoding="utf-8")
             for mjs in ("materialized_binding_contract", "materialized_source_emitter",
                         "materialized_ids_map"):
                 (idd / "jsx-runtime" / f"{mjs}.mjs").write_text("", encoding="utf-8")
@@ -234,6 +235,7 @@ class ScriptBehaviour(unittest.TestCase):
         for flag in ("--binary", "--cpp-binary", "--mcp-binary", "--control-broker-binary",
                      "--control-standalone-host-binary", "--control-standalone-manifest",
                      "--import-design-binary", "--import-design-runtime-dir",
+                     "--import-design-illustrator-helper",
                      "--import-design-contract", "--import-design-source-emitter",
                      "--import-design-ids-map", "--node-runtime", "--node-license"):
             with self.subTest(flag=flag):

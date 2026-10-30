@@ -1,0 +1,191 @@
+name: Shipyard merge steward
+
+# Keep the native merge queue supplied by the existing exact-head steward.
+# Scheduled runs apply only the governed steward path; manual dispatch remains
+# dry-run by default. Review dispatch, repair, rebase, and direct merge remain
+# outside this feeder.
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'Apply exact-head steward mutations'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: shipyard-merge-steward-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    if: github.repository == vars.PULP_PRIMARY_REPO && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Mint repository-scoped Shipyard App token
+        id: shipyard-app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          app-id: ${{ secrets.SHIPYARD_APP_ID }}
+          private-key: ${{ secrets.SHIPYARD_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-administration: read
+          permission-actions: read
+          permission-checks: read
+          permission-contents: write
+          permission-issues: write
+          permission-merge-queues: write
+          permission-pull-requests: write
+          permission-statuses: write
+
+      - name: Install pinned Shipyard
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ./tools/install-shipyard.sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Configure queue mutation authority
+        id: configure
+        env:
+          GH_TOKEN: ${{ steps.shipyard-app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.config/shipyard" "$RUNNER_TEMP/steward"
+          printf '%s\n' '[merge_queue]' 'mutation_machine = "github-actions"' \
+            > "$HOME/.config/shipyard/config.toml"
+          shipyard runner tag --set github-actions
+          shipyard merge-queue status --json | tee "$RUNNER_TEMP/steward/authority.json"
+          python3 - "$RUNNER_TEMP/steward/authority.json" <<'PY'
+          import json
+          import sys
+          status = json.load(open(sys.argv[1], encoding="utf-8"))
+          assert status["authority_configured"] is True
+          assert status["authority_matches"] is True
+          assert status["machine"] == "github-actions"
+          assert status["mutation_machine"] == "github-actions"
+          PY
+
+      - name: Audit exact-head review gates before mutation
+        id: review_gate
+        if: steps.configure.outcome == 'success' && (github.event_name == 'schedule' || inputs.apply)
+        env:
+          GH_TOKEN: ${{ steps.shipyard-app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          # The steward remains the sole mutation planner. This read-only pass
+          # independently proves every planned arm candidate is allowed at its
+          # current head before the apply pass can mutate GitHub state.
+          run_steward_with_retry() {
+            local attempt status
+            for attempt in 1 2 3; do
+              if "$@"; then
+                return 0
+              else
+                status=$?
+              fi
+              if [ "$attempt" -eq 3 ]; then
+                return "$status"
+              fi
+              sleep "$attempt"
+            done
+          }
+          run_steward_with_retry shipyard runner steward --repo "$GITHUB_REPOSITORY" --base main --arm-unqueued --json \
+            > "$RUNNER_TEMP/steward/audit.json"
+          # In dry-run mode Shipyard reports candidate plans under the native
+          # auto-merge backstop; prs[].mutation is intentionally null until
+          # apply mode. Keep this audit informational and let Shipyard's own
+          # apply path remain the final exact-head review gate.
+          jq -c '.repos[].native_auto_merge_backstop.results[]? |
+            select(.head_sha != null and .number != null) |
+            {number,head_sha}' "$RUNNER_TEMP/steward/audit.json" \
+            > "$RUNNER_TEMP/steward/review-candidates.jsonl"
+          : > "$RUNNER_TEMP/steward/review-blocked.jsonl"
+          while IFS= read -r candidate; do
+            [ -n "$candidate" ] || continue
+            pr=$(jq -r '.number' <<<"$candidate")
+            head=$(jq -r '.head_sha' <<<"$candidate")
+            set +e
+            verdict=$(shipyard review-verdict --repo "$GITHUB_REPOSITORY" --pr "$pr" --head "$head" --json)
+            verdict_status=$?
+            set -e
+            if [ "$verdict_status" -ge 2 ]; then
+              echo "review evidence unreadable for PR $pr head $head" >&2
+              exit "$verdict_status"
+            fi
+            if ! jq -e '.verdict.verdict == "allowed"' <<<"$verdict" >/dev/null; then
+              echo "skipping mutation: PR $pr head $head lacks an allowed exact-head review"
+              jq -cn --arg pr "$pr" --arg head "$head" \
+                '{number:($pr|tonumber),head_sha:$head,reason:"missing exact-head allowed review"}' \
+                >> "$RUNNER_TEMP/steward/review-blocked.jsonl"
+            fi
+          done < "$RUNNER_TEMP/steward/review-candidates.jsonl"
+
+      - name: Reconcile and feed the native queue
+        id: reconcile
+        if: steps.configure.outcome == 'success'
+        env:
+          APPLY: ${{ github.event_name == 'schedule' || inputs.apply }}
+          GH_TOKEN: ${{ steps.shipyard-app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          args=(runner steward --repo "$GITHUB_REPOSITORY" --base main --arm-unqueued --json)
+          if [ "$APPLY" = true ]; then
+            args+=(--apply)
+          fi
+          run_steward_with_retry() {
+            local attempt status
+            for attempt in 1 2 3; do
+              if "$@"; then
+                return 0
+              else
+                status=$?
+              fi
+              if [ "$attempt" -eq 3 ]; then
+                return "$status"
+              fi
+              sleep "$attempt"
+            done
+          }
+          set +e
+          run_steward_with_retry shipyard "${args[@]}" | tee "$RUNNER_TEMP/steward/report.json"
+          steward_status=${PIPESTATUS[0]}
+          set -e
+          if [ "$steward_status" -ne 0 ]; then
+            # A policy refusal for one PR is expected during a mixed backlog;
+            # transport, malformed-output, and mutation errors remain fatal.
+            if jq -e '
+              ([.repos[]?.errors[]?, .repos[]?.prs[]?.error?]
+                | map(select(. != null and . != ""))) as $errors
+              | ($errors | length > 0)
+              and ($errors | all(test("waiting_head_approval|waiting_required")))
+            ' "$RUNNER_TEMP/steward/report.json" >/dev/null; then
+              echo "steward completed with expected per-PR policy refusals; eligible candidates were processed"
+            else
+              exit "$steward_status"
+            fi
+          fi
+
+      - name: Publish feeder evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: shipyard-merge-steward-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/steward
+          retention-days: 14
+          if-no-files-found: warn

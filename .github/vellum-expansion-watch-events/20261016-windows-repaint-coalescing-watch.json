@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261016-windows-repaint-coalescing-watch",
+  "created_at": "2026-10-16T12:13:16Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Windows DAW embedding adaptation coalesces attached repaint requests onto the existing host frame timer to prevent recursive document mount and drawable acquisition. Unattached synchronous capture remains supported. Real Windows factory tests include repaired positive, sibling and pre-fix negative execution. This changes no design-import, Chromium, rendering or packaging authority; source ownership remains Pulp and this watch records no transfer.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-plugin-view-host-factory",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

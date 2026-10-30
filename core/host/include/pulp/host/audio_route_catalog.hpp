@@ -44,7 +44,7 @@ class AudioRouteCatalog {
     using ChangeCallback = std::function<void()>;
     using ConnectCallback = std::function<bool(const AudioRouteInfo&, std::size_t bus_index)>;
     using ConnectChannelCallback = std::function<bool(const AudioRouteInfo&, std::size_t bus_index,
-                                                     std::size_t channel_index)>;
+                                                      std::size_t channel_index)>;
 
     virtual ~AudioRouteCatalog() = default;
     virtual std::vector<AudioRouteInfo> enumerate() const = 0;
@@ -248,9 +248,9 @@ class MutableAudioRouteCatalog final : public AudioRouteCatalog {
     bool disconnect(std::size_t bus_index) override {
         const bool has_bus_selection =
             bus_index < selected_.size() && !selected_[bus_index].empty();
-        const bool has_channel_selection = bus_index < selected_channels_.size() &&
-                                           (!selected_channels_[bus_index][0].empty() ||
-                                            !selected_channels_[bus_index][1].empty());
+        const bool has_channel_selection =
+            bus_index < selected_channels_.size() && (!selected_channels_[bus_index][0].empty() ||
+                                                      !selected_channels_[bus_index][1].empty());
         if (!has_bus_selection && !has_channel_selection)
             return false;
         if (bus_index < selected_.size())
