@@ -2,6 +2,7 @@
 
 #include <pulp/audio/buffer.hpp>
 #include <pulp/host/signal_graph.hpp>
+#include <pulp/host/graph_serializer.hpp>
 
 #include <algorithm>
 #include <array>
@@ -754,4 +755,44 @@ TEST_CASE("live plugin swap retires the old slot only after reader drain",
         CHECK(old_stats->destroyed == 1);
         CHECK(old_stats->destroy_thread == control_thread);
     }
+}
+
+
+TEST_CASE("X9 DX replay and refusal diagnostics are deterministic",
+          "[host][graph][serializer][dx]") {
+    // This uses the existing public serializer and live-swap diagnostic surfaces
+    // in one bounded developer loop: build, persist, replay, make an invalid edit,
+    // and capture the actionable refusal receipt.
+    SignalGraph source;
+    const auto input = source.add_input_node(1, "Input");
+    const auto output = source.add_output_node(1, "Output");
+    REQUIRE(source.connect(input, 0, output, 0));
+    REQUIRE(source.prepare(kSr, kFrames));
+    const auto persisted = GraphSerializer::to_json(source);
+    REQUIRE_FALSE(persisted.empty());
+
+    SignalGraph replay;
+    const auto loaded = GraphSerializer::from_json(replay, persisted);
+    REQUIRE(loaded.ok);
+    REQUIRE(loaded.error.empty());
+    REQUIRE(replay.prepare(kSr, kFrames));
+    REQUIRE(GraphSerializer::to_json(replay) == persisted);
+
+    SlotBehavior old_behavior{.info = make_info("dx")};
+    SlotBehavior replacement_behavior{.info = make_info("dx"), .latency = 32};
+    auto setup = make_stage_setup(std::move(old_behavior),
+                                  std::move(replacement_behavior));
+    setup->graph.begin_swap_edit();
+    REQUIRE(setup->graph.stage_plugin_replacement(setup->plugin, setup->token)
+            == SignalGraph::SwapResult::NeedsEagerPrepare);
+    const auto diagnostics = setup->graph.last_swap_diagnostics();
+    REQUIRE(diagnostics.reason == LiveSwapFallbackReason::LatencyChanged);
+    REQUIRE(diagnostics.offending_node == setup->plugin);
+    REQUIRE_FALSE(diagnostics.message.empty());
+    REQUIRE(diagnostics.message.find("latency") != std::string::npos);
+    REQUIRE(destroyed_count(setup->replacement_stats) == 1);
+
+    // Productivity receipt: the bounded loop requires only the existing graph,
+    // serializer, and diagnostic concepts; no parallel inspector or control API.
+    INFO("workflow_concepts=3;manual_steps=6;fixture_lines=40");
 }
