@@ -22,6 +22,8 @@ pulp_add_test_group(pulp-test-group-app-signal LIBRARIES pulp::signal)
 pulp_add_test_group(pulp-test-group-app-midi LIBRARIES pulp::midi)
 pulp_add_test_group(pulp-test-group-app-state LIBRARIES pulp::state pulp::content)
 pulp_add_test_group(pulp-test-group-app-host LIBRARIES pulp::host pulp::signal)
+pulp_add_test_group(pulp-test-group-app-host-format
+    LIBRARIES pulp::host pulp::signal pulp::format pulp::graph)
 
 # WAMv2 Processor->WASM bridge: native coverage of the -fno-exceptions bridge TU (compiled directly; links real pulp libs; PulpWam.cmake's lib target can replace this later).
 add_executable(pulp-test-wam-adapter test_wam_adapter.cpp ${CMAKE_SOURCE_DIR}/core/format/src/wasm/wam_adapter.cpp)
@@ -967,6 +969,13 @@ if(DEFINED ENV{PULP_STRESS_FLAKY_TESTS} AND NOT "$ENV{PULP_STRESS_FLAKY_TESTS}" 
 endif()
 
 # GraphSerializer round-trip tests
+# End-to-end public-API modular-instrument workflow: ProcessorNode, MIDI,
+# modulation, state, prepared topology replacement, and offline rendering.
+pulp_add_test_suite(pulp-test-signal-graph-x9-modular-instrument
+    GROUP pulp-test-group-app-host-format
+    SOURCES test_signal_graph_x9_modular_instrument.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph)
+
 pulp_add_test_suite(pulp-test-graph-serializer GROUP pulp-test-group-app-host
     LIBRARIES pulp::host)
 

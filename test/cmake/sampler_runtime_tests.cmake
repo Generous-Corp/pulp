@@ -259,11 +259,6 @@ pulp_add_test_suite(pulp-test-signal-graph-audio-parity
 pulp_add_test_suite(pulp-test-signal-graph-offline-parity
     SOURCES test_signal_graph_offline_parity.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
-# End-to-end public-API modular-instrument workflow: ProcessorNode, MIDI,
-# modulation, state, prepared topology replacement, and offline rendering.
-pulp_add_test_suite(pulp-test-signal-graph-x9-modular-instrument
-    SOURCES test_signal_graph_x9_modular_instrument.cpp
-    LIBRARIES pulp::host pulp::format pulp::graph)
 # A SignalGraph baked into one shippable Processor (BakedGraphProcessor) drives a
 # frozen plan through the SAME GraphRuntimeExecutor::process_routed as the live
 # graph, so its output is bit-identical for the lowerable subset; non-lowerable
