@@ -46,6 +46,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+import fnmatch
 import os
 import subprocess
 import sys
@@ -565,6 +566,36 @@ def _write_plan(repo: Path, config: Config, plan: list[Assignment]) -> list[str]
     return edited
 
 
+def _validate_writer_paths(config: Config, edited: list[str], repo: Path | None = None) -> None:
+    """Fail closed if a privileged release commit would contain an unapproved path.
+
+    The writer runs with contents:write. Its own allowlist is therefore a
+    defense-in-depth boundary, independent of the workflow's shell and of any
+    GitHub ruleset configuration. An empty allowlist is rejected rather than
+    silently falling back to a broad generated-glob filter.
+    """
+    allowed = tuple(config.writer_allowed_globs)
+    if not allowed:
+        raise RuntimeError("version-at-land: writer allowlist is empty")
+    changed = set(edited)
+    if repo is not None:
+        status = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=all"],
+            cwd=repo, check=True, capture_output=True, text=True,
+        ).stdout.splitlines()
+        # Porcelain v1 uses a two-column status followed by a path. The writer
+        # never enables rename detection, so the final field is the path we
+        # must authorize (including deleted generated files).
+        changed.update(line[3:] for line in status if len(line) >= 4)
+    unexpected = sorted({path for path in changed
+                         if not any(fnmatch.fnmatchcase(path, pattern)
+                                    for pattern in allowed)})
+    if unexpected:
+        raise RuntimeError(
+            "version-at-land: refusing to write unapproved release paths: "
+            + ", ".join(unexpected))
+
+
 # ── Hardened single-writer push transaction ─────────────────────────────────
 
 def apply_and_push(
@@ -619,6 +650,7 @@ def apply_and_push(
             # committed but the marker walk missed it). Treat as done, not a
             # spurious empty commit.
             return "noop", plan
+        _validate_writer_paths(config, edited, repo)
 
         # Stage ONLY the version files we edited (never `git add -A` — this repo
         # carries a submodule gitlink that a blanket add would re-stage).
@@ -1069,6 +1101,7 @@ def apply_via_pr(
     edited = _write_plan(repo, config, plan)
     if not edited:
         return "noop", plan
+    _validate_writer_paths(config, edited, repo)
 
     # Stage ONLY the edited version files (never `git add -A` — a blanket add
     # re-stages this repo's submodule gitlink).
@@ -1170,6 +1203,19 @@ def _write_step_summary(line: str) -> None:
             fh.write(f"{line}\n")
     except OSError:
         pass
+
+
+def _write_assignment_summary(status: str, plan: list[Assignment]) -> None:
+    """Record one compact, machine-readable release-writer outcome."""
+    _write_step_summary("### version-at-land")
+    _write_step_summary(f"- status: `{status}`")
+    if plan:
+        assignments = ", ".join(
+            f"`{a.surface}` {a.current} -> {a.assigned} ({a.level})"
+            for a in plan)
+        _write_step_summary(f"- assignments: {assignments}")
+    else:
+        _write_step_summary("- assignments: none")
 
 
 def _repo_root() -> Path:
@@ -1279,6 +1325,7 @@ def main(argv: list[str]) -> int:
                 "version-at-land: could not land the bump "
                 f"(status={status}). See the error above. Re-run.\n")
             return 1
+        _write_assignment_summary(status, plan)
         return 0
 
     if not args.base:
