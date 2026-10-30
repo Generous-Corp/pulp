@@ -371,6 +371,14 @@ pulp_add_test_suite(pulp-test-signal-graph-transport GROUP pulp-test-group-sampl
     LIBRARIES pulp::host pulp::format pulp::graph pulp::audio pulp::state
     PROPERTIES RESOURCE_LOCK pulp_realtime_worker_pool)
 
+# Bounded R5 fault fixture: proves non-finite output detection plus the
+# documented PluginSlot bypass containment and deterministic finite recovery.
+# This is evidence for host policy only; it does not add an automatic fault
+# handler, scheduler behavior, or process-isolation claim.
+pulp_add_test_suite(pulp-test-signal-graph-nonfinite-containment
+    SOURCES test_signal_graph_nonfinite_containment.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph pulp::audio)
+
 # Live plugin-instance swap produces no dropout/xrun and a sample-continuous
 # output across the swap block, for every hosted format. CI-runnable mirror of
 # the local-only REAPER live-plugin-swap smoke.
