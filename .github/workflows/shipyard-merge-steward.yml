@@ -105,8 +105,24 @@ jobs:
               sleep "$attempt"
             done
           }
+          set +e
           run_steward_with_retry shipyard runner steward --repo "$GITHUB_REPOSITORY" --base main --arm-unqueued --json \
             > "$RUNNER_TEMP/steward/audit.json"
+          audit_status=$?
+          set -e
+          # Shipyard uses exit 1 for per-PR policy refusals (for example, a
+          # candidate without a counted exact-head approval). The JSON report
+          # is still valid and must be inspected so unrelated candidates can
+          # continue. Transport, malformed-output, and other failures remain
+          # fatal.
+          if [ "$audit_status" -ne 0 ] && ! jq -e '
+            ([.repos[]?.errors[]?, .repos[]?.prs[]?.error?]
+              | map(select(. != null and . != ""))) as $errors
+            | ($errors | length > 0)
+            and ($errors | all(test("waiting_head_approval|waiting_required")))
+          ' "$RUNNER_TEMP/steward/audit.json" >/dev/null; then
+            exit "$audit_status"
+          fi
           # In dry-run mode Shipyard reports candidate plans under the native
           # auto-merge backstop; prs[].mutation is intentionally null until
           # apply mode. Keep this audit informational and let Shipyard's own
