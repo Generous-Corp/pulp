@@ -799,3 +799,7 @@ pulp_test_data(pulp-test-timeline-document-fuzz NO_DEFINE PATHS test/fixtures/ti
 pulp_test_spawns(pulp-test-timeline-multitrack-pdc NONE REASON "adds only in-memory PluginSlot instances through add_plugin_node's slot overload, which loads nothing the tree builds")
 pulp_test_spawns(pulp-test-timeline-offline-renderer NONE REASON "adds only in-memory PluginSlot instances through add_plugin_node's slot overload, which loads nothing the tree builds")
 pulp_test_spawns(pulp-test-timeline-phase1-examples NONE REASON "adds only in-memory PluginSlot instances through add_plugin_node's slot overload, which loads nothing the tree builds")
+
+pulp_add_test_suite(pulp-test-external-plugin-offline-parity
+    SOURCES test_external_plugin_offline_parity.cpp
+    LIBRARIES pulp::host)
