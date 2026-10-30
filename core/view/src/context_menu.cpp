@@ -480,8 +480,8 @@ bool ContextMenu::on_key_event(const KeyEvent& event) {
         if (item.control_kind != Item::ControlKind::slider &&
             item.control_kind != Item::ControlKind::choice)
             return false;
-        adjust_control(item, event.key == KeyCode::left ? -item.normalized_step
-                                                        : item.normalized_step);
+        adjust_control(item,
+                       event.key == KeyCode::left ? -item.normalized_step : item.normalized_step);
         return true;
     }
     case KeyCode::home:
