@@ -1178,6 +1178,139 @@ TEST_CASE("Scanner -> load -> process -> unload round-trip on real CLAP plugin",
 
     slot->release();
 }
+
+TEST_CASE("Source-owned CLAP gain couples parameter readback, audio, and fresh restore",
+          "[host][clap][integration][state][regression]") {
+    const fs::path clap_path = PULP_TEST_CLAP_PATH;
+    REQUIRE(fs::exists(clap_path));
+
+    ScratchDir scratch("clap-gain-controls");
+    const fs::path isolated_clap_path = copy_bundle_for_scan(clap_path, scratch.path);
+    ScanOptions opts;
+    opts.scan_vst3 = false;
+    opts.scan_au = false;
+    opts.scan_lv2 = false;
+    opts.scan_clap = true;
+    opts.only_extra_paths = true;
+    opts.extra_paths.push_back(isolated_clap_path.parent_path().string());
+
+    PluginScanner scanner;
+    const auto plugins = scanner.scan(opts);
+    REQUIRE(plugins.size() == 1);
+    const PluginInfo* found = &plugins.front();
+
+    auto render = [](PluginSlot& slot, float input_value) {
+        constexpr int kFrames = 256;
+        std::vector<float> in_l(kFrames, input_value), in_r(kFrames, input_value);
+        std::vector<float> out_l(kFrames, 0.f), out_r(kFrames, 0.f);
+        const float* in_ptrs[2] = {in_l.data(), in_r.data()};
+        float* out_ptrs[2] = {out_l.data(), out_r.data()};
+        pulp::audio::BufferView<const float> input(in_ptrs, 2, kFrames);
+        pulp::audio::BufferView<float> output(out_ptrs, 2, kFrames);
+        pulp::midi::MidiBuffer midi_in, midi_out;
+        ParameterEventQueue param_events;
+        slot.process(output, input, midi_in, midi_out, param_events, kFrames);
+        return std::pair{std::move(out_l), std::move(out_r)};
+    };
+
+    auto slot = PluginSlot::load(*found);
+    REQUIRE(slot != nullptr);
+    REQUIRE(slot->prepare(48000.0, 256));
+    const auto baseline = render(*slot, 1.0f);
+    slot->set_parameter(1, -6.0f); // PulpGain input gain, plain dB domain.
+    REQUIRE(std::abs(slot->get_parameter(1) + 6.0f) < 1e-4f);
+    const auto changed = render(*slot, 1.0f);
+
+    auto energy = [](const auto& stereo) {
+        float total = 0.f;
+        for (std::size_t i = 0; i < stereo.first.size(); ++i) {
+            total += std::abs(stereo.first[i]) + std::abs(stereo.second[i]);
+        }
+        return total;
+    };
+    const float baseline_energy = energy(baseline);
+    const float changed_energy = energy(changed);
+    REQUIRE(std::abs(baseline_energy - 512.0f) < 1e-3f);
+    const float expected_changed_energy = 512.0f * std::pow(10.0f, -6.0f / 20.0f);
+    REQUIRE(std::abs(changed_energy - expected_changed_energy) < 1e-3f);
+
+    const auto state = slot->save_state();
+    REQUIRE_FALSE(state.empty());
+    slot->release();
+
+    auto restored = PluginSlot::load(*found);
+    REQUIRE(restored != nullptr);
+    REQUIRE(restored->prepare(48000.0, 256));
+    REQUIRE(restored->restore_state(state));
+    REQUIRE(std::abs(restored->get_parameter(1) + 6.0f) < 1e-4f);
+    const auto replay = render(*restored, 1.0f);
+
+    float max_error = 0.f;
+    for (std::size_t i = 0; i < changed.first.size(); ++i) {
+        max_error = std::max(max_error, std::abs(changed.first[i] - replay.first[i]));
+        max_error = std::max(max_error, std::abs(changed.second[i] - replay.second[i]));
+    }
+    REQUIRE(max_error < 1e-6f);
+    restored->release();
+}
+
+#ifdef PULP_TEST_TONE_CLAP_PATH
+TEST_CASE("Source-owned CLAP tone consumes a note event",
+          "[host][clap][integration][midi][regression]") {
+    const fs::path clap_path = PULP_TEST_TONE_CLAP_PATH;
+    REQUIRE(fs::exists(clap_path));
+
+    ScratchDir scratch("clap-tone-controls");
+    const fs::path isolated_clap_path = copy_bundle_for_scan(clap_path, scratch.path);
+    ScanOptions opts;
+    opts.scan_vst3 = false;
+    opts.scan_au = false;
+    opts.scan_lv2 = false;
+    opts.scan_clap = true;
+    opts.only_extra_paths = true;
+    opts.extra_paths.push_back(isolated_clap_path.parent_path().string());
+
+    PluginScanner scanner;
+    const auto plugins = scanner.scan(opts);
+    REQUIRE(plugins.size() == 1);
+    auto slot = PluginSlot::load(plugins.front());
+    REQUIRE(slot != nullptr);
+    REQUIRE(slot->prepare(48000.0, 256));
+
+    constexpr int kFrames = 256;
+    std::vector<float> silent_l(kFrames, 0.f), silent_r(kFrames, 0.f);
+    float* silent_ptrs[2] = {silent_l.data(), silent_r.data()};
+    pulp::audio::BufferView<float> silent_out(silent_ptrs, 2, kFrames);
+    pulp::audio::BufferView<const float> no_input;
+    pulp::midi::MidiBuffer no_midi, midi_out;
+    ParameterEventQueue params;
+    slot->process(silent_out, no_input, no_midi, midi_out, params, kFrames);
+    float silent_energy = 0.f;
+    for (int i = 0; i < kFrames; ++i) {
+        silent_energy += std::abs(silent_l[i]) + std::abs(silent_r[i]);
+    }
+    REQUIRE(silent_energy == 0.f);
+
+    std::vector<float> note_l(kFrames, 0.f), note_r(kFrames, 0.f);
+    float* note_ptrs[2] = {note_l.data(), note_r.data()};
+    pulp::audio::BufferView<float> note_out(note_ptrs, 2, kFrames);
+    pulp::midi::MidiBuffer note_input;
+    REQUIRE(note_input.add(pulp::midi::MidiEvent::note_on(0, 60, 100)));
+    slot->process(note_out, no_input, note_input, midi_out, params, kFrames);
+    float note_energy_l = 0.f;
+    float note_energy_r = 0.f;
+    bool finite = true;
+    for (int i = 0; i < kFrames; ++i) {
+        finite = finite && std::isfinite(note_l[i]) && std::isfinite(note_r[i]);
+        note_energy_l += std::abs(note_l[i]);
+        note_energy_r += std::abs(note_r[i]);
+    }
+    REQUIRE(finite);
+    REQUIRE(note_energy_l > 0.f);
+    REQUIRE(note_energy_r > 0.f);
+    slot->release();
+}
+#endif
 #endif
 
 // Regression for #545: sanity-check that `only_extra_paths` actually

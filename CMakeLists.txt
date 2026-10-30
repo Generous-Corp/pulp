@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 1.35.0
+    VERSION 1.35.1
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -1091,6 +1091,11 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND TARGET PulpGain_CLAP)
             add_dependencies(${_pulp_clap_host_test} PulpGain_CLAP)
         endif()
     endforeach()
+    if(TARGET pulp-test-host-regression AND TARGET PulpTone_CLAP)
+        target_compile_definitions(pulp-test-host-regression PRIVATE
+            PULP_TEST_TONE_CLAP_PATH="${CMAKE_BINARY_DIR}/CLAP/PulpTone.clap")
+        add_dependencies(pulp-test-host-regression PulpTone_CLAP)
+    endif()
     # pulp-test-host also loads examples/pulpsynth's CLAP from the build tree.
     if(TARGET pulp-test-host AND TARGET PulpSynth_CLAP)
         target_compile_definitions(pulp-test-host PRIVATE
