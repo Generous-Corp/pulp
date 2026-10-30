@@ -102,14 +102,18 @@ class LatencyMidiForwarderSlot final : public PluginSlot {
         last_seen_.reserve(8);
     }
 
-    const PluginInfo& info() const override { return info_; }
-    bool is_loaded() const override { return true; }
-    bool prepare(double, int) override { return true; }
+    const PluginInfo& info() const override {
+        return info_;
+    }
+    bool is_loaded() const override {
+        return true;
+    }
+    bool prepare(double, int) override {
+        return true;
+    }
     void release() override {}
-    void process(pulp::audio::BufferView<float>& out,
-                 const pulp::audio::BufferView<const float>&,
-                 const pulp::midi::MidiBuffer& midi_in,
-                 pulp::midi::MidiBuffer&,
+    void process(pulp::audio::BufferView<float>& out, const pulp::audio::BufferView<const float>&,
+                 const pulp::midi::MidiBuffer& midi_in, pulp::midi::MidiBuffer&,
                  const ParameterEventQueue&, int frames) override {
         last_seen_.clear();
         for (const auto& event : midi_in) {
@@ -118,19 +122,39 @@ class LatencyMidiForwarderSlot final : public PluginSlot {
         for (std::size_t channel = 0; channel < out.num_channels(); ++channel)
             std::fill_n(out.channel_ptr(channel), frames, 0.0f);
     }
-    std::vector<HostParamInfo> parameters() const override { return {}; }
-    float get_parameter(std::uint32_t) const override { return 0.0f; }
+    std::vector<HostParamInfo> parameters() const override {
+        return {};
+    }
+    float get_parameter(std::uint32_t) const override {
+        return 0.0f;
+    }
     void set_parameter(std::uint32_t, float) override {}
     void set_bypass(bool) override {}
-    bool is_bypassed() const override { return false; }
-    std::vector<std::uint8_t> save_state() const override { return {}; }
-    bool restore_state(const std::vector<std::uint8_t>&) override { return true; }
-    int latency_samples() const override { return kDelay; }
-    int tail_samples() const override { return 0; }
-    bool has_editor() const override { return false; }
-    void* create_editor_view() override { return nullptr; }
+    bool is_bypassed() const override {
+        return false;
+    }
+    std::vector<std::uint8_t> save_state() const override {
+        return {};
+    }
+    bool restore_state(const std::vector<std::uint8_t>&) override {
+        return true;
+    }
+    int latency_samples() const override {
+        return kDelay;
+    }
+    int tail_samples() const override {
+        return 0;
+    }
+    bool has_editor() const override {
+        return false;
+    }
+    void* create_editor_view() override {
+        return nullptr;
+    }
     void destroy_editor_view() override {}
-    const pulp::midi::MidiBuffer& last_seen() const { return last_seen_; }
+    const pulp::midi::MidiBuffer& last_seen() const {
+        return last_seen_;
+    }
 
   private:
     PluginInfo info_;
@@ -224,11 +248,9 @@ pulp::midi::MidiBuffer make_offset_events(std::int32_t first_offset) {
     return events;
 }
 
-void require_exact_offsets(const pulp::midi::MidiBuffer& events,
-                           std::int32_t first_offset) {
+void require_exact_offsets(const pulp::midi::MidiBuffer& events, std::int32_t first_offset) {
     REQUIRE(events.size() == 3);
-    const std::array<std::int32_t, 3> expected{
-        first_offset, first_offset + 28, first_offset + 60};
+    const std::array<std::int32_t, 3> expected{first_offset, first_offset + 28, first_offset + 60};
     for (std::size_t i = 0; i < expected.size(); ++i) {
         INFO("event " << i);
         CHECK(events[i].sample_offset == expected[i]);
@@ -302,8 +324,7 @@ TEST_CASE("R3/R4 MIDI offsets survive reported latency and reconfiguration",
         REQUIRE(graph.inject_midi(midi_input, across_swap));
         graph.begin_swap_edit();
         REQUIRE(graph.disconnect(spare_source, 0, spare_dest, 0));
-        REQUIRE(graph.prepare_swap(kSampleRate, kBlockSize) ==
-                SignalGraph::SwapResult::Swapped);
+        REQUIRE(graph.prepare_swap(kSampleRate, kBlockSize) == SignalGraph::SwapResult::Swapped);
         REQUIRE(graph.latency_samples() == kDelay);
         process_silent_block(graph);
         require_exact_offsets(probe->last_seen(), 1);
