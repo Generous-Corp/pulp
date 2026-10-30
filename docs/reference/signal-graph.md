@@ -392,6 +392,36 @@ register `GraphSerializer::register_migration()` steps to upgrade JSON to the
 current format; newer or unreadable versions fail closed instead of being
 silently interpreted as current data.
 
+### Debugging and replaying a graph edit
+
+A small deterministic workflow combines graph persistence with the live-swap
+diagnostics. It uses three concepts: the immutable prepared snapshot that the
+audio thread processes, the prepared swap transaction, and versioned
+`GraphSerializer` JSON plus `last_swap_diagnostics()`.
+
+1. Build and prepare a graph with a deterministic input buffer. Render a
+   baseline and record its audio hash. Keep the sample rate and maximum block
+   size fixed for the replay.
+2. Serialize the graph with `GraphSerializer::to_json()`. Retain the format
+   version and serialized JSON (or its hash) with the baseline receipt.
+3. Start a swap edit, stage a deliberately latency-changing replacement, and
+   call `prepare_swap()`. The invalid edit must return `NeedsEagerPrepare` and
+   report `LatencyChanged`; it must not publish a partial arrangement.
+4. Read `last_swap_diagnostics()` and record its reason, offending node, and
+   message. Verify old-snapshot continuation with the existing refusal and
+   re-prepare tests; the diagnostic object alone does not prove rollback or
+   continuity.
+5. Load the saved JSON into a fresh graph with
+   `GraphSerializer::from_json()`, prepare it with the same context, and render
+   the same input.
+6. Require exact serialized-JSON equality and a bitwise-equal replay audio
+   hash. Record the small authoring receipt used by the X9/DX fixture: three
+   required concepts, six manual steps, and 62 added fixture lines.
+
+This workflow is a bounded diagnostic and replay recipe. It does not promise a
+general rollback API, arbitrary in-block activation, seamless latency-changing
+replacement, crossfade event semantics, or a universal graph inspector.
+
 ## Thread model
 
 - **Build & edit** (add / connect / remove) runs on the UI thread.
