@@ -86,6 +86,57 @@ class LatencySilenceSlot final : public PluginSlot {
     PluginInfo info_;
 };
 
+// Test-only event fixture: reports the same non-block-aligned latency as the
+// PDC fixture while forwarding MIDI without changing its block-relative offset.
+// SignalGraph's latency compensation is an audio-path concern; this slot makes
+// that boundary observable without changing production code.
+class LatencyMidiForwarderSlot final : public PluginSlot {
+  public:
+    LatencyMidiForwarderSlot() {
+        info_.name = "LatencyMidiForwarder";
+        info_.unique_id = "pulp.test.latency-midi-forwarder";
+        info_.format = PluginFormat::CLAP;
+        info_.is_effect = true;
+        info_.num_inputs = 1;
+        info_.num_outputs = 1;
+        last_seen_.reserve(8);
+    }
+
+    const PluginInfo& info() const override { return info_; }
+    bool is_loaded() const override { return true; }
+    bool prepare(double, int) override { return true; }
+    void release() override {}
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>&,
+                 const pulp::midi::MidiBuffer& midi_in,
+                 pulp::midi::MidiBuffer&,
+                 const ParameterEventQueue&, int frames) override {
+        last_seen_.clear();
+        for (const auto& event : midi_in) {
+            last_seen_.add(event);
+        }
+        for (std::size_t channel = 0; channel < out.num_channels(); ++channel)
+            std::fill_n(out.channel_ptr(channel), frames, 0.0f);
+    }
+    std::vector<HostParamInfo> parameters() const override { return {}; }
+    float get_parameter(std::uint32_t) const override { return 0.0f; }
+    void set_parameter(std::uint32_t, float) override {}
+    void set_bypass(bool) override {}
+    bool is_bypassed() const override { return false; }
+    std::vector<std::uint8_t> save_state() const override { return {}; }
+    bool restore_state(const std::vector<std::uint8_t>&) override { return true; }
+    int latency_samples() const override { return kDelay; }
+    int tail_samples() const override { return 0; }
+    bool has_editor() const override { return false; }
+    void* create_editor_view() override { return nullptr; }
+    void destroy_editor_view() override {}
+    const pulp::midi::MidiBuffer& last_seen() const { return last_seen_; }
+
+  private:
+    PluginInfo info_;
+    pulp::midi::MidiBuffer last_seen_;
+};
+
 struct GraphFixture {
     SignalGraph graph;
     NodeId input = 0;
@@ -148,6 +199,44 @@ void render_checked_block(SignalGraph& graph, std::uint64_t absolute_frame) {
     REQUIRE(render_block_matches(graph, absolute_frame));
 }
 
+void process_silent_block(SignalGraph& graph) {
+    std::array<float, kBlockSize> input{};
+    std::array<float, kBlockSize> output{};
+    const std::array<const float*, 1> input_channels{input.data()};
+    const std::array<float*, 1> output_channels{output.data()};
+    pulp::audio::BufferView<const float> input_view(input_channels.data(), 1, kBlockSize);
+    pulp::audio::BufferView<float> output_view(output_channels.data(), 1, kBlockSize);
+    graph.process(output_view, input_view, kBlockSize);
+}
+
+pulp::midi::MidiBuffer make_offset_events(std::int32_t first_offset) {
+    pulp::midi::MidiBuffer events;
+    events.reserve(8);
+    auto note_on = pulp::midi::MidiEvent::note_on(0, 60, 100);
+    note_on.sample_offset = first_offset;
+    events.add(note_on);
+    auto cc = pulp::midi::MidiEvent::cc(0, 7, 64);
+    cc.sample_offset = first_offset + 28;
+    events.add(cc);
+    auto note_off = pulp::midi::MidiEvent::note_off(0, 60, 0);
+    note_off.sample_offset = first_offset + 60;
+    events.add(note_off);
+    return events;
+}
+
+void require_exact_offsets(const pulp::midi::MidiBuffer& events,
+                           std::int32_t first_offset) {
+    REQUIRE(events.size() == 3);
+    const std::array<std::int32_t, 3> expected{
+        first_offset, first_offset + 28, first_offset + 60};
+    for (std::size_t i = 0; i < expected.size(); ++i) {
+        INFO("event " << i);
+        CHECK(events[i].sample_offset == expected[i]);
+        // Planted wrong-offset negative: a latency-shifted event must not pass.
+        CHECK(events[i].sample_offset != expected[i] + kDelay);
+    }
+}
+
 } // namespace
 
 TEST_CASE("PDC state is sample continuous across a live structural edit",
@@ -173,6 +262,51 @@ TEST_CASE("PDC state is sample continuous across a live structural edit",
             render_checked_block(fixture.graph, frame);
             frame += kBlockSize;
         }
+    }
+}
+
+TEST_CASE("R3/R4 MIDI offsets survive reported latency and reconfiguration",
+          "[host][signal-graph][midi][latency][prepared-swap]") {
+    for (const auto mode : {Mode::Legacy, Mode::RoutedSerial, Mode::RoutedParallel}) {
+        INFO("routing mode " << static_cast<int>(mode));
+        SignalGraph graph;
+        select_mode(graph, mode);
+
+        const auto input = graph.add_input_node(1, "Input");
+        auto slot = std::make_unique<LatencyMidiForwarderSlot>();
+        auto* probe = slot.get();
+        const auto plugin = graph.add_plugin_node(std::move(slot), 1, 1, "Latent MIDI");
+        const auto output = graph.add_output_node(1, "Output");
+        const auto midi_input = graph.add_midi_input_node("MIDI In");
+        const auto spare_source = graph.add_gain_node("Spare source");
+        const auto spare_dest = graph.add_gain_node("Spare destination");
+
+        REQUIRE(graph.connect(input, 0, plugin, 0));
+        REQUIRE(graph.connect(plugin, 0, output, 0));
+        REQUIRE(graph.connect_midi(midi_input, plugin));
+        // This unrelated edge is removed during the prepared edit. Keeping it
+        // ahead of the latent path makes the reconfiguration change connection
+        // indices while the reported latency remains 97 samples.
+        REQUIRE(graph.connect(spare_source, 0, spare_dest, 0));
+        REQUIRE(graph.prepare(kSampleRate, kBlockSize));
+        REQUIRE(graph.latency_samples() == kDelay);
+
+        auto before = make_offset_events(2);
+        REQUIRE(graph.inject_midi(midi_input, before));
+        process_silent_block(graph);
+        require_exact_offsets(probe->last_seen(), 2);
+
+        // Publish another event block across a gap-free structural edit. The
+        // stable MIDI-input mailbox must carry it into the new snapshot.
+        auto across_swap = make_offset_events(1);
+        REQUIRE(graph.inject_midi(midi_input, across_swap));
+        graph.begin_swap_edit();
+        REQUIRE(graph.disconnect(spare_source, 0, spare_dest, 0));
+        REQUIRE(graph.prepare_swap(kSampleRate, kBlockSize) ==
+                SignalGraph::SwapResult::Swapped);
+        REQUIRE(graph.latency_samples() == kDelay);
+        process_silent_block(graph);
+        require_exact_offsets(probe->last_seen(), 1);
     }
 }
 
