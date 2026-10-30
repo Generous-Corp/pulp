@@ -149,5 +149,3 @@ def wrap_reaper(reaper_run: Path, out: Path, *, code_commit: str) -> tuple[dict,
         tolerance=analysis["tolerance"], window_pre=analysis["window"]["pre"],
         window_post=analysis["window"]["post"], render_frames=analysis["render_frames"],
         host_alive=bool(v1_receipt["host_alive"]), extra_artifacts=("reaper.out.txt",))
-
-
