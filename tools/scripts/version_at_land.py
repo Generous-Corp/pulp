@@ -139,7 +139,7 @@ def plan_assignments(config: Config, changed: list[str], base: str, head: str,
 def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["git", "-C", str(repo), *args],
-        check=check, capture_output=True, text=True,
+        check=check, capture_output=True, text=True, encoding="utf-8",
     )
 
 
@@ -380,7 +380,7 @@ def _drop_receipt_churn(repo: Path) -> None:
         # yet — so a clean `status` is a byte-identity claim about HEAD.)
         status = subprocess.run(
             ["git", "status", "--porcelain", "--", _GPU_LEDGER],
-            cwd=repo, capture_output=True, text=True, check=True,
+            cwd=repo, capture_output=True, text=True, encoding="utf-8", check=True,
         )
         if status.stdout.strip():
             return
@@ -389,7 +389,7 @@ def _drop_receipt_churn(repo: Path) -> None:
         # rewriting it would move nothing but `source_commit`.
         head_receipt = subprocess.run(
             ["git", "show", f"HEAD:{_GPU_RECEIPT}"],
-            cwd=repo, capture_output=True, text=True, check=True,
+            cwd=repo, capture_output=True, text=True, encoding="utf-8", check=True,
         ).stdout
         ledger_text = (repo / _GPU_LEDGER).read_text(encoding="utf-8")
         if LEDGER_SENTINEL in head_receipt:
@@ -463,7 +463,7 @@ def _refresh_derived(repo: Path) -> list[str]:
         for path in paths:
             status = subprocess.run(
                 ["git", "status", "--porcelain", "--", path],
-                cwd=repo, capture_output=True, text=True,
+                cwd=repo, capture_output=True, text=True, encoding="utf-8",
             )
             if status.stdout.strip():
                 refreshed.append(path)
@@ -581,7 +581,7 @@ def _validate_writer_paths(config: Config, edited: list[str], repo: Path | None 
     if repo is not None:
         status = subprocess.run(
             ["git", "status", "--porcelain", "--untracked-files=all"],
-            cwd=repo, check=True, capture_output=True, text=True,
+            cwd=repo, check=True, capture_output=True, text=True, encoding="utf-8",
         ).stdout.splitlines()
         # Porcelain v1 uses a two-column status followed by a path. The writer
         # never enables rename detection, so the final field is the path we
@@ -694,7 +694,7 @@ def apply_and_push(
 def _gh(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["gh", *args],
-        cwd=str(repo), check=check, capture_output=True, text=True,
+        cwd=str(repo), check=check, capture_output=True, text=True, encoding="utf-8",
     )
 
 
@@ -1220,7 +1220,7 @@ def _write_assignment_summary(status: str, plan: list[Assignment]) -> None:
 
 def _repo_root() -> Path:
     return Path(subprocess.run(["git", "rev-parse", "--show-toplevel"],
-                               check=True, capture_output=True, text=True).stdout.strip())
+                               check=True, capture_output=True, text=True, encoding="utf-8").stdout.strip())
 
 
 def main(argv: list[str]) -> int:

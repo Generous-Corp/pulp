@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "comment": "Per-file count of text I/O calls without encoding=. Only ever lowered; regenerate with text_encoding_lint.py --write.",
-  "total": 4202,
+  "total": 4196,
   "files": {
     "test/cmake/test_forge_catalog_install.py": 22,
     "test/harness/test_canvas2d_adapter.py": 1,
@@ -872,7 +872,6 @@
     "tools/scripts/verify_skia_m153_capabilities.py": 4,
     "tools/scripts/verify_standalone_trace_close.py": 1,
     "tools/scripts/verify_wasm_skia_slice.py": 2,
-    "tools/scripts/version_at_land.py": 6,
     "tools/scripts/version_bump_check.py": 7,
     "tools/scripts/version_bump_heuristics.py": 3,
     "tools/scripts/version_bump_surfaces.py": 6,
