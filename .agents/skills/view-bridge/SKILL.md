@@ -12,6 +12,19 @@ AAX, Standalone) opens its editor through
 the invariants the API enforces and the pitfalls that bit us enough
 times to be worth remembering.
 
+## Standalone window factory ownership
+
+On Windows/Linux, standalone startup calls
+`detail::ensure_standalone_window_factory()` before creating its editor window.
+It installs the SDL adapter only when the process has no registered window
+factory, preserving an embedding host's factory. Keep generic
+`WindowHost::create()` factory-only: with no factory it returns `nullptr`.
+Removing its SDL fallback without moving registration into standalone startup
+breaks standalone window creation even when headless CI is green. The
+`standalone-editor-chrome` tests cover registration and custom-factory preservation
+without opening a real window; the view-host bridge no-factory test remains the
+separate contract check.
+
 ## When to use ViewBridge
 
 | Task | Touch ViewBridge? |
