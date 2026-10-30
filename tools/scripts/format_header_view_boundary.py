@@ -60,6 +60,7 @@ VIEW_HEADERS = {
     "pulp/format/detail/standalone_key_sequence.hpp",
     "pulp/format/detail/standalone_musical_typing.hpp",
     "pulp/format/detail/standalone_updater.hpp",
+    "pulp/format/detail/standalone_window_factory.hpp",
     "pulp/format/editor_idle_pump.hpp",
     "pulp/format/editor_ui.hpp",
     "pulp/format/gpu_host_select.hpp",
