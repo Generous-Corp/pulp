@@ -3152,19 +3152,29 @@ signing identity) becomes a distinct authorization boundary, first publish its
 public fingerprint on protected main and then pin the embedded SSH signature
 key to that reviewed value.
 
-## The merge train forms member-approved rollups
+## One admission writer feeds the merge queue
 
-`.shipyard/config.toml` sets `[train] enabled = true` and, after the live
-scratch-repository test, sets `mode = "rollup"`. `shipyard train status --repo Generous-Corp/pulp` prints
-each open PR's stage. `--record` appends a sample to the host's sample file,
-and `shipyard train metrics` summarises those samples: queue depth, time
-from approval to merge, and merges per hour. A rollup forms only when every
-member has an approval naming its exact head; it lands through the merge queue
-as a merge commit. `SHIPYARD_TRAIN=off` or a `train.pause` file is the kill
-switch. `shipyard rollup reconcile --apply` is a manual operation because Pulp
-has no merge steward. The baseline numbers are recorded in the Shipyard
-merge-train design handoff; the after measurement uses the same scripts and
-rollback rule.
+The steward on the configured mutation machine (m3, `mutation_machine =
+studio`) is the only writer that admits Pulp PRs. A launchd job runs
+`shipyard runner steward --repo Generous-Corp/pulp --base main --arm-unqueued
+--apply` every five minutes. It runs from a config-only sparse clone on the
+internal disk, because a launchd job that opens a path on `/Volumes` can block
+in the kernel on a privacy prompt nobody can see. `gh` must resolve to the
+`ghapp` wrapper so every arm passes the queue-arm guard and lands in the arm
+ledger. The job refuses to run otherwise. Shipyard re-reads the exact-head
+approval immediately before each enqueue and refuses on a HOLD, a missing
+approval, or unreadable state. The native queue then validates and merges.
+
+`.github/workflows/shipyard-merge-steward.yml` is a manual diagnostic only.
+It has no schedule, runs dry-run unless dispatched with `apply`, and is not in
+`.github/schedule-backstop.json`. A second scheduled writer would race the
+mutation-authority flag. Its census also failed under the Actions-minted
+token on every run, so it never admitted a PR.
+
+`[train] mode = "off"`. The native queue already batches up to five entries,
+and a second grouping layer added planning work without forming a train.
+`shipyard train status` and `shipyard train metrics` still report queue depth
+and approval-to-merge time.
 
 ## A merge_group batch stops at the first failing test
 
