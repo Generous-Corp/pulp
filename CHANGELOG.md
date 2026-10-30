@@ -9,6 +9,14 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1340"></a>
+## [1.34.0] - 2026-10-29
+
+- release/version bump ([#11264](https://github.com/Generous-Corp/pulp/pull/11264))
+- feat/illustrator svg import current 20261028 ([#11251](https://github.com/Generous-Corp/pulp/pull/11251))
+- codex/arm64ec abi fix 20261027 fresh ([#11235](https://github.com/Generous-Corp/pulp/pull/11235))
+- codex/merge steward retry 20261029 ([#11263](https://github.com/Generous-Corp/pulp/pull/11263))
+
 <a id="v1330"></a>
 ## [1.33.0] - 2026-10-29
 
@@ -11889,6 +11897,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.34.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.34.0
 [1.33.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.33.0
 [1.32.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.32.0
 [1.31.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.31.0
