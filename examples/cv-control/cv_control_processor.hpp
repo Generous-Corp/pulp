@@ -3,6 +3,7 @@
 #include "cv_control.hpp"
 #include <pulp/format/processor.hpp>
 #include <pulp/midi/buffer.hpp>
+#include <pulp/runtime/triple_buffer.hpp>
 #if !defined(PULP_WASM)
 #include <pulp/osc/osc.hpp>
 #endif
@@ -43,6 +44,10 @@ class FaceToneProcessor final : public format::Processor {
     void prepare(const format::PrepareContext& ctx) override {
         sample_rate_ = ctx.sample_rate;
         phase_ = 0.0;
+        gate_ = 0.0f;
+        mapping_.expire();
+        timeout_samples_ = static_cast<std::uint64_t>(std::max(1.0, sample_rate_ * 0.25));
+        consumed_sequence_ = input_.read().sequence;
 #if !defined(PULP_WASM)
         if (const char* raw = std::getenv("PULP_CV_OSC_PORT")) {
             char* end = nullptr;
@@ -59,12 +64,30 @@ class FaceToneProcessor final : public format::Processor {
 #if !defined(PULP_WASM)
         osc_.stop();
 #endif
+        mapping_.expire();
     }
 
     void process(audio::BufferView<float>& output, const audio::BufferView<const float>&,
                  midi::MidiBuffer& midi_in, midi::MidiBuffer&,
                  const format::ProcessContext&) override {
+        std::optional<ControlSample> newest;
+#if !defined(PULP_WASM)
+        const auto& published = input_.read();
+        if (published.sequence != 0 && published.sequence != consumed_sequence_) {
+            consumed_sequence_ = published.sequence;
+            newest = published;
+        }
+#endif
         for (const auto& event : midi_in) {
+            // A single short MIDI message carries one coherent sample on every
+            // surface. This example reserves channel-16 pitch bend.
+            if (event.size() == 3 && event.data()[0] == 0xEF) {
+                if (const auto sample = decode_midi_control(event.data()[0], event.data()[1],
+                                                            event.data()[2], ++midi_sequence_)) {
+                    newest = *sample;
+                    continue;
+                }
+            }
             if (event.is_note_on()) {
                 frequency_ = 440.0 * std::pow(2.0, (event.note() - 69) / 12.0);
                 gate_ = event.velocity() / 127.0f;
@@ -73,7 +96,14 @@ class FaceToneProcessor final : public format::Processor {
             }
         }
 
-        const float base = state().get_value(kBrightness);
+        if (newest) {
+            mapping_.submit(*newest);
+        } else {
+            mapping_.advance(output.num_samples(), timeout_samples_);
+        }
+
+        // Include host modulation while leaving the saved/automated base alone.
+        const float base = state().get_modulated(kBrightness);
         const float effective = std::clamp(base + (mapping_.value() * 0.5f), 0.0f, 1.0f);
         const float volume = std::pow(10.0f, state().get_value(kVolume) / 20.0f);
         state().set_display_modulation(kBrightness, effective);
@@ -91,30 +121,40 @@ class FaceToneProcessor final : public format::Processor {
     }
 
     void submit_face_frame(FaceFrame frame) noexcept {
-        mapping_.submit(
-            ControlSample{frame.sequence, frame.mouth_open, frame.confidence, frame.tracked});
+        publish_control({frame.sequence, frame.mouth_open, frame.confidence, frame.tracked});
     }
     void expire_face_frame() noexcept {
-        mapping_.expire();
-    }
-    const FaceMapping& mapping() const noexcept {
-        return mapping_;
+        publish_control({0, 0.0f, 0.0f, false});
     }
 
   private:
+    // Exactly one selected native provider owns this writer role. The audio
+    // callback is the only reader and owns all mapping and timeout state.
+    void publish_control(ControlSample sample) noexcept {
+        sample.sequence = ++publication_sequence_;
+        input_.write(sample);
+    }
+
 #if !defined(PULP_WASM)
     void on_osc(const osc::Message& message) {
-        if (message.address == "/pulp/cv/face" && message.args.size() >= 3) {
-            submit_face_frame({static_cast<std::uint64_t>(message.get_int(3)), message.get_float(0),
-                               message.get_float(1), message.get_int(2) != 0});
-        } else if (message.address == "/pulp/control" && message.args.size() >= 3) {
-            mapping_.submit({static_cast<std::uint64_t>(message.get_int(3)), message.get_float(0),
-                             message.get_float(1), message.get_int(2) != 0});
-        }
+        if (message.address != "/pulp/cv/face" && message.address != "/pulp/control")
+            return;
+        if (message.args.size() < 3 || !std::holds_alternative<float>(message.args[0]) ||
+            !std::holds_alternative<float>(message.args[1]) ||
+            !std::holds_alternative<std::int32_t>(message.args[2]) ||
+            (message.args.size() > 3 && !std::holds_alternative<std::int32_t>(message.args[3])))
+            return;
+        publish_control({0, std::get<float>(message.args[0]), std::get<float>(message.args[1]),
+                         std::get<std::int32_t>(message.args[2]) != 0});
     }
 #endif
 
     FaceMapping mapping_;
+    runtime::TripleBuffer<ControlSample> input_;
+    std::uint64_t publication_sequence_ = 0;
+    std::uint64_t consumed_sequence_ = 0;
+    std::uint64_t midi_sequence_ = 0;
+    std::uint64_t timeout_samples_ = 12000;
 #if !defined(PULP_WASM)
     osc::Receiver osc_;
 #endif

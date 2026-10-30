@@ -1,7 +1,7 @@
 # Minimal CV vertical slice. Capture/inference stays application-owned.
 if(PULP_BUILD_TESTS)
     add_executable(pulp-cv-control-test test_cv_control.cpp)
-    target_link_libraries(pulp-cv-control-test PRIVATE pulp::format Catch2::Catch2WithMain)
+    target_link_libraries(pulp-cv-control-test PRIVATE pulp::format pulp::osc Catch2::Catch2WithMain)
     target_include_directories(pulp-cv-control-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     catch_discover_tests(pulp-cv-control-test)
 endif()
