@@ -203,3 +203,94 @@ TEST_CASE("MutableAudioRouteCatalog disconnects a channel-only selection") {
     REQUIRE(catalog.disconnect(0));
     REQUIRE(catalog.connected_route_channel(0, 1).empty());
 }
+
+TEST_CASE("MutableAudioRouteCatalog whole-bus connect replaces independent channels") {
+    pulp::host::MutableAudioRouteCatalog catalog;
+    catalog.set_routes({
+        {"track:piano", "Piano", pulp::host::AudioRouteKind::Track, 2, true},
+        {"bus:reverb", "Reverb", pulp::host::AudioRouteKind::Bus, 2, true},
+        {"mono", "Mono", pulp::host::AudioRouteKind::PhysicalInput, 1, true},
+    });
+    std::array<std::string, 2> graph;
+    catalog.set_connect_channel_callback([&](const auto& route, std::size_t, std::size_t channel) {
+        graph[channel] = route.stable_id;
+        return true;
+    });
+    bool disconnected = false;
+    catalog.set_disconnect_callback([&](std::size_t) {
+        graph = {};
+        disconnected = true;
+        return true;
+    });
+
+    REQUIRE(catalog.connect_channel("bus:reverb", 0, 1));
+    REQUIRE(catalog.connect("track:piano", 0));
+    REQUIRE(graph[0] == "track:piano");
+    REQUIRE(graph[1] == "track:piano");
+    REQUIRE(catalog.connected_route_channel(0, 1) == "track:piano");
+    REQUIRE_FALSE(disconnected);
+
+    // A mono whole-bus source must drop the stale right-channel graph edge.
+    REQUIRE(catalog.connect("mono", 0));
+    REQUIRE(disconnected);
+    REQUIRE(graph[0] == "mono");
+    REQUIRE(graph[1].empty());
+    REQUIRE(catalog.connected_route_channel(0, 1).empty());
+}
+
+TEST_CASE(
+    "MutableAudioRouteCatalog mono whole-bus connect needs a way to clear the right channel") {
+    pulp::host::MutableAudioRouteCatalog catalog;
+    catalog.set_routes({
+        {"bus:reverb", "Reverb", pulp::host::AudioRouteKind::Bus, 2, true},
+        {"mono", "Mono", pulp::host::AudioRouteKind::PhysicalInput, 1, true},
+    });
+    catalog.set_connect_channel_callback(
+        [](const auto&, std::size_t, std::size_t) { return true; });
+    REQUIRE(catalog.connect_channel("bus:reverb", 0, 1));
+    REQUIRE_FALSE(catalog.connect("mono", 0));
+    REQUIRE(catalog.connected_route_channel(0, 1) == "bus:reverb");
+}
+
+TEST_CASE("MutableAudioRouteCatalog connect with only a channel callback binds the graph") {
+    pulp::host::MutableAudioRouteCatalog catalog;
+    catalog.set_routes({{"stereo", "Stereo", pulp::host::AudioRouteKind::Track, 2, true}});
+    std::vector<std::size_t> channels;
+    catalog.set_connect_channel_callback([&](const auto&, std::size_t, std::size_t channel) {
+        channels.push_back(channel);
+        return true;
+    });
+    REQUIRE(catalog.connect("stereo", 0));
+    REQUIRE(channels == std::vector<std::size_t>{0, 1});
+    REQUIRE(catalog.connected_route_channel(0, 1) == "stereo");
+}
+
+TEST_CASE("MutableAudioRouteCatalog plain connect records both channels of a stereo source") {
+    pulp::host::MutableAudioRouteCatalog catalog;
+    catalog.set_routes({
+        {"stereo", "Stereo", pulp::host::AudioRouteKind::Track, 2, true},
+        {"mono", "Mono", pulp::host::AudioRouteKind::PhysicalInput, 1, true},
+    });
+    REQUIRE(catalog.connect("stereo", 0));
+    REQUIRE(catalog.connected_route_channel(0, 1) == "stereo");
+    REQUIRE(catalog.connect("mono", 0));
+    REQUIRE(catalog.connected_route_channel(0, 1).empty());
+}
+
+TEST_CASE("MutableAudioRouteCatalog legacy callback keeps catalog and graph in step") {
+    pulp::host::MutableAudioRouteCatalog catalog;
+    catalog.set_routes({
+        {"a", "A", pulp::host::AudioRouteKind::Track, 2, true},
+        {"b", "B", pulp::host::AudioRouteKind::Track, 2, true},
+    });
+    std::string graph;
+    catalog.set_connect_callback([&](const auto& route, std::size_t) {
+        graph = route.stable_id;
+        return true;
+    });
+    REQUIRE(catalog.connect_channel("a", 0, 0));
+    REQUIRE(catalog.connected_route_channel(0, 1) == graph);
+    REQUIRE_FALSE(catalog.connect_channel("b", 0, 1));
+    REQUIRE(graph == "a");
+    REQUIRE(catalog.connected_route_channel(0, 1) == "a");
+}

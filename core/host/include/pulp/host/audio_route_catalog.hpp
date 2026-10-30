@@ -213,11 +213,37 @@ class MutableAudioRouteCatalog final : public AudioRouteCatalog {
             });
         if (it == routes_.end())
             return false;
+        ensure_bus(bus_index);
+        const bool feeds_right = it->channels > 1;
+        if (connect_channel_callback_) {
+            // A whole-bus binding replaces both channels. A source that cannot
+            // feed the right channel must first drop any independent right
+            // binding, which only the bus-level disconnect can do.
+            const bool stale_right = !selected_channels_[bus_index][1].empty() && !feeds_right;
+            if (stale_right) {
+                if (!disconnect_callback_ || !disconnect_callback_(bus_index))
+                    return false;
+                selected_[bus_index].clear();
+                selected_channels_[bus_index] = {};
+            }
+            if (!connect_channel_callback_(*it, bus_index, 0)) {
+                if (stale_right)
+                    notify();
+                return false;
+            }
+            selected_[bus_index] = it->stable_id;
+            selected_channels_[bus_index][0] = it->stable_id;
+            if (!feeds_right) {
+                selected_channels_[bus_index][1].clear();
+            } else if (connect_channel_callback_(*it, bus_index, 1)) {
+                selected_channels_[bus_index][1] = it->stable_id;
+            }
+            notify();
+            return !feeds_right || !selected_channels_[bus_index][1].empty();
+        }
         if (connect_callback_ && !connect_callback_(*it, bus_index))
             return false;
-        ensure_bus(bus_index);
-        selected_[bus_index] = it->stable_id;
-        selected_channels_[bus_index][0] = it->stable_id;
+        set_whole_bus(bus_index, *it);
         notify();
         return true;
     }
@@ -238,7 +264,17 @@ class MutableAudioRouteCatalog final : public AudioRouteCatalog {
         if (connect_channel_callback_) {
             if (!connect_channel_callback_(*it, bus_index, channel_index))
                 return false;
-        } else if (connect_callback_ && !connect_callback_(*it, bus_index)) {
+        } else if (connect_callback_ && channel_index == 0) {
+            // The legacy callback rebinds the whole bus, so the catalog must
+            // record a whole-bus selection rather than a lone left channel.
+            if (!connect_callback_(*it, bus_index))
+                return false;
+            ensure_bus(bus_index);
+            set_whole_bus(bus_index, *it);
+            notify();
+            return true;
+        } else if (connect_callback_) {
+            // A legacy whole-bus callback cannot bind an independent channel.
             return false;
         }
         ensure_bus(bus_index);
@@ -296,6 +332,12 @@ class MutableAudioRouteCatalog final : public AudioRouteCatalog {
             selected_.resize(bus_index + 1);
         if (selected_channels_.size() <= bus_index)
             selected_channels_.resize(bus_index + 1);
+    }
+
+    void set_whole_bus(std::size_t bus_index, const AudioRouteInfo& route) {
+        selected_[bus_index] = route.stable_id;
+        selected_channels_[bus_index][0] = route.stable_id;
+        selected_channels_[bus_index][1] = route.channels > 1 ? route.stable_id : std::string{};
     }
 
     void notify() {
