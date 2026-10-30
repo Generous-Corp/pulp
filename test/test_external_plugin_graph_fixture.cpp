@@ -194,11 +194,10 @@ TEST_CASE("external CLAP lifecycle has explicit identity and removal controls",
     const auto parameters = live_slot->parameters();
     std::vector<std::uint8_t> state_to_restore = original_state;
     std::optional<std::pair<std::uint32_t, float>> mutated_parameter;
-    const auto writable = std::find_if(parameters.begin(), parameters.end(),
-                                       [](const pulp::host::HostParamInfo& parameter) {
-                                           return parameter.flags.automatable &&
-                                                  !parameter.flags.read_only;
-                                       });
+    const auto writable = std::find_if(
+        parameters.begin(), parameters.end(), [](const pulp::host::HostParamInfo& parameter) {
+            return parameter.flags.automatable && !parameter.flags.read_only;
+        });
     if (writable == parameters.end()) {
         std::cout << "parameter_state=refused reason=no_writable_automatable_parameter\n";
     } else {
@@ -213,8 +212,8 @@ TEST_CASE("external CLAP lifecycle has explicit identity and removal controls",
         const auto mutated_state = live_slot->save_state();
         if (mutated_state == original_state) {
             CHECK(mutated_state == original_state);
-            std::cout << "parameter_state=refused reason=state_blob_unchanged id="
-                      << writable->id << " before=" << before << " after=" << after << '\n';
+            std::cout << "parameter_state=refused reason=state_blob_unchanged id=" << writable->id
+                      << " before=" << before << " after=" << after << '\n';
         } else {
             expected_replay_hash = mutated_hash;
             state_to_restore = mutated_state;
