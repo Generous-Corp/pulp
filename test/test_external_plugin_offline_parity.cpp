@@ -36,7 +36,8 @@ std::filesystem::path main_executable(const std::filesystem::path& bundle) {
     std::vector<std::filesystem::path> candidates;
     const auto root = bundle / "Contents" / "MacOS";
     for (const auto& entry : std::filesystem::directory_iterator(root))
-        if (entry.is_regular_file() && entry.path().extension() != ".json") candidates.push_back(entry.path());
+        if (entry.is_regular_file() && entry.path().extension() != ".json")
+            candidates.push_back(entry.path());
     REQUIRE(candidates.size() == 1);
     return candidates.front();
 }
@@ -60,8 +61,8 @@ std::unique_ptr<Parts> make_graph(const PluginInfo& info) {
     parts->input = parts->graph.add_input_node(info.num_inputs);
     auto slot = PluginSlot::load(info);
     REQUIRE(slot);
-    parts->plugin = parts->graph.add_plugin_node(std::move(slot), info.num_inputs,
-                                                 info.num_outputs, "external parity");
+    parts->plugin = parts->graph.add_plugin_node(std::move(slot), info.num_inputs, info.num_outputs,
+                                                 "external parity");
     parts->output = parts->graph.add_output_node(info.num_outputs);
     for (int channel = 0; channel < info.num_inputs; ++channel)
         REQUIRE(parts->graph.connect(parts->input, channel, parts->plugin, channel));
@@ -121,12 +122,14 @@ void require_equal(const Buffer<float>& lhs, const Buffer<float>& rhs, float tol
     REQUIRE(lhs.num_samples() == rhs.num_samples());
     for (std::size_t channel = 0; channel < lhs.num_channels(); ++channel)
         for (std::size_t frame = 0; frame < lhs.num_samples(); ++frame)
-            REQUIRE(std::fabs(lhs.channel(channel)[frame] - rhs.channel(channel)[frame]) <= tolerance);
+            REQUIRE(std::fabs(lhs.channel(channel)[frame] - rhs.channel(channel)[frame]) <=
+                    tolerance);
 }
 
 } // namespace
 
-TEST_CASE("external CLAP graph matches live and offline rendering", "[host][graph][external][offline]") {
+TEST_CASE("external CLAP graph matches live and offline rendering",
+          "[host][graph][external][offline]") {
     const char* path = std::getenv("PULP_EXTERNAL_CLAP_PATH");
     const char* expected_sha = std::getenv("PULP_EXTERNAL_CLAP_SHA256");
     if (!path || !expected_sha)

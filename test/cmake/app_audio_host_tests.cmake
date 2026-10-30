@@ -967,6 +967,11 @@ if(DEFINED ENV{PULP_STRESS_FLAKY_TESTS} AND NOT "$ENV{PULP_STRESS_FLAKY_TESTS}" 
 endif()
 
 # GraphSerializer round-trip tests
+# External artifact parity is an optional, identity-pinned host/graph fixture.
+pulp_add_test_suite(pulp-test-external-plugin-offline-parity GROUP pulp-test-group-app-host
+    SOURCES test_external_plugin_offline_parity.cpp
+    LIBRARIES pulp::host)
+
 pulp_add_test_suite(pulp-test-graph-serializer GROUP pulp-test-group-app-host
     LIBRARIES pulp::host)
 
