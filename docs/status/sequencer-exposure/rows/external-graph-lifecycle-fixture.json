@@ -1,0 +1,49 @@
+{
+  "id": "external-graph-lifecycle-fixture",
+  "title": "Bounded external graph lifecycle fixture remains a pending test receipt",
+  "classification": "ci_test_only",
+  "delivery_state": "pending",
+  "claim_id": "c3a4f43b-8c0a-4a64-8f90-bc8e8a0c8f31",
+  "owned_paths": [
+    "test/cmake/timeline_tests.cmake",
+    "test/test_external_plugin_graph_fixture.cpp",
+    "docs/status/sequencer-exposure/rows/external-graph-lifecycle-fixture.json"
+  ],
+  "evidence": [
+    {
+      "path": "test/cmake/timeline_tests.cmake",
+      "needles": [
+        "pulp_add_test_suite(pulp-test-external-plugin-graph-fixture"
+      ]
+    },
+    {
+      "path": "test/test_external_plugin_graph_fixture.cpp",
+      "needles": [
+        "external CLAP lifecycle has explicit identity and removal controls",
+        "PULP_EXTERNAL_CLAP_SHA256"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "Test-only fixture and suite registration; no installed header or SDK artifact changes."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No CLI command, flag, or document format changes."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP tool or schema changes."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No product control, executor, or permission policy changes."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "The fixture does not add a design-time capability."
+    }
+  }
+}
