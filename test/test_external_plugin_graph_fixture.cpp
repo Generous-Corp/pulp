@@ -131,7 +131,7 @@ RenderResult render_one(GraphParts& parts) {
 
 TEST_CASE("external CLAP loads and renders through a signal graph", "[host][graph][external]") {
     const char* path = std::getenv("PULP_EXTERNAL_CLAP_PATH");
-    REQUIRE(path);
+    if (!path) SKIP("external CLAP artifact is not configured");
     REQUIRE(std::filesystem::exists(path));
     const auto plugins =
         pulp::host::PluginScanner::scan_bundle(path, pulp::host::PluginFormat::CLAP);
@@ -165,8 +165,8 @@ TEST_CASE("external CLAP lifecycle has explicit identity and removal controls",
           "[host][graph][external][lifecycle]") {
     const char* path = std::getenv("PULP_EXTERNAL_CLAP_PATH");
     const char* expected_sha = std::getenv("PULP_EXTERNAL_CLAP_SHA256");
-    REQUIRE(path);
-    REQUIRE(expected_sha);
+    if (!path || !expected_sha)
+        SKIP("external CLAP artifact identity is not configured");
     REQUIRE(std::filesystem::exists(path));
     const auto executable = main_executable(path);
     REQUIRE(sha256_file(executable) == expected_sha);
