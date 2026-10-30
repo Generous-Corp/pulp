@@ -471,22 +471,19 @@ bool ContextMenu::on_key_event(const KeyEvent& event) {
         move_hover(+1);
         return true;
     case KeyCode::left:
-        if (hover_index_ >= 0 && hover_index_ < static_cast<int>(items_.size()) &&
-            (items_[static_cast<size_t>(hover_index_)].control_kind == Item::ControlKind::slider ||
-             items_[static_cast<size_t>(hover_index_)].control_kind == Item::ControlKind::choice)) {
-            adjust_control(items_[static_cast<size_t>(hover_index_)],
-                           -items_[static_cast<size_t>(hover_index_)].normalized_step);
-            return true;
-        }
+    case KeyCode::right: {
+        // Only rows with an adjustable control consume horizontal arrows;
+        // other rows leave them to the host.
+        if (hover_index_ < 0 || hover_index_ >= static_cast<int>(items_.size()))
+            return false;
+        auto& item = items_[static_cast<size_t>(hover_index_)];
+        if (item.control_kind != Item::ControlKind::slider &&
+            item.control_kind != Item::ControlKind::choice)
+            return false;
+        adjust_control(item, event.key == KeyCode::left ? -item.normalized_step
+                                                        : item.normalized_step);
         return true;
-    case KeyCode::right:
-        if (hover_index_ >= 0 && hover_index_ < static_cast<int>(items_.size()) &&
-            (items_[static_cast<size_t>(hover_index_)].control_kind == Item::ControlKind::slider ||
-             items_[static_cast<size_t>(hover_index_)].control_kind == Item::ControlKind::choice)) {
-            adjust_control(items_[static_cast<size_t>(hover_index_)],
-                           items_[static_cast<size_t>(hover_index_)].normalized_step);
-        }
-        return true;
+    }
     case KeyCode::home:
         move_hover_to_edge(false);
         return true;
@@ -549,12 +546,6 @@ ContextMenu* ContextMenu::show(View* root, Point pos, std::vector<Item> items,
     };
 
     root->add_child(std::move(menu));  // last child → painted/hit-tested on top
-    // Context menus are full-window overlays. Claiming the overlay is what
-    // makes the platform host route Escape/arrow keys to this view and send
-    // outside presses through the dismissal path instead of letting them hit
-    // the DAW or the control underneath. The old implementation only added a
-    // painted child, so it looked correct while keyboard and outside-click
-    // behavior was inert in embedded editors.
     // Context menus are full-window overlays. Claiming the overlay is what
     // makes the platform host route Escape/arrow keys to this view and send
     // outside presses through the dismissal path instead of letting them hit

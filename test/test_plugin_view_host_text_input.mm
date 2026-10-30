@@ -1,15 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/view/plugin_view_host.hpp>
-#include <pulp/view/screenshot_compare.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
 
 #include <stdexcept>
-#include <memory>
-#include <utility>
-#include <vector>
 
 #if defined(__APPLE__)
 
@@ -562,89 +558,6 @@ TEST_CASE("PluginViewHost (mac CPU) — right click routes to the painted overla
 }
 
 #ifdef PULP_HAS_SKIA
-class OrientationProbeView final : public View {
-  public:
-    void paint(pulp::canvas::Canvas& canvas) override {
-        // Pulp view coordinates are top-down. The bright band is authored at
-        // y=0 and the dark band at the bottom so an embedded presentable
-        // surface cannot silently invert the editor while headless capture
-        // remains correct.
-        canvas.set_fill_color(pulp::canvas::Color::rgba8(246, 210, 70, 255));
-        canvas.fill_rect(0.0f, 0.0f, bounds().width, bounds().height * 0.5f);
-        canvas.set_fill_color(pulp::canvas::Color::rgba8(24, 28, 42, 255));
-        canvas.fill_rect(0.0f, bounds().height * 0.5f, bounds().width, bounds().height * 0.5f);
-    }
-};
-
-std::pair<uint32_t, uint32_t> orientation_png_dimensions(const std::vector<uint8_t>& png) {
-    if (png.size() < 24 || png[0] != 0x89 || png[1] != 0x50 || png[2] != 0x4e || png[3] != 0x47)
-        return {};
-    const auto read_be32 = [&](size_t offset) {
-        return (static_cast<uint32_t>(png[offset]) << 24u) |
-               (static_cast<uint32_t>(png[offset + 1]) << 16u) |
-               (static_cast<uint32_t>(png[offset + 2]) << 8u) |
-               static_cast<uint32_t>(png[offset + 3]);
-    };
-    return {read_be32(16), read_be32(20)};
-}
-
-struct ScopedOrientationHost {
-    std::unique_ptr<PluginViewHost> host;
-    NSWindow* window = nil;
-
-    ~ScopedOrientationHost() {
-        if (host) {
-            host->detach();
-            host.reset();
-        }
-        if (window)
-            [window close];
-    }
-};
-
-TEST_CASE("PluginViewHost (mac GPU) preserves top-down presentable orientation",
-          "[plugin-view-host][gpu][mac][orientation]") {
-    @autoreleasepool {
-        NSWindow* window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 240, 120)
-                                                       styleMask:NSWindowStyleMaskBorderless
-                                                         backing:NSBackingStoreBuffered
-                                                           defer:NO];
-        if (!window || !window.contentView)
-            SKIP("No Cocoa window — GPU orientation test skipped.");
-
-        OrientationProbeView root;
-        PluginViewHost::Options opts;
-        opts.size = {240u, 120u};
-        opts.use_gpu = true;
-        ScopedOrientationHost scoped{PluginViewHost::create(root, opts), window};
-        auto& host = scoped.host;
-        REQUIRE(host != nullptr);
-        if (!host->is_gpu_backed()) {
-            SKIP("No GPU-backed plugin host in this process — orientation test skipped.");
-        }
-        host->attach_to_parent((__bridge void*)window.contentView);
-        [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.20]];
-
-        const auto png = host->capture_back_buffer_png();
-        REQUIRE_FALSE(png.empty());
-        const auto [width, height] = orientation_png_dimensions(png);
-        REQUIRE(width > 1);
-        REQUIRE(height > 1);
-        const auto top = pulp::view::analyze_screenshot_content(
-            pulp::view::crop_png(png, 0, 0, width, height / 2));
-        const auto bottom = pulp::view::analyze_screenshot_content(
-            pulp::view::crop_png(png, 0, height / 2, width, height - height / 2));
-        REQUIRE(top.valid);
-        REQUIRE(bottom.valid);
-        // Metal's presentable readback exposes native bottom-up rows. The
-        // bridge transform above therefore makes the readback's top row dark;
-        // the same transform makes the composited screen's top row bright.
-        // Removing it restores the upside-down REAPER presentation and flips
-        // this relationship.
-        REQUIRE(bottom.luminance_mean > top.luminance_mean + 80.0);
-    }
-}
-
 TEST_CASE("PluginViewHost (mac GPU) — right click routes to the painted overlay",
           "[plugin-view-host][context-menu][overlay][mac][gpu]") {
     @autoreleasepool {

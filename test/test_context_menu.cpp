@@ -695,3 +695,16 @@ TEST_CASE("ContextMenu clips its rows to the panel", "[view][context-menu]") {
     }
     REQUIRE(clipped_to_panel);
 }
+
+TEST_CASE("ContextMenu left and right arrows are symmetric on action rows",
+          "[view][context-menu]") {
+    auto root = make_root();
+    auto* menu = ContextMenu::show(root.get(), {kAnchorX, kAnchorY}, {{1, "First"}},
+                                   [](std::optional<int>) {});
+    REQUIRE_FALSE(menu->on_key_event(key_down(KeyCode::left)));
+    REQUIRE_FALSE(menu->on_key_event(key_down(KeyCode::right)));
+    REQUIRE(menu->on_key_event(key_down(KeyCode::down)));
+    REQUIRE_FALSE(menu->on_key_event(key_down(KeyCode::left)));
+    REQUIRE_FALSE(menu->on_key_event(key_down(KeyCode::right)));
+    REQUIRE(root->child_count() == 1);
+}

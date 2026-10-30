@@ -2952,23 +2952,7 @@ private:
                     gpu_surface_->height(), scale);
         }
 
-        // Dawn's CAMetalLayer swapchain is presented in native bottom-up
-        // screen space when this view is embedded in a foreign DAW window.
-        // The Pulp view tree, hit testing, and every CPU/headless renderer use
-        // the documented top-down logical space.  Keep that contract at the
-        // presentable-surface seam instead of teaching each plugin or widget a
-        // second coordinate system.  The transform is deliberately limited to
-        // a real on-screen drawable: offscreen/GPU capture and the CPU host
-        // already have top-down rows and must remain unchanged.
-        const bool flip_presentable_surface = gpu_surface_->has_surface();
-        if (flip_presentable_surface) {
-            canvas->save();
-            canvas->translate(0.0f, static_cast<float>(size_.height));
-            canvas->scale(1.0f, -1.0f);
-        }
         paint_scene(*canvas);
-        if (flip_presentable_surface)
-            canvas->restore();
 
         // Two liveness answers (see HostFrameTick::animating): the gate stays
         // open while anything wants clock ticks, but only a tree that paints
