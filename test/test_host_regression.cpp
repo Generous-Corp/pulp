@@ -42,6 +42,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -1363,6 +1364,12 @@ TEST_CASE("Source-owned VST3 gain parameter output probe",
     REQUIRE(std::isfinite(it->default_value));
     REQUIRE(it->min_value <= it->default_value);
     REQUIRE(it->default_value <= it->max_value);
+    const bool strict_plain_range = std::getenv("PULP_VST3_STRICT_PLAIN_RANGE") != nullptr;
+    if (strict_plain_range) {
+        REQUIRE(std::abs(it->min_value - source_info->range.min) < 1e-5f);
+        REQUIRE(std::abs(it->max_value - source_info->range.max) < 1e-5f);
+        REQUIRE(std::abs(it->default_value - source_info->range.default_value) < 1e-5f);
+    }
     auto render = [&]() {
         constexpr int kFrames = 256;
         std::vector<float> in_l(kFrames, 1.f), in_r(kFrames, 1.f);
@@ -1389,6 +1396,14 @@ TEST_CASE("Source-owned VST3 gain parameter output probe",
                      requested, gain_id, readback, changed);
         REQUIRE(std::isfinite(readback));
         REQUIRE(std::isfinite(changed));
+        if (strict_plain_range) {
+            const float expected_norm = (requested - source_info->range.min) /
+                                        (source_info->range.max - source_info->range.min);
+            const float expected_energy = 512.f * std::pow(10.f, requested / 20.f);
+            REQUIRE(std::abs(readback - requested) < 1e-4f);
+            REQUIRE(std::abs(changed - expected_energy) < 1e-3f);
+            INFO("expected_norm=" << expected_norm);
+        }
     }
     slot->release();
 }
