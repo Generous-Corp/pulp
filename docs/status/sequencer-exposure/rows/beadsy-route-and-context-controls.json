@@ -1,0 +1,86 @@
+{
+  "id": "beadsy-route-and-context-controls",
+  "title": "Host-owned stereo route selection and interactive context-menu controls",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "beadsy-route-and-context-controls-20261028",
+  "owned_paths": [
+    "core/host/include/pulp/host/audio_route_catalog.hpp",
+    "core/view/include/pulp/view/context_menu.hpp",
+    "core/view/src/context_menu.cpp",
+    "test/test_audio_route_catalog.cpp",
+    "test/test_context_menu.cpp",
+    ".agents/skills/hosting/SKILL.md",
+    "docs/status/sequencer-exposure/rows/beadsy-route-and-context-controls.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/host/include/pulp/host/audio_route_catalog.hpp",
+      "needles": [
+        "virtual bool connect_channel(std::string_view stable_id",
+        "virtual std::string connected_route_channel(std::size_t bus_index",
+        "std::vector<std::array<std::string, 2>> selected_channels_"
+      ]
+    },
+    {
+      "path": "core/view/include/pulp/view/context_menu.hpp",
+      "needles": [
+        "static Item make_toggle(int id",
+        "static Item make_slider(int id",
+        "bool accepts_navigation_input() const override"
+      ]
+    },
+    {
+      "path": "test/test_audio_route_catalog.cpp",
+      "needles": [
+        "keeps independent left and right selections"
+      ]
+    },
+    {
+      "path": "test/test_context_menu.cpp",
+      "needles": [
+        "controls clamp and notify through their callbacks"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "The route-channel and context-menu control APIs are public headers with compatibility fallbacks. Hosts that do not support independent channel routing retain bus-level behavior, and ordinary ContextMenu action rows retain their existing selection and dismissal semantics. The delivery remains pending installed-consumer proof.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/host/include/pulp/host/audio_route_catalog.hpp",
+          "needles": ["connect_channel", "connected_route_channel"]
+        },
+        {
+          "kind": "sdk_header",
+          "path": "core/view/include/pulp/view/context_menu.hpp",
+          "needles": ["make_toggle", "make_slider"]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "These APIs operate on live host routing and live view input; no offline Timeline command or document schema changes."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP tool, schema, or handler is added."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "The catalog and menu callbacks are host/view plumbing, not a new broker operation or product-control grant."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "No design-time agent capability or importer authority changes."
+    }
+  }
+}
