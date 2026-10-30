@@ -152,3 +152,32 @@ TEST_CASE("MutableAudioRouteCatalog keeps independent left and right selections"
     REQUIRE(catalog.connected_route_channel(0, 0).empty());
     REQUIRE(catalog.connected_route_channel(0, 1).empty());
 }
+
+TEST_CASE("MutableAudioRouteCatalog binds independent channels and clears right-only state") {
+    pulp::host::MutableAudioRouteCatalog catalog;
+    catalog.set_routes({
+        {"stereo", "Stereo", pulp::host::AudioRouteKind::Track, 2, true},
+        {"mono", "Mono", pulp::host::AudioRouteKind::Track, 1, true},
+    });
+    std::vector<std::string> bindings;
+    catalog.set_connect_channel_callback(
+        [&](const auto& route, std::size_t bus, std::size_t channel) {
+            bindings.push_back(route.stable_id + ":" + std::to_string(bus) + ":" +
+                               std::to_string(channel));
+            return true;
+        });
+
+    REQUIRE(catalog.connect_channel("stereo", 0, 1));
+    REQUIRE(bindings == std::vector<std::string>{"stereo:0:1"});
+    REQUIRE_FALSE(catalog.connect_channel("mono", 0, 1));
+    REQUIRE(catalog.disconnect(0));
+    REQUIRE(catalog.connected_route_channel(0, 1).empty());
+}
+
+TEST_CASE("MutableAudioRouteCatalog rejects independent binding through legacy callback") {
+    pulp::host::MutableAudioRouteCatalog catalog;
+    catalog.set_routes({{"stereo", "Stereo", pulp::host::AudioRouteKind::Track, 2, true}});
+    catalog.set_connect_callback([](const auto&, std::size_t) { return true; });
+
+    REQUIRE_FALSE(catalog.connect_channel("stereo", 0, 1));
+}
