@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -777,6 +778,26 @@ TEST_CASE("X9 DX replay and refusal diagnostics are deterministic",
     REQUIRE(loaded.error.empty());
     REQUIRE(replay.prepare(kSr, kFrames));
     REQUIRE(GraphSerializer::to_json(replay) == persisted);
+
+    const auto render_hash = [](SignalGraph& graph) {
+        std::array<float, kFrames> input{};
+        std::array<float, kFrames> output{};
+        for (int frame = 0; frame < kFrames; ++frame)
+            input[frame] = static_cast<float>((frame % 7) - 3) * 0.125f;
+        std::array<const float*, 1> input_channels{input.data()};
+        std::array<float*, 1> output_channels{output.data()};
+        pulp::audio::BufferView<const float> input_view(input_channels.data(), 1, kFrames);
+        pulp::audio::BufferView<float> output_view(output_channels.data(), 1, kFrames);
+        graph.process(output_view, input_view, kFrames);
+        std::uint64_t hash = 1469598103934665603ull;
+        for (const auto sample : output) {
+            const auto bits = std::bit_cast<std::uint32_t>(sample);
+            hash ^= bits;
+            hash *= 1099511628211ull;
+        }
+        return hash;
+    };
+    REQUIRE(render_hash(source) == render_hash(replay));
 
     SlotBehavior old_behavior{.info = make_info("dx")};
     SlotBehavior replacement_behavior{.info = make_info("dx"), .latency = 32};
