@@ -196,6 +196,31 @@ TEST_CASE("VST3 param display declines to the base formatter without converters"
     processor.terminate();
 }
 
+TEST_CASE("VST3 parameter conversion preserves declared plain ranges",
+          "[vst3][params][conversion]") {
+    HostApp host;
+    pulp::format::vst3::PulpVst3Processor processor(make_display_processor);
+    REQUIRE(processor.initialize(&host) == Steinberg::kResultOk);
+
+    // Gain is declared as [-60, 24] dB, so normalized endpoints and their
+    // inverse must use that authored range rather than the SDK's [0, 1]
+    // fallback.
+    REQUIRE_THAT(processor.normalizedParamToPlain(kGainId, 0.0), WithinAbs(-60.0, 1e-6));
+    REQUIRE_THAT(processor.normalizedParamToPlain(kGainId, 0.5), WithinAbs(-18.0, 1e-6));
+    REQUIRE_THAT(processor.normalizedParamToPlain(kGainId, 1.0), WithinAbs(24.0, 1e-6));
+    REQUIRE_THAT(processor.plainParamToNormalized(kGainId, -60.0), WithinAbs(0.0, 1e-6));
+    REQUIRE_THAT(processor.plainParamToNormalized(kGainId, -18.0), WithinAbs(0.5, 1e-6));
+    REQUIRE_THAT(processor.plainParamToNormalized(kGainId, 24.0), WithinAbs(1.0, 1e-6));
+
+    // IDs that are not declared by the processor retain the SDK fallback;
+    // this covers hidden controller IDs that have no StateStore entry.
+    constexpr Steinberg::Vst::ParamID kUnknownId = 0x7ffffffe;
+    REQUIRE_THAT(processor.normalizedParamToPlain(kUnknownId, 0.25), WithinAbs(0.25, 1e-6));
+    REQUIRE_THAT(processor.plainParamToNormalized(kUnknownId, 0.75), WithinAbs(0.75, 1e-6));
+
+    processor.terminate();
+}
+
 namespace {
 
 constexpr pulp::state::ParamID kVisibleId = 10;
