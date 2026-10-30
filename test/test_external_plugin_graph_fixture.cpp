@@ -131,7 +131,8 @@ RenderResult render_one(GraphParts& parts) {
 
 TEST_CASE("external CLAP loads and renders through a signal graph", "[host][graph][external]") {
     const char* path = std::getenv("PULP_EXTERNAL_CLAP_PATH");
-    if (!path) SKIP("external CLAP artifact is not configured");
+    if (!path)
+        SKIP("external CLAP artifact is not configured");
     REQUIRE(std::filesystem::exists(path));
     const auto plugins =
         pulp::host::PluginScanner::scan_bundle(path, pulp::host::PluginFormat::CLAP);
