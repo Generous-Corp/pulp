@@ -1181,7 +1181,6 @@ TEST_CASE("Scanner -> load -> process -> unload round-trip on real CLAP plugin",
 }
 #endif
 
-
 #ifdef PULP_TEST_VST3_PATH
 TEST_CASE("Source-owned VST3 gain parameter output probe",
           "[host][vst3][integration][state][regression]") {
