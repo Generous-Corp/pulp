@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261030-standalone-window-factory-watch",
+  "created_at": "2026-10-30T04:49:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Restore the factory-only WindowHost contract while installing the existing SDL adapter explicitly at Windows/Linux standalone startup. Custom embedding factories remain authoritative. This is Pulp-owned standalone integration; no source authority or rendering backend changes.",
+  "tests": [
+    "Non-Apple WindowHost::create: no factory -> nullptr",
+    "Standalone startup registers a desktop factory without opening a window",
+    "Standalone startup preserves an embedding host factory"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
