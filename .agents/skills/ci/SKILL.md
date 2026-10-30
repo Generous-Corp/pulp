@@ -5236,6 +5236,15 @@ bisectable.
   inside setup before repository code runs. Use `packages: platform-tools` and
   install the exact NDK, emulator, platform, and system image later with the
   workflow's explicit `sdkmanager` step.
+- **Release secrets come from the `release` environment, which only `main`
+  can use.** `RELEASE_BOT_TOKEN`, `RELEASE_BOT_SSH_SIGNING_KEY` and
+  `VELLUM_DISPATCHER_APP_PRIVATE_KEY` are environment secrets, so a workflow on
+  any other ref (a `pull_request` run, a dispatch with `--ref <branch>`, a
+  merge-group run) cannot read them. A job that needs them names
+  `environment: { name: release, deployment: false }` and must run on main
+  (push, schedule, workflow_run or a main dispatch). A dequeued bump PR
+  therefore does not drain in its own `pull_request` run: version-at-land's
+  `kick-drain` job dispatches the drain on main.
 - **`version-at-land.yml` + `version_at_land.py` are the single-writer,
   post-merge half of the version-bump intent-trailer model, and the workflow
   runs LIVE (`--push`).** They exist to kill the version-bump merge treadmill

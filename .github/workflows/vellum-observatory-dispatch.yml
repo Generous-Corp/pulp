@@ -40,6 +40,10 @@ jobs:
     needs: validate-outbox
     if: needs.validate-outbox.outputs.dispatch_required == 'true'
     runs-on: ubuntu-latest
+    # Release secrets live in the `release` environment, which only main can use.
+    environment:
+      name: release
+      deployment: false
     steps:
       # This job never checks out or executes repository code. Only the pinned
       # GitHub-owned action sees the App private key, and its installation token

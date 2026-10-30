@@ -1408,6 +1408,8 @@ class WorkflowConcurrencyTest(unittest.TestCase):
         text = WORKFLOW.read_text(encoding="utf-8")
         self.group = _folded(text, "group:", "cancel-in-progress")
         self.job_if = _folded(text, "    if:", "    runs-on:")
+        self.kick_if = _folded(text.split("\n  kick-drain:\n", 1)[1],
+                               "    if:", "    runs-on:")
 
     def _events(self):
         base = {"github.repository": self.REPO, "github.run_id": "4242",
@@ -1461,14 +1463,39 @@ class WorkflowConcurrencyTest(unittest.TestCase):
 
     def test_heal_events_that_run_share_the_serial_group(self) -> None:
         events = dict(self._events())
-        for name in (f"dequeued {self.BUMP} {self.REPO}",
-                     f"workflow_run failure {self.REPO}",
+        for name in (f"workflow_run failure {self.REPO}",
                      f"workflow_run cancelled {self.REPO}"):
             with self.subTest(event=name):
                 ctx = {**events[name], "vars.PULP_BUMP_ROUTE": "pr"}
                 self.assertTrue(_evaluate(self.job_if, ctx))
                 self.assertEqual(_evaluate(self.group, ctx),
                                  "version-at-land-serial")
+
+    def test_a_dequeued_bump_pr_only_dispatches_a_drain_on_main(self) -> None:
+        """A `pull_request` run cannot use the main-only `release`
+        environment, so the drain never runs on one; kick-drain dispatches it
+        on main instead, for the bot's bump branch on the PR route only."""
+        for route in ("pr", ""):
+            for name, ctx in self._events():
+                ctx = {**ctx, "vars.PULP_BUMP_ROUTE": route}
+                with self.subTest(route=route, event=name):
+                    kicks = bool(_evaluate(self.kick_if, ctx))
+                    self.assertEqual(
+                        kicks,
+                        route == "pr"
+                        and name == f"dequeued {self.BUMP} {self.REPO}")
+                    if ctx["github.event_name"] == "pull_request":
+                        self.assertFalse(_evaluate(self.job_if, ctx))
+                        self.assertIn("4242", _evaluate(self.group, ctx))
+
+    def test_the_drain_runs_in_the_release_environment(self) -> None:
+        text = WORKFLOW.read_text(encoding="utf-8")
+        drain = text.split("\n  drain-dry-run:\n", 1)[1].split("\n    steps:\n", 1)[0]
+        self.assertIn("    environment:\n      name: release\n", drain)
+        kick = text.split("\n  kick-drain:\n", 1)[1]
+        self.assertNotIn("secrets.", kick)
+        self.assertIn("gh workflow run version-at-land.yml", kick)
+        self.assertIn("--ref main", kick)
 
 
 class RefreshDerivedTest(unittest.TestCase):

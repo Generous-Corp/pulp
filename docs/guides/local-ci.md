@@ -4609,7 +4609,8 @@ call to an operator.
   it can break with **no commit at all**: a runner is decommissioned, a host
   renamed, a variable edited in the web UI. A PR gate would never see any of
   that. It runs GitHub-hosted deliberately — a check that queues behind the
-  saturated pool it is auditing is no check.
+  saturated pool it is auditing is no check. Its `RELEASE_BOT_TOKEN` comes from
+  the `release` environment, which only `main` can use.
 - **`runner-topology-selftest`** (ctest) — the diff-shaped half: contract
   well-formedness and the reconciliation logic. No network, so it runs on every
   PR for free and never adds an API call to the required macOS gate.
@@ -5242,7 +5243,8 @@ can't invent one.
 
 **Org runner census authentication.** Label reconciliation reads
 `orgs/<org>/actions/runners`, which needs Administration: Read on the org. The
-workflow uses `RELEASE_BOT_TOKEN` and falls back to `GITHUB_TOKEN`. When the
+workflow uses `RELEASE_BOT_TOKEN` (from the main-only `release` environment, so
+a dispatch on any other ref gets no token) and falls back to `GITHUB_TOKEN`. When the
 fallback is in effect, the org scope refuses the read, and every
 `runner_census_blind` row says so. The fix is a GitHub App installation token
 that has org self-hosted-runner read, minted in the job with
