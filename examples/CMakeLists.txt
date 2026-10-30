@@ -40,6 +40,8 @@ add_subdirectory(host-bench-plugin)
 
 # PulpTone: oscillator synth with musical typing
 add_subdirectory(pulp-tone)
+# Minimal provider-neutral CV vertical slice (optional OSC/native provider).
+add_subdirectory(cv-control)
 
 # PulpEffect: filter with parameters and state
 add_subdirectory(pulp-effect)
