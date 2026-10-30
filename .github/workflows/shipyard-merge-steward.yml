@@ -107,17 +107,33 @@ jobs:
           }
           run_steward_with_retry shipyard runner steward --repo "$GITHUB_REPOSITORY" --base main --arm-unqueued --json \
             > "$RUNNER_TEMP/steward/audit.json"
-          jq -c '.repos[].prs[] | select(.mutation != null) | {number,head_sha}' \
-            "$RUNNER_TEMP/steward/audit.json" > "$RUNNER_TEMP/steward/review-candidates.jsonl"
+          # In dry-run mode Shipyard reports candidate plans under the native
+          # auto-merge backstop; prs[].mutation is intentionally null until
+          # apply mode. Keep this audit informational and let Shipyard's own
+          # apply path remain the final exact-head review gate.
+          jq -c '.repos[].native_auto_merge_backstop.results[]? |
+            select(.head_sha != null and .number != null) |
+            {number,head_sha}' "$RUNNER_TEMP/steward/audit.json" \
+            > "$RUNNER_TEMP/steward/review-candidates.jsonl"
+          : > "$RUNNER_TEMP/steward/review-blocked.jsonl"
           while IFS= read -r candidate; do
             [ -n "$candidate" ] || continue
             pr=$(jq -r '.number' <<<"$candidate")
             head=$(jq -r '.head_sha' <<<"$candidate")
+            set +e
             verdict=$(shipyard review-verdict --repo "$GITHUB_REPOSITORY" --pr "$pr" --head "$head" --json)
-            jq -e '.verdict.verdict == "allowed"' <<<"$verdict" >/dev/null || {
-              echo "refusing mutation: PR $pr head $head lacks an allowed exact-head review" >&2
-              exit 1
-            }
+            verdict_status=$?
+            set -e
+            if [ "$verdict_status" -ge 2 ]; then
+              echo "review evidence unreadable for PR $pr head $head" >&2
+              exit "$verdict_status"
+            fi
+            if ! jq -e '.verdict.verdict == "allowed"' <<<"$verdict" >/dev/null; then
+              echo "skipping mutation: PR $pr head $head lacks an allowed exact-head review"
+              jq -cn --arg pr "$pr" --arg head "$head" \
+                '{number:($pr|tonumber),head_sha:$head,reason:"missing exact-head allowed review"}' \
+                >> "$RUNNER_TEMP/steward/review-blocked.jsonl"
+            fi
           done < "$RUNNER_TEMP/steward/review-candidates.jsonl"
 
       - name: Reconcile and feed the native queue
@@ -146,7 +162,24 @@ jobs:
               sleep "$attempt"
             done
           }
+          set +e
           run_steward_with_retry shipyard "${args[@]}" | tee "$RUNNER_TEMP/steward/report.json"
+          steward_status=${PIPESTATUS[0]}
+          set -e
+          if [ "$steward_status" -ne 0 ]; then
+            # A policy refusal for one PR is expected during a mixed backlog;
+            # transport, malformed-output, and mutation errors remain fatal.
+            if jq -e '
+              ([.repos[]?.errors[]?, .repos[]?.prs[]?.error?]
+                | map(select(. != null and . != ""))) as $errors
+              | ($errors | length > 0)
+              and ($errors | all(test("waiting_head_approval|waiting_required")))
+            ' "$RUNNER_TEMP/steward/report.json" >/dev/null; then
+              echo "steward completed with expected per-PR policy refusals; eligible candidates were processed"
+            else
+              exit "$steward_status"
+            fi
+          fi
 
       - name: Publish feeder evidence
         if: always()
