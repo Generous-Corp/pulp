@@ -599,7 +599,7 @@ TEST_CASE("live plugin swap staging reports refusal reasons and releases candida
         REQUIRE(s->graph.prepare(kSr, kFrames));
         const int calls_before_reprepare_render = process_call_count(s->old_stats);
         render_blocks(s->graph, 2);
-        CHECK(process_call_count(s->old_stats) > calls_before_reprepare_render);
+        CHECK(process_call_count(s->old_stats) == calls_before_reprepare_render + 2);
         CHECK(destroyed_count(s->replacement_stats) == 1);
     }
 
