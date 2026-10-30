@@ -79,6 +79,16 @@ float rms(const Buffer<float>& buffer) {
         std::sqrt(sum / static_cast<double>(buffer.num_channels() * buffer.num_samples())));
 }
 
+pulp::midi::MidiBuffer chord() {
+    pulp::midi::MidiBuffer events;
+    for (const auto note : {uint8_t{60}, uint8_t{64}, uint8_t{67}}) {
+        auto event = pulp::midi::MidiEvent::note_on(0, note, 110);
+        event.sample_offset = 0;
+        events.add(event);
+    }
+    return events;
+}
+
 pulp::midi::MidiBuffer note_on() {
     pulp::midi::MidiBuffer events;
     auto event = pulp::midi::MidiEvent::note_on(0, 60, 110);
@@ -97,7 +107,8 @@ TEST_CASE("X9 public APIs compose a modular instrument through a live graph",
 
     auto input = constant_input(kBlockSize, 0.5f);
     Buffer<float> first_output(2, kBlockSize);
-    auto events = note_on();
+    auto events = chord();
+    REQUIRE(events.size() == 3);
     REQUIRE(fixture.graph.inject_midi(fixture.midi, events));
     auto first_output_view = first_output.view();
     auto input_view = std::as_const(input).view();
