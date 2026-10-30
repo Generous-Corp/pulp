@@ -6,10 +6,10 @@
 #if !defined(PULP_WASM)
 #include <pulp/osc/osc.hpp>
 #endif
-#include <pulp/audio/buffer.hpp>
 #include <cmath>
 #include <cstdlib>
 #include <numbers>
+#include <pulp/audio/buffer.hpp>
 
 namespace pulp::examples::cv_control {
 
@@ -21,20 +21,23 @@ enum FaceToneParam : state::ParamID {
 /// A deliberately small synth proving additive CV modulation. The saved base
 /// brightness remains in StateStore; the face value is an ephemeral offset.
 class FaceToneProcessor final : public format::Processor {
-public:
+  public:
     format::PluginDescriptor descriptor() const override {
-        return {.name = "CV Face Tone", .manufacturer = "Pulp",
-                .bundle_id = "com.pulp.cv-face-tone", .version = "0.1.0",
+        return {.name = "CV Face Tone",
+                .manufacturer = "Pulp",
+                .bundle_id = "com.pulp.cv-face-tone",
+                .version = "0.1.0",
                 .category = format::PluginCategory::Instrument,
-                .input_buses = {}, .output_buses = {{"Audio Out", 2}},
+                .input_buses = {},
+                .output_buses = {{"Audio Out", 2}},
                 .accepts_midi = true};
     }
 
     void define_parameters(state::StateStore& store) override {
-        store.add_parameter({.id = kBrightness, .name = "Brightness",
-                             .unit = "%", .range = {0.0f, 1.0f, 0.35f}});
-        store.add_parameter({.id = kVolume, .name = "Volume", .unit = "dB",
-                             .range = {-60.0f, 0.0f, -12.0f}});
+        store.add_parameter(
+            {.id = kBrightness, .name = "Brightness", .unit = "%", .range = {0.0f, 1.0f, 0.35f}});
+        store.add_parameter(
+            {.id = kVolume, .name = "Volume", .unit = "dB", .range = {-60.0f, 0.0f, -12.0f}});
     }
 
     void prepare(const format::PrepareContext& ctx) override {
@@ -58,8 +61,7 @@ public:
 #endif
     }
 
-    void process(audio::BufferView<float>& output,
-                 const audio::BufferView<const float>&,
+    void process(audio::BufferView<float>& output, const audio::BufferView<const float>&,
                  midi::MidiBuffer& midi_in, midi::MidiBuffer&,
                  const format::ProcessContext&) override {
         for (const auto& event : midi_in) {
@@ -83,28 +85,34 @@ public:
             left[i] = sample;
             right[i] = sample;
             phase_ += frequency_ / sample_rate_;
-            if (phase_ >= 1.0) phase_ -= 1.0;
+            if (phase_ >= 1.0)
+                phase_ -= 1.0;
         }
     }
 
-    void submit_face_frame(FaceFrame frame) noexcept { mapping_.submit(ControlSample{frame.sequence, frame.mouth_open, frame.confidence, frame.tracked}); }
-    void expire_face_frame() noexcept { mapping_.expire(); }
-    const FaceMapping& mapping() const noexcept { return mapping_; }
+    void submit_face_frame(FaceFrame frame) noexcept {
+        mapping_.submit(
+            ControlSample{frame.sequence, frame.mouth_open, frame.confidence, frame.tracked});
+    }
+    void expire_face_frame() noexcept {
+        mapping_.expire();
+    }
+    const FaceMapping& mapping() const noexcept {
+        return mapping_;
+    }
 
-private:
-    #if !defined(PULP_WASM)
+  private:
+#if !defined(PULP_WASM)
     void on_osc(const osc::Message& message) {
         if (message.address == "/pulp/cv/face" && message.args.size() >= 3) {
-            submit_face_frame({static_cast<std::uint64_t>(message.get_int(3)),
-                               message.get_float(0), message.get_float(1),
-                               message.get_int(2) != 0});
+            submit_face_frame({static_cast<std::uint64_t>(message.get_int(3)), message.get_float(0),
+                               message.get_float(1), message.get_int(2) != 0});
         } else if (message.address == "/pulp/control" && message.args.size() >= 3) {
-            mapping_.submit({static_cast<std::uint64_t>(message.get_int(3)),
-                             message.get_float(0), message.get_float(1),
-                             message.get_int(2) != 0});
+            mapping_.submit({static_cast<std::uint64_t>(message.get_int(3)), message.get_float(0),
+                             message.get_float(1), message.get_int(2) != 0});
         }
     }
-    #endif
+#endif
 
     FaceMapping mapping_;
 #if !defined(PULP_WASM)

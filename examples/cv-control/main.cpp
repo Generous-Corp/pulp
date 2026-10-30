@@ -1,16 +1,18 @@
 #include "cv_control_processor.hpp"
-#include <pulp/format/standalone.hpp>
-#include <pulp/runtime/log.hpp>
+#include <atomic>
 #include <chrono>
 #include <csignal>
 #include <iostream>
+#include <pulp/format/standalone.hpp>
+#include <pulp/runtime/log.hpp>
 #include <thread>
-#include <atomic>
 
 namespace {
 std::atomic<bool> quit{false};
-void stop(int) { quit.store(true, std::memory_order_release); }
+void stop(int) {
+    quit.store(true, std::memory_order_release);
 }
+} // namespace
 
 int main() {
     std::signal(SIGINT, stop);

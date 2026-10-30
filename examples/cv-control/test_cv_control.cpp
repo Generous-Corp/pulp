@@ -4,10 +4,10 @@
 #include <limits>
 #include <thread>
 
-using pulp::examples::cv_control::FaceFrame;
-using pulp::examples::cv_control::FaceMapping;
 using pulp::examples::cv_control::ControlReplay;
 using pulp::examples::cv_control::ControlSample;
+using pulp::examples::cv_control::FaceFrame;
+using pulp::examples::cv_control::FaceMapping;
 
 TEST_CASE("face mapping is coherent, smoothed, and confidence gated") {
     FaceMapping mapping(0.6f, 0.5f);
