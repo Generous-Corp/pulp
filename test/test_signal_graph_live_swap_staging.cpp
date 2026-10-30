@@ -815,5 +815,5 @@ TEST_CASE("X9 DX replay and refusal diagnostics are deterministic",
 
     // Productivity receipt: the bounded loop requires only the existing graph,
     // serializer, and diagnostic concepts; no parallel inspector or control API.
-    INFO("workflow_concepts=3;manual_steps=6;fixture_lines=40");
+    INFO("workflow_concepts=3;manual_steps=6;fixture_lines=62");
 }
