@@ -1351,11 +1351,11 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
     const float bw = static_cast<float>(bounds.size.width);
     const float bh = static_cast<float>(bounds.size.height);
 
-    // AppKit's NSView drawRect: context is already top-down. Do not apply
-    // CoreGraphicsCanvas's standalone/bitmap Y conversion a second time;
-    // doing so inverts RmlUi/plugin documents while native GPU hosts remain
-    // unaffected.
-    pulp::canvas::CoreGraphicsCanvas canvas(ctx, bw, bh, /*flip_y=*/false);
+    // PulpPluginView is non-flipped: AppKit supplies bottom-left coordinates.
+    // Keep Canvas's top-left conversion, including for transformed documents.
+    // The native pixel regression in test_plugin_cpu_orientation_mac.mm covers
+    // this boundary; an offscreen canvas test cannot establish AppKit's CTM.
+    pulp::canvas::CoreGraphicsCanvas canvas(ctx, bw, bh);
 
     // Clear at host bounds with the editor's own background: it is the whole
     // frame until the document mounts, and the letterbox bars after.

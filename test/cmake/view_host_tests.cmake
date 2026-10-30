@@ -899,3 +899,11 @@ if(APPLE AND NOT IOS AND TARGET pulp::host AND PROJECT_IS_TOP_LEVEL)
     set_tests_properties(host-lane-probe-requires-plugins host-lane-probe-unloadable-bundle-is-setup-error
         PROPERTIES LABELS "view;editor-open;tools" TIMEOUT 60)
 endif()
+
+# Native CPU-host coordinates need an AppKit drawRect, not an offscreen canvas.
+if(APPLE AND NOT PULP_IOS)
+    pulp_add_test_suite(pulp-test-plugin-cpu-orientation-mac
+        SOURCES test_plugin_cpu_orientation_mac.mm
+        LIBRARIES pulp::view "-framework AppKit"
+        PROPERTIES RESOURCE_LOCK pulp_cocoa)
+endif()
