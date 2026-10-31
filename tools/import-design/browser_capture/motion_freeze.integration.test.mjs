@@ -327,6 +327,33 @@ test("an infinite animation is frozen to its own first keyframe, not the element
     });
   });
 
+test("an infinite custom-property animation commits its first token value",
+  { timeout: captureCaseTimeout(2), skip: process.platform === "win32" },
+  async (context) => {
+    await withPage(context, async ({ cdp, open }) => {
+      const property = "<style>@property --pulp-motion-x { syntax: '<length>'; " +
+        "inherits: false; initial-value: 0px; }</style>";
+      await open(pageUrl(property +
+        "<div id=m></div><script>document.getElementById('m').animate(" +
+        "[{'--pulp-motion-x':'50px'},{'--pulp-motion-x':'400px'}]," +
+        "{duration:700,iterations:Infinity})</script>"));
+      const receipt = await freezeMotion(cdp, { declareSources: false });
+      assert.equal(receipt.animations.paused, 1);
+      const { result } = await cdp.call("Runtime.evaluate", {
+        expression: "(() => { const el = document.getElementById('m');" +
+          " return { running: document.getAnimations().length," +
+          " token: el.style.getPropertyValue('--pulp-motion-x')," +
+          " transform: getComputedStyle(el).transform }; })()",
+        returnByValue: true,
+      });
+      assert.deepEqual(result.value, {
+        running: 0,
+        token: "50px",
+        transform: "none",
+      });
+    });
+  });
+
 test("an inline !important declaration still beats a frozen animation",
   { timeout: captureCaseTimeout(2), skip: process.platform === "win32" },
   async (context) => {
