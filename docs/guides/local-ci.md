@@ -3126,7 +3126,8 @@ When the exact projection refuses, the same verifier is run once more with
 `--allowlist-diff`: the signed single-commit bump is still required, but its
 content is bounded by the protected base's `writer_allowed_globs` (the writer's
 own allowlist) and the `Version-Bump-Applied:` marker instead of a byte
-comparison. The outcome is still reported as `taken`. See
+comparison, and the allowlisted code/build files (`CMakeLists.txt`,
+`agent_capability_manifest.py`) may change only their version values. The outcome is still reported as `taken`. See
 [version-at-land cutover](version-at-land-cutover.md#cheap-ci-for-the-bump-pr).
 
 Every run on the release bot's bump reports the outcome as a `bump-fast-path`
@@ -3150,14 +3151,15 @@ their contexts is required. Each job's condition is
 other pull request, schedule and dispatch runs exactly as before. This also
 keeps bump pull requests off GitHub-hosted Windows runners.
 
-The current provenance boundary is GitHub's valid SSH-signature record plus the
-`danielraffel` signer/account and exact release-bot author/committer identity.
-The repository does not yet contain an authoritative public key or fingerprint
-for `RELEASE_BOT_SSH_SIGNING_KEY`, so the verifier must not invent one from a
-single historical commit. If the dedicated key (rather than Daniel's GitHub
-signing identity) becomes a distinct authorization boundary, first publish its
-public fingerprint on protected main and then pin the embedded SSH signature
-key to that reviewed value.
+The provenance boundary is the signing KEY, not the author. GitHub's valid
+SSH-signature record and the `danielraffel` account are necessary but not
+sufficient: every fleet agent's key is registered to that account and verifies
+too, and author/committer name and email are free text. The verifier extracts
+the public key embedded in the verified `SSHSIG` and requires its fingerprint to
+be listed in `tools/scripts/release_bot_signing.json` read from the protected
+base. That file records the public half of `RELEASE_BOT_SSH_SIGNING_KEY`
+(GitHub signing-key id 1044361, `SHA256:3FTeML...`); rotating the secret means
+landing the new public key there first.
 
 ## One admission writer feeds the merge queue
 

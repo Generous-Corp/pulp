@@ -72,13 +72,27 @@ group already carries an earlier queue entry), it gets a second pass,
   the same list the writer checks its own edits against
   (`version_at_land.paths_outside_writer_allowlist`);
 - every configured surface is at one consistent version and moved by one strict
-  semantic-version step.
+  semantic-version step;
+- a code or build file inside the allowlist changes only its version value:
+  `CMakeLists.txt` only the `project(... VERSION x.y.z)` number, and
+  `tools/scripts/agent_capability_manifest.py` only the `MANIFEST_REVISION` /
+  `SURFACE_INVENTORY_VERSION` counters, each by at most one. Any other byte, or
+  a code-like path with no such bound, keeps the full suite. Data files
+  (version JSON, `CHANGELOG.md`, migration notes, generated status) pass on a
+  path match.
+
+Both passes first require the commit's SSH signature to come from the release
+bot's own key. Author name, email and the GitHub login are free text, and every
+agent key registered to the same account also verifies, so the verifier reads
+the key embedded in GitHub's verified signature and compares its fingerprint to
+`tools/scripts/release_bot_signing.json` as committed on the PROTECTED BASE
+(never the candidate). A missing or self-inconsistent pin keeps the full suite.
 
 When both hold, the native matrix is skipped and `macos` reports success from
 the skip-safe alias job. Fail closed: an unreadable diff, any path outside the
 allowlist (a group that batches the bump with another change), a missing
-marker, a non-bot or unsigned commit, or a protected base without this flag
-keeps the full suite. The route, liveness alarm and marker semantics are
+marker, a non-bot, unsigned or wrong-key commit, or a protected base without
+this flag keeps the full suite. The route, liveness alarm and marker semantics are
 unchanged.
 
 ## The problem being solved

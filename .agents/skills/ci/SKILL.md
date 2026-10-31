@@ -11259,7 +11259,15 @@ Key facts:
   `writer_allowed_globs` (`version_at_land.paths_outside_writer_allowlist`, the
   list the writer checks itself against). A group that batches the bump with any
   other change leaves the allowlist and runs the full suite. A moved base that
-  resolves no trusted verifier is still refused.
+  resolves no trusted verifier is still refused. Allowlisted code/build files
+  change only their version values (`CONTENT_BOUNDED`: the CMake `project`
+  VERSION, the capability counters); any other byte keeps the full suite.
+- **Bot identity is the signing key, not the author.** Every agent key on the
+  `danielraffel` account verifies on GitHub, and author name/email are free
+  text, so a forged `pulp-release-bot` commit passes every identity field. Both
+  verifier passes require the key embedded in the verified `SSHSIG` to match
+  `tools/scripts/release_bot_signing.json` read from the protected base. Rotate
+  `RELEASE_BOT_SSH_SIGNING_KEY` by landing its public key there first.
 - **Advisory workflows skip the bump.** `coverage.yml`,
   `control-shipping-native.yml`, `examples-validation.yml` and
   `intel-portability.yml` AND `github.head_ref != 'release/version-bump'` into
