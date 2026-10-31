@@ -513,3 +513,102 @@ TEST_CASE("GraphRuntimeExecutor reports node processor failures",
     REQUIRE(result.failed_node_index == 0);
     REQUIRE(executor.stats().node_failures == 1);
 }
+
+TEST_CASE("GraphRuntimeSnapshot resolves each input port once at reset",
+          "[format][graph-runtime][executor]") {
+    // in(2) -> A(2 in): port 0 is A's only input from in:0 (in:0 has one
+    // reader), port 1 fans in from in:1 and B. in:1 also feeds C, so C's edge
+    // is a fan-out read (a private copy). D has one unconnected port.
+    using Mode = GraphRuntimeSnapshot::InputPortSource::Mode;
+    const std::array nodes = {
+        node(1, 0, 2, GraphRuntimeNodeKind::AudioInput),
+        node(2, 2, 1), // A
+        node(3, 0, 1), // B
+        node(4, 1, 1), // C
+        node(5, 1, 1), // D, unconnected input
+    };
+    const std::array connections = {
+        connect(1, 0, 2, 0),
+        connect(1, 1, 2, 1),
+        connect(3, 0, 2, 1),
+        connect(1, 1, 4, 0),
+    };
+    const std::array bindings = {
+        GraphRuntimeNodeBinding{1, record_visit, nullptr, false},
+        GraphRuntimeNodeBinding{2, record_visit, nullptr, false},
+        GraphRuntimeNodeBinding{3, record_visit, nullptr, false},
+        GraphRuntimeNodeBinding{4, record_visit, nullptr, false},
+        GraphRuntimeNodeBinding{5, record_visit, nullptr, false},
+    };
+    auto snapshot = make_snapshot(nodes, connections, bindings);
+    const auto& plan = snapshot.plan();
+    const auto& assignment = snapshot.buffer_assignment();
+    auto index_of = [&](NodeId id) {
+        for (std::uint32_t i = 0; i < plan.nodes.size(); ++i)
+            if (plan.nodes[i].id == id)
+                return i;
+        FAIL("node not in plan");
+        return 0u;
+    };
+
+    const auto in = index_of(1);
+    const auto a = snapshot.input_port_sources(index_of(2));
+    REQUIRE(a.size() == 2);
+    CHECK(a[0].mode == Mode::InPlace);
+    CHECK(a[0].slot == assignment.nodes[in].output_base + 0);
+    CHECK(a[1].mode == Mode::Sum);
+    const auto c = snapshot.input_port_sources(index_of(4));
+    REQUIRE(c.size() == 1);
+    CHECK(c[0].mode == Mode::Copy);
+    CHECK(c[0].slot == assignment.nodes[in].output_base + 1);
+    const auto d = snapshot.input_port_sources(index_of(5));
+    REQUIRE(d.size() == 1);
+    CHECK(d[0].mode == Mode::Zero);
+    CHECK(snapshot.input_port_sources(index_of(3)).empty());
+    CHECK_FALSE(snapshot.sole_audio_output());
+}
+
+TEST_CASE(
+    "Read-only consumers read a shared or persistent source in place and a writer forces copies",
+    "[format][graph-runtime][executor]") {
+    // P is a persistent source fanned out to two consumers. When both bindings
+    // declare reads_inputs_only, both read P's slot in place. When one of them
+    // may write its inputs, both fall back to private copies.
+    using Mode = GraphRuntimeSnapshot::InputPortSource::Mode;
+    auto build = [](bool second_reads_only) {
+        std::array nodes = {
+            node(1, 0, 1), // P
+            node(2, 1, 1), // first consumer
+            node(3, 1, 1), // second consumer
+        };
+        nodes[0].persistent_output = true;
+        const std::array connections = {connect(1, 0, 2, 0), connect(1, 0, 3, 0)};
+        std::array bindings = {
+            GraphRuntimeNodeBinding{1, record_visit, nullptr, false},
+            GraphRuntimeNodeBinding{2, record_visit, nullptr, false},
+            GraphRuntimeNodeBinding{3, record_visit, nullptr, false},
+        };
+        bindings[1].reads_inputs_only = true;
+        bindings[2].reads_inputs_only = second_reads_only;
+        return make_snapshot(nodes, connections, bindings);
+    };
+    auto modes = [](const GraphRuntimeSnapshot& snapshot) {
+        std::array<Mode, 2> out{};
+        const auto& plan = snapshot.plan();
+        for (std::uint32_t i = 0; i < plan.nodes.size(); ++i) {
+            if (plan.nodes[i].id == 2)
+                out[0] = snapshot.input_port_sources(i)[0].mode;
+            if (plan.nodes[i].id == 3)
+                out[1] = snapshot.input_port_sources(i)[0].mode;
+        }
+        return out;
+    };
+
+    const auto shared = build(true);
+    CHECK(modes(shared)[0] == Mode::InPlace);
+    CHECK(modes(shared)[1] == Mode::InPlace);
+
+    const auto with_writer = build(false);
+    CHECK(modes(with_writer)[0] == Mode::Copy);
+    CHECK(modes(with_writer)[1] == Mode::Copy);
+}

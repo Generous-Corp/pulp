@@ -629,6 +629,21 @@ tresult PLUGIN_API PulpVst3Processor::getParamValueByString(
     return SingleComponentEffect::getParamValueByString(tag, string, valueNormalized);
 }
 
+ParamValue PLUGIN_API PulpVst3Processor::normalizedParamToPlain(ParamID id,
+                                                                ParamValue valueNormalized) {
+    if (const auto* info = store_.info(static_cast<state::ParamID>(id)))
+        return static_cast<ParamValue>(
+            state::value_from_host_normalized(*info, static_cast<double>(valueNormalized)));
+    return SingleComponentEffect::normalizedParamToPlain(id, valueNormalized);
+}
+
+ParamValue PLUGIN_API PulpVst3Processor::plainParamToNormalized(ParamID id, ParamValue plainValue) {
+    if (const auto* info = store_.info(static_cast<state::ParamID>(id)))
+        return static_cast<ParamValue>(
+            state::host_normalized_from_value(*info, static_cast<float>(plainValue)));
+    return SingleComponentEffect::plainParamToNormalized(id, plainValue);
+}
+
 // ── noteId -> (channel, note) linkage ──────────────────────────────────────
 
 bool PulpVst3Processor::note_id_map_insert(int32 note_id, uint8_t channel,

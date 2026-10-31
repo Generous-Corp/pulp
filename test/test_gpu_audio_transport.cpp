@@ -720,6 +720,11 @@ class RealtimeHookNode : public GpuAudioNode {
     // by the worker's service step. Reserve capacity before the worker runs.
     std::atomic<std::uint64_t> completion_ready_ns{0};
     std::vector<std::uint64_t> wake_latencies_ns;
+    // Service gate: while hold_service is set, the worker's next service step
+    // parks inside the pump (bounded by the progress deadline) and raises
+    // service_held, so a test can land events while the worker is busy.
+    std::atomic<bool> hold_service{false};
+    std::atomic<bool> service_held{false};
     // Provider side of the completion-notifier seam: what a backend callback
     // thread would call after pushing a terminal record.
     void notify_completion() noexcept {
@@ -865,6 +870,12 @@ class RealtimeHookNode : public GpuAudioNode {
     static std::uint32_t service_realtime(void* self, std::uint64_t) noexcept {
         auto* node = static_cast<RealtimeHookNode*>(self);
         ++node->service_calls;
+        if (node->hold_service.load(std::memory_order_acquire)) {
+            node->service_held.store(true, std::memory_order_release);
+            (void)pulp::test::wait_for_condition(
+                [node] { return !node->hold_service.load(std::memory_order_acquire); });
+            node->service_held.store(false, std::memory_order_release);
+        }
         // Wake-latency probe: a completion "became ready" at this time; the
         // worker observes it here, in its service step.
         if (const auto ready = node->completion_ready_ns.exchange(0, std::memory_order_acq_rel);
@@ -3175,7 +3186,9 @@ TEST_CASE("GpuAudioTransport completion wakes never count as progress",
 
 TEST_CASE("GpuAudioTransport coalesces completion wakes instead of spinning",
           "[gpu_audio][transport][wake]") {
-    RealtimeHookNode node(1, 128, MissPolicy::CpuFallback);
+    constexpr std::uint32_t kBlock = 128;
+    constexpr int kPosts = 1000;
+    RealtimeHookNode node(1, kBlock, MissPolicy::CpuFallback);
     node.expose_notifier = true;
     node.service_return_blocks = 0;
     REQUIRE(node.prepare());
@@ -3185,22 +3198,41 @@ TEST_CASE("GpuAudioTransport coalesces completion wakes instead of spinning",
     config.run_worker_thread = true;
     config.wake_on_write = true;
     REQUIRE(t.prepare(&node, config));
-    // Let the worker settle into its wait.
-    REQUIRE(pulp::test::wait_for_condition([&] { return node.service_calls > 0; }));
-    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    REQUIRE(node.notifier_installs == 1);
+    // With a completion notifier installed the worker's fallback wait is one
+    // block (the transport truncates to whole microseconds).
+    const auto fallback_interval =
+        std::chrono::microseconds(static_cast<long>(1.0e6 * kBlock / 48000.0));
+
+    // Park the worker inside a service step, then land every post while it is
+    // held. No wait can consume a post in between, so all of them are pending
+    // when the pump returns and must be coalesced.
+    node.hold_service.store(true, std::memory_order_release);
+    REQUIRE(pulp::test::wait_for_condition(
+        [&] { return node.service_held.load(std::memory_order_acquire); }));
     const std::uint32_t services_before = node.service_calls.load();
-    // A burst of posts that lands while the worker waits once.
-    for (int i = 0; i < 1000; ++i)
+    for (int i = 0; i < kPosts; ++i)
         node.notify_completion();
+    const auto released_at = std::chrono::steady_clock::now();
+    node.hold_service.store(false, std::memory_order_release);
+    // The coalesced step must arrive; the extra time gives a spinning worker
+    // room to show itself.
+    CHECK(pulp::test::wait_for_condition([&] { return node.service_calls > services_before; }));
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    const auto services = node.service_calls - services_before;
+    const auto services = node.service_calls.load() - services_before;
+    const auto window = std::chrono::steady_clock::now() - released_at;
     t.release();
-    // One pump consumes every post it covers; 1000 posts must not become 1000
-    // service steps. The bound leaves room for the fallback timer (one block,
-    // 2.67 ms here) on a slow host.
-    INFO("service steps after 1000 posts: " << services);
-    CHECK(services >= 1);
-    CHECK(services < 200);
+
+    // Coalesced, the pending posts cost one service step; every other step in
+    // the window is the fallback timer. One spare step absorbs rounding at the
+    // window edges. A worker that drains one post per pump spends a step per
+    // post and lands near kPosts however slow the host is.
+    const auto timer_steps = static_cast<std::uint32_t>(window / fallback_interval);
+    const std::uint32_t bound = timer_steps + 2;
+    const auto window_us = std::chrono::duration_cast<std::chrono::microseconds>(window).count();
+    INFO("service steps after " << kPosts << " held posts: " << services << ", window " << window_us
+                                << " us, bound " << bound);
+    CHECK(services <= bound);
 }
 
 TEST_CASE("GpuAudioTransport survives completion events racing release",

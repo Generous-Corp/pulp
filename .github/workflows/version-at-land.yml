@@ -60,7 +60,15 @@ on:
       - WebCLAP Cloudflare
     types: [completed]
     branches: [release/version-bump]
-  workflow_dispatch: {}
+  # `release_now` opens the bump PR at once when a release needs the number,
+  # skipping the coalescing hold described at the drain step.
+  workflow_dispatch:
+    inputs:
+      release_now:
+        description: "Open the bump PR now instead of coalescing it with later merges"
+        type: boolean
+        required: false
+        default: false
 
 concurrency:
   # DIRECT route (default): event-scoped so a scheduled drain is never
@@ -109,7 +117,7 @@ concurrency:
 
 permissions:
   contents: write  # the single-writer bot pushes the `chore: bump versions` commit
-  pull-requests: write  # the PR-route (PULP_BUMP_ROUTE=pr) opens + auto-merges a bump PR
+  pull-requests: write  # the PR-route (PULP_BUMP_ROUTE=pr) opens a bump PR (the merge steward admits it)
 
 jobs:
   drain-dry-run:
@@ -157,7 +165,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Assign versions (single-writer push)
-        # GH_TOKEN authenticates the `gh` CLI the PR-route uses to open + arm the
+        # GH_TOKEN authenticates the `gh` CLI the PR-route uses to open the
         # bump PR. RELEASE_BOT_TOKEN (a real user PAT) so the PR + its checks are
         # not GITHUB_TOKEN-suppressed; GITHUB_TOKEN as the direct-route fallback.
         env:
@@ -165,14 +173,22 @@ jobs:
           HAS_RELEASE_PAT: ${{ secrets.RELEASE_BOT_TOKEN != '' }}
           BUMP_ROUTE: ${{ vars.PULP_BUMP_ROUTE || 'direct' }}
           # Opt-in (default off): replace a stale bump PR that is a dead end
-          # (ejected from the merge queue, not armed, or a required check
-          # failed). A stale bump PR still able to land is waited for either
+          # (ejected from the merge queue, held by a reviewer at its head,
+          # or a required check failed). A stale bump PR still able to land is waited for either
           # way, and that wait exits 0.
           HEAL_STALE_PR: ${{ vars.PULP_BUMP_HEAL_STALE_PR || 'false' }}
+          # PR route: hold a NEW bump PR while other PRs wait in the merge
+          # queue, for up to this many minutes after the last bump landed, so
+          # one bump PR covers many merges instead of each merge spending a
+          # queue validation on its own bump. 0 disables. The scheduled drain
+          # below opens the held PR once the queue drains or the window ends;
+          # pending-intent-liveness.yml's grace sits above window + cadence.
+          PULP_BUMP_COALESCE_MINUTES: ${{ vars.PULP_BUMP_COALESCE_MINUTES || '120' }}
+          PULP_BUMP_RELEASE_NOW: ${{ github.event.inputs.release_now || 'false' }}
         run: |
           # The PR-route MUST use a real PAT: a PR opened by GITHUB_TOKEN does
           # not trigger workflows (GitHub's loop-prevention), so its required
-          # checks never run and auto-merge stalls forever. Fail loudly rather
+          # checks never run and the PR stalls forever. Fail loudly rather
           # than open a bump PR that can never merge.
           if [ "$BUMP_ROUTE" = "pr" ] && [ "$HAS_RELEASE_PAT" != "true" ]; then
             echo "::error::PULP_BUMP_ROUTE=pr requires the RELEASE_BOT_TOKEN PAT" \
@@ -185,9 +201,8 @@ jobs:
           # direct ⇒ today's --ff-only push, no behavior change):
           #   direct — push --ff-only straight to main (incompatible with a
           #            "Require merge queue" rule).
-          #   pr     — open a bump PR + auto-merge (--merge) it (routes through
-          #            the merge queue when enabled; a normal auto-merge PR when
-          #            not).
+          #   pr     — open a bump PR and leave it for the merge steward to
+          #            admit through the merge queue (never armed here).
           # --base is only the first-run FALLBACK before any marker exists;
           # `github.event.before` bounds it to this push.
           heal=()

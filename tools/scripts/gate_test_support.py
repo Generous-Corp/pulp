@@ -151,6 +151,14 @@ class Fixture:
                 "build/**",
                 "**/*.generated.*",
             ],
+            "writer_allowed_globs": [
+                "CMakeLists.txt",
+                ".claude-plugin/plugin.json",
+                ".claude-plugin/marketplace.json",
+                "CHANGELOG.md",
+                "docs/migrations/v*.md",
+                "docs/migrations/unreleased/*.md",
+            ],
             "trailers": {
                 "version_bump": "Version-Bump",
                 "skill_update": "Skill-Update",

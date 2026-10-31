@@ -37,7 +37,13 @@ class Fixture:
             json.dump({
                 "schema_version": 1,
                 "ref": "main",
-                "workflows": [{"file": f, "cadence_minutes": c} for f, c in listed],
+                "workflows": [
+                    ({"file": f, "cadence_minutes": c}
+                     if len(row) == 2 else
+                     {"file": f, "cadence_minutes": c, "dispatch_inputs": row[2]})
+                    for row in listed
+                    for f, c in [row[:2]]
+                ],
                 "excluded": [{"file": f, "reason": r} for f, r in excluded],
             }, out)
         self.root = root
@@ -80,6 +86,18 @@ class ManifestTests(unittest.TestCase):
                     "        required: true\n")
         fx = Fixture({"net.yml": workflow(dispatch=dispatch)}, [("net.yml", 30)])
         self.assertTrue(any("'sha' is required" in v for v in fx.violations()))
+
+    def test_declared_dispatch_input_is_allowed(self):
+        dispatch = ("  workflow_dispatch:\n    inputs:\n      apply:\n"
+                    "        required: false\n        default: false\n")
+        fx = Fixture({"net.yml": workflow(dispatch=dispatch)},
+                     [("net.yml", 30, {"apply": "true"})])
+        self.assertEqual(fx.violations(), [])
+
+    def test_unknown_manifest_dispatch_input_is_reported(self):
+        fx = Fixture({"net.yml": workflow()},
+                     [("net.yml", 30, {"apply": "true"})])
+        self.assertTrue(any("not declared" in v for v in fx.violations()))
 
     def test_missing_concurrency_is_reported(self):
         fx = Fixture({"net.yml": workflow(concurrency=False)}, [("net.yml", 30)])

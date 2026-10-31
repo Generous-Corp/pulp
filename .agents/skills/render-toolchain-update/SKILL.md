@@ -11,6 +11,21 @@ description: |
 
 # Update the matched render toolchain
 
+Pulp's signal FFT backend is a separate dependency surface from the Apple
+render toolchain: Apple uses vDSP, while non-Apple builds may use the pinned
+MIT muFFT source. Keep muFFT's exact commit and source-file allowlist in the
+dependency manifest when touching cross-platform build inputs. Its transform
+path is audio-thread code, so the per-allocation admission ceiling is checked
+against the largest single allocation and must not be relaxed to permit
+per-transform allocation.
+
+The desktop source fallback in `tools/build-skia.sh` publishes only into a
+real checkout-owned `external/skia-build` directory. It refuses a symlink into
+the shared immutable cache and removes fetcher asset/generation receipts after
+publishing source-built bytes; those receipts authenticate release archives,
+not source builds. Keep the source-fallback negative controls in
+`tools/scripts/test_build_skia_source_pin.py` green when changing this path.
+
 This procedure expects `ghapp` and `python3`, and operates on
 `tools/deps/manifest.json`, `tools/scripts/fetch_skia_for_release.py`, and
 `tools/scripts/fetch_v8_for_release.py`.
@@ -87,6 +102,13 @@ ghapp release list --repo danielraffel/v8-builder --limit 100 --json tagName \
 
 The collection is a provenance and compatibility convenience, not one combined archive:
 Skia/Dawn, V8, or both may be consumed independently.
+
+## Realtime FFT backend boundary
+
+The optional muFFT FetchContent dependency is separate from the Apple render
+toolchain. It supplies the float `FftT` backend only off Apple; Apple remains on
+vDSP with byte-identical admission. Keep muFFT's Pulp-owned shim allocation-free
+after preparation and do not build or ship its FFTW-linked upstream tools.
 
 ## Independent Skia/Dawn advance
 

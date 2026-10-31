@@ -546,6 +546,13 @@ struct ControlHostUiExecutor::State : std::enable_shared_from_this<State> {
                            "runtime evaluation request could not be decoded");
         }
         const auto capabilities = acquired_evaluator->capabilities();
+        // A realm whose explicit grant carries an effectful capability is a
+        // policy refusal, not an unavailable host: retrying cannot help and the
+        // response names the authority that made the realm ineligible.
+        if (!capabilities.effectful_grant.empty())
+            return failure(ControlResultCode::PolicyDenied,
+                           "live realm holds the effectful capability '" +
+                               capabilities.effectful_grant + "'; evaluation is refused");
         if (!capabilities.can_evaluate || !capabilities.can_interrupt)
             return failure(ControlResultCode::HostUnavailable, "runtime evaluator is unavailable",
                            ControlRetryClassification::AfterRefresh);
@@ -590,6 +597,12 @@ struct ControlHostUiExecutor::State : std::enable_shared_from_this<State> {
         if (after_eval != ControlExecutionCheckpoint::Continue)
             return checkpoint_failure(after_eval);
         if (!evaluated.ok) {
+            if (evaluated.refused)
+                return failure(ControlResultCode::PolicyDenied,
+                               evaluated.error.empty()
+                                   ? std::string("live realm holds an effectful capability; "
+                                                 "evaluation is refused")
+                                   : evaluated.error);
             if (evaluated.timed_out)
                 return failure(ControlResultCode::DeadlineExceeded,
                                "runtime evaluation exceeded its deadline");

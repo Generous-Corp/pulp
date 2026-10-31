@@ -52,6 +52,25 @@ if [ -x build/tools/import-design/pulp-import-design ] \
     --import-design-binary build/tools/import-design/pulp-import-design
     --import-design-runtime-dir build/tools/import-design/browser_capture-v1
   )
+  if [ -f build/tools/import-design/illustrator_to_svg.py ]; then
+    import_design_args+=(
+      --import-design-illustrator-helper build/tools/import-design/illustrator_to_svg.py
+    )
+  elif "$python" - "$release_tag" <<'PY'
+import json, sys
+v = lambda s: tuple(map(int, s.removeprefix("v").split(".")))
+try:
+    floor = json.load(open("tools/scripts/release_product_matrix.json"))["illustrator_import_floor"]
+except (OSError, KeyError):
+    sys.exit(1)
+sys.exit(0 if v(sys.argv[1]) >= v(floor) else 1)
+PY
+  then
+    echo "::error::build/tools/import-design/illustrator_to_svg.py is missing but this release requires it; the import-design build must stage it" >&2
+    exit 1
+  else
+    echo "note: this historical import-design build has no Illustrator helper; omitting it" >&2
+  fi
   if at_least "$release_tag" "0.918.0"; then
     test -f build/tools/import-design/jsx-runtime/materialized_binding_contract.mjs
     test -f build/tools/import-design/jsx-runtime/materialized_source_emitter.mjs

@@ -182,9 +182,11 @@ public:
         return embedded_assets_;
     }
 
-    /// The embedded file a script-relative `path` names, or nullptr. Leading
-    /// `./` and `/` are ignored; `..` segments, absolute paths and URIs never
-    /// match. Matching is exact on the normalized name.
+    /// The embedded file a script-relative `path` names, or nullptr. A leading
+    /// `./` is ignored; `..` segments, absolute paths (including a leading
+    /// `/`) and URIs (including `file://`) never match, so an embedded file
+    /// answers only names resolve_script_relative() treats as relative.
+    /// Matching is exact on the normalized name.
     const EmbeddedAsset* embedded_asset(std::string_view path) const noexcept;
     /// `data:<mime>;base64,...` for an embedded file, which is how an image
     /// widget draws bytes that have no file behind them.
@@ -217,10 +219,38 @@ public:
     }
     const std::filesystem::path& script_base_dir() const noexcept { return script_base_dir_; }
 
-    /// Resolve an existing relative file against the script directory or a
-    /// reviewed asset root. Asset-root candidates are canonicalized and must
-    /// remain inside their root so symlinks and `..` cannot escape it.
-    /// Absolute paths, URIs, and misses pass through unchanged.
+    /// Whether path-taking bridge APIs (setImageSource, registerFont,
+    /// loadFont, sprite strips, __loadAssetSync__) may open a file that lies
+    /// outside the script directory and the reviewed asset roots. Off by
+    /// default: an absolute path or `file://` URL is refused unless it
+    /// resolves inside one of those roots, and `__loadAssetSync__` never falls
+    /// back to a raw filesystem read. A desktop tool that renders its own
+    /// import output, or an app whose UI legitimately previews user-picked
+    /// files, opts in; a DAW-hosted editor never should. The Filesystem
+    /// capability is still required for the API group to exist at all.
+    void set_allow_unreviewed_file_paths(bool allow) noexcept {
+        allow_unreviewed_file_paths_ = allow;
+    }
+    bool allow_unreviewed_file_paths() const noexcept {
+        return allow_unreviewed_file_paths_;
+    }
+
+    /// Whether a script may open `path`, an absolute filesystem path. True
+    /// when the realm holds Filesystem AND either unreviewed paths are allowed
+    /// or the canonicalized path stays inside the script directory or a
+    /// reviewed asset root. Pure; opens nothing.
+    bool permits_file_path(const std::filesystem::path& path) const;
+
+    /// Resolve a file a script named against the script directory or a
+    /// reviewed asset root, for a caller that will open the result. A
+    /// `file://` URL is judged as the path it names. A relative path resolves
+    /// to an existing file inside the script directory or a root; candidates
+    /// are canonicalized and must remain inside their root so symlinks and
+    /// `..` cannot escape it. An absolute path is returned unchanged only when
+    /// permits_file_path() allows it. A file above AssetManager's per-file
+    /// ceiling, any other URI scheme, and a relative name found under no root
+    /// all resolve to the empty string, which the caller treats as a refusal;
+    /// with allow_unreviewed_file_paths() the last two are returned unchanged.
     std::string resolve_script_relative(const std::string& path) const;
 
     /// load_script overload that retains a script identifier. `script_id` is
@@ -497,6 +527,7 @@ private:
     std::unique_ptr<NativeGpuBridgeState> native_gpu_bridge_state_;
     std::vector<std::filesystem::path> asset_roots_;
     std::filesystem::path script_base_dir_;
+    bool allow_unreviewed_file_paths_ = false;
     std::vector<EmbeddedAsset> embedded_assets_;
     std::string storage_identity_;
 
