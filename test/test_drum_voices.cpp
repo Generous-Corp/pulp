@@ -22,6 +22,7 @@
 #include <pulp/signal/drum/kit.hpp>
 #include <pulp/signal/drum/snare.hpp>
 #include <pulp/signal/drum/tom.hpp>
+#include <pulp/signal/denormal.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -1358,7 +1359,19 @@ TEST_CASE("Tom efficient ladder math preserves hit shape and block partition",
     REQUIRE(partitioned.set_ladder_math_profile(
         TomVoice::LadderMathProfile::realtime_efficient));
     partitioned.note_on(1.0f);
-    REQUIRE(render(partitioned, 36000, 512) == efficient);
+    const auto partitioned_render = render(partitioned, 36000, 512);
+    float max_partition_difference = 0.0f;
+    for (std::size_t i = 0; i < efficient.size(); ++i)
+        max_partition_difference =
+            std::max(max_partition_difference, std::fabs(partitioned_render[i] - efficient[i]));
+    // On targets where recursive state is snapped, preserve the exact
+    // partition-invariance oracle. Apple Silicon keeps recursive tails alive
+    // below the snap threshold, so allow only the measured tail difference
+    // there; the audible hit remains covered by the shape checks below.
+    if constexpr (pulp::signal::kSubnormalsAreFree)
+        REQUIRE(max_partition_difference <= 1.0e-13f);
+    else
+        REQUIRE(max_partition_difference == 0.0f);
 
     REQUIRE(std::fabs(peak(efficient) / peak(exact) - 1.0) < 0.001);
     REQUIRE(std::fabs(rms(efficient) / rms(exact) - 1.0) < 0.001);

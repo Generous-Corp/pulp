@@ -495,7 +495,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_runtime.hpp',
                 qualified_name='pulp::host::SignalGraph::prove_sample_region',
                 target='Pulp::host',
-                header_fingerprint='sha256:2215d3eba4d39138e0981407741cfde1002bb3fd6c7b84b317835e179e28b1dd',
+                header_fingerprint='sha256:30c125ede1300e944db42e79bbfbfc295b22dc732005b520030ee68ea5d19eee',
             ),
             binding(
                 role='graph_sample_region',
@@ -503,7 +503,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_runtime.hpp',
                 qualified_name='pulp::host::SignalGraph::sample_region',
                 target='Pulp::host',
-                header_fingerprint='sha256:2215d3eba4d39138e0981407741cfde1002bb3fd6c7b84b317835e179e28b1dd',
+                header_fingerprint='sha256:30c125ede1300e944db42e79bbfbfc295b22dc732005b520030ee68ea5d19eee',
             ),
             binding(
                 role='graph_sample_regions',
@@ -511,7 +511,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_runtime.hpp',
                 qualified_name='pulp::host::SignalGraph::sample_regions',
                 target='Pulp::host',
-                header_fingerprint='sha256:2215d3eba4d39138e0981407741cfde1002bb3fd6c7b84b317835e179e28b1dd',
+                header_fingerprint='sha256:30c125ede1300e944db42e79bbfbfc295b22dc732005b520030ee68ea5d19eee',
             ),
             binding(
                 role='SampleRegionCandidate',
@@ -1312,7 +1312,7 @@ EXPORTS = [
                 include="pulp/signal/waveguide_reflection_filter.hpp",
                 qualified_name="pulp::signal::WaveguideReflectionFilterT<float>",
                 target="Pulp::signal",
-                header_fingerprint="sha256:13cde0afa486a160cdfc055160ac97230a191569261c7b7e9f04a5f7396141f6",
+                header_fingerprint="sha256:4584a07804fabc91d7651938e057f9118db29c15dc725be6b9dba5611630d74e",
             ),
             binding(
                 role="junction", kind="cpp_type",
@@ -1791,7 +1791,7 @@ EXPORTS = [
         latency="zero", tail="recursive IIR decay", scheduling="sample-synchronous",
         bindings=[binding(role="entrypoint", kind="cpp_type", include="pulp/signal/linkwitz_riley.hpp",
                          qualified_name="pulp::signal::LinkwitzRileyCrossoverT<float>", target="Pulp::signal",
-                         header_fingerprint="sha256:38fca0b926e0b4cb492528f95a69af89eb7ec5a0e83ed8692eb195c0cd35fa64")],
+                         header_fingerprint="sha256:8aae04787676825f9eae118a9d52df318e8c67af2c8c7138572be8da61bc0545")],
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::LinkwitzRileyCrossoverT<float>",
                        "operation": "member_call", "member": "reset", "arguments": ""}],
     ),

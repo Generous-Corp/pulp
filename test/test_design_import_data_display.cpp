@@ -170,3 +170,86 @@ TEST_CASE("a context overriding both binder generations is called through each o
     CHECK(calls.meter == std::vector<std::string>{"left"});
     CHECK(calls.waveform == std::vector<std::string>{"osc.shape"});
 }
+
+namespace {
+
+// Records every level-display binding with its whole descriptor.
+class MeterDescriptorContext final : public NativeImportBindingContext {
+  public:
+    struct Bound {
+        std::string route, source, channel, value_key;
+    };
+    void bind_level_display(View&, LevelDisplay&,
+                            const NativeImportMeterBindingDescriptor& d) override {
+        bound.push_back({std::string(d.route_id), std::string(d.meter_source),
+                         std::string(d.channel), std::string(d.value_key)});
+    }
+    std::vector<Bound> bound;
+};
+
+DesignIR key_only_meter_ir(bool routed) {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "panel";
+    ir.root.style.width = 80.0f;
+    ir.root.style.height = 24.0f;
+    // kelvin's output meter: a value key and, here, a route, but no meter
+    // source or channel.
+    IRNode meter;
+    meter.type = "frame";
+    meter.stable_anchor_id = "out-meter";
+    meter.style.width = 80.0f;
+    meter.style.height = 24.0f;
+    meter.audio_widget = AudioWidgetType::meter;
+    meter.attributes["pulpMeterValueKey"] = "out";
+    if (routed)
+        meter.attributes["pulpRouteId"] = "capture:out:38";
+    ir.root.children.push_back(std::move(meter));
+    return ir;
+}
+
+} // namespace
+
+TEST_CASE("a key-only meter is bound by its value key, as ui.js binds it",
+          "[view][import][data-display][binding][meter-binding]") {
+    register_audio_widgets();
+    const auto ir = key_only_meter_ir(true);
+    auto root = build_native_view_tree(ir, ir.asset_manifest);
+    REQUIRE(root != nullptr);
+    MeterDescriptorContext ctx;
+    std::vector<ImportDiagnostic> diagnostics;
+    bind_native_view_tree(*root, ir, ctx, {.diagnostics_out = &diagnostics});
+    for (const auto& d : diagnostics)
+        CHECK(d.code.rfind("native-binding-", 0) != 0);
+    REQUIRE(ctx.bound.size() == 1);
+    CHECK(ctx.bound[0].route == "capture:out:38");
+    // The key form: no source or channel, the key the context binds by.
+    CHECK(ctx.bound[0].source.empty());
+    CHECK(ctx.bound[0].channel.empty());
+    CHECK(ctx.bound[0].value_key == "out");
+
+    // The baked C++ helper binds the same meter with the same descriptor.
+    const auto generated = generate_pulp_cpp(ir, ir.asset_manifest, {});
+    const auto call = generated.source.find("pulp::view::bind_imported_level_display(ctx,");
+    REQUIRE(call != std::string::npos);
+    CHECK(generated.source.find("\"out\"", call) != std::string::npos);
+}
+
+TEST_CASE("a key-only meter without a route is refused for the missing route",
+          "[view][import][data-display][binding][meter-binding]") {
+    register_audio_widgets();
+    const auto ir = key_only_meter_ir(false);
+    auto root = build_native_view_tree(ir, ir.asset_manifest);
+    REQUIRE(root != nullptr);
+    MeterDescriptorContext ctx;
+    std::vector<ImportDiagnostic> diagnostics;
+    bind_native_view_tree(*root, ir, ctx, {.diagnostics_out = &diagnostics});
+    CHECK(ctx.bound.empty());
+    bool missing_route = false;
+    for (const auto& d : diagnostics)
+        missing_route = missing_route || d.code == "native-binding-missing-route";
+    CHECK(missing_route);
+    const auto generated = generate_pulp_cpp(ir, ir.asset_manifest, {});
+    CHECK(generated.source.find("pulp::view::bind_imported_level_display(ctx,") ==
+          std::string::npos);
+}

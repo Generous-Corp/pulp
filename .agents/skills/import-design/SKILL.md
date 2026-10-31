@@ -91,6 +91,29 @@ matches in `ids.map.json` are rejected. Verify deterministic output with
 and keep the browser capture's Chromium validation receipt alongside the
 emitted source tree.
 
+### The capture browser runs at the capture's device scale
+
+`capture.mjs` emulates its DPR with `Emulation.setDeviceMetricsOverride`, and
+also launches Chrome with `--force-device-scale-factor=<dpr>` so the browser's
+own scale agrees. Chrome composites `backdrop-filter` at the browser's scale:
+with headless left at 1 under an emulated 2, a frosted box came back with
+unblurred streaks of what was behind it (16,786 px on fixture
+`22-backdrop-opacity`), and the lab charged that to the native render. Do not
+drop the launch flag or emulate a scale the browser was not launched at.
+At a real device scale Chromium reports DOMSnapshot layout bounds, text-box
+bounds and content size in device pixels, so the capture divides those back
+to CSS pixels (`snapshotToCssPixels`); without that the native lowering drew
+every panel at twice its size. The snapshot's offset, client and scroll
+rects and `DOM.getBoxModel` were already CSS pixels.
+
+**Testing a capture change against a built importer:** `pulp-import-design`
+runs the capture runtime staged beside its own binary
+(`<build>/tools/import-design/browser_capture-v1/capture.mjs`) ahead of
+`PULP_BROWSER_CAPTURE_SCRIPT`, so pointing that variable at an edited
+`capture.mjs` silently runs the staged copy instead. Rebuild to restage it, or
+copy the importer next to a runtime holding the edit, and check that the
+captures actually differ before reading any score.
+
 ### Browser capture provenance is an import boundary
 
 The native importer validates `capture.json` before lowering the browser tree
@@ -103,9 +126,9 @@ schema/version, HTML field, and asset count agree with the envelope. Only
 `--emit materialized-runtime` and `--materialized-canvas-composition` capture
 that sidecar (`browser_import_captures_materialized_document`). Every other
 import passes `--omit-materialized-document`, and the envelope then carries no
-materialized fields. The one exception is a document with Blob-URL
-`@font-face` rules: `capture.mjs` reads it anyway, because its
-`font_bindings` are the only record of those faces. A stale, hand-edited, mismatched, or
+materialized fields, with no exception: Blob-URL `@font-face` faces are read
+in the page into `font-faces.json`, so they do not need the sidecar. A stale,
+hand-edited, mismatched, or
 path-escaping envelope fails closed with the
 `browser-capture-provenance-invalid` diagnostic. Keep the envelope and sidecar
 from the same capture directory; do not copy one from an older browser run or
@@ -202,6 +225,16 @@ is rejected. A remote `https` font is read only with `--allow-browser-network`,
 and a used face whose staged file is absent fails as `capture-font-missing`,
 naming the authored path. Fixture: `test/fixtures/browser-capture-font-face-url`.
 
+`build_native_view_tree` registers them before materializing
+(`core/view/src/design_import_native_fonts.cpp`). Each unicode-range segment of a
+family goes under a private alias, `<family> [<12 hex>]`, named from its
+content. Every font-family stack naming the family is rewritten to list the
+aliases, last-defined first, in place of the family. So when you debug an
+imported Label's face, expect `effective_font_family()` to show aliases, not
+the CSS family. A face that can't be read or fails its manifest hash is
+skipped with `font-asset-unavailable`, and that family keeps resolving to host
+faces.
+
 ### Imported text looks heavier than Chromium: check font smoothing first
 
 Pulp's default glyph raster on macOS is Chromium's `-webkit-font-smoothing:
@@ -230,6 +263,14 @@ glyphs. On macOS the skia screenshot backend lives in
 is the non-Apple path, so a surface change made only there never reaches a
 macOS render.
 
+The import now carries the property. The capture records
+`-webkit-font-smoothing`, the lowering stamps `font_smoothing=antialiased` on
+those text nodes, and the materialized Label paints them unhinted
+(`Canvas::set_font_smoothing`). The surface preblend is the host's job:
+`design_ir_text_raster_policy(ir)` returns `chromium` when any captured text is
+antialiased, and the observer creates its surfaces with it. A host or emitter
+that renders imported text on a `legacy` surface still paints it heavy.
+
 ### DesignIR JSON floats are shortest round-trip, not six digits
 
 `write_float_member` (`design_ir_json_primitives.hpp`) writes each float with
@@ -255,7 +296,11 @@ A captured `<input type=range|checkbox|radio>` whose `native_theme` verdict is
 theme paints from as `ua_*` attributes (`browser_capture_controls.cpp`), and
 `design_import_form_controls.cpp` builds a `RangeSlider` / `Checkbox` in
 `UaSkin::chromium_refresh` from it, in the native lane and the baked C++ lane
-alike (`ua_form_control_state()` is the shared parse). Only those controls get
+alike (`ua_form_control_state()` is the shared parse). The ui.js lane emits the
+same widget and state from that parse (`design_js_capture_lowering.cpp`:
+`createRangeSlider`/`createCheckbox`, `createButtonSurface` with its label as
+children, `setUaSkin`, `setCheckboxKind`, the range, value and checked state), and every lane records the snapped paint rect
+(`setCapturedPaintRect` in ui.js); the emitter conformance gate checks all of it. Only those controls get
 the skin: an `author` or `unresolved` verdict, another import lane's checkbox,
 AutoUi and every hand-built widget keep `UaSkin::platform`. Chromium paints a
 theme part in its CSS-px-snapped box, so the skins paint in
@@ -282,7 +327,78 @@ themed control (a select's arrow, text fields, meter, progress, the picker
 types) stays the `ua-default-form-chrome` support boundary. Add a control to
 both when you give it a native skin.
 
+### Emitter conformance: one IR, four lowerings, one gate
+
+The native materializer, the ui.js emitter (`design_codegen.cpp`), the baked C++
+exporter and the SwiftUI exporter each walk the IR on their own, so a lowering
+added to one does not reach the others. `pulp-test-design-emitter-conformance`
+builds the fixtures in `test/fixtures/emitter-conformance/` (plus the
+figma-plugin fidelity scene) through all four and compares, per anchor, the
+anchored-view tree, widget kind, theme-control state, captured paint rect and
+snapped `self_paint_bounds()`, and bindings, against the native lane. The baked
+C++ is generated at build time by `pulp-emitter-conformance-gen`, never
+committed. A divergence must match an entry in `allowlist.json`, each linked to
+an issue; an entry that matches nothing fails the gate, so delete it with the
+fix. `PULP_CONFORMANCE_REPORT=<path>` writes every divergence as JSON. When you
+lower something new in one emitter, run the gate before you claim the others
+agree.
+
+To see what a ui.js import looks like against Chromium, pass `--emitter js` to
+the differential lab: the observer renders the candidate IR through its ui.js
+program instead of the native materializer.
+
+### Page fonts: match on the declared range
+
+`prepare_native_ir_with_fonts` registers each shipped face under a
+content-named alias, and generated JS registers it with `registerFont`. Both
+also hand each rule's declared `font-weight` range to
+`canvas::declare_font_face_weight_range`: natively on the alias, from that
+family's own rules (two families may bind one file with different ranges), and
+in JS on the family. Chromium matches and synthesizes against the declared
+range, not the file: one Regular file declared `400 700` draws 700
+unemboldened, and declared `400` it draws 700 faux-bold.
+
+`registerFont` declarations are owned by a unique per-bridge scope, separate
+from the persisted storage identity: reload clears the retiring bridge's ranges
+before registering the replacement realm, and bridge teardown removes only that
+bridge's declarations. Lookup still unions declarations from all live owners of
+a family; sharing a bare family across live editors with conflicting ranges is
+therefore deliberately ambiguous and should use distinct family names.
+`paragraph_fakes_missing_font_styles` decides SkParagraph's fake-styles switch
+(CSS font matching over the declared ranges; bold only when the request is 600+
+and the matched range ends below 600; italic keeps the default, which shares the
+switch). It looks up each stack entry by its parsed name, because imported
+stacks are quoted. Every paragraph Pulp builds must ask it, the painter and the
+`TextShaper` measurement paths alike: SkParagraph's own shaping cache does not
+key on the switch, so a measurement paragraph left at the default caches
+emboldened runs that the painter then reuses, whatever its own switch says. A
+canvas-only test does not reproduce that reuse; render a native tree.
+
+A declared family also never yields to another family over weight in
+`match_registered_typeface`: the resolver otherwise measured a 700 run in a
+system face while the paragraph painted the page face, and the text wrapped.
+
 ### Packaged SDK runtime contract
+
+### Illustrator/PDF vector-source boundary
+
+PDF-compatible Illustrator artwork is a first-class source for the import CLI:
+`pulp import-design --from illustrator --file panel.ai --output panel.svg` (the
+`ai` and `pdf` aliases are equivalent). The command invokes the installed
+`tools/import-design/illustrator_to_svg.py` helper through Pulp's argv-safe
+child-process boundary. Poppler is an explicit runtime prerequisite; missing or
+invalid converters fail closed. Every successful conversion writes a
+`pulp.illustrator-svg-provenance.v1` receipt containing source/output hashes,
+the selected page, and converter identity. Existing SVG input continues through
+the validated preconverted-SVG lane; the converter does not imply artwork
+license or redistribute third-party design assets.
+
+Release archives take the helper from the build directory, not from `install()`:
+`tools/import-design/CMakeLists.txt` stages it as
+`<build>/tools/import-design/illustrator_to_svg.py`, and
+`tools/ci/release_package_cli.sh` hard-fails when a release at or above the
+product matrix's `illustrator_import_floor` lacks it. A new file listed under
+`import-design/` in `release_product_matrix.json` needs the same staging.
 
 The installed `pulp-import-design` SDK runtime includes the browser-capture
 manifest plus the materialized JSX siblings
@@ -2159,6 +2275,19 @@ When testing emitted JS, note the unquoted `// Source:` header comment still
 names the decode-time input; assert on QUOTED paths (`'assets/...'`) when
 pinning "no absolute references".
 
+**Fonts are NOT localized, and a hosted editor now refuses the absolute
+path.** `localize_ir_assets` rewrites image/sprite paths to `assets/<file>`
+but leaves `font.resolved_path` absolute (it points into the design pack or
+`base_dir`), so emitted `registerFont('Family', '/abs/.../face.ttf')` names a
+file outside the script directory. `WidgetBridge` refuses an absolute path
+that is not inside the script directory or a reviewed asset root unless the
+host calls `set_allow_unreviewed_file_paths(true)`; `--validate`,
+`pulp-screenshot` and `pulp-design-tool` opt in (developer tools rendering
+the developer's own import), but `ScriptedUiSession` (every DAW-hosted
+editor) does not, so such a font silently falls back to the system face in a
+plugin. Until fonts are localized like images, copy the face beside `ui.js`
+and reference it as `assets/<face>.ttf`.
+
 **Windows path-separator gotcha (asset/font paths baked into generated JS):**
 when the CLI's asset pass (`resolve_sprite_skins` in `sprite_skins.cpp`) resolves an `asset_ref`/font `asset_id` to a path
 that is stamped into `attributes["asset_path"]` / `font.resolved_path` (and from
@@ -2404,7 +2533,7 @@ this produces controls that render, drag, and move nothing:
 | `pulp-switch` / `pulp-check` | ✅ | on/off; `data-pulp-value` sets the opening state |
 | `pulp-select` (segmented) | ✅ | `data-pulp-choices="A|B|C"`, pipe separated |
 | `pulp-stepper` | ✅ | a count; `data-pulp-min` / `-max` / `-step` are REQUIRED |
-| `pulp-meter` | display | shows a macro; drives nothing, and does not bind on the exported native path at all (needs `pulpMeterSource` + `pulpMeterChannel`, which nothing emits) |
+| `pulp-meter` | display | shows a macro; drives nothing. Binds by its `pulpMeterValueKey` in every lane: ui.js through `bindMeter(id, key)`, native and baked C++ through `bind_level_display` with `value_key` set and an empty source and channel, which the host context binds by that key |
 | `pulp-combo`, `pulp-tab`, `pulp-radio`, `pulp-numbox` | ❌ | recognised by the capture, dropped by the lowering — drawn faithfully, wired to nothing |
 
 Everything outside that table is DECORATION, and decoration is most of a good
@@ -4765,8 +4894,19 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   materialized document and the screenshot horizon. Each pass
   settles only what an earlier one did not, or what the page restarted, and
   counts each animation and video once: a finite Web Animation is `finish()`ed (its
-  resting frame), an infinite or unresolved one is paused at `currentTime 0`,
-  and a video is paused and rewound to its first frame unless it still shows
+  resting frame), an infinite or unresolved one is paused at `currentTime 0`
+  and then committed and cancelled (`commitStyles()` writes the time-zero
+  values inline, `cancel()` drops the animation). A browser at its real device
+  scale kept presenting a merely paused composited animation mid-cycle while
+  the page read time zero, and nothing is left to hold once it is cancelled.
+  The page's own reference becomes idle, and restarting it is settled again.
+  A `button`, `input`, `textarea`, `select` or `progress` target is only
+  paused: the form-control theme check counts inline styling as author
+  styling, so committing would flip a theme-painted control to author-styled.
+  Under the real-scale launch it can still show the mid-cycle frame. So is a
+  target whose inline style declares an animated property `!important`:
+  committing would rewrite that declaration at normal priority.
+  A video is paused and rewound to its first frame unless it still shows
   its poster. CSS animations and transitions stay on the stylesheet path, and
   scroll- or view-driven animations are left to the fixed scroll position. An
   animated GIF, APNG or WebP runs on the decoder's clock, so it is left alone
@@ -8383,3 +8523,12 @@ inactive without an error. Keep this mode explicit and fail closed on missing
 or malformed `canvas_bindings`, multiple implicit states, or non-canvas match
 selectors. The optional `canvas_index` preserves identity when a capture has
 multiple canvases; live canvas behavior remains a separate proof surface.
+
+## Capture determinism hashing
+
+`provenance.timings` in a browser capture envelope contains per-run diagnostic
+clocks and is expected to vary between otherwise identical imports. Canonical
+determinism hashing strips that field only for `pulp-browser-capture-v1`
+envelopes; report-level timing data and timings in other input shapes remain
+hashed. Do not treat this normalization as proof that browser animation,
+canvas, or WebGL output is deterministic.

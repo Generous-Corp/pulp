@@ -181,6 +181,23 @@ else()
     set(_strip_note ", strip unavailable")
 endif()
 
+# 7. A table needs two defined entries to count as evidence, wherever they
+# sit: nm separates an archive's members with "<member>:" headers and blank
+# lines, and an undefined "U" reference is not an entry.
+list(GET _expected_sym 0 _one_symbol_id)
+set(_one_defined "\nlibx.a(a.o):\n0000000000000000 T _only\n                 U _external\n")
+set(_two_defined "\nlibx.a(a.o):\n0000000000000000 T _first\n\nlibx.a(b.o):\n0000000000000010 t _second\n")
+pulp_release_artifact_probe(ARTIFACT "${CLEAN_BIN}" IDS ${_one_symbol_id} SYMBOLS _one_defined
+    OUT_PRESENT _p OUT_ABSENT _a OUT_UNCHECKED _u)
+if(NOT _u)
+    message(FATAL_ERROR "negative control: a table with one defined entry was taken as evidence")
+endif()
+pulp_release_artifact_probe(ARTIFACT "${CLEAN_BIN}" IDS ${_one_symbol_id} SYMBOLS _two_defined
+    OUT_PRESENT _p OUT_ABSENT _a OUT_UNCHECKED _u)
+if(_u OR NOT _a)
+    message(FATAL_ERROR "negative control: a table with two defined entries in two members was not checked")
+endif()
+
 message(STATUS
-    "release-artifact negative control OK${_strip_note}: ${_n_sym} symbol + ${_n_str} string markers flagged in the "
+    "release-artifact negative control OK${_strip_note}:${_n_sym} symbol + ${_n_str} string markers flagged in the "
     "forbidden fixture, ${_n_dep} dependency markers flagged in synthetic loader tables, clean fixture passes")

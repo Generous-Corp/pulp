@@ -139,7 +139,11 @@ REAPER session untouched.
   - `--dry-run` needs no REAPER.
 - **Real-host gpu-fault matrix (WP-K)**: the same plug-in in Logic and
   GarageBand (AU, including out-of-process AUHostingService), Bitwig and
-  REAPER. Driven step by step by `real_host_smoke.py`, not by `reaper_smoke.py`.
+  REAPER. Logic/GarageBand/Bitwig are driven step by step by
+  `real_host_smoke.py`; `reaper_smoke.py` drives REAPER, then
+  `real_host_smoke.py wrap-reaper` converts its verified v1 run to v2.
+  `gpu_fault_receipts.py` owns v2 receipt construction for both paths;
+  keep the GUI lifecycle and receipt logic separate when changing either.
   - Order: `preflight`, `install-au`, `snapshot-prefs`, `stage`, `launch`,
     `await-claim`, `realtime-begin`/`realtime-end`, `collect`, then `revert`.
     `preflight` refuses a running DAW, a locked console (`IOConsoleLocked`), an

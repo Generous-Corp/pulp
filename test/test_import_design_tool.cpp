@@ -447,8 +447,8 @@ TEST_CASE("pulp-import-design reports help and argument diagnostics",
     }
 }
 
-TEST_CASE("pulp-import-design refuses unconverted Illustrator and PDF sources",
-          "[cli][import-design][tool][preconverted-svg][fail-closed]") {
+TEST_CASE("pulp-import-design requires an Illustrator or PDF input file",
+          "[cli][import-design][tool][illustrator][fail-closed]") {
     if (!binary_exists()) {
         SKIP("pulp-import-design not built");
     }
@@ -457,10 +457,8 @@ TEST_CASE("pulp-import-design refuses unconverted Illustrator and PDF sources",
         const auto result = run_import_design({"--from", source});
         REQUIRE_FALSE(result.timed_out);
         REQUIRE(result.exit_code == 2);
-        CHECK(result.stderr_output.find("Error: source '" + source + "' is unsupported") !=
-              std::string::npos);
         CHECK(result.stderr_output.find(
-                  "convert to preconverted-svg with a validated control-map sidecar") !=
+                  "--from illustrator requires exactly one --file <.ai|.pdf>") !=
               std::string::npos);
     }
 
@@ -3811,8 +3809,8 @@ TEST_CASE("generic browser HTML supplies the reference for --fail-below",
 
 TEST_CASE("a plain ir-json import keeps the fonts a page serves from Blob URLs",
           "[import][browser][fonts]") {
-    // The materialized document is skipped for an ir-json import, but a page
-    // that serves its @font-face fonts from Blob URLs records them only there.
+    // The materialized document is skipped for an ir-json import, so a page's
+    // Blob URL fonts have to reach the IR through the faces read in the page.
     if (!binary_exists()) {
         SKIP("pulp-import-design not built");
     }

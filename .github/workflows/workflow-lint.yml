@@ -45,6 +45,7 @@ on:
       - 'tools/ci/macos_pr_lane.py'
       - 'tools/ci/test_macos_pr_lane.py'
       - 'tools/ci/test_macos_tier_record.py'
+      - 'tools/ci/test_build_pr_dispatch.py'
       - 'tools/scripts/workflow_runner_selector_audit.py'
       - 'tools/scripts/test_workflow_runner_selector_audit.py'
       - 'tools/scripts/test_windows_runner_policy.py'
@@ -188,6 +189,7 @@ on:
       - 'tools/ci/macos_pr_lane.py'
       - 'tools/ci/test_macos_pr_lane.py'
       - 'tools/ci/test_macos_tier_record.py'
+      - 'tools/ci/test_build_pr_dispatch.py'
       - 'tools/scripts/workflow_runner_selector_audit.py'
       - 'tools/scripts/test_workflow_runner_selector_audit.py'
       - 'tools/scripts/test_windows_runner_policy.py'
@@ -539,6 +541,8 @@ jobs:
           python3 tools/ci/test_macos_pr_lane.py
           # The macos tier record Shipyard's arm guard reads, decided from job steps.
           python3 tools/ci/test_macos_tier_record.py
+          # A pr_number dispatch tests the merge ref and routes Linux like a PR run.
+          python3 tools/ci/test_build_pr_dispatch.py
           # A runs-on that interpolates a *_RUNS_ON_JSON variable without
           # fromJSON yields one label no runner carries, so GitHub queues
           # the job forever instead of failing it. Substring guards could

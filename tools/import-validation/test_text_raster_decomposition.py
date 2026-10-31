@@ -129,6 +129,18 @@ class SyntheticMechanisms(unittest.TestCase):
         self.assertAlmostEqual(row["dx"], 1.0, places=2)
         self.assertEqual(row["shift"], [1, 0])
 
+    def test_shadow_on_opposite_polarity_is_not_counted_as_ink(self):
+        ref = glyph_field()
+        # Keep the light glyphs, then add a broad dark shadow in the interior.
+        # The reference chooses the light polarity; the shadow must not change
+        # the measured mass or centroid of the candidate.
+        cand = ref.copy()
+        cand[30:33, 8:45] = BG - 80.0
+        row = trd.decompose(ref, cand, BOX)
+        self.assertEqual(row["polarity"], "light")
+        self.assertAlmostEqual(row["ink_ratio"], 1.0, places=3)
+        self.assertEqual(row["shift"], [0, 0])
+
     def test_summary_counts_only_measured_labels(self):
         ref = glyph_field()
         rows = [dict(id="a", **trd.decompose(ref, shifted(ref, 1, 0), BOX)),

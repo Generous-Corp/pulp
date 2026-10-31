@@ -2,9 +2,11 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/audio/load_measurer.hpp>
 #include "harness/rt_allocation_probe.hpp"
+#include <algorithm>
 #include <thread>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <string>
 
@@ -44,6 +46,169 @@ TEST_CASE("AudioProcessLoadMeasurer measures nonzero load", "[audio][load]") {
 
     REQUIRE(m.load() > 0.01f);
     REQUIRE(std::isfinite(m.load()));
+}
+
+TEST_CASE("AudioProcessLoadMeasurer reports spans in nanoseconds of wall time", "[audio][load]") {
+    // The measurer reads its own monotonic clock (mach_absolute_time on Apple
+    // targets). Its span must match steady_clock's for the same wait, which
+    // pins the tick-to-nanosecond conversion end to end.
+    AudioProcessLoadMeasurer m;
+    for (int attempt = 0; attempt < 5; ++attempt) {
+        const auto outer_start = std::chrono::steady_clock::now();
+        m.begin(512, 44100.0f);
+        busy_wait_for(std::chrono::milliseconds(3));
+        m.end();
+        const auto outer_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                  std::chrono::steady_clock::now() - outer_start)
+                                  .count();
+        const auto measured = m.snapshot().elapsed_ns;
+        INFO("measured " << measured << " ns, steady_clock " << outer_ns << " ns");
+        // At least the wait itself, and no more than the enclosing span.
+        REQUIRE(measured >= 3'000'000 * 95 / 100);
+        REQUIRE(measured <= outer_ns + 50'000);
+    }
+}
+
+TEST_CASE("LoadClockRatio converts tick spans to nanoseconds", "[audio][load][clock]") {
+    // 24 MHz (M1's counter) against 1 GHz reduces to 125/3, and 1 GHz to 1/1.
+    REQUIRE(LoadClockRatio::reduced(1'000'000'000, 24'000'000) == LoadClockRatio{125, 3});
+    REQUIRE(LoadClockRatio::reduced(125, 3) == LoadClockRatio{125, 3});
+    REQUIRE(LoadClockRatio::reduced(7, 7) == LoadClockRatio{1, 1});
+
+    const auto m1 = LoadClockRatio::reduced(125, 3);
+    REQUIRE(m1.to_ns(24'000'000) == 1'000'000'000); // one second of 24 MHz ticks
+    REQUIRE(m1.to_ns(3) == 125);
+    REQUIRE(m1.to_ns(1) == 41); // truncates, never rounds up
+    REQUIRE(LoadClockRatio{1, 1}.to_ns(123'456'789) == 123'456'789);
+
+    // A zero rate is an unavailable clock: every span is 0, never a division
+    // by zero.
+    REQUIRE(LoadClockRatio::reduced(0, 3).to_ns(1'000) == 0);
+    REQUIRE(LoadClockRatio::reduced(125, 0).to_ns(1'000) == 0);
+
+    // A span too long for the multiply saturates instead of wrapping.
+    constexpr auto kMax = std::numeric_limits<std::int64_t>::max();
+    REQUIRE(m1.to_ns(std::numeric_limits<std::uint64_t>::max()) == kMax);
+    REQUIRE(LoadClockRatio{1, 1}.to_ns(std::numeric_limits<std::uint64_t>::max()) == kMax);
+
+    // The host ratio converts the measurer's own ticks to wall time: a
+    // steady_clock-timed wait reads the same in both.
+    const auto ratio = LoadClockRatio::host();
+    REQUIRE(ratio.numer > 0);
+    REQUIRE(ratio.denom > 0);
+    for (int attempt = 0; attempt < 5; ++attempt) {
+        const auto outer_start = std::chrono::steady_clock::now();
+        const auto start = AudioProcessLoadMeasurer::read_ticks();
+        busy_wait_for(std::chrono::milliseconds(2));
+        const auto end = AudioProcessLoadMeasurer::read_ticks();
+        const auto outer_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                  std::chrono::steady_clock::now() - outer_start)
+                                  .count();
+        const auto span_ns = ratio.to_ns(end - start);
+        INFO("span " << span_ns << " ns, steady_clock " << outer_ns << " ns");
+        REQUIRE(span_ns >= 2'000'000 * 95 / 100);
+        REQUIRE(span_ns <= outer_ns + 50'000);
+    }
+}
+
+TEST_CASE("AudioProcessLoadMeasurer converts spans with the ratio captured at construction",
+          "[audio][load][clock]") {
+    // begin() and end() must not query the platform timebase (a guarded
+    // function-local static or a kernel call on the audio thread). The ratio
+    // is read once by the constructor, so an injected ratio is the one every
+    // span uses.
+    const auto host = LoadClockRatio::host();
+    AudioProcessLoadMeasurer native;
+    REQUIRE(native.clock_ratio() == host);
+
+    AudioProcessLoadMeasurer doubled(LoadClockRatio{host.numer * 2, host.denom});
+    REQUIRE(doubled.clock_ratio() == LoadClockRatio{host.numer * 2, host.denom});
+    AudioProcessLoadMeasurer unavailable(LoadClockRatio::reduced(0, 1));
+
+    // Nest the spans: doubled encloses native, so its raw ticks are at least
+    // native's and its nanoseconds at least twice native's.
+    doubled.begin(512, 44100.0f);
+    unavailable.begin(512, 44100.0f);
+    native.begin(512, 44100.0f);
+    busy_wait_for(std::chrono::milliseconds(2));
+    native.end();
+    unavailable.end();
+    doubled.end();
+
+    const auto native_ns = native.snapshot().elapsed_ns;
+    const auto doubled_ns = doubled.snapshot().elapsed_ns;
+    INFO("native " << native_ns << " ns, doubled " << doubled_ns << " ns");
+    REQUIRE(native_ns >= 2'000'000 * 95 / 100);
+    REQUIRE(doubled_ns >= 2 * native_ns);
+    REQUIRE(unavailable.snapshot().elapsed_ns == 0);
+}
+
+TEST_CASE("AudioProcessLoadMeasurer clock reads are ordered and monotonic",
+          "[audio][load][clock]") {
+    // Each read is ordered against the work around it, so successive reads
+    // never go backwards and a span always covers the work it brackets.
+    auto previous = AudioProcessLoadMeasurer::read_ticks();
+    for (int i = 0; i < 1'000'000; ++i) {
+        const auto now = AudioProcessLoadMeasurer::read_ticks();
+        if (now < previous) {
+            FAIL("read_ticks went backwards at read " << i << ": " << previous << " then " << now);
+        }
+        previous = now;
+    }
+
+    // A span that brackets a short, data-dependent loop is never negative and
+    // never shorter than steady_clock's reading of the same loop by more than
+    // a tick of either clock.
+    const auto ratio = LoadClockRatio::host();
+    volatile std::uint64_t sink = 0;
+    for (int attempt = 0; attempt < 1000; ++attempt) {
+        const auto start = AudioProcessLoadMeasurer::read_ticks();
+        const auto inner_start = std::chrono::steady_clock::now();
+        std::uint64_t acc = static_cast<std::uint64_t>(attempt);
+        for (int k = 0; k < 2000; ++k)
+            acc = acc * 6364136223846793005ull + 1442695040888963407ull;
+        sink = acc;
+        const auto inner_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                  std::chrono::steady_clock::now() - inner_start)
+                                  .count();
+        const auto end = AudioProcessLoadMeasurer::read_ticks();
+        REQUIRE(end >= start);
+        const auto span_ns = ratio.to_ns(end - start);
+        if (span_ns + 1'000 < inner_ns) {
+            FAIL("span " << span_ns << " ns is shorter than the bracketed " << inner_ns << " ns");
+        }
+    }
+    static_cast<void>(sink);
+}
+
+TEST_CASE("AudioProcessLoadMeasurer clock read cost against steady_clock",
+          "[.][audio][load][clock][benchmark]") {
+    // Advisory: reports the per-read cost of the measurer's clock and of
+    // steady_clock on this host. Perf assertions flake on shared runners, so
+    // this is hidden and asserts nothing about speed.
+    constexpr int kReads = 2'000'000;
+    auto best_ns_per_read = [](auto&& read) {
+        double best = std::numeric_limits<double>::infinity();
+        for (int run = 0; run < 9; ++run) {
+            std::uint64_t acc = 0;
+            const auto start = std::chrono::steady_clock::now();
+            for (int i = 0; i < kReads; ++i)
+                acc += read();
+            const auto ns =
+                std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - start)
+                    .count();
+            REQUIRE(acc != 0);
+            best = std::min(best, ns / kReads);
+        }
+        return best;
+    };
+    const double measurer = best_ns_per_read([] { return AudioProcessLoadMeasurer::read_ticks(); });
+    const double steady = best_ns_per_read([] {
+        return static_cast<std::uint64_t>(
+            std::chrono::steady_clock::now().time_since_epoch().count());
+    });
+    WARN("measurer clock " << measurer << " ns/read, steady_clock " << steady << " ns/read");
+    SUCCEED();
 }
 
 TEST_CASE("AudioProcessLoadMeasurer peak tracking", "[audio][load]") {

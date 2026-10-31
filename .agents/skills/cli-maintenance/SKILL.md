@@ -2250,6 +2250,17 @@ force-loading `pulp-view-core` would no longer pull the importer's objects.
 Guard each entry with `if(TARGET …)` (the importer target exists only with
 `PULP_ENABLE_DESIGN_IMPORT=ON`).
 
+## `$PULP_HOME/cache` holds directories, not only files
+
+Other tools write there too: the browser-capture probe keeps a directory at
+`cache/browser-probe`. Code that lists or sizes the cache must treat each
+entry as a file or a directory, and use the `std::error_code` overloads; the
+throwing `fs::file_size` on that directory aborted `pulp cache status` with
+"Is a directory" on any host that had run a browser-capture test first.
+`cli-cache-status-subdir` seeds an isolated `PULP_HOME` with a nested
+directory. The Rust `pulp cache status` lists regular files only, so it omits
+such a directory rather than failing.
+
 ## Configure defaults carry `-DPULP_DEV_BUILD=ON`
 
 `configure_default_args` (`tools/cli/configure_defaults.hpp`, mirrored in
@@ -4092,6 +4103,20 @@ command contract and run the paired UI build and clean-output lint tests. Keep
 the CLI dispatch, Rust/C++ help summaries, command documentation, and the
 clean-output manifest-role rules synchronized. A generated or vendor fixture
 must be hash-verified even when it is excluded from authored-source linting.
+
+## SDK profiles compile the shell exec JS bridge out
+
+Every SDK configure the CLI emits — `cli_sdk.cpp` (checkout SDK) and
+`local_sdk_profile.cpp` (forge-dev and trace profiles) — passes
+`-DPULP_DEV_BRIDGE_EXEC=OFF`. Tests OFF already implies it, but the flag is
+explicit because `validate_staged_install` asserts the cache key is PRESENT and
+off: a missing key means a source tree that predates the option and compiled
+the `/bin/sh` bridge in unconditionally, so absence is not safety. The profile
+provenance records `features.bridge_exec: false`, and adding a feature key
+changes that exact text, which is why `kForgeProfileRevision` and
+`kTraceProfileRevision` moved with it — a prefix built under the old contract
+keeps its own fingerprint. Bump the revision again whenever the feature object
+changes; never edit an installed `sdk-provenance.json` to match.
 
 ## Advisory lane dispatch
 

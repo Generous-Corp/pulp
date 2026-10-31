@@ -18,8 +18,12 @@ on:
       grace_minutes:
         description: "Minutes an intent may stay unapplied before alarming"
         required: false
-        default: "45"
+        default: "210"
 
+# The 210-minute grace is above version-at-land's 120-minute coalescing
+# window plus its 15-minute drain cadence plus a bump PR's queue validation,
+# so a coalesced bump never alarms. Keep it in step with
+# DEFAULT_GRACE_MINUTES in tools/scripts/pending_intent_liveness.py.
 concurrency:
   group: pending-intent-liveness
   cancel-in-progress: false
@@ -41,7 +45,7 @@ jobs:
       - name: Assess pending intent
         id: assess
         env:
-          PULP_PENDING_INTENT_GRACE_MIN: ${{ github.event.inputs.grace_minutes || '45' }}
+          PULP_PENDING_INTENT_GRACE_MIN: ${{ github.event.inputs.grace_minutes || '210' }}
         run: |
           set -euo pipefail
           if python3 tools/scripts/pending_intent_liveness.py \

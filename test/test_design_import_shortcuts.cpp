@@ -842,23 +842,43 @@ TEST_CASE("extract_keyboard_shortcuts does not catastrophically backtrack on lar
     // A faithful-vector import embeds a ~1 MB base64 SVG data URI as a string.
     // The old unbounded `(\w+)\.` regex re-scanned every position of every
     // base64 word-run (O(n^2)) and hung the importer for minutes on a single
-    // design. With `\b(\w{1,64})` the scan is linear; this must finish fast and
-    // still pick up the one real shortcut after the blob.
-    std::string source(1'000'000, 'A');  // one long word-run (base64-like)
-    source += " const f = (e) => { if (e.key === 'Escape') x(); };";
-
-    const auto t0 = std::chrono::steady_clock::now();
-    auto out = extract_keyboard_shortcuts(source, "frame.svg");
-    const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - t0).count();
-
-#if defined(__SANITIZE_ADDRESS__) || __has_feature(address_sanitizer) || __has_feature(undefined_behavior_sanitizer)
-    constexpr long long max_elapsed_ms = 5000;
-#else
-    constexpr long long max_elapsed_ms = 2000;
-#endif
-    INFO("extract_keyboard_shortcuts on 1MB input took " << elapsed_ms << " ms");
-    REQUIRE(elapsed_ms < max_elapsed_ms);   // was minutes before the catastrophic-backtracking fix
-    REQUIRE(out.size() == 1);
-    REQUIRE(out[0].key == "Escape");
+    // design. With `\b(\w{1,64})` the scan is linear.
+    //
+    // The bound is the growth rate, not a wall-clock budget: quadrupling the
+    // word-run quadruples a linear scan and multiplies a quadratic one by 16.
+    // Host speed and sanitizer overhead divide out of the ratio, so it holds on
+    // a loaded ASan runner where any fixed millisecond limit does not.
+    // Fixed per-call cost (compiling the regex) only pulls the ratio down.
+    // The runs are short so a quadratic scan fails in seconds under ASan
+    // (about 4 s at 2 KB) instead of running into the ctest timeout.
+    constexpr std::size_t kSmallRun = 512;
+    constexpr std::size_t kLargeRun = 4 * kSmallRun;
+    constexpr double kMaxGrowth = 8.0; // halfway between 4x and 16x on a log scale
+    const auto make_source = [](std::size_t run) {
+        std::string source(run, 'A'); // one long word-run (base64-like)
+        source += " const f = (e) => { if (e.key === 'Escape') x(); };";
+        return source;
+    };
+    const auto scan_us = [](const std::string& source) {
+        const auto t0 = std::chrono::steady_clock::now();
+        auto out = extract_keyboard_shortcuts(source, "frame.svg");
+        const auto elapsed = std::chrono::steady_clock::now() - t0;
+        REQUIRE(out.size() == 1); // the real shortcut after the blob
+        REQUIRE(out[0].key == "Escape");
+        return std::chrono::duration<double, std::micro>(elapsed).count();
+    };
+    // Fastest of a few runs on each side: a scheduler stall only adds time.
+    const auto fastest_us = [&](std::size_t run) {
+        const auto source = make_source(run);
+        double best = scan_us(source);
+        for (int i = 0; i < 4; ++i)
+            best = std::min(best, scan_us(source));
+        return best;
+    };
+    const double small_us = fastest_us(kSmallRun);
+    const double large_us = fastest_us(kLargeRun);
+    const double growth = large_us / std::max(small_us, 1.0);
+    INFO("scan of " << kSmallRun << " B: " << small_us << " us, " << kLargeRun << " B: " << large_us
+                    << " us, growth " << growth << "x (linear 4x, quadratic 16x)");
+    REQUIRE(growth < kMaxGrowth);
 }

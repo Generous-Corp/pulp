@@ -77,9 +77,10 @@ template <typename SampleType = float> class BallisticsFilterT {
                                              : magnitude * magnitude;
         }
         SampleType coeff = (value > state_) ? attack_coeff_ : release_coeff_;
-        // Snap the envelope state so a long release into silence flushes to
-        // zero instead of stalling in the denormal range. No-op above 1e-15.
-        state_ = snap_to_zero(state_ + coeff * (value - state_));
+        // Snap the envelope state where subnormals are slow, so a long release
+        // into silence does not stall in the denormal range (see
+        // snap_recursion_state()). No-op above 1e-15.
+        state_ = snap_recursion_state(state_ + coeff * (value - state_));
         if (!std::isfinite(static_cast<double>(state_)) || state_ < SampleType{0}) {
             reset();
             return SampleType{0};

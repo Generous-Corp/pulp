@@ -109,6 +109,11 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
         }
     } telemetry_record_guard{cg, graph_load_.get(), num_samples};
 
+    // Per-node timing only when someone reads it (see set_node_load_monitoring()).
+    const bool time_nodes =
+        node_load_monitoring_.load(std::memory_order_relaxed) || cg->live_dsp_telemetry.enabled();
+    executor_.set_node_load_timing(time_nodes);
+
     struct GraphLoadEndGuard {
         audio::AudioProcessLoadMeasurer* m;
         ~GraphLoadEndGuard() {
@@ -130,7 +135,10 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
         const bool has_midi = cg->routed.midi.node_count() > 0;
         const bool has_automation = cg->routed.automation.node_count() > 0;
 
-        pulp::format::BusBufferSet buses;
+        // Reused per block: a fresh BusBufferSet initializes all kMaxBuses
+        // entries to hold these two.
+        pulp::format::BusBufferSet& buses = cg->routed.buses;
+        buses.clear();
         const bool buses_ok = buses.add_input("main", input, pulp::format::BusRole::Main) &&
                               buses.add_output("main", output, pulp::format::BusRole::Main);
         if (buses_ok) {
@@ -401,7 +409,7 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
     // No routed path took this block — run the legacy serial reference walk,
     // the hand-maintained bit-exact oracle/fallback (see
     // signal_graph_reference_walk.cpp).
-    run_reference_walk_(output, input, num_samples, cg);
+    run_reference_walk_(output, input, num_samples, cg, time_nodes);
 }
 
 void SignalGraph::ExecutionSnapshot::process(audio::BufferView<float>& output,

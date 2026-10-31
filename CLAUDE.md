@@ -1019,6 +1019,7 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 - Pull a Figma frame headlessly (CI) — the LAST resort; local lanes have no rate limit. → `tools/import-design/figma_rest_export.py`
 - Validate a fresh authored HTML fixture's Chromium receipt, native import receipt, and planted negative interaction. → `tools/import-design/fresh_plugin_fixture_validation.mjs`
   - ⚠ **Cannot see:** Acceptance evidence for a named fixture only; it does not prove general HTML importer coverage or semantic native-widget reconstruction.
+- Convert PDF-compatible Illustrator artwork or a PDF artboard to SVG before validated design import. → `tools/import-design/illustrator_to_svg.py`
 - Audit the JSX runtime shim against the contract it promises importers. → `tools/import-design/jsx-runtime/jsx-contract-audit.mjs`
 - Transform JSX/React design output into the Pulp runtime-import lane. → `tools/import-design/jsx-runtime/jsx-transform.mjs`
 - Validate authored keyed identity declarations, a deterministic reorder digest, and planted duplicate or unknown-key negatives. → `tools/import-design/keyed_identity_reorder_validation.mjs`
@@ -2019,9 +2020,20 @@ When adding a new skill, register its subsystem in `tools/scripts/skill_path_map
 
 Pulp ships as a Claude Code plugin with slash commands (`/build`, `/test`, `/create`, `/status`, `/validate`, `/design`, `/ship`, `/import-design`, `/audio-harness`), skills, and hooks. The plugin manifest is at `.claude-plugin/plugin.json`. See `docs/guides/claude-code-plugin.md` for installation and full details.
 
+### How a PR lands here
+
+- **Open the PR and stop.** `shipyard pr --base main --no-arm`. Never arm, enqueue, auto-merge or merge: admission has exactly one writer.
+- **Review:** a standing reviewer posts an exact-head APPROVE or a HOLD once required checks are green. Never approve your own team's work.
+- **Admission:** the m3 steward tick (every 5 minutes) enqueues approved green heads into GitHub's native merge queue, which batches up to 5.
+- **On a HOLD:** fix what it names, with a test. Merge `origin/main` (never rebase or force-push). Push once and comment `repaired: ... at <sha>`; the PR re-enters review on its own.
+- **macOS first.** A Windows- or Linux-only failure gets a `PARKED/<platform>` issue with evidence and never blocks a macOS landing.
+- **Labels the pipeline skips:** `superseded`, `owner-decision`, `PARKED/<platform>`.
+- Launch agents with `sr claude` / `sr codex` and use the smallest model that fits (Haiku or Codex Luna for mechanical work, Sonnet or Codex Terra/Sol for fixes, Opus/Fable/Codex Astra for security, signing and release diffs).
+- Steward log on m3: `~/Library/Logs/shipyard-steward-tick/summary.log`.
+
 ### CI Workflow
 
-Use Shipyard for all merges. Current Pulp branch protection requires the
+Open PRs with Shipyard; admission is described in "How a PR lands here". Current Pulp branch protection requires the
 macOS lane; Linux and Windows still run in GitHub Actions but are advisory
 unless branch protection changes. When the macOS lane wedges or
 Shipyard itself drifts, see the `ci` skill's *Self-hosted runner ops*
@@ -2073,7 +2085,7 @@ shipyard ship                             # resume/operate on an existing Shipya
 The CI skill (`.agents/skills/ci/SKILL.md`) is the single source of truth for landing code. Normal ship cycle:
 
 1. Run `shipyard pr` — never `gh pr create` + `shipyard ship` separately (that bypasses the skill-sync and version-bump gates)
-2. The orchestrator runs skill-sync + version-bump gates, commits any bumps, pushes, opens/tracks the PR, and arms auto-merge
+2. The orchestrator runs skill-sync + version-bump gates, commits any bumps, pushes, and opens/tracks the PR (with `--no-arm`, it stops there: the steward admits it after review)
 3. The required GitHub checks (the `macos` gate on the self-hosted Mac VMs, plus the other required contexts) decide whether it lands. Shipyard's local `mac` lane is opt-in (`default = false`) and runs only with `shipyard pr --target mac`; by default `shipyard pr` reports `validation: delegated` and writes no ship-state
 4. GitHub Actions runs Linux and Windows on GitHub-hosted runners as advisory checks
 5. Posts a closeout comment

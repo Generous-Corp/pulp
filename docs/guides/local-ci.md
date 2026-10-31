@@ -753,6 +753,15 @@ Each invocation:
    credential, writes it into the guest over stdin, and runs one job.
 6. Fences the registration and rolls back again.
 
+A runner that stays online and idle for 45 minutes
+(`PULP_WINDOWS_RUNNER_IDLE_RECYCLE_SECONDS`, default 2700; `0` turns it off) is
+deregistered through the same fence and the invocation exits 0, so systemd
+registers a fresh one. A JIT session that idles for hours can stay `online`
+while GitHub stops assigning it jobs: on 2026-10-25 a matching job queued for
+hours beside an idle registration. The fence deletes the registration before the
+session is stopped, so a runner that took a job in that window refuses the
+delete and keeps it.
+
 The VM belongs to the slot. Anything else that stops it (`qm shutdown 300` from
 another tool or session) kills the running job. The supervisor watches the VM
 while a job runs. When it stops without the supervisor stopping it, the
@@ -3143,6 +3152,30 @@ signing identity) becomes a distinct authorization boundary, first publish its
 public fingerprint on protected main and then pin the embedded SSH signature
 key to that reviewed value.
 
+## One admission writer feeds the merge queue
+
+The steward on the configured mutation machine (m3, `mutation_machine =
+studio`) is the only writer that admits Pulp PRs. A launchd job runs
+`shipyard runner steward --repo Generous-Corp/pulp --base main --arm-unqueued
+--apply` every five minutes. It runs from a config-only sparse clone on the
+internal disk, because a launchd job that opens a path on `/Volumes` can block
+in the kernel on a privacy prompt nobody can see. `gh` must resolve to the
+`ghapp` wrapper so every arm passes the queue-arm guard and lands in the arm
+ledger. The job refuses to run otherwise. Shipyard re-reads the exact-head
+approval immediately before each enqueue and refuses on a HOLD, a missing
+approval, or unreadable state. The native queue then validates and merges.
+
+`.github/workflows/shipyard-merge-steward.yml` is a read-only diagnostic. It
+has no schedule, no `apply` input and only read-scoped tokens, and it is not in
+`.github/schedule-backstop.json`. A second writer, scheduled or dispatched,
+would bypass the m3 guard and race the mutation-authority flag. Its census also failed under the Actions-minted
+token on every run, so it never admitted a PR.
+
+`[train] mode = "off"`. The native queue already batches up to five entries,
+and a second grouping layer added planning work without forming a train.
+`shipyard train status` and `shipyard train metrics` still report queue depth
+and approval-to-merge time.
+
 ## A merge_group batch stops at the first failing test
 
 The full suite is roughly 21,764 tests. A batch that has one failing test is
@@ -3872,8 +3905,11 @@ or its own message), and the fix is to add it to `PULP_PR_FAST_NEEDS_BUILD`.
      (skip-safe) tier. It fails closed: a read that fails, or a check run
      it cannot place, is a refusal ("could not verify …"). Only a check run
      proven to be for a head in another repository is passed over, and it
-     never falls back to an older run on uncertainty. Its comment says what it
-     found about the macos run; it does not judge approval.
+     never falls back to an older run on uncertainty. It judges the pull
+     request's current head, read live, not the event's (an arm event can
+     arrive after a push); an unreadable current head is a refusal. It reads
+     every page of the head's check runs and sorts them itself. Its comment
+     says what it found about the macos run; it does not judge approval.
   2. At the contract lane's conclusion: its `macos` job's last step, `Refuse a
      head armed before approval (contract lane)`, fails when this exact head is
      armed for auto-merge or already in the merge queue (read over GraphQL
@@ -3896,6 +3932,69 @@ or its own message), and the fix is to add it to `PULP_PR_FAST_NEEDS_BUILD`.
   Re-running a contract-lane run does not help either, because a re-run
   replays the original event.
 
+### The full-lane dispatch tests the merge ref (`pr_number`)
+
+A plain `workflow_dispatch` of `build.yml` tests the bare branch head. A head
+that is behind `main` then fails freshness checks such as
+`agent-capability-manifest-check`, and the Linux leg asks for the operator's
+local runner (`Linux (x64) [local]`), which nothing serves on that path. The
+fleet App's full-lane dispatch therefore sets the `pr_number` input:
+
+```bash
+gh workflow run build.yml --ref <pr-head-branch> -f pr_number=<n>
+```
+
+With `pr_number` set, the run does the following:
+- **Binds first, and resolves the merge commit once.** classify's first step
+  requires the pull request to be open, in this repository, with its head
+  branch and commit equal to the dispatch's `github.ref_name` and
+  `github.sha`. It then takes the pull request's merge commit
+  (`merge_commit_sha`, which `refs/pull/<n>/merge` names) and requires exactly
+  two parents: a base, then this head. Anything else fails closed, and so does
+  `macos`. That covers a conflicting pull request, a merge GitHub has not
+  computed yet, or a moved head. Without the binding, a dispatch on one branch
+  could post another pull request's merge result on its head.
+- **Tests that exact commit everywhere.** classify, and every build leg
+  through classify's output, check out the bound merge sha, never the moving
+  ref. Build re-checks that HEAD is that sha and that its second parent is the
+  run's head.
+- **Records what it tested.** The `tested_ref`, the `tested_sha` (the merge
+  commit) and the `merged_base` (its first parent) are classify outputs and
+  step outputs of `Verify the tested merge ref`, and appear in the job summary.
+  The next step is named `Tested <ref> at <sha> onto <base>`, so a reader of
+  the jobs API sees them without reading logs. The merged base is also the
+  capability base and the base classify diffs against, as a pull request's
+  pinned `base.sha` is.
+- **Writes nothing a later run reads.** The run executes a pull request's
+  code. A dispatch writes caches in its ref's scope, so on this path the bind
+  refuses the default branch, any `release/*` branch, and any branch with
+  classic protection or a ruleset, or whose protection cannot be read. Every
+  cache step only restores, and `setup-node` saves no npm cache.
+- **Uploads no consumable artifacts.** The iOS gate digest, the GPU-audio
+  SDK, the reuse replay record and the plugin bundles are skipped. Only the
+  ctest logs and the Rust fallback receipt upload, as diagnostics. The
+  protected receipt and the A2T attestation are `pull_request`-only. Every
+  artifact consumer (`ios_gate_digest`, `reuse_replay_collect`,
+  `binary_identity_shadow`, `base_poison_detector`,
+  `protected_merge_receipt`) reads only `merge_group`, `pull_request` or
+  push-to-main runs, and no `workflow_run` consumer of Build and Test reads
+  artifacts.
+- **Routes every leg as a pull_request run does.** macOS takes the PR-head
+  class (`pulp-build-pr-head`), so it gets the same host caches and warm
+  build dir (`build-<key>`) as the pull request's own runs. Linux goes to
+  GitHub-hosted runners, and there is no Windows leg. None of the operator
+  routing inputs applies: the provider and the Linux, Windows and macOS
+  selectors.
+- **Isolated from the pull request's other runs.** Its concurrency group
+  keys on `github.ref`, which is `refs/heads/<branch>`, so it cannot cancel
+  the pull request's `refs/pull/<n>/merge` run or a merge group. It uses no
+  secret and no environment beyond what a `pull_request` run gets.
+
+Everything else is still a dispatch: the run's checks land on the head, and
+it runs the full suite. A dispatch without `pr_number` behaves as before.
+`tools/ci/test_build_pr_dispatch.py` pins the checkout, the binding, the
+recorded ref, and the routing both ways.
+
 ### Approve first, then the full lane, then arm
 
 A reviewer may give `verdict: APPROVE head:<sha>` before the head has had a
@@ -3903,7 +4002,8 @@ full macOS run; the verdict is about the change, and the contract lane has
 already run the fast PR-caused checks. Approval is not arming:
 
 1. The arm sweep sees the trusted APPROVE for the current head, applies
-   `macos-ci` and dispatches `build.yml` on the branch. The full lane runs.
+   `macos-ci` and dispatches `build.yml` on the branch with `pr_number` set
+   (see below). The full lane runs.
 2. The sweep arms only once the head's latest `macos` check run is a
    completed full-lane `success`: its `shipyard-test-tier` annotation is not
    `deferred`. An arm made earlier (absent, running, failed, `deferred`, or no
@@ -4361,6 +4461,26 @@ for what a host can serve: its Pulp lane uses
 workflow and repository runner-group ID, and declares no fixed lane priority.
 The contract records that transformation separately from the repo variable so
 neither representation is mistaken for the other.
+
+The transformation removes any existing managed event-class labels before
+adding the current event's class. This matters because the shared repository
+selector normally carries the PR-head class; a merge-group job must request
+only `pulp-build-merge-group`. GitHub treats labels as an all-of set, so a job
+requesting both classes is unschedulable by the event-class-v2 fleet, whose
+ephemeral runners advertise one class at a time.
+
+If a merge-group run is manually removed while recovering this routing defect,
+re-admission must use a new reviewed head. Shipyard intentionally refuses to
+re-arm an unchanged head after a guarded manual removal, because doing so could
+re-enqueue a known-bad batch state. Make the smallest relevant follow-up
+correction, push it, obtain a fresh exact-head review, and then re-run the normal
+arm path. Do not bypass the queue-arm guard or use an empty commit. If the VM
+reaches the guest but its hydration SSH process remains stuck before `Connected
+to GitHub`, terminate only that recorded process and let TartCI discard the VM;
+then wait for GitHub to finish cancelling the ghost run before re-admitting the
+new head. A merge-group run that reaches the runner and then exits because
+hydration was terminated is a failed-check batch, so it also requires a new
+reviewed head before admission; do not force-arm the unchanged head.
 
 ### The failure this prevents
 

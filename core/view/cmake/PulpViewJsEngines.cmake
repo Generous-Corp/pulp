@@ -190,6 +190,13 @@ endif()
 set(PULP_HAS_JSC_ACTUAL "${PULP_HAS_JSC_ACTUAL}" CACHE INTERNAL
     "Whether this build compiles and links the JavaScriptCore backend" FORCE)
 
+# Shell exec/execAsync JS bridge (PULP_DEV_BRIDGE_EXEC, declared by the root
+# project). Private on purpose: only widget_bridge.cpp (the API-group table) and
+# widget_bridge/platform_services_api.cpp (the registrar body) read it, and no
+# installed header does, so a consumer cannot drift from the archive it links.
+target_compile_definitions(pulp-view-script
+    PRIVATE PULP_BRIDGE_EXEC_ENABLED=$<BOOL:${PULP_DEV_BRIDGE_EXEC}>)
+
 # Set compile definitions for engine availability / defaults.
 if(PULP_HAS_V8_ACTUAL)
     target_compile_definitions(pulp-view-script PRIVATE PULP_HAS_V8=1)

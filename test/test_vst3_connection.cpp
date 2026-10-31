@@ -23,6 +23,21 @@ using pulp::host::detail::vst3_connect_component_controller;
 using pulp::host::detail::vst3_disconnect_component_controller;
 using pulp::host::detail::vst3_push_component_state;
 
+// vstsinglecomponenteffect.cpp, the vst3-sdk library's only copy of
+// vsteditcontroller.cpp, compiles it with setState/getState renamed to
+// setEditorState/getEditorState (the SDK's IComponent/IEditController name
+// clash workaround), so the library defines no EditController::setState or
+// getState. The Itanium ABI emits EditController's vtable only beside its key
+// function, inside the library, so nothing here references them. The MSVC ABI
+// emits the base vftable in every translation unit that constructs a derived
+// controller, and that vftable names both symbols; define them as the SDK does.
+tresult PLUGIN_API Vst::EditController::setState(IBStream* /*state*/) {
+    return kNotImplemented;
+}
+tresult PLUGIN_API Vst::EditController::getState(IBStream* /*state*/) {
+    return kNotImplemented;
+}
+
 namespace {
 
 // One half of a separated plug-in. Reference counting is recorded rather than
@@ -133,9 +148,8 @@ public:
         return kResultOk;
     }
 
-    // The vst3-sdk library carries EditControllerEx1 (via
-    // vstsinglecomponenteffect.cpp) but not EditController's own state methods,
-    // so define them here rather than pulling in a whole extra SDK source.
+    // The seam never reads controller state; report success rather than the
+    // SDK default kNotImplemented.
     tresult PLUGIN_API getState(IBStream*) SMTG_OVERRIDE { return kResultOk; }
     tresult PLUGIN_API setState(IBStream*) SMTG_OVERRIDE { return kResultOk; }
 

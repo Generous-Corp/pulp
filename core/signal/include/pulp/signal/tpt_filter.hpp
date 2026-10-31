@@ -68,9 +68,9 @@ template <typename SampleType = float> class TptFilterT {
     SampleType process_lowpass(SampleType input) {
         const SampleType d = input - state_;
         const SampleType lp = g_ * d + state_;
-        // Snap the integrator state to flush denormal tails where no FTZ guard
-        // applies. No-op above 1e-15.
-        state_ = snap_to_zero(two_g_ * d + state_);
+        // Snap the integrator state where subnormals are slow (see
+        // snap_recursion_state()). No-op above 1e-15.
+        state_ = snap_recursion_state(two_g_ * d + state_);
         return lp;
     }
 
@@ -118,7 +118,7 @@ template <typename SampleType = float> class TptFilterT {
     Outputs process(SampleType input) {
         const SampleType d = input - state_;
         const SampleType lp = g_ * d + state_;
-        state_ = snap_to_zero(two_g_ * d + state_); // flush denormal tails (see above)
+        state_ = snap_recursion_state(two_g_ * d + state_); // see process_lowpass()
         SampleType hp = input - lp;
         SampleType ap = lp - hp; // = 2*lp - input
         return {lp, hp, ap};
@@ -129,11 +129,17 @@ template <typename SampleType = float> class TptFilterT {
     }
 
   private:
+    // The state sits apart from the coefficients the per-sample path reads.
+    // When the caller's output pointer may alias the filter, every call reloads
+    // the coefficients and the state from memory; next to a coefficient, the
+    // state was fetched with it in one paired load that overlapped the
+    // previous call's state store, which cannot be store-forwarded, so each
+    // call waited for that store to complete.
+    SampleType state_ = SampleType{0.0f};
     SampleType sample_rate_ = SampleType{44100.0f};
     SampleType cutoff_ = SampleType{1000.0f};
     SampleType g_ = SampleType{0.0f};
     SampleType two_g_ = SampleType{0.0f};
-    SampleType state_ = SampleType{0.0f};
 
     void update_coefficient() {
         constexpr SampleType pi = SampleType{3.14159265358979323846};

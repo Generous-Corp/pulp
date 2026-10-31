@@ -2194,14 +2194,35 @@ pub fn cache_with_home(
     }
 }
 
+/// Bytes in the regular files below `dir`, following no symlinked
+/// directory. An entry that cannot be read counts as zero.
+fn dir_bytes(dir: &Path) -> u64 {
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    rd.flatten()
+        .map(|e| match e.file_type() {
+            Ok(t) if t.is_dir() => dir_bytes(&e.path()),
+            Ok(t) if t.is_file() => e.metadata().map(|m| m.len()).unwrap_or(0),
+            _ => 0,
+        })
+        .sum()
+}
+
 fn do_cache_status(home: &Path, json: bool, out: &mut impl Write) -> Result<()> {
     let cache_dir = home.join("cache");
+    // Other tools keep directories here too (the browser-capture probe's
+    // `browser-probe/`); one is listed with the bytes of the files below it,
+    // as the C++ CLI lists it, so the totals agree.
     let mut assets: Vec<(String, u64)> = Vec::new();
     if let Ok(rd) = std::fs::read_dir(&cache_dir) {
         for e in rd.flatten() {
             let Ok(md) = e.metadata() else { continue };
+            let name = e.file_name().to_string_lossy().into_owned();
             if md.is_file() {
-                assets.push((e.file_name().to_string_lossy().into_owned(), md.len()));
+                assets.push((name, md.len()));
+            } else if md.is_dir() {
+                assets.push((format!("{name}/"), dir_bytes(&e.path())));
             }
         }
     }
@@ -3893,6 +3914,31 @@ mod tests {
         let s = String::from_utf8(out).unwrap();
         assert!(s.contains("SDKs: none cached"));
         assert!(s.contains("Assets: none cached"));
+    }
+
+    #[test]
+    fn cache_status_sizes_a_directory_by_its_files() {
+        let td = tempfile::tempdir().unwrap();
+        let probe = td.path().join("cache").join("browser-probe");
+        std::fs::create_dir_all(probe.join("profile")).unwrap();
+        std::fs::write(td.path().join("cache").join("top.bin"), [0u8; 10]).unwrap();
+        std::fs::write(probe.join("probe.bin"), [0u8; 1536]).unwrap();
+        std::fs::write(probe.join("profile").join("state.bin"), [0u8; 1536]).unwrap();
+        let mut out = Vec::new();
+        cache_with_home(&CacheSub::Status, td.path(), false, &mut out).unwrap();
+        let s = String::from_utf8(out).unwrap();
+        assert!(s.contains("browser-probe/ (3 KB)"), "{s}");
+        assert!(s.contains("top.bin (10 B)"), "{s}");
+        let mut out = Vec::new();
+        cache_with_home(&CacheSub::Status, td.path(), true, &mut out).unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&out).unwrap();
+        let bytes: Vec<u64> = body["assets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|a| a["bytes"].as_u64().unwrap())
+            .collect();
+        assert_eq!(bytes, vec![3072, 10]);
     }
 
     #[test]

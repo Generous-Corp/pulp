@@ -232,6 +232,14 @@ public:
         Steinberg::Vst::ParamID tag, Steinberg::Vst::TChar* string,
         Steinberg::Vst::ParamValue& valueNormalized) override;
 
+    // Keep Pulp-authored parameters in their declared plain StateStore domain
+    // when a host asks the VST3 controller to convert values. Unknown IDs,
+    // including hidden controller IDs, retain the SDK's normalized fallback.
+    Steinberg::Vst::ParamValue PLUGIN_API normalizedParamToPlain(
+        Steinberg::Vst::ParamID id, Steinberg::Vst::ParamValue valueNormalized) override;
+    Steinberg::Vst::ParamValue PLUGIN_API plainParamToNormalized(
+        Steinberg::Vst::ParamID id, Steinberg::Vst::ParamValue plainValue) override;
+
     // IEditController — editor view creation
     Steinberg::IPlugView* PLUGIN_API createView(Steinberg::FIDString name) override;
 

@@ -1,7 +1,5 @@
-# Pin the policy level. Run with -P and no minimum, CMake 3.x evaluates
-# `${var}` under the old CMP0053 rules, which stop at the first NUL byte; a
-# binary read below would then be a few bytes long and every marker search
-# would miss, which fails OPEN for the forbidden-marker checks. 3.24 is the
+# Pin the policy level. The scanner represents artifact bytes as hexadecimal
+# text, so CMake's string policies never see an embedded NUL. 3.24 is the
 # oldest CMake the project templates accept.
 cmake_minimum_required(VERSION 3.24)
 
@@ -11,35 +9,22 @@ cmake_minimum_required(VERSION 3.24)
 # hook below exercises the refusal.
 set(_pulp_marker_min_length 14)
 
-# Read the whole image as bytes. This is about a tenth of the cost of reading
-# its printable runs with file(STRINGS) (on a 40 MB plug-in, 0.03 s against
-# 0.38 s) and searches the raw bytes directly. Several CMake behaviours
-# matter, and each was measured:
-# - file(READ) folds each CRLF pair to LF. A marker contains neither byte, so
-#   the fold can neither hide a marker nor create one; the value is shorter
-#   than the file by the number of folded pairs, at most half its size.
-# - A NUL truncates the value in several places: `${var}` on CMake 3.x
-#   without the policy pin above, set(... PARENT_SCOPE) on every version, and
-#   string(REPLACE) / string(REGEX) on every version. string(LENGTH) and
-#   string(FIND) see the whole value. So this is a macro (the bytes land in the
-#   caller's scope directly), only LENGTH and FIND ever touch the bytes, and a
-#   function may read them but must never return them.
-# - Every truncation stops at the first NUL, which an executable has within its
-#   first few header bytes. A read shorter than half the file can only be such
-#   a truncation (CRLF folding removes at most half), so the scan fails closed.
-#   The length is also recorded as <var>_length, and _pulp_binary_contains
-#   refuses to search a value whose length differs from it.
+# Read the whole image as hexadecimal text. `file(READ ... HEX)` is binary-safe
+# and makes the representation length exactly twice the byte length. Marker
+# searches use the same representation, avoiding CMake's NUL-terminated
+# string handling on Windows.
 macro(_pulp_read_binary path out_var)
     file(SIZE "${path}" _pulp_read_size)
-    file(READ "${path}" ${out_var})
-    string(LENGTH "${${out_var}}" _pulp_read_length)
-    math(EXPR _pulp_read_twice "${_pulp_read_length} * 2")
-    if(_pulp_read_length GREATER _pulp_read_size OR _pulp_read_twice LESS _pulp_read_size)
+    file(READ "${path}" ${out_var} HEX)
+    string(LENGTH "${${out_var}}" _pulp_read_hex_length)
+    math(EXPR _pulp_expected_hex_length "${_pulp_read_size} * 2")
+    if(NOT _pulp_read_hex_length EQUAL _pulp_expected_hex_length)
         message(FATAL_ERROR
-            "control shipping scan read ${_pulp_read_length} of ${_pulp_read_size} bytes "
-            "of ${path}; refusing to scan a truncated image")
+            "control shipping scan read ${_pulp_read_hex_length} hex characters, "
+            "expected ${_pulp_expected_hex_length} for ${_pulp_read_size} bytes of "
+            "${path}; refusing to scan a truncated image")
     endif()
-    set(${out_var}_length "${_pulp_read_length}")
+    set(${out_var}_length "${_pulp_read_hex_length}")
 endmacro()
 
 # `bytes_var` names the variable holding a _pulp_read_binary result; passing
@@ -56,10 +41,11 @@ function(_pulp_binary_contains bytes_var marker out_var)
     if(NOT _searched_length EQUAL ${bytes_var}_length)
         message(FATAL_ERROR
             "control shipping scan would search ${_searched_length} of "
-            "${${bytes_var}_length} bytes read into ${bytes_var}; refusing to scan "
-            "a truncated image")
+            "${${bytes_var}_length} hex characters read into ${bytes_var}; "
+            "refusing to scan a truncated image")
     endif()
-    string(FIND "${${bytes_var}}" "${marker}" _marker_position)
+    string(HEX "${marker}" _marker_hex)
+    string(FIND "${${bytes_var}}" "${_marker_hex}" _marker_position)
     if(_marker_position GREATER_EQUAL 0)
         set(${out_var} TRUE PARENT_SCOPE)
     else()
@@ -76,6 +62,23 @@ if(DEFINED PULP_CONTROL_MARKER_SELFTEST)
     _pulp_binary_contains(_pulp_selftest_strings "${PULP_CONTROL_MARKER_SELFTEST}"
         _pulp_selftest_found)
     message(STATUS "control shipping marker accepted: ${PULP_CONTROL_MARKER_SELFTEST}")
+    return()
+endif()
+
+# Binary-read regression hook. The fixture is deliberately allowed to contain
+# NUL bytes before the marker; this proves both complete reads and hex marker
+# matching on Windows CMake.
+if(DEFINED PULP_CONTROL_BINARY_SELFTEST_ARTIFACT AND
+   DEFINED PULP_CONTROL_BINARY_SELFTEST_MARKER)
+    _pulp_read_binary("${PULP_CONTROL_BINARY_SELFTEST_ARTIFACT}" _pulp_selftest_binary)
+    _pulp_binary_contains(_pulp_selftest_binary
+        "${PULP_CONTROL_BINARY_SELFTEST_MARKER}" _pulp_selftest_found)
+    if(NOT _pulp_selftest_found)
+        message(FATAL_ERROR
+            "control shipping binary selftest marker was not found: "
+            "${PULP_CONTROL_BINARY_SELFTEST_MARKER}")
+    endif()
+    message(STATUS "control shipping binary selftest passed")
     return()
 endif()
 
@@ -345,6 +348,27 @@ elseif(WIN32)
         list(APPEND _compiler_hints "${_compiler_dir}")
     endif()
     find_program(_pulp_dumpbin NAMES dumpbin.exe dumpbin HINTS ${_compiler_hints})
+    # dumpbin sits beside cl.exe, so the compiler hint finds it for MSVC. A
+    # clang-cl build outside a Developer Prompt has neither it nor dumpbin's
+    # directory on PATH (clang-cl lives in LLVM's bin), so ask the Visual Studio
+    # installer where the MSVC tools are.
+    if(NOT _pulp_dumpbin)
+        set(_pulp_vswhere "$ENV{ProgramFiles\(x86\)}/Microsoft Visual Studio/Installer/vswhere.exe")
+        if(EXISTS "${_pulp_vswhere}")
+            execute_process(COMMAND "${_pulp_vswhere}" -latest -products *
+                    -find "VC/Tools/MSVC/**/bin/Host*/*/dumpbin.exe"
+                RESULT_VARIABLE _vswhere_result OUTPUT_VARIABLE _vswhere_output
+                ERROR_QUIET)
+            if(_vswhere_result EQUAL 0)
+                string(REPLACE "\r" "" _vswhere_output "${_vswhere_output}")
+                string(REPLACE "\n" ";" _vswhere_found "${_vswhere_output}")
+                list(FILTER _vswhere_found INCLUDE REGEX "dumpbin\\.exe$")
+                if(_vswhere_found)
+                    list(GET _vswhere_found 0 _pulp_dumpbin)
+                endif()
+            endif()
+        endif()
+    endif()
     if(_pulp_dumpbin)
         execute_process(COMMAND "${_pulp_dumpbin}" /DEPENDENTS "${ARTIFACT}"
             RESULT_VARIABLE _dependency_result OUTPUT_VARIABLE _dependency_output

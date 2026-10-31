@@ -9,6 +9,7 @@
 // (PULP_TEST_HAS_PLATFORM_PLUGIN_VIEW_HOST, set from CMake). Apple has built-in
 // NSView/UIView hosts and a different capture contract, so it is excluded.
 
+#include <catch2/catch_message.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/view/drag_drop.hpp>
@@ -18,8 +19,8 @@
 #include <pulp/view/widgets.hpp>
 
 #if defined(PULP_TEST_HAS_X11)
-#include <X11/Xlib.h>
 #include <X11/Xatom.h>
+#include <X11/Xlib.h>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -32,8 +33,9 @@
 #if defined(_WIN32)
 // WIN32_LEAN_AND_MEAN + NOMINMAX guarded before <windows.h> (SendMessageW,
 // WM_SIZE, MAKELPARAM, GetClientRect).
-#include <pulp/platform/win32_sane.hpp>
 #include <cstdint>
+#include <pulp/platform/win32_sane.hpp>
+#include <utility>
 #include <vector>
 #endif
 
@@ -56,7 +58,7 @@ TEST_CASE("PluginViewHost::create returns a native host with headless capture",
 
     PluginViewHost::Options opts;
     opts.size = {64, 64};
-    opts.use_gpu = true;  // host falls back to raster capture if GPU/display absent
+    opts.use_gpu = true; // host falls back to raster capture if GPU/display absent
     auto host = PluginViewHost::create(root, opts);
     REQUIRE(host != nullptr);
 
@@ -69,7 +71,7 @@ TEST_CASE("PluginViewHost::create returns a native host with headless capture",
     auto png = host->capture_back_buffer_png();
     REQUIRE_FALSE(png.empty());
     REQUIRE(png.size() > 8);
-    REQUIRE(png[0] == 0x89);  // PNG magic
+    REQUIRE(png[0] == 0x89); // PNG magic
     REQUIRE(png[1] == 'P');
 }
 
@@ -111,18 +113,18 @@ namespace {
 // A DropReceiver that records the last accepted drop so the test can assert the
 // host routed the XDND payload through the dispatch core.
 class RecordingDropZone : public pulp::view::View, public pulp::view::DropReceiver {
-public:
+  public:
     bool accept_drop(const pulp::view::DropData& data, pulp::view::Point) override {
         last = data;
         drops += 1;
-        return true;  // consume
+        return true; // consume
     }
     pulp::view::DropData last;
     int drops = 0;
 };
 
-void send_client_message(Display* dpy, Window target, Window source, Atom type,
-                         long d0, long d1, long d2, long d3, long d4) {
+void send_client_message(Display* dpy, Window target, Window source, Atom type, long d0, long d1,
+                         long d2, long d3, long d4) {
     XEvent ev;
     std::memset(&ev, 0, sizeof(ev));
     ev.xclient.type = ClientMessage;
@@ -139,7 +141,7 @@ void send_client_message(Display* dpy, Window target, Window source, Atom type,
     XFlush(dpy);
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("X11 plugin host runs the XDND target handshake into dispatch_drop",
           "[view][plugin-view-host][xdnd][linux]") {
@@ -157,7 +159,7 @@ TEST_CASE("X11 plugin host runs the XDND target handshake into dispatch_drop",
     auto zone_owned = std::make_unique<RecordingDropZone>();
     RecordingDropZone* zone = zone_owned.get();
     zone->set_bounds({0, 0, 200, 150});
-    zone->flex().flex_grow = 1.0f;  // fill the root's column main axis after layout
+    zone->flex().flex_grow = 1.0f; // fill the root's column main axis after layout
     root.add_child(std::move(zone_owned));
 
     pulp::view::register_platform_plugin_view_host();
@@ -177,18 +179,24 @@ TEST_CASE("X11 plugin host runs the XDND target handshake into dispatch_drop",
     // Verify the host advertised XdndAware on the child window.
     Atom xa_aware = XInternAtom(src, "XdndAware", False);
     {
-        Atom actual = 0; int fmt = 0; unsigned long n = 0, after = 0;
+        Atom actual = 0;
+        int fmt = 0;
+        unsigned long n = 0, after = 0;
         unsigned char* prop = nullptr;
         // Poll briefly: the host sets the property on its own connection.
         int version = 0;
         for (int i = 0; i < 50 && version == 0; ++i) {
-            if (XGetWindowProperty(src, child, xa_aware, 0, 1, False, XA_ATOM,
-                                   &actual, &fmt, &n, &after, &prop) == Success &&
+            if (XGetWindowProperty(src, child, xa_aware, 0, 1, False, XA_ATOM, &actual, &fmt, &n,
+                                   &after, &prop) == Success &&
                 prop && n >= 1) {
                 version = static_cast<int>(reinterpret_cast<unsigned long*>(prop)[0]);
             }
-            if (prop) { XFree(prop); prop = nullptr; }
-            if (version == 0) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            if (prop) {
+                XFree(prop);
+                prop = nullptr;
+            }
+            if (version == 0)
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
         REQUIRE(version >= 5);
     }
@@ -208,11 +216,10 @@ TEST_CASE("X11 plugin host runs the XDND target handshake into dispatch_drop",
     REQUIRE(XGetSelectionOwner(src, xa_selection) == source);
 
     // XdndEnter: version 5 in the top byte of data.l[1], single inline type.
-    send_client_message(src, child, source, xa_enter,
-                        0, (5L << 24), static_cast<long>(xa_uri_list), 0, 0);
+    send_client_message(src, child, source, xa_enter, 0, (5L << 24), static_cast<long>(xa_uri_list),
+                        0, 0);
     // XdndPosition: pointer at root (40,30); packed (x<<16)|y in data.l[2].
-    send_client_message(src, child, source, xa_position,
-                        0, 0, (40L << 16) | 30L, CurrentTime,
+    send_client_message(src, child, source, xa_position, 0, 0, (40L << 16) | 30L, CurrentTime,
                         static_cast<long>(XInternAtom(src, "XdndActionCopy", False)));
 
     // Drive the host until it replies XdndStatus (accept) for the position.
@@ -221,19 +228,18 @@ TEST_CASE("X11 plugin host runs the XDND target handshake into dispatch_drop",
         for (int i = 0; i < rounds; ++i) {
             host->pump_x_events();
             while (XPending(src) > 0) {
-                XEvent ev; XNextEvent(src, &ev);
+                XEvent ev;
+                XNextEvent(src, &ev);
                 if (ev.type == ClientMessage && ev.xclient.message_type == xa_status &&
                     (ev.xclient.data.l[1] & 1)) {
                     got_status = true;
-                } else if (ev.type == ClientMessage &&
-                           ev.xclient.message_type == xa_finished) {
+                } else if (ev.type == ClientMessage && ev.xclient.message_type == xa_finished) {
                     // recorded below
                 } else if (ev.type == SelectionRequest) {
                     // Service the host's XConvertSelection: write the payload to
                     // the requested property, then notify.
                     XSelectionRequestEvent& rq = ev.xselectionrequest;
-                    XChangeProperty(src, rq.requestor, rq.property, rq.target, 8,
-                                    PropModeReplace,
+                    XChangeProperty(src, rq.requestor, rq.property, rq.target, 8, PropModeReplace,
                                     reinterpret_cast<const unsigned char*>(payload.data()),
                                     static_cast<int>(payload.size()));
                     XEvent note;
@@ -260,11 +266,11 @@ TEST_CASE("X11 plugin host runs the XDND target handshake into dispatch_drop",
     for (int i = 0; i < 60 && zone->drops == 0; ++i) {
         host->pump_x_events();
         while (XPending(src) > 0) {
-            XEvent ev; XNextEvent(src, &ev);
+            XEvent ev;
+            XNextEvent(src, &ev);
             if (ev.type == SelectionRequest) {
                 XSelectionRequestEvent& rq = ev.xselectionrequest;
-                XChangeProperty(src, rq.requestor, rq.property, rq.target, 8,
-                                PropModeReplace,
+                XChangeProperty(src, rq.requestor, rq.property, rq.target, 8, PropModeReplace,
                                 reinterpret_cast<const unsigned char*>(payload.data()),
                                 static_cast<int>(payload.size()));
                 XEvent note;
@@ -277,8 +283,7 @@ TEST_CASE("X11 plugin host runs the XDND target handshake into dispatch_drop",
                 note.xselection.time = rq.time;
                 XSendEvent(src, rq.requestor, False, NoEventMask, &note);
                 XFlush(src);
-            } else if (ev.type == ClientMessage &&
-                       ev.xclient.message_type == xa_finished) {
+            } else if (ev.type == ClientMessage && ev.xclient.message_type == xa_finished) {
                 got_finished = true;
             }
         }
@@ -288,7 +293,8 @@ TEST_CASE("X11 plugin host runs the XDND target handshake into dispatch_drop",
     for (int i = 0; i < 20 && !got_finished; ++i) {
         host->pump_x_events();
         while (XPending(src) > 0) {
-            XEvent ev; XNextEvent(src, &ev);
+            XEvent ev;
+            XNextEvent(src, &ev);
             if (ev.type == ClientMessage && ev.xclient.message_type == xa_finished)
                 got_finished = true;
         }
@@ -459,7 +465,7 @@ TEST_CASE("X11 plugin host ignores a stale echo of an earlier resize",
     XCloseDisplay(daw);
 }
 
-#endif  // PULP_TEST_HAS_X11
+#endif // PULP_TEST_HAS_X11
 
 #if defined(_WIN32)
 
@@ -483,7 +489,7 @@ TEST_CASE("Windows plugin host reconciles a WM_SIZE host resize",
     register_platform_plugin_view_host();
     PluginViewHost::Options opts;
     opts.size = {64, 64};
-    opts.use_gpu = true;  // may degrade to raster-only on a GPU-less runner
+    opts.use_gpu = true; // may degrade to raster-only on a GPU-less runner
     auto host = PluginViewHost::create(root, opts);
     REQUIRE(host != nullptr);
     REQUIRE(host->get_size().width == 64);
@@ -503,7 +509,9 @@ TEST_CASE("Windows plugin host reconciles a WM_SIZE host resize",
     uint32_t cb_w = 0, cb_h = 0;
     int cb_count = 0;
     host->set_resize_callback([&](uint32_t w, uint32_t h) {
-        cb_w = w; cb_h = h; ++cb_count;
+        cb_w = w;
+        cb_h = h;
+        ++cb_count;
     });
 
     const float scale = host->scale_factor();
@@ -515,15 +523,12 @@ TEST_CASE("Windows plugin host reconciles a WM_SIZE host resize",
     // 200% DPI runners alike.
     const uint32_t target_logical_w = 200;
     const uint32_t target_logical_h = 150;
-    const auto phys_w =
-        static_cast<uint32_t>(target_logical_w * scale + 0.5f);
-    const auto phys_h =
-        static_cast<uint32_t>(target_logical_h * scale + 0.5f);
+    const auto phys_w = static_cast<uint32_t>(target_logical_w * scale + 0.5f);
+    const auto phys_h = static_cast<uint32_t>(target_logical_h * scale + 0.5f);
 
     // SIZE_RESTORED (0) is a normal (non-minimize) resize; lParam packs width in
     // the low word and height in the high word.
-    SendMessageW(hwnd, WM_SIZE, SIZE_RESTORED,
-                 static_cast<LPARAM>(MAKELPARAM(phys_w, phys_h)));
+    SendMessageW(hwnd, WM_SIZE, SIZE_RESTORED, static_cast<LPARAM>(MAKELPARAM(phys_w, phys_h)));
 
     auto sz = host->get_size();
     CHECK(sz.width == target_logical_w);
@@ -533,8 +538,7 @@ TEST_CASE("Windows plugin host reconciles a WM_SIZE host resize",
     CHECK(cb_h == sz.height);
 
     // A redundant WM_SIZE at the SAME size is a no-op (no second callback).
-    SendMessageW(hwnd, WM_SIZE, SIZE_RESTORED,
-                 static_cast<LPARAM>(MAKELPARAM(phys_w, phys_h)));
+    SendMessageW(hwnd, WM_SIZE, SIZE_RESTORED, static_cast<LPARAM>(MAKELPARAM(phys_w, phys_h)));
     CHECK(cb_count == 1);
 
     // A minimize (SIZE_MINIMIZED / 0x0 client) is ignored, size unchanged.
@@ -619,6 +623,241 @@ TEST_CASE("Windows plugin host frames a fractional-DPI client at its exact pixel
     CHECK(h == 751);
 }
 
+// A resize callback can resize the editor again: here the callback's own
+// WM_SIZE arrives while it runs, on an unattached editor that delivers at
+// once. The second size is delivered after the first callback returns, never
+// from inside it.
+TEST_CASE("Windows plugin host does not re-enter its resize callback",
+          "[view][plugin-view-host][resize][windows]") {
+    View root;
+    root.set_theme(Theme::dark());
+    register_platform_plugin_view_host();
+    PluginViewHost::Options opts;
+    opts.size = {64, 64};
+    opts.use_gpu = true; // may degrade to raster-only on a GPU-less runner
+    auto host = PluginViewHost::create(root, opts);
+    REQUIRE(host != nullptr);
+    auto hwnd = static_cast<HWND>(host->native_handle());
+    REQUIRE(hwnd != nullptr);
+    const float scale = host->scale_factor();
+    const auto send_logical = [&](uint32_t w, uint32_t h) {
+        const auto pw = static_cast<uint32_t>(w * scale + 0.5f);
+        const auto ph = static_cast<uint32_t>(h * scale + 0.5f);
+        SendMessageW(hwnd, WM_SIZE, SIZE_RESTORED, static_cast<LPARAM>(MAKELPARAM(pw, ph)));
+    };
+
+    std::vector<std::pair<uint32_t, uint32_t>> notified;
+    int depth = 0, max_depth = 0;
+    host->set_resize_callback([&](uint32_t w, uint32_t h) {
+        ++depth;
+        max_depth = depth > max_depth ? depth : max_depth;
+        notified.emplace_back(w, h);
+        if (notified.size() == 1)
+            send_logical(180, 120);
+        --depth;
+    });
+    send_logical(200, 150);
+    CHECK(max_depth == 1);
+    REQUIRE(notified.size() == 2);
+    CHECK(notified[0] == std::make_pair(200u, 150u));
+    CHECK(notified[1] == std::make_pair(180u, 120u));
+    CHECK(host->get_size().width == 180);
+}
+
+// A DAW drag resizes the attached editor once per mouse move. The processor
+// hears about it once per frame, from the frame timer, with the last size.
+TEST_CASE("Windows attached editor notifies a WM_SIZE flood once per frame",
+          "[view][plugin-view-host][resize][windows]") {
+    struct ParentWindow {
+        HWND hwnd =
+            CreateWindowExW(0, L"STATIC", L"Pulp resize coalescing", WS_OVERLAPPEDWINDOW, 0, 0, 512,
+                            512, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+        ~ParentWindow() {
+            if (hwnd)
+                DestroyWindow(hwnd);
+        }
+    } parent;
+    REQUIRE(parent.hwnd != nullptr);
+
+    View root;
+    root.set_theme(Theme::dark());
+    register_platform_plugin_view_host();
+    PluginViewHost::Options opts;
+    opts.size = {64, 64};
+    opts.use_gpu = true; // may degrade to raster-only on a GPU-less runner
+    auto host = PluginViewHost::create(root, opts);
+    REQUIRE(host != nullptr);
+    host->attach_to_parent(parent.hwnd);
+    REQUIRE(host->is_attached());
+
+    const auto child = static_cast<HWND>(host->native_handle());
+    REQUIRE(child != nullptr);
+    const auto dispatch_frame_timer = [&] {
+        const auto deadline = GetTickCount64() + 1000;
+        MSG msg{};
+        while (GetTickCount64() < deadline) {
+            if (PeekMessageW(&msg, child, WM_TIMER, WM_TIMER, PM_REMOVE)) {
+                DispatchMessageW(&msg);
+                return true;
+            }
+            Sleep(1);
+        }
+        return false;
+    };
+
+    std::vector<std::pair<uint32_t, uint32_t>> notified;
+    host->set_resize_callback([&](uint32_t w, uint32_t h) { notified.emplace_back(w, h); });
+    const float scale = host->scale_factor();
+    REQUIRE(scale > 0.0f);
+    const auto send_logical = [&](uint32_t w, uint32_t h) {
+        const auto pw = static_cast<uint32_t>(w * scale + 0.5f);
+        const auto ph = static_cast<uint32_t>(h * scale + 0.5f);
+        SendMessageW(child, WM_SIZE, SIZE_RESTORED, static_cast<LPARAM>(MAKELPARAM(pw, ph)));
+    };
+
+    for (uint32_t i = 1; i <= 60; ++i)
+        send_logical(100 + i, 80);
+    CHECK(notified.empty());
+    REQUIRE(dispatch_frame_timer());
+    REQUIRE(notified.size() == 1);
+    CHECK(notified.back() == std::make_pair(160u, 80u));
+    CHECK(host->get_size().width == 160);
+
+    // A frame with no resize notifies nothing.
+    host->repaint();
+    REQUIRE(dispatch_frame_timer());
+    CHECK(notified.size() == 1);
+    host->detach();
+}
+
+TEST_CASE("Windows attached editor requires detach before changing parent",
+          "[view][plugin-view-host][repaint][windows]") {
+    struct TimerFailureSeamReset {
+        ~TimerFailureSeamReset() {
+            SetEnvironmentVariableW(L"PULP_TEST_FORCE_WIN_FRAME_TIMER_FAILURE", nullptr);
+        }
+    } reset_seam;
+    REQUIRE(SetEnvironmentVariableW(L"PULP_TEST_FORCE_WIN_FRAME_TIMER_FAILURE", nullptr));
+    struct ParentWindow {
+        HWND hwnd =
+            CreateWindowExW(0, L"STATIC", L"Pulp repeated attachment", WS_OVERLAPPEDWINDOW, 0, 0,
+                            128, 128, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+        ~ParentWindow() {
+            if (hwnd)
+                DestroyWindow(hwnd);
+        }
+    } first_parent, second_parent;
+    REQUIRE(first_parent.hwnd != nullptr);
+    REQUIRE(second_parent.hwnd != nullptr);
+    ShowWindow(first_parent.hwnd, SW_SHOWNOACTIVATE);
+    ShowWindow(second_parent.hwnd, SW_SHOWNOACTIVATE);
+
+    View root;
+    root.set_bounds({0, 0, 64, 64});
+    root.set_theme(Theme::dark());
+    register_platform_plugin_view_host();
+    PluginViewHost::Options opts;
+    opts.size = {64, 64};
+    opts.use_gpu = true;
+    auto host = PluginViewHost::create(root, opts);
+    REQUIRE(host != nullptr);
+    const HWND child = static_cast<HWND>(host->native_handle());
+    REQUIRE(child != nullptr);
+    REQUIRE(host->try_attach_to_parent(first_parent.hwnd));
+    REQUIRE(IsWindowVisible(child));
+    const auto original_style = GetWindowLongPtrW(child, GWL_STYLE);
+    const auto original_surface = host->gpu_surface_status();
+    const bool had_gpu = host->is_gpu_backed();
+    if (had_gpu) {
+        REQUIRE(original_surface.state == PluginViewHost::GpuSurfaceState::ready);
+        REQUIRE(original_surface.surface != nullptr);
+    } else {
+        SKIP("Dawn GPU unavailable: repeated-attachment GPU lifetime checks unavailable");
+    }
+    int surface_notifications = 0;
+    auto subscription = host->observe_gpu_surface(
+        [&](const PluginViewHost::GpuSurfaceStatus&) { ++surface_notifications; });
+    REQUIRE(surface_notifications == 1);
+    REQUIRE(root.frame_clock() != nullptr);
+    root.set_continuous_repaint(true);
+    REQUIRE(ValidateRect(child, nullptr));
+    MSG frame_timer{};
+    while (PeekMessageW(&frame_timer, child, WM_TIMER, WM_TIMER, PM_REMOVE)) {
+    }
+    const auto frames_before_repeat = root.frame_clock()->frame();
+
+    const auto check_preserved_attachment = [&] {
+        CHECK(host->is_attached());
+        CHECK(GetParent(child) == first_parent.hwnd);
+        CHECK(GetWindowLongPtrW(child, GWL_STYLE) == original_style);
+        CHECK(IsWindowVisible(child));
+        CHECK_FALSE(GetUpdateRect(child, nullptr, FALSE));
+        CHECK(root.frame_clock()->frame() == frames_before_repeat);
+        CHECK(host->gpu_surface_status().state == original_surface.state);
+        CHECK(host->gpu_surface_status().surface == original_surface.surface);
+        CHECK(surface_notifications == 1);
+    };
+    for (int force_timer_failure = 0; force_timer_failure != 2; ++force_timer_failure) {
+        INFO("new timer installation forced to fail: " << force_timer_failure);
+        REQUIRE(SetEnvironmentVariableW(L"PULP_TEST_FORCE_WIN_FRAME_TIMER_FAILURE",
+                                        force_timer_failure ? L"1" : nullptr));
+        REQUIRE(host->try_attach_to_parent(first_parent.hwnd));
+        check_preserved_attachment();
+        host->attach_to_parent(first_parent.hwnd);
+        check_preserved_attachment();
+        REQUIRE_FALSE(host->try_attach_to_parent(second_parent.hwnd));
+        check_preserved_attachment();
+        host->attach_to_parent(second_parent.hwnd);
+        check_preserved_attachment();
+        REQUIRE_FALSE(host->try_attach_to_parent(nullptr));
+        check_preserved_attachment();
+    }
+
+    // New timer installation is still refused. Delivery after draining the
+    // queue proves that the existing attachment kept its installed timer.
+    bool timer_received = false;
+    const auto timer_deadline = GetTickCount64() + 2000;
+    while (!timer_received && GetTickCount64() < timer_deadline) {
+        if (PeekMessageW(&frame_timer, child, WM_TIMER, WM_TIMER, PM_REMOVE) &&
+            frame_timer.wParam == 1) {
+            timer_received = true;
+            DispatchMessageW(&frame_timer);
+        } else {
+            MsgWaitForMultipleObjectsEx(0, nullptr, 20, QS_TIMER, MWMO_INPUTAVAILABLE);
+        }
+    }
+    REQUIRE(timer_received);
+    CHECK(root.frame_clock()->frame() == frames_before_repeat + 1);
+
+    host->detach();
+    REQUIRE_FALSE(host->is_attached());
+    CHECK(GetParent(child) == nullptr);
+    if (had_gpu) {
+        CHECK(host->gpu_surface_state() == PluginViewHost::GpuSurfaceState::pending);
+        CHECK(host->gpu_surface() == nullptr);
+        CHECK(surface_notifications == 2);
+    }
+    // Once detached, a fresh attachment must install a new timer and may fail.
+    REQUIRE_FALSE(host->try_attach_to_parent(second_parent.hwnd));
+    CHECK_FALSE(host->is_attached());
+    CHECK(GetParent(child) == nullptr);
+    REQUIRE(SetEnvironmentVariableW(L"PULP_TEST_FORCE_WIN_FRAME_TIMER_FAILURE", nullptr));
+    REQUIRE(host->try_attach_to_parent(second_parent.hwnd));
+    CHECK(GetParent(child) == second_parent.hwnd);
+    CHECK(IsWindowVisible(child));
+    if (had_gpu) {
+        CHECK(host->is_gpu_backed());
+        CHECK(host->gpu_surface_state() == PluginViewHost::GpuSurfaceState::ready);
+        CHECK(host->gpu_surface() != nullptr);
+        CHECK(surface_notifications == 3);
+    }
+    host->detach();
+}
+
+// The real HWND/Dawn host must not recurse when scripted idle work requests a
+// repaint during a frame. An attached repaint is consumed by WM_TIMER; the
+// nested request survives for the next timer tick. This uses the production
+// host and a real GPU surface, rather than a fake invalidation counter.
 TEST_CASE("Windows attached GPU editor coalesces scripted repaint requests",
           "[view][plugin-view-host][repaint][windows][gpu]") {
     struct ParentWindow {
@@ -694,11 +933,11 @@ TEST_CASE("Windows attached GPU editor coalesces scripted repaint requests",
     host->detach();
 }
 
-TEST_CASE("Windows attached GPU editor rolls back when its frame timer fails",
-          "[view][plugin-view-host][repaint][windows][timer]") {
+TEST_CASE("Windows attached GPU editor retries a forced frame failure",
+          "[view][plugin-view-host][repaint][windows][frame]") {
     struct ParentWindow {
         HWND hwnd =
-            CreateWindowExW(0, L"STATIC", L"Pulp timer failure regression", WS_OVERLAPPEDWINDOW, 0,
+            CreateWindowExW(0, L"STATIC", L"Pulp frame failure regression", WS_OVERLAPPEDWINDOW, 0,
                             0, 128, 128, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
         ~ParentWindow() {
             if (hwnd)
@@ -714,16 +953,31 @@ TEST_CASE("Windows attached GPU editor rolls back when its frame timer fails",
     PluginViewHost::Options opts;
     opts.size = {64, 64};
     opts.use_gpu = true;
+    _putenv_s("PULP_TEST_FORCE_WIN_FRAME_FAILURE", "1");
     auto host = PluginViewHost::create(root, opts);
     REQUIRE(host != nullptr);
 
-    _putenv_s("PULP_TEST_FORCE_WIN_FRAME_TIMER_FAILURE", "1");
+    auto host_window = static_cast<HWND>(host->native_handle());
     host->attach_to_parent(parent.hwnd);
-    _putenv_s("PULP_TEST_FORCE_WIN_FRAME_TIMER_FAILURE", "");
+    REQUIRE(host->is_attached());
+    REQUIRE(GetParent(host_window) == parent.hwnd);
+    host->repaint();
+    MSG msg{};
+    REQUIRE(PeekMessageW(&msg, host_window, WM_TIMER, WM_TIMER, PM_REMOVE));
+    DispatchMessageW(&msg);
+    CHECK(host->is_attached());
+    CHECK(root.frame_clock()->frame() > 0);
 
-    CHECK_FALSE(host->is_attached());
-    CHECK(GetParent(static_cast<HWND>(host->native_handle())) == nullptr);
+    // The failed frame preserved its dirty state; clearing the production hook
+    // lets the next timer tick render the pending frame successfully.
+    _putenv_s("PULP_TEST_FORCE_WIN_FRAME_FAILURE", "");
+    host->repaint();
+    REQUIRE(PeekMessageW(&msg, host_window, WM_TIMER, WM_TIMER, PM_REMOVE));
+    DispatchMessageW(&msg);
+    auto png = host->capture_back_buffer_png();
+    REQUIRE_FALSE(png.empty());
+    _putenv_s("PULP_TEST_FORCE_WIN_FRAME_FAILURE", "");
     host->detach();
 }
 
-#endif  // _WIN32
+#endif // _WIN32

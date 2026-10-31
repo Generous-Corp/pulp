@@ -7,10 +7,91 @@
 #include <atomic>
 #include <complex>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
+#include <span>
 #include <vector>
 
 namespace pulp::signal {
+
+/// A fixed number of equal-length spectra in one contiguous, 64-byte-aligned
+/// block, each starting on a 64-byte boundary.
+///
+/// The partitioned convolver keeps its IR partition spectra and its input
+/// history in these. One block per set keeps the per-block multiply-accumulate
+/// walking a compact address range: separately allocated spectra, or spectra
+/// padded to the full FFT width, spread the same data over twice the memory,
+/// which costs most when several convolvers run side by side.
+///
+/// `operator[]` returns a span of `bins()` values. Allocation happens only in
+/// the sizing constructor and `assign()`; everything else is allocation-free.
+template <typename SampleType = float> class ConvolverSpectrumArenaT {
+  public:
+    using value_type = std::complex<SampleType>;
+
+    /// Distance between consecutive spectra in `value_type`s: `bins` rounded
+    /// up to a whole number of 64-byte lines.
+    static constexpr std::size_t stride_for(std::size_t bins) noexcept {
+        constexpr std::size_t per_line = 64 / sizeof(value_type);
+        return (bins + per_line - 1) / per_line * per_line;
+    }
+
+    ConvolverSpectrumArenaT() = default;
+    ConvolverSpectrumArenaT(std::size_t count, std::size_t bins) {
+        assign(count, bins);
+    }
+
+    // The alignment offset is relative to the storage address, which a copy
+    // would change; a move keeps the buffer, so moving is safe.
+    ConvolverSpectrumArenaT(const ConvolverSpectrumArenaT&) = delete;
+    ConvolverSpectrumArenaT& operator=(const ConvolverSpectrumArenaT&) = delete;
+    ConvolverSpectrumArenaT(ConvolverSpectrumArenaT&&) noexcept = default;
+    ConvolverSpectrumArenaT& operator=(ConvolverSpectrumArenaT&&) noexcept = default;
+
+    /// Allocate `count` zeroed spectra of `bins` values each.
+    void assign(std::size_t count, std::size_t bins) {
+        constexpr std::size_t per_line = 64 / sizeof(value_type);
+        count_ = count;
+        bins_ = bins;
+        stride_ = stride_for(bins);
+        storage_.assign(count_ * stride_ + per_line, value_type{});
+        const auto address = reinterpret_cast<std::uintptr_t>(storage_.data());
+        offset_ = ((64u - address % 64u) % 64u) / sizeof(value_type);
+    }
+
+    std::size_t size() const noexcept {
+        return count_;
+    }
+    bool empty() const noexcept {
+        return count_ == 0;
+    }
+    std::size_t bins() const noexcept {
+        return bins_;
+    }
+    std::size_t stride() const noexcept {
+        return stride_;
+    }
+    /// Bytes this arena holds, including its alignment slack.
+    std::size_t footprint_bytes() const noexcept {
+        return storage_.size() * sizeof(value_type);
+    }
+
+    std::span<value_type> operator[](std::size_t i) noexcept {
+        return {storage_.data() + offset_ + i * stride_, bins_};
+    }
+    std::span<const value_type> operator[](std::size_t i) const noexcept {
+        return {storage_.data() + offset_ + i * stride_, bins_};
+    }
+
+    /// Zero every spectrum. Allocation-free.
+    void fill_zero() noexcept {
+        std::fill(storage_.begin(), storage_.end(), value_type{});
+    }
+
+  private:
+    std::vector<value_type> storage_;
+    std::size_t offset_ = 0, count_ = 0, bins_ = 0, stride_ = 0;
+};
 
 /// The convolver's input-side overlap-save history.
 ///
@@ -36,9 +117,9 @@ struct ConvolverInputHistoryT {
     int block_size = 0;
     int fft_size = 0;
 
-    /// Ring of forward FFTs of recent input blocks. Only bins DC..Nyquist
-    /// (`fft_size / 2 + 1`) are written and read; the rest of each slot is
-    /// spare.
+    /// Ring of forward FFTs of recent input blocks. Each slot holds the
+    /// `fft_size / 2 + 1` bins DC..Nyquist, the only ones written and read:
+    /// the input is real, so the upper half of its spectrum is redundant.
     ///
     /// `write_pos` is advanced once per processed block, after every IR has
     /// rendered, so it means two different things depending on when you look —
@@ -48,7 +129,7 @@ struct ConvolverInputHistoryT {
     ///     and partition `p` of an IR reads age `p`;
     ///   - BETWEEN blocks (where a swap happens), it is the slot the NEXT block
     ///     will occupy, so the most recently written block is at `write_pos - 1`.
-    std::vector<std::vector<std::complex<SampleType>>> spectra;
+    ConvolverSpectrumArenaT<SampleType> spectra;
     /// Overlap-save window: `fft_size` complex slots whose leading `fft_size`
     /// scalars hold the real window, previous block first, then the current
     /// one. Zero-filled is a valid cold start.
@@ -76,7 +157,9 @@ using ConvolverInputHistory64 = ConvolverInputHistoryT<double>;
 /// A state built by hand rather than by `build_convolver_ir_state` must still
 /// populate `history` (with `spectra.size() >= num_partitions` and `overlap`
 /// sized to `fft_size`), or the convolver cannot guarantee a ring long enough
-/// for it and falls back to passing audio through unconvolved.
+/// for it and falls back to passing audio through unconvolved. Both
+/// `ir_spectra` and the history's `spectra` hold `fft_size / 2 + 1` bins per
+/// spectrum.
 ///
 /// Owned by `ConvolverIrSwapper` until claimed by the audio thread.
 template <typename SampleType = float>
@@ -86,7 +169,9 @@ struct ConvolverIrStateT {
     std::size_t num_partitions = 0;
 
     std::unique_ptr<FftT<SampleType>> fft;
-    std::vector<std::vector<std::complex<SampleType>>> ir_spectra;
+    /// One spectrum per partition, `fft_size / 2 + 1` bins (DC..Nyquist).
+    /// Storing only these keeps the MAC's working set to the bins it reads.
+    ConvolverSpectrumArenaT<SampleType> ir_spectra;
     std::vector<std::complex<SampleType>> accum;
     std::unique_ptr<ConvolverInputHistoryT<SampleType>> history;
 };
@@ -125,7 +210,8 @@ build_convolver_ir_state(const SampleType* ir,
     state->fft = std::make_unique<FftT<SampleType>>(state->fft_size);
     state->num_partitions = (ir_length + block_size - 1) / block_size;
 
-    state->ir_spectra.resize(state->num_partitions);
+    const auto bins = static_cast<std::size_t>(state->fft_size / 2 + 1);
+    state->ir_spectra.assign(state->num_partitions, bins);
     std::vector<std::complex<SampleType>> padded(
         state->fft_size, {SampleType{0.0f}, SampleType{0.0f}});
 
@@ -138,8 +224,8 @@ build_convolver_ir_state(const SampleType* ir,
         for (std::size_t i = 0; i < count; ++i)
             padded[i] = {ir[offset + i], SampleType{0.0f}};
 
-        state->ir_spectra[p].assign(padded.begin(), padded.end());
-        state->fft->forward(state->ir_spectra[p].data());
+        state->fft->forward(padded.data());
+        std::copy_n(padded.begin(), bins, state->ir_spectra[p].begin());
     }
 
     state->accum.assign(state->fft_size,
@@ -148,10 +234,7 @@ build_convolver_ir_state(const SampleType* ir,
     state->history->block_size = state->block_size;
     state->history->fft_size = state->fft_size;
     state->history->overlap.assign(state->fft_size, {0.0f, 0.0f});
-    state->history->spectra.assign(
-        state->num_partitions,
-        std::vector<std::complex<SampleType>>(
-            state->fft_size, {SampleType{0.0f}, SampleType{0.0f}}));
+    state->history->spectra.assign(state->num_partitions, bins);
 
     return state;
 }
@@ -163,10 +246,11 @@ build_convolver_ir_state(const SampleType* ir,
 /// everything the old ring recorded has to be carried across or the input
 /// stream restarts from silence.
 ///
-/// Buffers are SWAPPED, never copied — O(capacity) pointer swaps, no allocation
-/// and no per-sample work, so this is safe on the audio thread even for a long
-/// (many-partition) IR. `from` is left holding `to`'s old zero buffers, which is
-/// harmless: the caller hands `from` off to be freed off the audio thread.
+/// The carried spectra are copied from one arena into the other: no allocation,
+/// and work bounded by the carried ring length times `fft_size / 2 + 1` bins
+/// (about 0.8 MB for a 96000-tap IR at 64-sample blocks), so this is safe on the
+/// audio thread. `from` keeps its own copy, which is harmless: the caller hands
+/// `from` off to be freed off the audio thread.
 ///
 /// `from.write_pos` is the slot the next block would be written to, so the
 /// most-recent (age 0) block is at `from.write_pos - 1`. History is laid out in
@@ -186,12 +270,14 @@ inline void migrate_input_history(ConvolverInputHistoryT<SampleType>& from,
     const std::size_t new_capacity = to.spectra.size();
     if (old_capacity == 0 || new_capacity == 0) return;
     const std::size_t carried = std::min(old_capacity, new_capacity);
-    // Each `a` maps to a distinct slot in each of two distinct rings, so a swap
-    // never aliases a slot a later iteration reads.
+    // Both rings share the FFT size, so their spectra have the same length.
+    // Each `a` maps to a distinct slot in each of two distinct rings, so a copy
+    // never overwrites a slot a later iteration reads.
     for (std::size_t a = 0; a < carried; ++a) {
         const std::size_t oldi = (from.write_pos + old_capacity - 1 - a) % old_capacity;
         const std::size_t newi = (new_capacity - 1 - a) % new_capacity;
-        to.spectra[newi].swap(from.spectra[oldi]);
+        const auto source = from.spectra[oldi];
+        std::copy(source.begin(), source.end(), to.spectra[newi].begin());
     }
     // The overlap buffer's lower half holds the previous block's samples (the
     // overlap the next block's FFT needs); it is IR-independent, so carry it too.

@@ -804,87 +804,6 @@
       ],
       "nodes": [
         {
-          "factory": "make_delay_vibrato_node",
-          "baked_params": [
-            {
-              "id": "kRateHz",
-              "min": "floor_hz",
-              "max": "static_cast<float>(Engine::kMaxRateHz)",
-              "default": "std::max(floor_hz, static_cast<float>(Engine::kDefaultRateHz))"
-            },
-            {
-              "id": "kDepthCents",
-              "min": "0.0f",
-              "max": "static_cast<float>(Engine::kMaxDepthCents)",
-              "default": "static_cast<float>(Engine::kDefaultDepthCents)"
-            },
-            {
-              "id": "kDelayMs",
-              "min": "0.0f",
-              "max": "static_cast<float>(Engine::kMaxLifecycleMs)",
-              "default": "0.0f"
-            },
-            {
-              "id": "kFadeInMs",
-              "min": "0.0f",
-              "max": "static_cast<float>(Engine::kMaxLifecycleMs)",
-              "default": "0.0f"
-            }
-          ]
-        },
-        {
-          "factory": "make_phase_vibrato_node",
-          "baked_params": [
-            {
-              "id": "kRateHz",
-              "min": "static_cast<float>(Engine::kMinRateHz)",
-              "max": "static_cast<float>(Engine::kMaxRateHz)",
-              "default": "static_cast<float>(Engine::kDefaultRateHz)"
-            },
-            {
-              "id": "kDepth",
-              "min": "0.0f",
-              "max": "100.0f",
-              "default": "static_cast<float>(Engine::kDefaultDepth * 100.0)"
-            },
-            {
-              "id": "kCenterHz",
-              "min": "static_cast<float>(Engine::kMinCenterHz)",
-              "max": "static_cast<float>(Engine::kMaxCenterHz)",
-              "default": "static_cast<float>(Engine::kDefaultCenterHz)"
-            },
-            {
-              "id": "kMix",
-              "min": "0.0f",
-              "max": "100.0f",
-              "default": "static_cast<float>(Engine::kDefaultMix * 100.0)"
-            }
-          ]
-        },
-        {
-          "factory": "make_univibe_node",
-          "baked_params": [
-            {
-              "id": "kRateHz",
-              "min": "static_cast<float>(Engine::kMinRateHz)",
-              "max": "static_cast<float>(Engine::kMaxRateHz)",
-              "default": "static_cast<float>(Engine::kDefaultRateHz)"
-            },
-            {
-              "id": "kDepth",
-              "min": "0.0f",
-              "max": "100.0f",
-              "default": "static_cast<float>(Engine::kDefaultDepth * 100.0)"
-            },
-            {
-              "id": "kMode",
-              "min": "kModeVibrato",
-              "max": "kModeChorus",
-              "default": "kModeVibrato"
-            }
-          ]
-        },
-        {
           "factory": "make_frequency_shifter_node",
           "baked_params": [
             {
@@ -1004,6 +923,87 @@
               "min": "kWaveSine",
               "max": "kWaveSmoothRandom",
               "default": "kWaveTriangle"
+            }
+          ]
+        },
+        {
+          "factory": "make_delay_vibrato_node",
+          "baked_params": [
+            {
+              "id": "kRateHz",
+              "min": "floor_hz",
+              "max": "static_cast<float>(Engine::kMaxRateHz)",
+              "default": "std::max(floor_hz, static_cast<float>(Engine::kDefaultRateHz))"
+            },
+            {
+              "id": "kDepthCents",
+              "min": "0.0f",
+              "max": "static_cast<float>(Engine::kMaxDepthCents)",
+              "default": "static_cast<float>(Engine::kDefaultDepthCents)"
+            },
+            {
+              "id": "kDelayMs",
+              "min": "0.0f",
+              "max": "static_cast<float>(Engine::kMaxLifecycleMs)",
+              "default": "0.0f"
+            },
+            {
+              "id": "kFadeInMs",
+              "min": "0.0f",
+              "max": "static_cast<float>(Engine::kMaxLifecycleMs)",
+              "default": "0.0f"
+            }
+          ]
+        },
+        {
+          "factory": "make_phase_vibrato_node",
+          "baked_params": [
+            {
+              "id": "kRateHz",
+              "min": "static_cast<float>(Engine::kMinRateHz)",
+              "max": "static_cast<float>(Engine::kMaxRateHz)",
+              "default": "static_cast<float>(Engine::kDefaultRateHz)"
+            },
+            {
+              "id": "kDepth",
+              "min": "0.0f",
+              "max": "100.0f",
+              "default": "static_cast<float>(Engine::kDefaultDepth * 100.0)"
+            },
+            {
+              "id": "kCenterHz",
+              "min": "static_cast<float>(Engine::kMinCenterHz)",
+              "max": "static_cast<float>(Engine::kMaxCenterHz)",
+              "default": "static_cast<float>(Engine::kDefaultCenterHz)"
+            },
+            {
+              "id": "kMix",
+              "min": "0.0f",
+              "max": "100.0f",
+              "default": "static_cast<float>(Engine::kDefaultMix * 100.0)"
+            }
+          ]
+        },
+        {
+          "factory": "make_univibe_node",
+          "baked_params": [
+            {
+              "id": "kRateHz",
+              "min": "static_cast<float>(Engine::kMinRateHz)",
+              "max": "static_cast<float>(Engine::kMaxRateHz)",
+              "default": "static_cast<float>(Engine::kDefaultRateHz)"
+            },
+            {
+              "id": "kDepth",
+              "min": "0.0f",
+              "max": "100.0f",
+              "default": "static_cast<float>(Engine::kDefaultDepth * 100.0)"
+            },
+            {
+              "id": "kMode",
+              "min": "kModeVibrato",
+              "max": "kModeChorus",
+              "default": "kModeVibrato"
             }
           ]
         }

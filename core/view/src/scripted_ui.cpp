@@ -129,6 +129,7 @@ ScriptedUiSession::ScriptedUiSession(View& root, state::StateStore& store,
       storage_identity_(std::move(options.storage_identity)),
       asset_roots_(std::move(options.asset_roots)),
       granted_capabilities_(options.granted_capabilities),
+      allow_unreviewed_file_paths_(options.allow_unreviewed_file_paths),
       hot_reload_enabled_(options.enable_hot_reload),
       theme_reload_enabled_(options.enable_theme_reload),
       runtime_import_enabled_(options.enable_runtime_import),
@@ -795,6 +796,7 @@ bool ScriptedUiSession::rebuild_from_code(
                 probe_bridge->install_runtime_import_handlers();
             probe_bridge->set_asset_roots(asset_roots_);
             probe_bridge->set_script_base_dir(source_path.parent_path());
+            probe_bridge->set_allow_unreviewed_file_paths(allow_unreviewed_file_paths_);
             probe_bridge->set_embedded_assets(embedded_assets_);
             probe_bridge->set_storage_identity(storage_identity_);
             probe_bridge->set_host_kind(host_kind_);
@@ -865,6 +867,7 @@ bool ScriptedUiSession::rebuild_from_code(
         next_bridge->set_value_channel_access(value_channel_access_);
         next_bridge->set_asset_roots(asset_roots_);
         next_bridge->set_script_base_dir(source_path.parent_path());
+        next_bridge->set_allow_unreviewed_file_paths(allow_unreviewed_file_paths_);
         next_bridge->set_embedded_assets(embedded_assets_);
         next_bridge->set_storage_identity(storage_identity_);
         next_bridge->set_host_kind(host_kind_);

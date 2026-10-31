@@ -533,6 +533,24 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
                 self.assertTrue(sibling_members.isdisjoint(sdk_before))
                 self.assertTrue(sibling_members <= sdk_at_floor)
 
+    def test_illustrator_helper_is_version_floored(self) -> None:
+        member = "import-design/illustrator_to_svg.py"
+        sdk_member = "pulp-sdk/bin/" + member
+        for platform in ("darwin-arm64", "linux-x64", "windows-x64"):
+            with self.subTest(platform=platform):
+                before = rac.cli_members(platform, rac.DEFAULT_MATRIX, "1.11.9")
+                at_floor = rac.cli_members(platform, rac.DEFAULT_MATRIX, "1.12.0")
+                sdk_before = rac.required_sdk_members(
+                    platform, rac.DEFAULT_MATRIX, "1.11.9"
+                )
+                sdk_at_floor = rac.required_sdk_members(
+                    platform, rac.DEFAULT_MATRIX, "1.12.0"
+                )
+                self.assertNotIn(member, before)
+                self.assertIn(member, at_floor)
+                self.assertNotIn(sdk_member, sdk_before)
+                self.assertIn(sdk_member, sdk_at_floor)
+
     def test_materialized_runtime_siblings_are_installed_into_sdk(self) -> None:
         cmake = (
             ROOT / "tools" / "import-design" / "CMakeLists.txt"
@@ -818,7 +836,7 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
         }
         self.assertEqual(
             rac.DEFAULT_MATRIX.common_cli_members,
-            runtime_members | materialized_members,
+            runtime_members | materialized_members | {"import-design/illustrator_to_svg.py"},
             "browser-capture runtime manifest and materialized contract matrix drifted",
         )
         self.assertEqual(
@@ -831,6 +849,7 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
                 for member in runtime_members
             }
             | {"pulp-sdk/bin/" + member for member in materialized_members}
+            | {"pulp-sdk/bin/import-design/illustrator_to_svg.py"}
             | {
                 "pulp-sdk/bin/" + sibling
                 for sibling in rac.MATERIALIZED_RUNTIME_SIBLING_CLI_MEMBERS
@@ -1000,7 +1019,10 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
                 "libwgpu_native.dylib",
                 *(
                     rac.DEFAULT_MATRIX.common_cli_members
-                    - {rac.MATERIALIZED_BINDING_CONTRACT_CLI_MEMBER}
+                    - {
+                        rac.MATERIALIZED_BINDING_CONTRACT_CLI_MEMBER,
+                        "import-design/illustrator_to_svg.py",
+                    }
                 ),
             },
         )
@@ -1369,7 +1391,15 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
     def test_negative_control_wrong_version_fires(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            make_platform(root, "linux-x64")
+            cli, sdk = make_platform(root, "linux-x64")
+            # Build the archive at the current floor, then remove the newer
+            # Illustrator helper so the verifier reaches the version-bound
+            # provenance check rather than rejecting a deliberately stale
+            # payload as an unexpected member first.
+            cli.remove("import-design/illustrator_to_svg.py")
+            sdk.remove("pulp-sdk/bin/import-design/illustrator_to_svg.py")
+            write_archive(root / rac.cli_asset_name("linux-x64"), cli, as_zip=False)
+            write_archive(root / rac.sdk_asset_name("linux-x64"), sdk, as_zip=False)
             with self.assertRaisesRegex(rac.ContentError, "expected '1.2.3'"):
                 rac.verify_platform(
                     root, "linux-x64", "1.2.3", SOURCE_SHA, native_signatures=False
@@ -1878,6 +1908,44 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             rac.verify_platform(
                 root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
             )
+
+    def test_negative_control_provenance_claiming_bridge_exec_fires(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            make_platform(root, "linux-x64")
+            sdk_path = root / rac.sdk_asset_name("linux-x64")
+            with rac.Archive(sdk_path) as archive:
+                members = set(archive.members)
+            original_payload = member_payload
+
+            def bridge_exec_payload(name: str, platform: str = "linux-x64") -> bytes:
+                if name == "pulp-sdk/sdk-provenance.json":
+                    marker = json.loads(original_payload(name, platform))
+                    marker["features"]["bridge_exec"] = True
+                    return json.dumps(marker).encode()
+                return original_payload(name, platform)
+
+            # Control: the same marker with the key present and false is accepted,
+            # so the rejection below is the value and not the key's presence.
+            def bridge_exec_off_payload(name: str, platform: str = "linux-x64") -> bytes:
+                if name == "pulp-sdk/sdk-provenance.json":
+                    marker = json.loads(original_payload(name, platform))
+                    marker["features"]["bridge_exec"] = False
+                    return json.dumps(marker).encode()
+                return original_payload(name, platform)
+
+            with mock.patch(__name__ + ".member_payload", side_effect=bridge_exec_off_payload):
+                write_archive(sdk_path, members, as_zip=False)
+            rac.verify_platform(
+                root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
+            )
+
+            with mock.patch(__name__ + ".member_payload", side_effect=bridge_exec_payload):
+                write_archive(sdk_path, members, as_zip=False)
+            with self.assertRaisesRegex(rac.ContentError, "unsafe SDK provenance"):
+                rac.verify_platform(
+                    root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
+                )
 
     def test_negative_control_provenance_claiming_tracing_on_fires(self) -> None:
         with tempfile.TemporaryDirectory() as td:

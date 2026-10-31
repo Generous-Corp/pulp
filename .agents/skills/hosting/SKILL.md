@@ -52,6 +52,15 @@ audio edges. Add a permutation replay with a topology mutation negative control
 when changing this path so agents can distinguish deterministic replay from a
 test that only passes for one insertion order.
 
+The flat execution plan and processor-node adapter caches are prepared-state
+artifacts. Build them only after topology publication, keep bindings read-only
+while the audio callback runs, and invalidate the cached routing/register view
+when a prepared graph generation changes. The adapter fast path is valid only
+for the main audio bus; auxiliary buses still use the bounded routing path.
+Keep the flat-plan, adapter, and load-measurer tests together when changing
+these contracts so a cache hit cannot hide a stale generation or an incorrect
+bus route.
+
 ### SignalGraph snapshot readers
 
 `runtime::Slot::live()` is publisher-thread-only. A status or telemetry
@@ -866,6 +875,31 @@ save/reopen render proof beside the legacy caller-owned route controls.
   never erase while a snapshot may be live, or the audio thread's raw
   `NodeRuntime::load` pointer dangles. `begin()/end()` are relaxed-atomic and
   RT-safe (proven under the no-alloc trap in test_signal_graph_rt_safety).
+  Timing is opt-in: `process_snapshot_impl` sets
+  `executor_.set_node_load_timing()` and passes the same flag to the reference
+  walk each block, on when monitoring is on or live-DSP telemetry is enabled.
+  Monitoring starts off and the first `node_loads()` turns it on (sticky), so
+  existing pollers keep working with one stale first reading. On a three-node B=64 graph the two clock reads per node were
+  ~44% of the block once the bus marshalling was fixed (`mach_continuous_time`
+  under `steady_clock`). A test that needs real values on its FIRST read calls
+  `set_node_load_monitoring(true)` before processing. `graph_load()` is always
+  timed because live-swap admission reads it.
+- Edges pass samples through unchanged. In the executor's `gather_node_inputs`, a
+  port fed by exactly one undelayed edge gets that edge's exact bits, and the
+  only AudioOutput copies into the bus instead of adding onto zero. A graph of
+  Processors therefore equals calling them in sequence bit for bit, -0
+  included. Fan-in and PDC-delayed ports still sum from +0, so they turn -0
+  into +0. The reference walk mirrors the same rule (copy a lone undelayed
+  edge; sole output copies). Change both together or the parity suites
+  diverge on a signed zero (a -1 gain on silence is enough).
+  The edge is read IN PLACE (no copy) only when the buffer assignment marks it
+  `reads_in_place`: it is the only reader of its source port (no fan-out, no
+  feedback capture, no automation tap) and the source region is not
+  persistent. Otherwise the port gets a private copy. Inputs are const views,
+  but hosted plug-in slots (`plugin_slot_vst3/clap.cpp`) and native cores cast
+  that away, so a fan-out sibling must never share the bytes. In-place reads
+  also rely on the assignment freeing a source region only at the END of its
+  last reader's position, so it never becomes that reader's output.
 - Per-node live-DSP telemetry (`audio::LiveDspTelemetryStore`): richer than the
   load measurer — fixed-slot p50/p95/p99 + jitter + over-budget attribution.
   Disabled by default (`set_live_dsp_telemetry_enabled()`; the audio path is one
@@ -2830,3 +2864,23 @@ header. The existing namespace-level `GraphAuthoringReceipt` and
 umbrella remain stable; the focused header is a type/ownership boundary and
 must not be treated as proof of a compile-time speedup without a fresh fan-out
 or `-ftime-trace` measurement.
+
+### AudioRouteCatalog channel routing
+
+A declared stereo input may select different host-owned sources for its left and
+right channels. Use `connect_channel(stable_id, bus_index, channel_index)` and
+`connected_route_channel(...)` on the control/UI thread; `MutableAudioRouteCatalog`
+retains those stable IDs across catalog refresh and restores only available
+routes. Hosts that only support whole-bus routing inherit the compatibility
+fallback to `connect`/`connected_route`. The realtime processor still consumes
+host-provided buffers; this catalog never enumerates DAW tracks from realtime
+code.
+
+A whole-bus `connect` sets both channels the source can feed and replaces any
+independent channel binding. With a channel callback it binds channels 0 and 1
+through that callback; a mono source over an existing independent right binding
+needs the disconnect callback to clear the stale edge, otherwise `connect`
+refuses. Through the legacy whole-bus callback only channel 0 is bindable.
+`selected_route_ids()` persists one ID per bus, so independent left/right
+choices do not survive a project reload; hosts that need that must save
+`connected_route_channel` themselves.

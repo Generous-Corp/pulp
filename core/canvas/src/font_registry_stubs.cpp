@@ -23,6 +23,10 @@
 #include <future>
 #include <string>
 #include <vector>
+#include <optional>
+#include <unordered_map>
+#include <mutex>
+#include <tuple>
 
 // Probe for ICU's BreakIterator headers. The bundled Skia binaries
 // statically link `libskunicode_icu.a`
@@ -492,6 +496,138 @@ std::vector<std::size_t> line_break_opportunities(const std::string& text,
     out.push_back(text.size());
     return out;
 #endif
+}
+
+namespace {
+
+std::mutex& declared_weights_mutex() {
+    static std::mutex m;
+    return m;
+}
+
+using ScopedDeclaredWeights =
+    std::unordered_map<std::string,
+                       std::unordered_map<std::string, std::vector<DeclaredWeightRange>>>;
+
+ScopedDeclaredWeights& declared_weights() {
+    static ScopedDeclaredWeights map;
+    return map;
+}
+
+} // namespace
+
+void declare_font_face_weight_range(const std::string& family, int weight_min, int weight_max,
+                                    const std::string& scope) {
+    if (family.empty())
+        return;
+    weight_min = std::clamp(weight_min, 1, 1000);
+    weight_max = std::clamp(weight_max, 1, 1000);
+    const DeclaredWeightRange range{std::min(weight_min, weight_max),
+                                    std::max(weight_min, weight_max)};
+    std::lock_guard<std::mutex> guard(declared_weights_mutex());
+    auto& ranges = declared_weights()[scope][family];
+    for (const auto& existing : ranges) {
+        if (existing.min == range.min && existing.max == range.max)
+            return;
+    }
+    ranges.push_back(range);
+}
+
+void clear_declared_font_face_weight_ranges(const std::string& scope) {
+    if (scope.empty())
+        return;
+    std::lock_guard<std::mutex> guard(declared_weights_mutex());
+    declared_weights().erase(scope);
+}
+
+bool has_declared_font_face_weights(const std::string& family) {
+    std::lock_guard<std::mutex> guard(declared_weights_mutex());
+    for (const auto& [scope, families] : declared_weights()) {
+        (void)scope;
+        if (families.count(family) != 0)
+            return true;
+    }
+    return false;
+}
+
+int css_match_declared_weight(const std::vector<DeclaredWeightRange>& ranges, int desired) {
+    if (ranges.empty())
+        return -1;
+    for (std::size_t i = 0; i < ranges.size(); ++i) {
+        if (ranges[i].min <= desired && desired <= ranges[i].max)
+            return static_cast<int>(i);
+    }
+    // The nearest range entirely below or above the desired weight, judged by
+    // the edge that faces it.
+    const auto nearest_below = [&](int limit) {
+        int best = -1;
+        for (std::size_t i = 0; i < ranges.size(); ++i) {
+            if (ranges[i].max < desired && ranges[i].max >= limit &&
+                (best < 0 || ranges[i].max > ranges[static_cast<std::size_t>(best)].max))
+                best = static_cast<int>(i);
+        }
+        return best;
+    };
+    const auto nearest_above = [&](int limit) {
+        int best = -1;
+        for (std::size_t i = 0; i < ranges.size(); ++i) {
+            if (ranges[i].min > desired && ranges[i].min <= limit &&
+                (best < 0 || ranges[i].min < ranges[static_cast<std::size_t>(best)].min))
+                best = static_cast<int>(i);
+        }
+        return best;
+    };
+    constexpr int kAny = 1000;
+    if (desired >= 400 && desired <= 500) {
+        if (const int up = nearest_above(500); up >= 0)
+            return up;
+        if (const int down = nearest_below(0); down >= 0)
+            return down;
+        return nearest_above(kAny);
+    }
+    if (desired < 400) {
+        if (const int down = nearest_below(0); down >= 0)
+            return down;
+        return nearest_above(kAny);
+    }
+    if (const int up = nearest_above(kAny); up >= 0)
+        return up;
+    return nearest_below(0);
+}
+
+std::optional<bool> declared_face_synthesizes_bold(const std::string& family,
+                                                   int requested_weight) {
+    std::vector<DeclaredWeightRange> ranges;
+    {
+        std::lock_guard<std::mutex> guard(declared_weights_mutex());
+        for (const auto& [scope, families] : declared_weights()) {
+            (void)scope;
+            const auto it = families.find(family);
+            if (it != families.end())
+                ranges.insert(ranges.end(), it->second.begin(), it->second.end());
+        }
+        if (ranges.empty())
+            return std::nullopt;
+    }
+    // Multiple live realms contribute one effective declaration set. Merge
+    // overlaps so unordered scope iteration cannot change the selected face.
+    std::sort(ranges.begin(), ranges.end(), [](const auto& a, const auto& b) {
+        return std::tie(a.min, a.max) < std::tie(b.min, b.max);
+    });
+    std::vector<DeclaredWeightRange> merged;
+    for (const auto& range : ranges) {
+        if (!merged.empty() && range.min <= merged.back().max + 1)
+            merged.back().max = std::max(merged.back().max, range.max);
+        else
+            merged.push_back(range);
+    }
+    ranges = std::move(merged);
+    const int chosen = css_match_declared_weight(ranges, requested_weight);
+    if (chosen < 0)
+        return std::nullopt;
+    constexpr int kBoldThreshold = 600;
+    return requested_weight >= kBoldThreshold &&
+           ranges[static_cast<std::size_t>(chosen)].max < kBoldThreshold;
 }
 
 } // namespace pulp::canvas

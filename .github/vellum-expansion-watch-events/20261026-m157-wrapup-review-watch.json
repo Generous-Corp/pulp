@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261026-m157-wrapup-review-watch",
+  "created_at": "2026-10-26T23:15:22Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Adversarial review hardens the source Skia publisher, V8 provider test fixtures, and SDL3 status text; no design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "python3 tools/scripts/test_build_skia_source_pin.py",
+    "python3 tools/scripts/test_fetch_v8_for_release.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

@@ -14,6 +14,7 @@
 #include "mac_runtime_validators.hpp"
 #include "shell_redirect.hpp"
 #include "ship_bundle_strip.hpp"
+#include "ship_child_process.hpp"
 #include "xcode_developer_path.hpp"
 
 #include <algorithm>
@@ -246,6 +247,113 @@ static int enforce_no_tracing(const std::vector<fs::path>& roots,
     return 0;
 }
 
+// The JS engine the build directory was configured with, read from its
+// CMakeCache (PULP_JS_ENGINE). Empty when no cache or no entry exists.
+static std::string configured_js_engine(const fs::path& build_dir) {
+    std::ifstream in(build_dir / "CMakeCache.txt");
+    std::string line;
+    const std::string prefix = "PULP_JS_ENGINE:";
+    while (std::getline(in, line)) {
+        if (line.rfind(prefix, 0) != 0)
+            continue;
+        const auto eq = line.find('=');
+        if (eq == std::string::npos)
+            return {};
+        auto value = line.substr(eq + 1);
+        while (!value.empty() && (value.back() == '\r' || value.back() == ' '))
+            value.pop_back();
+        return value;
+    }
+    return {};
+}
+
+// Whether `plist` sets `key` to <true/>: the key's next element, skipping
+// whitespace and comments, must be <true/>.
+static bool plist_grants(const std::string& plist, std::string_view key) {
+    const std::string tag = "<key>" + std::string(key) + "</key>";
+    auto pos = plist.find(tag);
+    if (pos == std::string::npos)
+        return false;
+    pos += tag.size();
+    while (pos < plist.size()) {
+        if (std::isspace(static_cast<unsigned char>(plist[pos]))) {
+            ++pos;
+        } else if (plist.compare(pos, 4, "<!--") == 0) {
+            const auto close = plist.find("-->", pos + 4);
+            if (close == std::string::npos)
+                return false;
+            pos = close + 3;
+        } else {
+            return plist.compare(pos, 7, "<true/>") == 0 || plist.compare(pos, 8, "<true />") == 0;
+        }
+    }
+    return false;
+}
+
+// Whether `artifact` runs as its own process. A plug-in bundle (.vst3,
+// .component, .clap, .aaxplugin) is loaded into its host, and the host
+// process's entitlements, not the plug-in's, decide whether JIT pages may be
+// mapped; an app, an app extension or a bare executable carries its own.
+static bool runs_as_own_process(const fs::path& artifact) {
+    const auto ext = artifact.extension().string();
+    return ext == ".app" || ext == ".appex" || ext.empty();
+}
+
+// Hardened-runtime JIT policy for the entitlements `ship` is about to apply.
+//
+// com.apple.security.cs.allow-jit is the one approved JIT entitlement (V8 and
+// JavaScriptCore map JIT pages with MAP_JIT, which it covers). A plist that
+// asks for executable memory any other way (allow-unsigned-executable-memory,
+// disable-executable-page-protection) without allow-jit is refused for every
+// artifact and engine.
+//
+// For a V8 or JavaScriptCore build (PULP_JS_ENGINE in the build's CMakeCache),
+// an artifact that runs as its own process must grant allow-jit, or it signs
+// cleanly and then fails when the engine starts. Plug-in bundles are exempt:
+// they run under their host's entitlements, so the default ship entitlements,
+// which grant no JIT, are correct for them. Returns 0 when the policy holds.
+static int enforce_jit_entitlement(const fs::path& build_dir, const fs::path& entitlements,
+                                   const std::vector<fs::path>& artifacts) {
+    std::string plist;
+    {
+        std::ifstream in(entitlements);
+        plist.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    }
+    const bool allow_jit = plist_grants(plist, "com.apple.security.cs.allow-jit");
+    if (!allow_jit) {
+        for (const auto* unapproved :
+             {"com.apple.security.cs.allow-unsigned-executable-memory",
+              "com.apple.security.cs.disable-executable-page-protection"}) {
+            if (!plist_grants(plist, unapproved))
+                continue;
+            std::cerr << "Error: refusing to sign with " << unapproved << ".\n"
+                      << "  Entitlements: " << entitlements.string() << "\n"
+                      << "  The approved JIT entitlement is com.apple.security.cs.allow-jit\n"
+                      << "  (MAP_JIT); grant that instead, and only where a JIT engine runs.\n";
+            return 1;
+        }
+    }
+
+    const auto engine = configured_js_engine(build_dir);
+    if (allow_jit || (engine != "v8" && engine != "jsc"))
+        return 0;
+    for (const auto& artifact : artifacts) {
+        if (!runs_as_own_process(artifact))
+            continue;
+        std::cerr << "Error: refusing to sign a PULP_JS_ENGINE=" << engine
+                  << " app without the allow-jit entitlement.\n"
+                  << "  Artifact: " << artifact.string() << "\n"
+                  << "  Entitlements: " << entitlements.string() << "\n"
+                  << "  " << engine << " maps JIT pages with MAP_JIT, which the hardened runtime\n"
+                  << "  permits only under com.apple.security.cs.allow-jit. Pass --entitlements\n"
+                  << "  with a plist that grants allow-jit (the AUv3 templates emit it per\n"
+                  << "  engine). Plug-in bundles run under their host's entitlements and\n"
+                  << "  need no JIT grant of their own.\n";
+        return 1;
+    }
+    return 0;
+}
+
 // A dev build dir (PULP_DEV_BUILD=ON) records the on-disk UI_SCRIPT, theme and
 // asset-root paths for the hot-reload loop, so its artifacts would name, and
 // read from, the developer's source tree. cmd_ship() redirects such a project
@@ -441,12 +549,11 @@ constexpr int kSlots = kShipContainerDepthLimit + 1;
 char root[PATH_MAX] = {};
 char mounts[kSlots][PATH_MAX] = {};
 volatile sig_atomic_t tool = 0;
-constexpr int kSignals[3] = {SIGINT, SIGTERM, SIGHUP};
 
 sigset_t handled_signals() {
     sigset_t set;
     sigemptyset(&set);
-    for (const int sig : kSignals)
+    for (const int sig : pulp::cli::kShipScanSignals)
         sigaddset(&set, sig);
     return set;
 }
@@ -464,34 +571,18 @@ struct BlockSignals {
     }
 };
 
-pid_t spawn_quiet(const char* path, char* const argv[]) {
-    const pid_t pid = fork();
-    if (pid == 0) {
-        const int null_fd = open("/dev/null", O_RDWR);
-        if (null_fd >= 0) {
-            dup2(null_fd, 0);
-            dup2(null_fd, 1);
-            dup2(null_fd, 2);
-        }
-        execv(path, argv);
-        _exit(127);
-    }
-    return pid;
-}
+using pulp::cli::spawn_quiet;
+using pulp::cli::wait_exit_code;
 
-int wait_for(pid_t pid) {
-    int status = 0;
-    while (waitpid(pid, &status, 0) < 0) {
-        if (errno != EINTR)
-            return -1;
-    }
-    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
-}
-
+// Each piece of state is cleared as it is consumed, so a second run of cleanup
+// (a pending signal delivered after a handler returns) finds nothing left to
+// do: it never re-kills a pid that was already reaped and may have been
+// reused, or detaches and removes paths twice.
 void cleanup(int sig) {
     if (const pid_t running = static_cast<pid_t>(tool); running > 0) {
+        tool = 0;
         kill(running, SIGKILL);
-        wait_for(running);
+        wait_exit_code(running);
     }
     for (auto& mount : mounts) {
         if (mount[0] == '\0')
@@ -499,15 +590,21 @@ void cleanup(int sig) {
         char hdiutil[] = "hdiutil", detach[] = "detach", force[] = "-force";
         char* argv[] = {hdiutil, detach, force, mount, nullptr};
         if (const pid_t pid = spawn_quiet("/usr/bin/hdiutil", argv); pid > 0)
-            wait_for(pid);
+            wait_exit_code(pid);
+        mount[0] = '\0';
     }
     if (root[0] != '\0') {
         char rm[] = "rm", rf[] = "-rf";
         char* argv[] = {rm, rf, root, nullptr};
         if (const pid_t pid = spawn_quiet("/bin/rm", argv); pid > 0)
-            wait_for(pid);
+            wait_exit_code(pid);
+        root[0] = '\0';
     }
-    signal(sig, SIG_DFL);
+    // Default actions for all three before re-raising: the raised signal, and
+    // any other one already pending, terminate the process instead of running
+    // this handler again.
+    for (const int handled : pulp::cli::kShipScanSignals)
+        signal(handled, SIG_DFL);
     raise(sig);
 }
 
@@ -531,11 +628,11 @@ struct Guard {
         // so cleanup never runs inside itself.
         action.sa_mask = handled_signals();
         for (int i = 0; i < 3; ++i)
-            sigaction(kSignals[i], &action, &previous[i]);
+            sigaction(pulp::cli::kShipScanSignals[i], &action, &previous[i]);
     }
     ~Guard() {
         for (int i = 0; i < 3; ++i)
-            sigaction(kSignals[i], &previous[i], nullptr);
+            sigaction(pulp::cli::kShipScanSignals[i], &previous[i], nullptr);
         root[0] = '\0';
     }
 };
@@ -559,7 +656,7 @@ static int run_ship_tool(std::vector<std::string> args) {
     }
     if (pid <= 0)
         return -1;
-    const int rc = ship_scan_signals::wait_for(pid);
+    const int rc = ship_scan_signals::wait_exit_code(pid);
     ship_scan_signals::tool = 0;
     return rc;
 }
@@ -1005,6 +1102,13 @@ static int ship_sign(const std::vector<std::string>& args,
             if (int rc = enforce_no_development_runtimes({fs::path(sign_path)}, local_identity);
                 rc != 0)
                 return rc;
+            const bool is_disk_image = (ext == ".dmg");
+            if (!is_disk_image) {
+                if (int rc = enforce_jit_entitlement(build_dir, fs::path(entitlements),
+                                                     {fs::path(sign_path)});
+                    rc != 0)
+                    return rc;
+            }
 #ifdef __APPLE__
             if (!ad_hoc && !run_signing_preflight(root))
                 return 1;
@@ -1013,7 +1117,6 @@ static int ship_sign(const std::vector<std::string>& args,
             // notarization. Entitlements only apply to executables, so we
             // only attach them for app/plugin bundles, never a `.dmg`.
             std::cout << "Signing " << fs::path(sign_path).filename().string() << "...\n";
-            const bool is_disk_image = (ext == ".dmg");
             bool ok = pulp::ship::codesign(
                 sign_path, identity, is_disk_image ? "" : entitlements);
             if (!ok) {
@@ -1040,6 +1143,8 @@ static int ship_sign(const std::vector<std::string>& args,
             return 1;
         }
         if (int rc = enforce_no_development_runtimes(bundles, local_identity); rc != 0)
+            return rc;
+        if (int rc = enforce_jit_entitlement(build_dir, fs::path(entitlements), bundles); rc != 0)
             return rc;
 
 #ifdef __APPLE__
@@ -2886,6 +2991,12 @@ static int ship_share(const std::vector<std::string>& args,
         if (entitlements.empty()) {
             auto def = default_entitlements(root);
             if (fs::exists(def)) entitlements = def.string();
+        }
+        if (ext == ".app") {
+            if (int rc =
+                    enforce_jit_entitlement(build_dir, fs::path(entitlements), {fs::path(input)});
+                rc != 0)
+                return rc;
         }
 
         auto artifacts = output_dir.empty() ? (root / "artifacts")

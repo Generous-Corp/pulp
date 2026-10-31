@@ -1,3 +1,4 @@
+#include <pulp/canvas/bundled_fonts.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/platform/child_process.hpp>
 #include <pulp/runtime/base64.hpp>
@@ -5,6 +6,7 @@
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/control_painters.hpp>
 #include <pulp/view/css_gradient.hpp>
+#include <pulp/view/design_codegen.hpp>
 #include <pulp/view/design_frame_view.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/design_sources.hpp>
@@ -5298,4 +5300,156 @@ TEST_CASE(
         REQUIRE(compiled);
 #endif
     }
+}
+
+TEST_CASE("a captured antialiased text node materializes as an antialiased label",
+          "[design-import][native][font-smoothing]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.style.width = 240.0f;
+    ir.root.style.height = 60.0f;
+    for (const char* text : {"Antialiased", "Default"}) {
+        IRNode node;
+        node.type = "text";
+        node.text_content = text;
+        node.style.font_size = 15.0f;
+        node.style.width = 120.0f;
+        node.style.height = 20.0f;
+        if (std::string_view(text) == "Antialiased")
+            node.attributes["font_smoothing"] = "antialiased";
+        ir.root.children.push_back(node);
+    }
+    auto root = build_native_view_tree(ir, ir.asset_manifest);
+    REQUIRE(root);
+    const auto find = [&](const std::string& text) -> Label* {
+        const auto walk = [&](auto&& self, View& view) -> Label* {
+            if (auto* label = dynamic_cast<Label*>(&view); label && label->text() == text)
+                return label;
+            for (std::size_t i = 0; i < view.child_count(); ++i)
+                if (auto* child = view.child_at(i))
+                    if (auto* found = self(self, *child))
+                        return found;
+            return nullptr;
+        };
+        return walk(walk, *root);
+    };
+    auto* smooth = find("Antialiased");
+    auto* plain = find("Default");
+    REQUIRE(smooth != nullptr);
+    REQUIRE(plain != nullptr);
+    CHECK(smooth->font_smoothing() == pulp::canvas::FontSmoothing::antialiased);
+    CHECK(plain->font_smoothing() == pulp::canvas::FontSmoothing::auto_smoothing);
+    CHECK(design_ir_text_raster_policy(ir) == pulp::canvas::TextRasterPolicy::chromium);
+}
+
+// Generated JS and the bridge's registerFont carry each captured @font-face
+// rule's declared weight range to the text renderer.
+namespace {
+
+DesignIR ir_with_face(std::string family, std::string path, int weight, int weight_max) {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "root";
+    ir.root.style.width = 100.0f;
+    ir.root.style.height = 40.0f;
+    IRFontAsset face;
+    face.family = std::move(family);
+    face.resolved_path = std::move(path);
+    face.weight = weight;
+    face.weight_max = weight_max;
+    ir.font_family_assets.push_back(face);
+    return ir;
+}
+
+} // namespace
+
+TEST_CASE("generated JS registers a captured face with its declared weight range",
+          "[view][import][codegen][fonts][synthetic-bold]") {
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::bridge_native_js;
+    const auto range = generate_pulp_js(ir_with_face("Probe", "/fonts/Jost.ttf", 400, 700), opts);
+    CHECK(range.find("registerFont('Probe', '/fonts/Jost.ttf', 400, 700);") != std::string::npos);
+    const auto single = generate_pulp_js(ir_with_face("Probe", "/fonts/Jost.ttf", 400, 0), opts);
+    CHECK(single.find("registerFont('Probe', '/fonts/Jost.ttf', 400, 400);") != std::string::npos);
+}
+
+TEST_CASE("registerFont declares a range only for a registered face and valid weights",
+          "[view][bridge][fonts][synthetic-bold]") {
+    const std::string jost = std::string(PULP_REPO_ROOT) + "/external/fonts/Jost-Regular.ttf";
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 100, 40});
+    pulp::state::StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    // An absolute path is read only from an asset root or the script directory.
+    bridge.set_asset_roots({std::filesystem::path(PULP_REPO_ROOT) / "external/fonts"});
+    const auto call = [&](const std::string& family, const std::string& path,
+                          const std::string& weights) {
+        return engine.evaluate("registerFont('" + family + "', '" + path + "'" + weights + ")")
+            .getWithDefault<bool>(false);
+    };
+
+    // Control: a resolvable face with a valid range declares it.
+    CHECK(call("BridgeFaceValid", jost, ", 400, 700"));
+    CHECK(pulp::canvas::declared_face_synthesizes_bold("BridgeFaceValid", 700) == false);
+
+    // A face that never registered must not leave a range behind.
+    CHECK_FALSE(call("BridgeFaceMissing", "/nonexistent/face.ttf", ", 400, 700"));
+    CHECK_FALSE(pulp::canvas::has_declared_font_face_weights("BridgeFaceMissing"));
+
+    // Non-finite weights declare nothing; the face itself still registers.
+    CHECK(call("BridgeFaceNaN", jost, ", NaN, 700"));
+    CHECK(call("BridgeFaceInf", jost, ", 400, Infinity"));
+    CHECK_FALSE(pulp::canvas::has_declared_font_face_weights("BridgeFaceNaN"));
+    CHECK_FALSE(pulp::canvas::has_declared_font_face_weights("BridgeFaceInf"));
+
+    // Out-of-range weights clamp to CSS's [1, 1000] instead of overflowing the cast.
+    CHECK(call("BridgeFaceHuge", jost, ", 400, 1e300"));
+    CHECK(pulp::canvas::declared_face_synthesizes_bold("BridgeFaceHuge", 1000) == false);
+
+    // A reversed pair is the same range.
+    CHECK(call("BridgeFaceReversed", jost, ", 700, 400"));
+    CHECK(pulp::canvas::declared_face_synthesizes_bold("BridgeFaceReversed", 700) == false);
+}
+
+TEST_CASE("registerFont weight ranges are removed with their bridge scope",
+          "[view][bridge][fonts][synthetic-bold][reload]") {
+    const std::string jost = std::string(PULP_REPO_ROOT) + "/external/fonts/Jost-Regular.ttf";
+    {
+        ScriptEngine engine;
+        View root;
+        pulp::state::StateStore store;
+        WidgetBridge bridge(engine, root, store);
+        bridge.set_asset_roots({std::filesystem::path(PULP_REPO_ROOT) / "external/fonts"});
+        REQUIRE(engine.evaluate("registerFont('ScopedFace', '" + jost + "', 400, 700)")
+                    .getWithDefault<bool>(false));
+        CHECK(pulp::canvas::declared_face_synthesizes_bold("ScopedFace", 700) == false);
+    }
+    CHECK_FALSE(pulp::canvas::has_declared_font_face_weights("ScopedFace"));
+}
+
+TEST_CASE("font declaration cleanup does not cross bridges sharing storage identity",
+          "[view][bridge][fonts][synthetic-bold][reload][scope]") {
+    const std::string jost = std::string(PULP_REPO_ROOT) + "/external/fonts/Jost-Regular.ttf";
+    ScriptEngine first_engine;
+    ScriptEngine second_engine;
+    View first_root;
+    View second_root;
+    pulp::state::StateStore first_store;
+    pulp::state::StateStore second_store;
+    WidgetBridge first(first_engine, first_root, first_store);
+    WidgetBridge second(second_engine, second_root, second_store);
+    first.set_storage_identity("shared-script");
+    second.set_storage_identity("shared-script");
+    // The face lives outside any script directory, so both bridges declare the
+    // fonts tree as a reviewed asset root.
+    first.set_asset_roots({std::filesystem::path(PULP_REPO_ROOT) / "external/fonts"});
+    second.set_asset_roots({std::filesystem::path(PULP_REPO_ROOT) / "external/fonts"});
+    REQUIRE(first_engine.evaluate("registerFont('SharedScopeFace', '" + jost + "', 400, 700)")
+                .getWithDefault<bool>(false));
+    REQUIRE(second_engine.evaluate("registerFont('SharedScopeFace', '" + jost + "', 400, 400)")
+                .getWithDefault<bool>(false));
+    CHECK(pulp::canvas::declared_face_synthesizes_bold("SharedScopeFace", 700) == false);
+    first.clear_for_realm_replacement();
+    CHECK(pulp::canvas::declared_face_synthesizes_bold("SharedScopeFace", 700) == true);
 }

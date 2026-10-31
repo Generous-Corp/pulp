@@ -1,0 +1,4 @@
+{
+  "$comment": "Known divergences between the native materializer and the other emitters, read by test/test_design_emitter_conformance.cpp. Each entry names the lane, the projection field (a regex), optionally the fixtures, an anchor regex and the expected (native) and actual (lane) values as regexes, plus the issue that tracks closing it. An entry that matches nothing fails the gate: delete it with the fix.",
+  "gaps": []
+}

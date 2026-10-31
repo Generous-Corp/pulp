@@ -1142,6 +1142,7 @@ class DifferentialLabTests(unittest.TestCase):
             (evidence / "dom-snapshot.json").write_text(
                 json.dumps({"documents": []}), encoding="utf-8")
             mutate_snapshot_during_render = False
+            receipt_emitter = None
 
             def fake_run(argv: list[str], timeout_seconds: int) -> LAB.CommandResult:
                 if "--render" in argv:
@@ -1157,10 +1158,12 @@ class DifferentialLabTests(unittest.TestCase):
                             "id": "browser:root",
                             "rect": observer_root_rect(argv, 1, 1),
                         }]}), encoding="utf-8")
+                    emitter = (argv[argv.index("--emitter") + 1]
+                               if "--emitter" in argv else "native")
                     Path(argv[argv.index("--render-receipt") + 1]).write_text(
                         json.dumps({"schema": "pulp-design-ir-render-receipt-v1",
                                     "backend_requested": "skia", "backend_used": "skia",
-                                    "ok": True,
+                                    "ok": True, "emitter": receipt_emitter or emitter,
                                     "placement": observer_placement(argv)}), encoding="utf-8")
                 else:
                     output = Path(argv[argv.index("--output") + 1])
@@ -1183,7 +1186,43 @@ class DifferentialLabTests(unittest.TestCase):
             self.assertEqual(report["integrity"]["source_sha256"], source_sha256)
             self.assertTrue(report["integrity"]["source_bound"])
             self.assertTrue(report["comparison"]["viewport_dpr_audit"]["ok"])
+            self.assertEqual(report["candidate"]["emitter"], "native")
             binding.assert_called_once()
+
+            # The ui.js lane renders the same IR through the program it emits;
+            # the native lane's observer argv does not change.
+            with patch.object(LAB, "run_command", side_effect=fake_run) as run, \
+                    patch.object(LAB, "find_browser_evidence", return_value=evidence):
+                js_report = LAB.compare_one(
+                    Path("importer"), Path("observer"), source, root / "out-js", 60,
+                    "claude", Path("chrome"),
+                    fixture_metadata={"viewport": {"width": 1, "height": 1},
+                                      "browser_interactions": "plan.json"},
+                    emitter="js")
+            render_argv = [c.args[0] for c in run.call_args_list if "--render" in c.args[0]]
+            self.assertEqual(len(render_argv), 1)
+            self.assertEqual(render_argv[0][render_argv[0].index("--emitter") + 1], "js")
+            self.assertEqual(js_report["candidate"]["emitter"], "js")
+            with patch.object(LAB, "run_command", side_effect=fake_run) as run, \
+                    patch.object(LAB, "find_browser_evidence", return_value=evidence):
+                LAB.compare_one(
+                    Path("importer"), Path("observer"), source, root / "out-native", 60,
+                    "claude", Path("chrome"),
+                    fixture_metadata={"viewport": {"width": 1, "height": 1},
+                                      "browser_interactions": "plan.json"})
+            self.assertFalse(any("--emitter" in c.args[0] for c in run.call_args_list))
+            # A render that says another emitter made it is not this lane's render.
+            receipt_emitter = "native"
+            with patch.object(LAB, "run_command", side_effect=fake_run), \
+                    patch.object(LAB, "find_browser_evidence", return_value=evidence):
+                with self.assertRaisesRegex(LAB.LabError, "names emitter 'native'"):
+                    LAB.compare_one(
+                        Path("importer"), Path("observer"), source, root / "out-js-wrong", 60,
+                        "claude", Path("chrome"),
+                        fixture_metadata={"viewport": {"width": 1, "height": 1},
+                                          "browser_interactions": "plan.json"},
+                        emitter="js")
+            receipt_emitter = None
             self.assertEqual(binding.call_args.kwargs["expected_interaction_plan_sha256"], plan_sha256)
             # Each lane's screenshot, then the candidate lane's retained copy
             # that the visual lens scores.
@@ -1445,6 +1484,62 @@ class DifferentialLabTests(unittest.TestCase):
         nested_changed["reference"]["rounds"] = 2
         self.assertNotEqual(LAB.canonical_json_sha256(json.dumps(nested).encode()),
                             LAB.canonical_json_sha256(json.dumps(nested_changed).encode()))
+
+    def test_canonical_capture_digest_ignores_provenance_timings_only(self) -> None:
+        def capture(timing: int, width: int = 420) -> bytes:
+            return json.dumps({
+                "schema": "pulp-browser-capture-v1",
+                "provenance": {
+                    "timings": {"capture_ms": timing},
+                    "viewport": {"resolved": {"width": width}},
+                },
+                "documents": [{"snapshot_asset": "dom-snapshot.json"}],
+            }).encode()
+
+        baseline = LAB.canonical_json_sha256(capture(12))
+        self.assertEqual(baseline, LAB.canonical_json_sha256(capture(99)))
+        # A sibling provenance field is content, not a per-run clock.
+        self.assertNotEqual(baseline, LAB.canonical_json_sha256(capture(99, 421)))
+
+    def test_canonical_capture_digest_ignores_non_object_provenance_timings(self) -> None:
+        def capture(timings: object) -> bytes:
+            return json.dumps({
+                "schema": "pulp-browser-capture-v1",
+                "provenance": {
+                    "timings": timings,
+                    "viewport": {"resolved": {"width": 420}},
+                },
+                "documents": [{"snapshot_asset": "dom-snapshot.json"}],
+            }).encode()
+
+        baseline = LAB.canonical_json_sha256(capture(None))
+        for timings in ("worker-clock", ["capture", 12], {"capture_ms": 12}):
+            self.assertEqual(baseline, LAB.canonical_json_sha256(capture(timings)))
+
+        # The sibling provenance field remains part of the digest.
+        changed = json.loads(capture(None))
+        changed["provenance"]["viewport"]["resolved"]["width"] = 421
+        self.assertNotEqual(baseline, LAB.canonical_json_sha256(json.dumps(changed).encode()))
+
+    def test_non_capture_timings_remain_part_of_canonical_digest(self) -> None:
+        first = json.dumps({"provenance": {"timings": {"capture_ms": 12}}}).encode()
+        second = json.dumps({"provenance": {"timings": {"capture_ms": 99}}}).encode()
+        self.assertNotEqual(LAB.canonical_json_sha256(first),
+                            LAB.canonical_json_sha256(second))
+
+    def test_capture_timing_only_runs_can_pass_determinism_receipt(self) -> None:
+        def report(timing: int) -> dict[str, object]:
+            capture = json.dumps({
+                "schema": "pulp-browser-capture-v1",
+                "provenance": {"timings": {"capture_ms": timing}},
+            }).encode()
+            digest = LAB.canonical_json_sha256(capture)
+            return {"integrity": {field: digest for field in LAB_CLI.DETERMINISM_FIELDS}}
+
+        self.assertEqual(
+            LAB_CLI.determinism_receipt([report(1), report(2), report(3)])['status'],
+            "pass",
+        )
 
     def test_canonical_capture_digest_excludes_only_raw_document_bindings(self) -> None:
         first = {"schema": "pulp-browser-capture-v1", "documents": [

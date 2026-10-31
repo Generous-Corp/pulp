@@ -150,6 +150,19 @@ add_custom_target(pulp-jsx-runtime-materialized-ids-map
     COMMENT "Staging materialized ids map helper beside pulp-import-design")
 add_dependencies(pulp-import-design pulp-jsx-runtime-materialized-ids-map)
 
+# Release packaging reads the Illustrator helper from the build directory
+# beside the importer (install() alone only covers installed trees), and the
+# release product matrix requires it in every CLI archive.
+set(_pulp_illustrator_helper
+    "${CMAKE_CURRENT_SOURCE_DIR}/illustrator_to_svg.py")
+add_custom_target(pulp-illustrator-helper
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${_pulp_illustrator_helper}"
+        "$<TARGET_FILE_DIR:pulp-import-design>/illustrator_to_svg.py"
+    DEPENDS "${_pulp_illustrator_helper}"
+    COMMENT "Staging Illustrator SVG converter beside pulp-import-design")
+add_dependencies(pulp-import-design pulp-illustrator-helper)
+
 set(PULP_NODE_RUNTIME_EXECUTABLE "" CACHE FILEPATH
     "Self-contained target-architecture Node executable staged with design import")
 if(PULP_NODE_RUNTIME_EXECUTABLE)
@@ -192,6 +205,25 @@ endif()
 install(TARGETS pulp-import-design
     RUNTIME DESTINATION bin
     BUNDLE DESTINATION bin)
+# Keep the PDF-compatible Illustrator conversion helper available in SDK
+# installs alongside the compiled importer.  It remains an explicit boundary:
+# Poppler is discovered at runtime and the helper records its own provenance.
+install(PROGRAMS
+    "${CMAKE_CURRENT_SOURCE_DIR}/illustrator_to_svg.py"
+    DESTINATION bin/import-design)
+
+# Keep the pure-Python Illustrator boundary on the same source-selftest lane as
+# the other importer contracts.  It deliberately runs without a configured
+# SDK/build dependency so CI can validate converter provenance on the
+# build-free lane as well as locally.
+if(Python3_EXECUTABLE)
+    add_test(NAME illustrator-to-svg-selftest
+        COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/test_illustrator_to_svg.py")
+    set_tests_properties(illustrator-to-svg-selftest PROPERTIES
+        LABELS "source-selftest")
+endif()
+
 install(FILES ${_pulp_browser_capture_runtime_files}
     DESTINATION bin/browser_capture-v1)
 install(FILES
@@ -222,7 +254,8 @@ target_link_libraries(pulp-design-import-bench PRIVATE
 # serialized DesignIR directly, avoiding codegen/QuickJS as a confounding layer
 # when measuring the candidate importer's native tree.
 add_executable(pulp-design-ir-observe
-    design_ir_observe.cpp)
+    design_ir_observe.cpp
+    observer_script_lane.cpp)
 target_include_directories(pulp-design-ir-observe PRIVATE
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/core/render/src)

@@ -40,6 +40,22 @@ assignment** ("option B"). It is release-critical: a wrong flip can drop
 a version silently. Do not flip without the GO/NO-GO checklist at the
 bottom passing.
 
+## Direct-writer safety boundary
+
+The writer has a repository-owned `writer_allowed_globs` allowlist. Every
+generated commit is checked against it before staging, and an empty or
+unexpected path fails closed. This protects the writer from its own
+regenerators or configuration drift; it does not replace GitHub authorization.
+
+The live `main-merge-queue` ruleset currently has no bypass actor. GitHub
+ruleset bypass permissions are actor-wide and cannot be restricted to
+version-only paths. Therefore `PULP_BUMP_ROUTE=direct` must remain disabled
+until GitHub can enforce an equivalent narrow, auditable restriction (or a
+separate release-only protected ref is introduced). A compromised release bot
+must not be able to push arbitrary code to `main`. Until that platform control
+exists, keep `PULP_BUMP_ROUTE=pr`; the bump PR is the governed admission path,
+while the allowlist and marker/idempotency checks still apply.
+
 ## The problem being solved
 
 Every `fix:` / `feat:` PR hand-writes a version number ABOVE main's
@@ -145,6 +161,23 @@ which was the behaviour before. The `upgrade` skill maps only the two README fil
 `docs/migrations/`, so neither an author's note nor the bot's fold owes a
 SKILL.md update.
 
+### The SDK bump also assigns agent-capability counters
+
+`MANIFEST_REVISION` and `SURFACE_INVENTORY_VERSION` in
+`tools/scripts/agent_capability_manifest.py` were the same kind of shared
+counter as a release version: every branch that changed capability material
+claimed base + 1, and each merge staled the rest. Branches now leave them at the
+base value; the regenerated snapshot is *pending* (its material differs from the
+last state `contract-history.json` recorded under the same counter). When a bump
+assigns the `sdk` surface, `_assign_capability_counters` runs the repo's own
+`agent_capability_manifest.py --assign-pending`, which advances each pending
+counter by one and regenerates the snapshot, surface ledger and history; the
+changed paths join the bump commit, and the message carries a
+`Skill-Update: skip skill=agent-capabilities` trailer because the files are the
+skill's but the change is mechanical. A failure is reverted and logged, and
+`auto-release.yml`'s agent-capability pre-tag check withholds the SDK tag while
+anything is pending (see `release-watchdog.md`).
+
 ### Why the race can't lose or duplicate a version
 
 `apply_and_push` is safe under concurrent post-merge runs because of three
@@ -246,7 +279,8 @@ tag instead of main HEAD.
    cheap no-op, so correctness wins. The **pending-intent liveness alarm**
    (`.github/workflows/pending-intent-liveness.yml` +
    `tools/scripts/pending_intent_liveness.py`) is the time-based backstop: it
-   pages if a positive intent stays unapplied past a grace window, catching a
+   pages if a positive intent stays unapplied past a grace window (210
+   minutes, above the PR route's coalescing window), catching a
    disabled/failed bot, a bot-permission failure, or an exhausted `--ff-only`
    retry — the whole "X exists, Y never arrives, detector quiet" class.
 
@@ -303,10 +337,11 @@ The bump can land two ways, selected by the `PULP_BUMP_ROUTE` repo variable
   on 2026-07-20 when the queue was briefly enabled.
 
 - **`pr`** (dormant until flipped): `apply_via_pr` pushes the bump to the fixed
-  `release/version-bump` branch, opens a `chore: bump versions` PR, and arms
-  `gh pr merge --auto --merge`, so the bump lands **through the merge queue**
-  (and as a normal auto-merge PR when no queue is enabled — so the route flip
-  and the queue-enable are independent steps). Requirements and invariants:
+  `release/version-bump` branch, opens a `chore: bump versions` PR, and stops.
+  It does not arm auto-merge: the merge steward is the only admission writer,
+  enqueues the PR once it has an exact-head approval and green checks, and its
+  stale-arm sweep would disarm an arm made here. So the bump lands **through the
+  merge queue** like any other PR. Requirements and invariants:
   - **PAT required.** PR-route runs only with `RELEASE_BOT_TOKEN`; a
     `GITHUB_TOKEN`-created PR does not trigger workflows, so its checks never run
     and auto-merge stalls. The workflow fails loudly if the PAT is absent.
@@ -328,12 +363,19 @@ The bump can land two ways, selected by the `PULP_BUMP_ROUTE` repo variable
     the push re-runs the drain, which assesses every first-parent merge after
     the bump's cut point (the marker commit's parent) and skips only the bump's
     own integration merge. So a stale bump PR that is in the merge queue, or
-    armed with its required checks pending or green, is waited for
+    unheld with its required checks pending or green, is waited for
     (`stale-wait`, exit 0 with a `::notice::` naming the PR). Closing it would
     restart 8 to 36 minutes of checks, long enough for the next main push to
     stale its replacement too.
   - **Dead-end bump PR.** A stale bump PR that was ejected from the merge
-    queue, is not armed, or has a failed required check never lands. With the
+    queue, has a failed required check, or carries a reviewer HOLD at its current
+    head never lands. Nobody arms PRs under the steward admission model, so an
+    unarmed PR is not a dead end: it is waiting for review or for the steward's
+    next pass and is LIVE. It is dead only when it was ejected from the queue,
+    a required check on its head failed, or the last line of a stamped comment by the verdict App is
+    `verdict: HOLD head:<sha>` with the sha equal to the current head. A HOLD on
+    an older head leaves the current head unreviewed, which is live. Comments
+    that cannot be read never make a PR dead. With the
     `PULP_BUMP_HEAL_STALE_PR=true` repo variable (default off) the drain closes
     it, opens a fresh bump covering the whole range, and reclaims the branch
     through the normal confirmed-no-PR `--force-with-lease` path. It acts only on
@@ -343,12 +385,36 @@ The bump can land two ways, selected by the `PULP_BUMP_ROUTE` repo variable
     (failure, cancelled, timed out) is a dead end too: re-arming it would wait
     for nothing until main moved. With the same variable the drain closes it
     and regenerates the bump; a covering PR in the merge queue, or one whose
-    checks are pending, green or unreadable, is re-armed and never closed.
+    checks are pending, green or unreadable, is kept and never closed.
     The workflow also runs on the bump PR's `dequeued` event and on a non-green
     completion of a workflow reporting its required checks (`workflow_run`,
     scoped to `release/version-bump`), so a dead end is healed when it dies
     rather than on the next push to main. Those runs check out main, never PR
     code.
+  - **Coalescing.** A bump PR recomputes every intent since the last marker,
+    so one bump PR covers any number of merges. Opening one per merge spends a
+    merge-queue validation on each bump. So when no bump PR is open, the drain
+    holds a new one (`coalesced`, exit 0 with a `::notice::`) while BOTH of
+    these are true: other PRs are waiting in the merge queue, and the last bump
+    landed less than `PULP_BUMP_COALESCE_MINUTES` ago (default 120; `0`
+    disables). It opens the PR on the first drain where either stops being
+    true, or at once when a release needs the number: dispatch the workflow
+    with `release_now: true`. The `*/15` scheduled drain makes sure the window
+    ending is acted on. A fact the drain cannot read (the merge queue, or the
+    time of the last landing) never holds the bump; it opens as it did before
+    coalescing. An already-open bump PR is not affected: it is waited
+    for or healed exactly as described above. The predicate is
+    `coalesce_decision` in `version_at_land.py`, covered by
+    `test_version_at_land.py` (`CoalesceDecisionTest`,
+    `PrRouteCoalesceTest`).
+  - **Liveness grace stays above the window.** The pending-intent alarm
+    (row 10 of `.agents/contract.toml`) pages when an intent stays unapplied
+    past its grace. That grace is 210 minutes: above the 120-minute window, the
+    15-minute drain cadence and a bump PR's queue validation, so a coalesced
+    bump never reads as a stuck bot. `test_pending_intent_liveness.py` fails if
+    the grace drops under that sum or the workflow default and the script
+    default disagree. Raising `PULP_BUMP_COALESCE_MINUTES` means raising the
+    grace with it.
   - **No regression / no double-bump.** `_strictly_increasing` drops any
     assignment that does not exceed the surface's version at the fresh head, so a
     stale drain can never walk a version backward (independent of whether the

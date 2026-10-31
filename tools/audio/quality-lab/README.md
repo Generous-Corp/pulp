@@ -209,7 +209,12 @@ Each axis carries its own materiality default; `--threshold` overrides. `noise-r
 `graininess` are meaningful on tonal/sustained material; `stereo-width` reads the original 2-channel
 signal (mono input → `not_applicable`) and flags an out-of-phase candidate; `transient-integrity`
 needs onset-bearing (percussive) material (too few onsets → `not_applicable`) and is one-directional
-(a softening is the regression; a sharper candidate reads no change).
+(a softening is the regression; a sharper candidate reads no change). It is shift-invariant: each
+reference attack is measured at its predicted candidate position (the cross-correlation lag), so a
+pure delay reads no change. One attack decides the verdict only when a second measure corroborates
+its lost sharpness: its energy dropped, or its energy arrived later (an attack smeared wide with its
+energy intact). A rise-time estimate that jumps on a low noise floor, with the energy in place, does
+not.
 
 - **Time-alignment (`--align`).** By default the axes are alignment-free, so a constant delay/offset
   false-alarms the sample residual (`not_corroborated`). `--align latency` estimates a single constant
