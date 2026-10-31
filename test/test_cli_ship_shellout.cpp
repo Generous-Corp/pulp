@@ -3269,3 +3269,254 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     REQUIRE_FALSE(fs::exists(root / "artifacts"));
     fs::remove_all(root);
 }
+
+// The ship-time release-artifact scan: `pulp ship check` (and sign / package,
+// which share the guard) runs tools/cmake/PulpReleaseArtifactScan.cmake over
+// the native binaries of the bundles it is about to vouch for, with the gates
+// the build's cache proves. The cases plant a real Mach-O fixture, append a
+// forbidden marker to it, and drive the CLI; the scanner and its list are the
+// real ones, copied from the checkout into the fake project's source tree.
+#if defined(__APPLE__) && defined(PULP_SHIP_STRIP_FIXTURE) && defined(PULP_SOURCE_DIR)
+namespace {
+
+// A fake project whose build cache records a release-style configure and whose
+// source tree carries the real scanner, so `pulp ship` finds both.
+fs::path make_scannable_project(std::string_view name, std::string_view dev_build) {
+    auto root = make_fake_project(name, true);
+    {
+        std::ofstream cache(root / "build" / "CMakeCache.txt", std::ios::app);
+        cache << "PULP_TRACING:BOOL=OFF\nPULP_DEV_BUILD:BOOL=" << dev_build << "\n";
+    }
+    fs::create_directories(root / "tools" / "cmake");
+    for (const char* file : {"PulpReleaseArtifactScan.cmake", "release_artifact_forbidden.json"})
+        fs::copy_file(fs::path(PULP_SOURCE_DIR) / "tools" / "cmake" / file,
+                      root / "tools" / "cmake" / file, fs::copy_options::overwrite_existing);
+    return root;
+}
+
+// Appends a forbidden string marker to the bundle's executable. The image's
+// load commands are untouched, so nm still reads it; file(STRINGS) sees the
+// marker as one printable run.
+void plant_marker(const fs::path& bundle, std::string_view name, std::string_view marker) {
+    std::ofstream out(bundle / "Contents" / "MacOS" / std::string(name),
+                      std::ios::binary | std::ios::app);
+    out << "\n" << marker << "\n";
+}
+
+} // namespace
+
+TEST_CASE_METHOD(
+    ShipShelloutFixture,
+    "pulp ship check refuses a bundle carrying a forbidden release marker and names it",
+    "[cli][shellout][ship][artifact-scan]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_scannable_project("artifact-scan-dirty", "OFF");
+    auto bundle = make_module_bundle(root, "VST3", "Leaky", ".vst3");
+    plant_marker(bundle, "Leaky", "PULP_SKP_CAPTURE_DIR");
+
+    auto r = run_pulp_in(root, {"ship", "check"});
+    INFO(r.stdout_output << r.stderr_output);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 1);
+    REQUIRE(contains(r.stderr_output,
+                     "refusing to check an artifact that carries a forbidden release marker"));
+    REQUIRE(contains(r.stderr_output, "devenv.skp-capture-dir"));
+    REQUIRE(contains(r.stderr_output, "dev-env-off"));
+    REQUIRE(contains(r.stderr_output, "--skip-artifact-scan"));
+    // The signing report still ran before the verdict.
+    REQUIRE(contains(r.stdout_output, "Leaky.vst3: unsigned"));
+
+    // JSON keeps stdout one document and carries the verdict; the report follows on stderr.
+    auto json = run_pulp_in(root, {"ship", "check", "--json"});
+    REQUIRE(json.exit_code == 1);
+    REQUIRE(json.stdout_output.rfind("{\"inspector_capabilities\"", 0) == 0);
+    REQUIRE(contains(json.stdout_output, "\"artifact_scan\":\"forbidden-marker\""));
+    REQUIRE(contains(json.stderr_output, "devenv.skp-capture-dir"));
+
+    // The deliberate override is loud and succeeds.
+    auto skipped = run_pulp_in(root, {"ship", "check", "--skip-artifact-scan"});
+    REQUIRE(skipped.exit_code == 0);
+    REQUIRE(contains(skipped.stderr_output,
+                     "release-artifact scan skipped because --skip-artifact-scan was passed"));
+    auto skipped_json = run_pulp_in(root, {"ship", "check", "--skip-artifact-scan", "--json"});
+    REQUIRE(skipped_json.exit_code == 0);
+    REQUIRE(contains(skipped_json.stdout_output, "\"artifact_scan\":\"overridden\""));
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship check passes a clean bundle and reports the gates it scanned under",
+                 "[cli][shellout][ship][artifact-scan]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_scannable_project("artifact-scan-clean", "OFF");
+    make_module_bundle(root, "CLAP", "Clean", ".clap");
+
+    auto r = run_pulp_in(root, {"ship", "check"});
+    INFO(r.stdout_output << r.stderr_output);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(contains(r.stdout_output, "release-artifact scan clean over 1 binary"));
+    REQUIRE(contains(r.stdout_output, "tracing-off"));
+    REQUIRE(contains(r.stdout_output, "dev-env-off"));
+    auto json = run_pulp_in(root, {"ship", "check", "--json"});
+    REQUIRE(json.exit_code == 0);
+    REQUIRE(contains(json.stdout_output, "\"artifact_scan\":\"clean\""));
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(
+    ShipShelloutFixture,
+    "pulp ship check scans under the gates the cache proves, so a dev build keeps its hooks",
+    "[cli][shellout][ship][artifact-scan]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    // PULP_DEV_BUILD=ON: dev-env-off is not a gate, so the dev-env marker is
+    // allowed; tracing-off still is, so the tracing sentinel is not.
+    auto root = make_scannable_project("artifact-scan-dev", "ON");
+    auto bundle = make_module_bundle(root, "VST3", "DevLoop", ".vst3");
+    plant_marker(bundle, "DevLoop", "PULP_SKP_CAPTURE_DIR");
+
+    auto allowed = run_pulp_in(root, {"ship", "check"});
+    INFO(allowed.stdout_output << allowed.stderr_output);
+    REQUIRE(allowed.exit_code == 0);
+    REQUIRE(contains(allowed.stdout_output, "release-artifact scan clean"));
+    REQUIRE_FALSE(contains(allowed.stdout_output, "dev-env-off"));
+
+    plant_marker(bundle, "DevLoop", "PULP_TRACING_COMPILED_IN__DO_NOT_SHIP");
+    auto refused = run_pulp_in(root, {"ship", "check"});
+    INFO(refused.stdout_output << refused.stderr_output);
+    REQUIRE(refused.exit_code == 1);
+    REQUIRE(contains(refused.stderr_output, "tracing.ship-sentinel"));
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship check skips the scan, and says so, when the build recorded no gate",
+                 "[cli][shellout][ship][artifact-scan]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    // The plain fake project: a cache with only CMAKE_HOME_DIRECTORY.
+    auto root = make_fake_project("artifact-scan-ungated", true);
+    auto bundle = make_module_bundle(root, "VST3", "Ungated", ".vst3");
+    plant_marker(bundle, "Ungated", "PULP_SKP_CAPTURE_DIR");
+
+    auto r = run_pulp_in(root, {"ship", "check"});
+    INFO(r.stdout_output << r.stderr_output);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(contains(r.stdout_output,
+                     "release-artifact scan skipped: the build recorded none of the options"));
+    auto json = run_pulp_in(root, {"ship", "check", "--json"});
+    REQUIRE(json.exit_code == 0);
+    REQUIRE(contains(json.stdout_output, "\"artifact_scan\":\"skipped\""));
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship sign refuses to sign a bundle carrying a forbidden release marker",
+                 "[cli][shellout][ship][artifact-scan]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_scannable_project("artifact-scan-sign", "OFF");
+    auto bundle = make_module_bundle(root, "CLAP", "LeakySign", ".clap");
+    write_default_entitlements(root);
+    plant_marker(bundle, "LeakySign", "PULP_RELOAD_LOGIC_PATH");
+
+    auto r = run_pulp_in(root, {"ship", "sign", "--identity", "-"});
+    INFO(r.stdout_output << r.stderr_output);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 1);
+    REQUIRE(contains(r.stderr_output,
+                     "refusing to sign an artifact that carries a forbidden release marker"));
+    REQUIRE(contains(r.stderr_output, "devenv.reload-logic-path"));
+    REQUIRE_FALSE(contains(r.stdout_output, "Signed 1 bundles."));
+
+    // --path takes the same guard.
+    auto path_sign =
+        run_pulp_in(root, {"ship", "sign", "--identity", "-", "--path", bundle.string()});
+    REQUIRE(path_sign.exit_code == 1);
+    REQUIRE(contains(path_sign.stderr_output, "devenv.reload-logic-path"));
+
+    // The override gets past the scan, loudly; what codesign then makes of a
+    // fixture with bytes appended past its segments is its own business, so
+    // only the scan's behavior is asserted here (check proves the override's
+    // exit code on the same guard).
+    auto overridden =
+        run_pulp_in(root, {"ship", "sign", "--identity", "-", "--skip-artifact-scan"});
+    INFO(overridden.stdout_output << overridden.stderr_output);
+    REQUIRE(contains(overridden.stderr_output, "--skip-artifact-scan was passed"));
+    REQUIRE_FALSE(contains(overridden.stderr_output, "forbidden release marker"));
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "a scan that cannot reach a verdict refuses as scan-error, not as a marker hit",
+                 "[cli][shellout][ship][artifact-scan]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    // A symlink as the --path artifact: the scan refuses to follow it.
+    auto root = make_scannable_project("artifact-scan-error", "OFF");
+    auto bundle = make_module_bundle(root, "CLAP", "Linked", ".clap");
+    write_default_entitlements(root);
+    const auto alias = root / "Alias.clap";
+    std::error_code ec;
+    fs::create_directory_symlink(bundle, alias, ec);
+    REQUIRE_FALSE(ec);
+    auto r = run_pulp_in(root, {"ship", "sign", "--identity", "-", "--path", alias.string()});
+    INFO(r.stdout_output << r.stderr_output);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 1);
+    REQUIRE(contains(r.stderr_output, "could not reach a verdict"));
+    REQUIRE(contains(r.stderr_output, "a symlink is not scanned"));
+    REQUIRE_FALSE(contains(r.stderr_output, "forbidden release marker"));
+    fs::remove_all(root);
+
+    // A bundle path carrying the CMake list separator cannot reach the
+    // scanner; check reports it as scan-error in JSON, distinct from a hit.
+    auto odd = make_scannable_project("artifact;scan", "OFF");
+    make_module_bundle(odd, "VST3", "Odd", ".vst3");
+    auto json = run_pulp_in(odd, {"ship", "check", "--json"});
+    INFO(json.stdout_output << json.stderr_output);
+    REQUIRE(json.exit_code == 1);
+    REQUIRE(contains(json.stdout_output, "\"artifact_scan\":\"scan-error\""));
+    REQUIRE(contains(json.stderr_output, "';'"));
+    auto text = run_pulp_in(odd, {"ship", "check"});
+    REQUIRE(text.exit_code == 1);
+    REQUIRE(contains(text.stderr_output, "could not reach a verdict"));
+    fs::remove_all(odd);
+}
+#endif
+
+#if defined(_WIN32)
+// The scanner needs a POSIX shell and nm, so on Windows the scan is skipped
+// with a line saying so; it must never refuse a signing there.
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship check skips the release-artifact scan on Windows and says so",
+                 "[cli][shellout][ship][artifact-scan]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("artifact-scan-windows", true);
+    {
+        std::ofstream cache(root / "build" / "CMakeCache.txt", std::ios::app);
+        cache << "PULP_TRACING:BOOL=OFF\nPULP_DEV_BUILD:BOOL=OFF\n";
+    }
+    auto r = run_pulp_in(root, {"ship", "check"});
+    INFO(r.stdout_output << r.stderr_output);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(contains(r.stdout_output, "release-artifact scan skipped: not supported on Windows"));
+    REQUIRE_FALSE(contains(r.stderr_output, "forbidden release marker"));
+    auto json = run_pulp_in(root, {"ship", "check", "--json"});
+    REQUIRE(json.exit_code == 0);
+    REQUIRE(contains(json.stdout_output, "\"artifact_scan\":\"skipped\""));
+    fs::remove_all(root);
+}
+#endif

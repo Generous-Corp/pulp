@@ -173,6 +173,9 @@ commands:
           - name: --allow-dev-build
             required: false
             description: Ship a build dir configured with PULP_DEV_BUILD=ON (the on-disk ui.js hot-reload path recorded) as it is, instead of building and shipping build-ship/
+          - name: --skip-artifact-scan
+            required: false
+            description: Override the ship-time release-artifact scan (tools/cmake/PulpReleaseArtifactScan.cmake over the native binaries about to be signed, under the gates the build cache and SDK provenance prove); prints a loud warning and proceeds
           - name: --path
             required: false
             description: Sign one explicit desktop artifact (macOS .app/.dmg/bundle, Windows .exe/bundle; .pkg is signed at package time) instead of scanning build dirs
@@ -220,6 +223,9 @@ commands:
           - name: --allow-dev-build
             required: false
             description: Ship a build dir configured with PULP_DEV_BUILD=ON (the on-disk ui.js hot-reload path recorded) as it is, instead of building and shipping build-ship/
+          - name: --skip-artifact-scan
+            required: false
+            description: Override the ship-time release-artifact scan of the plug-in bundles and apps selected for packaging; prints a loud warning and proceeds
           - name: --target
             required: false
           - name: --keystore
@@ -320,10 +326,13 @@ commands:
           - name: --pub-date
             required: false
       - name: check
-        summary: Check signing status of built desktop plugins or Android APK/AAB artifacts
+        summary: Check signing status of built desktop plugins or Android APK/AAB artifacts, and run the release-artifact forbidden-marker scan over the desktop bundles (exit 1 on a hit or when the scan cannot reach a verdict; `--json` reports `artifact_scan` as clean, forbidden-marker, scan-error, overridden or skipped; skipped on Windows)
         args:
           - name: --target
             required: false
+          - name: --skip-artifact-scan
+            required: false
+            description: Report signing status only; skip the release-artifact scan (`--json` reports `artifact_scan` as `overridden`)
       - name: doctor
         summary: "Make signing+notarization non-interactive (no keychain/1Password prompt): self-heal the dedicated signing keychain and validate the file-based .p8 notary key. No build dir required. In an SDK consumer project the script comes from the selected SDK's share/pulp/ship. Run automatically as a fail-closed preflight by `ship sign`."
         args:

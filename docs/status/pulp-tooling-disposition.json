@@ -3516,6 +3516,10 @@
                 "required": false
               },
               {
+                "name": "--skip-artifact-scan",
+                "required": false
+              },
+              {
                 "name": "--path",
                 "required": false
               },
@@ -3601,6 +3605,10 @@
               },
               {
                 "name": "--allow-dev-build",
+                "required": false
+              },
+              {
+                "name": "--skip-artifact-scan",
                 "required": false
               },
               {
@@ -3799,6 +3807,10 @@
             "arguments": [
               {
                 "name": "--target",
+                "required": false
+              },
+              {
+                "name": "--skip-artifact-scan",
                 "required": false
               }
             ],

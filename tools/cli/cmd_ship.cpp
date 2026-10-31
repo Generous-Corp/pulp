@@ -7,6 +7,7 @@
 #include "private_temp_dir.hpp"
 #include "ship_dev_build_guard.hpp"
 #include "ship_tracing_guard.hpp"
+#include "ship_artifact_scan_guard.hpp"
 #include "tartci_lease.hpp"
 #include "inspector_container_report.hpp"
 #include "inspector_shipping_report.hpp"
@@ -108,6 +109,9 @@ static int print_ship_help() {
     std::cout << "             --path <artifact>  "
                  "(sign one explicit desktop artifact; .pkg is signed by package)\n";
     std::cout << "             --target android --keystore key.jks  (Android)\n";
+    std::cout << "             --skip-artifact-scan  (override the release-artifact "
+                 "forbidden-marker scan "
+                 "of the bytes being signed; package and check honor it too)\n";
     std::cout << "  notarize   Submit signed bundles for Apple notarization (macOS)\n";
     std::cout << "             --api-key <p8> --api-key-id <id> --api-issuer <uuid>   (preferred)\n";
     std::cout << "             --apple-id you@example.com --team-id ABCDE12345        (legacy)\n";
@@ -153,6 +157,8 @@ static int print_ship_help() {
     std::cout << "  check      Check signing status of built desktop plugins or Android APK/AAB artifacts\n";
     std::cout << "             --json  (include inspector capability declarations)\n";
     std::cout << "             --target android  (check APK/AAB in artifacts/)\n";
+    std::cout << "             --skip-artifact-scan  (report signing only; skip the "
+                 "forbidden-marker scan)\n";
     std::cout << "  doctor     Make signing+notarization non-interactive (no keychain/1Password prompt)\n";
     std::cout << "             --check-online  (validate the .p8 against Apple, refresh pulp-notary profile)\n";
     std::cout << "             --print-env     (emit resolved identity/keychain handles; no secrets)\n";
@@ -245,6 +251,139 @@ static int enforce_no_tracing(const std::vector<fs::path>& roots,
         return 1;
     }
     return 0;
+}
+
+// Runs `cmd` with no stdin and both output streams captured into `out`.
+// Returns the command's exit status, or -1 when it could not be started.
+static int run_captured_command(const std::string& cmd, std::string& out) {
+    out.clear();
+    FILE* pipe = popen((cmd + " </dev/null 2>&1").c_str(), "r");
+    if (!pipe)
+        return -1;
+    char buf[4096];
+    while (size_t n = fread(buf, 1, sizeof(buf), pipe))
+        out.append(buf, n);
+    const int status = pclose(pipe);
+#if defined(_WIN32)
+    return status;
+#else
+    if (status == -1)
+        return -1;
+    return WIFEXITED(status) ? WEXITSTATUS(status) : 128;
+#endif
+}
+
+// Ship-time release-artifact scan. Runs PulpReleaseArtifactScan.cmake, the one
+// scanner behind every "a release artifact must not contain X" check, over the
+// native binaries of the artifacts about to be signed, packaged or reported on,
+// with the gates the build directory's cache and the installed SDK's provenance
+// prove (ship_artifact_scan_guard.hpp). The build's ctests hold the same list
+// on the artifact classes they build; this holds it on the bytes that leave
+// the machine. Returns 0 when the scan is clean, or when nothing applies and
+// says which (no cache, no gate recorded, no scanner installed, no native
+// binary). Returns 1 with the scanner's report when a forbidden marker is
+// present, unless `skip_scan` overrides, which prints a loud warning. A scan
+// that could not run or reach a verdict (a symlink or unreadable artifact, a
+// runner that failed to start, the scanner's own FATAL for no evidence) also
+// refuses, reported as `scan-error` so automation reading `check --json` can
+// tell "the binary is dirty" from "the scan did not happen". On Windows the
+// scan is skipped and says so: the runner would go through cmd.exe and an
+// MSVC host has no nm.
+static int enforce_release_artifact_scan(const fs::path& build_dir,
+                                         const std::vector<fs::path>& artifacts, bool skip_scan,
+                                         const std::string& stage, std::string* status = nullptr) {
+    const std::string who = "pulp ship " + stage;
+    const auto report_status = [status](const char* value) {
+        if (status)
+            *status = value;
+    };
+    report_status("skipped");
+    if (skip_scan) {
+        report_status("overridden");
+        std::cerr << "⚠︎  " << who
+                  << ": release-artifact scan skipped because --skip-artifact-scan was passed.\n";
+        return 0;
+    }
+    if (!pulp::cli::release_scan_supported()) {
+        std::cout
+            << who
+            << ": release-artifact scan skipped: not supported on Windows (the scanner needs "
+               "a POSIX shell and nm); the build's own release-artifact ctests hold the list.\n";
+        return 0;
+    }
+    const auto cache = pulp::cli::read_cmake_cache(build_dir);
+    if (!cache) {
+        std::cout << who << ": release-artifact scan skipped: " << build_dir.string()
+                  << " has no CMakeCache.txt to derive the build's gates from.\n";
+        return 0;
+    }
+    const auto gates =
+        pulp::cli::release_scan_gates(*cache, pulp::cli::read_sdk_provenance(*cache));
+    std::string gate_list;
+    for (const auto& gate : gates)
+        gate_list += (gate_list.empty() ? "" : ";") + gate;
+    if (gates.empty()) {
+        std::cout << who
+                  << ": release-artifact scan skipped: the build recorded none of the options "
+                     "the forbidden-marker list gates on.\n";
+        return 0;
+    }
+    const auto script = pulp::cli::release_scan_script(*cache);
+    if (!script) {
+        std::cout << who << ": release-artifact scan skipped: " << pulp::cli::kReleaseScanScriptName
+                  << " is neither beside the build's source tree nor in its SDK.\n";
+        return 0;
+    }
+    const auto scan_error = [&](const std::string& why) {
+        report_status("scan-error");
+        std::cerr << "Error: refusing to " << stage
+                  << ": the release-artifact scan could not reach a verdict.\n"
+                  << why << (why.empty() || why.back() == '\n' ? "" : "\n")
+                  << "  Nothing was found or cleared; fix the input or the scanner, or pass "
+                     "--skip-artifact-scan to override deliberately.\n";
+        return 1;
+    };
+    std::vector<fs::path> targets;
+    for (const auto& artifact : artifacts) {
+        if (artifact.empty())
+            continue;
+        std::string why;
+        auto found = pulp::cli::release_scan_targets(artifact, &why);
+        if (!why.empty())
+            return scan_error("  " + why);
+        targets.insert(targets.end(), found.begin(), found.end());
+    }
+    if (targets.empty())
+        return 0; // a disk image or a flat package: nothing native to read
+    std::string cmd;
+    for (const auto& arg : pulp::cli::release_scan_argv(pulp::cli::release_scan_cmake(*cache),
+                                                        *script, gates, targets, who))
+        cmd += (cmd.empty() ? "" : " ") + shell_quote(arg);
+    std::string report;
+    const int rc = run_captured_command(cmd, report);
+    if (rc == -1)
+        return scan_error("  could not start: " + cmd);
+    // The scanner's own verdict text; anything else non-zero is the scanner
+    // failing (nm on an unreadable input, no evidence source) rather than a hit.
+    if (rc != 0 && report.find("forbidden marker(s) present") == std::string::npos)
+        return scan_error(report);
+    if (rc == 0) {
+        report_status("clean");
+        std::cout << who << ": release-artifact scan clean over " << targets.size()
+                  << (targets.size() == 1 ? " binary" : " binaries") << " (gates: " << gate_list
+                  << ").\n";
+        return 0;
+    }
+    report_status("forbidden-marker");
+    std::cerr << "Error: refusing to " << stage
+              << " an artifact that carries a forbidden release marker.\n"
+              << report << (report.empty() || report.back() == '\n' ? "" : "\n")
+              << "  The scan ran " << script->string() << " with the gates the build's cache "
+              << "and SDK provenance prove (" << gate_list << ").\n"
+              << "  Rebuild from a release configure (pulp ship builds build-ship/ for a dev "
+                 "build), or pass\n"
+              << "  --skip-artifact-scan to override deliberately.\n";
+    return 1;
 }
 
 // The JS engine the build directory was configured with, read from its
@@ -955,6 +1094,7 @@ static int ship_sign(const std::vector<std::string>& args,
         std::string entitlements = default_entitlements(root).string();
         bool allow_tracing = false;  // override the PULP_TRACING ship guard
         bool allow_dev_build = false; // override the PULP_DEV_BUILD ship guard
+        bool skip_artifact_scan = false; // override the release-artifact marker scan
         for (size_t i = 1; i < args.size(); ++i) {
             if (args[i] == "--identity") {
                 if (!take_ship_value(args, i, sub, args[i], identity)) return 2;
@@ -962,6 +1102,8 @@ static int ship_sign(const std::vector<std::string>& args,
                 allow_tracing = true;
             } else if (args[i] == "--allow-dev-build") {
                 allow_dev_build = true;
+            } else if (args[i] == "--skip-artifact-scan") {
+                skip_artifact_scan = true;
             } else if (args[i] == "--path") {
                 if (!take_ship_value(args, i, sub, args[i], sign_path)) return 2;
             } else if (args[i] == "--entitlements") {
@@ -1109,6 +1251,10 @@ static int ship_sign(const std::vector<std::string>& args,
                     rc != 0)
                     return rc;
             }
+            if (int rc = enforce_release_artifact_scan(build_dir, {fs::path(sign_path)},
+                                                       skip_artifact_scan, sub);
+                rc != 0)
+                return rc;
 #ifdef __APPLE__
             if (!ad_hoc && !run_signing_preflight(root))
                 return 1;
@@ -1143,6 +1289,9 @@ static int ship_sign(const std::vector<std::string>& args,
             return 1;
         }
         if (int rc = enforce_no_development_runtimes(bundles, local_identity); rc != 0)
+            return rc;
+        if (int rc = enforce_release_artifact_scan(build_dir, bundles, skip_artifact_scan, sub);
+            rc != 0)
             return rc;
         if (int rc = enforce_jit_entitlement(build_dir, fs::path(entitlements), bundles); rc != 0)
             return rc;
@@ -1254,6 +1403,7 @@ static int ship_package_impl(const std::vector<std::string>& args,
         bool per_user = false, apk_only = false, aab_only = false;
         bool allow_tracing = false;  // override the PULP_TRACING ship guard
         bool allow_dev_build = false; // override the PULP_DEV_BUILD ship guard
+        bool skip_artifact_scan = false; // override the release-artifact marker scan
         bool ship_inspector = false;
         bool ship_inspector_runtime_eval = false;
         // macOS packaging. DEFAULT: one component-selectable installer — a single
@@ -1317,6 +1467,8 @@ static int ship_package_impl(const std::vector<std::string>& args,
             else if (args[i] == "--allow-tracing") allow_tracing = true;
             else if (args[i] == "--allow-dev-build")
                 allow_dev_build = true;
+            else if (args[i] == "--skip-artifact-scan")
+                skip_artifact_scan = true;
             else if (args[i] == "--ship-inspector") ship_inspector = true;
             else if (args[i] == "--ship-inspector-runtime-eval")
                 ship_inspector_runtime_eval = true;
@@ -1341,6 +1493,12 @@ static int ship_package_impl(const std::vector<std::string>& args,
             inspector_artifacts.emplace_back(binary_path,
                 product_filter.empty() ? fs::path(binary_path).filename().string()
                                        : product_filter);
+        if (!binary_path.empty()) {
+            if (int rc = enforce_release_artifact_scan(build_dir, {fs::path(binary_path)},
+                                                       skip_artifact_scan, sub);
+                rc != 0)
+                return rc;
+        }
 #endif
 #if defined(__APPLE__)
         const auto standalone_apps = find_standalone_apps(build_dir, product_filter);
@@ -1362,6 +1520,10 @@ static int ship_package_impl(const std::vector<std::string>& args,
         // filtering and before creating a DMG/pkg or invoking a packager.
         if (target != "android") {
             if (int rc = enforce_no_development_runtimes(selected_macos_artifacts); rc != 0)
+                return rc;
+            if (int rc = enforce_release_artifact_scan(build_dir, selected_macos_artifacts,
+                                                       skip_artifact_scan, sub);
+                rc != 0)
                 return rc;
         }
         if (target != "android") {
@@ -1838,11 +2000,14 @@ static int ship_check(const std::vector<std::string>& args,
     const std::string sub = "check";
         std::string target;
         bool json_output = false;
+        bool skip_artifact_scan = false; // report signing only; skip the marker scan
         for (size_t i = 1; i < args.size(); ++i)
             if (args[i] == "--target") {
                 if (!take_ship_value(args, i, sub, args[i], target)) return 2;
             } else if (args[i] == "--json") {
                 json_output = true;
+            } else if (args[i] == "--skip-artifact-scan") {
+                skip_artifact_scan = true;
             } else {
                 return unknown_ship_arg(sub, args[i]);
             }
@@ -1855,6 +2020,10 @@ static int ship_check(const std::vector<std::string>& args,
             return 2;
         }
         std::vector<std::pair<std::string, bool>> checked_artifacts;
+        // The release-artifact scan's verdict over the desktop bundles:
+        // "clean", "forbidden-marker", "overridden" (--skip-artifact-scan) or
+        // "skipped" (nothing applied, or an Android check).
+        std::string artifact_scan_status = "skipped";
         const auto emit_json = [&] {
             std::cout << "{\"inspector_capabilities\": "
                       << inspector_report.json << ",\"artifacts\":[";
@@ -1865,7 +2034,8 @@ static int ship_check(const std::vector<std::string>& args,
                           << ",\"signed\":"
                           << (checked_artifacts[i].second ? "true" : "false") << "}";
             }
-            std::cout << "]}\n";
+            std::cout << "],\"artifact_scan\":" << pulp::cli::json_string(artifact_scan_status)
+                      << "}\n";
         };
 
         if (target == "android") {
@@ -1899,12 +2069,14 @@ static int ship_check(const std::vector<std::string>& args,
             return 0;
         }
 
+        std::vector<fs::path> bundles;
         for (auto dir_name : {"VST3", "CLAP", "AU"}) {
             auto dir = build_dir / dir_name;
             if (!fs::exists(dir)) continue;
             for (auto& entry : fs::directory_iterator(dir)) {
                 auto ext = entry.path().extension().string();
                 if (ext == ".vst3" || ext == ".clap" || ext == ".component") {
+                    bundles.push_back(entry.path());
                     auto info = pulp::ship::check_codesign(entry.path().string());
                     checked_artifacts.emplace_back(
                         entry.path().filename().string(), info.is_valid);
@@ -1914,8 +2086,27 @@ static int ship_check(const std::vector<std::string>& args,
                 }
             }
         }
-        if (json_output) emit_json();
-        return 0;
+        // The same forbidden-marker scan sign and package run, over the same
+        // bundles, so `check` reports what those steps would refuse. In JSON
+        // mode its text is held back so stdout stays one document; a failing
+        // scan's report then follows on stderr.
+        std::ostringstream scan_report;
+        int scan_rc = 0;
+        if (json_output) {
+            ScopedOutputCapture capture_stdout(std::cout, scan_report.rdbuf());
+            ScopedOutputCapture capture_stderr(std::cerr, scan_report.rdbuf());
+            scan_rc = enforce_release_artifact_scan(build_dir, bundles, skip_artifact_scan, sub,
+                                                    &artifact_scan_status);
+        } else {
+            scan_rc = enforce_release_artifact_scan(build_dir, bundles, skip_artifact_scan, sub,
+                                                    &artifact_scan_status);
+        }
+        if (json_output) {
+            emit_json();
+            if (scan_rc != 0)
+                std::cerr << scan_report.str();
+        }
+        return scan_rc == 0 ? 0 : 1;
 }
 
     // ── notarize ────────────────────────────────────────────────────────────
