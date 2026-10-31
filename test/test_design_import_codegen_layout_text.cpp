@@ -1479,7 +1479,7 @@ TEST_CASE("web compat preserves authored frame heights in a shrinking host",
     ir.root.children.push_back(child);
 
     CodeGenOptions opts;
-    opts.mode = CodeGenMode::web_compat_js;
+    opts.mode = CodeGenMode::web_compat;
     opts.include_comments = false;
     const auto js = generate_pulp_js(ir, opts);
 
