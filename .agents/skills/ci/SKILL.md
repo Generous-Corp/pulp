@@ -560,6 +560,21 @@ a regenerated `changed-surface-families.toml` carrying. To add an exclusion,
 append it to that list. When Shipyard's default changes, compare the two lists
 again, or Pulp silently drops the new protection.
 
+## The `review-verdict` check (not yet a required context)
+
+`.github/workflows/review-verdict.yml` runs Shipyard's `review_verdict_status.py`
+from a pinned Shipyard commit (never the pull request's code) and fails unless
+the exact head is approved and not held, so once `review-verdict` is a required
+check bound to GitHub Actions, GitHub itself refuses a held head, whoever armed
+it. Reviews reach it through `review-verdict-trigger.yml` (a no-permission
+workflow whose completion starts the poster via `workflow_run`). A comment or
+review re-runs the head's own check, so an APPROVE or HOLD changes it without a
+push. `review-verdict-merge-group.yml` reports the same context green for a
+merge-queue entry (the synthetic merge commit no review can name; admission
+already required the verdict), so making the check required cannot stall the
+queue. Bump the pinned Shipyard `ref` only to a commit that still contains the
+sticky-HOLD rule.
+
 ## A failed batch's branch name is not the culprit
 
 A merge_group batch is NAMED for one pull request but CONTAINS every entry
