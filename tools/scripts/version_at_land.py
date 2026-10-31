@@ -218,10 +218,11 @@ def plan_assignments(config: Config, changed: list[str], base: str, head: str,
 
 # ── Git helpers ────────────────────────────────────────────────────────────
 
-def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
+def _git(repo: Path, *args: str, check: bool = True,
+         env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["git", "-C", str(repo), *args],
-        check=check, capture_output=True, text=True, encoding="utf-8",
+        check=check, capture_output=True, text=True, encoding="utf-8", env=env,
     )
 
 
