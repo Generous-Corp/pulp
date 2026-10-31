@@ -986,8 +986,8 @@ static void emit_js_layout_constraints(const NativeEmit& e, const std::string& t
     // boxes to the host viewport (for example, a tall panel rendered into a
     // short initial viewport). Preserve the captured main-axis extent unless
     // the source explicitly supplied a shrink policy above.
-    if (!L.flex_shrink && e.parent_direction &&
-        *e.parent_direction == LayoutDirection::column && node.style.height) {
+    if (!L.flex_shrink && e.parent_direction && *e.parent_direction == LayoutDirection::column &&
+        node.style.height) {
         ss << ind << "setFlex('" << target_id << "', 'flex_shrink', 0);\n";
     }
     // Explicit per-child flex properties (Figma auto-layout children:

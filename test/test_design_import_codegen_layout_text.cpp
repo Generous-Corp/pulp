@@ -1444,8 +1444,7 @@ TEST_CASE("generate_pulp_js bridge_native_js mode covers layout and audio widget
     REQUIRE(js.find("setBackground('divider6', '#333333')") != std::string::npos);
 }
 
-TEST_CASE("generate_pulp_js preserves explicit heights in column flow",
-          "[view][import]") {
+TEST_CASE("generate_pulp_js preserves explicit heights in column flow", "[view][import]") {
     DesignIR ir;
     ir.root.type = "frame";
     ir.root.layout.direction = LayoutDirection::column;
