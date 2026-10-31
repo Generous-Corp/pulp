@@ -9,6 +9,36 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1371"></a>
+## [1.37.1] - 2026-10-31
+
+- release/version bump ([#11320](https://github.com/Generous-Corp/pulp/pull/11320))
+- fix/version at land heal approved ([#11322](https://github.com/Generous-Corp/pulp/pull/11322))
+- docs/host boundaries 20261031 ([#11321](https://github.com/Generous-Corp/pulp/pull/11321))
+- feature/native cv provider recipe 20261031 ([#11319](https://github.com/Generous-Corp/pulp/pull/11319))
+- feature/real world inputs android motion 20261031 ([#11316](https://github.com/Generous-Corp/pulp/pull/11316))
+- feature/sensor coherent replay 20261031 ([#11314](https://github.com/Generous-Corp/pulp/pull/11314))
+- feature/sensor input phase1 20261031 ([#11312](https://github.com/Generous-Corp/pulp/pull/11312))
+- fix/release cli illustrator helper ([#11313](https://github.com/Generous-Corp/pulp/pull/11313))
+- docs/how a pr lands ([#11310](https://github.com/Generous-Corp/pulp/pull/11310))
+- codex/importer motion custom prop 20261031 ([#11309](https://github.com/Generous-Corp/pulp/pull/11309))
+- release/version bump ([#11307](https://github.com/Generous-Corp/pulp/pull/11307))
+
+<a id="v1370"></a>
+## [1.37.0] - 2026-10-31
+
+- release/version bump ([#11306](https://github.com/Generous-Corp/pulp/pull/11306))
+- ci/build dispatch merge ref 20261025 ([#11053](https://github.com/Generous-Corp/pulp/pull/11053))
+- fix/version at land coalesce ([#10960](https://github.com/Generous-Corp/pulp/pull/10960))
+- fix/merge group exclusive label ([#11258](https://github.com/Generous-Corp/pulp/pull/11258))
+- codex/r7 vst3 domain fix 20261030 ([#11290](https://github.com/Generous-Corp/pulp/pull/11290))
+- codex/r3 r4 midi latency fixture ([#11295](https://github.com/Generous-Corp/pulp/pull/11295))
+- audit/x9 workflow probe 20261030 ([#11296](https://github.com/Generous-Corp/pulp/pull/11296))
+- codex/r2 graph measurement ([#11297](https://github.com/Generous-Corp/pulp/pull/11297))
+- audit/r7 external lifecycle 20261030 ([#11298](https://github.com/Generous-Corp/pulp/pull/11298))
+- release/version bump ([#11305](https://github.com/Generous-Corp/pulp/pull/11305))
+- ci/steward diagnostic dry run only ([#11304](https://github.com/Generous-Corp/pulp/pull/11304))
+
 <a id="v1360"></a>
 ## [1.36.0] - 2026-10-31
 
@@ -11927,6 +11957,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.37.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.37.1
+[1.37.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.37.0
 [1.36.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.36.0
 [1.35.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.35.1
 [1.35.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.35.0

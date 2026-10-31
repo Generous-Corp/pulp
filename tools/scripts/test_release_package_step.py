@@ -196,7 +196,8 @@ class ScriptBehaviour(unittest.TestCase):
     """Run the real script against a fake build tree and a recording packager."""
 
     def run_script(self, platform: str, tag: str | None, *, import_design: bool = True,
-                   node: bool = False) -> list[str]:
+                   node: bool = False, illustrator: bool = True,
+                   expect_failure: bool = False) -> list[str]:
         tmp = Path(tempfile.mkdtemp(prefix="release-package-"))
         self.addCleanup(shutil.rmtree, tmp, True)
         (tmp / "CMakeLists.txt").write_text(
@@ -215,7 +216,9 @@ class ScriptBehaviour(unittest.TestCase):
             binary = idd / "pulp-import-design"
             binary.write_text("", encoding="utf-8")
             binary.chmod(binary.stat().st_mode | stat.S_IXUSR)
-            (idd / "illustrator_to_svg.py").write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+            if illustrator:
+                (idd / "illustrator_to_svg.py").write_text(
+                    "#!/usr/bin/env python3\n", encoding="utf-8")
             for mjs in ("materialized_binding_contract", "materialized_source_emitter",
                         "materialized_ids_map"):
                 (idd / "jsx-runtime" / f"{mjs}.mjs").write_text("", encoding="utf-8")
@@ -226,6 +229,9 @@ class ScriptBehaviour(unittest.TestCase):
         cmd = ["bash", str(REPO_ROOT / SCRIPT), platform] + ([tag] if tag else [])
         proc = subprocess.run(cmd, cwd=tmp, env=env, capture_output=True, text=True,
                               encoding="utf-8")
+        if expect_failure:
+            self.assertNotEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            return proc.stderr.splitlines()
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertTrue((tmp / f"pulp-{platform}.tar.gz").is_file())
         return (tmp / "argv.txt").read_text(encoding="utf-8").splitlines()
@@ -262,6 +268,40 @@ class ScriptBehaviour(unittest.TestCase):
     def test_without_import_design_no_import_design_args(self) -> None:
         argv = self.run_script("linux-x64", "v0.966.0", import_design=False)
         self.assertFalse([a for a in argv if a.startswith("--import-design")])
+
+
+class ImportDesignMatrixMembers(unittest.TestCase):
+    """Every import-design/ file the product matrix requires must be packaged."""
+
+    MATRIX = REPO_ROOT / "tools/scripts/release_product_matrix.json"
+    CMAKE = REPO_ROOT / "tools/import-design/CMakeLists.txt"
+
+    def matrix_members(self) -> list[str]:
+        import json
+        doc = json.loads(self.MATRIX.read_text(encoding="utf-8"))
+        return [m for m in doc["common_cli_members"] if m.startswith("import-design/")]
+
+    def test_the_matrix_requires_the_illustrator_helper(self) -> None:
+        self.assertIn("import-design/illustrator_to_svg.py", self.matrix_members())
+
+    def test_the_build_stages_every_required_member_where_packaging_reads_it(self) -> None:
+        cmake = self.CMAKE.read_text(encoding="utf-8")
+        for member in self.matrix_members():
+            name = member.removeprefix("import-design/")
+            self.assertTrue((REPO_ROOT / "tools/import-design" / name).is_file(), member)
+            self.assertIn(f"$<TARGET_FILE_DIR:pulp-import-design>/{name}", cmake,
+                          f"{member} is required by the product matrix but the "
+                          "build never stages it for release packaging")
+
+    def test_a_current_release_without_the_helper_fails_loudly(self) -> None:
+        err = ScriptBehaviour("run_script").run_script(
+            "linux-x64", "v1.37.0", illustrator=False, expect_failure=True)
+        self.assertTrue([l for l in err if "illustrator_to_svg.py is missing" in l], err)
+
+    def test_a_pre_helper_release_still_omits_it(self) -> None:
+        argv = ScriptBehaviour("run_script").run_script(
+            "linux-x64", "v1.11.0", illustrator=False)
+        self.assertNotIn("--import-design-illustrator-helper", argv)
 
 
 class MergeGroupClassifier(unittest.TestCase):

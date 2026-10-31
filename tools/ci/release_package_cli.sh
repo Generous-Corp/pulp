@@ -56,6 +56,18 @@ if [ -x build/tools/import-design/pulp-import-design ] \
     import_design_args+=(
       --import-design-illustrator-helper build/tools/import-design/illustrator_to_svg.py
     )
+  elif "$python" - "$release_tag" <<'PY'
+import json, sys
+v = lambda s: tuple(map(int, s.removeprefix("v").split(".")))
+try:
+    floor = json.load(open("tools/scripts/release_product_matrix.json"))["illustrator_import_floor"]
+except (OSError, KeyError):
+    sys.exit(1)
+sys.exit(0 if v(sys.argv[1]) >= v(floor) else 1)
+PY
+  then
+    echo "::error::build/tools/import-design/illustrator_to_svg.py is missing but this release requires it; the import-design build must stage it" >&2
+    exit 1
   else
     echo "note: this historical import-design build has no Illustrator helper; omitting it" >&2
   fi
