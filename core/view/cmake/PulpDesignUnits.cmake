@@ -83,8 +83,10 @@ add_library(pulp-design-import STATIC
     src/design_ir_analysis.cpp
     src/design_import_v0_tsx.cpp
     src/design_import_native_common.cpp
+    src/design_import_text_raster.cpp
     src/design_import_native_fonts.cpp
     src/design_import_form_controls.cpp
+    src/design_js_capture_lowering.cpp
     src/design_import_legacy_registry.cpp
     src/design_import_document_checks.cpp
     src/design_cpp_codegen.cpp

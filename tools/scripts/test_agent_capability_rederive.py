@@ -8,6 +8,7 @@ Over-bumping is not the safe direction — it fails the opposite evolution rule,
 """
 from __future__ import annotations
 
+import io
 import pathlib
 import subprocess
 import sys
@@ -243,10 +244,13 @@ def exercise_reset_is_write_path_only() -> int:
 
 
 def exercise_prints_comparison_receipt() -> int:
+    # HEAD always contains itself, so the receipt does not depend on how far
+    # this checkout is behind origin/main.
     completed = subprocess.run(
         [sys.executable, str(ROOT / "tools/scripts/agent_capability_rederive.py"),
          "--print"],
         cwd=ROOT, capture_output=True, text=True,
+        env={**rederive.history.os.environ, "PULP_AGENT_CAPABILITY_BASE_REF": "HEAD"},
     )
     assert completed.returncode == 0, completed.stderr
     assert "comparison receipt" in completed.stdout, completed.stdout
@@ -581,8 +585,190 @@ def exercise_git_unavailable_is_not_source_archive() -> int:
     return 6
 
 
+class _BaseFixture:
+    """A repository whose protected base moved after a branch forked from it.
+
+    `main` fingerprints core/a.hpp and carries one history entry. The branch
+    forks, changes only notes.txt, and then `main` changes core/a.hpp, bumps
+    the inventory, and appends a second history entry: the shape of a branch
+    one counter behind main that carries none of main's newer entries.
+    """
+
+    HISTORY = "tools/agent-capabilities/contract-history.json"
+    MANIFEST = "tools/scripts/agent_capability_manifest.py"
+
+    def __init__(self, root: pathlib.Path) -> None:
+        self.root = root
+        self.git("init", "-q", "-b", "main")
+        self.git("config", "user.email", "t@t")
+        self.git("config", "user.name", "t")
+        self._write_base(inventory=1, header="v1\n", entries=['{"n": 1}'])
+        self.git("add", ".")
+        self.git("commit", "-qm", "base")
+        self.git("checkout", "-qb", "branch")
+        (root / "notes.txt").write_text("branch work\n", encoding="utf-8")
+        self.git("add", ".")
+        self.git("commit", "-qm", "branch work")
+        self.git("checkout", "-q", "main")
+        self._write_base(inventory=2, header="v2\n", entries=['{"n": 1}', '{"n": 2}'])
+        self.git("add", ".")
+        self.git("commit", "-qm", "main moves the base")
+        self.tip = self.git("rev-parse", "HEAD")
+        self.git("checkout", "-q", "branch")
+
+    def git(self, *arguments: str) -> str:
+        return subprocess.run(
+            ["git", *arguments], cwd=self.root, check=True,
+            capture_output=True, text=True, encoding="utf-8",
+        ).stdout.strip()
+
+    def _write_base(self, inventory: int, header: str, entries: list[str]) -> None:
+        def put(relative: str, text: str) -> None:
+            path = self.root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+
+        put("core/a.hpp", header)
+        put(str(rederive.history.SNAPSHOT), '{"manifest_revision": 1}\n')
+        put(
+            str(rederive.surface.SURFACE_SNAPSHOT),
+            '{"inventory_version": %d, "headers": [{"source": "core/a.hpp"}]}\n'
+            % inventory,
+        )
+        put(self.HISTORY, '{"entries": [' + ", ".join(entries) + "]}\n")
+        put(
+            self.MANIFEST,
+            "MANIFEST_REVISION = 1\nSURFACE_INVENTORY_VERSION = %d\n" % inventory,
+        )
+
+    def tracked_bytes(self) -> dict[str, bytes]:
+        return {
+            relative: (self.root / relative).read_bytes()
+            for relative in (
+                self.HISTORY, self.MANIFEST, str(rederive.history.SNAPSHOT),
+                str(rederive.surface.SURFACE_SNAPSHOT),
+            )
+        }
+
+    def resolve(self, root: pathlib.Path | None = None) -> tuple:
+        with mock.patch.dict(
+            rederive.history.os.environ,
+            {"PULP_AGENT_CAPABILITY_BASE_REF": "main"},
+        ):
+            return rederive._resolve_base(root or self.root)
+
+    def tree_json(self, relative: pathlib.Path) -> dict:
+        return rederive.history.json.loads((self.root / relative).read_text(encoding="utf-8"))
+
+    def run(self, *arguments: str) -> tuple[int, str]:
+        """rederive's CLI against this repository, base pinned to `main`."""
+        script = self.root / "tools/scripts/agent_capability_rederive.py"
+        stderr = io.StringIO()
+        with mock.patch.object(rederive, "__file__", str(script)), mock.patch.dict(
+            rederive.history.os.environ,
+            {"PULP_AGENT_CAPABILITY_BASE_REF": "main"},
+        ), mock.patch.object(rederive.sys, "stderr", stderr):
+            code = rederive.main(list(arguments))
+        return code, stderr.getvalue()
+
+
+def exercise_refuses_branch_behind_base() -> int:
+    """A branch one counter behind main must refuse and write nothing."""
+    with tempfile.TemporaryDirectory() as directory:
+        fixture = _BaseFixture(pathlib.Path(directory))
+        before = fixture.tracked_bytes()
+        for arguments in ((), ("--print",)):
+            code, stderr = fixture.run(*arguments)
+            assert code == 1, (arguments, stderr)
+            assert "does not contain the protected base " + fixture.tip in stderr, stderr
+            assert "Merge origin/main first" in stderr, stderr
+            assert "core/a.hpp" in stderr, stderr
+        assert fixture.tracked_bytes() == before, "a refused rederive changed files"
+        assert fixture.git("status", "--porcelain") == "", fixture.git("status")
+    return 5
+
+
+def exercise_allows_branch_with_base_merged() -> int:
+    """Once main is merged, the guard passes and history keeps main's bytes."""
+    with tempfile.TemporaryDirectory() as directory:
+        fixture = _BaseFixture(pathlib.Path(directory))
+        fixture.git("merge", "-q", "--no-edit", "main")
+        base_history = fixture.git("show", "main:" + fixture.HISTORY) + "\n"
+        base_manifest, base_surface, comparison = fixture.resolve()
+        assert comparison.resolved_base_tip == fixture.tip, comparison
+        assert base_surface["inventory_version"] == 2, base_surface
+        # The merged tree holds main's material, so nothing moved: no counter
+        # bump and so no history entry to append.
+        derived = rederive.derive(
+            fixture.tree_json(rederive.history.SNAPSHOT),
+            fixture.tree_json(rederive.surface.SURFACE_SNAPSHOT),
+            base_manifest, base_surface,
+        )
+        assert derived == (1, 2), derived
+        merged_history = (fixture.root / fixture.HISTORY).read_text(encoding="utf-8")
+        assert merged_history == base_history, merged_history
+        assert merged_history.count('"n"') == 2, merged_history
+    return 4
+
+
+def exercise_allows_merge_in_progress_with_base() -> int:
+    """An uncommitted merge whose incoming commit IS the base may derive."""
+    with tempfile.TemporaryDirectory() as directory:
+        fixture = _BaseFixture(pathlib.Path(directory))
+        fixture.git("merge", "-q", "--no-commit", "--no-ff", "main")
+        assert (fixture.root / ".git/MERGE_HEAD").read_text(encoding="utf-8").split()[0] == fixture.tip
+        _, base_surface, comparison = fixture.resolve()
+        assert comparison.resolved_base_tip == fixture.tip, comparison
+        assert base_surface["inventory_version"] == 2, base_surface
+    return 2
+
+
+def exercise_refuses_unresolvable_base() -> int:
+    """A base that cannot be resolved or proven refuses; it never skips."""
+    with tempfile.TemporaryDirectory() as directory:
+        fixture = _BaseFixture(pathlib.Path(directory))
+        fixture.git("merge", "-q", "--no-edit", "main")
+        with mock.patch.dict(
+            rederive.history.os.environ,
+            {"PULP_AGENT_CAPABILITY_BASE_REF": "no-such-ref"},
+        ):
+            try:
+                rederive._resolve_base(fixture.root)
+            except rederive.DeriveError as error:
+                unresolved = str(error)
+            else:
+                raise AssertionError("an unresolvable base was not refused")
+        assert "unavailable" in unresolved or "did not resolve" in unresolved, unresolved
+
+        # A shallow clone of the merged branch has the base commit but not the
+        # history that connects it to HEAD, so ancestry cannot be shown.
+        shallow = pathlib.Path(directory, "shallow")
+        subprocess.run(
+            ["git", "clone", "-q", "--no-local", "--depth=1", "--branch", "branch",
+             str(fixture.root), str(shallow)],
+            check=True, capture_output=True,
+        )
+        subprocess.run(
+            ["git", "fetch", "-q", "--depth=1", "origin", "main:main"],
+            cwd=shallow, check=True, capture_output=True,
+        )
+        try:
+            fixture.resolve(shallow)
+        except rederive.DeriveError as error:
+            shallow_error = str(error)
+        else:
+            raise AssertionError("a shallow clone derived without proving ancestry")
+        assert fixture.tip in shallow_error, shallow_error
+        assert "shallow clone" in shallow_error, shallow_error
+    return 3
+
+
 def main() -> int:
     checks = 0
+    checks += exercise_refuses_branch_behind_base()
+    checks += exercise_allows_branch_with_base_merged()
+    checks += exercise_allows_merge_in_progress_with_base()
+    checks += exercise_refuses_unresolvable_base()
     checks += exercise_reset_is_write_path_only()
     checks += exercise_prints_comparison_receipt()
     checks += exercise_proven_commit_absent_vs_malformed_authority()

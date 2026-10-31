@@ -5,7 +5,9 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cassert>
+#include <cstdint>
 #include <limits>
 #include <span>
 #include <utility>
@@ -52,119 +54,76 @@ graph::GraphEvent command_event(const graph::GraphTimedCommand& command,
 // if routing later moves to core/graph (no ProcessBlock dependency except the
 // bus copy).
 
-// Zero each input slot (unconnected ports stay silent) then sum every inbound
-// audio connection into the dest input slot. Feedforward edges read the
-// upstream output slot (topological order guarantees it is already filled this
-// block); feedback edges read their dedicated previous-block slot (last block's
-// captured source output), matching SignalGraph's one-block feedback_prev. Event
-// edges carry no audio and are skipped.
+// Resolve where each of a node's input ports reads from this block, and fill
+// `in_ptrs` with it. A port fed by exactly one audio edge with no delay passes
+// that edge's samples through unchanged, every bit intact (-0 included),
+// exactly as if the two nodes were called back to back:
+// - when the assignment marks the edge reads_in_place (it is the only reader of
+//   its source port, and the source's region is not persistent), the port reads
+//   the source's output slot, or a feedback edge's previous-block slot, in
+//   place with no copy;
+// - otherwise (fan-out) the port gets a private bit-exact copy, so a consumer
+//   that writes through its input view cannot corrupt what a sibling reads.
+// A port with no edge reads its own zeroed slot. A port fed by several edges,
+// or by one through a PDC delay ring, sums them into its own slot.
 //
-// A feedforward edge whose source is less latent than the destination's
-// most-latent input is delayed through a per-connection ring (sized by the
-// snapshot's buffer assignment, stored in the pool) so fan-in paths time-align,
-// matching the host graph's per-connection delay lines. Edges with zero delay
-// take the plain sum path.
+// Reading in place cannot make an input the node's own output: the assignment
+// frees a source's output region only at the END of its last reader's position
+// (build_graph_runtime_buffer_assignment), so the reader's output region is
+// allocated before that region is free, and a node's input and output regions
+// never overlap. Feedback previous-block slots are written only by
+// capture_feedback, after every node has run.
+//
+// A per-connection delay ring time-aligns fan-in paths, matching the host
+// graph's per-connection delay lines. Event and automation edges carry no
+// audio into an input port.
 void gather_node_inputs(const graph::GraphRuntimePlan& plan,
                         const graph::GraphRuntimeBufferAssignment& assignment,
-                        GraphRuntimeBufferPool& pool,
-                        const graph::GraphRuntimeNodePlan& node,
+                        GraphRuntimeBufferPool& pool, const graph::GraphRuntimeNodePlan& node,
                         const graph::GraphRuntimeNodeSlots& slots,
-                        std::uint32_t frames) noexcept {
-    // A single zero-delay audio edge needs no reduction: copy it directly and
-    // avoid a memset plus per-sample read/modify/write. Feedback still copies
-    // from its dedicated previous-block slot; delayed edges remain on the
-    // general stateful ring path.
-    const bool one_audio_edge = node.audio_inbound_connection_count == 1 &&
-                                node.single_audio_inbound_connection != 0xFFFFFFFFu;
-    const bool one_edge_per_port =
-        node.input_ports > 1 && node.input_ports <= 64 &&
-        node.audio_inbound_connection_count == node.input_ports &&
-        node.audio_inbound_port_mask == (node.input_ports == 64
-                                             ? ~std::uint64_t{0}
-                                             : ((std::uint64_t{1} << node.input_ports) - 1));
-    if (one_audio_edge) {
-        const auto connection_index = node.single_audio_inbound_connection;
-        const auto& conn = plan.connections[connection_index];
-        float* dst = conn.dest_port < node.input_ports
-                         ? pool.slot_data(slots.input_base + conn.dest_port)
-                         : nullptr;
-        const float* src = nullptr;
-        if (dst != nullptr) {
-            if (conn.feedback) {
-                src = pool.slot_data(assignment.feedback_prev_slot[connection_index]);
-            } else {
-                const auto& src_slots = assignment.nodes[conn.source_index];
-                src = pool.slot_data(src_slots.output_base + conn.source_port);
-                const auto ring = pool.delay_ring(connection_index);
-                if (ring.data != nullptr && ring.delay != 0)
-                    src = nullptr;
-            }
-        }
-        if (dst != nullptr && src != nullptr) {
-            for (std::uint32_t p = 0; p < node.input_ports; ++p) {
-                if (p == conn.dest_port)
-                    continue;
-                if (float* other = pool.slot_data(slots.input_base + p))
-                    std::fill_n(other, frames, 0.0f);
-            }
-            // Keep the exact arithmetic of the old clear-then-`+=` path. In
-            // particular, 0 + -0 is +0 and NaN payload handling follows the
-            // same operation; a raw memcpy would silently change those bits.
-            for (std::uint32_t f = 0; f < frames; ++f)
-                dst[f] = 0.0f + src[f];
-            return;
-        }
-    }
-
-    if (one_edge_per_port) {
-        bool eligible = true;
-        for (std::uint32_t offset = 0; offset < node.inbound_connection_count; ++offset) {
-            const auto connection_index =
-                plan.inbound_connection_indices[node.first_inbound_connection + offset];
-            const auto& conn = plan.connections[connection_index];
-            if (!graph::carries_audio(conn))
-                continue;
-            const auto ring = pool.delay_ring(connection_index);
-            if (ring.data != nullptr && ring.delay != 0) {
-                eligible = false;
-                break;
-            }
-        }
-        if (eligible) {
-            for (std::uint32_t offset = 0; offset < node.inbound_connection_count; ++offset) {
-                const auto connection_index =
-                    plan.inbound_connection_indices[node.first_inbound_connection + offset];
-                const auto& conn = plan.connections[connection_index];
-                if (!graph::carries_audio(conn))
-                    continue;
-                float* dst = pool.slot_data(slots.input_base + conn.dest_port);
-                const float* src =
-                    conn.feedback ? pool.slot_data(assignment.feedback_prev_slot[connection_index])
-                                  : pool.slot_data(assignment.nodes[conn.source_index].output_base +
-                                                   conn.source_port);
-                if (dst == nullptr || src == nullptr) {
-                    eligible = false;
-                    break;
-                }
-                for (std::uint32_t f = 0; f < frames; ++f)
-                    dst[f] = 0.0f + src[f];
-            }
-            if (eligible)
-                return;
-        }
-    }
-
+                        std::span<const GraphRuntimeSnapshot::InputPortSource> ports,
+                        std::uint32_t frames, const float** in_ptrs,
+                        bool in_place_resolved) noexcept {
+    using Mode = GraphRuntimeSnapshot::InputPortSource::Mode;
+    // The snapshot resolved every port in reset() (resolve_input_ports). A node
+    // without that table sums every port, which is always correct.
+    const bool resolved = ports.size() == node.input_ports;
+    bool any_sum = false;
     for (std::uint32_t p = 0; p < node.input_ports; ++p) {
-        if (float* dst = pool.slot_data(slots.input_base + p)) {
-            std::fill_n(dst, frames, 0.0f);
+        const Mode mode = resolved ? ports[p].mode : Mode::Sum;
+        if (mode == Mode::InPlace) {
+            // A bound pool already points the port at its source, which may be
+            // the host input rather than a slot this block.
+            if (!in_place_resolved)
+                in_ptrs[p] = pool.slot_data(ports[p].slot);
+            continue;
         }
+        float* own = pool.slot_data(slots.input_base + p);
+        in_ptrs[p] = own;
+        if (own == nullptr)
+            continue;
+        if (mode == Mode::Copy) {
+            if (const float* src = pool.slot_data(ports[p].slot))
+                std::copy_n(src, frames, own);
+            else
+                std::fill_n(own, frames, 0.0f);
+            continue;
+        }
+        std::fill_n(own, frames, 0.0f);
+        any_sum = any_sum || mode == Mode::Sum;
     }
+    if (!any_sum)
+        return;
+
     for (std::uint32_t c = 0; c < node.inbound_connection_count; ++c) {
         const auto conn_index =
             plan.inbound_connection_indices[node.first_inbound_connection + c];
         const auto& conn = plan.connections[conn_index];
-        // Event (MIDI) and automation edges carry no audio into an input port.
         if (graph::is_event(conn) || graph::is_automation_conn(conn)) continue;
+        if (conn.dest_port >= node.input_ports)
+            continue;
+        if (resolved && ports[conn.dest_port].mode != Mode::Sum)
+            continue;
         float* dst = pool.slot_data(slots.input_base + conn.dest_port);
         if (dst == nullptr) continue;
         if (conn.feedback) {
@@ -489,19 +448,18 @@ void capture_feedback(const graph::GraphRuntimePlan& plan,
 }
 
 // AudioInput copies the main input bus into its output slots; AudioOutput
-// ACCUMULATES its gathered input slots into the main output bus. The only
-// format/bus-aware step in routing.
+// writes its resolved inputs into the main output bus. The only format/bus-aware
+// step in routing.
 //
-// AudioOutput accumulates (+=), not overwrites, because the host graph it
-// mirrors (SignalGraph) zeroes the output bus once per block and lets every
-// AudioOutput node sum into it — so N output nodes mix rather than last-writer-
-// wins. process_routed zeroes the main output bus once before the walk to match.
-void copy_io_bus(graph::GraphRuntimeNodeKind kind,
-                 GraphRuntimeBufferPool& pool,
-                 const graph::GraphRuntimeNodePlan& node,
-                 const graph::GraphRuntimeNodeSlots& slots,
-                 const BusBuffer* in_bus, BusBuffer* out_bus,
-                 std::uint32_t frames) noexcept {
+// The host graph this mirrors (SignalGraph) zeroes the output bus once per block
+// and lets every AudioOutput node sum into it, so N output nodes mix rather than
+// last-writer-wins; process_routed zeroes the bus to match. When the graph has a
+// single AudioOutput there is nothing to mix, and it copies instead, so the
+// bus receives its input's bits exactly (a sum onto zero would turn -0 into +0).
+void copy_io_bus(graph::GraphRuntimeNodeKind kind, GraphRuntimeBufferPool& pool,
+                 const graph::GraphRuntimeNodePlan& node, const graph::GraphRuntimeNodeSlots& slots,
+                 const float* const* in_ptrs, bool sole_output, const BusBuffer* in_bus,
+                 BusBuffer* out_bus, std::uint32_t frames) noexcept {
     if (kind == graph::GraphRuntimeNodeKind::AudioInput) {
         for (std::uint32_t p = 0; p < node.output_ports; ++p) {
             float* dst = pool.slot_data(slots.output_base + p);
@@ -515,12 +473,64 @@ void copy_io_bus(graph::GraphRuntimeNodeKind kind,
     } else {  // AudioOutput
         for (std::uint32_t p = 0; p < node.input_ports; ++p) {
             if (out_bus == nullptr || p >= out_bus->output.num_channels()) continue;
-            const float* src = pool.slot_data(slots.input_base + p);
-            if (src == nullptr) continue;
+            const float* src = in_ptrs[p];
             float* dst = out_bus->output.channel_ptr(p);
-            for (std::uint32_t f = 0; f < frames; ++f) dst[f] += src[f];
+            if (sole_output) {
+                // The walk did not zero the channels a sole output writes.
+                if (src != nullptr)
+                    std::copy_n(src, frames, dst);
+                else
+                    std::fill_n(dst, frames, 0.0f);
+            } else if (src != nullptr) {
+                for (std::uint32_t f = 0; f < frames; ++f)
+                    dst[f] += src[f];
+            }
         }
     }
+}
+
+struct PreloadedInputBus {
+    std::array<const float*, GraphRuntimeExecutor::kMaxRoutedPortsPerNode> pointers{};
+    BusBuffer bus;
+};
+
+bool preload_input_bus(const graph::GraphRuntimePlan& plan,
+                       const graph::GraphRuntimeBufferAssignment& assignment,
+                       GraphRuntimeBufferPool& pool, const BusBuffer& input, std::uint32_t frames,
+                       PreloadedInputBus& preloaded) noexcept {
+    for (const auto node_index : plan.processing_order_indices) {
+        if (plan.nodes[node_index].kind != graph::GraphRuntimeNodeKind::AudioInput)
+            continue;
+        const auto& node = plan.nodes[node_index];
+        if (node.output_ports > GraphRuntimeExecutor::kMaxRoutedPortsPerNode)
+            return false;
+        const auto& slots = assignment.nodes[node_index];
+        for (std::uint32_t p = 0; p < node.output_ports; ++p) {
+            float* dst = pool.slot_data(slots.output_base + p);
+            preloaded.pointers[p] = dst;
+            if (dst == nullptr)
+                continue;
+            if (p < input.input.num_channels())
+                std::copy_n(input.input.channel_ptr(p), frames, dst);
+            else
+                std::fill_n(dst, frames, 0.0f);
+        }
+        preloaded.bus = input;
+        preloaded.bus.input =
+            audio::BufferView<const float>(preloaded.pointers.data(), node.output_ports, frames);
+        return true;
+    }
+    return false;
+}
+
+// True when the graph has exactly one AudioOutput node, so it can write the
+// output bus instead of summing into it (see copy_io_bus).
+bool has_sole_audio_output(const graph::GraphRuntimePlan& plan) noexcept {
+    std::uint32_t outputs = 0;
+    for (const auto& n : plan.nodes)
+        if (n.kind == graph::GraphRuntimeNodeKind::AudioOutput && ++outputs > 1)
+            return false;
+    return outputs == 1;
 }
 
 // Run ONE node of the routing walk: gather its audio / MIDI / automation inputs,
@@ -531,28 +541,38 @@ void copy_io_bus(graph::GraphRuntimeNodeKind kind,
 // output slots, per-node MIDI/automation buffers, per-connection inbound rings),
 // so distinct nodes may run concurrently — EXCEPT AudioOutput, which accumulates
 // into the shared output bus and must be run serially by the caller.
-GraphRuntimeExecutorErrorCode run_routed_node(
-    std::uint32_t node_index,
-    const graph::GraphRuntimePlan& plan,
-    std::span<const GraphRuntimeNodeBinding> bindings,
-    const graph::GraphRuntimeBufferAssignment& assignment,
-    GraphRuntimeBufferPool& pool,
-    GraphRuntimeMidiScratch* midi,
-    GraphRuntimeAutomationScratch* automation,
-    ProcessBlock& block,
-    const BusBuffer* in_bus,
-    BusBuffer* out_bus,
-    std::span<const GraphRuntimeCommandDecision> command_results,
-    std::uint32_t frames) noexcept {
+GraphRuntimeExecutorErrorCode
+run_routed_node(std::uint32_t node_index, const graph::GraphRuntimePlan& plan,
+                std::span<const GraphRuntimeNodeBinding> bindings,
+                const graph::GraphRuntimeBufferAssignment& assignment, GraphRuntimeBufferPool& pool,
+                GraphRuntimeMidiScratch* midi, GraphRuntimeAutomationScratch* automation,
+                ProcessBlock& block, const BusBuffer* in_bus, BusBuffer* out_bus,
+                std::span<const GraphRuntimeCommandDecision> command_results, std::uint32_t frames,
+                bool time_node, bool sole_output,
+                std::span<const GraphRuntimeSnapshot::InputPortSource> ports,
+                GraphRuntimeBufferPool::BoundNode* bound) noexcept {
     const auto& node = plan.nodes[node_index];
     const auto& slots = assignment.nodes[node_index];
 
-    if (node.input_ports > GraphRuntimeExecutor::kMaxRoutedPortsPerNode ||
-        node.output_ports > GraphRuntimeExecutor::kMaxRoutedPortsPerNode) {
-        return GraphRuntimeExecutorErrorCode::NodePortLimitExceeded;
+    // The node's channel views. A bound pool resolved them, and checked the port
+    // limit, in bind(); its gather only moves samples, and only for a node with
+    // a port that is not read in place. Otherwise only the node's own ports are
+    // written, and the views read no further, so the arrays are left
+    // uninitialized rather than zeroing kMaxRoutedPortsPerNode entries per node
+    // per block.
+    std::array<const float*, GraphRuntimeExecutor::kMaxRoutedPortsPerNode> in_ptrs;
+    const float** inputs = in_ptrs.data();
+    if (bound != nullptr) {
+        inputs = bound->inputs;
+        if (bound->gathers)
+            gather_node_inputs(plan, assignment, pool, node, slots, ports, frames, inputs, true);
+    } else {
+        if (node.input_ports > GraphRuntimeExecutor::kMaxRoutedPortsPerNode ||
+            node.output_ports > GraphRuntimeExecutor::kMaxRoutedPortsPerNode) {
+            return GraphRuntimeExecutorErrorCode::NodePortLimitExceeded;
+        }
+        gather_node_inputs(plan, assignment, pool, node, slots, ports, frames, inputs, false);
     }
-
-    gather_node_inputs(plan, assignment, pool, node, slots, frames);
     if (midi != nullptr) {
         gather_node_midi(plan, *midi, node, node_index);
     }
@@ -569,7 +589,8 @@ GraphRuntimeExecutorErrorCode run_routed_node(
     // legacy walk does. RAII closes the span on every return below (I/O copy,
     // missing/failed processor, success). Distinct measurer per node, so parallel
     // levels touch disjoint instances; begin()/end() are relaxed-atomic, RT-safe.
-    audio::AudioProcessLoadMeasurer* const node_load = bindings[node_index].load;
+    audio::AudioProcessLoadMeasurer* const node_load =
+        time_node ? bindings[node_index].load : nullptr;
     if (node_load != nullptr) {
         node_load->begin(static_cast<int>(frames), static_cast<float>(block.sample_rate));
     }
@@ -582,7 +603,10 @@ GraphRuntimeExecutorErrorCode run_routed_node(
 
     if (node.kind == graph::GraphRuntimeNodeKind::AudioInput ||
         node.kind == graph::GraphRuntimeNodeKind::AudioOutput) {
-        copy_io_bus(node.kind, pool, node, slots, in_bus, out_bus, frames);
+        // An AudioInput node whose readers read the host input directly this
+        // block has nothing to copy.
+        if (bound == nullptr || !bound->host_input_aliased)
+            copy_io_bus(node.kind, pool, node, slots, inputs, sole_output, in_bus, out_bus, frames);
         return GraphRuntimeExecutorErrorCode::None;
     }
 
@@ -591,39 +615,33 @@ GraphRuntimeExecutorErrorCode run_routed_node(
                                 : GraphRuntimeExecutorErrorCode::None;
     }
 
-    // Marshal the node's mono slots into contiguous channel views. Only the
-    // node's own ports are written, and the views read no further, so the
-    // arrays are left uninitialized rather than zeroing kMaxRoutedPortsPerNode
-    // entries per node per block.
-    std::array<const float*, GraphRuntimeExecutor::kMaxRoutedPortsPerNode> in_ptrs;
+    // A bound node's context keeps its node index, routed flag and channel
+    // pointers across blocks; every field that can change per block is set here.
     std::array<float*, GraphRuntimeExecutor::kMaxRoutedPortsPerNode> out_ptrs;
-    for (std::uint32_t p = 0; p < node.input_ports; ++p) {
-        in_ptrs[p] = pool.slot_data(slots.input_base + p);
+    GraphRuntimeNodeProcessContext unbound_context;
+    float** outputs = out_ptrs.data();
+    if (bound != nullptr) {
+        outputs = bound->outputs;
+    } else {
+        for (std::uint32_t p = 0; p < node.output_ports; ++p)
+            out_ptrs[p] = pool.slot_data(slots.output_base + p);
+        unbound_context.node_index = node_index;
+        unbound_context.routed = true;
     }
-    for (std::uint32_t p = 0; p < node.output_ports; ++p) {
-        out_ptrs[p] = pool.slot_data(slots.output_base + p);
-    }
-
-    GraphRuntimeNodeProcessContext context;
+    GraphRuntimeNodeProcessContext& context = bound != nullptr ? bound->context : unbound_context;
     context.plan = &plan;
     context.node = &node;
-    context.node_index = node_index;
     context.command_results = command_results;
-    context.routed = true;
-    context.node_inputs = audio::BufferView<const float>(
-        in_ptrs.data(), node.input_ports, frames);
-    context.node_outputs = audio::BufferView<float>(
-        out_ptrs.data(), node.output_ports, frames);
-    if (midi != nullptr) {
-        context.node_midi_in = midi->in(node_index);
-        context.node_midi_out = midi->out(node_index);
-    }
-    if (automation != nullptr) {
-        context.node_param_events = automation->events(node_index);
-        if (binding.audio_rate_modulation_delivery == AudioRateModulationDelivery::DenseViews) {
-            const auto count = automation->dense_view_count(node_index);
-            context.node_audio_rate_modulations = automation->dense_views(node_index).first(count);
-        }
+    context.node_inputs = audio::BufferView<const float>(inputs, node.input_ports, frames);
+    context.node_outputs = audio::BufferView<float>(outputs, node.output_ports, frames);
+    context.node_midi_in = midi != nullptr ? midi->in(node_index) : nullptr;
+    context.node_midi_out = midi != nullptr ? midi->out(node_index) : nullptr;
+    context.node_param_events = automation != nullptr ? automation->events(node_index) : nullptr;
+    context.node_audio_rate_modulations = {};
+    if (automation != nullptr &&
+        binding.audio_rate_modulation_delivery == AudioRateModulationDelivery::DenseViews) {
+        const auto count = automation->dense_view_count(node_index);
+        context.node_audio_rate_modulations = automation->dense_views(node_index).first(count);
     }
     if (!binding.process(block, context, binding.user_data)) {
         return GraphRuntimeExecutorErrorCode::NodeProcessorFailed;
@@ -877,6 +895,7 @@ GraphRuntimeBufferPool& GraphRuntimeBufferPool::operator=(
 
 bool GraphRuntimeBufferPool::reset(std::uint32_t slot_count, std::uint32_t max_frames,
                                    std::span<const std::uint32_t> connection_delay_samples) {
+    unbind();
     if (slot_count > 0 && max_frames == 0) return false;
     try {
         storage_.assign(static_cast<std::size_t>(slot_count) * max_frames, 0.0f);
@@ -909,10 +928,168 @@ bool GraphRuntimeBufferPool::reset(std::uint32_t slot_count, std::uint32_t max_f
 }
 
 void GraphRuntimeBufferPool::clear() noexcept {
+    unbind();
     storage_.clear();
     slot_count_ = 0;
     max_frames_ = 0;
     ring_.clear();
+}
+
+void GraphRuntimeBufferPool::unbind() noexcept {
+    bound_snapshot_id_ = 0;
+    bound_nodes_.clear();
+    bound_inputs_.clear();
+    bound_outputs_.clear();
+    host_input_aliases_.clear();
+    host_input_node_ = 0;
+    host_input_channels_ = 0;
+    host_input_aliasable_ = false;
+}
+
+bool GraphRuntimeBufferPool::bind(const GraphRuntimeSnapshot& snapshot) noexcept {
+    using Mode = GraphRuntimeSnapshot::InputPortSource::Mode;
+    unbind();
+    if (snapshot.id() == 0 || !snapshot.valid() || !fits(snapshot, max_frames_))
+        return false;
+    const auto& plan = snapshot.plan();
+    const auto& assignment = snapshot.buffer_assignment();
+    if (assignment.nodes.size() != plan.nodes.size())
+        return false;
+    std::size_t input_total = 0;
+    std::size_t output_total = 0;
+    for (const auto& node : plan.nodes) {
+        if (node.input_ports > GraphRuntimeExecutor::kMaxRoutedPortsPerNode ||
+            node.output_ports > GraphRuntimeExecutor::kMaxRoutedPortsPerNode)
+            return false;
+        input_total += node.input_ports;
+        output_total += node.output_ports;
+    }
+    try {
+        bound_inputs_.assign(input_total, nullptr);
+        bound_outputs_.assign(output_total, nullptr);
+        bound_nodes_.assign(plan.nodes.size(), BoundNode{});
+    } catch (...) {
+        unbind();
+        return false;
+    }
+    std::size_t input_at = 0;
+    std::size_t output_at = 0;
+    for (std::uint32_t i = 0; i < plan.nodes.size(); ++i) {
+        const auto& node = plan.nodes[i];
+        const auto& slots = assignment.nodes[i];
+        const auto ports = snapshot.input_port_sources(i);
+        const bool resolved = ports.size() == node.input_ports;
+        auto& bound = bound_nodes_[i];
+        bound.inputs = bound_inputs_.data() + input_at;
+        bound.outputs = bound_outputs_.data() + output_at;
+        input_at += node.input_ports;
+        output_at += node.output_ports;
+        // The same pointers gather_node_inputs() resolves each block: a port
+        // read in place points at its source, every other port at its own slot.
+        for (std::uint32_t p = 0; p < node.input_ports; ++p) {
+            if (resolved && ports[p].mode == Mode::InPlace) {
+                bound.inputs[p] = slot_data(ports[p].slot);
+            } else {
+                bound.inputs[p] = slot_data(slots.input_base + p);
+                bound.gathers = true;
+            }
+        }
+        for (std::uint32_t p = 0; p < node.output_ports; ++p)
+            bound.outputs[p] = slot_data(slots.output_base + p);
+        bound.context.node_index = i;
+        bound.context.routed = true;
+    }
+
+    // The host input can stand in for the AudioInput node's slots when that
+    // node is the only one and each of its readers is an audio input port that
+    // reads it in place, the same block, without writing through it.
+    std::uint32_t input_node = 0;
+    std::uint32_t input_nodes = 0;
+    for (std::uint32_t i = 0; i < plan.nodes.size(); ++i) {
+        if (plan.nodes[i].kind == graph::GraphRuntimeNodeKind::AudioInput) {
+            input_node = i;
+            ++input_nodes;
+        }
+    }
+    bool aliasable = input_nodes == 1;
+    const auto bindings = snapshot.bindings();
+    // An empty snapshot is valid and has no buffer assignment.  The alias
+    // analysis below only applies when the unique AudioInput node actually
+    // exists; do not index the empty assignment while checking that case.
+    const auto* input_slots = (input_nodes == 1 && input_node < assignment.nodes.size())
+                                  ? &assignment.nodes[input_node]
+                                  : nullptr;
+    try {
+        for (const auto& conn : plan.connections) {
+            if (!aliasable)
+                break;
+            if (conn.source_index != input_node)
+                continue;
+            // An automation lane reads the AudioInput slot itself.
+            if (graph::is_event(conn) || graph::is_automation_conn(conn)) {
+                aliasable = false;
+                break;
+            }
+            const auto& dest = plan.nodes[conn.dest_index];
+            const auto ports = snapshot.input_port_sources(conn.dest_index);
+            const bool read_only = dest.kind == graph::GraphRuntimeNodeKind::AudioOutput ||
+                                   bindings[conn.dest_index].reads_inputs_only;
+            if (conn.feedback || !read_only || conn.dest_port >= ports.size() ||
+                ports[conn.dest_port].mode != Mode::InPlace) {
+                aliasable = false;
+                break;
+            }
+            host_input_aliases_.push_back({&bound_nodes_[conn.dest_index].inputs[conn.dest_port],
+                                           slot_data(input_slots->output_base + conn.source_port),
+                                           conn.source_port});
+        }
+    } catch (...) {
+        unbind();
+        return false;
+    }
+    if (aliasable && input_slots != nullptr) {
+        host_input_node_ = input_node;
+        host_input_channels_ = plan.nodes[input_node].output_ports;
+        host_input_aliasable_ = true;
+    } else {
+        host_input_aliases_.clear();
+    }
+    bound_snapshot_id_ = snapshot.id();
+    return true;
+}
+
+bool GraphRuntimeBufferPool::alias_host_input(const BusBuffer* input, const BusBuffer* output,
+                                              std::uint32_t frames) noexcept {
+    if (!host_input_aliasable_ || input == nullptr ||
+        input->input.num_channels() < host_input_channels_)
+        return false;
+    // A host that processes in place hands the same memory as input and
+    // output; the walk writes the output before every reader has run, so the
+    // input then goes through the AudioInput slots as usual.
+    if (output != nullptr) {
+        const auto bytes = static_cast<std::uintptr_t>(frames) * sizeof(float);
+        for (std::uint32_t c = 0; c < host_input_channels_; ++c) {
+            const auto in_begin = reinterpret_cast<std::uintptr_t>(input->input.channel_ptr(c));
+            for (std::size_t k = 0; k < output->output.num_channels(); ++k) {
+                const auto out_begin =
+                    reinterpret_cast<std::uintptr_t>(output->output.channel_ptr(k));
+                if (in_begin < out_begin + bytes && out_begin < in_begin + bytes)
+                    return false;
+            }
+        }
+    }
+    for (const auto& alias : host_input_aliases_)
+        *alias.view = input->input.channel_ptr(alias.channel);
+    bound_nodes_[host_input_node_].host_input_aliased = true;
+    return true;
+}
+
+void GraphRuntimeBufferPool::release_host_input() noexcept {
+    if (!host_input_aliasable_ || !bound_nodes_[host_input_node_].host_input_aliased)
+        return;
+    for (const auto& alias : host_input_aliases_)
+        *alias.view = alias.slot;
+    bound_nodes_[host_input_node_].host_input_aliased = false;
 }
 
 bool GraphRuntimeBufferPool::can_adopt_delay_ring_state(
@@ -973,11 +1150,78 @@ bool GraphRuntimeSnapshot::reset(
         node_ids_sorted_ = std::move(node_ids);
         assignment_ = std::move(assignment);
         parallel_safe_ = parallel_safe;
+        valid_ = compute_valid();
+        sole_audio_output_ = has_sole_audio_output(plan_);
+        sole_audio_output_ports_ = 0;
+        for (const auto& n : plan_.nodes)
+            if (sole_audio_output_ && n.kind == graph::GraphRuntimeNodeKind::AudioOutput)
+                sole_audio_output_ports_ = n.input_ports;
+        resolve_input_ports();
     } catch (...) {
         clear();
         return false;
     }
+    static std::atomic<std::uint64_t> next_id{1};
+    id_ = next_id.fetch_add(1, std::memory_order_relaxed);
     return true;
+}
+
+void GraphRuntimeSnapshot::resolve_input_ports() {
+    using Mode = InputPortSource::Mode;
+    input_port_base_.assign(plan_.nodes.size() + 1, 0);
+    for (std::size_t n = 0; n < plan_.nodes.size(); ++n)
+        input_port_base_[n + 1] = input_port_base_[n] + plan_.nodes[n].input_ports;
+    input_ports_.assign(input_port_base_.back(), InputPortSource{});
+
+    // A source port whose every reader only reads (a reads_inputs_only binding,
+    // an AudioOutput, an automation tap) can be read in place by all of them,
+    // fan-out and persistent sources included: nobody writes the bytes.
+    std::vector<std::uint32_t> output_base(plan_.nodes.size() + 1, 0);
+    for (std::size_t n = 0; n < plan_.nodes.size(); ++n)
+        output_base[n + 1] = output_base[n] + plan_.nodes[n].output_ports;
+    std::vector<std::uint8_t> read_only_readers(output_base.back(), 1);
+    for (const auto& conn : plan_.connections) {
+        if (graph::is_event(conn) || graph::is_automation_conn(conn))
+            continue;
+        if (conn.source_index >= plan_.nodes.size() || conn.dest_index >= plan_.nodes.size() ||
+            conn.source_port >= plan_.nodes[conn.source_index].output_ports)
+            continue;
+        const bool reads_only =
+            plan_.nodes[conn.dest_index].kind == graph::GraphRuntimeNodeKind::AudioOutput ||
+            bindings_[conn.dest_index].reads_inputs_only;
+        if (!reads_only)
+            read_only_readers[output_base[conn.source_index] + conn.source_port] = 0;
+    }
+    for (std::uint32_t n = 0; n < plan_.nodes.size(); ++n) {
+        const auto& node = plan_.nodes[n];
+        auto* ports = input_ports_.data() + input_port_base_[n];
+        for (std::uint32_t c = 0; c < node.inbound_connection_count; ++c) {
+            const auto conn_index =
+                plan_.inbound_connection_indices[node.first_inbound_connection + c];
+            const auto& conn = plan_.connections[conn_index];
+            if (graph::is_event(conn) || graph::is_automation_conn(conn))
+                continue;
+            if (conn.dest_port >= node.input_ports)
+                continue;
+            auto& port = ports[conn.dest_port];
+            const bool delayed = !conn.feedback &&
+                                 conn_index < assignment_.connection_delay_samples.size() &&
+                                 assignment_.connection_delay_samples[conn_index] != 0;
+            if (port.mode != Mode::Zero || delayed) {
+                port.mode = Mode::Sum;
+                continue;
+            }
+            port.slot = conn.feedback
+                            ? assignment_.feedback_prev_slot[conn_index]
+                            : assignment_.nodes[conn.source_index].output_base + conn.source_port;
+            const bool in_place =
+                (conn_index < assignment_.reads_in_place.size() &&
+                 assignment_.reads_in_place[conn_index] != 0) ||
+                (!conn.feedback &&
+                 read_only_readers[output_base[conn.source_index] + conn.source_port] != 0);
+            port.mode = in_place ? Mode::InPlace : Mode::Copy;
+        }
+    }
 }
 
 void GraphRuntimeSnapshot::clear() noexcept {
@@ -986,9 +1230,19 @@ void GraphRuntimeSnapshot::clear() noexcept {
     node_ids_sorted_.clear();
     assignment_ = {};
     parallel_safe_ = false;
+    valid_ = true;
+    sole_audio_output_ = false;
+    sole_audio_output_ports_ = 0;
+    input_ports_.clear();
+    input_port_base_.clear();
+    id_ = 0;
 }
 
 bool GraphRuntimeSnapshot::valid() const noexcept {
+    return valid_;
+}
+
+bool GraphRuntimeSnapshot::compute_valid() const noexcept {
     if (bindings_.size() != plan_.nodes.size()) return false;
     if (node_ids_sorted_.size() != plan_.nodes.size()) return false;
     if (plan_.processing_order_indices.size() != plan_.nodes.size()) return false;
@@ -1015,6 +1269,9 @@ bool GraphRuntimeExecutor::drain_commands(
     GraphRuntimeEventSink event_sink,
     GraphRuntimeExecutorResult& result) noexcept {
     if (command_results.size() < commands.size()) return false;
+    // Most blocks carry no commands: nothing to count or report.
+    if (commands.empty())
+        return true;
 
     result.commands_drained = static_cast<std::uint32_t>(commands.size());
     commands_drained_.fetch_add(result.commands_drained, std::memory_order_relaxed);
@@ -1160,14 +1417,68 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
     BusBuffer* out_bus =
         block.buses ? block.buses->first(BusDirection::Output, BusRole::Main) : nullptr;
 
+    const bool bound = pool.bound_to(snapshot);
+    // A bound pool reads the host input in place for this block when the graph
+    // allows it, undone on every return below. This must happen before clearing
+    // the output bus: host input and output may intentionally alias.
+    struct HostInputRelease {
+        GraphRuntimeBufferPool* pool;
+        ~HostInputRelease() {
+            if (pool != nullptr)
+                pool->release_host_input();
+        }
+    } host_input_release{
+        bound && skip_mask.empty() && pool.alias_host_input(in_bus, out_bus, frames) ? &pool
+                                                                                     : nullptr};
+
     // Zero the main output bus once; AudioOutput nodes accumulate into it, so N
     // output nodes mix (and any output channel no node drives stays silent),
-    // matching the host graph this executor mirrors.
+    // matching the host graph this executor mirrors. A sole AudioOutput node
+    // writes its channels instead of adding to them, so those are left for it
+    // and are zeroed only if the block fails before it runs. With a skip mask
+    // the whole bus is zeroed up front.
+    const bool sole_output = snapshot.sole_audio_output();
+    std::size_t sole_output_channels = 0;
+    bool defer_output_clear = false;
+    PreloadedInputBus preloaded_input;
+    const BusBuffer* routed_in_bus = in_bus;
     if (out_bus != nullptr) {
-        for (std::size_t c = 0; c < out_bus->output.num_channels(); ++c) {
-            std::fill_n(out_bus->output.channel_ptr(c), frames, 0.0f);
+        const std::size_t channels = out_bus->output.num_channels();
+        if (sole_output && skip_mask.empty())
+            sole_output_channels =
+                std::min<std::size_t>(channels, snapshot.sole_audio_output_ports());
+        if (in_bus != nullptr) {
+            const auto bytes = static_cast<std::uintptr_t>(frames) * sizeof(float);
+            for (std::size_t c = 0; c < in_bus->input.num_channels() && !defer_output_clear; ++c) {
+                const auto in_begin =
+                    reinterpret_cast<std::uintptr_t>(in_bus->input.channel_ptr(c));
+                for (std::size_t k = 0; k < channels; ++k) {
+                    const auto out_begin =
+                        reinterpret_cast<std::uintptr_t>(out_bus->output.channel_ptr(k));
+                    if (in_begin < out_begin + bytes && out_begin < in_begin + bytes) {
+                        defer_output_clear = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if (defer_output_clear) {
+            // Preserve the host input before clearing an in-place output. The
+            // AudioInput node may appear later in the topological walk, so its
+            // copy must read from these preloaded slots after the clear.
+            if (preload_input_bus(plan, assignment, pool, *in_bus, frames, preloaded_input))
+                routed_in_bus = &preloaded_input.bus;
+            for (std::size_t c = sole_output_channels; c < channels; ++c)
+                std::fill_n(out_bus->output.channel_ptr(c), frames, 0.0f);
+        } else {
+            for (std::size_t c = sole_output_channels; c < channels; ++c)
+                std::fill_n(out_bus->output.channel_ptr(c), frames, 0.0f);
         }
     }
+    const auto zero_unwritten_sole_output = [&]() noexcept {
+        for (std::size_t c = 0; c < sole_output_channels; ++c)
+            std::fill_n(out_bus->output.channel_ptr(c), frames, 0.0f);
+    };
 
 #ifndef NDEBUG
     // Contract for a skip_mask (caller-enforced; assert it so a future caller
@@ -1197,8 +1508,12 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
 #endif
 
     const auto command_decisions = command_results.first(commands.size());
+    const bool time_nodes = node_load_timing();
     for (const auto node_index : plan.processing_order_indices) {
-        if (node_index >= bindings.size()) return fail_invalid_snapshot();
+        if (node_index >= bindings.size()) {
+            zero_unwritten_sole_output();
+            return fail_invalid_snapshot();
+        }
 
         // Skipped nodes are not run: the caller has pre-filled their output slots
         // (anticipative rendering pre-renders the interior off-thread). They are
@@ -1208,18 +1523,25 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
             continue;
         }
 
-        const auto error = run_routed_node(node_index, plan, bindings, assignment,
-                                           pool, midi, automation, block, in_bus,
-                                           out_bus, command_decisions, frames);
+        const auto error =
+            run_routed_node(node_index, plan, bindings, assignment, pool, midi, automation, block,
+                            routed_in_bus, out_bus, command_decisions, frames, time_nodes,
+                            sole_output, snapshot.input_port_sources(node_index),
+                            bound ? &pool.bound_node(node_index) : nullptr);
         if (error != GraphRuntimeExecutorErrorCode::None) {
+            zero_unwritten_sole_output();
             result.error = error;
             result.failed_node_index = node_index;
             node_failures_.fetch_add(1, std::memory_order_relaxed);
+            nodes_processed_.fetch_add(result.nodes_processed, std::memory_order_relaxed);
             return result;
         }
+        if (plan.nodes[node_index].kind == graph::GraphRuntimeNodeKind::AudioOutput)
+            sole_output_channels = 0;
         ++result.nodes_processed;
-        nodes_processed_.fetch_add(1, std::memory_order_relaxed);
     }
+    // One shared-counter update per block rather than one per node.
+    nodes_processed_.fetch_add(result.nodes_processed, std::memory_order_relaxed);
 
     capture_feedback(plan, assignment, pool, frames);
 
@@ -1243,18 +1565,23 @@ struct ParallelLevelTask {
     BusBuffer* out_bus;
     std::span<const GraphRuntimeCommandDecision> command_results;
     std::uint32_t frames;
+    bool time_nodes;
+    bool sole_output;
     const std::uint32_t* level_nodes;          // this level's node indices
     std::atomic<std::uint32_t>* error_code;    // 0 = None, else (code + 1)
     std::atomic<std::uint32_t>* failed_node;
+    const GraphRuntimeSnapshot* snapshot;
+    bool bound; // pool.bound_to(*snapshot)
 };
 
 void run_level_node(void* ctx, std::uint32_t i) noexcept {
     auto* t = static_cast<ParallelLevelTask*>(ctx);
     const std::uint32_t node_index = t->level_nodes[i];
-    const auto e = run_routed_node(node_index, *t->plan, t->bindings, *t->assignment,
-                                   *t->pool, t->midi, t->automation, *t->block,
-                                   t->in_bus, t->out_bus, t->command_results,
-                                   t->frames);
+    const auto e = run_routed_node(node_index, *t->plan, t->bindings, *t->assignment, *t->pool,
+                                   t->midi, t->automation, *t->block, t->in_bus, t->out_bus,
+                                   t->command_results, t->frames, t->time_nodes, t->sole_output,
+                                   t->snapshot->input_port_sources(node_index),
+                                   t->bound ? &t->pool->bound_node(node_index) : nullptr);
     if (e != GraphRuntimeExecutorErrorCode::None) {
         std::uint32_t expected = 0;
         if (t->error_code->compare_exchange_strong(
@@ -1313,13 +1640,47 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_parallel(
         block.buses ? block.buses->first(BusDirection::Input, BusRole::Main) : nullptr;
     BusBuffer* out_bus =
         block.buses ? block.buses->first(BusDirection::Output, BusRole::Main) : nullptr;
+    const bool bound = pool.bound_to(snapshot);
+    struct HostInputRelease {
+        GraphRuntimeBufferPool* pool;
+        ~HostInputRelease() {
+            if (pool != nullptr)
+                pool->release_host_input();
+        }
+    } host_input_release{bound && pool.alias_host_input(in_bus, out_bus, frames) ? &pool : nullptr};
+    bool defer_output_clear = false;
+    PreloadedInputBus preloaded_input;
+    const BusBuffer* routed_in_bus = in_bus;
     if (out_bus != nullptr) {
-        for (std::size_t c = 0; c < out_bus->output.num_channels(); ++c) {
-            std::fill_n(out_bus->output.channel_ptr(c), frames, 0.0f);
+        if (in_bus != nullptr) {
+            const auto bytes = static_cast<std::uintptr_t>(frames) * sizeof(float);
+            for (std::size_t c = 0; c < in_bus->input.num_channels() && !defer_output_clear; ++c) {
+                const auto in_begin =
+                    reinterpret_cast<std::uintptr_t>(in_bus->input.channel_ptr(c));
+                for (std::size_t k = 0; k < out_bus->output.num_channels(); ++k) {
+                    const auto out_begin =
+                        reinterpret_cast<std::uintptr_t>(out_bus->output.channel_ptr(k));
+                    if (in_begin < out_begin + bytes && out_begin < in_begin + bytes) {
+                        defer_output_clear = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if (defer_output_clear) {
+            if (preload_input_bus(plan, assignment, pool, *in_bus, frames, preloaded_input))
+                routed_in_bus = &preloaded_input.bus;
+            for (std::size_t c = 0; c < out_bus->output.num_channels(); ++c)
+                std::fill_n(out_bus->output.channel_ptr(c), frames, 0.0f);
+        } else {
+            for (std::size_t c = 0; c < out_bus->output.num_channels(); ++c)
+                std::fill_n(out_bus->output.channel_ptr(c), frames, 0.0f);
         }
     }
 
     const auto command_decisions = command_results.first(commands.size());
+    const bool time_nodes = node_load_timing();
+    const bool sole_output = snapshot.sole_audio_output();
     std::atomic<std::uint32_t> error_code{0};
     std::atomic<std::uint32_t> failed_node{0};
 
@@ -1331,10 +1692,22 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_parallel(
         return result;
     };
 
+    bool audio_input_seen = false;
+    const auto clear_deferred_output = [&]() noexcept {
+        if (audio_input_seen || !defer_output_clear || out_bus == nullptr)
+            return;
+        for (std::size_t c = 0; c < out_bus->output.num_channels(); ++c)
+            std::fill_n(out_bus->output.channel_ptr(c), frames, 0.0f);
+        defer_output_clear = false;
+    };
+
     for (std::uint32_t level = 0; level < levels.level_count; ++level) {
         const std::uint32_t base = levels.level_offsets[level];
         const std::uint32_t width = levels.level_offsets[level + 1] - base;
         if (width == 0) continue;
+        for (std::uint32_t k = 0; k < width; ++k)
+            audio_input_seen = audio_input_seen || plan.nodes[levels.level_nodes[base + k]].kind ==
+                                                       graph::GraphRuntimeNodeKind::AudioInput;
 
         // A level runs serially when it can't safely parallelize: a single node
         // (no benefit), no worker threads, or it contains an AudioOutput node
@@ -1368,22 +1741,32 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_parallel(
         if (serial) {
             for (std::uint32_t k = 0; k < width; ++k) {
                 const std::uint32_t node_index = levels.level_nodes[base + k];
-                const auto e = run_routed_node(node_index, plan, bindings, assignment,
-                                               pool, midi, automation, block, in_bus,
-                                               out_bus, command_decisions, frames);
+                const auto e = run_routed_node(node_index, plan, bindings, assignment, pool, midi,
+                                               automation, block, routed_in_bus, out_bus,
+                                               command_decisions, frames, time_nodes, sole_output,
+                                               snapshot.input_port_sources(node_index),
+                                               bound ? &pool.bound_node(node_index) : nullptr);
                 if (e != GraphRuntimeExecutorErrorCode::None) {
+                    clear_deferred_output();
                     return report_failure(e, node_index);
                 }
             }
         } else {
             ParallelLevelTask task{
-                &plan, bindings, &assignment, &pool, midi, automation, &block,
-                in_bus, out_bus, command_decisions, frames,
-                levels.level_nodes.data() + base, &error_code, &failed_node,
+                &plan,       bindings,
+                &assignment, &pool,
+                midi,        automation,
+                &block,      routed_in_bus,
+                out_bus,     command_decisions,
+                frames,      time_nodes,
+                sole_output, levels.level_nodes.data() + base,
+                &error_code, &failed_node,
+                &snapshot,   bound,
             };
             workers.run(width, run_level_node, &task);
             if (const std::uint32_t code = error_code.load(std::memory_order_relaxed);
                 code != 0) {
+                clear_deferred_output();
                 return report_failure(
                     static_cast<GraphRuntimeExecutorErrorCode>(code - 1),
                     failed_node.load(std::memory_order_relaxed));
@@ -1394,6 +1777,7 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_parallel(
         nodes_processed_.fetch_add(width, std::memory_order_relaxed);
     }
 
+    clear_deferred_output();
     capture_feedback(plan, assignment, pool, frames);
 
     blocks_processed_.fetch_add(1, std::memory_order_relaxed);

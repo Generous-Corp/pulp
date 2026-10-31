@@ -169,36 +169,7 @@ void collect_resolved_binding_plan(ResolvedBindingPlan& plan,
     route.metadata = NativeBindingMetadata::parse(node);
     route.eligible_for_manifest = node_has_binding_manifest_metadata(node);
 
-    const auto& md = route.metadata;
-    const bool has_single_param = md.param_key && !md.param_key->empty();
-    const bool has_scalar_param_control =
-        (resolved.kind == NativeWidgetKind::knob ||
-         resolved.kind == NativeWidgetKind::fader ||
-         resolved.kind == NativeWidgetKind::checkbox ||
-         resolved.kind == NativeWidgetKind::toggle_button ||
-         resolved.kind == NativeWidgetKind::segmented ||
-         resolved.kind == NativeWidgetKind::combo_box ||
-         resolved.kind == NativeWidgetKind::stepper) &&
-        has_single_param;
-    const bool has_choice_param = resolved.kind == NativeWidgetKind::toggle_button &&
-        has_single_param && md.choice_value && !md.choice_value->empty();
-    const bool has_xy_params = resolved.kind == NativeWidgetKind::xy_pad &&
-        md.x_param_key && !md.x_param_key->empty() &&
-        md.y_param_key && !md.y_param_key->empty();
-    const bool has_meter_input = resolved.kind == NativeWidgetKind::meter &&
-        md.meter_source && !md.meter_source->empty() &&
-        md.meter_channel && !md.meter_channel->empty();
-    const bool has_waveform_input = resolved.kind == NativeWidgetKind::waveform &&
-        has_single_param && md.waveform_shape && !md.waveform_shape->empty();
-    const bool has_text_input = resolved.kind == NativeWidgetKind::text_editor &&
-        md.value_key && !md.value_key->empty();
-    const bool has_host_action = resolved.kind == NativeWidgetKind::text_button &&
-        md.host_action && !md.host_action->empty();
-    route.eligible_for_helper =
-        md.route_id && !md.route_id->empty() &&
-        (has_scalar_param_control || has_choice_param || has_xy_params || has_meter_input ||
-         has_waveform_input || has_text_input || has_host_action) &&
-        node.stable_anchor_id && !node.stable_anchor_id->empty();
+    route.eligible_for_helper = binding_route_installable(node, resolved.kind, route.metadata);
 
     plan.routes.push_back(std::move(route));
 
@@ -610,6 +581,66 @@ void emit_binding_context_helpers(std::ostringstream& out,
 }
 
 }  // namespace
+
+bool binding_route_installable(const IRNode& node, NativeWidgetKind kind,
+                               const NativeBindingMetadata& md) {
+    const auto set = [](const std::optional<std::string>& value) {
+        return value && !value->empty();
+    };
+    const bool has_single_param = set(md.param_key);
+    const bool has_scalar_param_control =
+        (kind == NativeWidgetKind::knob || kind == NativeWidgetKind::fader ||
+         kind == NativeWidgetKind::checkbox || kind == NativeWidgetKind::toggle_button ||
+         kind == NativeWidgetKind::segmented || kind == NativeWidgetKind::combo_box ||
+         kind == NativeWidgetKind::stepper) &&
+        has_single_param;
+    const bool has_choice_param =
+        kind == NativeWidgetKind::toggle_button && has_single_param && set(md.choice_value);
+    const bool has_xy_params =
+        kind == NativeWidgetKind::xy_pad && set(md.x_param_key) && set(md.y_param_key);
+    const bool has_meter_input = kind == NativeWidgetKind::meter && md.has_meter_input();
+    const bool has_waveform_input =
+        kind == NativeWidgetKind::waveform && has_single_param && set(md.waveform_shape);
+    const bool has_text_input = kind == NativeWidgetKind::text_editor && set(md.value_key);
+    const bool has_host_action = kind == NativeWidgetKind::text_button && set(md.host_action);
+    return set(md.route_id) &&
+           (has_scalar_param_control || has_choice_param || has_xy_params || has_meter_input ||
+            has_waveform_input || has_text_input || has_host_action) &&
+           set(node.stable_anchor_id);
+}
+
+std::optional<BindingRefusal> binding_refusal(const IRNode& node, NativeWidgetKind kind,
+                                              const NativeBindingMetadata& md) {
+    const auto set = [](const std::optional<std::string>& value) {
+        return value && !value->empty();
+    };
+    // The same payload test, order and messages as `bind_imported_node_by_anchor`
+    // (design_import_native_common.cpp); a test pins the two to one answer.
+    const bool route_required = set(md.param_key) || set(md.x_param_key) || set(md.y_param_key) ||
+                                set(md.meter_source) || set(md.meter_channel) ||
+                                set(md.meter_value_key) || set(md.waveform_shape) ||
+                                set(md.value_key) || set(md.host_action);
+    if (!route_required && !set(md.initial_value))
+        return std::nullopt;
+    if (binding_route_installable(node, kind, md))
+        return std::nullopt;
+    if (!set(md.route_id)) {
+        if (!route_required)
+            return std::nullopt;
+        return BindingRefusal{"native-binding-missing-route",
+                              "binding metadata has no pulpRouteId, so no binding callback was "
+                              "installed",
+                              "pulpRouteId"};
+    }
+    if (!set(node.stable_anchor_id))
+        return BindingRefusal{"native-binding-missing-anchor",
+                              "binding metadata cannot bind without a stable anchor",
+                              "stable_anchor_id"};
+    return BindingRefusal{"native-binding-not-applied",
+                          "binding metadata did not match the materialized widget type or "
+                          "required fields",
+                          std::nullopt};
+}
 
 BindingCodegenArtifacts generate_cpp_binding_artifacts(
     const IRNode& root,

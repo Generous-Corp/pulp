@@ -111,11 +111,15 @@ _ONSET_MIN_MATCHED = 3
 # candidate onset within _ONSET_DETECTED_S of the prediction) for the dropped-attack accounting.
 _ONSET_DETECTED_S = 0.012
 # A single onset softened at least this much fires the verdict even when the mean is diluted across
-# many faithful onsets (the sparse-catastrophe gate) — but only when its attack ENERGY was lost as
-# well (amplitude ratio below _WORST_AMP_RATIO). The rise-time estimate alone can jump on a small
-# perturbation of an attack whose energy is intact, and that must not decide the verdict.
+# many faithful onsets (the sparse-catastrophe gate), but only when a second, independent measure
+# corroborates it: the attack lost its energy (amplitude ratio below _WORST_AMP_RATIO), or its energy
+# arrived later (the window's energy median moved by _WORST_SMEAR_MS or more). The rise-time
+# estimate alone can jump on a small perturbation of an attack that is intact (a -50 dBFS noise floor
+# did that with a 0.0 ms energy shift), and that must not decide the verdict; an attack smeared wide
+# with its energy intact moves the energy median by milliseconds and still does.
 _WORST_HARD_DEFICIT = 0.5
 _WORST_AMP_RATIO = 0.5
+_WORST_SMEAR_MS = 1.0
 
 # Above this level-matched, reference-relative residual, an algorithm-agnostic sample-domain
 # difference is present (the two renders are not effectively identical). Heuristic floor: -60 dB
@@ -364,9 +368,11 @@ def _transient_integrity_kernel(matched: np.ndarray, reference: np.ndarray, sr: 
         if measured is None:
             skipped += 1
             continue
-        d, amp_ratio = measured
+        d = measured.deficit
         deficits.append(d)
-        if d >= _WORST_HARD_DEFICIT and amp_ratio < _WORST_AMP_RATIO:
+        corroborated = (measured.amp_ratio < _WORST_AMP_RATIO
+                        or measured.energy_delay_ms >= _WORST_SMEAR_MS)
+        if d >= _WORST_HARD_DEFICIT and corroborated:
             catastrophic.append(d)
             if undetected:
                 lost += 1
@@ -376,9 +382,10 @@ def _transient_integrity_kernel(matched: np.ndarray, reference: np.ndarray, sr: 
         return {"applicable": False,
                 "reason": f"too few judgeable onsets ({len(deficits)} < {_ONSET_MIN_MATCHED})"}
     mean_deficit, worst_deficit = float(np.mean(deficits)), float(np.max(deficits))
-    # Two-part severity: a single catastrophic loss (softened AND its energy gone) fires via the
-    # worst even when diluted across many faithful onsets; a broad gentle smear fires via `mean`; a
-    # lone onset whose rise-time estimate jumped while its energy survived does not false-fire.
+    # Two-part severity: a single corroborated loss (softened, AND its energy gone or arriving
+    # later) fires via the worst even when diluted across many faithful onsets; a broad gentle smear
+    # fires via `mean`; a lone onset whose rise-time estimate jumped while its energy stayed in place
+    # does not false-fire.
     delta = max(catastrophic) if catastrophic else mean_deficit
     direction = "softer/smeared attacks" if delta > 1e-4 else "faithful attacks"
     return {"applicable": True, "delta": delta, "unit": "attack_smear_deficit",

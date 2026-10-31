@@ -382,7 +382,8 @@ test("the motion freeze runs once in the page and returns its receipt",
     assert.ok(expression.includes(animatedImageKind.toString()));
     assert.doesNotThrow(() => new Function(`return ${expression};`));
     for (const step of ["getAnimations", "finish()", "pause()",
-      "currentTime = 0", "querySelectorAll(\"video\")", "volatile_sources"]) {
+      "currentTime = 0", "commitStyles()", "cancel()", "querySelectorAll(\"video\")",
+      "volatile_sources"]) {
       assert.ok(expression.includes(step), step);
     }
   });

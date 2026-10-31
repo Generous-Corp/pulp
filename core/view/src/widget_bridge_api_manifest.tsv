@@ -22,6 +22,7 @@ setFaderTrackBorder	widget_assets	function	core/view/src/widget_bridge/widget_as
 setMeterColors	widget_assets	function	core/view/src/widget_bridge/widget_assets_api.cpp
 setMeterBarRatio	widget_assets	function	core/view/src/widget_bridge/widget_assets_api.cpp
 createCheckbox	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
+createButtonSurface	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
 createToggleButton	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
 createLabel	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
 createBadge	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
@@ -37,6 +38,8 @@ setOrientation	widget_value	function	core/view/src/widget_bridge/widget_value_co
 setAccentColor	widget_value	function	core/view/src/widget_bridge/widget_value_controls_api.cpp
 setToggleOn	widget_value	function	core/view/src/widget_bridge/widget_value_controls_api.cpp
 setRadioGroup	widget_value	function	core/view/src/widget_bridge/widget_value_controls_api.cpp
+setUaSkin	widget_value	function	core/view/src/widget_bridge/widget_value_controls_api.cpp
+setCheckboxKind	widget_value	function	core/view/src/widget_bridge/widget_value_controls_api.cpp
 onParamChanged	state_binding	preamble_function	core/view/src/widget_bridge/state_binding_api.cpp	internal
 offParamChanged	state_binding	preamble_function	core/view/src/widget_bridge/state_binding_api.cpp	internal
 bindEvents	state_binding	preamble_function	core/view/src/widget_bridge/state_binding_api.cpp	internal
@@ -61,6 +64,7 @@ setMotionToken	tokens	function	core/view/src/widget_bridge/tokens_api.cpp
 getMotionToken	tokens	function	core/view/src/widget_bridge/tokens_api.cpp
 setStringToken	tokens	function	core/view/src/widget_bridge/tokens_api.cpp
 getStringToken	tokens	function	core/view/src/widget_bridge/tokens_api.cpp
+removeToken	tokens	function	core/view/src/widget_bridge/tokens_api.cpp
 setVisible	css_style	function	core/view/src/widget_bridge/style_visibility_api.cpp
 setAccessibilityLabel	accessibility	function	core/view/src/widget_bridge/accessibility_api.cpp
 setAccessibilityRole	accessibility	function	core/view/src/widget_bridge/accessibility_api.cpp
@@ -264,6 +268,7 @@ canvasTranslate	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 canvasScale	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 canvasRotate	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 setStateStyle	css_style	function	core/view/src/widget_bridge/style_state_api.cpp
+setCapturedPaintRect	css_style	function	core/view/src/widget_bridge/style_state_api.cpp
 setEnabled	css_style	function	core/view/src/widget_bridge/style_state_api.cpp
 setDebugPaint	css_style	function	core/view/src/widget_bridge/style_state_api.cpp
 setColorToken	tokens	function	core/view/src/widget_bridge/tokens_api.cpp

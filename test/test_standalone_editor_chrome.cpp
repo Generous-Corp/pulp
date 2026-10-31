@@ -2,6 +2,7 @@
 #include <catch2/catch_approx.hpp>
 #include <pulp/format/detail/delayed_action.hpp>
 #include <pulp/format/detail/standalone_editor_chrome.hpp>
+#include <pulp/format/detail/standalone_window_factory.hpp>
 #include <pulp/format/editor_idle_pump.hpp>
 #include <pulp/format/standalone_settings.hpp>
 #include <pulp/format/detail/standalone_audio_probe_json.hpp>
@@ -2210,3 +2211,34 @@ TEST_CASE("standalone stop flushes an active environment trace",
     SUCCEED("tracing disabled in this configuration");
 #endif
 }
+
+#if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
+TEST_CASE("Standalone startup registers a desktop factory without opening a window",
+          "[standalone][window-host]") {
+    WindowHost::clear_factory();
+    View root;
+    REQUIRE(WindowHost::create(root, WindowOptions{}) == nullptr);
+
+    ensure_standalone_window_factory();
+    CHECK(WindowHost::has_factory());
+    ensure_standalone_window_factory();
+    CHECK(WindowHost::has_factory());
+
+    WindowHost::clear_factory();
+    CHECK(WindowHost::create(root, WindowOptions{}) == nullptr);
+}
+
+TEST_CASE("Standalone startup preserves an embedding host factory", "[standalone][window-host]") {
+    WindowHost::clear_factory();
+    int calls = 0;
+    WindowHost::set_factory([&](View&, const WindowOptions&) -> std::unique_ptr<WindowHost> {
+        ++calls;
+        return nullptr;
+    });
+    ensure_standalone_window_factory();
+    View root;
+    CHECK(WindowHost::create(root, WindowOptions{}) == nullptr);
+    CHECK(calls == 1);
+    WindowHost::clear_factory();
+}
+#endif

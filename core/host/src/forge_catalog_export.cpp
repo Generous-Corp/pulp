@@ -126,14 +126,11 @@ std::vector<ForgeCatalogExportNode> forge_catalog_export_nodes() {
 }
 
 std::vector<ForgeAuditFinding>
-audit_forge_catalog_export(const std::vector<ForgeCatalogExportNode>& nodes) {
-    std::vector<ForgeNodeDescriptor> descriptors;
-    descriptors.reserve(nodes.size());
+audit_catalog_export(const std::vector<ForgeCatalogExportNode>& nodes) {
     std::vector<ForgeAuditFinding> findings;
     std::unordered_map<std::string, int> type_ids;
 
     for (const auto& node : nodes) {
-        descriptors.push_back(node.descriptor);
         std::unordered_map<std::string_view, const ForgeRealization*> declared;
         for (const auto& value : node.descriptor.realizations)
             declared.emplace(value.mode, &value);
@@ -172,6 +169,16 @@ audit_forge_catalog_export(const std::vector<ForgeCatalogExportNode>& nodes) {
             findings.push_back({ForgeAuditFault::duplicate_type_id, "<catalog>", type_id,
                                 "concrete type id appears " + std::to_string(count) + " times"});
 
+    return findings;
+}
+
+std::vector<ForgeAuditFinding>
+audit_forge_catalog_export(const std::vector<ForgeCatalogExportNode>& nodes) {
+    auto findings = audit_catalog_export(nodes);
+    std::vector<ForgeNodeDescriptor> descriptors;
+    descriptors.reserve(nodes.size());
+    for (const auto& node : nodes)
+        descriptors.push_back(node.descriptor);
     append(findings, audit_forge_catalog_membership(descriptors, expected_node_keys()));
     return findings;
 }

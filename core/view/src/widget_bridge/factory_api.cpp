@@ -184,6 +184,23 @@ void BridgeRegistrars::register_widget_factory_form_api(WidgetBridge& self) {
         return choc::value::createString(id);
     });
 
+    // createButtonSurface(id, parentId, "row" | "column")
+    // Chromium's themed push-button surface: a container whose children are
+    // the button's own content (its label and icons), laid out in `direction`.
+    register_bridge_function(
+        api, "createButtonSurface", [&self](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto pid = args.get<std::string>(1, "");
+            auto surface = std::make_unique<ButtonSurface>();
+            surface->set_id(id);
+            surface->flex().direction = args.get<std::string>(2, "column") == "row"
+                                            ? FlexDirection::row
+                                            : FlexDirection::column;
+            self.widgets_[id] = surface.get();
+            self.attach_created(id, pid, std::move(surface));
+            return choc::value::createString(id);
+        });
+
     // createToggleButton(id, parentId)
     register_bridge_function(api, "createToggleButton", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");

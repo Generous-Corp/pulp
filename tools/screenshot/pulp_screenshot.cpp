@@ -672,6 +672,10 @@ int main(int argc, char* argv[]) {
             // ui.js), not relative to the process working directory.
             auto js_dir = std::filesystem::path(options.script_path).parent_path();
             bridge.set_script_base_dir(js_dir);
+            // A developer screenshot of the developer's own artifact: bundled
+            // font paths are baked absolute into generated JS and may point
+            // outside js_dir, so allow them here (never in a hosted editor).
+            bridge.set_allow_unreviewed_file_paths(true);
             for (auto& lib : {"oklch.js"}) {
                 auto lib_path = js_dir / lib;
                 if (std::filesystem::exists(lib_path)) {
@@ -720,6 +724,7 @@ int main(int argc, char* argv[]) {
                     ? "root" : "__pulp_design_ir_root__";
                 bridge.set_script_base_dir(
                     std::filesystem::path(options.design_ir_path).parent_path());
+                bridge.set_allow_unreviewed_file_paths(true);
                 const auto generated = generate_pulp_js(ir, codegen);
                 if (const char* dump = std::getenv("PULP_SHOT_DUMP_DESIGN_JS"))
                     if (*dump) write_text_file(dump, generated);

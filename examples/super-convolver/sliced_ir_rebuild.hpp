@@ -391,9 +391,9 @@ private:
 
     // Build one signal::ConvolverIrState per channel, ONE PARTITION AT A TIME.
     // This is what detail::build_convolver_ir_state() does in a single blocking
-    // call (N forward FFTs plus every working buffer); here each partition — its
-    // FFT and its share of the working buffers — is a bounded item, so a 375-
-    // partition IR spreads across ticks instead of stalling one.
+    // call (N forward FFTs plus every working buffer); here each partition's FFT
+    // is a bounded item, so a 375-partition IR spreads across ticks instead of
+    // stalling one. The working buffers are taken in the channel's first tick.
     std::size_t stage(std::size_t left) {
         if (stage_ch_ >= channels_) { phase_ = Phase::Idle; return 0; }
 
@@ -404,19 +404,24 @@ private:
             st->fft_size = st->block_size * 2;
             st->fft = std::make_unique<signal::Fft>(st->fft_size);
             st->num_partitions = (ir_.size() + block_ - 1) / block_;
-            st->ir_spectra.resize(st->num_partitions);
+            // Both spectrum arenas are one zeroed allocation each, taken here;
+            // the per-partition FFTs below are the work that stays sliced.
+            const std::size_t bins = static_cast<std::size_t>(st->fft_size / 2 + 1);
+            st->ir_spectra.assign(st->num_partitions, bins);
             st->accum.assign(static_cast<std::size_t>(st->fft_size), {0.0f, 0.0f});
             // The input-history spare the convolver adopts if it needs a longer
-            // ring than it holds. Its per-slot buffers are filled one partition
-            // at a time below, like the IR spectra, so a long IR stays sliced.
+            // ring than it holds.
             st->history = std::make_unique<signal::ConvolverInputHistory>();
             st->history->block_size = st->block_size;
             st->history->fft_size = st->fft_size;
             st->history->overlap.assign(static_cast<std::size_t>(st->fft_size), {0.0f, 0.0f});
-            st->history->spectra.resize(st->num_partitions);
+            st->history->spectra.assign(st->num_partitions, bins);
+            stage_scratch_.assign(static_cast<std::size_t>(st->fft_size), {0.0f, 0.0f});
             stage_part_ = 0;
         }
 
+        // Like detail::build_convolver_ir_state(): each partition's full
+        // transform goes through scratch, and only its DC..Nyquist bins are kept.
         const std::size_t fft_n = static_cast<std::size_t>(st->fft_size);
         std::size_t spent = 0;
         while (stage_part_ < st->num_partitions && spent < left) {
@@ -424,13 +429,12 @@ private:
             const std::size_t offset = p * block_;
             const std::size_t count = std::min(block_, ir_.size() - offset);
 
-            auto& spec = st->ir_spectra[p];
-            spec.assign(fft_n, {0.0f, 0.0f});
+            std::fill(stage_scratch_.begin(), stage_scratch_.end(), std::complex<float>{});
             for (std::size_t i = 0; i < count; ++i)
-                spec[i] = {ir_[offset + i], 0.0f};
-            st->fft->forward(spec.data());
-
-            st->history->spectra[p].assign(fft_n, {0.0f, 0.0f});
+                stage_scratch_[i] = {ir_[offset + i], 0.0f};
+            st->fft->forward(stage_scratch_.data());
+            const auto spectrum = st->ir_spectra[p];
+            std::copy_n(stage_scratch_.begin(), spectrum.size(), spectrum.begin());
 
             ++stage_part_;
             spent += fft_n;
@@ -446,6 +450,7 @@ private:
     std::size_t block_ = 0, channels_ = 0;
 
     std::vector<float> ir_;
+    std::vector<std::complex<float>> stage_scratch_; // one partition's full transform
     const std::vector<float>* base_ = nullptr;
     float decay_norm_ = 0.0f, density_ = 1.0f;
     std::uint32_t lcg_ = 0;

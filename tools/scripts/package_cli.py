@@ -42,6 +42,7 @@ Usage (called from .github/workflows/release-cli.yml):
         --mcp-binary build/tools/mcp/pulp-mcp \\
         --import-design-binary build/tools/import-design/pulp-import-design \\
         --import-design-runtime-dir build/tools/import-design/browser_capture-v1 \\
+        --import-design-illustrator-helper build/tools/import-design/illustrator_to_svg.py \\
         --import-design-contract build/tools/import-design/jsx-runtime/materialized_binding_contract.mjs \\
         --build-dir build \\
         --platform darwin-arm64 \\
@@ -52,6 +53,7 @@ Layout produced inside the tarball:
     pulp-cpp                    (optional, post-swap; rpath rewritten)
     pulp-mcp                    (optional, plugin-MCP server; rpath rewritten)
     pulp-control-broker         (optional, Darwin health-only service)
+    import-design/illustrator_to_svg.py (optional, importer Illustrator/PDF converter)
     jsx-runtime/materialized_binding_contract.mjs (optional, import-design sibling contract)
     libwgpu_native.dylib        (or libwgpu_native.so / wgpu_native.dll)
 
@@ -320,6 +322,8 @@ def main() -> int:
                    help="Optional pulp-import-design delegate binary.")
     p.add_argument("--import-design-runtime-dir", required=False, type=Path, default=None,
                    help="Browser-capture .mjs runtime directory bundled with import-design.")
+    p.add_argument("--import-design-illustrator-helper", required=False, type=Path, default=None,
+                   help="PDF-compatible Illustrator-to-SVG helper bundled with import-design.")
     p.add_argument("--import-design-contract", required=False, type=Path, default=None,
                    help="Shared materialized binding contract bundled beside the browser-capture runtime.")
     p.add_argument("--import-design-source-emitter", required=False, type=Path, default=None,
@@ -381,6 +385,15 @@ def main() -> int:
             (args.import_design_runtime_dir is None)):
         print("FAIL: import-design binary and runtime directory must be supplied together",
               file=sys.stderr)
+        return 2
+    if args.import_design_illustrator_helper is not None and args.import_design_binary is None:
+        print("FAIL: --import-design-illustrator-helper requires --import-design-binary",
+              file=sys.stderr)
+        return 2
+    if (args.import_design_illustrator_helper is not None
+            and not args.import_design_illustrator_helper.is_file()):
+        print("FAIL: --import-design-illustrator-helper not at "
+              f"{args.import_design_illustrator_helper}", file=sys.stderr)
         return 2
     materialized_payload = (
         args.import_design_contract,
@@ -505,6 +518,17 @@ def main() -> int:
                 args.import_design_binary, stage, import_name, is_windows)
             files.append(staged_import)
             names.append(import_name)
+            if args.import_design_illustrator_helper is not None:
+                helper_dir = stage / "import-design"
+                helper_dir.mkdir(parents=True, exist_ok=True)
+                staged_helper = helper_dir / "illustrator_to_svg.py"
+                shutil.copy2(args.import_design_illustrator_helper, staged_helper)
+                staged_helper.chmod(0o755)
+                files.append(staged_helper)
+                names.append("import-design/illustrator_to_svg.py")
+                print("bundled: "
+                      f"{args.import_design_illustrator_helper} -> "
+                      "import-design/illustrator_to_svg.py", flush=True)
             if args.import_design_contract is not None:
                 for source, member in (
                     (args.import_design_contract, "materialized_binding_contract.mjs"),

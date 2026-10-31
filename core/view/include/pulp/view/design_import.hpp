@@ -18,6 +18,7 @@
 /// NativeImport* binding descriptors / context) still lives directly in this
 /// umbrella; it has not been split out yet.
 
+#include <pulp/canvas/text_raster_policy.hpp>
 #include <pulp/view/design_codegen.hpp>
 #include <pulp/view/design_ir.hpp>
 #include <pulp/view/design_shortcuts.hpp>
@@ -192,6 +193,10 @@ struct NativeImportXYPadBindingDescriptor {
     std::string_view gesture_contract;
 };
 
+/// A level display's binding. Either `meter_source` and `channel` name a
+/// metering source, or both are empty and `value_key` alone names what to show:
+/// a parameter by name, or a `value:<name>` value channel, as the bridge's
+/// `bindMeter(id, key)` resolves it. A context binds the key form by that key.
 struct NativeImportMeterBindingDescriptor {
     std::string_view route_id;
     std::string_view meter_source;
@@ -369,6 +374,13 @@ std::unique_ptr<View> build_native_view_tree(
     const DesignIR& ir,
     const IRAssetManifest& manifest,
     const NativeMaterializeOptions& options = {});
+
+/// The text raster policy a surface showing `ir` should be created with:
+/// `chromium` when any captured text node was authored
+/// `-webkit-font-smoothing: antialiased`, otherwise `legacy`. A Label built by
+/// build_native_view_tree paints that text unhinted, which reproduces
+/// Chromium's glyphs only on a `chromium` surface.
+canvas::TextRasterPolicy design_ir_text_raster_policy(const DesignIR& ir);
 
 /// Apply explicit `pulp*` binding metadata from `ir` to an already materialized
 /// native view tree. This is opt-in: building the tree does not install

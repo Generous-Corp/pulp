@@ -118,6 +118,9 @@ def _importer_runtime_paths(prefix: Path, platform: str) -> set[str]:
         matrix = json.loads(PRODUCT_MATRIX.read_text(encoding="utf-8"))
         members = matrix["common_cli_members"]
         node_floor = str(matrix.get("node_runtime_floor", "999999.0.0"))
+        illustrator_floor = str(
+            matrix.get("illustrator_import_floor", "999999.0.0")
+        )
         materialized_contract_floor = str(
             matrix.get("materialized_binding_contract_floor", "999999.0.0")
         )
@@ -142,6 +145,8 @@ def _importer_runtime_paths(prefix: Path, platform: str) -> set[str]:
             "bin/jsx-runtime/materialized_source_emitter.mjs",
             "bin/jsx-runtime/materialized_ids_map.mjs",
         })
+    if version >= _version_tuple(illustrator_floor):
+        paths.add("bin/import-design/illustrator_to_svg.py")
     if not paths:
         raise ProvenanceError(f"empty importer runtime contract in {PRODUCT_MATRIX}")
     if version >= _version_tuple(node_floor):
@@ -450,6 +455,15 @@ def build_release_marker(
             "official release SDK feature contract requires tracing=OFF; this "
             "build was configured with PULP_TRACING=ON and is development-only"
         )
+    # The shell exec/execAsync JS bridge hands a scripted UI a /bin/sh. The
+    # release lanes configure with PULP_DEV_BRIDGE_EXEC=OFF; a missing key means
+    # a source tree that compiled it in unconditionally, and _cache_bool
+    # already refuses that.
+    if _cache_bool(build_dir, "PULP_DEV_BRIDGE_EXEC"):
+        raise ProvenanceError(
+            "official release SDK feature contract requires bridge_exec=OFF; this "
+            "build was configured with PULP_DEV_BRIDGE_EXEC=ON and is development-only"
+        )
     has_vellum_d15 = _cache_bool(build_dir, "PULP_GPU_AUDIO_HAS_VELLUM_D15")
     vellum_d15_release_eligible = _cache_bool(
         build_dir, "PULP_GPU_AUDIO_VELLUM_D15_RELEASE_ELIGIBLE"
@@ -478,6 +492,7 @@ def build_release_marker(
         "build_type": build_type,
         "features": {
             "audio_probes": False,
+            "bridge_exec": False,
             "inspector": expected_inspector,
             "tracing": False,
         },
@@ -561,6 +576,11 @@ def verify_release_marker(
     # marker may not claim a traced build.
     if isinstance(features, dict) and "tracing" in features:
         expected_features["tracing"] = False
+    # Same rule for `bridge_exec`: markers minted before the key existed came
+    # from a pipeline that could not record it, but a present key may only
+    # ever say the shell bridge is absent.
+    if isinstance(features, dict) and "bridge_exec" in features:
+        expected_features["bridge_exec"] = False
     if features != expected_features:
         raise ProvenanceError(f"{path}: release feature contract is unsafe")
     if _installed_gpu_audio_capability_schema(prefix) and "gpu_audio" not in marker:

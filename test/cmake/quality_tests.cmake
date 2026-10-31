@@ -134,6 +134,20 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(foundation-include-lint foundation-include-lint-negative-contract
         PROPERTIES LABELS "pr" TIMEOUT 60)
 
+    # Test-only compile macros (PULP_AU_V2_TEST_HOOKS guards an AU v2 accessor
+    # that hands out a PluginViewHost*) may be defined only under test/;
+    # elsewhere a line naming one may only guard on it or comment on it.
+    # Lexical and build-free; the self-test plants each shipping-path definition.
+    add_test(NAME shipping-macro-guard
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/shipping_macro_guard.py"
+            --root "${CMAKE_SOURCE_DIR}")
+    add_test(NAME shipping-macro-guard-negative-contract
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_shipping_macro_guard.py")
+    set_tests_properties(shipping-macro-guard shipping-macro-guard-negative-contract
+        PROPERTIES LABELS "pr" TIMEOUT 60)
+
     # Inheritance entries are one file per change event so concurrent pull
     # requests do not conflict; the checker keeps the older single-file ledger
     # frozen, requires an entry for every change or expansion-watch event that
@@ -898,6 +912,12 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME merge-group-shadows-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_merge_group_shadows.py")
         set_tests_properties(merge-group-shadows-selftest PROPERTIES TIMEOUT 180)
+        # Paired affected-test shadow runner: selected execution is concurrent
+        # with, and never authoritative over, the full merge-group command.
+        # script-inputs: not-gated advisory fixture test uses only temporary inputs
+        add_test(NAME paired-affected-tests-shadow-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_paired_affected_tests_shadow.py")
+        set_tests_properties(paired-affected-tests-shadow-selftest PROPERTIES TIMEOUT 120)
         # Per-test content-hash receipts (key derivation, always-run rules,
         # trusted reads), reported in shadow by merge-group macos jobs.
         add_test(NAME test-receipts-shadow-selftest COMMAND ${Python3_EXECUTABLE}

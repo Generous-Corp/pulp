@@ -836,6 +836,29 @@ TEST_CASE("WidgetBridge reports a handler error even without a dispatch hook",
               .getWithDefault<bool>(false));
 }
 
+TEST_CASE("WidgetBridge reports an after-dispatch hook error even without a dispatch hook",
+          "[view][bridge][event-batch]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // The UI framework's post-commit hook throws, and no __dispatchError__ is
+    // installed: the error must still be counted and keep its message.
+    bridge.load_script(R"(
+        on('w1', 'click', function () {});
+        globalThis.__pulpAfterDiscreteDispatch__ = function () { throw new RangeError('hook boom'); };
+    )");
+    REQUIRE(engine.evaluate("typeof __dispatchError__").toString() == "undefined");
+
+    dispatch_event(engine, "w1", "click", "{}");
+
+    CHECK(engine.evaluate("__pulpDispatchErrorCount__").getWithDefault<int>(-1) == 1);
+    CHECK(engine.evaluate("__pulpLastDispatchError__.indexOf('RangeError: hook boom') === 0")
+              .getWithDefault<bool>(false));
+}
+
 TEST_CASE("WidgetBridge reports a thrown value that has no toString",
           "[view][bridge][event-batch]") {
     ScriptEngine engine;
@@ -1391,6 +1414,9 @@ TEST_CASE("WidgetBridge loadAssetSync covers embedded file and missing records",
     root.set_bounds({0, 0, 400, 300});
     StateStore store;
     WidgetBridge bridge(engine, root, store);
+    // file:// reads with no asset root are the app-side raw-path posture;
+    // the default refuses them (see test_widget_bridge_capabilities.cpp).
+    bridge.set_allow_unreviewed_file_paths(true);
 
     static const char kEmbeddedJson[] = "{\"label\":\"pulp\"}";
     AssetManager::instance().register_embedded(
@@ -1445,6 +1471,7 @@ TEST_CASE("WidgetBridge loadAssetSync covers text mime variants and path normali
     root.set_bounds({0, 0, 400, 300});
     StateStore store;
     WidgetBridge bridge(engine, root, store);
+    bridge.set_allow_unreviewed_file_paths(true); // raw file:// read below
 
     static const char kEmbeddedCss[] = "body { color: red; }\n";
     static const char kEmbeddedSvg[] = "<svg><path d='M0 0h1v1z'/></svg>";
@@ -1724,6 +1751,13 @@ TEST_CASE("WidgetBridge loadFont reports existing and missing paths",
 
     const auto existing = js_single_quoted(font_path.string());
     const auto missing = js_single_quoted((font_path.string() + ".missing"));
+    // An absolute path outside every configured root is refused by default,
+    // so the probe reports "missing" for a file that exists: the existence
+    // oracle is closed unless the host opts into unreviewed paths.
+    bridge.load_script("var font_contained = loadFont('" + existing + "');");
+    REQUIRE_FALSE(engine.evaluate("font_contained").getWithDefault<bool>(true));
+
+    bridge.set_allow_unreviewed_file_paths(true);
     bridge.load_script(
         "var font_existing = loadFont('" + existing + "');"
         "var font_missing = loadFont('" + missing + "');"

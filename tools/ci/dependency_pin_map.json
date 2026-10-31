@@ -8,6 +8,7 @@
   "fastgltf": {"fetchcontent": ["fastgltf"]},
   "Highway": {"fetchcontent": ["highway"]},
   "Mbed TLS": {"fetchcontent": ["mbedtls"]},
+  "muFFT": {"fetchcontent": ["mufft"], "targets": ["pulp-signal-mufft"]},
   "Oboe": {"fetchcontent": ["oboe"], "platforms": ["android"]},
   "SDL3": {"fetchcontent": ["sdl3"]},
   "SheenBidi": {"fetchcontent": ["sheenbidi"]},

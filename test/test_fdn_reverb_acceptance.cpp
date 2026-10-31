@@ -278,6 +278,68 @@ TEST_CASE("fdn reverb loop saturator THD rises monotonically with drive",
     REQUIRE(thd[2] > thd[1]);
 }
 
+namespace {
+// Peak |H| of the bank as it actually filters: its impulse response, then a
+// direct DFT on a log grid plus a fine linear sweep. Independent of the bound
+// the bank reports, which is what this measurement checks.
+double realized_eq_peak(fdn::LoopEq<double>& eq, double rate) {
+    constexpr int kLen = 16384;
+    std::vector<double> h(kLen);
+    eq.reset();
+    for (int n = 0; n < kLen; ++n)
+        h[n] = eq.process(0, n == 0 ? 1.0 : 0.0);
+    eq.reset();
+    double peak = 0.0;
+    auto at = [&](double hz) {
+        const double w = 2.0 * 3.14159265358979323846 * hz / rate;
+        std::complex<double> acc{};
+        for (int n = 0; n < kLen; ++n)
+            acc += h[n] * std::polar(1.0, -w * n);
+        peak = std::max(peak, std::abs(acc));
+    };
+    for (double hz = 10.0; hz < 0.5 * rate; hz *= 1.01)
+        at(hz);
+    for (double hz = 0.0; hz < 0.5 * rate; hz += 25.0)
+        at(hz);
+    return peak;
+}
+} // namespace
+
+TEST_CASE("fdn loop EQ worst-case boost bounds the realized response", "[fdn][reverb][stability]") {
+    constexpr double kRate = 32000.0;
+    struct Case {
+        int index;
+        fdn::EqBand band;
+    };
+    // Shelves above Q 1/sqrt(2) overshoot their gain near the corner, and a
+    // cut shelf rises above unity there.
+    const Case cases[] = {
+        {9, {5000.0, -6.0, 4.0}}, {9, {5000.0, 6.0, 2.0}}, {0, {200.0, 6.0, 1.0}},
+        {0, {200.0, 6.0, 4.0}},   {0, {200.0, -6.0, 2.0}}, {4, {1500.0, 9.0, 3.0}},
+    };
+    for (const auto& c : cases) {
+        INFO("band " << c.index << " " << c.band.freq_hz << " Hz " << c.band.gain_db << " dB Q "
+                     << c.band.q);
+        fdn::LoopEq<double> eq;
+        eq.set_band(c.index, c.band);
+        eq.configure(kRate);
+        const double realized = realized_eq_peak(eq, kRate);
+        INFO("realized peak " << realized << " vs bound " << eq.worst_case_boost());
+        // A peaking band's peak equals its gain exactly; the DFT of the
+        // truncated impulse response can read a few ulp above it.
+        REQUIRE(realized <= eq.worst_case_boost() * (1.0 + 1e-9));
+    }
+
+    // Peaks and monotonic shelves keep the product-of-gains bound exactly.
+    fdn::LoopEq<double> eq;
+    eq.set_band(0, {200.0, 6.0, 0.7});
+    eq.set_band(4, {1500.0, 3.0, 2.0});
+    eq.set_band(9, {6000.0, -4.0, 0.5});
+    eq.configure(kRate);
+    REQUIRE(eq.worst_case_boost() == std::pow(10.0, 6.0 / 20.0) * std::pow(10.0, 3.0 / 20.0));
+    REQUIRE(realized_eq_peak(eq, kRate) <= eq.worst_case_boost() * (1.0 + 1e-9));
+}
+
 TEST_CASE("fdn reverb kills non-finite state locally and recovers",
           "[fdn][reverb][stability]") {
     const float nan = std::numeric_limits<float>::quiet_NaN();

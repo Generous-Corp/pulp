@@ -30,6 +30,7 @@
 #include <cstdint>
 #include <future>
 #include <string>
+#include <optional>
 #include <vector>
 
 #ifdef PULP_HAS_SKIA
@@ -85,6 +86,39 @@ bool register_font(const std::uint8_t* data, std::size_t size,
 /// `false` if the file cannot be opened, is empty, or the bytes are rejected.
 bool register_font_file(const std::string& path,
                         const std::string& family_override = "");
+
+/// One CSS `@font-face` rule's declared `font-weight` range (a single weight
+/// has `min == max`). Chromium matches and synthesizes against these, not
+/// against the weight the font file itself reports.
+struct DeclaredWeightRange {
+    int min = 400;
+    int max = 400;
+};
+
+/// Records that an `@font-face` rule bound `family` at a declared weight range
+/// for `scope`. Repeating a range already recorded by that owner is a no-op.
+void declare_font_face_weight_range(const std::string& family, int weight_min, int weight_max,
+                                    const std::string& scope = {});
+
+/// Remove all declared ranges owned by `scope`. The empty scope is the legacy
+/// process-wide bucket and is intentionally not cleared by bridge teardown.
+void clear_declared_font_face_weight_ranges(const std::string& scope);
+
+/// Whether any `@font-face` weight range has been declared for `family`.
+bool has_declared_font_face_weights(const std::string& family);
+
+/// The declared range CSS font matching picks for `desired_weight` (CSS Fonts 4
+/// section 5.2): a range containing it, else for a desired weight in 400..500
+/// the nearest range up to 500 then below then above, for one under 400 the
+/// nearest below then above, and for one over 500 the nearest above then
+/// below. Returns the index into `ranges`, or -1 when it is empty.
+int css_match_declared_weight(const std::vector<DeclaredWeightRange>& ranges, int desired_weight);
+
+/// Whether Chromium synthesizes bold for `requested_weight` text in `family`:
+/// it does exactly when the request is 600 or more and the declared range CSS
+/// matching picks ends below 600. nullopt when no `@font-face` range was
+/// declared for the family, so the caller keeps its own rule.
+std::optional<bool> declared_face_synthesizes_bold(const std::string& family, int requested_weight);
 
 /// How many `register_font_file` calls this process has routed to
 /// `register_font_woff2` because the file started with the WOFF2 magic. A

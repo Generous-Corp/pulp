@@ -549,6 +549,36 @@ int cmd_fmt(const std::vector<std::string>& args) {
 
 // ── cmd_cache ───────────────────────────────────────────────────────────────
 
+namespace {
+
+// Bytes held by one entry of the asset cache: a file's size, or the regular
+// files below a directory (the browser-capture probe keeps one there). An
+// entry that cannot be read counts as zero rather than ending the listing.
+std::uintmax_t cache_entry_bytes(const fs::path& path) {
+    std::error_code ec;
+    if (fs::is_regular_file(path, ec)) {
+        const auto size = fs::file_size(path, ec);
+        return ec ? 0 : size;
+    }
+    if (!fs::is_directory(path, ec))
+        return 0;
+    std::uintmax_t total = 0;
+    for (fs::recursive_directory_iterator
+             it(path, fs::directory_options::skip_permission_denied, ec),
+         end;
+         !ec && it != end; it.increment(ec)) {
+        std::error_code entry_ec;
+        if (!it->is_regular_file(entry_ec))
+            continue;
+        const auto size = it->file_size(entry_ec);
+        if (!entry_ec)
+            total += size;
+    }
+    return total;
+}
+
+} // namespace
+
 int cmd_cache(const std::vector<std::string>& args) {
     auto home = pulp_home();
     if (home.empty()) {
@@ -600,7 +630,9 @@ int cmd_cache(const std::vector<std::string>& args) {
             bool any = false;
             for (auto& entry : fs::directory_iterator(cache_dir)) {
                 any = true;
-                auto size = fs::file_size(entry.path());
+                const auto size = cache_entry_bytes(entry.path());
+                std::error_code dir_ec;
+                const bool is_dir = entry.is_directory(dir_ec);
                 std::string size_str;
                 if (size > 1024 * 1024)
                     size_str = std::to_string(size / (1024 * 1024)) + " MB";
@@ -608,8 +640,8 @@ int cmd_cache(const std::vector<std::string>& args) {
                     size_str = std::to_string(size / 1024) + " KB";
                 else
                     size_str = std::to_string(size) + " B";
-                std::cout << "  " << entry.path().filename().string()
-                          << " (" << size_str << ")\n";
+                std::cout << "  " << entry.path().filename().string() << (is_dir ? "/" : "") << " ("
+                          << size_str << ")\n";
             }
             if (!any) std::cout << "  (empty)\n";
         } else {

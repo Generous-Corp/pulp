@@ -992,6 +992,28 @@ TEST_CASE("FFT vDSP split halves sit 16 bytes past a 64-byte boundary",
     REQUIRE(Fft64(512).vdsp_split_offset_bytes(true) == -1);
 }
 
+TEST_CASE("FFT vDSP split halves are not a power of two apart", "[signal][fft][real][placement]") {
+    // Halves exactly N (or N/2) floats apart contend once that distance
+    // reaches 64 KB, so a 64-float gap separates them at every size, and the
+    // gap keeps both halves 16 bytes past a 64-byte boundary.
+    for (const int n : {32, 512, 4096, 16384, 32768, 65536}) {
+        Fft fft(n);
+        INFO("n=" << n);
+#if PULP_FFT_HAS_VDSP
+        REQUIRE(fft.vdsp_split_plane_gap_floats(true) == 64);
+        REQUIRE(fft.vdsp_split_plane_gap_floats(false) == 64);
+        REQUIRE(fft.vdsp_split_offset_bytes(true) == 16);
+        REQUIRE(fft.vdsp_split_offset_bytes(false) == 16);
+        Fft moved(std::move(fft));
+        REQUIRE(moved.vdsp_split_plane_gap_floats(true) == 64);
+        REQUIRE(moved.vdsp_split_plane_gap_floats(false) == 64);
+#else
+        REQUIRE(fft.vdsp_split_plane_gap_floats(true) == -1);
+#endif
+    }
+    REQUIRE(Fft64(512).vdsp_split_plane_gap_floats(false) == -1);
+}
+
 TEST_CASE("FFT real transform error matches the most accurate vDSP placement",
           "[signal][fft][real][accuracy]") {
     // Worst error over bins and frames relative to the largest bin, against a
@@ -1027,5 +1049,31 @@ TEST_CASE("FFT real transform error matches the most accurate vDSP placement",
 #else
         REQUIRE(worst_db < -120.0);
 #endif
+    }
+}
+
+TEST_CASE("FFT forward_real handles one- and two-point transforms", "[signal][fft]") {
+    {
+        Fft fft(2);
+        const float x[2] = {1.0f, -1.0f};
+        std::complex<float> out[2]{};
+        fft.forward_real(x, out);
+        REQUIRE(std::abs(out[0] - std::complex<float>(0.0f, 0.0f)) < 1.0e-6f);
+        REQUIRE(std::abs(out[1] - std::complex<float>(2.0f, 0.0f)) < 1.0e-6f);
+    }
+    {
+        Fft fft(2);
+        const float x[2] = {3.0f, 5.0f};
+        std::complex<float> out[2]{};
+        fft.forward_real(x, out);
+        REQUIRE(std::abs(out[0] - std::complex<float>(8.0f, 0.0f)) < 1.0e-6f);
+        REQUIRE(std::abs(out[1] - std::complex<float>(-2.0f, 0.0f)) < 1.0e-6f);
+    }
+    {
+        Fft fft(1);
+        const float x[1] = {0.75f};
+        std::complex<float> out[1]{};
+        fft.forward_real(x, out);
+        REQUIRE(std::abs(out[0] - std::complex<float>(0.75f, 0.0f)) < 1.0e-6f);
     }
 }
