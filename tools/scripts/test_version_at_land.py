@@ -789,7 +789,8 @@ class PrRouteTest(unittest.TestCase):
         self.assertEqual(self._branch_cmake_version(val.BUMP_BRANCH), "0.2.0")
         main_sha = subprocess.run(
             ["git", "-C", str(self.origin), "rev-parse", "main"],
-            capture_output=True, text=True, check=True).stdout.strip()
+            capture_output=True, text=True, encoding="utf-8",
+            check=True).stdout.strip()
         self.assertEqual(subprocess.run(
             ["git", "-C", str(self.origin), "merge-base", "--is-ancestor",
              main_sha, tip]).returncode, 0)
