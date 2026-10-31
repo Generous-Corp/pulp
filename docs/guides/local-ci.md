@@ -3932,6 +3932,69 @@ or its own message), and the fix is to add it to `PULP_PR_FAST_NEEDS_BUILD`.
   Re-running a contract-lane run does not help either, because a re-run
   replays the original event.
 
+### The full-lane dispatch tests the merge ref (`pr_number`)
+
+A plain `workflow_dispatch` of `build.yml` tests the bare branch head. A head
+that is behind `main` then fails freshness checks such as
+`agent-capability-manifest-check`, and the Linux leg asks for the operator's
+local runner (`Linux (x64) [local]`), which nothing serves on that path. The
+fleet App's full-lane dispatch therefore sets the `pr_number` input:
+
+```bash
+gh workflow run build.yml --ref <pr-head-branch> -f pr_number=<n>
+```
+
+With `pr_number` set, the run does the following:
+- **Binds first, and resolves the merge commit once.** classify's first step
+  requires the pull request to be open, in this repository, with its head
+  branch and commit equal to the dispatch's `github.ref_name` and
+  `github.sha`. It then takes the pull request's merge commit
+  (`merge_commit_sha`, which `refs/pull/<n>/merge` names) and requires exactly
+  two parents: a base, then this head. Anything else fails closed, and so does
+  `macos`. That covers a conflicting pull request, a merge GitHub has not
+  computed yet, or a moved head. Without the binding, a dispatch on one branch
+  could post another pull request's merge result on its head.
+- **Tests that exact commit everywhere.** classify, and every build leg
+  through classify's output, check out the bound merge sha, never the moving
+  ref. Build re-checks that HEAD is that sha and that its second parent is the
+  run's head.
+- **Records what it tested.** The `tested_ref`, the `tested_sha` (the merge
+  commit) and the `merged_base` (its first parent) are classify outputs and
+  step outputs of `Verify the tested merge ref`, and appear in the job summary.
+  The next step is named `Tested <ref> at <sha> onto <base>`, so a reader of
+  the jobs API sees them without reading logs. The merged base is also the
+  capability base and the base classify diffs against, as a pull request's
+  pinned `base.sha` is.
+- **Writes nothing a later run reads.** The run executes a pull request's
+  code. A dispatch writes caches in its ref's scope, so on this path the bind
+  refuses the default branch, any `release/*` branch, and any branch with
+  classic protection or a ruleset, or whose protection cannot be read. Every
+  cache step only restores, and `setup-node` saves no npm cache.
+- **Uploads no consumable artifacts.** The iOS gate digest, the GPU-audio
+  SDK, the reuse replay record and the plugin bundles are skipped. Only the
+  ctest logs and the Rust fallback receipt upload, as diagnostics. The
+  protected receipt and the A2T attestation are `pull_request`-only. Every
+  artifact consumer (`ios_gate_digest`, `reuse_replay_collect`,
+  `binary_identity_shadow`, `base_poison_detector`,
+  `protected_merge_receipt`) reads only `merge_group`, `pull_request` or
+  push-to-main runs, and no `workflow_run` consumer of Build and Test reads
+  artifacts.
+- **Routes every leg as a pull_request run does.** macOS takes the PR-head
+  class (`pulp-build-pr-head`), so it gets the same host caches and warm
+  build dir (`build-<key>`) as the pull request's own runs. Linux goes to
+  GitHub-hosted runners, and there is no Windows leg. None of the operator
+  routing inputs applies: the provider and the Linux, Windows and macOS
+  selectors.
+- **Isolated from the pull request's other runs.** Its concurrency group
+  keys on `github.ref`, which is `refs/heads/<branch>`, so it cannot cancel
+  the pull request's `refs/pull/<n>/merge` run or a merge group. It uses no
+  secret and no environment beyond what a `pull_request` run gets.
+
+Everything else is still a dispatch: the run's checks land on the head, and
+it runs the full suite. A dispatch without `pr_number` behaves as before.
+`tools/ci/test_build_pr_dispatch.py` pins the checkout, the binding, the
+recorded ref, and the routing both ways.
+
 ### Approve first, then the full lane, then arm
 
 A reviewer may give `verdict: APPROVE head:<sha>` before the head has had a
@@ -3939,7 +4002,8 @@ full macOS run; the verdict is about the change, and the contract lane has
 already run the fast PR-caused checks. Approval is not arming:
 
 1. The arm sweep sees the trusted APPROVE for the current head, applies
-   `macos-ci` and dispatches `build.yml` on the branch. The full lane runs.
+   `macos-ci` and dispatches `build.yml` on the branch with `pr_number` set
+   (see below). The full lane runs.
 2. The sweep arms only once the head's latest `macos` check run is a
    completed full-lane `success`: its `shipyard-test-tier` annotation is not
    `deferred`. An arm made earlier (absent, running, failed, `deferred`, or no

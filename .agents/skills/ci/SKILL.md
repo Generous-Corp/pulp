@@ -448,7 +448,16 @@ macOS.
 
 - **Only `shipyard-local[bot]`'s `macos-ci` counts.** On `opened` or
   `reopened` the lane checks who last applied the label. To force the full
-  lane, dispatch `build.yml` on the branch.
+  lane, dispatch `build.yml` on the branch with `-f pr_number=<n>`.
+- **A full-lane dispatch must set `pr_number`.** Without it a dispatch tests
+  the bare branch head (a behind head fails freshness checks such as
+  `agent-capability-manifest-check`), and its Linux leg waits forever for
+  `Linux (x64) [local]`. With it the run is bound to the PR's head, resolves
+  its merge commit once (parents: base, then head) and tests that sha in
+  classify and every build leg, routes Linux to hosted like a PR run, and
+  records
+  `tested_ref`, `tested_sha` and `merged_base` (step outputs, the job summary,
+  and the `Tested <ref> at <sha> onto <base>` step name).
 - **`build.yml` does not listen for `labeled`.** A label event's run is a newer
   check suite with no `macos` check run, and the merge queue then refuses to
   enqueue with "Required status check "macos" is expected" although the
