@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import base64
 import importlib.util
 import json
 from pathlib import Path
@@ -43,7 +44,15 @@ AAAAQCjQDta/bMVQqYtqs63boEVcZqsuOcnn9WJntHMT96qOyz3nZZ+sC8heJGSUmCwnE3
 lYjrdqTIWVgmzB0t0ELwk=
 -----END SSH SIGNATURE-----
 """
+# The key that signed the RELEASE_BOT_SIGNATURE fixture. It is no longer the
+# committed pin: the fixture base pins it (see setUpClass) so the real
+# signature still exercises the verifier, while the committed pin is asserted
+# separately against the rotated Actions-only key.
 RELEASE_BOT_FINGERPRINT = "SHA256:3FTeMLmPYGnvymrczt/KaZPmxGA345nT8qOAhMSslxQ"
+RELEASE_BOT_PUBLIC_KEY = (
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIO1bAGevh2gC79Y5aYzNPqHeszCd/8vcW6rdqy5XYap7"
+)
+COMMITTED_PIN_FINGERPRINT = "SHA256:1GDNVIagepWIT4dRynSurMyxNMEK3EqmYlkglH7S8g8"
 AGENT_FINGERPRINT = "SHA256:rxAigIze6ikPj3KR1cyL81fmaT0k2qVpwoBxC74gYMc"
 AGENT_PUBLIC_KEY = (
     "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILpks7Ba65dyh7Kv4SfXyQbGVUJDMxpoehuTyrnnUtkT"
@@ -100,6 +109,12 @@ class GeneratedVersionBumpCheckTest(unittest.TestCase):
             input="fixture protected base\n", capture_output=True,
         ).stdout.strip()
         run(template, "checkout", "--quiet", "-B", "main", root_commit)
+        (template / CHECK.RELEASE_BOT_SIGNING_PIN).write_text(
+            json.dumps({"ssh_signing_keys": [
+                {"public_key": RELEASE_BOT_PUBLIC_KEY,
+                 "fingerprint": RELEASE_BOT_FINGERPRINT}]}),
+            encoding="utf-8",
+        )
         # Re-pin the history-derived ledger pair to that history, as main
         # always carries it current, so an ordinary fixture bump does not also
         # re-pin it. The tests that need a re-pin build one deliberately.
@@ -914,6 +929,16 @@ class GeneratedVersionBumpCheckTest(unittest.TestCase):
     def test_pin_on_main_is_the_release_bot_key(self) -> None:
         self.assertEqual(CHECK._pinned_signing_fingerprints(self.repo, self.base),
                          {RELEASE_BOT_FINGERPRINT})
+
+    def test_committed_pin_is_exactly_the_rotated_actions_key(self) -> None:
+        pin = json.loads((ROOT / CHECK.RELEASE_BOT_SIGNING_PIN).read_text(encoding="utf-8"))
+        keys = pin["ssh_signing_keys"]
+        self.assertEqual(len(keys), 1)
+        self.assertEqual(keys[0]["fingerprint"], COMMITTED_PIN_FINGERPRINT)
+        self.assertNotIn(RELEASE_BOT_FINGERPRINT, json.dumps(pin))
+        self.assertEqual(keys[0]["github_signing_key_id"], 1289902)
+        blob = base64.b64decode(keys[0]["public_key"].split()[1], validate=True)
+        self.assertEqual(CHECK._ssh_key_fingerprint(blob), COMMITTED_PIN_FINGERPRINT)
 
     def test_bot_named_commit_signed_by_another_key_is_refused(self) -> None:
         # Author, committer, email, login and "verified" are all the bot's; only

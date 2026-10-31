@@ -3217,7 +3217,7 @@ too, and author/committer name and email are free text. The verifier extracts
 the public key embedded in the verified `SSHSIG` and requires its fingerprint to
 be listed in `tools/scripts/release_bot_signing.json` read from the protected
 base. That file records the public half of `RELEASE_BOT_SSH_SIGNING_KEY`
-(GitHub signing-key id 1044361, `SHA256:3FTeML...`); rotating the secret means
+(GitHub signing-key id 1289902, Actions-only, `SHA256:1GDNVI...`); rotating the secret means
 landing the new public key there first.
 
 ## One admission writer feeds the merge queue
