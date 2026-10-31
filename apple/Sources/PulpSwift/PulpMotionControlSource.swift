@@ -59,6 +59,7 @@ import CoreMotion
 public final class PulpMotionControlSource {
     private let manager: CMMotionManager
     private let queue: OperationQueue
+    private let publishQueue = DispatchQueue(label: "com.pulp.motion-control.publish")
     private let publish: (PulpMotionControlFrame) -> Void
     private let stateLock = NSLock()
     private var sequence: UInt64 = 0
@@ -114,18 +115,17 @@ public final class PulpMotionControlSource {
         }
         running = false
         sequence &+= 1
-        // Keep publication under the same lock as submit(). This makes a
-        // lifecycle loss frame ordered with respect to an in-flight sensor
-        // frame and prevents concurrent writers from producing an incoherent
-        // stream. The closure runs on the provider/lifecycle thread, never on
-        // an audio callback.
-        publish(PulpMotionControlFrame(
+        let frame = PulpMotionControlFrame(
             sequence: sequence,
             value: 0.0,
             confidence: 0.0,
             valid: false,
             timestampNanoseconds: 0
-        ))
+        )
+        // Enqueue while holding stateLock so this loss frame follows any
+        // in-flight sensor frame. The application closure runs later on a
+        // separate serial queue, never while stateLock is held.
+        publishQueue.async { [publish] in publish(frame) }
         stateLock.unlock()
     }
 
@@ -137,13 +137,14 @@ public final class PulpMotionControlSource {
         }
         let normalized = PulpMotionControlMath.normalizeTilt(yAcceleration: yAcceleration)
         sequence &+= 1
-        publish(PulpMotionControlFrame(
+        let frame = PulpMotionControlFrame(
             sequence: sequence,
             value: normalized ?? 0.0,
             confidence: normalized == nil ? 0.0 : 1.0,
             valid: normalized != nil,
             timestampNanoseconds: normalized == nil ? 0 : UInt64(max(0, timestamp) * 1_000_000_000)
-        ))
+        )
+        publishQueue.async { [publish] in publish(frame) }
         stateLock.unlock()
     }
 }
