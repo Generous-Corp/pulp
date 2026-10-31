@@ -212,13 +212,12 @@ jobs:
           # workflow-ref boundary is applied below; fork pull requests remain
           # hosted. If no local selector is configured, the resolver falls back
           # to GitHub-hosted Linux.
-          # Windows is deliberately different: the required PR leg is the
-          # authoritative x64 functional gate and stays on the stable VS 2022
-          # image. The separate MSVC release-path gate tracks windows-latest,
-          # so new-toolchain compile regressions still block before release.
-          # Local QEMU Windows is ARM64; it can smoke Windows-on-ARM behavior, but
-          # it is not an Intel Windows replacement. Use a workflow_dispatch input
-          # only for explicit one-off experiments.
+          # Windows is deliberately different: its x64 functional leg runs only
+          # on a dispatch (or with PULP_ALLOW_HOSTED_WINDOWS=1), on the
+          # self-hosted Windows x64 lane by default and on the stable VS 2022
+          # hosted image when opted in. The separate MSVC release-path gate
+          # tracks windows-latest. Local QEMU Windows is ARM64; it can smoke
+          # Windows-on-ARM behavior, but it is not an Intel Windows replacement.
           # A `pr_number` dispatch routes Linux as a pull_request run does
           # (hosted), so the operator selectors do not apply to it.
           WORKFLOW_DISPATCH_LINUX_SELECTOR: ${{ inputs.pr_number == '' && inputs.linux_runner_selector_json || '' }}
@@ -233,6 +232,9 @@ jobs:
           WORKFLOW_REF: ${{ github.workflow_ref }}
           EXPLICIT_LINUX_RUNNER_SELECTOR_JSON: ${{ inputs.pr_number == '' && (inputs.linux_runner_selector_json || (github.event_name == 'workflow_dispatch' && vars.PULP_LOCAL_LINUX_RUNS_ON_JSON)) || '' }}
           EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON: ${{ inputs.pr_number == '' && inputs.windows_runner_selector_json || '' }}
+          # The self-hosted Windows x64 lane a dispatch's Windows leg takes by
+          # default (see the Windows note in the resolver below).
+          LOCAL_WINDOWS_X64_RUNS_ON_JSON: ${{ vars.PULP_LOCAL_WINDOWS_X64_RUNS_ON_JSON || '' }}
           # macOS routing has three layers, evaluated in order (highest
           # precedence first). The Python block below composes
           # `EXPLICIT_MACOS_RUNNER_SELECTOR_JSON` from these inputs so the
@@ -844,13 +846,44 @@ jobs:
               f"resolved_selector={linux_runs_on}",
               file=sys.stderr,
           )
-          # Windows routes through the provider resolver, but it does NOT read
-          # PULP_LOCAL_WINDOWS_RUNS_ON_JSON on PRs. That local lane is currently
-          # Windows ARM64 on QEMU, useful as a smoke target but not an x64 gate.
-          # Keep functional tests on the stable VS 2022 image. windows-latest
-          # can change compiler and CRT generations in place; the dedicated
-          # release-path gate below covers that moving toolchain without making
-          # the authoritative runtime suite depend on an unpinned image.
+          # Windows routes through the provider resolver. It never reads
+          # PULP_LOCAL_WINDOWS_RUNS_ON_JSON: that lane is Windows ARM64 on
+          # QEMU, a smoke target, not an x64 gate.
+          #
+          # A dispatch's Windows leg takes the self-hosted Windows x64 lane
+          # (PULP_LOCAL_WINDOWS_X64_RUNS_ON_JSON, else its four capability
+          # labels) unless the dispatch input or PULP_ALLOW_HOSTED_WINDOWS=1
+          # opts into GitHub-hosted, which stays on the stable VS 2022 image:
+          # windows-latest can change compiler and CRT generations in place,
+          # and the dedicated release-path gate below covers that moving
+          # toolchain. A push never takes the lane; every push-reachable job
+          # stays hosted (tools/scripts/test_fork_pr_runner_routing.py).
+          # PULP_LOCAL_WINDOWS_X64_RUNS_ON_JSON set to a hosted label switches
+          # the lane off, so a dispatch then runs hosted windows-2022.
+          if (
+              EVENT_NAME == "workflow_dispatch"
+              and not PR_DISPATCH
+              and not os.environ.get("EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON", "").strip()
+              and os.environ.get("ALLOW_HOSTED_WINDOWS_VAR", "").strip() != "1"
+              and os.environ.get("WORKFLOW_DISPATCH_ALLOW_HOSTED_WINDOWS", "").lower() != "true"
+          ):
+              # The lane variable goes through the same screening a dispatch
+              # input gets, so a foreign-pool label never reaches runs-on.
+              sys.path.insert(0, str(WORKSPACE / "tools" / "scripts"))
+              import windows_runner_selector
+              try:
+                  lane_selector = windows_runner_selector.resolve(
+                      os.environ.get("LOCAL_WINDOWS_X64_RUNS_ON_JSON", "").strip()
+                      or json.dumps(windows_runner_selector.DEFAULT_SELF_HOSTED)
+                  )
+              except windows_runner_selector.SelectorError as exc:
+                  sys.exit(
+                      "PULP_LOCAL_WINDOWS_X64_RUNS_ON_JSON refused: " + str(exc)
+                  )
+              if lane_selector.startswith("["):
+                  os.environ["EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON"] = lane_selector
+              else:
+                  os.environ["WORKFLOW_DISPATCH_ALLOW_HOSTED_WINDOWS"] = "true"
           windows_runs_on = run([
               "--target-name", "Windows (x64)",
               "--mode", "provider",

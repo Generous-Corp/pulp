@@ -4841,9 +4841,24 @@ ghapp workflow run build.yml --ref <branch>
 
 A `build.yml` dispatch always includes the macOS leg, so it also spends a macOS
 gate VM. When only Windows matters, dispatch the nightly with `windows_only=true`
-instead. To prove a self-hosted Windows runner (the Mac Pro Windows x64 slot), also
-pass `windows_runner_selector_json` with that slot's labels. The schedule has no
-inputs, so the nightly stays on `windows-latest`. A run with either input set skips
+instead.
+
+**Windows x64 runs on our VM, not hosted.** The nightly, the WARP proof, a
+dispatch's `Windows (x64)` leg, scheduled coverage, Android's Windows row, the
+freshness tier-2 build and `control-shipping-native`'s `windows-x64` leg take the
+self-hosted Windows x64 lane (the Mac Pro slot) through
+`tools/scripts/windows_runner_selector.py --route`. Hosted needs an opt-in:
+`allow_hosted_windows`, `PULP_ALLOW_HOSTED_WINDOWS=1`, or
+`PULP_LOCAL_WINDOWS_X64_RUNS_ON_JSON='"windows-latest"'` (that last one takes the
+lane out of service and changes nothing else). No pull request reaches the lane. The
+fork check runs first, and a missing head repository counts as a fork. A pull
+request's control-shipping and coverage Windows legs run hosted only with the
+opt-in, and are otherwise left out. The lane is one serial VM, so a scheduled
+coverage leg is left out while another Windows x64 job waits; a dispatch always
+queues. The table
+is in `docs/guides/local-ci.md` ("What runs on it"). `windows-cli-compile.yml`, the
+three `build.yml` compile gates and `release-cli.yml` stay on `windows-latest` on
+purpose. Pass `windows_runner_selector_json` to pin a run to a specific runner. A run with either input set skips
 `tracking-issues`, so a red result on a new runner never files or closes the main
 tracking issue. Read where the job actually ran from the job's `runner_name`.
 The selector passes through `tools/scripts/windows_runner_selector.py` first, which
@@ -7905,14 +7920,15 @@ Makefile-based Mac Pro VMs compile serially, while a bare `--parallel` is
 unbounded. Four fills each VM's assigned cores and remains a bounded share on
 the larger self-hosted macOS machines.
 
-Windows is intentionally different. The required `Windows (x64)` functional
-gate stays on real GitHub-hosted `windows-2022`; the separate build-only MSVC
-release-path gate tracks `windows-latest`. The current local Windows pool is
-Windows ARM64 on QEMU (`qemu-system-aarch64`): it can maybe smoke x64 via
-Windows-on-ARM translation, but it is not the authoritative Intel/x64 gate.
-Do not wire `PULP_LOCAL_WINDOWS_RUNS_ON_JSON` into the required Build-and-Test
+Windows is intentionally different. The advisory `Windows (x64)` functional leg
+runs on a dispatch, on the self-hosted Windows x64 lane, or on GitHub-hosted
+`windows-2022` when opted in; the separate build-only MSVC release-path gate
+tracks `windows-latest`. The local QEMU Windows pool is Windows ARM64
+(`qemu-system-aarch64`): it can maybe smoke x64 via Windows-on-ARM translation,
+but it is not the Intel/x64 lane.
+Do not wire `PULP_LOCAL_WINDOWS_RUNS_ON_JSON` into the Build-and-Test
 Windows x64 matrix leg; use a separate/dedicated label for any local Windows
-ARM64 smoke.
+ARM64 smoke. The x64 leg's self-hosted lane is `PULP_LOCAL_WINDOWS_X64_RUNS_ON_JSON`.
 
 ### macOS runner routing (current)
 

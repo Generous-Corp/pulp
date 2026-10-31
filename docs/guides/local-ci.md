@@ -736,7 +736,64 @@ the golden.
 | Profile | `/etc/pulp/windows-runner-1.env`: `PULP_WINDOWS_VMID=300`, `PULP_WINDOWS_GOLDEN_SNAPSHOT=<name>` |
 | VM | VMID 300, 4 cores, 9216 MB, Windows Server 2022 evaluation, LAN DHCP |
 | Labels | `["self-hosted","Windows","X64","pulp-build-windows-x64","pulp-host-macpro"]` |
-| Routing | `PULP_LOCAL_WINDOWS_X64_RUNS_ON_JSON`, dispatch only; distinct from the ARM64 QEMU `PULP_LOCAL_WINDOWS_*` lanes |
+| Routing | `tools/scripts/windows_runner_selector.py --route`; `PULP_LOCAL_WINDOWS_X64_RUNS_ON_JSON` overrides the default selector. Distinct from the ARM64 QEMU `PULP_LOCAL_WINDOWS_*` lanes |
+
+#### What runs on it
+
+Windows x64 jobs default to this lane, and GitHub-hosted Windows runs only when it
+is opted into. No pull request reaches the lane. The selector checks for a fork
+first, before any selector or variable, and a pull request whose head repository
+is missing counts as a fork. The two pull-request-triggered jobs below
+(`control-shipping-native` and coverage) never send a pull request to the lane
+either: without the opt-in they leave Windows x64 out.
+Each routed workflow resolves its runner with `windows_runner_selector.py
+--route`, which emits `runs_on`, `route` (`self-hosted`, `hosted` or `skip`) and
+`route_reason`:
+
+| Workflow | Job | Lane by default on | Hosted when |
+|---|---|---|---|
+| `cross-platform-check.yml` | Windows build + test | the nightly, a dispatch | opted in |
+| `software-gpu-proof.yml` | Windows WARP proof | the nightly, a dispatch | opted in |
+| `control-shipping-native.yml` | `windows-x64` leg | the nightly, a dispatch | opted in (the only way a pull request runs it; otherwise deferred) |
+| `coverage.yml` | Coverage report (Windows, Clang) | a schedule while the lane is idle, a dispatch | opted in (the only way a pull request runs it) |
+| `android.yml` | `windows-x64` row | the nightly, a dispatch | opted in (which also adds it to a push) |
+| `freshness-check.yml` | Build validation, `windows-x64` | a tier-2 dispatch | opted in |
+| `build.yml` | `Windows (x64)` | a dispatch | opted in (`windows-2022`) |
+
+The default selector is `["self-hosted","Windows","X64","pulp-build-windows-x64"]`.
+It leaves out `pulp-host-macpro`, so a second Windows x64 host carrying the same
+capability label would serve the same jobs.
+
+The lane is one VM that runs one job at a time, and nothing on it is a required
+check (`tools/scripts/test_windows_x64_routing.py` pins both). So a scheduled
+coverage leg is bounded with `--max-backlog 1`: while another Windows x64 job is
+queued or running, it is left out instead of queued. A pull request's
+`control-shipping-native` `windows-x64` leg, left out unless hosted is opted
+into, is named in the consolidated evidence (`deferred_legs`,
+`complete: false`). A dispatch always queues. The backlog probe
+counts jobs carrying `pulp-build-windows-x64` in other queued and in-progress
+runs; when it cannot read them it counts zero and the job queues.
+
+Three switches choose hosted:
+
+- `-f allow_hosted_windows=true` on a `build.yml` dispatch;
+- `PULP_ALLOW_HOSTED_WINDOWS=1`, which also lets a push run `build.yml`'s and
+  `android.yml`'s Windows legs;
+- `PULP_LOCAL_WINDOWS_X64_RUNS_ON_JSON` set to a hosted label such as
+  `'"windows-latest"'`, which turns the lane off: each routed job goes back to
+  its own hosted image and nothing else changes. Use this one to take the lane
+  out of service.
+
+Some jobs stay hosted on purpose. `windows-cli-compile.yml` mirrors the release
+build on `windows-latest`, and its push verdict feeds `auto-release.yml`'s
+pre-tag check. The three `build.yml` compile gates (MSVC release-path, MIDI
+Services, BLE) track `windows-latest`'s moving toolchain, and they are already
+opt-in. `release-cli.yml` builds the release itself. The `windows-arm64` legs
+have no self-hosted x64 equivalent.
+
+The golden must carry every shell a routed job uses. `shell: pwsh` steps need
+PowerShell 7 (`pwsh`), not only Windows PowerShell; without it those jobs fail at
+their first `pwsh` step.
 
 Each invocation:
 
@@ -983,18 +1040,20 @@ ghapp workflow run build.yml --ref <branch>
 ```
 
 A `build.yml` dispatch always includes the macOS leg, so it also takes a macOS gate
-VM. To run only the full Windows suite, dispatch the nightly instead. Its Windows
-job takes an optional runner selector, which is how the Mac Pro Windows x64 slot is
-proven without touching the gate hosts:
+VM; its Windows leg runs on the self-hosted Windows x64 lane. To run only the full
+Windows suite, dispatch the nightly instead. Its Windows job takes the lane by
+default and an optional runner selector, which pins a specific runner without
+touching the gate hosts:
 
 ```sh
 ghapp workflow run cross-platform-check.yml --ref <branch> -f windows_only=true \
   -f windows_runner_selector_json='["self-hosted","Windows","X64","pulp-build-windows-x64","pulp-host-macpro"]'
 ```
 
-The schedule passes no inputs, so the nightly stays on `windows-latest`. A run with
-either input set never opens or closes the per-platform tracking issues, because
-it did not measure the nightly's configuration.
+The schedule passes no inputs, so the nightly runs on the self-hosted Windows x64
+lane, or on `windows-latest` when hosted is opted into (see "What runs on it"). A
+run with either input set never opens or closes the per-platform tracking issues,
+because it did not measure the nightly's configuration.
 
 A small `Resolve Windows runner` job checks the selector before any runner is
 chosen. It runs `tools/scripts/windows_runner_selector.py`, which refuses anything
@@ -6504,20 +6563,21 @@ gh workflow run build.yml --ref <trusted-branch> \
 This switch affects only `workflow_dispatch`; automatic events keep their
 documented matrix policy.
 
-GitHub-hosted Windows is opt-in. A `build.yml` dispatch or a push to `main`
-schedules no hosted Windows job (the `Windows (x64)` leg and the three
-`windows-latest` compile gates) unless one of these is set:
+GitHub-hosted Windows is opt-in. A push to `main` schedules no Windows job, and a
+`build.yml` dispatch runs its `Windows (x64)` leg on the self-hosted Windows x64
+lane, not a hosted image. The leg and the three `windows-latest` compile gates
+run hosted only when one of these is set:
 
 - `-f allow_hosted_windows=true` on the dispatch;
-- `-f windows_runner_selector_json=...` naming a self-hosted runner (a list
-  with `"self-hosted"`), which runs the leg there, not on a hosted image;
 - the repository variable `PULP_ALLOW_HOSTED_WINDOWS=1`, which also lets a push
   run it.
 
+`-f windows_runner_selector_json=...` pins the leg to a named runner instead.
+
 `resolve-provider` prints `resolve-provider: Windows leg omitted: GitHub-hosted
 Windows is opt-in ...` when it leaves the leg out, and the advisory `windows`
-alias then passes with that line. `android.yml` leaves its `windows-latest`
-row out on every event but the nightly schedule unless
+alias then passes with that line. `android.yml` runs its `windows-x64` row on the
+self-hosted lane on the nightly and a dispatch, and leaves it out of a push unless
 `PULP_ALLOW_HOSTED_WINDOWS=1`; no required context reads it. `windows-cli-compile.yml` is the one
 listed exception: its push verdict on `main` is the release backstop
 `auto-release.yml`'s pre-tag check reads. Schedules and pull requests keep
