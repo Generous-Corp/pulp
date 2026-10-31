@@ -36,6 +36,18 @@ struct HandFrame {
     bool tracked = false;
 };
 
+/// Example application-owned IMU result. A real Android/iOS/desktop adapter
+/// can choose different fields or units; this fixture only demonstrates that
+/// related orientation values are handed off as one coherent update.
+struct ImuFrame {
+    std::uint64_t sequence = 0;
+    float roll = 0.0f;
+    float pitch = 0.0f;
+    float yaw = 0.0f;
+    float confidence = 0.0f;
+    bool valid = false;
+};
+
 /// This example reserves channel-16 pitch bend as one control packet.
 /// The upper data bit is validity; the other 13 bits carry a normalized value.
 /// MediaPipe's current page reports presence (0/1), not graded confidence.
@@ -143,6 +155,46 @@ class HandMapping {
     SignalMapping pinch_;
 };
 
+/// Maps one application-owned IMU frame. This remains an example utility;
+/// Pulp does not define an orientation schema or sensor units.
+class ImuMapping {
+  public:
+    explicit ImuMapping(float confidence_gate = 0.6f, float smoothing = 0.25f) noexcept
+        : roll_(confidence_gate, smoothing), pitch_(confidence_gate, smoothing),
+          yaw_(confidence_gate, smoothing) {}
+
+    void submit(const ImuFrame& frame) noexcept {
+        const auto sample = [sequence = frame.sequence, confidence = frame.confidence,
+                             valid = frame.valid](float value) noexcept {
+            return ControlSample{sequence, value, confidence, valid};
+        };
+        roll_.submit(sample(frame.roll));
+        pitch_.submit(sample(frame.pitch));
+        yaw_.submit(sample(frame.yaw));
+    }
+
+    void advance(std::uint64_t samples, std::uint64_t timeout) noexcept {
+        roll_.advance(samples, timeout);
+        pitch_.advance(samples, timeout);
+        yaw_.advance(samples, timeout);
+    }
+
+    const SignalMapping& roll() const noexcept {
+        return roll_;
+    }
+    const SignalMapping& pitch() const noexcept {
+        return pitch_;
+    }
+    const SignalMapping& yaw() const noexcept {
+        return yaw_;
+    }
+
+  private:
+    SignalMapping roll_;
+    SignalMapping pitch_;
+    SignalMapping yaw_;
+};
+
 /// Deterministic mock/replay source used by tests and camera-free development.
 /// The provider owns the frame storage; replay only walks one coherent sample
 /// at a time and never touches the audio thread.
@@ -190,6 +242,30 @@ class HandReplay {
 
   private:
     std::span<const HandFrame> frames_;
+    std::size_t cursor_ = 0;
+};
+
+/// Deterministic replay for an application-owned IMU frame stream.
+class ImuReplay {
+  public:
+    explicit ImuReplay(std::span<const ImuFrame> frames) noexcept : frames_(frames) {}
+
+    bool next(ImuMapping& mapping) noexcept {
+        if (cursor_ >= frames_.size())
+            return false;
+        mapping.submit(frames_[cursor_++]);
+        return true;
+    }
+
+    void reset() noexcept {
+        cursor_ = 0;
+    }
+    std::size_t position() const noexcept {
+        return cursor_;
+    }
+
+  private:
+    std::span<const ImuFrame> frames_;
     std::size_t cursor_ = 0;
 };
 

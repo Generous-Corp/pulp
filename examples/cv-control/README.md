@@ -68,3 +68,9 @@ send the example's short MIDI packet. They may use Web Bluetooth, WebHID, Web
 Serial, DeviceMotion, or camera APIs when the origin and permission policy allows
 it; desktop adapters can use native SDKs or an external process. No universal
 hardware layer is introduced.
+
+The test fixture also includes an application-owned `ImuFrame`, `ImuMapping`,
+and `ImuReplay`. It demonstrates that roll, pitch, and yaw from one sensor
+update share a sequence and expire together. These fields are example-owned and
+do not define a Pulp orientation schema; a production adapter can choose its
+own frame and publish it through the same existing handoff.

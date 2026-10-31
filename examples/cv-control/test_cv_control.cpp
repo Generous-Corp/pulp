@@ -15,6 +15,9 @@ using pulp::examples::cv_control::FaceMapping;
 using pulp::examples::cv_control::HandFrame;
 using pulp::examples::cv_control::HandMapping;
 using pulp::examples::cv_control::HandReplay;
+using pulp::examples::cv_control::ImuFrame;
+using pulp::examples::cv_control::ImuMapping;
+using pulp::examples::cv_control::ImuReplay;
 
 struct ProcessorFixture {
     pulp::state::StateStore store;
@@ -200,4 +203,38 @@ TEST_CASE("coherent multi-signal replay expires all related controls together") 
     REQUIRE(mapping.x().value() == 0.0f);
     REQUIRE(mapping.y().value() == 0.0f);
     REQUIRE(mapping.pinch().value() == 0.0f);
+}
+
+TEST_CASE("imu replay preserves one orientation snapshot and expires together") {
+    const ImuFrame frames[] = {{8, 0.1f, 0.2f, 0.3f, 1.0f, true},
+                               {9, 0.7f, 0.8f, 0.9f, 1.0f, true}};
+    ImuReplay replay(frames);
+    ImuMapping mapping(0.6f, 1.0f);
+    REQUIRE(replay.next(mapping));
+    REQUIRE(replay.next(mapping));
+    REQUIRE_FALSE(replay.next(mapping));
+    REQUIRE(replay.position() == 2);
+    REQUIRE(mapping.roll().sequence() == 9);
+    REQUIRE(mapping.pitch().sequence() == 9);
+    REQUIRE(mapping.yaw().sequence() == 9);
+    REQUIRE_THAT(mapping.roll().value(), Catch::Matchers::WithinAbs(0.7f, 1e-6f));
+    REQUIRE_THAT(mapping.pitch().value(), Catch::Matchers::WithinAbs(0.8f, 1e-6f));
+    REQUIRE_THAT(mapping.yaw().value(), Catch::Matchers::WithinAbs(0.9f, 1e-6f));
+    mapping.advance(12000, 12000);
+    REQUIRE_FALSE(mapping.roll().valid());
+    REQUIRE_FALSE(mapping.pitch().valid());
+    REQUIRE_FALSE(mapping.yaw().valid());
+}
+
+TEST_CASE("imu loss and malformed orientation values fail closed") {
+    ImuMapping mapping;
+    mapping.submit({1, std::numeric_limits<float>::quiet_NaN(), 0.4f, 0.6f, 1.0f, true});
+    REQUIRE_FALSE(mapping.roll().valid());
+    REQUIRE(mapping.roll().value() == 0.0f);
+    mapping.submit({2, 0.2f, 0.4f, 0.6f, 0.2f, true});
+    REQUIRE_FALSE(mapping.roll().valid());
+    mapping.submit({3, 0.2f, 0.4f, 0.6f, 1.0f, false});
+    REQUIRE_FALSE(mapping.pitch().valid());
+    mapping.advance(12000, 12000);
+    REQUIRE(mapping.pitch().value() == 0.0f);
 }
