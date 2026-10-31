@@ -981,6 +981,15 @@ static void emit_js_layout_constraints(const NativeEmit& e, const std::string& t
     // layout needs shrink:0 to keep the sizes it emitted.
     if (L.flex_shrink)
         ss << ind << "setFlex('" << target_id << "', 'flex_shrink', " << *L.flex_shrink << ");\n";
+    // Imported browser/design captures carry already-solved heights. In a
+    // column parent Yoga's default flex-shrink:1 compresses those authored
+    // boxes to the host viewport (for example, a tall panel rendered into a
+    // short initial viewport). Preserve the captured main-axis extent unless
+    // the source explicitly supplied a shrink policy above.
+    if (!L.flex_shrink && e.parent_direction &&
+        *e.parent_direction == LayoutDirection::column && node.style.height) {
+        ss << ind << "setFlex('" << target_id << "', 'flex_shrink', 0);\n";
+    }
     // Explicit per-child flex properties (Figma auto-layout children:
     // layoutGrow → flex_grow, layoutAlign → align_self, targetAspectRatio →
     // aspect_ratio). Emitted BEFORE the constraint fallbacks below so an

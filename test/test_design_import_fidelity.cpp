@@ -1745,6 +1745,10 @@ TEST_CASE("codegen emits an IR node's flex_shrink instead of dropping it",
     DesignIR ir;
     ir.root.type = "frame";
     ir.root.name = "Root";
+    // Row flow makes the explicit child height a cross-axis extent; the
+    // automatic imported-height preservation applies only to column main-axis
+    // sizes.
+    ir.root.layout.direction = LayoutDirection::row;
     ir.root.style.width = 400.0f;
     ir.root.style.height = 400.0f;
 

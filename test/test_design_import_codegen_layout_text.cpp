@@ -1444,6 +1444,28 @@ TEST_CASE("generate_pulp_js bridge_native_js mode covers layout and audio widget
     REQUIRE(js.find("setBackground('divider6', '#333333')") != std::string::npos);
 }
 
+TEST_CASE("generate_pulp_js preserves explicit heights in column flow",
+          "[view][import]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.layout.direction = LayoutDirection::column;
+    ir.root.style.height = 120.0f;
+
+    IRNode child;
+    child.type = "frame";
+    child.name = "TallPanel";
+    child.style.height = 480.0f;
+    ir.root.children.push_back(child);
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::bridge_native_js;
+    opts.include_comments = false;
+    const auto js = generate_pulp_js(ir, opts);
+
+    REQUIRE(js.find("setFlex('TallPanel0', 'height', 480)") != std::string::npos);
+    REQUIRE(js.find("setFlex('TallPanel0', 'flex_shrink', 0)") != std::string::npos);
+}
+
 TEST_CASE("generate_pulp_js web compat emits extended style and layout properties",
           "[view][import]") {
     DesignIR ir;
