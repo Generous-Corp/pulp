@@ -914,7 +914,8 @@ def _review_verdict(repo: Path, number: str) -> tuple[str | None, str]:
     try:
         res = subprocess.run(
             ["shipyard", "review-verdict", "--pr", number, "--json"],
-            cwd=repo, capture_output=True, text=True, timeout=60, check=False)
+            cwd=repo, capture_output=True, text=True, encoding="utf-8",
+            timeout=60, check=False)
         verdict = (json.loads(res.stdout or "{}") or {}).get("verdict") or {}
         state = verdict.get("verdict")
     except (OSError, subprocess.SubprocessError, ValueError, AttributeError):
