@@ -846,6 +846,8 @@ void BridgeRegistrars::register_canvas2d_api(WidgetBridge& self) {
         if (auto* c = dynamic_cast<CanvasWidget*>(self.widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_fill_pattern;
             cmd.text = args.get<std::string>(1, "");          // image source
+            if (cmd.text.rfind("data:", 0) != 0)
+                cmd.text = self.resolve_script_relative(cmd.text);
             auto tx = args.get<std::string>(2, "repeat");
             auto ty = args.get<std::string>(3, "repeat");
             // Pack tile modes into int_val (bit 0 = x, bit 1 = y);
@@ -866,6 +868,8 @@ void BridgeRegistrars::register_canvas2d_api(WidgetBridge& self) {
         if (auto* c = dynamic_cast<CanvasWidget*>(self.widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_stroke_pattern;
             cmd.text = args.get<std::string>(1, "");
+            if (cmd.text.rfind("data:", 0) != 0)
+                cmd.text = self.resolve_script_relative(cmd.text);
             auto tx = args.get<std::string>(2, "repeat");
             auto ty = args.get<std::string>(3, "repeat");
             int tx_i = (tx == "no-repeat") ? 1 : 0;
