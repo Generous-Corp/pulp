@@ -39,6 +39,11 @@ docs:
     kind: guide
     summary: Shared base-vs-offset automation and modulation delivery across graph, Processor, timeline, and control surfaces
 
+  - slug: real-world-inputs
+    path: guides/real-world-inputs.md
+    kind: guide
+    summary: Map optional CV, sensor, controller, analysis, and network providers across Pulp surfaces
+
   - slug: getting-started
     path: guides/getting-started.md
     kind: guide
