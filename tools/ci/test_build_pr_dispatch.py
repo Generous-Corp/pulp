@@ -28,8 +28,8 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 BUILD = ROOT / ".github/workflows/build.yml"
 REPO = "Generous-Corp/pulp"
-CLASSIFY_REF = "${{ steps.pr_dispatch.outputs.merge_pin || '' }}"
-BUILD_REF = "${{ needs.classify.outputs.merge_pin || '' }}"
+CLASSIFY_REF = "${{ steps.pr_dispatch.outputs.tested_sha || '' }}"
+BUILD_REF = "${{ needs.classify.outputs.tested_sha || '' }}"
 PR_DISPATCH = "github.event_name == 'workflow_dispatch' && inputs.pr_number != ''"
 LOCAL_LINUX = ["self-hosted", "Linux", "X64", "pulp-build-linux-x64", "pulp-host-macpro"]
 
@@ -109,7 +109,7 @@ class InputAndCheckoutTest(unittest.TestCase):
         self.assertEqual(checkouts["classify"]["with"]["ref"], CLASSIFY_REF)
         self.assertEqual(checkouts["build"]["with"]["ref"], BUILD_REF)
         outputs = jobs["classify"]["outputs"]
-        for name in ("tested_ref", "merge_pin", "merged_base"):
+        for name in ("tested_ref", "tested_sha", "merged_base"):
             self.assertEqual(outputs[name], f"${{{{ steps.pr_dispatch.outputs.{name} }}}}")
         self.assertIn("classify", jobs["build"]["needs"])
         self.assertNotIn("refs/pull/{0}/merge", BUILD.read_text(encoding="utf-8"))
@@ -176,7 +176,7 @@ class VerifyMergeRefTest(unittest.TestCase):
 
     def test_it_reads_the_binding_from_classify(self) -> None:
         env = steps("build")["Verify the tested merge ref"]["env"]
-        self.assertEqual(env["BOUND_SHA"], "${{ needs.classify.outputs.merge_pin }}")
+        self.assertEqual(env["BOUND_SHA"], "${{ needs.classify.outputs.tested_sha }}")
         self.assertEqual(env["TESTED_REF"], "${{ needs.classify.outputs.tested_ref }}")
 
 
@@ -253,7 +253,7 @@ class BindingTest(unittest.TestCase):
     def test_a_dispatch_on_the_pull_requests_head_binds_its_merge_commit(self) -> None:
         proc, outputs = self._run(self._pull())
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
-        self.assertEqual((outputs["tested_ref"], outputs["merge_pin"], outputs["merged_base"]),
+        self.assertEqual((outputs["tested_ref"], outputs["tested_sha"], outputs["merged_base"]),
                          ("refs/pull/7/merge", self.MERGE, self.BASE))
 
     def test_a_protected_or_release_ref_is_refused(self) -> None:
@@ -267,7 +267,7 @@ class BindingTest(unittest.TestCase):
                 ref_name = kwargs.get("ref_name", "topic")
                 proc, outputs = self._run(self._pull(ref=ref_name), **kwargs)
                 self.assertEqual(proc.returncode, 1, proc.stdout)
-                self.assertNotIn("merge_pin", outputs)
+                self.assertNotIn("tested_sha", outputs)
 
     def test_a_dispatch_on_the_default_branch_is_refused(self) -> None:
         # Its caches would land in the default branch's scope. Even a pull
@@ -277,7 +277,7 @@ class BindingTest(unittest.TestCase):
                 proc, outputs = self._run(self._pull(ref=ref_name), ref_name=ref_name,
                                           default_branch=default_branch)
                 self.assertEqual(proc.returncode, 1, proc.stdout)
-                self.assertNotIn("merge_pin", outputs)
+                self.assertNotIn("tested_sha", outputs)
         self.assertEqual(self.step["env"]["DEFAULT_BRANCH"],
                          "${{ github.event.repository.default_branch }}")
 
@@ -303,7 +303,7 @@ class BindingTest(unittest.TestCase):
             with self.subTest(case=case):
                 proc, outputs = self._run(pull, parents, pr_number)
                 self.assertEqual(proc.returncode, 1, proc.stdout)
-                self.assertNotIn("merge_pin", outputs)
+                self.assertNotIn("tested_sha", outputs)
 
 
 class LinuxRoutingTest(unittest.TestCase):
@@ -371,35 +371,6 @@ class LinuxRoutingTest(unittest.TestCase):
                          "${{ inputs.pr_number == '' && inputs.linux_runner_selector_json || '' }}")
         self.assertEqual(self.env["DISPATCH_PR_NUMBER"], "${{ inputs.pr_number }}")
 
-
-
-class CheckoutRefIsNotAPullRequestHeadTest(unittest.TestCase):
-    """CodeQL (actions/cache-poisoning/poisonable-step) classifies an
-    actions/checkout whose `ref` reads an output named after a sha, ref, head,
-    branch or commit as a pull request head checked out in the default branch's
-    cache scope. The merge pin is such a checkout only by name: the bind step
-    refuses the default, release and protected branches. Keep the checkout refs
-    on names the model does not read as a pull request head."""
-
-    MODEL = re.compile(r"(head|branch|ref|sha|commit)")
-
-    def test_no_checkout_ref_reads_an_output_named_like_a_head(self) -> None:
-        seen = 0
-        for job, body in workflow()["jobs"].items():
-            for step in body.get("steps", []):
-                if not str(step.get("uses", "")).startswith("actions/checkout"):
-                    continue
-                ref = str((step.get("with") or {}).get("ref", ""))
-                for field in re.findall(r"outputs\.([A-Za-z0-9_-]+)", ref):
-                    seen += 1
-                    with self.subTest(job=job, field=field):
-                        self.assertIsNone(self.MODEL.search(field), ref)
-        self.assertGreaterEqual(seen, 2, "control: classify and build both check out the pin")
-
-    def test_the_bind_step_refuses_the_default_branch_before_any_checkout(self) -> None:
-        script = workflow()["jobs"]["classify"]["steps"][0]["run"]
-        self.assertIn('"$GITHUB_REF_NAME" = "$DEFAULT_BRANCH"', script)
-        self.assertIn("is protected", script)
 
 
 class NoCacheOrArtifactWriteTest(unittest.TestCase):
@@ -556,7 +527,7 @@ class TrustAndIsolationTest(unittest.TestCase):
                     "a2t_receipt_attestation_required == 'true'")):
                 continue
             reachable.add(step["name"])
-        self.assertEqual(reachable, {"Upload ctest logs and JUnit report"})
+        self.assertEqual(reachable, {"Upload the Rust fallback receipt", "Upload ctest logs and JUnit report"})
 
     def test_the_protected_receipt_is_pull_request_only(self) -> None:
         build = steps("build")
@@ -924,6 +895,7 @@ PR_DISPATCH_ALLOWLIST: dict[tuple[str, str], tuple[tuple[str, ...], str]] = {
     ("build", "Bootstrap repository dependencies"): ((), "fetches pinned deps, as on a PR run"),
     ("build", "Install pinned Chrome for browser-source fidelity (macOS ARM64)"): ((), "VM-ephemeral install, as on a PR run"),
     ("build", "Provide the pinned Rust toolchain"): ((), "VM-local toolchain, as on a PR run"),
+    ("build", "Upload the Rust fallback receipt"): ((), "diagnostic upload; no run consumes it"),
     ("build", "Fetch pulp-rs crates"): ((), "read-only crate fetch, as on a PR run"),
     ("build", "Fetch prebuilt Skia (macOS)"): ((), "fetches the pinned Skia, as on a PR run"),
     ("build", "Intel canary — lint + x86_64 GPU-off compile"): ((), "lints against the merged base, as a PR against base.sha"),
@@ -963,7 +935,7 @@ PR_DISPATCH_ALLOWLIST: dict[tuple[str, str], tuple[tuple[str, ...], str]] = {
     ("ci-cause", "actions/checkout@v7"): ((), "sparse checkout of the cause script"),
     ("ci-cause", "Name the cause of each failed job"): ((), "advisory; reads this run's logs, writes annotations"),
 }
-DIAGNOSTIC_UPLOADS = {"Upload ctest logs and JUnit report"}
+DIAGNOSTIC_UPLOADS = {"Upload the Rust fallback receipt", "Upload ctest logs and JUnit report"}
 DEAD_UPLOADS = {"Upload exact GPU-audio SDK (macOS ARM64, retry)", "Publish A2T structural verification",
                 "Publish exact protected-validation receipt"}
 

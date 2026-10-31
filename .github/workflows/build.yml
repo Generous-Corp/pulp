@@ -1091,14 +1091,9 @@ jobs:
       queue_breaker_reason: ${{ steps.queue_breaker.outputs.reason }}
       # A `pr_number` dispatch's merge commit, resolved once here and checked
       # out by sha here and in every build leg, so all of them test the same
-      # tree even if refs/pull/<n>/merge moves meanwhile. The output is named
-      # `merge_pin`, not after a sha or a ref: CodeQL's untrusted-checkout
-      # model treats a checkout `ref` read from an output with such a name as
-      # a pull request head checked out in the default-branch cache scope,
-      # which this dispatch never is (the bind step refuses a default,
-      # release or protected branch).
+      # tree even if refs/pull/<n>/merge moves meanwhile.
       tested_ref: ${{ steps.pr_dispatch.outputs.tested_ref }}
-      merge_pin: ${{ steps.pr_dispatch.outputs.merge_pin }}
+      tested_sha: ${{ steps.pr_dispatch.outputs.tested_sha }}
       merged_base: ${{ steps.pr_dispatch.outputs.merged_base }}
     steps:
       # A `pr_number` dispatch tests the pull request's merge commit but posts
@@ -1176,7 +1171,7 @@ jobs:
           fi
           {
             echo "tested_ref=refs/pull/$DISPATCH_PR_NUMBER/merge"
-            echo "merge_pin=$merge_sha"
+            echo "tested_sha=$merge_sha"
             echo "merged_base=${parent_list[0]}"
           } >> "$GITHUB_OUTPUT"
           echo "#$DISPATCH_PR_NUMBER is headed by $GITHUB_REF_NAME at $GITHUB_SHA; testing merge $merge_sha onto ${parent_list[0]}"
@@ -1189,7 +1184,7 @@ jobs:
           lfs: false
           # A `pr_number` dispatch classifies its bound merge commit, as a
           # pull_request run does. Empty is the event's own ref.
-          ref: ${{ steps.pr_dispatch.outputs.merge_pin || '' }}
+          ref: ${{ steps.pr_dispatch.outputs.tested_sha || '' }}
       # Backstop for a HOLD that did not take its head out of the queue: fail
       # the group, before any VM, when a queued pull request's latest trusted
       # verdict on the head it lands is HOLD. A failed classify makes the
@@ -1878,7 +1873,7 @@ jobs:
           clean: ${{ contains(matrix.runs_on_json, 'self-hosted') == false }}
           # A `pr_number` dispatch tests the merge commit classify bound to
           # this run's head, the same sha classify tested.
-          ref: ${{ needs.classify.outputs.merge_pin || '' }}
+          ref: ${{ needs.classify.outputs.tested_sha || '' }}
 
       # The tree a `pr_number` dispatch tested: the merge commit classify
       # bound, re-checked here. HEAD must be that sha and its second parent
@@ -1891,7 +1886,7 @@ jobs:
         shell: bash
         env:
           TESTED_REF: ${{ needs.classify.outputs.tested_ref }}
-          BOUND_SHA: ${{ needs.classify.outputs.merge_pin }}
+          BOUND_SHA: ${{ needs.classify.outputs.tested_sha }}
         run: |
           set -euo pipefail
           tested_sha=$(git rev-parse HEAD)
