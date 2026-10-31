@@ -535,7 +535,7 @@ counts too.
 
 **An App APPROVE needs a signer.** Every agent posts verdicts as the same App,
 so `.shipyard/config.toml` names who may sign one (`[auto_merge]
-reviewer_signers = ["pulp-review", "infra-review2"]`): Shipyard's guards count
+reviewer_signers = ["pulp-review", "pulp-review2", "infra-review2"]`): Shipyard's guards count
 an App `verdict: APPROVE` only with a `reviewer: <name>` line naming one of
 them, and never one `ghapp` stamped with an `unattributed` session. A reviewer
 agent puts `reviewer: <its name>` on the line above the verdict. Adding a
