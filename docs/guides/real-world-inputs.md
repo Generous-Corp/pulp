@@ -209,6 +209,32 @@ optional recipes. Pulp core must not link host SDKs or copy host code. A host
 adapter becomes implementation work only when a named application requires a
 live acceptance receipt.
 
+### External host boundaries
+
+These products are useful design tests, but they do not define a new Pulp
+provider or transport API:
+
+- **OBS Studio:** a future integration can use an OBS-side plugin, an external
+  OSC/WebSocket/UDP bridge, or a virtual audio/video device. Keep OBS's GPL
+  code and lifecycle outside Pulp core.
+- **DaVinci Resolve/Fairlight:** VST3/AU is the practical audio-plugin path;
+  Resolve scripting or control-surface APIs can be reached through a separate
+  companion bridge when project or video control is needed. Do not make the
+  Blackmagic SDK or a Resolve installation a Pulp dependency.
+- **Max/MSP, TouchDesigner, openFrameworks, vvvv, and Pure Data:** preserve
+  named, inspectable signals and optional OSC/MIDI/IPC recipes so a thin host
+  adapter can route them without a Pulp-specific node graph or landmark schema.
+- **Zoom and Google Meet:** do not assume that a call host can load an audio
+  plugin, accept arbitrary OSC, or grant a provider camera permission. A
+  companion desktop/browser application, virtual microphone/camera, or a
+  verified product SDK may publish controls into a Pulp app or plugin. Treat
+  direct Zoom/Meet integration as a separately verified product requirement.
+
+For any future host demo, name the boundary being exercised (for example, an
+OBS filter property, a Fairlight VST3 parameter, or a companion-process input
+stream). The demo must prove that boundary without implying that Pulp owns the
+host's permissions, scheduling, or lifecycle.
+
 ## Optional provider and model dependencies
 
 MediaPipe, OpenCV, OpenSeeFace, ONNX Runtime, LiteRT, Core ML, platform sensor
