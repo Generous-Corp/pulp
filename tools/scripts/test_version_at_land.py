@@ -644,9 +644,14 @@ class PrRouteTest(unittest.TestCase):
                        check=True)
         self._config(self.clone, "release-bot")
         self._orig_gh = val._gh
+        # No approval on record, so an unarmed bump PR keeps its dead-end
+        # reading and no test shells out to the real `shipyard`.
+        self._orig_verdict = val._review_verdict
+        val._review_verdict = lambda repo, n: ("refused", "no approval")
 
     def tearDown(self) -> None:
         val._gh = self._orig_gh
+        val._review_verdict = self._orig_verdict
         shutil.rmtree(self.root, ignore_errors=True)
 
     @staticmethod
@@ -1501,6 +1506,57 @@ class BumpPrLivenessTest(unittest.TestCase):
         state, reason = val._bump_pr_liveness(Path("."), "1")
         self.assertEqual(state, "red")
         self.assertIn("macos", reason)
+
+    def _unarmed(self, verdict, *, ejected=False, checks=None):
+        pr = {"state": "OPEN", "isDraft": False, "isInMergeQueue": False,
+              "autoMergeRequest": None,
+              "timelineItems": _ejection_timeline(ejected),
+              "commits": {"nodes": [{"commit": {"statusCheckRollup": {
+                  "contexts": {"pageInfo": {"hasNextPage": False},
+                               "nodes": checks or [_check("macos", None)]}}}}]}}
+        out = json.dumps({"data": {"repository": {"pullRequest": pr}}})
+        val._gh = lambda repo, *a, check=True: subprocess.CompletedProcess(
+            a, 0, stdout=out, stderr="")
+        orig = val._review_verdict
+        val._review_verdict = lambda repo, n: verdict
+        self.addCleanup(setattr, val, "_review_verdict", orig)
+        return val._bump_pr_liveness(Path("."), "1")
+
+    def test_unarmed_but_approved_pr_is_live(self) -> None:
+        state, _ = self._unarmed(("allowed", "the head carries a reviewed marker"))
+        self.assertEqual(state, "progressing")
+
+    def test_unarmed_held_pr_is_dead(self) -> None:
+        state, reason = self._unarmed(("refused", "HOLD at head abc"))
+        self.assertEqual(state, "dead")
+        self.assertIn("HOLD", reason)
+
+    def test_unarmed_unapproved_pr_is_dead(self) -> None:
+        state, _ = self._unarmed(("refused", "no approval"))
+        self.assertEqual(state, "dead")
+
+    def test_approved_but_ejected_pr_is_dead(self) -> None:
+        state, reason = self._unarmed(("allowed", "ok"), ejected=True)
+        self.assertEqual(state, "dead")
+        self.assertIn("ejected", reason)
+
+    def test_approved_but_failed_check_is_red(self) -> None:
+        state, _ = self._unarmed(("allowed", "ok"),
+                                 checks=[_check("macos", "FAILURE")])
+        self.assertEqual(state, "red")
+
+    def test_unreadable_approval_is_live(self) -> None:
+        state, _ = self._unarmed((None, "the review verdict could not be read"))
+        self.assertEqual(state, "progressing")
+
+    def test_review_verdict_reader_fails_open_on_garbage(self) -> None:
+        orig = subprocess.run
+        subprocess.run = lambda *a, **k: subprocess.CompletedProcess(
+            a, 2, stdout="not json", stderr="")
+        try:
+            self.assertIsNone(val._review_verdict(Path("."), "1")[0])
+        finally:
+            subprocess.run = orig
 
     def test_unknown_or_errored_history_fails_closed(self) -> None:
         for timeline in (_MISSING, None, {"totalCount": 8},

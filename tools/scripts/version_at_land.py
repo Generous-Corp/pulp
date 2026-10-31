@@ -906,6 +906,24 @@ def _failed_required_check(contexts: list[dict]) -> str | None:
     return None
 
 
+def _review_verdict(repo: Path, number: str) -> tuple[str | None, str]:
+    """The merge steward's reading of the bump PR's CURRENT head, via
+    `shipyard review-verdict`: `("allowed", reason)` for a counted exact-head
+    approval, `("refused", reason)` when it is refused (no approval, or a HOLD),
+    `(None, reason)` when the answer cannot be read (no CLI, bad output, exit 2)."""
+    try:
+        res = subprocess.run(
+            ["shipyard", "review-verdict", "--pr", number, "--json"],
+            cwd=repo, capture_output=True, text=True, timeout=60, check=False)
+        verdict = (json.loads(res.stdout or "{}") or {}).get("verdict") or {}
+        state = verdict.get("verdict")
+    except (OSError, subprocess.SubprocessError, ValueError, AttributeError):
+        return None, "the review verdict could not be read"
+    if res.returncode not in (0, 1) or state not in ("allowed", "refused"):
+        return None, "the review verdict could not be read"
+    return state, str(verdict.get("reason") or "")
+
+
 def _bump_pr_liveness(repo: Path, number: str) -> tuple[str | None, str]:
     """Can the open bump PR still land without intervention? `(state, reason)`:
 
@@ -918,8 +936,10 @@ def _bump_pr_liveness(repo: Path, number: str) -> tuple[str | None, str]:
                       newest run concluded failure, cancelled, timed out, ...).
                       Reported ahead of an ejection or a missing arm, so a
                       caller can tell a red head from any other dead end.
-    `"dead"`        — it cannot land: ejected from the merge queue or not
-                      armed. `reason` says which.
+    `"dead"`        — it cannot land: ejected from the merge queue, or neither
+                      armed nor approved at its head (or held). An unarmed PR
+                      with a counted exact-head approval is `"progressing"`.
+                      `reason` says which.
     `None`          — unknown (query failed or the answer was incomplete);
                       never read as replaceable.
 
@@ -968,7 +988,20 @@ def _bump_pr_liveness(repo: Path, number: str) -> tuple[str | None, str]:
            for n in ejection_nodes):
         return "dead", "the bump PR was ejected from the merge queue"
     if pr.get("autoMergeRequest") is None:
-        return "dead", "the bump PR is not armed for auto-merge"
+        # Nobody arms PRs under the steward admission model: the steward
+        # enqueues an approved, green head itself on its next pass. So an
+        # unarmed PR is live while its current head carries a counted
+        # exact-head approval (and no HOLD), and an unreadable approval is
+        # never read as dead: recutting is the expensive action.
+        verdict, why = _review_verdict(repo, number)
+        if verdict is None:
+            return "progressing", f"{why}; the bump PR is kept"
+        if verdict != "allowed" or "hold" in why.lower():
+            return "dead", ("the bump PR carries a HOLD at its head"
+                            if "hold" in why.lower()
+                            else "the bump PR is not armed and has no counted approval")
+        return "progressing", ("the bump PR has an exact-head approval and "
+                               "awaits the merge steward")
     if rollup is None:
         # No check has reported on the head yet: the checks are still starting.
         return "progressing", "the bump PR checks have not reported yet"

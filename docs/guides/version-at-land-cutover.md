@@ -367,7 +367,14 @@ The bump can land two ways, selected by the `PULP_BUMP_ROUTE` repo variable
     restart 8 to 36 minutes of checks, long enough for the next main push to
     stale its replacement too.
   - **Dead-end bump PR.** A stale bump PR that was ejected from the merge
-    queue, is not armed, or has a failed required check never lands. With the
+    queue, has a failed required check, or is neither armed nor approved at its
+    head never lands. Nobody arms PRs under the steward admission model (the
+    steward enqueues an approved, green head itself every few minutes), so an
+    unarmed PR is LIVE when it is in the queue, is armed, or its current head
+    has a counted exact-head approval (`shipyard review-verdict` returns
+    allowed) with required checks green or pending. An unreadable approval is
+    treated as live; a HOLD at the head, an ejection, or a failed required check
+    makes it dead. With the
     `PULP_BUMP_HEAL_STALE_PR=true` repo variable (default off) the drain closes
     it, opens a fresh bump covering the whole range, and reclaims the branch
     through the normal confirmed-no-PR `--force-with-lease` path. It acts only on
