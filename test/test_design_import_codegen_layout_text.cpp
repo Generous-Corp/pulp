@@ -1465,6 +1465,30 @@ TEST_CASE("generate_pulp_js preserves explicit heights in column flow", "[view][
     REQUIRE(js.find("setFlex('TallPanel0', 'flex_shrink', 0)") != std::string::npos);
 }
 
+TEST_CASE("web compat preserves authored frame heights in a shrinking host",
+          "[view][import][web-compat]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Panel";
+    ir.root.style.height = 886.109f;
+
+    IRNode child;
+    child.type = "frame";
+    child.name = "Body";
+    child.style.height = 760.0f;
+    ir.root.children.push_back(child);
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::web_compat_js;
+    opts.include_comments = false;
+    const auto js = generate_pulp_js(ir, opts);
+
+    REQUIRE(js.find("root.style.height = '886.109px'") != std::string::npos);
+    REQUIRE(js.find("root.style.flexShrink = '0'") != std::string::npos);
+    REQUIRE(js.find("Body0.style.height = '760px'") != std::string::npos);
+    REQUIRE(js.find("Body0.style.flexShrink = '0'") != std::string::npos);
+}
+
 TEST_CASE("generate_pulp_js web compat emits extended style and layout properties",
           "[view][import]") {
     DesignIR ir;

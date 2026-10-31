@@ -754,6 +754,14 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
     emit_str("transform", s.transform);
     emit_px("width", s.width);
     emit_px("height", s.height);
+    // Imported frames carry an authored height that is part of the captured
+    // design geometry.  A web-compat root/child is commonly mounted inside a
+    // flex host whose default flex-shrink is 1; when the host viewport is
+    // shorter than the design, that silently compresses the frame (Kelvin's
+    // 886px panel became 116px).  Preserve explicit design heights just as the
+    // native Yoga emitter does for column-flow children.
+    if (s.height)
+        ss << ind << var << ".style.flexShrink = '0';\n";
     emit_px("minWidth", s.min_width);
     emit_px("minHeight", s.min_height);
     emit_px("maxWidth", s.max_width);
