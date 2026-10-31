@@ -10,6 +10,7 @@
 #include <pulp/view/screenshot.hpp>
 #include <pulp/format/detail/standalone_editor_chrome.hpp>
 #include <pulp/format/detail/standalone_updater.hpp>
+#include <pulp/format/detail/standalone_window_factory.hpp>
 #include <pulp/format/editor_idle_pump.hpp>
 #include <pulp/format/editor_ui.hpp>
 #include <pulp/format/settings_panel.hpp>
@@ -1001,6 +1002,7 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     opts.initially_hidden = effective_config.headless;
     if (musical_typing_) musical_typing_->add_menu_command(opts);
 
+    detail::ensure_standalone_window_factory();
     auto window = view::WindowHost::create(window_root, opts);
     if (!window) {
         runtime::log_error("Standalone: WindowHost::create() failed");

@@ -26,6 +26,7 @@
 #include <pulp/format/processor.hpp>
 #include <pulp/format/processor_node_adapter.hpp>
 #include <pulp/graph/graph_runtime_plan.hpp>
+#include <pulp/midi/ump_buffer.hpp>
 #include <pulp/state/store.hpp>
 
 #include <algorithm>
@@ -530,6 +531,83 @@ TEST_CASE("ProcessorNode hands a main-bus processor the block context and empty 
     CHECK(processor.midi_in_events == 0);
     // The node restored the processor's sidecars after each block.
     CHECK(processor.param_events() == nullptr);
+}
+
+namespace {
+
+// Leaves events, sysex and a UMP attachment in both MIDI buffers it is handed,
+// and records what it found in them on entry.
+class MidiLeftoverProbe final : public Processor {
+  public:
+    PluginDescriptor descriptor() const override {
+        PluginDescriptor d;
+        d.name = "MidiLeftoverProbe";
+        d.manufacturer = "Pulp";
+        d.bundle_id = "com.pulp.test.midileftoverprobe";
+        d.version = "1.0.0";
+        d.category = PluginCategory::Effect;
+        d.input_buses = {{"Main In", 1, false}};
+        d.output_buses = {{"Main Out", 1, false}};
+        return d;
+    }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>& in, pulp::midi::MidiBuffer& midi_in,
+                 pulp::midi::MidiBuffer& midi_out, const ProcessContext&) override {
+        for (auto* buffer : {&midi_in, &midi_out}) {
+            leftover_events += buffer->size();
+            leftover_sysex += buffer->sysex_size();
+            leftover_ump += buffer->ump() != nullptr ? 1 : 0;
+            buffer->add(pulp::midi::MidiEvent::note_on(0, 60, 100));
+            buffer->add_sysex(std::vector<std::uint8_t>{0xF0, 0x7E, 0xF7});
+            buffer->attach_ump(&ump);
+        }
+        ++blocks;
+        for (std::size_t i = 0; i < out.num_samples(); ++i)
+            out.channel_ptr(0)[i] = in.channel_ptr(0)[i];
+    }
+    pulp::midi::UmpBuffer ump;
+    std::size_t leftover_events = 0;
+    std::size_t leftover_sysex = 0;
+    std::size_t leftover_ump = 0;
+    int blocks = 0;
+};
+
+} // namespace
+
+TEST_CASE("ProcessorNode hands a processor empty MIDI buffers on every block without routed MIDI",
+          "[format][graph][executor][routing][processor-node]") {
+    // With no routed MIDI the node lends the processor its own buffers. Whatever
+    // the processor left in them must be gone by the next block.
+    constexpr int frames = 8;
+    MidiLeftoverProbe processor;
+    pulp::state::StateStore store;
+    bind_processor(processor, store);
+    ProcessorNode node(processor);
+    PrepareContext prepare;
+    prepare.sample_rate = kSr;
+    prepare.max_buffer_size = frames;
+    prepare.input_channels = 1;
+    prepare.output_channels = 1;
+    REQUIRE(node.prepare(prepare));
+
+    std::array<float, frames> input{}, output{};
+    std::array<const float*, 1> in_ch{input.data()};
+    std::array<float*, 1> out_ch{output.data()};
+    pulp::format::GraphRuntimeNodeProcessContext context;
+    context.routed = true;
+    context.node_inputs = {in_ch.data(), 1, frames};
+    context.node_outputs = {out_ch.data(), 1, frames};
+    pulp::format::ProcessBlock block;
+    block.sample_rate = kSr;
+    block.frame_count = frames;
+    for (int i = 0; i < 4; ++i)
+        REQUIRE(ProcessorNode::process_binding(block, context, &node));
+    REQUIRE(processor.blocks == 4);
+    CHECK(processor.leftover_events == 0);
+    CHECK(processor.leftover_sysex == 0);
+    CHECK(processor.leftover_ump == 0);
 }
 
 TEST_CASE("ProcessorNode reuses its bus set without carrying a route into the next block",

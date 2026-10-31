@@ -14,6 +14,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/audio/audio_file.hpp": "Pulp::audio",
     "pulp/signal/parametric_eq.hpp": "Pulp::signal",
     "pulp/signal/processing_switch_crossfade.hpp": "Pulp::signal",
+    "pulp/signal/smoothed_value.hpp": "Pulp::signal",
     "pulp/host/signal_graph_authoring.hpp": "Pulp::host",
     "pulp/host/signal_graph.hpp": "Pulp::host",
     "pulp/host/signal_graph_runtime.hpp": "Pulp::host",
@@ -1556,6 +1557,17 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "GainT is a composable signal processor used by plugins and graph nodes; its "
             "optional smoothing API is implementation infrastructure rather than an "
             "independently advertised generator-facing capability."
+        ),
+    },
+    {
+        "include": "pulp/signal/smoothed_value.hpp",
+        "fingerprint": "sha256:6d2a27eec926cbe11fecf51dcddebd91f431038ef08ab7067048fc0ee0397044",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "SmoothedValue is the bounded parameter-ramping primitive used by signal "
+            "processors; its timing conversion is implementation infrastructure and "
+            "is not an independently advertised generator-facing capability."
         ),
     },
     {

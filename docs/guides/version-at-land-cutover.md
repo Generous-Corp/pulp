@@ -40,6 +40,22 @@ assignment** ("option B"). It is release-critical: a wrong flip can drop
 a version silently. Do not flip without the GO/NO-GO checklist at the
 bottom passing.
 
+## Direct-writer safety boundary
+
+The writer has a repository-owned `writer_allowed_globs` allowlist. Every
+generated commit is checked against it before staging, and an empty or
+unexpected path fails closed. This protects the writer from its own
+regenerators or configuration drift; it does not replace GitHub authorization.
+
+The live `main-merge-queue` ruleset currently has no bypass actor. GitHub
+ruleset bypass permissions are actor-wide and cannot be restricted to
+version-only paths. Therefore `PULP_BUMP_ROUTE=direct` must remain disabled
+until GitHub can enforce an equivalent narrow, auditable restriction (or a
+separate release-only protected ref is introduced). A compromised release bot
+must not be able to push arbitrary code to `main`. Until that platform control
+exists, keep `PULP_BUMP_ROUTE=pr`; the bump PR is the governed admission path,
+while the allowlist and marker/idempotency checks still apply.
+
 ## The problem being solved
 
 Every `fix:` / `feat:` PR hand-writes a version number ABOVE main's

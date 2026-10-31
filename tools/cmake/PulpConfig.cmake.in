@@ -202,6 +202,21 @@ endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/PulpTargets.cmake")
 
+# CMake cannot serialize the imported Skia targets into PulpTargets.cmake.
+# Consequently, a static Pulp::canvas export loses its PUBLIC Skia/Dawn
+# closure and downstream GUI plugins fail at link time with hundreds of Skia
+# unresolved externals. Reattach the co-installed provider targets after the
+# exported Pulp targets have been loaded; FindSkia.cmake above created them
+# from the exact SDK provider tree.
+if(TARGET Pulp::canvas AND TARGET skia::skia)
+    set_property(TARGET Pulp::canvas APPEND PROPERTY
+        INTERFACE_LINK_LIBRARIES skia::skia)
+    if(TARGET skia::dawn)
+        set_property(TARGET Pulp::canvas APPEND PROPERTY
+            INTERFACE_LINK_LIBRARIES skia::dawn)
+    endif()
+endif()
+
 function(_pulp_add_lowercase_alias imported_target alias_target)
     if(TARGET "${imported_target}" AND NOT TARGET "${alias_target}")
         add_library("${alias_target}" ALIAS "${imported_target}")

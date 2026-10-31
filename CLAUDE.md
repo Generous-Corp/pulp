@@ -1019,6 +1019,7 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 - Pull a Figma frame headlessly (CI) — the LAST resort; local lanes have no rate limit. → `tools/import-design/figma_rest_export.py`
 - Validate a fresh authored HTML fixture's Chromium receipt, native import receipt, and planted negative interaction. → `tools/import-design/fresh_plugin_fixture_validation.mjs`
   - ⚠ **Cannot see:** Acceptance evidence for a named fixture only; it does not prove general HTML importer coverage or semantic native-widget reconstruction.
+- Convert PDF-compatible Illustrator artwork or a PDF artboard to SVG before validated design import. → `tools/import-design/illustrator_to_svg.py`
 - Audit the JSX runtime shim against the contract it promises importers. → `tools/import-design/jsx-runtime/jsx-contract-audit.mjs`
 - Transform JSX/React design output into the Pulp runtime-import lane. → `tools/import-design/jsx-runtime/jsx-transform.mjs`
 - Validate authored keyed identity declarations, a deterministic reorder digest, and planted duplicate or unknown-key negatives. → `tools/import-design/keyed_identity_reorder_validation.mjs`

@@ -9,6 +9,50 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1351"></a>
+## [1.35.1] - 2026-10-30
+
+- release/version bump ([#11285](https://github.com/Generous-Corp/pulp/pull/11285))
+- fix/steward skip blocked ([#11272](https://github.com/Generous-Corp/pulp/pull/11272))
+
+<a id="v1350"></a>
+## [1.35.0] - 2026-10-30
+
+- release/version bump ([#11271](https://github.com/Generous-Corp/pulp/pull/11271))
+- codex/11255 defer clear 20261029 ([#11269](https://github.com/Generous-Corp/pulp/pull/11269))
+- codex/win frame coalesce 20261016 ([#10453](https://github.com/Generous-Corp/pulp/pull/10453))
+- codex/beadsy delivery reconcile 20261028 ([#11241](https://github.com/Generous-Corp/pulp/pull/11241))
+- fix/schedule backstop input ([#11265](https://github.com/Generous-Corp/pulp/pull/11265))
+
+<a id="v1340"></a>
+## [1.34.0] - 2026-10-29
+
+- release/version bump ([#11264](https://github.com/Generous-Corp/pulp/pull/11264))
+- feat/illustrator svg import current 20261028 ([#11251](https://github.com/Generous-Corp/pulp/pull/11251))
+- codex/arm64ec abi fix 20261027 fresh ([#11235](https://github.com/Generous-Corp/pulp/pull/11235))
+- codex/merge steward retry 20261029 ([#11263](https://github.com/Generous-Corp/pulp/pull/11263))
+
+<a id="v1330"></a>
+## [1.33.0] - 2026-10-29
+
+- release/version bump ([#11262](https://github.com/Generous-Corp/pulp/pull/11262))
+- fix/continuous merge feeder 20261028c ([#11252](https://github.com/Generous-Corp/pulp/pull/11252))
+- fix/gain ramp input bounds 20261029 ([#11254](https://github.com/Generous-Corp/pulp/pull/11254))
+
+<a id="v1320"></a>
+## [1.32.0] - 2026-10-29
+
+- release/version bump ([#11261](https://github.com/Generous-Corp/pulp/pull/11261))
+- fix/11255 deferred clear ([#11257](https://github.com/Generous-Corp/pulp/pull/11257))
+- remove rust fallback 20261027 ([#11200](https://github.com/Generous-Corp/pulp/pull/11200))
+
+<a id="v1310"></a>
+## [1.31.0] - 2026-10-28
+
+- release/version bump ([#11250](https://github.com/Generous-Corp/pulp/pull/11250))
+- perf/graph flat plan ([#11201](https://github.com/Generous-Corp/pulp/pull/11201))
+- codex/paired shadow 20261028 ([#11238](https://github.com/Generous-Corp/pulp/pull/11238))
+
 <a id="v1300"></a>
 ## [1.30.0] - 2026-10-28
 
@@ -11868,6 +11912,12 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.35.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.35.1
+[1.35.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.35.0
+[1.34.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.34.0
+[1.33.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.33.0
+[1.32.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.32.0
+[1.31.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.31.0
 [1.30.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.30.0
 [1.29.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.29.0
 [1.28.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.28.0

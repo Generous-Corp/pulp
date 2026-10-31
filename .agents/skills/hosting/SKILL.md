@@ -2864,3 +2864,23 @@ header. The existing namespace-level `GraphAuthoringReceipt` and
 umbrella remain stable; the focused header is a type/ownership boundary and
 must not be treated as proof of a compile-time speedup without a fresh fan-out
 or `-ftime-trace` measurement.
+
+### AudioRouteCatalog channel routing
+
+A declared stereo input may select different host-owned sources for its left and
+right channels. Use `connect_channel(stable_id, bus_index, channel_index)` and
+`connected_route_channel(...)` on the control/UI thread; `MutableAudioRouteCatalog`
+retains those stable IDs across catalog refresh and restores only available
+routes. Hosts that only support whole-bus routing inherit the compatibility
+fallback to `connect`/`connected_route`. The realtime processor still consumes
+host-provided buffers; this catalog never enumerates DAW tracks from realtime
+code.
+
+A whole-bus `connect` sets both channels the source can feed and replaces any
+independent channel binding. With a channel callback it binds channels 0 and 1
+through that callback; a mono source over an existing independent right binding
+needs the disconnect callback to clear the stale edge, otherwise `connect`
+refuses. Through the legacy whole-bus callback only channel 0 is bindable.
+`selected_route_ids()` persists one ID per bus, so independent left/right
+choices do not survive a project reload; hosts that need that must save
+`connected_route_channel` themselves.

@@ -43,6 +43,7 @@ bool AnticipationLane::prepare(
                      snapshot_.buffer_assignment().connection_delay_samples)) {
         return false;
     }
+    (void)pool_.bind(snapshot_);
 
     const std::size_t channels = sub.outputs.size();
     if (!ring_.prepare(static_cast<std::uint32_t>(channels),

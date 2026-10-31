@@ -18,6 +18,7 @@
 #endif
 
 #include <mutex>
+#include <utility>
 
 namespace pulp::view {
 
@@ -117,6 +118,7 @@ void WindowHost::paint_root(canvas::Canvas& canvas, View& root,
 
 #if !defined(__APPLE__)
 
+
 std::unique_ptr<WindowHost> WindowHost::create(View& root,
                                                 const WindowOptions& options) {
     // Copy the factory out, release the lock, then invoke. Creating a native
@@ -125,9 +127,11 @@ std::unique_ptr<WindowHost> WindowHost::create(View& root,
     WindowHost::Factory local;
     {
         std::lock_guard lock(g_factory_mu);
-        if (!g_factory_installed || !g_factory) return nullptr;
-        local = g_factory;
+        if (g_factory_installed && g_factory)
+            local = g_factory;
     }
+    if (!local)
+        return nullptr;
     auto host = local(root, options);
     if (host) {
         root.set_window_host(host.get());
