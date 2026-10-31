@@ -24,7 +24,10 @@ boundary is checked before the host starts so an ACL failure cannot be
 misreported as a plugin or status-publication failure.
 
 Use an initialized, registered profile whose first-run dialogs have already
-been dismissed. The harness copies the non-secret profile into a private
+been dismissed. The seed `reaper.ini` must contain both `[REAPER]` and
+`[audioconfig]`; a first-run/minimal profile is rejected immediately as
+`REAPER_SEED_PROFILE_INCOMPLETE` instead of being allowed to hang before
+startup-script dispatch. The harness copies the non-secret profile into a private
 temporary profile outside the evidence directory, preserves the license only in
 that private profile, and removes old VST/CLAP scan caches before the exact
 staged plugin is scanned. Windows REAPER's `-cfgfile` resource directory
@@ -41,6 +44,51 @@ records the session ID and Explorer PIDs, binds every owned REAPER process to
 that session, and records the foreground window session during editor
 activation. This prevents a successful host handshake from being mistaken for
 a visible editor when the runner is detached from the desktop.
+
+### Reconnect the Proxmox x64 demo session
+
+The retained Intel proof VM is VM 300 (`pulp-win-ci`). A disconnected RDP
+session is suitable for headless checks but cannot produce foreground-editor
+evidence. Reconnect the existing Windows desktop through the saved RDP/UTM
+launcher using the registered `pulp-rdp` account, then verify that the account
+is `Active` before launching a capture. From the macOS host, the read-only
+check is:
+
+```sh
+ssh -o IdentityAgent=none -o IdentitiesOnly=yes ci@192.168.86.21 qwinsta
+```
+
+The interactive smoke task is already installed in the guest and uses the
+complete registered seed profile:
+
+```text
+PulpSpectrX64Smoke
+C:\Users\pulp-rdp\Desktop\codex-intel-audio-current-x64-20261018
+```
+
+From a visible macOS Terminal, the file-backed credential can be passed to
+the installed FreeRDP client without putting the password in process
+arguments:
+
+```sh
+cat ~/.config/pulp/secrets/spectr-windows-proxmox-rdp | \
+  xfreerdp /v:192.168.86.21 /u:pulp-rdp /from-stdin:force \
+  /cert:ignore +dynamic-resolution /smart-sizing:off
+```
+
+Run this from a GUI Terminal with a display. A headless SSH shell has no
+display and cannot create the RDP window even when the guest is reachable.
+
+After reconnecting the desktop, run that task from an elevated Windows prompt
+or the existing launcher. Evidence is written under:
+
+```text
+C:\Users\pulp-rdp\Desktop\codex-x64-editor-20261019
+```
+
+Do not accept a screenshot from a disconnected session: the receipt must show
+the same session ID for REAPER, Explorer, the editor HWND and the foreground
+window.
 
 For CLAP, pass required adjacent files explicitly, for example
 `-SidecarPath 'C:\build\icudtl.dat'`. VST3 bundles are copied recursively.
@@ -59,8 +107,11 @@ The host executable determines the VST scan key: `vstpath64` for the x64 ABI and
 header; validated CHPE load-config metadata distinguishes that hybrid from an
 AMD64 image without CHPE metadata. Receipts preserve raw COFF fields, metadata
 status and derived ABI separately. Unavailable/unsupported metadata refuses scan
-routing. These fields do not assert every instruction's ISA or native ARM64
-execution. CLAP uses `clap_path`.
+routing. For a VST3 bundle, the harness first selects the inner payload whose
+name matches the bundle, then filters multi-architecture payloads by the host
+ABI; an ambiguous or mismatched set is rejected before REAPER launches. These
+fields do not assert every instruction's ISA or native ARM64 execution. CLAP
+uses `clap_path`.
 Startup, scan and parameter action have separate bounded budgets. A unique run
 token prevents stale host status from satisfying the handshake. Terminal
 status retains insertion evidence, actual normalized parameter observations,

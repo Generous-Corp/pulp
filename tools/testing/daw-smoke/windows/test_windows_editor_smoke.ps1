@@ -12,6 +12,35 @@ try {
     [System.Management.Automation.Language.Parser]::ParseFile($f.FullName,[ref]$tokens,[ref]$errors)|Out-Null
     Check ($errors.Count -eq 0) ('PowerShell parser '+$f.Name)
   }
+  $commonText=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'windows_editor_common.ps1') -Raw
+  Check ($commonText -match 'CreateToolhelp32Snapshot' -and $commonText -match 'Module32FirstW') 'Toolhelp module probe uses snapshot enumeration'
+  Check ($commonText -match 'ErrorBadLength' -and $commonText -match 'MaxModules') 'Toolhelp probe retries bounded BAD_LENGTH and caps module count'
+  Check ($commonText -match 'TargetAbi -in @\(''x64'',''arm64ec'',''arm64x''\)' -and $commonText -match '\$snapshotFlags') 'ARM64EC module probe omits SNAPMODULE32'
+  Check ($commonText -match 'ReadToEndAsync' -and $commonText -match 'stdoutTask') 'bounded probe drains redirected pipes before waiting'
+  $smokeText=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'windows_editor_smoke.ps1') -Raw
+  Check ($smokeText -match 'ProbeBeforeEditor' -and $smokeText -match 'module-probe-release') 'native editor probe can bind before GPU editor startup'
+  Check ($smokeText -match 'Get-BoundModulePaths[\s\S]+?Assert-OwnedIdentity') 'module binding rechecks owned PID/start identity after probe'
+  Check ($commonText -match 'PLUGIN_ABI_MISMATCH' -and $smokeText -match 'receipt\.plugin_pe') 'plugin ABI mismatch is recorded and rejected before DAW insertion'
+  $luaText=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'windows_editor_smoke.lua') -Raw
+  Check ($luaText -match 'fx_inserted' -and $luaText -match 'PULP_DAW_SMOKE_PROBE_GATE') 'Lua exposes bounded pre-editor module probe gate'
+  $probeCommand=@(Get-Command powershell.exe,pwsh -ErrorAction SilentlyContinue|Select-Object -First 1)
+  if($probeCommand.Count -ne 1){throw 'No PowerShell executable for bounded-probe fixture'}
+  $sleepProbe=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes('Start-Sleep -Seconds 4'))
+  $timeoutRejected=$false
+  try { Invoke-BoundedExternal $probeCommand[0].Source @('-NoProfile','-NonInteractive','-EncodedCommand',$sleepProbe) 1 'EXTERNAL_PROBE_TIMEOUT'|Out-Null }
+  catch { $timeoutRejected=$_.Exception.Message -eq 'EXTERNAL_PROBE_TIMEOUT' }
+  Check $timeoutRejected 'bounded external probe timeout is fail-closed'
+  # A Toolhelp module list can exceed an anonymous pipe buffer. Exercise both
+  # redirected streams with one successful child so the wrapper must drain
+  # while waiting instead of waiting for an exit that the child cannot reach.
+  $largeOutputScript='[Console]::Out.Write((''o'' * 262144));[Console]::Error.Write((''e'' * 131072))'
+  $largeOutputProbe=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($largeOutputScript))
+  $largeOutput=Invoke-BoundedExternal $probeCommand[0].Source @('-NoProfile','-NonInteractive','-EncodedCommand',$largeOutputProbe) 10 'EXTERNAL_PROBE_TIMEOUT'
+  Check ($largeOutput.exit_code -eq 0 -and $largeOutput.stdout.Length -eq 262144 -and $largeOutput.stderr.Length -eq 131072) 'bounded probe drains stdout/stderr beyond pipe buffers'
+  if([Environment]::OSVersion.Platform -eq 'Win32NT'){
+    $modulePaths=@(Get-BoundModulePaths $PID 5)
+    Check ($modulePaths.Count -gt 0) 'Toolhelp module probe returns current process paths'
+  } else { Write-Output 'SKIP: Toolhelp runtime fixture requires Windows' }
   $profile=Join-Path $root 'scan-profile.ini'
   $staged='C:\isolated staged plugins'
   $scanPath=Get-ReaperVstScanPath $staged
@@ -23,6 +52,16 @@ try {
   Check ($written -match [regex]::Escape($expected)) 'written INI preserves literal default scan roots before staged root'
   $scanRoots=$scanPath.Split(';')
   Check ($scanRoots.Count -eq 3 -and $scanRoots[-1] -eq $staged) 'staged scan root remains last without duplicated defaults'
+  $receiptPath=Join-Path $root 'receipt.json'
+  Write-Utf8NoBom $receiptPath '{"ok":true,"text":"receipt"}'
+  $receiptBytes=[IO.File]::ReadAllBytes($receiptPath)
+  Check ($receiptBytes.Length -gt 0 -and -not ($receiptBytes[0] -eq 0xef -and $receiptBytes[1] -eq 0xbb -and $receiptBytes[2] -eq 0xbf)) 'receipt writer emits UTF8 without BOM'
+  $receiptFixture=Get-Content -LiteralPath $receiptPath -Raw|ConvertFrom-Json
+  Check ($receiptFixture.ok -eq $true -and $receiptFixture.text -eq 'receipt') 'receipt writer emits parseable JSON'
+  $editorRect=@(100,200,500,600)
+  Check (Test-HalfOpenWindowRectContainsPoint $editorRect 300 400) 'interior editor point is accepted'
+  Check (-not (Test-HalfOpenWindowRectContainsPoint $editorRect 500 600)) 'bottom-right editor edge is rejected'
+  Check (-not (Test-HalfOpenWindowRectContainsPoint $editorRect 99 400)) 'outside editor point is rejected'
   foreach($fixture in @(@(0x8664,'x64','vstpath64'),@(0xaa64,'arm64','vstpath_winarm64'),@(0xa641,'arm64ec','vstpath_winarm64'),@(0xa64e,'arm64x','vstpath_winarm64'))){
     $path=Join-Path $root ($fixture[1]+'.exe')
     $bytes=New-Object byte[] 128
@@ -66,6 +105,28 @@ try {
     $identity=Get-PeIdentity $hybrid
     Check ($identity.coff_machine_hex -eq '0x8664' -and $identity.execution_abi -eq 'arm64ec' -and $identity.metadata_status -eq 'validated_chpe' -and $identity.code_map_bytes -eq 24 -and (Get-ReaperScanKeys $identity.execution_abi)[0] -eq 'vstpath_winarm64') ('AMD64 CHPE v'+$version+' maps ARM64EC scan ABI')
   }
+  $exampleBundle=Join-Path $root 'Example.vst3'
+  $examplePayload=Join-Path $exampleBundle 'Contents\x86_64-win\Example.vst3'
+  New-Item -ItemType Directory -Force -Path (Split-Path $examplePayload) | Out-Null
+  New-HybridFixture $examplePayload 0
+  $exampleCandidate=Select-PluginPeCandidate $exampleBundle 'vst3' 'x64'
+  Check ($exampleCandidate.path -ieq $examplePayload -and $exampleCandidate.pe.execution_abi -eq 'x64') 'generic Example.vst3 bundle selects its named x64 payload'
+  $multiBundle=Join-Path $root 'ExampleMulti.vst3'
+  $multiX64=Join-Path $multiBundle 'Contents\x86_64-win\ExampleMulti.vst3'
+  $multiArm=Join-Path $multiBundle 'Contents\arm64ec-win\ExampleMulti.vst3'
+  New-Item -ItemType Directory -Force -Path (Split-Path $multiX64),(Split-Path $multiArm) | Out-Null
+  New-HybridFixture $multiX64 0
+  New-HybridFixture $multiArm 1
+  $multiArmCandidate=Select-PluginPeCandidate $multiBundle 'vst3' 'arm64ec'
+  $multiX64Candidate=Select-PluginPeCandidate $multiBundle 'vst3' 'x64'
+  Check ($multiArmCandidate.path -ieq $multiArm -and $multiArmCandidate.pe.execution_abi -eq 'arm64ec') 'multiarch bundle selects the compatible ARM64EC payload'
+  Check ($multiX64Candidate.path -ieq $multiX64 -and $multiX64Candidate.pe.execution_abi -eq 'x64') 'multiarch bundle selects the compatible x64 payload'
+  Reject {Select-PluginPeCandidate $multiBundle 'vst3' 'arm64'} 'multiarch bundle rejects unsupported native ARM64 selection'
+  $mismatchBundle=Join-Path $root 'OnlyX64.vst3'
+  $mismatchPayload=Join-Path $mismatchBundle 'Contents\x86_64-win\OnlyX64.vst3'
+  New-Item -ItemType Directory -Force -Path (Split-Path $mismatchPayload) | Out-Null
+  New-HybridFixture $mismatchPayload 0
+  Reject {Select-PluginPeCandidate $mismatchBundle 'vst3' 'arm64ec'} 'single-architecture bundle rejects a mismatched host ABI'
   $invalid=Join-Path $root 'amd64-invalid-chpe.exe';New-HybridFixture $invalid 1 $true
   $identity=Get-PeIdentity $invalid
   Check ($identity.coff_machine_hex -eq '0x8664' -and $identity.execution_abi -eq 'unknown' -and $identity.metadata_status -eq 'unavailable') 'unmapped CHPE pointer preserves raw machine and unknown ABI'
@@ -75,6 +136,7 @@ try {
   [IO.File]::WriteAllBytes((Join-Path $root 'bad.exe'),[byte[]]@(0,0))
   Reject {Get-PeMachine (Join-Path $root 'bad.exe')} 'invalid PE refused'
   Check ((Join-WindowsArguments @('-cfgfile','C:\Space Folder\reaper.ini','C:\script path\start.lua')) -eq '"-cfgfile" "C:\Space Folder\reaper.ini" "C:\script path\start.lua"') 'paths with spaces preserve argument boundaries'
+  Check ((Join-WindowsArguments @('-newinst','-cfgfile','C:\Space Folder\reaper.ini','-new','-nosplash','C:\script path\start.lua')) -match '"C:\\script path\\start.lua"') 'Windows REAPER Lua launch preserves positional script argument'
   Reject {Join-WindowsArguments @("bad`nargument")} 'newline argument refused'
   $traceBefore=Get-ProcessTracePath
   Set-ProcessTracePath 'C:\trace\fixture.pftrace'
@@ -141,6 +203,9 @@ try {
   $seed=Join-Path $root 'source profile';$private=Join-Path $root 'private profile';$export=Join-Path $root 'export'
   New-Item -ItemType Directory -Path $seed,$export | Out-Null
   '[REAPER]'|Set-Content -LiteralPath (Join-Path $seed 'reaper.ini')
+  Reject {Assert-ReaperSeedProfile $seed} 'minimal REAPER seed profile is rejected before launch'
+  Add-Content -LiteralPath (Join-Path $seed 'reaper.ini') -Value '[audioconfig]'
+  Assert-ReaperSeedProfile $seed;Check $true 'initialized REAPER seed profile is accepted'
   'fixture private registration'|Set-Content -LiteralPath (Join-Path $seed 'reaper-license.rk')
   $sourceHash=(Get-FileHash -LiteralPath (Join-Path $seed 'reaper-license.rk')).Hash
   Copy-PrivateProfile $seed $private $export
