@@ -148,6 +148,28 @@ motion.startDeviceMotionUpdates(to: providerQueue) { [weak self] sample, _ in
 }
 ```
 
+The optional `PulpSwift` package includes the small
+`PulpMotionControlSource` adapter for this boundary. A host application only
+needs to select its handoff and mapping:
+
+```swift
+let source = PulpMotionControlSource { frame in
+    // This closure runs on the provider queue, never in the audio callback.
+    controlHandoff.publish(frame)
+}
+guard source.start() else {
+    controlHandoff.publishUnavailable()
+    return
+}
+// Call source.stop() from the app/plugin lifecycle teardown.
+```
+
+`PulpMotionControlFrame` carries the sequence, normalized value, confidence,
+validity, and timestamp as one observation. `PulpMotionControlMath` is pure
+and testable without an iPhone. The package does not request permissions or
+write parameters; the containing app owns the Info.plist usage description,
+mapping, and external handoff.
+
 These snippets are provider recipes, not a new Pulp sensor subsystem. A mobile
 plugin that cannot access the sensor permission can receive the same frames
 from its containing app or an external process over an existing transport.
