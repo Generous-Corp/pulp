@@ -197,7 +197,7 @@ jobs:
                 --head "${{ github.sha }}" \
                 --allowlist-diff; }; then
             echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "WebCLAP proof skipped: generated version-bump transaction."
+            echo "WebCLAP proof skipped: exact generated version-bump transaction."
             exit 0
           fi
 
