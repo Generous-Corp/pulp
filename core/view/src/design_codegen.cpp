@@ -754,6 +754,14 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
     emit_str("transform", s.transform);
     emit_px("width", s.width);
     emit_px("height", s.height);
+    // Imported frames carry an authored height that is part of the captured
+    // design geometry.  A web-compat root/child is commonly mounted inside a
+    // flex host whose default flex-shrink is 1; when the host viewport is
+    // shorter than the design, that silently compresses the frame (Kelvin's
+    // 886px panel became 116px).  Preserve explicit design heights just as the
+    // native Yoga emitter does for column-flow children.
+    if (s.height)
+        ss << ind << var << ".style.flexShrink = '0';\n";
     emit_px("minWidth", s.min_width);
     emit_px("minHeight", s.min_height);
     emit_px("maxWidth", s.max_width);
@@ -981,6 +989,15 @@ static void emit_js_layout_constraints(const NativeEmit& e, const std::string& t
     // layout needs shrink:0 to keep the sizes it emitted.
     if (L.flex_shrink)
         ss << ind << "setFlex('" << target_id << "', 'flex_shrink', " << *L.flex_shrink << ");\n";
+    // Imported browser/design captures carry already-solved heights. In a
+    // column parent Yoga's default flex-shrink:1 compresses those authored
+    // boxes to the host viewport (for example, a tall panel rendered into a
+    // short initial viewport). Preserve the captured main-axis extent unless
+    // the source explicitly supplied a shrink policy above.
+    if (!L.flex_shrink && e.parent_direction && *e.parent_direction == LayoutDirection::column &&
+        node.style.height) {
+        ss << ind << "setFlex('" << target_id << "', 'flex_shrink', 0);\n";
+    }
     // Explicit per-child flex properties (Figma auto-layout children:
     // layoutGrow → flex_grow, layoutAlign → align_self, targetAspectRatio →
     // aspect_ratio). Emitted BEFORE the constraint fallbacks below so an
