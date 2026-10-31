@@ -3165,10 +3165,10 @@ ledger. The job refuses to run otherwise. Shipyard re-reads the exact-head
 approval immediately before each enqueue and refuses on a HOLD, a missing
 approval, or unreadable state. The native queue then validates and merges.
 
-`.github/workflows/shipyard-merge-steward.yml` is a manual diagnostic only.
-It has no schedule, runs dry-run unless dispatched with `apply`, and is not in
-`.github/schedule-backstop.json`. A second scheduled writer would race the
-mutation-authority flag. Its census also failed under the Actions-minted
+`.github/workflows/shipyard-merge-steward.yml` is a read-only diagnostic. It
+has no schedule, no `apply` input and only read-scoped tokens, and it is not in
+`.github/schedule-backstop.json`. A second writer, scheduled or dispatched,
+would bypass the m3 guard and race the mutation-authority flag. Its census also failed under the Actions-minted
 token on every run, so it never admitted a PR.
 
 `[train] mode = "off"`. The native queue already batches up to five entries,

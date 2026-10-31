@@ -318,7 +318,10 @@ class ActionMajorPinTests(unittest.TestCase):
         document = yaml.load(text, Loader=yaml.BaseLoader)
         self.assertNotIn("schedule", document["on"])
         self.assertIn("workflow_dispatch", document["on"])
-        self.assertIn("APPLY: ${{ inputs.apply }}", text)
+        # Read-only: no apply input, no --apply, no write-scoped token.
+        self.assertNotIn("inputs", document["on"]["workflow_dispatch"] or {})
+        self.assertNotIn("--apply", text)
+        self.assertNotIn(": write", text)
         self.assertNotIn("github.event_name == 'schedule'", text)
         self.assertIn("runner steward --repo", text)
         self.assertIn("--arm-unqueued", text)
