@@ -90,6 +90,68 @@ non-blocking after preparation.
   platform-owned. AUv3 or other mobile plugin sandboxes may require an app or
   companion process to provide the input.
 
+### Mobile adapter recipe
+
+The mobile adapter can stay small because it only translates a platform event
+into the same application-owned frame used by the desktop and web providers.
+For example, an Android app can sample a rotation sensor on a non-audio
+dispatcher and pass the normalized result to its existing handoff:
+
+```kotlin
+private val listener = object : SensorEventListener {
+    private var sequence = 0L
+
+    override fun onSensorChanged(event: SensorEvent) {
+        if (event.sensor.type != Sensor.TYPE_ROTATION_VECTOR) return
+        val value = normalizeTilt(event.values) // application calibration
+        publishFrame(
+            sequence = ++sequence,
+            control = value,
+            confidence = 1.0f,
+            valid = true,
+            timestampNanos = event.timestamp,
+        ) // TripleBuffer, OSC/IPC, or the app's native queue
+    }
+
+    override fun onAccuracyChanged(sensor: Sensor, accuracy: Int) = Unit
+}
+
+sensorManager.registerListener(
+    listener,
+    sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
+        ?: return unavailable(),
+    SensorManager.SENSOR_DELAY_GAME,
+    handler,
+)
+```
+
+`publishFrame` is application code; Pulp does not need to know what the value
+means. Stop and unregister the listener on pause, release, permission denial,
+or provider restart, and publish one invalid frame if the consumer needs an
+immediate loss notification. The audio callback only reads the already
+published frame. The existing `com.pulp.motion` Android package is a UI motion
+observability/tracing facade, not a physical sensor API; do not use it as
+evidence that an accelerometer or gyroscope is already wired to parameters.
+
+An iOS application follows the same boundary with `CMMotionManager`:
+
+```swift
+motion.startDeviceMotionUpdates(to: providerQueue) { [weak self] sample, _ in
+    guard let sample else { return }
+    self?.publishFrame(
+        sequence: self?.nextSequence() ?? 0,
+        control: normalizeTilt(sample.attitude.roll),
+        confidence: 1,
+        valid: true,
+        timestamp: sample.timestamp
+    )
+}
+```
+
+These snippets are provider recipes, not a new Pulp sensor subsystem. A mobile
+plugin that cannot access the sensor permission can receive the same frames
+from its containing app or an external process over an existing transport.
+
 OBS Studio, DaVinci Resolve/Fairlight, Max/MSP, TouchDesigner, and similar
 hosts are compatibility forcing functions. They should consume existing
 plugin, OSC, MIDI, IPC, WebSocket, or external-process boundaries through
@@ -103,4 +165,3 @@ MediaPipe, OpenCV, OpenSeeFace, ONNX Runtime, LiteRT, Core ML, platform sensor
 APIs, and device SDKs remain application-selected dependencies. Audit model
 weights, task bundles, codecs, and SDK terms separately from runtime licenses.
 Do not add any of them to Pulp core for an application that does not use them.
-
