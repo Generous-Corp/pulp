@@ -461,6 +461,58 @@ def _adopt_unreproduced(
     return adopted
 
 
+def _derive_assignments(
+    repo: Path,
+    surfaces: Any,
+    version_at_land: Any,
+    config: Any,
+    worktree: Path,
+    *,
+    base: str,
+    candidate: str,
+) -> list[Any]:
+    """The per-surface version increments the candidate commit claims.
+
+    Fails closed on an unreadable version file, a surface whose files disagree
+    with each other, a step that is not one strict semantic-version increment,
+    or a candidate that moves no configured surface.
+    """
+    assignments: list[Any] = []
+    for surface in config.surfaces:
+        base_versions = [
+            surfaces.read_version(worktree, vf) for vf in surface.version_files
+        ]
+        candidate_versions = [
+            _candidate_version(repo, surfaces, candidate, vf)
+            for vf in surface.version_files
+        ]
+        if any(value is None for value in base_versions + candidate_versions):
+            raise NotGeneratedBump(f"unreadable version file on surface {surface.name}")
+        if len(set(base_versions)) != 1 or len(set(candidate_versions)) != 1:
+            raise NotGeneratedBump(f"version files drift within surface {surface.name}")
+        current = str(base_versions[0])
+        assigned = str(candidate_versions[0])
+        if current == assigned:
+            continue
+        levels = [
+            level
+            for level in ("patch", "minor", "major")
+            if version_at_land.bump_version(current, level) == assigned
+        ]
+        if len(levels) != 1:
+            raise NotGeneratedBump(
+                f"surface {surface.name} is not one strict semantic-version increment"
+            )
+        assignments.append(
+            version_at_land.Assignment(
+                surface.name, levels[0], current, assigned
+            )
+        )
+    if not assignments:
+        raise NotGeneratedBump("candidate changes no configured version surface")
+    return assignments
+
+
 def _reproduce_tree(
     repo: Path,
     *,
@@ -483,39 +535,10 @@ def _reproduce_tree(
             surfaces = importlib.import_module("version_bump_surfaces")
             _bind_trusted_regenerators(version_at_land, worktree)
             config = surfaces.load_config(scripts / "versioning.json")
-            assignments: list[Any] = []
-            for surface in config.surfaces:
-                base_versions = [
-                    surfaces.read_version(worktree, vf) for vf in surface.version_files
-                ]
-                candidate_versions = [
-                    _candidate_version(repo, surfaces, candidate, vf)
-                    for vf in surface.version_files
-                ]
-                if any(value is None for value in base_versions + candidate_versions):
-                    raise NotGeneratedBump(f"unreadable version file on surface {surface.name}")
-                if len(set(base_versions)) != 1 or len(set(candidate_versions)) != 1:
-                    raise NotGeneratedBump(f"version files drift within surface {surface.name}")
-                current = str(base_versions[0])
-                assigned = str(candidate_versions[0])
-                if current == assigned:
-                    continue
-                levels = [
-                    level
-                    for level in ("patch", "minor", "major")
-                    if version_at_land.bump_version(current, level) == assigned
-                ]
-                if len(levels) != 1:
-                    raise NotGeneratedBump(
-                        f"surface {surface.name} is not one strict semantic-version increment"
-                    )
-                assignments.append(
-                    version_at_land.Assignment(
-                        surface.name, levels[0], current, assigned
-                    )
-                )
-            if not assignments:
-                raise NotGeneratedBump("candidate changes no configured version surface")
+            assignments = _derive_assignments(
+                repo, surfaces, version_at_land, config, worktree,
+                base=base, candidate=candidate,
+            )
 
             edited = version_at_land._write_plan(worktree, config, assignments)
             if not edited:
@@ -632,6 +655,102 @@ def _reproduce_tree(
                 _git(repo, "worktree", "remove", "--force", str(worktree), check=False)
 
 
+def _diff_paths(repo: Path, older: str, newer: str) -> list[str]:
+    """Every path that differs between two commits, renames split into A + D."""
+    proc = _git(
+        repo, "diff", "--name-status", "--no-renames", "-z", older, newer,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise NotGeneratedBump(f"could not compute the diff {older[:12]}..{newer[:12]}")
+    fields = proc.stdout.split("\0")
+    if fields and fields[-1] == "":
+        fields.pop()
+    if len(fields) % 2 != 0:
+        raise NotGeneratedBump("diff path status stream is malformed")
+    paths: list[str] = []
+    for index in range(0, len(fields), 2):
+        status, path = fields[index], fields[index + 1]
+        if status not in {"A", "M", "D"} or not path:
+            raise NotGeneratedBump("diff contains a type change or unknown status")
+        paths.append(path)
+    return paths
+
+
+def _check_allowlisted_diff(
+    repo: Path,
+    *,
+    base: str,
+    candidate: str,
+    event_base: str,
+    event_head: str,
+) -> list[Any]:
+    """Accept a bot bump whose whole diff sits inside the writer's allowlist.
+
+    The looser sibling of ``_reproduce_tree``: the identity, signature, branch,
+    title and topology checks have already passed, so this decides only whether
+    the CONTENT is a version bump. It is for a bump the exact projection cannot
+    reproduce byte for byte (a migration note added or removed, or a merge group
+    that already carries an earlier queue entry), where the protected base's
+    own writer allowlist still bounds every path it may touch.
+
+    Requires, all from the protected base: the ``Version-Bump-Applied:`` marker
+    on the canonical subject; every path in the candidate's diff, and in the
+    event's own diff (the merge group against its base), inside
+    ``writer_allowed_globs``; and each configured surface at one consistent
+    version that moved by one strict increment. A group that batches the bump
+    with another change has a diff outside the allowlist and is refused.
+    """
+    message = _git(repo, "show", "-s", "--format=%B", candidate).stdout
+    if message.splitlines()[:1] != [BUMP_SUBJECT]:
+        raise NotGeneratedBump("commit subject is not the canonical bump subject")
+
+    runner_temp = Path(os.environ.get("RUNNER_TEMP") or tempfile.gettempdir())
+    runner_temp.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="pulp-version-bump-proof-", dir=runner_temp) as holder:
+        worktree = Path(holder) / "base"
+        added = False
+        try:
+            _git(repo, "worktree", "add", "--detach", str(worktree), base)
+            added = True
+            scripts = worktree / "tools" / "scripts"
+            sys.path.insert(0, str(scripts))
+            version_at_land = importlib.import_module("version_at_land")
+            surfaces = importlib.import_module("version_bump_surfaces")
+            try:
+                has_marker = version_at_land.has_applied_marker
+                outside = version_at_land.paths_outside_writer_allowlist
+            except AttributeError as exc:
+                raise NotGeneratedBump(
+                    "the protected base predates the shared writer allowlist"
+                ) from exc
+            if not has_marker(message):
+                raise NotGeneratedBump("commit carries no Version-Bump-Applied marker")
+            config = surfaces.load_config(scripts / "versioning.json")
+            if not tuple(config.writer_allowed_globs):
+                raise NotGeneratedBump("the protected base declares no writer allowlist")
+            if event_base != base:
+                _assert_writer_unchanged(repo, base, event_base)
+            observed: list[str] = []
+            for older, newer in dict.fromkeys(((base, candidate), (event_base, event_head))):
+                paths = _diff_paths(repo, older, newer)
+                if not paths:
+                    raise NotGeneratedBump("bump diff is empty")
+                observed.extend(paths)
+            stray = outside(config, observed)
+            if stray:
+                raise NotGeneratedBump(
+                    "diff leaves the writer allowlist: " + ", ".join(stray[:5])
+                )
+            return _derive_assignments(
+                repo, surfaces, version_at_land, config, worktree,
+                base=base, candidate=candidate,
+            )
+        finally:
+            if added:
+                _git(repo, "worktree", "remove", "--force", str(worktree), check=False)
+
+
 def verify(args: argparse.Namespace) -> dict[str, Any]:
     repo = args.repo.resolve()
     event = _load_json(args.event_path)
@@ -690,6 +809,21 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
     _commit_provenance(
         repo, metadata, candidate_base=candidate_base, candidate=candidate
     )
+    if getattr(args, "allowlist_diff", False):
+        assignments = _check_allowlisted_diff(
+            repo,
+            base=candidate_base,
+            candidate=candidate,
+            event_base=args.base,
+            event_head=cumulative_head or candidate,
+        )
+        return {
+            "generated_version_bump": True,
+            "mode": "allowlist-diff",
+            "base": args.base,
+            "candidate": candidate,
+            "surfaces": [item.surface for item in assignments],
+        }
     # Every cheap provenance check has passed; only now pay for history.
     _complete_history(
         repo,
@@ -729,6 +863,15 @@ def main(argv: list[str]) -> int:
             "when the PULP_BUMP_FASTPATH_PR_MERGE_REF repository variable is 1"
         ),
     )
+    parser.add_argument(
+        "--allowlist-diff",
+        action="store_true",
+        help=(
+            "accept a bump whose whole diff stays inside the protected base's "
+            "writer_allowed_globs instead of reproducing its tree byte for byte; "
+            "every identity, signature and topology check still applies"
+        ),
+    )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     try:
@@ -744,7 +887,9 @@ def main(argv: list[str]) -> int:
         print(json.dumps(result, sort_keys=True))
     else:
         print(
-            "generated-version-bump: exact trusted transaction "
+            "generated-version-bump: "
+            f"{'allowlisted' if result.get('mode') == 'allowlist-diff' else 'exact'}"
+            " trusted transaction "
             f"({','.join(result['surfaces'])})",
             file=sys.stderr,
         )

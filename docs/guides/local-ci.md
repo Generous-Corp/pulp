@@ -3122,6 +3122,13 @@ with extra content all keep the full path. The variable is read by the
 workflow, never by PR content; a base verifier that predates the flag rejects
 it and the run keeps the full path.
 
+When the exact projection refuses, the same verifier is run once more with
+`--allowlist-diff`: the signed single-commit bump is still required, but its
+content is bounded by the protected base's `writer_allowed_globs` (the writer's
+own allowlist) and the `Version-Bump-Applied:` marker instead of a byte
+comparison. The outcome is still reported as `taken`. See
+[version-at-land cutover](version-at-land-cutover.md#cheap-ci-for-the-bump-pr).
+
 Every run on the release bot's bump reports the outcome as a `bump-fast-path`
 notice on the `classify` job, and in its step summary: `taken`, or `refused:`
 followed by the reason. The reason is the verifier's own line (`verifier: ...`),

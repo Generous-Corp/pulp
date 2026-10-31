@@ -1462,6 +1462,27 @@ jobs:
                 bump_refusal=$(sed -n 's/^generated-version-bump: full validation (\(.*\))$/\1/p' \
                   "$bump_check_err" | tail -n 1)
                 bump_refusal="verifier: ${bump_refusal:-exited without a reason}"
+                [ ! -s "$bump_check_err" ] || cat "$bump_check_err" >&2
+                # Second chance for the same signed, single-commit bump when
+                # the exact projection could not reproduce it (a migration note
+                # added or removed, a group already carrying an earlier queue
+                # entry): its whole diff, and the event's own diff against its
+                # base, must sit inside the protected base's writer allowlist
+                # and carry the Version-Bump-Applied marker. A group that
+                # batches the bump with any other change leaves the allowlist
+                # and keeps the full path. A base verifier without the flag
+                # exits nonzero here and the run keeps the full path.
+                if GH_TOKEN="${{ github.token }}" "$ci_python" "$trusted_bump_check" \
+                      --repo . \
+                      --event-name "$EVENT_NAME" \
+                      --event-path "$EVENT_PATH" \
+                      --base "$base" \
+                      --head "$EVENT_HEAD_SHA" \
+                      ${accept_pr_merge_ref:+"$accept_pr_merge_ref"} \
+                      --allowlist-diff 2>"$bump_check_err"; then
+                  native_build_required=false
+                  echo "Allowlisted generated version bump: native build matrix skipped."
+                fi
               fi
               [ ! -s "$bump_check_err" ] || cat "$bump_check_err" >&2
               # Report the outcome for the release bot's bump only, as a

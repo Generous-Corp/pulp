@@ -53,7 +53,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterator
+from typing import Callable, Iterable, Iterator
 
 from gate_common import git_diff_names
 from version_bump_surfaces import (
@@ -647,6 +647,25 @@ def _write_plan(repo: Path, config: Config, plan: list[Assignment]) -> list[str]
     return edited
 
 
+def paths_outside_writer_allowlist(config: Config, paths: Iterable[str]) -> list[str]:
+    """The paths the release writer is not allowed to touch, sorted.
+
+    The single definition of "a bump-only path set": the writer checks its own
+    edits against it, and CI checks a candidate bump's diff against it. An
+    empty allowlist approves nothing, so every path is outside it.
+    """
+    allowed = tuple(config.writer_allowed_globs)
+    return sorted({path for path in paths
+                   if not any(fnmatch.fnmatchcase(path, pattern)
+                              for pattern in allowed)})
+
+
+def has_applied_marker(message: str) -> bool:
+    """True when `message` carries the `Version-Bump-Applied:` trailer line."""
+    return any(line.startswith(f"{APPLIED_MARKER}: ")
+               for line in message.splitlines())
+
+
 def _validate_writer_paths(config: Config, edited: list[str], repo: Path | None = None) -> None:
     """Fail closed if a privileged release commit would contain an unapproved path.
 
@@ -655,8 +674,7 @@ def _validate_writer_paths(config: Config, edited: list[str], repo: Path | None 
     GitHub ruleset configuration. An empty allowlist is rejected rather than
     silently falling back to a broad generated-glob filter.
     """
-    allowed = tuple(config.writer_allowed_globs)
-    if not allowed:
+    if not tuple(config.writer_allowed_globs):
         raise RuntimeError("version-at-land: writer allowlist is empty")
     changed = set(edited)
     if repo is not None:
@@ -668,9 +686,7 @@ def _validate_writer_paths(config: Config, edited: list[str], repo: Path | None 
         # never enables rename detection, so the final field is the path we
         # must authorize (including deleted generated files).
         changed.update(line[3:] for line in status if len(line) >= 4)
-    unexpected = sorted({path for path in changed
-                         if not any(fnmatch.fnmatchcase(path, pattern)
-                                    for pattern in allowed)})
+    unexpected = paths_outside_writer_allowlist(config, changed)
     if unexpected:
         raise RuntimeError(
             "version-at-land: refusing to write unapproved release paths: "

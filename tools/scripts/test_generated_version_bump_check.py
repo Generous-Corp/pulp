@@ -12,6 +12,7 @@ import sys
 import tempfile
 import types
 import unittest
+import unittest.mock
 
 
 SCRIPT = Path(__file__).with_name("generated_version_bump_check.py")
@@ -772,6 +773,91 @@ class GeneratedVersionBumpCheckTest(unittest.TestCase):
         self.assertEqual(text.count("--accept-pr-merge-ref"), 1)
         self.assertIn('[ "${BUMP_FASTPATH_PR_MERGE_REF:-}" = 1 ]', text)
         self.assertIn('${accept_pr_merge_ref:+"$accept_pr_merge_ref"}', text)
+
+
+    # -- allowlist-diff acceptance (--allowlist-diff) --------------------------
+
+    NOTE = "docs/migrations/unreleased/fixture-note.md"
+
+    def test_allowlisted_diff_accepts_a_bump_the_exact_projection_refuses(self) -> None:
+        # A migration note the writer folded in is an ADDED path inside the
+        # allowlist: the byte-exact projection cannot reproduce it, the
+        # allowlist check can.
+        candidate = self._generated_commit(extra_path=self.NOTE)
+        with self.assertRaises(CHECK.NotGeneratedBump):
+            CHECK.verify(self._inputs(candidate))
+        inputs = self._inputs(candidate)
+        inputs.allowlist_diff = True
+        result = CHECK.verify(inputs)
+        self.assertTrue(result["generated_version_bump"])
+        self.assertEqual(result["mode"], "allowlist-diff")
+        self.assertEqual(result["surfaces"], ["plugin"])
+
+    def test_allowlisted_diff_refuses_a_path_outside_the_allowlist(self) -> None:
+        candidate = self._generated_commit(extra_path="core/hostile.cpp")
+        inputs = self._inputs(candidate)
+        inputs.allowlist_diff = True
+        with self.assertRaisesRegex(CHECK.NotGeneratedBump, "leaves the writer allowlist"):
+            CHECK.verify(inputs)
+
+    def test_allowlisted_diff_refuses_a_missing_marker(self) -> None:
+        self._generated_commit(extra_path=self.NOTE)
+        run(self.repo, "commit", "--quiet", "--amend", "--no-verify", "-m",
+            CHECK.BUMP_SUBJECT + "\n\nno trailer here")
+        candidate = run(self.repo, "rev-parse", "HEAD")
+        inputs = self._inputs(candidate)
+        inputs.allowlist_diff = True
+        with self.assertRaisesRegex(CHECK.NotGeneratedBump, "Version-Bump-Applied"):
+            CHECK.verify(inputs)
+
+    def test_allowlisted_diff_refuses_when_the_diff_cannot_be_computed(self) -> None:
+        candidate = self._generated_commit(extra_path=self.NOTE)
+        inputs = self._inputs(candidate)
+        inputs.allowlist_diff = True
+        real_git = CHECK._git
+
+        def failing_diff(repo, *args, check=True):
+            if args and args[0] == "diff":
+                return subprocess.CompletedProcess(args, 128, "", "fatal: bad object")
+            return real_git(repo, *args, check=check)
+
+        with unittest.mock.patch.object(CHECK, "_git", failing_diff):
+            with self.assertRaisesRegex(CHECK.NotGeneratedBump, "could not compute the diff"):
+                CHECK.verify(inputs)
+
+    def test_allowlisted_diff_keeps_every_identity_check(self) -> None:
+        candidate = self._generated_commit(extra_path=self.NOTE)
+        inputs = self._inputs(candidate, verified=False)
+        inputs.allowlist_diff = True
+        with self.assertRaisesRegex(CHECK.NotGeneratedBump, "signature"):
+            CHECK.verify(inputs)
+        inputs = self._inputs(candidate, branch="feature/not-the-bump")
+        inputs.allowlist_diff = True
+        with self.assertRaises(CHECK.NotGeneratedBump):
+            CHECK.verify(inputs)
+
+    def test_allowlisted_lone_bump_group_behind_a_prior_entry_is_accepted(self) -> None:
+        candidate = self._generated_commit(extra_path=self.NOTE)
+        inputs = self._cumulative_inputs(candidate)
+        inputs.allowlist_diff = True
+        self.assertEqual(CHECK.verify(inputs)["mode"], "allowlist-diff")
+
+    def test_allowlisted_group_that_batches_another_change_is_refused(self) -> None:
+        candidate = self._generated_commit(extra_path=self.NOTE)
+        inputs = self._cumulative_inputs(
+            candidate, extra_group_path="core/batched-with-the-bump.cpp"
+        )
+        inputs.allowlist_diff = True
+        with self.assertRaisesRegex(CHECK.NotGeneratedBump, "leaves the writer allowlist"):
+            CHECK.verify(inputs)
+
+    def test_workflows_offer_the_allowlist_pass_after_the_exact_verifier(self) -> None:
+        build = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
+        self.assertEqual(build.count("--allowlist-diff"), 1)
+        self.assertLess(build.index("exited without a reason"),
+                        build.index("--allowlist-diff"))
+        wclap = (ROOT / ".github/workflows/wclap-cloudflare.yml").read_text(encoding="utf-8")
+        self.assertEqual(wclap.count("--allowlist-diff"), 1)
 
 
     # -- history-derived ledger reproduced from a shallow CI checkout ---------

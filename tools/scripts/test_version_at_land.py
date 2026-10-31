@@ -2173,5 +2173,40 @@ class WriterAllowlistTest(unittest.TestCase):
                 replace(CONFIG, writer_allowed_globs=[]), ["CMakeLists.txt"])
 
 
+class WriterAllowlistHelpersTest(unittest.TestCase):
+    """The allowlist CI applies to a bump's diff is the writer's own."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.config = load_config(Path(__file__).with_name("versioning.json"))
+
+    def test_bump_only_paths_are_inside_the_allowlist(self) -> None:
+        self.assertEqual(val.paths_outside_writer_allowlist(
+            self.config,
+            ["CMakeLists.txt", "CHANGELOG.md", "docs/migrations/unreleased/x.md"]), [])
+
+    def test_any_other_path_is_reported_sorted(self) -> None:
+        self.assertEqual(val.paths_outside_writer_allowlist(
+            self.config, ["core/z.cpp", "CMakeLists.txt", "core/a.cpp"]),
+            ["core/a.cpp", "core/z.cpp"])
+
+    def test_empty_allowlist_approves_nothing(self) -> None:
+        empty = replace(self.config, writer_allowed_globs=[])
+        self.assertEqual(
+            val.paths_outside_writer_allowlist(empty, ["CMakeLists.txt"]),
+            ["CMakeLists.txt"])
+
+    def test_writer_validation_uses_the_shared_allowlist(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "unapproved release paths: core/a.cpp"):
+            val._validate_writer_paths(self.config, ["CMakeLists.txt", "core/a.cpp"])
+
+    def test_marker_must_be_a_trailer_line(self) -> None:
+        self.assertTrue(val.has_applied_marker(
+            "chore: bump versions\n\nVersion-Bump-Applied: abc\n"))
+        self.assertFalse(val.has_applied_marker("chore: bump versions\n\nno marker"))
+        self.assertFalse(val.has_applied_marker(
+            "chore: bump versions\n\nmentions Version-Bump-Applied: inline"))
+
+
 if __name__ == "__main__":
     unittest.main()

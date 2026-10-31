@@ -183,14 +183,21 @@ jobs:
               && git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null \
               && git show "$trusted_verifier_base:tools/scripts/generated_version_bump_check.py" \
                 >"$trusted_bump_check" 2>/dev/null \
-              && GH_TOKEN="${{ github.token }}" python3 "$trusted_bump_check" \
+              && { GH_TOKEN="${{ github.token }}" python3 "$trusted_bump_check" \
                 --repo . \
                 --event-name "${{ github.event_name }}" \
                 --event-path "${{ github.event_path }}" \
                 --base "$BASE_SHA" \
-                --head "${{ github.sha }}"; then
+                --head "${{ github.sha }}" \
+              || GH_TOKEN="${{ github.token }}" python3 "$trusted_bump_check" \
+                --repo . \
+                --event-name "${{ github.event_name }}" \
+                --event-path "${{ github.event_path }}" \
+                --base "$BASE_SHA" \
+                --head "${{ github.sha }}" \
+                --allowlist-diff; }; then
             echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "WebCLAP proof skipped: exact generated version-bump transaction."
+            echo "WebCLAP proof skipped: generated version-bump transaction."
             exit 0
           fi
 
