@@ -150,6 +150,19 @@ add_custom_target(pulp-jsx-runtime-materialized-ids-map
     COMMENT "Staging materialized ids map helper beside pulp-import-design")
 add_dependencies(pulp-import-design pulp-jsx-runtime-materialized-ids-map)
 
+# Release packaging reads the Illustrator helper from the build directory
+# beside the importer (install() alone only covers installed trees), and the
+# release product matrix requires it in every CLI archive.
+set(_pulp_illustrator_helper
+    "${CMAKE_CURRENT_SOURCE_DIR}/illustrator_to_svg.py")
+add_custom_target(pulp-illustrator-helper
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${_pulp_illustrator_helper}"
+        "$<TARGET_FILE_DIR:pulp-import-design>/illustrator_to_svg.py"
+    DEPENDS "${_pulp_illustrator_helper}"
+    COMMENT "Staging Illustrator SVG converter beside pulp-import-design")
+add_dependencies(pulp-import-design pulp-illustrator-helper)
+
 set(PULP_NODE_RUNTIME_EXECUTABLE "" CACHE FILEPATH
     "Self-contained target-architecture Node executable staged with design import")
 if(PULP_NODE_RUNTIME_EXECUTABLE)

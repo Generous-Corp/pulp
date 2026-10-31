@@ -12990,3 +12990,11 @@ ASan and UBSan remain on non-draft `core/**` pull requests (opened, synchronize,
 and ready-for-review events); TSan runs nightly or by dispatch. Coverage alone
 has a `max-parallel: 2` matrix cap; sanitizer jobs are independent named legs.
 These changes preserve the required Vellum lanes on their existing runners.
+
+- **version-at-land never arms its bump PR.** On the `pr` route the merge
+  steward is the only admission writer: it enqueues an approved, green head
+  itself, and its stale-arm sweep disarms any arm made by the bump job. An
+  unarmed, unreviewed bump PR is therefore live. With
+  `PULP_BUMP_HEAL_STALE_PR` on, heal closes a stale bump PR only when it was
+  ejected from the queue, a required check failed, or the last line of a PR
+  comment is `verdict: HOLD head:<sha>` for the current head.

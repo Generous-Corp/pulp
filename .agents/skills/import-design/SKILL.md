@@ -393,6 +393,13 @@ the selected page, and converter identity. Existing SVG input continues through
 the validated preconverted-SVG lane; the converter does not imply artwork
 license or redistribute third-party design assets.
 
+Release archives take the helper from the build directory, not from `install()`:
+`tools/import-design/CMakeLists.txt` stages it as
+`<build>/tools/import-design/illustrator_to_svg.py`, and
+`tools/ci/release_package_cli.sh` hard-fails when a release at or above the
+product matrix's `illustrator_import_floor` lacks it. A new file listed under
+`import-design/` in `release_product_matrix.json` needs the same staging.
+
 The installed `pulp-import-design` SDK runtime includes the browser-capture
 manifest plus the materialized JSX siblings
 `materialized_binding_contract.mjs`, `materialized_source_emitter.mjs`, and
