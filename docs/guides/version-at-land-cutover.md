@@ -279,7 +279,8 @@ tag instead of main HEAD.
    cheap no-op, so correctness wins. The **pending-intent liveness alarm**
    (`.github/workflows/pending-intent-liveness.yml` +
    `tools/scripts/pending_intent_liveness.py`) is the time-based backstop: it
-   pages if a positive intent stays unapplied past a grace window, catching a
+   pages if a positive intent stays unapplied past a grace window (210
+   minutes, above the PR route's coalescing window), catching a
    disabled/failed bot, a bot-permission failure, or an exhausted `--ff-only`
    retry — the whole "X exists, Y never arrives, detector quiet" class.
 
@@ -382,6 +383,30 @@ The bump can land two ways, selected by the `PULP_BUMP_ROUTE` repo variable
     scoped to `release/version-bump`), so a dead end is healed when it dies
     rather than on the next push to main. Those runs check out main, never PR
     code.
+  - **Coalescing.** A bump PR recomputes every intent since the last marker,
+    so one bump PR covers any number of merges. Opening one per merge spends a
+    merge-queue validation on each bump. So when no bump PR is open, the drain
+    holds a new one (`coalesced`, exit 0 with a `::notice::`) while BOTH of
+    these are true: other PRs are waiting in the merge queue, and the last bump
+    landed less than `PULP_BUMP_COALESCE_MINUTES` ago (default 120; `0`
+    disables). It opens the PR on the first drain where either stops being
+    true, or at once when a release needs the number: dispatch the workflow
+    with `release_now: true`. The `*/15` scheduled drain makes sure the window
+    ending is acted on. A fact the drain cannot read (the merge queue, or the
+    time of the last landing) never holds the bump; it opens as it did before
+    coalescing. An already-open bump PR is not affected: it is re-armed, waited
+    for or healed exactly as described above. The predicate is
+    `coalesce_decision` in `version_at_land.py`, covered by
+    `test_version_at_land.py` (`CoalesceDecisionTest`,
+    `PrRouteCoalesceTest`).
+  - **Liveness grace stays above the window.** The pending-intent alarm
+    (row 10 of `.agents/contract.toml`) pages when an intent stays unapplied
+    past its grace. That grace is 210 minutes: above the 120-minute window, the
+    15-minute drain cadence and a bump PR's queue validation, so a coalesced
+    bump never reads as a stuck bot. `test_pending_intent_liveness.py` fails if
+    the grace drops under that sum or the workflow default and the script
+    default disagree. Raising `PULP_BUMP_COALESCE_MINUTES` means raising the
+    grace with it.
   - **No regression / no double-bump.** `_strictly_increasing` drops any
     assignment that does not exceed the surface's version at the fresh head, so a
     stale drain can never walk a version backward (independent of whether the

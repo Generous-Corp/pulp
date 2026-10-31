@@ -5278,6 +5278,17 @@ bisectable.
       drain so a dead end heals when it dies, not on the next main push.
       When grepping run logs for waits, match `was cut BEFORE this merge`:
       the literal `stale-defer` also appears in a branch name in fetch output.
+  - **A green `coalesced` drain is a deliberate hold, not a lost bump.** With
+      no bump PR open, the drain holds a new one while other PRs wait in the
+      merge queue and the last bump landed under `PULP_BUMP_COALESCE_MINUTES`
+      (120) ago, so one bump PR covers many merges instead of each merge
+      spending a queue validation on its own. It opens when the queue drains,
+      the window ends (the `*/15` drain), or on a `release_now: true` dispatch.
+      The pending-intent grace (210 min) must stay above window + cadence +
+      queue validation; raise both together. Do not name a test file's stem in
+      a comment of a reachable script such as `version_at_land.py`: the
+      changed-surface reachability scan treats the mention as a call and
+      unmaps that test and everything it imports from its bounded family.
   - **Intent is read `--no-merges`-scoped.** `version_at_land.intent_trailers`
     reads `Version-Bump:` trailers only from the range's NON-merge commits
     (`git_range_trailers(..., no_merges=True)`). A "Merge origin/main into

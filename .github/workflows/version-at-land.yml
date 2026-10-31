@@ -60,7 +60,15 @@ on:
       - WebCLAP Cloudflare
     types: [completed]
     branches: [release/version-bump]
-  workflow_dispatch: {}
+  # `release_now` opens the bump PR at once when a release needs the number,
+  # skipping the coalescing hold described at the drain step.
+  workflow_dispatch:
+    inputs:
+      release_now:
+        description: "Open the bump PR now instead of coalescing it with later merges"
+        type: boolean
+        required: false
+        default: false
 
 concurrency:
   # DIRECT route (default): event-scoped so a scheduled drain is never
@@ -169,6 +177,14 @@ jobs:
           # failed). A stale bump PR still able to land is waited for either
           # way, and that wait exits 0.
           HEAL_STALE_PR: ${{ vars.PULP_BUMP_HEAL_STALE_PR || 'false' }}
+          # PR route: hold a NEW bump PR while other PRs wait in the merge
+          # queue, for up to this many minutes after the last bump landed, so
+          # one bump PR covers many merges instead of each merge spending a
+          # queue validation on its own bump. 0 disables. The scheduled drain
+          # below opens the held PR once the queue drains or the window ends;
+          # pending-intent-liveness.yml's grace sits above window + cadence.
+          PULP_BUMP_COALESCE_MINUTES: ${{ vars.PULP_BUMP_COALESCE_MINUTES || '120' }}
+          PULP_BUMP_RELEASE_NOW: ${{ github.event.inputs.release_now || 'false' }}
         run: |
           # The PR-route MUST use a real PAT: a PR opened by GITHUB_TOKEN does
           # not trigger workflows (GitHub's loop-prevention), so its required
