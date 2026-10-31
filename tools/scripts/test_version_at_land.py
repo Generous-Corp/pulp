@@ -521,12 +521,13 @@ class _FakeGh:
                  covers: bool = True, armed: bool = True,
                  in_queue: bool = False, graphql_rc: int = 0,
                  close_rc: int = 0, ejected: bool = False,
-                 checks: list[dict] | None = None) -> None:
+                 checks: list[dict] | None = None, hold: bool = False) -> None:
         # In-flight state of the open bump PR, read by the stale-PR liveness
         # check. The default (armed, never ejected, no check reported yet) is a
         # PR still on its way to landing. `checks` is the head commit's
         # statusCheckRollup context list; None means nothing has reported.
         self.armed = armed
+        self.hold = hold
         self.in_queue = in_queue
         self.ejected = ejected
         self.checks = checks
@@ -563,6 +564,12 @@ class _FakeGh:
             return subprocess.CompletedProcess(
                 args, self.create_rc, stdout="", stderr=self.create_stderr)
         if head == ("pr", "view"):
+            if "comments,headRefOid" in args:
+                tip = "c" * 40
+                body = ("findings\n\nverdict: HOLD head:" + tip) if self.hold else ""
+                return subprocess.CompletedProcess(
+                    args, 0, stderr="", stdout=json.dumps({
+                        "headRefOid": tip, "comments": [{"body": body}]}))
             if "headRefOid" in args:
                 # Model the PR branch tip against the REAL repo, so the guard's
                 # `merge-base --is-ancestor` is exercised for real rather than
@@ -644,14 +651,9 @@ class PrRouteTest(unittest.TestCase):
                        check=True)
         self._config(self.clone, "release-bot")
         self._orig_gh = val._gh
-        # No approval on record, so an unarmed bump PR keeps its dead-end
-        # reading and no test shells out to the real `shipyard`.
-        self._orig_verdict = val._review_verdict
-        val._review_verdict = lambda repo, n: ("refused", "no approval")
 
     def tearDown(self) -> None:
         val._gh = self._orig_gh
-        val._review_verdict = self._orig_verdict
         shutil.rmtree(self.root, ignore_errors=True)
 
     @staticmethod
@@ -685,18 +687,15 @@ class PrRouteTest(unittest.TestCase):
         self.assertEqual(self._branch_cmake_version(val.BUMP_BRANCH), "0.2.0")
         # main is untouched — the PR, not a direct push, carries the bump.
         self.assertEqual(self._branch_cmake_version("main"), "0.1.0")
-        # A PR was opened and auto-merge armed with --merge (contract: NEVER
-        # --squash — squash folds the bump-marker commit and trips auto-release).
+        # A PR was opened and NOT armed: the merge steward is the only
+        # admission writer, and its sweep disarms any arm made here.
         self.assertTrue(fake.did("pr", "create"))
         create_call = next(
             call for call in fake.calls if call[:2] == ("pr", "create")
         )
         self.assertIn("--label", create_call)
         self.assertEqual(create_call[create_call.index("--label") + 1], "automation")
-        self.assertTrue(fake.did("pr", "merge"))
-        self.assertIn("--auto", fake.calls[-1])
-        self.assertIn("--merge", fake.calls[-1])
-        self.assertNotIn("--squash", fake.calls[-1])
+        self.assertFalse(fake.did("pr", "merge"))
         # The bump commit carries the applied marker.
         msg = subprocess.run(
             ["git", "-C", str(self.origin), "log", "-1", "--format=%B",
@@ -711,9 +710,8 @@ class PrRouteTest(unittest.TestCase):
         # The lock held: no branch pushed, no PR created.
         self.assertFalse(self._origin_has_branch(f"refs/heads/{val.BUMP_BRANCH}"))
         self.assertFalse(fake.did("pr", "create"))
-        # ...but it RE-ARMED the existing PR (self-heals a prior failed arm).
-        self.assertTrue(fake.did("pr", "merge"))
-        self.assertIn("--merge", fake.calls[-1])
+        # ...and it never arms the existing PR: the steward admits it.
+        self.assertFalse(fake.did("pr", "merge"))
 
     def test_pr_route_never_reports_a_stale_bump_pr_as_covering(self) -> None:
         """A bump PR cut before this merge does not carry its intent.
@@ -792,7 +790,6 @@ class PrRouteTest(unittest.TestCase):
         self.assertEqual(len(close), 1)
         self.assertEqual(close[0][2], "1")
         self.assertTrue(fake.did("pr", "create"))
-        self.assertIn("--merge", fake.calls[-1])
         # The branch was reclaimed onto a bump that covers the latest merge.
         tip = subprocess.run(
             ["git", "-C", str(self.origin), "rev-parse", val.BUMP_BRANCH],
@@ -835,7 +832,6 @@ class PrRouteTest(unittest.TestCase):
         self.assertIn("already covers", close[0][-1])
         self.assertIn("macos", close[0][-1])
         self.assertTrue(fake.did("pr", "create"))
-        self.assertIn("--merge", fake.calls[-1])
         tip = subprocess.run(
             ["git", "-C", str(self.origin), "rev-parse", val.BUMP_BRANCH],
             capture_output=True, text=True, encoding="utf-8",
@@ -862,7 +858,7 @@ class PrRouteTest(unittest.TestCase):
                 self.assertEqual(status, "pending")
                 self.assertFalse(fake.did("pr", "close"))
                 self.assertFalse(fake.did("pr", "create"))
-                self.assertTrue(fake.did("pr", "merge"))
+                self.assertFalse(fake.did("pr", "merge"))
 
     def test_heal_keeps_a_never_queued_stale_bump_pr(self) -> None:
         """A stale bump PR that was never in the merge queue is not "ejected".
@@ -880,7 +876,7 @@ class PrRouteTest(unittest.TestCase):
 
     def test_heal_is_off_by_default(self) -> None:
         """Without the opt-in the ejected PR is left alone (stale-defer)."""
-        fake = _FakeGh(open_prs=1, covers=False, armed=False)
+        fake = _FakeGh(open_prs=1, covers=False, armed=False, hold=True)
         val._gh = fake
         status, _ = val.apply_via_pr(self.clone, self._cfg())
         self.assertEqual(status, "stale-defer")
@@ -906,7 +902,6 @@ class PrRouteTest(unittest.TestCase):
         self.assertEqual([c[2] for c in close], ["1"])
         self.assertIn("macos", close[0][-1])
         self.assertTrue(fake.did("pr", "create"))
-        self.assertIn("--merge", fake.calls[-1])
         tip = subprocess.run(
             ["git", "-C", str(self.origin), "rev-parse", val.BUMP_BRANCH],
             capture_output=True, text=True, check=True).stdout.strip()
@@ -926,7 +921,7 @@ class PrRouteTest(unittest.TestCase):
     def test_heal_replaces_an_unarmed_stale_bump_pr(self) -> None:
         self._push_stale_bump_branch()
         fake = _FakeGh(open_prs_seq=[1, 0], covers=False, armed=False,
-                       checks=[_check("macos", None)])
+                       checks=[_check("macos", None)], hold=True)
         val._gh = fake
         status, plan = val.apply_via_pr(self.clone, self._cfg(), heal_stale=True)
         self.assertEqual(status, "pr-opened", plan)
@@ -965,7 +960,7 @@ class PrRouteTest(unittest.TestCase):
         self.assertEqual(status, "pending")
         self.assertFalse(fake.did("pr", "close"))
         self.assertFalse(fake.did("pr", "create"))
-        self.assertTrue(fake.did("pr", "merge"))
+        self.assertFalse(fake.did("pr", "merge"))
 
     def test_heal_never_closes_a_queued_or_draft_or_unknown_pr(self) -> None:
         """In the merge queue it is waited for; a draft or unreadable state
@@ -1018,8 +1013,18 @@ class PrRouteTest(unittest.TestCase):
         self.assertEqual(status, "stale-defer")
         self.assertFalse(fake.did("pr", "close"))
 
+    def test_heal_keeps_an_unarmed_unreviewed_stale_bump_pr(self) -> None:
+        """A fresh bump PR is unarmed until the steward admits it. Heal must
+        wait for review, never close and recut it."""
+        fake = _FakeGh(open_prs=1, covers=False, armed=False)
+        val._gh = fake
+        status, _ = val.apply_via_pr(self.clone, self._cfg(), heal_stale=True)
+        self.assertEqual(status, "stale-wait")
+        self.assertFalse(fake.did("pr", "close"))
+        self.assertFalse(fake.did("pr", "create"))
+
     def test_heal_close_failure_stays_red_and_opens_nothing(self) -> None:
-        fake = _FakeGh(open_prs=1, covers=False, armed=False, close_rc=1)
+        fake = _FakeGh(open_prs=1, covers=False, armed=False, close_rc=1, hold=True)
         val._gh = fake
         status, _ = val.apply_via_pr(self.clone, self._cfg(), heal_stale=True)
         self.assertEqual(status, "stale-defer")
@@ -1126,16 +1131,17 @@ class PrRouteTest(unittest.TestCase):
         val._gh = fake
         status, _ = val.apply_via_pr(self.clone, self._cfg())
         self.assertEqual(status, "pending")
-        self.assertTrue(fake.did("pr", "merge"))  # re-armed the rival PR
+        self.assertFalse(fake.did("pr", "merge"))  # never armed the rival PR
 
-    def test_pr_route_arm_failed_surfaces_when_merge_fails(self) -> None:
-        # Arming auto-merge fails → return an error status (run goes red +
-        # retries), NOT a false "pr-opened" that would wedge the drain forever.
+    def test_pr_route_never_calls_merge_even_if_it_would_fail(self) -> None:
+        # No arm call exists on the pr route, so a failing `gh pr merge` cannot
+        # turn a freshly opened bump PR into an error.
         fake = _FakeGh(open_prs=0, merge_rc=1)
         val._gh = fake
         status, _ = val.apply_via_pr(self.clone, self._cfg())
-        self.assertEqual(status, "arm-failed")
-        self.assertTrue(fake.did("pr", "create"))  # the PR IS open (retriable)
+        self.assertEqual(status, "pr-opened")
+        self.assertTrue(fake.did("pr", "create"))
+        self.assertFalse(fake.did("pr", "merge"))
 
     def test_pr_route_no_clobber_when_pr_appears_after_lock_check(self) -> None:
         # The concurrent race: a queued bump PR's head already sits on the
@@ -1162,7 +1168,7 @@ class PrRouteTest(unittest.TestCase):
             capture_output=True, text=True, check=True).stdout.strip()
         self.assertEqual(origin_sha, queued_sha,
                          "clobbered the queued bump PR head with a force-push")
-        self.assertTrue(fake.did("pr", "merge"))  # re-armed theirs
+        self.assertFalse(fake.did("pr", "merge"))  # never armed theirs
 
     def test_pr_route_unknown_pr_state_never_forces(self) -> None:
         # A divergent branch exists, but the PR lookup ERRORS (unknown state).
@@ -1200,14 +1206,12 @@ class PrRouteTest(unittest.TestCase):
         status, _ = val.apply_via_pr(self.clone, self._cfg())
         self.assertEqual(status, "exhausted")
 
-    def test_pr_route_rearm_failure_on_pending_is_arm_failed(self) -> None:
-        # An open bump PR exists but re-arming its auto-merge fails → surface
-        # "arm-failed" (red run), NOT a green "pending" that would let a
-        # persistently-unarmable PR wedge the drain silently.
+    def test_pr_route_open_bump_pr_is_pending_without_an_arm(self) -> None:
         fake = _FakeGh(open_prs=1, merge_rc=1)
         val._gh = fake
         status, _ = val.apply_via_pr(self.clone, self._cfg())
-        self.assertEqual(status, "arm-failed")
+        self.assertEqual(status, "pending")
+        self.assertFalse(fake.did("pr", "merge"))
 
     def test_pr_route_preserves_draft_hold_and_fails_closed(self) -> None:
         _git(self.clone, "checkout", "-q", "-b", val.BUMP_BRANCH)
@@ -1235,7 +1239,7 @@ class PrRouteTest(unittest.TestCase):
         status2, _ = val.apply_via_pr(self.clone, self._cfg())
         self.assertEqual(status2, "pr-opened")
         self.assertTrue(replacement.did("pr", "create"))
-        self.assertTrue(replacement.did("pr", "merge"))
+        self.assertFalse(replacement.did("pr", "merge"))
         replacement_sha = _git(self.clone, "ls-remote", "origin",
                                val.BUMP_BRANCH).split()[0]
         self.assertNotEqual(replacement_sha, held_sha)
@@ -1444,7 +1448,7 @@ class PrRouteCoalesceTest(unittest.TestCase):
         # Coalescing only gates opening a NEW PR; an open one is still re-armed.
         status, _, fake, _ = self.drain(queue=4, minutes_after=20, open_prs=1)
         self.assertEqual(status, "pending")
-        self.assertTrue(fake.did("pr", "merge"))
+        self.assertFalse(fake.did("pr", "merge"))
 
     def test_coalescing_off_by_default_in_the_function(self) -> None:
         self._land_bump_then_fix()
@@ -1507,7 +1511,7 @@ class BumpPrLivenessTest(unittest.TestCase):
         self.assertEqual(state, "red")
         self.assertIn("macos", reason)
 
-    def _unarmed(self, verdict, *, ejected=False, checks=None):
+    def _unarmed(self, hold, *, ejected=False, checks=None):
         pr = {"state": "OPEN", "isDraft": False, "isInMergeQueue": False,
               "autoMergeRequest": None,
               "timelineItems": _ejection_timeline(ejected),
@@ -1517,46 +1521,63 @@ class BumpPrLivenessTest(unittest.TestCase):
         out = json.dumps({"data": {"repository": {"pullRequest": pr}}})
         val._gh = lambda repo, *a, check=True: subprocess.CompletedProcess(
             a, 0, stdout=out, stderr="")
-        orig = val._review_verdict
-        val._review_verdict = lambda repo, n: verdict
-        self.addCleanup(setattr, val, "_review_verdict", orig)
+        orig = val._head_hold
+        val._head_hold = lambda repo, n: hold
+        self.addCleanup(setattr, val, "_head_hold", orig)
         return val._bump_pr_liveness(Path("."), "1")
 
-    def test_unarmed_but_approved_pr_is_live(self) -> None:
-        state, _ = self._unarmed(("allowed", "the head carries a reviewed marker"))
+    def test_unarmed_unreviewed_pr_is_live(self) -> None:
+        state, _ = self._unarmed(False)
         self.assertEqual(state, "progressing")
 
     def test_unarmed_held_pr_is_dead(self) -> None:
-        state, reason = self._unarmed(("refused", "HOLD at head abc"))
+        state, reason = self._unarmed(True)
         self.assertEqual(state, "dead")
         self.assertIn("HOLD", reason)
 
-    def test_unarmed_unapproved_pr_is_dead(self) -> None:
-        state, _ = self._unarmed(("refused", "no approval"))
-        self.assertEqual(state, "dead")
+    def test_unreadable_hold_state_is_live(self) -> None:
+        state, _ = self._unarmed(None)
+        self.assertEqual(state, "progressing")
 
-    def test_approved_but_ejected_pr_is_dead(self) -> None:
-        state, reason = self._unarmed(("allowed", "ok"), ejected=True)
+    def test_unarmed_ejected_pr_is_dead(self) -> None:
+        state, reason = self._unarmed(False, ejected=True)
         self.assertEqual(state, "dead")
         self.assertIn("ejected", reason)
 
-    def test_approved_but_failed_check_is_red(self) -> None:
-        state, _ = self._unarmed(("allowed", "ok"),
-                                 checks=[_check("macos", "FAILURE")])
+    def test_unarmed_failed_check_is_red(self) -> None:
+        state, _ = self._unarmed(False, checks=[_check("macos", "FAILURE")])
         self.assertEqual(state, "red")
 
-    def test_unreadable_approval_is_live(self) -> None:
-        state, _ = self._unarmed((None, "the review verdict could not be read"))
-        self.assertEqual(state, "progressing")
+    HEAD = "a" * 40
+    OLD = "b" * 40
 
-    def test_review_verdict_reader_fails_open_on_garbage(self) -> None:
-        orig = subprocess.run
-        subprocess.run = lambda *a, **k: subprocess.CompletedProcess(
-            a, 2, stdout="not json", stderr="")
-        try:
-            self.assertIsNone(val._review_verdict(Path("."), "1")[0])
-        finally:
-            subprocess.run = orig
+    def _hold_for(self, comments, *, rc=0, head=None):
+        out = json.dumps({"headRefOid": head or self.HEAD,
+                          "comments": [{"body": b} for b in comments]})
+        val._gh = lambda repo, *a, check=True: subprocess.CompletedProcess(
+            a, rc, stdout=out if rc == 0 else "", stderr="")
+        return val._head_hold(Path("."), "1")
+
+    def test_hold_at_current_head_is_a_hold(self) -> None:
+        self.assertTrue(self._hold_for(
+            [f"findings\n\nverdict: HOLD head:{self.HEAD}"]))
+
+    def test_hold_on_older_head_leaves_current_head_live(self) -> None:
+        self.assertFalse(self._hold_for(
+            [f"findings\n\nverdict: HOLD head:{self.OLD}"]))
+
+    def test_later_approval_at_current_head_clears_a_hold(self) -> None:
+        self.assertFalse(self._hold_for(
+            [f"verdict: HOLD head:{self.HEAD}",
+             f"ok\n\nverdict: APPROVE head:{self.HEAD}"]))
+
+    def test_hold_text_not_on_the_last_line_is_ignored(self) -> None:
+        self.assertFalse(self._hold_for(
+            [f"verdict: HOLD head:{self.HEAD}\nmore prose after it"]))
+
+    def test_unreadable_comments_give_unknown(self) -> None:
+        self.assertIsNone(self._hold_for([], rc=1))
+        self.assertIsNone(self._hold_for([], head="short"))
 
     def test_unknown_or_errored_history_fails_closed(self) -> None:
         for timeline in (_MISSING, None, {"totalCount": 8},

@@ -337,10 +337,11 @@ The bump can land two ways, selected by the `PULP_BUMP_ROUTE` repo variable
   on 2026-07-20 when the queue was briefly enabled.
 
 - **`pr`** (dormant until flipped): `apply_via_pr` pushes the bump to the fixed
-  `release/version-bump` branch, opens a `chore: bump versions` PR, and arms
-  `gh pr merge --auto --merge`, so the bump lands **through the merge queue**
-  (and as a normal auto-merge PR when no queue is enabled — so the route flip
-  and the queue-enable are independent steps). Requirements and invariants:
+  `release/version-bump` branch, opens a `chore: bump versions` PR, and stops.
+  It does not arm auto-merge: the merge steward is the only admission writer,
+  enqueues the PR once it has an exact-head approval and green checks, and its
+  stale-arm sweep would disarm an arm made here. So the bump lands **through the
+  merge queue** like any other PR. Requirements and invariants:
   - **PAT required.** PR-route runs only with `RELEASE_BOT_TOKEN`; a
     `GITHUB_TOKEN`-created PR does not trigger workflows, so its checks never run
     and auto-merge stalls. The workflow fails loudly if the PAT is absent.
@@ -362,19 +363,19 @@ The bump can land two ways, selected by the `PULP_BUMP_ROUTE` repo variable
     the push re-runs the drain, which assesses every first-parent merge after
     the bump's cut point (the marker commit's parent) and skips only the bump's
     own integration merge. So a stale bump PR that is in the merge queue, or
-    armed with its required checks pending or green, is waited for
+    unheld with its required checks pending or green, is waited for
     (`stale-wait`, exit 0 with a `::notice::` naming the PR). Closing it would
     restart 8 to 36 minutes of checks, long enough for the next main push to
     stale its replacement too.
   - **Dead-end bump PR.** A stale bump PR that was ejected from the merge
-    queue, has a failed required check, or is neither armed nor approved at its
-    head never lands. Nobody arms PRs under the steward admission model (the
-    steward enqueues an approved, green head itself every few minutes), so an
-    unarmed PR is LIVE when it is in the queue, is armed, or its current head
-    has a counted exact-head approval (`shipyard review-verdict` returns
-    allowed) with required checks green or pending. An unreadable approval is
-    treated as live; a HOLD at the head, an ejection, or a failed required check
-    makes it dead. With the
+    queue, has a failed required check, or carries a reviewer HOLD at its current
+    head never lands. Nobody arms PRs under the steward admission model, so an
+    unarmed PR is not a dead end: it is waiting for review or for the steward's
+    next pass and is LIVE. It is dead only when it was ejected from the queue,
+    a required check on its head failed, or the last line of a PR comment is
+    `verdict: HOLD head:<sha>` with the sha equal to the current head. A HOLD on
+    an older head leaves the current head unreviewed, which is live. Comments
+    that cannot be read never make a PR dead. With the
     `PULP_BUMP_HEAL_STALE_PR=true` repo variable (default off) the drain closes
     it, opens a fresh bump covering the whole range, and reclaims the branch
     through the normal confirmed-no-PR `--force-with-lease` path. It acts only on
@@ -384,7 +385,7 @@ The bump can land two ways, selected by the `PULP_BUMP_ROUTE` repo variable
     (failure, cancelled, timed out) is a dead end too: re-arming it would wait
     for nothing until main moved. With the same variable the drain closes it
     and regenerates the bump; a covering PR in the merge queue, or one whose
-    checks are pending, green or unreadable, is re-armed and never closed.
+    checks are pending, green or unreadable, is kept and never closed.
     The workflow also runs on the bump PR's `dequeued` event and on a non-green
     completion of a workflow reporting its required checks (`workflow_run`,
     scoped to `release/version-bump`), so a dead end is healed when it dies
@@ -401,7 +402,7 @@ The bump can land two ways, selected by the `PULP_BUMP_ROUTE` repo variable
     with `release_now: true`. The `*/15` scheduled drain makes sure the window
     ending is acted on. A fact the drain cannot read (the merge queue, or the
     time of the last landing) never holds the bump; it opens as it did before
-    coalescing. An already-open bump PR is not affected: it is re-armed, waited
+    coalescing. An already-open bump PR is not affected: it is waited
     for or healed exactly as described above. The predicate is
     `coalesce_decision` in `version_at_land.py`, covered by
     `test_version_at_land.py` (`CoalesceDecisionTest`,

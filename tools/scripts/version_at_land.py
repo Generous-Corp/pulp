@@ -46,6 +46,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+import re
 import fnmatch
 import os
 import subprocess
@@ -906,23 +907,37 @@ def _failed_required_check(contexts: list[dict]) -> str | None:
     return None
 
 
-def _review_verdict(repo: Path, number: str) -> tuple[str | None, str]:
-    """The merge steward's reading of the bump PR's CURRENT head, via
-    `shipyard review-verdict`: `("allowed", reason)` for a counted exact-head
-    approval, `("refused", reason)` when it is refused (no approval, or a HOLD),
-    `(None, reason)` when the answer cannot be read (no CLI, bad output, exit 2)."""
+_VERDICT_LAST_LINE = re.compile(
+    r"^\s*verdict:\s*(APPROVE|HOLD)\s+head:\s*([0-9a-f]{40})\s*$", re.I)
+
+
+def _head_hold(repo: Path, number: str) -> bool | None:
+    """Does the bump PR's CURRENT head carry an explicit reviewer HOLD?
+
+    A review comment ends with `verdict: HOLD head:<sha>` or `verdict: APPROVE
+    head:<sha>`. Only a verdict whose sha equals the current head counts, and
+    the newest such comment decides, so a HOLD on an older head leaves the
+    current head unreviewed (live). `None` when the comments cannot be read."""
+    res = _gh(repo, "pr", "view", number, "--json", "comments,headRefOid",
+              check=False)
+    if res.returncode != 0:
+        return None
     try:
-        res = subprocess.run(
-            ["shipyard", "review-verdict", "--pr", number, "--json"],
-            cwd=repo, capture_output=True, text=True, encoding="utf-8",
-            timeout=60, check=False)
-        verdict = (json.loads(res.stdout or "{}") or {}).get("verdict") or {}
-        state = verdict.get("verdict")
-    except (OSError, subprocess.SubprocessError, ValueError, AttributeError):
-        return None, "the review verdict could not be read"
-    if res.returncode not in (0, 1) or state not in ("allowed", "refused"):
-        return None, "the review verdict could not be read"
-    return state, str(verdict.get("reason") or "")
+        data = json.loads(res.stdout or "{}") or {}
+        head = str(data.get("headRefOid") or "").lower()
+        comments = data.get("comments")
+        if len(head) != 40 or not isinstance(comments, list):
+            return None
+        latest = None
+        for c in comments:
+            lines = [ln for ln in str((c or {}).get("body") or "").splitlines()
+                     if ln.strip()]
+            m = _VERDICT_LAST_LINE.match(lines[-1]) if lines else None
+            if m and m.group(2).lower() == head:
+                latest = m.group(1).upper()
+    except (ValueError, AttributeError, TypeError):
+        return None
+    return latest == "HOLD"
 
 
 def _bump_pr_liveness(repo: Path, number: str) -> tuple[str | None, str]:
@@ -930,17 +945,17 @@ def _bump_pr_liveness(repo: Path, number: str) -> tuple[str | None, str]:
 
     `"draft"`       — an explicit release hold its owner must resolve.
     `"queued"`      — a merge group holds it; it may still land.
-    `"progressing"` — armed for auto-merge, never ejected from the merge queue,
-                      and no required check on its head has failed: its checks
-                      are pending or green, so it will enqueue on its own.
+    `"progressing"` — never ejected from the merge queue, not held, and no
+                      required check on its head has failed: its checks are
+                      pending or green, so the steward will admit it.
     `"red"`         — it cannot land: a required check on its head failed (the
                       newest run concluded failure, cancelled, timed out, ...).
                       Reported ahead of an ejection or a missing arm, so a
                       caller can tell a red head from any other dead end.
-    `"dead"`        — it cannot land: ejected from the merge queue, or neither
-                      armed nor approved at its head (or held). An unarmed PR
-                      with a counted exact-head approval is `"progressing"`.
-                      `reason` says which.
+    `"dead"`        — it cannot land: ejected from the merge queue, or its
+                      head carries an explicit reviewer HOLD. `reason` says
+                      which. An unarmed, unheld PR is `"progressing"`: the merge
+                      steward admits approved green heads, nobody arms them.
     `None`          — unknown (query failed or the answer was incomplete);
                       never read as replaceable.
 
@@ -990,25 +1005,18 @@ def _bump_pr_liveness(repo: Path, number: str) -> tuple[str | None, str]:
         return "dead", "the bump PR was ejected from the merge queue"
     if pr.get("autoMergeRequest") is None:
         # Nobody arms PRs under the steward admission model: the steward
-        # enqueues an approved, green head itself on its next pass. So an
-        # unarmed PR is live while its current head carries a counted
-        # exact-head approval (and no HOLD), and an unreadable approval is
-        # never read as dead: recutting is the expensive action.
-        verdict, why = _review_verdict(repo, number)
-        if verdict is None:
-            return "progressing", f"{why}; the bump PR is kept"
-        if verdict != "allowed" or "hold" in why.lower():
-            return "dead", ("the bump PR carries a HOLD at its head"
-                            if "hold" in why.lower()
-                            else "the bump PR is not armed and has no counted approval")
-        return "progressing", ("the bump PR has an exact-head approval and "
-                               "awaits the merge steward")
+        # enqueues an approved, green head itself, and its sweep disarms any
+        # arm. So an unarmed PR is waiting for review or admission and is live
+        # unless its current head carries an explicit HOLD. An unreadable
+        # comment list is never read as dead: recutting is the expensive action.
+        if _head_hold(repo, number) is True:
+            return "dead", "the bump PR carries a HOLD at its head"
     if rollup is None:
         # No check has reported on the head yet: the checks are still starting.
         return "progressing", "the bump PR checks have not reported yet"
     if not complete:
         return None, "the bump PR check list is incomplete"
-    return "progressing", "the bump PR is armed with its required checks pending or green"
+    return "progressing", "the bump PR awaits review or admission with its required checks pending or green"
 
 
 def _close_stale_bump_pr(repo: Path, number: str, head: str, reason: str,
@@ -1077,11 +1085,9 @@ def _is_non_ff_rejection(detail: str) -> bool:
 
 
 def _arm_auto_merge(repo: Path, ref: str) -> bool:
-    """Arm GitHub-native auto-merge with `--merge` (NEVER `--squash`: the repo
-    contract, .agents/contract.toml, requires `--merge` so the bump-marker
-    commit is preserved and does not trip an auto-release false alarm).
-    Idempotent — re-arming an already-armed PR is a safe no-op, so any drain
-    that finds an open-but-unarmed bump PR self-heals it. Drafts fail closed:
+    """Confirm the bump PR is ready for the merge steward to admit. Despite the
+    name it no longer arms auto-merge (see the comment at the end). A confirmed
+    non-draft PR returns True. Drafts fail closed:
     they are an explicit release hold and must be closed or made ready by their
     owner before a replacement may be generated. Returns success."""
     draft = _gh(repo, "pr", "view", ref, "--json", "isDraft",
@@ -1098,11 +1104,9 @@ def _arm_auto_merge(repo: Path, ref: str) -> bool:
         sys.stderr.write(f"version-at-land: unknown draft state for {ref}; "
                          "refusing to arm auto-merge.\n")
         return False
-    res = _gh(repo, "pr", "merge", ref, "--auto", "--merge", check=False)
-    if res.returncode != 0:
-        sys.stderr.write(f"version-at-land: arming auto-merge on {ref} failed "
-                         f"(exit {res.returncode}).\n{res.stderr or ''}\n")
-        return False
+    # Deliberately no `gh pr merge --auto`: the merge steward is the only
+    # admission writer. It enqueues an approved, green head itself, and its
+    # stale-arm sweep disarms any arm made here and labels the PR unmanaged.
     return True
 
 
@@ -1166,9 +1170,9 @@ def apply_via_pr(
         "no open PR" (an errored/unknown lookup fails closed), and even then via
         an EXPLICIT `--force-with-lease=<branch>:<observed-sha>` compare-and-swap.
         A live queued PR's head is never overwritten.
-      * Wedge-free — a failed auto-merge arm (initial OR re-arm) returns
-        "arm-failed" (red, retried), never a green defer; any later drain
-        re-arms an open-but-unarmed PR.
+      * No arm — the PR is never armed here: the merge steward is the only
+        admission writer. A draft (explicit hold) still returns "arm-failed"
+        (red, retried), never a green defer.
       * Double-bump — independent of marker survival: a re-drained landed range
         yields an empty `_strictly_increasing` plan → noop.
     """
@@ -1385,14 +1389,14 @@ def main(argv: list[str]) -> int:
                          "push --ff-only straight to the branch — today's "
                          "behavior, incompatible with a 'Require merge queue' "
                          "rule. 'pr': open a bump PR on a dedicated branch and "
-                         "auto-merge it (routes through the merge queue when one "
-                         "is enabled). The workflow selects this via the "
+                         "leave it for the merge steward to admit through the merge "
+                         "queue. The workflow selects this via the "
                          "PULP_BUMP_ROUTE repo variable; unset ⇒ direct ⇒ no "
                          "behavior change.")
     ap.add_argument("--heal-stale-pr", action="store_true",
                     help="With --route pr: when the open bump PR was cut before "
                          "this merge AND is a dead end (ejected from the merge "
-                         "queue, not armed, or a required check failed), close "
+                         "queue, held at its head, or a required check failed), close "
                          "it and open a fresh bump instead of failing "
                          "stale-defer. A stale PR still able to land is kept "
                          "either way. The workflow enables this via the "
