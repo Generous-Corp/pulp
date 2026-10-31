@@ -74,3 +74,8 @@ and `ImuReplay`. It demonstrates that roll, pitch, and yaw from one sensor
 update share a sequence and expire together. These fields are example-owned and
 do not define a Pulp orientation schema; a production adapter can choose its
 own frame and publish it through the same existing handoff.
+
+`ModelFrame`, `ModelMapping`, and `ModelReplay` provide the same camera-free
+fixture for a custom model with two related outputs. The model provider owns
+the tensor, runtime, and licensing; it publishes only the application-owned
+outputs needed by the mapping.

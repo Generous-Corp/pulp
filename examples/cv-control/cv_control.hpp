@@ -48,6 +48,17 @@ struct ImuFrame {
     bool valid = false;
 };
 
+/// Example application-owned output from a custom model. The model may be
+/// ONNX, Core ML, LiteRT, or application code; Pulp does not inspect its
+/// tensor or prescribe these output names.
+struct ModelFrame {
+    std::uint64_t sequence = 0;
+    float drive = 0.0f;
+    float blend = 0.0f;
+    float confidence = 0.0f;
+    bool valid = false;
+};
+
 /// This example reserves channel-16 pitch bend as one control packet.
 /// The upper data bit is validity; the other 13 bits carry a normalized value.
 /// MediaPipe's current page reports presence (0/1), not graded confidence.
@@ -195,6 +206,38 @@ class ImuMapping {
     SignalMapping yaw_;
 };
 
+/// Maps two related outputs from one custom-model inference.
+class ModelMapping {
+  public:
+    explicit ModelMapping(float confidence_gate = 0.6f, float smoothing = 0.25f) noexcept
+        : drive_(confidence_gate, smoothing), blend_(confidence_gate, smoothing) {}
+
+    void submit(const ModelFrame& frame) noexcept {
+        const auto sample = [sequence = frame.sequence, confidence = frame.confidence,
+                             valid = frame.valid](float value) noexcept {
+            return ControlSample{sequence, value, confidence, valid};
+        };
+        drive_.submit(sample(frame.drive));
+        blend_.submit(sample(frame.blend));
+    }
+
+    void advance(std::uint64_t samples, std::uint64_t timeout) noexcept {
+        drive_.advance(samples, timeout);
+        blend_.advance(samples, timeout);
+    }
+
+    const SignalMapping& drive() const noexcept {
+        return drive_;
+    }
+    const SignalMapping& blend() const noexcept {
+        return blend_;
+    }
+
+  private:
+    SignalMapping drive_;
+    SignalMapping blend_;
+};
+
 /// Deterministic mock/replay source used by tests and camera-free development.
 /// The provider owns the frame storage; replay only walks one coherent sample
 /// at a time and never touches the audio thread.
@@ -266,6 +309,30 @@ class ImuReplay {
 
   private:
     std::span<const ImuFrame> frames_;
+    std::size_t cursor_ = 0;
+};
+
+/// Deterministic replay for application-owned custom-model outputs.
+class ModelReplay {
+  public:
+    explicit ModelReplay(std::span<const ModelFrame> frames) noexcept : frames_(frames) {}
+
+    bool next(ModelMapping& mapping) noexcept {
+        if (cursor_ >= frames_.size())
+            return false;
+        mapping.submit(frames_[cursor_++]);
+        return true;
+    }
+
+    void reset() noexcept {
+        cursor_ = 0;
+    }
+    std::size_t position() const noexcept {
+        return cursor_;
+    }
+
+  private:
+    std::span<const ModelFrame> frames_;
     std::size_t cursor_ = 0;
 };
 

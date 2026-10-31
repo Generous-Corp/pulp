@@ -18,6 +18,9 @@ using pulp::examples::cv_control::HandReplay;
 using pulp::examples::cv_control::ImuFrame;
 using pulp::examples::cv_control::ImuMapping;
 using pulp::examples::cv_control::ImuReplay;
+using pulp::examples::cv_control::ModelFrame;
+using pulp::examples::cv_control::ModelMapping;
+using pulp::examples::cv_control::ModelReplay;
 
 struct ProcessorFixture {
     pulp::state::StateStore store;
@@ -237,4 +240,21 @@ TEST_CASE("imu loss and malformed orientation values fail closed") {
     REQUIRE_FALSE(mapping.pitch().valid());
     mapping.advance(12000, 12000);
     REQUIRE(mapping.pitch().value() == 0.0f);
+}
+
+TEST_CASE("custom model replay keeps related outputs coherent") {
+    const ModelFrame frames[] = {{21, 0.25f, 0.75f, 1.0f, true}, {22, 0.55f, 0.35f, 1.0f, true}};
+    ModelReplay replay(frames);
+    ModelMapping mapping(0.6f, 1.0f);
+    REQUIRE(replay.next(mapping));
+    REQUIRE(replay.next(mapping));
+    REQUIRE_FALSE(replay.next(mapping));
+    REQUIRE(replay.position() == 2);
+    REQUIRE(mapping.drive().sequence() == 22);
+    REQUIRE(mapping.blend().sequence() == 22);
+    REQUIRE_THAT(mapping.drive().value(), Catch::Matchers::WithinAbs(0.55f, 1e-6f));
+    REQUIRE_THAT(mapping.blend().value(), Catch::Matchers::WithinAbs(0.35f, 1e-6f));
+    mapping.advance(12000, 12000);
+    REQUIRE_FALSE(mapping.drive().valid());
+    REQUIRE_FALSE(mapping.blend().valid());
 }
