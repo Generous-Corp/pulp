@@ -1,17 +1,12 @@
 name: Shipyard merge steward
 
-# Manual diagnostic for the exact-head steward. The admission writer is the
-# local steward tick on the configured mutation machine (m3), whose ghapp path
-# guards and records every arm; this workflow is dry-run unless dispatched with
-# apply. Shipyard re-checks exact-head approval before every enqueue.
+# Read-only diagnostic for the exact-head steward: it reports what the steward
+# would admit and never mutates. The only admission writer is the local
+# steward tick on the configured mutation machine (m3), whose ghapp path guards
+# and records every arm; a dispatchable apply here would be a second, unguarded
+# writer.
 on:
   workflow_dispatch:
-    inputs:
-      apply:
-        description: 'Apply exact-head steward mutations'
-        required: false
-        default: false
-        type: boolean
 
 permissions:
   contents: read
@@ -44,11 +39,11 @@ jobs:
           permission-administration: read
           permission-actions: read
           permission-checks: read
-          permission-contents: write
-          permission-issues: write
-          permission-merge-queues: write
-          permission-pull-requests: write
-          permission-statuses: write
+          permission-contents: read
+          permission-issues: read
+          permission-merge-queues: read
+          permission-pull-requests: read
+          permission-statuses: read
 
       - name: Install pinned Shipyard
         env:
@@ -83,14 +78,10 @@ jobs:
         id: reconcile
         if: steps.configure.outcome == 'success'
         env:
-          APPLY: ${{ inputs.apply }}
           GH_TOKEN: ${{ steps.shipyard-app-token.outputs.token }}
         run: |
           set -euo pipefail
           args=(runner steward --repo "$GITHUB_REPOSITORY" --base main --arm-unqueued --json)
-          if [ "$APPLY" = true ]; then
-            args+=(--apply)
-          fi
           run_steward_with_retry() {
             local attempt status
             for attempt in 1 2 3; do

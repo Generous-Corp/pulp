@@ -7500,16 +7500,24 @@ ship cycles should use Shipyard. `local_ci.py` remains in the repo as
 a fallback but is scheduled for removal after a 2-week observation
 period (see Generous-Corp/pulp#120).
 
-### No repository-wide merge steward
+### One admission writer: the m3 steward tick
 
-Pulp once carried a GitHub-hosted steward workflow
-(`shipyard-merge-steward.yml`) plus a model-driven recovery worker and canary.
-The steward never left manual dispatch, its last runs failed, and the native
-merge queue now does the landing it was built for, so all of it was removed.
-Land a PR by arming auto-merge with `mergeMethod: MERGE`; adopt an orphaned
-Shipyard PR with `shipyard ship --pr <n>`. `[merge_steward] auto_handoff` stays
-`false` and `shipyard pr --workstream-id` stays unused: both write
-`shipyard/steward-handoff` receipts that nothing reads.
+Pulp PRs enter the native merge queue through one writer: a launchd job on m3
+that runs `shipyard runner steward --repo Generous-Corp/pulp --base main
+--arm-unqueued --apply` every five minutes from a config-only sparse clone in
+`~/.local/share/shipyard-steward/`. It enqueues a PR only when its current head
+carries an allowlisted exact-head APPROVE and the required checks are green;
+Shipyard re-reads the approval immediately before each enqueue and fails
+closed. Each pass appends `enqueued=N waiting_approval=M` to
+`~/Library/Logs/shipyard-steward-tick/summary.log`.
+
+- Do not arm or enqueue by hand while the tick runs; post a verdict and let the
+  next pass admit it.
+- `.github/workflows/shipyard-merge-steward.yml` is a read-only diagnostic (no
+  `apply` input). Use it to see what the steward would do, never to admit.
+- A long apply pass holds the steward state lock that tartci's gate-VM
+  admission also takes, so a slow Shipyard starves gate VMs. Keep the tick on a
+  Shipyard with lazy hydration and the approval-first pre-filter.
 
 ### Why your macOS leg routed to `[github-hosted]`, and why re-running did not fix it
 
