@@ -575,6 +575,17 @@ already required the verdict), so making the check required cannot stall the
 queue. Bump the pinned Shipyard `ref` only to a commit that still contains the
 sticky-HOLD rule.
 
+The poster job is named `post-review-verdict`, never `review-verdict`: a
+comment-, `workflow_run`- or `pull_request_target`-triggered check run can attach
+to the default branch's commit, so a same-named job would add a second signal
+(a red mark on main after a HOLD). The status on the exact head is the only
+`review-verdict` signal on a pull request; only the merge-group job shares the
+name, because there the check run is the signal. A `push` to main touching the
+three review-verdict workflows, or a manual `workflow_dispatch`, runs
+`backfill-review-verdict`, which drives the same pinned script for every open
+non-draft PR targeting main, so existing PRs get a current status without a
+push. A refusal is a warning there, not a failed run.
+
 ## A failed batch's branch name is not the culprit
 
 A merge_group batch is NAMED for one pull request but CONTAINS every entry
