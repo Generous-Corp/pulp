@@ -663,8 +663,7 @@ TEST_CASE("canvas patterns hold image paths to the reviewed roots",
         CHECK(pattern(fn, escaped).empty());
         CHECK(pattern(fn, "file://" + escaped).empty());
         CHECK(pattern(fn, "../outside/secret.png").empty());
-        CHECK(pattern(fn, "data:image/png;base64,AAAA") ==
-              "data:image/png;base64,AAAA");
+        CHECK(pattern(fn, "data:image/png;base64,AAAA") == "data:image/png;base64,AAAA");
     }
 
     // Control: the host opt-in admits the outside file.
