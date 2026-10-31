@@ -1096,6 +1096,16 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND TARGET PulpGain_CLAP)
             PULP_TEST_TONE_CLAP_PATH="${CMAKE_BINARY_DIR}/CLAP/PulpTone.clap")
         add_dependencies(pulp-test-host-regression PulpTone_CLAP)
     endif()
+    if(TARGET pulp-test-host-regression AND TARGET PulpGain_VST3)
+        target_compile_definitions(pulp-test-host-regression PRIVATE
+            PULP_TEST_VST3_PATH="${CMAKE_BINARY_DIR}/VST3/PulpGain.vst3")
+        add_dependencies(pulp-test-host-regression PulpGain_VST3)
+    endif()
+    if(TARGET pulp-test-host-regression AND TARGET PulpTone_VST3)
+        target_compile_definitions(pulp-test-host-regression PRIVATE
+            PULP_TEST_TONE_VST3_PATH="${CMAKE_BINARY_DIR}/VST3/PulpTone.vst3")
+        add_dependencies(pulp-test-host-regression PulpTone_VST3)
+    endif()
     # pulp-test-host also loads examples/pulpsynth's CLAP from the build tree.
     if(TARGET pulp-test-host AND TARGET PulpSynth_CLAP)
         target_compile_definitions(pulp-test-host PRIVATE
