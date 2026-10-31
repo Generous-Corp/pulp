@@ -533,6 +533,26 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
             "workflow_dispatch",
             EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON=json.dumps(explicit)), explicit)
 
+    def test_a_bare_hosted_label_in_the_lane_variable_switches_the_lane_off(self) -> None:
+        self.assertEqual(self._windows_runs_on(
+            "workflow_dispatch", LOCAL_WINDOWS_X64_RUNS_ON_JSON="windows-latest"), "windows-2022")
+
+    def test_a_foreign_pool_lane_variable_is_refused_on_a_dispatch(self) -> None:
+        bad = json.dumps(["self-hosted", "macOS", "ARM64", "pulp-gate-fast"])
+        with self.assertRaises(AssertionError):
+            self._matrix("workflow_dispatch", LOCAL_WINDOWS_X64_RUNS_ON_JSON=bad)
+
+    def test_a_pull_request_dispatch_never_reads_the_lane_variable(self) -> None:
+        # The fleet App's merge-ref dispatch carries no Windows leg, so even a
+        # lane variable the selector would refuse must not be evaluated.
+        bad = json.dumps(["self-hosted", "macOS", "ARM64", "pulp-gate-fast"])
+        legs = self._matrix(
+            "workflow_dispatch", DISPATCH_PR_NUMBER="123",
+            LOCAL_WINDOWS_X64_RUNS_ON_JSON=bad)
+        self.assertNotIn("windows", [leg["key"] for leg in legs])
+        self.assertIn("linux", [leg["key"] for leg in legs],
+                      "control: the resolver ran and built a matrix")
+
     def test_workflow_dispatch_reaches_windows_only_by_opting_in(self) -> None:
         """Still reachable on demand, which is how a Windows fix gets verified
         without waiting for the nightly: by the dispatch input, by a local

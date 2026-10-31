@@ -47,6 +47,7 @@ import sys
 from typing import Callable, Optional
 
 LABEL = re.compile(r"^[A-Za-z0-9._-]+$")
+HOSTED_IMAGE = re.compile(r"^windows-[A-Za-z0-9._-]+$")
 # Labels that belong to another OS's pool. Matched case-insensitively against
 # whole labels, and as substrings for capability labels such as
 # pulp-build-linux-x64 or pulp-gate-fast.
@@ -85,6 +86,10 @@ def resolve(raw: str, fallback: str = "windows-latest") -> str:
     raw = raw.strip()
     if not raw:
         return json.dumps(fallback)
+    # A bare hosted image name is accepted as the quoted string it stands for;
+    # a variable set to `windows-latest` is a common way to write the override.
+    if HOSTED_IMAGE.match(raw):
+        raw = json.dumps(raw)
     try:
         value = json.loads(raw)
     except ValueError as exc:

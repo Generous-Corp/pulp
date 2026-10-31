@@ -33,6 +33,12 @@ class ResolveTests(unittest.TestCase):
     def test_macpro_windows_slot_is_accepted_verbatim(self) -> None:
         self.assertEqual(json.loads(selector.resolve(json.dumps(MACPRO_WINDOWS))), MACPRO_WINDOWS)
 
+    def test_a_bare_hosted_image_name_is_accepted_as_the_quoted_label(self) -> None:
+        self.assertEqual(selector.resolve("windows-latest"), '"windows-latest"')
+        self.assertEqual(selector.resolve(" windows-2022 "), '"windows-2022"')
+        with self.assertRaises(selector.SelectorError):
+            selector.resolve("windows-macos")
+
     def test_hosted_windows_image_is_accepted(self) -> None:
         self.assertEqual(selector.resolve('"windows-2022"'), '"windows-2022"')
 

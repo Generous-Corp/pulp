@@ -854,14 +854,24 @@ jobs:
           # the lane off, so a dispatch then runs hosted windows-2022.
           if (
               EVENT_NAME == "workflow_dispatch"
+              and not PR_DISPATCH
               and not os.environ.get("EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON", "").strip()
               and os.environ.get("ALLOW_HOSTED_WINDOWS_VAR", "").strip() != "1"
               and os.environ.get("WORKFLOW_DISPATCH_ALLOW_HOSTED_WINDOWS", "").lower() != "true"
           ):
-              lane_selector = (
-                  os.environ.get("LOCAL_WINDOWS_X64_RUNS_ON_JSON", "").strip()
-                  or json.dumps(["self-hosted", "Windows", "X64", "pulp-build-windows-x64"])
-              )
+              # The lane variable goes through the same screening a dispatch
+              # input gets, so a foreign-pool label never reaches runs-on.
+              sys.path.insert(0, str(WORKSPACE / "tools" / "scripts"))
+              import windows_runner_selector
+              try:
+                  lane_selector = windows_runner_selector.resolve(
+                      os.environ.get("LOCAL_WINDOWS_X64_RUNS_ON_JSON", "").strip()
+                      or json.dumps(windows_runner_selector.DEFAULT_SELF_HOSTED)
+                  )
+              except windows_runner_selector.SelectorError as exc:
+                  sys.exit(
+                      "PULP_LOCAL_WINDOWS_X64_RUNS_ON_JSON refused: " + str(exc)
+                  )
               if lane_selector.startswith("["):
                   os.environ["EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON"] = lane_selector
               else:
