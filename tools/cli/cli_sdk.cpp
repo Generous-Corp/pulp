@@ -442,8 +442,19 @@ fs::path ensure_checkout_sdk(const fs::path& repo_root, const std::string& versi
     std::string configure_cmd =
         "cmake -S " + shell_quote(repo_root.string()) + " -B " + shell_quote(build_dir.string()) +
         " -DCMAKE_BUILD_TYPE=Release" + " -DCMAKE_INSTALL_PREFIX=" + shell_quote(sdk_dir.string()) +
-        " -DPULP_BUILD_TESTS=OFF" + " -DPULP_BUILD_EXAMPLES=OFF" +
-        " -DPULP_ENABLE_AUDIO_PROBES=OFF"
+        // The from-source SDK cache is a developer SDK, not a release
+        // artifact, by decision: it keeps the dev profile
+        // (tools/cmake/PulpProfiles.cmake) so hot reload and the dev bridge
+        // keep working for a project built against it, its stamp records
+        // build_profile "dev", and it passes the stripped set explicitly: no
+        // tests, examples or audio probes, and the shell exec/execAsync JS
+        // bridge compiled out. Do not "harden" this to release:
+        // pulp-test-cli-local-sdk-profile reads this configure out of the
+        // source and fails on it. A release SDK comes only from
+        // release-cli.yml with PULP_PROFILE=release.
+        " -DPULP_PROFILE=dev" + " -DPULP_BUILD_TESTS=OFF" + " -DPULP_BUILD_EXAMPLES=OFF" +
+        " -DPULP_ENABLE_AUDIO_PROBES=OFF" +
+        " -DPULP_DEV_BRIDGE_EXEC=OFF"
         // Disable the standalone visual Cmd+I overlay in this local SDK build.
         // This option does not itself prove endpoint or archive stripping; GPU
         // is disabled separately below.
@@ -452,11 +463,7 @@ fs::path ensure_checkout_sdk(const fs::path& repo_root, const std::string& versi
         // runtime design-import) from the shipped SDK. The runtime W3C token API
         // stays. Re-enable with -DPULP_ENABLE_DESIGN_IMPORT=ON for a plugin that
         // needs runtime design import.
-        + " -DPULP_ENABLE_DESIGN_IMPORT=OFF" +
-        " -DPULP_ENABLE_GPU=OFF"
-        // Tests OFF already implies this, but an installed SDK must never carry
-        // the shell exec/execAsync JS bridge, so say so explicitly.
-        + " -DPULP_DEV_BRIDGE_EXEC=OFF";
+        + " -DPULP_ENABLE_DESIGN_IMPORT=OFF" + " -DPULP_ENABLE_GPU=OFF";
     append_windows_visual_studio_generator_args(configure_cmd);
     if (run_with_spinner(configure_cmd, "Configuring local SDK") != 0) {
         return {};

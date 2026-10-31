@@ -154,7 +154,6 @@
     "tools/cli/version_diag.cpp"
    ],
    "spawning_sources": [
-    "build/tools/cli/generated/migration_index.cpp",
     "tools/cli/cli_common.cpp",
     "tools/cli/cli_delegate.cpp",
     "tools/cli/cli_doctor_helpers.cpp",
@@ -681,6 +680,21 @@
     "tools/cli/package_registry.cpp"
    ],
    "spawns": "declared",
+   "undeclared_sources": []
+  },
+  "pulp-test-cli-local-sdk-profile": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_cli_local_sdk_profile.cpp"
+   ],
+   "inputs": [
+    "tools/cli/cli_sdk.cpp"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/test_cli_local_sdk_profile.cpp",
+    "tools/cli/local_sdk_profile.cpp"
+   ],
    "undeclared_sources": []
   },
   "pulp-test-cli-mac-runtime-validators": {

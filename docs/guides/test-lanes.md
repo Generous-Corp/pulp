@@ -401,8 +401,12 @@ alone would make one runner image's version the contract while `docs-material.ym
 and `docs-deploy.yml` drifted from it. If image drift ever does flip this check,
 pin all three together rather than just this one.
 
-**`control-shipping-native.yml` proves the installed scanner is complete.** After
-`cmake --install` it asserts that `lib/cmake/Pulp/` holds
+**`control-shipping-native.yml` proves the installed scanner is complete.** Its
+SDK producer configures through `-DPULP_PROFILE=release`
+(`tools/cmake/PulpProfiles.cmake`), the same shipped option set `release-cli.yml`
+installs with, so the SDK it scans is the one a release ships rather than a
+hand-picked approximation of it; only the GPU and inspector flags are
+site-specific. After `cmake --install` it asserts that `lib/cmake/Pulp/` holds
 `check_control_shipping_artifact.cmake` together with the two files it reads
 from its own directory, `PulpReleaseArtifactScan.cmake` and
 `release_artifact_forbidden.json` (the one forbidden-marker list every

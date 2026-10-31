@@ -63,6 +63,10 @@ RELEASE_DRY_RUN = REPO_ROOT / ".github" / "workflows" / "release-dry-run.yml"
 RELEASE_PUBLISH = REPO_ROOT / ".github" / "workflows" / "release-publish.yml"
 RELEASE_PATH_PR_GATE = REPO_ROOT / ".github" / "workflows" / "release-path-pr-gate.yml"
 RELEASE_CLI_LOCAL = REPO_ROOT / "tools" / "scripts" / "release-cli-local.sh"
+INSTALL_CONSUMER_SMOKE = REPO_ROOT / ".github" / "workflows" / "install-consumer-smoke.yml"
+CONTROL_SHIPPING_NATIVE = REPO_ROOT / ".github" / "workflows" / "control-shipping-native.yml"
+INTEL_VM_CROSS_BUILD = REPO_ROOT / "tools" / "ci" / "intel-vm-cross-build.sh"
+PULP_PROFILES = REPO_ROOT / "tools" / "cmake" / "PulpProfiles.cmake"
 BUILD_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "build.yml"
 AUTO_RELEASE = REPO_ROOT / ".github" / "workflows" / "auto-release.yml"
 WATCHDOG_REAPER = REPO_ROOT / ".github" / "workflows" / "watchdog-reaper.yml"
@@ -373,13 +377,18 @@ class ReleaseCliLinuxNoWebView(unittest.TestCase):
             self.text,
         )
 
-    def test_cli_and_sdk_build_disable_audio_probes(self) -> None:
+    def test_cli_and_sdk_builds_configure_through_the_release_profile(self) -> None:
+        # One CLI configure plus the Linux and macOS/Windows SDK configures.
         self.assertGreaterEqual(
-            self.text.count("-DPULP_ENABLE_AUDIO_PROBES=OFF"),
-            2,
-            "release-cli.yml must keep audio probes disabled for both the "
-            "CLI and SDK release configure steps.",
+            self.text.count("-DPULP_PROFILE=release"),
+            3,
+            "release-cli.yml must configure the CLI and both SDK release "
+            "steps with -DPULP_PROFILE=release.",
         )
+        # The profile owns these; a copy drifting back here would silently
+        # shadow PulpProfiles.cmake as the source of truth.
+        for option in profile_enforced_options():
+            self.assertNotIn(f"-D{option}=", self.text)
 
     def test_arm64_sdk_exports_gpu_convolution_catalog(self) -> None:
         """The Apple-Silicon GPU SDK must advertise its opt-in host route."""
@@ -566,6 +575,104 @@ class ReleaseCliLinuxNoWebView(unittest.TestCase):
         self.assertIn("authoritative-release-product-matrix.json", guard_block)
 
 
+def profile_enforced_options() -> list[str]:
+    """PULP_PROFILE_ENFORCED_OPTIONS as PulpProfiles.cmake declares it.
+
+    Read from the module rather than copied, so a flag added to the profile
+    is linted at every release site from the same commit.
+    """
+    text = PULP_PROFILES.read_text(encoding="utf-8")
+    match = re.search(r"set\(PULP_PROFILE_ENFORCED_OPTIONS\s+([^)]*)\)", text)
+    assert match, "PulpProfiles.cmake no longer declares PULP_PROFILE_ENFORCED_OPTIONS"
+    options = match.group(1).split()
+    assert options, "PULP_PROFILE_ENFORCED_OPTIONS is empty"
+    return options
+
+
+class EveryReleaseSiteConfiguresThroughTheProfile(unittest.TestCase):
+    """Every configure that ships, or rehearses a shipping configure, passes
+    -DPULP_PROFILE=release and spells none of the profile's enforced options
+    by hand. A hand-picked copy at one site is how the five release sites
+    disagreed with each other before the profile existed; the enforced list
+    is read out of PulpProfiles.cmake so a newly governed option is linted
+    here without a second edit."""
+
+    # Whole-file sites: every `cmake -S` in them is a release configure.
+    WHOLE_FILE_SITES = {
+        "release-cli.yml": RELEASE_CLI,
+        "sign-and-release.yml": SIGN_AND_RELEASE,
+        "release-dry-run.yml": RELEASE_DRY_RUN,
+        "install-consumer-smoke.yml": INSTALL_CONSUMER_SMOKE,
+        "control-shipping-native.yml": CONTROL_SHIPPING_NATIVE,
+        "release-cli-local.sh": RELEASE_CLI_LOCAL,
+        "intel-vm-cross-build.sh": INTEL_VM_CROSS_BUILD,
+    }
+    # release-path-pr-gate.yml also runs development probes in the same job, so
+    # only its release configure step is held to the profile.
+    PR_GATE_RELEASE_STEP = "Configure (CLI, no WebView on Linux, GPU required)"
+    PR_GATE_DEV_PROBE_STEP = "Build mixed Skia/Dawn/V8 provider probe"
+
+    @staticmethod
+    def _step_run(text: str, step_name: str) -> str:
+        pattern = re.compile(
+            r"- name: " + re.escape(step_name) + r"\n(.*?)(?=\n      - name: |\Z)",
+            re.DOTALL,
+        )
+        match = pattern.search(text)
+        assert match, f"could not locate `{step_name}` step"
+        return match.group(1)
+
+    def _sites(self) -> dict[str, str]:
+        sites = {
+            name: path.read_text(encoding="utf-8")
+            for name, path in self.WHOLE_FILE_SITES.items()
+        }
+        gate = RELEASE_PATH_PR_GATE.read_text(encoding="utf-8")
+        sites["release-path-pr-gate.yml#" + self.PR_GATE_RELEASE_STEP] = self._step_run(
+            gate, self.PR_GATE_RELEASE_STEP
+        )
+        return sites
+
+    def test_the_enforced_list_is_read_from_the_module(self) -> None:
+        options = profile_enforced_options()
+        for option in ("PULP_BUILD_TESTS", "PULP_BUILD_EXAMPLES",
+                       "PULP_ENABLE_AUDIO_PROBES", "PULP_DEV_BRIDGE_EXEC",
+                       "PULP_DEV_BUILD"):
+            self.assertIn(option, options)
+
+    def test_every_release_site_passes_the_profile(self) -> None:
+        for name, text in self._sites().items():
+            with self.subTest(site=name):
+                # assertTrue, not assertIn: the latter prints the whole file.
+                self.assertTrue(
+                    "-DPULP_PROFILE=release" in text,
+                    f"{name} must configure through -DPULP_PROFILE=release "
+                    "(tools/cmake/PulpProfiles.cmake) instead of hand-picking "
+                    "the shipped option set.",
+                )
+
+    def test_no_release_site_spells_an_enforced_option_by_hand(self) -> None:
+        options = profile_enforced_options()
+        for name, text in self._sites().items():
+            for option in options:
+                with self.subTest(site=name, option=option):
+                    self.assertFalse(
+                        f"-D{option}=" in text,
+                        f"{name} passes {option} by hand; PULP_PROFILE=release "
+                        "owns it, and a copy here would drift from "
+                        "PulpProfiles.cmake.",
+                    )
+
+    def test_the_pr_gate_dev_probe_leaves_the_release_profile(self) -> None:
+        # The V8 provider probe reconfigures the gate's release build dir with
+        # the examples tree ON. A cached PULP_PROFILE=release refuses that, so
+        # the probe must switch the dir back to the dev profile explicitly.
+        gate = RELEASE_PATH_PR_GATE.read_text(encoding="utf-8")
+        probe = self._step_run(gate, self.PR_GATE_DEV_PROBE_STEP)
+        self.assertIn("-DPULP_PROFILE=dev", probe)
+        self.assertIn("-DPULP_BUILD_EXAMPLES=ON", probe)
+
+
 class BuildWorkflowReleaseGate(unittest.TestCase):
     """build.yml release-path PR gate must match release-cli.yml invariants."""
 
@@ -601,9 +708,11 @@ class BuildWorkflowReleaseGate(unittest.TestCase):
             self.text,
         )
 
-    def test_windows_release_gate_disables_audio_probes(self) -> None:
+    def test_windows_release_gate_configures_through_the_release_profile(self) -> None:
         run_block = self._find_step_run("Configure (matches release-cli.yml)")
-        self.assertIn("-DPULP_ENABLE_AUDIO_PROBES=OFF", run_block)
+        self.assertIn("-DPULP_PROFILE=release", run_block)
+        self.assertNotIn("-DPULP_ENABLE_AUDIO_PROBES=OFF", run_block)
+        self.assertNotIn("-DPULP_BUILD_TESTS=OFF", run_block)
 
     def test_windows_release_gate_keeps_scene3d_off_without_gpu_assets(self) -> None:
         run_block = self._find_step_run("Configure (matches release-cli.yml)")

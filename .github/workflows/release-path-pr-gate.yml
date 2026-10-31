@@ -312,15 +312,15 @@ jobs:
               SCENE3D="-DPULP_ENABLE_SCENE3D=ON"
               ;;
           esac
-          # Examples OFF to match release-cli.yml, whose build and package
-          # steps this gate reproduces.
+          # The release profile (tools/cmake/PulpProfiles.cmake) is the one
+          # statement of the shipped option set release-cli.yml configures
+          # with, whose build and package steps this gate reproduces; the
+          # site-specific inspector, GPU and SCENE3D flags stay beside it.
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DPULP_NODE_RUNTIME_EXECUTABLE="${PULP_NODE_RUNTIME_EXECUTABLE:-}" \
             -DSKIA_DIR="$PWD/external/skia-build" \
-            -DPULP_BUILD_TESTS=OFF \
-            -DPULP_BUILD_EXAMPLES=OFF \
-            -DPULP_ENABLE_AUDIO_PROBES=OFF \
+            -DPULP_PROFILE=release \
             -DPULP_ENABLE_INSPECTOR=ON \
             $REQUIRE_GPU \
             $SCENE3D \
@@ -366,8 +366,14 @@ jobs:
         if: matrix.platform == 'darwin-arm64'
         run: |
           set -euo pipefail
+          # Reconfigures the release build dir as a development probe: the
+          # examples tree (the native three.js demo) must come back ON, which
+          # the cached PULP_PROFILE=release would refuse, so the profile is
+          # switched to dev explicitly. The release artifacts were packaged
+          # from this dir before this step; nothing below ships from it.
           cmake -S . -B build \
             -DSKIA_DIR="$PWD/external/skia-build" \
+            -DPULP_PROFILE=dev \
             -DPULP_BUILD_TESTS=OFF \
             -DPULP_BUILD_EXAMPLES=ON \
             -DPULP_ENABLE_DESIGN_IMPORT=OFF \

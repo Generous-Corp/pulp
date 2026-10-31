@@ -15,6 +15,10 @@ set(PULP_SDK_INSPECTOR_ENABLED "")
 # bridge (`features.bridge_exec` on a release or profile marker, top-level
 # `bridge_exec` on a source install). Empty when the marker predates the key.
 set(PULP_SDK_BRIDGE_EXEC_ENABLED "")
+# The PULP_PROFILE the SDK was configured under (top-level `build_profile` on
+# every marker kind). Empty when the marker predates the key; a release marker
+# that carries it must say `release`.
+set(PULP_SDK_BUILD_PROFILE "")
 
 set(_pulp_sdk_provenance "${PULP_SDK_DIR}/sdk-provenance.json")
 if(EXISTS "${_pulp_sdk_provenance}")
@@ -256,6 +260,26 @@ if(EXISTS "${_pulp_sdk_provenance}")
             "Pulp SDK provenance at ${_pulp_sdk_provenance} has an unknown "
             "or unsafe contract; refusing to consume it.")
     endif()
+    string(JSON _pulp_sdk_build_profile_type ERROR_VARIABLE _pulp_sdk_build_profile_error
+           TYPE "${_pulp_sdk_provenance_json}" build_profile)
+    if(NOT _pulp_sdk_build_profile_error)
+        string(JSON _pulp_sdk_build_profile
+               GET "${_pulp_sdk_provenance_json}" build_profile)
+        if(NOT _pulp_sdk_build_profile_type STREQUAL "STRING" OR
+           NOT _pulp_sdk_build_profile MATCHES "^(dev|release)$")
+            message(FATAL_ERROR
+                "Pulp SDK provenance at ${_pulp_sdk_provenance} has an unknown "
+                "or unsafe contract: build_profile is not dev or release; "
+                "refusing to consume it.")
+        endif()
+        if(_pulp_sdk_kind STREQUAL "release" AND NOT _pulp_sdk_build_profile STREQUAL "release")
+            message(FATAL_ERROR
+                "Pulp SDK provenance at ${_pulp_sdk_provenance} has an unknown "
+                "or unsafe release contract: build_profile is "
+                "${_pulp_sdk_build_profile}, not release; refusing to consume it.")
+        endif()
+        set(PULP_SDK_BUILD_PROFILE "${_pulp_sdk_build_profile}")
+    endif()
     set(PULP_SDK_PROVENANCE_KIND "${_pulp_sdk_kind}")
     set(PULP_SDK_SOURCE_GIT_SHA "${_pulp_sdk_source_sha}")
 endif()
@@ -308,6 +332,8 @@ set(PULP_SDK_AUDIO_PROBES_ENABLED "${PULP_SDK_AUDIO_PROBES_ENABLED}" CACHE INTER
     "Whether the selected SDK was built with audio probes" FORCE)
 set(PULP_SDK_INSPECTOR_ENABLED "${PULP_SDK_INSPECTOR_ENABLED}" CACHE INTERNAL
     "Whether the selected SDK was built with the inspector" FORCE)
+set(PULP_SDK_BUILD_PROFILE "${PULP_SDK_BUILD_PROFILE}" CACHE INTERNAL
+    "PULP_PROFILE the selected SDK was configured under (empty when unrecorded)" FORCE)
 
 unset(_pulp_sdk_provenance)
 unset(_pulp_sdk_provenance_json)
@@ -373,3 +399,6 @@ unset(_pulp_sdk_hash_error)
 unset(_pulp_sdk_integrity_file)
 unset(_pulp_sdk_expected_hash_length)
 unset(_pulp_sdk_actual_hash)
+unset(_pulp_sdk_build_profile)
+unset(_pulp_sdk_build_profile_error)
+unset(_pulp_sdk_build_profile_type)

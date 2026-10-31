@@ -89,15 +89,16 @@ jobs:
 
       - name: Configure (mirrors release-cli.yml)
         run: |
-          # Examples OFF to match release-cli.yml. The Build CLI step below
-          # deliberately builds with no --target, so with examples ON this
-          # job compiled the whole examples tree to package three binaries
-          # (pulp, pulp-cpp, pulp-mcp) that none of it contributes to.
+          # The release profile (tools/cmake/PulpProfiles.cmake) is the one
+          # statement of the shipped option set release-cli.yml configures
+          # with; passing it here keeps this rehearsal from drifting. It also
+          # keeps examples OFF: the Build CLI step below deliberately builds
+          # with no --target, so with examples ON this job compiled the whole
+          # examples tree to package three binaries (pulp, pulp-cpp, pulp-mcp)
+          # that none of it contributes to.
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DPULP_BUILD_TESTS=OFF \
-            -DPULP_BUILD_EXAMPLES=OFF \
-            -DPULP_ENABLE_AUDIO_PROBES=OFF \
+            -DPULP_PROFILE=release \
             -DPULP_ENABLE_SCENE3D=ON \
             -DPULP_NODE_RUNTIME_EXECUTABLE="$PULP_NODE_RUNTIME_EXECUTABLE" \
             -DPULP_REQUIRE_GPU_FOR_SDK=ON \

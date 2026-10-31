@@ -85,6 +85,11 @@ functions:
       - target
     docs: guides/dsp-hot-reload.md
 
+  - name: pulp_profile_validate
+    status: usable
+    summary: Final gate of the PULP_PROFILE contract (tools/cmake/PulpProfiles.cmake). Under PULP_PROFILE=release it refuses the configure when any enforced option is ON, or warns per option and publishes PULP_PROFILE_OVERRIDDEN=ON under PULP_PROFILE_ALLOW_OVERRIDE; it records the profile-neutral options in PULP_PROFILE_NEUTRAL_RECORD. Call once, after the last governed option().
+    docs: guides/build.md
+
   - name: pulp_add_app
     status: partial
     summary: Create a standalone application target with basic metadata.

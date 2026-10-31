@@ -103,7 +103,7 @@ python3 tools/scripts/fetch_skia_for_release.py darwin-x64
 [ "\$(lipo -archs external/skia-build/build/mac-gpu/lib/Release/libskia.a 2>/dev/null)" = "x86_64" ] || { echo "FAIL: skia not x86_64 after clean fetch"; exit 12; }
 env -u SKIA_DIR cmake -S . -B build-x64 -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_OSX_ARCHITECTURES=x86_64 -DPULP_RUST_CLI_TARGET=x86_64-apple-darwin \
-  -DPULP_BUILD_TESTS=OFF -DPULP_ENABLE_AUDIO_PROBES=OFF \
+  -DPULP_PROFILE=release \
   -DPULP_REQUIRE_GPU_FOR_SDK=ON -DPULP_SKIA_AUTOFETCH=ON -DPULP_BUILD_WEBVIEW=ON
 tools/ci/governed-build.sh cmake --build build-x64 --config Release $BUILD_TARGETS
 BIN=build-x64/pulp

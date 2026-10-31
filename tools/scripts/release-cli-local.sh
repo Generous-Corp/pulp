@@ -32,12 +32,12 @@ step() { echo ""; echo "── $* ──"; }
 
 step "Building macOS arm64"
 
+# -DPULP_PROFILE=release is the one statement of the shipped option set
+# (tools/cmake/PulpProfiles.cmake); site-specific flags stay beside it.
 cmake -S "$REPO_ROOT" -B "$MAC_BUILD_DIR" \
     -DCMAKE_BUILD_TYPE=Release \
-    -DPULP_BUILD_TESTS=OFF \
+    -DPULP_PROFILE=release \
     -DPULP_ENABLE_SCENE3D=ON \
-    -DPULP_ENABLE_AUDIO_PROBES=OFF \
-    -DPULP_DEV_BRIDGE_EXEC=OFF \
     -DPULP_BUILD_WEBVIEW=ON
 bash "$REPO_ROOT/tools/ci/governed-build.sh" cmake --build "$MAC_BUILD_DIR" --target pulp-cli --config Release
 if [ ! -f "$MAC_BUILD_DIR/tools/cli/pulp" ]; then
@@ -58,10 +58,8 @@ SDK_STAGING="$DIST_DIR/pulp-sdk-staging"
 rm -rf "$SDK_STAGING"
 cmake -S "$REPO_ROOT" -B "$MAC_SDK_BUILD_DIR" \
     -DCMAKE_BUILD_TYPE=Release \
-    -DPULP_BUILD_TESTS=OFF \
+    -DPULP_PROFILE=release \
     -DPULP_ENABLE_SCENE3D=OFF \
-    -DPULP_ENABLE_AUDIO_PROBES=OFF \
-    -DPULP_DEV_BRIDGE_EXEC=OFF \
     -DPULP_BUILD_WEBVIEW=ON
 bash "$REPO_ROOT/tools/ci/governed-build.sh" cmake --build "$MAC_SDK_BUILD_DIR" --config Release
 cmake --install "$MAC_SDK_BUILD_DIR" --prefix "$SDK_STAGING" --config Release
@@ -94,9 +92,7 @@ if ssh -o ConnectTimeout=5 -o BatchMode=yes ubuntu "echo ok" &>/dev/null; then
     # with the GitHub release workflow.
     ssh ubuntu "cd ~/pulp && \
         cmake -S . -B build-cli -DCMAKE_BUILD_TYPE=Release \
-            -DPULP_BUILD_TESTS=OFF -DPULP_ENABLE_GPU=OFF \
-            -DPULP_ENABLE_AUDIO_PROBES=OFF \
-    -DPULP_DEV_BRIDGE_EXEC=OFF \
+            -DPULP_PROFILE=release -DPULP_ENABLE_GPU=OFF \
             -DPULP_BUILD_WEBVIEW=ON"
 
     # Build
@@ -127,7 +123,7 @@ if ssh -o ConnectTimeout=5 -o BatchMode=yes win2 "echo ok" &>/dev/null; then
             --exclude='dist' --exclude='planning' \
             "$REPO_ROOT/" win2:~/pulp/
 
-        ssh win2 "cd ~/pulp && cmake -S . -B build-cli -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF -DPULP_ENABLE_GPU=OFF -DPULP_ENABLE_AUDIO_PROBES=OFF -DPULP_BUILD_WEBVIEW=ON"
+        ssh win2 "cd ~/pulp && cmake -S . -B build-cli -DCMAKE_BUILD_TYPE=Release -DPULP_PROFILE=release -DPULP_ENABLE_GPU=OFF -DPULP_BUILD_WEBVIEW=ON"
         ssh win2 "cd ~/pulp && bash tools/ci/governed-build.sh cmake --build build-cli --target pulp-cli --config Release"
 
         if ssh win2 "if exist ~/pulp/build-cli/tools/cli/Release/pulp.exe (echo ok)" | grep -q ok; then

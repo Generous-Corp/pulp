@@ -179,8 +179,9 @@ class SharedAudioSdkRecipe(unittest.TestCase):
                 for name in ("EXACT_PROVIDER_PROOF", "ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER"):
                     self.assertIn(f"-DPULP_GPU_AUDIO_{name}={state}", args)
                     self.assertEqual(sum(arg.startswith(f"-DPULP_GPU_AUDIO_{name}=") for arg in args), 1)
-                self.assertIn("-DPULP_ENABLE_AUDIO_PROBES=OFF", args)
-                self.assertIn("-DPULP_BUILD_TESTS=OFF", args)
+                self.assertIn("-DPULP_PROFILE=release", args)
+                self.assertNotIn("-DPULP_ENABLE_AUDIO_PROBES=OFF", args)
+                self.assertNotIn("-DPULP_BUILD_TESTS=OFF", args)
                 self.assertIn("-DPULP_REQUIRE_GPU_FOR_SDK=ON", args)
 
 
