@@ -774,7 +774,8 @@ class PrRouteTest(unittest.TestCase):
     def _tip(self) -> str:
         return subprocess.run(
             ["git", "-C", str(self.origin), "rev-parse", val.BUMP_BRANCH],
-            capture_output=True, text=True, check=True).stdout.strip()
+            capture_output=True, text=True, encoding="utf-8",
+            check=True).stdout.strip()
 
     def _assert_repaired_in_place(self, fake, before: str) -> None:
         """The standing PR kept its number and got a new head: nothing was
@@ -1325,7 +1326,7 @@ class StandingBumpPrTest(unittest.TestCase):
         return int(subprocess.run(
             ["git", "-C", str(self.origin), "log", "-1", "--format=%ct",
              val.BUMP_BRANCH], capture_output=True, text=True,
-            check=True).stdout.strip())
+            encoding="utf-8", check=True).stdout.strip())
 
     def test_one_pr_covers_several_landings_updated_in_place(self) -> None:
         calls: list[tuple[str, ...]] = []
