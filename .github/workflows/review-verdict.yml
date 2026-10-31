@@ -107,20 +107,34 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PYTHON: ${{ steps.python.outputs.python-path }}
-          GITHUB_EVENT_NAME: pull_request_target
         run: |
           set -u
           numbers=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls?state=open&base=main&per_page=100" \
             --jq '.[] | select(.draft == false) | .number')
           dir=$(mktemp -d)
           total=0
+          posted=0
           unsettled=0
           for number in $numbers; do
             total=$((total + 1))
             printf '{"pull_request":{"number":%s}}' "$number" > "$dir/event.json"
-            if ! GITHUB_EVENT_PATH="$dir/event.json" "$PYTHON" scripts/review_verdict_status.py; then
+            # Inline assignment: GitHub ignores a step-level env override of its
+            # default GITHUB_* variables, so the script would see push or
+            # workflow_dispatch and post nothing.
+            rc=0
+            GITHUB_EVENT_NAME=pull_request_target GITHUB_EVENT_PATH="$dir/event.json" \
+              "$PYTHON" scripts/review_verdict_status.py > "$dir/out.txt" 2>&1 || rc=$?
+            cat "$dir/out.txt"
+            if grep -Eq '^review-verdict: (success|failure) on [0-9a-f]{40}$' "$dir/out.txt"; then
+              posted=$((posted + 1))
+            fi
+            if [ "$rc" -ne 0 ]; then
               echo "::warning::review-verdict for PR #${number} is refused or could not be posted"
               unsettled=$((unsettled + 1))
             fi
           done
-          echo "backfilled ${total} open pull requests (${unsettled} refused or unposted)"
+          echo "found ${total} open pull requests; posted ${posted} statuses (${unsettled} refused or errored)"
+          if [ "$total" -gt 0 ] && [ "$posted" -ne "$total" ]; then
+            echo "::error::posted ${posted} statuses for ${total} open pull requests"
+            exit 1
+          fi
