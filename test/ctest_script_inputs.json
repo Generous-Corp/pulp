@@ -154,7 +154,6 @@
     "tools/cli/version_diag.cpp"
    ],
    "spawning_sources": [
-    "build/tools/cli/generated/migration_index.cpp",
     "tools/cli/cli_common.cpp",
     "tools/cli/cli_delegate.cpp",
     "tools/cli/cli_doctor_helpers.cpp",
