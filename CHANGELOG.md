@@ -9,6 +9,21 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1360"></a>
+## [1.36.0] - 2026-10-31
+
+- release/version bump ([#11303](https://github.com/Generous-Corp/pulp/pull/11303))
+- fix/11248 channel binding ([#11270](https://github.com/Generous-Corp/pulp/pull/11270))
+- fix/windowhost standalone registration 20261030 ([#11292](https://github.com/Generous-Corp/pulp/pull/11292))
+- chore/release writer guard ([#11275](https://github.com/Generous-Corp/pulp/pull/11275))
+- ci/local steward single writer ([#11299](https://github.com/Generous-Corp/pulp/pull/11299))
+- codex/gpu audio inventory followup 20261030 ([#11291](https://github.com/Generous-Corp/pulp/pull/11291))
+- release/version bump ([#11289](https://github.com/Generous-Corp/pulp/pull/11289))
+- codex/r7 positive controls 20261030 ([#11286](https://github.com/Generous-Corp/pulp/pull/11286))
+- codex/gpu audio daw receipt extraction 20261030 ([#11287](https://github.com/Generous-Corp/pulp/pull/11287))
+- feature/cv vertical slice 20261029 ([#11280](https://github.com/Generous-Corp/pulp/pull/11280))
+- fix/steward review retry ([#11278](https://github.com/Generous-Corp/pulp/pull/11278))
+
 <a id="v1351"></a>
 ## [1.35.1] - 2026-10-30
 
@@ -11912,6 +11927,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.36.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.36.0
 [1.35.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.35.1
 [1.35.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.35.0
 [1.34.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.34.0
