@@ -11249,6 +11249,17 @@ Key facts:
   `tools/scripts/bump_fastpath_report.py` (weekly in `bump-fastpath-weekly.yml`)
   counts them. Read that count before changing the verifier, so a fix targets
   the refusal that actually happens.
+- **The exact projection refuses a bump it cannot reproduce byte for byte.**
+  Over 3 days (2026-10-27..30) 37 of 42 bump runs were taken; the 5 refusals
+  cost about 100 `macos` gate-minutes (a migration note added or removed, a group
+  already carrying an earlier queue entry, a moved base). The verifier now has a
+  second pass, `--allowlist-diff`, run only after the exact pass refuses: the same
+  signed single-commit bump must carry the `Version-Bump-Applied:` marker, and its
+  diff and the event's own diff must sit inside the protected base's
+  `writer_allowed_globs` (`version_at_land.paths_outside_writer_allowlist`, the
+  list the writer checks itself against). A group that batches the bump with any
+  other change leaves the allowlist and runs the full suite. A moved base that
+  resolves no trusted verifier is still refused.
 - **Advisory workflows skip the bump.** `coverage.yml`,
   `control-shipping-native.yml`, `examples-validation.yml` and
   `intel-portability.yml` AND `github.head_ref != 'release/version-bump'` into
