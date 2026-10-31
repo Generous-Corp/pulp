@@ -1,0 +1,19 @@
+# A review event runs the pull request's own copy of its workflow, so this one
+# does nothing and holds no permissions. Its completion starts "Review
+# verdict" through workflow_run, which runs the default branch's definition.
+# See Shipyard's docs/review-verdict-status.md.
+name: Review verdict trigger
+
+on:
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+
+permissions: {}
+
+jobs:
+  trigger:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 1
+    steps:
+      - name: Hand the review to Review verdict
+        run: 'true'

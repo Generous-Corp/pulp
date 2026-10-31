@@ -1,0 +1,63 @@
+# Posts the `review-verdict` commit status on each pull request's head: the
+# repository-side twin of Shipyard's review-before-arm guard, which only sees
+# landings sent through ghapp. GitHub-native auto-merge armed before a HOLD
+# never reaches that guard; a required review-verdict status would stop it.
+#
+# The job is also the `review-verdict` check run and fails unless the head is
+# allowed (the pinned script exits non-zero on a refusal or any read error),
+# so a required check cannot be green on a refused head. The rule runs from a
+# pinned Shipyard commit, never from the pull request's code, on triggers that
+# all run the default branch's definition of this file. See Shipyard's
+# docs/review-verdict-status.md.
+name: Review verdict
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+  issue_comment:
+    types: [created, edited, deleted]
+  workflow_run:
+    workflows: [Review verdict trigger]
+    types: [completed]
+
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: write
+  # The script re-runs the head's own run when a comment or review changes the
+  # verdict, so the head's check run follows it without a new push.
+  actions: write
+
+# One group per pull request on every path, so a review's run and a comment's
+# run queue behind each other; a fork's review lists no pull request and
+# falls back to its head.
+concurrency:
+  group: review-verdict-${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  review-verdict:
+    name: review-verdict
+    if: github.event_name != 'issue_comment' || github.event.issue.pull_request
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out the pinned rule
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: danielraffel/Shipyard
+          # Shipyard main at the merge of PR 1086 (a counted HOLD is sticky
+          # for its head, so a later APPROVE from another session cannot
+          # clear it), on top of PR 1068 (fail the check when the verdict is
+          # not allowed and re-run the head's check on a verdict comment).
+          ref: e7dc77e866a63ba829aaac0daa0abdbbae374468
+          persist-credentials: false
+      - name: Set up Python
+        id: python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.12.12'
+      - name: Post review-verdict
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: '"${{ steps.python.outputs.python-path }}" scripts/review_verdict_status.py'
