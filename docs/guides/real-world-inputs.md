@@ -174,12 +174,88 @@ These snippets are provider recipes, not a new Pulp sensor subsystem. A mobile
 plugin that cannot access the sensor permission can receive the same frames
 from its containing app or an external process over an existing transport.
 
+### Native camera and custom-model adapters
+
+Desktop applications can keep camera capture and inference in an optional
+provider target. The application-owned output is the only part shared with the
+Pulp consumer:
+
+```cpp
+// Optional application target; OpenCV is not a Pulp dependency.
+cv::VideoCapture camera(0);
+cv::Mat frame;
+std::uint64_t sequence = 0;
+while (camera.read(frame)) {
+    const auto result = face_provider.infer(frame); // MediaPipe/OpenCV/custom code
+    publish(FaceFrame{
+        .sequence = ++sequence,
+        .mouth_open = result.mouth_open,
+        .confidence = result.confidence,
+        .tracked = result.tracked,
+    }); // TripleBuffer, OSC/IPC, or another existing handoff
+}
+```
+
+For a custom ONNX model, keep the runtime and model package in the application
+or an external process. The inference worker publishes one complete
+application-owned frame; the audio callback never sees an `Ort::Session` or a
+camera object:
+
+```cpp
+Ort::Session session(env, model_path.c_str(), session_options);
+while (running) {
+    auto input = next_input_frame();
+    auto outputs = session.Run(Ort::RunOptions{nullptr}, input_names, &input, 1,
+                               output_names, output_count);
+    publish(ModelFrame{
+        .sequence = ++sequence,
+        .drive = normalize(outputs[0]),
+        .blend = normalize(outputs[1]),
+        .confidence = confidence(outputs),
+        .valid = outputs_are_finite(outputs),
+    });
+}
+```
+
+The consumer then uses the existing example-owned `ModelMapping` and its
+normal StateStore/modulation path. ONNX Runtime, OpenCV, model weights, and
+their licenses remain optional and application-selected. If the model worker
+stops, publishes malformed output, or loses its input, publish one invalid
+frame and let the existing stale timeout and replay tests exercise the failure
+policy.
+
 OBS Studio, DaVinci Resolve/Fairlight, Max/MSP, TouchDesigner, and similar
 hosts are compatibility forcing functions. They should consume existing
 plugin, OSC, MIDI, IPC, WebSocket, or external-process boundaries through
 optional recipes. Pulp core must not link host SDKs or copy host code. A host
 adapter becomes implementation work only when a named application requires a
 live acceptance receipt.
+
+### External host boundaries
+
+These products are useful design tests, but they do not define a new Pulp
+provider or transport API:
+
+- **OBS Studio:** a future integration can use an OBS-side plugin, an external
+  OSC/WebSocket/UDP bridge, or a virtual audio/video device. Keep OBS's GPL
+  code and lifecycle outside Pulp core.
+- **DaVinci Resolve/Fairlight:** VST3/AU is the practical audio-plugin path;
+  Resolve scripting or control-surface APIs can be reached through a separate
+  companion bridge when project or video control is needed. Do not make the
+  Blackmagic SDK or a Resolve installation a Pulp dependency.
+- **Max/MSP, TouchDesigner, openFrameworks, vvvv, and Pure Data:** preserve
+  named, inspectable signals and optional OSC/MIDI/IPC recipes so a thin host
+  adapter can route them without a Pulp-specific node graph or landmark schema.
+- **Zoom and Google Meet:** do not assume that a call host can load an audio
+  plugin, accept arbitrary OSC, or grant a provider camera permission. A
+  companion desktop/browser application, virtual microphone/camera, or a
+  verified product SDK may publish controls into a Pulp app or plugin. Treat
+  direct Zoom/Meet integration as a separately verified product requirement.
+
+For any future host demo, name the boundary being exercised (for example, an
+OBS filter property, a Fairlight VST3 parameter, or a companion-process input
+stream). The demo must prove that boundary without implying that Pulp owns the
+host's permissions, scheduling, or lifecycle.
 
 ## Optional provider and model dependencies
 
