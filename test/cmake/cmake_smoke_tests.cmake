@@ -184,6 +184,16 @@ set_tests_properties(cmake-js-engine-selection PROPERTIES
     LABELS "cmake;view;js-engine"
     TIMEOUT 30)
 
+# AUv3 entitlement templates render per engine under `cmake -P`: QuickJS gets
+# no JIT or library-validation entitlement, V8/JSC get allow-jit only, and
+# allow-unsigned-executable-memory never appears.
+add_test(NAME cmake-auv3-entitlements
+    COMMAND ${CMAKE_COMMAND} -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_auv3_entitlements.cmake)
+set_tests_properties(cmake-auv3-entitlements PROPERTIES
+    LABELS "cmake;auv3;entitlements;security"
+    TIMEOUT 30)
+
 # A sealed V8 provider's manifest consumer_defines reach v8::v8, and a manifest
 # that cannot supply them fails configure. Each case configures a throwaway
 # LANGUAGES NONE project against the real FindV8.cmake and a fixture provider,
@@ -263,6 +273,25 @@ add_test(NAME cmake-ios-auv3-control-shipping
 set_tests_properties(cmake-ios-auv3-control-shipping PROPERTIES
     LABELS "cmake;ios;auv3;control"
     TIMEOUT 30)
+# The macOS AUv3 container's control-shipping scan reads the embedded framework
+# and appex, so the Ninja graph must order it after the embed steps.
+if(APPLE)
+    set(_pulp_auv3_scan_order_ninja "")
+    if(CMAKE_GENERATOR MATCHES "Ninja")
+        set(_pulp_auv3_scan_order_ninja "${CMAKE_MAKE_PROGRAM}")
+    endif()
+    add_test(NAME cmake-auv3-host-scan-order
+        COMMAND ${CMAKE_COMMAND}
+            -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+            -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/auv3-host-scan-order
+            "-DNINJA=${_pulp_auv3_scan_order_ninja}"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_auv3_host_scan_order.cmake)
+    set_tests_properties(cmake-auv3-host-scan-order PROPERTIES
+        LABELS "cmake;auv3;control"
+        TIMEOUT 60
+        SKIP_RETURN_CODE 77
+        SKIP_REGULAR_EXPRESSION "SKIPPED: cmake-auv3-host-scan-order needs ninja")
+endif()
 # Toggling pulp_add_binary_data(COMPRESS) in an existing Makefile build dir
 # regenerates the embedded source without a clean reconfigure.
 add_test(NAME cmake-pulp-add-binary-data-compress-toggle
@@ -914,6 +943,18 @@ if(UNIX)
     endif()
 endif()
 if(Python3_Interpreter_FOUND)
+    # The AU component preflight the DAW bench runs before auval: bundle
+    # metadata, signing, auval registration and the registrar diagnosis. A
+    # failed log query or auval timeout must fail closed, not report a clean
+    # registration. Every host tool is stubbed, so it runs on every host.
+    add_test(NAME au-component-preflight-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_check_au_component_preflight.py")
+    set_tests_properties(au-component-preflight-selftest PROPERTIES
+        LABELS "tooling"
+        TIMEOUT 60)
+endif()
+if(Python3_Interpreter_FOUND)
     # The frozen C0 ABI receipt was captured on darwin-arm64. Register its
     # governed nested build on the matching platform; the portable verifier
     # selftests remain part of every Python-enabled test manifest.
@@ -1116,6 +1157,11 @@ if(UNIX)
     add_test(NAME pulp-coverage-instrumentation-flags
         COMMAND ${CMAKE_COMMAND} -P ${CMAKE_SOURCE_DIR}/tools/cmake/test_pulp_instrumentation_flags.cmake)
     set_tests_properties(pulp-coverage-instrumentation-flags PROPERTIES TIMEOUT 60)
+    # WindowsApp also imports the OS icu.dll; as a link input it collides with
+    # Skia's bundled ICU under lld-link, so it must stay a default library.
+    add_test(NAME pulp-midi-windows-link-libs
+        COMMAND ${CMAKE_COMMAND} -P ${CMAKE_SOURCE_DIR}/tools/cmake/test_midi_windows_link_libs.cmake)
+    set_tests_properties(pulp-midi-windows-link-libs PROPERTIES TIMEOUT 60)
     # Fail at CONFIGURE if the script is not where the registration says.
     # A wrong path here does not fail configure on its own -- it produces
     # `***Failed 0.00 sec  No such file or directory` at run time, which reads
@@ -1467,3 +1513,9 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(cmake-forge-catalog-install PROPERTIES
         LABELS "cmake;host;sdk" TIMEOUT 180)
 endif()
+
+# The unified release-artifact scanner: forbidden-marker list self-test,
+# negative control, and per-class scans. Lives beside the control-shipping
+# scanner tests above because it is the same family of `cmake -P` artifact
+# scans and the control scanner reads the same list.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/release_artifact_tests.cmake")

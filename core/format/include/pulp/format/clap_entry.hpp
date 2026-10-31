@@ -833,18 +833,15 @@ inline bool gui_set_parent(const clap_plugin_t* plugin, const clap_window_t* win
     bool attached = false;
 #ifdef __APPLE__
     if (strcmp(window->api, CLAP_WINDOW_API_COCOA) == 0) {
-        p->editor_host->attach_to_parent(window->cocoa);
-        attached = true;
+        attached = p->editor_host->try_attach_to_parent(window->cocoa);
     }
 #elif defined(_WIN32)
     if (strcmp(window->api, CLAP_WINDOW_API_WIN32) == 0) {
-        p->editor_host->attach_to_parent(window->win32);
-        attached = true;
+        attached = p->editor_host->try_attach_to_parent(window->win32);
     }
 #elif defined(__linux__)
     if (strcmp(window->api, CLAP_WINDOW_API_X11) == 0) {
-        p->editor_host->attach_to_parent(reinterpret_cast<void*>(window->x11));
-        attached = true;
+        attached = p->editor_host->try_attach_to_parent(reinterpret_cast<void*>(window->x11));
     }
 #endif
     if (attached && p->bridge) {
@@ -877,6 +874,10 @@ inline bool gui_show(const clap_plugin_t* plugin) {
 inline bool gui_hide(const clap_plugin_t* plugin) {
     auto* p = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
     p->editor_visible = false;
+    // A hidden editor keeps its host and surfaces for gui_show, but nothing it
+    // is not drawing should keep holding GPU memory meanwhile.
+    if (p->editor_host)
+        p->editor_host->release_gpu_caches();
     return true;
 }
 

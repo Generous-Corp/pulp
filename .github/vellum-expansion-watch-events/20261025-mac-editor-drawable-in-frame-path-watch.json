@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261025-mac-editor-drawable-in-frame-path-watch",
+  "created_at": "2026-10-26T15:21:29Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Pulp-owned macOS plug-in host change. PulpGpuPluginView (plugin_view_host_mac.mm) no longer sets its CAMetalLayer drawableSize in -setFrameSize: or -viewDidChangeBackingProperties:; the frame that configures the swapchain sets it, and the layer uses kCAGravityTopLeft, so a drag keeps showing the last frame instead of an emptied layer between frames. A Pulp-owned host test checks the drawable size and layer contents across a resize. Only Pulp-owned host and test code changes; the render sources are untouched. No design-import, Chromium, rendering or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R 'a resize keeps the last frame until the next one draws'",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

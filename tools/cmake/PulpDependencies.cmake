@@ -48,6 +48,7 @@ FetchContent_MakeAvailable(choc)
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPatchChoc.cmake)
 pulp_patch_choc_v8("${choc_SOURCE_DIR}")
 pulp_patch_choc_json_number_exponent("${choc_SOURCE_DIR}")
+pulp_patch_choc_file_watcher("${choc_SOURCE_DIR}")
 
 # WebGPU (Dawn) — cross-platform GPU abstraction (BSD-3-Clause)
 # Uses eliemichel/WebGPU-distribution for CMake-friendly integration
@@ -514,7 +515,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         set(${_pulp_sdl3_option} OFF CACHE BOOL "Disabled: development headers not installed")
     endforeach()
     if(_pulp_sdl3_missing_x11)
-        message(STATUS "SDL3: X11 extensions without headers, built without: ${_pulp_sdl3_missing_x11}")
+        message(STATUS "SDL3: X11 extensions without headers, defaulting OFF: ${_pulp_sdl3_missing_x11} (cached; a build directory keeps these OFF after the package is installed; set SDL_X11_* explicitly to override)")
     endif()
     unset(_pulp_sdl3_missing_x11)
     unset(_pulp_sdl3_option)
@@ -883,6 +884,23 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(SheenBidi)
 set(PULP_HAS_SHEENBIDI TRUE)
 message(STATUS "Pulp: SheenBidi bidi engine enabled (v3.0.0)")
+
+# muFFT (MIT) — the float FFT behind FftT on every non-Apple target (Apple
+# uses vDSP). Pinned to an exact commit: upstream has no release tags. Only
+# fft.c, kernel.c, cpu.c and the x86 SIMD kernels are compiled, by
+# core/signal/CMakeLists.txt, so muFFT's own CMake (which builds FFTW-linked
+# bench and test binaries) never runs. Apple fetches it only for tests, which
+# exercise the portable backend on every host.
+if(NOT APPLE OR PULP_BUILD_TESTS)
+    pulp_register_fetchcontent_source(mufft REF 47bb08652eab399c2c7d460abe5184857110f130)
+    FetchContent_Declare(
+        mufft
+        GIT_REPOSITORY https://github.com/Themaister/muFFT.git
+        GIT_TAG 47bb08652eab399c2c7d460abe5184857110f130
+        SOURCE_SUBDIR pulp-fetch-only
+    )
+    FetchContent_MakeAvailable(mufft)
+endif()
 
 # Brotli + Google's WOFF2 decoder (MIT licenses) — captured browser imports
 # commonly package their exact @font-face payloads as WOFF2. Native import must

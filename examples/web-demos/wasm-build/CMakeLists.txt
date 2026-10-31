@@ -58,6 +58,15 @@ pulp_add_wam_plugin(PulpPluck
     ENTRY    ${CMAKE_CURRENT_SOURCE_DIR}/pulp_pluck_wasm.cpp
     INCLUDES ${PULP_ROOT}/examples/pulp-pluck)
 
+# CV control uses the same processor and mapping semantics in the browser.
+pulp_add_wam_plugin(CvFaceTone
+    ENTRY    ${CMAKE_CURRENT_SOURCE_DIR}/cv_control_wasm.cpp
+    INCLUDES ${PULP_ROOT}/examples/cv-control)
+
+pulp_add_wam_plugin(CvFaceToneWorklet SINGLE_FILE
+    ENTRY    ${CMAKE_CURRENT_SOURCE_DIR}/cv_control_wasm.cpp
+    INCLUDES ${PULP_ROOT}/examples/cv-control)
+
 pulp_add_wam_plugin(PulpChorus
     ENTRY    ${CMAKE_CURRENT_SOURCE_DIR}/pulp_chorus_wasm.cpp
     INCLUDES ${PULP_ROOT}/examples/web-demos)

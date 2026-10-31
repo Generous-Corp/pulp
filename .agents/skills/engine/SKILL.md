@@ -53,6 +53,7 @@ about 1.5 ms for the whole set on an M5. Two consequences:
 | `setTimeout` / `clearTimeout` / `setInterval` / `clearInterval` (driven by native `__scheduleTimer__` deadline tracker) | `web-compat-scheduler.js` | React's scheduler yield path + plugin code; setTimeout(fn, 0) drains via microtask, positive delays drain in `service_frame_callbacks()`. |
 | `performance.now()` (driven by native `__performanceNow__`) | `web-compat-scheduler.js` | Bundled-React modules read `performance.now` at module-eval time before the legacy `window.performance` shim is reachable. |
 | Mirror block onto `window` (rAF/cAF/sT/cT/sI/cI/MC/qM/perf) | `web-compat-scheduler.js` | React 18's scheduler reads `window.setTimeout` / `window.requestAnimationFrame` specifically; the global must be reachable through both names. |
+| `insertBefore` / `replaceChild` native position | `web-compat-dom-ops.js` + `__domAppend` (`dom_api.cpp`) | The native append always lands last, so `insertBefore` passes the first materialized following sibling as `__domAppend`'s fifth argument and the bridge moves the widget ahead of it. A move inside the same parent is a `move_child_to_index` reorder with no JS style or attribute replay: a detach and re-attach would blur a focused field and close a popup in the moved row. Check native order with `child_at()`, not `_children`, which was right even while the native order was wrong. |
 
 ### Popup keyboard navigation is owned by the prelude, not the app
 
@@ -442,7 +443,11 @@ required platform acceptance step:
    `v8-internal.h` tagged-field offsets mismatch the DLL and silently
    corrupt the heap. A sealed provider supplies it through its manifest
    `consumer_defines` on `v8::v8`; `PulpV8Windows.cmake` adds it explicitly
-   only for the manifest-less legacy override.
+   only for the manifest-less legacy override. The provider's
+   `V8_DEPRECATION_WARNINGS` and `V8_IMMINENT_DEPRECATION_WARNINGS` therefore
+   land as INTERFACE definitions on `v8::v8`, so external SDK consumers built
+   with `-Werror` see V8 deprecations as errors; Pulp itself promotes only
+   `-Werror=reorder-init-list` and `-Werror=initializer-overrides`.
 3. **Chromium-style libc++ headers** with `_LIBCPP_ABI_NAMESPACE=__Cr`
    (routed via clang-cl's `/clang:-nostdinc++ /clang:-isystem` — bare
    `-nostdinc++` is silently dropped by clang-cl, which is the trap that
@@ -565,7 +570,12 @@ block and renders `--demo cube --capture` to a non-empty PNG.
   counts it (`__pulpDispatchErrorCount__`, `__pulpLastDispatchError__`), keeps the message (QuickJS's
   `e.stack` holds only frames), and prints it with `console.error` when no `__dispatchError__` hook is
   installed. When a scripted-UI test sees a global that a handler should have created missing, read
-  `__pulpLastDispatchError__` first.
+  `__pulpLastDispatchError__` first. The limit is clamped to 3/4 of the stack the creating thread
+  still has (Apple and Linux), so a realm made on a 512 KB secondary thread gets a QuickJS
+  `InternalError` instead of a native stack overflow; a limit that reads lower than expected means
+  the realm was created on a small thread. The `console.error` fallback prints a message once,
+  then only every 100th consecutive repeat of it, so a handler failing on every frame does not flood the
+  log; the count still advances on every error.
 - **Every QuickJS realm starts with a 512 MiB heap ceiling** (`kDefaultJsMemoryLimitBytes`, applied via `JS_SetMemoryLimit` right after the stack-size call in `js_quickjs_engine.cpp`). A script that allocates past it gets a JS `InternalError: out of memory`, not a dead host. Raise or disable (0) per session with `ScriptedUiOptions::js_memory_limit_bytes` or `JsEngine::set_memory_limit()`. JSC and V8 return `false` from `set_memory_limit()`; they have no cap today.
 
 **Selector parses are memoized.** `_parseSelector` (web-compat-document-

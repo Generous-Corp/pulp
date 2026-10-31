@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 82,
+  "manifest_revision": 87,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -10008,6 +10008,22 @@
         ],
         "convolver_messages.hpp": [
           {
+            "class": "ConvolverSpectrumArenaT",
+            "qualified_name": "pulp::signal::ConvolverSpectrumArenaT",
+            "template": "typename SampleType = float",
+            "methods": [
+              "stride_for(std::size_t bins)",
+              "assign(std::size_t count, std::size_t bins)",
+              "size()",
+              "empty()",
+              "bins()",
+              "stride()",
+              "footprint_bytes()",
+              "fill_zero()"
+            ],
+            "enums": []
+          },
+          {
             "class": "ConvolverIrSwapperT",
             "qualified_name": "pulp::signal::ConvolverIrSwapperT",
             "template": "typename SampleType = float",
@@ -10035,7 +10051,12 @@
             "methods": [
               "process(const SampleType* input, SampleType* output, std::size_t num_samples)",
               "reset()",
-              "load_ir(const SampleType* ir, std::size_t ir_length, std::size_t block_size, std::size_t tail_multiplier = kDefaultTailMultiplier)",
+              "choose_tail_multiplier(std::size_t ir_length, std::size_t block_size)",
+              "table_measured_on(std::string_view cpu_brand)",
+              "default_tail_multiplier_for(std::string_view cpu_brand, std::size_t ir_length, std::size_t block_size)",
+              "default_tail_multiplier(std::size_t ir_length, std::size_t block_size)",
+              "load_ir(const SampleType* ir, std::size_t ir_length, std::size_t block_size)",
+              "load_ir(const SampleType* ir, std::size_t ir_length, std::size_t block_size, std::size_t tail_multiplier)",
               "latency()",
               "block_size()",
               "block_size_violations()",
@@ -11997,6 +12018,7 @@
             "methods": [
               "size()",
               "ready()",
+              "vdsp_split_plane_gap_floats(bool real_transform)",
               "vdsp_split_offset_bytes(bool real_transform)",
               "forward(std::complex<SampleType>* data)",
               "inverse(std::complex<SampleType>* data)",
@@ -12629,6 +12651,7 @@
             "methods": [
               "process(SampleType input)",
               "process(SampleType* buffer, int num_samples)",
+              "set_ramp_time(SampleType seconds, SampleType sample_rate)",
               "set_gain_db(SampleType db)",
               "set_gain_linear(SampleType linear)",
               "gain_db()",
@@ -17295,6 +17318,7 @@
             "methods": [
               "done()",
               "begin_forward_from_ring(const SampleType* ring, std::size_t base, std::size_t mask)",
+              "begin_forward_in_place()",
               "begin_inverse_in_place()",
               "cancel()",
               "advance(const SlicedFftPlanT& plan, std::complex<SampleType>* data, long budget)"

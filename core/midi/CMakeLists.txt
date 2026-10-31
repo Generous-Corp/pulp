@@ -168,12 +168,23 @@ elseif(WIN32)
     target_link_libraries(pulp-midi PRIVATE
         winmm
         # WinRT activation + COM apartment for the BLE advertisement watcher.
-        # WindowsApp is the desktop umbrella import lib (init_apartment,
-        # activation factories, event tokens); runtimeobject provides the
-        # WinRT/COM runtime helpers. Both ship with the base Windows SDK.
-        WindowsApp
+        # runtimeobject provides the WinRT/COM runtime helpers. It ships with
+        # the base Windows SDK and does not import the conflicting OS ICU.
         runtimeobject
     )
+    # Do not link WindowsApp.lib on MSVC/clang-cl builds. It is the desktop
+    # umbrella import library, but it also imports the OS icu.dll. lld-link
+    # then sees duplicate ICU definitions when Skia's bundled ICU
+    # (skunicode_icu) is pulled in. runtimeobject.lib supplies the WinRT
+    # activation/COM entry points used by this backend without importing the
+    # conflicting ICU symbols. Keep WindowsApp for non-MSVC toolchains, where
+    # runtimeobject alone is not a complete WinRT link contract.
+    if(MSVC)
+        # runtimeobject is linked above; intentionally do not add WindowsApp.
+        # Its ICU imports conflict with Skia's bundled ICU under lld-link.
+    else()
+        target_link_libraries(pulp-midi PRIVATE WindowsApp)
+    endif()
     # Opt-in WinRT MIDI 2.0 (UMP) backend — Windows MIDI Services SDK.
     #
     # Enable with -DPULP_HAS_WINRT_MIDI=ON. The backend consumes the
@@ -234,7 +245,12 @@ elseif(WIN32)
             endif()
             target_include_directories(pulp-midi PRIVATE
                 "${PULP_WINRT_MIDI_INCLUDE}")
-            target_link_libraries(pulp-midi PRIVATE WindowsApp runtimeobject)
+            # runtimeobject supplies the WinRT activation/COM helpers without
+            # importing WindowsApp's conflicting ICU symbols.
+            target_link_libraries(pulp-midi PRIVATE runtimeobject)
+            if(NOT MSVC)
+                target_link_libraries(pulp-midi PRIVATE WindowsApp)
+            endif()
             message(STATUS
                 "Pulp: WinRT MIDI 2.0 backend enabled "
                 "(manual projection: ${PULP_WINRT_MIDI_INCLUDE})")

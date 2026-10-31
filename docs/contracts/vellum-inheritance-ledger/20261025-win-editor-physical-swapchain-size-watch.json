@@ -1,0 +1,12 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261025-win-editor-physical-swapchain-size-watch",
+  "slices": [
+    "render-assets-and-backends"
+  ],
+  "vellum_obligation": "When the render targets adopt the Vellum package, Vellum's SkiaSurface keeps reading back at the source surface's size, so a host that sizes its swapchain from a physical client rect captures the whole frame.",
+  "evidence": [
+    ".github/vellum-expansion-watch-events/20261025-win-editor-physical-swapchain-size-watch.json",
+    ".github/vellum-change-events/20261025-render-readback-surface-size.json"
+  ]
+}

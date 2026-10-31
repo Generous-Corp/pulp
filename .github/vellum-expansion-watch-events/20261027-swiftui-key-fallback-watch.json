@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261027-swiftui-key-fallback-watch",
+  "created_at": "2026-10-27T07:15:06Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-ir-contract",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "The SwiftUI emitter now resolves a bound control with no audio label and no node name by its existing pulpParamKey, and a key-only meter by its existing pulpMeterValueKey, instead of emitting the unbound placeholder. core/view/src/design_swift_codegen.cpp (binding_resolve_name only) selects design-ir-contract through core/view/src/design_*.cpp and render-assets-and-backends through core/view/**. test/test_design_swift_codegen.cpp and test/test_design_emitter_conformance.cpp select design-source-ingest through test/test_design_*; the conformance test projects a meter by its primitive when it carries no source family, and test/fixtures/emitter-conformance/allowlist.json drops the two SwiftUI kelvin binding gaps this closes. No public header, DesignIR schema or IR field changes: the fallback reads binding metadata that NativeBindingMetadata::parse already exposes. The change is limited to SwiftUI code generation and its tests; no design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-design-emitter-conformance",
+    "ctest --test-dir build -R pulp-test-design-swift-codegen",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

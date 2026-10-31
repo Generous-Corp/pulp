@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import json
 import os
+import plistlib
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -25,6 +27,35 @@ gfc, hosts = rhs.gfc, rhs.hosts
 LOGIC = rhs.HOSTS["logic"]["executable"]
 FAULT, POST, FRAMES = 3000, 48000, 9600
 QUIET = {"status": "ok", "quiet_host": True, "reasons": []}
+UNARMED = {"input": "No Input", "record_armed": False, "input_monitoring": False}
+
+
+class FakeDefaults:
+    """`defaults` over an in-memory store, with `import` merging the way the
+    real one does (keys missing from the file are kept)."""
+
+    def __init__(self):
+        self.domains: dict[str, dict] = {}
+        self.calls: list[list[str]] = []
+        self.import_works = True
+        self.missing: set[str] = set()  # domains `defaults export` fails on
+
+    def __call__(self, args: list[str]) -> None:
+        self.calls.append(list(args))
+        verb, domain = args[0], args[1]
+        if verb == "export" and domain in self.missing:
+            raise subprocess.CalledProcessError(1, ["/usr/bin/defaults", *args])
+        if verb == "export":
+            Path(args[2]).write_bytes(plistlib.dumps(self.domains.get(domain, {}),
+                                                     fmt=plistlib.FMT_BINARY))
+        elif verb == "import":
+            if self.import_works:
+                self.domains.setdefault(domain, {}).update(
+                    plistlib.loads(Path(args[2]).read_bytes()))
+        elif verb == "delete":
+            del self.domains[domain][args[2]]
+        else:
+            raise AssertionError(f"unexpected defaults verb {verb}")
 
 
 class Env(unittest.TestCase):
@@ -42,6 +73,10 @@ class Env(unittest.TestCase):
         os.environ["PULP_REAL_HOST_COMPONENTS_DIR"] = str(self.components)
         self.procs: list[tuple[int, str]] = []
         self.locked = False
+        # No test may reach this user's real preference domains.
+        self.prefs = FakeDefaults()
+        real, rhs.defaults = rhs.defaults, self.prefs
+        self.addCleanup(setattr, rhs, "defaults", real)
 
     def tearDown(self):
         for key, value in self._env.items():
@@ -198,6 +233,102 @@ class Stage(Env):
         self.assertFalse((self.root / "active.json").exists())
 
 
+class Templates(unittest.TestCase):
+    def setUp(self):
+        self.spec = json.loads(rhs.TEMPLATES.read_text(encoding="utf-8"))
+        self.tmp = Path(tempfile.mkdtemp(prefix="wpk-save-as-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def test_no_template_kind_arms_the_track(self):
+        # Logic refuses to arm a No Input track, and a live row does not need
+        # a recording: every kind plays an unarmed track with monitoring off.
+        for kind, spec in self.spec["kinds"].items():
+            with self.subTest(kind):
+                self.assertIs(spec["record_armed"], False)
+                self.assertIs(spec["input_monitoring"], False)
+        self.assertTrue(self.spec["kinds"]["live"]["plugin_input"].startswith("internal"))
+
+    def test_each_host_template_uses_a_label_the_verifier_accepts(self):
+        self.assertEqual(set(self.spec["hosts"]), set(hosts.TEMPLATE_HOSTS))
+        for host_id, spec in self.spec["hosts"].items():
+            with self.subTest(host_id):
+                track = dict(UNARMED, input=spec["no_input_label"])
+                self.assertEqual(hosts.track_state_problem(track, host_id), "")
+
+    def test_the_save_as_plan_fronts_only_for_the_key_commands(self):
+        plan = rhs.save_as_plan("logic", self.tmp / "WPK-live.logicx")
+        actions = [s["action"] for s in plan["steps"]]
+        self.assertEqual(actions, ["hotkey", "await_window", "hotkey", "type_text", "press_key",
+                                   "type_text", "press_key", "verify_exists"])
+        self.assertEqual(plan["steps"][0]["keys"], ["cmd", "shift", "s"])
+        self.assertEqual(plan["steps"][2]["keys"], ["cmd", "shift", "g"])
+        self.assertEqual([s.get("delivery_mode") for s in plan["steps"]],
+                         ["foreground", None, "foreground", None, None, None, None, None])
+        self.assertEqual(plan["steps"][3]["text"], os.path.realpath(self.tmp))
+        self.assertEqual(plan["steps"][5]["text"], "WPK-live")
+
+    def test_the_save_as_plan_refuses_unsafe_targets(self):
+        existing = self.tmp / "WPK-playback.logicx"
+        existing.mkdir()
+        for target, needle in (
+                (Path.home() / "Music" / "Logic" / "WPK-live.logicx", "temp directory"),
+                (self.tmp / "WPK-live.band", "ends in .logicx"),
+                (existing, "never overwritten"),
+                (self.tmp / "missing" / "WPK-live.logicx", "does not exist")):
+            with self.subTest(needle):
+                with self.assertRaisesRegex(SystemExit, needle):
+                    rhs.save_as_plan("logic", target)
+
+    def test_the_save_as_cli_prints_the_plan_or_refuses(self):
+        self.assertEqual(rhs.main(["save-as-plan", "--host", "bitwig", "--target",
+                                   str(self.tmp / "WPK-live.bwproject")]), rhs.EXIT_OK)
+        self.assertEqual(rhs.main(["save-as-plan", "--host", "bitwig", "--target",
+                                   str(Path.home() / "WPK-live.bwproject")]), rhs.EXIT_USAGE)
+
+
+class WrapReaper(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="wpk-wrap-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def test_the_launch_bound_is_the_preflight_sample(self):
+        doc = {"observations": [
+            {"argv": ["/bin/ps"], "stdout": "1 0.0 launchd"},
+            {"argv": ["/repo/tools/scripts/host_vitals.sh", "--json"],
+             "stdout": json.dumps({"level": "green", "sampled_at": 1792769309})}]}
+        self.assertEqual(rhs.receipts._preflight_sampled_us(doc), 1792769309 * 1_000_000)
+        for broken in ({}, {"observations": [{"argv": ["/x/host_vitals.sh"], "stdout": "{"}]},
+                       {"observations": [{"argv": ["/x/host_vitals.sh"], "stdout": "{}"}]}):
+            with self.subTest(broken=broken):
+                self.assertIsNone(rhs.receipts._preflight_sampled_us(broken))
+
+    def test_the_control_kind_comes_from_what_the_plugin_armed(self):
+        none = {"planted_negative": None, "gpu_off": False}
+        self.assertEqual(rhs.receipts.reaper_control_kind(dict(none, planted_negative="no_fallback"),
+                                                 "force_loss_after"), "planted_negative")
+        self.assertEqual(rhs.receipts.reaper_control_kind(dict(none, gpu_off=True), "positive_control"),
+                         "planted_negative")
+        self.assertEqual(rhs.receipts.reaper_control_kind(none, "positive_control"), "positive_control")
+        self.assertEqual(rhs.receipts.reaper_control_kind(none, "worker_stall"), "fault")
+
+    def test_only_a_run_v1_verifies_live_is_wrapped(self):
+        # A dry run verifies as v1 only with --allow-dry-run; it is not DAW
+        # evidence, so it never becomes a v2 receipt.
+        run = self.tmp / "dry"
+        proc = rhs.subprocess.run(
+            [sys.executable, str(HERE / "reaper_smoke.py"), "--mode", "gpu-fault",
+             "--gpu-fault", "force_loss_after", "--dry-run", "--format", "clap",
+             "--plugin-name", "x", "--plugin-path", "/nonexistent", "--out-dir", str(run)],
+            capture_output=True, text=True, check=False)
+        self.assertTrue((run / "receipt.json").is_file(), proc.stdout[-2000:])
+        with self.assertRaisesRegex(rhs.V2.ReceiptError, "not DAW evidence"):
+            rhs.receipts.wrap_reaper(run, self.tmp / "out", code_commit="c" * 40)
+        self.assertFalse((self.tmp / "out").exists())
+        self.assertEqual(rhs.main(["wrap-reaper", "--reaper-run", str(run), "--out",
+                                   str(self.tmp / "out"), "--code-commit", "c" * 40]),
+                         rhs.EXIT_USAGE)
+
+
 class Revert(Env):
     def test_every_change_is_reverted_and_reverting_twice_is_safe(self):
         self.assertTrue(self.preflight()[0])
@@ -235,6 +366,82 @@ class Revert(Env):
             self.assertFalse((prefs / "new.prefs").exists())
         finally:
             rhs.HOSTS["bitwig"]["prefs_dir"] = saved
+
+    def logic_run_that_rewrites_prefs(self) -> dict:
+        original = {"recent": "~/Music/Logic/Owner.logicx", "zoom": 150, "kept": [1, 2]}
+        self.prefs.domains["com.apple.logic10"] = dict(original)
+        self.assertTrue(self.preflight()[0])
+        rhs.snapshot_prefs(self.run, "logic")
+        # What one launch did in the live window: a recent project, a
+        # changed value, a new key and (here) a removed one.
+        logic = self.prefs.domains["com.apple.logic10"]
+        logic.update(recent="EmptySong", zoom=100, NewTrackSettingsV1={"Audio": {"In": -1}})
+        del logic["kept"]
+        return original
+
+    def test_logic_prefs_are_restored_including_keys_the_launch_added(self):
+        original = self.logic_run_that_rewrites_prefs()
+        rhs.revert(self.run)
+        self.assertEqual(self.prefs.domains["com.apple.logic10"], original)
+        self.assertIn(["delete", "com.apple.logic10", "NewTrackSettingsV1"], self.prefs.calls)
+        self.assertEqual(rhs.unreverted(self.run), [])
+
+    def test_unchanged_prefs_are_not_imported(self):
+        self.prefs.domains["com.apple.logic10"] = {"zoom": 150}
+        self.assertTrue(self.preflight()[0])
+        rhs.snapshot_prefs(self.run, "logic")
+        rhs.revert(self.run)
+        self.assertEqual([c[0] for c in self.prefs.calls], ["export", "export"])
+
+    def test_a_restore_that_does_not_match_stays_unreverted(self):
+        self.logic_run_that_rewrites_prefs()
+        self.prefs.import_works = False
+        with self.assertRaisesRegex(RuntimeError, "REFUSING TO MARK com.apple.logic10"):
+            rhs.revert(self.run)
+        self.assertEqual([e["kind"] for e in rhs.unreverted(self.run)],
+                         ["prefs_domain_snapshot"])
+        ok, reasons = rhs.preflight("logic", self.runs / "run-2", runs_parent=self.runs,
+                                    processes=lambda: [], host_preflight=lambda: dict(QUIET),
+                                    locked=lambda: False)
+        self.assertFalse(ok, reasons)
+
+    def test_a_domain_that_cannot_be_exported_leaves_no_snapshot(self):
+        # A host never launched on this machine has no preferences domain.
+        self.prefs.missing.add("com.apple.logic10")
+        self.assertTrue(self.preflight()[0])
+        with self.assertRaisesRegex(SystemExit, "cannot export com.apple.logic10"):
+            rhs.snapshot_prefs(self.run, "logic")
+        self.assertFalse((self.run / "prefs-before").exists())
+        self.assertFalse(rhs.prefs_snapshot_taken(self.run))
+        self.assertEqual(list(self.run.glob("prefs-before*")), [])
+        # Once the domain exists the same run can take its snapshot.
+        self.prefs.missing.clear()
+        self.prefs.domains["com.apple.logic10"] = {"zoom": 150}
+        rhs.snapshot_prefs(self.run, "logic")
+        self.assertTrue(rhs.prefs_snapshot_taken(self.run))
+
+    def test_an_altered_export_is_not_restored(self):
+        self.logic_run_that_rewrites_prefs()
+        export = self.run / "prefs-before" / "com.apple.logic10.plist"
+        export.write_bytes(plistlib.dumps({"swapped": True}, fmt=plistlib.FMT_BINARY))
+        with self.assertRaisesRegex(RuntimeError, "no longer matches the snapshot's sha256"):
+            rhs.revert(self.run)
+        self.assertNotIn("import", [c[0] for c in self.prefs.calls])
+        self.assertEqual([e["kind"] for e in rhs.unreverted(self.run)],
+                         ["prefs_domain_snapshot"])
+
+    def test_a_missing_export_leaves_the_prefs_untouched(self):
+        self.logic_run_that_rewrites_prefs()
+        shutil.rmtree(self.run / "prefs-before")
+        with self.assertRaisesRegex(RuntimeError, "saved export .* is missing"):
+            rhs.revert(self.run)
+        self.assertNotIn("import", [c[0] for c in self.prefs.calls])
+
+    def test_garageband_exports_its_own_domain(self):
+        self.assertTrue(self.preflight("garageband")[0])
+        saved = rhs.snapshot_prefs(self.run, "garageband")
+        self.assertEqual([c[:2] for c in self.prefs.calls], [["export", "com.apple.garageband10"]])
+        self.assertTrue((saved / "com.apple.garageband10.plist").is_file())
 
 
 class Safety(Env):
@@ -294,6 +501,18 @@ class Safety(Env):
         self.assertFalse(Path(st["plugin_run"]).exists())
         self.assertTrue(any(e.get("note", "").startswith("left in place") for e in entries))
 
+    def test_logic_is_not_launched_before_its_prefs_are_saved(self):
+        self.assertTrue(self.preflight()[0])
+        rhs.stage(self.run, fault="force_loss_before", at_sample=FAULT, window_post=POST,
+                  stimulus_frames=FRAMES)
+        launched: list[list[str]] = []
+        with self.assertRaisesRegex(SystemExit, "snapshot-prefs"):
+            rhs.launch(self.run, processes=lambda: [], execute=launched.append, timeout=0.05)
+        self.assertEqual(launched, [])
+        rhs.snapshot_prefs(self.run, "logic")
+        with self.assertRaisesRegex(SystemExit, "already holds a prefs snapshot"):
+            rhs.snapshot_prefs(self.run, "logic")
+
     def test_no_revert_while_the_host_is_running(self):
         self.assertTrue(self.preflight()[0])
         component = Path(self._tmp.name) / "X.component"
@@ -352,6 +571,7 @@ class EndToEnd(Env):
         self.assertTrue(self.preflight()[0])
         st = rhs.stage(self.run, fault="force_loss_before", at_sample=FAULT, window_post=POST,
                        stimulus_frames=FRAMES)
+        rhs.snapshot_prefs(self.run, "logic")
         launched: list[list[str]] = []
 
         def execute(cmd):
@@ -371,10 +591,20 @@ class EndToEnd(Env):
             realtime.stat().st_mtime * 1e6) - 2_000_000)
         rhs.realtime_end(self.run, realtime, settle_s=0.05, poll=0.01)
         evidence = self.run / "ax.json"
-        evidence.write_text(json.dumps({"plugins": [rhs.PLUGIN_NAME],
-                                        "insert_slot": 1}), encoding="utf-8")
         executable = self.run / "plugin-binary"
         executable.write_bytes(b"binary")
+        # A snapshot showing the track armed on a real input is refused before
+        # any receipt is written.
+        evidence.write_text(json.dumps({"plugins": [rhs.PLUGIN_NAME], "insert_slot": 1,
+                                        "track": dict(UNARMED, record_armed=True,
+                                                      input="Input 1")}), encoding="utf-8")
+        with self.assertRaisesRegex(SystemExit, "record-armed"):
+            rhs.collect(self.run, bounce=self.run / "host-bounce.wav", host_evidence=evidence,
+                        hosting_mode="in_process", host_alive=True, host_version="12.4",
+                        code_commit="c" * 40, plugin_executable=executable, window_pre=1000)
+        self.assertFalse((self.run / "artifacts").exists())
+        evidence.write_text(json.dumps({"plugins": [rhs.PLUGIN_NAME], "insert_slot": 1,
+                                        "track": UNARMED}), encoding="utf-8")
         receipt, verdict, outcome = rhs.collect(
             self.run, bounce=self.run / "host-bounce.wav", host_evidence=evidence,
             hosting_mode="in_process", host_alive=True, host_version="12.4",

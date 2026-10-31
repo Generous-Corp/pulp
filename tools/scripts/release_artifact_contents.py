@@ -197,6 +197,7 @@ class ProductMatrix:
     control_broker_floor: str
     control_standalone_host_floor: str
     node_runtime_floor: str
+    illustrator_import_floor: str
     materialized_binding_contract_floor: str
     gpu_health_contract_floor: str
     gpu_health_v2_contract_floor: str
@@ -269,6 +270,9 @@ class ProductMatrix:
                 ),
                 node_runtime_floor=str(
                     doc.get("node_runtime_floor", "999999.0.0")
+                ),
+                illustrator_import_floor=str(
+                    doc.get("illustrator_import_floor", "999999.0.0")
                 ),
                 materialized_binding_contract_floor=str(
                     doc.get("materialized_binding_contract_floor", "999999.0.0")
@@ -540,6 +544,8 @@ def effective_cli_contract(
         resources = matrix.common_cli_members
         if not materialized_binding_contract_required(matrix, version):
             resources = resources - {MATERIALIZED_BINDING_CONTRACT_CLI_MEMBER}
+        if version is not None and version_tuple(version) < version_tuple(matrix.illustrator_import_floor):
+            resources = resources - {"import-design/illustrator_to_svg.py"}
         return matrix.cli_binary_stems, resources
     if version is not None:
         return (
@@ -584,6 +590,8 @@ def cli_runtime_source_path(member: str, source_root: Path) -> Path | None:
             source_root / "tools" / "import-design" / "jsx-runtime"
             / member.removeprefix("jsx-runtime/")
         )
+    if member == "import-design/illustrator_to_svg.py":
+        return source_root / "tools" / "import-design" / "illustrator_to_svg.py"
     return None
 
 
@@ -661,6 +669,11 @@ def sdk_import_design_runtime_members(
             for member in resources
             if member.startswith("jsx-runtime/")
         )
+    members.update(
+        "pulp-sdk/bin/" + member
+        for member in resources
+        if member.startswith("import-design/")
+    )
     return frozenset(members)
 
 
@@ -1150,6 +1163,10 @@ def verify_sdk_archive(
             archived_features = provenance.get("features")
             if isinstance(archived_features, dict) and "tracing" in archived_features:
                 expected_features["tracing"] = False
+            # `bridge_exec` follows the same rule: absent in archives minted
+            # before the key existed, and binding (must be false) when present.
+            if isinstance(archived_features, dict) and "bridge_exec" in archived_features:
+                expected_features["bridge_exec"] = False
             expected = {
                 "schema": "pulp.sdk-provenance.v1",
                 "kind": "release",
@@ -1199,6 +1216,7 @@ def verify_sdk_archive(
             runtime_prefixes = (
                 "pulp-sdk/bin/browser_capture-v1/",
                 "pulp-sdk/bin/jsx-runtime/",
+                "pulp-sdk/bin/import-design/",
             )
             actual_runtime = {
                 name

@@ -386,24 +386,34 @@ TEST_CASE("WebCompat: fetch bridge preserves UTF-8 JSON asset payloads", "[webco
 TEST_CASE("WebCompat: file and blob URLs stay readable through the browser helpers", "[webcompat][browser][fetch]") {
     TestEnvironment env;
 
+    // A file URL is readable when it names a file under a reviewed asset
+    // root; the same URL outside every root is refused.
     const std::string fileText = "Pulp ✓ file";
-    const auto tempPath = std::filesystem::temp_directory_path() / "pulp-phase13-fetch.txt";
-    {
-        std::ofstream out(tempPath, std::ios::binary);
+    const auto assetRoot = std::filesystem::temp_directory_path() / "pulp-phase13-fetch-root";
+    std::filesystem::create_directories(assetRoot);
+    const auto tempPath = assetRoot / "pulp-phase13-fetch.txt";
+    const auto outsidePath =
+        std::filesystem::temp_directory_path() / "pulp-phase13-fetch-outside.txt";
+    for (const auto& path : {tempPath, outsidePath}) {
+        std::ofstream out(path, std::ios::binary);
         out << fileText;
     }
+    env.bridge->set_asset_roots({assetRoot});
 
-    const auto genericPath = tempPath.generic_string();
-    const std::string fileUrl = std::string("file://")
-        + (genericPath.empty() || genericPath.front() == '/' ? "" : "/")
-        + genericPath;
-    const std::string fileExpr = "'" + fileUrl + "'";
+    const auto fileUrlFor = [](const std::filesystem::path& path) {
+        const auto genericPath = path.generic_string();
+        return std::string("file://") +
+               (genericPath.empty() || genericPath.front() == '/' ? "" : "/") + genericPath;
+    };
+    const std::string fileExpr = "'" + fileUrlFor(tempPath) + "'";
 
     auto fetchedText = env.engine.evaluate(
         "(function() {"
         "  var response = __responseFromAssetRecord(__loadAssetSync__(" + fileExpr + "));"
         "  return response.text();"
         "})()");
+    auto outsideStatus =
+        env.engine.evaluate("__loadAssetSync__('" + fileUrlFor(outsidePath) + "').status");
 
     env.eval(R"(
         var phase13Blob = new Blob(
@@ -416,11 +426,14 @@ TEST_CASE("WebCompat: file and blob URLs stay readable through the browser helpe
     auto blobLabel = env.engine.evaluate("__responseFromDataUri(phase13BlobUrl, phase13BlobUrl).json().label");
 
     REQUIRE(std::string(fetchedText.getWithDefault<std::string_view>("")) == fileText);
+    REQUIRE(outsideStatus.getWithDefault<int32_t>(0) == 403);
     const auto blobUrlString = std::string(blobUrl.getWithDefault<std::string_view>(""));
     REQUIRE(blobUrlString.find("data:application/json;charset=utf-8;base64,") == 0);
     REQUIRE(std::string(blobLabel.getWithDefault<std::string_view>("")) == "Pulp ✓");
 
-    std::filesystem::remove(tempPath);
+    std::error_code ec;
+    std::filesystem::remove_all(assetRoot, ec);
+    std::filesystem::remove(outsidePath, ec);
 }
 
 TEST_CASE("WebCompat: element.id assignment", "[webcompat][element]") {
@@ -1456,6 +1469,37 @@ TEST_CASE("WebCompat: setProperty('--name') clears stale slots on type-change re
     auto motionSlot3 = env.engine.evaluate("getMotionToken('my-var')");
     REQUIRE(std::string(stringSlot3.getWithDefault<std::string_view>("")) == "SF Mono");
     REQUIRE(motionSlot3.getWithDefault<double>(-1.0) == 0.0);
+}
+
+TEST_CASE("WebCompat: removeProperty clears every custom-token slot",
+          "[webcompat][css-var][remove-property]") {
+    TestEnvironment env;
+
+    // String and length values are exposed through the dedicated token
+    // getters. Removing either declaration must make var() take its fallback,
+    // rather than leaving a process-local token behind for later nodes.
+    env.eval(R"JS(
+        var __removeEl = document.createElement('div');
+        __removeEl.style.setProperty('--remove-string', 'JetBrains Mono');
+        __removeEl.style.removeProperty('--remove-string');
+        __removeEl.style.setProperty('--remove-length', '12px');
+        __removeEl.style.removeProperty('--remove-length');
+    )JS");
+    auto stringSlot = env.engine.evaluate("getStringToken('remove-string')");
+    auto lengthSlot = env.engine.evaluate("getMotionToken('remove-length')");
+    REQUIRE(std::string(stringSlot.getWithDefault<std::string_view>("")).empty());
+    REQUIRE(lengthSlot.getWithDefault<double>(-1.0) == 0.0);
+    auto fallback = env.engine.evaluate("_resolveVar('var(--remove-string, fallback)') + '|' + "
+                                        "_resolveVar('var(--remove-length, 7px)')");
+    REQUIRE(std::string(fallback.getWithDefault<std::string_view>("")) == "fallback|7px");
+
+    // Colors live in a third theme map and cannot be cleared by assigning an
+    // empty string or zero. The native removeToken bridge must erase it.
+    env.eval("__removeEl.style.setProperty('--remove-color', 'red'); "
+             "__removeEl.style.removeProperty('--remove-color');");
+    auto theme_json = env.engine.evaluate("getThemeJson()");
+    REQUIRE(std::string(theme_json.getWithDefault<std::string_view>("")).find("remove-color") ==
+            std::string::npos);
 }
 
 TEST_CASE("WebCompat: StyleSheet attach applies rules to existing elements (issue-1551)",

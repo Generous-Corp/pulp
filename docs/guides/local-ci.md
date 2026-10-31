@@ -753,6 +753,15 @@ Each invocation:
    credential, writes it into the guest over stdin, and runs one job.
 6. Fences the registration and rolls back again.
 
+A runner that stays online and idle for 45 minutes
+(`PULP_WINDOWS_RUNNER_IDLE_RECYCLE_SECONDS`, default 2700; `0` turns it off) is
+deregistered through the same fence and the invocation exits 0, so systemd
+registers a fresh one. A JIT session that idles for hours can stay `online`
+while GitHub stops assigning it jobs: on 2026-10-25 a matching job queued for
+hours beside an idle registration. The fence deletes the registration before the
+session is stopped, so a runner that took a job in that window refuses the
+delete and keeps it.
+
 The VM belongs to the slot. Anything else that stops it (`qm shutdown 300` from
 another tool or session) kills the running job. The supervisor watches the VM
 while a job runs. When it stops without the supervisor stopping it, the
@@ -3143,6 +3152,30 @@ signing identity) becomes a distinct authorization boundary, first publish its
 public fingerprint on protected main and then pin the embedded SSH signature
 key to that reviewed value.
 
+## One admission writer feeds the merge queue
+
+The steward on the configured mutation machine (m3, `mutation_machine =
+studio`) is the only writer that admits Pulp PRs. A launchd job runs
+`shipyard runner steward --repo Generous-Corp/pulp --base main --arm-unqueued
+--apply` every five minutes. It runs from a config-only sparse clone on the
+internal disk, because a launchd job that opens a path on `/Volumes` can block
+in the kernel on a privacy prompt nobody can see. `gh` must resolve to the
+`ghapp` wrapper so every arm passes the queue-arm guard and lands in the arm
+ledger. The job refuses to run otherwise. Shipyard re-reads the exact-head
+approval immediately before each enqueue and refuses on a HOLD, a missing
+approval, or unreadable state. The native queue then validates and merges.
+
+`.github/workflows/shipyard-merge-steward.yml` is a read-only diagnostic. It
+has no schedule, no `apply` input and only read-scoped tokens, and it is not in
+`.github/schedule-backstop.json`. A second writer, scheduled or dispatched,
+would bypass the m3 guard and race the mutation-authority flag. Its census also failed under the Actions-minted
+token on every run, so it never admitted a PR.
+
+`[train] mode = "off"`. The native queue already batches up to five entries,
+and a second grouping layer added planning work without forming a train.
+`shipyard train status` and `shipyard train metrics` still report queue depth
+and approval-to-merge time.
+
 ## A merge_group batch stops at the first failing test
 
 The full suite is roughly 21,764 tests. A batch that has one failing test is
@@ -3872,8 +3905,11 @@ or its own message), and the fix is to add it to `PULP_PR_FAST_NEEDS_BUILD`.
      (skip-safe) tier. It fails closed: a read that fails, or a check run
      it cannot place, is a refusal ("could not verify …"). Only a check run
      proven to be for a head in another repository is passed over, and it
-     never falls back to an older run on uncertainty. Its comment says what it
-     found about the macos run; it does not judge approval.
+     never falls back to an older run on uncertainty. It judges the pull
+     request's current head, read live, not the event's (an arm event can
+     arrive after a push); an unreadable current head is a refusal. It reads
+     every page of the head's check runs and sorts them itself. Its comment
+     says what it found about the macos run; it does not judge approval.
   2. At the contract lane's conclusion: its `macos` job's last step, `Refuse a
      head armed before approval (contract lane)`, fails when this exact head is
      armed for auto-merge or already in the merge queue (read over GraphQL
@@ -4334,6 +4370,13 @@ for what a host can serve: its Pulp lane uses
 workflow and repository runner-group ID, and declares no fixed lane priority.
 The contract records that transformation separately from the repo variable so
 neither representation is mistaken for the other.
+
+The transformation removes any existing managed event-class labels before
+adding the current event's class. This matters because the shared repository
+selector normally carries the PR-head class; a merge-group job must request
+only `pulp-build-merge-group`. GitHub treats labels as an all-of set, so a job
+requesting both classes is unschedulable by the event-class-v2 fleet, whose
+ephemeral runners advertise one class at a time.
 
 ### The failure this prevents
 

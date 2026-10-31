@@ -1241,7 +1241,9 @@ and accessors are allocation-free with caller-owned input/output buffers.
 
 ### Fft
 
-Radix-2 in-place FFT (decimation-in-time). Size must be a power of 2. Pre-computes twiddle factors at construction.
+Power-of-two FFT with in-place complex transforms and half-spectrum real transforms. Size must be a power of 2. Construction does all allocation; the transforms allocate nothing.
+
+Float transforms run on vDSP on Apple and on muFFT everywhere else (SIMD-dispatched at run time on x86-64, portable C on other processors). Double precision, and float transforms under 16 points off Apple, use a built-in radix-2 transform. Every backend gives the same scaling, bin order and split layout, and the same accuracy to within a few dB of rounding (about -124 to -144 dB of the largest bin); `test_fft_backend_accuracy.cpp` holds each one to that contract.
 
 ```cpp
 signal::Fft fft(1024);

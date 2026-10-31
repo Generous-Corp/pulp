@@ -686,10 +686,22 @@ jobs:
                   and "self-hosted" in parsed_macos_selector
                   and event_class_label not in parsed_macos_selector
               ):
+                  # The shared repo selector may already contain the other
+                  # event class (the PR-head selector is also the default
+                  # operator value).  Event classes are exclusive: leaving
+                  # both labels on a merge-group job makes it unassignable to
+                  # the event-class-v2 fleet, whose runner advertises exactly
+                  # one class.  Remove every managed class before appending
+                  # the class for this event.
+                  managed_event_classes = {
+                      "pulp-build-pr-head",
+                      "pulp-build-merge-group",
+                  }
                   parsed_macos_selector = [
                       label
                       for label in parsed_macos_selector
-                      if label != "pulp-gate-fast"
+                      if label not in managed_event_classes
+                      and label != "pulp-gate-fast"
                   ]
                   parsed_macos_selector.append(event_class_label)
                   chosen_macos_selector = json.dumps(
@@ -2219,24 +2231,13 @@ jobs:
       # tools/toolchain/manifest.toml) names an exact Rust, and RUSTUP_AUTO_INSTALL=0
       # keeps cargo from fetching it mid-build. This provides it before the build:
       # offline when the image has it by name or its stable is the same release,
-      # otherwise a download. Self-hosted legs (the required gate) fail closed;
-      # only GitHub-hosted legs may fall back, with a warning, a step summary line
-      # and the receipt uploaded below. Once tartci bakes the pin by name into the
-      # live golden, --fallback-to-default goes too (decisions contract row 29).
+      # otherwise a download. Every leg now fails closed when the named toolchain
+      # cannot be provided; the required local golden carries 1.97.1 by name.
       - name: Provide the pinned Rust toolchain
         id: pinned-rust
         timeout-minutes: 10
         shell: bash
-        run: bash tools/ci/provide_pinned_rust.sh --fallback-to-default
-
-      - name: Upload the Rust fallback receipt
-        if: steps.pinned-rust.outputs.branch == 'fallback'
-        continue-on-error: true
-        uses: actions/upload-artifact@v7
-        with:
-          name: rust-toolchain-fallback-${{ matrix.key || runner.os }}
-          path: ${{ steps.pinned-rust.outputs.receipt }}
-          retention-days: 30
+        run: bash tools/ci/provide_pinned_rust.sh
 
       - name: Fetch pulp-rs crates
         shell: bash

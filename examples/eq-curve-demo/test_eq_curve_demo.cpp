@@ -14,6 +14,7 @@
 #include <pulp/view/eq_curve_view.hpp>
 
 #include <cmath>
+#include <numbers>
 #include <vector>
 
 using namespace pulp;
@@ -135,7 +136,7 @@ TEST_CASE("processed audio matches the drawn curve", "[eq-curve-demo]") {
         // Reset state between frequencies.
         proc.prepare(prep);
         float phase = 0.0f;
-        const float dphi = 2.0f * static_cast<float>(M_PI) * test_hz / sr;
+        const float dphi = 2.0f * std::numbers::pi_v<float> * test_hz / sr;
         float peak = 0.0f;
         for (int off = 0; off < total; off += block) {
             for (int i = 0; i < block; ++i) {

@@ -19,6 +19,7 @@
 // also render through WM_PAINT. Unattached GPU repaint and explicit capture
 // remain synchronous.
 
+#include "../../src/pending_resize.hpp"
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/host_frame_pump.hpp>
 #include <pulp/view/platform/win_plugin_input_router.hpp>
@@ -32,9 +33,6 @@
 #include <pulp/view/window_host.hpp>
 
 #ifdef PULP_HAS_SKIA
-#include <pulp/render/gpu_surface.hpp>
-#include <pulp/render/skia_surface.hpp>
-#include <pulp/canvas/skia_canvas.hpp>
 #include "include/core/SkCanvas.h"
 #include "include/core/SkColorSpace.h"
 #include "include/core/SkData.h"
@@ -42,19 +40,22 @@
 #include "include/core/SkPixmap.h"
 #include "include/core/SkSurface.h"
 #include "include/encode/SkPngEncoder.h"
+#include <pulp/canvas/skia_canvas.hpp>
+#include <pulp/render/gpu_surface.hpp>
+#include <pulp/render/skia_surface.hpp>
 #endif
 
 #include <pulp/runtime/log.hpp>
-#include <pulp/runtime/trace.hpp>  // no-op unless PULP_TRACING=ON
+#include <pulp/runtime/trace.hpp> // no-op unless PULP_TRACING=ON
 
 // WIN32_LEAN_AND_MEAN + NOMINMAX, guarded, before <windows.h> so the min/max
 // macros don't collide with std::min/std::max or Skia (#384).
 #include <pulp/platform/win32_sane.hpp>
 
-#include <ole2.h>        // OleInitialize, RegisterDragDrop, IDropTarget, DoDragDrop
-#include <shellapi.h>    // DragQueryFileW, HDROP, CF_HDROP, DROPFILES
-#include <shlobj.h>      // SHCreateStdEnumFmtEtc (outbound IDataObject enum)
-#include "win_file_drag.hpp"  // shared OLE drag source (win_drag::win_run_file_drag)
+#include "win_file_drag.hpp" // shared OLE drag source (win_drag::win_run_file_drag)
+#include <ole2.h>            // OleInitialize, RegisterDragDrop, IDropTarget, DoDragDrop
+#include <shellapi.h>        // DragQueryFileW, HDROP, CF_HDROP, DROPFILES
+#include <shlobj.h>          // SHCreateStdEnumFmtEtc (outbound IDataObject enum)
 // After win32_sane.hpp + the OLE headers, matching where this code sat
 // before it was extracted — the include ORDER is load-bearing here.
 #include <pulp/view/platform/win_plugin_drop_target.hpp>
@@ -110,8 +111,12 @@ class WinPluginViewHost;
 struct ScopedFlag {
     bool& flag;
     bool prev;
-    explicit ScopedFlag(bool& f) : flag(f), prev(f) { flag = true; }
-    ~ScopedFlag() { flag = prev; }
+    explicit ScopedFlag(bool& f) : flag(f), prev(f) {
+        flag = true;
+    }
+    ~ScopedFlag() {
+        flag = prev;
+    }
     ScopedFlag(const ScopedFlag&) = delete;
     ScopedFlag& operator=(const ScopedFlag&) = delete;
 };
@@ -154,31 +159,33 @@ ATOM ensure_window_class() {
 // macOS gate. This class keeps what is genuinely native: decoding messages into
 // root-space events, and performing the capture/focus/tracking side effects the
 // router asks for through win_input::InputRouterHost.
-class WinPluginViewHost : public PluginViewHost,
-                          private win_input::InputRouterHost {
-public:
+class WinPluginViewHost : public PluginViewHost, private win_input::InputRouterHost {
+  public:
     WinPluginViewHost(View& root, const Options& options)
-        : root_(root),
-          size_(options.size),
-          use_gpu_(options.use_gpu),
-          options_(options) {
+        : root_(root), size_(options.size), use_gpu_(options.use_gpu), options_(options) {
+        // Test-only fault injection is opted into at construction. Normal
+        // editors never query the environment on their frame path.
+        wchar_t forced_frame_failure[2]{};
+        test_frame_failure_enabled_ = GetEnvironmentVariableW(L"PULP_TEST_FORCE_WIN_FRAME_FAILURE",
+                                                              forced_frame_failure, 2) > 0 &&
+                                      forced_frame_failure[0] == L'1';
         root_.set_frame_clock(&frame_clock_);
         // Dawn cannot configure presentation until attach_to_parent() gives the
         // HWND its final parent and style, so gpu_surface() is legitimately
         // null for the whole window between create() and attach. Say so, rather
         // than letting that null read as "this host is CPU".
-        if (use_gpu_) mark_gpu_surface_pending();
+        if (use_gpu_)
+            mark_gpu_surface_pending();
         ensure_window_class();
         // Create a hidden TOP-LEVEL window first (WS_POPUP). A WS_CHILD window
         // with a null parent is not a valid creation shape; we flip the style to
         // WS_CHILD and SetParent() in attach_to_parent(). `this` is passed as
         // lpParam so the wndproc can stash it at WM_NCCREATE.
-        hwnd_ = CreateWindowExW(
-            0, kChildClassName, L"",
-            WS_POPUP | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
-            0, 0, static_cast<int>(size_.width), static_cast<int>(size_.height),
-            /*parent*/ nullptr, nullptr, GetModuleHandleW(nullptr),
-            /*lpParam*/ this);
+        hwnd_ =
+            CreateWindowExW(0, kChildClassName, L"", WS_POPUP | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
+                            0, 0, static_cast<int>(size_.width), static_cast<int>(size_.height),
+                            /*parent*/ nullptr, nullptr, GetModuleHandleW(nullptr),
+                            /*lpParam*/ this);
         if (!hwnd_) {
             runtime::log_warn("WinPluginViewHost: CreateWindowExW failed");
             return;
@@ -204,7 +211,9 @@ public:
         }
     }
 
-    NativeViewHandle native_handle() override { return static_cast<void*>(hwnd_); }
+    NativeViewHandle native_handle() override {
+        return static_cast<void*>(hwnd_);
+    }
 
     // Outbound file drag (drag audio out to Explorer / a Canvas / another app).
     // The host owns its HWND, so this is a plain OLE drag source — no WebView
@@ -214,14 +223,20 @@ public:
     }
 
     void attach_to_parent(NativeViewHandle parent) override {
-        if (!hwnd_) return;
+        (void)try_attach_to_parent(parent);
+    }
+
+    bool try_attach_to_parent(NativeViewHandle parent) override {
+        if (!hwnd_)
+            return false;
         HWND parent_hwnd = static_cast<HWND>(parent);
-        if (!parent_hwnd) return;
-        const HWND current_parent = GetParent(hwnd_);
-        if (attached_.load(std::memory_order_acquire) && current_parent == parent_hwnd)
-            return;
-        if (current_parent != nullptr || attached_.load(std::memory_order_acquire))
-            detach();
+        if (!parent_hwnd)
+            return false;
+        // A live attachment owns its timer and presentation surfaces. Repeating
+        // it is a no-op; changing its native shape requires an explicit detach.
+        // Report refusal directly: is_attached() still describes the old parent.
+        if (attached_.load(std::memory_order_acquire))
+            return GetParent(hwnd_) == parent_hwnd;
         // Switch WS_POPUP -> WS_CHILD before reparenting (SetParent does not add
         // the style itself); SWP_FRAMECHANGED makes the style edit take effect.
         LONG_PTR style = GetWindowLongPtrW(hwnd_, GWL_STYLE);
@@ -240,7 +255,7 @@ public:
                               (style & ~static_cast<LONG_PTR>(WS_CHILD)) | WS_POPUP);
             SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0,
                          SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
-            return;  // attached_ stays false; try_attach_to_parent reports failure
+            return false;
         }
         {
             // Bracket our own sizing SetWindowPos: it synchronously re-enters the
@@ -248,23 +263,17 @@ public:
             // not reconcile a resize we ourselves drove (would double-fire the
             // resize callback / mis-scale on HiDPI). See handle_wm_size().
             ScopedFlag g(in_set_size_);
-            SetWindowPos(hwnd_, nullptr, 0, 0,
-                         static_cast<int>(size_.width), static_cast<int>(size_.height),
+            SetWindowPos(hwnd_, nullptr, 0, 0, static_cast<int>(size_.width),
+                         static_cast<int>(size_.height),
                          SWP_NOZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
         }
         ShowWindow(hwnd_, SW_SHOW);
         if (!start_frame_timer()) {
-            // An attached editor has no synchronous repaint fallback. Roll the
-            // native embedding back before publishing attached_=true, so a
-            // failed timer cannot leave a visible but permanently dirty HWND.
-            ShowWindow(hwnd_, SW_HIDE);
-            SetParent(hwnd_, nullptr);
-            LONG_PTR failed_style = GetWindowLongPtrW(hwnd_, GWL_STYLE);
-            failed_style = (failed_style & ~static_cast<LONG_PTR>(WS_CHILD)) | WS_POPUP;
-            SetWindowLongPtrW(hwnd_, GWL_STYLE, failed_style);
-            SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0,
-                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
-            return;
+            // An attached repaint is only live while the timer can consume its
+            // dirty bit. Fail closed instead of leaving a visible child that
+            // can never present another frame.
+            detach();
+            return false;
         }
         attached_.store(true, std::memory_order_release);
 #ifdef PULP_HAS_SKIA
@@ -274,8 +283,7 @@ public:
         // SetParent converts it into REAPER's WS_CHILD. Initialize only after
         // the final parent/style/size are in place.
         if (use_gpu_ && surface_lifecycle_.note_attached()) {
-            init_gpu(static_cast<float>(size_.width),
-                     static_cast<float>(size_.height));
+            init_gpu(static_cast<float>(size_.width), static_cast<float>(size_.height));
             // Reset the recreate budget on a FRESH editor session only. Doing
             // it inside init_gpu() would also reset it on the recreate path,
             // and a surface that rebuilds cleanly but never presents would then
@@ -294,18 +302,20 @@ public:
         }
 #endif
         repaint();
+        return true;
     }
 
     bool is_attached() const noexcept {
-        if (!hwnd_) return false;
+        if (!hwnd_)
+            return false;
         // Authoritative check: do we currently have a parent? (Survives a host
         // that detaches us behind our back.)
-        return GetParent(hwnd_) != nullptr &&
-               attached_.load(std::memory_order_acquire);
+        return GetParent(hwnd_) != nullptr && attached_.load(std::memory_order_acquire);
     }
 
     void detach() override {
-        if (!hwnd_) return;
+        if (!hwnd_)
+            return;
         stop_frame_timer();
         input_router_.cancel_gesture();
         try {
@@ -348,6 +358,7 @@ public:
         if (gpu_surface_ && skia_surface_) {
             render_frame(nullptr, nullptr, nullptr);
         } else if (dc) {
+            deliver_pending_resize();
             // Same contract as the GPU path: consume the damage for this frame
             // and put it back if the blit never happens, so a failed raster
             // frame does not silently retire a region nobody painted.
@@ -370,11 +381,9 @@ public:
                 info.bmiHeader.biPlanes = 1;
                 info.bmiHeader.biBitCount = 32;
                 info.bmiHeader.biCompression = BI_RGB;
-                if (StretchDIBits(dc, 0, 0, static_cast<int>(w),
-                                  static_cast<int>(h), 0, 0,
-                                  static_cast<int>(w), static_cast<int>(h),
-                                  pixels.data(), &info, DIB_RGB_COLORS,
-                                  SRCCOPY) == GDI_ERROR)
+                if (StretchDIBits(dc, 0, 0, static_cast<int>(w), static_cast<int>(h), 0, 0,
+                                  static_cast<int>(w), static_cast<int>(h), pixels.data(), &info,
+                                  DIB_RGB_COLORS, SRCCOPY) == GDI_ERROR)
                     damage_.restore(consumed);
             }
         }
@@ -390,7 +399,8 @@ public:
     // what the gesture DOES belongs on the router's.
 
     void handle_mouse_down(LPARAM lp, WPARAM wp, MouseButton button) {
-        if (!hwnd_) return;
+        if (!hwnd_)
+            return;
         input_router_.on_mouse_down(mouse_point(lp), button, mouse_modifiers(wp));
     }
 
@@ -404,9 +414,13 @@ public:
         input_router_.on_mouse_up(mouse_point(lp), button, mouse_modifiers(wp));
     }
 
-    void handle_capture_lost() { input_router_.on_capture_lost(); }
+    void handle_capture_lost() {
+        input_router_.on_capture_lost();
+    }
 
-    void handle_mouse_leave() { input_router_.on_mouse_leave(); }
+    void handle_mouse_leave() {
+        input_router_.on_mouse_leave();
+    }
 
     void handle_mouse_wheel(LPARAM lp, WPARAM wp, bool horizontal) {
         // Wheel messages carry SCREEN coordinates; every other pointer message
@@ -414,22 +428,18 @@ public:
         // sees the same space for all of them.
         const auto raw = static_cast<uint32_t>(static_cast<uintptr_t>(lp));
         POINT screen{win_input::lparam_x(raw), win_input::lparam_y(raw)};
-        if (!ScreenToClient(hwnd_, &screen)) return;
-        const auto packed = MAKELPARAM(static_cast<short>(screen.x),
-                                      static_cast<short>(screen.y));
-        const float steps = win_input::wheel_steps(
-            static_cast<uint32_t>(wp), horizontal);
-        input_router_.on_mouse_wheel(mouse_point(packed),
-                                     horizontal ? steps : 0.0f,
-                                     horizontal ? 0.0f : steps,
-                                     mouse_modifiers(wp));
+        if (!ScreenToClient(hwnd_, &screen))
+            return;
+        const auto packed = MAKELPARAM(static_cast<short>(screen.x), static_cast<short>(screen.y));
+        const float steps = win_input::wheel_steps(static_cast<uint32_t>(wp), horizontal);
+        input_router_.on_mouse_wheel(mouse_point(packed), horizontal ? steps : 0.0f,
+                                     horizontal ? 0.0f : steps, mouse_modifiers(wp));
     }
 
     bool handle_key(WPARAM wp, LPARAM lp, bool is_down) {
-        return input_router_.on_key(
-            win_input::key_code_from_virtual_key(static_cast<uint32_t>(wp)),
-            keyboard_modifiers(), is_down,
-            is_down && ((static_cast<uintptr_t>(lp) & (1u << 30)) != 0));
+        return input_router_.on_key(win_input::key_code_from_virtual_key(static_cast<uint32_t>(wp)),
+                                    keyboard_modifiers(), is_down,
+                                    is_down && ((static_cast<uintptr_t>(lp) & (1u << 30)) != 0));
     }
 
     bool handle_text(WPARAM wp) {
@@ -451,7 +461,8 @@ public:
             return;
         }
 #endif
-        if (hwnd_) InvalidateRect(hwnd_, nullptr, FALSE);
+        if (hwnd_)
+            InvalidateRect(hwnd_, nullptr, FALSE);
     }
 
     void repaint() override {
@@ -476,27 +487,31 @@ public:
     // endless chain of WM_PAINT messages.
     void request_repaint_from_input() {
         needs_repaint_ = true;
-        if (hwnd_) InvalidateRect(hwnd_, nullptr, FALSE);
+        if (hwnd_)
+            InvalidateRect(hwnd_, nullptr, FALSE);
     }
 
     void set_size(uint32_t width, uint32_t height) override {
         size_ = {width, height};
+        physical_w_ = physical_h_ = 0; // a logical size: derive the pixels
         if (hwnd_) {
             // SetWindowPos re-enters the wndproc synchronously (WM_SIZE); the
             // guard makes handle_wm_size() ignore that self-driven echo so we
             // don't reconcile (and re-fire the resize callback for) a size WE
             // just set.
             ScopedFlag g(in_set_size_);
-            SetWindowPos(hwnd_, nullptr, 0, 0, static_cast<int>(width),
-                         static_cast<int>(height), SWP_NOZORDER | SWP_NOMOVE);
+            SetWindowPos(hwnd_, nullptr, 0, 0, static_cast<int>(width), static_cast<int>(height),
+                         SWP_NOZORDER | SWP_NOMOVE);
         }
 #ifdef PULP_HAS_SKIA
         // GPU surface is sized at PHYSICAL pixels (logical × scale); SkiaSurface
         // takes LOGICAL dims + the scale factor and applies the logical→pixel
         // transform itself at paint (mirrors MacGpuWindowHost).
-        damage_.mark_full();  // new surface size => first frame is full
-        if (gpu_surface_) gpu_surface_->resize(pixel_w(), pixel_h());
-        if (skia_surface_) skia_surface_->resize(width, height, scale_);
+        damage_.mark_full(); // new surface size => first frame is full
+        if (gpu_surface_)
+            gpu_surface_->resize(pixel_w(), pixel_h());
+        if (skia_surface_)
+            skia_surface_->resize(width, height, scale_);
 #endif
         repaint();
     }
@@ -510,66 +525,120 @@ public:
     // the window, and calling it here would recurse.
     void handle_wm_size(uint32_t physical_w, uint32_t physical_h) {
         // Ignore the WM_SIZE/WM_WINDOWPOSCHANGED echo of our own SetWindowPos.
-        if (in_set_size_) return;
-        if (physical_w == 0 || physical_h == 0) return;  // minimized / degenerate
+        if (in_set_size_)
+            return;
+        if (physical_w == 0 || physical_h == 0)
+            return; // minimized / degenerate
         // PHYSICAL → LOGICAL. size_ / the view tree live in logical units; the
         // GPU swapchain lives at physical pixels. Round to nearest so fractional
         // scales (1.5×) don't drift a pixel each resize.
         const float s = scale_ > 0.0f ? scale_ : 1.0f;
-        const uint32_t logical_w =
-            static_cast<uint32_t>(static_cast<float>(physical_w) / s + 0.5f);
-        const uint32_t logical_h =
-            static_cast<uint32_t>(static_cast<float>(physical_h) / s + 0.5f);
-        if (logical_w == 0 || logical_h == 0) return;
-        if (logical_w == size_.width && logical_h == size_.height) return;  // no-op
+        const uint32_t logical_w = static_cast<uint32_t>(static_cast<float>(physical_w) / s + 0.5f);
+        const uint32_t logical_h = static_cast<uint32_t>(static_cast<float>(physical_h) / s + 0.5f);
+        if (logical_w == 0 || logical_h == 0)
+            return;
+        // At a fractional scale two client widths round to one logical width
+        // (1000 and 1001 px are both 667 at 1.5x), so the physical size is
+        // compared too: the swapchain follows the client rect exactly, and
+        // only a logical change is news to the processor.
+        const bool logical_changed = logical_w != size_.width || logical_h != size_.height;
+        if (!logical_changed && physical_w == pixel_w() && physical_h == pixel_h())
+            return; // no-op
         size_ = {logical_w, logical_h};
+        physical_w_ = physical_w;
+        physical_h_ = physical_h;
 #ifdef PULP_HAS_SKIA
         // Mirror set_size()'s surface sizing (GPU at physical, Skia at logical +
         // scale) but WITHOUT the SetWindowPos.
-        damage_.mark_full();  // new surface size => first frame is full
-        if (gpu_surface_) gpu_surface_->resize(pixel_w(), pixel_h());
-        if (skia_surface_) skia_surface_->resize(logical_w, logical_h, scale_);
+        damage_.mark_full(); // new surface size => first frame is full
+        if (gpu_surface_)
+            gpu_surface_->resize(pixel_w(), pixel_h());
+        if (skia_surface_)
+            skia_surface_->resize(logical_w, logical_h, scale_);
 #endif
-        if (resize_cb_) resize_cb_(logical_w, logical_h);
+        // Delivered by the next frame, once per frame with the last size, and
+        // only when the logical size changed (a physical-only change is not
+        // news to the processor). An unattached editor has no frame timer, so
+        // nothing may paint (the raster path only invalidates): tell the
+        // processor now.
+        if (logical_changed) {
+            pending_resize_.record(logical_w, logical_h);
+            if (!attached_.load(std::memory_order_acquire))
+                deliver_pending_resize();
+        }
         repaint();
     }
 
-    Size get_size() const override { return size_; }
+    // Runs the host's resize callback for the last size handle_wm_size()
+    // recorded since the previous frame (see PendingResize).
+    void deliver_pending_resize() {
+        pending_resize_.deliver([this](uint32_t w, uint32_t h) {
+            if (resize_cb_)
+                resize_cb_(w, h);
+        });
+    }
+
+    Size get_size() const override {
+        return size_;
+    }
 
     // ── HiDPI scale seam (W8) ────────────────────────────────────────────
-    float scale_factor() const override { return scale_; }
+    float scale_factor() const override {
+        return scale_;
+    }
 
     void set_scale_factor(float scale) override {
-        if (scale <= 0.0f) return;  // ignore non-positive; keep current scale
-        if (scale == scale_) return;
+        if (scale <= 0.0f)
+            return; // ignore non-positive; keep current scale
+        if (scale == scale_)
+            return;
         scale_ = scale;
+        // The client rect at the new scale arrives with the WM_SIZE that
+        // follows; until then derive it.
+        physical_w_ = physical_h_ = 0;
 #ifdef PULP_HAS_SKIA
         // Re-size surfaces at the new pixel resolution. Logical size is
         // unchanged, so the view tree layout is untouched.
-        damage_.mark_full();  // new surface size => first frame is full
-        if (gpu_surface_) gpu_surface_->resize(pixel_w(), pixel_h());
-        if (skia_surface_) skia_surface_->resize(size_.width, size_.height, scale_);
+        damage_.mark_full(); // new surface size => first frame is full
+        if (gpu_surface_)
+            gpu_surface_->resize(pixel_w(), pixel_h());
+        if (skia_surface_)
+            skia_surface_->resize(size_.width, size_.height, scale_);
 #endif
         repaint();
     }
 
     // WM_DPICHANGED: derive the new scale from the wParam DPI and rescale.
     void handle_dpi_changed(uint32_t new_dpi) {
-        if (new_dpi == 0) return;
+        if (new_dpi == 0)
+            return;
         set_scale_factor(static_cast<float>(new_dpi) / 96.0f);
     }
 
     bool is_gpu_backed() const override {
 #ifdef PULP_HAS_SKIA
-        return gpu_surface_ != nullptr && skia_surface_ != nullptr &&
-               skia_surface_->is_available();
+        return gpu_surface_ != nullptr && skia_surface_ != nullptr && skia_surface_->is_available();
 #else
         return false;
 #endif
     }
 
 #ifdef PULP_HAS_SKIA
-    render::GpuSurface* gpu_surface() const override { return gpu_surface_.get(); }
+    render::GpuSurface* gpu_surface() const override {
+        return gpu_surface_.get();
+    }
+
+    GpuCacheUsage gpu_cache_usage() const override {
+        if (!skia_surface_)
+            return {};
+        const auto bytes = skia_surface_->gpu_cache_bytes();
+        return {bytes.budgeted, bytes.purgeable};
+    }
+
+    void release_gpu_caches() override {
+        if (skia_surface_)
+            skia_surface_->trim_gpu_resources(render::SkiaSurface::TrimLevel::everything());
+    }
 #endif
 
     void set_idle_callback(std::function<void()> cb) override {
@@ -608,7 +677,9 @@ public:
         repaint();
     }
 
-    void set_fixed_aspect_ratio(float ratio) override { fixed_aspect_ratio_ = ratio; }
+    void set_fixed_aspect_ratio(float ratio) override {
+        fixed_aspect_ratio_ = ratio;
+    }
 
     Point window_to_root_point(Point pt) const override {
         // One shared inverse (WAH-10). This was byte-identical in the two
@@ -634,6 +705,9 @@ public:
         if (!should_dispatch_host_frame(frame_pump_, needs_repaint_, continuous_frames_,
                                         static_cast<bool>(idle_callback_)))
             return;
+        // Before the tick, so the editor lays out the frame at the size the
+        // processor was told about.
+        deliver_pending_resize();
 
         const auto now =
             std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch())
@@ -648,9 +722,12 @@ public:
         }
     }
 
-private:
+  private:
     View& root_;
-    Size size_;        // LOGICAL (DPI-independent) size; layout coordinate space
+    Size size_; // LOGICAL (DPI-independent) size; layout coordinate space
+    // PHYSICAL client size from the last WM_SIZE; 0 when the size came from
+    // set_size() or a scale change and is derived from size_ × scale_.
+    uint32_t physical_w_ = 0, physical_h_ = 0;
     bool use_gpu_ = false;
     // Presentation + diagnostics policy, decided by the caller rather than
     // hardcoded here (WAH-13). Both this host and the Linux one read the
@@ -663,13 +740,15 @@ private:
     FrameClock frame_clock_;
     HostFramePump frame_pump_;
     bool needs_repaint_ = true;
+    bool test_frame_failure_enabled_ = false;
     bool continuous_frames_ = false;
     std::function<void(uint32_t, uint32_t)> resize_cb_;
+    PendingResize pending_resize_;
     float design_viewport_w_ = 0.0f;
     float design_viewport_h_ = 0.0f;
     float fixed_aspect_ratio_ = 0.0f;
     bool design_top_align_ = false;
-    float scale_ = 1.0f;  // HiDPI: logical→physical-pixel factor (DPI/96)
+    float scale_ = 1.0f; // HiDPI: logical→physical-pixel factor (DPI/96)
     // True only while WE drive a SetWindowPos (set_size/attach). SetWindowPos
     // re-enters the wndproc synchronously on this thread, so this flag lets
     // handle_wm_size() distinguish a host-driven resize from our own echo.
@@ -721,24 +800,30 @@ private:
     // not allowed to make itself; all of them can re-enter this wndproc
     // synchronously, which is exactly why the router is written to tolerate it.
 
-    View& input_root() noexcept override { return root_; }
+    View& input_root() noexcept override {
+        return root_;
+    }
 
     void input_capture_pointer() override {
-        if (hwnd_) SetCapture(hwnd_);
+        if (hwnd_)
+            SetCapture(hwnd_);
     }
 
     void input_release_pointer_capture() override {
         // The router terminalizes BEFORE calling this, because ReleaseCapture
         // synchronously sends WM_CAPTURECHANGED back through this wndproc.
-        if (hwnd_ && GetCapture() == hwnd_) ReleaseCapture();
+        if (hwnd_ && GetCapture() == hwnd_)
+            ReleaseCapture();
     }
 
     void input_take_keyboard_focus() override {
-        if (hwnd_) SetFocus(hwnd_);
+        if (hwnd_)
+            SetFocus(hwnd_);
     }
 
     bool input_begin_mouse_leave_tracking() override {
-        if (!hwnd_) return false;
+        if (!hwnd_)
+            return false;
         TRACKMOUSEEVENT track{};
         track.cbSize = sizeof(track);
         track.dwFlags = TME_LEAVE;
@@ -746,26 +831,24 @@ private:
         return TrackMouseEvent(&track) != FALSE;
     }
 
-    void input_request_repaint() override { request_repaint_from_input(); }
+    void input_request_repaint() override {
+        request_repaint_from_input();
+    }
 
     // Windows packs only Shift/Control into the message; Alt and the Windows
     // key are keyboard state, so they are sampled here and passed to the pure
     // mapper.
     static uint16_t mouse_modifiers(WPARAM wp) {
         const bool alt_down = (GetKeyState(VK_MENU) & 0x8000) != 0;
-        const bool meta_down = (GetKeyState(VK_LWIN) & 0x8000) != 0 ||
-                               (GetKeyState(VK_RWIN) & 0x8000) != 0;
-        return win_input::mouse_modifiers(
-            static_cast<uint32_t>(wp), alt_down, meta_down);
+        const bool meta_down =
+            (GetKeyState(VK_LWIN) & 0x8000) != 0 || (GetKeyState(VK_RWIN) & 0x8000) != 0;
+        return win_input::mouse_modifiers(static_cast<uint32_t>(wp), alt_down, meta_down);
     }
 
     static uint16_t keyboard_modifiers() {
-        const auto down = [](int key) {
-            return (GetKeyState(key) & 0x8000) != 0;
-        };
-        return win_input::key_modifiers(
-            down(VK_SHIFT), down(VK_CONTROL), down(VK_MENU),
-            down(VK_LWIN) || down(VK_RWIN));
+        const auto down = [](int key) { return (GetKeyState(key) & 0x8000) != 0; };
+        return win_input::key_modifiers(down(VK_SHIFT), down(VK_CONTROL), down(VK_MENU),
+                                        down(VK_LWIN) || down(VK_RWIN));
     }
 
     // The size/scale/viewport this frame paints against. One value so the
@@ -778,6 +861,14 @@ private:
         FrameGeometry g;
         g.width = static_cast<float>(size_.width);
         g.height = static_cast<float>(size_.height);
+        if (physical_w_ != 0 && physical_h_ != 0) {
+            // Paint the logical size the client rect really has (667.33 at
+            // 1.5x for 1001 px), so the frame covers every physical pixel.
+            g.physical_width = physical_w_;
+            g.physical_height = physical_h_;
+            g.width = static_cast<float>(physical_w_) / scale_;
+            g.height = static_cast<float>(physical_h_) / scale_;
+        }
         g.scale = scale_;
         g.design_width = design_viewport_w_;
         g.design_height = design_viewport_h_;
@@ -789,16 +880,22 @@ private:
     // Physical pixel dimensions. FrameGeometry owns the logical×scale rule and
     // its min-1 clamp so the surface, the raster fallback and the capture path
     // cannot disagree about how big a frame is.
-    uint32_t pixel_w() const { return frame_geometry().pixel_width(); }
-    uint32_t pixel_h() const { return frame_geometry().pixel_height(); }
+    uint32_t pixel_w() const {
+        return frame_geometry().pixel_width();
+    }
+    uint32_t pixel_h() const {
+        return frame_geometry().pixel_height();
+    }
 
     // Derive the DPI scale for a window. GetDpiForWindow returns the effective
     // DPI (96 = 1×, 144 = 1.5×, 192 = 2×). Falls back to 1.0 if it reports 0
     // (per-monitor-DPI unaware context, or a window with no monitor yet).
     static float detect_dpi_scale(HWND hwnd) {
-        if (!hwnd) return 1.0f;
+        if (!hwnd)
+            return 1.0f;
         const UINT dpi = GetDpiForWindow(hwnd);
-        if (dpi == 0) return 1.0f;
+        if (dpi == 0)
+            return 1.0f;
         return static_cast<float>(dpi) / 96.0f;
     }
 
@@ -818,7 +915,9 @@ private:
         });
     }
 
-    void shutdown_drag_drop() { drop_registration_.reset(); }
+    void shutdown_drag_drop() {
+        drop_registration_.reset();
+    }
 
 #ifdef PULP_HAS_SKIA
     std::unique_ptr<render::GpuSurface> gpu_surface_;
@@ -846,8 +945,7 @@ private:
     // exactly what makes it different from the attach-time creation path.
     void recreate_gpu_surfaces() {
         release_gpu_surfaces(GpuSurfaceState::pending);
-        init_gpu(static_cast<float>(size_.width),
-                 static_cast<float>(size_.height));
+        init_gpu(static_cast<float>(size_.width), static_cast<float>(size_.height));
         if (!gpu_surface_ || !skia_surface_) {
             release_gpu_surfaces(GpuSurfaceState::unavailable);
             surface_lifecycle_.note_creation_failed();
@@ -856,20 +954,21 @@ private:
 
     void init_gpu(float width, float height) {
         FrameGeometry geometry = frame_geometry();
-        geometry.width = width;    // the caller may be mid-resize
+        geometry.width = width; // the caller may be mid-resize
         geometry.height = height;
         // FU-2 partial repaint, default OFF.
         const char* env = std::getenv("PULP_PARTIAL_REPAINT");
-        auto surfaces = create_editor_surfaces(
-            static_cast<void*>(hwnd_), geometry, options_.present_policy,
-            options_.enable_gpu_timing, env && env[0] == '1', "WinPluginViewHost");
+        auto surfaces = create_editor_surfaces(static_cast<void*>(hwnd_), geometry,
+                                               options_.present_policy, options_.enable_gpu_timing,
+                                               env && env[0] == '1', "WinPluginViewHost");
 
         partial_repaint_enabled_ = surfaces.partial_repaint;
         gpu_surface_ = std::move(surfaces.gpu);
         skia_surface_ = std::move(surfaces.skia);
-        if (!surfaces.ok()) return;  // the caller decides what a failure means
+        if (!surfaces.ok())
+            return; // the caller decides what a failure means
 
-        damage_.mark_full();  // a new surface has no previous frame to preserve
+        damage_.mark_full(); // a new surface has no previous frame to preserve
         // The surface is live: tell the scripted UI (navigator.gpu) and anyone
         // else waiting. Publishing here rather than making consumers poll is
         // what fixes the Windows case — every format adapter read
@@ -889,7 +988,9 @@ private:
         // queries; without it the Windows editor showed only gpu_submit /
         // gpu_present and there was no frame span to attribute them to.
         PULP_TRACE_SCOPE_NAMED("render", "frame");
-        if (!gpu_surface_ || !skia_surface_) return false;
+        deliver_pending_resize();
+        if (!gpu_surface_ || !skia_surface_)
+            return false;
 
         PluginFrameRenderer::Request request;
         request.root = &root_;
@@ -900,34 +1001,48 @@ private:
         request.capture_width = cap_w;
         request.capture_height = cap_h;
 
+        wchar_t forced_frame_failure[2]{};
+        const bool force_failure = test_frame_failure_enabled_ &&
+                                   GetEnvironmentVariableW(L"PULP_TEST_FORCE_WIN_FRAME_FAILURE",
+                                                           forced_frame_failure, 2) > 0 &&
+                                   forced_frame_failure[0] == L'1';
         const auto frame =
-            frame_renderer_.render(*gpu_surface_, *skia_surface_, damage_, request);
+            force_failure ? PluginFrameRenderer::Frame{}
+                          : frame_renderer_.render(*gpu_surface_, *skia_surface_, damage_, request);
 
         // A frame that never reached the drawable must not be reported as a
         // rendered frame, and must not retire its damage — the shared renderer
         // already put the damage back. React to a broken drawable here, where
         // the native surface lives.
         if (frame.should_recreate_surface) {
-            runtime::log_warn(
-                "WinPluginViewHost: frame did not reach the drawable "
-                "(attempt {} of {}); recreating GPU surfaces",
-                frame_renderer_.consecutive_recreates(),
-                PluginFrameRenderer::kMaxConsecutiveRecreates);
+            runtime::log_warn("WinPluginViewHost: frame did not reach the drawable "
+                              "(attempt {} of {}); recreating GPU surfaces",
+                              frame_renderer_.consecutive_recreates(),
+                              PluginFrameRenderer::kMaxConsecutiveRecreates);
             recreate_gpu_surfaces();
         } else if (frame.gpu_path_exhausted) {
-            runtime::log_error(
-                "WinPluginViewHost: GPU presentation failed {} times in a row; "
-                "falling back to CPU raster for this editor",
-                PluginFrameRenderer::kMaxConsecutiveRecreates);
+            runtime::log_error("WinPluginViewHost: GPU presentation failed {} times in a row; "
+                               "falling back to CPU raster for this editor",
+                               PluginFrameRenderer::kMaxConsecutiveRecreates);
             release_gpu_surfaces(GpuSurfaceState::unavailable);
             // Keep the lifecycle state honest: there are no surfaces now, so a
             // later detach/attach cycle must rebuild rather than assume a live
             // pair.
             surface_lifecycle_.note_creation_failed();
-            if (hwnd_) InvalidateRect(hwnd_, nullptr, FALSE);
+            if (hwnd_)
+                InvalidateRect(hwnd_, nullptr, FALSE);
         }
 
-        if (!frame.reached_output()) return false;
+        if (!frame.reached_output()) {
+            // The timer consumed its dirty bit before this attempt. Preserved
+            // damage also needs a future dispatch, including after WM_PAINT.
+            // Retry on the existing timer, never recursively. If recreation
+            // failed or GPU retries were exhausted, that tick schedules CPU
+            // raster instead. Successful output with failed readback does not
+            // enter this branch.
+            needs_repaint_ = true;
+            return false;
+        }
         // A failed/empty readback must report false so capture_back_buffer_png()
         // falls back to the raster path instead of returning a blank frame.
         return cap ? frame.readback_ok : true;
@@ -942,7 +1057,8 @@ private:
     // owns the Skia half; the idle tick stays here because it is the host's
     // frame callback, not part of rasterising.
     std::vector<uint8_t> raster_render_rgba(uint32_t* out_w, uint32_t* out_h) {
-        if (idle_callback_) idle_callback_();
+        if (idle_callback_)
+            idle_callback_();
         return raster_plugin_scene_rgba(root_, frame_geometry(), out_w, out_h);
     }
 
@@ -952,19 +1068,17 @@ private:
         return encode_rgba_png(pixels, w, h);
     }
 
-#endif  // PULP_HAS_SKIA
+#endif // PULP_HAS_SKIA
 };
 
 LRESULT CALLBACK pulp_pvh_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     if (msg == WM_NCCREATE) {
         // Stash the host pointer passed via CreateWindowEx lpParam.
         auto* cs = reinterpret_cast<CREATESTRUCTW*>(lp);
-        SetWindowLongPtrW(hwnd, GWLP_USERDATA,
-                          reinterpret_cast<LONG_PTR>(cs->lpCreateParams));
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(cs->lpCreateParams));
         return DefWindowProcW(hwnd, msg, wp, lp);
     }
-    auto* host = reinterpret_cast<WinPluginViewHost*>(
-        GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    auto* host = reinterpret_cast<WinPluginViewHost*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     if (host && msg == WM_TIMER && wp == kFrameTimerId) {
         host->handle_frame_timer();
         return 0;
@@ -973,20 +1087,16 @@ LRESULT CALLBACK pulp_pvh_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         host->handle_wm_paint();
         return 0;
     }
-    if (host && (msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN ||
-                 msg == WM_MBUTTONDOWN)) {
-        host->handle_mouse_down(
-            lp, wp, win_input::mouse_button_from_message(msg));
+    if (host && (msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN || msg == WM_MBUTTONDOWN)) {
+        host->handle_mouse_down(lp, wp, win_input::mouse_button_from_message(msg));
         return 0;
     }
     if (host && msg == WM_MOUSEMOVE) {
         host->handle_mouse_move(lp, wp);
         return 0;
     }
-    if (host && (msg == WM_LBUTTONUP || msg == WM_RBUTTONUP ||
-                 msg == WM_MBUTTONUP)) {
-        host->handle_mouse_up(
-            lp, wp, win_input::mouse_button_from_message(msg));
+    if (host && (msg == WM_LBUTTONUP || msg == WM_RBUTTONUP || msg == WM_MBUTTONUP)) {
+        host->handle_mouse_up(lp, wp, win_input::mouse_button_from_message(msg));
         return 0;
     }
     if (host && msg == WM_MOUSELEAVE) {
@@ -1002,13 +1112,16 @@ LRESULT CALLBACK pulp_pvh_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
     if (host && (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN)) {
-        if (host->handle_key(wp, lp, true)) return 0;
+        if (host->handle_key(wp, lp, true))
+            return 0;
     }
     if (host && (msg == WM_KEYUP || msg == WM_SYSKEYUP)) {
-        if (host->handle_key(wp, lp, false)) return 0;
+        if (host->handle_key(wp, lp, false))
+            return 0;
     }
     if (host && msg == WM_CHAR) {
-        if (host->handle_text(wp)) return 0;
+        if (host->handle_text(wp))
+            return 0;
     }
     if (host && msg == WM_SETFOCUS) {
         host->handle_focus_changed(true);
@@ -1054,7 +1167,7 @@ LRESULT CALLBACK pulp_pvh_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
 
-}  // namespace
+} // namespace
 
 // Strong definition of the registration hook (the stub's no-op default is
 // compiled out via PULP_HAS_PLATFORM_PLUGIN_VIEW_HOST). Idempotent: installs the
@@ -1063,13 +1176,13 @@ LRESULT CALLBACK pulp_pvh_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 void register_platform_plugin_view_host() {
     static std::once_flag once;
     std::call_once(once, [] {
-        if (PluginViewHost::has_factory()) return;
+        if (PluginViewHost::has_factory())
+            return;
         PluginViewHost::set_factory(
-            [](View& root, const PluginViewHost::Options& opts)
-                -> std::unique_ptr<PluginViewHost> {
+            [](View& root, const PluginViewHost::Options& opts) -> std::unique_ptr<PluginViewHost> {
                 return std::make_unique<WinPluginViewHost>(root, opts);
             });
     });
 }
 
-}  // namespace pulp::view
+} // namespace pulp::view

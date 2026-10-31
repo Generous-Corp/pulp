@@ -17,7 +17,53 @@ import {
   captureCaseTimeout,
   execute,
   installedBrowser,
+  runCapture,
 } from "./capture_integration_support.mjs";
+
+// The browser runs at the capture's device scale, which Chromium applies as
+// zoom, so DOMSnapshot hands back layout and text-box bounds in device
+// pixels. Everything downstream reads the snapshot as CSS pixels: a capture
+// that kept the device units lowered every panel at twice its size.
+test("the captured snapshot is in CSS pixels at the capture scale",
+  { timeout: captureCaseTimeout() }, async (context) => {
+    const browser = await installedBrowser();
+    if (!browser) return context.skip("no compatible system browser is installed");
+    const root = await mkdtemp(path.join(os.tmpdir(), "pulp-browser-snapshot-units-"));
+    const input = path.join(root, "panel.html");
+    const output = path.join(root, "capture");
+    const script = fileURLToPath(new URL("./capture.mjs", import.meta.url));
+    try {
+      await writeFile(input, `<!doctype html><style>
+        html,body{margin:0;width:400px;height:300px;background:#fff}
+        #box{position:absolute;left:30px;top:20px;width:100px;height:50px;
+          background:#c33;font:16px/18px sans-serif}
+      </style><div id="box">x</div>`);
+      await runCapture(script, browser, input, root, output, 400, 300);
+      const snapshot = JSON.parse(await readFile(path.join(output, "dom-snapshot.json"), "utf8"));
+      const document = snapshot.documents[0];
+      const strings = snapshot.strings;
+      const isBox = (nodeIndex) => {
+        const pairs = document.nodes.attributes?.[nodeIndex] ?? [];
+        for (let i = 0; i + 1 < pairs.length; i += 2)
+          if (strings[pairs[i]] === "id" && strings[pairs[i + 1]] === "box") return true;
+        return false;
+      };
+      const entry = document.layout.nodeIndex.findIndex(isBox);
+      assert.ok(entry >= 0, "the snapshot lays out #box");
+      assert.deepEqual(document.layout.bounds[entry], [30, 20, 100, 50]);
+      assert.equal(document.contentWidth, 400);
+      assert.equal(document.contentHeight, 300);
+      // Chrome at a real device scale snaps the line box to device pixels,
+      // which can move its edge by half a CSS pixel; device units would put
+      // it tens of pixels out.
+      for (const [x, y, width, height] of document.textBoxes.bounds) {
+        assert.ok(x >= 29 && x + width <= 131 && y >= 19 && y + height <= 71,
+          `the text box ${[x, y, width, height]} sits inside #box`);
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 
 test("a pointer drawn straight up survives the capture",
   { timeout: captureCaseTimeout() }, async (context) => {

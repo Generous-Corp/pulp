@@ -713,7 +713,8 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
          .materialized_canvas_composition = request.materialized_canvas_composition,
          .require_canvas_ink = request.require_canvas_ink,
          .capture_materialized_document = browser_import_captures_materialized_document(
-             request.materialized_runtime_emit, request.materialized_canvas_composition)},
+             request.materialized_runtime_emit, request.materialized_canvas_composition),
+         .browser_probe_cache_directory = request.browser_probe_cache_directory},
         content);
 
     BrowserLaneClock clock;

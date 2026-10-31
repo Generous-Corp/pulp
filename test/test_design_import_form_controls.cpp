@@ -257,6 +257,49 @@ TEST_CASE("an author-styled button, and a button from another lane, do not get t
     CHECK(dynamic_cast<TextButton*>(root->child_at(0)) != nullptr);
 }
 
+TEST_CASE("a theme-painted button input lowers to a ButtonSurface labelled by its value",
+          "[view][import][native-materializer][form-controls]") {
+    // The capture draws a button input's value as a `#control-value` text
+    // child, so the input carries its label the way a <button> carries its
+    // content.
+    const auto input_button = [](std::string id, float top) {
+        auto node = captured_input(std::move(id), "button", 10.0f, top, 80.0f, 24.0f);
+        node.attributes["type"] = "submit";
+        IRNode value;
+        value.type = "text";
+        value.name = "#control-value";
+        value.text_content = "Submit";
+        value.style.position = "absolute";
+        value.style.left = 7.0f;
+        value.style.top = 2.0f;
+        value.style.width = 66.0f;
+        value.style.height = 20.0f;
+        node.children.push_back(value);
+        return node;
+    };
+    auto themed = input_button("send", 10.0f);
+    themed.attributes["ua_disabled"] = "1";
+    auto styled = input_button("styled", 50.0f);
+    styled.attributes["native_theme"] = "author";
+    styled.attributes.erase("ua_control");
+    styled.style.background_color = "rgb(200, 0, 0)";
+    auto root = build_native_view_tree(panel_with({themed, styled}), {}, {});
+    REQUIRE(root->child_count() == 2);
+
+    auto* surface = dynamic_cast<ButtonSurface*>(root->child_at(0));
+    REQUIRE(surface != nullptr);
+    CHECK_FALSE(surface->enabled());
+    REQUIRE(surface->child_count() == 1);
+    auto* label = dynamic_cast<Label*>(surface->child_at(0));
+    REQUIRE(label != nullptr);
+    CHECK(label->text() == "Submit");
+
+    // Author styling dropped the theme: the input keeps its own paint.
+    CHECK(dynamic_cast<ButtonSurface*>(root->child_at(1)) == nullptr);
+    REQUIRE(root->child_at(1)->child_count() == 1);
+    CHECK(dynamic_cast<Label*>(root->child_at(1)->child_at(0)) != nullptr);
+}
+
 TEST_CASE("controls the theme did not paint, and widgets Pulp builds, keep the platform skin",
           "[view][import][native-materializer][form-controls]") {
     // Author box styling dropped the theme: the capture painted it from CSS.

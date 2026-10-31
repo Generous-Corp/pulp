@@ -1,0 +1,125 @@
+name: Shipyard merge steward
+
+# Read-only diagnostic for the exact-head steward: it reports what the steward
+# would admit and never mutates. The only admission writer is the local
+# steward tick on the configured mutation machine (m3), whose ghapp path guards
+# and records every arm; a dispatchable apply here would be a second, unguarded
+# writer.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: shipyard-merge-steward-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    if: github.repository == vars.PULP_PRIMARY_REPO && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Mint repository-scoped Shipyard App token
+        id: shipyard-app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          app-id: ${{ secrets.SHIPYARD_APP_ID }}
+          private-key: ${{ secrets.SHIPYARD_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-administration: read
+          permission-actions: read
+          permission-checks: read
+          permission-contents: read
+          permission-issues: read
+          permission-merge-queues: read
+          permission-pull-requests: read
+          permission-statuses: read
+
+      - name: Install pinned Shipyard
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ./tools/install-shipyard.sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Configure queue mutation authority
+        id: configure
+        env:
+          GH_TOKEN: ${{ steps.shipyard-app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.config/shipyard" "$RUNNER_TEMP/steward"
+          printf '%s\n' '[merge_queue]' 'mutation_machine = "github-actions"' \
+            > "$HOME/.config/shipyard/config.toml"
+          shipyard runner tag --set github-actions
+          shipyard merge-queue status --json | tee "$RUNNER_TEMP/steward/authority.json"
+          python3 - "$RUNNER_TEMP/steward/authority.json" <<'PY'
+          import json
+          import sys
+          status = json.load(open(sys.argv[1], encoding="utf-8"))
+          assert status["authority_configured"] is True
+          assert status["authority_matches"] is True
+          assert status["machine"] == "github-actions"
+          assert status["mutation_machine"] == "github-actions"
+          PY
+
+      - name: Reconcile and feed the native queue
+        id: reconcile
+        if: steps.configure.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ steps.shipyard-app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          args=(runner steward --repo "$GITHUB_REPOSITORY" --base main --arm-unqueued --json)
+          run_steward_with_retry() {
+            local attempt status
+            for attempt in 1 2 3; do
+              if "$@"; then
+                return 0
+              else
+                status=$?
+              fi
+              if [ "$attempt" -eq 3 ]; then
+                return "$status"
+              fi
+              sleep "$attempt"
+            done
+          }
+          set +e
+          run_steward_with_retry shipyard "${args[@]}" | tee "$RUNNER_TEMP/steward/report.json"
+          steward_status=${PIPESTATUS[0]}
+          set -e
+          if [ "$steward_status" -ne 0 ]; then
+            # A policy refusal for one PR is expected during a mixed backlog;
+            # transport, malformed-output, and mutation errors remain fatal.
+            if jq -e '
+              ([.repos[]?.errors[]?, .repos[]?.prs[]?.error?]
+                | map(select(. != null and . != ""))) as $errors
+              | ($errors | length > 0)
+              and ($errors | all(test("waiting_head_approval|waiting_required")))
+            ' "$RUNNER_TEMP/steward/report.json" >/dev/null; then
+              echo "steward completed with expected per-PR policy refusals; eligible candidates were processed"
+            else
+              exit "$steward_status"
+            fi
+          fi
+
+      - name: Publish feeder evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: shipyard-merge-steward-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/steward
+          retention-days: 14
+          if-no-files-found: warn

@@ -162,8 +162,21 @@ CSSStyleDeclaration.prototype.getPropertyValue = function(name) {
 };
 
 CSSStyleDeclaration.prototype.removeProperty = function(name) {
+    var old = this.getPropertyValue(name);
+    if (name.indexOf("--") === 0) {
+        var tokenName = name.slice(2);
+        if (typeof removeToken === 'function') removeToken(tokenName);
+        else {
+            // Keep stripped-down harnesses safe when the native token API is
+            // unavailable; empty string/zero are treated as missing by the
+            // var() resolver, while full bridges use removeToken above to
+            // erase color tokens as well.
+            if (typeof setStringToken === 'function') setStringToken(tokenName, "");
+            if (typeof setMotionToken === 'function') setMotionToken(tokenName, 0);
+        }
+        return old;
+    }
     var camel = name.replace(/-([a-z])/g, function(_, c) { return c.toUpperCase(); });
-    var old = this._props[camel] || "";
     delete this._props[camel];
     // Drop any applied-value record too, so re-setting the same value later is
     // treated as a fresh write rather than deduped against the removed one.

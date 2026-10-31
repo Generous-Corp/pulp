@@ -120,6 +120,12 @@ struct GraphRuntimeNodeBinding {
     AudioRateModulationDelivery audio_rate_modulation_delivery =
         AudioRateModulationDelivery::LegacyParameterEvents;
     bool preserve_parameter_events = false;
+    // The binding only reads its inputs, through the const views it is handed.
+    // When every reader of a node's output does, the snapshot lets them read that
+    // output in place (see GraphRuntimeSnapshot::InputPortSource), even when it
+    // fans out or the source keeps its output across blocks. Hosted plug-in
+    // slots and native cores, which pass inputs on as mutable, leave it false.
+    bool reads_inputs_only = false;
 };
 
 /// Control-thread-built graph snapshot for GraphRuntimeExecutor.
@@ -158,12 +164,60 @@ public:
     }
     std::uint32_t buffer_slot_count() const noexcept { return assignment_.slot_count; }
 
-private:
+    // Where one input port of a node reads from each block, resolved in reset()
+    // from the plan and the assignment so the routed walk does not rediscover
+    // it from the connection table on every block.
+    struct InputPortSource {
+        enum class Mode : std::uint8_t {
+            Zero,    // no audio edge: the port's own slot, zeroed
+            InPlace, // one undelayed edge read in place from `slot`
+            Copy,    // one undelayed edge copied bit-exactly from `slot`
+            Sum,     // several edges, or one through a PDC ring: summed
+        };
+        Mode mode = Mode::Zero;
+        std::uint32_t slot = 0;
+    };
+    // The node's input ports, in port order (empty for a node with none).
+    std::span<const InputPortSource> input_port_sources(std::uint32_t node_index) const noexcept {
+        if (node_index + 1 >= input_port_base_.size())
+            return {};
+        return std::span<const InputPortSource>(input_ports_)
+            .subspan(input_port_base_[node_index],
+                     input_port_base_[node_index + 1] - input_port_base_[node_index]);
+    }
+    // True when the plan has exactly one AudioOutput node.
+    bool sole_audio_output() const noexcept {
+        return sole_audio_output_;
+    }
+    // That node's input port count, which is how many output bus channels it
+    // writes; 0 unless sole_audio_output().
+    std::uint32_t sole_audio_output_ports() const noexcept {
+        return sole_audio_output_ports_;
+    }
+    // Identifies this snapshot's contents: a new value on every successful
+    // reset(), shared by copies (which carry the same contents), 0 when empty.
+    // A GraphRuntimeBufferPool bound to it resolves against these contents.
+    std::uint64_t id() const noexcept {
+        return id_;
+    }
+
+  private:
+    bool compute_valid() const noexcept;
+    void resolve_input_ports();
+
     graph::GraphRuntimePlan plan_;
     std::vector<GraphRuntimeNodeBinding> bindings_;
     std::vector<graph::NodeId> node_ids_sorted_;
     graph::GraphRuntimeBufferAssignment assignment_;
     bool parallel_safe_ = false;
+    // Computed once in reset() and clear(); the snapshot does not change in
+    // between. An empty snapshot is valid (it processes nothing).
+    bool valid_ = true;
+    bool sole_audio_output_ = false;
+    std::uint32_t sole_audio_output_ports_ = 0;
+    std::vector<InputPortSource> input_ports_;
+    std::vector<std::uint32_t> input_port_base_;
+    std::uint64_t id_ = 0;
 };
 
 struct GraphRuntimeEventSink {
@@ -297,6 +351,53 @@ public:
     // same buffer_assignment that built the snapshot (both travel as one
     // CompiledGraph). Pairing a pool with a same-connection-count-but-different-
     // delays snapshot is not a supported call sequence.
+    // Off-RT: resolve each node's channel pointers into this pool's slots for
+    // `snapshot` and prefill its routed process context, so a routed block only
+    // sets frame counts and the per-block context fields. An unbound pool, or one
+    // bound to another snapshot, takes the unbound path, which produces the same
+    // output. Returns false, leaving the pool unbound, when the pool does not fit
+    // the snapshot, a node exceeds the routed port limit, or allocation fails.
+    // reset(), clear() and copying unbind.
+    bool bind(const GraphRuntimeSnapshot& snapshot) noexcept;
+    bool bound_to(const GraphRuntimeSnapshot& snapshot) const noexcept {
+        return bound_snapshot_id_ != 0 && bound_snapshot_id_ == snapshot.id();
+    }
+
+    // One node's resolved routing state while the pool is bound.
+    struct BoundNode {
+        // node_index, routed and the channel pointer arrays are filled; the
+        // executor sets the frame counts and the per-block fields each block.
+        GraphRuntimeNodeProcessContext context;
+        const float** inputs = nullptr;
+        float** outputs = nullptr;
+        // False when every input port reads its source in place, so the block
+        // has no input to copy, sum or zero.
+        bool gathers = false;
+        // Set for the block while this AudioInput node's readers read the host
+        // input bus directly, so the node has nothing to copy.
+        bool host_input_aliased = false;
+    };
+    // RT-safe: node `index`'s bound state. Valid only while bound_to() holds.
+    BoundNode& bound_node(std::uint32_t index) noexcept {
+        return bound_nodes_[index];
+    }
+
+    // RT-safe, bound pools: for one block, point the views that read the
+    // graph's single AudioInput node at the host's main input channels instead
+    // of the slots that node would copy them into, and mark the node so it
+    // copies nothing. bind() records whether the graph qualifies: every reader
+    // of the AudioInput node is an audio input port that reads it in place,
+    // without feedback, and is read-only (an AudioOutput, or a binding with
+    // reads_inputs_only); an automation lane fed by the input disqualifies it.
+    // Returns false, aliasing nothing, when the graph does not qualify, the
+    // input bus is missing or narrower than the node, or an input channel
+    // overlaps an output channel (a host processing in place). Undo with
+    // release_host_input(), which the executor calls before it returns, so the
+    // bound views never hold host pointers between blocks.
+    bool alias_host_input(const BusBuffer* input, const BusBuffer* output,
+                          std::uint32_t frames) noexcept;
+    void release_host_input() noexcept;
+
     bool fits(const GraphRuntimeSnapshot& snapshot, std::uint32_t frames) const noexcept {
         if (slot_count_ < snapshot.buffer_slot_count() || frames > max_frames_) {
             return false;
@@ -321,10 +422,27 @@ private:
         std::shared_ptr<DelayRingState> state;
     };
 
+    void unbind() noexcept;
+
     std::vector<float> storage_;
     std::uint32_t slot_count_ = 0;
     std::uint32_t max_frames_ = 0;
     std::vector<RingSlot> ring_;
+    // A view that can read the host input in place of the AudioInput slot.
+    struct HostInputAlias {
+        const float** view = nullptr;
+        const float* slot = nullptr;
+        std::uint32_t channel = 0;
+    };
+
+    std::vector<BoundNode> bound_nodes_;
+    std::vector<const float*> bound_inputs_;
+    std::vector<float*> bound_outputs_;
+    std::uint64_t bound_snapshot_id_ = 0;
+    std::vector<HostInputAlias> host_input_aliases_;
+    std::uint32_t host_input_node_ = 0;
+    std::uint32_t host_input_channels_ = 0;
+    bool host_input_aliasable_ = false;
 };
 
 /// Pre-allocated per-node MIDI buffers backing the routing path's event edges.
@@ -720,6 +838,17 @@ public:
         return parallel_min_work_units_.load(std::memory_order_relaxed);
     }
 
+    // Whether routed execution (serial and parallel) times each node into its
+    // binding's load measurer. A node timing costs two clock reads, which is a
+    // large share of a small graph's per-node cost, so an owner that knows no one
+    // reads per-node load turns it off. Read once per block. Default on.
+    void set_node_load_timing(bool enabled) noexcept {
+        node_load_timing_.store(enabled, std::memory_order_relaxed);
+    }
+    bool node_load_timing() const noexcept {
+        return node_load_timing_.load(std::memory_order_relaxed);
+    }
+
 private:
     GraphRuntimeExecutorResult fail_invalid_block() noexcept;
     GraphRuntimeExecutorResult fail_invalid_snapshot() noexcept;
@@ -750,6 +879,7 @@ private:
     std::atomic<std::uint64_t> serial_levels_run_{0};
     // 0 = no cost gate (parallelize every eligible level); see the setter.
     std::atomic<std::uint64_t> parallel_min_work_units_{0};
+    std::atomic<bool> node_load_timing_{true};
 };
 
 } // namespace pulp::format

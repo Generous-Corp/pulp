@@ -4,6 +4,21 @@
 
   "_comment_post_merge": "Model B — PRs touch NO version files; version-at-land infers the level from the heuristic and assigns it on merge (--mode=apply is a no-op; the gate stops requiring a file bump for a touched surface but still hard-fails a fix/feat the heuristic scores none everywhere). One source of truth read by the pre-push hook, gates.sh, and version-skill-check.yml. See docs/guides/version-at-land-cutover.md.",
   "post_merge_assignment": true,
+  "writer_allowed_globs": [
+    "CMakeLists.txt",
+    ".claude-plugin/plugin.json",
+    ".claude-plugin/marketplace.json",
+    "CHANGELOG.md",
+    "docs/status/pulp-tooling-disposition.json",
+    "docs/status/gpu-vellum-handoff.yaml",
+    "docs/validation/gpu-handoff-provenance/receipt.json",
+    "tools/scripts/agent_capability_manifest.py",
+    "docs/status/agent-capabilities.json",
+    "docs/status/agent-capability-surface.json",
+    "tools/agent-capabilities/contract-history.json",
+    "docs/migrations/v*.md",
+    "docs/migrations/unreleased/*.md"
+  ],
   "_comment": "Repo-agnostic config for version_bump_check.py and skill_sync_check.py. Pivoted from YAML to JSON to avoid the PyYAML install friction on PEP-668 Python. Schema and field names unchanged; see planning/versioning-and-skill-sync-plan.md for the design.",
 
   "surfaces": {
@@ -33,6 +48,7 @@
         "tools/cmake/PulpAAX.cmake",
         "tools/cmake/PulpAppIcon.cmake",
         "tools/cmake/PulpAppTargets.cmake",
+        "tools/cmake/PulpAuv3Entitlements.cmake",
         "tools/cmake/PulpBuildInfo.cmake",
         "tools/cmake/PulpBundleRelocatable.cmake",
         "tools/cmake/PulpControlShipping.cmake",
@@ -58,6 +74,7 @@
         "tools/cmake/PulpPluginMetadata.cmake",
         "tools/cmake/PulpPortable.cmake",
         "tools/cmake/PulpReactRuntime.cmake",
+        "tools/cmake/PulpReleaseArtifactScan.cmake",
         "tools/cmake/PulpReload.cmake",
         "tools/cmake/PulpRuntimeStaging.cmake",
         "tools/cmake/PulpSdkGuards.cmake",

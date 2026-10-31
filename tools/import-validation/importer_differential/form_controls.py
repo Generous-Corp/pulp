@@ -60,12 +60,32 @@ def normalize_input_type(raw: str | None) -> str:
 
 
 UA_DEFAULT_FORM_CHROME = "ua-default-form-chrome"
+UA_THEME_SKINNED = "ua-theme-skinned"
 UA_SHADOW_FORM_PART = "ua-shadow-form-part"
 AUTHOR_STYLED = "author-styled"
 APPEARANCE_UNRECORDED = "appearance-unrecorded"
 THEME_UNRESOLVED = "theme-unresolved"
 
 BOUNDARY_STATUSES = frozenset({UA_DEFAULT_FORM_CHROME, UA_SHADOW_FORM_PART})
+
+# Theme parts the native lowering reproduces with Chromium's own paint: a
+# themed range, checkbox or radio gets the widget's `chromium_refresh` skin and
+# a push button a ButtonSurface (design_import_form_controls.cpp, from the
+# controls `record_ua_control_state` in browser_capture_controls.cpp records).
+# Their residual is an importer error like any other, so they are not a
+# boundary. Every other themed control (a select's arrow, a text field, a
+# meter, the picker types) has no such skin and stays one.
+# test/test_importer_differential_lab.py keeps this in step with the capture.
+THEME_SKINNED_TAGS = frozenset({"button"})
+THEME_SKINNED_INPUT_TYPES = frozenset({
+    "range", "checkbox", "radio", "button", "submit", "reset"})
+
+
+def theme_skinned(tag: str, input_type: str) -> bool:
+    """Whether the native lowering paints this themed control as Chromium does."""
+    if tag == "input":
+        return input_type in THEME_SKINNED_INPUT_TYPES
+    return tag in THEME_SKINNED_TAGS
 
 
 def control_status(tag: str, input_type: str, styles: dict[str, str],
@@ -90,7 +110,8 @@ def control_status(tag: str, input_type: str, styles: dict[str, str],
     if not theme_recorded or theme is None:
         return THEME_UNRESOLVED
     if theme == "native":
-        return UA_DEFAULT_FORM_CHROME
+        return (UA_THEME_SKINNED if theme_skinned(tag, input_type)
+                else UA_DEFAULT_FORM_CHROME)
     if theme == "author-arrow":
         return UA_SHADOW_FORM_PART
     if tag == "input" and input_type in SHADOW_PART_INPUT_TYPES:

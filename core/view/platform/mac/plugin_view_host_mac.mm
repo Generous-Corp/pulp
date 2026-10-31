@@ -18,6 +18,7 @@
 #include <pulp/view/continuous_frames.hpp> // needs_continuous_frames (CPU + GPU host repaint gate)
 #include <pulp/view/host_drag_coalescer.hpp> // per-presented-frame drag coalescing
 #include <pulp/view/input_events.hpp>
+#include "../../src/pending_resize.hpp"
 #include <pulp/view/overlay_dismissal.hpp>
 #include <pulp/view/platform/ns_role_mapping.hpp>
 #include <pulp/view/pointer_dispatch.hpp> // dispatch_context_menu (no-Skia builds too)
@@ -2299,6 +2300,13 @@ private:
         // requesting layer-backing; AppKit calls -makeBackingLayer synchronously.
         _backgroundRGB = pulp::view::kEditorHostClearRgb;
         self.wantsLayer = YES;
+        // Between a resize and the frame that draws it, the layer keeps
+        // showing the last frame at its own pixel size, anchored like the
+        // view's content, rather than stretched into the new bounds. Only an
+        // area the view grew into shows the background, for at most that one
+        // frame. AppKit owns a layer-backed view's contentsGravity and sets it
+        // from this placement, so the layer's own property would not stick.
+        self.layerContentsPlacement = NSViewLayerContentsPlacementTopLeft;
     }
     return self;
 }
@@ -2362,7 +2370,9 @@ private:
     CGFloat scale = self.window ? self.window.backingScaleFactor
                                 : [NSScreen mainScreen].backingScaleFactor;
     self.metalLayer.contentsScale = scale;
-    self.metalLayer.drawableSize = CGSizeMake(newSize.width * scale, newSize.height * scale);
+    // The drawable size is the swapchain's, set when the next frame configures
+    // it. Setting it here emptied the layer on every size event of a drag, so
+    // the host composited the background until that frame.
     // AU v2 resizes this NSView directly (no host size callback). Notify the
     // host; it resizes surfaces and forwards to ViewBridge::resize. The host
     // guards against re-entrancy when *it* drove the frame change.
@@ -2392,13 +2402,19 @@ private:
     }
 }
 
+- (void)viewDidHide {
+    [super viewDidHide];
+    if (self.onHide)
+        self.onHide();
+}
+
 - (void)viewDidChangeBackingProperties {
     [super viewDidChangeBackingProperties];
     CGFloat scale = self.window ? self.window.backingScaleFactor
                                 : [NSScreen mainScreen].backingScaleFactor;
     self.metalLayer.contentsScale = scale;
-    self.metalLayer.drawableSize = CGSizeMake(self.bounds.size.width * scale,
-                                              self.bounds.size.height * scale);
+    // The host re-sizes the swapchain at the new scale; the next frame sets
+    // the drawable size.
     if (self.onBackingChange) self.onBackingChange();
 }
 
@@ -2435,6 +2451,9 @@ public:
             // there too.
             metal_view_.onWindowChange = ^{ this->handle_window_change(); };
             metal_view_.onBackingChange = ^{ this->handle_backing_change(); };
+            metal_view_.onHide = ^{
+              this->release_gpu_caches();
+            };
             metal_view_.onResize = ^(uint32_t w, uint32_t h) {
                 this->on_native_frame_changed(w, h);
             };
@@ -2465,6 +2484,7 @@ public:
             metal_view_.pointTransform = nil;
             metal_view_.onWindowChange = nil;
             metal_view_.onBackingChange = nil;
+            metal_view_.onHide = nil;
             metal_view_.onResize = nil;
         }
         // Publish the teardown while the surfaces are still alive, so a
@@ -2556,10 +2576,10 @@ public:
     // the run-loop turn is not enough out of process: AUHostingService commits
     // the container's intermediate sizes before the turn ends, and about one
     // open in twenty-five showed the backing colour. Nor is skipping a view
-    // that has no window yet: the new drawable size empties the layer, which a
-    // host that resizes its container before showing it then composites.
+    // that has no window yet: a host that resizes its container before
+    // showing it composites whatever the layer holds at that moment.
     void present_resize_before_first_link_frame() {
-        if (!only_first_frame_presented_)
+        if (!only_first_frame_presented_ || delivering_resize_)
             return;
         if (size_.width == 0 || size_.height == 0)
             return;
@@ -2599,6 +2619,18 @@ public:
     // paints the editor.
     render::GpuSurface* gpu_surface() const override {
         return gpu_surface_.get();
+    }
+
+    GpuCacheUsage gpu_cache_usage() const override {
+        if (!skia_surface_)
+            return {};
+        const auto bytes = skia_surface_->gpu_cache_bytes();
+        return {bytes.budgeted, bytes.purgeable};
+    }
+
+    void release_gpu_caches() override {
+        if (skia_surface_)
+            skia_surface_->trim_gpu_resources(render::SkiaSurface::TrimLevel::everything());
     }
 
     void set_idle_callback(std::function<void()> callback) override {
@@ -2738,6 +2770,8 @@ private:
     std::function<void()> idle_callback_;
     std::atomic<bool> has_idle_callback_{false};
     std::function<void(uint32_t, uint32_t)> resize_cb_;
+    PendingResize pending_resize_;
+    bool delivering_resize_ = false;
     // Liveness token captured by the display-link main-thread dispatch
     // blocks. Flipped false in the destructor so a queued block after
     // teardown is a no-op (DAW teardown order is not under our control).
@@ -2886,6 +2920,7 @@ private:
                       uint32_t* capture_width = nullptr,
                       uint32_t* capture_height = nullptr) {
         if (!gpu_surface_ || !skia_surface_) return false;
+        deliver_pending_resize();
         commit_layer_geometry_before_present();
         if (!gpu_surface_->begin_frame()) return false;
 
@@ -3130,6 +3165,9 @@ private:
         // generation, a programmatic blur). Cheap + idempotent: syncKeyFocus
         // only touches first responder on a transition.
         if (metal_view_) [metal_view_ syncKeyFocus];
+        // Before the tick, so the editor lays out the frame at the size the
+        // processor was told about.
+        deliver_pending_resize();
 
         const auto tick = pulp::view::begin_host_frame(
             &root_, frame_clock_, frame_pump_, frame_time,
@@ -3181,7 +3219,32 @@ private:
         if (w == size_.width && h == size_.height) return;
         if (w == 0 || h == 0) return;
         set_size(w, h);
-        if (resize_cb_) resize_cb_(w, h);
+        // A drag resizes the view per mouse move; the next frame tells the
+        // processor once, with the last size. With no display link running
+        // there is no next frame, so tell it now.
+        pending_resize_.record(w, h);
+        if (!display_link_.is_open()) {
+            const Size delivered = size_;
+            deliver_pending_resize();
+            // A size the callback set was not presented while it ran.
+            if (size_.width != delivered.width || size_.height != delivered.height)
+                present_resize_before_first_link_frame();
+        }
+    }
+
+    // Runs the host's resize callback for the last size recorded since the
+    // previous frame (see PendingResize). A set_size() from inside the
+    // callback is painted by the frame that is delivering it, not presented
+    // on its own (see present_resize_before_first_link_frame).
+    void deliver_pending_resize() {
+        if (delivering_resize_)
+            return;
+        delivering_resize_ = true;
+        pending_resize_.deliver([this](uint32_t w, uint32_t h) {
+            if (resize_cb_)
+                resize_cb_(w, h);
+        });
+        delivering_resize_ = false;
     }
 
     void handle_window_change() {
@@ -3194,8 +3257,9 @@ private:
     }
 
     void handle_backing_change() {
-        // The view already updated its layer's contentsScale/drawableSize;
-        // re-sync the surfaces at the new scale and re-arm a paint.
+        // The view already updated its layer's contentsScale; re-sync the
+        // surfaces at the new scale, which the next frame configures (and so
+        // sets the drawable size), and re-arm a paint.
         set_size(size_.width, size_.height);
     }
 

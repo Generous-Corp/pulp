@@ -1,4 +1,5 @@
 #include "widget_bridge_test_support.hpp"
+#include <pulp/canvas/bundled_fonts.hpp>
 #include <pulp/view/chart_shader_presets.hpp>
 #include <pulp/view/screenshot.hpp>
 
@@ -2774,6 +2775,11 @@ TEST_CASE("WidgetBridge extended controls and visualization APIs round-trip JS t
     root.set_bounds({0, 0, 400, 300});
     StateStore store;
     WidgetBridge bridge(engine, root, store);
+    // This round-trip names an absolute path with no asset root configured,
+    // which the bridge refuses by default; it is the app-side raw-path posture
+    // under test here, not the containment policy (see
+    // test_widget_bridge_capabilities.cpp for that).
+    bridge.set_allow_unreviewed_file_paths(true);
 
     bridge.load_script(R"(
         var checkbox_change = -1;
@@ -4179,6 +4185,22 @@ TEST_CASE("WidgetBridge deadline rejects an oversized realm before detachment",
         bridge.clear_for_realm_replacement([] {}),
         "Runtime.evaluate realm reset tree exceeds bounded cleanup limit");
     REQUIRE(root.child_count() == 2049);
+}
+
+TEST_CASE("WidgetBridge rejected retirement preserves font declarations",
+          "[view][bridge][fonts][lifetime][deadline][runtime-eval]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    pulp::canvas::declare_font_face_weight_range("RollbackFace", 400, 700,
+                                                 bridge.font_weight_scope());
+    for (int index = 0; index < 2049; ++index)
+        root.add_child(std::make_unique<View>());
+
+    REQUIRE_THROWS_WITH(bridge.clear_for_realm_replacement([] {}),
+                        "Runtime.evaluate realm reset tree exceeds bounded cleanup limit");
+    CHECK(pulp::canvas::declared_face_synthesizes_bold("RollbackFace", 700) == false);
 }
 
 TEST_CASE("WidgetBridge deadline rejects an attached native view before detachment",

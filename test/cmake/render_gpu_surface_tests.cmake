@@ -55,6 +55,50 @@
     target_link_libraries(pulp-test-gpu-surface PRIVATE pulp::render Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-gpu-surface ${PULP_GPU_TEST_DISCOVERY_ARGS})
 
+    # SkiaSurface readback size on a real CAMetalLayer swapchain.
+    if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA)
+        add_executable(pulp-test-skia-surface-readback-macos
+            test_skia_surface_readback_macos.mm)
+        target_link_libraries(pulp-test-skia-surface-readback-macos PRIVATE
+            pulp::render Catch2::Catch2WithMain
+            "-framework Metal" "-framework QuartzCore")
+        catch_discover_tests(pulp-test-skia-surface-readback-macos
+            ${PULP_GPU_TEST_DISCOVERY_ARGS})
+    endif()
+
+    # Swapchain configures counted on a real CAMetalLayer. Reads the acquired
+    # wgpu::Texture's size, so it needs the Dawn headers Skia ships.
+    if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA)
+        add_executable(pulp-test-gpu-surface-swapchain-macos
+            test_gpu_surface_swapchain_macos.mm)
+        target_link_libraries(pulp-test-gpu-surface-swapchain-macos PRIVATE
+            pulp::render Catch2::Catch2WithMain
+            "-framework AppKit" "-framework Metal" "-framework QuartzCore")
+        target_include_directories(pulp-test-gpu-surface-swapchain-macos PRIVATE
+            ${SKIA_INCLUDE_DIRS})
+        if(EXISTS "${SKIA_INCLUDE_DIRS}/dawn")
+            target_include_directories(pulp-test-gpu-surface-swapchain-macos PRIVATE
+                "${SKIA_INCLUDE_DIRS}/dawn")
+        endif()
+        catch_discover_tests(pulp-test-gpu-surface-swapchain-macos
+            ${PULP_GPU_TEST_DISCOVERY_ARGS})
+    endif()
+
+    # Live resize through the GPU plug-in host: a set_size flood, one final
+    # set_size, and a native resize with no host call (Logic's AU v2 path).
+    # Each frame configures once and notifies the processor once, with the
+    # latest size. It reads the host's GpuSurface, so it lives with the GPU
+    # tests (this file is included only with PULP_ENABLE_GPU) and links
+    # pulp::render, not in the pulp::view-only AppKit group.
+    if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA)
+        add_executable(pulp-test-plugin-view-resize-macos
+            test_plugin_view_host_resize_macos.mm)
+        target_link_libraries(pulp-test-plugin-view-resize-macos PRIVATE
+            pulp::view pulp::render Catch2::Catch2WithMain "-framework AppKit")
+        catch_discover_tests(pulp-test-plugin-view-resize-macos
+            ${PULP_GPU_TEST_DISCOVERY_ARGS})
+    endif()
+
     # Skia surface test — also covers SkPicture (.skp) serialization on the
     # Graphite backend. The .skp round-trip cases include
     # Skia headers directly (SkPicture, SkPictureRecorder, SkSerialProcs,
@@ -72,6 +116,22 @@
         endif()
     endif()
     catch_discover_tests(pulp-test-skia-surface ${PULP_GPU_TEST_DISCOVERY_ARGS})
+
+    # The glyph preblend every Skia surface is created with: selection rule,
+    # props, and that retained layers, screenshots and GPU surfaces carry it.
+    # The raster cases run everywhere; the GPU cases skip without an adapter.
+    add_executable(pulp-test-text-raster-policy test_text_raster_policy.cpp)
+    target_link_libraries(pulp-test-text-raster-policy PRIVATE
+        pulp::render pulp::view Catch2::Catch2WithMain)
+    target_compile_definitions(pulp-test-text-raster-policy PRIVATE
+        PULP_TEST_JETBRAINS_TTF="${CMAKE_SOURCE_DIR}/external/fonts/JetBrainsMono-Regular.ttf")
+    if(PULP_HAS_SKIA)
+        target_compile_definitions(pulp-test-text-raster-policy PRIVATE PULP_HAS_SKIA=1)
+        target_include_directories(pulp-test-text-raster-policy PRIVATE ${SKIA_INCLUDE_DIRS})
+    endif()
+    pulp_test_data(pulp-test-text-raster-policy NO_DEFINE
+        PATHS external/fonts/JetBrainsMono-Regular.ttf)
+    catch_discover_tests(pulp-test-text-raster-policy ${PULP_GPU_TEST_DISCOVERY_ARGS})
 
     # HeadlessSurface CI wrapper: one-call offscreen Dawn/Skia helper
     # for golden-test fixtures. Compiles on every

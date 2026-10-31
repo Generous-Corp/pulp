@@ -1,3 +1,4 @@
+#include <pulp/view/anchor_strategy.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/design_export.hpp>
 #include <pulp/view/design_tokens_w3c.hpp>
@@ -20,9 +21,11 @@
 #include "envelope_merge.hpp"
 #include "figma_url.hpp"
 #include "browser_import_session.hpp"
+#include "browser_probe_cache.hpp"
 #include "browser_capture_limits.hpp"
 #include "node_runtime.hpp"
 #include "import_design_cli_help.hpp"
+#include "import_document_refusals.hpp"
 #include "render_artifact_path.hpp"
 #include "sprite_skins.hpp"
 #include "zip_entry_policy.hpp"
@@ -1586,6 +1589,7 @@ struct CliOptions {
     std::string source_str;
     std::string input_file;
     std::string sidecar_manifest;
+    std::string illustrator_provenance;
     bool validate_only = false;
     // --file: repeatable. Two or more paths capture a MULTI-STATE design from
     // already-exported envelopes — one per state, in the order given — which is
@@ -1718,6 +1722,8 @@ static std::optional<int> parse_cli_args(int argc, char* argv[], CliOptions& opt
             opt.input_files.push_back(argv[++i]);
         } else if (std::strcmp(argv[i], "--manifest") == 0 && i + 1 < argc) {
             opt.sidecar_manifest = argv[++i];
+        } else if (std::strcmp(argv[i], "--provenance") == 0 && i + 1 < argc) {
+            opt.illustrator_provenance = argv[++i];
         } else if (std::strcmp(argv[i], "--validate-only") == 0) {
             opt.validate_only = true;
         } else if (std::strcmp(argv[i], "--url") == 0 && i + 1 < argc) {
@@ -2113,6 +2119,81 @@ static std::optional<int> run_fidelity_selfcheck(
     return std::nullopt;
 }
 
+int run_illustrator_to_svg(const CliOptions& cli, const char* executable) {
+    if (cli.input_files.size() != 1 || cli.input_file.empty()) {
+        std::cerr << "Error: --from illustrator requires exactly one --file <.ai|.pdf>\n";
+        return 2;
+    }
+    if (cli.validate_only || cli.outline_mode || cli.export_tokens_mode) {
+        std::cerr << "Error: --from illustrator cannot be combined with validation-only, outline, "
+                     "or token export modes\n";
+        return 2;
+    }
+
+    fs::path helper;
+    if (const char* configured = std::getenv("PULP_ILLUSTRATOR_TO_SVG");
+        configured && *configured) {
+        helper = configured;
+    }
+#ifdef PULP_IMPORT_DESIGN_SRC_DIR
+    if (helper.empty())
+        helper = fs::path(PULP_IMPORT_DESIGN_SRC_DIR) / "illustrator_to_svg.py";
+#endif
+    if (helper.empty() || !fs::is_regular_file(helper)) {
+        const fs::path executable_path = executable ? fs::path(executable) : fs::path{};
+        const fs::path executable_dir =
+            executable_path.empty() ? fs::path{} : fs::absolute(executable_path).parent_path();
+        const fs::path installed_helper =
+            executable_dir / "import-design" / "illustrator_to_svg.py";
+        if (fs::is_regular_file(installed_helper))
+            helper = installed_helper;
+    }
+    if (helper.empty() || !fs::is_regular_file(helper)) {
+        std::cerr << "Error: Illustrator converter is not installed; expected "
+                     "illustrator_to_svg.py beside the import-design tool\n";
+        return 1;
+    }
+    auto python = pulp::platform::find_on_path("python3");
+    if (!python) {
+        std::cerr << "Error: python3 was not found on PATH; cannot convert Illustrator artwork\n";
+        return 1;
+    }
+
+    std::vector<std::string> args{helper.string(), cli.input_file};
+    if (!cli.output_file.empty() && cli.output_explicit) {
+        args.emplace_back("--output");
+        args.push_back(cli.output_file);
+    }
+    if (!cli.illustrator_provenance.empty()) {
+        args.emplace_back("--provenance");
+        args.push_back(cli.illustrator_provenance);
+    }
+    if (!cli.page_name.empty()) {
+        try {
+            const auto page = std::stoi(cli.page_name);
+            if (page < 1)
+                throw std::invalid_argument("page");
+            args.emplace_back("--page");
+            args.push_back(std::to_string(page));
+        } catch (const std::exception&) {
+            std::cerr << "Error: --page must be a positive integer for --from illustrator\n";
+            return 2;
+        }
+    }
+    pulp::platform::ProcessOptions options;
+    options.timeout_ms = 120000;
+    const auto result = pulp::platform::ChildProcess::run(python->string(), args, options);
+    if (!result.stdout_output.empty())
+        std::cout << result.stdout_output;
+    if (!result.stderr_output.empty())
+        std::cerr << result.stderr_output;
+    if (result.timed_out) {
+        std::cerr << "Error: Illustrator conversion timed out\n";
+        return 1;
+    }
+    return result.exit_code == 0 ? 0 : (result.exit_code < 0 ? 1 : result.exit_code);
+}
+
 int main(int argc, char* argv[]) {
     CliOptions cli;
     if (auto parse_exit = parse_cli_args(argc, argv, cli)) return *parse_exit;
@@ -2308,16 +2389,9 @@ int main(int argc, char* argv[]) {
     // multi-state capture, handled once the source is known.
     if (!input_files.empty()) input_file = input_files.front();
 
-    // Source-neutral, already-converted SVG lane. This is intentionally a
-    // validation-only integration point: conversion from Illustrator/PDF is
-    // outside Pulp, while the sidecar contract proves the bytes and controls
-    // before a future generator consumes them.
-    if (source_str == "illustrator" || source_str == "ai" || source_str == "pdf") {
-        std::cerr << "Error: source '" << source_str
-                  << "' is unsupported; convert to preconverted-svg with a validated "
-                     "control-map sidecar\n";
-        return 2;
-    }
+    if (source_str == "illustrator" || source_str == "ai" || source_str == "pdf")
+        return run_illustrator_to_svg(cli, argc > 0 ? argv[0] : nullptr);
+
     if (source_str == "preconverted-svg") {
         if (!validate_only) {
             std::cerr << "Error: --from preconverted-svg requires --validate-only\n";
@@ -2756,21 +2830,20 @@ int main(int argc, char* argv[]) {
          .materialized_canvas_composition = cli.materialized_canvas_composition,
          .require_canvas_ink = cli.require_canvas_ink,
          .validate = validate,
-         .materialized_runtime_emit = artifact_emit == ArtifactEmit::materialized_runtime},
+         .materialized_runtime_emit = artifact_emit == ArtifactEmit::materialized_runtime,
+         .browser_probe_cache_directory =
+             pulp::import_design::browser_capture::default_browser_probe_cache_directory()},
         content);
     if (const auto* failure =
-            std::get_if<pulp::import_design::BrowserImportFailure>(
-                &browser_import)) {
+            std::get_if<pulp::import_design::BrowserImportFailure>(&browser_import)) {
         return failure->exit_code;
     }
     auto browser_import_session =
-        std::get<pulp::import_design::BrowserImportSession>(
-            std::move(browser_import));
+        std::get<pulp::import_design::BrowserImportSession>(std::move(browser_import));
     const auto import_preparation = browser_import_session.preparation_policy();
     std::optional<DesignIR> browser_capture_ir;
     std::optional<fs::path> materialized_document;
-    if (auto capture =
-            browser_import_session.take_capture_adoption()) {
+    if (auto capture = browser_import_session.take_capture_adoption()) {
         render_width = capture->render_width;
         render_height = capture->render_height;
         reference_image = std::move(capture->reference_image);
@@ -3176,31 +3249,12 @@ int main(int argc, char* argv[]) {
     // --import-report / --fail-on-unresolved channel carry it.
     apply_swap_target_verification(ir.root);
 
-    // Captured states nobody can render are a hard error, not a diagnostic. Only
-    // a faithful_svg node lowers alternate_frames to DesignFrameView::add_frame,
-    // so on any other node the extra states are dropped and the import "succeeds"
-    // with a single frame — the user asked for N states and silently got one.
-    // Refusing here is what keeps that from shipping as a working command.
-    if (const auto dropped = find_unrenderable_alternate_frames(ir.root); !dropped.empty()) {
-        std::size_t total = 0;
-        for (const auto& d : dropped) total += d.alternates;
-        std::cerr << "Error: " << total << " captured state"
-                  << (total == 1 ? "" : "s") << " cannot be rendered and would be "
-                     "dropped:\n";
-        for (const auto& d : dropped)
-            std::cerr << "       - " << d.node_name << ": " << d.alternates
-                      << " alternate frame" << (d.alternates == 1 ? "" : "s")
-                      << " — " << d.reason << "\n";
-        std::cerr << "       Multi-state capture needs a faithful-vector export. The Figma "
-                     "REST lane produces one:\n"
-                     "         python3 tools/import-design/figma_rest_export.py --file-key "
-                     "<KEY> --node <A> --out a.pulp.json --faithful-vector\n"
-                     "         python3 tools/import-design/figma_rest_export.py --file-key "
-                     "<KEY> --node <B> --out b.pulp.json --faithful-vector\n"
-                     "         pulp import-design --from figma-plugin --file a.pulp.json "
-                     "--file b.pulp.json ...\n";
+    // Derived anchors that still collide are disambiguated; captured states
+    // nobody can render and repeated explicit anchors refuse the import before
+    // anything is written (import_document_refusals.hpp).
+    pulp::view::resolve_anchor_collisions(ir.root);
+    if (pulp::import_design::refuse_unimportable_document(ir.root, std::cerr))
         return 2;
-    }
     const auto import_report = collect_import_report(ir.root);
     if (!import_report.controls.empty())
         std::cerr << import_report_to_text(import_report);
@@ -3804,6 +3858,11 @@ int main(int argc, char* argv[]) {
         WidgetBridge render_bridge(render_engine, render_root, render_store);
         // The generated JS references its assets relative to the output file.
         render_bridge.set_script_base_dir(fs::path(output_file).parent_path());
+        // registerFont() paths are baked absolute and point at the design
+        // pack, outside the output directory. This is the developer's own
+        // import on the developer's machine, so the raw-path opt-in is safe
+        // here; a hosted editor keeps the default refusal.
+        render_bridge.set_allow_unreviewed_file_paths(true);
         try {
             render_bridge.load_script(js);
         } catch (const std::exception& e) {

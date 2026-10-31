@@ -18,7 +18,9 @@
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/widgets.hpp>
 
+#include <cstdint>
 #include <string>
+#include <vector>
 
 using namespace pulp::view;
 
@@ -32,15 +34,30 @@ bool paint(View& root) {
     return !render_to_png(root, 240, 60, 1.0f, ScreenshotBackend::skia).empty();
 }
 
+// The paragraph cache is process-wide: put it back to its defaults on the way
+// out, even when a REQUIRE fails, so a later test does not inherit one entry.
+struct CacheDefaults {
+    CacheDefaults() {
+        reset();
+    }
+    ~CacheDefaults() {
+        reset();
+    }
+    static void reset() {
+        auto& cache = pulp::canvas::ParagraphCache::instance();
+        cache.set_enabled(true);
+        cache.set_limits(pulp::canvas::ParagraphCache::kDefaultMaxEntries,
+                         pulp::canvas::ParagraphCache::kDefaultMaxBytes);
+        cache.clear();
+    }
+};
+
 } // namespace
 
 TEST_CASE("Paragraph cache holds script text runs with NaN and signed-zero spacing",
           "[canvas][paragraph-cache][widget-bridge]") {
+    CacheDefaults restore;
     auto& cache = pulp::canvas::ParagraphCache::instance();
-    cache.set_enabled(true);
-    cache.set_limits(pulp::canvas::ParagraphCache::kDefaultMaxEntries,
-                     pulp::canvas::ParagraphCache::kDefaultMaxBytes);
-    cache.clear();
 
     ScriptEngine engine;
     View root;
@@ -75,10 +92,63 @@ TEST_CASE("Paragraph cache holds script text runs with NaN and signed-zero spaci
         REQUIRE(paint(root));
         CHECK(cache.stats().entries <= 1);
     }
+}
 
-    cache.set_limits(pulp::canvas::ParagraphCache::kDefaultMaxEntries,
-                     pulp::canvas::ParagraphCache::kDefaultMaxBytes);
-    cache.clear();
+namespace {
+
+// One Label with `base` applied and `runs` set as its text runs, painted
+// through the Skia backend. Runs that resolve to the same style paint the same
+// bytes, so a run can be compared against the style it should inherit.
+std::vector<std::uint8_t> paint_runs(const std::string& base, const std::string& runs) {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 240, 40});
+    pulp::state::StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script("createLabel('t', 'Hello world', '');\n" + base + "setTextRuns('t', [" +
+                       runs + "]);\n");
+    auto* label = dynamic_cast<Label*>(bridge.widget("t"));
+    if (label == nullptr || !label->has_attributed_string())
+        return {};
+    label->set_bounds({0, 0, 240, 40});
+    return render_to_png(root, 240, 40, 1.0f, ScreenshotBackend::skia);
+}
+
+} // namespace
+
+TEST_CASE("setTextRuns keeps the inherited spacing for a non-finite letterSpacing",
+          "[canvas][paragraph-cache][widget-bridge]") {
+    CacheDefaults restore;
+    const std::string base = "setFontSize('t', 16);\nsetLetterSpacing('t', 3);\n";
+    const auto inherited = paint_runs(base, "{ start: 0, end: 5, letterSpacing: 3 }");
+    REQUIRE_FALSE(inherited.empty());
+    // Control: a different spacing paints differently, so equal bytes below
+    // mean the same spacing, not an instrument that cannot see spacing.
+    REQUIRE(paint_runs(base, "{ start: 0, end: 5, letterSpacing: 0 }") != inherited);
+    // NaN keeps the Label's 3. Were it passed on, make_paragraph would fold it
+    // to 0 and the run would paint like the control instead.
+    CHECK(paint_runs(base, "{ start: 0, end: 5, letterSpacing: NaN }") == inherited);
+}
+
+TEST_CASE("setTextRuns keeps the inherited size for a non-finite or non-positive fontSize",
+          "[canvas][paragraph-cache][widget-bridge]") {
+    CacheDefaults restore;
+    const std::string base = "setFontSize('t', 16);\n";
+    // The canvas keeps its last usable size when handed one it cannot use, so
+    // the run under test follows a run at 8. Painted first, a bad size would
+    // ride on the Label's 16 and look inherited whether or not it was.
+    const std::string sized = "{ start: 0, end: 6, fontSize: 8 }";
+    const auto inherited = paint_runs(base, sized);
+    REQUIRE_FALSE(inherited.empty());
+    REQUIRE(paint_runs(base, sized + ", { start: 6, end: 11, fontSize: 12 }") != inherited);
+    // parseFloat of a CSS keyword gives NaN; 0 and negatives are not sizes.
+    // Each keeps the Label's size, as setFontSize does, rather than the 8 the
+    // canvas was left at.
+    for (const char* size : {"NaN", "0", "-3"}) {
+        INFO("fontSize " << size);
+        CHECK(paint_runs(base, sized + ", { start: 6, end: 11, fontSize: " + size + " }") ==
+              inherited);
+    }
 }
 
 #endif // PULP_HAS_SKIA

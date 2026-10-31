@@ -342,7 +342,9 @@ sk_sp<SkShader> parse_url_image_mask(
     constexpr std::string_view kFile = "file://";
     if (path.size() >= kFile.size() && path.compare(0, kFile.size(), kFile) == 0)
         path = path.substr(kFile.size());
-    if (path.empty()) return nullptr;
+    // Fragment (`#id`) and `data:` references name no file.
+    if (path.empty() || path.front() == '#' || path.rfind("data:", 0) == 0)
+        return nullptr;
     auto data = SkData::MakeFromFileName(path.c_str());
     if (!data) return nullptr;
     auto image = decode_encoded_image(data);

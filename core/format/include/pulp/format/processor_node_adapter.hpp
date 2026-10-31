@@ -62,8 +62,9 @@ public:
     /// Routed node binding entry point. `user_data` must be the owning
     /// ProcessorNode. Reads the executor's gathered mono input view
     /// (ctx.node_inputs) and writes this node's mono output view
-    /// (ctx.node_outputs) by aliasing them into a stack-local single-bus
-    /// ProcessBlock, then forwards to process_processor_block(). Allocation-free
+    /// (ctx.node_outputs) by aliasing them into a block-local ProcessBlock
+    /// over the node's reused bus set, then forwards to
+    /// process_processor_block(). Allocation-free
     /// per block and only valid on the routed path (ctx.routed == true).
     static bool process_binding(ProcessBlock& block,
                                 const GraphRuntimeNodeProcessContext& ctx,
@@ -72,11 +73,28 @@ public:
     Processor& processor() noexcept { return *processor_; }
     const Processor& processor() const noexcept { return *processor_; }
 
-private:
+  private:
+    // The routed block for a node with one main input and one main output and
+    // no dense modulation: the views and context are prepared, so a block only
+    // points them at this block's buffers (see process_binding).
+    bool process_main_bus_block(const ProcessBlock& block,
+                                const GraphRuntimeNodeProcessContext& ctx) noexcept;
+
     Processor* processor_;
     // Caller-owned MIDI/parameter fallback storage for the block bridge. Sized
     // once in prepare() and reused across blocks; never resized on the RT path.
     ProcessorBlockAdapterScratch scratch_;
+    // The block's bus set, rebuilt per block by clear() and add_*(). Reusing it
+    // avoids constructing all kMaxBuses entries for the one to three buses a
+    // node uses.
+    BusBufferSet buses_;
+    // Chosen at prepare(): true when the node has at most one (main) input bus
+    // and no dense modulation, so process_binding takes process_main_bus_block.
+    bool main_bus_fast_path_ = false;
+    // The context handed to the processor when the block carries no complete
+    // transport; only sample_rate and num_samples change per block.
+    ProcessContext block_context_{};
+    bool block_context_from_transport_ = false;
     NodeCapabilities capabilities_{};
     AudioInputBusProvider input_provider_{};
     std::array<BusRole, BusBufferSet::kMaxBuses> input_roles_{};

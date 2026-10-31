@@ -14,6 +14,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/audio/audio_file.hpp": "Pulp::audio",
     "pulp/signal/parametric_eq.hpp": "Pulp::signal",
     "pulp/signal/processing_switch_crossfade.hpp": "Pulp::signal",
+    "pulp/signal/smoothed_value.hpp": "Pulp::signal",
     "pulp/host/signal_graph_authoring.hpp": "Pulp::host",
     "pulp/host/signal_graph.hpp": "Pulp::host",
     "pulp/host/signal_graph_runtime.hpp": "Pulp::host",
@@ -23,6 +24,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/host/sample_region_authoring.hpp": "Pulp::host",
     "pulp/host/sample_region_proof.hpp": "Pulp::host",
     "pulp/host/sample_region_parameters.hpp": "Pulp::host",
+    "pulp/host/catalog_descriptor.hpp": "Pulp::host",
 
     "pulp/format/processor.hpp": "Pulp::format",
     "pulp/format/processor_node_adapter.hpp": "Pulp::format",
@@ -91,6 +93,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/diffusion_network.hpp": "Pulp::signal",
     "pulp/signal/spectral_cross_synthesis.hpp": "Pulp::signal",
     "pulp/signal/fm_operator_engine.hpp": "Pulp::signal",
+    "pulp/signal/two_pole_resonator.hpp": "Pulp::signal",
     "pulp/signal/fir_design.hpp": "Pulp::signal",
     "pulp/signal/fractional_delay.hpp": "Pulp::signal",
     "pulp/signal/tempo_delay_wrapper.hpp": "Pulp::signal",
@@ -226,6 +229,19 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "It lets control and importer code validate graph identity/generation "
             "without claiming an installed DSP capability or pulling in the runtime "
             "implementation surface."
+        ),
+    },
+    {
+        "include": "pulp/host/catalog_descriptor.hpp",
+        "fingerprint": "sha256:1a5a790b3ae48d3992d429c12f35963293577fd49bfd3f7c9a6dec9548d9e539",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Product-neutral catalog descriptor aliases and validates the host-facing "
+            "descriptor and export machinery. It is reusable host infrastructure, "
+            "while product-specific Forge headers, symbols, and serialization remain "
+            "the compatibility authority; it is not an independently advertised "
+            "generator-facing capability."
         ),
     },
     {
@@ -425,7 +441,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/ballistics_filter.hpp",
-        "fingerprint": "sha256:58f673ad243d35a4df20b30d0bd68b76034ac04d57f028b9835df9ead58498c1",
+        "fingerprint": "sha256:cac378cc3b7b0c69765f929d530b292c17743b17ec491fcffcf66b774d350349",
         "disposition": "capability_support",
         "capability_keys": ["signal.dynamics-envelope-contract"],
         "rationale": (
@@ -498,7 +514,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     ],
     {
         "include": "pulp/signal/fft.hpp",
-        "fingerprint": "sha256:8e540807d1e39013586eec91a321b077bba48da22a903ce775314807327f6965",
+        "fingerprint": "sha256:d83eda9b7cf1281260c902d4e69ebc79cfc4424f6e06da743fb86c494382971a",
         "disposition": "capability_support",
         "capability_keys": ["signal.source-filter-analysis", "signal.streaming-analysis-frontends"],
         "rationale": (
@@ -811,7 +827,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/fast_math.hpp",
-        "fingerprint": "sha256:06673a7b8a8b1609fa65ffb1143e637dd8e0b48adcedfdfa2e26df11369217b0",
+        "fingerprint": "sha256:1ec60855acbc4b9fd41b37161c308bc3bf499c231be901222b11bfb1bf75a73e",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -842,7 +858,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/biquad.hpp",
-        "fingerprint": "sha256:7491f1683f2b88a0f5af8d160760e49ab429240fd07831f05961fcd0dd0db6a5",
+        "fingerprint": "sha256:6a885b8c54ff3ba32c66b3647036e7e12d6aeec763d751e967611917a364c396",
         "disposition": "capability_support",
         "capability_keys": ["signal.sos-cascade"],
         "rationale": (
@@ -1354,6 +1370,16 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         ),
     },
     {
+        "include": "pulp/signal/two_pole_resonator.hpp",
+        "fingerprint": "sha256:46c762aca702becc33f51ad1a0db963ee84a3b397e6202a859944c619d9bc2ec",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Two-pole resonance is composable realtime signal infrastructure, not an "
+            "independently advertised generator capability."
+        ),
+    },
+    {
         "include": "pulp/signal/classic_reverb.hpp",
         "fingerprint": "sha256:ef4d852f267095f4e18a7ed2114640adaeaf8fbbd57087cc3a1aaa1d3a4c796f",
         "disposition": "infrastructure",
@@ -1376,7 +1402,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/fdn/config.hpp",
-        "fingerprint": "sha256:a63cebacd0da5920556092f5e802fc863add06d8ff951ec78fe00eb2721770ce",
+        "fingerprint": "sha256:7c86120bda9c7619a3c92f490b4e9cf7f88dfdcc40ecf330d045b3db63eb387a",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1420,7 +1446,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/fdn/loop_eq.hpp",
-        "fingerprint": "sha256:553d65de8f48182b8d4362d8c974824dd4ade3d0cf9b5605283992c8bae0affc",
+        "fingerprint": "sha256:791f7d56e50ffd8143ae7c4bb339536b4febed45c298aca2792a3fcd4c6915e2",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1453,7 +1479,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/fdn/stages.hpp",
-        "fingerprint": "sha256:d397bfcef37a288a29648ad2bd95010c4f995b135693c23cb5da36b3ab7ed9b1",
+        "fingerprint": "sha256:02a305c4607e4e42fd4e51d161bfc46f6c10d13d8fe4bb0fb9d3d6d5cbcf9e75",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1487,7 +1513,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/denormal.hpp",
-        "fingerprint": "sha256:c139f6695a9b995b89dc3b9d00430bc0776391286bec850213c8e278bf67e099",
+        "fingerprint": "sha256:e833a00a6974d4fbb18bec9e1c2312285c7387d8f7aa4757b606425e39452277",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1499,7 +1525,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/convolver.hpp",
-        "fingerprint": "sha256:f2324d75e7b1fde411c4907b5f2b5f4f4a2849e4877a7b45cf9bd368d6da7564",
+        "fingerprint": "sha256:dcf17ae7acdf07ad6bfc3082876bf5c2f695a9dda49c933f56a074b3a7b5621d",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1523,8 +1549,30 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         ),
     },
     {
+        "include": "pulp/signal/gain.hpp",
+        "fingerprint": "sha256:54651b70d3f4f19684907be44323e35fd4d726d7e9795b04c07eda1b79aab503",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "GainT is a composable signal processor used by plugins and graph nodes; its "
+            "optional smoothing API is implementation infrastructure rather than an "
+            "independently advertised generator-facing capability."
+        ),
+    },
+    {
+        "include": "pulp/signal/smoothed_value.hpp",
+        "fingerprint": "sha256:6d2a27eec926cbe11fecf51dcddebd91f431038ef08ab7067048fc0ee0397044",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "SmoothedValue is the bounded parameter-ramping primitive used by signal "
+            "processors; its timing conversion is implementation infrastructure and "
+            "is not an independently advertised generator-facing capability."
+        ),
+    },
+    {
         "include": "pulp/signal/fixed_ir_convolver.hpp",
-        "fingerprint": "sha256:64382ea1f17038c0f2bcd960eb17a02c8f8cd97ce5680481ef7fe16e0109cb84",
+        "fingerprint": "sha256:80ba7f87cc92c3a7fb71238aea463f3839b977fe11877e80aeb029860edffe80",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1549,7 +1597,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/zero_latency_convolver.hpp",
-        "fingerprint": "sha256:b83e4d485420696d9598771185be0856b0fb377dd106c5d6ea76a7b5ef9e124e",
+        "fingerprint": "sha256:f2ffe01d98618d870a3e7c7dee8e935948a3333090f01094d8bb0dd601a0861e",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1562,7 +1610,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/zero_latency_convolver_support.hpp",
-        "fingerprint": "sha256:2617e8cdff61bb3899d2c2b4529339116634d86c0ec7d7f3492ae929a02cadfb",
+        "fingerprint": "sha256:8a70ab86dcf8dcdd7df62d8d7c6720ec3d71f947866d1310ee5675a3a158c815",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1573,7 +1621,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/audio/load_measurer.hpp",
-        "fingerprint": "sha256:268b2aa45e278f04876fa0f5590a36523d35ee13882d37f89c2890b8d4321253",
+        "fingerprint": "sha256:6208bb80a1ef427c9f69ea11a6f0911dfbd0ab832fe55328ecdd12034e4e5b10",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1598,13 +1646,14 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/convolver_messages.hpp",
-        "fingerprint": "sha256:13c0cdc65296220448802702ad25141e704d9d0c9d780f6575e222e1e6fa78ce",
+        "fingerprint": "sha256:bf0a804475fb6f8879ad5d734f586c6b76c2d119215af65d370d250bb7364a08",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
             "Audio-thread hand-off plumbing behind PartitionedConvolver: the per-IR state, "
-            "the convolver's shared input history, and the lock-free swapper that shuttles "
-            "them between a worker thread and the audio thread over runtime::Handoff. "
+            "the convolver's shared input history, the spectrum arena both keep their "
+            "half spectra in, and the lock-free swapper that shuttles them between a "
+            "worker thread and the audio thread over runtime::Handoff. "
             "Real-time ownership-transfer infrastructure for that engine rather than an "
             "advertised generator surface; it carries no capability claim of its own."
         ),
@@ -1623,7 +1672,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/convolver_non_uniform.hpp",
-        "fingerprint": "sha256:e36fe1a2424f6a0f64c30c3f0d395c6884633ebf78cce4b9b834369c2b6f3079",
+        "fingerprint": "sha256:598a096100daada3acac86a98d29856d23172b620dab4215349664d0dc600035",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1673,7 +1722,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/svf.hpp",
-        "fingerprint": "sha256:50341bc965475434473aaca48a378ca56c4c19d757922fd1b2ae23406a5ebb66",
+        "fingerprint": "sha256:9d3b9632299a64a68d78b62fb79fd264860d62b7b4d10269323cc25a94c5c87e",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1685,7 +1734,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/tpt_filter.hpp",
-        "fingerprint": "sha256:2e70a37436a0e624d192e38cd15dbf71c936230d21577b35271251d97b04b69c",
+        "fingerprint": "sha256:44621a5e2035d72cce3ef0c62d3a334c913ef7059780d2c7475834df4dfce04f",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (

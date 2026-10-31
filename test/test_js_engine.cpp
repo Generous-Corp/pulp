@@ -13,6 +13,9 @@
 #include <string>
 #include <thread>
 #include <vector>
+#if !defined(_WIN32)
+#include <pthread.h>
+#endif
 #if defined(_WIN32)
 #include <io.h>
 #else
@@ -114,6 +117,44 @@ static std::vector<JsEngineType> available_engines() {
             auto engine_var = create_js_engine(engine_type_);
 
 #define END_FOR_EACH_ENGINE }}
+
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+// QuickJS's stack limit is measured down from the thread that set it, so a
+// limit above the stack that thread has left would let deep recursion run off
+// the real stack and crash. An engine built on a 512KB thread, the macOS
+// secondary-thread default, must report a JS stack overflow instead.
+TEST_CASE("QuickJS on a small-stack thread reports a stack overflow, not a crash",
+          "[js_engine][quickjs][stack]") {
+    struct Result {
+        std::string text;
+        bool threw = false;
+    } result;
+    pthread_attr_t attr;
+    REQUIRE(pthread_attr_init(&attr) == 0);
+    REQUIRE(pthread_attr_setstacksize(&attr, 512 * 1024) == 0);
+    pthread_t thread;
+    auto body = [](void* arg) -> void* {
+        auto& out = *static_cast<Result*>(arg);
+        auto engine = create_js_engine(JsEngineType::quickjs);
+        try {
+            out.text = engine
+                           ->evaluate("function deep(n) { return n === 0 ? 0 : deep(n - 1) + 1; }"
+                                      "var r; try { r = String(deep(1e7)); }"
+                                      "catch (e) { r = String(e); } r")
+                           .toString();
+        } catch (const std::exception& e) {
+            out.threw = true;
+            out.text = e.what();
+        }
+        return nullptr;
+    };
+    REQUIRE(pthread_create(&thread, &attr, body, &result) == 0);
+    pthread_join(thread, nullptr);
+    pthread_attr_destroy(&attr);
+    INFO(result.text);
+    CHECK(result.text.find("stack overflow") != std::string::npos);
+}
+#endif
 
 TEST_CASE("JsEngine creation", "[js_engine]") {
     FOR_EACH_ENGINE(engine)
@@ -966,12 +1007,14 @@ TEST_CASE("QuickJS precompile_scripts fills the bytecode cache a later realm rea
           "[view][js-engine][editor-open]") {
     clear_script_bytecode_cache();
     const auto code = large_counting_script(11);
-    const auto small = std::string("40 + 2");
+    // `small` is a Windows SDK macro under clang-cl; keep the fixture name
+    // portable across the native test matrix.
+    const auto small_script = std::string("40 + 2");
     const auto broken = large_counting_script(3) + "\nthis is not javascript {{{\n";
 
     // Compiles the large script only: the small one is under the cache floor
     // and the broken one does not compile. Nothing runs.
-    CHECK(precompile_scripts({code, small, broken}) == 1);
+    CHECK(precompile_scripts({code, small_script, broken}) == 1);
     CHECK(script_bytecode_cached(code));
     CHECK_FALSE(script_bytecode_cached(broken));
     auto stats = script_bytecode_cache_stats();

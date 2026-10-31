@@ -440,10 +440,12 @@ set(PULP_CANVAS_UNIT_HEADERS
     include/pulp/canvas/sdf_text.hpp
     include/pulp/canvas/shaped_text.hpp
     include/pulp/canvas/skia_canvas.hpp
+    include/pulp/canvas/skia_text_raster_policy.hpp
     include/pulp/canvas/svg.hpp
     include/pulp/canvas/svg_dom_cache.hpp
     include/pulp/canvas/text_font_context.hpp
     include/pulp/canvas/text_layout.hpp
+    include/pulp/canvas/text_raster_policy.hpp
     include/pulp/canvas/text_run_planner.hpp
     include/pulp/canvas/text_shaper.hpp
     include/pulp/canvas/text_utf8.hpp

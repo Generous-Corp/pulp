@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 1.12.0
+    VERSION 1.36.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -75,6 +75,26 @@ elseif(ANDROID)
 elseif(UNIX)
     set(PULP_LINUX TRUE)
     set(PULP_PLATFORM "linux")
+endif()
+
+# ARM64EC is a mixed-ABI target: every translation unit, including C-only
+# FetchContent dependencies such as Brotli and miniz, must be compiled with
+# the EC code-generation switch.  Relying on the C++ flags alone leaves those
+# archives as native ARM64 and produces unresolved EC thunk symbols when a
+# plugin links them.  Keep the correction at the project boundary so all
+# dependencies inherit the same ABI.
+if(WIN32 AND
+   (CMAKE_GENERATOR_PLATFORM MATCHES "^(ARM64EC|ARM64X)$" OR
+    CMAKE_CXX_FLAGS MATCHES "ARM64EC|arm64EC" OR
+    CMAKE_CXX_COMPILER_ARCHITECTURE_ID MATCHES "^ARM64EC$"))
+    foreach(_pulp_ec_flag_var CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
+        if(NOT "${${_pulp_ec_flag_var}}" MATCHES "(^|[ ;])/arm64EC([ ;]|$)")
+            string(APPEND ${_pulp_ec_flag_var} " /arm64EC")
+            set(${_pulp_ec_flag_var} "${${_pulp_ec_flag_var}}" CACHE STRING
+                "ARM64EC compile flags" FORCE)
+        endif()
+    endforeach()
+    unset(_pulp_ec_flag_var)
 endif()
 
 message(STATUS "Pulp ${PROJECT_VERSION} — platform: ${PULP_PLATFORM}")
@@ -341,10 +361,10 @@ endif()
 # generator expression — these are the static-link variants. CMake
 # 3.15+ honors this via CMP0091 (set automatically by our minimum
 # version 3.24).
-if(MSVC)
+if(MSVC AND NOT DEFINED CMAKE_MSVC_RUNTIME_LIBRARY)
     set(CMAKE_MSVC_RUNTIME_LIBRARY
         "MultiThreaded$<$<CONFIG:Debug>:Debug>"
-        CACHE STRING "MSVC runtime library variant (static)" FORCE)
+        CACHE STRING "MSVC runtime library variant (static)")
 endif()
 
 if(WIN32)
@@ -407,6 +427,15 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpTracing.cmake)
 # static-library dependency even though the eventual cached value was ON.
 option(PULP_ENABLE_JS
     "Build the JS scripting + web-compat layer (pulp::view-script)" ON)
+# The shell exec/execAsync JS bridge hands a scripted UI a /bin/sh. It is a
+# developer-only affordance, so it follows PULP_BUILD_TESTS: release and SDK
+# builds (tests OFF) compile the registrar out of pulp-view-script entirely, and
+# those lanes also pass OFF explicitly. core/view/cmake/PulpViewJsEngines.cmake
+# turns the option into the PULP_BRIDGE_EXEC_ENABLED compile definition;
+# widget_bridge.cpp refuses to build without it, so a missing define fails loudly.
+option(PULP_DEV_BRIDGE_EXEC
+    "Compile the developer-only shell exec/execAsync JS bridge into pulp-view-script"
+    ${PULP_BUILD_TESTS})
 # Development-only paths: a dev checkout (tests on) compiles in the on-disk
 # UI_SCRIPT path so a hot-reloading editor reads the file being edited; a
 # tests-off or SDK build carries only the embedded script bytes. An installed-SDK
@@ -1062,6 +1091,11 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND TARGET PulpGain_CLAP)
             add_dependencies(${_pulp_clap_host_test} PulpGain_CLAP)
         endif()
     endforeach()
+    if(TARGET pulp-test-host-regression AND TARGET PulpTone_CLAP)
+        target_compile_definitions(pulp-test-host-regression PRIVATE
+            PULP_TEST_TONE_CLAP_PATH="${CMAKE_BINARY_DIR}/CLAP/PulpTone.clap")
+        add_dependencies(pulp-test-host-regression PulpTone_CLAP)
+    endif()
     # pulp-test-host also loads examples/pulpsynth's CLAP from the build tree.
     if(TARGET pulp-test-host AND TARGET PulpSynth_CLAP)
         target_compile_definitions(pulp-test-host PRIVATE
@@ -1125,6 +1159,7 @@ if(ANDROID)
         target_sources(pulp-jni PRIVATE
             core/render/platform/android/gpu_surface_android.cpp
             core/render/platform/android/gpu_surface_android_jni.cpp
+            core/render/platform/android/surface_runtime_android.cpp
         )
         target_link_libraries(pulp-jni PRIVATE pulp::render)
     endif()

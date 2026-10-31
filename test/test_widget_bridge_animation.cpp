@@ -836,6 +836,78 @@ TEST_CASE("WidgetBridge reports a handler error even without a dispatch hook",
               .getWithDefault<bool>(false));
 }
 
+TEST_CASE("WidgetBridge reports an after-dispatch hook error even without a dispatch hook",
+          "[view][bridge][event-batch]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // The UI framework's post-commit hook throws, and no __dispatchError__ is
+    // installed: the error must still be counted and keep its message.
+    bridge.load_script(R"(
+        on('w1', 'click', function () {});
+        globalThis.__pulpAfterDiscreteDispatch__ = function () { throw new RangeError('hook boom'); };
+    )");
+    REQUIRE(engine.evaluate("typeof __dispatchError__").toString() == "undefined");
+
+    dispatch_event(engine, "w1", "click", "{}");
+
+    CHECK(engine.evaluate("__pulpDispatchErrorCount__").getWithDefault<int>(-1) == 1);
+    CHECK(engine.evaluate("__pulpLastDispatchError__.indexOf('RangeError: hook boom') === 0")
+              .getWithDefault<bool>(false));
+}
+
+TEST_CASE("WidgetBridge reports a thrown value that has no toString",
+          "[view][bridge][event-batch]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        on('w1', 'click', function () { throw Object.create(null); });
+    )");
+    dispatch_event(engine, "w1", "click", "{}");
+
+    // String() on a null-prototype object throws; the report must not.
+    CHECK(engine.evaluate("__pulpDispatchErrorCount__").getWithDefault<int>(-1) == 1);
+    CHECK(engine.evaluate("__pulpLastDispatchError__").toString() == "[object Object]");
+}
+
+TEST_CASE("WidgetBridge prints a repeating handler error once per hundred repeats",
+          "[view][bridge][event-batch]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var printed = [];
+        globalThis.console = globalThis.console || {};
+        console.error = function (text) { printed.push(String(text)); };
+        on('w1', 'pointermove', function () { throw new Error('move boom'); });
+        on('w2', 'pointermove', function () { throw new Error('other boom'); });
+    )");
+    for (int i = 0; i < 250; ++i)
+        dispatch_event(engine, "w1", "pointermove", "{}");
+
+    // Every error is counted; the console sees the first, then every 100th
+    // repeat with how many it stood for.
+    CHECK(engine.evaluate("__pulpDispatchErrorCount__").getWithDefault<int>(-1) == 250);
+    CHECK(engine.evaluate("printed.length").getWithDefault<int>(-1) == 3);
+    CHECK(engine.evaluate("printed[2].indexOf('(repeated 200 more times)') > 0")
+              .getWithDefault<bool>(false));
+
+    // A different error prints at once.
+    dispatch_event(engine, "w2", "pointermove", "{}");
+    CHECK(engine.evaluate("printed.length").getWithDefault<int>(-1) == 4);
+    CHECK(engine.evaluate("printed[3].indexOf('other boom') > 0").getWithDefault<bool>(false));
+}
+
 TEST_CASE("WidgetBridge runs a nested dispatch without another batch frame",
           "[view][bridge][event-batch]") {
     ScriptEngine engine;
@@ -940,6 +1012,61 @@ TEST_CASE("WidgetBridge fans window and document listeners out inside the event 
 
     CHECK(engine.evaluate("fanout.join(',')").toString() == "window:1/1,document:1/1");
     CHECK(engine.evaluate("batches").getWithDefault<int>(-1) == 2);
+}
+
+TEST_CASE("WidgetBridge runs the after-dispatch hook once the outermost batch returns",
+          "[view][bridge][event-batch]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(kCountingBatchHook);
+    bridge.load_script(R"(
+        var after = [];
+        globalThis.__pulpAfterDiscreteDispatch__ = function (id, eventName) {
+            after.push(id + ':' + eventName + ':' + batch_depth + '/' + __pulpDispatchDepth__);
+        };
+        on('w1', 'click', function () {
+            if (after.length === 0) __dispatch__('w1', 'click', {});
+        });
+    )");
+
+    dispatch_event(engine, "w1", "click", "{}");
+
+    // Once for the outer dispatch, after its batch closed; the dispatch made
+    // from inside the handler did not run it.
+    CHECK(engine.evaluate("after.join(',')").toString() == "w1:click:0/0");
+    CHECK(engine.evaluate("batches").getWithDefault<int>(-1) == 1);
+}
+
+TEST_CASE("WidgetBridge after-dispatch value write does not dispatch the change again",
+          "[view][bridge][event-batch]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createKnob('k');
+        setValue('k', 0.5);
+        var changes = 0;
+        on('k', 'change', function () { changes += 1; });
+        globalThis.__pulpAfterDiscreteDispatch__ = function (id) { setValue(id, 0.5); };
+    )");
+    auto* knob = dynamic_cast<Knob*>(bridge.widget("k"));
+    REQUIRE(knob != nullptr);
+
+    // A user edit: the knob moves and reports it, and the hook puts the
+    // committed value back.
+    knob->set_value(0.8f);
+    REQUIRE(knob->on_change);
+    knob->on_change(0.8f);
+
+    CHECK(knob->value() == Catch::Approx(0.5f));
+    CHECK(engine.evaluate("changes").getWithDefault<int>(-1) == 1);
 }
 
 TEST_CASE("WidgetBridge native widget events run unbatched without a hook",
@@ -1287,6 +1414,9 @@ TEST_CASE("WidgetBridge loadAssetSync covers embedded file and missing records",
     root.set_bounds({0, 0, 400, 300});
     StateStore store;
     WidgetBridge bridge(engine, root, store);
+    // file:// reads with no asset root are the app-side raw-path posture;
+    // the default refuses them (see test_widget_bridge_capabilities.cpp).
+    bridge.set_allow_unreviewed_file_paths(true);
 
     static const char kEmbeddedJson[] = "{\"label\":\"pulp\"}";
     AssetManager::instance().register_embedded(
@@ -1341,6 +1471,7 @@ TEST_CASE("WidgetBridge loadAssetSync covers text mime variants and path normali
     root.set_bounds({0, 0, 400, 300});
     StateStore store;
     WidgetBridge bridge(engine, root, store);
+    bridge.set_allow_unreviewed_file_paths(true); // raw file:// read below
 
     static const char kEmbeddedCss[] = "body { color: red; }\n";
     static const char kEmbeddedSvg[] = "<svg><path d='M0 0h1v1z'/></svg>";
@@ -1620,6 +1751,13 @@ TEST_CASE("WidgetBridge loadFont reports existing and missing paths",
 
     const auto existing = js_single_quoted(font_path.string());
     const auto missing = js_single_quoted((font_path.string() + ".missing"));
+    // An absolute path outside every configured root is refused by default,
+    // so the probe reports "missing" for a file that exists: the existence
+    // oracle is closed unless the host opts into unreviewed paths.
+    bridge.load_script("var font_contained = loadFont('" + existing + "');");
+    REQUIRE_FALSE(engine.evaluate("font_contained").getWithDefault<bool>(true));
+
+    bridge.set_allow_unreviewed_file_paths(true);
     bridge.load_script(
         "var font_existing = loadFont('" + existing + "');"
         "var font_missing = loadFont('" + missing + "');"

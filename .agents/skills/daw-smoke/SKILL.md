@@ -139,7 +139,11 @@ REAPER session untouched.
   - `--dry-run` needs no REAPER.
 - **Real-host gpu-fault matrix (WP-K)**: the same plug-in in Logic and
   GarageBand (AU, including out-of-process AUHostingService), Bitwig and
-  REAPER. Driven step by step by `real_host_smoke.py`, not by `reaper_smoke.py`.
+  REAPER. Logic/GarageBand/Bitwig are driven step by step by
+  `real_host_smoke.py`; `reaper_smoke.py` drives REAPER, then
+  `real_host_smoke.py wrap-reaper` converts its verified v1 run to v2.
+  `gpu_fault_receipts.py` owns v2 receipt construction for both paths;
+  keep the GUI lifecycle and receipt logic separate when changing either.
   - Order: `preflight`, `install-au`, `snapshot-prefs`, `stage`, `launch`,
     `await-claim`, `realtime-begin`/`realtime-end`, `collect`, then `revert`.
     `preflight` refuses a running DAW, a locked console (`IOConsoleLocked`), an
@@ -153,6 +157,27 @@ REAPER session untouched.
   - Projects come only from `real_host_templates.json` (No Input, monitoring
     OFF, fingerprinted). Never open or save a user project; use throwaway
     copies in a temp dir.
+  - Never record-arm a template track. Logic refuses to arm a No Input track
+    ("No input source selected!"), so a `live` template is an unarmed track
+    with no audio region, playing the plug-in's internal stimulus. The AX
+    snapshot given to `collect` must carry a `track` object; an armed track,
+    monitoring on or a real input is refused by `collect` and the v2 verifier.
+  - Save a template with the `save-as-plan` steps (Cmd-Shift-S, then
+    Cmd-Shift-G in the sheet, with the host briefly in front). Pressing File >
+    Save As by accessibility does not open Logic's save sheet.
+  - Launching Logic rewrites its preferences, so `snapshot-prefs` exports
+    `com.apple.logic10` (GarageBand: `com.apple.garageband10`) and `launch`
+    refuses without it. `revert` restores the domain, deleting keys the run
+    added because `defaults import` only merges, and stays unreverted unless a
+    fresh export matches the saved one. Logic's launch also rewrites
+    `~/Music/Audio Music Apps/Databases`, which is expected.
+  - In a REAPER run the host render deviates exactly the declared PDC (1536)
+    earlier than the plug-in capture, not the status `latency_samples` (1024,
+    the GPU lead alone). The v2 verifier requires that offset at both ends of
+    the deviation. `wrap-reaper` re-reads a v1 REAPER run as a v2 receipt.
+  - A busy host voids a planted negative only when the deviation lacks the
+    defect's own onset and span (`quiet_host_exempt`). Rerun `gpu_off` on
+    `--gpu-fault positive_control`; on a fault row the pairing is a mismatch.
   - Only `tools/validation/verify_gpu_audio_daw_continuity_receipt_v2.py`
     accepts a real-host receipt (built by `gpu_fault_hosts.py`). It needs all
     six binding conjuncts: an unbound run is INCONCLUSIVE and a wrong DAW is

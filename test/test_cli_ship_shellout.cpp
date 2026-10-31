@@ -21,10 +21,13 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/platform/child_process.hpp>
 
+#include <algorithm>
 #include <chrono>
+#include <csignal>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -2063,7 +2066,16 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     }
     auto root = make_fake_project("share-dry-pkg", true);
     auto pkg = root / "Demo.pkg";
-    { std::ofstream out(pkg); out << "x"; }
+    // A real flat package: share opens it to scan for development-only
+    // runtimes, and refuses one that does not open.
+    fs::create_directories(root / "pkg-root" / "Demo");
+    std::ofstream(root / "pkg-root" / "Demo" / "readme.txt") << "demo\n";
+    REQUIRE(ChildProcess::run("/usr/bin/pkgbuild",
+                              {"--root", (root / "pkg-root").string(), "--identifier",
+                               "com.pulp.test.share", "--version", "1.0.0", "--install-location",
+                               "/Applications", pkg.string()},
+                              ProcessOptions{})
+                .exit_code == 0);
 
     auto r = run_pulp_in(root, {"ship", "share", pkg.string(), "--dry-run"});
     REQUIRE_FALSE(r.timed_out);
@@ -2476,6 +2488,365 @@ TEST_CASE_METHOD(ShipShelloutFixture, "pulp ship share rejects a dev-shared stan
     fs::remove_all(app);
     fs::remove_all(root);
 }
+
+// Containers another tool built are opened and their contents scanned: a zip
+// with ditto, a flat pkg with pkgutil --expand-full, a dmg mounted read-only.
+namespace {
+
+// A plug-in bundle staged in `stage`, clean or carrying a dev-shared module.
+fs::path stage_container_payload(const fs::path& stage, bool dev_shared) {
+    const auto bundle = stage / "FastGain.vst3";
+    const auto module = bundle / "Contents" / "MacOS" / "FastGain";
+    if (dev_shared) {
+        write_dev_shared_module(module);
+    } else {
+        fs::create_directories(module.parent_path());
+        std::ofstream(module, std::ios::binary) << "\xcf\xfa\xed\xfe" << "static module" << '\0';
+    }
+    return bundle;
+}
+
+fs::path make_container(const fs::path& dir, std::string_view kind, bool dev_shared) {
+    const auto stage = dir / (std::string(kind) + (dev_shared ? "-dev" : "-clean") + "-stage");
+    const auto bundle = stage_container_payload(stage, dev_shared);
+    const auto out = dir / ((dev_shared ? "Dev." : "Clean.") + std::string(kind));
+    ProcessResult r;
+    if (kind == "zip") {
+        r = ChildProcess::run("/usr/bin/ditto",
+                              {"-c", "-k", "--keepParent", bundle.string(), out.string()},
+                              ProcessOptions{});
+    } else if (kind == "pkg") {
+        r = ChildProcess::run("/usr/bin/pkgbuild",
+                              {"--root", stage.string(), "--identifier", "com.pulp.test.container",
+                               "--version", "1.0.0", "--install-location",
+                               "/Library/Audio/Plug-Ins/VST3", out.string()},
+                              ProcessOptions{});
+    } else {
+        r = ChildProcess::run("/usr/bin/hdiutil",
+                              {"create", "-quiet", "-ov", "-format", "UDZO", "-srcfolder",
+                               stage.string(), out.string()},
+                              ProcessOptions{});
+    }
+    INFO(r.stdout_output << r.stderr_output);
+    REQUIRE(r.exit_code == 0);
+    return out;
+}
+
+ProcessResult notarize_dry_run(const fs::path& root, const fs::path& artifact) {
+    return run_pulp_in(root, {"ship", "notarize", "--dry-run", "--path", artifact.string(),
+                              "--api-key", "/path/AuthKey_FAKE.p8", "--api-key-id", "FAKEKEYID",
+                              "--api-issuer", "fake-issuer"});
+}
+
+void check_container_scan(const fs::path& root, std::string_view kind) {
+    const auto dev = make_container(root, kind, true);
+    auto refused = notarize_dry_run(root, dev);
+    INFO(refused.stdout_output << refused.stderr_output);
+    REQUIRE_FALSE(refused.timed_out);
+    REQUIRE(refused.exit_code == 1);
+    REQUIRE(contains(refused.stderr_output, "development-only dev-shared build"));
+    REQUIRE(contains(refused.stderr_output, dev.filename().string()));
+    REQUIRE(contains(refused.stderr_output, "FastGain"));
+    REQUIRE_FALSE(contains(refused.stdout_output + refused.stderr_output, "notarytool submit"));
+
+    // Control: the same container without the runtime goes on to submission.
+    const auto clean = make_container(root, kind, false);
+    auto accepted = notarize_dry_run(root, clean);
+    INFO(accepted.stdout_output << accepted.stderr_output);
+    REQUIRE(accepted.exit_code == 0);
+    REQUIRE(contains(accepted.stdout_output + accepted.stderr_output, "notarytool submit"));
+}
+
+} // namespace
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship notarize opens a zip and refuses a dev-shared module inside",
+                 "[cli][shellout][ship][notarize][dev-shared]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("notarize-zip-dev-shared", true);
+    check_container_scan(root, "zip");
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship notarize expands a flat pkg and refuses a dev-shared module inside",
+                 "[cli][shellout][ship][notarize][dev-shared]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("notarize-pkg-dev-shared", true);
+    check_container_scan(root, "pkg");
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship notarize mounts a dmg and refuses a dev-shared module inside",
+                 "[cli][shellout][ship][notarize][dev-shared][hdiutil]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("notarize-dmg-dev-shared", true);
+    check_container_scan(root, "dmg");
+    // Every scan detached its image: nothing of this test is still mounted.
+    auto info = ChildProcess::run("/usr/bin/hdiutil", {"info"}, ProcessOptions{});
+    REQUIRE_FALSE(contains(info.stdout_output, "pulp-ship-container-scan"));
+    fs::remove_all(root);
+}
+
+namespace {
+
+// Zips `item` (a file or directory) into `out` with its own name at the root.
+void zip_item(const fs::path& item, const fs::path& out) {
+    auto r = ChildProcess::run("/usr/bin/ditto",
+                               {"-c", "-k", "--keepParent", item.string(), out.string()},
+                               ProcessOptions{});
+    INFO(r.stdout_output << r.stderr_output);
+    REQUIRE(r.exit_code == 0);
+}
+
+// Wraps `item` in `levels` zips, each holding the previous one; returns the
+// outermost.
+fs::path nest_in_zips(const fs::path& dir, const fs::path& item, int levels) {
+    fs::path current = item;
+    for (int i = 1; i <= levels; ++i) {
+        const auto out = dir / ("level" + std::to_string(i) + ".zip");
+        zip_item(current, out);
+        current = out;
+    }
+    return current;
+}
+
+} // namespace
+
+TEST_CASE_METHOD(ShipShelloutFixture, "pulp ship notarize opens a container inside a container",
+                 "[cli][shellout][ship][notarize][dev-shared]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("notarize-nested-dev-shared", true);
+    const auto stage = root / "nested-stage";
+    const auto bundle = stage_container_payload(stage, true);
+    // A dev-shared module inside a zip inside a zip: the outer bytes are
+    // compressed twice over, so only opening both finds it.
+    const auto outer = nest_in_zips(root, bundle, 2);
+    auto r = notarize_dry_run(root, outer);
+    INFO(r.stdout_output << r.stderr_output);
+    REQUIRE(r.exit_code == 1);
+    REQUIRE(contains(r.stderr_output, "development-only dev-shared build"));
+    // The message walks the chain, outermost first.
+    REQUIRE(contains(r.stderr_output, "level2.zip > "));
+    REQUIRE(contains(r.stderr_output, "/level1.zip: it contains"));
+    REQUIRE_FALSE(contains(r.stdout_output + r.stderr_output, "notarytool submit"));
+
+    // Control: the same nesting around a static module goes on to submission.
+    const auto clean_stage = root / "nested-clean-stage";
+    const auto clean_outer =
+        nest_in_zips(clean_stage, stage_container_payload(clean_stage, false), 2);
+    auto accepted = notarize_dry_run(root, clean_outer);
+    INFO(accepted.stdout_output << accepted.stderr_output);
+    REQUIRE(accepted.exit_code == 0);
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture, "containers nested deeper than the scan limit are refused",
+                 "[cli][shellout][ship][notarize][dev-shared]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("notarize-nested-too-deep", true);
+    const auto stage = root / "deep-stage";
+    // Four levels of clean zips: one more than the scan opens.
+    const auto outer = nest_in_zips(stage, stage_container_payload(stage, false), 4);
+    auto r = notarize_dry_run(root, outer);
+    INFO(r.stdout_output << r.stderr_output);
+    REQUIRE(r.exit_code == 1);
+    REQUIRE(contains(r.stderr_output, "nested more than 3 deep"));
+    REQUIRE(contains(r.stderr_output, "fails closed"));
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture, "a container's symlinks are not followed out of it",
+                 "[cli][shellout][ship][notarize][dev-shared]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("notarize-symlink-escape", true);
+    // Outside the container, a dev-shared module the scan must not reach.
+    const auto outside = root / "outside";
+    write_dev_shared_module(outside / "Elsewhere.vst3" / "Contents" / "MacOS" / "Elsewhere");
+    const auto stage = root / "symlink-stage" / "Payload";
+    stage_container_payload(stage, false);
+    std::error_code ec;
+    fs::create_directory_symlink(outside, stage / "Applications", ec);
+    REQUIRE_FALSE(ec);
+    const auto zip = root / "WithLink.zip";
+    zip_item(stage, zip);
+    auto r = notarize_dry_run(root, zip);
+    INFO(r.stdout_output << r.stderr_output);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(contains(r.stdout_output + r.stderr_output, "notarytool submit"));
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "an encrypted dmg is refused at once rather than waiting for a passphrase",
+                 "[cli][shellout][ship][notarize][dev-shared][hdiutil]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("notarize-encrypted-dmg", true);
+    const auto stage = root / "encrypted-stage";
+    stage_container_payload(stage, false);
+    const auto dmg = root / "Locked.dmg";
+    auto made = ChildProcess::run(
+        "/bin/sh",
+        {"-c",
+         "printf 'pulp-test-passphrase' | /usr/bin/hdiutil create -quiet -ov -encryption AES-128 "
+         "-stdinpass -srcfolder \"$0\" \"$1\"",
+         stage.string(), dmg.string()},
+        ProcessOptions{});
+    INFO(made.stdout_output << made.stderr_output);
+    REQUIRE(made.exit_code == 0);
+
+    // stdin stays open and silent, as in a terminal nobody answers: a tool
+    // that reads its passphrase from it waits until the timeout.
+    ProcessOptions opts;
+    opts.timeout_ms = 60000;
+    opts.working_directory = root.string();
+    std::vector<std::string> args = {"-c",
+                                     "exec \"$@\" < <(exec sleep 90 >/dev/null 2>&1)",
+                                     "notarize",
+                                     pulp_binary().string(),
+                                     "ship",
+                                     "notarize",
+                                     "--dry-run",
+                                     "--path",
+                                     dmg.string(),
+                                     "--api-key",
+                                     "/path/AuthKey_FAKE.p8",
+                                     "--api-key-id",
+                                     "FAKEKEYID",
+                                     "--api-issuer",
+                                     "fake-issuer"};
+    const auto started = std::chrono::steady_clock::now();
+    auto r = ChildProcess::run("/bin/bash", args, opts);
+    INFO(r.stdout_output << r.stderr_output);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(std::chrono::steady_clock::now() - started < std::chrono::seconds(30));
+    REQUIRE(r.exit_code == 1);
+    REQUIRE(contains(r.stderr_output, "hdiutil attach failed"));
+    REQUIRE(contains(r.stderr_output, "encrypted image"));
+    REQUIRE(contains(r.stderr_output, "licence agreement (SLA)"));
+    REQUIRE_FALSE(contains(r.stdout_output + r.stderr_output, "notarytool submit"));
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "a signal during a dmg scan detaches the image and removes the temp dir",
+                 "[cli][shellout][ship][notarize][dev-shared][hdiutil]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("notarize-dmg-signal", true);
+    const auto stage = root / "signal-stage";
+    stage_container_payload(stage, false);
+    // A zip of 30000 empty files, inside the image: ditto takes seconds to
+    // create them, so it is still running in the scan's second level, with
+    // the image mounted, when the signal arrives and for a while after.
+    const auto filler = root / "filler";
+    for (int dir = 0; dir < 30; ++dir) {
+        const auto sub = filler / std::to_string(dir);
+        fs::create_directories(sub);
+        for (int file = 0; file < 1000; ++file)
+            std::ofstream(sub / (std::to_string(file) + ".txt"));
+    }
+    zip_item(filler, stage / "Filler.zip");
+    fs::remove_all(filler);
+    const auto image = root / "Busy.dmg";
+    auto made = ChildProcess::run("/usr/bin/hdiutil",
+                                  {"create", "-quiet", "-ov", "-format", "UDZO", "-srcfolder",
+                                   stage.string(), image.string()},
+                                  ProcessOptions{});
+    INFO(made.stdout_output << made.stderr_output);
+    REQUIRE(made.exit_code == 0);
+
+    const auto scans = fs::temp_directory_path() / "pulp-ship-container-scan";
+    const auto list_scans = [&] {
+        std::vector<fs::path> found;
+        std::error_code ec;
+        for (fs::directory_iterator it(scans, ec), end; !ec && it != end; it.increment(ec))
+            found.push_back(it->path());
+        return found;
+    };
+    const auto before = list_scans();
+
+    ChildProcess scan;
+    ProcessOptions opts;
+    opts.timeout_ms = 120000;
+    opts.working_directory = root.string();
+    REQUIRE(scan.start(pulp_binary().string(),
+                       {"ship", "notarize", "--dry-run", "--path", image.string(), "--api-key",
+                        "/path/AuthKey_FAKE.p8", "--api-key-id", "FAKEKEYID", "--api-issuer",
+                        "fake-issuer"},
+                       opts));
+    // Signal as soon as the nested zip starts extracting: the image is
+    // mounted at level1/contents and ditto is writing level2/contents.
+    fs::path scan_root;
+    bool extracting = false;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+    while (!extracting && scan.is_running() && std::chrono::steady_clock::now() < deadline) {
+        if (scan_root.empty()) {
+            for (const auto& candidate : list_scans())
+                if (std::find(before.begin(), before.end(), candidate) == before.end())
+                    scan_root = candidate;
+            continue;
+        }
+        std::error_code ec;
+        extracting = fs::exists(scan_root / "level2" / "contents", ec);
+    }
+    REQUIRE(extracting);
+    REQUIRE(::kill(scan.process_id(), SIGTERM) == 0);
+    auto r = scan.wait(); // unbounded-wait: allow wait() kills the child at opts.timeout_ms
+    INFO(r.stdout_output << r.stderr_output);
+    REQUIRE_FALSE(contains(r.stdout_output + r.stderr_output, "notarytool submit"));
+
+    // Nothing the scan started is left running.
+    auto orphans = ChildProcess::run("/usr/bin/pgrep", {"-f", scan_root.filename().string()},
+                                     ProcessOptions{});
+    INFO("still running: " << orphans.stdout_output);
+    REQUIRE(orphans.exit_code == 1);
+    auto mounted = ChildProcess::run("/sbin/mount", {}, ProcessOptions{});
+    REQUIRE_FALSE(contains(mounted.stdout_output, scan_root.filename().string()));
+    REQUIRE_FALSE(fs::exists(scan_root));
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "a container that cannot be opened is refused, and share scans its input",
+                 "[cli][shellout][ship][share][dev-shared]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("container-unopened", true);
+    const auto broken = root / "Broken.zip";
+    std::ofstream(broken) << "not a zip archive\n";
+    auto r = notarize_dry_run(root, broken);
+    INFO(r.stdout_output << r.stderr_output);
+    REQUIRE(r.exit_code == 1);
+    REQUIRE(contains(r.stderr_output, "cannot check"));
+    REQUIRE(contains(r.stderr_output, "zipinfo cannot read its size"));
+    REQUIRE(contains(r.stderr_output, "fails closed"));
+
+    const auto pkg = make_container(root, "pkg", true);
+    auto shared = run_pulp_in(root, {"ship", "share", pkg.string(), "--dry-run"});
+    INFO(shared.stdout_output << shared.stderr_output);
+    REQUIRE(shared.exit_code == 1);
+    REQUIRE(contains(shared.stderr_output, "development-only dev-shared build"));
+    REQUIRE_FALSE(contains(shared.stdout_output, "share plan"));
+    fs::remove_all(root);
+}
 #endif
 
 // ── Linux packaging CLI routing ──────────────────────────────────────────
@@ -2564,6 +2935,170 @@ TEST_CASE("shellout timeout falls back to the default on unusable overrides",
                 pulp_test_cli::kDefaultShelloutTimeoutMs);
     }
 }
+
+// The hardened-runtime JIT policy `pulp ship sign` / `ship share` apply before
+// any codesign or signing preflight runs. allow-jit is the approved JIT
+// entitlement. For a V8 / JavaScriptCore build an app must grant it; a plug-in
+// bundle runs under its host's entitlements, so the default ship entitlements
+// (no JIT) are correct for it. Asking for executable memory any other way
+// without allow-jit is refused for every artifact.
+namespace {
+
+fs::path write_entitlements(const fs::path& path, std::initializer_list<std::string_view> keys) {
+    std::ofstream plist(path);
+    plist << "<plist version=\"1.0\"><dict>\n";
+    for (auto key : keys)
+        plist << "    <key>" << key << "</key>\n    <true/>\n";
+    plist << "</dict></plist>\n";
+    return path;
+}
+
+void set_engine(const fs::path& root, std::string_view engine) {
+    std::ofstream cache(root / "build" / "CMakeCache.txt");
+    cache << "CMAKE_HOME_DIRECTORY:INTERNAL=" << root.string() << "\n"
+          << "PULP_JS_ENGINE:STRING=" << engine << "\n";
+}
+
+const std::string kRefusal = "refusing to sign";
+
+} // namespace
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship sign admits a JIT-engine plug-in signed with the default entitlements",
+                 "[cli][shellout][ship][entitlements][security]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("jit-plugin-default", /*with_build_cache=*/true);
+    set_engine(root, "v8");
+    make_fake_bundle(root, "VST3", "JitPlugin.vst3");
+    write_signing_doctor_stub(root);
+
+    // No --entitlements: the documented default ship entitlements apply.
+    auto r = run_pulp_in(root, {"ship", "sign", "--identity", "fake-id"});
+    REQUIRE_FALSE(r.timed_out);
+    auto combined = r.stdout_output + r.stderr_output;
+    INFO(combined);
+    REQUIRE_FALSE(contains(combined, kRefusal));
+    REQUIRE(contains(combined, "Signing JitPlugin"));
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship sign refuses executable memory requested without allow-jit",
+                 "[cli][shellout][ship][entitlements][security]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("jit-unapproved", /*with_build_cache=*/true);
+    make_fake_bundle(root, "VST3", "JitPlugin.vst3");
+    write_signing_doctor_stub(root);
+
+    for (auto engine : {"v8", "quickjs"}) {
+        set_engine(root, engine);
+        for (auto key : {"com.apple.security.cs.allow-unsigned-executable-memory",
+                         "com.apple.security.cs.disable-executable-page-protection"}) {
+            auto plist = write_entitlements(root / "unapproved.plist", {key});
+            auto r = run_pulp_in(
+                root, {"ship", "sign", "--identity", "fake-id", "--entitlements", plist.string()});
+            REQUIRE_FALSE(r.timed_out);
+            auto combined = r.stdout_output + r.stderr_output;
+            INFO(engine << " " << key << "\n" << combined);
+            REQUIRE(r.exit_code != 0);
+            REQUIRE(contains(combined, kRefusal));
+            REQUIRE(contains(combined, key));
+            REQUIRE_FALSE(contains(combined, "Signing JitPlugin"));
+        }
+    }
+
+    // Control: the same request alongside allow-jit gets past the policy.
+    set_engine(root, "v8");
+    auto paired = write_entitlements(root / "paired.plist",
+                                     {"com.apple.security.cs.allow-jit",
+                                      "com.apple.security.cs.allow-unsigned-executable-memory"});
+    auto r = run_pulp_in(
+        root, {"ship", "sign", "--identity", "fake-id", "--entitlements", paired.string()});
+    REQUIRE_FALSE(r.timed_out);
+    INFO(r.stdout_output + r.stderr_output);
+    REQUIRE_FALSE(contains(r.stdout_output + r.stderr_output, kRefusal));
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship sign refuses a JIT-engine app whose entitlements lack allow-jit",
+                 "[cli][shellout][ship][entitlements][security]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("jit-app", /*with_build_cache=*/true);
+    set_engine(root, "v8");
+    auto app = root / "JitApp.app";
+    make_fake_standalone_app(app, "JitApp");
+    write_signing_doctor_stub(root);
+
+    auto no_jit =
+        write_entitlements(root / "no-jit.plist", {"com.apple.security.device.audio-input"});
+    auto refused = run_pulp_in(root, {"ship", "sign", "--identity", "fake-id", "--path",
+                                      app.string(), "--entitlements", no_jit.string()});
+    REQUIRE_FALSE(refused.timed_out);
+    auto combined = refused.stdout_output + refused.stderr_output;
+    INFO(combined);
+    REQUIRE(refused.exit_code != 0);
+    REQUIRE(contains(combined, "allow-jit"));
+    REQUIRE(contains(combined, "PULP_JS_ENGINE=v8"));
+    REQUIRE_FALSE(contains(combined, "Signing JitApp"));
+
+    // Control: the same app with allow-jit granted gets past the policy (and
+    // then fails on the fake identity, or succeeds, but not on entitlements).
+    auto with_jit = write_entitlements(root / "jit.plist", {"com.apple.security.cs.allow-jit"});
+    auto admitted = run_pulp_in(root, {"ship", "sign", "--identity", "fake-id", "--path",
+                                       app.string(), "--entitlements", with_jit.string()});
+    REQUIRE_FALSE(admitted.timed_out);
+    INFO(admitted.stdout_output + admitted.stderr_output);
+    REQUIRE_FALSE(contains(admitted.stdout_output + admitted.stderr_output, kRefusal));
+
+    // A QuickJS app needs no JIT grant.
+    set_engine(root, "quickjs");
+    auto quickjs = run_pulp_in(root, {"ship", "sign", "--identity", "fake-id", "--path",
+                                      app.string(), "--entitlements", no_jit.string()});
+    REQUIRE_FALSE(quickjs.timed_out);
+    REQUIRE_FALSE(contains(quickjs.stdout_output + quickjs.stderr_output, kRefusal));
+    fs::remove_all(root);
+}
+
+#ifdef __APPLE__
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship share applies the JIT entitlement policy to an app",
+                 "[cli][shellout][ship][share][entitlements][security]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("jit-share", /*with_build_cache=*/true);
+    set_engine(root, "v8");
+    auto app = root / "JitShare.app";
+    make_fake_standalone_app(app, "JitShare");
+
+    auto no_jit =
+        write_entitlements(root / "no-jit.plist", {"com.apple.security.device.audio-input"});
+    auto refused = run_pulp_in(
+        root, {"ship", "share", app.string(), "--entitlements", no_jit.string(), "--dry-run"});
+    REQUIRE_FALSE(refused.timed_out);
+    auto combined = refused.stdout_output + refused.stderr_output;
+    INFO(combined);
+    REQUIRE(refused.exit_code != 0);
+    REQUIRE(contains(combined, "PULP_JS_ENGINE=v8"));
+    REQUIRE_FALSE(contains(combined, "share plan"));
+
+    auto with_jit = write_entitlements(root / "jit.plist", {"com.apple.security.cs.allow-jit"});
+    auto admitted = run_pulp_in(
+        root, {"ship", "share", app.string(), "--entitlements", with_jit.string(), "--dry-run"});
+    REQUIRE_FALSE(admitted.timed_out);
+    INFO(admitted.stdout_output + admitted.stderr_output);
+    REQUIRE(admitted.exit_code == 0);
+    REQUIRE(contains(admitted.stdout_output + admitted.stderr_output, "share plan"));
+    fs::remove_all(root);
+}
+#endif
 
 // ── PULP_DEV_BUILD: ship builds build-ship/ instead of refusing ──────────────
 //

@@ -18,6 +18,15 @@
 #include <limits>
 #include <string>
 
+#if defined(PULP_HAS_SKIA)
+#include <pulp/canvas/skia_canvas.hpp>
+
+#include "include/core/SkCanvas.h"
+#include "include/core/SkImageInfo.h"
+#include "include/core/SkPixmap.h"
+#include "include/core/SkSurface.h"
+#endif
+
 namespace pulp::view {
 
 // ── Label ────────────────────────────────────────────────────────────────────
@@ -127,13 +136,42 @@ void Label::set_text(std::string text) {
     // vertical, attributed, and captured-wrap Labels unless the box is a
     // pinned capture. Their text can change measured geometry, so they
     // must still invalidate layout.
-    const auto& style = flex();
-    const bool has_explicit_width =
-        style.preferred_width > 0.0f ||
-        (style.dim_width.unit != DimensionUnit::auto_ && style.dim_width.value > 0.0f);
-    const bool has_explicit_height =
-        style.preferred_height > 0.0f ||
-        (style.dim_height.unit != DimensionUnit::auto_ && style.dim_height.value > 0.0f);
+    // "Fixed" means a size yoga_layout() hands Yoga as a definite number: a
+    // px dimension through preferred_*, or a viewport dimension, which it
+    // resolves itself. `auto` overrides preferred_*, and a px dim_* without a
+    // preferred size is never handed to Yoga. A percent is definite only when
+    // every ancestor up to the root fixes that axis the same way; under an
+    // auto-sized parent Yoga sizes the box from its text.
+    const auto fixed_size = [](const View* view, bool horizontal_axis) {
+        for (const View* self = view; view != nullptr; view = view->parent()) {
+            // An ancestor that is the root takes its size from the host,
+            // which is definite.
+            if (view != self && view->parent() == nullptr)
+                return true;
+            const auto& f = view->flex();
+            const auto& dim = horizontal_axis ? f.dim_width : f.dim_height;
+            const float preferred = horizontal_axis ? f.preferred_width : f.preferred_height;
+            switch (dim.unit) {
+            case DimensionUnit::px:
+                return preferred > 0.0f;
+            case DimensionUnit::vw:
+            case DimensionUnit::vh:
+            case DimensionUnit::vmin:
+            case DimensionUnit::vmax:
+                return dim.value > 0.0f;
+            case DimensionUnit::auto_:
+                return false;
+            case DimensionUnit::percent:
+                if (dim.value <= 0.0f || view->parent() == nullptr)
+                    return false;
+                continue;
+            }
+            return false;
+        }
+        return false;
+    };
+    const bool has_explicit_width = fixed_size(this, true);
+    const bool has_explicit_height = fixed_size(this, false);
     const bool horizontal = text_direction_ != canvas::TextDirection::top_to_bottom &&
                             text_direction_ != canvas::TextDirection::bottom_to_top;
     const bool single_line_simple =
@@ -171,6 +209,7 @@ void Label::set_text(std::string text) {
     // when the copy is wider than the box; measured before the copy
     // changes so the repaint below covers the old text's ink too.
     const float ink_before = has_explicit_width && single_line_simple ? intrinsic_width() : 0.0f;
+    const bool old_text_was_empty = text_.empty();
     text_ = std::move(text);
     // A captured browser line box describes ONE string. Once the copy
     // diverges from it the Label paints natively, and it must keep doing
@@ -217,25 +256,20 @@ void Label::set_text(std::string text) {
     const bool text_has_layout_slot = has_own_text_box();
     const bool box_is_pinned =
         has_explicit_width && has_explicit_height && !baseline_aligned && !text_has_layout_slot;
-    // A captured box pinned in points on both axes is fixed whatever the
-    // copy wraps to. Yoga never measures a box whose width and height are
-    // definite, it shrinks a flex item toward its explicit min size rather
-    // than a content minimum, and an auto-sized parent reads this box, not
-    // its text. A childless Label with captured lines never gets a text
-    // slot, and scroll extents read child bounds rather than ink, so no line
-    // count or retired capture can move anything. A percent or viewport
-    // dimension stays on the conservative path: it resolves against a
-    // parent whose own size may be content-derived. Most captured
-    // design-import boxes are this kind, and they wrap on a cache miss.
-    const auto pinned_in_points = [](float preferred, const Dimension& dim) {
-        return dim.unit == DimensionUnit::px && (dim.value > 0.0f || preferred > 0.0f);
-    };
-    const bool captured_box_is_pinned =
-        pinned_in_points(style.preferred_width, style.dim_width) &&
-        pinned_in_points(style.preferred_height, style.dim_height) && !baseline_aligned &&
-        !text_has_layout_slot && !cached_line_boxes_.empty() && child_count() == 0;
+    // A box fixed on both axes holds still whatever the copy wraps to. Yoga
+    // never measures a box whose width and height are definite, it shrinks a
+    // flex item toward its explicit min size rather than a content minimum,
+    // and an auto-sized parent reads this box, not its text; paint re-breaks
+    // the lines at the box width itself. A childless Label with captured lines
+    // never gets a text slot, and scroll extents read child bounds rather than
+    // ink, so no line count or retired capture can move anything. Without
+    // captured lines an empty copy has no slot and its first text may need
+    // one, so a change to or from empty still lays out.
+    const bool captured = !cached_line_boxes_.empty();
+    const bool box_holds_still = box_is_pinned && child_count() == 0 &&
+                                 (captured || (!text_.empty() && !old_text_was_empty));
     const bool text_geometry_is_fixed =
-        captured_box_is_pinned ||
+        box_holds_still ||
         (!captured_basis_dropped && has_explicit_width && single_line_simple &&
          !text_has_layout_slot &&
          (box_is_pinned || (probe_height && intrinsic_height() == height_before)));
@@ -1005,6 +1039,93 @@ Label::painted_text_extents(float available_width) const {
         default: break;
     }
     out.ink = Rect{ink_x, 0.0f, widest, height};
+
+    // A captured layout paints Chromium's line boxes, not a native re-shape:
+    // a label that wraps here may be one line on screen. Describe the lines
+    // paint() draws.
+    if (available_width > 0.0f &&
+        cached_line_layout_usable(display_text, rs.font_size, rs.letter_spacing, available_width)) {
+        int captured_lines = static_cast<int>(cached_line_boxes_.size());
+        if (line_clamp_ > 0 && line_clamp_ < captured_lines)
+            captured_lines = line_clamp_;
+        float left = std::numeric_limits<float>::max(), top = left;
+        float right = std::numeric_limits<float>::lowest(), bottom = right;
+        float captured_widest = 0.0f;
+        for (int i = 0; i < captured_lines; ++i) {
+            const auto& box = cached_line_boxes_[static_cast<std::size_t>(i)];
+            captured_widest = std::max(captured_widest, box.width);
+            left = std::min(left, box.left);
+            top = std::min(top, box.top);
+            right = std::max(right, box.left + box.width);
+            bottom = std::max(bottom, box.top + box.height);
+        }
+        if (captured_lines > 0) {
+            out.width = captured_widest;
+            out.height = bottom - top;
+            out.line_count = captured_lines;
+            out.ink = Rect{left, top, right - left, bottom - top};
+        }
+    }
+
+#if defined(PULP_HAS_SKIA)
+    // The ink: what paint() actually covers. Paint centres a block taller than
+    // its box over it, a glyph reaches past its advance and its line box, and
+    // a captured line sits where Chromium put it; every one of those is a
+    // placement rule of paint's own, so the honest answer is to paint once
+    // into a scratch raster and read back which pixels it touched.
+    const float box_w = available_width > 0.0f ? available_width : bounds().width;
+    const float box_h = has_own_text_box() ? own_text_box().height : bounds().height;
+    const float reach = std::max({out.width, out.height, box_w, box_h, rs.font_size * 4.0f});
+    const int margin = static_cast<int>(std::ceil(reach)) + 4;
+    const int surface_w = static_cast<int>(std::ceil(std::max(box_w, 1.0f))) + 2 * margin;
+    const int surface_h = static_cast<int>(std::ceil(std::max(box_h, 1.0f))) + 2 * margin;
+    if (auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(surface_w, surface_h))) {
+        surface->getCanvas()->clear(SK_ColorTRANSPARENT);
+        auto* self = const_cast<Label*>(this);
+        // Painting records selection geometry and counts line-break paths;
+        // this paint is a measurement, so neither may change.
+        const auto selection = selection_layout_;
+        const auto selection_pending = selection_layout_pending_;
+        const auto counts = line_break_counts();
+        {
+            canvas::SkiaCanvas probe(surface->getCanvas());
+            probe.translate(static_cast<float>(margin), static_cast<float>(margin));
+            if (has_own_text_box()) {
+                const Rect box = own_text_box();
+                probe.translate(box.x, box.y);
+                self->paint_text_(probe, {0.0f, 0.0f, box.width, box.height});
+            } else {
+                self->paint_text_(probe, {0.0f, 0.0f, box_w, box_h});
+            }
+        }
+        self->selection_layout_ = selection;
+        self->selection_layout_pending_ = selection_pending;
+        line_break_counts() = counts;
+        SkPixmap pixels;
+        if (surface->peekPixels(&pixels)) {
+            // Every pixel paint touched, anti-aliased edges included: a thin
+            // stroke of small or translucent text is covered by less than half
+            // a pixel and is still ink, and a repaint that skipped it would
+            // leave it stale.
+            int x0 = surface_w, y0 = surface_h, x1 = -1, y1 = -1;
+            for (int y = 0; y < surface_h; ++y) {
+                for (int x = 0; x < surface_w; ++x) {
+                    if (SkColorGetA(pixels.getColor(x, y)) == 0)
+                        continue;
+                    x0 = std::min(x0, x);
+                    x1 = std::max(x1, x);
+                    y0 = std::min(y0, y);
+                    y1 = std::max(y1, y);
+                }
+            }
+            // Nothing inked (a transparent colour, a face with no glyphs):
+            // keep the layout's answer rather than reporting an empty box.
+            if (x1 >= 0)
+                out.ink = Rect{static_cast<float>(x0 - margin), static_cast<float>(y0 - margin),
+                               static_cast<float>(x1 - x0 + 1), static_cast<float>(y1 - y0 + 1)};
+        }
+    }
+#endif
     return out;
 }
 
@@ -1730,19 +1851,28 @@ float captured_frame_y(const View& view) {
 } // namespace
 
 void Label::paint(canvas::Canvas& canvas) {
+    // Font smoothing is canvas state scoped by save()/restore(), so what this
+    // text asks for ends with it and never reaches whatever paints next.
+    const bool smoothed = font_smoothing_ != canvas::FontSmoothing::auto_smoothing;
+    if (smoothed) {
+        canvas.save();
+        canvas.set_font_smoothing(font_smoothing_);
+    }
     // A Label that also has element children draws its own text inside the
     // anonymous inline box the layout pass reserved for it on the flex line.
     // Without that slot the text would start at the same content origin the
     // first child lays out from and the two would overlap.
     if (!has_own_text_box()) {
         paint_text_(canvas, {0.0f, 0.0f, bounds().width, bounds().height});
-        return;
+    } else {
+        const Rect box = own_text_box();
+        canvas.save();
+        canvas.translate(box.x, box.y);
+        paint_text_(canvas, {0.0f, 0.0f, box.width, box.height});
+        canvas.restore();
     }
-    const Rect box = own_text_box();
-    canvas.save();
-    canvas.translate(box.x, box.y);
-    paint_text_(canvas, {0.0f, 0.0f, box.width, box.height});
-    canvas.restore();
+    if (smoothed)
+        canvas.restore();
 }
 
 void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {

@@ -401,6 +401,15 @@ alone would make one runner image's version the contract while `docs-material.ym
 and `docs-deploy.yml` drifted from it. If image drift ever does flip this check,
 pin all three together rather than just this one.
 
+**`control-shipping-native.yml` proves the installed scanner is complete.** After
+`cmake --install` it asserts that `lib/cmake/Pulp/` holds
+`check_control_shipping_artifact.cmake` together with the two files it reads
+from its own directory, `PulpReleaseArtifactScan.cmake` and
+`release_artifact_forbidden.json` (the one forbidden-marker list every
+release-artifact scan applies). A downstream SDK that staged the scanner
+without its list would fail closed at scan time; this check fails it at
+install time instead.
+
 **The release bot's bump skips the advisory lanes.** `control-shipping-native.yml`,
 `examples-validation.yml`, `intel-portability.yml` and `coverage.yml` AND
 `github.head_ref != 'release/version-bump'` into every job's condition. The
@@ -690,7 +699,13 @@ do not replace the required Vellum checks. The hosted Linux and macOS coverage
 legs each reclaim preinstalled image content before building, and log disk
 samples while the suite runs; see the versioning guide's hosted coverage disk
 section. The Linux leg also fetches full git history before its Python tools
-pass, because several tools tests check ancestry.
+pass, because several tools tests check ancestry. The Windows coverage leg
+builds with examples OFF, matching the normal Windows build; Linux and macOS
+coverage build the examples tree. The coverage publish
+barrier fails, rather than skips, when a required native leg fails or is
+cancelled. A dispatch that sets `windows_runner_selector_json` also requires the
+Windows Cobertura report, so a Windows proof run cannot read green with its
+Windows leg broken.
 
 The files under `docs/evidence/hosted-macos-advisory/` are labeled pre-change
 baselines. A post-merge follow-up must capture hosted-macOS running plus queued

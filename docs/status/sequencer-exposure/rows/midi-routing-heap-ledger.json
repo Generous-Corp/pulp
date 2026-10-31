@@ -35,12 +35,6 @@
         "MIDI routing kernels allocate only in their constructors",
         "a moved-from MIDI routing kernel refuses every entry point"
       ]
-    },
-    {
-      "path": "tools/scripts/agent_capability_manifest.py",
-      "needles": [
-        "SURFACE_INVENTORY_VERSION = 159"
-      ]
     }
   ],
   "surfaces": {

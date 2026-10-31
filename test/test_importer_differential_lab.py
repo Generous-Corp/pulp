@@ -33,6 +33,19 @@ class StageProvenanceTests(unittest.TestCase):
         self.assertEqual(record["import_timing_line"], result.stdout.strip())
         self.assertEqual(len(record["stdout_sha256"]), 64)
 
+    def test_a_timed_out_command_records_its_partial_output_as_text(self) -> None:
+        from importer_differential.core import command_record, run_command
+
+        script = ("import sys, time; print('started', flush=True); "
+                  "print('still going', file=sys.stderr, flush=True); time.sleep(30)")
+        result = run_command([sys.executable, "-c", script], timeout_seconds=1)
+        self.assertEqual(result.returncode, 124)
+        self.assertIsInstance(result.stdout, str)
+        self.assertIsInstance(result.stderr, str)
+        self.assertIn("started", result.stdout)
+        self.assertIn("still going", result.stderr)
+        self.assertEqual(len(command_record(result)["stderr_sha256"]), 64)
+
 from unittest.mock import patch
 
 try:
@@ -1129,6 +1142,7 @@ class DifferentialLabTests(unittest.TestCase):
             (evidence / "dom-snapshot.json").write_text(
                 json.dumps({"documents": []}), encoding="utf-8")
             mutate_snapshot_during_render = False
+            receipt_emitter = None
 
             def fake_run(argv: list[str], timeout_seconds: int) -> LAB.CommandResult:
                 if "--render" in argv:
@@ -1144,10 +1158,12 @@ class DifferentialLabTests(unittest.TestCase):
                             "id": "browser:root",
                             "rect": observer_root_rect(argv, 1, 1),
                         }]}), encoding="utf-8")
+                    emitter = (argv[argv.index("--emitter") + 1]
+                               if "--emitter" in argv else "native")
                     Path(argv[argv.index("--render-receipt") + 1]).write_text(
                         json.dumps({"schema": "pulp-design-ir-render-receipt-v1",
                                     "backend_requested": "skia", "backend_used": "skia",
-                                    "ok": True,
+                                    "ok": True, "emitter": receipt_emitter or emitter,
                                     "placement": observer_placement(argv)}), encoding="utf-8")
                 else:
                     output = Path(argv[argv.index("--output") + 1])
@@ -1170,10 +1186,49 @@ class DifferentialLabTests(unittest.TestCase):
             self.assertEqual(report["integrity"]["source_sha256"], source_sha256)
             self.assertTrue(report["integrity"]["source_bound"])
             self.assertTrue(report["comparison"]["viewport_dpr_audit"]["ok"])
+            self.assertEqual(report["candidate"]["emitter"], "native")
             binding.assert_called_once()
+
+            # The ui.js lane renders the same IR through the program it emits;
+            # the native lane's observer argv does not change.
+            with patch.object(LAB, "run_command", side_effect=fake_run) as run, \
+                    patch.object(LAB, "find_browser_evidence", return_value=evidence):
+                js_report = LAB.compare_one(
+                    Path("importer"), Path("observer"), source, root / "out-js", 60,
+                    "claude", Path("chrome"),
+                    fixture_metadata={"viewport": {"width": 1, "height": 1},
+                                      "browser_interactions": "plan.json"},
+                    emitter="js")
+            render_argv = [c.args[0] for c in run.call_args_list if "--render" in c.args[0]]
+            self.assertEqual(len(render_argv), 1)
+            self.assertEqual(render_argv[0][render_argv[0].index("--emitter") + 1], "js")
+            self.assertEqual(js_report["candidate"]["emitter"], "js")
+            with patch.object(LAB, "run_command", side_effect=fake_run) as run, \
+                    patch.object(LAB, "find_browser_evidence", return_value=evidence):
+                LAB.compare_one(
+                    Path("importer"), Path("observer"), source, root / "out-native", 60,
+                    "claude", Path("chrome"),
+                    fixture_metadata={"viewport": {"width": 1, "height": 1},
+                                      "browser_interactions": "plan.json"})
+            self.assertFalse(any("--emitter" in c.args[0] for c in run.call_args_list))
+            # A render that says another emitter made it is not this lane's render.
+            receipt_emitter = "native"
+            with patch.object(LAB, "run_command", side_effect=fake_run), \
+                    patch.object(LAB, "find_browser_evidence", return_value=evidence):
+                with self.assertRaisesRegex(LAB.LabError, "names emitter 'native'"):
+                    LAB.compare_one(
+                        Path("importer"), Path("observer"), source, root / "out-js-wrong", 60,
+                        "claude", Path("chrome"),
+                        fixture_metadata={"viewport": {"width": 1, "height": 1},
+                                          "browser_interactions": "plan.json"},
+                        emitter="js")
+            receipt_emitter = None
             self.assertEqual(binding.call_args.kwargs["expected_interaction_plan_sha256"], plan_sha256)
-            self.assertEqual(image_binding.call_count, 2)
+            # Each lane's screenshot, then the candidate lane's retained copy
+            # that the visual lens scores.
+            self.assertEqual(image_binding.call_count, 3)
             image_binding.assert_any_call(capture, evidence / "browser.png")
+            image_binding.assert_any_call(capture, root / "out/candidate/browser.png")
             self.assertEqual(snapshot_binding.call_count, 2)
             self.assertEqual(report["integrity"]["browser_snapshot_binding"]["status"], "legacy-unbound")
             # Verify declared bytes on compare_one's real path, before rendering.
@@ -1430,6 +1485,62 @@ class DifferentialLabTests(unittest.TestCase):
         self.assertNotEqual(LAB.canonical_json_sha256(json.dumps(nested).encode()),
                             LAB.canonical_json_sha256(json.dumps(nested_changed).encode()))
 
+    def test_canonical_capture_digest_ignores_provenance_timings_only(self) -> None:
+        def capture(timing: int, width: int = 420) -> bytes:
+            return json.dumps({
+                "schema": "pulp-browser-capture-v1",
+                "provenance": {
+                    "timings": {"capture_ms": timing},
+                    "viewport": {"resolved": {"width": width}},
+                },
+                "documents": [{"snapshot_asset": "dom-snapshot.json"}],
+            }).encode()
+
+        baseline = LAB.canonical_json_sha256(capture(12))
+        self.assertEqual(baseline, LAB.canonical_json_sha256(capture(99)))
+        # A sibling provenance field is content, not a per-run clock.
+        self.assertNotEqual(baseline, LAB.canonical_json_sha256(capture(99, 421)))
+
+    def test_canonical_capture_digest_ignores_non_object_provenance_timings(self) -> None:
+        def capture(timings: object) -> bytes:
+            return json.dumps({
+                "schema": "pulp-browser-capture-v1",
+                "provenance": {
+                    "timings": timings,
+                    "viewport": {"resolved": {"width": 420}},
+                },
+                "documents": [{"snapshot_asset": "dom-snapshot.json"}],
+            }).encode()
+
+        baseline = LAB.canonical_json_sha256(capture(None))
+        for timings in ("worker-clock", ["capture", 12], {"capture_ms": 12}):
+            self.assertEqual(baseline, LAB.canonical_json_sha256(capture(timings)))
+
+        # The sibling provenance field remains part of the digest.
+        changed = json.loads(capture(None))
+        changed["provenance"]["viewport"]["resolved"]["width"] = 421
+        self.assertNotEqual(baseline, LAB.canonical_json_sha256(json.dumps(changed).encode()))
+
+    def test_non_capture_timings_remain_part_of_canonical_digest(self) -> None:
+        first = json.dumps({"provenance": {"timings": {"capture_ms": 12}}}).encode()
+        second = json.dumps({"provenance": {"timings": {"capture_ms": 99}}}).encode()
+        self.assertNotEqual(LAB.canonical_json_sha256(first),
+                            LAB.canonical_json_sha256(second))
+
+    def test_capture_timing_only_runs_can_pass_determinism_receipt(self) -> None:
+        def report(timing: int) -> dict[str, object]:
+            capture = json.dumps({
+                "schema": "pulp-browser-capture-v1",
+                "provenance": {"timings": {"capture_ms": timing}},
+            }).encode()
+            digest = LAB.canonical_json_sha256(capture)
+            return {"integrity": {field: digest for field in LAB_CLI.DETERMINISM_FIELDS}}
+
+        self.assertEqual(
+            LAB_CLI.determinism_receipt([report(1), report(2), report(3)])['status'],
+            "pass",
+        )
+
     def test_canonical_capture_digest_excludes_only_raw_document_bindings(self) -> None:
         first = {"schema": "pulp-browser-capture-v1", "documents": [
             {"snapshot_asset": "dom-snapshot.json", "snapshot_sha256": "a" * 64}]}
@@ -1476,6 +1587,46 @@ class DifferentialLabTests(unittest.TestCase):
         self.assertEqual(baseline, LAB.snapshot_semantic_sha256(json.dumps(
             json.loads(snapshot("F" * 32, "native")), indent=2,
             sort_keys=True).encode()))
+
+    def test_platform_fonts_digest_sees_faces_and_ignores_backend_ids(self) -> None:
+        def report(backend: tuple[int, int] = (28, 31),
+                   face: str = "JetBrainsMono-Medium") -> dict:
+            return {
+                "schema": "pulp-browser-platform-fonts-v1", "version": 1,
+                "runs": [
+                    {"layout_index": 9, "node_index": 26, "owner_node_index": 25,
+                     "backend_node_id": backend[0],
+                     "requested": {"font_family": "JetBrains Mono", "font_weight": "500"},
+                     "resolved": [{"family_name": "JetBrains Mono Medium",
+                                   "post_script_name": face, "glyph_count": 37}]},
+                    {"layout_index": 12, "node_index": 30, "owner_node_index": 29,
+                     "backend_node_id": backend[1],
+                     "requested": {"font_family": "JetBrains Mono", "font_weight": "400"},
+                     "resolved": [{"family_name": "JetBrains Mono",
+                                   "post_script_name": "JetBrainsMono-Regular",
+                                   "glyph_count": 12}]},
+                ],
+            }
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "platform-fonts.json"
+
+            def digest(value: dict) -> str | None:
+                path.write_text(json.dumps(value), encoding="utf-8")
+                return LAB.platform_fonts_semantic_sha256(path)
+
+            baseline = digest(report())
+            self.assertIsNotNone(baseline)
+            # Chromium numbered the same nodes 4 lower in one of three runs.
+            self.assertEqual(baseline, digest(report(backend=(24, 27))))
+            self.assertEqual(baseline, digest(report(backend=(31, 28))))
+            # A different resolved face is content.
+            self.assertNotEqual(baseline, digest(report(face="JetBrainsMono-Regular")))
+            moved = report()
+            moved["runs"][1]["node_index"] = 31
+            self.assertNotEqual(baseline, digest(moved))
+            path.unlink()
+            self.assertIsNone(LAB.platform_fonts_semantic_sha256(path))
 
     def test_semantic_dom_digests_are_determinism_fields(self) -> None:
         self.assertIn("browser_snapshot_semantic_sha256", LAB_CLI.DETERMINISM_FIELDS)
@@ -1949,6 +2100,143 @@ class DifferentialLabTests(unittest.TestCase):
             with patch.object(LAB_CLI, "compare_one", side_effect=lambda *args, **kwargs: next(reports)), \
                     redirect_stdout(io.StringIO()):
                 self.assertEqual(LAB_CLI.command_benchmark(args), 1)
+
+    @requires_pillow
+    def test_visual_reference_is_the_candidate_lanes_own_capture(self) -> None:
+        """Score the native render against the moment it was lowered from."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "panel.html"
+            source.write_text("<canvas></canvas>", encoding="utf-8")
+            source_sha256 = LAB.sha256_file(source)
+
+            def lane_evidence(name: str, colour: tuple[int, int, int, int],
+                              snapshot: dict[str, object]) -> Path:
+                evidence = root / name
+                evidence.mkdir()
+                Image.new("RGBA", (2, 1), colour).save(evidence / "browser.png")
+                (evidence / "dom-snapshot.json").write_text(
+                    json.dumps(snapshot), encoding="utf-8")
+                (evidence / "capture.json").write_text(json.dumps({
+                    "provenance": {
+                        "source": {"sha256": source_sha256},
+                        "viewport": {"requested": {"width": 2, "height": 1},
+                                     "resolved": {"width": 2, "height": 1}},
+                        "browser": {"product": "Chrome", "version": "140.0"},
+                    },
+                    "reference": {"asset_id": "reference:browser",
+                                  "logical_width": 2, "logical_height": 1,
+                                  "device_scale_factor": 1,
+                                  "authored_frame": {"x": 0, "y": 0,
+                                                     "width": 2, "height": 1}},
+                    "assets": [{"id": "reference:browser",
+                                "sha256": LAB.sha256_file(evidence / "browser.png"),
+                                "width_px": 2, "height_px": 1}],
+                }), encoding="utf-8")
+                return evidence
+
+            # The canvas animates between the two lanes' captures; the native
+            # lowering reproduces the candidate lane's moment exactly.
+            moment_a, moment_b = (10, 20, 30, 255), (200, 40, 40, 255)
+            page = {"documents": []}
+
+            def run(name: str, candidate_snapshot: dict[str, object]) -> dict:
+                browser = lane_evidence(f"{name}-browser", moment_a, page)
+                candidate = lane_evidence(f"{name}-candidate", moment_b, candidate_snapshot)
+
+                def fake_run(argv: list[str], timeout_seconds: int) -> LAB.CommandResult:
+                    if "--render" in argv:
+                        Image.new("RGBA", (2, 1), moment_b).save(
+                            Path(argv[argv.index("--render") + 1]))
+                        Path(argv[argv.index("--layout") + 1]).write_text(
+                            json.dumps({"views": [], "nodes": [{
+                                "id": "browser:root",
+                                "rect": observer_root_rect(argv, 2, 1),
+                            }]}), encoding="utf-8")
+                        Path(argv[argv.index("--render-receipt") + 1]).write_text(
+                            json.dumps({"schema": "pulp-design-ir-render-receipt-v1",
+                                        "backend_requested": "skia", "backend_used": "skia",
+                                        "ok": True,
+                                        "placement": observer_placement(argv)}),
+                            encoding="utf-8")
+                    else:
+                        Path(argv[argv.index("--output") + 1]).write_text(json.dumps({
+                            "root": {"type": "frame", "style": {"width": 2, "height": 1},
+                                     "children": []}}), encoding="utf-8")
+                    return LAB.CommandResult(argv, 1, 0, "", "")
+
+                def evidence_for(ir: Path) -> Path:
+                    return candidate if ir.parent.name == "candidate" else browser
+
+                with patch.object(LAB, "run_command", side_effect=fake_run), \
+                        patch.object(LAB, "find_browser_evidence", side_effect=evidence_for):
+                    return LAB.compare_one(
+                        Path("importer"), Path("observer"), source, root / name, 60,
+                        "claude", Path("chrome"),
+                        fixture_metadata={"viewport": {"width": 2, "height": 1}})
+
+            same = run("same-page", page)
+            visual = same["comparison"]["visual"]
+            self.assertEqual(visual["reference"]["source"], "candidate-lane-capture")
+            self.assertTrue(visual["reference"]["dom_snapshots_match"])
+            self.assertEqual(visual["reference"]["path"], "candidate/browser.png")
+            self.assertEqual(visual["score"], 1.0)
+            self.assertEqual(visual["differing_pixel_count"], 0)
+            # The capture-timing noise is still reported, apart from the score.
+            self.assertEqual(visual["reference"]["capture_moment_residual"], {
+                "differing_pixel_count": 2, "differing_pixel_fraction": 1.0,
+                "bounds_css": [0.0, 0.0, 2.0, 1.0]})
+            self.assertEqual(same["integrity"]["candidate_screenshot_sha256"],
+                             LAB.sha256_file(root / "same-page/candidate/browser.png"))
+
+            # A candidate lane that evaluated a different DOM is not the page
+            # the structure lens read, so the browser lane stays the reference.
+            diverged = run("diverged", {"documents": [], "extra": True})
+            visual = diverged["comparison"]["visual"]
+            self.assertEqual(visual["reference"]["source"], "browser-lane-capture")
+            self.assertFalse(visual["reference"]["dom_snapshots_match"])
+            self.assertEqual(visual["differing_pixel_count"], 2)
+            self.assertLess(visual["score"], 1.0)
+
+    def test_manifest_volatile_regions_stay_inside_the_viewport(self) -> None:
+        manifest = json.loads((REPO / "test/fixtures/import-differential/manifest.json")
+                              .read_text(encoding="utf-8"))
+        checked = 0
+        for entry in manifest["fixtures"]:
+            viewport = entry.get("viewport", {"width": 1280, "height": 800})
+            for region in entry.get("volatile_regions", []):
+                rect = region["rect"]
+                with self.subTest(fixture=entry["id"], region=region["id"]):
+                    self.assertEqual(region["unit"], "css-px")
+                    self.assertGreater(rect["width"], 0)
+                    self.assertGreater(rect["height"], 0)
+                    self.assertGreaterEqual(rect["x"], 0)
+                    self.assertGreaterEqual(rect["y"], 0)
+                    self.assertLessEqual(rect["x"] + rect["width"], viewport["width"])
+                    self.assertLessEqual(rect["y"] + rect["height"], viewport["height"])
+                checked += 1
+        self.assertGreater(checked, 0)
+
+    def test_spectr_volatile_spectrum_covers_the_whole_plot(self) -> None:
+        """The spectrum can be drawn anywhere in the plot, not only where one run drew it."""
+        manifest = json.loads((REPO / "test/fixtures/import-differential/manifest.json")
+                              .read_text(encoding="utf-8"))
+        entry = next(item for item in manifest["fixtures"] if item["id"] == "spectr-standalone")
+        source = (REPO / "test/fixtures/import-differential" / entry["source"]).read_text(
+            encoding="utf-8")
+        # The panel's getGeom insets its plot from a full-viewport wrap by this padding.
+        pad = re.search(
+            r"const pad = \{ l: (\d+), r: (\d+), t: (\d+), b: (\d+) \};", source)
+        self.assertIsNotNone(pad)
+        left, right, top, bottom = (int(value) for value in pad.groups())
+        viewport = entry["viewport"]
+        plot = (left, top, viewport["width"] - right, viewport["height"] - bottom)
+        region = next(item["rect"] for item in entry["volatile_regions"]
+                      if item["id"] == "spectrum-canvas")
+        self.assertLessEqual(region["x"], plot[0])
+        self.assertLessEqual(region["y"], plot[1])
+        self.assertGreaterEqual(region["x"] + region["width"], plot[2])
+        self.assertGreaterEqual(region["y"] + region["height"], plot[3])
 
     def test_corpus_input_skips_holdout_fixtures_unless_asked(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -2455,7 +2743,8 @@ class FormControlBoundaryTests(unittest.TestCase):
         snapshot = self.form_snapshot()
         rows = form_controls(LAB.browser_nodes(snapshot), snapshot)
         status = {row["browser_node"]: row["status"] for row in rows}
-        self.assertEqual(status[1], "ua-default-form-chrome")
+        # A themed range is the theme's, and the lowering reskins it.
+        self.assertEqual(status[1], "ua-theme-skinned")
         self.assertEqual(status[2], "author-styled")
         # appearance:none does not reach a range's thumb.
         self.assertEqual(status[3], "ua-shadow-form-part")
@@ -2463,7 +2752,7 @@ class FormControlBoundaryTests(unittest.TestCase):
         # Both buttons compute `appearance: auto`. Author box styling drops
         # Chromium's theme, so only the unstyled one is the theme's.
         self.assertEqual(status[8], "author-styled")
-        self.assertEqual(status[9], "ua-default-form-chrome")
+        self.assertEqual(status[9], "ua-theme-skinned")
 
         # A capture without verdicts cannot say who painted an `auto`
         # control, and does not guess either way.
@@ -2476,6 +2765,75 @@ class FormControlBoundaryTests(unittest.TestCase):
         from importer_differential.form_controls import control_status
         self.assertEqual(control_status("button", "", {}),
                          "appearance-unrecorded")
+
+    def test_only_themed_controls_without_a_native_skin_are_a_boundary(
+            self) -> None:
+        from importer_differential.form_controls import control_status
+
+        auto = {"appearance": "auto"}
+
+        def status(tag: str, input_type: str = "", theme: str = "native") -> str:
+            return control_status(tag, input_type, auto, theme, True)
+
+        for tag, input_type in (("button", ""), ("input", "range"),
+                                ("input", "checkbox"), ("input", "radio"),
+                                ("input", "button"), ("input", "submit"),
+                                ("input", "reset")):
+            self.assertEqual(status(tag, input_type), "ua-theme-skinned",
+                             (tag, input_type))
+        # The theme still paints these and the lowering has no skin for them.
+        for tag, input_type in (("select", ""), ("textarea", ""),
+                                ("meter", ""), ("progress", ""),
+                                ("input", "text"), ("input", "date"),
+                                ("input", "color"), ("input", "file"),
+                                ("input", "image")):
+            self.assertEqual(status(tag, input_type), "ua-default-form-chrome",
+                             (tag, input_type))
+        # Only the native verdict is reskinned: an author-styled button is the
+        # author's, and a styled select's arrow is still the UA's.
+        self.assertEqual(status("button", "", "author"), "author-styled")
+        self.assertEqual(status("select", "", "author-arrow"),
+                         "ua-shadow-form-part")
+
+    def test_skinned_types_are_the_ones_the_capture_records_state_for(
+            self) -> None:
+        from importer_differential import form_controls as fc
+
+        cpp = InputTypeTableTests.CPP_CONTROLS.read_text(encoding="utf-8")
+        start = cpp.index("bool record_ua_control_state(")
+        body = cpp[start:cpp.index("\n}\n", start)]
+        tags = set(re.findall(r'tag == "([^"]+)"', body)) - {"input"}
+        types = set(re.findall(r'type == "([^"]+)"', body))
+        types |= set(re.findall(r'type != "([^"]+)"', body))
+        self.assertEqual(tags, set(fc.THEME_SKINNED_TAGS))
+        self.assertEqual(types, set(fc.THEME_SKINNED_INPUT_TYPES))
+
+    @requires_pillow
+    def test_a_skinned_control_keeps_its_share_but_is_no_boundary(self) -> None:
+        from importer_differential.form_controls import (
+            attribute_residual, support_boundaries)
+
+        controls = [
+            {"tag": "button", "type": None, "appearance": "auto",
+             "status": "ua-theme-skinned", "bounds": [10, 10, 20, 10]},
+            {"tag": "select", "type": None, "appearance": "auto",
+             "status": "ua-default-form-chrome", "bounds": [60, 10, 20, 10]},
+        ]
+        reference = Image.new("RGBA", (100, 40), (240, 240, 240, 255))
+        for x in range(6, 24):
+            for y in range(6, 14):
+                reference.putpixel((x, y), (0, 0, 255, 255))
+        attribution = attribute_residual(
+            controls, reference, Image.new("RGBA", (100, 40), (240, 240, 240, 255)),
+            (5.0, 5.0), 1.0)
+        # The skinned button still owns its error, and that error is the
+        # importer's: no boundary claims it.
+        self.assertEqual(attribution["controls"][0]["foreground_error_share"], 1.0)
+        self.assertEqual(attribution["boundary_foreground_error_share"], 0.0)
+        self.assertEqual([b["boundary"] for b in support_boundaries(attribution)],
+                         ["ua-default-form-chrome"])
+        self.assertEqual(support_boundaries(
+            {"controls": attribution["controls"][:1]}), [])
 
     @requires_pillow
     def test_residual_is_attributed_to_the_control_that_owns_it(self) -> None:

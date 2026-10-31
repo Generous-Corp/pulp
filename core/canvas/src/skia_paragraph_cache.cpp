@@ -34,6 +34,7 @@ struct ParagraphKeyHash {
         h = mix(h, std::bit_cast<std::uint32_t>(k.letter_spacing));
         h = mix(h, k.ltr ? 1u : 0u);
         h = mix(h, k.hinting ? 1u : 0u);
+        h = mix(h, k.glyph_hinting ? 1u : 0u);
         for (const auto& f : k.features)
             h = mix(mix(h, f.tag), f.value);
         h = mix(h, static_cast<std::size_t>(k.font_generation));

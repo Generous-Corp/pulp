@@ -250,6 +250,59 @@ built with PULP_TRACING=ON," the fix is to rebuild with tracing off (the
 default `pulp build`), not to reach for `--allow-tracing`. The scanner lives in
 `tools/cli/ship_tracing_guard.hpp` (unit-tested in `test/test_ship_tracing_guard.cpp`).
 
+## Shell exec bridge ship guard
+
+Release and SDK configures pass `-DPULP_DEV_BRIDGE_EXEC=OFF` (`release-cli.yml`, `sign-and-release.yml`, `pulp sdk install`, the local SDK profile), which compiles the JS `exec`/`execAsync` bridge body out of `pulp-view-script`. The installed SDK records the outcome in `sdk-provenance.json` as `features.bridge_exec` (release marker, forge-dev/trace) or top-level `bridge_exec` (source-install stamp); minting a release marker refuses a configure cache with the option ON or missing, and `PulpSdkProvenance.cmake` fails on a release marker claiming `true`. A dev checkout keeps the bridge because the option follows `PULP_BUILD_TESTS`. Prove an artifact with `strings <archive> | grep -c execAsync` (0 for ship) or the `pulp-bridge-exec-ship-symbol-absence` ctest.
+
+## Release-artifact forbidden-marker list
+
+Every "a shipped binary must not contain X" check reads ONE list:
+`tools/cmake/release_artifact_forbidden.json`, applied by
+`tools/cmake/PulpReleaseArtifactScan.cmake`. Each marker names a `kind`
+(`symbol` in the demangled `nm -C` table, `string` in the file's printable
+runs, `dependency` in the loader table) and the `gates` under which it is
+forbidden — a gate is a build condition: `js-off` (PULP_ENABLE_JS=OFF),
+`tracing-off` (PULP_TRACING=OFF), `reload-ship` (PULP_RELOAD_DEV_WATCHER=0),
+`bridge-exec-off` (PULP_BRIDGE_EXEC_ENABLED=0), `dev-env-off` (PULP_DEV_BUILD=0)
+and `control-stripped` (the production-stripped control profile). A
+registration site passes the gates that hold for the artifact it scans; the
+CLI, for instance, legitimately carries the control broker and the dev env
+hooks, so `control-stripped` and `dev-env-off` are never applied to it.
+
+The older scanners are thin wrappers over the same list and keep their names
+and ctest registrations: `AssertNoJsSymbols.cmake`, `AssertNoTracingSymbols.cmake`,
+`test/cmake/reload_ship_symbol_check.cmake` (`pulp-reload-ship-symbol-absence`)
+and `check_control_shipping_artifact.cmake`, which is installed into the SDK
+beside the list and the module (`lib/cmake/Pulp/`) and counts both as stamp
+inputs, so editing the list rescans every control-shipping artifact.
+
+**Adding a marker is one JSON entry.** Two ctests then hold it:
+`release-artifact-forbidden-list-selftest` (shape, unique id and pattern, every
+gate documented and used, pattern emittable) and
+`release-artifact-scan-negative-control`, which builds a fixture generated
+from the list carrying every symbol and string marker and asserts the scanner
+flags each one (dependency markers against synthetic otool/readelf/dumpbin
+lines), and that a clean fixture passes. A gate that selects no marker is a
+hard error in every wrapper, not a vacuous pass. The per-class scans
+(`release-artifact-scan-sdk-libraries`, `-cli-pulp-cli`,
+`-plugin-bundle-…`, `-standalone-…`) apply the gates the configure derives
+(`pulp_release_artifact_active_gates`) to every installed SDK library, the
+C++ CLI and the fixture plug-in built through `pulp_add_plugin`.
+
+**The scan's cost is in CMake, not `nm`.** A sanitizer build's archives give
+hundreds of MB of `nm -C` output (983 MB `libpulp-timeline.a` gives 607 MB of
+table, 269k entries), and any CMake operation that walks the whole table
+(`REGEX MATCHALL`, a list of every line) costs seconds per archive. Deciding
+that a table is evidence (at least two defined entries; a stripped binary has
+one) therefore stops at the second match. `string(FIND)` per pattern is cheap;
+`file(STRINGS)` over the archive is the other large cost.
+
+Not on the list, deliberately: `pulp ship`'s own tracing sentinel
+(`PULP_TRACING_COMPILED_IN__DO_NOT_SHIP`, previous section). The CLI contains
+that byte-string as its search needle, so a `string` marker for it would flag
+the CLI itself; the sentinel stays the ship command's check. Wiring
+`pulp ship check` to read this list for the notarized bytes is still open.
+
 ## PULP_DEV_BUILD: ship builds `build-ship/`
 
 A build dir whose `CMakeCache.txt` records `PULP_DEV_BUILD=ON` also records
@@ -338,8 +391,9 @@ a dev-shared build may be signed for local loading, never distributed.
   (`sign --path` with a Developer ID and no `build-ship/`): it prints the
   outermost command as one copy-pasteable line,
   `PULP_DEV_SHARED_UI=0 pulp build --all && pulp ship <args>`.
-- `is_local_signing_identity()` (ad hoc `-`, `Apple Development`,
-  `Mac Developer`, from `--identity`) lets `sign` take a dev-shared build as it
+- `is_local_signing_identity()` (ad hoc `-`, `Apple Development: ...`,
+  `Mac Developer: ...`, matched through the colon so a lookalike name that only
+  starts with those words is not local; from `--identity`) lets `sign` take a dev-shared build as it
   is: no `build-ship/`, no artifact refusal. Ad hoc signing also skips the signing-keychain preflight,
   because it needs no keychain.
 - `pulp::cli::dev_shared_artifact_offender()` scans every selected artifact for a
@@ -350,6 +404,47 @@ a dev-shared build may be signed for local loading, never distributed.
   closed on an uninspectable tree.
 - `tools/scripts/build_combined_installer.sh` greps its inputs for the same bytes
   before any signing tool runs; a grep read error also refuses.
+- `notarize` and `share` also open containers another tool built,
+  `enforce_no_development_runtimes_in_containers()`: a `.zip` through
+  `ditto -x -k`, a flat `.pkg` through `pkgutil --expand-full`, a `.dmg` mounted
+  `hdiutil attach -readonly -nobrowse -noverify` in a private temp dir and
+  always detached by the scratch object's destructor. The D15 and dev-shared
+  scans then run on the contents, without following symlinks out of the
+  container (a disk image's /Applications alias). Containers inside it are
+  recognized by content (zip header, xar header, UDIF `koly` trailer) or
+  extension and opened in turn, up to 3 levels; a deeper one is refused, as is
+  a container that does not open (fail closed), on `--dry-run` as well: a
+  placeholder `.dmg` that is not a disk image fails `hdiutil attach` and
+  stops the share plan. A test that only wants a plan needs a real image.
+- Every container tool runs with stdin from `/dev/null`, and `hdiutil attach`
+  takes `-stdinpass`. Without that, `std::system` hands the tools the
+  terminal, and an encrypted image or one with a licence agreement (SLA)
+  waits for an answer, so `notarize` hangs instead of refusing. Fixture for
+  an encrypted image: `printf pw | hdiutil create -encryption AES-128
+  -stdinpass -srcfolder <dir> <out>.dmg`. A test of the hang has to keep the
+  child's stdin open and silent (`exec "$@" < <(exec sleep 90)` under bash):
+  with stdin at EOF the old code failed fast and looked fixed.
+- Before extracting, the scan reads the expanded size (`zipinfo -t` for a
+  zip; the `installKBytes` of each `PackageInfo` from a shallow
+  `pkgutil --expand` for a pkg) and refuses unless it fits on the temp volume
+  with 256 MiB to spare. A disk image is mounted, not copied, so it is not
+  sized.
+- The tools are forked and exec'd directly (`run_ship_tool`), not through
+  `std::system`, so the scan knows the running child's pid. SIGINT, SIGTERM
+  and SIGHUP during a scan kill that child, detach the registered mountpoints
+  and remove the scan's temp root from the signal handler (fork/execv only,
+  paths in fixed buffers), then re-raise. The handler's sa_mask holds
+  all three signals, so a second one cannot re-enter cleanup, and the main
+  path blocks them while it writes a mount slot or the child pid
+  (`tool`, a `volatile sig_atomic_t`). Cleanup clears each piece as it
+  consumes it and sets all three signals to SIG_DFL before re-raising, so a
+  pending second signal cannot re-run it and re-kill a reaped, possibly
+  reused pid. Children start through `tools/cli/ship_child_process.hpp`,
+  which empties the inherited mask and restores default dispositions before
+  exec; without that, ditto and hdiutil inherit the blocked set and ignore a
+  Ctrl-C. Killing the child first matters: an
+  orphaned `ditto` keeps writing into the directory the handler removed. Best effort: SIGKILL leaves the
+  mount, which `hdiutil info` lists under `pulp-ship-container-scan`.
 
 There is no override flag. Tests: the `[dev-shared]` cases in
 `test/test_sdk_distribution_guard.cpp` and `test/test_cli_ship_shellout.cpp`:
@@ -367,6 +462,32 @@ plus
 `test_dev_shared_build_is_rejected_before_signing` in
 `tools/scripts/test_build_combined_installer.py`. A new distribution path must
 call `enforce_no_development_runtimes()` on exactly the inputs it selected.
+
+
+## JIT-engine entitlement guard
+
+`pulp ship sign` and `pulp ship share` check the entitlements plist they are
+about to apply, before the signing preflight or any `codesign` runs:
+
+- `com.apple.security.cs.allow-jit` is the one approved JIT entitlement (V8
+  and JSC map JIT pages with MAP_JIT, which it covers). A plist that asks for
+  `allow-unsigned-executable-memory` or `disable-executable-page-protection`
+  without `allow-jit` is refused for every artifact and engine.
+- When `<build>/CMakeCache.txt` has `PULP_JS_ENGINE=v8` or `jsc`, an artifact
+  that runs as its own process (`.app`, `.appex`, or a bare executable passed
+  with `--path`) must grant `allow-jit`. Otherwise it signs cleanly and the
+  engine then fails to map its first JIT page.
+- Plug-in bundles (`.vst3`, `.component`, `.clap`) are exempt. They load into
+  a host process, and the host's entitlements decide JIT, so the default
+  `ship/templates/entitlements.plist` (no JIT) is the right file for them.
+
+The AUv3 build renders per-engine files
+(`build/AUv3/<target>_AUv3.entitlements`) via
+`tools/cmake/PulpAuv3Entitlements.cmake`, which emits `allow-jit` only for
+those engines and never `allow-unsigned-executable-memory`. QuickJS builds
+pass the engine check untouched. The check is keyed on the configured engine,
+not on symbols in the binary, so a bundle copied from another build directory
+is not detected.
 
 ## Workflows
 

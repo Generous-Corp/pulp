@@ -40,6 +40,22 @@ assignment** ("option B"). It is release-critical: a wrong flip can drop
 a version silently. Do not flip without the GO/NO-GO checklist at the
 bottom passing.
 
+## Direct-writer safety boundary
+
+The writer has a repository-owned `writer_allowed_globs` allowlist. Every
+generated commit is checked against it before staging, and an empty or
+unexpected path fails closed. This protects the writer from its own
+regenerators or configuration drift; it does not replace GitHub authorization.
+
+The live `main-merge-queue` ruleset currently has no bypass actor. GitHub
+ruleset bypass permissions are actor-wide and cannot be restricted to
+version-only paths. Therefore `PULP_BUMP_ROUTE=direct` must remain disabled
+until GitHub can enforce an equivalent narrow, auditable restriction (or a
+separate release-only protected ref is introduced). A compromised release bot
+must not be able to push arbitrary code to `main`. Until that platform control
+exists, keep `PULP_BUMP_ROUTE=pr`; the bump PR is the governed admission path,
+while the allowlist and marker/idempotency checks still apply.
+
 ## The problem being solved
 
 Every `fix:` / `feat:` PR hand-writes a version number ABOVE main's
@@ -144,6 +160,23 @@ tags first; a clone that lacks the newest tag keys the note to the new version,
 which was the behaviour before. The `upgrade` skill maps only the two README files under
 `docs/migrations/`, so neither an author's note nor the bot's fold owes a
 SKILL.md update.
+
+### The SDK bump also assigns agent-capability counters
+
+`MANIFEST_REVISION` and `SURFACE_INVENTORY_VERSION` in
+`tools/scripts/agent_capability_manifest.py` were the same kind of shared
+counter as a release version: every branch that changed capability material
+claimed base + 1, and each merge staled the rest. Branches now leave them at the
+base value; the regenerated snapshot is *pending* (its material differs from the
+last state `contract-history.json` recorded under the same counter). When a bump
+assigns the `sdk` surface, `_assign_capability_counters` runs the repo's own
+`agent_capability_manifest.py --assign-pending`, which advances each pending
+counter by one and regenerates the snapshot, surface ledger and history; the
+changed paths join the bump commit, and the message carries a
+`Skill-Update: skip skill=agent-capabilities` trailer because the files are the
+skill's but the change is mechanical. A failure is reverted and logged, and
+`auto-release.yml`'s agent-capability pre-tag check withholds the SDK tag while
+anything is pending (see `release-watchdog.md`).
 
 ### Why the race can't lose or duplicate a version
 

@@ -722,6 +722,38 @@ claiming the affected families sorted. Coverage is compared for **equality**,
 not containment: claiming a family the diff does not touch fails the same way
 omitting one does.
 
+## A branch stacked on an unmerged PR borrows that PR's watch event
+
+A PR's Vellum checks diff live `main` against `main` plus the PR head. On a
+branch stacked on another unmerged PR, that diff also holds the parent's
+commits and the parent's watch event, so the range reads as covered even
+when the branch's own change has no event. Once the parent merges, the merge
+queue measures only the branch's change, finds no event, and ejects the whole
+batch. The branch cannot carry its own event while
+it is stacked: two events claiming the same families in one range are refused
+as duplicates. `vellum_watch_preflight.py` prints an advisory when every
+covering event was added by a commit another remote branch carries. Merge main
+after the parent lands, write the branch's own event, and only then enqueue it.
+
+The PR job of `Vellum freeze` reports the same rule
+(`tools/scripts/vellum_borrowed_coverage_check.py`) as a `::warning::`
+annotation naming the parent branch; it does not fail the required check
+until its hit rate on open PRs has been measured, and `--fail` is the
+promoted form. Read the annotation before enqueueing a stacked PR. CI measures a synthetic merge of live main and
+the PR head that no ref contains, so the check passes the PR head
+(`--source-head`) for the descendant test and the PR's branch name
+(`--own-branch`) for the ignore list. The merge_group job does not run it:
+the queued base already holds every merged parent. A carrier only counts
+when this PR's own commits past it (the commits neither the carrier nor
+live main holds, merges skipped) touch a watched family and add no event. A
+merge-base diff would not do: a PR that merged main after the carrier forked
+would count main's own watched changes as its part. So a parent whose review fix came after a
+child stacked on it, and an older copy of this PR under another name
+(`takeover/`, `backup/`, a hand-made batch branch), pass as long as what
+followed them is unwatched. A watched follow-up past such a copy is still reported.
+A fork PR whose branch name matches an origin branch ignores that origin
+branch.
+
 ## Refreshing the ledger no longer pulls this skill into skill-sync
 
 `docs/status/gpu-vellum-handoff.yaml` is mapped to this skill in

@@ -8,6 +8,7 @@ add_library(pulp-browser-capture-backend STATIC
     browser_capture_provenance.cpp
     browser_discovery.cpp
     browser_capture_diagnostics.cpp
+    browser_probe_cache.cpp
     node_runtime.cpp)
 add_library(pulp::browser-capture-backend ALIAS
     pulp-browser-capture-backend)
@@ -34,6 +35,7 @@ add_executable(pulp-import-design
     pulp_import_design.cpp
     annotated_capture.cpp
     import_design_cli_help.cpp
+    import_document_refusals.cpp
     browser_import_cli.cpp
     browser_import_session.cpp
     browser_html_import.cpp
@@ -190,6 +192,25 @@ endif()
 install(TARGETS pulp-import-design
     RUNTIME DESTINATION bin
     BUNDLE DESTINATION bin)
+# Keep the PDF-compatible Illustrator conversion helper available in SDK
+# installs alongside the compiled importer.  It remains an explicit boundary:
+# Poppler is discovered at runtime and the helper records its own provenance.
+install(PROGRAMS
+    "${CMAKE_CURRENT_SOURCE_DIR}/illustrator_to_svg.py"
+    DESTINATION bin/import-design)
+
+# Keep the pure-Python Illustrator boundary on the same source-selftest lane as
+# the other importer contracts.  It deliberately runs without a configured
+# SDK/build dependency so CI can validate converter provenance on the
+# build-free lane as well as locally.
+if(Python3_EXECUTABLE)
+    add_test(NAME illustrator-to-svg-selftest
+        COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/test_illustrator_to_svg.py")
+    set_tests_properties(illustrator-to-svg-selftest PROPERTIES
+        LABELS "source-selftest")
+endif()
+
 install(FILES ${_pulp_browser_capture_runtime_files}
     DESTINATION bin/browser_capture-v1)
 install(FILES
@@ -220,7 +241,8 @@ target_link_libraries(pulp-design-import-bench PRIVATE
 # serialized DesignIR directly, avoiding codegen/QuickJS as a confounding layer
 # when measuring the candidate importer's native tree.
 add_executable(pulp-design-ir-observe
-    design_ir_observe.cpp)
+    design_ir_observe.cpp
+    observer_script_lane.cpp)
 target_include_directories(pulp-design-ir-observe PRIVATE
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/core/render/src)

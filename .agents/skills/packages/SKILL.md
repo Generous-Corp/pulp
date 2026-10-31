@@ -202,7 +202,11 @@ still runs.
 Before suggesting a package, check if Pulp's built-in `core/signal/` already covers the need:
 
 - **Filters**: biquad, SVF, TPT, Linkwitz-Riley, ladder, FIR — built-in
-- **FFT/STFT**: built-in (use PFFFT only if benchmarks show it's needed)
+- **FFT/STFT**: built-in on Apple; the MIT muFFT backend is used off Apple
+  when enabled. muFFT is compiled from the pinned source files only; its
+  upstream CMake tests and FFTW-linked tools are never built or shipped.
+  The real-time FFT admission rule applies to the largest single allocation,
+  and every transform path must remain allocation-free on the audio thread.
 - **Delay**: built-in
 - **Reverb, compressor, oscillator, ADSR**: built-in
 - **Pitch detection**: NOT built-in → suggest cycfi-q
@@ -235,6 +239,22 @@ blocked by default, but the current CLI also accepts
 `--license-override commercial` for them, records a compliance warning, and
 leaves distribution responsibility with the project. Prefer permissive
 alternatives from the registry when available.
+
+### A registry `license` must name the license the project actually ships
+
+Read the project's own LICENSE file at the pinned commit before writing the
+`license` field; "BSD-like" is not `BSD-3-Clause`. PFFFT was listed as
+BSD-3-Clause for months, although its LICENSE.txt is the FFTPACK license from
+UCAR, with its own wording. A permissive license with no SPDX identifier gets a
+`LicenseRef-<Name>` token and a `license_note` stating its conditions. The CLI
+then reports it for review, instead of calling it allowed under a name it does
+not carry.
+
+Check a pinned annotated tag on a full clone, or with
+`git ls-remote <repo> 'refs/tags/<tag>^{}'`. A `git clone --depth 1 --branch
+<tag>` can print "is not a commit!" for an annotated tag that resolves fine.
+The package's test stub under `tools/packages/test-stubs/` is the install-path
+check: configure, build and run it.
 
 ## Attribution Audit
 
@@ -569,6 +589,14 @@ the shared contract in
 - [`kits`](../kits/SKILL.md) — reusable Pulp code/UI/templates → a project
 - [`content`](../content/SKILL.md) — data-only packs (presets/samples) → an installed plugin
 - [`installable-tools`](../installable-tools/SKILL.md) — machine-level dev/agent tooling under `~/.pulp/tools/`, plus the shared validate-and-uninstall-from-outside-a-checkout bar
+
+## Realtime FFT dependency boundary
+
+Pulp's optional muFFT backend is a pinned, MIT-licensed FetchContent dependency
+used by `FftT` on non-Apple targets. Its C shim and plans preserve the
+audio-thread allocation contract: admission accounts for the largest single
+backend allocation, and Apple continues to use byte-identical vDSP admission.
+muFFT's own FFTW-linked benchmark and test targets are never built or shipped.
 
 ## JS-engine attribution in the dependency inventory
 

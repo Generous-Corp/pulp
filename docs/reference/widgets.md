@@ -57,8 +57,8 @@ colour switches the control to the dark palette (`ua_scheme_for_accent`).
 
 ### Browser push-button skin
 
-A design-imported `appearance: auto` `<button>` is a `ButtonSurface` whose
-children are its content (labels, icons). The surface paints only what
+A design-imported `appearance: auto` `<button>`, or `<input type=button|submit|reset>`,
+is a `ButtonSurface` whose children are its content (labels, icons). The surface paints only what
 Chromium's theme draws for the button: the background, the 1px border with a
 2px radius, the hover, pressed and disabled colours, and the two-colour
 focus-visible ring, which reaches one CSS px outside the box. Set
@@ -170,6 +170,7 @@ lowercase names for serialization and the JS bridge.
 | `ScrollBar` | Standalone scrollbar | orientation, range/value/page, arrow/page step, keyboard + drag + track-page | `scroll_bar.hpp` |
 | `SidePanel` (`Sidebar`) | Slide-in edge panel | edge, extent, animated open/close, slide offset, state callback | `side_panel.hpp` |
 | `ContextMenu` (`PopupMenu`) | View-tree popup menu | items (id/label/enabled/checked/separator), anchor, keyboard nav, outside/Esc dismiss | `context_menu.hpp` |
+| `ContextMenu::show_modulation` | Shared two-lane modulation popup | LFO 1/LFO 2 enabled toggles, waveform choices, rate/depth sliders, arrow/Return selection, outside/Esc dismiss, reset callback | `context_menu.hpp` |
 
 ## Indicators & feedback
 

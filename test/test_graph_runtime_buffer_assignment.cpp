@@ -356,3 +356,107 @@ TEST_CASE("Buffer assignment with reuse disabled gives every node disjoint regio
     const auto reuse = build_graph_runtime_buffer_assignment(plan.plan, /*allow_reuse=*/true);
     CHECK(reuse.slot_count < a.slot_count);
 }
+
+namespace {
+
+// The in-place flag for the connection source->dest on ports sp->dp.
+bool in_place(const GraphRuntimePlan& plan, const pulp::graph::GraphRuntimeBufferAssignment& a,
+              pulp::graph::NodeId source, std::uint32_t sp, pulp::graph::NodeId dest,
+              std::uint32_t dp, bool feedback = false) {
+    for (std::size_t i = 0; i < plan.connections.size(); ++i) {
+        const auto& c = plan.connections[i];
+        if (plan.nodes[c.source_index].id == source && c.source_port == sp &&
+            plan.nodes[c.dest_index].id == dest && c.dest_port == dp && c.feedback == feedback) {
+            REQUIRE(i < a.reads_in_place.size());
+            return a.reads_in_place[i] != 0;
+        }
+    }
+    FAIL("connection not found");
+    return false;
+}
+
+bool overlaps(std::uint32_t a_base, std::uint32_t a_size, std::uint32_t b_base,
+              std::uint32_t b_size) {
+    return a_size > 0 && b_size > 0 && a_base < b_base + b_size && b_base < a_base + a_size;
+}
+
+} // namespace
+
+TEST_CASE("An input read in place never shares a region with the reader's output",
+          "[graph][buffer-assignment][in-place]") {
+    // A long stereo chain recycles regions as hard as it can. Every edge is its
+    // source's only reader, so every one is read in place, and in every case
+    // the reader's output region must stay clear of the source region it reads:
+    // the source region is freed only at the END of the reader's position, after
+    // the reader's own output was allocated.
+    constexpr int kStages = 16;
+    std::vector<GraphRuntimeNodeSpec> nodes;
+    nodes.push_back({1, GraphRuntimeNodeKind::AudioInput, 0, 2});
+    for (int i = 0; i < kStages; ++i)
+        nodes.push_back(
+            {static_cast<pulp::graph::NodeId>(2 + i), GraphRuntimeNodeKind::Processor, 2, 2});
+    nodes.push_back(
+        {static_cast<pulp::graph::NodeId>(2 + kStages), GraphRuntimeNodeKind::AudioOutput, 2, 0});
+    std::vector<GraphRuntimeConnectionSpec> conns;
+    for (std::size_t i = 0; i + 1 < nodes.size(); ++i) {
+        conns.push_back({nodes[i].id, 0, nodes[i + 1].id, 0});
+        conns.push_back({nodes[i].id, 1, nodes[i + 1].id, 1});
+    }
+    auto built = build_graph_runtime_plan(nodes, conns);
+    REQUIRE(built.ok());
+    const auto& plan = built.plan;
+    const auto a = build_graph_runtime_buffer_assignment(plan);
+    check_invariants(plan, a);
+    REQUIRE(a.reads_in_place.size() == plan.connections.size());
+
+    std::size_t checked = 0;
+    for (std::size_t i = 0; i < plan.connections.size(); ++i) {
+        const auto& c = plan.connections[i];
+        REQUIRE(a.reads_in_place[i] == 1);
+        const auto& src = a.nodes[c.source_index];
+        const auto& dst = a.nodes[c.dest_index];
+        CHECK_FALSE(overlaps(src.output_base, plan.nodes[c.source_index].output_ports,
+                             dst.output_base, plan.nodes[c.dest_index].output_ports));
+        ++checked;
+    }
+    CHECK(checked == plan.connections.size());
+}
+
+TEST_CASE("An edge is read in place only when it is its source port's only reader",
+          "[graph][buffer-assignment][in-place]") {
+    // in -> A, in -> B (fan-out on both ports); A -> out; B -> C; C -> out mixes.
+    // A also feeds itself back, and P is a persistent-output source.
+    const std::array nodes = {
+        GraphRuntimeNodeSpec{1, GraphRuntimeNodeKind::AudioInput, 0, 1},
+        GraphRuntimeNodeSpec{2, GraphRuntimeNodeKind::Processor, 2, 1},             // A
+        GraphRuntimeNodeSpec{3, GraphRuntimeNodeKind::Processor, 1, 1},             // B
+        GraphRuntimeNodeSpec{4, GraphRuntimeNodeKind::Processor, 1, 1},             // C
+        GraphRuntimeNodeSpec{5, GraphRuntimeNodeKind::Processor, 0, 1, 0, 0, true}, // P
+        GraphRuntimeNodeSpec{6, GraphRuntimeNodeKind::Processor, 1, 1},             // reads P
+        GraphRuntimeNodeSpec{7, GraphRuntimeNodeKind::AudioOutput, 3, 0},
+    };
+    const std::array conns = {
+        GraphRuntimeConnectionSpec{1, 0, 2, 0}, // fan-out from in
+        GraphRuntimeConnectionSpec{1, 0, 3, 0}, // fan-out from in
+        GraphRuntimeConnectionSpec{2, 0, 7, 0}, // A has two readers: out + feedback
+        GraphRuntimeConnectionSpec{2, 0, 2, 1, /*feedback=*/true},
+        GraphRuntimeConnectionSpec{3, 0, 4, 0}, // B's only reader
+        GraphRuntimeConnectionSpec{4, 0, 7, 1}, // C's only reader
+        GraphRuntimeConnectionSpec{5, 0, 6, 0}, // persistent source
+        GraphRuntimeConnectionSpec{6, 0, 7, 2},
+    };
+    auto built = build_graph_runtime_plan(nodes, conns);
+    REQUIRE(built.ok());
+    const auto& plan = built.plan;
+    const auto a = build_graph_runtime_buffer_assignment(plan);
+    check_invariants(plan, a);
+
+    CHECK_FALSE(in_place(plan, a, 1, 0, 2, 0)); // fan-out: private copy
+    CHECK_FALSE(in_place(plan, a, 1, 0, 3, 0)); // fan-out: private copy
+    CHECK_FALSE(in_place(plan, a, 2, 0, 7, 0)); // feedback capture also reads A
+    CHECK(in_place(plan, a, 2, 0, 2, 1, true)); // own previous-block slot
+    CHECK(in_place(plan, a, 3, 0, 4, 0));
+    CHECK(in_place(plan, a, 4, 0, 7, 1));
+    CHECK_FALSE(in_place(plan, a, 5, 0, 6, 0)); // persistent source region
+    CHECK(in_place(plan, a, 6, 0, 7, 2));
+}

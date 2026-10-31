@@ -684,6 +684,14 @@ the CLAP headers remove the older spelling.
 
 ## Gotchas
 
+- **`gui_hide` returns the editor's GPU caches; `gui_destroy` frees the rest.**
+  A host may hide an editor and keep it for the next `gui_show`. `gui_hide`
+  calls `PluginViewHost::release_gpu_caches()`, which trims the surface with
+  `TrimLevel::everything()` but keeps the surfaces, so `gui_show` repaints
+  without recreating them. `gui_destroy` resets `editor_host`, which frees
+  everything. A hidden editor whose display link keeps drawing refills the
+  caches, so the release only holds while nothing draws.
+
 ### Decoding an event is not the same as advertising that you accept it
 
 The adapter's decode paths are written before, and independently of, the
@@ -1186,6 +1194,15 @@ atomics from `process()` instead.
   points are main-thread-only (they forward to host undo grouping). A background
   writer must use `StateStore::run_gesture_on_main()` — see the state notes in
   `binding.hpp`.
+## Parent attachment can fail after GUI creation
+
+Recognizing the requested window API is insufficient for `gui_set_parent()` to
+return true: the native host can refuse attachment, including a Windows frame
+timer failure with a valid parent HWND. Propagate `try_attach_to_parent()` and
+skip the open notification and first-frame preparation on refusal. Keep the
+created GUI available for a later `set_parent()` retry or `gui_destroy()`; a
+refused attempt must not publish an editor-open lifecycle event.
+
 ## Editor resize contract (aspect-lock vs free reflow)
 
 `gui_can_resize` returns resizable **iff `view_size().min_width>0 && min_height>0`** —

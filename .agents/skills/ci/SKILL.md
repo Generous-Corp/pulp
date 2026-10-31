@@ -467,8 +467,10 @@ macOS.
   before the full macOS run. The sweep labels the approved head, and arms only
   once the head's latest `macos` check run is a completed full-lane success
   (not `deferred`). An earlier arm is disabled at once by
-  `macos-ci-arm-refusal.yml`, with a comment. If the full lane fails, the PR
-  needs a fix, and the fix is a new head, which needs a new verdict.
+  `macos-ci-arm-refusal.yml`, with a comment. It judges the PR's current head,
+  read live, not the arm event's, and reads every page of that head's check
+  runs; a head or listing it cannot read is a refusal. If the full lane fails,
+  the PR needs a fix, and the fix is a new head, which needs a new verdict.
 - **A push disarms and unlabels.** `macos-ci-label-reset.yml` disables
   auto-merge on `synchronize` (otherwise the new head's contract-lane green
   would merge it) and removes `macos-ci`. A queued PR leaves the queue on push
@@ -497,6 +499,15 @@ behind it, and the offender passed on whatever sat ahead of it. If an enforce
 failure on a merge group names a commit that is not in the ejected PR, read the
 `diff base:` line in the job log before touching the PR. Any new diff-scoped
 gate added to a merge_group workflow should reuse the same resolver.
+
+## `[train]` rollups are member-approved
+
+The merge train's switch is on in `.shipyard/config.toml`; `mode = "rollup"`
+permits only rollups whose members each have an exact counted approval and
+whose replayed file tree and merge parents pass the guard. Each rollup lands
+through the merge queue as a merge commit. `SHIPYARD_TRAIN=off` or a
+`train.pause` file disables the train, and `shipyard rollup reconcile --apply`
+is manual because Pulp has no merge steward.
 
 ## A HOLD on a queued head fails the merge group
 
@@ -529,6 +540,16 @@ an App `verdict: APPROVE` only with a `reviewer: <name>` line naming one of
 them, and never one `ghapp` stamped with an `unattributed` session. A reviewer
 agent puts `reviewer: <its name>` on the line above the verdict. Adding a
 reviewer means adding it to that list.
+
+**`carry_excluded_paths` replaces Shipyard's default; it does not add to it.**
+The same `[auto_merge]` table lists the paths whose change stops an APPROVE
+from carrying to a new head after a merge-only refresh. Shipyard's guard reads
+the key as the whole list. Pulp's copy therefore restates Shipyard's
+`DEFAULT_CARRY_EXCLUDED_PATHS` except `.shipyard/**`, which it narrows to the
+policy files: `config.toml`, `ci-profiles/**` and `vm-image*.toml`. That keeps
+a regenerated `changed-surface-families.toml` carrying. To add an exclusion,
+append it to that list. When Shipyard's default changes, compare the two lists
+again, or Pulp silently drops the new protection.
 
 ## A failed batch's branch name is not the culprit
 
@@ -1160,6 +1181,13 @@ real but is not what turned the job red. When the C++ build fails,
 (`build.log` for stderr, `build.stdout.log` for stdout) before the last 200
 lines; under a parallel build, the tail alone is warnings from sibling
 targets that kept compiling.
+
+The Windows coverage leg builds `RelWithDebInfo` (with `/Od /Ob0` from
+`PulpInstrumentation.cmake`), never `Debug`. Pulp links the static MSVC
+runtime, so a Debug build is `/MTd` with `_ITERATOR_DEBUG_LEVEL=2`, and the
+prebuilt release Skia (`/MT`, level 0) then fails every Skia-linking target
+with `lld-link: error: /failifmismatch`. The failure extract prints three lines
+after each `lld-link: error:`; those lines name the two objects that disagree.
 
 A hosted Linux leg that dies with "No space left on device" leaves no job log
 (the runner's own log write fails). Read the `disk-sample:` lines the coverage
@@ -3218,6 +3246,28 @@ dependencies", which normally takes 0.3 min). Bound a setup step that can only
 hang on the network with a step `timeout-minutes` well above its measured max,
 so the VM is freed in minutes instead of hours.
 
+## Gate: release-artifact scan (`tools/cmake/PulpReleaseArtifactScan.cmake`)
+
+One list, `tools/cmake/release_artifact_forbidden.json`, names every byte
+pattern a release artifact must not contain, keyed by the build condition
+(`gate`) that forbids it: `js-off`, `tracing-off`, `reload-ship`,
+`bridge-exec-off`, `dev-env-off`, `control-stripped`. `AssertNoJsSymbols`,
+`AssertNoTracingSymbols`, `reload_ship_symbol_check` and
+`check_control_shipping_artifact` are wrappers over it, and the required gate
+runs `release-artifact-forbidden-list-selftest`,
+`release-artifact-scan-negative-control` (a generated fixture carrying every
+marker must be flagged; a clean one must pass) and the per-class scans over
+the SDK libraries, the C++ CLI and the fixture plug-in/standalone. A red
+`release-artifact-scan-*` names the marker id, kind and pattern; the reason it
+is forbidden is the entry's `reason` in the JSON. Add a marker by adding an
+entry; the selftest rejects an unknown gate, a duplicate pattern or an
+unused gate, and the negative control fails if the scanner cannot see it.
+The `ship` skill has the full model. The ctest registrations live in
+`test/cmake/release_artifact_tests.cmake` (included from
+`cmake_smoke_tests.cmake`); the class scans register through
+`cmake_language(DEFER)` because `PULP_SDK_TARGETS` and the CLI target are
+defined after `test/`.
+
 ## Gate: framework-neutrality (`tools/scripts/framework_neutrality_check.py`)
 
 Hard-fails a PR when Pulp's own source names another UI framework — in a
@@ -4823,6 +4873,11 @@ auto-release deliberately does not hold. Read it as:
   runs no tests. A failure in `Build CLI targets (MSVC)` is a real MSVC error; a
   failure in an earlier step (bootstrap, toolchain) is runner trouble: the verdict
   job is skipped, so the pre-tag check ignores it too.
+- A second blocking pre-tag check withholds the SDK tag while an
+  agent-capability counter is pending
+  (`agent_capability_manifest.py --require-assigned`). The version-at-land bump
+  assigns pending counters; a withheld tag here means that assignment failed,
+  and its run log names why. See `docs/guides/release-watchdog.md`.
 - The MSVC build step invokes `bash tools/ci/governed-build.sh cmake --build
   build-win-cli --target pulp-cli pulp-mcp -- -k 0`. Keep the wrapper even though
   the hosted Windows runner is single-tenant: it supplies the same bounded
@@ -4899,6 +4954,23 @@ Same idea applies to the self-hosted golden images: bake with the flags CI actua
 uses, or the golden warms a cache the real jobs never touch.
 
 ## GitHub workflow gotchas
+
+- **A pre-push gate that reads the working tree can pass a commit it never
+  saw.** The push sends HEAD's commit; a file fixed on disk but not committed
+  let a bad commit through the encoding lint. The hook now hands the pushed
+  commit to the encoding lint (`--head`), docs-noise (`--commit`),
+  format_changed (`--check --rev`), the conflict-marker check (`--rev`, the
+  files the push changes) and compat aggregate (`check --rev`), all reading
+  blobs through `gate_common.commit_blobs`. Source contracts, the
+  single-backend guard and the negative-capability check still read the
+  working tree (they walk directory trees); the hook warns when tracked files
+  differ from the pushed commit. A new content gate should read the pushed
+  commit's blobs, not disk.
+- **A gate that did not run is not a pass.** The merge-tree checks exit 4
+  (NOT_CHECKED) when one times out or cannot start; gates.sh exits 4 and the
+  pre-push hook blocks on it (bypass: `PULP_PREPUSH_ALLOW_NOT_CHECKED=1`).
+  Each check's timeout is 20 s scaled by load per core, capped at 300 s;
+  `PULP_MERGE_TREE_CHECK_TIMEOUT` overrides it.
 
 - **A workflow that runs a test binary by name breaks when that suite joins
   a test group.** `pulp_add_test_suite(... GROUP <group>)` compiles the
@@ -6257,6 +6329,15 @@ triggers on a 143/137 signal-kill exit, not just the marker). Real os-windows
 vanished-`-object` existence-filter + mass-drop guard in `run_coverage.sh` were
 real); only the runtime/timeout is accepted as best-effort.
 
+Because `continue-on-error` absorbs a Windows failure, `needs.coverage.result`
+stays `success` and a run can read green with Windows broken (run 40162878355:
+`pwsh: command not found` before the build started). `coverage_publish_barrier`
+therefore runs under `always()`. It fails unless `needs.coverage.result` is
+`success`, and when a dispatch sets `windows_runner_selector_json` it also
+requires the `coverage-cobertura-windows-<sha>` artifact. When you read a
+Windows proof dispatch, check the Windows job and its artifact, not just the
+run conclusion. `test_codecov_upload_contract.py` pins the barrier shape.
+
 ### `release-cli.yml` needs Rust; the VM golden does not have it
 
 The macOS build gate and `release-cli.yml`'s darwin leg can share the Tart VM
@@ -7428,16 +7509,24 @@ ship cycles should use Shipyard. `local_ci.py` remains in the repo as
 a fallback but is scheduled for removal after a 2-week observation
 period (see Generous-Corp/pulp#120).
 
-### No repository-wide merge steward
+### One admission writer: the m3 steward tick
 
-Pulp once carried a GitHub-hosted steward workflow
-(`shipyard-merge-steward.yml`) plus a model-driven recovery worker and canary.
-The steward never left manual dispatch, its last runs failed, and the native
-merge queue now does the landing it was built for, so all of it was removed.
-Land a PR by arming auto-merge with `mergeMethod: MERGE`; adopt an orphaned
-Shipyard PR with `shipyard ship --pr <n>`. `[merge_steward] auto_handoff` stays
-`false` and `shipyard pr --workstream-id` stays unused: both write
-`shipyard/steward-handoff` receipts that nothing reads.
+Pulp PRs enter the native merge queue through one writer: a launchd job on m3
+that runs `shipyard runner steward --repo Generous-Corp/pulp --base main
+--arm-unqueued --apply` every five minutes from a config-only sparse clone in
+`~/.local/share/shipyard-steward/`. It enqueues a PR only when its current head
+carries an allowlisted exact-head APPROVE and the required checks are green;
+Shipyard re-reads the approval immediately before each enqueue and fails
+closed. Each pass appends `enqueued=N waiting_approval=M` to
+`~/Library/Logs/shipyard-steward-tick/summary.log`.
+
+- Do not arm or enqueue by hand while the tick runs; post a verdict and let the
+  next pass admit it.
+- `.github/workflows/shipyard-merge-steward.yml` is a read-only diagnostic (no
+  `apply` input). Use it to see what the steward would do, never to admit.
+- A long apply pass holds the steward state lock that tartci's gate-VM
+  admission also takes, so a slow Shipyard starves gate VMs. Keep the tick on a
+  Shipyard with lazy hydration and the approval-first pre-filter.
 
 ### Why your macOS leg routed to `[github-hosted]`, and why re-running did not fix it
 
@@ -12838,6 +12927,31 @@ first.
 
 ## Hosted macOS advisory cadence
 
+### Event-class labels are exclusive
+
+The shared `PULP_LOCAL_MACOS_RUNS_ON_JSON` selector may contain the PR-head
+class. Before dispatching a protected `merge_group`, `build.yml` must remove
+both managed event-class labels (`pulp-build-pr-head` and
+`pulp-build-merge-group`) and append only the class for the current event.
+GitHub requires every requested label, while TartCI event-class-v2 runners
+advertise exactly one class; leaving both labels creates a queued job that no
+runner can serve.
+
+## Release lanes pin the shell exec JS bridge OFF
+
+`PULP_DEV_BRIDGE_EXEC` compiles the developer-only `exec` / `execAsync` JS
+bridge (a `/bin/sh` for scripted UIs) into `pulp-view-script`. It defaults to
+`PULP_BUILD_TESTS`, so tests OFF already implies it, but every release
+configure — `release-cli.yml` (CLI build and both SDK builds) and
+`sign-and-release.yml` — passes `-DPULP_DEV_BRIDGE_EXEC=OFF` explicitly and
+`sdk_provenance.py` refuses to mint a release marker from a cache where it is
+ON or missing. The marker records it as `features.bridge_exec: false`;
+`PulpSdkProvenance.cmake` fails a release SDK whose marker claims `true`. When
+adding a release configure site, carry the flag; when a release leg fails on
+`bridge_exec=OFF`, the leg dropped the flag or configured from a source tree
+that predates the option — neither is a test failure. The same refusal
+stops a `workflow_dispatch` backfill of a tag older than the option: those
+SDKs do carry the bridge, so re-minting their provenance is refused by design.
 The TSan workflow's focused SignalGraph selector must retain exact-name entries
 for mailbox and retirement-reader race cases when those cases are extracted or
 renamed. Validate the selected names with `ctest -N` before changing the regex;

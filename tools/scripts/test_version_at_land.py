@@ -22,6 +22,7 @@ concurrent post-merge drains must not lose or duplicate a version (the
 from __future__ import annotations
 
 import contextlib
+from dataclasses import replace
 import hashlib
 import io
 import json
@@ -1795,6 +1796,87 @@ class MigrationNoteFoldTest(unittest.TestCase):
         self.assertIn("could not fold", err.getvalue())
 
 
+class CapabilityCounterAssignTest(unittest.TestCase):
+    """The SDK bump assigns pending agent-capability counters.
+
+    The repo's own `agent_capability_manifest.py --assign-pending` does the
+    assignment; a stub stands in for it so this pins the bot's contract (run it
+    on an SDK bump, carry what it changed, survive its failure)."""
+
+    SNAPSHOT = "docs/status/agent-capabilities.json"
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.repo = Path(self._tmp.name).resolve()
+        self._cwd = os.getcwd()
+        self.r = RangeRepo(self.repo)
+        os.chdir(self.repo)
+        self.r.write(self.SNAPSHOT, '{"manifest_revision": 1}\n')
+        self.r.commit("seed capability snapshot")
+
+    def tearDown(self):
+        os.chdir(self._cwd)
+        self._tmp.cleanup()
+
+    def _stub(self, exit_code: int) -> None:
+        self.r.write(val.CAPABILITY_SCRIPT,
+                     "import pathlib, sys\n"
+                     "assert sys.argv[1:] == ['--assign-pending']\n"
+                     f"pathlib.Path({self.SNAPSHOT!r}).write_text('{{\"manifest_revision\": 2}}\\n')\n"
+                     f"sys.exit({exit_code})\n")
+        self.r.commit("install stub capability script")
+
+    def _sdk(self):
+        return [val.Assignment(surface="sdk", level="minor", current="1.2.3", assigned="1.3.0")]
+
+    def test_an_sdk_bump_carries_the_assigned_counters(self):
+        self._stub(0)
+        edited = val._write_plan(self.repo, CONFIG, self._sdk())
+        self.assertIn(self.SNAPSHOT, edited)
+        self.assertIn('"manifest_revision": 2', (self.repo / self.SNAPSHOT).read_text(encoding="utf-8"))
+        message = val._bump_message(self._sdk(), "a" * 40, "b" * 40, edited)
+        self.assertIn("Skill-Update: skip skill=agent-capabilities", message)
+        self.assertIn(f"{val.APPLIED_MARKER}: {'b' * 40}", message)
+
+    def test_a_plugin_only_bump_leaves_the_counters_pending(self):
+        self._stub(0)
+        plan = [val.Assignment(surface="plugin", level="patch", current="0.5.0", assigned="0.5.1")]
+        edited = val._write_plan(self.repo, CONFIG, plan)
+        self.assertNotIn(self.SNAPSHOT, edited)
+        self.assertIn('"manifest_revision": 1', (self.repo / self.SNAPSHOT).read_text(encoding="utf-8"))
+
+    def test_a_failed_assignment_is_reverted_and_does_not_stop_the_bump(self):
+        self._stub(1)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            edited = val._write_plan(self.repo, CONFIG, self._sdk())
+        self.assertIn("CMakeLists.txt", edited)
+        self.assertNotIn(self.SNAPSHOT, edited)
+        self.assertIn('"manifest_revision": 1', (self.repo / self.SNAPSHOT).read_text(encoding="utf-8"))
+        self.assertIn("could not assign pending capability counters", err.getvalue())
+
+    def test_a_hung_assignment_times_out_and_does_not_hold_the_bump(self):
+        self.r.write(val.CAPABILITY_SCRIPT,
+                     "import pathlib, time\n"
+                     f"pathlib.Path({self.SNAPSHOT!r}).write_text('partial\\n')\n"
+                     "time.sleep(30)\n")
+        self.r.commit("install hanging stub")
+        err = io.StringIO()
+        original = val.CAPABILITY_ASSIGN_TIMEOUT_SECS
+        val.CAPABILITY_ASSIGN_TIMEOUT_SECS = 1
+        try:
+            with contextlib.redirect_stderr(err):
+                edited = val._write_plan(self.repo, CONFIG, self._sdk())
+        finally:
+            val.CAPABILITY_ASSIGN_TIMEOUT_SECS = original
+        self.assertIn("CMakeLists.txt", edited)
+        self.assertNotIn(self.SNAPSHOT, edited)
+        self.assertIn('"manifest_revision": 1', (self.repo / self.SNAPSHOT).read_text(encoding="utf-8"))
+        self.assertIn("timed out", err.getvalue())
+
+    def test_control_a_bump_without_capability_edits_carries_no_skill_trailer(self):
+        message = val._bump_message(self._sdk(), "a" * 40, "b" * 40, ["CMakeLists.txt"])
+        self.assertNotIn("Skill-Update", message)
 class MigrationFoldRouteTest(unittest.TestCase):
     """The fold runs inside the real bump transaction on both routes.
 
@@ -1903,6 +1985,25 @@ class MigrationFoldRouteTest(unittest.TestCase):
         self._bump_pr_lands_after("fader", tag=False)
         self.assertIn("fader changed", self._show("main", "docs/migrations/v0.3.0.md") or "")
         self.assertNotIn("fader changed", self._show("main", "docs/migrations/v0.2.0.md") or "")
+
+
+class WriterAllowlistTest(unittest.TestCase):
+    def test_release_outputs_are_allowed(self) -> None:
+        val._validate_writer_paths(CONFIG, [
+            "CMakeLists.txt",
+            "CHANGELOG.md",
+            "docs/migrations/v1.2.3.md",
+            "docs/migrations/unreleased/note.md",
+        ])
+
+    def test_unapproved_path_fails_closed(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "unapproved release paths"):
+            val._validate_writer_paths(CONFIG, ["core/runtime/src/evil.cpp"])
+
+    def test_empty_allowlist_fails_closed(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "allowlist is empty"):
+            val._validate_writer_paths(
+                replace(CONFIG, writer_allowed_globs=[]), ["CMakeLists.txt"])
 
 
 if __name__ == "__main__":

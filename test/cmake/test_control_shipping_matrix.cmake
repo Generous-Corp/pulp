@@ -9,6 +9,8 @@ file(COPY
     "${PULP_SOURCE_DIR}/tools/cmake/PulpInspectorShipping.cmake"
     "${PULP_SOURCE_DIR}/tools/cmake/PulpControlShipping.cmake"
     "${PULP_SOURCE_DIR}/tools/cmake/check_control_shipping_artifact.cmake"
+    "${PULP_SOURCE_DIR}/tools/cmake/PulpReleaseArtifactScan.cmake"
+    "${PULP_SOURCE_DIR}/tools/cmake/release_artifact_forbidden.json"
     DESTINATION "${_installed_helper_dir}")
 
 set(_matrix_source "${FIXTURE_DIR}/matrix-source")
@@ -488,3 +490,29 @@ endfunction()
 expect_marker_admission("PULP_ABCDEFGHI" TRUE)       # 14 bytes
 expect_marker_admission("PULP_ABCDEFGH" FALSE)       # 13 bytes
 expect_marker_admission("PULP_ABC;DEFGHIJ_V1" FALSE)
+
+# CMake's ordinary string representation truncates at the first NUL on the
+# Windows toolchain. A marker after several NUL bytes must still be found by
+# the installed scanner, proving that it reads the complete PE image.
+set(_binary_read_fixture "${FIXTURE_DIR}/binary-read-nul-fixture.bin")
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+execute_process(COMMAND "${Python3_EXECUTABLE}" -c
+    "import pathlib,sys; pathlib.Path(sys.argv[1]).write_bytes(bytes([77,90,0,0,0,0,0])+b'PULP_BINARY_READ_AFTER_NUL_V1')"
+    "${_binary_read_fixture}" RESULT_VARIABLE _binary_fixture_result)
+if(NOT _binary_fixture_result EQUAL 0)
+    message(FATAL_ERROR "could not write binary-read regression fixture")
+endif()
+execute_process(COMMAND "${CMAKE_COMMAND}"
+    "-DPULP_CONTROL_BINARY_SELFTEST_ARTIFACT=${_binary_read_fixture}"
+    "-DPULP_CONTROL_BINARY_SELFTEST_MARKER=PULP_BINARY_READ_AFTER_NUL_V1"
+    -P "${_installed_helper_dir}/check_control_shipping_artifact.cmake"
+    RESULT_VARIABLE _binary_read_result OUTPUT_VARIABLE _binary_read_output
+    ERROR_VARIABLE _binary_read_error)
+if(NOT _binary_read_result EQUAL 0)
+    message(FATAL_ERROR
+        "binary read selftest failed: ${_binary_read_output}${_binary_read_error}")
+endif()
+if(NOT "${_binary_read_output}${_binary_read_error}" MATCHES
+   "control shipping binary selftest passed")
+    message(FATAL_ERROR "binary read selftest emitted no pass receipt")
+endif()

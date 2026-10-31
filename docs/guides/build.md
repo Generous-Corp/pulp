@@ -37,6 +37,7 @@ ctest --test-dir build --output-on-failure    # test
 | `PULP_TEST_PCH` | ON on Clang, OFF elsewhere | Share one precompiled Catch2 + standard-library header across the Catch2 test executables (`pulp-test-pch-cxx20` / `-cxx23` carriers). Suites with ObjC++ sources, per-target `-f`/`-std` options, or `NO_PCH` compile as before; `<build>/pulp-test-pch.tsv` lists every decision and the `test-pch-wiring` ctest verifies it against the generated compile lines. |
 | `PULP_ENABLE_PROJECT_PACKAGE` | ON | Build and export the optional project-package component and dependent Timeline authoring tools. `OFF` omits them, so the installed SDK cannot satisfy a request for the `project-package` component. |
 | `PULP_ENABLE_JS` | ON | Build the JS scripting + web-compat layer (`pulp::view-script`). `OFF` yields a native-only `pulp::view` with no JS engine — smaller binaries, and the native faithful-vector design-import path still works. |
+| `PULP_DEV_BRIDGE_EXEC` | follows `PULP_BUILD_TESTS` | Compile the developer-only shell `exec` / `execAsync` JS bridge into `pulp::view-script`. `OFF` compiles the registrar out entirely (the archive carries no `/bin/sh` body), independent of the runtime `exec` capability gate. Release and SDK builds pass `OFF` explicitly and record it as `bridge_exec: false` in `sdk-provenance.json`; the `pulp-bridge-exec-ship-symbol-absence` ctest proves the symbol is absent from a gate-off object. |
 | `PULP_JS_ENGINE` | auto | JS engine: `auto`/`quickjs` compile QuickJS only; `jsc` adds JavaScriptCore on Apple and makes it the default; `v8` adds the sealed V8 backend and makes it the default (only when `PULP_ENABLE_JS=ON`) |
 | `PULP_DEV_SHARED_UI` | OFF | macOS development only: link plug-in modules against one shared Pulp runtime dylib for fast relinks. Never distributable; see [Fast plug-in relinks](#fast-plug-in-relinks-pulp_dev_shared_ui). |
 | `PULP_ENABLE_AAX` | OFF | Enable optional AAX format |
@@ -99,6 +100,13 @@ It is a development-only link mode, by design:
     them. That signature is for local loading only.
   - An artifact that is, or names, the shared runtime (a bundle copied out of a
     dev-shared tree, a hand-made `.pkg` input) is refused with the same command.
+    `notarize` and `share` open a `.zip`, flat `.pkg` or `.dmg` built by another
+    tool and scan what is inside; one that does not open is refused, with
+    `--dry-run` too, so a placeholder file named `.dmg` stops a share plan. That
+    includes an encrypted disk image or one with a licence agreement (SLA):
+    the scan never answers a prompt, so it refuses them rather than waiting.
+    A container whose declared size would not fit on the temp volume is
+    refused before it is extracted.
     `tools/scripts/build_combined_installer.sh` refuses such inputs before any
     signing tool runs.
 - **What stays static.** The format adapters (`libpulp-format*`,

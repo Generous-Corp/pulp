@@ -77,7 +77,7 @@ if(PULP_ENABLE_DESIGN_IMPORT)
     list(APPEND PULP_SDK_TARGETS pulp-design-import pulp-design-import-audio-pack)
 endif()
 if(PULP_BUILD_WEBVIEW)
-    list(APPEND PULP_SDK_TARGETS pulp-view-webview)
+    list(APPEND PULP_SDK_TARGETS pulp-view-webview pulp-view-webview-backend)
 endif()
 
 # pulp-signal-fft-backend is the optional multi-backend FFT facade. It's
@@ -86,6 +86,12 @@ endif()
 # consumers can include the header but cannot link the symbols.
 if(TARGET pulp-signal-fft-backend)
     list(APPEND PULP_SDK_TARGETS pulp-signal-fft-backend)
+endif()
+
+# The float FFT backend behind FftT off Apple. pulp::signal links it, so an
+# installed SDK must export it or every FFT user fails to link.
+if(TARGET pulp-signal-mufft AND NOT APPLE)
+    list(APPEND PULP_SDK_TARGETS pulp-signal-mufft)
 endif()
 
 # Modal-spec JSON parsing has a source-bearing library separate from the
@@ -761,6 +767,11 @@ if(_pulp_source_install_status STREQUAL "")
 else()
     set(PULP_SOURCE_INSTALL_DIRTY true)
 endif()
+if(PULP_DEV_BRIDGE_EXEC)
+    set(PULP_SOURCE_INSTALL_BRIDGE_EXEC true)
+else()
+    set(PULP_SOURCE_INSTALL_BRIDGE_EXEC false)
+endif()
 # A source-install SDK is intentionally non-distributable, but its target
 # architecture still matters: a native ARM64 archive must never be consumed
 # by an ARM64EC/ARM64X plugin just because both builds run on Windows ARM.
@@ -892,6 +903,8 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPortable.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpBundleRelocatable.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAuv3.cmake"
+    # Included by PulpAuv3.cmake for the per-engine entitlement fragments.
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAuv3Entitlements.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpIosHostApp.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAppTargets.cmake"
     # Included by PulpAppTargets.cmake, so an installed SDK without it fails
@@ -901,6 +914,10 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpControlShipping.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/check_inspector_shipping_artifact.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/check_control_shipping_artifact.cmake"
+    # Read by check_control_shipping_artifact.cmake relative to its own
+    # directory: the one forbidden-marker list and the scanner over it.
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpReleaseArtifactScan.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/release_artifact_forbidden.json"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/install_control_host.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/remove_control_host.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPlugin.cmake"
@@ -1138,6 +1155,13 @@ if(APPLE)
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/accessibility_mac.mm"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/text_accessibility_macos.mm"
         DESTINATION src/pulp/view/platform/mac
+    )
+    # plugin_view_host_mac.mm includes the private core/view/src/pending_resize.hpp
+    # as "../../src/pending_resize.hpp"; from src/pulp/view/platform/mac that
+    # resolves to src/pulp/view/src.
+    install(FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/core/view/src/pending_resize.hpp"
+        DESTINATION src/pulp/view/src
     )
     # Shared macOS render ObjC source (metal_surface_mac.mm), compiled per-binary
     # by _pulp_apply_view_mac_objc_suffix() so its PulpMetalSurfaceView (the

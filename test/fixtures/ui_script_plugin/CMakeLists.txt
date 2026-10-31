@@ -104,6 +104,14 @@ endif()
 
 # The same plug-in built outside the tree against the installed SDK.
 if(PULP_HAS_CLAP)
+    # An instrumented producer (sanitizer or coverage) installs static
+    # libraries that reference its runtime, so the consumer must compile and
+    # link with the same instrumentation, as the other installed-SDK consumer
+    # fixtures do.
+    string(JOIN " " _ui_script_consumer_instrumentation_compile_flags
+        ${PULP_SANITIZER_COMPILE_FLAGS} ${PULP_COVERAGE_COMPILE_FLAGS})
+    string(JOIN " " _ui_script_consumer_instrumentation_link_flags
+        ${PULP_SANITIZER_LINK_FLAGS} ${PULP_COVERAGE_LINK_FLAGS})
     add_test(NAME ui-script-plugin-editor-installed-sdk
         COMMAND ${CMAKE_COMMAND}
             -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
@@ -111,6 +119,10 @@ if(PULP_HAS_CLAP)
             "-DPROBE=$<TARGET_FILE:pulp-ui-script-editor-probe>"
             "-DEXPECT_GPU=${PULP_HAS_SKIA}"
             "-DCONFIG=$<CONFIG>"
+            "-DPULP_PARENT_SANITIZER=${PULP_SANITIZER}"
+            "-DPULP_PARENT_CXX_FLAGS=${CMAKE_CXX_FLAGS}"
+            "-DPULP_PARENT_INSTRUMENTATION_CXX_FLAGS=${_ui_script_consumer_instrumentation_compile_flags}"
+            "-DPULP_PARENT_INSTRUMENTATION_LINKER_FLAGS=${_ui_script_consumer_instrumentation_link_flags}"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/sdk_consumer.cmake")
     # The required macOS gate runs it: one install plus one small CLAP consumer
     # costs about as much as cmake-view-audio-sdk-consumer beside it. Elsewhere

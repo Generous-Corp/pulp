@@ -326,8 +326,8 @@ template <typename SampleType = float, std::size_t MaxBands = 8> class LinkwitzR
             const double v3 = input - state2;
             const double v1 = coefficients.a1 * state1 + coefficients.a2 * v3;
             const double v2 = state2 + coefficients.a2 * state1 + coefficients.a3 * v3;
-            state1 = snap_to_zero(2.0 * v1 - state1);
-            state2 = snap_to_zero(2.0 * v2 - state2);
+            state1 = snap_recursion_state(2.0 * v1 - state1);
+            state2 = snap_recursion_state(2.0 * v2 - state2);
             return {v2, input - inverse_q * v1 - v2};
         }
 

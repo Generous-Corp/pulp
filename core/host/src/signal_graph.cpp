@@ -1228,7 +1228,22 @@ pulp::audio::LiveDspTelemetrySnapshot SignalGraph::poll_live_dsp_telemetry() {
     return cg->live_dsp_telemetry.latest();
 }
 
+// Per-node timing costs two clock reads per node per block, so it runs only
+// once someone reads the result: node_loads() turns it on and leaves it on,
+// set_node_load_monitoring() controls it directly, and enabled live-DSP
+// telemetry times nodes too. Whole-graph timing always runs (live-swap
+// admission reads graph_load()). Read once per block on the audio thread.
+void SignalGraph::set_node_load_monitoring(bool enabled) noexcept {
+    node_load_monitoring_.store(enabled, std::memory_order_relaxed);
+}
+
+bool SignalGraph::node_load_monitoring() const noexcept {
+    return node_load_monitoring_.load(std::memory_order_relaxed);
+}
+
 std::vector<SignalGraph::NodeLoadReport> SignalGraph::node_loads() const {
+    // Reading per-node load is what asks for it to be measured (see the header).
+    node_load_monitoring_.store(true, std::memory_order_relaxed);
     // Control/UI-thread read of the persistent per-node measurers. node_load_
     // is only mutated on the control thread (compile_), so this is race-free
     // against topology recompiles; the audio thread writes only the measurer
