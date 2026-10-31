@@ -127,9 +127,15 @@ class HandMapping {
         pinch_.advance(samples, timeout);
     }
 
-    const SignalMapping& x() const noexcept { return x_; }
-    const SignalMapping& y() const noexcept { return y_; }
-    const SignalMapping& pinch() const noexcept { return pinch_; }
+    const SignalMapping& x() const noexcept {
+        return x_;
+    }
+    const SignalMapping& y() const noexcept {
+        return y_;
+    }
+    const SignalMapping& pinch() const noexcept {
+        return pinch_;
+    }
 
   private:
     SignalMapping x_;
@@ -175,8 +181,12 @@ class HandReplay {
         return true;
     }
 
-    void reset() noexcept { cursor_ = 0; }
-    std::size_t position() const noexcept { return cursor_; }
+    void reset() noexcept {
+        cursor_ = 0;
+    }
+    std::size_t position() const noexcept {
+        return cursor_;
+    }
 
   private:
     std::span<const HandFrame> frames_;
