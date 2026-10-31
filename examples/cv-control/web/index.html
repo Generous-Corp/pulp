@@ -120,7 +120,9 @@ async function start() {
 }
 
 document.querySelector("#start").addEventListener("click", start);
-document.querySelector("#stop").addEventListener("click", stop);
+// Event listeners pass a MouseEvent; stop() expects the active session. Keep
+// the lifecycle boundary explicit so a click really releases the provider.
+document.querySelector("#stop").addEventListener("click", () => { void stop(); });
 document.querySelector("#brightness").addEventListener("input", (e) => {
   active?.adapter?.setParameterValue(PARAM_BRIGHTNESS, Number(e.target.value));
 });
