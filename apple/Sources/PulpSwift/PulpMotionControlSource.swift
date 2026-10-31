@@ -60,6 +60,7 @@ public final class PulpMotionControlSource {
     private let manager: CMMotionManager
     private let queue: OperationQueue
     private let publish: (PulpMotionControlFrame) -> Void
+    private let stateLock = NSLock()
     private var sequence: UInt64 = 0
     private var running = false
 
@@ -81,7 +82,16 @@ public final class PulpMotionControlSource {
     /// Starts accelerometer delivery, returning false when hardware is absent.
     @discardableResult
     public func start(updateInterval: TimeInterval = 1.0 / 60.0) -> Bool {
-        guard !running, manager.isAccelerometerAvailable else { return false }
+        guard manager.isAccelerometerAvailable else { return false }
+        stateLock.lock()
+        guard !running else {
+            stateLock.unlock()
+            return false
+        }
+        // Set this before starting delivery: Core Motion may invoke the
+        // callback immediately on the provider queue.
+        running = true
+        stateLock.unlock()
         manager.accelerometerUpdateInterval = updateInterval
         manager.startAccelerometerUpdates(to: queue) { [weak self] data, error in
             guard let self else { return }
@@ -91,20 +101,40 @@ public final class PulpMotionControlSource {
             }
             self.submit(yAcceleration: data!.acceleration.y, timestamp: data!.timestamp)
         }
-        running = true
         return true
     }
 
     /// Stops delivery and publishes one invalid frame for deterministic loss.
     public func stop() {
-        guard running else { return }
         manager.stopAccelerometerUpdates()
+        stateLock.lock()
+        guard running else {
+            stateLock.unlock()
+            return
+        }
         running = false
-        publishLoss()
+        sequence &+= 1
+        // Keep publication under the same lock as submit(). This makes a
+        // lifecycle loss frame ordered with respect to an in-flight sensor
+        // frame and prevents concurrent writers from producing an incoherent
+        // stream. The closure runs on the provider/lifecycle thread, never on
+        // an audio callback.
+        publish(PulpMotionControlFrame(
+            sequence: sequence,
+            value: 0.0,
+            confidence: 0.0,
+            valid: false,
+            timestampNanoseconds: 0
+        ))
+        stateLock.unlock()
     }
 
     private func submit(yAcceleration: Double, timestamp: TimeInterval) {
-        guard running else { return }
+        stateLock.lock()
+        guard running else {
+            stateLock.unlock()
+            return
+        }
         let normalized = PulpMotionControlMath.normalizeTilt(yAcceleration: yAcceleration)
         sequence &+= 1
         publish(PulpMotionControlFrame(
@@ -114,17 +144,7 @@ public final class PulpMotionControlSource {
             valid: normalized != nil,
             timestampNanoseconds: normalized == nil ? 0 : UInt64(max(0, timestamp) * 1_000_000_000)
         ))
-    }
-
-    private func publishLoss() {
-        sequence &+= 1
-        publish(PulpMotionControlFrame(
-            sequence: sequence,
-            value: 0.0,
-            confidence: 0.0,
-            valid: false,
-            timestampNanoseconds: 0
-        ))
+        stateLock.unlock()
     }
 }
 
