@@ -357,38 +357,48 @@ The bump can land two ways, selected by the `PULP_BUMP_ROUTE` repo variable
     then skip its own job. Those runs get a per-run group instead.
     `test_version_at_land.py` evaluates the group expression and the job `if`
     against every event shape and fails if they diverge.
-  - **Stale bump PR.** A bump PR cut before the merge being drained does not
-    carry that merge's intent, so the drain never treats it as covering. It
-    still does not need replacing while it can land on its own: when it lands,
-    the push re-runs the drain, which assesses every first-parent merge after
-    the bump's cut point (the marker commit's parent) and skips only the bump's
-    own integration merge. So a stale bump PR that is in the merge queue, or
-    unheld with its required checks pending or green, is waited for
-    (`stale-wait`, exit 0 with a `::notice::` naming the PR). Closing it would
-    restart 8 to 36 minutes of checks, long enough for the next main push to
-    stale its replacement too.
-  - **Dead-end bump PR.** A stale bump PR that was ejected from the merge
-    queue, has a failed required check, or carries a reviewer HOLD at its current
-    head never lands. Nobody arms PRs under the steward admission model, so an
-    unarmed PR is not a dead end: it is waiting for review or for the steward's
-    next pass and is LIVE. It is dead only when it was ejected from the queue,
-    a required check on its head failed, or the last line of a stamped comment by the verdict App is
-    `verdict: HOLD head:<sha>` with the sha equal to the current head. A HOLD on
-    an older head leaves the current head unreviewed, which is live. Comments
-    that cannot be read never make a PR dead. With the
-    `PULP_BUMP_HEAL_STALE_PR=true` repo variable (default off) the drain closes
-    it, opens a fresh bump covering the whole range, and reclaims the branch
-    through the normal confirmed-no-PR `--force-with-lease` path. It acts only on
-    CONFIRMED stale AND CONFIRMED dead. A draft (an explicit release hold) or an
-    unreadable state fails the run (`stale-defer`, exit 1) and is never closed.
-    A bump PR that already covers the merge but has a failed required check
-    (failure, cancelled, timed out) is a dead end too: re-arming it would wait
-    for nothing until main moved. With the same variable the drain closes it
-    and regenerates the bump; a covering PR in the merge queue, or one whose
-    checks are pending, green or unreadable, is kept and never closed.
+  - **One standing bump PR, updated in place.** There is at most one open bump
+    PR, on `release/version-bump`, and it is never closed and recut. The bump is
+    cumulative from the last `Version-Bump-Applied` marker on main, so when
+    another merge lands while the PR is open the drain rebuilds the bump on the
+    current main and replaces the branch head with one compare-and-swap push
+    (`--force-with-lease` at the head it observed), then refreshes the PR body
+    (`pr-updated`). The PR number, label and conversation stay. The drain
+    leaves the head alone (`stale-wait`, exit 0 with a `::notice::`) when:
+    - the PR is in the merge queue (a push would eject it; its landing re-runs
+      the drain, which assesses every first-parent merge after the bump's cut
+      point and skips only the bump's own integration merge);
+    - the head already is the bump it would build: same files, same content,
+      same sync trailers, cut from an ancestor of main. A landing that needs no
+      new version therefore keeps a head a reviewer may already have approved;
+    - the branch could not be read.
+  - **The window spaces updates.** An update that is due waits
+    (`standing-held`, exit 0 with a `::notice::`) until the standing head is
+    `PULP_BUMP_COALESCE_MINUTES` old (default 120; `0` disables), measured from
+    the bump commit's time. A surface that now needs a higher version than the
+    head carries (a new surface, or patch to minor) updates at once, as does a
+    `release_now: true` dispatch. The `*/15` scheduled drain acts on the window
+    ending. A head that lands before its update is still correct for
+    everything up to its cut; the drain after its merge bumps the rest.
+  - **Dead-end bump PR.** A standing bump PR that was ejected from the merge
+    queue, has a failed required check, or carries a reviewer HOLD at its
+    current head never lands. Nobody arms PRs under the steward admission
+    model, so an unarmed PR is not a dead end: it is waiting for review or for
+    the steward's next pass and is LIVE. It is dead only when it was ejected
+    from the queue, a required check on its head failed, or the last line of a
+    stamped comment by the verdict App is `verdict: HOLD head:<sha>` with the
+    sha equal to the current head. A HOLD on an older head leaves the current
+    head unreviewed, which is live. Comments that cannot be read never make a
+    PR dead. With the `PULP_BUMP_HEAL_STALE_PR=true` repo variable (default off)
+    the drain repairs it in place: it replaces the head (the same push as an
+    update), which clears the verdict and reruns the checks. Nothing is closed
+    or reopened, and the repair obeys the window, so a persistently red head is
+    retried once per window. Without the variable a dead standing PR fails the
+    run (`stale-defer`, exit 1). A draft (an explicit release hold) or an
+    unreadable state fails the run the same way and is never pushed to.
     The workflow also runs on the bump PR's `dequeued` event and on a non-green
     completion of a workflow reporting its required checks (`workflow_run`,
-    scoped to `release/version-bump`), so a dead end is healed when it dies
+    scoped to `release/version-bump`), so a dead end is repaired when it dies
     rather than on the next push to main. Those runs check out main, never PR
     code.
   - **Coalescing.** A bump PR recomputes every intent since the last marker,
@@ -402,8 +412,8 @@ The bump can land two ways, selected by the `PULP_BUMP_ROUTE` repo variable
     with `release_now: true`. The `*/15` scheduled drain makes sure the window
     ending is acted on. A fact the drain cannot read (the merge queue, or the
     time of the last landing) never holds the bump; it opens as it did before
-    coalescing. An already-open bump PR is not affected: it is waited
-    for or healed exactly as described above. The predicate is
+    coalescing. An already-open bump PR is not held by this rule; it is
+    updated in place under the window described above. The predicate is
     `coalesce_decision` in `version_at_land.py`, covered by
     `test_version_at_land.py` (`CoalesceDecisionTest`,
     `PrRouteCoalesceTest`).

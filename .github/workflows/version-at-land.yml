@@ -172,16 +172,19 @@ jobs:
           GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
           HAS_RELEASE_PAT: ${{ secrets.RELEASE_BOT_TOKEN != '' }}
           BUMP_ROUTE: ${{ vars.PULP_BUMP_ROUTE || 'direct' }}
-          # Opt-in (default off): replace a stale bump PR that is a dead end
+          # Opt-in (default off): repair a standing bump PR that is a dead end
           # (ejected from the merge queue, held by a reviewer at its head,
-          # or a required check failed). A stale bump PR still able to land is waited for either
-          # way, and that wait exits 0.
+          # or a required check failed) by replacing its head in place. The
+          # PR is never closed and recut. A standing bump PR still able to
+          # land is left as it is either way, and that wait exits 0.
           HEAL_STALE_PR: ${{ vars.PULP_BUMP_HEAL_STALE_PR || 'false' }}
           # PR route: hold a NEW bump PR while other PRs wait in the merge
-          # queue, for up to this many minutes after the last bump landed, so
-          # one bump PR covers many merges instead of each merge spending a
-          # queue validation on its own bump. 0 disables. The scheduled drain
-          # below opens the held PR once the queue drains or the window ends;
+          # queue, for up to this many minutes after the last bump landed, and
+          # update the one standing bump PR no more often than this unless a
+          # surface needs a higher version, so one bump PR covers many merges
+          # instead of each merge spending a queue validation on its own bump.
+          # 0 disables. The scheduled drain below opens or updates the PR once
+          # the queue drains or the window ends;
           # pending-intent-liveness.yml's grace sits above window + cadence.
           PULP_BUMP_COALESCE_MINUTES: ${{ vars.PULP_BUMP_COALESCE_MINUTES || '120' }}
           PULP_BUMP_RELEASE_NOW: ${{ github.event.inputs.release_now || 'false' }}

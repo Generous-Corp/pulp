@@ -771,39 +771,45 @@ class PrRouteTest(unittest.TestCase):
         _git(self.clone, "switch", "-q", "main")
         return sha
 
-    def test_heal_replaces_a_stale_bump_pr_ejected_from_the_queue(self) -> None:
+    def _tip(self) -> str:
+        return subprocess.run(
+            ["git", "-C", str(self.origin), "rev-parse", val.BUMP_BRANCH],
+            capture_output=True, text=True, encoding="utf-8",
+            check=True).stdout.strip()
+
+    def _assert_repaired_in_place(self, fake, before: str) -> None:
+        """The standing PR kept its number and got a new head: nothing was
+        closed, nothing was opened, and the branch now carries the bump built
+        on the latest main."""
+        self.assertFalse(fake.did("pr", "close"))
+        self.assertFalse(fake.did("pr", "create"))
+        self.assertTrue(fake.did("pr", "edit"))
+        tip = self._tip()
+        self.assertNotEqual(tip, before)
+        self.assertEqual(self._branch_cmake_version(val.BUMP_BRANCH), "0.2.0")
+        main_sha = subprocess.run(
+            ["git", "-C", str(self.origin), "rev-parse", "main"],
+            capture_output=True, text=True, encoding="utf-8",
+            check=True).stdout.strip()
+        self.assertEqual(subprocess.run(
+            ["git", "-C", str(self.origin), "merge-base", "--is-ancestor",
+             main_sha, tip]).returncode, 0)
+
+    def test_heal_repairs_a_stale_bump_pr_ejected_from_the_queue_in_place(self) -> None:
         """A merge-queue ejection leaves the bump PR open, unarmed and unqueued.
 
         Without the heal every drain stale-defers against it forever, because
         the only exit ("once that PR lands") never happens: on 2026-09-26 #8874
         sat ejected for ~17.6h and on 2026-09-27 #8925 for ~14h until a human
-        closed each one. With the heal the drain closes it and opens a fresh
-        bump that carries the whole range.
+        closed each one. With the heal the drain replaces its head with the
+        bump that carries the whole range. The PR itself is never closed.
         """
         stale_sha = self._push_stale_bump_branch()
-        # Top lock check sees the stale PR; after it is closed, the reclaim
-        # lookup confirms no open PR.
-        fake = _FakeGh(open_prs_seq=[1, 0], covers=False, armed=False,
-                       ejected=True)
+        fake = _FakeGh(open_prs=1, covers=False, armed=False, ejected=True)
         val._gh = fake
         status, plan = val.apply_via_pr(self.clone, self._cfg(), heal_stale=True)
-        self.assertEqual(status, "pr-opened", plan)
-        close = [c for c in fake.calls if c[:2] == ("pr", "close")]
-        self.assertEqual(len(close), 1)
-        self.assertEqual(close[0][2], "1")
-        self.assertTrue(fake.did("pr", "create"))
-        # The branch was reclaimed onto a bump that covers the latest merge.
-        tip = subprocess.run(
-            ["git", "-C", str(self.origin), "rev-parse", val.BUMP_BRANCH],
-            capture_output=True, text=True, check=True).stdout.strip()
-        self.assertNotEqual(tip, stale_sha)
-        self.assertEqual(self._branch_cmake_version(val.BUMP_BRANCH), "0.2.0")
-        main_sha = subprocess.run(
-            ["git", "-C", str(self.origin), "rev-parse", "main"],
-            capture_output=True, text=True, check=True).stdout.strip()
-        self.assertEqual(subprocess.run(
-            ["git", "-C", str(self.origin), "merge-base", "--is-ancestor",
-             main_sha, tip]).returncode, 0)
+        self.assertEqual(status, "pr-updated", plan)
+        self._assert_repaired_in_place(fake, stale_sha)
 
     def _push_covering_bump_branch(self) -> str:
         """Leave a bump commit cut FROM the current main on the bump branch, as
@@ -818,27 +824,21 @@ class PrRouteTest(unittest.TestCase):
         _git(self.clone, "switch", "-q", "main")
         return sha
 
-    def test_heal_replaces_a_covering_bump_pr_with_a_failed_required_check(self) -> None:
+    def test_heal_repairs_a_covering_bump_pr_with_a_failed_required_check(self) -> None:
         """A bump PR that covers main but went red never enqueues; re-arming it
         waited for nothing until main moved (median 17 min, up to 124, from red
-        check to close, e.g. #9719). With the heal it is replaced at once."""
+        check to close, e.g. #9719). With the heal its head is replaced, which
+        reruns the checks, once the coalesce window allows it."""
         covering_sha = self._push_covering_bump_branch()
-        fake = _FakeGh(open_prs_seq=[1, 0], covers=True, armed=True,
+        fake = _FakeGh(open_prs=1, covers=True, armed=True,
                        checks=[_check("macos", "FAILURE"),
                                _check("drift-fast", "SUCCESS")])
         val._gh = fake
         status, plan = val.apply_via_pr(self.clone, self._cfg(), heal_stale=True)
-        self.assertEqual(status, "pr-opened", plan)
-        close = [c for c in fake.calls if c[:2] == ("pr", "close")]
-        self.assertEqual([c[2] for c in close], ["1"])
-        self.assertIn("already covers", close[0][-1])
-        self.assertIn("macos", close[0][-1])
-        self.assertTrue(fake.did("pr", "create"))
-        tip = subprocess.run(
-            ["git", "-C", str(self.origin), "rev-parse", val.BUMP_BRANCH],
-            capture_output=True, text=True, encoding="utf-8",
-            check=True).stdout.strip()
-        self.assertNotEqual(tip, covering_sha)
+        self.assertEqual(status, "pr-updated", plan)
+        self.assertFalse(fake.did("pr", "close"))
+        self.assertFalse(fake.did("pr", "create"))
+        self.assertNotEqual(self._tip(), covering_sha)
         self.assertEqual(self._branch_cmake_version(val.BUMP_BRANCH), "0.2.0")
 
     def test_heal_rearms_a_covering_bump_pr_that_is_not_confirmed_red(self) -> None:
@@ -885,49 +885,38 @@ class PrRouteTest(unittest.TestCase):
         self.assertFalse(fake.did("pr", "close"))
         self.assertFalse(fake.did("pr", "create"))
 
-    def test_heal_replaces_an_armed_stale_bump_pr_with_a_failed_required_check(self) -> None:
+    def test_heal_repairs_an_armed_stale_bump_pr_with_a_failed_required_check(self) -> None:
         """Armed is not a reason to keep a stale bump PR whose checks failed.
 
         An armed PR whose required checks failed never enqueues, so it never
         lands: #9038 on 2026-09-29 was stale, armed, not queued, with red
-        required checks, and every drain stale-deferred against it. A stale
-        generated bump is always safely regenerable; closing drops auto-merge.
-        """
+        required checks, and every drain stale-deferred against it."""
         stale_sha = self._push_stale_bump_branch()
-        fake = _FakeGh(open_prs_seq=[1, 0], covers=False, armed=True,
+        fake = _FakeGh(open_prs=1, covers=False, armed=True,
                        checks=[_check("macos", "FAILURE"),
                                _check("drift-fast", "SUCCESS")])
         val._gh = fake
         status, plan = val.apply_via_pr(self.clone, self._cfg(), heal_stale=True)
-        self.assertEqual(status, "pr-opened", plan)
-        close = [c for c in fake.calls if c[:2] == ("pr", "close")]
-        self.assertEqual([c[2] for c in close], ["1"])
-        self.assertIn("macos", close[0][-1])
-        self.assertTrue(fake.did("pr", "create"))
-        tip = subprocess.run(
-            ["git", "-C", str(self.origin), "rev-parse", val.BUMP_BRANCH],
-            capture_output=True, text=True, check=True).stdout.strip()
-        self.assertNotEqual(tip, stale_sha)
-        self.assertEqual(self._branch_cmake_version(val.BUMP_BRANCH), "0.2.0")
+        self.assertEqual(status, "pr-updated", plan)
+        self._assert_repaired_in_place(fake, stale_sha)
 
-    def test_heal_replaces_an_ejected_stale_bump_pr_even_if_armed(self) -> None:
-        self._push_stale_bump_branch()
-        fake = _FakeGh(open_prs_seq=[1, 0], covers=False, armed=True,
+    def test_heal_repairs_an_ejected_stale_bump_pr_even_if_armed(self) -> None:
+        stale_sha = self._push_stale_bump_branch()
+        fake = _FakeGh(open_prs=1, covers=False, armed=True,
                        ejected=True, checks=[_check("macos", "SUCCESS")])
         val._gh = fake
         status, plan = val.apply_via_pr(self.clone, self._cfg(), heal_stale=True)
-        self.assertEqual(status, "pr-opened", plan)
-        self.assertTrue(fake.did("pr", "close"))
-        self.assertTrue(fake.did("pr", "create"))
+        self.assertEqual(status, "pr-updated", plan)
+        self._assert_repaired_in_place(fake, stale_sha)
 
-    def test_heal_replaces_an_unarmed_stale_bump_pr(self) -> None:
-        self._push_stale_bump_branch()
-        fake = _FakeGh(open_prs_seq=[1, 0], covers=False, armed=False,
+    def test_heal_repairs_a_held_stale_bump_pr(self) -> None:
+        stale_sha = self._push_stale_bump_branch()
+        fake = _FakeGh(open_prs=1, covers=False, armed=False,
                        checks=[_check("macos", None)], hold=True)
         val._gh = fake
         status, plan = val.apply_via_pr(self.clone, self._cfg(), heal_stale=True)
-        self.assertEqual(status, "pr-opened", plan)
-        self.assertTrue(fake.did("pr", "close"))
+        self.assertEqual(status, "pr-updated", plan)
+        self._assert_repaired_in_place(fake, stale_sha)
 
     def test_heal_keeps_a_healthy_stale_bump_pr(self) -> None:
         """A stale bump PR that is armed with required checks pending or green
@@ -1025,12 +1014,22 @@ class PrRouteTest(unittest.TestCase):
         self.assertFalse(fake.did("pr", "close"))
         self.assertFalse(fake.did("pr", "create"))
 
-    def test_heal_close_failure_stays_red_and_opens_nothing(self) -> None:
-        fake = _FakeGh(open_prs=1, covers=False, armed=False, close_rc=1, hold=True)
+    def test_a_repair_that_loses_its_lease_stays_red_and_changes_nothing(self) -> None:
+        """The branch moved between the read and the push: the compare-and-swap
+        refuses, the run is red so it retries, and nothing is clobbered."""
+        stale_sha = self._push_stale_bump_branch()
+        fake = _FakeGh(open_prs=1, covers=False, armed=False, hold=True)
         val._gh = fake
-        status, _ = val.apply_via_pr(self.clone, self._cfg(), heal_stale=True)
-        self.assertEqual(status, "stale-defer")
-        self.assertTrue(fake.did("pr", "close"))
+        original = val._fetch_bump_tip
+        val._fetch_bump_tip = lambda repo, remote: (
+            original(repo, remote) and "0" * 40)
+        try:
+            status, _ = val.apply_via_pr(self.clone, self._cfg(), heal_stale=True)
+        finally:
+            val._fetch_bump_tip = original
+        self.assertEqual(status, "exhausted")
+        self.assertEqual(self._tip(), stale_sha)
+        self.assertFalse(fake.did("pr", "close"))
         self.assertFalse(fake.did("pr", "create"))
 
     def _main_exit(self, status: str, report: dict[str, str]) -> tuple[int, str, str]:
@@ -1293,6 +1292,177 @@ class PrRouteTest(unittest.TestCase):
         self.assertGreater(val._semver("0.10.0"), val._semver("0.9.9"))
         self.assertGreater(val._semver("1.0.0"), val._semver("0.99.99"))
         self.assertFalse(val._semver("0.2.0") > val._semver("0.2.0"))
+
+
+class StandingBumpPrTest(unittest.TestCase):
+    """One standing bump PR: it is updated in place as merges land, never
+    recut, spaced by the coalesce window, and a no-op once it merges."""
+
+    setUp = PrRouteTest.setUp
+    tearDown = PrRouteTest.tearDown
+    _config = staticmethod(PrRouteTest._config)
+    _cfg = PrRouteTest._cfg
+    _branch_cmake_version = PrRouteTest._branch_cmake_version
+    _tip = PrRouteTest._tip
+
+    def _land(self, name: str, rel: str, subject: str, body: str = "") -> None:
+        """Land one change on origin's main, as a merged PR would."""
+        work = self.root / f"land-{name}"
+        subprocess.run(["git", "clone", "-q", str(self.origin), str(work)],
+                       check=True)
+        self._config(work)
+        target = work / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(f"// {name}\n", encoding="utf-8")
+        _git(work, "add", "--", rel)
+        _git(work, "commit", "-q", "-m", f"{subject}\n\n{body}" if body else subject)
+        _git(work, "push", "-q", "origin", "HEAD:main")
+
+    def _drain(self, fake, **kwargs):
+        val._gh = fake
+        kwargs.setdefault("fallback_base", self.pre_feat)
+        return val.apply_via_pr(self.clone, self._cfg(), **kwargs)
+
+    def _tip_time(self) -> int:
+        return int(subprocess.run(
+            ["git", "-C", str(self.origin), "log", "-1", "--format=%ct",
+             val.BUMP_BRANCH], capture_output=True, text=True,
+            encoding="utf-8", check=True).stdout.strip())
+
+    def test_one_pr_covers_several_landings_updated_in_place(self) -> None:
+        calls: list[tuple[str, ...]] = []
+
+        def drain(**fake_kwargs):
+            fake = _FakeGh(**fake_kwargs)
+            result = self._drain(fake)
+            calls.extend(fake.calls)
+            return result
+
+        status, _ = drain(open_prs=0)
+        self.assertEqual(status, "pr-opened")
+        first = self._tip()
+        self.assertEqual(self._branch_cmake_version(val.BUMP_BRANCH), "0.2.0")
+
+        # A landing that needs a version the PR lacks (the plugin surface)
+        # replaces the PR's head; the PR stays.
+        self._land("skill", ".claude-plugin/hooks.json", "fix(plugin): tweak",
+                   "Version-Bump: plugin=patch")
+        status, plan = drain(open_prs=1, covers=False)
+        self.assertEqual(status, "pr-updated", plan)
+        second = self._tip()
+        self.assertNotEqual(second, first)
+        self.assertEqual({a.surface for a in plan}, {"sdk", "plugin"})
+
+        # A landing that needs no new version keeps the head a reviewer may
+        # have approved.
+        self._land("docs", "docs/note.md", "docs: unrelated note")
+        status, _ = drain(open_prs=1, covers=False)
+        self.assertEqual(status, "stale-wait")
+        self.assertEqual(self._tip(), second)
+        self._land("feat2", "core/runtime/src/bar.cpp", "feat(core): another",
+                   "Version-Bump: sdk=minor")
+        status, _ = drain(open_prs=1, covers=False)
+        self.assertEqual(status, "stale-wait", "same versions: keep the head")
+        self.assertEqual(self._tip(), second)
+
+        # A landing that raises a level updates the same PR again.
+        self._land("major", "core/runtime/src/baz.cpp", "feat(core): breaking",
+                   "Version-Bump: sdk=major")
+        status, _ = drain(open_prs=1, covers=False)
+        self.assertEqual(status, "pr-updated")
+        self.assertNotEqual(self._tip(), second)
+        self.assertEqual(self._branch_cmake_version(val.BUMP_BRANCH), "1.0.0")
+
+        creates = [c for c in calls if c[:2] == ("pr", "create")]
+        self.assertEqual(len(creates), 1, "a second bump PR was opened")
+        self.assertFalse([c for c in calls if c[:2] == ("pr", "close")],
+                         "the standing bump PR was closed and recut")
+        self.assertEqual(len([c for c in calls if c[:2] == ("pr", "edit")]), 2)
+        self.assertFalse([c for c in calls if c[:2] == ("pr", "merge")])
+
+    def test_update_is_spaced_by_the_window_unless_a_level_rises(self) -> None:
+        self.assertEqual(self._drain(_FakeGh(open_prs=0))[0], "pr-opened")
+        built = self._tip()
+        stamp = self._tip_time()
+
+        # Repairing a dead head with identical content waits out the window.
+        dead = dict(open_prs=1, covers=False, ejected=True, armed=False)
+        fake = _FakeGh(**dead)
+        status, _ = self._drain(fake, heal_stale=True, coalesce_window=120,
+                                now=stamp + 10 * 60)
+        self.assertEqual(status, "standing-held")
+        self.assertEqual(self._tip(), built)
+        self.assertFalse(fake.did("pr", "edit"))
+
+        # A level rise inside the window updates at once.
+        self._land("major", "core/runtime/src/baz.cpp", "feat(core): breaking",
+                   "Version-Bump: sdk=major")
+        fake = _FakeGh(open_prs=1, covers=False)
+        status, _ = self._drain(fake, coalesce_window=120, now=stamp + 10 * 60)
+        self.assertEqual(status, "pr-updated")
+        self.assertNotEqual(self._tip(), built)
+        self.assertEqual(self._branch_cmake_version(val.BUMP_BRANCH), "1.0.0")
+
+        # Past the window the same repair goes through.
+        held = self._tip()
+        fake = _FakeGh(**dead)
+        status, _ = self._drain(fake, heal_stale=True, coalesce_window=120,
+                                now=self._tip_time() + 121 * 60)
+        self.assertEqual(status, "pr-updated")
+        self.assertNotEqual(self._tip(), held)
+
+    def test_a_rebuild_identical_to_the_standing_head_is_not_an_update(self) -> None:
+        """Nothing changed since the head was built (same tree, parent, message
+        and time): the force push would be a no-op, so it must not be reported
+        or edited as an update."""
+        moment = 1_800_000_000
+        self.assertEqual(self._drain(_FakeGh(open_prs=0), now=moment)[0],
+                         "pr-opened")
+        built = self._tip()
+        fake = _FakeGh(open_prs=1, covers=False, ejected=True, armed=False)
+        status, _ = self._drain(fake, heal_stale=True, coalesce_window=0,
+                                now=moment)
+        self.assertEqual(status, "stale-wait")
+        self.assertEqual(self._tip(), built)
+        self.assertFalse(fake.did("pr", "edit"))
+        # Control: a later clock reading is a different commit and does update.
+        fake = _FakeGh(open_prs=1, covers=False, ejected=True, armed=False)
+        status, _ = self._drain(fake, heal_stale=True, coalesce_window=0,
+                                now=moment + 60)
+        self.assertEqual(status, "pr-updated")
+        self.assertNotEqual(self._tip(), built)
+
+    def test_a_queued_standing_pr_is_never_pushed_to(self) -> None:
+        self.assertEqual(self._drain(_FakeGh(open_prs=0))[0], "pr-opened")
+        built = self._tip()
+        self._land("major", "core/runtime/src/baz.cpp", "feat(core): breaking",
+                   "Version-Bump: sdk=major")
+        fake = _FakeGh(open_prs=1, covers=False, in_queue=True)
+        status, _ = self._drain(fake)
+        self.assertEqual(status, "stale-wait")
+        self.assertEqual(self._tip(), built)
+        self.assertFalse(fake.did("pr", "close"))
+
+    def test_the_standing_prs_own_merge_is_a_noop(self) -> None:
+        self.assertEqual(self._drain(_FakeGh(open_prs=0))[0], "pr-opened")
+        self._land("skill", ".claude-plugin/hooks.json", "fix(plugin): tweak",
+                   "Version-Bump: plugin=patch")
+        self.assertEqual(self._drain(_FakeGh(open_prs=1, covers=False))[0],
+                         "pr-updated")
+        # The merge queue lands the updated PR as a merge commit.
+        land = self.root / "land-merge"
+        subprocess.run(["git", "clone", "-q", str(self.origin), str(land)],
+                       check=True)
+        self._config(land)
+        _git(land, "fetch", "-q", "origin", val.BUMP_BRANCH)
+        _git(land, "merge", "-q", "--no-ff", "FETCH_HEAD",
+             "-m", "Merge pull request from release/version-bump")
+        _git(land, "push", "-q", "origin", "HEAD:main")
+        _git(self.clone, "push", "-q", "origin", f":{val.BUMP_BRANCH}")
+        fake = _FakeGh(open_prs=0)
+        status, plan = self._drain(fake)
+        self.assertEqual(status, "noop", plan)
+        self.assertFalse(fake.did("pr", "create"))
 
 
 class CoalesceDecisionTest(unittest.TestCase):

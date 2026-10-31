@@ -5320,23 +5320,32 @@ bisectable.
       shared-branch reclaim is only race-free without a competing drain). Plan +
       rollout + validation evidence: `planning/2026-07-20-merge-queue-reenable-plan.md`.
       This is the path back to the merge queue we moved to an org for.
-    - Stale bump PR: one cut BEFORE the merge being drained does not carry
-      that merge's intent, but it is safe to WAIT for while it can still land:
-      its landing re-runs the drain, which assesses every first-parent merge
-      after the bump's cut point (the marker commit's parent), skipping only
-      the bump's own merge. Starting after that integration merge instead
-      silently drops every merge that landed while the bump PR was open. A
-      queued stale PR, or one armed with required checks pending or green, is
-      `stale-wait` (exit 0 plus a `::notice::`), not a red run.
-      `PULP_BUMP_HEAL_STALE_PR=true` (`--heal-stale-pr`) closes a
-      CONFIRMED-stale DEAD END only: ejected from the merge queue, unarmed, or a
-      required check failed (newest run per name). Closing a healthy one just
-      restarts its 8-36 min of checks so the replacement goes stale too. Drafts
-      and unreadable state fail closed (`stale-defer`, exit 1). `dequeued` and
-      non-green `workflow_run` events on `release/version-bump` re-run the
-      drain so a dead end heals when it dies, not on the next main push.
-      When grepping run logs for waits, match `was cut BEFORE this merge`:
-      the literal `stale-defer` also appears in a branch name in fetch output.
+    - One standing bump PR, updated in place: `release/version-bump` carries at
+      most one open PR and it is never closed and recut. The bump is
+      cumulative from the last marker, so a drain that finds the PR cut before
+      the merge it is draining rebuilds the bump on current main and replaces
+      the branch head with one `--force-with-lease` push, then edits the PR
+      body (`pr-updated`). It leaves the head alone (`stale-wait`, exit 0 plus
+      a `::notice::`) when the PR is in the merge queue, when its head already
+      is the bump it would build (same files, content and sync trailers, so an
+      approved head survives landings that need no version), or when the branch
+      cannot be read. Updates are spaced by `PULP_BUMP_COALESCE_MINUTES`
+      (`standing-held`, exit 0) unless a surface now needs a higher version
+      than the head carries; the `*/15` drain acts on the window ending. The
+      landing of a stale head re-runs the drain, which assesses every
+      first-parent merge after the bump's cut point (the marker commit's
+      parent) and skips only the bump's own merge. Starting after that merge
+      instead silently drops every merge that landed while the bump PR was open.
+      `PULP_BUMP_HEAL_STALE_PR=true` (`--heal-stale-pr`) repairs a DEAD standing
+      PR in place (ejected from the merge queue, a required check failed, or a
+      HOLD at its head) by replacing its head, which clears the verdict and
+      reruns checks; it never closes or reopens the PR and obeys the window.
+      Drafts and unreadable state fail closed (`stale-defer`, exit 1).
+      `dequeued` and non-green `workflow_run` events on `release/version-bump`
+      re-run the drain so a dead end is repaired when it dies, not on the next
+      main push. When grepping run logs for waits, match `was cut BEFORE this
+      merge`: the literal `stale-defer` also appears in a branch name in fetch
+      output.
   - **A green `coalesced` drain is a deliberate hold, not a lost bump.** With
       no bump PR open, the drain holds a new one while other PRs wait in the
       merge queue and the last bump landed under `PULP_BUMP_COALESCE_MINUTES`
@@ -13035,6 +13044,7 @@ These changes preserve the required Vellum lanes on their existing runners.
   steward is the only admission writer: it enqueues an approved, green head
   itself, and its stale-arm sweep disarms any arm made by the bump job. An
   unarmed, unreviewed bump PR is therefore live. With
-  `PULP_BUMP_HEAL_STALE_PR` on, heal closes a stale bump PR only when it was
-  ejected from the queue, a required check failed, or the last line of a PR
-  comment is `verdict: HOLD head:<sha>` for the current head.
+  `PULP_BUMP_HEAL_STALE_PR` on, heal repairs the standing bump PR in place
+  (a new head, never a close) only when it was ejected from the queue, a
+  required check failed, or the last line of a PR comment is
+  `verdict: HOLD head:<sha>` for the current head.
