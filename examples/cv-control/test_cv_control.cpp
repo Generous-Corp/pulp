@@ -12,6 +12,9 @@ using pulp::examples::cv_control::ControlSample;
 using pulp::examples::cv_control::decode_midi_control;
 using pulp::examples::cv_control::FaceFrame;
 using pulp::examples::cv_control::FaceMapping;
+using pulp::examples::cv_control::HandFrame;
+using pulp::examples::cv_control::HandMapping;
+using pulp::examples::cv_control::HandReplay;
 
 struct ProcessorFixture {
     pulp::state::StateStore store;
@@ -163,4 +166,38 @@ TEST_CASE("camera-free replay feeds the same mapping") {
     REQUIRE(replay.position() == 2);
     replay.reset();
     REQUIRE(replay.position() == 0);
+}
+
+TEST_CASE("coherent multi-signal frames preserve one inference sequence") {
+    HandMapping mapping(0.6f, 1.0f);
+    mapping.submit({17, 0.2f, 0.4f, 0.8f, 0.9f, true});
+    REQUIRE(mapping.x().sequence() == 17);
+    REQUIRE(mapping.y().sequence() == 17);
+    REQUIRE(mapping.pinch().sequence() == 17);
+    REQUIRE(mapping.x().valid());
+    REQUIRE(mapping.y().valid());
+    REQUIRE(mapping.pinch().valid());
+    REQUIRE_THAT(mapping.x().value(), Catch::Matchers::WithinAbs(0.2f, 1e-6f));
+    REQUIRE_THAT(mapping.y().value(), Catch::Matchers::WithinAbs(0.4f, 1e-6f));
+    REQUIRE_THAT(mapping.pinch().value(), Catch::Matchers::WithinAbs(0.8f, 1e-6f));
+}
+
+TEST_CASE("coherent multi-signal replay expires all related controls together") {
+    const HandFrame frames[] = {{4, 0.1f, 0.2f, 0.3f, 1.0f, true},
+                                {5, 0.7f, 0.8f, 0.9f, 1.0f, true}};
+    HandReplay replay(frames);
+    HandMapping mapping(0.6f, 1.0f);
+    REQUIRE(replay.next(mapping));
+    REQUIRE(replay.next(mapping));
+    REQUIRE_FALSE(replay.next(mapping));
+    REQUIRE(mapping.x().sequence() == 5);
+    REQUIRE(mapping.y().sequence() == 5);
+    REQUIRE(mapping.pinch().sequence() == 5);
+    mapping.advance(12000, 12000);
+    REQUIRE_FALSE(mapping.x().valid());
+    REQUIRE_FALSE(mapping.y().valid());
+    REQUIRE_FALSE(mapping.pinch().valid());
+    REQUIRE(mapping.x().value() == 0.0f);
+    REQUIRE(mapping.y().value() == 0.0f);
+    REQUIRE(mapping.pinch().value() == 0.0f);
 }
