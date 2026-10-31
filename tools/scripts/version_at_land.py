@@ -218,10 +218,11 @@ def plan_assignments(config: Config, changed: list[str], base: str, head: str,
 
 # ── Git helpers ────────────────────────────────────────────────────────────
 
-def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
+def _git(repo: Path, *args: str, check: bool = True,
+         env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["git", "-C", str(repo), *args],
-        check=check, capture_output=True, text=True, encoding="utf-8",
+        check=check, capture_output=True, text=True, encoding="utf-8", env=env,
     )
 
 
@@ -1196,7 +1197,10 @@ def _update_standing_pr(
     _validate_writer_paths(config, edited, repo)
     message = _bump_message(plan, base, head, edited)
     _git(repo, "add", "--", *dict.fromkeys(edited))
-    _git(repo, "commit", "--no-verify", "-m", message)
+    commit_env = os.environ.copy()
+    commit_date = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
+    commit_env.update(GIT_AUTHOR_DATE=commit_date, GIT_COMMITTER_DATE=commit_date)
+    _git(repo, "commit", "--no-verify", "-m", message, env=commit_env)
 
     current = _standing_bump_is_current(repo, tip, head, edited, message)
     if current and state == "progressing":
