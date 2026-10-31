@@ -30,6 +30,7 @@
 #include <pluginterfaces/base/ustring.h>
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <span>
 #include <cstdio>
@@ -42,6 +43,42 @@ using namespace Steinberg;
 using namespace Steinberg::Vst;
 
 namespace {
+
+// Opt-in diagnostics for a host that stalls while instantiating a VST3. The
+// existing process-wide tracing session is the switch and sink, so the default
+// path does no getenv, clock, or logging work of its own.
+class StartupTraceScope {
+  public:
+    explicit StartupTraceScope(const char* operation)
+        : operation_(operation), enabled_(runtime::Tracing::active()) {
+        if (enabled_) {
+            start_ = std::chrono::steady_clock::now();
+            mark("begin");
+        }
+    }
+
+    void mark(const char* stage) const {
+        if constexpr (runtime::kTracingEnabled) {
+            if (!enabled_)
+                return;
+            const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+                                     std::chrono::steady_clock::now() - start_)
+                                     .count();
+            PULP_TRACE_INSTANT_ARGS("lifecycle", "vst3_startup_stage", "operation", operation_,
+                                    "stage", stage, "elapsed_us", elapsed);
+        }
+    }
+
+    ~StartupTraceScope() {
+        if (enabled_)
+            mark("end");
+    }
+
+  private:
+    const char* operation_;
+    std::chrono::steady_clock::time_point start_;
+    bool enabled_ = false;
+};
 
 // Per-note expression types Pulp's VST3 adapter declares to the host when the
 // plug-in opts into MPE. The mapping VST3 type -> MPE dimension is a independent
@@ -673,7 +710,10 @@ void PulpVst3Processor::note_id_map_clear() {
 
 tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
     PULP_TRACE_SCOPE_NAMED("lifecycle", "vst3_initialize");
+    StartupTraceScope trace{"initialize"};
+    trace.mark("before_base_initialize");
     auto result = SingleComponentEffect::initialize(context);
+    trace.mark("after_base_initialize");
     if (result != kResultOk) return result;
 
     // An ARA-aware VST3 host (Cubase, Studio One) queries
@@ -698,7 +738,9 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
     owner_alive_.reset();
 
     // Create the Pulp processor
+    trace.mark("before_factory");
     processor_ = factory_();
+    trace.mark("after_factory");
     if (!processor_) return kInternalError;
     sample_accurate_params_ = processor_->wants_sample_accurate_parameters();
     param_events_monitor_.arm(!sample_accurate_params_, &param_events_);
@@ -713,9 +755,12 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
     }
 
     auto desc = processor_->descriptor();
+    trace.mark("after_descriptor");
     processor_->set_state_store(&store_);
     processor_->define_parameters(store_);
+    trace.mark("after_define_parameters");
     request_editor_prewarm(*processor_);
+    trace.mark("after_editor_prewarm");
 
     // Wire the MPE sidecar when the plug-in opts in. configure() binds the
     // tracker's callbacks once here on the host thread (never on the audio
@@ -1006,6 +1051,8 @@ tresult PLUGIN_API PulpVst3Processor::terminate() {
 
 IPlugView* PLUGIN_API PulpVst3Processor::createView(FIDString name) {
     PULP_TRACE_SCOPE_NAMED("lifecycle", "vst3_create_view");
+    StartupTraceScope trace{"createView"};
+    trace.mark("entry");
     // VST3 hosts call createView("editor") to get the plugin's GUI
     if (name && strcmp(name, ViewType::kEditor) == 0) {
 #ifdef PULP_VST3_GUI
@@ -1014,6 +1061,7 @@ IPlugView* PLUGIN_API PulpVst3Processor::createView(FIDString name) {
             return nullptr;
         }
         if (processor_ && processor_->has_editor()) {
+            trace.mark("before_make_plug_view");
             return make_plug_view(
                 *processor_, store_, owner_alive_.capture());
         }
@@ -1193,6 +1241,8 @@ tresult PLUGIN_API PulpVst3Processor::canProcessSampleSize(int32 symbolicSampleS
 
 tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
     PULP_TRACE_SCOPE_NAMED("lifecycle", "vst3_setup_processing");
+    StartupTraceScope trace{"setupProcessing"};
+    trace.mark("entry");
     if (!processor_) return kInternalError;
     refresh_bus_channel_cache();
 
@@ -1273,8 +1323,11 @@ tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
         ctx.output_channels = out_ch;
     }
 
+    trace.mark("before_prepare");
     processor_->prepare(ctx);
+    trace.mark("after_prepare");
     processor_->prepare_f64_fallback_scratch(ctx, prepared_layout);
+    trace.mark("after_f64_scratch");
     prepared_context_ = ctx;
     prepared_layout_ = prepared_layout;
     has_prepared_context_ = true;
@@ -1527,13 +1580,17 @@ void PulpVst3Processor::schedule_restart_poll_tick() {
 
 tresult PLUGIN_API PulpVst3Processor::setActive(TBool state) {
     PULP_TRACE_SCOPE_NAMED("lifecycle", "vst3_set_active");
+    StartupTraceScope trace{"setActive"};
+    trace.mark(state ? "before_prepare" : "deactivate_entry");
     if (!state && processor_)
         param_events_monitor_.report(*processor_);
     if (state)
         refresh_bus_channel_cache();
     if (state && processor_ && has_prepared_context_) {
         processor_->prepare(prepared_context_);
+        trace.mark("after_prepare");
         processor_->prepare_f64_fallback_scratch(prepared_context_, prepared_layout_);
+        trace.mark("after_f64_scratch");
     }
     if (!state && processor_) {
         processor_->release();

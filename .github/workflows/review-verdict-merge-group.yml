@@ -1,0 +1,21 @@
+# Reports the `review-verdict` check for a merge-queue entry. Admission into
+# the queue already required the exact-head verdict, and the queue entry is a
+# synthetic merge commit that no review can name, so this run succeeds without
+# reading any verdict. It is a separate workflow so a pull request's own
+# `review-verdict` check is never shadowed by a skipped job of the same name.
+# It checks out and runs no repository code.
+name: Review verdict (merge queue)
+
+on:
+  merge_group:
+
+permissions: {}
+
+jobs:
+  review-verdict:
+    name: review-verdict
+    runs-on: ubuntu-24.04
+    timeout-minutes: 1
+    steps:
+      - name: Pass for the merge-queue entry
+        run: 'echo "review-verdict was required at queue admission for each pull request in this group"'

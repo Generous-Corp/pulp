@@ -736,7 +736,64 @@ the golden.
 | Profile | `/etc/pulp/windows-runner-1.env`: `PULP_WINDOWS_VMID=300`, `PULP_WINDOWS_GOLDEN_SNAPSHOT=<name>` |
 | VM | VMID 300, 4 cores, 9216 MB, Windows Server 2022 evaluation, LAN DHCP |
 | Labels | `["self-hosted","Windows","X64","pulp-build-windows-x64","pulp-host-macpro"]` |
-| Routing | `PULP_LOCAL_WINDOWS_X64_RUNS_ON_JSON`, dispatch only; distinct from the ARM64 QEMU `PULP_LOCAL_WINDOWS_*` lanes |
+| Routing | `tools/scripts/windows_runner_selector.py --route`; `PULP_LOCAL_WINDOWS_X64_RUNS_ON_JSON` overrides the default selector. Distinct from the ARM64 QEMU `PULP_LOCAL_WINDOWS_*` lanes |
+
+#### What runs on it
+
+Windows x64 jobs default to this lane, and GitHub-hosted Windows runs only when it
+is opted into. No pull request reaches the lane. The selector checks for a fork
+first, before any selector or variable, and a pull request whose head repository
+is missing counts as a fork. The two pull-request-triggered jobs below
+(`control-shipping-native` and coverage) never send a pull request to the lane
+either: without the opt-in they leave Windows x64 out.
+Each routed workflow resolves its runner with `windows_runner_selector.py
+--route`, which emits `runs_on`, `route` (`self-hosted`, `hosted` or `skip`) and
+`route_reason`:
+
+| Workflow | Job | Lane by default on | Hosted when |
+|---|---|---|---|
+| `cross-platform-check.yml` | Windows build + test | the nightly, a dispatch | opted in |
+| `software-gpu-proof.yml` | Windows WARP proof | the nightly, a dispatch | opted in |
+| `control-shipping-native.yml` | `windows-x64` leg | the nightly, a dispatch | opted in (the only way a pull request runs it; otherwise deferred) |
+| `coverage.yml` | Coverage report (Windows, Clang) | a schedule while the lane is idle, a dispatch | opted in (the only way a pull request runs it) |
+| `android.yml` | `windows-x64` row | the nightly, a dispatch | opted in (which also adds it to a push) |
+| `freshness-check.yml` | Build validation, `windows-x64` | a tier-2 dispatch | opted in |
+| `build.yml` | `Windows (x64)` | a dispatch | opted in (`windows-2022`) |
+
+The default selector is `["self-hosted","Windows","X64","pulp-build-windows-x64"]`.
+It leaves out `pulp-host-macpro`, so a second Windows x64 host carrying the same
+capability label would serve the same jobs.
+
+The lane is one VM that runs one job at a time, and nothing on it is a required
+check (`tools/scripts/test_windows_x64_routing.py` pins both). So a scheduled
+coverage leg is bounded with `--max-backlog 1`: while another Windows x64 job is
+queued or running, it is left out instead of queued. A pull request's
+`control-shipping-native` `windows-x64` leg, left out unless hosted is opted
+into, is named in the consolidated evidence (`deferred_legs`,
+`complete: false`). A dispatch always queues. The backlog probe
+counts jobs carrying `pulp-build-windows-x64` in other queued and in-progress
+runs; when it cannot read them it counts zero and the job queues.
+
+Three switches choose hosted:
+
+- `-f allow_hosted_windows=true` on a `build.yml` dispatch;
+- `PULP_ALLOW_HOSTED_WINDOWS=1`, which also lets a push run `build.yml`'s and
+  `android.yml`'s Windows legs;
+- `PULP_LOCAL_WINDOWS_X64_RUNS_ON_JSON` set to a hosted label such as
+  `'"windows-latest"'`, which turns the lane off: each routed job goes back to
+  its own hosted image and nothing else changes. Use this one to take the lane
+  out of service.
+
+Some jobs stay hosted on purpose. `windows-cli-compile.yml` mirrors the release
+build on `windows-latest`, and its push verdict feeds `auto-release.yml`'s
+pre-tag check. The three `build.yml` compile gates (MSVC release-path, MIDI
+Services, BLE) track `windows-latest`'s moving toolchain, and they are already
+opt-in. `release-cli.yml` builds the release itself. The `windows-arm64` legs
+have no self-hosted x64 equivalent.
+
+The golden must carry every shell a routed job uses. `shell: pwsh` steps need
+PowerShell 7 (`pwsh`), not only Windows PowerShell; without it those jobs fail at
+their first `pwsh` step.
 
 Each invocation:
 
@@ -983,18 +1040,20 @@ ghapp workflow run build.yml --ref <branch>
 ```
 
 A `build.yml` dispatch always includes the macOS leg, so it also takes a macOS gate
-VM. To run only the full Windows suite, dispatch the nightly instead. Its Windows
-job takes an optional runner selector, which is how the Mac Pro Windows x64 slot is
-proven without touching the gate hosts:
+VM; its Windows leg runs on the self-hosted Windows x64 lane. To run only the full
+Windows suite, dispatch the nightly instead. Its Windows job takes the lane by
+default and an optional runner selector, which pins a specific runner without
+touching the gate hosts:
 
 ```sh
 ghapp workflow run cross-platform-check.yml --ref <branch> -f windows_only=true \
   -f windows_runner_selector_json='["self-hosted","Windows","X64","pulp-build-windows-x64","pulp-host-macpro"]'
 ```
 
-The schedule passes no inputs, so the nightly stays on `windows-latest`. A run with
-either input set never opens or closes the per-platform tracking issues, because
-it did not measure the nightly's configuration.
+The schedule passes no inputs, so the nightly runs on the self-hosted Windows x64
+lane, or on `windows-latest` when hosted is opted into (see "What runs on it"). A
+run with either input set never opens or closes the per-platform tracking issues,
+because it did not measure the nightly's configuration.
 
 A small `Resolve Windows runner` job checks the selector before any runner is
 chosen. It runs `tools/scripts/windows_runner_selector.py`, which refuses anything
@@ -3352,7 +3411,10 @@ runs only its configure-only contract lane. Both look
 identical in the checks list.
 
 A reused receipt produces a three-step job (`Set up job`, the bootstrap step,
-`Complete job`) reporting success. Reading one of those as evidence that the
+`Complete job`) reporting success. A `pr_number` dispatch adds the
+`Tested refs/pull/<n>/merge at <sha> onto <base>` step after the bootstrap
+step, so a skip-safe head's tier record can bind its approval to the merge
+commit; it runs no test. Reading one of those as evidence that the
 suite passed has already sent an investigation in the wrong direction for
 hours.
 
@@ -4019,6 +4081,97 @@ A head that is already armed when the full lane reaches `Decide pull-request
 test suite` (and still merges onto the tip of `main`) also runs the full suite
 there and issues an exact-tree receipt, as before (see "Only a ready-to-land PR
 head issues a receipt" in the CI skill).
+
+### The tier record the arm guard reads
+
+Shipyard's queue-arm-guard does not read `shipyard-test-tier` annotations, since
+any step, including the code under test, can print one. It reads a *tier
+record* instead (Shipyard `docs/ghapp-guards.md`, "A tiered required check must
+prove its full lane"). That record is a check run named
+`shipyard-test-tier/macos` on the head, whose summary is
+`{"schema":"shipyard-test-tier/v1","check":"macos","tier":...,"run_id":...,"run_attempt":...,"trigger":...,"actor":...,"selector":...,"tested_ref":...,"tested_sha":...,"merged_base":...,"full_lane_workflow":"build.yml","full_suite_runs_in":"merge_group"}`.
+`tested_ref`, `tested_sha` and `merged_base` bind it to the merge commit the
+full lane tested (null when the run tested none).
+`trigger` and `actor` name the event and account that started the run; the
+guard reports them but does not trust them. `full_lane_workflow` is what its
+fix line says to dispatch. The record carries no label.
+The guard counts only records created by the App named in `[queue]
+tier_record_app`, never `github-actions`: any job holding `checks: write`
+could rewrite those. It refuses a head with no counted record bound to its
+`macos` job's run and attempt, or with a `deferred` one.
+
+`.github/workflows/macos-tier-record.yml` publishes the record:
+
+- **Trigger:** `workflow_run` when a Build and Test run completes. It runs from
+  main, with no checkout, for same-repository `pull_request` and
+  `workflow_dispatch` runs only.
+- **The tiered job's own token:** the guard also reads the `macos` job's
+  `GITHUB_TOKEN Permissions` log group and refuses if `Checks` is `write`.
+  `build.yml` grants `checks: read` explicitly, which satisfies that.
+- **Token:** its own `GITHUB_TOKEN` only reads. The record is created with a
+  token for a dedicated App, minted in the job from `TIER_RECORD_APP_ID` and
+  `TIER_RECORD_APP_KEY`. Those are secrets of the `tier-record` GitHub
+  Environment, whose deployment-branch policy allows `main` only. A
+  workflow_run job runs on the default branch and qualifies. A job on a pull
+  request branch is refused them, as repository secrets would not be. Only
+  this job references the environment or those secrets; a test checks that.
+  With the secrets absent the job fails visibly and publishes nothing.
+- **Tier:** the more conservative of two signals, since neither proves enough
+  alone. A pull request's own build.yml decides its step names, so steps alone
+  cannot grant a full tier, and who started the run does not show the suite
+  ran.
+  1. **The run.** It must be a `workflow_dispatch` whose triggering actor is
+     the fleet App (`shipyard-local[bot]`). The App moves an approved head to
+     the full lane that way, since label events no longer start Build and
+     Test runs. The App's latest verdict on the head, at or before the run's
+     `created_at`, must be a trusted `verdict: APPROVE head:<sha>` with a
+     `reviewer:` line. The run must also be a `pr_number` dispatch of that
+     pull request, which tests its merge commit (see "The full-lane dispatch
+     tests the merge ref"). Its `macos` job carries one succeeded step named
+     `Tested refs/pull/<n>/merge at <sha> onto <base>`, and that commit has
+     exactly the parents `[<base>, <head>]` on GitHub. Otherwise the tier is
+     `deferred`: a `pull_request` run, a dispatch or rerun by anyone else, a
+     plain dispatch, a missing or non-APPROVE verdict, or a head without
+     exactly one same-repository pull request.
+  2. **Steps.** The conclusions the runner recorded for that attempt's
+     `macos` job:
+
+     | `macos` job | Tier |
+     |---|---|
+     | `Build` ran, `Test (non-Windows)` ran | `full` |
+     | `Build` ran | `fast` (full lane) |
+     | `Build` skipped (the contract lane) | `deferred` |
+     | bootstrap step succeeded (skip-safe) | `not-required` |
+     | bootstrap step failed closed | `deferred` |
+
+A run with no `macos` job, two of them, a job for another head, neither
+step, or an unreadable listing publishes no record, and the guard refuses
+that head. So do fork heads, which land through an in-repository branch.
+
+Because the run signal applies to every head, only the fleet App's dispatch
+of an approved head can be anything but `deferred`. Every `pull_request` run
+is `deferred`, even on the full lane and even when `PULP_MACOS_PR_GATING` is
+off. The rule has no exemptions, since one would reopen the forgery surface.
+Turn on `tiered_required_checks` only after the App exists and the arm sweep
+dispatches `build.yml` for every approved head, skip-safe and release ones
+included, with gating on. That key and `[queue] tier_record_app` are the
+last change, and neither is set yet.
+
+**Trust boundary.** A same-repository pull request runs its own build.yml, so
+it can rename steps, or add a step that grants itself `checks: write`. The
+tests that pin step names and checks writers are in the same pull request and
+can be edited too, so they stop only an honest mistake. That is the trust
+level of every required context here (see "Required checks trust the pull
+request's own workflow YAML"). Three things stand behind it:
+- the run signal (event, triggering actor and the App's verdict), which no
+  pull request controls;
+- the guard counting only the dedicated App's records;
+- the merge group's full macOS suite.
+
+The repository's default workflow token permission is `read`. That covers
+only jobs that declare no permissions; a pull request can still declare
+`checks: write` explicitly. That is harmless here, because the guard counts
+only the dedicated App's records, which no pull request job can rewrite.
 
 ### Why the contract lane's `macos` check is green
 
@@ -6410,20 +6563,21 @@ gh workflow run build.yml --ref <trusted-branch> \
 This switch affects only `workflow_dispatch`; automatic events keep their
 documented matrix policy.
 
-GitHub-hosted Windows is opt-in. A `build.yml` dispatch or a push to `main`
-schedules no hosted Windows job (the `Windows (x64)` leg and the three
-`windows-latest` compile gates) unless one of these is set:
+GitHub-hosted Windows is opt-in. A push to `main` schedules no Windows job, and a
+`build.yml` dispatch runs its `Windows (x64)` leg on the self-hosted Windows x64
+lane, not a hosted image. The leg and the three `windows-latest` compile gates
+run hosted only when one of these is set:
 
 - `-f allow_hosted_windows=true` on the dispatch;
-- `-f windows_runner_selector_json=...` naming a self-hosted runner (a list
-  with `"self-hosted"`), which runs the leg there, not on a hosted image;
 - the repository variable `PULP_ALLOW_HOSTED_WINDOWS=1`, which also lets a push
   run it.
 
+`-f windows_runner_selector_json=...` pins the leg to a named runner instead.
+
 `resolve-provider` prints `resolve-provider: Windows leg omitted: GitHub-hosted
 Windows is opt-in ...` when it leaves the leg out, and the advisory `windows`
-alias then passes with that line. `android.yml` leaves its `windows-latest`
-row out on every event but the nightly schedule unless
+alias then passes with that line. `android.yml` runs its `windows-x64` row on the
+self-hosted lane on the nightly and a dispatch, and leaves it out of a push unless
 `PULP_ALLOW_HOSTED_WINDOWS=1`; no required context reads it. `windows-cli-compile.yml` is the one
 listed exception: its push verdict on `main` is the release backstop
 `auto-release.yml`'s pre-tag check reads. Schedules and pull requests keep

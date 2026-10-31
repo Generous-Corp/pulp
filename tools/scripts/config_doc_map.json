@@ -30,6 +30,7 @@
     ".github/workflows/build.yml",
     ".github/workflows/build-macos.yml",
     ".github/workflows/macos-ci-label-reset.yml",
+    ".github/workflows/macos-tier-record.yml",
     ".github/workflows/macos-ci-deferred-disarm.yml",
     ".github/workflows/macos-ci-arm-refusal.yml",
     "tools/ci/macos_pr_lane.py"

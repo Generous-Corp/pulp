@@ -7,6 +7,9 @@ the browser WAM. Brightness remains the saved and automatable base value.
 - `cv_control.hpp` is the application-owned sample, smoothing, confidence,
   and loss policy. An IMU, proximity sensor, or CV provider can reduce its
   result to the same normalized sample. The audio thread owns this mapping.
+  The `HandFrame`/`HandMapping` test fixture shows how several related values
+  from one inference (position and pinch) stay coherent without introducing a
+  universal landmark schema.
 - `main.cpp` is a native standalone host. It starts a held demo note so
   modulation is audible without a MIDI keyboard. Set `PULP_CV_OSC_PORT=9001` and send
   `/pulp/cv/face` with `mouth_open`, `confidence`, `tracked`, and optional
@@ -65,3 +68,14 @@ send the example's short MIDI packet. They may use Web Bluetooth, WebHID, Web
 Serial, DeviceMotion, or camera APIs when the origin and permission policy allows
 it; desktop adapters can use native SDKs or an external process. No universal
 hardware layer is introduced.
+
+The test fixture also includes an application-owned `ImuFrame`, `ImuMapping`,
+and `ImuReplay`. It demonstrates that roll, pitch, and yaw from one sensor
+update share a sequence and expire together. These fields are example-owned and
+do not define a Pulp orientation schema; a production adapter can choose its
+own frame and publish it through the same existing handoff.
+
+`ModelFrame`, `ModelMapping`, and `ModelReplay` provide the same camera-free
+fixture for a custom model with two related outputs. The model provider owns
+the tensor, runtime, and licensing; it publishes only the application-owned
+outputs needed by the mapping.
