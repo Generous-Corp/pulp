@@ -1,0 +1,10 @@
+{
+  "_comment": "The SSH key that signs the release bot's generated commits (version-bump PRs) and release tags. Its private half is the RELEASE_BOT_SSH_SIGNING_KEY Actions secret (configured by tools/scripts/configure_release_bot_ssh_signing.sh); the public half is registered as a signing key on the danielraffel GitHub account (signing-key id below; the verifier checks the fingerprint). generated_version_bump_check.py reads this file from the PROTECTED BASE only, never from the candidate, and lets a commit skip the native build matrix only when the key embedded in its GitHub-verified SSH signature has one of these fingerprints. Rotating the secret means replacing the key here on main first; a retired key is removed, not kept. See docs/guides/release-pipeline.md, 'Release bot signing'.",
+  "ssh_signing_keys": [
+    {
+      "public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPH6qFGdliWztkn4TOzhaPTqzHr+YrGXHBHrxp7hXz+m pulp-release-bot signing (Actions)",
+      "fingerprint": "SHA256:1GDNVIagepWIT4dRynSurMyxNMEK3EqmYlkglH7S8g8",
+      "github_signing_key_id": 1289902
+    }
+  ]
+}

