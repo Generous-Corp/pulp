@@ -4314,6 +4314,19 @@ only `pulp-build-merge-group`. GitHub treats labels as an all-of set, so a job
 requesting both classes is unschedulable by the event-class-v2 fleet, whose
 ephemeral runners advertise one class at a time.
 
+If a merge-group run is manually removed while recovering this routing defect,
+re-admission must use a new reviewed head. Shipyard intentionally refuses to
+re-arm an unchanged head after a guarded manual removal, because doing so could
+re-enqueue a known-bad batch state. Make the smallest relevant follow-up
+correction, push it, obtain a fresh exact-head review, and then re-run the normal
+arm path. Do not bypass the queue-arm guard or use an empty commit. If the VM
+reaches the guest but its hydration SSH process remains stuck before `Connected
+to GitHub`, terminate only that recorded process and let TartCI discard the VM;
+then wait for GitHub to finish cancelling the ghost run before re-admitting the
+new head. A merge-group run that reaches the runner and then exits because
+hydration was terminated is a failed-check batch, so it also requires a new
+reviewed head before admission; do not force-arm the unchanged head.
+
 ### The failure this prevents
 
 GitHub does not validate `runs-on`. **A job that asks for a label no runner
