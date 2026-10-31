@@ -1196,12 +1196,72 @@ TEST_CASE("SwiftUI binds only the controls the native and C++ lanes bind",
     CHECK_FALSE(contains(out.view, "⚠︎ unbound"));
 }
 
+TEST_CASE("SwiftUI binds a keyed control with no display label by its key",
+          "[view][import][swiftui][binding-rule]") {
+    // A captured fader often carries no label and no name, only its key and
+    // route: kelvin's drive. Every other lane binds it; SwiftUI resolves by
+    // the key as a last resort rather than leaving it unbound.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root = frame_node("root", "Panel", 200.0f, 200.0f, LayoutDirection::column);
+    auto fader = frame_node("", "", 24.0f, 120.0f, LayoutDirection::column);
+    fader.audio_widget = AudioWidgetType::fader;
+    fader.attributes["pulpParamKey"] = "drive";
+    fader.attributes["pulpRouteId"] = "capture:drive:36";
+    fader.stable_anchor_id = "capture:drive:36";
+    ir.root.children.push_back(std::move(fader));
+
+    const auto result = generate_pulp_swift(ir, ir.asset_manifest);
+    INFO(result.view_source);
+    INFO(result.binding_manifest);
+    CHECK(contains(result.view_source, "switch resolver.resolveParameter(named: \"drive\")"));
+    CHECK(contains(result.view_source, "PulpSlider(parameter: p)"));
+    CHECK(contains(result.binding_manifest, "\"resolve_name\": \"drive\""));
+    // A label still wins over the key when there is one.
+    auto labelled = ir;
+    labelled.root.children[0].audio_label = "Drive";
+    CHECK(contains(generate_pulp_swift(labelled, labelled.asset_manifest).view_source,
+                   "resolveParameter(named: \"Drive\")"));
+    require_generated_swift_compiles(ir, "unlabelled-keyed-fader");
+}
+
+TEST_CASE("SwiftUI binds a key-only meter with no display label by its value key",
+          "[view][import][swiftui][binding-rule]") {
+    // Kelvin's output meter as captured: a route and pulpMeterValueKey, with no
+    // label, name, source or channel. Native, baked C++ and ui.js bind it by the
+    // key; SwiftUI resolves the same key rather than leaving it unbound.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root = frame_node("root", "Panel", 200.0f, 200.0f, LayoutDirection::column);
+    auto meter = frame_node("", "", 16.0f, 120.0f, LayoutDirection::column);
+    meter.audio_widget = AudioWidgetType::meter;
+    meter.attributes["pulpMeterValueKey"] = "out";
+    meter.attributes["pulpRouteId"] = "capture:out:38";
+    meter.stable_anchor_id = "capture:out:38";
+    ir.root.children.push_back(std::move(meter));
+
+    const auto result = generate_pulp_swift(ir, ir.asset_manifest);
+    INFO(result.view_source);
+    INFO(result.binding_manifest);
+    CHECK(contains(result.view_source, "switch resolver.resolveParameter(named: \"out\")"));
+    CHECK(contains(result.view_source, "PulpMeter(parameter: p)"));
+    CHECK(contains(result.binding_manifest, "\"resolve_name\": \"out\""));
+    CHECK(contains(result.binding_manifest, "\"meter_value_key\": \"out\""));
+    // Without the route it stays unbound, as in every other lane.
+    auto unrouted = ir;
+    unrouted.root.children[0].attributes.erase("pulpRouteId");
+    const auto inert = generate_pulp_swift(unrouted, unrouted.asset_manifest);
+    CHECK_FALSE(contains(inert.view_source, "resolveParameter(named: \"out\")"));
+    CHECK_FALSE(contains(inert.binding_manifest, "\"resolve_name\": \""));
+    require_generated_swift_compiles(ir, "unlabelled-key-only-meter");
+}
+
 TEST_CASE("SwiftUI reports a refused binding with the native binder's diagnostic",
           "[view][import][swiftui][binding-rule]") {
     const auto ir = build_binding_rule_fixture();
     const auto out = generate_with_fidelity(ir);
     const auto swift = swift_binding_codes(out.issues);
-    // The meter's metadata cannot drive a meter; the unrouted knob has no route.
+    // The pad's metadata cannot drive an XY pad; the unrouted knob has no route.
     CHECK(swift ==
           std::vector<std::string>{"native-binding-missing-route", "native-binding-not-applied"});
     // And they are the native binder's own answers for the same IR, at its

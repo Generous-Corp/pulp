@@ -448,7 +448,16 @@ macOS.
 
 - **Only `shipyard-local[bot]`'s `macos-ci` counts.** On `opened` or
   `reopened` the lane checks who last applied the label. To force the full
-  lane, dispatch `build.yml` on the branch.
+  lane, dispatch `build.yml` on the branch with `-f pr_number=<n>`.
+- **A full-lane dispatch must set `pr_number`.** Without it a dispatch tests
+  the bare branch head (a behind head fails freshness checks such as
+  `agent-capability-manifest-check`), and its Linux leg waits forever for
+  `Linux (x64) [local]`. With it the run is bound to the PR's head, resolves
+  its merge commit once (parents: base, then head) and tests that sha in
+  classify and every build leg, routes Linux to hosted like a PR run, and
+  records
+  `tested_ref`, `tested_sha` and `merged_base` (step outputs, the job summary,
+  and the `Tested <ref> at <sha> onto <base>` step name).
 - **`build.yml` does not listen for `labeled`.** A label event's run is a newer
   check suite with no `macos` check run, and the merge queue then refuses to
   enqueue with "Required status check "macos" is expected" although the
@@ -5278,6 +5287,17 @@ bisectable.
       drain so a dead end heals when it dies, not on the next main push.
       When grepping run logs for waits, match `was cut BEFORE this merge`:
       the literal `stale-defer` also appears in a branch name in fetch output.
+  - **A green `coalesced` drain is a deliberate hold, not a lost bump.** With
+      no bump PR open, the drain holds a new one while other PRs wait in the
+      merge queue and the last bump landed under `PULP_BUMP_COALESCE_MINUTES`
+      (120) ago, so one bump PR covers many merges instead of each merge
+      spending a queue validation on its own. It opens when the queue drains,
+      the window ends (the `*/15` drain), or on a `release_now: true` dispatch.
+      The pending-intent grace (210 min) must stay above window + cadence +
+      queue validation; raise both together. Do not name a test file's stem in
+      a comment of a reachable script such as `version_at_land.py`: the
+      changed-surface reachability scan treats the mention as a call and
+      unmaps that test and everything it imports from its bounded family.
   - **Intent is read `--no-merges`-scoped.** `version_at_land.intent_trailers`
     reads `Version-Bump:` trailers only from the range's NON-merge commits
     (`git_range_trailers(..., no_merges=True)`). A "Merge origin/main into
@@ -7504,16 +7524,24 @@ ship cycles should use Shipyard. `local_ci.py` remains in the repo as
 a fallback but is scheduled for removal after a 2-week observation
 period (see Generous-Corp/pulp#120).
 
-### No repository-wide merge steward
+### One admission writer: the m3 steward tick
 
-Pulp once carried a GitHub-hosted steward workflow
-(`shipyard-merge-steward.yml`) plus a model-driven recovery worker and canary.
-The steward never left manual dispatch, its last runs failed, and the native
-merge queue now does the landing it was built for, so all of it was removed.
-Land a PR by arming auto-merge with `mergeMethod: MERGE`; adopt an orphaned
-Shipyard PR with `shipyard ship --pr <n>`. `[merge_steward] auto_handoff` stays
-`false` and `shipyard pr --workstream-id` stays unused: both write
-`shipyard/steward-handoff` receipts that nothing reads.
+Pulp PRs enter the native merge queue through one writer: a launchd job on m3
+that runs `shipyard runner steward --repo Generous-Corp/pulp --base main
+--arm-unqueued --apply` every five minutes from a config-only sparse clone in
+`~/.local/share/shipyard-steward/`. It enqueues a PR only when its current head
+carries an allowlisted exact-head APPROVE and the required checks are green;
+Shipyard re-reads the approval immediately before each enqueue and fails
+closed. Each pass appends `enqueued=N waiting_approval=M` to
+`~/Library/Logs/shipyard-steward-tick/summary.log`.
+
+- Do not arm or enqueue by hand while the tick runs; post a verdict and let the
+  next pass admit it.
+- `.github/workflows/shipyard-merge-steward.yml` is a read-only diagnostic (no
+  `apply` input). Use it to see what the steward would do, never to admit.
+- A long apply pass holds the steward state lock that tartci's gate-VM
+  admission also takes, so a slow Shipyard starves gate VMs. Keep the tick on a
+  Shipyard with lazy hydration and the approval-first pre-filter.
 
 ### Why your macOS leg routed to `[github-hosted]`, and why re-running did not fix it
 
@@ -12913,6 +12941,16 @@ Fix a hit with the other quote character, or bind the expression to a local
 first.
 
 ## Hosted macOS advisory cadence
+
+### Event-class labels are exclusive
+
+The shared `PULP_LOCAL_MACOS_RUNS_ON_JSON` selector may contain the PR-head
+class. Before dispatching a protected `merge_group`, `build.yml` must remove
+both managed event-class labels (`pulp-build-pr-head` and
+`pulp-build-merge-group`) and append only the class for the current event.
+GitHub requires every requested label, while TartCI event-class-v2 runners
+advertise exactly one class; leaving both labels creates a queued job that no
+runner can serve.
 
 ## Release lanes pin the shell exec JS bridge OFF
 

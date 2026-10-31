@@ -1090,6 +1090,14 @@ jobs:
               '--import-design-runtime-dir',
               'build/tools/import-design/Release/browser_capture-v1'
             )
+            if (Test-Path 'build/tools/import-design/Release/illustrator_to_svg.py') {
+              $importDesignArgs += @(
+                '--import-design-illustrator-helper',
+                'build/tools/import-design/Release/illustrator_to_svg.py'
+              )
+            } else {
+              Write-Host 'note: this historical import-design build has no Illustrator helper; omitting it'
+            }
             if ([version]$env:RELEASE_TAG.TrimStart('v') -ge [version]'0.918.0') {
               foreach ($sibling in @('materialized_binding_contract.mjs', 'materialized_source_emitter.mjs', 'materialized_ids_map.mjs')) {
                 if (!(Test-Path "build/tools/import-design/Release/jsx-runtime/$sibling")) {

@@ -856,7 +856,7 @@ auto_jump = "dry-run"
 # the queue's throughput. With `mode` unset ("off") nothing forms, arms,
 # enqueues or merges; rollups need `mode = "rollup"` (PR #11159).
 enabled = true
-mode = "rollup"
+mode = "off"
 landing = "merge-queue"
 max_members = 4
 exclude_paths = [

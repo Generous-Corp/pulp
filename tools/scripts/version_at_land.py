@@ -46,9 +46,11 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+import fnmatch
 import os
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterator
@@ -77,6 +79,86 @@ BUMP_SUBJECT = "chore: bump versions"
 # run reports "pending" instead of opening a rival bump PR (the debounce
 # concern). The bot solely owns this branch, so a force-push is safe.
 BUMP_BRANCH = "release/version-bump"
+
+# PR-route coalescing. Every merge to main used to open its own bump PR, and
+# each bump PR then took a merge-queue validation slot of its own. A bump PR
+# recomputes the whole range since the last marker, so one PR covers every
+# merge before it. The drain therefore holds a NEW bump PR while other PRs are
+# still waiting in the merge queue, up to this many minutes after the last
+# bump landed. The pending-intent liveness grace sits above this window plus
+# the drain cadence; the liveness alarm's own tests check that margin.
+COALESCE_WINDOW_MINUTES = 120
+
+
+def coalesce_decision(*, other_queue_entries: int | None,
+                      minutes_since_last_bump: int | None,
+                      window_minutes: int, release_now: bool) -> tuple[bool, str]:
+    """Whether to hold a new bump PR for now, and why, as `(hold, reason)`.
+
+    The bump opens when any one of these holds: a release needs the number,
+    coalescing is off, the merge queue has no entries other than the bump PR,
+    or at least `window_minutes` have passed since the last bump landed. A
+    fact that could not be read never holds the bump: an unreadable queue or
+    an unknown last landing opens it, as the drain did before coalescing.
+    """
+    if release_now:
+        return False, "a release needs the number now"
+    if window_minutes <= 0:
+        return False, "coalescing is off"
+    if other_queue_entries is None:
+        return False, "the merge queue could not be read"
+    if other_queue_entries == 0:
+        return False, "the merge queue has no other entries"
+    if minutes_since_last_bump is None:
+        return False, "no earlier bump landing to measure from"
+    if minutes_since_last_bump >= window_minutes:
+        return False, (f"the last bump landed {minutes_since_last_bump} min ago "
+                       f"(window {window_minutes} min)")
+    return True, (f"{other_queue_entries} other PR(s) in the merge queue and the "
+                  f"last bump landed {minutes_since_last_bump} min ago; the bump "
+                  f"opens once the queue drains or at {window_minutes} min")
+
+
+def _other_merge_queue_entries(repo: Path, branch: str) -> int | None:
+    """Merge-queue entries for `branch` that are not the bump PR, or None when
+    the queue cannot be read (no repository identity, an API error, or a
+    response without a queue)."""
+    full = os.environ.get("GITHUB_REPOSITORY", "")
+    owner, _, name = full.partition("/")
+    if not owner or not name:
+        return None
+    query = ("query($owner:String!,$name:String!,$branch:String!){"
+             "repository(owner:$owner,name:$name){mergeQueue(branch:$branch){"
+             "entries(first:100){totalCount nodes{pullRequest{headRefName}}}}}}")
+    done = _gh(repo, "api", "graphql", "-f", f"query={query}",
+               "-F", f"owner={owner}", "-F", f"name={name}",
+               "-F", f"branch={branch}", check=False)
+    if done.returncode != 0:
+        return None
+    try:
+        queue = json.loads(done.stdout)["data"]["repository"]["mergeQueue"]
+        entries = queue["entries"]
+        total = int(entries["totalCount"])
+        bump = sum(1 for n in entries["nodes"]
+                   if ((n or {}).get("pullRequest") or {}).get("headRefName")
+                   == BUMP_BRANCH)
+    except (KeyError, TypeError, ValueError):
+        return None
+    return max(0, total - bump)
+
+
+def _minutes_since_last_bump(repo: Path, head: str, now: int) -> int | None:
+    """Minutes since the last bump reached `head`'s first-parent chain: the
+    commit that integrated the newest marker (the marker itself on the direct
+    route). None when no marker exists."""
+    marker = last_applied_marker(repo, head)
+    if not marker:
+        return None
+    landed = _first_parent_boundary(repo, marker, head)
+    stamp = _git(repo, "log", "-1", "--format=%ct", landed, check=False).stdout.strip()
+    if not stamp.isdigit():
+        return None
+    return max(0, (now - int(stamp)) // 60)
 
 
 @dataclass(frozen=True)
@@ -138,7 +220,7 @@ def plan_assignments(config: Config, changed: list[str], base: str, head: str,
 def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["git", "-C", str(repo), *args],
-        check=check, capture_output=True, text=True,
+        check=check, capture_output=True, text=True, encoding="utf-8",
     )
 
 
@@ -379,7 +461,7 @@ def _drop_receipt_churn(repo: Path) -> None:
         # yet — so a clean `status` is a byte-identity claim about HEAD.)
         status = subprocess.run(
             ["git", "status", "--porcelain", "--", _GPU_LEDGER],
-            cwd=repo, capture_output=True, text=True, check=True,
+            cwd=repo, capture_output=True, text=True, encoding="utf-8", check=True,
         )
         if status.stdout.strip():
             return
@@ -388,7 +470,7 @@ def _drop_receipt_churn(repo: Path) -> None:
         # rewriting it would move nothing but `source_commit`.
         head_receipt = subprocess.run(
             ["git", "show", f"HEAD:{_GPU_RECEIPT}"],
-            cwd=repo, capture_output=True, text=True, check=True,
+            cwd=repo, capture_output=True, text=True, encoding="utf-8", check=True,
         ).stdout
         ledger_text = (repo / _GPU_LEDGER).read_text(encoding="utf-8")
         if LEDGER_SENTINEL in head_receipt:
@@ -462,7 +544,7 @@ def _refresh_derived(repo: Path) -> list[str]:
         for path in paths:
             status = subprocess.run(
                 ["git", "status", "--porcelain", "--", path],
-                cwd=repo, capture_output=True, text=True,
+                cwd=repo, capture_output=True, text=True, encoding="utf-8",
             )
             if status.stdout.strip():
                 refreshed.append(path)
@@ -565,6 +647,36 @@ def _write_plan(repo: Path, config: Config, plan: list[Assignment]) -> list[str]
     return edited
 
 
+def _validate_writer_paths(config: Config, edited: list[str], repo: Path | None = None) -> None:
+    """Fail closed if a privileged release commit would contain an unapproved path.
+
+    The writer runs with contents:write. Its own allowlist is therefore a
+    defense-in-depth boundary, independent of the workflow's shell and of any
+    GitHub ruleset configuration. An empty allowlist is rejected rather than
+    silently falling back to a broad generated-glob filter.
+    """
+    allowed = tuple(config.writer_allowed_globs)
+    if not allowed:
+        raise RuntimeError("version-at-land: writer allowlist is empty")
+    changed = set(edited)
+    if repo is not None:
+        status = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=all"],
+            cwd=repo, check=True, capture_output=True, text=True, encoding="utf-8",
+        ).stdout.splitlines()
+        # Porcelain v1 uses a two-column status followed by a path. The writer
+        # never enables rename detection, so the final field is the path we
+        # must authorize (including deleted generated files).
+        changed.update(line[3:] for line in status if len(line) >= 4)
+    unexpected = sorted({path for path in changed
+                         if not any(fnmatch.fnmatchcase(path, pattern)
+                                    for pattern in allowed)})
+    if unexpected:
+        raise RuntimeError(
+            "version-at-land: refusing to write unapproved release paths: "
+            + ", ".join(unexpected))
+
+
 # ── Hardened single-writer push transaction ─────────────────────────────────
 
 def apply_and_push(
@@ -619,6 +731,7 @@ def apply_and_push(
             # committed but the marker walk missed it). Treat as done, not a
             # spurious empty commit.
             return "noop", plan
+        _validate_writer_paths(config, edited, repo)
 
         # Stage ONLY the version files we edited (never `git add -A` — this repo
         # carries a submodule gitlink that a blanket add would re-stage).
@@ -662,7 +775,7 @@ def apply_and_push(
 def _gh(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["gh", *args],
-        cwd=str(repo), check=check, capture_output=True, text=True,
+        cwd=str(repo), check=check, capture_output=True, text=True, encoding="utf-8",
     )
 
 
@@ -967,6 +1080,10 @@ def apply_via_pr(
     fallback_base: str | None = None,
     heal_stale: bool = False,
     report: dict[str, str] | None = None,
+    coalesce_window: int = 0,
+    release_now: bool = False,
+    queue_reader: Callable[[Path, str], int | None] | None = None,
+    now: int | None = None,
 ) -> tuple[str, list[Assignment]]:
     """PR-route bumper: build the bump on `BUMP_BRANCH`, open a `chore: bump
     versions` PR, and arm auto-merge (`--merge`) so it lands THROUGH the merge
@@ -995,6 +1112,13 @@ def apply_via_pr(
                      and a fresh bump PR covering the whole range is opened;
                      so is a covering PR whose required check failed, which
                      would otherwise be re-armed and wait for nothing.
+      "coalesced"  — no bump PR is open, but `coalesce_decision` holds a new
+                     one: other PRs are waiting in the merge queue and the last
+                     bump landed under `coalesce_window` minutes ago. The run is
+                     green; a later push or the scheduled drain opens the PR,
+                     and it covers every merge since the last marker. `report`
+                     carries the reason. `coalesce_window` 0 (the default)
+                     never holds.
 
     Safety:
       * Regression — `_strictly_increasing` drops any assignment not exceeding
@@ -1030,6 +1154,19 @@ def apply_via_pr(
     # A failed re-arm surfaces as "arm-failed" (red run) — never a green defer,
     # or a persistently-unarmable PR would wedge the drain silently.
     ok, existing = _list_open_bump_pr(repo)
+    if ok and existing is None and coalesce_window > 0:
+        # Only a CONFIRMED absence of a bump PR is held; an open PR keeps its
+        # re-arm / wait / heal handling below, and an unknown lookup opens as
+        # before.
+        stamp = now if now is not None else int(time.time())
+        hold, why = coalesce_decision(
+            other_queue_entries=(queue_reader or _other_merge_queue_entries)(repo, branch),
+            minutes_since_last_bump=_minutes_since_last_bump(repo, head, stamp),
+            window_minutes=coalesce_window, release_now=release_now)
+        if report is not None:
+            report.update(coalesce=why)
+        if hold:
+            return "coalesced", plan
     if ok and existing is not None:
         # A bump PR whose branch contains `head` carries this merge's intent:
         # re-arm it and defer. One cut before `head` does not, but it is still
@@ -1069,6 +1206,7 @@ def apply_via_pr(
     edited = _write_plan(repo, config, plan)
     if not edited:
         return "noop", plan
+    _validate_writer_paths(config, edited, repo)
 
     # Stage ONLY the edited version files (never `git add -A` — a blanket add
     # re-stages this repo's submodule gitlink).
@@ -1172,9 +1310,22 @@ def _write_step_summary(line: str) -> None:
         pass
 
 
+def _write_assignment_summary(status: str, plan: list[Assignment]) -> None:
+    """Record one compact, machine-readable release-writer outcome."""
+    _write_step_summary("### version-at-land")
+    _write_step_summary(f"- status: `{status}`")
+    if plan:
+        assignments = ", ".join(
+            f"`{a.surface}` {a.current} -> {a.assigned} ({a.level})"
+            for a in plan)
+        _write_step_summary(f"- assignments: {assignments}")
+    else:
+        _write_step_summary("- assignments: none")
+
+
 def _repo_root() -> Path:
     return Path(subprocess.run(["git", "rev-parse", "--show-toplevel"],
-                               check=True, capture_output=True, text=True).stdout.strip())
+                               check=True, capture_output=True, text=True, encoding="utf-8").stdout.strip())
 
 
 def main(argv: list[str]) -> int:
@@ -1212,6 +1363,19 @@ def main(argv: list[str]) -> int:
                          "stale-defer. A stale PR still able to land is kept "
                          "either way. The workflow enables this via the "
                          "PULP_BUMP_HEAL_STALE_PR repo variable.")
+    ap.add_argument("--coalesce-minutes", type=int,
+                    default=int(os.environ.get("PULP_BUMP_COALESCE_MINUTES",
+                                               COALESCE_WINDOW_MINUTES)),
+                    help="With --route pr: hold a new bump PR while other PRs "
+                         "are in the merge queue, for up to this many minutes "
+                         "after the last bump landed (0 disables). Default "
+                         "PULP_BUMP_COALESCE_MINUTES or "
+                         f"{COALESCE_WINDOW_MINUTES}.")
+    ap.add_argument("--release-now", action="store_true",
+                    default=os.environ.get("PULP_BUMP_RELEASE_NOW", "") == "true",
+                    help="With --route pr: open the bump PR now, ignoring "
+                         "coalescing, because a release needs the number. "
+                         "Also PULP_BUMP_RELEASE_NOW=true.")
     ap.add_argument("--remote", default="origin")
     ap.add_argument("--branch", default="main")
     ap.add_argument("--max-retries", type=int, default=3)
@@ -1230,7 +1394,8 @@ def main(argv: list[str]) -> int:
             status, plan = apply_via_pr(
                 repo, config, remote=args.remote, branch=args.branch,
                 fallback_base=args.base, heal_stale=args.heal_stale_pr,
-                report=report,
+                report=report, coalesce_window=args.coalesce_minutes,
+                release_now=args.release_now,
             )
         else:
             status, plan = apply_and_push(
@@ -1258,6 +1423,13 @@ def main(argv: list[str]) -> int:
                     "landing re-runs the drain, which bumps the rest.")
             print(f"::notice title=version-at-land::{line}")
             _write_step_summary(line)
+        elif status == "coalesced":
+            # A deliberate hold, not a failure: the bump PR opens on a later
+            # push or scheduled drain and covers this merge too.
+            line = ("version-at-land: holding the bump PR to coalesce merges: "
+                    f"{report.get('coalesce')}.")
+            print(f"::notice title=version-at-land::{line}")
+            _write_step_summary(line)
         elif status == "stale-defer":
             pr = report.get("pr")
             why = report.get("reason")
@@ -1279,6 +1451,7 @@ def main(argv: list[str]) -> int:
                 "version-at-land: could not land the bump "
                 f"(status={status}). See the error above. Re-run.\n")
             return 1
+        _write_assignment_summary(status, plan)
         return 0
 
     if not args.base:

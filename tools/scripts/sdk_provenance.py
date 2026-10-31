@@ -120,6 +120,9 @@ def _importer_runtime_paths(prefix: Path, platform: str) -> set[str]:
         matrix = json.loads(PRODUCT_MATRIX.read_text(encoding="utf-8"))
         members = matrix["common_cli_members"]
         node_floor = str(matrix.get("node_runtime_floor", "999999.0.0"))
+        illustrator_floor = str(
+            matrix.get("illustrator_import_floor", "999999.0.0")
+        )
         materialized_contract_floor = str(
             matrix.get("materialized_binding_contract_floor", "999999.0.0")
         )
@@ -144,6 +147,8 @@ def _importer_runtime_paths(prefix: Path, platform: str) -> set[str]:
             "bin/jsx-runtime/materialized_source_emitter.mjs",
             "bin/jsx-runtime/materialized_ids_map.mjs",
         })
+    if version >= _version_tuple(illustrator_floor):
+        paths.add("bin/import-design/illustrator_to_svg.py")
     if not paths:
         raise ProvenanceError(f"empty importer runtime contract in {PRODUCT_MATRIX}")
     if version >= _version_tuple(node_floor):

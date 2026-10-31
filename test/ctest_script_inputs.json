@@ -154,6 +154,7 @@
     "tools/cli/version_diag.cpp"
    ],
    "spawning_sources": [
+    "build/tools/cli/generated/migration_index.cpp",
     "tools/cli/cli_common.cpp",
     "tools/cli/cli_delegate.cpp",
     "tools/cli/cli_doctor_helpers.cpp",
@@ -1485,6 +1486,18 @@
    ],
    "undeclared_sources": []
   },
+  "pulp-test-external-plugin-graph-fixture": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_external_plugin_graph_fixture.cpp"
+   ],
+   "spawns": "undeclared",
+   "undeclared_sources": []
+  },
   "pulp-test-fixture-runner-cli": {
    "data": "declared",
    "detected_sources": [
@@ -2341,6 +2354,18 @@
    "spawns": "undeclared",
    "undeclared_sources": []
   },
+  "pulp-test-signal-graph-x9-modular-instrument": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_signal_graph_x9_modular_instrument.cpp"
+   ],
+   "spawns": "undeclared",
+   "undeclared_sources": []
+  },
   "pulp-test-streaming-model-contract": {
    "data": "none",
    "inputs": [],
@@ -2774,6 +2799,7 @@
   "pulp-test-edit-history",
   "pulp-test-editor-open-stages",
   "pulp-test-embed-compress",
+  "pulp-test-external-plugin-graph-fixture",
   "pulp-test-face-identity-full",
   "pulp-test-face-identity-lite",
   "pulp-test-faithful-port-toolkit",
@@ -2781,6 +2807,9 @@
   "pulp-test-fdn-reverb",
   "pulp-test-fdn-reverb-catalog",
   "pulp-test-fdn-reverb-portable-lanes",
+  "pulp-test-fft-backend-accuracy",
+  "pulp-test-fft-backend-accuracy-builtin",
+  "pulp-test-fft-backend-accuracy-mufft",
   "pulp-test-fir-filter",
   "pulp-test-fixture-runner-cli",
   "pulp-test-foreign-framework-coexistence",
@@ -3112,11 +3141,13 @@
   "pulp-test-signal-formant-filter-bank",
   "pulp-test-signal-fractional-delay",
   "pulp-test-signal-frequency-shifter-ssb",
+  "pulp-test-signal-gain",
   "pulp-test-signal-granular",
   "pulp-test-signal-graph-audio-parity",
   "pulp-test-signal-graph-control-authority",
   "pulp-test-signal-graph-executor-parity",
   "pulp-test-signal-graph-offline-parity",
+  "pulp-test-signal-graph-x9-modular-instrument",
   "pulp-test-signal-harmony-engine",
   "pulp-test-signal-leslie",
   "pulp-test-signal-modular-sequencing",
@@ -3229,6 +3260,7 @@
   "pulp-test-web-gpu-convolver",
   "pulp-test-webgpu-mock-buffer",
   "pulp-test-webgpu-native-draw",
+  "pulp-test-webview-backend-platform",
   "pulp-test-widget-bridge-api-contracts",
   "pulp-test-widget-bridge-no-gpu-gates",
   "pulp-test-windowing",
@@ -3506,6 +3538,14 @@
     "tools/scripts/android_smoke.sh"
    ],
    "kind": "shell"
+  },
+  "android-surface-runtime-contract": {
+   "entry": "tools/scripts/test_android_surface_runtime_contract.py",
+   "inputs": [
+    "core/render/platform/android/surface_runtime_android.cpp",
+    "tools/scripts/test_android_surface_runtime_contract.py"
+   ],
+   "kind": "python"
   },
   "apple-bundle-signing-check": {
    "entry": "tools/scripts/test_check_apple_bundle_signing.py",
@@ -5920,6 +5960,7 @@
    "entry": "tools/testing/daw-smoke/test_real_host_smoke.py",
    "inputs": [
     "tools/scripts/gpu_audio_p2_host_preflight.py",
+    "tools/testing/daw-smoke/gpu_fault_receipts.py",
     "tools/testing/daw-smoke/real_host_smoke.py",
     "tools/testing/daw-smoke/test_real_host_smoke.py",
     "tools/validation/verify_gpu_audio_daw_continuity_receipt_v2.py"
@@ -6851,6 +6892,14 @@
    ],
    "kind": "python"
   },
+  "illustrator-to-svg-selftest": {
+   "entry": "tools/import-design/test_illustrator_to_svg.py",
+   "inputs": [
+    "tools/import-design/illustrator_to_svg.py",
+    "tools/import-design/test_illustrator_to_svg.py"
+   ],
+   "kind": "python"
+  },
   "import-design-external-asset-localized": {
    "entry": "test/test_import_design_external_asset.py",
    "inputs": [
@@ -6911,7 +6960,8 @@
   "import-design-ir-observe-variable-font-label": {
    "entry": "test/test_design_ir_observe_variable_font_label.py",
    "inputs": [
-    "test/test_design_ir_observe_variable_font_label.py"
+    "test/test_design_ir_observe_variable_font_label.py",
+    "tools/import-validation/text_raster_decomposition.py"
    ],
    "kind": "python"
   },
@@ -7501,6 +7551,14 @@
    ],
    "kind": "python"
   },
+  "nonuniform-head-table": {
+   "entry": "tools/scripts/nonuniform_head_check.py",
+   "inputs": [
+    "core/signal/include/pulp/signal/convolver_non_uniform.hpp",
+    "tools/scripts/nonuniform_head_check.py"
+   ],
+   "kind": "python"
+  },
   "object-deps-selftest": {
    "entry": "tools/ci/test_object_deps.py",
    "inputs": [
@@ -7541,6 +7599,15 @@
    "entry": "tools/packages/test_package_validation_tools.py",
    "inputs": [
     "tools/packages/test_package_validation_tools.py"
+   ],
+   "kind": "python"
+  },
+  "paired-affected-tests-shadow-selftest": {
+   "entry": "tools/ci/test_paired_affected_tests_shadow.py",
+   "inputs": [
+    "tools/ci/paired_affected_tests_shadow.py",
+    "tools/ci/test_paired_affected_tests_shadow.py",
+    "tools/scripts/process_liveness.py"
    ],
    "kind": "python"
   },

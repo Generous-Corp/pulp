@@ -14,6 +14,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/audio/audio_file.hpp": "Pulp::audio",
     "pulp/signal/parametric_eq.hpp": "Pulp::signal",
     "pulp/signal/processing_switch_crossfade.hpp": "Pulp::signal",
+    "pulp/signal/smoothed_value.hpp": "Pulp::signal",
     "pulp/host/signal_graph_authoring.hpp": "Pulp::host",
     "pulp/host/signal_graph.hpp": "Pulp::host",
     "pulp/host/signal_graph_runtime.hpp": "Pulp::host",
@@ -92,6 +93,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/diffusion_network.hpp": "Pulp::signal",
     "pulp/signal/spectral_cross_synthesis.hpp": "Pulp::signal",
     "pulp/signal/fm_operator_engine.hpp": "Pulp::signal",
+    "pulp/signal/two_pole_resonator.hpp": "Pulp::signal",
     "pulp/signal/fir_design.hpp": "Pulp::signal",
     "pulp/signal/fractional_delay.hpp": "Pulp::signal",
     "pulp/signal/tempo_delay_wrapper.hpp": "Pulp::signal",
@@ -439,7 +441,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/ballistics_filter.hpp",
-        "fingerprint": "sha256:58f673ad243d35a4df20b30d0bd68b76034ac04d57f028b9835df9ead58498c1",
+        "fingerprint": "sha256:cac378cc3b7b0c69765f929d530b292c17743b17ec491fcffcf66b774d350349",
         "disposition": "capability_support",
         "capability_keys": ["signal.dynamics-envelope-contract"],
         "rationale": (
@@ -512,7 +514,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     ],
     {
         "include": "pulp/signal/fft.hpp",
-        "fingerprint": "sha256:e5cb316d6a41224282447d106d52358f6245a768556f7b44e271ec81e5fbf433",
+        "fingerprint": "sha256:d83eda9b7cf1281260c902d4e69ebc79cfc4424f6e06da743fb86c494382971a",
         "disposition": "capability_support",
         "capability_keys": ["signal.source-filter-analysis", "signal.streaming-analysis-frontends"],
         "rationale": (
@@ -856,7 +858,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/biquad.hpp",
-        "fingerprint": "sha256:fdbc7b3053b72c4a8dc102e034e405bcaab68ba07083e5ac610c2b9ae35ec07e",
+        "fingerprint": "sha256:6a885b8c54ff3ba32c66b3647036e7e12d6aeec763d751e967611917a364c396",
         "disposition": "capability_support",
         "capability_keys": ["signal.sos-cascade"],
         "rationale": (
@@ -1368,6 +1370,16 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         ),
     },
     {
+        "include": "pulp/signal/two_pole_resonator.hpp",
+        "fingerprint": "sha256:46c762aca702becc33f51ad1a0db963ee84a3b397e6202a859944c619d9bc2ec",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Two-pole resonance is composable realtime signal infrastructure, not an "
+            "independently advertised generator capability."
+        ),
+    },
+    {
         "include": "pulp/signal/classic_reverb.hpp",
         "fingerprint": "sha256:ef4d852f267095f4e18a7ed2114640adaeaf8fbbd57087cc3a1aaa1d3a4c796f",
         "disposition": "infrastructure",
@@ -1501,7 +1513,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/denormal.hpp",
-        "fingerprint": "sha256:c139f6695a9b995b89dc3b9d00430bc0776391286bec850213c8e278bf67e099",
+        "fingerprint": "sha256:e833a00a6974d4fbb18bec9e1c2312285c7387d8f7aa4757b606425e39452277",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1537,6 +1549,28 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         ),
     },
     {
+        "include": "pulp/signal/gain.hpp",
+        "fingerprint": "sha256:54651b70d3f4f19684907be44323e35fd4d726d7e9795b04c07eda1b79aab503",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "GainT is a composable signal processor used by plugins and graph nodes; its "
+            "optional smoothing API is implementation infrastructure rather than an "
+            "independently advertised generator-facing capability."
+        ),
+    },
+    {
+        "include": "pulp/signal/smoothed_value.hpp",
+        "fingerprint": "sha256:6d2a27eec926cbe11fecf51dcddebd91f431038ef08ab7067048fc0ee0397044",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "SmoothedValue is the bounded parameter-ramping primitive used by signal "
+            "processors; its timing conversion is implementation infrastructure and "
+            "is not an independently advertised generator-facing capability."
+        ),
+    },
+    {
         "include": "pulp/signal/fixed_ir_convolver.hpp",
         "fingerprint": "sha256:80ba7f87cc92c3a7fb71238aea463f3839b977fe11877e80aeb029860edffe80",
         "disposition": "infrastructure",
@@ -1563,7 +1597,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/zero_latency_convolver.hpp",
-        "fingerprint": "sha256:b83e4d485420696d9598771185be0856b0fb377dd106c5d6ea76a7b5ef9e124e",
+        "fingerprint": "sha256:f2ffe01d98618d870a3e7c7dee8e935948a3333090f01094d8bb0dd601a0861e",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1576,7 +1610,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/zero_latency_convolver_support.hpp",
-        "fingerprint": "sha256:2617e8cdff61bb3899d2c2b4529339116634d86c0ec7d7f3492ae929a02cadfb",
+        "fingerprint": "sha256:8a70ab86dcf8dcdd7df62d8d7c6720ec3d71f947866d1310ee5675a3a158c815",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1587,7 +1621,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/audio/load_measurer.hpp",
-        "fingerprint": "sha256:268b2aa45e278f04876fa0f5590a36523d35ee13882d37f89c2890b8d4321253",
+        "fingerprint": "sha256:6208bb80a1ef427c9f69ea11a6f0911dfbd0ab832fe55328ecdd12034e4e5b10",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1638,7 +1672,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/convolver_non_uniform.hpp",
-        "fingerprint": "sha256:e36fe1a2424f6a0f64c30c3f0d395c6884633ebf78cce4b9b834369c2b6f3079",
+        "fingerprint": "sha256:598a096100daada3acac86a98d29856d23172b620dab4215349664d0dc600035",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1688,7 +1722,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/svf.hpp",
-        "fingerprint": "sha256:50341bc965475434473aaca48a378ca56c4c19d757922fd1b2ae23406a5ebb66",
+        "fingerprint": "sha256:9d3b9632299a64a68d78b62fb79fd264860d62b7b4d10269323cc25a94c5c87e",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1700,7 +1734,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/tpt_filter.hpp",
-        "fingerprint": "sha256:2e70a37436a0e624d192e38cd15dbf71c936230d21577b35271251d97b04b69c",
+        "fingerprint": "sha256:44621a5e2035d72cce3ef0c62d3a334c913ef7059780d2c7475834df4dfce04f",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (

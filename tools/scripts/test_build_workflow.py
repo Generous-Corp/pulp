@@ -72,6 +72,16 @@ class MiseCandidateWorkflowTest(unittest.TestCase):
         self.assertIn('"pulp-build-pr-head"', guard)
         self.assertNotIn('"pulp-build-merge-group"', guard)
 
+    def test_event_class_replaces_any_existing_managed_class(self) -> None:
+        resolver = next(
+            s for s in self.workflow["jobs"]["resolve-provider"]["steps"]
+            if s.get("id") == "resolve"
+        )["run"]
+        self.assertIn("managed_event_classes = {", resolver)
+        self.assertIn('"pulp-build-pr-head"', resolver)
+        self.assertIn('"pulp-build-merge-group"', resolver)
+        self.assertIn("label not in managed_event_classes", resolver)
+
     def test_activation_precedes_all_build_tool_use(self) -> None:
         names = [step.get("name") for step in self.steps]
         activate = names.index("Activate pinned mise candidate toolchain")
@@ -304,7 +314,8 @@ class LinuxRuntimeNodeProvisioningTest(unittest.TestCase):
         self.assertEqual(self.setup["if"], "runner.os == 'Linux'")
         self.assertIn(self.setup["uses"], self._SUPPORTED_SETUP_NODE_USES)
         self.assertEqual(self.setup["with"]["node-version"], "22.15.0")
-        self.assertEqual(self.setup["with"]["cache"], "npm")
+        # npm, except a pr_number dispatch, which saves no cache.
+        self.assertEqual(self.setup["with"]["cache"], "${{ inputs.pr_number == '' && 'npm' || '' }}")
         self.assertEqual(
             self.setup["with"]["cache-dependency-path"],
             "tools/import-design/jsx-runtime/package-lock.json",

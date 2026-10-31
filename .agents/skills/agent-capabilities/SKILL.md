@@ -46,6 +46,12 @@ exposure checker before pushing. This keeps focused-header refactors visible
 to installed-SDK consumers without turning an include-only change into a new
 capability contract.
 
+For implementation-only DSP refactors, review the primary and support header
+fingerprints separately. The installed manifest can remain unchanged while the
+surface inventory advances and the append-only history gains a full snapshot.
+Keep that generated history transaction; its size does not make it unrelated
+to the header change.
+
 Maintain three related artifacts:
 
 - `agent-capabilities.json` is the installed consumer contract: curated keys,
@@ -1705,3 +1711,15 @@ contract changes.
 ## SysEx core storage and representation
 
 SysEx7 reassembly is reviewed MIDI infrastructure, not a new musical capability. Refresh both reviewed-header fingerprints and generated surface history after bounded-storage or copy-semantics changes.
+
+## Audio callback clock changes
+
+When a realtime clock implementation changes, refresh the owning public-header fingerprint before re-deriving capability counters. Keep first-use initialization out of the callback and validate the generated manifest and sequencer evidence against the protected base.
+
+## FFT surface refreshes
+
+When a DSP change modifies a fingerprinted signal header such as
+`pulp/signal/fft.hpp`, update the registry fingerprint, re-derive the manifest
+and surface counters against the protected base, and refresh the two sequencer
+exposure evidence needles before running the gates. This keeps the generated
+contract and its evidence rows aligned with the new header bytes.

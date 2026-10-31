@@ -380,6 +380,19 @@ system face while the paragraph painted the page face, and the text wrapped.
 
 ### Packaged SDK runtime contract
 
+### Illustrator/PDF vector-source boundary
+
+PDF-compatible Illustrator artwork is a first-class source for the import CLI:
+`pulp import-design --from illustrator --file panel.ai --output panel.svg` (the
+`ai` and `pdf` aliases are equivalent). The command invokes the installed
+`tools/import-design/illustrator_to_svg.py` helper through Pulp's argv-safe
+child-process boundary. Poppler is an explicit runtime prerequisite; missing or
+invalid converters fail closed. Every successful conversion writes a
+`pulp.illustrator-svg-provenance.v1` receipt containing source/output hashes,
+the selected page, and converter identity. Existing SVG input continues through
+the validated preconverted-SVG lane; the converter does not imply artwork
+license or redistribute third-party design assets.
+
 The installed `pulp-import-design` SDK runtime includes the browser-capture
 manifest plus the materialized JSX siblings
 `materialized_binding_contract.mjs`, `materialized_source_emitter.mjs`, and
@@ -8503,3 +8516,12 @@ inactive without an error. Keep this mode explicit and fail closed on missing
 or malformed `canvas_bindings`, multiple implicit states, or non-canvas match
 selectors. The optional `canvas_index` preserves identity when a capture has
 multiple canvases; live canvas behavior remains a separate proof surface.
+
+## Capture determinism hashing
+
+`provenance.timings` in a browser capture envelope contains per-run diagnostic
+clocks and is expected to vary between otherwise identical imports. Canonical
+determinism hashing strips that field only for `pulp-browser-capture-v1`
+envelopes; report-level timing data and timings in other input shapes remain
+hashed. Do not treat this normalization as proof that browser animation,
+canvas, or WebGL output is deterministic.
