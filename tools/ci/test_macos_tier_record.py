@@ -30,6 +30,14 @@ APP = "shipyard-local[bot]"
 CREATED = "2026-10-25T12:00:00Z"
 BEFORE, AFTER = "2026-10-25T11:00:00Z", "2026-10-25T13:00:00Z"
 BOOTSTRAP = "macOS PR/dispatch bootstrap (required when native leg is absent)"
+# The other steps of that job. On a `pr_number` dispatch the replay record is
+# written but not uploaded, so the upload and its announcement are skipped.
+BOOTSTRAP_RECORD_STEPS = {
+    "Check out the reuse record writer": "success",
+    "Record that no suite ran, for reuse replay": "success",
+    "Upload reuse replay record": "skipped",
+    "Announce a missing reuse replay record": "skipped",
+}
 
 # The jobs allowed `checks: write`. Each runs no pull request code: the macOS
 # retarget's check publishers and reconciler (no checkout) and the
@@ -89,6 +97,18 @@ def native(build: str, full_suite: str = "skipped", tested: str | None = TESTED,
         steps[tested] = tested_conclusion
     steps.update({"Build": build, "Test fast deterministic tier (pull request head)": "success",
                   "Test (non-Windows)": full_suite})
+    return job(**steps)
+
+
+def bootstrap(conclusion: str = "success", tested: str | None = TESTED) -> dict:
+    """The skip-safe `macos` job as build.yml runs it for a `pr_number` dispatch:
+    the bootstrap step, then the Tested step naming the merge commit classify
+    bound, then the replay-record steps. A plain pull_request run has no Tested
+    step."""
+    steps = {BOOTSTRAP: conclusion}
+    if tested:
+        steps[tested] = "success"
+    steps.update(BOOTSTRAP_RECORD_STEPS)
     return job(**steps)
 
 
@@ -220,11 +240,13 @@ class TierDecisionTest(Harness):
                 self.assertEqual(self._tier([macos], [verdict()], **kwargs), "deferred")
 
     def test_the_skip_safe_bootstrap(self) -> None:
-        self.assertEqual(self._tier([job(**{TESTED: "success", BOOTSTRAP: "success"})], [verdict()]),
-                         "not-required")
-        self.assertEqual(self._tier([job(**{BOOTSTRAP: "success"})], [verdict()],
+        self.assertEqual(self._tier([bootstrap()], [verdict()]), "not-required")
+        self.assertEqual(self._tier([bootstrap(tested=None)], [verdict()],
                                     event="pull_request"), "deferred")
-        self.assertEqual(self._tier([job(**{BOOTSTRAP: "failure"})], [verdict()]), "deferred")
+        self.assertEqual(self._tier([bootstrap("failure")], [verdict()]), "deferred")
+        # A dispatch whose bootstrap job carries no Tested step cannot bind the
+        # approval to a merge commit, so it stays deferred.
+        self.assertEqual(self._tier([bootstrap(tested=None)], [verdict()]), "deferred")
 
     def test_annotations_never_enter_the_decision(self) -> None:
         # A contract-lane job whose code under test printed a wider tier.
@@ -262,7 +284,7 @@ class TierDecisionTest(Harness):
         self.assertEqual((summary["tested_ref"], summary["tested_sha"], summary["merged_base"]),
                          (None, None, None), "a pull_request run tested no bound merge commit")
         for jobs, selector in (([native("success", full_suite="success")], "full"),
-                               ([job(**{TESTED: "success", BOOTSTRAP: "success"})], "none")):
+                               ([bootstrap()], "none")):
             with self.subTest(selector=selector):
                 _, _, outputs = self._decide(jobs, [verdict()])
                 self.assertEqual(json.loads(outputs["summary"])["selector"], selector)
@@ -404,6 +426,34 @@ class WorkflowContractTest(Harness):
                          "the contract lane is the lane that skips Build")
         alias_steps = {step.get("name") for step in build["jobs"]["macos"]["steps"]}
         self.assertIn(BOOTSTRAP, alias_steps)
+
+    def test_both_macos_jobs_publish_the_tested_step_the_record_reads(self) -> None:
+        # The native job and the skip-safe bootstrap job each end a `pr_number`
+        # dispatch with a `Tested <ref> at <sha> onto <base>` step. Without it in
+        # the bootstrap job, a skip-safe head could never leave `deferred`.
+        build = yaml.safe_load(BUILD.read_text(encoding="utf-8"))
+        for job_id in ("build", "macos"):
+            with self.subTest(job=job_id):
+                steps = build["jobs"][job_id]["steps"]
+                tested = [step for step in steps if str(step.get("name", "")).startswith("Tested ")]
+                self.assertEqual(len(tested), 1, f"jobs.{job_id} needs exactly one Tested step")
+                name = tested[0]["name"]
+                for part in ("tested_ref", "tested_sha", "merged_base"):
+                    self.assertIn(part, name)
+        alias = build["jobs"]["macos"]["steps"]
+        names = [step.get("name") for step in alias]
+        tested = next(step for step in alias if str(step.get("name", "")).startswith("Tested "))
+        self.assertGreater(names.index(tested["name"]), names.index(BOOTSTRAP),
+                           "the bootstrap fails closed before the Tested step can succeed")
+        for output in ("tested_ref", "tested_sha", "merged_base"):
+            self.assertIn(f"needs.classify.outputs.{output}", tested["name"])
+        condition = tested["if"]
+        for required in ("workflow_dispatch", "inputs.pr_number != ''",
+                         "needs.classify.result == 'success'",
+                         "needs.classify.outputs.tested_sha != ''"):
+            self.assertIn(required, condition)
+        self.assertNotIn("${{", tested.get("run", ""),
+                         "the step must not interpolate outputs into its script")
 
 
 class ChecksWriterLintTest(unittest.TestCase):

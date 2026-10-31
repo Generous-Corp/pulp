@@ -3352,7 +3352,10 @@ runs only its configure-only contract lane. Both look
 identical in the checks list.
 
 A reused receipt produces a three-step job (`Set up job`, the bootstrap step,
-`Complete job`) reporting success. Reading one of those as evidence that the
+`Complete job`) reporting success. A `pr_number` dispatch adds the
+`Tested refs/pull/<n>/merge at <sha> onto <base>` step after the bootstrap
+step, so a skip-safe head's tier record can bind its approval to the merge
+commit; it runs no test. Reading one of those as evidence that the
 suite passed has already sent an investigation in the wrong direction for
 hours.
 

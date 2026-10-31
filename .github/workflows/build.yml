@@ -4027,6 +4027,23 @@ jobs:
           else
             echo '::notice title=shipyard-test-tier::{"schema":"shipyard-test-tier/v1","tier":"not-required"}'
           fi
+      # A skip-safe `pr_number` dispatch still bound a merge commit: classify
+      # resolved it and exported the three values below. The step's name
+      # carries them so the tier record reads this job exactly as it reads the
+      # native job's step of the same name, and the record checks them against
+      # the commit GitHub shows, so a bootstrap job names no more than a native
+      # one could. It follows the bootstrap step, which fails closed first.
+      - name: "Tested ${{ needs.classify.outputs.tested_ref }} at ${{ needs.classify.outputs.tested_sha }} onto ${{ needs.classify.outputs.merged_base }}"
+        if: >-
+          github.event_name == 'workflow_dispatch' && inputs.pr_number != ''
+          && needs.classify.result == 'success'
+          && needs.classify.outputs.tested_sha != ''
+        shell: bash
+        env:
+          TESTED_REF: ${{ needs.classify.outputs.tested_ref }}
+          TESTED_SHA: ${{ needs.classify.outputs.tested_sha }}
+          MERGED_BASE: ${{ needs.classify.outputs.merged_base }}
+        run: echo "tested_ref=$TESTED_REF tested_sha=$TESTED_SHA merged_base=$MERGED_BASE"
       # A `macos` check that ran no suite still belongs in the replay history
       # (receipt reuse and skip-safe groups are what a policy's coverage is
       # measured against), so it writes a record with no tests and says why.
