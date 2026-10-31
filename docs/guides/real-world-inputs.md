@@ -152,6 +152,56 @@ These snippets are provider recipes, not a new Pulp sensor subsystem. A mobile
 plugin that cannot access the sensor permission can receive the same frames
 from its containing app or an external process over an existing transport.
 
+### Native camera and custom-model adapters
+
+Desktop applications can keep camera capture and inference in an optional
+provider target. The application-owned output is the only part shared with the
+Pulp consumer:
+
+```cpp
+// Optional application target; OpenCV is not a Pulp dependency.
+cv::VideoCapture camera(0);
+cv::Mat frame;
+std::uint64_t sequence = 0;
+while (camera.read(frame)) {
+    const auto result = face_provider.infer(frame); // MediaPipe/OpenCV/custom code
+    publish(FaceFrame{
+        .sequence = ++sequence,
+        .mouth_open = result.mouth_open,
+        .confidence = result.confidence,
+        .tracked = result.tracked,
+    }); // TripleBuffer, OSC/IPC, or another existing handoff
+}
+```
+
+For a custom ONNX model, keep the runtime and model package in the application
+or an external process. The inference worker publishes one complete
+application-owned frame; the audio callback never sees an `Ort::Session` or a
+camera object:
+
+```cpp
+Ort::Session session(env, model_path.c_str(), session_options);
+while (running) {
+    auto input = next_input_frame();
+    auto outputs = session.Run(Ort::RunOptions{nullptr}, input_names, &input, 1,
+                               output_names, output_count);
+    publish(ModelFrame{
+        .sequence = ++sequence,
+        .drive = normalize(outputs[0]),
+        .blend = normalize(outputs[1]),
+        .confidence = confidence(outputs),
+        .valid = outputs_are_finite(outputs),
+    });
+}
+```
+
+The consumer then uses the existing example-owned `ModelMapping` and its
+normal StateStore/modulation path. ONNX Runtime, OpenCV, model weights, and
+their licenses remain optional and application-selected. If the model worker
+stops, publishes malformed output, or loses its input, publish one invalid
+frame and let the existing stale timeout and replay tests exercise the failure
+policy.
+
 OBS Studio, DaVinci Resolve/Fairlight, Max/MSP, TouchDesigner, and similar
 hosts are compatibility forcing functions. They should consume existing
 plugin, OSC, MIDI, IPC, WebSocket, or external-process boundaries through
