@@ -3420,7 +3420,10 @@ runs only its configure-only contract lane. Both look
 identical in the checks list.
 
 A reused receipt produces a three-step job (`Set up job`, the bootstrap step,
-`Complete job`) reporting success. Reading one of those as evidence that the
+`Complete job`) reporting success. A `pr_number` dispatch adds the
+`Tested refs/pull/<n>/merge at <sha> onto <base>` step after the bootstrap
+step, so a skip-safe head's tier record can bind its approval to the merge
+commit; it runs no test. Reading one of those as evidence that the
 suite passed has already sent an investigation in the wrong direction for
 hours.
 
@@ -4087,6 +4090,97 @@ A head that is already armed when the full lane reaches `Decide pull-request
 test suite` (and still merges onto the tip of `main`) also runs the full suite
 there and issues an exact-tree receipt, as before (see "Only a ready-to-land PR
 head issues a receipt" in the CI skill).
+
+### The tier record the arm guard reads
+
+Shipyard's queue-arm-guard does not read `shipyard-test-tier` annotations, since
+any step, including the code under test, can print one. It reads a *tier
+record* instead (Shipyard `docs/ghapp-guards.md`, "A tiered required check must
+prove its full lane"). That record is a check run named
+`shipyard-test-tier/macos` on the head, whose summary is
+`{"schema":"shipyard-test-tier/v1","check":"macos","tier":...,"run_id":...,"run_attempt":...,"trigger":...,"actor":...,"selector":...,"tested_ref":...,"tested_sha":...,"merged_base":...,"full_lane_workflow":"build.yml","full_suite_runs_in":"merge_group"}`.
+`tested_ref`, `tested_sha` and `merged_base` bind it to the merge commit the
+full lane tested (null when the run tested none).
+`trigger` and `actor` name the event and account that started the run; the
+guard reports them but does not trust them. `full_lane_workflow` is what its
+fix line says to dispatch. The record carries no label.
+The guard counts only records created by the App named in `[queue]
+tier_record_app`, never `github-actions`: any job holding `checks: write`
+could rewrite those. It refuses a head with no counted record bound to its
+`macos` job's run and attempt, or with a `deferred` one.
+
+`.github/workflows/macos-tier-record.yml` publishes the record:
+
+- **Trigger:** `workflow_run` when a Build and Test run completes. It runs from
+  main, with no checkout, for same-repository `pull_request` and
+  `workflow_dispatch` runs only.
+- **The tiered job's own token:** the guard also reads the `macos` job's
+  `GITHUB_TOKEN Permissions` log group and refuses if `Checks` is `write`.
+  `build.yml` grants `checks: read` explicitly, which satisfies that.
+- **Token:** its own `GITHUB_TOKEN` only reads. The record is created with a
+  token for a dedicated App, minted in the job from `TIER_RECORD_APP_ID` and
+  `TIER_RECORD_APP_KEY`. Those are secrets of the `tier-record` GitHub
+  Environment, whose deployment-branch policy allows `main` only. A
+  workflow_run job runs on the default branch and qualifies. A job on a pull
+  request branch is refused them, as repository secrets would not be. Only
+  this job references the environment or those secrets; a test checks that.
+  With the secrets absent the job fails visibly and publishes nothing.
+- **Tier:** the more conservative of two signals, since neither proves enough
+  alone. A pull request's own build.yml decides its step names, so steps alone
+  cannot grant a full tier, and who started the run does not show the suite
+  ran.
+  1. **The run.** It must be a `workflow_dispatch` whose triggering actor is
+     the fleet App (`shipyard-local[bot]`). The App moves an approved head to
+     the full lane that way, since label events no longer start Build and
+     Test runs. The App's latest verdict on the head, at or before the run's
+     `created_at`, must be a trusted `verdict: APPROVE head:<sha>` with a
+     `reviewer:` line. The run must also be a `pr_number` dispatch of that
+     pull request, which tests its merge commit (see "The full-lane dispatch
+     tests the merge ref"). Its `macos` job carries one succeeded step named
+     `Tested refs/pull/<n>/merge at <sha> onto <base>`, and that commit has
+     exactly the parents `[<base>, <head>]` on GitHub. Otherwise the tier is
+     `deferred`: a `pull_request` run, a dispatch or rerun by anyone else, a
+     plain dispatch, a missing or non-APPROVE verdict, or a head without
+     exactly one same-repository pull request.
+  2. **Steps.** The conclusions the runner recorded for that attempt's
+     `macos` job:
+
+     | `macos` job | Tier |
+     |---|---|
+     | `Build` ran, `Test (non-Windows)` ran | `full` |
+     | `Build` ran | `fast` (full lane) |
+     | `Build` skipped (the contract lane) | `deferred` |
+     | bootstrap step succeeded (skip-safe) | `not-required` |
+     | bootstrap step failed closed | `deferred` |
+
+A run with no `macos` job, two of them, a job for another head, neither
+step, or an unreadable listing publishes no record, and the guard refuses
+that head. So do fork heads, which land through an in-repository branch.
+
+Because the run signal applies to every head, only the fleet App's dispatch
+of an approved head can be anything but `deferred`. Every `pull_request` run
+is `deferred`, even on the full lane and even when `PULP_MACOS_PR_GATING` is
+off. The rule has no exemptions, since one would reopen the forgery surface.
+Turn on `tiered_required_checks` only after the App exists and the arm sweep
+dispatches `build.yml` for every approved head, skip-safe and release ones
+included, with gating on. That key and `[queue] tier_record_app` are the
+last change, and neither is set yet.
+
+**Trust boundary.** A same-repository pull request runs its own build.yml, so
+it can rename steps, or add a step that grants itself `checks: write`. The
+tests that pin step names and checks writers are in the same pull request and
+can be edited too, so they stop only an honest mistake. That is the trust
+level of every required context here (see "Required checks trust the pull
+request's own workflow YAML"). Three things stand behind it:
+- the run signal (event, triggering actor and the App's verdict), which no
+  pull request controls;
+- the guard counting only the dedicated App's records;
+- the merge group's full macOS suite.
+
+The repository's default workflow token permission is `read`. That covers
+only jobs that declare no permissions; a pull request can still declare
+`checks: write` explicitly. That is harmless here, because the guard counts
+only the dedicated App's records, which no pull request job can rewrite.
 
 ### Why the contract lane's `macos` check is green
 
