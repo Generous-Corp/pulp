@@ -458,6 +458,13 @@ struct SwiftEmitCtx {
     // shadows) so the import CLI can surface them as `fidelity:` warnings and
     // `--strict-fidelity` can gate on the non-informational ones.
     std::vector<FidelityIssue>* fidelity = nullptr;
+    struct Subtree {
+        const ResolvedNativeNode* resolved = nullptr;
+        std::string property;
+    };
+    std::map<const IRNode*, Subtree> subtrees;
+    std::vector<const IRNode*> subtree_order;
+    bool emit_subtree_references = false;
 };
 
 // Report a SwiftUI-lowering divergence against the fidelity sink (if any).
@@ -649,6 +656,31 @@ void emit_bound_control(std::ostringstream& out, const SwiftEmitCtx& ctx,
 void emit_node(std::ostringstream& out, const SwiftEmitCtx& ctx,
                const IRNode& node, const ResolvedNativeNode& resolved, int depth);
 
+void emit_child_node(std::ostringstream& out, const SwiftEmitCtx& ctx, const IRNode& node,
+                     const ResolvedNativeNode& resolved, int depth) {
+    if (ctx.emit_subtree_references) {
+        const auto it = ctx.subtrees.find(&node);
+        if (it != ctx.subtrees.end()) {
+            emit_line(out, depth, ctx.opts.indent_spaces, "self." + it->second.property);
+            return;
+        }
+    }
+    emit_node(out, ctx, node, resolved, depth);
+}
+
+void collect_subtree_properties(SwiftEmitCtx& ctx, const IRNode& node,
+                                const ResolvedNativeNode& resolved, std::size_t& next_property) {
+    const std::size_t count = std::min(node.children.size(), resolved.children.size());
+    for (std::size_t i = 0; i < count; ++i) {
+        const auto& child = node.children[i];
+        const auto& child_resolved = resolved.children[i];
+        const std::string property = "pulpImportedNode" + std::to_string(next_property++);
+        ctx.subtrees.emplace(&child, SwiftEmitCtx::Subtree{&child_resolved, property});
+        ctx.subtree_order.push_back(&child);
+        collect_subtree_properties(ctx, child, child_resolved, next_property);
+    }
+}
+
 // Emit child indices [lo, hi) into the current ViewBuilder, keeping every
 // container's direct child count <= 10 (SwiftUI's ViewBuilder arity limit) by
 // recursively wrapping in Group blocks. For N <= 10, emit directly. Otherwise
@@ -662,7 +694,7 @@ void emit_child_range(std::ostringstream& out, const SwiftEmitCtx& ctx,
     const std::size_t n = hi - lo;
     if (n <= 10) {
         for (std::size_t i = lo; i < hi; ++i)
-            emit_node(out, ctx, node.children[i], resolved.children[i], depth);
+            emit_child_node(out, ctx, node.children[i], resolved.children[i], depth);
         return;
     }
     const std::size_t chunk = (n + 9) / 10;  // ceil(n/10) → at most 10 groups
@@ -1588,7 +1620,7 @@ void emit_children_distributed(std::ostringstream& out, const SwiftEmitCtx& ctx,
     if (around || end) emit_line(out, depth, s, "Spacer()");
     for (std::size_t i = 0; i < count; ++i) {
         if (i > 0 && (around || between)) emit_line(out, depth, s, "Spacer()");
-        emit_node(out, ctx, node.children[i], resolved.children[i], depth);
+        emit_child_node(out, ctx, node.children[i], resolved.children[i], depth);
     }
     if (around) emit_line(out, depth, s, "Spacer()");
     // space-between with a single child is flex-start: a trailing Spacer pushes
@@ -1868,9 +1900,24 @@ std::string emit_view(const DesignIR& ir, const ResolvedNativeNode& resolved,
     out << "        self.resolver = resolver\n";
     out << "    }\n\n";
     out << "    public var body: some View {\n";
-    SwiftEmitCtx ctx{opts, ir.asset_manifest, opts.fidelity_report};
+    SwiftEmitCtx ctx{opts, ir.asset_manifest, opts.fidelity_report, {}, {}, false};
+    std::size_t next_property = 0;
+    collect_subtree_properties(ctx, ir.root, resolved, next_property);
+    ctx.emit_subtree_references = true;
     emit_node(out, ctx, ir.root, resolved, 2);
     out << "    }\n";
+
+    // Keep each imported subtree in its own ViewBuilder expression. This
+    // preserves the hierarchy while preventing Swift from type-checking a
+    // large browser capture as one deeply nested opaque body expression.
+    for (const IRNode* node : ctx.subtree_order) {
+        const auto it = ctx.subtrees.find(node);
+        if (it == ctx.subtrees.end() || !it->second.resolved)
+            continue;
+        out << "\n    @ViewBuilder\n    private var " << it->second.property << ": some View {\n";
+        emit_node(out, ctx, *node, *it->second.resolved, 2);
+        out << "    }\n";
+    }
     out << "}\n";
     return out.str();
 }
