@@ -1033,26 +1033,74 @@ def _bump_pr_liveness(repo: Path, number: str) -> tuple[str | None, str]:
     return "progressing", "the bump PR awaits review or admission with its required checks pending or green"
 
 
-def _close_stale_bump_pr(repo: Path, number: str, head: str, reason: str,
-                         *, covers: bool = False) -> bool:
-    """Close a bump PR that is a dead end, so this drain can cut a fresh bump
-    covering the whole range: one that is stale (cut before `head`), or one
-    that covers `head` but whose required check failed. Only the PR is closed;
-    the branch is reclaimed by the normal confirmed-no-PR `--force-with-lease`
-    path. Returns success."""
-    cut = (f"It already covers {head[:12]} but" if covers
-           else f"It was cut before {head[:12]} and")
-    comment = (
-        f"version-at-land: closing this bump PR. {cut} cannot land as it "
-        f"stands: {reason}. A fresh bump PR covering the full range replaces "
-        "it.")
-    res = _gh(repo, "pr", "close", number, "--comment", comment, check=False)
-    if res.returncode != 0:
-        sys.stderr.write(f"version-at-land: closing stale bump PR #{number} "
-                         f"failed (exit {res.returncode}).\n{res.stderr or ''}\n")
+def _fetch_bump_tip(repo: Path, remote: str) -> str | None:
+    """Fetch the bump branch and return its tip, or None when it is absent or
+    cannot be fetched. The tip's objects must be local before any ancestry or
+    file comparison against it."""
+    fetched = _git(repo, "fetch", "--quiet", remote,
+                   f"refs/heads/{BUMP_BRANCH}", check=False)
+    if fetched.returncode != 0:
+        return None
+    tip = _git(repo, "rev-parse", "FETCH_HEAD", check=False).stdout.strip()
+    return tip or None
+
+
+def _tip_age_minutes(repo: Path, tip: str, now: int) -> int | None:
+    """Minutes since the standing bump commit was built; None when unreadable."""
+    stamp = _git(repo, "log", "-1", "--format=%ct", tip, check=False).stdout.strip()
+    if not stamp.isdigit():
+        return None
+    return max(0, (now - int(stamp)) // 60)
+
+
+def _plan_rises_above_tip(repo: Path, config: Config, plan: list[Assignment],
+                          tip: str) -> bool:
+    """Whether any surface needs a higher version than the standing bump carries.
+
+    That is the one change worth an immediate update: the standing PR would
+    otherwise land a number the range no longer justifies. An unreadable
+    version at the tip counts as a rise, never as current."""
+    surfaces = {s.name: s for s in config.surfaces}
+    with _in_repo(repo):
+        for a in plan:
+            carried = _current_at_base(tip, surfaces[a.surface])
+            if carried is None or _semver(a.assigned) > _semver(carried):
+                return True
+    return False
+
+
+def _standing_bump_is_current(repo: Path, tip: str, head: str,
+                              edited: list[str], message: str) -> bool:
+    """Whether the bump just built on `head` is the bump the standing PR carries.
+
+    True when the standing commit is a marker commit cut from an ancestor of
+    `head`, changes exactly the files this build edited with identical content,
+    and carries every trailer this build would. Merging it then releases the
+    same versions, and the drain after its merge assesses the landings between
+    its cut and its merge, so keeping it loses nothing. It also keeps a head a
+    reviewer may already have approved instead of resetting the review on every
+    landing that needs no new version."""
+    body = _git(repo, "log", "-1", "--format=%B", tip, check=False).stdout
+    if not any(line.startswith(f"{APPLIED_MARKER}:") for line in body.splitlines()):
         return False
-    sys.stderr.write(f"version-at-land: closed stale bump PR #{number} "
-                     f"({reason}); opening a fresh bump.\n")
+    have = set(body.splitlines())
+    if any(line not in have for line in message.splitlines()
+           if line.startswith("Skill-Update:")):
+        return False
+    cut = _git(repo, "rev-parse", "--verify", "--quiet", f"{tip}^1",
+               check=False).stdout.strip()
+    if not cut or _git(repo, "merge-base", "--is-ancestor", cut, head,
+                       check=False).returncode != 0:
+        return False
+    changed = set(_git(repo, "diff", "--name-only", f"{tip}^1", tip,
+                       check=False).stdout.split())
+    if changed != set(edited):
+        return False
+    for path in edited:
+        ours = _git(repo, "rev-parse", f"HEAD:{path}", check=False).stdout.strip()
+        theirs = _git(repo, "rev-parse", f"{tip}:{path}", check=False).stdout.strip()
+        if not ours or ours != theirs:
+            return False
     return True
 
 
@@ -1124,6 +1172,61 @@ def _arm_auto_merge(repo: Path, ref: str) -> bool:
     return True
 
 
+def _update_standing_pr(
+    repo: Path, config: Config, *, remote: str, number: str, tip: str,
+    plan: list[Assignment], base: str, head: str, state: str | None,
+    window: int, release_now: bool, now: int, report: dict[str, str] | None,
+) -> str:
+    """Bring the standing bump PR's branch up to the bump built on `head`.
+
+    Returns `"pr-updated"` after replacing the branch head (one compare-and-swap
+    push against the observed `tip`; the PR, its number, labels and review
+    thread stay), `"stale-wait"` when the standing head already is this bump
+    and is healthy, `"standing-held"` when an update is due but the coalesce
+    window has not passed and no surface needs a higher version, `"noop"` when
+    the plan writes nothing, and `"exhausted"` when the push lost its lease.
+
+    A dead or red head is repaired the same way: replacing the head clears the
+    reviewer verdict and reruns the checks, which is all a recut did, without
+    closing the PR. The window bounds that repair too, so a persistently red
+    head is retried once per window, not on every drain."""
+    edited = _write_plan(repo, config, plan)
+    if not edited:
+        return "noop"
+    _validate_writer_paths(config, edited, repo)
+    message = _bump_message(plan, base, head, edited)
+    _git(repo, "add", "--", *dict.fromkeys(edited))
+    _git(repo, "commit", "--no-verify", "-m", message)
+
+    current = _standing_bump_is_current(repo, tip, head, edited, message)
+    if current and state == "progressing":
+        return "stale-wait"
+    age = _tip_age_minutes(repo, tip, now)
+    rises = (not current) and _plan_rises_above_tip(repo, config, plan, tip)
+    if not (release_now or window <= 0 or rises or age is None or age >= window):
+        if report is not None:
+            report.update(coalesce=(
+                f"the standing bump PR was built {age} min ago (window "
+                f"{window} min) and no surface needs a higher version"))
+        return "standing-held"
+
+    pushed = _git(repo, "push", "--porcelain",
+                  f"--force-with-lease=refs/heads/{BUMP_BRANCH}:{tip}",
+                  remote, f"HEAD:refs/heads/{BUMP_BRANCH}", check=False)
+    if pushed.returncode != 0:
+        sys.stderr.write(
+            f"version-at-land: updating {BUMP_BRANCH} was rejected (exit "
+            f"{pushed.returncode}); the branch moved under us.\n"
+            f"{(pushed.stderr or pushed.stdout or '').strip()}\n")
+        return "exhausted"
+    edit = _gh(repo, "pr", "edit", number, "--body",
+               _bump_message(plan, base, head), check=False)
+    if edit.returncode != 0:
+        sys.stderr.write(f"version-at-land: could not refresh the body of bump "
+                         f"PR #{number} (exit {edit.returncode}).\n")
+    return "pr-updated"
+
+
 def apply_via_pr(
     repo: Path,
     config: Config,
@@ -1137,10 +1240,11 @@ def apply_via_pr(
     queue_reader: Callable[[Path, str], int | None] | None = None,
     now: int | None = None,
 ) -> tuple[str, list[Assignment]]:
-    """PR-route bumper: build the bump on `BUMP_BRANCH`, open a `chore: bump
-    versions` PR, and arm auto-merge (`--merge`) so it lands THROUGH the merge
-    queue when one is enabled (and as a normal auto-merge PR when it is not — so
-    this route is safe to enable before the queue). Returns `(status, plan)`:
+    """PR-route bumper: keep ONE standing `chore: bump versions` PR on
+    `BUMP_BRANCH`. With none open, build the bump and open it; with one open,
+    update it in place (see "pr-updated") instead of opening or recutting a
+    second. The merge steward admits it; nothing here arms it. Returns
+    `(status, plan)`:
 
       "noop"       — nothing to assign (no intent, or every surface already at/
                      above target at the fresh head).
@@ -1151,19 +1255,23 @@ def apply_via_pr(
       "arm-failed" — the PR is open but auto-merge could not be armed; the run
                      fails (visible + retried) and the next drain re-arms it via
                      the "pending" path, so there is no permanent wedge.
-      "stale-wait" — the open bump PR was cut before this merge but can still
-                     land on its own (in the merge queue, or armed with its
-                     required checks pending or green). The drain waits for it:
-                     its landing re-runs the drain, which bumps every merge
-                     after its cut point. `report` names the PR.
-      "stale-defer" — the open bump PR was cut before this merge and the drain
-                     cannot move past it: a draft hold, an unknown state, or a
-                     dead end (ejected from the merge queue, unarmed, or a
-                     required check failed) with the heal off. The run fails.
-                     With `heal_stale`, a confirmed-stale dead end is closed
-                     and a fresh bump PR covering the whole range is opened;
-                     so is a covering PR whose required check failed, which
-                     would otherwise be re-armed and wait for nothing.
+      "pr-updated" — the standing bump PR was cut before this merge and is now
+                     replaced in place by the bump built on the current main
+                     (one compare-and-swap push; the PR stays). This is also
+                     how a dead or red head is repaired with `heal_stale`:
+                     replacing it clears the verdict and reruns the checks.
+      "standing-held" — an update is due but `coalesce_window` has not passed
+                     since the standing head was built and no surface needs a
+                     higher version; the PR keeps its head. `report` carries
+                     the reason.
+      "stale-wait" — the standing bump PR is left as it is: it is in the merge
+                     queue, its head already is the bump this run would build,
+                     or its branch could not be read. Its landing re-runs the
+                     drain, which bumps every merge after its cut point.
+      "stale-defer" — the standing bump PR cannot be moved past: a draft hold,
+                     an unknown state, or a dead end (ejected from the merge
+                     queue, held, or a required check failed) with the heal
+                     off. The run fails.
       "coalesced"  — no bump PR is open, but `coalesce_decision` holds a new
                      one: other PRs are waiting in the merge queue and the last
                      bump landed under `coalesce_window` minutes ago. The run is
@@ -1220,11 +1328,16 @@ def apply_via_pr(
         if hold:
             return "coalesced", plan
     if ok and existing is not None:
-        # A bump PR whose branch contains `head` carries this merge's intent:
-        # re-arm it and defer. One cut before `head` does not, but it is still
-        # safe to wait for while it can land on its own: its landing re-runs the
-        # drain, which assesses every merge after its cut point. Unknown
-        # coverage is treated as NOT covering.
+        # The one standing bump PR. A bump PR whose branch contains `head`
+        # carries this merge's intent. One cut before `head` is brought up to
+        # `head` in place: the bump is cumulative from the last marker, so
+        # replacing its head loses nothing and no second PR is ever opened. An
+        # update waits while the PR is in the merge queue (a push would eject
+        # it; its landing re-runs the drain, which bumps every merge after its
+        # cut point), and is spaced by the coalesce window unless a surface
+        # needs a higher version. Unknown coverage is treated as NOT covering.
+        stamp = now if now is not None else int(time.time())
+        tip = _fetch_bump_tip(repo, remote)
         covers = _bump_pr_covers(repo, existing, head)
         if covers is True and not heal_stale:
             return ("pending" if _arm_auto_merge(repo, existing)
@@ -1232,28 +1345,27 @@ def apply_via_pr(
         state, reason = _bump_pr_liveness(repo, existing)
         if report is not None:
             report.update(pr=existing, reason=reason)
-        if covers is True:
-            # A covering PR whose required check failed never enqueues, so
-            # re-arming it waits for nothing until main moves and stales it (a
-            # median 17 minutes and up to 124 from red check to close). With
-            # the heal on it is replaced at once. Only a CONFIRMED red head
-            # qualifies: queued, draft, or unknown states are re-armed.
-            if not (state == "red" and _close_stale_bump_pr(
-                    repo, existing, head, reason, covers=True)):
-                return ("pending" if _arm_auto_merge(repo, existing)
-                        else "arm-failed"), plan
-        else:
-            if covers is False and state in ("queued", "progressing"):
-                return "stale-wait", plan
-            # A dead end never lands, so waiting for it wedges the drain until
-            # a human closes it. A stale generated bump is always regenerable,
-            # so replace it. Only on CONFIRMED stale + CONFIRMED dead: a draft
-            # is a release hold, and an unknown state is never read as
-            # replaceable.
-            if not (heal_stale and covers is False
-                    and state in ("dead", "red")
-                    and _close_stale_bump_pr(repo, existing, head, reason)):
-                return "stale-defer", plan
+        if covers is True and state != "red":
+            return ("pending" if _arm_auto_merge(repo, existing)
+                    else "arm-failed"), plan
+        if covers is None or state not in ("progressing", "red", "dead",
+                                           "queued"):
+            # Unknown coverage or state, or a draft: an explicit hold or a
+            # fact that could not be read is never replaced.
+            return "stale-defer", plan
+        if state == "queued":
+            return "stale-wait", plan
+        if state in ("red", "dead") and not heal_stale:
+            return "stale-defer", plan
+        if tip is None:
+            # The branch could not be read, so there is nothing to compare
+            # with or replace; wait rather than guess.
+            return ("stale-wait" if state == "progressing"
+                    else "stale-defer"), plan
+        return _update_standing_pr(
+            repo, config, remote=remote, number=existing, tip=tip, plan=plan,
+            base=base, head=head, state=state, window=coalesce_window,
+            release_now=release_now, now=stamp, report=report), plan
 
     edited = _write_plan(repo, config, plan)
     if not edited:
@@ -1408,19 +1520,22 @@ def main(argv: list[str]) -> int:
                          "PULP_BUMP_ROUTE repo variable; unset ⇒ direct ⇒ no "
                          "behavior change.")
     ap.add_argument("--heal-stale-pr", action="store_true",
-                    help="With --route pr: when the open bump PR was cut before "
-                         "this merge AND is a dead end (ejected from the merge "
-                         "queue, held at its head, or a required check failed), close "
-                         "it and open a fresh bump instead of failing "
-                         "stale-defer. A stale PR still able to land is kept "
-                         "either way. The workflow enables this via the "
+                    help="With --route pr: repair the standing bump PR when it is "
+                         "a dead end (ejected from the merge queue, held at "
+                         "its head, or a required check failed) by replacing "
+                         "its head in place, which clears the verdict and "
+                         "reruns the checks. Never closes or reopens the PR. "
+                         "Without it a dead standing PR fails the run "
+                         "(stale-defer). The workflow enables this via the "
                          "PULP_BUMP_HEAL_STALE_PR repo variable.")
     ap.add_argument("--coalesce-minutes", type=int,
                     default=int(os.environ.get("PULP_BUMP_COALESCE_MINUTES",
                                                COALESCE_WINDOW_MINUTES)),
                     help="With --route pr: hold a new bump PR while other PRs "
                          "are in the merge queue, for up to this many minutes "
-                         "after the last bump landed (0 disables). Default "
+                         "after the last bump landed, and update the standing "
+                         "bump PR no more often than this unless a surface "
+                         "needs a higher version (0 disables). Default "
                          "PULP_BUMP_COALESCE_MINUTES or "
                          f"{COALESCE_WINDOW_MINUTES}.")
     ap.add_argument("--release-now", action="store_true",
@@ -1466,13 +1581,22 @@ def main(argv: list[str]) -> int:
             for a in plan:
                 print(f"version-at-land: {a.surface} {verb} {a.current} -> "
                       f"{a.assigned} ({a.level})")
+        elif status == "pr-updated":
+            for a in plan:
+                print(f"version-at-land: updated bump PR #{report.get('pr')} in "
+                      f"place: {a.surface} {a.current} -> {a.assigned} ({a.level})")
+        elif status == "standing-held":
+            line = (f"version-at-land: bump PR #{report.get('pr')} keeps its "
+                    f"head: {report.get('coalesce')}.")
+            print(f"::notice title=version-at-land::{line}")
+            _write_step_summary(line)
         elif status == "stale-wait":
             # A routine wait, not a failure: the retry is the push that lands
             # the open bump PR, and the PR's dequeue or a failed required check
             # re-runs this drain if it becomes a dead end instead.
-            line = (f"version-at-land: waiting for bump PR #{report.get('pr')}, "
-                    f"cut before this merge ({report.get('reason')}). Its "
-                    "landing re-runs the drain, which bumps the rest.")
+            line = (f"version-at-land: leaving bump PR #{report.get('pr')} as it "
+                    f"is ({report.get('reason')}). Its landing re-runs the "
+                    "drain, which bumps the rest.")
             print(f"::notice title=version-at-land::{line}")
             _write_step_summary(line)
         elif status == "coalesced":
@@ -1490,8 +1614,8 @@ def main(argv: list[str]) -> int:
                 "version-at-land: the open bump PR was cut BEFORE this merge and "
                 f"the drain cannot move past it.{detail} A draft is a release "
                 "hold its owner must resolve; an unknown state is retried; a "
-                "dead end is replaced automatically with "
-                "PULP_BUMP_HEAL_STALE_PR=true, or close it by hand.\n")
+                "dead end is repaired in place with "
+                "PULP_BUMP_HEAL_STALE_PR=true.\n")
             return 1
         elif status == "arm-failed":
             sys.stderr.write(
