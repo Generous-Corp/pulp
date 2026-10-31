@@ -867,6 +867,9 @@ def reachable_on_pr_dispatch(data: dict) -> dict[tuple[str, str], dict]:
 
 TESTED_STEP = ("Tested ${{ steps.tested.outputs.tested_ref }} at ${{ steps.tested.outputs.tested_sha }}"
                " onto ${{ steps.tested.outputs.merged_base }}")
+BOOTSTRAP_TESTED_STEP = (
+    "Tested ${{ needs.classify.outputs.tested_ref }} at ${{ needs.classify.outputs.tested_sha }}"
+    " onto ${{ needs.classify.outputs.merged_base }}")
 RESOLVER_INPUTS = ("allow_hosted_windows", "linux_runner_selector_json", "local_proof",
                    "macos_runner_selector_json", "mise_candidate", "pr_number", "run_windows",
                    "runner_provider", "windows_runner_selector_json")
@@ -927,6 +930,7 @@ PR_DISPATCH_ALLOWLIST: dict[tuple[str, str], tuple[tuple[str, ...], str]] = {
     ("build", "Install Linux dependencies"): ((), "apt install on the hosted runner, as on a PR run"),
     ("build", "Set up Node.js for materialized runtime tests (Linux)"): (("pr_number",), "its npm cache is off on this path"),
     ("macos", "macOS PR/dispatch bootstrap (required when native leg is absent)"): ((), "skip-safe or fail-closed verdict; no build"),
+    ("macos", BOOTSTRAP_TESTED_STEP): (("pr_number",), "names the merge ref, sha and base classify bound, for the tier record; echo only, the values reach the script through env"),
     ("macos", "Check out the reuse record writer"): ((), "sparse checkout of one script"),
     ("macos", "Record that no suite ran, for reuse replay"): ((), "writes a local record; its upload is skipped on this path"),
     ("linux", "Linux leg outcome (advisory)"): ((), "reads this run's jobs"),
