@@ -33,6 +33,8 @@ public struct PulpMotionControlFrame: Sendable, Equatable {
 /// Pure conversion shared by the provider and camera-free tests.
 public enum PulpMotionControlMath {
     /// Maps finite Y-axis acceleration, including gravity, into 0...1.
+    /// `yAcceleration` and `gravity` share one unit: metres per second squared
+    /// with the default, or g with `gravity: 1.0`.
     /// Returns nil for malformed input so the caller can publish loss.
     public static func normalizeTilt(
         yAcceleration: Double,
@@ -129,13 +131,37 @@ public final class PulpMotionControlSource {
         stateLock.unlock()
     }
 
+    /// Publishes one invalid frame for a sensor error while delivery is
+    /// running, with the same ordering guarantees as `submit` and `stop`.
+    private func publishLoss() {
+        stateLock.lock()
+        guard running else {
+            stateLock.unlock()
+            return
+        }
+        sequence &+= 1
+        let frame = PulpMotionControlFrame(
+            sequence: sequence,
+            value: 0.0,
+            confidence: 0.0,
+            valid: false,
+            timestampNanoseconds: 0
+        )
+        publishQueue.async { [publish] in publish(frame) }
+        stateLock.unlock()
+    }
+
     private func submit(yAcceleration: Double, timestamp: TimeInterval) {
         stateLock.lock()
         guard running else {
             stateLock.unlock()
             return
         }
-        let normalized = PulpMotionControlMath.normalizeTilt(yAcceleration: yAcceleration)
+        // Core Motion reports acceleration in g, so one g of gravity is 1.0.
+        let normalized = PulpMotionControlMath.normalizeTilt(
+            yAcceleration: yAcceleration,
+            gravity: 1.0
+        )
         sequence &+= 1
         let frame = PulpMotionControlFrame(
             sequence: sequence,

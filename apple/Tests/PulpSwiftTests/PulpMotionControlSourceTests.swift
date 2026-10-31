@@ -8,6 +8,15 @@ final class PulpMotionControlSourceTests: XCTestCase {
         XCTAssertEqual(PulpMotionControlMath.normalizeTilt(yAcceleration: 9.80665)!, 1.0, accuracy: 0.0001)
     }
 
+    func testNormalizeTiltMapsCoreMotionGUnits() {
+        // Core Motion reports acceleration in g; the provider passes gravity 1.0.
+        XCTAssertEqual(PulpMotionControlMath.normalizeTilt(yAcceleration: -1.0, gravity: 1.0)!, 0.0, accuracy: 0.0001)
+        XCTAssertEqual(PulpMotionControlMath.normalizeTilt(yAcceleration: 0.0, gravity: 1.0)!, 0.5, accuracy: 0.0001)
+        XCTAssertEqual(PulpMotionControlMath.normalizeTilt(yAcceleration: 1.0, gravity: 1.0)!, 1.0, accuracy: 0.0001)
+        // The metres-per-second-squared default would read a full g as ~0.55.
+        XCTAssertEqual(PulpMotionControlMath.normalizeTilt(yAcceleration: 1.0)!, 0.5510, accuracy: 0.001)
+    }
+
     func testNormalizeTiltClampsAndRejectsMalformedInput() {
         XCTAssertEqual(PulpMotionControlMath.normalizeTilt(yAcceleration: 100.0), 1.0)
         XCTAssertEqual(PulpMotionControlMath.normalizeTilt(yAcceleration: -100.0), 0.0)
