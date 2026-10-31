@@ -3,9 +3,12 @@
 # landings sent through ghapp. GitHub-native auto-merge armed before a HOLD
 # never reaches that guard; a required review-verdict status would stop it.
 #
-# The job is also the `review-verdict` check run and fails unless the head is
-# allowed (the pinned script exits non-zero on a refusal or any read error),
-# so a required check cannot be green on a refused head. The rule runs from a
+# The poster job is deliberately NOT named `review-verdict`: a check run from a
+# comment, workflow_run or pull_request_target trigger can attach to the default
+# branch's commit rather than the pull request's head, so a same-named job would
+# leave a second `review-verdict` signal (a red mark on main after a HOLD). The
+# commit status the script posts on the exact head is the only `review-verdict`
+# signal on a pull request. The rule runs from a
 # pinned Shipyard commit, never from the pull request's code, on triggers that
 # all run the default branch's definition of this file. See Shipyard's
 # docs/review-verdict-status.md.
@@ -19,6 +22,15 @@ on:
   workflow_run:
     workflows: [Review verdict trigger]
     types: [completed]
+  # Backfill: judge every open pull request, so landing or changing this
+  # workflow (or running it by hand) gives each one a current status.
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/review-verdict.yml
+      - .github/workflows/review-verdict-trigger.yml
+      - .github/workflows/review-verdict-merge-group.yml
 
 permissions:
   contents: read
@@ -32,13 +44,15 @@ permissions:
 # run queue behind each other; a fork's review lists no pull request and
 # falls back to its head.
 concurrency:
-  group: review-verdict-${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.head_sha }}
+  group: review-verdict-${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.head_sha || 'backfill' }}
   cancel-in-progress: false
 
 jobs:
-  review-verdict:
-    name: review-verdict
-    if: github.event_name != 'issue_comment' || github.event.issue.pull_request
+  post-review-verdict:
+    name: post-review-verdict
+    if: >-
+      github.event_name != 'push' && github.event_name != 'workflow_dispatch'
+      && (github.event_name != 'issue_comment' || github.event.issue.pull_request)
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -61,3 +75,66 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: '"${{ steps.python.outputs.python-path }}" scripts/review_verdict_status.py'
+
+  # Runs the same pinned script once per open, non-draft pull request that
+  # targets main, as if each had just been opened. Only the status is posted;
+  # a refusal is expected here and must not fail the run on main, so each
+  # pull request's outcome is logged as a warning instead. No pull request code
+  # is checked out, and no actions: write is needed (no check is re-run).
+  backfill-review-verdict:
+    name: backfill-review-verdict
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: read
+      statuses: write
+    steps:
+      - name: Check out the pinned rule
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: danielraffel/Shipyard
+          # Same pinned commit as the post-review-verdict job.
+          ref: e7dc77e866a63ba829aaac0daa0abdbbae374468
+          persist-credentials: false
+      - name: Set up Python
+        id: python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.12.12'
+      - name: Post review-verdict for every open pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PYTHON: ${{ steps.python.outputs.python-path }}
+        run: |
+          set -u
+          numbers=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls?state=open&base=main&per_page=100" \
+            --jq '.[] | select(.draft == false) | .number')
+          dir=$(mktemp -d)
+          total=0
+          posted=0
+          unsettled=0
+          for number in $numbers; do
+            total=$((total + 1))
+            printf '{"pull_request":{"number":%s}}' "$number" > "$dir/event.json"
+            # Inline assignment: GitHub ignores a step-level env override of its
+            # default GITHUB_* variables, so the script would see push or
+            # workflow_dispatch and post nothing.
+            rc=0
+            GITHUB_EVENT_NAME=pull_request_target GITHUB_EVENT_PATH="$dir/event.json" \
+              "$PYTHON" scripts/review_verdict_status.py > "$dir/out.txt" 2>&1 || rc=$?
+            cat "$dir/out.txt"
+            if grep -Eq '^review-verdict: (success|failure) on [0-9a-f]{40}$' "$dir/out.txt"; then
+              posted=$((posted + 1))
+            fi
+            if [ "$rc" -ne 0 ]; then
+              echo "::warning::review-verdict for PR #${number} is refused or could not be posted"
+              unsettled=$((unsettled + 1))
+            fi
+          done
+          echo "found ${total} open pull requests; posted ${posted} statuses (${unsettled} refused or errored)"
+          if [ "$total" -gt 0 ] && [ "$posted" -ne "$total" ]; then
+            echo "::error::posted ${posted} statuses for ${total} open pull requests"
+            exit 1
+          fi
