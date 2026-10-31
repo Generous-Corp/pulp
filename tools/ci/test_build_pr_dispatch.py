@@ -527,7 +527,7 @@ class TrustAndIsolationTest(unittest.TestCase):
                     "a2t_receipt_attestation_required == 'true'")):
                 continue
             reachable.add(step["name"])
-        self.assertEqual(reachable, {"Upload the Rust fallback receipt", "Upload ctest logs and JUnit report"})
+        self.assertEqual(reachable, {"Upload ctest logs and JUnit report"})
 
     def test_the_protected_receipt_is_pull_request_only(self) -> None:
         build = steps("build")
@@ -895,7 +895,6 @@ PR_DISPATCH_ALLOWLIST: dict[tuple[str, str], tuple[tuple[str, ...], str]] = {
     ("build", "Bootstrap repository dependencies"): ((), "fetches pinned deps, as on a PR run"),
     ("build", "Install pinned Chrome for browser-source fidelity (macOS ARM64)"): ((), "VM-ephemeral install, as on a PR run"),
     ("build", "Provide the pinned Rust toolchain"): ((), "VM-local toolchain, as on a PR run"),
-    ("build", "Upload the Rust fallback receipt"): ((), "diagnostic upload; no run consumes it"),
     ("build", "Fetch pulp-rs crates"): ((), "read-only crate fetch, as on a PR run"),
     ("build", "Fetch prebuilt Skia (macOS)"): ((), "fetches the pinned Skia, as on a PR run"),
     ("build", "Intel canary — lint + x86_64 GPU-off compile"): ((), "lints against the merged base, as a PR against base.sha"),
@@ -935,7 +934,7 @@ PR_DISPATCH_ALLOWLIST: dict[tuple[str, str], tuple[tuple[str, ...], str]] = {
     ("ci-cause", "actions/checkout@v7"): ((), "sparse checkout of the cause script"),
     ("ci-cause", "Name the cause of each failed job"): ((), "advisory; reads this run's logs, writes annotations"),
 }
-DIAGNOSTIC_UPLOADS = {"Upload the Rust fallback receipt", "Upload ctest logs and JUnit report"}
+DIAGNOSTIC_UPLOADS = {"Upload ctest logs and JUnit report"}
 DEAD_UPLOADS = {"Upload exact GPU-audio SDK (macOS ARM64, retry)", "Publish A2T structural verification",
                 "Publish exact protected-validation receipt"}
 
