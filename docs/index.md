@@ -51,6 +51,7 @@ MIT-licensed. No royalties. No copyleft.
   ownership, traversal, conventional stretch, and optional Heritage-character
   model that matches the product
 - [Web Plugins](guides/web-plugins.md) — WAMv2, WebCLAP, browser-host status
+- [Real-world Inputs](guides/real-world-inputs.md) — map optional CV, sensor, controller, analysis, and network providers across Pulp surfaces
 - [Design from Figma](guides/figma-plugin.md) — the "Design for Pulp" plugin, export, and import ([model](reference/design-import-model.md))
 - [Docs Maintenance](guides/docs-maintenance.md) — how docs stay consistent with code
 

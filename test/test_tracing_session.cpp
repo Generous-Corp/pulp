@@ -60,6 +60,23 @@ private:
 
 } // namespace
 
+TEST_CASE("environment-selected tracing is the startup diagnostics switch", "[tracing][startup]") {
+    if (!pulp::runtime::kTracingEnabled)
+        return;
+
+    REQUIRE_FALSE(Tracing::active());
+    const auto out = std::filesystem::temp_directory_path() / "pulp-trace-startup-switch.pftrace";
+    std::error_code ec;
+    std::filesystem::remove(out, ec);
+    {
+        ScopedEnvironment path_environment("PULP_TRACE_PATH", out.string());
+        Tracing::attach();
+        REQUIRE(Tracing::active());
+        Tracing::detach();
+    }
+    REQUIRE(std::filesystem::exists(out));
+    std::filesystem::remove(out, ec);
+}
 TEST_CASE("tracing session lifecycle", "[tracing]") {
     if (!pulp::runtime::kTracingEnabled) {
         // OFF contract: every call is an inert no-op.

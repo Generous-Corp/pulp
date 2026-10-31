@@ -24,6 +24,41 @@ struct FaceFrame {
     bool tracked = false;
 };
 
+/// Example application-owned multi-signal result. The fields are deliberately
+/// provider/application-specific; Pulp does not interpret hand landmarks.
+/// Every value from one inference carries the same sequence and validity.
+struct HandFrame {
+    std::uint64_t sequence = 0;
+    float x = 0.0f;
+    float y = 0.0f;
+    float pinch = 0.0f;
+    float confidence = 0.0f;
+    bool tracked = false;
+};
+
+/// Example application-owned IMU result. A real Android/iOS/desktop adapter
+/// can choose different fields or units; this fixture only demonstrates that
+/// related orientation values are handed off as one coherent update.
+struct ImuFrame {
+    std::uint64_t sequence = 0;
+    float roll = 0.0f;
+    float pitch = 0.0f;
+    float yaw = 0.0f;
+    float confidence = 0.0f;
+    bool valid = false;
+};
+
+/// Example application-owned output from a custom model. The model may be
+/// ONNX, Core ML, LiteRT, or application code; Pulp does not inspect its
+/// tensor or prescribe these output names.
+struct ModelFrame {
+    std::uint64_t sequence = 0;
+    float drive = 0.0f;
+    float blend = 0.0f;
+    float confidence = 0.0f;
+    bool valid = false;
+};
+
 /// This example reserves channel-16 pitch bend as one control packet.
 /// The upper data bit is validity; the other 13 bits carry a normalized value.
 /// MediaPipe's current page reports presence (0/1), not graded confidence.
@@ -91,6 +126,118 @@ class SignalMapping {
     std::uint64_t age_samples_ = 0;
 };
 
+/// Maps one coherent application-owned frame into related control signals.
+/// This is an example utility, not a universal landmark or sensor schema.
+class HandMapping {
+  public:
+    explicit HandMapping(float confidence_gate = 0.6f, float smoothing = 0.25f) noexcept
+        : x_(confidence_gate, smoothing), y_(confidence_gate, smoothing),
+          pinch_(confidence_gate, smoothing) {}
+
+    void submit(const HandFrame& frame) noexcept {
+        const auto sample = [sequence = frame.sequence, confidence = frame.confidence,
+                             valid = frame.tracked](float value) noexcept {
+            return ControlSample{sequence, value, confidence, valid};
+        };
+        x_.submit(sample(frame.x));
+        y_.submit(sample(frame.y));
+        pinch_.submit(sample(frame.pinch));
+    }
+
+    void advance(std::uint64_t samples, std::uint64_t timeout) noexcept {
+        x_.advance(samples, timeout);
+        y_.advance(samples, timeout);
+        pinch_.advance(samples, timeout);
+    }
+
+    const SignalMapping& x() const noexcept {
+        return x_;
+    }
+    const SignalMapping& y() const noexcept {
+        return y_;
+    }
+    const SignalMapping& pinch() const noexcept {
+        return pinch_;
+    }
+
+  private:
+    SignalMapping x_;
+    SignalMapping y_;
+    SignalMapping pinch_;
+};
+
+/// Maps one application-owned IMU frame. This remains an example utility;
+/// Pulp does not define an orientation schema or sensor units.
+class ImuMapping {
+  public:
+    explicit ImuMapping(float confidence_gate = 0.6f, float smoothing = 0.25f) noexcept
+        : roll_(confidence_gate, smoothing), pitch_(confidence_gate, smoothing),
+          yaw_(confidence_gate, smoothing) {}
+
+    void submit(const ImuFrame& frame) noexcept {
+        const auto sample = [sequence = frame.sequence, confidence = frame.confidence,
+                             valid = frame.valid](float value) noexcept {
+            return ControlSample{sequence, value, confidence, valid};
+        };
+        roll_.submit(sample(frame.roll));
+        pitch_.submit(sample(frame.pitch));
+        yaw_.submit(sample(frame.yaw));
+    }
+
+    void advance(std::uint64_t samples, std::uint64_t timeout) noexcept {
+        roll_.advance(samples, timeout);
+        pitch_.advance(samples, timeout);
+        yaw_.advance(samples, timeout);
+    }
+
+    const SignalMapping& roll() const noexcept {
+        return roll_;
+    }
+    const SignalMapping& pitch() const noexcept {
+        return pitch_;
+    }
+    const SignalMapping& yaw() const noexcept {
+        return yaw_;
+    }
+
+  private:
+    SignalMapping roll_;
+    SignalMapping pitch_;
+    SignalMapping yaw_;
+};
+
+/// Maps two related outputs from one custom-model inference.
+class ModelMapping {
+  public:
+    explicit ModelMapping(float confidence_gate = 0.6f, float smoothing = 0.25f) noexcept
+        : drive_(confidence_gate, smoothing), blend_(confidence_gate, smoothing) {}
+
+    void submit(const ModelFrame& frame) noexcept {
+        const auto sample = [sequence = frame.sequence, confidence = frame.confidence,
+                             valid = frame.valid](float value) noexcept {
+            return ControlSample{sequence, value, confidence, valid};
+        };
+        drive_.submit(sample(frame.drive));
+        blend_.submit(sample(frame.blend));
+    }
+
+    void advance(std::uint64_t samples, std::uint64_t timeout) noexcept {
+        drive_.advance(samples, timeout);
+        blend_.advance(samples, timeout);
+    }
+
+    const SignalMapping& drive() const noexcept {
+        return drive_;
+    }
+    const SignalMapping& blend() const noexcept {
+        return blend_;
+    }
+
+  private:
+    SignalMapping drive_;
+    SignalMapping blend_;
+};
+
 /// Deterministic mock/replay source used by tests and camera-free development.
 /// The provider owns the frame storage; replay only walks one coherent sample
 /// at a time and never touches the audio thread.
@@ -114,6 +261,78 @@ class ControlReplay {
 
   private:
     std::span<const ControlSample> samples_;
+    std::size_t cursor_ = 0;
+};
+
+/// Deterministic replay for a provider-owned coherent multi-signal frame.
+class HandReplay {
+  public:
+    explicit HandReplay(std::span<const HandFrame> frames) noexcept : frames_(frames) {}
+
+    bool next(HandMapping& mapping) noexcept {
+        if (cursor_ >= frames_.size())
+            return false;
+        mapping.submit(frames_[cursor_++]);
+        return true;
+    }
+
+    void reset() noexcept {
+        cursor_ = 0;
+    }
+    std::size_t position() const noexcept {
+        return cursor_;
+    }
+
+  private:
+    std::span<const HandFrame> frames_;
+    std::size_t cursor_ = 0;
+};
+
+/// Deterministic replay for an application-owned IMU frame stream.
+class ImuReplay {
+  public:
+    explicit ImuReplay(std::span<const ImuFrame> frames) noexcept : frames_(frames) {}
+
+    bool next(ImuMapping& mapping) noexcept {
+        if (cursor_ >= frames_.size())
+            return false;
+        mapping.submit(frames_[cursor_++]);
+        return true;
+    }
+
+    void reset() noexcept {
+        cursor_ = 0;
+    }
+    std::size_t position() const noexcept {
+        return cursor_;
+    }
+
+  private:
+    std::span<const ImuFrame> frames_;
+    std::size_t cursor_ = 0;
+};
+
+/// Deterministic replay for application-owned custom-model outputs.
+class ModelReplay {
+  public:
+    explicit ModelReplay(std::span<const ModelFrame> frames) noexcept : frames_(frames) {}
+
+    bool next(ModelMapping& mapping) noexcept {
+        if (cursor_ >= frames_.size())
+            return false;
+        mapping.submit(frames_[cursor_++]);
+        return true;
+    }
+
+    void reset() noexcept {
+        cursor_ = 0;
+    }
+    std::size_t position() const noexcept {
+        return cursor_;
+    }
+
+  private:
+    std::span<const ModelFrame> frames_;
     std::size_t cursor_ = 0;
 };
 
