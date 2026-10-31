@@ -50,6 +50,7 @@ jobs:
           MACOS_RUNS_ON_JSON: ${{ vars.PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON }}
           EVENT_NAME: ${{ github.event_name }}
           ALLOW_HOSTED_WINDOWS_VAR: ${{ vars.PULP_ALLOW_HOSTED_WINDOWS || '' }}
+          WINDOWS_X64_RUNS_ON_JSON: ${{ vars.PULP_LOCAL_WINDOWS_X64_RUNS_ON_JSON || '' }}
         run: |
           set -euo pipefail
           macos=$(python3 tools/scripts/resolve_runs_on.py \
@@ -58,15 +59,23 @@ jobs:
             --override-env MACOS_RUNS_ON_JSON \
             --default-label macos-latest)
           echo "macos_runs_on=${macos}" >>"${GITHUB_OUTPUT}"
-          # GitHub-hosted Windows is opt-in (PULP_ALLOW_HOSTED_WINDOWS=1) on
-          # every event but the nightly schedule, which is the only Windows
-          # coverage until local Windows lanes serve. No required context reads
-          # this workflow.
-          matrix=$(MACOS="$macos" python3 -c '
+          # The Windows row runs on the nightly schedule and on a dispatch, on
+          # the self-hosted Windows x64 lane; PULP_ALLOW_HOSTED_WINDOWS=1 moves
+          # it to GitHub-hosted windows-latest and adds it to a push. No
+          # required context reads this workflow.
+          windows=""
+          if [ "$EVENT_NAME" = schedule ] || [ "$EVENT_NAME" = workflow_dispatch ] \
+            || [ "$ALLOW_HOSTED_WINDOWS_VAR" = 1 ]; then
+            windows=$(python3 tools/scripts/windows_runner_selector.py --route \
+              --event-name "$EVENT_NAME" \
+              --default-selector "$WINDOWS_X64_RUNS_ON_JSON" \
+              --allow-hosted "$ALLOW_HOSTED_WINDOWS_VAR" | sed -n 's/^runs_on=//p')
+          fi
+          matrix=$(MACOS="$macos" WINDOWS="$windows" python3 -c '
           import json, os
           rows = [{"os": "macos-latest", "runs_on_json": os.environ["MACOS"]}]
-          if os.environ["EVENT_NAME"] == "schedule" or os.environ.get("ALLOW_HOSTED_WINDOWS_VAR") == "1":
-              rows.append({"os": "windows-latest", "runs_on_json": json.dumps("windows-latest")})
+          if os.environ["WINDOWS"]:
+              rows.append({"os": "windows-x64", "runs_on_json": os.environ["WINDOWS"]})
           print(json.dumps({"include": rows}))
           ')
           echo "matrix=${matrix}" >>"${GITHUB_OUTPUT}"

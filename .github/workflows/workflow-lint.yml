@@ -52,6 +52,7 @@ on:
       - 'tools/scripts/test_cross_platform_check_concurrency.py'
       - 'tools/scripts/windows_runner_selector.py'
       - 'tools/scripts/test_windows_runner_selector.py'
+      - 'tools/scripts/test_windows_x64_routing.py'
       - 'tools/scripts/windows_cli_compile_scope.py'
       - 'tools/scripts/test_windows_cli_compile_scope.py'
       - 'tools/scripts/windows_cli_release_precheck.py'
@@ -195,6 +196,7 @@ on:
       - 'tools/scripts/test_cross_platform_check_concurrency.py'
       - 'tools/scripts/windows_runner_selector.py'
       - 'tools/scripts/test_windows_runner_selector.py'
+      - 'tools/scripts/test_windows_x64_routing.py'
       - 'tools/scripts/windows_cli_compile_scope.py'
       - 'tools/scripts/test_windows_cli_compile_scope.py'
       - 'tools/scripts/windows_cli_release_precheck.py'
@@ -555,6 +557,8 @@ jobs:
           python3 tools/scripts/test_cross_platform_check_concurrency.py
           # A dispatch-routed Windows job never lands on a macOS or Linux pool.
           python3 tools/scripts/test_windows_runner_selector.py
+          # Windows x64 jobs default to the self-hosted lane; hosted is opt-in.
+          python3 tools/scripts/test_windows_x64_routing.py
           # Pulp #47 — guard the linux-arm64 Skia manifest entry against
           # silent regressions (parallel to the linux-x64 / mac-arm64
           # entries enforced by tests/test_skia_determinism.py).
