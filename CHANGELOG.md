@@ -9,6 +9,15 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1372"></a>
+## [1.37.2] - 2026-10-31
+
+- release/version bump ([#11327](https://github.com/Generous-Corp/pulp/pull/11327))
+- ci/windows self hosted default ([#11117](https://github.com/Generous-Corp/pulp/pull/11117))
+- fix/windows vst3 startup diagnostics 20261018 ([#10527](https://github.com/Generous-Corp/pulp/pull/10527))
+- release/version bump ([#11323](https://github.com/Generous-Corp/pulp/pull/11323))
+- feature/real world inputs ios motion 20261031 ([#11318](https://github.com/Generous-Corp/pulp/pull/11318))
+
 <a id="v1371"></a>
 ## [1.37.1] - 2026-10-31
 
@@ -11957,6 +11966,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.37.2]: https://github.com/Generous-Corp/pulp/releases/tag/v1.37.2
 [1.37.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.37.1
 [1.37.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.37.0
 [1.36.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.36.0
