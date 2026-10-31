@@ -1411,6 +1411,27 @@ class StandingBumpPrTest(unittest.TestCase):
         self.assertEqual(status, "pr-updated")
         self.assertNotEqual(self._tip(), held)
 
+    def test_a_rebuild_identical_to_the_standing_head_is_not_an_update(self) -> None:
+        """Nothing changed since the head was built (same tree, parent, message
+        and time): the force push would be a no-op, so it must not be reported
+        or edited as an update."""
+        moment = 1_800_000_000
+        self.assertEqual(self._drain(_FakeGh(open_prs=0), now=moment)[0],
+                         "pr-opened")
+        built = self._tip()
+        fake = _FakeGh(open_prs=1, covers=False, ejected=True, armed=False)
+        status, _ = self._drain(fake, heal_stale=True, coalesce_window=0,
+                                now=moment)
+        self.assertEqual(status, "stale-wait")
+        self.assertEqual(self._tip(), built)
+        self.assertFalse(fake.did("pr", "edit"))
+        # Control: a later clock reading is a different commit and does update.
+        fake = _FakeGh(open_prs=1, covers=False, ejected=True, armed=False)
+        status, _ = self._drain(fake, heal_stale=True, coalesce_window=0,
+                                now=moment + 60)
+        self.assertEqual(status, "pr-updated")
+        self.assertNotEqual(self._tip(), built)
+
     def test_a_queued_standing_pr_is_never_pushed_to(self) -> None:
         self.assertEqual(self._drain(_FakeGh(open_prs=0))[0], "pr-opened")
         built = self._tip()

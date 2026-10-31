@@ -1172,6 +1172,21 @@ def _arm_auto_merge(repo: Path, ref: str) -> bool:
     return True
 
 
+def _commit_bump(repo: Path, message: str, now: int) -> str:
+    """Commit the staged bump dated `now` and return the new commit's SHA.
+
+    The date comes from the caller's clock, not the process clock, so the same
+    inputs always build the same commit: a rebuild that changes nothing yields
+    the standing head's SHA (and is then recognised as such), and the commit
+    time the window is measured from is the time the run was told it is."""
+    env = dict(os.environ)
+    env["GIT_AUTHOR_DATE"] = env["GIT_COMMITTER_DATE"] = f"{now} +0000"
+    subprocess.run(["git", "-C", str(repo), "commit", "--no-verify", "-m", message],
+                   check=True, capture_output=True, text=True, encoding="utf-8",
+                   env=env)
+    return _rev_parse(repo, "HEAD")
+
+
 def _update_standing_pr(
     repo: Path, config: Config, *, remote: str, number: str, tip: str,
     plan: list[Assignment], base: str, head: str, state: str | None,
@@ -1196,7 +1211,11 @@ def _update_standing_pr(
     _validate_writer_paths(config, edited, repo)
     message = _bump_message(plan, base, head, edited)
     _git(repo, "add", "--", *dict.fromkeys(edited))
-    _git(repo, "commit", "--no-verify", "-m", message)
+    built = _commit_bump(repo, message, now)
+    if built == tip:
+        # The rebuild is the standing head byte for byte: pushing it would
+        # change nothing, so it is not an update.
+        return "stale-wait"
 
     current = _standing_bump_is_current(repo, tip, head, edited, message)
     if current and state == "progressing":
@@ -1375,7 +1394,8 @@ def apply_via_pr(
     # Stage ONLY the edited version files (never `git add -A` — a blanket add
     # re-stages this repo's submodule gitlink).
     _git(repo, "add", "--", *dict.fromkeys(edited))
-    _git(repo, "commit", "--no-verify", "-m", _bump_message(plan, base, head, edited))
+    _commit_bump(repo, _bump_message(plan, base, head, edited),
+                 now if now is not None else int(time.time()))
 
     # Plain push first — creates the branch or fast-forwards it. A NON-force
     # push cannot clobber anyone.
