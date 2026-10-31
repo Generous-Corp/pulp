@@ -372,7 +372,7 @@ The bump can land two ways, selected by the `PULP_BUMP_ROUTE` repo variable
     head never lands. Nobody arms PRs under the steward admission model, so an
     unarmed PR is not a dead end: it is waiting for review or for the steward's
     next pass and is LIVE. It is dead only when it was ejected from the queue,
-    a required check on its head failed, or the last line of a PR comment is
+    a required check on its head failed, or the last line of a stamped comment by the verdict App is
     `verdict: HOLD head:<sha>` with the sha equal to the current head. A HOLD on
     an older head leaves the current head unreviewed, which is live. Comments
     that cannot be read never make a PR dead. With the

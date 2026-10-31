@@ -911,10 +911,20 @@ _VERDICT_LAST_LINE = re.compile(
     r"^\s*verdict:\s*(APPROVE|HOLD)\s+head:\s*([0-9a-f]{40})\s*$", re.I)
 
 
+# Verdict comments count only from the App that posts them. The repository is
+# public, so any account can write `verdict: HOLD head:<sha>`; trusting it would
+# let an outsider make heal recut every bump PR. `gh` reports the App login
+# without the `[bot]` suffix, the REST API with it. The ghapp session stamp is
+# a second, independent mark that the comment went through the review path.
+_VERDICT_AUTHORS = frozenset({"shipyard-local", "shipyard-local[bot]",
+                              "app/shipyard-local"})
+_SESSION_STAMP = re.compile(r"<!--\s*session:[^>]*-->")
+
+
 def _head_hold(repo: Path, number: str) -> bool | None:
     """Does the bump PR's CURRENT head carry an explicit reviewer HOLD?
 
-    A review comment ends with `verdict: HOLD head:<sha>` or `verdict: APPROVE
+    Only comments by the verdict App that carry the session stamp count. A review comment ends with `verdict: HOLD head:<sha>` or `verdict: APPROVE
     head:<sha>`. Only a verdict whose sha equals the current head counts, and
     the newest such comment decides, so a HOLD on an older head leaves the
     current head unreviewed (live). `None` when the comments cannot be read."""
@@ -930,8 +940,12 @@ def _head_hold(repo: Path, number: str) -> bool | None:
             return None
         latest = None
         for c in comments:
-            lines = [ln for ln in str((c or {}).get("body") or "").splitlines()
-                     if ln.strip()]
+            c = c or {}
+            login = str((c.get("author") or {}).get("login") or "").lower()
+            body = str(c.get("body") or "")
+            if login not in _VERDICT_AUTHORS or not _SESSION_STAMP.search(body):
+                continue
+            lines = [ln for ln in body.splitlines() if ln.strip()]
             m = _VERDICT_LAST_LINE.match(lines[-1]) if lines else None
             if m and m.group(2).lower() == head:
                 latest = m.group(1).upper()

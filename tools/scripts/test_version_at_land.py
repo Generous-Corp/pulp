@@ -569,7 +569,9 @@ class _FakeGh:
                 body = ("findings\n\nverdict: HOLD head:" + tip) if self.hold else ""
                 return subprocess.CompletedProcess(
                     args, 0, stderr="", stdout=json.dumps({
-                        "headRefOid": tip, "comments": [{"body": body}]}))
+                        "headRefOid": tip, "comments": [{
+                            "author": {"login": "shipyard-local"},
+                            "body": "<!-- session: x -->\n" + body}]}))
             if "headRefOid" in args:
                 # Model the PR branch tip against the REAL repo, so the guard's
                 # `merge-base --is-ancestor` is exercised for real rather than
@@ -1552,11 +1554,36 @@ class BumpPrLivenessTest(unittest.TestCase):
     OLD = "b" * 40
 
     def _hold_for(self, comments, *, rc=0, head=None):
-        out = json.dumps({"headRefOid": head or self.HEAD,
-                          "comments": [{"body": b} for b in comments]})
+        stamp = "\n<!-- session: m3/abc agent: pulp-review -->\n"
+        out = json.dumps({"headRefOid": head or self.HEAD, "comments": [
+            {"author": {"login": "shipyard-local"},
+             "body": b.replace("verdict:", stamp + "verdict:", 1)}
+            for b in comments]})
         val._gh = lambda repo, *a, check=True: subprocess.CompletedProcess(
             a, rc, stdout=out if rc == 0 else "", stderr="")
         return val._head_hold(Path("."), "1")
+
+    def _raw(self, login, body):
+        out = json.dumps({"headRefOid": self.HEAD, "comments": [
+            {"author": {"login": login}, "body": body}]})
+        val._gh = lambda repo, *a, check=True: subprocess.CompletedProcess(
+            a, 0, stdout=out, stderr="")
+        return val._head_hold(Path("."), "1")
+
+    def test_hold_from_a_foreign_login_is_ignored(self) -> None:
+        body = ("x\n<!-- session: m3/abc agent: pulp-review -->\n"
+                f"verdict: HOLD head:{self.HEAD}")
+        self.assertFalse(self._raw("some-outsider", body))
+
+    def test_hold_from_the_app_without_the_stamp_is_ignored(self) -> None:
+        self.assertFalse(self._raw("shipyard-local",
+                                   f"verdict: HOLD head:{self.HEAD}"))
+
+    def test_stamped_hold_from_the_app_is_a_hold(self) -> None:
+        body = ("x\n<!-- session: m3/abc agent: pulp-review -->\n"
+                f"verdict: HOLD head:{self.HEAD}")
+        for login in ("shipyard-local", "shipyard-local[bot]"):
+            self.assertTrue(self._raw(login, body))
 
     def test_hold_at_current_head_is_a_hold(self) -> None:
         self.assertTrue(self._hold_for(
