@@ -36,6 +36,13 @@
         "ConnectionClass",
         "ExecutorTopologyValidation"
       ]
+    },
+    {
+      "path": "test/test_graph_serializer.cpp",
+      "needles": [
+        "SignalGraph D1 replay probe separates plan determinism from persistence order",
+        "gain_edit.set_node_gain"
+      ]
     }
   ],
   "surfaces": {
