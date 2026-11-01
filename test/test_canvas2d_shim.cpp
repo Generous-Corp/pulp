@@ -1566,10 +1566,14 @@ TEST_CASE("Canvas2D createPattern accepts image-like objects with .src",
 
 TEST_CASE("Canvas2D pattern flushes via canvasSetFillPattern bridge fn",
           "[view][canvas2d][issue-1434][bridge-thin]") {
+    // This test covers shim dispatch. Path confinement is covered by the
+    // security-tagged bridge tests, so opt into the legacy working-directory
+    // lookup for the synthetic texture name used here.
     // ctx.fillStyle = pattern -> canvasSetFillPattern -> set_fill_pattern
     // command on the CanvasWidget. The fill_rect that follows MUST land
     // after the pattern setter so the active fill paint stays current.
     ScriptedBridge env;
+    env.bridge->set_allow_unreviewed_file_paths(true);
     env.load(R"(
         var c = document.createElement('canvas');
         globalThis.__test_canvas_el__ = c;
@@ -1680,8 +1684,12 @@ TEST_CASE("Canvas2D pattern no-repeat packs tile modes correctly",
 
 TEST_CASE("Canvas2D pattern strokeStyle flushes via canvasSetStrokePattern",
           "[view][canvas2d][issue-1434][bridge-thin]") {
+    // This test covers shim dispatch. Path confinement is covered by the
+    // security-tagged bridge tests, so opt into the legacy working-directory
+    // lookup for the synthetic texture name used here.
     // ctx.strokeStyle = pattern -> canvasSetStrokePattern -> set_stroke_pattern
     ScriptedBridge env;
+    env.bridge->set_allow_unreviewed_file_paths(true);
     env.load(R"(
         var c = document.createElement('canvas');
         globalThis.__test_canvas_el__ = c;
