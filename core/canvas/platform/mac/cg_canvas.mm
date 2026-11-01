@@ -1353,6 +1353,40 @@ bool CoreGraphicsCanvas::draw_image_from_data_rect(const uint8_t* data, size_t s
                                  dx, dy, dw, dh);
 }
 
+namespace {
+CGImageRef cg_image_from_rgba(const uint8_t* data, size_t size, uint32_t width,
+                              uint32_t height) {
+    if (!data || width == 0 || height == 0 ||
+        static_cast<uint64_t>(width) * height * 4u > size)
+        return nullptr;
+    CGColorSpaceRef space = CGColorSpaceCreateDeviceRGB();
+    if (!space) return nullptr;
+    CGContextRef bitmap = CGBitmapContextCreate(
+        const_cast<uint8_t*>(data), width, height, 8, static_cast<size_t>(width) * 4u,
+        space, kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+    CGColorSpaceRelease(space);
+    if (!bitmap) return nullptr;
+    CGImageRef image = CGBitmapContextCreateImage(bitmap);
+    CGContextRelease(bitmap);
+    return image;
+}
+} // namespace
+
+bool CoreGraphicsCanvas::draw_image_from_rgba(const uint8_t* data, size_t size,
+                                              uint32_t width, uint32_t height,
+                                              float x, float y, float w, float h) {
+    return draw_cg_image_in_rect(cg_image_from_rgba(data, size, width, height), false,
+                                 0, 0, 0, 0, x, y, w, h);
+}
+
+bool CoreGraphicsCanvas::draw_image_from_rgba_rect(const uint8_t* data, size_t size,
+                                                   uint32_t width, uint32_t height,
+                                                   float sx, float sy, float sw, float sh,
+                                                   float dx, float dy, float dw, float dh) {
+    return draw_cg_image_in_rect(cg_image_from_rgba(data, size, width, height), true,
+                                 sx, sy, sw, sh, dx, dy, dw, dh);
+}
+
 bool CoreGraphicsCanvas::measure_image_from_file(const std::string& path,
                                                  float& out_width,
                                                  float& out_height) {
