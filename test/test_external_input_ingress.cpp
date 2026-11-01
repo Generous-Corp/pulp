@@ -1,4 +1,6 @@
 #include "../examples/cv-control/cv_control.hpp"
+// This test intentionally includes the processor implementation so it can drive
+// the same OSC callback used by the live receiver, including publication state.
 #include "../examples/cv-control/cv_control_processor.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/osc/osc.hpp>
