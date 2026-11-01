@@ -12,7 +12,7 @@ runtime or a second control authority.
 |---|---|---|
 | Build fixed DSP or voice logic | [Processing models](../reference/processing-models.md) and `Processor` | Processor lifecycle and audio output tests |
 | Learn the graph vocabulary | [Signal Graph Reference](../reference/signal-graph.md) | A small graph that loads, prepares, and renders |
-| Study a complete example | [Sample granular graphs](sample-granular-graphs.md) | The example's structural and executable receipts |
+| Study a complete example | [Sample granular graphs](sample-granular-graphs.md) and the [installed consumer README](../../examples/sample-region-allpass/README.md) | The example's structural and executable receipts |
 | Build editable routing or hosted composition | [Choose the graph boundary](#choose-the-graph-boundary) | A prepared graph and one executable render |
 | Turn an authored or generated graph into audio | [Load and validate before preparation](#load-and-validate-before-preparation) | Limits, preparation, partition contract, and output receipt |
 | Change a running graph | [Prepare and publish a safe edit](#prepare-and-publish-a-safe-edit) | Valid edit acceptance and invalid edit rollback |
@@ -29,7 +29,7 @@ compact status view; this guide is the operational sequence.
 An audio graph is a set of processing nodes connected by typed paths. Audio,
 MIDI, automation, modulation, and feedback move along those paths in a defined
 order. The graph is useful when the application needs to make the connections
-themselves part of the product: a patch editor, instrument voice network,
+themselves part of the product: a patch editor, instrument routing network,
 effect chain, mixer, or hosted processing rack.
 
 | Use this boundary | When it fits | Typical work |
@@ -47,9 +47,11 @@ explicitly gated; read the [capability matrix](../reference/signal-graph-capabil
 before treating a row as a universal guarantee.
 
 The practical rule is to keep fixed DSP and voice state in `Processor`, and use
-`SignalGraph` where composition is the feature being edited. A `Processor` may
-own a prepared graph through the existing binding, so choosing the graph boundary
-does not require a second runtime or a duplicate control model.
+`SignalGraph` where composition is the feature being edited. `ProcessorNode` can
+wrap a caller-owned `Processor`, while the graph owns routing and execution; a
+timeline binding likewise requires its graph and program store to outlive the
+binding. Choosing the graph boundary does not require a second runtime or a
+duplicate control model.
 
 ## Choose the graph boundary
 
@@ -57,8 +59,9 @@ Start with [Processing models](../reference/processing-models.md). Keep fixed
 DSP, voice state, and sample processing in `Processor`. Use
 `pulp::host::SignalGraph` when the routing or hosted composition is the thing
 the application edits: a rack, mixer, modular patch, plugin host, or node
-editor. A `Processor` can own a prepared graph through the existing binding;
-that ownership does not change the Processor/SignalGraph boundary.
+editor. `ProcessorNode` instead wraps a non-owning `Processor` while
+`SignalGraph` owns routing and execution. Timeline playback uses its existing
+binding to lower transport-driven work into graph nodes.
 
 ## Discover a fixture or kit
 
