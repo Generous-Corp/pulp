@@ -32,7 +32,7 @@ bool u32(View o, const char* k, std::uint32_t& out) {
     out = static_cast<std::uint32_t>(n);
     return true;
 }
-runtime::ExternalInputStatus status(std::string_view v) {
+std::optional<runtime::ExternalInputStatus> status(std::string_view v) {
     if (v == "valid")
         return runtime::ExternalInputStatus::valid;
     if (v == "invalid")
@@ -41,7 +41,7 @@ runtime::ExternalInputStatus status(std::string_view v) {
         return runtime::ExternalInputStatus::denied;
     if (v == "paused")
         return runtime::ExternalInputStatus::paused;
-    return runtime::ExternalInputStatus::unavailable;
+    return std::nullopt;
 }
 const char* status_name(runtime::ExternalInputStatus s) {
     switch (s) {
@@ -96,7 +96,7 @@ ExternalInputReplayReceipt run_external_input_replay(const std::filesystem::path
     receipt.fixture = path.string();
     std::ifstream input(path);
     std::string line;
-    std::uint64_t block = 128;
+    std::uint64_t block = 128, capacity = 64;
     bool header = false;
     std::optional<runtime::ExternalInputVerdict> last;
     while (std::getline(input, line)) {
@@ -127,6 +127,7 @@ ExternalInputReplayReceipt run_external_input_replay(const std::filesystem::path
                 ++receipt.failed;
                 continue;
             }
+            capacity = cap;
             policy = {static_cast<std::uint32_t>(source), static_cast<float>(min), age,
                       static_cast<std::uint8_t>(count)};
             header = true;
@@ -149,9 +150,18 @@ ExternalInputReplayReceipt run_external_input_replay(const std::filesystem::path
                 ++receipt.failed;
                 continue;
             }
-            f.status = status(o["status"].getString());
+            const auto parsed_status = status(o["status"].getString());
+            if (!parsed_status) {
+                ++receipt.failed;
+                continue;
+            }
+            f.status = *parsed_status;
             f.confidence = static_cast<float>(confidence);
             f.count = static_cast<std::uint8_t>(o["values"].size());
+            if (f.count > capacity) {
+                ++receipt.failed;
+                continue;
+            }
             for (std::uint32_t i = 0; i < f.count; ++i) {
                 double value = 0;
                 if (!number(o["values"][i], value)) {
@@ -215,9 +225,9 @@ ExternalInputReplayReceipt run_external_input_replay(const std::filesystem::path
                 for (std::uint32_t i = 0; i < o["values"].size(); ++i) {
                     double expected = 0;
                     ++receipt.checked;
-                    if (!number(o["values"][i], expected) ||
-                        std::abs(gate.value(i, std::numeric_limits<float>::quiet_NaN()) -
-                                 expected) > tolerance)
+                    if (!number(o["values"][i], expected) || i >= gate.values().size() ||
+                        !std::isfinite(gate.values()[i]) ||
+                        std::abs(static_cast<double>(gate.values()[i]) - expected) > tolerance)
                         ++receipt.failed;
                 }
             }
