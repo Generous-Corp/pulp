@@ -240,7 +240,51 @@ pulp::midi::MidiBuffer note_on() {
     return events;
 }
 
+Buffer<float> render_live_note(ModularInstrument& fixture, float modulation) {
+    REQUIRE(fixture.graph.prepare(kSampleRate, kBlockSize));
+    auto input = constant_input(kBlockSize, modulation);
+    Buffer<float> output(2, kBlockSize);
+    REQUIRE(fixture.graph.inject_midi(fixture.midi, note_on()));
+    auto output_view = output.view();
+    fixture.graph.process(output_view, std::as_const(input).view(), kBlockSize);
+    return output;
+}
+
+Buffer<float> render_offline_note(ModularInstrument& fixture, float modulation) {
+    REQUIRE(fixture.graph.prepare(kSampleRate, kBlockSize));
+    pulp::host::OfflineSignalGraphHost offline(fixture.graph);
+    pulp::host::OfflineSignalGraphConfig config;
+    config.sample_rate = kSampleRate;
+    config.block_frames = kBlockSize;
+    config.input_channels = 1;
+    config.output_channels = 2;
+    REQUIRE(offline.prepare(config));
+    auto input = constant_input(kBlockSize, modulation);
+    REQUIRE(fixture.graph.inject_midi(fixture.midi, note_on()));
+    pulp::host::OfflineSignalGraphOptions options;
+    options.frame_count = kBlockSize;
+    options.input = std::as_const(input).view();
+    const auto result = offline.render(options);
+    REQUIRE(result.ok);
+    REQUIRE(result.blocks_rendered == 1);
+    return result.audio;
+}
+
 } // namespace
+
+TEST_CASE("X9 live and offline rendering agree for the same event and input",
+          "[host][graph][x9][offline][deterministic]") {
+    ModularInstrument live;
+    ModularInstrument offline;
+    configure_modular_instrument(live);
+    configure_modular_instrument(offline);
+
+    const auto live_output = render_live_note(live, 0.5f);
+    const auto offline_output = render_offline_note(offline, 0.5f);
+    REQUIRE(rms(live_output) > 1.0e-5f);
+    REQUIRE(rms(offline_output) > 1.0e-5f);
+    require_equal_buffer(live_output, offline_output);
+}
 
 TEST_CASE("X9 public APIs compose a modular instrument through a live graph",
           "[host][graph][x9][midi][modulation][state][offline]") {
@@ -290,12 +334,14 @@ TEST_CASE("X9 public APIs compose a modular instrument through a live graph",
 
     // A malformed candidate must be rejected without disturbing the committed
     // graph. This is the failure control for runtime graph mutation.
+    const auto active_snapshot_before_rejection = fixture.graph.live_snapshot_handle();
     auto rejected = fixture.graph.begin_prepared_topology_edit();
     REQUIRE(rejected);
     REQUIRE_FALSE(rejected->connect(fixture.synth_node, 0, 999'999, 0));
     REQUIRE(rejected->prepare(kSampleRate, kBlockSize) ==
             SignalGraph::PreparedTopologyEdit::Result::InvalidMutation);
     REQUIRE(rejected->commit() == SignalGraph::PreparedTopologyEdit::Result::NotPrepared);
+    REQUIRE(fixture.graph.live_snapshot_handle() == active_snapshot_before_rejection);
 
     Buffer<float> edited_output(2, kBlockSize);
     auto edited_output_view = edited_output.view();
