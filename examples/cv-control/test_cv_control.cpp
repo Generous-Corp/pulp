@@ -1,7 +1,7 @@
 #include "cv_control.hpp"
 #include "cv_control_processor.hpp"
-#include <array>
 #include <atomic>
+#include <array>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <limits>
@@ -264,26 +264,16 @@ TEST_CASE("custom model replay keeps related outputs coherent") {
 
 TEST_CASE("browser SysEx decoder accepts bounded multi-value packet", "[cv][midi][sysex]") {
     std::vector<std::uint8_t> packet{0xf0, 0x7d, 'P', 'I', 1};
-    auto append32 = [&](std::uint32_t v) {
-        for (int i = 0; i < 4; ++i)
-            packet.push_back((v >> (8 * i)) & 0xff);
-    };
-    append32(9);
-    append32(2);
-    packet.push_back(7);
-    for (int i = 1; i < 8; ++i)
-        packet.push_back(0);
-    for (int i = 0; i < 8; ++i)
-        packet.push_back(0);
+    auto append32 = [&](std::uint32_t v) { for (int i = 0; i < 4; ++i) packet.push_back((v >> (8 * i)) & 0xff); };
+    append32(9); append32(2);
+    packet.push_back(7); for (int i = 1; i < 8; ++i) packet.push_back(0);
+    for (int i = 0; i < 8; ++i) packet.push_back(0);
     packet.push_back(0);
     const float confidence = 0.75f;
     const auto* c = reinterpret_cast<const std::uint8_t*>(&confidence);
     packet.insert(packet.end(), c, c + sizeof(float));
     packet.push_back(2);
-    for (float value : {0.1f, 0.9f}) {
-        const auto* p = reinterpret_cast<const std::uint8_t*>(&value);
-        packet.insert(packet.end(), p, p + 4);
-    }
+    for (float value : {0.1f, 0.9f}) { const auto* p = reinterpret_cast<const std::uint8_t*>(&value); packet.insert(packet.end(), p, p + 4); }
     packet.push_back(0xf7);
     const auto decoded = decode_midi_sysex(packet);
     REQUIRE(decoded.has_value());
@@ -297,12 +287,7 @@ TEST_CASE("browser SysEx decoder accepts bounded multi-value packet", "[cv][midi
 TEST_CASE("browser SysEx decoder rejects short and oversized packets", "[cv][midi][sysex]") {
     CHECK_FALSE(decode_midi_sysex(std::array<std::uint8_t, 4>{0xf0, 0x7d, 'P', 'I'}));
     std::vector<std::uint8_t> oversized(36 + 17 * 4, 0);
-    oversized[0] = 0xf0;
-    oversized[1] = 0x7d;
-    oversized[2] = 'P';
-    oversized[3] = 'I';
-    oversized[4] = 1;
-    oversized[34] = 17;
-    oversized.back() = 0xf7;
+    oversized[0] = 0xf0; oversized[1] = 0x7d; oversized[2] = 'P'; oversized[3] = 'I'; oversized[4] = 1;
+    oversized[34] = 17; oversized.back() = 0xf7;
     CHECK_FALSE(decode_midi_sysex(oversized));
 }

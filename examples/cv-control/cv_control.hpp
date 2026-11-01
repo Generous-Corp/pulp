@@ -1,12 +1,12 @@
 #pragma once
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <cstdint>
-#include <cstring>
 #include <optional>
 #include <span>
+#include <array>
+#include <cstring>
 
 #include <pulp/runtime/external_input.hpp>
 
@@ -94,8 +94,7 @@ decode_midi_sysex(std::span<const std::uint8_t> bytes) noexcept {
     };
     auto u64 = [&](std::size_t p) {
         std::uint64_t v = 0;
-        for (unsigned i = 0; i < 8; ++i)
-            v |= std::uint64_t(bytes[p + i]) << (8 * i);
+        for (unsigned i = 0; i < 8; ++i) v |= std::uint64_t(bytes[p + i]) << (8 * i);
         return v;
     };
     const auto count = bytes[header - 1];
@@ -111,12 +110,10 @@ decode_midi_sysex(std::span<const std::uint8_t> bytes) noexcept {
     frame.status = static_cast<pulp::runtime::ExternalInputStatus>(bytes[29]);
     std::memcpy(&frame.confidence, bytes.data() + 30, sizeof(float));
     frame.count = count;
-    if (!std::isfinite(frame.confidence))
-        return std::nullopt;
+    if (!std::isfinite(frame.confidence)) return std::nullopt;
     for (std::size_t i = 0; i < count; ++i) {
         std::memcpy(&frame.values[i], bytes.data() + header + 4 * i, sizeof(float));
-        if (!std::isfinite(frame.values[i]))
-            return std::nullopt;
+        if (!std::isfinite(frame.values[i])) return std::nullopt;
     }
     return frame;
 }
