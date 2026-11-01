@@ -1010,7 +1010,8 @@ bool SkiaCanvas::draw_image_from_rgba(const uint8_t* data, size_t size, uint32_t
     const SkImageInfo info = SkImageInfo::Make(static_cast<int>(width), static_cast<int>(height),
                                                kRGBA_8888_SkColorType,
                                                kPremul_SkAlphaType);
-    auto image = SkImage::MakeRasterCopy(SkPixmap(info, data, static_cast<size_t>(width) * 4u));
+    auto image = SkImages::RasterFromPixmapCopy(
+        SkPixmap(info, data, static_cast<size_t>(width) * 4u));
     if (!image) return false;
     image = ensure_gpu_image(std::move(image));
     canvas_->drawImageRect(image, SkRect::MakeXYWH(x, y, w, h),
@@ -1027,7 +1028,8 @@ bool SkiaCanvas::draw_image_from_rgba_rect(const uint8_t* data, size_t size, uin
     const SkImageInfo info = SkImageInfo::Make(static_cast<int>(width), static_cast<int>(height),
                                                kRGBA_8888_SkColorType,
                                                kPremul_SkAlphaType);
-    auto image = SkImage::MakeRasterCopy(SkPixmap(info, data, static_cast<size_t>(width) * 4u));
+    auto image = SkImages::RasterFromPixmapCopy(
+        SkPixmap(info, data, static_cast<size_t>(width) * 4u));
     if (!image) return false;
     image = ensure_gpu_image(std::move(image));
     canvas_->drawImageRect(image, SkRect::MakeXYWH(sx, sy, sw, sh),
