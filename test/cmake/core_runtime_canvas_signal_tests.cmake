@@ -322,7 +322,7 @@ pulp_add_test_suite(pulp-test-osc GROUP pulp-test-group-core-osc
 
 pulp_add_test_suite(pulp-test-external-input-ingress
     SOURCES test_external_input_ingress.cpp
-    LIBRARIES pulp::osc pulp::events)
+    LIBRARIES pulp::osc pulp::events pulp::format)
 
 # ImageConvolutionKernel tests
 pulp_add_test_suite(pulp-test-image-convolution GROUP pulp-test-group-core-canvas
