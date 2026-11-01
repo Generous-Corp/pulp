@@ -841,16 +841,14 @@ void BridgeRegistrars::register_canvas2d_api(WidgetBridge& self) {
     // Args: (id, src, tile_x, tile_y)
     //   src      — image source (file path, "data:" URL, or "" for clear)
     //   tile_x   — "repeat" | "no-repeat"
-    //   tile_y   — "repeat" | "no-repeat"
     register_bridge_function(api, "canvasSetFillPattern", [&self](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(self.widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_fill_pattern;
-            cmd.text = args.get<std::string>(1, "");          // image source
+            cmd.text = args.get<std::string>(1, "");
+            if (cmd.text.rfind("data:", 0) != 0)
+                cmd.text = self.resolve_script_relative(cmd.text);
             auto tx = args.get<std::string>(2, "repeat");
             auto ty = args.get<std::string>(3, "repeat");
-            // Pack tile modes into int_val (bit 0 = x, bit 1 = y);
-            // 0 = repeat, 1 = no-repeat. Mirrors set_image_smoothing's
-            // pattern of folding multiple enum values into one int slot.
             int tx_i = (tx == "no-repeat") ? 1 : 0;
             int ty_i = (ty == "no-repeat") ? 1 : 0;
             cmd.int_val = tx_i | (ty_i << 1);
@@ -866,6 +864,8 @@ void BridgeRegistrars::register_canvas2d_api(WidgetBridge& self) {
         if (auto* c = dynamic_cast<CanvasWidget*>(self.widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_stroke_pattern;
             cmd.text = args.get<std::string>(1, "");
+            if (cmd.text.rfind("data:", 0) != 0)
+                cmd.text = self.resolve_script_relative(cmd.text);
             auto tx = args.get<std::string>(2, "repeat");
             auto ty = args.get<std::string>(3, "repeat");
             int tx_i = (tx == "no-repeat") ? 1 : 0;
