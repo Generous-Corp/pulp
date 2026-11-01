@@ -35,6 +35,25 @@
 
 namespace pulp::view {
 
+namespace {
+
+// RDP/UTM sessions can expose a valid display while SDL cannot provide a
+// work-area rectangle.  Falling back to the full display bounds keeps the
+// standalone window centered and fitted instead of preserving an off-screen
+// position from a previous desktop arrangement.
+bool get_display_work_bounds(SDL_DisplayID display, SDL_Rect& bounds) {
+    if (display != 0 && SDL_GetDisplayUsableBounds(display, &bounds))
+        return true;
+    if (display != 0 && SDL_GetDisplayBounds(display, &bounds))
+        return true;
+    const auto primary = SDL_GetPrimaryDisplay();
+    if (primary != 0 && SDL_GetDisplayUsableBounds(primary, &bounds))
+        return true;
+    return primary != 0 && SDL_GetDisplayBounds(primary, &bounds);
+}
+
+} // namespace
+
 class SdlWindowHostImpl : public SdlWindowHost {
 public:
     SdlWindowHostImpl(View& root, Options options)
@@ -70,7 +89,7 @@ public:
         // initial client area against the current usable display bounds.
         SDL_Rect usable{};
         const auto display = SDL_GetDisplayForWindow(window_);
-        if (display && SDL_GetDisplayUsableBounds(display, &usable)) {
+        if (get_display_work_bounds(display, usable)) {
             const int margin = 8;
             const int max_width = std::max(1, usable.w - margin * 2);
             const int max_height = std::max(1, usable.h - margin * 2);
@@ -127,7 +146,7 @@ public:
         int h = static_cast<int>(std::lround(height));
         SDL_Rect usable{};
         const auto display = SDL_GetDisplayForWindow(window_);
-        if (display && SDL_GetDisplayUsableBounds(display, &usable)) {
+        if (get_display_work_bounds(display, usable)) {
             const int margin = 8;
             const int max_width = std::max(1, usable.w - margin * 2);
             const int max_height = std::max(1, usable.h - margin * 2);
