@@ -135,7 +135,10 @@ try {
   # stall before startup-script dispatch; with the private resource directory
   # and its stale scan caches removed, the documented positional Lua form
   # executes in the same owned host process that will load the staged module.
-  $proc=Start-Owned @('-newinst','-cfgfile',$ini,'-new','-nosplash',$lua) 'scripted'
+  # Windows REAPER dispatches a command-line Lua script only when the script
+  # path precedes -cfgfile.  Keeping the script first also prevents a stale
+  # status file from being mistaken for a fresh editor run.
+  $proc=Start-Owned @($lua,'-newinst','-cfgfile',$ini,'-new','-nosplash') 'scripted'
   $receipt.process=@{pid=$proc.process.Id;started_utc=$proc.started;arguments=$proc.command;session_id=$proc.session_id}
   $deadline=[DateTime]::UtcNow.AddSeconds($TimeoutSec);$hostStatus=$null
   while([DateTime]::UtcNow -lt $deadline){
