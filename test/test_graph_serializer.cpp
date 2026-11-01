@@ -109,6 +109,15 @@ bool missing_plugins_contain(const GraphSerializer::LoadResult& result,
     return false;
 }
 
+bool state_restore_failures_contain(const GraphSerializer::LoadResult& result,
+                                    const std::string& needle) {
+    for (const auto& entry : result.state_restore_failures) {
+        if (entry.find(needle) != std::string::npos)
+            return true;
+    }
+    return false;
+}
+
 bool missing_custom_types_contain(const GraphSerializer::LoadResult& result,
                                   const std::string& needle) {
     for (const auto& entry : result.missing_custom_node_types) {
@@ -2183,6 +2192,35 @@ TEST_CASE("GraphSerializer resolves the canonical BuiltIn instrument round-trip"
     REQUIRE(restored.plugin_info.format == PluginFormat::BuiltIn);
     REQUIRE(restored.plugin_info.unique_id == "pulp.instrument.basic");
     REQUIRE(restored.plugin_info.path.empty());
+}
+
+TEST_CASE("GraphSerializer reports a plugin state restore refusal",
+          "[host][serializer][state][failure]") {
+    PluginInfo info;
+    info.format = PluginFormat::BuiltIn;
+    info.unique_id = "pulp.instrument.basic";
+    info.num_inputs = 0;
+    info.num_outputs = 2;
+
+    auto slot = PluginSlot::load(info);
+    REQUIRE(slot != nullptr);
+
+    SignalGraph src;
+    src.add_plugin_node(std::move(slot), 0, 2, "Basic Instrument");
+    auto json = GraphSerializer::to_json(src);
+    const auto marker = std::string("\"state_b64\": \"\"");
+    const auto marker_pos = json.find(marker);
+    REQUIRE(marker_pos != std::string::npos);
+    json.replace(marker_pos, marker.size(), "\"state_b64\": \"AA==\"");
+
+    SignalGraph dst;
+    const auto result = GraphSerializer::from_json(dst, json);
+    REQUIRE(result.ok);
+    REQUIRE(result.missing_plugins.empty());
+    REQUIRE(result.state_restore_failures.size() == 1);
+    REQUIRE(state_restore_failures_contain(result, "builtin:pulp.instrument.basic"));
+    REQUIRE(dst.nodes().size() == 1);
+    REQUIRE(dst.nodes().front().plugin != nullptr);
 }
 
 TEST_CASE("GraphSerializer serializes short plugin state blobs with stable padding",
