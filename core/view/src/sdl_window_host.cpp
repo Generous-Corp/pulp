@@ -8,6 +8,7 @@
 #include <pulp/view/drag_drop.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/host_frame_pump.hpp>
+#include <pulp/runtime/trace.hpp>
 #include <SDL3/SDL.h>
 #ifdef PULP_HAS_SKIA
 #include <pulp/canvas/skia_canvas.hpp>
@@ -491,6 +492,7 @@ private:
 
     void render_frame() {
         if (!renderer_) return;
+        PULP_TRACE_SCOPE_NAMED("render", "sdl_render_frame");
 
         // SDL_GetWindowSize reports logical coordinates.  With
         // SDL_WINDOW_HIGH_PIXEL_DENSITY (and especially Windows per-monitor
@@ -547,11 +549,14 @@ private:
             skia->scale(static_cast<float>(pixel_w) / w,
                         static_cast<float>(pixel_h) / h);
         }
-        canvas::SkiaCanvas skia_canvas(skia);
-        root_.set_bounds({0, 0, fitted ? design_width_ : static_cast<float>(w),
-                          fitted ? design_height_ : static_cast<float>(h)});
-        root_.layout_children();
-        root_.paint_all(skia_canvas);
+        {
+            canvas::SkiaCanvas skia_canvas(skia);
+            PULP_TRACE_SCOPE_NAMED("layout", "sdl_layout_and_paint");
+            root_.set_bounds({0, 0, fitted ? design_width_ : static_cast<float>(w),
+                              fitted ? design_height_ : static_cast<float>(h)});
+            root_.layout_children();
+            root_.paint_all(skia_canvas);
+        }
         if (fitted || (w > 0 && h > 0)) skia->restore();
         SkPixmap pixmap;
         if (!surface->peekPixels(&pixmap)) {
@@ -568,6 +573,7 @@ private:
             texture_height_ = pixel_h;
         }
         if (texture_) {
+            PULP_TRACE_SCOPE_NAMED("render", "sdl_texture_upload");
             SDL_UpdateTexture(texture_, nullptr, pixmap.addr(),
                               static_cast<int>(pixmap.rowBytes()));
             SDL_RenderTexture(renderer_, texture_, nullptr, nullptr);
