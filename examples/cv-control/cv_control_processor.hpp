@@ -79,6 +79,16 @@ class FaceToneProcessor final : public format::Processor {
         if (verdict == runtime::ExternalInputVerdict::accepted)
             newest = ControlSample{input_gate_.sequence(), input_gate_.value(0, 0.0f), published.confidence, true};
 #endif
+        // Browser multi-value packets use the existing WAM SysEx sidecar. The
+        // example maps the first application-owned value to its scalar control;
+        // products that need all values submit the decoded frame to their own
+        // ExternalInputGate<N>.
+        for (const auto& sysex : midi_in.sysex()) {
+            if (const auto frame = decode_midi_sysex(sysex.data)) {
+                const bool valid = frame->status == runtime::ExternalInputStatus::valid;
+                newest = ControlSample{frame->sequence, frame->values[0], frame->confidence, valid};
+            }
+        }
         for (const auto& event : midi_in) {
             // A single short MIDI message carries one coherent sample on every
             // surface. This example reserves channel-16 pitch bend.
