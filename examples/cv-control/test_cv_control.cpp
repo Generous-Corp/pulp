@@ -5,6 +5,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <limits>
+#include <pulp/runtime/external_input.hpp>
 #include <pulp/runtime/triple_buffer.hpp>
 #include <thread>
 #include <vector>
@@ -305,4 +306,42 @@ TEST_CASE("browser SysEx decoder rejects short and oversized packets", "[cv][mid
     oversized[34] = 17;
     oversized.back() = 0xf7;
     CHECK_FALSE(decode_midi_sysex(oversized));
+}
+
+TEST_CASE("browser SysEx frames enforce external-input source ordering and confidence",
+          "[cv][midi][sysex][external-input]") {
+    using pulp::runtime::ExternalInputFrame;
+    using pulp::runtime::ExternalInputGate;
+    using pulp::runtime::ExternalInputPolicy;
+    using pulp::runtime::ExternalInputStatus;
+    using pulp::runtime::ExternalInputVerdict;
+
+    ExternalInputGate<16> gate;
+    const ExternalInputPolicy policy{1, 0.6f, 12000, 0};
+    ExternalInputFrame<16> frame;
+    frame.source_id = 1;
+    frame.epoch = 1;
+    frame.sequence = 2;
+    frame.provider_time_ns = 2;
+    frame.status = ExternalInputStatus::valid;
+    frame.confidence = 0.8f;
+    frame.count = 1;
+    frame.values[0] = 0.4f;
+    REQUIRE(gate.submit(frame, policy) == ExternalInputVerdict::accepted);
+
+    auto wrong_source = frame;
+    wrong_source.source_id = 2;
+    wrong_source.sequence = 3;
+    CHECK(gate.submit(wrong_source, policy) == ExternalInputVerdict::rejected_source);
+
+    auto stale = frame;
+    stale.sequence = 1;
+    stale.provider_time_ns = 1;
+    CHECK(gate.submit(stale, policy) == ExternalInputVerdict::rejected_order);
+
+    auto over_confidence = frame;
+    over_confidence.sequence = 3;
+    over_confidence.provider_time_ns = 3;
+    over_confidence.confidence = 1.1f;
+    CHECK(gate.submit(over_confidence, policy) == ExternalInputVerdict::rejected_confidence);
 }

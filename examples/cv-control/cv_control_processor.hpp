@@ -47,6 +47,7 @@ class FaceToneProcessor final : public format::Processor {
         phase_ = 0.0;
         gate_ = 0.0f;
         input_gate_.expire();
+        browser_gate_.expire();
         mapping_.expire();
         timeout_samples_ = static_cast<std::uint64_t>(std::max(1.0, sample_rate_ * 0.25));
 #if !defined(PULP_WASM)
@@ -66,6 +67,7 @@ class FaceToneProcessor final : public format::Processor {
         osc_.stop();
 #endif
         input_gate_.expire();
+        browser_gate_.expire();
         mapping_.expire();
     }
 
@@ -80,14 +82,15 @@ class FaceToneProcessor final : public format::Processor {
             newest = ControlSample{input_gate_.sequence(), input_gate_.value(0, 0.0f),
                                    published.confidence, true};
 #endif
-        // Browser multi-value packets use the existing WAM SysEx sidecar. The
-        // example maps the first application-owned value to its scalar control;
-        // products that need all values submit the decoded frame to their own
-        // ExternalInputGate<N>.
+        // Browser multi-value packets use the existing WAM SysEx sidecar, but
+        // still pass through the same bounded external-input policy as native
+        // providers before they can affect the control mapping.
         for (const auto& sysex : midi_in.sysex()) {
             if (const auto frame = decode_midi_sysex(sysex.data)) {
-                const bool valid = frame->status == runtime::ExternalInputStatus::valid;
-                newest = ControlSample{frame->sequence, frame->values[0], frame->confidence, valid};
+                const auto verdict = browser_gate_.submit(*frame, browser_policy_);
+                if (verdict == runtime::ExternalInputVerdict::accepted)
+                    newest = ControlSample{browser_gate_.sequence(), browser_gate_.value(0, 0.0f),
+                                           frame->confidence, true};
             }
         }
         for (const auto& event : midi_in) {
@@ -112,6 +115,7 @@ class FaceToneProcessor final : public format::Processor {
             mapping_.submit(*newest);
         } else {
             input_gate_.advance(output.num_samples(), policy_);
+            browser_gate_.advance(output.num_samples(), browser_policy_);
             mapping_.advance(output.num_samples(), timeout_samples_);
         }
 
@@ -175,6 +179,8 @@ class FaceToneProcessor final : public format::Processor {
     runtime::TripleBuffer<runtime::ExternalInputFrame<1>> input_;
     runtime::ExternalInputGate<1> input_gate_;
     runtime::ExternalInputPolicy policy_{1, 0.6f, 12000, 1};
+    runtime::ExternalInputGate<16> browser_gate_;
+    runtime::ExternalInputPolicy browser_policy_{1, 0.6f, 12000, 0};
     std::uint64_t publication_sequence_ = 0;
     std::uint32_t epoch_ = 1;
     std::uint64_t midi_sequence_ = 0;
