@@ -3,8 +3,8 @@
 #include "cv_control.hpp"
 #include <pulp/format/processor.hpp>
 #include <pulp/midi/buffer.hpp>
-#include <pulp/runtime/triple_buffer.hpp>
 #include <pulp/runtime/external_input.hpp>
+#include <pulp/runtime/triple_buffer.hpp>
 #if !defined(PULP_WASM)
 #include <pulp/osc/osc.hpp>
 #endif
@@ -77,8 +77,19 @@ class FaceToneProcessor final : public format::Processor {
         const auto& published = input_.read();
         const auto verdict = input_gate_.submit(published, policy_);
         if (verdict == runtime::ExternalInputVerdict::accepted)
-            newest = ControlSample{input_gate_.sequence(), input_gate_.value(0, 0.0f), published.confidence, true};
+            newest = ControlSample{input_gate_.sequence(), input_gate_.value(0, 0.0f),
+                                   published.confidence, true};
 #endif
+        // Browser multi-value packets use the existing WAM SysEx sidecar. The
+        // example maps the first application-owned value to its scalar control;
+        // products that need all values submit the decoded frame to their own
+        // ExternalInputGate<N>.
+        for (const auto& sysex : midi_in.sysex()) {
+            if (const auto frame = decode_midi_sysex(sysex.data)) {
+                const bool valid = frame->status == runtime::ExternalInputStatus::valid;
+                newest = ControlSample{frame->sequence, frame->values[0], frame->confidence, valid};
+            }
+        }
         for (const auto& event : midi_in) {
             // A single short MIDI message carries one coherent sample on every
             // surface. This example reserves channel-16 pitch bend.
