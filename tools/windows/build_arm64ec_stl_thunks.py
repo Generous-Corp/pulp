@@ -46,7 +46,10 @@ def main() -> int:
     args.output.parent.mkdir(parents=True, exist_ok=True)
 
     listing = subprocess.check_output(
-        [str(args.lib_exe), "/list", str(args.msvcprt)], text=True, errors="replace"
+        [str(args.lib_exe), "/list", str(args.msvcprt)],
+        text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     members = []
     for line in listing.splitlines():
@@ -71,7 +74,7 @@ def main() -> int:
             strip_directives(obj)
             objects.append(obj)
         response = root / "objects.rsp"
-        response.write_text("\n".join(str(obj) for obj in objects) + "\n")
+        response.write_text("\n".join(str(obj) for obj in objects) + "\n", encoding="utf-8")
         subprocess.run(
             [str(args.lib_exe), "/machine:arm64ec", f"/out:{args.output}", f"@{response}"],
             check=True,
