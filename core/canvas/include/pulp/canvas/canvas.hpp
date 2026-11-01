@@ -1320,6 +1320,25 @@ public:
         return draw_image_from_data(data, size, dx, dy, dw, dh);
     }
 
+    /// Draw tightly packed 8-bit RGBA pixels. Optional backends may override
+    /// these seams; the default keeps older canvas implementations source and
+    /// binary compatible while allowing RmlUi glyph atlases to render.
+    virtual bool draw_image_from_rgba(const uint8_t* data, size_t size,
+                                      uint32_t width, uint32_t height,
+                                      float x, float y, float w, float h) {
+        (void)data; (void)size; (void)width; (void)height;
+        (void)x; (void)y; (void)w; (void)h;
+        return false;
+    }
+    virtual bool draw_image_from_rgba_rect(const uint8_t* data, size_t size,
+                                            uint32_t width, uint32_t height,
+                                            float sx, float sy, float sw, float sh,
+                                            float dx, float dy, float dw, float dh) {
+        (void)data; (void)size; (void)width; (void)height;
+        (void)sx; (void)sy; (void)sw; (void)sh;
+        return false;
+    }
+
     /// Decoded-image intrinsic dimensions in pixels. Returned via out-params
     /// so backends without image decode just leave them at 0 and callers
     /// short-circuit to "use destination bounds" (the previous behavior).
