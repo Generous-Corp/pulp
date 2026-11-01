@@ -40,7 +40,7 @@ try {
   await page.goto(`http://127.0.0.1:${port}/examples/cv-control/web/`);
   const levels = await page.evaluate(async () => {
     const { createWamAdapter } = await import("/packages/pulp-web-player/src/adapters/wam.js");
-    const { sendControlSample } = await import("/examples/cv-control/web/control_input.mjs");
+    const { sendControlSample, sendMultiValueSample } = await import("/examples/cv-control/web/control_input.mjs");
     async function render(value) {
       const ctx = new OfflineAudioContext(2, 8192, 48000);
       const adapter = await createWamAdapter(ctx, {
@@ -55,6 +55,8 @@ try {
       adapter.setParameterValue(100, 0.2);
       adapter.scheduleMidi(0x90, 60, 100);
       sendControlSample(adapter, value, true);
+      if (!sendMultiValueSample(adapter, [value, 1 - value], { sequence: 2 }))
+        throw new Error("multi-value SysEx encoder rejected a bounded frame");
       await new Promise((resolve) => setTimeout(resolve, 50));
       const audio = await ctx.startRendering();
       adapter.destroy();

@@ -1485,6 +1485,22 @@
    ],
    "undeclared_sources": []
   },
+  "pulp-test-external-input": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_external_input.cpp"
+   ],
+   "inputs": [
+    "test/fixtures/external-input"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/harness/rt_allocation_probe.cpp",
+    "test/support/external_input_replay.cpp",
+    "test/test_external_input.cpp"
+   ],
+   "undeclared_sources": []
+  },
   "pulp-test-external-plugin-graph-fixture": {
    "data": "none",
    "inputs": [],
