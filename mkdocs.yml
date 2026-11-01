@@ -169,6 +169,7 @@ nav:
       - Streaming Sample Source: guides/streaming-sample-source.md
       - Web Plugins: guides/web-plugins.md
       - Copyright Protection: guides/copyright-protection.md
+      - External Inputs: guides/external-inputs.md
       - GPU Validation: guides/gpu-validation-checklist.md
       - Partial Repaint: guides/partial-repaint.md
       - Text Shaping Determinism: reference/text-shaping.md
