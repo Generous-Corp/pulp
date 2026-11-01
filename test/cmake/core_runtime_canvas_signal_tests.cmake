@@ -320,6 +320,10 @@ pulp_add_test_suite(pulp-test-musical-typing GROUP pulp-test-group-core-view
 pulp_add_test_suite(pulp-test-osc GROUP pulp-test-group-core-osc
     LIBRARIES pulp::osc)
 
+pulp_add_test_suite(pulp-test-external-input-ingress
+    SOURCES test_external_input_ingress.cpp
+    LIBRARIES pulp::osc pulp::events)
+
 # ImageConvolutionKernel tests
 pulp_add_test_suite(pulp-test-image-convolution GROUP pulp-test-group-core-canvas
     LIBRARIES pulp::canvas)
