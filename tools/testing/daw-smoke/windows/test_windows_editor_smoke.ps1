@@ -223,6 +223,23 @@ try {
   Check ($code -eq 3 -and $receipts.Count -eq 1) 'early missing-host failure leaves terminal receipt'
   $receipt=Get-Content -LiteralPath $receipts[0].FullName -Raw|ConvertFrom-Json
   Check ($receipt.verdict -eq 'INCONCLUSIVE' -and $receipt.error -match 'REAPER executable missing') 'failure receipt carries typed reason'
+  # An evidence root the launching account cannot write must be refused
+  # before any host process starts (Windows ACL deny on the root only).
+  $locked=Join-Path $root 'locked evidence'
+  New-Item -ItemType Directory -Path $locked | Out-Null
+  $who="$env:USERDOMAIN\$env:USERNAME"
+  & icacls.exe $locked /deny "${who}:(WD)" | Out-Null
+  try {
+    & $engine -NoProfile -File (Join-Path $PSScriptRoot 'windows_editor_smoke.ps1') -ReaperExe $PSCommandPath -Format vst3 -PluginPath $PSCommandPath -PluginName Example -SeedProfile $root -EvidenceDir $locked 3>&1 | Out-Null
+    $lockedCode=$LASTEXITCODE
+  } finally {
+    & icacls.exe $locked /remove:d $who | Out-Null
+  }
+  $lockedReceipts=@(Get-ChildItem -LiteralPath $locked -Filter receipt.json -Recurse)
+  Check ($lockedCode -eq 3 -and $lockedReceipts.Count -eq 1) 'unwritable EvidenceDir refused with terminal receipt'
+  $lockedReceipt=Get-Content -LiteralPath $lockedReceipts[0].FullName -Raw|ConvertFrom-Json
+  Check ($lockedReceipt.error -match 'EvidenceDir is not writable by') 'unwritable EvidenceDir reports explicit ACL reason'
+  Check ($null -eq $lockedReceipt.host) 'unwritable EvidenceDir refused before host inspection or launch'
   Write-Output "PASS: $checks fixture checks; product runtime NOT EVALUATED"
 } finally {
   Remove-Item -LiteralPath $root -Recurse -Force
