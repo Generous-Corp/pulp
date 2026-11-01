@@ -2116,6 +2116,43 @@ nothing for processors that don't opt in. (What the hooks *do*, and which format
 actually call them — CLAP does, including native CLAP; VST3/AU/standalone do
 not — is documented in the `clap` skill.)
 
+## The UI-agnostic editor-host contract (`editor_host.hpp`)
+
+`pulp/format/editor_host.hpp` (`EditorFactory`, `Editor`, `EditorContext`,
+`ParamPort`, `VisualPort`) is the toolkit-free way to open an editor; the guide
+is `docs/guides/editor-host-contract.md`. Things that are easy to get wrong:
+
+- **No adapter consumes `Processor::editor_factory()` yet.** A processor that
+  returns a factory still opens through `has_editor()` / `create_view()` /
+  `ViewBridge` in every format. Do not assume a factory changes what a DAW
+  shows until an adapter is wired to it.
+- **The header must stay view-free.** It names no `pulp::view`, canvas, render,
+  Dawn or Vellum type, and `format_header_view_boundary.py` classifies it as a
+  `pulp-format-core` header automatically, so an include that reaches the view
+  layer fails that check. `EditorHostKind` lives in `editor_host_kind.hpp` so
+  the contract does not need `processor.hpp`.
+- **Edits go through the store, not around it.** `StateStoreParamPort` writes
+  with `set_value` and opens gestures with `acquire_gesture` /
+  `release_gesture`, which is what `HostParameterEditBridge` already reports to
+  the host. Calling a format's host API from a `ParamPort` would bypass the
+  provenance check and echo host automation back.
+- **One port per editor isolates teardown.** Ports over one store share the
+  store's gesture leases, so overlapping drags open one host gesture. A port's
+  destructor (or `release_all()`) closes only the gestures that port opened;
+  closing one window mid-drag must not end another window's gesture. A shared
+  port works too, but then teardown of one editor cannot tell its gestures
+  apart from another's.
+- **A `set` outside `begin`/`end` is bracketed by the port.** VST3 only accepts
+  `performEdit` between `beginEdit` and `endEdit`, so a one-shot write reaches
+  the host as begin, value, value, end.
+- **`detach()` and `invalidate()` differ.** `detach()` runs while the parent is
+  valid; `invalidate()` means the host already destroyed (or is destroying) the
+  window, so the editor must not touch it or call the host again.
+- **`Editor` and `EditorContext` are implemented across a binary boundary.**
+  Appending a virtual later is not free for a prebuilt editor or host, so a
+  shape question (a new host call, a new editor callback) is cheaper to settle
+  before the first adapter consumes the contract.
+
 ### Rich f64 fallback scratch follows the active bus layout
 
 Format adapters that negotiate bus widths away from descriptor defaults must

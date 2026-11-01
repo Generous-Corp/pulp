@@ -34,6 +34,7 @@
 // of pulp-format-core at link. That is the property worth proving, and it is
 // a link requirement rather than a compile one.
 
+#include <pulp/format/editor_host.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/plugin_descriptor.hpp>
 #include <pulp/state/store.hpp>
@@ -97,6 +98,32 @@ int main() {
         }
         if (!processor->settings_sections().empty()) {
             std::fprintf(stderr, "the default settings_sections() was not empty\n");
+            return 1;
+        }
+    }
+
+    // The editor-host contract is part of format-core: a processor without a
+    // factory reports none, and the default ParamPort runs a full gesture over
+    // a StateStore with no view layer in the link.
+    if (processor->editor_factory() != nullptr) {
+        std::fprintf(stderr, "the default editor_factory() was not null\n");
+        return 1;
+    }
+    {
+        pulp::state::StateStore store;
+        pulp::state::ParamInfo gain;
+        gain.id = 1;
+        gain.name = "Gain";
+        gain.range = {0.0f, 1.0f, 0.5f};
+        store.add_parameter(gain);
+        pulp::format::StateStoreParamPort port(store);
+        float heard = -1.0f;
+        auto subscription = port.add_listener([&heard](pulp::state::ParamID, float v) { heard = v; });
+        port.begin(1);
+        port.set(1, 0.75f);
+        port.end(1);
+        if (heard != 0.75f || port.get(1) != 0.75f || store.open_gesture_count() != 0) {
+            std::fprintf(stderr, "the default ParamPort did not complete a gesture\n");
             return 1;
         }
     }
