@@ -1148,6 +1148,18 @@ endif()
 # Keep X9 format lanes independent: a platform/configuration may provide
 # VST3 or Audio Unit without building the CLAP example target.
 if(PULP_BUILD_TESTS AND NOT ANDROID AND TARGET pulp-test-signal-graph-x9-modular-instrument)
+    add_test(
+        NAME pulp-test-signal-graph-x9-hosted-format-receipt
+        COMMAND ${CMAKE_COMMAND}
+            "-DCLAP_PATH=${CMAKE_BINARY_DIR}/CLAP/PulpGain.clap"
+            "-DVST3_PATH=${CMAKE_BINARY_DIR}/VST3/PulpGain.vst3"
+            "-DAU_PATH=${CMAKE_BINARY_DIR}/AU/PulpGain.component"
+            "-DOUTPUT=${CMAKE_BINARY_DIR}/x9-hosted-format-receipt.json"
+            -P "${CMAKE_SOURCE_DIR}/test/cmake/x9_hosted_format_receipt.cmake")
+    set_tests_properties(pulp-test-signal-graph-x9-hosted-format-receipt PROPERTIES
+        LABELS "signal-graph;x9;hosting;receipt"
+        TIMEOUT 30)
+
     if(TARGET PulpGain_VST3)
         target_compile_definitions(pulp-test-signal-graph-x9-modular-instrument PRIVATE
             PULP_X9_VST3_PATH="${CMAKE_BINARY_DIR}/VST3/PulpGain.vst3")

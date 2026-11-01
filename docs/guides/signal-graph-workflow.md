@@ -47,11 +47,25 @@ explicitly gated; read the [capability matrix](../reference/signal-graph-capabil
 before treating a row as a universal guarantee.
 
 The practical rule is to keep fixed DSP and voice state in `Processor`, and use
-`SignalGraph` where composition is the feature being edited. `ProcessorNode` can
-wrap a caller-owned `Processor`, while the graph owns routing and execution; a
-timeline binding likewise requires its graph and program store to outlive the
-binding. Choosing the graph boundary does not require a second runtime or a
+`SignalGraph` where composition is the feature being edited. `ProcessorNode` wraps a configured processor-node instance; the graph retains
+its node lifetime while owning routing and execution. A timeline binding likewise
+requires its graph and program store to outlive the binding. Choosing the graph boundary does not require a second runtime or a
 duplicate control model.
+
+Ask these three questions before writing code:
+
+1. **Is the signal algorithm fixed?** Put it in a `Processor`, including complex
+   voices, sidechains, oversampling, and internal serial or parallel stages.
+2. **Can a user or host change the routing while the product runs?** Use a
+   `SignalGraph`, with prepared edits and an immutable published snapshot.
+3. **Does behavior depend on musical time?** Use the timeline model and its
+   transport-aware renderer; bind graph work underneath it when needed.
+
+A graph fixture is a routing and lifecycle example, not proof of every host or
+format. The [sample-region example](../../examples/sample-region-allpass/) is a
+small graph-backed fixture; the [timeline phase example](../examples/timeline-phase1.md)
+shows the transport-owned path. Use both when a feature crosses the graph and
+timeline boundaries.
 
 ## Choose the graph boundary
 
@@ -59,8 +73,8 @@ Start with [Processing models](../reference/processing-models.md). Keep fixed
 DSP, voice state, and sample processing in `Processor`. Use
 `pulp::host::SignalGraph` when the routing or hosted composition is the thing
 the application edits: a rack, mixer, modular patch, plugin host, or node
-editor. `ProcessorNode` instead wraps a non-owning `Processor` while
-`SignalGraph` owns routing and execution. Timeline playback uses its existing
+editor. `ProcessorNode` uses the configured processor-node path while `SignalGraph`
+retains the node lifetime and owns routing and execution. Timeline playback uses its existing
 binding to lower transport-driven work into graph nodes.
 
 ## Discover a fixture or kit
@@ -80,6 +94,31 @@ That check proves manifest shape, paths, and declared fixture metadata; it does
 not execute a graph. Treat an unexecuted fixture as an input to the next step,
 not as audio evidence. `pulp kit apply` remains a reviewed project mutation and
 must be used only after inspecting its plan.
+
+### Executable fixture dispatch
+
+The use-case names in the planning material map to checked-in source and test
+targets as follows. Run a target through the normal governed build, then run the
+matching CTest name from the configured build directory. A source link without a
+target is an authoring reference, not a passing runtime receipt.
+
+| Workflow | Start with | What it proves | Current boundary |
+|---|---|---|---|
+| Voice and polyphony (X1) | [`test_instrument_voice_allocator.cpp`](../../test/test_instrument_voice_allocator.cpp), [`test_voice_runtime_facade.cpp`](../../test/test_voice_runtime_facade.cpp), [`test_mpe_synth_voice.cpp`](../../test/test_mpe_synth_voice.cpp) | voice lifecycle and per-note building blocks | No single complete instrument fixture yet |
+| Feedback and modulation (X2) | `pulp-test-host-signal-graph`, `pulp-test-signal-graph-executor-parity` | graph execution, feedback and parity controls | A combined serialized replay receipt remains open |
+| Reusable components (X3) | `pulp-test-signal-graph-x9-modular-instrument` (`X3` cases) | two independent component instances in the public-API fixture | General template authoring is still higher-level guidance |
+| Routing and mutation (X4) | `pulp-test-signal-graph-prepared-swap-live` and `pulp-test-signal-graph-pdc-swap-continuity` (declared in `test/cmake/sampler_runtime_tests.cmake`) | prepared edits, latency/PDC and continuity policy | Full aux/sidechain application routing remains open |
+| Hosted processing (X5) | `pulp-test-external-plugin-graph-fixture` (declared in `test/cmake/timeline_tests.cmake`), plus the conditional `pulp-test-signal-graph-x9-hosted-format-receipt` CTest in `CMakeLists.txt` when the X9 target exists | conditional format availability and graph-host seams | Bus negotiation, graph-visible failure, offline parity and isolation remain gated |
+| Generated instrument (X6) | `pulp-test-dsl-processor` | deterministic generated `Processor` path | Graph/template discoverability and full live/baked/offline join remain open |
+| Mixed-rate/sample-region work (X7) | [sample granular graphs](sample-granular-graphs.md), `pulp-test-host-signal-graph` | documented rate and causality building blocks | A complete mixed-rate authoring fixture is not yet claimed |
+| Inspection and replay (X8) | `pulp-test-live-dsp-telemetry-graph`, `pulp-test-signal-graph-offline-parity` | diagnostics and output parity surfaces | Joined topology/event/fault replay receipt remains open |
+| Complete modular instrument (X9) | `pulp-test-signal-graph-x9-modular-instrument` | public-API integration of voices, modulation, state, mutation and offline render | Hosted-format matrix and replay/state/output closure remain conditional |
+
+For a clean-checkout productivity measurement, record the first successful
+fixture command, elapsed setup time, concepts required, manual integration
+steps, and the first diagnostic artifact. Repeat the same exercise after any
+documentation change. This keeps a discoverability improvement distinct from
+new runtime capability.
 
 ## Load and validate before preparation
 

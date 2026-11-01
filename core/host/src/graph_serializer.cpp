@@ -1665,7 +1665,10 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                                 result.error = "invalid plugin state_b64";
                                 return result;
                             }
-                            if (!blob->empty()) slot->restore_state(*blob);
+                            if (!blob->empty() && !slot->restore_state(*blob)) {
+                                result.state_restore_failures.push_back(
+                                    std::string(format_str(info.format)) + ":" + info.unique_id);
+                            }
                         }
                         new_id = graph.add_plugin_node(std::move(slot), in_ch, out_ch, name);
                     }
