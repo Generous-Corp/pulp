@@ -168,12 +168,19 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
             }
 
             // Run one routed path with the shared MIDI mailbox bridge around it.
-            // `run` returns the executor result; this returns true iff routing
-            // succeeded (took the path). On failure the consumed MIDI sequences
-            // are NOT committed, so a fallback path re-consumes the same block.
-            auto dispatch_routed = [&](auto&& run) -> bool {
+            // Keep processing failure distinct from setup failure: retrying a
+            // plugin that rejected its block would invoke it twice and defeat
+            // the fail-closed contract. On setup failure, consumed MIDI
+            // sequences are NOT committed so a fallback path can re-consume the
+            // same block.
+            enum class RoutedDispatchResult : std::uint8_t {
+                success,
+                setup_failure,
+                processing_failure,
+            };
+            auto dispatch_routed = [&](auto&& run) -> RoutedDispatchResult {
                 if (!block.validate())
-                    return false;
+                    return RoutedDispatchResult::setup_failure;
                 reset_plugin_parameter_event_sequences(cg->routed.serial.plugin_ctx);
                 reset_plugin_parameter_event_sequences(cg->routed.parallel.plugin_ctx);
                 for (auto& processor : cg->routed.processor_parameter_inputs) {
@@ -210,8 +217,12 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
                         }
                     }
                 }
-                if (!run().ok())
-                    return false;
+                const auto result = run();
+                if (!result.ok()) {
+                    return result.error == format::GraphRuntimeExecutorErrorCode::NodeProcessorFailed
+                        ? RoutedDispatchResult::processing_failure
+                        : RoutedDispatchResult::setup_failure;
+                }
                 commit_plugin_parameter_event_sequences(cg->routed.serial.plugin_ctx);
                 commit_plugin_parameter_event_sequences(cg->routed.parallel.plugin_ctx);
                 for (const auto& processor : cg->routed.processor_parameter_inputs) {
@@ -251,7 +262,7 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
                         }
                     }
                 }
-                return true;
+                return RoutedDispatchResult::success;
             };
 
             // worker_pool_.running() is a plain flag read here; it is safe without
@@ -309,7 +320,7 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
                             has_midi ? &cg->routed.midi : nullptr,
                             has_automation ? &cg->routed.automation : nullptr, {}, {}, {}, {},
                             cg->anticipation.skip_mask);
-                    });
+                    }) == RoutedDispatchResult::success;
                 }
                 if (!ok) {
                     for (std::size_t c = 0; c < output.num_channels(); ++c) {
@@ -326,13 +337,16 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
             // owns, so they must never execute while anticipation is active.
             // Observability for a SILENT degradation the parity test cannot see:
             // when a routed path is ELIGIBLE (enabled + a valid routed snapshot +
-            // the pool fits) but its dispatch returns false, control falls through
-            // to the legacy walk. Because the walk is BOTH the oracle and the
-            // fallback, that produces no divergence — so an eligible graph that
-            // stopped routing would be invisible. Flag it: count it (relaxed,
-            // RT-safe) and warn in debug builds. A normal fallback (routing
-            // disabled, ineligible, or build failure → routed.serial.valid false) does
-            // NOT set this, so the counter isolates the should-have-routed case.
+            // the pool fits) but setup fails, control may fall through to the
+            // legacy walk. A processing failure is terminal: retrying the same
+            // block would invoke a rejecting plugin twice and undermine the
+            // fail-closed output contract. Because the walk is BOTH the oracle
+            // and the setup fallback, an eligible graph that stopped routing
+            // would otherwise be invisible. Flag setup fallbacks: count them
+            // (relaxed, RT-safe) and warn in debug builds. A normal fallback
+            // (routing disabled, ineligible, or build failure → routed.serial.valid
+            // false) does NOT set this, so the counter isolates the should-have-routed
+            // case.
             bool routed_eligible_dispatch_failed = false;
 
             const bool use_parallel =
@@ -347,29 +361,41 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
 
             if (use_parallel && cg->routed.parallel.valid && worker_pool_.running() &&
                 cg->routed.parallel.pool.fits(cg->routed.parallel.snapshot, frames32)) {
-                if (dispatch_routed([&] {
-                        return executor_.process_parallel(
+                const auto dispatch = dispatch_routed([&] {
+                    return executor_.process_parallel(
                             block, cg->routed.parallel.snapshot, cg->routed.parallel.levelization,
                             cg->routed.parallel.pool, worker_pool_,
                             has_midi ? &cg->routed.midi : nullptr,
                             has_automation ? &cg->routed.automation : nullptr);
-                    })) {
+                    });
+                if (dispatch == RoutedDispatchResult::success) {
                     return;
                 }
-                routed_eligible_dispatch_failed = true; // eligible but did not route
+                if (dispatch == RoutedDispatchResult::processing_failure) {
+                    output.clear();
+                    routed_only_execution_failures_.fetch_add(1, std::memory_order_relaxed);
+                    return;
+                }
+                routed_eligible_dispatch_failed = true; // setup failed; safe to retry
             }
 
             if (use_serial && cg->routed.serial.valid &&
                 cg->routed.serial.pool.fits(cg->routed.serial.snapshot, frames32)) {
-                if (dispatch_routed([&] {
-                        return executor_.process_routed(
+                const auto dispatch = dispatch_routed([&] {
+                    return executor_.process_routed(
                             block, cg->routed.serial.snapshot, cg->routed.serial.pool,
                             has_midi ? &cg->routed.midi : nullptr,
                             has_automation ? &cg->routed.automation : nullptr);
-                    })) {
+                    });
+                if (dispatch == RoutedDispatchResult::success) {
                     return;
                 }
-                routed_eligible_dispatch_failed = true; // eligible but did not route
+                if (dispatch == RoutedDispatchResult::processing_failure) {
+                    output.clear();
+                    routed_only_execution_failures_.fetch_add(1, std::memory_order_relaxed);
+                    return;
+                }
+                routed_eligible_dispatch_failed = true; // setup failed; safe to retry
             }
 
             if (routed_eligible_dispatch_failed &&

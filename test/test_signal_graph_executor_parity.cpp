@@ -638,6 +638,7 @@ PluginInfo test_plugin_info(int in_ch, int out_ch) {
 //                      current block), so the same instance can drive both walks.
 class DeterministicPlugin final : public PluginSlot {
 public:
+    int process_calls = 0;
     enum class Mode { kFull, kPartialCh1Gated, kSidechainMix };
     DeterministicPlugin(Mode mode, float scale, int in_ch, int out_ch, int latency = 0,
                         bool fail_process = false)
@@ -654,6 +655,7 @@ public:
                  pulp::midi::MidiBuffer&,
                  const pulp::host::ParameterEventQueue&,
                  int n) override {
+        ++process_calls;
         const std::size_t chs = out.num_channels();
         if (mode_ == Mode::kSidechainMix) {
             // out[c] = main[c] * scale + sidechain[c], where the sidechain
@@ -1066,6 +1068,58 @@ TEST_CASE("Routed hosted failure status reaches the graph executor",
     CHECK(result.error == pulp::format::GraphRuntimeExecutorErrorCode::NodeProcessorFailed);
     CHECK(result.failed_node_index == 1);
     CHECK(executor.stats().node_failures == 1);
+    for (const auto sample : output_samples) CHECK(sample == 0.0f);
+}
+
+TEST_CASE("Legacy graph fallback contains a hosted failure to one invocation",
+          "[host][graph][reference-walk][plugin][failure]") {
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1, "Input");
+    auto rejecting = std::make_unique<DeterministicPlugin>(
+        DeterministicPlugin::Mode::kFull, 1.0f, 1, 1, 0, true);
+    auto* rejecting_ptr = rejecting.get();
+    const auto plugin = graph.add_plugin_node(std::move(rejecting), 1, 1, "Rejecting plugin");
+    const auto output = graph.add_output_node(1, "Output");
+    REQUIRE(graph.connect(input, 0, plugin, 0));
+    REQUIRE(graph.connect(plugin, 0, output, 0));
+    graph.set_canonical_executor_routing_enabled(false);
+    REQUIRE(graph.prepare(kSr, kFrames));
+
+    std::vector<float> input_samples(static_cast<std::size_t>(kFrames), 0.25f);
+    std::vector<float> output_samples(static_cast<std::size_t>(kFrames), 1.0f);
+    std::array<const float*, 1> input_ptrs{input_samples.data()};
+    std::array<float*, 1> output_ptrs{output_samples.data()};
+    pulp::audio::BufferView<const float> input_view(input_ptrs.data(), 1, kFrames);
+    pulp::audio::BufferView<float> output_view(output_ptrs.data(), 1, kFrames);
+    graph.process(output_view, input_view, kFrames);
+
+    CHECK(rejecting_ptr->process_calls == 1);
+    for (const auto sample : output_samples) CHECK(sample == 0.0f);
+}
+
+TEST_CASE("SignalGraph routed hosted failure is terminal and fail-closed",
+          "[host][graph][routing][plugin][failure]") {
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1, "Input");
+    auto rejecting = std::make_unique<DeterministicPlugin>(
+        DeterministicPlugin::Mode::kFull, 1.0f, 1, 1, 0, true);
+    auto* rejecting_ptr = rejecting.get();
+    const auto plugin = graph.add_plugin_node(std::move(rejecting), 1, 1, "Rejecting plugin");
+    const auto output = graph.add_output_node(1, "Output");
+    REQUIRE(graph.connect(input, 0, plugin, 0));
+    REQUIRE(graph.connect(plugin, 0, output, 0));
+    graph.set_canonical_executor_routing_enabled(true);
+    REQUIRE(graph.prepare(kSr, kFrames));
+
+    std::vector<float> input_samples(static_cast<std::size_t>(kFrames), 0.25f);
+    std::vector<float> output_samples(static_cast<std::size_t>(kFrames), 1.0f);
+    std::array<const float*, 1> input_ptrs{input_samples.data()};
+    std::array<float*, 1> output_ptrs{output_samples.data()};
+    pulp::audio::BufferView<const float> input_view(input_ptrs.data(), 1, kFrames);
+    pulp::audio::BufferView<float> output_view(output_ptrs.data(), 1, kFrames);
+    graph.process(output_view, input_view, kFrames);
+
+    CHECK(rejecting_ptr->process_calls == 1);
     for (const auto sample : output_samples) CHECK(sample == 0.0f);
 }
 
