@@ -3010,8 +3010,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".github/workflows/release-cli.yml",
           "state": "pulp-owned-retained",
-          "revision": "b8dbd08811425d35c27995a00781d79856098df6",
-          "object_id": "5f2b72852d6a6b5c5ba54cbb570ddcc86ed2b406",
+          "revision": "b84d29787992fbdd724fa9695945c99a811f18ee",
+          "object_id": "27e0d7935d21eb710d32ec06ca1d03ecef37d09c",
           "object_type": "blob"
         },
         {
@@ -3050,8 +3050,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/release_artifact_contents.py",
           "state": "pulp-owned-retained",
-          "revision": "267257a57355e84a89d1d4e8a621736e7cd70d3c",
-          "object_id": "f6b51a24f4728a5084d6e1877c44a90a295353cb",
+          "revision": "b84d29787992fbdd724fa9695945c99a811f18ee",
+          "object_id": "a7b4176e1b23ae5a7fd932c614efe49dda7e1c16",
           "object_type": "blob"
         },
         {
@@ -3074,8 +3074,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/test_release_artifact_contents.py",
           "state": "pulp-owned-retained",
-          "revision": "b8dbd08811425d35c27995a00781d79856098df6",
-          "object_id": "37d72c178b887a0f99774e9c3c00e5728112ab3b",
+          "revision": "b84d29787992fbdd724fa9695945c99a811f18ee",
+          "object_id": "591bd865bd6ad8e103b66146c632d957b636b9e3",
           "object_type": "blob"
         }
       ],

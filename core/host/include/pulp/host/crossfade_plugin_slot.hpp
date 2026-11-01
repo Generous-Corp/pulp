@@ -76,8 +76,22 @@ public:
                  midi::MidiBuffer& midi_out,
                  const ParameterEventQueue& param_events,
                  int num_samples) override {
+        begin_process();
         new_slot_->process(output, input, midi_in, midi_out, param_events, num_samples);
         blend_old_into_(output, input, num_samples);
+    }
+
+    void begin_process() noexcept override {
+        new_slot_->begin_process();
+        if (old_slot_)
+            old_slot_->begin_process();
+    }
+
+    ProcessStatus process_status() const noexcept override {
+        if (new_slot_->process_status() == ProcessStatus::failed ||
+            (old_slot_ && old_slot_->process_status() == ProcessStatus::failed))
+            return ProcessStatus::failed;
+        return ProcessStatus::ok;
     }
 
     void process(format::ProcessBuffers& audio,
@@ -85,6 +99,7 @@ public:
                  midi::MidiBuffer& midi_out,
                  const ParameterEventQueue& param_events,
                  int num_samples) override {
+        begin_process();
         if (skip_blend_(audio, num_samples)) {
             new_slot_->process(audio, midi_in, midi_out, param_events, num_samples);
             return;
@@ -106,6 +121,7 @@ public:
                  const ParameterEventQueue& param_events,
                  int num_samples,
                  const format::ProcessContext& transport) override {
+        begin_process();
         if (skip_blend_(audio, num_samples)) {
             new_slot_->process(audio, midi_in, midi_out, param_events, num_samples, transport);
             return;

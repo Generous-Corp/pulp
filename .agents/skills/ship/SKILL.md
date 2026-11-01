@@ -250,9 +250,70 @@ built with PULP_TRACING=ON," the fix is to rebuild with tracing off (the
 default `pulp build`), not to reach for `--allow-tracing`. The scanner lives in
 `tools/cli/ship_tracing_guard.hpp` (unit-tested in `test/test_ship_tracing_guard.cpp`).
 
+## Release-artifact scan at ship time
+
+`sign`, `package` and `check` run `tools/cmake/PulpReleaseArtifactScan.cmake`
+(the one forbidden-marker list, see "Release-artifact forbidden-marker list"
+below) over the **native binaries of the artifacts they are about to vouch
+for**: every Mach-O / ELF / PE file under a bundle, found by image header, or
+the loose file itself. The build's ctests already hold the list on the artifact
+classes they build; this holds it on the bytes that get signed and notarized.
+
+- **Gates come from evidence, not from the command line.** The guard
+  (`tools/cli/ship_artifact_scan_guard.hpp`, unit-tested in
+  `test/test_ship_artifact_scan_guard.cpp`) mirrors
+  `pulp_release_artifact_active_gates`: only an option the build dir's
+  `CMakeCache.txt` recorded contributes (`PULP_ENABLE_JS`, `PULP_TRACING`,
+  `PULP_DEV_BUILD`, `PULP_RELOAD_DEV_WATCHER`, `PULP_DEV_BRIDGE_EXEC` /
+  `PULP_BRIDGE_EXEC_ENABLED`, explicit value over profile fallback), plus the
+  installed SDK's `sdk-provenance.json`: an official release marker
+  (`profile: official-release`, `features.bridge_exec: false`,
+  `features.tracing: false`) proves `dev-env-off`, `reload-ship`,
+  `bridge-exec-off` and `tracing-off`; a source-install stamp (top-level
+  `bridge_exec`, `build_profile: release`) proves the first three, so
+  an SDK-based plug-in whose own cache records none of those options is still
+  scanned against what its SDK proves. `control-stripped` is never derived here.
+- **Skips say why.** No cache, no gate recorded, no scanner (it is looked for
+  at `<CMAKE_HOME_DIRECTORY>/tools/cmake/` then `<Pulp_DIR>/`, where the SDK
+  installs it), nothing native under the artifact (a `.dmg`, a `.pkg`), or a
+  Windows host (the runner would go through cmd.exe, which cannot open
+  `/dev/null`, and an MSVC host has no `nm`; the build's own release-artifact
+  ctests hold the list there) each print one line and proceed. A skip is not
+  a pass; `check --json` reports `artifact_scan` as `skipped` in that case,
+  `clean` / `forbidden-marker` otherwise, and `overridden` under
+  `--skip-artifact-scan`.
+- **A hit fails closed** with the scanner's own report (marker id, kind,
+  pattern, gates) and exits 1. **So does a scan that cannot reach a verdict**,
+  reported as `scan-error` with its own message: a symlink as the artifact
+  (never followed), a directory the walk cannot read, a path carrying `;` (the
+  CMake list separator `BINS` is joined with), a runner that failed to start,
+  or the scanner's own FATAL (nm failing on an input, no evidence source at
+  all). The two are told apart by the scanner's `forbidden marker(s) present`
+  text, so automation reading the JSON never mistakes "the scan did not
+  happen" for "the binary is dirty". The fix for a hit is a release configure
+  (`pulp ship` builds `build-ship/` for a dev build); `--skip-artifact-scan`
+  is the deliberate, loud override, on `sign`, `package` and `check`.
+  `release` inherits the guard through its `sign` and `package` stages and has
+  no override of its own.
+- **Provenance is read by position, not by key name.** The reader takes the
+  top level and the `features` object of `sdk-provenance.json` and nothing
+  deeper, so a `profile` or `tracing` key inside `gpu_audio` or `integrity`
+  cannot shadow the real ones whatever order `sort_keys=True` wrote them in;
+  the unit test feeds the marker as minted and a demoted negative control.
+- **Testing it needs a real image.** The scanner runs `nm` on every target and
+  a text file fails it, so the shell-out cases (`[artifact-scan]` in
+  `test/test_cli_ship_shellout.cpp`) copy the Mach-O strip fixture into a fake
+  bundle and append the marker bytes after its segments; the fake project's
+  cache records `PULP_TRACING`/`PULP_DEV_BUILD` and its `tools/cmake/` holds a
+  copy of the real scanner and list (declared through `pulp_test_data`).
+
 ## Shell exec bridge ship guard
 
-Release and SDK configures pass `-DPULP_DEV_BRIDGE_EXEC=OFF` (`release-cli.yml`, `sign-and-release.yml`, `pulp sdk install`, the local SDK profile), which compiles the JS `exec`/`execAsync` bridge body out of `pulp-view-script`. The installed SDK records the outcome in `sdk-provenance.json` as `features.bridge_exec` (release marker, forge-dev/trace) or top-level `bridge_exec` (source-install stamp); minting a release marker refuses a configure cache with the option ON or missing, and `PulpSdkProvenance.cmake` fails on a release marker claiming `true`. A dev checkout keeps the bridge because the option follows `PULP_BUILD_TESTS`. Prove an artifact with `strings <archive> | grep -c execAsync` (0 for ship) or the `pulp-bridge-exec-ship-symbol-absence` ctest.
+Release and SDK configures compile the JS `exec`/`execAsync` bridge body out of `pulp-view-script`: `release-cli.yml`, `sign-and-release.yml` and `release-cli-local.sh` through `-DPULP_PROFILE=release` (see the next section); the from-source checkout SDK behind `pulp sdk install` and the local forge-dev/trace profiles are dev-profile developer SDKs and pass an explicit `-DPULP_DEV_BRIDGE_EXEC=OFF` instead. The installed SDK records the outcome in `sdk-provenance.json` as `features.bridge_exec` (release marker, forge-dev/trace) or top-level `bridge_exec` (source-install stamp); minting a release marker refuses a configure cache with the option ON or missing, and `PulpSdkProvenance.cmake` fails on a release marker claiming `true`. A dev checkout keeps the bridge because the option follows `PULP_BUILD_TESTS`. Prove an artifact with `strings <archive> | grep -c execAsync` (0 for ship) or the `pulp-bridge-exec-ship-symbol-absence` ctest.
+
+## One release profile, not a flag list
+
+`-DPULP_PROFILE=release` (`tools/cmake/PulpProfiles.cmake`) is the only security flag a release configure passes. The from-source checkout SDK that `pulp sdk install` builds from a checkout (`ensure_checkout_sdk`, `tools/cli/cli_sdk.cpp`) is the deliberate exception, not a drift: it is a developer SDK, so it passes `-DPULP_PROFILE=dev` (the dev profile keeps hot reload and the dev bridge working for a project built against it) plus the stripped flags explicitly, and its stamp records `build_profile: dev`; `pulp-test-cli-local-sdk-profile` reads that configure out of the source so a later "hardening" to `release` fails there. A release SDK comes only from `release-cli.yml`. It forces `PULP_BUILD_TESTS`, `PULP_BUILD_EXAMPLES`, `PULP_ENABLE_AUDIO_PROBES`, `PULP_DEV_BRIDGE_EXEC`, `PULP_DEV_BUILD` (the on-disk `UI_SCRIPT` hot-reload path), `PULP_TRACING`, `PULP_ENABLE_FUZZING`, `PULP_BENCHMARK` and `PULP_RT_WORK_COUNTERS` OFF and refuses a configure whose cache or command line says ON for any of them (`PULP_PROFILE_ALLOW_OVERRIDE=ON` is the loud, warn-per-option escape hatch for a development build and must never reach a release site; it publishes `PULP_PROFILE_OVERRIDDEN=ON` to the cache, which `sdk_provenance.py` refuses to mint from and which the source-install stamp and dev-experiment document record as `build_profile: dev`). `PULP_ENABLE_INSPECTOR` and `PULP_ENABLE_DESIGN_IMPORT` are profile-neutral and stay per site. Every `sdk-provenance.json` writer records the profile as top-level `build_profile` (`release` on the official marker, `dev` on forge-dev/trace, the configure's value on a source-install stamp or dev-experiment document); `sdk_provenance.py` refuses to mint a release marker from a cache whose `PULP_PROFILE` is not `release`, `PulpSdkProvenance.cmake` exports `PULP_SDK_BUILD_PROFILE` and fails a release marker that says anything else, and `release_artifact_contents.py` refuses a release archive whose marker carries a non-release profile. Markers minted before the key existed verify as before. Prove a build dir with `grep '^PULP_PROFILE' <dir>/CMakeCache.txt`.
 
 ## Release-artifact forbidden-marker list
 
@@ -326,9 +387,14 @@ Gotchas:
   `ship_build_initial_cache()` writes every non-INTERNAL/STATIC cache entry
   (formats such as `PULP_ENABLE_AAX`/`PULP_AAX_SDK_DIR`, `PULP_ENABLE_ARA`,
   compiler, sysroot, SDK paths) into `build-ship/pulp-ship-initial-cache.cmake`,
-  which the configure loads with `cmake -C`; only `PULP_BUILD_TESTS`,
-  `PULP_DEV_BUILD`, `PULP_DEV_BRIDGE_EXEC` and `PULP_ENABLE_AUDIO_PROBES` are
-  dropped (the first two set OFF) and `PULP_PROFILE` is forced to `release`.
+  which the configure loads with `cmake -C`; only the release profile's
+  enforced options (`PULP_PROFILE_ENFORCED_OPTIONS` in `PulpProfiles.cmake`,
+  read from the generated `tools/cli/build_profile_gen.h`: `PULP_DEV_BUILD`,
+  tests, examples, audio probes, the exec bridge, tracing, fuzzing, benchmark,
+  RT work counters) plus `PULP_DEV_SHARED_UI` are dropped and set OFF, and
+  `PULP_PROFILE` is forced to `release`. The drop list is not a second copy:
+  adding an option to the profile drops it from `build-ship/` too, and a
+  `static_assert` fails the CLI build if the list ever loses `PULP_DEV_BUILD`.
   The generator is INTERNAL and goes on the command line (`-G`). An earlier
   version carried ten named entries and silently dropped an AAX-enabled
   plug-in's AAX bundle.

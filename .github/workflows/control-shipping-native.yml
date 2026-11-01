@@ -168,11 +168,12 @@ jobs:
               platform_args+=(-A x64)
             fi
           fi
+          # The release profile (tools/cmake/PulpProfiles.cmake) is the
+          # shipped option set release-cli.yml installs its SDK with; the
+          # GPU and inspector flags are site-specific and stay beside it.
           cmake -S . -B build-sdk \
             -DCMAKE_BUILD_TYPE=Release \
-            -DPULP_BUILD_TESTS=OFF \
-            -DPULP_BUILD_EXAMPLES=OFF \
-            -DPULP_ENABLE_AUDIO_PROBES=OFF \
+            -DPULP_PROFILE=release \
             -DPULP_ENABLE_GPU=OFF \
             -DPULP_ENABLE_INSPECTOR=ON \
             "${platform_args[@]}"

@@ -24,7 +24,10 @@ boundary is checked before the host starts so an ACL failure cannot be
 misreported as a plugin or status-publication failure.
 
 Use an initialized, registered profile whose first-run dialogs have already
-been dismissed. The harness copies the non-secret profile into a private
+been dismissed. The seed `reaper.ini` must contain both `[REAPER]` and
+`[audioconfig]`; a first-run/minimal profile is rejected immediately as
+`REAPER_SEED_PROFILE_INCOMPLETE` instead of being allowed to hang before
+startup-script dispatch. The harness copies the non-secret profile into a private
 temporary profile outside the evidence directory, preserves the license only in
 that private profile, and removes old VST/CLAP scan caches before the exact
 staged plugin is scanned. Windows REAPER's `-cfgfile` resource directory
@@ -41,6 +44,19 @@ records the session ID and Explorer PIDs, binds every owned REAPER process to
 that session, and records the foreground window session during editor
 activation. This prevents a successful host handshake from being mistaken for
 a visible editor when the runner is detached from the desktop.
+
+### Interactive desktop requirement
+
+A disconnected remote-desktop session is suitable for headless checks
+(`-Headless`) but cannot produce foreground-editor evidence. Reconnect the
+Windows desktop that owns the display, confirm the account's session is
+`Active`, and run the harness from that session. Host-specific reconnect
+steps, addresses, accounts and credential locations belong in private
+host-operations documentation, not in this generic harness guide.
+
+Do not accept a screenshot from a disconnected session: the receipt must show
+the same session ID for REAPER, Explorer, the editor HWND and the foreground
+window.
 
 For CLAP, pass required adjacent files explicitly, for example
 `-SidecarPath 'C:\build\icudtl.dat'`. VST3 bundles are copied recursively.
@@ -59,8 +75,11 @@ The host executable determines the VST scan key: `vstpath64` for the x64 ABI and
 header; validated CHPE load-config metadata distinguishes that hybrid from an
 AMD64 image without CHPE metadata. Receipts preserve raw COFF fields, metadata
 status and derived ABI separately. Unavailable/unsupported metadata refuses scan
-routing. These fields do not assert every instruction's ISA or native ARM64
-execution. CLAP uses `clap_path`.
+routing. For a VST3 bundle, the harness first selects the inner payload whose
+name matches the bundle, then filters multi-architecture payloads by the host
+ABI; an ambiguous or mismatched set is rejected before REAPER launches. These
+fields do not assert every instruction's ISA or native ARM64 execution. CLAP
+uses `clap_path`.
 Startup, scan and parameter action have separate bounded budgets. A unique run
 token prevents stale host status from satisfying the handshake. Terminal
 status retains insertion evidence, actual normalized parameter observations,

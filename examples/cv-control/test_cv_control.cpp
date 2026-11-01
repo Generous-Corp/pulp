@@ -1,15 +1,19 @@
 #include "cv_control.hpp"
 #include "cv_control_processor.hpp"
+#include <array>
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <limits>
+#include <pulp/runtime/external_input.hpp>
 #include <pulp/runtime/triple_buffer.hpp>
 #include <thread>
+#include <vector>
 
 using pulp::examples::cv_control::ControlReplay;
 using pulp::examples::cv_control::ControlSample;
 using pulp::examples::cv_control::decode_midi_control;
+using pulp::examples::cv_control::decode_midi_sysex;
 using pulp::examples::cv_control::FaceFrame;
 using pulp::examples::cv_control::FaceMapping;
 using pulp::examples::cv_control::HandFrame;
@@ -257,4 +261,87 @@ TEST_CASE("custom model replay keeps related outputs coherent") {
     mapping.advance(12000, 12000);
     REQUIRE_FALSE(mapping.drive().valid());
     REQUIRE_FALSE(mapping.blend().valid());
+}
+
+TEST_CASE("browser SysEx decoder accepts bounded multi-value packet", "[cv][midi][sysex]") {
+    std::vector<std::uint8_t> packet{0xf0, 0x7d, 'P', 'I', 1};
+    auto append32 = [&](std::uint32_t v) {
+        for (int i = 0; i < 4; ++i)
+            packet.push_back((v >> (8 * i)) & 0xff);
+    };
+    append32(9);
+    append32(2);
+    packet.push_back(7);
+    for (int i = 1; i < 8; ++i)
+        packet.push_back(0);
+    for (int i = 0; i < 8; ++i)
+        packet.push_back(0);
+    packet.push_back(0);
+    const float confidence = 0.75f;
+    const auto* c = reinterpret_cast<const std::uint8_t*>(&confidence);
+    packet.insert(packet.end(), c, c + sizeof(float));
+    packet.push_back(2);
+    for (float value : {0.1f, 0.9f}) {
+        const auto* p = reinterpret_cast<const std::uint8_t*>(&value);
+        packet.insert(packet.end(), p, p + 4);
+    }
+    packet.push_back(0xf7);
+    const auto decoded = decode_midi_sysex(packet);
+    REQUIRE(decoded.has_value());
+    CHECK(decoded->source_id == 9);
+    CHECK(decoded->sequence == 7);
+    CHECK(decoded->count == 2);
+    CHECK_THAT(decoded->values[0], Catch::Matchers::WithinAbs(0.1f, 1e-6f));
+    CHECK_THAT(decoded->values[1], Catch::Matchers::WithinAbs(0.9f, 1e-6f));
+}
+
+TEST_CASE("browser SysEx decoder rejects short and oversized packets", "[cv][midi][sysex]") {
+    CHECK_FALSE(decode_midi_sysex(std::array<std::uint8_t, 4>{0xf0, 0x7d, 'P', 'I'}));
+    std::vector<std::uint8_t> oversized(36 + 17 * 4, 0);
+    oversized[0] = 0xf0;
+    oversized[1] = 0x7d;
+    oversized[2] = 'P';
+    oversized[3] = 'I';
+    oversized[4] = 1;
+    oversized[34] = 17;
+    oversized.back() = 0xf7;
+    CHECK_FALSE(decode_midi_sysex(oversized));
+}
+
+TEST_CASE("browser SysEx frames enforce external-input source ordering and confidence",
+          "[cv][midi][sysex][external-input]") {
+    using pulp::runtime::ExternalInputFrame;
+    using pulp::runtime::ExternalInputGate;
+    using pulp::runtime::ExternalInputPolicy;
+    using pulp::runtime::ExternalInputStatus;
+    using pulp::runtime::ExternalInputVerdict;
+
+    ExternalInputGate<16> gate;
+    const ExternalInputPolicy policy{1, 0.6f, 12000, 0};
+    ExternalInputFrame<16> frame;
+    frame.source_id = 1;
+    frame.epoch = 1;
+    frame.sequence = 2;
+    frame.provider_time_ns = 2;
+    frame.status = ExternalInputStatus::valid;
+    frame.confidence = 0.8f;
+    frame.count = 1;
+    frame.values[0] = 0.4f;
+    REQUIRE(gate.submit(frame, policy) == ExternalInputVerdict::accepted);
+
+    auto wrong_source = frame;
+    wrong_source.source_id = 2;
+    wrong_source.sequence = 3;
+    CHECK(gate.submit(wrong_source, policy) == ExternalInputVerdict::rejected_source);
+
+    auto stale = frame;
+    stale.sequence = 1;
+    stale.provider_time_ns = 1;
+    CHECK(gate.submit(stale, policy) == ExternalInputVerdict::rejected_order);
+
+    auto over_confidence = frame;
+    over_confidence.sequence = 3;
+    over_confidence.provider_time_ns = 3;
+    over_confidence.confidence = 1.1f;
+    CHECK(gate.submit(over_confidence, policy) == ExternalInputVerdict::rejected_confidence);
 }

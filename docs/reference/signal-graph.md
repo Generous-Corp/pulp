@@ -545,6 +545,12 @@ stage the intended publish state before prepare.
 
 - [Choosing a Processing Model](processing-models.md) — whether you need a
   `SignalGraph` at all, and what goes inside a node.
+- [Unified SignalGraph workflow](../guides/signal-graph-workflow.md) — the
+  discover, validate, prepare, mutate, render, and diagnose sequence.
+- [SignalGraph capability matrix](signal-graph-capabilities.md) — current
+  support, developer surface, evidence status, and next acceptance gate.
+- [Sample granular graphs](../guides/sample-granular-graphs.md) — a concrete
+  graph example and its executable workflow.
 - [Hosting guide](../guides/hosting.md) — end-to-end example.
 - [`pulp::host::PluginSlot`](../../core/host/include/pulp/host/plugin_slot.hpp)
 - [`pulp::host::SignalGraph`](../../core/host/include/pulp/host/signal_graph.hpp)
