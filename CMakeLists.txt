@@ -1151,11 +1151,11 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND TARGET pulp-test-signal-graph-x9-modular
     add_test(
         NAME pulp-test-signal-graph-x9-hosted-format-receipt
         COMMAND ${CMAKE_COMMAND}
-            -DCLAP_PATH=${CMAKE_BINARY_DIR}/CLAP/PulpGain.clap
-            -DVST3_PATH=${CMAKE_BINARY_DIR}/VST3/PulpGain.vst3
-            -DAU_PATH=${CMAKE_BINARY_DIR}/AU/PulpGain.component
-            -DOUTPUT=${CMAKE_BINARY_DIR}/x9-hosted-format-receipt.json
-            -P ${CMAKE_SOURCE_DIR}/test/cmake/x9_hosted_format_receipt.cmake)
+            "-DCLAP_PATH=${CMAKE_BINARY_DIR}/CLAP/PulpGain.clap"
+            "-DVST3_PATH=${CMAKE_BINARY_DIR}/VST3/PulpGain.vst3"
+            "-DAU_PATH=${CMAKE_BINARY_DIR}/AU/PulpGain.component"
+            "-DOUTPUT=${CMAKE_BINARY_DIR}/x9-hosted-format-receipt.json"
+            -P "${CMAKE_SOURCE_DIR}/test/cmake/x9_hosted_format_receipt.cmake")
     set_tests_properties(pulp-test-signal-graph-x9-hosted-format-receipt PROPERTIES
         LABELS "signal-graph;x9;hosting;receipt"
         TIMEOUT 30)
