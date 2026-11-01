@@ -47,11 +47,25 @@ explicitly gated; read the [capability matrix](../reference/signal-graph-capabil
 before treating a row as a universal guarantee.
 
 The practical rule is to keep fixed DSP and voice state in `Processor`, and use
-`SignalGraph` where composition is the feature being edited. `ProcessorNode` can
-wrap a caller-owned `Processor`, while the graph owns routing and execution; a
-timeline binding likewise requires its graph and program store to outlive the
-binding. Choosing the graph boundary does not require a second runtime or a
+`SignalGraph` where composition is the feature being edited. `ProcessorNode` wraps a configured processor-node instance; the graph retains
+its node lifetime while owning routing and execution. A timeline binding likewise
+requires its graph and program store to outlive the binding. Choosing the graph boundary does not require a second runtime or a
 duplicate control model.
+
+Ask these three questions before writing code:
+
+1. **Is the signal algorithm fixed?** Put it in a `Processor`, including complex
+   voices, sidechains, oversampling, and internal serial or parallel stages.
+2. **Can a user or host change the routing while the product runs?** Use a
+   `SignalGraph`, with prepared edits and an immutable published snapshot.
+3. **Does behavior depend on musical time?** Use the timeline model and its
+   transport-aware renderer; bind graph work underneath it when needed.
+
+A graph fixture is a routing and lifecycle example, not proof of every host or
+format. The [sample-region example](../../examples/sample-region-allpass/) is a
+small graph-backed fixture; the [timeline phase example](../examples/timeline-phase1.md)
+shows the transport-owned path. Use both when a feature crosses the graph and
+timeline boundaries.
 
 ## Choose the graph boundary
 
@@ -59,8 +73,8 @@ Start with [Processing models](../reference/processing-models.md). Keep fixed
 DSP, voice state, and sample processing in `Processor`. Use
 `pulp::host::SignalGraph` when the routing or hosted composition is the thing
 the application edits: a rack, mixer, modular patch, plugin host, or node
-editor. `ProcessorNode` instead wraps a non-owning `Processor` while
-`SignalGraph` owns routing and execution. Timeline playback uses its existing
+editor. `ProcessorNode` uses the configured processor-node path while `SignalGraph`
+retains the node lifetime and owns routing and execution. Timeline playback uses its existing
 binding to lower transport-driven work into graph nodes.
 
 ## Discover a fixture or kit
