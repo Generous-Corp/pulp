@@ -575,12 +575,16 @@ already required the verdict), so making the check required cannot stall the
 queue. Bump the pinned Shipyard `ref` only to a commit that still contains the
 sticky-HOLD rule.
 
-The poster job is named `post-review-verdict`, never `review-verdict`: a
-comment-, `workflow_run`- or `pull_request_target`-triggered check run can attach
-to the default branch's commit, so a same-named job would add a second signal
-(a red mark on main after a HOLD). The status on the exact head is the only
-`review-verdict` signal on a pull request; only the merge-group job shares the
-name, because there the check run is the signal. A `push` to main touching the
+The poster job is named `review-verdict`, like the required context and the
+job in Vellum, Shipyard and TartCI. Keep the job id and name equal to the
+context: the merge steward matches a required check bound to GitHub Actions by
+the check run's name, so renaming the job (as was done once, to
+`post-review-verdict`) left every PR head with only the commit status and a
+steward that matched only check runs reported
+`required_never_ran:review-verdict` while GitHub showed the rule green. The
+accepted cost: a comment- or `workflow_run`-triggered run can also show a
+`review-verdict` check on main's commit. The merge-group job shares the name
+too, because there the check run is the signal. A `push` to main touching the
 three review-verdict workflows, or a manual `workflow_dispatch`, runs
 `backfill-review-verdict`, which drives the same pinned script for every open
 non-draft PR targeting main, so existing PRs get a current status without a
