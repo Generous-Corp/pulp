@@ -126,16 +126,6 @@ public:
                          const ParameterEventQueue& param_events,
                          int num_samples) = 0;
 
-    // Called by the graph executor immediately before a routed block. Existing
-    // slots need no override. Format adapters may clear an audio-thread-owned
-    // status latch here; process() also clears it at its own entry so direct
-    // callers get the same per-block semantics.
-    virtual void begin_process() noexcept {}
-
-    // Status for the most recent process block. Implementations must use an
-    // allocation-free, lock-free read suitable for the audio thread.
-    virtual ProcessStatus process_status() const noexcept { return ProcessStatus::ok; }
-
     // Parameters
     virtual std::vector<HostParamInfo> parameters() const = 0;
     virtual float get_parameter(uint32_t id) const = 0;
@@ -395,6 +385,17 @@ public:
     virtual bool reseed_dsp_state(std::uint64_t) {
         return false;
     }
+
+    // Appended after the original PluginSlot virtual surface to preserve ABI
+    // ordering for existing slot implementations. The graph executor calls
+    // begin_process() before a routed block; adapters also clear their latch at
+    // process() entry so direct slot callers observe the same per-block result.
+    virtual void begin_process() noexcept {}
+
+    // Status for the most recent process block. Implementations must provide an
+    // allocation-free, nonblocking read suitable for the audio thread. The
+    // status does not replace a format's output fallback policy.
+    virtual ProcessStatus process_status() const noexcept { return ProcessStatus::ok; }
 };
 
 } // namespace pulp::host
