@@ -24,6 +24,33 @@ dispatch map, then follow the selected section and record the artifacts named
 there. The [capability matrix](../reference/signal-graph-capabilities.md) is the
 compact status view; this guide is the operational sequence.
 
+## What a graph is, and when to use one
+
+An audio graph is a set of processing nodes connected by typed paths. Audio,
+MIDI, automation, modulation, and feedback move along those paths in a defined
+order. The graph is useful when the application needs to make the connections
+themselves part of the product: a patch editor, instrument voice network,
+effect chain, mixer, or hosted processing rack.
+
+| Use this boundary | When it fits | Typical work |
+|---|---|---|
+| `Processor` | The signal algorithm and its state are fixed inside one component | Oscillators, voices, filters, samplers, meters, and reusable DSP modules |
+| `SignalGraph` | The application edits nodes, routing, hosted processing, or graph-level automation | Modular instruments, effect chains, mixers, plugin hosts, and patch editors |
+| Timeline/playback | The behavior depends on transport, tempo, arrangement, pre-roll, or tails | Songs, clips, automation lanes, and offline renders with transport |
+
+Pulp graphs currently cover DAG composition, stable node identity, prepared
+topology edits, MIDI and bounded modulation lanes, explicit feedback delay,
+latency/PDC, serial and parallel execution, graph and timeline offline paths,
+serialization, and signed bake artifacts. Hosted plugin breadth, richer bus
+projection, process isolation, and some event-format and continuity cases remain
+explicitly gated; read the [capability matrix](../reference/signal-graph-capabilities.md)
+before treating a row as a universal guarantee.
+
+The practical rule is to keep fixed DSP and voice state in `Processor`, and use
+`SignalGraph` where composition is the feature being edited. A `Processor` may
+own a prepared graph through the existing binding, so choosing the graph boundary
+does not require a second runtime or a duplicate control model.
+
 ## Choose the graph boundary
 
 Start with [Processing models](../reference/processing-models.md). Keep fixed
