@@ -73,6 +73,57 @@ TEST_CASE("external input verdict ordering and lifecycle", "[runtime][external-i
     REQUIRE(gate.epoch() == 2);
 }
 
+TEST_CASE("external input stale status frame cannot knock out a newer value",
+          "[runtime][external-input]") {
+    ExternalInputGate<3> gate;
+    ExternalInputPolicy p{7, 0.5f, 0, 3};
+    REQUIRE(gate.submit(frame(1, 5), p) == ExternalInputVerdict::accepted);
+    auto paused = frame(1, 2);
+    paused.status = ExternalInputStatus::paused;
+    REQUIRE(gate.submit(paused, p) == ExternalInputVerdict::rejected_order);
+    REQUIRE(gate.valid());
+    REQUIRE(gate.last_status() == ExternalInputStatus::valid);
+    REQUIRE(gate.sequence() == 5);
+    REQUIRE(gate.counters().rejected_status == 0);
+    REQUIRE(gate.counters().rejected_order == 1);
+}
+
+TEST_CASE("external input ordering watermark survives expiry", "[runtime][external-input]") {
+    ExternalInputPolicy p{7, 0.5f, 5, 3};
+    SECTION("status expiry") {
+        ExternalInputGate<3> gate;
+        REQUIRE(gate.submit(frame(1, 10), p) == ExternalInputVerdict::accepted);
+        auto denied = frame(1, 11);
+        denied.status = ExternalInputStatus::denied;
+        REQUIRE(gate.submit(denied, p) == ExternalInputVerdict::rejected_status);
+        REQUIRE_FALSE(gate.valid());
+        REQUIRE(gate.submit(frame(1, 9), p) == ExternalInputVerdict::rejected_order);
+        REQUIRE_FALSE(gate.valid());
+        REQUIRE(gate.submit(frame(1, 12), p) == ExternalInputVerdict::accepted);
+    }
+    SECTION("age expiry") {
+        ExternalInputGate<3> gate;
+        REQUIRE(gate.submit(frame(2, 10), p) == ExternalInputVerdict::accepted);
+        REQUIRE(gate.advance(5, p));
+        REQUIRE_FALSE(gate.valid());
+        REQUIRE(gate.submit(frame(2, 9), p) == ExternalInputVerdict::rejected_order);
+        REQUIRE(gate.submit(frame(1, 50), p) == ExternalInputVerdict::rejected_order);
+        REQUIRE_FALSE(gate.valid());
+        REQUIRE(gate.submit(frame(2, 11), p) == ExternalInputVerdict::accepted);
+    }
+}
+
+TEST_CASE("external input checks source before reporting unchanged", "[runtime][external-input]") {
+    ExternalInputGate<3> gate;
+    ExternalInputPolicy p{7, 0.5f, 0, 3};
+    REQUIRE(gate.submit(frame(1, 5), p) == ExternalInputVerdict::accepted);
+    auto wrong = frame(1, 5);
+    wrong.source_id = 8;
+    REQUIRE(gate.submit(wrong, p) == ExternalInputVerdict::rejected_source);
+    REQUIRE(gate.counters().unchanged == 0);
+    REQUIRE(gate.valid());
+}
+
 TEST_CASE("external input rejects non-finite and wrong shape", "[runtime][external-input]") {
     ExternalInputGate<3> gate;
     ExternalInputPolicy p{7, 0.0f, 0, 3};
