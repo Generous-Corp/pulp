@@ -98,9 +98,9 @@ function Get-BoundModulePaths([int]$TargetPid, [ValidateRange(1,60)][int]$Timeou
     Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
   }
 }
-function Assert-OwnedIdentity($Process, [string]$StartedUtc) {
+function Assert-OwnedIdentity($Process, [long]$StartedTicks) {
   $Process.Refresh()
-  if ($Process.HasExited -or $Process.StartTime.ToUniversalTime().ToString('o') -ne $StartedUtc) { throw 'Owned process identity changed' }
+  if ($Process.HasExited -or [math]::Abs($Process.StartTime.ToUniversalTime().Ticks - $StartedTicks) -gt [TimeSpan]::FromSeconds(1).Ticks) { throw 'Owned process identity changed' }
 }
 function Get-InteractiveDesktopContext {
   $sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId

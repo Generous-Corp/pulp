@@ -52,7 +52,7 @@ $priorTracePath=Get-ProcessTracePath
 $tracePathRestored=$false
 function Stop-Owned($Entry) {
   if ($Entry.process.HasExited) { return }
-  Assert-OwnedIdentity $Entry.process $Entry.started
+  Assert-OwnedIdentity $Entry.process $Entry.started_ticks
   $Entry.process.Kill()
   if (-not $Entry.process.WaitForExit(10000)) { throw 'Owned REAPER warm process did not exit before scripted launch' }
   # Windows can release redirected handles just after WaitForExit returns.
@@ -64,7 +64,7 @@ function Start-Owned([string[]]$Arguments,[string]$Label) {
   $command=Join-WindowsArguments $Arguments
   $p=Start-Process -FilePath $script:reaper -ArgumentList $command -WorkingDirectory $run -RedirectStandardOutput (Join-Path $run ($Label+'.stdout.txt')) -RedirectStandardError (Join-Path $run ($Label+'.stderr.txt')) -PassThru
   if ($p.SessionId -ne [int]$receipt.session.session_id) { throw 'Owned REAPER process entered a different Windows session' }
-  $entry=@{process=$p;started=$p.StartTime.ToUniversalTime().ToString('o');command=$command;session_id=[int]$p.SessionId}
+  $entry=@{process=$p;started=$p.StartTime.ToUniversalTime().ToString('o');started_ticks=$p.StartTime.ToUniversalTime().Ticks;command=$command;session_id=[int]$p.SessionId}
   $owned.Add($entry); return $entry
 }
 try {
@@ -126,7 +126,7 @@ try {
   $warm=Start-Owned @('-newinst','-cfgfile',$ini,'-new','-nosplash') 'warm'
   $deadline=[DateTime]::UtcNow.AddSeconds($TimeoutSec);$cacheMatch=$false
   while([DateTime]::UtcNow -lt $deadline){
-    Assert-OwnedIdentity $warm.process $warm.started
+    Assert-OwnedIdentity $warm.process $warm.started_ticks
     try {
       $cacheText=(Get-ChildItem -LiteralPath $portable -File | Where-Object {$_.Name -match '^reaper-(vstplugins|clap).*\.ini$'} | Get-Content -ErrorAction Stop) -join "`n"
     } catch {
@@ -156,7 +156,7 @@ try {
   $receipt.process=@{pid=$proc.process.Id;started_utc=$proc.started;arguments=$proc.command;session_id=$proc.session_id}
   $deadline=[DateTime]::UtcNow.AddSeconds($TimeoutSec);$hostStatus=$null
   while([DateTime]::UtcNow -lt $deadline){
-    Assert-OwnedIdentity $proc.process $proc.started
+    Assert-OwnedIdentity $proc.process $proc.started_ticks
     $hostStatus=Read-HostStatus $status $token
     if($hostStatus -and ($hostStatus.fx_shown -eq '1' -or $hostStatus.error)){break}
     Start-Sleep -Milliseconds 100
@@ -166,7 +166,7 @@ try {
   $deadline=[DateTime]::UtcNow.AddSeconds($AutomationSec+$TimeoutSec)
   $terminal=if($ParamIndex -ge 0){'AUTOMATION_DONE'}else{'EDITOR_READY'}
   while([DateTime]::UtcNow -lt $deadline){
-    Assert-OwnedIdentity $proc.process $proc.started
+    Assert-OwnedIdentity $proc.process $proc.started_ticks
     $hostStatus=Read-HostStatus $status $token
     if($hostStatus -and ($hostStatus.phase -eq $terminal -or $hostStatus.error)){break}
     Start-Sleep -Milliseconds 100
@@ -216,7 +216,7 @@ public static class OwnedWindow {
 '@
   $editor=[IntPtr]([long]$hostStatus.editor_hwnd)
   function Guard-EditorOwner([long]$Hwnd) {
-    Assert-OwnedIdentity $proc.process $proc.started
+    Assert-OwnedIdentity $proc.process $proc.started_ticks
     if ($proc.process.SessionId -ne [int]$receipt.session.session_id) { throw 'Bound REAPER process left the interactive session' }
     if($Hwnd -ne $editor.ToInt64() -or $proc.process.Path -ine $reaper){throw 'Bound editor/host identity changed'}
     if(-not(Test-Path -LiteralPath $receipt.loaded_plugin.path -PathType Leaf)){throw 'Bound plugin module disappeared'}
@@ -256,7 +256,7 @@ public static class OwnedWindow {
     Assert-EditorEvidence $editor.ToInt64() ([OwnedWindow]::IsWindow($editor)) ([OwnedWindow]::IsWindowVisible($editor)) ([OwnedWindow]::IsOwned($editor,[uint32]$proc.process.Id)) ([OwnedWindow]::Belongs($editor,[OwnedWindow]::GetForegroundWindow()))
   }
   function Capture([string]$Name){
-    Assert-OwnedIdentity $proc.process $proc.started
+    Assert-OwnedIdentity $proc.process $proc.started_ticks
     Guard-Editor
     $b=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds
     $image=New-Object Drawing.Bitmap($b.Width,$b.Height);$g=[Drawing.Graphics]::FromImage($image)
