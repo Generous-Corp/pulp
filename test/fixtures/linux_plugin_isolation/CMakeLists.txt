@@ -30,7 +30,7 @@ add_subdirectory(iso_a)
 add_subdirectory(iso_b)
 
 add_executable(pulp-test-plugin-isolation-host plugin_isolation_host.cpp)
-target_link_libraries(pulp-test-plugin-isolation-host PRIVATE ${CMAKE_DL_LIBS})
+target_link_libraries(pulp-test-plugin-isolation-host PRIVATE pulp::platform ${CMAKE_DL_LIBS})
 
 foreach(_fmt IN LISTS PULP_ISOLATION_FORMATS)
     string(TOLOWER "${_fmt}" _fmt_lower)
