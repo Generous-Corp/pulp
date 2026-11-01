@@ -427,6 +427,20 @@ TEST_CASE("Offline sidechain PDC render matches online routing across partitions
             CHECK(online[channel][frame] == input[channel][frame] + delayed_sidechain);
         }
     }
+
+    // Planted negative: a one-sample-wrong PDC oracle must fail, proving that
+    // the positive result is sensitive to the negotiated delay rather than
+    // merely checking that both paths produce finite audio.
+    std::size_t wrong_delay_mismatches = 0;
+    for (std::size_t frame = 0; frame < kFrames; ++frame) {
+        for (std::size_t channel = 0; channel < 2; ++channel) {
+            const float wrong_delayed_sidechain =
+                frame < 63 ? 0.0f : input[channel][frame - 63] * 0.75f;
+            if (online[channel][frame] != input[channel][frame] + wrong_delayed_sidechain)
+                ++wrong_delay_mismatches;
+        }
+    }
+    CHECK(wrong_delay_mismatches > 0);
 }
 
 TEST_CASE("Offline render zero-pads a source shorter than the frame count",
