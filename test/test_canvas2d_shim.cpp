@@ -1731,6 +1731,10 @@ TEST_CASE("Canvas2D pattern set_fill_pattern reaches Skia without throwing",
     // harness; the assertion is that the unresolved decode doesn't
     // poison the rest of the paint pass.
     ScriptedBridge env;
+    // Path confinement is covered by the security-tagged bridge tests; this
+    // case checks that an unresolved decode leaves the paint pass intact, so
+    // opt into the legacy working-directory lookup for the synthetic name.
+    env.bridge->set_allow_unreviewed_file_paths(true);
     env.load(R"(
         var c = document.createElement('canvas');
         globalThis.__test_canvas_el__ = c;
