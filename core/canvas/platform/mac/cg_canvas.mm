@@ -1277,15 +1277,16 @@ bool CoreGraphicsCanvas::draw_cg_image_in_rect(CGImageRef img,
         if (!cropped) return false;
         to_draw = cropped;
     }
-    // The construction CTM flip (translate(0,h) + scale(1,-1)) already puts us
-    // in a top-down space. An ImageIO-decoded CGImage stores its rows top-first,
-    // and CGContextDrawImage maps the image so that — under this flipped CTM —
-    // it lands right-side-up when drawn straight into the destination rect. (The
-    // conic-gradient blit counter-flips because ITS source bitmap is authored
-    // bottom-up; a decoded image is the opposite orientation, so no extra flip.)
+    // ImageIO-decoded CGImages are row-top-first while CGContextDrawImage
+    // consumes image space bottom-first. Counter-flip around the destination
+    // rect so Canvas' public top-down coordinates preserve authored artwork.
     // Interpolation quality honors the sticky imageSmoothing state already
     // pushed onto the GState by set_image_smoothing().
-    CGContextDrawImage(ctx_, CGRectMake(dx, dy, dw, dh), to_draw);
+    CGContextSaveGState(ctx_);
+    CGContextTranslateCTM(ctx_, dx, dy + dh);
+    CGContextScaleCTM(ctx_, 1.0, -1.0);
+    CGContextDrawImage(ctx_, CGRectMake(0.0, 0.0, dw, dh), to_draw);
+    CGContextRestoreGState(ctx_);
     CGImageRelease(to_draw);
     return true;
 }
