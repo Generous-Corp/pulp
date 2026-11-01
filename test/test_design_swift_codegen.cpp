@@ -145,6 +145,11 @@ TEST_CASE("generate_pulp_swift emits a resolver-generic SwiftUI view",
         "public struct ImportedPulpView<Resolver: PulpParameterResolving & ObservableObject>: View"));
     REQUIRE(contains(view, "@ObservedObject private var resolver: Resolver"));
     REQUIRE(contains(view, "public var body: some View {"));
+    // Imported subtrees are emitted as independent ViewBuilder properties so
+    // large browser captures do not exceed Swift's expression type-checking
+    // budget while preserving the same hierarchy.
+    REQUIRE(contains(view, "self.pulpImportedNode0"));
+    REQUIRE(contains(view, "private var pulpImportedNode0: some View"));
 
     // Container direction → stack kind, gap → spacing.
     REQUIRE(contains(view, "VStack(spacing: 8) {"));

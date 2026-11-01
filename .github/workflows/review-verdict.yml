@@ -3,15 +3,12 @@
 # landings sent through ghapp. GitHub-native auto-merge armed before a HOLD
 # never reaches that guard; a required review-verdict status would stop it.
 #
-# The poster job is deliberately NOT named `review-verdict`: a check run from a
-# comment, workflow_run or pull_request_target trigger can attach to the default
-# branch's commit rather than the pull request's head, so a same-named job would
-# leave a second `review-verdict` signal (a red mark on main after a HOLD). The
-# commit status the script posts on the exact head is the only `review-verdict`
-# signal on a pull request. The rule runs from a
-# pinned Shipyard commit, never from the pull request's code, on triggers that
-# all run the default branch's definition of this file. See Shipyard's
-# docs/review-verdict-status.md.
+# The poster job is also the `review-verdict` check run and fails unless the
+# head is allowed (the pinned script exits non-zero on a refusal or any read
+# error), so a required check cannot be green on a refused head. The rule runs
+# from a pinned Shipyard commit, never from the pull request's code, on
+# triggers that all run the default branch's definition of this file. See
+# Shipyard's docs/review-verdict-status.md.
 name: Review verdict
 
 on:
@@ -48,8 +45,11 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  post-review-verdict:
-    name: post-review-verdict
+  # The job id and name must equal the required context, as in Vellum, Shipyard
+  # and TartCI: the merge steward matches the Actions-bound required check by
+  # this check run's name.
+  review-verdict:
+    name: review-verdict
     if: >-
       github.event_name != 'push' && github.event_name != 'workflow_dispatch'
       && (github.event_name != 'issue_comment' || github.event.issue.pull_request)
@@ -95,7 +95,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: danielraffel/Shipyard
-          # Same pinned commit as the post-review-verdict job.
+          # Same pinned commit as the review-verdict job.
           ref: e7dc77e866a63ba829aaac0daa0abdbbae374468
           persist-credentials: false
       - name: Set up Python
