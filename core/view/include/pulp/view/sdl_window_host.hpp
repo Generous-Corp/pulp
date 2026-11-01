@@ -34,6 +34,10 @@ public:
     // standalone bridge uses this for editor polling and settings updates.
     virtual void set_idle_callback(std::function<void()> cb) = 0;
 
+    virtual void request_content_size(float width, float height) = 0;
+    virtual void set_fixed_aspect_ratio(float ratio) = 0;
+    virtual void set_design_viewport(float width, float height) = 0;
+
     // Run the event loop (blocks until window closed)
     virtual void run_event_loop() = 0;
 

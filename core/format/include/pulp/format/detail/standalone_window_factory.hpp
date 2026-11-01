@@ -53,6 +53,18 @@ class SdlWindowHostAdapter final : public WindowHost {
         if (host_)
             host_->set_idle_callback(std::move(cb));
     }
+    void request_content_size(float width, float height) override {
+        if (host_) {
+            host_->request_content_size(width, height);
+            size_ = {static_cast<uint32_t>(width), static_cast<uint32_t>(height)};
+        }
+    }
+    void set_fixed_aspect_ratio(float ratio) override {
+        if (host_) host_->set_fixed_aspect_ratio(ratio);
+    }
+    void set_design_viewport(float width, float height) override {
+        if (host_) host_->set_design_viewport(width, height);
+    }
     ContentSize get_content_size() const override {
         return size_;
     }

@@ -12,11 +12,13 @@
 #ifdef PULP_HAS_SKIA
 #include <pulp/canvas/skia_canvas.hpp>
 #include "include/core/SkColorType.h"
+#include "include/core/SkCanvas.h"
 #include "include/core/SkImageInfo.h"
 #include "include/core/SkPixmap.h"
 #include "include/core/SkSurface.h"
 #endif
 #include <cstdint>  // uintptr_t (X11 Window id for outbound file drag)
+#include <cmath>
 #include <string>
 #include <vector>
 #include <deque>
@@ -62,6 +64,30 @@ public:
             return;
         }
 
+        // SDL remembers a window position across launches.  A remembered
+        // position from a larger RDP/display arrangement can leave the editor
+        // half off-screen on a smaller UTM desktop, so clamp and center the
+        // initial client area against the current usable display bounds.
+        SDL_Rect usable{};
+        const auto display = SDL_GetDisplayForWindow(window_);
+        if (display && SDL_GetDisplayUsableBounds(display, &usable)) {
+            const int margin = 8;
+            const int max_width = std::max(1, usable.w - margin * 2);
+            const int max_height = std::max(1, usable.h - margin * 2);
+            int fitted_width = static_cast<int>(options_.width);
+            int fitted_height = static_cast<int>(options_.height);
+            if (fitted_width > max_width || fitted_height > max_height) {
+                const float scale = std::min(
+                    static_cast<float>(max_width) / fitted_width,
+                    static_cast<float>(max_height) / fitted_height);
+                fitted_width = std::max(1, static_cast<int>(fitted_width * scale));
+                fitted_height = std::max(1, static_cast<int>(fitted_height * scale));
+                SDL_SetWindowSize(window_, fitted_width, fitted_height);
+            }
+            SDL_SetWindowPosition(window_, SDL_WINDOWPOS_CENTERED,
+                                  SDL_WINDOWPOS_CENTERED);
+        }
+
         renderer_ = SDL_CreateRenderer(window_, nullptr);
         if (!renderer_) {
             std::cerr << "[pulp] SDL_CreateRenderer failed: " << SDL_GetError() << "\n";
@@ -93,6 +119,40 @@ public:
 
     void set_idle_callback(std::function<void()> cb) {
         idle_callback_ = std::move(cb);
+    }
+
+    void request_content_size(float width, float height) {
+        if (!window_ || width <= 0.0f || height <= 0.0f) return;
+        int w = static_cast<int>(std::lround(width));
+        int h = static_cast<int>(std::lround(height));
+        SDL_Rect usable{};
+        const auto display = SDL_GetDisplayForWindow(window_);
+        if (display && SDL_GetDisplayUsableBounds(display, &usable)) {
+            const int margin = 8;
+            const int max_width = std::max(1, usable.w - margin * 2);
+            const int max_height = std::max(1, usable.h - margin * 2);
+            const float scale = std::min(1.0f,
+                                         std::min(static_cast<float>(max_width) / w,
+                                                  static_cast<float>(max_height) / h));
+            w = std::max(1, static_cast<int>(w * scale));
+            h = std::max(1, static_cast<int>(h * scale));
+        }
+        SDL_SetWindowSize(window_, w, h);
+        SDL_SetWindowPosition(window_, SDL_WINDOWPOS_CENTERED,
+                              SDL_WINDOWPOS_CENTERED);
+        needs_repaint_ = true;
+    }
+
+    void set_fixed_aspect_ratio(float ratio) {
+        fixed_aspect_ratio_ = ratio > 0.0f ? ratio : 0.0f;
+        if (window_ && fixed_aspect_ratio_ > 0.0f)
+            SDL_SetWindowAspectRatio(window_, fixed_aspect_ratio_, fixed_aspect_ratio_);
+    }
+
+    void set_design_viewport(float width, float height) {
+        design_width_ = width > 0.0f ? width : 0.0f;
+        design_height_ = height > 0.0f ? height : 0.0f;
+        needs_repaint_ = true;
     }
 
     void set_close_callback(std::function<void()> cb) {
@@ -291,11 +351,6 @@ public:
         if (window_) SDL_SetWindowAlwaysOnTop(window_, on_top);
     }
 
-    void set_fixed_aspect_ratio(float ratio) {
-        if (window_ && ratio > 0)
-            SDL_SetWindowAspectRatio(window_, ratio, ratio);
-    }
-
     bool is_visible() const {
         return window_ && (SDL_GetWindowFlags(window_) & SDL_WINDOW_HIDDEN) == 0;
     }
@@ -344,6 +399,17 @@ private:
     // (W8/L9 HiDPI), apply that inverse transform HERE — and route mouse events
     // through the same helper — so drops keep landing under the cursor.
     Point window_to_root(float window_x, float window_y) const {
+        if (design_width_ > 0.0f && design_height_ > 0.0f && window_) {
+            int w = 0, h = 0;
+            SDL_GetWindowSize(window_, &w, &h);
+            const float scale = std::min(static_cast<float>(w) / design_width_,
+                                         static_cast<float>(h) / design_height_);
+            if (scale > 0.0f) {
+                const float tx = (w - design_width_ * scale) * 0.5f;
+                const float ty = (h - design_height_ * scale) * 0.5f;
+                return {(window_x - tx) / scale, (window_y - ty) / scale};
+            }
+        }
         return {window_x, window_y};
     }
 
@@ -429,10 +495,26 @@ private:
             SDL_RenderPresent(renderer_);
             return;
         }
-        canvas::SkiaCanvas skia_canvas(surface->getCanvas());
-        root_.set_bounds({0, 0, static_cast<float>(w), static_cast<float>(h)});
+        auto* skia = surface->getCanvas();
+        const bool fitted = design_width_ > 0.0f && design_height_ > 0.0f;
+        float scale = 1.0f;
+        float tx = 0.0f;
+        float ty = 0.0f;
+        if (fitted) {
+            scale = std::min(static_cast<float>(w) / design_width_,
+                             static_cast<float>(h) / design_height_);
+            tx = (w - design_width_ * scale) * 0.5f;
+            ty = (h - design_height_ * scale) * 0.5f;
+            skia->save();
+            skia->translate(tx, ty);
+            skia->scale(scale, scale);
+        }
+        canvas::SkiaCanvas skia_canvas(skia);
+        root_.set_bounds({0, 0, fitted ? design_width_ : static_cast<float>(w),
+                          fitted ? design_height_ : static_cast<float>(h)});
         root_.layout_children();
         root_.paint_all(skia_canvas);
+        if (fitted) skia->restore();
         SkPixmap pixmap;
         if (!surface->peekPixels(&pixmap)) {
             SDL_RenderPresent(renderer_);
@@ -469,6 +551,9 @@ private:
     int texture_width_ = 0;
     int texture_height_ = 0;
 #endif
+    float fixed_aspect_ratio_ = 0.0f;
+    float design_width_ = 0.0f;
+    float design_height_ = 0.0f;
 };
 
 std::unique_ptr<SdlWindowHost> SdlWindowHost::create(View& root, Options options) {
