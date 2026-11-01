@@ -140,6 +140,16 @@ class FaceToneProcessor final : public format::Processor {
     void submit_face_frame(FaceFrame frame) noexcept {
         publish_control({frame.sequence, frame.mouth_open, frame.confidence, frame.tracked});
     }
+#if !defined(PULP_WASM)
+    // Test seam that drives the same callback installed on the real OSC receiver.
+    void submit_osc_for_test(const osc::Message& message) {
+        on_osc(message);
+    }
+    const runtime::ExternalInputFrame<1>& published_control_for_test() {
+        return input_.read();
+    }
+#endif
+
     void expire_face_frame() noexcept {
         publish_control({0, 0.0f, 0.0f, false});
     }
@@ -163,15 +173,8 @@ class FaceToneProcessor final : public format::Processor {
 
 #if !defined(PULP_WASM)
     void on_osc(const osc::Message& message) {
-        if (message.address != "/pulp/cv/face" && message.address != "/pulp/control")
-            return;
-        if (message.args.size() < 3 || !std::holds_alternative<float>(message.args[0]) ||
-            !std::holds_alternative<float>(message.args[1]) ||
-            !std::holds_alternative<std::int32_t>(message.args[2]) ||
-            (message.args.size() > 3 && !std::holds_alternative<std::int32_t>(message.args[3])))
-            return;
-        publish_control({0, std::get<float>(message.args[0]), std::get<float>(message.args[1]),
-                         std::get<std::int32_t>(message.args[2]) != 0});
+        if (const auto sample = cv_control::decode_osc_control(message))
+            publish_control(*sample);
     }
 #endif
 
