@@ -10,6 +10,7 @@
 #include <memory>
 #include <array>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace pulp::format {
@@ -100,6 +101,9 @@ public:
     std::array<BusRole, BusBufferSet::kMaxBuses> input_roles_{};
     std::array<int, BusBufferSet::kMaxBuses> input_channels_{};
     std::array<bool, BusBufferSet::kMaxBuses> input_optional_{};
+    // Descriptor-owned names are copied during prepare() so the routed block
+    // can publish stable, non-owning string_views without allocating on RT.
+    std::array<std::string, BusBufferSet::kMaxBuses> input_names_{};
     std::size_t input_bus_count_ = 0;
     bool prepared_ = false;
 };
