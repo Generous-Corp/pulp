@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/runtime/seqlock.hpp>
 #include <pulp/runtime/triple_buffer.hpp>
+#include <pulp/runtime/external_input.hpp>
 #include <pulp/runtime/spsc_queue.hpp>
 #include <array>
 #include <stdexcept>
@@ -540,4 +541,25 @@ TEST_CASE("Composed: SeqLock + TripleBuffer simultaneous access", "[runtime][int
     ui_thread.join();
 
     REQUIRE(bad_reads.load() == 0);
+}
+
+TEST_CASE("External input mapping rejects unsafe or stale observations",
+          "[runtime][external_input]") {
+    using pulp::runtime::ExternalInputPolicy;
+    using pulp::runtime::ExternalInputSample;
+    using pulp::runtime::map_external_input;
+
+    const ExternalInputPolicy policy{.minimum_confidence = 0.5f,
+                                     .max_age_samples = 128,
+                                     .fallback = -1.0f};
+    CHECK(map_external_input(ExternalInputSample{1, 100, 0.75f, 0.9f, true}, 120,
+                             policy) == Catch::Approx(0.75f));
+    CHECK(map_external_input(ExternalInputSample{2, 100, 0.75f, 0.9f, true}, 229,
+                             policy) == Catch::Approx(-1.0f));
+    CHECK(map_external_input(ExternalInputSample{3, 100, 0.75f, 0.1f, true}, 120,
+                             policy) == Catch::Approx(-1.0f));
+    CHECK(map_external_input(ExternalInputSample{4, 100, INFINITY, 1.0f, true}, 120,
+                             policy) == Catch::Approx(-1.0f));
+    CHECK(map_external_input(ExternalInputSample{5, 100, 0.75f, 1.0f, true}, 99,
+                             policy) == Catch::Approx(-1.0f));
 }
