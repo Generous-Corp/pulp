@@ -123,6 +123,31 @@ float render_peak(SignalGraph& g) {
     return peak;
 }
 
+// A published snapshot owns the whole block.  This helper deliberately checks
+// every sample instead of only the block peak: a mixed old/new block would still
+// have a non-zero peak and would evade the no-silence assertion below.
+bool render_block_is_atomic_gain(SignalGraph& g) {
+    std::vector<float> l(kFrames, 0.0f), r(kFrames, 0.0f);
+    std::array<float*, 2> oc{l.data(), r.data()};
+    std::vector<float> in_l(kFrames, 0.25f), in_r(kFrames, 0.25f);
+    std::array<const float*, 2> ic{in_l.data(), in_r.data()};
+    pulp::audio::BufferView<const float> iv(ic.data(), 2, kFrames);
+    pulp::audio::BufferView<float> ov(oc.data(), 2, kFrames);
+    g.process(ov, iv, kFrames);
+
+    const float first = l.front();
+    const bool is_known_gain =
+        std::abs(first - 0.125f) < 1.0e-6f || std::abs(first - 0.2f) < 1.0e-6f;
+    if (!is_known_gain)
+        return false;
+    for (int k = 0; k < kFrames; ++k) {
+        if (std::abs(l[static_cast<std::size_t>(k)] - first) >= 1.0e-6f ||
+            std::abs(r[static_cast<std::size_t>(k)] - first) >= 1.0e-6f)
+            return false;
+    }
+    return true;
+}
+
 }  // namespace
 
 TEST_CASE("prepare_swap publishes a reinit-free edit with NO silent block "
@@ -170,14 +195,19 @@ TEST_CASE("prepare_swap publishes a reinit-free edit with NO silent block "
     // The deadline bounds a real regression (a graph that never swaps) into a
     // failed CHECK instead of a hang.
     bool saw_silent = false;
+    bool saw_non_atomic = false;
     for (int i = 0; i < 5000; ++i) {
         if (render_peak(g) == 0.0f) saw_silent = true;
+        if (!render_block_is_atomic_gain(g))
+            saw_non_atomic = true;
     }
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
     while (swapped.load(std::memory_order_relaxed) == 0
            && needs_eager.load(std::memory_order_relaxed) == 0
            && std::chrono::steady_clock::now() < deadline) {
         if (render_peak(g) == 0.0f) saw_silent = true;
+        if (!render_block_is_atomic_gain(g))
+            saw_non_atomic = true;
         std::this_thread::yield();
     }
     stop.store(true, std::memory_order_relaxed);
@@ -185,6 +215,9 @@ TEST_CASE("prepare_swap publishes a reinit-free edit with NO silent block "
 
     // The contract: a reinit-free swap never drops a block to silence.
     CHECK_FALSE(saw_silent);
+    // The stronger transaction contract: a block comes entirely from the old
+    // or entirely from the new immutable snapshot, never a mixture of both.
+    CHECK_FALSE(saw_non_atomic);
     // The swap path actually ran (a pure gain graph is always reinit-free, so it
     // must Swap, never fall back to eager prepare).
     CHECK(swapped.load(std::memory_order_relaxed) > 0);
