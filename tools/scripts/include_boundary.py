@@ -13,7 +13,9 @@ include edge, in any spelling the compiler accepts, that leaves it:
   directory (the compiler would reach it only through that target);
 * a relative include (``"../x.hpp"``) that resolves, from the including file
   and then from the boundary's include directories as the compiler searches,
-  outside the roots or into an excluded subtree, or does not resolve at all.
+  outside the roots or into an excluded subtree, or does not resolve at all;
+* an include whose path starts with, or passes through, one of the boundary's
+  forbidden prefixes (``vellum/`` for the core-vellum boundary).
 
 The scan needs no configured build. Known edges tracked for removal are
 allowlisted per boundary with a reason; an allowlist entry that no longer
@@ -49,6 +51,11 @@ class Boundary:
     # Include directories of retained targets whose headers share an allowed
     # area's prefix (pulp-content installs pulp/state/content_registry.hpp).
     forbidden_include_dirs: tuple[str, ...] = ()
+    # Non-Pulp include prefixes the roots may never name (``vellum/``).
+    forbidden_prefixes: tuple[str, ...] = ()
+    # Whether relative includes must resolve inside the roots. Boundaries that
+    # only police a foreign prefix leave relative includes to the others.
+    check_relative: bool = True
 
 
 BOUNDARIES: dict[str, Boundary] = {
@@ -69,6 +76,15 @@ BOUNDARIES: dict[str, Boundary] = {
         excluded=("core/view/audio",),
         forbidden_include_dirs=vellum_policy.include_dirs(),
     ),
+    "core-vellum": Boundary(
+        name="core-vellum",
+        summary=("no source under core/ may include a Vellum header: Pulp core knows "
+                 "nothing about Vellum, and integration packages connect the two"),
+        roots=("core",),
+        include_dirs=(),
+        forbidden_prefixes=("vellum/",),
+        check_relative=False,
+    ),
 }
 
 # boundary name -> {(file, include): reason}. Every entry must still match.
@@ -85,6 +101,18 @@ ALLOWED["view-core"].update({
         "hot-reload export set retains audio display registration",
     ("core/view/src/reload_exports.cpp", "pulp/view/audio_widgets.hpp"):
         "hot-reload export set retains the audio displays",
+})
+# The opt-in D15 GPU-audio provider registers its Dawn bootstrap through the
+# installed Vellum coordinator. This edge is removed when the shared GPU runtime
+# (gpu-runtime) lands and owns the one-per-process Dawn bootstrap; the matching
+# CMake edge is allowlisted in core_vellum_direction.py.
+ALLOWED["core-vellum"].update({
+    ("core/gpu_audio/src/detail/dawn_shared_io_provider.cpp",
+     "vellum/graphics/dawn_bootstrap.hpp"):
+        "D15 provider; removed when the shared GPU runtime lands",
+    ("core/gpu_audio/src/detail/dawn_shared_io_provider.cpp",
+     "vellum/graphics/dawn_native_bootstrap.hpp"):
+        "D15 provider; removed when the shared GPU runtime lands",
 })
 
 
@@ -111,6 +139,10 @@ def crossings(path: pathlib.Path, root: pathlib.Path, b: Boundary) -> list[tuple
     forbidden_dirs = [(root / d).resolve() for d in b.forbidden_include_dirs]
     found: list[tuple[int, str]] = []
     for n, delim, target in include_edges(path):
+        if any(target.startswith(prefix) or f"/{prefix}" in target
+               for prefix in b.forbidden_prefixes):
+            found.append((n, target))
+            continue
         parts = target.split("/")
         if len(parts) >= 2 and parts[0] == "pulp":
             area = parts[1]
@@ -125,7 +157,7 @@ def crossings(path: pathlib.Path, root: pathlib.Path, b: Boundary) -> list[tuple
                     and any((d / target).exists() for d in forbidden_dirs):
                 found.append((n, target))
             continue
-        if ".." in parts:
+        if b.check_relative and ".." in parts:
             # Mirror the compiler: the including file's directory first (for a
             # quoted include), then the include directories. An include that
             # resolves nowhere cannot be proven to stay inside, so it crosses.

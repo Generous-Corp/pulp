@@ -149,6 +149,7 @@ LIVE_BUILD_CHECK="$ROOT/tools/scripts/live_build_check.py"
 DESIGNATED_INIT_LINT="$ROOT/tools/scripts/designated_initializer_lint.py"
 WIN32_INCLUDE_LINT="$ROOT/tools/scripts/win32_include_lint.py"
 FOUNDATION_INCLUDE_LINT="$ROOT/tools/scripts/foundation_include_lint.py"
+CORE_VELLUM_DIRECTION="$ROOT/tools/scripts/core_vellum_direction.py"
 SAFE_PATH_LINT="$ROOT/tools/scripts/safe_path_guard_lint.py"
 TEXT_ENCODING_LINT="$ROOT/tools/scripts/text_encoding_lint.py"
 PYTHON_FLOOR_SYNTAX="$ROOT/tools/scripts/python_floor_syntax_check.py"
@@ -807,6 +808,17 @@ if [ -f "$FOUNDATION_INCLUDE_LINT" ]; then
     echo "" >&2
     echo "▸ foundation include lint (no upper-layer includes in core/platform|runtime|simd)" >&2
     if ! "$PYTHON" "$FOUNDATION_INCLUDE_LINT" --root "$ROOT" >&2; then
+        fail=1
+    fi
+fi
+
+# ── 9d. core -> Vellum direction (Pulp core knows nothing about Vellum) ──
+# No source under core/ includes a vellum/ header and no CMake file under core/
+# finds, fetches, adds or links Vellum. Lexical, whole-tree, sub-second.
+if [ -f "$CORE_VELLUM_DIRECTION" ]; then
+    echo "" >&2
+    echo "▸ core -> Vellum direction (no vellum/ include or Vellum link under core/)" >&2
+    if ! "$PYTHON" "$CORE_VELLUM_DIRECTION" --root "$ROOT" >&2; then
         fail=1
     fi
 fi
