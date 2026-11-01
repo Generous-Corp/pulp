@@ -4,6 +4,20 @@ This matrix describes what a developer can use today, where the capability is
 exposed, and what evidence is still required. It intentionally separates graph
 engine semantics from authoring and debugging surfaces.
 
+## Choose a starting point
+
+| Your question | Read these rows first |
+|---|---|
+| Can the runtime express this graph? | DAG composition, limits, prepared edits, feedback and latency/PDC |
+| Can I build and edit it safely? | Prepared topology edits, graph fixture discovery, serialization and bake |
+| Can I render and compare it? | Offline graph rendering, timeline offline rendering, graph inspection and fingerprints |
+| Can I host external processing? | Hosted plugin lifecycle, multi-bus routing, process isolation |
+| Can an agent operate it repeatably? | Agent/Forge generation, limits, fixture discovery, inspection and fingerprints |
+
+Use the [unified workflow guide](../guides/signal-graph-workflow.md) for the
+step-by-step path. This page answers “is it supported and how certain are we?”;
+the guide answers “what do I do next?”
+
 | Capability | Library/runtime | Existing developer surface | Current status | Next acceptance gate |
 |---|---|---|---|---|
 | DAG composition and stable node identity | `SignalGraph`, built-in/custom nodes | C++ API, graph reference | Supported | Deterministic serialization and replay fixture |

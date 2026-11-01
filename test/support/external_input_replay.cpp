@@ -43,6 +43,21 @@ runtime::ExternalInputStatus status(std::string_view v) {
         return runtime::ExternalInputStatus::paused;
     return runtime::ExternalInputStatus::unavailable;
 }
+const char* status_name(runtime::ExternalInputStatus s) {
+    switch (s) {
+    case runtime::ExternalInputStatus::valid:
+        return "valid";
+    case runtime::ExternalInputStatus::invalid:
+        return "invalid";
+    case runtime::ExternalInputStatus::unavailable:
+        return "unavailable";
+    case runtime::ExternalInputStatus::denied:
+        return "denied";
+    case runtime::ExternalInputStatus::paused:
+        return "paused";
+    }
+    return "unknown";
+}
 const char* verdict(runtime::ExternalInputVerdict v) {
     switch (v) {
     case runtime::ExternalInputVerdict::accepted:
@@ -182,6 +197,12 @@ ExternalInputReplayReceipt run_external_input_replay(const std::filesystem::path
             if (o.hasObjectMember("valid")) {
                 ++receipt.checked;
                 if (!o["valid"].isBool() || gate.valid() != o["valid"].getBool())
+                    ++receipt.failed;
+            }
+            if (o.hasObjectMember("status")) {
+                ++receipt.checked;
+                if (!o["status"].isString() ||
+                    std::string(status_name(gate.last_status())) != o["status"].getString())
                     ++receipt.failed;
             }
             if (o.hasObjectMember("values")) {
