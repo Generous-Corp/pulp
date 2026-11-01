@@ -269,7 +269,11 @@ public static class OwnedWindow {
   }
   }
   $receipt.verdict='PASS';$receipt.product_ui_acceptance='NOT_EVALUATED';$receipt.live_audio='NOT_EVALUATED';$exitCode=0
-} catch {$receipt.error=$_.Exception.Message;Write-Warning $receipt.error} finally {
+} catch {
+  $receipt.error = $_.Exception.Message
+  $receipt.error_location = [ordered]@{line=$_.InvocationInfo.ScriptLineNumber;command=$_.InvocationInfo.Line.Trim()}
+  Write-Warning $receipt.error
+} finally {
   foreach($entry in $owned){try{Stop-Owned $entry}catch{$receipt.cleanup_errors+= $_.Exception.Message;$exitCode=3;$receipt.verdict='INCONCLUSIVE'}}
   if($privateProfile -and (Test-Path -LiteralPath $privateProfile)){
     try{Remove-Item -LiteralPath $privateProfile -Recurse -Force}catch{$receipt.cleanup_errors+='Private profile cleanup failed';$exitCode=3;$receipt.verdict='INCONCLUSIVE'}
