@@ -307,6 +307,10 @@ int main(int argc, char* argv[]) {
     // Import artifacts reference their assets relative to the script file
     // (assets/<file> next to the .js); resolve against its directory.
     bridge->set_script_base_dir(js_path.parent_path());
+    // The design tool previews a developer's own import on the developer's
+    // machine; generated registerFont() paths are absolute and may point at
+    // the design pack outside the script directory.
+    bridge->set_allow_unreviewed_file_paths(true);
     if (!automation.ai_cli.empty()) {
         bridge->set_ai_cli_command(automation.ai_cli);
     } else if (auto ai_cli = pulp::runtime::get_env("PULP_AI_CLI")) {

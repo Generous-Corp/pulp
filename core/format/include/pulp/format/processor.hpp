@@ -543,6 +543,14 @@ public:
     ///
     /// For sidechain input, call sidechain_input() which returns nullptr
     /// if no sidechain is connected.
+    ///
+    /// The input is read-only. A host or graph may hand the same input memory
+    /// to several processors, or the host's own buffer, so writing through it
+    /// (with a const_cast, or by passing it to an API that writes in place) is
+    /// undefined behavior. A processor that needs to, such as a native core
+    /// handing its buffers to a C interface as mutable, sets
+    /// PluginDescriptor::node_capabilities.writes_input_buffers, and a graph
+    /// then gives it private copies.
     virtual void process(
         audio::BufferView<float>& audio_output,
         const audio::BufferView<const float>& audio_input,

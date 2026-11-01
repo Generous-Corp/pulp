@@ -478,15 +478,23 @@ void push_fidelity(const SwiftEmitCtx& ctx, const IRNode& node,
 // The string the generated control resolves against PulpParameter.name. B1's
 // convention is an exact match on the runtime parameter's *display name*, so we
 // use the widget's display label — the audio label (e.g. "Gain") or, lacking
-// one, the node name. We deliberately do NOT use pulpParamKey here: that is the
-// design tool's *canonical* key (e.g. "filter.cutoff_hz"), a different concept
-// from ParamInfo's human-readable `name`, and would systematically miss. The
-// canonical key is preserved as metadata in the binding manifest for B4, which
-// will add a real key→parameter resolver. Until then a name mismatch surfaces
-// as a visible missing/duplicate placeholder, never a silent mis-bind.
+// one, the node name. pulpParamKey is the design tool's *canonical* key (e.g.
+// "filter.cutoff_hz"), a different concept from ParamInfo's human-readable
+// `name`, so it is only the last resort: a keyed, routed control with neither
+// label nor name (a captured fader often has none) would otherwise bind in
+// every lane except this one. A key-only meter (pulpMeterValueKey, no source or
+// channel) falls back to that key the same way: it names what the meter shows,
+// as the bridge's bindMeter(id, key) resolves it. A name mismatch still surfaces
+// as a visible missing/duplicate placeholder, never a silent mis-bind; B4's
+// key→parameter resolver retires the guess.
 std::string binding_resolve_name(const IRNode& node) {
     if (!node.audio_label.empty()) return node.audio_label;
-    return node.name;
+    if (!node.name.empty())
+        return node.name;
+    const auto md = NativeBindingMetadata::parse(node);
+    if (md.param_key && !md.param_key->empty())
+        return *md.param_key;
+    return md.meter_value_key.value_or(std::string{});
 }
 
 bool is_bound_widget(NativeWidgetKind kind) {

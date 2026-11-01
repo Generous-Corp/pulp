@@ -219,6 +219,11 @@ struct NodeCapabilities {
     bool supports_ump = false;
     bool supports_f64_audio = false;
     bool consumes_audio_rate_modulations = false;
+    /// The processor may write into the input buffers it is handed (a native
+    /// core passing them to a C ABI as mutable, say). A graph then gives it a
+    /// private copy of each input instead of the upstream node's own buffer.
+    /// Processors that treat their const input views as read-only leave it false.
+    bool writes_input_buffers = false;
 };
 
 /// Plugin metadata — declared once, immutable.
@@ -332,6 +337,7 @@ struct PluginDescriptor {
             .supports_ump = supports_ump || node_capabilities.supports_ump,
             .supports_f64_audio = supports_f64_audio || node_capabilities.supports_f64_audio,
             .consumes_audio_rate_modulations = node_capabilities.consumes_audio_rate_modulations,
+            .writes_input_buffers = node_capabilities.writes_input_buffers,
         };
     }
 

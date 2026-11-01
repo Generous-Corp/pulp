@@ -85,6 +85,11 @@
       "type": "boolean",
       "description": "Model B — when true, PRs touch no version files; version-at-land infers the level from the heuristic and assigns it on merge (--mode=apply is a no-op; the PR gate stops requiring a file bump for a touched surface but still hard-fails a fix/feat scoring none on every surface)."
     },
+    "writer_allowed_globs": {
+      "type": "array",
+      "description": "Repository-relative paths the privileged post-merge writer may modify. This must contain only generated release/version outputs.",
+      "items": { "type": "string", "minLength": 1 }
+    },
     "trailers": {
       "type": "object",
       "additionalProperties": false,

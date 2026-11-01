@@ -5644,6 +5644,8 @@ class InputClobberProcessor final : public pulp::format::Processor {
         d.category = pulp::format::PluginCategory::Effect;
         d.input_buses = {{"Main In", 2, false}};
         d.output_buses = {{"Main Out", 2, false}};
+        // It writes its input, as a native core may; it says so.
+        d.node_capabilities.writes_input_buffers = true;
         return d;
     }
     void define_parameters(pulp::state::StateStore&) override {}
@@ -5666,8 +5668,9 @@ class InputClobberProcessor final : public pulp::format::Processor {
 TEST_CASE("A node that writes through its input cannot reach a fan-out sibling",
           "[host][graph][executor][in-place]") {
     // Inputs reach a binding as const views, but a plug-in or native core can
-    // cast that away. An edge is read in place only when it is its source's
-    // only reader, so a fan-out sibling always reads the source's own bits.
+    // cast that away. A node that declares writes_input_buffers makes every
+    // reader of its source fall back to the sole-reader rule, so a fan-out
+    // sibling always reads the source's own bits.
     constexpr int kFrames = 16;
     std::vector<float> l(kFrames), r(kFrames);
     for (int i = 0; i < kFrames; ++i) {
@@ -5711,6 +5714,123 @@ TEST_CASE("A node that writes through its input cannot reach a fan-out sibling",
         REQUIRE(same_bits(o1, nr));
         REQUIRE(same_bits(o2, l));
         REQUIRE(same_bits(o3, r));
+    }
+}
+
+namespace {
+
+// A hosted plug-in slot that processes in place the way the VST3 and CLAP slots
+// hand a plug-in its buffers: it casts the const input away, copies it to the
+// output and then overwrites it.
+class InPlaceHostedSlot final : public PluginSlot {
+  public:
+    InPlaceHostedSlot() : info_(make_plugin_info("InPlaceHosted", 2, 2)) {}
+    const PluginInfo& info() const override {
+        return info_;
+    }
+    bool is_loaded() const override {
+        return true;
+    }
+    bool prepare(double, int) override {
+        return true;
+    }
+    void release() override {}
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>& in, const pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&, const pulp::host::ParameterEventQueue&, int n) override {
+        for (std::size_t c = 0; c < out.num_channels() && c < in.num_channels(); ++c) {
+            auto* writable = const_cast<float*>(in.channel_ptr(c));
+            for (int i = 0; i < n; ++i) {
+                out.channel_ptr(c)[i] = writable[i];
+                writable[i] = 12345.0f;
+            }
+        }
+    }
+    std::vector<HostParamInfo> parameters() const override {
+        return {};
+    }
+    float get_parameter(uint32_t) const override {
+        return 0.0f;
+    }
+    void set_parameter(uint32_t, float) override {}
+    void set_bypass(bool) override {}
+    bool is_bypassed() const override {
+        return false;
+    }
+    std::vector<uint8_t> save_state() const override {
+        return {};
+    }
+    bool restore_state(const std::vector<uint8_t>&) override {
+        return true;
+    }
+    int latency_samples() const override {
+        return 0;
+    }
+    int tail_samples() const override {
+        return 0;
+    }
+    bool has_editor() const override {
+        return false;
+    }
+    void* create_editor_view() override {
+        return nullptr;
+    }
+    void destroy_editor_view() override {}
+
+  private:
+    PluginInfo info_;
+};
+
+} // namespace
+
+TEST_CASE("A hosted plug-in slot is never treated as a read-only reader",
+          "[host][graph][executor][in-place]") {
+    // Hosted VST3 and CLAP slots pass their input to the plug-in as writable
+    // memory, and the binding a plug-in slot gets declares nothing about its
+    // inputs. It must therefore get a private copy: a fan-out sibling and the
+    // host's input buffer keep their bits.
+    constexpr int kFrames = 16;
+    std::vector<float> l(kFrames), r(kFrames);
+    for (int i = 0; i < kFrames; ++i) {
+        l[i] = 0.1f * static_cast<float>(i) - 0.5f;
+        r[i] = (i % 2 == 0) ? -0.0f : 0.03f * static_cast<float>(i);
+    }
+    const auto l_in = l;
+    const auto r_in = r;
+    SignalGraph graph;
+    const auto input = graph.add_input_node(2, "In");
+    const auto hosted = graph.add_plugin_node(std::make_unique<InPlaceHostedSlot>(), 2, 2);
+    const auto negate = graph.add_processor_node(std::make_unique<NegateProcessor>());
+    const auto output = graph.add_output_node(4, "Out");
+    REQUIRE(hosted != 0);
+    for (PortIndex c = 0; c < 2; ++c) {
+        REQUIRE(graph.connect(input, c, hosted, c));
+        REQUIRE(graph.connect(input, c, negate, c));
+        REQUIRE(graph.connect(negate, c, output, c));
+        REQUIRE(graph.connect(hosted, c, output, static_cast<PortIndex>(c + 2)));
+    }
+    REQUIRE(graph.prepare(48000.0, kFrames));
+
+    std::vector<float> o0(kFrames), o1(kFrames), o2(kFrames), o3(kFrames);
+    std::array<const float*, 2> in_ch{l.data(), r.data()};
+    std::array<float*, 4> out_ch{o0.data(), o1.data(), o2.data(), o3.data()};
+    pulp::audio::BufferView<const float> in_view(in_ch.data(), 2, kFrames);
+    pulp::audio::BufferView<float> out_view(out_ch.data(), 4, kFrames);
+    for (int block = 0; block < 2; ++block) {
+        INFO("block " << block);
+        graph.process(out_view, in_view, kFrames);
+        REQUIRE(graph.routed_walk_fallbacks() == 0);
+        std::vector<float> nl(kFrames), nr(kFrames);
+        for (int i = 0; i < kFrames; ++i) {
+            nl[i] = -l_in[i];
+            nr[i] = -r_in[i];
+        }
+        REQUIRE(same_bits(l, l_in));
+        REQUIRE(same_bits(r, r_in));
+        REQUIRE(same_bits(o0, nl));
+        REQUIRE(same_bits(o1, nr));
+        REQUIRE(same_bits(o2, l_in));
+        REQUIRE(same_bits(o3, r_in));
     }
 }
 

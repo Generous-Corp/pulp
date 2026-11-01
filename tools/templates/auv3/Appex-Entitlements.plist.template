@@ -1,19 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- macOS AU v3 .appex entitlements. app-sandbox is required for all
-     app extensions; allow-jit + allow-unsigned-executable-memory are
-     pragmatic defaults for JS-engine-backed editors (QuickJS / V8) and
-     GPU shader codegen (Skia / Dawn). disable-library-validation lets the
-     extension load the AUv3Framework that's signed with the same identity. -->
+<!-- macOS AU v3 .appex entitlements. app-sandbox is required for all app
+     extensions. The remaining keys are filled per build by
+     tools/cmake/PulpAuv3Entitlements.cmake: allow-jit appears only for a
+     JIT JS engine (PULP_JS_ENGINE=v8 or jsc), and disable-library-validation
+     only when PULP_AUV3_DISABLE_LIBRARY_VALIDATION is ON because an embedded
+     framework or dylib is not signed with this extension's Team ID. -->
 <plist version="1.0">
 <dict>
     <key>com.apple.security.app-sandbox</key>
     <true/>
-    <key>com.apple.security.cs.allow-jit</key>
-    <true/>
-    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
-    <true/>
-    <key>com.apple.security.cs.disable-library-validation</key>
-    <true/>
-</dict>
+@PULP_AUV3_JIT_ENTITLEMENTS@@PULP_AUV3_LIBRARY_VALIDATION_ENTITLEMENT@</dict>
 </plist>

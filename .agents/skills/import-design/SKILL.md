@@ -358,6 +358,12 @@ in JS on the family. Chromium matches and synthesizes against the declared
 range, not the file: one Regular file declared `400 700` draws 700
 unemboldened, and declared `400` it draws 700 faux-bold.
 
+`registerFont` declarations are owned by a unique per-bridge scope, separate
+from the persisted storage identity: reload clears the retiring bridge's ranges
+before registering the replacement realm, and bridge teardown removes only that
+bridge's declarations. Lookup still unions declarations from all live owners of
+a family; sharing a bare family across live editors with conflicting ranges is
+therefore deliberately ambiguous and should use distinct family names.
 `paragraph_fakes_missing_font_styles` decides SkParagraph's fake-styles switch
 (CSS font matching over the declared ranges; bold only when the request is 600+
 and the matched range ends below 600; italic keeps the default, which shares the
@@ -373,6 +379,26 @@ A declared family also never yields to another family over weight in
 system face while the paragraph painted the page face, and the text wrapped.
 
 ### Packaged SDK runtime contract
+
+### Illustrator/PDF vector-source boundary
+
+PDF-compatible Illustrator artwork is a first-class source for the import CLI:
+`pulp import-design --from illustrator --file panel.ai --output panel.svg` (the
+`ai` and `pdf` aliases are equivalent). The command invokes the installed
+`tools/import-design/illustrator_to_svg.py` helper through Pulp's argv-safe
+child-process boundary. Poppler is an explicit runtime prerequisite; missing or
+invalid converters fail closed. Every successful conversion writes a
+`pulp.illustrator-svg-provenance.v1` receipt containing source/output hashes,
+the selected page, and converter identity. Existing SVG input continues through
+the validated preconverted-SVG lane; the converter does not imply artwork
+license or redistribute third-party design assets.
+
+Release archives take the helper from the build directory, not from `install()`:
+`tools/import-design/CMakeLists.txt` stages it as
+`<build>/tools/import-design/illustrator_to_svg.py`, and
+`tools/ci/release_package_cli.sh` hard-fails when a release at or above the
+product matrix's `illustrator_import_floor` lacks it. A new file listed under
+`import-design/` in `release_product_matrix.json` needs the same staging.
 
 The installed `pulp-import-design` SDK runtime includes the browser-capture
 manifest plus the materialized JSX siblings
@@ -2248,6 +2274,19 @@ their scratch dirs, and hundreds had accumulated before the sweep existed.
 When testing emitted JS, note the unquoted `// Source:` header comment still
 names the decode-time input; assert on QUOTED paths (`'assets/...'`) when
 pinning "no absolute references".
+
+**Fonts are NOT localized, and a hosted editor now refuses the absolute
+path.** `localize_ir_assets` rewrites image/sprite paths to `assets/<file>`
+but leaves `font.resolved_path` absolute (it points into the design pack or
+`base_dir`), so emitted `registerFont('Family', '/abs/.../face.ttf')` names a
+file outside the script directory. `WidgetBridge` refuses an absolute path
+that is not inside the script directory or a reviewed asset root unless the
+host calls `set_allow_unreviewed_file_paths(true)`; `--validate`,
+`pulp-screenshot` and `pulp-design-tool` opt in (developer tools rendering
+the developer's own import), but `ScriptedUiSession` (every DAW-hosted
+editor) does not, so such a font silently falls back to the system face in a
+plugin. Until fonts are localized like images, copy the face beside `ui.js`
+and reference it as `assets/<face>.ttf`.
 
 **Windows path-separator gotcha (asset/font paths baked into generated JS):**
 when the CLI's asset pass (`resolve_sprite_skins` in `sprite_skins.cpp`) resolves an `asset_ref`/font `asset_id` to a path
@@ -8484,3 +8523,12 @@ inactive without an error. Keep this mode explicit and fail closed on missing
 or malformed `canvas_bindings`, multiple implicit states, or non-canvas match
 selectors. The optional `canvas_index` preserves identity when a capture has
 multiple canvases; live canvas behavior remains a separate proof surface.
+
+## Capture determinism hashing
+
+`provenance.timings` in a browser capture envelope contains per-run diagnostic
+clocks and is expected to vary between otherwise identical imports. Canonical
+determinism hashing strips that field only for `pulp-browser-capture-v1`
+envelopes; report-level timing data and timings in other input shapes remain
+hashed. Do not treat this normalization as proof that browser animation,
+canvas, or WebGL output is deterministic.

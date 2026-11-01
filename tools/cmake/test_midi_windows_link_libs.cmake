@@ -4,7 +4,8 @@
 # ICU symbols ahead of Skia's bundled ICU, and lld-link then reports duplicate
 # symbols (ures_getByKey, u_charsToUChars) for any module that pulls a Skia ICU
 # object too. On MSVC-style linkers it must therefore be a default library,
-# which is searched only after every library on the command line.
+# which is searched only after every library on the command line. The current
+# MSVC path intentionally omits WindowsApp entirely and uses runtimeobject.
 #
 # Script mode (`cmake -P`). core/midi/CMakeLists.txt is evaluated in a child
 # `cmake -P` of this file with the project-only commands stubbed to record the
@@ -76,7 +77,12 @@ foreach(_line IN LISTS _msvc)
         set(_runtimeobject TRUE)
     endif()
 endforeach()
-expect("MSVC-style linkers get WindowsApp as an INTERFACE /DEFAULTLIB" _default_lib)
+if(_default_lib)
+    set(_not_default_lib FALSE)
+else()
+    set(_not_default_lib TRUE)
+endif()
+expect("MSVC-style linkers do not add WindowsApp as an INTERFACE /DEFAULTLIB" _not_default_lib)
 if(_input_lib)
     set(_not_input FALSE)
 else()

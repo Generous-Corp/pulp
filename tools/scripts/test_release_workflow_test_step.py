@@ -961,6 +961,9 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
             r"--import-design-runtime-dir\s+build/tools/import-design/browser_capture-v1")
         self.assertRegex(
             run_block,
+            r"--import-design-illustrator-helper\s+build/tools/import-design/illustrator_to_svg\.py")
+        self.assertRegex(
+            run_block,
             r"--import-design-contract\s+build/tools/import-design/jsx-runtime/materialized_binding_contract\.mjs")
         self.assertRegex(
             run_block,
@@ -1024,6 +1027,10 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
             run_block,
             r"'--import-design-runtime-dir',\s*"
             r"'build/tools/import-design/Release/browser_capture-v1'")
+        self.assertRegex(
+            run_block,
+            r"'--import-design-illustrator-helper',\s*"
+            r"'build/tools/import-design/Release/illustrator_to_svg\.py'")
         self.assertRegex(
             run_block,
             r"'--import-design-contract',\s*"

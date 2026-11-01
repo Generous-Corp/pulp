@@ -655,10 +655,28 @@ You MUST:
 3. **Sign the .appex** with `--entitlements <sandbox>.plist` (the
    `com.apple.security.app-sandbox` entitlement is REQUIRED for app
    extensions; without it pkd logs "plug-ins must be sandboxed" and
-   rejects). Plus `allow-jit` + `allow-unsigned-executable-memory` +
-   `disable-library-validation` for JS-engine + Skia/Dawn editors.
-4. **Sign the container .app** (also with hardened-runtime entitlements
-   for library validation)
+   rejects). Use the build's rendered
+   `build/AUv3/<target>_AUv3.entitlements`: `PulpAuv3Entitlements.cmake`
+   emits `com.apple.security.cs.allow-jit` only for `PULP_JS_ENGINE=v8`
+   or `jsc` (QuickJS, Skia and Dawn need no executable memory), never
+   emits `allow-unsigned-executable-memory` (V8/JSC use `MAP_JIT`, which
+   `allow-jit` covers), and emits `disable-library-validation` only when
+   `-DPULP_AUV3_DISABLE_LIBRARY_VALIDATION=ON`. Library validation admits
+   code signed by Apple or by the host's own Team ID, so the inner-out
+   same-identity recipe here passes without it; turn it on only for a
+   vendor-signed prebuilt dylib you cannot re-sign, or an ad-hoc
+   (`codesign -s -`) dev build whose components carry no Team ID. The
+   old unconditional trio let any signed-by-anyone dylib load into the
+   extension. Gotcha: `pulp ship sign` / `ship share` refuse to sign an
+   app or appex of a `v8`/`jsc` build whose entitlements grant no
+   `allow-jit` (they read `PULP_JS_ENGINE` from the build's
+   `CMakeCache.txt`), because such a bundle signs fine and then fails the
+   instant the editor starts the engine. Plug-in bundles are exempt; they
+   run under the host's entitlements.
+4. **Sign the container .app** with the rendered
+   `build/AUv3/<target>_AUv3Host.entitlements` (same per-engine policy;
+   the host opens the AU UI in-process so it needs `allow-jit` exactly
+   when the appex does)
 5. **Notarize the container .app** via `xcrun notarytool submit
    --apple-id <id> --team-id <team> --password <app-specific-pwd>
    --wait`

@@ -32,6 +32,7 @@
 # be included on its own without PulpUtils.cmake, so pull the helper in here.
 include("${CMAKE_CURRENT_LIST_DIR}/PulpBuildInfo.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/PulpInstall.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/PulpAuv3Entitlements.cmake")
 
 function(_pulp_add_auv3 target name bundle_id version manufacturer category plugin_code manufacturer_code accepts_midi)
     if(NOT APPLE)
@@ -193,6 +194,9 @@ function(_pulp_add_auv3_macos_appex target name bundle_id version manufacturer m
         "${CMAKE_BINARY_DIR}/AUv3/${appex_target}-Info.plist"
         @ONLY
     )
+    # JIT and library-validation entitlements follow the configured JS engine
+    # and signing posture (PulpAuv3Entitlements.cmake), never unconditionally.
+    pulp_auv3_entitlement_fragments("${PULP_JS_ENGINE}" "${PULP_AUV3_DISABLE_LIBRARY_VALIDATION}")
     configure_file(
         "${_PULP_AUV3_TEMPLATE_DIR}/Appex-Entitlements.plist.template"
         "${CMAKE_BINARY_DIR}/AUv3/${appex_target}.entitlements"
@@ -261,6 +265,7 @@ function(_pulp_add_auv3_macos_host target name bundle_id version)
         "${CMAKE_BINARY_DIR}/AUv3/${host_target}-Info.plist"
         @ONLY
     )
+    pulp_auv3_entitlement_fragments("${PULP_JS_ENGINE}" "${PULP_AUV3_DISABLE_LIBRARY_VALIDATION}")
     configure_file(
         "${_PULP_AUV3_TEMPLATE_DIR}/Host-Entitlements.plist.template"
         "${CMAKE_BINARY_DIR}/AUv3/${host_target}.entitlements"

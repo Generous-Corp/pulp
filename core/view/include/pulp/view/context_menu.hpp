@@ -18,6 +18,9 @@
 #include <pulp/view/input_events.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <functional>
+#include <algorithm>
+#include <array>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -34,15 +37,26 @@ namespace pulp::view {
 class ContextMenu : public View {
 public:
     struct Item {
+        enum class ControlKind { action, toggle, slider, choice };
         int id = 0;
         std::string label;
         bool enabled = true;
         bool checked = false;
+        ControlKind control_kind = ControlKind::action;
+        float normalized_value = 0.0f;
+        float normalized_step = 0.05f;
+        std::vector<std::string> choices;
+        std::size_t choice_index = 0;
+        std::function<void(const Item&)> on_change;
         bool separator = false;
         /// A non-selectable title row that groups the items below it.
         bool header = false;
         bool has_submenu = false;
-        static Item make_separator() { return Item{0, "", true, false, true}; }
+        static Item make_separator() {
+            Item i;
+            i.separator = true;
+            return i;
+        }
         static Item make_header(std::string title) {
             Item i;
             i.label = std::move(title);
@@ -50,11 +64,73 @@ public:
             i.header = true;
             return i;
         }
+        static Item make_toggle(int id, std::string label, bool checked,
+                                std::function<void(const Item&)> on_change) {
+            Item i;
+            i.id = id;
+            i.label = std::move(label);
+            i.checked = checked;
+            i.control_kind = ControlKind::toggle;
+            i.on_change = std::move(on_change);
+            return i;
+        }
+        static Item make_slider(int id, std::string label, float normalized, float step,
+                                std::function<void(const Item&)> on_change) {
+            Item i;
+            i.id = id;
+            i.label = std::move(label);
+            i.control_kind = ControlKind::slider;
+            i.normalized_value = std::clamp(normalized, 0.0f, 1.0f);
+            i.normalized_step = step > 0.0f ? step : 0.05f;
+            i.on_change = std::move(on_change);
+            return i;
+        }
+        static Item make_choice(int id, std::string label, std::vector<std::string> choices,
+                                std::size_t selected, std::function<void(const Item&)> on_change) {
+            Item i;
+            i.id = id;
+            i.label = std::move(label);
+            i.control_kind = ControlKind::choice;
+            i.choices = std::move(choices);
+            i.choice_index = i.choices.empty() ? 0 : std::min(selected, i.choices.size() - 1);
+            i.on_change = std::move(on_change);
+            return i;
+        }
+        void set_toggled(bool value) {
+            if (control_kind != ControlKind::toggle || checked == value)
+                return;
+            checked = value;
+            if (on_change)
+                on_change(*this);
+        }
+        void set_normalized_value(float value) {
+            if (control_kind != ControlKind::slider)
+                return;
+            const float next = std::clamp(value, 0.0f, 1.0f);
+            if (normalized_value == next)
+                return;
+            normalized_value = next;
+            if (on_change)
+                on_change(*this);
+        }
+        void set_choice_index(std::size_t value) {
+            if (control_kind != ControlKind::choice || choices.empty())
+                return;
+            const auto next = std::min(value, choices.size() - 1);
+            if (choice_index == next)
+                return;
+            choice_index = next;
+            if (on_change)
+                on_change(*this);
+        }
     };
 
     ContextMenu() { set_focusable(true); }
 
     void set_items(std::vector<Item> items) { items_ = std::move(items); }
+    std::vector<Item>& items() {
+        return items_;
+    }
     const std::vector<Item>& items() const { return items_; }
 
     /// Fired with the chosen item id on select, or with std::nullopt on dismiss
@@ -123,18 +199,55 @@ public:
     /// Convenience: the panel width `layout()` would choose.
     float measured_width() const { return layout().box.width; }
 
-private:
+    /// A lane is the product-independent state needed by the standard two-LFO
+    /// modulation popup. Products keep ownership of their state and receive a
+    /// copy after each edit through `on_change`; the SDK owns the hierarchy,
+    /// controls, keyboard behavior, hover state, and dismissal lifecycle.
+    struct ModulationLane {
+        std::string label; ///< e.g. "LFO 1"
+        bool enabled = false;
+        float rate_normalized = 0.25f;
+        float depth_normalized = 0.0f;
+        std::vector<std::string> shapes; ///< e.g. Sine, Triangle, Square
+        std::size_t shape_index = 0;
+        std::function<void(const ModulationLane&)> on_change;
+    };
+
+    struct ModulationMenuSpec {
+        std::string target_label;
+        ModulationLane lanes[2];
+        std::size_t lane_count = 2;
+        std::function<void()> on_reset;
+        std::function<void()> on_dismiss;
+    };
+
+    /// Build the canonical Spectr-style two-LFO menu. This is deliberately a
+    /// factory for the regular ContextMenu rather than a second popup class,
+    /// so all products inherit the same focus, pointer capture, keyboard,
+    /// hover, and outside-click behavior automatically.
+    static std::vector<Item> make_modulation_items(const ModulationMenuSpec& spec);
+
+    /// Show the canonical modulation popup at a root-local anchor. The reset
+    /// action is returned as the final command and invokes `on_reset`; all lane
+    /// edits invoke the lane's callback while the menu remains open.
+    static ContextMenu* show_modulation(View* root, Point pos, ModulationMenuSpec spec);
+
+  private:
     // Row index under a local point, or -1 if outside the box / on a non-row.
     int row_at(Point local_point, const MenuLayout& lay) const;
     // Keyboard nav must not move the hover somewhere the panel is not showing.
     void scroll_row_into_view(int index);
     void move_hover(int delta);    // keyboard nav, skipping separators + disabled
     void move_hover_to_edge(bool last);  // Home / End
+    void adjust_control(Item& item, float delta);
+    bool set_control_from_pointer(Item& item, const Rect& row, Point point);
     void fire_close(std::optional<int> result);
 
     std::vector<Item> items_;
     Point anchor_{0, 0};
     int hover_index_ = -1;
+    int active_slider_index_ = -1;
+    int active_pointer_id_ = 0;
     bool closed_ = false;
     float scroll_ = 0.0f;
 

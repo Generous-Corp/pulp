@@ -41,6 +41,7 @@ endfunction()
 
 pulp_dsp_series_signal_suite(pulp-test-signal-analysis-frontends
                              test_signal_analysis_frontends.cpp)
+pulp_dsp_series_signal_suite(pulp-test-signal-gain test_signal_gain.cpp)
 pulp_dsp_series_signal_suite(pulp-test-spectral-feature-frontends
                              test_spectral_feature_frontends.cpp)
 

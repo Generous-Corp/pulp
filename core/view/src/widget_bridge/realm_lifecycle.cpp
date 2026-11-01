@@ -1,6 +1,7 @@
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/native_view_host.hpp>
 #include <pulp/view/ui_components.hpp>
+#include <pulp/canvas/bundled_fonts.hpp>
 
 #include "bridge_dispatch.hpp"
 #include "layout_baselines.hpp"
@@ -72,6 +73,9 @@ void WidgetBridge::clear(const DeadlineCheck& deadline_check) {
 void WidgetBridge::clear_for_realm_replacement(
     const DeadlineCheck& deadline_check) {
     retire_realm(deadline_check);
+    // Keep the current realm's declarations intact if bounded retirement
+    // rejects the tree before its ownership transition commits.
+    pulp::canvas::clear_declared_font_face_weight_ranges(font_weight_scope());
 }
 
 std::string_view WidgetBridge::bounded_realm_retirement_denial() const noexcept {

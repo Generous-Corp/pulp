@@ -936,3 +936,49 @@ TEST_CASE("FixedIrConvolver process and reset do not allocate on either engine",
         REQUIRE(conv.block_size_violations() == 0); // reset() cleared it
     }
 }
+
+TEST_CASE("PartitionedConvolver long IR swap records bounded history migration time",
+          "[signal][convolver][bg-swap][rt-safety][timing]") {
+    // #11146 moved the input-history ring into compact arenas.  Growing that
+    // ring during an IR swap is allocation-free, but it copies the carried
+    // spectra on the audio thread.  Keep a real large-IR case here so the
+    // callback cost stays visible in CI and in local realtime investigations.
+    constexpr std::size_t block = 64;
+    constexpr std::size_t initial_taps = 96'000;
+    constexpr std::size_t grown_taps = 192'000;
+    constexpr double sample_rate = 96'000.0;
+    constexpr auto callback_deadline =
+        std::chrono::duration<double>(static_cast<double>(block) / sample_rate);
+    constexpr auto smoke_ceiling = std::chrono::milliseconds(20);
+
+    auto initial_ir = make_dense_ir(initial_taps, 0.0f);
+    auto grown_ir = make_dense_ir(grown_taps, 0.4f);
+
+    std::chrono::steady_clock::duration worst{};
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        PartitionedConvolver conv;
+        conv.load_ir(initial_ir.data(), initial_ir.size(), block);
+        ConvolverIrSwapper swapper;
+        // Build and publish before starting the measured callback section.  The
+        // FFTs and all allocations belong to the worker/control side.
+        REQUIRE(swapper.stage_ir(grown_ir.data(), grown_ir.size(), block));
+        const auto started = std::chrono::steady_clock::now();
+        {
+            pulp::test::RtAllocationProbe probe;
+            REQUIRE(conv.try_swap_ir(swapper));
+            REQUIRE_FALSE(probe.saw_allocation());
+        }
+        worst = std::max(worst, std::chrono::steady_clock::now() - started);
+        REQUIRE(swapper.drain_old() == 1);
+    }
+
+    const double callback_deadline_us = callback_deadline.count() * 1'000'000.0;
+    const double worst_swap_ms =
+        std::chrono::duration_cast<std::chrono::duration<double>>(worst).count() * 1'000.0;
+    WARN("callback deadline " << callback_deadline_us << " us, worst swap " << worst_swap_ms
+                              << " ms");
+    // This is deliberately a generous smoke ceiling rather than a machine
+    // qualification number: scheduler jitter may exceed one audio deadline,
+    // but a multi-tens-of-milliseconds migration is an unmistakable RT risk.
+    REQUIRE(worst < smoke_ceiling);
+}

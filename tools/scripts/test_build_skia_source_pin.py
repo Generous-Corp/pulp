@@ -312,6 +312,29 @@ class SkiaSourceFallbackPinTests(unittest.TestCase):
         self.assertIn("SKIA_EXPECTED_COMMIT must be a full 40-character", result.stderr)
         self.assertFalse((self.pulp / "external").exists())
 
+    def test_checkout_owned_output_must_not_be_a_symlink(self) -> None:
+        self._manifest(self._builder(FAKE_BUILDER))
+        shared = self.tmp / "shared-cache"
+        shared.mkdir()
+        output = self.pulp / "external" / "skia-build"
+        output.parent.mkdir(parents=True)
+        output.symlink_to(shared, target_is_directory=True)
+        result = self._run()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("refusing to publish source-built Skia through symlink", result.stderr)
+        self.assertEqual(list(shared.iterdir()), [])
+
+    def test_source_publish_removes_fetcher_provenance(self) -> None:
+        self._manifest(self._builder(FAKE_BUILDER))
+        output = self.pulp / "external" / "skia-build"
+        output.mkdir(parents=True)
+        for name in (".skia-asset-sha256", ".skia-generation-manifest.json", ".skia-source-archive.zip"):
+            (output / name).write_text("stale\n", encoding="utf-8")
+        result = self._run()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for name in (".skia-asset-sha256", ".skia-generation-manifest.json", ".skia-source-archive.zip"):
+            self.assertFalse((output / name).exists(), name)
+
     def test_dry_run_reports_manifest_pins_without_cloning(self) -> None:
         builder_ref = self._builder(FAKE_BUILDER)
         self._manifest(builder_ref)

@@ -682,6 +682,29 @@ else()
         LIBRARIES pulp::view)
 endif()
 
+# Linked alone, view-platform has no WebView provider, so it reports "none".
+pulp_add_test_suite(pulp-test-webview-backend-platform
+    LIBRARIES pulp::view-platform)
+
+# The detector and each per-OS probe are compiled by exactly one core/view
+# target, so no binary can link two disagreeing definitions.
+get_property(_pulp_view_dir_targets DIRECTORY "${CMAKE_SOURCE_DIR}/core/view" PROPERTY BUILDSYSTEM_TARGETS)
+set(_pulp_view_target_sources "")
+foreach(_pulp_view_dir_target IN LISTS _pulp_view_dir_targets)
+    get_target_property(_pulp_view_dir_sources ${_pulp_view_dir_target} SOURCES)
+    if(_pulp_view_dir_sources)
+        string(REPLACE ";" "|" _pulp_view_dir_sources "${_pulp_view_dir_sources}")
+        list(APPEND _pulp_view_target_sources "${_pulp_view_dir_target}=${_pulp_view_dir_sources}")
+    endif()
+endforeach()
+string(REPLACE ";" "," _pulp_view_target_sources "${_pulp_view_target_sources}")
+add_test(NAME view-webview-detector-owner
+    COMMAND ${CMAKE_COMMAND} "-DVIEW_TARGET_SOURCES=${_pulp_view_target_sources}"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_view_webview_detector_owner.cmake")
+set_tests_properties(view-webview-detector-owner PROPERTIES LABELS "pr;view")
+unset(_pulp_view_dir_targets)
+unset(_pulp_view_target_sources)
+
 # MIDI 2.0 UMP/MPE tests
 pulp_add_test_suite(pulp-test-ump-mpe GROUP pulp-test-group-app-midi
     LIBRARIES pulp::midi)

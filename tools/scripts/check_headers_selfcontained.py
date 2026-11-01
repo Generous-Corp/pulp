@@ -117,6 +117,14 @@ def load_module_flags(cc_path: Path) -> dict[str, tuple[list[str], str]]:
             args = split_compile_command(e.get("command", ""))
         directory = e.get("directory", ".")
         score = module_target_score(args, mod, directory, e.get("output", ""))
+        # A C++ header must be checked with the owning target's C++ flags.
+        # Modules can also contain C sources (for example a C FFT shim); a
+        # canonical C object otherwise wins the tie and leaves clang++ with
+        # `-std=gnu99`, which is invalid for the standalone C++ TU.
+        if Path(f).suffix.lower() in {".cc", ".cpp", ".cxx", ".mm"}:
+            score += 1
+        elif Path(f).suffix.lower() == ".c":
+            score -= 1
         if mod in by_module and score <= scores[mod]:
             continue
         by_module[mod] = (filter_args(args, f), directory)

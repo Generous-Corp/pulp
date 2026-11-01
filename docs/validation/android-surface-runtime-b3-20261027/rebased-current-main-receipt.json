@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "kind": "android-surface-runtime-b3-rebased-receipt",
+  "status": "PASS_LIFECYCLE_PROFILE_GPU_UNVERIFIED",
+  "generated_at": "2026-10-27T18:36:30-07:00",
+  "source_commit": "cd8509c6e351c5bf1c4bfb72054662ad8a40be66",
+  "base": "origin/main",
+  "toolchain": {
+    "host": "macOS arm64",
+    "java": "Temurin 17.0.20.1",
+    "android_sdk": "/Users/danielraffel/Library/Android/sdk",
+    "ndk": "30.0.14904198",
+    "compile_sdk": 35,
+    "abi": "arm64-v8a"
+  },
+  "avd": {
+    "name": "Pulp_Profile_API35_GoogleApis_20261018b",
+    "tag": "google_apis",
+    "api": 35,
+    "abi": "arm64-v8a",
+    "ro_debuggable": "1",
+    "device_serial": "emulator-5554"
+  },
+  "apk": {
+    "path": "android/app/build/outputs/apk/debug/app-debug.apk",
+    "sha256": "8151aad75673e9ea4fbc7aa4c706916b3d0f122b76a319263a4836ec3fb219ba",
+    "package": "com.pulp.app",
+    "activity": "com.pulp.PulpActivity"
+  },
+  "contract_test": {
+    "command": "python3 tools/scripts/test_android_surface_runtime_contract.py",
+    "result": "PASS",
+    "cases": 6
+  },
+  "gradle_build": {
+    "command": "JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home ANDROID_HOME=/Users/danielraffel/Library/Android/sdk ./gradlew :app:assembleDebug",
+    "result": "PASS",
+    "tasks": 37
+  },
+  "lifecycle": {
+    "install": "PASS",
+    "launch": "PASS",
+    "rapid_recreation_cycles": 5,
+    "background_foreground_surface_destroy_create": "PASS",
+    "observed": [
+      "surfaceDestroyed \u2014 waiting for render-thread teardown",
+      "surfaceDestroyed: render thread stopped",
+      "surfaceCreated \u2014 launching GPU init on render thread",
+      "Render thread started",
+      "SurfaceRuntime: cleanup complete after failed create"
+    ],
+    "filtered_log_sha256": "424ed6a6887a83ff876bcb054d64497b7ea1603cfb66779cefbb73b8f58df21a"
+  },
+  "profiling": {
+    "profileable_device": true,
+    "method_trace_command": "adb -s emulator-5554 shell am profile start --sampling 1 com.pulp.app /data/local/tmp/pulp-b3.trace; adb -s emulator-5554 shell am profile stop com.pulp.app",
+    "trace_sha256": "8d3ff1354641170b0af51f8a659965b33f2de933583a4b075916226259c04a66",
+    "meminfo_sha256": "a4d573f42603f6122223c4a5f89d638a4f1cab6fb917acf9f464c730d0f9bfe7"
+  },
+  "gpu_provider": {
+    "status": "UNVERIFIED",
+    "reason": "This checkout has no Android static Skia/Dawn libraries under external/skia-build/android-gpu; the Gradle CMake configure warns that PULP_ENABLE_GPU falls back to CPU. SurfaceRuntime failure cleanup was observed, but no Dawn adapter identity can be claimed.",
+    "shared_pin_check": "python3 tools/scripts/test_build_skia_android_pin.py PASS",
+    "dry_run": "PULP_SKIA_ANDROID_DRY_RUN=1 tools/build-skia-android.sh arm64 PASS"
+  },
+  "limitations": [
+    "This receipt proves the rebased source extraction, arm64 APK build, install/launch, repeated surface lifecycle, and profile capture.",
+    "A GPU-success receipt requires building the manifest-pinned shared Skia/Dawn Android artifact and rerunning the same APK smoke on this AVD or a physical arm64 device."
+  ]
+}

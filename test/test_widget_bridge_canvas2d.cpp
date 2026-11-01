@@ -841,6 +841,10 @@ TEST_CASE("WidgetBridge canvasDrawImage records draw_image with src + dst rect",
     root.set_theme(Theme::dark());
     StateStore store;
     WidgetBridge bridge(engine, root, store);
+    // These pin argument plumbing with fixture paths that exist under no
+    // reviewed root; the containment rule is covered in
+    // test_widget_bridge_capabilities.cpp.
+    bridge.set_allow_unreviewed_file_paths(true);
 
     bridge.load_script(R"(
         var c = document.createElement('canvas');
@@ -896,6 +900,10 @@ TEST_CASE("WidgetBridge canvasDrawImage 9-arg form plumbs source rect end-to-end
     root.set_theme(Theme::dark());
     StateStore store;
     WidgetBridge bridge(engine, root, store);
+    // These pin argument plumbing with fixture paths that exist under no
+    // reviewed root; the containment rule is covered in
+    // test_widget_bridge_capabilities.cpp.
+    bridge.set_allow_unreviewed_file_paths(true);
 
     bridge.load_script(R"(
         var c = document.createElement('canvas');
@@ -953,6 +961,10 @@ TEST_CASE("WidgetBridge canvasDrawImage 10-arg call sets has_source_rect on the 
     root.set_theme(Theme::dark());
     StateStore store;
     WidgetBridge bridge(engine, root, store);
+    // These pin argument plumbing with fixture paths that exist under no
+    // reviewed root; the containment rule is covered in
+    // test_widget_bridge_capabilities.cpp.
+    bridge.set_allow_unreviewed_file_paths(true);
 
     // Drive canvasDrawImage directly with the 10-arg shape so the
     // `args.numArgs >= 10` branch in widget_bridge.cpp fires. Using the
@@ -1010,6 +1022,10 @@ TEST_CASE("WidgetBridge canvasDrawImage 6-arg call leaves has_source_rect=false"
     root.set_theme(Theme::dark());
     StateStore store;
     WidgetBridge bridge(engine, root, store);
+    // These pin argument plumbing with fixture paths that exist under no
+    // reviewed root; the containment rule is covered in
+    // test_widget_bridge_capabilities.cpp.
+    bridge.set_allow_unreviewed_file_paths(true);
 
     bridge.load_script(R"(
         var c = document.createElement('canvas');
