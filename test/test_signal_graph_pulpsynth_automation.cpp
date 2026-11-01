@@ -25,7 +25,8 @@ struct RenderedGraph {
     Buffer<float> audio;
 };
 
-RenderedGraph render_graph(float modulation, bool connect_automation) {
+RenderedGraph render_graph(float modulation, bool connect_automation,
+                           bool ramp_modulation = false) {
     SignalGraph graph;
     const auto input = graph.add_input_node(1, "Cutoff modulation");
     const auto midi = graph.add_midi_input_node("MIDI");
@@ -47,6 +48,8 @@ RenderedGraph render_graph(float modulation, bool connect_automation) {
 
     auto input_buffer = Buffer<float>(1, kBlockSize);
     std::fill(input_buffer.channel(0).begin(), input_buffer.channel(0).end(), modulation);
+    if (ramp_modulation)
+        input_buffer.channel(0).back() = 1.0f;
     Buffer<float> output_buffer(2, kBlockSize);
     auto note = pulp::midi::MidiBuffer{};
     auto event = pulp::midi::MidiEvent::note_on(0, 60, 110);
@@ -98,6 +101,24 @@ TEST_CASE("PulpSynth graph parameter automation changes filter output",
     REQUIRE(rms(low_cutoff.audio) > 1.0e-5f);
     REQUIRE(rms(high_cutoff.audio) > 1.0e-5f);
     require_different(low_cutoff.audio, high_cutoff.audio);
+}
+
+TEST_CASE("PulpSynth graph automation takes effect at a nonzero sample offset",
+          "[host][graph][pulpsynth][automation][sample-accurate]") {
+    constexpr int kEventOffset = kBlockSize - 1;
+    const auto baseline = render_graph(0.0f, true);
+    const auto changed = render_graph(0.0f, true, true);
+
+    for (std::size_t channel = 0; channel < baseline.audio.num_channels(); ++channel)
+        for (int frame = 0; frame < kEventOffset; ++frame)
+            REQUIRE(changed.audio.channel(channel)[static_cast<std::size_t>(frame)] ==
+                    baseline.audio.channel(channel)[static_cast<std::size_t>(frame)]);
+
+    bool differs_at_event = false;
+    for (std::size_t channel = 0; channel < baseline.audio.num_channels(); ++channel)
+        differs_at_event |= changed.audio.channel(channel)[kEventOffset] !=
+                            baseline.audio.channel(channel)[kEventOffset];
+    REQUIRE(differs_at_event);
 }
 
 TEST_CASE("PulpSynth graph input alone does not alter output without an automation edge",
