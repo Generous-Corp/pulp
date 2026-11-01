@@ -286,8 +286,8 @@ TEST_CASE("X9 live and offline rendering agree for the same event and input",
     require_equal_buffer(live_output, offline_output);
 }
 
-TEST_CASE("X9 routes named aux and master stages through a live graph",
-          "[host][graph][x9][routing][mutation]") {
+TEST_CASE("X9 chains named serial stages through a live graph",
+          "[host][graph][x9][serial][mutation]") {
     SignalGraph graph;
     const auto input = graph.add_input_node(2, "Voice Bus");
     const auto aux = graph.add_gain_node("Aux Bus");
@@ -322,8 +322,8 @@ TEST_CASE("X9 routes named aux and master stages through a live graph",
     REQUIRE(encoded.find("Aux Bus") != std::string::npos);
     REQUIRE(encoded.find("Master Bus") != std::string::npos);
 
-    // Gain edits are live control changes on the named route and do not require
-    // replacing the graph or introducing another routing model.
+    // Gain edits are live control changes on the named serial stages and do not
+    // require replacing the graph or introducing another routing model.
     REQUIRE(graph.set_node_gain(aux, 0.75f));
     Buffer<float> changed(2, kBlockSize);
     auto changed_view = changed.view();
