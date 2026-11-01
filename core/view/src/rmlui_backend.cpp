@@ -362,8 +362,9 @@ std::atomic_uint64_t Backend::Runtime::next_context_id{1};
 std::atomic_flag Backend::Runtime::process_active = ATOMIC_FLAG_INIT;
 
 Backend::Backend(AssetProvider& assets, RenderInterface& renderer, LuaInterface& lua,
-                 ActionSink* actions)
-    : assets_(assets), renderer_(renderer), lua_(lua), actions_(actions) {}
+                 ActionSink* actions, ExtensionHost* extensions)
+    : assets_(assets), renderer_(renderer), lua_(lua), actions_(actions),
+      extensions_(extensions) {}
 
 Backend::~Backend() {
     close();
@@ -514,6 +515,25 @@ Status Backend::open(std::uint32_t width, std::uint32_t height) {
         return Status::rejected;
     }
     runtime->initialised = true;
+    if (extensions_) {
+        // Register the product vocabulary before creating a context or loading
+        // a document. A failed registration leaves the process-global RmlUi
+        // lifecycle clean and prevents a partially admitted skin from opening.
+        for (const auto& registration : custom_properties_) {
+            if (extensions_->register_custom_property(registration) != Status::ok) {
+                Rml::Shutdown();
+                Runtime::process_active.clear(std::memory_order_release);
+                return Status::rejected;
+            }
+        }
+        for (const auto& registration : element_instancers_) {
+            if (extensions_->register_element_instancer(registration) != Status::ok) {
+                Rml::Shutdown();
+                Runtime::process_active.clear(std::memory_order_release);
+                return Status::rejected;
+            }
+        }
+    }
     runtime->context =
         Rml::CreateContext(runtime->context_name,
                            {static_cast<int>(width), static_cast<int>(height)}, &runtime->render);
@@ -526,6 +546,21 @@ Status Backend::open(std::uint32_t width, std::uint32_t height) {
     height_ = height;
     runtime_ = std::move(runtime);
     open_ = true;
+    return Status::ok;
+}
+
+Status Backend::register_custom_property(CustomPropertyRegistration registration) {
+    if (registration.name.empty() || registration.default_value.empty() ||
+        registration.parser.empty())
+        return Status::rejected;
+    custom_properties_.push_back(std::move(registration));
+    return Status::ok;
+}
+
+Status Backend::register_element_instancer(ElementInstancerRegistration registration) {
+    if (registration.name.empty())
+        return Status::rejected;
+    element_instancers_.push_back(std::move(registration));
     return Status::ok;
 }
 

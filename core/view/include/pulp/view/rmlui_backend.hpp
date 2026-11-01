@@ -120,6 +120,27 @@ class ActionSink {
     virtual Status invoke(std::string_view action) = 0;
 };
 
+// Product-owned RmlUi vocabulary registration. The backend keeps these
+// registrations behind the Pulp seam so consumers can provide custom source
+// elements without depending on RmlUi headers in their public ABI.
+struct CustomPropertyRegistration {
+    std::string name;
+    std::string default_value;
+    std::string parser;
+    bool inherited = false;
+};
+
+struct ElementInstancerRegistration {
+    std::string name;
+};
+
+class ExtensionHost {
+  public:
+    virtual ~ExtensionHost() = default;
+    virtual Status register_custom_property(CustomPropertyRegistration) = 0;
+    virtual Status register_element_instancer(ElementInstancerRegistration) = 0;
+};
+
 // Renderer-neutral product model seam. Concrete importers expose their
 // product state through this interface; the backend owns the RmlUi data-model
 // bindings and never exposes RmlUi headers to the importer ABI.
@@ -163,7 +184,8 @@ class ModelHost {
 // no RmlUi or Lua headers; those dependencies remain behind this boundary.
 class Backend {
   public:
-    Backend(AssetProvider&, RenderInterface&, LuaInterface&, ActionSink* = nullptr);
+    Backend(AssetProvider&, RenderInterface&, LuaInterface&, ActionSink* = nullptr,
+            ExtensionHost* = nullptr);
     ~Backend();
 
     Backend(const Backend&) = delete;
@@ -171,6 +193,8 @@ class Backend {
 
     Status open(std::uint32_t width, std::uint32_t height);
     Status load_document(std::string_view path);
+    Status register_custom_property(CustomPropertyRegistration);
+    Status register_element_instancer(ElementInstancerRegistration);
     // Loads a manifest-approved font through the admitted RmlUi font engine.
     // The path is resolved by AssetProvider before it reaches RmlUi; callers
     // cannot make the font engine read outside the declared asset closure.
@@ -209,6 +233,9 @@ class Backend {
     RenderInterface& renderer_;
     LuaInterface& lua_;
     ActionSink* actions_ = nullptr;
+    ExtensionHost* extensions_ = nullptr;
+    std::vector<CustomPropertyRegistration> custom_properties_;
+    std::vector<ElementInstancerRegistration> element_instancers_;
     std::uint32_t width_ = 0;
     std::uint32_t height_ = 0;
     bool open_ = false;
