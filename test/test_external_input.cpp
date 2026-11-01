@@ -115,3 +115,16 @@ TEST_CASE("external input replay receipts classify positive, negative, and incon
         if (std::string(name) == "zero-expect.jsonl") REQUIRE(receipt.result == "inconclusive");
     }
 }
+
+TEST_CASE("TouchDesigner sharing recipe fixture is replayed through the external input gate",
+          "[runtime][external-input][touchdesigner]") {
+    ExternalInputGate<1> gate;
+    ExternalInputPolicy policy{7, 0.6f, 12000, 1};
+    const auto receipt = pulp::test::run_external_input_replay(
+        "test/fixtures/external-input/t7-touchdesigner-synthesized.jsonl", gate, policy);
+    REQUIRE(receipt.result == "pass");
+    REQUIRE(receipt.frames == 4);
+    REQUIRE(receipt.advances == 1);
+    REQUIRE(receipt.expects == 5);
+    REQUIRE(receipt.failed == 0);
+}
