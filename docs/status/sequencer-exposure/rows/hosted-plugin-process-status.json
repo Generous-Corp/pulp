@@ -1,0 +1,78 @@
+{
+  "id": "hosted-plugin-process-status",
+  "title": "Hosted plugin block rejection is observable at the graph boundary",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "73b0a3e4-17d9-4a26-bf89-3be97f4f1f7c",
+  "owned_paths": [
+    "core/host/include/pulp/host/crossfade_plugin_slot.hpp",
+    "docs/status/sequencer-exposure/rows/hosted-plugin-process-status.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/host/include/pulp/host/crossfade_plugin_slot.hpp",
+      "needles": [
+        "void begin_process() noexcept override",
+        "ProcessStatus process_status() const noexcept override"
+      ]
+    },
+    {
+      "path": "test/test_signal_graph_executor_parity.cpp",
+      "needles": [
+        "SignalGraph routed hosted failure is terminal and fail-closed",
+        "Legacy graph fallback contains a hosted failure to one invocation"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "The crossfade slot inherits the append-only PluginSlot status boundary and forwards per-block rejection state. The installed host headers therefore expose the compatible status contract to SDK subclasses, while the graph remains responsible for containment.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/host/include/pulp/host/crossfade_plugin_slot.hpp",
+          "needles": [
+            "ProcessStatus process_status() const noexcept override"
+          ]
+        },
+        {
+          "kind": "sdk_target",
+          "path": "tools/cmake/PulpInstallRules.cmake",
+          "needles": [
+            "list(APPEND _pulp_sdk_header_subsystems host)"
+          ]
+        },
+        {
+          "kind": "test",
+          "path": "test/test_signal_graph_executor_parity.cpp",
+          "needles": [
+            "SignalGraph routed hosted failure is terminal and fail-closed"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No offline CLI surface is added or changed by this graph execution boundary."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP surface is added or changed by this graph execution boundary."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "Failure containment is an execution guarantee, not a musician-facing control operation."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "The status latch is a runtime hosting boundary and does not add a design-time capability key."
+    }
+  }
+}
