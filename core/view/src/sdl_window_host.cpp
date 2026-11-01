@@ -2,32 +2,32 @@
 
 #ifdef PULP_HAS_SDL3
 
+#include <SDL3/SDL.h>
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/events/main_thread_dispatcher.hpp>
+#include <pulp/runtime/trace.hpp>
 #include <pulp/view/accessibility_provider.hpp>
 #include <pulp/view/drag_drop.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/host_frame_pump.hpp>
-#include <pulp/runtime/trace.hpp>
-#include <SDL3/SDL.h>
 #ifdef PULP_HAS_SKIA
-#include <pulp/canvas/skia_canvas.hpp>
-#include "include/core/SkColorType.h"
 #include "include/core/SkCanvas.h"
+#include "include/core/SkColorType.h"
 #include "include/core/SkImageInfo.h"
 #include "include/core/SkPixmap.h"
 #include "include/core/SkSurface.h"
+#include <pulp/canvas/skia_canvas.hpp>
 #endif
-#include <cstdint>  // uintptr_t (X11 Window id for outbound file drag)
 #include <cmath>
-#include <string>
-#include <vector>
+#include <cstdint> // uintptr_t (X11 Window id for outbound file drag)
 #include <deque>
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 
 // On macOS, use CoreGraphics canvas for rendering into SDL surface
 #ifdef __APPLE__
@@ -56,9 +56,8 @@ bool get_display_work_bounds(SDL_DisplayID display, SDL_Rect& bounds) {
 } // namespace
 
 class SdlWindowHostImpl : public SdlWindowHost {
-public:
-    SdlWindowHostImpl(View& root, Options options)
-        : root_(root), options_(std::move(options)) {
+  public:
+    SdlWindowHostImpl(View& root, Options options) : root_(root), options_(std::move(options)) {
 
         // The SDL host (the Windows / Linux standalone window) previously owned
         // no FrameClock and advanced no animation at all: widget hover/thumb
@@ -97,15 +96,13 @@ public:
             int fitted_width = static_cast<int>(options_.width);
             int fitted_height = static_cast<int>(options_.height);
             if (fitted_width > max_width || fitted_height > max_height) {
-                const float scale = std::min(
-                    static_cast<float>(max_width) / fitted_width,
-                    static_cast<float>(max_height) / fitted_height);
+                const float scale = std::min(static_cast<float>(max_width) / fitted_width,
+                                             static_cast<float>(max_height) / fitted_height);
                 fitted_width = std::max(1, static_cast<int>(fitted_width * scale));
                 fitted_height = std::max(1, static_cast<int>(fitted_height * scale));
                 SDL_SetWindowSize(window_, fitted_width, fitted_height);
             }
-            SDL_SetWindowPosition(window_, SDL_WINDOWPOS_CENTERED,
-                                  SDL_WINDOWPOS_CENTERED);
+            SDL_SetWindowPosition(window_, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
         }
 
         renderer_ = SDL_CreateRenderer(window_, nullptr);
@@ -118,7 +115,8 @@ public:
         root_.set_frame_clock(nullptr);
         shutdown_dispatcher();
 #ifdef PULP_HAS_SKIA
-        if (texture_) SDL_DestroyTexture(texture_);
+        if (texture_)
+            SDL_DestroyTexture(texture_);
 #endif
         if (renderer_) SDL_DestroyRenderer(renderer_);
         if (window_) SDL_DestroyWindow(window_);
@@ -142,7 +140,8 @@ public:
     }
 
     void request_content_size(float width, float height) {
-        if (!window_ || width <= 0.0f || height <= 0.0f) return;
+        if (!window_ || width <= 0.0f || height <= 0.0f)
+            return;
         int w = static_cast<int>(std::lround(width));
         int h = static_cast<int>(std::lround(height));
         SDL_Rect usable{};
@@ -151,15 +150,13 @@ public:
             const int margin = 8;
             const int max_width = std::max(1, usable.w - margin * 2);
             const int max_height = std::max(1, usable.h - margin * 2);
-            const float scale = std::min(1.0f,
-                                         std::min(static_cast<float>(max_width) / w,
-                                                  static_cast<float>(max_height) / h));
+            const float scale = std::min(1.0f, std::min(static_cast<float>(max_width) / w,
+                                                        static_cast<float>(max_height) / h));
             w = std::max(1, static_cast<int>(w * scale));
             h = std::max(1, static_cast<int>(h * scale));
         }
         SDL_SetWindowSize(window_, w, h);
-        SDL_SetWindowPosition(window_, SDL_WINDOWPOS_CENTERED,
-                              SDL_WINDOWPOS_CENTERED);
+        SDL_SetWindowPosition(window_, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
         needs_repaint_ = true;
     }
 
@@ -220,20 +217,18 @@ public:
                         break;
                     case SDL_EVENT_MOUSE_MOTION:
                         if (drag_active_ && (event.motion.state & SDL_BUTTON_LMASK)) {
-                            root_.simulate_drag(
-                                drag_start_,
-                                window_to_root(event.motion.x, event.motion.y), 1);
+                            root_.simulate_drag(drag_start_,
+                                                window_to_root(event.motion.x, event.motion.y), 1);
                             needs_repaint_ = true;
                         }
                         break;
                     case SDL_EVENT_MOUSE_BUTTON_UP: {
                         const auto point = window_to_root(event.button.x, event.button.y);
                         View::SimulatedPointer pointer;
-                        pointer.button = event.button.button == SDL_BUTTON_RIGHT
-                                            ? MouseButton::right
-                                            : event.button.button == SDL_BUTTON_MIDDLE
-                                                  ? MouseButton::middle
-                                                  : MouseButton::left;
+                        pointer.button =
+                            event.button.button == SDL_BUTTON_RIGHT    ? MouseButton::right
+                            : event.button.button == SDL_BUTTON_MIDDLE ? MouseButton::middle
+                                                                       : MouseButton::left;
                         root_.simulate_click(point, pointer);
                         if (event.button.button == SDL_BUTTON_LEFT)
                             drag_active_ = false;
@@ -520,8 +515,8 @@ private:
         // streaming texture.  RecordingCanvas is useful for tests, but it only
         // records commands; using it here made the standalone show a blue
         // diagnostic rectangle while the actual editor remained invisible.
-        const auto image_info = SkImageInfo::Make(
-            pixel_w, pixel_h, kBGRA_8888_SkColorType, kPremul_SkAlphaType);
+        const auto image_info =
+            SkImageInfo::Make(pixel_w, pixel_h, kBGRA_8888_SkColorType, kPremul_SkAlphaType);
         auto surface = SkSurfaces::Raster(image_info);
         if (!surface) {
             SDL_SetRenderDrawColor(renderer_, 30, 30, 46, 255);
@@ -546,8 +541,7 @@ private:
             // Non-fitted views still lay out in logical coordinates.  Apply
             // the platform DPI transform before painting them into pixels.
             skia->save();
-            skia->scale(static_cast<float>(pixel_w) / w,
-                        static_cast<float>(pixel_h) / h);
+            skia->scale(static_cast<float>(pixel_w) / w, static_cast<float>(pixel_h) / h);
         }
         {
             canvas::SkiaCanvas skia_canvas(skia);
@@ -557,7 +551,8 @@ private:
             root_.layout_children();
             root_.paint_all(skia_canvas);
         }
-        if (fitted || (w > 0 && h > 0)) skia->restore();
+        if (fitted || (w > 0 && h > 0))
+            skia->restore();
         SkPixmap pixmap;
         if (!surface->peekPixels(&pixmap)) {
             SDL_RenderPresent(renderer_);
@@ -565,10 +560,10 @@ private:
         }
 
         if (!texture_ || texture_width_ != pixel_w || texture_height_ != pixel_h) {
-            if (texture_) SDL_DestroyTexture(texture_);
+            if (texture_)
+                SDL_DestroyTexture(texture_);
             texture_ = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_BGRA32,
-                                         SDL_TEXTUREACCESS_STREAMING,
-                                         pixel_w, pixel_h);
+                                         SDL_TEXTUREACCESS_STREAMING, pixel_w, pixel_h);
             texture_width_ = pixel_w;
             texture_height_ = pixel_h;
         }

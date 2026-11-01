@@ -60,10 +60,12 @@ class SdlWindowHostAdapter final : public WindowHost {
         }
     }
     void set_fixed_aspect_ratio(float ratio) override {
-        if (host_) host_->set_fixed_aspect_ratio(ratio);
+        if (host_)
+            host_->set_fixed_aspect_ratio(ratio);
     }
     void set_design_viewport(float width, float height) override {
-        if (host_) host_->set_design_viewport(width, height);
+        if (host_)
+            host_->set_design_viewport(width, height);
     }
     ContentSize get_content_size() const override {
         return size_;
