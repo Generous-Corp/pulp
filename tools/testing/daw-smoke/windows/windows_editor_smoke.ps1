@@ -107,7 +107,7 @@ try {
   if(-not $inserted){throw 'Seed profile lacks REAPER section'}
   Write-ReaperIni $ini $out.ToArray()
   $status=Join-Path $run 'status.txt';$lua=Join-Path $PSScriptRoot 'windows_editor_smoke.lua'
-  $env:PULP_DAW_SMOKE_FX="$(if($Format -eq 'vst3'){'VST3:'}else{'CLAP:'}) $PluginName"
+  $env:PULP_DAW_SMOKE_FX="$(if($Format -eq 'vst3'){'VST3:'}else{'CLAP:'})$PluginName"
   $env:PULP_DAW_SMOKE_STATUS=$status;$env:PULP_DAW_SMOKE_TOKEN=$token
   $env:PULP_DAW_SMOKE_PROJECT=Join-Path $run 'host-state.rpp'
   $env:PULP_DAW_SMOKE_PARAM_INDEX="$ParamIndex";$env:PULP_DAW_SMOKE_DURATION="$AutomationSec"
