@@ -219,9 +219,10 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
                 }
                 const auto result = run();
                 if (!result.ok()) {
-                    return result.error == format::GraphRuntimeExecutorErrorCode::NodeProcessorFailed
-                        ? RoutedDispatchResult::processing_failure
-                        : RoutedDispatchResult::setup_failure;
+                    return result.error ==
+                                   format::GraphRuntimeExecutorErrorCode::NodeProcessorFailed
+                               ? RoutedDispatchResult::processing_failure
+                               : RoutedDispatchResult::setup_failure;
                 }
                 commit_plugin_parameter_event_sequences(cg->routed.serial.plugin_ctx);
                 commit_plugin_parameter_event_sequences(cg->routed.parallel.plugin_ctx);
@@ -313,12 +314,12 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
                         }
                     }
                     ok = dispatch_routed([&] {
-                        return executor_.process_routed(
-                            block, cg->routed.serial.snapshot, cg->routed.serial.pool,
-                            has_midi ? &cg->routed.midi : nullptr,
-                            has_automation ? &cg->routed.automation : nullptr, {}, {}, {}, {},
-                            cg->anticipation.skip_mask);
-                    }) == RoutedDispatchResult::success;
+                             return executor_.process_routed(
+                                 block, cg->routed.serial.snapshot, cg->routed.serial.pool,
+                                 has_midi ? &cg->routed.midi : nullptr,
+                                 has_automation ? &cg->routed.automation : nullptr, {}, {}, {}, {},
+                                 cg->anticipation.skip_mask);
+                         }) == RoutedDispatchResult::success;
                 }
                 if (!ok) {
                     for (std::size_t c = 0; c < output.num_channels(); ++c) {
@@ -361,11 +362,11 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
                 cg->routed.parallel.pool.fits(cg->routed.parallel.snapshot, frames32)) {
                 const auto dispatch = dispatch_routed([&] {
                     return executor_.process_parallel(
-                            block, cg->routed.parallel.snapshot, cg->routed.parallel.levelization,
-                            cg->routed.parallel.pool, worker_pool_,
-                            has_midi ? &cg->routed.midi : nullptr,
-                            has_automation ? &cg->routed.automation : nullptr);
-                    });
+                        block, cg->routed.parallel.snapshot, cg->routed.parallel.levelization,
+                        cg->routed.parallel.pool, worker_pool_,
+                        has_midi ? &cg->routed.midi : nullptr,
+                        has_automation ? &cg->routed.automation : nullptr);
+                });
                 if (dispatch == RoutedDispatchResult::success) {
                     return;
                 }
@@ -381,10 +382,10 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
                 cg->routed.serial.pool.fits(cg->routed.serial.snapshot, frames32)) {
                 const auto dispatch = dispatch_routed([&] {
                     return executor_.process_routed(
-                            block, cg->routed.serial.snapshot, cg->routed.serial.pool,
-                            has_midi ? &cg->routed.midi : nullptr,
-                            has_automation ? &cg->routed.automation : nullptr);
-                    });
+                        block, cg->routed.serial.snapshot, cg->routed.serial.pool,
+                        has_midi ? &cg->routed.midi : nullptr,
+                        has_automation ? &cg->routed.automation : nullptr);
+                });
                 if (dispatch == RoutedDispatchResult::success) {
                     return;
                 }

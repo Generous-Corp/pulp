@@ -83,7 +83,8 @@ public:
 
     void begin_process() noexcept override {
         new_slot_->begin_process();
-        if (old_slot_) old_slot_->begin_process();
+        if (old_slot_)
+            old_slot_->begin_process();
     }
 
     ProcessStatus process_status() const noexcept override {

@@ -637,13 +637,13 @@ PluginInfo test_plugin_info(int in_ch, int out_ch) {
 //                      across blocks. Stateless (the decision depends only on the
 //                      current block), so the same instance can drive both walks.
 class DeterministicPlugin final : public PluginSlot {
-public:
+  public:
     int process_calls = 0;
     enum class Mode { kFull, kPartialCh1Gated, kSidechainMix };
     DeterministicPlugin(Mode mode, float scale, int in_ch, int out_ch, int latency = 0,
                         bool fail_process = false)
-        : mode_(mode), scale_(scale), latency_(latency),
-          fail_process_(fail_process), info_(test_plugin_info(in_ch, out_ch)) {}
+        : mode_(mode), scale_(scale), latency_(latency), fail_process_(fail_process),
+          info_(test_plugin_info(in_ch, out_ch)) {}
 
     const PluginInfo& info() const override { return info_; }
     bool is_loaded() const override { return true; }
@@ -673,7 +673,8 @@ public:
                     o[i] = (m ? m[i] * scale_ : 0.0f) + (s ? s[i] : 0.0f);
                 }
             }
-            if (fail_process_) status_ = ProcessStatus::failed;
+            if (fail_process_)
+                status_ = ProcessStatus::failed;
             return;
         }
         const bool gate_open = in.num_samples() > 0 && in.num_channels() > 0 &&
@@ -689,10 +690,15 @@ public:
                     i ? i[static_cast<std::size_t>(s)] * scale_ : 0.0f;
             }
         }
-        if (fail_process_) status_ = ProcessStatus::failed;
+        if (fail_process_)
+            status_ = ProcessStatus::failed;
     }
-    void begin_process() noexcept override { status_ = ProcessStatus::ok; }
-    ProcessStatus process_status() const noexcept override { return status_; }
+    void begin_process() noexcept override {
+        status_ = ProcessStatus::ok;
+    }
+    ProcessStatus process_status() const noexcept override {
+        return status_;
+    }
     std::vector<pulp::host::HostParamInfo> parameters() const override { return {}; }
     float get_parameter(uint32_t) const override { return 0.0f; }
     void set_parameter(uint32_t, float) override {}
@@ -1029,10 +1035,10 @@ TEST_CASE("Routed hosted failure status reaches the graph executor",
           "[host][graph][executor][routing][plugin][failure]") {
     SignalGraph graph;
     const auto input = graph.add_input_node(1, "Input");
-    const auto plugin = graph.add_plugin_node(
-        std::make_unique<DeterministicPlugin>(DeterministicPlugin::Mode::kFull, 1.0f,
-                                              1, 1, 0, true),
-        1, 1, "Rejecting plugin");
+    const auto plugin =
+        graph.add_plugin_node(std::make_unique<DeterministicPlugin>(
+                                  DeterministicPlugin::Mode::kFull, 1.0f, 1, 1, 0, true),
+                              1, 1, "Rejecting plugin");
     const auto output = graph.add_output_node(1, "Output");
     REQUIRE(graph.connect(input, 0, plugin, 0));
     REQUIRE(graph.connect(plugin, 0, output, 0));
@@ -1058,8 +1064,7 @@ TEST_CASE("Routed hosted failure status reaches the graph executor",
     REQUIRE(block.validate());
 
     pulp::format::GraphRuntimeBufferPool pool;
-    REQUIRE(pool.reset(routing.snapshot.buffer_slot_count(),
-                       static_cast<std::uint32_t>(kFrames),
+    REQUIRE(pool.reset(routing.snapshot.buffer_slot_count(), static_cast<std::uint32_t>(kFrames),
                        routing.snapshot.buffer_assignment().connection_delay_samples));
     REQUIRE(pool.bind(routing.snapshot));
     pulp::format::GraphRuntimeExecutor executor;
@@ -1068,15 +1073,16 @@ TEST_CASE("Routed hosted failure status reaches the graph executor",
     CHECK(result.error == pulp::format::GraphRuntimeExecutorErrorCode::NodeProcessorFailed);
     CHECK(result.failed_node_index == 1);
     CHECK(executor.stats().node_failures == 1);
-    for (const auto sample : output_samples) CHECK(sample == 0.0f);
+    for (const auto sample : output_samples)
+        CHECK(sample == 0.0f);
 }
 
 TEST_CASE("Legacy graph fallback contains a hosted failure to one invocation",
           "[host][graph][reference-walk][plugin][failure]") {
     SignalGraph graph;
     const auto input = graph.add_input_node(1, "Input");
-    auto rejecting = std::make_unique<DeterministicPlugin>(
-        DeterministicPlugin::Mode::kFull, 1.0f, 1, 1, 0, true);
+    auto rejecting = std::make_unique<DeterministicPlugin>(DeterministicPlugin::Mode::kFull, 1.0f,
+                                                           1, 1, 0, true);
     auto* rejecting_ptr = rejecting.get();
     const auto plugin = graph.add_plugin_node(std::move(rejecting), 1, 1, "Rejecting plugin");
     const auto output = graph.add_output_node(1, "Output");
@@ -1094,15 +1100,16 @@ TEST_CASE("Legacy graph fallback contains a hosted failure to one invocation",
     graph.process(output_view, input_view, kFrames);
 
     CHECK(rejecting_ptr->process_calls == 1);
-    for (const auto sample : output_samples) CHECK(sample == 0.0f);
+    for (const auto sample : output_samples)
+        CHECK(sample == 0.0f);
 }
 
 TEST_CASE("SignalGraph routed hosted failure is terminal and fail-closed",
           "[host][graph][routing][plugin][failure]") {
     SignalGraph graph;
     const auto input = graph.add_input_node(1, "Input");
-    auto rejecting = std::make_unique<DeterministicPlugin>(
-        DeterministicPlugin::Mode::kFull, 1.0f, 1, 1, 0, true);
+    auto rejecting = std::make_unique<DeterministicPlugin>(DeterministicPlugin::Mode::kFull, 1.0f,
+                                                           1, 1, 0, true);
     auto* rejecting_ptr = rejecting.get();
     const auto plugin = graph.add_plugin_node(std::move(rejecting), 1, 1, "Rejecting plugin");
     const auto output = graph.add_output_node(1, "Output");
@@ -1121,7 +1128,8 @@ TEST_CASE("SignalGraph routed hosted failure is terminal and fail-closed",
 
     CHECK(rejecting_ptr->process_calls == 1);
     CHECK(graph.routed_only_execution_failures() == 1);
-    for (const auto sample : output_samples) CHECK(sample == 0.0f);
+    for (const auto sample : output_samples)
+        CHECK(sample == 0.0f);
 }
 
 TEST_CASE("Translated routing matches SignalGraph: plugin + gain fan-in mix",

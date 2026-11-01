@@ -176,13 +176,15 @@ std::unique_ptr<PluginSlot> slot_for(CountingCombined& plugin) {
 }
 
 class RejectingAudioEffect final : public Vst::AudioEffect {
-public:
+  public:
     RejectingAudioEffect() {
         addAudioInput(u"Input", Vst::SpeakerArr::kStereo);
         addAudioOutput(u"Output", Vst::SpeakerArr::kStereo);
     }
 
-    tresult PLUGIN_API process(Vst::ProcessData&) SMTG_OVERRIDE { return kResultFalse; }
+    tresult PLUGIN_API process(Vst::ProcessData&) SMTG_OVERRIDE {
+        return kResultFalse;
+    }
 };
 
 }  // namespace
@@ -243,7 +245,8 @@ TEST_CASE("VST3 process rejection is exposed through the slot status latch",
         pulp::host::ParameterEventQueue params;
         slot->process(output, input, midi_in, midi_out, params, 16);
         CHECK(slot->process_status() == PluginSlot::ProcessStatus::failed);
-        for (const auto sample : out_samples) CHECK(sample == 0.25f);
+        for (const auto sample : out_samples)
+            CHECK(sample == 0.25f);
     }
 }
 

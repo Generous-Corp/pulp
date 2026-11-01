@@ -90,7 +90,7 @@ using ParamRate = state::ParamRate;
 // ── Plugin Slot ─────────────────────────────────────────────────────────
 
 class PluginSlot {
-public:
+  public:
     // Result of the most recent audio block. A slot reports this through an
     // audio-thread-safe latch so the graph executor can contain a plugin that
     // rejects a block without changing the existing void process ABI. The
@@ -395,7 +395,9 @@ public:
     // Status for the most recent process block. Implementations must provide an
     // allocation-free, nonblocking read suitable for the audio thread. The
     // status does not replace a format's output fallback policy.
-    virtual ProcessStatus process_status() const noexcept { return ProcessStatus::ok; }
+    virtual ProcessStatus process_status() const noexcept {
+        return ProcessStatus::ok;
+    }
 };
 
 } // namespace pulp::host

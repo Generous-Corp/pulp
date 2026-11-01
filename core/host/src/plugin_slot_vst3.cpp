@@ -745,7 +745,7 @@ public:
         }
     }
 
-private:
+  private:
     std::atomic<ProcessStatus> process_status_{ProcessStatus::ok};
     PluginInfo info_;
     void* handle_ = nullptr;

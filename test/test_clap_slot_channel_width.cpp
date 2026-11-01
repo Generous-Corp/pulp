@@ -60,8 +60,7 @@ bool CLAP_ABI fake_start_processing(const clap_plugin_t*) { return true; }
 void CLAP_ABI fake_stop_processing(const clap_plugin_t*) {}
 void CLAP_ABI fake_reset(const clap_plugin_t*) {}
 clap_process_status CLAP_ABI fake_process(const clap_plugin_t*, const clap_process_t*) {
-    return g_fake != nullptr && g_fake->reject_process ? CLAP_PROCESS_ERROR
-                                                       : CLAP_PROCESS_CONTINUE;
+    return g_fake != nullptr && g_fake->reject_process ? CLAP_PROCESS_ERROR : CLAP_PROCESS_CONTINUE;
 }
 
 void CLAP_ABI fake_on_main_thread(const clap_plugin_t*) {}

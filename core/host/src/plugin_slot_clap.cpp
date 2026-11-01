@@ -676,7 +676,7 @@ public:
         visitor.visit_clap(*this, ext);
     }
 
-private:
+  private:
     std::atomic<ProcessStatus> process_status_{ProcessStatus::ok};
     /// Tear the plugin's gui down: hide, then destroy. Leaves the container
     /// alone — see close_editor(). Idempotent.
