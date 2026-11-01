@@ -1355,10 +1355,12 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // reentrant call degrades to a no-op instead of corrupting the lane's
     // unsynchronized executor/pool/scratch + interior plugin state.
     std::atomic<bool> anticipation_pump_busy_{false};
-    // Audio-thread writer only: terminal routed processing failures and routed-only
-    // lease failures that produce a deterministic silent block.
+    // See routed_walk_fallbacks(): incremented when an eligible routed path failed
+    // dispatch and process() fell back to the walk. Audio-thread writer only.
     std::atomic<std::uint64_t> routed_walk_fallbacks_{0};
     std::atomic<std::uint32_t> routed_only_execution_owners_{0};
+    // Audio-thread writer only: terminal routed processing failures and routed-only
+    // lease failures that produce a deterministic silent block.
     std::atomic<std::uint64_t> routed_only_execution_failures_{0};
     // See transport_suppressed_for_anticipation(): set by compile_() to the count
     // of transport-sensitive nodes that active anticipation forced exterior
