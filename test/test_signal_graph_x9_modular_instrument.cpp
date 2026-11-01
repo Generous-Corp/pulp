@@ -7,12 +7,16 @@
 #include <pulp/format/processor_node_adapter.hpp>
 #include <pulp/host/graph_serializer.hpp>
 #include <pulp/host/offline_signal_graph_host.hpp>
+#include <pulp/host/plugin_slot.hpp>
+#include <pulp/host/scanner.hpp>
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/host/signal_graph_prepared_topology_edit.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
+#include <filesystem>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -25,10 +29,19 @@ using pulp::examples::kFilterCutoff;
 using pulp::examples::PulpSynthProcessor;
 using pulp::format::ProcessorNodeInstance;
 using pulp::host::NodeId;
+using pulp::host::PluginFormat;
+using pulp::host::PluginInfo;
 using pulp::host::SignalGraph;
 
 constexpr double kSampleRate = 48'000.0;
 constexpr int kBlockSize = 64;
+
+struct HostedInstrument {
+    SignalGraph graph;
+    NodeId input = 0;
+    NodeId plugin = 0;
+    NodeId output = 0;
+};
 
 struct ModularInstrument {
     SignalGraph graph;
@@ -77,6 +90,123 @@ float rms(const Buffer<float>& buffer) {
         }
     return static_cast<float>(
         std::sqrt(sum / static_cast<double>(buffer.num_channels() * buffer.num_samples())));
+}
+
+Buffer<float> hosted_input(std::size_t frames) {
+    Buffer<float> result(2, frames);
+    for (std::size_t frame = 0; frame < frames; ++frame) {
+        const float value = 0.2f + 0.001f * static_cast<float>(frame);
+        result.channel(0)[frame] = value;
+        result.channel(1)[frame] = -value;
+    }
+    return result;
+}
+
+std::unique_ptr<HostedInstrument> make_hosted_instrument(const PluginInfo& info) {
+    auto fixture = std::make_unique<HostedInstrument>();
+    auto slot = pulp::host::PluginSlot::load(info);
+    REQUIRE(slot);
+    fixture->input = fixture->graph.add_input_node(info.num_inputs, "Input");
+    fixture->plugin = fixture->graph.add_plugin_node(std::move(slot), info.num_inputs,
+                                                     info.num_outputs, "Effect");
+    fixture->output = fixture->graph.add_output_node(info.num_outputs, "Output");
+    REQUIRE(fixture->input != 0);
+    REQUIRE(fixture->plugin != 0);
+    REQUIRE(fixture->output != 0);
+    for (int channel = 0; channel < info.num_inputs; ++channel)
+        REQUIRE(fixture->graph.connect(fixture->input, channel, fixture->plugin, channel));
+    for (int channel = 0; channel < info.num_outputs; ++channel)
+        REQUIRE(fixture->graph.connect(fixture->plugin, channel, fixture->output, channel));
+    REQUIRE(fixture->graph.prepare(kSampleRate, kBlockSize));
+    return fixture;
+}
+
+Buffer<float> render_hosted(HostedInstrument& fixture, const Buffer<float>& input) {
+    Buffer<float> output(2, input.num_samples());
+    for (std::size_t offset = 0; offset < input.num_samples(); offset += kBlockSize) {
+        const auto frames = std::min<std::size_t>(kBlockSize, input.num_samples() - offset);
+        std::array<const float*, 2> input_channels{input.channel(0).data() + offset,
+                                                   input.channel(1).data() + offset};
+        std::array<float*, 2> output_channels{output.channel(0).data() + offset,
+                                              output.channel(1).data() + offset};
+        pulp::audio::BufferView<const float> input_view(input_channels.data(), 2,
+                                                        static_cast<int>(frames));
+        pulp::audio::BufferView<float> output_view(output_channels.data(), 2,
+                                                   static_cast<int>(frames));
+        fixture.graph.process(output_view, input_view, static_cast<int>(frames));
+    }
+    return output;
+}
+
+void require_finite_and_different(const Buffer<float>& baseline, const Buffer<float>& changed) {
+    REQUIRE(baseline.num_channels() == changed.num_channels());
+    REQUIRE(baseline.num_samples() == changed.num_samples());
+    bool differs = false;
+    for (std::size_t channel = 0; channel < changed.num_channels(); ++channel)
+        for (std::size_t frame = 0; frame < changed.num_samples(); ++frame) {
+            REQUIRE(std::isfinite(changed.channel(channel)[frame]));
+            differs |= changed.channel(channel)[frame] != baseline.channel(channel)[frame];
+        }
+    REQUIRE(differs);
+}
+
+void require_equal_buffer(const Buffer<float>& expected, const Buffer<float>& actual) {
+    REQUIRE(expected.num_channels() == actual.num_channels());
+    REQUIRE(expected.num_samples() == actual.num_samples());
+    for (std::size_t channel = 0; channel < expected.num_channels(); ++channel)
+        for (std::size_t frame = 0; frame < expected.num_samples(); ++frame)
+            REQUIRE(expected.channel(channel)[frame] == actual.channel(channel)[frame]);
+}
+
+void run_hosted_format(const char* path, PluginFormat format) {
+    REQUIRE(path != nullptr);
+    REQUIRE(std::filesystem::exists(path));
+    const auto plugins = pulp::host::PluginScanner::scan_bundle(path, format);
+    REQUIRE(plugins.size() == 1);
+    const auto& info = plugins.front();
+    REQUIRE(info.num_inputs == 2);
+    REQUIRE(info.num_outputs == 2);
+
+    const auto input = hosted_input(kBlockSize * 2);
+    auto fixture = make_hosted_instrument(info);
+    const auto handle = fixture->graph.live_snapshot_handle();
+    REQUIRE(handle);
+    auto* live_slot = fixture->graph.live_plugin_slot(fixture->plugin);
+    REQUIRE(live_slot);
+    const auto saved_state = live_slot->save_state();
+    REQUIRE_FALSE(saved_state.empty());
+
+    const auto baseline = render_hosted(*fixture, input);
+    REQUIRE(rms(baseline) > 1.0e-5f);
+
+    const auto parameters = live_slot->parameters();
+    REQUIRE_FALSE(parameters.empty());
+    const auto parameter = parameters.front();
+    const float before = live_slot->get_parameter(parameter.id);
+    const float target = before < 0.5f ? 0.75f : 0.25f;
+    live_slot->set_parameter(parameter.id, target);
+    REQUIRE(live_slot->get_parameter(parameter.id) == target);
+    const auto changed = render_hosted(*fixture, input);
+    require_finite_and_different(baseline, changed);
+
+    REQUIRE(live_slot->restore_state(saved_state));
+    const auto restored = render_hosted(*fixture, input);
+    require_equal_buffer(baseline, restored);
+
+    auto offline_fixture = make_hosted_instrument(info);
+    pulp::host::OfflineSignalGraphHost offline(offline_fixture->graph);
+    pulp::host::OfflineSignalGraphConfig config;
+    config.sample_rate = kSampleRate;
+    config.block_frames = kBlockSize;
+    config.input_channels = 2;
+    config.output_channels = 2;
+    REQUIRE(offline.prepare(config));
+    pulp::host::OfflineSignalGraphOptions options;
+    options.frame_count = input.num_samples();
+    options.input = std::as_const(input).view();
+    const auto offline_result = offline.render(options);
+    REQUIRE(offline_result.ok);
+    require_equal_buffer(baseline, offline_result.audio);
 }
 
 pulp::midi::MidiBuffer chord() {
@@ -145,6 +275,15 @@ TEST_CASE("X9 public APIs compose a modular instrument through a live graph",
             SignalGraph::PreparedTopologyEdit::Result::Prepared);
     REQUIRE(edit->commit() == SignalGraph::PreparedTopologyEdit::Result::Committed);
 
+    // A malformed candidate must be rejected without disturbing the committed
+    // graph. This is the failure control for runtime graph mutation.
+    auto rejected = fixture.graph.begin_prepared_topology_edit();
+    REQUIRE(rejected);
+    REQUIRE_FALSE(rejected->connect(fixture.synth_node, 0, 999'999, 0));
+    REQUIRE(rejected->prepare(kSampleRate, kBlockSize) ==
+            SignalGraph::PreparedTopologyEdit::Result::InvalidMutation);
+    REQUIRE(rejected->commit() == SignalGraph::PreparedTopologyEdit::Result::NotPrepared);
+
     Buffer<float> edited_output(2, kBlockSize);
     auto edited_output_view = edited_output.view();
     fixture.graph.process(edited_output_view, input_view, kBlockSize);
@@ -197,3 +336,30 @@ TEST_CASE("X9 records the runtime ProcessorNode persistence boundary",
     REQUIRE(result.error.find("unsupported by .pulpgraph") != std::string::npos);
     REQUIRE(loaded.nodes().empty());
 }
+
+#ifdef PULP_X9_CLAP_PATH
+TEST_CASE("X9 hosted graph lifecycle covers the CLAP format",
+          "[host][graph][x9][plugin][clap][offline]") {
+    run_hosted_format(PULP_X9_CLAP_PATH, PluginFormat::CLAP);
+}
+#endif
+
+#ifdef PULP_X9_VST3_PATH
+TEST_CASE("X9 hosted graph lifecycle covers the VST3 format",
+          "[host][graph][x9][plugin][vst3][offline]") {
+    run_hosted_format(PULP_X9_VST3_PATH, PluginFormat::VST3);
+}
+#endif
+
+#ifdef PULP_X9_AU_PATH
+TEST_CASE("X9 hosted graph lifecycle covers the Audio Unit format",
+          "[host][graph][x9][plugin][au][offline]") {
+    REQUIRE(std::filesystem::exists(PULP_X9_AU_PATH));
+    const auto plugins =
+        pulp::host::PluginScanner::scan_bundle(PULP_X9_AU_PATH, PluginFormat::AudioUnit);
+    if (plugins.empty())
+        SKIP("Audio Unit bundle discovery is unavailable through scan_bundle on this host");
+    REQUIRE(plugins.size() == 1);
+    run_hosted_format(PULP_X9_AU_PATH, PluginFormat::AudioUnit);
+}
+#endif

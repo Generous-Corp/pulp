@@ -16,6 +16,14 @@ configure_file(
     "${CMAKE_CURRENT_BINARY_DIR}/release_floors_gen.h"
     @ONLY)
 
+# The release profile's enforced option list (tools/cmake/PulpProfiles.cmake)
+# as C++, so `pulp ship` drops exactly those entries from its shippable
+# configure (ship_dev_build_guard.hpp).
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/build_profile_gen.h.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/build_profile_gen.h"
+    @ONLY)
+
 # ── Migration index codegen ─────────────────────────────────────────────────
 #
 # Scan docs/migrations/*.md at configure time, parse the TOML

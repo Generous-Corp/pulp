@@ -21,6 +21,8 @@ string(REPEAT "a" 40 PULP_SOURCE_INSTALL_SHA)
 set(PULP_SOURCE_INSTALL_DIRTY false)
 # The stamp refuses an unset bridge_exec; this test exercises platform naming only.
 set(PULP_SOURCE_INSTALL_BRIDGE_EXEC false)
+set(PULP_PROFILE dev)
+set(PULP_PROFILE_OVERRIDDEN OFF)
 
 # Runs the stamp for one target; sets <out_rc>, and <out_platform> to the
 # stamped platform (empty when the install was refused).

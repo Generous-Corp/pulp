@@ -9,6 +9,24 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1373"></a>
+## [1.37.3] - 2026-11-01
+
+- release/version bump ([#11347](https://github.com/Generous-Corp/pulp/pull/11347))
+- chore/vellum acceptance refresh 20261031 ([#11346](https://github.com/Generous-Corp/pulp/pull/11346))
+- feature/bump pr fast path ([#11311](https://github.com/Generous-Corp/pulp/pull/11311))
+- fix/swiftui import subtree typecheck 20261031 ([#11343](https://github.com/Generous-Corp/pulp/pull/11343))
+- ci/review verdict job name ([#11344](https://github.com/Generous-Corp/pulp/pull/11344))
+- release/version bump ([#11338](https://github.com/Generous-Corp/pulp/pull/11338))
+- ci/standing bump pr ([#11335](https://github.com/Generous-Corp/pulp/pull/11335))
+- ci/review verdict backfill ([#11337](https://github.com/Generous-Corp/pulp/pull/11337))
+- release/version bump ([#11336](https://github.com/Generous-Corp/pulp/pull/11336))
+- feature/real world inputs followup 20261031 ([#11332](https://github.com/Generous-Corp/pulp/pull/11332))
+- feature/review verdict check ([#11331](https://github.com/Generous-Corp/pulp/pull/11331))
+- release/version bump ([#11330](https://github.com/Generous-Corp/pulp/pull/11330))
+- release/version bump ([#11329](https://github.com/Generous-Corp/pulp/pull/11329))
+- ci/macos tier record 20261025 ([#11037](https://github.com/Generous-Corp/pulp/pull/11037))
+
 <a id="v1372"></a>
 ## [1.37.2] - 2026-10-31
 
@@ -11966,6 +11984,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.37.3]: https://github.com/Generous-Corp/pulp/releases/tag/v1.37.3
 [1.37.2]: https://github.com/Generous-Corp/pulp/releases/tag/v1.37.2
 [1.37.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.37.1
 [1.37.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.37.0

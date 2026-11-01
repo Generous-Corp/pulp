@@ -467,13 +467,16 @@ string(JSON _provenance_sha ERROR_VARIABLE _provenance_sha_error
     GET "${_installed_provenance_json}" source_git_sha)
 string(JSON _provenance_bridge_exec_type ERROR_VARIABLE _provenance_bridge_exec_error
     TYPE "${_installed_provenance_json}" bridge_exec)
+string(JSON _provenance_build_profile ERROR_VARIABLE _provenance_build_profile_error
+    GET "${_installed_provenance_json}" build_profile)
 # CMake regular expressions have no {n} quantifier ("{40}" matches the literal
 # text), so the 40-hex-digit SHA pattern is spelled out.
 string(REPEAT "[0-9a-f]" 40 _provenance_sha_pattern)
 if(_provenance_schema_error OR NOT _provenance_schema STREQUAL "pulp.sdk-provenance.v1" OR
    _provenance_kind_error OR NOT _provenance_kind STREQUAL "source-install" OR
    _provenance_sha_error OR NOT _provenance_sha MATCHES "^${_provenance_sha_pattern}$" OR
-   _provenance_bridge_exec_error OR NOT _provenance_bridge_exec_type STREQUAL "BOOLEAN")
+   _provenance_bridge_exec_error OR NOT _provenance_bridge_exec_type STREQUAL "BOOLEAN" OR
+   _provenance_build_profile_error OR NOT _provenance_build_profile MATCHES "^(dev|release)$")
     message(FATAL_ERROR "Source install provenance is incomplete: ${_installed_provenance_json}")
 endif()
 

@@ -8532,3 +8532,14 @@ determinism hashing strips that field only for `pulp-browser-capture-v1`
 envelopes; report-level timing data and timings in other input shapes remain
 hashed. Do not treat this normalization as proof that browser animation,
 canvas, or WebGL output is deterministic.
+
+## Authored column heights must not shrink on any lane
+
+An explicit `style.height` on a child of a column parent is captured design
+geometry, and a host viewport shorter than the design must not compress it
+(Yoga's default `flex-shrink: 1` turned an 886px panel into 116px). Both
+lowerings preserve it unless the source supplies its own `flex_shrink`: the
+generated-JS emitter in `design_codegen.cpp` and the native lowering in
+`apply_layout` (`design_import_native_common.cpp`). Change them together;
+`design import screenshot parity compares live and baked native fixtures`
+(the `clipped-stack` fixture) fails when only one lane keeps the height.
