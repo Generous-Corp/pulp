@@ -314,12 +314,12 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
                         }
                     }
                     dispatch = dispatch_routed([&] {
-                             return executor_.process_routed(
-                                 block, cg->routed.serial.snapshot, cg->routed.serial.pool,
-                                 has_midi ? &cg->routed.midi : nullptr,
-                                 has_automation ? &cg->routed.automation : nullptr, {}, {}, {}, {},
-                                 cg->anticipation.skip_mask);
-                         });
+                        return executor_.process_routed(
+                            block, cg->routed.serial.snapshot, cg->routed.serial.pool,
+                            has_midi ? &cg->routed.midi : nullptr,
+                            has_automation ? &cg->routed.automation : nullptr, {}, {}, {}, {},
+                            cg->anticipation.skip_mask);
+                    });
                 }
                 if (dispatch == RoutedDispatchResult::processing_failure) {
                     routed_only_execution_failures_.fetch_add(1, std::memory_order_relaxed);
