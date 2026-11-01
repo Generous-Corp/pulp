@@ -108,9 +108,14 @@ public:
     // graph still loads but those nodes have null PluginSlots.
     struct LoadResult {
         bool ok = false;
-        std::string error;  // populated when ok == false
-        std::vector<std::string> missing_plugins;  // identity strings
-        std::vector<std::string> missing_custom_node_types;  // type_id@version
+        std::string error;                        // populated when ok == false
+        std::vector<std::string> missing_plugins; // identity strings
+        // Plugins that resolved and loaded, but rejected their persisted state.
+        // The graph remains loaded, but state is not guaranteed to have been
+        // restored; callers decide whether recovery is required without
+        // confusing this with a missing plugin.
+        std::vector<std::string> state_restore_failures;    // identity strings
+        std::vector<std::string> missing_custom_node_types; // type_id@version
         std::unordered_map<NodeId, std::pair<float,float>> editor_layout;
     };
 

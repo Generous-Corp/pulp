@@ -109,6 +109,15 @@ bool missing_plugins_contain(const GraphSerializer::LoadResult& result,
     return false;
 }
 
+bool state_restore_failures_contain(const GraphSerializer::LoadResult& result,
+                                    const std::string& needle) {
+    for (const auto& entry : result.state_restore_failures) {
+        if (entry.find(needle) != std::string::npos)
+            return true;
+    }
+    return false;
+}
+
 bool missing_custom_types_contain(const GraphSerializer::LoadResult& result,
                                   const std::string& needle) {
     for (const auto& entry : result.missing_custom_node_types) {
@@ -427,6 +436,19 @@ TEST_CASE("SignalGraph D1 replay probe separates plan determinism from persisten
     REQUIRE(altered_json != baseline_json);
     REQUIRE(replay_plan_fingerprint(altered) != baseline_plan_hash);
     REQUIRE(render_replay_graph(altered) != baseline_render);
+
+    // A semantic graph value can change without changing the resolved
+    // execution topology. Keep these fingerprints separate: persistence must
+    // notice the gain edit, while the plan fingerprint remains stable.
+    SignalGraph gain_edit;
+    ReplayFixture gain_fixture;
+    populate_replay_graph(gain_edit, gain_fixture, canonical_edge_order);
+    REQUIRE(gain_edit.set_node_gain(gain_fixture.gain_b, 0.5f));
+    const auto gain_json = GraphSerializer::to_json(gain_edit);
+    REQUIRE(gain_edit.prepare(48000.0, 8));
+    REQUIRE(gain_json != baseline_json);
+    REQUIRE(replay_plan_fingerprint(gain_edit) == baseline_plan_hash);
+    REQUIRE(render_replay_graph(gain_edit) != baseline_render);
 }
 
 TEST_CASE("GraphSerializer persists an executable sample region",
@@ -2170,6 +2192,35 @@ TEST_CASE("GraphSerializer resolves the canonical BuiltIn instrument round-trip"
     REQUIRE(restored.plugin_info.format == PluginFormat::BuiltIn);
     REQUIRE(restored.plugin_info.unique_id == "pulp.instrument.basic");
     REQUIRE(restored.plugin_info.path.empty());
+}
+
+TEST_CASE("GraphSerializer reports a plugin state restore refusal",
+          "[host][serializer][state][failure]") {
+    PluginInfo info;
+    info.format = PluginFormat::BuiltIn;
+    info.unique_id = "pulp.instrument.basic";
+    info.num_inputs = 0;
+    info.num_outputs = 2;
+
+    auto slot = PluginSlot::load(info);
+    REQUIRE(slot != nullptr);
+
+    SignalGraph src;
+    src.add_plugin_node(std::move(slot), 0, 2, "Basic Instrument");
+    auto json = GraphSerializer::to_json(src);
+    const auto marker = std::string("\"state_b64\": \"\"");
+    const auto marker_pos = json.find(marker);
+    REQUIRE(marker_pos != std::string::npos);
+    json.replace(marker_pos, marker.size(), "\"state_b64\": \"AA==\"");
+
+    SignalGraph dst;
+    const auto result = GraphSerializer::from_json(dst, json);
+    REQUIRE(result.ok);
+    REQUIRE(result.missing_plugins.empty());
+    REQUIRE(result.state_restore_failures.size() == 1);
+    REQUIRE(state_restore_failures_contain(result, "builtin:pulp.instrument.basic"));
+    REQUIRE(dst.nodes().size() == 1);
+    REQUIRE(dst.nodes().front().plugin != nullptr);
 }
 
 TEST_CASE("GraphSerializer serializes short plugin state blobs with stable padding",

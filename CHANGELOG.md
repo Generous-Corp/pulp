@@ -9,6 +9,37 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1400"></a>
+## [1.40.0] - 2026-11-01
+
+- release/version bump ([#11374](https://github.com/Generous-Corp/pulp/pull/11374))
+- codex/named bus names 20261101 ([#11373](https://github.com/Generous-Corp/pulp/pull/11373))
+- docs/signal graph navigation 20261101 ([#11372](https://github.com/Generous-Corp/pulp/pull/11372))
+
+<a id="v1390"></a>
+## [1.39.0] - 2026-11-01
+
+- release/version bump ([#11371](https://github.com/Generous-Corp/pulp/pull/11371))
+- codex/signal graph workflow docs 20261101 ([#11370](https://github.com/Generous-Corp/pulp/pull/11370))
+- feat/real world inputs p0 t1 ([#11357](https://github.com/Generous-Corp/pulp/pull/11357))
+
+<a id="v1380"></a>
+## [1.38.0] - 2026-11-01
+
+- release/version bump ([#11360](https://github.com/Generous-Corp/pulp/pull/11360))
+- codex/windows arm module timeout ([#10534](https://github.com/Generous-Corp/pulp/pull/10534))
+
+<a id="v1374"></a>
+## [1.37.4] - 2026-11-01
+
+- release/version bump ([#11356](https://github.com/Generous-Corp/pulp/pull/11356))
+- feature/attack surface release profile 20261022 ([#11175](https://github.com/Generous-Corp/pulp/pull/11175))
+- codex/importer height fix 20261030 ([#11308](https://github.com/Generous-Corp/pulp/pull/11308))
+- test/x9 permanent plugin matrix 20261031 ([#11354](https://github.com/Generous-Corp/pulp/pull/11354))
+- codex/b1 r4 rebase 20261031 ([#11352](https://github.com/Generous-Corp/pulp/pull/11352))
+- r2 main 20261031 ([#11353](https://github.com/Generous-Corp/pulp/pull/11353))
+- fix/10924 canvas pattern confinement 20261031 ([#11340](https://github.com/Generous-Corp/pulp/pull/11340))
+
 <a id="v1373"></a>
 ## [1.37.3] - 2026-11-01
 
@@ -11984,6 +12015,10 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.40.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.40.0
+[1.39.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.39.0
+[1.38.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.38.0
+[1.37.4]: https://github.com/Generous-Corp/pulp/releases/tag/v1.37.4
 [1.37.3]: https://github.com/Generous-Corp/pulp/releases/tag/v1.37.3
 [1.37.2]: https://github.com/Generous-Corp/pulp/releases/tag/v1.37.2
 [1.37.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.37.1
