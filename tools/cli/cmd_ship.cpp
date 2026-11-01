@@ -1732,6 +1732,7 @@ static int ship_package_impl(const std::vector<std::string>& args,
             }
 
             std::string product_name;
+            std::vector<fs::path> selected_linux_artifacts;
             bool found_linux_plugin = false;
             for (auto dir_name : {"VST3", "CLAP", "LV2"}) {
                 auto dir = build_dir / dir_name;
@@ -1743,17 +1744,24 @@ static int ship_package_impl(const std::vector<std::string>& args,
                         (std::string_view(dir_name) == "CLAP" && ext == ".clap") ||
                         (std::string_view(dir_name) == "LV2" && ext == ".lv2");
                     if (!is_plugin) continue;
+                    if (!product_filter.empty() && entry.path().stem().string() != product_filter)
+                        continue;
+                    selected_linux_artifacts.push_back(entry.path());
                     found_linux_plugin = true;
-                    product_name = entry.path().stem().string();
-                    break;
+                    if (product_name.empty())
+                        product_name = entry.path().stem().string();
                 }
-                if (!product_name.empty()) break;
             }
             if (!found_linux_plugin) {
                 std::cerr << "Error: no VST3/CLAP/LV2 plugins found in "
                           << build_dir.string() << "\n";
                 return 1;
             }
+
+            if (int rc = enforce_release_artifact_scan(build_dir, selected_linux_artifacts,
+                                                       skip_artifact_scan, sub);
+                rc != 0)
+                return rc;
 
             auto deb_path = artifacts / (product_name + "-" + version + ".deb");
             std::cout << "Packaging " << product_name << " (Linux → .deb)...\n";

@@ -1338,6 +1338,66 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 
     fs::remove_all(root);
 }
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship package on Linux scans selected plugin bytes before packaging",
+                 "[cli][shellout][ship][package][linux-package][artifact-scan]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+
+    auto make_scannable_linux_project = [](std::string_view name) {
+        auto root = make_fake_project(name, true);
+        {
+            std::ofstream cache(root / "build" / "CMakeCache.txt", std::ios::app);
+            cache << "PULP_TRACING:BOOL=OFF\nPULP_DEV_BUILD:BOOL=OFF\n";
+        }
+        fs::create_directories(root / "tools" / "cmake");
+        for (const char* file :
+             {"PulpReleaseArtifactScan.cmake", "release_artifact_forbidden.json"})
+            fs::copy_file(fs::path(PULP_SOURCE_DIR) / "tools" / "cmake" / file,
+                          root / "tools" / "cmake" / file, fs::copy_options::overwrite_existing);
+        return root;
+    };
+    auto plant_linux_marker = [](const fs::path& bundle, std::string_view marker) {
+        const auto executable = bundle / "Contents" / "plugin";
+        std::error_code ec;
+        fs::copy_file("/bin/true", executable, fs::copy_options::overwrite_existing, ec);
+        REQUIRE_FALSE(ec);
+        std::ofstream out(executable, std::ios::binary | std::ios::app);
+        REQUIRE(out.good());
+        out << "\n" << marker << "\n";
+    };
+
+    auto dirty = make_scannable_linux_project("package-linux-artifact-scan-dirty");
+    auto dirty_bundle = make_fake_bundle(dirty, "VST3", "Leaky.vst3");
+    plant_linux_marker(dirty_bundle, "PULP_SKP_CAPTURE_DIR");
+    auto refused = run_pulp_in(dirty, {"ship", "package", "--version", "1.0.0"}, 60000);
+    INFO(refused.stdout_output << refused.stderr_output);
+    REQUIRE_FALSE(refused.timed_out);
+    REQUIRE(refused.exit_code == 1);
+    REQUIRE(contains(refused.stderr_output, "forbidden release marker"));
+    REQUIRE(fs::is_empty(dirty / "artifacts"));
+    fs::remove_all(dirty);
+
+    auto clean = make_scannable_linux_project("package-linux-artifact-scan-clean");
+    make_fake_bundle(clean, "VST3", "Clean.vst3");
+    auto packaged = run_pulp_in(clean, {"ship", "package", "--version", "1.0.0"}, 60000);
+    INFO(packaged.stdout_output << packaged.stderr_output);
+    REQUIRE_FALSE(packaged.timed_out);
+    REQUIRE(packaged.exit_code == 0);
+    fs::remove_all(clean);
+
+    auto overridden = make_scannable_linux_project("package-linux-artifact-scan-override");
+    auto override_bundle = make_fake_bundle(overridden, "VST3", "Leaky.vst3");
+    plant_linux_marker(override_bundle, "PULP_SKP_CAPTURE_DIR");
+    auto bypassed = run_pulp_in(
+        overridden, {"ship", "package", "--version", "1.0.0", "--skip-artifact-scan"}, 60000);
+    INFO(bypassed.stdout_output << bypassed.stderr_output);
+    REQUIRE_FALSE(bypassed.timed_out);
+    REQUIRE(bypassed.exit_code == 0);
+    fs::remove_all(overridden);
+}
 #endif
 
 // macOS authoring item 7.5: per-artifact .pkg / .dmg
