@@ -1,0 +1,49 @@
+{
+  "id": "install-consumer-release-profile",
+  "title": "Install consumer smoke configures its SDK through PULP_PROFILE=release",
+  "classification": "ci_test_only",
+  "delivery_state": "pending",
+  "claim_id": "install-consumer-release-profile-20261026",
+  "owned_paths": [
+    ".github/workflows/install-consumer-smoke.yml",
+    "docs/status/sequencer-exposure/rows/install-consumer-release-profile.json"
+  ],
+  "evidence": [
+    {
+      "path": ".github/workflows/install-consumer-smoke.yml",
+      "needles": [
+        "-DPULP_PROFILE=release",
+        "tools/ci/governed-build.sh cmake --build build"
+      ]
+    },
+    {
+      "path": "tools/scripts/test_release_workflow_test_step.py",
+      "needles": [
+        "class EveryReleaseSiteConfiguresThroughTheProfile",
+        "\"install-consumer-smoke.yml\": INSTALL_CONSUMER_SMOKE"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "This CI configure change swaps hand-picked release flags for the release profile; it changes no sequencer CLI, MCP, live control, or design-time agent surface."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "This CI configure change swaps hand-picked release flags for the release profile; it changes no sequencer CLI, MCP, live control, or design-time agent surface."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "This CI configure change swaps hand-picked release flags for the release profile; it changes no sequencer CLI, MCP, live control, or design-time agent surface."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "This CI configure change swaps hand-picked release flags for the release profile; it changes no sequencer CLI, MCP, live control, or design-time agent surface."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "This CI configure change swaps hand-picked release flags for the release profile; it changes no sequencer CLI, MCP, live control, or design-time agent surface."
+    }
+  }
+}

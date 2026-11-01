@@ -12,10 +12,10 @@ namespace pulp::cli::local_sdk {
 namespace fs = std::filesystem;
 
 // A profile revision moves whenever the archive contract or the provenance
-// text changes (most recently: the shell exec/execAsync JS bridge is compiled
-// out and recorded as `features.bridge_exec`), so a prefix built under the old
-// contract keeps its own fingerprint instead of being mistaken for the new one.
-inline constexpr int kForgeProfileRevision = 3;
+// text changes (most recently: the configure is pinned to PULP_PROFILE=dev and
+// recorded as `build_profile`), so a prefix built under the old contract keeps
+// its own fingerprint instead of being mistaken for the new one.
+inline constexpr int kForgeProfileRevision = 4;
 inline constexpr const char* kForgeProfileName = "forge-dev";
 
 // The tracing profile: the forge-dev feature set plus Perfetto compiled in.
@@ -25,9 +25,13 @@ inline constexpr const char* kForgeProfileName = "forge-dev";
 // shipped — and because the two must not collide at one prefix. A prefix whose
 // name promises tracing while its libraries contain none is the exact failure
 // this profile exists to make impossible.
-inline constexpr int kTraceProfileRevision = 2;
+inline constexpr int kTraceProfileRevision = 3;
 inline constexpr const char* kTraceProfileName = "trace";
 inline constexpr const char* kProvenanceSchema = "pulp.sdk-provenance.v1";
+// Both profiles are development SDKs: they keep design import and the GPU on
+// and are never distributable, so they configure under the dev profile and say
+// so, rather than borrowing the release profile's enforced set.
+inline constexpr const char* kBuildProfile = "dev";
 
 struct Identity {
     // Perfetto tracing compiled in. Part of the identity, not a side channel:
