@@ -6,6 +6,24 @@ existing graph library, kit fixtures, validation, prepared edits, offline
 rendering, diagnostics, and bake tooling. It does not introduce another graph
 runtime or a second control authority.
 
+## Start here
+
+| If you are trying to… | Start with… | Finish by proving… |
+|---|---|---|
+| Build fixed DSP or voice logic | [Processing models](../reference/processing-models.md) and `Processor` | Processor lifecycle and audio output tests |
+| Learn the graph vocabulary | [Signal Graph Reference](../reference/signal-graph.md) | A small graph that loads, prepares, and renders |
+| Study a complete example | [Sample granular graphs](sample-granular-graphs.md) | The example's structural and executable receipts |
+| Build editable routing or hosted composition | [Choose the graph boundary](#choose-the-graph-boundary) | A prepared graph and one executable render |
+| Turn an authored or generated graph into audio | [Load and validate before preparation](#load-and-validate-before-preparation) | Limits, preparation, partition contract, and output receipt |
+| Change a running graph | [Prepare and publish a safe edit](#prepare-and-publish-a-safe-edit) | Valid edit acceptance and invalid edit rollback |
+| Diagnose or reproduce a graph | [Inspect and diagnose](#inspect-and-diagnose) | Semantic receipt, generation receipt, diagnostics, and audio artifact |
+| Automate graph work as an agent | [Agent and Forge acceptance workflow](#agent-and-forge-acceptance-workflow) | One deterministic fixture with positive and negative controls |
+
+Humans can read the sections top to bottom. Agents should use the table as a
+dispatch map, then follow the selected section and record the artifacts named
+there. The [capability matrix](../reference/signal-graph-capabilities.md) is the
+compact status view; this guide is the operational sequence.
+
 ## Choose the graph boundary
 
 Start with [Processing models](../reference/processing-models.md). Keep fixed
