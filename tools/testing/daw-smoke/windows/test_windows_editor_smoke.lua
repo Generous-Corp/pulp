@@ -2,17 +2,19 @@
 -- controlled host; it never starts a DAW. argv[1]=driver, argv[2]=existing tempdir.
 local driver=assert(arg[1]);local root=assert(arg[2]):gsub('\\','/')..'/'
 local original_getenv=os.getenv
-local function run(name,index,ignore_write,no_editor,window_format)
+local original_rename=os.rename
+local function run(name,index,ignore_write,no_editor,window_format,block_publish)
   local env={PULP_DAW_SMOKE_FX='VST3: Fixture',PULP_DAW_SMOKE_STATUS=root..name..'.status',
     PULP_DAW_SMOKE_TOKEN=name,PULP_DAW_SMOKE_PROJECT=root..name..'.rpp',
     PULP_DAW_SMOKE_PARAM_INDEX=tostring(index),PULP_DAW_SMOKE_DURATION='1'}
   os.getenv=function(k) return env[k] or original_getenv(k) end
+  os.rename=block_publish and function() return false end or original_rename
   local now=0;local pending;local value=0;local shown=false
   reaper={
     CountTracks=function() return 0 end,InsertTrackAtIndex=function() end,
     GetTrack=function() return {} end,TrackFX_AddByName=function() return 0 end,
     TrackFX_GetNumParams=function() return 1 end,
-    TrackFX_Show=function() shown=true end,TrackFX_GetFloatingWindow=function() return not no_editor and (window_format or 'userdata: 0x1234') or nil end,time_precise=function() return now end,
+    TrackFX_Show=function() shown=true end,TrackFX_GetFloatingWindow=function() return not no_editor and (window_format or 'userdata: 0x1234') or nil end,time_precise=function() if block_publish then now=now+0.1 end return now end,
     TrackFX_SetParamNormalized=function(_,_,_,v) if not ignore_write then value=v end end,
     TrackFX_GetParamNormalized=function() return value end,
     Main_SaveProjectEx=function(_,p) local f=assert(io.open(p,'w'));f:write('fixture');f:close() end,
@@ -48,5 +50,10 @@ end
 for _,case in ipairs({{'null_pointer','userdata: 0000000000000000'}, {'arbitrary_pointer','garbage 1234'}}) do
   s=run(case[1],-1,false,false,case[2]);assert(s.error=='FLOATING_EDITOR_ABSENT',case[1]..' was accepted')
 end
+-- A terminal publication that can never replace the status file must surface
+-- as STATUS_PUBLISH_TIMEOUT rather than silently dropping EDITOR_READY.
+local ok,err=pcall(run,'blocked_publish',-1,false,false,nil,true)
+os.rename=original_rename
+assert(not ok and tostring(err):find('STATUS_PUBLISH_TIMEOUT',1,true),'terminal publication failure was swallowed')
 os.getenv=original_getenv
 print('PASS: driver terminal, no-automation, ignored-write, invalid-index and absent-editor controls; product runtime NOT EVALUATED')

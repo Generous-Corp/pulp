@@ -54,31 +54,17 @@ local fx = reaper.TrackFX_AddByName(tr,fx_name,false,-1)
 if fx < 0 then fail('FX_NOT_FOUND');return end
 fields.param_count = reaper.TrackFX_GetNumParams(tr,fx)
 if param_index >= fields.param_count then fail('PARAM_INDEX_OUT_OF_RANGE');return end
-reaper.TrackFX_Show(tr,fx,3)
-local window=reaper.TrackFX_GetFloatingWindow(tr,fx)
--- Lua/REAPER pointer formatting differs by CRT: Windows commonly omits 0x.
--- Accept explicit userdata/HWND hexadecimal forms, never arbitrary text.
-local window_text=tostring(window)
-local window_hex=window_text:match('^userdata:%s*0[xX](%x+)$')
-  or window_text:match('^userdata:%s*(%x+)$')
-  or window_text:match('^%(HWND%*%)%s*0[xX](%x+)$')
-  or window_text:match('^%(HWND%*%)%s*(%x+)$')
-local window_number=type(window)=='number' and window or (window_hex and tonumber(window_hex,16))
-if not window_number or window_number<=0 or window_number~=math.floor(window_number)
-  or window_number>9007199254740991 then fail('FLOATING_EDITOR_ABSENT');return end
-fields.editor_hwnd=string.format('%.0f',window_number)
-fields.fx_shown=1;fields.phase='EDITOR_SHOWN';status()
-if param_index < 0 then
-  reaper.Main_SaveProjectEx(0,project_path,8)
-  fields.state_saved=project_path;fields.phase='EDITOR_READY';status(true);return
-end
-local started=reaper.time_precise()
+fields.fx_inserted=1;fields.phase='FX_INSERTED';status()
+local probe_gate=os.getenv('PULP_DAW_SMOKE_PROBE_GATE')
+local editor_ready=false
+local started=nil
 local previous=nil
 local last_sample=-1
 local function pump()
+  if not editor_ready then reaper.defer(pump);return end
   local elapsed=reaper.time_precise()-started
   if elapsed>=duration then
-    reaper.Main_SaveProjectEx(0,project_path,8)
+    reaper.Main_SaveProjectEx(0,project_path,0)
     fields.state_saved=project_path;fields.phase='AUTOMATION_DONE';status(true);return
   end
   if elapsed-last_sample>=0.05 then
@@ -94,4 +80,37 @@ local function pump()
   end
   reaper.defer(pump)
 end
+local function show_editor()
+reaper.TrackFX_Show(tr,fx,3)
+local window=reaper.TrackFX_GetFloatingWindow(tr,fx)
+-- Lua/REAPER pointer formatting differs by CRT: Windows commonly omits 0x.
+-- Accept explicit userdata/HWND hexadecimal forms, never arbitrary text.
+local window_text=tostring(window)
+local window_hex=window_text:match('^userdata:%s*0[xX](%x+)$')
+  or window_text:match('^userdata:%s*(%x+)$')
+  or window_text:match('^%(HWND%*%)%s*0[xX](%x+)$')
+  or window_text:match('^%(HWND%*%)%s*(%x+)$')
+local window_number=type(window)=='number' and window or (window_hex and tonumber(window_hex,16))
+if not window_number or window_number<=0 or window_number~=math.floor(window_number)
+  or window_number>9007199254740991 then fail('FLOATING_EDITOR_ABSENT');return end
+fields.editor_hwnd=string.format('%.0f',window_number)
+fields.fx_shown=1;fields.phase='EDITOR_SHOWN';status()
+if param_index < 0 then
+  reaper.Main_SaveProjectEx(0,project_path,0)
+  fields.state_saved=project_path;fields.phase='EDITOR_READY';status(true);return
+end
+started=reaper.time_precise();editor_ready=true
 reaper.defer(pump)
+end
+if probe_gate then
+  local gate_started=reaper.time_precise()
+  local function wait_probe()
+    local f=io.open(probe_gate,'r')
+    if f then f:close();show_editor();return end
+    if reaper.time_precise()-gate_started>60 then fail('MODULE_PROBE_GATE_TIMEOUT');return end
+    reaper.defer(wait_probe)
+  end
+  reaper.defer(wait_probe)
+else
+  show_editor()
+end
