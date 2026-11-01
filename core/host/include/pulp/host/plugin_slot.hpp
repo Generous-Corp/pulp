@@ -22,6 +22,7 @@
 #include <string>
 #include <vector>
 #include <functional>
+#include <cstdint>
 
 namespace pulp::host {
 
@@ -90,6 +91,13 @@ using ParamRate = state::ParamRate;
 
 class PluginSlot {
 public:
+    // Result of the most recent audio block. A slot reports this through an
+    // audio-thread-safe latch so the graph executor can contain a plugin that
+    // rejects a block without changing the existing void process ABI. The
+    // status is diagnostic/executor control only; each format retains its
+    // explicit output fallback policy.
+    enum class ProcessStatus : std::uint8_t { ok, failed };
+
     virtual ~PluginSlot() = default;
 
     // Load a plugin from a PluginInfo descriptor.
@@ -117,6 +125,16 @@ public:
                          midi::MidiBuffer& midi_out,
                          const ParameterEventQueue& param_events,
                          int num_samples) = 0;
+
+    // Called by the graph executor immediately before a routed block. Existing
+    // slots need no override. Format adapters may clear an audio-thread-owned
+    // status latch here; process() also clears it at its own entry so direct
+    // callers get the same per-block semantics.
+    virtual void begin_process() noexcept {}
+
+    // Status for the most recent process block. Implementations must use an
+    // allocation-free, lock-free read suitable for the audio thread.
+    virtual ProcessStatus process_status() const noexcept { return ProcessStatus::ok; }
 
     // Parameters
     virtual std::vector<HostParamInfo> parameters() const = 0;

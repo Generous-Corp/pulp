@@ -32,6 +32,7 @@ struct FakePortPlugin {
     uint32_t in_channels = 1;
     uint32_t out_channels = 1;
     bool ports_declared = true;
+    bool reject_process = false;
 
     clap_plugin_t plugin{};
     clap_plugin_audio_ports_t audio_ports{};
@@ -59,8 +60,10 @@ bool CLAP_ABI fake_start_processing(const clap_plugin_t*) { return true; }
 void CLAP_ABI fake_stop_processing(const clap_plugin_t*) {}
 void CLAP_ABI fake_reset(const clap_plugin_t*) {}
 clap_process_status CLAP_ABI fake_process(const clap_plugin_t*, const clap_process_t*) {
-    return CLAP_PROCESS_CONTINUE;
+    return g_fake != nullptr && g_fake->reject_process ? CLAP_PROCESS_ERROR
+                                                       : CLAP_PROCESS_CONTINUE;
 }
+
 void CLAP_ABI fake_on_main_thread(const clap_plugin_t*) {}
 
 const void* CLAP_ABI fake_get_extension(const clap_plugin_t*, const char* id) {
@@ -90,6 +93,31 @@ std::unique_ptr<PluginSlot> slot_for(FakePortPlugin& fake) {
     return pulp::host::make_clap_slot(info, [&fake](const clap_host_t*) {
         return &fake.plugin;
     });
+}
+
+TEST_CASE("CLAP process rejection is exposed through the slot status latch",
+          "[host][clap][failure]") {
+    FakePortPlugin fake;
+    fake.reject_process = true;
+    auto slot = slot_for(fake);
+    REQUIRE(slot != nullptr);
+    REQUIRE(slot->prepare(48000.0, 64));
+
+    std::vector<float> in_samples(16, 0.25f);
+    std::vector<float> out_samples(16, 0.0f);
+    std::array<const float*, 1> in_ptrs{in_samples.data()};
+    std::array<float*, 1> out_ptrs{out_samples.data()};
+    pulp::audio::BufferView<const float> input(in_ptrs.data(), 1, 16);
+    pulp::audio::BufferView<float> output(out_ptrs.data(), 1, 16);
+    pulp::midi::MidiBuffer midi_in;
+    pulp::midi::MidiBuffer midi_out;
+    pulp::host::ParameterEventQueue params;
+    slot->process(output, input, midi_in, midi_out, params, 16);
+    CHECK(slot->process_status() == PluginSlot::ProcessStatus::failed);
+
+    fake.reject_process = false;
+    slot->process(output, input, midi_in, midi_out, params, 16);
+    CHECK(slot->process_status() == PluginSlot::ProcessStatus::ok);
 }
 
 }  // namespace

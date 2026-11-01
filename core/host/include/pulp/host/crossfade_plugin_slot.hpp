@@ -80,6 +80,18 @@ public:
         blend_old_into_(output, input, num_samples);
     }
 
+    void begin_process() noexcept override {
+        new_slot_->begin_process();
+        if (old_slot_) old_slot_->begin_process();
+    }
+
+    ProcessStatus process_status() const noexcept override {
+        if (new_slot_->process_status() == ProcessStatus::failed ||
+            (old_slot_ && old_slot_->process_status() == ProcessStatus::failed))
+            return ProcessStatus::failed;
+        return ProcessStatus::ok;
+    }
+
     void process(format::ProcessBuffers& audio,
                  const midi::MidiBuffer& midi_in,
                  midi::MidiBuffer& midi_out,

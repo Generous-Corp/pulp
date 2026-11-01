@@ -226,6 +226,7 @@ public:
                  midi::MidiBuffer& midi_out,
                  const ParameterEventQueue& param_events,
                  int num_samples) override {
+        begin_process();
         if (!plugin_ || !processing_ || bypassed_.load(std::memory_order_relaxed)) {
             copy_or_zero(output, input, num_samples);
             return;
@@ -376,9 +377,18 @@ public:
 
         auto status = plugin_->process(plugin_, &p);
         if (status == CLAP_PROCESS_ERROR) {
+            process_status_.store(ProcessStatus::failed, std::memory_order_release);
             runtime::log_warn("ClapSlot: process returned ERROR for '{}'", info_.name);
         }
         steady_time_ += num_samples;
+    }
+
+    void begin_process() noexcept override {
+        process_status_.store(ProcessStatus::ok, std::memory_order_release);
+    }
+
+    ProcessStatus process_status() const noexcept override {
+        return process_status_.load(std::memory_order_acquire);
     }
 
     std::vector<HostParamInfo> parameters() const override { return params_; }
@@ -667,6 +677,7 @@ public:
     }
 
 private:
+    std::atomic<ProcessStatus> process_status_{ProcessStatus::ok};
     /// Tear the plugin's gui down: hide, then destroy. Leaves the container
     /// alone — see close_editor(). Idempotent.
     void destroy_gui() {
