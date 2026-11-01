@@ -640,6 +640,37 @@ TEST_CASE("canvasDrawImage and setMaskImage hold url() and paths to the reviewed
     REQUIRE(mask("url(" + escaped + ")") == "url(\"" + escaped + "\")");
 }
 
+TEST_CASE("canvas patterns hold image paths to the reviewed roots",
+          "[view][bridge][assets][security]") {
+    AssetPathRig rig;
+    rig.bridge.set_script_base_dir(rig.script_dir);
+    const auto inside =
+        (rig.script_dir / "assets" / "hero.png").lexically_normal().generic_string();
+    const auto escaped = (rig.outside / "secret.png").generic_string();
+    rig.engine.evaluate("createCanvas('cv', '');");
+    auto* canvas = dynamic_cast<CanvasWidget*>(rig.bridge.widget("cv"));
+    REQUIRE(canvas != nullptr);
+
+    const auto pattern = [&](const std::string& fn, const std::string& src) {
+        canvas->clear_commands();
+        rig.engine.evaluate(fn + "('cv', '" + src + "', 'repeat', 'repeat')");
+        REQUIRE(canvas->commands().size() == 1);
+        return canvas->commands().front().text;
+    };
+    for (const std::string fn : {"canvasSetFillPattern", "canvasSetStrokePattern"}) {
+        CAPTURE(fn);
+        CHECK(pattern(fn, "assets/hero.png") == inside);
+        CHECK(pattern(fn, escaped).empty());
+        CHECK(pattern(fn, "file://" + escaped).empty());
+        CHECK(pattern(fn, "../outside/secret.png").empty());
+        CHECK(pattern(fn, "data:image/png;base64,AAAA") == "data:image/png;base64,AAAA");
+    }
+
+    // Control: the host opt-in admits the outside file.
+    rig.bridge.set_allow_unreviewed_file_paths(true);
+    CHECK(pattern("canvasSetFillPattern", escaped) == escaped);
+}
+
 TEST_CASE("bridge path APIs apply the per-file read ceiling", "[view][bridge][assets][security]") {
     AssetPathRig rig;
     rig.bridge.set_script_base_dir(rig.script_dir);
