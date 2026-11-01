@@ -1,4 +1,5 @@
 #include "../examples/cv-control/cv_control.hpp"
+#include "../examples/cv-control/cv_control_processor.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/osc/osc.hpp>
 #include <variant>
