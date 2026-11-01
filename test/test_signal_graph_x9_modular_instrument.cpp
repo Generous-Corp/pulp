@@ -286,6 +286,54 @@ TEST_CASE("X9 live and offline rendering agree for the same event and input",
     require_equal_buffer(live_output, offline_output);
 }
 
+TEST_CASE("X9 routes named aux and master stages through a live graph",
+          "[host][graph][x9][routing][mutation]") {
+    SignalGraph graph;
+    const auto input = graph.add_input_node(2, "Voice Bus");
+    const auto aux = graph.add_gain_node("Aux Bus");
+    const auto master = graph.add_gain_node("Master Bus");
+    const auto output = graph.add_output_node(2, "Master Output");
+    REQUIRE(input != 0);
+    REQUIRE(aux != 0);
+    REQUIRE(master != 0);
+    REQUIRE(output != 0);
+    for (int channel = 0; channel < 2; ++channel) {
+        REQUIRE(graph.connect(input, channel, aux, channel));
+        REQUIRE(graph.connect(aux, channel, master, channel));
+        REQUIRE(graph.connect(master, channel, output, channel));
+    }
+    REQUIRE(graph.set_node_gain(aux, 0.5f));
+    REQUIRE(graph.set_node_gain(master, 0.5f));
+    REQUIRE(graph.prepare(kSampleRate, kBlockSize));
+
+    Buffer<float> input_buffer(2, kBlockSize);
+    std::fill(input_buffer.channel(0).begin(), input_buffer.channel(0).end(), 1.0f);
+    std::fill(input_buffer.channel(1).begin(), input_buffer.channel(1).end(), -1.0f);
+    Buffer<float> baseline(2, kBlockSize);
+    auto baseline_view = baseline.view();
+    const auto input_view = std::as_const(input_buffer).view();
+    graph.process(baseline_view, input_view, kBlockSize);
+    for (std::size_t frame = 0; frame < kBlockSize; ++frame) {
+        REQUIRE(baseline.channel(0)[frame] == 0.25f);
+        REQUIRE(baseline.channel(1)[frame] == -0.25f);
+    }
+
+    const auto encoded = pulp::host::GraphSerializer::to_json(graph);
+    REQUIRE(encoded.find("Aux Bus") != std::string::npos);
+    REQUIRE(encoded.find("Master Bus") != std::string::npos);
+
+    // Gain edits are live control changes on the named route and do not require
+    // replacing the graph or introducing another routing model.
+    REQUIRE(graph.set_node_gain(aux, 0.75f));
+    Buffer<float> changed(2, kBlockSize);
+    auto changed_view = changed.view();
+    graph.process(changed_view, input_view, kBlockSize);
+    for (std::size_t frame = 0; frame < kBlockSize; ++frame) {
+        REQUIRE(changed.channel(0)[frame] == 0.375f);
+        REQUIRE(changed.channel(1)[frame] == -0.375f);
+    }
+}
+
 TEST_CASE("X9 public APIs compose a modular instrument through a live graph",
           "[host][graph][x9][midi][modulation][state][offline]") {
     ModularInstrument fixture;
