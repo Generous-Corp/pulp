@@ -551,6 +551,10 @@ class SignalGraph : public format::AudioWorkgroupClient {
     /// requested block size.
     using RoutedExecutionStatus = SignalGraphExecutionStatus;
     RoutedExecutionStatus routed_execution_status(int block_size) const noexcept;
+    /// Number of blocks made silent because routed processing failed, including
+    /// a hosted node rejection, or because a routed-only lease had no usable
+    /// compiled path. Setup-only routing fallback is tracked separately by
+    /// routed_walk_fallbacks().
     std::uint64_t routed_only_execution_failures() const noexcept {
         return routed_only_execution_failures_.load(std::memory_order_relaxed);
     }
@@ -1355,6 +1359,8 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // dispatch and process() fell back to the walk. Audio-thread writer only.
     std::atomic<std::uint64_t> routed_walk_fallbacks_{0};
     std::atomic<std::uint32_t> routed_only_execution_owners_{0};
+    // Audio-thread writer only: terminal routed processing failures and routed-only
+    // lease failures that produce a deterministic silent block.
     std::atomic<std::uint64_t> routed_only_execution_failures_{0};
     // See transport_suppressed_for_anticipation(): set by compile_() to the count
     // of transport-sensitive nodes that active anticipation forced exterior
