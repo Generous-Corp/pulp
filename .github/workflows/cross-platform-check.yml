@@ -342,6 +342,10 @@ jobs:
         with:
           lfs: false
 
+      - name: Windows DAW-smoke harness fixture controls
+        shell: powershell
+        run: ./tools/testing/daw-smoke/windows/test_windows_editor_smoke.ps1
+
       - name: Hydrate bounded GPU provenance commits
         shell: bash
         run: python3 tools/scripts/hydrate_gpu_provenance_commits.py
