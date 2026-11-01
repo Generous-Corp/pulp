@@ -17,16 +17,20 @@
 
 #include <dlfcn.h>
 #include <elf.h>
-#include <sys/wait.h>
-#include <unistd.h>
 
+#include <pulp/platform/child_process.hpp>
+
+#include <chrono>
 #include <cstdint>
+#include <csignal>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <set>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -127,41 +131,67 @@ std::string joined(const Listing& listing) {
     return s.empty() ? "(none)" : s;
 }
 
-// Runs one load scenario in a child process; the child writes one listing
-// line per image to the pipe.
+int scenario_child(const std::string& format, const std::vector<const char*>& paths, int mode) {
+    std::vector<Listing> listings(paths.size());
+    std::vector<void*> handles(paths.size());
+    for (std::size_t i = 0; i < paths.size(); ++i) {
+        if (!load_and_list(format, paths[i], mode, &handles[i], listings[i]))
+            return 3;
+    }
+    for (const auto& listing : listings)
+        std::puts(joined(listing).c_str());
+    return 0;
+}
+
+// Runs one load scenario in a child process with a wall-clock bound. A
+// malformed plug-in may crash or stop answering while its factory is queried;
+// the parent must report that outcome instead of waiting forever.
 bool scenario(const std::string& format, const std::vector<const char*>& paths, int mode,
               std::vector<std::string>& lines) {
-    int fds[2];
-    if (pipe(fds) != 0)
+    std::error_code ec;
+    const auto self = std::filesystem::read_symlink("/proc/self/exe", ec);
+    if (ec || self.empty())
         return false;
-    pid_t pid = fork();
-    if (pid == 0) {
-        close(fds[0]);
-        std::vector<Listing> listings(paths.size());
-        std::vector<void*> handles(paths.size());
-        for (std::size_t i = 0; i < paths.size(); ++i)
-            if (!load_and_list(format, paths[i], mode, &handles[i], listings[i]))
-                _exit(3);
-        std::string text;
-        for (const auto& l : listings)
-            text += joined(l) + "\n";
-        (void)!write(fds[1], text.data(), text.size());
-        _exit(0);
-    }
-    close(fds[1]);
-    std::string text;
-    char buf[4096];
-    for (ssize_t n; (n = read(fds[0], buf, sizeof buf)) > 0;)
-        text.append(buf, static_cast<std::size_t>(n));
-    close(fds[0]);
-    int status = 0;
-    waitpid(pid, &status, 0);
-    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+
+    std::vector<std::string> args{"--scenario-child", format,
+                                  mode == RTLD_GLOBAL ? "global" : "local"};
+    for (const char* path : paths)
+        args.emplace_back(path);
+    pulp::platform::ProcessOptions options;
+    options.timeout_ms = 5000;
+    options.max_output_bytes = 64u << 10;
+    const auto result = pulp::platform::ChildProcess::run(self.string(), args, options);
+    if (result.timed_out || result.output_limit_exceeded || result.exit_code != 0)
         return false;
+
     lines.clear();
-    for (std::size_t at = 0, nl; (nl = text.find('\n', at)) != std::string::npos; at = nl + 1)
-        lines.push_back(text.substr(at, nl - at));
+    for (std::size_t at = 0, nl; (nl = result.stdout_output.find('\n', at)) != std::string::npos;
+         at = nl + 1)
+        lines.push_back(result.stdout_output.substr(at, nl - at));
     return lines.size() == paths.size();
+}
+
+bool process_boundary_controls() {
+    std::error_code ec;
+    const auto self = std::filesystem::read_symlink("/proc/self/exe", ec);
+    if (ec || self.empty())
+        return false;
+
+    pulp::platform::ProcessOptions hang_options;
+    hang_options.timeout_ms = 100;
+    const auto hang = pulp::platform::ChildProcess::run(
+        self.string(), {"--isolation-control", "hang"}, hang_options);
+    const bool bounded_hang = hang.timed_out && hang.exit_code < 0;
+
+    pulp::platform::ProcessOptions crash_options;
+    crash_options.timeout_ms = 1000;
+    const auto crash = pulp::platform::ChildProcess::run(
+        self.string(), {"--isolation-control", "crash"}, crash_options);
+    const bool contained_crash = !crash.timed_out && crash.exit_code < 0;
+
+    std::printf("boundary: hang=%s crash=%s\n", bounded_hang ? "contained" : "FAIL",
+                contained_crash ? "contained" : "FAIL");
+    return bounded_hang && contained_crash;
 }
 
 // Defined GLOBAL/WEAK default- or protected-visibility names in .dynsym.
@@ -197,6 +227,26 @@ bool dynamic_exports(const char* path, std::set<std::string>& out) {
 } // namespace
 
 int main(int argc, char** argv) {
+    if (argc >= 2 && std::string(argv[1]) == "--isolation-control") {
+        if (argc != 3)
+            return 2;
+        if (std::string(argv[2]) == "hang") {
+            std::this_thread::sleep_for(std::chrono::seconds(30));
+            return 0;
+        }
+        if (std::string(argv[2]) == "crash") {
+            std::raise(SIGABRT);
+            return 3;
+        }
+        return 2;
+    }
+    if (argc >= 5 && std::string(argv[1]) == "--scenario-child") {
+        const int mode = std::string(argv[3]) == "global" ? RTLD_GLOBAL : RTLD_LOCAL;
+        std::vector<const char*> paths;
+        for (int i = 4; i < argc; ++i)
+            paths.push_back(argv[i]);
+        return scenario_child(argv[2], paths, mode);
+    }
     if (argc < 4) {
         std::fprintf(stderr, "usage: %s <clap|vst3|lv2> <A> <B> <allowed-export>...\n", argv[0]);
         return 2;
@@ -206,6 +256,11 @@ int main(int argc, char** argv) {
     const char* b = argv[3];
     const std::set<std::string> allowed(argv + 4, argv + argc);
     int failures = 0;
+
+    if (!process_boundary_controls()) {
+        std::fprintf(stderr, "FAIL child-process crash/hang boundary control\n");
+        ++failures;
+    }
 
     std::vector<std::string> alone_a, alone_b, lines;
     if (!scenario(format, {a}, RTLD_LOCAL, alone_a) ||
