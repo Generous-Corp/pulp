@@ -53,7 +53,12 @@ $tracePathRestored=$false
 function Stop-Owned($Entry) {
   if ($Entry.process.HasExited) { return }
   Assert-OwnedIdentity $Entry.process $Entry.started
-  $Entry.process.Kill(); $Entry.process.WaitForExit(5000) | Out-Null
+  $Entry.process.Kill()
+  if (-not $Entry.process.WaitForExit(10000)) { throw 'Owned REAPER warm process did not exit before scripted launch' }
+  # Windows can release redirected handles just after WaitForExit returns.
+  # Give the profile/output handles one bounded scheduler turn to close before
+  # Start-Process opens the scripted run's redirected files.
+  Start-Sleep -Milliseconds 250
 }
 function Start-Owned([string[]]$Arguments,[string]$Label) {
   $command=Join-WindowsArguments $Arguments
