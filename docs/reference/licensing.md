@@ -158,7 +158,7 @@ permissions, and lifecycle. Pulp does not bundle, fetch, link, or redistribute
 those provider implementations, and they do not add rows to `NOTICE.md`,
 `DEPENDENCIES.md`, or the dependency manifest.
 
-The contract is documented in the [External Inputs guide](../guides/external-inputs.md).
+The contract is documented in the [Real-World Inputs guide](../guides/real-world-inputs.md).
 It is experimental and provider-neutral; values carry application-defined
 meaning and are validated by `pulp::runtime::ExternalInputGate`.
 
