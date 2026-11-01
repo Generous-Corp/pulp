@@ -9,6 +9,19 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1410"></a>
+## [1.41.0] - 2026-11-01
+
+- release/version bump ([#11384](https://github.com/Generous-Corp/pulp/pull/11384))
+- codex/x9 closure controls refresh 20261101 ([#11380](https://github.com/Generous-Corp/pulp/pull/11380))
+- feat/real world inputs t2 ([#11361](https://github.com/Generous-Corp/pulp/pull/11361))
+- codex/r3r4 atomic block 20261101 ([#11379](https://github.com/Generous-Corp/pulp/pull/11379))
+- feature/attack surface ship artifact scan 20261027 ([#11198](https://github.com/Generous-Corp/pulp/pull/11198))
+- codex/x9 expressiveness 20261101 ([#11378](https://github.com/Generous-Corp/pulp/pull/11378))
+- codex/audio graph final docs 20261101 ([#11377](https://github.com/Generous-Corp/pulp/pull/11377))
+- test/x4 graph fixture ([#11375](https://github.com/Generous-Corp/pulp/pull/11375))
+- feat/real world inputs t8 ([#11369](https://github.com/Generous-Corp/pulp/pull/11369))
+
 <a id="v1400"></a>
 ## [1.40.0] - 2026-11-01
 
@@ -12015,6 +12028,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.41.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.41.0
 [1.40.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.40.0
 [1.39.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.39.0
 [1.38.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.38.0
