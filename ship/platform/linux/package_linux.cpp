@@ -95,21 +95,22 @@ bool run_tar(const std::string& build_dir, const std::string& output_path,
              const std::vector<std::string>& members) {
     if (members.empty())
         return false;
-    std::string cmd = "tar czf \"" + output_path + "\" -C \"" + build_dir + "\"";
-    for (auto& m : members)
-        cmd += " \"" + m + "\"";
-    return exec_status(cmd) == 0;
+    std::vector<std::string> args = {"czf", output_path, "-C", build_dir, "--"};
+    args.insert(args.end(), members.begin(), members.end());
+    return pulp::platform::exec("tar", args, 60000).exit_code == 0;
 }
 
 } // namespace
 
 // Explicit-list packagers: ship exactly `bundles`. A bundle outside a
-// VST3/CLAP/LV2 directory fails; an empty list yields a metadata-only .deb and
-// fails for a tarball (nothing to archive).
+// VST3/CLAP/LV2 directory fails; an empty list fails. The whole-directory
+// overload below retains its separate metadata-only .deb behavior.
 bool create_deb(const std::string& plugin_name, const std::string& version,
                 const std::string& build_dir, const std::string& output_path,
                 const std::string& manufacturer, const std::vector<std::string>& bundles) {
     namespace fs = std::filesystem;
+    if (bundles.empty())
+        return false;
     for (auto& b : bundles)
         if (install_suffix(fs::path(b)).empty())
             return false;
