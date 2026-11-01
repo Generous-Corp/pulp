@@ -30,6 +30,10 @@ public:
     virtual void hide() = 0;
     virtual void repaint() = 0;
 
+    // Called once per event-loop iteration before a frame is painted.  The
+    // standalone bridge uses this for editor polling and settings updates.
+    virtual void set_idle_callback(std::function<void()> cb) = 0;
+
     // Run the event loop (blocks until window closed)
     virtual void run_event_loop() = 0;
 

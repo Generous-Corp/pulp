@@ -49,6 +49,10 @@ class SdlWindowHostAdapter final : public WindowHost {
         if (host_)
             host_->repaint();
     }
+    void set_idle_callback(std::function<void()> cb) override {
+        if (host_)
+            host_->set_idle_callback(std::move(cb));
+    }
     ContentSize get_content_size() const override {
         return size_;
     }

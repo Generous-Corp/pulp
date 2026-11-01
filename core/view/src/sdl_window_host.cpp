@@ -9,6 +9,13 @@
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/host_frame_pump.hpp>
 #include <SDL3/SDL.h>
+#ifdef PULP_HAS_SKIA
+#include <pulp/canvas/skia_canvas.hpp>
+#include "include/core/SkColorType.h"
+#include "include/core/SkImageInfo.h"
+#include "include/core/SkPixmap.h"
+#include "include/core/SkSurface.h"
+#endif
 #include <cstdint>  // uintptr_t (X11 Window id for outbound file drag)
 #include <string>
 #include <vector>
@@ -64,6 +71,9 @@ public:
     ~SdlWindowHostImpl() {
         root_.set_frame_clock(nullptr);
         shutdown_dispatcher();
+#ifdef PULP_HAS_SKIA
+        if (texture_) SDL_DestroyTexture(texture_);
+#endif
         if (renderer_) SDL_DestroyRenderer(renderer_);
         if (window_) SDL_DestroyWindow(window_);
         SDL_Quit();
@@ -79,6 +89,10 @@ public:
 
     void repaint() {
         needs_repaint_ = true;
+    }
+
+    void set_idle_callback(std::function<void()> cb) {
+        idle_callback_ = std::move(cb);
     }
 
     void set_close_callback(std::function<void()> cb) {
@@ -118,6 +132,34 @@ public:
                     case SDL_EVENT_WINDOW_EXPOSED:
                         needs_repaint_ = true;
                         break;
+                    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+                        if (event.button.button == SDL_BUTTON_LEFT) {
+                            drag_start_ = window_to_root(event.button.x, event.button.y);
+                            drag_active_ = true;
+                        }
+                        break;
+                    case SDL_EVENT_MOUSE_MOTION:
+                        if (drag_active_ && (event.motion.state & SDL_BUTTON_LMASK)) {
+                            root_.simulate_drag(
+                                drag_start_,
+                                window_to_root(event.motion.x, event.motion.y), 1);
+                            needs_repaint_ = true;
+                        }
+                        break;
+                    case SDL_EVENT_MOUSE_BUTTON_UP: {
+                        const auto point = window_to_root(event.button.x, event.button.y);
+                        View::SimulatedPointer pointer;
+                        pointer.button = event.button.button == SDL_BUTTON_RIGHT
+                                            ? MouseButton::right
+                                            : event.button.button == SDL_BUTTON_MIDDLE
+                                                  ? MouseButton::middle
+                                                  : MouseButton::left;
+                        root_.simulate_click(point, pointer);
+                        if (event.button.button == SDL_BUTTON_LEFT)
+                            drag_active_ = false;
+                        needs_repaint_ = true;
+                        break;
+                    }
                     // Native drag-and-drop. SDL3 abstracts Win OLE / Linux XDND
                     // (and macOS) into normalized drop events and delivers each
                     // dropped file as its own SDL_EVENT_DROP_FILE, bracketed by
@@ -178,6 +220,9 @@ public:
             // method calls on the exported View tree). Cheap when no assistive
             // tech is connected; a no-op on the sentinel handle.
             accessibility_pump(accessibility_handle_);
+
+            if (idle_callback_)
+                idle_callback_();
 
             // One measured dt per loop iteration, from SDL's monotonic
             // performance counter — never the 16 ms the delay below ASKS for
@@ -261,6 +306,7 @@ private:
     SDL_Window* window_ = nullptr;
     SDL_Renderer* renderer_ = nullptr;
     std::function<void()> close_callback_;
+    std::function<void()> idle_callback_;
     bool needs_repaint_ = false;
     FrameClock frame_clock_;
     // Measured-dt source for the loop (SDL_GetPerformanceCounter).
@@ -279,6 +325,8 @@ private:
     Point pending_drop_pos_{0, 0};
     // Per-window drop hover state (owned here, not a process global).
     DragSession drag_session_;
+    Point drag_start_{0, 0};
+    bool drag_active_ = false;
 
     struct DispatcherQueueState {
         mutable std::mutex mutex;
@@ -366,22 +414,61 @@ private:
         SDL_SetRenderDrawColor(renderer_, 30, 30, 46, 255);
         SDL_RenderClear(renderer_);
 
-        // For now, use RecordingCanvas to paint the view tree
-        // (real GPU rendering will use WebGPU canvas when Skia is integrated)
-        // The view tree layout and paint still work — just not visible on screen yet
-        // via SDL. The CoreGraphics path (WindowHost) handles visible rendering on macOS.
+#ifdef PULP_HAS_SKIA
+        // SDL is the Windows/Linux window and input transport.  Paint the real
+        // view tree into a CPU Skia surface, then upload those pixels to an SDL
+        // streaming texture.  RecordingCanvas is useful for tests, but it only
+        // records commands; using it here made the standalone show a blue
+        // diagnostic rectangle while the actual editor remained invisible.
+        const auto image_info = SkImageInfo::Make(
+            w, h, kBGRA_8888_SkColorType, kPremul_SkAlphaType);
+        auto surface = SkSurfaces::Raster(image_info);
+        if (!surface) {
+            SDL_SetRenderDrawColor(renderer_, 30, 30, 46, 255);
+            SDL_RenderClear(renderer_);
+            SDL_RenderPresent(renderer_);
+            return;
+        }
+        canvas::SkiaCanvas skia_canvas(surface->getCanvas());
+        root_.set_bounds({0, 0, static_cast<float>(w), static_cast<float>(h)});
+        root_.layout_children();
+        root_.paint_all(skia_canvas);
+        SkPixmap pixmap;
+        if (!surface->peekPixels(&pixmap)) {
+            SDL_RenderPresent(renderer_);
+            return;
+        }
+
+        if (!texture_ || texture_width_ != w || texture_height_ != h) {
+            if (texture_) SDL_DestroyTexture(texture_);
+            texture_ = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_BGRA32,
+                                         SDL_TEXTUREACCESS_STREAMING, w, h);
+            texture_width_ = w;
+            texture_height_ = h;
+        }
+        if (texture_) {
+            SDL_UpdateTexture(texture_, nullptr, pixmap.addr(),
+                              static_cast<int>(pixmap.rowBytes()));
+            SDL_RenderTexture(renderer_, texture_, nullptr, nullptr);
+        }
+#else
         canvas::RecordingCanvas recording_canvas;
         root_.set_bounds({0, 0, static_cast<float>(w), static_cast<float>(h)});
         root_.layout_children();
         root_.paint_all(recording_canvas);
-
-        // Draw a simple "rendering active" indicator using SDL
         SDL_FRect rect = {10, 10, 100, 20};
         SDL_SetRenderDrawColor(renderer_, 100, 180, 250, 255);
         SDL_RenderFillRect(renderer_, &rect);
+#endif
 
         SDL_RenderPresent(renderer_);
     }
+
+#ifdef PULP_HAS_SKIA
+    SDL_Texture* texture_ = nullptr;
+    int texture_width_ = 0;
+    int texture_height_ = 0;
+#endif
 };
 
 std::unique_ptr<SdlWindowHost> SdlWindowHost::create(View& root, Options options) {
