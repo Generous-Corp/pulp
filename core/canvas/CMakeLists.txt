@@ -264,6 +264,30 @@ if(PULP_HAS_SKIA)
     if(TARGET skia::dawn)
         target_link_libraries(pulp-canvas PUBLIC skia::dawn)
     endif()
+
+    # MSVC's ARM64EC compiler emits STL helper calls with the EC thunk ABI.
+    # The ARM64EC toolset has no standalone msvcprt.lib; the ARM64 import
+    # library contains the compatible definitions, but also carries /MD
+    # runtime directives.  Pulp and the Skia bundle are /MT, so exporting the
+    # whole import library creates LNK2038/LNK1319 conflicts.  The SDK instead
+    # carries a thunk-only archive made from its ARM64EC members with those
+    # directives removed.
+    if(WIN32 AND CMAKE_CXX_COMPILER_ARCHITECTURE_ID STREQUAL "ARM64EC")
+        set(PULP_ARM64EC_STL_THUNKS "" CACHE FILEPATH
+            "Sanitized ARM64EC STL thunk archive for static-runtime consumers")
+        if(NOT EXISTS "${PULP_ARM64EC_STL_THUNKS}")
+            message(FATAL_ERROR
+                "ARM64EC requires PULP_ARM64EC_STL_THUNKS (the thunk-only "
+                "archive shipped by the Windows SDK)")
+        endif()
+        if(NOT TARGET pulp-arm64ec-stl-thunks)
+            add_library(pulp-arm64ec-stl-thunks INTERFACE)
+            target_link_libraries(pulp-arm64ec-stl-thunks INTERFACE
+                "$<BUILD_INTERFACE:${PULP_ARM64EC_STL_THUNKS}>"
+                "$<INSTALL_INTERFACE:$<INSTALL_PREFIX>/${CMAKE_INSTALL_LIBDIR}/pulp-arm64ec-stl-thunks.lib>")
+        endif()
+        target_link_libraries(pulp-canvas PUBLIC pulp-arm64ec-stl-thunks)
+    endif()
     target_compile_definitions(pulp-canvas PUBLIC PULP_HAS_SKIA=1)
     target_include_directories(pulp-canvas PRIVATE ${SKIA_INCLUDE_DIRS})
 
