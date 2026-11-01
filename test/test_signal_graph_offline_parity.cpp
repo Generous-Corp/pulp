@@ -31,6 +31,7 @@
 #include <pulp/host/offline_signal_graph_host.hpp>
 #include <pulp/host/signal_graph.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -241,6 +242,106 @@ Fixture make_block_size_dependent_fixture() {
     return f;
 }
 
+// Small, stateless plugin pair for the offline sidechain/PDC fixture. The
+// first instance reports latency but forwards its main inputs unchanged; the
+// second instance mixes its main and sidechain buses. Keeping the processing
+// deterministic makes any mismatch attributable to graph routing or the
+// offline block driver rather than plugin state.
+class OfflineSidechainPlugin final : public pulp::host::PluginSlot {
+public:
+    enum class Mode { LatencyPassthrough, MainSidechainMix };
+
+    OfflineSidechainPlugin(Mode mode, int input_channels, int output_channels,
+                           int latency_samples = 0)
+        : mode_(mode), latency_samples_(latency_samples),
+          info_(make_info(input_channels, output_channels)) {}
+
+    const pulp::host::PluginInfo& info() const override { return info_; }
+    bool is_loaded() const override { return true; }
+    bool prepare(double, int) override { return true; }
+    void release() override {}
+
+    void process(pulp::audio::BufferView<float>& output,
+                 const pulp::audio::BufferView<const float>& input,
+                 const pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::host::ParameterEventQueue&, int num_samples) override {
+        for (std::size_t channel = 0; channel < output.num_channels(); ++channel) {
+            float* dst = output.channel_ptr(channel);
+            const float* main = channel < input.num_channels()
+                                    ? input.channel_ptr(channel)
+                                    : nullptr;
+            const std::size_t sidechain_channel = channel + output.num_channels();
+            const float* sidechain =
+                mode_ == Mode::MainSidechainMix && sidechain_channel < input.num_channels()
+                    ? input.channel_ptr(sidechain_channel)
+                    : nullptr;
+            for (int frame = 0; frame < num_samples; ++frame) {
+                const auto index = static_cast<std::size_t>(frame);
+                const float main_value = main ? main[index] : 0.0f;
+                dst[index] = main_value + (sidechain ? sidechain[index] : 0.0f);
+            }
+        }
+    }
+
+    std::vector<pulp::host::HostParamInfo> parameters() const override { return {}; }
+    float get_parameter(std::uint32_t) const override { return 0.0f; }
+    void set_parameter(std::uint32_t, float) override {}
+    void set_bypass(bool) override {}
+    bool is_bypassed() const override { return false; }
+    std::vector<std::uint8_t> save_state() const override { return {}; }
+    bool restore_state(const std::vector<std::uint8_t>&) override { return true; }
+    int latency_samples() const override { return latency_samples_; }
+    int tail_samples() const override { return 0; }
+    bool has_editor() const override { return false; }
+    void* create_editor_view() override { return nullptr; }
+    void destroy_editor_view() override {}
+
+private:
+    static pulp::host::PluginInfo make_info(int input_channels, int output_channels) {
+        pulp::host::PluginInfo info{};
+        info.name = "OfflineSidechainFixture";
+        info.format = pulp::host::PluginFormat::BuiltIn;
+        info.num_inputs = input_channels;
+        info.num_outputs = output_channels;
+        info.category = "Fx";
+        return info;
+    }
+
+    Mode mode_;
+    int latency_samples_;
+    pulp::host::PluginInfo info_;
+};
+
+Fixture make_sidechain_pdc_fixture() {
+    Fixture f;
+    f.name = "offline sidechain PDC";
+    f.in_channels = 2;
+    f.out_channels = 2;
+    f.block_size_dependent = false;
+    f.build = [](SignalGraph& g) {
+        const auto input = g.add_input_node(2, "Input");
+        const auto delayed = g.add_plugin_node(
+            std::make_unique<OfflineSidechainPlugin>(
+                OfflineSidechainPlugin::Mode::LatencyPassthrough, 2, 2, 64),
+            2, 2, "Delayed");
+        const auto sidechain = g.add_gain_node("Sidechain");
+        const auto mixer = g.add_plugin_node(
+            std::make_unique<OfflineSidechainPlugin>(
+                OfflineSidechainPlugin::Mode::MainSidechainMix, 4, 2),
+            4, 2, "Mixer");
+        const auto output = g.add_output_node(2, "Output");
+        for (int channel = 0; channel < 2; ++channel) {
+            REQUIRE(g.connect(input, channel, delayed, channel));
+            REQUIRE(g.connect(delayed, channel, mixer, channel));
+            REQUIRE(g.connect(input, channel, sidechain, channel));
+            REQUIRE(g.connect_sidechain(sidechain, channel, mixer, channel + 2));
+            REQUIRE(g.connect(mixer, channel, output, channel));
+        }
+        REQUIRE(g.set_node_gain(sidechain, 0.75f));
+    };
+    return f;
+}
+
 }  // namespace
 
 TEST_CASE("Offline SignalGraph render equals online render across partitionings",
@@ -282,6 +383,50 @@ TEST_CASE("Offline SignalGraph render equals online render across partitionings"
     for (const auto& ch : online)
         for (float s : ch) peak = std::max(peak, std::fabs(s));
     CHECK(peak > 0.1f);
+}
+
+TEST_CASE("Offline sidechain PDC render matches online routing across partitions",
+          "[host][graph][offline][parity][sidechain][pdc]") {
+    constexpr int kBlockOnline = 128;
+    constexpr int kBlockCoarse = 64;
+    const int kBlockBig = static_cast<int>(kFrames);
+
+    const Fixture f = make_sidechain_pdc_fixture();
+    std::vector<std::vector<float>> input(static_cast<std::size_t>(f.in_channels),
+                                          std::vector<float>(kFrames, 0.0f));
+    for (std::size_t frame = 0; frame < kFrames; ++frame) {
+        input[1][frame] = 0.1f + static_cast<float>(frame) * 0.001f;
+    }
+    const auto host_input = to_buffer(input);
+
+    SignalGraph online_graph;
+    f.build(online_graph);
+    REQUIRE(online_graph.prepare(kSr, kBlockOnline));
+    const auto online =
+        run_online(online_graph, kBlockOnline, static_cast<std::size_t>(f.out_channels), input);
+
+    const auto offline_same =
+        run_offline(f.build, kBlockOnline, f.in_channels, f.out_channels, host_input);
+    const auto offline_coarse =
+        run_offline(f.build, kBlockCoarse, f.in_channels, f.out_channels, host_input);
+    const auto offline_big =
+        run_offline(f.build, kBlockBig, f.in_channels, f.out_channels, host_input);
+    require_bit_exact(online, offline_same);
+    require_bit_exact(online, offline_coarse);
+    require_bit_exact(online, offline_big);
+
+    // The latent main path forces the sidechain path through a 64-sample PDC
+    // ring. The input node feeds both buses, so the expected output is the
+    // immediate main signal plus the delayed, gain-scaled sidechain. This is a
+    // positive oracle for both the sidechain edge and the delay ring,
+    // independent of the online comparison.
+    for (std::size_t frame = 0; frame < kFrames; ++frame) {
+        for (std::size_t channel = 0; channel < 2; ++channel) {
+            const float delayed_sidechain =
+                frame < 64 ? 0.0f : input[channel][frame - 64] * 0.75f;
+            CHECK(online[channel][frame] == input[channel][frame] + delayed_sidechain);
+        }
+    }
 }
 
 TEST_CASE("Offline render zero-pads a source shorter than the frame count",
