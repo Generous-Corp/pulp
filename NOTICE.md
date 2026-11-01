@@ -15,6 +15,19 @@ Dependencies") and on the public licensing page
 
 ---
 
+## Application-selected provider integrations
+
+Pulp supports application-owned adapters that publish external observations
+through the [real-world inputs guide](docs/guides/real-world-inputs.md). The
+following integrations are optional and are **not redistributed or linked by
+Pulp**: MediaPipe and OpenCV for camera/inference providers; ONNX Runtime for
+application-selected model inference; and OSC, IPC, MIDI, and browser WAM
+transport implementations. Applications that ship one of these providers
+must carry its own dependency, license notice, permissions, and lifecycle
+integration. Pulp core remains provider-neutral.
+
+---
+
 ## AudioUnitSDK
 
 Copyright (c) 2000-2025 Apple Inc. All rights reserved.

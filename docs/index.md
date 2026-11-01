@@ -26,6 +26,7 @@ MIT-licensed. No royalties. No copyleft.
   analysis surfaces
 - [Stable Filter Morph](guides/filter-morph.md) — morph between validated filter endpoints without coefficient interpolation
 - **Plugin hosting and analysis** — [host third-party plugins](guides/hosting.md) or [inspect, render, and compare them](guides/plugin-interrogation.md)
+- [Real-world inputs](guides/real-world-inputs.md) — connect camera, sensor, controller, analysis, and network providers through application-owned handoffs
 - [Capabilities](reference/capabilities.md) — full capability matrix with status
 - [Overview](concepts/overview.md) — what Pulp is and how it is organized
 
