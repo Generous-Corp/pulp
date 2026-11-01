@@ -1,15 +1,15 @@
-#include <catch2/catch_test_macros.hpp>
-#include <pulp/runtime/seqlock.hpp>
-#include <pulp/runtime/triple_buffer.hpp>
-#include <pulp/runtime/external_input.hpp>
-#include <pulp/runtime/spsc_queue.hpp>
 #include <array>
-#include <stdexcept>
-#include <thread>
 #include <atomic>
+#include <catch2/catch_test_macros.hpp>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <cmath>
+#include <pulp/runtime/external_input.hpp>
+#include <pulp/runtime/seqlock.hpp>
+#include <pulp/runtime/spsc_queue.hpp>
+#include <pulp/runtime/triple_buffer.hpp>
+#include <stdexcept>
+#include <thread>
 
 using namespace pulp::runtime;
 
@@ -50,8 +50,7 @@ TEST_CASE("SeqLock basic read/write", "[runtime][seqlock]") {
     REQUIRE(result.time_sig_den == 8);
 }
 
-TEST_CASE("SeqLock default value is readable before first write",
-          "[runtime][seqlock]") {
+TEST_CASE("SeqLock default value is readable before first write", "[runtime][seqlock]") {
     SeqLock<TransportState> lock;
 
     auto result = lock.read();
@@ -62,8 +61,7 @@ TEST_CASE("SeqLock default value is readable before first write",
     REQUIRE(result.time_sig_den == 4);
 }
 
-TEST_CASE("SeqLock explicit initial value is readable before first write",
-          "[runtime][seqlock]") {
+TEST_CASE("SeqLock explicit initial value is readable before first write", "[runtime][seqlock]") {
     TransportState init;
     init.tempo = 96.0;
     init.beat_position = 12.25;
@@ -79,8 +77,7 @@ TEST_CASE("SeqLock explicit initial value is readable before first write",
     REQUIRE(result.time_sig_den == 8);
 }
 
-TEST_CASE("SeqLock preserves payload tail bytes",
-          "[runtime][seqlock]") {
+TEST_CASE("SeqLock preserves payload tail bytes", "[runtime][seqlock]") {
     struct OddPayload {
         std::array<std::uint8_t, 11> bytes{};
     };
@@ -134,8 +131,7 @@ TEST_CASE("SeqLock concurrent stress test", "[runtime][seqlock]") {
     REQUIRE(torn_reads.load() == 0);
 }
 
-TEST_CASE("SpscQueue failed push preserves queued item",
-          "[runtime][spsc]") {
+TEST_CASE("SpscQueue failed push preserves queued item", "[runtime][spsc]") {
     SpscQueue<int, 1> q;
 
     REQUIRE(q.empty());
@@ -217,8 +213,7 @@ TEST_CASE("TripleBuffer reader gets latest value", "[runtime][triple_buffer]") {
     REQUIRE(buf.read() == 3);
 }
 
-TEST_CASE("TripleBuffer default and clean reads are stable",
-          "[runtime][triple_buffer]") {
+TEST_CASE("TripleBuffer default and clean reads are stable", "[runtime][triple_buffer]") {
     struct Snapshot {
         float left = 0.0f;
         float right = 0.0f;
@@ -333,8 +328,7 @@ TEST_CASE("TripleBuffer concurrent stress test", "[runtime][triple_buffer]") {
 
 // ── SpscQueue tests ───────────────────────────────────────────────────────
 
-TEST_CASE("SpscQueue reports capacity, empty state, and FIFO order",
-          "[runtime][spsc_queue]") {
+TEST_CASE("SpscQueue reports capacity, empty state, and FIFO order", "[runtime][spsc_queue]") {
     SpscQueue<int, 4> queue;
 
     REQUIRE(queue.capacity() == 4);
@@ -357,8 +351,7 @@ TEST_CASE("SpscQueue reports capacity, empty state, and FIFO order",
     REQUIRE_FALSE(queue.try_pop(first));
 }
 
-TEST_CASE("SpscQueue rejects pushes when full and accepts after pop",
-          "[runtime][spsc_queue]") {
+TEST_CASE("SpscQueue rejects pushes when full and accepts after pop", "[runtime][spsc_queue]") {
     SpscQueue<int, 2> queue;
 
     REQUIRE(queue.try_push(1));
@@ -376,8 +369,7 @@ TEST_CASE("SpscQueue rejects pushes when full and accepts after pop",
     REQUIRE_FALSE(queue.try_pop().has_value());
 }
 
-TEST_CASE("SpscQueue full small buffer drains and reuses slots",
-          "[runtime][spsc]") {
+TEST_CASE("SpscQueue full small buffer drains and reuses slots", "[runtime][spsc]") {
     SpscQueue<int, 2> queue;
 
     REQUIRE(queue.empty());
@@ -403,8 +395,7 @@ TEST_CASE("SpscQueue full small buffer drains and reuses slots",
     REQUIRE(queue.empty());
 }
 
-TEST_CASE("SpscQueue supports rvalue item pushes",
-          "[runtime][spsc_queue]") {
+TEST_CASE("SpscQueue supports rvalue item pushes", "[runtime][spsc_queue]") {
     struct MoveTracked {
         int value = 0;
     };
@@ -429,7 +420,7 @@ struct MeterData {
 };
 
 struct UIEvent {
-    int type = 0;     // 0=param_change, 1=note_on, 2=note_off
+    int type = 0; // 0=param_change, 1=note_on, 2=note_off
     int param_id = 0;
     float value = 0.0f;
 };
@@ -549,17 +540,16 @@ TEST_CASE("External input mapping rejects unsafe or stale observations",
     using pulp::runtime::ExternalInputSample;
     using pulp::runtime::map_external_input;
 
-    const ExternalInputPolicy policy{.minimum_confidence = 0.5f,
-                                     .max_age_samples = 128,
-                                     .fallback = -1.0f};
-    CHECK(map_external_input(ExternalInputSample{1, 100, 0.75f, 0.9f, true}, 120,
-                             policy) == Catch::Approx(0.75f));
-    CHECK(map_external_input(ExternalInputSample{2, 100, 0.75f, 0.9f, true}, 229,
-                             policy) == Catch::Approx(-1.0f));
-    CHECK(map_external_input(ExternalInputSample{3, 100, 0.75f, 0.1f, true}, 120,
-                             policy) == Catch::Approx(-1.0f));
-    CHECK(map_external_input(ExternalInputSample{4, 100, INFINITY, 1.0f, true}, 120,
-                             policy) == Catch::Approx(-1.0f));
-    CHECK(map_external_input(ExternalInputSample{5, 100, 0.75f, 1.0f, true}, 99,
-                             policy) == Catch::Approx(-1.0f));
+    const ExternalInputPolicy policy{
+        .minimum_confidence = 0.5f, .max_age_samples = 128, .fallback = -1.0f};
+    CHECK(map_external_input(ExternalInputSample{1, 100, 0.75f, 0.9f, true}, 120, policy) ==
+          Catch::Approx(0.75f));
+    CHECK(map_external_input(ExternalInputSample{2, 100, 0.75f, 0.9f, true}, 229, policy) ==
+          Catch::Approx(-1.0f));
+    CHECK(map_external_input(ExternalInputSample{3, 100, 0.75f, 0.1f, true}, 120, policy) ==
+          Catch::Approx(-1.0f));
+    CHECK(map_external_input(ExternalInputSample{4, 100, INFINITY, 1.0f, true}, 120, policy) ==
+          Catch::Approx(-1.0f));
+    CHECK(map_external_input(ExternalInputSample{5, 100, 0.75f, 1.0f, true}, 99, policy) ==
+          Catch::Approx(-1.0f));
 }

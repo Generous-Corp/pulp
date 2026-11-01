@@ -29,8 +29,7 @@ struct ExternalInputPolicy {
 [[nodiscard]] inline float map_external_input(const ExternalInputSample& sample,
                                               std::uint64_t now_samples,
                                               const ExternalInputPolicy& policy) noexcept {
-    if (!sample.valid || !std::isfinite(sample.value) ||
-        !std::isfinite(sample.confidence) ||
+    if (!sample.valid || !std::isfinite(sample.value) || !std::isfinite(sample.confidence) ||
         sample.confidence < policy.minimum_confidence || sample.confidence < 0.0f ||
         sample.confidence > 1.0f ||
         (policy.max_age_samples != 0 &&
