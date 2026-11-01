@@ -161,7 +161,7 @@ class WorkflowBuildDirTests(unittest.TestCase):
         fetch_step = """- name: Fetch protected capability base
         if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
         env:
-          PULP_CAPABILITY_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PULP_CAPABILITY_PR_BASE_SHA: ${{ github.event.pull_request.base.sha || steps.tested.outputs.merged_base }}
         shell: bash
         run: |
           if [ -n "$PULP_CAPABILITY_PR_BASE_SHA" ]; then
@@ -395,7 +395,9 @@ class WorkflowBuildDirTests(unittest.TestCase):
         self.assertIn("else", between.split('if [ "$ios_action" = skip ]; then', 1)[1])
         self.assertNotRegex(between, r"\bexit\b|continue", "the skip must not end the step early")
         record = workflow_named_step(BUILD_WORKFLOW, "build", "Record iOS gate digest")
-        self.assertEqual(record.get("if"), "steps.build.outputs.ios_gate_digest != ''")
+        # A pr_number dispatch runs a pull request's code and records no digest.
+        self.assertEqual(record.get("if"),
+                         "(steps.build.outputs.ios_gate_digest != '') && inputs.pr_number == ''")
         self.assertEqual(record["with"]["name"], "ios-gate-ok-${{ steps.build.outputs.ios_gate_digest }}")
 
     def test_merge_group_shadows_run_from_one_advisory_step(self) -> None:

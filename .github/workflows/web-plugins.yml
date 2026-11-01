@@ -305,6 +305,15 @@ jobs:
           ln -sfn "$GITHUB_WORKSPACE/node_modules" browser-test/node_modules
           node browser-test/validate.mjs --screenshot /tmp/wam-browser.png
 
+      - name: CV control WAM browser smoke
+        working-directory: examples/cv-control/web
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+        run: |
+          set -euo pipefail
+          node assemble.mjs
+          node validate.mjs
+
       # ── WebCLAP (wasi-sdk) ────────────────────────────────────────────────
       - name: Build WebCLAP module + bundle
         working-directory: examples/web-demos/wclap-build

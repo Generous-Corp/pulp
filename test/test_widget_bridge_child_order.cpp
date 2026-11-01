@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/state/store.hpp>
+#include <pulp/view/pointer_dispatch.hpp>
 #include <pulp/view/script_engine.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/widget_bridge.hpp>
@@ -136,6 +137,172 @@ TEST_CASE("insertChild positions the child through an intervening wrapper",
     bridge.load_script("var moved = insertChild('panel', 'content', 0);");
     CHECK(engine.evaluate("moved").getWithDefault<bool>(false));
     CHECK(child_ids(*panel) == std::vector<std::string>{"wrapper", "caption"});
+}
+
+TEST_CASE("DOM insertBefore and replaceChild keep native order in step with the DOM",
+          "[view][bridge][child-order][web-compat]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"JS(
+        var list = document.createElement('div');
+        document.body.appendChild(list);
+        function row(name) {
+            var el = document.createElement('div');
+            el.setAttribute('data-row', name);
+            return el;
+        }
+        var a = row('a'), b = row('b'), c = row('c');
+        list.appendChild(a);
+        list.appendChild(b);
+        list.appendChild(c);
+        // A new row in the middle, an existing row moved to the front, and a
+        // replacement in the middle: the three ways a keyed list changes.
+        var d = row('d');
+        list.insertBefore(d, b);
+        list.insertBefore(c, a);
+        var e = row('e');
+        list.replaceChild(e, d);
+        var names = {};
+        [a, b, c, d, e].forEach(function(el) {
+            names[el._id] = el.getAttribute('data-row');
+        });
+        var listId = list._id;
+        var domOrder = list._children.map(function(el) {
+            return el.getAttribute('data-row');
+        }).join(',');
+    )JS");
+
+    auto* list = bridge.widget(engine.evaluate("listId").toString());
+    REQUIRE(list != nullptr);
+    REQUIRE(engine.evaluate("domOrder").toString() == "c,a,e,b");
+    std::vector<std::string> native_order;
+    for (const auto& id : child_ids(*list))
+        native_order.push_back(engine.evaluate("names['" + id + "']").toString());
+    CHECK(native_order == std::vector<std::string>{"c", "a", "e", "b"});
+}
+
+TEST_CASE("DOM reorder of a keyed row keeps its widget, focus, and applied styles",
+          "[view][bridge][child-order][web-compat]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"JS(
+        var list = document.createElement('div');
+        document.body.appendChild(list);
+        var first = document.createElement('div');
+        var second = document.createElement('div');
+        first.style.background = 'rgb(10,20,30)';
+        second.style.background = 'rgb(40,50,60)';
+        list.appendChild(first);
+        list.appendChild(second);
+        var backgroundWrites = 0;
+        var realSetBackground = setBackground;
+        setBackground = function(id, value) {
+            backgroundWrites++;
+            return realSetBackground(id, value);
+        };
+        var listId = list._id, firstId = first._id, secondId = second._id;
+    )JS");
+
+    auto* list = bridge.widget(engine.evaluate("listId").toString());
+    const auto first_id = engine.evaluate("firstId").toString();
+    const auto second_id = engine.evaluate("secondId").toString();
+    REQUIRE(list != nullptr);
+    View* second_before = bridge.widget(second_id);
+    REQUIRE(second_before != nullptr);
+    const auto lifetime = second_before->import_binding_lifetime_token();
+
+    // A focused editor inside the moved row. Detaching the row blurs it, and
+    // re-attaching hands focus back through a fresh gain callback, so a
+    // reparent shows up as a gain even though focus looks unchanged after.
+    struct FocusProbe : View {
+        int gains = 0;
+        void on_focus_changed(bool gained) override {
+            View::on_focus_changed(gained);
+            if (gained)
+                ++gains;
+        }
+    };
+    auto owned_probe = std::make_unique<FocusProbe>();
+    owned_probe->set_focusable(true);
+    auto* field = owned_probe.get();
+    second_before->add_child(std::move(owned_probe));
+    REQUIRE(transfer_input_focus(root, field));
+    REQUIRE(field->has_focus());
+    field->gains = 0;
+
+    // Swap the rows the way a keyed reconciler does, then put them back. Each
+    // move runs through load_script: evaluate() would convert the returned
+    // Element, whose parent and child links are cyclic, and never finish.
+    bridge.load_script("list.insertBefore(second, first);");
+    CHECK(child_ids(*list) == std::vector<std::string>{second_id, first_id});
+    CHECK(bridge.widget(second_id) == second_before);
+    CHECK_FALSE(lifetime.expired());
+    // A detach and re-attach would blur the editor inside the moved row.
+    CHECK(field->has_focus());
+    CHECK(field->gains == 0);
+    // The row's styles are already on its widget; a move does not resend them.
+    CHECK(engine.evaluate("backgroundWrites").getWithDefault<int>(-1) == 0);
+
+    bridge.load_script("list.insertBefore(first, second);");
+    CHECK(child_ids(*list) == std::vector<std::string>{first_id, second_id});
+    CHECK(field->has_focus());
+    CHECK(field->gains == 0);
+
+    // Inserting a row before its own next sibling is no move at all.
+    bridge.load_script("list.insertBefore(first, second);");
+    CHECK(child_ids(*list) == std::vector<std::string>{first_id, second_id});
+    CHECK(engine.evaluate("backgroundWrites").getWithDefault<int>(-1) == 0);
+}
+
+TEST_CASE("DOM append moves a retained scroll wrapper to the native tail",
+          "[view][bridge][child-order][web-compat][scroll]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"JS(
+        var list = document.createElement('div');
+        document.body.appendChild(list);
+        var wrapped = document.createElement('div');
+        var tail = document.createElement('div');
+        list.appendChild(wrapped);
+        list.appendChild(tail);
+        var listId = list._id, wrappedId = wrapped._id, tailId = tail._id;
+    )JS");
+
+    const auto list_id = engine.evaluate("listId").toString();
+    const auto wrapped_id = engine.evaluate("wrappedId").toString();
+    const auto tail_id = engine.evaluate("tailId").toString();
+    auto* list = bridge.widget(list_id);
+    REQUIRE(list != nullptr);
+    auto* wrapped = bridge.widget(wrapped_id);
+    REQUIRE(wrapped != nullptr);
+    auto* tail = bridge.widget(tail_id);
+    REQUIRE(tail != nullptr);
+
+    // Upgrade the authored child to the retained scroll-wrapper form.
+    // Move it to the front first so the later append has a visible tail move.
+    engine.evaluate("__domAppend(listId, wrappedId, 'div', 'scroll')");
+    bridge.load_script("insertChild(listId, wrappedId, 0);");
+    auto* wrapper = bridge.scroll_wrapper(wrapped_id);
+    REQUIRE(wrapper != nullptr);
+    REQUIRE(static_cast<const void*>(list->child_at(0)) == static_cast<const void*>(wrapper));
+    REQUIRE(list->child_at(1) == tail);
+
+    // No following materialized sibling exists after appendChild, so the JS
+    // bridge passes an empty nativeBefore. The wrapper must still move to the
+    // tail rather than remaining in its old slot.
+    bridge.load_script("list.appendChild(wrapped);");
+    CHECK(list->child_at(0) == tail);
+    CHECK(static_cast<const void*>(list->child_at(1)) == static_cast<const void*>(wrapper));
 }
 
 TEST_CASE("View reorders a child without running the attach lifecycle",

@@ -59,6 +59,23 @@ void BridgeRegistrars::register_tokens_api(WidgetBridge& self) {
         return choc::value::createString(s.value_or(std::string()));
     });
 
+    // removeToken(name) - remove a CSS custom-property token from every
+    // theme slot. CSSStyleDeclaration.removeProperty() must undo a prior
+    // setProperty() even when the value changed type (string, dimension, or
+    // color); leaving one slot behind makes a removed var() keep affecting
+    // later materialization in the same bridge.
+    register_bridge_function(api, "removeToken", [&self](choc::javascript::ArgumentList args) {
+        auto name = args.get<std::string>(0, "");
+        if (name.empty())
+            return choc::value::Value();
+        auto theme = self.root_.theme();
+        theme.dimensions.erase(name);
+        theme.strings.erase(name);
+        theme.colors.erase(name);
+        self.root_.set_theme(theme);
+        return choc::value::Value();
+    });
+
     // setColorToken(name, color) - set a color token on the root theme
     register_bridge_function(api, "setColorToken", [&self](choc::javascript::ArgumentList args) {
         auto name = args.get<std::string>(0, "");

@@ -34,9 +34,15 @@
 #include "support/thread_progress.hpp"
 #include "support/unique_temp_dir.hpp"
 
+#ifdef PULP_TEST_VST3_PATH
+#include "../examples/pulp-gain/pulp_gain.hpp"
+#endif
+
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -1176,6 +1182,273 @@ TEST_CASE("Scanner -> load -> process -> unload round-trip on real CLAP plugin",
         REQUIRE(slot->restore_state(state));
     }
 
+    slot->release();
+}
+
+TEST_CASE("Source-owned CLAP gain couples parameter readback, audio, and fresh restore",
+          "[host][clap][integration][state][regression]") {
+    const fs::path clap_path = PULP_TEST_CLAP_PATH;
+    REQUIRE(fs::exists(clap_path));
+
+    ScratchDir scratch("clap-gain-controls");
+    const fs::path isolated_clap_path = copy_bundle_for_scan(clap_path, scratch.path);
+    ScanOptions opts;
+    opts.scan_vst3 = false;
+    opts.scan_au = false;
+    opts.scan_lv2 = false;
+    opts.scan_clap = true;
+    opts.only_extra_paths = true;
+    opts.extra_paths.push_back(isolated_clap_path.parent_path().string());
+
+    PluginScanner scanner;
+    const auto plugins = scanner.scan(opts);
+    REQUIRE(plugins.size() == 1);
+    const PluginInfo* found = &plugins.front();
+
+    auto render = [](PluginSlot& slot, float input_value) {
+        constexpr int kFrames = 256;
+        std::vector<float> in_l(kFrames, input_value), in_r(kFrames, input_value);
+        std::vector<float> out_l(kFrames, 0.f), out_r(kFrames, 0.f);
+        const float* in_ptrs[2] = {in_l.data(), in_r.data()};
+        float* out_ptrs[2] = {out_l.data(), out_r.data()};
+        pulp::audio::BufferView<const float> input(in_ptrs, 2, kFrames);
+        pulp::audio::BufferView<float> output(out_ptrs, 2, kFrames);
+        pulp::midi::MidiBuffer midi_in, midi_out;
+        ParameterEventQueue param_events;
+        slot.process(output, input, midi_in, midi_out, param_events, kFrames);
+        return std::pair{std::move(out_l), std::move(out_r)};
+    };
+
+    auto slot = PluginSlot::load(*found);
+    REQUIRE(slot != nullptr);
+    REQUIRE(slot->prepare(48000.0, 256));
+    const auto baseline = render(*slot, 1.0f);
+    slot->set_parameter(1, -6.0f); // PulpGain input gain, plain dB domain.
+    REQUIRE(std::abs(slot->get_parameter(1) + 6.0f) < 1e-4f);
+    const auto changed = render(*slot, 1.0f);
+
+    auto energy = [](const auto& stereo) {
+        float total = 0.f;
+        for (std::size_t i = 0; i < stereo.first.size(); ++i) {
+            total += std::abs(stereo.first[i]) + std::abs(stereo.second[i]);
+        }
+        return total;
+    };
+    const float baseline_energy = energy(baseline);
+    const float changed_energy = energy(changed);
+    REQUIRE(std::abs(baseline_energy - 512.0f) < 1e-3f);
+    const float expected_changed_energy = 512.0f * std::pow(10.0f, -6.0f / 20.0f);
+    REQUIRE(std::abs(changed_energy - expected_changed_energy) < 1e-3f);
+
+    const auto state = slot->save_state();
+    REQUIRE_FALSE(state.empty());
+    slot->release();
+
+    auto restored = PluginSlot::load(*found);
+    REQUIRE(restored != nullptr);
+    REQUIRE(restored->prepare(48000.0, 256));
+    REQUIRE(restored->restore_state(state));
+    REQUIRE(std::abs(restored->get_parameter(1) + 6.0f) < 1e-4f);
+    const auto replay = render(*restored, 1.0f);
+
+    float max_error = 0.f;
+    for (std::size_t i = 0; i < changed.first.size(); ++i) {
+        max_error = std::max(max_error, std::abs(changed.first[i] - replay.first[i]));
+        max_error = std::max(max_error, std::abs(changed.second[i] - replay.second[i]));
+    }
+    REQUIRE(max_error < 1e-6f);
+    restored->release();
+}
+
+#ifdef PULP_TEST_TONE_CLAP_PATH
+TEST_CASE("Source-owned CLAP tone consumes a note event",
+          "[host][clap][integration][midi][regression]") {
+    const fs::path clap_path = PULP_TEST_TONE_CLAP_PATH;
+    REQUIRE(fs::exists(clap_path));
+
+    ScratchDir scratch("clap-tone-controls");
+    const fs::path isolated_clap_path = copy_bundle_for_scan(clap_path, scratch.path);
+    ScanOptions opts;
+    opts.scan_vst3 = false;
+    opts.scan_au = false;
+    opts.scan_lv2 = false;
+    opts.scan_clap = true;
+    opts.only_extra_paths = true;
+    opts.extra_paths.push_back(isolated_clap_path.parent_path().string());
+
+    PluginScanner scanner;
+    const auto plugins = scanner.scan(opts);
+    REQUIRE(plugins.size() == 1);
+    auto slot = PluginSlot::load(plugins.front());
+    REQUIRE(slot != nullptr);
+    REQUIRE(slot->prepare(48000.0, 256));
+
+    constexpr int kFrames = 256;
+    std::vector<float> silent_l(kFrames, 0.f), silent_r(kFrames, 0.f);
+    float* silent_ptrs[2] = {silent_l.data(), silent_r.data()};
+    pulp::audio::BufferView<float> silent_out(silent_ptrs, 2, kFrames);
+    pulp::audio::BufferView<const float> no_input;
+    pulp::midi::MidiBuffer no_midi, midi_out;
+    ParameterEventQueue params;
+    slot->process(silent_out, no_input, no_midi, midi_out, params, kFrames);
+    float silent_energy = 0.f;
+    for (int i = 0; i < kFrames; ++i) {
+        silent_energy += std::abs(silent_l[i]) + std::abs(silent_r[i]);
+    }
+    REQUIRE(silent_energy == 0.f);
+
+    std::vector<float> note_l(kFrames, 0.f), note_r(kFrames, 0.f);
+    float* note_ptrs[2] = {note_l.data(), note_r.data()};
+    pulp::audio::BufferView<float> note_out(note_ptrs, 2, kFrames);
+    pulp::midi::MidiBuffer note_input;
+    REQUIRE(note_input.add(pulp::midi::MidiEvent::note_on(0, 60, 100)));
+    slot->process(note_out, no_input, note_input, midi_out, params, kFrames);
+    float note_energy_l = 0.f;
+    float note_energy_r = 0.f;
+    bool finite = true;
+    for (int i = 0; i < kFrames; ++i) {
+        finite = finite && std::isfinite(note_l[i]) && std::isfinite(note_r[i]);
+        note_energy_l += std::abs(note_l[i]);
+        note_energy_r += std::abs(note_r[i]);
+    }
+    REQUIRE(finite);
+    REQUIRE(note_energy_l > 0.f);
+    REQUIRE(note_energy_r > 0.f);
+    slot->release();
+}
+#endif
+#endif
+
+#ifdef PULP_TEST_VST3_PATH
+TEST_CASE("Source-owned VST3 gain parameter output probe",
+          "[host][vst3][integration][state][regression]") {
+    const fs::path vst3_path = PULP_TEST_VST3_PATH;
+    REQUIRE(fs::exists(vst3_path));
+    ScratchDir scratch("vst3-gain-probe");
+    const fs::path isolated = copy_bundle_for_scan(vst3_path, scratch.path);
+    ScanOptions opts;
+    opts.scan_vst3 = true;
+    opts.scan_au = false;
+    opts.scan_lv2 = false;
+    opts.scan_clap = false;
+    opts.only_extra_paths = true;
+    opts.extra_paths.push_back(isolated.parent_path().string());
+    PluginScanner scanner;
+    const auto plugins = scanner.scan(opts);
+    REQUIRE(plugins.size() == 1);
+    REQUIRE(plugins.front().format == PluginFormat::VST3);
+    auto slot = PluginSlot::load(plugins.front());
+    REQUIRE(slot != nullptr);
+    REQUIRE(slot->prepare(48000.0, 256));
+    const auto infos = slot->parameters();
+    const auto it = std::find_if(infos.begin(), infos.end(),
+                                 [](const HostParamInfo& p) { return p.name == "Input Gain"; });
+    REQUIRE(it != infos.end());
+    const auto gain_id = it->id;
+    pulp::state::StateStore source_store;
+    pulp::examples::PulpGainProcessor source_processor;
+    source_processor.define_parameters(source_store);
+    const auto* source_info = source_store.info(pulp::examples::kInputGain);
+    REQUIRE(source_info != nullptr);
+    std::fprintf(stderr, "VST3_SOURCE_RANGE name=%s min=%g max=%g default=%g unit=%s\n",
+                 source_info->name.c_str(), source_info->range.min, source_info->range.max,
+                 source_info->range.default_value, source_info->unit.c_str());
+    REQUIRE(std::isfinite(source_info->range.min));
+    REQUIRE(std::isfinite(source_info->range.max));
+    REQUIRE(std::isfinite(source_info->range.default_value));
+    std::fprintf(stderr, "VST3_METADATA name=%s id=%u min=%g max=%g default=%g unit=%s\n",
+                 it->name.c_str(), it->id, it->min_value, it->max_value, it->default_value,
+                 it->unit.c_str());
+    REQUIRE(std::isfinite(it->min_value));
+    REQUIRE(std::isfinite(it->max_value));
+    REQUIRE(std::isfinite(it->default_value));
+    REQUIRE(it->min_value <= it->default_value);
+    REQUIRE(it->default_value <= it->max_value);
+    const bool strict_plain_range = std::getenv("PULP_VST3_STRICT_PLAIN_RANGE") != nullptr;
+    if (strict_plain_range) {
+        REQUIRE(std::abs(it->min_value - source_info->range.min) < 1e-5f);
+        REQUIRE(std::abs(it->max_value - source_info->range.max) < 1e-5f);
+        REQUIRE(std::abs(it->default_value - source_info->range.default_value) < 1e-5f);
+    }
+    auto render = [&]() {
+        constexpr int kFrames = 256;
+        std::vector<float> in_l(kFrames, 1.f), in_r(kFrames, 1.f);
+        std::vector<float> out_l(kFrames, 0.f), out_r(kFrames, 0.f);
+        const float* ins[2] = {in_l.data(), in_r.data()};
+        float* outs[2] = {out_l.data(), out_r.data()};
+        pulp::audio::BufferView<const float> input(ins, 2, kFrames);
+        pulp::audio::BufferView<float> output(outs, 2, kFrames);
+        pulp::midi::MidiBuffer midi_in, midi_out;
+        ParameterEventQueue params;
+        slot->process(output, input, midi_in, midi_out, params, kFrames);
+        float energy = 0.f;
+        for (int i = 0; i < kFrames; ++i)
+            energy += std::abs(out_l[i]) + std::abs(out_r[i]);
+        return energy;
+    };
+    const float baseline = render();
+    REQUIRE(std::abs(baseline - 512.f) < 1e-3f);
+    for (const float requested : {-60.f, -6.f, 0.f, 6.f, 24.f}) {
+        slot->set_parameter(gain_id, requested);
+        const float readback = slot->get_parameter(gain_id);
+        const float changed = render();
+        std::fprintf(stderr, "VST3_DOMAIN requested=%g gain_id=%u readback=%g energy=%g\n",
+                     requested, gain_id, readback, changed);
+        REQUIRE(std::isfinite(readback));
+        REQUIRE(std::isfinite(changed));
+        if (strict_plain_range) {
+            const float expected_norm = (requested - source_info->range.min) /
+                                        (source_info->range.max - source_info->range.min);
+            const float expected_energy = 512.f * std::pow(10.f, requested / 20.f);
+            REQUIRE(std::abs(readback - requested) < 1e-4f);
+            const float energy_tolerance = 1e-4f * std::max(1.0f, std::abs(expected_energy));
+            REQUIRE(std::abs(changed - expected_energy) < energy_tolerance);
+            INFO("expected_norm=" << expected_norm);
+        }
+    }
+    slot->release();
+}
+#endif
+
+#ifdef PULP_TEST_TONE_VST3_PATH
+TEST_CASE("Source-owned VST3 tone event output probe",
+          "[host][vst3][integration][midi][regression]") {
+    const fs::path vst3_path = PULP_TEST_TONE_VST3_PATH;
+    REQUIRE(fs::exists(vst3_path));
+    ScratchDir scratch("vst3-tone-probe");
+    const fs::path isolated = copy_bundle_for_scan(vst3_path, scratch.path);
+    ScanOptions opts;
+    opts.scan_vst3 = true;
+    opts.scan_au = false;
+    opts.scan_lv2 = false;
+    opts.scan_clap = false;
+    opts.only_extra_paths = true;
+    opts.extra_paths.push_back(isolated.parent_path().string());
+    PluginScanner scanner;
+    const auto plugins = scanner.scan(opts);
+    REQUIRE(plugins.size() == 1);
+    auto slot = PluginSlot::load(plugins.front());
+    REQUIRE(slot != nullptr);
+    REQUIRE(slot->prepare(48000.0, 256));
+    constexpr int kFrames = 256;
+    std::vector<float> out_l(kFrames, 0.f), out_r(kFrames, 0.f);
+    float* outs[2] = {out_l.data(), out_r.data()};
+    pulp::audio::BufferView<float> output(outs, 2, kFrames);
+    pulp::audio::BufferView<const float> input;
+    pulp::midi::MidiBuffer midi_in, midi_out;
+    REQUIRE(midi_in.add(pulp::midi::MidiEvent::note_on(0, 60, 100)));
+    ParameterEventQueue params;
+    slot->process(output, input, midi_in, midi_out, params, kFrames);
+    float left = 0.f, right = 0.f;
+    bool finite = true;
+    for (int i = 0; i < kFrames; ++i) {
+        finite = finite && std::isfinite(out_l[i]) && std::isfinite(out_r[i]);
+        left += std::abs(out_l[i]);
+        right += std::abs(out_r[i]);
+    }
+    REQUIRE(finite);
+    REQUIRE(left > 0.f);
+    REQUIRE(right > 0.f);
     slot->release();
 }
 #endif

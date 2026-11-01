@@ -36,6 +36,12 @@ class CheckSdkCompleteTests(unittest.TestCase):
         (runtime / "interaction_plan_protocol.json").write_text("protocol", encoding="utf-8")
         (source_runtime / "runtime_manifest.txt").write_text(
             "capture.mjs\ninteraction_plan_protocol.json\n", encoding="utf-8")
+        source_helper = self.source / "tools/import-design/illustrator_to_svg.py"
+        source_helper.parent.mkdir(parents=True, exist_ok=True)
+        source_helper.write_text("helper", encoding="utf-8")
+        installed_helper = self.prefix / "bin/import-design/illustrator_to_svg.py"
+        installed_helper.parent.mkdir(parents=True, exist_ok=True)
+        installed_helper.write_text("helper", encoding="utf-8")
         (runtime / "runtime_manifest.txt").write_text(
             "capture.mjs\ninteraction_plan_protocol.json\n", encoding="utf-8")
         source_contract = self.source / "tools/import-design/jsx-runtime/materialized_binding_contract.mjs"
@@ -53,6 +59,7 @@ class CheckSdkCompleteTests(unittest.TestCase):
                 {
                     "node_runtime_floor": "0.813.1",
                     "materialized_binding_contract_floor": "0.918.0",
+                    "illustrator_import_floor": "1.12.0",
                 }
             ), encoding="utf-8"
         )
@@ -77,6 +84,20 @@ class CheckSdkCompleteTests(unittest.TestCase):
         (self.prefix / "bin/jsx-runtime/materialized_binding_contract.mjs").unlink()
         problems = complete.check(self.prefix, self.source)
         self.assertTrue(any("materialized binding contract" in problem for problem in problems))
+
+    def test_illustrator_helper_is_required_at_floor(self) -> None:
+        (self.prefix / "version.txt").write_text("1.12.0\n", encoding="utf-8")
+        (self.prefix / "bin/import-design/illustrator_to_svg.py").unlink()
+        problems = complete.check(self.prefix, self.source)
+        self.assertTrue(any("Illustrator/PDF converter helper" in problem for problem in problems))
+
+    def test_illustrator_helper_stale_bytes_are_rejected(self) -> None:
+        (self.prefix / "version.txt").write_text("1.12.0\n", encoding="utf-8")
+        (self.prefix / "bin/import-design/illustrator_to_svg.py").write_text(
+            "stale", encoding="utf-8"
+        )
+        problems = complete.check(self.prefix, self.source)
+        self.assertTrue(any("Illustrator/PDF converter helper is STALE" in problem for problem in problems))
 
     def test_manifested_json_runtime_asset_stale_bytes_are_rejected(self) -> None:
         (self.prefix / "version.txt").write_text("0.918.0\n", encoding="utf-8")

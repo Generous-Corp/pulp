@@ -86,6 +86,10 @@ PluginDescriptor NativeCoreProcessor::descriptor() const {
     d.supports_mpe = (nd->capabilities & PULP_NATIVE_CAP_MPE) != 0;
     d.supports_ump = (nd->capabilities & PULP_NATIVE_CAP_UMP) != 0;
     d.tail_samples = static_cast<int>(nd->tail_frames);
+    // The C ABI takes input channels as mutable pointers (process() casts the
+    // views' constness away), so a graph must not hand this node an upstream
+    // node's own buffer.
+    d.node_capabilities.writes_input_buffers = true;
     // Bus counts come from the descriptor; channel counts default to stereo until
     // bus-layout renegotiation is wired.
     d.input_buses.clear();

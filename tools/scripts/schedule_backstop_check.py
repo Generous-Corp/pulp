@@ -14,10 +14,10 @@ The manifest is the contract between this repository and the dispatcher, so
 this check holds every listed workflow to what the dispatcher assumes:
 
 * it exists, accepts ``workflow_dispatch``, and has no required dispatch input
-  (the dispatcher sends none, so a dispatched run must behave like a scheduled
-  one);
+  (the dispatcher may send explicitly declared optional inputs);
 * it keeps an hourly-or-faster ``schedule`` cron, and the manifest's
   ``cadence_minutes`` equals the longest gap between that cron's firings;
+* any manifest ``dispatch_inputs`` name an optional workflow-dispatch input;
 * it declares a top-level ``concurrency`` group, so a dispatch that overlaps a
   late scheduled run cannot pile up;
 * no job names a self-hosted runner label (the dispatcher must never add load
@@ -178,8 +178,12 @@ def check(root: str) -> list[str]:
     violations: list[str] = []
     named: set[str] = set()
     for row in manifest.get("workflows") or []:
-        if not isinstance(row, dict) or set(row) != {"file", "cadence_minutes"}:
-            violations.append(f"{MANIFEST}: workflow rows need exactly file and cadence_minutes")
+        if not isinstance(row, dict) or not set(row).issubset(
+            {"file", "cadence_minutes", "dispatch_inputs"}
+        ) or not {"file", "cadence_minutes"}.issubset(row):
+            violations.append(
+                f"{MANIFEST}: workflow rows need file and cadence_minutes, with optional dispatch_inputs"
+            )
             continue
         file, cadence = row["file"], row["cadence_minutes"]
         if not isinstance(file, str) or "/" in file or file in named:
@@ -188,8 +192,31 @@ def check(root: str) -> list[str]:
         if type(cadence) is not int or not 1 <= cadence <= 60:
             violations.append(f"{MANIFEST}: {file} cadence_minutes must be an integer in 1..60")
             continue
+        dispatch_inputs = row.get("dispatch_inputs", {})
+        if not isinstance(dispatch_inputs, dict) or any(
+            not isinstance(key, str)
+            or not key
+            or not isinstance(value, str)
+            or not value
+            for key, value in dispatch_inputs.items()
+        ):
+            violations.append(f"{MANIFEST}: {file} dispatch_inputs must map non-empty strings")
+            continue
+        workflow_path = os.path.join(root, WORKFLOWS, file)
+        try:
+            with open(workflow_path, encoding="utf-8") as source:
+                workflow_doc = yaml.safe_load(source)
+        except (OSError, yaml.YAMLError):
+            workflow_doc = None
+        workflow_inputs = _dispatch_inputs(workflow_doc)
+        if workflow_inputs is not None:
+            for key in dispatch_inputs:
+                if key not in workflow_inputs:
+                    violations.append(
+                        f"{MANIFEST}: {file} dispatch input {key!r} is not declared by the workflow"
+                    )
         named.add(file)
-        violations.extend(check_workflow(os.path.join(root, WORKFLOWS, file), cadence))
+        violations.extend(check_workflow(workflow_path, cadence))
     for row in manifest.get("excluded") or []:
         if not isinstance(row, dict) or set(row) != {"file", "reason"}:
             violations.append(f"{MANIFEST}: excluded rows need exactly file and reason")
@@ -230,8 +257,9 @@ def main(argv: list[str]) -> int:
             print(f"  x {violation}", file=sys.stderr)
         print(
             f"\nEvery workflow in {MANIFEST} is dispatched by an external backstop at its\n"
-            "cadence. Keep cadence_minutes equal to the cron, keep workflow_dispatch with\n"
-            "no required input, keep a concurrency group, and stay on GitHub-hosted\n"
+            "cadence. Keep cadence_minutes equal to the cron, declare any intended\n"
+            "dispatch_inputs in the manifest, keep required inputs defaulted, keep a\n"
+            "concurrency group, and stay on GitHub-hosted\n"
             "runners. A new hourly-or-faster cron must be listed or excluded with a reason.",
             file=sys.stderr,
         )

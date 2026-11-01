@@ -460,6 +460,15 @@ auto-release.yml  (diffs version files, pushes vX.Y.Z tag)
 release-cli.yml  (build binaries, compose_release_notes.py, GitHub Release body)
 ```
 
+**One bump PR covers many merges.** On the PR route the drain does not open a
+bump PR per merge. While other PRs are waiting in the merge queue and the last
+bump landed under two hours ago (`PULP_BUMP_COALESCE_MINUTES`, default 120), it
+holds the new bump PR, which then covers every merge since the last marker.
+Dispatch `version-at-land.yml` with `release_now: true` when a release needs
+the number sooner. The pending-intent liveness alarm's grace (210 minutes)
+sits above that window. Details: `docs/guides/version-at-land-cutover.md`,
+"Coalescing".
+
 **The changelog trails by one release.** The bump for vX.Y.Z is written before its tag exists, so vX.Y.Z's section reaches `CHANGELOG.md` with the next bump. A separate post-tag PR would close that gap but pay the required gate a second time per release for one docs file; the GitHub Release page is current the moment the tag lands.
 
 **CHANGELOG.md source of truth:** `shipyard changelog regenerate` (shipyard v0.11+), configured via `[release.changelog]` in `.shipyard/config.toml`. With no args it rewrites `CHANGELOG.md` from the full tag graph and is idempotent. If a bump run logs `derived regenerator failed, leaving CHANGELOG.md stale`, the next bump retries it; to catch up by hand, run it locally and open a docs PR.
@@ -579,7 +588,9 @@ The coverage matrix runs the instrumented build + a coverage-focused ctest suite
 internal time budget (below the job's `timeout-minutes`) enforced by a watchdog
 that terminates the suite before the job cap. When that budget is hit the leg
 drops any partial report and records `budget_hit`. The Windows leg builds
-with examples OFF, as the normal Windows build does. Windows remains advisory,
+with examples OFF, as the normal Windows build does. Windows remains advisory
+(and runs on the self-hosted Windows x64 lane; a busy lane or a pull request
+leaves it out, see `docs/guides/coverage.md`),
 but Linux and macOS are receipt-authoritative: their Cobertura verifier still
 runs and fails when the report is absent, so a green workflow cannot hide a
 missing native upload. The shared coverage CTest policy excludes the

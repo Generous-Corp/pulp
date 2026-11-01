@@ -889,6 +889,10 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
                 cg->routed.serial.snapshot.buffer_slot_count(),
                 static_cast<std::uint32_t>(max_block_size),
                 cg->routed.serial.snapshot.buffer_assignment().connection_delay_samples);
+            // Resolve per-node channel pointers once; an unbound pool still
+            // routes, through the per-block resolution.
+            if (cg->routed.serial.valid)
+                (void)cg->routed.serial.pool.bind(cg->routed.serial.snapshot);
         }
         // Per-snapshot MIDI scratch + the MidiInput/MidiOutput node index lists
         // the routed dispatch bridges to the mailboxes. Built only when the
@@ -969,6 +973,8 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
                          cg->routed.parallel.snapshot.buffer_slot_count(),
                          static_cast<std::uint32_t>(max_block_size),
                          cg->routed.parallel.snapshot.buffer_assignment().connection_delay_samples);
+                if (ok)
+                    (void)cg->routed.parallel.pool.bind(cg->routed.parallel.snapshot);
             }
             if (ok && prepared_edit_origin_ == nullptr) {
                 // Start the persistent worker pool off the audio thread, ONCE.

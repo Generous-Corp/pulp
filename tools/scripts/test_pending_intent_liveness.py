@@ -41,6 +41,28 @@ def _ct(repo: Path, ref: str = "HEAD") -> int:
         capture_output=True, text=True, check=True).stdout)
 
 
+class GraceAboveCoalescingWindowTests(unittest.TestCase):
+    """version-at-land holds a new bump PR up to COALESCE_WINDOW_MINUTES after
+    the last bump landed; the scheduled drain then opens it within 15 minutes
+    and the PR still has to validate in the merge queue. A grace at or under
+    that sum would page on a healthy coalesced bump."""
+
+    DRAIN_CADENCE_MINUTES = 15
+    QUEUE_VALIDATION_MINUTES = 45
+
+    def test_the_default_grace_clears_the_coalescing_window(self) -> None:
+        import version_at_land as val
+        floor = (val.COALESCE_WINDOW_MINUTES + self.DRAIN_CADENCE_MINUTES
+                 + self.QUEUE_VALIDATION_MINUTES)
+        self.assertGreater(pil.DEFAULT_GRACE_MINUTES, floor)
+
+    def test_the_workflow_grace_matches_the_script_default(self) -> None:
+        wf = (Path(__file__).resolve().parents[2]
+              / ".github/workflows/pending-intent-liveness.yml").read_text(encoding="utf-8")
+        self.assertIn(f'default: "{pil.DEFAULT_GRACE_MINUTES}"', wf)
+        self.assertIn(f"|| '{pil.DEFAULT_GRACE_MINUTES}' }}}}", wf)
+
+
 class LivenessAlarmTests(unittest.TestCase):
     def setUp(self) -> None:
         self.repo = Path(tempfile.mkdtemp(prefix="pulp-liveness-"))

@@ -65,12 +65,22 @@ TEST_CASE("MF-3: guarded feedback filters flush to a subnormal-free tail",
     const denormal_null::TailReport snap_off = reference.tail;
     const denormal_null::TailReport snap_on = denormal_null::render_tails();
 
-    // The guard flushes every feedback state cleanly.
+    // The guard flushes every feedback state cleanly. The per-sample SVF and
+    // ballistics recursions snap only where subnormals are slow
+    // (snap_recursion_state()); where they are free, their tails follow the
+    // snap-off reference.
     REQUIRE_FALSE(snap_on.dc_blocker);
-    REQUIRE_FALSE(snap_on.ballistics);
-    REQUIRE_FALSE(snap_on.svf);
     REQUIRE_FALSE(snap_on.ladder);
     REQUIRE_FALSE(snap_on.reverb);
+    if constexpr (pulp::signal::kSubnormalsAreFree) {
+        if (!reference.denormals_flushed) {
+            REQUIRE(snap_on.svf == snap_off.svf);
+            REQUIRE(snap_on.ballistics == snap_off.ballistics);
+        }
+    } else {
+        REQUIRE_FALSE(snap_on.svf);
+        REQUIRE_FALSE(snap_on.ballistics);
+    }
 
     // The test has teeth: without the guard, these tails go subnormal — but
     // ONLY where the CPU can actually represent a subnormal. If the REFERENCE

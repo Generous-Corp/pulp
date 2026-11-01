@@ -11,6 +11,8 @@
 // V8 provides JIT compilation, making it suitable for heavy workloads like
 // Three.js scene graphs. QuickJS is the portable fallback.
 
+#include <cstdlib>
+
 #include <pulp/view/js_engine.hpp>
 
 #ifdef PULP_HAS_V8

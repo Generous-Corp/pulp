@@ -56,6 +56,9 @@ RetainedChargeOracle exact_owned_store_charge(
     const auto platform_split_buffers =
         2u * store_bytes<float>(2u * fft_size + kVdspSplitPaddingFloats);
 #else
+#if PULP_FFT_USE_MUFFT
+    result.platform_fft_setups = 2u * pulp_mufft_retained_bytes(fft_size);
+#endif
     const std::uint64_t platform_split_buffers = 0;
 #endif
     // The portable real transform keeps a real_bins()-long complex scratch in
@@ -872,6 +875,15 @@ TEST_CASE("RealtimePitchTime prepared geometry reports every retained backing st
     REQUIRE(base_oracle.platform_fft_setups == 2u * platform_setup_bytes);
     REQUIRE_FALSE(checked_fft_platform_setup_bytes<float>(
         base.fft_size, platform_setup_bytes - 1, platform_setup_bytes));
+#elif PULP_FFT_USE_MUFFT
+    REQUIRE(platform_setup_bytes == pulp_mufft_retained_bytes(base.fft_size));
+    REQUIRE(platform_setup_bytes > 0);
+    REQUIRE(base_oracle.platform_fft_setups == 2u * platform_setup_bytes);
+    // The ceiling applies to the plan's largest single allocation.
+    const auto largest = pulp_mufft_largest_allocation_bytes(base.fft_size);
+    REQUIRE(checked_fft_platform_setup_bytes<float>(base.fft_size, largest, platform_setup_bytes));
+    REQUIRE_FALSE(
+        checked_fft_platform_setup_bytes<float>(base.fft_size, largest - 1, platform_setup_bytes));
 #else
     REQUIRE(platform_setup_bytes == 0);
 #endif

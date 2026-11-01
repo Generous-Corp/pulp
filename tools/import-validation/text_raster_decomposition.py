@@ -75,15 +75,46 @@ def load_luma(path: Path) -> np.ndarray:
     return 0.2126 * rgb[..., 0] + 0.7152 * rgb[..., 1] + 0.0722 * rgb[..., 2]
 
 
-def ink_map(luma: np.ndarray, box: tuple[int, int, int, int]) -> tuple[np.ndarray, float, float]:
-    """Ink inside `box` (x0, y0, x1, y1): each pixel's luminance distance from
-    the box's background, whichever side of it the text is drawn on."""
+def _box_region(luma: np.ndarray, box: tuple[int, int, int, int]) -> tuple[np.ndarray, float, float, tuple[int, int, int, int]]:
     x0, y0, x1, y1 = box
     region = luma[y0:y1, x0:x1]
     border = np.concatenate([region[0, :], region[-1, :], region[:, 0], region[:, -1]])
     bg = float(np.median(border))
     spread = float(np.percentile(border, 90) - np.percentile(border, 10))
-    return np.abs(region - bg), bg, spread
+    return region, bg, spread, box
+
+
+def ink_map(luma: np.ndarray, box: tuple[int, int, int, int],
+            polarity: int | None = None) -> tuple[np.ndarray, float, float, int]:
+    """Return one-sided ink inside ``box`` and the selected polarity.
+
+    ``polarity`` is +1 for pixels lighter than the local background and -1 for
+    darker pixels. When omitted, the side with the larger luminance mass in the
+    reference box wins. Measuring one side prevents a shadow or halo painted on
+    the opposite side from being counted as glyph ink.
+    """
+    region, bg, spread, _ = _box_region(luma, box)
+    signed = region - bg
+    positive = np.clip(signed, 0.0, None)
+    negative = np.clip(-signed, 0.0, None)
+    if polarity is None:
+        polarity = 1 if float(positive.sum()) >= float(negative.sum()) else -1
+    if polarity not in (-1, 1):
+        raise ValueError("polarity must be -1, 1, or None")
+    return (positive if polarity > 0 else negative), bg, spread, polarity
+
+
+def ink(luma: np.ndarray, box: tuple[int, int, int, int], pad: int = PAD,
+        polarity: int | None = None) -> tuple[float, float, float, int]:
+    """Return one-sided ink mass and centroid for a luma image and box."""
+    h, w = luma.shape
+    x0, y0, x1, y1 = max(0, box[0] - pad), max(0, box[1] - pad), min(w, box[2] + pad), min(h, box[3] + pad)
+    field, _, _, selected = ink_map(luma, (x0, y0, x1, y1), polarity)
+    mass = float(field.sum())
+    if mass <= 0:
+        return mass, float("nan"), float("nan"), selected
+    ys, xs = np.indices(field.shape)
+    return mass, float((xs * field).sum() / mass + x0), float((ys * field).sum() / mass + y0), selected
 
 
 def centroid(ink: np.ndarray) -> tuple[float, float]:
@@ -135,8 +166,8 @@ def decompose(ref_luma: np.ndarray, cand_luma: np.ndarray, box: tuple[int, int, 
     h, w = ref_luma.shape
     x0, y0, x1, y1 = box
     box = (max(0, x0 - PAD), max(0, y0 - PAD), min(w, x1 + PAD), min(h, y1 + PAD))
-    ref, ref_bg, ref_spread = ink_map(ref_luma, box)
-    cand, cand_bg, cand_spread = ink_map(cand_luma, box)
+    ref, ref_bg, ref_spread, polarity = ink_map(ref_luma, box)
+    cand, cand_bg, cand_spread, _ = ink_map(cand_luma, box, polarity)
     ref_mass, cand_mass = float(ref.sum()), float(cand.sum())
     if ref_mass <= 0:
         return {"box": list(box), "error": "reference box has no ink"}
@@ -153,6 +184,7 @@ def decompose(ref_luma: np.ndarray, cand_luma: np.ndarray, box: tuple[int, int, 
         "dy": round(ccy - rcy, 3),
         "shift": [sdx, sdy],
         "background": [round(ref_bg, 1), round(cand_bg, 1)],
+        "polarity": "light" if polarity > 0 else "dark",
         "background_spread": round(max(ref_spread, cand_spread), 1),
         "transfer": transfer_curve(ref, cand),
     }

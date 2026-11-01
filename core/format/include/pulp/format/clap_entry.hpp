@@ -833,18 +833,15 @@ inline bool gui_set_parent(const clap_plugin_t* plugin, const clap_window_t* win
     bool attached = false;
 #ifdef __APPLE__
     if (strcmp(window->api, CLAP_WINDOW_API_COCOA) == 0) {
-        p->editor_host->attach_to_parent(window->cocoa);
-        attached = true;
+        attached = p->editor_host->try_attach_to_parent(window->cocoa);
     }
 #elif defined(_WIN32)
     if (strcmp(window->api, CLAP_WINDOW_API_WIN32) == 0) {
-        p->editor_host->attach_to_parent(window->win32);
-        attached = true;
+        attached = p->editor_host->try_attach_to_parent(window->win32);
     }
 #elif defined(__linux__)
     if (strcmp(window->api, CLAP_WINDOW_API_X11) == 0) {
-        p->editor_host->attach_to_parent(reinterpret_cast<void*>(window->x11));
-        attached = true;
+        attached = p->editor_host->try_attach_to_parent(reinterpret_cast<void*>(window->x11));
     }
 #endif
     if (attached && p->bridge) {

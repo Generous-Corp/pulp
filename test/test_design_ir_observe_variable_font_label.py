@@ -20,6 +20,7 @@ Usage: test_design_ir_observe_variable_font_label.py --observer <pulp-design-ir-
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 from pathlib import Path
 import struct
@@ -29,13 +30,26 @@ import tempfile
 import unittest
 import zlib
 
+try:
+    import numpy as np
+except ImportError:  # pragma: no cover - test environment guard
+    print("SKIP: numpy is required for shared text-raster ink measurement")
+    raise SystemExit(77)
+
 FIXTURE = Path(__file__).resolve().parent / "fixtures/design-ir-observe/variable-font-label"
 OBSERVER: Path | None = None
 DPR = 2.0
 PAD = 4  # device px around the captured paint box
 
+_RASTER_SCRIPT = Path(__file__).resolve().parents[1] / "tools/import-validation/text_raster_decomposition.py"
+_RASTER_SPEC = importlib.util.spec_from_file_location("pulp_text_raster_decomposition", _RASTER_SCRIPT)
+if _RASTER_SPEC is None or _RASTER_SPEC.loader is None:
+    raise ImportError(f"cannot load {_RASTER_SCRIPT}")
+_RASTER = importlib.util.module_from_spec(_RASTER_SPEC)
+_RASTER_SPEC.loader.exec_module(_RASTER)
 
-def decode_png(path: Path) -> tuple[int, int, list[float]]:
+
+def decode_png(path: Path):
     """Width, height and per-pixel luminance of an 8-bit RGB/RGBA PNG."""
     data = path.read_bytes()
     if not data.startswith(b"\x89PNG\r\n\x1a\n"):
@@ -87,7 +101,7 @@ def decode_png(path: Path) -> tuple[int, int, list[float]]:
         for x in range(width):
             r, g, b = line[x * channels:x * channels + 3]
             luma.append(0.2126 * r + 0.7152 * g + 0.0722 * b)
-    return width, height, luma
+    return np.asarray(luma, dtype=np.float64).reshape((height, width))
 
 
 def label_boxes(ir: dict) -> dict[str, tuple[int, int, int, int]]:
@@ -111,26 +125,6 @@ def label_boxes(ir: dict) -> dict[str, tuple[int, int, int, int]]:
     return boxes
 
 
-def ink(image: tuple[int, int, list[float]], box: tuple[int, int, int, int]):
-    """Background-subtracted ink mass and centroid (device px) inside `box`."""
-    width, height, luma = image
-    x0, y0, x1, y1 = box
-    x0, y0, x1, y1 = max(0, x0 - PAD), max(0, y0 - PAD), min(width, x1 + PAD), min(height, y1 + PAD)
-    border = [luma[y * width + x] for x in range(x0, x1) for y in (y0, y1 - 1)]
-    border += [luma[y * width + x] for y in range(y0, y1) for x in (x0, x1 - 1)]
-    border.sort()
-    background = border[len(border) // 2]
-    mass = cx = cy = 0.0
-    for y in range(y0, y1):
-        for x in range(x0, x1):
-            value = luma[y * width + x] - background
-            if value > 0:
-                mass += value
-                cx += value * x
-                cy += value * y
-    return mass, cx / mass if mass else float("nan"), cy / mass if mass else float("nan")
-
-
 class VariableFontLabel(unittest.TestCase):
     def test_labels_match_chromium(self) -> None:
         ir = json.loads((FIXTURE / "design.ir.json").read_text(encoding="utf-8"))
@@ -150,8 +144,8 @@ class VariableFontLabel(unittest.TestCase):
         chromium = decode_png(FIXTURE / "chromium.png")
         for anchor, box in sorted(boxes.items()):
             with self.subTest(label=anchor.rsplit("/", 2)[-2]):
-                c_mass, c_x, c_y = ink(chromium, box)
-                n_mass, n_x, n_y = ink(native, box)
+                c_mass, c_x, c_y, _ = _RASTER.ink(chromium, box, pad=PAD)
+                n_mass, n_x, n_y, _ = _RASTER.ink(native, box, pad=PAD)
                 self.assertGreater(c_mass, 0.0)
                 self.assertAlmostEqual(n_mass / c_mass, 1.0, delta=0.02)
                 self.assertLess(abs(n_x - c_x) / DPR, 0.1)

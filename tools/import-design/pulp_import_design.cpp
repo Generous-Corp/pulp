@@ -1589,6 +1589,7 @@ struct CliOptions {
     std::string source_str;
     std::string input_file;
     std::string sidecar_manifest;
+    std::string illustrator_provenance;
     bool validate_only = false;
     // --file: repeatable. Two or more paths capture a MULTI-STATE design from
     // already-exported envelopes — one per state, in the order given — which is
@@ -1721,6 +1722,8 @@ static std::optional<int> parse_cli_args(int argc, char* argv[], CliOptions& opt
             opt.input_files.push_back(argv[++i]);
         } else if (std::strcmp(argv[i], "--manifest") == 0 && i + 1 < argc) {
             opt.sidecar_manifest = argv[++i];
+        } else if (std::strcmp(argv[i], "--provenance") == 0 && i + 1 < argc) {
+            opt.illustrator_provenance = argv[++i];
         } else if (std::strcmp(argv[i], "--validate-only") == 0) {
             opt.validate_only = true;
         } else if (std::strcmp(argv[i], "--url") == 0 && i + 1 < argc) {
@@ -2116,6 +2119,81 @@ static std::optional<int> run_fidelity_selfcheck(
     return std::nullopt;
 }
 
+int run_illustrator_to_svg(const CliOptions& cli, const char* executable) {
+    if (cli.input_files.size() != 1 || cli.input_file.empty()) {
+        std::cerr << "Error: --from illustrator requires exactly one --file <.ai|.pdf>\n";
+        return 2;
+    }
+    if (cli.validate_only || cli.outline_mode || cli.export_tokens_mode) {
+        std::cerr << "Error: --from illustrator cannot be combined with validation-only, outline, "
+                     "or token export modes\n";
+        return 2;
+    }
+
+    fs::path helper;
+    if (const char* configured = std::getenv("PULP_ILLUSTRATOR_TO_SVG");
+        configured && *configured) {
+        helper = configured;
+    }
+#ifdef PULP_IMPORT_DESIGN_SRC_DIR
+    if (helper.empty())
+        helper = fs::path(PULP_IMPORT_DESIGN_SRC_DIR) / "illustrator_to_svg.py";
+#endif
+    if (helper.empty() || !fs::is_regular_file(helper)) {
+        const fs::path executable_path = executable ? fs::path(executable) : fs::path{};
+        const fs::path executable_dir =
+            executable_path.empty() ? fs::path{} : fs::absolute(executable_path).parent_path();
+        const fs::path installed_helper =
+            executable_dir / "import-design" / "illustrator_to_svg.py";
+        if (fs::is_regular_file(installed_helper))
+            helper = installed_helper;
+    }
+    if (helper.empty() || !fs::is_regular_file(helper)) {
+        std::cerr << "Error: Illustrator converter is not installed; expected "
+                     "illustrator_to_svg.py beside the import-design tool\n";
+        return 1;
+    }
+    auto python = pulp::platform::find_on_path("python3");
+    if (!python) {
+        std::cerr << "Error: python3 was not found on PATH; cannot convert Illustrator artwork\n";
+        return 1;
+    }
+
+    std::vector<std::string> args{helper.string(), cli.input_file};
+    if (!cli.output_file.empty() && cli.output_explicit) {
+        args.emplace_back("--output");
+        args.push_back(cli.output_file);
+    }
+    if (!cli.illustrator_provenance.empty()) {
+        args.emplace_back("--provenance");
+        args.push_back(cli.illustrator_provenance);
+    }
+    if (!cli.page_name.empty()) {
+        try {
+            const auto page = std::stoi(cli.page_name);
+            if (page < 1)
+                throw std::invalid_argument("page");
+            args.emplace_back("--page");
+            args.push_back(std::to_string(page));
+        } catch (const std::exception&) {
+            std::cerr << "Error: --page must be a positive integer for --from illustrator\n";
+            return 2;
+        }
+    }
+    pulp::platform::ProcessOptions options;
+    options.timeout_ms = 120000;
+    const auto result = pulp::platform::ChildProcess::run(python->string(), args, options);
+    if (!result.stdout_output.empty())
+        std::cout << result.stdout_output;
+    if (!result.stderr_output.empty())
+        std::cerr << result.stderr_output;
+    if (result.timed_out) {
+        std::cerr << "Error: Illustrator conversion timed out\n";
+        return 1;
+    }
+    return result.exit_code == 0 ? 0 : (result.exit_code < 0 ? 1 : result.exit_code);
+}
+
 int main(int argc, char* argv[]) {
     CliOptions cli;
     if (auto parse_exit = parse_cli_args(argc, argv, cli)) return *parse_exit;
@@ -2311,16 +2389,9 @@ int main(int argc, char* argv[]) {
     // multi-state capture, handled once the source is known.
     if (!input_files.empty()) input_file = input_files.front();
 
-    // Source-neutral, already-converted SVG lane. This is intentionally a
-    // validation-only integration point: conversion from Illustrator/PDF is
-    // outside Pulp, while the sidecar contract proves the bytes and controls
-    // before a future generator consumes them.
-    if (source_str == "illustrator" || source_str == "ai" || source_str == "pdf") {
-        std::cerr << "Error: source '" << source_str
-                  << "' is unsupported; convert to preconverted-svg with a validated "
-                     "control-map sidecar\n";
-        return 2;
-    }
+    if (source_str == "illustrator" || source_str == "ai" || source_str == "pdf")
+        return run_illustrator_to_svg(cli, argc > 0 ? argv[0] : nullptr);
+
     if (source_str == "preconverted-svg") {
         if (!validate_only) {
             std::cerr << "Error: --from preconverted-svg requires --validate-only\n";

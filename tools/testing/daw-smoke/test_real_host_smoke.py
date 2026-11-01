@@ -296,20 +296,20 @@ class WrapReaper(unittest.TestCase):
             {"argv": ["/bin/ps"], "stdout": "1 0.0 launchd"},
             {"argv": ["/repo/tools/scripts/host_vitals.sh", "--json"],
              "stdout": json.dumps({"level": "green", "sampled_at": 1792769309})}]}
-        self.assertEqual(rhs._preflight_sampled_us(doc), 1792769309 * 1_000_000)
+        self.assertEqual(rhs.receipts._preflight_sampled_us(doc), 1792769309 * 1_000_000)
         for broken in ({}, {"observations": [{"argv": ["/x/host_vitals.sh"], "stdout": "{"}]},
                        {"observations": [{"argv": ["/x/host_vitals.sh"], "stdout": "{}"}]}):
             with self.subTest(broken=broken):
-                self.assertIsNone(rhs._preflight_sampled_us(broken))
+                self.assertIsNone(rhs.receipts._preflight_sampled_us(broken))
 
     def test_the_control_kind_comes_from_what_the_plugin_armed(self):
         none = {"planted_negative": None, "gpu_off": False}
-        self.assertEqual(rhs.reaper_control_kind(dict(none, planted_negative="no_fallback"),
+        self.assertEqual(rhs.receipts.reaper_control_kind(dict(none, planted_negative="no_fallback"),
                                                  "force_loss_after"), "planted_negative")
-        self.assertEqual(rhs.reaper_control_kind(dict(none, gpu_off=True), "positive_control"),
+        self.assertEqual(rhs.receipts.reaper_control_kind(dict(none, gpu_off=True), "positive_control"),
                          "planted_negative")
-        self.assertEqual(rhs.reaper_control_kind(none, "positive_control"), "positive_control")
-        self.assertEqual(rhs.reaper_control_kind(none, "worker_stall"), "fault")
+        self.assertEqual(rhs.receipts.reaper_control_kind(none, "positive_control"), "positive_control")
+        self.assertEqual(rhs.receipts.reaper_control_kind(none, "worker_stall"), "fault")
 
     def test_only_a_run_v1_verifies_live_is_wrapped(self):
         # A dry run verifies as v1 only with --allow-dry-run; it is not DAW
@@ -322,7 +322,7 @@ class WrapReaper(unittest.TestCase):
             capture_output=True, text=True, check=False)
         self.assertTrue((run / "receipt.json").is_file(), proc.stdout[-2000:])
         with self.assertRaisesRegex(rhs.V2.ReceiptError, "not DAW evidence"):
-            rhs.wrap_reaper(run, self.tmp / "out", code_commit="c" * 40)
+            rhs.receipts.wrap_reaper(run, self.tmp / "out", code_commit="c" * 40)
         self.assertFalse((self.tmp / "out").exists())
         self.assertEqual(rhs.main(["wrap-reaper", "--reaper-run", str(run), "--out",
                                    str(self.tmp / "out"), "--code-commit", "c" * 40]),

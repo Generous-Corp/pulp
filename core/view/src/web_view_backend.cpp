@@ -1,67 +1,70 @@
-// Cross-platform WebView backend detector — compiled into the selected
-// view composition so callers can
-// distinguish "this build doesn't include WebView support" from
-// "this OS has no usable WebView backend installed" without first
-// trying to instantiate a WebViewPanel.
+// WebView backend detector. This is its only definition: every view
+// composition reaches it through pulp::view-platform, so a binary that links
+// more than one composition still has one answer.
 //
-// The detection layer is split per-platform so each OS surfaces a
-// canonical identifier:
-//
-//   * macOS / iOS   → "wkwebview"   (always — WebKit.framework ships
-//                                    with the OS).
-//   * Windows       → "webview2"    (when WebView2Loader.dll resolves
-//                                    at runtime; "none" otherwise).
-//                     Implemented in platform/win/webview2_backend.cpp.
-//   * Linux         → "webkitgtk"   (when libwebkit2gtk-4.{1,0}.so
-//                                    resolves; "none" otherwise).
-//                     Implemented in platform/linux/webkitgtk_backend.cpp.
-//   * Android       → "chromium"    (always — system WebView).
-//   * Other         → "none".
-//
-// On Windows + Linux the per-platform TUs own the symbol so we get the
-// runtime probe. On every other supported OS this file owns it directly
-// so the build still links.
+// A composition without WebView support answers "none", which lets callers
+// tell "this build excludes WebView" from "this OS has no usable WebView"
+// without constructing a WebViewPanel. pulp::view-webview supplies the per-OS
+// answer (web_view_backend_provider.cpp) as a link-time definition, so the
+// answer does not depend on static-initialization order: a consumer's own
+// static initializer that calls the detector already sees it.
 
 #include <pulp/view/web_view.hpp>
 
-#if defined(__APPLE__)
+#include <atomic>
+#include <string>
 
-namespace pulp::view {
-// When PULP_BUILD_WEBVIEW is OFF the WebView implementation file
-// (web_view.cpp) is excluded from the build, so reporting "wkwebview"
-// would lie about a build that physically cannot construct a
-// WebViewPanel. Honor the documented "none if disabled" contract.
-#if defined(PULP_BUILD_WEBVIEW) && !PULP_BUILD_WEBVIEW
-std::string detect_webview_backend() { return "none"; }
-bool webview_backend_available() { return false; }
+// The linked provider. pulp::view-webview defines it (strongly); this
+// translation unit's default, which answers "no provider", is used only when
+// no composition links WebView in. MSVC has no weak definitions, so the
+// default is named and selected with /alternatename instead. C linkage keeps
+// the symbol name undecorated on every 64-bit target.
+extern "C" const pulp::view::detail::WebViewBackendProvider* pulp_view_webview_backend_provider();
+
+#if defined(_MSC_VER)
+extern "C" const pulp::view::detail::WebViewBackendProvider*
+pulp_view_webview_backend_provider_none() {
+    return nullptr;
+}
+#pragma comment(                                                                                   \
+    linker,                                                                                        \
+    "/alternatename:pulp_view_webview_backend_provider=pulp_view_webview_backend_provider_none")
 #else
-std::string detect_webview_backend() { return "wkwebview"; }
-bool webview_backend_available() { return true; }
+extern "C" __attribute__((weak))
+const pulp::view::detail::WebViewBackendProvider* pulp_view_webview_backend_provider() {
+    return nullptr;
+}
 #endif
-} // namespace pulp::view
-
-#elif defined(__ANDROID__)
 
 namespace pulp::view {
-#if defined(PULP_BUILD_WEBVIEW) && !PULP_BUILD_WEBVIEW
-std::string detect_webview_backend() { return "none"; }
-bool webview_backend_available() { return false; }
-#else
-std::string detect_webview_backend() { return "chromium"; }
-bool webview_backend_available() { return true; }
-#endif
+
+namespace {
+
+// An override installed by set_webview_backend_provider (tests). Constant-
+// initialized, so it is valid before any dynamic initializer runs.
+std::atomic<const detail::WebViewBackendProvider*> g_override{nullptr};
+
+const detail::WebViewBackendProvider* active_provider() {
+    if (const auto* provider = g_override.load(std::memory_order_acquire))
+        return provider;
+    return pulp_view_webview_backend_provider();
+}
+
+} // namespace
+
+const detail::WebViewBackendProvider*
+detail::set_webview_backend_provider(const WebViewBackendProvider* provider) {
+    return g_override.exchange(provider, std::memory_order_acq_rel);
+}
+
+std::string detect_webview_backend() {
+    const auto* provider = active_provider();
+    return provider && provider->detect ? provider->detect() : std::string("none");
+}
+
+bool webview_backend_available() {
+    const auto* provider = active_provider();
+    return provider && provider->available ? provider->available() : false;
+}
+
 } // namespace pulp::view
-
-#elif !defined(_WIN32) && !defined(__linux__)
-
-// Catch-all fallback for OSes that are neither Apple, nor Android, nor
-// Windows, nor Linux (e.g. FreeBSD, OpenBSD, future ports). The
-// Windows + Linux symbols live in the per-platform TUs alongside their
-// runtime probes; we deliberately don't define them here so the build
-// hard-fails if the per-platform TU is missing from CMakeLists.txt.
-namespace pulp::view {
-std::string detect_webview_backend() { return "none"; }
-bool webview_backend_available() { return false; }
-} // namespace pulp::view
-
-#endif

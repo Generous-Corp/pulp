@@ -45,7 +45,10 @@ from version_bump_surfaces import load_config  # noqa: E402
 from version_at_land import APPLIED_MARKER, last_applied_marker  # noqa: E402
 
 POSITIVE_LEVELS = ("patch", "minor", "major")
-DEFAULT_GRACE_MINUTES = 45
+# Above version-at-land's coalescing window (COALESCE_WINDOW_MINUTES) plus
+# its 15-minute scheduled drain and a bump PR's merge-queue validation, so
+# a bump held to coalesce merges never reads as a stuck bot.
+DEFAULT_GRACE_MINUTES = 210
 
 
 def _git(repo: Path, *args: str) -> str:

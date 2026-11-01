@@ -8,8 +8,9 @@ name: Cross-platform check
 # cross-platform breakage on `main` would go unnoticed for days.
 #
 # This workflow is that backstop. Every night it runs the FULL Linux,
-# Windows, and Android build + test on GitHub-hosted runners — never the
-# scarce self-hosted macOS runners — and, on failure, files (or updates)
+# Windows, and Android build + test — Linux and Android on GitHub-hosted
+# runners, Windows x64 on the self-hosted Windows x64 lane, never the scarce
+# self-hosted macOS runners — and, on failure, files (or updates)
 # ONE labeled GitHub issue per broken platform so cross-platform debt is
 # visible and batch-fixable rather than silent. On recovery, that
 # platform's tracking issue auto-closes.
@@ -32,12 +33,12 @@ on:
   # after a fix lands without waiting for the next nightly.
   workflow_dispatch:
     inputs:
-      # Proves a self-hosted Windows lane (the Mac Pro Windows x64 slot,
-      # docs/guides/local-ci.md) on the full Windows suite without spending a
-      # macOS gate VM, which a build.yml dispatch always does. The nightly
-      # never sees an input, so it keeps windows-latest.
+      # Runs the full Windows suite on a chosen runner without spending a
+      # macOS gate VM, which a build.yml dispatch always does. Empty takes the
+      # self-hosted Windows x64 lane (docs/guides/local-ci.md); '"windows-latest"'
+      # runs it GitHub-hosted. The nightly never sees an input.
       windows_runner_selector_json:
-        description: "Optional JSON runs-on for the Windows job; empty keeps windows-latest"
+        description: "Optional JSON runs-on for the Windows job; empty takes the self-hosted Windows x64 lane"
         required: false
         default: ""
         type: string
@@ -195,8 +196,7 @@ jobs:
 
   # ── Windows build + test ───────────────────────────────────────────────
   # Mirrors build.yml's Windows matrix leg: same bootstrap, same Release
-  # configure, same UTF-8-code-page-wrapped ctest. GitHub-hosted
-  # windows-latest only.
+  # configure, same UTF-8-code-page-wrapped ctest.
   linux-arm64:
     name: Linux ARM64 build + test
     if: (github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO) && !inputs.windows_only
@@ -299,13 +299,13 @@ jobs:
 
   # ── Windows build + test ───────────────────────────────────────────────
   # Mirrors build.yml's Windows matrix leg: same bootstrap, same Release
-  # configure, same UTF-8-code-page-wrapped ctest. GitHub-hosted
-  # windows-latest only.
+  # configure, same UTF-8-code-page-wrapped ctest.
 
   # Resolves the Windows job's runs-on before any runner is chosen. A
   # dispatch input that names a macOS or Linux pool (the gate VMs, the Linux
   # clones, the preamble slot) is refused here, so a typo cannot put a Windows
-  # build on a gate host. Empty keeps windows-latest.
+  # build on a gate host. Empty takes the self-hosted Windows x64 lane;
+  # GitHub-hosted windows-latest needs PULP_ALLOW_HOSTED_WINDOWS=1.
   windows-runner:
     name: Resolve Windows runner
     if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
@@ -322,7 +322,12 @@ jobs:
         id: resolve
         env:
           SELECTOR: ${{ inputs.windows_runner_selector_json || '' }}
-        run: python3 tools/scripts/windows_runner_selector.py --selector "$SELECTOR" --github-output
+          DEFAULT_SELECTOR: ${{ vars.PULP_LOCAL_WINDOWS_X64_RUNS_ON_JSON || '' }}
+          ALLOW_HOSTED: ${{ vars.PULP_ALLOW_HOSTED_WINDOWS || '' }}
+        run: >-
+          python3 tools/scripts/windows_runner_selector.py --route --github-output
+          --selector "$SELECTOR" --default-selector "$DEFAULT_SELECTOR"
+          --allow-hosted "$ALLOW_HOSTED"
 
   windows:
     name: Windows build + test
@@ -595,7 +600,7 @@ jobs:
     needs: [linux, linux-arm64, windows, android]
     # The tracking issues describe main. A proof-branch dispatch must neither
     # open nor close them, and branches now run concurrently with main. A run
-    # that skipped platforms or moved Windows off windows-latest measured
+    # that skipped platforms or moved Windows off the nightly's runner measured
     # something else, so it leaves the issues alone too.
     if: ${{ always() && github.ref == 'refs/heads/main' && !inputs.windows_only && !inputs.windows_runner_selector_json }}
     runs-on: ubuntu-latest

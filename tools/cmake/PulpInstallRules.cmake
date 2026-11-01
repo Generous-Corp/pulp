@@ -77,7 +77,7 @@ if(PULP_ENABLE_DESIGN_IMPORT)
     list(APPEND PULP_SDK_TARGETS pulp-design-import pulp-design-import-audio-pack)
 endif()
 if(PULP_BUILD_WEBVIEW)
-    list(APPEND PULP_SDK_TARGETS pulp-view-webview)
+    list(APPEND PULP_SDK_TARGETS pulp-view-webview pulp-view-webview-backend)
 endif()
 
 # pulp-signal-fft-backend is the optional multi-backend FFT facade. It's
@@ -86,6 +86,12 @@ endif()
 # consumers can include the header but cannot link the symbols.
 if(TARGET pulp-signal-fft-backend)
     list(APPEND PULP_SDK_TARGETS pulp-signal-fft-backend)
+endif()
+
+# The float FFT backend behind FftT off Apple. pulp::signal links it, so an
+# installed SDK must export it or every FFT user fails to link.
+if(TARGET pulp-signal-mufft AND NOT APPLE)
+    list(APPEND PULP_SDK_TARGETS pulp-signal-mufft)
 endif()
 
 # Modal-spec JSON parsing has a source-bearing library separate from the

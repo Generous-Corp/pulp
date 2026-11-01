@@ -210,11 +210,11 @@ public:
     // Process a single sample (Direct Form II Transposed)
     SampleType process(SampleType input) {
         SampleType output = b0_ * input + s1_;
-        // Snap the recursive state to zero to keep denormals out of the DF2T
-        // feedback path on platforms/threads without an FTZ guard (wasm,
-        // MSVC/ARM64, graph worker threads). No-op for any state >= 1e-15.
-        s1_ = snap_to_zero(b1_ * input - a1_ * output + s2_);
-        s2_ = snap_to_zero(b2_ * input - a2_ * output);
+        // Snap the recursive state to keep denormals out of the DF2T feedback
+        // path where subnormals are slow and no FTZ guard applies (see
+        // snap_recursion_state()). No-op for any state >= 1e-15.
+        s1_ = snap_recursion_state(b1_ * input - a1_ * output + s2_);
+        s2_ = snap_recursion_state(b2_ * input - a2_ * output);
         history_valid_ = false;
         return output;
     }

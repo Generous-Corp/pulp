@@ -1514,6 +1514,7 @@ void BakedGraphProcessor::prepare(const fmt::PrepareContext& context) {
                               candidate_snapshot.buffer_assignment().connection_delay_samples)) {
         return;
     }
+    (void)candidate_pool.bind(candidate_snapshot);
     // Size the in-place-host input scratch (one contiguous block, per-channel
     // pointers into it) so process() can rescue an aliased input with only a
     // copy_n on the audio thread. Sized for the descriptor's input bus — the

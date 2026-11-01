@@ -1,0 +1,262 @@
+name: macOS test tier record
+
+# Publishes the tier record Shipyard's queue-arm-guard reads for the tiered
+# required check `macos` (Shipyard docs/ghapp-guards.md, "A tiered required
+# check must prove its full lane"). The record is a check run named
+# `shipyard-test-tier/macos` on the head, whose output.summary is one JSON
+# object bound to the exact workflow run and attempt whose job is the `macos`
+# check:
+#
+#   {"schema":"shipyard-test-tier/v1","check":"macos","tier":"deferred",
+#    "run_id":123,"run_attempt":1,"trigger":"pull_request","actor":"<author>",
+#    "selector":"pr-fast+pr-guard","full_lane_workflow":"build.yml",
+#    "full_suite_runs_in":"merge_group"}
+#
+# `trigger` and `actor` name the event and account that started the run; the
+# guard reports them but does not trust them. `full_lane_workflow` is what the
+# guard's fix line tells an operator to dispatch. The record carries no label:
+# a label is not a full-lane path (#11044).
+#
+# Who may write it. The guard counts only records created by the App named in
+# `[queue] tier_record_app`, never `github-actions`: any job holding
+# `checks: write` could rewrite a github-actions record. So the record is
+# created with a token for a dedicated App, minted here. Its ID and key live in
+# the `tier-record` GitHub Environment, which allows deployments from `main`
+# only. A workflow_run job runs on the default branch, so it qualifies, and a
+# job on a pull request branch is refused the secrets. Nothing else references
+# that environment (tools/ci/test_macos_tier_record.py). With the secrets
+# absent, the job fails visibly.
+#
+# The tier is the more conservative of two signals, because neither proves
+# enough alone. A pull request's own build.yml decides its step names, so steps
+# alone cannot grant `full`; who started the run does not show the suite ran.
+#
+# 1. The run: a workflow_dispatch whose triggering actor is the fleet App,
+#    which moves an approved head to the full lane that way (label events no
+#    longer start Build and Test runs). The App's latest verdict on the head at
+#    or before the run's created_at must be a trusted APPROVE. A pull_request
+#    run, a dispatch or rerun by anyone else, or no such verdict: `deferred`.
+# 2. The steps the runner recorded for that attempt's `macos` job (jobs API),
+#    never annotations, which any step can print. `Build` ran gives `fast`, or
+#    `full` when `Test (non-Windows)` ran too. `Build` skipped (the contract
+#    lane) gives `deferred`. A succeeded skip-safe bootstrap gives
+#    `not-required`; one that failed closed gives `deferred`.
+#
+# A run it cannot place publishes no record, and no record is a refusal at the
+# guard. workflow_run runs this definition from the default branch and checks
+# out nothing, so no pull request code runs here. Same-repository runs only:
+# a fork's head gets no record, so the guard refuses to arm it (outside
+# contributions land through an in-repository branch).
+
+on:
+  workflow_run:
+    workflows: ["Build and Test"]
+    types: [completed]
+
+permissions:
+  actions: read
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: macos-tier-record-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
+  cancel-in-progress: false
+
+jobs:
+  tier-record:
+    name: Publish the macos tier record
+    # Same-repository pull-request and dispatch runs; the script checks again.
+    if: >-
+      (github.event.workflow_run.event == 'pull_request'
+       || github.event.workflow_run.event == 'workflow_dispatch')
+      && github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Main-only deployment-branch policy: the App's ID and key are released to
+    # this job and to no job on a pull request branch.
+    environment: tier-record
+    steps:
+      - name: Require the tier-record App's secrets
+        env:
+          APP_ID: ${{ secrets.TIER_RECORD_APP_ID }}
+          HAS_KEY: ${{ secrets.TIER_RECORD_APP_KEY != '' }}
+        run: |
+          if [ -z "$APP_ID" ] || [ "$HAS_KEY" != true ]; then
+            echo "::error title=no tier record::TIER_RECORD_APP_ID and TIER_RECORD_APP_KEY must be secrets of the tier-record environment (main only); no record was published, so the arm guard refuses this head"
+            exit 1
+          fi
+
+      - name: Decide the tier
+        id: tier
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          RUN_CREATED_AT: ${{ github.event.workflow_run.created_at }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
+          RUN_PRS: ${{ join(github.event.workflow_run.pull_requests.*.number, ' ') }}
+          TRIGGER_EVENT: ${{ github.event.workflow_run.event }}
+          TRIGGERING_ACTOR: ${{ github.event.workflow_run.triggering_actor.login }}
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          app="shipyard-local[bot]"
+          if [ "$HEAD_REPO" != "$repo" ]; then
+            echo "run $RUN_ID is from $HEAD_REPO, not $repo; only same-repository runs get a record"
+            exit 0
+          fi
+
+          # --- signal 2: the steps the runner recorded ----------------------
+          # The jobs of exactly this attempt, every page, as one array.
+          jobs_json=$(gh api --paginate "repos/$repo/actions/runs/$RUN_ID/attempts/$RUN_ATTEMPT/jobs?per_page=100" \
+            | jq -s '[.[].jobs[]]')
+          macos=$(jq -c '[.[] | select(.name == "macos")]' <<< "$jobs_json")
+          count=$(jq 'length' <<< "$macos")
+          if [ "$count" -eq 0 ]; then
+            echo "run $RUN_ID attempt $RUN_ATTEMPT has no macos job; no record"
+            exit 0
+          fi
+          if [ "$count" -ne 1 ]; then
+            echo "::error title=no tier record::run $RUN_ID attempt $RUN_ATTEMPT has $count jobs named macos, so none can be bound; no record, which the guard refuses"
+            exit 1
+          fi
+          job=$(jq -c '.[0]' <<< "$macos")
+          if [ "$(jq -r '.head_sha' <<< "$job")" != "$HEAD_SHA" ]; then
+            echo "::error title=no tier record::the macos job of run $RUN_ID is not for $HEAD_SHA; no record, which the guard refuses"
+            exit 1
+          fi
+          # A step's conclusion as the runner recorded it, or `absent`.
+          step() {
+            jq -r --arg name "$1" \
+              '[.steps[]? | select(.name == $name) | .conclusion // "none"] | if length == 0 then "absent" else .[0] end' \
+              <<< "$job"
+          }
+          ran() { [ "$1" = success ] || [ "$1" = failure ]; }
+          bootstrap=$(step "macOS PR/dispatch bootstrap (required when native leg is absent)")
+          build=$(step "Build")
+          full_suite=$(step "Test (non-Windows)")
+          if [ "$bootstrap" != absent ]; then
+            # The bootstrap claims `macos` when no native build is needed, and
+            # fails it closed when routing or classification failed.
+            if [ "$bootstrap" = success ]; then steps_tier=not-required; else steps_tier=deferred; fi
+            selector=none
+          elif [ "$build" = absent ]; then
+            echo "::error title=no tier record::the macos job of run $RUN_ID has neither a Build step nor the bootstrap step, so its lane cannot be read; no record, which the guard refuses"
+            exit 1
+          elif ran "$build"; then
+            if ran "$full_suite"; then
+              steps_tier=full; selector=full
+            else
+              steps_tier=fast; selector=pr-fast+pr-guard+affected
+            fi
+          else
+            steps_tier=deferred; selector=pr-fast+pr-guard
+          fi
+
+          # --- signal 1: the fleet App dispatched this run after approving -
+          # The full lane is a workflow_dispatch of build.yml by the fleet
+          # App on an approved head; label events no longer start runs. So
+          # the run must be that dispatch (its event and triggering actor,
+          # which a rerun by anyone else changes), and the App's latest
+          # verdict on this head at or before the run was created must be a
+          # trusted APPROVE (`reviewer:` line, last line
+          # `verdict: APPROVE head:<sha>`). It must also be a `pr_number`
+          # dispatch of that pull request, which tests its merge commit: the
+          # macos job's succeeded step `Tested refs/pull/<n>/merge at <sha>
+          # onto <base>` (build.yml), whose commit GitHub shows has exactly the
+          # parents [<base>, this head].
+          approval="absent"
+          tested_ref="" tested_sha="" merged_base=""
+          if [ "$TRIGGER_EVENT" != workflow_dispatch ]; then
+            approval="not a dispatch ($TRIGGER_EVENT)"
+          elif [ "$TRIGGERING_ACTOR" != "$app" ]; then
+            approval="dispatched by $TRIGGERING_ACTOR, not $app"
+          else
+            # The same-repository open pull request whose head is this commit.
+            prs="$RUN_PRS"
+            if [ -z "$prs" ]; then
+              prs=$(gh api "repos/$repo/commits/$HEAD_SHA/pulls" \
+                | jq -r --arg sha "$HEAD_SHA" --arg repo "$repo" \
+                  '[.[] | select(.state == "open" and .head.sha == $sha and .head.repo.full_name == $repo) | .number] | join(" ")')
+            fi
+            read -r -a pr_list <<< "$prs"
+            tested=$(jq -r '[.steps[]? | select(.conclusion == "success" and (.name | test("^Tested refs/pull/[0-9]+/merge at [0-9a-f]{40} onto [0-9a-f]{40}$")))
+                             | .name] | if length == 1 then .[0] else "" end' <<< "$job")
+            read -r _ tested_ref _ tested_sha _ merged_base <<< "$tested"
+            if [ "${#pr_list[@]}" -ne 1 ]; then
+              approval="unplaced (${#pr_list[@]} pull requests at this head)"
+            elif [ -z "$tested" ]; then
+              approval="not a pr_number dispatch: the macos job has no single succeeded Tested step"
+            elif [ "$tested_ref" != "refs/pull/${pr_list[0]}/merge" ]; then
+              approval="tested $tested_ref, not refs/pull/${pr_list[0]}/merge"
+            elif [ "$(gh api "repos/$repo/commits/$tested_sha" --jq '[.parents[].sha] | join(" ")')" != "$merged_base $HEAD_SHA" ]; then
+              approval="tested commit $tested_sha does not have the parents [$merged_base, $HEAD_SHA]"
+            else
+              verdict=$(gh api --paginate "repos/$repo/issues/${pr_list[0]}/comments?per_page=100" \
+                | jq -s -r --arg app "$app" --arg at "$RUN_CREATED_AT" --arg sha "$HEAD_SHA" \
+                  '[.[][] | select(.user.login == $app and .created_at <= $at)
+                    | {at: .created_at, body: .body,
+                       last: ((.body | split("\n") | map(sub("\\s+$"; "")) | map(select(length > 0)) | last) // "")}
+                    | select(.last | test("^verdict: [A-Z_]+ head:" + $sha + "$"))]
+                   | sort_by(.at) | last
+                   | if . == null then "none"
+                     elif (.last | startswith("verdict: APPROVE ")) and (.body | test("(^|\n)reviewer: \\S")) then "approve"
+                     else "other" end')
+              case "$verdict" in
+                approve) approval=present ;;
+                none) approval="no verdict for this head before the run" ;;
+                *) approval="the latest verdict for this head before the run is not a trusted APPROVE" ;;
+              esac
+            fi
+          fi
+
+          # --- the more conservative of the two ------------------------------
+          if [ "$approval" != present ]; then tier=deferred; else tier="$steps_tier"; fi
+          # The fields and their order follow Shipyard's docs/ghapp-guards.md.
+          # `tested_ref`, `tested_sha` and `merged_base` bind the record to the
+          # merge commit the full lane tested; null when the run tested none.
+          summary=$(jq -cn --arg tier "$tier" --argjson run "$RUN_ID" --argjson attempt "$RUN_ATTEMPT" \
+            --arg trigger "$TRIGGER_EVENT" --arg actor "$TRIGGERING_ACTOR" --arg selector "$selector" \
+            --arg tested_ref "$tested_ref" --arg tested_sha "$tested_sha" --arg merged_base "$merged_base" \
+            'def opt: if . == "" then null else . end;
+             {schema:"shipyard-test-tier/v1",check:"macos",tier:$tier,run_id:$run,
+              run_attempt:$attempt,trigger:$trigger,actor:$actor,selector:$selector,
+              tested_ref:($tested_ref | opt),tested_sha:($tested_sha | opt),
+              merged_base:($merged_base | opt),
+              full_lane_workflow:"build.yml",full_suite_runs_in:"merge_group"}')
+          echo "tier $tier for $HEAD_SHA: steps say $steps_tier (Build=$build, Test (non-Windows)=$full_suite, bootstrap=$bootstrap); approved fleet-App dispatch: $approval"
+          {
+            echo "publish=true"
+            echo "tier=$tier"
+            echo "summary=$summary"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Mint the tier-record App token
+        id: app-token
+        if: steps.tier.outputs.publish == 'true'
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510
+        with:
+          app-id: ${{ secrets.TIER_RECORD_APP_ID }}
+          private-key: ${{ secrets.TIER_RECORD_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-checks: write
+
+      - name: Publish shipyard-test-tier/macos
+        if: steps.tier.outputs.publish == 'true'
+        env:
+          # The App's token, never GITHUB_TOKEN: the guard counts only
+          # records the tier-record App created.
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          TIER: ${{ steps.tier.outputs.tier }}
+          SUMMARY: ${{ steps.tier.outputs.summary }}
+        run: |
+          set -euo pipefail
+          gh api --method POST "repos/$GITHUB_REPOSITORY/check-runs" \
+            -f name=shipyard-test-tier/macos \
+            -f head_sha="$HEAD_SHA" \
+            -f status=completed -f conclusion=neutral \
+            -f "output[title]=$TIER" -f "output[summary]=$SUMMARY" >/dev/null
+          echo "published shipyard-test-tier/macos on $HEAD_SHA: $SUMMARY"

@@ -26,6 +26,7 @@ let package = Package(
                 "PulpParameter.swift",
                 "PulpViews.swift",
                 "PulpAudioSession.swift",
+                "PulpMotionControlSource.swift",
                 "PulpMotion.swift",
                 "PulpMotionProbe.swift",
             ]

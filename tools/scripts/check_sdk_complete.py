@@ -58,6 +58,14 @@ def _materialized_contract_required(prefix: Path, source: Path) -> bool:
     return _version_tuple(version) >= _version_tuple(floor)
 
 
+def _illustrator_import_required(prefix: Path, source: Path) -> bool:
+    version = (prefix / "version.txt").read_text(encoding="utf-8").strip()
+    matrix_path = source / "tools/scripts/release_product_matrix.json"
+    matrix = json.loads(matrix_path.read_text(encoding="utf-8"))
+    floor = str(matrix.get("illustrator_import_floor", "999999.0.0"))
+    return _version_tuple(version) >= _version_tuple(floor)
+
+
 def _runtime_manifest(source_runtime: Path) -> list[Path]:
     """Return the shipped runtime paths from the source manifest.
 
@@ -88,6 +96,10 @@ def check(prefix: Path, source: Path) -> list[str]:
     node = runtime / ("node.exe" if sys.platform == "win32" else "node")
     node_license = runtime / "node.LICENSE"
     contract = prefix / "bin" / "jsx-runtime" / "materialized_binding_contract.mjs"
+    illustrator_helper = prefix / "bin" / "import-design" / "illustrator_to_svg.py"
+    src_illustrator_helper = (
+        source / "tools" / "import-design" / "illustrator_to_svg.py"
+    )
     src_runtime = source / "tools" / "import-design" / "browser_capture"
     src_contract = (
         source / "tools" / "import-design" / "jsx-runtime"
@@ -97,6 +109,7 @@ def check(prefix: Path, source: Path) -> list[str]:
     try:
         require_node = _node_runtime_required(prefix, source)
         require_contract = _materialized_contract_required(prefix, source)
+        require_illustrator = _illustrator_import_required(prefix, source)
     except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
         problems.append(f"cannot determine bundled Node requirement: {exc}")
         return problems
@@ -109,6 +122,8 @@ def check(prefix: Path, source: Path) -> list[str]:
         problems.append(f"missing bundled Node license: {node_license}")
     if require_contract and not contract.is_file():
         problems.append(f"missing materialized binding contract: {contract}")
+    if require_illustrator and not illustrator_helper.is_file():
+        problems.append(f"missing Illustrator/PDF converter helper: {illustrator_helper}")
     if not runtime.is_dir():
         problems.append(f"missing capture runtime directory: {runtime}")
     if problems:
@@ -123,6 +138,18 @@ def check(prefix: Path, source: Path) -> list[str]:
         problems.append(
             f"materialized binding contract is STALE in the SDK: {src_contract.name} "
             f"(copy {src_contract} -> {contract})"
+        )
+    if require_illustrator and not src_illustrator_helper.is_file():
+        problems.append(
+            f"source Illustrator/PDF converter helper not found: {src_illustrator_helper}"
+        )
+    elif require_illustrator and not filecmp.cmp(
+        src_illustrator_helper, illustrator_helper, shallow=False
+    ):
+        problems.append(
+            "Illustrator/PDF converter helper is STALE in the SDK: "
+            f"{src_illustrator_helper.name} (copy {src_illustrator_helper} -> "
+            f"{illustrator_helper})"
         )
 
     try:

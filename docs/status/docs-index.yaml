@@ -39,6 +39,11 @@ docs:
     kind: guide
     summary: Shared base-vs-offset automation and modulation delivery across graph, Processor, timeline, and control surfaces
 
+  - slug: real-world-inputs
+    path: guides/real-world-inputs.md
+    kind: guide
+    summary: Map optional CV, sensor, controller, analysis, and network providers across Pulp surfaces
+
   - slug: getting-started
     path: guides/getting-started.md
     kind: guide
@@ -712,6 +717,11 @@ docs:
     path: validation/convolver-crossover.md
     kind: reference
     summary: Measured direct-FIR versus partitioned-FFT crossover behind FixedIrConvolver, per-chip receipts, and the command that regenerates them
+
+  - slug: nonuniform-head
+    path: validation/nonuniform-head.md
+    kind: reference
+    summary: Measured head-length table behind NonUniformPartitionedConvolver's default tail multiplier, per-chip receipts, and the command that regenerates them
 
   - slug: drum-whole-voice-math
     path: validation/drum-whole-voice-math.md

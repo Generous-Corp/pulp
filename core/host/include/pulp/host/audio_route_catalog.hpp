@@ -5,6 +5,7 @@
 // and connects one of its entries to a declared input bus.
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -42,6 +43,9 @@ class AudioRouteCatalog {
   public:
     using ChangeCallback = std::function<void()>;
     using ConnectCallback = std::function<bool(const AudioRouteInfo&, std::size_t bus_index)>;
+    using ConnectChannelCallback = std::function<bool(const AudioRouteInfo&, std::size_t bus_index,
+                                                      std::size_t channel_index)>;
+    using DisconnectCallback = std::function<bool(std::size_t bus_index)>;
 
     virtual ~AudioRouteCatalog() = default;
     virtual std::vector<AudioRouteInfo> enumerate() const = 0;
@@ -55,6 +59,18 @@ class AudioRouteCatalog {
         (void)callback;
     }
 
+    /// Install the host graph binding for an individual channel connection.
+    /// Hosts that only support whole-bus routing may leave this unset.
+    virtual void set_connect_channel_callback(ConnectChannelCallback callback) {
+        (void)callback;
+    }
+
+    /// Install the host graph binding for disconnect(). Returning false keeps
+    /// the catalog selection because the graph did not accept the mutation.
+    virtual void set_disconnect_callback(DisconnectCallback callback) {
+        (void)callback;
+    }
+
     /// Connect a host-owned source to a declared processor input bus. Hosts
     /// that cannot retarget routes from the plug-in UI keep the default false
     /// and expose their own routing menu instead.
@@ -62,6 +78,14 @@ class AudioRouteCatalog {
         (void)stable_id;
         (void)bus_index;
         return false;
+    }
+
+    /// Connect one channel of a declared input bus. Hosts that do not expose
+    /// independent channel routing inherit the bus-level connection behavior.
+    virtual bool connect_channel(std::string_view stable_id, std::size_t bus_index,
+                                 std::size_t channel_index) {
+        (void)channel_index;
+        return connect(stable_id, bus_index);
     }
 
     virtual bool disconnect(std::size_t bus_index) {
@@ -74,6 +98,14 @@ class AudioRouteCatalog {
     virtual std::string connected_route(std::size_t bus_index) const {
         (void)bus_index;
         return {};
+    }
+
+    /// Return the stable source currently connected to one bus channel. The
+    /// default preserves compatibility with hosts that only route whole buses.
+    virtual std::string connected_route_channel(std::size_t bus_index,
+                                                std::size_t channel_index) const {
+        (void)channel_index;
+        return connected_route(bus_index);
     }
 
     /// Return the stable IDs selected for each declared input bus. Hosts may
@@ -119,9 +151,29 @@ class MutableAudioRouteCatalog final : public AudioRouteCatalog {
             // never an audio-path claim.
             retained.push_back(selected);
         }
+        std::vector<std::array<std::string, 2>> retained_channels;
+        retained_channels.reserve(selected_channels_.size());
+        for (const auto& selected : selected_channels_)
+            retained_channels.push_back(selected);
         routes_ = std::move(routes);
         selected_ = std::move(retained);
-        if (connect_callback_) {
+        selected_channels_ = std::move(retained_channels);
+        if (connect_channel_callback_) {
+            for (std::size_t bus_index = 0; bus_index < selected_channels_.size(); ++bus_index) {
+                for (std::size_t channel_index = 0; channel_index < 2; ++channel_index) {
+                    const auto& selected = selected_channels_[bus_index][channel_index];
+                    if (selected.empty())
+                        continue;
+                    const auto it = std::find_if(
+                        routes_.begin(), routes_.end(), [&](const AudioRouteInfo& route) {
+                            return route.stable_id == selected && route.available &&
+                                   channel_index < static_cast<std::size_t>(route.channels);
+                        });
+                    if (it != routes_.end())
+                        (void)connect_channel_callback_(*it, bus_index, channel_index);
+                }
+            }
+        } else if (connect_callback_) {
             for (std::size_t bus_index = 0; bus_index < selected_.size(); ++bus_index) {
                 const auto it =
                     std::find_if(routes_.begin(), routes_.end(), [&](const AudioRouteInfo& route) {
@@ -143,6 +195,14 @@ class MutableAudioRouteCatalog final : public AudioRouteCatalog {
         connect_callback_ = std::move(callback);
     }
 
+    void set_connect_channel_callback(ConnectChannelCallback callback) override {
+        connect_channel_callback_ = std::move(callback);
+    }
+
+    void set_disconnect_callback(DisconnectCallback callback) override {
+        disconnect_callback_ = std::move(callback);
+    }
+
     bool connect(std::string_view stable_id, std::size_t bus_index) override {
         if (bus_index == std::numeric_limits<std::size_t>::max() ||
             bus_index >= selected_.max_size())
@@ -153,25 +213,106 @@ class MutableAudioRouteCatalog final : public AudioRouteCatalog {
             });
         if (it == routes_.end())
             return false;
+        ensure_bus(bus_index);
+        const bool feeds_right = it->channels > 1;
+        if (connect_channel_callback_) {
+            // A whole-bus binding replaces both channels. A source that cannot
+            // feed the right channel must first drop any independent right
+            // binding, which only the bus-level disconnect can do.
+            const bool stale_right = !selected_channels_[bus_index][1].empty() && !feeds_right;
+            if (stale_right) {
+                if (!disconnect_callback_ || !disconnect_callback_(bus_index))
+                    return false;
+                selected_[bus_index].clear();
+                selected_channels_[bus_index] = {};
+            }
+            if (!connect_channel_callback_(*it, bus_index, 0)) {
+                if (stale_right)
+                    notify();
+                return false;
+            }
+            selected_[bus_index] = it->stable_id;
+            selected_channels_[bus_index][0] = it->stable_id;
+            if (!feeds_right) {
+                selected_channels_[bus_index][1].clear();
+            } else if (connect_channel_callback_(*it, bus_index, 1)) {
+                selected_channels_[bus_index][1] = it->stable_id;
+            }
+            notify();
+            return !feeds_right || !selected_channels_[bus_index][1].empty();
+        }
         if (connect_callback_ && !connect_callback_(*it, bus_index))
             return false;
-        if (selected_.size() <= bus_index)
-            selected_.resize(bus_index + 1);
-        selected_[bus_index] = it->stable_id;
+        set_whole_bus(bus_index, *it);
+        notify();
+        return true;
+    }
+
+    bool connect_channel(std::string_view stable_id, std::size_t bus_index,
+                         std::size_t channel_index) override {
+        if (bus_index == std::numeric_limits<std::size_t>::max() ||
+            bus_index >= selected_.max_size() || channel_index >= 2)
+            return false;
+        const auto it =
+            std::find_if(routes_.begin(), routes_.end(), [stable_id](const AudioRouteInfo& route) {
+                return route.stable_id == stable_id && route.available && route.channels > 0;
+            });
+        if (it == routes_.end())
+            return false;
+        if (channel_index >= static_cast<std::size_t>(it->channels))
+            return false;
+        if (connect_channel_callback_) {
+            if (!connect_channel_callback_(*it, bus_index, channel_index))
+                return false;
+        } else if (connect_callback_ && channel_index == 0) {
+            // The legacy callback rebinds the whole bus, so the catalog must
+            // record a whole-bus selection rather than a lone left channel.
+            if (!connect_callback_(*it, bus_index))
+                return false;
+            ensure_bus(bus_index);
+            set_whole_bus(bus_index, *it);
+            notify();
+            return true;
+        } else if (connect_callback_) {
+            // A legacy whole-bus callback cannot bind an independent channel.
+            return false;
+        }
+        ensure_bus(bus_index);
+        selected_channels_[bus_index][channel_index] = it->stable_id;
+        if (channel_index == 0)
+            selected_[bus_index] = it->stable_id;
         notify();
         return true;
     }
 
     bool disconnect(std::size_t bus_index) override {
-        if (bus_index >= selected_.size() || selected_[bus_index].empty())
+        const bool bus_selected = bus_index < selected_.size() && !selected_[bus_index].empty();
+        const bool channel_selected =
+            bus_index < selected_channels_.size() &&
+            std::any_of(
+                selected_channels_[bus_index].begin(), selected_channels_[bus_index].end(),
+                [](const std::string& selected) { return !selected.empty(); });
+        if (!bus_selected && !channel_selected)
             return false;
-        selected_[bus_index].clear();
+        if (disconnect_callback_ && !disconnect_callback_(bus_index))
+            return false;
+        if (bus_index < selected_.size())
+            selected_[bus_index].clear();
+        if (bus_index < selected_channels_.size())
+            selected_channels_[bus_index] = {};
         notify();
         return true;
     }
 
     std::string connected_route(std::size_t bus_index) const override {
         return bus_index < selected_.size() ? selected_[bus_index] : std::string{};
+    }
+
+    std::string connected_route_channel(std::size_t bus_index,
+                                        std::size_t channel_index) const override {
+        if (bus_index >= selected_channels_.size() || channel_index >= 2)
+            return {};
+        return selected_channels_[bus_index][channel_index];
     }
 
     std::vector<std::string> selected_route_ids() const override {
@@ -186,6 +327,19 @@ class MutableAudioRouteCatalog final : public AudioRouteCatalog {
     }
 
   private:
+    void ensure_bus(std::size_t bus_index) {
+        if (selected_.size() <= bus_index)
+            selected_.resize(bus_index + 1);
+        if (selected_channels_.size() <= bus_index)
+            selected_channels_.resize(bus_index + 1);
+    }
+
+    void set_whole_bus(std::size_t bus_index, const AudioRouteInfo& route) {
+        selected_[bus_index] = route.stable_id;
+        selected_channels_[bus_index][0] = route.stable_id;
+        selected_channels_[bus_index][1] = route.channels > 1 ? route.stable_id : std::string{};
+    }
+
     void notify() {
         if (callback_)
             callback_();
@@ -193,8 +347,11 @@ class MutableAudioRouteCatalog final : public AudioRouteCatalog {
 
     std::vector<AudioRouteInfo> routes_;
     std::vector<std::string> selected_;
+    std::vector<std::array<std::string, 2>> selected_channels_;
     ChangeCallback callback_;
     ConnectCallback connect_callback_;
+    ConnectChannelCallback connect_channel_callback_;
+    DisconnectCallback disconnect_callback_;
 };
 
 } // namespace pulp::host

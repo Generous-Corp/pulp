@@ -102,10 +102,34 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
+  # The self-hosted Windows x64 lane by default; GitHub-hosted windows-latest
+  # only with PULP_ALLOW_HOSTED_WINDOWS=1 (tools/scripts/windows_runner_selector.py).
+  windows-runner:
+    name: Resolve Windows runner
+    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      runs_on: ${{ steps.resolve.outputs.runs_on }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: tools/scripts/windows_runner_selector.py
+          sparse-checkout-cone-mode: false
+      - name: Resolve the Windows x64 runner
+        id: resolve
+        env:
+          DEFAULT_SELECTOR: ${{ vars.PULP_LOCAL_WINDOWS_X64_RUNS_ON_JSON || '' }}
+          ALLOW_HOSTED: ${{ vars.PULP_ALLOW_HOSTED_WINDOWS || '' }}
+        run: >-
+          python3 tools/scripts/windows_runner_selector.py --route --github-output
+          --default-selector "$DEFAULT_SELECTOR" --allow-hosted "$ALLOW_HOSTED"
+
   windows:
     name: Windows WARP proof (advisory)
+    needs: windows-runner
     if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
-    runs-on: windows-latest
+    runs-on: ${{ fromJSON(needs.windows-runner.outputs.runs_on) }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
