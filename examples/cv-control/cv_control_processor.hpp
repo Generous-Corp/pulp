@@ -163,15 +163,8 @@ class FaceToneProcessor final : public format::Processor {
 
 #if !defined(PULP_WASM)
     void on_osc(const osc::Message& message) {
-        if (message.address != "/pulp/cv/face" && message.address != "/pulp/control")
-            return;
-        if (message.args.size() < 3 || !std::holds_alternative<float>(message.args[0]) ||
-            !std::holds_alternative<float>(message.args[1]) ||
-            !std::holds_alternative<std::int32_t>(message.args[2]) ||
-            (message.args.size() > 3 && !std::holds_alternative<std::int32_t>(message.args[3])))
-            return;
-        publish_control({0, std::get<float>(message.args[0]), std::get<float>(message.args[1]),
-                         std::get<std::int32_t>(message.args[2]) != 0});
+        if (const auto sample = cv_control::decode_osc_control(message))
+            publish_control(*sample);
     }
 #endif
 
