@@ -1,7 +1,7 @@
-#include <catch2/catch_test_macros.hpp>
-#include <pulp/osc/osc.hpp>
-#include <pulp/events/interprocess_connection.hpp>
 #include "../examples/cv-control/cv_control.hpp"
+#include <catch2/catch_test_macros.hpp>
+#include <pulp/events/interprocess_connection.hpp>
+#include <pulp/osc/osc.hpp>
 #include <variant>
 
 TEST_CASE("OSC malformed packet is rejected", "[external-input][osc]") {
@@ -10,17 +10,21 @@ TEST_CASE("OSC malformed packet is rejected", "[external-input][osc]") {
     REQUIRE(message.address.empty());
 }
 
-TEST_CASE("OSC wrong-type arguments are rejected before frame publication", "[external-input][osc]") {
+TEST_CASE("OSC wrong-type arguments are rejected before frame publication",
+          "[external-input][osc]") {
     pulp::osc::Message message("/pulp/control");
     message.add(std::string("not-a-float")).add(0.8f).add(std::int32_t{1});
     REQUIRE(message.args.size() == 3);
     REQUIRE_FALSE(std::holds_alternative<float>(message.args[0]));
 }
 
-TEST_CASE("IPC connection loss publishes unavailable through the recipe callback", "[external-input][ipc]") {
+TEST_CASE("IPC connection loss publishes unavailable through the recipe callback",
+          "[external-input][ipc]") {
     struct Probe final : pulp::events::InterprocessConnection {
         bool lost = false;
-        void connection_lost() override { lost = true; }
+        void connection_lost() override {
+            lost = true;
+        }
     } probe;
     probe.connection_lost();
     REQUIRE(probe.lost);
