@@ -291,7 +291,7 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
                 // parallel/legacy paths below, which would run the masked interior
                 // live and double-advance producer-owned state. Worst case here is a
                 // silent block, never a double-render.
-                bool ok = false;
+                auto dispatch = RoutedDispatchResult::setup_failure;
                 if (cg->routed.serial.pool.fits(cg->routed.serial.snapshot, frames32)) {
                     const bool size_ok = frames32 == static_cast<std::uint32_t>(
                                                          cg->anticipation.lane.block_frames());
@@ -313,15 +313,18 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
                             std::fill_n(dst, num_samples, 0.0f);
                         }
                     }
-                    ok = dispatch_routed([&] {
+                    dispatch = dispatch_routed([&] {
                              return executor_.process_routed(
                                  block, cg->routed.serial.snapshot, cg->routed.serial.pool,
                                  has_midi ? &cg->routed.midi : nullptr,
                                  has_automation ? &cg->routed.automation : nullptr, {}, {}, {}, {},
                                  cg->anticipation.skip_mask);
-                         }) == RoutedDispatchResult::success;
+                         });
                 }
-                if (!ok) {
+                if (dispatch == RoutedDispatchResult::processing_failure) {
+                    routed_only_execution_failures_.fetch_add(1, std::memory_order_relaxed);
+                }
+                if (dispatch != RoutedDispatchResult::success) {
                     for (std::size_t c = 0; c < output.num_channels(); ++c) {
                         std::memset(output.channel_ptr(c), 0,
                                     sizeof(float) * static_cast<std::size_t>(num_samples));

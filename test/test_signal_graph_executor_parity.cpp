@@ -1132,6 +1132,45 @@ TEST_CASE("SignalGraph routed hosted failure is terminal and fail-closed",
         CHECK(sample == 0.0f);
 }
 
+TEST_CASE("SignalGraph anticipation counts a hosted processing rejection once",
+          "[host][graph][anticipation][routing][plugin][failure]") {
+    SignalGraph graph;
+    const auto input = graph.add_input_node(2, "Input");
+    const auto plugin = graph.add_plugin_node(
+        std::make_unique<DeterministicPlugin>(DeterministicPlugin::Mode::kFull, 1.0f, 2, 2, 0,
+                                              true),
+        2, 2, "Rejecting exterior");
+    const auto gen = graph.add_plugin_node(
+        std::make_unique<DeterministicPlugin>(DeterministicPlugin::Mode::kFull, 1.0f, 0, 2),
+        0, 2, "Anticipated interior");
+    const auto gain = graph.add_gain_node("Gain");
+    const auto output = graph.add_output_node(2, "Output");
+    for (int c = 0; c < 2; ++c) {
+        REQUIRE(graph.connect(input, c, plugin, c));
+        REQUIRE(graph.connect(plugin, c, output, c));
+        REQUIRE(graph.connect(gen, c, gain, c));
+        REQUIRE(graph.connect(gain, c, output, c));
+    }
+    graph.set_canonical_executor_routing_enabled(true);
+    graph.set_anticipation_enabled(true);
+    REQUIRE(graph.prepare(kSr, kFrames));
+    CHECK(graph.pump_anticipation(1) >= 0);
+
+    std::vector<float> output_l(static_cast<std::size_t>(kFrames), 1.0f);
+    std::vector<float> output_r(static_cast<std::size_t>(kFrames), 1.0f);
+    std::array<float*, 2> output_ptrs{output_l.data(), output_r.data()};
+    std::vector<float> input_l(static_cast<std::size_t>(kFrames), 0.0f);
+    std::vector<float> input_r(static_cast<std::size_t>(kFrames), 0.0f);
+    std::array<const float*, 2> input_ptrs{input_l.data(), input_r.data()};
+    pulp::audio::BufferView<const float> input_view(input_ptrs.data(), 2, kFrames);
+    pulp::audio::BufferView<float> output_view(output_ptrs.data(), 2, kFrames);
+    graph.process(output_view, input_view, kFrames);
+
+    CHECK(graph.routed_only_execution_failures() == 1);
+    for (const auto sample : output_l) CHECK(sample == 0.0f);
+    for (const auto sample : output_r) CHECK(sample == 0.0f);
+}
+
 TEST_CASE("Translated routing matches SignalGraph: plugin + gain fan-in mix",
           "[host][graph][executor][routing][parity][plugin]") {
     SignalGraph g;
