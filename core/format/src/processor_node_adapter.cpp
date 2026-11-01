@@ -30,6 +30,9 @@ bool ProcessorNode::prepare(const PrepareContext& context) {
             input_roles_[index] = role;
             input_channels_[index] = descriptor.input_buses[index].default_channels;
             input_optional_[index] = descriptor.input_buses[index].optional;
+            input_names_[index] = descriptor.input_buses[index].name;
+            if (index > 0 && input_names_[index].empty())
+                input_names_[index] = "aux";
         }
         processor_->prepare(context);
         // Pre-size the discard MIDI sinks so the per-block clear() the bridge runs
@@ -138,7 +141,8 @@ bool ProcessorNode::process_binding(ProcessBlock& block, const GraphRuntimeNodeP
         } else {
             route_view = {};
         }
-        if (!local_buses.add_input("aux", route_view, self->input_roles_[bus], active))
+        if (!local_buses.add_input(self->input_names_[bus], route_view, self->input_roles_[bus],
+                                   active))
             return false;
     }
     if (!local_buses.add_output("main", ctx.node_outputs, BusRole::Main))
