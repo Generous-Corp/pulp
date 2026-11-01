@@ -18,10 +18,13 @@
 
 #include <public.sdk/source/common/pluginview.h>
 #include <public.sdk/source/vst/vsteditcontroller.h>
+#include <public.sdk/source/vst/vstaudioeffect.h>
 
 #import <AppKit/AppKit.h>
 
 #include <memory>
+#include <array>
+#include <vector>
 
 using namespace Steinberg;
 using pulp::host::make_vst3_slot;
@@ -172,6 +175,18 @@ std::unique_ptr<PluginSlot> slot_for(CountingCombined& plugin) {
                           static_cast<Vst::IEditController*>(&plugin));
 }
 
+class RejectingAudioEffect final : public Vst::AudioEffect {
+  public:
+    RejectingAudioEffect() {
+        addAudioInput(u"Input", Vst::SpeakerArr::kStereo);
+        addAudioOutput(u"Output", Vst::SpeakerArr::kStereo);
+    }
+
+    tresult PLUGIN_API process(Vst::ProcessData&) SMTG_OVERRIDE {
+        return kResultFalse;
+    }
+};
+
 }  // namespace
 
 TEST_CASE("VST3 editor embeds into a real parent view",
@@ -203,6 +218,35 @@ TEST_CASE("VST3 editor embeds into a real parent view",
         slot->destroy_hosted_editor(std::move(editor));
         REQUIRE(view.removed_calls == 1);
         REQUIRE([[win.content() subviews] count] == 0u);
+    }
+}
+
+TEST_CASE("VST3 process rejection is exposed through the slot status latch",
+          "[host][vst3][failure]") {
+    @autoreleasepool {
+        auto* fake = new RejectingAudioEffect();
+        // The slot owns one reference for each interface pointer it receives.
+        fake->addRef();
+        PluginInfo info;
+        info.name = "FakeVst3Rejecting";
+        auto slot = make_vst3_slot(info, static_cast<Vst::IComponent*>(fake),
+                                   static_cast<Vst::IAudioProcessor*>(fake), nullptr);
+        REQUIRE(slot != nullptr);
+        REQUIRE(slot->prepare(48000.0, 64));
+
+        std::vector<float> in_samples(16, 0.25f);
+        std::vector<float> out_samples(16, 0.0f);
+        std::array<const float*, 1> in_ptrs{in_samples.data()};
+        std::array<float*, 1> out_ptrs{out_samples.data()};
+        pulp::audio::BufferView<const float> input(in_ptrs.data(), 1, 16);
+        pulp::audio::BufferView<float> output(out_ptrs.data(), 1, 16);
+        pulp::midi::MidiBuffer midi_in;
+        pulp::midi::MidiBuffer midi_out;
+        pulp::host::ParameterEventQueue params;
+        slot->process(output, input, midi_in, midi_out, params, 16);
+        CHECK(slot->process_status() == PluginSlot::ProcessStatus::failed);
+        for (const auto sample : out_samples)
+            CHECK(sample == 0.25f);
     }
 }
 
