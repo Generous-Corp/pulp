@@ -515,7 +515,17 @@ catch_discover_tests(pulp-test-ship-tracing-guard)
 # of ship_artifact_scan_guard.hpp, proven against fixtures. The scan itself is
 # exercised through `pulp ship check` in test_cli_ship_shellout.cpp.
 add_executable(pulp-test-ship-artifact-scan-guard test_ship_artifact_scan_guard.cpp)
-target_include_directories(pulp-test-ship-artifact-scan-guard PRIVATE ${CMAKE_SOURCE_DIR})
+# ship_artifact_scan_guard.hpp pulls in ship_dev_build_guard.hpp, which includes
+# the generated build_profile_gen.h; configure it here (idempotent) as the
+# dev-build-guard test does, so the header exists at configure time.
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/tools/cli")
+configure_file(
+    "${CMAKE_SOURCE_DIR}/tools/cli/build_profile_gen.h.in"
+    "${CMAKE_BINARY_DIR}/tools/cli/build_profile_gen.h"
+    @ONLY)
+target_include_directories(pulp-test-ship-artifact-scan-guard PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_BINARY_DIR}/tools/cli)
 pulp_test_data(pulp-test-ship-artifact-scan-guard NONE)
 target_link_libraries(pulp-test-ship-artifact-scan-guard PRIVATE Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-ship-artifact-scan-guard)
