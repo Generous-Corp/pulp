@@ -140,6 +140,16 @@ class FaceToneProcessor final : public format::Processor {
     void submit_face_frame(FaceFrame frame) noexcept {
         publish_control({frame.sequence, frame.mouth_open, frame.confidence, frame.tracked});
     }
+#if !defined(PULP_WASM)
+    // Test seam that drives the same callback installed on the real OSC receiver.
+    void submit_osc_for_test(const osc::Message& message) {
+        on_osc(message);
+    }
+    const runtime::ExternalInputFrame<1>& published_control_for_test() {
+        return input_.read();
+    }
+#endif
+
     void expire_face_frame() noexcept {
         publish_control({0, 0.0f, 0.0f, false});
     }
