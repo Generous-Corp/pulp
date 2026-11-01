@@ -154,6 +154,7 @@
     "tools/cli/version_diag.cpp"
    ],
    "spawning_sources": [
+    "build/tools/cli/generated/migration_index.cpp",
     "tools/cli/cli_common.cpp",
     "tools/cli/cli_delegate.cpp",
     "tools/cli/cli_doctor_helpers.cpp",
@@ -1482,6 +1483,22 @@
    "kind": "compiled",
    "sources": [
     "test/test_embed_compress.cpp"
+   ],
+   "undeclared_sources": []
+  },
+  "pulp-test-external-input": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_external_input.cpp"
+   ],
+   "inputs": [
+    "test/fixtures/external-input"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/harness/rt_allocation_probe.cpp",
+    "test/support/external_input_replay.cpp",
+    "test/test_external_input.cpp"
    ],
    "undeclared_sources": []
   },
