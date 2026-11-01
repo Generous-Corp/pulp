@@ -488,6 +488,15 @@ macOS.
   workflow's `GITHUB_TOKEN` starts no workflow run.
 - **`gate_suite_executed.py` reads both lanes as `tier-only`.** Use the
   `deferred` annotation, or the skipped `Build` step, to tell them apart.
+- **Shipyard's arm guard reads the tier record, not annotations.**
+  `macos-tier-record.yml` publishes a `shipyard-test-tier/macos` check run per
+  completed same-repository Build and Test run, bound to that run and attempt.
+  It is created with a dedicated App's token from the main-only `tier-record`
+  environment, never GITHUB_TOKEN. The tier is the more conservative of the
+  run (a `workflow_dispatch` by the fleet App of a head it had approved) and
+  the `macos` job's step conclusions (`Build` skipped means `deferred`). A head with no counted
+  record, or a `deferred` one, cannot be armed once `tiered_required_checks`
+  is set.
 
 ## Diff-scoped gates on merge_group use the entry's own base
 
@@ -550,6 +559,36 @@ policy files: `config.toml`, `ci-profiles/**` and `vm-image*.toml`. That keeps
 a regenerated `changed-surface-families.toml` carrying. To add an exclusion,
 append it to that list. When Shipyard's default changes, compare the two lists
 again, or Pulp silently drops the new protection.
+
+## The `review-verdict` check (not yet a required context)
+
+`.github/workflows/review-verdict.yml` runs Shipyard's `review_verdict_status.py`
+from a pinned Shipyard commit (never the pull request's code) and fails unless
+the exact head is approved and not held, so once `review-verdict` is a required
+check bound to GitHub Actions, GitHub itself refuses a held head, whoever armed
+it. Reviews reach it through `review-verdict-trigger.yml` (a no-permission
+workflow whose completion starts the poster via `workflow_run`). A comment or
+review re-runs the head's own check, so an APPROVE or HOLD changes it without a
+push. `review-verdict-merge-group.yml` reports the same context green for a
+merge-queue entry (the synthetic merge commit no review can name; admission
+already required the verdict), so making the check required cannot stall the
+queue. Bump the pinned Shipyard `ref` only to a commit that still contains the
+sticky-HOLD rule.
+
+The poster job is named `review-verdict`, like the required context and the
+job in Vellum, Shipyard and TartCI. Keep the job id and name equal to the
+context: the merge steward matches a required check bound to GitHub Actions by
+the check run's name, so renaming the job (as was done once, to
+`post-review-verdict`) left every PR head with only the commit status and a
+steward that matched only check runs reported
+`required_never_ran:review-verdict` while GitHub showed the rule green. The
+accepted cost: a comment- or `workflow_run`-triggered run can also show a
+`review-verdict` check on main's commit. The merge-group job shares the name
+too, because there the check run is the signal. A `push` to main touching the
+three review-verdict workflows, or a manual `workflow_dispatch`, runs
+`backfill-review-verdict`, which drives the same pinned script for every open
+non-draft PR targeting main, so existing PRs get a current status without a
+push. A refusal is a warning there, not a failed run.
 
 ## A failed batch's branch name is not the culprit
 
@@ -4832,9 +4871,24 @@ ghapp workflow run build.yml --ref <branch>
 
 A `build.yml` dispatch always includes the macOS leg, so it also spends a macOS
 gate VM. When only Windows matters, dispatch the nightly with `windows_only=true`
-instead. To prove a self-hosted Windows runner (the Mac Pro Windows x64 slot), also
-pass `windows_runner_selector_json` with that slot's labels. The schedule has no
-inputs, so the nightly stays on `windows-latest`. A run with either input set skips
+instead.
+
+**Windows x64 runs on our VM, not hosted.** The nightly, the WARP proof, a
+dispatch's `Windows (x64)` leg, scheduled coverage, Android's Windows row, the
+freshness tier-2 build and `control-shipping-native`'s `windows-x64` leg take the
+self-hosted Windows x64 lane (the Mac Pro slot) through
+`tools/scripts/windows_runner_selector.py --route`. Hosted needs an opt-in:
+`allow_hosted_windows`, `PULP_ALLOW_HOSTED_WINDOWS=1`, or
+`PULP_LOCAL_WINDOWS_X64_RUNS_ON_JSON='"windows-latest"'` (that last one takes the
+lane out of service and changes nothing else). No pull request reaches the lane. The
+fork check runs first, and a missing head repository counts as a fork. A pull
+request's control-shipping and coverage Windows legs run hosted only with the
+opt-in, and are otherwise left out. The lane is one serial VM, so a scheduled
+coverage leg is left out while another Windows x64 job waits; a dispatch always
+queues. The table
+is in `docs/guides/local-ci.md` ("What runs on it"). `windows-cli-compile.yml`, the
+three `build.yml` compile gates and `release-cli.yml` stay on `windows-latest` on
+purpose. Pass `windows_runner_selector_json` to pin a run to a specific runner. A run with either input set skips
 `tracking-issues`, so a red result on a new runner never files or closes the main
 tracking issue. Read where the job actually ran from the job's `runner_name`.
 The selector passes through `tools/scripts/windows_runner_selector.py` first, which
@@ -5270,23 +5324,32 @@ bisectable.
       shared-branch reclaim is only race-free without a competing drain). Plan +
       rollout + validation evidence: `planning/2026-07-20-merge-queue-reenable-plan.md`.
       This is the path back to the merge queue we moved to an org for.
-    - Stale bump PR: one cut BEFORE the merge being drained does not carry
-      that merge's intent, but it is safe to WAIT for while it can still land:
-      its landing re-runs the drain, which assesses every first-parent merge
-      after the bump's cut point (the marker commit's parent), skipping only
-      the bump's own merge. Starting after that integration merge instead
-      silently drops every merge that landed while the bump PR was open. A
-      queued stale PR, or one armed with required checks pending or green, is
-      `stale-wait` (exit 0 plus a `::notice::`), not a red run.
-      `PULP_BUMP_HEAL_STALE_PR=true` (`--heal-stale-pr`) closes a
-      CONFIRMED-stale DEAD END only: ejected from the merge queue, unarmed, or a
-      required check failed (newest run per name). Closing a healthy one just
-      restarts its 8-36 min of checks so the replacement goes stale too. Drafts
-      and unreadable state fail closed (`stale-defer`, exit 1). `dequeued` and
-      non-green `workflow_run` events on `release/version-bump` re-run the
-      drain so a dead end heals when it dies, not on the next main push.
-      When grepping run logs for waits, match `was cut BEFORE this merge`:
-      the literal `stale-defer` also appears in a branch name in fetch output.
+    - One standing bump PR, updated in place: `release/version-bump` carries at
+      most one open PR and it is never closed and recut. The bump is
+      cumulative from the last marker, so a drain that finds the PR cut before
+      the merge it is draining rebuilds the bump on current main and replaces
+      the branch head with one `--force-with-lease` push, then edits the PR
+      body (`pr-updated`). It leaves the head alone (`stale-wait`, exit 0 plus
+      a `::notice::`) when the PR is in the merge queue, when its head already
+      is the bump it would build (same files, content and sync trailers, so an
+      approved head survives landings that need no version), or when the branch
+      cannot be read. Updates are spaced by `PULP_BUMP_COALESCE_MINUTES`
+      (`standing-held`, exit 0) unless a surface now needs a higher version
+      than the head carries; the `*/15` drain acts on the window ending. The
+      landing of a stale head re-runs the drain, which assesses every
+      first-parent merge after the bump's cut point (the marker commit's
+      parent) and skips only the bump's own merge. Starting after that merge
+      instead silently drops every merge that landed while the bump PR was open.
+      `PULP_BUMP_HEAL_STALE_PR=true` (`--heal-stale-pr`) repairs a DEAD standing
+      PR in place (ejected from the merge queue, a required check failed, or a
+      HOLD at its head) by replacing its head, which clears the verdict and
+      reruns checks; it never closes or reopens the PR and obeys the window.
+      Drafts and unreadable state fail closed (`stale-defer`, exit 1).
+      `dequeued` and non-green `workflow_run` events on `release/version-bump`
+      re-run the drain so a dead end is repaired when it dies, not on the next
+      main push. When grepping run logs for waits, match `was cut BEFORE this
+      merge`: the literal `stale-defer` also appears in a branch name in fetch
+      output.
   - **A green `coalesced` drain is a deliberate hold, not a lost bump.** With
       no bump PR open, the drain holds a new one while other PRs wait in the
       merge queue and the last bump landed under `PULP_BUMP_COALESCE_MINUTES`
@@ -7896,14 +7959,15 @@ Makefile-based Mac Pro VMs compile serially, while a bare `--parallel` is
 unbounded. Four fills each VM's assigned cores and remains a bounded share on
 the larger self-hosted macOS machines.
 
-Windows is intentionally different. The required `Windows (x64)` functional
-gate stays on real GitHub-hosted `windows-2022`; the separate build-only MSVC
-release-path gate tracks `windows-latest`. The current local Windows pool is
-Windows ARM64 on QEMU (`qemu-system-aarch64`): it can maybe smoke x64 via
-Windows-on-ARM translation, but it is not the authoritative Intel/x64 gate.
-Do not wire `PULP_LOCAL_WINDOWS_RUNS_ON_JSON` into the required Build-and-Test
+Windows is intentionally different. The advisory `Windows (x64)` functional leg
+runs on a dispatch, on the self-hosted Windows x64 lane, or on GitHub-hosted
+`windows-2022` when opted in; the separate build-only MSVC release-path gate
+tracks `windows-latest`. The local QEMU Windows pool is Windows ARM64
+(`qemu-system-aarch64`): it can maybe smoke x64 via Windows-on-ARM translation,
+but it is not the Intel/x64 lane.
+Do not wire `PULP_LOCAL_WINDOWS_RUNS_ON_JSON` into the Build-and-Test
 Windows x64 matrix leg; use a separate/dedicated label for any local Windows
-ARM64 smoke.
+ARM64 smoke. The x64 leg's self-hosted lane is `PULP_LOCAL_WINDOWS_X64_RUNS_ON_JSON`.
 
 ### macOS runner routing (current)
 
@@ -11249,6 +11313,25 @@ Key facts:
   `tools/scripts/bump_fastpath_report.py` (weekly in `bump-fastpath-weekly.yml`)
   counts them. Read that count before changing the verifier, so a fix targets
   the refusal that actually happens.
+- **The exact projection refuses a bump it cannot reproduce byte for byte.**
+  Over 3 days (2026-10-27..30) 37 of 42 bump runs were taken; the 5 refusals
+  cost about 100 `macos` gate-minutes (a migration note added or removed, a group
+  already carrying an earlier queue entry, a moved base). The verifier now has a
+  second pass, `--allowlist-diff`, run only after the exact pass refuses: the same
+  signed single-commit bump must carry the `Version-Bump-Applied:` marker, and its
+  diff and the event's own diff must sit inside the protected base's
+  `writer_allowed_globs` (`version_at_land.paths_outside_writer_allowlist`, the
+  list the writer checks itself against). A group that batches the bump with any
+  other change leaves the allowlist and runs the full suite. A moved base that
+  resolves no trusted verifier is still refused. Allowlisted code/build files
+  change only their version values (`CONTENT_BOUNDED`: the CMake `project`
+  VERSION, the capability counters); any other byte keeps the full suite.
+- **Bot identity is the signing key, not the author.** Every agent key on the
+  `danielraffel` account verifies on GitHub, and author name/email are free
+  text, so a forged `pulp-release-bot` commit passes every identity field. Both
+  verifier passes require the key embedded in the verified `SSHSIG` to match
+  `tools/scripts/release_bot_signing.json` read from the protected base. Rotate
+  `RELEASE_BOT_SSH_SIGNING_KEY` by landing its public key there first.
 - **Advisory workflows skip the bump.** `coverage.yml`,
   `control-shipping-native.yml`, `examples-validation.yml` and
   `intel-portability.yml` AND `github.head_ref != 'release/version-bump'` into
@@ -12984,6 +13067,7 @@ These changes preserve the required Vellum lanes on their existing runners.
   steward is the only admission writer: it enqueues an approved, green head
   itself, and its stale-arm sweep disarms any arm made by the bump job. An
   unarmed, unreviewed bump PR is therefore live. With
-  `PULP_BUMP_HEAL_STALE_PR` on, heal closes a stale bump PR only when it was
-  ejected from the queue, a required check failed, or the last line of a PR
-  comment is `verdict: HOLD head:<sha>` for the current head.
+  `PULP_BUMP_HEAL_STALE_PR` on, heal repairs the standing bump PR in place
+  (a new head, never a close) only when it was ejected from the queue, a
+  required check failed, or the last line of a PR comment is
+  `verdict: HOLD head:<sha>` for the current head.

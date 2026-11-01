@@ -291,7 +291,7 @@
     },
     {
       "variable": "PULP_LOCAL_WINDOWS_X64_RUNS_ON_JSON",
-      "purpose": "Dispatch-only Windows x64 lane served by one repository-scoped Proxmox VM on macpro that is rolled back to a golden snapshot before and after every job. Distinct from the ARM64 QEMU Windows lanes. Not referenced by any workflow until the variable is set.",
+      "purpose": "Default Windows x64 lane, served by one repository-scoped Proxmox VM on macpro that is rolled back to a golden snapshot before and after every job. Read by tools/scripts/windows_runner_selector.py --route callers; unset uses the lane's four capability labels, and a hosted label switches the lane off. Distinct from the ARM64 QEMU Windows lanes.",
       "expect": [
         "self-hosted",
         "Windows",
