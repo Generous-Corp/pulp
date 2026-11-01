@@ -1459,6 +1459,18 @@ TEST_CASE_METHOD(
     }
     fs::remove_all(filtered);
 
+    // A --product that matches no bundle is a clear error, not an empty package.
+    auto nomatch = make_project("package-linux-product-nomatch");
+    make_fake_bundle(nomatch, "VST3", "Chosen.vst3");
+    auto missing = run_pulp_in(
+        nomatch, {"ship", "package", "--version", "1.0.0", "--product", "Absent"}, 60000);
+    INFO(missing.stdout_output << missing.stderr_output);
+    REQUIRE_FALSE(missing.timed_out);
+    REQUIRE(missing.exit_code == 1);
+    REQUIRE(contains(missing.stderr_output, "no VST3/CLAP/LV2 plugins found"));
+    REQUIRE(fs::is_empty(nomatch / "artifacts"));
+    fs::remove_all(nomatch);
+
     // Filtered, marker in the selected bundle: refused.
     auto selected = make_project("package-linux-product-selected");
     plant(make_fake_bundle(selected, "VST3", "Chosen.vst3"));
