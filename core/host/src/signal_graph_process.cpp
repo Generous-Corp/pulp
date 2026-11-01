@@ -270,11 +270,9 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
             // once, by ~GraphRuntimeWorkerPool, when no audio-thread reader exists
             // (see the compile_ start invariant). Each dispatch is idempotent: it
             // re-clears the MIDI ingress buffers and does not commit consumed
-            // sequences until run() succeeds, and every executor zeroes the output
-            // bus before accumulating — so a parallel attempt that returns false
-            // (a node failed, or it does not fit) can fall through to the serial
-            // executor and then the legacy walk re-rendering the same block with
-            // no double-consumed MIDI and no doubled output.
+            // sequences until run() succeeds. Setup failures can therefore be
+            // retried safely; a node processing failure is terminal and is never
+            // re-rendered by another path.
             // Anticipative rendering (tried first): the lane has pre-rendered the
             // interior off the audio thread. Consume one block, fill the interior
             // boundary-source output slots with it (or zero them on an underrun /

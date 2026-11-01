@@ -1120,6 +1120,7 @@ TEST_CASE("SignalGraph routed hosted failure is terminal and fail-closed",
     graph.process(output_view, input_view, kFrames);
 
     CHECK(rejecting_ptr->process_calls == 1);
+    CHECK(graph.routed_only_execution_failures() == 1);
     for (const auto sample : output_samples) CHECK(sample == 0.0f);
 }
 
