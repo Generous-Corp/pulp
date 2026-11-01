@@ -154,7 +154,6 @@
     "tools/cli/version_diag.cpp"
    ],
    "spawning_sources": [
-    "build/tools/cli/generated/migration_index.cpp",
     "tools/cli/cli_common.cpp",
     "tools/cli/cli_delegate.cpp",
     "tools/cli/cli_doctor_helpers.cpp",
@@ -4140,6 +4139,7 @@
     "test/cmake/plugin_lab_clap_roundtrip.cmake",
     "test/cmake/pulp_state_link_closure.cmake.in",
     "test/cmake/quality_tests.cmake",
+    "test/cmake/x9_hosted_format_receipt.cmake",
     "test/ctest_script_inputs.json",
     "test/fixtures",
     "test/gpu_health_scene3d_acceptance.cpp",
@@ -10342,6 +10342,7 @@
     "test/cmake/plugin_lab_clap_roundtrip.cmake",
     "test/cmake/pulp_state_link_closure.cmake.in",
     "test/cmake/quality_tests.cmake",
+    "test/cmake/x9_hosted_format_receipt.cmake",
     "test/ctest_script_inputs.json",
     "test/fixtures",
     "test/fixtures/timeline",
