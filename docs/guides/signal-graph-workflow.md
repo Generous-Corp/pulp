@@ -95,6 +95,31 @@ not execute a graph. Treat an unexecuted fixture as an input to the next step,
 not as audio evidence. `pulp kit apply` remains a reviewed project mutation and
 must be used only after inspecting its plan.
 
+### Executable fixture dispatch
+
+The use-case names in the planning material map to checked-in source and test
+targets as follows. Run a target through the normal governed build, then run the
+matching CTest name from the configured build directory. A source link without a
+target is an authoring reference, not a passing runtime receipt.
+
+| Workflow | Start with | What it proves | Current boundary |
+|---|---|---|---|
+| Voice and polyphony (X1) | [`test_instrument_voice_allocator.cpp`](../../test/test_instrument_voice_allocator.cpp), [`test_voice_runtime_facade.cpp`](../../test/test_voice_runtime_facade.cpp), [`test_mpe_synth_voice.cpp`](../../test/test_mpe_synth_voice.cpp) | voice lifecycle and per-note building blocks | No single complete instrument fixture yet |
+| Feedback and modulation (X2) | `pulp-test-host-signal-graph`, `pulp-test-signal-graph-executor-parity` | graph execution, feedback and parity controls | A combined serialized replay receipt remains open |
+| Reusable components (X3) | `pulp-test-signal-graph-x9-modular-instrument` (`X3` cases) | two independent component instances in the public-API fixture | General template authoring is still higher-level guidance |
+| Routing and mutation (X4) | `pulp-test-signal-graph-prepared-swap-live` and `pulp-test-signal-graph-pdc-swap-continuity` (declared in `test/cmake/sampler_runtime_tests.cmake`) | prepared edits, latency/PDC and continuity policy | Full aux/sidechain application routing remains open |
+| Hosted processing (X5) | `pulp-test-external-plugin-graph-fixture` (declared in `test/cmake/timeline_tests.cmake`), plus the conditional `pulp-test-signal-graph-x9-hosted-format-receipt` CTest in `CMakeLists.txt` when the X9 target exists | conditional format availability and graph-host seams | Bus negotiation, graph-visible failure, offline parity and isolation remain gated |
+| Generated instrument (X6) | `pulp-test-dsl-processor` | deterministic generated `Processor` path | Graph/template discoverability and full live/baked/offline join remain open |
+| Mixed-rate/sample-region work (X7) | [sample granular graphs](sample-granular-graphs.md), `pulp-test-host-signal-graph` | documented rate and causality building blocks | A complete mixed-rate authoring fixture is not yet claimed |
+| Inspection and replay (X8) | `pulp-test-live-dsp-telemetry-graph`, `pulp-test-signal-graph-offline-parity` | diagnostics and output parity surfaces | Joined topology/event/fault replay receipt remains open |
+| Complete modular instrument (X9) | `pulp-test-signal-graph-x9-modular-instrument` | public-API integration of voices, modulation, state, mutation and offline render | Hosted-format matrix and replay/state/output closure remain conditional |
+
+For a clean-checkout productivity measurement, record the first successful
+fixture command, elapsed setup time, concepts required, manual integration
+steps, and the first diagnostic artifact. Repeat the same exercise after any
+documentation change. This keeps a discoverability improvement distinct from
+new runtime capability.
+
 ## Load and validate before preparation
 
 For a generated or authored `.pulpgraph` document, keep the JSON bytes and
