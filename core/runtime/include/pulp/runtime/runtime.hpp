@@ -44,3 +44,4 @@
 #include <pulp/runtime/system.hpp>
 #include <pulp/runtime/seqlock.hpp>
 #include <pulp/runtime/triple_buffer.hpp>
+#include <pulp/runtime/external_input.hpp>
