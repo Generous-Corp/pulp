@@ -1104,6 +1104,29 @@ class CompiledDataTests(unittest.TestCase):
             self.assertIn("${CMAKE_BINARY_DIR}/tools/cli/generated/index.cpp", seen[0]["sources"])
             self.assertFalse(any(s.startswith("build-") for s in seen[0]["sources"]))
 
+    def test_a_generated_source_in_the_build_dir_never_counts_as_a_spawner(self) -> None:
+        # The generated index quotes API names in prose; its presence or its
+        # build-directory name must not change the compiled entry.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp))
+            write(repo.root, "tools/cli/real.cpp", "int main() { return 0; }\n")
+            seen = []
+            for name, with_file in (("build-gate", True), ("build-linux", False)):
+                build = repo.root / name
+                ev = build / "test" / "test-data"
+                ev.mkdir(parents=True)
+                gen = f"{name}/tools/cli/generated/index.cpp"
+                if with_file:
+                    write(repo.root, gen, "// see ChildProcessManager\nconst char* t = \"ChildProcessManager\";\n")
+                (ev / "executables.json").write_text(json.dumps({"schema": "pulp-test-executables/v1", "executables": {
+                    "pulp-gen": {"sources": ["tools/cli/real.cpp", gen], "tree_defines": []}}}), encoding="utf-8")
+                (ev / "pulp-gen.inputs.json").write_text(json.dumps({
+                    "schema": "pulp-test-data-inputs/v1", "executable": "pulp-gen", "kind": "compiled",
+                    "whole_checkout": True, "sources": [], "inputs": []}), encoding="utf-8")
+                seen.append(sti.compiled_entries(repo.root, build).get("pulp-gen"))
+            self.assertEqual(seen[0], seen[1])
+            self.assertFalse(any("index.cpp" in x for x in (seen[0] or {}).get("spawning_sources", [])))
+
     def test_reading_without_a_declaration_is_undeclared_and_a_quiet_source_gets_no_entry(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Repo(Path(tmp)); compiled_evidence(repo)

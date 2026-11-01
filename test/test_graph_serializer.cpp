@@ -427,6 +427,19 @@ TEST_CASE("SignalGraph D1 replay probe separates plan determinism from persisten
     REQUIRE(altered_json != baseline_json);
     REQUIRE(replay_plan_fingerprint(altered) != baseline_plan_hash);
     REQUIRE(render_replay_graph(altered) != baseline_render);
+
+    // A semantic graph value can change without changing the resolved
+    // execution topology. Keep these fingerprints separate: persistence must
+    // notice the gain edit, while the plan fingerprint remains stable.
+    SignalGraph gain_edit;
+    ReplayFixture gain_fixture;
+    populate_replay_graph(gain_edit, gain_fixture, canonical_edge_order);
+    REQUIRE(gain_edit.set_node_gain(gain_fixture.gain_b, 0.5f));
+    const auto gain_json = GraphSerializer::to_json(gain_edit);
+    REQUIRE(gain_edit.prepare(48000.0, 8));
+    REQUIRE(gain_json != baseline_json);
+    REQUIRE(replay_plan_fingerprint(gain_edit) == baseline_plan_hash);
+    REQUIRE(render_replay_graph(gain_edit) != baseline_render);
 }
 
 TEST_CASE("GraphSerializer persists an executable sample region",

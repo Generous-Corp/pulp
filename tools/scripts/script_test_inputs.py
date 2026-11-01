@@ -1116,7 +1116,13 @@ def compiled_entries(root: Path, build_dir: Path | None) -> dict | None:
         defines = list(rec.get("tree_defines") or [])
         reading = {src for src in rec.get("sources") or [] if source_signals(root, src, defines)}
         data_sources = reading | declared_sources
-        spawns, spawning, unmatched = spawn_state(root, rec, target, artifacts)
+        # A configure-generated source holds text rendered from docs (the
+        # migration index quotes API names such as ChildProcessManager), so its
+        # words are not a process-API call, and whether the file exists yet
+        # would otherwise change the entry.
+        spawn_rec = dict(rec, sources=[x for x in rec.get("sources") or []
+                                       if not (build_rel and build_rel != "." and x.startswith(build_rel + "/"))])
+        spawns, spawning, unmatched = spawn_state(root, spawn_rec, target, artifacts)
         if not data_sources and spawns is None and not decl.get("whole_checkout"):
             continue
         whole = bool(decl.get("whole_checkout"))
