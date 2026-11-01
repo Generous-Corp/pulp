@@ -248,7 +248,7 @@ Fixture make_block_size_dependent_fixture() {
 // deterministic makes any mismatch attributable to graph routing or the
 // offline block driver rather than plugin state.
 class OfflineSidechainPlugin final : public pulp::host::PluginSlot {
-public:
+  public:
     enum class Mode { LatencyPassthrough, MainSidechainMix };
 
     OfflineSidechainPlugin(Mode mode, int input_channels, int output_channels,
@@ -256,20 +256,25 @@ public:
         : mode_(mode), latency_samples_(latency_samples),
           info_(make_info(input_channels, output_channels)) {}
 
-    const pulp::host::PluginInfo& info() const override { return info_; }
-    bool is_loaded() const override { return true; }
-    bool prepare(double, int) override { return true; }
+    const pulp::host::PluginInfo& info() const override {
+        return info_;
+    }
+    bool is_loaded() const override {
+        return true;
+    }
+    bool prepare(double, int) override {
+        return true;
+    }
     void release() override {}
 
     void process(pulp::audio::BufferView<float>& output,
-                 const pulp::audio::BufferView<const float>& input,
-                 const pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
-                 const pulp::host::ParameterEventQueue&, int num_samples) override {
+                 const pulp::audio::BufferView<const float>& input, const pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&, const pulp::host::ParameterEventQueue&,
+                 int num_samples) override {
         for (std::size_t channel = 0; channel < output.num_channels(); ++channel) {
             float* dst = output.channel_ptr(channel);
-            const float* main = channel < input.num_channels()
-                                    ? input.channel_ptr(channel)
-                                    : nullptr;
+            const float* main =
+                channel < input.num_channels() ? input.channel_ptr(channel) : nullptr;
             const std::size_t sidechain_channel = channel + output.num_channels();
             const float* sidechain =
                 mode_ == Mode::MainSidechainMix && sidechain_channel < input.num_channels()
@@ -283,20 +288,38 @@ public:
         }
     }
 
-    std::vector<pulp::host::HostParamInfo> parameters() const override { return {}; }
-    float get_parameter(std::uint32_t) const override { return 0.0f; }
+    std::vector<pulp::host::HostParamInfo> parameters() const override {
+        return {};
+    }
+    float get_parameter(std::uint32_t) const override {
+        return 0.0f;
+    }
     void set_parameter(std::uint32_t, float) override {}
     void set_bypass(bool) override {}
-    bool is_bypassed() const override { return false; }
-    std::vector<std::uint8_t> save_state() const override { return {}; }
-    bool restore_state(const std::vector<std::uint8_t>&) override { return true; }
-    int latency_samples() const override { return latency_samples_; }
-    int tail_samples() const override { return 0; }
-    bool has_editor() const override { return false; }
-    void* create_editor_view() override { return nullptr; }
+    bool is_bypassed() const override {
+        return false;
+    }
+    std::vector<std::uint8_t> save_state() const override {
+        return {};
+    }
+    bool restore_state(const std::vector<std::uint8_t>&) override {
+        return true;
+    }
+    int latency_samples() const override {
+        return latency_samples_;
+    }
+    int tail_samples() const override {
+        return 0;
+    }
+    bool has_editor() const override {
+        return false;
+    }
+    void* create_editor_view() override {
+        return nullptr;
+    }
     void destroy_editor_view() override {}
 
-private:
+  private:
     static pulp::host::PluginInfo make_info(int input_channels, int output_channels) {
         pulp::host::PluginInfo info{};
         info.name = "OfflineSidechainFixture";
@@ -320,15 +343,15 @@ Fixture make_sidechain_pdc_fixture() {
     f.block_size_dependent = false;
     f.build = [](SignalGraph& g) {
         const auto input = g.add_input_node(2, "Input");
-        const auto delayed = g.add_plugin_node(
-            std::make_unique<OfflineSidechainPlugin>(
-                OfflineSidechainPlugin::Mode::LatencyPassthrough, 2, 2, 64),
-            2, 2, "Delayed");
+        const auto delayed =
+            g.add_plugin_node(std::make_unique<OfflineSidechainPlugin>(
+                                  OfflineSidechainPlugin::Mode::LatencyPassthrough, 2, 2, 64),
+                              2, 2, "Delayed");
         const auto sidechain = g.add_gain_node("Sidechain");
-        const auto mixer = g.add_plugin_node(
-            std::make_unique<OfflineSidechainPlugin>(
-                OfflineSidechainPlugin::Mode::MainSidechainMix, 4, 2),
-            4, 2, "Mixer");
+        const auto mixer =
+            g.add_plugin_node(std::make_unique<OfflineSidechainPlugin>(
+                                  OfflineSidechainPlugin::Mode::MainSidechainMix, 4, 2),
+                              4, 2, "Mixer");
         const auto output = g.add_output_node(2, "Output");
         for (int channel = 0; channel < 2; ++channel) {
             REQUIRE(g.connect(input, channel, delayed, channel));
@@ -422,8 +445,7 @@ TEST_CASE("Offline sidechain PDC render matches online routing across partitions
     // independent of the online comparison.
     for (std::size_t frame = 0; frame < kFrames; ++frame) {
         for (std::size_t channel = 0; channel < 2; ++channel) {
-            const float delayed_sidechain =
-                frame < 64 ? 0.0f : input[channel][frame - 64] * 0.75f;
+            const float delayed_sidechain = frame < 64 ? 0.0f : input[channel][frame - 64] * 0.75f;
             CHECK(online[channel][frame] == input[channel][frame] + delayed_sidechain);
         }
     }
