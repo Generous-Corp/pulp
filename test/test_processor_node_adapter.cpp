@@ -142,6 +142,8 @@ class SidechainProbe final : public Processor {
         auto* main = audio.main_input();
         auto* sidechain = audio.sidechain_input();
         auto* output = audio.main_output();
+        saw_named_sidechain = audio.inputs.find_by_name("Sidechain") != nullptr;
+        saw_legacy_aux_alias = audio.inputs.find_by_name("aux") != nullptr;
         if (!output)
             return;
         for (std::size_t frame = 0; frame < output->num_samples(); ++frame) {
@@ -150,6 +152,9 @@ class SidechainProbe final : public Processor {
             output->channel_ptr(0)[frame] = main_sample + side_sample;
         }
     }
+
+    bool saw_named_sidechain = false;
+    bool saw_legacy_aux_alias = false;
 };
 
 struct RouteProviderFixture {
@@ -421,6 +426,8 @@ TEST_CASE("ProcessorNode routes a pre-bound host bus into a sidechain") {
     context.node_outputs = {output_channels.data(), 1, frames};
     REQUIRE(ProcessorNode::process_binding(block, context, &node));
     REQUIRE(provider.calls == 1);
+    REQUIRE(processor.saw_named_sidechain);
+    REQUIRE_FALSE(processor.saw_legacy_aux_alias);
     for (int frame = 0; frame < frames; ++frame)
         REQUIRE(output[frame] == main[frame] + route[frame]);
 }
