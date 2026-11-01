@@ -141,8 +141,8 @@ bool ProcessorNode::process_binding(ProcessBlock& block, const GraphRuntimeNodeP
         } else {
             route_view = {};
         }
-        if (!local_buses.add_input(self->input_names_[bus], route_view,
-                                   self->input_roles_[bus], active))
+        if (!local_buses.add_input(self->input_names_[bus], route_view, self->input_roles_[bus],
+                                   active))
             return false;
     }
     if (!local_buses.add_output("main", ctx.node_outputs, BusRole::Main))
