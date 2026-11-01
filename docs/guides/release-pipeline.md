@@ -482,6 +482,13 @@ signing key, and the workflow uses that account's noreply email address. That
 pair is what lets GitHub mark the automation-created commit or tag as
 `Verified`.
 
+The public half is also committed as `tools/scripts/release_bot_signing.json`
+(key and `SHA256:` fingerprint). CI's generated-version-bump fast path trusts a
+bump commit only when the key in its verified signature matches that file as
+committed on protected `main`, since agent keys on the same account verify as
+well. When the secret is rotated, add the new public key to that file on `main`
+before the first bump signed with it, or bumps run the full native suite.
+
 The signing secret is required only when automation is about to create a release
 tag or bot-maintained commit. If it is missing, that step fails closed instead
 of quietly publishing an unsigned source ref.

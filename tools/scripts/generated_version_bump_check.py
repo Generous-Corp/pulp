@@ -15,6 +15,8 @@ only this trusted program invokes ``gh api``.
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
 import importlib
 import json
 import os
@@ -32,6 +34,11 @@ BOT_NAME = "pulp-release-bot"
 BOT_EMAIL = "25807+danielraffel@users.noreply.github.com"
 BOT_LOGIN = "danielraffel"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+# The release bot's SSH signing key(s), read from the PROTECTED BASE only. An
+# author name, email or GitHub login is free text any signer can claim; the key
+# that produced the signature is the identity.
+RELEASE_BOT_SIGNING_PIN = "tools/scripts/release_bot_signing.json"
+SSH_FINGERPRINT_RE = re.compile(r"^SHA256:[A-Za-z0-9+/]{43}$")
 TRUSTED_WRITER_ROOT = "tools/scripts"
 TRUSTED_WRITER_PATHS = (
     "tools/scripts/version_at_land.py",
@@ -171,6 +178,89 @@ def _pull_shape(
         raise NotGeneratedBump("version-bump pull request does not contain exactly one commit")
 
 
+def _ssh_key_fingerprint(public_key_blob: bytes) -> str:
+    """OpenSSH's ``SHA256:`` fingerprint of a wire-format public key blob."""
+    digest = hashlib.sha256(public_key_blob).digest()
+    return "SHA256:" + base64.b64encode(digest).decode("ascii").rstrip("=")
+
+
+def _ssh_signature_key_fingerprint(armored: str) -> str:
+    """Fingerprint of the public key embedded in an armored ``SSHSIG``.
+
+    GitHub's ``verification.verified`` says the signature is valid for SOME key
+    registered to the account; the embedded key says WHICH one. Parsing is
+    strict and fails closed on any malformed field.
+    """
+    lines = [line.strip() for line in armored.strip().splitlines() if line.strip()]
+    if (len(lines) < 3 or lines[0] != "-----BEGIN SSH SIGNATURE-----"
+            or lines[-1] != "-----END SSH SIGNATURE-----"):
+        raise NotGeneratedBump("release-bot signature is not an armored SSH signature")
+    try:
+        raw = base64.b64decode("".join(lines[1:-1]), validate=True)
+    except ValueError as exc:
+        raise NotGeneratedBump("release-bot SSH signature is not valid base64") from exc
+    if raw[:6] != b"SSHSIG" or len(raw) < 10:
+        raise NotGeneratedBump("release-bot SSH signature has no SSHSIG preamble")
+    offset = 10  # magic + uint32 version
+
+    def field() -> bytes:
+        nonlocal offset
+        if offset + 4 > len(raw):
+            raise NotGeneratedBump("release-bot SSH signature is truncated")
+        size = int.from_bytes(raw[offset:offset + 4], "big")
+        offset += 4
+        if offset + size > len(raw):
+            raise NotGeneratedBump("release-bot SSH signature is truncated")
+        value = raw[offset:offset + size]
+        offset += size
+        return value
+
+    if int.from_bytes(raw[6:10], "big") != 1:
+        raise NotGeneratedBump("release-bot SSH signature has an unknown version")
+    public_key = field()
+    if field() != b"git":
+        raise NotGeneratedBump("release-bot SSH signature is not in the git namespace")
+    if not public_key:
+        raise NotGeneratedBump("release-bot SSH signature carries no public key")
+    return _ssh_key_fingerprint(public_key)
+
+
+def _pinned_signing_fingerprints(repo: Path, base: str) -> set[str]:
+    """The release-bot key fingerprints the protected base declares.
+
+    Read with ``git show <base>:``, never from the working tree or the
+    candidate, so a candidate cannot name its own signer. Each entry's
+    fingerprint must be the one its recorded public key yields. A missing,
+    unreadable or empty pin refuses the fast path.
+    """
+    shown = _git(repo, "show", f"{base}:{RELEASE_BOT_SIGNING_PIN}", check=False)
+    if shown.returncode != 0:
+        raise NotGeneratedBump("the protected base pins no release-bot signing key")
+    try:
+        entries = json.loads(shown.stdout).get("ssh_signing_keys")
+    except (json.JSONDecodeError, AttributeError) as exc:
+        raise NotGeneratedBump("the protected base's release-bot key pin is unreadable") from exc
+    if not isinstance(entries, list) or not entries:
+        raise NotGeneratedBump("the protected base pins no release-bot signing key")
+    pinned: set[str] = set()
+    for entry in entries:
+        fingerprint = entry.get("fingerprint") if isinstance(entry, dict) else None
+        public_key = entry.get("public_key") if isinstance(entry, dict) else None
+        if not isinstance(fingerprint, str) or not SSH_FINGERPRINT_RE.fullmatch(fingerprint):
+            raise NotGeneratedBump("the protected base's release-bot key pin is malformed")
+        parts = public_key.split() if isinstance(public_key, str) else []
+        try:
+            blob = base64.b64decode(parts[1], validate=True) if len(parts) >= 2 else b""
+        except ValueError:
+            blob = b""
+        if not blob or _ssh_key_fingerprint(blob) != fingerprint:
+            raise NotGeneratedBump(
+                "the protected base's release-bot key pin disagrees with its public key"
+            )
+        pinned.add(fingerprint)
+    return pinned
+
+
 def _commit_provenance(
     repo: Path,
     metadata: dict[str, Any],
@@ -188,8 +278,15 @@ def _commit_provenance(
     api_committer = metadata.get("committer") or {}
     if verification.get("verified") is not True or verification.get("reason") != "valid":
         raise NotGeneratedBump("release-bot signature is absent or not valid")
-    if not str(verification.get("signature") or "").startswith("-----BEGIN SSH SIGNATURE-----"):
+    signature = str(verification.get("signature") or "")
+    if not signature.startswith("-----BEGIN SSH SIGNATURE-----"):
         raise NotGeneratedBump("release-bot commit is not SSH-signed")
+    if _ssh_signature_key_fingerprint(signature) not in _pinned_signing_fingerprints(
+        repo, candidate_base
+    ):
+        raise NotGeneratedBump(
+            "commit is not signed by the release-bot key the protected base pins"
+        )
     if author.get("name") != BOT_NAME or committer.get("name") != BOT_NAME:
         raise NotGeneratedBump("commit author/committer name is not the release bot")
     if author.get("email") != BOT_EMAIL or committer.get("email") != BOT_EMAIL:
@@ -461,6 +558,58 @@ def _adopt_unreproduced(
     return adopted
 
 
+def _derive_assignments(
+    repo: Path,
+    surfaces: Any,
+    version_at_land: Any,
+    config: Any,
+    worktree: Path,
+    *,
+    base: str,
+    candidate: str,
+) -> list[Any]:
+    """The per-surface version increments the candidate commit claims.
+
+    Fails closed on an unreadable version file, a surface whose files disagree
+    with each other, a step that is not one strict semantic-version increment,
+    or a candidate that moves no configured surface.
+    """
+    assignments: list[Any] = []
+    for surface in config.surfaces:
+        base_versions = [
+            surfaces.read_version(worktree, vf) for vf in surface.version_files
+        ]
+        candidate_versions = [
+            _candidate_version(repo, surfaces, candidate, vf)
+            for vf in surface.version_files
+        ]
+        if any(value is None for value in base_versions + candidate_versions):
+            raise NotGeneratedBump(f"unreadable version file on surface {surface.name}")
+        if len(set(base_versions)) != 1 or len(set(candidate_versions)) != 1:
+            raise NotGeneratedBump(f"version files drift within surface {surface.name}")
+        current = str(base_versions[0])
+        assigned = str(candidate_versions[0])
+        if current == assigned:
+            continue
+        levels = [
+            level
+            for level in ("patch", "minor", "major")
+            if version_at_land.bump_version(current, level) == assigned
+        ]
+        if len(levels) != 1:
+            raise NotGeneratedBump(
+                f"surface {surface.name} is not one strict semantic-version increment"
+            )
+        assignments.append(
+            version_at_land.Assignment(
+                surface.name, levels[0], current, assigned
+            )
+        )
+    if not assignments:
+        raise NotGeneratedBump("candidate changes no configured version surface")
+    return assignments
+
+
 def _reproduce_tree(
     repo: Path,
     *,
@@ -483,39 +632,10 @@ def _reproduce_tree(
             surfaces = importlib.import_module("version_bump_surfaces")
             _bind_trusted_regenerators(version_at_land, worktree)
             config = surfaces.load_config(scripts / "versioning.json")
-            assignments: list[Any] = []
-            for surface in config.surfaces:
-                base_versions = [
-                    surfaces.read_version(worktree, vf) for vf in surface.version_files
-                ]
-                candidate_versions = [
-                    _candidate_version(repo, surfaces, candidate, vf)
-                    for vf in surface.version_files
-                ]
-                if any(value is None for value in base_versions + candidate_versions):
-                    raise NotGeneratedBump(f"unreadable version file on surface {surface.name}")
-                if len(set(base_versions)) != 1 or len(set(candidate_versions)) != 1:
-                    raise NotGeneratedBump(f"version files drift within surface {surface.name}")
-                current = str(base_versions[0])
-                assigned = str(candidate_versions[0])
-                if current == assigned:
-                    continue
-                levels = [
-                    level
-                    for level in ("patch", "minor", "major")
-                    if version_at_land.bump_version(current, level) == assigned
-                ]
-                if len(levels) != 1:
-                    raise NotGeneratedBump(
-                        f"surface {surface.name} is not one strict semantic-version increment"
-                    )
-                assignments.append(
-                    version_at_land.Assignment(
-                        surface.name, levels[0], current, assigned
-                    )
-                )
-            if not assignments:
-                raise NotGeneratedBump("candidate changes no configured version surface")
+            assignments = _derive_assignments(
+                repo, surfaces, version_at_land, config, worktree,
+                base=base, candidate=candidate,
+            )
 
             edited = version_at_land._write_plan(worktree, config, assignments)
             if not edited:
@@ -632,6 +752,167 @@ def _reproduce_tree(
                 _git(repo, "worktree", "remove", "--force", str(worktree), check=False)
 
 
+def _diff_paths(repo: Path, older: str, newer: str) -> list[str]:
+    """Every path that differs between two commits, renames split into A + D."""
+    proc = _git(
+        repo, "diff", "--name-status", "--no-renames", "-z", older, newer,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise NotGeneratedBump(f"could not compute the diff {older[:12]}..{newer[:12]}")
+    fields = proc.stdout.split("\0")
+    if fields and fields[-1] == "":
+        fields.pop()
+    if len(fields) % 2 != 0:
+        raise NotGeneratedBump("diff path status stream is malformed")
+    paths: list[str] = []
+    for index in range(0, len(fields), 2):
+        status, path = fields[index], fields[index + 1]
+        if status not in {"A", "M", "D"} or not path:
+            raise NotGeneratedBump("diff contains a type change or unknown status")
+        paths.append(path)
+    return paths
+
+
+# Code and build files the writer allowlist admits. On a path match alone a
+# forged or buggy bump could carry arbitrary CMake or Python, so allowlist-diff
+# mode admits each of them only when the change is confined to its version
+# value(s): every other byte must match the protected base. Each pattern's
+# first group is the fixed text, its second the value that may move.
+CONTENT_BOUNDED: dict[str, tuple[re.Pattern[str], str]] = {
+    "CMakeLists.txt": (
+        re.compile(r"(project\s*\(\s*[A-Za-z_]\w*\s+VERSION\s+)(\d+\.\d+\.\d+)"),
+        "version",
+    ),
+    "tools/scripts/agent_capability_manifest.py": (
+        re.compile(r"^((?:MANIFEST_REVISION|SURFACE_INVENTORY_VERSION) = )(\d+)$",
+                   re.MULTILINE),
+        "counter",
+    ),
+}
+# A changed path that looks like code or build input and has no bound above
+# keeps the full path, so widening the writer allowlist cannot silently widen
+# what skips the native build.
+CODE_SUFFIXES = (
+    ".bash", ".bat", ".c", ".cc", ".cjs", ".cmake", ".cpp", ".cxx", ".h", ".hpp",
+    ".in", ".js", ".m", ".mjs", ".mm", ".ps1", ".py", ".rs", ".sh", ".swift",
+    ".toml", ".ts", ".yml", ".zsh",
+)
+
+
+def _blob_text(repo: Path, commit: str, path: str) -> str | None:
+    shown = _git(repo, "show", f"{commit}:{path}", check=False)
+    return shown.stdout if shown.returncode == 0 else None
+
+
+def _check_bounded_content(repo: Path, older: str, newer: str, paths: list[str]) -> None:
+    """Refuse a code/build change that is more than its version value(s)."""
+    for path in paths:
+        bound = CONTENT_BOUNDED.get(path)
+        if bound is None:
+            name = path.rsplit("/", 1)[-1]
+            if name == "CMakeLists.txt" or name.endswith(CODE_SUFFIXES):
+                raise NotGeneratedBump(f"code path {path} has no version-only content bound")
+            continue
+        pattern, kind = bound
+        before = _blob_text(repo, older, path)
+        after = _blob_text(repo, newer, path)
+        if before is None or after is None:
+            raise NotGeneratedBump(f"{path} is added or removed, not a version edit")
+        before_matches = pattern.findall(before)
+        after_matches = pattern.findall(after)
+        fixed_before = [prefix for prefix, _ in before_matches]
+        if (not before_matches or len(set(fixed_before)) != len(fixed_before)
+                or fixed_before != [prefix for prefix, _ in after_matches]):
+            raise NotGeneratedBump(f"{path} version line(s) are missing or reshaped")
+        if pattern.sub(r"\g<1>@", before) != pattern.sub(r"\g<1>@", after):
+            raise NotGeneratedBump(f"{path} changes more than its version value(s)")
+        if kind == "counter":
+            for (_, old_value), (_, new_value) in zip(before_matches, after_matches):
+                if int(new_value) - int(old_value) not in (0, 1):
+                    raise NotGeneratedBump(f"{path} counter moves by more than one")
+
+
+def _check_allowlisted_diff(
+    repo: Path,
+    *,
+    base: str,
+    candidate: str,
+    event_base: str,
+    event_head: str,
+) -> list[Any]:
+    """Accept a bot bump whose whole diff sits inside the writer's allowlist.
+
+    The looser sibling of ``_reproduce_tree``: the identity, signature, branch,
+    title and topology checks have already passed, so this decides only whether
+    the CONTENT is a version bump. It is for a bump the exact projection cannot
+    reproduce byte for byte (a migration note added or removed, or a merge group
+    that already carries an earlier queue entry), where the protected base's
+    own writer allowlist still bounds every path it may touch.
+
+    Requires, all from the protected base: the ``Version-Bump-Applied:`` marker
+    on the canonical subject; every path in the candidate's diff, and in the
+    event's own diff (the merge group against its base), inside
+    ``writer_allowed_globs``; and each configured surface at one consistent
+    version that moved by one strict increment. A group that batches the bump
+    with another change has a diff outside the allowlist and is refused. A
+    code or build file inside the allowlist must change only its version
+    value(s) (``CONTENT_BOUNDED``); one with no bound is refused.
+    """
+    message = _git(repo, "show", "-s", "--format=%B", candidate).stdout
+    if message.splitlines()[:1] != [BUMP_SUBJECT]:
+        raise NotGeneratedBump("commit subject is not the canonical bump subject")
+
+    runner_temp = Path(os.environ.get("RUNNER_TEMP") or tempfile.gettempdir())
+    runner_temp.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="pulp-version-bump-proof-", dir=runner_temp) as holder:
+        worktree = Path(holder) / "base"
+        added = False
+        try:
+            _git(repo, "worktree", "add", "--detach", str(worktree), base)
+            added = True
+            scripts = worktree / "tools" / "scripts"
+            sys.path.insert(0, str(scripts))
+            version_at_land = importlib.import_module("version_at_land")
+            surfaces = importlib.import_module("version_bump_surfaces")
+            try:
+                has_marker = version_at_land.has_applied_marker
+                outside = version_at_land.paths_outside_writer_allowlist
+            except AttributeError as exc:
+                raise NotGeneratedBump(
+                    "the protected base predates the shared writer allowlist"
+                ) from exc
+            if not has_marker(message):
+                raise NotGeneratedBump("commit carries no Version-Bump-Applied marker")
+            config = surfaces.load_config(scripts / "versioning.json")
+            if not tuple(config.writer_allowed_globs):
+                raise NotGeneratedBump("the protected base declares no writer allowlist")
+            if event_base != base:
+                _assert_writer_unchanged(repo, base, event_base)
+            observed: list[str] = []
+            diffs: list[tuple[str, str, list[str]]] = []
+            for older, newer in dict.fromkeys(((base, candidate), (event_base, event_head))):
+                paths = _diff_paths(repo, older, newer)
+                if not paths:
+                    raise NotGeneratedBump("bump diff is empty")
+                observed.extend(paths)
+                diffs.append((older, newer, paths))
+            stray = outside(config, observed)
+            if stray:
+                raise NotGeneratedBump(
+                    "diff leaves the writer allowlist: " + ", ".join(stray[:5])
+                )
+            for older, newer, paths in diffs:
+                _check_bounded_content(repo, older, newer, paths)
+            return _derive_assignments(
+                repo, surfaces, version_at_land, config, worktree,
+                base=base, candidate=candidate,
+            )
+        finally:
+            if added:
+                _git(repo, "worktree", "remove", "--force", str(worktree), check=False)
+
+
 def verify(args: argparse.Namespace) -> dict[str, Any]:
     repo = args.repo.resolve()
     event = _load_json(args.event_path)
@@ -690,6 +971,21 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
     _commit_provenance(
         repo, metadata, candidate_base=candidate_base, candidate=candidate
     )
+    if getattr(args, "allowlist_diff", False):
+        assignments = _check_allowlisted_diff(
+            repo,
+            base=candidate_base,
+            candidate=candidate,
+            event_base=args.base,
+            event_head=cumulative_head or candidate,
+        )
+        return {
+            "generated_version_bump": True,
+            "mode": "allowlist-diff",
+            "base": args.base,
+            "candidate": candidate,
+            "surfaces": [item.surface for item in assignments],
+        }
     # Every cheap provenance check has passed; only now pay for history.
     _complete_history(
         repo,
@@ -729,6 +1025,15 @@ def main(argv: list[str]) -> int:
             "when the PULP_BUMP_FASTPATH_PR_MERGE_REF repository variable is 1"
         ),
     )
+    parser.add_argument(
+        "--allowlist-diff",
+        action="store_true",
+        help=(
+            "accept a bump whose whole diff stays inside the protected base's "
+            "writer_allowed_globs instead of reproducing its tree byte for byte; "
+            "every identity, signature and topology check still applies"
+        ),
+    )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     try:
@@ -744,7 +1049,9 @@ def main(argv: list[str]) -> int:
         print(json.dumps(result, sort_keys=True))
     else:
         print(
-            "generated-version-bump: exact trusted transaction "
+            "generated-version-bump: "
+            f"{'allowlisted' if result.get('mode') == 'allowlist-diff' else 'exact'}"
+            " trusted transaction "
             f"({','.join(result['surfaces'])})",
             file=sys.stderr,
         )
