@@ -1,5 +1,21 @@
 # Real-world inputs
 
+The shipped external-input contract is experimental and provider-neutral. It
+is implemented by `pulp::runtime::ExternalInputFrame<N>` and
+`ExternalInputGate<N>` in the runtime SDK. A frame carries `source_id`, an
+`epoch` for provider restart, a provider sequence and timestamp, status,
+confidence, count, and bounded application-defined float values. The gate
+accepts only monotonic, well-formed frames that meet the application policy;
+`invalid`, `unavailable`, `denied`, and `paused` statuses expire the accepted
+value. Advance it once per audio block with the block sample count. It never
+compares a provider clock to the audio clock.
+
+Providers and applications own capture, permissions, inference, lifecycle, and
+mapping. Use an existing `TripleBuffer`, SPSC queue, OSC, IPC, MIDI, or WAM
+handoff; do not add a provider-specific transport or schema to Pulp core. See
+the [licensing boundary](../reference/licensing.md#application-selected-provider-and-host-integrations)
+for why application-selected providers are not Pulp redistributed dependencies.
+
 Pulp applications can map camera, sensor, controller, analysis, or network
 data to parameters and application behavior without adding those providers to
 Pulp core. The provider owns capture, permissions, inference, and lifecycle;
