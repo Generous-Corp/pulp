@@ -77,6 +77,10 @@ try {
   if(-not(Test-Path -LiteralPath $PluginPath)){throw "Plugin missing: $PluginPath"}
   $plugin=(Resolve-Path -LiteralPath $PluginPath).Path
   if([IO.Path]::GetExtension($plugin) -ine ('.'+$Format)){throw 'Plugin format/path mismatch'}
+  $pluginCandidate=Select-PluginPeCandidate $plugin $Format $hostPe.execution_abi
+  $pluginBinary=$pluginCandidate.path
+  $pluginPe=$pluginCandidate.pe
+  $receipt.plugin_pe=@{path=$pluginBinary;pe=$pluginPe;sha256=(Get-FileHash -LiteralPath $pluginBinary -Algorithm SHA256).Hash}
   $privateProfile=Join-Path ([IO.Path]::GetTempPath()) ('pulp-reaper-profile-'+$token)
   $portable=$privateProfile;$scan=Join-Path $run 'scan'
   New-Item -ItemType Directory -Path $scan | Out-Null
@@ -193,7 +197,7 @@ try {
   }
   Assert-TerminalStatus $hostStatus $ParamIndex
   $receipt.host_status=$hostStatus
-  $modulePaths=@(Get-BoundModulePaths $proc.process.Id)
+  $modulePaths=@(Get-BoundModulePaths $proc.process.Id 15 $hostPe.execution_abi)
   $modules=@($modulePaths | ForEach-Object { [pscustomobject]@{FileName=$_} } |
     Where-Object {[IO.Path]::GetExtension($_.FileName) -ieq ('.'+$Format)})
   $bound=@()
@@ -202,6 +206,7 @@ try {
     Assert-ModuleBinding $module.FileName $hash $manifest
     $pluginPe=Get-PeIdentity $module.FileName
     if($pluginPe.execution_abi -eq 'unknown'){throw 'Loaded plugin ABI metadata is unavailable'}
+    if(-not (Test-WindowsPluginAbiCompatible $hostPe.execution_abi $pluginPe.execution_abi)){throw "PLUGIN_ABI_MISMATCH: host=$($hostPe.execution_abi) loaded=$($pluginPe.execution_abi)"}
     $bound+=@{path=$module.FileName;sha256=$hash;pe=$pluginPe}
   }
   if($bound.Count -ne 1){throw 'Expected exactly one manifest-bound loaded plugin PE'}
