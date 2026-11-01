@@ -1211,8 +1211,10 @@ pulp_add_test_suite(pulp-test-runtime
     LIBRARIES pulp::runtime)
 
 pulp_add_test_suite(pulp-test-external-input
-    SOURCES test_external_input.cpp harness/rt_allocation_probe.cpp
-    LIBRARIES pulp::runtime)
+    SOURCES test_external_input.cpp harness/rt_allocation_probe.cpp support/external_input_replay.cpp
+    LIBRARIES pulp::runtime
+    PROPERTIES WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+pulp_test_data(pulp-test-external-input NO_DEFINE PATHS test/fixtures/external-input)
 
 pulp_add_test_suite(pulp-test-durable-file-replacement GROUP pulp-test-group-core-runtime
     LIBRARIES pulp::runtime)

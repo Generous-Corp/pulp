@@ -1,0 +1,3 @@
+{"schema":"pulp.external-input-replay.v1","capacity":1,"sample_rate":48000,"block_samples":128,"policy":{"source_id":1,"minimum_confidence":0.6,"max_age_samples":12000,"expected_count":1},"description":"deliberately failing control"}
+{"t":"frame","source_id":1,"epoch":1,"sequence":1,"provider_time_ns":1000000,"status":"valid","confidence":0.2,"values":[0.1]}
+{"t":"expect","verdict":"accepted","valid":true}

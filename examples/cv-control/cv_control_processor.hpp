@@ -3,6 +3,7 @@
 #include "cv_control.hpp"
 #include <pulp/format/processor.hpp>
 #include <pulp/midi/buffer.hpp>
+#include <pulp/runtime/external_input.hpp>
 #include <pulp/runtime/triple_buffer.hpp>
 #if !defined(PULP_WASM)
 #include <pulp/osc/osc.hpp>
@@ -45,9 +46,10 @@ class FaceToneProcessor final : public format::Processor {
         sample_rate_ = ctx.sample_rate;
         phase_ = 0.0;
         gate_ = 0.0f;
+        input_gate_.expire();
+        browser_gate_.expire();
         mapping_.expire();
         timeout_samples_ = static_cast<std::uint64_t>(std::max(1.0, sample_rate_ * 0.25));
-        consumed_sequence_ = input_.read().sequence;
 #if !defined(PULP_WASM)
         if (const char* raw = std::getenv("PULP_CV_OSC_PORT")) {
             char* end = nullptr;
@@ -64,6 +66,8 @@ class FaceToneProcessor final : public format::Processor {
 #if !defined(PULP_WASM)
         osc_.stop();
 #endif
+        input_gate_.expire();
+        browser_gate_.expire();
         mapping_.expire();
     }
 
@@ -73,11 +77,22 @@ class FaceToneProcessor final : public format::Processor {
         std::optional<ControlSample> newest;
 #if !defined(PULP_WASM)
         const auto& published = input_.read();
-        if (published.sequence != 0 && published.sequence != consumed_sequence_) {
-            consumed_sequence_ = published.sequence;
-            newest = published;
-        }
+        const auto verdict = input_gate_.submit(published, policy_);
+        if (verdict == runtime::ExternalInputVerdict::accepted)
+            newest = ControlSample{input_gate_.sequence(), input_gate_.value(0, 0.0f),
+                                   published.confidence, true};
 #endif
+        // Browser multi-value packets use the existing WAM SysEx sidecar, but
+        // still pass through the same bounded external-input policy as native
+        // providers before they can affect the control mapping.
+        for (const auto& sysex : midi_in.sysex()) {
+            if (const auto frame = decode_midi_sysex(sysex.data)) {
+                const auto verdict = browser_gate_.submit(*frame, browser_policy_);
+                if (verdict == runtime::ExternalInputVerdict::accepted)
+                    newest = ControlSample{browser_gate_.sequence(), browser_gate_.value(0, 0.0f),
+                                           frame->confidence, true};
+            }
+        }
         for (const auto& event : midi_in) {
             // A single short MIDI message carries one coherent sample on every
             // surface. This example reserves channel-16 pitch bend.
@@ -99,6 +114,8 @@ class FaceToneProcessor final : public format::Processor {
         if (newest) {
             mapping_.submit(*newest);
         } else {
+            input_gate_.advance(output.num_samples(), policy_);
+            browser_gate_.advance(output.num_samples(), browser_policy_);
             mapping_.advance(output.num_samples(), timeout_samples_);
         }
 
@@ -131,8 +148,17 @@ class FaceToneProcessor final : public format::Processor {
     // Exactly one selected native provider owns this writer role. The audio
     // callback is the only reader and owns all mapping and timeout state.
     void publish_control(ControlSample sample) noexcept {
-        sample.sequence = ++publication_sequence_;
-        input_.write(sample);
+        runtime::ExternalInputFrame<1> frame;
+        frame.source_id = 1;
+        frame.epoch = epoch_;
+        frame.sequence = ++publication_sequence_;
+        frame.provider_time_ns = frame.sequence;
+        frame.status = sample.valid ? runtime::ExternalInputStatus::valid
+                                    : runtime::ExternalInputStatus::unavailable;
+        frame.confidence = sample.confidence;
+        frame.count = 1;
+        frame.values[0] = sample.value;
+        input_.write(frame);
     }
 
 #if !defined(PULP_WASM)
@@ -150,9 +176,13 @@ class FaceToneProcessor final : public format::Processor {
 #endif
 
     FaceMapping mapping_;
-    runtime::TripleBuffer<ControlSample> input_;
+    runtime::TripleBuffer<runtime::ExternalInputFrame<1>> input_;
+    runtime::ExternalInputGate<1> input_gate_;
+    runtime::ExternalInputPolicy policy_{1, 0.6f, 12000, 1};
+    runtime::ExternalInputGate<16> browser_gate_;
+    runtime::ExternalInputPolicy browser_policy_{1, 0.6f, 12000, 0};
     std::uint64_t publication_sequence_ = 0;
-    std::uint64_t consumed_sequence_ = 0;
+    std::uint32_t epoch_ = 1;
     std::uint64_t midi_sequence_ = 0;
     std::uint64_t timeout_samples_ = 12000;
 #if !defined(PULP_WASM)
