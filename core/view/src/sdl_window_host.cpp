@@ -492,8 +492,21 @@ private:
     void render_frame() {
         if (!renderer_) return;
 
-        int w, h;
+        // SDL_GetWindowSize reports logical coordinates.  With
+        // SDL_WINDOW_HIGH_PIXEL_DENSITY (and especially Windows per-monitor
+        // DPI scaling) the renderer target is larger in physical pixels.
+        // Using the logical size for the Skia surface makes Windows scale the
+        // already-rendered image a second time, so a fitted editor is cropped
+        // at the right/bottom edge.  Keep layout/input in logical units, but
+        // allocate and paint the surface in the actual pixel dimensions.
+        int w = 0, h = 0;
         SDL_GetWindowSize(window_, &w, &h);
+        int pixel_w = 0, pixel_h = 0;
+        SDL_GetWindowSizeInPixels(window_, &pixel_w, &pixel_h);
+        if (pixel_w <= 0 || pixel_h <= 0) {
+            pixel_w = w;
+            pixel_h = h;
+        }
 
         // Use SDL renderer for basic clearing and present
         SDL_SetRenderDrawColor(renderer_, 30, 30, 46, 255);
@@ -506,7 +519,7 @@ private:
         // records commands; using it here made the standalone show a blue
         // diagnostic rectangle while the actual editor remained invisible.
         const auto image_info = SkImageInfo::Make(
-            w, h, kBGRA_8888_SkColorType, kPremul_SkAlphaType);
+            pixel_w, pixel_h, kBGRA_8888_SkColorType, kPremul_SkAlphaType);
         auto surface = SkSurfaces::Raster(image_info);
         if (!surface) {
             SDL_SetRenderDrawColor(renderer_, 30, 30, 46, 255);
@@ -520,32 +533,39 @@ private:
         float tx = 0.0f;
         float ty = 0.0f;
         if (fitted) {
-            scale = std::min(static_cast<float>(w) / design_width_,
-                             static_cast<float>(h) / design_height_);
-            tx = (w - design_width_ * scale) * 0.5f;
-            ty = (h - design_height_ * scale) * 0.5f;
+            scale = std::min(static_cast<float>(pixel_w) / design_width_,
+                             static_cast<float>(pixel_h) / design_height_);
+            tx = (pixel_w - design_width_ * scale) * 0.5f;
+            ty = (pixel_h - design_height_ * scale) * 0.5f;
             skia->save();
             skia->translate(tx, ty);
             skia->scale(scale, scale);
+        } else if (w > 0 && h > 0) {
+            // Non-fitted views still lay out in logical coordinates.  Apply
+            // the platform DPI transform before painting them into pixels.
+            skia->save();
+            skia->scale(static_cast<float>(pixel_w) / w,
+                        static_cast<float>(pixel_h) / h);
         }
         canvas::SkiaCanvas skia_canvas(skia);
         root_.set_bounds({0, 0, fitted ? design_width_ : static_cast<float>(w),
                           fitted ? design_height_ : static_cast<float>(h)});
         root_.layout_children();
         root_.paint_all(skia_canvas);
-        if (fitted) skia->restore();
+        if (fitted || (w > 0 && h > 0)) skia->restore();
         SkPixmap pixmap;
         if (!surface->peekPixels(&pixmap)) {
             SDL_RenderPresent(renderer_);
             return;
         }
 
-        if (!texture_ || texture_width_ != w || texture_height_ != h) {
+        if (!texture_ || texture_width_ != pixel_w || texture_height_ != pixel_h) {
             if (texture_) SDL_DestroyTexture(texture_);
             texture_ = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_BGRA32,
-                                         SDL_TEXTUREACCESS_STREAMING, w, h);
-            texture_width_ = w;
-            texture_height_ = h;
+                                         SDL_TEXTUREACCESS_STREAMING,
+                                         pixel_w, pixel_h);
+            texture_width_ = pixel_w;
+            texture_height_ = pixel_h;
         }
         if (texture_) {
             SDL_UpdateTexture(texture_, nullptr, pixmap.addr(),
