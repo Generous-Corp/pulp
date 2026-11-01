@@ -21,8 +21,11 @@ try {
   Check ($smokeText -match 'ProbeBeforeEditor' -and $smokeText -match 'module-probe-release') 'native editor probe can bind before GPU editor startup'
   Check ($smokeText -match 'Get-BoundModulePaths[\s\S]+?Assert-OwnedIdentity') 'module binding rechecks owned PID/start identity after probe'
   Check ($commonText -match 'PLUGIN_ABI_MISMATCH' -and $smokeText -match 'receipt\.plugin_pe') 'plugin ABI mismatch is recorded and rejected before DAW insertion'
+  Check ($smokeText -match '\[switch\]\$Headless' -and $smokeText -match 'if\(-not \$Headless\)') 'public -Headless mode is retained and skips desktop interaction'
+  Check ($smokeText -match 'Set-ProcessTracePath \$null' -and $smokeText -match 'Set-ProcessTracePath \$priorTracePath' -and $smokeText -match 'trace_environment') 'warm scan clears and restores the caller trace destination and records it'
   $luaText=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'windows_editor_smoke.lua') -Raw
   Check ($luaText -match 'fx_inserted' -and $luaText -match 'PULP_DAW_SMOKE_PROBE_GATE') 'Lua exposes bounded pre-editor module probe gate'
+  Check ($luaText -match 'STATUS_PUBLISH_TIMEOUT' -and $luaText -match 'status_sequence' -and $luaText -notmatch 'direct=io\.open') 'Lua terminal publication uses unique temp names, bounded retry and surfaces timeout'
   $probeCommand=@(Get-Command powershell.exe,pwsh -ErrorAction SilentlyContinue|Select-Object -First 1)
   if($probeCommand.Count -ne 1){throw 'No PowerShell executable for bounded-probe fixture'}
   $sleepProbe=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes('Start-Sleep -Seconds 4'))

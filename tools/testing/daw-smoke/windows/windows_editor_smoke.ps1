@@ -17,7 +17,8 @@ param(
   [ValidateRange(5,300)][int]$TimeoutSec = 60,
   [int]$ContextX = -1,
   [int]$ContextY = -1,
-  [switch]$ProbeBeforeEditor
+  [switch]$ProbeBeforeEditor,
+  [switch]$Headless
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'windows_editor_common.ps1')
@@ -26,6 +27,7 @@ New-Item -ItemType Directory -Force -Path $EvidenceDir | Out-Null
 $run = Join-Path (Resolve-Path -LiteralPath $EvidenceDir).Path ('run-' + [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ') + '-' + $token.Substring(0,8))
 New-Item -ItemType Directory -Path $run | Out-Null
 $receipt = [ordered]@{schema=2;token=$token;verdict='INCONCLUSIVE';scope='host insertion/editor/optional host parameter readback';started_utc=[DateTime]::UtcNow.ToString('o');error=$null;cleanup_errors=@()}
+if($Headless){$receipt.scope='host insertion/optional host parameter readback (headless)'}
 # Fail before launching REAPER when the selected evidence root belongs to a
 # different Windows account. Without this probe, the Lua status handshake can
 # be mistaken for a plugin failure after an ACL-denied write.
@@ -46,6 +48,8 @@ $envNames = @('FX','STATUS','TOKEN','PROJECT','PARAM_INDEX','DURATION','PROBE_GA
 foreach($name in $envNames){$priorEnv[$name]=[Environment]::GetEnvironmentVariable($name,'Process')}
 $exitCode=3
 $privateProfile=$null
+$priorTracePath=Get-ProcessTracePath
+$tracePathRestored=$false
 function Stop-Owned($Entry) {
   if ($Entry.process.HasExited) { return }
   Assert-OwnedIdentity $Entry.process $Entry.started
@@ -117,6 +121,12 @@ try {
   } else {
     Remove-Item Env:PULP_DAW_SMOKE_PROBE_GATE -ErrorAction SilentlyContinue
   }
+  # The warm scan is only a cache/readiness probe. Do not let it inherit the
+  # product trace destination: REAPER may load the plugin during scanning and
+  # close the trace before the measured startup script runs, leaving a
+  # metadata-only capture. Restore the caller's value right after the probe.
+  Set-ProcessTracePath $null
+  $receipt.trace_environment=[ordered]@{warm_scan='cleared';scripted='pending'}
   $warm=Start-Owned @('-newinst','-cfgfile',$ini,'-new','-nosplash') 'warm'
   $deadline=[DateTime]::UtcNow.AddSeconds($TimeoutSec);$cacheMatch=$false
   while([DateTime]::UtcNow -lt $deadline){
@@ -127,6 +137,9 @@ try {
   }
   if(-not $cacheMatch){throw 'Scan cache did not acquire staged basename'}
   Stop-Owned $warm
+  Set-ProcessTracePath $priorTracePath
+  $tracePathRestored=$true
+  $receipt.trace_environment.scripted=if($null -eq $priorTracePath){'cleared'}else{'restored'}
   # A complete copied REAPER profile is required here. A minimal profile can
   # stall before startup-script dispatch; with the private resource directory
   # and its stale scan caches removed, the documented positional Lua form
@@ -183,6 +196,7 @@ try {
   }
   Assert-TerminalStatus $hostStatus $ParamIndex
   $receipt.host_status=$hostStatus
+  if(-not $Headless){
   Add-Type -AssemblyName System.Drawing
   Add-Type -AssemblyName System.Windows.Forms
   Add-Type @'
@@ -269,6 +283,7 @@ public static class OwnedWindow {
     Guard-Editor
     [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
   }
+  }
   $secondModulePaths=@(Get-BoundModulePaths $proc.process.Id 15 $hostPe.execution_abi)
   Assert-OwnedIdentity $proc.process $proc.started
   $secondMatches=@($secondModulePaths | Where-Object { $_ -ieq $receipt.loaded_plugin.path })
@@ -281,6 +296,8 @@ public static class OwnedWindow {
     try{Remove-Item -LiteralPath $privateProfile -Recurse -Force}catch{$receipt.cleanup_errors+='Private profile cleanup failed';$exitCode=3;$receipt.verdict='INCONCLUSIVE'}
   }
   foreach($name in $envNames){[Environment]::SetEnvironmentVariable($name,$priorEnv[$name],'Process')}
+  # Restore tracing even when the warm scan or cache wait failed.
+  if(-not $tracePathRestored){Set-ProcessTracePath $priorTracePath}
   $receipt.finished_utc=[DateTime]::UtcNow.ToString('o')
   Write-Utf8NoBom (Join-Path $run 'receipt.json') ($receipt | ConvertTo-Json -Depth 12)
 }
