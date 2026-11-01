@@ -2657,6 +2657,14 @@ TEST_CASE("Translated routing matches SignalGraph: partial-writing custom node p
         routed.process(rov, riv, kFrames);
         for (int i = 0; i < kFrames; ++i)
             REQUIRE(wo[static_cast<std::size_t>(i)] == ro[static_cast<std::size_t>(i)]);
+
+        // X4 fixture: the untouched second half is a deterministic, non-zero
+        // tail from the preceding block.  Pin this independently of the
+        // parity loop so a future implementation cannot satisfy equality by
+        // clearing both paths at the block boundary.
+        if (blk > 0) {
+            REQUIRE(std::fabs(ro[static_cast<std::size_t>(kFrames / 2)]) > 1.0e-6f);
+        }
     }
 }
 
