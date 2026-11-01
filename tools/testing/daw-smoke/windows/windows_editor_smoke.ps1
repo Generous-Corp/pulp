@@ -138,7 +138,7 @@ try {
   # Windows REAPER dispatches a command-line Lua script only when the script
   # path precedes -cfgfile.  Keeping the script first also prevents a stale
   # status file from being mistaken for a fresh editor run.
-  $proc=Start-Owned @($lua,'-newinst','-cfgfile',$ini,'-new','-nosplash') 'scripted'
+  $proc=Start-Owned @('-newinst',$lua,'-cfgfile',$ini,'-new','-nosplash') 'scripted'
   $receipt.process=@{pid=$proc.process.Id;started_utc=$proc.started;arguments=$proc.command;session_id=$proc.session_id}
   $deadline=[DateTime]::UtcNow.AddSeconds($TimeoutSec);$hostStatus=$null
   while([DateTime]::UtcNow -lt $deadline){
