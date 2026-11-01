@@ -33,6 +33,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 namespace pulp::cli {
@@ -411,6 +412,37 @@ inline std::vector<std::string> release_scan_argv(const std::string& cmake,
     argv.push_back("-P");
     argv.push_back(script.string());
     return argv;
+}
+
+// The plugin bundles a Linux `ship package` run ships: every `.vst3`, `.clap`
+// and `.lv2` directly under build_dir's VST3, CLAP and LV2 directories,
+// narrowed to the one whose stem equals `product_filter` when it is non-empty.
+// Format-directory order is VST3, CLAP, LV2; sorted within each. The scan and the packagers both take this list, so the scanned bytes are
+// exactly the packaged bytes.
+inline std::vector<std::filesystem::path>
+linux_package_bundles(const std::filesystem::path& build_dir, std::string_view product_filter) {
+    namespace fs = std::filesystem;
+    std::vector<fs::path> bundles;
+    for (const auto& [dir_name, extension] :
+         {std::pair<std::string_view, std::string_view>{"VST3", ".vst3"},
+          {"CLAP", ".clap"},
+          {"LV2", ".lv2"}}) {
+        const auto dir = build_dir / std::string(dir_name);
+        std::error_code ec;
+        if (!fs::exists(dir, ec))
+            continue;
+        std::vector<fs::path> in_dir;
+        for (const auto& entry : fs::directory_iterator(dir, ec)) {
+            if (entry.path().extension().string() != extension)
+                continue;
+            if (!product_filter.empty() && entry.path().stem().string() != product_filter)
+                continue;
+            in_dir.push_back(entry.path());
+        }
+        std::sort(in_dir.begin(), in_dir.end());
+        bundles.insert(bundles.end(), in_dir.begin(), in_dir.end());
+    }
+    return bundles;
 }
 
 } // namespace pulp::cli

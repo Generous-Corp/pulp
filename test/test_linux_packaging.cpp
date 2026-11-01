@@ -138,6 +138,25 @@ TEST_CASE("Linux packaging creates tarballs with only present plugin formats",
     REQUIRE(listing.stdout_output.find("ignored.txt") == std::string::npos);
 }
 
+TEST_CASE("Linux packaging tarballs hold exactly the listed bundles", "[ship][linux-package]") {
+    TempDir temp("listed-tarball");
+    auto build = temp.path / "build";
+    write_file(build / "VST3" / "Chosen.vst3" / "Contents" / "plugin", "chosen");
+    write_file(build / "VST3" / "Other.vst3" / "Contents" / "plugin", "other");
+    write_file(build / "CLAP" / "Other.clap", "other-clap");
+
+    auto output = temp.path / "listed.tar.gz";
+    REQUIRE(pulp::ship::create_tar_gz("Chosen", build.string(), output.string(),
+                                      {(build / "VST3" / "Chosen.vst3").string()}));
+    auto listing = run_sh("tar tzf " + quote(output));
+    REQUIRE(listing.exit_code == 0);
+    REQUIRE_THAT(listing.stdout_output, ContainsSubstring("VST3/Chosen.vst3/Contents/plugin"));
+    REQUIRE(listing.stdout_output.find("Other") == std::string::npos);
+
+    REQUIRE_FALSE(pulp::ship::create_tar_gz("None", build.string(),
+                                            (temp.path / "none.tar.gz").string(), {}));
+}
+
 TEST_CASE("Linux packaging tarball path fails closed without plugin formats",
           "[ship][linux-package]") {
     TempDir temp("empty-tarball");

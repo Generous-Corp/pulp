@@ -1731,32 +1731,19 @@ static int ship_package_impl(const std::vector<std::string>& args,
                 return 1;
             }
 
-            std::string product_name;
-            std::vector<fs::path> selected_linux_artifacts;
-            bool found_linux_plugin = false;
-            for (auto dir_name : {"VST3", "CLAP", "LV2"}) {
-                auto dir = build_dir / dir_name;
-                if (!fs::exists(dir)) continue;
-                for (auto& entry : fs::directory_iterator(dir)) {
-                    const auto ext = entry.path().extension().string();
-                    const bool is_plugin =
-                        (std::string_view(dir_name) == "VST3" && ext == ".vst3") ||
-                        (std::string_view(dir_name) == "CLAP" && ext == ".clap") ||
-                        (std::string_view(dir_name) == "LV2" && ext == ".lv2");
-                    if (!is_plugin) continue;
-                    if (!product_filter.empty() && entry.path().stem().string() != product_filter)
-                        continue;
-                    selected_linux_artifacts.push_back(entry.path());
-                    found_linux_plugin = true;
-                    if (product_name.empty())
-                        product_name = entry.path().stem().string();
-                }
-            }
-            if (!found_linux_plugin) {
+            // One list drives both the release scan and the packagers, so the
+            // scanned bytes are exactly the packaged bytes.
+            const auto selected_linux_artifacts =
+                pulp::cli::linux_package_bundles(build_dir, product_filter);
+            if (selected_linux_artifacts.empty()) {
                 std::cerr << "Error: no VST3/CLAP/LV2 plugins found in "
                           << build_dir.string() << "\n";
                 return 1;
             }
+            const std::string product_name = selected_linux_artifacts.front().stem().string();
+            std::vector<std::string> linux_bundle_args;
+            for (const auto& bundle : selected_linux_artifacts)
+                linux_bundle_args.push_back(bundle.string());
 
             if (int rc = enforce_release_artifact_scan(build_dir, selected_linux_artifacts,
                                                        skip_artifact_scan, sub);
@@ -1765,8 +1752,8 @@ static int ship_package_impl(const std::vector<std::string>& args,
 
             auto deb_path = artifacts / (product_name + "-" + version + ".deb");
             std::cout << "Packaging " << product_name << " (Linux → .deb)...\n";
-            if (pulp::ship::create_deb(product_name, version, build_dir.string(),
-                                       deb_path.string(), "Pulp")) {
+            if (pulp::ship::create_deb(product_name, version, build_dir.string(), deb_path.string(),
+                                       "Pulp", linux_bundle_args)) {
                 std::cout << "  Created " << deb_path.string() << "\n";
                 return 0;
             }
@@ -1774,8 +1761,8 @@ static int ship_package_impl(const std::vector<std::string>& args,
             std::cerr << "  .deb creation failed (is dpkg-deb installed?) — "
                          "writing .tar.gz fallback\n";
             auto tar_path = artifacts / (product_name + "-" + version + ".tar.gz");
-            if (pulp::ship::create_tar_gz(product_name, build_dir.string(),
-                                          tar_path.string())) {
+            if (pulp::ship::create_tar_gz(product_name, build_dir.string(), tar_path.string(),
+                                          linux_bundle_args)) {
                 std::cout << "  Created " << tar_path.string() << "\n";
                 return 0;
             }

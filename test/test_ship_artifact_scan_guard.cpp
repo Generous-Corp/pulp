@@ -359,3 +359,30 @@ TEST_CASE("the scan argv names every binary, the gates and the forbid mode",
                       "-DMODE=forbid", "-DGATES=tracing-off;dev-env-off", "-DLABEL=pulp ship sign",
                       "-P", "/sdk/lib/cmake/Pulp/PulpReleaseArtifactScan.cmake"});
 }
+
+TEST_CASE("the Linux package bundle list is one filtered set for scan and packaging",
+          "[ship][artifact-scan][linux-bundles]") {
+    const auto root = temp_dir("linux-bundles");
+    write(root / "VST3" / "Alpha.vst3" / "Contents" / "plugin", "a");
+    write(root / "VST3" / "Beta.vst3" / "Contents" / "plugin", "b");
+    write(root / "CLAP" / "Alpha.clap", "c");
+    write(root / "LV2" / "Beta.lv2" / "manifest.ttl", "d");
+    write(root / "VST3" / "notes.txt", "not a bundle");
+
+    const auto names = [](const std::vector<fs::path>& v) {
+        std::vector<std::string> out;
+        for (const auto& p : v)
+            out.push_back(p.parent_path().filename().string() + "/" + p.filename().string());
+        return out;
+    };
+    // Unfiltered: every bundle the packagers would copy, stray files excluded.
+    CHECK(names(linux_package_bundles(root, "")) ==
+          std::vector<std::string>{"VST3/Alpha.vst3", "VST3/Beta.vst3", "CLAP/Alpha.clap",
+                                   "LV2/Beta.lv2"});
+    // Filtered: only the selected product, in every format, and nothing else.
+    CHECK(names(linux_package_bundles(root, "Alpha")) ==
+          std::vector<std::string>{"VST3/Alpha.vst3", "CLAP/Alpha.clap"});
+    CHECK(linux_package_bundles(root, "Missing").empty());
+    CHECK(linux_package_bundles(root / "absent", "").empty());
+    fs::remove_all(root);
+}

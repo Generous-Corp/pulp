@@ -1398,6 +1398,99 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     REQUIRE(bypassed.exit_code == 0);
     fs::remove_all(overridden);
 }
+
+TEST_CASE_METHOD(
+    ShipShelloutFixture,
+    "pulp ship package on Linux scans and ships the same bundles with and without --product",
+    "[cli][shellout][ship][package][linux-package][artifact-scan][linux-product]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+
+    auto make_project = [](std::string_view name) {
+        auto root = make_fake_project(name, true);
+        {
+            std::ofstream cache(root / "build" / "CMakeCache.txt", std::ios::app);
+            cache << "PULP_TRACING:BOOL=OFF\nPULP_DEV_BUILD:BOOL=OFF\n";
+        }
+        fs::create_directories(root / "tools" / "cmake");
+        for (const char* file :
+             {"PulpReleaseArtifactScan.cmake", "release_artifact_forbidden.json"})
+            fs::copy_file(fs::path(PULP_SOURCE_DIR) / "tools" / "cmake" / file,
+                          root / "tools" / "cmake" / file, fs::copy_options::overwrite_existing);
+        return root;
+    };
+    auto plant = [](const fs::path& bundle) {
+        const auto executable = bundle / "Contents" / "plugin";
+        std::error_code ec;
+        fs::copy_file("/bin/true", executable, fs::copy_options::overwrite_existing, ec);
+        REQUIRE_FALSE(ec);
+        std::ofstream out(executable, std::ios::binary | std::ios::app);
+        REQUIRE(out.good());
+        out << "\nPULP_SKP_CAPTURE_DIR\n";
+    };
+    // Names of the files inside the produced package, whichever packager ran.
+    auto package_listing = [](const fs::path& artifacts) {
+        for (const auto& entry : fs::directory_iterator(artifacts)) {
+            const auto path = entry.path().string();
+            const auto cmd = entry.path().extension() == ".deb" ? "dpkg-deb -c '" + path + "'"
+                                                                : "tar tzf '" + path + "'";
+            return pulp::platform::exec("/bin/sh", {"-c", cmd}, 60000).stdout_output;
+        }
+        return std::string{};
+    };
+
+    // Filtered: the forbidden marker sits in a bundle --product did NOT select.
+    // The package must either be refused or must not carry that bundle.
+    auto filtered = make_project("package-linux-product-filter");
+    make_fake_bundle(filtered, "VST3", "Chosen.vst3");
+    plant(make_fake_bundle(filtered, "VST3", "Leaky.vst3"));
+    auto narrowed = run_pulp_in(
+        filtered, {"ship", "package", "--version", "1.0.0", "--product", "Chosen"}, 60000);
+    INFO(narrowed.stdout_output << narrowed.stderr_output);
+    REQUIRE_FALSE(narrowed.timed_out);
+    if (narrowed.exit_code == 0) {
+        const auto listing = package_listing(filtered / "artifacts");
+        REQUIRE(contains(listing, "Chosen.vst3"));
+        REQUIRE_FALSE(contains(listing, "Leaky"));
+    } else {
+        REQUIRE(contains(narrowed.stderr_output, "forbidden release marker"));
+        REQUIRE(fs::is_empty(filtered / "artifacts"));
+    }
+    fs::remove_all(filtered);
+
+    // Filtered, marker in the selected bundle: refused.
+    auto selected = make_project("package-linux-product-selected");
+    plant(make_fake_bundle(selected, "VST3", "Chosen.vst3"));
+    make_fake_bundle(selected, "VST3", "Other.vst3");
+    auto refused = run_pulp_in(
+        selected, {"ship", "package", "--version", "1.0.0", "--product", "Chosen"}, 60000);
+    INFO(refused.stdout_output << refused.stderr_output);
+    REQUIRE_FALSE(refused.timed_out);
+    REQUIRE(refused.exit_code == 1);
+    REQUIRE(contains(refused.stderr_output, "forbidden release marker"));
+    REQUIRE(fs::is_empty(selected / "artifacts"));
+    fs::remove_all(selected);
+
+    // Unfiltered: a marker in any one of several bundles is refused.
+    auto unfiltered = make_project("package-linux-unfiltered-multi");
+    make_fake_bundle(unfiltered, "VST3", "Clean.vst3");
+    plant(make_fake_bundle(unfiltered, "VST3", "Leaky.vst3"));
+    auto all_refused = run_pulp_in(unfiltered, {"ship", "package", "--version", "1.0.0"}, 60000);
+    INFO(all_refused.stdout_output << all_refused.stderr_output);
+    REQUIRE_FALSE(all_refused.timed_out);
+    REQUIRE(all_refused.exit_code == 1);
+    REQUIRE(contains(all_refused.stderr_output, "forbidden release marker"));
+    REQUIRE(fs::is_empty(unfiltered / "artifacts"));
+
+    // Override control on the same tree: ships when the scan is explicitly skipped.
+    auto bypassed = run_pulp_in(
+        unfiltered, {"ship", "package", "--version", "1.0.0", "--skip-artifact-scan"}, 60000);
+    INFO(bypassed.stdout_output << bypassed.stderr_output);
+    REQUIRE_FALSE(bypassed.timed_out);
+    REQUIRE(bypassed.exit_code == 0);
+    fs::remove_all(unfiltered);
+}
 #endif
 
 // macOS authoring item 7.5: per-artifact .pkg / .dmg
