@@ -290,8 +290,8 @@ TEST_CASE("X9 chains named serial stages through a live graph",
           "[host][graph][x9][serial][mutation]") {
     SignalGraph graph;
     const auto input = graph.add_input_node(2, "Voice Bus");
-    const auto aux = graph.add_gain_node("Aux Bus");
-    const auto master = graph.add_gain_node("Master Bus");
+    const auto aux = graph.add_gain_node("Serial Stage A");
+    const auto master = graph.add_gain_node("Serial Stage B");
     const auto output = graph.add_output_node(2, "Master Output");
     REQUIRE(input != 0);
     REQUIRE(aux != 0);
@@ -319,8 +319,8 @@ TEST_CASE("X9 chains named serial stages through a live graph",
     }
 
     const auto encoded = pulp::host::GraphSerializer::to_json(graph);
-    REQUIRE(encoded.find("Aux Bus") != std::string::npos);
-    REQUIRE(encoded.find("Master Bus") != std::string::npos);
+    REQUIRE(encoded.find("Serial Stage A") != std::string::npos);
+    REQUIRE(encoded.find("Serial Stage B") != std::string::npos);
 
     // Gain edits are live control changes on the named serial stages and do not
     // require replacing the graph or introducing another routing model.
