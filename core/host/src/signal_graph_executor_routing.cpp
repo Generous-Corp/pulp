@@ -162,12 +162,14 @@ bool plugin_binding(fmt::ProcessBlock& block,
     // as before. block.transport is the routed ProcessBlock's transport pointer,
     // populated by SignalGraph::process_impl from the host playhead.
     if (pctx->wants_transport && block.transport != nullptr) {
+        pctx->slot->begin_process();
         pctx->slot->process(buffers, midi_in, midi_out, param_events, num_samples,
                             *block.transport);
     } else {
+        pctx->slot->begin_process();
         pctx->slot->process(buffers, midi_in, midi_out, param_events, num_samples);
     }
-    return true;
+    return pctx->slot->process_status() == PluginSlot::ProcessStatus::ok;
 }
 
 // Custom binding: invoke the node's resolved process callback exactly as

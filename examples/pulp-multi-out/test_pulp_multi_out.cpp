@@ -169,3 +169,71 @@ TEST_CASE(
     REQUIRE(bus_rms(harness.out_views[0].buffer) > 1e-4f);
     REQUIRE(harness.out_views[2].info.index == 2);  // mapping unchanged
 }
+
+TEST_CASE("multi-out: four voices keep independent state through note-off",
+          "[multi-out][voice-lifecycle]") {
+    state::StateStore store;
+    Processor proc;
+    proc.set_state_store(&store);
+    proc.define_parameters(store);
+    format::PrepareContext ctx;
+    ctx.sample_rate = 48000;
+    ctx.max_buffer_size = 4096;
+    proc.prepare(ctx);
+
+    MultiOutHarness attack(512);
+    midi::MidiBuffer notes, midi_out;
+    for (const int note : {60, 64, 67, 71})
+        notes.add(midi::MidiEvent::note_on(0, note, 100));
+    format::ProcessContext pctx;
+    pctx.sample_rate = 48000;
+    pctx.num_samples = 512;
+    auto attack_buffers = attack.buffers();
+    proc.process(attack_buffers, notes, midi_out, pctx);
+    for (std::size_t bus = 0; bus < 4; ++bus)
+        REQUIRE(bus_rms(attack.out_views[bus].buffer) > 1e-4f);
+    for (std::size_t bus = 4; bus < MultiOutHarness::kBuses; ++bus)
+        REQUIRE(bus_rms(attack.out_views[bus].buffer) == 0.0f);
+
+    // Releasing voice 0 must leave the other three voices sounding. A fresh
+    // block also proves that state survives the process call boundary.
+    MultiOutHarness release(4096);
+    midi::MidiBuffer off;
+    off.add(midi::MidiEvent::note_off(0, 60));
+    pctx.num_samples = 4096;
+    auto release_buffers = release.buffers();
+    proc.process(release_buffers, off, midi_out, pctx);
+    REQUIRE(bus_rms(release.out_views[0].buffer) < 0.5f * bus_rms(release.out_views[1].buffer));
+    for (std::size_t bus = 1; bus < 4; ++bus)
+        REQUIRE(bus_rms(release.out_views[bus].buffer) > 1e-4f);
+}
+
+TEST_CASE("multi-out: reusable instances keep parameter state independent",
+          "[multi-out][parameters]") {
+    auto render = [](float gain_db) {
+        state::StateStore store;
+        Processor proc;
+        proc.set_state_store(&store);
+        proc.define_parameters(store);
+        store.set_value(kMasterGainDb, gain_db);
+        format::PrepareContext ctx;
+        ctx.sample_rate = 48000;
+        ctx.max_buffer_size = 512;
+        proc.prepare(ctx);
+        MultiOutHarness harness(512);
+        midi::MidiBuffer notes, midi_out;
+        notes.add(midi::MidiEvent::note_on(0, 69, 127));
+        format::ProcessContext pctx;
+        pctx.sample_rate = 48000;
+        pctx.num_samples = 512;
+        auto buffers = harness.buffers();
+        proc.process(buffers, notes, midi_out, pctx);
+        return bus_rms(harness.out_views[0].buffer);
+    };
+
+    const float unity = render(0.0f);
+    const float half = render(-6.0206f);
+    REQUIRE(unity > 1e-4f);
+    REQUIRE(half > 1e-4f);
+    REQUIRE(std::abs(half / unity - 0.5f) < 0.03f);
+}
