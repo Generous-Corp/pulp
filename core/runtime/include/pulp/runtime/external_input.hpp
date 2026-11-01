@@ -67,9 +67,9 @@ template <std::size_t Capacity> class ExternalInputGate {
             return ExternalInputVerdict::unchanged;
         }
         // The ordering watermark outlives expire(): it is independent of whether a frame is held.
-        if (has_seen_ && (frame.epoch < epoch_ ||
-                          (frame.epoch == epoch_ && (frame.sequence <= sequence_ ||
-                                                     frame.provider_time_ns < provider_time_ns_)))) {
+        if (has_seen_ && (frame.epoch < epoch_ || (frame.epoch == epoch_ &&
+                                                   (frame.sequence <= sequence_ ||
+                                                    frame.provider_time_ns < provider_time_ns_)))) {
             ++counters_.rejected_order;
             return ExternalInputVerdict::rejected_order;
         }
