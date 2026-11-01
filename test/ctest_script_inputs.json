@@ -2846,6 +2846,7 @@
   "pulp-test-editor-open-stages",
   "pulp-test-embed-compress",
   "pulp-test-external-input",
+  "pulp-test-external-input-ingress",
   "pulp-test-external-plugin-graph-fixture",
   "pulp-test-face-identity-full",
   "pulp-test-face-identity-lite",
