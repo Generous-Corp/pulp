@@ -1084,13 +1084,18 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND TARGET PulpGain_CLAP)
     foreach(_pulp_clap_host_test IN ITEMS
             pulp-test-host
             pulp-test-host-regression
-            pulp-test-timeline-graph-binding)
+            pulp-test-timeline-graph-binding
+            pulp-test-signal-graph-x9-modular-instrument)
         if(TARGET ${_pulp_clap_host_test})
             target_compile_definitions(${_pulp_clap_host_test} PRIVATE
                 PULP_TEST_CLAP_PATH="${CMAKE_BINARY_DIR}/CLAP/PulpGain.clap")
             add_dependencies(${_pulp_clap_host_test} PulpGain_CLAP)
         endif()
     endforeach()
+    if(TARGET pulp-test-signal-graph-x9-modular-instrument)
+        target_compile_definitions(pulp-test-signal-graph-x9-modular-instrument PRIVATE
+            PULP_X9_CLAP_PATH="${CMAKE_BINARY_DIR}/CLAP/PulpGain.clap")
+    endif()
     if(TARGET pulp-test-host-regression AND TARGET PulpTone_CLAP)
         target_compile_definitions(pulp-test-host-regression PRIVATE
             PULP_TEST_TONE_CLAP_PATH="${CMAKE_BINARY_DIR}/CLAP/PulpTone.clap")
@@ -1126,6 +1131,21 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND TARGET PulpGain_CLAP)
         set_tests_properties(plugin-lab-clap-roundtrip PROPERTIES
             LABELS "validation;clap;cli;plugin-lab"
             TIMEOUT 60)
+    endif()
+endif()
+
+# Keep X9 format lanes independent: a platform/configuration may provide
+# VST3 or Audio Unit without building the CLAP example target.
+if(PULP_BUILD_TESTS AND NOT ANDROID AND TARGET pulp-test-signal-graph-x9-modular-instrument)
+    if(TARGET PulpGain_VST3)
+        target_compile_definitions(pulp-test-signal-graph-x9-modular-instrument PRIVATE
+            PULP_X9_VST3_PATH="${CMAKE_BINARY_DIR}/VST3/PulpGain.vst3")
+        add_dependencies(pulp-test-signal-graph-x9-modular-instrument PulpGain_VST3)
+    endif()
+    if(TARGET PulpGain_AU)
+        target_compile_definitions(pulp-test-signal-graph-x9-modular-instrument PRIVATE
+            PULP_X9_AU_PATH="${CMAKE_BINARY_DIR}/AU/PulpGain.component")
+        add_dependencies(pulp-test-signal-graph-x9-modular-instrument PulpGain_AU)
     endif()
 endif()
 
