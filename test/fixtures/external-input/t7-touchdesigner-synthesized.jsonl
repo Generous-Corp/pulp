@@ -1,0 +1,11 @@
+{"schema":"pulp.external-input-replay.v1","fixture":"t7-touchdesigner-synthesized","provenance":"synthesized","host":"TouchDesigner","host_version":null,"destination":"127.0.0.1:9001","message":"/pulp/control"}
+{"t":"frame","source_id":7,"epoch":1,"sequence":1,"provider_time_ns":1000000,"status":"valid","confidence":0.95,"values":[0.25]}
+{"t":"expect","valid":true,"value":0.25}
+{"t":"frame","source_id":7,"epoch":1,"sequence":2,"provider_time_ns":2000000,"status":"valid","confidence":"bad","values":[0.5]}
+{"t":"expect","valid":false,"reason":"malformed_confidence"}
+{"t":"frame","source_id":7,"epoch":1,"sequence":3,"provider_time_ns":3000000,"status":"paused","confidence":0,"values":[0]}
+{"t":"expect","valid":false,"reason":"paused"}
+{"t":"frame","source_id":7,"epoch":2,"sequence":1,"provider_time_ns":1000000,"status":"valid","confidence":0.9,"values":[0.75]}
+{"t":"expect","valid":true,"value":0.75}
+{"t":"advance","blocks":100}
+{"t":"expect","valid":false,"reason":"expiry"}
