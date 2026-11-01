@@ -19,7 +19,12 @@ data class MotionControlFrame(
     val confidence: Float,
     val valid: Boolean,
     val timestampNanos: Long,
+    val sourceId: String = "android.motion.accelerometer",
+    val epoch: Long = 0L,
+    val status: Status = if (valid) Status.ACCEPTED else Status.UNAVAILABLE,
 )
+
+enum class Status { ACCEPTED, PAUSED, DENIED, UNAVAILABLE }
 
 /**
  * Application-owned Android accelerometer provider.
@@ -38,6 +43,7 @@ class MotionControlSource(
     private var sensor: Sensor? = null
     private var sequence: Long = 0
     private var running = false
+    private var epoch: Long = 0
 
     /** Register the accelerometer, returning false when hardware is absent. */
     fun start(): Boolean {
@@ -49,6 +55,7 @@ class MotionControlSource(
         }
         sensor = available
         running = true
+        epoch += 1
         return true
     }
 
@@ -61,10 +68,12 @@ class MotionControlSource(
         publish(
             MotionControlFrame(
                 sequence = ++sequence,
+                epoch = epoch,
                 value = 0.0f,
                 confidence = 0.0f,
                 valid = false,
                 timestampNanos = 0L,
+                status = Status.UNAVAILABLE,
             ),
         )
     }
@@ -79,10 +88,12 @@ class MotionControlSource(
             publish(
                 MotionControlFrame(
                     sequence = ++sequence,
+                    epoch = epoch,
                     value = 0.0f,
                     confidence = 0.0f,
                     valid = false,
                     timestampNanos = 0L,
+                    status = Status.UNAVAILABLE,
                 ),
             )
         }
@@ -94,10 +105,12 @@ class MotionControlSource(
         publish(
             MotionControlFrame(
                 sequence = ++sequence,
+                epoch = epoch,
                 value = normalized ?: 0.0f,
                 confidence = if (normalized == null) 0.0f else 1.0f,
                 valid = normalized != null,
                 timestampNanos = if (normalized == null) 0L else timestampNanos,
+                status = if (normalized == null) Status.UNAVAILABLE else Status.ACCEPTED,
             ),
         )
     }

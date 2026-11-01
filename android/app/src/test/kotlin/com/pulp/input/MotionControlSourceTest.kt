@@ -86,5 +86,22 @@ class MotionControlSourceTest {
         source.submitAccelerometerSample(floatArrayOf(0.0f, Float.NaN), 123L)
 
         assertEquals(MotionControlFrame(1, 0.0f, 0.0f, false, 0L), frames.single())
+        assertEquals(Status.UNAVAILABLE, frames.single().status)
+    }
+
+    @Test
+    fun restartAdvancesEpochAndStopIsUnavailable() {
+        val manager = mock<SensorManager>()
+        val sensor = mock<Sensor>()
+        whenever(sensor.type).thenReturn(Sensor.TYPE_ACCELEROMETER)
+        whenever(manager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)).thenReturn(sensor)
+        whenever(manager.registerListener(any<SensorEventListener>(), eq(sensor), eq(SensorManager.SENSOR_DELAY_GAME), any<Handler>())).thenReturn(true)
+        val frames = mutableListOf<MotionControlFrame>()
+        val source = MotionControlSource(manager, mock<Handler>(), frames::add)
+        assertTrue(source.start()); source.submitAccelerometerSample(floatArrayOf(0f, 0f), 1L); source.stop()
+        assertTrue(source.start()); source.submitAccelerometerSample(floatArrayOf(0f, 0f), 2L)
+        assertEquals(1L, frames[0].epoch); assertEquals(1L, frames[1].epoch)
+        assertEquals(Status.UNAVAILABLE, frames[1].status)
+        assertEquals(2L, frames[2].epoch)
     }
 }
