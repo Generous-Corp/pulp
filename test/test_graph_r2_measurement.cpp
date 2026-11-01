@@ -130,22 +130,29 @@ bool build_case(Shape shape, int frames, int scale, Case& result, std::string& e
     } else if (shape == Shape::Chain) {
         const int count = std::max(1, scale);
         for (int i = 0; i < count; ++i)
-            add_node(static_cast<pulp::graph::NodeId>(2 + i), GraphRuntimeNodeKind::Processor, 1, 1);
-        add_node(static_cast<pulp::graph::NodeId>(2 + count), GraphRuntimeNodeKind::AudioOutput, 1, 0);
+            add_node(static_cast<pulp::graph::NodeId>(2 + i), GraphRuntimeNodeKind::Processor, 1,
+                     1);
+        add_node(static_cast<pulp::graph::NodeId>(2 + count), GraphRuntimeNodeKind::AudioOutput, 1,
+                 0);
         connect(1, 2);
         for (int i = 0; i + 1 < count; ++i)
-            connect(static_cast<pulp::graph::NodeId>(2 + i), static_cast<pulp::graph::NodeId>(3 + i));
-        connect(static_cast<pulp::graph::NodeId>(1 + count), static_cast<pulp::graph::NodeId>(2 + count));
+            connect(static_cast<pulp::graph::NodeId>(2 + i),
+                    static_cast<pulp::graph::NodeId>(3 + i));
+        connect(static_cast<pulp::graph::NodeId>(1 + count),
+                static_cast<pulp::graph::NodeId>(2 + count));
         result.states.assign(static_cast<std::size_t>(count), PassState{});
         result.expected = fixed_input(frames);
     } else {
         const int branches = std::max(2, scale);
         for (int i = 0; i < branches; ++i)
-            add_node(static_cast<pulp::graph::NodeId>(2 + i), GraphRuntimeNodeKind::Processor, 1, 1);
-        add_node(static_cast<pulp::graph::NodeId>(2 + branches), GraphRuntimeNodeKind::AudioOutput, 1, 0);
+            add_node(static_cast<pulp::graph::NodeId>(2 + i), GraphRuntimeNodeKind::Processor, 1,
+                     1);
+        add_node(static_cast<pulp::graph::NodeId>(2 + branches), GraphRuntimeNodeKind::AudioOutput,
+                 1, 0);
         for (int i = 0; i < branches; ++i) {
             connect(1, static_cast<pulp::graph::NodeId>(2 + i));
-            connect(static_cast<pulp::graph::NodeId>(2 + i), static_cast<pulp::graph::NodeId>(2 + branches));
+            connect(static_cast<pulp::graph::NodeId>(2 + i),
+                    static_cast<pulp::graph::NodeId>(2 + branches));
         }
         result.states.assign(static_cast<std::size_t>(branches), PassState{});
         result.expected = fixed_input(frames);
@@ -252,107 +259,115 @@ int run() {
               << std::setprecision(3) << overhead_ns << '\n';
     for (const auto shape : {Shape::Passthrough, Shape::Chain, Shape::Fanout}) {
         for (const int scale : {1, 4, 16, 64}) {
-          if ((shape == Shape::Passthrough && scale != 1) ||
-              (shape == Shape::Fanout && scale == 1)) continue;
-          for (const int frames : {16, 32, 64, 128, 512}) {
-            Case test;
-            std::string error;
-            std::array<double, kSamples> activation_samples{};
-            for (auto& sample : activation_samples) {
-                Case probe;
-                const auto build_start = std::chrono::steady_clock::now();
-                if (!build_case(shape, frames, scale, probe, error)) {
+            if ((shape == Shape::Passthrough && scale != 1) ||
+                (shape == Shape::Fanout && scale == 1))
+                continue;
+            for (const int frames : {16, 32, 64, 128, 512}) {
+                Case test;
+                std::string error;
+                std::array<double, kSamples> activation_samples{};
+                for (auto& sample : activation_samples) {
+                    Case probe;
+                    const auto build_start = std::chrono::steady_clock::now();
+                    if (!build_case(shape, frames, scale, probe, error)) {
+                        std::cerr << "error shape=" << shape_name(shape) << " block=" << frames
+                                  << " " << error << '\n';
+                        return EXIT_FAILURE;
+                    }
+                    const auto build_end = std::chrono::steady_clock::now();
+                    sample =
+                        std::chrono::duration<double, std::nano>(build_end - build_start).count();
+                }
+                if (!build_case(shape, frames, scale, test, error)) {
                     std::cerr << "error shape=" << shape_name(shape) << " block=" << frames << " "
                               << error << '\n';
                     return EXIT_FAILURE;
                 }
-                const auto build_end = std::chrono::steady_clock::now();
-                sample = std::chrono::duration<double, std::nano>(build_end - build_start).count();
-            }
-            if (!build_case(shape, frames, scale, test, error)) {
-                std::cerr << "error shape=" << shape_name(shape) << " block=" << frames << " "
-                          << error << '\n';
-                return EXIT_FAILURE;
-            }
-            std::sort(activation_samples.begin(), activation_samples.end());
-            const auto activation_p50_ns = activation_samples[kSamples / 2];
-            const auto activation_p99_ns = activation_samples[(kSamples * 99 + 99) / 100 - 1];
-            const auto activation_max_ns = activation_samples.back();
-            std::cout << "shape=" << shape_name(shape) << " scale=" << scale << " block=" << frames
-                      << " activation_p50_ns=" << std::fixed << std::setprecision(3) << activation_p50_ns
-                      << " activation_p99_sample_ns=" << activation_p99_ns
-                      << " activation_max_ns=" << activation_max_ns
-                      << " scratch_slots=" << test.snapshot.buffer_slot_count() << '\n';
-            GraphRuntimeExecutor executor;
-            for (int i = 0; i < kWarmupBlocks; ++i) {
-                if (!run_one(test, executor)) {
-                    std::cerr << "error during warmup shape=" << shape_name(shape)
-                              << " block=" << frames << '\n';
-                    return EXIT_FAILURE;
+                std::sort(activation_samples.begin(), activation_samples.end());
+                const auto activation_p50_ns = activation_samples[kSamples / 2];
+                const auto activation_p99_ns = activation_samples[(kSamples * 99 + 99) / 100 - 1];
+                const auto activation_max_ns = activation_samples.back();
+                std::cout << "shape=" << shape_name(shape) << " scale=" << scale
+                          << " block=" << frames << " activation_p50_ns=" << std::fixed
+                          << std::setprecision(3) << activation_p50_ns
+                          << " activation_p99_sample_ns=" << activation_p99_ns
+                          << " activation_max_ns=" << activation_max_ns
+                          << " scratch_slots=" << test.snapshot.buffer_slot_count() << '\n';
+                GraphRuntimeExecutor executor;
+                for (int i = 0; i < kWarmupBlocks; ++i) {
+                    if (!run_one(test, executor)) {
+                        std::cerr << "error during warmup shape=" << shape_name(shape)
+                                  << " block=" << frames << '\n';
+                        return EXIT_FAILURE;
+                    }
                 }
-            }
-            if (!oracle_matches(test)) {
-                std::cerr << "oracle_failed shape=" << shape_name(shape) << " block=" << frames
-                          << '\n';
-                return EXIT_FAILURE;
-            }
-            std::vector<std::uint32_t> baseline_bits;
-            baseline_bits.reserve(test.output[0].size());
-            for (const float value : test.output[0])
-                baseline_bits.push_back(std::bit_cast<std::uint32_t>(value));
-            std::size_t process_allocations = 0;
-            {
-                pulp::test::RtAllocationProbe probe;
-                if (!run_one(test, executor)) {
-                    std::cerr << "process_failed shape=" << shape_name(shape) << " block=" << frames << '\n';
-                    return EXIT_FAILURE;
-                }
-                process_allocations = probe.allocation_count();
-            }
-            if (process_allocations != 0) {
-                std::cerr << "process_allocations shape=" << shape_name(shape)
-                          << " scale=" << scale << " block=" << frames
-                          << " count=" << process_allocations << '\n';
-                return EXIT_FAILURE;
-            }
-            if (!oracle_matches(test)) {
-                std::cerr << "oracle_failed_after_probe shape=" << shape_name(shape) << " block=" << frames << '\n';
-                return EXIT_FAILURE;
-            }
-            for (std::size_t index = 0; index < baseline_bits.size(); ++index)
-                if (std::bit_cast<std::uint32_t>(test.output[0][index]) != baseline_bits[index]) {
-                    std::cerr << "repeat_mismatch shape=" << shape_name(shape) << " block=" << frames << '\n';
-                    return EXIT_FAILURE;
-                }
-            std::array<double, kSamples> samples{};
-            for (auto& sample : samples) {
-                sample = timed_sample(test, executor, overhead_ns);
-                if (!std::isfinite(sample)) {
-                    std::cerr << "timing_failed shape=" << shape_name(shape) << " block=" << frames
+                if (!oracle_matches(test)) {
+                    std::cerr << "oracle_failed shape=" << shape_name(shape) << " block=" << frames
                               << '\n';
                     return EXIT_FAILURE;
                 }
+                std::vector<std::uint32_t> baseline_bits;
+                baseline_bits.reserve(test.output[0].size());
+                for (const float value : test.output[0])
+                    baseline_bits.push_back(std::bit_cast<std::uint32_t>(value));
+                std::size_t process_allocations = 0;
+                {
+                    pulp::test::RtAllocationProbe probe;
+                    if (!run_one(test, executor)) {
+                        std::cerr << "process_failed shape=" << shape_name(shape)
+                                  << " block=" << frames << '\n';
+                        return EXIT_FAILURE;
+                    }
+                    process_allocations = probe.allocation_count();
+                }
+                if (process_allocations != 0) {
+                    std::cerr << "process_allocations shape=" << shape_name(shape)
+                              << " scale=" << scale << " block=" << frames
+                              << " count=" << process_allocations << '\n';
+                    return EXIT_FAILURE;
+                }
                 if (!oracle_matches(test)) {
-                    std::cerr << "oracle_failed_after_timing shape=" << shape_name(shape)
+                    std::cerr << "oracle_failed_after_probe shape=" << shape_name(shape)
                               << " block=" << frames << '\n';
                     return EXIT_FAILURE;
                 }
+                for (std::size_t index = 0; index < baseline_bits.size(); ++index)
+                    if (std::bit_cast<std::uint32_t>(test.output[0][index]) !=
+                        baseline_bits[index]) {
+                        std::cerr << "repeat_mismatch shape=" << shape_name(shape)
+                                  << " block=" << frames << '\n';
+                        return EXIT_FAILURE;
+                    }
+                std::array<double, kSamples> samples{};
+                for (auto& sample : samples) {
+                    sample = timed_sample(test, executor, overhead_ns);
+                    if (!std::isfinite(sample)) {
+                        std::cerr << "timing_failed shape=" << shape_name(shape)
+                                  << " block=" << frames << '\n';
+                        return EXIT_FAILURE;
+                    }
+                    if (!oracle_matches(test)) {
+                        std::cerr << "oracle_failed_after_timing shape=" << shape_name(shape)
+                                  << " block=" << frames << '\n';
+                        return EXIT_FAILURE;
+                    }
+                }
+                std::sort(samples.begin(), samples.end());
+                const auto p50_ns = samples[kSamples / 2];
+                const auto p99_ns = samples[(kSamples * 99 + 99) / 100 - 1];
+                const auto max_ns = samples.back();
+                const auto jitter_ns = max_ns - samples.front();
+                std::cout << "shape=" << shape_name(shape) << " scale=" << scale
+                          << " block=" << frames << " warmup=" << kWarmupBlocks
+                          << " iterations=" << kTimedBlocks << " samples=" << kSamples
+                          << " p50_ns=" << std::fixed << std::setprecision(3) << p50_ns
+                          << " p99_sample_ns=" << p99_ns << " max_ns=" << max_ns
+                          << " jitter_ns=" << jitter_ns << " observed_wcet_proxy_ns=" << max_ns
+                          << " oracle=pass"
+                          << " process_allocations=" << process_allocations << " output_bits=0x"
+                          << std::hex << std::bit_cast<std::uint32_t>(test.output[0][0]) << std::dec
+                          << '\n';
             }
-            std::sort(samples.begin(), samples.end());
-            const auto p50_ns = samples[kSamples / 2];
-            const auto p99_ns = samples[(kSamples * 99 + 99) / 100 - 1];
-            const auto max_ns = samples.back();
-            const auto jitter_ns = max_ns - samples.front();
-            std::cout << "shape=" << shape_name(shape) << " scale=" << scale << " block=" << frames
-                      << " warmup=" << kWarmupBlocks << " iterations=" << kTimedBlocks
-                      << " samples=" << kSamples << " p50_ns=" << std::fixed << std::setprecision(3) << p50_ns
-                      << " p99_sample_ns=" << p99_ns << " max_ns=" << max_ns
-                      << " jitter_ns=" << jitter_ns << " observed_wcet_proxy_ns=" << max_ns
-                      << " oracle=pass"
-                      << " process_allocations=" << process_allocations
-                      << " output_bits=0x" << std::hex
-                      << std::bit_cast<std::uint32_t>(test.output[0][0]) << std::dec << '\n';
-          }
         }
     }
     return EXIT_SUCCESS;
