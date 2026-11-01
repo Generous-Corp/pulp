@@ -127,7 +127,13 @@ try {
   $deadline=[DateTime]::UtcNow.AddSeconds($TimeoutSec);$cacheMatch=$false
   while([DateTime]::UtcNow -lt $deadline){
     Assert-OwnedIdentity $warm.process $warm.started
-    $cacheText=(Get-ChildItem -LiteralPath $portable -File | Where-Object {$_.Name -match '^reaper-(vstplugins|clap).*\.ini$'} | Get-Content) -join "`n"
+    try {
+      $cacheText=(Get-ChildItem -LiteralPath $portable -File | Where-Object {$_.Name -match '^reaper-(vstplugins|clap).*\.ini$'} | Get-Content -ErrorAction Stop) -join "`n"
+    } catch {
+      # REAPER writes the scan cache in place. A transient Windows sharing
+      # violation is scan progress, not a failed acceptance run.
+      $cacheText=''
+    }
     if($cacheText -match [regex]::Escape([IO.Path]::GetFileName($staged))){$cacheMatch=$true;break}
     Start-Sleep -Milliseconds 250
   }
