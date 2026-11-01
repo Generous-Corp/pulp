@@ -1,0 +1,43 @@
+{
+  "id": "graph-fingerprint-diagnostic-fixture",
+  "title": "Graph semantic persistence and resolved-plan diagnostics remain distinct",
+  "classification": "ci_test_only",
+  "delivery_state": "pending",
+  "claim_id": "graph-fingerprint-diagnostic-20261101",
+  "owned_paths": [
+    "test/test_graph_serializer.cpp",
+    "docs/status/sequencer-exposure/rows/graph-fingerprint-diagnostic-fixture.json"
+  ],
+  "evidence": [
+    {
+      "path": "test/test_graph_serializer.cpp",
+      "needles": [
+        "replay_plan_fingerprint",
+        "gain_edit",
+        "gain_json != baseline_json"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "The change adds only a test fixture and does not add an installed header, symbol, or compatibility contract."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No timeline CLI command, flag, handler, or document shape changes."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP operation, schema, or handler changes."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No runtime operation, executor policy, or control authority changes."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "The test does not publish a design-time capability or agent manifest entry."
+    }
+  }
+}
