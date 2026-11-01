@@ -452,6 +452,10 @@ endif()
 # for the non-destructive ship subcommand branches.
 add_executable(pulp-test-cli-ship-shellout test_cli_ship_shellout.cpp)
 target_link_libraries(pulp-test-cli-ship-shellout PRIVATE pulp::platform Catch2::Catch2WithMain)
+# The release-artifact scan cases copy the real scanner and its list into a
+# fake project so `pulp ship check` runs them over a fixture bundle.
+pulp_test_data(pulp-test-cli-ship-shellout
+    PATHS tools/cmake/PulpReleaseArtifactScan.cmake tools/cmake/release_artifact_forbidden.json)
 if(APPLE)
     # A real Mach-O module carrying a local symbol, for the ship-time strip case.
     add_library(pulp-test-ship-strip-fixture MODULE fixtures/ship_strip/ship_strip_fixture.cpp)
@@ -505,6 +509,26 @@ target_include_directories(pulp-test-ship-tracing-guard PRIVATE ${CMAKE_SOURCE_D
 pulp_test_data(pulp-test-ship-tracing-guard PATHS core/runtime/src/trace.cpp)
 target_link_libraries(pulp-test-ship-tracing-guard PRIVATE Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-ship-tracing-guard)
+
+# Ship-time release-artifact scan: the pure parts (gates from a CMakeCache.txt
+# and SDK provenance, scanner lookup, native-image detection, the cmake -P argv)
+# of ship_artifact_scan_guard.hpp, proven against fixtures. The scan itself is
+# exercised through `pulp ship check` in test_cli_ship_shellout.cpp.
+add_executable(pulp-test-ship-artifact-scan-guard test_ship_artifact_scan_guard.cpp)
+# ship_artifact_scan_guard.hpp pulls in ship_dev_build_guard.hpp, which includes
+# the generated build_profile_gen.h; configure it here (idempotent) as the
+# dev-build-guard test does, so the header exists at configure time.
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/tools/cli")
+configure_file(
+    "${CMAKE_SOURCE_DIR}/tools/cli/build_profile_gen.h.in"
+    "${CMAKE_BINARY_DIR}/tools/cli/build_profile_gen.h"
+    @ONLY)
+target_include_directories(pulp-test-ship-artifact-scan-guard PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_BINARY_DIR}/tools/cli)
+pulp_test_data(pulp-test-ship-artifact-scan-guard NONE)
+target_link_libraries(pulp-test-ship-artifact-scan-guard PRIVATE Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-ship-artifact-scan-guard)
 
 # App Store Connect notary env-file parser. Compiles the parser source
 # directly so the test target stays free of pulp::ship + pulp::runtime

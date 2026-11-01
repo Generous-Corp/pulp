@@ -138,6 +138,57 @@ TEST_CASE("Linux packaging creates tarballs with only present plugin formats",
     REQUIRE(listing.stdout_output.find("ignored.txt") == std::string::npos);
 }
 
+TEST_CASE("Linux packaging tarballs hold exactly the listed bundles", "[ship][linux-package]") {
+    TempDir temp("listed-tarball");
+    auto build = temp.path / "build";
+    write_file(build / "VST3" / "Chosen.vst3" / "Contents" / "plugin", "chosen");
+    write_file(build / "VST3" / "Other.vst3" / "Contents" / "plugin", "other");
+    write_file(build / "CLAP" / "Other.clap", "other-clap");
+
+    auto output = temp.path / "listed.tar.gz";
+    REQUIRE(pulp::ship::create_tar_gz("Chosen", build.string(), output.string(),
+                                      {(build / "VST3" / "Chosen.vst3").string()}));
+    auto listing = run_sh("tar tzf " + quote(output));
+    REQUIRE(listing.exit_code == 0);
+    REQUIRE_THAT(listing.stdout_output, ContainsSubstring("VST3/Chosen.vst3/Contents/plugin"));
+    REQUIRE(listing.stdout_output.find("Other") == std::string::npos);
+
+    REQUIRE_FALSE(pulp::ship::create_tar_gz("None", build.string(),
+                                            (temp.path / "none.tar.gz").string(), {}));
+}
+
+TEST_CASE("Linux packaging rejects empty explicit deb bundle lists", "[ship][linux-package]") {
+    if (!command_available("dpkg-deb"))
+        SKIP("dpkg-deb is required to inspect generated deb archives");
+
+    TempDir temp("empty-explicit-deb");
+    auto build = temp.path / "build";
+    fs::create_directories(build);
+    auto output = temp.path / "empty.deb";
+
+    REQUIRE_FALSE(pulp::ship::create_deb("Empty", "1.0.0", build.string(), output.string(),
+                                         "Pulp Tests", {}));
+    REQUIRE_FALSE(fs::exists(output));
+    REQUIRE_FALSE(fs::exists(build / "deb-staging"));
+}
+
+TEST_CASE("Linux packaging tarballs treat bundle names as data", "[ship][linux-package]") {
+    TempDir temp("tarball-shell-metacharacters");
+    auto build = temp.path / "build";
+    auto marker_name = temp.path.filename().string() + "-tar-injection-marker";
+    auto marker = fs::current_path() / marker_name;
+    fs::remove(marker);
+    auto bundle = build / "VST3" / (std::string("Evil\"; touch ") + marker_name + "; #.vst3");
+    write_file(bundle / "Contents" / "module.txt", "vst3");
+
+    auto output = temp.path / "safe.tar.gz";
+    REQUIRE(pulp::ship::create_tar_gz("Evil", build.string(), output.string(), {bundle.string()}));
+    REQUIRE(fs::is_regular_file(output));
+    const bool marker_created = fs::exists(marker);
+    fs::remove(marker);
+    REQUIRE_FALSE(marker_created);
+}
+
 TEST_CASE("Linux packaging tarball path fails closed without plugin formats",
           "[ship][linux-package]") {
     TempDir temp("empty-tarball");
