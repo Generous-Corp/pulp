@@ -59,6 +59,8 @@ TEST_CASE("ContextMenu show mounts as last child and set_items round-trips",
     REQUIRE(menu->parent() == root.get());
     REQUIRE(menu->bounds().width == 400);
     REQUIRE(menu->bounds().height == 400);
+    REQUIRE(menu->overlay_depth() == 1);
+    REQUIRE(menu->overlay_consumes_outside_click());
 }
 
 TEST_CASE("ContextMenu click on a row selects and removes the menu",
@@ -217,6 +219,128 @@ TEST_CASE("ContextMenu Escape dismisses with nullopt",
     REQUIRE(fired);
     REQUIRE_FALSE(got.has_value());
     REQUIRE(root->child_count() == 0);
+}
+
+TEST_CASE("ContextMenu controls clamp and notify through their callbacks", "[view][context-menu]") {
+    bool toggled = false;
+    auto toggle =
+        Item::make_toggle(1, "LFO 1", false, [&](const Item& item) { toggled = item.checked; });
+    toggle.set_toggled(true);
+    REQUIRE(toggle.checked);
+    REQUIRE(toggled);
+
+    float value = -1.0f;
+    auto slider = Item::make_slider(2, "Depth", 0.25f, 0.1f,
+                                    [&](const Item& item) { value = item.normalized_value; });
+    slider.set_normalized_value(2.0f);
+    REQUIRE(slider.normalized_value == 1.0f);
+    REQUIRE(value == 1.0f);
+    slider.set_normalized_value(-1.0f);
+    REQUIRE(slider.normalized_value == 0.0f);
+    REQUIRE(value == 0.0f);
+}
+
+TEST_CASE("ContextMenu builds the shared two-LFO modulation hierarchy",
+          "[view][context-menu][modulation]") {
+    ContextMenu::ModulationMenuSpec spec;
+    spec.target_label = "Density";
+    spec.lanes[0].label = "LFO 1";
+    spec.lanes[0].enabled = true;
+    spec.lanes[0].shapes = {"Sine", "Triangle", "Square"};
+    spec.lanes[0].shape_index = 1;
+    spec.lanes[1].label = "LFO 2";
+    spec.lanes[1].shapes = {"Sine", "Saw"};
+
+    auto items = ContextMenu::make_modulation_items(spec);
+    REQUIRE(items.size() == 14);
+    REQUIRE(items[0].header);
+    REQUIRE(items[2].header);
+    REQUIRE(items[3].control_kind == Item::ControlKind::toggle);
+    REQUIRE(items[4].control_kind == Item::ControlKind::choice);
+    REQUIRE(items[4].choices[items[4].choice_index] == "Triangle");
+    REQUIRE(items[5].control_kind == Item::ControlKind::slider);
+    REQUIRE(items[8].header);
+    REQUIRE(items[9].control_kind == Item::ControlKind::toggle);
+}
+
+TEST_CASE("ContextMenu choice controls cycle with arrows and invoke their callback",
+          "[view][context-menu][modulation]") {
+    auto root = make_root();
+    ContextMenu::ModulationMenuSpec spec;
+    spec.lanes[0].label = "LFO 1";
+    spec.lanes[0].shapes = {"Sine", "Triangle", "Square"};
+    int selected = -1;
+    spec.lanes[0].on_change = [&](const auto& lane) {
+        selected = static_cast<int>(lane.shape_index);
+    };
+    auto* menu = ContextMenu::show_modulation(root.get(), {kAnchorX, kAnchorY}, spec);
+    REQUIRE(menu != nullptr);
+    // Down skips the header and lands on Enabled; down again lands on Shape.
+    REQUIRE(menu->on_key_event(key_down(KeyCode::down)));
+    REQUIRE(menu->on_key_event(key_down(KeyCode::down)));
+    REQUIRE(menu->hovered_index() == 2);
+    REQUIRE(menu->on_key_event(key_down(KeyCode::right)));
+    REQUIRE(selected == 1);
+    REQUIRE(menu->on_key_event(key_down(KeyCode::left)));
+    REQUIRE(selected == 0);
+    REQUIRE(menu->on_key_event(key_down(KeyCode::escape)));
+    REQUIRE(root->child_count() == 0);
+}
+
+TEST_CASE("ContextMenu modulation lane toggles are actionable for both lanes",
+          "[view][context-menu][modulation]") {
+    auto root = make_root();
+    ContextMenu::ModulationMenuSpec spec;
+    spec.lanes[0].shapes = {"Sine"};
+    spec.lanes[1].shapes = {"Sine"};
+    bool lane1 = false;
+    bool lane2 = false;
+    spec.lanes[0].on_change = [&](const auto& lane) { lane1 = lane.enabled; };
+    spec.lanes[1].on_change = [&](const auto& lane) { lane2 = lane.enabled; };
+    auto* menu = ContextMenu::show_modulation(root.get(), {kAnchorX, kAnchorY}, spec);
+    REQUIRE(menu != nullptr);
+
+    // Header -> LFO 1 Enabled; activate with Return.
+    REQUIRE(menu->on_key_event(key_down(KeyCode::down)));
+    REQUIRE(menu->on_key_event(key_down(KeyCode::enter)));
+    REQUIRE(lane1);
+    // Walk to LFO 2 Enabled and activate it as well.
+    for (int i = 0; i < 12 && menu->hovered_index() != 7; ++i)
+        REQUIRE(menu->on_key_event(key_down(KeyCode::down)));
+    REQUIRE(menu->hovered_index() == 7);
+    REQUIRE(menu->on_key_event(key_down(KeyCode::enter)));
+    REQUIRE(lane2);
+    REQUIRE(menu->on_key_event(key_down(KeyCode::escape)));
+    REQUIRE(root->child_count() == 0);
+}
+
+TEST_CASE("ContextMenu modulation callbacks retain sibling lane edits",
+          "[view][context-menu][modulation]") {
+    ContextMenu::ModulationMenuSpec spec;
+    spec.lanes[0].shapes = {"Sine", "Triangle"};
+    float observed_rate = -1.0f;
+    float observed_depth = -1.0f;
+    spec.lanes[0].on_change = [&](const auto& lane) {
+        observed_rate = lane.rate_normalized;
+        observed_depth = lane.depth_normalized;
+    };
+    auto items = ContextMenu::make_modulation_items(spec);
+    // With no target label, lane 1 is header/toggle/shape/rate/depth.
+    items[3].set_normalized_value(0.8f);
+    items[4].set_normalized_value(0.6f);
+    REQUIRE(observed_rate == 0.8f);
+    REQUIRE(observed_depth == 0.6f);
+}
+
+TEST_CASE("ContextMenu can expose a product's supported lane count",
+          "[view][context-menu][modulation]") {
+    ContextMenu::ModulationMenuSpec spec;
+    spec.lane_count = 1;
+    spec.lanes[0].shapes = {"Sine"};
+    const auto items = ContextMenu::make_modulation_items(spec);
+    REQUIRE(items.size() == 6);
+    REQUIRE(items[0].header);
+    REQUIRE(items[4].control_kind == Item::ControlKind::slider);
 }
 
 TEST_CASE("ContextMenu click on a disabled row does not select",
@@ -570,4 +694,17 @@ TEST_CASE("ContextMenu clips its rows to the panel", "[view][context-menu]") {
         }
     }
     REQUIRE(clipped_to_panel);
+}
+
+TEST_CASE("ContextMenu left and right arrows are symmetric on action rows",
+          "[view][context-menu]") {
+    auto root = make_root();
+    auto* menu = ContextMenu::show(root.get(), {kAnchorX, kAnchorY}, {{1, "First"}},
+                                   [](std::optional<int>) {});
+    REQUIRE_FALSE(menu->on_key_event(key_down(KeyCode::left)));
+    REQUIRE_FALSE(menu->on_key_event(key_down(KeyCode::right)));
+    REQUIRE(menu->on_key_event(key_down(KeyCode::down)));
+    REQUIRE_FALSE(menu->on_key_event(key_down(KeyCode::left)));
+    REQUIRE_FALSE(menu->on_key_event(key_down(KeyCode::right)));
+    REQUIRE(root->child_count() == 1);
 }

@@ -49,6 +49,7 @@ public:
         out.can_break = caps.can_break;
         out.can_step = caps.can_step;
         out.can_inspect_locals = caps.can_inspect_locals;
+        out.effectful_grant = caps.refused_capability;
         return out;
     }
 
@@ -76,6 +77,7 @@ public:
         out.timed_out = result->timed_out;
         out.busy = result->busy;
         out.detached = result->detached;
+        out.refused = result->refused;
         out.json = result->json;
         out.error = result->error;
         if (out.ok && out.json.size() > maximum_result_bytes) {

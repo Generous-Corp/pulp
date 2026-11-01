@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261023-view-webview-backend-single-owner-watch",
+  "created_at": "2026-10-23T10:40:16Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "The WebView backend detector (detect_webview_backend) is now compiled only by pulp-view-platform and answers none until pulp-view-webview installs the per-OS provider; pulp-view links pulp-view-platform instead of compiling a second copy, and the Windows/Linux probes move into the WebView-only pulp-view-webview-backend archive. No design-import, Chromium, rendering, asset or packaging authority moves: no render, canvas, DesignIR or importer source changes, and the view-platform unit only loses the per-OS probe TUs it never needed.",
+  "tests": [
+    "ctest --test-dir build -R backend-detect",
+    "ctest --test-dir build -R view-platform alone",
+    "ctest --test-dir build -R view-webview-detector-owner",
+    "ctest --test-dir build -R pulp-view-core-audio-free",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

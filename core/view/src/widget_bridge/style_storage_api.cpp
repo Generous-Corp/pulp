@@ -7,6 +7,45 @@
 
 namespace pulp::view {
 
+namespace {
+
+// Rewrite each `url(...)` image reference in a CSS image value so that a
+// filesystem reference names the path resolve_script_relative() admits, and
+// a refused one becomes `none`. Fragment (`#id`) and `data:` references are
+// not files and are kept as written.
+std::string confine_css_image_urls(const WidgetBridge& bridge, const std::string& value) {
+    std::string out;
+    std::size_t pos = 0;
+    while (true) {
+        const auto open = value.find("url(", pos);
+        if (open == std::string::npos)
+            break;
+        const auto close = value.find(')', open);
+        if (close == std::string::npos)
+            break;
+        out.append(value, pos, open - pos);
+        std::string ref = value.substr(open + 4, close - (open + 4));
+        while (!ref.empty() && (ref.front() == ' ' || ref.front() == '"' || ref.front() == '\''))
+            ref.erase(ref.begin());
+        while (!ref.empty() && (ref.back() == ' ' || ref.back() == '"' || ref.back() == '\''))
+            ref.pop_back();
+        if (ref.empty() || ref.front() == '#' || ref.rfind("data:", 0) == 0) {
+            out.append(value, open, close + 1 - open);
+        } else {
+            const auto resolved = bridge.resolve_script_relative(ref);
+            if (resolved.empty() || resolved.find_first_of("\"')") != std::string::npos)
+                out += "none";
+            else
+                out += "url(\"" + resolved + "\")";
+        }
+        pos = close + 1;
+    }
+    out.append(value, pos, std::string::npos);
+    return out;
+}
+
+} // namespace
+
 void BridgeRegistrars::register_widget_style_background_repeat_api(WidgetBridge& self) {
     BridgeApiContext api{self.engine_};
 
@@ -39,7 +78,10 @@ void BridgeRegistrars::register_widget_style_mask_object_api(WidgetBridge& self)
             auto id = args.get<std::string>(0, "");
             auto value = args.get<std::string>(1, "");
             auto* v = id.empty() ? &self.root_ : self.widget(id);
-            if (v) v->set_mask_image(value);
+            // A url() mask is decoded from the file it names, so it is held
+            // to the same containment rule as every other image path.
+            if (v)
+                v->set_mask_image(confine_css_image_urls(self, value));
             return choc::value::Value();
         });
 

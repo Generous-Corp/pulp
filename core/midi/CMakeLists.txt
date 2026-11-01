@@ -168,20 +168,20 @@ elseif(WIN32)
     target_link_libraries(pulp-midi PRIVATE
         winmm
         # WinRT activation + COM apartment for the BLE advertisement watcher.
-        # runtimeobject provides the WinRT/COM runtime helpers; WindowsApp is
-        # added below. Both ship with the base Windows SDK.
+        # runtimeobject provides the WinRT/COM runtime helpers. It ships with
+        # the base Windows SDK and does not import the conflicting OS ICU.
         runtimeobject
     )
-    # WindowsApp is the desktop umbrella import lib (init_apartment,
-    # activation factories, event tokens). It also imports the OS icu.dll, so
-    # as an ordinary link input it can win ICU symbols such as ures_getByKey
-    # ahead of Skia's bundled ICU (skunicode_icu), and lld-link then rejects
-    # the second definition when a Skia ICU object is pulled in anyway. A
-    # default library is searched only after every library named on the
-    # command line, so Skia's ICU always resolves first and WindowsApp supplies
-    # only what nothing else defines.
+    # Do not link WindowsApp.lib on MSVC/clang-cl builds. It is the desktop
+    # umbrella import library, but it also imports the OS icu.dll. lld-link
+    # then sees duplicate ICU definitions when Skia's bundled ICU
+    # (skunicode_icu) is pulled in. runtimeobject.lib supplies the WinRT
+    # activation/COM entry points used by this backend without importing the
+    # conflicting ICU symbols. Keep WindowsApp for non-MSVC toolchains, where
+    # runtimeobject alone is not a complete WinRT link contract.
     if(MSVC)
-        target_link_options(pulp-midi INTERFACE "/DEFAULTLIB:WindowsApp.lib")
+        # runtimeobject is linked above; intentionally do not add WindowsApp.
+        # Its ICU imports conflict with Skia's bundled ICU under lld-link.
     else()
         target_link_libraries(pulp-midi PRIVATE WindowsApp)
     endif()
@@ -245,8 +245,8 @@ elseif(WIN32)
             endif()
             target_include_directories(pulp-midi PRIVATE
                 "${PULP_WINRT_MIDI_INCLUDE}")
-            # WindowsApp is already a default library on MSVC-style linkers
-            # (see the BLE block above).
+            # runtimeobject supplies the WinRT activation/COM helpers without
+            # importing WindowsApp's conflicting ICU symbols.
             target_link_libraries(pulp-midi PRIVATE runtimeobject)
             if(NOT MSVC)
                 target_link_libraries(pulp-midi PRIVATE WindowsApp)

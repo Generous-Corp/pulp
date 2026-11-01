@@ -182,6 +182,9 @@ if(PULP_HAS_SKIA AND NOT APPLE AND NOT ANDROID)
     if(_pulp_has_platform_pvh)
         add_executable(pulp-test-plugin-view-host-factory test_plugin_view_host_factory.cpp)
         target_link_libraries(pulp-test-plugin-view-host-factory PRIVATE pulp::view Catch2::Catch2WithMain)
+        # The fixture creates a real GPU device on every platform, including
+        # Windows where there is no Xvfb wrapper to provide serialization.
+        set(_pulp_pvh_resource_locks pulp_gpu)
         set(_pulp_pvh_discovery_args)
         if(_pulp_pvh_x11)
             target_link_libraries(pulp-test-plugin-view-host-factory PRIVATE ${X11_LIBRARIES})
@@ -198,13 +201,16 @@ if(PULP_HAS_SKIA AND NOT APPLE AND NOT ANDROID)
             if(PULP_XVFB_RUN)
                 set_property(TARGET pulp-test-plugin-view-host-factory PROPERTY
                     CROSSCOMPILING_EMULATOR "${PULP_XVFB_RUN};-a")
-                set(_pulp_pvh_discovery_args PROPERTIES
-                    RESOURCE_LOCK pulp_xvfb
+                list(APPEND _pulp_pvh_resource_locks pulp_xvfb)
+                set(_pulp_pvh_discovery_args
                     TIMEOUT 120
                     ENVIRONMENT "PULP_TEST_REQUIRE_X11_DISPLAY=1")
             endif()
         endif()
-        catch_discover_tests(pulp-test-plugin-view-host-factory ${_pulp_pvh_discovery_args})
+        catch_discover_tests(pulp-test-plugin-view-host-factory
+            # RESOURCE_LOCK pulp_gpu is required for this real-device fixture.
+            PROPERTIES RESOURCE_LOCK "${_pulp_pvh_resource_locks}"
+            ${_pulp_pvh_discovery_args})
     endif()
 endif()
 

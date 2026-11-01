@@ -3,6 +3,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include "test_helpers.hpp"
 
+#include <filesystem>
+
 using namespace pulp::test;
 using namespace pulp::view;
 using namespace pulp::canvas;
@@ -242,7 +244,31 @@ TEST_CASE("Element: img.src remains reflected after mount",
     const auto id = env.engine.evaluate("globalThis.__img_id").toString();
     auto* image = dynamic_cast<ImageView*>(env.widget(id));
     REQUIRE(image != nullptr);
-    CHECK(image->image_source() == "file:///tmp/attribute.png");
+    // The attribute stays reflected, but a path outside the script directory
+    // and every reviewed asset root is never handed to the native image.
+    CHECK(image->image_source().empty());
     CHECK(env.engine.evaluate("globalThis.__img_src").toString() ==
           "/tmp/attribute.png");
+}
+
+TEST_CASE("Element: img.src under a reviewed asset root reaches the native ImageView",
+          "[element][api][img]") {
+    TestEnvironment env;
+    const auto root = std::filesystem::temp_directory_path() / "pulp-element-img-root";
+    std::filesystem::create_directories(root);
+    env.bridge->set_asset_roots({root});
+    const auto inside = (root / "attribute.png").generic_string();
+    env.run("const im = document.createElement('img');\n"
+            "document.body.appendChild(im);\n"
+            "im.setAttribute('src', '" +
+            inside +
+            "');\n"
+            "globalThis.__img_id = im._id;\n");
+
+    const auto id = env.engine.evaluate("globalThis.__img_id").toString();
+    auto* image = dynamic_cast<ImageView*>(env.widget(id));
+    REQUIRE(image != nullptr);
+    CHECK(image->image_source() == "file://" + inside);
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
 }

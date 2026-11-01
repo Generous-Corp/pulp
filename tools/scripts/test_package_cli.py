@@ -677,9 +677,11 @@ class MainTests(unittest.TestCase):
             root = pathlib.Path(td)
             pulp = root / "pulp-built"
             importer = root / "pulp-import-design-built"
+            illustrator_helper = root / "illustrator_to_svg.py"
             runtime = root / "browser_capture"
             pulp.write_text("rust", encoding="utf-8")
             importer.write_text("importer", encoding="utf-8")
+            illustrator_helper.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
             contract = root / "materialized_binding_contract.mjs"
             contract.write_text("export const fixtureContract = true;\n", encoding="utf-8")
             emitter = root / "materialized_source_emitter.mjs"
@@ -719,6 +721,8 @@ class MainTests(unittest.TestCase):
                             str(importer),
                             "--import-design-runtime-dir",
                             str(runtime),
+                            "--import-design-illustrator-helper",
+                            str(illustrator_helper),
                             "--import-design-contract",
                             str(contract),
                             "--import-design-source-emitter",
@@ -751,6 +755,7 @@ class MainTests(unittest.TestCase):
                 "libwgpu_native.so",
                 "pulp",
                 "pulp-import-design",
+                "import-design/illustrator_to_svg.py",
                 "jsx-runtime/materialized_binding_contract.mjs",
                 "jsx-runtime/materialized_source_emitter.mjs",
                 "jsx-runtime/materialized_ids_map.mjs",

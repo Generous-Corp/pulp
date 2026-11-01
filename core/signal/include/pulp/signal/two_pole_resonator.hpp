@@ -84,7 +84,7 @@ public:
                              static_cast<SampleType>(a2_) * y2_ +
                              static_cast<SampleType>(gain_) * excitation;
         y2_ = y1_;
-        y1_ = snap_to_zero(y);
+        y1_ = snap_recursion_state(y);
         return y;
     }
 

@@ -41,6 +41,7 @@ class ScriptInspectorBridge final : public ScriptInspectorPort {
         bool timed_out = false;   ///< the request exceeded its deadline
         bool busy = false;        ///< another evaluation was already in flight
         bool detached = false;    ///< no engine is attached
+        bool refused = false;     ///< the realm's explicit grant holds an effectful capability
         std::string json;         ///< result serialized as JSON when ok
         std::string error;        ///< message when !ok (exception text / reason)
     };
@@ -55,6 +56,13 @@ class ScriptInspectorBridge final : public ScriptInspectorPort {
         bool can_break = false;          ///< source-line breakpoints (never on mainline QuickJS)
         bool can_step = false;           ///< step in/over/out
         bool can_inspect_locals = false; ///< paused local-scope inspection
+        /// Wire name of the first effectful capability the realm's EXPLICIT
+        /// grant holds, empty when evaluation is eligible. Non-empty forces
+        /// can_evaluate false: exec, clipboard, filesystem, storage, AI,
+        /// runtime-import, or network authority cannot be masked in place to
+        /// make a live realm evaluable. The legacy all() default grant
+        /// (CapabilitySet::is_legacy_default) does not set this.
+        std::string refused_capability;
     };
 
     static constexpr std::chrono::milliseconds kDefaultTimeout{2000};
@@ -64,6 +72,12 @@ class ScriptInspectorBridge final : public ScriptInspectorPort {
 
     ScriptInspectorBridge(const ScriptInspectorBridge&) = delete;
     ScriptInspectorBridge& operator=(const ScriptInspectorBridge&) = delete;
+
+    // [engine thread] Record the realm's native grant. An explicit grant with
+    // an effectful capability makes evaluate() refuse and capabilities()
+    // report can_evaluate=false with the offending name; the legacy all()
+    // default grant is not a decision and leaves evaluation eligible.
+    void set_realm_capabilities(const CapabilitySet& granted) override;
 
     // [engine thread] Attach the engine and capture its capability snapshot.
     // Passing a new engine replaces the previous one; the calling thread is
@@ -158,10 +172,17 @@ private:
 
     friend struct ScriptInspectorBridgeTestAccess;
 
+    // mutex_ must be held. Re-derives caps_.refused_capability / can_evaluate
+    // from the attached engine and the recorded realm grant.
+    void apply_realm_gate_locked();
+
     mutable std::mutex mutex_;
     std::condition_variable state_cv_;
     ScriptEngine* engine_ = nullptr;
     Capabilities caps_{};
+    // Grant of the realm the engine belongs to. Default-constructed (empty) so
+    // a bridge attached without a session evaluates as before.
+    CapabilitySet realm_capabilities_{};
     std::thread::id engine_thread_{};
     bool have_engine_thread_ = false;
     bool in_flight_ = false;

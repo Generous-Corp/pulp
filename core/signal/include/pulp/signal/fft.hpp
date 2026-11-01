@@ -9,19 +9,60 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <numbers>
 #include <type_traits>
 #include <vector>
 
-#if defined(__APPLE__)
+// Backend selection. Float transforms run on vDSP on Apple and on muFFT
+// everywhere else (the pulp-signal-mufft target defines PULP_FFT_HAS_MUFFT
+// when muFFT compiles for the target; configure falls back without it).
+// FftT<double> keeps the built-in radix-2 transform below on every platform,
+// as do float sizes muFFT does not plan and builds without muFFT.
+// PULP_FFT_FORCE_PORTABLE and PULP_FFT_FORCE_BUILTIN select a backend for one
+// test binary, so every backend is testable on any host; they must be set
+// for a whole binary, never per translation unit.
+#if defined(__APPLE__) && !defined(PULP_FFT_FORCE_PORTABLE)
 #include <Accelerate/Accelerate.h>
 #define PULP_FFT_HAS_VDSP 1
+#endif
+
+#if !defined(PULP_FFT_HAS_VDSP) && defined(PULP_FFT_HAS_MUFFT) && PULP_FFT_HAS_MUFFT &&            \
+    !defined(PULP_FFT_FORCE_BUILTIN)
+#define PULP_FFT_USE_MUFFT 1
+// The C shim in core/signal/src/fft_mufft.c. A plan owns muFFT's four 1-D
+// plans for one size and two staging buffers of 2n + 2 floats aligned for
+// the kernels. The execute calls need `in` and `out` aligned to
+// pulp_mufft_alignment() and non-overlapping, and allocate nothing. Create
+// returns null for sizes muFFT does not plan (below 16 points, or not a power
+// of two) and on allocation failure. pulp_mufft_allocations() counts every
+// allocation the backend has made, inside muFFT included.
+extern "C" {
+struct pulp_mufft_plan;
+pulp_mufft_plan* pulp_mufft_create(int n);
+void pulp_mufft_destroy(pulp_mufft_plan* plan);
+float* pulp_mufft_in(pulp_mufft_plan* plan);
+float* pulp_mufft_out(pulp_mufft_plan* plan);
+void pulp_mufft_complex(pulp_mufft_plan* plan, int forward, float* out, const float* in);
+void pulp_mufft_real_forward(pulp_mufft_plan* plan, float* out, const float* in);
+void pulp_mufft_real_inverse(pulp_mufft_plan* plan, float* out, const float* in);
+std::size_t pulp_mufft_alignment(void);
+std::uint64_t pulp_mufft_retained_bytes(std::uint64_t n);
+std::uint64_t pulp_mufft_largest_allocation_bytes(std::uint64_t n);
+std::uint64_t pulp_mufft_allocations(void);
+}
+#else
+#define PULP_FFT_USE_MUFFT 0
 #endif
 
 namespace pulp::signal {
 
 namespace detail {
+
+inline constexpr bool is_power_of_two(int value) noexcept {
+    return value > 0 && (value & (value - 1)) == 0;
+}
 
 inline constexpr std::size_t fft_twiddle_index(int phase_index, int stride) noexcept {
     const auto index = static_cast<std::size_t>(phase_index);
@@ -35,14 +76,17 @@ struct FftRealSplit;
 
 /// Conservative policy charge for Accelerate's opaque float FFT setup. Apple
 /// does not expose its allocation size, so admission treats the setup as one
-/// allocation bounded at 64 bytes per transform point. Non-vDSP transforms do
-/// not own this allocation and therefore charge zero.
+/// allocation bounded at 64 bytes per transform point. muFFT-backed float
+/// transforms charge the shim's bound for their plans and staging buffers,
+/// several allocations whose largest must fit `target_max_bytes`; the
+/// built-in transform owns no platform setup and charges zero.
 inline constexpr std::uint64_t kVdspFftSetupChargeBytesPerPoint = 64;
 
 /// Floats a float FftT's vDSP split buffer holds beyond its two N-point
-/// halves: up to 15 to reach a 64-byte boundary plus a 4-float (16-byte)
-/// step off it, which is how the halves' placement is pinned (see FftT).
-inline constexpr std::uint64_t kVdspSplitPaddingFloats = 20;
+/// halves: up to 15 to reach a 64-byte boundary, a 4-float (16-byte) step off
+/// it, and a 64-float (256-byte) gap between the halves, which is how their
+/// placement is pinned (see FftT).
+inline constexpr std::uint64_t kVdspSplitPaddingFloats = 84;
 
 template <typename SampleType>
 inline bool checked_fft_platform_setup_bytes(std::uint64_t fft_size,
@@ -52,6 +96,14 @@ inline bool checked_fft_platform_setup_bytes(std::uint64_t fft_size,
     if constexpr (std::is_same_v<SampleType, float>)
         return checked_capacity_product(fft_size, kVdspFftSetupChargeBytesPerPoint,
                                         target_max_bytes, bytes);
+#endif
+#if PULP_FFT_USE_MUFFT
+    if constexpr (std::is_same_v<SampleType, float>) {
+        // The plan is several allocations: each must fit the per-allocation
+        // ceiling, and their sum is the retained charge.
+        bytes = pulp_mufft_retained_bytes(fft_size);
+        return pulp_mufft_largest_allocation_bytes(fft_size) <= target_max_bytes;
+    }
 #endif
     bytes = 0;
     return true;
@@ -104,7 +156,9 @@ inline bool checked_fft_retained_bytes(std::uint64_t fft_size,
 
 // Radix-2 FFT — in-place, decimation-in-time.
 // Size must be a power of 2.
-// On Apple platforms, uses vDSP for significantly faster large transforms.
+// Float transforms use vDSP on Apple and muFFT elsewhere (see the backend
+// note at the top of this file); the radix-2 code below serves double
+// precision, sizes under 16 points off Apple, and builds without muFFT.
 //
 // Real-input signals have Hermitian spectra, so `forward_real_half()` and
 // `inverse_real_half()` move only the N/2 + 1 independent bins (DC through
@@ -137,9 +191,16 @@ public:
           log2n_(other.log2n_), vdsp_setup_(other.vdsp_setup_), split_(std::move(other.split_)),
           split_base_(other.split_base_)
 #endif
+#if PULP_FFT_USE_MUFFT
+          ,
+          mufft_(other.mufft_), mufft_alignment_(other.mufft_alignment_)
+#endif
     {
 #if PULP_FFT_HAS_VDSP
         other.vdsp_setup_ = nullptr;  // Prevent double-free
+#endif
+#if PULP_FFT_USE_MUFFT
+        other.mufft_ = nullptr;
 #endif
         other.size_ = 0;
     }
@@ -154,6 +215,13 @@ public:
             split_ = std::move(other.split_);
             split_base_ = other.split_base_;
 #endif
+#if PULP_FFT_USE_MUFFT
+            if (mufft_)
+                pulp_mufft_destroy(mufft_);
+            mufft_ = other.mufft_;
+            mufft_alignment_ = other.mufft_alignment_;
+            other.mufft_ = nullptr;
+#endif
             size_ = other.size_;
             other.size_ = 0;
             twiddles_ = std::move(other.twiddles_);
@@ -163,6 +231,14 @@ public:
     }
 
     explicit FftT(int size) : size_(size) {
+        // Every implementation below is radix-2, including vDSP and muFFT.
+        // Reject invalid geometry before allocating twiddles or backend
+        // storage; otherwise a non-power-of-two size can report ready() and
+        // silently run a truncated log2 transform.
+        if (!detail::is_power_of_two(size)) {
+            size_ = 0;
+            return;
+        }
 #if PULP_FFT_HAS_VDSP
         // Use vDSP for FFT — much faster for large sizes
         if constexpr (std::is_same_v<SampleType, float>) {
@@ -192,11 +268,23 @@ public:
             vdsp_setup_ = vDSP_create_fftsetup(log2n_, kFFTRadix2);
         }
 #endif
+#if PULP_FFT_USE_MUFFT
+        // Last, for the same reason as the vDSP setup. A null plan leaves the
+        // transform on the built-in path, which is complete for every size.
+        if constexpr (std::is_same_v<SampleType, float>) {
+            mufft_alignment_ = pulp_mufft_alignment();
+            mufft_ = pulp_mufft_create(size);
+        }
+#endif
     }
 
     ~FftT() {
 #if PULP_FFT_HAS_VDSP
         if (vdsp_setup_) vDSP_destroy_fftsetup(vdsp_setup_);
+#endif
+#if PULP_FFT_USE_MUFFT
+        if (mufft_)
+            pulp_mufft_destroy(mufft_);
 #endif
     }
 
@@ -218,6 +306,24 @@ public:
         }
 #endif
         return true;
+    }
+
+    /// Floats between the end of the real half and the start of the
+    /// imaginary half the vDSP transforms use (64 for every ready float
+    /// transform; see the placement note on the split storage), or -1 when
+    /// this transform does not use vDSP.
+    [[nodiscard]] int vdsp_split_plane_gap_floats(bool real_transform) const noexcept {
+#if PULP_FFT_HAS_VDSP
+        if constexpr (std::is_same_v<SampleType, float>) {
+            if (!ready())
+                return -1;
+            const DSPSplitComplex z = real_transform ? real_split() : split();
+            const int half = real_transform ? size_ / 2 : size_;
+            return static_cast<int>(z.imagp - z.realp) - half;
+        }
+#endif
+        static_cast<void>(real_transform);
+        return -1;
     }
 
     /// Byte offset past a 64-byte boundary of the real and imaginary halves
@@ -243,6 +349,14 @@ public:
     // Forward FFT (time → frequency) — complex in-place
     void forward(std::complex<SampleType>* data) const {
         rt::count_fft();
+#if PULP_FFT_USE_MUFFT
+        if constexpr (std::is_same_v<SampleType, float>) {
+            if (mufft_) {
+                complex_mufft(data, true, 1.0f);
+                return;
+            }
+        }
+#endif
 #if PULP_FFT_HAS_VDSP
         if constexpr (std::is_same_v<SampleType, float>) {
             forward_vdsp(data);
@@ -257,6 +371,14 @@ public:
     // Inverse FFT (frequency → time) — complex in-place
     void inverse(std::complex<SampleType>* data) const {
         rt::count_fft();
+#if PULP_FFT_USE_MUFFT
+        if constexpr (std::is_same_v<SampleType, float>) {
+            if (mufft_) {
+                complex_mufft(data, false, 1.0f / static_cast<float>(size_));
+                return;
+            }
+        }
+#endif
 #if PULP_FFT_HAS_VDSP
         if constexpr (std::is_same_v<SampleType, float>) {
             inverse_vdsp(data);
@@ -271,6 +393,14 @@ public:
     // Real-valued forward FFT: real input → complex output
     void forward_real(const SampleType* input, std::complex<SampleType>* output) const {
         rt::count_fft();
+#if PULP_FFT_USE_MUFFT
+        if constexpr (std::is_same_v<SampleType, float>) {
+            if (mufft_) {
+                forward_real_full_mufft(input, output);
+                return;
+            }
+        }
+#endif
 #if PULP_FFT_HAS_VDSP
         if constexpr (std::is_same_v<SampleType, float>) {
             if (size_ >= kVdspMinRealSize) {
@@ -304,6 +434,14 @@ public:
                            SampleType scale) const {
         rt::count_fft();
         assert(size_ >= kMinRealSize && "real transforms need at least two points");
+#if PULP_FFT_USE_MUFFT
+        if constexpr (std::is_same_v<SampleType, float>) {
+            if (mufft_) {
+                forward_real_half_mufft(input, output, scale);
+                return;
+            }
+        }
+#endif
 #if PULP_FFT_HAS_VDSP
         if constexpr (std::is_same_v<SampleType, float>) {
             if (size_ >= kVdspMinRealSize) {
@@ -332,6 +470,14 @@ public:
                            SampleType scale) const {
         rt::count_fft();
         assert(size_ >= kMinRealSize && "real transforms need at least two points");
+#if PULP_FFT_USE_MUFFT
+        if constexpr (std::is_same_v<SampleType, float>) {
+            if (mufft_) {
+                inverse_real_half_mufft(input, output, scale);
+                return;
+            }
+        }
+#endif
 #if PULP_FFT_HAS_VDSP
         if constexpr (std::is_same_v<SampleType, float>) {
             if (size_ >= kVdspMinRealSize) {
@@ -380,6 +526,14 @@ public:
                             SampleType scale) const {
         rt::count_fft();
         assert(size_ >= kMinRealSize && "real transforms need at least two points");
+#if PULP_FFT_USE_MUFFT
+        if constexpr (std::is_same_v<SampleType, float>) {
+            if (mufft_) {
+                forward_real_split_mufft(input, re, im, scale);
+                return;
+            }
+        }
+#endif
 #if PULP_FFT_HAS_VDSP
         if constexpr (std::is_same_v<SampleType, float>) {
             if (size_ >= kVdspMinRealSize) {
@@ -400,6 +554,14 @@ public:
                             SampleType scale) const {
         rt::count_fft();
         assert(size_ >= kMinRealSize && "real transforms need at least two points");
+#if PULP_FFT_USE_MUFFT
+        if constexpr (std::is_same_v<SampleType, float>) {
+            if (mufft_) {
+                inverse_real_split_mufft(re, im, output, scale);
+                return;
+            }
+        }
+#endif
 #if PULP_FFT_HAS_VDSP
         if constexpr (std::is_same_v<SampleType, float>) {
             if (size_ >= kVdspMinRealSize) {
@@ -416,6 +578,12 @@ public:
     // real_bins() bins for the portable split-spectrum path, which builds
     // the interleaved half spectrum first; empty where vDSP serves it.
     mutable std::vector<std::complex<SampleType>> real_scratch_;
+#if PULP_FFT_USE_MUFFT
+    // Owned muFFT plan; null for double precision and for sizes muFFT does
+    // not plan, which take the built-in transform.
+    pulp_mufft_plan* mufft_ = nullptr;
+    std::size_t mufft_alignment_ = 1;
+#endif
 #if PULP_FFT_HAS_VDSP
     int log2n_ = 0;
     FFTSetup vdsp_setup_ = nullptr;
@@ -448,25 +616,43 @@ public:
     //
     // Separate allocations made the same transform's speed and error depend
     // on where the buffers happened to land.
+    //
+    // The imaginary half starts 64 floats (256 bytes) after the real half
+    // ends, not directly after it. Directly after puts the halves a power of
+    // two apart, and once that distance reaches 64 KB (complex transforms
+    // from 16384 points, real ones from 32768, whose halves are N/2 long)
+    // the two streams contend and the transform slows sharply. With the gap,
+    // forward transforms take 0.53-0.87x the time on M5 Max and 0.46-0.78x on
+    // M1 Max at complex 16384-131072 and real 32768-131072 points (paired,
+    // interleaved; loaded), the complex inverse 0.48-0.88x, with the error
+    // unchanged in every cell. Smaller transforms are unaffected (0.92-1.11x,
+    // within noise). The gap is a whole number of 64-byte lines, so both
+    // halves keep the 16-byte offset above.
     mutable std::vector<float> split_;
     std::size_t split_base_ = 0;
-    static constexpr std::size_t kVdspSplitOffsetFloats = 4; // 16 bytes
-    static_assert(kVdspSplitPaddingFloats >= 64 / sizeof(float) - 1 + kVdspSplitOffsetFloats,
-                  "split padding must cover the 64-byte alignment slack plus the 16-byte step");
+    static constexpr std::size_t kVdspSplitOffsetFloats = 4;    // 16 bytes
+    static constexpr std::size_t kVdspSplitPlaneGapFloats = 64; // 256 bytes
+    static_assert(kVdspSplitPlaneGapFloats % (64 / sizeof(float)) == 0,
+                  "the plane gap must be whole 64-byte lines to keep both halves' offset");
+    static_assert(kVdspSplitPaddingFloats >=
+                      64 / sizeof(float) - 1 + kVdspSplitOffsetFloats + kVdspSplitPlaneGapFloats,
+                  "split padding must cover the 64-byte alignment slack, the 16-byte step "
+                  "and the gap between the halves");
 #endif
 
 #if PULP_FFT_HAS_VDSP
     // N-point halves for complex transforms, each 16 bytes past a 64-byte
-    // boundary (N is a power of two, so the second half keeps the offset).
+    // boundary (N is a power of two and the gap is whole lines, so the second
+    // half keeps the offset), with the plane gap between them.
     DSPSplitComplex split() const {
         float* base = split_.data() + split_base_ + kVdspSplitOffsetFloats;
-        return {base, base + size_};
+        return {base, base + size_ + kVdspSplitPlaneGapFloats};
     }
 
     // N/2-point halves for real transforms, placed like split()'s.
     DSPSplitComplex real_split() const {
         float* base = split_.data() + split_base_ + kVdspSplitOffsetFloats;
-        return {base, base + size_ / 2};
+        return {base, base + size_ / 2 + kVdspSplitPlaneGapFloats};
     }
 
     void forward_vdsp(std::complex<float>* data) const {
@@ -578,6 +764,159 @@ public:
                       static_cast<vDSP_Length>(half));
         else
             interleave_scaled(z.realp, z.imagp, output, half, scale);
+    }
+#endif
+
+#if PULP_FFT_USE_MUFFT
+    // muFFT needs aligned, non-overlapping input and output. A caller buffer
+    // that qualifies is handed to it directly; one that does not is staged
+    // through the plan's buffers. The caller's scale is folded into whichever
+    // pass touches the result anyway, so FftT's in-place, any-alignment and
+    // overlapping-output contracts are unchanged.
+    bool mufft_aligned(const void* p) const noexcept {
+        return reinterpret_cast<std::uintptr_t>(p) % mufft_alignment_ == 0;
+    }
+
+    static bool mufft_disjoint(const float* a, std::size_t a_count, const float* b,
+                               std::size_t b_count) noexcept {
+        const auto a0 = reinterpret_cast<std::uintptr_t>(a);
+        const auto b0 = reinterpret_cast<std::uintptr_t>(b);
+        return a0 + a_count * sizeof(float) <= b0 || b0 + b_count * sizeof(float) <= a0;
+    }
+
+    static void mufft_scale(float* data, std::size_t count, float scale) noexcept {
+        if (scale != 1.0f)
+            for (std::size_t i = 0; i < count; ++i)
+                data[i] *= scale;
+    }
+
+    // In place: muFFT cannot read and write one buffer, so the input is
+    // always staged; an aligned caller buffer then receives the output.
+    void complex_mufft(std::complex<float>* data, bool forward, float scale) const {
+        const auto floats = 2 * static_cast<std::size_t>(size_);
+        auto* dst = reinterpret_cast<float*>(data);
+        float* in = pulp_mufft_in(mufft_);
+        std::memcpy(in, dst, floats * sizeof(float));
+        if (mufft_aligned(dst)) {
+            pulp_mufft_complex(mufft_, forward ? 1 : 0, dst, in);
+            mufft_scale(dst, floats, scale);
+            return;
+        }
+        const float* out = pulp_mufft_out(mufft_);
+        pulp_mufft_complex(mufft_, forward ? 1 : 0, pulp_mufft_out(mufft_), in);
+        for (std::size_t i = 0; i < floats; ++i)
+            dst[i] = scale * out[i];
+    }
+
+    // The real input, read in place when aligned.
+    const float* mufft_real_input(const float* input) const {
+        if (mufft_aligned(input))
+            return input;
+        float* in = pulp_mufft_in(mufft_);
+        std::memcpy(in, input, static_cast<std::size_t>(size_) * sizeof(float));
+        return in;
+    }
+
+    // Runs the forward real transform, writing bins 0..N/2 interleaved and
+    // unscaled into `out` when it qualifies, otherwise into the plan's output
+    // buffer, and returns where they landed.
+    const float* forward_real_bins_mufft(const float* input, float* out) const {
+        const float* in = mufft_real_input(input);
+        const auto bins = 2 * static_cast<std::size_t>(size_ / 2 + 1);
+        float* dst = (out && mufft_aligned(out) &&
+                      mufft_disjoint(out, bins, in, static_cast<std::size_t>(size_)))
+                         ? out
+                         : pulp_mufft_out(mufft_);
+        pulp_mufft_real_forward(mufft_, dst, in);
+        return dst;
+    }
+
+    void forward_real_full_mufft(const float* input, std::complex<float>* output) const {
+        auto* out = reinterpret_cast<float*>(output);
+        const float* bins = forward_real_bins_mufft(input, out);
+        const int half = size_ / 2;
+        if (bins != out)
+            std::memcpy(out, bins, 2 * static_cast<std::size_t>(half + 1) * sizeof(float));
+        out[1] = 0.0f;
+        out[2 * half + 1] = 0.0f;
+        for (int k = 1; k < half; ++k)
+            output[size_ - k] = std::conj(output[k]);
+    }
+
+    void forward_real_half_mufft(const float* input, std::complex<float>* output,
+                                 float scale) const {
+        auto* out = reinterpret_cast<float*>(output);
+        const float* bins = forward_real_bins_mufft(input, out);
+        const int half = size_ / 2;
+        const auto count = 2 * static_cast<std::size_t>(half + 1);
+        if (bins == out) {
+            mufft_scale(out, count, scale);
+        } else {
+            for (std::size_t i = 0; i < count; ++i)
+                out[i] = scale * bins[i];
+        }
+        out[1] = 0.0f;            // DC has no imaginary part
+        out[2 * half + 1] = 0.0f; // nor does Nyquist
+    }
+
+    // Runs the inverse real transform from `in` (N/2 + 1 interleaved bins,
+    // DC and Nyquist imaginary parts zero) and writes scale times the
+    // unnormalised result to `output`, directly when it qualifies.
+    void inverse_real_from_mufft(const float* in, float* output, float scale) const {
+        const auto n = static_cast<std::size_t>(size_);
+        const auto bins = 2 * static_cast<std::size_t>(size_ / 2 + 1);
+        if (mufft_aligned(output) && mufft_disjoint(output, n, in, bins)) {
+            pulp_mufft_real_inverse(mufft_, output, in);
+            mufft_scale(output, n, scale);
+            return;
+        }
+        const float* out = pulp_mufft_out(mufft_);
+        pulp_mufft_real_inverse(mufft_, pulp_mufft_out(mufft_), in);
+        for (std::size_t i = 0; i < n; ++i)
+            output[i] = scale * out[i];
+    }
+
+    void inverse_real_half_mufft(const std::complex<float>* input, float* output,
+                                 float scale) const {
+        const int half = size_ / 2;
+        const auto* src = reinterpret_cast<const float*>(input);
+        // The caller's bins are used in place when aligned and already
+        // carrying zero DC and Nyquist imaginary parts, which FftT ignores.
+        if (mufft_aligned(src) && src[1] == 0.0f && src[2 * half + 1] == 0.0f) {
+            inverse_real_from_mufft(src, output, scale);
+            return;
+        }
+        float* in = pulp_mufft_in(mufft_);
+        std::memcpy(in, src, 2 * static_cast<std::size_t>(half + 1) * sizeof(float));
+        in[1] = 0.0f;
+        in[2 * half + 1] = 0.0f;
+        inverse_real_from_mufft(in, output, scale);
+    }
+
+    // The packed split layout is not muFFT's, so its bins always pass
+    // through the plan's buffers on one side.
+    void forward_real_split_mufft(const float* input, float* re, float* im, float scale) const {
+        const float* bins = forward_real_bins_mufft(input, nullptr);
+        const int half = size_ / 2;
+        for (int k = 0; k < half; ++k) {
+            re[k] = scale * bins[2 * k];
+            im[k] = scale * bins[2 * k + 1];
+        }
+        im[0] = scale * bins[2 * half]; // Nyquist rides in im[0]
+    }
+
+    void inverse_real_split_mufft(const float* re, const float* im, float* output,
+                                  float scale) const {
+        const int half = size_ / 2;
+        float* in = pulp_mufft_in(mufft_);
+        for (int k = 0; k < half; ++k) {
+            in[2 * k] = re[k];
+            in[2 * k + 1] = im[k];
+        }
+        in[1] = 0.0f;
+        in[2 * half] = im[0];
+        in[2 * half + 1] = 0.0f;
+        inverse_real_from_mufft(in, output, scale);
     }
 #endif
 

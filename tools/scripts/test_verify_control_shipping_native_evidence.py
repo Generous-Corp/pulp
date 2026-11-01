@@ -205,7 +205,73 @@ class NativeShippingEvidenceTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         aggregate = json.loads(output.read_text())
         self.assertTrue(aggregate["complete"])
+        self.assertEqual(aggregate["deferred_legs"], [])
         self.assertFalse(aggregate["aax"]["proof"])
+
+    def write_matrix_evidence(self, skip: tuple[str, ...] = ()) -> Path:
+        evidence_root = self.root / "evidence"
+        evidence_root.mkdir()
+        identities = {
+            "macos-universal": ("darwin", ["arm64", "x86_64"]),
+            "linux-x64": ("linux", ["x86_64"]),
+            "linux-arm64": ("linux", ["arm64"]),
+            "windows-x64": ("windows", ["x86_64-win"]),
+            "windows-arm64": ("windows", ["arm64-win"]),
+        }
+        for leg, (platform, architectures) in identities.items():
+            if leg in skip:
+                continue
+            aax = {"status": "not-assessed", "proof": False}
+            if leg == "macos-universal":
+                aax = {
+                    "status": "unavailable",
+                    "proof": False,
+                    "reason_code": "aax-sdk-secret-unavailable",
+                }
+            value = {
+                "schema": "dev.pulp.control/native-shipping-leg@1",
+                "leg": leg,
+                "platform": platform,
+                "required_architectures": architectures,
+                "required_formats": self.expected_formats(leg),
+                "reports": self.aggregate_reports(
+                    platform, architectures, self.expected_formats(leg)
+                ),
+                "aax": aax,
+                "verdict": "pass",
+            }
+            (evidence_root / f"{leg}.native-shipping-leg.json").write_text(
+                json.dumps(value), encoding="utf-8"
+            )
+        return evidence_root
+
+    def run_aggregate(self, evidence_root: Path, *extra: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["python3", str(SCRIPT), "aggregate", "--evidence-root", str(evidence_root),
+             "--output", str(self.root / "aggregate.json"), *extra],
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+        )
+
+    def test_a_deferred_leg_is_named_and_the_aggregate_is_incomplete(self) -> None:
+        evidence_root = self.write_matrix_evidence(skip=("windows-x64",))
+        result = self.run_aggregate(evidence_root, "--deferred-leg", "windows-x64")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        aggregate = json.loads((self.root / "aggregate.json").read_text(encoding="utf-8"))
+        self.assertFalse(aggregate["complete"])
+        self.assertEqual(aggregate["deferred_legs"], ["windows-x64"])
+
+    def test_a_missing_leg_that_was_not_deferred_still_fails(self) -> None:
+        evidence_root = self.write_matrix_evidence(skip=("windows-x64",))
+        result = self.run_aggregate(evidence_root)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("missing native shipping leg evidence: windows-x64", result.stderr)
+
+    def test_a_deferred_leg_cannot_also_carry_evidence(self) -> None:
+        result = self.run_aggregate(self.write_matrix_evidence(), "--deferred-leg", "windows-x64")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("deferred native shipping leg has evidence", result.stderr)
 
     def test_aggregate_rejects_ambiguous_aax_skip(self) -> None:
         evidence_root = self.root / "evidence"

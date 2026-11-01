@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Lock the split between stable Windows runtime and latest-toolchain lanes.
 
-The authoritative functional suite deliberately uses ``windows-2022`` while
-release, coverage, scheduled, and standalone compile validation continue to
-exercise ``windows-latest``.  Read every operative workflow here so the policy
-cannot self-agree inside its documentation or Shipyard mirror while a real lane
-silently drifts.
+The functional suite's hosted image is ``windows-2022`` while release and
+standalone compile validation exercise ``windows-latest``. Coverage, the
+nightly, and a dispatch's functional leg take the self-hosted Windows x64 lane
+unless hosted is opted into (test_windows_x64_routing.py). Read every operative
+workflow here so the policy cannot self-agree inside its documentation or
+Shipyard mirror while a real lane silently drifts.
 
 Run:  python3 tools/scripts/test_windows_runner_policy.py
 """
@@ -192,19 +193,21 @@ class WindowsRunnerPolicyTests(unittest.TestCase):
             "windows-latest",
         )
 
-    def test_coverage_stays_on_latest(self) -> None:
+    def test_coverage_windows_routes_through_the_lane_selector(self) -> None:
+        # Behaviour per event is exercised in test_windows_x64_routing.py; this
+        # pins the chain from the resolver to the matrix.
         resolver = job(self.coverage, "resolve-runners")
-        self.assertIn("windows='\"windows-latest\"'", resolver)
-        self.assertRegex(resolver, r"(?m)^\s+windows-latest\)$")
+        self.assertIn("tools/scripts/windows_runner_selector.py --route", resolver)
         self.assertNotIn("windows-2022", resolver)
-        # Exactly the PR literal and non-PR resolver assignment. A later
-        # reassignment before publication would silently sever this chain.
-        self.assertEqual(len(re.findall(r"(?m)^\s*windows\s*=", resolver)), 2)
+        # Exactly one assignment. A later reassignment before publication
+        # would silently sever this chain.
+        self.assertEqual(len(re.findall(r"(?m)^\s*windows\s*=", resolver)), 1)
         self.assertIn(
             "windows_runs_on: ${{ steps.resolve.outputs.windows_runs_on }}",
             resolver,
         )
         self.assertIn('echo "windows_runs_on=${windows}"', resolver)
+        self.assertIn('echo "windows_route=${windows_leg}"', resolver)
 
         matrix_config = job(self.coverage, "matrix-config")
         self.assertIn("needs: [resolve-runners]", matrix_config)
@@ -234,24 +237,28 @@ class WindowsRunnerPolicyTests(unittest.TestCase):
             "runs-on: ${{ fromJSON(matrix.runs_on_json) }}", consumer
         )
 
-    def test_cross_platform_windows_takes_a_policed_selector_with_hosted_fallback(self) -> None:
+    def test_cross_platform_windows_takes_a_policed_selector_with_lane_default(self) -> None:
         # The Windows job's runner comes only from the resolver job, which runs
-        # tools/scripts/windows_runner_selector.py over the dispatch input. The
-        # hosted label is the fallback for an empty input (the schedule passes
-        # none), not a hard-coded runs-on.
+        # tools/scripts/windows_runner_selector.py --route over the dispatch
+        # input. An empty input (the schedule passes none) takes the
+        # self-hosted Windows x64 lane; hosted needs the repository opt-in.
         windows = job(self.nightly, "windows")
         self.assertIn("needs: windows-runner", windows)
         self.assertIn("runs-on: ${{ fromJSON(needs.windows-runner.outputs.runs_on) }}", windows)
         self.assertNotIn("windows-2022", windows)
         resolver = job(self.nightly, "windows-runner")
         self.assertIn("runs-on: ubuntu-latest", resolver)
-        self.assertIn("tools/scripts/windows_runner_selector.py --selector", resolver)
+        self.assertIn("tools/scripts/windows_runner_selector.py --route", resolver)
+        self.assertIn('--selector "$SELECTOR"', resolver)
         self.assertIn("SELECTOR: ${{ inputs.windows_runner_selector_json || '' }}", resolver)
-        fallback = subprocess.run(
-            [sys.executable, str(REPO_ROOT / "tools/scripts/windows_runner_selector.py"), "--selector", ""],
+        self.assertIn("ALLOW_HOSTED: ${{ vars.PULP_ALLOW_HOSTED_WINDOWS || '' }}", resolver)
+        default = subprocess.run(
+            [sys.executable, str(REPO_ROOT / "tools/scripts/windows_runner_selector.py"),
+             "--route", "--event-name", "schedule"],
             capture_output=True, text=True, encoding="utf-8", check=True,
-        ).stdout.strip()
-        self.assertEqual(fallback, 'runs_on="windows-latest"')
+        ).stdout.splitlines()[0]
+        self.assertEqual(
+            default, 'runs_on=["self-hosted","Windows","X64","pulp-build-windows-x64"]')
         triggers = yaml.safe_load(self.nightly)[True]
         self.assertEqual(
             triggers["workflow_dispatch"]["inputs"]["windows_runner_selector_json"]["default"], ""
@@ -408,6 +415,7 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
                 "NAMESPACE_WINDOWS_RUNS_ON_JSON": "",
                 "WORKFLOW_DISPATCH_ALLOW_HOSTED_WINDOWS": "",
                 "ALLOW_HOSTED_WINDOWS_VAR": "",
+                "LOCAL_WINDOWS_X64_RUNS_ON_JSON": "",
             }
         )
         env.update(extra)
@@ -489,14 +497,61 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
         self.assertIn("macos", keys)
         self.assertIn("linux", keys)
 
-    def test_a_default_dispatch_or_push_schedules_no_hosted_windows(self) -> None:
-        """GitHub-hosted Windows is opt-in: agents kept landing on it by
-        default through a plain dispatch or a push to main."""
-        for event in ("workflow_dispatch", "push"):
-            with self.subTest(event=event):
-                keys = self._matrix_keys(event)
-                self.assertNotIn("windows", keys)
-                self.assertIn("linux", keys, "control: the resolver ran and built a matrix")
+    def _windows_runs_on(self, event_name: str, **extra: str):
+        legs = [leg for leg in self._matrix(event_name, **extra) if leg["key"] == "windows"]
+        return json.loads(legs[0]["runs_on_json"]) if legs else None
+
+    def test_a_default_push_schedules_no_windows(self) -> None:
+        """GitHub-hosted Windows is opt-in, and a push never takes the
+        self-hosted lane (every push-reachable job stays hosted)."""
+        keys = self._matrix_keys("push")
+        self.assertNotIn("windows", keys)
+        self.assertIn("linux", keys, "control: the resolver ran and built a matrix")
+        self.assertIsNone(self._windows_runs_on(
+            "push", LOCAL_WINDOWS_X64_RUNS_ON_JSON=json.dumps(self.LANE)))
+
+    LANE = ["self-hosted", "Windows", "X64", "pulp-build-windows-x64"]
+
+    def test_a_default_dispatch_runs_windows_on_the_self_hosted_lane(self) -> None:
+        self.assertEqual(self._windows_runs_on("workflow_dispatch"), self.LANE)
+        configured = [*self.LANE, "pulp-host-macpro"]
+        self.assertEqual(self._windows_runs_on(
+            "workflow_dispatch", LOCAL_WINDOWS_X64_RUNS_ON_JSON=json.dumps(configured)),
+            configured)
+
+    def test_a_dispatch_reaches_hosted_windows_only_by_opting_in(self) -> None:
+        self.assertEqual(self._windows_runs_on(
+            "workflow_dispatch", WORKFLOW_DISPATCH_ALLOW_HOSTED_WINDOWS="true"), "windows-2022")
+        self.assertEqual(self._windows_runs_on(
+            "workflow_dispatch", ALLOW_HOSTED_WINDOWS_VAR="1"), "windows-2022")
+        # A hosted label in the lane variable switches the lane off.
+        self.assertEqual(self._windows_runs_on(
+            "workflow_dispatch", LOCAL_WINDOWS_X64_RUNS_ON_JSON='"windows-latest"'), "windows-2022")
+        # An explicit selector still wins over the lane default.
+        explicit = [*self.LANE, "pulp-host-macpro"]
+        self.assertEqual(self._windows_runs_on(
+            "workflow_dispatch",
+            EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON=json.dumps(explicit)), explicit)
+
+    def test_a_bare_hosted_label_in_the_lane_variable_switches_the_lane_off(self) -> None:
+        self.assertEqual(self._windows_runs_on(
+            "workflow_dispatch", LOCAL_WINDOWS_X64_RUNS_ON_JSON="windows-latest"), "windows-2022")
+
+    def test_a_foreign_pool_lane_variable_is_refused_on_a_dispatch(self) -> None:
+        bad = json.dumps(["self-hosted", "macOS", "ARM64", "pulp-gate-fast"])
+        with self.assertRaises(AssertionError):
+            self._matrix("workflow_dispatch", LOCAL_WINDOWS_X64_RUNS_ON_JSON=bad)
+
+    def test_a_pull_request_dispatch_never_reads_the_lane_variable(self) -> None:
+        # The fleet App's merge-ref dispatch carries no Windows leg, so even a
+        # lane variable the selector would refuse must not be evaluated.
+        bad = json.dumps(["self-hosted", "macOS", "ARM64", "pulp-gate-fast"])
+        legs = self._matrix(
+            "workflow_dispatch", DISPATCH_PR_NUMBER="123",
+            LOCAL_WINDOWS_X64_RUNS_ON_JSON=bad)
+        self.assertNotIn("windows", [leg["key"] for leg in legs])
+        self.assertIn("linux", [leg["key"] for leg in legs],
+                      "control: the resolver ran and built a matrix")
 
     def test_workflow_dispatch_reaches_windows_only_by_opting_in(self) -> None:
         """Still reachable on demand, which is how a Windows fix gets verified
@@ -716,7 +771,7 @@ class HostedWindowsOptInTests(unittest.TestCase):
             with self.subTest(workflow=workflow, job=job_name):
                 self.assertIn(job_name, yaml.safe_load(read(WORKFLOWS / workflow))["jobs"])
 
-    def android_matrix(self, event: str, allow: str = "") -> list[str]:
+    def android_matrix(self, event: str, allow: str = "") -> list:
         doc = yaml.safe_load(read(WORKFLOWS / "android.yml"))
         step = next(s for s in doc["jobs"]["resolve-runners"]["steps"] if s.get("id") == "resolve")
         with tempfile.TemporaryDirectory() as tmp:
@@ -724,22 +779,28 @@ class HostedWindowsOptInTests(unittest.TestCase):
             output.write_text("", encoding="utf-8")
             env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "GITHUB_OUTPUT": str(output),
                    "MACOS_RUNS_ON_JSON": "", "EVENT_NAME": event,
-                   "ALLOW_HOSTED_WINDOWS_VAR": allow}
+                   "ALLOW_HOSTED_WINDOWS_VAR": allow, "WINDOWS_X64_RUNS_ON_JSON": ""}
             result = subprocess.run(["bash", "-c", step["run"]], cwd=REPO_ROOT, env=env,
                                     capture_output=True, text=True, encoding="utf-8",
                                     check=False, timeout=60)
             self.assertEqual(result.returncode, 0, result.stderr)
             line = next(l for l in output.read_text(encoding="utf-8").splitlines()
                         if l.startswith("matrix="))
-        return [row["os"] for row in json.loads(line.split("=", 1)[1])["include"]]
+        return [row["os"] if row["os"] == "macos-latest"
+                else (row["os"], json.loads(row["runs_on_json"]))
+                for row in json.loads(line.split("=", 1)[1])["include"]]
 
-    def test_android_runs_hosted_windows_only_nightly_or_by_opting_in(self) -> None:
-        for event in ("push", "pull_request", "merge_group", "workflow_dispatch"):
+    def test_android_runs_windows_on_the_lane_nightly_and_hosted_only_by_opting_in(self) -> None:
+        lane = ("windows-x64", ["self-hosted", "Windows", "X64", "pulp-build-windows-x64"])
+        hosted = ("windows-x64", "windows-latest")
+        for event in ("push", "pull_request", "merge_group"):
             with self.subTest(event=event):
                 self.assertEqual(self.android_matrix(event), ["macos-latest"])
-                self.assertEqual(self.android_matrix(event, "1"),
-                                 ["macos-latest", "windows-latest"])
-        self.assertEqual(self.android_matrix("schedule"), ["macos-latest", "windows-latest"])
+                self.assertEqual(self.android_matrix(event, "1"), ["macos-latest", hosted])
+        for event in ("schedule", "workflow_dispatch"):
+            with self.subTest(event=event):
+                self.assertEqual(self.android_matrix(event), ["macos-latest", lane])
+                self.assertEqual(self.android_matrix(event, "1"), ["macos-latest", hosted])
 
     def test_no_required_context_comes_from_android(self) -> None:
         ruleset = json.loads(read(REPO_ROOT / ".github/rulesets/main-protection.json"))

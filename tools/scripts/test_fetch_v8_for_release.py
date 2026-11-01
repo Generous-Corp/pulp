@@ -800,7 +800,11 @@ class FindV8ReceiptSelection(unittest.TestCase):
         (root / "lib").mkdir(parents=True)
         (root / "include/v8.h").write_bytes(b"header")
         (root / "lib/libv8.dylib").write_bytes(b"provider")
-        (root / "manifest.json").write_text("{}", encoding="utf-8")
+        # FindV8 applies the sealed provider's ABI contract at configure time;
+        # keep this receipt fixture representative of a real v8-builder asset.
+        (root / "manifest.json").write_text(
+            json.dumps({"sealed": True, "consumer_defines": ["V8_COMPRESS_POINTERS"]}),
+            encoding="utf-8")
         fetch_v8.write_generation_receipt(
             root, "mac-arm64", asset_sha, metadata_sha)
         (root / ".v8-asset-sha256").write_text(asset_sha + "\n", encoding="utf-8")

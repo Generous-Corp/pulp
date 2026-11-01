@@ -202,15 +202,15 @@ public:
                 if (i & (1 << b)) r |= 1 << (log2_size_ - 1 - b);
             reversed_[static_cast<std::size_t>(i)] = r;
         }
-        // Twiddles are held in double regardless of SampleType: they are a
-        // fixed table, so computing them in double costs nothing at run time
-        // while keeping the float transform's error floor set by the
-        // accumulation rather than by the table.
+        // Compute in double, then store the processing precision once. The
+        // butterflies use these same rounded coefficients without converting
+        // every table load; float plans also need half the table storage.
         twiddles_.resize(static_cast<std::size_t>(std::max(1, size / 2)));
         constexpr double two_pi = 6.283185307179586476925286766559;
         for (int i = 0; i < size / 2; ++i) {
             const double angle = -two_pi * static_cast<double>(i) / static_cast<double>(size);
-            twiddles_[static_cast<std::size_t>(i)] = {std::cos(angle), std::sin(angle)};
+            twiddles_[static_cast<std::size_t>(i)] = {static_cast<SampleType>(std::cos(angle)),
+                                                      static_cast<SampleType>(std::sin(angle))};
         }
     }
 
@@ -262,6 +262,16 @@ public:
             gather_mask = mask;
         }
 
+        /// Forward transform of the already gathered natural-order data in
+        /// `data`, using the in-place permutation and butterfly phases.
+        void begin_forward_in_place() {
+            phase = Phase::permute;
+            cursor = 0;
+            stage = 1;
+            inverse = false;
+            gather_src = nullptr;
+        }
+
         /// Inverse transform of whatever already sits in `data`, computed as
         /// `conj(fft(conj(x)))/N`.
         void begin_inverse_in_place() {
@@ -302,12 +312,13 @@ public:
                     const int half = len / 2;
                     const int step = n / len;
                     for (int b = cursor; b < cursor + take; ++b) {
-                        const int group = b / half;
-                        const int j = b - group * half;
+                        // half is 2^(stage - 1); keep the butterfly index
+                        // arithmetic as shifts/masks in this hot loop.
+                        const int group = b >> (stage - 1);
+                        const int j = b & (half - 1);
                         const int i = group * len;
                         const auto& tw = plan.twiddles_[static_cast<std::size_t>(j * step)];
-                        const std::complex<SampleType> w(static_cast<SampleType>(tw.real()),
-                                                         static_cast<SampleType>(tw.imag()));
+                        const auto w = tw;
                         const auto u = data[i + j];
                         const auto v = data[i + j + half] * w;
                         data[i + j] = u + v;
@@ -386,8 +397,7 @@ public:
             for (int i = 0; i < size_; i += len) {
                 for (int j = 0; j < half; ++j) {
                     const auto& tw = twiddles_[static_cast<std::size_t>(j * step)];
-                    const std::complex<SampleType> w(static_cast<SampleType>(tw.real()),
-                                                     static_cast<SampleType>(tw.imag()));
+                    const auto w = tw;
                     const auto u = dst[i + j];
                     const auto v = dst[i + j + half] * w;
                     dst[i + j] = u + v;
@@ -401,7 +411,7 @@ private:
     int size_ = 0;
     int log2_size_ = 0;
     std::vector<int> reversed_;
-    std::vector<std::complex<double>> twiddles_;
+    std::vector<std::complex<SampleType>> twiddles_;
 };
 
 }  // namespace detail

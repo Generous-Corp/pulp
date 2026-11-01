@@ -12,6 +12,19 @@ AAX, Standalone) opens its editor through
 the invariants the API enforces and the pitfalls that bit us enough
 times to be worth remembering.
 
+## Standalone window factory ownership
+
+On Windows/Linux, standalone startup calls
+`detail::ensure_standalone_window_factory()` before creating its editor window.
+It installs the SDL adapter only when the process has no registered window
+factory, preserving an embedding host's factory. Keep generic
+`WindowHost::create()` factory-only: with no factory it returns `nullptr`.
+Removing its SDL fallback without moving registration into standalone startup
+breaks standalone window creation even when headless CI is green. The
+`standalone-editor-chrome` tests cover registration and custom-factory preservation
+without opening a real window; the view-host bridge no-factory test remains the
+separate contract check.
+
 ## When to use ViewBridge
 
 | Task | Touch ViewBridge? |
@@ -1953,6 +1966,15 @@ honoring the `PULP_DISABLE_PLUGIN_GPU` runtime opt-out. Hardcoding
 back to the AutoUi CPU path (the GPU-plugin-view-host work, 2026-05).
 
 Rules when touching an adapter's editor-attach path:
+- Use `try_attach_to_parent()` before reporting attachment success or calling
+  `notify_attached()` / `prepare_first_frame()`. A Windows host can reject a
+  valid parent when its frame timer cannot be installed; a successful VST3
+  `CPluginView::attached()` or a recognized CLAP window API does not prove the
+  native host attached. Keep failure cleanup before the bridge's teardown.
+- The Windows host treats an already attached parent as an idempotent success.
+  A different-parent request returns false and preserves the existing timer
+  and GPU surfaces. Call `detach()` before attaching to a different parent;
+  detach releases the old surfaces so the next attachment recreates them.
 - A custom `Processor::create_view()` that owns a `ScriptedUiSession` MUST
   override `Processor::active_scripted_ui()` so `ViewBridge` reports
   `uses_script_ui()`, adapters log `mode=scripted`, select the GPU host, and
@@ -1998,6 +2020,17 @@ Rules when touching an adapter's editor-attach path:
   `use_gpu=false` still initializes Dawn, the runtime opt-out is fictional; if
   the CPU path only supports capture and not live presentation, ordinary
   AutoUi editors paint black.
+- **Attached Windows repaint requests must wait for the frame timer.** Scripted
+  document mounting and idle callbacks can request repaint while a frame is
+  being assembled. Calling `render_frame()` synchronously from that request
+  re-enters document mounting and nests drawable acquisition. Keep the dirty
+  mark for the next `WM_TIMER`; preserve explicit unattached capture behavior
+  and the platform `WM_PAINT` path. Validate with the real HWND/Dawn regression
+  and a trace: completed document load and no nested `frame` ancestors prove
+  this repair, while long `gpu_acquire` spans still require separate analysis.
+  The Windows host source belongs to `pulp-view-tooling`; rebuilding only
+  `pulp-view-native` can exit successfully without compiling it. Verify a new
+  final plugin hash and exact loaded module before measuring the result.
 - **AU specifically also needs the Cocoa view advertised** (`kAudioUnitProperty_CocoaUI`)
   or the host shows its own generic param view regardless of the host wiring —
   see the `auv2` skill's "AU v2 MUST advertise its Cocoa view" gotcha.

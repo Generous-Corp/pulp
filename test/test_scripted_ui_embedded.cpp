@@ -225,6 +225,10 @@ TEST_CASE("an embedded session resolves the files embedded beside its script",
             createLabel('traversal', traversal.ok ? 'leaked' : String(traversal.status), '');
             var missing = __loadAssetSync__('assets/nope.json');
             createLabel('missing', missing.ok ? 'leaked' : String(missing.status), '');
+            var rooted = __loadAssetSync__('/assets/data.json');
+            createLabel('rooted', rooted.ok ? 'leaked' : String(rooted.status), '');
+            var fileUrl = __loadAssetSync__('file://assets/data.json');
+            createLabel('file-url', fileUrl.ok ? 'leaked' : String(fileUrl.status), '');
             createLabel('font', loadFont('fonts/Face.ttf') ? 'present' : 'absent', '');
             createLabel('nofont', loadFont('fonts/Other.ttf') ? 'present' : 'absent', '');
             createImage('knob', '');
@@ -242,6 +246,10 @@ TEST_CASE("an embedded session resolves the files embedded beside its script",
     REQUIRE(label_text(session, "dotted") == "ok");
     REQUIRE(label_text(session, "traversal") == "404");
     REQUIRE(label_text(session, "missing") == "404");
+    // An absolute or file:// spelling is judged by the filesystem rule, which
+    // refuses it here; the embedded table never answers for it.
+    REQUIRE(label_text(session, "rooted") == "403");
+    REQUIRE(label_text(session, "file-url") == "403");
     REQUIRE(label_text(session, "font") == "present");
     REQUIRE(label_text(session, "nofont") == "absent");
 
@@ -257,6 +265,49 @@ TEST_CASE("an embedded session resolves the files embedded beside its script",
     // A reload keeps the table: the realm is rebuilt with the same files.
     REQUIRE(session.reload(&error));
     REQUIRE(label_text(session, "sidecar") == R"({"from":"embedded"})");
+}
+
+namespace {
+
+// PNG signature plus an IHDR chunk header naming a 4x8 image: enough for the
+// bridge to read dimensions; nothing here decodes the pixels.
+const unsigned char kStripPngBytes[] = {
+    0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0x0D, 'I', 'H', 'D',
+    'R',  0,   0,   0,   4,    0,    0,    0,    8, 8, 6, 0,    0,   0,
+};
+
+} // namespace
+
+TEST_CASE("an embedded sprite strip keeps its bytes instead of naming a file",
+          "[view][scripted-ui][embedded][assets]") {
+    View root;
+    root.set_bounds({0, 0, 320, 240});
+    StateStore store;
+    ScriptedUiSession session(
+        root, store,
+        {.enable_hot_reload = false,
+         .enable_theme_reload = false,
+         .script_source = R"JS(
+            createKnob('knob', 0, 0, 48, 48);
+            setKnobSpriteStrip('knob', 'strip.png', 2, 'vertical');
+         )JS",
+         .script_name = "ui.js",
+         .embedded_assets = {{"strip.png", kStripPngBytes, sizeof(kStripPngBytes)}},
+         .storage_identity = "com.acme.synth/ui.js"});
+    std::string error;
+    REQUIRE(session.load(&error));
+    REQUIRE(error.empty());
+
+    auto* knob = dynamic_cast<Knob*>(session.bridge()->widget("knob"));
+    REQUIRE(knob != nullptr);
+    const auto& strip = knob->sprite_strip();
+    REQUIRE(strip != nullptr);
+    // A file-backed strip would carry the bare embedded name, which the
+    // renderer would open relative to the working directory.
+    REQUIRE(strip->source() == SpriteStrip::Source::raw_pixels);
+    REQUIRE(strip->path().empty());
+    REQUIRE(strip->data_size() == sizeof(kStripPngBytes));
+    REQUIRE(strip->frame_count() == 2);
 }
 
 TEST_CASE("the embedded asset table rejects names that cannot be script-relative",
@@ -280,7 +331,11 @@ TEST_CASE("the embedded asset table rejects names that cannot be script-relative
     REQUIRE(session.bridge()->embedded_assets()[0].name == "ok/keep.json");
     REQUIRE(session.bridge()->embedded_asset("ok/keep.json") != nullptr);
     REQUIRE(session.bridge()->embedded_asset("../escape.json") == nullptr);
-    REQUIRE(session.bridge()->embedded_asset("/ok/keep.json") != nullptr);
+    REQUIRE(session.bridge()->embedded_asset("./ok/keep.json") != nullptr);
+    // Names the filesystem rule would refuse never reach the embedded table.
+    REQUIRE(session.bridge()->embedded_asset("/ok/keep.json") == nullptr);
+    REQUIRE(session.bridge()->embedded_asset("file://ok/keep.json") == nullptr);
+    REQUIRE(session.bridge()->embedded_asset("ok/../ok/keep.json") == nullptr);
     REQUIRE(session.bridge()->embedded_asset("pulp://ok/keep.json") == nullptr);
 }
 

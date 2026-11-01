@@ -61,7 +61,7 @@ template <typename SampleType = float> class WaveguideReflectionFilterT {
             reset();
             return SampleType{};
         }
-        last_output_ = snap_to_zero(output);
+        last_output_ = snap_recursion_state(output);
         return finite_cast(last_output_);
     }
 

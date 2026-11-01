@@ -1414,6 +1414,9 @@ TEST_CASE("WidgetBridge loadAssetSync covers embedded file and missing records",
     root.set_bounds({0, 0, 400, 300});
     StateStore store;
     WidgetBridge bridge(engine, root, store);
+    // file:// reads with no asset root are the app-side raw-path posture;
+    // the default refuses them (see test_widget_bridge_capabilities.cpp).
+    bridge.set_allow_unreviewed_file_paths(true);
 
     static const char kEmbeddedJson[] = "{\"label\":\"pulp\"}";
     AssetManager::instance().register_embedded(
@@ -1468,6 +1471,7 @@ TEST_CASE("WidgetBridge loadAssetSync covers text mime variants and path normali
     root.set_bounds({0, 0, 400, 300});
     StateStore store;
     WidgetBridge bridge(engine, root, store);
+    bridge.set_allow_unreviewed_file_paths(true); // raw file:// read below
 
     static const char kEmbeddedCss[] = "body { color: red; }\n";
     static const char kEmbeddedSvg[] = "<svg><path d='M0 0h1v1z'/></svg>";
@@ -1747,6 +1751,13 @@ TEST_CASE("WidgetBridge loadFont reports existing and missing paths",
 
     const auto existing = js_single_quoted(font_path.string());
     const auto missing = js_single_quoted((font_path.string() + ".missing"));
+    // An absolute path outside every configured root is refused by default,
+    // so the probe reports "missing" for a file that exists: the existence
+    // oracle is closed unless the host opts into unreviewed paths.
+    bridge.load_script("var font_contained = loadFont('" + existing + "');");
+    REQUIRE_FALSE(engine.evaluate("font_contained").getWithDefault<bool>(true));
+
+    bridge.set_allow_unreviewed_file_paths(true);
     bridge.load_script(
         "var font_existing = loadFont('" + existing + "');"
         "var font_missing = loadFont('" + missing + "');"

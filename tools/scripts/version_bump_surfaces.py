@@ -89,6 +89,10 @@ class Config:
     # `Version-Bump:` trailers still override the heuristic. See
     # docs/guides/version-at-land-cutover.md.
     post_merge_assignment: bool = False
+    # Paths the post-merge writer may ever include in its generated commit.
+    # This is intentionally separate from generated_globs: the latter filters
+    # author changes, while this allowlist constrains the privileged writer.
+    writer_allowed_globs: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -124,6 +128,7 @@ def load_config(path: Path) -> Config:
         generated_globs=data.get("generated_globs", []) or [],
         trailer_version_bump=trailers.get("version_bump", "Version-Bump"),
         post_merge_assignment=bool(data.get("post_merge_assignment", False)),
+        writer_allowed_globs=data.get("writer_allowed_globs", []) or [],
     )
 
 

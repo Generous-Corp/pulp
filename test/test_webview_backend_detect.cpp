@@ -96,3 +96,45 @@ TEST_CASE("WebView backend on Android is chromium when enabled",
 #endif
 }
 #endif
+
+TEST_CASE("WebView backend detector answers from the installed provider",
+          "[webview][backend-detect][provider]") {
+    using pulp::view::detail::set_webview_backend_provider;
+    using pulp::view::detail::WebViewBackendProvider;
+    const auto before = pulp::view::detect_webview_backend();
+
+    static const WebViewBackendProvider fake{
+        [] { return std::string("webkitgtk"); },
+        [] { return true; },
+    };
+    const auto* previous = set_webview_backend_provider(&fake);
+    CHECK(previous == nullptr);
+    CHECK(pulp::view::detect_webview_backend() == "webkitgtk");
+    CHECK(pulp::view::webview_backend_available());
+
+    static const WebViewBackendProvider empty{};
+    set_webview_backend_provider(&empty);
+    CHECK(pulp::view::detect_webview_backend() == "none");
+    CHECK_FALSE(pulp::view::webview_backend_available());
+
+    // Removing the override hands the answer back to the linked provider.
+    CHECK(set_webview_backend_provider(nullptr) == &empty);
+    REQUIRE(pulp::view::detect_webview_backend() == before);
+}
+
+namespace {
+
+// Recorded by this translation unit's own static initializer, before main and
+// in no defined order relative to the WebView provider's translation unit. A
+// provider installed by a registrar's constructor could still be missing here.
+const std::string kBackendSeenDuringStaticInit = pulp::view::detect_webview_backend();
+
+} // namespace
+
+TEST_CASE("WebView backend detector is correct during static initialization",
+          "[webview][backend-detect][static-init]") {
+    REQUIRE(kBackendSeenDuringStaticInit == pulp::view::detect_webview_backend());
+#if defined(__APPLE__) && defined(PULP_BUILD_WEBVIEW) && PULP_BUILD_WEBVIEW
+    REQUIRE(kBackendSeenDuringStaticInit == "wkwebview");
+#endif
+}

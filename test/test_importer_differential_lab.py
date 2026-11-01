@@ -1485,6 +1485,62 @@ class DifferentialLabTests(unittest.TestCase):
         self.assertNotEqual(LAB.canonical_json_sha256(json.dumps(nested).encode()),
                             LAB.canonical_json_sha256(json.dumps(nested_changed).encode()))
 
+    def test_canonical_capture_digest_ignores_provenance_timings_only(self) -> None:
+        def capture(timing: int, width: int = 420) -> bytes:
+            return json.dumps({
+                "schema": "pulp-browser-capture-v1",
+                "provenance": {
+                    "timings": {"capture_ms": timing},
+                    "viewport": {"resolved": {"width": width}},
+                },
+                "documents": [{"snapshot_asset": "dom-snapshot.json"}],
+            }).encode()
+
+        baseline = LAB.canonical_json_sha256(capture(12))
+        self.assertEqual(baseline, LAB.canonical_json_sha256(capture(99)))
+        # A sibling provenance field is content, not a per-run clock.
+        self.assertNotEqual(baseline, LAB.canonical_json_sha256(capture(99, 421)))
+
+    def test_canonical_capture_digest_ignores_non_object_provenance_timings(self) -> None:
+        def capture(timings: object) -> bytes:
+            return json.dumps({
+                "schema": "pulp-browser-capture-v1",
+                "provenance": {
+                    "timings": timings,
+                    "viewport": {"resolved": {"width": 420}},
+                },
+                "documents": [{"snapshot_asset": "dom-snapshot.json"}],
+            }).encode()
+
+        baseline = LAB.canonical_json_sha256(capture(None))
+        for timings in ("worker-clock", ["capture", 12], {"capture_ms": 12}):
+            self.assertEqual(baseline, LAB.canonical_json_sha256(capture(timings)))
+
+        # The sibling provenance field remains part of the digest.
+        changed = json.loads(capture(None))
+        changed["provenance"]["viewport"]["resolved"]["width"] = 421
+        self.assertNotEqual(baseline, LAB.canonical_json_sha256(json.dumps(changed).encode()))
+
+    def test_non_capture_timings_remain_part_of_canonical_digest(self) -> None:
+        first = json.dumps({"provenance": {"timings": {"capture_ms": 12}}}).encode()
+        second = json.dumps({"provenance": {"timings": {"capture_ms": 99}}}).encode()
+        self.assertNotEqual(LAB.canonical_json_sha256(first),
+                            LAB.canonical_json_sha256(second))
+
+    def test_capture_timing_only_runs_can_pass_determinism_receipt(self) -> None:
+        def report(timing: int) -> dict[str, object]:
+            capture = json.dumps({
+                "schema": "pulp-browser-capture-v1",
+                "provenance": {"timings": {"capture_ms": timing}},
+            }).encode()
+            digest = LAB.canonical_json_sha256(capture)
+            return {"integrity": {field: digest for field in LAB_CLI.DETERMINISM_FIELDS}}
+
+        self.assertEqual(
+            LAB_CLI.determinism_receipt([report(1), report(2), report(3)])['status'],
+            "pass",
+        )
+
     def test_canonical_capture_digest_excludes_only_raw_document_bindings(self) -> None:
         first = {"schema": "pulp-browser-capture-v1", "documents": [
             {"snapshot_asset": "dom-snapshot.json", "snapshot_sha256": "a" * 64}]}

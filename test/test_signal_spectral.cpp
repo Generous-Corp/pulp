@@ -992,6 +992,28 @@ TEST_CASE("FFT vDSP split halves sit 16 bytes past a 64-byte boundary",
     REQUIRE(Fft64(512).vdsp_split_offset_bytes(true) == -1);
 }
 
+TEST_CASE("FFT vDSP split halves are not a power of two apart", "[signal][fft][real][placement]") {
+    // Halves exactly N (or N/2) floats apart contend once that distance
+    // reaches 64 KB, so a 64-float gap separates them at every size, and the
+    // gap keeps both halves 16 bytes past a 64-byte boundary.
+    for (const int n : {32, 512, 4096, 16384, 32768, 65536}) {
+        Fft fft(n);
+        INFO("n=" << n);
+#if PULP_FFT_HAS_VDSP
+        REQUIRE(fft.vdsp_split_plane_gap_floats(true) == 64);
+        REQUIRE(fft.vdsp_split_plane_gap_floats(false) == 64);
+        REQUIRE(fft.vdsp_split_offset_bytes(true) == 16);
+        REQUIRE(fft.vdsp_split_offset_bytes(false) == 16);
+        Fft moved(std::move(fft));
+        REQUIRE(moved.vdsp_split_plane_gap_floats(true) == 64);
+        REQUIRE(moved.vdsp_split_plane_gap_floats(false) == 64);
+#else
+        REQUIRE(fft.vdsp_split_plane_gap_floats(true) == -1);
+#endif
+    }
+    REQUIRE(Fft64(512).vdsp_split_plane_gap_floats(false) == -1);
+}
+
 TEST_CASE("FFT real transform error matches the most accurate vDSP placement",
           "[signal][fft][real][accuracy]") {
     // Worst error over bins and frames relative to the largest bin, against a

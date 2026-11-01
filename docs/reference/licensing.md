@@ -24,6 +24,7 @@ Tables are sorted alphabetically (case-insensitive) by name. Entries here must s
 | **Mbed TLS** | Apache-2.0 (dual-licensed; Pulp uses the Apache-2.0 option) | Cryptographic primitives (SHA-256, RSA, AES) | [github.com/Mbed-TLS/mbedtls](https://github.com/Mbed-TLS/mbedtls) |
 | **miniz** | MIT | ZIP/GZIP compression | [github.com/richgel999/miniz](https://github.com/richgel999/miniz) |
 | **msdfgen** | MIT | Reserved for multi-channel SDF glyph generation | [github.com/Chlumsky/msdfgen](https://github.com/Chlumsky/msdfgen) |
+| **muFFT** | MIT | Float FFT backend for `FftT` on non-Apple targets (Apple uses vDSP) | [github.com/Themaister/muFFT](https://github.com/Themaister/muFFT) |
 | **nanosvg** | zlib | SVG parsing and rasterization | [github.com/memononen/nanosvg](https://github.com/memononen/nanosvg) |
 | **pugixml** | MIT | XML parsing and generation | [github.com/zeux/pugixml](https://github.com/zeux/pugixml) |
 | **QuickJS** | MIT | Default JavaScript engine, embedded in CHOC's `choc_javascript_QuickJS.h` (`CONFIG_VERSION` 2021-03-27) | [bellard.org/quickjs](https://bellard.org/quickjs/) |

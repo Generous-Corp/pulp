@@ -1007,12 +1007,14 @@ TEST_CASE("QuickJS precompile_scripts fills the bytecode cache a later realm rea
           "[view][js-engine][editor-open]") {
     clear_script_bytecode_cache();
     const auto code = large_counting_script(11);
-    const auto small = std::string("40 + 2");
+    // `small` is a Windows SDK macro under clang-cl; keep the fixture name
+    // portable across the native test matrix.
+    const auto small_script = std::string("40 + 2");
     const auto broken = large_counting_script(3) + "\nthis is not javascript {{{\n";
 
     // Compiles the large script only: the small one is under the cache floor
     // and the broken one does not compile. Nothing runs.
-    CHECK(precompile_scripts({code, small, broken}) == 1);
+    CHECK(precompile_scripts({code, small_script, broken}) == 1);
     CHECK(script_bytecode_cached(code));
     CHECK_FALSE(script_bytecode_cached(broken));
     auto stats = script_bytecode_cache_stats();

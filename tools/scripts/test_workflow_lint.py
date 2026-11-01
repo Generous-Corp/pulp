@@ -26,6 +26,7 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "workflow-lint.yml"
 ACTIONLINT_CONFIG = REPO_ROOT / ".github" / "actionlint.yaml"
+STEWARD_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "shipyard-merge-steward.yml"
 
 
 def _workflow_text() -> str:
@@ -310,6 +311,27 @@ class ActionMajorPinTests(unittest.TestCase):
             f"actions/setup-python is pinned to more than one major: {majors}",
         )
 
+    def test_merge_steward_workflow_is_a_manual_diagnostic(self) -> None:
+        # The local steward tick on the mutation machine is the single
+        # admission writer; this workflow must not race it on a schedule.
+        text = STEWARD_WORKFLOW.read_text(encoding="utf-8")
+        document = yaml.load(text, Loader=yaml.BaseLoader)
+        self.assertNotIn("schedule", document["on"])
+        self.assertIn("workflow_dispatch", document["on"])
+        # Read-only: no apply input, no --apply, no write-scoped token.
+        self.assertNotIn("inputs", document["on"]["workflow_dispatch"] or {})
+        self.assertNotIn("--apply", text)
+        self.assertNotIn(": write", text)
+        self.assertNotIn("github.event_name == 'schedule'", text)
+        self.assertIn("runner steward --repo", text)
+        self.assertIn("--arm-unqueued", text)
+        self.assertNotIn("dispatch_recovery", text)
+        self.assertNotIn("shipyard-merge-steward.yml",
+                         (REPO_ROOT / ".github" / "schedule-backstop.json").read_text(encoding="utf-8"))
+        self.assertIn("actions: read", text)
+        self.assertIn("actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09", text)
+        self.assertIn("actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02", text)
+        self.assertEqual(text.count("run_steward_with_retry()"), 1)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

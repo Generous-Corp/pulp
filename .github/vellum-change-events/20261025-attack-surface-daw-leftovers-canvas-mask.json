@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "event_id": "20261025-attack-surface-daw-leftovers-canvas-mask",
+  "kind": "change",
+  "created_at": "2026-10-25T05:39:11Z",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "rationale": "The Skia mask-image url() parser no longer treats fragment (#id) or data: references as file paths; it returns no mask for them, as it already did for an unreadable file. The bridge confines every file reference before it reaches the canvas, so this only removes a filesystem lookup for references that never named a file. No canvas API, signature or authority boundary changes. Pulp-side hardening alongside the retained-UI kernel event; Vellum may adopt it independently.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "ctest --test-dir build -R pulp-test-widget-bridge-canvas2d",
+    "ctest --test-dir build -R pulp-test-widget-bridge-capabilities"
+  ],
+  "disposition": "pulp-only"
+}

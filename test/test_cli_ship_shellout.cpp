@@ -27,6 +27,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -2934,6 +2935,170 @@ TEST_CASE("shellout timeout falls back to the default on unusable overrides",
                 pulp_test_cli::kDefaultShelloutTimeoutMs);
     }
 }
+
+// The hardened-runtime JIT policy `pulp ship sign` / `ship share` apply before
+// any codesign or signing preflight runs. allow-jit is the approved JIT
+// entitlement. For a V8 / JavaScriptCore build an app must grant it; a plug-in
+// bundle runs under its host's entitlements, so the default ship entitlements
+// (no JIT) are correct for it. Asking for executable memory any other way
+// without allow-jit is refused for every artifact.
+namespace {
+
+fs::path write_entitlements(const fs::path& path, std::initializer_list<std::string_view> keys) {
+    std::ofstream plist(path);
+    plist << "<plist version=\"1.0\"><dict>\n";
+    for (auto key : keys)
+        plist << "    <key>" << key << "</key>\n    <true/>\n";
+    plist << "</dict></plist>\n";
+    return path;
+}
+
+void set_engine(const fs::path& root, std::string_view engine) {
+    std::ofstream cache(root / "build" / "CMakeCache.txt");
+    cache << "CMAKE_HOME_DIRECTORY:INTERNAL=" << root.string() << "\n"
+          << "PULP_JS_ENGINE:STRING=" << engine << "\n";
+}
+
+const std::string kRefusal = "refusing to sign";
+
+} // namespace
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship sign admits a JIT-engine plug-in signed with the default entitlements",
+                 "[cli][shellout][ship][entitlements][security]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("jit-plugin-default", /*with_build_cache=*/true);
+    set_engine(root, "v8");
+    make_fake_bundle(root, "VST3", "JitPlugin.vst3");
+    write_signing_doctor_stub(root);
+
+    // No --entitlements: the documented default ship entitlements apply.
+    auto r = run_pulp_in(root, {"ship", "sign", "--identity", "fake-id"});
+    REQUIRE_FALSE(r.timed_out);
+    auto combined = r.stdout_output + r.stderr_output;
+    INFO(combined);
+    REQUIRE_FALSE(contains(combined, kRefusal));
+    REQUIRE(contains(combined, "Signing JitPlugin"));
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship sign refuses executable memory requested without allow-jit",
+                 "[cli][shellout][ship][entitlements][security]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("jit-unapproved", /*with_build_cache=*/true);
+    make_fake_bundle(root, "VST3", "JitPlugin.vst3");
+    write_signing_doctor_stub(root);
+
+    for (auto engine : {"v8", "quickjs"}) {
+        set_engine(root, engine);
+        for (auto key : {"com.apple.security.cs.allow-unsigned-executable-memory",
+                         "com.apple.security.cs.disable-executable-page-protection"}) {
+            auto plist = write_entitlements(root / "unapproved.plist", {key});
+            auto r = run_pulp_in(
+                root, {"ship", "sign", "--identity", "fake-id", "--entitlements", plist.string()});
+            REQUIRE_FALSE(r.timed_out);
+            auto combined = r.stdout_output + r.stderr_output;
+            INFO(engine << " " << key << "\n" << combined);
+            REQUIRE(r.exit_code != 0);
+            REQUIRE(contains(combined, kRefusal));
+            REQUIRE(contains(combined, key));
+            REQUIRE_FALSE(contains(combined, "Signing JitPlugin"));
+        }
+    }
+
+    // Control: the same request alongside allow-jit gets past the policy.
+    set_engine(root, "v8");
+    auto paired = write_entitlements(root / "paired.plist",
+                                     {"com.apple.security.cs.allow-jit",
+                                      "com.apple.security.cs.allow-unsigned-executable-memory"});
+    auto r = run_pulp_in(
+        root, {"ship", "sign", "--identity", "fake-id", "--entitlements", paired.string()});
+    REQUIRE_FALSE(r.timed_out);
+    INFO(r.stdout_output + r.stderr_output);
+    REQUIRE_FALSE(contains(r.stdout_output + r.stderr_output, kRefusal));
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship sign refuses a JIT-engine app whose entitlements lack allow-jit",
+                 "[cli][shellout][ship][entitlements][security]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("jit-app", /*with_build_cache=*/true);
+    set_engine(root, "v8");
+    auto app = root / "JitApp.app";
+    make_fake_standalone_app(app, "JitApp");
+    write_signing_doctor_stub(root);
+
+    auto no_jit =
+        write_entitlements(root / "no-jit.plist", {"com.apple.security.device.audio-input"});
+    auto refused = run_pulp_in(root, {"ship", "sign", "--identity", "fake-id", "--path",
+                                      app.string(), "--entitlements", no_jit.string()});
+    REQUIRE_FALSE(refused.timed_out);
+    auto combined = refused.stdout_output + refused.stderr_output;
+    INFO(combined);
+    REQUIRE(refused.exit_code != 0);
+    REQUIRE(contains(combined, "allow-jit"));
+    REQUIRE(contains(combined, "PULP_JS_ENGINE=v8"));
+    REQUIRE_FALSE(contains(combined, "Signing JitApp"));
+
+    // Control: the same app with allow-jit granted gets past the policy (and
+    // then fails on the fake identity, or succeeds, but not on entitlements).
+    auto with_jit = write_entitlements(root / "jit.plist", {"com.apple.security.cs.allow-jit"});
+    auto admitted = run_pulp_in(root, {"ship", "sign", "--identity", "fake-id", "--path",
+                                       app.string(), "--entitlements", with_jit.string()});
+    REQUIRE_FALSE(admitted.timed_out);
+    INFO(admitted.stdout_output + admitted.stderr_output);
+    REQUIRE_FALSE(contains(admitted.stdout_output + admitted.stderr_output, kRefusal));
+
+    // A QuickJS app needs no JIT grant.
+    set_engine(root, "quickjs");
+    auto quickjs = run_pulp_in(root, {"ship", "sign", "--identity", "fake-id", "--path",
+                                      app.string(), "--entitlements", no_jit.string()});
+    REQUIRE_FALSE(quickjs.timed_out);
+    REQUIRE_FALSE(contains(quickjs.stdout_output + quickjs.stderr_output, kRefusal));
+    fs::remove_all(root);
+}
+
+#ifdef __APPLE__
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship share applies the JIT entitlement policy to an app",
+                 "[cli][shellout][ship][share][entitlements][security]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("jit-share", /*with_build_cache=*/true);
+    set_engine(root, "v8");
+    auto app = root / "JitShare.app";
+    make_fake_standalone_app(app, "JitShare");
+
+    auto no_jit =
+        write_entitlements(root / "no-jit.plist", {"com.apple.security.device.audio-input"});
+    auto refused = run_pulp_in(
+        root, {"ship", "share", app.string(), "--entitlements", no_jit.string(), "--dry-run"});
+    REQUIRE_FALSE(refused.timed_out);
+    auto combined = refused.stdout_output + refused.stderr_output;
+    INFO(combined);
+    REQUIRE(refused.exit_code != 0);
+    REQUIRE(contains(combined, "PULP_JS_ENGINE=v8"));
+    REQUIRE_FALSE(contains(combined, "share plan"));
+
+    auto with_jit = write_entitlements(root / "jit.plist", {"com.apple.security.cs.allow-jit"});
+    auto admitted = run_pulp_in(
+        root, {"ship", "share", app.string(), "--entitlements", with_jit.string(), "--dry-run"});
+    REQUIRE_FALSE(admitted.timed_out);
+    INFO(admitted.stdout_output + admitted.stderr_output);
+    REQUIRE(admitted.exit_code == 0);
+    REQUIRE(contains(admitted.stdout_output + admitted.stderr_output, "share plan"));
+    fs::remove_all(root);
+}
+#endif
 
 // ── PULP_DEV_BUILD: ship builds build-ship/ instead of refusing ──────────────
 //

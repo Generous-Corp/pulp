@@ -32,6 +32,8 @@ namespace {
 
 constexpr pulp::state::ParamID kGainId = 1;   // dB, custom to/from string
 constexpr pulp::state::ParamID kPlainId = 2;  // no converters (base fallback)
+constexpr pulp::state::ParamID kShapedId = 3;
+constexpr pulp::state::ParamID kEnumId = 4;
 
 // A minimal processor with one "smart" parameter (custom display) and one
 // plain parameter (no converters).
@@ -65,6 +67,19 @@ public:
         // No to_string / from_string — must fall back to the base formatter.
         store.add_parameter({.id = kPlainId, .name = "Plain",
                              .range = {0.0f, 1.0f, 0.5f, 0.0f}});
+
+        store.add_parameter(
+            {.id = kShapedId,
+             .name = "Frequency",
+             .range = pulp::state::ParamRange::with_center(20.0f, 20000.0f, 1000.0f, 1000.0f)});
+
+        pulp::state::ParamInfo mode{.id = kEnumId,
+                                    .name = "Mode",
+                                    .range =
+                                        pulp::state::ParamRange::linear(0.0f, 2.0f, 1.0f, 1.0f),
+                                    .kind = pulp::state::ParamKind::Enum,
+                                    .value_labels = {"One", "Two", "Three"}};
+        store.add_parameter(mode);
     }
 
     void prepare(const pulp::format::PrepareContext&) override {}
@@ -192,6 +207,54 @@ TEST_CASE("VST3 param display declines to the base formatter without converters"
     Steinberg::Vst::String128 out{};
     REQUIRE(processor.getParamStringByValue(kPlainId, 0.5, out) == Steinberg::kResultTrue);
     REQUIRE(to_ascii(out).find("dB") == std::string::npos);
+
+    processor.terminate();
+}
+
+TEST_CASE("VST3 parameter conversion preserves declared plain ranges",
+          "[vst3][params][conversion]") {
+    HostApp host;
+    pulp::format::vst3::PulpVst3Processor processor(make_display_processor);
+    REQUIRE(processor.initialize(&host) == Steinberg::kResultOk);
+
+    // Gain is declared as [-60, 24] dB, so normalized endpoints and their
+    // inverse must use that authored range rather than the SDK's [0, 1]
+    // fallback.
+    REQUIRE_THAT(processor.normalizedParamToPlain(kGainId, 0.0), WithinAbs(-60.0, 1e-6));
+    REQUIRE_THAT(processor.normalizedParamToPlain(kGainId, 0.5), WithinAbs(-18.0, 1e-6));
+    REQUIRE_THAT(processor.normalizedParamToPlain(kGainId, 1.0), WithinAbs(24.0, 1e-6));
+    REQUIRE_THAT(processor.plainParamToNormalized(kGainId, -60.0), WithinAbs(0.0, 1e-6));
+    REQUIRE_THAT(processor.plainParamToNormalized(kGainId, -18.0), WithinAbs(0.5, 1e-6));
+    REQUIRE_THAT(processor.plainParamToNormalized(kGainId, 24.0), WithinAbs(1.0, 1e-6));
+
+    // IDs that are not declared by the processor retain the SDK fallback;
+    // this covers hidden controller IDs that have no StateStore entry.
+    constexpr Steinberg::Vst::ParamID kUnknownId = 0x7ffffffe;
+    REQUIRE_THAT(processor.normalizedParamToPlain(kUnknownId, 0.25), WithinAbs(0.25, 1e-6));
+    REQUIRE_THAT(processor.plainParamToNormalized(kUnknownId, 0.75), WithinAbs(0.75, 1e-6));
+
+    processor.terminate();
+}
+
+TEST_CASE("VST3 parameter conversion preserves shaped and discrete ranges",
+          "[vst3][params][conversion][edge]") {
+    HostApp host;
+    pulp::format::vst3::PulpVst3Processor processor(make_display_processor);
+    REQUIRE(processor.initialize(&host) == Steinberg::kResultOk);
+
+    // The shaped range is intentionally non-linear: its midpoint is the
+    // authored 1 kHz center, and the inverse conversion must preserve it.
+    REQUIRE_THAT(processor.normalizedParamToPlain(kShapedId, 0.5), WithinAbs(1000.0, 1e-3));
+    REQUIRE_THAT(processor.plainParamToNormalized(kShapedId, 1000.0), WithinAbs(0.5, 1e-5));
+    REQUIRE_THAT(processor.normalizedParamToPlain(kShapedId, -1.0), WithinAbs(20.0, 1e-5));
+    REQUIRE_THAT(processor.normalizedParamToPlain(kShapedId, 2.0), WithinAbs(20000.0, 1e-2));
+
+    // Enum conversion snaps normalized values to the declared legal step;
+    // plain values outside the range clamp at the corresponding endpoint.
+    REQUIRE_THAT(processor.normalizedParamToPlain(kEnumId, 0.25), WithinAbs(1.0, 1e-5));
+    REQUIRE_THAT(processor.plainParamToNormalized(kEnumId, 2.0), WithinAbs(1.0, 1e-5));
+    REQUIRE_THAT(processor.plainParamToNormalized(kEnumId, -1.0), WithinAbs(0.0, 1e-5));
+    REQUIRE_THAT(processor.plainParamToNormalized(kEnumId, 3.0), WithinAbs(1.0, 1e-5));
 
     processor.terminate();
 }

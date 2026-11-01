@@ -583,7 +583,7 @@ class ProvidePinnedRustTests(unittest.TestCase):
     def test_every_lane_that_builds_pulp_rs_provides_the_pin_first(self) -> None:
         build = (REPO / ".github/workflows/build.yml").read_text(encoding="utf-8")
         job = build[build.index("\n  build:\n"):]
-        provide = job.index("run: bash tools/ci/provide_pinned_rust.sh --fallback-to-default")
+        provide = job.index("run: bash tools/ci/provide_pinned_rust.sh")
         self.assertLess(provide, job.index("- name: Fetch pulp-rs crates"))
         self.assertLess(provide, job.index("- name: Configure"))
         for lane in ("release-cli.yml", "release-path-pr-gate.yml"):

@@ -8,6 +8,12 @@ requires:
 
 # Building Pulp with Skia + GPU
 
+`tools/build-skia.sh` must never publish through a symlinked
+`external/skia-build`: shared cache generations are immutable and owned by the
+release fetcher. A source fallback also clears fetcher asset/generation
+receipts after its atomic publish so later fetches cannot bless source-built
+bytes as a release archive.
+
 Pulp's GPU path is **Skia Graphite over Dawn (WebGPU)**. `PULP_ENABLE_GPU` is
 **ON by default**, but GPU only actually turns on when CMake can *find the
 prebuilt Skia libraries*. If it can't, the build silently comes up **CPU-only**

@@ -178,9 +178,21 @@ option(PULP_BUILD_WEBVIEW "Include native WebView support (WebKit / WebView2 / W
 if(PULP_BUILD_WEBVIEW)
     add_library(pulp-view-webview STATIC
         src/web_view.cpp
-        src/web_view_backend.cpp
         src/editor_bridge_webview.cpp)
     add_library(pulp::view-webview ALIAS pulp-view-webview)
+    # The per-OS backend answer, installed into view-platform's detector by a
+    # static registrar. Nothing references that registrar, so the archive is
+    # linked whole; an ordinary static link would drop it and report "none".
+    add_library(pulp-view-webview-backend STATIC src/web_view_backend_provider.cpp)
+    add_library(pulp::view-webview-backend ALIAS pulp-view-webview-backend)
+    target_link_libraries(pulp-view-webview-backend PUBLIC pulp::view-platform)
+    if(WIN32)
+        target_sources(pulp-view-webview-backend PRIVATE platform/win/webview2_backend.cpp)
+    elseif(UNIX AND NOT APPLE AND NOT ANDROID)
+        target_sources(pulp-view-webview-backend PRIVATE platform/linux/webkitgtk_backend.cpp)
+    endif()
+    target_link_libraries(pulp-view-webview PUBLIC
+        "$<LINK_LIBRARY:WHOLE_ARCHIVE,pulp::view-webview-backend>")
     target_include_directories(pulp-view-webview
         PUBLIC
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -191,8 +203,8 @@ if(PULP_BUILD_WEBVIEW)
     # editor_bridge_webview.cpp adapts the Pulp-kept EditorBridge.
     target_link_libraries(pulp-view-webview PUBLIC pulp::view-tooling)
     target_link_libraries(pulp-view PUBLIC pulp::view-webview)
-    # PUBLIC so tests and downstream callers see the same value the
-    # detector TU was compiled with.
+    # PUBLIC so tests and downstream callers see whether this composition
+    # compiles WebView in.
     target_compile_definitions(pulp-view-webview PUBLIC PULP_BUILD_WEBVIEW=1)
     target_compile_definitions(pulp-view PUBLIC PULP_BUILD_WEBVIEW=1)
     if(APPLE AND NOT PULP_IOS)
@@ -208,36 +220,13 @@ if(PULP_BUILD_WEBVIEW)
     # Android: WebView is handled by the Kotlin layer, not native GTK
     endif()
 else()
-    # Backend detector honors the documented "none if disabled" contract
-    # When WebView is excluded from the build,
-    # detect_webview_backend() must return "none" so callers can
-    # distinguish "build excluded WebView" from "OS has no WebView".
-    target_sources(pulp-view PRIVATE src/web_view_backend.cpp)
+    # Without a provider the detector reports "none", so callers can tell
+    # "this build excludes WebView" from "this OS has no WebView".
     target_compile_definitions(pulp-view PUBLIC PULP_BUILD_WEBVIEW=0)
 endif()
-
-# Backend detection TUs — compiled into each view composition so callers can
-# distinguish "this target excluded WebView" from "this OS has no usable
-# WebView backend installed".
-# `web_view_backend.cpp` owns the symbol on Apple / Android / generic
-# OSes; the Windows + Linux per-platform TUs own it on their OS so the
-# runtime probe (LoadLibrary / dlopen) can run before the answer is
-# returned.
-if(WIN32)
-    target_sources(pulp-view-platform PRIVATE platform/win/webview2_backend.cpp)
-    if(PULP_BUILD_WEBVIEW)
-        target_sources(pulp-view-webview PRIVATE platform/win/webview2_backend.cpp)
-    else()
-        target_sources(pulp-view PRIVATE platform/win/webview2_backend.cpp)
-    endif()
-elseif(UNIX AND NOT APPLE AND NOT ANDROID)
-    target_sources(pulp-view-platform PRIVATE platform/linux/webkitgtk_backend.cpp)
-    if(PULP_BUILD_WEBVIEW)
-        target_sources(pulp-view-webview PRIVATE platform/linux/webkitgtk_backend.cpp)
-    else()
-        target_sources(pulp-view PRIVATE platform/linux/webkitgtk_backend.cpp)
-    endif()
-endif()
+# The detector is defined once, in view-platform; the umbrella reaches it
+# there rather than compiling a second copy.
+target_link_libraries(pulp-view PUBLIC pulp::view-platform)
 
 # CHOC headers (JS engine, utilities)
 foreach(_pulp_view_target pulp-view-core pulp-view-script pulp-view-tooling)
@@ -583,4 +572,22 @@ if(TARGET pulp-render)
     # (sanitizer matrix) have no pulp-render target, so mark_dirty() there
     # degrades to a direct repaint(); the define gates that cleanly.
     target_compile_definitions(pulp-view-core PRIVATE PULP_VIEW_HAS_RENDER_LOOP=1)
+endif()
+
+# The importer handoff is public and dependency-free, but its opt-in runtime
+# target must not be enabled until the optional RmlUi admission exports a
+# backend target. This keeps configure from fabricating an integration.
+option(PULP_ENABLE_RMLUI_IMPORTER_ADAPTER
+    "Enable the opt-in importer adapter only with an admitted RmlUi backend" OFF)
+if(PULP_ENABLE_RMLUI_IMPORTER_ADAPTER AND NOT TARGET pulp-view-rmlui)
+    message(FATAL_ERROR
+        "PULP_ENABLE_RMLUI_IMPORTER_ADAPTER=ON requires the admitted pulp-view-rmlui target")
+endif()
+if(PULP_ENABLE_RMLUI_IMPORTER_ADAPTER)
+    add_library(pulp-view-rmlui-importer-adapter INTERFACE)
+    add_library(pulp::view-rmlui-importer-adapter ALIAS pulp-view-rmlui-importer-adapter)
+    target_link_libraries(pulp-view-rmlui-importer-adapter INTERFACE pulp::view-rmlui)
+    target_include_directories(pulp-view-rmlui-importer-adapter INTERFACE
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>)
 endif()

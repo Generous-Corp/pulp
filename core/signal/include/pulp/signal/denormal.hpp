@@ -54,6 +54,40 @@ inline T snap_to_zero(T x) {
 #endif
 }
 
+/// Whether subnormal arithmetic runs at full speed on this target.
+///
+/// 64-bit ARM cores handle subnormal operands in hardware at no extra cost;
+/// x86 takes a slow assist per subnormal operation, which is what snapping
+/// recursive state exists to avoid. Where subnormals are free, a per-sample
+/// recursion does not snap its state (snap_recursion_state() is the identity):
+/// the snap's compare and select sat inside the recursion's dependency chain
+/// and made per-sample calls 2.3-2.7x slower on M5 Max. The output matches a
+/// snapping build bit for bit until a state value first falls below
+/// snap_threshold(), 1e-15 (about -300 dB). From then on the tail keeps
+/// decaying instead of stopping at zero, and the two differ only at the
+/// tail's own scale (below 1e-13, about -260 dB, for the filters measured).
+///
+/// Every Pulp plug-in and graph entry point already runs its audio under
+/// ScopedFlushDenormals. A per-sample caller outside such an entry that needs
+/// subnormal-free state on any target should hold a ScopedFlushDenormals
+/// across its loop.
+inline constexpr bool kSubnormalsAreFree =
+#if defined(__aarch64__) || defined(_M_ARM64)
+    true;
+#else
+    false;
+#endif
+
+/// Snap a per-sample recursion's state: snap_to_zero() where subnormals are
+/// slow, the identity where kSubnormalsAreFree. Block paths keep snapping
+/// once per kSnapChunkSamples chunk with snap_to_zero().
+template <typename T> inline T snap_recursion_state(T x) {
+    if constexpr (kSubnormalsAreFree)
+        return x;
+    else
+        return snap_to_zero(x);
+}
+
 /// Snap an entire buffer in place.
 template<typename T>
 inline void snap_to_zero(T* samples, int n) {
