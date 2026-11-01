@@ -2432,12 +2432,17 @@ pulp::host::CustomNodeType make_scale_type() {
     return t;
 }
 
-// A PARTIAL-writing custom node: writes only the first half of each block and
-// leaves the tail untouched. A node that does not fully overwrite its output
-// relies on a persistent per-node output buffer — the untouched tail must carry
-// the PREVIOUS block's samples. Exercises the persistent-output contract for
-// custom nodes (regression guard: without it the routed tail would be a recycled
-// or zeroed slot while the walk keeps the stale tail).
+// A PARTIAL-writing custom node: the first block seeds the whole output, then
+// later blocks write only the first half and leave the tail untouched. A node
+// that does not fully overwrite its output relies on a persistent per-node
+// output buffer — the untouched tail must carry the PREVIOUS block's samples.
+// Exercises the persistent-output contract for custom nodes (regression guard:
+// without it the routed tail would be a recycled or zeroed slot while the walk
+// keeps the stale tail).
+struct CustomPartial {
+    int blocks = 0;
+};
+
 pulp::host::CustomNodeType make_partial_type() {
     pulp::host::CustomNodeType t;
     t.type_id = "pulp.test.partial";
@@ -2445,10 +2450,16 @@ pulp::host::CustomNodeType make_partial_type() {
     t.num_input_ports = 1;
     t.num_output_ports = 1;
     t.default_name = "Partial";
-    t.process = [](pulp::audio::BufferView<float>& out,
-                   const pulp::audio::BufferView<const float>& in, int n) {
-        for (int i = 0; i < n / 2; ++i) out.channel_ptr(0)[i] = in.channel_ptr(0)[i] * 0.5f;
-        // [n/2, n) deliberately left untouched — persists across blocks.
+    t.create = []() -> void* { return new CustomPartial{}; };
+    t.destroy = [](void* p) { delete static_cast<CustomPartial*>(p); };
+    t.reset = [](void* p) { static_cast<CustomPartial*>(p)->blocks = 0; };
+    t.process_instance = [](void* p, pulp::audio::BufferView<float>& out,
+                            const pulp::audio::BufferView<const float>& in, int n) {
+        auto* state = static_cast<CustomPartial*>(p);
+        const int limit = state->blocks++ == 0 ? n : n / 2;
+        for (int i = 0; i < limit; ++i)
+            out.channel_ptr(0)[i] = in.channel_ptr(0)[i] * 0.5f;
+        // [n/2, n) is deliberately untouched after the first block.
     };
     return t;
 }
