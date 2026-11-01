@@ -157,7 +157,8 @@ TEST_CASE("external input gate and triple buffer are allocation free",
 TEST_CASE("external input replay receipts classify positive, negative, and inconclusive fixtures",
           "[runtime][external-input]") {
     for (const auto* name :
-         {"imu-pause-resume.jsonl", "negative-control.jsonl", "zero-expect.jsonl"}) {
+         {"imu-pause-resume.jsonl", "negative-control.jsonl", "negative-values.jsonl",
+          "negative-verdict.jsonl", "zero-expect.jsonl"}) {
         ExternalInputGate<64> gate;
         ExternalInputPolicy policy{1, 0.6f, 12000, 0};
         const auto receipt = pulp::test::run_external_input_replay(
@@ -165,6 +166,10 @@ TEST_CASE("external input replay receipts classify positive, negative, and incon
         if (std::string(name) == "imu-pause-resume.jsonl")
             REQUIRE(receipt.result == "pass");
         if (std::string(name) == "negative-control.jsonl")
+            REQUIRE(receipt.result == "fail");
+        if (std::string(name) == "negative-values.jsonl")
+            REQUIRE(receipt.result == "fail");
+        if (std::string(name) == "negative-verdict.jsonl")
             REQUIRE(receipt.result == "fail");
         if (std::string(name) == "zero-expect.jsonl")
             REQUIRE(receipt.result == "inconclusive");

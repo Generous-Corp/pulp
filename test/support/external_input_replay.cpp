@@ -1,47 +1,79 @@
 #include "external_input_replay.hpp"
+#include <choc/text/choc_JSON.h>
+#include <cmath>
 #include <fstream>
-#include <regex>
-#include <sstream>
+#include <limits>
+#include <optional>
 
 namespace pulp::test {
 namespace {
-std::string field(const std::string& line, const char* key) {
-    std::smatch m;
-    if (std::regex_search(
-            line, m, std::regex(std::string("\\\"") + key + "\\\"\\s*:\\s*\\\"([^\\\"]*)\\\"")))
-        return m[1];
-    return {};
+using Json = choc::value::Value;
+using View = choc::value::ValueView;
+using Frame = runtime::ExternalInputFrame<64>;
+bool number(View v, double& out) {
+    if (!v.isFloat() && !v.isInt())
+        return false;
+    out = v.isFloat() ? v.getFloat64() : static_cast<double>(v.getInt64());
+    return std::isfinite(out);
 }
-double number(const std::string& line, const char* key, double fallback = 0) {
-    std::smatch m;
-    if (std::regex_search(
-            line, m,
-            std::regex(std::string("\\\"") + key + "\\\"\\s*:\\s*(-?[0-9]+(?:\\.[0-9]+)?)")))
-        return std::stod(m[1]);
-    return fallback;
+bool u64(View o, const char* k, std::uint64_t& out) {
+    if (!o.hasObjectMember(k) || (!o[k].isInt() && !o[k].isFloat()))
+        return false;
+    const auto value = o[k].isInt() ? static_cast<double>(o[k].getInt64()) : o[k].getFloat64();
+    if (!std::isfinite(value) || value < 0 || std::floor(value) != value)
+        return false;
+    out = static_cast<std::uint64_t>(value);
+    return true;
 }
-bool boolean(const std::string& line, const char* key, bool fallback = false) {
-    auto p = line.find(std::string("\"") + key + "\"");
-    if (p == std::string::npos)
-        return fallback;
-    p = line.find(':', p);
-    if (p == std::string::npos)
-        return fallback;
-    return line.compare(p + 1, 4, "true") == 0;
+bool u32(View o, const char* k, std::uint32_t& out) {
+    std::uint64_t n = 0;
+    if (!u64(o, k, n) || n > UINT32_MAX)
+        return false;
+    out = static_cast<std::uint32_t>(n);
+    return true;
 }
-runtime::ExternalInputStatus status(const std::string& value) {
-    if (value == "valid")
+runtime::ExternalInputStatus status(std::string_view v) {
+    if (v == "valid")
         return runtime::ExternalInputStatus::valid;
-    if (value == "invalid")
+    if (v == "invalid")
         return runtime::ExternalInputStatus::invalid;
-    if (value == "denied")
+    if (v == "denied")
         return runtime::ExternalInputStatus::denied;
-    if (value == "paused")
+    if (v == "paused")
         return runtime::ExternalInputStatus::paused;
     return runtime::ExternalInputStatus::unavailable;
 }
+const char* verdict(runtime::ExternalInputVerdict v) {
+    switch (v) {
+    case runtime::ExternalInputVerdict::accepted:
+        return "accepted";
+    case runtime::ExternalInputVerdict::unchanged:
+        return "unchanged";
+    case runtime::ExternalInputVerdict::rejected_status:
+        return "rejected_status";
+    case runtime::ExternalInputVerdict::rejected_source:
+        return "rejected_source";
+    case runtime::ExternalInputVerdict::rejected_order:
+        return "rejected_order";
+    case runtime::ExternalInputVerdict::rejected_malformed:
+        return "rejected_malformed";
+    case runtime::ExternalInputVerdict::rejected_confidence:
+        return "rejected_confidence";
+    }
+    return "unknown";
+}
+bool known(View o, std::initializer_list<const char*> fields) {
+    for (std::uint32_t i = 0; i < o.size(); ++i) {
+        const auto n = o.getObjectMemberAt(i).name;
+        bool found = false;
+        for (const auto* f : fields)
+            found |= std::string(n) == f;
+        if (!found)
+            return false;
+    }
+    return true;
+}
 } // namespace
-
 ExternalInputReplayReceipt run_external_input_replay(const std::filesystem::path& path,
                                                      runtime::ExternalInputGate<64>& gate,
                                                      runtime::ExternalInputPolicy& policy) {
@@ -49,58 +81,139 @@ ExternalInputReplayReceipt run_external_input_replay(const std::filesystem::path
     receipt.fixture = path.string();
     std::ifstream input(path);
     std::string line;
-    std::size_t line_no = 0;
     std::uint64_t block = 128;
+    bool header = false;
+    std::optional<runtime::ExternalInputVerdict> last;
     while (std::getline(input, line)) {
-        ++line_no;
-        if (line_no == 1) {
-            block = static_cast<std::uint64_t>(number(line, "block_samples", 128));
+        Json o;
+        try {
+            o = choc::json::parse(line);
+        } catch (...) {
+            ++receipt.failed;
             continue;
         }
-        const auto type = field(line, "t");
-        if (type == "frame") {
-            runtime::ExternalInputFrame<64> frame;
-            frame.source_id = static_cast<std::uint32_t>(number(line, "source_id"));
-            frame.epoch = static_cast<std::uint32_t>(number(line, "epoch"));
-            frame.sequence = static_cast<std::uint64_t>(number(line, "sequence"));
-            frame.provider_time_ns = static_cast<std::uint64_t>(number(line, "provider_time_ns"));
-            frame.status = status(field(line, "status"));
-            frame.confidence = static_cast<float>(number(line, "confidence", 1));
-            const auto begin = line.find("[", line.find("\"values\""));
-            const auto end = line.find("]", begin);
-            if (begin != std::string::npos && end != std::string::npos) {
-                std::stringstream values(line.substr(begin + 1, end - begin - 1));
-                std::string token;
-                while (std::getline(values, token, ',') && frame.count < frame.capacity()) {
-                    if (token.find("nan") != std::string::npos)
-                        frame.values[frame.count++] = std::numeric_limits<float>::quiet_NaN();
-                    else
-                        frame.values[frame.count++] = std::stof(token);
-                }
+        if (!o.isObject()) {
+            ++receipt.failed;
+            continue;
+        }
+        if (!header) {
+            if (!o.hasObjectMember("schema") || !o.hasObjectMember("capacity") ||
+                !o.hasObjectMember("block_samples") || !o["policy"].isObject() ||
+                !u64(o, "block_samples", block)) {
+                ++receipt.failed;
+                continue;
             }
-            gate.submit(frame, policy);
+            std::uint64_t cap = 0, source = 0, age = 0, count = 0;
+            double min = 0;
+            const auto p = o["policy"];
+            if (!u64(o, "capacity", cap) || cap == 0 || cap > 64 || !u64(p, "source_id", source) ||
+                !number(p["minimum_confidence"], min) || !u64(p, "max_age_samples", age) ||
+                !u64(p, "expected_count", count) || source > UINT32_MAX || count > 64) {
+                ++receipt.failed;
+                continue;
+            }
+            policy = {static_cast<std::uint32_t>(source), static_cast<float>(min), age,
+                      static_cast<std::uint8_t>(count)};
+            header = true;
+            continue;
+        }
+        const auto type = o["t"].getWithDefault<std::string>("");
+        if (type == "frame") {
+            if (!known(o, {"t", "source_id", "epoch", "sequence", "provider_time_ns", "status",
+                           "confidence", "values"}) ||
+                !o["status"].isString() || !o["values"].isArray()) {
+                ++receipt.failed;
+                continue;
+            }
+            Frame f;
+            double confidence = 0;
+            if (!u32(o, "source_id", f.source_id) || !u32(o, "epoch", f.epoch) ||
+                !u64(o, "sequence", f.sequence) ||
+                !u64(o, "provider_time_ns", f.provider_time_ns) ||
+                !number(o["confidence"], confidence) || o["values"].size() > 64) {
+                ++receipt.failed;
+                continue;
+            }
+            f.status = status(o["status"].getString());
+            f.confidence = static_cast<float>(confidence);
+            f.count = static_cast<std::uint8_t>(o["values"].size());
+            for (std::uint32_t i = 0; i < f.count; ++i) {
+                double value = 0;
+                if (!number(o["values"][i], value)) {
+                    f.count = 0;
+                    break;
+                }
+                f.values[i] = static_cast<float>(value);
+            }
+            if (f.count == 0) {
+                ++receipt.failed;
+                continue;
+            }
+            last = gate.submit(f, policy);
             ++receipt.frames;
         } else if (type == "advance") {
-            const auto blocks = static_cast<std::uint64_t>(number(line, "blocks"));
+            std::uint64_t blocks = 0;
+            if (!known(o, {"t", "blocks"}) || !u64(o, "blocks", blocks)) {
+                ++receipt.failed;
+                continue;
+            }
             gate.advance(blocks * block, policy);
             ++receipt.advances;
         } else if (type == "reset") {
+            if (!known(o, {"t"})) {
+                ++receipt.failed;
+                continue;
+            }
             gate.expire();
             ++receipt.resets;
         } else if (type == "expect") {
+            if (!known(o, {"t", "verdict", "valid", "values", "tolerance", "epoch", "sequence",
+                           "status"})) {
+                ++receipt.failed;
+                continue;
+            }
             ++receipt.expects;
-            ++receipt.checked;
-            if (line.find("\"valid\":true") != std::string::npos && !gate.valid())
-                ++receipt.failed;
-            if (line.find("\"valid\":false") != std::string::npos && gate.valid())
-                ++receipt.failed;
-        }
+            if (o.hasObjectMember("verdict")) {
+                ++receipt.checked;
+                if (!last || !o["verdict"].isString() ||
+                    std::string(verdict(*last)) != o["verdict"].getString())
+                    ++receipt.failed;
+            }
+            if (o.hasObjectMember("valid")) {
+                ++receipt.checked;
+                if (!o["valid"].isBool() || gate.valid() != o["valid"].getBool())
+                    ++receipt.failed;
+            }
+            if (o.hasObjectMember("values")) {
+                double tolerance = 0;
+                if (!o["values"].isArray() ||
+                    (o.hasObjectMember("tolerance") && !number(o["tolerance"], tolerance))) {
+                    ++receipt.failed;
+                    continue;
+                }
+                for (std::uint32_t i = 0; i < o["values"].size(); ++i) {
+                    double expected = 0;
+                    ++receipt.checked;
+                    if (!number(o["values"][i], expected) ||
+                        std::abs(gate.value(i, std::numeric_limits<float>::quiet_NaN()) -
+                                 expected) > tolerance)
+                        ++receipt.failed;
+                }
+            }
+            for (const auto* key : {"epoch", "sequence"})
+                if (o.hasObjectMember(key)) {
+                    ++receipt.checked;
+                    std::uint64_t expected = 0;
+                    if (!u64(o, key, expected) ||
+                        (std::string(key) == "epoch" ? gate.epoch() : gate.sequence()) != expected)
+                        ++receipt.failed;
+                }
+        } else
+            ++receipt.failed;
     }
-    receipt.result =
-        receipt.expects == 0 ? "inconclusive" : (receipt.failed == 0 ? "pass" : "fail");
+    receipt.result = receipt.failed ? "fail" : (receipt.expects ? "pass" : "inconclusive");
     return receipt;
 }
-
 bool write_external_input_receipt(const std::filesystem::path& path,
                                   const ExternalInputReplayReceipt& r, std::string& error) {
     std::ofstream out(path);
