@@ -26,6 +26,18 @@ set(FETCHCONTENT_UPDATES_DISCONNECTED ${PULP_FETCHCONTENT_UPDATES_DISCONNECTED})
 if(PULP_ENABLE_RMLUI)
     if(PULP_ENABLE_RMLUI_FONTS)
         find_package(Freetype REQUIRED)
+        # Consumers that ship a self-contained plugin may opt into the static
+        # FreeType archive. Keep the normal imported target and its include/
+        # dependency metadata, but replace only its library location.
+        if(DEFINED PULP_FREETYPE_STATIC_LIBRARY AND
+           EXISTS "${PULP_FREETYPE_STATIC_LIBRARY}" AND
+           TARGET Freetype::Freetype)
+            set_property(TARGET Freetype::Freetype PROPERTY
+                         IMPORTED_LOCATION "${PULP_FREETYPE_STATIC_LIBRARY}")
+            set_property(TARGET Freetype::Freetype PROPERTY
+                         IMPORTED_LOCATION_RELEASE "${PULP_FREETYPE_STATIC_LIBRARY}")
+            message(STATUS "Pulp: using static FreeType archive ${PULP_FREETYPE_STATIC_LIBRARY}")
+        endif()
     endif()
     # RmlUi defaults BUILD_SHARED_LIBS to ON. Scope that option to the
     # dependency so opting into this backend cannot silently change Pulp's
