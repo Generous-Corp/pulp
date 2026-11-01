@@ -1,0 +1,7 @@
+{"schema":"pulp.external-input-replay.v1","capacity":3,"sample_rate":48000,"block_samples":128,"policy":{"source_id":1,"minimum_confidence":0.6,"max_age_samples":12000,"expected_count":3},"description":"pause and resume lifecycle"}
+{"t":"frame","source_id":1,"epoch":1,"sequence":1,"provider_time_ns":1000000,"status":"valid","confidence":1.0,"values":[0.1,0.2,0.3]}
+{"t":"expect","verdict":"accepted","valid":true,"values":[0.1,0.2,0.3],"tolerance":0.000001}
+{"t":"frame","source_id":1,"epoch":1,"sequence":2,"provider_time_ns":2000000,"status":"paused","confidence":1.0,"values":[0.1,0.2,0.3]}
+{"t":"expect","verdict":"rejected_status","valid":false}
+{"t":"frame","source_id":1,"epoch":2,"sequence":1,"provider_time_ns":500,"status":"valid","confidence":1.0,"values":[0.5,0.5,0.5]}
+{"t":"expect","verdict":"accepted","epoch":2,"values":[0.5,0.5,0.5]}
