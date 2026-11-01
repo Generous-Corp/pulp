@@ -158,6 +158,19 @@ void require_equal_buffer(const Buffer<float>& expected, const Buffer<float>& ac
             REQUIRE(expected.channel(channel)[frame] == actual.channel(channel)[frame]);
 }
 
+// X3's smallest useful reusable component is an authoring helper that expands
+// into ordinary SignalGraph nodes. Each invocation owns a separate node and
+// gain state; the runtime remains the existing graph.
+NodeId add_gain_component(SignalGraph& graph, NodeId source, NodeId destination, const char* name,
+                          float gain) {
+    const auto stage = graph.add_gain_node(name);
+    REQUIRE(stage != 0);
+    REQUIRE(graph.connect(source, 0, stage, 0));
+    REQUIRE(graph.connect(stage, 0, destination, 0));
+    REQUIRE(graph.set_node_gain(stage, gain));
+    return stage;
+}
+
 void run_hosted_format(const char* path, PluginFormat format) {
     REQUIRE(path != nullptr);
     REQUIRE(std::filesystem::exists(path));
@@ -381,6 +394,61 @@ TEST_CASE("X9 records the runtime ProcessorNode persistence boundary",
     REQUIRE_FALSE(result.ok);
     REQUIRE(result.error.find("unsupported by .pulpgraph") != std::string::npos);
     REQUIRE(loaded.nodes().empty());
+}
+
+TEST_CASE("X3 reusable graph components expand with independent state",
+          "[host][graph][x3][serializer][composition]") {
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1, "Input");
+    const auto output = graph.add_output_node(1, "Output");
+    REQUIRE(input != 0);
+    REQUIRE(output != 0);
+
+    // The same parameterized component is instantiated twice. Both stages
+    // consume the same source and fan into the output, proving independent
+    // authored identities without introducing nested runtime execution.
+    const auto dry = add_gain_component(graph, input, output, "Dry", 0.25f);
+    const auto wet = add_gain_component(graph, input, output, "Wet", 0.5f);
+    REQUIRE(dry != wet);
+    REQUIRE(graph.prepare(kSampleRate, kBlockSize));
+
+    Buffer<float> input_buffer(1, kBlockSize);
+    std::fill(input_buffer.channel(0).begin(), input_buffer.channel(0).end(), 1.0f);
+    Buffer<float> output_buffer(1, kBlockSize);
+    auto output_view = output_buffer.view();
+    const auto input_view = std::as_const(input_buffer).view();
+    graph.process(output_view, input_view, kBlockSize);
+    for (const auto sample : output_buffer.channel(0))
+        REQUIRE(sample == 0.75f);
+
+    const auto encoded = pulp::host::GraphSerializer::to_json(graph);
+    REQUIRE(encoded.find("Dry") != std::string::npos);
+    REQUIRE(encoded.find("Wet") != std::string::npos);
+    REQUIRE(encoded.find("0.25") != std::string::npos);
+    REQUIRE(encoded.find("0.5") != std::string::npos);
+
+    SignalGraph restored;
+    const auto loaded = pulp::host::GraphSerializer::from_json(restored, encoded);
+    REQUIRE(loaded.ok);
+    REQUIRE(restored.nodes().size() == graph.nodes().size());
+    REQUIRE(restored.connections().size() == graph.connections().size());
+    const auto restored_dry_it = std::find_if(restored.nodes().begin(), restored.nodes().end(),
+                                              [](const auto& node) { return node.name == "Dry"; });
+    REQUIRE(restored_dry_it != restored.nodes().end());
+    REQUIRE(restored_dry_it->gain == 0.25f);
+    const auto restored_dry = restored_dry_it->id;
+    REQUIRE(restored.prepare(kSampleRate, kBlockSize));
+    Buffer<float> restored_output(1, kBlockSize);
+    auto restored_output_view = restored_output.view();
+    restored.process(restored_output_view, input_view, kBlockSize);
+    require_equal_buffer(output_buffer, restored_output);
+
+    REQUIRE(restored.set_node_gain(restored_dry, 0.0f));
+    Buffer<float> independently_changed(1, kBlockSize);
+    auto independently_changed_view = independently_changed.view();
+    restored.process(independently_changed_view, input_view, kBlockSize);
+    for (const auto sample : independently_changed.channel(0))
+        REQUIRE(sample == 0.5f);
 }
 
 #ifdef PULP_X9_CLAP_PATH
