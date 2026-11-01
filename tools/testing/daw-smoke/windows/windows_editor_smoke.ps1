@@ -83,11 +83,31 @@ try {
   # Sensitive copied settings/license remain outside exported evidence.
   Copy-PrivateProfile $SeedProfile $privateProfile (Resolve-Path -LiteralPath $EvidenceDir).Path
   $receipt.seed_profile=@{path=(Resolve-Path -LiteralPath $SeedProfile).Path;license_present=(Test-Path -LiteralPath (Join-Path $portable 'reaper-license.rk'))}
-  Copy-Item -LiteralPath $plugin -Destination $scan -Recurse
-  $staged=Join-Path $scan (Split-Path $plugin -Leaf)
+  # Preserve the VST3 bundle layout.  Skia's Windows ICU loader searches the
+  # loaded module's directory; flattening Contents/<arch>-win/Spectr.vst3 into
+  # the scan root makes a valid packaged icudtl.dat invisible and causes a
+  # misleading paragraph fatal.  CLAP remains a flat module.
+  $bundleRoot = $null
+  if ($Format -eq 'vst3') {
+    $cursor = Get-Item -LiteralPath (Split-Path $plugin -Parent)
+    while ($cursor) {
+      if ($cursor.Name -like '*.vst3' -and (Test-Path -LiteralPath (Join-Path $cursor.FullName 'Contents') -PathType Container)) {
+        $bundleRoot = $cursor.FullName
+        break
+      }
+      $cursor = $cursor.Parent
+    }
+  }
+  if ($bundleRoot) {
+    Copy-Item -LiteralPath $bundleRoot -Destination $scan -Recurse
+    $staged = Join-Path $scan ((Split-Path $bundleRoot -Leaf) + '\Contents\' + (Split-Path (Split-Path $plugin -Parent) -Leaf) + '\' + (Split-Path $plugin -Leaf))
+  } else {
+    Copy-Item -LiteralPath $plugin -Destination $scan -Recurse
+    $staged = Join-Path $scan (Split-Path $plugin -Leaf)
+  }
   foreach($sidecar in $SidecarPath){
     if(-not(Test-Path -LiteralPath $sidecar -PathType Leaf)){throw "Sidecar missing: $sidecar"}
-    $destination=Join-Path $scan (Split-Path $sidecar -Leaf)
+    $destination=if($bundleRoot){Join-Path (Split-Path $staged -Parent) (Split-Path $sidecar -Leaf)}else{Join-Path $scan (Split-Path $sidecar -Leaf)}
     if(Test-Path -LiteralPath $destination){throw 'Sidecar filename collision'}
     Copy-Item -LiteralPath $sidecar -Destination $destination
   }
