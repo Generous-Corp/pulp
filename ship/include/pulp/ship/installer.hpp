@@ -71,6 +71,18 @@ bool create_tar_gz(const std::string& plugin_name,
                    const std::string& build_dir,
                    const std::string& output_path);
 
+// Explicit-bundle overloads: package exactly `bundles` and nothing else.
+// Each entry is a plugin bundle path inside `build_dir` whose parent directory
+// is VST3, CLAP or LV2. Callers that scan release bytes pass the same list to
+// the scan and to these functions, so the scanned set cannot drift from the
+// packaged set. An empty list, or an entry outside those directories, fails.
+bool create_deb(const std::string& plugin_name, const std::string& version,
+                const std::string& build_dir, const std::string& output_path,
+                const std::string& manufacturer, const std::vector<std::string>& bundles);
+
+bool create_tar_gz(const std::string& plugin_name, const std::string& build_dir,
+                   const std::string& output_path, const std::vector<std::string>& bundles);
+
 // Wrap a standalone executable into a single-file AppImage. `exe_path` is the
 // built standalone binary; `icon_path` is an optional .png (a placeholder is
 // used when empty). Requires `appimagetool` on PATH — returns false honestly
