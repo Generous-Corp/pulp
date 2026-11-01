@@ -77,9 +77,12 @@ TEST_CASE("the shippable initial cache carries every configured entry except the
                               "PULP_ENABLE_GPU:BOOL=ON\n"
                               "PULP_PROFILE:STRING=forge-dev\n"
                               "PULP_BUILD_TESTS:BOOL=ON\n"
+                              "PULP_BUILD_EXAMPLES:BOOL=ON\n"
                               "PULP_DEV_BUILD:BOOL=ON\n"
                               "PULP_DEV_BRIDGE_EXEC:BOOL=ON\n"
+                              "PULP_DEV_SHARED_UI:BOOL=ON\n"
                               "PULP_ENABLE_AUDIO_PROBES:BOOL=ON\n"
+                              "PULP_TRACING:BOOL=ON\n"
                               "SOME_FLAG:UNINITIALIZED=1\n"
                               "CMAKE_GENERATOR:INTERNAL=Ninja\n"
                               "CMAKE_CACHEFILE_DIR:INTERNAL=/proj/build\n"
@@ -97,15 +100,17 @@ TEST_CASE("the shippable initial cache carries every configured entry except the
     CHECK(has("set(PULP_ENABLE_GPU [==[ON]==] CACHE BOOL"));
     CHECK(has("set(CMAKE_BUILD_TYPE [==[Release]==] CACHE STRING"));
     CHECK(has("set(SOME_FLAG [==[1]==] CACHE STRING"));
-    // The profile is forced to release; the dev-only switches are dropped and
-    // the two that define the shippable build are set OFF.
+    // The profile is forced to release; every option it enforces, and the
+    // dev-shared runtime, is dropped (never carried verbatim) and set OFF.
     CHECK(has("set(PULP_PROFILE [==[release]==] CACHE STRING"));
     CHECK_FALSE(has("forge-dev"));
-    CHECK(has("set(PULP_BUILD_TESTS OFF CACHE BOOL"));
-    CHECK(has("set(PULP_DEV_BUILD OFF CACHE BOOL"));
-    CHECK_FALSE(has("PULP_DEV_BUILD [==["));
-    CHECK_FALSE(has("PULP_DEV_BRIDGE_EXEC"));
-    CHECK_FALSE(has("PULP_ENABLE_AUDIO_PROBES"));
+    for (const char* option :
+         {"PULP_BUILD_TESTS", "PULP_BUILD_EXAMPLES", "PULP_DEV_BUILD", "PULP_DEV_BRIDGE_EXEC",
+          "PULP_ENABLE_AUDIO_PROBES", "PULP_TRACING", "PULP_DEV_SHARED_UI"}) {
+        INFO(option);
+        CHECK(has("set(" + std::string(option) + " OFF CACHE BOOL"));
+        CHECK_FALSE(has(std::string(option) + " [==["));
+    }
     // Internal and static bookkeeping never crosses over.
     CHECK_FALSE(has("CMAKE_GENERATOR"));
     CHECK_FALSE(has("CMAKE_CACHEFILE_DIR"));
@@ -118,6 +123,28 @@ TEST_CASE("the shippable initial cache carries every configured entry except the
         CHECK(bare.find("set(CMAKE_BUILD_TYPE [==[Release]==] CACHE STRING") != std::string::npos);
         CHECK(bare.find("set(PULP_DEV_BUILD OFF CACHE BOOL") != std::string::npos);
     }
+    SECTION("a cache that predates the profile option still pins PULP_PROFILE=release") {
+        // A pre-profile or stale developer cache has no PULP_PROFILE entry.
+        // Without the pin PulpProfiles.cmake would default the sibling to
+        // `dev`, and its stamp would record a build_profile official
+        // provenance minting rejects.
+        const auto stale = ship_build_initial_cache("CMAKE_GENERATOR:INTERNAL=Ninja\n"
+                                                    "CMAKE_BUILD_TYPE:STRING=Release\n"
+                                                    "PULP_DEV_BUILD:BOOL=ON\n");
+        CHECK(
+            stale.find("set(PULP_PROFILE [==[release]==] CACHE STRING \"pinned by pulp ship\")") !=
+            std::string::npos);
+        // Exactly one PULP_PROFILE line, whether rewritten or added.
+        const auto count = [](const std::string& text, const std::string& needle) {
+            size_t n = 0;
+            for (size_t at = text.find(needle); at != std::string::npos;
+                 at = text.find(needle, at + 1))
+                ++n;
+            return n;
+        };
+        CHECK(count(stale, "set(PULP_PROFILE ") == 1);
+        CHECK(count(ship_build_initial_cache(cache), "set(PULP_PROFILE ") == 1);
+    }
     SECTION("the configure arguments are the generator and the initial cache") {
         REQUIRE(pulp::cli::ship_build_configure_args(cache, "/proj/build-ship/init.cmake") ==
                 std::vector<std::string>{"-G", "Ninja", "-C", "/proj/build-ship/init.cmake"});
@@ -126,6 +153,27 @@ TEST_CASE("the shippable initial cache carries every configured entry except the
     }
     SECTION("the ship build dir sits beside build/") {
         REQUIRE(pulp::cli::ship_build_dir("/proj") == fs::path("/proj") / "build-ship");
+    }
+}
+
+// The drop list is the release profile's own enforced list, generated from
+// PulpProfiles.cmake, so a cache entry for ANY enforced option is dropped and
+// the shippable configure cannot carry one the profile would refuse.
+TEST_CASE("the dropped entries are the release profile's enforced options", "[ship][dev-build]") {
+    using pulp::cli::kProfileEnforcedOptions;
+    using pulp::cli::ship_build_initial_cache;
+    REQUIRE(pulp::cli::profile_enforces("PULP_DEV_BUILD"));
+    REQUIRE(pulp::cli::profile_enforces("PULP_BUILD_EXAMPLES"));
+    REQUIRE(pulp::cli::profile_enforces("PULP_DEV_BRIDGE_EXEC"));
+    REQUIRE_FALSE(pulp::cli::profile_enforces("PULP_ENABLE_GPU"));
+    REQUIRE_FALSE(pulp::cli::profile_enforces("PULP_DEV_SHARED_UI"));
+    for (const auto option : kProfileEnforcedOptions) {
+        INFO(option);
+        const auto name = std::string(option);
+        const auto script = ship_build_initial_cache(name + ":BOOL=ON\nPULP_ENABLE_GPU:BOOL=ON\n");
+        CHECK(script.find("set(" + name + " [==[") == std::string::npos);
+        CHECK(script.find("set(" + name + " OFF CACHE BOOL") != std::string::npos);
+        CHECK(script.find("set(PULP_ENABLE_GPU [==[ON]==] CACHE BOOL") != std::string::npos);
     }
 }
 

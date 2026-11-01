@@ -128,7 +128,7 @@ class AdoptionTest(unittest.TestCase):
                 path.write_text(original)
 
     def test_unrelated_cache_entries_not_disclosed(self):
-        with self.cache.open('a') as stream:
+        with self.cache.open('a', encoding='utf-8') as stream:
             stream.write('PULP_SECRET_TOKEN:STRING=never-publish-this\n')
         self.assertNotIn('never-publish-this', str(self.inspect()))
 
@@ -149,6 +149,31 @@ class AdoptionTest(unittest.TestCase):
         self.cache.write_text(self.cache.read_text(encoding='utf-8').replace(
             'PULP_DEV_BRIDGE_EXEC:BOOL=OFF\n', 'PULP_DEV_BRIDGE_EXEC:BOOL=ON\n'), encoding='utf-8')
         self.assertTrue(self.inspect()['bridge_exec'])
+
+    def test_build_profile_reads_the_cache_and_treats_absence_as_dev(self):
+        # The fixture cache predates PULP_PROFILE: nothing enforced a release
+        # option set, so the honest answer is dev.
+        self.assertEqual(self.inspect()['build_profile'], 'dev')
+
+        with self.cache.open('a', encoding='utf-8') as stream:
+            stream.write('PULP_PROFILE:STRING=release\n')
+        self.assertEqual(self.inspect()['build_profile'], 'release')
+
+        # Control: an explicit dev is reported verbatim, so the default above
+        # is a default and not the only value the reader can produce.
+        self.cache.write_text(self.cache.read_text(encoding='utf-8').replace(
+            'PULP_PROFILE:STRING=release\n', 'PULP_PROFILE:STRING=dev\n'), encoding='utf-8')
+        self.assertEqual(self.inspect()['build_profile'], 'dev')
+
+    def test_build_profile_reads_an_overridden_release_as_dev(self):
+        # Control: release with the override flag OFF is still release.
+        with self.cache.open('a', encoding='utf-8') as stream:
+            stream.write('PULP_PROFILE:STRING=release\nPULP_PROFILE_OVERRIDDEN:INTERNAL=OFF\n')
+        self.assertEqual(self.inspect()['build_profile'], 'release')
+
+        self.cache.write_text(self.cache.read_text(encoding='utf-8').replace(
+            'PULP_PROFILE_OVERRIDDEN:INTERNAL=OFF\n', 'PULP_PROFILE_OVERRIDDEN:INTERNAL=ON\n'), encoding='utf-8')
+        self.assertEqual(self.inspect()['build_profile'], 'dev')
 
     def test_release_eligibility_rejected(self):
         for field, value in [('kind', 'release'), ('distribution_eligible', True)]:

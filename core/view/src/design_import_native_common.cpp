@@ -1349,6 +1349,11 @@ void apply_layout(View& view, const IRNode& node, std::optional<LayoutDirection>
 
     const bool parent_is_row = parent_direction && *parent_direction == LayoutDirection::row;
     const bool parent_is_column = parent_direction && *parent_direction == LayoutDirection::column;
+    // An authored main-axis height is captured design geometry. Keep it from
+    // being compressed by the host viewport, matching the generated-JS path,
+    // unless the source supplied its own shrink policy.
+    if (parent_is_column && node.style.height && !node.layout.flex_shrink)
+        flex.flex_shrink = 0.0f;
     const bool has_explicit_align_self = node.layout.align_self.has_value();
     if (node.layout.width_mode == SizingMode::fill && !node.style.width) {
         if (!parent_direction || parent_is_row) {

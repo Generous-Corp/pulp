@@ -14,7 +14,11 @@
 // The shippable configure takes over EVERY entry the developer configured
 // (formats, SDK paths, compiler, sysroot, feature switches) by writing them to
 // an initial-cache script the configure loads with `cmake -C`; only the
-// dev-only switches are dropped. After the build, the set of plug-in artifacts
+// options the release profile enforces (PULP_PROFILE_ENFORCED_OPTIONS in
+// tools/cmake/PulpProfiles.cmake, read here from the generated
+// build_profile_gen.h) and the dev-shared runtime switch are dropped and set
+// OFF, so the drop list cannot drift from what PULP_PROFILE=release refuses.
+// After the build, the set of plug-in artifacts
 // under build-ship is compared with the dev build's, so a format that silently
 // fell out of the configure is refused rather than shipped without it.
 //
@@ -22,6 +26,7 @@
 // unit-tested directly against fixture caches (test/test_ship_dev_build_guard.cpp).
 #pragma once
 
+#include "build_profile_gen.h"
 #include "configure_defaults.hpp"
 
 #include <filesystem>
@@ -121,11 +126,24 @@ inline std::vector<CmakeCacheEntry> cmake_cache_entries(std::string_view cache) 
     return entries;
 }
 
-// Dev-only switches the shippable configure must not inherit. They fall back
-// to their defaults, except the three set explicitly below.
+// True when `name` is an option the release profile forces OFF.
+constexpr bool profile_enforces(std::string_view name) {
+    for (const auto option : kProfileEnforcedOptions)
+        if (option == name)
+            return true;
+    return false;
+}
+// The guard's whole premise: the option it exists for is one the release
+// profile owns, so the generated list must carry it.
+static_assert(profile_enforces(kDevBuildCacheName),
+              "PULP_PROFILE_ENFORCED_OPTIONS must include PULP_DEV_BUILD");
+
+// Dev-only switches the shippable configure must not inherit beyond the
+// release profile's enforced list: the dev-shared runtime is a link-layout
+// choice the profile does not govern. Every dropped entry is set OFF explicitly
+// in the initial cache.
 inline constexpr std::string_view kShipBuildDroppedEntries[] = {
-    "PULP_BUILD_TESTS",   "PULP_DEV_BUILD",           "PULP_DEV_BRIDGE_EXEC",
-    "PULP_DEV_SHARED_UI", "PULP_ENABLE_AUDIO_PROBES",
+    kDevSharedUiOption,
 };
 
 // Entries that describe the dev build DIRECTORY rather than its configuration.
@@ -136,6 +154,8 @@ inline constexpr std::string_view kShipBuildDirectoryEntries[] = {
 
 inline bool ship_build_carries_entry(const CmakeCacheEntry& entry) {
     if (entry.type == "INTERNAL" || entry.type == "STATIC")
+        return false;
+    if (profile_enforces(entry.name))
         return false;
     for (const auto dropped : kShipBuildDroppedEntries)
         if (entry.name == dropped)
@@ -153,9 +173,13 @@ inline bool ship_build_carries_entry(const CmakeCacheEntry& entry) {
 // from `dev_cache`, the dev build dir's CMakeCache.txt text:
 // - every non-INTERNAL, non-STATIC entry the developer configured, verbatim
 //   (formats, SDK paths, compiler, sysroot, feature switches, build type);
-// - PULP_PROFILE forced to `release` when the dev build has that option;
-// - the dev-only switches dropped, with PULP_BUILD_TESTS, PULP_DEV_BUILD and
-//   PULP_DEV_SHARED_UI set OFF explicitly, which is the point;
+// - PULP_PROFILE pinned to `release`, whether the dev build recorded the
+//   option (rewritten) or predates it (added): PulpProfiles.cmake would
+//   otherwise default the sibling to `dev`, and its stamp would record a
+//   build_profile that official provenance minting rejects;
+// - every option the release profile enforces (PULP_DEV_BUILD, tests,
+//   examples, audio probes, the exec bridge, ...) and PULP_DEV_SHARED_UI
+//   dropped and set OFF explicitly, which is the point;
 // - CMAKE_BUILD_TYPE pinned to Release when the dev build recorded none.
 // The generator is INTERNAL and cannot come from an initial cache; see
 // ship_build_configure_args(). Pure over the cache text so it can be tested
@@ -165,12 +189,15 @@ inline std::string ship_build_initial_cache(std::string_view dev_cache) {
         "# Written by `pulp ship`: the dev build's configuration, minus the dev-only switches.\n"
         "# Regenerated from build/CMakeCache.txt whenever it changes; do not edit.\n";
     bool has_build_type = false;
+    bool has_profile = false;
     for (const auto& entry : cmake_cache_entries(dev_cache)) {
         if (!ship_build_carries_entry(entry))
             continue;
         std::string value = entry.value;
-        if (entry.name == "PULP_PROFILE")
+        if (entry.name == "PULP_PROFILE") {
             value = "release";
+            has_profile = true;
+        }
         if (entry.name == "CMAKE_BUILD_TYPE") {
             if (value.empty())
                 value = std::string(kDefaultBuildType);
@@ -183,11 +210,14 @@ inline std::string ship_build_initial_cache(std::string_view dev_cache) {
     if (!has_build_type)
         script += "set(CMAKE_BUILD_TYPE [==[" + std::string(kDefaultBuildType) +
                   "]==] CACHE STRING \"pinned by pulp ship\")\n";
-    script += "set(PULP_BUILD_TESTS OFF CACHE BOOL \"a shipping build has no test tree\")\n";
-    script += "set(" + std::string(kDevBuildCacheName) +
-              " OFF CACHE BOOL \"the shippable build records no development-only paths\")\n";
-    script += "set(" + std::string(kDevSharedUiOption) +
-              " OFF CACHE BOOL \"the shippable build links plug-ins statically\")\n";
+    if (!has_profile)
+        script += "set(PULP_PROFILE [==[release]==] CACHE STRING \"pinned by pulp ship\")\n";
+    for (const auto option : kProfileEnforcedOptions)
+        script += "set(" + std::string(option) +
+                  " OFF CACHE BOOL \"OFF under the release profile; set by pulp ship\")\n";
+    for (const auto option : kShipBuildDroppedEntries)
+        script += "set(" + std::string(option) +
+                  " OFF CACHE BOOL \"the shippable build links plug-ins statically\")\n";
     return script;
 }
 

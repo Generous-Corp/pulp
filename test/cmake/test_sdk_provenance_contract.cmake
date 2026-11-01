@@ -97,14 +97,98 @@ if(NOT "${_bridge_exec_stdout}\n${_bridge_exec_stderr}"
         "${_bridge_exec_stdout}\n${_bridge_exec_stderr}")
 endif()
 
+# A release marker that records the release build profile exports it…
+file(WRITE "${_sdk}/sdk-provenance.json"
+    "{\"schema\":\"pulp.sdk-provenance.v1\",\"kind\":\"release\","
+    "\"profile\":\"official-release\",\"build_profile\":\"release\","
+    "\"distribution_eligible\":true,"
+    "\"sdk_version\":\"9.8.7\",\"source_git_ref\":\"v9.8.7\","
+    "\"source_git_sha\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\","
+    "\"source_git_dirty\":false,\"platform\":\"darwin-arm64\",\"build_type\":\"Release\","
+    "\"features\":{\"audio_probes\":false,\"inspector\":true,\"bridge_exec\":false}${_integrity}}")
+include("${_module}")
+if(NOT PULP_SDK_DISTRIBUTION_ELIGIBLE OR NOT PULP_SDK_BUILD_PROFILE STREQUAL "release")
+    message(FATAL_ERROR "release SDK build_profile=release was not exported")
+endif()
+
+# …one minted before the key existed exports nothing for it…
+file(WRITE "${_sdk}/sdk-provenance.json"
+    "{\"schema\":\"pulp.sdk-provenance.v1\",\"kind\":\"release\","
+    "\"profile\":\"official-release\",\"distribution_eligible\":true,"
+    "\"sdk_version\":\"9.8.7\",\"source_git_ref\":\"v9.8.7\","
+    "\"source_git_sha\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\","
+    "\"source_git_dirty\":false,\"platform\":\"darwin-arm64\",\"build_type\":\"Release\","
+    "\"features\":{\"audio_probes\":false,\"inspector\":true,\"bridge_exec\":false}${_integrity}}")
+include("${_module}")
+if(NOT PULP_SDK_DISTRIBUTION_ELIGIBLE OR NOT PULP_SDK_BUILD_PROFILE STREQUAL "")
+    message(FATAL_ERROR "release SDK without build_profile did not export an empty profile")
+endif()
+
+# …and one that claims a development profile is refused outright.
+file(WRITE "${_sdk}/sdk-provenance.json"
+    "{\"schema\":\"pulp.sdk-provenance.v1\",\"kind\":\"release\","
+    "\"profile\":\"official-release\",\"build_profile\":\"dev\","
+    "\"distribution_eligible\":true,"
+    "\"sdk_version\":\"9.8.7\",\"source_git_ref\":\"v9.8.7\","
+    "\"source_git_sha\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\","
+    "\"source_git_dirty\":false,\"platform\":\"darwin-arm64\",\"build_type\":\"Release\","
+    "\"features\":{\"audio_probes\":false,\"inspector\":true,\"bridge_exec\":false}${_integrity}}")
+execute_process(
+    COMMAND "${CMAKE_COMMAND}"
+        "-DPULP_SDK_DIR=${_sdk}"
+        -P "${_module}"
+    RESULT_VARIABLE _build_profile_result
+    OUTPUT_VARIABLE _build_profile_stdout
+    ERROR_VARIABLE _build_profile_stderr)
+if(_build_profile_result EQUAL 0)
+    message(FATAL_ERROR "release SDK claiming a development build profile did not fail closed")
+endif()
+if(NOT "${_build_profile_stdout}\n${_build_profile_stderr}"
+       MATCHES "unsafe release contract: build_profile is dev")
+    message(FATAL_ERROR
+        "dev-profile release failed without the expected diagnostic:\n"
+        "${_build_profile_stdout}\n${_build_profile_stderr}")
+endif()
+
+# A development marker exports a recorded build_profile verbatim, and an
+# unknown profile value is refused for every kind.
+unset(PULP_SDK_BUILD_PROFILE)
+file(WRITE "${_sdk}/sdk-provenance.json"
+    "{\"schema\":\"pulp.sdk-provenance.v1\",\"kind\":\"development\","
+    "\"distribution_eligible\":false,\"source_git_sha\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\","
+    "\"build_profile\":\"dev\"}")
+include("${_module}")
+if(NOT PULP_SDK_DEVELOPMENT OR NOT PULP_SDK_BUILD_PROFILE STREQUAL "dev")
+    message(FATAL_ERROR "development build_profile=dev was not exported")
+endif()
+file(WRITE "${_sdk}/sdk-provenance.json"
+    "{\"schema\":\"pulp.sdk-provenance.v1\",\"kind\":\"development\","
+    "\"distribution_eligible\":false,\"source_git_sha\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\","
+    "\"build_profile\":\"ship\"}")
+execute_process(
+    COMMAND "${CMAKE_COMMAND}"
+        "-DPULP_SDK_DIR=${_sdk}"
+        -P "${_module}"
+    RESULT_VARIABLE _unknown_profile_result
+    OUTPUT_VARIABLE _unknown_profile_stdout
+    ERROR_VARIABLE _unknown_profile_stderr)
+if(_unknown_profile_result EQUAL 0 OR
+   NOT "${_unknown_profile_stdout}\n${_unknown_profile_stderr}"
+       MATCHES "build_profile is not dev or release")
+    message(FATAL_ERROR
+        "unknown build_profile was not refused:\n"
+        "${_unknown_profile_stdout}\n${_unknown_profile_stderr}")
+endif()
+
 # A source-install marker exports its top-level bridge_exec verbatim.
 file(WRITE "${_sdk}/sdk-provenance.json"
     "{\"schema\":\"pulp.sdk-provenance.v1\",\"kind\":\"source-install\","
     "\"distribution_eligible\":false,\"source_git_sha\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\","
-    "\"source_git_dirty\":false,\"bridge_exec\":true}")
+    "\"source_git_dirty\":false,\"bridge_exec\":true,\"build_profile\":\"dev\"}")
 include("${_module}")
-if(NOT PULP_SDK_DEVELOPMENT OR NOT PULP_SDK_BRIDGE_EXEC_ENABLED)
-    message(FATAL_ERROR "source-install bridge_exec=true was not exported as TRUE")
+if(NOT PULP_SDK_DEVELOPMENT OR NOT PULP_SDK_BRIDGE_EXEC_ENABLED OR
+   NOT PULP_SDK_BUILD_PROFILE STREQUAL "dev")
+    message(FATAL_ERROR "source-install bridge_exec=true / build_profile=dev was not exported")
 endif()
 
 # A dev-experiment document records bridge_exec at top level, so a development

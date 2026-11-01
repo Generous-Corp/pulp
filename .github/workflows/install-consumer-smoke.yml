@@ -84,18 +84,17 @@ jobs:
         shell: bash
 
       - name: Configure + build
-        # Tests and examples off — they don't participate in install
-        # rules and would just slow the smoke. But every install(TARGETS)
-        # target must be built or `cmake --install` aborts mid-pass
-        # before reaching the install(FILES) block that ships the
-        # CMake config files. That's why we build the full default
-        # target set rather than just pulp-view.
+        # The release profile (tools/cmake/PulpProfiles.cmake) configures
+        # what an installed SDK really carries — tests and examples off,
+        # which also don't participate in install rules and would just slow
+        # the smoke. But every install(TARGETS) target must be built or
+        # `cmake --install` aborts mid-pass before reaching the install(FILES)
+        # block that ships the CMake config files. That's why we build the
+        # full default target set rather than just pulp-view.
         run: |
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DPULP_BUILD_TESTS=OFF \
-            -DPULP_BUILD_EXAMPLES=OFF \
-            -DPULP_ENABLE_AUDIO_PROBES=OFF
+            -DPULP_PROFILE=release
           tools/ci/governed-build.sh cmake --build build --config Release
         shell: bash
 
