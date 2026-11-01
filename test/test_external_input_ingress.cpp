@@ -19,13 +19,21 @@ TEST_CASE("OSC malformed packet is rejected and valid control decodes", "[extern
 
 TEST_CASE("OSC wrong-type arguments are rejected before frame publication",
           "[external-input][osc]") {
+    pulp::examples::cv_control::FaceToneProcessor processor;
     pulp::osc::Message wrong("/pulp/control");
     wrong.add(std::string("not-a-float")).add(0.8f).add(std::int32_t{1});
-    REQUIRE_FALSE(pulp::examples::cv_control::decode_osc_control(wrong));
+    processor.submit_osc_for_test(wrong);
+    const auto& rejected = processor.published_control_for_test();
+    REQUIRE(rejected.sequence == 0);
+    REQUIRE(rejected.status == pulp::runtime::ExternalInputStatus::unavailable);
 
     pulp::osc::Message valid("/pulp/control");
     valid.add(0.4f).add(0.8f).add(std::int32_t{1});
-    REQUIRE(pulp::examples::cv_control::decode_osc_control(valid));
+    processor.submit_osc_for_test(valid);
+    const auto& published = processor.published_control_for_test();
+    REQUIRE(published.sequence == 1);
+    REQUIRE(published.status == pulp::runtime::ExternalInputStatus::valid);
+    REQUIRE(published.values[0] == 0.4f);
 }
 
 TEST_CASE("reserved MIDI packet rejects invalid status and data bytes", "[external-input][midi]") {
