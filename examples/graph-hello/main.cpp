@@ -21,7 +21,7 @@ int main() {
 
     graph.set_limits({.max_nodes = 3,
                       .max_connections = 2,
-                      .max_ports = 3,
+                      .max_ports = 6,
                       .max_block_size = 64,
                       .max_estimated_work_units = 4096});
     if (!graph.validate_generated_graph(16).accepted) {
