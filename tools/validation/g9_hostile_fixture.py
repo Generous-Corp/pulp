@@ -44,7 +44,7 @@ def run_case(name: str, timeout: float, out: Path) -> dict:
         "stdout": stdout, "stderr": stderr,
         "descendant_observation": name == "descendant",
     }
-    (out / f"{name}.json").write_text(json.dumps(record, indent=2) + "\n")
+    (out / f"{name}.json").write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
     return record
 
 
@@ -65,7 +65,7 @@ def main() -> int:
     receipt = {"fixture": "G-9", "platform": sys.platform, "pid": os.getpid(),
                "cases": results, "planted_negative_controls": controls,
                "isolation_implemented": False}
-    (args.output / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
+    (args.output / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
     return 0
 
 
