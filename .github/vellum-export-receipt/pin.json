@@ -1,5 +1,5 @@
 {
-  "export_id": "20261102-c35c0f1dafef",
+  "export_id": "20261102-0f616a440cec",
   "framework_repository": "Generous-Corp/vellum",
   "frozen_paths": [
     "core/canvas/include/pulp/canvas/affine_transform.hpp",
@@ -145,8 +145,8 @@
     "packages/pulp-import-ir/src/diff.ts",
     "packages/pulp-import-ir/src/tweaks.ts"
   ],
-  "receipt_path": ".github/vellum-export-receipt/20261102-c35c0f1dafef.json",
-  "receipt_sha256": "3836852785d389a158887e069a4d002759ae227fc67b070962806fddb33a4125",
-  "receipt_source": "provenance/mirror/receipts/20261102-c35c0f1dafef.json",
+  "receipt_path": ".github/vellum-export-receipt/20261102-0f616a440cec.json",
+  "receipt_sha256": "9a0f1fd7f0578b350a620c8c3cef222d9b32873f8b0671e3f8af2f609823cb63",
+  "receipt_source": "provenance/mirror/receipts/20261102-0f616a440cec.json",
   "schema_version": 1
 }

@@ -8,7 +8,7 @@ description: Route repository-qualified changes across Pulp and Vellum using Pul
 ## Design-import refactor event contract
 
 The design-import refactor's inheritance exception (owner decision 2026-10-04)
-has ended for the transferred slices. Vellum's export `20261102-c35c0f1dafef`
+has ended for the transferred slices. Vellum's export `20261102-0f616a440cec`
 carries everything that landed under it, and Pulp's copy of every
 transferred-slice path is frozen: the receipt pin's `frozen_paths` lists them
 (see `docs/contracts/vellum-extraction-freeze.md`). Generic work on a frozen

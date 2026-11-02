@@ -1,6 +1,6 @@
 # Vellum inheritance ledger entries
 
-**Retired.** Vellum's export `20261102-c35c0f1dafef` carries everything these
+**Retired.** Vellum's export `20261102-0f616a440cec` carries everything these
 entries promised, and Pulp's copy of the transferred slices is frozen. No event
 owes an entry any more: whether Vellum inherits a change to an exported path is
 recorded by `vellum_freeze_check.py --receipt-mode` (see

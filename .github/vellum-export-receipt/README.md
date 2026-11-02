@@ -37,7 +37,7 @@ a change event or expansion-watch event that covers it, or an export event under
   "event_id": "20261101-example-exported-change",
   "kind": "exported-path-change",
   "created_at": "2026-11-01T12:00:00Z",
-  "receipt_export_id": "20261102-c35c0f1dafef",
+  "receipt_export_id": "20261102-0f616a440cec",
   "paths": ["core/state/src/store.cpp"],
   "vellum_inherits": true,
   "rationale": "What changed, and why Vellum does or does not take it."

@@ -98,7 +98,7 @@ ledger entry distinguished an inherited generic change from Pulp-specific
 integration work.
 
 The exception has ended for the transferred slices. Vellum's export
-`20261102-c35c0f1dafef` carries everything Pulp landed under it, and the change
+`20261102-0f616a440cec` carries everything Pulp landed under it, and the change
 that pinned that receipt froze Pulp's copy of every transferred-slice path (the
 pin's `frozen_paths`, below). Generic work on those paths originates in Vellum.
 The inheritance ledger is retired with it: its entries stay as history, and no

@@ -1,13 +1,13 @@
 {
   "commit_map": {
-    "path": "provenance/mirror/commit-maps/20261102-c35c0f1dafef.txt",
-    "sha256": "f74ff1f7e8af5b8ea5c6a0e33e8192d8ddd980a2dc35bd6c79b6acb4035ab014"
+    "path": "provenance/mirror/commit-maps/20261102-0f616a440cec.txt",
+    "sha256": "e7bee6731d689fd6a5f88f10b9eab62a682b7082f9b1d44e542d38908045a02a"
   },
-  "created_at": "2026-11-02T04:55:05Z",
-  "export_id": "20261102-c35c0f1dafef",
+  "created_at": "2026-11-02T21:52:52Z",
+  "export_id": "20261102-0f616a440cec",
   "files": [
     {
-      "blob": "cabc9d43c5cc9452a233222f3e8d28a89ef67fb3",
+      "blob": "b15f328515094ae15f286dcc27ef2e482ddd5874",
       "mirror_path": "mirror/core/canvas/CMakeLists.txt",
       "mode": "100644",
       "pulp_path": "core/canvas/CMakeLists.txt"
@@ -571,7 +571,7 @@
       "pulp_path": "core/canvas/src/recording_canvas.cpp"
     },
     {
-      "blob": "df044077084a2117e5bacef7a056bbd18941c876",
+      "blob": "450f99163679cf84c18b913c0ab9342efbb803ea",
       "mirror_path": "mirror/core/canvas/src/runtime_effect_cache.hpp",
       "mode": "100644",
       "pulp_path": "core/canvas/src/runtime_effect_cache.hpp"
@@ -2911,7 +2911,7 @@
       "pulp_path": "core/view/include/pulp/view/scroll_bar.hpp"
     },
     {
-      "blob": "1f5f4bb4866b8f2871f1a34a1cb712f1f1b770e2",
+      "blob": "bb5d140ab4f7dc5da8dce8ebf61ac7f6acdfd399",
       "mirror_path": "mirror/core/view/include/pulp/view/sdl_window_host.hpp",
       "mode": "100644",
       "pulp_path": "core/view/include/pulp/view/sdl_window_host.hpp"
@@ -4573,7 +4573,7 @@
       "pulp_path": "core/view/src/scroll_bar.cpp"
     },
     {
-      "blob": "2f8aeb8c48506f73435f532d0582e7e91d03d0f0",
+      "blob": "dd8ae846e73abcc513d7b6bc42becf93fd387104",
       "mirror_path": "mirror/core/view/src/sdl_window_host.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/sdl_window_host.cpp"
@@ -5522,7 +5522,7 @@
         "core/runtime/CMakeLists.txt",
         "core/runtime/include/pulp/runtime/build_info.hpp.in"
       ],
-      "sha256": "4b863ff82cc40001835be240e6991b1a023d6053967fdaae892b6a65f980a84e"
+      "sha256": "93c3291a88bbc9f741f7fbc9a252d0d9f62ae684e4b9e3a07494db3b2412b467"
     },
     {
       "path": "@build/core/view/web_compat_preludes_gen.cpp",
@@ -5542,28 +5542,28 @@
     }
   ],
   "mirror_ref": "refs/heads/mirror/pulp-framework",
-  "mirror_sha": "550cfc5d9d37076aa0557420bbf1eefd78485126",
+  "mirror_sha": "36a65f8018120b73bca100b97887947829a9a4f9",
   "mirror_source": {
     "proof": {
       "commit_map_rows": [
-        "c35c0f1dafef3c1030b533150ef8a34918745b9a 0000000000000000000000000000000000000000",
-        "72c0bf9d40d644c1ba46926a15a458733f35a381 550cfc5d9d37076aa0557420bbf1eefd78485126"
+        "0f616a440cecdbdaff6234be48f682eec1184587 0000000000000000000000000000000000000000",
+        "c5990b5016faa3487f55ca161fc6c2f1751edb25 36a65f8018120b73bca100b97887947829a9a4f9"
       ],
-      "exported_blobs_sha256": "813800d5fed42e11d58a51420ee1397cd29691692d4e7db4fda4c014e09a8981",
+      "exported_blobs_sha256": "456e762cf2e952ee50fd928854c5a3519bb7638d097a0d2fc1eae1ada7fd42a6",
       "exported_path_count": 900,
       "exported_paths_equal": true,
-      "ref_map_row": "c35c0f1dafef3c1030b533150ef8a34918745b9a 550cfc5d9d37076aa0557420bbf1eefd78485126 refs/heads/export-source",
+      "ref_map_row": "0f616a440cecdbdaff6234be48f682eec1184587 36a65f8018120b73bca100b97887947829a9a4f9 refs/heads/export-source",
       "source_is_ancestor": true
     },
     "ref_map": {
-      "path": "provenance/mirror/ref-maps/20261102-c35c0f1dafef.txt",
-      "sha256": "e4dec4f01efb5d6f1cce8c70a192bef10334b023f1d95d1313931fea618ba74a"
+      "path": "provenance/mirror/ref-maps/20261102-0f616a440cec.txt",
+      "sha256": "9a9cc75bd7936d04c442bc5da521b305098b70e2b71836560dec51583bbff514"
     },
-    "sha": "72c0bf9d40d644c1ba46926a15a458733f35a381"
+    "sha": "c5990b5016faa3487f55ca161fc6c2f1751edb25"
   },
-  "mirror_tree": "7b44c274992b9ae35e43788d144ff041889e33d9",
+  "mirror_tree": "d66bc7534fca6489d0ef31cbc53bf81b6e8e742c",
   "pulp_repository": "Generous-Corp/pulp",
-  "pulp_sha": "c35c0f1dafef3c1030b533150ef8a34918745b9a",
+  "pulp_sha": "0f616a440cecdbdaff6234be48f682eec1184587",
   "rename": {
     "from_prefix": "",
     "to_prefix": "mirror/"
@@ -5575,8 +5575,8 @@
   },
   "units": [
     {
-      "closure_manifest": "provenance/mirror/closures/20261102-c35c0f1dafef/foundation.json",
-      "closure_sha256": "3a479961be1337b78310728e34417f0cc185e7b849e064496397f0c91c5674df",
+      "closure_manifest": "provenance/mirror/closures/20261102-0f616a440cec/foundation.json",
+      "closure_sha256": "c7033d7f45aa57fe97c08106fb61b87e008153194028353571e7d6a6f7e895e9",
       "configure": {
         "identity": {
           "build_type": "Release",
@@ -5593,8 +5593,8 @@
       "oracle_class": "identity"
     },
     {
-      "closure_manifest": "provenance/mirror/closures/20261102-c35c0f1dafef/gpu-device-api.json",
-      "closure_sha256": "2d6d09b4a39241019d454f7083772999f7d263f67a3b78e7e0d1076f7df85e63",
+      "closure_manifest": "provenance/mirror/closures/20261102-0f616a440cec/gpu-device-api.json",
+      "closure_sha256": "dbab538d28dd5f824644c255583c8da1a0a4a50ece7c8f09c0adecd96ea27a63",
       "configure": {
         "identity": {
           "build_type": "Release",
@@ -5611,8 +5611,8 @@
       "oracle_class": "identity"
     },
     {
-      "closure_manifest": "provenance/mirror/closures/20261102-c35c0f1dafef/canvas.json",
-      "closure_sha256": "580f54c261cfb9c7025e36276247270d8bf85984f1a5e440ed319bb9896b1179",
+      "closure_manifest": "provenance/mirror/closures/20261102-0f616a440cec/canvas.json",
+      "closure_sha256": "1cc0d81a91233ca1263de65b61fa9db536d9173f00d1890f6ac6611a839883a9",
       "configure": {
         "identity": {
           "build_type": "Release",
@@ -5629,8 +5629,8 @@
       "oracle_class": "identity"
     },
     {
-      "closure_manifest": "provenance/mirror/closures/20261102-c35c0f1dafef/render-2d.json",
-      "closure_sha256": "9167b2b68b9f405838dcf4d6a9582b62c95fc6ada6cca2166547e6b761a487af",
+      "closure_manifest": "provenance/mirror/closures/20261102-0f616a440cec/render-2d.json",
+      "closure_sha256": "8b173a8f52d31ac3fae3030797a557b6649fd10093500a59e7ce3e8c71411842",
       "configure": {
         "identity": {
           "build_type": "Release",
@@ -5647,8 +5647,8 @@
       "oracle_class": "identity"
     },
     {
-      "closure_manifest": "provenance/mirror/closures/20261102-c35c0f1dafef/state-core.json",
-      "closure_sha256": "709c7d87e2a1d0abd0f69c0ea6df5e0a7d75e7eb8435e5887799418c7d8b13b2",
+      "closure_manifest": "provenance/mirror/closures/20261102-0f616a440cec/state-core.json",
+      "closure_sha256": "c2c149097aacaf66ecd4b0bc648760269d1e09ed96f727c83f2bb20c60539972",
       "configure": {
         "identity": {
           "build_type": "Release",
@@ -5665,8 +5665,8 @@
       "oracle_class": "identity"
     },
     {
-      "closure_manifest": "provenance/mirror/closures/20261102-c35c0f1dafef/view-core.json",
-      "closure_sha256": "4b2a378bd225a0a072429ac3823fc7767333d938ce8f4537387093c5cbc3b25d",
+      "closure_manifest": "provenance/mirror/closures/20261102-0f616a440cec/view-core.json",
+      "closure_sha256": "066f784c8df9c01bcb962b3e91234d2b48fcc557857f6dea9cec68d33cc069e1",
       "configure": {
         "identity": {
           "build_type": "Release",
@@ -5683,8 +5683,8 @@
       "oracle_class": "identity"
     },
     {
-      "closure_manifest": "provenance/mirror/closures/20261102-c35c0f1dafef/design-import.json",
-      "closure_sha256": "0fd559125a721cfdfd2a2a42a910524b9cdacfc1a2a0a3d3595b1e16f583b999",
+      "closure_manifest": "provenance/mirror/closures/20261102-0f616a440cec/design-import.json",
+      "closure_sha256": "afbca51bf564099d0324015c292d1358def5368aae6a53f5dd0619bd75694abd",
       "configure": {
         "identity": {
           "build_type": "Release",
@@ -5701,8 +5701,8 @@
       "oracle_class": "identity"
     },
     {
-      "closure_manifest": "provenance/mirror/closures/20261102-c35c0f1dafef/view-script.json",
-      "closure_sha256": "720a545566e5d6d9511a24cd87e6834f8bc2f0bedc28f723ed8e90c268b4cc97",
+      "closure_manifest": "provenance/mirror/closures/20261102-0f616a440cec/view-script.json",
+      "closure_sha256": "b02e4c95ae2df54c2c5eee57a330abee09106be0aec0b6df13ed60b43f453c01",
       "configure": {
         "identity": {
           "build_type": "Release",

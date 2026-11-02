@@ -71,7 +71,7 @@ are limited to explicitly Pulp-owned integration, adaptation, or compatibility
 work and must carry the required immutable change-event declaration.
 
 **The temporary inheritance exception (owner decision 2026-10-04) has ended
-for the transferred slices.** Vellum's export `20261102-c35c0f1dafef` carries
+for the transferred slices.** Vellum's export `20261102-0f616a440cec` carries
 everything it let land in Pulp, and Pulp's copy of every transferred-slice path
 is frozen (`frozen_paths` in `.github/vellum-export-receipt/pin.json`): a change
 to one fails the "Vellum freeze" check unless its change event has disposition
