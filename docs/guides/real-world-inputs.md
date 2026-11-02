@@ -301,7 +301,7 @@ bundle its SDK, model, permissions, or landmark schema.
 
 The fixture at
 `test/fixtures/external-input/t7-touchdesigner-synthesized.jsonl` exercises the
-positive frame, malformed confidence, pause/unavailable status, restart epoch,
+positive frame, below-threshold confidence, paused status, restart epoch,
 and silence-to-expiry cases. It is explicitly marked `synthesized`: this host
 does not have TouchDesigner installed, so it is not a live TouchDesigner
 acceptance receipt. A live receipt must record the exact TouchDesigner version,
