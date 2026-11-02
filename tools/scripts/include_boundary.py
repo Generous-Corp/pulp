@@ -120,14 +120,102 @@ def _inside(path: pathlib.Path, dirs: list[pathlib.Path]) -> bool:
     return any(path == d or d in path.parents for d in dirs)
 
 
+def _logical_preprocessor_lines(text: str) -> list[tuple[int, str]]:
+    """Return comment-free preprocessor lines after C/C++ line splicing.
+
+    The preprocessor joins a backslash-newline pair before it removes comments,
+    so an include directive may put its header, or even the ``include`` token,
+    on the next physical line. Keep the first physical line number for each
+    resulting logical line so diagnostics still point at the source directive.
+    """
+    chars: list[str] = []
+    lines: list[int] = []
+    physical_line = 1
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if ch == "\\" and i + 1 < len(text):
+            if text[i + 1] == "\n":
+                physical_line += 1
+                i += 2
+                continue
+            if text[i + 1:i + 3] == "\r\n":
+                physical_line += 1
+                i += 3
+                continue
+        chars.append(ch)
+        lines.append(physical_line)
+        if ch == "\n":
+            physical_line += 1
+        i += 1
+
+    # Replace comments with whitespace while preserving newlines and their
+    # source locations. A line comment can only end at a non-spliced newline.
+    out: list[str] = []
+    out_lines: list[int] = []
+    quote: str | None = None
+    escaped = False
+    i = 0
+    while i < len(chars):
+        if quote is not None:
+            out.append(chars[i])
+            out_lines.append(lines[i])
+            if escaped:
+                escaped = False
+            elif chars[i] == "\\":
+                escaped = True
+            elif chars[i] == quote:
+                quote = None
+            i += 1
+            continue
+        if chars[i] in {'"', "'"}:
+            quote = chars[i]
+            out.append(chars[i])
+            out_lines.append(lines[i])
+            i += 1
+            continue
+        if chars[i:i + 2] == ["/", "/"]:
+            i += 2
+            while i < len(chars) and chars[i] != "\n":
+                i += 1
+            continue
+        if chars[i:i + 2] == ["/", "*"]:
+            start_line = lines[i]
+            i += 2
+            while i < len(chars) and chars[i:i + 2] != ["*", "/"]:
+                if chars[i] == "\n":
+                    out.append("\n")
+                    out_lines.append(lines[i])
+                elif not out or out[-1] != " ":
+                    out.append(" ")
+                    out_lines.append(start_line)
+                i += 1
+            i = min(len(chars), i + 2)
+            continue
+        out.append(chars[i])
+        out_lines.append(lines[i])
+        i += 1
+
+    result: list[tuple[int, str]] = []
+    start = 0
+    while start < len(out):
+        end = start
+        while end < len(out) and out[end] != "\n":
+            end += 1
+        if end > start:
+            result.append((out_lines[start], "".join(out[start:end])))
+        start = end + 1
+    return result
+
+
 def include_edges(path: pathlib.Path) -> list[tuple[int, str, str]]:
     """(line, delimiter, target) for every include/import directive in a file."""
-    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    text = path.read_text(encoding="utf-8", errors="replace")
     edges = []
-    for n, line in enumerate(lines, 1):
-        m = INCLUDE_RE.match(line)
+    for line, logical in _logical_preprocessor_lines(text):
+        m = INCLUDE_RE.match(logical)
         if m:
-            edges.append((n, m.group(1), m.group(2)))
+            edges.append((line, m.group(1), m.group(2)))
     return edges
 
 
@@ -139,11 +227,12 @@ def crossings(path: pathlib.Path, root: pathlib.Path, b: Boundary) -> list[tuple
     forbidden_dirs = [(root / d).resolve() for d in b.forbidden_include_dirs]
     found: list[tuple[int, str]] = []
     for n, delim, target in include_edges(path):
-        if any(target.startswith(prefix) or f"/{prefix}" in target
+        normalized_target = target.replace("\\", "/")
+        if any(normalized_target.startswith(prefix) or f"/{prefix}" in normalized_target
                for prefix in b.forbidden_prefixes):
             found.append((n, target))
             continue
-        parts = target.split("/")
+        parts = normalized_target.split("/")
         if len(parts) >= 2 and parts[0] == "pulp":
             area = parts[1]
             if b.allowed_areas is not None and area not in b.allowed_areas:
@@ -162,7 +251,7 @@ def crossings(path: pathlib.Path, root: pathlib.Path, b: Boundary) -> list[tuple
             # quoted include), then the include directories. An include that
             # resolves nowhere cannot be proven to stay inside, so it crosses.
             bases = ([path.parent] if delim == '"' else []) + include_dirs
-            resolved = next((c for c in ((base / target).resolve() for base in bases)
+            resolved = next((c for c in ((base / normalized_target).resolve() for base in bases)
                              if c.exists()), None)
             if resolved is None or not _inside(resolved, roots) or _inside(resolved, excluded):
                 found.append((n, target))

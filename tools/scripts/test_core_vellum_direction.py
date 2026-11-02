@@ -25,6 +25,9 @@ SPEC.loader.exec_module(direction)
 include_boundary = direction.include_boundary
 
 REPO = HERE.parents[1]
+# Keep the repository-scanning contract's broad input visible to the script
+# input generator even though the test loads the guard through importlib.
+CORE_SCAN_ROOT = "core/."
 
 
 class CoreVellumDirectionTests(unittest.TestCase):
@@ -68,7 +71,10 @@ class CoreVellumDirectionTests(unittest.TestCase):
         for spelling in ("#include <vellum/graphics/dawn_bootstrap.hpp>\n",
                          '#include "vellum/view/view.hpp"\n',
                          "#import <vellum/app_host/host.hpp>\n",
-                         '#include "../../external/vellum/foundation/x.hpp"\n'):
+                         '#include "../../external/vellum/foundation/x.hpp"\n',
+                         "#include \\\n<vellum/graphics/dawn_bootstrap.hpp>\n",
+                         "#/**/include <vellum/graphics/dawn_bootstrap.hpp>\n",
+                         "#include <vellum\\graphics\\dawn_bootstrap.hpp>\n"):
             with self.subTest(spelling=spelling):
                 self._write("core/audio/src/planted.cpp", spelling)
                 self.assertEqual(self._run(), 1)
@@ -88,6 +94,23 @@ class CoreVellumDirectionTests(unittest.TestCase):
             with self.subTest(line=line):
                 self._write("core/audio/cmake/planted.cmake", line)
                 self.assertEqual(self._run(), 1)
+
+    def test_quoted_cmake_names_fail(self):
+        for line in ('find_package("Vellum" QUIET)\n',
+                     'FetchContent_Declare("vellum" GIT_REPOSITORY x)\n',
+                     'ExternalProject_Add("vellum" SOURCE_DIR x)\n'):
+            with self.subTest(line=line):
+                self._write("core/audio/cmake/planted.cmake", line)
+                self.assertEqual(self._run(), 1)
+
+    def test_core_inputs_cover_the_whole_scanned_tree(self):
+        import json
+
+        self.assertTrue((REPO / CORE_SCAN_ROOT).is_dir())
+        inventory = json.loads((REPO / "test/ctest_script_inputs.json").read_text(encoding="utf-8"))
+        for name in ("core-vellum-direction", "core-vellum-direction-negative-contract"):
+            with self.subTest(name=name):
+                self.assertIn("core", inventory["tests"][name]["inputs"])
 
     def test_multiline_comments_are_not_references(self):
         self._write("core/audio/cmake/prose.cmake",

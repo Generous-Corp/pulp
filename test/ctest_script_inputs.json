@@ -4738,6 +4738,7 @@
   "core-vellum-direction": {
    "entry": "tools/scripts/core_vellum_direction.py",
    "inputs": [
+    "core",
     "core/gpu_audio/CMakeLists.txt",
     "core/gpu_audio/src/detail/dawn_shared_io_provider.cpp",
     "core/platform",
@@ -4761,7 +4762,9 @@
   "core-vellum-direction-negative-contract": {
    "entry": "tools/scripts/test_core_vellum_direction.py",
    "inputs": [
+    "core",
     "core/audio/CMakeLists.txt",
+    "test/ctest_script_inputs.json",
     "tools/scripts/test_core_vellum_direction.py"
    ],
    "kind": "python"

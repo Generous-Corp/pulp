@@ -32,10 +32,15 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import include_boundary  # noqa: E402
 
-CMAKE_ROOT = "core"
+# This directory marker is intentionally a literal checkout input: the guard
+# scans every current and future subtree below core/, so changed-surface input
+# selection must include the whole root rather than today's named exceptions.
+_SCAN_INPUT_ROOT = "core/."
+CMAKE_ROOT = _SCAN_INPUT_ROOT.rstrip("/.")
 TARGET_RE = re.compile(r"\b[Vv]ellum::[A-Za-z0-9_]+")
 _COMMAND_RE = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 _BRACKET_OPEN_RE = re.compile(r"\[(=*)\[")
+_FIRST_ARGUMENT_RE = re.compile(r'''\s*(?:"((?:\\.|[^"\\])*)"|([^\s()]+))''', re.S)
 
 # (file, reference) -> (count, reason). The opt-in D15 GPU-audio provider
 # imports Vellum's installed GPU runtime and Dawn headers. The block is removed
@@ -137,19 +142,31 @@ def cmake_commands(text: str) -> list[tuple[int, str, str]]:
     return commands
 
 
+def first_cmake_argument(body: str) -> str:
+    """Return the normalized first CMake argument, removing double quotes."""
+    match = _FIRST_ARGUMENT_RE.match(body)
+    if not match:
+        return ""
+    value = match.group(1) if match.group(1) is not None else match.group(2)
+    # CMake permits escaped characters inside a quoted argument. Dependency
+    # names do not need the escape, so normalize it before comparing.
+    return re.sub(r"\\(.)", r"\1", value)
+
+
 def cmake_references(path: pathlib.Path) -> list[tuple[int, str]]:
     """(line, reference) for every Vellum dependency a CMake file names."""
     found: list[tuple[int, str]] = []
     text = strip_cmake_comments(path.read_text(encoding="utf-8", errors="replace"))
     for n, command, body in cmake_commands(text):
         lower = command.lower()
-        if lower == "find_package" and re.match(r"\s*vellum\b", body, re.I):
+        first = first_cmake_argument(body)
+        if lower == "find_package" and first.casefold() == "vellum":
             found.append((n, "find_package(Vellum"))
         elif lower in {"fetchcontent_declare", "fetchcontent_makeavailable",
                        "fetchcontent_populate", "fetchcontent_getproperties"} \
-                and re.match(r"\s*vellum\b", body, re.I):
+                and first.casefold() == "vellum":
             found.append((n, "FetchContent(vellum"))
-        elif lower == "externalproject_add" and re.match(r"\s*vellum\b", body, re.I):
+        elif lower == "externalproject_add" and first.casefold() == "vellum":
             found.append((n, "ExternalProject_Add(vellum"))
         elif lower == "add_subdirectory" and re.search(r"\bvellum\b", body, re.I):
             found.append((n, "add_subdirectory(vellum"))
