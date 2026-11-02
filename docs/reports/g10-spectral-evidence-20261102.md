@@ -78,4 +78,4 @@ speculative compile probe or runtime adapter was added.
 No code or build-system files changed, so no build gate was run. The worktree had no
 `build/` directory. The next safe action for `surface:1000120036` is to choose an
 explicit owner for the typed-frame adapter contract and define its public API before
-any SignalGraph wiring is attempted. PR status: **no-change PR; not opened**.
+any SignalGraph wiring is attempted. PR status: **open, unarmed**: https://github.com/Generous-Corp/pulp/pull/11427

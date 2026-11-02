@@ -21,6 +21,6 @@
   ],
   "typed_frame_gap": "A public adapter contract is missing for block-to-frame scheduling, ownership, latency, and frame-stage composition.",
   "build_gate": "N/A: no code or build-system files changed; build/ absent",
-  "pr": "none",
+  "pr": "https://github.com/Generous-Corp/pulp/pull/11427",
   "next_action": "Lead surface:1000120036 must assign and specify the typed-frame adapter contract before runtime wiring."
 }
