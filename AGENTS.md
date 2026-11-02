@@ -70,16 +70,15 @@ framework/rendering/UI work originates in `Generous-Corp/vellum`; Pulp changes
 are limited to explicitly Pulp-owned integration, adaptation, or compatibility
 work and must carry the required immutable change-event declaration.
 
-**Temporary inheritance exception (owner decision 2026-10-04).** Until a target
-flips, generic design-import, UI compiler, bridge-contract, SDK, and supporting
-UI/render work may still land in Pulp, including on transferred-slice files.
-Such a change declares a `pulp-only` change event whose rationale starts with
-the fixed prefix in `docs/contracts/vellum-extraction-freeze.md`, and records an
-entry file `docs/contracts/vellum-inheritance-ledger/<event_id>.json`. The exception ends per
-target, in the same Pulp change that switches that target to an exact installed
-Vellum package and freezes the Pulp copy; from then on the rule above applies to
-that target without exception. The exception transfers no authority and does
-not authorize Pulp to consume Vellum.
+**The temporary inheritance exception (owner decision 2026-10-04) has ended
+for the transferred slices.** Vellum's export `20261102-0f616a440cec` carries
+everything it let land in Pulp, and Pulp's copy of every transferred-slice path
+is frozen (`frozen_paths` in `.github/vellum-export-receipt/pin.json`): a change
+to one fails the "Vellum freeze" check unless its change event has disposition
+`framework-backport` or `emergency-exception`. The inheritance ledger is
+retired; its entries stay as history. A change to any other path Vellum's
+receipt exports still needs an event stating `vellum_inherits` (see
+`docs/contracts/vellum-extraction-freeze.md`, "Receipt mode").
 
 Do not widen, narrow, or reverse an active slice in a routine Pulp change. Any
 such boundary change requires the separately reviewed cross-repository

@@ -11,7 +11,12 @@ Pulp paths Vellum's newest mirror export copied.
   must print the same value.
 - `pin.json` names that copy, its SHA-256, and `frozen_paths`: exact paths, or
   directories ending in `/`, whose Pulp copy is frozen. A frozen path owes no
-  inheritance decision, because it is not edited in Pulp.
+  inheritance decision, because it is not edited in Pulp: a change to one
+  fails unless a change event it adds covers the path's transferred slice with
+  disposition `framework-backport` or `emergency-exception`. `frozen_paths`
+  lists exactly the paths of the transferred slices in
+  `.github/vellum-ownership.json`; `test_vellum_receipt_drift.py` holds the
+  two equal.
 
 The check reads both files at the base commit of a change, so editing them
 takes effect for the changes after the one that edits them. That makes an edit
@@ -32,7 +37,7 @@ a change event or expansion-watch event that covers it, or an export event under
   "event_id": "20261101-example-exported-change",
   "kind": "exported-path-change",
   "created_at": "2026-11-01T12:00:00Z",
-  "receipt_export_id": "20261025-46cee5e4e6e2",
+  "receipt_export_id": "20261102-0f616a440cec",
   "paths": ["core/state/src/store.cpp"],
   "vellum_inherits": true,
   "rationale": "What changed, and why Vellum does or does not take it."

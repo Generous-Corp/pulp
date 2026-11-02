@@ -401,15 +401,82 @@ class ReceiptDriftTests(unittest.TestCase):
 
     # --- the pin ---------------------------------------------------------------
 
-    def test_frozen_path_is_exempt(self):
+    def test_frozen_path_owes_no_decision_but_cannot_be_edited(self):
         fixture = Fixture(frozen=["core/canvas/", "core/state/src/s.cpp"])
         try:
             fixture.write("core/state/src/s.cpp", "// edited\n")
             fixture.write("core/canvas/src/a.cpp", "// edited\n")
             fixture.write("core/canvas/src/new.cpp", "// new\n")
-            self.assertEqual(fixture.check()["status"], "pass")
+            report = fixture.check()
+            self.assertEqual(report["missing"], [])
+            self.assertEqual(report["owed"], {})
+            self.assertEqual(report["status"], "fail")
+            self.assertEqual(report["frozen"], [
+                "core/canvas/src/a.cpp", "core/canvas/src/new.cpp", "core/state/src/s.cpp",
+            ])
         finally:
             fixture.close()
+
+    def test_unfrozen_neighbour_still_owes_a_decision(self):
+        fixture = Fixture(frozen=["core/canvas/src/a.cpp"])
+        try:
+            fixture.write("core/state/src/s.cpp", "// edited\n")
+            report = fixture.check()
+            self.assertEqual(report["frozen"], [])
+            self.assert_missing(report, ["core/state/src/s.cpp"])
+        finally:
+            fixture.close()
+
+    def test_pulp_only_change_event_does_not_unfreeze(self):
+        fixture = Fixture(frozen=["core/canvas/src/a.cpp"])
+        try:
+            fixture.write("core/canvas/src/a.cpp", "// edited\n")
+            event = {"kind": "change", "slices": ["canvas-kernel"],
+                     "disposition": "pulp-only", "vellum_inherits": True}
+            fixture.write(".github/vellum-change-events/20261102-canvas.json", event)
+            report = fixture.check()
+            self.assertEqual((report["status"], report["frozen"]),
+                             ("fail", ["core/canvas/src/a.cpp"]))
+        finally:
+            fixture.close()
+
+    def test_backport_or_emergency_change_event_unfreezes_its_slice(self):
+        for disposition in ("framework-backport", "emergency-exception"):
+            with self.subTest(disposition=disposition):
+                fixture = Fixture(frozen=["core/canvas/src/a.cpp"])
+                try:
+                    fixture.write("core/canvas/src/a.cpp", "// edited\n")
+                    event = {"kind": "change", "slices": ["canvas-kernel"],
+                             "disposition": disposition}
+                    fixture.write(".github/vellum-change-events/20261102-canvas.json", event)
+                    report = fixture.check()
+                    self.assertEqual((report["status"], report["frozen"]), ("pass", []))
+                finally:
+                    fixture.close()
+
+    def test_unfreezing_event_covers_only_its_slice(self):
+        fixture = Fixture(frozen=["core/canvas/", "core/state/src/s.cpp"])
+        try:
+            fixture.write("core/canvas/src/a.cpp", "// edited\n")
+            fixture.write("core/state/src/s.cpp", "// edited\n")
+            event = {"kind": "change", "slices": ["canvas-kernel"],
+                     "disposition": "framework-backport"}
+            fixture.write(".github/vellum-change-events/20261102-canvas.json", event)
+            report = fixture.check()
+            self.assertEqual((report["status"], report["frozen"]),
+                             ("fail", ["core/state/src/s.cpp"]))
+        finally:
+            fixture.close()
+
+    def test_freezing_takes_effect_after_the_change_that_freezes(self):
+        # The pin is read at the base: freezing a path in the same change that
+        # edits it neither exempts nor blocks that edit.
+        self.fixture.write("core/canvas/src/a.cpp", "// edited\n")
+        receipt = receipt_bytes()
+        self.fixture.write(drift.PIN_PATH, pin_value(receipt, ["core/canvas/src/a.cpp"]))
+        report = self.fixture.check()
+        self.assertEqual(report["frozen"], [])
+        self.assert_missing(report, ["core/canvas/src/a.cpp"])
 
     def test_pin_is_read_at_the_base(self):
         # Dropping the path from the receipt, or freezing it, in the same
@@ -492,6 +559,26 @@ class ReceiptDriftTests(unittest.TestCase):
         self.assertIn("vellum_inherits", result.stderr)
 
 
+class FrozenCliTests(unittest.TestCase):
+    def test_cli_names_a_frozen_edit(self):
+        fixture = Fixture(frozen=["core/canvas/src/a.cpp"])
+        try:
+            fixture.write("core/canvas/src/a.cpp", "// edited\n")
+            head = fixture.commit("head")
+            with tempfile.TemporaryDirectory() as out:
+                result = subprocess.run(
+                    [sys.executable, str(SCRIPTS / "vellum_freeze_check.py"), "--receipt-mode",
+                     "--repo", str(fixture.root), "--base", fixture.base,
+                     "--head", head, "--output", str(pathlib.Path(out) / "report.json")],
+                    capture_output=True, text=True, encoding="utf-8", check=False)
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertIn("frozen in Pulp", result.stderr)
+            self.assertIn("core/canvas/src/a.cpp", result.stderr)
+            self.assertIn("framework-backport", result.stderr)
+        finally:
+            fixture.close()
+
+
 class CommittedPinTests(unittest.TestCase):
     def test_committed_pin_and_receipt_are_consistent(self):
         pin = drift.parse_pin((REPO / drift.PIN_PATH).read_bytes())
@@ -499,6 +586,17 @@ class CommittedPinTests(unittest.TestCase):
         self.assertEqual(receipt.export_id, pin.export_id)
         self.assertGreater(len(receipt.exported), 0)
         self.assertGreater(len(receipt.source_dirs), 0)
+
+    def test_committed_pin_freezes_exactly_the_transferred_slices(self):
+        pin = drift.parse_pin((REPO / drift.PIN_PATH).read_bytes())
+        mapping = json.loads((REPO / drift.MAP_PATH).read_text(encoding="utf-8"))
+        transferred = sorted({
+            path
+            for item in mapping["slices"]
+            if item["state"] == "framework-authoritative-transferred"
+            for path in item["paths"]
+        })
+        self.assertEqual(list(pin.frozen_paths), transferred)
 
 
 if __name__ == "__main__":

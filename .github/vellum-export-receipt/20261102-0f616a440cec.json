@@ -1,13 +1,13 @@
 {
   "commit_map": {
-    "path": "provenance/mirror/commit-maps/20261025-46cee5e4e6e2.txt",
-    "sha256": "6fcef5bdbeab45fd32d259e701120567d340b4afb0ae5bb354985971e11186b0"
+    "path": "provenance/mirror/commit-maps/20261102-0f616a440cec.txt",
+    "sha256": "e7bee6731d689fd6a5f88f10b9eab62a682b7082f9b1d44e542d38908045a02a"
   },
-  "created_at": "2026-10-25T05:23:30Z",
-  "export_id": "20261025-46cee5e4e6e2",
+  "created_at": "2026-11-02T21:52:52Z",
+  "export_id": "20261102-0f616a440cec",
   "files": [
     {
-      "blob": "9cd39188b6b115f7d7104424382ab26cffb21835",
+      "blob": "b15f328515094ae15f286dcc27ef2e482ddd5874",
       "mirror_path": "mirror/core/canvas/CMakeLists.txt",
       "mode": "100644",
       "pulp_path": "core/canvas/CMakeLists.txt"
@@ -37,13 +37,13 @@
       "pulp_path": "core/canvas/include/pulp/canvas/box_shadow_cache.hpp"
     },
     {
-      "blob": "d82b1309bac0366200518733a8389b6c5f6d6c21",
+      "blob": "ce61edf515c86de5a13ef3713b2aea971d5d3b85",
       "mirror_path": "mirror/core/canvas/include/pulp/canvas/bundled_fonts.hpp",
       "mode": "100644",
       "pulp_path": "core/canvas/include/pulp/canvas/bundled_fonts.hpp"
     },
     {
-      "blob": "5ec76639919a9cd6532daf94389b56d27d75159b",
+      "blob": "e8e0f7dda6dc9993aaa49ea874e5007652aa69ee",
       "mirror_path": "mirror/core/canvas/include/pulp/canvas/canvas.hpp",
       "mode": "100644",
       "pulp_path": "core/canvas/include/pulp/canvas/canvas.hpp"
@@ -55,7 +55,7 @@
       "pulp_path": "core/canvas/include/pulp/canvas/canvas_capability.hpp"
     },
     {
-      "blob": "d3d2ddc27872bd558b25519cf2ed93a1d27abbd0",
+      "blob": "827478518958b5e41408f8c17714a24a3de62020",
       "mirror_path": "mirror/core/canvas/include/pulp/canvas/cg_canvas.hpp",
       "mode": "100644",
       "pulp_path": "core/canvas/include/pulp/canvas/cg_canvas.hpp"
@@ -85,7 +85,7 @@
       "pulp_path": "core/canvas/include/pulp/canvas/font_options.hpp"
     },
     {
-      "blob": "c86e4309643a37b6239a2ea50400ec2f1aaca296",
+      "blob": "680ff0e3a7f299c0fd7512413c28be5f632069d7",
       "mirror_path": "mirror/core/canvas/include/pulp/canvas/font_resolver.hpp",
       "mode": "100644",
       "pulp_path": "core/canvas/include/pulp/canvas/font_resolver.hpp"
@@ -95,6 +95,12 @@
       "mirror_path": "mirror/core/canvas/include/pulp/canvas/font_scope.hpp",
       "mode": "100644",
       "pulp_path": "core/canvas/include/pulp/canvas/font_scope.hpp"
+    },
+    {
+      "blob": "ee79ba59c05eb8101d43abee900003363f8a138b",
+      "mirror_path": "mirror/core/canvas/include/pulp/canvas/gradient_interpolation.hpp",
+      "mode": "100644",
+      "pulp_path": "core/canvas/include/pulp/canvas/gradient_interpolation.hpp"
     },
     {
       "blob": "ec6c9f28954bfd48410f24a6fe606ab0f29aeba0",
@@ -109,7 +115,7 @@
       "pulp_path": "core/canvas/include/pulp/canvas/image_convolution.hpp"
     },
     {
-      "blob": "43156b343067bb04761e3f38881b35823565503e",
+      "blob": "192d173d951e978c07964f28b85ce416f39eb372",
       "mirror_path": "mirror/core/canvas/include/pulp/canvas/image_file_cache.hpp",
       "mode": "100644",
       "pulp_path": "core/canvas/include/pulp/canvas/image_file_cache.hpp"
@@ -131,6 +137,12 @@
       "mirror_path": "mirror/core/canvas/include/pulp/canvas/msdf_atlas.hpp",
       "mode": "100644",
       "pulp_path": "core/canvas/include/pulp/canvas/msdf_atlas.hpp"
+    },
+    {
+      "blob": "48678b857cd9f5e395f40363c92f6bce2b50fa5a",
+      "mirror_path": "mirror/core/canvas/include/pulp/canvas/paragraph_cache.hpp",
+      "mode": "100644",
+      "pulp_path": "core/canvas/include/pulp/canvas/paragraph_cache.hpp"
     },
     {
       "blob": "ff5bc5323dc16b6f77d3b892ac13c5777e7cfd1e",
@@ -157,7 +169,7 @@
       "pulp_path": "core/canvas/include/pulp/canvas/psdf_atlas.hpp"
     },
     {
-      "blob": "1fc0a861ee5252ce4e014bd211b29f6c96081b39",
+      "blob": "c70e857c51cec4945b04d2098ea23e875b52b7c9",
       "mirror_path": "mirror/core/canvas/include/pulp/canvas/recording_canvas.hpp",
       "mode": "100644",
       "pulp_path": "core/canvas/include/pulp/canvas/recording_canvas.hpp"
@@ -259,10 +271,16 @@
       "pulp_path": "core/canvas/include/pulp/canvas/shaped_text.hpp"
     },
     {
-      "blob": "c9a0bc69da50d961742a681b50b2b2ae8418d060",
+      "blob": "c7f33f09f5eee8d78bb00c3bd07ccf91399a9186",
       "mirror_path": "mirror/core/canvas/include/pulp/canvas/skia_canvas.hpp",
       "mode": "100644",
       "pulp_path": "core/canvas/include/pulp/canvas/skia_canvas.hpp"
+    },
+    {
+      "blob": "0ab2e7f83de40ef34095a406f4dd6876ab631a2f",
+      "mirror_path": "mirror/core/canvas/include/pulp/canvas/skia_text_raster_policy.hpp",
+      "mode": "100644",
+      "pulp_path": "core/canvas/include/pulp/canvas/skia_text_raster_policy.hpp"
     },
     {
       "blob": "4c8d98c7990e2c7dbe843a3ee3258a2649004c0c",
@@ -289,13 +307,19 @@
       "pulp_path": "core/canvas/include/pulp/canvas/text_layout.hpp"
     },
     {
+      "blob": "777895bff588b9535822d71cd1b9724c60e89a69",
+      "mirror_path": "mirror/core/canvas/include/pulp/canvas/text_raster_policy.hpp",
+      "mode": "100644",
+      "pulp_path": "core/canvas/include/pulp/canvas/text_raster_policy.hpp"
+    },
+    {
       "blob": "87185707103d906652c5172fda6901c3883fe413",
       "mirror_path": "mirror/core/canvas/include/pulp/canvas/text_run_planner.hpp",
       "mode": "100644",
       "pulp_path": "core/canvas/include/pulp/canvas/text_run_planner.hpp"
     },
     {
-      "blob": "97b337a694afd6bbd311e4a7b4f03a7ef5d5c67c",
+      "blob": "4811d9f7cee1aee0d9d726d5269cc25a5457f181",
       "mirror_path": "mirror/core/canvas/include/pulp/canvas/text_shaper.hpp",
       "mode": "100644",
       "pulp_path": "core/canvas/include/pulp/canvas/text_shaper.hpp"
@@ -313,13 +337,13 @@
       "pulp_path": "core/canvas/include/pulp/canvas/view_effect.hpp"
     },
     {
-      "blob": "2d1473d3002e05a049d34104eedd83c44fa6b90e",
+      "blob": "c180c0d0446e4bf753c44f9484cf90da0a7d3bcb",
       "mirror_path": "mirror/core/canvas/platform/mac/cg_canvas.mm",
       "mode": "100644",
       "pulp_path": "core/canvas/platform/mac/cg_canvas.mm"
     },
     {
-      "blob": "f4d7fea443a212a64fd074205c8406570c69d126",
+      "blob": "e933a8680b11e583a93a1e6222aa3802a3bc0a6d",
       "mirror_path": "mirror/core/canvas/platform/mac/cg_canvas_gradients.mm",
       "mode": "100644",
       "pulp_path": "core/canvas/platform/mac/cg_canvas_gradients.mm"
@@ -337,7 +361,7 @@
       "pulp_path": "core/canvas/platform/mac/cg_canvas_shadow.mm"
     },
     {
-      "blob": "5f12d7a9f9918a0f521b71598b0501c791950807",
+      "blob": "91311fcab94387cde0763edf3c16d628eae194f0",
       "mirror_path": "mirror/core/canvas/platform/mac/coretext_text.mm",
       "mode": "100644",
       "pulp_path": "core/canvas/platform/mac/coretext_text.mm"
@@ -373,7 +397,7 @@
       "pulp_path": "core/canvas/src/bundled_font_blobs.hpp"
     },
     {
-      "blob": "fae8d338814bbd24b0cd0b3d29d276ffeaf4bdd8",
+      "blob": "ce14d5cb99b470683314351193f407bee6c421a2",
       "mirror_path": "mirror/core/canvas/src/bundled_fonts.cpp",
       "mode": "100644",
       "pulp_path": "core/canvas/src/bundled_fonts.cpp"
@@ -385,13 +409,19 @@
       "pulp_path": "core/canvas/src/color.cpp"
     },
     {
-      "blob": "e352d6729cd6a7bb4b1a344c8f09cba6faa3cf69",
+      "blob": "7c645377eaf2cbfc1ac91ff1cae555921d0e5526",
       "mirror_path": "mirror/core/canvas/src/coretext_text.hpp",
       "mode": "100644",
       "pulp_path": "core/canvas/src/coretext_text.hpp"
     },
     {
-      "blob": "d1c893a398ae4295f6f822d213c5c96ff90b1024",
+      "blob": "af1d6dc088e28181bb82aa70e35fbb17db358ea5",
+      "mirror_path": "mirror/core/canvas/src/css_weight_font_manager.cpp",
+      "mode": "100644",
+      "pulp_path": "core/canvas/src/css_weight_font_manager.cpp"
+    },
+    {
+      "blob": "e69aeec5c813befdfd892746051063e094f80b82",
       "mirror_path": "mirror/core/canvas/src/drawlist_format.cpp",
       "mode": "100644",
       "pulp_path": "core/canvas/src/drawlist_format.cpp"
@@ -415,13 +445,13 @@
       "pulp_path": "core/canvas/src/font_options.cpp"
     },
     {
-      "blob": "814acf6a8ef857628a5f1998ff05899249107790",
+      "blob": "cd1f83766be106d1894b32909c7a57cf2930a15a",
       "mirror_path": "mirror/core/canvas/src/font_registry_stubs.cpp",
       "mode": "100644",
       "pulp_path": "core/canvas/src/font_registry_stubs.cpp"
     },
     {
-      "blob": "297b2a9a24c2367859b4fded9e7fb6ed56c3dc0c",
+      "blob": "b0e28ff3762ea63171f15d248baa8f21e375fceb",
       "mirror_path": "mirror/core/canvas/src/font_resolver.cpp",
       "mode": "100644",
       "pulp_path": "core/canvas/src/font_resolver.cpp"
@@ -445,6 +475,24 @@
       "pulp_path": "core/canvas/src/font_tables.hpp"
     },
     {
+      "blob": "a672e79082b88782e26c46f71ad7754577d8fac2",
+      "mirror_path": "mirror/core/canvas/src/font_weight_match.cpp",
+      "mode": "100644",
+      "pulp_path": "core/canvas/src/font_weight_match.cpp"
+    },
+    {
+      "blob": "eb313d08f63205161719eb961f8ad87c3554ea5d",
+      "mirror_path": "mirror/core/canvas/src/font_weight_match.hpp",
+      "mode": "100644",
+      "pulp_path": "core/canvas/src/font_weight_match.hpp"
+    },
+    {
+      "blob": "2a3d1bccc91cc5cee7af3e5fd3216af8adc301fb",
+      "mirror_path": "mirror/core/canvas/src/gradient_interpolation.cpp",
+      "mode": "100644",
+      "pulp_path": "core/canvas/src/gradient_interpolation.cpp"
+    },
+    {
       "blob": "aa9323728a06d4fa302b1674be9e0afbdb719158",
       "mirror_path": "mirror/core/canvas/src/image_codecs_gif.cpp",
       "mode": "100644",
@@ -457,7 +505,7 @@
       "pulp_path": "core/canvas/src/image_codecs_tiff.cpp"
     },
     {
-      "blob": "304e2623703b8f2f42feadb6cc0309f38cae7145",
+      "blob": "16d567bf4f4f6762a4294882219d117ab7d28204",
       "mirror_path": "mirror/core/canvas/src/image_file_cache.cpp",
       "mode": "100644",
       "pulp_path": "core/canvas/src/image_file_cache.cpp"
@@ -517,13 +565,13 @@
       "pulp_path": "core/canvas/src/path_to_sdf.cpp"
     },
     {
-      "blob": "39c3bb67682043e9ae6aaaadfa5da2b9861d3c52",
+      "blob": "fd2fdf5750e30afcfcd54d0ff928a422d5b0b0b4",
       "mirror_path": "mirror/core/canvas/src/recording_canvas.cpp",
       "mode": "100644",
       "pulp_path": "core/canvas/src/recording_canvas.cpp"
     },
     {
-      "blob": "df044077084a2117e5bacef7a056bbd18941c876",
+      "blob": "450f99163679cf84c18b913c0ab9342efbb803ea",
       "mirror_path": "mirror/core/canvas/src/runtime_effect_cache.hpp",
       "mode": "100644",
       "pulp_path": "core/canvas/src/runtime_effect_cache.hpp"
@@ -553,7 +601,7 @@
       "pulp_path": "core/canvas/src/sdf_chart_contract.hpp"
     },
     {
-      "blob": "d1e278eed220fcff0f632f5faf5c584786564152",
+      "blob": "6937075657b1faf784317d25f16b878a96afbffc",
       "mirror_path": "mirror/core/canvas/src/skia_canvas.cpp",
       "mode": "100644",
       "pulp_path": "core/canvas/src/skia_canvas.cpp"
@@ -583,31 +631,31 @@
       "pulp_path": "core/canvas/src/skia_canvas_fonts.cpp"
     },
     {
-      "blob": "67d3e3745a5854b2342a407c390f79d2ae2fea4d",
+      "blob": "1609c850ab31ba312a7c9b7b859775b04837d1eb",
       "mirror_path": "mirror/core/canvas/src/skia_canvas_gradients.cpp",
       "mode": "100644",
       "pulp_path": "core/canvas/src/skia_canvas_gradients.cpp"
     },
     {
-      "blob": "6ac07bdf6c08e1b777b6168d0edb0513a9669404",
+      "blob": "de7ff8211ea3b0565ff92c379ded6bcb89bff6f1",
       "mirror_path": "mirror/core/canvas/src/skia_canvas_internal.hpp",
       "mode": "100644",
       "pulp_path": "core/canvas/src/skia_canvas_internal.hpp"
     },
     {
-      "blob": "296b5da1eec7ae434fec66f8feb982be3d4083c2",
+      "blob": "4db35e90caa93b3abee893dc6464d4c4df6494f8",
       "mirror_path": "mirror/core/canvas/src/skia_canvas_mask.cpp",
       "mode": "100644",
       "pulp_path": "core/canvas/src/skia_canvas_mask.cpp"
     },
     {
-      "blob": "c9b3f26554d86e46610dc6b22e5764f0036b3c43",
+      "blob": "06d1a528ccffef7d867637c820fe778d96a8a6c9",
       "mirror_path": "mirror/core/canvas/src/skia_canvas_opacity.cpp",
       "mode": "100644",
       "pulp_path": "core/canvas/src/skia_canvas_opacity.cpp"
     },
     {
-      "blob": "d01a6acaa64492dbd06e288e439d182ea3235297",
+      "blob": "5fa26e2836fc236af0af8e5526059d55f1691f76",
       "mirror_path": "mirror/core/canvas/src/skia_canvas_path.cpp",
       "mode": "100644",
       "pulp_path": "core/canvas/src/skia_canvas_path.cpp"
@@ -619,16 +667,28 @@
       "pulp_path": "core/canvas/src/skia_canvas_shaders.cpp"
     },
     {
-      "blob": "1561d7b903b590cba0a7fcec129ad93537a35a55",
+      "blob": "39f5a4407847713751d0523a01d4f77aaf1a9580",
       "mirror_path": "mirror/core/canvas/src/skia_canvas_text.cpp",
       "mode": "100644",
       "pulp_path": "core/canvas/src/skia_canvas_text.cpp"
     },
     {
-      "blob": "0a55efce696fa9376ee1e9b7d92c54bf681ea461",
+      "blob": "c1a54ac2919b9b86809e9f4e2f7ae7020670e235",
       "mirror_path": "mirror/core/canvas/src/skia_gradient_compat.hpp",
       "mode": "100644",
       "pulp_path": "core/canvas/src/skia_gradient_compat.hpp"
+    },
+    {
+      "blob": "a40b5d36a21533236fc4464a609ff46ff3780432",
+      "mirror_path": "mirror/core/canvas/src/skia_paragraph_cache.cpp",
+      "mode": "100644",
+      "pulp_path": "core/canvas/src/skia_paragraph_cache.cpp"
+    },
+    {
+      "blob": "80f02fbf542505bc6e424438c70c35f4a1cced5c",
+      "mirror_path": "mirror/core/canvas/src/skia_paragraph_cache.hpp",
+      "mode": "100644",
+      "pulp_path": "core/canvas/src/skia_paragraph_cache.hpp"
     },
     {
       "blob": "dd7bd5507621166ef5e47a7d03fe2bd635bc00f5",
@@ -667,7 +727,7 @@
       "pulp_path": "core/canvas/src/system_ui_typeface.hpp"
     },
     {
-      "blob": "c5e5ea5bb18455e1f528a0b57910acbb8fb57423",
+      "blob": "50157a3e9ed19245daa55202acde9dc3c6b913bb",
       "mirror_path": "mirror/core/canvas/src/text_font_context.cpp",
       "mode": "100644",
       "pulp_path": "core/canvas/src/text_font_context.cpp"
@@ -685,7 +745,7 @@
       "pulp_path": "core/canvas/src/text_run_planner.cpp"
     },
     {
-      "blob": "0ce0db7fc73200acd102fe50ec9115467cb839d9",
+      "blob": "3f068c3f1d928ecaa5523f66db2d35f522c84c2f",
       "mirror_path": "mirror/core/canvas/src/text_shaper.cpp",
       "mode": "100644",
       "pulp_path": "core/canvas/src/text_shaper.cpp"
@@ -1081,13 +1141,13 @@
       "pulp_path": "core/render/include/pulp/render/gpu_startup_report.hpp"
     },
     {
-      "blob": "a147fa8e9af916ecdbe89e344c6e4e33251eda5f",
+      "blob": "47966ae61d17540e2a70ba1067ea7972270eae2f",
       "mirror_path": "mirror/core/render/include/pulp/render/gpu_surface.hpp",
       "mode": "100644",
       "pulp_path": "core/render/include/pulp/render/gpu_surface.hpp"
     },
     {
-      "blob": "0c00b51502809ab9274917371930eaea4edfc13b",
+      "blob": "2cfd947de34a79dbfc838f81bbb9c9959d407047",
       "mirror_path": "mirror/core/render/include/pulp/render/headless_surface.hpp",
       "mode": "100644",
       "pulp_path": "core/render/include/pulp/render/headless_surface.hpp"
@@ -1111,7 +1171,7 @@
       "pulp_path": "core/render/include/pulp/render/sdl3_surface.hpp"
     },
     {
-      "blob": "6398ce0f2ed7bbf3713c78a52167579a486a8ee7",
+      "blob": "e9b3ca1f57cd6920062303be3f560f09d07584b5",
       "mirror_path": "mirror/core/render/include/pulp/render/skia_surface.hpp",
       "mode": "100644",
       "pulp_path": "core/render/include/pulp/render/skia_surface.hpp"
@@ -1177,7 +1237,7 @@
       "pulp_path": "core/render/src/gpu_startup_report.cpp"
     },
     {
-      "blob": "f424881080e074cd59004eecc29ac1550c80a54c",
+      "blob": "7e5bfd44625006b6fa90bc6ce5e4c3a13279f6f8",
       "mirror_path": "mirror/core/render/src/gpu_surface_dawn.cpp",
       "mode": "100644",
       "pulp_path": "core/render/src/gpu_surface_dawn.cpp"
@@ -1189,7 +1249,7 @@
       "pulp_path": "core/render/src/graphite_image_provider.hpp"
     },
     {
-      "blob": "65b1e7213c9f6d4636b14dd09e471b0e281bc461",
+      "blob": "6f40a818b48e8299bb19950cced53e68cd145773",
       "mirror_path": "mirror/core/render/src/headless_surface.cpp",
       "mode": "100644",
       "pulp_path": "core/render/src/headless_surface.cpp"
@@ -1243,7 +1303,7 @@
       "pulp_path": "core/render/src/sdl3_surface.cpp"
     },
     {
-      "blob": "4cb5ab3b5fca15af3b7161429887d630377629ec",
+      "blob": "6b5312b81c4d3582e1177296d52b268800453e3f",
       "mirror_path": "mirror/core/render/src/skia_surface.cpp",
       "mode": "100644",
       "pulp_path": "core/render/src/skia_surface.cpp"
@@ -1267,7 +1327,7 @@
       "pulp_path": "core/render/src/wavenet_layer_wgsl.hpp"
     },
     {
-      "blob": "2dba6b0ad9bb4c88aea6bf96bbd4f54ec7257a2a",
+      "blob": "0d42f281edcbe925679d5f95e20ebb01e08e77a8",
       "mirror_path": "mirror/core/runtime/CMakeLists.txt",
       "mode": "100644",
       "pulp_path": "core/runtime/CMakeLists.txt"
@@ -1375,6 +1435,12 @@
       "pulp_path": "core/runtime/include/pulp/runtime/expression.hpp"
     },
     {
+      "blob": "b6eed6ef63a18547ef9bdf10ef17c4d6dbac722a",
+      "mirror_path": "mirror/core/runtime/include/pulp/runtime/external_input.hpp",
+      "mode": "100644",
+      "pulp_path": "core/runtime/include/pulp/runtime/external_input.hpp"
+    },
+    {
       "blob": "54871ce17adc22c955344270b5a14ee83264aae2",
       "mirror_path": "mirror/core/runtime/include/pulp/runtime/file_search_path.hpp",
       "mode": "100644",
@@ -1423,7 +1489,7 @@
       "pulp_path": "core/runtime/include/pulp/runtime/json_rpc.hpp"
     },
     {
-      "blob": "2a2ab1d95f977f2223149f3b97de3c262ab6f999",
+      "blob": "58d8b3c55a47119cf53f4cb4d493026b24b78dda",
       "mirror_path": "mirror/core/runtime/include/pulp/runtime/license.hpp",
       "mode": "100644",
       "pulp_path": "core/runtime/include/pulp/runtime/license.hpp"
@@ -1459,19 +1525,19 @@
       "pulp_path": "core/runtime/include/pulp/runtime/message_channel.hpp"
     },
     {
-      "blob": "d36a13eecffae0221edcb17bbc9e323b7acee602",
+      "blob": "b6b853d3276d1a2a10629c70a231d700dd9ad0bf",
       "mirror_path": "mirror/core/runtime/include/pulp/runtime/model_download.hpp",
       "mode": "100644",
       "pulp_path": "core/runtime/include/pulp/runtime/model_download.hpp"
     },
     {
-      "blob": "92bf59902e0fbfcc8129b893251b041233c9894f",
+      "blob": "82ab8102f41c55b866cfad5bf685075608c74d2f",
       "mirror_path": "mirror/core/runtime/include/pulp/runtime/model_registry.hpp",
       "mode": "100644",
       "pulp_path": "core/runtime/include/pulp/runtime/model_registry.hpp"
     },
     {
-      "blob": "edc196f19bbe17b9b28856809ae59842605ffa31",
+      "blob": "790ecc709be7f9879d87f9984515f8423702e343",
       "mirror_path": "mirror/core/runtime/include/pulp/runtime/model_store.hpp",
       "mode": "100644",
       "pulp_path": "core/runtime/include/pulp/runtime/model_store.hpp"
@@ -1513,7 +1579,7 @@
       "pulp_path": "core/runtime/include/pulp/runtime/result.hpp"
     },
     {
-      "blob": "604b97830fc6a077d0170afaeaa6780fd29350c4",
+      "blob": "72fffe6a6d006d4fa94576f24b1522389ff79117",
       "mirror_path": "mirror/core/runtime/include/pulp/runtime/runtime.hpp",
       "mode": "100644",
       "pulp_path": "core/runtime/include/pulp/runtime/runtime.hpp"
@@ -1651,7 +1717,7 @@
       "pulp_path": "core/runtime/include/pulp/runtime/xml.hpp"
     },
     {
-      "blob": "c09646d64b3837ba31a829ce35450140e2c16b42",
+      "blob": "7a0e518a961778b57f67eca85ace28af59931411",
       "mirror_path": "mirror/core/runtime/include/pulp/runtime/zip.hpp",
       "mode": "100644",
       "pulp_path": "core/runtime/include/pulp/runtime/zip.hpp"
@@ -1765,7 +1831,7 @@
       "pulp_path": "core/runtime/src/json_rpc.cpp"
     },
     {
-      "blob": "5e350fad595459c1a3cea89e2021c8ce9c9a3acf",
+      "blob": "dbbd31a87749c67ff06d5cc01945bb99b011fb31",
       "mirror_path": "mirror/core/runtime/src/license.cpp",
       "mode": "100644",
       "pulp_path": "core/runtime/src/license.cpp"
@@ -1789,7 +1855,7 @@
       "pulp_path": "core/runtime/src/memory_message_channel.cpp"
     },
     {
-      "blob": "30ff3c37afd52e8b796275de5fd6805c2b3dd01a",
+      "blob": "030d7910a2592db8a8be04c2342b90a453ec2b03",
       "mirror_path": "mirror/core/runtime/src/model_download.cpp",
       "mode": "100644",
       "pulp_path": "core/runtime/src/model_download.cpp"
@@ -1801,7 +1867,7 @@
       "pulp_path": "core/runtime/src/model_registry.cpp"
     },
     {
-      "blob": "44848516054c207a75f08b81829d0d884fb08bb7",
+      "blob": "2a16697c03f949e019df8b5f6a95f7e51f5fd773",
       "mirror_path": "mirror/core/runtime/src/model_store.cpp",
       "mode": "100644",
       "pulp_path": "core/runtime/src/model_store.cpp"
@@ -1909,7 +1975,7 @@
       "pulp_path": "core/runtime/src/xml.cpp"
     },
     {
-      "blob": "c971eb43a46fadadf2b2e989736ae1511c6ccd40",
+      "blob": "de517301b4cb7c81b744e71b8c88cbe59d1596d9",
       "mirror_path": "mirror/core/runtime/src/zip.cpp",
       "mode": "100644",
       "pulp_path": "core/runtime/src/zip.cpp"
@@ -2059,7 +2125,7 @@
       "pulp_path": "core/state/src/store.cpp"
     },
     {
-      "blob": "e051862930e78c82e43e6a49f06d1e967d4e8a6f",
+      "blob": "b0c435085f5536edb5f02d01cd759eed90ad3e42",
       "mirror_path": "mirror/core/view/cmake/PulpViewJsPreludes.cmake",
       "mode": "100644",
       "pulp_path": "core/view/cmake/PulpViewJsPreludes.cmake"
@@ -2137,7 +2203,7 @@
       "pulp_path": "core/view/include/pulp/view/accessibility_tree.hpp"
     },
     {
-      "blob": "03f2ab81b89cf21b3b3423003e334ae669193bfe",
+      "blob": "2f3c20527d2f16ea2f30416cdd6c5d15a4da2e01",
       "mirror_path": "mirror/core/view/include/pulp/view/anchor_strategy.hpp",
       "mode": "100644",
       "pulp_path": "core/view/include/pulp/view/anchor_strategy.hpp"
@@ -2173,7 +2239,7 @@
       "pulp_path": "core/view/include/pulp/view/aria_roles.hpp"
     },
     {
-      "blob": "d7c8a465f634f70faf828737d0433b7d6aca1d0d",
+      "blob": "4c64fecdf1316a88eac28ce95c7f016b9e65c1bb",
       "mirror_path": "mirror/core/view/include/pulp/view/asset_manager.hpp",
       "mode": "100644",
       "pulp_path": "core/view/include/pulp/view/asset_manager.hpp"
@@ -2281,7 +2347,7 @@
       "pulp_path": "core/view/include/pulp/view/concertina_panel.hpp"
     },
     {
-      "blob": "9410766cb4c995b969e497fb3a25c18be6c2deb5",
+      "blob": "096be2707000e338bb938bed5372bb47a3a3b244",
       "mirror_path": "mirror/core/view/include/pulp/view/context_menu.hpp",
       "mode": "100644",
       "pulp_path": "core/view/include/pulp/view/context_menu.hpp"
@@ -2371,7 +2437,7 @@
       "pulp_path": "core/view/include/pulp/view/design_frame_view.hpp"
     },
     {
-      "blob": "62e32eb1552c5d0faf80da0d9c6be1b4c264cfb3",
+      "blob": "d6d7434c52730d23c3c7c29fc827ae1fc390d2ac",
       "mirror_path": "mirror/core/view/include/pulp/view/design_import.hpp",
       "mode": "100644",
       "pulp_path": "core/view/include/pulp/view/design_import.hpp"
@@ -2707,7 +2773,7 @@
       "pulp_path": "core/view/include/pulp/view/plugin_key_routing.hpp"
     },
     {
-      "blob": "73462f22366089fa89cc1edd148271c6c58c5bfd",
+      "blob": "42c6e8e8c04a9a8a680dccf7c340b745a887b630",
       "mirror_path": "mirror/core/view/include/pulp/view/plugin_view_host.hpp",
       "mode": "100644",
       "pulp_path": "core/view/include/pulp/view/plugin_view_host.hpp"
@@ -2767,7 +2833,7 @@
       "pulp_path": "core/view/include/pulp/view/relative_point.hpp"
     },
     {
-      "blob": "8dd72ea443c83704c06723414fd14c435e47b495",
+      "blob": "2d2ed4198758e66f6f03070e2ce7ed2a494062dd",
       "mirror_path": "mirror/core/view/include/pulp/view/reload_capabilities.hpp",
       "mode": "100644",
       "pulp_path": "core/view/include/pulp/view/reload_capabilities.hpp"
@@ -2791,7 +2857,7 @@
       "pulp_path": "core/view/include/pulp/view/resizable_shell.hpp"
     },
     {
-      "blob": "1a4f9f9434dfe3fe5f3d4ee3286dd0647ea4a0bf",
+      "blob": "c8f963d7f0adcb44e980780e32bdceb21004feb5",
       "mirror_path": "mirror/core/view/include/pulp/view/screenshot.hpp",
       "mode": "100644",
       "pulp_path": "core/view/include/pulp/view/screenshot.hpp"
@@ -2815,7 +2881,7 @@
       "pulp_path": "core/view/include/pulp/view/script_event_dispatch.hpp"
     },
     {
-      "blob": "5ef7db9939d0f242ae064eb1694b028b1cb273e2",
+      "blob": "f81d289e343ec379572dac0144d1bcbf3ed4ef84",
       "mirror_path": "mirror/core/view/include/pulp/view/script_inspector_port.hpp",
       "mode": "100644",
       "pulp_path": "core/view/include/pulp/view/script_inspector_port.hpp"
@@ -2827,7 +2893,7 @@
       "pulp_path": "core/view/include/pulp/view/scripted_editor_session.hpp"
     },
     {
-      "blob": "5ecd3cb633c21cdae6810db1ceaeebeed6c22962",
+      "blob": "153f1dde157a8698dbd5769177e9e9e9aca24ca3",
       "mirror_path": "mirror/core/view/include/pulp/view/scripted_ui.hpp",
       "mode": "100644",
       "pulp_path": "core/view/include/pulp/view/scripted_ui.hpp"
@@ -2845,7 +2911,7 @@
       "pulp_path": "core/view/include/pulp/view/scroll_bar.hpp"
     },
     {
-      "blob": "1f5f4bb4866b8f2871f1a34a1cb712f1f1b770e2",
+      "blob": "bb5d140ab4f7dc5da8dce8ebf61ac7f6acdfd399",
       "mirror_path": "mirror/core/view/include/pulp/view/sdl_window_host.hpp",
       "mode": "100644",
       "pulp_path": "core/view/include/pulp/view/sdl_window_host.hpp"
@@ -3025,7 +3091,7 @@
       "pulp_path": "core/view/include/pulp/view/value_source_binding.hpp"
     },
     {
-      "blob": "abdef1ecc35827278f84106ec419cc7e40248ea4",
+      "blob": "c2c622d8bedc4310902d4349784a6027973887d9",
       "mirror_path": "mirror/core/view/include/pulp/view/view.hpp",
       "mode": "100644",
       "pulp_path": "core/view/include/pulp/view/view.hpp"
@@ -3067,7 +3133,7 @@
       "pulp_path": "core/view/include/pulp/view/w3c_tokens.hpp"
     },
     {
-      "blob": "09d2e5aeb3eb6b63b1de98d852f8bebc5aac2b91",
+      "blob": "107c17463d0081aa5e310a0c229ed2d206faf3f1",
       "mirror_path": "mirror/core/view/include/pulp/view/widget_bridge.hpp",
       "mode": "100644",
       "pulp_path": "core/view/include/pulp/view/widget_bridge.hpp"
@@ -3097,7 +3163,7 @@
       "pulp_path": "core/view/include/pulp/view/widget_skin_derive.hpp"
     },
     {
-      "blob": "d38c467cc340430c8168a4f09be6f0af3779e4e9",
+      "blob": "1ed4a596f2847614f2c635ff2f225ed6da2f390e",
       "mirror_path": "mirror/core/view/include/pulp/view/widgets.hpp",
       "mode": "100644",
       "pulp_path": "core/view/include/pulp/view/widgets.hpp"
@@ -3145,7 +3211,7 @@
       "pulp_path": "core/view/js/css-parser.js"
     },
     {
-      "blob": "46013d855ca190491fc2dea63cef8c4c21988f9a",
+      "blob": "7ca671934a4d544e25951d56b1b3f326472c978d",
       "mirror_path": "mirror/core/view/js/embed_js.py",
       "mode": "100644",
       "pulp_path": "core/view/js/embed_js.py"
@@ -3205,7 +3271,7 @@
       "pulp_path": "core/view/js/web-compat-document.js"
     },
     {
-      "blob": "478cce47d00d8ce3740a73c774e44cf3f4a3a8f8",
+      "blob": "7e167eba490eec4099a62e71aa739b4fb86ea9e6",
       "mirror_path": "mirror/core/view/js/web-compat-dom-ops.js",
       "mode": "100644",
       "pulp_path": "core/view/js/web-compat-dom-ops.js"
@@ -3241,7 +3307,7 @@
       "pulp_path": "core/view/js/web-compat-scheduler.js"
     },
     {
-      "blob": "dadee8db4010bffcc9ec4b630b34479a0454fbea",
+      "blob": "1d8e516d8f3a69f223eca7c1adfcfce504446c5e",
       "mirror_path": "mirror/core/view/js/web-compat-style-decl-helpers.js",
       "mode": "100644",
       "pulp_path": "core/view/js/web-compat-style-decl-helpers.js"
@@ -3349,6 +3415,12 @@
       "pulp_path": "core/view/platform/mac/drag_drop_mac_internal.h"
     },
     {
+      "blob": "a4bba9f2c7aea0d9c1895c168821d3cec8dde7b5",
+      "mirror_path": "mirror/core/view/platform/mac/mac_gpu_host_config.h",
+      "mode": "100644",
+      "pulp_path": "core/view/platform/mac/mac_gpu_host_config.h"
+    },
+    {
       "blob": "27727be0249d6bbd36fc391439d04300888ba291",
       "mirror_path": "mirror/core/view/platform/mac/mac_text_input_ranges.h",
       "mode": "100644",
@@ -3367,7 +3439,7 @@
       "pulp_path": "core/view/platform/mac/pulp_mac_objc_names.h"
     },
     {
-      "blob": "acc51d0aeb7bf1ed883dad0b5a172a78e92407a2",
+      "blob": "4765aa657f7bf82e2a06720001f0df066fa6257b",
       "mirror_path": "mirror/core/view/platform/mac/screenshot_mac.mm",
       "mode": "100644",
       "pulp_path": "core/view/platform/mac/screenshot_mac.mm"
@@ -3379,7 +3451,7 @@
       "pulp_path": "core/view/platform/mac/text_accessibility_macos.mm"
     },
     {
-      "blob": "cfc5a3a784435dacb0bc1d57077e3d1fd34ee930",
+      "blob": "9ddeb2adce90ed4bc9083c2bbd5850696754a917",
       "mirror_path": "mirror/core/view/platform/mac/window_host_mac.mm",
       "mode": "100644",
       "pulp_path": "core/view/platform/mac/window_host_mac.mm"
@@ -3427,7 +3499,7 @@
       "pulp_path": "core/view/platform/mac/window_host_mac_metal_view.h"
     },
     {
-      "blob": "ba6d73fe4305229fd1b85143002f43f6a5d0a43f",
+      "blob": "d45c319edf1464003fa05a725fc383ca574f4b10",
       "mirror_path": "mirror/core/view/platform/mac/window_host_mac_metal_view.mm",
       "mode": "100644",
       "pulp_path": "core/view/platform/mac/window_host_mac_metal_view.mm"
@@ -3487,7 +3559,7 @@
       "pulp_path": "core/view/src/accessibility_tree.cpp"
     },
     {
-      "blob": "a9b2e3c156d95a4a07939787e6aeca21fcff4188",
+      "blob": "f19f2b62cc47f9bff512581bfb7294de605214c8",
       "mirror_path": "mirror/core/view/src/anchor_strategy.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/anchor_strategy.cpp"
@@ -3499,7 +3571,7 @@
       "pulp_path": "core/view/src/app_framework.cpp"
     },
     {
-      "blob": "3d18bbd5d0054bbe51a14769d9d051aa15910d0d",
+      "blob": "ee7d37b507284795eabd481ba4ed407fc6370a6e",
       "mirror_path": "mirror/core/view/src/appearance_defects.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/appearance_defects.cpp"
@@ -3511,7 +3583,7 @@
       "pulp_path": "core/view/src/appearance_tracker.cpp"
     },
     {
-      "blob": "6ba3e7280f5c5e93f4529534c15a2be7ac60577d",
+      "blob": "eb361761a0ea4a3bbecb1b304686f0c5b3d1ea3e",
       "mirror_path": "mirror/core/view/src/asset_manager.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/asset_manager.cpp"
@@ -3565,7 +3637,7 @@
       "pulp_path": "core/view/src/canvas_replay_state.hpp"
     },
     {
-      "blob": "9dd778bbd61092196ee1ffb235f150bb814e3100",
+      "blob": "0159bfec9351f19ae8c59d4b5e389bf62d9307a0",
       "mirror_path": "mirror/core/view/src/canvas_widget.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/canvas_widget.cpp"
@@ -3637,7 +3709,7 @@
       "pulp_path": "core/view/src/concertina_panel.cpp"
     },
     {
-      "blob": "5eeba66c598eac9d88641b0696848496d9f4a87c",
+      "blob": "4eec38e2b9dd66d2630e159a304a6c589448ed1c",
       "mirror_path": "mirror/core/view/src/context_menu.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/context_menu.cpp"
@@ -3661,7 +3733,7 @@
       "pulp_path": "core/view/src/css_effect_parse.cpp"
     },
     {
-      "blob": "4adbf29c9dca576e5e842b787df675345cae445c",
+      "blob": "0675206483aae013ec31139074992f6d0857c33a",
       "mirror_path": "mirror/core/view/src/css_gradient.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/css_gradient.cpp"
@@ -3691,25 +3763,25 @@
       "pulp_path": "core/view/src/design_binding_metadata.cpp"
     },
     {
-      "blob": "3c28b5386e41ed6eafe6d59421f7da078589a07d",
+      "blob": "b4dd36fd8e2472fcde1b218d0506602392436450",
       "mirror_path": "mirror/core/view/src/design_binding_metadata.hpp",
       "mode": "100644",
       "pulp_path": "core/view/src/design_binding_metadata.hpp"
     },
     {
-      "blob": "a34c43659aaa49aaf22161f7f3cfea28b5ccf6a1",
+      "blob": "fc303328fc6869e4607f10374fdd2e073135941c",
       "mirror_path": "mirror/core/view/src/design_codegen.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/design_codegen.cpp"
     },
     {
-      "blob": "ed94168637269c64bd0a846bfe60f0e6f8ddcf3b",
+      "blob": "d2083ca9c301661bd0ffa96d65da6af6f5cbaa66",
       "mirror_path": "mirror/core/view/src/design_cpp_binding_codegen.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/design_cpp_binding_codegen.cpp"
     },
     {
-      "blob": "dd4df12563b6934d0ee1b26757c723f30c1a0c8b",
+      "blob": "d7d86125db52ea38bc60155aad3f557ca8024d4d",
       "mirror_path": "mirror/core/view/src/design_cpp_binding_codegen.hpp",
       "mode": "100644",
       "pulp_path": "core/view/src/design_cpp_binding_codegen.hpp"
@@ -3817,7 +3889,7 @@
       "pulp_path": "core/view/src/design_import_designmd_schema.hpp"
     },
     {
-      "blob": "8ed6f31c6987ddceb8bc06d0026676b932ecd6aa",
+      "blob": "7d46808cfbeaf15a4f53dcf73d61de4d6b1533df",
       "mirror_path": "mirror/core/view/src/design_import_document_checks.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/design_import_document_checks.cpp"
@@ -3829,19 +3901,19 @@
       "pulp_path": "core/view/src/design_import_document_checks.hpp"
     },
     {
-      "blob": "a79093aa9ca7b521698eb71cab4eae2c2cc847b3",
+      "blob": "77bdde790f3cd80aabcd3eab2d9778792f1d6080",
       "mirror_path": "mirror/core/view/src/design_import_form_controls.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/design_import_form_controls.cpp"
     },
     {
-      "blob": "1785cdce71e4ed5a33cef9d470ab2a46dfa609ea",
+      "blob": "7e2ecf4a242b92235b462479c8c562e99d415286",
       "mirror_path": "mirror/core/view/src/design_import_form_controls.hpp",
       "mode": "100644",
       "pulp_path": "core/view/src/design_import_form_controls.hpp"
     },
     {
-      "blob": "a355242fc1c42b0a580e6eb09f5c521668bb5fdb",
+      "blob": "edea81fb7367340931582f7d49cdda1d3b1b5701",
       "mirror_path": "mirror/core/view/src/design_import_internal.hpp",
       "mode": "100644",
       "pulp_path": "core/view/src/design_import_internal.hpp"
@@ -3853,16 +3925,22 @@
       "pulp_path": "core/view/src/design_import_legacy_registry.cpp"
     },
     {
-      "blob": "01fc5907a4ac4b1debb0551d01eee9a0f5b2c67a",
+      "blob": "fc9d3c4ee85df6c53fed6fa562095be6753dd7ce",
       "mirror_path": "mirror/core/view/src/design_import_native_common.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/design_import_native_common.cpp"
     },
     {
-      "blob": "ded12400fc8a0a0833eff7482d9ea26a016847e9",
+      "blob": "666463e18dea81f2b43ac50593c416523fc4b60b",
       "mirror_path": "mirror/core/view/src/design_import_native_common.hpp",
       "mode": "100644",
       "pulp_path": "core/view/src/design_import_native_common.hpp"
+    },
+    {
+      "blob": "9f37d95655a2b98e21bae5c4eb02873153bbaea2",
+      "mirror_path": "mirror/core/view/src/design_import_native_fonts.cpp",
+      "mode": "100644",
+      "pulp_path": "core/view/src/design_import_native_fonts.cpp"
     },
     {
       "blob": "89b2abf2c2e70b759c5fbd1dc5e96bd7c4ccc820",
@@ -3883,13 +3961,19 @@
       "pulp_path": "core/view/src/design_import_svg_stroke.hpp"
     },
     {
+      "blob": "595641f83c2ff9d072a8e1a85230245058e6f9ac",
+      "mirror_path": "mirror/core/view/src/design_import_text_raster.cpp",
+      "mode": "100644",
+      "pulp_path": "core/view/src/design_import_text_raster.cpp"
+    },
+    {
       "blob": "f2b2674e5012c345ac58caa15791fccb309e9a7f",
       "mirror_path": "mirror/core/view/src/design_import_v0_tsx.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/design_import_v0_tsx.cpp"
     },
     {
-      "blob": "d7a0a16668dfe213f2e89051e63a878fc5a61730",
+      "blob": "de27366cfb47d277819366580ec14165f03638f5",
       "mirror_path": "mirror/core/view/src/design_ir_analysis.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/design_ir_analysis.cpp"
@@ -3901,7 +3985,7 @@
       "pulp_path": "core/view/src/design_ir_helpers.hpp"
     },
     {
-      "blob": "a4175b04af94e42121c560c9d3d7f5c26bd74c56",
+      "blob": "bdf68c1095d177dd663123acc6824a733a45c9cf",
       "mirror_path": "mirror/core/view/src/design_ir_json.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/design_ir_json.cpp"
@@ -3925,10 +4009,22 @@
       "pulp_path": "core/view/src/design_ir_json_text.cpp"
     },
     {
-      "blob": "86195b3ac0838e8bb23a7db6975652b55e48bda6",
+      "blob": "5b55bfe09caa6a58a29d4410dfff0233ffebc958",
       "mirror_path": "mirror/core/view/src/design_ir_normalize.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/design_ir_normalize.cpp"
+    },
+    {
+      "blob": "e53755a505510b41cd80b893b089a5ad973792ab",
+      "mirror_path": "mirror/core/view/src/design_js_capture_lowering.cpp",
+      "mode": "100644",
+      "pulp_path": "core/view/src/design_js_capture_lowering.cpp"
+    },
+    {
+      "blob": "422fca12dd41e4ec7e48b8905d5bf89e23d2e958",
+      "mirror_path": "mirror/core/view/src/design_js_capture_lowering.hpp",
+      "mode": "100644",
+      "pulp_path": "core/view/src/design_js_capture_lowering.hpp"
     },
     {
       "blob": "5b6a722a8c3d364331cbb7b357ae32ddd402d160",
@@ -3955,7 +4051,7 @@
       "pulp_path": "core/view/src/design_param_binding.cpp"
     },
     {
-      "blob": "c039804a53fa6e87b18bbc1a8548d265a7a33a04",
+      "blob": "b50a6821a3ad57b030729add5d4e103a9af03959",
       "mirror_path": "mirror/core/view/src/design_swift_codegen.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/design_swift_codegen.cpp"
@@ -3983,6 +4079,12 @@
       "mirror_path": "mirror/core/view/src/design_tweaks.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/design_tweaks.cpp"
+    },
+    {
+      "blob": "a4cc8e80491b53c66b6ad3c38a8a3005750552e3",
+      "mirror_path": "mirror/core/view/src/design_ua_form_control_state.hpp",
+      "mode": "100644",
+      "pulp_path": "core/view/src/design_ua_form_control_state.hpp"
     },
     {
       "blob": "10b478e316c0747bf9ac28d40e5f16bd66ca36d2",
@@ -4153,13 +4255,19 @@
       "pulp_path": "core/view/src/js_engine_recommend.cpp"
     },
     {
-      "blob": "19220e8b9906879dbdf7e4eed9a45d2a5fd20359",
+      "blob": "96ba05a4f504ae5de4f7ccc936d46ab5590951cc",
+      "mirror_path": "mirror/core/view/src/js_prelude_source.cpp",
+      "mode": "100644",
+      "pulp_path": "core/view/src/js_prelude_source.cpp"
+    },
+    {
+      "blob": "e20ab470307a5cd6e3e7a27373ef9f906bc0bf7a",
       "mirror_path": "mirror/core/view/src/js_quickjs_engine.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/js_quickjs_engine.cpp"
     },
     {
-      "blob": "ded70f3cb2ce046c569a908d845c4ef271944b17",
+      "blob": "b1d76464cd87479bbf9e4fff038850a7e56aa62d",
       "mirror_path": "mirror/core/view/src/js_v8_engine.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/js_v8_engine.cpp"
@@ -4205,6 +4313,12 @@
       "mirror_path": "mirror/core/view/src/layout_snapshot.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/layout_snapshot.cpp"
+    },
+    {
+      "blob": "12b2669177fac81770d37d92da205e7d04ce6030",
+      "mirror_path": "mirror/core/view/src/lite_editor_host.cpp",
+      "mode": "100644",
+      "pulp_path": "core/view/src/lite_editor_host.cpp"
     },
     {
       "blob": "2b646a68c8e16b4588a5935e609a6ee4d3f31f55",
@@ -4399,7 +4513,7 @@
       "pulp_path": "core/view/src/screenshot_compare.cpp"
     },
     {
-      "blob": "8fc395aca791a42b037c97c8222fdcf24b655802",
+      "blob": "ae3360e6c28c72795e3254f6b22d819e52f16ddf",
       "mirror_path": "mirror/core/view/src/screenshot_gpu.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/screenshot_gpu.cpp"
@@ -4411,7 +4525,7 @@
       "pulp_path": "core/view/src/screenshot_png_validation.cpp"
     },
     {
-      "blob": "5aef1c28332cf299202b2ccb1cf27e8a5efdfecc",
+      "blob": "50758bfa49a1572e377d167697114c52156452ea",
       "mirror_path": "mirror/core/view/src/screenshot_stub.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/screenshot_stub.cpp"
@@ -4441,7 +4555,7 @@
       "pulp_path": "core/view/src/script_event_dispatch.cpp"
     },
     {
-      "blob": "6333c237f886e46a53fe303d0f104614a5e12993",
+      "blob": "f336660ea1f667b82247c406ce2b4f9fef79f7c8",
       "mirror_path": "mirror/core/view/src/scripted_ui.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/scripted_ui.cpp"
@@ -4459,7 +4573,7 @@
       "pulp_path": "core/view/src/scroll_bar.cpp"
     },
     {
-      "blob": "2f8aeb8c48506f73435f532d0582e7e91d03d0f0",
+      "blob": "dd8ae846e73abcc513d7b6bc42becf93fd387104",
       "mirror_path": "mirror/core/view/src/sdl_window_host.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/sdl_window_host.cpp"
@@ -4651,7 +4765,7 @@
       "pulp_path": "core/view/src/view_lifecycle.cpp"
     },
     {
-      "blob": "8ed96ff52967193139b0b292603904aabd6262f1",
+      "blob": "a01cc80d71326f23f5038d8e6496f56dd84ebd22",
       "mirror_path": "mirror/core/view/src/view_paint.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/view_paint.cpp"
@@ -4681,7 +4795,7 @@
       "pulp_path": "core/view/src/w3c_tokens.cpp"
     },
     {
-      "blob": "1fe87c1d0a91b8921b221c2540609f1ee2882bc2",
+      "blob": "f9b04ad62159f5176eae9ee8efcd2a334d6cb9ea",
       "mirror_path": "mirror/core/view/src/widget_bridge.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/widget_bridge.cpp"
@@ -4723,7 +4837,7 @@
       "pulp_path": "core/view/src/widget_bridge/border_side_api.cpp"
     },
     {
-      "blob": "5a531ad77870ae4eb7233663314ac7870bca3b1b",
+      "blob": "0f7cfd3d9fa8b7a2d9d9e44ef72a02faf164e59b",
       "mirror_path": "mirror/core/view/src/widget_bridge/bridge_dispatch.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/widget_bridge/bridge_dispatch.cpp"
@@ -4735,7 +4849,7 @@
       "pulp_path": "core/view/src/widget_bridge/bridge_dispatch.hpp"
     },
     {
-      "blob": "8eca873b037afa504d572b8b0504d6983b55cd05",
+      "blob": "f46f66c3a41f15a5bcd7de2c7f304f368ed6265c",
       "mirror_path": "mirror/core/view/src/widget_bridge/canvas2d_api.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/widget_bridge/canvas2d_api.cpp"
@@ -4753,7 +4867,7 @@
       "pulp_path": "core/view/src/widget_bridge/css_color.hpp"
     },
     {
-      "blob": "096966265c6fadecee677febf8af64d6df53b68f",
+      "blob": "fbe656dca8813f5409402cc7a8e866ee420c53bf",
       "mirror_path": "mirror/core/view/src/widget_bridge/dom_api.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/widget_bridge/dom_api.cpp"
@@ -4765,7 +4879,7 @@
       "pulp_path": "core/view/src/widget_bridge/event_api.cpp"
     },
     {
-      "blob": "834fe9367a30960fe80545bba68cbe98ade6459a",
+      "blob": "51a8673234ded214fe7d16d353065bc5cf27e4b6",
       "mirror_path": "mirror/core/view/src/widget_bridge/factory_api.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/widget_bridge/factory_api.cpp"
@@ -4825,13 +4939,13 @@
       "pulp_path": "core/view/src/widget_bridge/outline_api.cpp"
     },
     {
-      "blob": "697ce09f61bab61504e3471087cc7938c961ea8e",
+      "blob": "6f8227d3b73bec6e3fa6c8636c8bf9d048403a2a",
       "mirror_path": "mirror/core/view/src/widget_bridge/platform_services_api.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/widget_bridge/platform_services_api.cpp"
     },
     {
-      "blob": "8eaa58220cee1580cc2e8368110d2995e90029e8",
+      "blob": "8de96a7b8b6432e1d63008abad57c646adfb9d1d",
       "mirror_path": "mirror/core/view/src/widget_bridge/private_storage.hpp",
       "mode": "100644",
       "pulp_path": "core/view/src/widget_bridge/private_storage.hpp"
@@ -4843,13 +4957,13 @@
       "pulp_path": "core/view/src/widget_bridge/query_service_api.cpp"
     },
     {
-      "blob": "d309e70df3966744c5a13ab47141caf05df8e180",
+      "blob": "22badd2c7d42180d819b349f6bd2731292a0fa15",
       "mirror_path": "mirror/core/view/src/widget_bridge/realm_lifecycle.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/widget_bridge/realm_lifecycle.cpp"
     },
     {
-      "blob": "cdae83cbf11a23baf6ce4fde8ac432863aca19ef",
+      "blob": "d5fd794c8b51c26097abd10091bd2fcb4b751c39",
       "mirror_path": "mirror/core/view/src/widget_bridge/registrars.hpp",
       "mode": "100644",
       "pulp_path": "core/view/src/widget_bridge/registrars.hpp"
@@ -4885,13 +4999,13 @@
       "pulp_path": "core/view/src/widget_bridge/shader_api.cpp"
     },
     {
-      "blob": "8d0104cfc3f1b2aa6af08843bca5118c8f9ed9b3",
+      "blob": "9c25766215f0716cfb88203d78d8010cdc046105",
       "mirror_path": "mirror/core/view/src/widget_bridge/state_binding_api.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/widget_bridge/state_binding_api.cpp"
     },
     {
-      "blob": "161e0af924b57a24bd73663ade33305b567a048d",
+      "blob": "e5399b31fb47f033ef5657941c3e33d238a47c51",
       "mirror_path": "mirror/core/view/src/widget_bridge/storage_assets_api.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/widget_bridge/storage_assets_api.cpp"
@@ -4921,13 +5035,13 @@
       "pulp_path": "core/view/src/widget_bridge/style_rn_compat_api.cpp"
     },
     {
-      "blob": "8b2210d79db30f66afa6cfb6fa3753e92f1f3105",
+      "blob": "a82ef0153041d8b5d01959d473633f6e26eb7d03",
       "mirror_path": "mirror/core/view/src/widget_bridge/style_state_api.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/widget_bridge/style_state_api.cpp"
     },
     {
-      "blob": "dce94094a926b01b38a29cc77bbfcd8bd3689fa5",
+      "blob": "961bf79880adc812d3458b690408c9b05ca05d7f",
       "mirror_path": "mirror/core/view/src/widget_bridge/style_storage_api.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/widget_bridge/style_storage_api.cpp"
@@ -4957,7 +5071,7 @@
       "pulp_path": "core/view/src/widget_bridge/svg_api.cpp"
     },
     {
-      "blob": "97aeb89d82446d47418210e0c91c918d949ee8b3",
+      "blob": "254b3d31073c43a96b8d705743508476ddbd0635",
       "mirror_path": "mirror/core/view/src/widget_bridge/text_runs_api.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/widget_bridge/text_runs_api.cpp"
@@ -4969,7 +5083,7 @@
       "pulp_path": "core/view/src/widget_bridge/theme_api.cpp"
     },
     {
-      "blob": "66d7e6c26d8370d28a34205dc1a3c91b93de2673",
+      "blob": "b9d92abd096838542e0da5a394b0f7ae011797a5",
       "mirror_path": "mirror/core/view/src/widget_bridge/tokens_api.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/widget_bridge/tokens_api.cpp"
@@ -4999,7 +5113,7 @@
       "pulp_path": "core/view/src/widget_bridge/value_widget_access.hpp"
     },
     {
-      "blob": "4f8dfd9b254bc2247081f65e70d37d2e92b208bc",
+      "blob": "ea9b1030bd487158b9ae03e48df0c10edf276b9d",
       "mirror_path": "mirror/core/view/src/widget_bridge/widget_assets_api.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/widget_bridge/widget_assets_api.cpp"
@@ -5011,7 +5125,7 @@
       "pulp_path": "core/view/src/widget_bridge/widget_callbacks.cpp"
     },
     {
-      "blob": "d9200907de4f0fbff944b8e68414c31f844922b8",
+      "blob": "4facfcb4eff8c465597ef1942e1478b75a177377",
       "mirror_path": "mirror/core/view/src/widget_bridge/widget_schema_api.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/widget_bridge/widget_schema_api.cpp"
@@ -5029,7 +5143,7 @@
       "pulp_path": "core/view/src/widget_bridge/widget_value_content_api.cpp"
     },
     {
-      "blob": "dfecf653582c94a1448eedd898c4221c610b5c28",
+      "blob": "be70c1b676b906be006aaebf0dc8c56492c6beff",
       "mirror_path": "mirror/core/view/src/widget_bridge/widget_value_controls_api.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/widget_bridge/widget_value_controls_api.cpp"
@@ -5077,7 +5191,7 @@
       "pulp_path": "core/view/src/widgets/form_controls.cpp"
     },
     {
-      "blob": "35dad3746fd064c2de8af586009a55489673518c",
+      "blob": "f7d378bb5204b934163b2ad8d318d3266e3855b5",
       "mirror_path": "mirror/core/view/src/widgets/label.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/widgets/label.cpp"
@@ -5095,7 +5209,7 @@
       "pulp_path": "core/view/src/widgets/svg_rect.cpp"
     },
     {
-      "blob": "bd03d4b90dceb70e9e9b0f0bd3680b63a44394f3",
+      "blob": "292906c07eecf9621647a1cbe46ba6932bd2cfec",
       "mirror_path": "mirror/core/view/src/widgets/visualizers.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/widgets/visualizers.cpp"
@@ -5107,7 +5221,7 @@
       "pulp_path": "core/view/src/window_classes.cpp"
     },
     {
-      "blob": "b3562363617b8debd2a4620a2ec97e7624013a57",
+      "blob": "1ad35a12c87232fadd78dc3fc804086f4edeb2c4",
       "mirror_path": "mirror/core/view/src/window_host_stub.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/window_host_stub.cpp"
@@ -5281,13 +5395,13 @@
       "pulp_path": "external/tweetnacl/tweetnacl.h"
     },
     {
-      "blob": "d97d18c0b9ffc7cd0358eed7032a42d4fc7f46db",
+      "blob": "eed3105b95a2ef2c390c06d0f70f19af8cefe43f",
       "mirror_path": "mirror/tools/cmake/PulpEmbedData.cmake",
       "mode": "100644",
       "pulp_path": "tools/cmake/PulpEmbedData.cmake"
     },
     {
-      "blob": "7c3199d6b0e496e192fc745ff89ce76cdcf9007e",
+      "blob": "bc76546b9f4d5ee057147d7fa8e44a51a68a9302",
       "mirror_path": "mirror/tools/cmake/scripts/encode_binary_data.py",
       "mode": "100755",
       "pulp_path": "tools/cmake/scripts/encode_binary_data.py"
@@ -5408,7 +5522,7 @@
         "core/runtime/CMakeLists.txt",
         "core/runtime/include/pulp/runtime/build_info.hpp.in"
       ],
-      "sha256": "d48f9ac0eab5ca02a5bf2c8d4b9408f8fcbb8ed226e52a41e8f9e150a4ef44a5"
+      "sha256": "93c3291a88bbc9f741f7fbc9a252d0d9f62ae684e4b9e3a07494db3b2412b467"
     },
     {
       "path": "@build/core/view/web_compat_preludes_gen.cpp",
@@ -5416,7 +5530,7 @@
         "core/view/cmake/PulpViewJsPreludes.cmake",
         "core/view/js/embed_js.py"
       ],
-      "sha256": "39c1e7002bbdaa2f9f50466e182d85f8e6ed117dd408d9ef24e225e69dfa749c"
+      "sha256": "bd12915351dba7497a946e86f323d0da4b7732594983d0cbf2063d9f5473c401"
     },
     {
       "path": "@build/core/view/web_compat_preludes_gen.hpp",
@@ -5424,32 +5538,32 @@
         "core/view/cmake/PulpViewJsPreludes.cmake",
         "core/view/js/embed_js.py"
       ],
-      "sha256": "7f9f354b1bfaf7dc68218ebc84c37ca30b72a59537720217aaf94291d2c76c0a"
+      "sha256": "c6b7505b93b95c82a9424ff3ea3a614387e5f5999016eafe5b5c05639d9280b4"
     }
   ],
   "mirror_ref": "refs/heads/mirror/pulp-framework",
-  "mirror_sha": "53d5269201e01d37b081445eb7be6810a8115041",
+  "mirror_sha": "36a65f8018120b73bca100b97887947829a9a4f9",
   "mirror_source": {
     "proof": {
       "commit_map_rows": [
-        "46cee5e4e6e2984e407a402d89dffae5f4f56631 0000000000000000000000000000000000000000",
-        "a12c524755385e608754fce538c428faa70c43a4 53d5269201e01d37b081445eb7be6810a8115041"
+        "0f616a440cecdbdaff6234be48f682eec1184587 0000000000000000000000000000000000000000",
+        "c5990b5016faa3487f55ca161fc6c2f1751edb25 36a65f8018120b73bca100b97887947829a9a4f9"
       ],
-      "exported_blobs_sha256": "942d39b6001f415f52d7ca87fb33d36d75ad7579377d98a90e943da7a2d882e9",
-      "exported_path_count": 881,
+      "exported_blobs_sha256": "456e762cf2e952ee50fd928854c5a3519bb7638d097a0d2fc1eae1ada7fd42a6",
+      "exported_path_count": 900,
       "exported_paths_equal": true,
-      "ref_map_row": "46cee5e4e6e2984e407a402d89dffae5f4f56631 53d5269201e01d37b081445eb7be6810a8115041 refs/heads/export-source",
+      "ref_map_row": "0f616a440cecdbdaff6234be48f682eec1184587 36a65f8018120b73bca100b97887947829a9a4f9 refs/heads/export-source",
       "source_is_ancestor": true
     },
     "ref_map": {
-      "path": "provenance/mirror/ref-maps/20261025-46cee5e4e6e2.txt",
-      "sha256": "9c64aca6b09beaf810e4450b1901d9e4757fb6537bcc2a3ffc583fb39e3c00f2"
+      "path": "provenance/mirror/ref-maps/20261102-0f616a440cec.txt",
+      "sha256": "9a9cc75bd7936d04c442bc5da521b305098b70e2b71836560dec51583bbff514"
     },
-    "sha": "a12c524755385e608754fce538c428faa70c43a4"
+    "sha": "c5990b5016faa3487f55ca161fc6c2f1751edb25"
   },
-  "mirror_tree": "4ca5e09da7bf9f4fd76c32d25510426930164974",
+  "mirror_tree": "d66bc7534fca6489d0ef31cbc53bf81b6e8e742c",
   "pulp_repository": "Generous-Corp/pulp",
-  "pulp_sha": "46cee5e4e6e2984e407a402d89dffae5f4f56631",
+  "pulp_sha": "0f616a440cecdbdaff6234be48f682eec1184587",
   "rename": {
     "from_prefix": "",
     "to_prefix": "mirror/"
@@ -5457,12 +5571,12 @@
   "schema": "pulp.vellum.export-receipt.v2",
   "tool": {
     "path": "tools/scripts/vellum_closure.py",
-    "pulp_blob": "324da9b100d7535e9454fb9deabe9b33acfb69e4"
+    "pulp_blob": "3324f0eb7337bee1ef0ce6d41e3909366caf96fa"
   },
   "units": [
     {
-      "closure_manifest": "provenance/mirror/closures/20261025-46cee5e4e6e2/foundation.json",
-      "closure_sha256": "c494fc90274e997c22ed8bfa3740d4562063fdbb9ce3dbe2ec463f3e0270e6e2",
+      "closure_manifest": "provenance/mirror/closures/20261102-0f616a440cec/foundation.json",
+      "closure_sha256": "c7033d7f45aa57fe97c08106fb61b87e008153194028353571e7d6a6f7e895e9",
       "configure": {
         "identity": {
           "build_type": "Release",
@@ -5473,14 +5587,14 @@
           "text_shaping": true
         },
         "label": "",
-        "options_sha256": "9480162a5e24220716e36c1dceaec4717a726d8154b5dd85a73df390837227db"
+        "options_sha256": "b1d95f98e0bc21ce7eb11f90f74b7bf3b5cae5d657cf7ed6e59f54e063d83b73"
       },
       "name": "foundation",
       "oracle_class": "identity"
     },
     {
-      "closure_manifest": "provenance/mirror/closures/20261025-46cee5e4e6e2/gpu-device-api.json",
-      "closure_sha256": "57fd216b8789a1cd3302c3fbb29e44261e5288317c2caae9cbdb01a061682175",
+      "closure_manifest": "provenance/mirror/closures/20261102-0f616a440cec/gpu-device-api.json",
+      "closure_sha256": "dbab538d28dd5f824644c255583c8da1a0a4a50ece7c8f09c0adecd96ea27a63",
       "configure": {
         "identity": {
           "build_type": "Release",
@@ -5491,14 +5605,14 @@
           "text_shaping": true
         },
         "label": "",
-        "options_sha256": "9480162a5e24220716e36c1dceaec4717a726d8154b5dd85a73df390837227db"
+        "options_sha256": "b1d95f98e0bc21ce7eb11f90f74b7bf3b5cae5d657cf7ed6e59f54e063d83b73"
       },
       "name": "gpu-device-api",
       "oracle_class": "identity"
     },
     {
-      "closure_manifest": "provenance/mirror/closures/20261025-46cee5e4e6e2/canvas.json",
-      "closure_sha256": "b728ab37975ee3346a285fdb44997d769ad0a25790177c311ad9589bb03a04ae",
+      "closure_manifest": "provenance/mirror/closures/20261102-0f616a440cec/canvas.json",
+      "closure_sha256": "1cc0d81a91233ca1263de65b61fa9db536d9173f00d1890f6ac6611a839883a9",
       "configure": {
         "identity": {
           "build_type": "Release",
@@ -5509,14 +5623,14 @@
           "text_shaping": true
         },
         "label": "",
-        "options_sha256": "9480162a5e24220716e36c1dceaec4717a726d8154b5dd85a73df390837227db"
+        "options_sha256": "b1d95f98e0bc21ce7eb11f90f74b7bf3b5cae5d657cf7ed6e59f54e063d83b73"
       },
       "name": "canvas",
       "oracle_class": "identity"
     },
     {
-      "closure_manifest": "provenance/mirror/closures/20261025-46cee5e4e6e2/render-2d.json",
-      "closure_sha256": "dbbe89bcd926f18af99cf4bcc526352fa0865ebcee2d7e5d0890971c7866930c",
+      "closure_manifest": "provenance/mirror/closures/20261102-0f616a440cec/render-2d.json",
+      "closure_sha256": "8b173a8f52d31ac3fae3030797a557b6649fd10093500a59e7ce3e8c71411842",
       "configure": {
         "identity": {
           "build_type": "Release",
@@ -5527,14 +5641,14 @@
           "text_shaping": true
         },
         "label": "",
-        "options_sha256": "9480162a5e24220716e36c1dceaec4717a726d8154b5dd85a73df390837227db"
+        "options_sha256": "b1d95f98e0bc21ce7eb11f90f74b7bf3b5cae5d657cf7ed6e59f54e063d83b73"
       },
       "name": "render-2d",
       "oracle_class": "identity"
     },
     {
-      "closure_manifest": "provenance/mirror/closures/20261025-46cee5e4e6e2/state-core.json",
-      "closure_sha256": "ceec3cdcd492d42d6a7ff29d50ffc01cb3004da105d01b9f0c0870a7d3454568",
+      "closure_manifest": "provenance/mirror/closures/20261102-0f616a440cec/state-core.json",
+      "closure_sha256": "c2c149097aacaf66ecd4b0bc648760269d1e09ed96f727c83f2bb20c60539972",
       "configure": {
         "identity": {
           "build_type": "Release",
@@ -5545,14 +5659,14 @@
           "text_shaping": true
         },
         "label": "",
-        "options_sha256": "9480162a5e24220716e36c1dceaec4717a726d8154b5dd85a73df390837227db"
+        "options_sha256": "b1d95f98e0bc21ce7eb11f90f74b7bf3b5cae5d657cf7ed6e59f54e063d83b73"
       },
       "name": "state-core",
       "oracle_class": "identity"
     },
     {
-      "closure_manifest": "provenance/mirror/closures/20261025-46cee5e4e6e2/view-core.json",
-      "closure_sha256": "47226a1967ab2c154229562a0ae0b4ffbfe809d34afe317656bd7cc01102c98d",
+      "closure_manifest": "provenance/mirror/closures/20261102-0f616a440cec/view-core.json",
+      "closure_sha256": "066f784c8df9c01bcb962b3e91234d2b48fcc557857f6dea9cec68d33cc069e1",
       "configure": {
         "identity": {
           "build_type": "Release",
@@ -5563,14 +5677,14 @@
           "text_shaping": true
         },
         "label": "",
-        "options_sha256": "9480162a5e24220716e36c1dceaec4717a726d8154b5dd85a73df390837227db"
+        "options_sha256": "b1d95f98e0bc21ce7eb11f90f74b7bf3b5cae5d657cf7ed6e59f54e063d83b73"
       },
       "name": "view-core",
       "oracle_class": "identity"
     },
     {
-      "closure_manifest": "provenance/mirror/closures/20261025-46cee5e4e6e2/design-import.json",
-      "closure_sha256": "234c5084ad6ea7ef7263c0d7aa619c3cf984c131ee8a38dd2ade41349b47bfb7",
+      "closure_manifest": "provenance/mirror/closures/20261102-0f616a440cec/design-import.json",
+      "closure_sha256": "afbca51bf564099d0324015c292d1358def5368aae6a53f5dd0619bd75694abd",
       "configure": {
         "identity": {
           "build_type": "Release",
@@ -5581,14 +5695,14 @@
           "text_shaping": true
         },
         "label": "",
-        "options_sha256": "9480162a5e24220716e36c1dceaec4717a726d8154b5dd85a73df390837227db"
+        "options_sha256": "b1d95f98e0bc21ce7eb11f90f74b7bf3b5cae5d657cf7ed6e59f54e063d83b73"
       },
       "name": "design-import",
       "oracle_class": "identity"
     },
     {
-      "closure_manifest": "provenance/mirror/closures/20261025-46cee5e4e6e2/view-script.json",
-      "closure_sha256": "44806e216bbe34a4070830b425d81751e6316a394ab7d56b7a43f80706d5b64e",
+      "closure_manifest": "provenance/mirror/closures/20261102-0f616a440cec/view-script.json",
+      "closure_sha256": "b02e4c95ae2df54c2c5eee57a330abee09106be0aec0b6df13ed60b43f453c01",
       "configure": {
         "identity": {
           "build_type": "Release",
@@ -5599,7 +5713,7 @@
           "text_shaping": true
         },
         "label": "",
-        "options_sha256": "9480162a5e24220716e36c1dceaec4717a726d8154b5dd85a73df390837227db"
+        "options_sha256": "b1d95f98e0bc21ce7eb11f90f74b7bf3b5cae5d657cf7ed6e59f54e063d83b73"
       },
       "name": "view-script",
       "oracle_class": "identity"

@@ -78,79 +78,44 @@ class Tests(unittest.TestCase):
     def test_copied_tree_passes_before_mutation(self) -> None:
         self.assertEqual(checker.check(self.root), [])
 
-    def test_prefixed_event_without_entry_is_rejected(self) -> None:
-        self.write_event()
-        errors = checker.check(self.root)
-        self.assertTrue(any("has no entry" in error for error in errors), errors)
+    def test_retired_ledger_requires_no_entry_for_an_inheritance_claim(self) -> None:
+        # The ledger is retired: receipt mode records inheritance decisions,
+        # so no form of inheritance claim owes an entry any more.
+        claims = (
+            {},
+            {"expansion": True,
+             "rationale": "The generic fix is inherited by Vellum in the next extraction wave."},
+            {"expansion": True,
+             "rationale": "Generic DesignIR hardening landed in Pulp; Vellum inherits it."},
+            {"expansion": True,
+             "rationale": "Generic behavior that Vellum's JS UI runtime unit inherits."},
+            {"expansion": True, "prefixed": False, "extra": {"vellum_inherits": True}},
+        )
+        for claim in claims:
+            with self.subTest(claim=claim):
+                self.write_event(**claim)
+                self.assertEqual(checker.check(self.root), [])
 
     def test_prefixed_event_with_entry_passes(self) -> None:
         self.write_event()
         self.write_entry()
         self.assertEqual(checker.check(self.root), [])
 
-    def test_inherited_by_vellum_expansion_event_without_entry_is_rejected(self) -> None:
-        self.write_event(
-            expansion=True,
-            rationale="The generic fix is inherited by Vellum in the next extraction wave.",
+    def test_existing_entries_stay_validated_as_history(self) -> None:
+        # Retiring the requirement keeps the history honest: an existing entry
+        # whose event disappeared is still an error.
+        path = next(
+            path for path in sorted((self.root / checker.ENTRIES_DIR).glob("*.json"))
         )
+        event_id = path.stem
+        for directory in (checker.EVENTS_DIR, checker.EXPANSION_EVENTS_DIR):
+            event = self.root / directory / f"{event_id}.json"
+            if event.is_file():
+                event.unlink()
         errors = checker.check(self.root)
-        self.assertTrue(any("has no entry" in error for error in errors), errors)
-
-    def test_vellum_inherits_it_expansion_event_without_entry_is_rejected(self) -> None:
-        self.write_event(
-            expansion=True,
-            rationale="Generic DesignIR hardening landed in Pulp; Vellum inherits it.",
+        self.assertTrue(
+            any(event_id in error and "no event in" in error for error in errors), errors
         )
-        errors = checker.check(self.root)
-        self.assertTrue(any("has no entry" in error for error in errors), errors)
-
-    def test_vellum_runtime_inherits_expansion_event_without_entry_is_rejected(self) -> None:
-        self.write_event(
-            expansion=True,
-            rationale="Generic behavior that Vellum's JS UI runtime unit inherits.",
-        )
-        errors = checker.check(self.root)
-        self.assertTrue(any("has no entry" in error for error in errors), errors)
-
-    def test_advisory_inherit_wording_owes_no_entry(self) -> None:
-        for rationale in (
-            "This is not a shape Vellum should inherit.",
-            "Vellum inherits nothing from this Pulp-only carve.",
-            "These changes improve behavior inherited by Spectr.",
-        ):
-            with self.subTest(rationale=rationale):
-                self.write_event(expansion=True, rationale=rationale)
-                self.assertEqual(checker.check(self.root), [])
-
-    def test_explicit_vellum_inherits_field_decides(self) -> None:
-        self.write_event(expansion=True, prefixed=False, extra={"vellum_inherits": True})
-        errors = checker.check(self.root)
-        self.assertTrue(any("has no entry" in error for error in errors), errors)
-        self.write_event(
-            expansion=True,
-            rationale="Vellum inherits it.",
-            extra={"vellum_inherits": False},
-        )
-        self.assertEqual(checker.check(self.root), [])
-
-    def test_backfilled_expansion_entries_are_required(self) -> None:
-        for event_id in (
-            "20261010-scripted-ui-mount-frame-bindings-watch",
-            "20261010-scripted-ui-time-source-watch",
-            "20261011-design-import-fail-closed-f4-watch",
-            "20261011-design-ir-asset-path-lexical-watch",
-            "20261011-design-ir-json-truncated-input-watch",
-        ):
-            with self.subTest(event_id=event_id):
-                path = self.root / checker.ENTRIES_DIR / f"{event_id}.json"
-                saved = path.read_bytes()
-                path.unlink()
-                errors = checker.check(self.root)
-                path.write_bytes(saved)
-                self.assertTrue(
-                    any(event_id in error and "has no entry" in error for error in errors),
-                    errors,
-                )
 
     def test_expansion_capability_families_must_match_entry_slices(self) -> None:
         self.write_event(expansion=True)
