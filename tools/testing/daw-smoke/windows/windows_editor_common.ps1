@@ -331,8 +331,23 @@ function Select-PluginPeCandidate([string]$PluginPath, [string]$Format, [string]
 function Get-ReaperVstScanPath([string]$StagedRoot) {
   return '%COMMONPROGRAMFILES%\VST3;%LOCALAPPDATA%\Programs\Common\VST3;'+$StagedRoot
 }
+function Get-Vst3StagedPluginPath([string]$ScanRoot,[string]$BundleRoot,[string]$PluginPath) {
+  $bundleFull = [IO.Path]::GetFullPath($BundleRoot)
+  $pluginFull = [IO.Path]::GetFullPath($PluginPath)
+  $bundlePrefix = $bundleFull + [IO.Path]::DirectorySeparatorChar
+  if (-not $pluginFull.StartsWith($bundlePrefix,[StringComparison]::OrdinalIgnoreCase)) {
+    throw "VST3 payload is outside bundle: $PluginPath"
+  }
+  $relativePayload = $pluginFull.Substring($bundlePrefix.Length)
+  $stagedBundle = Join-Path $ScanRoot (Split-Path -LiteralPath $bundleFull -Leaf)
+  return Join-Path $stagedBundle $relativePayload
+}
 function Write-ReaperIni([string]$Path,[string[]]$Lines) {
   # Windows PowerShell 5.1 Set-Content -Encoding utf8 emits a BOM. Preserve the
   # no-BOM INI form read by the seeded REAPER profile on the actual guest.
   [IO.File]::WriteAllLines($Path,$Lines,(New-Object Text.UTF8Encoding($false)))
+}
+function Test-HalfOpenWindowRectContainsPoint([int[]]$Rect,[int]$X,[int]$Y) {
+  if($null -eq $Rect -or $Rect.Count -ne 4){return $false}
+  return $X -ge $Rect[0] -and $X -lt $Rect[2] -and $Y -ge $Rect[1] -and $Y -lt $Rect[3]
 }

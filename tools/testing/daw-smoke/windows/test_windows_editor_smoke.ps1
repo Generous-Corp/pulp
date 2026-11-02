@@ -65,6 +65,10 @@ try {
   Check (Test-HalfOpenWindowRectContainsPoint $editorRect 300 400) 'interior editor point is accepted'
   Check (-not (Test-HalfOpenWindowRectContainsPoint $editorRect 500 600)) 'bottom-right editor edge is rejected'
   Check (-not (Test-HalfOpenWindowRectContainsPoint $editorRect 99 400)) 'outside editor point is rejected'
+  $stagedVst3=Get-Vst3StagedPluginPath 'C:\scan' 'C:\source\Example.vst3' 'C:\source\Example.vst3\Contents\arm64ec-win\Example.vst3'
+  Check ($stagedVst3 -eq 'C:\scan\Example.vst3\Contents\arm64ec-win\Example.vst3') 'VST3 staging keeps the payload architecture directory'
+  $stagedRootPayload=Get-Vst3StagedPluginPath 'C:\scan' 'C:\source\Example.vst3' 'C:\source\Example.vst3\Contents\Example.vst3'
+  Check ($stagedRootPayload -eq 'C:\scan\Example.vst3\Contents\Example.vst3') 'VST3 staging does not duplicate the Contents directory'
   foreach($fixture in @(@(0x8664,'x64','vstpath64'),@(0xaa64,'arm64','vstpath_winarm64'),@(0xa641,'arm64ec','vstpath_winarm64'),@(0xa64e,'arm64x','vstpath_winarm64'))){
     $path=Join-Path $root ($fixture[1]+'.exe')
     $bytes=New-Object byte[] 128

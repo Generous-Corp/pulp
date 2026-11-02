@@ -104,7 +104,8 @@ try {
   }
   if ($bundleRoot) {
     Copy-Item -LiteralPath $bundleRoot -Destination $scan -Recurse
-    $staged = Join-Path $scan ((Split-Path $bundleRoot -Leaf) + '\Contents\' + (Split-Path (Split-Path $plugin -Parent) -Leaf) + '\' + (Split-Path $plugin -Leaf))
+    $staged = Get-Vst3StagedPluginPath $scan $bundleRoot $plugin
+    if (-not (Test-Path -LiteralPath $staged -PathType Leaf)) { throw "Staged VST3 payload missing: $staged" }
   } else {
     Copy-Item -LiteralPath $plugin -Destination $scan -Recurse
     $staged = Join-Path $scan (Split-Path $plugin -Leaf)
@@ -219,6 +220,10 @@ using System;
 using System.Runtime.InteropServices;
 public static class OwnedWindow {
  [StructLayout(LayoutKind.Sequential)] public struct Point {public int X,Y;public Point(int x,int y){X=x;Y=y;}}
+ [StructLayout(LayoutKind.Sequential)] public struct Rect {public int Left,Top,Right,Bottom;}
+ [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h,out Rect rect);
+ public static int[] WindowRect(IntPtr h){Rect r; if(!GetWindowRect(h,out r)) return null; return new int[]{r.Left,r.Top,r.Right,r.Bottom};}
+ public static bool ContainsHalfOpen(Rect r,int x,int y){return x>=r.Left&&x<r.Right&&y>=r.Top&&y<r.Bottom;}
  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h,int command);
  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
@@ -236,10 +241,13 @@ public static class OwnedWindow {
   return false;
  }
  public static bool IsOwned(IntPtr h,uint pid){uint p;GetWindowThreadProcessId(h,out p);return p==pid;}
- public static void GuardPoint(IntPtr editor,uint pid,int x,int y){var w=WindowFromPoint(new Point(x,y));if(!IsOwned(w,pid)||!Belongs(editor,w))throw new Exception("Point is outside bound editor");}
+ public static void GuardPoint(IntPtr editor,uint pid,int x,int y){Rect rect;if(!GetWindowRect(editor,out rect)||!ContainsHalfOpen(rect,x,y))throw new Exception("Point is outside bound editor");var w=WindowFromPoint(new Point(x,y));if(!IsOwned(w,pid)||!Belongs(editor,w))throw new Exception("Point is outside bound editor");}
 }
 '@
   $editor=[IntPtr]([long]$hostStatus.editor_hwnd)
+  $editorRect=[OwnedWindow]::WindowRect($editor)
+  if($null -eq $editorRect -or $editorRect.Count -ne 4 -or $editorRect[2] -le $editorRect[0] -or $editorRect[3] -le $editorRect[1]){throw 'Bound editor rectangle unavailable'}
+  $receipt.editor_rect=[ordered]@{left=$editorRect[0];top=$editorRect[1];right=$editorRect[2];bottom=$editorRect[3]}
   function Guard-EditorOwner([long]$Hwnd) {
     Assert-OwnedIdentity $proc.process $proc.started_ticks
     if ($proc.process.SessionId -ne [int]$receipt.session.session_id) { throw 'Bound REAPER process left the interactive session' }
