@@ -27,7 +27,8 @@ float StateStoreParamPort::get(state::ParamID id) const {
 }
 
 void StateStoreParamPort::begin(state::ParamID id) {
-    if (store_.info(id) == nullptr) return;
+    if (store_.info(id) == nullptr)
+        return;
     // The store counts leases across every port and binding on this store, so
     // the host sees one begin for overlapping gestures; this port counts its
     // own share so it can close exactly what it opened.
@@ -36,7 +37,8 @@ void StateStoreParamPort::begin(state::ParamID id) {
 }
 
 void StateStoreParamPort::set(state::ParamID id, float plain_value) {
-    if (store_.info(id) == nullptr) return;
+    if (store_.info(id) == nullptr)
+        return;
     if (open_gestures(id) > 0) {
         store_.set_value(id, plain_value);
         return;
@@ -51,8 +53,10 @@ void StateStoreParamPort::set(state::ParamID id, float plain_value) {
 
 void StateStoreParamPort::end(state::ParamID id) {
     const auto found = held_.find(id);
-    if (found == held_.end()) return;
-    if (--found->second == 0) held_.erase(found);
+    if (found == held_.end())
+        return;
+    if (--found->second == 0)
+        held_.erase(found);
     store_.release_gesture(id);
 }
 
@@ -72,7 +76,8 @@ void StateStoreParamPort::release_all() {
     auto held = std::move(held_);
     held_.clear();
     for (const auto& [id, count] : held)
-        for (int i = 0; i < count; ++i) store_.release_gesture(id);
+        for (int i = 0; i < count; ++i)
+            store_.release_gesture(id);
 }
 
 int StateStoreParamPort::open_gestures(state::ParamID id) const {
@@ -80,4 +85,4 @@ int StateStoreParamPort::open_gestures(state::ParamID id) const {
     return found == held_.end() ? 0 : found->second;
 }
 
-}  // namespace pulp::format
+} // namespace pulp::format

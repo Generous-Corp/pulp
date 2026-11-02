@@ -14,4 +14,4 @@ namespace pulp::format {
 /// bind plain-key global shortcuts.
 enum class EditorHostKind : std::uint8_t { plugin, standalone };
 
-}  // namespace pulp::format
+} // namespace pulp::format

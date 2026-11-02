@@ -54,14 +54,16 @@ struct HostLog {
         const int hundredths = static_cast<int>(v * 100.0f + 0.5f);
         std::string s = std::to_string(hundredths / 100) + ".";
         const int frac = hundredths % 100;
-        if (frac < 10) s += '0';
+        if (frac < 10)
+            s += '0';
         return s + std::to_string(frac);
     }
 
     std::string stream() const {
         std::string s;
         for (const auto& e : entries) {
-            if (!s.empty()) s += ' ';
+            if (!s.empty())
+                s += ' ';
             s += e;
         }
         return s;
@@ -80,7 +82,7 @@ struct Fixture {
     }
 };
 
-}  // namespace
+} // namespace
 
 TEST_CASE("a ParamPort gesture reaches the host as begin, values, end in order",
           "[editor-host][param-port]") {
@@ -126,8 +128,7 @@ TEST_CASE("a ParamPort ignores unbalanced ends and unknown parameters",
     REQUIRE(port.get_normalized(999) == 0.0f);
 }
 
-TEST_CASE("a ParamPort exposes parameter info and normalized access",
-          "[editor-host][param-port]") {
+TEST_CASE("a ParamPort exposes parameter info and normalized access", "[editor-host][param-port]") {
     Fixture f;
     StateStoreParamPort port(f.store);
 
@@ -147,8 +148,8 @@ TEST_CASE("ParamPort listeners see every writer and stop when unsubscribed",
     Fixture f;
     StateStoreParamPort port(f.store);
     std::vector<std::pair<ParamID, float>> seen;
-    auto subscription = port.add_listener(
-        [&seen](ParamID id, float plain) { seen.emplace_back(id, plain); });
+    auto subscription =
+        port.add_listener([&seen](ParamID id, float plain) { seen.emplace_back(id, plain); });
     REQUIRE(subscription);
 
     port.set(kGain, 0.3f);
@@ -179,13 +180,13 @@ TEST_CASE("two editors sharing one ParamPort open one host gesture",
     auto a = shared.add_listener([&](ParamID, float v) { editor_a_saw.push_back(v); });
     auto b = shared.add_listener([&](ParamID, float v) { editor_b_saw.push_back(v); });
 
-    shared.begin(kGain);   // editor A grabs the knob
-    shared.begin(kGain);   // editor B grabs the same parameter's control
+    shared.begin(kGain); // editor A grabs the knob
+    shared.begin(kGain); // editor B grabs the same parameter's control
     shared.set(kGain, 0.2f);
     shared.set(kGain, 0.8f);
-    shared.end(kGain);     // A lets go: B still holds it, so no host end yet
+    shared.end(kGain); // A lets go: B still holds it, so no host end yet
     REQUIRE(f.host.stream() == "B1 V1(0.20) V1(0.80)");
-    shared.end(kGain);     // B lets go
+    shared.end(kGain); // B lets go
 
     REQUIRE(f.host.stream() == "B1 V1(0.20) V1(0.80) V1(0.80) E1");
     // Each editor saw the other's writes: the round trip between windows.
@@ -227,8 +228,7 @@ TEST_CASE("destroying the last port mid-gesture releases its gestures",
     REQUIRE(f.host.entries.back().front() == 'E');
 }
 
-TEST_CASE("ParamSubscription cancels exactly once and moves its ownership",
-          "[editor-host]") {
+TEST_CASE("ParamSubscription cancels exactly once and moves its ownership", "[editor-host]") {
     int cancelled = 0;
     {
         ParamSubscription first([&cancelled] { ++cancelled; });
@@ -248,34 +248,47 @@ namespace {
 
 /// The smallest editor: records what the host did to it.
 class RecordingEditor final : public Editor {
-public:
+  public:
     RecordingEditor(EditorContext& context, EditorRole role) : context_(context), role_(role) {}
 
     bool supports_parent(NativeParentKind kind) const override {
         return kind == NativeParentKind::none;
     }
     bool attach(const NativeParent& parent) override {
-        if (!supports_parent(parent.kind)) return false;
+        if (!supports_parent(parent.kind))
+            return false;
         attached_ = true;
         return true;
     }
-    void detach() override { attached_ = false; }
+    void detach() override {
+        attached_ = false;
+    }
     void invalidate() override {
         attached_ = false;
         invalidated_ = true;
     }
-    EditorSize size() const override { return size_; }
+    EditorSize size() const override {
+        return size_;
+    }
     bool set_size(const EditorSize& size) override {
         size_ = size;
         return true;
     }
 
-    EditorContext& context() { return context_; }
-    EditorRole role() const { return role_; }
-    bool attached() const { return attached_; }
-    bool invalidated() const { return invalidated_; }
+    EditorContext& context() {
+        return context_;
+    }
+    EditorRole role() const {
+        return role_;
+    }
+    bool attached() const {
+        return attached_;
+    }
+    bool invalidated() const {
+        return invalidated_;
+    }
 
-private:
+  private:
     EditorContext& context_;
     EditorRole role_;
     EditorSize size_{400, 300, 1.0};
@@ -284,20 +297,26 @@ private:
 };
 
 class RecordingFactory final : public EditorFactory {
-public:
-    bool supports(EditorRole role) const override { return role != EditorRole::settings; }
-    std::unique_ptr<Editor> create(Processor&, EditorContext& context,
-                                   EditorRole role) override {
-        if (!supports(role)) return nullptr;
+  public:
+    bool supports(EditorRole role) const override {
+        return role != EditorRole::settings;
+    }
+    std::unique_ptr<Editor> create(Processor&, EditorContext& context, EditorRole role) override {
+        if (!supports(role))
+            return nullptr;
         return std::make_unique<RecordingEditor>(context, role);
     }
 };
 
 class TestContext final : public EditorContext {
-public:
+  public:
     explicit TestContext(ParamPort& port) : port_(port) {}
-    ParamPort& params() override { return port_; }
-    VisualPort* visuals() override { return nullptr; }
+    ParamPort& params() override {
+        return port_;
+    }
+    VisualPort* visuals() override {
+        return nullptr;
+    }
     bool request_resize(const EditorSize& size) override {
         requested_ = size;
         return true;
@@ -305,35 +324,42 @@ public:
     bool host_action(const HostActionRequest& request) override {
         return request.action == HostAction::mark_state_dirty;
     }
-    EditorHostKind host_kind() const override { return EditorHostKind::plugin; }
+    EditorHostKind host_kind() const override {
+        return EditorHostKind::plugin;
+    }
 
     EditorSize requested_{};
 
-private:
+  private:
     ParamPort& port_;
 };
 
 class GainProcessor : public Processor {
-public:
-    PluginDescriptor descriptor() const override { return {}; }
-    void define_parameters(StateStore& store) override { add_unit_param(store, kGain, "Gain"); }
+  public:
+    PluginDescriptor descriptor() const override {
+        return {};
+    }
+    void define_parameters(StateStore& store) override {
+        add_unit_param(store, kGain, "Gain");
+    }
     void prepare(const PrepareContext&) override {}
     void process(pulp::audio::BufferView<float>& out, const pulp::audio::BufferView<const float>&,
-                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
-                 const ProcessContext&) override {
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&, const ProcessContext&) override {
         out.clear();
     }
 };
 
 class GainProcessorWithEditor final : public GainProcessor {
-public:
-    EditorFactory* editor_factory() override { return &factory_; }
+  public:
+    EditorFactory* editor_factory() override {
+        return &factory_;
+    }
 
-private:
+  private:
     RecordingFactory factory_;
 };
 
-}  // namespace
+} // namespace
 
 TEST_CASE("a processor has no editor factory unless it provides one", "[editor-host]") {
     GainProcessor headless;
@@ -355,7 +381,7 @@ TEST_CASE("an editor and an inspector share one port through the contract",
     REQUIRE_FALSE(factory->supports(EditorRole::settings));
     REQUIRE(factory->create(processor, context, EditorRole::settings) == nullptr);
 
-    factory->prewarm();  // the default has nothing to warm
+    factory->prewarm(); // the default has nothing to warm
     auto editor = factory->create(processor, context, EditorRole::editor);
     auto inspector = factory->create(processor, context, EditorRole::inspector);
     REQUIRE(editor);
@@ -367,8 +393,8 @@ TEST_CASE("an editor and an inspector share one port through the contract",
     REQUIRE_FALSE(editor->attach(NativeParent{NativeParentKind::cocoa_view, nullptr, 0}));
 
     float inspector_saw = -1.0f;
-    auto seen = context.params().add_listener(
-        [&inspector_saw](ParamID, float v) { inspector_saw = v; });
+    auto seen =
+        context.params().add_listener([&inspector_saw](ParamID, float v) { inspector_saw = v; });
 
     // The editor drags gain; the inspector observes it through the same port.
     auto& editor_params = static_cast<RecordingEditor&>(*editor).context().params();
@@ -398,8 +424,7 @@ TEST_CASE("an editor and an inspector share one port through the contract",
     REQUIRE(static_cast<RecordingEditor&>(*inspector).invalidated());
 }
 
-TEST_CASE("the default automation provider reports every request as unsupported",
-          "[editor-host]") {
+TEST_CASE("the default automation provider reports every request as unsupported", "[editor-host]") {
     EditorAutomation automation;
     std::vector<std::uint8_t> png;
     std::string error;
@@ -413,26 +438,35 @@ TEST_CASE("the default automation provider reports every request as unsupported"
 namespace {
 
 class TwoChannelVisuals final : public VisualPort {
-public:
-    std::size_t channel_count() const noexcept override { return 2; }
+  public:
+    std::size_t channel_count() const noexcept override {
+        return 2;
+    }
     VisualChannelInfo channel(std::size_t index) const noexcept override {
         return index == 0 ? VisualChannelInfo{"gain", "dB", VisualChannelShape::scalar, 0.0f}
                           : VisualChannelInfo{"out", "", VisualChannelShape::meter, 0.0f};
     }
     bool read_scalar(std::size_t index, float& value) noexcept override {
-        if (index != 0) return false;
+        if (index != 0)
+            return false;
         value = -6.0f;
         return true;
     }
     std::size_t read_meter(std::size_t, std::span<float>, std::span<float>) noexcept override {
         return 0;
     }
-    std::size_t read_vector(std::size_t, std::span<float>) noexcept override { return 0; }
-    std::size_t read_events(std::size_t, std::span<VisualEvent>) noexcept override { return 0; }
-    std::uint32_t publish_count(std::size_t) const noexcept override { return 0; }
+    std::size_t read_vector(std::size_t, std::span<float>) noexcept override {
+        return 0;
+    }
+    std::size_t read_events(std::size_t, std::span<VisualEvent>) noexcept override {
+        return 0;
+    }
+    std::uint32_t publish_count(std::size_t) const noexcept override {
+        return 0;
+    }
 };
 
-}  // namespace
+} // namespace
 
 TEST_CASE("VisualPort::find matches a channel by name and shape", "[editor-host]") {
     TwoChannelVisuals visuals;

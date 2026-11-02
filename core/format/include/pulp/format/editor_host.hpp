@@ -59,7 +59,7 @@ class Processor;
 /// Owns one `ParamPort` listener registration. Destroying it, or calling
 /// `reset()`, removes the listener. Move-only.
 class ParamSubscription {
-public:
+  public:
     ParamSubscription() = default;
     /// Adopt a registration; `cancel` runs exactly once, on reset or
     /// destruction. Port implementations construct these.
@@ -76,16 +76,21 @@ public:
     }
     ParamSubscription(const ParamSubscription&) = delete;
     ParamSubscription& operator=(const ParamSubscription&) = delete;
-    ~ParamSubscription() { reset(); }
+    ~ParamSubscription() {
+        reset();
+    }
 
     /// Remove the listener now. Idempotent.
     void reset() noexcept {
-        if (auto cancel = std::exchange(cancel_, {})) cancel();
+        if (auto cancel = std::exchange(cancel_, {}))
+            cancel();
     }
 
-    explicit operator bool() const noexcept { return static_cast<bool>(cancel_); }
+    explicit operator bool() const noexcept {
+        return static_cast<bool>(cancel_);
+    }
 
-private:
+  private:
     std::function<void()> cancel_;
 };
 
@@ -106,7 +111,7 @@ private:
 /// format adapter's existing gesture and value reporting
 /// (`HostParameterEditBridge`), so a port needs no host-specific code.
 class ParamPort {
-public:
+  public:
     using Listener = std::function<void(state::ParamID id, float plain_value)>;
 
     virtual ~ParamPort() = default;
@@ -142,7 +147,8 @@ public:
     /// `set(id, …)` from a [0, 1] value through the parameter's range. Does
     /// nothing for an unknown id.
     void set_normalized(state::ParamID id, float normalized) {
-        if (const auto* i = info(id)) set(id, i->range.denormalize(normalized));
+        if (const auto* i = info(id))
+            set(id, i->range.denormalize(normalized));
     }
 };
 
@@ -162,7 +168,7 @@ public:
 /// Main thread only, apart from `info()` and `get()`. The store must outlive
 /// the port.
 class StateStoreParamPort final : public ParamPort {
-public:
+  public:
     explicit StateStoreParamPort(state::StateStore& store);
     ~StateStoreParamPort() override;
 
@@ -185,7 +191,7 @@ public:
     /// Gestures this port currently holds open on `id` (0 when none).
     int open_gestures(state::ParamID id) const;
 
-private:
+  private:
     state::StateStore& store_;
     std::unordered_map<state::ParamID, int> held_;
 };
@@ -194,16 +200,16 @@ private:
 
 /// The shape of one visual channel.
 enum class VisualChannelShape : std::uint8_t {
-    scalar = 0,  ///< one number per publish (gain reduction, an envelope level)
-    meter = 1,   ///< per-channel RMS and peak levels
-    vector = 2,  ///< a block of samples for a scope-style display
-    events = 3,  ///< a bounded list of occurrences from one audio block
+    scalar = 0, ///< one number per publish (gain reduction, an envelope level)
+    meter = 1,  ///< per-channel RMS and peak levels
+    vector = 2, ///< a block of samples for a scope-style display
+    events = 3, ///< a bounded list of occurrences from one audio block
 };
 
 /// What a visual channel is. The strings stay valid for the life of the port.
 struct VisualChannelInfo {
-    std::string_view name;  ///< verbatim lookup key
-    std::string_view unit;  ///< display only ("dB", "Hz"); may be empty
+    std::string_view name; ///< verbatim lookup key
+    std::string_view unit; ///< display only ("dB", "Hz"); may be empty
     VisualChannelShape shape = VisualChannelShape::scalar;
     /// The value a reader falls back to when the channel goes stale.
     float neutral = 0.0f;
@@ -211,8 +217,8 @@ struct VisualChannelInfo {
 
 /// One occurrence on an events channel.
 struct VisualEvent {
-    std::uint32_t frame_index = 0;  ///< sample offset inside its audio block
-    float value = 0.0f;             ///< payload; a zero value is still an event
+    std::uint32_t frame_index = 0; ///< sample offset inside its audio block
+    float value = 0.0f;            ///< payload; a zero value is still an event
 };
 
 /// Read access to the values and meters a processor publishes for its UI.
@@ -225,7 +231,7 @@ struct VisualEvent {
 /// thread (normally the editor's frame tick). The channel set is fixed before
 /// audio runs, so an index resolved once stays valid.
 class VisualPort {
-public:
+  public:
     virtual ~VisualPort() = default;
 
     virtual std::size_t channel_count() const noexcept = 0;
@@ -243,12 +249,10 @@ public:
                                    std::span<float> peak) noexcept = 0;
     /// Latest block of a vector channel into `samples`. Returns the number of
     /// samples written, or 0 if `index` is not a vector channel.
-    virtual std::size_t read_vector(std::size_t index,
-                                    std::span<float> samples) noexcept = 0;
+    virtual std::size_t read_vector(std::size_t index, std::span<float> samples) noexcept = 0;
     /// Occurrences of the latest published block of an events channel. Returns
     /// the number written, or 0 if `index` is not an events channel.
-    virtual std::size_t read_events(std::size_t index,
-                                    std::span<VisualEvent> events) noexcept = 0;
+    virtual std::size_t read_events(std::size_t index, std::span<VisualEvent> events) noexcept = 0;
     /// Monotonic publish count of channel `index`. A reader compares it across
     /// ticks to tell "the writer stopped" from "the value held steady".
     virtual std::uint32_t publish_count(std::size_t index) const noexcept = 0;
@@ -258,7 +262,8 @@ public:
                                     VisualChannelShape shape) const noexcept {
         for (std::size_t i = 0, n = channel_count(); i < n; ++i) {
             const auto c = channel(i);
-            if (c.shape == shape && c.name == name) return i;
+            if (c.shape == shape && c.name == name)
+                return i;
         }
         return std::nullopt;
     }
@@ -268,26 +273,26 @@ public:
 
 /// The UI role an editor plays. A processor may offer several at once.
 enum class EditorRole : std::uint8_t {
-    editor = 0,     ///< the main plug-in or app editor
-    inspector = 1,  ///< a secondary window over the same processor
-    settings = 2,   ///< the processor's own settings content
+    editor = 0,    ///< the main plug-in or app editor
+    inspector = 1, ///< a secondary window over the same processor
+    settings = 2,  ///< the processor's own settings content
 };
 
 /// The kind of native window handle an editor is attached to. Values are
 /// stable; new kinds are only ever appended.
 enum class NativeParentKind : std::uint8_t {
-    none = 0,          ///< no window: an offscreen or headless editor
-    cocoa_view = 1,    ///< macOS `NSView*` in `handle`
-    uikit_view = 2,    ///< iOS `UIView*` in `handle`
-    win32_window = 3,  ///< Windows `HWND` in `handle`
-    x11_window = 4,    ///< X11 `Window` id in `window_id`
+    none = 0,         ///< no window: an offscreen or headless editor
+    cocoa_view = 1,   ///< macOS `NSView*` in `handle`
+    uikit_view = 2,   ///< iOS `UIView*` in `handle`
+    win32_window = 3, ///< Windows `HWND` in `handle`
+    x11_window = 4,   ///< X11 `Window` id in `window_id`
 };
 
 /// A native window to attach an editor to, owned by the host.
 struct NativeParent {
     NativeParentKind kind = NativeParentKind::none;
-    void* handle = nullptr;         ///< pointer handle (`NSView*`, `UIView*`, `HWND`)
-    std::uint64_t window_id = 0;    ///< integer handle (an X11 `Window`)
+    void* handle = nullptr;      ///< pointer handle (`NSView*`, `UIView*`, `HWND`)
+    std::uint64_t window_id = 0; ///< integer handle (an X11 `Window`)
 };
 
 /// An editor size in logical pixels, with the backing scale factor that maps
@@ -330,16 +335,16 @@ enum EditorKeyModifier : std::uint8_t {
 /// A key the host offers to the editor before acting on it itself.
 struct EditorKeyEvent {
     EditorKey key = EditorKey::none;
-    char32_t character = 0;       ///< composed Unicode scalar, 0 when none
-    std::uint8_t modifiers = 0;   ///< `EditorKeyModifier` bits
-    bool is_down = true;          ///< false for a key release
-    bool is_repeat = false;       ///< an auto-repeat of a held key
+    char32_t character = 0;     ///< composed Unicode scalar, 0 when none
+    std::uint8_t modifiers = 0; ///< `EditorKeyModifier` bits
+    bool is_down = true;        ///< false for a key release
+    bool is_repeat = false;     ///< an auto-repeat of a held key
 };
 
 /// The editor's answer to an offered key.
 enum class KeyDisposition : std::uint8_t {
-    forward = 0,   ///< not the editor's: the host acts on it (Space → transport)
-    consumed = 1,  ///< the editor handled it; the host must not act on it
+    forward = 0,  ///< not the editor's: the host acts on it (Space → transport)
+    consumed = 1, ///< the editor handled it; the host must not act on it
 };
 
 // ── Editor ───────────────────────────────────────────────────────────────────
@@ -349,11 +354,13 @@ enum class KeyDisposition : std::uint8_t {
 /// and replies are JSON text. Each member reports false when the editor does
 /// not support it. Main thread.
 class EditorAutomation {
-public:
+  public:
     virtual ~EditorAutomation() = default;
 
     /// Encode the editor's current frame as PNG into `png`.
-    virtual bool capture_png(std::vector<std::uint8_t>& /*png*/) { return false; }
+    virtual bool capture_png(std::vector<std::uint8_t>& /*png*/) {
+        return false;
+    }
     /// Apply one synthetic input request (a click, drag, key or text entry
     /// described as JSON). On failure `error` says why.
     virtual bool inject_input(std::string_view /*request_json*/, std::string& error) {
@@ -379,7 +386,7 @@ public:
 ///
 /// Every member runs on the host's main thread.
 class Editor {
-public:
+  public:
     virtual ~Editor() = default;
 
     /// Whether this editor can attach to a parent of `kind`. A host asks before
@@ -420,7 +427,9 @@ public:
 
     /// The nearest size to `proposed` this editor accepts, for a host that
     /// negotiates during an interactive resize. Default: `proposed`.
-    virtual EditorSize adjust_size(const EditorSize& proposed) const { return proposed; }
+    virtual EditorSize adjust_size(const EditorSize& proposed) const {
+        return proposed;
+    }
 
     /// Main-thread tick from the host (a timer or the window's frame clock).
     virtual void idle() {}
@@ -446,7 +455,9 @@ public:
 
     /// The editor's automation surface, or null when it has none. Owned by the
     /// editor and valid while the editor lives.
-    virtual EditorAutomation* automation() { return nullptr; }
+    virtual EditorAutomation* automation() {
+        return nullptr;
+    }
 };
 
 // ── Host context ─────────────────────────────────────────────────────────────
@@ -475,7 +486,7 @@ struct HostActionRequest {
 /// What the host gives an editor. Implemented by the host; outlives every
 /// editor created with it. Main thread.
 class EditorContext {
-public:
+  public:
     virtual ~EditorContext() = default;
 
     /// Parameter access. Several editors may share one port.
@@ -503,7 +514,7 @@ public:
 /// Builds a processor's editors. Owned by the processor
 /// (`Processor::editor_factory()`) and alive as long as the processor.
 class EditorFactory {
-public:
+  public:
     virtual ~EditorFactory() = default;
 
     /// Whether this factory builds editors for `role`.
@@ -524,4 +535,4 @@ public:
     virtual void prewarm() {}
 };
 
-}  // namespace pulp::format
+} // namespace pulp::format

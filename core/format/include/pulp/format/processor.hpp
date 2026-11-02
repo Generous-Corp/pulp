@@ -1229,7 +1229,9 @@ public:
     /// `has_editor() == false` is headless.
     ///
     /// Appended to preserve additive-only vtable ordering (node_abi_gate).
-    virtual EditorFactory* editor_factory() { return nullptr; }
+    virtual EditorFactory* editor_factory() {
+        return nullptr;
+    }
 
 private:
     std::shared_ptr<const std::vector<uint8_t>> published_plugin_state_;

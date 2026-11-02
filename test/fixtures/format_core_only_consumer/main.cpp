@@ -118,7 +118,8 @@ int main() {
         store.add_parameter(gain);
         pulp::format::StateStoreParamPort port(store);
         float heard = -1.0f;
-        auto subscription = port.add_listener([&heard](pulp::state::ParamID, float v) { heard = v; });
+        auto subscription =
+            port.add_listener([&heard](pulp::state::ParamID, float v) { heard = v; });
         port.begin(1);
         port.set(1, 0.75f);
         port.end(1);
