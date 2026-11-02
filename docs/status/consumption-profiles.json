@@ -292,6 +292,8 @@
       "pulp/format/device_quotas.hpp",
       "pulp/format/diagnostic_reporter.hpp",
       "pulp/format/editor_assets.hpp",
+      "pulp/format/editor_host.hpp",
+      "pulp/format/editor_host_kind.hpp",
       "pulp/format/editor_idle_pump.hpp",
       "pulp/format/editor_prewarm.hpp",
       "pulp/format/editor_ui.hpp",
