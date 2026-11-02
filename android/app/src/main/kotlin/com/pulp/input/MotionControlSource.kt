@@ -40,31 +40,88 @@ class MotionControlSource(
     private val publish: (MotionControlFrame) -> Unit,
 ) : SensorEventListener {
 
+    private val stateLock = Any()
     private var sensor: Sensor? = null
+    private var callback: SensorEventListener? = null
     private var sequence: Long = 0
     private var running = false
     private var epoch: Long = 0
 
     /** Register the accelerometer, returning false when hardware is absent. */
     fun start(): Boolean {
-        if (running) return true
-        val available = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
-            ?: return false
-        if (!sensorManager.registerListener(this, available, SensorManager.SENSOR_DELAY_GAME, handler)) {
-            return false
+        synchronized(stateLock) {
+            if (running) return true
+            val available = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+                ?: return false
+            val nextEpoch = epoch + 1
+            val epochCallback = EpochListener(nextEpoch)
+            if (!sensorManager.registerListener(epochCallback, available, SensorManager.SENSOR_DELAY_GAME, handler)) {
+                return false
+            }
+            sensor = available
+            callback = epochCallback
+            epoch = nextEpoch
+            running = true
+            return true
         }
-        sensor = available
-        running = true
-        epoch += 1
-        return true
     }
 
     /** Stop polling and publish deterministic provider loss when active. */
     fun stop() {
-        if (!running) return
-        sensorManager.unregisterListener(this, sensor)
-        running = false
-        sensor = null
+        synchronized(stateLock) {
+            if (!running) return
+            val activeSensor = sensor
+            val activeCallback = callback
+            if (activeSensor != null && activeCallback != null) {
+                sensorManager.unregisterListener(activeCallback, activeSensor)
+            }
+            running = false
+            sensor = null
+            callback = null
+            publishUnavailableLocked()
+        }
+    }
+
+    override fun onSensorChanged(event: SensorEvent) {
+        synchronized(stateLock) {
+            if (!running || event.sensor.type != Sensor.TYPE_ACCELEROMETER) return
+            submitAccelerometerSampleLocked(event.values, event.timestamp, epoch)
+        }
+    }
+
+    override fun onAccuracyChanged(sensor: Sensor, accuracy: Int) {
+        synchronized(stateLock) {
+            if (running && accuracy == SensorManager.SENSOR_STATUS_UNRELIABLE) {
+                publishUnavailableLocked()
+            }
+        }
+    }
+
+    /** Testable/provider-facing conversion from Y-axis acceleration to 0..1. */
+    internal fun submitAccelerometerSample(values: FloatArray, timestampNanos: Long) {
+        synchronized(stateLock) {
+            if (!running) return
+            submitAccelerometerSampleLocked(values, timestampNanos, epoch)
+        }
+    }
+
+    private fun submitAccelerometerSampleLocked(values: FloatArray, timestampNanos: Long, callbackEpoch: Long) {
+        if (!running || callbackEpoch != epoch) return
+        val normalized = normalizeTilt(values)
+        publish(
+            MotionControlFrame(
+                sequence = ++sequence,
+                epoch = epoch,
+                value = normalized ?: 0.0f,
+                confidence = if (normalized == null) 0.0f else 1.0f,
+                valid = normalized != null,
+                timestampNanos = if (normalized == null) 0L else timestampNanos,
+                status = if (normalized == null) Status.UNAVAILABLE else Status.ACCEPTED,
+            ),
+        )
+    }
+
+    private fun publishUnavailableLocked() {
         publish(
             MotionControlFrame(
                 sequence = ++sequence,
@@ -78,41 +135,20 @@ class MotionControlSource(
         )
     }
 
-    override fun onSensorChanged(event: SensorEvent) {
-        if (!running || event.sensor.type != Sensor.TYPE_ACCELEROMETER) return
-        submitAccelerometerSample(event.values, event.timestamp)
-    }
-
-    override fun onAccuracyChanged(sensor: Sensor, accuracy: Int) {
-        if (running && accuracy == SensorManager.SENSOR_STATUS_UNRELIABLE) {
-            publish(
-                MotionControlFrame(
-                    sequence = ++sequence,
-                    epoch = epoch,
-                    value = 0.0f,
-                    confidence = 0.0f,
-                    valid = false,
-                    timestampNanos = 0L,
-                    status = Status.UNAVAILABLE,
-                ),
-            )
+    private inner class EpochListener(private val callbackEpoch: Long) : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent) {
+            synchronized(stateLock) {
+                submitAccelerometerSampleLocked(event.values, event.timestamp, callbackEpoch)
+            }
         }
-    }
 
-    /** Testable/provider-facing conversion from Y-axis acceleration to 0..1. */
-    internal fun submitAccelerometerSample(values: FloatArray, timestampNanos: Long) {
-        val normalized = normalizeTilt(values)
-        publish(
-            MotionControlFrame(
-                sequence = ++sequence,
-                epoch = epoch,
-                value = normalized ?: 0.0f,
-                confidence = if (normalized == null) 0.0f else 1.0f,
-                valid = normalized != null,
-                timestampNanos = if (normalized == null) 0L else timestampNanos,
-                status = if (normalized == null) Status.UNAVAILABLE else Status.ACCEPTED,
-            ),
-        )
+        override fun onAccuracyChanged(sensor: Sensor, accuracy: Int) {
+            synchronized(stateLock) {
+                if (running && callbackEpoch == epoch && accuracy == SensorManager.SENSOR_STATUS_UNRELIABLE) {
+                    publishUnavailableLocked()
+                }
+            }
+        }
     }
 
     companion object {
