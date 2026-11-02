@@ -32,3 +32,4 @@ Branch: `codex/g9-hostile-20261102` (base `origin/main`, head at authoring time
 validation; its JSON receipt was written to the run output directory. The
 worktree is marked active. This report and the fixture are the only intended
 committed artifacts; no isolation implementation is included.
+PR: https://github.com/Generous-Corp/pulp/pull/11429 (open, unarmed; exact head is reported by GitHub).
