@@ -36,7 +36,7 @@ for the step-by-step sequence.
 | Timeline offline rendering | Timeline renderer supplies transport, pre-roll, PDC, and tails | Timeline project, clips, notes, and automation | Timeline CLI and [SDK guide](../guides/timeline-sdk.md) | [timeline phase example](../examples/timeline-phase1.md) and [timeline corpus](../../test/fixtures/timeline/corpus.index) | Supported at the higher level; preserve the direct graph-host boundary |
 | Graph serialization and bake | `GraphSerializer` and signed bake artifacts | Author `.pulpgraph` and lowerable node sets | `pulp bake` and verification | [sample-region graph](../../test/fixtures/sample-region-compat/graphs/legacy-v2.pulpgraph) | Supported with node restrictions; retain semantic form and artifact lineage |
 | Hosted plugin lifecycle | `PluginSlot` and plugin nodes | Wrap a configured `PluginSlot` in a graph node; `Processor` nodes use the owned processor-node path | Format adapters and bounded hosting fixtures | [hosting guide](../guides/hosting.md) | Partial; require a pinned format lifecycle matrix |
-| Multi-bus routed `ProcessBuffers` | Direct rich buses; routed named secondary delivery is bounded | Declare and connect supported buses | Existing tests and routed fixture | [capability rows](capabilities.md) | Confirmed seam; add name preservation, mapping, and auxiliary-output receipts |
+| Multi-bus routed `ProcessBuffers` | Direct rich buses; routed named secondary delivery is bounded | Declare and connect supported buses | Existing tests and routed fixture | [capability rows](capabilities.md) | Partial/awkward seam; add name preservation, mapping, and auxiliary-output receipts |
 | Graph inspection and fingerprints | Authoring receipts and runtime diagnostics | Capture semantic and prepared generations separately | No unified graph CLI/MCP workflow | [reference diagnostics](signal-graph.md) | Partial/awkward; establish deterministic internal receipts before a public contract |
 | Fixture discovery and structural validation | Kit metadata does not execute a graph | Declare fixture paths and metadata | `pulp kit search/inspect/validate/verify` | [sample-region kit](../../examples/sample-region-allpass/) | Partial; pair structural verification with an executable fixture receipt |
 | Unified graph control workflow | Adjacent control operations exist | Discover → validate → prepare → mutate → render → diagnose | CLI/MCP/control docs cover adjacent surfaces | [workflow guide](../guides/signal-graph-workflow.md) | Partial/awkward; keep the guide as the canonical integration path |
@@ -53,6 +53,8 @@ specific bounded behavior. **Unverified/artifact-gated** means the required
 external identity or platform evidence is absent. Do not collapse these states
 into a broad parity claim.
 
-The matrix is subordinate to the durable audio-graph planning ledger. When a
-receipt changes a row, update `graph-update.md` with the exact source head,
-commands, positive and negative controls, confidence, and next action.
+The matrix is subordinate to the durable audio-graph planning ledger at
+`pulp-planning/graph-update.md` (latest closeout receipt: planning commit
+`43e09da01`). When a receipt changes a row, update that ledger with the exact
+source head, commands, positive and negative controls, confidence, and next
+action.
