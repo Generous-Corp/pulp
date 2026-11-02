@@ -34,6 +34,16 @@ A manifest row may carry a structured `artifacts` list for release assets:
 `setup.sh` and `tools/cmake/PulpWgpuNative.cmake` refuse any archive whose
 digest does not match.
 
+`--strict` also compares Pulp's renderer pin with Vellum's, temporarily, until
+both repositories read one shared renderer lock. The Skia row's
+`vellum_renderer_drift_check` names a Vellum repository, full commit and path
+(`cmake/VellumSkiaDawn.cmake`); the audit reads that file at that commit and
+fails unless its `_vellum_expected_archive_sha256` equals the row's
+`release_assets.mac-universal.sha256` and its `chrome/mNNN macOS universal
+tuple` equals the row's `version`. The file is read from
+raw.githubusercontent.com, or with `git show` from the clone named by
+`PULP_VELLUM_CHECKOUT`; a read that fails fails `--strict`.
+
 ## Usage
 
 ```bash

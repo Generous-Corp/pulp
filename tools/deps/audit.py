@@ -33,6 +33,11 @@ It verifies two classes of invariant:
    across all four surfaces while the pinned tree was "Steinberg VST3
    License OR GPLv3". A name being present says nothing about the text being
    right.
+
+4. **Renderer agreement** (``--strict``, temporary) — Vellum's pinned
+   macOS universal Skia/Dawn archive digest and Skia release, read at the
+   Vellum commit the manifest's Skia entry names, must equal Pulp's. It is
+   removed once both repositories read one shared renderer lock.
 """
 
 from __future__ import annotations
@@ -1042,6 +1047,117 @@ def find_uncovered_declarations(
     return uncovered
 
 
+# ── Vellum renderer drift (temporary) ──────────────────────────────────────
+#
+# Vellum embeds the same macOS universal Skia/Dawn archive as Pulp but pins it in
+# its own CMake module, so the two renderer pins can drift apart silently. Until
+# both repositories read one shared renderer lock, --strict reads Vellum's pin at
+# the exact commit named in the manifest's Skia entry and requires it to name
+# Pulp's archive digest and Skia release. The comparison is fail-closed: a pin
+# that cannot be read is a failure, never a skipped check.
+VELLUM_DRIFT_FIELD = "vellum_renderer_drift_check"
+VELLUM_CHECKOUT_ENV = "PULP_VELLUM_CHECKOUT"
+VELLUM_ARCHIVE_SHA_RE = re.compile(
+    r'set\(\s*_vellum_expected_archive_sha256\s+"([0-9A-Fa-f]{64})"\s*\)')
+VELLUM_TUPLE_RE = re.compile(r"(chrome/m\d+)\s+macOS universal tuple")
+FULL_SHA_RE = re.compile(r"[0-9a-f]{40}")
+
+
+class VellumPinUnavailable(RuntimeError):
+    """Vellum's pinned renderer module could not be read at the pinned commit."""
+
+
+def read_vellum_pin_source(repository: str, commit: str, path: str) -> str:
+    """Vellum's renderer module at `commit`, from a local checkout or GitHub.
+
+    A checkout named by PULP_VELLUM_CHECKOUT is read with `git show`, so the
+    override still compares the pinned commit rather than whatever that checkout
+    has on disk.
+    """
+    checkout = os.environ.get(VELLUM_CHECKOUT_ENV)
+    if checkout:
+        try:
+            result = subprocess.run(
+                ["git", "-C", checkout, "show", f"{commit}:{path}"],
+                capture_output=True, text=True, encoding="utf-8", timeout=30, check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            raise VellumPinUnavailable(f"git show in {checkout} failed: {error}") from error
+        if result.returncode != 0:
+            raise VellumPinUnavailable(
+                f"{VELLUM_CHECKOUT_ENV}={checkout} cannot show {commit}:{path}: "
+                f"{result.stderr.strip() or 'git exited ' + str(result.returncode)}")
+        return result.stdout
+    match = GITHUB_REPO_RE.search(repository)
+    if not match:
+        raise VellumPinUnavailable(f"repository is not a GitHub URL: {repository!r}")
+    owner, name = match.groups()
+    url = f"https://raw.githubusercontent.com/{owner}/{name}/{commit}/{path}"
+    try:
+        with urllib.request.urlopen(url, timeout=30) as response:
+            return response.read().decode("utf-8")
+    except (urllib.error.URLError, OSError, UnicodeDecodeError) as error:
+        raise VellumPinUnavailable(f"cannot read {url}: {error}") from error
+
+
+def vellum_renderer_drift(manifest: list[dict], read_source=None) -> tuple[str, list[str]]:
+    """Compare Vellum's renderer pin with Pulp's Skia entry.
+
+    Returns (status, problems): status is "not-configured" when the Skia entry
+    declares no comparison, "match" when both pins agree, and "mismatch" or
+    "unavailable" with the problems that say why.
+    """
+    skia = next((dep for dep in manifest if dep.get("name") == "Skia"), None)
+    if skia is None or VELLUM_DRIFT_FIELD not in skia:
+        return "not-configured", []
+    spec = skia[VELLUM_DRIFT_FIELD]
+    if not isinstance(spec, dict):
+        return "unavailable", [f"Skia {VELLUM_DRIFT_FIELD} is not an object"]
+    repository = spec.get("repository")
+    commit = spec.get("commit")
+    path = spec.get("path")
+    asset_key = spec.get("pulp_release_asset")
+    problems = []
+    if not isinstance(repository, str) or not repository:
+        problems.append("repository is missing")
+    if not isinstance(commit, str) or not FULL_SHA_RE.fullmatch(commit):
+        problems.append(f"commit must be a full 40-hex SHA, not {commit!r}")
+    if (not isinstance(path, str) or not path or path.startswith("/")
+            or ".." in Path(path).parts):
+        problems.append(f"path must be repository-relative, not {path!r}")
+    assets = (skia.get("determinism") or {}).get("release_assets") or {}
+    asset = assets.get(asset_key) if isinstance(asset_key, str) else None
+    pulp_sha = asset.get("sha256") if isinstance(asset, dict) else None
+    if not isinstance(pulp_sha, str):
+        problems.append(f"pulp_release_asset {asset_key!r} names no Skia release asset digest")
+    pulp_tag = skia.get("version")
+    if problems:
+        return "unavailable", [f"Skia {VELLUM_DRIFT_FIELD}: {p}" for p in problems]
+
+    try:
+        source = (read_source or read_vellum_pin_source)(repository, commit, path)
+    except VellumPinUnavailable as error:
+        return "unavailable", [f"Vellum renderer pin unreadable at {commit}: {error}"]
+    where = f"{repository} @ {commit} {path}"
+    digests = set(VELLUM_ARCHIVE_SHA_RE.findall(source))
+    tags = set(VELLUM_TUPLE_RE.findall(source))
+    if len(digests) != 1 or len(tags) != 1:
+        return "unavailable", [
+            f"{where} does not declare exactly one _vellum_expected_archive_sha256 "
+            f"and one 'chrome/mNNN macOS universal tuple' (found digests={sorted(digests)}, "
+            f"tags={sorted(tags)})"]
+    vellum_sha, vellum_tag = digests.pop().lower(), tags.pop()
+    if vellum_sha != pulp_sha.lower():
+        problems.append(
+            f"archive digest differs: Vellum {vellum_sha} ({where}) vs Pulp {pulp_sha} "
+            f"(manifest Skia release_assets.{asset_key})")
+    if vellum_tag != pulp_tag:
+        problems.append(
+            f"Skia release differs: Vellum {vellum_tag} ({where}) vs Pulp {pulp_tag} "
+            "(manifest Skia version)")
+    return ("mismatch" if problems else "match"), problems
+
+
 def run_git_ls_remote(repo: str, *refs: str, options: tuple[str, ...] = ()) -> str:
     # Options must precede the repository; git treats anything AFTER it as a ref
     # pattern. `git ls-remote <repo> --tags --refs` therefore matches no refs and
@@ -1469,12 +1585,22 @@ def main() -> int:
                 print("Offline-fetch contract: FetchContent only in "
                       + ", ".join(offline_verified))
 
+    vellum_status, vellum_problems = ("skipped", [])
+    if args.strict:
+        vellum_status, vellum_problems = vellum_renderer_drift(manifest)
+        if vellum_problems:
+            print(f"\nVellum renderer pin drift ({vellum_status}):")
+            for problem in vellum_problems:
+                print(f"  - {problem}")
+        elif vellum_status == "match":
+            print("\nVellum renderer pin: matches the manifest Skia archive digest and release")
+
     if args.require_offline_trees and offline_unverified:
         print("\nOffline-fetch trees required but absent: " + ", ".join(offline_unverified))
         return 1
     if args.strict and (
         missing_deps or missing_notice or missing_licensing or uncovered or stale_known
-        or license_problems or truncated_notices or offline_problems
+        or license_problems or truncated_notices or offline_problems or vellum_problems
     ):
         return 1
     return 0

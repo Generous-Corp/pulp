@@ -308,6 +308,16 @@ retain those fields in the PR/landing evidence.
   `tools/cmake/scripts/icu_data_subset.py` still rewrites the new archive
   (`icu-data-subset-deterministic`, `pulp-test-icu-data-breaks`).
 - **A `pulp_register_fetchcontent_source(... REF <sha>)` pin is enforced at configure.** `pulp_materialize_mutable_fetchcontent_source` fails closed when the shared-cache git checkout's HEAD is not the registered commit, so a `GIT_TAG` must be the same full SHA (CHOC is the first consumer). The cache directory name is only a key, not proof of the commit. Symbolic refs and tarball sources skip the check. Selftest: `tools/scripts/test_setup_source_cache.sh`.
+- **Some Pulp workarounds exist only for one Skia defect, and are retired by
+  the bump that fixes it.** Graphite emits a runtime shader's `main` with a
+  coordinate parameter named `pos`; before `chrome/m158` an author local named
+  `pos` in `main` redefined or shadowed it (a Graphite pipeline compile failure
+  and crash, or black output), and `RuntimeEffectCache` refused such sources.
+  On m158 they render correctly on Graphite, so the refusal is gone and
+  `pulp-test-runtime-effect-names-gpu` requires those shaders to match a
+  control ramp on a real adapter. If a later Skia fails that test, the collision
+  is back: restore a refusal rather than loosening the comparison. The suite
+  SKIPs without a GPU adapter, so prove it on a Mac with Metal, not a VM.
 - **QuickJS has its own manifest row** even though it rides inside CHOC's `choc_javascript_QuickJS.h`; its version is the embedded `CONFIG_VERSION`. Bumping CHOC must update that row.
 - A V8 bump can break choc's V8 bridge without any Pulp change: the release-path
   cube capture is the canary, and the m153 to m157 move tripped it. V8 15.4
@@ -341,6 +351,19 @@ retain those fields in the PR/landing evidence.
   release may place libraries under `build/win-gpu/lib/Release/x64/`; older
   releases can be flat. Test a fresh x64 configure on ARM64 without an explicit
   `SKIA_DIR` as well as an explicit nested archive.
+- Vellum pins the same macOS universal archive separately, in its
+  `cmake/VellumSkiaDawn.cmake` (`_vellum_expected_archive_sha256` plus a
+  `chrome/mNNN macOS universal tuple` message). Until the two repositories share
+  one renderer lock, `tools/deps/audit.py --strict` reads that file at the Vellum
+  commit named by the Skia entry's `vellum_renderer_drift_check` and fails unless
+  both values equal Pulp's `release_assets.mac-universal.sha256` and Skia
+  `version`. A milestone bump therefore moves that commit to the Vellum change
+  carrying the same archive; pointing it at Vellum's previous milestone is the
+  negative control. The read is fail-closed (no network means `--strict` fails);
+  `PULP_VELLUM_CHECKOUT=<vellum clone>` reads the same commit from a local clone.
+  Vellum's GPU mirror build pins the archive and header digests of the Pulp
+  commit it was exported from, so its renderer bump can only pass after Pulp's
+  lands.
 - The Vellum closure gate identifies Skia inputs by `determinism.skia_commit` and
   by the asset digest sealed in the cache generation's
   `.skia-generation-manifest.json`, which must be one of
@@ -504,6 +527,11 @@ carry CRLF headers, so a byte compare reports every header as different.
 ```python
 a.read(n).replace(b"\r\n", b"\n") == b.read(n).replace(b"\r\n", b"\n")
 ```
+
+Expect exactly one difference from m158 on: both Windows archives carry
+skia-builder's ARM64EC guard in `include/private/SkFeatures.h`
+(`&& !defined(_M_ARM64EC)` on the x86 CPU test). Any other differing header is a
+second revision, not a builder patch.
 
 For Windows GPU consumers, record separate `windows-x64` and `windows-arm64`
 release assets in the manifest. Select the slice from the CMake target

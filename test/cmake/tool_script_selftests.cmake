@@ -58,6 +58,9 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME deps-audit-extra-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/deps/test_audit_extra.py")
     set_tests_properties(deps-audit-extra-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
+    add_test(NAME deps-audit-vellum-drift-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/deps/test_audit_vellum_drift.py")
+    set_tests_properties(deps-audit-vellum-drift-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
     add_test(NAME harness-adapters-base-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/harness/tests/test_adapters_base.py")
     set_tests_properties(harness-adapters-base-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)

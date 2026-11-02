@@ -225,10 +225,10 @@ setup, the audio-thread gating rule, and the reference plugin.
 
 | Name | License | Purpose | Link |
 |------|---------|---------|------|
-| **Dawn** | BSD-3-Clause | WebGPU implementation (Metal, D3D12, Vulkan), pinned via the DEPS of Skia `chrome/m157` at `b94213a11b3a` (the bundled build reports Dawn `ada567700e13`) | [dawn.googlesource.com](https://dawn.googlesource.com/dawn) |
+| **Dawn** | BSD-3-Clause | WebGPU implementation (Metal, D3D12, Vulkan), pinned via the DEPS of Skia `chrome/m158` at `be7d7c3e996e` (the bundled build reports Dawn `1716e88cc9e5`) | [dawn.googlesource.com](https://dawn.googlesource.com/dawn) |
 | **ICU** | Unicode-3.0 (+ ICU, BSD, IPADIC/ICOT dictionary notices) | Unicode text segmentation, bidi and normalization data linked through Skia (`libskunicode_icu.a`), ICU 78.2; data subsetted to what Pulp's text stack reads | [github.com/unicode-org/icu](https://github.com/unicode-org/icu) |
 | **SDL3** | zlib | Cross-platform windowing and input | [github.com/libsdl-org/SDL](https://github.com/libsdl-org/SDL) |
-| **Skia** | BSD-3-Clause | 2D GPU rendering engine (Graphite backend), pinned to `chrome/m157 @ b94213a11b3a` with bundled HarfBuzz and ICU DEPS revisions locked for deterministic text shaping | [skia.org](https://skia.org) |
+| **Skia** | BSD-3-Clause | 2D GPU rendering engine (Graphite backend), pinned to `chrome/m158 @ be7d7c3e996e` with bundled HarfBuzz and ICU DEPS revisions locked for deterministic text shaping | [skia.org](https://skia.org) |
 | **Vellum D15 GPU provider** | MIT plus bundled third-party notices | Opt-in macOS development provider for coordinated Dawn GPU-audio. D15-enabled SDKs ship the exact provider LICENSE, NOTICE, and dependency inventory; production release remains blocked pending exhaustive renderer-builder provenance | [github.com/Generous-Corp/vellum](https://github.com/Generous-Corp/vellum) |
 | **WebGPU-distribution** | MIT | WebGPU C API wrapper for Dawn | [github.com/eliemichel/WebGPU-distribution](https://github.com/eliemichel/WebGPU-distribution) |
 | **wgpu-native** | MIT OR Apache-2.0 | Prebuilt WebGPU runtime library staged beside desktop GPU modules; release assets SHA-256 pinned | [github.com/gfx-rs/wgpu-native](https://github.com/gfx-rs/wgpu-native) |
@@ -256,7 +256,7 @@ packages are installed on demand via `npm`.
 | **scheduler** | MIT | Cooperative-scheduling runtime pulled in transitively by `react-reconciler` for `@pulp/react`; npm-installed | [github.com/facebook/react](https://github.com/facebook/react) |
 | **simdjson** | Apache-2.0 | JSON parser used by fastgltf; fetched only when `PULP_ENABLE_SCENE3D=ON` | [github.com/simdjson/simdjson](https://github.com/simdjson/simdjson) |
 | **three.js** | MIT | Pinned native WebGPU runtime for demos, tests, and installed-SDK consumers; fetched or supplied through `PULP_THREEJS_RUNTIME_DIR` when `PULP_ENABLE_THREEJS_RUNTIME=ON` (the default with GPU support) | [github.com/mrdoob/three.js](https://github.com/mrdoob/three.js) |
-| **V8** | BSD-3-Clause | Optional JS engine backend, selected with `PULP_JS_ENGINE=v8` (default is QuickJS; JSC is opt-in on Apple with `PULP_JS_ENGINE=jsc`). Sealed prebuilt `libv8` (bundles ICU/zlib/Abseil internally — see NOTICE.md); fetched per-platform via `tools/scripts/fetch_v8_for_release.py`. V8 is unavailable as a Pulp iOS runtime; the m157 jitless simulator framework is retained only for provider/header provenance validation | [github.com/danielraffel/v8-builder](https://github.com/danielraffel/v8-builder) |
+| **V8** | BSD-3-Clause | Optional JS engine backend, selected with `PULP_JS_ENGINE=v8` (default is QuickJS; JSC is opt-in on Apple with `PULP_JS_ENGINE=jsc`). Sealed prebuilt `libv8` (bundles ICU/zlib/Abseil internally — see NOTICE.md); fetched per-platform via `tools/scripts/fetch_v8_for_release.py`. V8 is unavailable as a Pulp iOS runtime; the m158 jitless simulator framework is retained only for provider/header provenance validation | [github.com/danielraffel/v8-builder](https://github.com/danielraffel/v8-builder) |
 
 ### Developer-Only Tooling (not shipped)
 
