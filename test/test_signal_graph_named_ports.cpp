@@ -34,3 +34,17 @@ TEST_CASE("named graph ports reject an instantaneous cycle with a message") {
     CHECK(result.code == GraphResult::Code::IllegalCycle);
     CHECK(result.message().find("illegal instantaneous cycle") != std::string::npos);
 }
+
+TEST_CASE("MIDI graph ports retain their kind") {
+    SignalGraph graph;
+    const auto midi_source = graph.add_midi_input_node("midi source");
+    const auto midi_sink = graph.add_midi_output_node("midi sink");
+    const auto audio = graph.add_gain_node("audio");
+
+    CHECK(graph.node(midi_source)->out("audio").kind == PortKind::Midi);
+    CHECK(graph.node(midi_sink)->in("audio").kind == PortKind::Midi);
+    CHECK(graph.connect(graph.node(midi_source)->out("audio"), graph.node(midi_sink)->in("audio")));
+    const auto mismatch =
+        graph.connect(graph.node(midi_source)->out("audio"), graph.node(audio)->in("audio"));
+    CHECK(mismatch.code == GraphResult::Code::KindMismatch);
+}
