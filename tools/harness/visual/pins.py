@@ -29,14 +29,15 @@ FONT_SHA256 = {
 }
 
 RELEASE_ASSET_SHA256 = {
-    # The chrome/m158 release ships linux-arm64 alongside the other slices; must
-    # stay in lockstep with manifest.json (guarded by
+    # Linux temporarily stays on the known-good chrome/m157 archives while the
+    # m158 BackupRefPtr link contract is recut; keep this in lockstep with the
+    # manifest (guarded by
     # test_skia_linux_arm64_asset.py).
     "linux-arm64": (
-        "8e27987be3b7239f31b948fc441223b123eaa7d16e4ad373c3403f6101f6dffd"
+        "e591268124be249b2a2f56c5042e1e7865bd04556d509c6e4937a04251964435"
     ),
     "linux-x64": (
-        "5165feecf8e5eb545e329a1c3e492f4537ef87aa9ae4416925cf3d90e2ae7660"
+        "bf74ae1bfd5abd9f49e57c3c6ae6d94c580bbbfe575256fa5077272e1ce0c187"
     ),
     # The mac-arm64 key selects the verified universal archive: its arm64 Dawn
     # slice retains the verified 13.0 deployment target.

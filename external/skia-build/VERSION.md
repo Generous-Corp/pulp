@@ -13,7 +13,9 @@ publishes iOS device, iOS simulator, visionOS device, visionOS simulator,
 mac-x86_64, and `Skia.xcframework` slices that upstream does not. While
 upstream stays on m144, this fork is the active dependency.
 
-The chrome/m158 release ships all platform slices, including `linux-arm64`,
+The chrome/m158 release supplies the active renderer pins. Its Linux archives
+temporarily remain on the known-good chrome/m157 assets until the m158
+BackupRefPtr link contract is recut. The m158 release also ships `linux-arm64`,
 Windows x64, and native Windows ARM64. Its Skia branch tip is
 `be7d7c3e996e567eda7dc9774274f7a0103cdb8c` at the start of the publishing
 workflow (`build-skia.yml` run `40626447857`, attempt 1). Every slice,
@@ -185,8 +187,8 @@ Or run: `./tools/build-skia.sh <platform>` to build from source.
 |-------|---------|
 | `skia-build-ios-device-arm64-gpu-release.zip` | `56a76f22b30a2a045e7dc72bf645221b403408a2d8aaf01081ffe05937e052ca` |
 | `skia-build-ios-simulator-arm64-x86_64-gpu-release.zip` | `e446cbfa3302026ce055dd9eae980f466cac89f8f9ad50b07e5b2aa4989d1488` |
-| `skia-build-linux-arm64-gpu-release.zip` | `8e27987be3b7239f31b948fc441223b123eaa7d16e4ad373c3403f6101f6dffd` |
-| `skia-build-linux-x64-gpu-release.zip` | `5165feecf8e5eb545e329a1c3e492f4537ef87aa9ae4416925cf3d90e2ae7660` |
+| `skia-build-linux-arm64-gpu-release.zip` | `e591268124be249b2a2f56c5042e1e7865bd04556d509c6e4937a04251964435` |
+| `skia-build-linux-x64-gpu-release.zip` | `bf74ae1bfd5abd9f49e57c3c6ae6d94c580bbbfe575256fa5077272e1ce0c187` |
 | `manifest-key-mac-arm64--skia-build-mac-universal-gpu-release.zip` | `dca73c0eee5b0f6d129fe357d0754f7165c6b436051e0de947aeedd3e1bde250` |
 | `skia-build-mac-universal-gpu-release.zip` | `dca73c0eee5b0f6d129fe357d0754f7165c6b436051e0de947aeedd3e1bde250` |
 | `skia-build-mac-x86_64-gpu-release.zip` | `2a795f54bb22feb46a499d56740f98a15b6e95bfdf5923b82b222ef95edb2f47` |

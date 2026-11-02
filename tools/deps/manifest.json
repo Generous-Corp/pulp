@@ -1108,7 +1108,7 @@
       "upstream": { "kind": "none" },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
-      "notes": "Prebuilt via skia-builder (danielraffel fork: https://github.com/danielraffel/skia-builder) for Pulp rendering. The fork tracks olilarkin/skia-builder's tag pattern and adds iOS device/simulator, visionOS, mac-x86_64, Windows ARM64, and Skia.xcframework slices the upstream does not ship. The chrome/m158 release ships all required platform slices including linux-arm64 and the native jsonreader/skresources archives. Visual harness determinism locks Skia plus its bundled HarfBuzz and ICU DEPS revisions; regenerate raster goldens only when any pinned Skia asset, bundled text dependency, font file, or sampler/render configuration changes.",
+      "notes": "Prebuilt via skia-builder (danielraffel fork: https://github.com/danielraffel/skia-builder) for Pulp rendering. The fork tracks olilarkin/skia-builder's tag pattern and adds iOS device/simulator, visionOS, mac-x86_64, Windows ARM64, and Skia.xcframework slices the upstream does not ship. The chrome/m158 release supplies the active renderer pins; its Linux archives are temporarily held at the known-good chrome/m157 assets until the m158 BackupRefPtr link contract is recut. Visual harness determinism locks Skia plus its bundled HarfBuzz and ICU DEPS revisions; regenerate raster goldens only when any pinned Skia asset, bundled text dependency, font file, or sampler/render configuration changes.",
       "vellum_renderer_drift_check": {
         "temporary": true,
         "note": "Temporary until Pulp and Vellum read one shared renderer lock: tools/deps/audit.py --strict reads Vellum's cmake/VellumSkiaDawn.cmake at this exact commit and fails unless its _vellum_expected_archive_sha256 equals release_assets.mac-universal.sha256 and its 'chrome/mNNN macOS universal tuple' equals this entry's version. PULP_VELLUM_CHECKOUT=<vellum checkout> reads the same commit from a local clone instead of raw.githubusercontent.com. Move the commit whenever either repository moves its renderer pin.",
@@ -1134,12 +1134,12 @@
             "sha256": "e446cbfa3302026ce055dd9eae980f466cac89f8f9ad50b07e5b2aa4989d1488"
           },
           "linux-arm64": {
-            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m158/skia-build-linux-arm64-gpu-release.zip",
-            "sha256": "8e27987be3b7239f31b948fc441223b123eaa7d16e4ad373c3403f6101f6dffd"
+            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m157/skia-build-linux-arm64-gpu-release.zip",
+            "sha256": "e591268124be249b2a2f56c5042e1e7865bd04556d509c6e4937a04251964435"
           },
           "linux-x64": {
-            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m158/skia-build-linux-x64-gpu-release.zip",
-            "sha256": "5165feecf8e5eb545e329a1c3e492f4537ef87aa9ae4416925cf3d90e2ae7660"
+            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m157/skia-build-linux-x64-gpu-release.zip",
+            "sha256": "bf74ae1bfd5abd9f49e57c3c6ae6d94c580bbbfe575256fa5077272e1ce0c187"
           },
           "mac-arm64": {
             "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m158/skia-build-mac-universal-gpu-release.zip",
