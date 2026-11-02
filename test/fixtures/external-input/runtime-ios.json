@@ -1,0 +1,14 @@
+{
+  "schema": "pulp.external-input-runtime-receipt.v1",
+  "platform": "ios",
+  "provider": "PulpMotionControlSource",
+  "permission": {
+    "owner": "application",
+    "requested_by_pulp": false,
+    "result": "application-managed"
+  },
+  "teardown": {
+    "stop_emits_unavailable": true,
+    "provider_callbacks_detached": true
+  }
+}

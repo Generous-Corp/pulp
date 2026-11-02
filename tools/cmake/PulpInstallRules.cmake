@@ -192,6 +192,12 @@ endif()
 if(TARGET pulp-bundled-noto-color-emoji)
     list(APPEND PULP_SDK_TARGETS pulp-bundled-noto-color-emoji)
 endif()
+if(TARGET pulp-arm64ec-stl-thunks)
+    list(APPEND PULP_SDK_TARGETS pulp-arm64ec-stl-thunks)
+    install(FILES "${PULP_ARM64EC_STL_THUNKS}"
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RENAME pulp-arm64ec-stl-thunks.lib)
+endif()
 
 foreach(_sdk_target IN LISTS PULP_SDK_TARGETS)
     string(REPLACE "pulp-" "" _sdk_export_name "${_sdk_target}")

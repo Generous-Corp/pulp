@@ -60,11 +60,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: danielraffel/Shipyard
-          # Shipyard main at the merge of PR 1086 (a counted HOLD is sticky
-          # for its head, so a later APPROVE from another session cannot
-          # clear it), on top of PR 1068 (fail the check when the verdict is
-          # not allowed and re-run the head's check on a verdict comment).
-          ref: e7dc77e866a63ba829aaac0daa0abdbbae374468
+          # Shipyard v0.384.0: counts an App APPROVE only from a session listed in
+          # `[auto_merge] reviewer_stamp_sessions` (a HOLD from any session still counts).
+          ref: 67aa53c534eeded02e5a1b0bc83892903fe8ab22
           persist-credentials: false
       - name: Set up Python
         id: python
@@ -96,7 +94,7 @@ jobs:
         with:
           repository: danielraffel/Shipyard
           # Same pinned commit as the review-verdict job.
-          ref: e7dc77e866a63ba829aaac0daa0abdbbae374468
+          ref: 67aa53c534eeded02e5a1b0bc83892903fe8ab22
           persist-credentials: false
       - name: Set up Python
         id: python

@@ -467,7 +467,7 @@ THE SOFTWARE.
 ## ICU
 
 ICU (International Components for Unicode) 78.2, linked through Skia's prebuilt `libskunicode_icu.a` (Skia
-`chrome/m157`) for text segmentation (line, word, sentence and grapheme
+`chrome/m158`) for text segmentation (line, word, sentence and grapheme
 breaks), bidi, normalization and character properties. The license text below
 is from https://github.com/unicode-org/icu/blob/release-78.2/LICENSE (tag
 `release-78.2`).
@@ -2140,7 +2140,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 V8 is an optional JS engine backend (selected with `PULP_JS_ENGINE=v8`;
 default is QuickJS; JSC is opt-in on Apple). Pulp ships a sealed, embeddable
-prebuilt `libv8` (version 15.7.112.5, matched to the active Skia/Dawn M157
+prebuilt `libv8` (version 15.8.62.6, matched to the active Skia/Dawn M158
 provider generation) produced by the
 [danielraffel/v8-builder](https://github.com/danielraffel/v8-builder)
 fork. The shared library exports only the `v8::`/`cppgc::` API surface,

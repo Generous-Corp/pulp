@@ -60,6 +60,15 @@ on a real PR. Do them in order.
      outside those roots (it resolves through the foundation include dirs, the
      way the compiler does). Put the code in the owning subsystem instead of
      allowlisting it; a stale allowlist entry also fails.
+   - **core -> Vellum direction** — `core_vellum_direction.py` fails when a
+     file under `core/` includes a `vellum/` header (any spelling, including a
+     relative path through a `vellum/` directory) or a CMake file under `core/`
+     names `find_package(Vellum`, a `Vellum::`/`vellum::` target, or fetches or
+     adds a Vellum tree. Pulp core knows nothing about Vellum; the connection
+     belongs in an integration package. The only allowlisted edge is the opt-in
+     D15 GPU-audio provider, pinned by exact count, and it goes away when the
+     shared GPU runtime lands. Its source half is `include_boundary.py
+     --boundary core-vellum`.
    - **change events** (`vellum_freeze_check.py`) — a range touching a path in
      a transferred slice of `.github/vellum-ownership.json` (e.g.
      `core/view/src/pointer_dispatch.cpp` in `retained-ui-kernel`) without a
@@ -549,6 +558,13 @@ an App `verdict: APPROVE` only with a `reviewer: <name>` line naming one of
 them, and never one `ghapp` stamped with an `unattributed` session. A reviewer
 agent puts `reviewer: <its name>` on the line above the verdict. Adding a
 reviewer means adding it to that list.
+
+`reviewer_stamp_sessions = ["fleet-pass-reviewer-*"]` in the same table also
+requires the APPROVE's `ghapp` session stamp (the session part, not the host
+prefix) to match a glob, so only the scheduled standing pass approves; a HOLD
+from any session still counts. A reviewer tab outside that pass needs its
+session listed. The key only takes effect through the Shipyard commit pinned in
+`.github/workflows/review-verdict.yml`, so keep that pin at a version that reads it.
 
 **`carry_excluded_paths` replaces Shipyard's default; it does not add to it.**
 The same `[auto_merge]` table lists the paths whose change stops an APPROVE
@@ -9429,7 +9445,7 @@ If `local_ci.py` doesn't exist, the user likely has an older checkout. Tell them
 
 `ci/visual-harness.Dockerfile` and `.github/workflows/visual-harness.yml`
 provide the deterministic visual-harness smoke environment. The Docker image
-downloads the pinned Skia `chrome/m157` Linux release asset (from the
+downloads the pinned Skia `chrome/m158` Linux release asset (from the
 `danielraffel/skia-builder` fork — adds iOS/visionOS/mac-x86_64 slices the
 upstream `olilarkin/skia-builder` omits), verifies its SHA-256, installs the
 bundled Pulp fonts into fontconfig, and installs `skia-python==144.0.post2`

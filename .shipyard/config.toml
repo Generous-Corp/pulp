@@ -813,6 +813,10 @@ attribution = "🤖 Generated with [Claude Code](https://claude.com/claude-code)
 # who reviewed. Shipyard's server-side `review-verdict` reads only this list
 # (never a host file), and refuses every App approval here if it is missing.
 reviewer_signers = ["pulp-review", "infra-review2"]
+# Only a scheduled reviewer pass may approve: an App APPROVE counts only when
+# its ghapp session stamp matches one of these globs (a HOLD from any session
+# still counts).
+reviewer_stamp_sessions = ["fleet-pass-reviewer-*"]
 # A PR changing a path that matches one of these never carries an APPROVE to a
 # new head: it needs a verdict naming its exact head. Setting the key REPLACES
 # Shipyard's DEFAULT_CARRY_EXCLUDED_PATHS rather than extending it, so this

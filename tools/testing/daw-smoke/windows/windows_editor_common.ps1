@@ -159,9 +159,11 @@ function Get-BoundModulePaths([int]$TargetPid, [ValidateRange(1,60)][int]$Timeou
   }
   return @($result.stdout -split "`r?`n" | Where-Object { $_ })
 }
-function Assert-OwnedIdentity($Process, [string]$StartedUtc) {
+function Assert-OwnedIdentity($Process, [long]$StartedTicks) {
   $Process.Refresh()
-  if ($Process.HasExited -or $Process.StartTime.ToUniversalTime().ToString('o') -ne $StartedUtc) { throw 'Owned process identity changed' }
+  # StartTime ticks are the recorded kernel identity for this PID. A tolerance
+  # can admit a recycled PID, so every ownership check must match exactly.
+  if ($Process.HasExited -or $Process.StartTime.ToUniversalTime().Ticks -ne $StartedTicks) { throw 'Owned process identity changed' }
 }
 function Get-InteractiveDesktopContext {
   $sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
@@ -330,6 +332,43 @@ function Select-PluginPeCandidate([string]$PluginPath, [string]$Format, [string]
 # make it append the defaults again, after the staged root, changing precedence.
 function Get-ReaperVstScanPath([string]$StagedRoot) {
   return '%COMMONPROGRAMFILES%\VST3;%LOCALAPPDATA%\Programs\Common\VST3;'+$StagedRoot
+}
+function Get-Vst3StagedPluginPath([string]$ScanRoot,[string]$BundleRoot,[string]$PluginPath) {
+  $bundleFull = [IO.Path]::GetFullPath($BundleRoot)
+  $pluginFull = [IO.Path]::GetFullPath($PluginPath)
+  $bundlePrefix = $bundleFull + [IO.Path]::DirectorySeparatorChar
+  if (-not $pluginFull.StartsWith($bundlePrefix,[StringComparison]::OrdinalIgnoreCase)) {
+    throw "VST3 payload is outside bundle: $PluginPath"
+  }
+  $relativePayload = $pluginFull.Substring($bundlePrefix.Length)
+  $stagedBundle = Join-Path $ScanRoot ([System.IO.Path]::GetFileName($bundleFull.TrimEnd('\','/')))
+  return Join-Path $stagedBundle $relativePayload
+}
+function Stage-Vst3Plugin([string]$ScanRoot,[string]$PluginPath) {
+  $plugin = (Resolve-Path -LiteralPath $PluginPath -ErrorAction Stop).Path
+  $bundleRoot = $null
+  $pluginItem = Get-Item -LiteralPath $plugin -ErrorAction Stop
+  $cursor = if ($pluginItem.PSIsContainer) {
+    $pluginItem
+  } else {
+    Get-Item -LiteralPath (Split-Path $plugin -Parent) -ErrorAction Stop
+  }
+  while ($cursor) {
+    if ($cursor.Name -like '*.vst3' -and (Test-Path -LiteralPath (Join-Path $cursor.FullName 'Contents') -PathType Container)) {
+      $bundleRoot = $cursor.FullName
+      break
+    }
+    $cursor = $cursor.Parent
+  }
+  if ($bundleRoot) {
+    Copy-Item -LiteralPath $bundleRoot -Destination $ScanRoot -Recurse
+    $staged = Get-Vst3StagedPluginPath $ScanRoot $bundleRoot $plugin
+    if (-not (Test-Path -LiteralPath $staged -PathType Leaf)) { throw "Staged VST3 payload missing: $staged" }
+  } else {
+    Copy-Item -LiteralPath $plugin -Destination $ScanRoot -Recurse
+    $staged = Join-Path $ScanRoot (Split-Path $plugin -Leaf)
+  }
+  return [pscustomobject]@{BundleRoot=$bundleRoot;Staged=$staged}
 }
 function Write-ReaperIni([string]$Path,[string[]]$Lines) {
   # Windows PowerShell 5.1 Set-Content -Encoding utf8 emits a BOM. Preserve the

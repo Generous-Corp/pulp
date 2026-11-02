@@ -18,13 +18,23 @@ try {
   Check ($commonText -match 'TargetAbi -in @\(''x64'',''arm64ec'',''arm64x''\)' -and $commonText -match '\$snapshotFlags') 'ARM64EC module probe omits SNAPMODULE32'
   Check ($commonText -match 'ReadToEndAsync' -and $commonText -match 'stdoutTask') 'bounded probe drains redirected pipes before waiting'
   $smokeText=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'windows_editor_smoke.ps1') -Raw
-  Check ($smokeText -match 'ProbeBeforeEditor' -and $smokeText -match 'module-probe-release') 'native editor probe can bind before GPU editor startup'
+  Check ($smokeText -notmatch 'ProbeBeforeEditor' -and $smokeText -notmatch 'module-probe-release' -and $smokeText -match "'PROBE_GATE'" -and $smokeText -match 'Remove-Item Env:PULP_DAW_SMOKE_PROBE_GATE' -and $smokeText -match 'foreach\(\$name in \$envNames\).*SetEnvironmentVariable') 'single-pass flow clears the inherited probe gate and restores it in cleanup'
+  Check ($smokeText -match 'function Get-LoadedPluginBinding' -and $smokeText -match '\$bound=Get-LoadedPluginBinding' -and $smokeText -match 'Assert-ModuleBinding \$module\.FileName') 'loaded plugin binding is one reusable manifest-checked enumeration'
+  Check ($smokeText -match '\$finalBound=Get-LoadedPluginBinding[\s\S]+?Loaded plugin binding changed before PASS[\s\S]+?\$receipt\.verdict=''PASS''') 'loaded plugin binding is re-enumerated and compared before PASS'
   Check ($smokeText -match 'Get-BoundModulePaths[\s\S]+?Assert-OwnedIdentity') 'module binding rechecks owned PID/start identity after probe'
+  Check ((@([regex]::Matches($smokeText,'Get-LoadedPluginBinding')).Count -ge 3) -and $smokeText -match 'final_revalidated_utc') 'loaded plugin binding is revalidated immediately before PASS'
+  $identityTime=[DateTime]::UtcNow
+  $fakeProcess=[pscustomobject]@{HasExited=$false;StartTime=$identityTime}
+  $fakeProcess | Add-Member ScriptMethod Refresh {}
+  Assert-OwnedIdentity $fakeProcess $identityTime.ToUniversalTime().Ticks
+  Check $true 'exact process start identity is accepted'
+  Reject {Assert-OwnedIdentity $fakeProcess ($identityTime.AddTicks(1).ToUniversalTime().Ticks)} 'one-tick process identity change is refused'
+  Reject {Assert-OwnedIdentity $fakeProcess ($identityTime.AddMilliseconds(500).ToUniversalTime().Ticks)} 'subsecond process identity change is refused'
   Check ($commonText -match 'PLUGIN_ABI_MISMATCH' -and $smokeText -match 'receipt\.plugin_pe') 'plugin ABI mismatch is recorded and rejected before DAW insertion'
   Check ($smokeText -match '\[switch\]\$Headless' -and $smokeText -match 'if\(-not \$Headless\)') 'public -Headless mode is retained and skips desktop interaction'
   Check ($smokeText -match 'Set-ProcessTracePath \$null' -and $smokeText -match 'Set-ProcessTracePath \$priorTracePath' -and $smokeText -match 'trace_environment') 'warm scan clears and restores the caller trace destination and records it'
   $luaText=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'windows_editor_smoke.lua') -Raw
-  Check ($luaText -match 'fx_inserted' -and $luaText -match 'PULP_DAW_SMOKE_PROBE_GATE') 'Lua exposes bounded pre-editor module probe gate'
+  Check ($luaText -match 'fx_inserted' -and $luaText -match 'PULP_DAW_SMOKE_PROBE_GATE') 'Lua keeps its optional env-driven editor gate, which the wrapper no longer sets'
   Check ($luaText -match 'STATUS_PUBLISH_TIMEOUT' -and $luaText -match 'status_sequence' -and $luaText -notmatch 'direct=io\.open') 'Lua terminal publication uses unique temp names, bounded retry and surfaces timeout'
   $probeCommand=@(Get-Command powershell.exe,pwsh -ErrorAction SilentlyContinue|Select-Object -First 1)
   if($probeCommand.Count -ne 1){throw 'No PowerShell executable for bounded-probe fixture'}
@@ -65,6 +75,17 @@ try {
   Check (Test-HalfOpenWindowRectContainsPoint $editorRect 300 400) 'interior editor point is accepted'
   Check (-not (Test-HalfOpenWindowRectContainsPoint $editorRect 500 600)) 'bottom-right editor edge is rejected'
   Check (-not (Test-HalfOpenWindowRectContainsPoint $editorRect 99 400)) 'outside editor point is rejected'
+  $stagedVst3=Get-Vst3StagedPluginPath 'C:\scan' 'C:\source\Example.vst3' 'C:\source\Example.vst3\Contents\arm64ec-win\Example.vst3'
+  Check ($stagedVst3 -eq 'C:\scan\Example.vst3\Contents\arm64ec-win\Example.vst3') 'VST3 staging keeps the payload architecture directory'
+  $stagedRootPayload=Get-Vst3StagedPluginPath 'C:\scan' 'C:\source\Example.vst3' 'C:\source\Example.vst3\Contents\Example.vst3'
+  Check ($stagedRootPayload -eq 'C:\scan\Example.vst3\Contents\Example.vst3') 'VST3 staging does not duplicate the Contents directory'
+  $stageInput=Join-Path $root 'StageInput.vst3'
+  $stagePayload=Join-Path $stageInput 'Contents\x86_64-win\StageInput.vst3'
+  New-Item -ItemType Directory -Force -Path (Split-Path $stagePayload) | Out-Null
+  Set-Content -LiteralPath $stagePayload -Value 'fixture'
+  $stageScan=Join-Path $root 'stage-scan';New-Item -ItemType Directory -Path $stageScan | Out-Null
+  $stagedBundle=Stage-Vst3Plugin $stageScan $stageInput
+  Check ($stagedBundle.BundleRoot -ieq $stageInput -and $stagedBundle.Staged -ieq (Join-Path $stageScan 'StageInput.vst3\Contents\x86_64-win\StageInput.vst3') -and (Test-Path -LiteralPath $stagedBundle.Staged -PathType Leaf)) 'VST3 wrapper staging accepts a bundle-directory input'
   foreach($fixture in @(@(0x8664,'x64','vstpath64'),@(0xaa64,'arm64','vstpath_winarm64'),@(0xa641,'arm64ec','vstpath_winarm64'),@(0xa64e,'arm64x','vstpath_winarm64'))){
     $path=Join-Path $root ($fixture[1]+'.exe')
     $bytes=New-Object byte[] 128

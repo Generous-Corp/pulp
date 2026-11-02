@@ -1,6 +1,14 @@
 # View, accessibility, host scanner, platform audio-device, and host hook tests.
 # Included by test/CMakeLists.txt; keep related test registrations here.
 
+add_test(NAME sdl-window-host-resize-contract
+    COMMAND ${CMAKE_COMMAND}
+            -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+            -P ${CMAKE_CURRENT_LIST_DIR}/test_sdl_window_host_resize_contract.cmake)
+set_tests_properties(sdl-window-host-resize-contract PROPERTIES
+    LABELS "view;host;gate"
+    TIMEOUT 60)
+
 # The overlay-dismissal policy has one implementation, and every platform host
 # routes through it. Hand-rolled per-host copies drift silently and did: one
 # read the process-global shim mirror so a press in one editor dismissed
