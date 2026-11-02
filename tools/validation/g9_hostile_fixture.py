@@ -30,7 +30,7 @@ def run_case(name: str, timeout: float, out: Path) -> dict:
                             "subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)")
     started = time.monotonic()
     proc = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE, text=True)
+                            stderr=subprocess.PIPE, text=True, encoding="utf-8")
     timed_out = False
     try:
         stdout, stderr = proc.communicate(timeout=timeout)
