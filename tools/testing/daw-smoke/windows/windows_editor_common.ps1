@@ -344,6 +344,32 @@ function Get-Vst3StagedPluginPath([string]$ScanRoot,[string]$BundleRoot,[string]
   $stagedBundle = Join-Path $ScanRoot ([System.IO.Path]::GetFileName($bundleFull.TrimEnd('\','/')))
   return Join-Path $stagedBundle $relativePayload
 }
+function Stage-Vst3Plugin([string]$ScanRoot,[string]$PluginPath) {
+  $plugin = (Resolve-Path -LiteralPath $PluginPath -ErrorAction Stop).Path
+  $bundleRoot = $null
+  $pluginItem = Get-Item -LiteralPath $plugin -ErrorAction Stop
+  $cursor = if ($pluginItem.PSIsContainer) {
+    $pluginItem
+  } else {
+    Get-Item -LiteralPath (Split-Path $plugin -Parent) -ErrorAction Stop
+  }
+  while ($cursor) {
+    if ($cursor.Name -like '*.vst3' -and (Test-Path -LiteralPath (Join-Path $cursor.FullName 'Contents') -PathType Container)) {
+      $bundleRoot = $cursor.FullName
+      break
+    }
+    $cursor = $cursor.Parent
+  }
+  if ($bundleRoot) {
+    Copy-Item -LiteralPath $bundleRoot -Destination $ScanRoot -Recurse
+    $staged = Get-Vst3StagedPluginPath $ScanRoot $bundleRoot $plugin
+    if (-not (Test-Path -LiteralPath $staged -PathType Leaf)) { throw "Staged VST3 payload missing: $staged" }
+  } else {
+    Copy-Item -LiteralPath $plugin -Destination $ScanRoot -Recurse
+    $staged = Join-Path $ScanRoot (Split-Path $plugin -Leaf)
+  }
+  return [pscustomobject]@{BundleRoot=$bundleRoot;Staged=$staged}
+}
 function Write-ReaperIni([string]$Path,[string[]]$Lines) {
   # Windows PowerShell 5.1 Set-Content -Encoding utf8 emits a BOM. Preserve the
   # no-BOM INI form read by the seeded REAPER profile on the actual guest.

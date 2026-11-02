@@ -91,22 +91,12 @@ try {
   # loaded module's directory; flattening Contents/<arch>-win/Spectr.vst3 into
   # the scan root makes a valid packaged icudtl.dat invisible and causes a
   # misleading paragraph fatal.  CLAP remains a flat module.
-  $bundleRoot = $null
   if ($Format -eq 'vst3') {
-    $cursor = Get-Item -LiteralPath (Split-Path $plugin -Parent)
-    while ($cursor) {
-      if ($cursor.Name -like '*.vst3' -and (Test-Path -LiteralPath (Join-Path $cursor.FullName 'Contents') -PathType Container)) {
-        $bundleRoot = $cursor.FullName
-        break
-      }
-      $cursor = $cursor.Parent
-    }
-  }
-  if ($bundleRoot) {
-    Copy-Item -LiteralPath $bundleRoot -Destination $scan -Recurse
-    $staged = Get-Vst3StagedPluginPath $scan $bundleRoot $plugin
-    if (-not (Test-Path -LiteralPath $staged -PathType Leaf)) { throw "Staged VST3 payload missing: $staged" }
+    $staging = Stage-Vst3Plugin $scan $plugin
+    $bundleRoot = $staging.BundleRoot
+    $staged = $staging.Staged
   } else {
+    $bundleRoot = $null
     Copy-Item -LiteralPath $plugin -Destination $scan -Recurse
     $staged = Join-Path $scan (Split-Path $plugin -Leaf)
   }

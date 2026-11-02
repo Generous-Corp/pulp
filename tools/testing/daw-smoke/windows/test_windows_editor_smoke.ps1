@@ -79,6 +79,13 @@ try {
   Check ($stagedVst3 -eq 'C:\scan\Example.vst3\Contents\arm64ec-win\Example.vst3') 'VST3 staging keeps the payload architecture directory'
   $stagedRootPayload=Get-Vst3StagedPluginPath 'C:\scan' 'C:\source\Example.vst3' 'C:\source\Example.vst3\Contents\Example.vst3'
   Check ($stagedRootPayload -eq 'C:\scan\Example.vst3\Contents\Example.vst3') 'VST3 staging does not duplicate the Contents directory'
+  $stageInput=Join-Path $root 'StageInput.vst3'
+  $stagePayload=Join-Path $stageInput 'Contents\x86_64-win\StageInput.vst3'
+  New-Item -ItemType Directory -Force -Path (Split-Path $stagePayload) | Out-Null
+  Set-Content -LiteralPath $stagePayload -Value 'fixture'
+  $stageScan=Join-Path $root 'stage-scan';New-Item -ItemType Directory -Path $stageScan | Out-Null
+  $stagedBundle=Stage-Vst3Plugin $stageScan $stageInput
+  Check ($stagedBundle.BundleRoot -ieq $stageInput -and $stagedBundle.Staged -ieq (Join-Path $stageScan 'StageInput.vst3\Contents\x86_64-win\StageInput.vst3') -and (Test-Path -LiteralPath $stagedBundle.Staged -PathType Leaf)) 'VST3 wrapper staging accepts a bundle-directory input'
   foreach($fixture in @(@(0x8664,'x64','vstpath64'),@(0xaa64,'arm64','vstpath_winarm64'),@(0xa641,'arm64ec','vstpath_winarm64'),@(0xa64e,'arm64x','vstpath_winarm64'))){
     $path=Join-Path $root ($fixture[1]+'.exe')
     $bytes=New-Object byte[] 128
