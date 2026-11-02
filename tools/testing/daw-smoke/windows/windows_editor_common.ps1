@@ -341,7 +341,7 @@ function Get-Vst3StagedPluginPath([string]$ScanRoot,[string]$BundleRoot,[string]
     throw "VST3 payload is outside bundle: $PluginPath"
   }
   $relativePayload = $pluginFull.Substring($bundlePrefix.Length)
-  $stagedBundle = Join-Path $ScanRoot (Split-Path -LiteralPath $bundleFull -Leaf)
+  $stagedBundle = Join-Path $ScanRoot ([System.IO.Path]::GetFileName($bundleFull.TrimEnd('\','/')))
   return Join-Path $stagedBundle $relativePayload
 }
 function Write-ReaperIni([string]$Path,[string[]]$Lines) {
