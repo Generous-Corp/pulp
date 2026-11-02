@@ -1,0 +1,16 @@
+{
+  "schema": "pulp.external-input-runtime-receipt.v1",
+  "product": "TouchDesigner",
+  "status": "unverified",
+  "host_version": null,
+  "os": "macOS",
+  "patch": null,
+  "destination": "127.0.0.1:9001",
+  "message": "/pulp/control",
+  "provenance": "synthesized-fixture-only",
+  "live_packets_captured": false,
+  "media_pipe": {
+    "used": false,
+    "status": "optional-external-provider"
+  }
+}
