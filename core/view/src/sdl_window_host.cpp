@@ -156,7 +156,6 @@ class SdlWindowHostImpl : public SdlWindowHost {
             h = std::max(1, static_cast<int>(h * scale));
         }
         SDL_SetWindowSize(window_, w, h);
-        SDL_SetWindowPosition(window_, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
         needs_repaint_ = true;
     }
 
