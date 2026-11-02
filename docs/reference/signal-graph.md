@@ -273,9 +273,9 @@ holds a single loaded hosted plugin (the *instance*). Live plugin swap
 replaces the instance inside a `Plugin` node **while audio is still
 flowing** — either with a fresh instance of the *same* plugin (for example
 to reset it or hand it different saved state) or, when it can't be done
-seamlessly, with a *different* plugin. The goal is a **gap-free** change:
-the audio stream never drops to silence and the listener hears no gap or
-click at the moment of the swap.
+seamlessly, with a *different* plugin. Eligible edits can be **gap-free**; the audio stream remains continuous when
+all continuity, latency, feedback, and budget gates pass. Edits that fail a
+gate use the documented eager path and may briefly interrupt audio.
 
 The swap is gap-free because the graph does all the slow work — loading the
 replacement, preparing it at the current sample rate and block size, and
@@ -285,11 +285,10 @@ replacement is fully ready does the graph publish the new arrangement in a
 single atomic step, so the audio callback always reads either the complete
 old arrangement or the complete new one, never a half-built or empty one.
 
-The swap is also **click-free**: for a short window (`fade_ms`) after the
-change the node briefly runs both the old and the new instance and
-crossfades one into the other along `curve`, so even when the two produce
-different output the listener hears a smooth blend rather than a step at the
-boundary. (`fade_ms = 0` disables the fade for an instant switch.) The old
+When crossfade is enabled, the node runs both instances for a short window
+(`fade_ms`) and blends them along `curve`; this is the intended transition
+policy, but a deterministic graph-level audio continuity oracle is still a
+separate validation requirement. (`fade_ms = 0` disables the fade.) The old
 instance is released on a non-audio thread once the fade has finished.
 
 This is not the same as [DSP hot-reload](../guides/dsp-hot-reload.md). Live
@@ -317,11 +316,10 @@ installed and already trusts, so it needs no signing or trust model.
    and `prepare_swap` the live graph keeps playing the old arrangement, so
    staging never interrupts audio. `abort_swap_edit()` abandons the attempt.
 
-`prepare_swap` returns `Swapped` when the change went live gap-free. It
-returns `NeedsEagerPrepare` when a gap-free swap isn't possible; the host
-then calls `prepare()` under the usual "no `process()` while preparing"
-rule, which rebuilds the graph with a brief silence instead of a seamless
-change. `last_swap_diagnostics()` reports which check refused and on which
+`prepare_swap` returns `Swapped` when the change satisfies the eligible
+continuity gates. It returns `NeedsEagerPrepare` when those gates fail; the
+host then calls `prepare()` under the usual "no `process()` while preparing"
+rule, which may briefly interrupt the stream. `last_swap_diagnostics()` reports which check refused and on which
 node.
 
 ### The gates (fail-closed)

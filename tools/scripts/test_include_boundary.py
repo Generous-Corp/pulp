@@ -78,6 +78,15 @@ class ViewCoreBoundaryTests(unittest.TestCase):
     def test_spaced_directive_fails(self):
         self.assertEqual(self._plant('  #  include   "pulp/host/plugin_slot.hpp"\n'), 1)
 
+    def test_line_spliced_directive_fails(self):
+        self.assertEqual(self._plant('#include \\\n<pulp/audio/buffer.hpp>\n'), 1)
+
+    def test_comments_between_directive_tokens_fail(self):
+        self.assertEqual(self._plant('#/**/include <pulp/audio/buffer.hpp>\n'), 1)
+
+    def test_windows_separator_relative_escape_fails(self):
+        self.assertEqual(self._plant('#include "..\\\\audio\\\\include\\\\pulp\\\\audio\\\\buffer.hpp"\n'), 1)
+
     def test_every_forbidden_area_fails(self):
         for area in ("audio", "signal", "host", "midi", "format", "timebase", "graph",
                      "playback", "content", "sample_bank_manifest", "gpu_audio", "music"):

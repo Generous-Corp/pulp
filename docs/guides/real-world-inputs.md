@@ -1,5 +1,21 @@
 # Real-world inputs
 
+The shipped external-input contract is experimental and provider-neutral. It
+is implemented by `pulp::runtime::ExternalInputFrame<N>` and
+`ExternalInputGate<N>` in the runtime SDK. A frame carries `source_id`, an
+`epoch` for provider restart, a provider sequence and timestamp, status,
+confidence, count, and bounded application-defined float values. The gate
+accepts only monotonic, well-formed frames that meet the application policy;
+`invalid`, `unavailable`, `denied`, and `paused` statuses expire the accepted
+value. Advance it once per audio block with the block sample count. It never
+compares a provider clock to the audio clock.
+
+Providers and applications own capture, permissions, inference, lifecycle, and
+mapping. Use an existing `TripleBuffer`, SPSC queue, OSC, IPC, MIDI, or WAM
+handoff; do not add a provider-specific transport or schema to Pulp core. See
+the [licensing boundary](../reference/licensing.md#application-selected-provider-and-host-integrations)
+for why application-selected providers are not Pulp redistributed dependencies.
+
 Pulp applications can map camera, sensor, controller, analysis, or network
 data to parameters and application behavior without adding those providers to
 Pulp core. The provider owns capture, permissions, inference, and lifecycle;
@@ -263,3 +279,50 @@ MediaPipe, OpenCV, OpenSeeFace, ONNX Runtime, LiteRT, Core ML, platform sensor
 APIs, and device SDKs remain application-selected dependencies. Audit model
 weights, task bundles, codecs, and SDK terms separately from runtime licenses.
 Do not add any of them to Pulp core for an application that does not use them.
+
+## T7 recipe: TouchDesigner OSC sharing app
+
+TouchDesigner is the named sharing-app target for this recipe. This recipe is
+external to Pulp and requires a pinned TouchDesigner build on the host. Create
+an OSC Out CHOP or DAT that sends UDP to `127.0.0.1:9001` with the existing
+`examples/cv-control` message shape:
+
+```text
+/pulp/control <float value> <float confidence> <int valid> [int sequence]
+```
+
+The Pulp application maps the message to `ExternalInputFrame<1>` with its
+configured `source_id`, current provider `epoch`, sequence, `valid` status,
+confidence, and one value. TouchDesigner owns any camera, sensor, or MediaPipe
+operator and its permissions; Pulp receives only the normalized application
+value through the existing OSC ingress. MediaPipe may be used inside
+TouchDesigner or a companion process as an optional provider, but Pulp does not
+bundle its SDK, model, permissions, or landmark schema.
+
+The fixture at
+`test/fixtures/external-input/t7-touchdesigner-synthesized.jsonl` exercises the
+positive frame, below-threshold confidence, paused status, restart epoch,
+and silence-to-expiry cases. It is explicitly marked `synthesized`: this host
+does not have TouchDesigner installed, so it is not a live TouchDesigner
+acceptance receipt. A live receipt must record the exact TouchDesigner version,
+OS, destination port, patch/operator identity, and a captured packet sequence
+before this recipe can be promoted to runtime-proven.
+## T10 recipe: DaVinci Resolve / Fairlight
+
+The named T10 host target is DaVinci Resolve's Fairlight page. The acceptance
+path is host-only and does not add a Blackmagic SDK or Resolve dependency to
+Pulp. Install an exact Resolve version, place a built Pulp VST3 in the host's
+plugin search path, and record the plugin identity, project, timeline, track,
+and parameter automation. The receipt must show a before/after host automation
+value reaching the plugin's existing `get_modulated` path.
+
+`examples/cv-control` currently declares `CvFaceTone` as a VST3 instrument and
+does not expose an input bus. Verify that the selected Fairlight version loads
+VST3 instruments and automates its Brightness parameter before claiming T10.
+If it only accepts effects, use an existing Pulp VST3 effect with a clearly
+automatable parameter or leave T10 unverified; do not change core solely to
+force host compatibility.
+
+The receipt fixture below is an evidence template, not a live host result.
+This checkout has no DaVinci Resolve installation, so it deliberately records
+the missing runtime evidence.

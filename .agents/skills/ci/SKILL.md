@@ -60,6 +60,15 @@ on a real PR. Do them in order.
      outside those roots (it resolves through the foundation include dirs, the
      way the compiler does). Put the code in the owning subsystem instead of
      allowlisting it; a stale allowlist entry also fails.
+   - **core -> Vellum direction** — `core_vellum_direction.py` fails when a
+     file under `core/` includes a `vellum/` header (any spelling, including a
+     relative path through a `vellum/` directory) or a CMake file under `core/`
+     names `find_package(Vellum`, a `Vellum::`/`vellum::` target, or fetches or
+     adds a Vellum tree. Pulp core knows nothing about Vellum; the connection
+     belongs in an integration package. The only allowlisted edge is the opt-in
+     D15 GPU-audio provider, pinned by exact count, and it goes away when the
+     shared GPU runtime lands. Its source half is `include_boundary.py
+     --boundary core-vellum`.
    - **change events** (`vellum_freeze_check.py`) — a range touching a path in
      a transferred slice of `.github/vellum-ownership.json` (e.g.
      `core/view/src/pointer_dispatch.cpp` in `retained-ui-kernel`) without a
