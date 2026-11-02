@@ -4386,6 +4386,14 @@ never one `ghapp` stamped with an `unattributed` session. Shipyard's
 server-side `review-verdict` reads the list only from this file and refuses
 every App approval when it is missing, so a new reviewer is added here first.
 
+`[auto_merge] reviewer_stamp_sessions = ["fleet-pass-reviewer-*"]` further
+restricts which sessions may approve: an App APPROVE counts only when the
+session in its `ghapp` stamp (the part after the host) matches one of these
+globs, so a reviewer tab that is not the scheduled standing pass does not count
+unless it is listed. A HOLD from any session still counts. The key is read by
+the Shipyard commit pinned in `.github/workflows/review-verdict.yml`, so bump
+that pin with the setting.
+
 The preamble can run from a checkout below `/Volumes/Workshop`. Inline Python
 started with `python3 -` resolves the current directory before executing its
 stdin script, so a wedged checkout volume can freeze the routing probe even
