@@ -29,7 +29,8 @@ def run_case(name: str, timeout: float, out: Path) -> dict:
         code = code.replace("subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)'])",
                             "subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)")
     started = time.monotonic()
-    proc = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE,
+    command = ["/bin/sh", "-c", "kill -ABRT $$"] if name == "crash" else [sys.executable, "-c", code]
+    proc = subprocess.Popen(command, stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE, text=True, encoding="utf-8")
     timed_out = False
     try:
