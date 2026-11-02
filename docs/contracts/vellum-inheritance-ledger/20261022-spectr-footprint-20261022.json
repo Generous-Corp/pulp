@@ -1,0 +1,14 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261022-spectr-footprint-20261022",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "vellum_obligation": "Vellum inherits every edit the pull request made to exported files, including SkiaCanvas::begin_layer compiling its Ganesh offscreen-surface call only under PULP_CANVAS_GANESH, so a native (Graphite or raster) Vellum build does not keep Skia's Ganesh backend. The same pull request's compressed JS-prelude format changes a generated export input; Vellum's mirror_package.py must emit the new web_compat_preludes_gen.hpp format before the re-export, or the closure digest check fails.",
+  "evidence": [
+    ".github/vellum-change-events/20261022-spectr-footprint-20261022.json",
+    "https://github.com/Generous-Corp/pulp/pull/11031",
+    "Vellum export receipt 20261025-46cee5e4e6e2 lists the files this event's change edits",
+    "pulp-planning vellum-move/evidence/phase5-prep-post-export-drift-20261101.md (\"Labels that don't match what happens\")"
+  ]
+}
