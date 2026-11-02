@@ -2845,6 +2845,7 @@
   "pulp-test-editor-open-stages",
   "pulp-test-embed-compress",
   "pulp-test-external-input",
+  "pulp-test-external-input-ingress",
   "pulp-test-external-plugin-graph-fixture",
   "pulp-test-face-identity-full",
   "pulp-test-face-identity-lite",
@@ -8488,7 +8489,9 @@
    "entry": "tools/scripts/test_include_boundary.py",
    "inputs": [
     "core/audio/include/pulp/audio/buffer.hpp",
+    "core/content/include/pulp/state",
     "core/content/include/pulp/state/content_registry.hpp",
+    "core/state/include/pulp/state",
     "core/state/include/pulp/state/store.hpp",
     "core/view/include/pulp/view/view.hpp",
     "core/view/src/view.cpp",

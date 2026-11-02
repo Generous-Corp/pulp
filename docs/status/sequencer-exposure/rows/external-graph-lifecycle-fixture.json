@@ -19,7 +19,9 @@
     {
       "path": "test/test_external_plugin_graph_fixture.cpp",
       "needles": [
+        "input_left",
         "external CLAP lifecycle has explicit identity and removal controls",
+        "energy > 1.0e-8",
         "PULP_EXTERNAL_CLAP_SHA256"
       ]
     }
