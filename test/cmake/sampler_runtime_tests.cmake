@@ -545,3 +545,7 @@ pulp_add_test_suite(pulp-test-dspx09-followup GROUP pulp-test-group-sampler-host
 pulp_add_test_suite(pulp-test-retained-history-dspx03 GROUP pulp-test-group-sampler-host-graph
     SOURCES test_retained_history_dspx03.cpp
     LIBRARIES pulp::host pulp::format pulp::graph pulp::audio pulp::audio-analysis)
+# Named typed graph ports expose structured, actionable authoring diagnostics.
+pulp_add_test_suite(pulp-test-signal-graph-named-ports
+    SOURCES test_signal_graph_named_ports.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph)
