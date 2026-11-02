@@ -6,9 +6,11 @@ routable audio topology.
 
 In plain terms: this is how one Pulp plugin can **host several other plugins
 and wire them into a chain** (e.g. an EQ → a compressor → a reverb) and process
-audio through them as a unit. Each box in that chain is a *node*. Editing the
-chain while it plays — re-wiring nodes, adjusting them — is done without an audio
-gap. This is distinct from [DSP hot-reload](../guides/dsp-hot-reload.md), which
+audio through them as a unit. Each box in that chain is a *node*. Eligible edits
+can be applied while the chain plays without an audio gap. Edits that fail the
+continuity, latency, or feedback gates use eager preparation and may briefly
+interrupt audio; see [live graph swaps](#live-plugin-swap). This is
+distinct from [DSP hot-reload](../guides/dsp-hot-reload.md), which
 swaps a plugin's **own** compiled DSP; live graph editing re-arranges **already-
 installed, already-trusted** hosted plugins and loads no new code.
 

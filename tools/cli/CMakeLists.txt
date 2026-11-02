@@ -196,10 +196,12 @@ if(PULP_BUILD_TESTS)
     pulp_test_data(pulp-cli WHOLE_CHECKOUT)
 endif()
 target_compile_features(pulp-cli PRIVATE cxx_std_20)
+# pulp::content: `pulp content` admits archives through the content-install
+# budget (pulp/state/content_install_limits.hpp), which pulp-content owns.
 target_link_libraries(pulp-cli PRIVATE
     pulp::runtime pulp::tool-audio pulp::audio-analysis
     pulp::ship pulp::view pulp::render pulp::format pulp::host
-    pulp::tool-gpu-health-probes)
+    pulp::content pulp::tool-gpu-health-probes)
 
 # Apple ld scans a static archive once.  The CLI intentionally exposes the
 # complete design/import and inspector command surface, so a single archive

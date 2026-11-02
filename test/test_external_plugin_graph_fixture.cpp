@@ -52,8 +52,13 @@ RenderResult render(const pulp::host::PluginInfo& info) {
     std::array<float, 128> right{};
     std::array<float*, 2> out_channels{left.data(), right.data()};
     pulp::audio::BufferView<float> out(out_channels.data(), info.num_outputs, 128);
-    std::array<float, 128> silence{};
-    std::array<const float*, 2> in_channels{silence.data(), silence.data()};
+    std::array<float, 128> input_left{};
+    std::array<float, 128> input_right{};
+    for (std::size_t frame = 0; frame < input_left.size(); ++frame) {
+        input_left[frame] = 0.25f + 0.001f * static_cast<float>(frame);
+        input_right[frame] = 0.5f - 0.001f * static_cast<float>(frame);
+    }
+    std::array<const float*, 2> in_channels{input_left.data(), input_right.data()};
     pulp::audio::BufferView<const float> in(in_channels.data(), info.num_inputs, 128);
     RenderResult result;
     for (int block = 0; block < 64; ++block) {
