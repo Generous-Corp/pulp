@@ -1,5 +1,21 @@
 # Real-world inputs
 
+The shipped external-input contract is experimental and provider-neutral. It
+is implemented by `pulp::runtime::ExternalInputFrame<N>` and
+`ExternalInputGate<N>` in the runtime SDK. A frame carries `source_id`, an
+`epoch` for provider restart, a provider sequence and timestamp, status,
+confidence, count, and bounded application-defined float values. The gate
+accepts only monotonic, well-formed frames that meet the application policy;
+`invalid`, `unavailable`, `denied`, and `paused` statuses expire the accepted
+value. Advance it once per audio block with the block sample count. It never
+compares a provider clock to the audio clock.
+
+Providers and applications own capture, permissions, inference, lifecycle, and
+mapping. Use an existing `TripleBuffer`, SPSC queue, OSC, IPC, MIDI, or WAM
+handoff; do not add a provider-specific transport or schema to Pulp core. See
+the [licensing boundary](../reference/licensing.md#application-selected-provider-and-host-integrations)
+for why application-selected providers are not Pulp redistributed dependencies.
+
 Pulp applications can map camera, sensor, controller, analysis, or network
 data to parameters and application behavior without adding those providers to
 Pulp core. The provider owns capture, permissions, inference, and lifecycle;
@@ -263,3 +279,23 @@ MediaPipe, OpenCV, OpenSeeFace, ONNX Runtime, LiteRT, Core ML, platform sensor
 APIs, and device SDKs remain application-selected dependencies. Audit model
 weights, task bundles, codecs, and SDK terms separately from runtime licenses.
 Do not add any of them to Pulp core for an application that does not use them.
+
+## T10 recipe: DaVinci Resolve / Fairlight
+
+The named T10 host target is DaVinci Resolve's Fairlight page. The acceptance
+path is host-only and does not add a Blackmagic SDK or Resolve dependency to
+Pulp. Install an exact Resolve version, place a built Pulp VST3 in the host's
+plugin search path, and record the plugin identity, project, timeline, track,
+and parameter automation. The receipt must show a before/after host automation
+value reaching the plugin's existing `get_modulated` path.
+
+`examples/cv-control` currently declares `CvFaceTone` as a VST3 instrument and
+does not expose an input bus. Verify that the selected Fairlight version loads
+VST3 instruments and automates its Brightness parameter before claiming T10.
+If it only accepts effects, use an existing Pulp VST3 effect with a clearly
+automatable parameter or leave T10 unverified; do not change core solely to
+force host compatibility.
+
+The receipt fixture below is an evidence template, not a live host result.
+This checkout has no DaVinci Resolve installation, so it deliberately records
+the missing runtime evidence.

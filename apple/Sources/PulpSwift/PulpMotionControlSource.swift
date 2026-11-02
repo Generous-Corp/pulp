@@ -9,24 +9,39 @@ import Foundation
 
 /// One complete motion observation published by an application-owned provider.
 public struct PulpMotionControlFrame: Sendable, Equatable {
+    public enum Status: String, Sendable {
+        case accepted
+        case paused
+        case denied
+        case unavailable
+    }
+    public let sourceId: String
+    public let epoch: UInt64
     public let sequence: UInt64
     public let value: Double
     public let confidence: Double
     public let valid: Bool
     public let timestampNanoseconds: UInt64
+    public let status: Status
 
     public init(
         sequence: UInt64,
         value: Double,
         confidence: Double,
         valid: Bool,
-        timestampNanoseconds: UInt64
+        timestampNanoseconds: UInt64,
+        sourceId: String = "ios.motion.accelerometer",
+        epoch: UInt64 = 0,
+        status: Status? = nil
     ) {
         self.sequence = sequence
+        self.sourceId = sourceId
+        self.epoch = epoch
         self.value = value
         self.confidence = confidence
         self.valid = valid
         self.timestampNanoseconds = timestampNanoseconds
+        self.status = status ?? (valid ? .accepted : .unavailable)
     }
 }
 
@@ -66,6 +81,7 @@ public final class PulpMotionControlSource {
     private let stateLock = NSLock()
     private var sequence: UInt64 = 0
     private var running = false
+    private var epoch: UInt64 = 0
 
     public init(
         manager: CMMotionManager = CMMotionManager(),
@@ -94,15 +110,17 @@ public final class PulpMotionControlSource {
         // Set this before starting delivery: Core Motion may invoke the
         // callback immediately on the provider queue.
         running = true
+        epoch &+= 1
+        let registrationEpoch = epoch
         stateLock.unlock()
         manager.accelerometerUpdateInterval = updateInterval
         manager.startAccelerometerUpdates(to: queue) { [weak self] data, error in
             guard let self else { return }
             if error != nil || data == nil {
-                self.publishLoss()
+                self.publishLoss(for: registrationEpoch)
                 return
             }
-            self.submit(yAcceleration: data!.acceleration.y, timestamp: data!.timestamp)
+            self.submit(yAcceleration: data!.acceleration.y, timestamp: data!.timestamp, for: registrationEpoch)
         }
         return true
     }
@@ -122,7 +140,9 @@ public final class PulpMotionControlSource {
             value: 0.0,
             confidence: 0.0,
             valid: false,
-            timestampNanoseconds: 0
+            timestampNanoseconds: 0,
+            epoch: epoch,
+            status: .unavailable
         )
         // Enqueue while holding stateLock so this loss frame follows any
         // in-flight sensor frame. The application closure runs later on a
@@ -133,9 +153,9 @@ public final class PulpMotionControlSource {
 
     /// Publishes one invalid frame for a sensor error while delivery is
     /// running, with the same ordering guarantees as `submit` and `stop`.
-    private func publishLoss() {
+    private func publishLoss(for callbackEpoch: UInt64) {
         stateLock.lock()
-        guard running else {
+        guard running, callbackEpoch == epoch else {
             stateLock.unlock()
             return
         }
@@ -145,15 +165,17 @@ public final class PulpMotionControlSource {
             value: 0.0,
             confidence: 0.0,
             valid: false,
-            timestampNanoseconds: 0
+            timestampNanoseconds: 0,
+            epoch: epoch,
+            status: .unavailable
         )
         publishQueue.async { [publish] in publish(frame) }
         stateLock.unlock()
     }
 
-    private func submit(yAcceleration: Double, timestamp: TimeInterval) {
+    private func submit(yAcceleration: Double, timestamp: TimeInterval, for callbackEpoch: UInt64) {
         stateLock.lock()
-        guard running else {
+        guard running, callbackEpoch == epoch else {
             stateLock.unlock()
             return
         }
@@ -168,7 +190,9 @@ public final class PulpMotionControlSource {
             value: normalized ?? 0.0,
             confidence: normalized == nil ? 0.0 : 1.0,
             valid: normalized != nil,
-            timestampNanoseconds: normalized == nil ? 0 : UInt64(max(0, timestamp) * 1_000_000_000)
+            timestampNanoseconds: normalized == nil ? 0 : UInt64(max(0, timestamp) * 1_000_000_000),
+            epoch: epoch,
+            status: normalized == nil ? .unavailable : .accepted
         )
         publishQueue.async { [publish] in publish(frame) }
         stateLock.unlock()

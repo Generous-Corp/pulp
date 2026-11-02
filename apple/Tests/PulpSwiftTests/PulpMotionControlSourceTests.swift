@@ -38,5 +38,8 @@ final class PulpMotionControlSourceTests: XCTestCase {
         XCTAssertEqual(frame.confidence, 1.0)
         XCTAssertTrue(frame.valid)
         XCTAssertEqual(frame.timestampNanoseconds, 123)
+        XCTAssertEqual(frame.sourceId, "ios.motion.accelerometer")
+        XCTAssertEqual(frame.epoch, 0)
+        XCTAssertEqual(frame.status, .accepted)
     }
 }

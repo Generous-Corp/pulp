@@ -1,0 +1,20 @@
+{
+  "schema": "pulp.external-input-host-receipt.v1",
+  "product": "DaVinci Resolve / Fairlight",
+  "status": "unverified",
+  "resolve_version": null,
+  "os": "macOS",
+  "project": null,
+  "timeline": null,
+  "track": null,
+  "plugin": "CvFaceTone.vst3",
+  "plugin_category": "Instrument",
+  "parameter": "Brightness",
+  "automation": {
+    "before": null,
+    "after": null,
+    "reached_get_modulated": null
+  },
+  "live_host_run": false,
+  "reason": "DaVinci Resolve is not installed on the validation host"
+}
