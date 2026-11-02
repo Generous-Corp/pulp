@@ -77,6 +77,7 @@ target_sources(pulp-format-core PRIVATE
     $<$<PLATFORM_ID:Windows>:src/host_version_win.cpp>
     src/host_quirks.cpp
     src/host_parameter_edit.cpp
+    src/editor_host.cpp
     src/ara.cpp
     src/ara_factory.cpp
     src/ios_audio_session.cpp

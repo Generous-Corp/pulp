@@ -2387,14 +2387,14 @@
    "spawns": "undeclared",
    "undeclared_sources": []
   },
-  "pulp-test-signal-graph-x9-modular-instrument": {
+  "pulp-test-signal-graph-offline-parity": {
    "data": "none",
    "inputs": [],
    "kind": "compiled",
    "runtime_targets": [],
    "sources": [],
    "spawning_sources": [
-    "test/test_signal_graph_x9_modular_instrument.cpp"
+    "test/test_signal_graph_offline_parity.cpp"
    ],
    "spawns": "undeclared",
    "undeclared_sources": []
@@ -2407,6 +2407,18 @@
    "sources": [],
    "spawning_sources": [
     "test/test_signal_graph_pulpsynth_automation.cpp"
+   ],
+   "spawns": "undeclared",
+   "undeclared_sources": []
+  },
+  "pulp-test-signal-graph-x9-modular-instrument": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_signal_graph_x9_modular_instrument.cpp"
    ],
    "spawns": "undeclared",
    "undeclared_sources": []
@@ -8454,7 +8466,9 @@
    "entry": "tools/scripts/test_include_boundary.py",
    "inputs": [
     "core/audio/include/pulp/audio/buffer.hpp",
+    "core/content/include/pulp/state",
     "core/content/include/pulp/state/content_registry.hpp",
+    "core/state/include/pulp/state",
     "core/state/include/pulp/state/store.hpp",
     "core/view/include/pulp/view/view.hpp",
     "core/view/src/view.cpp",

@@ -110,7 +110,7 @@ separators or colons in file names therefore fails validation everywhere.
 ## Archives are size-budgeted from the central directory
 
 A `.pulpcontent` archive declares each entry's decompressed size, so
-`ContentSizeBudget` (`core/state/include/pulp/state/content_install_limits.hpp`)
+`ContentSizeBudget` (`core/content/include/pulp/state/content_install_limits.hpp`)
 admits the whole pack from metadata before anything is inflated: 4 GiB total,
 1 GiB per entry and 65536 entries by default. `--max-pack-bytes <n>` on
 `validate` / `install` / `update` lowers both byte caps through
@@ -122,6 +122,13 @@ check, because that check inflates every declared file onto the heap. A refusal
 names the entry (`archive-size: entry ... above the per-entry cap`); miniz
 enforces the declared size during extraction, so a stream that inflates past its
 own header fails there rather than growing past the budget.
+
+The header lives in `pulp-content`'s include directory even though its include
+path is `pulp/state/...`: only content code uses it, and the owning directory,
+not the prefix, decides which subsystem a header belongs to
+(`tools/scripts/vellum_policy.json` lists `core/content/include` as content's).
+Keep content-only headers there, never under `core/state/include`, or an
+extracted state unit carries content policy it does not use.
 
 ## Design-import UI source snapshots stay out of content-pack extraction
 
