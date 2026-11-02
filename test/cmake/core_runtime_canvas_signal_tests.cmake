@@ -322,7 +322,7 @@ pulp_add_test_suite(pulp-test-osc GROUP pulp-test-group-core-osc
 
 pulp_add_test_suite(pulp-test-external-input-ingress
     SOURCES test_external_input_ingress.cpp
-    LIBRARIES pulp::osc pulp::events)
+    LIBRARIES pulp::osc pulp::events pulp::format)
 
 # ImageConvolutionKernel tests
 pulp_add_test_suite(pulp-test-image-convolution GROUP pulp-test-group-core-canvas
@@ -1216,7 +1216,9 @@ pulp_add_test_suite(pulp-test-runtime
 
 pulp_add_test_suite(pulp-test-external-input
     SOURCES test_external_input.cpp harness/rt_allocation_probe.cpp support/external_input_replay.cpp
-    LIBRARIES pulp::runtime)
+    LIBRARIES pulp::runtime
+    PROPERTIES WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+pulp_test_data(pulp-test-external-input NO_DEFINE PATHS test/fixtures/external-input)
 
 pulp_add_test_suite(pulp-test-durable-file-replacement GROUP pulp-test-group-core-runtime
     LIBRARIES pulp::runtime)

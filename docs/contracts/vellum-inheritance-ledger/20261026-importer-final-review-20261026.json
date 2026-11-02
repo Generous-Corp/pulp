@@ -1,0 +1,14 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261026-importer-final-review-20261026",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "vellum_obligation": "Vellum inherits every edit the pull request made to exported files, including declared font ranges scoped to the bridge lifetime that declared them, and emoji paragraph style routing, in the canvas kernel.",
+  "evidence": [
+    ".github/vellum-change-events/20261026-importer-final-review-20261026.json",
+    "https://github.com/Generous-Corp/pulp/pull/11179",
+    "Vellum export receipt 20261025-46cee5e4e6e2 lists the files this event's change edits",
+    "pulp-planning vellum-move/evidence/phase5-prep-post-export-drift-20261101.md (\"Labels that don't match what happens\")"
+  ]
+}

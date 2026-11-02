@@ -1,0 +1,14 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261025-attack-surface-daw-leftovers-canvas-mask",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "vellum_obligation": "Vellum inherits every edit the pull request made to exported files, including the Skia mask-image url() parser returning no mask for fragment (#id) and data: references instead of treating them as file paths.",
+  "evidence": [
+    ".github/vellum-change-events/20261025-attack-surface-daw-leftovers-canvas-mask.json",
+    "https://github.com/Generous-Corp/pulp/pull/10924",
+    "Vellum export receipt 20261025-46cee5e4e6e2 lists the files this event's change edits",
+    "pulp-planning vellum-move/evidence/phase5-prep-post-export-drift-20261101.md (\"Labels that don't match what happens\")"
+  ]
+}

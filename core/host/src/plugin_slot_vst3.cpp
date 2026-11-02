@@ -292,6 +292,7 @@ public:
                  midi::MidiBuffer& /*midi_out*/,
                  const ParameterEventQueue& param_events,
                  int num_samples) override {
+        begin_process();
         if (!active_ || !processor_ || bypassed_.load(std::memory_order_relaxed)) {
             for (size_t c = 0; c < output.num_channels(); ++c) {
                 auto* dst = output.channel_ptr(c);
@@ -432,6 +433,7 @@ public:
         data.processContext     = &ctx;
 
         if (processor_->process(data) != kResultOk) {
+            process_status_.store(ProcessStatus::failed, std::memory_order_release);
             // Plugin rejected the block; fall back to input pass-through so the
             // host buffer isn't left with stale contents.
             for (size_t c = 0; c < output.num_channels(); ++c) {
@@ -444,6 +446,14 @@ public:
             }
         }
         process_clock_.advance(num_samples);
+    }
+
+    void begin_process() noexcept override {
+        process_status_.store(ProcessStatus::ok, std::memory_order_release);
+    }
+
+    ProcessStatus process_status() const noexcept override {
+        return process_status_.load(std::memory_order_acquire);
     }
 
     std::vector<HostParamInfo> parameters() const override { return params_; }
@@ -735,7 +745,8 @@ public:
         }
     }
 
-private:
+  private:
+    std::atomic<ProcessStatus> process_status_{ProcessStatus::ok};
     PluginInfo info_;
     void* handle_ = nullptr;
     IPluginFactory* factory_ = nullptr;

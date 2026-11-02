@@ -1,0 +1,2 @@
+{"schema":"pulp.external-input-replay.v1","capacity":1,"block_samples":128,"policy":{"source_id":1,"minimum_confidence":0.0,"max_age_samples":12000,"expected_count":1}}
+{"t":"frame","source_id":1,"epoch":1,"sequence":1,"provider_time_ns":1000000,"status":"bogus","confidence":1.0,"values":[0.1]}

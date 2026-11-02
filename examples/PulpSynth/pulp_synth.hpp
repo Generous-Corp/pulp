@@ -7,6 +7,7 @@
 #include "minblep_saw.hpp"
 
 #include <pulp/format/processor.hpp>
+#include <pulp/state/param_cursor.hpp>
 #include <pulp/signal/oscillator.hpp>
 #include <pulp/signal/svf.hpp>
 #include <pulp/signal/adsr.hpp>
@@ -34,9 +35,10 @@ class PulpSynthProcessor : public format::Processor {
 public:
     static constexpr int kMaxVoices = 8;
 
-    // Reads its parameters once per block, so it opts out of per-point
-    // automation: the VST3, AU v2 and CLAP adapters then write each
-    // automated parameter once per block and dense automation costs nothing.
+    // Graph nodes deliver parameter events with sample offsets even when a
+    // processor opts into the block-rate format-adapter shortcut. The graph
+    // path is consumed below through ParamCursor; format adapters continue to
+    // publish each block's final value into StateStore for the other controls.
     bool wants_sample_accurate_parameters() const override {
         return false;
     }
@@ -91,7 +93,6 @@ public:
     {
         // Read parameters
         int waveform = static_cast<int>(state().get_value(kOscWaveform));
-        float cutoff_hz = state().get_value(kFilterCutoff);
         float reso = state().get_value(kFilterReso);
         float filter_env = state().get_value(kFilterEnv);
         float gain_db = state().get_value(kMasterGain);
@@ -103,14 +104,21 @@ public:
         env_params.release = state().get_value(kAmpRelease);
 
         gain_smooth_.set_target(signal::db_to_linear(gain_db));
-        cutoff_smooth_.set_target(cutoff_hz);
+        float cutoff_target = state().get_value(kFilterCutoff);
+        cutoff_smooth_.set_target(cutoff_target);
 
         waveform = std::clamp(waveform, 0, 4);
-
+        state::ParamCursor parameters(state(), param_events());
         midi_in.sort();
         std::size_t midi_idx = 0;
 
         for (std::size_t i = 0; i < output.num_samples(); ++i) {
+            parameters.advance_to(static_cast<int32_t>(i));
+            const float automated_cutoff = parameters.value(kFilterCutoff);
+            if (automated_cutoff != cutoff_target) {
+                cutoff_target = automated_cutoff;
+                cutoff_smooth_.set_target(cutoff_target);
+            }
             // Process MIDI
             while (midi_idx < midi_in.size() &&
                    midi_in[midi_idx].sample_offset <= static_cast<int32_t>(i)) {

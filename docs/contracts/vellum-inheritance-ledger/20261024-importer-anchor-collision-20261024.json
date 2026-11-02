@@ -1,0 +1,14 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261024-importer-anchor-collision-20261024",
+  "slices": [
+    "design-schema-compiler"
+  ],
+  "vellum_obligation": "Vellum inherits every edit the pull request made to exported files, including anchor_strategy.cpp's adapter-strategy fallback counting the per-signature sibling index over id-less siblings, so id-less siblings of one shape get distinct anchors while the first keeps its previous one. The CLI refusals the same pull request added in pulp_import_design stay in Pulp until the Chromium authoring lane has a Vellum home.",
+  "evidence": [
+    ".github/vellum-change-events/20261024-importer-anchor-collision-20261024.json",
+    "https://github.com/Generous-Corp/pulp/pull/10943",
+    "Vellum export receipt 20261025-46cee5e4e6e2 lists the files this event's change edits",
+    "pulp-planning vellum-move/evidence/phase5-prep-post-export-drift-20261101.md (\"Labels that don't match what happens\")"
+  ]
+}

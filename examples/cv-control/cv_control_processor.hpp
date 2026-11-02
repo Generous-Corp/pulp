@@ -3,8 +3,8 @@
 #include "cv_control.hpp"
 #include <pulp/format/processor.hpp>
 #include <pulp/midi/buffer.hpp>
-#include <pulp/runtime/triple_buffer.hpp>
 #include <pulp/runtime/external_input.hpp>
+#include <pulp/runtime/triple_buffer.hpp>
 #if !defined(PULP_WASM)
 #include <pulp/osc/osc.hpp>
 #endif
@@ -47,6 +47,7 @@ class FaceToneProcessor final : public format::Processor {
         phase_ = 0.0;
         gate_ = 0.0f;
         input_gate_.expire();
+        browser_gate_.expire();
         mapping_.expire();
         timeout_samples_ = static_cast<std::uint64_t>(std::max(1.0, sample_rate_ * 0.25));
 #if !defined(PULP_WASM)
@@ -66,6 +67,7 @@ class FaceToneProcessor final : public format::Processor {
         osc_.stop();
 #endif
         input_gate_.expire();
+        browser_gate_.expire();
         mapping_.expire();
     }
 
@@ -77,8 +79,20 @@ class FaceToneProcessor final : public format::Processor {
         const auto& published = input_.read();
         const auto verdict = input_gate_.submit(published, policy_);
         if (verdict == runtime::ExternalInputVerdict::accepted)
-            newest = ControlSample{input_gate_.sequence(), input_gate_.value(0, 0.0f), published.confidence, true};
+            newest = ControlSample{input_gate_.sequence(), input_gate_.value(0, 0.0f),
+                                   published.confidence, true};
 #endif
+        // Browser multi-value packets use the existing WAM SysEx sidecar, but
+        // still pass through the same bounded external-input policy as native
+        // providers before they can affect the control mapping.
+        for (const auto& sysex : midi_in.sysex()) {
+            if (const auto frame = decode_midi_sysex(sysex.data)) {
+                const auto verdict = browser_gate_.submit(*frame, browser_policy_);
+                if (verdict == runtime::ExternalInputVerdict::accepted)
+                    newest = ControlSample{browser_gate_.sequence(), browser_gate_.value(0, 0.0f),
+                                           frame->confidence, true};
+            }
+        }
         for (const auto& event : midi_in) {
             // A single short MIDI message carries one coherent sample on every
             // surface. This example reserves channel-16 pitch bend.
@@ -101,6 +115,7 @@ class FaceToneProcessor final : public format::Processor {
             mapping_.submit(*newest);
         } else {
             input_gate_.advance(output.num_samples(), policy_);
+            browser_gate_.advance(output.num_samples(), browser_policy_);
             mapping_.advance(output.num_samples(), timeout_samples_);
         }
 
@@ -125,6 +140,16 @@ class FaceToneProcessor final : public format::Processor {
     void submit_face_frame(FaceFrame frame) noexcept {
         publish_control({frame.sequence, frame.mouth_open, frame.confidence, frame.tracked});
     }
+#if !defined(PULP_WASM)
+    // Test seam that drives the same callback installed on the real OSC receiver.
+    void submit_osc_for_test(const osc::Message& message) {
+        on_osc(message);
+    }
+    const runtime::ExternalInputFrame<1>& published_control_for_test() {
+        return input_.read();
+    }
+#endif
+
     void expire_face_frame() noexcept {
         publish_control({0, 0.0f, 0.0f, false});
     }
@@ -148,15 +173,8 @@ class FaceToneProcessor final : public format::Processor {
 
 #if !defined(PULP_WASM)
     void on_osc(const osc::Message& message) {
-        if (message.address != "/pulp/cv/face" && message.address != "/pulp/control")
-            return;
-        if (message.args.size() < 3 || !std::holds_alternative<float>(message.args[0]) ||
-            !std::holds_alternative<float>(message.args[1]) ||
-            !std::holds_alternative<std::int32_t>(message.args[2]) ||
-            (message.args.size() > 3 && !std::holds_alternative<std::int32_t>(message.args[3])))
-            return;
-        publish_control({0, std::get<float>(message.args[0]), std::get<float>(message.args[1]),
-                         std::get<std::int32_t>(message.args[2]) != 0});
+        if (const auto sample = cv_control::decode_osc_control(message))
+            publish_control(*sample);
     }
 #endif
 
@@ -164,6 +182,8 @@ class FaceToneProcessor final : public format::Processor {
     runtime::TripleBuffer<runtime::ExternalInputFrame<1>> input_;
     runtime::ExternalInputGate<1> input_gate_;
     runtime::ExternalInputPolicy policy_{1, 0.6f, 12000, 1};
+    runtime::ExternalInputGate<16> browser_gate_;
+    runtime::ExternalInputPolicy browser_policy_{1, 0.6f, 12000, 0};
     std::uint64_t publication_sequence_ = 0;
     std::uint32_t epoch_ = 1;
     std::uint64_t midi_sequence_ = 0;
