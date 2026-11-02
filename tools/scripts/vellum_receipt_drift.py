@@ -20,8 +20,12 @@ the path and states ``vellum_inherits`` explicitly. Three event kinds count:
   It is the only vehicle for an exported path that is in neither a transferred
   slice nor a watch family.
 
-Paths the pin lists as frozen are exempt: a frozen path is not edited in Pulp
-at all, so there is no inheritance decision to record.
+Paths the pin lists as frozen owe no inheritance decision, because a frozen
+path is not edited in Pulp at all: its authoritative copy is Vellum's. A change
+to a frozen path fails unless a change event added by the same change covers it
+through its transferred slice with disposition ``framework-backport`` (bringing
+a named Vellum commit back) or ``emergency-exception``. A ``pulp-only`` change
+event does not unfreeze a path.
 
 The pin, the receipt copy and the slice map are always read at the BASE
 commit, so a change cannot exempt itself by editing them; a re-pin takes effect
@@ -60,6 +64,8 @@ EVENT_ID_RE = re.compile(r"^[0-9]{8}-[a-z0-9][a-z0-9-]{2,79}$")
 SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 MAX_EVENT_BYTES = 32 * 1024
+# The change-event dispositions that may touch a frozen path.
+FROZEN_EDIT_DISPOSITIONS = frozenset({"framework-backport", "emergency-exception"})
 MAX_RECEIPT_BYTES = 8 * 1024 * 1024
 # A directory holding an exported file with one of these suffixes is a source
 # directory of an exported target: a file added anywhere under it is compiled
@@ -315,6 +321,47 @@ def drifted_paths(
     return owed
 
 
+def frozen_edits(changes: Iterable[tuple[str, str]], pin: Pin) -> list[str]:
+    """Changed paths the pin freezes: each needs a backport or emergency event."""
+    return sorted({path for _, path in changes if _is_frozen(path, pin.frozen_paths)})
+
+
+def frozen_edit_coverage(
+    repo: pathlib.Path,
+    head: str,
+    changes: list[tuple[str, str]],
+    edits: list[str],
+    slice_paths: dict[str, list[str]],
+) -> set[str]:
+    """Frozen paths an added change event covers with an unfreezing disposition."""
+    covered: set[str] = set()
+    if not edits:
+        return covered
+    for status, path in changes:
+        if (
+            status != "A"
+            or posixpath.dirname(path) != CHANGE_EVENT_DIRECTORY
+            or not path.endswith(".json")
+        ):
+            continue
+        raw = _blob(repo, head, path, MAX_EVENT_BYTES)
+        if raw is None:
+            continue
+        event = _strict_json(raw, path)
+        if (
+            not isinstance(event, dict)
+            or event.get("kind") != "change"
+            or event.get("disposition") not in FROZEN_EDIT_DISPOSITIONS
+        ):
+            continue
+        slices = event.get("slices", [])
+        if not isinstance(slices, list) or not all(isinstance(x, str) for x in slices):
+            raise ReceiptDriftError(f"{path}: slices must be a list of slice ids")
+        patterns = [pattern for slice_id in slices for pattern in slice_paths.get(slice_id, [])]
+        covered.update(item for item in edits if any(_slice_matches(item, p) for p in patterns))
+    return covered
+
+
 def _existed_at(repo: pathlib.Path, commit: str) -> Callable[[str], bool]:
     def existed(path: str) -> bool:
         return _git(repo, "cat-file", "-e", f"{commit}:{path}", check=False).returncode == 0
@@ -481,7 +528,7 @@ def check(repo: pathlib.Path, base: str, head: str) -> dict[str, Any]:
     head_pin_raw = _blob(repo, head, PIN_PATH, MAX_EVENT_BYTES)
     if base_pin_raw is None and head_pin_raw is None:
         return {"status": "pass", "state": "inactive", "export_id": None,
-                "owed": {}, "missing": [], "conflicting": [], "events": []}
+                "owed": {}, "missing": [], "conflicting": [], "frozen": [], "events": []}
     if base_pin_raw is not None and head_pin_raw is None:
         raise ReceiptDriftError(
             f"{PIN_PATH} cannot be removed; retiring the receipt guard is a change "
@@ -508,23 +555,28 @@ def check(repo: pathlib.Path, base: str, head: str) -> dict[str, Any]:
     owed = drifted_paths(changes, receipt, pin, _existed_at(repo, receipt.pulp_sha))
     map_raw = _blob(repo, base, MAP_PATH, MAX_RECEIPT_BYTES)
     base_map = _strict_json(map_raw, MAP_PATH) if map_raw is not None else None
-    decisions, events = collect_decisions(
-        repo, head, changes, owed, pin, _transferred_slice_paths(base_map)
-    )
+    slice_paths = _transferred_slice_paths(base_map)
+    decisions, events = collect_decisions(repo, head, changes, owed, pin, slice_paths)
     missing = sorted(path for path, values in decisions.items() if not values)
     conflicting = sorted(path for path, values in decisions.items() if len(values) > 1)
+    edits = frozen_edits(changes, pin)
+    unfrozen = frozen_edit_coverage(repo, head, changes, edits, slice_paths)
+    frozen = [path for path in edits if path not in unfrozen]
     return {
-        "status": "fail" if missing or conflicting else "pass",
+        "status": "fail" if missing or conflicting or frozen else "pass",
         "state": "active",
         "export_id": pin.export_id,
         "owed": dict(sorted(owed.items())),
         "missing": missing,
         "conflicting": conflicting,
+        "frozen": frozen,
         "events": sorted(events),
     }
 
 
 def describe_failure(report: dict[str, Any]) -> str:
+    if report.get("frozen") and not report["missing"] and not report["conflicting"]:
+        return describe_frozen(report)
     lines = [
         f"changed paths exported by Vellum receipt {report['export_id']} need an "
         "explicit vellum_inherits decision"
@@ -551,5 +603,27 @@ def describe_failure(report: dict[str, Any]) -> str:
     lines.append(
         "  See .agents/skills/pulp-vellum-change-routing/SKILL.md, "
         '"Receipt mode".'
+    )
+    if report.get("frozen"):
+        lines.append("")
+        lines.append(describe_frozen(report))
+    return "\n".join(lines)
+
+
+def describe_frozen(report: dict[str, Any]) -> str:
+    lines = [
+        f"changed paths are frozen in Pulp since Vellum export {report['export_id']}; "
+        "their authoritative copy is Vellum's",
+        "",
+    ]
+    lines.extend(f"    - {path}" for path in report["frozen"])
+    lines.append("")
+    lines.append(
+        "  Fix: make the change in Vellum. To bring a Vellum commit back, or for an "
+        "emergency, add a change event"
+    )
+    lines.append(
+        f"  in {CHANGE_EVENT_DIRECTORY}/ naming the path's transferred slice with "
+        "disposition framework-backport or emergency-exception."
     )
     return "\n".join(lines)

@@ -84,24 +84,25 @@ design-import, UI compiler, bridge-contract, and SDK improvements land in Pulp;
 Vellum inherits them later through the package manifests and inheritance ledger.
 This decision does not transfer source authority.
 
-This is a temporary exception to "generic features and fixes originate in
-Vellum". While it holds, a Pulp change to a transferred-slice file that carries
-generic behavior uses disposition `pulp-only` with a rationale that starts
+This was a temporary exception to "generic features and fixes originate in
+Vellum". While it held, a Pulp change to a transferred-slice file that carried
+generic behavior used disposition `pulp-only` with a rationale that starts
 exactly with:
 
 > design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger)
 
-and adds the entry `vellum-inheritance-ledger/<event_id>.json` (see
-[`vellum-inheritance-ledger/README.md`](vellum-inheritance-ledger/README.md);
-`tools/scripts/vellum_inheritance_ledger_check.py` enforces it).
-Here `pulp-only` means "landed in Pulp", not "Pulp-specific": the prefix and the
-ledger entry are what distinguish an inherited generic change from Pulp-specific
+and added the entry `vellum-inheritance-ledger/<event_id>.json` (see
+[`vellum-inheritance-ledger/README.md`](vellum-inheritance-ledger/README.md)).
+There `pulp-only` meant "landed in Pulp", not "Pulp-specific": the prefix and the
+ledger entry distinguished an inherited generic change from Pulp-specific
 integration work.
 
-The exception ends per target, not globally: in the same Pulp change that
-switches a target to an exact installed Vellum package, that target's Pulp copy
-freezes and generic work on it originates in Vellum from then on. Until that
-change lands for a target, Pulp remains the editable source for it.
+The exception has ended for the transferred slices. Vellum's export
+`20261102-c35c0f1dafef` carries everything Pulp landed under it, and the change
+that pinned that receipt froze Pulp's copy of every transferred-slice path (the
+pin's `frozen_paths`, below). Generic work on those paths originates in Vellum.
+The inheritance ledger is retired with it: its entries stay as history, and no
+event owes a new one.
 
 ## Receipt mode: decisions for exported paths
 
@@ -117,6 +118,13 @@ every changed path the receipt exports, every path that produces a generated
 export input, and every file added under a directory that holds exported
 source. A change event covers its transferred slices' paths, an expansion-watch
 event covers its capability families' selections, and an export event under
-`.github/vellum-export-events/` covers the exact paths it lists. Paths the pin
-lists as frozen are exempt, because they are not edited in Pulp. The pin's
+`.github/vellum-export-events/` covers the exact paths it lists. The pin's
 README describes the event schema and how to re-pin a newer receipt.
+
+Paths the pin lists as frozen owe no decision, because they are not edited in
+Pulp: the pin freezes exactly the transferred slices' paths. A change to a
+frozen path fails unless a change event it adds covers the path's slice with
+disposition `framework-backport` (bringing a named Vellum commit back) or
+`emergency-exception`; a `pulp-only` event does not unfreeze it. Like the rest
+of the pin, `frozen_paths` is read at the base commit, so a freeze applies to
+the changes after the one that adds it.

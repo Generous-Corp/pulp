@@ -1,6 +1,13 @@
 # Vellum inheritance ledger entries
 
-One JSON file per change event that lands generic work in Pulp under the
+**Retired.** Vellum's export `20261102-c35c0f1dafef` carries everything these
+entries promised, and Pulp's copy of the transferred slices is frozen. No event
+owes an entry any more: whether Vellum inherits a change to an exported path is
+recorded by `vellum_freeze_check.py --receipt-mode` (see
+[`../vellum-extraction-freeze.md`](../vellum-extraction-freeze.md)). The entries
+stay as history, still checked against their events and still append-only.
+
+One JSON file per change event that landed generic work in Pulp under the
 temporary inheritance exception (see
 [`../vellum-extraction-freeze.md`](../vellum-extraction-freeze.md)). Rows
 recorded before this directory existed stay in the frozen
@@ -25,15 +32,10 @@ recorded: it is the first-parent `main` commit that added the event file, which
 Git already proves. Entries are append-only: add a new file and never edit or
 delete an existing one.
 
-`tools/scripts/vellum_inheritance_ledger_check.py` enforces the schema, the
-match with the event, and that every event claiming Vellum inherits it has an
-entry here or a row in the frozen ledger. An event claims inheritance when it
-sets `"vellum_inherits": true`, or, without that field, when its rationale
-starts with the design-import-refactor inheritance prefix or says "Vellum
-inherits" or "inherited by Vellum". `"vellum_inherits": false` records an
-explicit non-claim. Advisory wording such as "Vellum should inherit" is not a
-claim. A new event whose rationale mentions both Vellum and inheritance must
-set `vellum_inherits` explicitly. The checker also keeps the frozen ledger
+`tools/scripts/vellum_inheritance_ledger_check.py` enforces the schema and the
+match with the event for every existing entry. It no longer requires an entry
+for any event. A new event whose rationale mentions both Vellum and
+inheritance must still set `vellum_inherits` explicitly. The checker also keeps the frozen ledger
 frozen, and with `--base <ref>` it rejects any edit to or deletion of an entry
 that exists at that ref. The `vellum-inheritance-ledger` ctest runs it with
 `--base auto`: in GitHub Actions that is the base commit the event names
