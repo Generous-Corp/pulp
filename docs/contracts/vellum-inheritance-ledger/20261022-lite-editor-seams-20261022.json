@@ -1,0 +1,15 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261022-lite-editor-seams-20261022",
+  "slices": [
+    "canvas-kernel",
+    "retained-ui-kernel"
+  ],
+  "vellum_obligation": "Vellum inherits every edit the pull request made to exported files, including the PULP_LITE_EDITOR switches in text_shaper.cpp, font_resolver.cpp, canvas_widget.cpp and asset_manager.cpp: with the macro undefined they compile to the existing Skia bodies, which is how every Vellum unit builds them. The second compile of those four sources with PULP_LITE_EDITOR, inside the macOS plug-in lite-editor target, stays in Pulp for now: no Vellum unit carries a lite variant, so the re-export does not export that object set, and Vellum owes no lite-editor target until one is designed.",
+  "evidence": [
+    ".github/vellum-change-events/20261022-lite-editor-seams-20261022.json",
+    "https://github.com/Generous-Corp/pulp/pull/11027",
+    "Vellum export receipt 20261025-46cee5e4e6e2 lists the files this event's change edits",
+    "pulp-planning vellum-move/evidence/phase5-prep-post-export-drift-20261101.md (\"Labels that don't match what happens\")"
+  ]
+}
