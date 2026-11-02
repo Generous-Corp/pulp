@@ -13,14 +13,17 @@ publishes iOS device, iOS simulator, visionOS device, visionOS simulator,
 mac-x86_64, and `Skia.xcframework` slices that upstream does not. While
 upstream stays on m144, this fork is the active dependency.
 
-The chrome/m158 release supplies the active renderer pins. Its Linux archives
-temporarily remain on the known-good chrome/m157 assets until the m158
-BackupRefPtr link contract is recut. The m158 release also ships
-Windows x64 and native Windows ARM64. Its Skia branch tip is
+The chrome/m158 release ships all platform slices, including `linux-arm64`,
+Windows x64, and native Windows ARM64. Its Skia branch tip is
 `be7d7c3e996e567eda7dc9774274f7a0103cdb8c` at the start of the publishing
-workflow (`build-skia.yml` run `40626447857`, attempt 1). Every slice,
-including Windows ARM64 (built natively on `windows-11-arm`), comes from that
-one run and revision: the shipped headers of every archive are identical once
+workflow (`build-skia.yml` run `40626447857`, attempt 1). Every slice except
+Linux, including Windows ARM64 (built natively on `windows-11-arm`), comes from
+that one run and revision. The two Linux archives were re-cut from the same
+revision by run `41466672481` (skia-builder `a43f061b`) with
+`skia_use_partition_alloc = false`, because the first Linux archives referenced
+PartitionAlloc's `RawPtrBackupRefImpl` with no definition; the release notes'
+replacement ledger records both digests. The re-cut changed no shipped header.
+Across all of them, the shipped headers of every archive are identical once
 line endings are normalised, except that both Windows archives carry
 skia-builder's ARM64EC guard in `include/private/SkFeatures.h`
 (`&& !defined(_M_ARM64EC)` on the x86 CPU test, from
@@ -43,9 +46,8 @@ from the m151 re-cut, whose original zips accidentally leaked the CI runner's
 macOS 15 SDK through Dawn's separate CMake sub-build. These 13.0 stamps are
 recorded in `tools/deps/min_os.json`; Pulp's own floor lands slightly higher
 (macOS 13.4) because Apple's libc++ gates `std::to_chars(float)` — reached via
-`std::format` in the logging path — at 13.3. The Windows slices remain the
-`chrome/m158` assets; the Linux slices remain the `chrome/m157` assets until
-the recut is published.
+`std::format` in the logging path — at 13.3. The non-macOS slices remain the
+`chrome/m158` assets.
 
 ## Bundled Text and GPU Pins
 
@@ -154,7 +156,7 @@ The **`wasm-gpu`** slice is the exception, and the difference is load-bearing:
 |-----------|----------|--------------|-------|
 | `mac-gpu/` | macOS | arm64, x86_64, universal | mac-x86_64 only in the fork |
 | `win-gpu/` | Windows | x64, arm64 | release assets consumed by the CLI/SDK release matrix |
-| `linux-gpu/` | Linux | x64, arm64 | both slices published on the chrome/m157 release |
+| `linux-gpu/` | Linux | x64, arm64 | both slices published on the chrome/m158 release |
 | `ios-gpu/` | iOS device + simulator | arm64, arm64+x86_64 | fork-only slices |
 | `visionos-gpu/` | visionOS device + simulator | arm64 | fork-only slices |
 | `wasm-gpu/` | WebAssembly | wasm32 | |
@@ -188,8 +190,8 @@ Or run: `./tools/build-skia.sh <platform>` to build from source.
 |-------|---------|
 | `skia-build-ios-device-arm64-gpu-release.zip` | `56a76f22b30a2a045e7dc72bf645221b403408a2d8aaf01081ffe05937e052ca` |
 | `skia-build-ios-simulator-arm64-x86_64-gpu-release.zip` | `e446cbfa3302026ce055dd9eae980f466cac89f8f9ad50b07e5b2aa4989d1488` |
-| `skia-build-linux-arm64-gpu-release.zip` | `e591268124be249b2a2f56c5042e1e7865bd04556d509c6e4937a04251964435` |
-| `skia-build-linux-x64-gpu-release.zip` | `bf74ae1bfd5abd9f49e57c3c6ae6d94c580bbbfe575256fa5077272e1ce0c187` |
+| `skia-build-linux-arm64-gpu-release.zip` | `053833562a4ec4eeb97d71515fdf437cad7b6e8d668ca7e7d8b486f65528aaf9` |
+| `skia-build-linux-x64-gpu-release.zip` | `74c31d020cd18f1f9e544b1d8440bcc293e82982e50a9777a3940d84e2ccd666` |
 | `manifest-key-mac-arm64--skia-build-mac-universal-gpu-release.zip` | `dca73c0eee5b0f6d129fe357d0754f7165c6b436051e0de947aeedd3e1bde250` |
 | `skia-build-mac-universal-gpu-release.zip` | `dca73c0eee5b0f6d129fe357d0754f7165c6b436051e0de947aeedd3e1bde250` |
 | `skia-build-mac-x86_64-gpu-release.zip` | `2a795f54bb22feb46a499d56740f98a15b6e95bfdf5923b82b222ef95edb2f47` |
