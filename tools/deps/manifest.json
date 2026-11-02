@@ -1135,11 +1135,13 @@
           },
           "linux-arm64": {
             "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m157/skia-build-linux-arm64-gpu-release.zip",
-            "sha256": "e591268124be249b2a2f56c5042e1e7865bd04556d509c6e4937a04251964435"
+            "sha256": "e591268124be249b2a2f56c5042e1e7865bd04556d509c6e4937a04251964435",
+            "release_tag": "chrome/m157"
           },
           "linux-x64": {
             "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m157/skia-build-linux-x64-gpu-release.zip",
-            "sha256": "bf74ae1bfd5abd9f49e57c3c6ae6d94c580bbbfe575256fa5077272e1ce0c187"
+            "sha256": "bf74ae1bfd5abd9f49e57c3c6ae6d94c580bbbfe575256fa5077272e1ce0c187",
+            "release_tag": "chrome/m157"
           },
           "mac-arm64": {
             "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m158/skia-build-mac-universal-gpu-release.zip",

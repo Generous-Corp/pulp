@@ -122,6 +122,22 @@ class CheckSkiaPinTests(unittest.TestCase):
         self.assertIn("SHA-256", joined)
         self.assertIn("URL", joined)
 
+    def test_asset_release_tag_overrides_global_branch(self) -> None:
+        import copy
+
+        manifest_data = copy.deepcopy(_MANIFEST_TEMPLATE)
+        manifest_data["dependencies"][0]["determinism"]["skia_branch"] = "chrome/m158"
+        manifest_data["dependencies"][0]["determinism"]["release_assets"][
+            "linux-x64"
+        ]["release_tag"] = "chrome/m144"
+        manifest_path = _write_manifest(
+            Path(self._tmpdir.name) / "manifest.json", manifest_data
+        )
+        docker = check_skia_pin.read_dockerfile_pin(self._dockerfile())
+        manifest = check_skia_pin.read_manifest_pin(manifest_path)
+        self.assertEqual(manifest["release_tag"], "chrome/m144")
+        self.assertEqual(check_skia_pin.compare(docker, manifest), [])
+
     def test_missing_arg_line_raises_check_error(self) -> None:
         body = "\n".join(
             line

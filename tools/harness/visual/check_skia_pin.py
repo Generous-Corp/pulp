@@ -123,8 +123,11 @@ def read_manifest_pin(path: Path = MANIFEST_PATH) -> Dict[str, str]:
                 f"{path} release_assets['{DOCKER_PLATFORM}'] missing '{key}'"
             )
 
+    # Most platforms use the renderer's branch tag. A platform can carry a
+    # temporary fallback archive from an older release while that slice is
+    # being recut; the asset-level tag makes that mixed provider explicit.
     return {
-        "release_tag": determinism["skia_branch"],
+        "release_tag": asset.get("release_tag", determinism["skia_branch"]),
         "sha256": asset["sha256"],
         "url": asset["url"],
         "python_version": determinism["skia_python_smoke_version"],

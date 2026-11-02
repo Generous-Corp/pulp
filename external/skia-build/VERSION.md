@@ -15,8 +15,8 @@ upstream stays on m144, this fork is the active dependency.
 
 The chrome/m158 release supplies the active renderer pins. Its Linux archives
 temporarily remain on the known-good chrome/m157 assets until the m158
-BackupRefPtr link contract is recut. The m158 release also ships `linux-arm64`,
-Windows x64, and native Windows ARM64. Its Skia branch tip is
+BackupRefPtr link contract is recut. The m158 release also ships
+Windows x64 and native Windows ARM64. Its Skia branch tip is
 `be7d7c3e996e567eda7dc9774274f7a0103cdb8c` at the start of the publishing
 workflow (`build-skia.yml` run `40626447857`, attempt 1). Every slice,
 including Windows ARM64 (built natively on `windows-11-arm`), comes from that
@@ -43,8 +43,9 @@ from the m151 re-cut, whose original zips accidentally leaked the CI runner's
 macOS 15 SDK through Dawn's separate CMake sub-build. These 13.0 stamps are
 recorded in `tools/deps/min_os.json`; Pulp's own floor lands slightly higher
 (macOS 13.4) because Apple's libc++ gates `std::to_chars(float)` — reached via
-`std::format` in the logging path — at 13.3. The non-macOS slices remain the
-`chrome/m158` assets.
+`std::format` in the logging path — at 13.3. The Windows slices remain the
+`chrome/m158` assets; the Linux slices remain the `chrome/m157` assets until
+the recut is published.
 
 ## Bundled Text and GPU Pins
 
@@ -153,7 +154,7 @@ The **`wasm-gpu`** slice is the exception, and the difference is load-bearing:
 |-----------|----------|--------------|-------|
 | `mac-gpu/` | macOS | arm64, x86_64, universal | mac-x86_64 only in the fork |
 | `win-gpu/` | Windows | x64, arm64 | release assets consumed by the CLI/SDK release matrix |
-| `linux-gpu/` | Linux | x64, arm64 | both slices published on the chrome/m158 release |
+| `linux-gpu/` | Linux | x64, arm64 | both slices published on the chrome/m157 release |
 | `ios-gpu/` | iOS device + simulator | arm64, arm64+x86_64 | fork-only slices |
 | `visionos-gpu/` | visionOS device + simulator | arm64 | fork-only slices |
 | `wasm-gpu/` | WebAssembly | wasm32 | |
