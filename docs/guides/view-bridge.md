@@ -6,6 +6,9 @@ CLAP, and standalone today). It owns the constructed view tree, dispatches
 open / close / resize callbacks, and lets one processor serve multiple
 simultaneous views (editor + inspector).
 
+For an editor that does not depend on Pulp's view layer, see the UI-agnostic
+[editor-host contract](editor-host-contract.md) (`Processor::editor_factory()`).
+
 ## Why it exists
 
 Before ViewBridge each format adapter called `build_editor_ui(store, …)`
