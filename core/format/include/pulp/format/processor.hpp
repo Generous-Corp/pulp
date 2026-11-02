@@ -4,6 +4,7 @@
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/mpe_buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
+#include <pulp/format/editor_host_kind.hpp>
 #include <pulp/format/process_block.hpp>
 #include <pulp/runtime/node_abi.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
@@ -86,15 +87,7 @@ inline std::unordered_map<const void*, bool>& standalone_processors() {
 
 }  // namespace detail
 
-/// Where a processor's editor lives, as far as the keyboard is concerned.
-///
-/// `plugin`: a DAW or other host owns the window and the keyboard. Plain keys
-/// are the host's (transport, Musical Typing, key commands); an editor should
-/// consume them only while its own focused field or open popup needs them.
-///
-/// `standalone`: the Pulp standalone app owns the window, so the editor may
-/// bind plain-key global shortcuts.
-enum class EditorHostKind : std::uint8_t { plugin, standalone };
+class EditorFactory;
 
 /// The plugin processor interface.
 ///
@@ -1219,6 +1212,25 @@ public:
     /// preserve additive-only vtable ordering (node_abi_gate).
     virtual bool wants_au_scheduled_parameter_slices() const {
         return true;
+    }
+
+    /// The UI-agnostic editor factory for this processor, or null.
+    ///
+    /// A non-null factory builds this processor's editors through the
+    /// editor-host contract in `pulp/format/editor_host.hpp`: one
+    /// `EditorFactory` creates an `Editor` per window and role, each bound to
+    /// the processor through an `EditorContext`. The factory belongs to the
+    /// processor and must outlive every editor it creates; the returned
+    /// pointer is non-owning. Called on the host's main thread.
+    ///
+    /// Null (the default) leaves the processor on the existing editor path
+    /// (`has_editor()`, `create_view()` and the hooks around them), which
+    /// format adapters keep using unchanged. A processor with no factory and
+    /// `has_editor() == false` is headless.
+    ///
+    /// Appended to preserve additive-only vtable ordering (node_abi_gate).
+    virtual EditorFactory* editor_factory() {
+        return nullptr;
     }
 
 private:

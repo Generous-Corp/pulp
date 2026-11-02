@@ -102,3 +102,21 @@ The exception ends per target, not globally: in the same Pulp change that
 switches a target to an exact installed Vellum package, that target's Pulp copy
 freezes and generic work on it originates in Vellum from then on. Until that
 change lands for a target, Pulp remains the editable source for it.
+
+## Receipt mode: decisions for exported paths
+
+Vellum's mirror is a copy of named Pulp files at one Pulp commit, recorded in an
+export receipt. Until Pulp's copy of a file is frozen, a Pulp change to it is
+either carried by the next re-export or deliberately left behind, and the diff
+alone does not say which. `vellum_freeze_check.py --receipt-mode`, run by the
+required "Vellum freeze" check, makes that a recorded decision.
+
+It reads the receipt copy pinned under `.github/vellum-export-receipt/` at the
+change's base commit and requires an added event stating `vellum_inherits` for
+every changed path the receipt exports, every path that produces a generated
+export input, and every file added under a directory that holds exported
+source. A change event covers its transferred slices' paths, an expansion-watch
+event covers its capability families' selections, and an export event under
+`.github/vellum-export-events/` covers the exact paths it lists. Paths the pin
+lists as frozen are exempt, because they are not edited in Pulp. The pin's
+README describes the event schema and how to re-pin a newer receipt.

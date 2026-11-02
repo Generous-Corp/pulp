@@ -9,6 +9,14 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1430"></a>
+## [1.43.0] - 2026-11-01
+
+- release/version bump ([#11393](https://github.com/Generous-Corp/pulp/pull/11393))
+- codex/r7 plugin status clean 20261101 ([#11390](https://github.com/Generous-Corp/pulp/pull/11390))
+- x9 voice template phase ([#11392](https://github.com/Generous-Corp/pulp/pull/11392))
+- x9 completion 20261101 ([#11391](https://github.com/Generous-Corp/pulp/pull/11391))
+
 <a id="v1420"></a>
 ## [1.42.0] - 2026-11-01
 
@@ -12038,6 +12046,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.43.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.43.0
 [1.42.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.42.0
 [1.41.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.41.0
 [1.40.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.40.0

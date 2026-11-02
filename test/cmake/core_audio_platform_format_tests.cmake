@@ -298,6 +298,12 @@ pulp_add_test_suite(pulp-test-format-hardening GROUP pulp-test-group-cap-format
 pulp_add_test_suite(pulp-test-host-parameter-edit GROUP pulp-test-group-cap-format
     LIBRARIES pulp::format pulp::state)
 
+# Editor-host contract: the default ParamPort's begin/set/end stream as the
+# host receives it, listener delivery, several editors on one port, and a
+# factory building an editor and an inspector over one processor.
+pulp_add_test_suite(pulp-test-editor-host GROUP pulp-test-group-cap-format
+    LIBRARIES pulp::format pulp::state)
+
 # Plugin registry: legacy single global slot + keyed multi-plugin-bundle table.
 pulp_add_test_suite(pulp-test-plugin-registry GROUP pulp-test-group-cap-format
     LIBRARIES pulp::format)

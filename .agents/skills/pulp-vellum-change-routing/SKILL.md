@@ -435,6 +435,55 @@ tree that edits one pinned path without regenerating, `check` exits 1 naming two
 drifts before `resolve` and 0 naming none after. Any cross-check of `resolve`
 has to be read before it runs.
 
+## Receipt mode: an exported path needs an explicit `vellum_inherits`
+
+The "Vellum freeze" job also runs `vellum_freeze_check.py --receipt-mode`
+(implemented in `tools/scripts/vellum_receipt_drift.py`). It reads the copy of
+Vellum's newest mirror receipt pinned in `.github/vellum-export-receipt/` and
+fails a change that edits, adds or deletes an exported path, edits a path a
+generated export input is produced from, or adds any file under a directory
+holding exported source, unless an event the same change ADDS covers that path
+and sets `vellum_inherits` to `true` or `false`:
+
+- a change event covers the paths of the transferred slices it names (read from
+  the BASE ownership map, so widening a slice in the same change covers nothing);
+- an expansion-watch event covers what its capability families select;
+- an export event in `.github/vellum-export-events/` (kind
+  `exported-path-change`, schema in `.github/vellum-export-receipt/README.md`)
+  covers exactly the paths it lists. It is the only vehicle for an exported
+  path in neither a transferred slice nor a watch family, such as
+  `core/state/**` or `core/runtime/**`.
+
+Traps:
+
+- A change event with `disposition: pulp-only` and no `vellum_inherits` does not
+  count. That combination let edits to exported files land with no record of
+  whether the next re-export carries them.
+- Two added events that cover one path with different values fail as a
+  conflict. A broad watch event with `false` and a precise export event with
+  `true` for the same path is a conflict, not an override.
+- An export event may list only paths this change owes a decision for; a stray
+  path fails, so an event cannot pre-authorise later edits.
+- The pin, the receipt copy and `frozen_paths` are read at the BASE commit. A
+  change cannot exempt itself by editing them; a re-pin applies to the changes
+  after it, and deleting the pin fails.
+- A file added to an exported source directory owes a decision even though no
+  receipt row names it, and so does every later edit or deletion of it while it
+  postdates the export commit: it compiles into an exported target, and the next
+  re-export picks it up. A file that existed at the export commit but was not
+  exported (another platform's source) owes nothing.
+- The receipt's `pulp_sha` must be a commit in the checkout and an ancestor of
+  the head, so the workflow's full-history checkout is load-bearing.
+- Receipt mode runs in the untrusted "Vellum freeze" job only, which executes
+  the change's own copy of the script. The trusted gate does not run it yet;
+  adding it there in the same change would call a flag the base copy lacks and
+  fail that change's merge group.
+- The pin is data a reviewer must read. A change to `frozen_paths` or a swapped
+  receipt is only parsed for shape and self-consistency, and takes effect for
+  every later change, so review a pin edit as an ownership decision. Nothing yet
+  checks the receipt copy against Vellum's blob; the trusted gate, which holds a
+  Vellum reader token, is where that check belongs.
+
 ## The "Vellum freeze" CI job runs two checks, and the second is the one that fails
 
 `.github/workflows/vellum-freeze-check.yml` runs `vellum_freeze_check.py` **and**
