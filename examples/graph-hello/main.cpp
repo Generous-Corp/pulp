@@ -19,16 +19,21 @@ int main() {
         return 2;
     }
 
-    graph.set_limits({.max_nodes = 3, .max_connections = 2, .max_ports = 3,
-                      .max_block_size = 64, .max_estimated_work_units = 4096});
+    graph.set_limits({.max_nodes = 3,
+                      .max_connections = 2,
+                      .max_ports = 3,
+                      .max_block_size = 64,
+                      .max_estimated_work_units = 4096});
     if (!graph.validate_generated_graph(16).accepted) {
         std::cerr << "graph validation failed\n";
         return 3;
     }
 
     OfflineSignalGraphHost host(graph);
-    if (!host.prepare({.sample_rate = 48000.0, .block_frames = 16,
-                       .input_channels = 1, .output_channels = 1})) {
+    if (!host.prepare({.sample_rate = 48000.0,
+                       .block_frames = 16,
+                       .input_channels = 1,
+                       .output_channels = 1})) {
         std::cerr << "offline prepare failed\n";
         return 4;
     }
