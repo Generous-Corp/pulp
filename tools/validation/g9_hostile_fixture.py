@@ -26,9 +26,8 @@ CASES = {
 def run_case(name: str, timeout: float, out: Path) -> dict:
     code = "import sys; " + CASES[name]
     if name == "descendant":
-        pid_file = str(out / f"{name}.child.pid")
-        child_code = f"import os,time; open({pid_file!r}, 'w').write(str(os.getpid())); time.sleep(30)"
-        code = f"import sys,subprocess; subprocess.Popen([sys.executable, '-c', {child_code!r}], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); time.sleep(30)"
+        code = code.replace("subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)'])",
+                            "subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)")
     started = time.monotonic()
     proc = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE, text=True, encoding="utf-8")
@@ -37,23 +36,17 @@ def run_case(name: str, timeout: float, out: Path) -> dict:
         stdout, stderr = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
         timed_out = True
-        if name == "descendant":
-            time.sleep(0.2)
         proc.send_signal(signal.SIGTERM)
         stdout, stderr = proc.communicate(timeout=2)
     descendant_pid = None
     descendant_alive_after_parent = False
     if name == "descendant":
         try:
-            pid_path = out / f"{name}.child.pid"
-            if pid_path.exists():
-                descendant_pid = int(pid_path.read_text(encoding="utf-8").strip())
-            if descendant_pid is None:
-                raise FileNotFoundError
+            descendant_pid = int(stdout.strip().splitlines()[0])
             os.kill(descendant_pid, 0)
             descendant_alive_after_parent = True
             os.kill(descendant_pid, signal.SIGTERM)
-        except (ValueError, IndexError, FileNotFoundError, ProcessLookupError, PermissionError):
+        except (ValueError, IndexError, ProcessLookupError, PermissionError):
             pass
     record = {
         "case": name, "pid": proc.pid, "returncode": proc.returncode,
