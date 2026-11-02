@@ -1204,6 +1204,8 @@ if(PULP_ENABLE_RMLUI)
         pulp-mcp
         pulp-scan-worker
         pulp-import-design
+        pulp-view-rmlui
+        pulp-rmlui-lua
         rmlui
         rmlui_core
         rmlui_debugger)
