@@ -1,0 +1,26 @@
+{
+  "goal": "G-10 spectral evidence",
+  "date": "2026-11-02",
+  "branch": "codex/g10-spectral-20261102",
+  "head": "0f616a440cecdbdaff6234be48f682eec1184587",
+  "platform_scope": "macOS arm64 source checkout",
+  "verdict": "PARTIAL",
+  "change_scope": [
+    "docs/reports/g10-spectral-evidence-20261102.md",
+    "docs/validation/g10-spectral/evidence.json"
+  ],
+  "positive_controls": [
+    "SignalGraph::add_processor_node accepts format::Processor or ProcessorNodeInstance",
+    "ProcessorNode provides ProcessBlock graph binding",
+    "SpectralMaskProcessor exposes typed planar block and complex frame APIs"
+  ],
+  "planted_negative_controls": [
+    "SpectralMaskProcessor is not a format::Processor and cannot satisfy add_processor_node",
+    "ProcessorNode has no typed complex-frame adapter",
+    "runtime ProcessorNode serialization is intentionally unavailable"
+  ],
+  "typed_frame_gap": "A public adapter contract is missing for block-to-frame scheduling, ownership, latency, and frame-stage composition.",
+  "build_gate": "N/A: no code or build-system files changed; build/ absent",
+  "pr": "https://github.com/Generous-Corp/pulp/pull/11427",
+  "next_action": "Lead surface:1000120036 must assign and specify the typed-frame adapter contract before runtime wiring."
+}

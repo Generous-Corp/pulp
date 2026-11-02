@@ -7,38 +7,36 @@ description: Route repository-qualified changes across Pulp and Vellum using Pul
 
 ## Design-import refactor event contract
 
-The design-import refactor keeps generic importer, compiler, bridge-contract,
-and SDK work in Pulp until each target flips: the exception ends for a target in
-the same Pulp change that switches it to an exact installed Vellum package and
-freezes its Pulp copy (see `docs/contracts/vellum-extraction-freeze.md`). Source
-authority being `active` in `.github/vellum-ownership.json` does not end it. Two independent event kinds
-remain in force: a **watch** event under
+The design-import refactor's inheritance exception (owner decision 2026-10-04)
+has ended for the transferred slices. Vellum's export `20261102-0f616a440cec`
+carries everything that landed under it, and Pulp's copy of every
+transferred-slice path is frozen: the receipt pin's `frozen_paths` lists them
+(see `docs/contracts/vellum-extraction-freeze.md`). Generic work on a frozen
+path originates in Vellum. A Pulp change to one fails receipt mode unless the
+change event it adds names the path's slice with disposition
+`framework-backport` or `emergency-exception`; a `pulp-only` event, with or
+without the old prefix
+`design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger)`,
+does not unfreeze it.
+
+Two independent event kinds remain in force: a **watch** event under
 `.github/vellum-expansion-watch-events/` for watched capability-family paths,
 and a **change** event under `.github/vellum-change-events/` for a transferred
-slice. A planned change event uses disposition `pulp-only` and its rationale
-starts with the exact prefix:
+slice. The watch event has `disposition: watch-only-no-authority` and
+`authority_effect: none`.
 
-`design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger)`
+The inheritance ledger is retired. `docs/contracts/vellum-inheritance-ledger/`
+and the frozen `docs/contracts/vellum-inheritance-ledger.md` stay as history:
+`vellum_inheritance_ledger_check.py` (ctest `vellum-inheritance-ledger`) still
+checks every existing entry against its event, keeps entries append-only and the
+frozen file frozen, but no event owes an entry. Do not add new entries;
+receipt mode's `vellum_inherits` decision is the record now.
 
-The watch event has `disposition: watch-only-no-authority` and
-`authority_effect: none`. Record every such change event as its own entry file
-`docs/contracts/vellum-inheritance-ledger/<event_id>.json` (schema in that
-directory's README; `slices` must equal the event's). The older
-`docs/contracts/vellum-inheritance-ledger.md` is frozen: one shared file made
-concurrent pull requests conflict, so `vellum_inheritance_ledger_check.py` (ctest
-`vellum-inheritance-ledger`) rejects any change to it and any prefixed event
-without an entry. Do not use
-`emergency-exception` or `framework-backport` for this planned program.
-
-Watch events count too. An expansion-watch or change event whose rationale says
-"Vellum inherits" or "inherited by Vellum" owes an entry exactly as a prefixed
-change event does; the entry's `slices` then equals the watch event's
-`capability_families`. A NEW event whose rationale so much as mentions Vellum
-and inheritance must state its intent with the optional boolean
-`"vellum_inherits": true|false`, which both event schemas accept. Without it the
-ledger check fails, even for wording like "records an inheritance obligation
-for Vellum" that claims nothing. Free-text detection only backstops events
-already on main. The trusted "Vellum freeze" job validates a PR's events with
+A NEW event whose rationale so much as mentions Vellum and inheritance must
+state its intent with the optional boolean `"vellum_inherits": true|false`,
+which both event schemas accept. Without it the ledger check still fails, even
+for wording like "records an inheritance obligation for Vellum" that claims
+nothing. The trusted "Vellum freeze" job validates a PR's events with
 the BASE branch's schema, so a pull request cannot use an event field that the
 same pull request adds to the schema; word the rationale so it needs no field
 instead.
@@ -464,6 +462,12 @@ Traps:
   `true` for the same path is a conflict, not an override.
 - An export event may list only paths this change owes a decision for; a stray
   path fails, so an event cannot pre-authorise later edits.
+- A frozen path (the pin's `frozen_paths`, exactly the transferred slices'
+  paths) owes no `vellum_inherits` decision but cannot be edited: the report's
+  `frozen` list fails the check unless an added change event covering the
+  path's slice has disposition `framework-backport` or `emergency-exception`.
+  A directory entry in `frozen_paths` that no transferred slice covers cannot
+  be unfrozen by any event; only a re-pin can.
 - The pin, the receipt copy and `frozen_paths` are read at the BASE commit. A
   change cannot exempt itself by editing them; a re-pin applies to the changes
   after it, and deleting the pin fails.

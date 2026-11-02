@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
-"""Check the sharded Vellum inheritance ledger.
+"""Keep the retired Vellum inheritance ledger intact as history.
 
-Every change event that lands generic work in Pulp under the temporary
-inheritance exception owes a ledger entry: one JSON file per event under
-docs/contracts/vellum-inheritance-ledger/, or a row in the frozen ledger that
-predates the directory. This covers both the original change-event records
-and the expansion-watch records used by the extraction review. The checker
-keeps the frozen file frozen, validates every entry against its event, and,
-with --base, rejects edits to or deletion of an existing entry and requires
-every event added since the base whose rationale mentions Vellum and
-inheritance to state `vellum_inherits` explicitly. `--base auto` resolves the
-base from the GitHub event in Actions (a merge-group checkout has no
-origin/main) and to origin/main elsewhere.
+The ledger recorded, per change event, that Vellum would inherit generic work
+landed in Pulp under the temporary inheritance exception. It is retired: drift
+from Vellum's last export is now guarded by `vellum_freeze_check.py
+--receipt-mode`, which requires an explicit `vellum_inherits` decision on every
+change to an exported path, and the transferred slices are frozen in Pulp. No
+event owes a ledger entry any more.
+
+What remains is history. The checker keeps the frozen file frozen, validates
+every existing entry against its event, and, with --base, rejects edits to or
+deletion of an existing entry and requires every event added since the base
+whose rationale mentions Vellum and inheritance to state `vellum_inherits`
+explicitly. `--base auto` resolves the base from the GitHub event in Actions (a
+merge-group checkout has no origin/main) and to origin/main elsewhere.
 """
 
 from __future__ import annotations
@@ -40,15 +42,6 @@ INHERITANCE_PREFIX = (
     "design-import-refactor: generic change landed in Pulp per owner decision "
     "2026-10-04; Vellum inherits (see inheritance ledger)"
 )
-# An affirmative inheritance claim in free text: "Vellum inherits",
-# "Vellum's JS UI runtime inherits", "inherited by Vellum". Advisory phrasing
-# ("Vellum should inherit", "not a shape Vellum should inherit") is not a
-# claim, and "inherits nothing" is an explicit non-claim.
-INHERITANCE_CLAIM = re.compile(
-    r"\bVellum(?:'s(?:\s+[\w-]+){1,6})?\s+inherits\b(?!\s+nothing)"
-    r"|(?<!not\s)\binherited\s+by\s+Vellum\b",
-    re.IGNORECASE,
-)
 MENTIONS_VELLUM_INHERITANCE = re.compile(
     r"vellum.*inherit|inherit.*vellum", re.IGNORECASE | re.DOTALL
 )
@@ -64,24 +57,6 @@ def load_object(path: Path) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"{path}: expected a JSON object")
     return value
-
-
-def claims_vellum_inheritance(event: dict[str, Any]) -> bool:
-    """Whether an event records that Vellum inherits its change.
-
-    An explicit boolean ``vellum_inherits`` field decides on its own. Without
-    it, the legacy rationale prefix or an affirmative claim in the rationale
-    counts.
-    """
-    explicit = event.get("vellum_inherits")
-    if isinstance(explicit, bool):
-        return explicit
-    rationale = event.get("rationale")
-    if not isinstance(rationale, str):
-        return False
-    return rationale.startswith(INHERITANCE_PREFIX) or bool(
-        INHERITANCE_CLAIM.search(rationale)
-    )
 
 
 def frozen_event_ids(text: str) -> set[str]:
@@ -298,23 +273,6 @@ def check(root: Path, base: str | None = None) -> list[str]:
                         f"row in {FROZEN_LEDGER}"
                     )
                 recorded.add(event_id)
-    event_paths = list((root / EVENTS_DIR).glob("*.json"))
-    event_paths.extend((root / EXPANSION_EVENTS_DIR).glob("*.json"))
-    for event_path in sorted(event_paths):
-        try:
-            event = load_object(event_path)
-        except ValueError as error:
-            errors.append(str(error))
-            continue
-        claims_inheritance = claims_vellum_inheritance(event)
-        if claims_inheritance:
-            event_id = event.get("event_id", event_path.stem)
-            if event_id not in recorded:
-                errors.append(
-                    f"{event_path.relative_to(root).as_posix()}: event {event_id} "
-                    f"claims Vellum inherits it but has no entry in {ENTRIES_DIR}/ "
-                    f"or {FROZEN_LEDGER}"
-                )
     if base is not None:
         try:
             revision, form = resolve_base(root, base)
