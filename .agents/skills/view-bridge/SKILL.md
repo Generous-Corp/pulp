@@ -2149,9 +2149,14 @@ is `docs/guides/editor-host-contract.md`. Things that are easy to get wrong:
   valid; `invalidate()` means the host already destroyed (or is destroying) the
   window, so the editor must not touch it or call the host again.
 - **`Editor` and `EditorContext` are implemented across a binary boundary.**
-  Appending a virtual later is not free for a prebuilt editor or host, so a
-  shape question (a new host call, a new editor callback) is cheaper to settle
-  before the first adapter consumes the contract.
+  Appending a virtual later is not free for a prebuilt editor or host. A new
+  host capability goes through `EditorContext::query_extension(id)` (a stable,
+  versioned id; null when the host lacks it), not a new virtual. The GPU device
+  is not an extension: editors get it from the shared GPU runtime by role.
+- **Default editors are wired per plug-in.** `pulp_add_plugin(... UI <package>)`
+  is meant to generate a hook in each plug-in binary that returns the package's
+  factory, like VST3's `createView()`. Do not add a process-wide factory
+  registration: two plug-ins in one host would override each other.
 
 ### Rich f64 fallback scratch follows the active bus layout
 

@@ -17,7 +17,7 @@ until they do.
 |---|---|
 | `EditorFactory` | Builds an `Editor` for `(Processor&, EditorContext&, EditorRole)`, and can `prewarm()` its caches on a background thread before the first open. A processor returns it from `Processor::editor_factory()`; null (the default) means no factory. |
 | `Editor` | One editor in one native window: `attach` / `detach`, `size` / `set_size` / `size_hints` / `adjust_size`, `idle`, `visibility_changed`, `focus_changed`, `offer_key`, `parameter_highlight`, `automation`, and `invalidate`. |
-| `EditorContext` | What the host gives the editor: `params()`, `visuals()`, `request_resize()`, `host_action()`, `host_kind()`. |
+| `EditorContext` | What the host gives the editor: `params()`, `visuals()`, `request_resize()`, `host_action()`, `host_kind()`, and `query_extension()` for capabilities added later. |
 | `ParamPort` | Parameter info, `get`, `begin` / `set` / `end`, normalized helpers and listeners. |
 | `StateStoreParamPort` | The default `ParamPort`, over the processor's `StateStore`. |
 | `VisualPort` | Read access to the lock-free values and meters the audio thread publishes. |
@@ -25,6 +25,27 @@ until they do.
 
 Roles are `editor`, `inspector` and `settings`; several editors, of one role or
 several, can be alive at once over one processor.
+
+## How a plug-in gets its default editor
+
+A plug-in's editor is wired per plug-in, never by a process-wide registration.
+`pulp_add_plugin(... UI <package>)` generates a hook in that plug-in's own
+binary that returns the named UI package's `EditorFactory`, the way a VST3
+plug-in supplies its own view from `createView()`. Several plug-ins loaded into
+one host process therefore never share or override each other's editor choice.
+That generator is not built yet; until it is, a processor provides a factory by
+overriding `Processor::editor_factory()`.
+
+## Extending the contract
+
+`Editor` and `EditorContext` are implemented in different binaries (a UI
+package, a format adapter), so a virtual appended to either breaks a prebuilt
+one. New host capabilities go through `EditorContext::query_extension(id)`
+instead: the id is a stable, versioned string naming an interface, the host
+returns a pointer to it (owned by the host, valid while the context lives) or
+null when it does not offer it, and the default returns null. The GPU device is
+not one of these: an editor acquires it from the shared GPU runtime with a
+role tag.
 
 ## Threading
 

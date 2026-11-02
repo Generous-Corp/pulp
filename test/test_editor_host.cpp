@@ -15,6 +15,7 @@
 
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -334,6 +335,38 @@ class TestContext final : public EditorContext {
     ParamPort& port_;
 };
 
+/// A host that offers one extension beyond the base contract.
+struct ExampleExtension {
+    int answer = 42;
+};
+
+class ExtendedContext final : public EditorContext {
+  public:
+    explicit ExtendedContext(ParamPort& port) : port_(port) {}
+    ParamPort& params() override {
+        return port_;
+    }
+    VisualPort* visuals() override {
+        return nullptr;
+    }
+    bool request_resize(const EditorSize&) override {
+        return false;
+    }
+    bool host_action(const HostActionRequest&) override {
+        return false;
+    }
+    EditorHostKind host_kind() const override {
+        return EditorHostKind::standalone;
+    }
+    void* query_extension(std::string_view id) override {
+        return id == "dev.pulp.test.example/1" ? &extension_ : nullptr;
+    }
+
+  private:
+    ParamPort& port_;
+    ExampleExtension extension_;
+};
+
 class GainProcessor : public Processor {
   public:
     PluginDescriptor descriptor() const override {
@@ -474,4 +507,21 @@ TEST_CASE("VisualPort::find matches a channel by name and shape", "[editor-host]
     REQUIRE(visuals.find("out", VisualChannelShape::meter) == std::size_t{1});
     REQUIRE_FALSE(visuals.find("gain", VisualChannelShape::meter));
     REQUIRE_FALSE(visuals.find("missing", VisualChannelShape::scalar));
+}
+
+TEST_CASE("query_extension is null by default and reaches a host's extension", "[editor-host]") {
+    Fixture f;
+    StateStoreParamPort port(f.store);
+
+    TestContext plain(port);
+    EditorContext& base = plain;
+    REQUIRE(base.query_extension("dev.pulp.test.example/1") == nullptr);
+
+    ExtendedContext extended(port);
+    EditorContext& through_base = extended;
+    auto* ext =
+        static_cast<ExampleExtension*>(through_base.query_extension("dev.pulp.test.example/1"));
+    REQUIRE(ext != nullptr);
+    REQUIRE(ext->answer == 42);
+    REQUIRE(through_base.query_extension("dev.pulp.test.example/2") == nullptr);
 }

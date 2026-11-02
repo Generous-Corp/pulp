@@ -13,12 +13,18 @@
 /// - `EditorFactory` builds an `Editor` for a processor, a host-supplied
 ///   `EditorContext` and a role. A processor exposes its factory through
 ///   `Processor::editor_factory()`; a processor with no factory has no editor
-///   on this path.
+///   on this path. A plug-in's default editor is wired per plug-in, not by a
+///   process-wide registration: `pulp_add_plugin(... UI <package>)` generates
+///   a hook in that plug-in's own binary that returns the UI package's factory,
+///   the way a VST3 plug-in supplies its own view from `createView()`. Several
+///   plug-ins in one host process therefore never share or override each
+///   other's editor choice.
 /// - `Editor` is one editor instance in one native window: attach and detach,
 ///   size negotiation, a main-thread tick, synchronous key offering, an
 ///   optional automation provider, and host-driven invalidation.
 /// - `EditorContext` is what the host gives the editor: the parameter port, the
-///   visual port, a resize request, host actions and the host kind.
+///   visual port, a resize request, host actions, the host kind, and
+///   `query_extension()` for capabilities added later.
 /// - `ParamPort` is parameter access (info, get, begin, set, end, listeners).
 ///   `StateStoreParamPort` is the default implementation, routed through the
 ///   StateStore gesture path the format adapters already report to the host.
@@ -507,6 +513,25 @@ class EditorContext {
 
     /// Whether the editor runs inside a plug-in host or the standalone app.
     virtual EditorHostKind host_kind() const = 0;
+
+    /// A host capability beyond the members above, by stable string id, or
+    /// null when this host does not offer it.
+    ///
+    /// This is how the contract grows without breaking prebuilt editors or
+    /// hosts: appending a virtual to this class would shift the vtable an
+    /// editor built against an older header calls through, while a new
+    /// capability added here is just a new id. The id names an interface
+    /// documented next to it (a reverse-DNS string such as
+    /// "dev.pulp.editor.example/1", versioned in the id itself); the returned
+    /// pointer is that interface, owned by the host and valid while this
+    /// context lives. An editor that does not know an id never asks for it,
+    /// and a host that does not know one returns null.
+    ///
+    /// The GPU device is not reached this way: an editor acquires it from the
+    /// shared GPU runtime with a role tag.
+    virtual void* query_extension(std::string_view /*id*/) {
+        return nullptr;
+    }
 };
 
 // ── Factory ──────────────────────────────────────────────────────────────────
