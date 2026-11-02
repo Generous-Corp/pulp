@@ -51,6 +51,14 @@ reaper.InsertTrackAtIndex(0,true)
 local tr = reaper.GetTrack(0,0)
 if not tr then fail('TRACK_NOT_AVAILABLE');return end
 local fx = reaper.TrackFX_AddByName(tr,fx_name,false,-1)
+-- REAPER's Windows ARM host accepts the plain display name for some VST3
+-- builds even when the format-qualified spelling is present in its scan
+-- cache. Keep the qualified attempt first, then use the same display name as
+-- a bounded fallback; the wrapper still binds the loaded module hash.
+if fx < 0 then
+  local display_name = fx_name:gsub('^VST3:', ''):gsub('^CLAP:', '')
+  fx = reaper.TrackFX_AddByName(tr,display_name,false,-1)
+end
 if fx < 0 then fail('FX_NOT_FOUND');return end
 fields.param_count = reaper.TrackFX_GetNumParams(tr,fx)
 if param_index >= fields.param_count then fail('PARAM_INDEX_OUT_OF_RANGE');return end

@@ -233,8 +233,6 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
         _pulp_bundle_write_pkginfo(${target}_VST3 "${_pkginfo}"
             "${CMAKE_BINARY_DIR}/VST3/${name}.vst3")
     endif()
-    _pulp_attach_plugin_runtime_manifest(${target} ${target}_VST3)
-
     # Copy moduleinfo.json if available.
     #
     # It belongs in Contents/Resources/, not Contents/. That is where the VST3
@@ -311,6 +309,11 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
         endif()
     endif()
     pulp_assert_runtime_dependencies_staged(${target}_VST3)
+    # Attach build-info only after runtime staging has marked the target.  The
+    # manifest generator reads PULP_RUNTIME_DEPENDENCIES_STAGED to declare
+    # bundled sidecars; doing this earlier silently omitted wgpu_native.dll
+    # from otherwise correctly assembled Windows VST3 metadata.
+    _pulp_attach_plugin_runtime_manifest(${target} ${target}_VST3)
     _pulp_attach_control_shipping(${target} ${target}_VST3 VST3)
 endfunction()
 

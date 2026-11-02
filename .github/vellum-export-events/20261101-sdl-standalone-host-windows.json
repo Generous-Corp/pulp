@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "event_id": "20261101-sdl-standalone-host-windows",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-01T12:00:00Z",
+  "receipt_export_id": "20261025-46cee5e4e6e2",
+  "paths": [
+    "core/canvas/CMakeLists.txt",
+    "core/view/include/pulp/view/sdl_window_host.hpp",
+    "core/view/src/sdl_window_host.cpp"
+  ],
+  "vellum_inherits": false,
+  "rationale": "Routes the SDL standalone window host through the GPU path and adds a Windows ARM64EC link step (a sanitized STL thunk archive linked into pulp-canvas only for that toolset). Both are standalone-host and Windows toolchain concerns; Vellum's design-import and visual lane does not host through SDL and does not build ARM64EC, so the next re-export need not carry them."
+}

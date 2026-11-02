@@ -174,6 +174,18 @@ foreach(_needle
     endif()
 endforeach()
 
+# VST3 build-info reads PULP_RUNTIME_DEPENDENCIES_STAGED to declare the
+# sidecars that the target carries.  Keep the attach after staging so a
+# Windows GPU bundle cannot contain wgpu_native.dll while its metadata claims
+# only ICU (the old order produced exactly that portable-package mismatch).
+string(FIND "${_plugin_formats}" "_pulp_attach_plugin_runtime_manifest(\${target} \${target}_VST3)" _vst3_manifest_pos)
+string(FIND "${_plugin_formats}" "pulp_stage_runtime_dependencies(\${target}_VST3)" _vst3_stage_pos)
+if(_vst3_manifest_pos GREATER -1 AND _vst3_stage_pos GREATER -1
+   AND _vst3_manifest_pos LESS _vst3_stage_pos)
+    list(APPEND _failures
+        "PulpPluginFormats.cmake: VST3 build-info is attached before runtime staging")
+endif()
+
 # No format helper may call the wgpu primitive directly. It copies ONLY the wgpu
 # runtime — no Apple @loader_path rpath, no Windows ICU data — so a call site
 # left on it produces a module that builds clean and then fails once shared or
