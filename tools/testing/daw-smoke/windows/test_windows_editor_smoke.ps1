@@ -18,7 +18,9 @@ try {
   Check ($commonText -match 'TargetAbi -in @\(''x64'',''arm64ec'',''arm64x''\)' -and $commonText -match '\$snapshotFlags') 'ARM64EC module probe omits SNAPMODULE32'
   Check ($commonText -match 'ReadToEndAsync' -and $commonText -match 'stdoutTask') 'bounded probe drains redirected pipes before waiting'
   $smokeText=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'windows_editor_smoke.ps1') -Raw
-  Check ($smokeText -match 'ProbeBeforeEditor' -and $smokeText -match 'module-probe-release') 'native editor probe can bind before GPU editor startup'
+  Check ($smokeText -notmatch 'ProbeBeforeEditor' -and $smokeText -notmatch 'module-probe-release' -and $smokeText -notmatch 'PULP_DAW_SMOKE_PROBE_GATE') 'single-pass binding flow has no pre-editor probe gate'
+  Check ($smokeText -match 'function Get-LoadedPluginBinding' -and $smokeText -match '\$bound=Get-LoadedPluginBinding' -and $smokeText -match 'Assert-ModuleBinding \$module\.FileName') 'loaded plugin binding is one reusable manifest-checked enumeration'
+  Check ($smokeText -match '\$finalBound=Get-LoadedPluginBinding[\s\S]+?Loaded plugin binding changed before PASS[\s\S]+?\$receipt\.verdict=''PASS''') 'loaded plugin binding is re-enumerated and compared before PASS'
   Check ($smokeText -match 'Get-BoundModulePaths[\s\S]+?Assert-OwnedIdentity') 'module binding rechecks owned PID/start identity after probe'
   Check ((@([regex]::Matches($smokeText,'Get-LoadedPluginBinding')).Count -ge 3) -and $smokeText -match 'final_revalidated_utc') 'loaded plugin binding is revalidated immediately before PASS'
   $identityTime=[DateTime]::UtcNow
@@ -32,7 +34,7 @@ try {
   Check ($smokeText -match '\[switch\]\$Headless' -and $smokeText -match 'if\(-not \$Headless\)') 'public -Headless mode is retained and skips desktop interaction'
   Check ($smokeText -match 'Set-ProcessTracePath \$null' -and $smokeText -match 'Set-ProcessTracePath \$priorTracePath' -and $smokeText -match 'trace_environment') 'warm scan clears and restores the caller trace destination and records it'
   $luaText=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'windows_editor_smoke.lua') -Raw
-  Check ($luaText -match 'fx_inserted' -and $luaText -match 'PULP_DAW_SMOKE_PROBE_GATE') 'Lua exposes bounded pre-editor module probe gate'
+  Check ($luaText -match 'fx_inserted' -and $luaText -match 'PULP_DAW_SMOKE_PROBE_GATE') 'Lua keeps its optional env-driven editor gate, which the wrapper no longer sets'
   Check ($luaText -match 'STATUS_PUBLISH_TIMEOUT' -and $luaText -match 'status_sequence' -and $luaText -notmatch 'direct=io\.open') 'Lua terminal publication uses unique temp names, bounded retry and surfaces timeout'
   $probeCommand=@(Get-Command powershell.exe,pwsh -ErrorAction SilentlyContinue|Select-Object -First 1)
   if($probeCommand.Count -ne 1){throw 'No PowerShell executable for bounded-probe fixture'}
