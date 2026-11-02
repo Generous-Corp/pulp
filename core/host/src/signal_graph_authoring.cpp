@@ -71,7 +71,6 @@ NodeId SignalGraph::add_input_node(int channels, const std::string& name) {
     node.name = name;
     node.num_output_ports = channels;
     populate_named_ports(node);
-    populate_named_ports(node);
     nodes_.push_back(std::move(node));
     invalidate_live_locked_();
     return nodes_.back().id;
