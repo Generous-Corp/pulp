@@ -39,7 +39,7 @@ def git_in(root: pathlib.Path, *args: str) -> str:
         "GIT_CONFIG_NOSYSTEM": "1",
     }
     return subprocess.run(["git", "-C", str(root), *args], check=True,
-                          capture_output=True, text=True, env=env).stdout.strip()
+                          capture_output=True, text=True, encoding="utf-8", env=env).stdout.strip()
 
 
 def make_export_commit(root: pathlib.Path) -> str:
@@ -136,7 +136,7 @@ class Fixture:
     def git(self, *args: str) -> str:
         return subprocess.run(
             ["git", "-C", str(self.root), *args],
-            check=True, capture_output=True, text=True,
+            check=True, capture_output=True, text=True, encoding="utf-8",
         ).stdout.strip()
 
     def write(self, path: str, content) -> None:
@@ -486,7 +486,7 @@ class ReceiptDriftTests(unittest.TestCase):
                 [sys.executable, str(SCRIPTS / "vellum_freeze_check.py"), "--receipt-mode",
                  "--repo", str(self.fixture.root), "--base", self.fixture.base,
                  "--head", head, "--output", str(pathlib.Path(out) / "report.json")],
-                capture_output=True, text=True, check=False)
+                capture_output=True, text=True, encoding="utf-8", check=False)
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("core/state/src/s.cpp", result.stderr)
         self.assertIn("vellum_inherits", result.stderr)
