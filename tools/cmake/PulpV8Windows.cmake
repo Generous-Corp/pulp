@@ -1,7 +1,7 @@
 # PulpV8Windows.cmake — Windows V8-consumer ABI contract for the sealed
 # v8-builder drop-in.
 #
-# The sealed Windows v8.dll (v8-builder, v8-m157-15.7.112.5-3362da6c495d) is built — by deliberate,
+# The sealed Windows v8.dll (v8-builder, v8-m158-15.8.62.6-38351a002e2c) is built — by deliberate,
 # documented decision in v8-builder/build-v8.py:win_gn_args() — with:
 #
 #   * v8_enable_pointer_compression = true   (Windows-only; mac/linux are OFF)
@@ -10,17 +10,17 @@
 #   * v8_enable_sandbox              = false
 #   * use_rtti                       = false
 #
-# The m157 x64 and arm64 archives' ABI shape and required files are inspected and
-# pinned (same file layout as m153; v8.dll.lib exports ~314 __Cr@std records;
+# The m158 x64 and arm64 archives' ABI shape and required files are inspected and
+# pinned (same file layout as m153; v8.dll.lib exports ~320 __Cr@std records;
 # V8_COMPRESS_POINTERS in the embedded consumer_defines).
 # The following consumer consequences were last link/run VERIFIED with m152
 # (15.2.124.7) on the Win11-24H2 arm64 QEMU golden (host arm64; x64 V8 + x64
-# consumer run under Windows-ARM x64 emulation). Repeat that gate for m157 before
-# claiming m157 Windows runtime acceptance:
+# consumer run under Windows-ARM x64 emulation). Repeat that gate for m158 before
+# claiming m158 Windows runtime acceptance:
 #
 #  1. v8.dll.lib exports its std::-bearing API surface mangled into the Chromium
 #     libc++ ABI namespace — e.g. ...V?$shared_ptr@...@__Cr@std@@... (hundreds
-#     of such records in the m157 import library). A consumer built with MSVC cl + the MSVC
+#     of such records in the m158 import library). A consumer built with MSVC cl + the MSVC
 #     STL emits plain `@std@@` symbols that never resolve against those `__Cr@std`
 #     imports → unresolved-external link failure (observed:
 #     `lld-link: error: undefined symbol: ... std::unique_ptr<v8::Platform> ...
@@ -44,7 +44,7 @@
 # (choc_javascript_V8.h + Console) built with the flags below links the sealed
 # v8.dll.lib + a __Cr-ABI libc++.lib and runs —
 #   V8::GetVersion() = 15.2.124.7 / evaluateExpression('40 + 2') = 42 / PASS.
-# m157 has structural ABI inspection only; its equivalent consumer link/run is
+# m158 has structural ABI inspection only; its equivalent consumer link/run is
 # still pending.
 #
 # This module is a NO-OP off Windows.

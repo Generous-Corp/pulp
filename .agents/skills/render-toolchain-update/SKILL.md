@@ -341,6 +341,19 @@ retain those fields in the PR/landing evidence.
   release may place libraries under `build/win-gpu/lib/Release/x64/`; older
   releases can be flat. Test a fresh x64 configure on ARM64 without an explicit
   `SKIA_DIR` as well as an explicit nested archive.
+- Vellum pins the same macOS universal archive separately, in its
+  `cmake/VellumSkiaDawn.cmake` (`_vellum_expected_archive_sha256` plus a
+  `chrome/mNNN macOS universal tuple` message). Until the two repositories share
+  one renderer lock, `tools/deps/audit.py --strict` reads that file at the Vellum
+  commit named by the Skia entry's `vellum_renderer_drift_check` and fails unless
+  both values equal Pulp's `release_assets.mac-universal.sha256` and Skia
+  `version`. A milestone bump therefore moves that commit to the Vellum change
+  carrying the same archive; pointing it at Vellum's previous milestone is the
+  negative control. The read is fail-closed (no network means `--strict` fails);
+  `PULP_VELLUM_CHECKOUT=<vellum clone>` reads the same commit from a local clone.
+  Vellum's GPU mirror build pins the archive and header digests of the Pulp
+  commit it was exported from, so its renderer bump can only pass after Pulp's
+  lands.
 - The Vellum closure gate identifies Skia inputs by `determinism.skia_commit` and
   by the asset digest sealed in the cache generation's
   `.skia-generation-manifest.json`, which must be one of
@@ -504,6 +517,11 @@ carry CRLF headers, so a byte compare reports every header as different.
 ```python
 a.read(n).replace(b"\r\n", b"\n") == b.read(n).replace(b"\r\n", b"\n")
 ```
+
+Expect exactly one difference from m158 on: both Windows archives carry
+skia-builder's ARM64EC guard in `include/private/SkFeatures.h`
+(`&& !defined(_M_ARM64EC)` on the x86 CPU test). Any other differing header is a
+second revision, not a builder patch.
 
 For Windows GPU consumers, record separate `windows-x64` and `windows-arm64`
 release assets in the manifest. Select the slice from the CMake target

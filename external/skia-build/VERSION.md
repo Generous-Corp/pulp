@@ -2,41 +2,52 @@
 
 ## Source
 - **Repository:** https://github.com/danielraffel/skia-builder (fork of olilarkin/skia-builder)
-- **Release:** chrome/m157
-- **Release URL:** https://github.com/danielraffel/skia-builder/releases/tag/chrome%2Fm157
-- **Downloaded:** 2026-10-22
-- **Skia branch:** chrome/m157 (Skia Graphite + Dawn)
-- **skia-builder ref:** `f710b2834eaf37dbf1bd39408f9361d10d85eda2`
+- **Release:** chrome/m158
+- **Release URL:** https://github.com/danielraffel/skia-builder/releases/tag/chrome%2Fm158
+- **Downloaded:** 2026-11-01
+- **Skia branch:** chrome/m158 (Skia Graphite + Dawn)
+- **skia-builder ref:** `312f05e24a5d5a45d4a3e70ca70ff3ccff1b4d97`
 
 The fork tracks `olilarkin/skia-builder`'s tag pattern and additionally
 publishes iOS device, iOS simulator, visionOS device, visionOS simulator,
 mac-x86_64, and `Skia.xcframework` slices that upstream does not. While
 upstream stays on m144, this fork is the active dependency.
 
-The chrome/m157 release ships all platform slices, including `linux-arm64`,
+The chrome/m158 release ships all platform slices, including `linux-arm64`,
 Windows x64, and native Windows ARM64. Its Skia branch tip is
-`b94213a11b3a2edadfae89f0c57a7f4ab72772c9` at the start of the publishing
-workflow (run `38756369724`). Every slice, including Windows ARM64 (built
-natively on `windows-11-arm`), comes from that one run and revision: the
-shipped headers of every archive are identical once line endings are
-normalised.
+`be7d7c3e996e567eda7dc9774274f7a0103cdb8c` at the start of the publishing
+workflow (`build-skia.yml` run `40626447857`, attempt 1). Every slice,
+including Windows ARM64 (built natively on `windows-11-arm`), comes from that
+one run and revision: the shipped headers of every archive are identical once
+line endings are normalised, except that both Windows archives carry
+skia-builder's ARM64EC guard in `include/private/SkFeatures.h`
+(`&& !defined(_M_ARM64EC)` on the x86 CPU test, from
+`patches/fix_windows_arm64ec_archive_flags.patch`), which changes nothing for
+an x64 or ARM64 consumer. Neither Windows archive ships an `arm64ec/` or
+`arm64x/` library slice, so ARM64EC/ARM64X consumers stay fail-closed.
 The bundled build reports Dawn SHA1
-`ada567700e13aecf7989d78b21f7d330b522ea80` (`include/dawn/dawn_version.h`).
+`1716e88cc9e58398fab5d4473f7f2e858667b677` (`include/dawn/dawn_version.h`).
+
+The `chrome/m158` branch has moved past the built revision since the release
+was cut: Chromium's M158 DEPS (and the matched V8 release) record Skia
+`759bfdeaae370993f1ddc5f2168145770936288d`, six cherry-picks later. The
+published archives, and therefore Pulp, use `be7d7c3e`; the matched V8 release
+records both and binds its provider pair to `be7d7c3e`.
 
 The **macOS** slices (`mac-arm64`, `mac-x86_64`, `mac-universal`) are pinned to the
-`chrome/m157` release, which stamps `LC_BUILD_VERSION minos 13.0`
+`chrome/m158` release, which stamps `LC_BUILD_VERSION minos 13.0`
 (macOS 13 Ventura) on both Skia and Dawn. This preserves the corrected floor
 from the m151 re-cut, whose original zips accidentally leaked the CI runner's
 macOS 15 SDK through Dawn's separate CMake sub-build. These 13.0 stamps are
 recorded in `tools/deps/min_os.json`; Pulp's own floor lands slightly higher
 (macOS 13.4) because Apple's libc++ gates `std::to_chars(float)` — reached via
 `std::format` in the logging path — at 13.3. The non-macOS slices remain the
-`chrome/m157` assets.
+`chrome/m158` assets.
 
 ## Bundled Text and GPU Pins
 
-These revisions are read from Skia's `DEPS` file at the chrome/m157 tip
-the build was cut from. Pulp ports against the m157 API surface. m153
+These revisions are read from Skia's `DEPS` file at the chrome/m158 tip
+the build was cut from. Pulp ports against the m158 API surface. m153
 introduced two GPU-diagnostics and latency APIs that Pulp validates before
 adoption:
 
@@ -51,10 +62,14 @@ adoption:
   `SkExecutor::MakeFIFOThreadPool`/`MakeLIFOThreadPool` factories are gone);
   an integration supplies its own subclass. Compile that subclass without RTTI
   (`-fno-rtti`, or `/GR-` with MSVC): skia-builder's official builds disable
-  RTTI, `~SkExecutor` is the key function, and an RTTI-enabled subclass fails
-  to link with an undefined `typeinfo for SkExecutor`.
+  RTTI, and the executor base is instantiated inside Skia, so an RTTI-enabled
+  subclass fails to link against typeinfo the archive does not contain. Since
+  m158 `SkExecutor` derives from `SkExecutorBase<std::function<void()>>`
+  (aliased `SkFunctionalExecutor`); Graphite takes that type unless
+  `SK_GRAPHITE_USE_CALLBACK_EXECUTOR` selects `SkCallbackExecutor`, which Pulp
+  does not define.
 
-m154 through m157 change nothing Pulp calls; `rg` over `core/`, `apple/`,
+m154 through m158 change nothing Pulp calls; `rg` over `core/`, `apple/`,
 `examples/`, `tools/` and `test/` finds no caller of a removed API:
 
 - m155: `skcpu::Context`, `skcpu::Recorder` and both `makeCPURecorder()` were
@@ -66,6 +81,14 @@ m154 through m157 change nothing Pulp calls; `rg` over `core/`, `apple/`,
   `SK_ENABLE_YUVA_PACKED_422`, off by default; Pulp does not opt in.
 - m157: `SK_ASSUME_SINGLE_GANESH_CONTEXT` is an optional Ganesh-only define;
   Pulp's Graphite path does not use it.
+- m158: `SkExecutor` became a template (see above). The PNG, JPEG, Rust PNG
+  and WebP encoder options take `const skhdr::Metadata* fHdrMetadata` (PNG's
+  was a value), and `SkWebpEncoder::Options` gained `fMethod`; Pulp sets
+  neither. No `SK_LEGACY_*` guard and no shipped header was removed between
+  the m157 and m158 archives; `include/private/SkGPUContext.h` and
+  `SkOnlyStackAllocatable.h` were added. Dawn dropped the
+  `WGPUDawnLoadCacheDataFunction`/`WGPUDawnStoreCacheDataFunction` typedefs,
+  which Pulp never used.
 
 - Gradient construction migrated from `SkGradientShader::Make*` to the
   `SkShaders::*` namespace with the `SkGradient` data class.
@@ -128,7 +151,7 @@ The **`wasm-gpu`** slice is the exception, and the difference is load-bearing:
 |-----------|----------|--------------|-------|
 | `mac-gpu/` | macOS | arm64, x86_64, universal | mac-x86_64 only in the fork |
 | `win-gpu/` | Windows | x64, arm64 | release assets consumed by the CLI/SDK release matrix |
-| `linux-gpu/` | Linux | x64, arm64 | both slices published on the chrome/m157 release |
+| `linux-gpu/` | Linux | x64, arm64 | both slices published on the chrome/m158 release |
 | `ios-gpu/` | iOS device + simulator | arm64, arm64+x86_64 | fork-only slices |
 | `visionos-gpu/` | visionOS device + simulator | arm64 | fork-only slices |
 | `wasm-gpu/` | WebAssembly | wasm32 | |
@@ -160,16 +183,16 @@ Or run: `./tools/build-skia.sh <platform>` to build from source.
 
 | Asset | SHA-256 |
 |-------|---------|
-| `skia-build-ios-device-arm64-gpu-release.zip` | `7c9986329c1d85321ae5331851d6166e7036825739451c11ffa097c61e478e86` |
-| `skia-build-ios-simulator-arm64-x86_64-gpu-release.zip` | `c80ce9aff94b0be79306d44271b539fab601b7fe0d3917652db57e6e5602764c` |
-| `skia-build-linux-arm64-gpu-release.zip` | `e591268124be249b2a2f56c5042e1e7865bd04556d509c6e4937a04251964435` |
-| `skia-build-linux-x64-gpu-release.zip` | `bf74ae1bfd5abd9f49e57c3c6ae6d94c580bbbfe575256fa5077272e1ce0c187` |
-| `manifest-key-mac-arm64--skia-build-mac-universal-gpu-release.zip` | `bb24c74f05699fa084df6d68ecb9a427802c3df49ce85d8a7dc696aeb9e19a86` |
-| `skia-build-mac-universal-gpu-release.zip` | `bb24c74f05699fa084df6d68ecb9a427802c3df49ce85d8a7dc696aeb9e19a86` |
-| `skia-build-mac-x86_64-gpu-release.zip` | `67e801d2e1ca0c8e5a3fc3b26e253fd608348ceae0d0964efe4d7d6d342649e6` |
-| `skia-build-wasm-wasm32-gpu-release.zip` | `400e04a3fb71358fa83bbb7be97c2f17a6b5749f434c4ee7c4edca9dfa5d30c1` |
-| `skia-build-win-arm64-gpu-release.zip` | `7424b8225f553b3e4dcf292141b49f4e5a6a4506e0c78e6c932350dc5ceedda1` |
-| `skia-build-win-x64-gpu-release.zip` | `b744f5583ea2351d6b0607785da8e4ce5a95c669e8bd4a01990e05f32b48a57b` |
+| `skia-build-ios-device-arm64-gpu-release.zip` | `56a76f22b30a2a045e7dc72bf645221b403408a2d8aaf01081ffe05937e052ca` |
+| `skia-build-ios-simulator-arm64-x86_64-gpu-release.zip` | `e446cbfa3302026ce055dd9eae980f466cac89f8f9ad50b07e5b2aa4989d1488` |
+| `skia-build-linux-arm64-gpu-release.zip` | `8e27987be3b7239f31b948fc441223b123eaa7d16e4ad373c3403f6101f6dffd` |
+| `skia-build-linux-x64-gpu-release.zip` | `5165feecf8e5eb545e329a1c3e492f4537ef87aa9ae4416925cf3d90e2ae7660` |
+| `manifest-key-mac-arm64--skia-build-mac-universal-gpu-release.zip` | `dca73c0eee5b0f6d129fe357d0754f7165c6b436051e0de947aeedd3e1bde250` |
+| `skia-build-mac-universal-gpu-release.zip` | `dca73c0eee5b0f6d129fe357d0754f7165c6b436051e0de947aeedd3e1bde250` |
+| `skia-build-mac-x86_64-gpu-release.zip` | `2a795f54bb22feb46a499d56740f98a15b6e95bfdf5923b82b222ef95edb2f47` |
+| `skia-build-wasm-wasm32-gpu-release.zip` | `a3382b3a53d13780667f7db9d9969c42d531451e55de35faaadf4e62f64ce357` |
+| `skia-build-win-arm64-gpu-release.zip` | `d2586d3ae1d3a1103aa87dda5afecfed2ced7be82d0276f6b9a15fd034d9a5c7` |
+| `skia-build-win-x64-gpu-release.zip` | `a23b3fc4f75eda3420ec7de70cbc68307be6f4fed37d004f43e9bb1ea81e5854` |
 
 The manifest's `mac-arm64` selector uses the universal archive, so its cache
 oracle row above intentionally carries the universal digest. The release also
@@ -177,11 +200,11 @@ publishes these non-fetcher assets, whose GitHub asset digests were audited:
 
 | Published asset | SHA-256 |
 |-----------------|---------|
-| skia-build-mac-arm64-gpu-release.zip | `aceaac61d20a8b7e7966ea4bd490e2948a64ea87c101dc70153e7e84f6e68e02` |
-| skia-build-visionos-device-arm64-gpu-release.zip | `22760b34de47ee0725d6d783ae3f9c18a682ea09c784bf2c205ac5899111d19e` |
-| skia-build-visionos-simulator-arm64-gpu-release.zip | `bae0a268adcfb8ea5c7878b922e770a629a12d4795d20476f3d58112a1f58cd8` |
-| skia-build-win-x64-gpu-debug.zip | `2c35a698676759f2978dc1bfeafcc1fda42be55a3c12eb7d65d3277225c203e5` |
-| Skia.xcframework.zip | `0e16520af05bcc6cfa05f0c2890730e1a8d00366ac97e64026d4c3c57321ef09` |
+| skia-build-mac-arm64-gpu-release.zip | `20735644dc7c65c71522a4d2b303f19fcd236c2e24468759daa86c7829c39edb` |
+| skia-build-visionos-device-arm64-gpu-release.zip | `6eaee60b606254890209ac73f73e22479e9d6877a28ffdcc99e69aa05e4ab751` |
+| skia-build-visionos-simulator-arm64-gpu-release.zip | `b506044cfe7a8500727fe787ad00b309fd512ad65f6d35de161608a4c0e4b1f0` |
+| skia-build-win-x64-gpu-debug.zip | `d7b6255332b92167b9ec6a00cbab020f7518f1fa88a768b07c21ce17fbb06340` |
+| Skia.xcframework.zip | `621ebb6b29f20fca34996eea725c477bc12467818895bd0f4e850b1d0101da26` |
 
 The `mac-arm64` manifest key intentionally selects the mac-universal archive,
 whose arm64 Skia/Dawn slices measure macOS 13.0. This preserves the verified
@@ -208,8 +231,9 @@ archive whose receipt is missing, does not name native ARM64, or leaves the
 toolset, SDK or compiler fields empty or reading "unknown".
 
 The m153 Windows ARM64 archive was re-published in place from a later Skia
-revision and its receipt read "unknown"; m157 has neither problem, because
-every slice was built in the one publishing run named above. GitHub release
+revision and its receipt read "unknown"; m158 has neither problem, because
+every slice was built in the one publishing run named above. The m158 Windows
+receipts name the same toolsets as m157. GitHub release
 tags are mutable, so any future change to an asset digest under the same tag
 needs the same content comparison before the pin moves.
 

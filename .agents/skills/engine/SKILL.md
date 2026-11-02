@@ -354,7 +354,7 @@ prebuilt `libv8`** from the
 fork — the same pin/fetch/Find pattern as Skia:
 
 1. **Pin:** the `V8` entry in `tools/deps/manifest.json`
-   (`determinism.release_assets`, per-platform URL + sha256, tag `v8-m157-15.7.112.5-3362da6c495d`).
+   (`determinism.release_assets`, per-platform URL + sha256, tag `v8-m158-15.8.62.6-38351a002e2c`).
 2. **Fetch:** `python3 tools/scripts/fetch_v8_for_release.py <platform>`
    downloads + sha256-verifies + unpacks to `external/v8-build/<platform>/`
    (`include/` + `lib/`). Platforms: `darwin-arm64`, `darwin-x64`,
@@ -388,9 +388,9 @@ a baked V8 (golden VMs: `V8_DIR=~/pulp-v8-build`).
 - `PULP_JS_ENGINE=auto` **never** pulls in V8 — V8 is strictly opt-in via
   `=v8`. (Previously `auto` + `V8_INCLUDE_DIR` silently enabled it.)
 - `PULP_JS_ENGINE=v8` on **iOS** is a configure-time `FATAL_ERROR`. The pinned
-  m157 asset is a jitless simulator framework, but Pulp has no device/AUv3 V8
+  m158 asset is a jitless simulator framework, but Pulp has no device/AUv3 V8
   runtime acceptance or packaging contract. Use QuickJS (the default) or JSC.
-- `PULP_JS_ENGINE=v8` on **Android** requires API 29+ for the pinned m157
+- `PULP_JS_ENGINE=v8` on **Android** requires API 29+ for the pinned m158
   provider (its embedded manifest records `ndk_api_level: 29`). Pulp's general Android floor remains API 26; use QuickJS below 29.
 
 **Why the sealed build (the ICU caveat):** the v8-builder `libv8` exports
@@ -420,20 +420,20 @@ Tracktion/choc still carries the `Iterate` walk.
 
 ## Windows sealed v8-builder V8 (clang-cl + Chromium libc++ `__Cr`)
 
-The v8-builder sealed Windows `v8.dll` (e.g. `v8-m157-15.7.112.5-3362da6c495d`) is a special
+The v8-builder sealed Windows `v8.dll` (e.g. `v8-m158-15.8.62.6-38351a002e2c`) is a special
 ABI lane, NOT a drop-in for MSVC cl. It is built (v8-builder
 `build-v8.py:win_gn_args()`) with **pointer compression ON**, **Chromium's
 bundled libc++ (`__Cr` ABI namespace)**, sandbox OFF, rtti OFF. So
 `v8.dll.lib` exports its `std::`-bearing API mangled into `__Cr@std`
 (verify: hundreds of `...@__Cr@std@@` symbols). A consumer built with
 **MSVC cl + MSVC STL will not link** — its plain `@std@@` symbols never
-resolve against the `__Cr@std` imports. The m157 x64 and arm64 archives' ABI
+resolve against the `__Cr@std` imports. The m158 x64 and arm64 archives' ABI
 shape and required files are inspected and pinned: the same file layout as
 m153 (`lib/v8.dll`, `lib/v8.dll.lib`, `lib/libc++.lib`, `manifest.json`),
 ~314 `@__Cr@std@@` import records, and `V8_COMPRESS_POINTERS` in the embedded
 `consumer_defines`. The following consumer contract was
 last link/run proven with m152 (`15.2.124.7`) on the Win11-24H2 arm64 QEMU
-golden (x64 V8 under ARM x64 emulation); the m157 consumer link/run remains a
+golden (x64 V8 under ARM x64 emulation); the m158 consumer link/run remains a
 required platform acceptance step:
 
 1. Compile the V8 TU (`js_v8_engine.cpp`) with **clang-cl**, not cl.
@@ -476,7 +476,7 @@ On Windows, additionally supply `PULP_V8_WIN_LIBCXX_INCLUDE` and
 then calls `pulp_v8_windows_apply_abi(pulp-view-script)` (no-op off
 Windows). Last runtime proof (m152): choc V8 consumer init +
 `evaluateExpression("40 + 2") == 42`, `V8::GetVersion() == 15.2.124.7`.
-The m157 Windows archives have passed structural ABI inspection but not this
+The m158 Windows archives have passed structural ABI inspection but not this
 consumer link/run gate.
 
 The archive also ships a `__Cr` runtime as `lib/libc++.lib` (the embedded
@@ -507,7 +507,7 @@ the `__Cr` contract is Windows-only.
 **Cross-platform rollout + ship/sign/package** (Windows MSVC `/MT` ABI,
 macOS nested-dylib re-signing, Android ABI gating, golden-VM bake) are
 tracked in `planning/2026-06-06-v8-sealed-libv8-provider-migration-plan.md`.
-macOS arm64 is the proven runtime lane (re-proved on m157); other platforms are pinned but
+macOS arm64 is the proven runtime lane (re-proved on m158); other platforms are pinned but
 pending per-platform verification.
 
 ### Sealed v8-builder provider (`FindV8.cmake` → `external/v8-build/`)

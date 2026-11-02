@@ -8047,6 +8047,7 @@ tests = [
   "ctest-inventory-parity-self-check",
   "ctest-label-exclusion-guard",
   "ctest-label-exclusion-guard-selftest",
+  "deps-audit-vellum-drift-selftest",
   "drift-fast-selftest",
   "dsp-capability-registry-selftest",
   "fleet-remote-probe-selftest",
