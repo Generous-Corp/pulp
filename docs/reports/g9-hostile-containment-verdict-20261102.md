@@ -13,15 +13,15 @@ python3 tools/validation/g9_hostile_fixture.py --output /tmp/g9-hostile-evidence
 ```
 
 The receipt records each case, return code, timeout observation, and two planted
-negative controls (clean exit and slow-but-within-budget). The descendant case
-is marked for process-tree inspection; this fixture does not kill or sandbox the
-child, so any surviving descendant is containment evidence rather than a fix.
+negative controls (clean exit and slow-but-within-budget). The descendant case is planned for process-tree inspection, but this fixture does not
+capture a child PID or prove survival after parent termination. The evidence is
+therefore unverified.
 
 ## Verdict
 
-**HOLD / containment unproven.** Positive observations cover crash, hang,
-deadline timeout, and descendant creation. The negative controls demonstrate the
-fixture can abstain on non-hostile behavior. No process isolation, descendant
+**HOLD / containment unproven.** Positive observations cover crash, hang, and
+deadline timeout. Descendant survival and planted-negative controls are
+metadata-only and remain unverified. No process isolation, descendant
 reaping, or crash containment is implemented by this change. Platform scope is
 the invoking host (`sys.platform`); no cross-platform claim is made.
 
