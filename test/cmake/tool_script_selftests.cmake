@@ -143,6 +143,10 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME packages-package-validation-tools-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/packages/test_package_validation_tools.py")
     set_tests_properties(packages-package-validation-tools-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
+    add_test(NAME windows-arm64ec-thunk-tool-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/windows/test_build_arm64ec_stl_thunks.py")
+    set_tests_properties(windows-arm64ec-thunk-tool-selftest PROPERTIES
+        LABELS "tools;selftest;windows;arm64ec" TIMEOUT 30)
     add_test(NAME daw-smoke-reaper-smoke-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/testing/daw-smoke/test_reaper_smoke.py")
     set_tests_properties(daw-smoke-reaper-smoke-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)

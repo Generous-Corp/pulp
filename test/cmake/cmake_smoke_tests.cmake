@@ -216,6 +216,15 @@ set_tests_properties(pulp-simd-arm64ec-detect PROPERTIES
     LABELS "cmake;simd"
     TIMEOUT 30)
 
+# The project-wide ARM64EC switch must reach C-only dependencies, while ARM64X
+# remains a mixed image and must not be forced into EC.
+add_test(NAME pulp-windows-arm64ec-compiler-contract
+    COMMAND ${CMAKE_COMMAND} -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_windows_arm64ec.cmake)
+set_tests_properties(pulp-windows-arm64ec-compiler-contract PROPERTIES
+    LABELS "cmake;windows;arm64ec"
+    TIMEOUT 30)
+
 add_test(NAME pulp-windows-target-arch
     COMMAND ${CMAKE_COMMAND} -P
         ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_windows_target_arch.cmake)
