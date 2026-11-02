@@ -559,6 +559,13 @@ them, and never one `ghapp` stamped with an `unattributed` session. A reviewer
 agent puts `reviewer: <its name>` on the line above the verdict. Adding a
 reviewer means adding it to that list.
 
+`reviewer_stamp_sessions = ["fleet-pass-reviewer-*"]` in the same table also
+requires the APPROVE's `ghapp` session stamp (the session part, not the host
+prefix) to match a glob, so only the scheduled standing pass approves; a HOLD
+from any session still counts. A reviewer tab outside that pass needs its
+session listed. The key only takes effect through the Shipyard commit pinned in
+`.github/workflows/review-verdict.yml`, so keep that pin at a version that reads it.
+
 **`carry_excluded_paths` replaces Shipyard's default; it does not add to it.**
 The same `[auto_merge]` table lists the paths whose change stops an APPROVE
 from carrying to a new head after a merge-only refresh. Shipyard's guard reads
