@@ -308,6 +308,16 @@ retain those fields in the PR/landing evidence.
   `tools/cmake/scripts/icu_data_subset.py` still rewrites the new archive
   (`icu-data-subset-deterministic`, `pulp-test-icu-data-breaks`).
 - **A `pulp_register_fetchcontent_source(... REF <sha>)` pin is enforced at configure.** `pulp_materialize_mutable_fetchcontent_source` fails closed when the shared-cache git checkout's HEAD is not the registered commit, so a `GIT_TAG` must be the same full SHA (CHOC is the first consumer). The cache directory name is only a key, not proof of the commit. Symbolic refs and tarball sources skip the check. Selftest: `tools/scripts/test_setup_source_cache.sh`.
+- **Some Pulp workarounds exist only for one Skia defect, and are retired by
+  the bump that fixes it.** Graphite emits a runtime shader's `main` with a
+  coordinate parameter named `pos`; before `chrome/m158` an author local named
+  `pos` in `main` redefined or shadowed it (a Graphite pipeline compile failure
+  and crash, or black output), and `RuntimeEffectCache` refused such sources.
+  On m158 they render correctly on Graphite, so the refusal is gone and
+  `pulp-test-runtime-effect-names-gpu` requires those shaders to match a
+  control ramp on a real adapter. If a later Skia fails that test, the collision
+  is back: restore a refusal rather than loosening the comparison. The suite
+  SKIPs without a GPU adapter, so prove it on a Mac with Metal, not a VM.
 - **QuickJS has its own manifest row** even though it rides inside CHOC's `choc_javascript_QuickJS.h`; its version is the embedded `CONFIG_VERSION`. Bumping CHOC must update that row.
 - A V8 bump can break choc's V8 bridge without any Pulp change: the release-path
   cube capture is the canary, and the m153 to m157 move tripped it. V8 15.4

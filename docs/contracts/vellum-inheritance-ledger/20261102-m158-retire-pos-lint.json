@@ -1,0 +1,13 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261102-m158-retire-pos-lint",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "vellum_obligation": "When Vellum links chrome/m158 or later Skia, its runtime-effect compile path must stop refusing caller SkSL whose main() declares a local named pos, replacing the earlier pos refusal obligation, and its Graphite readback test must require a local pos in main and a nested pos shadowing the coordinates to render identically to a control shader.",
+  "evidence": [
+    "pulp-test-group-canvas [runtime-effect]",
+    "pulp-test-runtime-effect-names-gpu",
+    "Vellum freeze"
+  ]
+}

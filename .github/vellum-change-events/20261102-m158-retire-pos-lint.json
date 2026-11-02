@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "event_id": "20261102-m158-retire-pos-lint",
+  "kind": "change",
+  "created_at": "2026-11-02T19:05:26Z",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "rationale": "design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger); RuntimeEffectCache no longer refuses caller SkSL that declares a local named pos in main(). The refusal existed only because Skia before chrome/m158 let that local redefine or shadow the coordinate parameter Graphite names pos; on the chrome/m158 Skia this branch pins, Graphite renders such shaders identically to a control, so the refusal rejected valid shaders on every backend. pulp-test-runtime-effect-names-gpu now requires every name-alike shader, including a local pos in main and a nested pos shadowing the coordinates, to compile and match the control ramp on live Graphite, so a Skia that reintroduces the collision fails there. No public API is removed and no design-import, rendering, packaging, or source-authority boundary moves.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "ctest --test-dir build -R 'Runtime-effect locals named like Graphite'",
+    "ctest --test-dir build -R 'compile_sksl accepts locals named pos in main'"
+  ],
+  "disposition": "pulp-only",
+  "vellum_inherits": true
+}
