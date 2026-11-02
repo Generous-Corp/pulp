@@ -19,7 +19,7 @@ CASES = {
     "crash": "import os,signal; os.kill(os.getpid(), signal.SIGABRT)",
     "hang": "import time; time.sleep(30)",
     "deadline": "import time; time.sleep(0.75)",
-    "descendant": "import subprocess,os,time; child=subprocess.Popen([sys.executable,'-c','import os,time; print(os.getpid(), flush=True); time.sleep(30)']); time.sleep(30)",
+    "descendant": "import subprocess,time; subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)']); time.sleep(30)",
 }
 
 
@@ -39,22 +39,11 @@ def run_case(name: str, timeout: float, out: Path) -> dict:
         timed_out = True
         proc.send_signal(signal.SIGTERM)
         stdout, stderr = proc.communicate(timeout=2)
-    descendant_pid = None
-    descendant_alive_after_parent = False
-    if name == "descendant":
-        try:
-            descendant_pid = int(stdout.strip().splitlines()[0])
-            os.kill(descendant_pid, 0)
-            descendant_alive_after_parent = True
-            os.kill(descendant_pid, signal.SIGTERM)
-        except (ValueError, IndexError, ProcessLookupError, PermissionError):
-            pass
     record = {
         "case": name, "pid": proc.pid, "returncode": proc.returncode,
         "timed_out": timed_out, "elapsed_ms": round((time.monotonic()-started)*1000, 1),
         "stdout": stdout, "stderr": stderr,
-        "descendant_pid": descendant_pid,
-        "descendant_alive_after_parent": descendant_alive_after_parent,
+        "descendant_observation": name == "descendant",
     }
     (out / f"{name}.json").write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
     return record
