@@ -2,22 +2,32 @@
 
 #ifdef PULP_HAS_SDL3
 
+#include <SDL3/SDL.h>
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/events/main_thread_dispatcher.hpp>
+#include <pulp/runtime/trace.hpp>
 #include <pulp/view/accessibility_provider.hpp>
 #include <pulp/view/drag_drop.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/host_frame_pump.hpp>
-#include <SDL3/SDL.h>
-#include <cstdint>  // uintptr_t (X11 Window id for outbound file drag)
-#include <string>
-#include <vector>
+#ifdef PULP_HAS_SKIA
+#include "include/core/SkCanvas.h"
+#include "include/core/SkColorType.h"
+#include "include/core/SkImageInfo.h"
+#include "include/core/SkPixmap.h"
+#include "include/core/SkSurface.h"
+#include <pulp/canvas/skia_canvas.hpp>
+#endif
+#include <cmath>
+#include <cstdint> // uintptr_t (X11 Window id for outbound file drag)
 #include <deque>
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 
 // On macOS, use CoreGraphics canvas for rendering into SDL surface
 #ifdef __APPLE__
@@ -26,10 +36,28 @@
 
 namespace pulp::view {
 
+namespace {
+
+// RDP/UTM sessions can expose a valid display while SDL cannot provide a
+// work-area rectangle.  Falling back to the full display bounds keeps the
+// standalone window centered and fitted instead of preserving an off-screen
+// position from a previous desktop arrangement.
+bool get_display_work_bounds(SDL_DisplayID display, SDL_Rect& bounds) {
+    if (display != 0 && SDL_GetDisplayUsableBounds(display, &bounds))
+        return true;
+    if (display != 0 && SDL_GetDisplayBounds(display, &bounds))
+        return true;
+    const auto primary = SDL_GetPrimaryDisplay();
+    if (primary != 0 && SDL_GetDisplayUsableBounds(primary, &bounds))
+        return true;
+    return primary != 0 && SDL_GetDisplayBounds(primary, &bounds);
+}
+
+} // namespace
+
 class SdlWindowHostImpl : public SdlWindowHost {
-public:
-    SdlWindowHostImpl(View& root, Options options)
-        : root_(root), options_(std::move(options)) {
+  public:
+    SdlWindowHostImpl(View& root, Options options) : root_(root), options_(std::move(options)) {
 
         // The SDL host (the Windows / Linux standalone window) previously owned
         // no FrameClock and advanced no animation at all: widget hover/thumb
@@ -55,6 +83,28 @@ public:
             return;
         }
 
+        // SDL remembers a window position across launches.  A remembered
+        // position from a larger RDP/display arrangement can leave the editor
+        // half off-screen on a smaller UTM desktop, so clamp and center the
+        // initial client area against the current usable display bounds.
+        SDL_Rect usable{};
+        const auto display = SDL_GetDisplayForWindow(window_);
+        if (get_display_work_bounds(display, usable)) {
+            const int margin = 8;
+            const int max_width = std::max(1, usable.w - margin * 2);
+            const int max_height = std::max(1, usable.h - margin * 2);
+            int fitted_width = static_cast<int>(options_.width);
+            int fitted_height = static_cast<int>(options_.height);
+            if (fitted_width > max_width || fitted_height > max_height) {
+                const float scale = std::min(static_cast<float>(max_width) / fitted_width,
+                                             static_cast<float>(max_height) / fitted_height);
+                fitted_width = std::max(1, static_cast<int>(fitted_width * scale));
+                fitted_height = std::max(1, static_cast<int>(fitted_height * scale));
+                SDL_SetWindowSize(window_, fitted_width, fitted_height);
+            }
+            SDL_SetWindowPosition(window_, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+        }
+
         renderer_ = SDL_CreateRenderer(window_, nullptr);
         if (!renderer_) {
             std::cerr << "[pulp] SDL_CreateRenderer failed: " << SDL_GetError() << "\n";
@@ -64,6 +114,10 @@ public:
     ~SdlWindowHostImpl() {
         root_.set_frame_clock(nullptr);
         shutdown_dispatcher();
+#ifdef PULP_HAS_SKIA
+        if (texture_)
+            SDL_DestroyTexture(texture_);
+#endif
         if (renderer_) SDL_DestroyRenderer(renderer_);
         if (window_) SDL_DestroyWindow(window_);
         SDL_Quit();
@@ -78,6 +132,42 @@ public:
     }
 
     void repaint() {
+        needs_repaint_ = true;
+    }
+
+    void set_idle_callback(std::function<void()> cb) {
+        idle_callback_ = std::move(cb);
+    }
+
+    void request_content_size(float width, float height) {
+        if (!window_ || width <= 0.0f || height <= 0.0f)
+            return;
+        int w = static_cast<int>(std::lround(width));
+        int h = static_cast<int>(std::lround(height));
+        SDL_Rect usable{};
+        const auto display = SDL_GetDisplayForWindow(window_);
+        if (get_display_work_bounds(display, usable)) {
+            const int margin = 8;
+            const int max_width = std::max(1, usable.w - margin * 2);
+            const int max_height = std::max(1, usable.h - margin * 2);
+            const float scale = std::min(1.0f, std::min(static_cast<float>(max_width) / w,
+                                                        static_cast<float>(max_height) / h));
+            w = std::max(1, static_cast<int>(w * scale));
+            h = std::max(1, static_cast<int>(h * scale));
+        }
+        SDL_SetWindowSize(window_, w, h);
+        needs_repaint_ = true;
+    }
+
+    void set_fixed_aspect_ratio(float ratio) {
+        fixed_aspect_ratio_ = ratio > 0.0f ? ratio : 0.0f;
+        if (window_ && fixed_aspect_ratio_ > 0.0f)
+            SDL_SetWindowAspectRatio(window_, fixed_aspect_ratio_, fixed_aspect_ratio_);
+    }
+
+    void set_design_viewport(float width, float height) {
+        design_width_ = width > 0.0f ? width : 0.0f;
+        design_height_ = height > 0.0f ? height : 0.0f;
         needs_repaint_ = true;
     }
 
@@ -118,6 +208,32 @@ public:
                     case SDL_EVENT_WINDOW_EXPOSED:
                         needs_repaint_ = true;
                         break;
+                    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+                        if (event.button.button == SDL_BUTTON_LEFT) {
+                            drag_start_ = window_to_root(event.button.x, event.button.y);
+                            drag_active_ = true;
+                        }
+                        break;
+                    case SDL_EVENT_MOUSE_MOTION:
+                        if (drag_active_ && (event.motion.state & SDL_BUTTON_LMASK)) {
+                            root_.simulate_drag(drag_start_,
+                                                window_to_root(event.motion.x, event.motion.y), 1);
+                            needs_repaint_ = true;
+                        }
+                        break;
+                    case SDL_EVENT_MOUSE_BUTTON_UP: {
+                        const auto point = window_to_root(event.button.x, event.button.y);
+                        View::SimulatedPointer pointer;
+                        pointer.button =
+                            event.button.button == SDL_BUTTON_RIGHT    ? MouseButton::right
+                            : event.button.button == SDL_BUTTON_MIDDLE ? MouseButton::middle
+                                                                       : MouseButton::left;
+                        root_.simulate_click(point, pointer);
+                        if (event.button.button == SDL_BUTTON_LEFT)
+                            drag_active_ = false;
+                        needs_repaint_ = true;
+                        break;
+                    }
                     // Native drag-and-drop. SDL3 abstracts Win OLE / Linux XDND
                     // (and macOS) into normalized drop events and delivers each
                     // dropped file as its own SDL_EVENT_DROP_FILE, bracketed by
@@ -178,6 +294,9 @@ public:
             // method calls on the exported View tree). Cheap when no assistive
             // tech is connected; a no-op on the sentinel handle.
             accessibility_pump(accessibility_handle_);
+
+            if (idle_callback_)
+                idle_callback_();
 
             // One measured dt per loop iteration, from SDL's monotonic
             // performance counter — never the 16 ms the delay below ASKS for
@@ -246,11 +365,6 @@ public:
         if (window_) SDL_SetWindowAlwaysOnTop(window_, on_top);
     }
 
-    void set_fixed_aspect_ratio(float ratio) {
-        if (window_ && ratio > 0)
-            SDL_SetWindowAspectRatio(window_, ratio, ratio);
-    }
-
     bool is_visible() const {
         return window_ && (SDL_GetWindowFlags(window_) & SDL_WINDOW_HIDDEN) == 0;
     }
@@ -261,6 +375,7 @@ private:
     SDL_Window* window_ = nullptr;
     SDL_Renderer* renderer_ = nullptr;
     std::function<void()> close_callback_;
+    std::function<void()> idle_callback_;
     bool needs_repaint_ = false;
     FrameClock frame_clock_;
     // Measured-dt source for the loop (SDL_GetPerformanceCounter).
@@ -279,6 +394,8 @@ private:
     Point pending_drop_pos_{0, 0};
     // Per-window drop hover state (owned here, not a process global).
     DragSession drag_session_;
+    Point drag_start_{0, 0};
+    bool drag_active_ = false;
 
     struct DispatcherQueueState {
         mutable std::mutex mutex;
@@ -296,6 +413,17 @@ private:
     // (W8/L9 HiDPI), apply that inverse transform HERE — and route mouse events
     // through the same helper — so drops keep landing under the cursor.
     Point window_to_root(float window_x, float window_y) const {
+        if (design_width_ > 0.0f && design_height_ > 0.0f && window_) {
+            int w = 0, h = 0;
+            SDL_GetWindowSize(window_, &w, &h);
+            const float scale = std::min(static_cast<float>(w) / design_width_,
+                                         static_cast<float>(h) / design_height_);
+            if (scale > 0.0f) {
+                const float tx = (w - design_width_ * scale) * 0.5f;
+                const float ty = (h - design_height_ * scale) * 0.5f;
+                return {(window_x - tx) / scale, (window_y - ty) / scale};
+            }
+        }
         return {window_x, window_y};
     }
 
@@ -358,30 +486,113 @@ private:
 
     void render_frame() {
         if (!renderer_) return;
+        PULP_TRACE_SCOPE_NAMED("render", "sdl_render_frame");
 
-        int w, h;
+        // SDL_GetWindowSize reports logical coordinates.  With
+        // SDL_WINDOW_HIGH_PIXEL_DENSITY (and especially Windows per-monitor
+        // DPI scaling) the renderer target is larger in physical pixels.
+        // Using the logical size for the Skia surface makes Windows scale the
+        // already-rendered image a second time, so a fitted editor is cropped
+        // at the right/bottom edge.  Keep layout/input in logical units, but
+        // allocate and paint the surface in the actual pixel dimensions.
+        int w = 0, h = 0;
         SDL_GetWindowSize(window_, &w, &h);
+        int pixel_w = 0, pixel_h = 0;
+        SDL_GetWindowSizeInPixels(window_, &pixel_w, &pixel_h);
+        if (pixel_w <= 0 || pixel_h <= 0) {
+            pixel_w = w;
+            pixel_h = h;
+        }
 
         // Use SDL renderer for basic clearing and present
         SDL_SetRenderDrawColor(renderer_, 30, 30, 46, 255);
         SDL_RenderClear(renderer_);
 
-        // For now, use RecordingCanvas to paint the view tree
-        // (real GPU rendering will use WebGPU canvas when Skia is integrated)
-        // The view tree layout and paint still work — just not visible on screen yet
-        // via SDL. The CoreGraphics path (WindowHost) handles visible rendering on macOS.
+#ifdef PULP_HAS_SKIA
+        // SDL is the Windows/Linux window and input transport.  Paint the real
+        // view tree into a CPU Skia surface, then upload those pixels to an SDL
+        // streaming texture.  RecordingCanvas is useful for tests, but it only
+        // records commands; using it here made the standalone show a blue
+        // diagnostic rectangle while the actual editor remained invisible.
+        const auto image_info =
+            SkImageInfo::Make(pixel_w, pixel_h, kBGRA_8888_SkColorType, kPremul_SkAlphaType);
+        auto surface = SkSurfaces::Raster(image_info);
+        if (!surface) {
+            SDL_SetRenderDrawColor(renderer_, 30, 30, 46, 255);
+            SDL_RenderClear(renderer_);
+            SDL_RenderPresent(renderer_);
+            return;
+        }
+        auto* skia = surface->getCanvas();
+        const bool fitted = design_width_ > 0.0f && design_height_ > 0.0f;
+        float scale = 1.0f;
+        float tx = 0.0f;
+        float ty = 0.0f;
+        if (fitted) {
+            scale = std::min(static_cast<float>(pixel_w) / design_width_,
+                             static_cast<float>(pixel_h) / design_height_);
+            tx = (pixel_w - design_width_ * scale) * 0.5f;
+            ty = (pixel_h - design_height_ * scale) * 0.5f;
+            skia->save();
+            skia->translate(tx, ty);
+            skia->scale(scale, scale);
+        } else if (w > 0 && h > 0) {
+            // Non-fitted views still lay out in logical coordinates.  Apply
+            // the platform DPI transform before painting them into pixels.
+            skia->save();
+            skia->scale(static_cast<float>(pixel_w) / w, static_cast<float>(pixel_h) / h);
+        }
+        {
+            canvas::SkiaCanvas skia_canvas(skia);
+            PULP_TRACE_SCOPE_NAMED("layout", "sdl_layout_and_paint");
+            root_.set_bounds({0, 0, fitted ? design_width_ : static_cast<float>(w),
+                              fitted ? design_height_ : static_cast<float>(h)});
+            root_.layout_children();
+            root_.paint_all(skia_canvas);
+        }
+        if (fitted || (w > 0 && h > 0))
+            skia->restore();
+        SkPixmap pixmap;
+        if (!surface->peekPixels(&pixmap)) {
+            SDL_RenderPresent(renderer_);
+            return;
+        }
+
+        if (!texture_ || texture_width_ != pixel_w || texture_height_ != pixel_h) {
+            if (texture_)
+                SDL_DestroyTexture(texture_);
+            texture_ = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_BGRA32,
+                                         SDL_TEXTUREACCESS_STREAMING, pixel_w, pixel_h);
+            texture_width_ = pixel_w;
+            texture_height_ = pixel_h;
+        }
+        if (texture_) {
+            PULP_TRACE_SCOPE_NAMED("render", "sdl_texture_upload");
+            SDL_UpdateTexture(texture_, nullptr, pixmap.addr(),
+                              static_cast<int>(pixmap.rowBytes()));
+            SDL_RenderTexture(renderer_, texture_, nullptr, nullptr);
+        }
+#else
         canvas::RecordingCanvas recording_canvas;
         root_.set_bounds({0, 0, static_cast<float>(w), static_cast<float>(h)});
         root_.layout_children();
         root_.paint_all(recording_canvas);
-
-        // Draw a simple "rendering active" indicator using SDL
         SDL_FRect rect = {10, 10, 100, 20};
         SDL_SetRenderDrawColor(renderer_, 100, 180, 250, 255);
         SDL_RenderFillRect(renderer_, &rect);
+#endif
 
         SDL_RenderPresent(renderer_);
     }
+
+#ifdef PULP_HAS_SKIA
+    SDL_Texture* texture_ = nullptr;
+    int texture_width_ = 0;
+    int texture_height_ = 0;
+#endif
+    float fixed_aspect_ratio_ = 0.0f;
+    float design_width_ = 0.0f;
+    float design_height_ = 0.0f;
 };
 
 std::unique_ptr<SdlWindowHost> SdlWindowHost::create(View& root, Options options) {
