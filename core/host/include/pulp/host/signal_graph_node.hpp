@@ -10,6 +10,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace pulp::host {
@@ -24,6 +25,27 @@ enum class NodeType {
     MidiInput,     // System MIDI input
     MidiOutput,    // System MIDI output
     Custom,        // String-keyed extension node
+};
+
+enum class PortKind : uint8_t { Audio, Sidechain, Midi, Event, Control, Param };
+
+struct PortHandle {
+    NodeId node = 0;
+    PortIndex index = 0;
+    bool output = false;
+    std::string name;
+    PortKind kind = PortKind::Audio;
+};
+
+struct GraphResult {
+    enum class Code : uint8_t { Ok, UnknownNode, UnknownPort, KindMismatch, IllegalCycle, Duplicate };
+    Code code = Code::Ok;
+    NodeId node = 0;
+    PortIndex port = 0;
+    std::string rule;
+    std::string suggested_fix;
+    std::string message() const { return rule + (suggested_fix.empty() ? "" : "; " + suggested_fix); }
+    explicit operator bool() const noexcept { return code == Code::Ok; }
 };
 
 enum class LiveSwapCurve { Smoothstep, EqualPower };
@@ -138,6 +160,12 @@ struct GraphNode {
 
     NodeLiveSwapPolicy live_swap_policy;
     bool hosted_editor_open = false;
+
+    std::vector<PortHandle> input_ports;
+    std::vector<PortHandle> output_ports;
+
+    PortHandle in(std::string_view port) const;
+    PortHandle out(std::string_view port) const;
 };
 
 }  // namespace pulp::host
