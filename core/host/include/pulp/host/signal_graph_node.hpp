@@ -38,14 +38,25 @@ struct PortHandle {
 };
 
 struct GraphResult {
-    enum class Code : uint8_t { Ok, UnknownNode, UnknownPort, KindMismatch, IllegalCycle, Duplicate };
+    enum class Code : uint8_t {
+        Ok,
+        UnknownNode,
+        UnknownPort,
+        KindMismatch,
+        IllegalCycle,
+        Duplicate
+    };
     Code code = Code::Ok;
     NodeId node = 0;
     PortIndex port = 0;
     std::string rule;
     std::string suggested_fix;
-    std::string message() const { return rule + (suggested_fix.empty() ? "" : "; " + suggested_fix); }
-    explicit operator bool() const noexcept { return code == Code::Ok; }
+    std::string message() const {
+        return rule + (suggested_fix.empty() ? "" : "; " + suggested_fix);
+    }
+    explicit operator bool() const noexcept {
+        return code == Code::Ok;
+    }
 };
 
 enum class LiveSwapCurve { Smoothstep, EqualPower };

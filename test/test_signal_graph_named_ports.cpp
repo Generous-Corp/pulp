@@ -1,5 +1,5 @@
-#include <pulp/host/signal_graph.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <pulp/host/signal_graph.hpp>
 
 using pulp::host::GraphResult;
 using pulp::host::PortKind;
