@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 1.44.0
+    VERSION 1.45.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -1148,12 +1148,27 @@ endif()
 # Keep X9 format lanes independent: a platform/configuration may provide
 # VST3 or Audio Unit without building the CLAP example target.
 if(PULP_BUILD_TESTS AND NOT ANDROID AND TARGET pulp-test-signal-graph-x9-modular-instrument)
+    set(_pulp_x9_expect_clap OFF)
+    set(_pulp_x9_expect_vst3 OFF)
+    set(_pulp_x9_expect_au OFF)
+    if(TARGET PulpGain_CLAP)
+        set(_pulp_x9_expect_clap ON)
+    endif()
+    if(TARGET PulpGain_VST3)
+        set(_pulp_x9_expect_vst3 ON)
+    endif()
+    if(TARGET PulpGain_AU)
+        set(_pulp_x9_expect_au ON)
+    endif()
     add_test(
         NAME pulp-test-signal-graph-x9-hosted-format-receipt
         COMMAND ${CMAKE_COMMAND}
             "-DCLAP_PATH=${CMAKE_BINARY_DIR}/CLAP/PulpGain.clap"
             "-DVST3_PATH=${CMAKE_BINARY_DIR}/VST3/PulpGain.vst3"
             "-DAU_PATH=${CMAKE_BINARY_DIR}/AU/PulpGain.component"
+            "-DEXPECT_CLAP=${_pulp_x9_expect_clap}"
+            "-DEXPECT_VST3=${_pulp_x9_expect_vst3}"
+            "-DEXPECT_AU=${_pulp_x9_expect_au}"
             "-DOUTPUT=${CMAKE_BINARY_DIR}/x9-hosted-format-receipt.json"
             -P "${CMAKE_SOURCE_DIR}/test/cmake/x9_hosted_format_receipt.cmake")
     set_tests_properties(pulp-test-signal-graph-x9-hosted-format-receipt PROPERTIES
