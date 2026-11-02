@@ -4722,6 +4722,37 @@
    ],
    "kind": "python"
   },
+  "core-vellum-direction": {
+   "entry": "tools/scripts/core_vellum_direction.py",
+   "inputs": [
+    "core/gpu_audio/CMakeLists.txt",
+    "core/gpu_audio/src/detail/dawn_shared_io_provider.cpp",
+    "core/platform",
+    "core/platform/include",
+    "core/runtime",
+    "core/runtime/include",
+    "core/simd",
+    "core/simd/include",
+    "core/view",
+    "core/view/audio",
+    "core/view/include",
+    "core/view/include/pulp/view/widgets.hpp",
+    "core/view/src/reload_exports.cpp",
+    "tools/scripts/core_vellum_direction.py",
+    "tools/scripts/include_boundary.py",
+    "tools/scripts/vellum_policy.json",
+    "tools/scripts/vellum_policy.py"
+   ],
+   "kind": "python"
+  },
+  "core-vellum-direction-negative-contract": {
+   "entry": "tools/scripts/test_core_vellum_direction.py",
+   "inputs": [
+    "core/audio/CMakeLists.txt",
+    "tools/scripts/test_core_vellum_direction.py"
+   ],
+   "kind": "python"
+  },
   "create-templates-verify": {
    "entry": "tools/scripts/test_verify_create_templates.py",
    "inputs": [
@@ -4902,6 +4933,7 @@
   "design-unit-boundary": {
    "entry": "tools/scripts/design_unit_boundary_check.py",
    "inputs": [
+    "core/gpu_audio/src/detail/dawn_shared_io_provider.cpp",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -4923,6 +4955,7 @@
   "design-unit-boundary-selftest": {
    "entry": "tools/scripts/test_design_unit_boundary_check.py",
    "inputs": [
+    "core/gpu_audio/src/detail/dawn_shared_io_provider.cpp",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -5325,6 +5358,7 @@
   "foundation-include-lint": {
    "entry": "tools/scripts/foundation_include_lint.py",
    "inputs": [
+    "core/gpu_audio/src/detail/dawn_shared_io_provider.cpp",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -8432,6 +8466,7 @@
   "pulp-view-core-include-boundary": {
    "entry": "tools/scripts/include_boundary.py",
    "inputs": [
+    "core/gpu_audio/src/detail/dawn_shared_io_provider.cpp",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -8487,6 +8522,7 @@
    "inputs": [
     "core/canvas",
     "core/canvas/CMakeLists.txt",
+    "core/gpu_audio/src/detail/dawn_shared_io_provider.cpp",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -8527,6 +8563,7 @@
    "inputs": [
     "core/canvas",
     "core/canvas/CMakeLists.txt",
+    "core/gpu_audio/src/detail/dawn_shared_io_provider.cpp",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -8558,6 +8595,7 @@
    "inputs": [
     "core/canvas",
     "core/canvas/CMakeLists.txt",
+    "core/gpu_audio/src/detail/dawn_shared_io_provider.cpp",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -8598,6 +8636,7 @@
    "inputs": [
     "core/canvas",
     "core/canvas/CMakeLists.txt",
+    "core/gpu_audio/src/detail/dawn_shared_io_provider.cpp",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -8643,6 +8682,7 @@
     "core/canvas/platform/mac/cg_canvas.mm",
     "core/canvas/src/bundled_fonts.cpp",
     "core/canvas/src/skia_chromium_raw_ptr_compat.cpp",
+    "core/gpu_audio/src/detail/dawn_shared_io_provider.cpp",
     "core/platform",
     "core/platform/include",
     "core/render/include/pulp/render/gpu_compute.hpp",
@@ -8691,6 +8731,7 @@
   "pulp.vellum-view-core-pulp-kept": {
    "entry": "tools/scripts/vellum_view_core_pulp_kept_check.py",
    "inputs": [
+    "core/gpu_audio/src/detail/dawn_shared_io_provider.cpp",
     "core/platform",
     "core/platform/include",
     "core/runtime",
