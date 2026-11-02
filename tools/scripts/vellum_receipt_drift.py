@@ -40,7 +40,7 @@ import posixpath
 import re
 import subprocess
 import sys
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import vellum_expansion_watch_check as watch  # noqa: E402  (needs the path insert)
@@ -254,8 +254,10 @@ def parse_receipt(raw: bytes, pin: Pin) -> Receipt:
 
 
 def _changes(repo: pathlib.Path, base: str, head: str) -> list[tuple[str, str]]:
+    # --ignore-submodules=none: a gitlink added under an exported directory is
+    # a change even when .gitmodules says ignore = all.
     raw = _git(repo, "diff", "--name-status", "-z", "--no-renames", "--no-ext-diff",
-               base, head, "--").stdout.split(b"\0")
+               "--ignore-submodules=none", base, head, "--").stdout.split(b"\0")
     if raw and raw[-1] == b"":
         raw.pop()
     if len(raw) % 2:
@@ -284,8 +286,19 @@ def _under(path: str, directories: frozenset[str]) -> bool:
     return False
 
 
-def drifted_paths(changes: Iterable[tuple[str, str]], receipt: Receipt, pin: Pin) -> dict[str, str]:
-    """Changed paths that owe an inheritance decision, with the reason each one does."""
+def drifted_paths(
+    changes: Iterable[tuple[str, str]],
+    receipt: Receipt,
+    pin: Pin,
+    existed_at_export: Callable[[str], bool] = lambda path: True,
+) -> dict[str, str]:
+    """Changed paths that owe an inheritance decision, with the reason each one does.
+
+    A file under an exported source directory that did not exist at the export
+    commit is one the next re-export picks up, so every change to it owes a
+    decision, not only the one that adds it. A file that existed then and was
+    not exported (another platform's source, say) owes nothing.
+    """
     owed: dict[str, str] = {}
     for status, path in changes:
         if _is_frozen(path, pin.frozen_paths):
@@ -294,9 +307,29 @@ def drifted_paths(changes: Iterable[tuple[str, str]], receipt: Receipt, pin: Pin
             owed[path] = "exported"
         elif path in receipt.producers:
             owed[path] = "produces a generated export input"
-        elif status == "A" and _under(path, receipt.source_dirs):
-            owed[path] = "added in an exported source directory"
+        elif _under(path, receipt.source_dirs):
+            if status == "A":
+                owed[path] = "added in an exported source directory"
+            elif not existed_at_export(path):
+                owed[path] = "added to an exported source directory since the export"
     return owed
+
+
+def _existed_at(repo: pathlib.Path, commit: str) -> Callable[[str], bool]:
+    def existed(path: str) -> bool:
+        return _git(repo, "cat-file", "-e", f"{commit}:{path}", check=False).returncode == 0
+
+    return existed
+
+
+def _require_commit(repo: pathlib.Path, sha: str, head: str, where: str) -> None:
+    """The receipt's Pulp commit must be real Pulp history, reachable from head."""
+    if _git(repo, "cat-file", "-e", f"{sha}^{{commit}}", check=False).returncode:
+        raise ReceiptDriftError(
+            f"{where}: pulp_sha {sha} is not in this checkout; the check needs full history"
+        )
+    if _git(repo, "merge-base", "--is-ancestor", sha, head, check=False).returncode:
+        raise ReceiptDriftError(f"{where}: pulp_sha {sha} is not an ancestor of {head}")
 
 
 def _parse_utc(value: Any, where: str) -> None:
@@ -413,20 +446,25 @@ def collect_decisions(
         if directory == CHANGE_EVENT_DIRECTORY:
             if event.get("kind") != "change":
                 continue
+            slices = event.get("slices", [])
+            if not isinstance(slices, list) or not all(isinstance(x, str) for x in slices):
+                raise ReceiptDriftError(f"{path}: slices must be a list of slice ids")
             patterns = [
                 pattern
-                for slice_id in event.get("slices", [])
+                for slice_id in slices
                 for pattern in slice_paths.get(slice_id, [])
             ]
             covered = [
                 item for item in owed if any(_slice_matches(item, p) for p in patterns)
             ]
         else:
-            selectors = watch.EXPECTED_SCOPES
+            families = event.get("capability_families", [])
+            if not isinstance(families, list) or not all(isinstance(x, str) for x in families):
+                raise ReceiptDriftError(f"{path}: capability_families must be a list of names")
             patterns = [
                 selector
-                for family in event.get("capability_families", [])
-                for selector in selectors.get(family, [])
+                for family in families
+                for selector in watch.EXPECTED_SCOPES.get(family, [])
             ]
             covered = [
                 item for item in owed if any(watch._matches(item, p) for p in patterns)
@@ -462,10 +500,12 @@ def check(repo: pathlib.Path, base: str, head: str) -> dict[str, Any]:
         head_receipt = _blob(repo, head, head_pin.receipt_path, MAX_RECEIPT_BYTES)
         if head_receipt is None:
             raise ReceiptDriftError(f"{head_pin.receipt_path} is missing at the head commit")
-        parse_receipt(head_receipt, head_pin)
+        new_receipt = parse_receipt(head_receipt, head_pin)
+        _require_commit(repo, new_receipt.pulp_sha, head, head_pin.receipt_path)
 
+    _require_commit(repo, receipt.pulp_sha, head, pin.receipt_path)
     changes = _changes(repo, base, head)
-    owed = drifted_paths(changes, receipt, pin)
+    owed = drifted_paths(changes, receipt, pin, _existed_at(repo, receipt.pulp_sha))
     map_raw = _blob(repo, base, MAP_PATH, MAX_RECEIPT_BYTES)
     base_map = _strict_json(map_raw, MAP_PATH) if map_raw is not None else None
     decisions, events = collect_decisions(

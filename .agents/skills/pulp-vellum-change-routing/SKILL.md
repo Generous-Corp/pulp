@@ -467,13 +467,22 @@ Traps:
 - The pin, the receipt copy and `frozen_paths` are read at the BASE commit. A
   change cannot exempt itself by editing them; a re-pin applies to the changes
   after it, and deleting the pin fails.
-- A new file in an exported source directory owes a decision even though no
-  receipt row names it: it compiles into an exported target, which is how the
-  last export missed `content_install_limits.hpp`.
+- A file added to an exported source directory owes a decision even though no
+  receipt row names it, and so does every later edit or deletion of it while it
+  postdates the export commit: it compiles into an exported target, and the next
+  re-export picks it up. A file that existed at the export commit but was not
+  exported (another platform's source) owes nothing.
+- The receipt's `pulp_sha` must be a commit in the checkout and an ancestor of
+  the head, so the workflow's full-history checkout is load-bearing.
 - Receipt mode runs in the untrusted "Vellum freeze" job only, which executes
   the change's own copy of the script. The trusted gate does not run it yet;
   adding it there in the same change would call a flag the base copy lacks and
   fail that change's merge group.
+- The pin is data a reviewer must read. A change to `frozen_paths` or a swapped
+  receipt is only parsed for shape and self-consistency, and takes effect for
+  every later change, so review a pin edit as an ownership decision. Nothing yet
+  checks the receipt copy against Vellum's blob; the trusted gate, which holds a
+  Vellum reader token, is where that check belongs.
 
 ## The "Vellum freeze" CI job runs two checks, and the second is the one that fails
 

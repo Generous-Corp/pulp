@@ -14,7 +14,10 @@ Pulp paths Vellum's newest mirror export copied.
   inheritance decision, because it is not edited in Pulp.
 
 The check reads both files at the base commit of a change, so editing them
-takes effect for the changes after the one that edits them. Re-pin by copying
+takes effect for the changes after the one that edits them. That makes an edit
+here an ownership decision for every later change: review it as one. The check
+only proves the copy is self-consistent and that its `pulp_sha` is real Pulp
+history; it does not yet compare the copy with Vellum's blob. Re-pin by copying
 the new receipt, updating `export_id`, `receipt_path`, `receipt_source` and
 `receipt_sha256` together, and removing the old copy. The pin cannot be deleted
 while the guard runs.

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -17,8 +18,6 @@ sys.path.insert(0, str(SCRIPTS))
 
 import vellum_receipt_drift as drift  # noqa: E402  (needs the path insert)
 
-EXPORT_ID = "20261025-46cee5e4e6e2"
-PULP_SHA = "46cee5e4e6e2" + "0" * 28
 EXPORTED = [
     "core/canvas/include/pulp/canvas/a.hpp",
     "core/canvas/src/a.cpp",
@@ -26,6 +25,39 @@ EXPORTED = [
     "external/fonts/F.ttf",
 ]
 PRODUCER = "tools/cmake/Embed.cmake"
+# Present at the export commit but not exported, like another platform's source.
+UNEXPORTED_AT_EXPORT = "core/canvas/src/other_platform.cpp"
+FIXED_DATE = "2026-10-25T05:00:00Z"
+
+
+def git_in(root: pathlib.Path, *args: str) -> str:
+    env = {
+        "GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.com",
+        "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@example.com",
+        "GIT_AUTHOR_DATE": FIXED_DATE, "GIT_COMMITTER_DATE": FIXED_DATE,
+        "PATH": os.environ.get("PATH", ""), "HOME": str(root),
+        "GIT_CONFIG_NOSYSTEM": "1",
+    }
+    return subprocess.run(["git", "-C", str(root), *args], check=True,
+                          capture_output=True, text=True, env=env).stdout.strip()
+
+
+def make_export_commit(root: pathlib.Path) -> str:
+    """The commit Vellum exported from. Fixed content and dates fix its SHA."""
+    git_in(root, "init", "-q", "-b", "main")
+    for path in [*EXPORTED, PRODUCER, UNEXPORTED_AT_EXPORT, "core/view/src/kept.cpp",
+                 "docs/readme.md"]:
+        target = root / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(f"// {path}\n", encoding="utf-8")
+    git_in(root, "add", "-A")
+    git_in(root, "commit", "-q", "-m", "export source")
+    return git_in(root, "rev-parse", "HEAD")
+
+
+with tempfile.TemporaryDirectory() as _scratch:
+    PULP_SHA = make_export_commit(pathlib.Path(_scratch))
+EXPORT_ID = f"20261025-{PULP_SHA[:12]}"
 
 
 def receipt_bytes(files: list[str] = EXPORTED) -> bytes:
@@ -87,11 +119,10 @@ class Fixture:
     def __init__(self, frozen: list[str] | None = None, with_pin: bool = True) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.root = pathlib.Path(self.tmp.name)
-        self.git("init", "-q", "-b", "main")
+        export = make_export_commit(self.root)
+        assert export == PULP_SHA, "the export commit must be reproducible"
         self.git("config", "user.email", "test@example.com")
         self.git("config", "user.name", "Test")
-        for path in [*EXPORTED, PRODUCER, "core/view/src/kept.cpp", "docs/readme.md"]:
-            self.write(path, f"// {path}\n")
         self.write(drift.MAP_PATH, json.dumps(OWNERSHIP_MAP))
         if with_pin:
             receipt = receipt_bytes()
@@ -184,11 +215,48 @@ class ReceiptDriftTests(unittest.TestCase):
         self.fixture.write("external/fonts/G.ttf", b"\x00")
         self.assertEqual(self.fixture.check()["status"], "pass")
 
-    def test_modified_unexported_file_in_source_directory_passes(self):
+    def test_file_present_at_export_but_not_exported_passes(self):
+        # Another platform's source sits beside exported files; the export did
+        # not take it, so editing or deleting it owes nothing.
+        self.fixture.write(UNEXPORTED_AT_EXPORT, "// edited\n")
+        self.assertEqual(self.fixture.check()["status"], "pass")
+        self.fixture.remove(UNEXPORTED_AT_EXPORT)
+        self.assertEqual(self.fixture.check()["status"], "pass")
+
+    def test_re_adding_an_unexported_file_in_source_directory_fails(self):
+        # Adding a file under an exported source directory owes a decision even
+        # when a file of that name existed at the export commit.
+        self.fixture.remove(UNEXPORTED_AT_EXPORT)
+        self.fixture.base = self.fixture.commit("removed")
+        self.fixture.write(UNEXPORTED_AT_EXPORT, "// back\n")
+        self.assert_missing(self.fixture.check(), [UNEXPORTED_AT_EXPORT])
+
+    def test_editing_a_file_added_since_the_export_fails(self):
+        # The next re-export picks the file up, so each later change to it owes
+        # a decision too, not only the one that added it.
         self.fixture.write("core/canvas/src/new.cpp", "// new\n")
         self.fixture.base = self.fixture.commit("land it")
         self.fixture.write("core/canvas/src/new.cpp", "// edited\n")
-        self.assertEqual(self.fixture.check()["status"], "pass")
+        self.assert_missing(self.fixture.check(), ["core/canvas/src/new.cpp"])
+
+    def test_deleting_a_file_added_since_the_export_fails(self):
+        self.fixture.write("core/canvas/src/new.cpp", "// new\n")
+        self.fixture.base = self.fixture.commit("land it")
+        self.fixture.remove("core/canvas/src/new.cpp")
+        self.assert_missing(self.fixture.check(), ["core/canvas/src/new.cpp"])
+
+    def test_submodule_added_in_source_directory_fails_even_when_ignored(self):
+        sha = self.fixture.git("rev-parse", "HEAD")
+        self.fixture.git("update-index", "--add", "--cacheinfo",
+                         f"160000,{sha},core/canvas/src/vendored")
+        self.fixture.write(".gitmodules",
+                           '[submodule "v"]\n\tpath = core/canvas/src/vendored\n'
+                           "\turl = https://example.invalid/v.git\n\tignore = all\n")
+        self.fixture.git("add", ".gitmodules")
+        self.fixture.git("commit", "-q", "-m", "head")
+        report = drift.check(self.fixture.root, self.fixture.base,
+                             self.fixture.git("rev-parse", "HEAD"))
+        self.assert_missing(report, ["core/canvas/src/vendored"])
 
     # --- what records the decision --------------------------------------------
 
@@ -366,6 +434,29 @@ class ReceiptDriftTests(unittest.TestCase):
     def test_head_repin_is_validated(self):
         self.fixture.write(f"{drift.PIN_DIRECTORY}/{EXPORT_ID}.json", receipt_bytes() + b" ")
         with self.assertRaisesRegex(drift.ReceiptDriftError, "receipt_sha256"):
+            self.fixture.check()
+
+    def test_receipt_commit_must_be_pulp_history(self):
+        receipt = receipt_bytes()
+        fake = receipt.replace(PULP_SHA.encode(), (PULP_SHA[:12] + "f" * 28).encode())
+        self.fixture.write(f"{drift.PIN_DIRECTORY}/{EXPORT_ID}.json", fake)
+        self.fixture.write(drift.PIN_PATH, pin_value(fake))
+        with self.assertRaisesRegex(drift.ReceiptDriftError, "not in this checkout"):
+            self.fixture.check()
+
+    def test_malformed_watch_event_fails_cleanly(self):
+        self.fixture.write("core/canvas/include/pulp/canvas/a.hpp", "// edited\n")
+        event = {"capability_families": [["render-assets-and-backends"]],
+                 "vellum_inherits": True}
+        self.fixture.write(".github/vellum-expansion-watch-events/20261101-w.json", event)
+        with self.assertRaisesRegex(drift.ReceiptDriftError, "capability_families"):
+            self.fixture.check()
+
+    def test_malformed_change_event_fails_cleanly(self):
+        self.fixture.write("core/canvas/src/a.cpp", "// edited\n")
+        event = {"kind": "change", "slices": "canvas-kernel", "vellum_inherits": True}
+        self.fixture.write(".github/vellum-change-events/20261101-canvas.json", event)
+        with self.assertRaisesRegex(drift.ReceiptDriftError, "slices"):
             self.fixture.check()
 
     def test_no_pin_is_inactive(self):
