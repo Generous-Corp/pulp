@@ -18,7 +18,7 @@ try {
   Check ($commonText -match 'TargetAbi -in @\(''x64'',''arm64ec'',''arm64x''\)' -and $commonText -match '\$snapshotFlags') 'ARM64EC module probe omits SNAPMODULE32'
   Check ($commonText -match 'ReadToEndAsync' -and $commonText -match 'stdoutTask') 'bounded probe drains redirected pipes before waiting'
   $smokeText=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'windows_editor_smoke.ps1') -Raw
-  Check ($smokeText -notmatch 'ProbeBeforeEditor' -and $smokeText -notmatch 'module-probe-release' -and $smokeText -notmatch 'PULP_DAW_SMOKE_PROBE_GATE') 'single-pass binding flow has no pre-editor probe gate'
+  Check ($smokeText -notmatch 'ProbeBeforeEditor' -and $smokeText -notmatch 'module-probe-release' -and $smokeText -match "'PROBE_GATE'" -and $smokeText -match 'Remove-Item Env:PULP_DAW_SMOKE_PROBE_GATE' -and $smokeText -match 'foreach\(\$name in \$envNames\).*SetEnvironmentVariable') 'single-pass flow clears the inherited probe gate and restores it in cleanup'
   Check ($smokeText -match 'function Get-LoadedPluginBinding' -and $smokeText -match '\$bound=Get-LoadedPluginBinding' -and $smokeText -match 'Assert-ModuleBinding \$module\.FileName') 'loaded plugin binding is one reusable manifest-checked enumeration'
   Check ($smokeText -match '\$finalBound=Get-LoadedPluginBinding[\s\S]+?Loaded plugin binding changed before PASS[\s\S]+?\$receipt\.verdict=''PASS''') 'loaded plugin binding is re-enumerated and compared before PASS'
   Check ($smokeText -match 'Get-BoundModulePaths[\s\S]+?Assert-OwnedIdentity') 'module binding rechecks owned PID/start identity after probe'

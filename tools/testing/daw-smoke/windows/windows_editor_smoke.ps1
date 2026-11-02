@@ -44,7 +44,7 @@ try {
 }
 $owned = New-Object 'System.Collections.Generic.List[object]'
 $priorEnv = @{}
-$envNames = @('FX','STATUS','TOKEN','PROJECT','PARAM_INDEX','DURATION') | ForEach-Object {'PULP_DAW_SMOKE_'+$_}
+$envNames = @('FX','STATUS','TOKEN','PROJECT','PARAM_INDEX','DURATION','PROBE_GATE') | ForEach-Object {'PULP_DAW_SMOKE_'+$_}
 foreach($name in $envNames){$priorEnv[$name]=[Environment]::GetEnvironmentVariable($name,'Process')}
 $exitCode=3
 $privateProfile=$null
@@ -138,6 +138,11 @@ try {
   # probe so the scripted editor run owns the complete trace.
   Set-ProcessTracePath $null
   $receipt.trace_environment=[ordered]@{warm_scan='cleared';scripted='pending'}
+  # The Lua helper still supports the optional probe gate for direct callers,
+  # but this wrapper owns a single warm/scripted flow.  Clear an inherited gate
+  # before either owned host starts so a stale caller value cannot wedge the
+  # scripted editor behind a release file that this wrapper never creates.
+  Remove-Item Env:PULP_DAW_SMOKE_PROBE_GATE -ErrorAction SilentlyContinue
   $warm=Start-Owned @('-newinst','-cfgfile',$ini,'-new','-nosplash') 'warm'
   $deadline=[DateTime]::UtcNow.AddSeconds($TimeoutSec);$cacheMatch=$false
   while([DateTime]::UtcNow -lt $deadline){
@@ -167,6 +172,7 @@ try {
   # REAPER treats the Lua path as the final positional input before
   # -cfgfile. Options placed after -cfgfile make the launch look successful
   # while silently skipping the script.
+  Remove-Item Env:PULP_DAW_SMOKE_PROBE_GATE -ErrorAction SilentlyContinue
   $proc=Start-Owned @('-newinst','-new','-nosplash',$lua,'-cfgfile',$ini) 'scripted'
   $receipt.process=@{pid=$proc.process.Id;started_utc=$proc.started;arguments=$proc.command;session_id=$proc.session_id}
   $deadline=[DateTime]::UtcNow.AddSeconds($TimeoutSec);$hostStatus=$null
