@@ -263,3 +263,23 @@ MediaPipe, OpenCV, OpenSeeFace, ONNX Runtime, LiteRT, Core ML, platform sensor
 APIs, and device SDKs remain application-selected dependencies. Audit model
 weights, task bundles, codecs, and SDK terms separately from runtime licenses.
 Do not add any of them to Pulp core for an application that does not use them.
+
+## T10 recipe: DaVinci Resolve / Fairlight
+
+The named T10 host target is DaVinci Resolve's Fairlight page. The acceptance
+path is host-only and does not add a Blackmagic SDK or Resolve dependency to
+Pulp. Install an exact Resolve version, place a built Pulp VST3 in the host's
+plugin search path, and record the plugin identity, project, timeline, track,
+and parameter automation. The receipt must show a before/after host automation
+value reaching the plugin's existing `get_modulated` path.
+
+`examples/cv-control` currently declares `CvFaceTone` as a VST3 instrument and
+does not expose an input bus. Verify that the selected Fairlight version loads
+VST3 instruments and automates its Brightness parameter before claiming T10.
+If it only accepts effects, use an existing Pulp VST3 effect with a clearly
+automatable parameter or leave T10 unverified; do not change core solely to
+force host compatibility.
+
+The receipt fixture below is an evidence template, not a live host result.
+This checkout has no DaVinci Resolve installation, so it deliberately records
+the missing runtime evidence.
