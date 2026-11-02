@@ -80,10 +80,25 @@ class CoreVellumDirectionTests(unittest.TestCase):
                      "target_link_libraries(pulp-audio PRIVATE Vellum::Gpu)\n",
                      "target_link_libraries(pulp-audio PRIVATE vellum::view)\n",
                      "FetchContent_Declare(vellum GIT_REPOSITORY x)\n",
-                     "add_subdirectory(${CMAKE_SOURCE_DIR}/external/vellum vellum)\n"):
+                     "add_subdirectory(${CMAKE_SOURCE_DIR}/external/vellum vellum)\n",
+                     "find_package(\n  Vellum 0.2 CONFIG REQUIRED\n)\n",
+                     "FetchContent_Declare(\n  vellum\n  GIT_REPOSITORY x\n)\n",
+                     "add_subdirectory(\n  ${CMAKE_SOURCE_DIR}/external/vellum\n  vellum\n)\n",
+                     "target_link_libraries(\n  pulp-audio PRIVATE\n  Vellum::Gpu\n)\n"):
             with self.subTest(line=line):
                 self._write("core/audio/cmake/planted.cmake", line)
                 self.assertEqual(self._run(), 1)
+
+    def test_multiline_comments_are_not_references(self):
+        self._write("core/audio/cmake/prose.cmake",
+                    "find_package(\n"
+                    "  # Vellum is prose here\n"
+                    "  OtherPackage\n"
+                    ")\n"
+                    "#[[ FetchContent_Declare(\n"
+                    "  vellum\n"
+                    ") ]]\n")
+        self.assertEqual(self._run(), 0)
 
     def test_comments_are_not_references(self):
         self._write("core/audio/cmake/prose.cmake",

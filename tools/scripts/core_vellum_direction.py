@@ -33,16 +33,9 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import include_boundary  # noqa: E402
 
 CMAKE_ROOT = "core"
-CMAKE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("find_package(Vellum", re.compile(r"\bfind_package\s*\(\s*vellum\b", re.I)),
-    ("FetchContent(vellum", re.compile(
-        r"\bFetchContent_(?:Declare|MakeAvailable|Populate|GetProperties)\s*\(\s*vellum\b",
-        re.I)),
-    ("ExternalProject_Add(vellum", re.compile(r"\bExternalProject_Add\s*\(\s*vellum\b", re.I)),
-    ("add_subdirectory(vellum", re.compile(
-        r"\badd_subdirectory\s*\([^)]*\bvellum\b", re.I)),
-)
 TARGET_RE = re.compile(r"\b[Vv]ellum::[A-Za-z0-9_]+")
+_COMMAND_RE = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+_BRACKET_OPEN_RE = re.compile(r"\[(=*)\[")
 
 # (file, reference) -> (count, reason). The opt-in D15 GPU-audio provider
 # imports Vellum's installed GPU runtime and Dawn headers. The block is removed
@@ -72,19 +65,96 @@ def strip_cmake_comment(line: str) -> str:
     return line
 
 
+def strip_cmake_comments(text: str) -> str:
+    """Remove line and bracket comments while preserving line numbers."""
+    # Bracket comments can span commands and lines. Keep their newlines so a
+    # hit in a later command still reports the source line where it starts.
+    text = re.sub(r"#\[(=*)\[.*?\]\1\]",
+                  lambda m: " " + "\n" * m.group(0).count("\n") + " ",
+                  text, flags=re.S)
+    return "".join(strip_cmake_comment(line)
+                    for line in text.splitlines(keepends=True))
+
+
+def cmake_commands(text: str) -> list[tuple[int, str, str]]:
+    """Return ``(line, command, body)`` for balanced CMake commands.
+
+    CMake commands may span lines, and parentheses inside quoted or bracket
+    arguments do not close the command. The input must already have comments
+    removed so commented-out commands cannot become hits.
+    """
+    commands: list[tuple[int, str, str]] = []
+    cursor = 0
+    while match := _COMMAND_RE.search(text, cursor):
+        opening = text.find("(", match.start(), match.end())
+        depth = 1
+        i = opening + 1
+        in_quote = False
+        escaped = False
+        bracket_close: str | None = None
+        while i < len(text) and depth:
+            if bracket_close is not None:
+                end = text.find(bracket_close, i)
+                if end < 0:
+                    i = len(text)
+                    break
+                i = end + len(bracket_close)
+                bracket_close = None
+                continue
+            ch = text[i]
+            if in_quote:
+                if escaped:
+                    escaped = False
+                elif ch == "\\":
+                    escaped = True
+                elif ch == '"':
+                    in_quote = False
+                i += 1
+                continue
+            if ch == '"':
+                in_quote = True
+                i += 1
+                continue
+            if ch == "[":
+                bracket = _BRACKET_OPEN_RE.match(text, i)
+                if bracket:
+                    bracket_close = "]" + bracket.group(1) + "]"
+                    i = bracket.end()
+                    continue
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+            i += 1
+        if depth:
+            # An unterminated command cannot provide a valid dependency edge;
+            # leave it to CMake's own parser and continue scanning later text.
+            cursor = match.end()
+            continue
+        line = text.count("\n", 0, match.start()) + 1
+        commands.append((line, match.group(1), text[opening + 1:i - 1]))
+        cursor = i
+    return commands
+
+
 def cmake_references(path: pathlib.Path) -> list[tuple[int, str]]:
     """(line, reference) for every Vellum dependency a CMake file names."""
     found: list[tuple[int, str]] = []
-    text = path.read_text(encoding="utf-8", errors="replace")
-    # Bracket comments (#[[ ... ]]) are prose too.
-    text = re.sub(r"#\[(=*)\[.*?\]\1\]",
-                  lambda m: "\n" * m.group(0).count("\n"), text, flags=re.S)
-    for n, raw in enumerate(text.splitlines(), 1):
-        line = strip_cmake_comment(raw)
-        for label, pattern in CMAKE_PATTERNS:
-            if pattern.search(line):
-                found.append((n, label))
-        found.extend((n, m.group(0)) for m in TARGET_RE.finditer(line))
+    text = strip_cmake_comments(path.read_text(encoding="utf-8", errors="replace"))
+    for n, command, body in cmake_commands(text):
+        lower = command.lower()
+        if lower == "find_package" and re.match(r"\s*vellum\b", body, re.I):
+            found.append((n, "find_package(Vellum"))
+        elif lower in {"fetchcontent_declare", "fetchcontent_makeavailable",
+                       "fetchcontent_populate", "fetchcontent_getproperties"} \
+                and re.match(r"\s*vellum\b", body, re.I):
+            found.append((n, "FetchContent(vellum"))
+        elif lower == "externalproject_add" and re.match(r"\s*vellum\b", body, re.I):
+            found.append((n, "ExternalProject_Add(vellum"))
+        elif lower == "add_subdirectory" and re.search(r"\bvellum\b", body, re.I):
+            found.append((n, "add_subdirectory(vellum"))
+    found.extend((text.count("\n", 0, m.start()) + 1, m.group(0))
+                 for m in TARGET_RE.finditer(text))
     return found
 
 
