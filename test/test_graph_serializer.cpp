@@ -18,9 +18,12 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstring>
+#include <cmath>
 #include <memory>
 #include <numeric>
 #include <set>
+#include <string_view>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -105,6 +108,15 @@ bool missing_plugins_contain(const GraphSerializer::LoadResult& result,
                              const std::string& needle) {
     for (const auto& entry : result.missing_plugins) {
         if (entry.find(needle) != std::string::npos) return true;
+    }
+    return false;
+}
+
+bool state_restore_failures_contain(const GraphSerializer::LoadResult& result,
+                                    const std::string& needle) {
+    for (const auto& entry : result.state_restore_failures) {
+        if (entry.find(needle) != std::string::npos)
+            return true;
     }
     return false;
 }
@@ -337,6 +349,72 @@ std::uint64_t replay_plan_fingerprint(const SignalGraph& graph) {
     return hash;
 }
 
+// X3 fixture: an immutable descriptor expands into ordinary graph nodes.  The
+// expansion deliberately has no runtime or nested graph of its own.
+struct ReusableGainDescriptor {
+    std::string prefix;
+    float gain = 1.0f;
+};
+
+struct ReusableGainState {
+    float gain = 1.0f;
+};
+
+constexpr std::string_view kReusableGainType = "test.reusable_gain";
+
+CustomNodeType make_reusable_gain_type() {
+    CustomNodeType type =
+        make_custom_node_type(std::string(kReusableGainType), 1, 1, 1, "Reusable Gain");
+    type.create = [] { return new ReusableGainState{}; };
+    type.destroy = [](void* p) { delete static_cast<ReusableGainState*>(p); };
+    type.reset = [](void* p) { static_cast<ReusableGainState*>(p)->gain = 1.0f; };
+    type.process_instance = [](void* p, pulp::audio::BufferView<float>& output,
+                               const pulp::audio::BufferView<const float>& input, int frames) {
+        const auto gain = static_cast<ReusableGainState*>(p)->gain;
+        if (output.num_channels() == 0 || input.num_channels() == 0)
+            return;
+        auto out = output.channel(0);
+        const auto in = input.channel(0);
+        for (int i = 0; i < frames; ++i)
+            out[i] = in[i] * gain;
+    };
+    type.save_state = [](void* p) {
+        const auto gain = static_cast<ReusableGainState*>(p)->gain;
+        std::vector<uint8_t> bytes(sizeof(float));
+        std::memcpy(bytes.data(), &gain, sizeof(float));
+        return bytes;
+    };
+    type.load_state = [](void* p, const std::vector<uint8_t>& bytes) {
+        if (bytes.size() != sizeof(float))
+            return false;
+        std::memcpy(&static_cast<ReusableGainState*>(p)->gain, bytes.data(), sizeof(float));
+        return std::isfinite(static_cast<ReusableGainState*>(p)->gain);
+    };
+    return type;
+}
+
+std::array<NodeId, 2> expand_reusable_gain(SignalGraph& graph,
+                                           const ReusableGainDescriptor& descriptor, NodeId input,
+                                           NodeId output) {
+    const auto left = graph.add_custom_node(kReusableGainType, descriptor.prefix + "/gain");
+    const auto right = graph.add_custom_node(kReusableGainType, descriptor.prefix + "/gain-copy");
+    REQUIRE(left != 0);
+    REQUIRE(right != 0);
+    REQUIRE(graph.set_custom_node_state(
+        left,
+        std::vector<uint8_t>(reinterpret_cast<const uint8_t*>(&descriptor.gain),
+                             reinterpret_cast<const uint8_t*>(&descriptor.gain) + sizeof(float))));
+    REQUIRE(graph.set_custom_node_state(
+        right,
+        std::vector<uint8_t>(reinterpret_cast<const uint8_t*>(&descriptor.gain),
+                             reinterpret_cast<const uint8_t*>(&descriptor.gain) + sizeof(float))));
+    REQUIRE(graph.connect(input, 0, left, 0));
+    REQUIRE(graph.connect(input, 0, right, 0));
+    REQUIRE(graph.connect(left, 0, output, 0));
+    REQUIRE(graph.connect(right, 0, output, 0));
+    return {left, right};
+}
+
 } // namespace
 
 TEST_CASE("GraphSerializer round-trips an empty graph", "[host][serializer]") {
@@ -427,6 +505,19 @@ TEST_CASE("SignalGraph D1 replay probe separates plan determinism from persisten
     REQUIRE(altered_json != baseline_json);
     REQUIRE(replay_plan_fingerprint(altered) != baseline_plan_hash);
     REQUIRE(render_replay_graph(altered) != baseline_render);
+
+    // A semantic graph value can change without changing the resolved
+    // execution topology. Keep these fingerprints separate: persistence must
+    // notice the gain edit, while the plan fingerprint remains stable.
+    SignalGraph gain_edit;
+    ReplayFixture gain_fixture;
+    populate_replay_graph(gain_edit, gain_fixture, canonical_edge_order);
+    REQUIRE(gain_edit.set_node_gain(gain_fixture.gain_b, 0.5f));
+    const auto gain_json = GraphSerializer::to_json(gain_edit);
+    REQUIRE(gain_edit.prepare(48000.0, 8));
+    REQUIRE(gain_json != baseline_json);
+    REQUIRE(replay_plan_fingerprint(gain_edit) == baseline_plan_hash);
+    REQUIRE(render_replay_graph(gain_edit) != baseline_render);
 }
 
 TEST_CASE("GraphSerializer persists an executable sample region",
@@ -2172,6 +2263,35 @@ TEST_CASE("GraphSerializer resolves the canonical BuiltIn instrument round-trip"
     REQUIRE(restored.plugin_info.path.empty());
 }
 
+TEST_CASE("GraphSerializer reports a plugin state restore refusal",
+          "[host][serializer][state][failure]") {
+    PluginInfo info;
+    info.format = PluginFormat::BuiltIn;
+    info.unique_id = "pulp.instrument.basic";
+    info.num_inputs = 0;
+    info.num_outputs = 2;
+
+    auto slot = PluginSlot::load(info);
+    REQUIRE(slot != nullptr);
+
+    SignalGraph src;
+    src.add_plugin_node(std::move(slot), 0, 2, "Basic Instrument");
+    auto json = GraphSerializer::to_json(src);
+    const auto marker = std::string("\"state_b64\": \"\"");
+    const auto marker_pos = json.find(marker);
+    REQUIRE(marker_pos != std::string::npos);
+    json.replace(marker_pos, marker.size(), "\"state_b64\": \"AA==\"");
+
+    SignalGraph dst;
+    const auto result = GraphSerializer::from_json(dst, json);
+    REQUIRE(result.ok);
+    REQUIRE(result.missing_plugins.empty());
+    REQUIRE(result.state_restore_failures.size() == 1);
+    REQUIRE(state_restore_failures_contain(result, "builtin:pulp.instrument.basic"));
+    REQUIRE(dst.nodes().size() == 1);
+    REQUIRE(dst.nodes().front().plugin != nullptr);
+}
+
 TEST_CASE("GraphSerializer serializes short plugin state blobs with stable padding",
           "[host][serializer]") {
     SignalGraph src;
@@ -2710,4 +2830,64 @@ TEST_CASE("GraphSerializer refuses runtime-owned Processor nodes",
     REQUIRE_FALSE(result.ok);
     REQUIRE(result.error.find("unsupported by .pulpgraph") != std::string::npos);
     REQUIRE(loaded.nodes().empty());
+}
+
+TEST_CASE("X3 expands reusable descriptors with isolated state and deterministic persistence",
+          "[host][serializer][x3]") {
+    SignalGraph source;
+    REQUIRE(source.register_custom_node_type(make_reusable_gain_type()));
+    const auto input = source.add_input_node(1, "Input");
+    const auto output = source.add_output_node(1, "Output");
+    REQUIRE(input != 0);
+    REQUIRE(output != 0);
+    const auto first = expand_reusable_gain(source, {"A", 0.5f}, input, output);
+    const auto second = expand_reusable_gain(source, {"B", 2.0f}, input, output);
+    REQUIRE(first[0] != second[0]);
+    REQUIRE(source.custom_node_state(first[0]) != source.custom_node_state(second[0]));
+    REQUIRE(source.prepare(48000.0, 4));
+
+    std::array<float, 4> in{{1.0f, -1.0f, 0.25f, 2.0f}};
+    std::array<float, 4> out{};
+    const float* inputs[] = {in.data()};
+    float* outputs[] = {out.data()};
+    pulp::audio::BufferView<float> source_output(outputs, 1, 4);
+    pulp::audio::BufferView<const float> source_input(inputs, 1, 4);
+    source.process(source_output, source_input, 4);
+    REQUIRE(out == std::array<float, 4>{{5.0f, -5.0f, 1.25f, 10.0f}});
+
+    const auto json = GraphSerializer::to_json(source);
+    REQUIRE_FALSE(json.empty());
+    REQUIRE(json.find("A/gain") != std::string::npos);
+    REQUIRE(json.find("B/gain") != std::string::npos);
+
+    SignalGraph replay;
+    REQUIRE(replay.register_custom_node_type(make_reusable_gain_type()));
+    const auto loaded = GraphSerializer::from_json(replay, json);
+    REQUIRE(loaded.ok);
+    REQUIRE(loaded.missing_custom_node_types.empty());
+    REQUIRE(GraphSerializer::to_json(replay) == json);
+    REQUIRE(replay.prepare(48000.0, 4));
+    out.fill(0.0f);
+    pulp::audio::BufferView<float> replay_output(outputs, 1, 4);
+    pulp::audio::BufferView<const float> replay_input(inputs, 1, 4);
+    replay.process(replay_output, replay_input, 4);
+    REQUIRE(out == std::array<float, 4>{{5.0f, -5.0f, 1.25f, 10.0f}});
+
+    auto unknown_type = json;
+    const auto type_pos = unknown_type.find("test.reusable_gain");
+    REQUIRE(type_pos != std::string::npos);
+    unknown_type.replace(type_pos, kReusableGainType.size(), "test.unknown_gain");
+    SignalGraph unknown;
+    const auto unknown_result = GraphSerializer::from_json(unknown, unknown_type);
+    REQUIRE(unknown_result.ok);
+    REQUIRE(missing_custom_types_contain(unknown_result, "test.unknown_gain@1"));
+
+    auto unknown_version = json;
+    const auto version_pos = unknown_version.find("\"version\": 1", type_pos);
+    REQUIRE(version_pos != std::string::npos);
+    unknown_version.replace(version_pos, std::string("\"version\": 1").size(), "\"version\": 99");
+    SignalGraph future;
+    const auto future_result = GraphSerializer::from_json(future, unknown_version);
+    REQUIRE(future_result.ok);
+    REQUIRE(missing_custom_types_contain(future_result, "test.reusable_gain@99"));
 }

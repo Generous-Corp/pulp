@@ -315,6 +315,7 @@ set(PULP_RUNTIME_UNIT_HEADERS
     include/pulp/runtime/dynamic_library.hpp
     include/pulp/runtime/exceptions.hpp
     include/pulp/runtime/expression.hpp
+    include/pulp/runtime/external_input.hpp
     include/pulp/runtime/file_search_path.hpp
     include/pulp/runtime/high_resolution_timer.hpp
     include/pulp/runtime/http.hpp

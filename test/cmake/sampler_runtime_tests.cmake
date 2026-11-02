@@ -264,6 +264,11 @@ pulp_add_test_suite(pulp-test-signal-graph-offline-parity
 pulp_add_test_suite(pulp-test-signal-graph-x9-modular-instrument
     SOURCES test_signal_graph_x9_modular_instrument.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
+# PulpSynth consumes graph-delivered parameter events through ParamCursor;
+# keep this focused regression independent of the larger X9 workflow fixture.
+pulp_add_test_suite(pulp-test-signal-graph-pulpsynth-automation
+    SOURCES test_signal_graph_pulpsynth_automation.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph)
 # A SignalGraph baked into one shippable Processor (BakedGraphProcessor) drives a
 # frozen plan through the SAME GraphRuntimeExecutor::process_routed as the live
 # graph, so its output is bit-identical for the lowerable subset; non-lowerable

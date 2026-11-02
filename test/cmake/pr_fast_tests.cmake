@@ -139,6 +139,8 @@ set(PULP_PR_FAST_TESTS
     consumption-census-negative-contract
     consumption-census-schema
     control-authoring-examples
+    core-vellum-direction
+    core-vellum-direction-negative-contract
     ctest-duplicate-registration
     ctest-label-exclusion-guard
     ctest-measured-budgets

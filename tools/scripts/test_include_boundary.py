@@ -78,6 +78,15 @@ class ViewCoreBoundaryTests(unittest.TestCase):
     def test_spaced_directive_fails(self):
         self.assertEqual(self._plant('  #  include   "pulp/host/plugin_slot.hpp"\n'), 1)
 
+    def test_line_spliced_directive_fails(self):
+        self.assertEqual(self._plant('#include \\\n<pulp/audio/buffer.hpp>\n'), 1)
+
+    def test_comments_between_directive_tokens_fail(self):
+        self.assertEqual(self._plant('#/**/include <pulp/audio/buffer.hpp>\n'), 1)
+
+    def test_windows_separator_relative_escape_fails(self):
+        self.assertEqual(self._plant('#include "..\\\\audio\\\\include\\\\pulp\\\\audio\\\\buffer.hpp"\n'), 1)
+
     def test_every_forbidden_area_fails(self):
         for area in ("audio", "signal", "host", "midi", "format", "timebase", "graph",
                      "playback", "content", "sample_bank_manifest", "gpu_audio", "music"):
@@ -99,6 +108,20 @@ class ViewCoreBoundaryTests(unittest.TestCase):
         self._write("core/state/include/pulp/state/store.hpp", "#pragma once\n")
         self.assertEqual(self._plant("#include <pulp/state/content_registry.hpp>\n"), 1)
         self.assertEqual(self._plant("#include <pulp/state/store.hpp>\n"), 0)
+
+    def test_content_install_limits_header_belongs_to_content(self):
+        # The real header lives in pulp-content's include directory, so a
+        # view-core include of it crosses the boundary even though its include
+        # path uses the pulp/state prefix. Under core/state/include it would not.
+        planted = self.root / "planted.cpp"
+        planted.write_text("#include <pulp/state/content_install_limits.hpp>\n",
+                           encoding="utf-8")
+        self.assertTrue((REPO / "core/content/include/pulp/state/"
+                         "content_install_limits.hpp").is_file())
+        self.assertFalse((REPO / "core/state/include/pulp/state/"
+                          "content_install_limits.hpp").exists())
+        found = boundary.crossings(planted, REPO, boundary.BOUNDARIES["view-core"])
+        self.assertEqual(found, [(1, "pulp/state/content_install_limits.hpp")])
 
     def test_relative_escape_out_of_view_fails(self):
         self.assertEqual(

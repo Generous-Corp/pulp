@@ -241,6 +241,7 @@ paths = [
   "tools/scripts/test_vellum_borrowed_coverage_check.py",
   "tools/scripts/test_vellum_expansion_watch_check.py",
   "tools/scripts/test_vellum_freeze_check.py",
+  "tools/scripts/test_vellum_receipt_drift.py",
   "tools/scripts/test_verify_cobertura_xml.py",
   "tools/scripts/test_verify_control_shipping_native_evidence.py",
   "tools/scripts/test_verify_macos_cross_artifacts.py",
@@ -2655,6 +2656,40 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "control-profile-downgrade-announced",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-124f30d85230"
+paths = ["tools/scripts/test_core_vellum_direction.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "core-vellum-direction-negative-contract",
   "gate-common-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -7712,6 +7747,7 @@ paths = [
   "tools/scripts/test_consumption_census.py",
   "tools/scripts/test_control_profile_downgrade_is_announced.py",
   "tools/scripts/test_control_shipping_native_workflow.py",
+  "tools/scripts/test_core_vellum_direction.py",
   "tools/scripts/test_coverage_diff_comment.py",
   "tools/scripts/test_coverage_diff_comment_extra.py",
   "tools/scripts/test_coverage_tier_check.py",
@@ -7952,6 +7988,7 @@ paths = [
   "tools/scripts/test_vellum_expansion_watch_check.py",
   "tools/scripts/test_vellum_freeze_check.py",
   "tools/scripts/test_vellum_inheritance_ledger_check.py",
+  "tools/scripts/test_vellum_receipt_drift.py",
   "tools/scripts/test_vellum_trusted_merge.py",
   "tools/scripts/test_vellum_view_core_pulp_kept_check.py",
   "tools/scripts/test_vellum_watch_preflight.py",
@@ -8298,6 +8335,7 @@ paths = [
   "tools/scripts/test_consumption_census.py",
   "tools/scripts/test_control_profile_downgrade_is_announced.py",
   "tools/scripts/test_control_shipping_native_workflow.py",
+  "tools/scripts/test_core_vellum_direction.py",
   "tools/scripts/test_coverage_diff_comment.py",
   "tools/scripts/test_coverage_diff_comment_extra.py",
   "tools/scripts/test_coverage_tier_check.py",
@@ -8538,6 +8576,7 @@ paths = [
   "tools/scripts/test_vellum_expansion_watch_check.py",
   "tools/scripts/test_vellum_freeze_check.py",
   "tools/scripts/test_vellum_inheritance_ledger_check.py",
+  "tools/scripts/test_vellum_receipt_drift.py",
   "tools/scripts/test_vellum_trusted_merge.py",
   "tools/scripts/test_vellum_view_core_pulp_kept_check.py",
   "tools/scripts/test_vellum_watch_preflight.py",

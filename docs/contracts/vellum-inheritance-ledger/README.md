@@ -53,3 +53,21 @@ lacks it), and elsewhere it is `origin/main`.
   program's planning ledger records the carve as item `C1-ui-kernel-30`,
   citing `eb5ea227991485005ff6fc9a2b12b8cb8d9d0731` and the #10036 merge
   `ecf122d1ff`.
+
+## Relabelled events
+
+An event that edits a file Vellum's mirror exports is inherited by the next
+re-export whatever its rationale says. Seven change events filed after the
+`20261025-46cee5e4e6e2` export call their change Pulp-only, but each edits
+exported files, so each now has an entry here recording what Vellum takes. The
+events themselves stay as written; the entry is the correction:
+
+- `20261022-spectr-footprint-20261022`
+- `20261022-lite-editor-seams-20261022`: Vellum inherits the source edits; the
+  second `PULP_LITE_EDITOR` compile of the four lite-editor sources, and the
+  macOS plug-in target that builds it, stay in Pulp for now.
+- `20261024-attack-surface-daw-leftovers-20261023`
+- `20261025-attack-surface-daw-leftovers-canvas-mask`
+- `20261025-importer-synthetic-bold-20261025`
+- `20261026-importer-final-review-20261026`
+- `20261024-importer-anchor-collision-20261024`

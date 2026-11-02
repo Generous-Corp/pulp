@@ -9,6 +9,68 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1430"></a>
+## [1.43.0] - 2026-11-01
+
+- release/version bump ([#11393](https://github.com/Generous-Corp/pulp/pull/11393))
+- codex/r7 plugin status clean 20261101 ([#11390](https://github.com/Generous-Corp/pulp/pull/11390))
+- x9 voice template phase ([#11392](https://github.com/Generous-Corp/pulp/pull/11392))
+- x9 completion 20261101 ([#11391](https://github.com/Generous-Corp/pulp/pull/11391))
+
+<a id="v1420"></a>
+## [1.42.0] - 2026-11-01
+
+- release/version bump ([#11389](https://github.com/Generous-Corp/pulp/pull/11389))
+- docs/productivity audit 20261101 ([#11388](https://github.com/Generous-Corp/pulp/pull/11388))
+- codex/r7 state restore 20261101 ([#11387](https://github.com/Generous-Corp/pulp/pull/11387))
+- docs/graph workflow guide ([#11386](https://github.com/Generous-Corp/pulp/pull/11386))
+- codex/r7 hosted receipt refresh 20261101 ([#11382](https://github.com/Generous-Corp/pulp/pull/11382))
+- codex/pulpsynth param delivery 20261101 ([#11385](https://github.com/Generous-Corp/pulp/pull/11385))
+
+<a id="v1410"></a>
+## [1.41.0] - 2026-11-01
+
+- release/version bump ([#11384](https://github.com/Generous-Corp/pulp/pull/11384))
+- codex/x9 closure controls refresh 20261101 ([#11380](https://github.com/Generous-Corp/pulp/pull/11380))
+- feat/real world inputs t2 ([#11361](https://github.com/Generous-Corp/pulp/pull/11361))
+- codex/r3r4 atomic block 20261101 ([#11379](https://github.com/Generous-Corp/pulp/pull/11379))
+- feature/attack surface ship artifact scan 20261027 ([#11198](https://github.com/Generous-Corp/pulp/pull/11198))
+- codex/x9 expressiveness 20261101 ([#11378](https://github.com/Generous-Corp/pulp/pull/11378))
+- codex/audio graph final docs 20261101 ([#11377](https://github.com/Generous-Corp/pulp/pull/11377))
+- test/x4 graph fixture ([#11375](https://github.com/Generous-Corp/pulp/pull/11375))
+- feat/real world inputs t8 ([#11369](https://github.com/Generous-Corp/pulp/pull/11369))
+
+<a id="v1400"></a>
+## [1.40.0] - 2026-11-01
+
+- release/version bump ([#11374](https://github.com/Generous-Corp/pulp/pull/11374))
+- codex/named bus names 20261101 ([#11373](https://github.com/Generous-Corp/pulp/pull/11373))
+- docs/signal graph navigation 20261101 ([#11372](https://github.com/Generous-Corp/pulp/pull/11372))
+
+<a id="v1390"></a>
+## [1.39.0] - 2026-11-01
+
+- release/version bump ([#11371](https://github.com/Generous-Corp/pulp/pull/11371))
+- codex/signal graph workflow docs 20261101 ([#11370](https://github.com/Generous-Corp/pulp/pull/11370))
+- feat/real world inputs p0 t1 ([#11357](https://github.com/Generous-Corp/pulp/pull/11357))
+
+<a id="v1380"></a>
+## [1.38.0] - 2026-11-01
+
+- release/version bump ([#11360](https://github.com/Generous-Corp/pulp/pull/11360))
+- codex/windows arm module timeout ([#10534](https://github.com/Generous-Corp/pulp/pull/10534))
+
+<a id="v1374"></a>
+## [1.37.4] - 2026-11-01
+
+- release/version bump ([#11356](https://github.com/Generous-Corp/pulp/pull/11356))
+- feature/attack surface release profile 20261022 ([#11175](https://github.com/Generous-Corp/pulp/pull/11175))
+- codex/importer height fix 20261030 ([#11308](https://github.com/Generous-Corp/pulp/pull/11308))
+- test/x9 permanent plugin matrix 20261031 ([#11354](https://github.com/Generous-Corp/pulp/pull/11354))
+- codex/b1 r4 rebase 20261031 ([#11352](https://github.com/Generous-Corp/pulp/pull/11352))
+- r2 main 20261031 ([#11353](https://github.com/Generous-Corp/pulp/pull/11353))
+- fix/10924 canvas pattern confinement 20261031 ([#11340](https://github.com/Generous-Corp/pulp/pull/11340))
+
 <a id="v1373"></a>
 ## [1.37.3] - 2026-11-01
 
@@ -11984,6 +12046,13 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.43.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.43.0
+[1.42.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.42.0
+[1.41.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.41.0
+[1.40.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.40.0
+[1.39.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.39.0
+[1.38.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.38.0
+[1.37.4]: https://github.com/Generous-Corp/pulp/releases/tag/v1.37.4
 [1.37.3]: https://github.com/Generous-Corp/pulp/releases/tag/v1.37.3
 [1.37.2]: https://github.com/Generous-Corp/pulp/releases/tag/v1.37.2
 [1.37.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.37.1
