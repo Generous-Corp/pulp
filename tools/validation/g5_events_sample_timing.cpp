@@ -30,8 +30,10 @@ int main() {
         const bool fired = trigger.process_signal(onset);
         if (fired) {
             envelope.trigger(1.0f);
-            if (first_trigger < 0) first_trigger = n;
-            else if (second_trigger < 0) second_trigger = n;
+            if (first_trigger < 0)
+                first_trigger = n;
+            else if (second_trigger < 0)
+                second_trigger = n;
         }
         const float env = envelope.process();
         const float mod = 900.0f * std::sin(2.0 * M_PI * 3.0 * n / sr);
@@ -47,7 +49,6 @@ int main() {
     const bool planted_negative = !negative.process_signal(0.5f);
     std::cout << "fixture=g5-events sr=48000 first_trigger=" << first_trigger
               << " second_trigger=" << second_trigger << " positive=" << positive
-              << " planted_negative=" << planted_negative << " final_feedback=" << feedback
-              << "\n";
+              << " planted_negative=" << planted_negative << " final_feedback=" << feedback << "\n";
     return positive && planted_negative ? 0 : 1;
 }
