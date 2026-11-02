@@ -20,6 +20,14 @@ try {
   $smokeText=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'windows_editor_smoke.ps1') -Raw
   Check ($smokeText -match 'ProbeBeforeEditor' -and $smokeText -match 'module-probe-release') 'native editor probe can bind before GPU editor startup'
   Check ($smokeText -match 'Get-BoundModulePaths[\s\S]+?Assert-OwnedIdentity') 'module binding rechecks owned PID/start identity after probe'
+  Check ((@([regex]::Matches($smokeText,'Get-LoadedPluginBinding')).Count -ge 3) -and $smokeText -match 'final_revalidated_utc') 'loaded plugin binding is revalidated immediately before PASS'
+  $identityTime=[DateTime]::UtcNow
+  $fakeProcess=[pscustomobject]@{HasExited=$false;StartTime=$identityTime}
+  $fakeProcess | Add-Member ScriptMethod Refresh {}
+  Assert-OwnedIdentity $fakeProcess $identityTime.ToUniversalTime().Ticks
+  Check $true 'exact process start identity is accepted'
+  Reject {Assert-OwnedIdentity $fakeProcess ($identityTime.AddTicks(1).ToUniversalTime().Ticks)} 'one-tick process identity change is refused'
+  Reject {Assert-OwnedIdentity $fakeProcess ($identityTime.AddMilliseconds(500).ToUniversalTime().Ticks)} 'subsecond process identity change is refused'
   Check ($commonText -match 'PLUGIN_ABI_MISMATCH' -and $smokeText -match 'receipt\.plugin_pe') 'plugin ABI mismatch is recorded and rejected before DAW insertion'
   Check ($smokeText -match '\[switch\]\$Headless' -and $smokeText -match 'if\(-not \$Headless\)') 'public -Headless mode is retained and skips desktop interaction'
   Check ($smokeText -match 'Set-ProcessTracePath \$null' -and $smokeText -match 'Set-ProcessTracePath \$priorTracePath' -and $smokeText -match 'trace_environment') 'warm scan clears and restores the caller trace destination and records it'

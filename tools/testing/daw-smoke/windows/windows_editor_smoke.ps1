@@ -198,20 +198,24 @@ try {
   }
   Assert-TerminalStatus $hostStatus $ParamIndex
   $receipt.host_status=$hostStatus
-  $modulePaths=@(Get-BoundModulePaths $proc.process.Id 15 $hostPe.execution_abi)
-  $modules=@($modulePaths | ForEach-Object { [pscustomobject]@{FileName=$_} } |
-    Where-Object {[IO.Path]::GetExtension($_.FileName) -ieq ('.'+$Format)})
-  $bound=@()
-  foreach($module in $modules){
-    $hash=(Get-FileHash -LiteralPath $module.FileName -Algorithm SHA256).Hash
-    Assert-ModuleBinding $module.FileName $hash $manifest
-    $pluginPe=Get-PeIdentity $module.FileName
-    if($pluginPe.execution_abi -eq 'unknown'){throw 'Loaded plugin ABI metadata is unavailable'}
-    if(-not (Test-WindowsPluginAbiCompatible $hostPe.execution_abi $pluginPe.execution_abi)){throw "PLUGIN_ABI_MISMATCH: host=$($hostPe.execution_abi) loaded=$($pluginPe.execution_abi)"}
-    $bound+=@{path=$module.FileName;sha256=$hash;pe=$pluginPe}
+  function Get-LoadedPluginBinding {
+    $modulePaths=@(Get-BoundModulePaths $proc.process.Id 15 $hostPe.execution_abi)
+    $modules=@($modulePaths | ForEach-Object { [pscustomobject]@{FileName=$_} } |
+      Where-Object {[IO.Path]::GetExtension($_.FileName) -ieq ('.'+$Format)})
+    $bound=@()
+    foreach($module in $modules){
+      $hash=(Get-FileHash -LiteralPath $module.FileName -Algorithm SHA256).Hash
+      Assert-ModuleBinding $module.FileName $hash $manifest
+      $pluginPe=Get-PeIdentity $module.FileName
+      if($pluginPe.execution_abi -eq 'unknown'){throw 'Loaded plugin ABI metadata is unavailable'}
+      if(-not (Test-WindowsPluginAbiCompatible $hostPe.execution_abi $pluginPe.execution_abi)){throw "PLUGIN_ABI_MISMATCH: host=$($hostPe.execution_abi) loaded=$($pluginPe.execution_abi)"}
+      $bound+=@{path=$module.FileName;sha256=$hash;pe=$pluginPe}
+    }
+    if($bound.Count -ne 1){throw 'Expected exactly one manifest-bound loaded plugin PE'}
+    return $bound[0]
   }
-  if($bound.Count -ne 1){throw 'Expected exactly one manifest-bound loaded plugin PE'}
-  $receipt.loaded_plugin=$bound[0]
+  $bound=Get-LoadedPluginBinding
+  $receipt.loaded_plugin=$bound
   if(-not $Headless){
   Add-Type -AssemblyName System.Drawing
   Add-Type -AssemblyName System.Windows.Forms
@@ -307,6 +311,11 @@ public static class OwnedWindow {
     [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
   }
   }
+  # Re-enumerate immediately before PASS so the receipt cannot report a plugin
+  # that unloaded after the initial binding probe.
+  $finalBound=Get-LoadedPluginBinding
+  if($finalBound.path -ine $receipt.loaded_plugin.path -or $finalBound.sha256 -ine $receipt.loaded_plugin.sha256){throw 'Loaded plugin binding changed before PASS'}
+  $receipt.loaded_plugin.final_revalidated_utc=[DateTime]::UtcNow.ToString('o')
   $receipt.verdict='PASS';$receipt.product_ui_acceptance='NOT_EVALUATED';$receipt.live_audio='NOT_EVALUATED';$exitCode=0
 } catch {
   $receipt.error = $_.Exception.Message

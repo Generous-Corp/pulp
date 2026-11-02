@@ -161,7 +161,9 @@ function Get-BoundModulePaths([int]$TargetPid, [ValidateRange(1,60)][int]$Timeou
 }
 function Assert-OwnedIdentity($Process, [long]$StartedTicks) {
   $Process.Refresh()
-  if ($Process.HasExited -or [math]::Abs($Process.StartTime.ToUniversalTime().Ticks - $StartedTicks) -gt [TimeSpan]::FromSeconds(1).Ticks) { throw 'Owned process identity changed' }
+  # StartTime ticks are the recorded kernel identity for this PID. A tolerance
+  # can admit a recycled PID, so every ownership check must match exactly.
+  if ($Process.HasExited -or $Process.StartTime.ToUniversalTime().Ticks -ne $StartedTicks) { throw 'Owned process identity changed' }
 }
 function Get-InteractiveDesktopContext {
   $sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
