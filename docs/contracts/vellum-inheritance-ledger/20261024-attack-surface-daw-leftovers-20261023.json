@@ -1,0 +1,14 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261024-attack-surface-daw-leftovers-20261023",
+  "slices": [
+    "retained-ui-kernel"
+  ],
+  "vellum_obligation": "Vellum inherits every edit the pull request made to exported files, including AssetManager::read_file_bytes' per-file byte ceiling and the rule that a script-named file path resolves only inside the script directory or a reviewed asset root unless the host opts into unreviewed paths. A Vellum host that reads script-named files must keep that refusal.",
+  "evidence": [
+    ".github/vellum-change-events/20261024-attack-surface-daw-leftovers-20261023.json",
+    "https://github.com/Generous-Corp/pulp/pull/10924",
+    "Vellum export receipt 20261025-46cee5e4e6e2 lists the files this event's change edits",
+    "pulp-planning vellum-move/evidence/phase5-prep-post-export-drift-20261101.md (\"Labels that don't match what happens\")"
+  ]
+}
