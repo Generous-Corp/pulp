@@ -48,6 +48,8 @@ def run_case(name: str, timeout: float, out: Path) -> dict:
             pid_path = out / f"{name}.child.pid"
             if pid_path.exists():
                 descendant_pid = int(pid_path.read_text(encoding="utf-8").strip())
+            if descendant_pid is None:
+                raise FileNotFoundError
             os.kill(descendant_pid, 0)
             descendant_alive_after_parent = True
             os.kill(descendant_pid, signal.SIGTERM)
