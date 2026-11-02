@@ -369,11 +369,13 @@ public:
 
 /// One editor instance in one native window.
 ///
-/// Lifecycle: the factory creates it unattached; the host calls `attach()`
-/// with its window, then any of the members below, then `detach()`; the editor
-/// may be attached again or destroyed. If the host's window is going away
-/// underneath the editor without an orderly detach, the host calls
-/// `invalidate()` instead.
+/// Lifecycle: the factory creates it unattached. The size members may be
+/// called before the first `attach()`: some hosts negotiate scale and size
+/// first and only then hand over a window, and some defer attaching until the
+/// host's size settles. The host then calls `attach()` with its window, any of
+/// the members below, and `detach()`; the editor may be attached again or
+/// destroyed. If the host's window is going away underneath the editor without
+/// an orderly detach, the host calls `invalidate()` instead.
 ///
 /// Every member runs on the host's main thread.
 class Editor {
@@ -512,6 +514,14 @@ public:
     /// may be alive at once, for one role or several.
     virtual std::unique_ptr<Editor> create(Processor& processor, EditorContext& context,
                                            EditorRole role) = 0;
+
+    /// Warm process-wide caches (compiled scripts, parsed documents, fonts) so
+    /// the first `create()` does not do that work inside the host's
+    /// view-creation call. A host calls it at most once per factory, on a
+    /// background thread, possibly while `create()` runs on the main thread;
+    /// the factory synchronizes its own caches. It must not touch processor
+    /// state or call the host. Default: nothing to warm.
+    virtual void prewarm() {}
 };
 
 }  // namespace pulp::format

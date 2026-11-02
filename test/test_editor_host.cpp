@@ -355,10 +355,13 @@ TEST_CASE("an editor and an inspector share one port through the contract",
     REQUIRE_FALSE(factory->supports(EditorRole::settings));
     REQUIRE(factory->create(processor, context, EditorRole::settings) == nullptr);
 
+    factory->prewarm();  // the default has nothing to warm
     auto editor = factory->create(processor, context, EditorRole::editor);
     auto inspector = factory->create(processor, context, EditorRole::inspector);
     REQUIRE(editor);
     REQUIRE(inspector);
+    // Hosts may negotiate scale and size before handing over a window.
+    REQUIRE(editor->set_size({400, 300, 2.0}));
     REQUIRE(editor->attach(NativeParent{}));
     REQUIRE(inspector->attach(NativeParent{}));
     REQUIRE_FALSE(editor->attach(NativeParent{NativeParentKind::cocoa_view, nullptr, 0}));

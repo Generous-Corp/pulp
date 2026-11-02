@@ -15,7 +15,7 @@ until they do.
 
 | Type | Role |
 |---|---|
-| `EditorFactory` | Builds an `Editor` for `(Processor&, EditorContext&, EditorRole)`. A processor returns it from `Processor::editor_factory()`; null (the default) means no factory. |
+| `EditorFactory` | Builds an `Editor` for `(Processor&, EditorContext&, EditorRole)`, and can `prewarm()` its caches on a background thread before the first open. A processor returns it from `Processor::editor_factory()`; null (the default) means no factory. |
 | `Editor` | One editor in one native window: `attach` / `detach`, `size` / `set_size` / `size_hints` / `adjust_size`, `idle`, `visibility_changed`, `focus_changed`, `offer_key`, `parameter_highlight`, `automation`, and `invalidate`. |
 | `EditorContext` | What the host gives the editor: `params()`, `visuals()`, `request_resize()`, `host_action()`, `host_kind()`. |
 | `ParamPort` | Parameter info, `get`, `begin` / `set` / `end`, normalized helpers and listeners. |
@@ -79,6 +79,12 @@ macOS responder chain under AU). `Editor::offer_key()` returns `consumed` only
 when the editor needs the key, such as a focused text field; otherwise
 `forward`, so the host keeps its shortcuts. Space with no focused field must be
 forwarded, or the host loses transport.
+
+## Lifecycle
+
+A factory creates an editor unattached. The size members may be called before
+the first `attach()`: CLAP sets the scale and asks for the size before it hands
+over a parent window, and AU v3 attaches only once the host's size settles.
 
 ## Teardown
 
