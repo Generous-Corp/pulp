@@ -770,6 +770,10 @@ GraphResult SignalGraph::connect(const PortHandle& source, const PortHandle& des
     auto find = [](const std::vector<PortHandle>& ports, const PortHandle& h) -> const PortHandle* {
         for (const auto& p : ports) if (p.name == h.name) return &p; return nullptr;
     };
+    if (source.kind != dest.kind)
+        return {GraphResult::Code::KindMismatch, dest.node, dest.index,
+                "port kind mismatch: '" + source.name + "' to '" + dest.name + "'",
+                "connect ports with the same kind"};
     const auto* sp = find(src->output_ports, source); const auto* dp = find(dst->input_ports, dest);
     if (!sp) return {GraphResult::Code::UnknownPort, source.node, source.index, "unknown output port '" + source.name + "'", "use out(\"audio\") or an available output"};
     if (!dp) return {GraphResult::Code::UnknownPort, dest.node, dest.index, "unknown input port '" + dest.name + "'", "use in(\"audio\") or an available input"};
