@@ -64,8 +64,8 @@ class MotionControlSourceTest {
         source.stop()
 
         assertEquals(2, frames.size)
-        assertEquals(MotionControlFrame(1, 0.5f, 1.0f, true, 123L), frames[0])
-        assertEquals(MotionControlFrame(2, 0.0f, 0.0f, false, 0L), frames[1])
+        assertEquals(MotionControlFrame(1, 0.5f, 1.0f, true, 123L, epoch = 1L), frames[0])
+        assertEquals(MotionControlFrame(2, 0.0f, 0.0f, false, 0L, epoch = 1L), frames[1])
         verify(manager, times(1)).unregisterListener(any<SensorEventListener>(), eq(sensor))
     }
 
@@ -88,7 +88,7 @@ class MotionControlSourceTest {
 
         source.submitAccelerometerSample(floatArrayOf(0.0f, Float.NaN), 123L)
 
-        assertEquals(MotionControlFrame(1, 0.0f, 0.0f, false, 0L), frames.single())
+        assertEquals(MotionControlFrame(1, 0.0f, 0.0f, false, 0L, epoch = 1L), frames.single())
         assertEquals(Status.UNAVAILABLE, frames.single().status)
     }
 
