@@ -103,6 +103,14 @@ class CoreVellumDirectionTests(unittest.TestCase):
                 self._write("core/audio/cmake/planted.cmake", line)
                 self.assertEqual(self._run(), 1)
 
+    def test_bracket_cmake_names_fail(self):
+        for line in ("find_package([=[Vellum]=] QUIET)\n",
+                     "FetchContent_Declare([=[vellum]=] GIT_REPOSITORY x)\n",
+                     "ExternalProject_Add([=[vellum]=] SOURCE_DIR x)\n"):
+            with self.subTest(line=line):
+                self._write("core/audio/cmake/planted.cmake", line)
+                self.assertEqual(self._run(), 1)
+
     def test_core_inputs_cover_the_whole_scanned_tree(self):
         import json
 

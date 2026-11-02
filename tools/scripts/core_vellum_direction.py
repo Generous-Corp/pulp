@@ -40,6 +40,7 @@ CMAKE_ROOT = _SCAN_INPUT_ROOT.rstrip("/.")
 TARGET_RE = re.compile(r"\b[Vv]ellum::[A-Za-z0-9_]+")
 _COMMAND_RE = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 _BRACKET_OPEN_RE = re.compile(r"\[(=*)\[")
+_BRACKET_ARGUMENT_RE = re.compile(r"\s*\[(=*)\[(.*?)\]\1\]", re.S)
 _FIRST_ARGUMENT_RE = re.compile(r'''\s*(?:"((?:\\.|[^"\\])*)"|([^\s()]+))''', re.S)
 
 # (file, reference) -> (count, reason). The opt-in D15 GPU-audio provider
@@ -143,7 +144,10 @@ def cmake_commands(text: str) -> list[tuple[int, str, str]]:
 
 
 def first_cmake_argument(body: str) -> str:
-    """Return the normalized first CMake argument, removing double quotes."""
+    """Return the normalized first CMake argument."""
+    bracket = _BRACKET_ARGUMENT_RE.match(body)
+    if bracket:
+        return bracket.group(2)
     match = _FIRST_ARGUMENT_RE.match(body)
     if not match:
         return ""
