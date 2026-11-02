@@ -204,6 +204,7 @@
       "pulp/canvas/view_effect.hpp"
     ],
     "core/content/include": [
+      "pulp/state/content_install_limits.hpp",
       "pulp/state/content_registry.hpp"
     ],
     "core/dawproject/include": [
@@ -291,6 +292,8 @@
       "pulp/format/device_quotas.hpp",
       "pulp/format/diagnostic_reporter.hpp",
       "pulp/format/editor_assets.hpp",
+      "pulp/format/editor_host.hpp",
+      "pulp/format/editor_host_kind.hpp",
       "pulp/format/editor_idle_pump.hpp",
       "pulp/format/editor_prewarm.hpp",
       "pulp/format/editor_ui.hpp",
@@ -1150,13 +1153,13 @@
       "pulp/smf/interchange.hpp"
     ],
     "core/state/../content/include": [
+      "pulp/state/content_install_limits.hpp",
       "pulp/state/content_registry.hpp"
     ],
     "core/state/include": [
       "pulp/state/binding.hpp",
       "pulp/state/cached_property.hpp",
       "pulp/state/content_capability_manifest.hpp",
-      "pulp/state/content_install_limits.hpp",
       "pulp/state/edit_history.hpp",
       "pulp/state/external_binding.hpp",
       "pulp/state/listener_token.hpp",

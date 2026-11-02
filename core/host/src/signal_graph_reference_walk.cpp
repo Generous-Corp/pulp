@@ -498,8 +498,22 @@ void SignalGraph::run_reference_walk_(audio::BufferView<float>& output,
                         format::ProcessBusBufferSet<float>{std::span(output_buses)},
                     };
 
+                    // The reference walk has no result channel, but it still
+                    // participates in the per-block hosted-plugin failure
+                    // contract. Clear the latch before direct invocation so a
+                    // rejected block cannot be mistaken for a prior failure.
+                    pit->second->begin_process();
                     pit->second->process(process_buffers, rt.midi_in, rt.midi_out,
                                          param_events, num_samples);
+                    if (pit->second->process_status() == PluginSlot::ProcessStatus::failed) {
+                        // Preserve the direct-slot format fallback policy while
+                        // keeping the graph fallback fail-closed: downstream
+                        // nodes see silence for a rejected block.
+                        for (auto* dst : rt.output_ptrs) {
+                            std::memset(dst, 0,
+                                        sizeof(float) * static_cast<std::size_t>(num_samples));
+                        }
+                    }
                     if (pending_parameter_sequences.live != 0) {
                         rt.parameter_input_mailbox->sequence_seen.store(
                             pending_parameter_sequences.live,

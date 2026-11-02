@@ -111,15 +111,16 @@ public final class PulpMotionControlSource {
         // callback immediately on the provider queue.
         running = true
         epoch &+= 1
+        let registrationEpoch = epoch
         stateLock.unlock()
         manager.accelerometerUpdateInterval = updateInterval
         manager.startAccelerometerUpdates(to: queue) { [weak self] data, error in
             guard let self else { return }
             if error != nil || data == nil {
-                self.publishLoss()
+                self.publishLoss(for: registrationEpoch)
                 return
             }
-            self.submit(yAcceleration: data!.acceleration.y, timestamp: data!.timestamp)
+            self.submit(yAcceleration: data!.acceleration.y, timestamp: data!.timestamp, for: registrationEpoch)
         }
         return true
     }
@@ -152,9 +153,9 @@ public final class PulpMotionControlSource {
 
     /// Publishes one invalid frame for a sensor error while delivery is
     /// running, with the same ordering guarantees as `submit` and `stop`.
-    private func publishLoss() {
+    private func publishLoss(for callbackEpoch: UInt64) {
         stateLock.lock()
-        guard running else {
+        guard running, callbackEpoch == epoch else {
             stateLock.unlock()
             return
         }
@@ -172,9 +173,9 @@ public final class PulpMotionControlSource {
         stateLock.unlock()
     }
 
-    private func submit(yAcceleration: Double, timestamp: TimeInterval) {
+    private func submit(yAcceleration: Double, timestamp: TimeInterval, for callbackEpoch: UInt64) {
         stateLock.lock()
-        guard running else {
+        guard running, callbackEpoch == epoch else {
             stateLock.unlock()
             return
         }

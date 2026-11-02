@@ -44,7 +44,7 @@ EXPORTS = [
                 include="pulp/format/processor.hpp",
                 qualified_name="pulp::format::Processor::process_block",
                 target="Pulp::format",
-                header_fingerprint="sha256:535e0d3548a15ec92b5d8886b02d420f283077f4169dbaf03e85f55e618caca2",
+                header_fingerprint="sha256:2c58a56073c651d705753ea4e44f2a20d886ca0a680dfa3682f2852ce821f595",
                 address_expression=(
                     "static_cast<bool (pulp::format::Processor::*)("
                     "pulp::format::ProcessBlock&)>(&pulp::format::Processor::process_block)"
@@ -56,7 +56,7 @@ EXPORTS = [
                 include="pulp/format/processor_node_adapter.hpp",
                 qualified_name="pulp::format::ProcessorNodeInstance::create",
                 target="Pulp::format",
-                header_fingerprint="sha256:37fee4424e76610a54647698a167653ded5f335a059179d99129cc255a8c4bb0",
+                header_fingerprint="sha256:729c839c4055910c921868734ed1d7adfe86375540f73fdae42ad393677f4934",
             ),
         ],
         _link_probes=[

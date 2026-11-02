@@ -58,16 +58,24 @@ template <std::size_t Capacity> class ExternalInputGate {
     using Frame = ExternalInputFrame<Capacity>;
 
     ExternalInputVerdict submit(const Frame& frame, const ExternalInputPolicy& policy) noexcept {
-        if (has_frame_ && frame.epoch == epoch_ && frame.sequence == sequence_) {
-            ++counters_.unchanged;
-            return ExternalInputVerdict::unchanged;
-        }
         if (policy.source_id != 0 && frame.source_id != policy.source_id) {
             ++counters_.rejected_source;
             return ExternalInputVerdict::rejected_source;
         }
-        last_status_ = frame.status;
+        if (has_seen_ && frame.epoch == epoch_ && frame.sequence == sequence_) {
+            ++counters_.unchanged;
+            return ExternalInputVerdict::unchanged;
+        }
+        // The ordering watermark outlives expire(): it is independent of whether a frame is held.
+        if (has_seen_ && (frame.epoch < epoch_ || (frame.epoch == epoch_ &&
+                                                   (frame.sequence <= sequence_ ||
+                                                    frame.provider_time_ns < provider_time_ns_)))) {
+            ++counters_.rejected_order;
+            return ExternalInputVerdict::rejected_order;
+        }
         if (frame.status != ExternalInputStatus::valid) {
+            last_status_ = frame.status;
+            advance_watermark(frame);
             expire();
             ++counters_.rejected_status;
             return ExternalInputVerdict::rejected_status;
@@ -89,21 +97,10 @@ template <std::size_t Capacity> class ExternalInputGate {
             ++counters_.rejected_confidence;
             return ExternalInputVerdict::rejected_confidence;
         }
-        if (has_frame_ && frame.epoch < epoch_) {
-            ++counters_.rejected_order;
-            return ExternalInputVerdict::rejected_order;
-        }
-        if (has_frame_ && frame.epoch == epoch_ &&
-            (frame.sequence <= sequence_ || frame.provider_time_ns < provider_time_ns_)) {
-            ++counters_.rejected_order;
-            return ExternalInputVerdict::rejected_order;
-        }
         values_ = frame.values;
         count_ = frame.count;
         has_frame_ = true;
-        epoch_ = frame.epoch;
-        sequence_ = frame.sequence;
-        provider_time_ns_ = frame.provider_time_ns;
+        advance_watermark(frame);
         age_samples_ = 0;
         last_status_ = frame.status;
         ++counters_.accepted;
@@ -159,6 +156,12 @@ template <std::size_t Capacity> class ExternalInputGate {
     }
 
   private:
+    void advance_watermark(const Frame& frame) noexcept {
+        has_seen_ = true;
+        epoch_ = frame.epoch;
+        sequence_ = frame.sequence;
+        provider_time_ns_ = frame.provider_time_ns;
+    }
     std::array<float, Capacity> values_{};
     ExternalInputCounters counters_{};
     ExternalInputStatus last_status_ = ExternalInputStatus::unavailable;
@@ -166,6 +169,7 @@ template <std::size_t Capacity> class ExternalInputGate {
     std::uint64_t sequence_ = 0, provider_time_ns_ = 0, age_samples_ = 0;
     std::uint8_t count_ = 0;
     bool has_frame_ = false;
+    bool has_seen_ = false;
 };
 
 } // namespace pulp::runtime

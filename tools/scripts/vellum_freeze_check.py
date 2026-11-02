@@ -1271,6 +1271,34 @@ def _write_outputs(path: pathlib.Path, *, required: bool, output: pathlib.Path) 
         handle.write(f"outbox_b64={payload}\n")
 
 
+def _receipt_mode(args: argparse.Namespace) -> int:
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+    import vellum_receipt_drift as receipt  # noqa: PLC0415  (needs the path insert)
+
+    try:
+        repo = args.repo.resolve()
+        base = args.base or merge_base(args.base_branch, args.head, repo)
+        report = receipt.check(repo, base, args.head)
+    except (receipt.ReceiptDriftError, FreezeError, OSError) as exc:
+        print(f"vellum-freeze receipt mode: {exc}", file=sys.stderr)
+        return 1
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if report["status"] != "pass":
+        print(f"vellum-freeze receipt mode: {receipt.describe_failure(report)}", file=sys.stderr)
+        return 1
+    if report["state"] == "inactive":
+        print("No Vellum export receipt is pinned; receipt mode has nothing to check.")
+    elif report["owed"]:
+        print(
+            f"Every changed path in Vellum export {report['export_id']} carries an "
+            "explicit vellum_inherits decision."
+        )
+    else:
+        print(f"No path in Vellum export {report['export_id']} is changed.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", type=pathlib.Path, default=ROOT)
@@ -1290,9 +1318,20 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="verify a transfer commit and counterpart through the Vellum API",
     )
+    parser.add_argument(
+        "--receipt-mode",
+        action="store_true",
+        help=(
+            "instead of the authority-event check, require an explicit "
+            "vellum_inherits decision for every changed path in Vellum's pinned "
+            "export receipt (vellum_receipt_drift.py)"
+        ),
+    )
     parser.add_argument("--output", type=pathlib.Path, required=True)
     parser.add_argument("--github-output", type=pathlib.Path)
     args = parser.parse_args(argv)
+    if args.receipt_mode:
+        return _receipt_mode(args)
 
     try:
         repo = args.repo.resolve()

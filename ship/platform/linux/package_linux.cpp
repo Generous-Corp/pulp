@@ -55,10 +55,87 @@ std::string default_audio_entitlements() { return {}; }
 
 namespace pulp::ship {
 
-bool create_deb(const std::string& plugin_name,
-                const std::string& version,
-                const std::string& build_dir,
-                const std::string& output_path,
+namespace {
+
+// "vst3"/"clap"/"lv2" install suffix for a bundle's format directory, or empty.
+std::string install_suffix(const std::filesystem::path& bundle) {
+    const auto format = bundle.parent_path().filename().string();
+    if (format == "VST3")
+        return "vst3";
+    if (format == "CLAP")
+        return "clap";
+    if (format == "LV2")
+        return "lv2";
+    return {};
+}
+
+bool write_deb_control(const std::filesystem::path& debian_dir, const std::string& plugin_name,
+                       const std::string& version, const std::string& manufacturer) {
+    std::ofstream ctl(debian_dir / "control");
+    if (!ctl)
+        return false;
+    ctl << "Package: " << plugin_name << "\n"
+        << "Version: " << version << "\n"
+        << "Architecture: " << debian_architecture() << "\n"
+        << "Maintainer: " << manufacturer << "\n"
+        << "Description: " << plugin_name << " audio plugin\n"
+        << "Section: sound\n"
+        << "Priority: optional\n";
+    return true;
+}
+
+bool build_deb_from_staging(const std::filesystem::path& deb_root, const std::string& output_path) {
+    std::string cmd = "dpkg-deb --build \"" + deb_root.string() + "\" \"" + output_path + "\"";
+    int rc = exec_status(cmd);
+    std::filesystem::remove_all(deb_root);
+    return rc == 0;
+}
+
+bool run_tar(const std::string& build_dir, const std::string& output_path,
+             const std::vector<std::string>& members) {
+    if (members.empty())
+        return false;
+    std::vector<std::string> args = {"czf", output_path, "-C", build_dir, "--"};
+    args.insert(args.end(), members.begin(), members.end());
+    return pulp::platform::exec("tar", args, 60000).exit_code == 0;
+}
+
+} // namespace
+
+// Explicit-list packagers: ship exactly `bundles`. A bundle outside a
+// VST3/CLAP/LV2 directory fails; an empty list fails. The whole-directory
+// overload below retains its separate metadata-only .deb behavior.
+bool create_deb(const std::string& plugin_name, const std::string& version,
+                const std::string& build_dir, const std::string& output_path,
+                const std::string& manufacturer, const std::vector<std::string>& bundles) {
+    namespace fs = std::filesystem;
+    if (bundles.empty())
+        return false;
+    for (auto& b : bundles)
+        if (install_suffix(fs::path(b)).empty())
+            return false;
+
+    auto deb_root = fs::path(build_dir) / "deb-staging";
+    fs::remove_all(deb_root);
+    auto debian_dir = deb_root / "DEBIAN";
+    fs::create_directories(debian_dir);
+    if (!write_deb_control(debian_dir, plugin_name, version, manufacturer))
+        return false;
+
+    for (auto& b : bundles) {
+        fs::path src(b);
+        auto dest = deb_root / "usr" / "lib" / install_suffix(src);
+        fs::create_directories(dest);
+        fs::copy(src, dest / src.filename(),
+                 fs::copy_options::recursive | fs::copy_options::overwrite_existing);
+    }
+    return build_deb_from_staging(deb_root, output_path);
+}
+
+// Whole-directory packager: ships everything under the declared VST3/CLAP/LV2
+// directories, including declared-but-empty ones.
+bool create_deb(const std::string& plugin_name, const std::string& version,
+                const std::string& build_dir, const std::string& output_path,
                 const std::string& manufacturer) {
     namespace fs = std::filesystem;
 
@@ -66,19 +143,8 @@ bool create_deb(const std::string& plugin_name,
     fs::remove_all(deb_root);
     auto debian_dir = deb_root / "DEBIAN";
     fs::create_directories(debian_dir);
-
-    // Write control file
-    {
-        std::ofstream ctl(debian_dir / "control");
-        if (!ctl) return false;
-        ctl << "Package: " << plugin_name << "\n"
-            << "Version: " << version << "\n"
-            << "Architecture: " << debian_architecture() << "\n"
-            << "Maintainer: " << manufacturer << "\n"
-            << "Description: " << plugin_name << " audio plugin\n"
-            << "Section: sound\n"
-            << "Priority: optional\n";
-    }
+    if (!write_deb_control(debian_dir, plugin_name, version, manufacturer))
+        return false;
 
     // Copy plugin bundles to standard Linux locations
     auto copy_dir = [&](const std::string& subdir, const std::string& dest_suffix) {
@@ -95,23 +161,32 @@ bool create_deb(const std::string& plugin_name,
     copy_dir("VST3", "vst3");
     copy_dir("CLAP", "clap");
     copy_dir("LV2", "lv2");
-
-    // Build .deb
-    std::string cmd = "dpkg-deb --build \"" + deb_root.string() + "\" \"" + output_path + "\"";
-    int rc = exec_status(cmd);
-    fs::remove_all(deb_root);
-    return rc == 0;
+    return build_deb_from_staging(deb_root, output_path);
 }
 
-bool create_tar_gz(const std::string& plugin_name,
-                   const std::string& build_dir,
-                   const std::string& output_path) {
+bool create_tar_gz(const std::string& plugin_name, const std::string& build_dir,
+                   const std::string& output_path, const std::vector<std::string>& bundles) {
+    (void)plugin_name;
     namespace fs = std::filesystem;
-    std::string cmd = "tar czf \"" + output_path + "\" -C \"" + build_dir + "\"";
-    if (fs::exists(fs::path(build_dir) / "VST3")) cmd += " VST3";
-    if (fs::exists(fs::path(build_dir) / "CLAP")) cmd += " CLAP";
-    if (fs::exists(fs::path(build_dir) / "LV2")) cmd += " LV2";
-    return exec_status(cmd) == 0;
+    std::vector<std::string> members;
+    for (auto& b : bundles) {
+        fs::path src(b);
+        if (install_suffix(src).empty())
+            return false;
+        members.push_back((fs::path(src.parent_path().filename()) / src.filename()).string());
+    }
+    return run_tar(build_dir, output_path, members);
+}
+
+bool create_tar_gz(const std::string& plugin_name, const std::string& build_dir,
+                   const std::string& output_path) {
+    (void)plugin_name;
+    namespace fs = std::filesystem;
+    std::vector<std::string> members;
+    for (const char* sub : {"VST3", "CLAP", "LV2"})
+        if (fs::exists(fs::path(build_dir) / sub))
+            members.push_back(sub);
+    return run_tar(build_dir, output_path, members);
 }
 
 namespace {

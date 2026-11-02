@@ -1,7 +1,7 @@
 #pragma once
 
-#include <pulp/runtime/external_input.hpp>
 #include <filesystem>
+#include <pulp/runtime/external_input.hpp>
 #include <string>
 
 namespace pulp::test {
@@ -13,13 +13,11 @@ struct ExternalInputReplayReceipt {
     std::string result;
 };
 
-ExternalInputReplayReceipt run_external_input_replay(
-    const std::filesystem::path& path,
-    runtime::ExternalInputGate<64>& gate,
-    runtime::ExternalInputPolicy& policy);
+ExternalInputReplayReceipt run_external_input_replay(const std::filesystem::path& path,
+                                                     runtime::ExternalInputGate<64>& gate,
+                                                     runtime::ExternalInputPolicy& policy);
 
 bool write_external_input_receipt(const std::filesystem::path& path,
-                                  const ExternalInputReplayReceipt& receipt,
-                                  std::string& error);
+                                  const ExternalInputReplayReceipt& receipt, std::string& error);
 
 } // namespace pulp::test

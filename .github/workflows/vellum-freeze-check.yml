@@ -125,6 +125,18 @@ jobs:
             --head '${{ steps.comparison.outputs.head }}' \
             --output "$RUNNER_TEMP/vellum-expansion-watch.json"
 
+      # Receipt mode: every changed path in Vellum's pinned export receipt
+      # (.github/vellum-export-receipt/) needs an added event that states
+      # vellum_inherits, so a Pulp change to an exported file cannot reach or
+      # skip the next re-export without a recorded decision.
+      - name: Require an inheritance decision for exported paths
+        run: |
+          python3 tools/scripts/vellum_freeze_check.py \
+            --receipt-mode \
+            --base '${{ steps.comparison.outputs.base }}' \
+            --head '${{ steps.comparison.outputs.head }}' \
+            --output "$RUNNER_TEMP/vellum-receipt-drift.json"
+
       # A branch stacked on an unmerged PR passes the watch check on its
       # parent's event, then ejects its merge-queue batch once the parent
       # lands and the queue measures this change alone. merge_group needs no
@@ -148,6 +160,7 @@ jobs:
       - name: Run freeze-check negative controls
         run: |
           python3 tools/scripts/test_vellum_freeze_check.py
+          python3 tools/scripts/test_vellum_receipt_drift.py
           python3 tools/scripts/test_vellum_expansion_watch_check.py
           python3 tools/scripts/test_github_app_jwt.py
           python3 tools/scripts/test_vellum_authority_workflows.py

@@ -1,10 +1,17 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <optional>
 #include <span>
+
+#include <pulp/runtime/external_input.hpp>
+#if !defined(PULP_WASM)
+#include <pulp/osc/osc.hpp>
+#endif
 
 namespace pulp::examples::cv_control {
 
@@ -62,6 +69,20 @@ struct ModelFrame {
 /// This example reserves channel-16 pitch bend as one control packet.
 /// The upper data bit is validity; the other 13 bits carry a normalized value.
 /// MediaPipe's current page reports presence (0/1), not graded confidence.
+#if !defined(PULP_WASM)
+inline std::optional<ControlSample> decode_osc_control(const pulp::osc::Message& message) {
+    if (message.address != "/pulp/cv/face" && message.address != "/pulp/control")
+        return std::nullopt;
+    if (message.args.size() < 3 || !std::holds_alternative<float>(message.args[0]) ||
+        !std::holds_alternative<float>(message.args[1]) ||
+        !std::holds_alternative<std::int32_t>(message.args[2]) ||
+        (message.args.size() > 3 && !std::holds_alternative<std::int32_t>(message.args[3])))
+        return std::nullopt;
+    return ControlSample{0, std::get<float>(message.args[0]), std::get<float>(message.args[1]),
+                         std::get<std::int32_t>(message.args[2]) != 0};
+}
+#endif
+
 inline std::optional<ControlSample> decode_midi_control(std::uint8_t status, std::uint8_t low,
                                                         std::uint8_t high,
                                                         std::uint64_t arrival) noexcept {
@@ -71,6 +92,50 @@ inline std::optional<ControlSample> decode_midi_control(std::uint8_t status, std
     const bool valid = (high & 0x40) != 0;
     return ControlSample{arrival, static_cast<float>(quantized) / 8191.0f, valid ? 1.0f : 0.0f,
                          valid};
+}
+
+/// Decode the application-owned browser multi-value packet carried by the
+/// existing WAM SysEx ingress.  The packet is deliberately bounded and has no
+/// provider or landmark vocabulary: values are just a fixed array of floats.
+/// Wire format (little endian): F0 7D 'P' 'I' version, source_id, epoch,
+/// sequence, provider_time_ns, status, confidence, count, count float32s, F7.
+inline std::optional<pulp::runtime::ExternalInputFrame<16>>
+decode_midi_sysex(std::span<const std::uint8_t> bytes) noexcept {
+    constexpr std::size_t header = 5 + 4 + 4 + 8 + 8 + 1 + 4 + 1;
+    if (bytes.size() < header + 2 || bytes.front() != 0xf0 || bytes.back() != 0xf7 ||
+        bytes[1] != 0x7d || bytes[2] != 'P' || bytes[3] != 'I' || bytes[4] != 1)
+        return std::nullopt;
+    auto u32 = [&](std::size_t p) {
+        return std::uint32_t(bytes[p]) | (std::uint32_t(bytes[p + 1]) << 8) |
+               (std::uint32_t(bytes[p + 2]) << 16) | (std::uint32_t(bytes[p + 3]) << 24);
+    };
+    auto u64 = [&](std::size_t p) {
+        std::uint64_t v = 0;
+        for (unsigned i = 0; i < 8; ++i)
+            v |= std::uint64_t(bytes[p + i]) << (8 * i);
+        return v;
+    };
+    const auto count = bytes[header - 1];
+    if (count == 0 || count > 16 || bytes.size() != header + 1 + 4 * count)
+        return std::nullopt;
+    pulp::runtime::ExternalInputFrame<16> frame{};
+    frame.source_id = u32(5);
+    frame.epoch = u32(9);
+    frame.sequence = u64(13);
+    frame.provider_time_ns = u64(21);
+    if (bytes[29] > static_cast<std::uint8_t>(pulp::runtime::ExternalInputStatus::paused))
+        return std::nullopt;
+    frame.status = static_cast<pulp::runtime::ExternalInputStatus>(bytes[29]);
+    std::memcpy(&frame.confidence, bytes.data() + 30, sizeof(float));
+    frame.count = count;
+    if (!std::isfinite(frame.confidence))
+        return std::nullopt;
+    for (std::size_t i = 0; i < count; ++i) {
+        std::memcpy(&frame.values[i], bytes.data() + header + 4 * i, sizeof(float));
+        if (!std::isfinite(frame.values[i]))
+            return std::nullopt;
+    }
+    return frame;
 }
 
 /// Application-owned mapping state shared by every input kind. The processor's

@@ -134,6 +134,20 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(foundation-include-lint foundation-include-lint-negative-contract
         PROPERTIES LABELS "pr" TIMEOUT 60)
 
+    # Pulp core knows nothing about Vellum: no source under core/ includes a
+    # vellum/ header, and no CMake file under core/ finds, fetches, adds or
+    # links Vellum. Lexical and build-free; known edges carry a reason and an
+    # exact count. The self-test plants each spelling and must turn red.
+    add_test(NAME core-vellum-direction
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/core_vellum_direction.py"
+            --root "${CMAKE_SOURCE_DIR}")
+    add_test(NAME core-vellum-direction-negative-contract
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_core_vellum_direction.py")
+    set_tests_properties(core-vellum-direction core-vellum-direction-negative-contract
+        PROPERTIES LABELS "pr" TIMEOUT 60)
+
     # Test-only compile macros (PULP_AU_V2_TEST_HOOKS guards an AU v2 accessor
     # that hands out a PluginViewHost*) may be defined only under test/;
     # elsewhere a line naming one may only guard on it or comment on it.
