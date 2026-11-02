@@ -3206,6 +3206,7 @@
   "pulp-test-signal-graph-audio-parity",
   "pulp-test-signal-graph-control-authority",
   "pulp-test-signal-graph-executor-parity",
+  "pulp-test-signal-graph-named-ports",
   "pulp-test-signal-graph-offline-parity",
   "pulp-test-signal-graph-pulpsynth-automation",
   "pulp-test-signal-graph-x9-modular-instrument",
