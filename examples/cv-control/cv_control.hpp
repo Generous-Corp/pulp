@@ -9,6 +9,9 @@
 #include <span>
 
 #include <pulp/runtime/external_input.hpp>
+#if !defined(PULP_WASM)
+#include <pulp/osc/osc.hpp>
+#endif
 
 namespace pulp::examples::cv_control {
 
@@ -66,6 +69,20 @@ struct ModelFrame {
 /// This example reserves channel-16 pitch bend as one control packet.
 /// The upper data bit is validity; the other 13 bits carry a normalized value.
 /// MediaPipe's current page reports presence (0/1), not graded confidence.
+#if !defined(PULP_WASM)
+inline std::optional<ControlSample> decode_osc_control(const pulp::osc::Message& message) {
+    if (message.address != "/pulp/cv/face" && message.address != "/pulp/control")
+        return std::nullopt;
+    if (message.args.size() < 3 || !std::holds_alternative<float>(message.args[0]) ||
+        !std::holds_alternative<float>(message.args[1]) ||
+        !std::holds_alternative<std::int32_t>(message.args[2]) ||
+        (message.args.size() > 3 && !std::holds_alternative<std::int32_t>(message.args[3])))
+        return std::nullopt;
+    return ControlSample{0, std::get<float>(message.args[0]), std::get<float>(message.args[1]),
+                         std::get<std::int32_t>(message.args[2]) != 0};
+}
+#endif
+
 inline std::optional<ControlSample> decode_midi_control(std::uint8_t status, std::uint8_t low,
                                                         std::uint8_t high,
                                                         std::uint64_t arrival) noexcept {
