@@ -46,13 +46,15 @@ bool has_output_port(const GraphNode& node, PortIndex port) {
 void populate_named_ports(GraphNode& node) {
     node.input_ports.clear();
     node.output_ports.clear();
+    const auto kind = (node.type == NodeType::MidiInput || node.type == NodeType::MidiOutput)
+                          ? PortKind::Midi
+                          : PortKind::Audio;
     for (int i = 0; i < node.num_input_ports; ++i)
         node.input_ports.push_back({node.id, static_cast<PortIndex>(i), false,
-                                    i == 0 ? "audio" : "in" + std::to_string(i), PortKind::Audio});
+                                    i == 0 ? "audio" : "in" + std::to_string(i), kind});
     for (int i = 0; i < node.num_output_ports; ++i)
         node.output_ports.push_back({node.id, static_cast<PortIndex>(i), true,
-                                     i == 0 ? "audio" : "out" + std::to_string(i),
-                                     PortKind::Audio});
+                                     i == 0 ? "audio" : "out" + std::to_string(i), kind});
 }
 
 } // namespace
