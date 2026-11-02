@@ -9,6 +9,19 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1460"></a>
+## [1.46.0] - 2026-11-02
+
+- release/version bump ([#11416](https://github.com/Generous-Corp/pulp/pull/11416))
+- codex/windows standalone host 20261101 ([#11396](https://github.com/Generous-Corp/pulp/pull/11396))
+- feat/real world inputs t7 ([#11367](https://github.com/Generous-Corp/pulp/pull/11367))
+- release/version bump ([#11413](https://github.com/Generous-Corp/pulp/pull/11413))
+- feat/real world inputs t5 ([#11365](https://github.com/Generous-Corp/pulp/pull/11365))
+- docs/graph final review 20261103 ([#11412](https://github.com/Generous-Corp/pulp/pull/11412))
+- feat/real world inputs t10 ([#11368](https://github.com/Generous-Corp/pulp/pull/11368))
+- feat/real world inputs t6 ([#11364](https://github.com/Generous-Corp/pulp/pull/11364))
+- feature/core vellum direction check ([#11402](https://github.com/Generous-Corp/pulp/pull/11402))
+
 <a id="v1450"></a>
 ## [1.45.0] - 2026-11-02
 
@@ -12067,6 +12080,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.46.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.46.0
 [1.45.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.45.0
 [1.44.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.44.0
 [1.43.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.43.0
