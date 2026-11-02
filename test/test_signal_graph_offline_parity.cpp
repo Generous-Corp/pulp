@@ -470,6 +470,27 @@ TEST_CASE("Offline sidechain PDC render matches online routing across partitions
     CHECK(wrong_delay_mismatches > 0);
 }
 
+TEST_CASE("Offline sidechain PDC delays an impulse by the negotiated latency",
+          "[host][graph][offline][parity][sidechain][pdc]") {
+    constexpr int kPdcLatency = 64;
+    constexpr std::size_t kImpulseFrame = 0;
+
+    const Fixture f = make_sidechain_pdc_fixture();
+    std::vector<std::vector<float>> input(static_cast<std::size_t>(f.in_channels),
+                                          std::vector<float>(kFrames, 0.0f));
+    input[0][kImpulseFrame] = 1.0f;
+
+    const auto output =
+        run_offline(f.build, kPdcLatency, f.in_channels, f.out_channels, to_buffer(input));
+
+    // The main path is immediate, while the sidechain impulse appears only
+    // after the first plugin's reported latency and is scaled by the sidechain
+    // gain. This is an independent impulse-response oracle for the PDC ring.
+    CHECK(output[0][kImpulseFrame] == 1.0f);
+    CHECK(output[0][static_cast<std::size_t>(kPdcLatency - 1)] == 0.0f);
+    CHECK(output[0][static_cast<std::size_t>(kPdcLatency)] == 0.75f);
+}
+
 TEST_CASE("Offline render zero-pads a source shorter than the frame count",
           "[host][graph][offline][parity][i13]") {
     // Exercises the host's source-tail padding: a source buffer shorter than
