@@ -1,25 +1,58 @@
 # Real-world inputs
 
-The shipped external-input contract is experimental and provider-neutral. It
-is implemented by `pulp::runtime::ExternalInputFrame<N>` and
-`ExternalInputGate<N>` in the runtime SDK. A frame carries `source_id`, an
-`epoch` for provider restart, a provider sequence and timestamp, status,
-confidence, count, and bounded application-defined float values. The gate
-accepts only monotonic, well-formed frames that meet the application policy;
-`invalid`, `unavailable`, `denied`, and `paused` statuses expire the accepted
-value. Advance it once per audio block with the block sample count. It never
-compares a provider clock to the audio clock.
+Real-world inputs let a Pulp application turn signals from devices and other
+software into musical control. You can use a facial expression to move a
+synthesizer filter, move your hands through a granular texture, tilt a phone
+to change pitch or reverb, or use a gesture to trigger samples. A
+TouchDesigner or Max/MSP patch can control a Pulp instrument over OSC, and a
+custom machine-learning model can become an expressive interface. Several
+physical inputs can feed different controls in the same instrument.
+
+These are integration patterns, not turnkey face tracking or gesture products.
+Your application or companion process captures the signal and decides what it
+means; Pulp provides a consistent, real-time-safe way to deliver, validate,
+and expire the resulting control data.
+
+## What is available today
+
+The experimental, provider-neutral contract is implemented by
+`pulp::runtime::ExternalInputFrame<N>` and `ExternalInputGate<N>` in the
+runtime SDK. It is covered by core replay and ingress tests, the
+`examples/cv-control` reference application, and tested Swift and Kotlin motion
+adapters. The TouchDesigner and Fairlight sections below are integration
+recipes with synthesized evidence, not claims that those products are installed
+or validated on every machine. A live camera, phone, named host, or model still
+needs an application-specific acceptance run.
+
+Pulp handles bounded frame storage, source and restart identity, ordering,
+confidence and value validation, status changes, and sample-count staleness.
+It does not capture devices, request permissions, run inference, own model
+weights, or write saved parameters from a provider thread. Those responsibilities
+stay with your application.
+
+## How the contract works
+
+A provider publishes one complete observation at a time. The frame carries a
+source identity, a provider restart epoch, sequence and provider time, status,
+confidence, and a bounded array of application-defined values. The gate accepts
+only well-formed frames that meet the consumer policy. `invalid`, `unavailable`,
+`denied`, and `paused` statuses expire the accepted value. Advance the gate once
+per audio block with the block sample count; it never compares a provider clock
+with the audio clock.
 
 Providers and applications own capture, permissions, inference, lifecycle, and
 mapping. Use an existing `TripleBuffer`, SPSC queue, OSC, IPC, MIDI, or WAM
 handoff; do not add a provider-specific transport or schema to Pulp core. See
 the [licensing boundary](../reference/licensing.md#application-selected-provider-and-host-integrations)
-for why application-selected providers are not Pulp redistributed dependencies.
+for why application-selected providers are not Pulp-redistributed dependencies.
 
-Pulp applications can map camera, sensor, controller, analysis, or network
-data to parameters and application behavior without adding those providers to
-Pulp core. The provider owns capture, permissions, inference, and lifecycle;
-the application owns the result type and mapping policy.
+## A small provider-to-audio example
+
+The following example shows the boundary: capture and inference happen away from
+the audio callback, one complete result crosses an existing handoff, and the
+consumer applies an ephemeral modulation value. Adapt the frame fields and
+`map` function to your application; Pulp does not prescribe a face, hand, body,
+or sensor schema.
 
 ## The portable recipe
 
@@ -280,10 +313,10 @@ APIs, and device SDKs remain application-selected dependencies. Audit model
 weights, task bundles, codecs, and SDK terms separately from runtime licenses.
 Do not add any of them to Pulp core for an application that does not use them.
 
-## T7 recipe: TouchDesigner OSC sharing app
+## Connecting TouchDesigner over OSC
 
-TouchDesigner is the named sharing-app target for this recipe. This recipe is
-external to Pulp and requires a pinned TouchDesigner build on the host. Create
+TouchDesigner is an example of an external sharing application. This recipe is
+outside Pulp and requires a pinned TouchDesigner build on the host. Create
 an OSC Out CHOP or DAT that sends UDP to `127.0.0.1:9001` with the existing
 `examples/cv-control` message shape:
 
@@ -306,23 +339,26 @@ and silence-to-expiry cases. It is explicitly marked `synthesized`: this host
 does not have TouchDesigner installed, so it is not a live TouchDesigner
 acceptance receipt. A live receipt must record the exact TouchDesigner version,
 OS, destination port, patch/operator identity, and a captured packet sequence
-before this recipe can be promoted to runtime-proven.
-## T10 recipe: DaVinci Resolve / Fairlight
+before this recipe can be treated as validated on a live host.
 
-The named T10 host target is DaVinci Resolve's Fairlight page. The acceptance
-path is host-only and does not add a Blackmagic SDK or Resolve dependency to
-Pulp. Install an exact Resolve version, place a built Pulp VST3 in the host's
-plugin search path, and record the plugin identity, project, timeline, track,
-and parameter automation. The receipt must show a before/after host automation
-value reaching the plugin's existing `get_modulated` path.
+## Using Pulp plugins in DaVinci Resolve / Fairlight
+
+The Fairlight acceptance path is host-only and does not add a Blackmagic SDK
+or Resolve dependency to Pulp. Install an exact Resolve version, place a built
+Pulp VST3 in the host's plugin search path, and record the plugin identity,
+project, timeline, track, and parameter automation. The receipt must show a
+before/after host automation value reaching the plugin's existing
+`get_modulated` path.
 
 `examples/cv-control` currently declares `CvFaceTone` as a VST3 instrument and
 does not expose an input bus. Verify that the selected Fairlight version loads
-VST3 instruments and automates its Brightness parameter before claiming T10.
-If it only accepts effects, use an existing Pulp VST3 effect with a clearly
-automatable parameter or leave T10 unverified; do not change core solely to
-force host compatibility.
+VST3 instruments and automates its Brightness parameter before claiming a live
+Fairlight integration. If it only accepts effects, use an existing Pulp VST3
+effect with a clearly automatable parameter or leave the integration
+unverified; do not change core solely to force host compatibility.
 
-The receipt fixture below is an evidence template, not a live host result.
+The receipt fixture at
+`test/fixtures/external-input/t10-fairlight-receipt.json` is an evidence
+template, not a live host result.
 This checkout has no DaVinci Resolve installation, so it deliberately records
-the missing runtime evidence.
+that live-host evidence is still missing.
