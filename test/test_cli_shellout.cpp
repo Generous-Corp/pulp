@@ -205,6 +205,36 @@ TEST_CASE("pulp graph canonicalize refuses unresolved plugin state", "[cli][shel
     REQUIRE(read_file(graph) == original);
 }
 
+TEST_CASE("pulp graph canonicalize preserves editor layout", "[cli][shellout][graph]") {
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
+
+    const auto project = unique_temp_dir("pulp-graph-canonicalize-layout");
+    const auto graph = project / "layout.pulpgraph";
+    write_text(graph, R"({
+  "format_version": 1,
+  "nodes": [{
+    "id": 1,
+    "type": "gain",
+    "name": "Gain",
+    "num_input_ports": 2,
+    "num_output_ports": 2,
+    "gain": 1,
+    "layout": {"x": 123.5, "y": 45.25}
+  }],
+  "connections": []
+}
+)");
+
+    const auto result = run_pulp({"graph", "canonicalize", graph.string()});
+    REQUIRE(result.exit_code == 0);
+    const auto out = read_file(graph);
+    REQUIRE(out.find("\"layout\"") != std::string::npos);
+    REQUIRE(out.find("123.5") != std::string::npos);
+    REQUIRE(out.find("45.25") != std::string::npos);
+}
+
 TEST_CASE("pulp with no arguments prints help and exits 0", "[cli][shellout]") {
     if (!binary_exists()) {
         SKIP("pulp not built");

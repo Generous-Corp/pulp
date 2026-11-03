@@ -74,7 +74,14 @@ int cmd_graph(const std::vector<std::string>& args) {
                          "resolve all plugins first\n";
             return 1;
         }
-        const auto serialized = pulp::host::GraphSerializer::to_json(graph);
+        if (!loaded.state_restore_failures.empty()) {
+            std::cerr << "pulp graph: cannot canonicalize because "
+                      << loaded.state_restore_failures.size()
+                      << " plugin(s) rejected their persisted state; canonicalizing would "
+                         "overwrite it\n";
+            return 1;
+        }
+        const auto serialized = pulp::host::GraphSerializer::to_json(graph, loaded.editor_layout);
         if (serialized.empty()) {
             std::cerr << "pulp graph: cannot canonicalize graph because serialization failed\n";
             return 1;
