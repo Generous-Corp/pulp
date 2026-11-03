@@ -167,6 +167,44 @@ TEST_CASE("pulp --help is an alias for pulp help", "[cli][shellout]") {
     REQUIRE(c.stdout_output.find("pulp") != std::string::npos);
 }
 
+TEST_CASE("pulp graph canonicalize refuses unresolved plugin state", "[cli][shellout][graph]") {
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
+
+    const auto project = unique_temp_dir("pulp-graph-canonicalize-plugin-state");
+    const auto graph = project / "stateful.pulpgraph";
+    const std::string original = R"({
+  "format_version": 1,
+  "nodes": [{
+    "id": 1,
+    "type": "plugin",
+    "name": "Missing Plugin",
+    "num_input_ports": 1,
+    "num_output_ports": 1,
+    "gain": 1,
+    "plugin": {
+      "format": "clap",
+      "unique_id": "pulp.test.missing.state",
+      "name": "Missing Plugin",
+      "manufacturer": "PulpTest",
+      "version": "1.0.0",
+      "last_path": "/nonexistent/Missing.clap",
+      "state_b64": "AAE="
+    }
+  }],
+  "connections": []
+}
+)";
+    write_text(graph, original);
+
+    const auto result = run_pulp({"graph", "canonicalize", graph.string()});
+    REQUIRE(result.exit_code != 0);
+    REQUIRE_FALSE(result.timed_out);
+    REQUIRE((result.stdout_output + result.stderr_output).find("unresolved") != std::string::npos);
+    REQUIRE(read_file(graph) == original);
+}
+
 TEST_CASE("pulp with no arguments prints help and exits 0", "[cli][shellout]") {
     if (!binary_exists()) {
         SKIP("pulp not built");

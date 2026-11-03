@@ -67,6 +67,11 @@ int cmd_graph(const std::vector<std::string>& args) {
         return 0;
     }
     if (op == "canonicalize") {
+        if (!loaded.missing_plugins.empty()) {
+            std::cerr << "pulp graph: cannot canonicalize while plugin nodes are unresolved; "
+                         "resolve all plugins first\n";
+            return 1;
+        }
         const std::filesystem::path destination(path);
         const auto temporary = destination.string() + ".tmp-" + std::to_string(std::rand());
         std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
