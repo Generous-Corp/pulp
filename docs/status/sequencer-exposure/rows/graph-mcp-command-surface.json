@@ -36,7 +36,7 @@
     },
     "offline_timeline_mcp": {
       "disposition": "exposed",
-      "rationale": "The graph MCP command is a bounded offline serializer projection; this row records its reviewed exposure without adding a live sequencer mutation surface.",
+      "rationale": "The graph MCP command exposes only inspect and validate, a bounded offline serializer projection; canonicalizing writes remain CLI-only so this row records no MCP mutation surface.",
       "evidence": [
         {
           "kind": "mcp_definition",
@@ -62,7 +62,7 @@
     },
     "live_product_control": {
       "disposition": "not_applicable",
-      "rationale": "The graph MCP command is a bounded offline serializer projection; this row records its reviewed exposure without adding a live sequencer mutation surface.",
+      "rationale": "The graph MCP command exposes only inspect and validate, a bounded offline serializer projection; canonicalizing writes remain CLI-only so this row records no MCP mutation surface.",
       "dependencies": [
         "baked-graph-event-plane",
         "graph-topology-read-control",
