@@ -48,7 +48,8 @@ struct MainThreadTimer::Impl {
 
     bool start(int interval_ms, std::function<void()> fn) {
         stop();
-        source = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
+        source =
+            dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
         if (source == nullptr)
             return false;
         tick = std::move(fn);

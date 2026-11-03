@@ -55,8 +55,7 @@ class MainLoop {
         }
 #endif
     }
-    template <typename Done>
-    bool run_until(Done done, double seconds = 2.0) {
+    template <typename Done> bool run_until(Done done, double seconds = 2.0) {
         for (double waited = 0.0; waited < seconds; waited += 0.02) {
             if (done())
                 return true;
