@@ -554,3 +554,6 @@ pulp_add_test_suite(pulp-test-retained-history-dspx03 GROUP pulp-test-group-samp
 pulp_add_test_suite(pulp-test-signal-graph-named-ports
     SOURCES test_signal_graph_named_ports.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
+pulp_add_test_suite(pulp-test-signal-graph-subgraph
+    SOURCES test_signal_graph_subgraph.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph)
