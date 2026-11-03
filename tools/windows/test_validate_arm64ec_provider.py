@@ -7,6 +7,7 @@ import importlib.util
 import json
 import pathlib
 import struct
+import sys
 import tempfile
 import unittest
 
@@ -15,6 +16,10 @@ SCRIPT = pathlib.Path(__file__).with_name("validate_arm64ec_provider.py")
 _spec = importlib.util.spec_from_file_location("validate_arm64ec_provider", SCRIPT)
 assert _spec and _spec.loader
 _mod = importlib.util.module_from_spec(_spec)
+# ``dataclasses`` resolves postponed annotations through ``sys.modules`` while
+# importing the validator.  Register the dynamically loaded module first; this
+# is required by Python 3.14 and is also the correct importlib contract.
+sys.modules[_spec.name] = _mod
 _spec.loader.exec_module(_mod)
 
 
