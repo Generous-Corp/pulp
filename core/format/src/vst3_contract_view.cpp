@@ -70,11 +70,9 @@ ContractPlugView* ContractPlugView::create(PulpVst3Processor& owner, Processor& 
 
 ContractPlugView::ContractPlugView(PulpVst3Processor& owner, Processor& processor,
                                    state::StateStore& store, HostActionHandler host_action)
-    : CPluginView(nullptr)
-    , owner_(&owner)
-    , processor_(&processor)
-    , port_(std::make_unique<StateStoreParamPort>(store))
-    , context_(std::make_unique<Context>(*this, *port_, processor.editor_host_kind(),
+    : CPluginView(nullptr), owner_(&owner), processor_(&processor),
+      port_(std::make_unique<StateStoreParamPort>(store)),
+      context_(std::make_unique<Context>(*this, *port_, processor.editor_host_kind(),
                                          std::move(host_action))) {}
 
 ContractPlugView::~ContractPlugView() {

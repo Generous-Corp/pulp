@@ -76,7 +76,7 @@ class RecordingEditor final : public Editor {
     }
     bool attach(const NativeParent& parent) override {
         g_log.calls.push_back(parent.kind == NativeParentKind::cocoa_view ? "attach:cocoa_view"
-                                                                         : "attach:other");
+                                                                          : "attach:other");
         g_log.parent_handle = parent.handle;
         return true;
     }
@@ -314,8 +314,7 @@ ContractPlugView* open_contract_view(PulpVst3Processor& processor) {
 
 namespace pulp::format::vst3 {
 
-Steinberg::IPlugView* make_plug_view(Processor&, state::StateStore&,
-                                     runtime::AliveToken::Handle) {
+Steinberg::IPlugView* make_plug_view(Processor&, state::StateStore&, runtime::AliveToken::Handle) {
     ++g_legacy_views;
     return new LegacyMarkerView();
 }
@@ -342,9 +341,11 @@ TEST_CASE("VST3 opens, resizes and closes a contract editor, twice",
     REQUIRE(rect.getWidth() == 400);
     REQUIRE(rect.getHeight() == 300);
 
-    REQUIRE(view->isPlatformTypeSupported(Steinberg::kPlatformTypeNSView) == Steinberg::kResultTrue);
+    REQUIRE(view->isPlatformTypeSupported(Steinberg::kPlatformTypeNSView) ==
+            Steinberg::kResultTrue);
     REQUIRE(view->isPlatformTypeSupported("not-a-platform") == Steinberg::kResultFalse);
-    REQUIRE(view->attached(fake_parent(), Steinberg::kPlatformTypeNSView) == Steinberg::kResultTrue);
+    REQUIRE(view->attached(fake_parent(), Steinberg::kPlatformTypeNSView) ==
+            Steinberg::kResultTrue);
     REQUIRE(g_log.saw("attach:cocoa_view"));
     REQUIRE(g_log.parent_handle == fake_parent());
 
@@ -386,7 +387,8 @@ TEST_CASE("VST3 opens, resizes and closes a contract editor, twice",
     // Reopen: a fresh editor sees the value the first one set.
     g_log.calls.clear();
     view = open_contract_view(processor);
-    REQUIRE(view->attached(fake_parent(), Steinberg::kPlatformTypeNSView) == Steinberg::kResultTrue);
+    REQUIRE(view->attached(fake_parent(), Steinberg::kPlatformTypeNSView) ==
+            Steinberg::kResultTrue);
     REQUIRE(g_log.context->params().get(kGain) == 0.75f);
     REQUIRE(view->removed() == Steinberg::kResultOk);
     view->release();
@@ -408,7 +410,8 @@ TEST_CASE("VST3 terminate invalidates a contract editor the host still holds",
     REQUIRE(processor.setComponentHandler(&host) == Steinberg::kResultOk);
 
     auto* view = open_contract_view(processor);
-    REQUIRE(view->attached(fake_parent(), Steinberg::kPlatformTypeNSView) == Steinberg::kResultTrue);
+    REQUIRE(view->attached(fake_parent(), Steinberg::kPlatformTypeNSView) ==
+            Steinberg::kResultTrue);
     g_log.context->params().begin(kGain);
     REQUIRE(host.open == 1);
 
@@ -450,7 +453,8 @@ TEST_CASE("VST3 keeps create_view() for a processor without an editor factory",
 
 TEST_CASE("VST3 key callbacks map to the contract's key events",
           "[vst3][editor-host][vst3-contract]") {
-    auto space = ContractPlugView::key_event(u' ', Steinberg::KEY_SPACE, Steinberg::kShiftKey, true);
+    auto space =
+        ContractPlugView::key_event(u' ', Steinberg::KEY_SPACE, Steinberg::kShiftKey, true);
     REQUIRE(space.key == EditorKey::space);
     REQUIRE(space.character == U' ');
     REQUIRE(space.modifiers == pulp::format::editor_modifier_shift);

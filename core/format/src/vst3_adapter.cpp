@@ -1090,11 +1090,10 @@ IPlugView* PLUGIN_API PulpVst3Processor::createView(FIDString name) {
         if (processor_) {
             if (auto* factory = processor_->editor_factory()) {
                 trace.mark("before_contract_view");
-                auto* view = ContractPlugView::create(
-                    *this, *processor_, store_, *factory,
-                    [this](const HostActionRequest& request) {
-                        return contract_host_action(request);
-                    });
+                auto* view = ContractPlugView::create(*this, *processor_, store_, *factory,
+                                                      [this](const HostActionRequest& request) {
+                                                          return contract_host_action(request);
+                                                      });
                 if (view != nullptr)
                     contract_views_.push_back(view);
                 return view;

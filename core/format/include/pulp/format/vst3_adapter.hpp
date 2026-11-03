@@ -309,7 +309,7 @@ public:
     /// destroyed, so the adapter stops tracking it.
     void forget_contract_view(ContractPlugView* view);
 
-private:
+  private:
     // Tell every live contract view that the processor is going away, so each
     // invalidates and destroys its editor while the processor that owns the
     // editor factory, and the store its port reads, are still alive.

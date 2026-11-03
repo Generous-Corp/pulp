@@ -381,6 +381,7 @@
       "pulp/format/validation_harness.hpp",
       "pulp/format/view_bridge.hpp",
       "pulp/format/vst3_adapter.hpp",
+      "pulp/format/vst3_contract_view.hpp",
       "pulp/format/vst3_entry.hpp",
       "pulp/format/vst3_plug_view.hpp",
       "pulp/format/web/clap_webview.hpp",
