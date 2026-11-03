@@ -3317,6 +3317,7 @@
   "pulp-test-vst3-audio-parity",
   "pulp-test-vst3-bundle-entry",
   "pulp-test-vst3-connection",
+  "pulp-test-vst3-contract-editor",
   "pulp-test-vst3-editor",
   "pulp-test-vst3-host-process-clock",
   "pulp-test-vst3-hosted-editor",
