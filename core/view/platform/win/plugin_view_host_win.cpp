@@ -263,8 +263,8 @@ class WinPluginViewHost : public PluginViewHost, private win_input::InputRouterH
             // not reconcile a resize we ourselves drove (would double-fire the
             // resize callback / mis-scale on HiDPI). See handle_wm_size().
             ScopedFlag g(in_set_size_);
-            SetWindowPos(hwnd_, nullptr, 0, 0, static_cast<int>(size_.width),
-                         static_cast<int>(size_.height),
+            SetWindowPos(hwnd_, nullptr, 0, 0, static_cast<int>(pixel_w()),
+                         static_cast<int>(pixel_h()),
                          SWP_NOZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
         }
         ShowWindow(hwnd_, SW_SHOW);
@@ -500,8 +500,11 @@ class WinPluginViewHost : public PluginViewHost, private win_input::InputRouterH
             // don't reconcile (and re-fire the resize callback for) a size WE
             // just set.
             ScopedFlag g(in_set_size_);
-            SetWindowPos(hwnd_, nullptr, 0, 0, static_cast<int>(width), static_cast<int>(height),
-                         SWP_NOZORDER | SWP_NOMOVE);
+            // HWND dimensions and backing surfaces use physical pixels; the
+            // public size remains logical. Giving the HWND the logical size
+            // clips a 900x600 frame into a 600x400 client at 150% DPI.
+            SetWindowPos(hwnd_, nullptr, 0, 0, static_cast<int>(pixel_w()),
+                         static_cast<int>(pixel_h()), SWP_NOZORDER | SWP_NOMOVE);
         }
 #ifdef PULP_HAS_SKIA
         // GPU surface is sized at PHYSICAL pixels (logical × scale); SkiaSurface

@@ -12,6 +12,18 @@ AAX, Standalone) opens its editor through
 the invariants the API enforces and the pitfalls that bit us enough
 times to be worth remembering.
 
+## Windows editor client pixels
+
+`PluginViewHost::set_size()` and `get_size()` use logical units. HWND client
+rectangles and backing surfaces use physical pixels. Both programmatic sizing
+and parent attachment must pass the derived physical dimensions to
+`SetWindowPos`; using logical dimensions clips the renderer at fractional DPI.
+Keep the self-driven resize guard around those calls so synchronous `WM_SIZE`
+echoes do not change logical size or notify the processor. Validate with native
+`GetClientRect` at 100%, 125%, 150% and 200%, including reparenting; a correctly
+sized backing surface alone does not prove the window fits it. The Windows
+`plugin-view-host` HiDPI regression covers this contract without a GPU adapter.
+
 ## Standalone window factory ownership
 
 On Windows/Linux, standalone startup calls
