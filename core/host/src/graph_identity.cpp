@@ -194,17 +194,24 @@ bool normalize(std::string_view input, std::string& output, std::string& error) 
     std::uint8_t last_class = 0;
     for (const auto code_point : decomposed) {
         const auto code_point_class = combining_class(code_point);
+        // Canonical composition normally considers a non-starter only when
+        // it is not blocked by the previous combining class.  A few scripts
+        // (including Bengali) and Hangul use canonical compositions where
+        // both scalars have class 0, so try the starter pair before treating
+        // this scalar as a new starter.  A preceding non-zero class still
+        // blocks that composition.
+        if (starter != static_cast<std::size_t>(-1) &&
+            ((code_point_class == 0 && last_class == 0) || last_class < code_point_class)) {
+            if (const auto replacement = compose(composed[starter], code_point); replacement != 0) {
+                composed[starter] = replacement;
+                continue;
+            }
+        }
         if (code_point_class == 0) {
             starter = composed.size();
             last_class = 0;
             composed.push_back(code_point);
             continue;
-        }
-        if (starter != static_cast<std::size_t>(-1) && last_class < code_point_class) {
-            if (const auto replacement = compose(composed[starter], code_point); replacement != 0) {
-                composed[starter] = replacement;
-                continue;
-            }
         }
         composed.push_back(code_point);
         last_class = code_point_class;
@@ -271,9 +278,9 @@ CanonicalSet canonical(std::span<const PortHandle> ports,
         }
         if (authored.empty() || whitespace_only(authored) || replacement.empty() ||
             whitespace_only(replacement)) {
-            result.report.issues.push_back(
-                {PortIdentityIssue::Code::EmptyName, authored.empty() ? replacement : authored,
-                 "alias names must not be empty or whitespace-only"});
+            result.report.issues.push_back({PortIdentityIssue::Code::EmptyName,
+                                            authored.empty() ? replacement : authored,
+                                            "alias names must not be empty or whitespace-only"});
             continue;
         }
         const bool cross_link = authored_alias_names.contains(replacement) ||
