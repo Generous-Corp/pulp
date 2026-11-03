@@ -41,6 +41,7 @@
         "inspect/src/**",
         "inspect/CMakeLists.txt",
         "tools/cmake/PulpInstallRules.cmake",
+        "tools/cmake/PulpEditorPackage.cmake",
         "tools/cmake/PulpSdkProvenance.cmake",
         "tools/cmake/PulpAuv3.cmake",
         "tools/cmake/PulpPluginFormats.cmake",
@@ -110,6 +111,7 @@
         "inspect/include/**",
         "inspect/CMakeLists.txt",
         "tools/cmake/PulpInstallRules.cmake",
+        "tools/cmake/PulpEditorPackage.cmake",
         "tools/cmake/PulpSdkProvenance.cmake",
         "tools/cmake/PulpAuv3.cmake"
       ],
