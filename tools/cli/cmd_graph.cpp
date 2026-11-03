@@ -1,4 +1,5 @@
 #include "cli_common.hpp"
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -66,13 +67,25 @@ int cmd_graph(const std::vector<std::string>& args) {
         return 0;
     }
     if (op == "canonicalize") {
-        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        const std::filesystem::path destination(path);
+        const auto temporary = destination.string() + ".tmp-" + std::to_string(std::rand());
+        std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
         if (!out) {
-            std::cerr << "pulp graph: cannot write '" << path << "'\n";
+            std::cerr << "pulp graph: cannot write temporary output beside '" << path << "'\n";
             return 1;
         }
         out << pulp::host::GraphSerializer::to_json(graph) << '\n';
-        return out ? 0 : 1;
+        if (!out)
+            return 1;
+        out.close();
+        std::error_code error;
+        std::filesystem::rename(temporary, destination, error);
+        if (error) {
+            std::filesystem::remove(temporary);
+            std::cerr << "pulp graph: cannot replace '" << path << "': " << error.message() << '\n';
+            return 1;
+        }
+        return 0;
     }
     std::cerr << "pulp graph: unknown subcommand '" << op << "'\n";
     usage();
