@@ -1,8 +1,12 @@
 # G-10 spectral SignalGraph evidence
 
 Date: 2026-11-02  
-Branch: `codex/g5-g10-impl-20261102`  
-Observed head: `0474c1d9ebbba2ba69d86b1bbf3b9fa502d9a5e1`  
+Fixture source branch: `main`
+
+Observed fixture head: `a9197c3505d7ccb7df57f2907504271171552c93`
+
+This evidence predates the status-only disposition commit `34c5c9fb47beb652d84c067136605c77fa213e0b`; the fixture source is the valid `main` parent.
+
 Platform scope: macOS arm64 source checkout; no build directory was present.
 
 ## Bounded verdict

@@ -1,7 +1,7 @@
 {
   "goal": "G-10 spectral evidence",
   "date": "2026-11-02",
-  "branch": "codex/g5-g10-impl-20261102",
+  "branch": "main",
   "head": "a9197c3505d7ccb7df57f2907504271171552c93",
   "platform_scope": "macOS arm64 source checkout",
   "verdict": "BLOCKED",
@@ -23,5 +23,5 @@
   "build_gate": "N/A: no production implementation was specified; typed-frame contract is missing",
   "pr": null,
   "next_action": "Assign an owner for the typed-frame adapter and specify ownership/lifetime, hop scheduling, channel-group shape, latency/tail, block chronology, back-pressure, and automation composition before runtime wiring.",
-  "head_scope": "origin/main source head before this status-only disposition commit"
+  "head_scope": "main source head before status-only disposition commit 34c5c9fb47beb652d84c067136605c77fa213e0b"
 }
