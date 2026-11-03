@@ -74,6 +74,8 @@
     "pulp-authoring-capsule",
     "pulp-canvas",
     "pulp-content",
+    "pulp-dataplane",
+    "pulp-dataplane-audio",
     "pulp-dawproject-export",
     "pulp-dawproject-import",
     "pulp-design-import",

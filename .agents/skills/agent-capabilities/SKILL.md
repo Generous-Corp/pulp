@@ -387,8 +387,11 @@ cannot create additional FFT bins.
 
 ## Reuse the realtime visualization bridge
 
-`pulp::view::VisualizationBridge` is the shared realtime-safe audio-to-UI tap
-for spectrum, waveform, and meter consumers. Configure it while fully
+`pulp::dataplane::VisualizationBridge` (`<pulp/dataplane/visualization_bridge.hpp>`,
+target `pulp::dataplane-audio`; the `pulp::view::` spelling still compiles) is
+the shared realtime-safe audio-to-UI tap for spectrum, waveform, and meter
+consumers. It links no view layer, so a headless host or a non-Pulp editor can
+use it. Configure it while fully
 quiescent, call `process()` from the audio callback, and give exactly one UI
 thread ownership of `poll()` plus the snapshot reads. The callback path only
 meters and copies into fixed SPSC storage; FFT and waveform assembly happen in
@@ -1108,6 +1111,27 @@ EOF
 ```
 
 A catalog printing `1` is watched by this gate; `0`, or `2` and up, is not.
+
+## A new core module is a release-surface change in five places
+
+Adding a library under `core/` that the SDK installs (as `core/dataplane` did)
+is not finished when `PULP_SDK_TARGETS` and `_pulp_sdk_header_subsystems` in
+`tools/cmake/PulpInstallRules.cmake` name it. Each of these fails separately,
+and only some of them run in `gates.sh`:
+
+- `tools/scripts/release_product_matrix.json` `pulp_library_stems`
+  (`test_release_artifact_contents.py`);
+- `docs/doxygen/Doxyfile` `INPUT` (`doxygen_installed_header_check.py`);
+- `codecov.yml` components and `ci/coverage-surfaces.yaml` component sets
+  (`test_codecov_config.py`, `test_coverage_surface_contract.py`);
+- `docs/status/consumption-profiles.json`, regenerated per profile with
+  `consumption_census.py --write` from a configure of each feature set it
+  records;
+- `docs/status/modules.yaml` and `docs/reference/modules.md`.
+
+Keep one include root per module. The Doxygen parity check accepts a second
+public install root only by name, so a module that installs `audio/include`
+beside `include` fails it.
 
 ## `gates.sh` does NOT run the capability check — adding a public header passes pre-push and fails in CI
 

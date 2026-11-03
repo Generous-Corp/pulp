@@ -1,6 +1,7 @@
 // state_inspector.hpp — Parameter state monitoring and editing for the inspector
 #pragma once
 
+#include <pulp/dataplane/fwd.hpp>
 #include <pulp/state/listener_token.hpp>
 #include <pulp/state/parameter.hpp>
 #include <pulp/state/store.hpp>
@@ -11,8 +12,6 @@
 #include <span>
 #include <string>
 #include <vector>
-
-namespace pulp::view { class ValueChannelSet; }
 
 namespace pulp::inspect {
 

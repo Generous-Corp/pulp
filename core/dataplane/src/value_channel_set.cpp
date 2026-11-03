@@ -1,8 +1,8 @@
-#include <pulp/view/value_channel_set.hpp>
+#include <pulp/dataplane/value_channel_set.hpp>
 
 #include <algorithm>
 
-namespace pulp::view {
+namespace pulp::dataplane {
 
 std::uint64_t ValueChannelSet::generation_identity() const noexcept {
     return detail::value_channel_telemetry_control_identity(
@@ -157,4 +157,4 @@ ValueChannelTelemetryAttachment ValueChannelSet::attach_telemetry() const {
     return ValueChannelTelemetryAttachment(telemetry_control_, std::move(states), infos_);
 }
 
-}  // namespace pulp::view
+}  // namespace pulp::dataplane

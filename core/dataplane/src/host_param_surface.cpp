@@ -1,4 +1,4 @@
-#include <pulp/view/host_param_surface.hpp>
+#include <pulp/dataplane/host_param_surface.hpp>
 
 #include <cassert>
 #include <cmath>
@@ -7,7 +7,7 @@
 #include <pulp/runtime/scoped_no_alloc.hpp>
 #include <pulp/state/store.hpp>
 
-namespace pulp::view {
+namespace pulp::dataplane {
 
 // ── StateStoreHostParamSurface ─────────────────────────────────────────────
 
@@ -95,4 +95,4 @@ int StateStoreHostParamSurface::do_param_step_count(std::string_view key) {
     return static_cast<int>(state::param_value_count(*info));
 }
 
-} // namespace pulp::view
+} // namespace pulp::dataplane

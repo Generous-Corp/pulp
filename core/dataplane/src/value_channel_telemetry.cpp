@@ -1,4 +1,4 @@
-#include <pulp/view/value_channel_telemetry.hpp>
+#include <pulp/dataplane/value_channel_telemetry.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -9,7 +9,7 @@
 #include <pulp/runtime/spsc_queue.hpp>
 #include <pulp/runtime/triple_buffer.hpp>
 
-namespace pulp::view::detail {
+namespace pulp::dataplane::detail {
 
 namespace {
 
@@ -302,9 +302,9 @@ void mark_event_source_dead(EventTelemetryState* state) noexcept {
         state->mark_source_dead();
 }
 
-}  // namespace pulp::view::detail
+}  // namespace pulp::dataplane::detail
 
-namespace pulp::view {
+namespace pulp::dataplane {
 
 struct ValueChannelTelemetryAttachment::Impl {
     Impl(std::shared_ptr<detail::ValueChannelTelemetryControl> control_in,
@@ -401,4 +401,4 @@ bool ValueChannelTelemetryAttachment::source_alive(std::size_t index) const noex
            impl_->states[index]->source_alive();
 }
 
-}  // namespace pulp::view
+}  // namespace pulp::dataplane

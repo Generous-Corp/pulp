@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261103-data-plane-core-move-watch",
+  "created_at": "2026-11-03T09:04:13Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-ir-contract",
+    "render-assets-and-backends"
+  ],
+  "rationale": "The editor data plane (host parameter surfaces, value sources, value channels, AudioBridge and VisualizationBridge) moves out of core/view into the UI-free Pulp module core/dataplane. Under core/view only build wiring, forward declarations and forwarding headers change: the pulp/view headers include their pulp/dataplane counterparts and re-export the names into pulp::view, view-core and view-audio link the new targets, and the sources leave PulpViewSources.cmake. design_param_binding.hpp only drops a forward declaration of HostParamSurface. No design-import, Chromium, rendering, asset or packaging behaviour changes and no authority moves; Vellum does not inherit the move.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-value-channel-visual-port",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none",
+  "vellum_inherits": false
+}

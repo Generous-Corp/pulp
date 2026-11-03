@@ -160,6 +160,20 @@ modules:
     dependencies: [runtime]
     docs: reference/modules.md#state
 
+  - name: dataplane
+    summary: >-
+      The editor data plane, with no UI library linked. pulp::dataplane holds
+      the HostParamSurface / HostActionSurface contracts and their
+      StateStore-backed adapter, the lock-free value sources (scalar, meter,
+      vector, events) and a processor's named ValueChannelSet with its
+      telemetry and JSON projection. pulp::dataplane-audio adds AudioBridge and
+      VisualizationBridge. Format adapters, headless hosts and editors on any
+      UI toolkit share it; the pulp/view/ spellings of these headers forward to
+      it, so view code is unchanged.
+    status: usable
+    dependencies: [runtime, state, audio, signal]
+    docs: reference/modules.md#dataplane
+
   - name: format
     summary: >-
       Plugin format adapters (VST3, AU, CLAP, standalone, headless), native

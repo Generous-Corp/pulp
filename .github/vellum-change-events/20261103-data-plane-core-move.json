@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "event_id": "20261103-data-plane-core-move",
+  "kind": "change",
+  "created_at": "2026-11-03T08:11:16Z",
+  "slices": [
+    "retained-ui-kernel"
+  ],
+  "rationale": "Moves the editor data plane out of core/view into a new UI-free Pulp module, core/dataplane (pulp::dataplane and pulp::dataplane-audio, namespace pulp::dataplane), so the editor-host contract's VisualPort and ParamPort can be backed by it with no UI library linked. value_source.hpp keeps its path as a forwarding header: it includes <pulp/dataplane/value_source.hpp> and brings each name into pulp::view with a using-declaration, so view code and widgets compile unchanged. This is a deliberate move out of the exported set, not generic UI work: the next re-export shrinks the unit set instead of carrying the forwarder, and Vellum binds its widgets to its own generic value model rather than to Pulp's data plane.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "ctest --test-dir build -R 'ValueChannelSet|ValueSource|HostParamSurface|VisualizationBridge'",
+    "ctest --test-dir build -R 'ValueChannelVisualPort'",
+    "ctest --test-dir build -R 'pulp-format-core-only-consumer'"
+  ],
+  "disposition": "pulp-only",
+  "vellum_inherits": false
+}

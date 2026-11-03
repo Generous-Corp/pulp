@@ -1184,6 +1184,42 @@ public repository unless its license allows redistribution.
 
 ---
 
+## dataplane
+
+The editor data plane: what an editor reads and writes, with no view, canvas or
+render layer linked. A format adapter, a headless host, and an editor built on
+any UI toolkit use the same types.
+
+**Link:** `pulp::dataplane`, plus `pulp::dataplane-audio` for the two audio
+bridges · **Include prefix:** `<pulp/dataplane/...>`
+
+| Header | What it holds |
+|--------|---------------|
+| `host_surfaces.hpp` | `HostParamSurface` and `HostActionSurface`, the key-based host parameter and host command contracts |
+| `host_param_surface.hpp` | `StateStoreHostParamSurface`, the StateStore-backed `HostParamSurface` |
+| `value_source.hpp` | lock-free `ScalarSource`, `MeterSource`, `VectorSource` and `EventSource` channels |
+| `value_channel_set.hpp` | `ValueChannelSet`, a processor's named value channels (`Processor::value_channels()`) |
+| `value_channel_telemetry.hpp` | the exclusive telemetry attachment over a channel set |
+| `value_channel_json.hpp` | the channel list as a `choc::value::Value` |
+| `audio_bridge.hpp` (`pulp::dataplane-audio`) | `AudioBridge`, meter publication with ballistics |
+| `visualization_bridge.hpp` (`pulp::dataplane-audio`) | `VisualizationBridge`, the spectrum and waveform tap |
+
+`pulp::dataplane` links `pulp::runtime` and `pulp::state` only, so
+`pulp::view-core` depends on it and stays audio-free; `pulp::dataplane-audio`
+adds `pulp::audio` and `pulp::signal`.
+
+The `<pulp/view/...>` spellings of these headers still compile: they include
+the data-plane header and bring each name into `pulp::view` with a
+using-declaration, so `pulp::view::ValueChannelSet` and
+`pulp::dataplane::ValueChannelSet` are the same class. Forward-declare these
+types through `<pulp/dataplane/fwd.hpp>`, not with `namespace pulp::view {
+class ValueChannelSet; }`, which would declare a second, unrelated class.
+
+The editor-host contract reaches the data plane through
+`pulp::format::ValueChannelVisualPort` (`<pulp/format/value_channel_visual_port.hpp>`,
+in `pulp::format-core`), the default `VisualPort` over a processor's
+`ValueChannelSet`.
+
 ## state
 
 Parameters, state trees, presets, and settings.
@@ -2540,8 +2576,6 @@ Pulp's plug-in host and editor tooling is in `pulp::view-tooling`, which links
 `pulp::view-core` (and `pulp::view-script` when JS is enabled):
 - the component inspector (`ViewInspector`, `InspectorWindow`);
 - `EditorBridge`;
-- `StateStoreHostParamSurface`, the StateStore adapter behind
-  `HostParamSurface`;
 - `ScriptInspectorBridge`, the runtime-inspector bridge;
 - the platform plug-in editor hosts (macOS, iOS, Windows, Linux), the
   `PluginViewHost` factory and `PluginViewHost::create()`;
@@ -2549,11 +2583,11 @@ Pulp's plug-in host and editor tooling is in `pulp::view-tooling`, which links
   share.
 
 `pulp::view` and `pulp::format-view` link it; `pulp::view-core`,
-`pulp::view-script` and `pulp::view-native` do not. The abstract
-`HostParamSurface` and `HostActionSurface` contracts are in
-`<pulp/view/host_surfaces.hpp>` in `pulp::view-core`;
-`<pulp/view/host_param_surface.hpp>` re-exports them alongside the StateStore
-adapter. The abstract `PluginViewHost` class
+`pulp::view-script` and `pulp::view-native` do not. The `HostParamSurface`
+and `HostActionSurface` contracts and the StateStore adapter
+`StateStoreHostParamSurface` are in the [data plane](#dataplane)
+(`<pulp/dataplane/host_surfaces.hpp>`, `<pulp/dataplane/host_param_surface.hpp>`);
+the `<pulp/view/...>` spellings forward to them. The abstract `PluginViewHost` class
 (`<pulp/view/plugin_view_host.hpp>`) also stays in `pulp::view-core`, so a view
 tree reaches its host without the kept layer; creating a platform host needs
 `pulp::view-tooling`. `view_type_name()` (`<pulp/view/inspector_facts.hpp>`, view-core) is the

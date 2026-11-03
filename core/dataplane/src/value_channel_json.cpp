@@ -1,6 +1,6 @@
-#include <pulp/view/value_channel_json.hpp>
+#include <pulp/dataplane/value_channel_json.hpp>
 
-namespace pulp::view {
+namespace pulp::dataplane {
 
 const char* value_channel_shape_name(ValueChannelShape shape) noexcept {
     switch (shape) {
@@ -34,4 +34,4 @@ value_channels_to_value(std::span<const ValueChannelInfo> channels) {
     return arr;
 }
 
-} // namespace pulp::view
+} // namespace pulp::dataplane

@@ -1,10 +1,10 @@
-#include <pulp/view/value_source.hpp>
+#include <pulp/dataplane/value_source.hpp>
 
 #include <algorithm>
 
-#include <pulp/view/value_channel_telemetry.hpp>
+#include <pulp/dataplane/value_channel_telemetry.hpp>
 
-namespace pulp::view {
+namespace pulp::dataplane {
 
 MeterSource::~MeterSource() {
     detail::mark_meter_source_dead(telemetry_);
@@ -100,4 +100,4 @@ float ScalarSource::read() {
     return published.value;
 }
 
-}  // namespace pulp::view
+}  // namespace pulp::dataplane

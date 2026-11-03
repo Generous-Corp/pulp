@@ -18,7 +18,6 @@
         "core/view/include/pulp/view/inspector_window.hpp",
         "core/view/src/editor_bridge.cpp",
         "core/view/include/pulp/view/editor_bridge.hpp",
-        "core/view/src/host_param_surface.cpp",
         "core/view/include/pulp/view/host_param_surface.hpp",
         "core/view/src/script_inspector_bridge.cpp",
         "core/view/include/pulp/view/script_inspector_bridge.hpp",
