@@ -86,6 +86,66 @@ class IllustratorToSvgTests(unittest.TestCase):
         with self.assertRaisesRegex(ConversionError, "must not be a symlink"):
             convert(link)
 
+    def test_symlinked_provenance_is_rejected_and_target_untouched(self) -> None:
+        victim = self.root / "victim.json"
+        victim.write_text("keep", encoding="utf-8")
+        link = self.root / "panel.receipt.json"
+        link.symlink_to(victim)
+        with self.assertRaisesRegex(ConversionError, "provenance must not be a symlink"):
+            convert(self.source, self.root / "panel.svg", link)
+        self.assertEqual(victim.read_text(encoding="utf-8"), "keep")
+        self.assertFalse((self.root / "panel.svg").exists())
+
+    def test_dangling_symlinked_provenance_is_rejected(self) -> None:
+        link = self.root / "panel.receipt.json"
+        link.symlink_to(self.root / "missing-dir" / "victim.json")
+        with self.assertRaisesRegex(ConversionError, "provenance must not be a symlink"):
+            convert(self.source, self.root / "panel.svg", link)
+        self.assertFalse((self.root / "missing-dir").exists())
+
+    def test_symlinked_default_provenance_is_rejected(self) -> None:
+        victim = self.root / "victim.json"
+        victim.write_text("keep", encoding="utf-8")
+        (self.root / "panel.svg.provenance.json").symlink_to(victim)
+        with self.assertRaisesRegex(ConversionError, "provenance must not be a symlink"):
+            convert(self.source)
+        self.assertEqual(victim.read_text(encoding="utf-8"), "keep")
+
+    def test_preplanted_receipt_temporary_is_not_followed(self) -> None:
+        victim = self.root / "victim.json"
+        victim.write_text("keep", encoding="utf-8")
+        provenance = self.root / "panel.receipt.json"
+        # The old fixed temporary name for this receipt.
+        (self.root / ".panel.receipt.json.tmp").symlink_to(victim)
+        convert(self.source, self.root / "panel.svg", provenance)
+        self.assertEqual(victim.read_text(encoding="utf-8"), "keep")
+        self.assertEqual(json.loads(provenance.read_text(encoding="utf-8"))["schema"],
+                         "pulp.illustrator-svg-provenance.v1")
+
+    def test_symlinked_output_is_rejected_and_target_untouched(self) -> None:
+        victim = self.root / "victim.svg"
+        victim.write_text("keep", encoding="utf-8")
+        link = self.root / "panel.svg"
+        link.symlink_to(victim)
+        with self.assertRaisesRegex(ConversionError, "output must not be a symlink"):
+            convert(self.source, link)
+        self.assertEqual(victim.read_text(encoding="utf-8"), "keep")
+
+    def test_output_and_provenance_may_not_overwrite_inputs(self) -> None:
+        source = self.root / "art.pdf"
+        source.write_bytes(b"%PDF-1.4\n")
+        with self.assertRaisesRegex(ConversionError, "output must not overwrite the source"):
+            convert(source, source)
+        with self.assertRaisesRegex(ConversionError, "provenance must not overwrite"):
+            convert(self.source, self.root / "panel.svg", self.source)
+        with self.assertRaisesRegex(ConversionError, "provenance must not overwrite"):
+            convert(self.source, self.root / "panel.svg", self.root / "panel.svg")
+        self.assertEqual(source.read_bytes(), b"%PDF-1.4\n")
+
+    def test_no_temporaries_left_after_success(self) -> None:
+        convert(self.source)
+        self.assertEqual(sorted(p.name for p in self.root.iterdir() if p.name.startswith(".")), [])
+
     def test_cli_returns_nonzero_for_invalid_page(self) -> None:
         self.assertEqual(main([str(self.source), "--page", "0"]), 2)
 

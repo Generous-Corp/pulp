@@ -23,6 +23,7 @@ from pathlib import Path
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 from datetime import datetime, timezone
 
@@ -46,9 +47,8 @@ def sha256(path: Path) -> str:
 
 def _regular_file(path: Path, *, label: str) -> Path:
     """Resolve a path and require a regular, non-symlink file."""
+    _reject_symlink(path, label)
     try:
-        if path.is_symlink():
-            raise ConversionError(f"{label} must not be a symlink: {path}")
         info = path.stat()
     except FileNotFoundError as exc:
         raise ConversionError(f"{label} does not exist: {path}") from exc
@@ -57,6 +57,35 @@ def _regular_file(path: Path, *, label: str) -> Path:
     if not stat.S_ISREG(info.st_mode):
         raise ConversionError(f"{label} is not a regular file: {path}")
     return path.resolve()
+
+
+def _reject_symlink(path: Path, label: str) -> None:
+    # Check the path as given, before any resolve(): a resolved path is never a
+    # symlink, so a later check would accept one and write through to its target.
+    if path.is_symlink():
+        raise ConversionError(f"{label} must not be a symlink: {path}")
+
+
+def _writable_destination(path: Path, label: str) -> Path:
+    """Resolve a path the helper will replace, refusing symlinks and non-files."""
+    _reject_symlink(path, label)
+    if path.exists() and not path.is_file():
+        raise ConversionError(f"{label} is not a regular file: {path}")
+    return path.resolve()
+
+
+def _private_temporary(directory: Path, stem: str, suffix: str) -> Path:
+    """Create a fresh file in ``directory`` that no other path can alias."""
+    fd, name = tempfile.mkstemp(prefix=f".{stem}.", suffix=suffix, dir=str(directory))
+    os.close(fd)
+    return Path(name)
+
+
+def _remove_if_present(path: Path) -> None:
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
 
 
 def _converter() -> Path:
@@ -141,33 +170,29 @@ def convert(
             f"unsupported source extension {source.suffix!r}; expected {allowed} "
             "(SVG is already a converted design and does not use this helper)")
 
-    if output is None:
-        output = source.with_suffix(".svg")
-    else:
-        output = Path(output).expanduser()
-    if output.exists() or output.is_symlink():
-        if output.is_symlink():
-            raise ConversionError(f"output must not be a symlink: {output}")
-        if not output.is_file():
-            raise ConversionError(f"output is not a regular file: {output}")
-    output = output.resolve()
+    output = _writable_destination(
+        source.with_suffix(".svg") if output is None else Path(output).expanduser(),
+        "output",
+    )
+    if output == source:
+        raise ConversionError(f"output must not overwrite the source: {output}")
+    provenance = _writable_destination(
+        Path(str(output) + ".provenance.json")
+        if provenance is None
+        else Path(provenance).expanduser(),
+        "provenance",
+    )
+    if provenance in (source, output):
+        raise ConversionError(
+            f"provenance must not overwrite the source or output: {provenance}")
     output.parent.mkdir(parents=True, exist_ok=True)
-    if provenance is None:
-        provenance = Path(str(output) + ".provenance.json")
-    else:
-        provenance = Path(provenance).expanduser().resolve()
-    if provenance.exists() and provenance.is_symlink():
-        raise ConversionError(f"provenance must not be a symlink: {provenance}")
     provenance.parent.mkdir(parents=True, exist_ok=True)
 
     tool = _converter()
     version = _version(tool)
     source_hash = sha256(source)
 
-    fd, temporary_name = tempfile.mkstemp(
-        prefix=f".{output.stem}.", suffix=".svg", dir=str(output.parent))
-    os.close(fd)
-    temporary = Path(temporary_name)
+    temporary = _private_temporary(output.parent, output.stem, ".svg")
     try:
         # Restrict conversion to one artboard/page.  ``pdftocairo`` writes an
         # exact output path for SVG when one page is selected; ``-singlefile``
@@ -202,10 +227,7 @@ def convert(
             raise ConversionError("pdftocairo output is not a valid-looking SVG")
         os.replace(temporary, output)
     finally:
-        try:
-            temporary.unlink()
-        except FileNotFoundError:
-            pass
+        _remove_if_present(temporary)
 
     receipt = {
         "schema": SCHEMA,
@@ -229,10 +251,14 @@ def convert(
         },
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
     }
-    temporary_receipt = provenance.with_name(f".{provenance.name}.tmp")
-    temporary_receipt.write_text(
-        json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    os.replace(temporary_receipt, provenance)
+    # A fixed temporary name could be pre-planted as a symlink; mkstemp cannot.
+    temporary_receipt = _private_temporary(provenance.parent, provenance.name, ".tmp")
+    try:
+        temporary_receipt.write_text(
+            json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        os.replace(temporary_receipt, provenance)
+    finally:
+        _remove_if_present(temporary_receipt)
     return receipt
 
 
@@ -258,7 +284,7 @@ def main(argv: list[str] | None = None) -> int:
             timeout=args.timeout,
         )
     except ConversionError as exc:
-        print(f"illustrator-to-svg: error: {exc}", file=os.sys.stderr)
+        print(f"illustrator-to-svg: error: {exc}", file=sys.stderr)
         return 2
     print(json.dumps(receipt, indent=2, sort_keys=True))
     return 0
