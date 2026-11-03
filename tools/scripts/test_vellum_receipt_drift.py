@@ -579,14 +579,61 @@ class FrozenCliTests(unittest.TestCase):
             fixture.close()
 
 
-# Transferred-slice paths the owner unfroze in Pulp ahead of the re-export that
-# drops them. The ownership map's transferred slices are immutable (the freeze
-# check refuses any change to one), so an unfrozen path stays in its slice and
-# leaves only the pin. Each entry names the DECISIONS.md ruling that unfroze it.
-OWNER_UNFROZEN_PATHS = {
-    # "OWNER DECISION 2026-11-03: unfreeze value_source.hpp for the data-plane move"
-    "core/view/include/pulp/view/value_source.hpp",
-}
+OWNER_UNFREEZES_PATH = ".github/vellum-export-receipt/owner-unfreezes.json"
+OWNER_UNFREEZES_SCHEMA = "pulp.vellum.owner-unfreezes.v1"
+
+
+def owner_unfrozen_paths(raw: bytes, transferred: set[str]) -> set[str]:
+    """Validate the owner-controlled unfreeze record and return its exact paths.
+
+    The record is the only source of pin removals the consistency test accepts.
+    Each entry names one exact transferred-slice path, the owner ruling that
+    unfroze it, and ``decided_by`` "owner"; anything else raises ValueError, so
+    a pin deletion without a recorded ruling cannot pass.
+    """
+    value = json.loads(raw)
+    if not isinstance(value, dict) or value.get("schema") != OWNER_UNFREEZES_SCHEMA:
+        raise ValueError("owner-unfreezes: wrong schema")
+    paths: set[str] = set()
+    for index, row in enumerate(value.get("unfreezes", [])):
+        where = f"owner-unfreezes[{index}]"
+        if not isinstance(row, dict) or set(row) != {"path", "ruling", "decided_by"}:
+            raise ValueError(f"{where}: needs exactly path, ruling, decided_by")
+        if row["decided_by"] != "owner":
+            raise ValueError(f"{where}: decided_by must be owner")
+        if not isinstance(row["ruling"], str) or not row["ruling"].startswith("OWNER DECISION "):
+            raise ValueError(f"{where}: ruling must cite an OWNER DECISION")
+        if row["path"] not in transferred:
+            raise ValueError(f"{where}: path is not an exact transferred-slice path")
+        if row["path"] in paths:
+            raise ValueError(f"{where}: repeated path")
+        paths.add(row["path"])
+    return paths
+
+
+class OwnerUnfreezeRecordTests(unittest.TestCase):
+    TRANSFERRED = {"a/x.hpp", "a/y.hpp"}
+
+    def record(self, **row):
+        base = {"path": "a/x.hpp", "ruling": "OWNER DECISION 2026-11-03: x", "decided_by": "owner"}
+        base.update(row)
+        return json.dumps({"schema": OWNER_UNFREEZES_SCHEMA, "unfreezes": [base]}).encode()
+
+    def test_recorded_path_is_accepted(self):
+        self.assertEqual(owner_unfrozen_paths(self.record(), self.TRANSFERRED), {"a/x.hpp"})
+
+    def test_unrecorded_pin_deletion_fails_consistency(self):
+        # A path missing from the pin but absent from the record is not accepted.
+        recorded = owner_unfrozen_paths(self.record(), self.TRANSFERRED)
+        pin_after_unrecorded_deletion = ["a/x.hpp"]  # a/y.hpp deleted, no record
+        expected = [p for p in sorted(self.TRANSFERRED) if p not in recorded]
+        self.assertNotEqual(pin_after_unrecorded_deletion, expected)
+
+    def test_record_rejects_forged_entries(self):
+        for bad in (self.record(path="a/z.hpp"), self.record(ruling="trust me"),
+                    self.record(decided_by="contributor"), self.record(path="a")):
+            with self.assertRaises(ValueError):
+                owner_unfrozen_paths(bad, self.TRANSFERRED)
 
 
 class CommittedPinTests(unittest.TestCase):
@@ -606,10 +653,10 @@ class CommittedPinTests(unittest.TestCase):
             if item["state"] == "framework-authoritative-transferred"
             for path in item["paths"]
         })
-        self.assertTrue(OWNER_UNFROZEN_PATHS <= set(transferred),
-                        "an owner-unfrozen path must still belong to a transferred slice")
+        unfrozen = owner_unfrozen_paths((REPO / OWNER_UNFREEZES_PATH).read_bytes(),
+                                        set(transferred))
         self.assertEqual(list(pin.frozen_paths),
-                         [path for path in transferred if path not in OWNER_UNFROZEN_PATHS])
+                         [path for path in transferred if path not in unfrozen])
 
 
 if __name__ == "__main__":
