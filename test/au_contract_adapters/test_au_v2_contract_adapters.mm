@@ -1,7 +1,7 @@
 // test_au_v2_contract_adapters.mm — every AU v2 adapter type (effect,
 // instrument, MIDI processor) hands its contract session registry to the
-// contract view, so disposing the unit invalidates an editor its view still
-// holds.
+// contract view, so disposing the unit closes an editor its view still holds
+// in order (detached, never invalidated, since the view is still alive).
 //
 // Each adapter is built from its real entry macro (one per translation unit),
 // registered with the Audio Component manager for this process only, and
@@ -71,11 +71,11 @@ void check_adapter(AudioComponent comp) {
     contract_log().context->params().begin(pulp::test_fixtures::kContractGain);
     REQUIRE(ctx.store->open_gesture_count() == 1);
 
-    // Disposed while the view lives: the adapter invalidates the editor
-    // before its processor goes.
+    // Disposed while the view lives: the adapter closes the editor in order
+    // (gestures released, detached) before its processor goes.
     AudioComponentInstanceDispose(au);
-    REQUIRE(contract_log().saw("invalidate"));
-    REQUIRE_FALSE(contract_log().saw("detach"));
+    REQUIRE(contract_log().saw("detach"));
+    REQUIRE_FALSE(contract_log().saw("invalidate"));
     REQUIRE(contract_log().live == 0);
     @autoreleasepool {
         [view release];
@@ -84,7 +84,7 @@ void check_adapter(AudioComponent comp) {
 
 } // namespace
 
-TEST_CASE("the AU v2 effect adapter invalidates its contract editor on dispose",
+TEST_CASE("the AU v2 effect adapter closes its contract editor on dispose",
           "[auv2][editor-host][au-contract]") {
     EditorEnvironment env;
     reset_contract_recording();
@@ -93,7 +93,7 @@ TEST_CASE("the AU v2 effect adapter invalidates its contract editor on dispose",
         reinterpret_cast<AudioComponentFactoryFunction>(PulpTestContractFxFactory)));
 }
 
-TEST_CASE("the AU v2 instrument adapter invalidates its contract editor on dispose",
+TEST_CASE("the AU v2 instrument adapter closes its contract editor on dispose",
           "[auv2][editor-host][au-contract]") {
     EditorEnvironment env;
     reset_contract_recording();
@@ -102,7 +102,7 @@ TEST_CASE("the AU v2 instrument adapter invalidates its contract editor on dispo
         reinterpret_cast<AudioComponentFactoryFunction>(PulpTestContractSynthFactory)));
 }
 
-TEST_CASE("the AU v2 MIDI processor adapter invalidates its contract editor on dispose",
+TEST_CASE("the AU v2 MIDI processor adapter closes its contract editor on dispose",
           "[auv2][editor-host][au-contract]") {
     EditorEnvironment env;
     reset_contract_recording();
