@@ -28,6 +28,28 @@
 set(_PULP_UI_PACKAGE_TARGET_SUFFIXES
     VST3 CLAP AU LV2 AAX AUv3 AUv3Framework Standalone ControlHost)
 
+# The formats whose adapter opens an editor through the editor-host contract
+# today. A UI package plug-in links no Pulp view layer, so a format missing
+# here builds with no editor at all, and pulp_add_plugin says so.
+set(_PULP_CONTRACT_EDITOR_FORMATS)
+
+# Warn, naming them, when a UI package plug-in builds formats whose adapter
+# does not open contract editors yet.
+function(_pulp_warn_ui_package_formats target ui)
+    set(_missing "")
+    foreach(_format VST3 CLAP AU LV2 AAX AUv3 Standalone)
+        if(TARGET "${target}_${_format}" AND NOT _format IN_LIST _PULP_CONTRACT_EDITOR_FORMATS)
+            list(APPEND _missing "${_format}")
+        endif()
+    endforeach()
+    if(_missing)
+        list(JOIN _missing ", " _missing_text)
+        message(WARNING
+            "pulp_add_plugin(${target}): UI ${ui}: ${_missing_text} do not open "
+            "editor-host contract editors yet, so those builds have no editor.")
+    endif()
+endfunction()
+
 # Read and check a UI package's declaration. Sets out_function and out_header
 # to empty for `none` or an empty value.
 function(_pulp_resolve_ui_package context ui out_function out_header)
@@ -95,4 +117,5 @@ struct PulpPluginEditorFactoryRegistrar {
             set_property(TARGET "${_format_target}" PROPERTY PULP_UI_PACKAGE "${ui}")
         endif()
     endforeach()
+    _pulp_warn_ui_package_formats("${target}" "${ui}")
 endfunction()
