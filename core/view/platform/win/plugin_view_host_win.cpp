@@ -358,6 +358,10 @@ class WinPluginViewHost : public PluginViewHost, private win_input::InputRouterH
         if (gpu_surface_ && skia_surface_) {
             render_frame(nullptr, nullptr, nullptr);
         } else if (dc) {
+            // CPU presentation is a real editor frame too. Keeping the same
+            // frame marker as the GPU path lets cadence queries see fallback
+            // work instead of reporting an apparently idle window.
+            PULP_TRACE_SCOPE_NAMED("render", "frame");
             deliver_pending_resize();
             // Same contract as the GPU path: consume the damage for this frame
             // and put it back if the blit never happens, so a failed raster
@@ -372,8 +376,11 @@ class WinPluginViewHost : public PluginViewHost, private win_input::InputRouterH
                 // Windows. Skia readback is RGBA, so swap red/blue before the
                 // blit. A negative height makes the DIB top-down, matching the
                 // view coordinate system.
-                for (size_t i = 0; i < pixels.size(); i += 4)
-                    std::swap(pixels[i], pixels[i + 2]);
+                {
+                    PULP_TRACE_SCOPE_NAMED("canvas", "win_bgra_swizzle");
+                    for (size_t i = 0; i < pixels.size(); i += 4)
+                        std::swap(pixels[i], pixels[i + 2]);
+                }
                 BITMAPINFO info{};
                 info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
                 info.bmiHeader.biWidth = static_cast<LONG>(w);
@@ -381,10 +388,13 @@ class WinPluginViewHost : public PluginViewHost, private win_input::InputRouterH
                 info.bmiHeader.biPlanes = 1;
                 info.bmiHeader.biBitCount = 32;
                 info.bmiHeader.biCompression = BI_RGB;
-                if (StretchDIBits(dc, 0, 0, static_cast<int>(w), static_cast<int>(h), 0, 0,
-                                  static_cast<int>(w), static_cast<int>(h), pixels.data(), &info,
-                                  DIB_RGB_COLORS, SRCCOPY) == GDI_ERROR)
-                    damage_.restore(consumed);
+                {
+                    PULP_TRACE_SCOPE_NAMED("render", "win_dib_present");
+                    if (StretchDIBits(dc, 0, 0, static_cast<int>(w), static_cast<int>(h), 0, 0,
+                                      static_cast<int>(w), static_cast<int>(h), pixels.data(),
+                                      &info, DIB_RGB_COLORS, SRCCOPY) == GDI_ERROR)
+                        damage_.restore(consumed);
+                }
             }
         }
 #endif
@@ -978,11 +988,6 @@ class WinPluginViewHost : public PluginViewHost, private win_input::InputRouterH
         // gpu_surface() at editor-open time, which on Windows is BEFORE this
         // point, got null, and never looked again.
         publish_gpu_surface(gpu_surface_.get(), GpuSurfaceState::ready);
-    }
-
-    void paint_scene(canvas::Canvas& canvas, const Rect* clip = nullptr) {
-        PULP_TRACE_SCOPE_NAMED("canvas", "paint");
-        paint_plugin_scene(canvas, root_, frame_geometry(), clip);
     }
 
     bool render_frame(std::vector<uint8_t>* cap, uint32_t* cap_w, uint32_t* cap_h) {
