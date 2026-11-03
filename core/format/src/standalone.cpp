@@ -1,5 +1,6 @@
 #include <pulp/format/standalone.hpp>
 #include <pulp/format/audio_workgroup_client.hpp>
+#include <pulp/format/detail/standalone_contract_editor.hpp>
 #include <pulp/format/detail/delayed_action.hpp>
 #include <pulp/format/detail/frame_time_summary.hpp>
 #include <pulp/format/detail/screenshot_capture.hpp>
@@ -122,6 +123,19 @@ void detail::StandaloneTestInputHost::release_test_input() noexcept {
         transport_before_control_.reset();
         transport_commands_.write(control_transport_);
     }
+}
+
+void detail::StandaloneTestInputHost::set_playing(bool playing) noexcept {
+    std::lock_guard lock(control_transport_mutex_);
+    control_transport_.playing = playing;
+    if (transport_before_control_)
+        transport_before_control_->playing = playing;
+    transport_commands_.write(control_transport_);
+}
+
+bool detail::StandaloneTestInputHost::commanded_playing() const noexcept {
+    std::lock_guard lock(control_transport_mutex_);
+    return control_transport_.playing;
 }
 
 detail::StandaloneTestTransportState
@@ -870,6 +884,35 @@ bool StandaloneApp::apply_config(const StandaloneConfig& new_config) {
     return ok;
 }
 
+bool StandaloneApp::run_contract_editor(EditorFactory& factory) {
+    if (!detail::standalone_contract_editor_supported()) {
+        runtime::log_error(
+            "Standalone: this platform cannot host an editor-host contract editor yet");
+        return false;
+    }
+    detail::StandaloneContractEditorOptions options;
+    options.title = processor_->descriptor().name + " \u2014 Standalone";
+    options.headless = config_.headless;
+    options.screenshot_path = config_.screenshot_path;
+    options.screenshot_frame_delay = config_.screenshot_frame_delay;
+    options.key_frame_delay = config_.test_key_frame_delay;
+    if (!config_.test_key_sequence.empty()) {
+        std::string error;
+        if (!detail::parse_key_sequence(config_.test_key_sequence, options.key_steps, error)) {
+            runtime::log_error("Standalone: bad test key sequence ({})", error);
+            return false;
+        }
+    }
+    // Space, when the editor forwards it, plays or stops the standalone's
+    // transport (the ProcessContext playing state the processor sees).
+    options.on_transport_key = [this] {
+        const bool playing = !test_input_host_.commanded_playing();
+        test_input_host_.set_playing(playing);
+        config_.transport_playing = playing;
+    };
+    return detail::run_standalone_contract_editor(*processor_, store_, factory, options);
+}
+
 bool StandaloneApp::run_with_editor(bool use_gpu) {
     if (musical_typing_) musical_typing_->shutdown();
     musical_typing_.reset();
@@ -915,6 +958,17 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
 
     config_ = effective_config;
     if (!start()) return false;
+
+    // A processor with an editor factory opens its editor through the
+    // editor-host contract in its own native window; create_view() stays the
+    // path without one.
+    if (processor_) {
+        if (auto* factory = processor_->editor_factory()) {
+            const bool ran = run_contract_editor(*factory);
+            stop();
+            return ran;
+        }
+    }
 
     if (!processor_ || !processor_->has_editor()) {
         runtime::log_error("Standalone: processor has no editor");

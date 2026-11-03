@@ -281,6 +281,14 @@ class StandaloneTestInputHost {
     StandaloneTestTransportState transport_snapshot() const noexcept;
     std::uint64_t midi_overflow_count() const noexcept;
 
+    /// The standalone's own play/stop (Space in its window): the playing
+    /// state the next audio block takes. Kept through a test controller's
+    /// release, which restores everything else it changed. Any non-audio
+    /// thread.
+    void set_playing(bool playing) noexcept;
+    /// The playing state last commanded, whether or not audio has run since.
+    bool commanded_playing() const noexcept;
+
     /// @internal Standalone audio-driver/test seam. Call prepare only while the
     /// audio callback is stopped; all remaining methods are RT-safe.
     void prepare(bool playing, double tempo_bpm) noexcept;
@@ -311,7 +319,7 @@ class StandaloneTestInputHost {
     bool note_release_pending_ = false;
 
     TransportCommand control_transport_{};
-    std::mutex control_transport_mutex_;
+    mutable std::mutex control_transport_mutex_;
     std::optional<TransportCommand> transport_before_control_;
     runtime::TripleBuffer<TransportCommand> transport_commands_{control_transport_};
     StandaloneTestTransportState audio_transport_{};
@@ -407,7 +415,10 @@ public:
     static bool save_persisted_config(std::string_view app_name,
                                       const StandaloneConfig& config);
 
-private:
+  private:
+    // run_with_editor() for a processor with an editor factory: the editor-host
+    // contract editor in its own native window (detail/standalone_contract_editor.hpp).
+    bool run_contract_editor(EditorFactory& factory);
     std::function<void(const std::vector<std::string>&)> open_files_handler_;
 
     // Declared FIRST so it is destroyed LAST: the final detach cancels and

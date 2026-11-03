@@ -543,10 +543,12 @@ set(_pulp_standalone_sources
 if(APPLE)
     list(APPEND _pulp_standalone_sources
         core/format/src/standalone_key_driver_mac.mm
+        core/format/src/standalone_contract_editor_mac.mm
         core/format/src/standalone_updater_mac.mm)
 else()
     list(APPEND _pulp_standalone_sources
         core/format/src/standalone_key_driver_stub.cpp
+        core/format/src/standalone_contract_editor_stub.cpp
         core/format/src/standalone_updater_stub.cpp)
 endif()
 add_library(pulp-standalone STATIC ${_pulp_standalone_sources})

@@ -1108,6 +1108,15 @@ if(PULP_HAS_SKIA)
         PROPERTIES RESOURCE_LOCK pulp_gpu)
 endif()
 
+# Standalone app hosting an editor-host contract editor in its own window,
+# headless: a screenshot-only launch, so no audio device is created.
+if(APPLE AND NOT PULP_IOS)
+    add_executable(pulp-test-standalone-contract-editor test_standalone_contract_editor.mm)
+    target_link_libraries(pulp-test-standalone-contract-editor PRIVATE
+        pulp::standalone Catch2::Catch2WithMain "-framework AppKit")
+    catch_discover_tests(pulp-test-standalone-contract-editor)
+endif()
+
 # Test signal source (sine tone, file playback)
 pulp_add_test_suite(pulp-test-test-signal GROUP pulp-test-group-core-standalone
     LIBRARIES pulp::standalone)
