@@ -52,6 +52,11 @@ if(NOT _found_required)
     message(FATAL_ERROR "${BINARY} exports no symbol matching ${REQUIRED}: the listing is blind")
 endif()
 if(_violations)
+    # One unwrapped line per symbol (a FATAL_ERROR message is re-wrapped), so a
+    # test can match exactly which symbol the module exported.
+    foreach(_symbol IN LISTS _violations)
+        message("exported editor-hook symbol: ${_symbol}")
+    endforeach()
     list(JOIN _violations "\n  " _text)
     message(FATAL_ERROR "${BINARY} exports editor-hook symbols:\n  ${_text}")
 endif()
