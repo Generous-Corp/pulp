@@ -557,3 +557,19 @@ rebuild of the same source that differs only in timestamps can be repinned as
 is, and its provenance belongs in `VERSION.md`. Any other content difference is
 a toolchain change and needs a full Windows build and smoke before the pin
 moves.
+
+## One Skia identity across every platform
+
+Pulp records a single Skia identity for all platforms (manifest, V8 pairing,
+runtime-pins build info, visual-harness pin). Never pin platforms at different
+milestones: a Linux bundle left on the old milestone would carry the new
+milestone's stamp over old bytes, a false provenance record. When one platform's
+assets for the new milestone fail (for example Linux archives that do not link),
+re-cut that platform's assets and re-pin its digests in the same change rather
+than splitting the identity. skia-builder has issues disabled, so track the
+failure as a `PARKED/<platform>` issue on Pulp, linked from the PR; a
+Linux-only failure does not block the macOS landing.
+
+A consumer that locks a renderer milestone can also refuse a closure exported
+against a different Skia archive, so the Pulp side must be on the new milestone
+before a downstream re-export.
