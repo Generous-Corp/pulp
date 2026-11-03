@@ -1,0 +1,78 @@
+{
+  "id": "graph-mcp-command-surface",
+  "title": "The graph MCP command is covered by the sequencer exposure ledger",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "f2b7b5fd-8f09-4e88-9e3a-4cc2d45e8f30",
+  "owned_paths": [
+    "tools/mcp/pulp_mcp.cpp",
+    "tools/mcp/mcp_tools.cpp",
+    "tools/mcp/mcp_tools.hpp",
+    "docs/status/sequencer-exposure/rows/graph-mcp-command-surface.json"
+  ],
+  "evidence": [
+    {
+      "path": "tools/mcp/pulp_mcp.cpp",
+      "needles": [
+        "pulp_graph",
+        "pulp_mcp::handle_graph"
+      ]
+    },
+    {
+      "path": "tools/mcp/mcp_tools.cpp",
+      "needles": [
+        "std::string handle_graph"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "The graph MCP command is a bounded offline serializer projection; this row records its reviewed exposure without adding a live sequencer mutation surface."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "The graph MCP command is a bounded offline serializer projection; this row records its reviewed exposure without adding a live sequencer mutation surface."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "exposed",
+      "rationale": "The graph MCP command is a bounded offline serializer projection; this row records its reviewed exposure without adding a live sequencer mutation surface.",
+      "evidence": [
+        {
+          "kind": "mcp_definition",
+          "path": "tools/mcp/mcp_tools.cpp",
+          "needles": [
+            "std::string handle_graph"
+          ]
+        },
+        {
+          "kind": "mcp_handler",
+          "path": "tools/mcp/mcp_tools.hpp",
+          "needles": [
+            "handle_graph"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "read_only",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "The graph MCP command is a bounded offline serializer projection; this row records its reviewed exposure without adding a live sequencer mutation surface.",
+      "dependencies": [
+        "baked-graph-event-plane",
+        "graph-topology-read-control",
+        "forge-custom-node-type-pack"
+      ],
+      "owner": "sequencer-control-closure"
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "The graph MCP command is a bounded offline serializer projection; this row records its reviewed exposure without adding a live sequencer mutation surface."
+    }
+  }
+}
