@@ -1991,6 +1991,27 @@
         ]
       },
       {
+        "name": "graph",
+        "disposition": "candidate-shared-later",
+        "arguments": [
+          {
+            "name": "operation",
+            "kind": "positional",
+            "required": true
+          },
+          {
+            "name": "file",
+            "kind": "positional",
+            "required": true
+          },
+          {
+            "name": "--json",
+            "kind": "flag"
+          }
+        ],
+        "subcommands": []
+      },
+      {
         "name": "harness",
         "disposition": "candidate-shared-later",
         "arguments": [
@@ -4917,6 +4938,10 @@
       {
         "name": "pulp_gpu_recipes",
         "disposition": "pulp-owned"
+      },
+      {
+        "name": "pulp_graph",
+        "disposition": "candidate-shared-later"
       },
       {
         "name": "pulp_inspect_pending_requests",
