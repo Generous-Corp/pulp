@@ -414,6 +414,7 @@
       "pulp/graph/graph_runtime_buffer_assignment.hpp",
       "pulp/graph/graph_runtime_levelization.hpp",
       "pulp/graph/graph_runtime_plan.hpp",
+      "pulp/graph/graph_runtime_probe.hpp",
       "pulp/graph/graph_runtime_queue.hpp",
       "pulp/graph/graph_types.hpp"
     ],

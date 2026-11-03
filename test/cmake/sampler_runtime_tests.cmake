@@ -504,6 +504,11 @@ pulp_add_test_suite(pulp-test-graph-runtime-plan GROUP pulp-test-group-sampler-g
     SOURCES test_graph_runtime_plan.cpp
     LIBRARIES pulp::graph)
 
+# Allocation-free single-producer/single-consumer edge probe contract.
+pulp_add_test_suite(pulp-test-graph-runtime-probe GROUP pulp-test-group-sampler-graph-runtime
+    SOURCES test_graph_runtime_probe.cpp
+    LIBRARIES pulp::graph)
+
 if(TARGET pulp-host)
     # Compatibility coverage for legacy host graph-runtime include paths.
     pulp_add_test_suite(pulp-test-graph-runtime-host-compat GROUP pulp-test-group-sampler-host-graph

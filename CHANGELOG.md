@@ -9,6 +9,22 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1470"></a>
+## [1.47.0] - 2026-11-03
+
+- release/version bump ([#11435](https://github.com/Generous-Corp/pulp/pull/11435))
+- docs/real world inputs guide ergonomics ([#11433](https://github.com/Generous-Corp/pulp/pull/11433))
+- codex/g1 ports 20261102 ([#11428](https://github.com/Generous-Corp/pulp/pull/11428))
+- codex/g9 hostile 20261102 ([#11429](https://github.com/Generous-Corp/pulp/pull/11429))
+- release/version bump ([#11432](https://github.com/Generous-Corp/pulp/pull/11432))
+- codex/g1 hello 20261102 ([#11423](https://github.com/Generous-Corp/pulp/pull/11423))
+- codex/g5 events 20261102 ([#11424](https://github.com/Generous-Corp/pulp/pull/11424))
+- docs/real world inputs guide refresh ([#11425](https://github.com/Generous-Corp/pulp/pull/11425))
+- codex/g8 multirate 20261102 ([#11426](https://github.com/Generous-Corp/pulp/pull/11426))
+- codex/g10 spectral 20261102 ([#11427](https://github.com/Generous-Corp/pulp/pull/11427))
+- codex/g3 contract 20261102 ([#11430](https://github.com/Generous-Corp/pulp/pull/11430))
+- feature/vellum m1 freeze ([#11422](https://github.com/Generous-Corp/pulp/pull/11422))
+
 <a id="v1461"></a>
 ## [1.46.1] - 2026-11-02
 
@@ -12088,6 +12104,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.47.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.47.0
 [1.46.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.46.1
 [1.46.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.46.0
 [1.45.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.45.0
