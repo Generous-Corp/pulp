@@ -138,7 +138,7 @@ class HeaderSelfContainedTests(unittest.TestCase):
 
             # A registered owner without a compile entry fails rather than
             # falling back to the module's narrower flags.
-            cc.write_text(json.dumps([json.loads(cc.read_text())[0]]), encoding="utf-8")
+            cc.write_text(json.dumps([json.loads(cc.read_text(encoding="utf-8"))[0]]), encoding="utf-8")
             with mock.patch.object(sys, "argv", argv), \
                     contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(checker.main(), 1)

@@ -183,7 +183,7 @@ def load_target_flags(cc_path: Path, targets: set[str]) -> dict[str, tuple[list[
 
     Picks a C++ translation unit whose object lies in ``CMakeFiles/<target>.dir``.
     """
-    entries = json.loads(cc_path.read_text())
+    entries = json.loads(cc_path.read_text(encoding="utf-8"))
     found: dict[str, tuple[list[str], str]] = {}
     for e in entries:
         f = e.get("file", "")
