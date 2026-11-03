@@ -25,6 +25,60 @@ if(NOT EXISTS "${PULP_MIN_OS_JSON}")
 endif()
 file(READ "${PULP_MIN_OS_JSON}" _json)
 
+# Exercise a real first configure, not only already-initialized cache entries.
+# The old pre-project Windows pin hid CXXFLAGS (including /arm64EC) and MSVC
+# defaults even though every post-project consumer assertion below passed.
+set(_flags_fixture "${CMAKE_CURRENT_BINARY_DIR}/pulp-minos-flags-init")
+file(MAKE_DIRECTORY "${_flags_fixture}/src")
+set(_flags_module "${_repo_root}/tools/cmake/PulpMinOs.cmake")
+if(DEFINED PULP_MIN_OS_TEST_MODULE)
+    set(_flags_module "${PULP_MIN_OS_TEST_MODULE}")
+endif()
+file(WRITE "${_flags_fixture}/src/CMakeLists.txt" "
+cmake_minimum_required(VERSION 3.24)
+set(PULP_MIN_OS_JSON \"${PULP_MIN_OS_JSON}\")
+include(\"${_flags_module}\")
+_pulp_min_os_pin_windows()
+project(MinOsFlagsInit LANGUAGES CXX C)
+_pulp_min_os_pin_windows()
+if(NOT CMAKE_CXX_FLAGS MATCHES \"PULP_MINOS_CXX_ENV_SENTINEL\"
+   OR NOT CMAKE_C_FLAGS MATCHES \"PULP_MINOS_C_ENV_SENTINEL\")
+  message(FATAL_ERROR \"Windows min-OS pin discarded compiler environment flags\")
+endif()
+if(MSVC AND NOT CMAKE_CXX_FLAGS MATCHES \"/EHsc\")
+  message(FATAL_ERROR \"Windows min-OS pin discarded MSVC exception defaults\")
+endif()
+if(DEFINED EXPECT_COMPILER_ARCH AND
+   NOT CMAKE_CXX_COMPILER_ARCHITECTURE_ID STREQUAL EXPECT_COMPILER_ARCH)
+  message(FATAL_ERROR \"Compiler target architecture did not survive initialization\")
+endif()
+include(CheckCXXSourceCompiles)
+check_cxx_source_compiles(\"
+#if !defined(PULP_MINOS_CXX_ENV_SENTINEL) || !defined(_WIN32_WINNT) || !defined(WINVER)
+#error Missing compiler environment or Windows API floor
+#endif
+int main() { try { throw 1; } catch (int) { return 0; } }
+\" MINOS_ENV_AND_API_FLOOR_COMPILE)
+if(NOT MINOS_ENV_AND_API_FLOOR_COMPILE)
+  message(FATAL_ERROR \"Compiler flags and Windows API floor did not reach compilation\")
+endif()
+")
+set(_flags_args)
+if(DEFINED PULP_MIN_OS_EXPECT_COMPILER_ARCH)
+    list(APPEND _flags_args "-DEXPECT_COMPILER_ARCH=${PULP_MIN_OS_EXPECT_COMPILER_ARCH}")
+endif()
+execute_process(
+    COMMAND "${CMAKE_COMMAND}" -E env
+        "CXXFLAGS=$ENV{CXXFLAGS} -DPULP_MINOS_CXX_ENV_SENTINEL=1"
+        "CFLAGS=$ENV{CFLAGS} -DPULP_MINOS_C_ENV_SENTINEL=1"
+        "${CMAKE_COMMAND}" --fresh -S "${_flags_fixture}/src" -B "${_flags_fixture}/build"
+        ${_flags_args}
+    RESULT_VARIABLE _flags_rc OUTPUT_VARIABLE _flags_output ERROR_VARIABLE _flags_error)
+if(NOT _flags_rc EQUAL 0)
+    message(FATAL_ERROR "Compiler initialization regression: ${_flags_output}\n${_flags_error}")
+endif()
+message(STATUS "min-OS compiler initialization: environment, defaults and API floor survive. OK.")
+
 execute_process(COMMAND uname -s
                 OUTPUT_VARIABLE _uname OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
 

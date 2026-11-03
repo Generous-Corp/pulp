@@ -144,6 +144,14 @@ function(_pulp_min_os_pin_macos)
 endfunction()
 
 function(_pulp_min_os_pin_windows)
+  # CMake initializes these cache entries from CFLAGS/CXXFLAGS, the toolchain
+  # and compiler defaults during project(). Creating them beforehand suppresses
+  # that initialization, losing e.g. /arm64EC and MSVC's /EHsc. Source builds
+  # call this again after project(); installed consumers already run there.
+  if(NOT CMAKE_C_COMPILER_LOADED AND NOT CMAKE_CXX_COMPILER_LOADED
+     AND NOT CMAKE_SCRIPT_MODE_FILE)
+    return()
+  endif()
   # Windows has no "deployment target"; the floor is the compile-time
   # _WIN32_WINNT / WINVER API level. Pulp does not set it, so it otherwise
   # inherits the Windows SDK default — a newer SDK can silently raise the floor
