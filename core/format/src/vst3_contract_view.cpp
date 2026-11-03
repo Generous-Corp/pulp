@@ -49,8 +49,10 @@ ContractPlugView::~ContractPlugView() {
 }
 
 void ContractPlugView::owner_terminated() {
+    // The host still holds this view, so its NSView is alive: close the editor
+    // in order rather than invalidating it.
     if (session_)
-        session_->invalidate();
+        session_->close_for_owner();
     owner_ = nullptr;
 }
 

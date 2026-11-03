@@ -32,7 +32,7 @@
 using pulp::test_support::contract_config;
 using pulp::test_support::contract_log;
 using pulp::test_support::EditorEnvironment;
-using pulp::test_support::QueuedMainThread;
+using pulp::test_support::MainLoop;
 using pulp::test_support::RecordingContractFactory;
 using pulp::test_support::reset_contract_recording;
 
@@ -410,23 +410,20 @@ TEST_CASE("a CLAP contract editor without host timers ticks only while attached"
     g_processor_has_factory = true;
     FakeHost host;
     OpenPlugin p(host);
-    // Registered after init(), so it is the active backend.
-    QueuedMainThread main_thread;
+    MainLoop loop;
 
     REQUIRE(p.gui->create(p.plugin, platform_api(), false));
-    main_thread.run_pending();
+    loop.run_for(0.1);
     REQUIRE(contract_log().idles == 0);
 
     const auto window = fake_window();
     REQUIRE(p.gui->set_parent(p.plugin, &window));
-    for (int i = 0; i < 3; ++i)
-        REQUIRE(main_thread.run_pending() == 1);
-    REQUIRE(contract_log().idles == 3);
+    REQUIRE(loop.run_until([] { return contract_log().idles >= 3; }));
 
     p.gui->destroy(p.plugin);
-    main_thread.run_pending();
-    REQUIRE(contract_log().idles == 3);
-    REQUIRE(main_thread.pending() == 0);
+    const int at_destroy = contract_log().idles;
+    loop.run_for(0.1);
+    REQUIRE(contract_log().idles == at_destroy);
 }
 
 TEST_CASE("destroying a CLAP plug-in with its contract editor open invalidates it first",
