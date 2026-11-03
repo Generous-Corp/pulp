@@ -76,7 +76,8 @@ endfunction()
 #       PROCESSOR_FACTORY create_pulp_gain  # Function that returns unique_ptr<Processor>
 #       UI              my-ui-package    # optional; a UI package target whose editor
 #                                        # factory Processor::editor_factory() returns
-#                                        # by default (see PulpEditorPackage.cmake);
+#                                        # by default (see PulpEditorPackage.cmake).
+#                                        # Implies NO_EDITOR's view-free link;
 #                                        # `none` or no UI adds nothing to the link
 #       SOURCE_GIT_SHA  "${MY_SHA}"      # optional; commit recorded in each bundle's
 #       SOURCE_GIT_DIRTY FALSE           # pulp-build-info.json (default: read from git
@@ -147,9 +148,32 @@ function(pulp_add_plugin target)
     # override create_view(); if it does, the link fails on the view symbols.
     # Standalone, AUv3 and AAX still link the view stack: a standalone app and
     # an app-extension host need a window, and the AAX GUI glue is not split.
-    # NO_EDITOR combines with UI <package>: the plug-in then has no Pulp view
-    # editor, and its editor is the package's, reached through
-    # Processor::editor_factory().
+    #
+    # UI <package> implies NO_EDITOR: the plug-in's editor is the package's,
+    # reached through Processor::editor_factory(), so its modules link no Pulp
+    # view layer. Keywords that select or force Pulp's own view editor
+    # contradict that and are a configure error. `UI none` selects no package
+    # and leaves the link as it would be without UI.
+    set(_pulp_no_editor_reason "NO_EDITOR")
+    if(PLUGIN_UI AND NOT PLUGIN_UI STREQUAL "none")
+        set(_pulp_ui_conflicts "")
+        foreach(_kw NATIVE_UI UI_SCRIPT GPU_UI FULL_EDITOR LITE_EDITOR)
+            if(PLUGIN_${_kw})
+                list(APPEND _pulp_ui_conflicts ${_kw})
+            endif()
+        endforeach()
+        if(_pulp_ui_conflicts)
+            list(JOIN _pulp_ui_conflicts ", " _pulp_ui_conflicts_text)
+            message(FATAL_ERROR
+                "pulp_add_plugin(${target}): UI ${PLUGIN_UI} cannot be combined with "
+                "${_pulp_ui_conflicts_text}. A UI package plug-in links no Pulp view layer "
+                "(UI implies NO_EDITOR), and those keywords select Pulp's own view editor.")
+        endif()
+        if(NOT PLUGIN_NO_EDITOR)
+            set(_pulp_no_editor_reason "UI ${PLUGIN_UI}")
+        endif()
+        set(PLUGIN_NO_EDITOR TRUE)
+    endif()
     if(PLUGIN_NO_EDITOR)
         if(PLUGIN_NATIVE_UI OR PLUGIN_UI_SCRIPT)
             message(FATAL_ERROR
@@ -157,11 +181,11 @@ function(pulp_add_plugin target)
         endif()
         if(NOT _PULP_FORMAT_CORE_TARGET)
             message(FATAL_ERROR
-                "pulp_add_plugin(${target} NO_EDITOR): this Pulp SDK does not export Pulp::format-core")
+                "pulp_add_plugin(${target} ${_pulp_no_editor_reason}): this Pulp SDK does not export Pulp::format-core")
         endif()
         if("CLAP" IN_LIST PLUGIN_FORMATS AND PULP_HAS_CLAP AND NOT _PULP_FORMAT_CLAP_CORE_TARGET)
             message(FATAL_ERROR
-                "pulp_add_plugin(${target} NO_EDITOR): this Pulp SDK does not export Pulp::format-clap-core")
+                "pulp_add_plugin(${target} ${_pulp_no_editor_reason}): this Pulp SDK does not export Pulp::format-clap-core")
         endif()
         set(PULP_${target}_NO_EDITOR TRUE CACHE INTERNAL "")
         set(_pulp_core_format_target "${_PULP_FORMAT_CORE_TARGET}")

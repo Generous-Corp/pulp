@@ -2,10 +2,11 @@
 # package's editor factory from Processor::editor_factory(), and UI none (or
 # no UI argument) generates and links nothing.
 #
-# Four editor-less CLAP plug-ins share one processor that does not override
-# editor_factory(): two declare different UI packages, one declares UI none
-# and one declares no UI. pulp-test-editor-ui-package-host loads all four into
-# one process and reads which factory each reports.
+# Four CLAP plug-ins share one processor that does not override
+# editor_factory(): two declare different UI packages (UI alone, which implies
+# NO_EDITOR's view-free link), and two are editor-less NO_EDITOR plug-ins, one
+# with UI none and one with no UI. pulp-test-editor-ui-package-host loads all
+# four into one process and reads which factory each reports.
 if(PULP_IOS OR ANDROID OR EMSCRIPTEN OR NOT PULP_HAS_CLAP)
     return()
 endif()
@@ -27,12 +28,11 @@ foreach(_variant A B None Plain)
     elseif(_variant STREQUAL "B")
         set(_ui UI pulp-test-ui-package-b)
     elseif(_variant STREQUAL "None")
-        set(_ui UI none)
+        set(_ui NO_EDITOR UI none)
     else()
-        set(_ui "")
+        set(_ui NO_EDITOR)
     endif()
     pulp_add_plugin(PulpEditorUi${_variant}
-        NO_EDITOR
         ${_ui}
         FORMATS           CLAP
         PLUGIN_NAME       "Pulp Editor UI ${_variant}"
@@ -57,12 +57,30 @@ add_test(NAME editor-ui-package-per-plugin-factory
 set_tests_properties(editor-ui-package-per-plugin-factory PROPERTIES
     LABELS "format;editor-host" TIMEOUT 60)
 
-# The configured target graph of the UI none, no-UI and UI package plug-ins,
-# with the plug-in name factored out so the three compare directly. Recorded
-# at configure time, before dead stripping could hide an extra link item.
+# Positive control for the view-free check: the same processor with the
+# default editor, which links Pulp's view layer. Only its configured target
+# graph is read, so it is not built.
+pulp_add_plugin(PulpEditorUiViewControl
+    FORMATS           CLAP
+    PLUGIN_NAME       "Pulp Editor UI View Control"
+    BUNDLE_ID         "dev.pulp.test.editor-ui-package-view-control"
+    MANUFACTURER      "Pulp"
+    VERSION           "1.0.0"
+    CATEGORY          Effect
+)
+get_property(_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+foreach(_t IN LISTS _targets)
+    if(_t MATCHES "^PulpEditorUiViewControl_")
+        set_target_properties(${_t} PROPERTIES EXCLUDE_FROM_ALL TRUE)
+    endif()
+endforeach()
+
+# The configured target graph of each plug-in, with the plug-in name factored
+# out so they compare directly. Recorded at configure time, before dead
+# stripping could hide an extra link item.
 set(_record "${CMAKE_CURRENT_BINARY_DIR}/editor_ui_package_link_record.cmake")
 set(_record_content "")
-foreach(_variant A None Plain)
+foreach(_variant A B None Plain ViewControl)
     set(_plugin PulpEditorUi${_variant})
     pulp_link_closure(${_plugin}_CLAP TARGETS_OUT _closure)
     get_target_property(_sources ${_plugin}_CLAP SOURCES)
@@ -81,4 +99,10 @@ add_test(NAME editor-ui-package-none-links-nothing
     COMMAND ${CMAKE_COMMAND} -DRECORD=${_record}
         -P ${CMAKE_CURRENT_SOURCE_DIR}/check_ui_none_links_nothing.cmake)
 set_tests_properties(editor-ui-package-none-links-nothing PROPERTIES
+    LABELS "format;editor-host;cmake" TIMEOUT 60)
+
+add_test(NAME editor-ui-package-links-no-view
+    COMMAND ${CMAKE_COMMAND} -DRECORD=${_record}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/check_ui_package_links_no_view.cmake)
+set_tests_properties(editor-ui-package-links-no-view PROPERTIES
     LABELS "format;editor-host;cmake" TIMEOUT 60)

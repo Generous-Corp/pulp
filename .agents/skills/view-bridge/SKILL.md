@@ -91,7 +91,10 @@ console line) plus `ui-script-plugin-editor-installed-sdk`.
 and standalone target compiles `<build>/pulp_editor_package/<plugin>.cpp`,
 which installs an internal-linkage hook at static init into an image-local slot
 (`pulp/format/editor_package.hpp`), and `Processor::editor_factory()`'s default
-returns what that hook returns. Things that are easy to get wrong:
+returns what that hook returns. A package implies `NO_EDITOR`: the plug-in's
+VST3/CLAP/AU v2/LV2 modules link no Pulp view layer, and `NATIVE_UI`,
+`UI_SCRIPT`, `GPU_UI`, `FULL_EDITOR` or `LITE_EDITOR` beside it is a configure
+error. Things that are easy to get wrong:
 
 - The slot is per image only because `pulp-format-core` is linked statically
   and its accessors are hidden. Do not move the slot into a shared library or

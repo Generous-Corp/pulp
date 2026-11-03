@@ -19,6 +19,10 @@
 # target's own image, so two plug-ins in one host process never share or
 # replace each other's choice. `UI none`, or no UI argument, generates and
 # links nothing.
+#
+# A UI package plug-in links no Pulp view layer: pulp_add_plugin treats
+# UI <package> as NO_EDITOR, and rejects NATIVE_UI, UI_SCRIPT, GPU_UI,
+# FULL_EDITOR and LITE_EDITOR beside it.
 
 # Every per-plug-in target that constructs the plug-in's processor.
 set(_PULP_UI_PACKAGE_TARGET_SUFFIXES
