@@ -77,6 +77,21 @@ TEST_CASE("G3 planted negative identity controls fail closed") {
     CHECK(rename.renamed.front() == "drive -> gain");
 }
 
+TEST_CASE("G3 aliases reject empty names and one-hop chains") {
+    const std::array ports{PortHandle{1, 0, false, "Drive", PortKind::Audio}};
+    const std::array empty_authored{PortIdentityAlias{"", "Drive", 1}};
+    const std::array whitespace_replacement{
+        PortIdentityAlias{"drive", "\xE2\x80\x83", 1}};
+    CHECK_FALSE(validate_port_identities(ports, empty_authored).valid);
+    CHECK_FALSE(validate_port_identities(ports, whitespace_replacement).valid);
+
+    const std::array chain{
+        PortIdentityAlias{"drive", "Drive", 1},
+        PortIdentityAlias{"legacy", "drive", 1},
+    };
+    CHECK_FALSE(validate_port_identities(ports, chain).valid);
+}
+
 TEST_CASE("G3 identity undo is value-owned") {
     const std::array before{PortHandle{2, 3, true, "drive", PortKind::Audio}};
     const auto undo = capture_port_identity_undo(before);

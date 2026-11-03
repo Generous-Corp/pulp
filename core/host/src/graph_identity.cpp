@@ -257,6 +257,8 @@ CanonicalSet canonical(std::span<const PortHandle> ports,
         }
         result.report.normalized_names.push_back(name);
     }
+    std::unordered_set<std::string> authored_alias_names;
+    std::unordered_set<std::string> replacement_alias_names;
     for (const auto& alias : aliases) {
         std::string authored, replacement, error;
         if (!normalize(alias.authored_name, authored, error) ||
@@ -267,11 +269,26 @@ CanonicalSet canonical(std::span<const PortHandle> ports,
                  "alias must have distinct valid names and a contract version"});
             continue;
         }
-        if (result.aliases.contains(replacement) || result.aliases.contains(authored)) {
+        if (authored.empty() || whitespace_only(authored) || replacement.empty() ||
+            whitespace_only(replacement)) {
             result.report.issues.push_back(
-                {PortIdentityIssue::Code::AliasCollision, replacement, "alias is ambiguous"});
+                {PortIdentityIssue::Code::EmptyName, authored.empty() ? replacement : authored,
+                 "alias names must not be empty or whitespace-only"});
             continue;
         }
+        const bool cross_link = authored_alias_names.contains(replacement) ||
+                                replacement_alias_names.contains(authored);
+        const bool collision = authored_alias_names.contains(authored) ||
+                               replacement_alias_names.contains(replacement);
+        if (cross_link || collision) {
+            result.report.issues.push_back(
+                {cross_link ? PortIdentityIssue::Code::AliasChain
+                            : PortIdentityIssue::Code::AliasCollision,
+                 replacement, cross_link ? "alias chain is not allowed" : "alias is ambiguous"});
+            continue;
+        }
+        authored_alias_names.insert(authored);
+        replacement_alias_names.insert(replacement);
         result.aliases.emplace(replacement, authored);
     }
     for (auto& name : result.report.normalized_names) {
