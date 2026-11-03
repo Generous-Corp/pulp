@@ -41,7 +41,7 @@ jobs:
       macos_runs_on: ${{ steps.resolve.outputs.macos_runs_on }}
       matrix: ${{ steps.resolve.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           submodules: false
           lfs: false
@@ -88,7 +88,7 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           submodules: false
 
@@ -187,7 +187,7 @@ jobs:
       # verify step above fails.
       - name: Upload APK + build logs (diagnostic)
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: pulp-android-${{ matrix.os }}-diag
           path: |
@@ -201,7 +201,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Upload APK artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: pulp-android-${{ matrix.os }}
           path: android/app/build/outputs/apk/debug/app-debug.apk
@@ -240,7 +240,7 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           submodules: false
 
@@ -341,7 +341,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           submodules: false
           fetch-depth: 0

@@ -43,7 +43,7 @@ jobs:
     continue-on-error: ${{ matrix.experimental || false }}
     timeout-minutes: ${{ matrix.experimental && 75 || 360 }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       # The FetchContent seed and the configure-check cache on a self-hosted
       # host can be written by earlier jobs, PR gate jobs included, so this job
@@ -188,7 +188,7 @@ jobs:
         shell: bash
 
       - name: Upload dry-run artifacts (throwaway — NOT a release)
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: release-dry-run-${{ matrix.platform }}
           path: |
