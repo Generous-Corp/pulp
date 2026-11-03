@@ -167,6 +167,10 @@ one host process each read their own package's factory and neither can replace
 the other's. Every processor in one binary that does not override
 `editor_factory()` shares that binary's package.
 
+A format whose adapter does not open contract editors yet still builds, but
+without an editor; `pulp_add_plugin()` names those formats in a configure
+warning.
+
 VST3 and CLAP open the editor through the contract whenever
 `editor_factory()` is non-null, and fall back to `create_view()` otherwise. A
 UI-package plug-in's AU v2 component serves a view-free Cocoa view factory

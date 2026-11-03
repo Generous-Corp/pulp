@@ -5,6 +5,10 @@
 // became in the contract. One global log and one global config, reset by the
 // test, so a factory a processor owns needs no wiring to the test.
 
+#if defined(__APPLE__)
+#include <CoreFoundation/CoreFoundation.h>
+#endif
+
 #include <pulp/events/main_thread_dispatcher.hpp>
 #include <pulp/format/editor_host.hpp>
 
@@ -190,49 +194,64 @@ struct EditorEnvironment {
     ScopedEnvUnset ci{"CI"};
 };
 
-/// A main-thread backend whose posts wait in a queue until the test runs
-/// them, so each idle tick is observable. Register it after the adapter
-/// registers its own backend, so it is the active one.
-class QueuedMainThread {
+/// The main thread's event loop, for an editor's own idle tick. On Apple
+/// platforms that tick is a dispatch source on the main queue, so the loop
+/// runs the real main run loop; elsewhere the tick posts through
+/// MainThreadDispatcher, and the loop runs those posts from a queued backend,
+/// registered after the adapter's own backend so it is the active one.
+class MainLoop {
   public:
-    QueuedMainThread() {
+#if !defined(__APPLE__)
+    MainLoop() {
         events::MainThreadDispatcher::Backend backend;
         backend.post = [this](events::Task task) {
-            tasks_.push_back({std::move(task), 0});
+            tasks_.push_back(std::move(task));
             return true;
         };
         backend.is_main_thread = [] { return true; };
-        backend.post_after = [this](events::Task task, int delay_ms) {
-            tasks_.push_back({std::move(task), delay_ms});
+        backend.post_after = [this](events::Task task, int) {
+            tasks_.push_back(std::move(task));
             return true;
         };
         token_ = events::MainThreadDispatcher::register_backend(std::move(backend));
     }
-    ~QueuedMainThread() {
+    ~MainLoop() {
         events::MainThreadDispatcher::unregister_backend(token_);
     }
-    QueuedMainThread(const QueuedMainThread&) = delete;
-    QueuedMainThread& operator=(const QueuedMainThread&) = delete;
+#else
+    MainLoop() = default;
+#endif
+    MainLoop(const MainLoop&) = delete;
+    MainLoop& operator=(const MainLoop&) = delete;
 
-    /// Run the tasks queued so far (not the ones they queue).
-    std::size_t run_pending() {
-        auto batch = std::move(tasks_);
-        tasks_.clear();
-        for (auto& queued : batch)
-            queued.task();
-        return batch.size();
+    /// Run the loop for about `seconds`.
+    void run_for(double seconds) {
+#if defined(__APPLE__)
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, seconds, false);
+#else
+        for (int i = 0; i < static_cast<int>(seconds * 100.0) + 1; ++i) {
+            auto batch = std::move(tasks_);
+            tasks_.clear();
+            for (auto& task : batch)
+                task();
+        }
+#endif
     }
-    std::size_t pending() const {
-        return tasks_.size();
+    /// Run the loop until `done()` holds or about `seconds` pass.
+    template <typename Done> bool run_until(Done done, double seconds = 2.0) {
+        for (double waited = 0.0; waited < seconds; waited += 0.02) {
+            if (done())
+                return true;
+            run_for(0.02);
+        }
+        return done();
     }
 
   private:
-    struct Queued {
-        events::Task task;
-        int delay_ms;
-    };
-    std::vector<Queued> tasks_;
+#if !defined(__APPLE__)
+    std::vector<events::Task> tasks_;
     events::MainThreadDispatcher::Token token_ = 0;
+#endif
 };
 
 } // namespace pulp::test_support

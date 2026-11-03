@@ -17,13 +17,15 @@
 //   onFocus                  -> Editor::focus_changed()
 //   setContentScaleFactor    -> Editor::set_size() with the new scale
 //                               (IPlugViewContentScaleSupport)
-//   while attached           -> Editor::idle() from a paced main-thread tick
-//                               (MainThreadDispatcher::call_async_after),
-//                               started by attached() and stopped by removed(),
-//                               invalidation and destruction
-//   adapter terminate        -> Editor::invalidate(), then the editor is
-//                               destroyed before the processor that owns its
-//                               factory
+//   while attached           -> Editor::idle() from a main-thread timer
+//                               (detail::MainThreadTimer), started by attached()
+//                               and stopped by removed(), owner termination and
+//                               destruction; once stopped it runs no more
+//                               plug-in code
+//   adapter terminate        -> every gesture released and Editor::detach()
+//                               while the host's window is still there, then the
+//                               editor is destroyed before the processor that
+//                               owns its factory
 //
 // Each view owns one ContractEditorSession (contract_editor_session.hpp): the
 // editor, its StateStoreParamPort over the adapter's store (so edits reach the
@@ -92,8 +94,8 @@ class ContractPlugView final : public Steinberg::CPluginView,
     REFCOUNT_METHODS(CPluginView)
 
     /// The adapter is terminating or being destroyed while the host still
-    /// holds this view. Releases every open gesture, invalidates and destroys
-    /// the editor (its factory belongs to the processor about to go), and
+    /// holds this view. Releases every open gesture, detaches and destroys the
+    /// editor (its factory belongs to the processor about to go), and
     /// answers every later call with kResultFalse.
     void owner_terminated();
 

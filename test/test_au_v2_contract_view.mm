@@ -30,7 +30,7 @@ EditorKeyEvent contract_key_event(unsigned short key_code, NSString* characters,
 using pulp::test_support::contract_config;
 using pulp::test_support::contract_log;
 using pulp::test_support::EditorEnvironment;
-using pulp::test_support::QueuedMainThread;
+using pulp::test_support::MainLoop;
 using pulp::test_support::RecordingContractFactory;
 using pulp::test_support::reset_contract_recording;
 
@@ -268,20 +268,17 @@ TEST_CASE("an AU v2 contract editor ticks only while its view lives",
     FakeInstance instance(true);
     g_instance = &instance;
     AudioUnit au = fake_audio_unit();
-    QueuedMainThread main_thread;
+    MainLoop loop;
 
     @autoreleasepool {
         NSView* view = [open_view(au) retain];
         REQUIRE(view != nil);
-        REQUIRE(main_thread.pending() == 1);
-        for (int i = 0; i < 3; ++i)
-            REQUIRE(main_thread.run_pending() == 1);
-        REQUIRE(contract_log().idles == 3);
+        REQUIRE(loop.run_until([] { return contract_log().idles >= 3; }));
         [view release];
     }
-    main_thread.run_pending();
-    REQUIRE(contract_log().idles == 3);
-    REQUIRE(main_thread.pending() == 0);
+    const int at_release = contract_log().idles;
+    loop.run_for(0.1);
+    REQUIRE(contract_log().idles == at_release);
 
     AudioComponentInstanceDispose(au);
     g_instance = nullptr;
@@ -294,7 +291,7 @@ TEST_CASE("disposing the AU instance invalidates a contract editor its view stil
     auto instance = std::make_unique<FakeInstance>(true);
     g_instance = instance.get();
     AudioUnit au = fake_audio_unit();
-    QueuedMainThread main_thread;
+    MainLoop loop;
 
     @autoreleasepool {
         NSView* view = [open_view(au) retain];
@@ -314,7 +311,7 @@ TEST_CASE("disposing the AU instance invalidates a contract editor its view stil
         // The view outlives its instance: resizing, ticking and releasing it
         // touch nothing that is gone.
         [view setFrameSize:NSMakeSize(500, 400)];
-        main_thread.run_pending();
+        loop.run_for(0.1);
         REQUIRE(contract_log().idles == 0);
         [view release];
     }

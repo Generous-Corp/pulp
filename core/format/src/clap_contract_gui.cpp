@@ -52,8 +52,7 @@ const void* host_extension(const PulpClapPlugin& self, const char* id) {
 }
 
 bool applies(const PulpClapPlugin* self) {
-    return self != nullptr && self->processor != nullptr &&
-           self->processor->editor_factory() != nullptr &&
+    return self != nullptr && self->processor != nullptr && self->editor_factory != nullptr &&
            !detail::editor_launch_blocked_by_environment();
 }
 
@@ -119,8 +118,8 @@ bool gui_create(const clap_plugin_t* plugin, const char* api, bool is_floating) 
     };
     const auto idle = gui->host_timer != nullptr ? ContractEditorSession::IdleSource::host_driven
                                                  : ContractEditorSession::IdleSource::self_paced;
-    gui->session = ContractEditorSession::create(
-        *self->processor, self->store, *self->processor->editor_factory(), std::move(hooks), idle);
+    gui->session = ContractEditorSession::create(*self->processor, self->store,
+                                                 *self->editor_factory, std::move(hooks), idle);
     if (!gui->session)
         return false;
     self->contract_gui = std::move(gui);
@@ -227,10 +226,16 @@ bool gui_set_parent(const clap_plugin_t* plugin, const clap_window_t* window) {
     auto& gui = *gui_of(*self);
     if (gui.host_timer != nullptr) {
         clap_id id = CLAP_INVALID_ID;
-        if (gui.host_timer->register_timer(self->host, ContractEditorSession::kIdleIntervalMs, &id))
+        if (gui.host_timer->register_timer(self->host, ContractEditorSession::kIdleIntervalMs,
+                                           &id) &&
+            id != CLAP_INVALID_ID) {
             gui.timer_id = id;
-        else
-            runtime::log_error("CLAP editor: the host refused an idle timer");
+        } else {
+            // The host offers timers but gave none: tick from the session's own
+            // timer so the editor still idles.
+            runtime::log_error("CLAP editor: the host refused an idle timer; ticking without it");
+            gui.session->use_self_paced_idle();
+        }
     }
     return true;
 }

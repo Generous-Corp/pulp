@@ -32,7 +32,7 @@
 using pulp::test_support::contract_config;
 using pulp::test_support::contract_log;
 using pulp::test_support::EditorEnvironment;
-using pulp::test_support::QueuedMainThread;
+using pulp::test_support::MainLoop;
 using pulp::test_support::RecordingContractFactory;
 using pulp::test_support::reset_contract_recording;
 
@@ -128,6 +128,7 @@ struct FakeHost {
     clap_host_state_t state{};
     clap_host_timer_support_t timers{};
     bool offers_timers = false;
+    bool refuse_timers = false;
     bool accept_resize = true;
     std::vector<std::string> resize_requests;
     int dirty_marks = 0;
@@ -175,6 +176,8 @@ struct FakeHost {
         timers.register_timer = [](const clap_host_t* h, uint32_t period_ms, clap_id* id) {
             auto* self = static_cast<FakeHost*>(h->host_data);
             self->last_period = period_ms;
+            if (self->refuse_timers)
+                return false;
             *id = self->next_timer++;
             self->live_timers.push_back(*id);
             return true;
@@ -410,23 +413,43 @@ TEST_CASE("a CLAP contract editor without host timers ticks only while attached"
     g_processor_has_factory = true;
     FakeHost host;
     OpenPlugin p(host);
-    // Registered after init(), so it is the active backend.
-    QueuedMainThread main_thread;
+    MainLoop loop;
 
     REQUIRE(p.gui->create(p.plugin, platform_api(), false));
-    main_thread.run_pending();
+    loop.run_for(0.1);
     REQUIRE(contract_log().idles == 0);
 
     const auto window = fake_window();
     REQUIRE(p.gui->set_parent(p.plugin, &window));
-    for (int i = 0; i < 3; ++i)
-        REQUIRE(main_thread.run_pending() == 1);
-    REQUIRE(contract_log().idles == 3);
+    REQUIRE(loop.run_until([] { return contract_log().idles >= 3; }));
 
     p.gui->destroy(p.plugin);
-    main_thread.run_pending();
-    REQUIRE(contract_log().idles == 3);
-    REQUIRE(main_thread.pending() == 0);
+    const int at_destroy = contract_log().idles;
+    loop.run_for(0.1);
+    REQUIRE(contract_log().idles == at_destroy);
+}
+
+TEST_CASE("a CLAP contract editor ticks itself when the host refuses its timer",
+          "[clap][editor-host][clap-contract][idle]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    g_processor_has_factory = true;
+    FakeHost host;
+    host.offers_timers = true;
+    host.refuse_timers = true;
+    OpenPlugin p(host);
+    MainLoop loop;
+
+    REQUIRE(p.gui->create(p.plugin, platform_api(), false));
+    const auto window = fake_window();
+    REQUIRE(p.gui->set_parent(p.plugin, &window));
+    REQUIRE(host.live_timers.empty());
+    REQUIRE(loop.run_until([] { return contract_log().idles >= 2; }));
+
+    p.gui->destroy(p.plugin);
+    const int at_destroy = contract_log().idles;
+    loop.run_for(0.1);
+    REQUIRE(contract_log().idles == at_destroy);
 }
 
 TEST_CASE("destroying a CLAP plug-in with its contract editor open invalidates it first",

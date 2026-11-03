@@ -1,6 +1,5 @@
 #include <pulp/format/contract_editor_session.hpp>
 
-#include <pulp/events/main_thread_dispatcher.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/state/store.hpp>
@@ -37,11 +36,6 @@ class ContractEditorSession::Context final : public EditorContext {
     ParamPort& port_;
     EditorHostKind kind_;
     HostHooks hooks_;
-};
-
-struct ContractEditorSession::IdleState {
-    ContractEditorSession* session = nullptr;
-    bool running = false;
 };
 
 ContractSessionRegistry::~ContractSessionRegistry() {
@@ -107,33 +101,18 @@ void ContractEditorSession::start_idle() {
     stop_idle();
     if (idle_source_ != IdleSource::self_paced)
         return;
-    idle_ = std::make_shared<IdleState>();
-    idle_->session = this;
-    idle_->running = true;
-    schedule_idle(idle_);
+    if (!idle_timer_.start(kIdleIntervalMs, [this] { tick(); }))
+        runtime::log_error("editor host: no main-thread timer for the editor's idle tick");
 }
 
 void ContractEditorSession::stop_idle() {
-    if (idle_) {
-        idle_->running = false;
-        idle_->session = nullptr;
-        idle_.reset();
-    }
+    idle_timer_.stop();
 }
 
-void ContractEditorSession::schedule_idle(std::shared_ptr<IdleState> state) {
-    // Every step runs on the main thread, as do attach, detach and the
-    // session's destruction, so the flag needs no synchronization: a tick
-    // queued before stop_idle() sees it cleared and ends the chain.
-    events::MainThreadDispatcher::call_async_after(
-        [state] {
-            if (!state->running || state->session == nullptr)
-                return;
-            state->session->tick();
-            if (state->running)
-                schedule_idle(state);
-        },
-        kIdleIntervalMs);
+void ContractEditorSession::use_self_paced_idle() {
+    idle_source_ = IdleSource::self_paced;
+    if (attached_)
+        start_idle();
 }
 
 bool ContractEditorSession::attach(const NativeParent& parent) {
@@ -160,14 +139,24 @@ void ContractEditorSession::detach() {
     attached_ = false;
 }
 
+void ContractEditorSession::close_for_owner() {
+    // detach() stops the tick, releases every gesture and detaches the editor
+    // from the window the host still owns.
+    detach();
+    destroy_editor();
+}
+
 void ContractEditorSession::invalidate() {
     unregister();
     stop_idle();
-    if (editor_) {
+    if (editor_)
         editor_->invalidate();
-        editor_.reset();
-    }
     attached_ = false;
+    destroy_editor();
+}
+
+void ContractEditorSession::destroy_editor() {
+    editor_.reset();
     context_.reset();
     // Destroying the port releases every gesture it still holds.
     port_.reset();

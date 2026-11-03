@@ -148,3 +148,22 @@ add_test(NAME editor-ui-package-links-no-view
         -P ${CMAKE_CURRENT_SOURCE_DIR}/check_ui_package_links_no_view.cmake)
 set_tests_properties(editor-ui-package-links-no-view PROPERTIES
     LABELS "format;editor-host;cmake" TIMEOUT 60)
+
+# The editor hook stays inside its module: the built UI package module exports
+# none of the hook symbols, checked on every platform with an nm (Linux
+# included, where hidden visibility and the version script are what keep it
+# in). The control runs the same check with the module's own entry point as
+# the forbidden name and must fail, showing the check can see an export.
+if(NOT WIN32 AND CMAKE_NM)
+    set(_hook_check ${CMAKE_CURRENT_SOURCE_DIR}/check_hook_not_exported.cmake)
+    add_test(NAME editor-ui-package-hook-not-exported
+        COMMAND ${CMAKE_COMMAND} -DNM=${CMAKE_NM} -DBINARY=$<TARGET_FILE:PulpEditorUiA_CLAP>
+            "-DFORBIDDEN=plugin_editor_factory" -DREQUIRED=clap_entry -P ${_hook_check})
+    add_test(NAME editor-ui-package-hook-export-check-control
+        COMMAND ${CMAKE_COMMAND} -DNM=${CMAKE_NM} -DBINARY=$<TARGET_FILE:PulpEditorUiA_CLAP>
+            "-DFORBIDDEN=clap_entry" -DREQUIRED=clap_entry -P ${_hook_check})
+    set_tests_properties(editor-ui-package-hook-not-exported
+        editor-ui-package-hook-export-check-control PROPERTIES
+        LABELS "format;editor-host;cmake" TIMEOUT 60)
+    set_tests_properties(editor-ui-package-hook-export-check-control PROPERTIES WILL_FAIL TRUE)
+endif()
