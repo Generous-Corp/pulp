@@ -277,6 +277,7 @@ endif()
 if(PULP_HAS_CLAP)
     target_sources(pulp-format-view PRIVATE
         src/clap_adapter.cpp
+        src/clap_contract_gui.cpp
         src/clap_remote_controls.cpp
         src/clap_note_name.cpp
     )
@@ -293,6 +294,7 @@ if(PULP_HAS_CLAP)
     # carries no view, canvas, render, Skia or Dawn code.
     add_library(pulp-format-clap-core
         src/clap_adapter.cpp
+        src/clap_contract_gui.cpp
         src/clap_remote_controls.cpp
         src/clap_note_name.cpp
     )

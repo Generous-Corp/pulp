@@ -44,7 +44,7 @@ foreach(_variant A B None Plain)
 endforeach()
 
 add_executable(pulp-test-editor-ui-package-host editor_ui_package_host.cpp)
-target_link_libraries(pulp-test-editor-ui-package-host PRIVATE ${CMAKE_DL_LIBS})
+target_link_libraries(pulp-test-editor-ui-package-host PRIVATE clap ${CMAKE_DL_LIBS})
 add_dependencies(pulp-test-editor-ui-package-host
     PulpEditorUiA_CLAP PulpEditorUiB_CLAP PulpEditorUiNone_CLAP PulpEditorUiPlain_CLAP)
 
@@ -54,8 +54,12 @@ add_test(NAME editor-ui-package-per-plugin-factory
         "$<TARGET_FILE:PulpEditorUiB_CLAP>=editor:b"
         "$<TARGET_FILE:PulpEditorUiNone_CLAP>=editor:none"
         "$<TARGET_FILE:PulpEditorUiPlain_CLAP>=editor:none")
+# The host also opens each UI package plug-in's GUI through the contract,
+# which plug-in editors refuse in CI and headless environments.
 set_tests_properties(editor-ui-package-per-plugin-factory PROPERTIES
-    LABELS "format;editor-host" TIMEOUT 60)
+    LABELS "format;editor-host" TIMEOUT 60
+    ENVIRONMENT_MODIFICATION
+        "CI=unset:;PULP_HEADLESS=unset:;PULP_TEST_MODE=unset:;PULP_DISABLE_PLUGIN_EDITOR=unset:")
 
 # Positive control for the view-free check: the same processor with the
 # default editor, which links Pulp's view layer. Only its configured target

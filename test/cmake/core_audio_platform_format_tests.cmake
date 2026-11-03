@@ -385,6 +385,14 @@ if(PULP_HAS_CLAP)
         PRIVATE ${PULP_ROOT_DIR}/core/host/src)
     catch_discover_tests(pulp-test-clap-slot-channel-width)
 
+    # The CLAP adapter opening a processor's editor through the editor-host
+    # contract, built the way a UI-package plug-in is: no PULP_CLAP_GUI, and
+    # the view-free pulp-format-clap-core.
+    add_executable(pulp-test-clap-contract-editor test_clap_contract_editor.cpp)
+    target_link_libraries(pulp-test-clap-contract-editor PRIVATE
+        pulp::format-clap-core clap Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-clap-contract-editor)
+
     add_executable(pulp-test-clap-entry test_clap_entry.cpp
         ${CMAKE_SOURCE_DIR}/core/format/src/clap_adapter.cpp
         ${CMAKE_SOURCE_DIR}/core/format/src/clap_remote_controls.cpp

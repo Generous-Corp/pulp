@@ -63,9 +63,10 @@ class ContractEditorSession {
 
     /// A session over a new editor from `factory`, or null when the factory
     /// does not offer the editor role or builds no editor.
-    static std::unique_ptr<ContractEditorSession>
-    create(Processor& processor, state::StateStore& store, EditorFactory& factory,
-           HostHooks hooks, IdleSource idle = IdleSource::self_paced);
+    static std::unique_ptr<ContractEditorSession> create(Processor& processor,
+                                                         state::StateStore& store,
+                                                         EditorFactory& factory, HostHooks hooks,
+                                                         IdleSource idle = IdleSource::self_paced);
 
     ~ContractEditorSession();
     ContractEditorSession(const ContractEditorSession&) = delete;
