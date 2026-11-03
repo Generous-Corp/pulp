@@ -462,12 +462,19 @@ Traps:
   `true` for the same path is a conflict, not an override.
 - An export event may list only paths this change owes a decision for; a stray
   path fails, so an event cannot pre-authorise later edits.
-- A frozen path (the pin's `frozen_paths`, exactly the transferred slices'
-  paths) owes no `vellum_inherits` decision but cannot be edited: the report's
+- A frozen path (the pin's `frozen_paths`: the transferred slices' paths
+  minus `OWNER_UNFROZEN_PATHS` in `test_vellum_receipt_drift.py`) owes no
+  `vellum_inherits` decision but cannot be edited: the report's
   `frozen` list fails the check unless an added change event covering the
   path's slice has disposition `framework-backport` or `emergency-exception`.
   A directory entry in `frozen_paths` that no transferred slice covers cannot
   be unfrozen by any event; only a re-pin can.
+- Unfreezing a path on an owner ruling is a pin-only change. Removing the path
+  from its slice in `.github/vellum-ownership.json` as well fails the freeze
+  check ("transferred slice ... cannot change without a designed ownership
+  reversal"). Drop the path from `frozen_paths`, add it to
+  `OWNER_UNFROZEN_PATHS` with the ruling's title, and land that before the
+  change that edits the path, because the pin is read at the base commit.
 - The pin, the receipt copy and `frozen_paths` are read at the BASE commit. A
   change cannot exempt itself by editing them; a re-pin applies to the changes
   after it, and deleting the pin fails.

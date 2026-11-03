@@ -122,7 +122,10 @@ event covers its capability families' selections, and an export event under
 README describes the event schema and how to re-pin a newer receipt.
 
 Paths the pin lists as frozen owe no decision, because they are not edited in
-Pulp: the pin freezes exactly the transferred slices' paths. A change to a
+Pulp: the pin freezes the transferred slices' paths, minus any the owner has
+unfrozen. Transferred slices are immutable, so an unfrozen path keeps its
+slice: it leaves only the pin, and an edit to it then owes an ordinary change
+event for that slice with an explicit `vellum_inherits`. A change to a
 frozen path fails unless a change event it adds covers the path's slice with
 disposition `framework-backport` (bringing a named Vellum commit back) or
 `emergency-exception`; a `pulp-only` event does not unfreeze it. Like the rest
