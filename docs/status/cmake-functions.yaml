@@ -25,6 +25,7 @@ functions:
       - AAX_NATIVE_CODE
       - SOURCES
       - PROCESSOR_FACTORY
+      - UI
       - UI_SCRIPT
       - ICON
       - ICNS

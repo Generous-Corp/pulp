@@ -2306,3 +2306,32 @@ resources that were removed from source.
   must include that sibling directory, hash it in provenance, and add a
   missing-sibling negative control; a browser runtime-only smoke test is not
   sufficient.
+
+### A release is irreversible: replay the tag's own pipeline first
+
+A published tag and its immutable release cannot be edited, and a tag whose
+downstream run fails stays failed (every input is frozen by the tag), so the
+version is lost. Before any release-path change or release request, replay what
+the tag will trigger against the exact commit, and against the real artifacts
+where they exist: the provenance run, the GPU run, and the SDK-release
+finalizer, not only the step that creates the tag. Vellum keeps
+`tools/rehearse_release.sh` and `tools/rehearse_tag_pipeline.py` for this. Two
+losses came from rehearsing only the earlier stage: a tag whose provenance check
+could never pass on the commit that landed its own request, and a finalizer step
+that no release had reached for several versions. A replay that cannot fail on
+a known-bad input proves nothing, so include the historical tags that failed
+(they must fail) and one that published (it must pass).
+
+### Security, release and provenance changes: the whole class, guards that can fail
+
+- Fix the whole class of the defect, not the reported instance; grep for every
+  sibling that shares the pattern before pushing.
+- Prove every new guard can fail: run it on an input with the defect and watch it
+  refuse, as well as on a good input. A guard that only ever passed is untested.
+- Get a fresh adversarial review of the final head (a reviewer that has not seen
+  earlier rounds) before pushing, and again after any substantive change.
+- Verify a GitHub ruleset against a read-back (`GET .../rulesets/<id>`), never
+  against the payload you POSTed. GitHub stores rules differently than they were
+  posted; for example an `update` rule comes back without its parameters.
+- `gh attestation verify --bundle <file>` refuses a bundle whose name does not
+  end in `.json` or `.jsonl`; name a downloaded bundle accordingly.

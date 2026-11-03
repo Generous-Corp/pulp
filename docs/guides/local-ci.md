@@ -3293,7 +3293,9 @@ build that none of them needs.
 `pull_request` (the `refs/pull/N/merge` tree) and every `merge_group`, both of
 which are the tip combined with the head. The job bootstraps dependencies,
 configures exactly as the gate does (`Release`, examples off, GPU on) and does
-not build. Before configuring, it runs
+not build. It restores (never saves) main's Linux FetchContent cache,
+including the shared `~/.cache/pulp/fetchcontent-src` that `setup.sh` clones
+into, and bounds a cold bootstrap at 20 minutes. Before configuring, it runs
 `tools/scripts/hydrate_gpu_provenance_commits.py` because the historical GPU
 probe acceptance registration walks commits outside the depth-2 event
 checkout. Without it that test raises `ShallowCheckoutError` on every run, a
