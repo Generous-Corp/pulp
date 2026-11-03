@@ -79,6 +79,7 @@ target_sources(pulp-format-core PRIVATE
     src/host_parameter_edit.cpp
     src/editor_host.cpp
     src/editor_package.cpp
+    src/contract_editor_session.cpp
     src/ara.cpp
     src/ara_factory.cpp
     src/ios_audio_session.cpp

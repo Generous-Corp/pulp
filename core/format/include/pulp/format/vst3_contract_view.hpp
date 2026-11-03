@@ -25,14 +25,16 @@
 //                               destroyed before the processor that owns its
 //                               factory
 //
-// Each view owns its own StateStoreParamPort over the adapter's store, so its
-// edits reach the host through the adapter's existing gesture path
-// (HostParameterEditBridge -> beginEdit/performEdit/endEdit), and closing one
-// view never ends a gesture another view holds.
+// Each view owns one ContractEditorSession (contract_editor_session.hpp): the
+// editor, its StateStoreParamPort over the adapter's store (so edits reach the
+// host through HostParameterEditBridge -> beginEdit/performEdit/endEdit, and
+// closing one view never ends a gesture another view holds), and the idle
+// tick. This class only maps IPlugView calls onto it.
 //
 // View-free: this names no view, canvas or render type, so it compiles into
 // pulp-format-core with the audio adapter.
 
+#include <pulp/format/contract_editor_session.hpp>
 #include <pulp/format/editor_host.hpp>
 
 #include <pluginterfaces/gui/iplugviewcontentscalesupport.h>
@@ -53,7 +55,7 @@ class ContractPlugView final : public Steinberg::CPluginView,
                                public Steinberg::IPlugViewContentScaleSupport {
   public:
     /// Interval of the main-thread idle tick while attached (about 60 Hz).
-    static constexpr int kIdleIntervalMs = 16;
+    static constexpr int kIdleIntervalMs = ContractEditorSession::kIdleIntervalMs;
 
     using HostActionHandler = std::function<bool(const HostActionRequest&)>;
 
@@ -97,11 +99,11 @@ class ContractPlugView final : public Steinberg::CPluginView,
 
     /// The editor, or null after `owner_terminated()`.
     Editor* editor() const {
-        return editor_.get();
+        return session_ ? session_->editor() : nullptr;
     }
     /// This view's parameter port, or null after `owner_terminated()`.
     StateStoreParamPort* param_port() const {
-        return port_.get();
+        return session_ ? session_->param_port() : nullptr;
     }
 
     /// The contract's parent kind for a VST3 platform type, or `none` for a
@@ -112,28 +114,11 @@ class ContractPlugView final : public Steinberg::CPluginView,
                                     Steinberg::int16 modifiers, bool is_down);
 
   private:
-    class Context;
-
-    ContractPlugView(PulpVst3Processor& owner, Processor& processor, state::StateStore& store,
-                     HostActionHandler host_action);
-    EditorSize current_size() const;
+    explicit ContractPlugView(PulpVst3Processor& owner);
     Steinberg::tresult offer(const EditorKeyEvent& event);
-    // The idle tick: one live chain per attachment. A tick that runs after
-    // stop_idle() sees `running` false and neither ticks nor re-posts.
-    struct IdleState;
-    void start_idle();
-    void stop_idle();
-    static void schedule_idle(std::shared_ptr<IdleState> state);
 
     PulpVst3Processor* owner_;
-    Processor* processor_;
-    // Declared in dependency order so the editor is destroyed first, then the
-    // context it was created with, then the port the context hands out.
-    std::unique_ptr<StateStoreParamPort> port_;
-    std::unique_ptr<Context> context_;
-    std::unique_ptr<Editor> editor_;
-    bool editor_attached_ = false;
-    std::shared_ptr<IdleState> idle_;
+    std::unique_ptr<ContractEditorSession> session_;
 };
 
 } // namespace pulp::format::vst3

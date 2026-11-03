@@ -1,9 +1,7 @@
 #include <pulp/format/vst3_contract_view.hpp>
 
-#include <pulp/events/main_thread_dispatcher.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/vst3_adapter.hpp>
-#include <pulp/runtime/log.hpp>
 #include <pulp/state/store.hpp>
 
 #include <pluginterfaces/base/keycodes.h>
@@ -17,129 +15,43 @@ namespace pulp::format::vst3 {
 
 using namespace Steinberg;
 
-// What the host gives the editor: this view's port, a resize request through
-// the host's IPlugFrame, and the adapter's host actions.
-class ContractPlugView::Context final : public EditorContext {
-  public:
-    Context(ContractPlugView& view, ParamPort& port, EditorHostKind kind,
-            HostActionHandler host_action)
-        : view_(view), port_(port), kind_(kind), host_action_(std::move(host_action)) {}
-
-    ParamPort& params() override {
-        return port_;
-    }
-    VisualPort* visuals() override {
-        return nullptr;
-    }
-    bool request_resize(const EditorSize& size) override {
-        if (view_.plugFrame == nullptr || size.width == 0 || size.height == 0)
-            return false;
-        ViewRect rect(0, 0, static_cast<int32>(size.width), static_cast<int32>(size.height));
-        return view_.plugFrame->resizeView(&view_, &rect) == kResultTrue;
-    }
-    bool host_action(const HostActionRequest& request) override {
-        return host_action_ ? host_action_(request) : false;
-    }
-    EditorHostKind host_kind() const override {
-        return kind_;
-    }
-
-  private:
-    ContractPlugView& view_;
-    ParamPort& port_;
-    EditorHostKind kind_;
-    HostActionHandler host_action_;
-};
-
 ContractPlugView* ContractPlugView::create(PulpVst3Processor& owner, Processor& processor,
                                            state::StateStore& store, EditorFactory& factory,
                                            HostActionHandler host_action) {
-    if (!factory.supports(EditorRole::editor))
-        return nullptr;
-    auto* view = new ContractPlugView(owner, processor, store, std::move(host_action));
-    view->editor_ = factory.create(processor, *view->context_, EditorRole::editor);
-    if (!view->editor_) {
-        runtime::log_error("VST3 editor: the editor factory built no editor");
+    auto* view = new ContractPlugView(owner);
+    ContractEditorSession::HostHooks hooks;
+    hooks.request_resize = [view](const EditorSize& size) {
+        if (view->plugFrame == nullptr)
+            return false;
+        ViewRect rect(0, 0, static_cast<int32>(size.width), static_cast<int32>(size.height));
+        return view->plugFrame->resizeView(view, &rect) == kResultTrue;
+    };
+    hooks.host_action = std::move(host_action);
+    view->session_ = ContractEditorSession::create(processor, store, factory, std::move(hooks));
+    if (!view->session_) {
         view->owner_ = nullptr;
         view->release();
         return nullptr;
     }
-    const auto size = view->current_size();
+    const auto size = view->session_->size();
     view->rect = ViewRect(0, 0, static_cast<int32>(size.width), static_cast<int32>(size.height));
     return view;
 }
 
-ContractPlugView::ContractPlugView(PulpVst3Processor& owner, Processor& processor,
-                                   state::StateStore& store, HostActionHandler host_action)
-    : CPluginView(nullptr), owner_(&owner), processor_(&processor),
-      port_(std::make_unique<StateStoreParamPort>(store)),
-      context_(std::make_unique<Context>(*this, *port_, processor.editor_host_kind(),
-                                         std::move(host_action))) {}
-
-struct ContractPlugView::IdleState {
-    ContractPlugView* view = nullptr;
-    bool running = false;
-};
-
-void ContractPlugView::start_idle() {
-    stop_idle();
-    idle_ = std::make_shared<IdleState>();
-    idle_->view = this;
-    idle_->running = true;
-    schedule_idle(idle_);
-}
-
-void ContractPlugView::stop_idle() {
-    if (idle_) {
-        idle_->running = false;
-        idle_->view = nullptr;
-        idle_.reset();
-    }
-}
-
-void ContractPlugView::schedule_idle(std::shared_ptr<IdleState> state) {
-    // Every step runs on the main thread, as do attached(), removed() and the
-    // view's destruction, so the flag needs no synchronization: a tick queued
-    // before stop_idle() sees it cleared and stops the chain.
-    events::MainThreadDispatcher::call_async_after(
-        [state] {
-            if (!state->running || state->view == nullptr)
-                return;
-            auto* view = state->view;
-            if (view->editor_ && view->editor_attached_)
-                view->editor_->idle();
-            if (state->running)
-                schedule_idle(state);
-        },
-        kIdleIntervalMs);
-}
+ContractPlugView::ContractPlugView(PulpVst3Processor& owner)
+    : CPluginView(nullptr), owner_(&owner) {}
 
 ContractPlugView::~ContractPlugView() {
-    stop_idle();
-    // A host that releases the view without removed() has already torn down
-    // the window it was attached to.
-    if (editor_ && editor_attached_)
-        editor_->invalidate();
-    editor_.reset();
-    context_.reset();
-    port_.reset();
+    // Destroying the session invalidates an editor the host never detached.
+    session_.reset();
     if (owner_ != nullptr)
         owner_->forget_contract_view(this);
 }
 
 void ContractPlugView::owner_terminated() {
-    stop_idle();
-    if (port_)
-        port_->release_all();
-    if (editor_) {
-        editor_->invalidate();
-        editor_.reset();
-    }
-    editor_attached_ = false;
-    context_.reset();
-    port_.reset();
+    if (session_)
+        session_->invalidate();
     owner_ = nullptr;
-    processor_ = nullptr;
 }
 
 NativeParentKind ContractPlugView::parent_kind(FIDString type) {
@@ -158,14 +70,14 @@ NativeParentKind ContractPlugView::parent_kind(FIDString type) {
 
 tresult PLUGIN_API ContractPlugView::isPlatformTypeSupported(FIDString type) {
     const auto kind = parent_kind(type);
-    if (!editor_ || kind == NativeParentKind::none)
+    if (editor() == nullptr || kind == NativeParentKind::none)
         return kResultFalse;
-    return editor_->supports_parent(kind) ? kResultTrue : kResultFalse;
+    return editor()->supports_parent(kind) ? kResultTrue : kResultFalse;
 }
 
 tresult PLUGIN_API ContractPlugView::attached(void* parent, FIDString type) {
     const auto kind = parent_kind(type);
-    if (!editor_ || parent == nullptr || kind == NativeParentKind::none || editor_attached_)
+    if (!session_ || parent == nullptr || kind == NativeParentKind::none)
         return kResultFalse;
     NativeParent native;
     native.kind = kind;
@@ -173,23 +85,14 @@ tresult PLUGIN_API ContractPlugView::attached(void* parent, FIDString type) {
         native.window_id = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(parent));
     else
         native.handle = parent;
-    if (!editor_->attach(native)) {
-        runtime::log_error("VST3 editor: the editor did not attach to the host window");
+    if (!session_->attach(native))
         return kResultFalse;
-    }
-    editor_attached_ = true;
-    start_idle();
     return CPluginView::attached(parent, type);
 }
 
 tresult PLUGIN_API ContractPlugView::removed() {
-    stop_idle();
-    // Closing the window mid-drag must still balance every beginEdit.
-    if (port_)
-        port_->release_all();
-    if (editor_ && editor_attached_)
-        editor_->detach();
-    editor_attached_ = false;
+    if (session_)
+        session_->detach();
     return CPluginView::removed();
 }
 
@@ -272,11 +175,11 @@ EditorKeyEvent ContractPlugView::key_event(char16 key, int16 key_code, int16 mod
 }
 
 tresult ContractPlugView::offer(const EditorKeyEvent& event) {
-    if (!editor_ || !editor_attached_)
-        return kResultFalse;
     // kResultFalse hands the key back to the host: Space then reaches the
     // host's transport, which is what forward means.
-    return editor_->offer_key(event) == KeyDisposition::consumed ? kResultTrue : kResultFalse;
+    if (!session_)
+        return kResultFalse;
+    return session_->offer_key(event) == KeyDisposition::consumed ? kResultTrue : kResultFalse;
 }
 
 tresult PLUGIN_API ContractPlugView::onKeyDown(char16 key, int16 keyCode, int16 modifiers) {
@@ -287,24 +190,12 @@ tresult PLUGIN_API ContractPlugView::onKeyUp(char16 key, int16 keyCode, int16 mo
     return offer(key_event(key, keyCode, modifiers, false));
 }
 
-EditorSize ContractPlugView::current_size() const {
-    if (!editor_)
-        return {};
-    auto size = editor_->size();
-    if (size.width == 0 || size.height == 0) {
-        const auto hints = editor_->size_hints();
-        size.width = hints.preferred_width;
-        size.height = hints.preferred_height;
-    }
-    return size;
-}
-
 tresult PLUGIN_API ContractPlugView::getSize(ViewRect* size) {
     if (size == nullptr)
         return kInvalidArgument;
-    if (!editor_)
+    if (editor() == nullptr)
         return kResultFalse;
-    const auto s = current_size();
+    const auto s = session_->size();
     *size = ViewRect(0, 0, static_cast<int32>(s.width), static_cast<int32>(s.height));
     return kResultTrue;
 }
@@ -312,65 +203,42 @@ tresult PLUGIN_API ContractPlugView::getSize(ViewRect* size) {
 tresult PLUGIN_API ContractPlugView::onSize(ViewRect* newSize) {
     if (newSize == nullptr)
         return kInvalidArgument;
-    if (!editor_ || newSize->getWidth() <= 0 || newSize->getHeight() <= 0)
+    if (!session_ || newSize->getWidth() <= 0 || newSize->getHeight() <= 0)
         return kResultFalse;
-    EditorSize size = editor_->size();
-    size.width = static_cast<std::uint32_t>(newSize->getWidth());
-    size.height = static_cast<std::uint32_t>(newSize->getHeight());
-    if (!editor_->set_size(size))
+    if (!session_->set_size(static_cast<std::uint32_t>(newSize->getWidth()),
+                            static_cast<std::uint32_t>(newSize->getHeight())))
         return kResultFalse;
     return CPluginView::onSize(newSize);
 }
 
 tresult PLUGIN_API ContractPlugView::setContentScaleFactor(ScaleFactor factor) {
-    if (!editor_ || !(factor > 0.0f))
+    if (!session_)
         return kResultFalse;
-    // The editor keeps the scale in its size, so a later onSize() carries it.
-    EditorSize size = current_size();
-    size.scale = static_cast<double>(factor);
-    return editor_->set_size(size) ? kResultTrue : kResultFalse;
+    return session_->set_scale(static_cast<double>(factor)) ? kResultTrue : kResultFalse;
 }
 
 tresult PLUGIN_API ContractPlugView::onFocus(TBool state) {
-    if (!editor_)
+    if (editor() == nullptr)
         return kResultFalse;
-    editor_->focus_changed(state != 0);
+    session_->focus_changed(state != 0);
     return kResultTrue;
 }
 
 tresult PLUGIN_API ContractPlugView::canResize() {
-    if (!editor_)
-        return kResultFalse;
-    // Equal, non-zero minimum and maximum on both axes mean a fixed size.
-    const auto h = editor_->size_hints();
-    const bool fixed = h.min_width > 0 && h.min_width == h.max_width && h.min_height > 0 &&
-                       h.min_height == h.max_height;
-    return fixed ? kResultFalse : kResultTrue;
+    return session_ && session_->resizable() ? kResultTrue : kResultFalse;
 }
 
 tresult PLUGIN_API ContractPlugView::checkSizeConstraint(ViewRect* rect) {
     if (rect == nullptr)
         return kInvalidArgument;
-    if (!editor_ || rect->getWidth() <= 0 || rect->getHeight() <= 0)
+    if (!session_ || rect->getWidth() <= 0 || rect->getHeight() <= 0)
         return kResultFalse;
-    EditorSize proposed = editor_->size();
-    proposed.width = static_cast<std::uint32_t>(rect->getWidth());
-    proposed.height = static_cast<std::uint32_t>(rect->getHeight());
-    auto adjusted = editor_->adjust_size(proposed);
-    const auto h = editor_->size_hints();
-    auto clamp = [](std::uint32_t v, std::uint32_t lo, std::uint32_t hi) {
-        if (lo > 0 && v < lo)
-            v = lo;
-        if (hi > 0 && v > hi)
-            v = hi;
-        return v;
-    };
-    adjusted.width = clamp(adjusted.width, h.min_width, h.max_width);
-    adjusted.height = clamp(adjusted.height, h.min_height, h.max_height);
-    if (adjusted.width == 0 || adjusted.height == 0)
+    auto width = static_cast<std::uint32_t>(rect->getWidth());
+    auto height = static_cast<std::uint32_t>(rect->getHeight());
+    if (!session_->constrain(width, height))
         return kResultFalse;
-    rect->right = rect->left + static_cast<int32>(adjusted.width);
-    rect->bottom = rect->top + static_cast<int32>(adjusted.height);
+    rect->right = rect->left + static_cast<int32>(width);
+    rect->bottom = rect->top + static_cast<int32>(height);
     return kResultTrue;
 }
 
