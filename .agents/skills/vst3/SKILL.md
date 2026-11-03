@@ -784,18 +784,22 @@ that check runs before `has_editor()`. Things to keep straight:
   `release_all()` before `Editor::detach()`, so a window closed mid-drag still
   sends `endEdit`.
 - `terminate()` and the adapter's destructor call `owner_terminated()` on
-  every view the host still holds. The editor is invalidated and destroyed
-  there because its factory belongs to the processor about to be reset. Do not
-  move that call after `processor_.reset()`.
+  every view the host still holds. The view closes the editor in order there:
+  stop idle, release gestures, `Editor::detach()` (the host's NSView is still
+  alive), then destroy, because the editor's factory belongs to the processor
+  about to be reset. `invalidate()` is only for a parent that is already gone.
+  Do not move that call after `processor_.reset()`.
 - `onKeyDown` returns `kResultFalse` for a forwarded key, which is how Space
   stays the host's transport key. Return `kResultTrue` only for `consumed`.
-- VST3 has no idle callback, so the view ticks `Editor::idle()` itself with a
-  paced `MainThreadDispatcher::call_async_after` chain (16 ms) that runs only
-  while attached. `removed()`, `owner_terminated()` and the destructor stop it.
-  A tick already queued then sees the cleared flag and neither ticks nor
-  touches the view. Without a registered main-thread backend (the Windows and
-  Linux stubs today) nothing ticks. Tests drive the chain through their own
-  queued backend, registered after `initialize()` so it is the active one.
+- VST3 has no idle callback, so the view ticks `Editor::idle()` itself from a
+  `detail::MainThreadTimer` (16 ms) that runs only while attached. On Apple it
+  is a main-queue `dispatch_source`: `stop()` cancels it on the main thread
+  (a call from another thread waits for that), so no tick runs after stop
+  returns. `removed()`, `owner_terminated()` and the destructor stop it.
+  Elsewhere it is a `MainThreadDispatcher::call_async_after` chain; without a
+  registered main-thread backend (the Windows and Linux stubs today) nothing
+  ticks. Tests pump the real main run loop on Apple, so idle assertions must
+  wait for a tick rather than count exact ones.
 - `setContentScaleFactor()` (`IPlugViewContentScaleSupport`, declared through
   the view's `DEFINE_INTERFACES`) hands the scale to `Editor::set_size()`. Later
   `onSize()` calls take the scale from `Editor::size()`, so an editor must report

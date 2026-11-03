@@ -304,6 +304,10 @@ pulp_add_test_suite(pulp-test-host-parameter-edit GROUP pulp-test-group-cap-form
 pulp_add_test_suite(pulp-test-editor-host GROUP pulp-test-group-cap-format
     LIBRARIES pulp::format pulp::state)
 
+# The cancellable main-thread timer behind contract editors' idle ticks.
+pulp_add_test_suite(pulp-test-main-thread-timer GROUP pulp-test-group-cap-format
+    LIBRARIES pulp::format)
+
 # Plugin registry: legacy single global slot + keyed multi-plugin-bundle table.
 pulp_add_test_suite(pulp-test-plugin-registry GROUP pulp-test-group-cap-format
     LIBRARIES pulp::format)

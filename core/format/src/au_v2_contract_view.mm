@@ -20,11 +20,14 @@
 //                                     continues up the responder chain to the
 //                                     host, so Space stays its transport key
 //   container deallocates          -> every gesture released, Editor::detach()
-//   AU instance disposed first     -> its ContractSessionRegistry invalidates
-//                                     the editor before the processor goes
+//   AU instance disposed first     -> its ContractSessionRegistry closes the
+//                                     editor in order (gestures released,
+//                                     Editor::detach(), destroyed) on the main
+//                                     thread before the processor goes; the
+//                                     container is still alive, so the editor
+//                                     is never invalidated here
 //
-// Idle runs from the session's own main-thread tick (the AU instance registers
-// the main-thread backend). Edits go through the session's StateStoreParamPort
+// Idle runs from the session's own main-thread timer. Edits go through the session's StateStoreParamPort
 // into the AU instance's store, which the adapter already reports to the host.
 //
 // Class names are per plug-in (PULP_AU_CONTRACT_VIEW_FACTORY_CLASS and

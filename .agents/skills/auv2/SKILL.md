@@ -247,12 +247,19 @@ per plug-in, and the factory class is exported. Things to keep straight:
   (effect, instrument, MIDI processor) declares a `ContractSessionRegistry
   contract_sessions_` after `processor_` and hands it out through
   `PulpEditorContext::contract_sessions`, and the view registers its session
-  there. The adapter's destruction then invalidates the editor before the
-  processor that owns its factory goes. Keep that member after `processor_`.
+  there. The adapter's destruction then closes the editor in order (gestures
+  released, `detach()`, destroyed) before the processor that owns its factory
+  goes. The container is still alive then, so the editor is detached, never
+  invalidated. Keep that member after `processor_`.
+- `AudioComponentInstanceDispose` may run off the main thread. The registry's
+  `close_all()` then waits for the main thread to close the editors
+  (`detail::run_on_main_thread_and_wait`), so a host that disposes from a worker
+  while its main thread is blocked on that worker would deadlock; no host is
+  known to do that.
 - `uiViewForAudioUnit:` returns an autoreleased view. A test that must observe
   the view's `-dealloc` before disposing the unit has to drain its own
   autorelease pool first. Otherwise the view outlives the unit and the
-  invalidate path runs instead of detach.
+  registry's close runs instead of the view's.
 - AU v2 has no resize request. An editor's `request_resize` moves the
   container's frame, and the host follows the frame.
 - `pulp-test-au-v2-contract-adapters` builds all three adapter types from
