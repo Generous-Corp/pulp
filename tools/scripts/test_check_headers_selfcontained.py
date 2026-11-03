@@ -90,6 +90,59 @@ class HeaderSelfContainedTests(unittest.TestCase):
         )
         self.assertNotIn("tools/scripts", flags)
 
+    def test_registered_owner_target_supplies_the_flags(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            header = root / "core/dataplane/include/pulp/dataplane/visualization_bridge.hpp"
+            header.parent.mkdir(parents=True)
+            header.write_text("#pragma once\n", encoding="utf-8")
+            cc = root / "compile_commands.json"
+            cc.write_text(
+                json.dumps([
+                    {
+                        "file": "core/dataplane/src/value_source.cpp",
+                        "directory": td,
+                        "arguments": ["c++", "-Icore-only", "-c", "value_source.cpp",
+                                      "-o", "CMakeFiles/pulp-dataplane.dir/src/value_source.cpp.o"],
+                    },
+                    {
+                        "file": "core/dataplane/src/visualization_bridge.cpp",
+                        "directory": td,
+                        "arguments": ["c++", "-Iwith-audio", "-c", "visualization_bridge.cpp",
+                                      "-o", "CMakeFiles/pulp-dataplane-audio.dir/src/visualization_bridge.cpp.o"],
+                    },
+                ]),
+                encoding="utf-8",
+            )
+            self.assertEqual(checker.owner_target_of(header, root), "pulp-dataplane-audio")
+            self.assertEqual(checker.load_module_flags(cc)["core/dataplane"][0], ["-Icore-only"])
+            self.assertEqual(
+                checker.load_target_flags(cc, {"pulp-dataplane-audio"}),
+                {"pulp-dataplane-audio": (["-Iwith-audio"], td)},
+            )
+            seen: list[list[str]] = []
+
+            def fake_check(_header, flags, _cwd, _compiler):
+                seen.append(flags)
+                return None
+
+            argv = ["prog", "--compile-commands", str(cc), "--repo-root", td,
+                    "--headers", str(root / "list.txt")]
+            (root / "list.txt").write_text(
+                "core/dataplane/include/pulp/dataplane/visualization_bridge.hpp\n", encoding="utf-8")
+            with mock.patch.object(sys, "argv", argv), \
+                    mock.patch.object(checker, "check_header", side_effect=fake_check), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(checker.main(), 0)
+            self.assertEqual(seen, [["-Iwith-audio"]])
+
+            # A registered owner without a compile entry fails rather than
+            # falling back to the module's narrower flags.
+            cc.write_text(json.dumps([json.loads(cc.read_text())[0]]), encoding="utf-8")
+            with mock.patch.object(sys, "argv", argv), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(checker.main(), 1)
+
     def test_load_module_flags_prefers_cpp_over_c_for_a_cpp_header(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             cc = Path(td) / "compile_commands.json"

@@ -11,7 +11,7 @@ namespace pulp::view {
 
 using dataplane::SpectrumData;
 using dataplane::VisualizationBacklogPolicy;
-using dataplane::VisualizationBenchCounters;
+using dataplane::VisualizationBenchSink;
 using dataplane::VisualizationBridge;
 using dataplane::VisualizationConfig;
 using dataplane::WaveformData;

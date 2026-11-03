@@ -25,14 +25,15 @@
 
 namespace pulp::dataplane {
 
-/// Benchmark timing sink for the bridge's audio-thread work. The bridge adds
-/// elapsed microseconds with relaxed atomics; the caller owns the counters,
-/// reads or resets them off the audio thread, and keeps them alive while they
-/// are installed. The bridge records into them only when PULP_BENCHMARK is
-/// defined.
-struct VisualizationBenchCounters {
-    std::atomic<double> audio_copy_total_us{0.0};
-    std::atomic<double> triplebuffer_publish_total_us{0.0};
+/// Where the bridge reports its benchmark timings. Each member points at an
+/// accumulator the caller owns (for example the matching fields of
+/// pulp::render::bench::PerfCounters), so the bridge adds elapsed microseconds
+/// straight into the caller's snapshot without naming its type. A null member
+/// is not recorded. The accumulators must outlive the installed sink. The
+/// bridge records only when PULP_BENCHMARK is defined.
+struct VisualizationBenchSink {
+    std::atomic<double>* audio_copy_total_us = nullptr;
+    std::atomic<double>* triplebuffer_publish_total_us = nullptr;
 };
 
 /// Published one-sided amplitude spectrum (lock-free via TripleBuffer).
@@ -233,12 +234,11 @@ class VisualizationBridge {
     void process(const float* const* channels, int num_channels, int num_samples) noexcept;
 
 #ifdef PULP_BENCHMARK
-    /// Install (or clear) the benchmark perf-counter sink. Call from the
-    /// UI/main thread before the audio callback starts accumulating.
-    /// The pointer is stored by raw reference — caller owns the counters
-    /// and must outlive this bridge.
-    void set_bench_counters(VisualizationBenchCounters* counters) {
-        bench_counters_ = counters;
+    /// Install the benchmark timing sink; a default-constructed sink clears
+    /// it. Call from the UI/main thread before the audio callback starts
+    /// accumulating, never while it runs.
+    void set_bench_sink(const VisualizationBenchSink& sink) {
+        bench_sink_ = sink;
     }
 #endif
 
@@ -360,7 +360,7 @@ class VisualizationBridge {
     std::uint64_t epoch_ = 0;
 
 #ifdef PULP_BENCHMARK
-    VisualizationBenchCounters* bench_counters_ = nullptr;
+    VisualizationBenchSink bench_sink_{};
 #endif
 };
 

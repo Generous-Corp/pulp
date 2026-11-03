@@ -1177,6 +1177,15 @@ pulp_add_test_suite(pulp-test-stft GROUP pulp-test-group-core-signal
 pulp_add_test_suite(pulp-test-visualization
     SOURCES test_visualization.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::view)
+# The benchmark-only VisualizationBridge API, compiled (never linked) with
+# PULP_BENCHMARK in every build so the opt-in benchmark consumers cannot rot.
+if(TARGET pulp-render)
+    add_library(pulp-visualization-bench-consumer-check OBJECT
+        fixtures/benchmark_consumer/visualization_bench_consumer.cpp)
+    target_link_libraries(pulp-visualization-bench-consumer-check
+        PRIVATE pulp::view-audio pulp::render)
+    target_compile_definitions(pulp-visualization-bench-consumer-check PRIVATE PULP_BENCHMARK)
+endif()
 
 # Clipboard tests
 pulp_add_test_suite(pulp-test-clipboard GROUP pulp-test-group-core-platform

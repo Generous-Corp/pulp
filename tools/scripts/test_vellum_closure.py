@@ -28,6 +28,35 @@ from vellum_closure import (
 )
 
 
+
+# Edges from the two view umbrellas that the allowlist may admit, by exact
+# name and debt. "OWNER DECISION 2026-11-03: the data-plane edges enter the
+# Vellum closure gate as temporary debt" admits view-platform's data-plane edge;
+# nothing else from either umbrella is admitted, and a prefix entry that could
+# match one of their edges never is.
+VIEW_UMBRELLA_SOURCES = ("pulp-view-native->", "pulp-view-platform->")
+VIEW_UMBRELLA_ADMITTED_EDGES = {
+    ("pulp-view-platform->pulp-dataplane", "M2-dataplane"),
+}
+
+
+def view_umbrella_edge_admissions(entries):
+    """Ids of allowlist entries that would admit a view-umbrella edge unexpectedly."""
+    offending = []
+    for entry in entries:
+        match = entry.get("match", "")
+        if entry.get("match_type", "exact") == "prefix":
+            if match.startswith(VIEW_UMBRELLA_SOURCES) or any(
+                source.startswith(match) for source in VIEW_UMBRELLA_SOURCES
+            ):
+                offending.append(entry["id"])
+            continue
+        if not match.startswith(VIEW_UMBRELLA_SOURCES):
+            continue
+        if entry.get("kind") != "edge" or (match, entry.get("debt_id")) not in VIEW_UMBRELLA_ADMITTED_EDGES:
+            offending.append(entry["id"])
+    return offending
+
 class ClosurePolicyTests(unittest.TestCase):
     def test_policy_matches_boundaries(self):
         self.assertTrue(policy_target_forbidden("pulp::audio"))
@@ -1014,13 +1043,37 @@ class MirroredLinkTests(unittest.TestCase):
     def test_view_platform_is_carried_by_the_audio_free_target(self):
         # pulp-view-native is the Pulp-kept umbrella that adds the audio widgets;
         # the view-platform unit carries pulp-view-platform, and no allowlist
-        # entry admits an audio edge from either.
+        # entry admits an edge from either except the exact data-plane debt.
         from vellum_closure import unit_manifest_targets
         self.assertEqual(unit_manifest_targets(self.UNITS, "view-platform"), ["pulp-view-platform"])
         entries = load_allowlist(REPO_ROOT / "tools/scripts/vellum_closure_allowlist.json")
         self.assertEqual([e["id"] for e in entries if e["debt_id"] == "P4-view-audio"], [])
-        self.assertEqual([e["id"] for e in entries if e.get("match", "").startswith(("pulp-view-native->", "pulp-view-platform->"))
-                          and e["match"].endswith(("audio", "midi", "signal"))], [])
+        self.assertEqual(view_umbrella_edge_admissions(entries), [])
+
+    def test_view_umbrella_guard_refuses_every_bypass(self):
+        base = {"owner": "o", "debt_id": "d", "kind": "edge", "exit_criterion": "x"}
+        bypasses = [
+            {"id": "prefix-all", "match": "pulp-view-platform->", "match_type": "prefix"},
+            {"id": "prefix-audio", "match": "pulp-view-platform->pulp-a", "match_type": "prefix"},
+            {"id": "prefix-above", "match": "pulp-view-", "match_type": "prefix"},
+            {"id": "native-host", "match": "pulp-view-native->pulp-host"},
+            {"id": "platform-format", "match": "pulp-view-platform->pulp-format"},
+            {"id": "platform-audio", "match": "pulp-view-platform->pulp-view-audio"},
+            {"id": "dataplane-as-prefix", "match": "pulp-view-platform->pulp-dataplane",
+             "match_type": "prefix"},
+            {"id": "dataplane-wrong-debt", "match": "pulp-view-platform->pulp-dataplane",
+             "debt_id": "other"},
+        ]
+        for bypass in bypasses:
+            with self.subTest(bypass=bypass["id"]):
+                entry = {**base, **bypass}
+                self.assertEqual(view_umbrella_edge_admissions([entry]), [bypass["id"]])
+        exact = {**base, "id": "m2", "debt_id": "M2-dataplane",
+                 "match": "pulp-view-platform->pulp-dataplane"}
+        self.assertEqual(view_umbrella_edge_admissions([exact]), [])
+        # Debts from other mirrored targets are outside this guard.
+        other = {**base, "id": "core", "match": "pulp-view-core->pulp-dataplane"}
+        self.assertEqual(view_umbrella_edge_admissions([other]), [])
 
     def test_empty_allowlist_loads_and_malformed_entries_fail(self):
         with tempfile.TemporaryDirectory() as td:

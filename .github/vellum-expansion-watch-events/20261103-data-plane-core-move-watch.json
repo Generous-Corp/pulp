@@ -8,9 +8,10 @@
   "capability_families": [
     "design-ir-contract",
     "design-source-ingest",
-    "render-assets-and-backends"
+    "render-assets-and-backends",
+    "visual-proof-harness"
   ],
-  "rationale": "The editor data plane (host parameter surfaces, value sources, value channels, AudioBridge and VisualizationBridge) moves out of core/view into the UI-free Pulp module core/dataplane. Under core/view only build wiring, forward declarations and forwarding headers change: the pulp/view headers include their pulp/dataplane counterparts and re-export the names into pulp::view, view-core and view-audio link the new targets, and the sources leave PulpViewSources.cmake. design_param_binding.hpp only drops a forward declaration of HostParamSurface. No design-import, Chromium, rendering, asset or packaging behaviour changes and no authority moves; Vellum does not inherit the move. The design-import native materializer and C++ codegen compile tests add core/dataplane/include to the include roots their generated sources may read, because view.hpp now includes <pulp/dataplane/fwd.hpp>; the generated sources themselves do not change.",
+  "rationale": "The editor data plane (host parameter surfaces, value sources, value channels, AudioBridge and VisualizationBridge) moves out of core/view into the UI-free Pulp module core/dataplane. Under core/view only build wiring, forward declarations and forwarding headers change: the pulp/view headers include their pulp/dataplane counterparts and re-export the names into pulp::view, view-core and view-audio link the new targets, and the sources leave PulpViewSources.cmake. design_param_binding.hpp only drops a forward declaration of HostParamSurface. No design-import, Chromium, rendering, asset or packaging behaviour changes and no authority moves; Vellum does not inherit the move. The design-import native materializer and C++ codegen compile tests add core/dataplane/include to the include roots their generated sources may read, because view.hpp now includes <pulp/dataplane/fwd.hpp>; the generated sources themselves do not change. examples/ui-preview, which the visual-proof-harness family selects, changes only its PULP_BENCHMARK wiring: the bridge reports its timings into the PerfCounters snapshot through VisualizationBenchSink. Its rendering does not change.",
   "tests": [
     "ctest --test-dir build -R pulp-test-value-channel-visual-port",
     "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",

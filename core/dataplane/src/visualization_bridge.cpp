@@ -26,10 +26,7 @@ void VisualizationBridge::process(const float* const* channels, int num_channels
 #ifdef PULP_BENCHMARK
         const double t0 = bench_now_us();
         meter_buf_.write(data);
-        if (bench_counters_) {
-            bench_counters_->triplebuffer_publish_total_us.fetch_add(bench_now_us() - t0,
-                                                                     std::memory_order_relaxed);
-        }
+        bench_add(bench_sink_.triplebuffer_publish_total_us, t0);
 #else
         meter_buf_.write(data);
 #endif
@@ -101,10 +98,7 @@ void VisualizationBridge::process(const float* const* channels, int num_channels
 #endif
     (void)capture_.write(block, requested_frames);
 #ifdef PULP_BENCHMARK
-    if (bench_counters_) {
-        bench_counters_->audio_copy_total_us.fetch_add(bench_now_us() - copy_start,
-                                                       std::memory_order_relaxed);
-    }
+    bench_add(bench_sink_.audio_copy_total_us, copy_start);
 #endif
 }
 
@@ -251,10 +245,7 @@ bool VisualizationBridge::poll() {
 #endif
         spectrum_buf_.write(spec);
 #ifdef PULP_BENCHMARK
-        if (bench_counters_) {
-            bench_counters_->triplebuffer_publish_total_us.fetch_add(bench_now_us() - publish_start,
-                                                                     std::memory_order_relaxed);
-        }
+        bench_add(bench_sink_.triplebuffer_publish_total_us, publish_start);
 #endif
     }
 
@@ -273,10 +264,7 @@ bool VisualizationBridge::poll() {
 #endif
         waveform_buf_.write(wd);
 #ifdef PULP_BENCHMARK
-        if (bench_counters_) {
-            bench_counters_->triplebuffer_publish_total_us.fetch_add(bench_now_us() - publish_start,
-                                                                     std::memory_order_relaxed);
-        }
+        bench_add(bench_sink_.triplebuffer_publish_total_us, publish_start);
 #endif
     }
 
