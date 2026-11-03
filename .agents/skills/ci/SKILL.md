@@ -13153,3 +13153,13 @@ rather than waiting. Read the reviews list at the head, not the summary field.
   directories afterwards because its disk runs near full.
 - When a host's pre-push hook refuses the heavy suites, push the branch from
   m1 (a named branch in a fresh worktree) instead of bypassing the hook.
+
+## A restore-only FetchContent cache must cover where `setup.sh` clones
+
+`setup.sh` clones every dependency into the shared source cache
+(`~/.cache/pulp/fetchcontent-src` on Linux), not into `<build>/_deps`. A cache
+step that lists only `_deps` never hits, so each run clones three.js and the SDK
+submodules cold (about 10 minutes) and a bootstrap step with a 10-minute limit
+dies. Main's Linux build leg saves both paths, and `drift-fast` and
+`read-audit-nightly` restore them. The path list is part of the cache version,
+so keep it identical across the save and every restore.

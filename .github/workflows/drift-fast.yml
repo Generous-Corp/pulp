@@ -47,7 +47,9 @@ jobs:
     # also list this workflow in its runner group's selected workflows
     # (tools/ci/verify_linux_runner_group.py), or the job is never assigned.
     runs-on: ${{ fromJSON(vars.PULP_DRIFT_FAST_RUNS_ON_JSON || '"ubuntu-latest"') }}
-    timeout-minutes: 20
+    # The job budget must exceed the cold bootstrap (up to 20 min), configure and
+    # the checks; GitHub reports a job-timeout kill as "cancelled".
+    timeout-minutes: 40
     env:
       PULP_BUILD_DIR: build-linux
     steps:
@@ -83,19 +85,22 @@ jobs:
         uses: ./.github/actions/install-linux-build-deps
 
       # Restore only: main's Linux build leg publishes this cache, and this job
-      # uses the same key and path so its configure reuses those sources. It
-      # never saves.
+      # uses the same key and paths (the path list is part of the cache
+      # version). setup.sh clones into the shared ~/.cache/pulp/fetchcontent-src
+      # on Linux, so that directory must be restored or every run re-clones
+      # three.js and the SDK submodules cold. It never saves.
       - name: Restore FetchContent sources
         uses: actions/cache/restore@v6
         with:
           path: |
             ${{ github.workspace }}/${{ env.PULP_BUILD_DIR }}/_deps
+            ~/.cache/pulp/fetchcontent-src
           key: ${{ runner.os }}-linux-fetchcontent-${{ hashFiles('setup.sh') }}
           restore-keys: |
             ${{ runner.os }}-linux-fetchcontent-
 
       - name: Bootstrap repository dependencies
-        timeout-minutes: 10
+        timeout-minutes: 20
         run: ./setup.sh --ci --deps-only
 
       # The gate's own configure (Release, examples off, GPU on), minus the
