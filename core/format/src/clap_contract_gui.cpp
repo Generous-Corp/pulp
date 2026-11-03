@@ -298,4 +298,8 @@ const clap_plugin_timer_support_t* contract_timer_extension(const clap_plugin_t*
     return applies(self_of(plugin)) ? &s_contract_timer : nullptr;
 }
 
+ContractEditorSession* contract_gui_session(const clap_plugin_t* plugin) {
+    return session_of(plugin);
+}
+
 } // namespace pulp::format::clap_adapter

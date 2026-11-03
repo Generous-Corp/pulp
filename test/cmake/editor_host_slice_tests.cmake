@@ -6,6 +6,15 @@
 # PULP_EDITOR_HOST_SLICE_VELLUM_PREFIX names an installed Vellum SDK built
 # with the mirror and the RmlUi module.
 
+# The acceptance runner's verdict logic (tools/scripts/editor_host_acceptance.py)
+# needs neither a build of the slice nor a Vellum SDK, so it is tested always.
+if(Python3_EXECUTABLE)
+    add_test(NAME editor-host-acceptance-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_editor_host_acceptance.py")
+    set_tests_properties(editor-host-acceptance-selftest PROPERTIES LABELS "editor-host")
+endif()
+
 set(PULP_EDITOR_HOST_SLICE_VELLUM_PREFIX "" CACHE PATH
     "Installed Vellum SDK (mirror + RmlUi) for the editor-host slice; empty disables it")
 
@@ -59,7 +68,7 @@ file(READ "${_slice_dir}/knob_led.rml" _slice_rml)
 file(WRITE "${_slice_out}/gen/slice_rmlui_document.hpp"
     "#pragma once\ninline constexpr const char* kSliceRmlDocument = R\"rml(${_slice_rml})rml\";\n")
 
-foreach(_kind headless vellum rmlui)
+foreach(_kind headless vellum rmlui native)
     add_executable(pulp-slice-${_kind} ${_slice_dir}/slice_main.cpp)
     target_link_libraries(pulp-slice-${_kind} PRIVATE pulp-slice-harness)
     _pulp_slice_link_map(pulp-slice-${_kind})
@@ -87,7 +96,75 @@ set_target_properties(pulp-slice-rmlui PROPERTIES
     BUILD_RPATH "${PULP_EDITOR_HOST_SLICE_VELLUM_PREFIX}/lib")
 pulp_test_data(pulp-slice-rmlui NO_DEFINE PATHS test/editor_host_slice/knob_led.golden.png)
 
-foreach(_kind headless vellum rmlui)
+# Bring your own UI: a plain AppKit editor over the contract alone.
+target_sources(pulp-slice-native PRIVATE ${_slice_dir}/native_editor.mm)
+set_source_files_properties(${_slice_dir}/native_editor.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+target_compile_definitions(pulp-slice-native PRIVATE
+    SLICE_KIND="native" SLICE_EXPECT_EDITOR=1 SLICE_EXACT_DRAG=1 SLICE_HAS_LED=0
+    SLICE_VALUE_KEY="gain")
+
+# Each editor inside Pulp's real VST3, CLAP and AU v2 adapters, in process, and
+# as a headless standalone app. These link Pulp's format adapters (and the
+# standalone app its view stack), so the symbol census does not read them.
+set(_slice_editor_vellum ${_slice_dir}/vellum_editor.cpp)
+set(_slice_editor_rmlui ${_slice_dir}/rmlui_editor.cpp)
+set(_slice_editor_native ${_slice_dir}/native_editor.mm)
+set(_slice_value_key_vellum knob)
+set(_slice_value_key_rmlui gain)
+set(_slice_value_key_native gain)
+foreach(_kind vellum rmlui native)
+    add_executable(pulp-slice-formats-${_kind}
+        ${_slice_dir}/format_hosts_main.mm
+        ${_slice_dir}/format_hosts_clap_entry.cpp
+        ${_slice_dir}/format_hosts_au_entry.cpp
+        ${CMAKE_SOURCE_DIR}/core/format/src/au_v2_contract_view.mm
+        ${CMAKE_SOURCE_DIR}/core/format/src/vst3_no_editor.cpp
+        ${_slice_editor_${_kind}})
+    target_link_libraries(pulp-slice-formats-${_kind} PRIVATE
+        pulp-slice-harness pulp::format-clap-core clap ausdk
+        "-framework AudioToolbox" "-framework AudioUnit" "-framework CoreAudio")
+    target_compile_definitions(pulp-slice-formats-${_kind} PRIVATE
+        SLICE_KIND="${_kind}" SLICE_VALUE_KEY="${_slice_value_key_${_kind}}"
+        PULP_AU_CONTRACT_VIEW_FACTORY_CLASS=PulpAUContractViewFactory_Slice_${_kind}
+        PULP_AU_CONTRACT_HOST_VIEW_CLASS=PulpAUContractHostView_Slice_${_kind})
+    set_target_properties(pulp-slice-formats-${_kind} PROPERTIES CXX_STANDARD 23)
+    target_compile_options(pulp-slice-formats-${_kind} PRIVATE
+        $<$<COMPILE_LANGUAGE:OBJCXX>:-std=gnu++23>)
+    set_source_files_properties(${_slice_dir}/format_hosts_main.mm PROPERTIES
+        COMPILE_OPTIONS "-fobjc-arc")
+
+    add_executable(pulp-slice-standalone-${_kind}
+        ${_slice_dir}/standalone_main.cpp ${_slice_editor_${_kind}})
+    target_link_libraries(pulp-slice-standalone-${_kind} PRIVATE
+        pulp-slice-gain-meter pulp-slice-harness pulp::standalone)
+    target_compile_definitions(pulp-slice-standalone-${_kind} PRIVATE SLICE_KIND="${_kind}")
+endforeach()
+target_link_libraries(pulp-slice-formats-vellum PRIVATE pulp-slice-vellum-ui)
+target_link_libraries(pulp-slice-standalone-vellum PRIVATE pulp-slice-vellum-ui)
+foreach(_target pulp-slice-formats-vellum pulp-slice-standalone-vellum)
+    set_target_properties(${_target} PROPERTIES
+        BUILD_RPATH "${PULP_EDITOR_HOST_SLICE_VELLUM_PREFIX}/mirror/lib;${PULP_EDITOR_HOST_SLICE_VELLUM_PREFIX}/lib")
+endforeach()
+foreach(_target pulp-slice-formats-rmlui pulp-slice-standalone-rmlui)
+    target_include_directories(${_target} PRIVATE "${_slice_out}/gen")
+    target_link_libraries(${_target} PRIVATE VellumRmlUi::SoftRenderer)
+    set_target_properties(${_target} PROPERTIES
+        BUILD_RPATH "${PULP_EDITOR_HOST_SLICE_VELLUM_PREFIX}/lib")
+endforeach()
+foreach(_target pulp-slice-formats-native pulp-slice-standalone-native)
+    target_link_libraries(${_target} PRIVATE "-framework AppKit")
+endforeach()
+
+foreach(_kind vellum rmlui native)
+    add_test(NAME pulp-editor-host-formats-${_kind}
+        COMMAND pulp-slice-formats-${_kind})
+    add_test(NAME pulp-editor-host-standalone-${_kind}
+        COMMAND pulp-slice-standalone-${_kind} "${_slice_out}/run")
+    set_tests_properties(pulp-editor-host-formats-${_kind} pulp-editor-host-standalone-${_kind}
+        PROPERTIES LABELS "editor-host-slice")
+endforeach()
+
+foreach(_kind headless vellum rmlui native)
     add_test(NAME pulp-editor-host-slice-${_kind}
         COMMAND pulp-slice-${_kind} "${_slice_out}/run")
     set_tests_properties(pulp-editor-host-slice-${_kind} PROPERTIES
@@ -113,4 +190,6 @@ add_test(NAME pulp-editor-host-slice-symbols
 set_tests_properties(pulp-editor-host-slice-symbols PROPERTIES LABELS "editor-host-slice")
 
 add_custom_target(pulp-editor-host-slice DEPENDS
-    pulp-slice-headless pulp-slice-vellum pulp-slice-rmlui pulp-slice-vellum-ui)
+    pulp-slice-headless pulp-slice-vellum pulp-slice-rmlui pulp-slice-native pulp-slice-vellum-ui
+    pulp-slice-formats-vellum pulp-slice-formats-rmlui pulp-slice-formats-native
+    pulp-slice-standalone-vellum pulp-slice-standalone-rmlui pulp-slice-standalone-native)

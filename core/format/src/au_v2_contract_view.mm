@@ -213,6 +213,14 @@ EditorKeyEvent contract_key_event(unsigned short key_code, NSString* characters,
 
 namespace pulp::format::au {
 
+ContractEditorSession* contract_view_session(void* ns_view) {
+    id view = (__bridge id)ns_view;
+    if (view == nil || ![view isKindOfClass:[PULP_AU_CONTRACT_HOST_VIEW_CLASS class]])
+        return nullptr;
+    auto* session = [(PULP_AU_CONTRACT_HOST_VIEW_CLASS*)view session];
+    return session != nullptr && session->editor() != nullptr ? session : nullptr;
+}
+
 namespace {
 
 constexpr const char* kContractViewFactoryClassName =
