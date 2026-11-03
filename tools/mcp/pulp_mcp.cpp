@@ -747,7 +747,7 @@ static std::string handle_request_raw(const std::string& json) {
         else if (name == "pulp_status")
             result = handle_status(args_json);
         else if (name == "pulp_graph")
-            result = handle_graph(args_json);
+            result = pulp_mcp::handle_graph(args_json);
         else if (name == "pulp_validate")
             result = handle_validate(args_json);
         else if (name == "pulp_gpu_doctor")
