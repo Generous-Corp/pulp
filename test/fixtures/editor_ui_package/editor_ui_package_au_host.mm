@@ -8,9 +8,10 @@
 // The package module links no Pulp view layer (UI implies NO_EDITOR), so its
 // view is the editor-host contract's container. The host opens it, sizes it,
 // closes it, then opens it again and disposes the audio unit while the view is
-// still alive, as some hosts do: the instance's session registry must
-// invalidate the editor before the processor goes, and the view, released
-// afterwards, must not touch it. The module without a package must advertise
+// still alive, as some hosts do: the instance's session registry must close
+// the editor in order (detach, never invalidate, since the view still exists)
+// before the processor goes, and the view, released afterwards, must not touch
+// it again. The module without a package must advertise
 // no Cocoa view.
 
 #import <AppKit/AppKit.h>
@@ -137,10 +138,11 @@ int check_package(const char* path, NSWindow* window, const std::string& log_pat
                 [view release];
             }
         }
-        // An orderly close detaches the editor; disposing the instance first
-        // invalidates it (its session registry goes before the processor).
+        // An orderly close detaches the editor, and so does disposing the
+        // instance first (its session registry goes before the processor),
+        // once: the view released afterwards does not detach it again.
         const std::string events = take_editor_log(log_path);
-        const std::string expected = round == 0 ? "detach\n" : "invalidate\n";
+        const std::string expected = "detach\n";
         if (events != expected) {
             std::fprintf(stderr, "FAIL %s round %d: editor events \"%s\", expected \"%s\"\n", path,
                          round, events.c_str(), expected.c_str());

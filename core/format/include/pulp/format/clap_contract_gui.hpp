@@ -27,7 +27,9 @@
 //
 // Idle: when the host offers timer-support, a timer registered at set_parent()
 // drives Editor::idle() through this plug-in's timer-support extension;
-// otherwise the session's own main-thread tick does. CLAP has no key callback,
+// otherwise, or when the host refuses that timer, the session's own main-thread
+// timer does. The processor's editor factory is read once by clap_init() on the
+// main thread, since get_extension() may be called from any thread. CLAP has no key callback,
 // so keys reach the editor only through its own native view, and Space reaches
 // the host the way the host's window routes it.
 

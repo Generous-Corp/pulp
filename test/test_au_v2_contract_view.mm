@@ -20,7 +20,9 @@
 #include <pulp/runtime/alive_token.hpp>
 #include <pulp/state/store.hpp>
 
+#include <atomic>
 #include <memory>
+#include <thread>
 
 namespace pulp::format::au {
 EditorKeyEvent contract_key_event(unsigned short key_code, NSString* characters,
@@ -30,7 +32,7 @@ EditorKeyEvent contract_key_event(unsigned short key_code, NSString* characters,
 using pulp::test_support::contract_config;
 using pulp::test_support::contract_log;
 using pulp::test_support::EditorEnvironment;
-using pulp::test_support::QueuedMainThread;
+using pulp::test_support::MainLoop;
 using pulp::test_support::RecordingContractFactory;
 using pulp::test_support::reset_contract_recording;
 
@@ -268,33 +270,30 @@ TEST_CASE("an AU v2 contract editor ticks only while its view lives",
     FakeInstance instance(true);
     g_instance = &instance;
     AudioUnit au = fake_audio_unit();
-    QueuedMainThread main_thread;
+    MainLoop loop;
 
     @autoreleasepool {
         NSView* view = [open_view(au) retain];
         REQUIRE(view != nil);
-        REQUIRE(main_thread.pending() == 1);
-        for (int i = 0; i < 3; ++i)
-            REQUIRE(main_thread.run_pending() == 1);
-        REQUIRE(contract_log().idles == 3);
+        REQUIRE(loop.run_until([] { return contract_log().idles >= 3; }));
         [view release];
     }
-    main_thread.run_pending();
-    REQUIRE(contract_log().idles == 3);
-    REQUIRE(main_thread.pending() == 0);
+    const int at_release = contract_log().idles;
+    loop.run_for(0.1);
+    REQUIRE(contract_log().idles == at_release);
 
     AudioComponentInstanceDispose(au);
     g_instance = nullptr;
 }
 
-TEST_CASE("disposing the AU instance invalidates a contract editor its view still holds",
+TEST_CASE("disposing the AU instance closes a contract editor its view still holds",
           "[auv2][editor-host][au-contract]") {
     EditorEnvironment env;
     reset_contract_recording();
     auto instance = std::make_unique<FakeInstance>(true);
     g_instance = instance.get();
     AudioUnit au = fake_audio_unit();
-    QueuedMainThread main_thread;
+    MainLoop loop;
 
     @autoreleasepool {
         NSView* view = [open_view(au) retain];
@@ -303,19 +302,59 @@ TEST_CASE("disposing the AU instance invalidates a contract editor its view stil
         REQUIRE(instance->store.open_gesture_count() == 1);
 
         // The adapter's registry goes before its processor (member order).
+        // The host still holds the view, so the editor detaches from it in
+        // order rather than being invalidated.
         instance->sessions.reset();
-        REQUIRE(contract_log().saw("invalidate"));
-        REQUIRE_FALSE(contract_log().saw("detach"));
+        REQUIRE(contract_log().saw("detach"));
+        REQUIRE_FALSE(contract_log().saw("invalidate"));
         REQUIRE(contract_log().live == 0);
         REQUIRE(instance->store.open_gesture_count() == 0);
         instance.reset();
         g_instance = nullptr;
 
         // The view outlives its instance: resizing, ticking and releasing it
-        // touch nothing that is gone.
+        // touch nothing that is gone, and the editor is not detached twice.
+        const auto calls = contract_log().calls.size();
         [view setFrameSize:NSMakeSize(500, 400)];
-        main_thread.run_pending();
+        loop.run_for(0.1);
         REQUIRE(contract_log().idles == 0);
+        [view release];
+        REQUIRE(contract_log().calls.size() == calls);
+    }
+    AudioComponentInstanceDispose(au);
+}
+
+TEST_CASE("disposing the AU instance off the main thread closes its editor on the main thread",
+          "[auv2][editor-host][au-contract]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    auto instance = std::make_unique<FakeInstance>(true);
+    g_instance = instance.get();
+    AudioUnit au = fake_audio_unit();
+    MainLoop loop;
+
+    @autoreleasepool {
+        NSView* view = [open_view(au) retain];
+        REQUIRE(view != nil);
+        contract_log().context->params().begin(kGain);
+
+        // The disposing thread waits for the main thread, so the main loop
+        // keeps running until it is done.
+        std::atomic<bool> done{false};
+        std::thread disposer([&] {
+            instance->sessions.reset();
+            done = true;
+        });
+        REQUIRE(loop.run_until([&done] { return done.load(); }));
+        disposer.join();
+
+        REQUIRE(contract_log().saw("detach"));
+        REQUIRE_FALSE(contract_log().saw("invalidate"));
+        REQUIRE(contract_log().live == 0);
+        REQUIRE(contract_log().off_main_thread_calls == 0);
+        REQUIRE(instance->store.open_gesture_count() == 0);
+        instance.reset();
+        g_instance = nullptr;
         [view release];
     }
     AudioComponentInstanceDispose(au);
