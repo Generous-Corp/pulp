@@ -3,6 +3,7 @@
 // Parameters are registered with the VST3 parameter system and synced
 // with the Pulp StateStore during processing
 
+#include <pulp/format/vst3_contract_view.hpp>
 #include <pulp/runtime/trace.hpp>
 #include <pulp/format/vst3_adapter.hpp>
 #include <pulp/format/editor_prewarm.hpp>
@@ -346,7 +347,28 @@ PulpVst3Processor::PulpVst3Processor(ProcessorFactory factory)
     processContextRequirements = kProcessContextRequirements;
 }
 
-PulpVst3Processor::~PulpVst3Processor() = default;
+PulpVst3Processor::~PulpVst3Processor() {
+    terminate_contract_views();
+}
+
+void PulpVst3Processor::forget_contract_view(ContractPlugView* view) {
+    contract_views_.erase(std::remove(contract_views_.begin(), contract_views_.end(), view),
+                          contract_views_.end());
+}
+
+void PulpVst3Processor::terminate_contract_views() {
+    auto views = std::move(contract_views_);
+    contract_views_.clear();
+    for (auto* view : views)
+        view->owner_terminated();
+}
+
+bool PulpVst3Processor::contract_host_action(const HostActionRequest& request) {
+    if (request.action != HostAction::mark_state_dirty || componentHandler == nullptr)
+        return false;
+    Steinberg::FUnknownPtr<Steinberg::Vst::IComponentHandler2> handler(componentHandler);
+    return handler && handler->setDirty(true) == Steinberg::kResultOk;
+}
 
 tresult PLUGIN_API PulpVst3Processor::queryInterface(const TUID iid, void** obj) {
     // Expose the interfaces this subclass adds on top of SingleComponentEffect
@@ -1038,6 +1060,9 @@ tresult PLUGIN_API PulpVst3Processor::terminate() {
     if (poll_active_) poll_active_->store(false, std::memory_order_release);
     if (drain_alive_) drain_alive_->store(false, std::memory_order_release);
     owner_alive_.retire();
+    // A host may still hold a contract view; its editor goes before the
+    // processor that owns the editor factory.
+    terminate_contract_views();
 
     // Symmetric teardown of the MainThreadDispatcher backend installed in
     // initialize().
@@ -1059,6 +1084,21 @@ IPlugView* PLUGIN_API PulpVst3Processor::createView(FIDString name) {
         if (pulp::format::detail::editor_launch_blocked_by_environment()) {
             runtime::log_info("VST3 editor: disabled in headless/CI/test environment");
             return nullptr;
+        }
+        // A processor with an editor factory opens its editor through the
+        // editor-host contract; create_view() stays the path without one.
+        if (processor_) {
+            if (auto* factory = processor_->editor_factory()) {
+                trace.mark("before_contract_view");
+                auto* view = ContractPlugView::create(
+                    *this, *processor_, store_, *factory,
+                    [this](const HostActionRequest& request) {
+                        return contract_host_action(request);
+                    });
+                if (view != nullptr)
+                    contract_views_.push_back(view);
+                return view;
+            }
         }
         if (processor_ && processor_->has_editor()) {
             trace.mark("before_make_plug_view");

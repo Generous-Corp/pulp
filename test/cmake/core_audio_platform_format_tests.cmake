@@ -482,6 +482,14 @@ if(PULP_HAS_CLAP)
 endif()
 
 if(PULP_HAS_VST3)
+    # The VST3 adapter opening a processor's editor through the editor-host
+    # contract. Links format-core alone: the test defines make_plug_view()
+    # itself to tell the create_view() path apart.
+    add_executable(pulp-test-vst3-contract-editor test_vst3_contract_editor.cpp)
+    target_link_libraries(pulp-test-vst3-contract-editor PRIVATE
+        pulp::format-core Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-vst3-contract-editor)
+
     add_executable(pulp-test-vst3-plugin-state
         test_vst3_plugin_state.cpp harness/rt_allocation_probe.cpp
         ${CMAKE_SOURCE_DIR}/core/format/src/vst3_plug_view.cpp

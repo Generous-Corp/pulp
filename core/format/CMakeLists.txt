@@ -253,6 +253,8 @@ endif()
 if(PULP_HAS_VST3)
     target_sources(pulp-format-core PRIVATE
         src/vst3_adapter.cpp
+        # The editor-host contract's IPlugView; view-free like the adapter.
+        src/vst3_contract_view.cpp
     )
     target_link_libraries(pulp-format-core PUBLIC vst3-sdk)
     # PULP_VST3_GUI must stay defined here. It guards createView()'s body in
