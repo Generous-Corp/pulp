@@ -127,5 +127,9 @@ if(NOT WIN32 AND CMAKE_NM)
     set_tests_properties(editor-ui-package-hook-not-exported
         editor-ui-package-hook-export-check-control PROPERTIES
         LABELS "format;editor-host;cmake" TIMEOUT 60)
-    set_tests_properties(editor-ui-package-hook-export-check-control PROPERTIES WILL_FAIL TRUE)
+    # The control must fail for the right reason: the check finding the entry
+    # point it was told is forbidden. A bare WILL_FAIL would also pass on a
+    # missing module or a broken nm, which would hide a blind check.
+    set_tests_properties(editor-ui-package-hook-export-check-control PROPERTIES
+        PASS_REGULAR_EXPRESSION "exported editor-hook symbol: _?clap_entry")
 endif()
