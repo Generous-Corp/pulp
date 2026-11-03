@@ -787,6 +787,17 @@ GraphResult SignalGraph::connect(const PortHandle& source, const PortHandle& des
     if (!src || !dst)
         return {GraphResult::Code::UnknownNode, !src ? source.node : dest.node, 0, "unknown node",
                 "use a node from this graph"};
+    if (!source.output)
+        return {GraphResult::Code::UnknownPort, source.node, source.index,
+                "source handle is not an output port", "use out(\"audio\") or an available output"};
+    if (dest.output)
+        return {GraphResult::Code::UnknownPort, dest.node, dest.index,
+                "destination handle is not an input port",
+                "use in(\"audio\") or an available input"};
+    if (prepared_edit_origin_ == nullptr && (sample_region_for_node_locked_(source.node) != 0 ||
+                                             sample_region_for_node_locked_(dest.node) != 0))
+        return {GraphResult::Code::UnknownPort, dest.node, dest.index,
+                "sample-region nodes cannot be mutated directly", "use a prepared topology edit"};
     auto find = [](const std::vector<PortHandle>& ports, const PortHandle& h) -> const PortHandle* {
         for (const auto& p : ports)
             if (p.name == h.name)
