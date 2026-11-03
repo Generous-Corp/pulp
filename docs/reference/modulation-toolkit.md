@@ -272,7 +272,8 @@ SlewLimiterT edge; edge.prepare(sr); edge.set_times_ms(2.0f, 2.0f);  // the clic
 ### P4 — Random-step acid filter
 
 ```cpp
-LfoT clock;      clock.set_period_samples(/* 1/16 */);
+LfoT clock;      clock.set_period_samples(units::division_to_samples(
+                                      units::Division::sixteenth, bpm, sr));
 ComparatorT cmp; cmp.set_threshold(0.0f);
 SampleHoldT sh;  sh.prepare(sr);
 QuantizerT q;    q.set_range(200.0f, 6000.0f); q.set_steps(12);
@@ -294,7 +295,7 @@ BurstGenT burst;      burst.prepare(sr); burst.set_count(4);
 AhdT body;            body.prepare(sr); /* 1 ms / 4 ms / 30 ms */
 LpgT cell;            cell.prepare(sr); cell.set_decay_ms(150.0); cell.set_colour(0.5f);
 
-if (auto h = burst.process(hit.process(trigger)); h.fired) {
+if (auto h = burst.process(hit.process_signal(trigger)); h.fired) {
     body.trigger(h.level);
     cell.strike(Lpg::velocity_to_strike(h.level));
 }
