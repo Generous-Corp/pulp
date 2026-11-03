@@ -4,11 +4,14 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <pulp/signal/envelope.hpp>
+#include <pulp/signal/indexed_control.hpp>
 #include <pulp/signal/mod_tools.hpp>
 #include <pulp/signal/trigger.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 using namespace pulp::signal;
@@ -30,6 +33,31 @@ template <typename Fn> std::vector<int> fire_times(int n, Fn&& step) {
 }
 
 } // namespace
+
+TEST_CASE("MapClip retains valid configuration after invalid input", "[signal][mod][g5]") {
+    MapClip map;
+    REQUIRE(map.configure(0.0f, 1.0f, 100.0f, 200.0f));
+    REQUIRE(map.process(-2.0f) == 100.0f);
+    REQUIRE(map.process(0.5f) == 150.0f);
+    REQUIRE(map.process(2.0f) == 200.0f);
+    REQUIRE_FALSE(map.configure(1.0f, 1.0f, 0.0f, 1.0f));
+    REQUIRE_FALSE(map.configure(0.0f, std::numeric_limits<float>::infinity(), 0.0f, 1.0f));
+    REQUIRE(map.process(0.5f) == 150.0f);
+    REQUIRE(map.process(std::numeric_limits<float>::quiet_NaN()) == 100.0f);
+}
+
+TEST_CASE("IndexedControl follows external index and rejects invalid index", "[signal][mod][g5]") {
+    IndexedControl reader;
+    REQUIRE(reader.process(0.0) == 0.0f);
+    const std::array<float, 3> table{0.0f, 1.0f, 0.0f};
+    reader.set_table(table);
+    REQUIRE(reader.process(0.5) == 0.5f);
+    REQUIRE(reader.process(1.0) == 1.0f);
+    REQUIRE(reader.process(0.5) == 0.5f); // external time reversed
+    REQUIRE(reader.process(-1.0) == 0.0f);
+    REQUIRE(reader.process(3.0) == 0.0f);
+    REQUIRE(reader.process(std::numeric_limits<double>::quiet_NaN()) == 0.0f);
+}
 
 // ── TriggerDetectT ───────────────────────────────────────────────────────────
 
