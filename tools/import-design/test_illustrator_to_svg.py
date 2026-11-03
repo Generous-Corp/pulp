@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -26,6 +28,9 @@ if len(sys.argv) == 2 and sys.argv[1] == '-v':
     raise SystemExit(0)
 if '-svg' not in sys.argv:
     raise SystemExit(9)
+mkdir_at = os.environ.get("FAKE_MKDIR_AT")
+if mkdir_at:
+    pathlib.Path(mkdir_at).mkdir()
 out = pathlib.Path(sys.argv[-1])
 probe = os.environ.get("FAKE_PROBE_LOG")
 if probe:
@@ -181,6 +186,45 @@ class IllustratorToSvgTests(unittest.TestCase):
             self.skipTest("this volume is case-sensitive, so OUT is a different directory")
         with self.assertRaisesRegex(ConversionError, "provenance must not overwrite"):
             convert(self.source, self.root / "out" / "panel.svg", self.root / "OUT" / "Panel.SVG")
+
+    def test_unicode_normalization_variant_provenance_does_not_overwrite_the_output(self) -> None:
+        nfc = self.root / "caf\u00e9.svg"
+        nfd = self.root / "cafe\u0301.svg"
+        self.assertNotEqual(nfc.name, nfd.name)
+        with self.assertRaisesRegex(ConversionError, "provenance must not overwrite"):
+            convert(self.source, nfc, nfd)
+        self.assertFalse(nfc.exists())
+
+    def test_unicode_and_case_variant_provenance_does_not_overwrite_the_output(self) -> None:
+        with self.assertRaisesRegex(ConversionError, "provenance must not overwrite"):
+            convert(self.source, self.root / "caf\u00e9.svg", self.root / "CAFE\u0301.SVG")
+
+    def test_output_that_becomes_a_directory_is_a_conversion_error(self) -> None:
+        output = self.root / "panel.svg"
+        os.environ["FAKE_MKDIR_AT"] = str(output)
+        self.addCleanup(os.environ.pop, "FAKE_MKDIR_AT", None)
+        with self.assertRaisesRegex(ConversionError, "cannot move the SVG into place"):
+            convert(self.source, output)
+        self.assertTrue(output.is_dir())
+        self.assertEqual(sorted(p.name for p in self.root.iterdir() if p.name.startswith(".")), [])
+
+    def test_provenance_that_becomes_a_directory_is_a_conversion_error(self) -> None:
+        receipt = self.root / "panel.receipt.json"
+        os.environ["FAKE_MKDIR_AT"] = str(receipt)
+        self.addCleanup(os.environ.pop, "FAKE_MKDIR_AT", None)
+        with self.assertRaisesRegex(ConversionError, "cannot move the provenance into place"):
+            convert(self.source, self.root / "panel.svg", receipt)
+        self.assertTrue(receipt.is_dir())
+        self.assertEqual(sorted(p.name for p in self.root.iterdir() if p.name.startswith(".")), [])
+
+    def test_cli_exits_2_when_the_output_becomes_a_directory(self) -> None:
+        output = self.root / "panel.svg"
+        os.environ["FAKE_MKDIR_AT"] = str(output)
+        self.addCleanup(os.environ.pop, "FAKE_MKDIR_AT", None)
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            self.assertEqual(main([str(self.source), "-o", str(output)]), 2)
+        self.assertIn("cannot move the SVG into place", stderr.getvalue())
 
     def test_converter_writes_into_a_fresh_private_directory(self) -> None:
         probe = self.root / "probe.json"
