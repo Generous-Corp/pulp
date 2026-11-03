@@ -60,6 +60,15 @@ struct EditorLog {
 };
 EditorLog g_log;
 
+/// How the next editors and factory behave.
+struct EditorConfig {
+    bool attach_succeeds = true;
+    bool fixed_size = false;
+    bool factory_builds_editor = true;
+    bool factory_supports_editor = true;
+};
+EditorConfig g_config;
+
 class RecordingEditor final : public Editor {
   public:
     explicit RecordingEditor(EditorContext& context) {
@@ -78,7 +87,10 @@ class RecordingEditor final : public Editor {
         g_log.calls.push_back(parent.kind == NativeParentKind::cocoa_view ? "attach:cocoa_view"
                                                                           : "attach:other");
         g_log.parent_handle = parent.handle;
-        return true;
+        return g_config.attach_succeeds;
+    }
+    void focus_changed(bool focused) override {
+        g_log.calls.push_back(focused ? "focus:on" : "focus:off");
     }
     void detach() override {
         g_log.calls.push_back("detach");
@@ -106,6 +118,10 @@ class RecordingEditor final : public Editor {
         hints.min_height = 150;
         hints.max_width = 800;
         hints.max_height = 600;
+        if (g_config.fixed_size) {
+            hints.min_width = hints.max_width = 400;
+            hints.min_height = hints.max_height = 300;
+        }
         return hints;
     }
     EditorSize adjust_size(const EditorSize& proposed) const override {
@@ -130,11 +146,11 @@ class RecordingEditor final : public Editor {
 class RecordingFactory final : public EditorFactory {
   public:
     bool supports(EditorRole role) const override {
-        return role == EditorRole::editor;
+        return role == EditorRole::editor && g_config.factory_supports_editor;
     }
     std::unique_ptr<Editor> create(pulp::format::Processor&, EditorContext& context,
                                    EditorRole role) override {
-        if (role != EditorRole::editor)
+        if (role != EditorRole::editor || !g_config.factory_builds_editor)
             return nullptr;
         return std::make_unique<RecordingEditor>(context);
     }
@@ -255,8 +271,22 @@ class HostApp final : public Steinberg::Vst::IHostApplication {
 };
 
 // The host's side of the gesture path, rendered as "B1 V1 E1".
-class HostEdits final : public Steinberg::Vst::IComponentHandler {
+class HostEdits final : public Steinberg::Vst::IComponentHandler,
+                        public Steinberg::Vst::IComponentHandler2 {
   public:
+    Steinberg::tresult PLUGIN_API setDirty(Steinberg::TBool state) override {
+        dirty = state != 0;
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API requestOpenEditor(Steinberg::FIDString) override {
+        return Steinberg::kNotImplemented;
+    }
+    Steinberg::tresult PLUGIN_API startGroupEdit() override {
+        return Steinberg::kNotImplemented;
+    }
+    Steinberg::tresult PLUGIN_API finishGroupEdit() override {
+        return Steinberg::kNotImplemented;
+    }
     Steinberg::tresult PLUGIN_API beginEdit(Steinberg::Vst::ParamID id) override {
         stream += "B" + std::to_string(id) + " ";
         ++open;
@@ -276,6 +306,10 @@ class HostEdits final : public Steinberg::Vst::IComponentHandler {
         return Steinberg::kResultOk;
     }
     Steinberg::tresult PLUGIN_API queryInterface(const Steinberg::TUID iid, void** obj) override {
+        if (Steinberg::FUnknownPrivate::iidEqual(iid, Steinberg::Vst::IComponentHandler2::iid)) {
+            *obj = static_cast<Steinberg::Vst::IComponentHandler2*>(this);
+            return Steinberg::kResultTrue;
+        }
         if (Steinberg::FUnknownPrivate::iidEqual(iid, Steinberg::Vst::IComponentHandler::iid) ||
             Steinberg::FUnknownPrivate::iidEqual(iid, Steinberg::FUnknown::iid)) {
             *obj = static_cast<Steinberg::Vst::IComponentHandler*>(this);
@@ -293,6 +327,7 @@ class HostEdits final : public Steinberg::Vst::IComponentHandler {
 
     std::string stream;
     int open = 0;
+    bool dirty = false;
 };
 
 // Any non-null pointer stands in for the host's NSView: the adapter forwards
@@ -325,6 +360,7 @@ TEST_CASE("VST3 opens, resizes and closes a contract editor, twice",
           "[vst3][editor-host][vst3-contract]") {
     EditorEnvironment env;
     g_log = {};
+    g_config = {};
     g_legacy_views = 0;
     HostApp host_app;
     HostEdits host;
@@ -403,6 +439,7 @@ TEST_CASE("VST3 terminate invalidates a contract editor the host still holds",
           "[vst3][editor-host][vst3-contract]") {
     EditorEnvironment env;
     g_log = {};
+    g_config = {};
     HostApp host_app;
     HostEdits host;
     PulpVst3Processor processor(create_contract_processor);
@@ -437,6 +474,7 @@ TEST_CASE("VST3 keeps create_view() for a processor without an editor factory",
           "[vst3][editor-host][vst3-contract]") {
     EditorEnvironment env;
     g_log = {};
+    g_config = {};
     g_legacy_views = 0;
     HostApp host_app;
     PulpVst3Processor processor(create_plain_processor);
@@ -470,4 +508,194 @@ TEST_CASE("VST3 key callbacks map to the contract's key events",
     REQUIRE(ContractPlugView::parent_kind(Steinberg::kPlatformTypeHWND) ==
             NativeParentKind::win32_window);
     REQUIRE(ContractPlugView::parent_kind("unknown") == NativeParentKind::none);
+}
+
+namespace {
+
+// The host's window frame: records resize requests and answers them.
+class HostFrame final : public Steinberg::IPlugFrame {
+  public:
+    Steinberg::tresult PLUGIN_API resizeView(Steinberg::IPlugView* view,
+                                             Steinberg::ViewRect* rect) override {
+        requests.push_back(std::to_string(rect->getWidth()) + "x" +
+                           std::to_string(rect->getHeight()));
+        if (!accept)
+            return Steinberg::kResultFalse;
+        view->onSize(rect);
+        return Steinberg::kResultTrue;
+    }
+    Steinberg::tresult PLUGIN_API queryInterface(const Steinberg::TUID iid, void** obj) override {
+        if (Steinberg::FUnknownPrivate::iidEqual(iid, Steinberg::IPlugFrame::iid) ||
+            Steinberg::FUnknownPrivate::iidEqual(iid, Steinberg::FUnknown::iid)) {
+            *obj = static_cast<Steinberg::IPlugFrame*>(this);
+            return Steinberg::kResultTrue;
+        }
+        *obj = nullptr;
+        return Steinberg::kNoInterface;
+    }
+    Steinberg::uint32 PLUGIN_API addRef() override {
+        return 1;
+    }
+    Steinberg::uint32 PLUGIN_API release() override {
+        return 1;
+    }
+
+    bool accept = true;
+    std::vector<std::string> requests;
+};
+
+} // namespace
+
+TEST_CASE("a VST3 contract editor reaches its host through the context",
+          "[vst3][editor-host][vst3-contract]") {
+    EditorEnvironment env;
+    g_log = {};
+    g_config = {};
+    HostApp host_app;
+    HostEdits host;
+    HostFrame frame;
+    PulpVst3Processor processor(create_contract_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    REQUIRE(processor.setComponentHandler(&host) == Steinberg::kResultOk);
+
+    auto* view = open_contract_view(processor);
+    auto& context = *g_log.context;
+    REQUIRE(context.visuals() == nullptr);
+    REQUIRE(context.host_kind() == pulp::format::EditorHostKind::plugin);
+
+    // No frame yet: the host cannot resize.
+    REQUIRE_FALSE(context.request_resize({500, 375, 1.0}));
+    REQUIRE(view->setFrame(&frame) == Steinberg::kResultTrue);
+    REQUIRE(view->attached(fake_parent(), Steinberg::kPlatformTypeNSView) ==
+            Steinberg::kResultTrue);
+    REQUIRE(context.request_resize({500, 375, 1.0}));
+    REQUIRE(frame.requests == std::vector<std::string>{"500x375"});
+    REQUIRE(g_log.saw("set_size:500x375"));
+    frame.accept = false;
+    REQUIRE_FALSE(context.request_resize({600, 450, 1.0}));
+    REQUIRE_FALSE(context.request_resize({0, 450, 1.0}));
+
+    // Host actions: a dirty project reaches IComponentHandler2; the others
+    // have no VST3 call and are declined.
+    pulp::format::HostActionRequest dirty;
+    dirty.action = pulp::format::HostAction::mark_state_dirty;
+    REQUIRE(context.host_action(dirty));
+    REQUIRE(host.dirty);
+    pulp::format::HostActionRequest close;
+    close.action = pulp::format::HostAction::close_editor;
+    REQUIRE_FALSE(context.host_action(close));
+
+    // Focus and key releases reach the editor too.
+    REQUIRE(view->onFocus(true) == Steinberg::kResultTrue);
+    REQUIRE(g_log.saw("focus:on"));
+    REQUIRE(view->onKeyUp(u' ', Steinberg::KEY_SPACE, 0) == Steinberg::kResultFalse);
+
+    REQUIRE(view->removed() == Steinberg::kResultOk);
+    view->setFrame(nullptr);
+    view->release();
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("a VST3 contract view refuses what its editor cannot do",
+          "[vst3][editor-host][vst3-contract]") {
+    EditorEnvironment env;
+    g_log = {};
+    g_config = {};
+    HostApp host_app;
+    PulpVst3Processor processor(create_contract_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+
+    // A factory that builds no editor, or does not offer the editor role,
+    // gives the host no view at all.
+    g_config.factory_builds_editor = false;
+    REQUIRE(processor.createView(Steinberg::Vst::ViewType::kEditor) == nullptr);
+    g_config = {};
+    g_config.factory_supports_editor = false;
+    REQUIRE(processor.createView(Steinberg::Vst::ViewType::kEditor) == nullptr);
+    g_config = {};
+
+    // A fixed-size editor is not resizable.
+    g_config.fixed_size = true;
+    auto* view = open_contract_view(processor);
+    REQUIRE(view->canResize() == Steinberg::kResultFalse);
+
+    // Bad arguments and unknown platforms are refused without touching the
+    // editor.
+    REQUIRE(view->getSize(nullptr) == Steinberg::kInvalidArgument);
+    REQUIRE(view->onSize(nullptr) == Steinberg::kInvalidArgument);
+    REQUIRE(view->checkSizeConstraint(nullptr) == Steinberg::kInvalidArgument);
+    Steinberg::ViewRect empty(0, 0, 0, 0);
+    REQUIRE(view->onSize(&empty) == Steinberg::kResultFalse);
+    REQUIRE(view->checkSizeConstraint(&empty) == Steinberg::kResultFalse);
+    REQUIRE(view->attached(fake_parent(), "not-a-platform") == Steinberg::kResultFalse);
+    REQUIRE(view->attached(nullptr, Steinberg::kPlatformTypeNSView) == Steinberg::kResultFalse);
+    // Keys before attach are the host's.
+    REQUIRE(view->onKeyDown(u'a', 0, 0) == Steinberg::kResultFalse);
+
+    // An editor that will not attach leaves the view unattached.
+    g_config.attach_succeeds = false;
+    REQUIRE(view->attached(fake_parent(), Steinberg::kPlatformTypeNSView) ==
+            Steinberg::kResultFalse);
+    g_config.attach_succeeds = true;
+    REQUIRE(view->attached(fake_parent(), Steinberg::kPlatformTypeNSView) ==
+            Steinberg::kResultTrue);
+    // A second attach without removed() is refused.
+    REQUIRE(view->attached(fake_parent(), Steinberg::kPlatformTypeNSView) ==
+            Steinberg::kResultFalse);
+
+    // A host that releases the view without removed() has destroyed the
+    // window already: the editor is invalidated, not detached.
+    view->release();
+    REQUIRE(g_log.saw("invalidate"));
+    REQUIRE_FALSE(g_log.saw("detach"));
+    REQUIRE(g_log.live == 0);
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("every VST3 key and platform type maps to the contract",
+          "[vst3][editor-host][vst3-contract]") {
+    struct Case {
+        Steinberg::int16 code;
+        EditorKey key;
+    };
+    const Case cases[] = {
+        {Steinberg::KEY_RETURN, EditorKey::enter},
+        {Steinberg::KEY_ENTER, EditorKey::enter},
+        {Steinberg::KEY_TAB, EditorKey::tab},
+        {Steinberg::KEY_BACK, EditorKey::backspace},
+        {Steinberg::KEY_ESCAPE, EditorKey::escape},
+        {Steinberg::KEY_DELETE, EditorKey::delete_forward},
+        {Steinberg::KEY_LEFT, EditorKey::left},
+        {Steinberg::KEY_RIGHT, EditorKey::right},
+        {Steinberg::KEY_UP, EditorKey::up},
+        {Steinberg::KEY_DOWN, EditorKey::down},
+        {Steinberg::KEY_HOME, EditorKey::home},
+        {Steinberg::KEY_END, EditorKey::end},
+        {Steinberg::KEY_PAGEUP, EditorKey::page_up},
+        {Steinberg::KEY_PAGEDOWN, EditorKey::page_down},
+        {0, EditorKey::none},
+    };
+    for (const auto& c : cases) {
+        CAPTURE(c.code);
+        REQUIRE(ContractPlugView::key_event(0, c.code, 0, true).key == c.key);
+    }
+
+    const auto alt = ContractPlugView::key_event(u'x', 0, Steinberg::kAlternateKey, true);
+    REQUIRE(alt.character == U'x');
+    REQUIRE(alt.modifiers == pulp::format::editor_modifier_alt);
+    REQUIRE(ContractPlugView::key_event(0, 0, Steinberg::kControlKey, true).modifiers ==
+            pulp::format::editor_modifier_control);
+#if defined(__APPLE__)
+    REQUIRE(ContractPlugView::key_event(0, 0, Steinberg::kCommandKey, true).modifiers ==
+            pulp::format::editor_modifier_command);
+#else
+    REQUIRE(ContractPlugView::key_event(0, 0, Steinberg::kCommandKey, true).modifiers ==
+            pulp::format::editor_modifier_control);
+#endif
+
+    REQUIRE(ContractPlugView::parent_kind(Steinberg::kPlatformTypeUIView) ==
+            NativeParentKind::uikit_view);
+    REQUIRE(ContractPlugView::parent_kind(Steinberg::kPlatformTypeX11EmbedWindowID) ==
+            NativeParentKind::x11_window);
+    REQUIRE(ContractPlugView::parent_kind(nullptr) == NativeParentKind::none);
 }
