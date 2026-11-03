@@ -114,6 +114,11 @@ Validation validate_common(const fs::path& prefix, const Identity& expected) {
             "installed SDK does not expose VST3", out);
     require(targets_text.find("Pulp::ausdk") != std::string::npos,
             "installed SDK does not expose Audio Unit", out);
+    require(fs::is_regular_file(prefix / "lib" / "libausdk.a"),
+            "installed SDK is missing libausdk.a", out);
+    require(fs::is_regular_file(prefix / "external" / "AudioUnitSDK" / "include" /
+                                 "AudioUnitSDK" / "AUBase.h"),
+            "installed SDK is missing AudioUnitSDK headers", out);
     require(targets_text.find("Pulp::render") != std::string::npos,
             "installed SDK does not expose the GPU runtime", out);
     require(targets_text.find("Pulp::standalone") != std::string::npos,
@@ -233,7 +238,8 @@ std::vector<std::string> configure_arguments(const fs::path& source, const fs::p
         "-DCMAKE_INSTALL_PREFIX=" + install_prefix.string(),
         "-DCMAKE_OSX_DEPLOYMENT_TARGET=" + identity.deployment_target,
         "-DSKIA_DIR=" + (source / "external" / "skia-build").string(), "-DPULP_MACOS_ARCH=arm64",
-        "-DPULP_ENABLE_GPU=ON", "-DPULP_REQUIRE_GPU_FOR_SDK=ON", "-DPULP_ENABLE_DESIGN_IMPORT=ON",
+        "-DPULP_ENABLE_GPU=ON", "-DPULP_REQUIRE_GPU_FOR_SDK=ON",
+        "-DPULP_REQUIRE_CHECKOUT_DEPENDENCIES=ON", "-DPULP_ENABLE_DESIGN_IMPORT=ON",
         "-DPULP_BUILD_WEBVIEW=ON", "-DPULP_ENABLE_AUDIO_PROBES=OFF", "-DPULP_ENABLE_INSPECTOR=OFF",
         "-DPULP_BUILD_TESTS=OFF", "-DPULP_BUILD_EXAMPLES=OFF",
         // Tests OFF already implies this; it is passed explicitly because the
@@ -294,6 +300,8 @@ Validation validate_staged_install(const fs::path& prefix, const fs::path& build
     require(cache_true(cache, "PULP_BUILD_WEBVIEW"), "WebView support was not enabled", out);
     require(cache_true(cache, "PULP_HAS_VST3"), "VST3 SDK was not resolved", out);
     require(cache_true(cache, "PULP_HAS_AUSDK"), "AudioUnitSDK was not resolved", out);
+    require(cache_true(cache, "PULP_REQUIRE_CHECKOUT_DEPENDENCIES"),
+            "SDK dependency closure was not enforced during configure", out);
     require(cache_true(cache, "PULP_HAS_CLAP"), "CLAP was not resolved", out);
     require(!cache_true(cache, "PULP_ENABLE_AUDIO_PROBES"),
             "audio probes must stay disabled in the SDK", out);
