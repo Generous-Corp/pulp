@@ -1,0 +1,48 @@
+<rml>
+<head>
+<title>Knob and LED</title>
+<style>
+body {
+    display: block;
+    width: 160px;
+    height: 96px;
+    margin: 0;
+    background-color: #1b1e24;
+}
+div { display: block; }
+#knob {
+    position: absolute;
+    left: 24px;
+    top: 13px;
+    width: 64px;
+    height: 64px;
+    border: 3px #9aa4b8;
+    border-radius: 35px;
+    background-color: #3a4150;
+}
+#pointer {
+    position: absolute;
+    left: 30px;
+    top: 6px;
+    width: 4px;
+    height: 26px;
+    background-color: #f2f2f2;
+    transform-origin: 2px 26px;
+}
+#led {
+    position: absolute;
+    left: 112px;
+    top: 38px;
+    width: 20px;
+    height: 20px;
+    border-radius: 10px;
+    background-color: #3b1414;
+}
+#led.on { background-color: #ff3b30; }
+</style>
+</head>
+<body data-model="controls">
+<div id="knob"><div id="pointer" data-style-transform="'rotate(' + (gain * 270 - 135) + 'deg)'"></div></div>
+<div id="led" data-class-on="gain > 0.5"></div>
+</body>
+</rml>
