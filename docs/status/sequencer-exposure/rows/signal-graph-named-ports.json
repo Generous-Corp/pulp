@@ -1,0 +1,73 @@
+{
+  "id": "signal-graph-named-ports",
+  "title": "SignalGraph named ports expose typed authoring diagnostics",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "g1-ports-20261102",
+  "owned_paths": [
+    "core/host/include/pulp/host/signal_graph_node.hpp",
+    "core/host/include/pulp/host/signal_graph_runtime.hpp",
+    "core/host/src/signal_graph_authoring.cpp",
+    "test/cmake/sampler_runtime_tests.cmake",
+    "test/test_signal_graph_named_ports.cpp",
+    "docs/status/sequencer-exposure/rows/signal-graph-named-ports.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/host/include/pulp/host/signal_graph_node.hpp",
+      "needles": [
+        "enum class PortKind",
+        "struct PortHandle",
+        "struct GraphResult"
+      ]
+    },
+    {
+      "path": "test/test_signal_graph_named_ports.cpp",
+      "needles": [
+        "named graph ports report actionable diagnostics",
+        "named graph ports reject an instantaneous cycle with a message",
+        "MIDI graph ports retain their kind"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "The host include tree installs signal_graph_node.hpp and signal_graph_runtime.hpp with the public host SDK; named PortHandle values and typed GraphResult diagnostics are therefore available to SDK graph authors.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/host/include/pulp/host/signal_graph_node.hpp",
+          "needles": ["enum class PortKind", "struct PortHandle", "struct GraphResult"]
+        },
+        {
+          "kind": "sdk_target",
+          "path": "tools/cmake/PulpInstallRules.cmake",
+          "needles": ["list(APPEND _pulp_sdk_header_subsystems host)", "FILES_MATCHING PATTERN \"*.hpp\""]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No offline timeline CLI operation or document format changes."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP operation or handler changes."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "Named ports are an in-process graph authoring API and do not grant a new live product control surface."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "No design-time agent capability or manifest entry changes."
+    }
+  }
+}

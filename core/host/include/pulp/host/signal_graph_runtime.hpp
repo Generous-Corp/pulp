@@ -237,6 +237,10 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // Connect two nodes (port-to-port)
     bool connect(NodeId source, PortIndex source_port, NodeId dest, PortIndex dest_port);
 
+    /// Connect named typed ports. The returned diagnostic is stable and suitable
+    /// for CLI/MCP surfaces; the legacy index overload remains unchanged.
+    GraphResult connect(const PortHandle& source, const PortHandle& dest);
+
     // Connect with an explicit one-block delay. Permitted to close a cycle
     // (the back-edge the user is intentionally introducing) and invisible to
     // topological sort. The destination reads the source's previous-block

@@ -43,6 +43,20 @@ bool has_output_port(const GraphNode& node, PortIndex port) {
     return node.num_output_ports > 0 && port < static_cast<PortIndex>(node.num_output_ports);
 }
 
+void populate_named_ports(GraphNode& node) {
+    node.input_ports.clear();
+    node.output_ports.clear();
+    const auto kind = (node.type == NodeType::MidiInput || node.type == NodeType::MidiOutput)
+                          ? PortKind::Midi
+                          : PortKind::Audio;
+    for (int i = 0; i < node.num_input_ports; ++i)
+        node.input_ports.push_back({node.id, static_cast<PortIndex>(i), false,
+                                    i == 0 ? "audio" : "in" + std::to_string(i), kind});
+    for (int i = 0; i < node.num_output_ports; ++i)
+        node.output_ports.push_back({node.id, static_cast<PortIndex>(i), true,
+                                     i == 0 ? "audio" : "out" + std::to_string(i), kind});
+}
+
 } // namespace
 
 // All add_*/connect/remove mutators below take graph_mutation_mutex_ for the
@@ -58,6 +72,7 @@ NodeId SignalGraph::add_input_node(int channels, const std::string& name) {
     node.type = NodeType::AudioInput;
     node.name = name;
     node.num_output_ports = channels;
+    populate_named_ports(node);
     nodes_.push_back(std::move(node));
     invalidate_live_locked_();
     return nodes_.back().id;
@@ -70,6 +85,7 @@ NodeId SignalGraph::add_output_node(int channels, const std::string& name) {
     node.type = NodeType::AudioOutput;
     node.name = name;
     node.num_input_ports = channels;
+    populate_named_ports(node);
     nodes_.push_back(std::move(node));
     invalidate_live_locked_();
     return nodes_.back().id;
@@ -85,6 +101,7 @@ NodeId SignalGraph::add_plugin_node(const PluginInfo& info) {
     node.num_output_ports = info.num_outputs;
     node.plugin = std::shared_ptr<PluginSlot>(PluginSlot::load(info));
     node.plugin_info = info; // preserve identity even if load failed
+    populate_named_ports(node);
     nodes_.push_back(std::move(node));
     invalidate_live_locked_();
     return nodes_.back().id;
@@ -102,6 +119,7 @@ NodeId SignalGraph::add_unresolved_plugin_node(const PluginInfo& info, int num_i
     node.plugin_info = info;
     node.plugin_info.num_inputs = num_inputs;
     node.plugin_info.num_outputs = num_outputs;
+    populate_named_ports(node);
     nodes_.push_back(std::move(node));
     invalidate_live_locked_();
     return nodes_.back().id;
@@ -124,6 +142,7 @@ NodeId SignalGraph::add_plugin_node(std::unique_ptr<PluginSlot> slot, int num_in
         node.plugin_info.num_inputs = num_inputs;
         node.plugin_info.num_outputs = num_outputs;
     }
+    populate_named_ports(node);
     nodes_.push_back(std::move(node));
     invalidate_live_locked_();
     return nodes_.back().id;
@@ -159,6 +178,7 @@ NodeId SignalGraph::add_processor_node(std::shared_ptr<format::ProcessorNodeInst
     const NodeId id = node.id;
     try {
         processor_nodes_.emplace(id, std::make_shared<ProcessorNodeLifetime>(std::move(instance)));
+        populate_named_ports(node);
         nodes_.push_back(std::move(node));
     } catch (...) {
         processor_nodes_.erase(id);
@@ -203,6 +223,7 @@ NodeId SignalGraph::add_gain_node(const std::string& name) {
     node.name = name;
     node.num_input_ports = 2;
     node.num_output_ports = 2;
+    populate_named_ports(node);
     nodes_.push_back(std::move(node));
     invalidate_live_locked_();
     return nodes_.back().id;
@@ -215,6 +236,7 @@ NodeId SignalGraph::add_midi_input_node(const std::string& name) {
     node.type = NodeType::MidiInput;
     node.name = name;
     node.num_output_ports = 1;
+    populate_named_ports(node);
     nodes_.push_back(std::move(node));
     invalidate_live_locked_();
     return nodes_.back().id;
@@ -227,6 +249,7 @@ NodeId SignalGraph::add_midi_output_node(const std::string& name) {
     node.type = NodeType::MidiOutput;
     node.name = name;
     node.num_input_ports = 1;
+    populate_named_ports(node);
     nodes_.push_back(std::move(node));
     invalidate_live_locked_();
     return nodes_.back().id;
@@ -279,6 +302,7 @@ NodeId SignalGraph::add_unresolved_custom_node(std::string_view type_id, int ver
     node.num_output_ports = num_outputs;
     node.custom_type_id = std::move(type.type_id);
     node.custom_type_version = version;
+    populate_named_ports(node);
     nodes_.push_back(std::move(node));
     invalidate_live_locked_();
     return nodes_.back().id;
@@ -739,4 +763,75 @@ std::vector<NodeId> SignalGraph::processing_order() const {
     return processing_order_for(nodes_, connections_);
 }
 
+} // namespace pulp::host
+
+namespace pulp::host {
+
+PortHandle GraphNode::in(std::string_view port) const {
+    for (const auto& p : input_ports)
+        if (p.name == port)
+            return p;
+    return PortHandle{id, 0, false, std::string(port), PortKind::Audio};
+}
+PortHandle GraphNode::out(std::string_view port) const {
+    for (const auto& p : output_ports)
+        if (p.name == port)
+            return p;
+    return PortHandle{id, 0, true, std::string(port), PortKind::Audio};
+}
+
+GraphResult SignalGraph::connect(const PortHandle& source, const PortHandle& dest) {
+    GraphMutationLock mutation_lock(*this);
+    const GraphNode* src = node(source.node);
+    const GraphNode* dst = node(dest.node);
+    if (!src || !dst)
+        return {GraphResult::Code::UnknownNode, !src ? source.node : dest.node, 0, "unknown node",
+                "use a node from this graph"};
+    if (!source.output)
+        return {GraphResult::Code::UnknownPort, source.node, source.index,
+                "source handle is not an output port", "use out(\"audio\") or an available output"};
+    if (dest.output)
+        return {GraphResult::Code::UnknownPort, dest.node, dest.index,
+                "destination handle is not an input port",
+                "use in(\"audio\") or an available input"};
+    if (prepared_edit_origin_ == nullptr && (sample_region_for_node_locked_(source.node) != 0 ||
+                                             sample_region_for_node_locked_(dest.node) != 0))
+        return {GraphResult::Code::UnknownPort, dest.node, dest.index,
+                "sample-region nodes cannot be mutated directly", "use a prepared topology edit"};
+    auto find = [](const std::vector<PortHandle>& ports, const PortHandle& h) -> const PortHandle* {
+        for (const auto& p : ports)
+            if (p.name == h.name)
+                return &p;
+        return nullptr;
+    };
+    if (source.kind != dest.kind)
+        return {GraphResult::Code::KindMismatch, dest.node, dest.index,
+                "port kind mismatch: '" + source.name + "' to '" + dest.name + "'",
+                "connect ports with the same kind"};
+    const auto* sp = find(src->output_ports, source);
+    const auto* dp = find(dst->input_ports, dest);
+    if (!sp)
+        return {GraphResult::Code::UnknownPort, source.node, source.index,
+                "unknown output port '" + source.name + "'",
+                "use out(\"audio\") or an available output"};
+    if (!dp)
+        return {GraphResult::Code::UnknownPort, dest.node, dest.index,
+                "unknown input port '" + dest.name + "'",
+                "use in(\"audio\") or an available input"};
+    if (sp->kind != dp->kind)
+        return {GraphResult::Code::KindMismatch, dest.node, dp->index,
+                "port kind mismatch: '" + source.name + "' to '" + dest.name + "'",
+                "connect ports with the same kind"};
+    if (would_create_cycle(source.node, dest.node))
+        return {GraphResult::Code::IllegalCycle, dest.node, dp->index,
+                "illegal instantaneous cycle", "insert a feedback delay"};
+    Connection c{source.node, sp->index, dest.node, dp->index};
+    for (const auto& existing : connections_)
+        if (existing == c)
+            return {GraphResult::Code::Duplicate, dest.node, dp->index, "duplicate connection",
+                    "remove the existing connection"};
+    append_connection_locked_(c);
+    invalidate_live_locked_();
+    return {};
+}
 } // namespace pulp::host
