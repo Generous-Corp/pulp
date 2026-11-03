@@ -9,6 +9,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#if defined(__APPLE__)
+#include <CoreFoundation/CoreFoundation.h>
+#endif
+
 #include <pulp/events/main_thread_dispatcher.hpp>
 #include <pulp/format/editor_host.hpp>
 #include <pulp/format/processor.hpp>
@@ -443,7 +447,7 @@ TEST_CASE("VST3 opens, resizes and closes a contract editor, twice",
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
 }
 
-TEST_CASE("VST3 terminate invalidates a contract editor the host still holds",
+TEST_CASE("VST3 terminate closes a contract editor the host still holds",
           "[vst3][editor-host][vst3-contract]") {
     EditorEnvironment env;
     g_log = {};
@@ -460,12 +464,13 @@ TEST_CASE("VST3 terminate invalidates a contract editor the host still holds",
     g_log.context->params().begin(kGain);
     REQUIRE(host.open == 1);
 
-    // The host tears the component down before the view: the editor is
-    // invalidated (never detached into a dead window) and destroyed while the
-    // processor that owns its factory still exists, and the gesture is ended.
+    // The host tears the component down before the view, with its window
+    // still open: the gesture is ended, the editor detaches in order (it is
+    // not told its window is gone, because it is not) and is destroyed while
+    // the processor that owns its factory still exists.
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
-    REQUIRE(g_log.saw("invalidate"));
-    REQUIRE_FALSE(g_log.saw("detach"));
+    REQUIRE(g_log.saw("detach"));
+    REQUIRE_FALSE(g_log.saw("invalidate"));
     REQUIRE(g_log.live == 0);
     REQUIRE(host.open == 0);
     REQUIRE(view->editor() == nullptr);
@@ -710,50 +715,61 @@ TEST_CASE("every VST3 key and platform type maps to the contract",
 
 namespace {
 
-// A main-thread backend whose posts wait in a queue until the test runs them,
-// so each idle tick is observable.
-class QueuedMainThread {
+// The main thread's event loop, where the idle timer fires: a dispatch timer
+// source on Apple platforms, a chain of main-thread posts elsewhere (run here
+// through a queued backend).
+class MainLoop {
   public:
-    QueuedMainThread() {
+#if !defined(__APPLE__)
+    MainLoop() {
         pulp::events::MainThreadDispatcher::Backend backend;
         backend.post = [this](pulp::events::Task task) {
-            tasks_.push_back({std::move(task), 0});
+            tasks_.push_back(std::move(task));
             return true;
         };
         backend.is_main_thread = [] { return true; };
-        backend.post_after = [this](pulp::events::Task task, int delay_ms) {
-            tasks_.push_back({std::move(task), delay_ms});
+        backend.post_after = [this](pulp::events::Task task, int) {
+            tasks_.push_back(std::move(task));
             return true;
         };
         token_ = pulp::events::MainThreadDispatcher::register_backend(std::move(backend));
     }
-    ~QueuedMainThread() {
+    ~MainLoop() {
         pulp::events::MainThreadDispatcher::unregister_backend(token_);
     }
+#endif
 
-    /// Run the tasks queued so far (not the ones they queue). Returns how
-    /// many ran.
-    std::size_t run_pending() {
-        auto batch = std::move(tasks_);
-        tasks_.clear();
-        for (auto& queued : batch)
-            queued.task();
-        return batch.size();
+    /// Run the loop for about `seconds`.
+    void run_for(double seconds) {
+#if defined(__APPLE__)
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, seconds, false);
+#else
+        const int passes = static_cast<int>(seconds * 1000.0 / ContractPlugView::kIdleIntervalMs);
+        for (int i = 0; i < passes; ++i) {
+            auto batch = std::move(tasks_);
+            tasks_.clear();
+            for (auto& task : batch)
+                task();
+        }
+#endif
     }
-    std::size_t pending() const {
-        return tasks_.size();
-    }
-    int last_delay_ms() const {
-        return tasks_.empty() ? -1 : tasks_.back().delay_ms;
+
+    /// Run the loop until `done()` holds, for at most `seconds`.
+    template <typename Done>
+    bool run_until(Done done, double seconds = 2.0) {
+        for (double waited = 0.0; waited < seconds; waited += 0.02) {
+            if (done())
+                return true;
+            run_for(0.02);
+        }
+        return done();
     }
 
   private:
-    struct Queued {
-        pulp::events::Task task;
-        int delay_ms;
-    };
-    std::vector<Queued> tasks_;
+#if !defined(__APPLE__)
+    std::vector<pulp::events::Task> tasks_;
     pulp::events::MainThreadDispatcher::Token token_ = 0;
+#endif
 };
 
 } // namespace
@@ -766,41 +782,36 @@ TEST_CASE("a VST3 contract editor ticks only while attached",
     HostApp host_app;
     PulpVst3Processor processor(create_contract_processor);
     REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
-    // Registered after initialize() so it is the active backend.
-    QueuedMainThread main_thread;
+    // Constructed after initialize() so its backend, where there is one, is the
+    // active one.
+    MainLoop loop;
 
     auto* view = open_contract_view(processor);
-    main_thread.run_pending();
-    REQUIRE(main_thread.pending() == 0);
+    loop.run_for(0.1);
     REQUIRE(g_log.idles == 0);
 
     REQUIRE(view->attached(fake_parent(), Steinberg::kPlatformTypeNSView) ==
             Steinberg::kResultTrue);
-    REQUIRE(main_thread.pending() == 1);
-    REQUIRE(main_thread.last_delay_ms() == ContractPlugView::kIdleIntervalMs);
-    for (int i = 0; i < 3; ++i)
-        REQUIRE(main_thread.run_pending() == 1);
-    REQUIRE(g_log.idles == 3);
+    REQUIRE(loop.run_until([] { return g_log.idles >= 3; }));
 
-    // removed(): the queued tick runs, does not tick, and ends the chain.
+    // removed(): the timer stops; nothing ticks afterwards.
     REQUIRE(view->removed() == Steinberg::kResultOk);
-    main_thread.run_pending();
-    REQUIRE(g_log.idles == 3);
-    REQUIRE(main_thread.pending() == 0);
+    const int after_removed = g_log.idles;
+    loop.run_for(0.1);
+    REQUIRE(g_log.idles == after_removed);
 
     // Attached again, it ticks again.
     REQUIRE(view->attached(fake_parent(), Steinberg::kPlatformTypeNSView) ==
             Steinberg::kResultTrue);
-    main_thread.run_pending();
-    REQUIRE(g_log.idles == 4);
+    REQUIRE(loop.run_until([after_removed] { return g_log.idles > after_removed; }));
 
-    // Released without removed(): invalidated, and the queued tick neither
-    // ticks nor touches the destroyed view.
+    // Released without removed(): invalidated, and the timer never ticks the
+    // destroyed view.
     view->release();
     REQUIRE(g_log.saw("invalidate"));
-    main_thread.run_pending();
-    REQUIRE(g_log.idles == 4);
-    REQUIRE(main_thread.pending() == 0);
+    const int after_release = g_log.idles;
+    loop.run_for(0.1);
+    REQUIRE(g_log.idles == after_release);
 
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
 }
@@ -813,24 +824,22 @@ TEST_CASE("a VST3 contract editor never ticks after terminate",
     HostApp host_app;
     PulpVst3Processor processor(create_contract_processor);
     REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
-    QueuedMainThread main_thread;
+    MainLoop loop;
 
     auto* view = open_contract_view(processor);
     REQUIRE(view->attached(fake_parent(), Steinberg::kPlatformTypeNSView) ==
             Steinberg::kResultTrue);
-    main_thread.run_pending();
-    REQUIRE(g_log.idles == 1);
+    REQUIRE(loop.run_until([] { return g_log.idles >= 1; }));
 
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
-    REQUIRE(g_log.saw("invalidate"));
-    main_thread.run_pending();
-    REQUIRE(g_log.idles == 1);
-    REQUIRE(main_thread.pending() == 0);
+    const int after_terminate = g_log.idles;
+    loop.run_for(0.1);
+    REQUIRE(g_log.idles == after_terminate);
 
     view->removed();
     view->release();
-    main_thread.run_pending();
-    REQUIRE(g_log.idles == 1);
+    loop.run_for(0.1);
+    REQUIRE(g_log.idles == after_terminate);
 }
 
 TEST_CASE("the host's content scale reaches the contract editor's size",

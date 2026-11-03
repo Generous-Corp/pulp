@@ -17,13 +17,15 @@
 //   onFocus                  -> Editor::focus_changed()
 //   setContentScaleFactor    -> Editor::set_size() with the new scale
 //                               (IPlugViewContentScaleSupport)
-//   while attached           -> Editor::idle() from a paced main-thread tick
-//                               (MainThreadDispatcher::call_async_after),
-//                               started by attached() and stopped by removed(),
-//                               invalidation and destruction
-//   adapter terminate        -> Editor::invalidate(), then the editor is
-//                               destroyed before the processor that owns its
-//                               factory
+//   while attached           -> Editor::idle() from a main-thread timer
+//                               (detail::MainThreadTimer), started by attached()
+//                               and stopped by removed(), owner termination and
+//                               destruction; once stopped it runs no more
+//                               plug-in code
+//   adapter terminate        -> every gesture released and Editor::detach()
+//                               while the host's window is still there, then the
+//                               editor is destroyed before the processor that
+//                               owns its factory
 //
 // Each view owns its own StateStoreParamPort over the adapter's store, so its
 // edits reach the host through the adapter's existing gesture path
@@ -33,6 +35,7 @@
 // View-free: this names no view, canvas or render type, so it compiles into
 // pulp-format-core with the audio adapter.
 
+#include <pulp/format/detail/main_thread_timer.hpp>
 #include <pulp/format/editor_host.hpp>
 
 #include <pluginterfaces/gui/iplugviewcontentscalesupport.h>
@@ -90,8 +93,9 @@ class ContractPlugView final : public Steinberg::CPluginView,
     REFCOUNT_METHODS(CPluginView)
 
     /// The adapter is terminating or being destroyed while the host still
-    /// holds this view. Releases every open gesture, invalidates and destroys
-    /// the editor (its factory belongs to the processor about to go), and
+    /// holds this view. Releases every open gesture, detaches an attached
+    /// editor (the host's window is still there; only the plug-in is going),
+    /// destroys it (its factory belongs to the processor about to go), and
     /// answers every later call with kResultFalse.
     void owner_terminated();
 
@@ -118,12 +122,8 @@ class ContractPlugView final : public Steinberg::CPluginView,
                      HostActionHandler host_action);
     EditorSize current_size() const;
     Steinberg::tresult offer(const EditorKeyEvent& event);
-    // The idle tick: one live chain per attachment. A tick that runs after
-    // stop_idle() sees `running` false and neither ticks nor re-posts.
-    struct IdleState;
     void start_idle();
     void stop_idle();
-    static void schedule_idle(std::shared_ptr<IdleState> state);
 
     PulpVst3Processor* owner_;
     Processor* processor_;
@@ -133,7 +133,7 @@ class ContractPlugView final : public Steinberg::CPluginView,
     std::unique_ptr<Context> context_;
     std::unique_ptr<Editor> editor_;
     bool editor_attached_ = false;
-    std::shared_ptr<IdleState> idle_;
+    detail::MainThreadTimer idle_;
 };
 
 } // namespace pulp::format::vst3
