@@ -133,14 +133,13 @@ void ContractEditorSession::detach() {
 
 void ContractEditorSession::invalidate() {
     stop_idle();
-    if (port_)
-        port_->release_all();
     if (editor_) {
         editor_->invalidate();
         editor_.reset();
     }
     attached_ = false;
     context_.reset();
+    // Destroying the port releases every gesture it still holds.
     port_.reset();
 }
 
