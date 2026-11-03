@@ -1,0 +1,10 @@
+{
+  "schema": "pulp.vellum.owner-unfreezes.v1",
+  "unfreezes": [
+    {
+      "path": "core/view/include/pulp/view/value_source.hpp",
+      "ruling": "OWNER DECISION 2026-11-03: unfreeze value_source.hpp for the data-plane move",
+      "decided_by": "owner"
+    }
+  ]
+}
