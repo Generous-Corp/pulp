@@ -1642,6 +1642,18 @@
    "spawns": "declared",
    "undeclared_sources": []
   },
+  "pulp-test-signal-graph-subgraph": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_signal_graph_subgraph.cpp"
+   ],
+   "spawns": "none",
+   "undeclared_sources": []
+  },
   "pulp-test-group-app-host": {
    "data": "declared",
    "detected_sources": [
@@ -2957,6 +2969,7 @@
   "pulp-test-graphic-eq",
   "pulp-test-group-app-audio",
   "pulp-test-group-app-audio-support",
+  "pulp-test-signal-graph-subgraph",
   "pulp-test-group-app-host",
   "pulp-test-group-app-midi",
   "pulp-test-group-app-signal",
