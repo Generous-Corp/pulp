@@ -86,6 +86,8 @@
         "tools/cmake/PulpVerifyRuntimeStaging.cmake",
         "tools/cmake/PulpWebGpuImportedTarget.cmake",
         "tools/cmake/PulpWindowsTargetArch.cmake",
+        "tools/cmake/PulpWindowsArm64Ec.cmake",
+        "tools/cmake/PulpWindowsArm64EcProvider.cmake",
         "experimental/pulp-rs/Cargo.toml",
         "experimental/pulp-rs/Cargo.lock",
         "experimental/pulp-rs/src/**/*.rs",

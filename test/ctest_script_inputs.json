@@ -13546,6 +13546,20 @@
     "tools/scripts/test_check_yoga_oracle_pin.py"
    ],
    "kind": "python"
+  },
+  "windows-arm64ec-provider-validator-selftest": {
+   "entry": "tools/windows/test_validate_arm64ec_provider.py",
+   "inputs": [
+    "tools/windows/test_validate_arm64ec_provider.py"
+   ],
+   "kind": "python"
+  },
+  "windows-arm64ec-thunk-tool-selftest": {
+   "entry": "tools/windows/test_build_arm64ec_stl_thunks.py",
+   "inputs": [
+    "tools/windows/test_build_arm64ec_stl_thunks.py"
+   ],
+   "kind": "python"
   }
  }
 }
