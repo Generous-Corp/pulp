@@ -276,6 +276,10 @@ TEST_CASE("CLAP opens, sizes and closes a contract editor, twice",
     REQUIRE(p.gui->get_size(p.plugin, &w, &h));
     REQUIRE(w == 400);
     REQUIRE(h == 300);
+    // An in-process host reaches the open editor through its session.
+    auto* session = pulp::format::clap_adapter::contract_gui_session(p.plugin);
+    REQUIRE(session != nullptr);
+    REQUIRE(session->editor() != nullptr);
 
     const auto window = fake_window();
     REQUIRE(p.gui->set_parent(p.plugin, &window));
@@ -340,6 +344,7 @@ TEST_CASE("CLAP opens, sizes and closes a contract editor, twice",
     REQUIRE(p.store().open_gesture_count() == 0);
 
     // Calls with no editor open are refused.
+    REQUIRE(pulp::format::clap_adapter::contract_gui_session(p.plugin) == nullptr);
     REQUIRE_FALSE(p.gui->get_size(p.plugin, &w, &h));
     REQUIRE_FALSE(p.gui->set_parent(p.plugin, &window));
     REQUIRE_FALSE(p.gui->show(p.plugin));

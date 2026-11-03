@@ -201,6 +201,15 @@ TEST_CASE("AU v2 opens, sizes and closes a contract editor, twice",
         REQUIRE(contract_log().saw("attach:cocoa_view"));
         REQUIRE(contract_log().parent_handle == (__bridge void*)view);
         REQUIRE(instance.sessions->size() == 1);
+        // An in-process host reaches the open editor through the view's
+        // session; any other view has none.
+        auto* session = pulp::format::au::contract_view_session((__bridge void*)view);
+        REQUIRE(session != nullptr);
+        REQUIRE(session->editor() != nullptr);
+        NSView* other = [[NSView alloc] initWithFrame:NSZeroRect];
+        REQUIRE(pulp::format::au::contract_view_session((__bridge void*)other) == nullptr);
+        [other release];
+        REQUIRE(pulp::format::au::contract_view_session(nullptr) == nullptr);
 
         [window.contentView addSubview:view];
         REQUIRE(contract_log().saw("visible:on"));
