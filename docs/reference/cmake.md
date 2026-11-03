@@ -167,6 +167,10 @@ one host process each read their own package's factory and neither can replace
 the other's. Every processor in one binary that does not override
 `editor_factory()` shares that binary's package.
 
+A format whose adapter does not open contract editors yet still builds, but
+without an editor; `pulp_add_plugin()` names those formats in a configure
+warning.
+
 `UI` is not yet read by the format adapters: VST3, CLAP, AU and the standalone
 host still open the editor through `create_view()`. A host that drives the
 editor-host contract itself reads `editor_factory()`.
