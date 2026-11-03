@@ -560,6 +560,25 @@ endfunction()
 _pulp_configure_standalone_target(pulp-standalone pulp::view)
 _pulp_configure_standalone_target(pulp-standalone-native pulp::view-native)
 
+# Native standalone consumers select the deliberately narrow view-native
+# umbrella. On Skia desktop targets that umbrella contains the renderer and
+# platform layer, but the native HWND/X11 PluginViewHost factory lives in
+# view-tooling. A native standalone calls PluginViewHost::create() directly;
+# without this edge the factory translation unit is absent from the final
+# static link and WindowHost::create() fails at runtime with no window.
+# Keep this closure on the native standalone target so native plugin targets
+# retain their existing link floor while every future native standalone gets
+# the platform host it needs.
+if((WIN32 OR (UNIX AND NOT APPLE AND NOT ANDROID)) AND PULP_HAS_SKIA)
+    target_link_libraries(pulp-standalone-native PUBLIC pulp::view-tooling)
+    get_target_property(_native_standalone_links
+        pulp-standalone-native INTERFACE_LINK_LIBRARIES)
+    if(NOT "${_native_standalone_links}" MATCHES "pulp::view-tooling")
+        message(FATAL_ERROR
+            "pulp-standalone-native must expose pulp::view-tooling on Skia desktop targets: ${_native_standalone_links}")
+    endif()
+endif()
+
 # The GPU-health contracts are CPU-only and back Inspector's typed read
 # executor, so define the model before the optional Inspector runtime on every
 # supported SDK configuration. Native probes remain desktop-tooling-only.
