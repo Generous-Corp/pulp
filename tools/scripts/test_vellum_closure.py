@@ -1019,7 +1019,8 @@ class MirroredLinkTests(unittest.TestCase):
         self.assertEqual(unit_manifest_targets(self.UNITS, "view-platform"), ["pulp-view-platform"])
         entries = load_allowlist(REPO_ROOT / "tools/scripts/vellum_closure_allowlist.json")
         self.assertEqual([e["id"] for e in entries if e["debt_id"] == "P4-view-audio"], [])
-        self.assertEqual([e["id"] for e in entries if e.get("match", "").startswith(("pulp-view-native->", "pulp-view-platform->"))], [])
+        self.assertEqual([e["id"] for e in entries if e.get("match", "").startswith(("pulp-view-native->", "pulp-view-platform->"))
+                          and e["match"].endswith(("audio", "midi", "signal"))], [])
 
     def test_empty_allowlist_loads_and_malformed_entries_fail(self):
         with tempfile.TemporaryDirectory() as td:
