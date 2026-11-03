@@ -278,6 +278,51 @@ PYCONFLICT=$( ( cd "$TMP/py-conflict" && "$UNDER_TEST" \
   ) >/dev/null 2>&1; echo $? )
 check "--python with --build-dir is rejected" 2 "$PYCONFLICT"
 
+# A break that stops the module parsing or importing makes the test die at
+# import, which exits nonzero exactly like an assertion failure. It proves
+# nothing about the test, so it must be INCONCLUSIVE, never CONFIRMED.
+run_python_break() {
+    local root="$1" break_cmd="$2"
+    ( cd "$root" && "$UNDER_TEST" --file value.py --break "$break_cmd" \
+        --python --test "python3 test_value.py" ) 2>&1
+    echo "exit=$?"
+}
+
+make_python_project "$TMP/py-indent" meaningful
+PYINDENT="$(run_python_break "$TMP/py-indent" "perl -pi -e 's/^    return 42/return 42/'")"
+check "--python: a break that leaves an IndentationError is INCONCLUSIVE" "exit=2" \
+    "$(printf '%s\n' "$PYINDENT" | tail -n 1)"
+case "$PYINDENT" in
+    *"no longer parses (IndentationError"*) ;;
+    *) printf '  FAIL the IndentationError verdict does not name the parse error\n'
+       FAILURES=$((FAILURES + 1)) ;;
+esac
+( cd "$TMP/py-indent" && git diff --quiet ) || {
+    printf '  FAIL the tree is left dirty after an unparseable break\n'
+    FAILURES=$((FAILURES + 1)); }
+
+make_python_project "$TMP/py-unimportable" meaningful
+check "--python: a break that makes the module fail to import is INCONCLUSIVE" "exit=2" \
+    "$(run_python_break "$TMP/py-unimportable" \
+        "perl -pi -e 's/^def answer/import confirm_failure_no_such_module\ndef answer/'" \
+        | tail -n 1)"
+
+# Control: a module that cannot be loaded standalone at baseline (here it
+# insists on its own import name) gets the parse check only, so an ordinary
+# value break is still CONFIRMED rather than refused.
+make_python_project "$TMP/py-standalone-only" meaningful
+( cd "$TMP/py-standalone-only" \
+  && printf 'if __name__ != "value":\n    raise ImportError("import me as value")\ndef answer():\n    return 42\n' > value.py \
+  && git commit -qam "named import only" ) >/dev/null 2>&1
+PYSTANDALONE="$(run_python_break "$TMP/py-standalone-only" "perl -pi -e 's/return 42/return 41/'")"
+check "--python: a module that only loads by its own name is still CONFIRMED" "exit=0" \
+    "$(printf '%s\n' "$PYSTANDALONE" | tail -n 1)"
+case "$PYSTANDALONE" in
+    *"gets the parse check only"*) ;;
+    *) printf '  FAIL the run does not say the load probe was skipped\n'
+       FAILURES=$((FAILURES + 1)) ;;
+esac
+
 # A test that drives another binary: the fingerprint must follow the edit,
 # not the test's own executable. Here the "test" is a shell script that runs
 # the compiled subject, the shape of every CLI shell-out suite (the suite is
