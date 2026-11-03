@@ -262,6 +262,12 @@ per plug-in, and the factory class is exported. Things to keep straight:
   a real adapter instance in-process without a bundle.
 - The AppKit key mapping lives in `detail/appkit_contract_key.hpp`, shared with
   the standalone contract window.
+- `au::contract_view_session(ns_view)` (declared in `au_v2_common.hpp`) reaches
+  an open contract view's session, and through it the editor's
+  `EditorAutomation`, from an in-process host. A harness that opens contract
+  views must give each open/close round its own `@autoreleasepool`. AppKit
+  autoreleases the view on a resize, and without a draining pool (a bare
+  `main`) the view never deallocates, so the editor never closes.
 - A `create_view()` AU (PULP_AU_GUI) keeps the ViewBridge factory even when its
   processor overrides `editor_factory()`. Only view-free UI-package AUs serve the
   contract view.

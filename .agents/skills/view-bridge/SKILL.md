@@ -120,6 +120,21 @@ error. Things that are easy to get wrong:
   clear it (`nullptr`) before it ends, or every later test in the grouped
   binary sees a factory on a headless processor.
 
+### The editor-host acceptance test is one command
+
+`python3 tools/scripts/editor_host_acceptance.py --vellum-prefix <vellum-sdk>`
+configures a build with `PULP_EDITOR_HOST_SLICE_VELLUM_PREFIX`, builds
+`pulp-editor-host-slice`, runs the `editor-host-slice` ctest label and the
+core -> Vellum direction check, and prints one verdict per item of the plan's
+acceptance test. The SDK must be installed and built with the mirror and RmlUi.
+An item passes only when every named harness line (`[kind/format] ok: ...`) or
+ctest result it lists was seen to pass. Items this tree cannot run yet are
+SKIP with a reason and never PASS. When a harness check is renamed, update the
+runner's `ITEMS` in the same change, or the item fails as "not reported".
+`tools/scripts/test_editor_host_acceptance.py` (the
+`editor-host-acceptance-selftest` ctest, always registered) covers the verdict
+logic.
+
 ### Native scripted UI is not a WebView
 
 When a materialized canvas is retained as the native paint and hit-test
