@@ -1479,6 +1479,23 @@
    "spawns": "none",
    "undeclared_sources": []
   },
+  "pulp-test-editor-ui-package-host": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "PulpEditorUiA_CLAP",
+    "PulpEditorUiB_CLAP",
+    "PulpEditorUiNone_CLAP",
+    "PulpEditorUiPlain_CLAP"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/fixtures/editor_ui_package/editor_ui_package_host.cpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
   "pulp-test-embed-compress": {
    "data": "declared",
    "detected_sources": [
@@ -2855,6 +2872,7 @@
   "pulp-test-dspx07-projection",
   "pulp-test-edit-history",
   "pulp-test-editor-open-stages",
+  "pulp-test-editor-ui-package-host",
   "pulp-test-embed-compress",
   "pulp-test-external-input",
   "pulp-test-external-input-ingress",
