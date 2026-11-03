@@ -5,6 +5,7 @@
 #include <pulp/midi/mpe_buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
 #include <pulp/format/editor_host_kind.hpp>
+#include <pulp/format/editor_package.hpp>
 #include <pulp/format/process_block.hpp>
 #include <pulp/runtime/node_abi.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
@@ -1223,14 +1224,21 @@ public:
     /// processor and must outlive every editor it creates; the returned
     /// pointer is non-owning. Called on the host's main thread.
     ///
-    /// Null (the default) leaves the processor on the existing editor path
-    /// (`has_editor()`, `create_view()` and the hooks around them), which
-    /// format adapters keep using unchanged. A processor with no factory and
-    /// `has_editor() == false` is headless.
+    /// The default returns the factory of the UI package this plug-in's
+    /// binary declares with `pulp_add_plugin(... UI <package>)` (see
+    /// `pulp/format/editor_package.hpp`), so a plug-in gets its package's
+    /// editor without overriding this. Each plug-in binary carries its own
+    /// choice; every processor in that binary that does not override this
+    /// shares it. An override wins over the package.
+    ///
+    /// Null (no UI package, `UI none`, and no override) leaves the processor
+    /// on the existing editor path (`has_editor()`, `create_view()` and the
+    /// hooks around them), which format adapters keep using unchanged. A
+    /// processor with no factory and `has_editor() == false` is headless.
     ///
     /// Appended to preserve additive-only vtable ordering (node_abi_gate).
     virtual EditorFactory* editor_factory() {
-        return nullptr;
+        return plugin_editor_factory();
     }
 
 private:
