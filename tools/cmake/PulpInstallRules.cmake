@@ -906,6 +906,7 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPluginFormats.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpWindowsTargetArch.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpWindowsArm64Ec.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpWindowsArm64EcProvider.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpGpuProvider.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPortable.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpBundleRelocatable.cmake"
@@ -1002,6 +1003,9 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/pulp_dev_shared_link.sh"
     # PulpSkiaIcuData.cmake resolves the ICU data trimmer next to itself.
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/icu_data_subset.py"
+    # FindSkia's Windows ARM64EC provider guard resolves this beside the
+    # installed CMake helpers.
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/windows/validate_arm64ec_provider.py"
     # G3 universal-build arch/signature gate. pulp_validate_bundle_architectures
     # (PulpBundleRelocatable.cmake) resolves this next to itself, so ship it in
     # lib/cmake/Pulp/scripts too — the authoritative copy lives at
