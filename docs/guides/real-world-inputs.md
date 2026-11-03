@@ -15,14 +15,14 @@ and expire the resulting control data.
 
 ## What is available today
 
-The experimental, provider-neutral contract is implemented by
-`pulp::runtime::ExternalInputFrame<N>` and `ExternalInputGate<N>` in the
-runtime SDK. It is covered by core replay and ingress tests, the
-`examples/cv-control` reference application, and tested Swift and Kotlin motion
-adapters. The TouchDesigner and Fairlight sections below are integration
-recipes with synthesized evidence, not claims that those products are installed
-or validated on every machine. A live camera, phone, named host, or model still
-needs an application-specific acceptance run.
+Pulp ships a small provider-neutral contract in the runtime SDK:
+`pulp::runtime::ExternalInputFrame<N>` carries one observation and
+`ExternalInputGate<N>` validates it for a consumer. The core replay and ingress
+tests and the `examples/cv-control` application exercise this contract. The
+TouchDesigner and Fairlight sections are optional recipes with synthesized
+evidence; they do not mean those products are installed or validated on every
+machine. A live camera, phone, named host, or model still needs an
+application-specific acceptance run.
 
 Pulp handles bounded frame storage, source and restart identity, ordering,
 confidence and value validation, status changes, and sample-count staleness.
@@ -46,48 +46,54 @@ handoff; do not add a provider-specific transport or schema to Pulp core. See
 the [licensing boundary](../reference/licensing.md#application-selected-provider-and-host-integrations)
 for why application-selected providers are not Pulp-redistributed dependencies.
 
-## A small provider-to-audio example
+## Quick start: one value from any provider
 
-The following example shows the boundary: capture and inference happen away from
-the audio callback, one complete result crosses an existing handoff, and the
-consumer applies an ephemeral modulation value. Adapt the frame fields and
-`map` function to your application; Pulp does not prescribe a face, hand, body,
-or sensor schema.
-
-## The portable recipe
-
-Use one coherent application-owned result for values produced by one provider
-inference or sensor update. Keep related values together so a hand pose, face
-pose, or IMU orientation cannot be assembled from different updates.
+Capture and inference happen on a provider or worker thread. At the handoff,
+translate the result into Pulp's frame, submit it to a gate, then read the
+accepted value while processing audio. This is the smallest complete example;
+the provider could be a camera model, phone sensor, MIDI device, or OSC
+receiver.
 
 ```cpp
-struct MyProviderFrame {
-    std::uint64_t sequence = 0;
-    float control = 0.0f;       // provider-normalized value
-    float confidence = 0.0f;
-    bool valid = false;
+using namespace pulp::runtime;
+
+ExternalInputGate<1> gate;
+ExternalInputPolicy policy{
+    .source_id = 7,
+    .minimum_confidence = 0.6f,
+    .max_age_samples = 4800,
+    .expected_count = 1,
 };
 
-// Provider thread / external adapter: capture and inference happen here.
-void on_provider_frame(MyProviderFrame frame) {
-    // Use an application-owned handoff, such as TripleBuffer, or send an
-    // existing OSC/IPC/MIDI message to the consumer.
-    published.write({frame.sequence, frame.control, frame.confidence, frame.valid});
-}
+// The provider adapter does this away from the audio callback.
+ExternalInputFrame<1> frame{
+    .source_id = 7,
+    .epoch = provider_epoch,
+    .sequence = ++sequence,
+    .provider_time_ns = timestamp_ns,
+    .status = ExternalInputStatus::valid,
+    .confidence = model_confidence,
+    .count = 1,
+    .values = {normalise_provider_value(result)},
+};
+handoff.write(frame); // TripleBuffer, OSC/IPC, MIDI, or another existing path
 
-// Audio callback: read the latest complete result and apply an ephemeral
-// modulation offset. Do not perform capture, inference, blocking I/O, or
-// parameter persistence here.
-const auto frame = published.read();
-const float effective = base_parameter + map(frame.control, frame.confidence);
+// Consumer side: submit a complete frame, then use the bounded value.
+const auto verdict = gate.submit(handoff.read(), policy);
+if (verdict == ExternalInputVerdict::accepted && gate.valid()) {
+    const float effective = base_parameter + map(gate.value(0, 0.0f));
+    render_audio(effective);
+}
+gate.advance(block_samples, policy);
 ```
 
-`examples/cv-control` is the executable reference. Its `ControlSample` and
-`SignalMapping` intentionally remain application-owned. The example supports
-replay, confidence gating, smoothing, malformed input rejection, provider
-restart, sample-count stale expiry, native OSC, and a browser short-MIDI
-packet. It does not define a universal face, hand, body, sensor, or tensor
-schema.
+`handoff`, `provider_epoch`, `sequence`, `timestamp_ns`, `result`,
+`normalise_provider_value`, `map`, and `render_audio` are application code. The
+public runtime types are the frame, policy, gate, verdict, and status shown
+above. Keep related values in one frame so a hand pose, face pose, or IMU
+orientation cannot be assembled from different updates. The
+`examples/cv-control` application shows a fuller mapping and ingress example;
+its `ControlSample` and `SignalMapping` remain application-owned.
 
 ## Choosing a handoff
 
