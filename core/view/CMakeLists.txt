@@ -239,8 +239,7 @@ unset(_pulp_view_target)
 
 target_link_libraries(pulp-view-core PUBLIC
     pulp::canvas pulp::events pulp::state pulp::platform
-    # Value sources, value channels and the host parameter surfaces; the
-    # pulp/view/ spellings of those headers forward to it.
+    # The data plane, which the pulp/view/ value and host-surface headers forward to.
     pulp::dataplane
 )
 
