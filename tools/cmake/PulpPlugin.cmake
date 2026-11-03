@@ -107,6 +107,10 @@ function(pulp_add_plugin target)
     _pulp_reject_unknown_arguments("pulp_add_plugin(${target})" "${PLUGIN_UNPARSED_ARGUMENTS}" PRODUCES_MIDI)
     _pulp_reject_unknown_formats("pulp_add_plugin(${target})" "${PLUGIN_FORMATS}"
         VST3 CLAP AU LV2 AAX AUv3 Standalone)
+    if("UI" IN_LIST PLUGIN_KEYWORDS_MISSING_VALUES)
+        message(FATAL_ERROR
+            "pulp_add_plugin(${target}): UI needs a UI package target, or none")
+    endif()
 
     # Defaults
     if(NOT PLUGIN_PLUGIN_NAME)

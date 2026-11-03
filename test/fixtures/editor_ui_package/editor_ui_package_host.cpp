@@ -110,8 +110,8 @@ int main(int argc, char** argv) {
     // Reverse order: the module loaded last is read first, so a choice that
     // leaked between images would show on the earlier ones.
     for (auto it = modules.rbegin(); it != modules.rend(); ++it) {
-        const auto* factory = static_cast<const ClapFactoryHead*>(
-            it->entry->get_factory("clap.plugin-factory"));
+        const auto* factory =
+            static_cast<const ClapFactoryHead*>(it->entry->get_factory("clap.plugin-factory"));
         const std::uint32_t count = factory != nullptr ? factory->get_plugin_count(factory) : 0;
         if (count != 1) {
             std::fprintf(stderr, "FAIL %s lists %u plug-ins, expected 1\n", it->path.c_str(),
@@ -120,9 +120,8 @@ int main(int argc, char** argv) {
             continue;
         }
         const auto* descriptor = factory->get_plugin_descriptor(factory, 0);
-        const char* name = descriptor != nullptr && descriptor->name != nullptr
-                               ? descriptor->name
-                               : "(null)";
+        const char* name =
+            descriptor != nullptr && descriptor->name != nullptr ? descriptor->name : "(null)";
         if (it->expected != name) {
             std::fprintf(stderr, "FAIL %s reports %s, expected %s\n", it->path.c_str(), name,
                          it->expected.c_str());
