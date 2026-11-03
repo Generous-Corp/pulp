@@ -307,6 +307,23 @@ check "--python: a break that makes the module fail to import is INCONCLUSIVE" "
         "perl -pi -e 's/^def answer/import confirm_failure_no_such_module\ndef answer/'" \
         | tail -n 1)"
 
+# A module that hangs during import must be classified like any other failed
+# load, and the probe must be bounded. The timeout override keeps this
+# regression fast while the production default remains one minute.
+make_python_project "$TMP/py-import-timeout" meaningful
+PYTIMEOUT="$( ( cd "$TMP/py-import-timeout" && \
+    CONFIRM_FAILURE_PYTHON_LOAD_TIMEOUT=1 "$UNDER_TEST" \
+      --file value.py \
+      --break "perl -0pi -e 's/^/import time\\ntime.sleep(30)\\n/'" \
+      --python --test "python3 test_value.py" ) 2>&1; echo "exit=$?" )"
+check "--python: a timed-out import is INCONCLUSIVE" "exit=2" \
+    "$(printf '%s\n' "$PYTIMEOUT" | tail -n 1)"
+case "$PYTIMEOUT" in
+    *"no longer imports (timed out after 1 seconds)"*) ;;
+    *) printf '  FAIL the timeout verdict does not name the bounded import probe\n'
+       FAILURES=$((FAILURES + 1)) ;;
+esac
+
 # Control: a module that cannot be loaded standalone at baseline (here it
 # insists on its own import name) gets the parse check only, so an ordinary
 # value break is still CONFIRMED rather than refused.

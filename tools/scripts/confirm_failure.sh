@@ -416,7 +416,7 @@ PY
 # Exit 0 loaded, 1 raised while loading (the error is printed), 3 timed out.
 python_loads() {
     python3 -I - "$FILE" <<'PY'
-import os, subprocess, sys
+import os, signal, subprocess, sys
 path = os.path.abspath(sys.argv[1])
 probe = r"""
 import importlib.util, os, sys
@@ -429,12 +429,24 @@ sys.modules[name] = module
 spec.loader.exec_module(module)
 """
 env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+timeout = float(os.environ.get("CONFIRM_FAILURE_PYTHON_LOAD_TIMEOUT", "60"))
+process = subprocess.Popen(
+    [sys.executable, "-c", probe, path], cwd=os.path.dirname(path), env=env,
+    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    text=True, start_new_session=True)
 try:
-    result = subprocess.run(
-        [sys.executable, "-c", probe, path], cwd=os.path.dirname(path), env=env,
-        stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
+    stdout, stderr = process.communicate(timeout=timeout)
 except subprocess.TimeoutExpired:
+    # The module may have spawned descendants. Kill the whole process group,
+    # then reap the probe so a timed-out import cannot leak into later phases.
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    process.communicate()
+    print(f"timed out after {timeout:g} seconds")
     sys.exit(3)
+result = subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
 if result.returncode != 0:
     lines = (result.stderr or result.stdout).strip().splitlines()
     print(lines[-1] if lines else f"exit {result.returncode}")
@@ -569,7 +581,8 @@ if [ "$BUILD_STATUS" -eq 0 ] && [ "$PYTHON_SOURCE" -eq 1 ]; then
         BREAK_UNRUNNABLE="no longer parses ($PARSE_ERROR)"
     elif [ "$LOAD_PROBE" -eq 1 ]; then
         LOAD_ERROR="$(python_loads 2>&1)"
-        [ $? -ne 1 ] || BREAK_UNRUNNABLE="no longer imports ($LOAD_ERROR)"
+        LOAD_STATUS=$?
+        [ "$LOAD_STATUS" -eq 0 ] || BREAK_UNRUNNABLE="no longer imports ($LOAD_ERROR)"
     fi
     if [ -n "$BREAK_UNRUNNABLE" ]; then
         say "broken: $BASE $BREAK_UNRUNNABLE"
