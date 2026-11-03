@@ -925,3 +925,6 @@ endif()
 
 # The install and screenshot cases stage fakes at the real tools' names.
 pulp_test_spawns(pulp-test-mcp-server NOT_RUN pulp-mcp pulp-screenshot)
+
+# The editor-host slice (opt-in; configures only with an installed Vellum SDK).
+include("${CMAKE_CURRENT_LIST_DIR}/editor_host_slice_tests.cmake")
