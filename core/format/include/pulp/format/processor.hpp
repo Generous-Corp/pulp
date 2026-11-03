@@ -5,7 +5,6 @@
 #include <pulp/midi/mpe_buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
 #include <pulp/format/editor_host_kind.hpp>
-#include <pulp/format/editor_package.hpp>
 #include <pulp/format/process_block.hpp>
 #include <pulp/runtime/node_abi.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
@@ -1236,12 +1235,15 @@ public:
     /// hooks around them), which format adapters keep using unchanged. A
     /// processor with no factory and `has_editor() == false` is headless.
     ///
+    /// Defined out of line (format.cpp) so a derived class's vtable names
+    /// this exported member rather than the hidden image-local accessor: a
+    /// hot-reload logic dylib resolves Processor's members from the plug-in
+    /// that loads it, and could not resolve a hidden symbol.
+    ///
     /// Appended to preserve additive-only vtable ordering (node_abi_gate).
-    virtual EditorFactory* editor_factory() {
-        return plugin_editor_factory();
-    }
+    virtual EditorFactory* editor_factory();
 
-private:
+  private:
     std::shared_ptr<const std::vector<uint8_t>> published_plugin_state_;
     static constexpr std::size_t kF64FallbackMaxBuses = 16;
 
