@@ -131,4 +131,15 @@ bool MainThreadTimer::running() const {
     return impl_->running();
 }
 
+void run_on_main_thread_and_wait(const std::function<void()>& fn) {
+#if defined(__APPLE__)
+    if (pthread_main_np() == 0) {
+        dispatch_sync_f(dispatch_get_main_queue(), const_cast<std::function<void()>*>(&fn),
+                        [](void* context) { (*static_cast<std::function<void()>*>(context))(); });
+        return;
+    }
+#endif
+    fn();
+}
+
 } // namespace pulp::format::detail

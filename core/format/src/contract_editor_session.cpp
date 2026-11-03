@@ -1,5 +1,7 @@
 #include <pulp/format/contract_editor_session.hpp>
 
+#include <pulp/format/detail/main_thread_timer.hpp>
+
 #include <pulp/format/processor.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/state/store.hpp>
@@ -39,16 +41,22 @@ class ContractEditorSession::Context final : public EditorContext {
 };
 
 ContractSessionRegistry::~ContractSessionRegistry() {
-    invalidate_all();
+    close_all();
 }
 
-void ContractSessionRegistry::invalidate_all() {
-    auto sessions = std::move(sessions_);
-    sessions_.clear();
-    for (auto* session : sessions) {
-        session->registry_ = nullptr;
-        session->invalidate();
-    }
+void ContractSessionRegistry::close_all() {
+    if (sessions_.empty())
+        return;
+    // A host may dispose of the plug-in instance off the main thread, but the
+    // editors' windows belong to the main thread.
+    detail::run_on_main_thread_and_wait([this] {
+        auto sessions = std::move(sessions_);
+        sessions_.clear();
+        for (auto* session : sessions) {
+            session->registry_ = nullptr;
+            session->close_for_owner();
+        }
+    });
 }
 
 void ContractEditorSession::register_with(ContractSessionRegistry& registry) {
@@ -140,6 +148,7 @@ void ContractEditorSession::detach() {
 }
 
 void ContractEditorSession::close_for_owner() {
+    unregister();
     // detach() stops the tick, releases every gesture and detaches the editor
     // from the window the host still owns.
     detach();

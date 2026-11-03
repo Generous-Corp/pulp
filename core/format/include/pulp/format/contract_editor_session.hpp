@@ -53,9 +53,12 @@ class ContractEditorSession;
 /// instance that made it is torn down, but the editor's factory belongs to the
 /// processor. An adapter whose editors outlive it in that way declares one of
 /// these after its processor, so its destruction (or an explicit
-/// `invalidate_all()`) invalidates every registered session while the
-/// processor and store still exist. Sessions unregister themselves when they
-/// are destroyed or invalidated. Main thread only.
+/// `close_all()`) closes every registered session while the processor and
+/// store still exist. The host still holds those windows, so each editor is
+/// closed in order (gestures released, detached, destroyed), never
+/// invalidated. Sessions unregister themselves when they are destroyed,
+/// closed or invalidated. Main thread only, except that destruction or
+/// `close_all()` from another thread waits for the main thread to close them.
 class ContractSessionRegistry {
   public:
     ContractSessionRegistry() = default;
@@ -63,8 +66,9 @@ class ContractSessionRegistry {
     ContractSessionRegistry(const ContractSessionRegistry&) = delete;
     ContractSessionRegistry& operator=(const ContractSessionRegistry&) = delete;
 
-    /// Invalidate every registered session and forget them.
-    void invalidate_all();
+    /// Close every registered session for its owner (close_for_owner()) and
+    /// forget them.
+    void close_all();
     std::size_t size() const {
         return sessions_.size();
     }

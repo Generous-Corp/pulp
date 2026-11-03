@@ -40,4 +40,9 @@ class MainThreadTimer {
     std::unique_ptr<Impl> impl_;
 };
 
+/// Run `fn` on the main thread and return once it has run: inline on the main
+/// thread, otherwise (on Apple platforms) synchronously on the main queue.
+/// Elsewhere there is no main queue to wait on, so `fn` runs inline.
+void run_on_main_thread_and_wait(const std::function<void()>& fn);
+
 } // namespace pulp::format::detail
