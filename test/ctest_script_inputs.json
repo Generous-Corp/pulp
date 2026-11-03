@@ -215,6 +215,21 @@
    "spawns": "undeclared",
    "undeclared_sources": []
   },
+  "pulp-slice-rmlui": {
+   "data": "declared",
+   "detected_sources": [
+    "test/editor_host_slice/slice_main.cpp"
+   ],
+   "inputs": [
+    "test/editor_host_slice/knob_led.golden.png"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/editor_host_slice/rmlui_editor.cpp",
+    "test/editor_host_slice/slice_main.cpp"
+   ],
+   "undeclared_sources": []
+  },
   "pulp-test-au-v2-param-display": {
    "data": "none",
    "inputs": [],
@@ -2675,6 +2690,9 @@
   "pulp-sampler-cli-sidecar-probe",
   "pulp-sampler-heritage-render-wav",
   "pulp-sampler-render-wav",
+  "pulp-slice-headless",
+  "pulp-slice-rmlui",
+  "pulp-slice-vellum",
   "pulp-test-aax-native-view",
   "pulp-test-aax-rt-safety",
   "pulp-test-ableton-link-sdk",
@@ -8246,6 +8264,13 @@
     "tools/bridge/bridge_gen_checks.py",
     "tools/bridge/generated_editor_bridge.hpp",
     "tools/bridge/generated_editor_bridge.ts"
+   ],
+   "kind": "python"
+  },
+  "pulp-editor-host-slice-symbols": {
+   "entry": "test/editor_host_slice/check_symbols.py",
+   "inputs": [
+    "test/editor_host_slice/check_symbols.py"
    ],
    "kind": "python"
   },
